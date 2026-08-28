@@ -36,3 +36,13 @@ sudo_log_file: "/var/log/sudo.log"
 fail2ban_bantime: "1h"
 fail2ban_findtime: "10m"
 fail2ban_maxretry: 5
+
+# Docker Firewalld Filter Chain Manager
+enable_docker_firewall_manager: true
+docker_firewall_interface: "{{ ansible_default_ipv4.interface | default('bond0') }}"
+docker_firewall_syslog_ipset: "syslog_sources"
+docker_firewall_snmp_ipset: "snmptrap_sources"
+docker_firewall_auto_init: false
+docker_firewall_syslog_initial_ips: []
+docker_firewall_snmp_initial_ips: []
+

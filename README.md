@@ -28,6 +28,7 @@
    - 타임존(`Asia/Seoul`), Chrony NTP Standard UTC 동기화, 기본 패키지, 커널 튜닝, 관리자 계정 생성 (`COMMON-001 ~ COMMON-017`)
 4. **`security`**:
    - SSH 보안 하드닝, 방화벽(UFW/Firewalld/iptables), SELinux(permissive), Auditd, Fail2ban (`SEC-001 ~ SEC-015`)
+   - **Docker 방화벽 체인 관리기 배포 (`SEC-016 ~ SEC-020`)**: Docker의 `PREROUTING` NAT 우회를 방어하기 위한 `firewalld-docker` CLI (`/usr/local/bin/firewalld-docker`) 배포 및 `DOCKER-USER` Direct Rule/IPSet 연동 지원
 5. **`openbao_ssh_ca`**:
    - OpenBao SSH CA 공개키 배포 및 단기 SSH 인증서 신뢰 설정 (`BAO-001 ~ BAO-007`)
 6. **`boundary_target`**:
@@ -73,3 +74,36 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 # 6. 정기 유지보수 및 보안 패치
 ./docker-run.sh playbooks/maintenance.yml
 ```
+
+---
+
+## 4. Docker Firewalld 체인 관리 도구 (`firewalld-docker`)
+
+Docker 컨테이너에 포트를 바인딩(`-p 80:80`, `-p 514:514` 등)할 경우 Docker가 호스트의 `iptables PREROUTING` NAT 체인을 먼저 타게 되어 일반적인 `firewalld` 규칙이 우회됩니다.  
+이를 방어하고 안전하게 제어하기 위해 **`DOCKER-USER` Direct 체인 및 IPSet 기반 화이트리스트 관리 CLI (`firewalld-docker`)**가 제공됩니다.
+
+### 4.1 CLI 주요 명령어
+```bash
+# 초기 Direct Rule 및 IPSet 설정 (80/443 허용, 514/162 화이트리스트, 나머지 DROP)
+firewalld-docker init
+
+# Syslog(514) / SNMP Trap(162) 화이트리스트 IP 등록
+firewalld-docker add syslog 192.168.10.50
+firewalld-docker add snmp 10.20.0.0/24
+
+# 화이트리스트 IP 삭제 및 조회
+firewalld-docker del syslog 192.168.10.50
+firewalld-docker list
+
+# DOCKER-USER 실시간 패킷 카운터 및 룰 상태 점검
+firewalld-docker status
+
+# 대화형 대시보드 메뉴 실행 (인수 없이 실행 시)
+firewalld-docker
+```
+
+### 4.2 스크립트 자체 검증 및 테스트 실행
+```bash
+./scripts/test_firewalld_docker.sh
+```
+

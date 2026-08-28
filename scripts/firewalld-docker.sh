@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Script Name: firewalld-docker.sh
+# Description: Docker 컨테이너(Caddy 80/443 공개, Syslog 514 / SNMP 162 화이트리스트)
+#              방화벽 초기화 및 IPSet 통합 관리 스크립트 (Go Cobra CLI Style Help 지원)
+# ==============================================================================
+
+set -e
+
+# --- [사용자 환경 설정] ---
+CLI_NAME="firewalld-docker"
+IFACE="${IFACE:-bond0}"                       # 차단 대상 메인 물리 인터페이스
+IPSET_SYSLOG="${IPSET_SYSLOG:-syslog_sources}"       # Syslog(514) IPSet 이름
+IPSET_SNMP="${IPSET_SNMP:-snmptrap_sources}"         # SNMP Trap(162) IPSet 이름
+
+# 색상 정의 (ANSI-C Quoting for heredoc support)
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
+
+# Root 권한 확인 (help 조회는 root 없이도 가능)
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Error: 이 명령은 root 권한으로 실행해야 합니다 (sudo 필요).${NC}"
+        exit 1
+    fi
+}
+
+# ==============================================================================
+# Cobra Style Help Functions
+# ==============================================================================
+
+show_main_help() {
+    cat <<HELPEOF
+${BOLD}Docker Firewall Manager${NC} - Firewalld Direct Rule & IPSet CLI for Docker Containers
+
+Control incoming traffic to Docker exposed ports (Caddy 80/443, Syslog 514, SNMP Trap 162)
+without being bypassed by Docker's default PREROUTING iptables chains.
+
+${BOLD}Usage:${NC}
+  ${CLI_NAME} [command]
+
+${BOLD}Available Commands:${NC}
+  ${GREEN}init${NC}        Initialize DOCKER-USER Direct Rules and base IPSets
+  ${GREEN}add${NC}         Add an IP or CIDR subnet to an IPSet
+  ${GREEN}del${NC}         Remove an IP or CIDR subnet from an IPSet (aliases: remove, rm)
+  ${GREEN}list${NC}        List all entries in a target IPSet (aliases: ls, show)
+  ${GREEN}status${NC}      Show active Direct Rules and real-time iptables packet counters
+  ${GREEN}reset${NC}       [Emergency] Clear all DOCKER-USER direct rules to default open
+  ${GREEN}help${NC}        Help about any command
+
+${BOLD}Flags:${NC}
+  -h, --help   help for ${CLI_NAME}
+
+Use "${CLI_NAME} [command] --help" for more information about a command.
+HELPEOF
+}
+
+show_init_help() {
+    cat <<HELPEOF
+Initialize DOCKER-USER Direct Rules and base IPSets.
+
+Configures default ACCEPT for ports 80/443 (Caddy/Web) and restricts ports 514 (Syslog)
+and 162 (SNMP Trap) to the respective IPSet whitelists, while dropping all remaining
+inbound container traffic arriving on ${IFACE}.
+
+${BOLD}Usage:${NC}
+  ${CLI_NAME} init [flags]
+
+${BOLD}Flags:${NC}
+  -h, --help   help for init
+HELPEOF
+}
+
+show_add_help() {
+    cat <<HELPEOF
+Add an IPv4 host address or CIDR subnet to a target IPSet.
+
+${BOLD}Usage:${NC}
+  ${CLI_NAME} add [target] [IP/CIDR] [flags]
+
+${BOLD}Aliases:${NC}
+  add, append
+
+${BOLD}Targets:${NC}
+  syslog      Maps to IPSet '${IPSET_SYSLOG}' (Ports 514 TCP/UDP)
+  snmp        Maps to IPSet '${IPSET_SNMP}' (Ports 162 TCP/UDP)
+  <name>      Any custom Firewalld IPSet name
+
+${BOLD}Examples:${NC}
+  # Add single IP for Syslog
+  ${CLI_NAME} add syslog 192.168.10.50
+
+  # Add subnet for SNMP Trap
+  ${CLI_NAME} add snmp 10.20.0.0/24
+
+  # Add to custom IPSet
+  ${CLI_NAME} add custom_whitelist 59.25.177.53
+
+${BOLD}Flags:${NC}
+  -h, --help   help for add
+HELPEOF
+}
+
+show_del_help() {
+    cat <<HELPEOF
+Remove an IPv4 host address or CIDR subnet from a target IPSet.
+
+${BOLD}Usage:${NC}
+  ${CLI_NAME} del [target] [IP/CIDR] [flags]
+
+${BOLD}Aliases:${NC}
+  del, remove, rm
+
+${BOLD}Targets:${NC}
+  syslog      Maps to IPSet '${IPSET_SYSLOG}'
+  snmp        Maps to IPSet '${IPSET_SNMP}'
+  <name>      Any custom Firewalld IPSet name
+
+${BOLD}Examples:${NC}
+  ${CLI_NAME} del syslog 192.168.10.50
+  ${CLI_NAME} del snmp 10.20.0.0/24
+
+${BOLD}Flags:${NC}
+  -h, --help   help for del
+HELPEOF
+}
+
+show_list_help() {
+    cat <<HELPEOF
+List registered IP and subnet entries in the specified IPSet.
+
+${BOLD}Usage:${NC}
+  ${CLI_NAME} list [target] [flags]
+
+${BOLD}Aliases:${NC}
+  list, ls, show
+
+${BOLD}Targets:${NC}
+  syslog      List '${IPSET_SYSLOG}' entries
+  snmp        List '${IPSET_SNMP}' entries
+  <name>      List specific custom IPSet entries
+  (empty)     List both syslog and snmp IPSet entries
+
+${BOLD}Examples:${NC}
+  ${CLI_NAME} list
+  ${CLI_NAME} list syslog
+  ${CLI_NAME} list snmp
+
+${BOLD}Flags:${NC}
+  -h, --help   help for list
+HELPEOF
+}
+
+show_status_help() {
+    cat <<HELPEOF
+Display Firewalld Direct Rules and real-time iptables DOCKER-USER packet match counters.
+
+${BOLD}Usage:${NC}
+  ${CLI_NAME} status [flags]
+
+${BOLD}Flags:${NC}
+  -h, --help   help for status
+HELPEOF
+}
+
+show_reset_help() {
+    cat <<HELPEOF
+Emergency reset command. Completely removes all DOCKER-USER direct rules and reverts
+Docker container port filtering to default fully-open state.
+
+${BOLD}Usage:${NC}
+  ${CLI_NAME} reset [flags]
+
+${BOLD}Flags:${NC}
+  -h, --help   help for reset
+HELPEOF
+}
+
+# ==============================================================================
+# Core Operations
+# ==============================================================================
+
+ensure_ipset() {
+    local ipset_name="$1"
+    if ! firewall-cmd --get-ipsets 2>/dev/null | grep -qw "$ipset_name"; then
+        echo -e "${YELLOW}[안내] '${ipset_name}' IPSet 생성 중...${NC}"
+        firewall-cmd --permanent --new-ipset="$ipset_name" --type=hash:net
+        firewall-cmd --reload >/dev/null
+    fi
+}
+
+init_firewall() {
+    check_root
+    echo -e "${CYAN}====================================================${NC}"
+    echo -e "${CYAN}   Docker Direct Rule & IPSet 초기 구성을 시작합니다. ${NC}"
+    echo -e "${CYAN}   (80/443 전체 개방, 514/162 IPSet 화이트리스트 제어) ${NC}"
+    echo -e "${CYAN}====================================================${NC}"
+
+    ensure_ipset "$IPSET_SYSLOG"
+    ensure_ipset "$IPSET_SNMP"
+
+    firewall-cmd --permanent --direct --remove-rules ipv4 filter DOCKER-USER 2>/dev/null || true
+
+    echo -e "${BLUE}[1/4] 세션 유지(ESTABLISHED) 규칙 추가...${NC}"
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+    echo -e "${BLUE}[2/4] Web (80, 443 TCP/UDP) 전체 허용 규칙 추가...${NC}"
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 10 -p tcp -m multiport --dports 80,443 -j ACCEPT
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 10 -p udp --dport 443 -j ACCEPT
+
+    echo -e "${BLUE}[3/4] Syslog(514) / SNMP(162) IPSet 화이트리스트 규칙 추가...${NC}"
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 10 -m set --match-set "$IPSET_SYSLOG" src -p tcp --dport 514 -j ACCEPT
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 10 -m set --match-set "$IPSET_SYSLOG" src -p udp --dport 514 -j ACCEPT
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 10 -m set --match-set "$IPSET_SNMP" src -p tcp --dport 162 -j ACCEPT
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 10 -m set --match-set "$IPSET_SNMP" src -p udp --dport 162 -j ACCEPT
+
+    echo -e "${BLUE}[4/4] ${IFACE} 물리 인터페이스 나머지 트래픽 DROP 규칙 추가...${NC}"
+    firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER 99 -i "$IFACE" -j DROP
+
+    firewall-cmd --reload >/dev/null
+    echo -e "${GREEN}[완료] 기본 방화벽 규칙이 성공적으로 초기화 및 적용되었습니다.${NC}"
+}
+
+add_entry() {
+    check_root
+    local ipset_name="$1"
+    local ip_addr="$2"
+    ensure_ipset "$ipset_name"
+
+    echo -e "${BLUE}[작업] ${ipset_name} 에 [${ip_addr}] 추가 중...${NC}"
+    if firewall-cmd --permanent --ipset="$ipset_name" --add-entry="$ip_addr" 2>/dev/null; then
+        firewall-cmd --reload >/dev/null
+        echo -e "${GREEN}[성공] ${ip_addr} 등록 및 방화벽 갱신 완료!${NC}"
+    else
+        echo -e "${RED}[실패] 등록 실패 (이미 존재하거나 올바르지 않은 IP 형식)${NC}"
+    fi
+}
+
+del_entry() {
+    check_root
+    local ipset_name="$1"
+    local ip_addr="$2"
+    ensure_ipset "$ipset_name"
+
+    echo -e "${BLUE}[작업] ${ipset_name} 에서 [${ip_addr}] 삭제 중...${NC}"
+    if firewall-cmd --permanent --ipset="$ipset_name" --remove-entry="$ip_addr" 2>/dev/null; then
+        firewall-cmd --reload >/dev/null
+        echo -e "${GREEN}[성공] ${ip_addr} 삭제 및 방화벽 갱신 완료!${NC}"
+    else
+        echo -e "${RED}[실패] 삭제 실패 (등록되지 않은 IP일 수 있음)${NC}"
+    fi
+}
+
+list_entries() {
+    local ipset_name="$1"
+    ensure_ipset "$ipset_name"
+
+    echo -e "${YELLOW}===== [${ipset_name}] 등록 IP 목록 =====${NC}"
+    firewall-cmd --ipset="$ipset_name" --get-entries
+    echo -e "${YELLOW}=========================================${NC}"
+}
+
+show_status() {
+    check_root
+    echo -e "${CYAN}===== [Firewalld Direct Rule 설정] =====${NC}"
+    firewall-cmd --direct --get-all-rules
+    echo ""
+    echo -e "${CYAN}===== [iptables DOCKER-USER 체인 패킷 카운트] =====${NC}"
+    iptables -nvL DOCKER-USER --line-numbers
+    echo ""
+    list_entries "$IPSET_SYSLOG"
+    echo ""
+    list_entries "$IPSET_SNMP"
+}
+
+reset_rules() {
+    check_root
+    echo -e "${RED}[경고] DOCKER-USER 체인의 모든 방화벽 규칙을 제거합니다.${NC}"
+    read -rp "계속하시겠습니까? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        firewall-cmd --permanent --direct --remove-rules ipv4 filter DOCKER-USER 2>/dev/null || true
+        firewall-cmd --reload >/dev/null
+        echo -e "${GREEN}[완료] Direct Rule이 모두 삭제되었습니다. (Docker 기본 개방 상태)${NC}"
+    else
+        echo "취소되었습니다."
+    fi
+}
+
+interactive_menu() {
+    check_root
+    while true; do
+        echo ""
+        echo -e "${BLUE}=== [${CLI_NAME} 대화형 관리자] ===${NC}"
+        echo "1) IP/서브넷 추가 (add)"
+        echo "2) IP/서브넷 삭제 (del)"
+        echo "3) IPSet 목록 조회 (list)"
+        echo "4) 전체 상태 및 패킷 카운트 확인 (status)"
+        echo "5) [최초 1회] 방화벽 Direct Rule 초기 구축 (init)"
+        echo "6) [비상 복구] 방화벽 Direct Rule 전체 해제 (reset)"
+        echo "7) 종료"
+        read -rp "선택하세요 [1-7]: " choice
+
+        case $choice in
+            1)
+                echo "대상 IPSet 선택:"
+                echo " 1) Syslog ($IPSET_SYSLOG)"
+                echo " 2) SNMP Trap ($IPSET_SNMP)"
+                echo " 3) 직접 입력"
+                read -rp "선택 [1-3]: " set_choice
+                case $set_choice in
+                    1) target_set="$IPSET_SYSLOG" ;;
+                    2) target_set="$IPSET_SNMP" ;;
+                    3) read -rp "IPSet 이름: " target_set ;;
+                    *) echo -e "${RED}잘못된 선택입니다.${NC}"; continue ;;
+                esac
+                read -rp "추가할 IP 또는 CIDR (예: 192.168.1.10 또는 10.0.0.0/24): " target_ip
+                if [[ -n "$target_ip" ]]; then
+                    add_entry "$target_set" "$target_ip"
+                fi
+                ;;
+            2)
+                echo "대상 IPSet 선택:"
+                echo " 1) Syslog ($IPSET_SYSLOG)"
+                echo " 2) SNMP Trap ($IPSET_SNMP)"
+                echo " 3) 직접 입력"
+                read -rp "선택 [1-3]: " set_choice
+                case $set_choice in
+                    1) target_set="$IPSET_SYSLOG" ;;
+                    2) target_set="$IPSET_SNMP" ;;
+                    3) read -rp "IPSet 이름: " target_set ;;
+                    *) echo -e "${RED}잘못된 선택입니다.${NC}"; continue ;;
+                esac
+                read -rp "삭제할 IP 또는 CIDR: " target_ip
+                if [[ -n "$target_ip" ]]; then
+                    del_entry "$target_set" "$target_ip"
+                fi
+                ;;
+            3)
+                list_entries "$IPSET_SYSLOG"
+                echo ""
+                list_entries "$IPSET_SNMP"
+                ;;
+            4)
+                show_status
+                ;;
+            5)
+                init_firewall
+                ;;
+            6)
+                reset_rules
+                ;;
+            7)
+                echo "종료합니다."
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}잘못된 입력입니다.${NC}"
+                ;;
+        esac
+    done
+}
+
+# ==============================================================================
+# CLI Routing & Arguments Parsing
+# ==============================================================================
+
+if [[ $# -eq 0 ]]; then
+    interactive_menu
+    exit 0
+fi
+
+case "$1" in
+    -h|--help)
+        show_main_help
+        exit 0
+        ;;
+    help)
+        if [[ -z "$2" ]]; then
+            show_main_help
+        else
+            case "$2" in
+                init) show_init_help ;;
+                add) show_add_help ;;
+                del|remove|rm) show_del_help ;;
+                list|ls|show) show_list_help ;;
+                status) show_status_help ;;
+                reset) show_reset_help ;;
+                *) echo -e "${RED}Unknown help topic: $2${NC}"; show_main_help; exit 1 ;;
+            esac
+        fi
+        exit 0
+        ;;
+    init)
+        if [[ "$2" == "-h" || "$2" == "--help" ]]; then
+            show_init_help
+            exit 0
+        fi
+        init_firewall
+        ;;
+    add|append)
+        if [[ "$2" == "-h" || "$2" == "--help" ]]; then
+            show_add_help
+            exit 0
+        fi
+        if [[ -z "$2" ]]; then
+            echo -e "${RED}Error: accepts 2 arg(s), received 0${NC}\n"
+            show_add_help
+            exit 1
+        fi
+        if [[ -z "$3" ]]; then
+            echo -e "${RED}Error: accepts 2 arg(s), received 1${NC}\n"
+            show_add_help
+            exit 1
+        fi
+        target="$2"
+        [[ "$target" == "syslog" ]] && target="$IPSET_SYSLOG"
+        [[ "$target" == "snmp" ]] && target="$IPSET_SNMP"
+        add_entry "$target" "$3"
+        ;;
+    del|remove|rm)
+        if [[ "$2" == "-h" || "$2" == "--help" ]]; then
+            show_del_help
+            exit 0
+        fi
+        if [[ -z "$2" ]]; then
+            echo -e "${RED}Error: accepts 2 arg(s), received 0${NC}\n"
+            show_del_help
+            exit 1
+        fi
+        if [[ -z "$3" ]]; then
+            echo -e "${RED}Error: accepts 2 arg(s), received 1${NC}\n"
+            show_del_help
+            exit 1
+        fi
+        target="$2"
+        [[ "$target" == "syslog" ]] && target="$IPSET_SYSLOG"
+        [[ "$target" == "snmp" ]] && target="$IPSET_SNMP"
+        del_entry "$target" "$3"
+        ;;
+    list|ls|show)
+        if [[ "$2" == "-h" || "$2" == "--help" ]]; then
+            show_list_help
+            exit 0
+        fi
+        if [[ "$2" == "syslog" ]]; then
+            list_entries "$IPSET_SYSLOG"
+        elif [[ "$2" == "snmp" ]]; then
+            list_entries "$IPSET_SNMP"
+        elif [[ -n "$2" ]]; then
+            list_entries "$2"
+        else
+            list_entries "$IPSET_SYSLOG"
+            echo ""
+            list_entries "$IPSET_SNMP"
+        fi
+        ;;
+    status)
+        if [[ "$2" == "-h" || "$2" == "--help" ]]; then
+            show_status_help
+            exit 0
+        fi
+        show_status
+        ;;
+    reset)
+        if [[ "$2" == "-h" || "$2" == "--help" ]]; then
+            show_reset_help
+            exit 0
+        fi
+        reset_rules
+        ;;
+    *)
+        echo -e "${RED}Error: unknown command \"$1\" for \"${CLI_NAME}\"${NC}"
+        echo -e "Run '${CLI_NAME} --help' for usage.\n"
+        exit 1
+        ;;
+esac

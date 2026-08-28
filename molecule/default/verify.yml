@@ -132,6 +132,29 @@
       ansible.builtin.debug:
         msg: "Fail2ban SSH jail verified."
 
+    - name: "[VERIFY-SEC-016] Verify firewalld-docker CLI is deployed"
+      ansible.builtin.stat:
+        path: /usr/local/bin/firewalld-docker
+      register: firewalld_docker_stat
+
+    - name: Assert firewalld-docker CLI exists with executable mode
+      ansible.builtin.assert:
+        that:
+          - firewalld_docker_stat.stat.exists
+          - firewalld_docker_stat.stat.mode == '0755'
+        fail_msg: "firewalld-docker CLI binary is missing or not executable."
+
+    - name: "[VERIFY-SEC-017] Verify firewalld-docker --help execution"
+      ansible.builtin.command: /usr/local/bin/firewalld-docker --help
+      register: firewalld_docker_help_out
+      changed_when: false
+
+    - name: Assert firewalld-docker help output
+      ansible.builtin.assert:
+        that:
+          - "'Docker Firewall Manager' in firewalld_docker_help_out.stdout"
+        fail_msg: "firewalld-docker help command failed."
+
     # ==========================================================================
     # 3. Docker Engine & Overseer Control Plane 검증
     # ==========================================================================
