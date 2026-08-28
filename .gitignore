@@ -1,0 +1,59 @@
+# ==============================================================================
+# Overseer Git Ignore Rules
+# Separates repository code from local session configs, real IDC IPs, and secrets
+# ==============================================================================
+
+# Environment and Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+
+# Ansible Inventory & Local Host Configurations
+inventory/hosts.yml
+inventory/hosts.yaml
+inventory/hosts
+inventory/host_vars/*.yml
+inventory/host_vars/*.yaml
+!inventory/host_vars/*.example.yml
+!inventory/host_vars/*.example.yaml
+!inventory/host_vars/*.example
+ansible/inventory/hosts.yml
+ansible/inventory/hosts.yaml
+ansible/inventory/hosts
+ansible/inventory/host_vars/*.yml
+ansible/inventory/host_vars/*.yaml
+!ansible/inventory/host_vars/*.example.yml
+!ansible/inventory/host_vars/*.example.yaml
+!ansible/inventory/host_vars/*.example
+.vault_pass*
+*.vault
+.ansible/
+*.retry
+
+# Python Cache & Testing
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Control Plane & Docker Runtime Volumes/Data
+openbao/data/
+postgres/data/
+prometheus/data/
+data/
+backup/
+*.log
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

@@ -1,0 +1,13 @@
+{
+  "log-driver": "{{ docker_log_driver }}",
+  "log-opts": {
+    "max-size": "{{ docker_log_max_size }}",
+    "max-file": "{{ docker_log_max_file }}"
+  },
+  "live-restore": {{ docker_live_restore | bool | lower }},
+  "userland-proxy": {{ docker_userland_proxy | bool | lower }},
+  "iptables": {{ docker_iptables | bool | lower }}{% if docker_metrics_enabled | bool %},
+  "metrics-addr": "{{ docker_metrics_address }}",
+  "experimental": true
+{% endif %}
+}

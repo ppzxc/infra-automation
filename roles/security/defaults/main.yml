@@ -1,0 +1,38 @@
+---
+ssh_port: "{{ ansible_port | default(22) }}"
+ssh_permit_root_login: "prohibit-password"
+ssh_password_authentication: "yes"
+ssh_pubkey_authentication: "yes"
+ssh_max_auth_tries: 3
+ssh_client_alive_interval: 300
+ssh_client_alive_count_max: 2
+
+# 방화벽 허용 기본 포트
+firewall_allowed_tcp_ports:
+  - "{{ ssh_port | default(22) }}"
+
+# 서브넷 제한
+admin_allowed_subnets:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  - "127.0.0.1/32"
+
+monitoring_allowed_subnets:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  - "127.0.0.1/32"
+
+# SELinux (permissive 모드로 운영 안정성 확보 및 감사 로그 수집)
+selinux_mode: "permissive"
+selinux_policy: "targeted"
+
+# Sudo 보안 정책
+sudo_timestamp_timeout: 15
+sudo_log_file: "/var/log/sudo.log"
+
+# Fail2ban
+fail2ban_bantime: "1h"
+fail2ban_findtime: "10m"
+fail2ban_maxretry: 5

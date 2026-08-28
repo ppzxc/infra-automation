@@ -1,0 +1,25 @@
+---
+overseer_install_dir: "/opt/overseer"
+overseer_systemd_enabled: true
+overseer_service_name: "overseer"
+
+# OpenBao & Boundary System Limits & Kernel Tuning
+overseer_sysctl_settings:
+  fs.file-max: 2097152
+  vm.max_map_count: 262144
+  vm.swappiness: 1
+  net.core.somaxconn: 65535
+
+overseer_directories:
+  - path: "{{ overseer_install_dir }}"
+    mode: "0755"
+  - path: "{{ overseer_install_dir }}/openbao/data"
+    mode: "0700"
+  - path: "{{ overseer_install_dir }}/openbao/config"
+    mode: "0755"
+  - path: "{{ overseer_install_dir }}/boundary/config"
+    mode: "0755"
+  - path: "{{ overseer_install_dir }}/boundary/scripts"
+    mode: "0755"
+  - path: "{{ overseer_install_dir }}/postgres/data"
+    mode: "0700"

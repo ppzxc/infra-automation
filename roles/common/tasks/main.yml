@@ -1,0 +1,159 @@
+---
+- name: "[COMMON-001] Set timezone"
+  community.general.timezone:
+    name: "{{ timezone }}"
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[COMMON-002] Fix EOL CentOS 6 / 7 Vault Repositories"
+  ansible.builtin.shell: |
+    sed -i -e 's/^mirrorlist/#mirrorlist/g' -e 's|^#baseurl=http://mirror.centos.org/centos/$releasever|baseurl=https://vault.centos.org/{{ ansible_distribution_version }}|g' /etc/yum.repos.d/CentOS-*.repo
+  when: ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 7
+  changed_when: false
+  failed_when: false
+
+- name: "[COMMON-003] Install common packages (Debian/Ubuntu)"
+  ansible.builtin.apt:
+    name: "{{ common_packages + ['iproute2', 'lsb-release', 'gnupg', 'htop', 'iotop', 'sudo'] }}"
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: "[COMMON-004] Install EPEL repository (RedHat/CentOS 7, Rocky 8, 9)"
+  ansible.builtin.package:
+    name: epel-release
+    state: present
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+  failed_when: false
+
+- name: "[COMMON-005] Install common packages (RedHat/CentOS 6, 7 via YUM)"
+  ansible.builtin.yum:
+    name: "{{ common_packages + ['iproute', 'sudo'] }}"
+    state: present
+  when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int <= 7
+
+- name: "[COMMON-006] Install common packages (RHEL/Rocky 8, 9, 10 via DNF)"
+  ansible.builtin.dnf:
+    name: "{{ common_packages + ['iproute', 'sudo'] }}"
+    state: present
+  when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int >= 8
+
+- name: "[COMMON-007] Install optional diagnostic tools (htop, iotop)"
+  ansible.builtin.package:
+    name:
+      - htop
+      - iotop
+    state: present
+  failed_when: false
+
+# NTP 동기화 (CentOS 7+, Rocky Linux, Debian 계열: chrony / CentOS 6: ntp)
+- name: "[COMMON-008] Configure Chrony NTP servers (Modern OS)"
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: "{{ '/etc/chrony/chrony.conf' if ansible_os_family == 'Debian' else '/etc/chrony.conf' }}"
+    mode: '0644'
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  notify: Restart chrony
+
+- name: "[COMMON-009] Ensure Chrony service is running (Modern OS)"
+  ansible.builtin.service:
+    name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+    state: started
+    enabled: true
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[COMMON-010] Ensure NTP service is running (CentOS 6 legacy)"
+  ansible.builtin.service:
+    name: ntpd
+    state: started
+    enabled: true
+  when: ansible_distribution == "CentOS" and ansible_distribution_major_version | int == 6
+
+- name: "[COMMON-011] Apply sysctl kernel tuning"
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    sysctl_set: yes
+  loop: "{{ sysctl_settings | dict2items }}"
+
+- name: "[COMMON-011-IPV6] Disable IPv6 via sysctl"
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    sysctl_set: yes
+  loop: "{{ sysctl_ipv6_settings | dict2items }}"
+  when: disable_ipv6 | default(false) | bool
+
+- name: "[COMMON-011-EXTRA] Apply extra sysctl kernel tuning"
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    sysctl_set: yes
+  loop: "{{ sysctl_extra_settings | default({}) | dict2items }}"
+  when:
+    - sysctl_extra_settings is defined
+    - sysctl_extra_settings | length > 0
+
+- name: "[COMMON-012] Ensure admin user group exists"
+  ansible.builtin.group:
+    name: "{{ admin_user }}"
+    state: present
+
+- name: "[COMMON-013] Ensure admin user exists with sudo privileges"
+  ansible.builtin.user:
+    name: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    groups: "{{ 'sudo' if ansible_os_family == 'Debian' else 'wheel' }}"
+    append: yes
+    shell: /bin/bash
+    create_home: yes
+    state: present
+
+- name: "[COMMON-014] Enable passwordless sudo for admin user"
+  ansible.builtin.copy:
+    content: "{{ admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/90-{{ admin_user }}"
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
+- name: "[COMMON-015] Deploy admin SSH public keys"
+  ansible.posix.authorized_key:
+    user: "{{ admin_user }}"
+    key: "{{ item }}"
+    state: present
+  loop: "{{ admin_ssh_public_keys | default([]) | map('trim') | reject('equalto', '') | list }}"
+  ignore_errors: "{{ ansible_check_mode }}"
+  when:
+    - admin_ssh_public_keys is defined
+    - (admin_ssh_public_keys | default([]) | map('trim') | reject('equalto', '') | list | length) > 0
+
+- name: "[COMMON-016] Configure system security limits (nofile/nproc)"
+  community.general.pam_limits:
+    domain: "{{ item.domain }}"
+    limit_type: "{{ item.limit_type }}"
+    limit_item: "{{ item.limit_item }}"
+    value: "{{ item.value }}"
+    dest: /etc/security/limits.d/99-limits.conf
+  loop: "{{ system_limits }}"
+
+- name: "[COMMON-017] Configure Systemd Journald retention limits"
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/99-retention.conf
+    content: |
+      [Journal]
+      SystemMaxUse={{ journald_max_use | default('2G') }}
+      MaxRetentionSec={{ journald_max_retention | default('1month') }}
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_service_mgr == "systemd"
+  failed_when: false
+

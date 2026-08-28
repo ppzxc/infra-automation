@@ -1,0 +1,11 @@
+---
+- name: Restart chrony
+  ansible.builtin.service:
+    name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+    state: restarted
+    enabled: true
+
+- name: Apply sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false
+

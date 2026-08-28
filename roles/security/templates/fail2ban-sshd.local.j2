@@ -1,0 +1,9 @@
+[sshd]
+enabled = true
+port = {{ ssh_port | default(22) }}
+logpath = %(sshd_log)s
+backend = %(sshd_backend)s
+maxretry = {{ fail2ban_maxretry | default(5) }}
+findtime = {{ fail2ban_findtime | default('10m') }}
+bantime = {{ fail2ban_bantime | default('1h') }}
+ignoreip = 127.0.0.1/8 ::1 {{ admin_allowed_subnets | default([]) | join(' ') }}

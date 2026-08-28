@@ -1,0 +1,26 @@
+---
+# 온프레미스 IDC 서버 그룹 변수 (Standard UTC / Leap Smear 미적용 소스 일원화)
+ntp_pools:
+  - "kr.pool.ntp.org"
+
+ntp_servers:
+  - "time.kriss.re.kr"
+  - "time2.kriss.re.kr"
+  - "time.cloudflare.com"
+
+# 커널 파라미터 추가 튜닝 (기본값 외 추가 파라미터 필요 시 명시)
+# sysctl_extra_settings: {}
+
+# 패키지 업데이트 및 기본 도구
+common_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - net-tools
+  - chrony
+  - jq
+  - ca-certificates
+  - tar
+  - gzip
+

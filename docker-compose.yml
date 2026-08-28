@@ -1,0 +1,16 @@
+services:
+  ansible:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: overseer-ansible:latest
+    volumes:
+      - .:/ansible
+      - ~/.ssh:/root/.ssh:ro
+    environment:
+      - ANSIBLE_FORCE_COLOR=True
+      - BAO_ADDR=${BAO_ADDR:-}
+      - BAO_TOKEN=${BAO_TOKEN:-}
+    working_dir: /ansible
+    entrypoint: ["ansible-playbook"]
+    command: ["--help"]

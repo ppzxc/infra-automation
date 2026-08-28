@@ -1,0 +1,20 @@
+---
+# 로드밸런서 (HAProxy / Keepalived / VIP) 전용 그룹 변수
+# Keepalived & VIP Active-Active / L4 포워딩 및 ARP Flux 방지 커널 튜닝
+
+sysctl_extra_settings:
+  # 1. VIP가 할당되지 않은 BACKUP 노드에서도 웹서버/데몬이 VIP IP로 바인딩(Listen) 가능하도록 허용
+  net.ipv4.ip_nonlocal_bind: 1
+
+  # 2. 동일 서브넷 내 여러 VIP 운용 시 ARP Flux(ARP 응답 충돌/캐시 오염) 방지
+  net.ipv4.conf.all.arp_ignore: 1
+  net.ipv4.conf.all.arp_announce: 2
+  net.ipv4.conf.default.arp_ignore: 1
+  net.ipv4.conf.default.arp_announce: 2
+
+  # 3. IP 포워딩 활성화 (L4/LVS 및 패킷 전달용)
+  net.ipv4.ip_forward: 1
+
+  # 특정 본딩(bond0) 또는 물리 인터페이스 전용 ARP 설정이 필요한 경우 host_vars에 추가 가능:
+  # net.ipv4.conf.bond0.arp_ignore: 1
+  # net.ipv4.conf.bond0.arp_announce: 2

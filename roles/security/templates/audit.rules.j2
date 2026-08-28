@@ -1,0 +1,30 @@
+# Overseer Auditd Security Rules
+# Monitors critical identity and system configuration files
+
+# First rule - delete all previous rules
+-D
+
+# Increase the buffers to survive stress events
+-b 8192
+
+# Failure mode: 1 = log rate-limiting, 2 = panic
+-f 1
+
+# 1. Identity and Authentication files
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/security/opasswd -p wa -k identity
+
+# 2. Sudoers configuration & logs
+-w /etc/sudoers -p wa -k sudo_config
+-w /etc/sudoers.d/ -p wa -k sudo_config
+-w {{ sudo_log_file | default('/var/log/sudo.log') }} -p wa -k sudo_logs
+
+# 3. SSH daemon configuration
+-w /etc/ssh/sshd_config -p wa -k sshd_config
+-w /etc/ssh/sshd_config.d/ -p wa -k sshd_config
+
+# 4. System and Kernel execution tracking
+-a always,exit -F arch=b64 -S execve -k exec_log

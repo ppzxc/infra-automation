@@ -1,0 +1,37 @@
+---
+# ==============================================================================
+# 온프레미스 IDC 일반 서버(타겟 노드) 프로비저닝 플레이북
+# 실행 예시:
+#   ansible-playbook -i inventory/hosts.yml playbooks/provision_servers.yml --limit ns0333.nanoit.kr
+# ==============================================================================
+
+- name: Provision Baseline On-Premise Target Servers
+  hosts: servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Verify connectivity and OS facts
+      ansible.builtin.debug:
+        msg: "Provisioning target server: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }})"
+
+  roles:
+    - role: common
+      tags: [common, base]
+
+    - role: security
+      tags: [security, ssh, firewall]
+
+    - role: openbao_ssh_ca
+      tags: [openbao, bao, security, ssh-ca]
+
+    - role: boundary_target
+      tags: [boundary, access]
+
+    - role: monitoring
+      tags: [monitoring, metrics, otel]
+
+  post_tasks:
+    - name: Target server provisioning completion summary
+      ansible.builtin.debug:
+        msg: "Successfully provisioned target server {{ inventory_hostname }}. OpenBao SSH CA and Boundary Target ready."

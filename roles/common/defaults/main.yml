@@ -1,0 +1,106 @@
+---
+timezone: "Asia/Seoul"
+locale: "en_US.UTF-8"
+# NTP Pool 및 개별 Time Server 분리 구성 (Standard UTC 기준, Leap Smear 미적용 소스 일원화)
+ntp_pools:
+  - "kr.pool.ntp.org"
+
+ntp_servers:
+  - "time.kriss.re.kr"
+  - "time2.kriss.re.kr"
+  - "time.cloudflare.com"
+
+common_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - net-tools
+  - chrony
+  - jq
+  - ca-certificates
+
+# IPv6 비활성화 여부 (기본값 false, 필요 시 true로 설정하여 IPv6 차단)
+disable_ipv6: false
+
+sysctl_settings:
+  fs.file-max: 2097152
+  fs.inotify.max_user_watches: 524288
+  # 수신/송신 소켓 버퍼 및 Window Scaling 최적화 (10GbE+ IDC 고대역폭 처리량 최적화)
+  net.core.rmem_default: 253952
+  net.core.wmem_default: 253952
+  net.core.rmem_max: 16777216
+  net.core.wmem_max: 16777216
+  net.ipv4.tcp_rmem: "253952 253952 16777216"
+  net.ipv4.tcp_wmem: "253952 253952 16777216"
+  net.ipv4.tcp_window_scaling: 1
+  # 패킷 인바운드 큐 & 소켓 백로그
+  net.core.netdev_max_backlog: 30000
+  net.core.somaxconn: 65535
+  net.ipv4.tcp_max_syn_backlog: 65535
+  net.ipv4.ip_local_port_range: "1024 65535"
+  # TIME_WAIT 및 연결 유지 관리
+  net.ipv4.tcp_fin_timeout: 15
+  net.ipv4.tcp_max_tw_buckets: 1800000
+  net.ipv4.tcp_timestamps: 1
+  net.ipv4.tcp_tw_reuse: 1
+  net.ipv4.tcp_keepalive_time: 300
+  net.ipv4.tcp_keepalive_intvl: 30
+  net.ipv4.tcp_keepalive_probes: 5
+  # 가상 메모리 관리
+  vm.swappiness: 10
+  vm.max_map_count: 262144
+  vm.overcommit_memory: 1
+
+# IPv6 비활성화 전용 sysctl 파라미터 (disable_ipv6: true일 때 적용)
+sysctl_ipv6_settings:
+  net.ipv6.conf.all.disable_ipv6: 1
+  net.ipv6.conf.default.disable_ipv6: 1
+  net.ipv6.conf.lo.disable_ipv6: 1
+
+# 추가 커널 파라미터 (개별 그룹/호스트에서 기본값을 유지하면서 확장할 때 사용)
+sysctl_extra_settings: {}
+
+# System ulimit (pam_limits) 설정
+# 기본 권장값: 65535 (일반 웹/WAS 표준)
+# 필요 시 group_vars 또는 host_vars에서 262144 (DB/캐시) 또는 1048576 (초고성능 게이트웨이/커널 최대치) 등으로 재정의 가능
+system_limit_nofile: 65535
+system_limit_nproc: 65535
+
+system_limits:
+  - domain: "*"
+    limit_type: "soft"
+    limit_item: "nofile"
+    value: "{{ system_limit_nofile }}"
+  - domain: "*"
+    limit_type: "hard"
+    limit_item: "nofile"
+    value: "{{ system_limit_nofile }}"
+  - domain: "*"
+    limit_type: "soft"
+    limit_item: "nproc"
+    value: "{{ system_limit_nproc }}"
+  - domain: "*"
+    limit_type: "hard"
+    limit_item: "nproc"
+    value: "{{ system_limit_nproc }}"
+  - domain: "root"
+    limit_type: "soft"
+    limit_item: "nofile"
+    value: "{{ system_limit_nofile }}"
+  - domain: "root"
+    limit_type: "hard"
+    limit_item: "nofile"
+    value: "{{ system_limit_nofile }}"
+  - domain: "root"
+    limit_type: "soft"
+    limit_item: "nproc"
+    value: "{{ system_limit_nproc }}"
+  - domain: "root"
+    limit_type: "hard"
+    limit_item: "nproc"
+    value: "{{ system_limit_nproc }}"
+
+journald_max_use: "2G"
+journald_max_retention: "1month"

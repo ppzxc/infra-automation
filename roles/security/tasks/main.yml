@@ -1,0 +1,144 @@
+---
+# 1. SSH Hardening
+- name: "[SEC-001] Configure SSH Hardening parameters"
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: '/usr/sbin/sshd -t -f %s'
+  loop:
+    - { regexp: '^#?Port', line: 'Port {{ ssh_port | default(22) }}' }
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin {{ ssh_permit_root_login }}' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication {{ ssh_password_authentication }}' }
+    - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication {{ ssh_pubkey_authentication }}' }
+    - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries {{ ssh_max_auth_tries }}' }
+    - { regexp: '^#?ClientAliveInterval', line: 'ClientAliveInterval {{ ssh_client_alive_interval }}' }
+    - { regexp: '^#?ClientAliveCountMax', line: 'ClientAliveCountMax {{ ssh_client_alive_count_max }}' }
+  notify: Restart sshd
+
+# 2. Firewall configuration (UFW for Debian/Ubuntu)
+- name: "[SEC-002] Ensure UFW is installed (Debian)"
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: "[SEC-003] Allow incoming TCP ports via UFW (Debian)"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  loop: "{{ firewall_allowed_tcp_ports }}"
+  when: ansible_os_family == "Debian"
+
+- name: "[SEC-004] Enable UFW with default deny incoming (Debian)"
+  community.general.ufw:
+    state: enabled
+    default: deny
+    direction: incoming
+  when: ansible_os_family == "Debian"
+
+# 3. Firewall configuration (Firewalld for CentOS 7, 8, Rocky 9, 10)
+- name: "[SEC-005] Ensure firewalld is installed and running (RHEL/Rocky 7+)"
+  ansible.builtin.package:
+    name: firewalld
+    state: present
+  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
+
+- name: "[SEC-006] Ensure firewalld service is started and enabled (RHEL/Rocky 7+)"
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
+
+- name: "[SEC-007] Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)"
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ firewall_allowed_tcp_ports }}"
+  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
+
+# 4. Firewall configuration (iptables for CentOS 6 legacy)
+- name: "[SEC-008] Allow incoming TCP ports via iptables (CentOS 6)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "{{ item | string }}"
+    jump: ACCEPT
+    action: insert
+  loop: "{{ firewall_allowed_tcp_ports }}"
+  when: ansible_distribution == "CentOS" and (ansible_distribution_major_version | int == 6)
+
+# 5. Fail2ban configuration (Optional / EPEL dependent)
+- name: "[SEC-009] Install fail2ban package if available"
+  ansible.builtin.package:
+    name: fail2ban
+    state: present
+  register: fail2ban_install_result
+  failed_when: false
+
+- name: "[SEC-010] Ensure fail2ban is running and enabled (if installed)"
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
+  failed_when: false
+
+# 6. SELinux configuration (Permissive mode)
+- name: "[SEC-011] Configure SELinux in permissive mode (RHEL/Rocky 7+)"
+  ansible.posix.selinux:
+    policy: "{{ selinux_policy | default('targeted') }}"
+    state: "{{ selinux_mode | default('permissive') }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+  failed_when: false
+
+# 7. Auditd configuration
+- name: "[SEC-012] Deploy Auditd security audit rules"
+  ansible.builtin.template:
+    src: audit.rules.j2
+    dest: "{{ '/etc/audit/rules.d/overseer.rules' if ansible_distribution_major_version | int >= 7 else '/etc/audit/audit.rules' }}"
+    owner: root
+    group: root
+    mode: '0600'
+  when: ansible_os_family == "RedHat"
+  notify: Restart auditd
+  failed_when: false
+
+- name: "[SEC-013] Ensure Auditd service is running and enabled"
+  ansible.builtin.service:
+    name: auditd
+    state: started
+    enabled: true
+  when: ansible_os_family == "RedHat"
+  failed_when: false
+
+# 8. Sudo Policy & Log segregation
+- name: "[SEC-014] Configure Sudo timestamp timeout and log file"
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/99-security-policy
+    content: |
+      Defaults timestamp_timeout={{ sudo_timestamp_timeout | default(15) }}
+      Defaults logfile="{{ sudo_log_file | default('/var/log/sudo.log') }}"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
+# 9. Fail2ban SSH jail deployment
+- name: "[SEC-015] Deploy Fail2ban SSH jail configuration"
+  ansible.builtin.template:
+    src: fail2ban-sshd.local.j2
+    dest: /etc/fail2ban/jail.d/sshd.local
+    owner: root
+    group: root
+    mode: '0644'
+  when: fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
+  notify: Restart fail2ban
+  failed_when: false

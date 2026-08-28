@@ -1,0 +1,80 @@
+---
+- name: "[BAO-001] Skip OpenBao SSH CA if disabled or key is empty"
+  ansible.builtin.debug:
+    msg: "OpenBao SSH CA is disabled (enable_openbao_ssh_ca=false or openbao_ssh_ca_public_key is empty). Skipping setup."
+  when: not (enable_openbao_ssh_ca | default(false) | bool) or (openbao_ssh_ca_public_key | default('') | length == 0)
+
+- name: "[BAO-002] Check OpenSSH CA capability (requires OpenSSH >= 5.4, RHEL/CentOS 7+)"
+  ansible.builtin.debug:
+    msg: "Warning: CentOS 6 / OpenSSH 5.3 does not natively support TrustedUserCAKeys. Skipping OpenBao SSH CA setup for {{ inventory_hostname }}."
+  when:
+    - enable_openbao_ssh_ca | default(false) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6
+
+- name: "[BAO-003] Ensure SSH configuration directory exists"
+  ansible.builtin.file:
+    path: /etc/ssh
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - enable_openbao_ssh_ca | default(false) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+
+- name: "[BAO-004] Deploy OpenBao SSH CA Public Key"
+  ansible.builtin.copy:
+    content: "{{ openbao_ssh_ca_public_key }}\n"
+    dest: "{{ openbao_ssh_ca_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - enable_openbao_ssh_ca | default(false) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+  notify: Restart sshd for OpenBao CA
+
+- name: "[BAO-005] Ensure AuthorizedPrincipals directory exists"
+  ansible.builtin.file:
+    path: "{{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - enable_openbao_ssh_ca | default(false) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - admin_user is defined
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+
+- name: "[BAO-006] Create admin user principals file"
+  ansible.builtin.copy:
+    content: "admin\n{{ admin_user }}\n"
+    dest: "{{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}/{{ admin_user }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - enable_openbao_ssh_ca | default(false) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - admin_user is defined
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+
+- name: "[BAO-007] Configure sshd to trust OpenBao CA Keys and AuthorizedPrincipals"
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: '/usr/sbin/sshd -t -f %s'
+  loop:
+    - { regexp: '^#?TrustedUserCAKeys', line: "TrustedUserCAKeys {{ openbao_ssh_ca_path }}" }
+    - { regexp: '^#?AuthorizedPrincipalsFile', line: "AuthorizedPrincipalsFile {{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}/%u" }
+  when:
+    - enable_openbao_ssh_ca | default(false) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+  notify: Restart sshd for OpenBao CA

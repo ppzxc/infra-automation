@@ -1,0 +1,55 @@
+---
+# 전역 공통 변수
+timezone: "Asia/Seoul"
+locale: "en_US.UTF-8"
+
+# 관리자 계정 및 SSH 키 설정
+admin_user: "ppzxc"
+admin_groups:
+  - sudo
+  - wheel
+
+# 관리자 SSH 공개키 목록 (비상용 또는 초기 부트스트랩 접근 키)
+# 로컬 워크스테이션의 ~/.ssh/id_ed25519.pub 또는 id_rsa.pub 파일이 존재할 경우 자동 주입
+admin_ssh_public_keys:
+  - "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub', errors='ignore') | default(lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub', errors='ignore'), true) | default('', true) }}"
+
+
+# 기능 활성화 플래그
+enable_openbao_ssh_ca: false
+enable_boundary: false
+enable_otelcol: true
+
+# OpenBao SSH CA 공개키 (서명 기반 SSH 접근 허용 시 사용)
+openbao_ssh_ca_public_key: ""
+
+# Boundary Worker / Target 설정
+boundary_worker_tags:
+  - "idc=main"
+  - "env=production"
+boundary_authorized_users:
+  - "ppzxc"
+  - "ansible"
+
+# SSH 및 보안 포트 / 서브넷
+ssh_port: "{{ ansible_port | default(22) }}"
+firewall_allowed_tcp_ports:
+  - "{{ ansible_port | default(22) }}"
+
+admin_allowed_subnets:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  - "127.0.0.1/32"
+
+monitoring_allowed_subnets:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+  - "127.0.0.1/32"
+
+# OpenTelemetry 중앙 관제 타겟 설정
+otel_target_endpoint: "127.0.0.1:4317"
+otel_target_insecure: true
+otel_target_headers: {}
+otel_auth_header: ""

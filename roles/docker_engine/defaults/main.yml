@@ -1,0 +1,9 @@
+---
+docker_log_driver: "json-file"
+docker_log_max_size: "50m"
+docker_log_max_file: "3"
+docker_live_restore: true
+docker_metrics_enabled: true
+docker_metrics_address: "127.0.0.1:9323"
+docker_userland_proxy: false
+docker_iptables: true

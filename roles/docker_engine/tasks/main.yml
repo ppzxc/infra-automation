@@ -1,0 +1,133 @@
+---
+# 1. Purge legacy and conflicting container packages (Podman, Buildah, Skopeo, old Docker)
+- name: "[DOC-001] Remove conflicting packages and Podman stack (RedHat/Rocky)"
+  ansible.builtin.package:
+    name:
+      - podman
+      - podman-docker
+      - podman-plugins
+      - buildah
+      - skopeo
+      - runc
+      - containernetworking-plugins
+      - docker
+      - docker-client
+      - docker-client-latest
+      - docker-common
+      - docker-latest
+      - docker-latest-logrotate
+      - docker-logrotate
+      - docker-engine
+    state: absent
+  when: ansible_os_family == "RedHat"
+
+- name: "[DOC-002] Remove conflicting packages and old Docker stack (Debian/Ubuntu)"
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+  when: ansible_os_family == "Debian"
+
+# 2. Setup Official Docker Repository
+- name: "[DOC-003] Install Docker repository prerequisites (RedHat/Rocky)"
+  ansible.builtin.package:
+    name:
+      - dnf-plugins-core
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: "[DOC-004] Configure Docker CE official repository (RedHat/Rocky)"
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/centos/docker-ce.repo"
+    dest: /etc/yum.repos.d/docker-ce.repo
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_os_family == "RedHat"
+
+- name: "[DOC-005] Install Docker repository prerequisites (Debian/Ubuntu)"
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: "[DOC-006] Create keyrings directory for apt (Debian/Ubuntu)"
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: ansible_os_family == "Debian"
+
+- name: "[DOC-007] Download Docker GPG key (Debian/Ubuntu)"
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_os_family == "Debian"
+
+- name: "[DOC-008] Configure Docker CE repository (Debian/Ubuntu)"
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+    state: present
+    filename: docker
+  when: ansible_os_family == "Debian"
+
+# 3. Install Docker CE Engine and Plugins
+- name: "[DOC-009] Install latest Docker CE and Compose plugin packages"
+  ansible.builtin.package:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+
+# 4. Deploy Hardened Docker daemon.json
+- name: "[DOC-010] Create /etc/docker directory"
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: "[DOC-011] Deploy hardened Docker daemon configuration"
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart docker
+
+# 5. Enable and Start Docker Service
+- name: "[DOC-012] Ensure Docker and containerd services are started and enabled"
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - containerd
+    - docker
+
+# 6. Add Admin User to docker group
+- name: "[DOC-013] Add admin user to docker group"
+  ansible.builtin.user:
+    name: "{{ admin_user | default('ppzxc') }}"
+    groups: docker
+    append: yes
+  when: admin_user is defined

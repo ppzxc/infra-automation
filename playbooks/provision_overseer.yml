@@ -1,0 +1,37 @@
+---
+# ==============================================================================
+# Overseer 중앙 컨트롤 플레인 서버 프로비저닝 플레이북
+# 실행 예시:
+#   ansible-playbook -i inventory/hosts.yml playbooks/provision_overseer.yml
+# ==============================================================================
+
+- name: Provision Overseer Control Plane Host
+  hosts: overseer
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Verify connectivity and OS facts for Overseer host
+      ansible.builtin.debug:
+        msg: "Provisioning Overseer Control Plane Node: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }})"
+
+  roles:
+    - role: common
+      tags: [common, base]
+
+    - role: security
+      tags: [security, ssh, firewall]
+
+    - role: docker_engine
+      tags: [docker, container]
+
+    - role: overseer_control_plane
+      tags: [overseer, control_plane]
+
+    - role: monitoring
+      tags: [monitoring, metrics, otel]
+
+  post_tasks:
+    - name: Overseer provisioning completion summary
+      ansible.builtin.debug:
+        msg: "Successfully provisioned Overseer Control Plane on {{ inventory_hostname }}. Docker CE, hardened config, systemd overseer.service, and OTEL agent ready."

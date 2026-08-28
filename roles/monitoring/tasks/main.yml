@@ -1,0 +1,141 @@
+---
+# ==============================================================================
+# 1. Legacy Node Exporter Cleanup (Complete Removal)
+# ==============================================================================
+- name: "[MON-CLEANUP-001] Stop and disable legacy node_exporter service"
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: stopped
+    enabled: false
+  when:
+    - cleanup_legacy_node_exporter | default(true) | bool
+    - ansible_service_mgr == "systemd"
+  failed_when: false
+
+- name: "[MON-CLEANUP-002] Remove legacy node_exporter systemd unit file"
+  ansible.builtin.file:
+    path: /etc/systemd/system/node_exporter.service
+    state: absent
+  when:
+    - cleanup_legacy_node_exporter | default(true) | bool
+    - ansible_service_mgr == "systemd"
+
+- name: "[MON-CLEANUP-003] Remove legacy node_exporter binary"
+  ansible.builtin.file:
+    path: /usr/local/bin/node_exporter
+    state: absent
+  when: cleanup_legacy_node_exporter | default(true) | bool
+
+- name: "[MON-CLEANUP-004] Remove legacy node_exporter user"
+  ansible.builtin.user:
+    name: node_exporter
+    state: absent
+    remove: yes
+  when: cleanup_legacy_node_exporter | default(true) | bool
+  failed_when: false
+
+- name: "[MON-CLEANUP-005] Remove legacy node_exporter group"
+  ansible.builtin.group:
+    name: node_exporter
+    state: absent
+  when: cleanup_legacy_node_exporter | default(true) | bool
+  failed_when: false
+
+# ==============================================================================
+# 2. OpenTelemetry Collector Contrib Deployment (OpenObserve Ingestion Pipeline)
+# ==============================================================================
+- name: "[MON-001] Create otelcol system group"
+  ansible.builtin.group:
+    name: "{{ otelcol_group }}"
+    system: yes
+    state: present
+  when: enable_otelcol | default(true) | bool
+
+- name: "[MON-002] Create otelcol system user"
+  ansible.builtin.user:
+    name: "{{ otelcol_user }}"
+    group: "{{ otelcol_group }}"
+    groups: "{{ 'adm' if ansible_os_family == 'Debian' else 'systemd-journal' }}"
+    append: yes
+    system: yes
+    shell: /sbin/nologin
+    create_home: no
+    state: present
+  when: enable_otelcol | default(true) | bool
+
+- name: "[MON-003] Download and install OpenTelemetry Collector Contrib binary"
+  ansible.builtin.unarchive:
+    src: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ otelcol_version }}/otelcol-contrib_{{ otelcol_version }}_linux_{{ otelcol_arch }}.tar.gz"
+    dest: /usr/local/bin
+    remote_src: yes
+    extra_opts:
+      - "--wildcards"
+      - "*/otelcol-contrib"
+    creates: /usr/local/bin/otelcol-contrib
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - enable_otelcol | default(true) | bool
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  notify: Restart otelcol-contrib
+
+- name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"
+  ansible.builtin.template:
+    src: otelcol-contrib.yaml.j2
+    dest: /etc/otelcol-contrib.yaml
+    owner: root
+    group: "{{ otelcol_group }}"
+    mode: '0640'
+  when:
+    - enable_otelcol | default(true) | bool
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  notify: Restart otelcol-contrib
+
+- name: "[MON-005] Create systemd service for otelcol-contrib"
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/otelcol-contrib.service
+    content: |
+      [Unit]
+      Description=OpenTelemetry Collector Contrib
+      After=network.target
+
+      [Service]
+      User={{ otelcol_user }}
+      Group={{ otelcol_group }}
+      Type=simple
+      ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otelcol-contrib.yaml
+      Restart=always
+      RestartSec=5
+      LimitNOFILE=65536
+      NoNewPrivileges=true
+      ProtectSystem=full
+      ProtectHome=true
+      PrivateTmp=true
+      CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+      AmbientCapabilities=CAP_DAC_READ_SEARCH
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: '0644'
+  register: otelcol_unit_created
+  when:
+    - enable_otelcol | default(true) | bool
+    - ansible_service_mgr == "systemd"
+  notify: Restart otelcol-contrib
+
+
+- name: "[MON-006] Ensure otelcol-contrib service is started and enabled"
+  ansible.builtin.systemd:
+    name: otelcol-contrib
+    state: started
+    enabled: true
+  when:
+    - enable_otelcol | default(true) | bool
+    - ansible_service_mgr == "systemd"
+    - not ansible_check_mode or (otelcol_unit_created is defined and not otelcol_unit_created.changed)
+  ignore_errors: "{{ ansible_check_mode }}"
+
+

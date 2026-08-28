@@ -1,0 +1,115 @@
+# OpenTelemetry Collector Contrib Configuration for Overseer Managed Host
+# Ingests Host Metrics & Docker metrics, system logs, and forwards to Central OTLP Backend
+
+receivers:
+{% if docker_metrics_enabled | default(false) | bool %}
+  # 1. Prometheus Scrape receiver for Docker daemon metrics (when enabled)
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'docker-engine-local'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['{{ docker_metrics_address | default("127.0.0.1:9323") }}']
+{% endif %}
+
+  # 2. Hostmetrics receiver for kernel, system & hardware stats
+  hostmetrics:
+    collection_interval: {{ otel_hostmetrics_interval | default("15s") }}
+    scrapers:
+      {{ otel_hostmetrics_scrapers | default({
+        'cpu': {},
+        'memory': {},
+        'disk': {},
+        'filesystem': {},
+        'load': {},
+        'network': {},
+        'paging': {},
+        'processes': {}
+      }) | to_nice_yaml(indent=2) | indent(6) }}
+
+  # 3. Filelog receiver for critical system and audit logs (ISMS/ISMS-P Baseline)
+  filelog/system:
+    include:
+{% for log_path in otel_system_logs | default([
+  '/var/log/messages',
+  '/var/log/syslog',
+  '/var/log/secure',
+  '/var/log/auth.log',
+  '/var/log/sudo.log',
+  '/var/log/audit/audit.log',
+  '/var/log/cron*',
+  '/var/log/fail2ban.log',
+  '/var/log/dnf.log',
+  '/var/log/yum.log',
+  '/var/log/dpkg.log',
+  '/var/log/firewalld'
+]) %}
+      - {{ log_path }}
+{% endfor %}
+    start_at: end
+    retry_on_failure:
+      enabled: true
+
+  # 4. Standard OTLP ingestion for application containers/services (Metrics, Logs, and Distributed Tracing)
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:{{ otel_otlp_grpc_port | default(4317) }}"
+      http:
+        endpoint: "0.0.0.0:{{ otel_otlp_http_port | default(4318) }}"
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  batch:
+    send_batch_size: 1024
+    timeout: 1s
+
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 2s
+    system:
+      hostname_sources: [os]
+
+exporters:
+  otlp/backend:
+    endpoint: "{{ otel_target_endpoint | default('127.0.0.1:4317') }}"
+    tls:
+      insecure: {{ otel_target_insecure | default(true) | bool | lower }}
+{% if otel_target_headers is defined and otel_target_headers | length > 0 %}
+    headers:
+      {{ otel_target_headers | to_nice_yaml(indent=2) | indent(6) }}
+{% elif otel_auth_header is defined and otel_auth_header | length > 0 %}
+    headers:
+      Authorization: "{{ otel_auth_header }}"
+{% endif %}
+
+service:
+  pipelines:
+    metrics:
+      receivers: [{% if docker_metrics_enabled | default(false) | bool %}prometheus, {% endif %}hostmetrics, otlp]
+      processors: [memory_limiter, batch, resourcedetection]
+      exporters: [otlp/backend]
+
+    logs:
+      receivers: [filelog/system, otlp]
+      processors: [memory_limiter, batch, resourcedetection]
+      exporters: [otlp/backend]
+
+{% if otel_traces_enabled | default(true) | bool %}
+    # Distributed Traces Pipeline (Forward trace spans from container/apps to OpenObserve)
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resourcedetection]
+      exporters: [otlp/backend]
+{% endif %}
+
+  telemetry:
+    logs:
+      level: info
+
+

@@ -1,0 +1,54 @@
+---
+# OpenTelemetry Collector Contrib
+enable_otelcol: true
+otelcol_version: "0.108.0"
+otelcol_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+otelcol_user: "otelcol-contrib"
+otelcol_group: "otelcol-contrib"
+
+# OpenTelemetry Hostmetrics Receiver Configuration
+otel_hostmetrics_interval: "15s"
+otel_hostmetrics_scrapers:
+  cpu: {}
+  memory: {}
+  disk: {}
+  filesystem: {}
+  load: {}
+  network: {}
+  paging: {}
+  processes: {}
+
+# Docker Metrics Scrape Toggle (Scrapes dockerd metrics endpoint directly via OTel prometheus receiver)
+docker_metrics_enabled: false
+docker_metrics_address: "127.0.0.1:9323"
+
+# OTLP Ingestion Endpoints (For Application Metrics, Logs, and Traces)
+otel_otlp_grpc_port: 4317
+otel_otlp_http_port: 4318
+otel_traces_enabled: true
+
+# OpenTelemetry Target Backend Endpoint
+otel_target_endpoint: "127.0.0.1:4317"
+otel_target_insecure: true
+otel_target_headers: {}
+otel_auth_header: ""
+
+
+# OpenTelemetry Collector System Logs to Ingest (ISMS/ISMS-P Baseline)
+otel_system_logs:
+  - /var/log/messages
+  - /var/log/syslog
+  - /var/log/secure
+  - /var/log/auth.log
+  - /var/log/sudo.log
+  - /var/log/audit/audit.log
+  - /var/log/cron*
+  - /var/log/fail2ban.log
+  - /var/log/dnf.log
+  - /var/log/yum.log
+  - /var/log/dpkg.log
+  - /var/log/firewalld
+
+# Legacy node_exporter Cleanup Toggle
+cleanup_legacy_node_exporter: true
+

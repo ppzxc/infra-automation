@@ -1,0 +1,30 @@
+---
+# ==============================================================================
+# 정기 유지보수 및 보안 패치 플레이북
+# ==============================================================================
+
+- name: Maintenance and Security Updates for Overseer Control Plane
+  hosts: overseer
+  become: true
+  gather_facts: true
+  roles:
+    - role: common
+      tags: [common, update]
+    - role: security
+      tags: [security, audit]
+    - role: docker_engine
+      tags: [docker]
+    - role: monitoring
+      tags: [monitoring]
+
+- name: Maintenance and Security Updates for Target Servers
+  hosts: servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: common
+      tags: [common, update]
+    - role: security
+      tags: [security, audit]
+    - role: monitoring
+      tags: [monitoring]

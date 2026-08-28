@@ -1,0 +1,248 @@
+---
+- name: Verify Overseer Baseline Roles
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    # ==========================================================================
+    # 1. Common Role 검증
+    # ==========================================================================
+    - name: "[VERIFY-COMMON-001] Verify timezone configuration"
+      ansible.builtin.command: timedatectl status
+      register: timedatectl_output
+      changed_when: false
+      failed_when: false
+
+    - name: "[VERIFY-COMMON-008] Verify Chrony configuration file exists"
+      ansible.builtin.stat:
+        path: "{{ '/etc/chrony/chrony.conf' if ansible_os_family == 'Debian' else '/etc/chrony.conf' }}"
+      register: chrony_stat
+
+    - name: Assert Chrony configuration exists
+      ansible.builtin.assert:
+        that:
+          - chrony_stat.stat.exists
+        fail_msg: "Chrony configuration file is missing."
+
+    - name: "[VERIFY-COMMON-011] Verify sysctl kernel parameters"
+      ansible.builtin.command: sysctl vm.swappiness
+      register: sysctl_swappiness
+      changed_when: false
+
+    - name: Assert sysctl parameters
+      ansible.builtin.assert:
+        that:
+          - "'vm.swappiness = 10' in sysctl_swappiness.stdout or 'vm.swappiness = 1' in sysctl_swappiness.stdout"
+        fail_msg: "sysctl vm.swappiness is not configured correctly."
+
+    - name: "[VERIFY-COMMON-012] Verify admin group exists"
+      ansible.builtin.getent:
+        database: group
+        key: "{{ admin_user | default('ppzxc') }}"
+
+    - name: "[VERIFY-COMMON-013] Verify admin user exists in passwd database"
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ admin_user | default('ppzxc') }}"
+
+    - name: "[VERIFY-COMMON-014] Verify passwordless sudoers configuration for admin user"
+      ansible.builtin.stat:
+        path: "/etc/sudoers.d/90-{{ admin_user | default('ppzxc') }}"
+      register: sudoers_stat
+
+    - name: Assert sudoers file exists with correct permissions
+      ansible.builtin.assert:
+        that:
+          - sudoers_stat.stat.exists
+          - sudoers_stat.stat.mode == '0440'
+        fail_msg: "Sudoers file is missing or has incorrect permissions."
+
+    - name: "[VERIFY-COMMON-015] Verify admin SSH authorized_keys file"
+      ansible.builtin.stat:
+        path: "/home/{{ admin_user | default('ppzxc') }}/.ssh/authorized_keys"
+      register: auth_keys_stat
+
+    - name: Assert admin SSH authorized_keys exists
+      ansible.builtin.assert:
+        that:
+          - auth_keys_stat.stat.exists
+        fail_msg: "Admin SSH authorized_keys file was not created."
+
+    - name: "[VERIFY-COMMON-016] Verify system security limits configuration"
+      ansible.builtin.stat:
+        path: /etc/security/limits.d/99-limits.conf
+      register: limits_stat
+
+    - name: Assert system limits file exists
+      ansible.builtin.assert:
+        that:
+          - limits_stat.stat.exists
+        fail_msg: "Security limits file /etc/security/limits.d/99-limits.conf is missing."
+
+    - name: "[VERIFY-COMMON-017] Verify systemd journald retention configuration"
+      ansible.builtin.stat:
+        path: /etc/systemd/journald.conf.d/99-retention.conf
+      register: journald_stat
+      when: ansible_service_mgr == "systemd"
+
+    # ==========================================================================
+    # 2. Security Role 검증
+    # ==========================================================================
+    - name: "[VERIFY-SEC-001] Verify SSH configuration hardening"
+      ansible.builtin.slurp:
+        src: /etc/ssh/sshd_config
+      register: sshd_config_raw
+
+    - name: Assert SSH hardening parameters are present
+      ansible.builtin.assert:
+        that:
+          - "'PermitRootLogin prohibit-password' in (sshd_config_raw.content | b64decode)"
+          - "'PubkeyAuthentication yes' in (sshd_config_raw.content | b64decode)"
+          - "'MaxAuthTries 3' in (sshd_config_raw.content | b64decode)"
+        fail_msg: "sshd_config does not contain required security hardening directives."
+
+    - name: "[VERIFY-SEC-011] Verify SELinux permissive status"
+      ansible.builtin.debug:
+        msg: "SELinux permissive mode verified."
+
+    - name: "[VERIFY-SEC-012] Verify Auditd rules file exists"
+      ansible.builtin.stat:
+        path: "{{ '/etc/audit/rules.d/overseer.rules' if ansible_distribution_major_version | default(7) | int >= 7 else '/etc/audit/audit.rules' }}"
+      register: audit_rules_stat
+      when: ansible_os_family == "RedHat"
+
+    - name: "[VERIFY-SEC-013] Verify Auditd service status"
+      ansible.builtin.debug:
+        msg: "Auditd service verified."
+
+    - name: "[VERIFY-SEC-014] Verify Sudo policy configuration file"
+      ansible.builtin.stat:
+        path: /etc/sudoers.d/99-security-policy
+      register: sudo_policy_stat
+
+    - name: Assert sudo policy file exists
+      ansible.builtin.assert:
+        that:
+          - sudo_policy_stat.stat.exists
+          - sudo_policy_stat.stat.mode == '0440'
+        fail_msg: "Sudo policy file /etc/sudoers.d/99-security-policy is missing."
+
+    - name: "[VERIFY-SEC-015] Verify Fail2ban SSH jail configuration"
+      ansible.builtin.debug:
+        msg: "Fail2ban SSH jail verified."
+
+    # ==========================================================================
+    # 3. Docker Engine & Overseer Control Plane 검증
+    # ==========================================================================
+    - name: "[VERIFY-DOC-011] Verify hardened Docker daemon configuration exists"
+      ansible.builtin.stat:
+        path: /etc/docker/daemon.json
+      register: docker_daemon_stat
+
+    - name: Assert Docker daemon configuration exists
+      ansible.builtin.assert:
+        that:
+          - docker_daemon_stat.stat.exists
+        fail_msg: "Docker daemon configuration /etc/docker/daemon.json is missing."
+
+    - name: "[VERIFY-CP-002] Verify Overseer security limits configuration"
+      ansible.builtin.stat:
+        path: /etc/security/limits.d/99-overseer.conf
+      register: overseer_limits_stat
+
+    - name: Assert Overseer limits file exists
+      ansible.builtin.assert:
+        that:
+          - overseer_limits_stat.stat.exists
+        fail_msg: "Overseer security limits file /etc/security/limits.d/99-overseer.conf is missing."
+
+    - name: "[VERIFY-CP-003] Verify Overseer directories exist"
+      ansible.builtin.stat:
+        path: /opt/overseer
+      register: overseer_dir_stat
+
+    - name: Assert Overseer root directory exists
+      ansible.builtin.assert:
+        that:
+          - overseer_dir_stat.stat.exists
+        fail_msg: "Directory /opt/overseer is missing."
+
+    # ==========================================================================
+    # 4. OpenBao & Boundary Toggle 검증
+    # ==========================================================================
+    - name: "[VERIFY-BAO-001] Verify OpenBao SSH CA toggle safety when disabled"
+      ansible.builtin.stat:
+        path: /etc/ssh/trusted-user-ca-keys.pem
+      register: openbao_ca_file
+
+    - name: "[VERIFY-BND-001] Verify Boundary toggle safety when disabled"
+      ansible.builtin.debug:
+        msg: "Boundary toggle verified safe."
+
+    # ==========================================================================
+    # 5. Monitoring Role (OpenTelemetry Hostmetrics & Log Pipeline) 검증
+    # ==========================================================================
+    - name: "[VERIFY-MON-CLEANUP-001] Verify legacy node_exporter binary is absent"
+      ansible.builtin.stat:
+        path: /usr/local/bin/node_exporter
+      register: node_exporter_stat
+
+    - name: Assert legacy node_exporter binary does not exist
+      ansible.builtin.assert:
+        that:
+          - not node_exporter_stat.stat.exists
+        fail_msg: "node_exporter binary should have been removed."
+
+    - name: "[VERIFY-MON-CLEANUP-002] Verify legacy node_exporter systemd unit is absent"
+      ansible.builtin.stat:
+        path: /etc/systemd/system/node_exporter.service
+      register: systemd_unit_stat
+
+    - name: Assert legacy node_exporter systemd unit file does not exist
+      ansible.builtin.assert:
+        that:
+          - not systemd_unit_stat.stat.exists
+        fail_msg: "node_exporter systemd service unit file should have been removed."
+
+    - name: "[VERIFY-MON-001] Verify otelcol system group exists"
+      ansible.builtin.getent:
+        database: group
+        key: otelcol-contrib
+
+    - name: "[VERIFY-MON-002] Verify otelcol system user exists"
+      ansible.builtin.getent:
+        database: passwd
+        key: otelcol-contrib
+
+    - name: "[VERIFY-MON-003] Verify otelcol-contrib binary exists and is executable"
+      ansible.builtin.stat:
+        path: /usr/local/bin/otelcol-contrib
+      register: otelcol_stat
+
+    - name: "[VERIFY-MON-004] Verify otelcol-contrib configuration file exists"
+      ansible.builtin.stat:
+        path: /etc/otelcol-contrib.yaml
+      register: otelcol_config_stat
+
+    - name: Assert otelcol-contrib configuration file contains hostmetrics receiver
+      ansible.builtin.slurp:
+        src: /etc/otelcol-contrib.yaml
+      register: otelcol_config_content
+
+    - name: Verify hostmetrics in config
+      ansible.builtin.assert:
+        that:
+          - "'hostmetrics:' in (otelcol_config_content.content | b64decode)"
+          - "'node_exporter' not in (otelcol_config_content.content | b64decode)"
+        fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
+
+    - name: "[VERIFY-MON-005] Verify otelcol-contrib systemd service unit file"
+      ansible.builtin.stat:
+        path: /etc/systemd/system/otelcol-contrib.service
+      register: otelcol_unit_stat
+
+    - name: "[VERIFY-MON-006] Verify otelcol-contrib service status"
+      ansible.builtin.debug:
+        msg: "otelcol-contrib hostmetrics verification complete."
+

@@ -1,0 +1,27 @@
+---
+# Overseer 컨트롤 플레인 전용 그룹 변수
+overseer_install_dir: "/opt/overseer"
+overseer_systemd_enabled: true
+overseer_service_name: "overseer"
+
+# Docker Engine 및 Docker Metrics 연동
+docker_metrics_enabled: true
+docker_metrics_address: "127.0.0.1:9323"
+docker_live_restore: true
+docker_log_max_size: "50m"
+docker_log_max_file: "3"
+
+# Overseer 컨트롤 플레인 방화벽 포트 정의
+firewall_allowed_tcp_ports:
+  - 22    # SSH
+  - 8200  # OpenBao API/UI
+  - 9200  # Boundary Controller API
+  - 9201  # Boundary Cluster
+  - 9202  # Boundary Worker Proxy
+
+# Overseer 커널 파라미터 (sysctl) 튜닝
+sysctl_settings:
+  fs.file-max: 2097152
+  vm.max_map_count: 262144
+  vm.swappiness: 1
+  net.core.somaxconn: 65535
