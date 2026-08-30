@@ -3,8 +3,10 @@
 enable_otelcol: true
 otelcol_version: "0.108.0"
 otelcol_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
-otelcol_user: "otelcol-contrib"
-otelcol_group: "otelcol-contrib"
+otelcol_user: "otelcol"
+otelcol_group: "otelcol"
+otelcol_config_dir: "/etc/otelcol"
+otelcol_config_path: "/etc/otelcol/config.yaml"
 
 # OpenTelemetry Hostmetrics Receiver Configuration
 otel_hostmetrics_interval: "15s"

@@ -40,9 +40,9 @@ fail2ban_maxretry: 5
 # Docker Firewalld Filter Chain Manager
 enable_docker_firewall_manager: true
 docker_firewall_interface: "{{ ansible_default_ipv4.interface | default('bond0') }}"
-docker_firewall_syslog_ipset: "syslog_sources"
-docker_firewall_snmp_ipset: "snmptrap_sources"
 docker_firewall_auto_init: false
-docker_firewall_syslog_initial_ips: []
-docker_firewall_snmp_initial_ips: []
+docker_firewall_open_80: true
+docker_firewall_open_443: true
+docker_firewall_whitelists: []
+
 

@@ -84,26 +84,38 @@ Docker 컨테이너에 포트를 바인딩(`-p 80:80`, `-p 514:514` 등)할 경�
 
 ### 4.1 CLI 주요 명령어
 ```bash
-# 초기 Direct Rule 및 IPSet 설정 (80/443 허용, 514/162 화이트리스트, 나머지 DROP)
+# 방화벽 초기화 (대화형 마법사: 인터페이스 선택, 80/443 개방 여부 설정)
 firewalld-docker init
 
-# Syslog(514) / SNMP Trap(162) 화이트리스트 IP 등록
-firewalld-docker add syslog 192.168.10.50
-firewalld-docker add snmp 10.20.0.0/24
+# 또는 비대화형 플래그로 초기화
+firewalld-docker init -i bond0 --open-80 --open-443 -y
 
-# 화이트리스트 IP 삭제 및 조회
-firewalld-docker del syslog 192.168.10.50
+# IPSet에 화이트리스트 IP/CIDR 등록
+firewalld-docker add office_ips 192.168.10.50
+firewalld-docker add office_ips 10.20.0.0/24
+
+# 특정 IPSet에 대해 허용할 포트 규칙 연결
+firewalld-docker allow-port office_ips 8080 tcp
+firewalld-docker allow-port syslog_sources 514 udp
+
+# 포트 허용 규칙 제거
+firewalld-docker deny-port syslog_sources 514 udp
+
+# 화이트리스트 IP 삭제 및 목록 조회
+firewalld-docker del office_ips 192.168.10.50
 firewalld-docker list
+firewalld-docker list office_ips
 
 # DOCKER-USER 실시간 패킷 카운터 및 룰 상태 점검
 firewalld-docker status
 
-# 대화형 대시보드 메뉴 실행 (인수 없이 실행 시)
-firewalld-docker
+# 비상 초기화 (DOCKER-USER 체인 Direct Rule 제거)
+firewalld-docker reset -f
 ```
 
-### 4.2 스크립트 자체 검증 및 테스트 실행
+### 4.2 스크립트 TDD 자동 검증 및 테스트 실행
 ```bash
 ./scripts/test_firewalld_docker.sh
 ```
+
 

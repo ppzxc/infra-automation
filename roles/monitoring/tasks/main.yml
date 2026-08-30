@@ -81,16 +81,26 @@
   notify: Restart otelcol-contrib
 
 - name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"
-  ansible.builtin.template:
-    src: otelcol-contrib.yaml.j2
-    dest: /etc/otelcol-contrib.yaml
-    owner: root
-    group: "{{ otelcol_group }}"
-    mode: '0640'
+  block:
+    - name: "[MON-004-DIR] Ensure OpenTelemetry configuration directory exists"
+      ansible.builtin.file:
+        path: "{{ otelcol_config_dir }}"
+        state: directory
+        owner: root
+        group: "{{ otelcol_group }}"
+        mode: '0750'
+
+    - name: "[MON-004-CONF] Deploy OpenTelemetry Collector configuration"
+      ansible.builtin.template:
+        src: otelcol-contrib.yaml.j2
+        dest: "{{ otelcol_config_path }}"
+        owner: root
+        group: "{{ otelcol_group }}"
+        mode: '0640'
+      notify: Restart otelcol-contrib
   when:
     - enable_otelcol | default(true) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
-  notify: Restart otelcol-contrib
 
 - name: "[MON-005] Create systemd service for otelcol-contrib"
   ansible.builtin.copy:
@@ -104,7 +114,7 @@
       User={{ otelcol_user }}
       Group={{ otelcol_group }}
       Type=simple
-      ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otelcol-contrib.yaml
+      ExecStart=/usr/local/bin/otelcol-contrib --config={{ otelcol_config_path }}
       Restart=always
       RestartSec=5
       LimitNOFILE=65536

@@ -231,12 +231,12 @@
     - name: "[VERIFY-MON-001] Verify otelcol system group exists"
       ansible.builtin.getent:
         database: group
-        key: otelcol-contrib
+        key: otelcol
 
     - name: "[VERIFY-MON-002] Verify otelcol system user exists"
       ansible.builtin.getent:
         database: passwd
-        key: otelcol-contrib
+        key: otelcol
 
     - name: "[VERIFY-MON-003] Verify otelcol-contrib binary exists and is executable"
       ansible.builtin.stat:
@@ -245,12 +245,12 @@
 
     - name: "[VERIFY-MON-004] Verify otelcol-contrib configuration file exists"
       ansible.builtin.stat:
-        path: /etc/otelcol-contrib.yaml
+        path: /etc/otelcol/config.yaml
       register: otelcol_config_stat
 
     - name: Assert otelcol-contrib configuration file contains hostmetrics receiver
       ansible.builtin.slurp:
-        src: /etc/otelcol-contrib.yaml
+        src: /etc/otelcol/config.yaml
       register: otelcol_config_content
 
     - name: Verify hostmetrics in config

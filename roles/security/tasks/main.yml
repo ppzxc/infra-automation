@@ -162,7 +162,12 @@
   when: enable_docker_firewall_manager | default(true) | bool
 
 - name: "[SEC-018] Initialize firewalld DOCKER-USER direct rules (optional auto-init)"
-  ansible.builtin.command: /usr/local/bin/firewalld-docker init
+  ansible.builtin.command: >-
+    /usr/local/bin/firewalld-docker init
+    -i {{ docker_firewall_interface | default('bond0') }}
+    {{ '--open-80' if (docker_firewall_open_80 | default(true) | bool) else '--no-open-80' }}
+    {{ '--open-443' if (docker_firewall_open_443 | default(true) | bool) else '--no-open-443' }}
+    -y
   when:
     - enable_docker_firewall_manager | default(true) | bool
     - docker_firewall_auto_init | default(false) | bool
@@ -170,23 +175,4 @@
     - ansible_distribution_major_version | int >= 7
   failed_when: false
 
-- name: "[SEC-019] Register initial Syslog whitelist IPs to IPSet"
-  ansible.builtin.command: "/usr/local/bin/firewalld-docker add syslog {{ item }}"
-  loop: "{{ docker_firewall_syslog_initial_ips | default([]) }}"
-  when:
-    - enable_docker_firewall_manager | default(true) | bool
-    - docker_firewall_auto_init | default(false) | bool
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-  failed_when: false
-
-- name: "[SEC-020] Register initial SNMP Trap whitelist IPs to IPSet"
-  ansible.builtin.command: "/usr/local/bin/firewalld-docker add snmp {{ item }}"
-  loop: "{{ docker_firewall_snmp_initial_ips | default([]) }}"
-  when:
-    - enable_docker_firewall_manager | default(true) | bool
-    - docker_firewall_auto_init | default(false) | bool
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-  failed_when: false
 
