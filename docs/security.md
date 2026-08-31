@@ -68,5 +68,11 @@
 | `SEC-016` | `Deploy firewalld-docker management CLI` | `ansible.builtin.copy` | RHEL 7+, Rocky | Checksum 비교 (`firewalld-docker.sh`) |
 | `SEC-017` | `Create firewalld-docker.sh symlink` | `ansible.builtin.file` | RHEL 7+, Rocky | 심볼릭 링크 일치 시 `ok` |
 | `SEC-018` | `Initialize firewalld DOCKER-USER direct rules (optional auto-init)` | `ansible.builtin.command` | RHEL 7+, Rocky | 룰 기등록 시 `ok`, `changed_when: false` |
+| `SEC-019` | `Configure custom firewall ingress rules with source IP restrictions (UFW)` | `community.general.ufw` | Debian, Ubuntu | 룰 기등록 시 `ok` |
+| `SEC-020` | `Configure custom firewall ingress rules with source IP restrictions (firewalld)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | Rich Rule 기등록 시 `ok` |
+| `SEC-021` | `Configure custom firewall ingress rules with source IP restrictions (iptables)` | `ansible.builtin.iptables` | CentOS 6 | iptables 체인 룰 확인 후 적용 |
+| `SEC-022` | `Add IPSet source IPs via firewalld-docker` | `ansible.builtin.command` | RHEL 7+, Rocky | IPSet 멤버 기등록 시 `ok`, `changed_when: false` |
+| `SEC-023` | `Allow ports for IPSet whitelists via firewalld-docker` | `ansible.builtin.command` | RHEL 7+, Rocky | 포트 Direct Rule 기등록 시 `ok`, `changed_when: false` |
+
 
 

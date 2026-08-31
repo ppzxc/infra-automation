@@ -7,9 +7,20 @@ ssh_max_auth_tries: 3
 ssh_client_alive_interval: 300
 ssh_client_alive_count_max: 2
 
-# 방화벽 허용 기본 포트
+# 방화벽 허용 기본 포트 (하위 호환성 유지)
 firewall_allowed_tcp_ports:
   - "{{ ssh_port | default(22) }}"
+
+# 강화된 인바운드 방화벽 규칙 (포트/프로토콜/출발지 공인 IP 목록 지정)
+# sources가 정의된 경우 특정 공인 IP/서브넷에 대해서만 개방 (Rich Rule / UFW from_ip)
+firewall_ingress_rules: []
+# 예시:
+# firewall_ingress_rules:
+#   - port: 22
+#     proto: tcp
+#     sources:
+#       - "211.234.120.10/32"
+#       - "118.220.15.0/24"
 
 # 서브넷 제한
 admin_allowed_subnets:
@@ -44,5 +55,14 @@ docker_firewall_auto_init: false
 docker_firewall_open_80: true
 docker_firewall_open_443: true
 docker_firewall_whitelists: []
+# 예시:
+# docker_firewall_whitelists:
+#   - ipset_name: "admin_whitelist"
+#     sources:
+#       - "211.234.120.10"
+#       - "211.234.120.11"
+#     ports:
+#       - { port: 8080, proto: tcp }
+
 
 

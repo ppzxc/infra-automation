@@ -175,4 +175,73 @@
     - ansible_distribution_major_version | int >= 7
   failed_when: false
 
+# 11. Custom Ingress Rules with Source IP restrictions
+- name: "[SEC-019] Configure custom firewall ingress rules with source IP restrictions (UFW)"
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.0.port | string }}"
+    proto: "{{ item.0.proto | default('tcp') }}"
+    from_ip: "{{ item.1 }}"
+  loop: "{{ firewall_ingress_rules | default([]) | subelements('sources', skip_missing=True) }}"
+  when:
+    - ansible_os_family == "Debian"
+    - firewall_ingress_rules is defined
+    - firewall_ingress_rules | length > 0
+
+- name: "[SEC-020] Configure custom firewall ingress rules with source IP restrictions (firewalld)"
+  ansible.posix.firewalld:
+    rich_rule: 'rule family="ipv4" source address="{{ item.1 }}" port port="{{ item.0.port }}" protocol="{{ item.0.proto | default("tcp") }}" accept'
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ firewall_ingress_rules | default([]) | subelements('sources', skip_missing=True) }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - firewall_ingress_rules is defined
+    - firewall_ingress_rules | length > 0
+
+- name: "[SEC-021] Configure custom firewall ingress rules with source IP restrictions (iptables)"
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: "{{ item.0.proto | default('tcp') }}"
+    destination_port: "{{ item.0.port | string }}"
+    source: "{{ item.1 }}"
+    jump: ACCEPT
+    action: insert
+  loop: "{{ firewall_ingress_rules | default([]) | subelements('sources', skip_missing=True) }}"
+  when:
+    - ansible_distribution == "CentOS"
+    - ansible_distribution_major_version | int == 6
+    - firewall_ingress_rules is defined
+    - firewall_ingress_rules | length > 0
+
+# 12. Docker IPSet Whitelist and Port Bindings via firewalld-docker
+- name: "[SEC-022] Add IPSet source IPs via firewalld-docker"
+  ansible.builtin.command: >-
+    /usr/local/bin/firewalld-docker add {{ item.0.ipset_name }} {{ item.1 }}
+  loop: "{{ docker_firewall_whitelists | default([]) | subelements('sources', skip_missing=True) }}"
+  when:
+    - enable_docker_firewall_manager | default(true) | bool
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - docker_firewall_whitelists is defined
+    - docker_firewall_whitelists | length > 0
+  failed_when: false
+  changed_when: false
+
+- name: "[SEC-023] Allow ports for IPSet whitelists via firewalld-docker"
+  ansible.builtin.command: >-
+    /usr/local/bin/firewalld-docker allow-port {{ item.0.ipset_name }} {{ item.1.port }} {{ item.1.proto | default('tcp') }}
+  loop: "{{ docker_firewall_whitelists | default([]) | subelements('ports', skip_missing=True) }}"
+  when:
+    - enable_docker_firewall_manager | default(true) | bool
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - docker_firewall_whitelists is defined
+    - docker_firewall_whitelists | length > 0
+  failed_when: false
+  changed_when: false
+
+
 

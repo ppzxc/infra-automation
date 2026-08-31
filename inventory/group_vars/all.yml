@@ -36,6 +36,28 @@ ssh_port: "{{ ansible_port | default(22) }}"
 firewall_allowed_tcp_ports:
   - "{{ ansible_port | default(22) }}"
 
+# 강화된 인바운드 방화벽 규칙 (특정 공인 IP/서브넷에 한해 포트 개방)
+firewall_ingress_rules: []
+# 예시:
+# firewall_ingress_rules:
+#   - port: "{{ ssh_port | default(22) }}"
+#     proto: tcp
+#     sources:
+#       - "211.234.120.10/32"
+#       - "118.220.15.0/24"
+
+# Docker 컨테이너 전용 IPSet 화이트리스트 및 포트 허용 규칙
+docker_firewall_whitelists: []
+# 예시:
+# docker_firewall_whitelists:
+#   - ipset_name: "admin_whitelist"
+#     sources:
+#       - "211.234.120.10"
+#       - "211.234.120.11"
+#     ports:
+#       - { port: 8080, proto: tcp }
+#       - { port: 9090, proto: tcp }
+
 admin_allowed_subnets:
   - "10.0.0.0/8"
   - "172.16.0.0/12"
