@@ -1,0 +1,128 @@
+---
+# ==============================================================================
+# 1. Zero-Trust Access Pre-flight Checks
+# ==============================================================================
+- name: "[ACC-001] Skip Access Security if disabled"
+  ansible.builtin.debug:
+    msg: "Access Security is disabled (enable_access_security=false). Skipping setup."
+  when: not (enable_access_security | default(true) | bool)
+
+- name: "[ACC-002] Check OpenSSH CA capability (requires OpenSSH >= 5.4, RHEL/CentOS 7+)"
+  ansible.builtin.debug:
+    msg: "Warning: CentOS 6 / OpenSSH 5.3 does not natively support TrustedUserCAKeys. Falling back to offline break-glass key only for {{ inventory_hostname }}."
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_openbao_ssh_ca | default(true) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6
+
+# ==============================================================================
+# 2. OpenBao SSH CA Key Deployment and Principals Mapping
+# ==============================================================================
+- name: "[ACC-003] Ensure SSH configuration directory exists"
+  ansible.builtin.file:
+    path: /etc/ssh
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_openbao_ssh_ca | default(true) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+
+- name: "[ACC-004] Deploy OpenBao SSH CA Public Key"
+  ansible.builtin.copy:
+    content: "{{ openbao_ssh_ca_public_key }}\n"
+    dest: "{{ openbao_ssh_ca_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_openbao_ssh_ca | default(true) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+  notify: Restart sshd for Access Security
+
+- name: "[ACC-005] Ensure AuthorizedPrincipals directory exists"
+  ansible.builtin.file:
+    path: "{{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_openbao_ssh_ca | default(true) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - admin_user is defined
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+
+- name: "[ACC-006] Create admin user principals file"
+  ansible.builtin.copy:
+    content: |
+      {% for principal in openbao_ssh_allowed_principals %}
+      {{ principal }}
+      {% endfor %}
+    dest: "{{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}/{{ admin_user }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_openbao_ssh_ca | default(true) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - admin_user is defined
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+
+- name: "[ACC-007] Configure sshd to trust OpenBao CA Keys and AuthorizedPrincipals"
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+    validate: '/usr/sbin/sshd -t -f %s'
+  loop:
+    - { regexp: '^#?TrustedUserCAKeys', line: "TrustedUserCAKeys {{ openbao_ssh_ca_path }}" }
+    - { regexp: '^#?AuthorizedPrincipalsFile', line: "AuthorizedPrincipalsFile {{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}/%u" }
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_openbao_ssh_ca | default(true) | bool
+    - openbao_ssh_ca_public_key | default('') | length > 0
+    - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
+  notify: Restart sshd for Access Security
+
+# ==============================================================================
+# 3. HashiCorp Boundary Target Node Metadata
+# ==============================================================================
+- name: "[ACC-008] Create Boundary target metadata directory"
+  ansible.builtin.file:
+    path: /etc/boundary
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_boundary_target | default(true) | bool
+
+- name: "[ACC-009] Write Boundary Target Node Metadata"
+  ansible.builtin.copy:
+    dest: "{{ boundary_target_metadata_path | default('/etc/boundary/node-metadata.json') }}"
+    content: |
+      {
+        "hostname": "{{ inventory_hostname }}",
+        "ip": "{{ ansible_default_ipv4.address | default(ansible_host) }}",
+        "target_type": "{{ boundary_target_type | default('ssh') }}",
+        "target_port": {{ boundary_target_port | default(22) }},
+        "tags": {{ boundary_worker_tags | default([]) | to_json }},
+        "provisioned_at": "{{ '%Y-%m-%d %H:%M:%S' | strftime }}"
+      }
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_boundary_target | default(true) | bool

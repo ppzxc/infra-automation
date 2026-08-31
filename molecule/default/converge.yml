@@ -7,8 +7,6 @@
   roles:
     - role: common
     - role: security
+    - role: access_security
     - role: docker_engine
-    - role: overseer_control_plane
-    - role: openbao_ssh_ca
-    - role: boundary_target
     - role: monitoring

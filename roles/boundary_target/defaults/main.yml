@@ -1,8 +1,0 @@
----
-enable_boundary: false
-boundary_target_type: "ssh"
-boundary_target_port: 22
-boundary_worker_tags:
-  - "env=production"
-  - "datacenter=idc-main"
-

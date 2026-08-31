@@ -6,7 +6,7 @@
 # ==============================================================================
 
 - name: Provision Baseline On-Premise Target Servers
-  hosts: servers
+  hosts: servers:loadbalancers
   become: true
   gather_facts: true
 
@@ -22,11 +22,8 @@
     - role: security
       tags: [security, ssh, firewall]
 
-    - role: openbao_ssh_ca
-      tags: [openbao, bao, security, ssh-ca]
-
-    - role: boundary_target
-      tags: [boundary, access]
+    - role: access_security
+      tags: [access, openbao, boundary, security, ssh-ca]
 
     - role: monitoring
       tags: [monitoring, metrics, otel]
@@ -34,4 +31,4 @@
   post_tasks:
     - name: Target server provisioning completion summary
       ansible.builtin.debug:
-        msg: "Successfully provisioned target server {{ inventory_hostname }}. OpenBao SSH CA and Boundary Target ready."
+        msg: "Successfully provisioned target server {{ inventory_hostname }}. Access Security (OpenBao SSH CA & Boundary) and OTel Monitoring ready."

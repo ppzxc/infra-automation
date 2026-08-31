@@ -1,15 +1,7 @@
 ---
 all:
   children:
-    # 1. Overseer 컨트롤 플레인 전용 서버 그룹 (OpenBao, Boundary, Docker Engine)
-    overseer:
-      hosts:
-        overseer-01.idc.internal:
-          ansible_host: 192.168.1.10
-          ansible_user: ppzxc
-          ansible_port: 22
-
-    # 2. 온프레미스 IDC 일반 서버 그룹 (Target Nodes)
+    # 1. 온프레미스 IDC 일반 서버 그룹 (Target Nodes)
     servers:
       hosts:
         web-01.idc.internal:
@@ -18,5 +10,13 @@ all:
           ansible_port: 22
         db-01.idc.internal:
           ansible_host: 192.168.1.30
+          ansible_user: ppzxc
+          ansible_port: 22
+
+    # 2. 로드밸런서 그룹 (Keepalived, HAProxy, L4 VIP)
+    loadbalancers:
+      hosts:
+        lb-01.idc.internal:
+          ansible_host: 192.168.1.40
           ansible_user: ppzxc
           ansible_port: 22

@@ -1,6 +1,0 @@
----
-enable_openbao_ssh_ca: false
-openbao_ssh_ca_path: "/etc/ssh/trusted-user-ca-keys.pem"
-openbao_ssh_ca_principals_dir: "/etc/ssh/auth_principals"
-openbao_ssh_ca_public_key: ""
-

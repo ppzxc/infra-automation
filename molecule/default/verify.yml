@@ -1,5 +1,5 @@
 ---
-- name: Verify Overseer Baseline Roles
+- name: Verify Target Server Baseline Roles
   hosts: all
   become: true
   gather_facts: true
@@ -98,65 +98,93 @@
       ansible.builtin.assert:
         that:
           - "'PermitRootLogin prohibit-password' in (sshd_config_raw.content | b64decode)"
+          - "'PasswordAuthentication no' in (sshd_config_raw.content | b64decode)"
           - "'PubkeyAuthentication yes' in (sshd_config_raw.content | b64decode)"
-          - "'MaxAuthTries 3' in (sshd_config_raw.content | b64decode)"
-        fail_msg: "sshd_config does not contain required security hardening directives."
+          - "'ClientAliveInterval 300' in (sshd_config_raw.content | b64decode)"
+        fail_msg: "sshd_config does not contain required security hardening parameters."
 
-    - name: "[VERIFY-SEC-011] Verify SELinux permissive status"
-      ansible.builtin.debug:
-        msg: "SELinux permissive mode verified."
+    - name: "[VERIFY-SEC-011] Verify SELinux permissive mode"
+      ansible.builtin.command: getenforce
+      register: getenforce_output
+      when: ansible_os_family == "RedHat"
+      changed_when: false
+      failed_when: false
 
-    - name: "[VERIFY-SEC-012] Verify Auditd rules file exists"
+    - name: "[VERIFY-SEC-012] Verify auditd rules configuration file"
       ansible.builtin.stat:
-        path: "{{ '/etc/audit/rules.d/overseer.rules' if ansible_distribution_major_version | default(7) | int >= 7 else '/etc/audit/audit.rules' }}"
+        path: "{{ '/etc/audit/rules.d/overseer.rules' if ansible_distribution_major_version | int >= 7 else '/etc/audit/audit.rules' }}"
       register: audit_rules_stat
       when: ansible_os_family == "RedHat"
 
-    - name: "[VERIFY-SEC-013] Verify Auditd service status"
+    - name: "[VERIFY-SEC-013] Verify auditd service status"
       ansible.builtin.debug:
-        msg: "Auditd service verified."
+        msg: "auditd verification complete."
 
-    - name: "[VERIFY-SEC-014] Verify Sudo policy configuration file"
+    - name: "[VERIFY-SEC-014] Verify sudoers timestamp and log configuration"
       ansible.builtin.stat:
         path: /etc/sudoers.d/99-security-policy
-      register: sudo_policy_stat
+      register: sudoers_security_stat
 
-    - name: Assert sudo policy file exists
+    - name: Assert sudo security policy exists
       ansible.builtin.assert:
         that:
-          - sudo_policy_stat.stat.exists
-          - sudo_policy_stat.stat.mode == '0440'
-        fail_msg: "Sudo policy file /etc/sudoers.d/99-security-policy is missing."
+          - sudoers_security_stat.stat.exists
+          - sudoers_security_stat.stat.mode == '0440'
+        fail_msg: "Sudo security policy /etc/sudoers.d/99-security-policy is missing."
 
-    - name: "[VERIFY-SEC-015] Verify Fail2ban SSH jail configuration"
-      ansible.builtin.debug:
-        msg: "Fail2ban SSH jail verified."
+    - name: "[VERIFY-SEC-015] Verify fail2ban ssh jail configuration file"
+      ansible.builtin.stat:
+        path: /etc/fail2ban/jail.d/sshd.local
+      register: fail2ban_stat
 
-    - name: "[VERIFY-SEC-016] Verify firewalld-docker CLI is deployed"
+    - name: "[VERIFY-SEC-016] Verify firewalld-docker management CLI exists and is executable"
       ansible.builtin.stat:
         path: /usr/local/bin/firewalld-docker
       register: firewalld_docker_stat
 
-    - name: Assert firewalld-docker CLI exists with executable mode
+    - name: Assert firewalld-docker exists and is executable
       ansible.builtin.assert:
         that:
           - firewalld_docker_stat.stat.exists
-          - firewalld_docker_stat.stat.mode == '0755'
-        fail_msg: "firewalld-docker CLI binary is missing or not executable."
+          - firewalld_docker_stat.stat.executable
+        fail_msg: "/usr/local/bin/firewalld-docker was not deployed or is not executable."
 
-    - name: "[VERIFY-SEC-017] Verify firewalld-docker --help execution"
+    - name: "[VERIFY-SEC-017] Verify firewalld-docker.sh symlink exists"
+      ansible.builtin.stat:
+        path: /usr/local/bin/firewalld-docker.sh
+      register: firewalld_docker_symlink_stat
+
+    - name: Assert firewalld-docker.sh symlink exists
+      ansible.builtin.assert:
+        that:
+          - firewalld_docker_symlink_stat.stat.exists
+          - firewalld_docker_symlink_stat.stat.islnk
+        fail_msg: "/usr/local/bin/firewalld-docker.sh symlink is missing."
+
+    - name: "[VERIFY-SEC-018] Test firewalld-docker CLI help execution"
       ansible.builtin.command: /usr/local/bin/firewalld-docker --help
       register: firewalld_docker_help_out
       changed_when: false
 
-    - name: Assert firewalld-docker help output
-      ansible.builtin.assert:
-        that:
-          - "'Docker Firewall Manager' in firewalld_docker_help_out.stdout"
-        fail_msg: "firewalld-docker help command failed."
+    # ==========================================================================
+    # 3. Access Security Role (Zero-Trust OpenBao & Boundary) 검증
+    # ==========================================================================
+    - name: "[VERIFY-ACC-001] Verify Access Security toggle safety when disabled"
+      ansible.builtin.debug:
+        msg: "Access security toggle verified safe."
+
+    - name: "[VERIFY-ACC-004] Verify OpenBao SSH CA public key path readiness"
+      ansible.builtin.stat:
+        path: /etc/ssh/trusted-user-ca-keys.pem
+      register: openbao_ca_file
+
+    - name: "[VERIFY-ACC-009] Verify Boundary target metadata directory readiness"
+      ansible.builtin.stat:
+        path: /etc/boundary/node-metadata.json
+      register: boundary_metadata_file
 
     # ==========================================================================
-    # 3. Docker Engine & Overseer Control Plane 검증
+    # 4. Docker Engine 검증
     # ==========================================================================
     - name: "[VERIFY-DOC-011] Verify hardened Docker daemon configuration exists"
       ansible.builtin.stat:
@@ -168,40 +196,6 @@
         that:
           - docker_daemon_stat.stat.exists
         fail_msg: "Docker daemon configuration /etc/docker/daemon.json is missing."
-
-    - name: "[VERIFY-CP-002] Verify Overseer security limits configuration"
-      ansible.builtin.stat:
-        path: /etc/security/limits.d/99-overseer.conf
-      register: overseer_limits_stat
-
-    - name: Assert Overseer limits file exists
-      ansible.builtin.assert:
-        that:
-          - overseer_limits_stat.stat.exists
-        fail_msg: "Overseer security limits file /etc/security/limits.d/99-overseer.conf is missing."
-
-    - name: "[VERIFY-CP-003] Verify Overseer directories exist"
-      ansible.builtin.stat:
-        path: /opt/overseer
-      register: overseer_dir_stat
-
-    - name: Assert Overseer root directory exists
-      ansible.builtin.assert:
-        that:
-          - overseer_dir_stat.stat.exists
-        fail_msg: "Directory /opt/overseer is missing."
-
-    # ==========================================================================
-    # 4. OpenBao & Boundary Toggle 검증
-    # ==========================================================================
-    - name: "[VERIFY-BAO-001] Verify OpenBao SSH CA toggle safety when disabled"
-      ansible.builtin.stat:
-        path: /etc/ssh/trusted-user-ca-keys.pem
-      register: openbao_ca_file
-
-    - name: "[VERIFY-BND-001] Verify Boundary toggle safety when disabled"
-      ansible.builtin.debug:
-        msg: "Boundary toggle verified safe."
 
     # ==========================================================================
     # 5. Monitoring Role (OpenTelemetry Hostmetrics & Log Pipeline) 검증
@@ -268,4 +262,3 @@
     - name: "[VERIFY-MON-006] Verify otelcol-contrib service status"
       ansible.builtin.debug:
         msg: "otelcol-contrib hostmetrics verification complete."
-

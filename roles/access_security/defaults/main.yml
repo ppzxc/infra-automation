@@ -1,0 +1,28 @@
+---
+# ==============================================================================
+# Access Security Role Defaults (Zero-Trust OpenBao SSH CA & Boundary Target)
+# ==============================================================================
+
+# Master switch for Zero-Trust Access Control (OpenBao SSH CA + Boundary Metadata)
+enable_access_security: true
+
+# Access Tier: 'zero_trust' (OpenBao CA + Boundary), 'break_glass_only', or 'disabled'
+access_tier: "zero_trust"
+
+# 1. OpenBao SSH CA Configuration
+enable_openbao_ssh_ca: true
+openbao_ssh_ca_public_key: ""
+openbao_ssh_ca_path: "/etc/ssh/trusted-user-ca-keys.pem"
+openbao_ssh_principals_dir: "/etc/ssh/auth_principals"
+openbao_ssh_allowed_principals:
+  - "admin"
+  - "{{ admin_user | default('ppzxc') }}"
+
+# 2. Boundary Target Configuration
+enable_boundary_target: true
+boundary_target_metadata_path: "/etc/boundary/node-metadata.json"
+boundary_target_type: "ssh"
+boundary_target_port: "{{ ssh_port | default(22) }}"
+boundary_worker_tags:
+  - "datacenter=idc-main"
+  - "env=production"

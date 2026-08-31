@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 def test_ansible_inventory_and_vars():
-    """Ansible inventory and group_vars verification (overseer / servers isolation)"""
+    """Ansible inventory and group_vars verification (Target Nodes / Loadbalancers)"""
     inv_file = ROOT_DIR / "inventory" / "hosts.yml"
     if not inv_file.exists():
         inv_file = ROOT_DIR / "inventory" / "hosts.yml.example"
@@ -15,7 +15,6 @@ def test_ansible_inventory_and_vars():
         inv_data = yaml.safe_load(f)
     assert "all" in inv_data, "Inventory missing root 'all' key"
     children = inv_data["all"].get("children", {})
-    assert "overseer" in children, "Missing 'overseer' group in inventory"
     assert "servers" in children, "Missing 'servers' group in inventory"
     
     # group_vars verification
@@ -27,42 +26,51 @@ def test_ansible_inventory_and_vars():
     assert "timezone" in all_vars, "timezone is not defined in all.yml"
     assert "otel_target_endpoint" in all_vars, "otel_target_endpoint is not defined in all.yml"
 
-    # overseer group_vars verification
-    overseer_vars_file = ROOT_DIR / "inventory" / "group_vars" / "overseer.yml"
-    assert overseer_vars_file.exists(), "group_vars/overseer.yml is missing"
-    with open(overseer_vars_file, 'r', encoding='utf-8') as f:
-        overseer_vars = yaml.safe_load(f)
-    assert "overseer_install_dir" in overseer_vars, "overseer_install_dir is not defined in overseer.yml"
-    assert "docker_metrics_enabled" in overseer_vars, "docker_metrics_enabled is not defined in overseer.yml"
-
     # servers group_vars verification
     servers_vars_file = ROOT_DIR / "inventory" / "group_vars" / "servers.yml"
     assert servers_vars_file.exists(), "group_vars/servers.yml is missing"
 
 def test_ansible_playbooks_structure():
-    """Ansible playbooks separation verification"""
+    """Ansible playbooks structure verification for Target Node Provisioner"""
     playbooks_dir = ROOT_DIR / "playbooks"
-    assert (playbooks_dir / "provision_overseer.yml").exists(), "provision_overseer.yml is missing"
     assert (playbooks_dir / "provision_servers.yml").exists(), "provision_servers.yml is missing"
     assert (playbooks_dir / "provision.yml").exists(), "provision.yml is missing"
     assert (playbooks_dir / "maintenance.yml").exists(), "maintenance.yml is missing"
     assert (playbooks_dir / "site.yml").exists(), "site.yml is missing"
 
 def test_ansible_roles_structure():
-    """Ansible roles structure verification"""
+    """Ansible roles structure verification (Deep access_security module)"""
     roles_dir = ROOT_DIR / "roles"
     expected_roles = [
         "docker_engine",
-        "overseer_control_plane",
         "common",
         "security",
-        "openbao_ssh_ca",
-        "boundary_target",
+        "access_security",
         "monitoring"
     ]
     for role in expected_roles:
         assert (roles_dir / role).exists(), f"Role {role} is missing"
         assert (roles_dir / role / "tasks" / "main.yml").exists(), f"Role {role} main task file is missing"
+
+def test_access_security_role_integration():
+    """Verify access_security deep module tasks and defaults"""
+    role_dir = ROOT_DIR / "roles" / "access_security"
+    defaults_file = role_dir / "defaults" / "main.yml"
+    tasks_file = role_dir / "tasks" / "main.yml"
+    
+    assert defaults_file.exists(), "access_security defaults/main.yml missing"
+    assert tasks_file.exists(), "access_security tasks/main.yml missing"
+    
+    with open(defaults_file, 'r', encoding='utf-8') as f:
+        defaults = yaml.safe_load(f)
+    assert defaults.get("enable_access_security") is True
+    assert "openbao_ssh_ca_public_key" in defaults
+    assert "boundary_worker_tags" in defaults
+
+    tasks_content = tasks_file.read_text(encoding='utf-8')
+    assert "[ACC-001]" in tasks_content
+    assert "[ACC-004]" in tasks_content
+    assert "[ACC-009]" in tasks_content
 
 def test_monitoring_otel_system_logs():
     """OTel system log collection paths (ISMS/ISMS-P compliance)"""

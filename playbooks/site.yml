@@ -1,10 +1,7 @@
 ---
 # ==============================================================================
-# Overseer 마스터 플레이북 (Site Master Playbook)
+# Node Provisioner 마스터 플레이북 (Site Master Playbook)
 # ==============================================================================
-
-- name: Overseer Control Plane Provisioning
-  ansible.builtin.import_playbook: provision_overseer.yml
 
 - name: Target Servers Provisioning
   ansible.builtin.import_playbook: provision_servers.yml

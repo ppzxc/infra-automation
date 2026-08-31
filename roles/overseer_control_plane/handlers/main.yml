@@ -1,9 +1,0 @@
----
-- name: Reload systemd
-  ansible.builtin.systemd:
-    daemon_reload: yes
-
-- name: Restart overseer service
-  ansible.builtin.service:
-    name: "{{ overseer_service_name }}"
-    state: restarted

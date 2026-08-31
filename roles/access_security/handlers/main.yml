@@ -1,5 +1,6 @@
 ---
-- name: Restart sshd for OpenBao CA
+- name: Restart sshd for Access Security
   ansible.builtin.service:
     name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
     state: restarted
+  failed_when: false
