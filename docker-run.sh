@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# Overseer Ansible Docker Execution Wrapper Script
+# Node Provisioner Ansible Docker Execution Wrapper Script
 # Usage: ./docker-run.sh [ansible / ansible-playbook arguments...]
 # Example: ./docker-run.sh playbooks/provision.yml --limit storage-01.idc.internal
 
@@ -32,6 +32,18 @@ if [ -n "${SSH_AUTH_SOCK}" ] && [ -S "${SSH_AUTH_SOCK}" ]; then
         -v "${SSH_AUTH_SOCK}:/ssh-agent"
         -e SSH_AUTH_SOCK=/ssh-agent
     )
+    # ssh-agent에 키 등록 여부 확인 및 안내
+    if command -v ssh-add >/dev/null 2>&1; then
+        if ! ssh-add -l >/dev/null 2>&1; then
+            echo "[!] Warning: SSH agent가 실행 중이나 등록된 개인키가 없습니다."
+            echo "    패스프레이즈가 있는 키를 사용 중인 경우 'ssh-add ~/.ssh/id_ed25519'를 실행하면 비밀번호 재입력 없이 자동 인증됩니다."
+        fi
+    fi
+else
+    # SSH_AUTH_SOCK이 없을 때 안내
+    if [ -f "${HOME}/.ssh/id_ed25519" ] || [ -f "${HOME}/.ssh/id_rsa" ]; then
+        echo "[i] Tip: SSH Agent를 사용하려면 다음을 실행하세요: eval \$(ssh-agent -s) && ssh-add"
+    fi
 fi
 
 # Docker 소켓 마운트 (Molecule 컨테이너 테스트 지원)
@@ -56,4 +68,3 @@ else
     # 일반 인자는 ansible-playbook 인자로 전달
     exec docker run "${DOCKER_RUN_OPTS[@]}" "${IMAGE_NAME}" "$@"
 fi
-
