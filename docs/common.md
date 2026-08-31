@@ -1,6 +1,6 @@
 # Common Role Task Specification
 
-`common` 역할은 온프레미스 IDC 인프라의 모든 리눅스 노드에 공통적으로 적용되는 기본 시스템 베이스라인 환경(타임존, 패키지 저장소 복구, 기본 유틸리티, NTP 시간 동기화, 커널 튜닝, 관리자 계정)을 구성합니다.
+`common` 역할은 온프레미스 IDC 인프라의 모든 리눅스 노드에 공통적으로 적용되는 기본 시스템 베이스라인 환경(타임존, 패키지 저장소 복구, 필수 및 현대적 진단 유틸리티, NTP 시간 동기화, 커널 튜닝, 관리자 계정)을 구성합니다.
 
 ---
 
@@ -8,10 +8,11 @@
 
 - **표준 타임존 동기화**: 전 노드의 타임존을 표준 시간대(`Asia/Seoul`)로 통일.
 - **레거시 OS 저장소 복구 (CentOS 6/7)**: 공식 EOL로 인해 중단된 yum 미러를 `vault.centos.org` 아카이브 저장소로 자동 치환.
-- **필수 시스템 패키지 및 EPEL 설치**: OS 패밀리(Debian/Ubuntu, RHEL 6/7/8/9/10, Rocky)별 적합한 패키지 관리자(APT, YUM, DNF)를 사용하여 기본 도구(`curl`, `vim`, `net-tools`, `tar` 등) 및 EPEL 저장소, 진단 도구(`htop`, `iotop`) 설치.
+- **필수 시스템 패키지 및 EPEL 설치**: OS 패밀리(Debian/Ubuntu, RHEL 6/7/8/9/10, Rocky)별 적합한 패키지 관리자(APT, YUM, DNF)를 사용하여 기본 도구(`curl`, `wget`, `git`, `vim`, `net-tools`, `jq`, `ca-certificates`, `tar`, `gzip` 등) 및 EPEL 저장소, 네트워크 소켓 도구(`nc`, `netcat-openbsd`) 설치.
+- **현대적 진단/분석 도구 (Modern Diagnostics)**: `htop`, `iotop`, `bat`, `ripgrep` (`rg`) 설치 및 Debian 계열 `batcat` -> `bat` 심볼릭 링크 자동 생성.
 - **NTP 시간 동기화 데몬 구성**: 최신 OS에서는 `Chrony`, 레거시 CentOS 6에서는 `NTP`를 구성하여 지정된 사내/공용 NTP 서버와 지속 동기화. 한국 표준시(KRISS: `time.kriss.re.kr`, `time2.kriss.re.kr`), 국내 전용 NTP Pool(`kr.pool.ntp.org`), 글로벌 Anycast(`time.cloudflare.com`)를 조합한 Standard UTC(Leap Smear 미적용) 소스 분리(`ntp_pools`, `ntp_servers`) 구성 지원.
 - **커널 파라미터(sysctl) 최적화**: 10GbE+ IDC 고대역폭 TCP 소켓 버퍼(16MB), Window Scaling, 패킷 큐(`netdev_max_backlog=30000`), TIME_WAIT 소켓 관리(`tcp_max_tw_buckets=1800000`), 파일 디스크립터 한도 확장 및 메모리 스왑 동작 최적화. 선택적 IPv6 비활성화(`disable_ipv6`) 및 추가 확장(`sysctl_extra_settings`) 지원.
-- **시스템 자원 보안 한도 (Ulimit)**: `nofile` 및 `nproc` 한도를 100,000으로 상향하여 고부하 분산 애플리케이션 및 데몬 병목 제거.
+- **시스템 자원 보안 한도 (Ulimit)**: `nofile` 및 `nproc` 한도를 65,535로 상향하여 고부하 분산 애플리케이션 및 데몬 병목 제거.
 - **표준 관리자 계정 및 SSH 접근 환경**: 비루트 표준 관리자(`admin_user`) 계정 생성, 패스워드리스 `sudoers` 권한 부여 및 관리자 SSH 공개키 배포.
 
 ---
@@ -37,9 +38,10 @@
    - `/etc/yum.repos.d/*.repo` : CentOS 6/7의 미러 주소를 `vault.centos.org` 아카이브 주소로 교체
    - `/etc/chrony.conf` 또는 `/etc/chrony/chrony.conf` : NTP 서버 풀 템플릿 적용
    - `/etc/sysctl.d/99-ansible.conf` (또는 `/etc/sysctl.conf`) : 커널 튜닝 파라미터(`fs.file-max`, `net.core.rmem_max`, `net.ipv4.tcp_rmem`, `net.core.netdev_max_backlog`, `vm.swappiness` 등)
-   - `/etc/security/limits.d/99-limits.conf` : 시스템 보안 리소스 한도 (`nofile=100000`, `nproc=100000`)
+   - `/etc/security/limits.d/99-limits.conf` : 시스템 보안 리소스 한도 (`nofile=65535`, `nproc=65535`)
    - `/etc/sudoers.d/90-admin-user` : 관리자 패스워드리스 sudo 권한 파일 (`validate: visudo -cf %s`)
    - `/home/<admin_user>/.ssh/authorized_keys` : 관리자 SSH 공개키 등록
+   - `/usr/local/bin/bat` : Debian/Ubuntu 환경 `batcat` 심볼릭 링크
 - ⚙️ **데몬 및 서비스**:
    - `chronyd` (또는 레거시 `ntpd`) : 서비스 활성화 및 자동 재시작
 - 👤 **사용자 및 그룹**:
@@ -57,7 +59,8 @@
 | `COMMON-004` | `Install EPEL repository (RedHat/CentOS 7, Rocky 8, 9)` | `ansible.builtin.package` | RHEL 7, 8, 9, 10 | 기설치 시 `ok`, `failed_when: false` |
 | `COMMON-005` | `Install common packages (RedHat/CentOS 6, 7 via YUM)` | `ansible.builtin.yum` | RHEL/CentOS 6, 7 | 패키지 기설치 시 `ok` |
 | `COMMON-006` | `Install common packages (RHEL/Rocky 8, 9, 10 via DNF)` | `ansible.builtin.dnf` | RHEL 8, 9, 10, Rocky | 패키지 기설치 시 `ok` |
-| `COMMON-007` | `Install optional diagnostic tools (htop, iotop)` | `ansible.builtin.package` | All | `failed_when: false` |
+| `COMMON-007` | `Install optional diagnostic tools (htop, iotop, bat, ripgrep)` | `ansible.builtin.package` | All | `failed_when: false` |
+| `COMMON-007-BAT` | `Ensure bat symlink exists for Debian/Ubuntu (batcat -> bat)` | `ansible.builtin.file` | Debian, Ubuntu | 심볼릭 링크 존재 시 `ok`, `failed_when: false` |
 | `COMMON-008` | `Configure Chrony NTP servers (Modern OS)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 후 변경 시만 수정 및 핸들러 호출 |
 | `COMMON-009` | `Ensure Chrony service is running (Modern OS)` | `ansible.builtin.service` | RHEL 7+, Debian | 서비스 기동 상태면 `ok` |
 | `COMMON-010` | `Ensure NTP service is running (CentOS 6 legacy)` | `ansible.builtin.service` | CentOS 6 | 서비스 기동 상태면 `ok` |
@@ -70,4 +73,3 @@
 | `COMMON-015` | `Deploy admin SSH public keys` | `ansible.posix.authorized_key` | All | 공개키 등록되어 있으면 `ok` |
 | `COMMON-016` | `Configure system security limits (nofile/nproc)` | `community.general.pam_limits` | All | `/etc/security/limits.d/99-limits.conf` 한도 일치 시 `ok` |
 | `COMMON-017` | `Configure Systemd Journald retention limits` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` |
-

@@ -13,7 +13,7 @@
 
 - name: "[COMMON-003] Install common packages (Debian/Ubuntu)"
   ansible.builtin.apt:
-    name: "{{ common_packages + ['iproute2', 'lsb-release', 'gnupg', 'htop', 'iotop', 'sudo'] }}"
+    name: "{{ common_packages + ['iproute2', 'lsb-release', 'gnupg', 'htop', 'iotop', 'sudo', 'netcat-openbsd'] }}"
     state: present
     update_cache: yes
     cache_valid_time: 3600
@@ -30,22 +30,33 @@
 
 - name: "[COMMON-005] Install common packages (RedHat/CentOS 6, 7 via YUM)"
   ansible.builtin.yum:
-    name: "{{ common_packages + ['iproute', 'sudo'] }}"
+    name: "{{ common_packages + ['iproute', 'sudo', 'nc'] }}"
     state: present
   when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int <= 7
 
 - name: "[COMMON-006] Install common packages (RHEL/Rocky 8, 9, 10 via DNF)"
   ansible.builtin.dnf:
-    name: "{{ common_packages + ['iproute', 'sudo'] }}"
+    name: "{{ common_packages + ['iproute', 'sudo', 'nc'] }}"
     state: present
   when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int >= 8
 
-- name: "[COMMON-007] Install optional diagnostic tools (htop, iotop)"
+- name: "[COMMON-007] Install optional diagnostic tools (htop, iotop, bat, ripgrep)"
   ansible.builtin.package:
     name:
       - htop
       - iotop
+      - bat
+      - ripgrep
     state: present
+  failed_when: false
+
+- name: "[COMMON-007-BAT] Ensure bat symlink exists for Debian/Ubuntu (batcat -> bat)"
+  ansible.builtin.file:
+    src: /usr/bin/batcat
+    dest: /usr/local/bin/bat
+    state: link
+    force: yes
+  when: ansible_os_family == "Debian"
   failed_when: false
 
 # NTP 동기화 (CentOS 7+, Rocky Linux, Debian 계열: chrony / CentOS 6: ntp)
@@ -156,4 +167,3 @@
     mode: '0644'
   when: ansible_service_mgr == "systemd"
   failed_when: false
-

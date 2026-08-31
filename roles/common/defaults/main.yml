@@ -15,11 +15,12 @@ common_packages:
   - wget
   - git
   - vim
-  - htop
   - net-tools
   - chrony
   - jq
   - ca-certificates
+  - tar
+  - gzip
 
 # IPv6 비활성화 여부 (기본값 false, 필요 시 true로 설정하여 IPv6 차단)
 disable_ipv6: false
@@ -63,8 +64,6 @@ sysctl_ipv6_settings:
 sysctl_extra_settings: {}
 
 # System ulimit (pam_limits) 설정
-# 기본 권장값: 65535 (일반 웹/WAS 표준)
-# 필요 시 group_vars 또는 host_vars에서 262144 (DB/캐시) 또는 1048576 (초고성능 게이트웨이/커널 최대치) 등으로 재정의 가능
 system_limit_nofile: 65535
 system_limit_nproc: 65535
 
