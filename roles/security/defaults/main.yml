@@ -1,6 +1,6 @@
 ---
 ssh_port: "{{ ansible_port | default(22) }}"
-ssh_permit_root_login: "prohibit-password"
+ssh_permit_root_login: "no"
 ssh_password_authentication: "yes"
 ssh_pubkey_authentication: "yes"
 ssh_max_auth_tries: 3

@@ -97,7 +97,7 @@
     - name: Assert SSH hardening parameters are present
       ansible.builtin.assert:
         that:
-          - "'PermitRootLogin prohibit-password' in (sshd_config_raw.content | b64decode)"
+          - "'PermitRootLogin no' in (sshd_config_raw.content | b64decode)"
           - "'PasswordAuthentication no' in (sshd_config_raw.content | b64decode)"
           - "'PubkeyAuthentication yes' in (sshd_config_raw.content | b64decode)"
           - "'ClientAliveInterval 300' in (sshd_config_raw.content | b64decode)"
