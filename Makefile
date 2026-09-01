@@ -1,10 +1,11 @@
-.PHONY: help provision provision-overseer provision-servers check spec-check lint test test-unit test-molecule test-scripts clean
+.PHONY: help provision provision-overseer provision-servers check spec-check lint test test-unit test-molecule test-scripts clean init-hooks
 
 # Default Target
 help:
 	@echo "================================================================================"
 	@echo "                      Node Provisioner (Ansible Automation)                     "
 	@echo "================================================================================"
+	@echo "  make init-hooks                 - Install Git Pre-Commit security & lint hooks"
 	@echo "  make provision                  - Run full provisioning (overseer + servers)"
 	@echo "  make provision-overseer         - Run provisioning for Overseer Control Plane host"
 	@echo "  make provision-servers          - Run baseline provisioning for IDC target servers"
@@ -17,6 +18,13 @@ help:
 	@echo "  make test-scripts               - Run shell script unit tests"
 	@echo "  make clean                      - Clean up temporary/cache files"
 	@echo "================================================================================"
+
+init-hooks:
+	@chmod +x scripts/pre-commit.sh
+	@cp scripts/pre-commit.sh .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Git pre-commit hook installed successfully."
+
 
 provision:
 	@./docker-run.sh playbooks/provision.yml

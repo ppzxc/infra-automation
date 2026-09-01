@@ -5,11 +5,18 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 def test_ansible_inventory_and_vars():
-    """Ansible inventory and group_vars verification (Target Nodes / Loadbalancers)"""
+    """Ansible inventory, requirements, and group_vars verification (Target Nodes / Loadbalancers)"""
+    req_file = ROOT_DIR / "requirements.yml"
+    assert req_file.exists(), f"requirements.yml missing in {ROOT_DIR}"
+    
+    hook_script = ROOT_DIR / "scripts" / "pre-commit.sh"
+    assert hook_script.exists(), f"scripts/pre-commit.sh missing in {ROOT_DIR}"
+
     inv_file = ROOT_DIR / "inventory" / "hosts.yml"
     if not inv_file.exists():
         inv_file = ROOT_DIR / "inventory" / "hosts.yml.example"
     assert inv_file.exists(), f"Inventory file missing in {ROOT_DIR}"
+
     
     with open(inv_file, 'r', encoding='utf-8') as f:
         inv_data = yaml.safe_load(f)
