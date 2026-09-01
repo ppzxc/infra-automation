@@ -414,7 +414,11 @@ init_firewall() {
     fi
 
     if [[ -z "$iface" ]]; then
-        iface="{{ docker_firewall_interface | default('bond0') }}"
+        if [[ ${{ '{#' }}ifaces[@]} -gt 0 ]]; then
+            iface="${ifaces[0]}"
+        else
+            iface="{{ docker_firewall_interface | default(firewall_interface | default('bond0')) }}"
+        fi
     fi
 
     if [[ -z "$open_80" ]]; then
