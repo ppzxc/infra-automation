@@ -14,6 +14,7 @@
 - **커널 파라미터(sysctl) 최적화**: 10GbE+ IDC 고대역폭 TCP 소켓 버퍼(16MB), Window Scaling, 패킷 큐(`netdev_max_backlog=30000`), TIME_WAIT 소켓 관리(`tcp_max_tw_buckets=1800000`), 파일 디스크립터 한도 확장 및 메모리 스왑 동작 최적화. 선택적 IPv6 비활성화(`disable_ipv6`) 및 추가 확장(`sysctl_extra_settings`) 지원.
 - **시스템 자원 보안 한도 (Ulimit)**: `nofile` 및 `nproc` 한도를 65,535로 상향하여 고부하 분산 애플리케이션 및 데몬 병목 제거.
 - **표준 관리자 계정 및 SSH 접근 환경**: 비루트 표준 관리자(`admin_user`) 계정 생성, 패스워드리스 `sudoers` 권한 부여 및 관리자 SSH 공개키 배포.
+- **시스템 전역 쉘 별칭 (Custom Shell Aliases)**: 모든 사용자가 대화형 셸에서 공통으로 사용할 수 있는 Docker, Compose, Podman, Firewalld 단축 명령어(`/etc/profile.d/99-aliases.sh`) 배포.
 
 ---
 
@@ -42,6 +43,7 @@
    - `/etc/sudoers.d/90-admin-user` : 관리자 패스워드리스 sudo 권한 파일 (`validate: visudo -cf %s`)
    - `/home/<admin_user>/.ssh/authorized_keys` : 관리자 SSH 공개키 등록
    - `/usr/local/bin/bat` : Debian/Ubuntu 환경 `batcat` 심볼릭 링크
+   - `/etc/profile.d/99-aliases.sh` : 시스템 전역 커스텀 쉘 별칭 파일
 - ⚙️ **데몬 및 서비스**:
    - `chronyd` (또는 레거시 `ntpd`) : 서비스 활성화 및 자동 재시작
 - 👤 **사용자 및 그룹**:
@@ -73,3 +75,4 @@
 | `COMMON-015` | `Deploy admin SSH public keys` | `ansible.posix.authorized_key` | All | 공개키 등록되어 있으면 `ok` |
 | `COMMON-016` | `Configure system security limits (nofile/nproc)` | `community.general.pam_limits` | All | `/etc/security/limits.d/99-limits.conf` 한도 일치 시 `ok` |
 | `COMMON-017` | `Configure Systemd Journald retention limits` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` |
+| `COMMON-018` | `Deploy system-wide custom shell aliases` | `ansible.builtin.template` | All | Checksum 비교 (`aliases.sh.j2`) |

@@ -86,6 +86,17 @@
       register: journald_stat
       when: ansible_service_mgr == "systemd"
 
+    - name: "[VERIFY-COMMON-018] Verify system-wide aliases configuration file exists"
+      ansible.builtin.stat:
+        path: /etc/profile.d/99-aliases.sh
+      register: aliases_stat
+
+    - name: Assert aliases file exists
+      ansible.builtin.assert:
+        that:
+          - aliases_stat.stat.exists
+        fail_msg: "System-wide aliases file /etc/profile.d/99-aliases.sh is missing."
+
     # ==========================================================================
     # 2. Security Role 검증
     # ==========================================================================

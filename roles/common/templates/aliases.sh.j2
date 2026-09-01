@@ -1,0 +1,11 @@
+# ==============================================================================
+# Managed by Ansible - Overseer Common Base
+# System-wide custom shell aliases for all users (/etc/profile.d/99-aliases.sh)
+# ==============================================================================
+
+########################################
+############## ALIAS ###################
+########################################
+{% for alias in custom_shell_aliases | default([]) %}
+alias {{ alias.name }}="{{ alias.cmd }}"
+{% endfor %}

@@ -72,3 +72,14 @@ otel_target_endpoint: "127.0.0.1:4317"
 otel_target_insecure: true
 otel_target_headers: {}
 otel_auth_header: ""
+
+# 시스템 전역 쉘 별칭 (System-wide Custom Shell Aliases: /etc/profile.d/99-aliases.sh)
+custom_shell_aliases:
+  - { name: "dcd", cmd: "docker compose down -v" }
+  - { name: "dcu", cmd: "docker compose up --build -d" }
+  - { name: "dcl", cmd: "docker compose logs -f" }
+  - { name: "dcr", cmd: "docker compose down -v && docker compose up --build -d && docker compose logs -f" }
+  - { name: "dpa", cmd: "docker ps -a" }
+  - { name: "fcr", cmd: "firewall-cmd --reload" }
+  - { name: "fcl", cmd: "firewall-cmd --list-all" }
+  - { name: "fclz", cmd: "firewall-cmd --list-all-zones" }
