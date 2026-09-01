@@ -1,5 +1,5 @@
 ---
-# 전역 공통 변수
+# 전역 공통 변수 템플릿 (all.yml.example)
 timezone: "Asia/Seoul"
 locale: "en_US.UTF-8"
 
@@ -10,17 +10,15 @@ admin_groups:
   - wheel
 
 # 관리자 SSH 공개키 목록 (비상용 또는 초기 부트스트랩 접근 키)
-# 로컬 워크스테이션의 ~/.ssh/id_ed25519.pub 또는 id_rsa.pub 파일이 존재할 경우 자동 주입
 admin_ssh_public_keys:
   - "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub', errors='ignore') | default(lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub', errors='ignore'), true) | default('', true) }}"
-
 
 # 기능 활성화 플래그
 enable_openbao_ssh_ca: false
 enable_boundary: false
 enable_otelcol: true
 
-# OpenBao SSH CA 공개키 (서명 기반 SSH 접근 허용 시 사용)
+# OpenBao SSH CA 공개키
 openbao_ssh_ca_public_key: ""
 
 # Boundary Worker / Target 설정
@@ -31,32 +29,29 @@ boundary_authorized_users:
   - "ppzxc"
   - "ansible"
 
-# SSH 및 보안 포트 / 서브넷
+# SSH 기본 포트
 ssh_port: "{{ ansible_port | default(22) }}"
-firewall_allowed_tcp_ports:
-  - "{{ ansible_port | default(22) }}"
 
-# 강화된 인바운드 방화벽 규칙 (특정 공인 IP/서브넷에 한해 포트 개방)
-firewall_ingress_rules: []
+# SSH 허용 출발지 IP 목록 (정의 시 지정된 IP/서브넷에 한해서만 22번 포트 허용)
+# 빈 리스트일 경우 모든 IP(0.0.0.0/0)에 대해 ssh_port 개방
+ssh_allowed_source_ips: []
 # 예시:
-# firewall_ingress_rules:
-#   - port: "{{ ssh_port | default(22) }}"
-#     proto: tcp
-#     sources:
-#       - "211.234.120.10/32"
-#       - "118.220.15.0/24"
+# ssh_allowed_source_ips:
+#   - "10.0.0.0/8"        # 내부 IDC 사설망
+#   - "172.16.0.0/12"     # 사설망 대역
+#   - "192.168.0.0/16"    # 사설망 대역
+#   - "211.234.120.10/32" # 본사 오피스 고정 IP
+#   - "121.162.15.0/24"   # 운영팀 VPN 서브넷
+
+# 전역 방화벽 허용 TCP 포트 (하위 호환성)
+firewall_allowed_tcp_ports:
+  - "{{ ssh_port | default(22) }}"
+
+# 추가 인바운드 방화벽 규칙 (특정 공인 IP/서브넷에 한해 포트 개방)
+firewall_ingress_rules: []
 
 # Docker 컨테이너 전용 IPSet 화이트리스트 및 포트 허용 규칙
 docker_firewall_whitelists: []
-# 예시:
-# docker_firewall_whitelists:
-#   - ipset_name: "admin_whitelist"
-#     sources:
-#       - "211.234.120.10"
-#       - "211.234.120.11"
-#     ports:
-#       - { port: 8080, proto: tcp }
-#       - { port: 9090, proto: tcp }
 
 admin_allowed_subnets:
   - "10.0.0.0/8"

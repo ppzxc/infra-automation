@@ -29,7 +29,7 @@
     rule: allow
     port: "{{ item | string }}"
     proto: tcp
-  loop: "{{ firewall_allowed_tcp_ports }}"
+  loop: "{{ (firewall_allowed_tcp_ports | default([])) if (ssh_allowed_source_ips is not defined or ssh_allowed_source_ips | length == 0) else (firewall_allowed_tcp_ports | default([]) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list) }}"
   when: ansible_os_family == "Debian"
 
 - name: "[SEC-004] Enable UFW with default deny incoming (Debian)"
@@ -59,7 +59,7 @@
     permanent: yes
     state: enabled
     immediate: yes
-  loop: "{{ firewall_allowed_tcp_ports }}"
+  loop: "{{ (firewall_allowed_tcp_ports | default([])) if (ssh_allowed_source_ips is not defined or ssh_allowed_source_ips | length == 0) else (firewall_allowed_tcp_ports | default([]) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list) }}"
   when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
 
 # 4. Firewall configuration (iptables for CentOS 6 legacy)
@@ -70,7 +70,7 @@
     destination_port: "{{ item | string }}"
     jump: ACCEPT
     action: insert
-  loop: "{{ firewall_allowed_tcp_ports }}"
+  loop: "{{ (firewall_allowed_tcp_ports | default([])) if (ssh_allowed_source_ips is not defined or ssh_allowed_source_ips | length == 0) else (firewall_allowed_tcp_ports | default([]) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list) }}"
   when: ansible_distribution == "CentOS" and (ansible_distribution_major_version | int == 6)
 
 # 5. Fail2ban configuration (Optional / EPEL dependent)
@@ -182,11 +182,10 @@
     port: "{{ item.0.port | string }}"
     proto: "{{ item.0.proto | default('tcp') }}"
     from_ip: "{{ item.1 }}"
-  loop: "{{ firewall_ingress_rules | default([]) | subelements('sources', skip_missing=True) }}"
+  loop: "{{ ((firewall_ingress_rules | default([])) + ([{'port': (ssh_port | default(22)), 'proto': 'tcp', 'sources': ssh_allowed_source_ips}] if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else [])) | subelements('sources', skip_missing=True) }}"
   when:
     - ansible_os_family == "Debian"
-    - firewall_ingress_rules is defined
-    - firewall_ingress_rules | length > 0
+    - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
 
 - name: "[SEC-020] Configure custom firewall ingress rules with source IP restrictions (firewalld)"
   ansible.posix.firewalld:
@@ -194,12 +193,11 @@
     permanent: yes
     state: enabled
     immediate: yes
-  loop: "{{ firewall_ingress_rules | default([]) | subelements('sources', skip_missing=True) }}"
+  loop: "{{ ((firewall_ingress_rules | default([])) + ([{'port': (ssh_port | default(22)), 'proto': 'tcp', 'sources': ssh_allowed_source_ips}] if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else [])) | subelements('sources', skip_missing=True) }}"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
-    - firewall_ingress_rules is defined
-    - firewall_ingress_rules | length > 0
+    - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
 
 - name: "[SEC-021] Configure custom firewall ingress rules with source IP restrictions (iptables)"
   ansible.builtin.iptables:
@@ -209,12 +207,11 @@
     source: "{{ item.1 }}"
     jump: ACCEPT
     action: insert
-  loop: "{{ firewall_ingress_rules | default([]) | subelements('sources', skip_missing=True) }}"
+  loop: "{{ ((firewall_ingress_rules | default([])) + ([{'port': (ssh_port | default(22)), 'proto': 'tcp', 'sources': ssh_allowed_source_ips}] if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else [])) | subelements('sources', skip_missing=True) }}"
   when:
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 6
-    - firewall_ingress_rules is defined
-    - firewall_ingress_rules | length > 0
+    - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
 
 # 12. Docker IPSet Whitelist and Port Bindings via firewalld-docker
 - name: "[SEC-022] Add IPSet source IPs via firewalld-docker"

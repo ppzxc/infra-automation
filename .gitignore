@@ -16,6 +16,13 @@
 inventory/hosts.yml
 inventory/hosts.yaml
 inventory/hosts
+inventory/group_vars/all.yml
+inventory/group_vars/all.yaml
+inventory/group_vars/*.local.yml
+inventory/group_vars/*.local.yaml
+!inventory/group_vars/*.example.yml
+!inventory/group_vars/*.example.yaml
+!inventory/group_vars/*.example
 inventory/host_vars/*.yml
 inventory/host_vars/*.yaml
 !inventory/host_vars/*.example.yml

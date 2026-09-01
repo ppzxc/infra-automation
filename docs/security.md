@@ -42,7 +42,8 @@
   - `ufw` (Debian/Ubuntu) / `firewalld` (RHEL/Rocky) / `fail2ban` : 데몬 활성화 및 자동 기동
 - 🌐 **네트워크 및 방화벽 규칙**:
   - 기본 인바운드 정책: `DENY` / `DROP`
-  - 허용 인바운드 TCP 포트: SSH(`22`), 사용자 정의 포트(`firewall_allowed_tcp_ports`) (※ Node Exporter는 로컬 `127.0.0.1` 바인딩 및 Otel Collector 아웃바운드 푸시 구조로 인바운드 포트 불필요)
+  - 허용 인바운드 TCP 포트: SSH(`22`), 사용자 정의 포트(`firewall_allowed_tcp_ports`)
+  - **SSH IP 기반 접근 제어 (`ssh_allowed_source_ips`)**: 인가된 공인 IP/서브넷에 한해 22/tcp 허용(Firewalld Rich Rule / UFW from_ip), 미지정 시 0.0.0.0/0 개방 (※ Node Exporter는 로컬 `127.0.0.1` 바인딩 및 Otel Collector 아웃바운드 푸시 구조로 인바운드 포트 불필요)
 
 ---
 
