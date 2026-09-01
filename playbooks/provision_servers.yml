@@ -19,6 +19,9 @@
     - role: common
       tags: [common, base]
 
+    - role: docker_engine
+      tags: [docker, containers]
+
     - role: security
       tags: [security, ssh, firewall]
 
