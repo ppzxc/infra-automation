@@ -1,5 +1,11 @@
 ---
 # 1. SSH Hardening
+- name: "[SEC-001-DROPIN] Remove conflicting sshd_config.d drop-in files"
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/01-permitrootlogin.conf
+    state: absent
+  notify: Restart sshd
+
 - name: "[SEC-001] Configure SSH Hardening parameters"
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
