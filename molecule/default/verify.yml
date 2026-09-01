@@ -97,6 +97,28 @@
           - aliases_stat.stat.exists
         fail_msg: "System-wide aliases file /etc/profile.d/99-aliases.sh is missing."
 
+    - name: "[VERIFY-COMMON-019] Verify node environment variables drop-in file exists"
+      ansible.builtin.stat:
+        path: /etc/profile.d/98-node-env.sh
+      register: node_env_stat
+
+    - name: Assert node environment file exists
+      ansible.builtin.assert:
+        that:
+          - node_env_stat.stat.exists
+        fail_msg: "Node environment file /etc/profile.d/98-node-env.sh is missing."
+
+    - name: "[VERIFY-COMMON-020] Verify system-wide environment configuration file exists"
+      ansible.builtin.stat:
+        path: /etc/environment
+      register: etc_env_stat
+
+    - name: Assert /etc/environment file exists
+      ansible.builtin.assert:
+        that:
+          - etc_env_stat.stat.exists
+        fail_msg: "/etc/environment file is missing."
+
     # ==========================================================================
     # 2. Security Role 검증
     # ==========================================================================

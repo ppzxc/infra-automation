@@ -1,0 +1,31 @@
+# ==============================================================================
+# Managed by Ansible - Overseer Node Environment Variables
+# Deployed to /etc/profile.d/98-node-env.sh
+# ==============================================================================
+
+# 1. Node Hostnames & Domain Architecture
+export NODE_EXTERNAL_HOSTNAME="{{ external_hostname | default(inventory_hostname) }}"
+export NODE_INTERNAL_HOSTNAME="{{ internal_hostname | default( (inventory_hostname.split('.')[0] + '.' + (internal_subdomain | default('internal')) + '.' + (inventory_hostname.split('.')[1:] | join('.'))) if (internal_subdomain is defined and internal_subdomain | length > 0) else inventory_hostname ) }}"
+export NODE_SHORT_HOSTNAME="{{ short_hostname | default(inventory_hostname.split('.')[0]) }}"
+export NODE_WILDCARD_HOSTNAME="{{ wildcard_hostname | default('*.' + (external_hostname | default(inventory_hostname))) }}"
+
+# 2. Network & Routing Facts
+export NODE_PRIMARY_IPV4="{{ primary_ipv4 | default(ansible_default_ipv4.address | default(ansible_host)) }}"
+export NODE_INTERFACE="{{ firewall_interface | default(ansible_default_ipv4.interface | default('bond0')) }}"
+export NODE_GATEWAY="{{ default_gateway | default(ansible_default_ipv4.gateway | default('')) }}"
+
+# 3. Environment & Organization Metadata
+export NODE_ENV="{{ node_env | default('production') }}"
+export NODE_IDC="{{ node_idc | default('main') }}"
+export NODE_ROLE="{{ node_role | default(group_names | reject('equalto', 'all') | first | default('server')) }}"
+export NODE_ADMIN_USER="{{ admin_user | default('ppzxc') }}"
+export NODE_SSH_PORT="{{ ssh_port | default(22) }}"
+
+# 4. Observability & Monitoring
+export OTEL_EXPORTER_OTLP_ENDPOINT="{{ otel_target_endpoint | default('127.0.0.1:4317') }}"
+export OTEL_SERVICE_NAME="{{ inventory_hostname }}"
+
+# 5. Custom Environment Variables
+{% for k, v in (custom_environment_variables | default({})).items() %}
+export {{ k }}="{{ v }}"
+{% endfor %}

@@ -178,3 +178,19 @@
   when:
     - custom_shell_aliases is defined
     - custom_shell_aliases | length > 0
+
+- name: "[COMMON-019] Deploy node environment variables drop-in (/etc/profile.d/98-node-env.sh)"
+  ansible.builtin.template:
+    src: node-env.sh.j2
+    dest: /etc/profile.d/98-node-env.sh
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: "[COMMON-020] Deploy system-wide environment variables (/etc/environment)"
+  ansible.builtin.template:
+    src: environment.j2
+    dest: /etc/environment
+    owner: root
+    group: root
+    mode: '0644'

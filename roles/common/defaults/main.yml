@@ -114,3 +114,9 @@ custom_shell_aliases:
   - { name: "fcr", cmd: "firewall-cmd --reload" }
   - { name: "fcl", cmd: "firewall-cmd --list-all" }
   - { name: "fclz", cmd: "firewall-cmd --list-all-zones" }
+
+# 노드 환경변수 설정 (/etc/profile.d/98-node-env.sh 및 /etc/environment)
+internal_subdomain: "internal"
+node_env: "production"
+node_idc: "main"
+custom_environment_variables: {}
