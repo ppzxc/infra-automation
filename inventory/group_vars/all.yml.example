@@ -52,8 +52,7 @@ firewall_allowed_tcp_ports:
 # 추가 인바운드 방화벽 규칙 (특정 공인 IP/서브넷에 한해 포트 개방)
 firewall_ingress_rules: []
 
-# Docker 컨테이너 전용 IPSet 화이트리스트 및 포트 허용 규칙
-docker_firewall_whitelists: []
+
 
 admin_allowed_subnets:
   - "10.0.0.0/8"

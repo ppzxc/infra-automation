@@ -173,38 +173,10 @@
         path: /etc/fail2ban/jail.d/sshd.local
       register: fail2ban_stat
 
-    - name: "[VERIFY-SEC-016] Verify firewalld-docker management CLI exists and is executable"
-      ansible.builtin.stat:
-        path: /usr/local/bin/firewalld-docker
-      register: firewalld_docker_stat
-
-    - name: Assert firewalld-docker exists and is executable
-      ansible.builtin.assert:
-        that:
-          - firewalld_docker_stat.stat.exists
-          - firewalld_docker_stat.stat.executable
-        fail_msg: "/usr/local/bin/firewalld-docker was not deployed or is not executable."
-
-    - name: "[VERIFY-SEC-017] Verify firewalld-docker.sh symlink exists"
-      ansible.builtin.stat:
-        path: /usr/local/bin/firewalld-docker.sh
-      register: firewalld_docker_symlink_stat
-
-    - name: Assert firewalld-docker.sh symlink exists
-      ansible.builtin.assert:
-        that:
-          - firewalld_docker_symlink_stat.stat.exists
-          - firewalld_docker_symlink_stat.stat.islnk
-        fail_msg: "/usr/local/bin/firewalld-docker.sh symlink is missing."
-
-    - name: "[VERIFY-SEC-018] Test firewalld-docker CLI help execution"
-      ansible.builtin.command: /usr/local/bin/firewalld-docker --help
-      register: firewalld_docker_help_out
-      changed_when: false
-
     # ==========================================================================
     # 3. Access Security Role (Zero-Trust OpenBao & Boundary) 검증
     # ==========================================================================
+
     - name: "[VERIFY-ACC-001] Verify Access Security toggle safety when disabled"
       ansible.builtin.debug:
         msg: "Access security toggle verified safe."

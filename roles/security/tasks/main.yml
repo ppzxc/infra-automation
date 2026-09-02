@@ -71,32 +71,7 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
 
-- name: "[SEC-006-DOCKER-ZONE] Ensure docker0 bridge interface is bound to docker zone in firewalld"
-  ansible.posix.firewalld:
-    zone: docker
-    interface: docker0
-    permanent: yes
-    state: enabled
-    immediate: yes
-  when:
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-  failed_when: false
-
-- name: "[SEC-006-DOCKER-POLICY] Create egress forwarding policy from docker to physical drop zone"
-  ansible.builtin.shell: |
-    firewall-cmd --permanent --new-policy docker-to-drop 2>/dev/null || true
-    firewall-cmd --permanent --policy docker-to-drop --add-ingress-zone docker
-    firewall-cmd --permanent --policy docker-to-drop --add-egress-zone {{ firewall_interface_zone | default('drop') }}
-    firewall-cmd --permanent --policy docker-to-drop --set-target ACCEPT
-    firewall-cmd --reload
-  when:
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-  changed_when: false
-  failed_when: false
-
-- name: "[SEC-006-DOCKER-MASQ] Ensure masquerade is enabled for outbound traffic (NAT)"
+- name: "[SEC-006-MASQ] Ensure masquerade is enabled for outbound traffic on drop zone"
   ansible.posix.firewalld:
     zone: "{{ firewall_interface_zone | default('drop') }}"
     masquerade: yes
@@ -107,6 +82,23 @@
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
   failed_when: false
+
+- name: "[SEC-006-POLICY] Ensure egress policy allows forwarding from docker to physical drop zone"
+  ansible.builtin.shell: |
+    firewall-cmd --permanent --new-policy docker-to-drop 2>/dev/null || true
+    firewall-cmd --permanent --policy docker-to-drop --add-ingress-zone docker
+    firewall-cmd --permanent --policy docker-to-drop --add-egress-zone {{ firewall_interface_zone | default('drop') }}
+    firewall-cmd --permanent --policy docker-to-drop --set-target ACCEPT
+    firewall-cmd --permanent --policy docker-to-drop --add-masquerade
+    firewall-cmd --permanent --zone=docker --add-masquerade 2>/dev/null || true
+    firewall-cmd --reload
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+  changed_when: false
+  failed_when: false
+
+
 
 
 - name: "[SEC-006-CLEAN-PUBLIC] Clean up public zone default services"
@@ -244,40 +236,9 @@
   notify: Restart fail2ban
   failed_when: false
 
-# 10. Docker Firewalld Filter Chain Manager (firewalld-docker)
-- name: "[SEC-016] Deploy firewalld-docker management CLI"
-  ansible.builtin.template:
-    src: firewalld-docker.sh.j2
-    dest: /usr/local/bin/firewalld-docker
-    owner: root
-    group: root
-    mode: '0755'
-  when: enable_docker_firewall_manager | default(true) | bool
-
-- name: "[SEC-017] Create firewalld-docker.sh symlink"
-  ansible.builtin.file:
-    src: /usr/local/bin/firewalld-docker
-    dest: /usr/local/bin/firewalld-docker.sh
-    state: link
-    force: yes
-  when: enable_docker_firewall_manager | default(true) | bool
-
-- name: "[SEC-018] Initialize firewalld DOCKER-USER direct rules (optional auto-init)"
-  ansible.builtin.command: >-
-    /usr/local/bin/firewalld-docker init
-    -i {{ docker_firewall_interface | default('bond0') }}
-    {{ '--open-80' if (docker_firewall_open_80 | default(true) | bool) else '--no-open-80' }}
-    {{ '--open-443' if (docker_firewall_open_443 | default(true) | bool) else '--no-open-443' }}
-    -y
-  when:
-    - enable_docker_firewall_manager | default(true) | bool
-    - docker_firewall_auto_init | default(false) | bool
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-  failed_when: false
-
-# 11. Custom Ingress Rules with Source IP restrictions
+# 10. Custom Ingress Rules with Source IP restrictions
 - name: "[SEC-019] Configure custom firewall ingress rules with source IP restrictions (UFW)"
+
   community.general.ufw:
     rule: allow
     port: "{{ item.0.port | string }}"
@@ -330,32 +291,7 @@
     - ansible_distribution_major_version | int == 6
     - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
 
-# 12. Docker IPSet Whitelist and Port Bindings via firewalld-docker
-- name: "[SEC-022] Add IPSet source IPs via firewalld-docker"
-  ansible.builtin.command: >-
-    /usr/local/bin/firewalld-docker add {{ item.0.ipset_name }} {{ item.1 }}
-  loop: "{{ docker_firewall_whitelists | default([]) | subelements('sources', skip_missing=True) }}"
-  when:
-    - enable_docker_firewall_manager | default(true) | bool
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-    - docker_firewall_whitelists is defined
-    - docker_firewall_whitelists | length > 0
-  failed_when: false
-  changed_when: false
 
-- name: "[SEC-023] Allow ports for IPSet whitelists via firewalld-docker"
-  ansible.builtin.command: >-
-    /usr/local/bin/firewalld-docker allow-port {{ item.0.ipset_name }} {{ item.1.port }} {{ item.1.proto | default('tcp') }}
-  loop: "{{ docker_firewall_whitelists | default([]) | subelements('ports', skip_missing=True) }}"
-  when:
-    - enable_docker_firewall_manager | default(true) | bool
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-    - docker_firewall_whitelists is defined
-    - docker_firewall_whitelists | length > 0
-  failed_when: false
-  changed_when: false
 
 
 

@@ -126,8 +126,8 @@ def test_monitoring_node_exporter_removed_and_hostmetrics_enabled():
     assert "hostmetrics:" in template_content, "Template must configure hostmetrics receiver"
     assert "traces:" in template_content, "Template must configure traces pipeline"
 
-def test_security_enhanced_firewall_ingress_and_docker_rules():
-    """Verify security role enhanced firewall ingress and docker IPSet rules integration"""
+def test_security_enhanced_firewall_ingress_rules():
+    """Verify security role host firewall ingress rules integration"""
     defaults_file = ROOT_DIR / "roles" / "security" / "defaults" / "main.yml"
     tasks_file = ROOT_DIR / "roles" / "security" / "tasks" / "main.yml"
     all_vars_file = ROOT_DIR / "inventory" / "group_vars" / "all.yml"
@@ -136,20 +136,17 @@ def test_security_enhanced_firewall_ingress_and_docker_rules():
     with open(defaults_file, 'r', encoding='utf-8') as f:
         defaults = yaml.safe_load(f)
     assert "firewall_ingress_rules" in defaults, "firewall_ingress_rules missing from security defaults"
-    assert "docker_firewall_whitelists" in defaults, "docker_firewall_whitelists missing from security defaults"
     assert "ssh_allowed_source_ips" in defaults, "ssh_allowed_source_ips missing from security defaults"
 
     target_var_file = all_vars_file if all_vars_file.exists() else all_example_file
     with open(target_var_file, 'r', encoding='utf-8') as f:
         all_vars = yaml.safe_load(f)
     assert "firewall_ingress_rules" in all_vars, "firewall_ingress_rules missing from all.yml(.example)"
-    assert "docker_firewall_whitelists" in all_vars, "docker_firewall_whitelists missing from all.yml(.example)"
     assert "ssh_allowed_source_ips" in all_vars, "ssh_allowed_source_ips missing from all.yml(.example)"
 
     tasks_content = tasks_file.read_text(encoding='utf-8')
     assert "[SEC-019]" in tasks_content, "Task [SEC-019] missing in security tasks"
     assert "[SEC-020]" in tasks_content, "Task [SEC-020] missing in security tasks"
     assert "[SEC-021]" in tasks_content, "Task [SEC-021] missing in security tasks"
-    assert "[SEC-022]" in tasks_content, "Task [SEC-022] missing in security tasks"
-    assert "[SEC-023]" in tasks_content, "Task [SEC-023] missing in security tasks"
+
 
