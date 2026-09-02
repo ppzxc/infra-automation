@@ -155,8 +155,6 @@
     name: "{{ docker_svc_user }}"
     uid: "{{ docker_svc_uid }}"
     group: "{{ docker_mgmt_group }}"
-    groups: docker
-    append: true
     system: true
     shell: /sbin/nologin
     create_home: false
@@ -211,15 +209,12 @@
 
 - name: "[DOC-020] Create convenience symlinks in operator home directory"
   ansible.builtin.file:
-    src: "{{ item.src }}"
-    dest: "/home/{{ item.user }}/{{ item.dest }}"
+    src: "{{ item.1.src }}"
+    dest: "/home/{{ item.0 }}/{{ item.1.dest }}"
     state: link
     force: false
-  loop:
-    - { user: "{{ admin_user | default('ppzxc') }}", src: "/opt/services", dest: "services" }
-    - { user: "{{ admin_user | default('ppzxc') }}", src: "/data", dest: "data" }
+  loop: "{{ (docker_operators | default([admin_user | default('ppzxc')])) | product([{'src': '/opt/services', 'dest': 'services'}, {'src': '/data', 'dest': 'data'}]) | list }}"
   when:
-    - admin_user is defined
+    - (docker_operators is defined and docker_operators | length > 0) or admin_user is defined
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
-  failed_when: false
 
