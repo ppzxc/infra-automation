@@ -23,7 +23,7 @@ export NODE_ADMIN_USER="{{ admin_user | default('ppzxc') }}"
 export NODE_SSH_PORT="{{ ssh_port | default(22) }}"
 
 # 4. Observability & Monitoring (Default Host OTLP Endpoint for Apps/Containers)
-export OTEL_EXPORTER_OTLP_ENDPOINT="{{ otel_target_endpoint | default('127.0.0.1:4317') }}"
+export OTEL_EXPORTER_OTLP_ENDPOINT="{{ ('http://' + otel_target_endpoint) if (otel_target_endpoint is defined and not otel_target_endpoint.startswith('http://') and not otel_target_endpoint.startswith('https://')) else (otel_target_endpoint | default('http://127.0.0.1:4317')) }}"
 
 
 # 5. Custom Environment Variables
