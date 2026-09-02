@@ -89,12 +89,12 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
 
-- name: "[SEC-006-MASQ] Ensure masquerade is enabled for outbound traffic on interface zone"
+- name: "[SEC-006-MASQ] Ensure masquerade is disabled on public interface zone (preserve client remote IP)"
   ansible.posix.firewalld:
     zone: "{{ firewall_interface_zone | default('public') }}"
-    masquerade: yes
+    masquerade: no
     permanent: yes
-    state: enabled
+    state: disabled
     immediate: yes
   when:
     - ansible_os_family == "RedHat"
