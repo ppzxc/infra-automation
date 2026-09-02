@@ -14,9 +14,12 @@ ssh_allowed_source_ips: []
 firewall_allowed_tcp_ports:
   - "{{ ssh_port | default(22) }}"
 
-# Firewalld 존 아키텍처 (Model A: Drop 인터페이스 + Work 소스 존)
-firewall_interface_zone: "drop"
-firewall_source_zone: "work"
+# Firewalld 허용 기본 서비스 (포트 대신 서비스 객체 기반 관리 지원)
+firewall_allowed_services: []
+
+# Firewalld 존 아키텍처 (Standard Model: Public 인터페이스 + Trusted/Work 소스 존)
+firewall_interface_zone: "public"
+firewall_source_zone: "trusted"
 firewall_interface: "{{ ansible_default_ipv4.interface | default('bond0') }}"
 
 # 강화된 인바운드 방화벽 규칙 (포트/프로토콜/출발지 공인 IP 목록 지정)

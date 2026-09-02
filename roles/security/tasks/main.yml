@@ -59,9 +59,9 @@
     enabled: true
   when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
 
-- name: "[SEC-006-IFACE] Bind physical network interface to drop zone"
+- name: "[SEC-006-IFACE] Bind physical network interface to interface zone"
   ansible.posix.firewalld:
-    zone: "{{ firewall_interface_zone | default('drop') }}"
+    zone: "{{ firewall_interface_zone | default('public') }}"
     interface: "{{ firewall_interface | default(ansible_default_ipv4.interface | default('bond0')) }}"
     permanent: yes
     state: enabled
@@ -71,9 +71,9 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
 
-- name: "[SEC-006-MASQ] Ensure masquerade is enabled for outbound traffic on drop zone"
+- name: "[SEC-006-MASQ] Ensure masquerade is enabled for outbound traffic on interface zone"
   ansible.posix.firewalld:
-    zone: "{{ firewall_interface_zone | default('drop') }}"
+    zone: "{{ firewall_interface_zone | default('public') }}"
     masquerade: yes
     permanent: yes
     state: enabled
@@ -83,27 +83,23 @@
     - ansible_distribution_major_version | int >= 7
   failed_when: false
 
-- name: "[SEC-006-POLICY] Ensure egress policy allows forwarding from docker to physical drop zone"
+- name: "[SEC-006-POLICY] Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)"
   ansible.builtin.shell: |
-    firewall-cmd --permanent --new-policy docker-to-drop 2>/dev/null || true
-    firewall-cmd --permanent --policy docker-to-drop --add-ingress-zone docker
-    firewall-cmd --permanent --policy docker-to-drop --add-egress-zone {{ firewall_interface_zone | default('drop') }}
-    firewall-cmd --permanent --policy docker-to-drop --set-target ACCEPT
-    firewall-cmd --permanent --policy docker-to-drop --add-masquerade
+    firewall-cmd --permanent --new-policy docker-to-ext 2>/dev/null || true
+    firewall-cmd --permanent --policy docker-to-ext --add-ingress-zone docker
+    firewall-cmd --permanent --policy docker-to-ext --add-egress-zone {{ firewall_interface_zone | default('public') }}
+    firewall-cmd --permanent --policy docker-to-ext --set-target ACCEPT
+    firewall-cmd --permanent --policy docker-to-ext --add-masquerade
     firewall-cmd --permanent --zone=docker --add-masquerade 2>/dev/null || true
     firewall-cmd --reload
   when:
     - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
+    - ansible_distribution_major_version | int >= 9
   changed_when: false
   failed_when: false
 
-
-
-
-- name: "[SEC-006-CLEAN-PUBLIC] Clean up public zone default services"
+- name: "[SEC-006-CLEAN-PUBLIC] Clean up public zone default open services when restricted"
   ansible.posix.firewalld:
-
     zone: public
     service: "{{ item }}"
     permanent: yes
@@ -116,6 +112,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
+    - ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0
   failed_when: false
 
 - name: "[SEC-006-CLEAN-PUBLIC-RICH] Clean up stale rich rules from public zone"
@@ -132,9 +129,23 @@
     - ssh_allowed_source_ips is defined
   failed_when: false
 
+- name: "[SEC-007-SERVICES] Allow standard services via firewalld (RHEL/Rocky 7+)"
+  ansible.posix.firewalld:
+    zone: "{{ firewall_interface_zone | default('public') }}"
+    service: "{{ item }}"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ firewall_allowed_services | default([]) }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - firewall_allowed_services is defined
+    - firewall_allowed_services | length > 0
+
 - name: "[SEC-007] Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)"
   ansible.posix.firewalld:
-    zone: "{{ (firewall_source_zone | default('work')) if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else (firewall_interface_zone | default('drop')) }}"
+    zone: "{{ (firewall_source_zone | default('trusted')) if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else (firewall_interface_zone | default('public')) }}"
     port: "{{ item }}/tcp"
     permanent: yes
     state: enabled
@@ -144,7 +155,7 @@
 
 - name: "[SEC-007-SSH] Ensure SSH service is enabled in source zone"
   ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('work') }}"
+    zone: "{{ firewall_source_zone | default('trusted') }}"
     service: ssh
     permanent: yes
     state: enabled
@@ -251,7 +262,7 @@
 
 - name: "[SEC-020] Configure custom firewall ingress rules with source IP restrictions (firewalld)"
   ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('work') }}"
+    zone: "{{ firewall_source_zone | default('trusted') }}"
     source: "{{ item }}"
     permanent: yes
     state: enabled
@@ -265,7 +276,7 @@
 
 - name: "[SEC-020-RICH] Configure custom rich rules with source IP restrictions (firewalld)"
   ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('work') }}"
+    zone: "{{ firewall_source_zone | default('trusted') }}"
     rich_rule: 'rule family="ipv4" source address="{{ item.1 }}" port port="{{ item.0.port }}" protocol="{{ item.0.proto | default("tcp") }}" accept'
     permanent: yes
     state: enabled
