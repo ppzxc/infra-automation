@@ -169,6 +169,7 @@
     mode: "{{ item.mode }}"
     state: directory
   loop: "{{ docker_fhs_directories }}"
+  ignore_errors: "{{ ansible_check_mode }}"
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
 - name: "[DOC-017] Configure POSIX default and access ACLs for docker management"
@@ -180,6 +181,7 @@
     default: "{{ item.1 }}"
     state: present
   loop: "{{ docker_fhs_directories | product([true, false]) | list }}"
+  ignore_errors: "{{ ansible_check_mode }}"
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
 - name: "[DOC-018] Deploy docker management session umask script (/etc/profile.d/docker_mgmt.sh)"
