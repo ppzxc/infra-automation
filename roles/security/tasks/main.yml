@@ -59,6 +59,24 @@
     enabled: true
   when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
 
+- name: "[SEC-006-UNBIND-DROP] Remove physical network interface from drop zone if moving to another zone"
+  ansible.posix.firewalld:
+    zone: drop
+    interface: "{{ item }}"
+    permanent: yes
+    state: disabled
+    immediate: yes
+  loop:
+    - "{{ firewall_interface | default(ansible_default_ipv4.interface | default('bond0')) }}"
+    - "bond0"
+    - "eno1"
+    - "eno2"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - (firewall_interface_zone | default('public')) != "drop"
+  failed_when: false
+
 - name: "[SEC-006-IFACE] Bind physical network interface to interface zone"
   ansible.posix.firewalld:
     zone: "{{ firewall_interface_zone | default('public') }}"
@@ -129,6 +147,7 @@
     - ssh_allowed_source_ips is defined
   failed_when: false
 
+
 - name: "[SEC-006-CLEAN-STALE-SOURCES] Clean up stale sources from conflicting zones (work, drop, public)"
   ansible.posix.firewalld:
     zone: "{{ item.0 }}"
@@ -136,13 +155,27 @@
     permanent: yes
     state: disabled
     immediate: yes
-  loop: "{{ ['work', 'drop', 'public'] | product(ssh_allowed_source_ips | default([])) | list }}"
+  loop: "{{ ['work', 'drop', 'public'] | product((ssh_allowed_source_ips | default([])) + ['59.25.177.53', '39.116.31.0/24']) | list }}"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
     - item.0 != (firewall_source_zone | default('trusted'))
-    - ssh_allowed_source_ips is defined
-    - ssh_allowed_source_ips | length > 0
+  failed_when: false
+
+- name: "[SEC-006-CLEAN-WORK-PORTS] Clean up stale ports from work zone"
+  ansible.posix.firewalld:
+    zone: work
+    port: "{{ item }}"
+    permanent: yes
+    state: disabled
+    immediate: yes
+  loop:
+    - "22/tcp"
+    - "8487/tcp"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - (firewall_source_zone | default('trusted')) != "work"
   failed_when: false
 
 - name: "[SEC-007-SERVICES] Allow standard services via firewalld (RHEL/Rocky 7+)"
