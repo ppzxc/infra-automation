@@ -2,7 +2,7 @@
 # Lefthook Git Hooks Configuration (node-provisioner)
 # ==============================================================================
 # Pre-Commit Pipeline:
-#   1. Gitleaks: Staged secret leaks detection (with built-in regex fallback)
+#   1. Gitleaks: Staged secret leaks detection (auto-downloads to .bin/ if missing)
 #   2. Spec Validator: 3-Way Specification & Traceability verification (Docs <-> Code <-> Tests)
 #   3. Pytest: Structure & Unit tests suite
 # ==============================================================================
@@ -14,10 +14,16 @@ pre-commit:
       tags: security secrets
       stage_fixed: true
       run: |
+        # 1. 바이너리 없으면 다운로드 스크립트 실행 (.bin/gitleaks)
+        bash scripts/ensure-gitleaks.sh
+        
+        # 2. PATH 또는 .bin/gitleaks 실행
         if command -v gitleaks >/dev/null 2>&1; then
           gitleaks protect --staged --verbose --redact
+        elif [ -x ".bin/gitleaks" ]; then
+          .bin/gitleaks protect --staged --verbose --redact
         else
-          echo "[i] Gitleaks not found in PATH, running built-in secret scan..."
+          echo "[i] Gitleaks unavailable, running built-in secret scan..."
           bash scripts/pre-commit.sh
         fi
 

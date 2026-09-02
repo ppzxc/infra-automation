@@ -65,3 +65,7 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# Local Tools and Binaries (Lefthook, Gitleaks, etc.)
+.bin/
+
