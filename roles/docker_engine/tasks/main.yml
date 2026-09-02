@@ -150,7 +150,7 @@
     state: present
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
-- name: "[DOC-015] Ensure dockersvc system user exists (UID 998)"
+- name: "[DOC-015] Ensure dockersvc system user exists (UID 2000)"
   ansible.builtin.user:
     name: "{{ docker_svc_user }}"
     uid: "{{ docker_svc_uid }}"

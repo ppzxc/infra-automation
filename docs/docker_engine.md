@@ -38,7 +38,7 @@
 | `DOC-012` | `Ensure Docker and containerd services are started and enabled` | `ansible.builtin.service` | All | 서비스 활성 상태 시 `ok` |
 | `DOC-013` | `Add admin user to docker group` | `ansible.builtin.user` | All | 그룹 소속 일치 시 `ok` |
 | `DOC-014` | `Ensure dockermgmt system group exists (GID 2000)` | `ansible.builtin.group` | All | GID 일치 시 `ok` |
-| `DOC-015` | `Ensure dockersvc system user exists (UID 998)` | `ansible.builtin.user` | All | UID/그룹 일치 시 `ok` |
+| `DOC-015` | `Ensure dockersvc system user exists (UID 2000)` | `ansible.builtin.user` | All | UID/그룹 일치 시 `ok` |
 | `DOC-016` | `Create FHS standard service and data directories (/opt/services, /data, /backup)` | `ansible.builtin.file` | All | 디렉터리 경로 및 권한 일치 시 `ok` |
 | `DOC-017` | `Configure POSIX default and access ACLs for docker management` | `ansible.posix.acl` | All | ACL 엔트리 일치 시 `ok` |
 | `DOC-018` | `Deploy docker management session umask script (/etc/profile.d/docker_mgmt.sh)` | `ansible.builtin.copy` | All | 파일 내용 및 권한(`0644`) 일치 시 `ok` |

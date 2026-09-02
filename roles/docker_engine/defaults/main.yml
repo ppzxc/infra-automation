@@ -14,7 +14,7 @@ docker_iptables: true
 docker_mgmt_group: "dockermgmt"
 docker_mgmt_gid: 2000
 docker_svc_user: "dockersvc"
-docker_svc_uid: 998
+docker_svc_uid: 2000
 docker_operators:
   - "{{ admin_user | default('ppzxc') }}"
 

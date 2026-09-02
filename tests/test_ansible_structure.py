@@ -160,7 +160,7 @@ def test_docker_engine_adr0002_integration():
     assert defaults.get("docker_mgmt_group") == "dockermgmt"
     assert defaults.get("docker_mgmt_gid") == 2000
     assert defaults.get("docker_svc_user") == "dockersvc"
-    assert defaults.get("docker_svc_uid") == 998
+    assert defaults.get("docker_svc_uid") == 2000
     assert "docker_fhs_directories" in defaults
 
     tasks_content = tasks_file.read_text(encoding='utf-8')
