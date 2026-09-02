@@ -133,6 +133,26 @@
     - ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0
   failed_when: false
 
+- name: "[SEC-006-CLEAN-ZONE-DEFAULTS] Clean up default unneeded services from dmz, work, internal zones"
+  ansible.posix.firewalld:
+    zone: "{{ item.0 }}"
+    service: "{{ item.1 }}"
+    permanent: yes
+    state: disabled
+    immediate: yes
+  loop:
+    - ["dmz", "ssh"]
+    - ["work", "dhcpv6-client"]
+    - ["work", "cockpit"]
+    - ["internal", "mdns"]
+    - ["internal", "samba-client"]
+    - ["internal", "dhcpv6-client"]
+    - ["internal", "cockpit"]
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+  failed_when: false
+
 - name: "[SEC-006-CLEAN-PUBLIC-RICH] Clean up stale rich rules from public zone"
   ansible.posix.firewalld:
     zone: public
@@ -147,35 +167,17 @@
     - ssh_allowed_source_ips is defined
   failed_when: false
 
-
-- name: "[SEC-006-CLEAN-STALE-SOURCES] Clean up stale sources from conflicting zones (work, drop, public)"
+- name: "[SEC-006-CLEAN-STALE-SOURCES] Clean up stale sources from conflicting zones (trusted, drop)"
   ansible.posix.firewalld:
     zone: "{{ item.0 }}"
     source: "{{ item.1 }}"
     permanent: yes
     state: disabled
     immediate: yes
-  loop: "{{ ['work', 'drop', 'public'] | product((ssh_allowed_source_ips | default([])) + ['59.25.177.53', '39.116.31.0/24']) | list }}"
+  loop: "{{ ['trusted', 'drop'] | product((ssh_allowed_source_ips | default([])) + ['59.25.177.53', '39.116.31.0/24']) | list }}"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
-    - item.0 != (firewall_source_zone | default('trusted'))
-  failed_when: false
-
-- name: "[SEC-006-CLEAN-WORK-PORTS] Clean up stale ports from work zone"
-  ansible.posix.firewalld:
-    zone: work
-    port: "{{ item }}"
-    permanent: yes
-    state: disabled
-    immediate: yes
-  loop:
-    - "22/tcp"
-    - "8487/tcp"
-  when:
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-    - (firewall_source_zone | default('trusted')) != "work"
   failed_when: false
 
 - name: "[SEC-007-SERVICES] Allow standard services via firewalld (RHEL/Rocky 7+)"
@@ -185,26 +187,16 @@
     permanent: yes
     state: enabled
     immediate: yes
-  loop: "{{ firewall_allowed_services | default([]) }}"
+  loop: "{{ firewall_allowed_services | default(['http', 'https']) }}"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
     - firewall_allowed_services is defined
     - firewall_allowed_services | length > 0
 
-- name: "[SEC-007] Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)"
-  ansible.posix.firewalld:
-    zone: "{{ (firewall_source_zone | default('trusted')) if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else (firewall_interface_zone | default('public')) }}"
-    port: "{{ item }}/tcp"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  loop: "{{ firewall_allowed_tcp_ports | default([ssh_port | default(22)]) }}"
-  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
-
 - name: "[SEC-007-SSH] Ensure SSH service is enabled in source zone"
   ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('trusted') }}"
+    zone: "{{ firewall_source_zone | default('work') }}"
     service: ssh
     permanent: yes
     state: enabled
@@ -214,6 +206,72 @@
     - ansible_distribution_major_version | int >= 7
     - ssh_allowed_source_ips is defined
     - ssh_allowed_source_ips | length > 0
+
+- name: "[SEC-007-DMZ] Configure dmz zone for monitoring sources (RHEL/Rocky 7+)"
+  ansible.posix.firewalld:
+    zone: dmz
+    source: "{{ item }}"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ monitoring_allowed_subnets | default([]) }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - monitoring_allowed_subnets is defined
+    - monitoring_allowed_subnets | length > 0
+
+- name: "[SEC-007-DMZ-PORTS] Allow monitoring metric collection ports in dmz zone (RHEL/Rocky 7+)"
+  ansible.posix.firewalld:
+    zone: dmz
+    port: "{{ item }}"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ firewall_dmz_ports | default([]) }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - firewall_dmz_ports is defined
+    - firewall_dmz_ports | length > 0
+
+- name: "[SEC-007-INTERNAL] Configure internal zone for private VPC subnets (RHEL/Rocky 7+)"
+  ansible.posix.firewalld:
+    zone: internal
+    source: "{{ item }}"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ internal_allowed_subnets | default([]) }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - internal_allowed_subnets is defined
+    - internal_allowed_subnets | length > 0
+
+- name: "[SEC-007-INTERNAL-PORTS] Allow internal backend ports in internal zone (RHEL/Rocky 7+)"
+  ansible.posix.firewalld:
+    zone: internal
+    port: "{{ item }}"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ firewall_internal_ports | default([]) }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - firewall_internal_ports is defined
+    - firewall_internal_ports | length > 0
+
+- name: "[SEC-007] Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)"
+  ansible.posix.firewalld:
+    zone: "{{ (firewall_source_zone | default('work')) if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else (firewall_interface_zone | default('public')) }}"
+    port: "{{ item }}/tcp"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ firewall_allowed_tcp_ports | default([ssh_port | default(22)]) }}"
+  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
 
 # 4. Firewall configuration (iptables for CentOS 6 legacy)
 - name: "[SEC-008] Allow incoming TCP ports via iptables (CentOS 6)"
@@ -311,7 +369,7 @@
 
 - name: "[SEC-020] Configure custom firewall ingress rules with source IP restrictions (firewalld)"
   ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('trusted') }}"
+    zone: "{{ firewall_source_zone | default('work') }}"
     source: "{{ item }}"
     permanent: yes
     state: enabled
@@ -325,7 +383,7 @@
 
 - name: "[SEC-020-RICH] Configure custom rich rules with source IP restrictions (firewalld)"
   ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('trusted') }}"
+    zone: "{{ firewall_source_zone | default('work') }}"
     rich_rule: 'rule family="ipv4" source address="{{ item.1 }}" port port="{{ item.0.port }}" protocol="{{ item.0.proto | default("tcp") }}" accept'
     permanent: yes
     state: enabled

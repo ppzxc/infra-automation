@@ -14,13 +14,25 @@ ssh_allowed_source_ips: []
 firewall_allowed_tcp_ports:
   - "{{ ssh_port | default(22) }}"
 
-# Firewalld 허용 기본 서비스 (포트 대신 서비스 객체 기반 관리 지원)
-firewall_allowed_services: []
+# Firewalld 허용 기본 서비스 (public 존 서비스 관리)
+firewall_allowed_services:
+  - "http"
+  - "https"
 
-# Firewalld 존 아키텍처 (Standard Model: Public 인터페이스 + Trusted/Work 소스 존)
+# Firewalld 4대 기본 존 아키텍처 (public, dmz, work, internal)
 firewall_interface_zone: "public"
-firewall_source_zone: "trusted"
+firewall_source_zone: "work"
 firewall_interface: "{{ ansible_default_ipv4.interface | default('bond0') }}"
+
+# 존별 소스 IP 및 포트 분리 정의
+internal_allowed_subnets:
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+
+firewall_internal_ports: []
+firewall_dmz_ports:
+  - "9100/tcp"
 
 # 강화된 인바운드 방화벽 규칙 (포트/프로토콜/출발지 공인 IP 목록 지정)
 # sources가 정의된 경우 특정 공인 IP/서브넷에 대해서만 개방 (Rich Rule / UFW from_ip)
