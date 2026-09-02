@@ -83,7 +83,18 @@
     - ansible_distribution_major_version | int >= 7
   failed_when: false
 
-
+- name: "[SEC-006-DOCKER-POLICY] Create egress forwarding policy from docker to physical drop zone"
+  ansible.builtin.shell: |
+    firewall-cmd --permanent --new-policy docker-to-drop 2>/dev/null || true
+    firewall-cmd --permanent --policy docker-to-drop --add-ingress-zone docker
+    firewall-cmd --permanent --policy docker-to-drop --add-egress-zone {{ firewall_interface_zone | default('drop') }}
+    firewall-cmd --permanent --policy docker-to-drop --set-target ACCEPT
+    firewall-cmd --reload
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+  changed_when: false
+  failed_when: false
 
 - name: "[SEC-006-DOCKER-MASQ] Ensure masquerade is enabled for outbound traffic (NAT)"
   ansible.posix.firewalld:
@@ -96,6 +107,7 @@
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
   failed_when: false
+
 
 - name: "[SEC-006-CLEAN-PUBLIC] Clean up public zone default services"
   ansible.posix.firewalld:
