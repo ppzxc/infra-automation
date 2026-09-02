@@ -79,12 +79,14 @@
     state: enabled
     immediate: yes
   loop:
-    - "172.17.0.0/16"
-    - "172.18.0.0/16"
+    - "172.16.0.0/12"
+    - "10.0.0.0/8"
+    - "192.168.0.0/16"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
   failed_when: false
+
 
 - name: "[SEC-006-DOCKER-MASQ] Ensure masquerade is enabled for outbound traffic (NAT)"
   ansible.posix.firewalld:
