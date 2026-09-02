@@ -39,6 +39,7 @@ ansible/inventory/host_vars/*.yaml
 .vault_pass*
 *.vault
 .ansible/
+collections/
 *.retry
 
 # Python Cache & Testing
