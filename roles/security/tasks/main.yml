@@ -129,6 +129,22 @@
     - ssh_allowed_source_ips is defined
   failed_when: false
 
+- name: "[SEC-006-CLEAN-STALE-SOURCES] Clean up stale sources from conflicting zones (work, drop, public)"
+  ansible.posix.firewalld:
+    zone: "{{ item.0 }}"
+    source: "{{ item.1 }}"
+    permanent: yes
+    state: disabled
+    immediate: yes
+  loop: "{{ ['work', 'drop', 'public'] | product(ssh_allowed_source_ips | default([])) | list }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - item.0 != (firewall_source_zone | default('trusted'))
+    - ssh_allowed_source_ips is defined
+    - ssh_allowed_source_ips | length > 0
+  failed_when: false
+
 - name: "[SEC-007-SERVICES] Allow standard services via firewalld (RHEL/Rocky 7+)"
   ansible.posix.firewalld:
     zone: "{{ firewall_interface_zone | default('public') }}"
