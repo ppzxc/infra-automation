@@ -54,17 +54,16 @@ firewall_ingress_rules: []
 
 
 
-admin_allowed_subnets:
+# Firewalld 존별 서브넷 매핑 (internal=사내망/VPC, dmz=모니터링 수집기 IP)
+internal_allowed_subnets:
   - "10.0.0.0/8"
   - "172.16.0.0/12"
   - "192.168.0.0/16"
-  - "127.0.0.1/32"
 
-monitoring_allowed_subnets:
-  - "10.0.0.0/8"
-  - "172.16.0.0/12"
-  - "192.168.0.0/16"
-  - "127.0.0.1/32"
+monitoring_allowed_subnets: []
+# 예시: Prometheus / 메트릭 수집 서버 IP 지정
+# monitoring_allowed_subnets:
+#   - "192.168.10.50/32"
 
 # OpenTelemetry 중앙 관제 타겟 설정
 otel_target_endpoint: "127.0.0.1:4317"

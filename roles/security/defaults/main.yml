@@ -52,11 +52,7 @@ admin_allowed_subnets:
   - "192.168.0.0/16"
   - "127.0.0.1/32"
 
-monitoring_allowed_subnets:
-  - "10.0.0.0/8"
-  - "172.16.0.0/12"
-  - "192.168.0.0/16"
-  - "127.0.0.1/32"
+monitoring_allowed_subnets: []
 
 # SELinux (permissive 모드로 운영 안정성 확보 및 감사 로그 수집)
 selinux_mode: "permissive"

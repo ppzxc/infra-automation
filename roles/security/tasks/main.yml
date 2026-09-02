@@ -167,6 +167,33 @@
     - ssh_allowed_source_ips is defined
   failed_when: false
 
+- name: "[SEC-020] Configure custom firewall ingress rules with source IP restrictions (firewalld)"
+  ansible.posix.firewalld:
+    zone: "{{ firewall_source_zone | default('work') }}"
+    source: "{{ item }}"
+    permanent: yes
+    state: enabled
+    immediate: yes
+  loop: "{{ ssh_allowed_source_ips | default([]) }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - ssh_allowed_source_ips is defined
+    - ssh_allowed_source_ips | length > 0
+
+- name: "[SEC-007-SSH] Ensure SSH service is enabled in source zone"
+  ansible.posix.firewalld:
+    zone: "{{ firewall_source_zone | default('work') }}"
+    service: ssh
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - ssh_allowed_source_ips is defined
+    - ssh_allowed_source_ips | length > 0
+
 - name: "[SEC-006-CLEAN-STALE-SOURCES] Clean up stale sources from conflicting zones (trusted, drop)"
   ansible.posix.firewalld:
     zone: "{{ item.0 }}"
@@ -178,6 +205,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
+    - item.0 != (firewall_source_zone | default('work'))
   failed_when: false
 
 - name: "[SEC-007-SERVICES] Allow standard services via firewalld (RHEL/Rocky 7+)"
@@ -193,19 +221,6 @@
     - ansible_distribution_major_version | int >= 7
     - firewall_allowed_services is defined
     - firewall_allowed_services | length > 0
-
-- name: "[SEC-007-SSH] Ensure SSH service is enabled in source zone"
-  ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('work') }}"
-    service: ssh
-    permanent: yes
-    state: enabled
-    immediate: yes
-  when:
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-    - ssh_allowed_source_ips is defined
-    - ssh_allowed_source_ips | length > 0
 
 - name: "[SEC-007-DMZ] Configure dmz zone for monitoring sources (RHEL/Rocky 7+)"
   ansible.posix.firewalld:
@@ -366,20 +381,6 @@
   when:
     - ansible_os_family == "Debian"
     - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
-
-- name: "[SEC-020] Configure custom firewall ingress rules with source IP restrictions (firewalld)"
-  ansible.posix.firewalld:
-    zone: "{{ firewall_source_zone | default('work') }}"
-    source: "{{ item }}"
-    permanent: yes
-    state: enabled
-    immediate: yes
-  loop: "{{ ssh_allowed_source_ips | default([]) }}"
-  when:
-    - ansible_os_family == "RedHat"
-    - ansible_distribution_major_version | int >= 7
-    - ssh_allowed_source_ips is defined
-    - ssh_allowed_source_ips | length > 0
 
 - name: "[SEC-020-RICH] Configure custom rich rules with source IP restrictions (firewalld)"
   ansible.posix.firewalld:
