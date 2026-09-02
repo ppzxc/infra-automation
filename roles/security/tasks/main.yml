@@ -103,6 +103,7 @@
 
 - name: "[SEC-006-POLICY] Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)"
   ansible.builtin.shell: |
+    firewall-cmd --permanent --delete-policy=docker-to-drop 2>/dev/null || true
     firewall-cmd --permanent --new-policy docker-to-ext 2>/dev/null || true
     firewall-cmd --permanent --policy docker-to-ext --add-ingress-zone docker
     firewall-cmd --permanent --policy docker-to-ext --add-egress-zone {{ firewall_interface_zone | default('public') }}
