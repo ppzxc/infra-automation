@@ -149,4 +149,31 @@ def test_security_enhanced_firewall_ingress_rules():
     assert "[SEC-020]" in tasks_content, "Task [SEC-020] missing in security tasks"
     assert "[SEC-021]" in tasks_content, "Task [SEC-021] missing in security tasks"
 
+def test_docker_engine_adr0002_integration():
+    """Verify docker_engine ADR-0002 account, directory, and permission standard"""
+    defaults_file = ROOT_DIR / "roles" / "docker_engine" / "defaults" / "main.yml"
+    tasks_file = ROOT_DIR / "roles" / "docker_engine" / "tasks" / "main.yml"
+    doc_file = ROOT_DIR / "docs" / "docker_engine.md"
+
+    with open(defaults_file, 'r', encoding='utf-8') as f:
+        defaults = yaml.safe_load(f)
+    assert defaults.get("docker_mgmt_group") == "dockermgmt"
+    assert defaults.get("docker_mgmt_gid") == 2000
+    assert defaults.get("docker_svc_user") == "dockersvc"
+    assert defaults.get("docker_svc_uid") == 998
+    assert "docker_fhs_directories" in defaults
+
+    tasks_content = tasks_file.read_text(encoding='utf-8')
+    assert "[DOC-014]" in tasks_content
+    assert "[DOC-015]" in tasks_content
+    assert "[DOC-016]" in tasks_content
+    assert "[DOC-017]" in tasks_content
+    assert "[DOC-018]" in tasks_content
+    assert "[DOC-019]" in tasks_content
+    assert "[DOC-020]" in tasks_content
+
+    doc_content = doc_file.read_text(encoding='utf-8')
+    assert "DOC-014" in doc_content
+    assert "DOC-020" in doc_content
+
 

@@ -7,3 +7,27 @@ docker_metrics_enabled: true
 docker_metrics_address: "127.0.0.1:9323"
 docker_userland_proxy: false
 docker_iptables: true
+
+# ==============================================================================
+# ADR-0002: Docker Account, Directory Layout, and Permission Standard
+# ==============================================================================
+docker_mgmt_group: "dockermgmt"
+docker_mgmt_gid: 2000
+docker_svc_user: "dockersvc"
+docker_svc_uid: 998
+docker_operators:
+  - "{{ admin_user | default('ppzxc') }}"
+
+docker_fhs_directories:
+  - path: "/opt/services"
+    owner: "root"
+    group: "{{ docker_mgmt_group }}"
+    mode: "2775"
+  - path: "/data"
+    owner: "{{ docker_svc_user }}"
+    group: "{{ docker_mgmt_group }}"
+    mode: "2770"
+  - path: "/backup"
+    owner: "{{ docker_svc_user }}"
+    group: "{{ docker_mgmt_group }}"
+    mode: "2770"

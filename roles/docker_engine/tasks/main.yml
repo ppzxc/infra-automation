@@ -58,7 +58,7 @@
       - curl
       - gnupg
     state: present
-    update_cache: yes
+    update_cache: true
   when: ansible_os_family == "Debian"
 
 - name: "[DOC-006] Create keyrings directory for apt (Debian/Ubuntu)"
@@ -95,6 +95,7 @@
       - containerd.io
       - docker-buildx-plugin
       - docker-compose-plugin
+      - acl
     state: present
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
@@ -134,8 +135,91 @@
   ansible.builtin.user:
     name: "{{ admin_user | default('ppzxc') }}"
     groups: docker
-    append: yes
+    append: true
   when:
     - admin_user is defined
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+# ==============================================================================
+# 7. ADR-0002 Account, Directory Layout, and Permission Inheritance Standard
+# ==============================================================================
+- name: "[DOC-014] Ensure dockermgmt system group exists (GID 2000)"
+  ansible.builtin.group:
+    name: "{{ docker_mgmt_group }}"
+    gid: "{{ docker_mgmt_gid }}"
+    state: present
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[DOC-015] Ensure dockersvc system user exists (UID 998)"
+  ansible.builtin.user:
+    name: "{{ docker_svc_user }}"
+    uid: "{{ docker_svc_uid }}"
+    group: "{{ docker_mgmt_group }}"
+    groups: docker
+    append: true
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+    state: present
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[DOC-016] Create FHS standard service and data directories (/opt/services, /data, /backup)"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+    state: directory
+  loop: "{{ docker_fhs_directories }}"
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[DOC-017] Configure POSIX default and access ACLs for docker management"
+  ansible.posix.acl:
+    path: "{{ item.0.path }}"
+    entity: "{{ docker_mgmt_group }}"
+    etype: group
+    permissions: rwx
+    default: "{{ item.1 }}"
+    state: present
+  loop: "{{ docker_fhs_directories | product([true, false]) | list }}"
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[DOC-018] Deploy docker management session umask script (/etc/profile.d/docker_mgmt.sh)"
+  ansible.builtin.copy:
+    dest: /etc/profile.d/docker_mgmt.sh
+    content: |
+      # Managed by Ansible - ADR-0002 docker management session umask
+      if id -nG "$USER" 2>/dev/null | grep -qw "dockermgmt"; then
+          umask 002
+      fi
+    owner: root
+    group: root
+    mode: '0644'
+  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[DOC-019] Add admin and operator users to dockermgmt group"
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups:
+      - "{{ docker_mgmt_group }}"
+      - docker
+    append: true
+  loop: "{{ docker_operators | default([admin_user | default('ppzxc')]) }}"
+  when:
+    - (docker_operators is defined and docker_operators | length > 0) or admin_user is defined
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+- name: "[DOC-020] Create convenience symlinks in operator home directory"
+  ansible.builtin.file:
+    src: "{{ item.src }}"
+    dest: "/home/{{ item.user }}/{{ item.dest }}"
+    state: link
+    force: false
+  loop:
+    - { user: "{{ admin_user | default('ppzxc') }}", src: "/opt/services", dest: "services" }
+    - { user: "{{ admin_user | default('ppzxc') }}", src: "/data", dest: "data" }
+  when:
+    - admin_user is defined
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  failed_when: false
 

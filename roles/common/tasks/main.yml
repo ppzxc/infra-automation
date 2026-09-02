@@ -15,7 +15,7 @@
   ansible.builtin.apt:
     name: "{{ common_packages + ['iproute2', 'lsb-release', 'gnupg', 'htop', 'iotop', 'sudo', 'netcat-openbsd'] }}"
     state: present
-    update_cache: yes
+    update_cache: true
     cache_valid_time: 3600
   when: ansible_os_family == "Debian"
 
@@ -55,7 +55,7 @@
     src: /usr/bin/batcat
     dest: /usr/local/bin/bat
     state: link
-    force: yes
+    force: true
   when: ansible_os_family == "Debian"
   failed_when: false
 
@@ -87,8 +87,8 @@
     name: "{{ item.key }}"
     value: "{{ item.value }}"
     state: present
-    reload: yes
-    sysctl_set: yes
+    reload: true
+    sysctl_set: true
   loop: "{{ sysctl_settings | dict2items }}"
 
 - name: "[COMMON-011-IPV6] Disable IPv6 via sysctl"
@@ -96,8 +96,8 @@
     name: "{{ item.key }}"
     value: "{{ item.value }}"
     state: present
-    reload: yes
-    sysctl_set: yes
+    reload: true
+    sysctl_set: true
   loop: "{{ sysctl_ipv6_settings | dict2items }}"
   when: disable_ipv6 | default(false) | bool
 
@@ -106,8 +106,8 @@
     name: "{{ item.key }}"
     value: "{{ item.value }}"
     state: present
-    reload: yes
-    sysctl_set: yes
+    reload: true
+    sysctl_set: true
   loop: "{{ sysctl_extra_settings | default({}) | dict2items }}"
   when:
     - sysctl_extra_settings is defined
@@ -123,9 +123,9 @@
     name: "{{ admin_user }}"
     group: "{{ admin_user }}"
     groups: "{{ 'sudo' if ansible_os_family == 'Debian' else 'wheel' }}"
-    append: yes
+    append: true
     shell: /bin/bash
-    create_home: yes
+    create_home: true
     state: present
 
 - name: "[COMMON-014] Enable passwordless sudo for admin user"

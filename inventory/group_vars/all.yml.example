@@ -9,6 +9,7 @@ admin_groups:
   - sudo
   - wheel
   - docker
+  - dockermgmt
 
 # 관리자 SSH 공개키 목록 (비상용 또는 초기 부트스트랩 접근 키)
 admin_ssh_public_keys:

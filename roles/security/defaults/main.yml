@@ -10,6 +10,9 @@ ssh_client_alive_count_max: 2
 # SSH 허용 출발지 IP 목록 (정의 시 지정된 IP/서브넷에 한해서만 ssh_port 허용, 비어있을 경우 0.0.0.0/0 개방)
 ssh_allowed_source_ips: []
 
+# 정리할 구버전/오래된 방화벽 소스 IP 목록 (미정의 시 ssh_allowed_source_ips 사용)
+firewall_stale_source_ips: []
+
 # 방화벽 허용 기본 포트 (하위 호환성 유지)
 firewall_allowed_tcp_ports:
   - "{{ ssh_port | default(22) }}"

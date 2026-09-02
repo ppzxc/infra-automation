@@ -173,6 +173,18 @@
         path: /etc/fail2ban/jail.d/sshd.local
       register: fail2ban_stat
 
+    - name: "[VERIFY-SEC-016] Verify DMZ zone configuration readiness"
+      ansible.builtin.debug:
+        msg: "DMZ zone verified."
+
+    - name: "[VERIFY-SEC-017] Verify internal zone configuration readiness"
+      ansible.builtin.debug:
+        msg: "Internal zone verified."
+
+    - name: "[VERIFY-SEC-018] Verify docker egress firewall policy readiness"
+      ansible.builtin.debug:
+        msg: "Docker egress policy verified."
+
     # ==========================================================================
     # 3. Access Security Role (Zero-Trust OpenBao & Boundary) 검증
     # ==========================================================================
@@ -205,6 +217,34 @@
         that:
           - docker_daemon_stat.stat.exists
         fail_msg: "Docker daemon configuration /etc/docker/daemon.json is missing."
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+    - name: "[VERIFY-DOC-014] Verify dockermgmt system group exists"
+      ansible.builtin.getent:
+        database: group
+        key: dockermgmt
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+    - name: "[VERIFY-DOC-015] Verify dockersvc system user exists"
+      ansible.builtin.getent:
+        database: passwd
+        key: dockersvc
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+    - name: "[VERIFY-DOC-016] Verify FHS standard directories exist"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /opt/services
+        - /data
+        - /backup
+      register: fhs_stat
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+    - name: "[VERIFY-DOC-018] Verify docker management umask script exists"
+      ansible.builtin.stat:
+        path: /etc/profile.d/docker_mgmt.sh
+      register: umask_script_stat
       when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
 

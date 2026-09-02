@@ -66,6 +66,9 @@
 | `SEC-013` | `Ensure Auditd service is running and enabled` | `ansible.builtin.service` | RHEL / Rocky | 서비스 기동 상태면 `ok` |
 | `SEC-014` | `Configure Sudo timestamp timeout and log file` | `ansible.builtin.copy` | All | Checksum 비교 (`validate: visudo`) |
 | `SEC-015` | `Deploy Fail2ban SSH jail configuration` | `ansible.builtin.template` | All | Checksum 비교 (`fail2ban-sshd.local.j2`) |
+| `SEC-016` | `Configure dmz zone for monitoring sources (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | DMZ 서브넷 기등록 시 `ok` |
+| `SEC-017` | `Configure internal zone for private VPC subnets (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | Internal 서브넷 기등록 시 `ok` |
+| `SEC-018` | `Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)` | `ansible.builtin.shell` | RHEL 9+ | 방화벽 정책 일치 시 `ok` |
 | `SEC-019` | `Configure custom firewall ingress rules with source IP restrictions (UFW)` | `community.general.ufw` | Debian, Ubuntu | 룰 기등록 시 `ok` |
 | `SEC-020` | `Configure custom firewall ingress rules with source IP restrictions (firewalld)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | Rich Rule 기등록 시 `ok` |
 | `SEC-021` | `Configure custom firewall ingress rules with source IP restrictions (iptables)` | `ansible.builtin.iptables` | CentOS 6 | iptables 체인 룰 확인 후 적용 |

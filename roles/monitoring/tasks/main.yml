@@ -30,7 +30,7 @@
   ansible.builtin.user:
     name: node_exporter
     state: absent
-    remove: yes
+    remove: true
   when: cleanup_legacy_node_exporter | default(true) | bool
   failed_when: false
 
@@ -47,7 +47,7 @@
 - name: "[MON-001] Create otelcol system group"
   ansible.builtin.group:
     name: "{{ otelcol_group }}"
-    system: yes
+    system: true
     state: present
   when: enable_otelcol | default(true) | bool
 
@@ -56,10 +56,10 @@
     name: "{{ otelcol_user }}"
     group: "{{ otelcol_group }}"
     groups: "{{ 'adm' if ansible_os_family == 'Debian' else 'systemd-journal' }}"
-    append: yes
-    system: yes
+    append: true
+    system: true
     shell: /sbin/nologin
-    create_home: no
+    create_home: false
     state: present
   when: enable_otelcol | default(true) | bool
 
@@ -67,7 +67,7 @@
   ansible.builtin.unarchive:
     src: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ otelcol_version }}/otelcol-contrib_{{ otelcol_version }}_linux_{{ otelcol_arch }}.tar.gz"
     dest: /usr/local/bin
-    remote_src: yes
+    remote_src: true
     extra_opts:
       - "otelcol-contrib"
     creates: /usr/local/bin/otelcol-contrib
@@ -112,7 +112,7 @@
       ExecStart=/usr/local/bin/otelcol-contrib --config={{ otelcol_config_path }}
       Restart=always
       RestartSec=5
-      LimitNOFILE=65536
+      LimitNOFILE=65535
       NoNewPrivileges=true
       ProtectSystem=full
       ProtectHome=true

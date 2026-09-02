@@ -63,9 +63,9 @@
   ansible.posix.firewalld:
     zone: drop
     interface: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: disabled
-    immediate: yes
+    immediate: true
   loop:
     - "{{ firewall_interface | default(ansible_default_ipv4.interface | default('bond0')) }}"
     - "bond0"
@@ -81,9 +81,9 @@
   ansible.posix.firewalld:
     zone: "{{ firewall_interface_zone | default('public') }}"
     interface: "{{ firewall_interface | default(ansible_default_ipv4.interface | default('bond0')) }}"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
@@ -104,7 +104,7 @@
   changed_when: false
   failed_when: false
 
-- name: "[SEC-006-POLICY] Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)"
+- name: "[SEC-018] Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)"
   ansible.builtin.shell: |
     firewall-cmd --permanent --delete-policy=docker-to-drop 2>/dev/null || true
     firewall-cmd --permanent --new-policy docker-to-ext 2>/dev/null || true
@@ -124,9 +124,9 @@
   ansible.posix.firewalld:
     zone: public
     service: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: disabled
-    immediate: yes
+    immediate: true
   loop:
     - ssh
     - cockpit
@@ -141,9 +141,9 @@
   ansible.posix.firewalld:
     zone: "{{ item.0 }}"
     service: "{{ item.1 }}"
-    permanent: yes
+    permanent: true
     state: disabled
-    immediate: yes
+    immediate: true
   loop:
     - ["dmz", "ssh"]
     - ["work", "dhcpv6-client"]
@@ -161,9 +161,9 @@
   ansible.posix.firewalld:
     zone: public
     rich_rule: 'rule family="ipv4" source address="{{ item }}" port port="{{ ssh_port | default(22) }}" protocol="tcp" accept'
-    permanent: yes
+    permanent: true
     state: disabled
-    immediate: yes
+    immediate: true
   loop: "{{ ssh_allowed_source_ips | default([]) }}"
   when:
     - ansible_os_family == "RedHat"
@@ -175,9 +175,9 @@
   ansible.posix.firewalld:
     zone: "{{ firewall_source_zone | default('work') }}"
     source: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ ssh_allowed_source_ips | default([]) }}"
   when:
     - ansible_os_family == "RedHat"
@@ -189,9 +189,9 @@
   ansible.posix.firewalld:
     zone: "{{ firewall_source_zone | default('work') }}"
     service: ssh
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
@@ -202,10 +202,10 @@
   ansible.posix.firewalld:
     zone: "{{ item.0 }}"
     source: "{{ item.1 }}"
-    permanent: yes
+    permanent: true
     state: disabled
-    immediate: yes
-  loop: "{{ ['trusted', 'drop'] | product((ssh_allowed_source_ips | default([])) + ['59.25.177.53', '39.116.31.0/24']) | list }}"
+    immediate: true
+  loop: "{{ ['trusted', 'drop'] | product(firewall_stale_source_ips | default(ssh_allowed_source_ips | default([]))) | list }}"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
@@ -216,9 +216,9 @@
   ansible.posix.firewalld:
     zone: "{{ firewall_interface_zone | default('public') }}"
     service: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ firewall_allowed_services | default(['http', 'https']) }}"
   when:
     - ansible_os_family == "RedHat"
@@ -226,13 +226,13 @@
     - firewall_allowed_services is defined
     - firewall_allowed_services | length > 0
 
-- name: "[SEC-007-DMZ] Configure dmz zone for monitoring sources (RHEL/Rocky 7+)"
+- name: "[SEC-016] Configure dmz zone for monitoring sources (RHEL/Rocky 7+)"
   ansible.posix.firewalld:
     zone: dmz
     source: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ monitoring_allowed_subnets | default([]) }}"
   when:
     - ansible_os_family == "RedHat"
@@ -244,9 +244,9 @@
   ansible.posix.firewalld:
     zone: dmz
     port: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ firewall_dmz_ports | default([]) }}"
   when:
     - ansible_os_family == "RedHat"
@@ -254,13 +254,13 @@
     - firewall_dmz_ports is defined
     - firewall_dmz_ports | length > 0
 
-- name: "[SEC-007-INTERNAL] Configure internal zone for private VPC subnets (RHEL/Rocky 7+)"
+- name: "[SEC-017] Configure internal zone for private VPC subnets (RHEL/Rocky 7+)"
   ansible.posix.firewalld:
     zone: internal
     source: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ internal_allowed_subnets | default([]) }}"
   when:
     - ansible_os_family == "RedHat"
@@ -272,9 +272,9 @@
   ansible.posix.firewalld:
     zone: internal
     port: "{{ item }}"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ firewall_internal_ports | default([]) }}"
   when:
     - ansible_os_family == "RedHat"
@@ -286,9 +286,9 @@
   ansible.posix.firewalld:
     zone: "{{ (firewall_source_zone | default('work')) if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else (firewall_interface_zone | default('public')) }}"
     port: "{{ item }}/tcp"
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ (firewall_allowed_tcp_ports | default([])) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list }}"
   when:
     - ansible_os_family == "RedHat"
@@ -394,9 +394,9 @@
   ansible.posix.firewalld:
     zone: "{{ firewall_source_zone | default('work') }}"
     rich_rule: 'rule family="ipv4" source address="{{ item.1 }}" port port="{{ item.0.port }}" protocol="{{ item.0.proto | default("tcp") }}" accept'
-    permanent: yes
+    permanent: true
     state: enabled
-    immediate: yes
+    immediate: true
   loop: "{{ firewall_ingress_rules | default([]) | subelements('sources', skip_missing=True) }}"
   when:
     - ansible_os_family == "RedHat"
