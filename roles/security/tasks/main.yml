@@ -89,13 +89,23 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
 
-- name: "[SEC-006-MASQ] Ensure masquerade is disabled on public interface zone (preserve client remote IP)"
+- name: "[SEC-006-MASQ] Ensure masquerade is disabled on all zones except external"
   ansible.posix.firewalld:
-    zone: "{{ firewall_interface_zone | default('public') }}"
+    zone: "{{ item }}"
     masquerade: no
     permanent: yes
     state: disabled
     immediate: yes
+  loop:
+    - public
+    - work
+    - dmz
+    - internal
+    - docker
+    - drop
+    - block
+    - home
+    - trusted
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
@@ -109,7 +119,7 @@
     firewall-cmd --permanent --policy docker-to-ext --add-egress-zone {{ firewall_interface_zone | default('public') }}
     firewall-cmd --permanent --policy docker-to-ext --set-target ACCEPT
     firewall-cmd --permanent --policy docker-to-ext --add-masquerade
-    firewall-cmd --permanent --zone=docker --add-masquerade 2>/dev/null || true
+    firewall-cmd --permanent --zone=docker --remove-masquerade 2>/dev/null || true
     firewall-cmd --reload
   when:
     - ansible_os_family == "RedHat"
