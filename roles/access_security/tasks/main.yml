@@ -57,24 +57,27 @@
     - enable_access_security | default(true) | bool
     - enable_openbao_ssh_ca | default(true) | bool
     - openbao_ssh_ca_public_key | default('') | length > 0
-    - admin_user is defined
     - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
 
 - name: "[ACC-006] Create admin user principals file"
   ansible.builtin.copy:
     content: |
-      {% for principal in openbao_ssh_allowed_principals %}
+      {% for principal in (item.principals | default(openbao_ssh_allowed_principals | default(['admin', item.name]))) %}
       {{ principal }}
       {% endfor %}
-    dest: "{{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}/{{ admin_user }}"
+    dest: "{{ openbao_ssh_principals_dir | default('/etc/ssh/auth_principals') }}/{{ item.name }}"
     owner: root
     group: root
     mode: '0644'
+  loop: "{{ accounts | default([]) }}"
   when:
     - enable_access_security | default(true) | bool
     - enable_openbao_ssh_ca | default(true) | bool
     - openbao_ssh_ca_public_key | default('') | length > 0
-    - admin_user is defined
+    - accounts is defined
+    - item.name is defined
+    - item.state | default('present') != 'absent'
+    - item.tier | default('user') == 'admin' or item.sudo | default(false)
     - not (ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 6)
 
 - name: "[ACC-007] Configure sshd to trust OpenBao CA Keys and AuthorizedPrincipals"

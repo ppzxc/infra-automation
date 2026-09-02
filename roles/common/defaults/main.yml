@@ -1,6 +1,11 @@
----
-timezone: "Asia/Seoul"
-locale: "en_US.UTF-8"
+# 사용자 계정 및 권한 통합 설정 (Accounts - admin, operator, user)
+accounts:
+  - name: "ppzxc"
+    tier: "admin"
+    comment: "Default Administrator"
+    shell: "/bin/bash"
+    keys: []
+
 # NTP Pool 및 개별 Time Server 분리 구성 (Standard UTC 기준, Leap Smear 미적용 소스 일원화)
 ntp_pools:
   - "kr.pool.ntp.org"

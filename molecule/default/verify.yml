@@ -39,38 +39,70 @@
           - "'vm.swappiness = 10' in sysctl_swappiness.stdout or 'vm.swappiness = 1' in sysctl_swappiness.stdout"
         fail_msg: "sysctl vm.swappiness is not configured correctly."
 
-    - name: "[VERIFY-COMMON-012] Verify admin group exists"
+    - name: "[VERIFY-COMMON-012] Verify account primary groups exist"
       ansible.builtin.getent:
         database: group
-        key: "{{ admin_user | default('ppzxc') }}"
+        key: "{{ item.name }}"
+      loop: "{{ accounts | default([]) }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') != 'absent'
 
-    - name: "[VERIFY-COMMON-013] Verify admin user exists in passwd database"
+    - name: "[VERIFY-COMMON-013] Verify accounts exist in passwd database"
       ansible.builtin.getent:
         database: passwd
-        key: "{{ admin_user | default('ppzxc') }}"
+        key: "{{ item.name }}"
+      loop: "{{ accounts | default([]) }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') != 'absent'
 
-    - name: "[VERIFY-COMMON-014] Verify passwordless sudoers configuration for admin user"
+    - name: "[VERIFY-COMMON-014] Verify passwordless sudoers configuration for admin accounts"
       ansible.builtin.stat:
-        path: "/etc/sudoers.d/90-{{ admin_user | default('ppzxc') }}"
+        path: "/etc/sudoers.d/90-{{ item.name }}"
       register: sudoers_stat
+      loop: "{{ accounts | default([]) }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') != 'absent'
+        - item.sudo | default(item.tier | default('user') == 'admin') | bool
 
-    - name: Assert sudoers file exists with correct permissions
+    - name: Assert sudoers file exists with correct permissions for admin accounts
       ansible.builtin.assert:
         that:
-          - sudoers_stat.stat.exists
-          - sudoers_stat.stat.mode == '0440'
+          - item.stat.exists
+          - item.stat.mode == '0440'
         fail_msg: "Sudoers file is missing or has incorrect permissions."
+      loop: "{{ sudoers_stat.results | default([]) }}"
+      when:
+        - item.skipped is not defined or not item.skipped
 
-    - name: "[VERIFY-COMMON-015] Verify admin SSH authorized_keys file"
+    - name: "[VERIFY-COMMON-015] Verify SSH authorized_keys file exists for accounts"
       ansible.builtin.stat:
-        path: "/home/{{ admin_user | default('ppzxc') }}/.ssh/authorized_keys"
+        path: "/home/{{ item.name }}/.ssh/authorized_keys"
       register: auth_keys_stat
+      loop: "{{ accounts | default([]) }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') != 'absent'
+        - item.keys is defined and item.keys | length > 0
 
-    - name: Assert admin SSH authorized_keys exists
+    - name: Assert SSH authorized_keys exists for accounts with keys
       ansible.builtin.assert:
         that:
-          - auth_keys_stat.stat.exists
-        fail_msg: "Admin SSH authorized_keys file was not created."
+          - item.stat.exists
+        fail_msg: "SSH authorized_keys file was not created."
+      loop: "{{ auth_keys_stat.results | default([]) }}"
+      when:
+        - item.skipped is not defined or not item.skipped
 
     - name: "[VERIFY-COMMON-016] Verify system security limits configuration"
       ansible.builtin.stat:

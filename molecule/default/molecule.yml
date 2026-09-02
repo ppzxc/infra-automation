@@ -62,9 +62,19 @@ provisioner:
     group_vars:
       all:
         timezone: "Asia/Seoul"
-        admin_user: "infra-admin"
-        admin_ssh_public_keys:
-          - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyForVerificationAdminUser test@molecule"
+        accounts:
+          - name: "infra-admin"
+            tier: "admin"
+            keys:
+              - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyForVerificationAdminUser test@molecule"
+          - name: "infra-operator"
+            tier: "operator"
+            keys:
+              - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyForOperator operator@molecule"
+          - name: "infra-viewer"
+            tier: "user"
+            keys:
+              - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyForViewer viewer@molecule"
         enable_vault_ssh_ca: false
         enable_boundary: false
         firewall_allowed_tcp_ports:

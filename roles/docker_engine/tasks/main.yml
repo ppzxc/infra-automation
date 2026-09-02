@@ -130,14 +130,19 @@
     - docker
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
-# 6. Add Admin User to docker group
+# 6. Add Admin & Docker enabled users to docker group
 - name: "[DOC-013] Add admin user to docker group"
   ansible.builtin.user:
-    name: "{{ admin_user | default('ppzxc') }}"
+    name: "{{ item.name }}"
     groups: docker
     append: true
+  loop: "{{ accounts | default([]) }}"
   when:
-    - admin_user is defined
+    - accounts is defined
+    - accounts | length > 0
+    - item.name is defined
+    - item.state | default('present') != 'absent'
+    - item.docker | default(item.tier | default('user') in ['admin', 'operator']) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
 # ==============================================================================
@@ -155,9 +160,12 @@
     name: "{{ docker_svc_user }}"
     uid: "{{ docker_svc_uid }}"
     group: "{{ docker_mgmt_group }}"
-    system: true
+    groups:
+      - "{{ docker_mgmt_group }}"
+      - docker
     shell: /sbin/nologin
     create_home: false
+    system: true
     state: present
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
@@ -169,29 +177,35 @@
     mode: "{{ item.mode }}"
     state: directory
   loop: "{{ docker_fhs_directories }}"
-  ignore_errors: "{{ ansible_check_mode }}"
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
 - name: "[DOC-017] Configure POSIX default and access ACLs for docker management"
   ansible.posix.acl:
-    path: "{{ item.0.path }}"
+    path: "{{ item.path }}"
     entity: "{{ docker_mgmt_group }}"
     etype: group
-    permissions: rwx
-    default: "{{ item.1 }}"
+    permissions: "{{ item.perms }}"
+    default: "{{ item.default }}"
     state: present
-  loop: "{{ docker_fhs_directories | product([true, false]) | list }}"
-  ignore_errors: "{{ ansible_check_mode }}"
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  loop:
+    - { path: '/opt/services', perms: 'rwx', default: true }
+    - { path: '/opt/services', perms: 'rwx', default: false }
+    - { path: '/data', perms: 'rwx', default: true }
+    - { path: '/data', perms: 'rwx', default: false }
+    - { path: '/backup', perms: 'rwx', default: true }
+    - { path: '/backup', perms: 'rwx', default: false }
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))
 
 - name: "[DOC-018] Deploy docker management session umask script (/etc/profile.d/docker_mgmt.sh)"
   ansible.builtin.copy:
-    dest: /etc/profile.d/docker_mgmt.sh
     content: |
-      # Managed by Ansible - ADR-0002 docker management session umask
-      if id -nG "$USER" 2>/dev/null | grep -qw "dockermgmt"; then
-          umask 002
+      # Enforce umask 0002 for dockermgmt group members (ADR-0002)
+      if id -Gn 2>/dev/null | grep -qw "{{ docker_mgmt_group }}"; then
+          umask 0002
       fi
+    dest: /etc/profile.d/docker_mgmt.sh
     owner: root
     group: root
     mode: '0644'
@@ -199,24 +213,33 @@
 
 - name: "[DOC-019] Add admin and operator users to dockermgmt group"
   ansible.builtin.user:
-    name: "{{ item }}"
+    name: "{{ item.name }}"
     groups:
       - "{{ docker_mgmt_group }}"
       - docker
     append: true
-  loop: "{{ docker_operators | default([admin_user | default('ppzxc')]) }}"
+  loop: "{{ accounts | default([]) }}"
   when:
-    - (docker_operators is defined and docker_operators | length > 0) or admin_user is defined
+    - accounts is defined
+    - accounts | length > 0
+    - item.name is defined
+    - item.state | default('present') != 'absent'
+    - item.docker | default(item.tier | default('user') in ['admin', 'operator']) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
 - name: "[DOC-020] Create convenience symlinks in operator home directory"
   ansible.builtin.file:
     src: "{{ item.1.src }}"
-    dest: "/home/{{ item.0 }}/{{ item.1.dest }}"
+    dest: "/home/{{ item.0.name }}/{{ item.1.dest }}"
+    owner: "{{ item.0.name }}"
+    group: "{{ item.0.name }}"
     state: link
     force: false
-  loop: "{{ (docker_operators | default([admin_user | default('ppzxc')])) | product([{'src': '/opt/services', 'dest': 'services'}, {'src': '/data', 'dest': 'data'}]) | list }}"
+  loop: "{{ accounts | default([]) | product([{'src': '/opt/services', 'dest': 'services'}, {'src': '/data', 'dest': 'data'}]) | list }}"
   when:
-    - (docker_operators is defined and docker_operators | length > 0) or admin_user is defined
+    - accounts is defined
+    - accounts | length > 0
+    - item.0.name is defined
+    - item.0.state | default('present') != 'absent'
+    - item.0.docker | default(item.0.tier | default('user') in ['admin', 'operator']) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
-

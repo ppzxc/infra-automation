@@ -3,23 +3,64 @@
 timezone: "Asia/Seoul"
 locale: "en_US.UTF-8"
 
-# 관리자 계정 및 SSH 키 설정
-admin_user: "ppzxc"
-admin_groups:
-  - sudo
-  - wheel
-  - docker
-  - dockermgmt
+# ==============================================================================
+# 시스템 사용자 계정 및 권한 통합 설정 (Accounts)
+# ==============================================================================
+# tier 기본값:
+#   - admin:    sudo(NOPASSWD:ALL) + docker(dockermgmt) + 서비스 디렉토리 링크
+#   - operator: docker(dockermgmt) + 서비스 디렉토리 링크 (sudo 없음)
+#   - user:     기본 쉘 접근만 가능 (sudo / docker 없음)
+#
+# 지원 옵션 명세:
+#   - name: (필수, string) 리눅스 계정명
+#   - tier: (선택, string: admin | operator | user, 기본값: user)
+#   - keys: (선택, list[str]) authorized_keys에 등록할 SSH 공개키 목록
+#   - sudo: (선택, bool) sudo 권한 명시적 활성화/비활성화 (미지정 시 tier 기본값 적용)
+#   - docker: (선택, bool) docker 권한 명시적 활성화/비활성화 (미지정 시 tier 기본값 적용)
+#   - shell: (선택, string, 기본값: /bin/bash) 로그인 셸
+#   - groups: (선택, list[str]) 추가 보조 그룹 목록
+#   - uid: (선택, int) 고정 UID
+#   - gid: (선택, int) 고정 GID
+#   - comment: (선택, string) 사용자 설명 (GECOS)
+#   - state: (선택, string: present | absent, 기본값: present)
+# ==============================================================================
+accounts:
+  # 1. 표준 관리자 (로컬 SSH 공개키 자동 로드)
+  - name: "ppzxc"
+    tier: "admin"
+    comment: "Chief DevOps Administrator"
+    keys:
+      - "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub', errors='ignore') | default(lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub', errors='ignore'), true) | default('', true) }}"
 
-# Docker 및 데이터 관리 권한 공유 운영자 계정 목록 (ADR-0002)
-# 등록된 사용자들은 자동으로 dockermgmt, docker 그룹 추가 및 ~/services, ~/data 심볼릭 링크 생성
-docker_operators:
-  - "{{ admin_user }}"
-# - "engineer2"
+  # 2. 추가 관리자 (SSH 키 직접 지정)
+  # - name: "devops-lead"
+  #   tier: "admin"
+  #   comment: "Infrastructure Lead"
+  #   uid: 1001
+  #   groups:
+  #     - "adm"
+  #   keys:
+  #     - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... devops-lead@company.com"
 
-# 관리자 SSH 공개키 목록 (비상용 또는 초기 부트스트랩 접근 키)
-admin_ssh_public_keys:
-  - "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub', errors='ignore') | default(lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub', errors='ignore'), true) | default('', true) }}"
+  # 3. 서비스 운영자 (sudo 없음, docker 및 ~/services, ~/data 링크 접근 가능)
+  # - name: "service-operator"
+  #   tier: "operator"
+  #   comment: "Backend Service Operator"
+  #   uid: 1002
+  #   keys:
+  #     - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... operator@company.com"
+
+  # 4. 일반 조회자/인턴 (sudo / docker 권한 없음, 쉘 접속 및 로그/모니터링 조회만 가능)
+  # - name: "intern-viewer"
+  #   tier: "user"
+  #   comment: "QA & Monitoring Viewer"
+  #   keys:
+  #     - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... intern@company.com"
+
+  # 5. 퇴사자 / 비활성화 계정 삭제 처리 예시
+  # - name: "former-employee"
+  #   state: "absent"
+
 
 # 기능 활성화 플래그
 enable_openbao_ssh_ca: false

@@ -113,38 +113,65 @@
     - sysctl_extra_settings is defined
     - sysctl_extra_settings | length > 0
 
-- name: "[COMMON-012] Ensure admin user group exists"
+- name: "[COMMON-012] Ensure account primary groups exist"
   ansible.builtin.group:
-    name: "{{ admin_user }}"
-    state: present
+    name: "{{ item.name }}"
+    gid: "{{ item.gid | default(omit) }}"
+    state: "{{ item.state | default('present') }}"
+  loop: "{{ accounts | default([]) }}"
+  when:
+    - accounts is defined
+    - accounts | length > 0
+    - item.name is defined
+    - item.state | default('present') != 'absent'
 
-- name: "[COMMON-013] Ensure admin user exists with sudo privileges"
+- name: "[COMMON-013] Ensure accounts exist with tier-specific permissions"
   ansible.builtin.user:
-    name: "{{ admin_user }}"
-    group: "{{ admin_user }}"
-    groups: "{{ 'sudo' if ansible_os_family == 'Debian' else 'wheel' }}"
+    name: "{{ item.name }}"
+    group: "{{ item.name }}"
+    groups: "{{ ( (['sudo' if ansible_os_family == 'Debian' else 'wheel'] if (item.sudo | default(item.tier | default('user') == 'admin')) else []) + (item.groups | default([])) ) | unique | join(',') if ( (['sudo' if ansible_os_family == 'Debian' else 'wheel'] if (item.sudo | default(item.tier | default('user') == 'admin')) else []) + (item.groups | default([])) ) | length > 0 else omit }}"
     append: true
-    shell: /bin/bash
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    comment: "{{ item.comment | default(omit) }}"
+    uid: "{{ item.uid | default(omit) }}"
     create_home: true
-    state: present
+    state: "{{ item.state | default('present') }}"
+    remove: "{{ true if item.state | default('present') == 'absent' else false }}"
+  loop: "{{ accounts | default([]) }}"
+  when:
+    - accounts is defined
+    - accounts | length > 0
+    - item.name is defined
 
-- name: "[COMMON-014] Enable passwordless sudo for admin user"
+- name: "[COMMON-014] Configure passwordless sudoers for admin accounts"
   ansible.builtin.copy:
-    content: "{{ admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
-    dest: "/etc/sudoers.d/90-{{ admin_user }}"
+    content: "{{ item.name }} ALL=(ALL) NOPASSWD:ALL\n"
+    dest: "/etc/sudoers.d/90-{{ item.name }}"
+    owner: root
+    group: root
     mode: '0440'
     validate: 'visudo -cf %s'
+  loop: "{{ accounts | default([]) }}"
+  when:
+    - accounts is defined
+    - accounts | length > 0
+    - item.name is defined
+    - item.state | default('present') != 'absent'
+    - item.sudo | default(item.tier | default('user') == 'admin') | bool
 
-- name: "[COMMON-015] Deploy admin SSH public keys"
+- name: "[COMMON-015] Deploy SSH public keys for accounts"
   ansible.posix.authorized_key:
-    user: "{{ admin_user }}"
-    key: "{{ item }}"
+    user: "{{ item.0.name }}"
+    key: "{{ item.1 }}"
     state: present
-  loop: "{{ admin_ssh_public_keys | default([]) | map('trim') | reject('equalto', '') | list }}"
+  loop: "{{ accounts | default([]) | subelements('keys', skip_missing=True) }}"
   ignore_errors: "{{ ansible_check_mode }}"
   when:
-    - admin_ssh_public_keys is defined
-    - (admin_ssh_public_keys | default([]) | map('trim') | reject('equalto', '') | list | length) > 0
+    - accounts is defined
+    - accounts | length > 0
+    - item.0.name is defined
+    - item.0.state | default('present') != 'absent'
+    - item.1 | trim | length > 0
 
 - name: "[COMMON-016] Configure system security limits (nofile/nproc)"
   community.general.pam_limits:

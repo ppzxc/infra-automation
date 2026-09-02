@@ -29,7 +29,13 @@ def test_ansible_inventory_and_vars():
     assert all_vars_file.exists(), "group_vars/all.yml is missing"
     with open(all_vars_file, 'r', encoding='utf-8') as f:
         all_vars = yaml.safe_load(f)
-    assert "admin_user" in all_vars, "admin_user is not defined in all.yml"
+    assert "accounts" in all_vars, "accounts is not defined in all.yml"
+    assert isinstance(all_vars["accounts"], list), "accounts must be a list"
+    assert len(all_vars["accounts"]) > 0, "accounts list must not be empty"
+    for acc in all_vars["accounts"]:
+        assert "name" in acc, f"account {acc} missing 'name'"
+        assert "tier" in acc, f"account {acc} missing 'tier'"
+        assert acc["tier"] in ["admin", "operator", "user"], f"Invalid tier {acc['tier']}"
     assert "timezone" in all_vars, "timezone is not defined in all.yml"
     assert "otel_target_endpoint" in all_vars, "otel_target_endpoint is not defined in all.yml"
 
