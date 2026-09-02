@@ -11,6 +11,12 @@ admin_groups:
   - docker
   - dockermgmt
 
+# Docker 및 데이터 관리 권한 공유 운영자 계정 목록 (ADR-0002)
+# 등록된 사용자들은 자동으로 dockermgmt, docker 그룹 추가 및 ~/services, ~/data 심볼릭 링크 생성
+docker_operators:
+  - "{{ admin_user }}"
+# - "engineer2"
+
 # 관리자 SSH 공개키 목록 (비상용 또는 초기 부트스트랩 접근 키)
 admin_ssh_public_keys:
   - "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub', errors='ignore') | default(lookup('file', lookup('env', 'HOME') + '/.ssh/id_rsa.pub', errors='ignore'), true) | default('', true) }}"
