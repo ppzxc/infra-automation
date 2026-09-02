@@ -289,8 +289,12 @@
     permanent: yes
     state: enabled
     immediate: yes
-  loop: "{{ firewall_allowed_tcp_ports | default([ssh_port | default(22)]) }}"
-  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
+  loop: "{{ (firewall_allowed_tcp_ports | default([])) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list }}"
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 7
+    - firewall_allowed_tcp_ports is defined
+    - ((firewall_allowed_tcp_ports | default([])) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list | length) > 0
 
 # 4. Firewall configuration (iptables for CentOS 6 legacy)
 - name: "[SEC-008] Allow incoming TCP ports via iptables (CentOS 6)"
