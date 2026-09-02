@@ -71,21 +71,18 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
 
-- name: "[SEC-006-DOCKER-ZONE] Ensure docker bridge interfaces and container subnets are trusted in firewalld"
+- name: "[SEC-006-DOCKER-ZONE] Ensure docker0 bridge interface is bound to docker zone in firewalld"
   ansible.posix.firewalld:
-    zone: trusted
-    source: "{{ item }}"
+    zone: docker
+    interface: docker0
     permanent: yes
     state: enabled
     immediate: yes
-  loop:
-    - "172.16.0.0/12"
-    - "10.0.0.0/8"
-    - "192.168.0.0/16"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
   failed_when: false
+
 
 
 - name: "[SEC-006-DOCKER-MASQ] Ensure masquerade is enabled for outbound traffic (NAT)"
