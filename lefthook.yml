@@ -1,0 +1,30 @@
+# ==============================================================================
+# Lefthook Git Hooks Configuration (node-provisioner)
+# ==============================================================================
+# Pre-Commit Pipeline:
+#   1. Gitleaks: Staged secret leaks detection (with built-in regex fallback)
+#   2. Spec Validator: 3-Way Specification & Traceability verification (Docs <-> Code <-> Tests)
+#   3. Pytest: Structure & Unit tests suite
+# ==============================================================================
+
+pre-commit:
+  parallel: false
+  commands:
+    gitleaks:
+      tags: security secrets
+      stage_fixed: true
+      run: |
+        if command -v gitleaks >/dev/null 2>&1; then
+          gitleaks protect --staged --verbose --redact
+        else
+          echo "[i] Gitleaks not found in PATH, running built-in secret scan..."
+          bash scripts/pre-commit.sh
+        fi
+
+    spec-validator:
+      tags: docs specification quality
+      run: python3 scripts/validate-ansible-specs.py
+
+    pytest:
+      tags: test unit quality
+      run: pytest tests/ -v

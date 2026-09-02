@@ -1,0 +1,15 @@
+# ==============================================================================
+# Gitleaks Configuration for node-provisioner
+# ==============================================================================
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow example variables and Molecule verification test fixtures"
+paths = [
+  '''inventory/.*\.example''',
+  '''molecule/default/.*''',
+  '''tests/.*''',
+  '''docs/.*''',
+]
