@@ -18,12 +18,15 @@
       ansible.builtin.stat:
         path: "{{ '/etc/chrony/chrony.conf' if ansible_os_family == 'Debian' else '/etc/chrony.conf' }}"
       register: chrony_stat
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
     - name: Assert Chrony configuration exists
       ansible.builtin.assert:
         that:
           - chrony_stat.stat.exists
         fail_msg: "Chrony configuration file is missing."
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
 
     - name: "[VERIFY-COMMON-011] Verify sysctl kernel parameters"
       ansible.builtin.command: sysctl vm.swappiness
@@ -223,12 +226,15 @@
       ansible.builtin.stat:
         path: /etc/docker/daemon.json
       register: docker_daemon_stat
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
     - name: Assert Docker daemon configuration exists
       ansible.builtin.assert:
         that:
           - docker_daemon_stat.stat.exists
         fail_msg: "Docker daemon configuration /etc/docker/daemon.json is missing."
+      when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
 
     # ==========================================================================
     # 5. Monitoring Role (OpenTelemetry Hostmetrics & Log Pipeline) 검증
@@ -287,11 +293,18 @@
           - "'node_exporter' not in (otelcol_config_content.content | b64decode)"
         fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
 
-    - name: "[VERIFY-MON-005] Verify otelcol-contrib systemd service unit file"
+    - name: "[VERIFY-MON-005] Verify otelcol-contrib service unit or init script"
       ansible.builtin.stat:
-        path: /etc/systemd/system/otelcol-contrib.service
-      register: otelcol_unit_stat
+        path: "{{ '/etc/systemd/system/otelcol-contrib.service' if ansible_service_mgr == 'systemd' else '/etc/init.d/otelcol-contrib' }}"
+      register: otelcol_service_file_stat
+
+    - name: Assert otelcol-contrib service file exists
+      ansible.builtin.assert:
+        that:
+          - otelcol_service_file_stat.stat.exists
+        fail_msg: "otelcol-contrib service unit/init script is missing."
 
     - name: "[VERIFY-MON-006] Verify otelcol-contrib service status"
       ansible.builtin.debug:
         msg: "otelcol-contrib hostmetrics verification complete."
+

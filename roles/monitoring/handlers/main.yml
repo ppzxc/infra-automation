@@ -1,9 +1,8 @@
----
 - name: Restart otelcol-contrib
-  ansible.builtin.systemd:
+  ansible.builtin.service:
     name: otelcol-contrib
     state: restarted
-    daemon_reload: yes
     enabled: true
   failed_when: false
+
 

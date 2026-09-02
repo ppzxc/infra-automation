@@ -1,0 +1,93 @@
+#!/bin/bash
+#
+# otelcol-contrib OpenTelemetry Collector Contrib
+#
+# chkconfig: 2345 90 10
+# description: OpenTelemetry Collector Contrib
+# processname: otelcol-contrib
+# pidfile: /var/run/otelcol-contrib.pid
+
+### BEGIN INIT INFO
+# Provides:          otelcol-contrib
+# Required-Start:    $network $local_fs $remote_fs
+# Required-Stop:     $network $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: OpenTelemetry Collector Contrib
+### END INIT INFO
+
+# Source function library
+if [ -f /etc/init.d/functions ]; then
+    . /etc/init.d/functions
+fi
+
+PROG="otelcol-contrib"
+EXEC="/usr/local/bin/$PROG"
+CONFIG="{{ otelcol_config_path }}"
+PIDFILE="/var/run/$PROG.pid"
+LOGFILE="/var/log/$PROG.log"
+USER="{{ otelcol_user }}"
+
+[ -e /etc/sysconfig/$PROG ] && . /etc/sysconfig/$PROG
+
+start() {
+    [ -x $EXEC ] || exit 5
+    [ -f $CONFIG ] || exit 6
+    echo -n $"Starting $PROG: "
+    if [ -f $PIDFILE ] && kill -0 $(cat $PIDFILE) 2>/dev/null; then
+        echo -n $"$PROG is already running."
+        echo
+        return 0
+    fi
+    nohup su -s /bin/sh $USER -c "$EXEC --config=$CONFIG" >> $LOGFILE 2>&1 &
+    PID=$!
+    echo $PID > $PIDFILE
+    echo_success 2>/dev/null || echo -n "[ OK ]"
+    echo
+    return 0
+}
+
+stop() {
+    echo -n $"Stopping $PROG: "
+    if [ -f $PIDFILE ]; then
+        PID=$(cat $PIDFILE)
+        kill -TERM $PID 2>/dev/null
+        rm -f $PIDFILE
+        echo_success 2>/dev/null || echo -n "[ OK ]"
+    else
+        echo_failure 2>/dev/null || echo -n "[ FAILED ]"
+    fi
+    echo
+    return 0
+}
+
+status_fn() {
+    if [ -f $PIDFILE ] && kill -0 $(cat $PIDFILE) 2>/dev/null; then
+        echo "$PROG (pid $(cat $PIDFILE)) is running..."
+        return 0
+    else
+        echo "$PROG is stopped"
+        return 3
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status_fn
+        ;;
+    restart)
+        stop
+        sleep 1
+        start
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|status|restart}"
+        exit 2
+esac
+exit $?

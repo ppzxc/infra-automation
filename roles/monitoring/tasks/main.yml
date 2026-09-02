@@ -74,9 +74,7 @@
     owner: root
     group: root
     mode: '0755'
-  when:
-    - enable_otelcol | default(true) | bool
-    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when: enable_otelcol | default(true) | bool
   notify: Restart otelcol-contrib
 
 - name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"
@@ -97,9 +95,7 @@
         group: "{{ otelcol_group }}"
         mode: '0640'
       notify: Restart otelcol-contrib
-  when:
-    - enable_otelcol | default(true) | bool
-    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when: enable_otelcol | default(true) | bool
 
 - name: "[MON-005] Create systemd service for otelcol-contrib"
   ansible.builtin.copy:
@@ -135,16 +131,27 @@
     - ansible_service_mgr == "systemd"
   notify: Restart otelcol-contrib
 
+- name: "[MON-005-SYSV] Create SysVinit service script for otelcol-contrib"
+  ansible.builtin.template:
+    src: otelcol-contrib.init.j2
+    dest: /etc/init.d/otelcol-contrib
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - enable_otelcol | default(true) | bool
+    - ansible_service_mgr != "systemd"
+  notify: Restart otelcol-contrib
 
 - name: "[MON-006] Ensure otelcol-contrib service is started and enabled"
-  ansible.builtin.systemd:
+  ansible.builtin.service:
     name: otelcol-contrib
     state: started
     enabled: true
   when:
     - enable_otelcol | default(true) | bool
-    - ansible_service_mgr == "systemd"
     - not ansible_check_mode or (otelcol_unit_created is defined and not otelcol_unit_created.changed)
   ignore_errors: "{{ ansible_check_mode }}"
+
 
 
