@@ -1,10 +1,9 @@
 # ==============================================================================
 # Lefthook Git Hooks Configuration (node-provisioner)
 # ==============================================================================
-# Pre-Commit Pipeline:
-#   1. Gitleaks: Staged secret leaks detection (auto-downloads to .bin/ if missing)
-#   2. Spec Validator: 3-Way Specification & Traceability verification (Docs <-> Code <-> Tests)
-#   3. Pytest: Structure & Unit tests suite
+# Pipeline Architecture:
+#   1. pre-commit (Fast ~1s): Gitleaks secret scan + Spec Validator + Pytest
+#   2. pre-push   (Integration): Molecule Multi-OS Docker testing (CentOS 6/7, Rocky 8/9, CentOS Stream 10, Ubuntu 22.04)
 # ==============================================================================
 
 pre-commit:
@@ -14,10 +13,7 @@ pre-commit:
       tags: security secrets
       stage_fixed: true
       run: |
-        # 1. 바이너리 없으면 다운로드 스크립트 실행 (.bin/gitleaks)
         bash scripts/ensure-gitleaks.sh
-        
-        # 2. PATH 또는 .bin/gitleaks 실행
         if command -v gitleaks >/dev/null 2>&1; then
           gitleaks protect --staged --verbose --redact
         elif [ -x ".bin/gitleaks" ]; then
@@ -34,3 +30,10 @@ pre-commit:
     pytest:
       tags: test unit quality
       run: pytest tests/ -v
+
+pre-push:
+  parallel: false
+  commands:
+    molecule:
+      tags: integration test container
+      run: bash scripts/run-molecule.sh
