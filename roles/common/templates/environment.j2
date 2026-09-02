@@ -1,6 +1,8 @@
 # ==============================================================================
 # Managed by Ansible - System-wide Environment Variables (/etc/environment)
 # ==============================================================================
+NODE_NAME="{{ short_hostname | default(inventory_hostname.split('.')[0]) }}"
+NODE_HOSTNAME="{{ external_hostname | default(inventory_hostname) }}"
 NODE_EXTERNAL_HOSTNAME="{{ external_hostname | default(inventory_hostname) }}"
 NODE_INTERNAL_HOSTNAME="{{ internal_hostname | default( (inventory_hostname.split('.')[0] + '.' + (internal_subdomain | default('internal')) + '.' + (inventory_hostname.split('.')[1:] | join('.'))) if (internal_subdomain is defined and internal_subdomain | length > 0) else inventory_hostname ) }}"
 NODE_SHORT_HOSTNAME="{{ short_hostname | default(inventory_hostname.split('.')[0]) }}"
@@ -14,7 +16,7 @@ NODE_ROLE="{{ node_role | default(group_names | reject('equalto', 'all') | first
 NODE_ADMIN_USER="{{ admin_user | default('ppzxc') }}"
 NODE_SSH_PORT="{{ ssh_port | default(22) }}"
 OTEL_EXPORTER_OTLP_ENDPOINT="{{ otel_target_endpoint | default('127.0.0.1:4317') }}"
-OTEL_SERVICE_NAME="{{ inventory_hostname }}"
+
 {% for k, v in (custom_environment_variables | default({})).items() %}
 {{ k }}="{{ v }}"
 {% endfor %}
