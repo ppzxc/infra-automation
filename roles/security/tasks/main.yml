@@ -90,25 +90,18 @@
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
 
 - name: "[SEC-006-MASQ] Ensure masquerade is disabled on all zones except external"
-  ansible.posix.firewalld:
-    zone: "{{ item }}"
-    masquerade: no
-    permanent: yes
-    state: disabled
-    immediate: yes
-  loop:
-    - public
-    - work
-    - dmz
-    - internal
-    - docker
-    - drop
-    - block
-    - home
-    - trusted
+  ansible.builtin.shell: |
+    for z in $(firewall-cmd --get-zones); do
+      if [ "$z" != "external" ]; then
+        firewall-cmd --permanent --zone="$z" --remove-masquerade 2>/dev/null || true
+        firewall-cmd --zone="$z" --remove-masquerade 2>/dev/null || true
+      fi
+    done
+    firewall-cmd --reload
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
+  changed_when: false
   failed_when: false
 
 - name: "[SEC-006-POLICY] Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)"
