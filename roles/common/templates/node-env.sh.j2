@@ -6,10 +6,9 @@
 # 1. Node Hostnames & Identification
 export NODE_NAME="{{ short_hostname | default(inventory_hostname.split('.')[0]) }}"
 export NODE_HOSTNAME="{{ external_hostname | default(inventory_hostname) }}"
-export NODE_EXTERNAL_HOSTNAME="{{ external_hostname | default(inventory_hostname) }}"
 export NODE_INTERNAL_HOSTNAME="{{ internal_hostname | default( (inventory_hostname.split('.')[0] + '.' + (internal_subdomain | default('internal')) + '.' + (inventory_hostname.split('.')[1:] | join('.'))) if (internal_subdomain is defined and internal_subdomain | length > 0) else inventory_hostname ) }}"
-export NODE_SHORT_HOSTNAME="{{ short_hostname | default(inventory_hostname.split('.')[0]) }}"
 export NODE_WILDCARD_HOSTNAME="{{ wildcard_hostname | default('*.' + (external_hostname | default(inventory_hostname))) }}"
+
 
 # 2. Network & Routing Facts
 export NODE_PRIMARY_IPV4="{{ primary_ipv4 | default(ansible_default_ipv4.address | default(ansible_host)) }}"

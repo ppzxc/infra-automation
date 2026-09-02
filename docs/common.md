@@ -15,7 +15,7 @@
 - **시스템 자원 보안 한도 (Ulimit)**: `nofile` 및 `nproc` 한도를 65,535로 상향하여 고부하 분산 애플리케이션 및 데몬 병목 제거.
 - **표준 관리자 계정 및 SSH 접근 환경**: 비루트 표준 관리자(`admin_user`) 계정 생성, 패스워드리스 `sudoers` 권한 부여 및 관리자 SSH 공개키 배포.
 - **시스템 전역 쉘 별칭 (Custom Shell Aliases)**: 모든 사용자가 대화형 셸에서 공통으로 사용할 수 있는 Docker, Compose, Firewalld 단축 명령어(`/etc/profile.d/99-aliases.sh`) 배포.
-- **노드 식별 및 시스템 환경변수 배포**: `NODE_EXTERNAL_HOSTNAME`, `NODE_INTERNAL_HOSTNAME`, `NODE_SHORT_HOSTNAME`, `NODE_WILDCARD_HOSTNAME`, `NODE_PRIMARY_IPV4`, `NODE_INTERFACE`, `NODE_GATEWAY`, `NODE_ENV`, `NODE_IDC`, `NODE_ROLE` 등을 `/etc/profile.d/98-node-env.sh` 및 `/etc/environment`에 자동 주입.
+- **노드 식별 및 시스템 환경변수 배포**: `NODE_NAME`(단축 관리번호), `NODE_HOSTNAME`(FQDN), `NODE_INTERNAL_HOSTNAME`, `NODE_WILDCARD_HOSTNAME`, `NODE_PRIMARY_IPV4`, `NODE_INTERFACE`, `NODE_GATEWAY`, `NODE_ENV`, `NODE_IDC`, `NODE_ROLE` 등을 `/etc/profile.d/98-node-env.sh` 및 `/etc/environment`에 자동 주입.
 
 ---
 
