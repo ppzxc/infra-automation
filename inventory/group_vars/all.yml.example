@@ -62,13 +62,47 @@ accounts:
   #   state: "absent"
 
 
+# ==============================================================================
+# OpenBao & Semaphore UI Secret Management (하이브리드 시크릿 연동)
+# ==============================================================================
+# 1. 로컬 변수(_local_*) 정의 시: 로컬 변수 우선 적용 (Git 미추적 YAML)
+# 2. VAULT_ADDR 또는 OPENBAO_ADDR 환경변수 존재 시: OpenBao KV v2에서 동적 조회
+# 3. 미정의 시: 기본값(fallback) 적용
+# ==============================================================================
+_openbao_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR', default=lookup('ansible.builtin.env', 'OPENBAO_ADDR', default='')) }}"
+
+_vault_node_secret: >-
+  {{
+    lookup(
+      'community.hashi_vault.hashi_vault',
+      'secret=secret/data/nodes/' + inventory_hostname,
+      'engine_mount_point=secret',
+      errors='ignore'
+    ) | default({}, true)
+  }}
+
+_vault_global_secret: >-
+  {{
+    lookup(
+      'community.hashi_vault.hashi_vault',
+      'secret=secret/data/global/services',
+      'engine_mount_point=secret',
+      errors='ignore'
+    ) | default({}, true)
+  }}
+
+# Ansible 노드 연결 자격증명 (Connection Credentials)
+ansible_user: "{{ _local_ansible_user | default((_vault_node_secret | default({}, true)).ansible_user | default('ppzxc')) }}"
+ansible_password: "{{ _local_ansible_password | default((_vault_node_secret | default({}, true)).ansible_password | default(omit)) }}"
+ansible_become_password: "{{ _local_ansible_become_password | default((_vault_node_secret | default({}, true)).ansible_become_password | default(ansible_password | default(omit))) }}"
+
 # 기능 활성화 플래그
 enable_openbao_ssh_ca: false
 enable_boundary: false
 enable_otelcol: true
 
 # OpenBao SSH CA 공개키
-openbao_ssh_ca_public_key: ""
+openbao_ssh_ca_public_key: "{{ _local_openbao_ssh_ca_public_key | default((_vault_global_secret | default({}, true)).openbao_ssh_ca_public_key | default('')) }}"
 
 # Boundary Worker / Target 설정
 boundary_worker_tags:
@@ -117,7 +151,7 @@ monitoring_allowed_subnets: []
 otel_target_endpoint: "127.0.0.1:4317"
 otel_target_insecure: true
 otel_target_headers: {}
-otel_auth_header: ""
+otel_auth_header: "{{ _local_otel_auth_header | default((_vault_global_secret | default({}, true)).otel_auth_header | default('')) }}"
 
 # 시스템 전역 쉘 별칭 (System-wide Custom Shell Aliases: /etc/profile.d/99-aliases.sh)
 custom_shell_aliases:
