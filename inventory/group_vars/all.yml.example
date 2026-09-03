@@ -66,16 +66,14 @@ accounts:
 # OpenBao & Semaphore UI Secret Management (하이브리드 시크릿 연동)
 # ==============================================================================
 # 1. 로컬 변수(_local_*) 정의 시: 로컬 변수 우선 적용 (Git 미추적 YAML)
-# 2. VAULT_ADDR 또는 OPENBAO_ADDR 환경변수 존재 시: OpenBao KV v2에서 동적 조회
+# 2. VAULT_ADDR 환경변수 존재 시: OpenBao KV v2에서 동적 조회
 # 3. 미정의 시: 기본값(fallback) 적용
 # ==============================================================================
-_openbao_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR', default=lookup('ansible.builtin.env', 'OPENBAO_ADDR', default='')) }}"
-
 _vault_node_secret: >-
   {{
     lookup(
       'community.hashi_vault.hashi_vault',
-      'secret=secret/data/nodes/' + inventory_hostname,
+      'secret=nodes/' + inventory_hostname,
       'engine_mount_point=secret',
       errors='ignore'
     ) | default({}, true)
@@ -85,7 +83,7 @@ _vault_global_secret: >-
   {{
     lookup(
       'community.hashi_vault.hashi_vault',
-      'secret=secret/data/global/services',
+      'secret=global/services',
       'engine_mount_point=secret',
       errors='ignore'
     ) | default({}, true)
@@ -95,11 +93,6 @@ _vault_global_secret: >-
 ansible_user: "{{ _local_ansible_user | default((_vault_node_secret | default({}, true)).ansible_user | default('ppzxc')) }}"
 ansible_password: "{{ _local_ansible_password | default((_vault_node_secret | default({}, true)).ansible_password | default(omit)) }}"
 ansible_become_password: "{{ _local_ansible_become_password | default((_vault_node_secret | default({}, true)).ansible_become_password | default(ansible_password | default(omit))) }}"
-
-# 기능 활성화 플래그
-enable_openbao_ssh_ca: false
-enable_boundary: false
-enable_otelcol: true
 
 # OpenBao SSH CA 공개키
 openbao_ssh_ca_public_key: "{{ _local_openbao_ssh_ca_public_key | default((_vault_global_secret | default({}, true)).openbao_ssh_ca_public_key | default('')) }}"

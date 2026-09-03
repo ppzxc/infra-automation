@@ -29,21 +29,21 @@
     rhel9_cis_rule_5_3_4: false
 
   tasks:
-    - name: "[AUDIT-CIS-001] Verify target OS compatibility (Rocky Linux 9 / RHEL 9)"
+    - name: "Verify target OS compatibility (Rocky Linux 9 / RHEL 9)"
       ansible.builtin.debug:
         msg: "Starting CIS Benchmark Audit for {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
       when:
         - ansible_os_family == "RedHat"
         - ansible_distribution_major_version | int == 9
 
-    - name: "[AUDIT-CIS-002] Execute ansible-lockdown CIS Audit role"
+    - name: "Execute ansible-lockdown CIS Audit role"
       ansible.builtin.include_role:
         name: ansible-lockdown.rhel9_cis
       when:
         - ansible_os_family == "RedHat"
         - ansible_distribution_major_version | int == 9
 
-    - name: "[AUDIT-CIS-003] Audit completion summary"
+    - name: "CIS audit completion summary"
       ansible.builtin.debug:
         msg: "CIS Benchmark Audit finished for {{ inventory_hostname }}. System state remains untouched."
       when:

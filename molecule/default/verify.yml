@@ -29,15 +29,18 @@
 
 
     - name: "[VERIFY-COMMON-011] Verify sysctl kernel parameters"
-      ansible.builtin.command: sysctl vm.swappiness
-      register: sysctl_swappiness
+      ansible.builtin.command: sysctl vm.swappiness fs.protected_hardlinks fs.protected_symlinks kernel.randomize_va_space
+      register: sysctl_output
       changed_when: false
 
     - name: Assert sysctl parameters
       ansible.builtin.assert:
         that:
-          - "'vm.swappiness = 10' in sysctl_swappiness.stdout or 'vm.swappiness = 1' in sysctl_swappiness.stdout"
-        fail_msg: "sysctl vm.swappiness is not configured correctly."
+          - "'vm.swappiness = 10' in sysctl_output.stdout or 'vm.swappiness = 1' in sysctl_output.stdout"
+          - "'fs.protected_hardlinks = 1' in sysctl_output.stdout"
+          - "'fs.protected_symlinks = 1' in sysctl_output.stdout"
+          - "'kernel.randomize_va_space = 2' in sysctl_output.stdout"
+        fail_msg: "sysctl parameters are not configured correctly according to baseline and hardening standards."
 
     - name: "[VERIFY-COMMON-012] Verify account primary groups exist"
       ansible.builtin.getent:

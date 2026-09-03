@@ -28,6 +28,16 @@ def test_all_group_vars_hybrid_secret_structure():
         assert "ansible_user" in content
         assert "ansible_password" in content
         assert "ansible_become_password" in content
+        # Check standard VAULT_ADDR and no OPENBAO_ADDR scope creep
+        assert "VAULT_ADDR" in content
+        assert "OPENBAO_ADDR" not in content, f"OPENBAO_ADDR should not be present in {fname}"
+        # Check correct secret paths (no duplicated prefix)
+        assert "secret=nodes/" in content
+        assert "secret=global/services" in content
+        assert "engine_mount_point=secret" in content
+        # Ensure shadow feature flags are not defined in all.yml
+        assert "enable_openbao_ssh_ca:" not in content
+        assert "enable_boundary:" not in content
 
 def test_hybrid_secret_resolution_logic():
     """Verify Jinja2 template fallback mechanism for credentials"""

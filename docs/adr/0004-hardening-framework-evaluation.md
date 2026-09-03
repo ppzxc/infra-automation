@@ -39,7 +39,7 @@
 ## 3. Decision Outcomes (결정 사항)
 
 1. **독립적 CIS 감사 파일럿 채택 (`ansible-lockdown.rhel9_cis`)**:
-   - Rocky Linux 9 노드를 대상으로 시스템 변경 없이 취약점을 진단하는 **감사 전용 모드(`audit_only: true`)** 플레이북(`playbooks/audit_rhel9_cis.yml`)을 구성합니다.
+   - Rocky Linux 9 노드를 대상으로 시스템 변경 없이 취약점을 진단하는 **감사 전용 모드(`rhel9_cis_audit_only: true`)** 플레이북(`playbooks/audit_rhel9_cis.yml`)을 구성합니다.
    - 기존 무인 프로비저닝 메인 플로우(`playbooks/provision_servers.yml`, `site.yml`)와 철저히 분리하여 운영 안정성을 보장합니다.
 
 2. **기존 역할(Security, Common) 중심의 우수 룰 내재화**:

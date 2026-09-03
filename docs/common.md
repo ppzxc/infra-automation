@@ -39,7 +39,7 @@
    - `/etc/localtime`, `/etc/timezone` : 표준 타임존 심볼릭 링크 및 설정
    - `/etc/yum.repos.d/*.repo` : CentOS 6/7의 미러 주소를 `vault.centos.org` 아카이브 주소로 교체
    - `/etc/chrony.conf` 또는 `/etc/chrony/chrony.conf` : NTP 서버 풀 템플릿 적용
-   - `/etc/sysctl.d/99-ansible.conf` (또는 `/etc/sysctl.conf`) : 커널 튜닝 파라미터(`fs.file-max`, `net.core.rmem_max`, `net.ipv4.tcp_rmem`, `net.core.netdev_max_backlog`, `vm.swappiness` 등)
+   - `/etc/sysctl.d/99-ansible.conf` (또는 `/etc/sysctl.conf`) : 커널 튜닝 및 하드닝 파라미터(`fs.file-max`, `net.core.rmem_max`, `net.ipv4.tcp_rmem`, `net.core.netdev_max_backlog`, `vm.swappiness`, `fs.protected_hardlinks`, `fs.protected_symlinks`, `kernel.randomize_va_space` 등)
    - `/etc/security/limits.d/99-limits.conf` : 시스템 보안 리소스 한도 (`nofile=65535`, `nproc=65535`)
    - `/etc/sudoers.d/90-<account>` : Admin 계층 패스워드리스 sudo 권한 파일 (`validate: visudo -cf %s`)
    - `/home/<account>/.ssh/authorized_keys` : 계정별 SSH 공개키 등록

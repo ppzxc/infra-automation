@@ -57,13 +57,22 @@ def test_adr_evaluation_doc_exists():
     assert "audit_only" in content.lower()
 
 def test_sysctl_and_security_enhanced_params():
-    """Verify safe sysctl and kernel parameters from hardening standards are incorporated in common and security roles"""
+    """Verify safe sysctl and kernel parameters from hardening standards are incorporated in common defaults, docs, and tests"""
     common_defaults_file = ROOT_DIR / "roles" / "common" / "defaults" / "main.yml"
     with open(common_defaults_file, "r", encoding="utf-8") as f:
         common_defaults = yaml.safe_load(f)
 
     sysctl_settings = common_defaults.get("sysctl_settings", {})
-    # Core hardened sysctl settings
+    # Core hardened sysctl settings in defaults
     assert sysctl_settings.get("fs.protected_hardlinks") == 1
     assert sysctl_settings.get("fs.protected_symlinks") == 1
     assert sysctl_settings.get("kernel.randomize_va_space") == 2
+
+    # 3-Way Spec Traceability verification in docs and molecule tests
+    common_doc = (ROOT_DIR / "docs" / "common.md").read_text(encoding="utf-8")
+    assert "fs.protected_hardlinks" in common_doc
+    assert "kernel.randomize_va_space" in common_doc
+
+    verify_file = (ROOT_DIR / "molecule" / "default" / "verify.yml").read_text(encoding="utf-8")
+    assert "fs.protected_hardlinks" in verify_file
+    assert "kernel.randomize_va_space" in verify_file
