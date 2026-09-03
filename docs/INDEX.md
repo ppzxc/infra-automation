@@ -17,4 +17,5 @@
 ## 2. 통합 아키텍처 및 시크릿 관리 (Integrations & Secrets)
 
 * [OpenBao & Semaphore UI Secret Management Integration](file:///home/ppzxc/projects/node-provisioner/docs/openbao_integration.md) - OpenBao KV v2 동적 시크릿 및 Semaphore UI 최신 연동 가이드
+* [Security Hardening Frameworks Evaluation ADR-0004](file:///home/ppzxc/projects/node-provisioner/docs/adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 및 파일럿 전략
 

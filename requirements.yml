@@ -13,4 +13,6 @@ collections:
   - name: community.hashi_vault
     version: ">=6.0.0"
 
-roles: []
+roles:
+  - name: ansible-lockdown.rhel9_cis
+    version: ">=1.0.0"
