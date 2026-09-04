@@ -27,7 +27,7 @@ init-hooks:
 
 
 provision:
-	@./docker-run.sh playbooks/provision.yml
+	@./docker-run.sh playbooks/site.yml
 
 provision-overseer:
 	@./docker-run.sh playbooks/provision_overseer.yml
@@ -36,7 +36,7 @@ provision-servers:
 	@./docker-run.sh playbooks/provision_servers.yml
 
 check:
-	@./docker-run.sh playbooks/provision.yml --check --diff
+	@./docker-run.sh playbooks/site.yml --check --diff
 
 spec-check:
 	@python3 scripts/validate-ansible-specs.py

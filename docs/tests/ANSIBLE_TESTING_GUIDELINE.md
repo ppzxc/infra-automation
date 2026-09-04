@@ -29,7 +29,7 @@
 
 ```bash
 # 1. Ansible 문법 체크
-./docker-run.sh playbooks/provision.yml --syntax-check
+./docker-run.sh playbooks/site.yml --syntax-check
 
 # 2. ansible-lint 정적 검사 (베스트 프랙티스 & 안티패턴 검사)
 ./docker-run.sh ansible-lint
@@ -43,7 +43,7 @@
 
 ```bash
 # 특정 대상 노드 대상 Dry-Run 시뮬레이션
-./docker-run.sh playbooks/provision.yml -k -K --limit ns0333.nanoit.kr --check --diff
+./docker-run.sh playbooks/site.yml -k -K --limit ns0333.nanoit.kr --check --diff
 ```
 
 ---
@@ -132,7 +132,7 @@ Molecule 테스트 중 `Idempotence` 단계가 실패하는 주된 원인과 해
 
 1. **1단계 (단일 카나리 노드 적용)**:
    ```bash
-   ./docker-run.sh playbooks/provision.yml -k -K --limit ns0333.nanoit.kr
+   ./docker-run.sh playbooks/site.yml -k -K --limit ns0333.nanoit.kr
    ```
 2. **2단계 (실서버 접속 및 동작 검증)**:
    - 신규 관리자 계정 로그인 테스트: `ssh infra-admin@<IP>`

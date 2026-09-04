@@ -1,7 +1,40 @@
 ---
 # ==============================================================================
 # Node Provisioner 마스터 플레이북 (Site Master Playbook)
+# 온프레미스 IDC 인프라 통합 프로비저닝 (일반 서버 및 로드밸런서)
+#
+# 실행 예시:
+#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml --limit ns0332.nanoit.kr
 # ==============================================================================
 
-- name: Target Servers Provisioning
-  ansible.builtin.import_playbook: provision_servers.yml
+- name: Provision Baseline On-Premise Target Servers
+  hosts: servers:loadbalancers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Verify connectivity and OS facts
+      ansible.builtin.debug:
+        msg: "Provisioning target server: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }})"
+
+  roles:
+    - role: common
+      tags: [common, base]
+
+    - role: docker_engine
+      tags: [docker, containers]
+
+    - role: security
+      tags: [security, ssh, firewall]
+
+    - role: access_security
+      tags: [access, openbao, boundary, security, ssh-ca]
+
+    - role: monitoring
+      tags: [monitoring, metrics, otel]
+
+  post_tasks:
+    - name: Target server provisioning completion summary
+      ansible.builtin.debug:
+        msg: "Successfully provisioned target server {{ inventory_hostname }}. Access Security (OpenBao SSH CA & Boundary) and OTel Monitoring ready."
+

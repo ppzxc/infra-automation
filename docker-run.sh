@@ -3,7 +3,7 @@ set -e
 
 # Node Provisioner Ansible Docker Execution Wrapper Script
 # Usage: ./docker-run.sh [ansible / ansible-playbook arguments...]
-# Example: ./docker-run.sh playbooks/provision.yml --limit storage-01.idc.internal
+# Example: ./docker-run.sh playbooks/site.yml --limit storage-01.idc.internal
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="overseer-ansible:latest"

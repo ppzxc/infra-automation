@@ -1,37 +1,9 @@
 ---
 # ==============================================================================
-# 온프레미스 IDC 일반 서버(타겟 노드) 프로비저닝 플레이북
-# 실행 예시:
-#   ansible-playbook -i inventory/hosts.yml playbooks/provision_servers.yml --limit ns0333.nanoit.kr
+# 온프레미스 IDC 일반 서버(타겟 노드) 프로비저닝 플레이북 (하위 호환 래퍼)
+# 실제 프로비저닝 로직은 playbooks/site.yml에 통합되어 있습니다.
 # ==============================================================================
 
-- name: Provision Baseline On-Premise Target Servers
-  hosts: servers:loadbalancers
-  become: true
-  gather_facts: true
+- name: Import Site Master Playbook
+  ansible.builtin.import_playbook: site.yml
 
-  pre_tasks:
-    - name: Verify connectivity and OS facts
-      ansible.builtin.debug:
-        msg: "Provisioning target server: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }})"
-
-  roles:
-    - role: common
-      tags: [common, base]
-
-    - role: docker_engine
-      tags: [docker, containers]
-
-    - role: security
-      tags: [security, ssh, firewall]
-
-    - role: access_security
-      tags: [access, openbao, boundary, security, ssh-ca]
-
-    - role: monitoring
-      tags: [monitoring, metrics, otel]
-
-  post_tasks:
-    - name: Target server provisioning completion summary
-      ansible.builtin.debug:
-        msg: "Successfully provisioned target server {{ inventory_hostname }}. Access Security (OpenBao SSH CA & Boundary) and OTel Monitoring ready."

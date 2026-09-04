@@ -1,8 +1,0 @@
----
-# ==============================================================================
-# Node Provisioner 온프레미스 IDC 인프라 통합 프로비저닝 플레이북
-# Semaphore UI 및 CLI를 통해 대상 서버군 일괄 프로비저닝
-# ==============================================================================
-
-- name: Import Target Servers Playbook
-  ansible.builtin.import_playbook: provision_servers.yml

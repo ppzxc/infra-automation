@@ -51,16 +51,13 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 
 #### Option B: CLI 스크립트 직접 실행 (개발 및 일회성 검증)
 ```bash
-# 1. 온프레미스 대상 서버 프로비저닝 (공통 베이스라인 + SSH CA + Boundary + OTEL Agent)
-./docker-run.sh playbooks/provision_servers.yml
+# 1. 전체 타겟 서버 일괄 프로비저닝 (마스터 플레이북)
+./docker-run.sh playbooks/site.yml
 
-# 2. 전체 타겟 서버 일괄 프로비저닝
-./docker-run.sh playbooks/provision.yml
+# 2. Dry-Run (Check & Diff) 시뮬레이션
+./docker-run.sh playbooks/site.yml --check --diff
 
-# 3. Dry-Run (Check & Diff) 시뮬레이션
-./docker-run.sh playbooks/provision.yml --check --diff
-
-# 4. 특정 타겟 호스트만 선택 실행
+# 3. 특정 타겟 호스트만 선택 실행
 ./docker-run.sh playbooks/provision_servers.yml --limit ns0266.nanoit.kr
 
 # 5. 정기 유지보수 및 보안 패치
