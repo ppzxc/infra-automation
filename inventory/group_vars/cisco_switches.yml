@@ -1,0 +1,16 @@
+---
+# ==============================================================================
+# Cisco IOS Network Switches Group Variables
+# ==============================================================================
+
+ansible_network_os: cisco.ios
+ansible_connection: network_cli
+ansible_user: "{{ _local_cisco_user | default((_vault_global_secret | default({}, true)).cisco_user | default('admin')) }}"
+ansible_password: "{{ _local_cisco_password | default((_vault_global_secret | default({}, true)).cisco_password | default(omit)) }}"
+ansible_become: true
+ansible_become_method: enable
+ansible_become_password: "{{ _local_cisco_enable_password | default((_vault_global_secret | default({}, true)).cisco_enable_password | default(ansible_password | default(omit))) }}"
+
+# 네트워크 CLI SSH 타임아웃
+ansible_command_timeout: 60
+ansible_connect_timeout: 30

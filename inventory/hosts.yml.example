@@ -20,3 +20,15 @@ all:
           ansible_host: 192.168.1.40
           ansible_user: ppzxc
           ansible_port: 22
+
+    # 3. 네트워크 인프라 스위치 그룹 (Cisco IOS Switches)
+    cisco_switches:
+      hosts:
+        sw-core-01.idc.internal:
+          ansible_host: 192.168.1.10
+          ansible_port: 22
+        sw-access-01.idc.internal:
+          ansible_host: 192.168.1.11
+          ansible_port: 22
+          # 경유지(Bastion) 스위치를 경유해야 하는 경우 SSH ProxyJump 지정 예시:
+          # ansible_ssh_common_args: '-o ProxyJump=admin@192.168.1.1:22'

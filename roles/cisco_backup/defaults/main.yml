@@ -1,0 +1,19 @@
+---
+# ==============================================================================
+# Cisco IOS Switch Configuration Backup Role Defaults
+# ==============================================================================
+
+# 백업 로컬 저장소 기본 경로
+cisco_backup_dir: "{{ lookup('env', 'HOME') + '/backups/cisco' if lookup('env', 'HOME') else '/tmp/backups/cisco' }}"
+
+# 백업 보관 주기 (일 단위) - Semaphore 또는 스케줄러 실행 시 유지 기간
+cisco_backup_retention_days: 90
+
+# 장비별 백업 파일 접두사 및 네이밍 포맷
+cisco_backup_filename_format: "{{ inventory_hostname }}_{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}.txt"
+
+# 실행 모드: 'command' (ios_command show running-config) 또는 'config' (ios_config backup)
+cisco_backup_method: "command"
+
+# 백업 명령 타임아웃 (초)
+cisco_backup_timeout: 60

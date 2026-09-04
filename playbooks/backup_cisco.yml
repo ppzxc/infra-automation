@@ -1,0 +1,16 @@
+---
+# ==============================================================================
+# Cisco IOS Network Switch Configuration Backup Playbook
+# ==============================================================================
+# Execution example:
+#   ansible-playbook -i inventory/hosts.yml playbooks/backup_cisco.yml
+# ==============================================================================
+
+- name: Backup Cisco IOS Network Switches
+  hosts: cisco_switches
+  gather_facts: false
+  connection: network_cli
+
+  roles:
+    - role: cisco_backup
+      tags: [cisco, backup, network]

@@ -1,0 +1,50 @@
+---
+# ==============================================================================
+# Cisco IOS Switch Configuration Backup Tasks
+# ==============================================================================
+
+- name: "[CISCO-001] Ensure local backup destination directory exists"
+  ansible.builtin.file:
+    path: "{{ cisco_backup_dir }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+
+- name: "[CISCO-002] Collect running configuration from Cisco IOS switch"
+  cisco.ios.ios_command:
+    commands:
+      - show running-config
+  register: cisco_config_output
+
+- name: "[CISCO-003] Save running configuration to backup destination"
+  ansible.builtin.copy:
+    content: "{{ cisco_config_output.stdout[0] }}"
+    dest: "{{ cisco_backup_dir }}/{{ inventory_hostname }}_{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}.txt"
+    mode: '0600'
+  delegate_to: localhost
+
+- name: "[CISCO-004] Verify configuration output validity"
+  ansible.builtin.assert:
+    that:
+      - cisco_config_output.stdout is defined
+      - cisco_config_output.stdout | length > 0
+      - cisco_config_output.stdout[0] | length > 0
+      - "'% Invalid input detected' not in cisco_config_output.stdout[0]"
+    fail_msg: "Failed to collect valid running-config from Cisco switch {{ inventory_hostname }}"
+
+- name: "[CISCO-005] Clean up old backup archives exceeding retention period"
+  ansible.builtin.find:
+    paths: "{{ cisco_backup_dir }}"
+    patterns: "{{ inventory_hostname }}_*.txt"
+    age: "{{ cisco_backup_retention_days }}d"
+    recurse: false
+  register: expired_backups
+  delegate_to: localhost
+
+- name: Remove expired backup files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ expired_backups.files | default([]) }}"
+  delegate_to: localhost

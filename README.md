@@ -10,6 +10,7 @@
 |---|---|---|---|
 | **`servers`** | `inventory/group_vars/servers.yml` | 온프레미스 IDC 일반 연산 호스트 (타겟 호스트) | `playbooks/site.yml` |
 | **`loadbalancers`**| `inventory/group_vars/loadbalancers.yml` | HAProxy, Keepalived, VIP 로드밸런서 호스트 (L4 포워딩 & ARP Flux 방지) | `playbooks/site.yml` |
+| **`cisco_switches`**| `inventory/group_vars/cisco_switches.yml` | Cisco IOS 네트워크 스위치 장비군 (L2/L3 스위치) | `playbooks/backup_cisco.yml` |
 
 ---
 
@@ -31,6 +32,10 @@
    - OpenTelemetry Collector Contrib(`otelcol-contrib`) 바이너리/서비스 배포 및 원격 OTEL 백엔드로 OTLP 아웃바운드 푸시 (`MON-001 ~ MON-006`)
    - `hostmetrics` receiver를 통한 호스트 CPU, Memory, Disk, Network 등 저수준 시스템 메트릭 직접 수집
    - 레거시 `node_exporter` 데몬/바이너리/유저 자동 정리 (`MON-CLEANUP-001 ~ MON-CLEANUP-005`)
+6. **`cisco_backup`**:
+   - Cisco IOS 네트워크 스위치 `show running-config` 백업 자동 수집 및 무결성 검증 (`CISCO-001 ~ CISCO-005`)
+   - 백업 파일 최소 권한(`0600`) 저장, 타임스탬프 네이밍 및 보관 주기(`cisco_backup_retention_days`) 자동 정리
+   - Semaphore UI 기반 Cron Schedule(매일 03:00) 및 결과 알림(Webhook) 중앙 집중식 연동
 
 ---
 

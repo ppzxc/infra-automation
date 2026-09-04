@@ -60,7 +60,8 @@ def test_ansible_roles_structure():
         "common",
         "security",
         "access_security",
-        "monitoring"
+        "monitoring",
+        "cisco_backup"
     ]
     for role in expected_roles:
         assert (roles_dir / role).exists(), f"Role {role} is missing"
