@@ -17,4 +17,6 @@ collections:
 
 roles:
   - name: ansible-lockdown.rhel9_cis
-    version: ">=1.0.0"
+    src: https://github.com/ansible-lockdown/RHEL9-CIS.git
+    version: "2.4.0"
+

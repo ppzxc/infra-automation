@@ -14,6 +14,10 @@ def test_requirements_includes_lockdown_role():
     roles = req_data.get("roles", [])
     role_names = [r["name"] if isinstance(r, dict) else r for r in roles]
     assert "ansible-lockdown.rhel9_cis" in role_names, "ansible-lockdown.rhel9_cis role should be listed in requirements.yml for audit pilot"
+    target_role = next(r for r in roles if (isinstance(r, dict) and r.get("name") == "ansible-lockdown.rhel9_cis"))
+    assert target_role.get("src") == "https://github.com/ansible-lockdown/RHEL9-CIS.git"
+    assert target_role.get("version") == "2.4.0"
+
 
 def test_audit_rhel9_cis_playbook_structure():
     """Verify playbooks/audit_rhel9_cis.yml exists, is safe (audit_only: true), and isolates Rocky 9"""
