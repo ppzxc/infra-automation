@@ -1,5 +1,5 @@
 ---
-- name: Verify Target Server Baseline Roles
+- name: Verify Target Host Baseline Roles
   hosts: all
   become: true
   gather_facts: true

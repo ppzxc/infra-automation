@@ -1,5 +1,5 @@
 ---
-- name: Converge Target Servers
+- name: Converge Target Hosts
   hosts: all
   become: true
   gather_facts: true

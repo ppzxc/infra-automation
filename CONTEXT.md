@@ -1,7 +1,7 @@
 # Node Provisioner Domain Context
 
 ## 1. Overview
-**`node-provisioner`** is an idempotent Ansible automation suite executed by **Semaphore UI** (within the `overseer` Central Control Plane) to migrate, provision, harden, and onboard on-premise IDC target servers across multiple Linux generations (CentOS 6 legacy to Rocky Linux 10, Ubuntu/Debian).
+**`node-provisioner`** is an idempotent Ansible automation suite executed by **Semaphore UI** (within the `overseer` Central Control Plane) to migrate, provision, harden, and onboard on-premise IDC target hosts across multiple Linux generations (CentOS 6 legacy to Rocky Linux 10, Ubuntu/Debian).
 
 ## 2. System Boundaries & Relationship
 - **Central Control Plane (`../overseer`)**: Hosts OpenBao (SSH CA & Secrets), HashiCorp Boundary (Zero-Trust Session Proxy), PostgreSQL, and Semaphore UI (GitOps orchestrator).

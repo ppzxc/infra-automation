@@ -17,7 +17,7 @@
     - role: monitoring
       tags: [monitoring]
 
-- name: Maintenance and Security Updates for Target Servers
+- name: Maintenance and Security Updates for Target Hosts
   hosts: servers
   become: true
   gather_facts: true

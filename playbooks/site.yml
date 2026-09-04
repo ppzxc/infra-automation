@@ -7,7 +7,7 @@
 #   ansible-playbook -i inventory/hosts.yml playbooks/site.yml --limit ns0332.nanoit.kr
 # ==============================================================================
 
-- name: Provision Baseline On-Premise Target Servers
+- name: Provision Baseline On-Premise Target Hosts
   hosts: servers:loadbalancers
   become: true
   gather_facts: true
@@ -15,7 +15,7 @@
   pre_tasks:
     - name: Verify connectivity and OS facts
       ansible.builtin.debug:
-        msg: "Provisioning target server: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }})"
+        msg: "Provisioning target host: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }})"
 
   roles:
     - role: common
@@ -34,7 +34,8 @@
       tags: [monitoring, metrics, otel]
 
   post_tasks:
-    - name: Target server provisioning completion summary
+    - name: Target host provisioning completion summary
       ansible.builtin.debug:
-        msg: "Successfully provisioned target server {{ inventory_hostname }}. Access Security (OpenBao SSH CA & Boundary) and OTel Monitoring ready."
+        msg: "Successfully provisioned target host {{ inventory_hostname }}. Access Security (OpenBao SSH CA & Boundary) and OTel Monitoring ready."
+
 

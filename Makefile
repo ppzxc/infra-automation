@@ -8,7 +8,7 @@ help:
 	@echo "  make init-hooks                 - Install Git Pre-Commit security & lint hooks"
 	@echo "  make provision                  - Run full provisioning (overseer + servers)"
 	@echo "  make provision-overseer         - Run provisioning for Overseer Control Plane host"
-	@echo "  make provision-servers          - Run baseline provisioning for IDC target servers"
+	@echo "  make provision-servers          - Run baseline provisioning for IDC target hosts"
 	@echo "  make check                      - Dry-run simulation (--check --diff)"
 	@echo "  make spec-check                 - Validate 3-way consistency (Docs <-> Code <-> Tests)"
 	@echo "  make lint                       - Run ansible-lint and spec validation"

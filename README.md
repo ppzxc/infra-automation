@@ -1,6 +1,6 @@
 # Node Provisioner Ansible Provisioning & Automation
 
-**Node Provisioner**는 Overseer 중앙 컨트롤 플레인(`../overseer`, Semaphore UI)에 의해 실행되며, 온프레미스 대상 서버(IDC 타겟 노드, 로드밸런서)의 베이스라인 구성, 보안 하드닝, Zero-Trust 접근 제어 및 OpenTelemetry 관제 파이프라인 연동을 자동화하는 Ansible 툴체인입니다.
+**Node Provisioner**는 Overseer 중앙 컨트롤 플레인(`../overseer`, Semaphore UI)에 의해 실행되며, 온프레미스 대상 호스트(IDC 타겟 호스트, 로드밸런서)의 베이스라인 구성, 보안 하드닝, Zero-Trust 접근 제어 및 OpenTelemetry 관제 파이프라인 연동을 자동화하는 Ansible 툴체인입니다.
 
 ---
 
@@ -8,8 +8,8 @@
 
 | 인벤토리 그룹 | 정의 경로 | 대상 호스트 역할 | 적용 Playbook |
 |---|---|---|---|
-| **`servers`** | `inventory/group_vars/servers.yml` | 온프레미스 IDC 일반 서버 노드 (타겟 서버) | `playbooks/provision_servers.yml` |
-| **`loadbalancers`**| `inventory/group_vars/loadbalancers.yml` | HAProxy, Keepalived, VIP 로드밸런서 노드 (L4 포워딩 & ARP Flux 방지) | `playbooks/provision_servers.yml` |
+| **`servers`** | `inventory/group_vars/servers.yml` | 온프레미스 IDC 일반 연산 호스트 (타겟 호스트) | `playbooks/site.yml` |
+| **`loadbalancers`**| `inventory/group_vars/loadbalancers.yml` | HAProxy, Keepalived, VIP 로드밸런서 호스트 (L4 포워딩 & ARP Flux 방지) | `playbooks/site.yml` |
 
 ---
 
@@ -22,7 +22,7 @@
    - **Docker 방화벽 체인 관리기 배포 (`SEC-016 ~ SEC-018`)**: Docker의 `PREROUTING` NAT 우회를 방어하기 위한 `firewalld-docker` CLI (`/usr/local/bin/firewalld-docker`) 배포 및 `DOCKER-USER` Direct Rule/IPSet 연동 지원
 3. **`access_security`**:
    - OpenBao SSH CA 공개키 배포 및 단기 SSH 인증서 신뢰 설정 (`ACC-001 ~ ACC-007`)
-   - HashiCorp Boundary Zero-Trust 타겟 노드 메타데이터 등록 (`ACC-008 ~ ACC-009`)
+   - HashiCorp Boundary Zero-Trust 타겟 호스트 메타데이터 등록 (`ACC-008 ~ ACC-009`)
 4. **`docker_engine`**:
    - Podman 및 레거시 패키지 충돌 완벽 정리 (`DOC-001 ~ DOC-002`)
    - 공식 Docker CE 최신판 & Docker Compose 플러그인 설치 (`DOC-003 ~ DOC-009`)
@@ -46,12 +46,12 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 #### Option A: Semaphore Web UI를 통한 실행 (권장)
 - Overseer 컨트롤 플레인 브라우저 접속: `http://<컨트롤플레인IP>:3000` (초기 계정: `admin` / `semaphoreadmin`)
 - UI에서 **Key Store** (OpenBao 연동) 및 **Environment** (`VAULT_ADDR` / `VAULT_TOKEN`)를 통해 중앙 집중식 시크릿이 자동 주입됩니다.
-- 상세 연동 가이드: [OpenBao & Semaphore UI Secret Integration](file:///home/ppzxc/projects/node-provisioner/docs/openbao_integration.md)
+- 상세 연동 가이드: [OpenBao & Semaphore UI Secret Integration](docs/openbao_integration.md)
 - UI에서 **Playbook Template** 선택 후 원클릭 실행 및 실시간 모니터링
 
 #### Option B: CLI 스크립트 직접 실행 (개발 및 일회성 검증)
 ```bash
-# 1. 전체 타겟 서버 일괄 프로비저닝 (마스터 플레이북)
+# 1. 전체 타겟 호스트 일괄 프로비저닝 (마스터 플레이북)
 ./docker-run.sh playbooks/site.yml
 
 # 2. Dry-Run (Check & Diff) 시뮬레이션
