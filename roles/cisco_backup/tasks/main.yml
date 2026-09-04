@@ -9,6 +9,7 @@
     state: directory
     mode: '0700'
   delegate_to: localhost
+  become: false
   run_once: true
 
 # 1. Direct SSH 수집 (connection_type 미지정 또는 ssh)
@@ -38,6 +39,7 @@
       }}
   register: cisco_config_telnet_output
   delegate_to: localhost
+  become: false
   changed_when: false
   no_log: true
   when: connection_type | default('ssh') == 'telnet'
@@ -65,6 +67,7 @@
       }}
   register: cisco_config_jump_output
   delegate_to: localhost
+  become: false
   changed_when: false
   no_log: true
   when: connection_type | default('ssh') == 'jump_ssh'
@@ -93,6 +96,7 @@
     dest: "{{ cisco_backup_dir }}/{{ cisco_backup_filename_format }}"
     mode: '0600'
   delegate_to: localhost
+  become: false
 
 - name: "[CISCO-005] Clean up old backup archives exceeding retention period"
   ansible.builtin.find:
@@ -102,6 +106,7 @@
     recurse: false
   register: expired_backups
   delegate_to: localhost
+  become: false
 
 - name: (CISCO-005) Delete expired backup archive files
   ansible.builtin.file:
@@ -109,4 +114,5 @@
     state: absent
   loop: "{{ expired_backups.files | default([]) }}"
   delegate_to: localhost
+  become: false
 
