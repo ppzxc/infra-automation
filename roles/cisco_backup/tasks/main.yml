@@ -27,11 +27,19 @@
     --host {{ ansible_host }}
     --port {{ ansible_port | default(23) }}
     --user {{ ansible_user }}
-    --password {{ ansible_password }}
     --timeout {{ cisco_backup_timeout | default(30) }}
+  args:
+    stdin: >-
+      {{
+        {
+          "password": ansible_password | default(''),
+          "enable_password": ansible_become_password | default(ansible_password | default(''))
+        } | to_json
+      }}
   register: cisco_config_telnet_output
   delegate_to: localhost
   changed_when: false
+  no_log: true
   when: connection_type | default('ssh') == 'telnet'
 
 # 3. Bastion 경유 Jump SSH 수집 (cisco_jump_switches 장비: ns0279, ns0281, ns0282)
@@ -42,15 +50,23 @@
     --bastion-host {{ hostvars[bastion_host].ansible_host }}
     --bastion-port {{ hostvars[bastion_host].ansible_port | default(22) }}
     --bastion-user {{ hostvars[bastion_host].ansible_user }}
-    --bastion-password {{ hostvars[bastion_host].ansible_password }}
     --host {{ ansible_host }}
     --port {{ ansible_port | default(22) }}
     --user {{ ansible_user }}
-    --password {{ ansible_password }}
     --timeout {{ cisco_backup_timeout | default(30) }}
+  args:
+    stdin: >-
+      {{
+        {
+          "password": ansible_password | default(''),
+          "enable_password": ansible_become_password | default(ansible_password | default('')),
+          "bastion_password": hostvars[bastion_host].ansible_password | default('')
+        } | to_json
+      }}
   register: cisco_config_jump_output
   delegate_to: localhost
   changed_when: false
+  no_log: true
   when: connection_type | default('ssh') == 'jump_ssh'
 
 - name: Set unified collected configuration fact
@@ -62,13 +78,7 @@
         (cisco_config_jump_output.stdout if (cisco_config_jump_output is defined and cisco_config_jump_output.stdout is defined) else '')))
       }}
 
-- name: "[CISCO-003] Save running configuration to backup destination"
-  ansible.builtin.copy:
-    content: "{{ cisco_running_config_raw }}"
-    dest: "{{ cisco_backup_dir }}/{{ inventory_hostname }}_{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}.txt"
-    mode: '0600'
-  delegate_to: localhost
-
+# 검증 태스크가 파일 저장보다 먼저 실행되어야 불완전/오류 파일 기록 방지
 - name: "[CISCO-004] Verify configuration output validity"
   ansible.builtin.assert:
     that:
@@ -76,6 +86,13 @@
       - cisco_running_config_raw | length > 0
       - "'% Invalid input detected' not in cisco_running_config_raw"
     fail_msg: "Failed to collect valid running-config from Cisco switch {{ inventory_hostname }}"
+
+- name: "[CISCO-003] Save running configuration to backup destination"
+  ansible.builtin.copy:
+    content: "{{ cisco_running_config_raw }}"
+    dest: "{{ cisco_backup_dir }}/{{ cisco_backup_filename_format }}"
+    mode: '0600'
+  delegate_to: localhost
 
 - name: "[CISCO-005] Clean up old backup archives exceeding retention period"
   ansible.builtin.find:
@@ -86,9 +103,10 @@
   register: expired_backups
   delegate_to: localhost
 
-- name: Remove expired backup files
+- name: (CISCO-005) Delete expired backup archive files
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: absent
   loop: "{{ expired_backups.files | default([]) }}"
   delegate_to: localhost
+
