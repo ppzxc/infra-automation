@@ -9,8 +9,8 @@ ansible_connection: network_cli
 # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (외부 변수 또는 Semaphore Environment 주입 가능)
 cisco_openbao_namespace: "{{ _local_cisco_openbao_namespace | default(openbao_namespace | default(lookup('env', 'VAULT_NAMESPACE') | default(omit, true), true), true) }}"
 
-cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | default('secret', true), true) }}"
-cisco_openbao_secret_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default('switches/', true), true) }}"
+cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | default(lookup('env', 'VAULT_MOUNT') | default('secret', true), true), true) }}"
+cisco_openbao_secret_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default(lookup('env', 'OPENBAO_CISCO_PREFIX') | default(lookup('env', 'VAULT_CISCO_PREFIX') | default('', true), true), true), true) }}"
 
 # AppRole 인증 자격증명 (Semaphore Variable Group 주입 시 자동 감지)
 _vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') | default('', true) }}"

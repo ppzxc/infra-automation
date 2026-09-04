@@ -120,16 +120,27 @@ Semaphore UI 최신 버전은 **OpenBao** 및 **HashiCorp Vault**를 일급 시�
 * Semaphore가 태스크 실행 시 OpenBao로부터 인증서를 실시간으로 취득하여 Runner에 주입합니다.
 
 ### 3단계: Environment (Variable Group) 구성
-Semaphore UI의 **Environment**에 Ansible 및 `community.hashi_vault` lookup을 위한 환경변수를 등록합니다:
+Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hashi_vault` lookup을 위한 환경변수와 Extra Variables를 등록합니다:
 
-```json
-{
-  "VAULT_ADDR": "https://openbao.internal:8200",
-  "VAULT_SKIP_VERIFY": "false",
-  "VAULT_AUTH_METHOD": "token",
-  "VAULT_TOKEN": "{{ vault_runner_token }}"
-}
-```
+* **Environment variables (환경 변수)**:
+  ```json
+  {
+    "VAULT_ADDR": "https://openbao.internal:8200",
+    "VAULT_NAMESPACE": "root",
+    "OPENBAO_CISCO_PREFIX": "switches/",
+    "VAULT_SKIP_VERIFY": "false"
+  }
+  ```
+* **Extra variables (추가 변수)**:
+  ```json
+  {
+    "cisco_backup_dir": "/opt/backups/cisco",
+    "openbao_cisco_prefix": "switches/"
+  }
+  ```
+* **Secrets (보안 변수 - AppRole 인증 시)**:
+  - `VAULT_ROLE_ID`: OpenBao AppRole Role ID
+  - `VAULT_SECRET_ID`: OpenBao AppRole Secret ID
 
 ---
 
