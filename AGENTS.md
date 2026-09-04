@@ -9,7 +9,7 @@ Ansible과 Semaphore UI는 저장소 루트(`cwd`)를 기준으로 동작하므�
 - `ansible.cfg`: 전역 런타임 최적화 (`roles_path`, `collections_path`, fact caching 등).
 - `requirements.yml`: Ansible Galaxy 외부 롤 및 컬렉션 의존성 정의.
 - `inventory/`: 환경별 인벤토리 및 `group_vars/`, `host_vars/` 분리.
-- `playbooks/`: 목적별 오케스트레이션 진입점 (`site.yml`, `provision_servers.yml`, `maintenance.yml` 등).
+- `playbooks/`: 목적별 오케스트레이션 진입점 (`site.yml`, `provision_hosts.yml`, `maintenance.yml` 등).
 - `roles/`: 단일 책임 원칙(SRP) 기반 모듈화.
 
 ## 2. 역할(Role) 구성 및 변수 우선순위 표준

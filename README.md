@@ -58,7 +58,7 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 ./docker-run.sh playbooks/site.yml --check --diff
 
 # 3. 특정 타겟 호스트만 선택 실행
-./docker-run.sh playbooks/provision_servers.yml --limit ns0266.nanoit.kr
+./docker-run.sh playbooks/provision_hosts.yml --limit ns0266.nanoit.kr
 
 # 5. 정기 유지보수 및 보안 패치
 ./docker-run.sh playbooks/maintenance.yml

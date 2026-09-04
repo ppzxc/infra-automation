@@ -1,4 +1,4 @@
-.PHONY: help provision provision-overseer provision-servers check spec-check lint test test-unit test-molecule test-scripts clean init-hooks
+.PHONY: help provision provision-overseer provision-hosts check spec-check lint test test-unit test-molecule test-scripts clean init-hooks
 
 # Default Target
 help:
@@ -8,7 +8,7 @@ help:
 	@echo "  make init-hooks                 - Install Git Pre-Commit security & lint hooks"
 	@echo "  make provision                  - Run full provisioning (overseer + servers)"
 	@echo "  make provision-overseer         - Run provisioning for Overseer Control Plane host"
-	@echo "  make provision-servers          - Run baseline provisioning for IDC target hosts"
+	@echo "  make provision-hosts            - Run baseline provisioning for IDC target hosts"
 	@echo "  make check                      - Dry-run simulation (--check --diff)"
 	@echo "  make spec-check                 - Validate 3-way consistency (Docs <-> Code <-> Tests)"
 	@echo "  make lint                       - Run ansible-lint and spec validation"
@@ -32,8 +32,8 @@ provision:
 provision-overseer:
 	@./docker-run.sh playbooks/provision_overseer.yml
 
-provision-servers:
-	@./docker-run.sh playbooks/provision_servers.yml
+provision-hosts:
+	@./docker-run.sh playbooks/provision_hosts.yml
 
 check:
 	@./docker-run.sh playbooks/site.yml --check --diff

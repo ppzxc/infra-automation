@@ -47,8 +47,9 @@ def test_ansible_playbooks_structure():
     """Ansible playbooks structure verification for Target Node Provisioner"""
     playbooks_dir = ROOT_DIR / "playbooks"
     assert (playbooks_dir / "site.yml").exists(), "site.yml master playbook is missing"
-    assert (playbooks_dir / "provision_servers.yml").exists(), "provision_servers.yml is missing"
+    assert (playbooks_dir / "provision_hosts.yml").exists(), "provision_hosts.yml is missing"
     assert (playbooks_dir / "maintenance.yml").exists(), "maintenance.yml is missing"
+
 
 
 def test_ansible_roles_structure():

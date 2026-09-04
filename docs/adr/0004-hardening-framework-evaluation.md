@@ -40,7 +40,7 @@
 
 1. **독립적 CIS 감사 파일럿 채택 (`ansible-lockdown.rhel9_cis`)**:
    - Rocky Linux 9 노드를 대상으로 시스템 변경 없이 취약점을 진단하는 **감사 전용 모드(`rhel9_cis_audit_only: true`)** 플레이북(`playbooks/audit_rhel9_cis.yml`)을 구성합니다.
-   - 기존 무인 프로비저닝 메인 플로우(`playbooks/provision_servers.yml`, `site.yml`)와 철저히 분리하여 운영 안정성을 보장합니다.
+   - 기존 무인 프로비저닝 메인 플로우(`playbooks/provision_hosts.yml`, `site.yml`)와 철저히 분리하여 운영 안정성을 보장합니다.
 
 2. **기존 역할(Security, Common) 중심의 우수 룰 내재화**:
    - `dev-sec` 및 CIS 벤치마크 중 운영 영향도가 없고 보안성을 증대시키는 안전한 커널 파라미터(`fs.protected_hardlinks`, `fs.protected_symlinks`, `kernel.randomize_va_space`)를 `roles/common/defaults/main.yml`에 선별 반영합니다.
