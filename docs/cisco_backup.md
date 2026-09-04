@@ -35,6 +35,8 @@
 | `CISCO-003` | `Save running configuration to backup destination` | `ansible.builtin.copy` | Controller / Localhost | 백업 파일 생성 및 권한(`0600`) 부여 |
 | `CISCO-004` | `Verify configuration output validity` | `ansible.builtin.assert` | Controller / Localhost | 출력값 검증 및 CLI 에러 패턴 미포함 확인 |
 | `CISCO-005` | `Clean up old backup archives exceeding retention period` | `ansible.builtin.find` | Controller / Localhost | 만료 백업 파일 검색 및 삭제 수행 |
+| `CISCO-006` | `Collect running configuration via Telnet` | `ansible.builtin.command` | Controller / Localhost | Telnet 소켓 세션 통해 설정 수집 |
+| `CISCO-007` | `Collect running configuration via Bastion jump session` | `ansible.builtin.command` | Controller / Localhost | Bastion 대화형 쉘 점프 통해 설정 수집 |
 
 ---
 

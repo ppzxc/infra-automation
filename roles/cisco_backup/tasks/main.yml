@@ -11,15 +11,60 @@
   delegate_to: localhost
   run_once: true
 
+# 1. Direct SSH 수집 (connection_type 미지정 또는 ssh)
 - name: "[CISCO-002] Collect running configuration from Cisco IOS switch"
   cisco.ios.ios_command:
     commands:
       - show running-config
-  register: cisco_config_output
+  register: cisco_config_direct_output
+  when: connection_type | default('ssh') == 'ssh'
+
+# 2. Telnet 직접 수집 (cisco_direct_telnet 장비: ns0341, ns0065)
+- name: "[CISCO-006] Collect running configuration via Telnet"
+  ansible.builtin.command: >-
+    python3 {{ role_path }}/files/cisco_cli_collector.py
+    --mode telnet
+    --host {{ ansible_host }}
+    --port {{ ansible_port | default(23) }}
+    --user {{ ansible_user }}
+    --password {{ ansible_password }}
+    --timeout {{ cisco_backup_timeout | default(30) }}
+  register: cisco_config_telnet_output
+  delegate_to: localhost
+  changed_when: false
+  when: connection_type | default('ssh') == 'telnet'
+
+# 3. Bastion 경유 Jump SSH 수집 (cisco_jump_switches 장비: ns0279, ns0281, ns0282)
+- name: "[CISCO-007] Collect running configuration via Bastion jump session"
+  ansible.builtin.command: >-
+    python3 {{ role_path }}/files/cisco_cli_collector.py
+    --mode jump_ssh
+    --bastion-host {{ hostvars[bastion_host].ansible_host }}
+    --bastion-port {{ hostvars[bastion_host].ansible_port | default(22) }}
+    --bastion-user {{ hostvars[bastion_host].ansible_user }}
+    --bastion-password {{ hostvars[bastion_host].ansible_password }}
+    --host {{ ansible_host }}
+    --port {{ ansible_port | default(22) }}
+    --user {{ ansible_user }}
+    --password {{ ansible_password }}
+    --timeout {{ cisco_backup_timeout | default(30) }}
+  register: cisco_config_jump_output
+  delegate_to: localhost
+  changed_when: false
+  when: connection_type | default('ssh') == 'jump_ssh'
+
+- name: Set unified collected configuration fact
+  ansible.builtin.set_fact:
+    cisco_running_config_raw: >-
+      {{
+        (cisco_config_direct_output.stdout[0] if (cisco_config_direct_output is defined and cisco_config_direct_output.stdout is defined and cisco_config_direct_output.stdout | length > 0) else
+        (cisco_config_telnet_output.stdout if (cisco_config_telnet_output is defined and cisco_config_telnet_output.stdout is defined and cisco_config_telnet_output.stdout | length > 0) else
+        (cisco_config_jump_output.stdout if (cisco_config_jump_output is defined and cisco_config_jump_output.stdout is defined) else '')))
+      }}
 
 - name: "[CISCO-003] Save running configuration to backup destination"
   ansible.builtin.copy:
-    content: "{{ cisco_config_output.stdout[0] }}"
+    content: "{{ cisco_running_config_raw }}"
     dest: "{{ cisco_backup_dir }}/{{ inventory_hostname }}_{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}.txt"
     mode: '0600'
   delegate_to: localhost
@@ -27,10 +72,9 @@
 - name: "[CISCO-004] Verify configuration output validity"
   ansible.builtin.assert:
     that:
-      - cisco_config_output.stdout is defined
-      - cisco_config_output.stdout | length > 0
-      - cisco_config_output.stdout[0] | length > 0
-      - "'% Invalid input detected' not in cisco_config_output.stdout[0]"
+      - cisco_running_config_raw is defined
+      - cisco_running_config_raw | length > 0
+      - "'% Invalid input detected' not in cisco_running_config_raw"
     fail_msg: "Failed to collect valid running-config from Cisco switch {{ inventory_hostname }}"
 
 - name: "[CISCO-005] Clean up old backup archives exceeding retention period"

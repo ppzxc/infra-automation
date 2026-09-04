@@ -58,7 +58,7 @@ def test_cisco_backup_spec_ids_in_tasks_and_docs():
     tasks_content = tasks_file.read_text(encoding="utf-8")
     doc_content = doc_file.read_text(encoding="utf-8")
 
-    expected_specs = ["CISCO-001", "CISCO-002", "CISCO-003", "CISCO-004", "CISCO-005"]
+    expected_specs = ["CISCO-001", "CISCO-002", "CISCO-003", "CISCO-004", "CISCO-005", "CISCO-006", "CISCO-007"]
     for spec in expected_specs:
         assert f"[{spec}]" in tasks_content, f"Spec [{spec}] missing in tasks"
         assert f"`{spec}`" in doc_content, f"Spec `{spec}` missing in docs"
