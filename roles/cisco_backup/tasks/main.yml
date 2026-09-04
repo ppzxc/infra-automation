@@ -108,7 +108,7 @@
   delegate_to: localhost
   become: false
 
-- name: (CISCO-005) Delete expired backup archive files
+- name: "Delete expired backup archive files identified in [CISCO-005]"
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: absent
