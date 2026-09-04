@@ -11,6 +11,8 @@
 *.key
 *.crt
 *.p12
+devices.yml
+devices.yaml
 
 # Ansible Inventory & Local Host Configurations
 inventory/hosts.yml
