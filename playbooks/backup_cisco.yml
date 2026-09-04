@@ -11,6 +11,9 @@
   gather_facts: false
   connection: "{{ 'network_cli' if (ansible_host | default('') | length > 0 and (connection_type | default('ssh') == 'ssh')) else 'local' }}"
 
+  vars:
+    cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('', true) }}"
+
   pre_tasks:
     - name: Verify OpenBao switch metadata is resolved
       ansible.builtin.assert:
@@ -21,7 +24,7 @@
           - ansible_user | length > 0
         fail_msg: >-
           [OPENBAO-MISSING] Switch metadata not found in OpenBao for '{{ inventory_hostname }}'.
-          Key '{{ cisco_openbao_secret_prefix }}{{ inventory_hostname }}' must exist in OpenBao KV with valid 'ansible_host' and 'ansible_user'.
+          Key '{{ cisco_openbao_secret_prefix | default('', true) }}{{ inventory_hostname }}' must exist in OpenBao KV with valid 'ansible_host' and 'ansible_user'.
 
   roles:
     - role: cisco_backup
