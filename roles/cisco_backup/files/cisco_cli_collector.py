@@ -179,7 +179,7 @@ def main():
     enable_password = stdin_creds.get("enable_password") or args.enable_password
     bastion_password = stdin_creds.get("bastion_password") or args.bastion_password
 
-    if not password:
+    if password is None:
         sys.stderr.write("Error: password must be provided via stdin or --password\n")
         sys.exit(1)
 

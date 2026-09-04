@@ -50,19 +50,19 @@ _vault_global_secret: >-
 
 
 
-# 3. 우선순위: 로컬 명시 변수 -> 노드별 OpenBao -> 인벤토리/기본값
-ansible_host: "{{ _local_ansible_host | default((_vault_cisco_node_secret | default({}, true)).ansible_host | default(ip | default(inventory_hostname))) }}"
-ansible_port: "{{ _local_ansible_port | default((_vault_cisco_node_secret | default({}, true)).ansible_port | default(22)) | int }}"
-connection_type: "{{ _local_connection_type | default((_vault_cisco_node_secret | default({}, true)).connection_type | default('ssh')) }}"
-bastion_host: "{{ _local_bastion_host | default((_vault_cisco_node_secret | default({}, true)).bastion_host | default(omit)) }}"
-fqdn: "{{ _local_fqdn | default((_vault_cisco_node_secret | default({}, true)).fqdn | default(inventory_hostname)) }}"
+# 3. 우선순위: OpenBao KV v2 최우선 -> 인벤토리/로컬 폴백 -> 기본값
+ansible_host: "{{ (_vault_cisco_node_secret | default({}, true)).ansible_host | default(hostvars[inventory_hostname].ansible_host | default(ip | default(inventory_hostname))) }}"
+ansible_port: "{{ ((_vault_cisco_node_secret | default({}, true)).ansible_port | default(hostvars[inventory_hostname].ansible_port | default(22))) | int }}"
+connection_type: "{{ (_vault_cisco_node_secret | default({}, true)).connection_type | default(hostvars[inventory_hostname].connection_type | default('ssh')) }}"
+bastion_host: "{{ (_vault_cisco_node_secret | default({}, true)).bastion_host | default(hostvars[inventory_hostname].bastion_host | default(omit)) }}"
+fqdn: "{{ (_vault_cisco_node_secret | default({}, true)).fqdn | default(hostvars[inventory_hostname].fqdn | default(inventory_hostname)) }}"
 
-ansible_user: "{{ _local_cisco_user | default((_vault_cisco_node_secret | default({}, true)).ansible_user | default((_vault_global_secret | default({}, true)).cisco_user | default('ansible-backup'))) }}"
-ansible_password: "{{ _local_cisco_password | default((_vault_cisco_node_secret | default({}, true)).ansible_password | default((_vault_global_secret | default({}, true)).cisco_password | default(omit))) }}"
+ansible_user: "{{ (_vault_cisco_node_secret | default({}, true)).ansible_user | default(hostvars[inventory_hostname].ansible_user | default((_vault_global_secret | default({}, true)).cisco_user | default('ansible-backup'))) }}"
+ansible_password: "{{ (_vault_cisco_node_secret | default({}, true)).ansible_password | default(hostvars[inventory_hostname].ansible_password | default((_vault_global_secret | default({}, true)).cisco_password | default(omit))) }}"
 
 ansible_become: true
 ansible_become_method: enable
-ansible_become_password: "{{ _local_cisco_enable_password | default((_vault_cisco_node_secret | default({}, true)).ansible_become_password | default((_vault_global_secret | default({}, true)).cisco_enable_password | default(ansible_password | default(omit)))) }}"
+ansible_become_password: "{{ (_vault_cisco_node_secret | default({}, true)).ansible_become_password | default(hostvars[inventory_hostname].ansible_become_password | default((_vault_global_secret | default({}, true)).cisco_enable_password | default(ansible_password | default(omit)))) }}"
 
 
 # 네트워크 CLI SSH 타임아웃

@@ -53,8 +53,9 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   }
   ```
 ### (2) Cisco 스위치별 접속 정보 및 자격증명
-* **경로**: `secret/data/switches/<inventory_hostname>` (예: `secret/data/switches/ns0278`)
-* **필드 (Key-Value)**:
+* **경로**: `secret/data/switches/<inventory_hostname>` (예: `secret/data/switches/ns0000`, `secret/data/switches/ns0278`)
+* **변수 해석 우선순위**: OpenBao KV v2 최우선 ➔ 인벤토리/로컬 변수 폴백 ➔ 시스템 기본값
+* **필드 (Key-Value) - SSH 스위치**:
   ```json
   {
     "ansible_host": "211.210.44.182",
@@ -63,6 +64,17 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
     "ansible_password": "SwitchSecretPassword123!",
     "connection_type": "ssh",
     "fqdn": "ns0278.nanoit.kr"
+  }
+  ```
+* **필드 (Key-Value) - Telnet 스위치 (예: `ns0000`, 무암호 허용)**:
+  ```json
+  {
+    "ansible_host": "218.54.219.82",
+    "ansible_port": "23",
+    "ansible_user": "ansible-backup",
+    "ansible_password": "",
+    "connection_type": "telnet",
+    "fqdn": "ns0065.nanoit.kr"
   }
   ```
 * **Bastion 경유 장비 필드 추가 (예: `ns0279`)**:

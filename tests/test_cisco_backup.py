@@ -53,9 +53,12 @@ def test_inventory_cisco_switches_example():
     assert "cisco_openbao_namespace" in raw_content
     assert "secret=global/services" in raw_content
 
-
-
-
+    # OpenBao 우선 로딩 및 인벤토리 폴백 검증
+    assert "(_vault_cisco_node_secret | default({}, true)).ansible_host" in raw_content
+    assert "(_vault_cisco_node_secret | default({}, true)).ansible_port" in raw_content
+    assert "(_vault_cisco_node_secret | default({}, true)).connection_type" in raw_content
+    assert "(_vault_cisco_node_secret | default({}, true)).ansible_user" in raw_content
+    assert "(_vault_cisco_node_secret | default({}, true)).ansible_password" in raw_content
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
     """Verify CISCO spec IDs exist in tasks and docs"""
     tasks_file = ROOT_DIR / "roles" / "cisco_backup" / "tasks" / "main.yml"
