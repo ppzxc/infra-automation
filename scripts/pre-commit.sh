@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Git Pre-Commit Hook for node-provisioner
+# Git Pre-Commit Hook for infra-automation
 # Checks for:
 #   1. Secret leaks (Private Keys, Tokens, Passwords, Cloud Secrets)
 #   2. Syntax & Spec validation (Python 3-way validator, Pytest)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# Node Provisioner Ansible Docker Execution Wrapper Script
+# Infra Automation Ansible Docker Execution Wrapper Script
 # Usage: ./docker-run.sh [ansible / ansible-playbook arguments...]
 # Example: ./docker-run.sh playbooks/site.yml --limit storage-01.idc.internal
 

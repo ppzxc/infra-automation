@@ -44,7 +44,7 @@ def test_ansible_inventory_and_vars():
     assert servers_vars_file.exists(), "group_vars/servers.yml is missing"
 
 def test_ansible_playbooks_structure():
-    """Ansible playbooks structure verification for Target Node Provisioner"""
+    """Ansible playbooks structure verification for Infra Automation"""
     playbooks_dir = ROOT_DIR / "playbooks"
     assert (playbooks_dir / "site.yml").exists(), "site.yml master playbook is missing"
     assert (playbooks_dir / "provision_hosts.yml").exists(), "provision_hosts.yml is missing"

@@ -3,7 +3,7 @@
 # Default Target
 help:
 	@echo "================================================================================"
-	@echo "                      Node Provisioner (Ansible Automation)                     "
+	@echo "                     Infra Automation (Ansible Automation)                      "
 	@echo "================================================================================"
 	@echo "  make init-hooks                 - Install Git Pre-Commit security & lint hooks"
 	@echo "  make provision                  - Run full provisioning (overseer + servers)"

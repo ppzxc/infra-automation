@@ -1,6 +1,6 @@
-# Node Provisioner Ansible Roles Index & Matrix
+# Infra Automation Ansible Roles Index & Matrix
 
-이 디렉토리는 Overseer 컨트롤 플레인과 연동되는 온프레미스 대상 서버(IDC 타겟 노드) 자동화 레이어를 구성하는 Ansible 역할(Roles)의 스펙과 추적 매트릭스를 포함합니다.
+`infra-automation` 프로젝트는 단일 책임 원칙(SRP)에 따라 모듈화된 5대 핵심 역할을 통해 온프레미스 대상 호스트의 라이프사이클을 관리하며, 본 디렉토리는 관련 스펙과 추적 매트릭스를 포함합니다.
 
 ---
 

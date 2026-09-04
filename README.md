@@ -1,6 +1,6 @@
-# Node Provisioner Ansible Provisioning & Automation
+# Infra Automation (Ansible Infrastructure Operations & Provisioning)
 
-**Node Provisioner**는 Overseer 중앙 컨트롤 플레인(`../overseer`, Semaphore UI)에 의해 실행되며, 온프레미스 대상 호스트(IDC 타겟 호스트, 로드밸런서)의 베이스라인 구성, 보안 하드닝, Zero-Trust 접근 제어 및 OpenTelemetry 관제 파이프라인 연동을 자동화하는 Ansible 툴체인입니다.
+**Infra Automation**은 Overseer 중앙 컨트롤 플레인(`../overseer`, Semaphore UI)에 의해 실행되며, 온프레미스 대상 호스트(IDC 타겟 호스트, 로드밸런서)의 베이스라인 프로비저닝, 보안 하드닝, Zero-Trust 접근 제어, 지속적 유지보수 및 OpenTelemetry 관제 파이프라인 연동을 자동화하는 통합 Ansible 툴체인입니다.
 
 ---
 

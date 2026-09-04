@@ -69,9 +69,9 @@ def extract_verify_tests():
     return verify_ids
 
 def main():
-    print("=" * 80)
-    print("   Node Provisioner 3-Way Ansible Specification & Traceability Validator")
-    print("=" * 80)
+    print("================================================================================")
+    print("   Infra Automation 3-Way Ansible Specification & Traceability Validator")
+    print("================================================================================")
     
     docs_specs, doc_dups = extract_docs_specs()
     code_tasks, code_dups = extract_code_tasks()

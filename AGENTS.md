@@ -1,6 +1,6 @@
-# Node Provisioner Project Rules & Guidelines
+# Infra Automation Project Rules & Guidelines
 
-이 문서는 `node-provisioner` 프로젝트의 프로덕션 운영 표준, 아키텍처 원칙, 멱등성 및 보안 규칙을 정의합니다. Antigravity 및 모든 작업자는 다음 가이드라인을 엄격히 준수해야 합니다.
+이 문서는 `infra-automation` 프로젝트의 프로덕션 운영 표준, 아키텍처 원칙, 멱등성 및 보안 규칙을 정의합니다. Antigravity 및 모든 작업자는 다음 가이드라인을 엄격히 준수해야 합니다.
 
 ---
 

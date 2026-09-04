@@ -1,5 +1,5 @@
 # ==============================================================================
-# Lefthook Git Hooks Configuration (node-provisioner)
+# Lefthook Git Hooks Configuration (infra-automation)
 # ==============================================================================
 # Pipeline Architecture:
 #   1. pre-commit (Fast ~1s): Gitleaks secret scan + Spec Validator + Pytest
