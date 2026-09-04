@@ -36,6 +36,7 @@ def test_cisco_backup_playbook_structure():
     pre_tasks = play.get("pre_tasks", [])
     assert len(pre_tasks) > 0, "pre_tasks missing in backup_cisco.yml"
     assert any("ansible_host" in str(t.get("ansible.builtin.assert", {}).get("that", [])) for t in pre_tasks)
+    assert any("ansible_host != inventory_hostname" in str(t.get("ansible.builtin.assert", {}).get("that", [])) for t in pre_tasks)
 
 def test_inventory_cisco_switches_example():
     """Verify cisco_switches group is documented in inventory hosts and group_vars"""
