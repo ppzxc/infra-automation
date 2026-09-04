@@ -4,7 +4,7 @@
 # ==============================================================================
 
 # 백업 로컬 저장소 기본 경로
-cisco_backup_dir: "{{ lookup('env', 'HOME') + '/backups/cisco' if lookup('env', 'HOME') else '/tmp/backups/cisco' }}"
+cisco_backup_dir: "{{ playbook_dir }}/../backups/cisco"
 
 # 백업 보관 주기 (일 단위) - Semaphore 또는 스케줄러 실행 시 유지 기간
 cisco_backup_retention_days: 90

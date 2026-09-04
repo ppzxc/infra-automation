@@ -3,7 +3,7 @@
 # Cisco IOS Network Switches Group Variables
 # ==============================================================================
 
-ansible_network_os: cisco.ios
+ansible_network_os: cisco.ios.ios
 ansible_connection: network_cli
 ansible_user: "{{ _local_cisco_user | default((_vault_global_secret | default({}, true)).cisco_user | default('admin')) }}"
 ansible_password: "{{ _local_cisco_password | default((_vault_global_secret | default({}, true)).cisco_password | default(omit)) }}"

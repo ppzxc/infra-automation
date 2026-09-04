@@ -30,7 +30,8 @@ RUN pip install --no-cache-dir \
     hvac \
     cryptography \
     jmespath \
-    netaddr
+    netaddr \
+    "paramiko<5.0.0"
 
 
 WORKDIR /ansible

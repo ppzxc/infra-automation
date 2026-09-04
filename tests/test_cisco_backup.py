@@ -45,7 +45,7 @@ def test_inventory_cisco_switches_example():
     assert cisco_vars_file.exists(), "group_vars/cisco_switches.yml is missing"
     with open(cisco_vars_file, "r", encoding="utf-8") as f:
         cisco_vars = yaml.safe_load(f)
-    assert cisco_vars.get("ansible_network_os") == "cisco.ios"
+    assert cisco_vars.get("ansible_network_os") in ["cisco.ios", "cisco.ios.ios"]
     assert cisco_vars.get("ansible_connection") == "network_cli"
 
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
