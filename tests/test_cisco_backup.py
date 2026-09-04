@@ -21,7 +21,7 @@ def test_cisco_backup_role_structure():
     assert (role_dir / "defaults" / "main.yml").exists(), "roles/cisco_backup/defaults/main.yml missing"
 
 def test_cisco_backup_playbook_structure():
-    """Verify playbooks/backup_cisco.yml exists and defines correct hosts and role"""
+    """Verify playbooks/backup_cisco.yml exists and defines correct hosts, pre_tasks, and role"""
     playbook_file = ROOT_DIR / "playbooks" / "backup_cisco.yml"
     assert playbook_file.exists(), "playbooks/backup_cisco.yml is missing"
     with open(playbook_file, "r", encoding="utf-8") as f:
@@ -32,6 +32,10 @@ def test_cisco_backup_playbook_structure():
     assert play.get("gather_facts") is False
     roles = [r if isinstance(r, str) else r.get("role") for r in play.get("roles", [])]
     assert "cisco_backup" in roles
+    # Verify fail-fast pre_tasks
+    pre_tasks = play.get("pre_tasks", [])
+    assert len(pre_tasks) > 0, "pre_tasks missing in backup_cisco.yml"
+    assert any("ansible_host" in str(t.get("ansible.builtin.assert", {}).get("that", [])) for t in pre_tasks)
 
 def test_inventory_cisco_switches_example():
     """Verify cisco_switches group is documented in inventory hosts and group_vars"""
