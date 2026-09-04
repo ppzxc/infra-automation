@@ -54,8 +54,27 @@
 ### Semaphore UI 예약 작업 구성
 1. **Task Template 생성**:
    - Playbook: `playbooks/backup_cisco.yml`
-   - Inventory: `inventory/hosts.yml`
-   - Environment: `cisco_switches` 접속 자격증명 주입
-2. **Cron Schedule 설정**:
+   - Inventory: `inventory/hosts.yml` (스위치 short name 등록, 정적 IP 미지정 시 OpenBao 우선 조회)
+   - Environment: OpenBao/Vault 접속 정보 및 AppRole 주입
+     - `VAULT_ADDR`: OpenBao/Vault 엔드포인트 URL (예: `http://192.168.1.50:8200`)
+     - `VAULT_ROLE_ID`: Semaphore 전용 AppRole Role ID
+     - `VAULT_SECRET_ID`: Semaphore 전용 AppRole Secret ID
+     - `VAULT_MOUNT`: (선택) KV v2 마운트 지점 (기본값: `secret`)
+     - `OPENBAO_CISCO_PREFIX`: (선택) 스위치 키 접두사 (기본값: `switches/`)
+2. **OpenBao KV v2 메타데이터 규격 (`secret/data/switches/<inventory_hostname>`)**:
+   - 각 스위치는 KV 경로 `switches/<inventory_hostname>`에 다음 키-값 필드를 보유해야 합니다:
+     - `ansible_host`: (필수) 스위치 관리 IP 주소 (예: `192.168.1.10`)
+     - `ansible_user`: (필수) 접속 계정명 (예: `admin`)
+     - `ansible_password`: (선택) 접속 비밀번호
+     - `ansible_become_password`: (선택) Cisco IOS enable 비밀번호
+     - `connection_type`: (선택) `ssh` (기본값) 또는 `telnet`
+     - `ansible_port`: (선택) 접속 포트 (기본값: `22`)
+     - `bastion_host`: (선택) Bastion 점프 호스트 IP
+3. **호스트 변수 결정 및 폴백(Fallback) 우선순위**:
+   - 1순위: OpenBao KV v2 (`switches/<inventory_hostname>`) 시크릿 메타데이터
+   - 2순위: 인벤토리(`hosts.yml`)에 명시적으로 정의된 `ansible_host`, `ansible_user`
+   - 3순위 (실패): OpenBao 및 `hosts.yml` 둘 다 유효한 IP/계정이 없을 경우 단축 호스트명(`inventory_hostname`)으로 임의 fallback하지 않고 `Verify OpenBao switch metadata is resolved` 태스크에서 즉시 실패(`[OPENBAO-MISSING]`) 처리.
+4. **Cron Schedule 설정**:
    - 매일 새벽 03:00 정기 실행: `0 3 * * *`
    - 작업 완료 후 Semaphore 기본 Webhook/알림 채널(Slack, Teams 등)로 자동 결과 전달
+
