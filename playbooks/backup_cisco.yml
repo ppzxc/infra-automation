@@ -9,7 +9,7 @@
 - name: Backup Cisco IOS Network Switches
   hosts: cisco_switches
   gather_facts: false
-  connection: network_cli
+  connection: "{{ 'network_cli' if connection_type | default('ssh') == 'ssh' else 'local' }}"
 
   roles:
     - role: cisco_backup

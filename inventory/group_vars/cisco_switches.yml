@@ -13,9 +13,10 @@ cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | de
 cisco_openbao_secret_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default('switches/', true), true) }}"
 
 # AppRole 인증 자격증명 (Semaphore Variable Group 주입 시 자동 감지)
-_vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') | default(omit, true) }}"
-_vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') | default(omit, true) }}"
-_vault_auth_method: "{{ 'approle' if (_vault_role_id and _vault_secret_id) else (lookup('env', 'VAULT_AUTH_METHOD') | default('token', true)) }}"
+_vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') | default('', true) }}"
+_vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') | default('', true) }}"
+_has_approle: "{{ (_vault_role_id | length > 0) and (_vault_secret_id | length > 0) }}"
+_vault_auth_method: "{{ 'approle' if _has_approle else (lookup('env', 'VAULT_AUTH_METHOD') | default('token', true)) }}"
 
 # 1. 스위치별 OpenBao 시크릿 조회
 _vault_cisco_node_secret: >-
@@ -24,10 +25,10 @@ _vault_cisco_node_secret: >-
       'community.hashi_vault.hashi_vault',
       'secret=' + cisco_openbao_secret_prefix + inventory_hostname,
       'engine_mount_point=' + cisco_openbao_mount,
-      'auth_method=' + _vault_auth_method,
-      ('role_id=' + _vault_role_id) if (_vault_auth_method == 'approle') else omit,
-      ('secret_id=' + _vault_secret_id) if (_vault_auth_method == 'approle') else omit,
-      ('namespace=' + cisco_openbao_namespace) if (cisco_openbao_namespace is defined and cisco_openbao_namespace) else omit,
+      ('auth_method=' + _vault_auth_method) if _vault_auth_method else omit,
+      ('role_id=' + _vault_role_id) if _has_approle else omit,
+      ('secret_id=' + _vault_secret_id) if _has_approle else omit,
+      ('namespace=' + lookup('env', 'VAULT_NAMESPACE')) if lookup('env', 'VAULT_NAMESPACE') else omit,
       errors='ignore'
     ) | default({}, true)
   }}
@@ -39,10 +40,10 @@ _vault_global_secret: >-
       'community.hashi_vault.hashi_vault',
       'secret=global/services',
       'engine_mount_point=' + cisco_openbao_mount,
-      'auth_method=' + _vault_auth_method,
-      ('role_id=' + _vault_role_id) if (_vault_auth_method == 'approle') else omit,
-      ('secret_id=' + _vault_secret_id) if (_vault_auth_method == 'approle') else omit,
-      ('namespace=' + cisco_openbao_namespace) if (cisco_openbao_namespace is defined and cisco_openbao_namespace) else omit,
+      ('auth_method=' + _vault_auth_method) if _vault_auth_method else omit,
+      ('role_id=' + _vault_role_id) if _has_approle else omit,
+      ('secret_id=' + _vault_secret_id) if _has_approle else omit,
+      ('namespace=' + lookup('env', 'VAULT_NAMESPACE')) if lookup('env', 'VAULT_NAMESPACE') else omit,
       errors='ignore'
     ) | default({}, true)
   }}
