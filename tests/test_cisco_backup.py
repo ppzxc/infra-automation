@@ -47,6 +47,14 @@ def test_inventory_cisco_switches_example():
         cisco_vars = yaml.safe_load(f)
     assert cisco_vars.get("ansible_network_os") in ["cisco.ios", "cisco.ios.ios"]
     assert cisco_vars.get("ansible_connection") == "network_cli"
+    raw_content = cisco_vars_file.read_text(encoding="utf-8")
+    assert "community.hashi_vault.hashi_vault" in raw_content
+    assert "cisco_openbao_secret_prefix" in raw_content
+    assert "cisco_openbao_namespace" in raw_content
+    assert "secret=global/services" in raw_content
+
+
+
 
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
     """Verify CISCO spec IDs exist in tasks and docs"""

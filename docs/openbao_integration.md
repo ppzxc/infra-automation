@@ -42,8 +42,8 @@ flowchart TD
 OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키를 배치합니다:
 
 ### (1) 노드별 개별 접속 자격증명
-* **경로**: `secret/data/nodes/<inventory_hostname>` (예: `secret/data/nodes/web-01.idc.internal`)
-* **필드 (Key-Value)**:
+* **경로**: `secret/data/nodes/<inventory_hostname>` (예: `secret/data/nodes/web-01.idc.internal`, `secret/data/nodes/ns0278`)
+* **서버 노드 필드 (Key-Value)**:
   ```json
   {
     "ansible_user": "ppzxc",
@@ -52,10 +52,37 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
     "ansible_port": 22
   }
   ```
+### (2) Cisco 스위치별 접속 정보 및 자격증명
+* **경로**: `secret/data/switches/<inventory_hostname>` (예: `secret/data/switches/ns0278`)
+* **필드 (Key-Value)**:
+  ```json
+  {
+    "ansible_host": "211.210.44.182",
+    "ansible_port": 22,
+    "ansible_user": "ansible-backup",
+    "ansible_password": "SwitchSecretPassword123!",
+    "connection_type": "ssh",
+    "fqdn": "ns0278.nanoit.kr"
+  }
+  ```
+* **Bastion 경유 장비 필드 추가 (예: `ns0279`)**:
+  ```json
+  {
+    "ansible_host": "10.10.200.4",
+    "ansible_port": 22,
+    "ansible_user": "ansible-backup",
+    "ansible_password": "SwitchSecretPassword123!",
+    "connection_type": "jump_ssh",
+    "bastion_host": "ns0278",
+    "fqdn": "ns0279.nanoit.kr"
+  }
+  ```
 
-### (2) 전역 인프라 서비스 시크릿
+
+### (3) 전역 인프라 서비스 시크릿
 * **경로**: `secret/data/global/services`
 * **필드 (Key-Value)**:
+
   ```json
   {
     "openbao_ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... openbao-ca@internal",

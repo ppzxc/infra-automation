@@ -5,12 +5,67 @@
 
 ansible_network_os: cisco.ios.ios
 ansible_connection: network_cli
-ansible_user: "{{ _local_cisco_user | default((_vault_global_secret | default({}, true)).cisco_user | default('admin')) }}"
-ansible_password: "{{ _local_cisco_password | default((_vault_global_secret | default({}, true)).cisco_password | default(omit)) }}"
+
+# OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (외부 변수 또는 Semaphore Environment 주입 가능)
+cisco_openbao_namespace: "{{ _local_cisco_openbao_namespace | default(openbao_namespace | default(lookup('env', 'VAULT_NAMESPACE') | default(omit, true), true), true) }}"
+
+cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | default('secret', true), true) }}"
+cisco_openbao_secret_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default('switches/', true), true) }}"
+
+# AppRole 인증 자격증명 (Semaphore Variable Group 주입 시 자동 감지)
+_vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') | default(omit, true) }}"
+_vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') | default(omit, true) }}"
+_vault_auth_method: "{{ 'approle' if (_vault_role_id and _vault_secret_id) else (lookup('env', 'VAULT_AUTH_METHOD') | default('token', true)) }}"
+
+# 1. 스위치별 OpenBao 시크릿 조회
+_vault_cisco_node_secret: >-
+  {{
+    lookup(
+      'community.hashi_vault.hashi_vault',
+      'secret=' + cisco_openbao_secret_prefix + inventory_hostname,
+      'engine_mount_point=' + cisco_openbao_mount,
+      'auth_method=' + _vault_auth_method,
+      ('role_id=' + _vault_role_id) if (_vault_auth_method == 'approle') else omit,
+      ('secret_id=' + _vault_secret_id) if (_vault_auth_method == 'approle') else omit,
+      ('namespace=' + cisco_openbao_namespace) if (cisco_openbao_namespace is defined and cisco_openbao_namespace) else omit,
+      errors='ignore'
+    ) | default({}, true)
+  }}
+
+# 2. 전역 공통 OpenBao 시크릿 조회
+_vault_global_secret: >-
+  {{
+    lookup(
+      'community.hashi_vault.hashi_vault',
+      'secret=global/services',
+      'engine_mount_point=' + cisco_openbao_mount,
+      'auth_method=' + _vault_auth_method,
+      ('role_id=' + _vault_role_id) if (_vault_auth_method == 'approle') else omit,
+      ('secret_id=' + _vault_secret_id) if (_vault_auth_method == 'approle') else omit,
+      ('namespace=' + cisco_openbao_namespace) if (cisco_openbao_namespace is defined and cisco_openbao_namespace) else omit,
+      errors='ignore'
+    ) | default({}, true)
+  }}
+
+
+
+
+# 3. 우선순위: 로컬 명시 변수 -> 노드별 OpenBao -> 인벤토리/기본값
+ansible_host: "{{ _local_ansible_host | default((_vault_cisco_node_secret | default({}, true)).ansible_host | default(ip | default(inventory_hostname))) }}"
+ansible_port: "{{ _local_ansible_port | default((_vault_cisco_node_secret | default({}, true)).ansible_port | default(22)) | int }}"
+connection_type: "{{ _local_connection_type | default((_vault_cisco_node_secret | default({}, true)).connection_type | default('ssh')) }}"
+bastion_host: "{{ _local_bastion_host | default((_vault_cisco_node_secret | default({}, true)).bastion_host | default(omit)) }}"
+fqdn: "{{ _local_fqdn | default((_vault_cisco_node_secret | default({}, true)).fqdn | default(inventory_hostname)) }}"
+
+ansible_user: "{{ _local_cisco_user | default((_vault_cisco_node_secret | default({}, true)).ansible_user | default((_vault_global_secret | default({}, true)).cisco_user | default('ansible-backup'))) }}"
+ansible_password: "{{ _local_cisco_password | default((_vault_cisco_node_secret | default({}, true)).ansible_password | default((_vault_global_secret | default({}, true)).cisco_password | default(omit))) }}"
+
 ansible_become: true
 ansible_become_method: enable
-ansible_become_password: "{{ _local_cisco_enable_password | default((_vault_global_secret | default({}, true)).cisco_enable_password | default(ansible_password | default(omit))) }}"
+ansible_become_password: "{{ _local_cisco_enable_password | default((_vault_cisco_node_secret | default({}, true)).ansible_become_password | default((_vault_global_secret | default({}, true)).cisco_enable_password | default(ansible_password | default(omit)))) }}"
+
 
 # 네트워크 CLI SSH 타임아웃
 ansible_command_timeout: 60
 ansible_connect_timeout: 30
+
