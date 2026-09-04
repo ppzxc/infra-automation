@@ -58,6 +58,7 @@ postgres/data/
 prometheus/data/
 data/
 backup/
+backups/
 *.log
 
 # OS & Editor Files
