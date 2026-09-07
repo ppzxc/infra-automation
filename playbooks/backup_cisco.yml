@@ -11,6 +11,9 @@
   gather_facts: false
   connection: "{{ 'network_cli' if (ansible_host | default('') | length > 0 and (connection_type | default('ssh') == 'ssh')) else 'local' }}"
 
+  vars_files:
+    - "{{ playbook_dir }}/../inventory/group_vars/cisco_switches.yml"
+
   vars:
     cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('switches/', true) }}"
 

@@ -32,6 +32,9 @@ def test_cisco_backup_playbook_structure():
     assert play.get("gather_facts") is False
     roles = [r if isinstance(r, str) else r.get("role") for r in play.get("roles", [])]
     assert "cisco_backup" in roles
+    # Verify vars_files includes cisco_switches.yml
+    vars_files = play.get("vars_files", [])
+    assert any("cisco_switches.yml" in str(v) for v in vars_files)
     # Verify fail-fast pre_tasks
     pre_tasks = play.get("pre_tasks", [])
     assert len(pre_tasks) > 0, "pre_tasks missing in backup_cisco.yml"
