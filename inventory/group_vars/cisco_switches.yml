@@ -7,9 +7,9 @@ ansible_network_os: cisco.ios.ios
 ansible_connection: network_cli
 
 # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (외부 변수 또는 Semaphore Environment 주입 가능)
-cisco_openbao_namespace: "{{ _local_cisco_openbao_namespace | default(openbao_namespace | default(lookup('env', 'VAULT_NAMESPACE') | default(omit, true), true), true) }}"
+cisco_openbao_namespace: "{{ _local_cisco_openbao_namespace | default(openbao_namespace | default(vault_namespace | default(VAULT_NAMESPACE | default(lookup('env', 'VAULT_NAMESPACE') | default(lookup('env', 'OPENBAO_NAMESPACE') | default('', true), true), true), true), true), true) }}"
 
-cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | default(lookup('env', 'VAULT_MOUNT') | default('secret', true), true), true) }}"
+cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | default(vault_mount | default(VAULT_MOUNT | default(lookup('env', 'VAULT_MOUNT') | default('secret', true), true), true), true), true) }}"
 cisco_openbao_secret_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default(lookup('env', 'OPENBAO_CISCO_PREFIX') | default(lookup('env', 'VAULT_CISCO_PREFIX') | default('switches/', true), true), true), true) }}"
 
 # AppRole 및 Token 인증 자격증명 자동 감지 (Semaphore Secrets / Extra vars / OS Env vars 모두 지원)
@@ -30,7 +30,7 @@ _vault_cisco_node_secret: >-
       ('role_id=' + _vault_role_id) if _has_approle else omit,
       ('secret_id=' + _vault_secret_id) if _has_approle else omit,
       ('token=' + _vault_token) if (_vault_token | length > 0 and not _has_approle) else omit,
-      ('namespace=' + lookup('env', 'VAULT_NAMESPACE')) if lookup('env', 'VAULT_NAMESPACE') else omit,
+      ('namespace=' + cisco_openbao_namespace) if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else omit,
       errors='ignore'
     ) | default({}, true)
   }}
@@ -46,7 +46,7 @@ _vault_global_secret: >-
       ('role_id=' + _vault_role_id) if _has_approle else omit,
       ('secret_id=' + _vault_secret_id) if _has_approle else omit,
       ('token=' + _vault_token) if (_vault_token | length > 0 and not _has_approle) else omit,
-      ('namespace=' + lookup('env', 'VAULT_NAMESPACE')) if lookup('env', 'VAULT_NAMESPACE') else omit,
+      ('namespace=' + cisco_openbao_namespace) if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else omit,
       errors='ignore'
     ) | default({}, true)
   }}

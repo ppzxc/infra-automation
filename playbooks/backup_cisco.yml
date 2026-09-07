@@ -35,6 +35,7 @@
       ansible.builtin.uri:
         url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/auth/approle/login"
         method: POST
+        headers: "{{ {'X-Vault-Namespace': cisco_openbao_namespace} if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else {} }}"
         body_format: json
         body:
           role_id: "{{ _vault_role_id | default('', true) }}"
@@ -55,6 +56,7 @@
           inventory_hostname: "{{ inventory_hostname }}"
           vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('NOT_SET', true) }}"
           vault_mount: "{{ cisco_openbao_mount | default('NOT_SET', true) }}"
+          vault_namespace: "{{ cisco_openbao_namespace | default('NOT_SET', true) }}"
           secret_prefix: "{{ cisco_openbao_secret_prefix | default('', true) }}"
           secret_path: "{{ (cisco_openbao_secret_prefix | default('', true)) ~ inventory_hostname }}"
           auth_method: "{{ _vault_auth_method | default('NONE', true) }}"
