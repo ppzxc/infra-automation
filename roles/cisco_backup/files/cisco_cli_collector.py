@@ -363,6 +363,141 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
         raise oe
 
 
+def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, bastion_user: str, bastion_pass: str,
+                                     target_host: str, target_user: str, target_pass: str,
+                                     enable_pass: str = None, timeout: int = 35,
+                                     _bastion_cmd: list = None) -> str:
+    """Collect config by SSHing into Bastion host first via PTY, then chaining SSH to target switch."""
+    master, slave = pty.openpty()
+
+    def preexec():
+        os.setsid()
+        try:
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+        except Exception:
+            pass
+
+    cmd = _bastion_cmd or [
+        "ssh", "-tt",
+        "-p", str(bastion_port),
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        "-o", "PubkeyAuthentication=no",
+        "-o", "PreferredAuthentications=password,keyboard-interactive",
+        f"{bastion_user}@{bastion_host}"
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+        preexec_fn=preexec
+    )
+    os.close(slave)
+
+    def pty_send(data: bytes):
+        os.write(master, data)
+
+    def pty_recv(t: float = 0.5) -> bytes:
+        r, _, _ = select.select([master], [], [], t)
+        if r:
+            try:
+                return os.read(master, 8192)
+            except OSError:
+                return b""
+        return b""
+
+    try:
+        # Step 1: Handle Bastion password authentication
+        buf = b""
+        login_start = time.time()
+        while time.time() - login_start < 20.0:
+            chunk = pty_recv(0.3)
+            if chunk:
+                buf += chunk
+                lower = buf.lower()
+                if b"yes/no" in lower:
+                    pty_send(b"yes\n")
+                    buf = b""
+                elif b"permission denied" in lower:
+                    err_msg = buf.decode(errors="ignore").strip()
+                    raise RuntimeError(f"Bastion SSH authentication failed (permission denied): {err_msg}")
+                elif b"password:" in lower or b"password :" in lower:
+                    pty_send(bastion_pass.encode() + b"\n")
+                    buf = b""
+                    break
+            if proc.poll() is not None:
+                err_msg = buf.decode(errors="ignore").strip()
+                raise RuntimeError(f"Bastion SSH process exited unexpectedly with code {proc.returncode}: {err_msg}")
+
+        # Step 2: Wait for bastion shell prompt ($ or # or >)
+        shell_start = time.time()
+        buf = b""
+        while time.time() - shell_start < 10.0:
+            chunk = pty_recv(0.3)
+            if chunk:
+                buf += chunk
+                if b"$" in buf or b"#" in buf or b">" in buf:
+                    break
+            if proc.poll() is not None:
+                err_msg = buf.decode(errors="ignore").strip()
+                raise RuntimeError(f"Bastion shell exited unexpectedly: {err_msg}")
+
+        pty_send(b"stty -echo\n")
+        time.sleep(0.3)
+        pty_recv(0.3)
+
+        # Step 3: From Bastion shell, SSH to target Cisco switch with legacy cipher options
+        ssh_cmd = (
+            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+            f"-o KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256 "
+            f"-o HostKeyAlgorithms=+ssh-rsa,ssh-dss "
+            f"-o Ciphers=+aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc "
+            f"-l {target_user} {target_host}\n"
+        )
+        pty_send(ssh_cmd.encode())
+
+        # Step 4: Handle Target switch password authentication
+        target_start = time.time()
+        buf = b""
+        while time.time() - target_start < 15.0:
+            chunk = pty_recv(0.3)
+            if chunk:
+                buf += chunk
+                lower = buf.lower()
+                if b"yes/no" in lower:
+                    pty_send(b"yes\n")
+                    buf = b""
+                elif b"permission denied" in lower:
+                    err_msg = buf.decode(errors="ignore").strip()
+                    raise RuntimeError(f"Target switch SSH authentication failed (permission denied): {err_msg}")
+                elif b"password:" in lower or b"password :" in lower:
+                    pty_send(target_pass.encode() + b"\n")
+                    buf = b""
+                    break
+            if proc.poll() is not None:
+                err_msg = buf.decode(errors="ignore").strip()
+                raise RuntimeError(f"Target SSH process exited unexpectedly: {err_msg}")
+
+        effective_enable = enable_pass or target_pass
+        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout)
+    finally:
+        try:
+            pty_send(b"exit\nexit\n")
+        except Exception:
+            pass
+        os.close(master)
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                proc.kill()
+
+
 def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, bastion_pass: str,
                      target_host: str, target_user: str, target_pass: str,
                      enable_pass: str = None, timeout: int = 35) -> str:
@@ -437,12 +572,19 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
         except Exception as pe:
             paramiko_err = pe
 
-    # Fallback to OpenSSH Jump via ProxyCommand
-    proxy_cmd = f"ssh -p {bastion_port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p {bastion_user}@{bastion_host}"
-    direct_args = get_openssh_direct_args(target_host, 22, target_user)
-    jump_args = direct_args[:2] + ["-o", f"ProxyCommand={proxy_cmd}"] + direct_args[2:]
+    # Fallback to interactive OpenSSH Jump session via PTY
     try:
-        return collect_openssh_pty(jump_args, password=bastion_pass, target_pass=target_pass, enable_pass=enable_pass or target_pass, timeout=timeout)
+        return collect_openssh_jump_interactive(
+            bastion_host=bastion_host,
+            bastion_port=bastion_port,
+            bastion_user=bastion_user,
+            bastion_pass=bastion_pass,
+            target_host=target_host,
+            target_user=target_user,
+            target_pass=target_pass,
+            enable_pass=enable_pass,
+            timeout=timeout
+        )
     except Exception as oe:
         if paramiko_err:
             raise RuntimeError(f"Jump SSH failed with Paramiko ({paramiko_err}) and OpenSSH ({oe})")
