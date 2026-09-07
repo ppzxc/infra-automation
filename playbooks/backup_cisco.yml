@@ -29,6 +29,7 @@
       ignore_errors: true
       delegate_to: localhost
       run_once: true
+      check_mode: false
 
     - name: Run OpenBao AppRole login diagnostic probe from controller
       ansible.builtin.uri:
@@ -45,6 +46,7 @@
       ignore_errors: true
       delegate_to: localhost
       run_once: true
+      check_mode: false
       when: _has_approle | default(false)
 
     - name: Debug OpenBao switch resolution and environment
@@ -59,9 +61,9 @@
           has_approle: "{{ _has_approle | default(false) }}"
           has_vault_token: "{{ (_vault_token | default('') | length) > 0 }}"
           openbao_health_status: "{{ _openbao_health_probe.status | default('FAILED') }}"
-          openbao_health_msg: "{{ _openbao_health_probe.msg | default('N/A') }}"
+          openbao_health_msg: "{{ _openbao_health_probe.msg | default(_openbao_health_probe.content | default('N/A')) }}"
           openbao_login_status: "{{ _openbao_login_probe.status | default('SKIPPED') }}"
-          openbao_login_msg: "{{ _openbao_login_probe.msg | default('N/A') }}"
+          openbao_login_msg: "{{ _openbao_login_probe.msg | default(_openbao_login_probe.content | default('N/A')) }}"
           openbao_secret_raw_type: "{{ _cisco_sec.__class__.__name__ | default('dict') }}"
           openbao_secret_keys: "{{ (_cisco_sec | default({})).keys() | list }}"
           openbao_secret_retrieved: "{{ (_cisco_sec | default({}) | length) > 0 }}"
