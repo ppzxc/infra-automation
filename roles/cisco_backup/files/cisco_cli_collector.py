@@ -17,6 +17,52 @@ except ImportError:
     paramiko = None
 
 
+def enable_legacy_algorithms():
+    """Ensure legacy KEX, ciphers, and key types are enabled in Paramiko for Cisco IOS devices."""
+    if paramiko is None:
+        return
+    try:
+        transport = paramiko.Transport
+        legacy_kex = (
+            "diffie-hellman-group1-sha1",
+            "diffie-hellman-group14-sha1",
+            "diffie-hellman-group-exchange-sha1",
+            "diffie-hellman-group-exchange-sha256",
+        )
+        if hasattr(transport, "_preferred_kex"):
+            current_kex = list(transport._preferred_kex)
+            for kex in legacy_kex:
+                if kex not in current_kex:
+                    current_kex.append(kex)
+            transport._preferred_kex = tuple(current_kex)
+
+        legacy_keys = (
+            "ssh-rsa",
+            "ssh-dss",
+        )
+        if hasattr(transport, "_preferred_keys"):
+            current_keys = list(transport._preferred_keys)
+            for key in legacy_keys:
+                if key not in current_keys:
+                    current_keys.append(key)
+            transport._preferred_keys = tuple(current_keys)
+
+        legacy_ciphers = (
+            "aes128-cbc",
+            "3des-cbc",
+            "aes192-cbc",
+            "aes256-cbc",
+        )
+        if hasattr(transport, "_preferred_ciphers"):
+            current_ciphers = list(transport._preferred_ciphers)
+            for c in legacy_ciphers:
+                if c not in current_ciphers:
+                    current_ciphers.append(c)
+            transport._preferred_ciphers = tuple(current_ciphers)
+    except Exception:
+        pass
+
+
 def read_passwords_from_stdin() -> dict:
     """Read credentials from JSON-formatted stdin to prevent exposure in process table (ps aux)."""
     if not sys.stdin.isatty():
@@ -117,11 +163,50 @@ def collect_telnet(host: str, port: int, user: str, password: str,
         s.close()
 
 
+def collect_direct_ssh(host: str, port: int, user: str, password: str,
+                       enable_pass: str = None, timeout: int = 30) -> str:
+    if paramiko is None:
+        raise RuntimeError("paramiko is required for direct SSH collection")
+
+    enable_legacy_algorithms()
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(
+        host,
+        port=port,
+        username=user,
+        password=password,
+        look_for_keys=False,
+        allow_agent=False,
+        timeout=timeout
+    )
+    try:
+        shell = ssh.invoke_shell()
+        time.sleep(1)
+
+        def send_fn(data: bytes):
+            shell.send(data.decode(errors="ignore"))
+
+        def recv_fn() -> bytes:
+            time.sleep(0.3)
+            out = b""
+            while shell.recv_ready():
+                out += shell.recv(65535)
+            return out
+
+        return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or password, timeout=timeout)
+    finally:
+        ssh.close()
+
+
 def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, bastion_pass: str,
                      target_host: str, target_user: str, target_pass: str,
                      enable_pass: str = None, timeout: int = 35) -> str:
     if paramiko is None:
         raise RuntimeError("paramiko is required for jump SSH collection")
+
+    enable_legacy_algorithms()
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -161,7 +246,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
 
 def main():
     parser = argparse.ArgumentParser(description="Cisco Config Collector Helper")
-    parser.add_argument("--mode", choices=["telnet", "jump_ssh"], required=True)
+    parser.add_argument("--mode", choices=["telnet", "jump_ssh", "direct_ssh", "ssh"], required=True)
     parser.add_argument("--host", required=True)
     parser.add_argument("--port", type=int, default=22)
     parser.add_argument("--user", required=True)
@@ -205,6 +290,15 @@ def main():
                 target_host=args.host,
                 target_user=args.user,
                 target_pass=password,
+                enable_pass=enable_password,
+                timeout=args.timeout
+            )
+        elif args.mode in ("direct_ssh", "ssh"):
+            config = collect_direct_ssh(
+                host=args.host,
+                port=args.port,
+                user=args.user,
+                password=password,
                 enable_pass=enable_password,
                 timeout=args.timeout
             )

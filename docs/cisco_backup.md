@@ -31,7 +31,7 @@
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `CISCO-001` | `Ensure local backup destination directory exists` | `ansible.builtin.file` | Controller / Localhost | 디렉토리 상태 및 권한(`0700`) 일치 시 `ok` |
-| `CISCO-002` | `Collect running configuration from Cisco IOS switch` | `cisco.ios.ios_command` | Cisco IOS | 장비로부터 `show running-config` 실행 후 출력 등록 |
+| `CISCO-002` | `Collect running configuration from Cisco IOS switch` | `ansible.builtin.command` | Controller / Localhost | 장비로부터 SSH 대화형 세션을 통해 `show running-config` 실행 후 출력 등록 |
 | `CISCO-004` | `Verify configuration output validity` | `ansible.builtin.assert` | Controller / Localhost | 출력값 검증 및 CLI 에러 패턴 미포함 확인 |
 | `CISCO-003` | `Save running configuration to backup destination` | `ansible.builtin.copy` | Controller / Localhost | 백업 파일 생성 및 권한(`0600`) 부여 |
 | `CISCO-005` | `Clean up old backup archives exceeding retention period` | `ansible.builtin.find` | Controller / Localhost | 만료 백업 파일 검색 및 삭제 수행 |

@@ -14,10 +14,26 @@
 
 # 1. Direct SSH 수집 (connection_type 미지정 또는 ssh)
 - name: "[CISCO-002] Collect running configuration from Cisco IOS switch"
-  cisco.ios.ios_command:
-    commands:
-      - show running-config
+  ansible.builtin.command: >-
+    python3 {{ role_path }}/files/cisco_cli_collector.py
+    --mode direct_ssh
+    --host {{ ansible_host }}
+    --port {{ ansible_port | default(22) }}
+    --user {{ ansible_user }}
+    --timeout {{ cisco_backup_timeout | default(30) }}
+  args:
+    stdin: >-
+      {{
+        {
+          "password": ansible_password | default(''),
+          "enable_password": ansible_become_password | default(ansible_password | default(''))
+        } | to_json
+      }}
   register: cisco_config_direct_output
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  no_log: true
   when: connection_type | default('ssh') == 'ssh'
 
 # 2. Telnet 직접 수집 (cisco_direct_telnet 장비: ns0341, ns0065)
@@ -76,7 +92,7 @@
   ansible.builtin.set_fact:
     cisco_running_config_raw: >-
       {{
-        (cisco_config_direct_output.stdout[0] if (cisco_config_direct_output is defined and cisco_config_direct_output.stdout is defined and cisco_config_direct_output.stdout | length > 0) else
+        (cisco_config_direct_output.stdout if (cisco_config_direct_output is defined and cisco_config_direct_output.stdout is defined and cisco_config_direct_output.stdout | length > 0) else
         (cisco_config_telnet_output.stdout if (cisco_config_telnet_output is defined and cisco_config_telnet_output.stdout is defined and cisco_config_telnet_output.stdout | length > 0) else
         (cisco_config_jump_output.stdout if (cisco_config_jump_output is defined and cisco_config_jump_output.stdout is defined) else '')))
       }}
