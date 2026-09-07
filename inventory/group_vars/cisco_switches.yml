@@ -78,3 +78,10 @@ ansible_become_password: "{{ _cisco_sec.ansible_become_password | default(_host_
 ansible_command_timeout: 60
 ansible_connect_timeout: 30
 
+# 구형 Cisco IOS 장비 SSH 레거시 알고리즘 호환성 옵션 (KEX / HostKey / Ciphers)
+ansible_ssh_common_args: >-
+  -o KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1
+  -o HostKeyAlgorithms=+ssh-rsa,ssh-dss
+  -o Ciphers=+aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc
+
+
