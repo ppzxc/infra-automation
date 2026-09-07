@@ -7,7 +7,11 @@ Collects running-config from Cisco IOS switches via:
 """
 import argparse
 import json
+import os
+import pty
+import select
 import socket
+import subprocess
 import sys
 import time
 
@@ -98,44 +102,55 @@ def extract_clean_config(raw_output: str) -> str:
 
 
 def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 30) -> str:
-    """Shared interactive logic for Cisco IOS CLI session."""
-    time.sleep(1)
-    send_fn(b"\n")
+    """Robust interactive logic for Cisco IOS CLI session."""
+    def wait_for(pred_fn, wait_timeout=8.0, poll_interval=0.2):
+        accum = b""
+        start = time.time()
+        while time.time() - start < wait_timeout:
+            chunk = recv_fn(poll_interval)
+            if chunk:
+                accum += chunk
+                if pred_fn(accum):
+                    return accum
+        return accum
+
+    # Send newline to wake up console and observe initial prompt
     time.sleep(0.5)
-    prompt = recv_fn()
+    send_fn(b"\n")
+    initial_buf = wait_for(lambda b: b.strip().endswith(b">") or b.strip().endswith(b"#"), wait_timeout=5.0)
 
-    if prompt.strip().endswith(b">"):
+    # Check if we need to escalate to enable mode
+    if initial_buf.strip().endswith(b">") or b">" in initial_buf:
         send_fn(b"enable\n")
-        time.sleep(1)
-        resp = recv_fn()
-        if b"password" in resp.lower() and enable_pass:
+        enable_resp = wait_for(lambda b: b"password" in b.lower() or b.strip().endswith(b"#"), wait_timeout=5.0)
+        if b"password" in enable_resp.lower() and enable_pass:
             send_fn(enable_pass.encode() + b"\n")
-            time.sleep(1)
-            recv_fn()
+            wait_for(lambda b: b.strip().endswith(b"#"), wait_timeout=5.0)
 
+    # Disable terminal paging so config outputs continuously without --More--
     send_fn(b"terminal length 0\n")
-    time.sleep(1)
-    recv_fn()
+    wait_for(lambda b: b.strip().endswith(b"#"), wait_timeout=5.0)
 
+    # Execute show running-config
     send_fn(b"show running-config\n")
-    time.sleep(2)
 
     out = b""
     start_time = time.time()
     while time.time() - start_time < timeout:
-        chunk = recv_fn()
+        chunk = recv_fn(0.5)
         if chunk:
             out += chunk
             if b"end\r\n" in chunk or b"end\n" in chunk:
                 break
-        else:
-            time.sleep(0.5)
+            if b"--More--" in chunk or b"--more--" in chunk:
+                send_fn(b" ")
 
     return extract_clean_config(out.decode(errors="ignore"))
 
 
 def collect_telnet(host: str, port: int, user: str, password: str,
                    enable_pass: str = None, timeout: int = 30) -> str:
+    """Connect to Cisco switch via direct Telnet socket."""
     s = socket.create_connection((host, port), timeout=timeout)
     time.sleep(2)
     banner = s.recv(4096).decode(errors="ignore")
@@ -150,10 +165,12 @@ def collect_telnet(host: str, port: int, user: str, password: str,
     def send_fn(data: bytes):
         s.sendall(data)
 
-    def recv_fn() -> bytes:
+    def recv_fn(t: float = 1.0) -> bytes:
         try:
-            s.settimeout(2.0)
-            return s.recv(8192)
+            r, _, _ = select.select([s], [], [], t)
+            if r:
+                return s.recv(8192)
+            return b""
         except Exception:
             return b""
 
@@ -163,85 +180,234 @@ def collect_telnet(host: str, port: int, user: str, password: str,
         s.close()
 
 
+def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
+                        target_pass: str = None, timeout: int = 30) -> str:
+    """PTY-based execution of OpenSSH command for guaranteed legacy cipher/KEX compatibility."""
+    master, slave = pty.openpty()
+    proc = subprocess.Popen(
+        cmd_args,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True
+    )
+    os.close(slave)
+
+    def pty_send(data: bytes):
+        os.write(master, data)
+
+    def pty_recv(t: float = 0.5) -> bytes:
+        r, _, _ = select.select([master], [], [], t)
+        if r:
+            try:
+                return os.read(master, 8192)
+            except OSError:
+                return b""
+        return b""
+
+    try:
+        # Wait for SSH password prompt and supply password
+        buf = b""
+        login_start = time.time()
+        while time.time() - login_start < 10.0:
+            chunk = pty_recv(0.3)
+            if chunk:
+                buf += chunk
+                lower = buf.lower()
+                if b"password:" in lower or b"password :" in lower:
+                    pty_send(password.encode() + b"\n")
+                    buf = b""
+                    break
+                if b"yes/no" in lower:
+                    pty_send(b"yes\n")
+                    buf = b""
+
+        if target_pass:
+            jump_start = time.time()
+            buf = b""
+            while time.time() - jump_start < 10.0:
+                chunk = pty_recv(0.3)
+                if chunk:
+                    buf += chunk
+                    lower = buf.lower()
+                    if b"password:" in lower or b"password :" in lower:
+                        pty_send(target_pass.encode() + b"\n")
+                        break
+
+        return run_cisco_session(pty_send, pty_recv, enable_pass=enable_pass or password, timeout=timeout)
+    finally:
+        try:
+            pty_send(b"exit\n")
+        except Exception:
+            pass
+        os.close(master)
+        proc.poll()
+        if proc.returncode is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                proc.kill()
+
+
+def get_openssh_direct_args(host: str, port: int, user: str) -> list:
+    """Build OpenSSH CLI invocation with all legacy ciphers, key exchanges, and host keys enabled."""
+    return [
+        "ssh",
+        "-tt",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        "-o", "PubkeyAuthentication=no",
+        "-o", "PreferredAuthentications=password,keyboard-interactive",
+        "-o", "KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256",
+        "-o", "HostKeyAlgorithms=+ssh-rsa,ssh-dss",
+        "-o", "Ciphers=+aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc",
+        "-p", str(port),
+        f"{user}@{host}"
+    ]
+
+
 def collect_direct_ssh(host: str, port: int, user: str, password: str,
                        enable_pass: str = None, timeout: int = 30) -> str:
-    if paramiko is None:
-        raise RuntimeError("paramiko is required for direct SSH collection")
+    """Collect config via Direct SSH. Tries Paramiko first, falls back to OpenSSH PTY."""
+    paramiko_err = None
+    if paramiko is not None:
+        try:
+            enable_legacy_algorithms()
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            connect_kwargs = {
+                "hostname": host,
+                "port": port,
+                "username": user,
+                "password": password,
+                "look_for_keys": False,
+                "allow_agent": False,
+                "timeout": timeout,
+            }
+            try:
+                connect_kwargs["disabled_algorithms"] = dict(kex=[], ciphers=[], keys=[])
+                ssh.connect(**connect_kwargs)
+            except TypeError:
+                del connect_kwargs["disabled_algorithms"]
+                ssh.connect(**connect_kwargs)
 
-    enable_legacy_algorithms()
+            try:
+                shell = ssh.invoke_shell()
 
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(
-        host,
-        port=port,
-        username=user,
-        password=password,
-        look_for_keys=False,
-        allow_agent=False,
-        timeout=timeout
-    )
+                def send_fn(data: bytes):
+                    shell.send(data)
+
+                def recv_fn(t: float = 0.5) -> bytes:
+                    start = time.time()
+                    out = b""
+                    while time.time() - start < t:
+                        if shell.recv_ready():
+                            out += shell.recv(65535)
+                        else:
+                            time.sleep(0.05)
+                    return out
+
+                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or password, timeout=timeout)
+            finally:
+                ssh.close()
+        except Exception as pe:
+            paramiko_err = pe
+
+    cmd = get_openssh_direct_args(host, port, user)
     try:
-        shell = ssh.invoke_shell()
-        time.sleep(1)
-
-        def send_fn(data: bytes):
-            shell.send(data.decode(errors="ignore"))
-
-        def recv_fn() -> bytes:
-            time.sleep(0.3)
-            out = b""
-            while shell.recv_ready():
-                out += shell.recv(65535)
-            return out
-
-        return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or password, timeout=timeout)
-    finally:
-        ssh.close()
+        return collect_openssh_pty(cmd, password=password, enable_pass=enable_pass or password, timeout=timeout)
+    except Exception as oe:
+        if paramiko_err:
+            raise RuntimeError(f"Direct SSH failed with Paramiko ({paramiko_err}) and OpenSSH ({oe})")
+        raise oe
 
 
 def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, bastion_pass: str,
                      target_host: str, target_user: str, target_pass: str,
                      enable_pass: str = None, timeout: int = 35) -> str:
-    if paramiko is None:
-        raise RuntimeError("paramiko is required for jump SSH collection")
+    """Collect config via Bastion jump SSH session."""
+    paramiko_err = None
+    if paramiko is not None:
+        try:
+            enable_legacy_algorithms()
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            connect_kwargs = {
+                "hostname": bastion_host,
+                "port": bastion_port,
+                "username": bastion_user,
+                "password": bastion_pass,
+                "look_for_keys": False,
+                "allow_agent": False,
+                "timeout": timeout,
+            }
+            try:
+                connect_kwargs["disabled_algorithms"] = dict(kex=[], ciphers=[], keys=[])
+                ssh.connect(**connect_kwargs)
+            except TypeError:
+                del connect_kwargs["disabled_algorithms"]
+                ssh.connect(**connect_kwargs)
 
-    enable_legacy_algorithms()
+            try:
+                shell = ssh.invoke_shell()
 
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(
-        bastion_host,
-        port=bastion_port,
-        username=bastion_user,
-        password=bastion_pass,
-        look_for_keys=False,
-        allow_agent=False,
-        timeout=timeout
-    )
+                def send_fn(data: bytes):
+                    shell.send(data)
+
+                def recv_fn(t: float = 0.5) -> bytes:
+                    start = time.time()
+                    out = b""
+                    while time.time() - start < t:
+                        if shell.recv_ready():
+                            out += shell.recv(65535)
+                        else:
+                            time.sleep(0.05)
+                    return out
+
+                buf = b""
+                start = time.time()
+                while time.time() - start < 5.0:
+                    c = recv_fn(0.2)
+                    if c:
+                        buf += c
+                        if b"$" in buf or b"#" in buf or b">" in buf:
+                            break
+
+                send_fn(b"terminal length 0\n")
+                time.sleep(0.5)
+                recv_fn(0.5)
+
+                send_fn(f"ssh -l {target_user} {target_host}\n".encode())
+                buf = b""
+                start = time.time()
+                while time.time() - start < 10.0:
+                    c = recv_fn(0.3)
+                    if c:
+                        buf += c
+                        if b"password:" in buf.lower() or b"password :" in buf.lower():
+                            send_fn(f"{target_pass}\n".encode())
+                            break
+                        if b"yes/no" in buf.lower():
+                            send_fn(b"yes\n")
+
+                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or target_pass, timeout=timeout)
+            finally:
+                ssh.close()
+        except Exception as pe:
+            paramiko_err = pe
+
+    # Fallback to OpenSSH Jump via ProxyCommand
+    proxy_cmd = f"ssh -p {bastion_port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p {bastion_user}@{bastion_host}"
+    direct_args = get_openssh_direct_args(target_host, 22, target_user)
+    jump_args = direct_args[:2] + ["-o", f"ProxyCommand={proxy_cmd}"] + direct_args[2:]
     try:
-        shell = ssh.invoke_shell()
-        time.sleep(1)
-        shell.send("terminal length 0\n")
-        time.sleep(1)
-        shell.send(f"ssh -l {target_user} {target_host}\n")
-        time.sleep(2)
-        shell.send(f"{target_pass}\n")
-        time.sleep(2)
-
-        def send_fn(data: bytes):
-            shell.send(data.decode(errors="ignore"))
-
-        def recv_fn() -> bytes:
-            time.sleep(0.3)
-            out = b""
-            while shell.recv_ready():
-                out += shell.recv(65535)
-            return out
-
-        return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or target_pass, timeout=timeout)
-    finally:
-        ssh.close()
+        return collect_openssh_pty(jump_args, password=target_pass, enable_pass=enable_pass or target_pass, timeout=timeout)
+    except Exception as oe:
+        if paramiko_err:
+            raise RuntimeError(f"Jump SSH failed with Paramiko ({paramiko_err}) and OpenSSH ({oe})")
+        raise oe
 
 
 def main():
@@ -307,13 +473,16 @@ def main():
             sys.exit(1)
 
         if not config or ("Building configuration" not in config and "Current configuration" not in config and "version " not in config):
-            sys.stderr.write("Error: collected output does not look like a valid running-config\n")
+            snippet = (config[:200] + "...") if config else "None"
+            sys.stderr.write(f"Error: collected output does not look like a valid running-config (len={len(config) if config else 0}, snippet={snippet!r})\n")
             sys.exit(2)
 
         sys.stdout.write(config)
         sys.exit(0)
     except Exception as e:
-        sys.stderr.write(f"Error during collection: {e}\n")
+        import traceback
+        sys.stderr.write(f"Error during collection on {args.host} ({type(e).__name__}): {e}\n")
+        traceback.print_exc(file=sys.stderr)
         sys.exit(3)
 
 
