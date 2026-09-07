@@ -18,6 +18,35 @@
     cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('switches/', true) }}"
 
   pre_tasks:
+    - name: Run OpenBao direct diagnostic probe from controller
+      ansible.builtin.uri:
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/sys/health"
+        method: GET
+        status_code: [-1, 200, 429, 472, 473, 501, 503]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_health_probe
+      ignore_errors: true
+      delegate_to: localhost
+      run_once: true
+
+    - name: Run OpenBao AppRole login diagnostic probe from controller
+      ansible.builtin.uri:
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/auth/approle/login"
+        method: POST
+        body_format: json
+        body:
+          role_id: "{{ _vault_role_id | default('', true) }}"
+          secret_id: "{{ _vault_secret_id | default('', true) }}"
+        status_code: [-1, 200, 400, 401, 403, 404, 500]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_login_probe
+      ignore_errors: true
+      delegate_to: localhost
+      run_once: true
+      when: _has_approle | default(false)
+
     - name: Debug OpenBao switch resolution and environment
       ansible.builtin.debug:
         msg:
@@ -29,6 +58,12 @@
           auth_method: "{{ _vault_auth_method | default('NONE', true) }}"
           has_approle: "{{ _has_approle | default(false) }}"
           has_vault_token: "{{ (_vault_token | default('') | length) > 0 }}"
+          openbao_health_status: "{{ _openbao_health_probe.status | default('FAILED') }}"
+          openbao_health_msg: "{{ _openbao_health_probe.msg | default('N/A') }}"
+          openbao_login_status: "{{ _openbao_login_probe.status | default('SKIPPED') }}"
+          openbao_login_msg: "{{ _openbao_login_probe.msg | default('N/A') }}"
+          openbao_secret_raw_type: "{{ _cisco_sec.__class__.__name__ | default('dict') }}"
+          openbao_secret_keys: "{{ (_cisco_sec | default({})).keys() | list }}"
           openbao_secret_retrieved: "{{ (_cisco_sec | default({}) | length) > 0 }}"
           resolved_ansible_host: "{{ ansible_host | default('UNSET', true) }}"
           resolved_ansible_user: "{{ ansible_user | default('UNSET', true) }}"
