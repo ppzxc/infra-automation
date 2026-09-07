@@ -65,6 +65,8 @@ def test_inventory_cisco_switches_example():
     assert "_cisco_sec.ansible_user" in raw_content
     assert "_cisco_sec.ansible_password" in raw_content
     assert "_vault_token" in raw_content
+    assert "vault_role_id" in raw_content
+    assert "vault_secret_id" in raw_content
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
     """Verify CISCO spec IDs exist in tasks and docs"""
     tasks_file = ROOT_DIR / "roles" / "cisco_backup" / "tasks" / "main.yml"

@@ -25,7 +25,7 @@
           secret_path: "{{ (cisco_openbao_secret_prefix | default('', true)) ~ inventory_hostname }}"
           auth_method: "{{ _vault_auth_method | default('NONE', true) }}"
           has_approle: "{{ _has_approle | default(false) }}"
-          has_vault_token: "{{ (lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true) | length) > 0 }}"
+          has_vault_token: "{{ (_vault_token | default('') | length) > 0 }}"
           openbao_secret_retrieved: "{{ (_cisco_sec | default({}) | length) > 0 }}"
           resolved_ansible_host: "{{ ansible_host | default('UNSET', true) }}"
           resolved_ansible_user: "{{ ansible_user | default('UNSET', true) }}"
@@ -45,10 +45,10 @@
           Attempted OpenBao lookup: VAULT_ADDR='{{ lookup("ansible.builtin.env", "VAULT_ADDR") | default("NOT_SET", true) }}',
           Mount='{{ cisco_openbao_mount | default("secret", true) }}',
           Path='{{ (cisco_openbao_secret_prefix | default("", true)) ~ inventory_hostname }}',
-          AuthMethod='{{ _vault_auth_method | default("NONE", true) }}' (has_approle: {{ _has_approle | default(false) }}, has_token: {{ (lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true) | length) > 0 }}).
-          Please check Semaphore Environment / OpenBao:
-          1) Set VAULT_ROLE_ID & VAULT_SECRET_ID (for AppRole) OR VAULT_TOKEN (for Token).
-          2) Verify OPENBAO_CISCO_PREFIX matches your OpenBao secret path structure.
+          AuthMethod='{{ _vault_auth_method | default("NONE", true) }}' (has_approle: {{ _has_approle | default(false) }}, has_token: {{ (_vault_token | default('') | length) > 0 }}).
+          Please check Semaphore Variable Group (Secrets / Extra vars / Environment):
+          1) Set vault_role_id & vault_secret_id (in Secrets or Environment) OR vault_token.
+          2) Verify openbao_cisco_prefix matches your OpenBao secret path structure.
           3) Ensure OpenBao secret at '{{ (cisco_openbao_secret_prefix | default("", true)) ~ inventory_hostname }}' has 'ansible_host' and 'ansible_user'.
 
   roles:

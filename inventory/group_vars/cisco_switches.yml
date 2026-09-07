@@ -12,12 +12,12 @@ cisco_openbao_namespace: "{{ _local_cisco_openbao_namespace | default(openbao_na
 cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | default(lookup('env', 'VAULT_MOUNT') | default('secret', true), true), true) }}"
 cisco_openbao_secret_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default(lookup('env', 'OPENBAO_CISCO_PREFIX') | default(lookup('env', 'VAULT_CISCO_PREFIX') | default('switches/', true), true), true), true) }}"
 
-# AppRole 및 Token 인증 자격증명 자동 감지
-_vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') | default('', true) }}"
-_vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') | default('', true) }}"
+# AppRole 및 Token 인증 자격증명 자동 감지 (Semaphore Secrets / Extra vars / OS Env vars 모두 지원)
+_vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
+_vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
 _has_approle: "{{ (_vault_role_id | length > 0) and (_vault_secret_id | length > 0) }}"
-_vault_token: "{{ lookup('env', 'VAULT_TOKEN') | default('', true) }}"
-_vault_auth_method: "{{ lookup('env', 'VAULT_AUTH_METHOD') | default('approle' if _has_approle else ('token' if (_vault_token | length > 0) else omit), true) }}"
+_vault_token: "{{ vault_token | default(VAULT_TOKEN | default(lookup('env', 'VAULT_TOKEN') | default('', true), true), true) }}"
+_vault_auth_method: "{{ vault_auth_method | default(VAULT_AUTH_METHOD | default(lookup('env', 'VAULT_AUTH_METHOD') | default('approle' if _has_approle else ('token' if (_vault_token | length > 0) else omit), true), true), true) }}"
 
 # 1. 스위치별 OpenBao 시크릿 조회
 _vault_cisco_node_secret: >-

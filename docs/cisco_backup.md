@@ -55,12 +55,12 @@
 1. **Task Template 생성**:
    - Playbook: `playbooks/backup_cisco.yml`
    - Inventory: `inventory/hosts.yml` (스위치 short name 등록, 정적 IP 미지정 시 OpenBao 우선 조회)
-   - Environment: OpenBao/Vault 접속 정보 및 AppRole 주입
+   - Environment / Variable Group: OpenBao/Vault 접속 정보 및 AppRole 주입
      - `VAULT_ADDR`: OpenBao/Vault 엔드포인트 URL (예: `http://192.168.1.50:8200`)
-     - `VAULT_ROLE_ID`: Semaphore 전용 AppRole Role ID
-     - `VAULT_SECRET_ID`: Semaphore 전용 AppRole Secret ID
+     - `vault_role_id` / `VAULT_ROLE_ID`: Semaphore Secrets 또는 Environment에 등록된 AppRole Role ID
+     - `vault_secret_id` / `VAULT_SECRET_ID`: Semaphore Secrets 또는 Environment에 등록된 AppRole Secret ID
      - `VAULT_MOUNT`: (선택) KV v2 마운트 지점 (기본값: `secret`)
-     - `OPENBAO_CISCO_PREFIX`: (선택) 스위치 키 접두사 (기본값: `switches/`)
+     - `openbao_cisco_prefix` / `OPENBAO_CISCO_PREFIX`: (선택) 스위치 키 접두사 (기본값: `switches/`)
 2. **OpenBao KV v2 메타데이터 규격 (`secret/data/switches/<inventory_hostname>`)**:
    - 각 스위치는 KV 경로 `switches/<inventory_hostname>`에 다음 키-값 필드를 보유해야 합니다:
      - `ansible_host`: (필수) 스위치 관리 IP 주소 (예: `192.168.1.10`)
