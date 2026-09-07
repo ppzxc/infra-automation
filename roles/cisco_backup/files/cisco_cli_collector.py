@@ -6,6 +6,7 @@ Collects running-config from Cisco IOS switches via:
   2. bastion jump session (for isolated internal subnet switches)
 """
 import argparse
+import fcntl
 import json
 import os
 import pty
@@ -13,6 +14,7 @@ import select
 import socket
 import subprocess
 import sys
+import termios
 import time
 
 try:
@@ -182,14 +184,23 @@ def collect_telnet(host: str, port: int, user: str, password: str,
 
 def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
                         target_pass: str = None, timeout: int = 30) -> str:
-    """PTY-based execution of OpenSSH command for guaranteed legacy cipher/KEX compatibility."""
+    """PTY-based execution of OpenSSH command with controlling terminal and robust password negotiation."""
     master, slave = pty.openpty()
+
+    def preexec():
+        os.setsid()
+        try:
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+        except Exception:
+            pass
+
     proc = subprocess.Popen(
         cmd_args,
         stdin=slave,
         stdout=slave,
         stderr=slave,
-        close_fds=True
+        close_fds=True,
+        preexec_fn=preexec
     )
     os.close(slave)
 
@@ -206,50 +217,41 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
         return b""
 
     try:
-        # Wait for SSH password prompt and supply password
+        # If target_pass is specified, we expect password prompt for bastion first, then target switch
+        passwords_to_send = [password, target_pass] if target_pass else [password]
+        pass_idx = 0
         buf = b""
         login_start = time.time()
-        while time.time() - login_start < 10.0:
+
+        while time.time() - login_start < 20.0 and pass_idx < len(passwords_to_send):
             chunk = pty_recv(0.3)
             if chunk:
                 buf += chunk
                 lower = buf.lower()
-                if b"password:" in lower or b"password :" in lower:
-                    pty_send(password.encode() + b"\n")
-                    buf = b""
-                    break
                 if b"yes/no" in lower:
                     pty_send(b"yes\n")
+                    buf = b""
+                elif b"permission denied" in lower:
+                    err_msg = buf.decode(errors="ignore").strip()
+                    raise RuntimeError(f"SSH authentication failed (permission denied): {err_msg}")
+                elif b"password:" in lower or b"password :" in lower:
+                    current_pwd = passwords_to_send[pass_idx]
+                    pty_send(current_pwd.encode() + b"\n")
+                    pass_idx += 1
                     buf = b""
             if proc.poll() is not None:
                 err_msg = buf.decode(errors="ignore").strip()
                 raise RuntimeError(f"SSH process exited unexpectedly with code {proc.returncode}: {err_msg}")
 
-        if target_pass:
-            jump_start = time.time()
-            buf = b""
-            while time.time() - jump_start < 10.0:
-                chunk = pty_recv(0.3)
-                if chunk:
-                    buf += chunk
-                    lower = buf.lower()
-                    if b"password:" in lower or b"password :" in lower:
-                        pty_send(target_pass.encode() + b"\n")
-                        break
-                if proc.poll() is not None:
-                    err_msg = buf.decode(errors="ignore").strip()
-                    raise RuntimeError(f"Jump SSH process exited unexpectedly with code {proc.returncode}: {err_msg}")
-
-
-        return run_cisco_session(pty_send, pty_recv, enable_pass=enable_pass or password, timeout=timeout)
+        effective_enable = enable_pass or (target_pass if target_pass else password)
+        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout)
     finally:
         try:
             pty_send(b"exit\n")
         except Exception:
             pass
         os.close(master)
-        proc.poll()
-        if proc.returncode is None:
+        if proc.poll() is None:
             proc.terminate()
             try:
                 proc.wait(timeout=2)
@@ -440,7 +442,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
     direct_args = get_openssh_direct_args(target_host, 22, target_user)
     jump_args = direct_args[:2] + ["-o", f"ProxyCommand={proxy_cmd}"] + direct_args[2:]
     try:
-        return collect_openssh_pty(jump_args, password=target_pass, enable_pass=enable_pass or target_pass, timeout=timeout)
+        return collect_openssh_pty(jump_args, password=bastion_pass, target_pass=target_pass, enable_pass=enable_pass or target_pass, timeout=timeout)
     except Exception as oe:
         if paramiko_err:
             raise RuntimeError(f"Jump SSH failed with Paramiko ({paramiko_err}) and OpenSSH ({oe})")
