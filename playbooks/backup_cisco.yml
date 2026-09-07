@@ -97,6 +97,18 @@
         - _openbao_direct_secret_resp.json.data is defined
         - _openbao_direct_secret_resp.json.data.data is defined
 
+    - name: Debug direct OpenBao secret response
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          status: "{{ _openbao_direct_secret_resp.status | default('UNSET') }}"
+          url: "{{ _openbao_direct_secret_resp.url | default('UNSET') }}"
+          msg: "{{ _openbao_direct_secret_resp.msg | default('N/A') }}"
+          json_keys: "{{ (_openbao_direct_secret_resp.json | default({})).keys() | list }}"
+          data_keys: "{{ (_openbao_direct_secret_resp.json.data | default({})).keys() | list if _openbao_direct_secret_resp.json is defined else [] }}"
+          subdata_keys: "{{ (_openbao_direct_secret_resp.json.data.data | default({})).keys() | list if (_openbao_direct_secret_resp.json is defined and _openbao_direct_secret_resp.json.data is defined) else [] }}"
+      when: _openbao_direct_secret_resp is defined
+
     - name: Debug OpenBao switch resolution and environment
       ansible.builtin.debug:
         msg:
