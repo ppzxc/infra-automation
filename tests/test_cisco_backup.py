@@ -64,7 +64,6 @@ def test_inventory_cisco_switches_example():
     assert "_cisco_sec.connection_type" in raw_content
     assert "_cisco_sec.ansible_user" in raw_content
     assert "_cisco_sec.ansible_password" in raw_content
-    assert "regex_replace" in raw_content
     assert "_vault_token" in raw_content
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
     """Verify CISCO spec IDs exist in tasks and docs"""

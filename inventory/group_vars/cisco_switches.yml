@@ -10,9 +10,7 @@ ansible_connection: network_cli
 cisco_openbao_namespace: "{{ _local_cisco_openbao_namespace | default(openbao_namespace | default(lookup('env', 'VAULT_NAMESPACE') | default(omit, true), true), true) }}"
 
 cisco_openbao_mount: "{{ _local_cisco_openbao_mount | default(openbao_mount | default(lookup('env', 'VAULT_MOUNT') | default('secret', true), true), true) }}"
-_raw_cisco_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default(lookup('env', 'OPENBAO_CISCO_PREFIX') | default(lookup('env', 'VAULT_CISCO_PREFIX') | default('switches/', true), true), true), true) }}"
-# 만약 사용자가 'secret/switches/' 처럼 마운트 지점을 prefix에 포함시킨 경우 자동으로 제거하여 중복 경로 방지
-cisco_openbao_secret_prefix: "{{ _raw_cisco_prefix | regex_replace('^' ~ cisco_openbao_mount ~ '/?', '') }}"
+cisco_openbao_secret_prefix: "{{ _local_cisco_openbao_secret_prefix | default(openbao_cisco_prefix | default(lookup('env', 'OPENBAO_CISCO_PREFIX') | default(lookup('env', 'VAULT_CISCO_PREFIX') | default('switches/', true), true), true), true) }}"
 
 # AppRole 및 Token 인증 자격증명 자동 감지
 _vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') | default('', true) }}"

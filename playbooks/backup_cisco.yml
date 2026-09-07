@@ -12,8 +12,7 @@
   connection: "{{ 'network_cli' if (ansible_host | default('') | length > 0 and (connection_type | default('ssh') == 'ssh')) else 'local' }}"
 
   vars:
-    _raw_playbook_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('switches/', true) }}"
-    cisco_openbao_secret_prefix: "{{ _raw_playbook_prefix | regex_replace('^' ~ (cisco_openbao_mount | default('secret', true)) ~ '/?', '') }}"
+    cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('switches/', true) }}"
 
   pre_tasks:
     - name: Debug OpenBao switch resolution and environment
@@ -47,9 +46,9 @@
           Mount='{{ cisco_openbao_mount | default("secret", true) }}',
           Path='{{ (cisco_openbao_secret_prefix | default("", true)) ~ inventory_hostname }}',
           AuthMethod='{{ _vault_auth_method | default("NONE", true) }}' (has_approle: {{ _has_approle | default(false) }}, has_token: {{ (lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true) | length) > 0 }}).
-          Please check Semaphore Environment:
+          Please check Semaphore Environment / OpenBao:
           1) Set VAULT_ROLE_ID & VAULT_SECRET_ID (for AppRole) OR VAULT_TOKEN (for Token).
-          2) Ensure OPENBAO_CISCO_PREFIX is 'switches/' (do NOT include mount 'secret/').
+          2) Verify OPENBAO_CISCO_PREFIX matches your OpenBao secret path structure.
           3) Ensure OpenBao secret at '{{ (cisco_openbao_secret_prefix | default("", true)) ~ inventory_hostname }}' has 'ansible_host' and 'ansible_user'.
 
   roles:
