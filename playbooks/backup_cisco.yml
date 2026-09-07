@@ -15,6 +15,22 @@
     cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('', true) }}"
 
   pre_tasks:
+    - name: Debug OpenBao switch resolution and environment
+      ansible.builtin.debug:
+        msg:
+          inventory_hostname: "{{ inventory_hostname }}"
+          vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('NOT_SET', true) }}"
+          vault_mount: "{{ cisco_openbao_mount | default('NOT_SET', true) }}"
+          secret_prefix: "{{ cisco_openbao_secret_prefix | default('', true) }}"
+          secret_path: "{{ (cisco_openbao_secret_prefix | default('', true)) ~ inventory_hostname }}"
+          auth_method: "{{ _vault_auth_method | default('UNKNOWN', true) }}"
+          has_approle: "{{ _has_approle | default(false) }}"
+          has_vault_token: "{{ (lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true) | length) > 0 }}"
+          openbao_secret_retrieved: "{{ (_cisco_sec | default({}) | length) > 0 }}"
+          resolved_ansible_host: "{{ ansible_host | default('UNSET', true) }}"
+          resolved_ansible_user: "{{ ansible_user | default('UNSET', true) }}"
+          resolved_connection_type: "{{ connection_type | default('ssh', true) }}"
+
     - name: Verify OpenBao switch metadata is resolved
       ansible.builtin.assert:
         that:
@@ -24,8 +40,13 @@
           - ansible_user is defined
           - ansible_user | length > 0
         fail_msg: >-
-          [OPENBAO-MISSING] Switch metadata not found or invalid in OpenBao for '{{ inventory_hostname }}' (ansible_host: '{{ ansible_host | default("UNSET", true) }}').
-          Key '{{ cisco_openbao_secret_prefix | default("", true) }}{{ inventory_hostname }}' must exist in OpenBao KV with valid IP in 'ansible_host' and valid 'ansible_user'.
+          [OPENBAO-MISSING] Switch metadata not found or invalid in OpenBao for '{{ inventory_hostname }}'.
+          Resolved ansible_host='{{ ansible_host | default("UNSET", true) }}', ansible_user='{{ ansible_user | default("UNSET", true) }}'.
+          Attempted OpenBao lookup: VAULT_ADDR='{{ lookup("ansible.builtin.env", "VAULT_ADDR") | default("NOT_SET", true) }}',
+          Mount='{{ cisco_openbao_mount | default("secret", true) }}',
+          Path='{{ (cisco_openbao_secret_prefix | default("", true)) ~ inventory_hostname }}',
+          AuthMethod='{{ _vault_auth_method | default("UNKNOWN", true) }}'.
+          Please ensure Semaphore Environment injects valid VAULT_ADDR / AppRole and OpenBao contains this key with 'ansible_host' and 'ansible_user'.
 
   roles:
     - role: cisco_backup
