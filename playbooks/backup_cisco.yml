@@ -50,6 +50,53 @@
       check_mode: false
       when: _has_approle | default(false)
 
+    - name: Register acquired OpenBao client token from AppRole probe
+      ansible.builtin.set_fact:
+        _vault_token: "{{ _openbao_login_probe.json.auth.client_token }}"
+        _vault_auth_method: "token"
+      when:
+        - _openbao_login_probe.json is defined
+        - _openbao_login_probe.json.auth is defined
+        - _openbao_login_probe.json.auth.client_token is defined
+
+    - name: Resolve Cisco switch secret directly from OpenBao API
+      ansible.builtin.uri:
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/{{ cisco_openbao_mount }}/data/{{ cisco_openbao_secret_prefix }}{{ inventory_hostname }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': cisco_openbao_namespace} if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_direct_secret_resp
+      ignore_errors: true
+      delegate_to: localhost
+      check_mode: false
+      when:
+        - (_vault_token | default('') | length) > 0
+        - (ansible_host | default('') | length) == 0
+
+    - name: Apply OpenBao switch secret data to host facts
+      ansible.builtin.set_fact:
+        ansible_host: "{{ _openbao_direct_secret_resp.json.data.data.ansible_host | default(ansible_host | default('', true), true) }}"
+        ansible_user: "{{ _openbao_direct_secret_resp.json.data.data.ansible_user | default(ansible_user | default('', true), true) }}"
+        ansible_port: "{{ (_openbao_direct_secret_resp.json.data.data.ansible_port | default(ansible_port | default(22))) | int }}"
+        connection_type: "{{ _openbao_direct_secret_resp.json.data.data.connection_type | default(connection_type | default('ssh', true), true) }}"
+        ansible_password: "{{ _openbao_direct_secret_resp.json.data.data.ansible_password | default(ansible_password | default(omit)) }}"
+        ansible_become_password: "{{ _openbao_direct_secret_resp.json.data.data.ansible_become_password | default(ansible_become_password | default(omit)) }}"
+        bastion_host: "{{ _openbao_direct_secret_resp.json.data.data.bastion_host | default(bastion_host | default(omit)) }}"
+      when:
+        - _openbao_direct_secret_resp is defined
+        - _openbao_direct_secret_resp.json is defined
+        - _openbao_direct_secret_resp.json.data is defined
+        - _openbao_direct_secret_resp.json.data.data is defined
+
     - name: Debug OpenBao switch resolution and environment
       ansible.builtin.debug:
         msg:
