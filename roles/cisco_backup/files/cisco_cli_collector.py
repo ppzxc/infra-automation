@@ -221,6 +221,9 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
                 if b"yes/no" in lower:
                     pty_send(b"yes\n")
                     buf = b""
+            if proc.poll() is not None:
+                err_msg = buf.decode(errors="ignore").strip()
+                raise RuntimeError(f"SSH process exited unexpectedly with code {proc.returncode}: {err_msg}")
 
         if target_pass:
             jump_start = time.time()
@@ -233,6 +236,10 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
                     if b"password:" in lower or b"password :" in lower:
                         pty_send(target_pass.encode() + b"\n")
                         break
+                if proc.poll() is not None:
+                    err_msg = buf.decode(errors="ignore").strip()
+                    raise RuntimeError(f"Jump SSH process exited unexpectedly with code {proc.returncode}: {err_msg}")
+
 
         return run_cisco_session(pty_send, pty_recv, enable_pass=enable_pass or password, timeout=timeout)
     finally:
@@ -250,9 +257,35 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
                 proc.kill()
 
 
+def get_supported_ssh_algorithms(query_type: str) -> set:
+    """Query OpenSSH for supported algorithms (e.g. 'key', 'kex', 'cipher')."""
+    try:
+        out = subprocess.check_output(["ssh", "-Q", query_type], text=True, stderr=subprocess.DEVNULL)
+        return {line.strip() for line in out.splitlines() if line.strip()}
+    except Exception:
+        return set()
+
+
 def get_openssh_direct_args(host: str, port: int, user: str) -> list:
-    """Build OpenSSH CLI invocation with all legacy ciphers, key exchanges, and host keys enabled."""
-    return [
+    """Build OpenSSH CLI invocation with legacy ciphers, key exchanges, and host keys enabled (filtered by system support)."""
+    desired_kex = [
+        "diffie-hellman-group1-sha1",
+        "diffie-hellman-group14-sha1",
+        "diffie-hellman-group-exchange-sha1",
+        "diffie-hellman-group-exchange-sha256",
+    ]
+    desired_keys = ["ssh-rsa", "ssh-dss"]
+    desired_ciphers = ["aes128-cbc", "3des-cbc", "aes192-cbc", "aes256-cbc"]
+
+    sup_kex = get_supported_ssh_algorithms("kex")
+    sup_keys = get_supported_ssh_algorithms("key")
+    sup_ciphers = get_supported_ssh_algorithms("cipher")
+
+    valid_kex = [k for k in desired_kex if not sup_kex or k in sup_kex]
+    valid_keys = [k for k in desired_keys if not sup_keys or k in sup_keys]
+    valid_ciphers = [c for c in desired_ciphers if not sup_ciphers or c in sup_ciphers]
+
+    args = [
         "ssh",
         "-tt",
         "-o", "StrictHostKeyChecking=no",
@@ -260,12 +293,16 @@ def get_openssh_direct_args(host: str, port: int, user: str) -> list:
         "-o", "LogLevel=ERROR",
         "-o", "PubkeyAuthentication=no",
         "-o", "PreferredAuthentications=password,keyboard-interactive",
-        "-o", "KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256",
-        "-o", "HostKeyAlgorithms=+ssh-rsa,ssh-dss",
-        "-o", "Ciphers=+aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc",
-        "-p", str(port),
-        f"{user}@{host}"
     ]
+    if valid_kex:
+        args.extend(["-o", f"KexAlgorithms=+{','.join(valid_kex)}"])
+    if valid_keys:
+        args.extend(["-o", f"HostKeyAlgorithms=+{','.join(valid_keys)}"])
+    if valid_ciphers:
+        args.extend(["-o", f"Ciphers=+{','.join(valid_ciphers)}"])
+
+    args.extend(["-p", str(port), f"{user}@{host}"])
+    return args
 
 
 def collect_direct_ssh(host: str, port: int, user: str, password: str,
