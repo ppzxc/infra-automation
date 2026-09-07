@@ -383,8 +383,6 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
         "-o", "StrictHostKeyChecking=no",
         "-o", "UserKnownHostsFile=/dev/null",
         "-o", "LogLevel=ERROR",
-        "-o", "PubkeyAuthentication=no",
-        "-o", "PreferredAuthentications=password,keyboard-interactive",
         f"{bastion_user}@{bastion_host}"
     ]
 
@@ -411,7 +409,7 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
         return b""
 
     try:
-        # Step 1: Handle Bastion password authentication
+        # Step 1: Handle Bastion password authentication or immediate shell
         buf = b""
         login_start = time.time()
         while time.time() - login_start < 20.0:
@@ -426,8 +424,12 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
                     err_msg = buf.decode(errors="ignore").strip()
                     raise RuntimeError(f"Bastion SSH authentication failed (permission denied): {err_msg}")
                 elif b"password:" in lower or b"password :" in lower:
-                    pty_send(bastion_pass.encode() + b"\n")
+                    if bastion_pass:
+                        pty_send(bastion_pass.encode() + b"\n")
                     buf = b""
+                    break
+                elif b"$" in buf or b"#" in buf or b">" in buf:
+                    # Shell prompt reached directly (e.g. pubkey authentication)
                     break
             if proc.poll() is not None:
                 err_msg = buf.decode(errors="ignore").strip()
@@ -626,14 +628,14 @@ def main():
                 timeout=args.timeout
             )
         elif args.mode == "jump_ssh":
-            if not args.bastion_host or not args.bastion_user or not bastion_password:
-                sys.stderr.write("Error: bastion parameters (host, user, password) required for jump_ssh mode\n")
+            if not args.bastion_host or not args.bastion_user:
+                sys.stderr.write("Error: bastion parameters (host, user) required for jump_ssh mode\n")
                 sys.exit(1)
             config = collect_jump_ssh(
                 bastion_host=args.bastion_host,
                 bastion_port=args.bastion_port,
                 bastion_user=args.bastion_user,
-                bastion_pass=bastion_password,
+                bastion_pass=bastion_password or "",
                 target_host=args.host,
                 target_user=args.user,
                 target_pass=password,
