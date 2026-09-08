@@ -100,3 +100,28 @@ def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
     assert play3.get("connection") == "local"
     assert play3.get("become") is False, "Play 3 must have become: false so controller does not run sudo on local cleanup"
 
+
+def test_site_playbook_host_vars_and_probe_condition():
+    """Verify site.yml applies host variable fallback and safe probe result handling."""
+    site_file = ROOT_DIR / "playbooks" / "site.yml"
+    content = site_file.read_text(encoding="utf-8")
+    with open(site_file, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+
+    play1_tasks = plays[0]["tasks"]
+    task_names = [t["name"] for t in play1_tasks]
+
+    # Host variable fallback task must exist and not be restricted by when condition on OpenBao KV
+    assert "Apply OpenBao and inventory host variables to host facts" in task_names
+    host_fact_task = next(t for t in play1_tasks if t["name"] == "Apply OpenBao and inventory host variables to host facts")
+    assert "when" not in host_fact_task, "Host fact task must always run so inventory hostvars fallback is applied"
+
+    # Probe task must only run when admin private key is available
+    probe_task = next(t for t in play1_tasks if t["name"] == "Probe SSH connection using primary admin user credentials")
+    assert "when" in probe_task
+    assert any("_admin_key_tempfile" in cond for cond in probe_task["when"])
+
+    # Decision task must check probe rc is defined
+    decision_task = next(t for t in play1_tasks if t["name"] == "Set connection mode facts based on admin SSH probe result")
+    assert "_admin_ssh_probe.rc is defined" in decision_task["ansible.builtin.set_fact"]["_is_already_provisioned"]
+

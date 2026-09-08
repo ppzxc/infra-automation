@@ -46,16 +46,7 @@
 
     - name: Normalize target_admin_users list and primary admin user
       ansible.builtin.set_fact:
-        _normalized_admin_users: >-
-          {%- if target_admin_users is defined and target_admin_users is string -%}
-            {{ target_admin_users.split(',') | map('trim') | reject('equalto', '') | list }}
-          {%- elif target_admin_users is defined and target_admin_users is iterable and target_admin_users is not mapping -%}
-            {{ target_admin_users | list }}
-          {%- elif target_admin_user is defined and target_admin_user | length > 0 -%}
-            {{ [target_admin_user] }}
-          {%- else -%}
-            {{ [] }}
-          {%- endif -%}
+        _normalized_admin_users: "{{ (target_admin_users.split(',') | map('trim') | reject('equalto', '') | list) if (target_admin_users is defined and target_admin_users is string) else ((target_admin_users | list) if (target_admin_users is defined and target_admin_users is iterable and target_admin_users is not mapping) else ([target_admin_user] if (target_admin_user is defined and target_admin_user | length > 0) else [])) }}"
 
     - name: Set primary target admin user for connection probing
       ansible.builtin.set_fact:
@@ -120,15 +111,10 @@
       check_mode: false
       when: (_vault_token | default('') | length) > 0
 
-    - name: Apply OpenBao host variables to host facts
+    - name: Apply OpenBao and inventory host variables to host facts
       ansible.builtin.set_fact:
-        ansible_host: "{{ _openbao_host_kv_resp.json.data.data.ansible_host | default(ansible_host | default(inventory_hostname, true), true) }}"
-        ansible_port: "{{ (_openbao_host_kv_resp.json.data.data.ansible_port | default(ansible_port | default(22))) | int }}"
-      when:
-        - _openbao_host_kv_resp is defined
-        - _openbao_host_kv_resp.json is defined
-        - _openbao_host_kv_resp.json.data is defined
-        - _openbao_host_kv_resp.json.data.data is defined
+        ansible_host: "{{ ((_openbao_host_kv_resp.json.data.data.ansible_host if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined and _openbao_host_kv_resp.json.data.data.ansible_host is defined) else '') | default((hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true))), true)) }}"
+        ansible_port: "{{ (((_openbao_host_kv_resp.json.data.data.ansible_port if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined and _openbao_host_kv_resp.json.data.data.ansible_port is defined) else '') | default((hostvars[inventory_hostname].ansible_port if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_port is defined) else (ansible_port | default(22))), true))) | int }}"
 
     - name: Fetch primary admin user credentials from OpenBao (secret/users/<user>)
       ansible.builtin.uri:
@@ -270,10 +256,15 @@
       register: _admin_ssh_probe
       changed_when: false
       failed_when: false
+      when:
+        - _admin_key_tempfile is defined
+        - _admin_key_tempfile.path is defined
+        - _admin_user_entry.ssh_private_key is defined
+        - _admin_user_entry.ssh_private_key | length > 0
 
     - name: Set connection mode facts based on admin SSH probe result
       ansible.builtin.set_fact:
-        _is_already_provisioned: "{{ _admin_ssh_probe.rc == 0 }}"
+        _is_already_provisioned: "{{ (_admin_ssh_probe.rc == 0) if (_admin_ssh_probe is defined and _admin_ssh_probe.rc is defined) else false }}"
 
     - name: Configure connection parameters for already provisioned host (Admin SSH Key mode)
       ansible.builtin.set_fact:
