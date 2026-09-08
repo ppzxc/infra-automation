@@ -75,3 +75,28 @@ def test_admin_accounts_generation_from_openbao_keys():
     assert res[0]["keys"] == ["ssh-ed25519 AAAAC1..."]
     assert res[1]["name"] == "admin2"
     assert res[1]["keys"] == ["ssh-rsa AAAAB2..."]
+
+def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
+    """Verify Play 1 and Play 3 explicitly set become: false, and vars have no self-referencing recursion loops."""
+    site_file = ROOT_DIR / "playbooks" / "site.yml"
+    with open(site_file, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+
+    # Play 1: Controller Pre-flight
+    play1 = plays[0]
+    assert play1.get("connection") == "local"
+    assert play1.get("become") is False, "Play 1 must have become: false so controller does not run sudo on local tasks"
+    
+    # Check vars in Play 1 do not contain circular self-references
+    vars1 = play1.get("vars", {})
+    assert "openbao_namespace" in vars1
+    assert "openbao_namespace | default(openbao_namespace" not in vars1["openbao_namespace"]
+    assert "openbao_mount | default(openbao_mount" not in vars1["openbao_mount"]
+    assert "openbao_hosts_prefix | default(openbao_hosts_prefix" not in vars1["openbao_hosts_prefix"]
+    assert "openbao_users_prefix | default(openbao_users_prefix" not in vars1["openbao_users_prefix"]
+
+    # Play 3: Cleanup temporary credentials
+    play3 = plays[2]
+    assert play3.get("connection") == "local"
+    assert play3.get("become") is False, "Play 3 must have become: false so controller does not run sudo on local cleanup"
+

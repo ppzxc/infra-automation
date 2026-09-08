@@ -15,13 +15,14 @@
   hosts: servers:loadbalancers
   gather_facts: false
   connection: local
+  become: false
 
   vars:
     # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (Cisco switch 백업 플레이북과 동일한 패턴 및 변수명 계층 적용)
-    openbao_namespace: "{{ _local_openbao_namespace | default(openbao_namespace | default(vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true), true), true) }}"
-    openbao_mount: "{{ _local_openbao_mount | default(openbao_mount | default(vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secrets', true), true), true), true), true), true) }}"
-    openbao_hosts_prefix: "{{ _local_openbao_hosts_prefix | default(openbao_hosts_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('secret/hosts/', true), true), true) }}"
-    openbao_users_prefix: "{{ _local_openbao_users_prefix | default(openbao_users_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_USERS_PREFIX') | default('secret/users/', true), true), true) }}"
+    openbao_namespace: "{{ _local_openbao_namespace | default(vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true), true) }}"
+    openbao_mount: "{{ _local_openbao_mount | default(vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secrets', true), true), true), true), true) }}"
+    openbao_hosts_prefix: "{{ _local_openbao_hosts_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('secret/hosts/', true), true) }}"
+    openbao_users_prefix: "{{ _local_openbao_users_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_USERS_PREFIX') | default('secret/users/', true), true) }}"
 
     # AppRole 및 Token 인증 자격증명 자동 감지 (Semaphore Secrets / Extra vars / OS Env vars 모두 지원)
     _vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
@@ -336,6 +337,7 @@
   hosts: servers:loadbalancers
   gather_facts: false
   connection: local
+  become: false
   tasks:
     - name: Remove temporary admin SSH private key file
       ansible.builtin.file:
