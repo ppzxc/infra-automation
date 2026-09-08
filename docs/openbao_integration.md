@@ -42,13 +42,23 @@ flowchart TD
 OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키를 배치합니다:
 
 ### (1) 호스트별 개별 접속 정보
+* **원칙**: 정적 인벤토리(Semaphore UI 및 `inventory/hosts.yml`)에는 관리번호(호스트명, 예: `ns0332`)만 전달되며, 실제 연결 대상 IP(`ansible_host`) 및 SSH 포트(`ansible_port`)는 OpenBao KV에서 동적으로 로딩하여 바인딩합니다.
 * **네임스페이스**: `infra/prod/host/` (Semaphore UI `VAULT_NAMESPACE` 주입)
-* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0266`)
-* **필드 (Key-Value)**:
+* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0266`, `secret/data/hosts/ns0332`)
+* **필드 (Key-Value)** (플랫 오브젝트, 호스트명 키 중첩, 또는 배열 포맷 지원):
   ```json
   {
-    "ansible_host": "39.116.31.43",
+    "ansible_host": "39.116.31.40",
     "ansible_port": 22
+  }
+  ```
+  또는 호스트명 키 래핑 / `ip` 필드 사용:
+  ```json
+  {
+    "ns0332": {
+      "ip": "39.116.31.40",
+      "port": 22
+    }
   }
   ```
 

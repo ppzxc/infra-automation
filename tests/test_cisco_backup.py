@@ -100,3 +100,50 @@ def test_openssh_cli_collector_args_compatibility():
     res = subprocess.run(val_cmd, capture_output=True, text=True)
     assert res.returncode == 0, f"OpenSSH rejected generated options: {res.stderr}"
 
+
+def test_cisco_backup_openbao_unwrapping_logic():
+    """Verify that backup_cisco.yml unwraps flat, nested, and array schemas with ansible_host, ip, user, port."""
+    from jinja2 import Environment
+    env = Environment()
+    template_str = """
+    {%- set _sw_raw = _openbao_direct_secret_resp.json.data.data if (_openbao_direct_secret_resp is defined and _openbao_direct_secret_resp.json is defined and _openbao_direct_secret_resp.json.data is defined and _openbao_direct_secret_resp.json.data.data is defined) else {} -%}
+    {%- set _sw_unwrapped = (_sw_raw if _sw_raw is not mapping else (_sw_raw[inventory_hostname] if inventory_hostname in _sw_raw else ((_sw_raw.values() | first) if (_sw_raw | length > 0 and (_sw_raw.values() | first) is mapping) else _sw_raw))) -%}
+    {%- set _sw_dict = (_sw_unwrapped | first) if (_sw_unwrapped is sequence and _sw_unwrapped is not string and _sw_unwrapped | length > 0 and (_sw_unwrapped | first) is mapping) else (_sw_unwrapped if _sw_unwrapped is mapping else {}) -%}
+    {%- set _sw_resolved_host = _sw_dict.get('ansible_host', _sw_dict.get('ip', '')) -%}
+    {%- set _sw_resolved_user = _sw_dict.get('ansible_user', _sw_dict.get('user', _sw_dict.get('username', ''))) -%}
+    {%- set _sw_resolved_port = _sw_dict.get('ansible_port', _sw_dict.get('port', '')) -%}
+    {{ {
+      'ansible_host': _sw_resolved_host if (_sw_resolved_host | length > 0) else (ansible_host | default('', true)),
+      'ansible_user': _sw_resolved_user if (_sw_resolved_user | length > 0) else (ansible_user | default('', true)),
+      'ansible_port': ((_sw_resolved_port if (_sw_resolved_port | string | length > 0) else (ansible_port | default(22))) | int)
+    } | tojson }}
+    """
+    tmpl = env.from_string(template_str)
+
+    # 1. Flat schema
+    r1 = yaml.safe_load(tmpl.render(
+        _openbao_direct_secret_resp={'json': {'data': {'data': {'ansible_host': '211.210.44.182', 'ansible_user': 'ansible-backup', 'ansible_port': 22}}}},
+        inventory_hostname='ns0278'
+    ))
+    assert r1['ansible_host'] == '211.210.44.182'
+    assert r1['ansible_user'] == 'ansible-backup'
+    assert r1['ansible_port'] == 22
+
+    # 2. Nested dictionary under hostname with 'ip' and 'user'
+    r2 = yaml.safe_load(tmpl.render(
+        _openbao_direct_secret_resp={'json': {'data': {'data': {'ns0278': {'ip': '211.210.44.182', 'user': 'admin', 'port': 2222}}}}},
+        inventory_hostname='ns0278'
+    ))
+    assert r2['ansible_host'] == '211.210.44.182'
+    assert r2['ansible_user'] == 'admin'
+    assert r2['ansible_port'] == 2222
+
+    # 3. Array of dictionaries
+    r3 = yaml.safe_load(tmpl.render(
+        _openbao_direct_secret_resp={'json': {'data': {'data': [{'ansible_host': '218.54.219.82', 'username': 'telnet-user'}]}}},
+        inventory_hostname='ns0065'
+    ))
+    assert r3['ansible_host'] == '218.54.219.82'
+    assert r3['ansible_user'] == 'telnet-user'
+
+

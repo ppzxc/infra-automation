@@ -83,14 +83,27 @@
         - (ansible_host | default('') | length) == 0
 
     - name: Apply OpenBao switch secret data to host facts
+      vars:
+        _sw_raw: "{{ _openbao_direct_secret_resp.json.data.data if (_openbao_direct_secret_resp is defined and _openbao_direct_secret_resp.json is defined and _openbao_direct_secret_resp.json.data is defined and _openbao_direct_secret_resp.json.data.data is defined) else {} }}"
+        _sw_unwrapped: "{{ (_sw_raw if _sw_raw is not mapping else (_sw_raw[inventory_hostname] if inventory_hostname in _sw_raw else ((_sw_raw.values() | first) if (_sw_raw | length > 0 and (_sw_raw.values() | first) is mapping) else _sw_raw))) }}"
+        _sw_dict: "{{ (_sw_unwrapped | first) if (_sw_unwrapped is sequence and _sw_unwrapped is not string and _sw_unwrapped | length > 0 and (_sw_unwrapped | first) is mapping) else (_sw_unwrapped if _sw_unwrapped is mapping else {}) }}"
+        _sw_resolved_host: "{{ _sw_dict.ansible_host | default(_sw_dict.ip | default('', true), true) }}"
+        _sw_resolved_user: "{{ _sw_dict.ansible_user | default(_sw_dict.user | default(_sw_dict.username | default('', true), true), true) }}"
+        _sw_resolved_port: "{{ _sw_dict.ansible_port | default(_sw_dict.port | default('', true), true) }}"
+        _sw_resolved_conn: "{{ _sw_dict.connection_type | default('', true) }}"
+        _sw_resolved_pwd: "{{ _sw_dict.ansible_password | default(_sw_dict.password | default('', true), true) }}"
+        _sw_resolved_become_pwd: "{{ _sw_dict.ansible_become_password | default(_sw_dict.enable_password | default('', true), true) }}"
+        _sw_resolved_bastion: "{{ _sw_dict.bastion_host | default('', true) }}"
+        _sw_resolved_fqdn: "{{ _sw_dict.fqdn | default('', true) }}"
       ansible.builtin.set_fact:
-        ansible_host: "{{ _openbao_direct_secret_resp.json.data.data.ansible_host | default(ansible_host | default('', true), true) }}"
-        ansible_user: "{{ _openbao_direct_secret_resp.json.data.data.ansible_user | default(ansible_user | default('', true), true) }}"
-        ansible_port: "{{ (_openbao_direct_secret_resp.json.data.data.ansible_port | default(ansible_port | default(22))) | int }}"
-        connection_type: "{{ _openbao_direct_secret_resp.json.data.data.connection_type | default(connection_type | default('ssh', true), true) }}"
-        ansible_password: "{{ _openbao_direct_secret_resp.json.data.data.ansible_password | default(ansible_password | default(omit)) }}"
-        ansible_become_password: "{{ _openbao_direct_secret_resp.json.data.data.ansible_become_password | default(ansible_become_password | default(omit)) }}"
-        bastion_host: "{{ _openbao_direct_secret_resp.json.data.data.bastion_host | default(bastion_host | default(omit)) }}"
+        ansible_host: "{{ _sw_resolved_host if (_sw_resolved_host | length > 0) else (ansible_host | default('', true)) }}"
+        ansible_user: "{{ _sw_resolved_user if (_sw_resolved_user | length > 0) else (ansible_user | default('', true)) }}"
+        ansible_port: "{{ ((_sw_resolved_port if (_sw_resolved_port | string | length > 0) else (ansible_port | default(22))) | int) }}"
+        connection_type: "{{ _sw_resolved_conn if (_sw_resolved_conn | length > 0) else (connection_type | default('ssh', true)) }}"
+        ansible_password: "{{ _sw_resolved_pwd if (_sw_resolved_pwd | length > 0) else (ansible_password | default(omit)) }}"
+        ansible_become_password: "{{ _sw_resolved_become_pwd if (_sw_resolved_become_pwd | length > 0) else (ansible_become_password | default(omit)) }}"
+        bastion_host: "{{ _sw_resolved_bastion if (_sw_resolved_bastion | length > 0) else (bastion_host | default(omit)) }}"
+        fqdn: "{{ _sw_resolved_fqdn if (_sw_resolved_fqdn | length > 0) else (fqdn | default('', true)) }}"
       when:
         - _openbao_direct_secret_resp is defined
         - _openbao_direct_secret_resp.json is defined
@@ -123,11 +136,19 @@
         - bastion_host | length > 0
 
     - name: Apply OpenBao Bastion secret data to host facts
+      vars:
+        _b_raw: "{{ _openbao_bastion_secret_resp.json.data.data if (_openbao_bastion_secret_resp is defined and _openbao_bastion_secret_resp.json is defined and _openbao_bastion_secret_resp.json.data is defined and _openbao_bastion_secret_resp.json.data.data is defined) else {} }}"
+        _b_unwrapped: "{{ (_b_raw if _b_raw is not mapping else (_b_raw[bastion_host] if bastion_host in _b_raw else ((_b_raw.values() | first) if (_b_raw | length > 0 and (_b_raw.values() | first) is mapping) else _b_raw))) }}"
+        _b_dict: "{{ (_b_unwrapped | first) if (_b_unwrapped is sequence and _b_unwrapped is not string and _b_unwrapped | length > 0 and (_b_unwrapped | first) is mapping) else (_b_unwrapped if _b_unwrapped is mapping else {}) }}"
+        _b_resolved_host: "{{ _b_dict.ansible_host | default(_b_dict.ip | default('', true), true) }}"
+        _b_resolved_user: "{{ _b_dict.ansible_user | default(_b_dict.user | default(_b_dict.username | default('', true), true), true) }}"
+        _b_resolved_port: "{{ _b_dict.ansible_port | default(_b_dict.port | default('', true), true) }}"
+        _b_resolved_pwd: "{{ _b_dict.ansible_password | default(_b_dict.password | default('', true), true) }}"
       ansible.builtin.set_fact:
-        bastion_resolved_host: "{{ _openbao_bastion_secret_resp.json.data.data.ansible_host | default(bastion_host) }}"
-        bastion_resolved_port: "{{ (_openbao_bastion_secret_resp.json.data.data.ansible_port | default(22)) | int }}"
-        bastion_resolved_user: "{{ _openbao_bastion_secret_resp.json.data.data.ansible_user | default(ansible_user) }}"
-        bastion_resolved_password: "{{ _openbao_bastion_secret_resp.json.data.data.ansible_password | default('') }}"
+        bastion_resolved_host: "{{ _b_resolved_host if (_b_resolved_host | length > 0) else bastion_host }}"
+        bastion_resolved_port: "{{ ((_b_resolved_port if (_b_resolved_port | string | length > 0) else 22) | int) }}"
+        bastion_resolved_user: "{{ _b_resolved_user if (_b_resolved_user | length > 0) else (ansible_user | default('', true)) }}"
+        bastion_resolved_password: "{{ _b_resolved_pwd if (_b_resolved_pwd | length > 0) else '' }}"
       when:
         - _openbao_bastion_secret_resp is defined
         - _openbao_bastion_secret_resp.json is defined

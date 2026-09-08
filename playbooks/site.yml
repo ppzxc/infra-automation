@@ -112,9 +112,15 @@
       when: (_vault_token | default('') | length) > 0
 
     - name: Apply OpenBao and inventory host variables to host facts
+      vars:
+        _host_raw: "{{ _openbao_host_kv_resp.json.data.data if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined) else {} }}"
+        _host_unwrapped: "{{ (_host_raw if _host_raw is not mapping else (_host_raw[inventory_hostname] if inventory_hostname in _host_raw else ((_host_raw.values() | first) if (_host_raw | length > 0 and (_host_raw.values() | first) is mapping) else _host_raw))) }}"
+        _host_dict: "{{ (_host_unwrapped | first) if (_host_unwrapped is sequence and _host_unwrapped is not string and _host_unwrapped | length > 0 and (_host_unwrapped | first) is mapping) else (_host_unwrapped if _host_unwrapped is mapping else {}) }}"
+        _resolved_bao_host: "{{ _host_dict.ansible_host | default(_host_dict.ip | default('', true), true) }}"
+        _resolved_bao_port: "{{ _host_dict.ansible_port | default(_host_dict.port | default('', true), true) }}"
       ansible.builtin.set_fact:
-        ansible_host: "{{ ((_openbao_host_kv_resp.json.data.data.ansible_host if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined and _openbao_host_kv_resp.json.data.data.ansible_host is defined) else '') | default((hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true))), true)) }}"
-        ansible_port: "{{ (((_openbao_host_kv_resp.json.data.data.ansible_port if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined and _openbao_host_kv_resp.json.data.data.ansible_port is defined) else '') | default((hostvars[inventory_hostname].ansible_port if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_port is defined) else (ansible_port | default(22))), true))) | int }}"
+        ansible_host: "{{ (_resolved_bao_host if _resolved_bao_host | length > 0 else (hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true)))) }}"
+        ansible_port: "{{ ((_resolved_bao_port if (_resolved_bao_port | string | length > 0) else (hostvars[inventory_hostname].ansible_port if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_port is defined) else (ansible_port | default(22)))) | int) }}"
 
     - name: Fetch primary admin user credentials from OpenBao (secret/users/<user>)
       ansible.builtin.uri:
@@ -243,6 +249,25 @@
         - _admin_key_tempfile.path is defined
         - _admin_user_entry.ssh_private_key is defined
         - _admin_user_entry.ssh_private_key | length > 0
+
+    - name: Verify OpenBao target host metadata is resolved
+      ansible.builtin.assert:
+        that:
+          - ansible_host is defined
+          - ansible_host | length > 0
+          - ansible_host != inventory_hostname
+        fail_msg: >-
+          [OPENBAO-HOST-MISSING] Target host IP/metadata not found or invalid in OpenBao for '{{ inventory_hostname }}'.
+          Resolved ansible_host='{{ ansible_host | default("UNSET", true) }}'.
+          Attempted OpenBao lookup: VAULT_ADDR='{{ _vault_addr }}',
+          Mount='{{ openbao_mount }}',
+          Path='{{ openbao_hosts_prefix }}{{ inventory_hostname }}',
+          Namespace='{{ openbao_namespace }}',
+          AuthMethod='{{ _vault_auth_method | default("NONE", true) }}' (has_approle: {{ _has_approle | default(false) }}, has_token: {{ (_vault_token | default('') | length) > 0 }}).
+          Please check Semaphore Variable Group (Secrets / Extra vars / Environment):
+          1) Set vault_role_id & vault_secret_id (in Secrets or Environment) OR vault_token.
+          2) Verify openbao_hosts_prefix matches your OpenBao secret path structure (e.g. 'secret/hosts/' or 'hosts/').
+          3) Ensure OpenBao secret at '{{ openbao_hosts_prefix }}{{ inventory_hostname }}' exists and contains 'ansible_host' (or 'ip').
 
     - name: Probe SSH connection using primary admin user credentials
       ansible.builtin.command: >-

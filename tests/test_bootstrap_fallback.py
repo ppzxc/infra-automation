@@ -125,3 +125,64 @@ def test_site_playbook_host_vars_and_probe_condition():
     decision_task = next(t for t in play1_tasks if t["name"] == "Set connection mode facts based on admin SSH probe result")
     assert "_admin_ssh_probe.rc is defined" in decision_task["ansible.builtin.set_fact"]["_is_already_provisioned"]
 
+    # Target host metadata assertion must exist before SSH probe to guarantee OpenBao host resolution
+    assert "Verify OpenBao target host metadata is resolved" in task_names
+    assert_task = next(t for t in play1_tasks if t["name"] == "Verify OpenBao target host metadata is resolved")
+    assert "ansible_host is defined" in assert_task["ansible.builtin.assert"]["that"]
+    assert "ansible_host != inventory_hostname" in assert_task["ansible.builtin.assert"]["that"]
+
+
+def test_openbao_host_kv_unwrapping_logic():
+    """Verify that OpenBao host payload unwraps flat, nested, and array schemas with ansible_host or ip."""
+    env = Environment()
+    template_str = """
+    {%- set host_raw = _openbao_host_kv_resp.json.data.data if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined) else {} -%}
+    {%- set host_unwrapped = (host_raw if host_raw is not mapping else (host_raw[inventory_hostname] if inventory_hostname in host_raw else ((host_raw.values() | first) if (host_raw | length > 0 and (host_raw.values() | first) is mapping) else host_raw))) -%}
+    {%- set host_dict = (host_unwrapped | first) if (host_unwrapped is sequence and host_unwrapped is not string and host_unwrapped | length > 0 and (host_unwrapped | first) is mapping) else (_host_unwrapped if _host_unwrapped is mapping else (host_unwrapped if host_unwrapped is mapping else {})) -%}
+    {%- set resolved_bao_host = host_dict.get('ansible_host', host_dict.get('ip', '')) -%}
+    {%- set resolved_bao_port = host_dict.get('ansible_port', host_dict.get('port', '')) -%}
+    {{ {
+      'ansible_host': (resolved_bao_host if resolved_bao_host | length > 0 else (hostvars.get(inventory_hostname, {}).get('ansible_host', (ansible_host if (ansible_host is defined and ansible_host | length > 0) else inventory_hostname)))),
+      'ansible_port': (resolved_bao_port if (resolved_bao_port is defined and resolved_bao_port | string | length > 0) else (hostvars.get(inventory_hostname, {}).get('ansible_port', (ansible_port if (ansible_port is defined and ansible_port | string | length > 0) else 22)))) | int
+    } | tojson }}
+    """
+    tmpl = env.from_string(template_str)
+
+    # 1. Flat schema with ansible_host
+    r1 = yaml.safe_load(tmpl.render(
+        _openbao_host_kv_resp={'json': {'data': {'data': {'ansible_host': '39.116.31.40', 'ansible_port': 22}}}},
+        inventory_hostname='ns0332', hostvars={}
+    ))
+    assert r1['ansible_host'] == '39.116.31.40'
+    assert r1['ansible_port'] == 22
+
+    # 2. Flat schema with 'ip'
+    r2 = yaml.safe_load(tmpl.render(
+        _openbao_host_kv_resp={'json': {'data': {'data': {'ip': '39.116.31.40'}}}},
+        inventory_hostname='ns0332', hostvars={}
+    ))
+    assert r2['ansible_host'] == '39.116.31.40'
+
+    # 3. Nested dictionary keyed by hostname
+    r3 = yaml.safe_load(tmpl.render(
+        _openbao_host_kv_resp={'json': {'data': {'data': {'ns0332': {'ip': '39.116.31.40', 'port': 2222}}}}},
+        inventory_hostname='ns0332', hostvars={}
+    ))
+    assert r3['ansible_host'] == '39.116.31.40'
+    assert r3['ansible_port'] == 2222
+
+    # 4. Array of dictionaries
+    r4 = yaml.safe_load(tmpl.render(
+        _openbao_host_kv_resp={'json': {'data': {'data': [{'ansible_host': '39.116.31.40'}]}}},
+        inventory_hostname='ns0332', hostvars={}
+    ))
+    assert r4['ansible_host'] == '39.116.31.40'
+
+    # 5. Missing in OpenBao, fallback to inventory_hostname
+    r5 = yaml.safe_load(tmpl.render(
+        _openbao_host_kv_resp={},
+        inventory_hostname='ns0332', hostvars={}
+    ))
+    assert r5['ansible_host'] == 'ns0332'
+
+

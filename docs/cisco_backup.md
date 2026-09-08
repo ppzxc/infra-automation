@@ -62,14 +62,16 @@
      - `VAULT_MOUNT`: (선택) KV v2 마운트 지점 (기본값: `secret`)
      - `openbao_cisco_prefix` / `OPENBAO_CISCO_PREFIX`: (선택) 스위치 키 접두사 (기본값: `switches/`)
 2. **OpenBao KV v2 메타데이터 규격 (`secret/data/switches/<inventory_hostname>`)**:
-   - 각 스위치는 KV 경로 `switches/<inventory_hostname>`에 다음 키-값 필드를 보유해야 합니다:
-     - `ansible_host`: (필수) 스위치 관리 IP 주소 (예: `192.168.1.10`)
-     - `ansible_user`: (필수) 접속 계정명 (예: `admin`)
-     - `ansible_password`: (선택) 접속 비밀번호
-     - `ansible_become_password`: (선택) Cisco IOS enable 비밀번호
-     - `connection_type`: (선택) `ssh` (기본값) 또는 `telnet`
-     - `ansible_port`: (선택) 접속 포트 (기본값: `22`)
-     - `bastion_host`: (선택) Bastion 점프 호스트 IP
+   - 정적 인벤토리(`inventory/hosts.yml` 또는 Semaphore Static Inventory)에는 스위치 관리번호(예: `ns0278`, `ns0065`)만 전달됩니다.
+   - 각 스위치는 KV 경로 `switches/<inventory_hostname>`에 다음 키-값 필드를 보유해야 하며, 플랫 딕셔너리, 호스트명 키 중첩(`{ "ns0278": { ... } }`), 또는 배열 포맷(`[ { ... } ]`) 모두 자동으로 언래핑되어 해석됩니다:
+     - `ansible_host` (또는 `ip`): (필수) 스위치 관리 IP 주소 (예: `211.210.44.182`)
+     - `ansible_user` (또는 `user`, `username`): (필수) 접속 계정명 (예: `admin`, `ansible-backup`)
+     - `ansible_password` (또는 `password`): (선택) 접속 비밀번호
+     - `ansible_become_password` (또는 `enable_password`): (선택) Cisco IOS enable 비밀번호
+     - `connection_type`: (선택) `ssh` (기본값), `telnet`, 또는 `jump_ssh`
+     - `ansible_port` (또는 `port`): (선택) 접속 포트 (기본값: `22`)
+     - `bastion_host`: (선택) Bastion 점프 호스트 IP / 관리번호 (동일하게 OpenBao에서 접속 정보 자동 조회)
+     - `fqdn`: (선택) 정규 호스트명
 3. **호스트 변수 결정 및 폴백(Fallback) 우선순위**:
    - 1순위: OpenBao KV v2 (`switches/<inventory_hostname>`) 시크릿 메타데이터
    - 2순위: 인벤토리(`hosts.yml`)에 명시적으로 정의된 `ansible_host`, `ansible_user`
