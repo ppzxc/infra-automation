@@ -19,10 +19,10 @@
 
   vars:
     # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (Cisco switch 백업 플레이북과 동일한 패턴 및 변수명 계층 적용)
-    openbao_namespace: "{{ _local_openbao_namespace | default(vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true), true) }}"
-    openbao_mount: "{{ _local_openbao_mount | default(vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secrets', true), true), true), true), true) }}"
-    openbao_hosts_prefix: "{{ _local_openbao_hosts_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('secret/hosts/', true), true) }}"
-    openbao_users_prefix: "{{ _local_openbao_users_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_USERS_PREFIX') | default('secret/users/', true), true) }}"
+    openbao_namespace: "{{ (_local_openbao_namespace | default(vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true), true)) | regex_replace('/+$', '') }}"
+    openbao_mount: "{{ _local_openbao_mount | default(vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true), true) }}"
+    openbao_hosts_prefix: "{{ (_local_openbao_hosts_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true), true)) | regex_replace('^secret/', '') }}"
+    openbao_users_prefix: "{{ (_local_openbao_users_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_USERS_PREFIX') | default('users/', true), true)) | regex_replace('^secret/', '') }}"
 
     # AppRole 및 Token 인증 자격증명 자동 감지 (Semaphore Secrets / Extra vars / OS Env vars 모두 지원)
     _vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
@@ -91,7 +91,7 @@
         - _openbao_login_probe.json.auth is defined
         - _openbao_login_probe.json.auth.client_token is defined
 
-    - name: Fetch target host KV from OpenBao (secret/hosts/<hostname>)
+    - name: Fetch target host KV from OpenBao (hosts/<hostname>)
       ansible.builtin.uri:
         url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_hosts_prefix }}{{ inventory_hostname }}"
         method: GET
@@ -111,9 +111,46 @@
       check_mode: false
       when: (_vault_token | default('') | length) > 0
 
+    - name: Fallback fetch target host KV from OpenBao with secret/ prefix if initial lookup 404
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/secret/{{ openbao_hosts_prefix }}{{ inventory_hostname }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_host_kv_resp_fallback
+      ignore_errors: true
+      check_mode: false
+      when:
+        - (_vault_token | default('') | length) > 0
+        - (_openbao_host_kv_resp.status is not defined) or (_openbao_host_kv_resp.status != 200)
+
+    - name: Merge primary and fallback OpenBao host response
+      ansible.builtin.set_fact:
+        _effective_host_resp: "{{ _openbao_host_kv_resp if (_openbao_host_kv_resp.status is defined and _openbao_host_kv_resp.status == 200) else (_openbao_host_kv_resp_fallback if (_openbao_host_kv_resp_fallback is defined and _openbao_host_kv_resp_fallback.status is defined and _openbao_host_kv_resp_fallback.status == 200) else _openbao_host_kv_resp) }}"
+
+    - name: Debug direct OpenBao host KV response
+      ansible.builtin.debug:
+        msg:
+          host: "{{ inventory_hostname }}"
+          status: "{{ _effective_host_resp.status | default('UNSET') }}"
+          url: "{{ _effective_host_resp.url | default('UNSET') }}"
+          msg: "{{ _effective_host_resp.msg | default('N/A') }}"
+          json_data_defined: "{{ (_effective_host_resp.json.data.data is defined) if (_effective_host_resp.json is defined and _effective_host_resp.json.data is defined) else false }}"
+          keys: "{{ (_effective_host_resp.json.data.data.keys() | list) if (_effective_host_resp.json is defined and _effective_host_resp.json.data is defined and _effective_host_resp.json.data.data is defined and _effective_host_resp.json.data.data is mapping) else [] }}"
+      when: _effective_host_resp is defined
+
     - name: Apply OpenBao and inventory host variables to host facts
       vars:
-        _host_raw: "{{ _openbao_host_kv_resp.json.data.data if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined) else {} }}"
+        _host_raw: "{{ _effective_host_resp.json.data.data if (_effective_host_resp is defined and _effective_host_resp.json is defined and _effective_host_resp.json.data is defined and _effective_host_resp.json.data.data is defined) else {} }}"
         _host_unwrapped: "{{ (_host_raw if _host_raw is not mapping else (_host_raw[inventory_hostname] if inventory_hostname in _host_raw else ((_host_raw.values() | first) if (_host_raw | length > 0 and (_host_raw.values() | first) is mapping) else _host_raw))) }}"
         _host_dict: "{{ (_host_unwrapped | first) if (_host_unwrapped is sequence and _host_unwrapped is not string and _host_unwrapped | length > 0 and (_host_unwrapped | first) is mapping) else (_host_unwrapped if _host_unwrapped is mapping else {}) }}"
         _resolved_bao_host: "{{ _host_dict.ansible_host | default(_host_dict.ip | default('', true), true) }}"
@@ -122,7 +159,7 @@
         ansible_host: "{{ (_resolved_bao_host if _resolved_bao_host | length > 0 else (hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true)))) }}"
         ansible_port: "{{ ((_resolved_bao_port if (_resolved_bao_port | string | length > 0) else (hostvars[inventory_hostname].ansible_port if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_port is defined) else (ansible_port | default(22)))) | int) }}"
 
-    - name: Fetch primary admin user credentials from OpenBao (secret/users/<user>)
+    - name: Fetch primary admin user credentials from OpenBao (users/<user>)
       ansible.builtin.uri:
         url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ _primary_admin_user }}"
         method: GET
@@ -142,7 +179,33 @@
       check_mode: false
       when: (_vault_token | default('') | length) > 0
 
-    - name: Fetch bootstrap user credentials from OpenBao (secret/users/<user>)
+    - name: Fallback fetch primary admin user credentials from OpenBao with secret/ prefix if initial lookup 404
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/secret/{{ openbao_users_prefix }}{{ _primary_admin_user }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_admin_user_resp_fallback
+      ignore_errors: true
+      check_mode: false
+      when:
+        - (_vault_token | default('') | length) > 0
+        - (_openbao_admin_user_resp.status is not defined) or (_openbao_admin_user_resp.status != 200)
+
+    - name: Merge primary and fallback admin user response
+      ansible.builtin.set_fact:
+        _effective_admin_user_resp: "{{ _openbao_admin_user_resp if (_openbao_admin_user_resp.status is defined and _openbao_admin_user_resp.status == 200) else (_openbao_admin_user_resp_fallback if (_openbao_admin_user_resp_fallback is defined and _openbao_admin_user_resp_fallback.status is defined and _openbao_admin_user_resp_fallback.status == 200) else _openbao_admin_user_resp) }}"
+
+    - name: Fetch bootstrap user credentials from OpenBao (users/<user>)
       ansible.builtin.uri:
         url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ bootstrap_user }}"
         method: GET
@@ -162,18 +225,44 @@
       check_mode: false
       when: (_vault_token | default('') | length) > 0
 
+    - name: Fallback fetch bootstrap user credentials from OpenBao with secret/ prefix if initial lookup 404
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/secret/{{ openbao_users_prefix }}{{ bootstrap_user }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_bootstrap_user_resp_fallback
+      ignore_errors: true
+      check_mode: false
+      when:
+        - (_vault_token | default('') | length) > 0
+        - (_openbao_bootstrap_user_resp.status is not defined) or (_openbao_bootstrap_user_resp.status != 200)
+
+    - name: Merge primary and fallback bootstrap user response
+      ansible.builtin.set_fact:
+        _effective_bootstrap_user_resp: "{{ _openbao_bootstrap_user_resp if (_openbao_bootstrap_user_resp.status is defined and _openbao_bootstrap_user_resp.status == 200) else (_openbao_bootstrap_user_resp_fallback if (_openbao_bootstrap_user_resp_fallback is defined and _openbao_bootstrap_user_resp_fallback.status is defined and _openbao_bootstrap_user_resp_fallback.status == 200) else _openbao_bootstrap_user_resp) }}"
+
     - name: Parse admin and bootstrap user secrets
       ansible.builtin.set_fact:
         _admin_user_data: >-
-          {%- if _openbao_admin_user_resp.json.data.data is defined -%}
-            {%- set raw = _openbao_admin_user_resp.json.data.data -%}
+          {%- if _effective_admin_user_resp.json.data.data is defined -%}
+            {%- set raw = _effective_admin_user_resp.json.data.data -%}
             {{ (raw if raw is not mapping else (raw.values() | first)) | default({}, true) }}
           {%- else -%}
             {}
           {%- endif -%}
         _bootstrap_user_data: >-
-          {%- if _openbao_bootstrap_user_resp.json.data.data is defined -%}
-            {%- set raw = _openbao_bootstrap_user_resp.json.data.data -%}
+          {%- if _effective_bootstrap_user_resp.json.data.data is defined -%}
+            {%- set raw = _effective_bootstrap_user_resp.json.data.data -%}
             {{ (raw if raw is not mapping else (raw.values() | first)) | default({}, true) }}
           {%- else -%}
             {}
