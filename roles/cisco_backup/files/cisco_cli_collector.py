@@ -377,14 +377,7 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
         except Exception:
             pass
 
-    cmd = _bastion_cmd or [
-        "ssh", "-tt",
-        "-p", str(bastion_port),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null",
-        "-o", "LogLevel=ERROR",
-        f"{bastion_user}@{bastion_host}"
-    ]
+    cmd = _bastion_cmd or get_openssh_direct_args(bastion_host, bastion_port, bastion_user)
 
     proc = subprocess.Popen(
         cmd,
@@ -438,28 +431,38 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
         # Step 2: Wait for bastion shell prompt ($ or # or >)
         shell_start = time.time()
         buf = b""
+        bastion_is_cisco = False
         while time.time() - shell_start < 10.0:
             chunk = pty_recv(0.3)
             if chunk:
                 buf += chunk
-                if b"$" in buf or b"#" in buf or b">" in buf:
+                if b"#" in buf or b">" in buf:
+                    bastion_is_cisco = True
+                    break
+                elif b"$" in buf:
                     break
             if proc.poll() is not None:
                 err_msg = buf.decode(errors="ignore").strip()
                 raise RuntimeError(f"Bastion shell exited unexpectedly: {err_msg}")
 
-        pty_send(b"stty -echo\n")
+        if bastion_is_cisco:
+            pty_send(b"terminal length 0\n")
+        else:
+            pty_send(b"stty -echo\n")
         time.sleep(0.3)
         pty_recv(0.3)
 
-        # Step 3: From Bastion shell, SSH to target Cisco switch with legacy cipher options
-        ssh_cmd = (
-            f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
-            f"-o KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256 "
-            f"-o HostKeyAlgorithms=+ssh-rsa,ssh-dss "
-            f"-o Ciphers=+aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc "
-            f"-l {target_user} {target_host}\n"
-        )
+        # Step 3: From Bastion shell, SSH to target Cisco switch
+        if bastion_is_cisco:
+            ssh_cmd = f"ssh -l {target_user} {target_host}\n"
+        else:
+            ssh_cmd = (
+                f"ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "
+                f"-o KexAlgorithms=+diffie-hellman-group1-sha1,diffie-hellman-group14-sha1,diffie-hellman-group-exchange-sha1,diffie-hellman-group-exchange-sha256 "
+                f"-o HostKeyAlgorithms=+ssh-rsa,ssh-dss "
+                f"-o Ciphers=+aes128-cbc,3des-cbc,aes192-cbc,aes256-cbc "
+                f"-l {target_user} {target_host}\n"
+            )
         pty_send(ssh_cmd.encode())
 
         # Step 4: Handle Target switch password authentication

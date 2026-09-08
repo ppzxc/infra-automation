@@ -138,3 +138,72 @@ while True:
     assert "hostname ns0281" in config
     assert "version 15.0" in config
 
+
+def test_jump_ssh_cisco_switch_as_bastion(tmp_path):
+    """Simulate jump via Cisco IOS switch acting as bastion (ns0278 -> ns0279)."""
+    mock_switch_bastion = tmp_path / "mock_cisco_bastion.py"
+    mock_target = tmp_path / "mock_target_from_switch.py"
+
+    mock_target.write_text("""import sys
+sys.stdout.write("User Access Verification\\r\\nPassword: ")
+sys.stdout.flush()
+pwd = sys.stdin.readline().strip()
+if pwd != "TargetPass123":
+    sys.exit(1)
+sys.stdout.write("\\r\\nns0279#\\r\\n")
+sys.stdout.flush()
+while True:
+    cmd = sys.stdin.readline()
+    if not cmd:
+        break
+    if cmd.strip() == "show running-config":
+        sys.stdout.write("Building configuration...\\r\\nversion 12.2\\r\\nhostname ns0279\\r\\nend\\r\\n")
+        sys.stdout.flush()
+    elif cmd.strip() == "exit":
+        break
+""")
+
+    mock_switch_bastion.write_text(f"""import sys, subprocess
+sys.stdout.write("User Access Verification\\r\\nPassword: ")
+sys.stdout.flush()
+pwd = sys.stdin.readline().strip()
+if pwd != "BastionSwitchPass":
+    sys.stdout.write("Login invalid\\r\\n")
+    sys.stdout.flush()
+    sys.exit(1)
+sys.stdout.write("\\r\\nns0278#\\r\\n")
+sys.stdout.flush()
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    line = line.strip()
+    if line == "terminal length 0":
+        sys.stdout.write("ns0278#\\r\\n")
+        sys.stdout.flush()
+    elif line.startswith("ssh -l"):
+        proc = subprocess.Popen(["python3", "{mock_target}"], stdin=sys.stdin, stdout=sys.stdout)
+        proc.wait()
+        break
+    elif line == "exit":
+        break
+    else:
+        sys.stdout.write("ns0278#\\r\\n")
+        sys.stdout.flush()
+""")
+
+    config = cisco_cli_collector.collect_openssh_jump_interactive(
+        bastion_host="ns0278",
+        bastion_port=22,
+        bastion_user="ansible-backup",
+        bastion_pass="BastionSwitchPass",
+        target_host="10.10.200.79",
+        target_user="ansible-backup",
+        target_pass="TargetPass123",
+        enable_pass="TargetPass123",
+        timeout=10,
+        _bastion_cmd=["python3", str(mock_switch_bastion)]
+    )
+    assert "hostname ns0279" in config
+    assert "version 12.2" in config
+

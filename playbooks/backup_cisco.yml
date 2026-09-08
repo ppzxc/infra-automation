@@ -97,6 +97,43 @@
         - _openbao_direct_secret_resp.json.data is defined
         - _openbao_direct_secret_resp.json.data.data is defined
 
+    - name: Resolve Bastion host secret directly from OpenBao API
+      ansible.builtin.uri:
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/{{ cisco_openbao_mount }}/data/{{ cisco_openbao_secret_prefix }}{{ bastion_host }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': cisco_openbao_namespace} if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_bastion_secret_resp
+      ignore_errors: true
+      delegate_to: localhost
+      check_mode: false
+      when:
+        - (_vault_token | default('') | length) > 0
+        - connection_type | default('ssh') == 'jump_ssh'
+        - bastion_host is defined
+        - bastion_host | length > 0
+
+    - name: Apply OpenBao Bastion secret data to host facts
+      ansible.builtin.set_fact:
+        bastion_resolved_host: "{{ _openbao_bastion_secret_resp.json.data.data.ansible_host | default(bastion_host) }}"
+        bastion_resolved_port: "{{ (_openbao_bastion_secret_resp.json.data.data.ansible_port | default(22)) | int }}"
+        bastion_resolved_user: "{{ _openbao_bastion_secret_resp.json.data.data.ansible_user | default(ansible_user) }}"
+        bastion_resolved_password: "{{ _openbao_bastion_secret_resp.json.data.data.ansible_password | default('') }}"
+      when:
+        - _openbao_bastion_secret_resp is defined
+        - _openbao_bastion_secret_resp.json is defined
+        - _openbao_bastion_secret_resp.json.data is defined
+        - _openbao_bastion_secret_resp.json.data.data is defined
+
     - name: Debug direct OpenBao secret response
       ansible.builtin.debug:
         msg:

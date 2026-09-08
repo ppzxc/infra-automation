@@ -65,9 +65,9 @@
   ansible.builtin.command: >-
     python3 {{ role_path }}/files/cisco_cli_collector.py
     --mode jump_ssh
-    --bastion-host {{ (hostvars[bastion_host].ansible_host if (bastion_host in hostvars and hostvars[bastion_host].ansible_host is defined) else bastion_host) }}
-    --bastion-port {{ (hostvars[bastion_host].ansible_port if (bastion_host in hostvars and hostvars[bastion_host].ansible_port is defined) else 22) }}
-    --bastion-user {{ (hostvars[bastion_host].ansible_user if (bastion_host in hostvars and hostvars[bastion_host].ansible_user is defined) else ansible_user) }}
+    --bastion-host {{ bastion_resolved_host | default(hostvars[bastion_host].ansible_host if (bastion_host in hostvars and hostvars[bastion_host].ansible_host is defined) else bastion_host) }}
+    --bastion-port {{ bastion_resolved_port | default(hostvars[bastion_host].ansible_port if (bastion_host in hostvars and hostvars[bastion_host].ansible_port is defined) else 22) }}
+    --bastion-user {{ bastion_resolved_user | default(hostvars[bastion_host].ansible_user if (bastion_host in hostvars and hostvars[bastion_host].ansible_user is defined) else ansible_user) }}
     --host {{ ansible_host }}
     --port {{ ansible_port | default(22) }}
     --user {{ ansible_user }}
@@ -78,7 +78,7 @@
         {
           "password": ansible_password | default(''),
           "enable_password": ansible_become_password | default(ansible_password | default('')),
-          "bastion_password": (hostvars[bastion_host].ansible_password if (bastion_host in hostvars and hostvars[bastion_host].ansible_password is defined) else (ansible_password | default(lookup('ansible.builtin.env', 'BASTION_PASSWORD') | default('', true))))
+          "bastion_password": (bastion_resolved_password if (bastion_resolved_password is defined and bastion_resolved_password | length > 0) else (hostvars[bastion_host].ansible_password if (bastion_host in hostvars and hostvars[bastion_host].ansible_password is defined) else (lookup('ansible.builtin.env', 'BASTION_PASSWORD') | default(ansible_password | default(''), true))))
         } | to_json
       }}
   register: cisco_config_jump_output
