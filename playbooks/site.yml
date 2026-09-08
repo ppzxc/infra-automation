@@ -153,7 +153,7 @@
         _host_raw: "{{ _effective_host_resp.json.data.data if (_effective_host_resp is defined and _effective_host_resp.json is defined and _effective_host_resp.json.data is defined and _effective_host_resp.json.data.data is defined) else {} }}"
         _host_unwrapped: "{{ (_host_raw if _host_raw is not mapping else (_host_raw[inventory_hostname] if inventory_hostname in _host_raw else ((_host_raw.values() | first) if (_host_raw | length > 0 and (_host_raw.values() | first) is mapping) else _host_raw))) }}"
         _host_dict: "{{ (_host_unwrapped | first) if (_host_unwrapped is sequence and _host_unwrapped is not string and _host_unwrapped | length > 0 and (_host_unwrapped | first) is mapping) else (_host_unwrapped if _host_unwrapped is mapping else {}) }}"
-        _resolved_bao_host: "{{ _host_dict.ansible_host | default(_host_dict.ip | default('', true), true) }}"
+        _resolved_bao_host: "{{ _host_dict.ansible_host | default(_host_dict.public_ip | default(_host_dict.ip | default(_host_dict.host | default('', true), true), true), true) }}"
         _resolved_bao_port: "{{ _host_dict.ansible_port | default(_host_dict.port | default('', true), true) }}"
       ansible.builtin.set_fact:
         ansible_host: "{{ (_resolved_bao_host if _resolved_bao_host | length > 0 else (hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true)))) }}"
@@ -356,7 +356,7 @@
           Please check Semaphore Variable Group (Secrets / Extra vars / Environment):
           1) Set vault_role_id & vault_secret_id (in Secrets or Environment) OR vault_token.
           2) Verify openbao_hosts_prefix matches your OpenBao secret path structure (e.g. 'secret/hosts/' or 'hosts/').
-          3) Ensure OpenBao secret at '{{ openbao_hosts_prefix }}{{ inventory_hostname }}' exists and contains 'ansible_host' (or 'ip').
+          3) Ensure OpenBao secret at '{{ openbao_hosts_prefix }}{{ inventory_hostname }}' exists and contains 'ansible_host', 'public_ip', or 'ip'.
 
     - name: Probe SSH connection using primary admin user credentials
       ansible.builtin.command: >-

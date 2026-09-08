@@ -139,7 +139,7 @@ def test_openbao_host_kv_unwrapping_logic():
     {%- set host_raw = _openbao_host_kv_resp.json.data.data if (_openbao_host_kv_resp is defined and _openbao_host_kv_resp.json is defined and _openbao_host_kv_resp.json.data is defined and _openbao_host_kv_resp.json.data.data is defined) else {} -%}
     {%- set host_unwrapped = (host_raw if host_raw is not mapping else (host_raw[inventory_hostname] if inventory_hostname in host_raw else ((host_raw.values() | first) if (host_raw | length > 0 and (host_raw.values() | first) is mapping) else host_raw))) -%}
     {%- set host_dict = (host_unwrapped | first) if (host_unwrapped is sequence and host_unwrapped is not string and host_unwrapped | length > 0 and (host_unwrapped | first) is mapping) else (_host_unwrapped if _host_unwrapped is mapping else (host_unwrapped if host_unwrapped is mapping else {})) -%}
-    {%- set resolved_bao_host = host_dict.get('ansible_host', host_dict.get('ip', '')) -%}
+    {%- set resolved_bao_host = host_dict.get('ansible_host', host_dict.get('public_ip', host_dict.get('ip', host_dict.get('host', '')))) -%}
     {%- set resolved_bao_port = host_dict.get('ansible_port', host_dict.get('port', '')) -%}
     {{ {
       'ansible_host': (resolved_bao_host if resolved_bao_host | length > 0 else (hostvars.get(inventory_hostname, {}).get('ansible_host', (ansible_host if (ansible_host is defined and ansible_host | length > 0) else inventory_hostname)))),
@@ -178,11 +178,22 @@ def test_openbao_host_kv_unwrapping_logic():
     ))
     assert r4['ansible_host'] == '39.116.31.40'
 
-    # 5. Missing in OpenBao, fallback to inventory_hostname
+    # 5. Flat schema with 'public_ip'
     r5 = yaml.safe_load(tmpl.render(
+        _openbao_host_kv_resp={'json': {'data': {'data': {
+            'hostname': 'ns0332',
+            'public_ip': '39.116.31.40',
+            'ssh_user': 'ppzxc'
+        }}}},
+        inventory_hostname='ns0332', hostvars={}
+    ))
+    assert r5['ansible_host'] == '39.116.31.40'
+
+    # 6. Missing in OpenBao, fallback to inventory_hostname
+    r6 = yaml.safe_load(tmpl.render(
         _openbao_host_kv_resp={},
         inventory_hostname='ns0332', hostvars={}
     ))
-    assert r5['ansible_host'] == 'ns0332'
+    assert r6['ansible_host'] == 'ns0332'
 
 

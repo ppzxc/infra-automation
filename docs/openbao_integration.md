@@ -52,7 +52,17 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
     "ansible_port": 22
   }
   ```
-  또는 호스트명 키 래핑 / `ip` 필드 사용:
+  또는 `public_ip` (IDC 기본 호스트 메타데이터 포맷) / `ip` 필드 사용:
+  ```json
+  {
+    "hostname": "ns0332",
+    "domain": "nanoit.kr",
+    "fqdn": "ns0332.nanoit.kr",
+    "public_ip": "39.116.31.40",
+    "ssh_user": "ppzxc"
+  }
+  ```
+  또는 호스트명 키 래핑 사용:
   ```json
   {
     "ns0332": {
