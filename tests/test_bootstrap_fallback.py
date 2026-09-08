@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 def test_site_playbook_syntax_and_structure():
-    """Verify site.yml contains variable assertion, probe connection, and fallback"""
+    """Verify site.yml contains variable assertion, probe connection, and fallback aligned with cisco pattern"""
     site_file = ROOT_DIR / "playbooks" / "site.yml"
     assert site_file.exists(), "site.yml missing"
     
@@ -15,6 +15,11 @@ def test_site_playbook_syntax_and_structure():
     assert "target_admin_users" in content or "target_admin_user" in content
     assert "openbao_namespace" in content
     assert "openbao_mount" in content
+    assert "cisco_openbao_namespace" in content or "VAULT_NAMESPACE" in content
+    assert "_vault_role_id" in content
+    assert "_vault_secret_id" in content
+    assert "_has_approle" in content
+    assert "_vault_auth_method" in content
 
 def test_target_admin_users_normalization_logic():
     """Verify normalization of target_admin_users from string or list"""

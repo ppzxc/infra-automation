@@ -17,18 +17,19 @@
   connection: local
 
   vars:
-    # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (Semaphore UI 환경변수/Extra vars 주입 가능)
-    openbao_namespace: "{{ _local_openbao_namespace | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true) }}"
-    openbao_mount: "{{ _local_openbao_mount | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secrets', true), true), true) }}"
-    openbao_hosts_prefix: "{{ _local_openbao_hosts_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('secret/hosts/', true), true) }}"
-    openbao_users_prefix: "{{ _local_openbao_users_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_USERS_PREFIX') | default('secret/users/', true), true) }}"
+    # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (Cisco switch 백업 플레이북과 동일한 패턴 및 변수명 계층 적용)
+    openbao_namespace: "{{ _local_openbao_namespace | default(openbao_namespace | default(vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true), true), true) }}"
+    openbao_mount: "{{ _local_openbao_mount | default(openbao_mount | default(vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secrets', true), true), true), true), true), true) }}"
+    openbao_hosts_prefix: "{{ _local_openbao_hosts_prefix | default(openbao_hosts_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('secret/hosts/', true), true), true) }}"
+    openbao_users_prefix: "{{ _local_openbao_users_prefix | default(openbao_users_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_USERS_PREFIX') | default('secret/users/', true), true), true) }}"
 
-    # AppRole 및 Token 인증 자격증명 자동 감지
-    _vault_role_id: "{{ vault_role_id | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true) }}"
-    _vault_secret_id: "{{ vault_secret_id | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true) }}"
+    # AppRole 및 Token 인증 자격증명 자동 감지 (Semaphore Secrets / Extra vars / OS Env vars 모두 지원)
+    _vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
+    _vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
     _has_approle: "{{ (_vault_role_id | length > 0) and (_vault_secret_id | length > 0) }}"
-    _vault_token: "{{ vault_token | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true) }}"
-    _vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}"
+    _vault_token: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true) }}"
+    _vault_auth_method: "{{ vault_auth_method | default(VAULT_AUTH_METHOD | default(lookup('ansible.builtin.env', 'VAULT_AUTH_METHOD') | default('approle' if _has_approle else ('token' if (_vault_token | length > 0) else omit), true), true), true) }}"
+    _vault_addr: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
 
   tasks:
     - name: Validate mandatory input variables
@@ -59,7 +60,19 @@
       ansible.builtin.set_fact:
         _primary_admin_user: "{{ _normalized_admin_users | first }}"
 
-    - name: Probe OpenBao AppRole login if credentials provided
+    - name: Run OpenBao direct diagnostic health probe from controller
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/sys/health"
+        method: GET
+        status_code: [-1, 200, 429, 472, 473, 501, 503]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_health_probe
+      ignore_errors: true
+      run_once: true
+      check_mode: false
+
+    - name: Run OpenBao AppRole login diagnostic probe from controller
       ansible.builtin.uri:
         url: "{{ _vault_addr }}/v1/auth/approle/login"
         method: POST
@@ -74,11 +87,13 @@
       register: _openbao_login_probe
       run_once: true
       ignore_errors: true
+      check_mode: false
       when: _has_approle
 
-    - name: Register OpenBao client token from AppRole probe
+    - name: Register acquired OpenBao client token from AppRole probe
       ansible.builtin.set_fact:
         _vault_token: "{{ _openbao_login_probe.json.auth.client_token }}"
+        _vault_auth_method: "token"
       when:
         - _openbao_login_probe.json is defined
         - _openbao_login_probe.json.auth is defined
@@ -101,6 +116,7 @@
         validate_certs: false
       register: _openbao_host_kv_resp
       ignore_errors: true
+      check_mode: false
       when: (_vault_token | default('') | length) > 0
 
     - name: Apply OpenBao host variables to host facts
@@ -130,6 +146,7 @@
         validate_certs: false
       register: _openbao_admin_user_resp
       ignore_errors: true
+      check_mode: false
       when: (_vault_token | default('') | length) > 0
 
     - name: Fetch bootstrap user credentials from OpenBao (secret/users/<user>)
@@ -149,6 +166,7 @@
         validate_certs: false
       register: _openbao_bootstrap_user_resp
       ignore_errors: true
+      check_mode: false
       when: (_vault_token | default('') | length) > 0
 
     - name: Parse admin and bootstrap user secrets
@@ -191,6 +209,7 @@
       register: _openbao_all_admins_resp
       loop: "{{ _normalized_admin_users }}"
       ignore_errors: true
+      check_mode: false
       when: (_vault_token | default('') | length) > 0
 
     - name: Build accounts list for common role from OpenBao keys
