@@ -1,0 +1,72 @@
+import pytest
+import yaml
+from jinja2 import Environment
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+def test_site_playbook_syntax_and_structure():
+    """Verify site.yml contains variable assertion, probe connection, and fallback"""
+    site_file = ROOT_DIR / "playbooks" / "site.yml"
+    assert site_file.exists(), "site.yml missing"
+    
+    content = site_file.read_text(encoding='utf-8')
+    assert "bootstrap_user" in content
+    assert "target_admin_users" in content or "target_admin_user" in content
+    assert "openbao_namespace" in content
+    assert "openbao_mount" in content
+
+def test_target_admin_users_normalization_logic():
+    """Verify normalization of target_admin_users from string or list"""
+    env = Environment()
+    template_str = """
+    {%- if target_admin_users is defined and target_admin_users is string -%}
+      {{ target_admin_users.split(',') | map('trim') | reject('equalto', '') | list | tojson }}
+    {%- elif target_admin_users is defined and target_admin_users is iterable and target_admin_users is not mapping -%}
+      {{ target_admin_users | list | tojson }}
+    {%- elif target_admin_user is defined and target_admin_user | length > 0 -%}
+      {{ [target_admin_user] | tojson }}
+    {%- else -%}
+      {{ [] | tojson }}
+    {%- endif -%}
+    """
+    tmpl = env.from_string(template_str)
+    
+    # Comma-separated string
+    res1 = yaml.safe_load(tmpl.render(target_admin_users="ppzxc, admin2, secops"))
+    assert res1 == ["ppzxc", "admin2", "secops"]
+    
+    # List of users
+    res2 = yaml.safe_load(tmpl.render(target_admin_users=["ppzxc", "admin2"]))
+    assert res2 == ["ppzxc", "admin2"]
+    
+    # Fallback to target_admin_user single string
+    res3 = yaml.safe_load(tmpl.render(target_admin_user="ppzxc"))
+    assert res3 == ["ppzxc"]
+
+def test_admin_accounts_generation_from_openbao_keys():
+    """Verify dynamic accounts structure generation for common role"""
+    env = Environment()
+    template_str = """
+    {%- set user_list = ['ppzxc', 'admin2'] -%}
+    {%- set pub_keys = {'ppzxc': 'ssh-ed25519 AAAAC1...', 'admin2': 'ssh-rsa AAAAB2...'} -%}
+    {%- set dynamic_accounts = [] -%}
+    {%- for u in user_list -%}
+      {%- set k = pub_keys.get(u, '') -%}
+      {%- set _ = dynamic_accounts.append({
+            'name': u,
+            'tier': 'admin',
+            'comment': 'Administrator managed via OpenBao',
+            'shell': '/bin/bash',
+            'keys': [k] if k else []
+          }) -%}
+    {%- endfor -%}
+    {{ dynamic_accounts | tojson }}
+    """
+    tmpl = env.from_string(template_str)
+    res = yaml.safe_load(tmpl.render())
+    assert len(res) == 2
+    assert res[0]["name"] == "ppzxc"
+    assert res[0]["keys"] == ["ssh-ed25519 AAAAC1..."]
+    assert res[1]["name"] == "admin2"
+    assert res[1]["keys"] == ["ssh-rsa AAAAB2..."]

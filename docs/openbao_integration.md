@@ -41,18 +41,48 @@ flowchart TD
 
 OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키를 배치합니다:
 
-### (1) 노드별 개별 접속 자격증명
-* **경로**: `secret/data/nodes/<inventory_hostname>` (예: `secret/data/nodes/web-01.idc.internal`, `secret/data/nodes/ns0278`)
-* **서버 노드 필드 (Key-Value)**:
+### (1) 호스트별 개별 접속 정보
+* **네임스페이스**: `infra/prod/host/` (Semaphore UI `VAULT_NAMESPACE` 주입)
+* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0266`)
+* **필드 (Key-Value)**:
   ```json
   {
-    "ansible_user": "ppzxc",
-    "ansible_password": "HostSpecificSecretPassword123!",
-    "ansible_become_password": "SudoPasswordIfDifferentOrSame",
+    "ansible_host": "39.116.31.43",
     "ansible_port": 22
   }
   ```
-### (2) Cisco 스위치별 접속 정보 및 자격증명
+
+### (2) 사용자 계정 자격증명 (Users)
+* **경로**: `secret/data/users/<username>` (예: `secret/data/users/ppzxc`, `secret/data/users/root`)
+* **SSH 자격증명 포맷 (JSON Array)**:
+  ```json
+  [
+    {
+      "ssh_passphrase": "",
+      "ssh_private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+      "ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
+      "type": "SSH",
+      "username": "ppzxc"
+    }
+  ]
+  ```
+* **패스워드 자격증명 포맷 (JSON Array, root 등 부트스트랩 계정)**:
+  ```json
+  [
+    {
+      "password": "InitialRootPassword123!",
+      "type": "PASSWORD",
+      "username": "root"
+    }
+  ]
+  ```
+
+### (3) 부트스트랩 접속 및 관리자 자동 폴백 메커니즘
+* `site.yml` 실행 시 `bootstrap_user`와 `target_admin_users`를 필수로 주입받습니다.
+* **1차 시도 (관리자 접속)**: OpenBao `users/<target_admin_user>`의 SSH Private Key로 타겟 호스트 접속을 시도합니다. 성공 시 이미 프로비저닝된 상태로 판단하여 해당 키로 플레이북을 실행합니다.
+* **2차 시도 (부트스트랩 폴백)**: 관리자 SSH 연결 실패 시 신규 호스트로 판단, OpenBao `users/<bootstrap_user>`에서 패스워드/키를 취득하여 `ansible_user=bootstrap_user`로 자동 폴백 접속 후 프로비저닝을 수행합니다. 프로비저닝이 완료되면 `root` 원격 접속은 차단되고 등록된 관리자 계정만 유지됩니다.
+
+### (4) Cisco 스위치별 접속 정보 및 자격증명
 * **경로**: `secret/data/switches/<inventory_hostname>` (예: `secret/data/switches/ns0000`, `secret/data/switches/ns0278`)
 * **변수 해석 우선순위**: OpenBao KV v2 최우선 ➔ 인벤토리/로컬 변수 폴백 ➔ 시스템 기본값
 * **필드 (Key-Value) - SSH 스위치**:
@@ -91,7 +121,7 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   ```
 
 
-### (3) 전역 인프라 서비스 시크릿
+### (5) 전역 인프라 서비스 시크릿
 * **경로**: `secret/data/global/services`
 * **필드 (Key-Value)**:
 

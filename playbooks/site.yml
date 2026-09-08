@@ -4,9 +4,281 @@
 # 온프레미스 IDC 인프라 통합 프로비저닝 (일반 서버 및 로드밸런서)
 # ==============================================================================
 # 실행 예시:
-#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml --limit ns0332.nanoit.kr
+#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml \
+#     -e "bootstrap_user=root target_admin_users=ppzxc"
 # ==============================================================================
 
+# ------------------------------------------------------------------------------
+# Play 1: Controller Pre-flight & OpenBao Secret Resolution
+# ------------------------------------------------------------------------------
+- name: Controller Pre-flight & Dynamic OpenBao Credential Resolution
+  hosts: servers:loadbalancers
+  gather_facts: false
+  connection: local
+
+  vars:
+    # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (Semaphore UI 환경변수/Extra vars 주입 가능)
+    openbao_namespace: "{{ _local_openbao_namespace | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true) }}"
+    openbao_mount: "{{ _local_openbao_mount | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secrets', true), true), true) }}"
+    openbao_hosts_prefix: "{{ _local_openbao_hosts_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('secret/hosts/', true), true) }}"
+    openbao_users_prefix: "{{ _local_openbao_users_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_USERS_PREFIX') | default('secret/users/', true), true) }}"
+
+    # AppRole 및 Token 인증 자격증명 자동 감지
+    _vault_role_id: "{{ vault_role_id | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true) }}"
+    _vault_secret_id: "{{ vault_secret_id | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true) }}"
+    _has_approle: "{{ (_vault_role_id | length > 0) and (_vault_secret_id | length > 0) }}"
+    _vault_token: "{{ vault_token | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true) }}"
+    _vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}"
+
+  tasks:
+    - name: Validate mandatory input variables
+      ansible.builtin.assert:
+        that:
+          - bootstrap_user is defined
+          - bootstrap_user | length > 0
+          - (target_admin_users is defined and target_admin_users | length > 0) or (target_admin_user is defined and target_admin_user | length > 0)
+        fail_msg: >-
+          [ERROR] 필수 변수 'bootstrap_user' 및 'target_admin_users'(또는 'target_admin_user')가 정의되지 않았습니다!
+          Semaphore UI Environment JSON 또는 '-e "bootstrap_user=root target_admin_users=ppzxc"' 형식으로 주입해야 합니다.
+      run_once: true
+
+    - name: Normalize target_admin_users list and primary admin user
+      ansible.builtin.set_fact:
+        _normalized_admin_users: >-
+          {%- if target_admin_users is defined and target_admin_users is string -%}
+            {{ target_admin_users.split(',') | map('trim') | reject('equalto', '') | list }}
+          {%- elif target_admin_users is defined and target_admin_users is iterable and target_admin_users is not mapping -%}
+            {{ target_admin_users | list }}
+          {%- elif target_admin_user is defined and target_admin_user | length > 0 -%}
+            {{ [target_admin_user] }}
+          {%- else -%}
+            {{ [] }}
+          {%- endif -%}
+
+    - name: Set primary target admin user for connection probing
+      ansible.builtin.set_fact:
+        _primary_admin_user: "{{ _normalized_admin_users | first }}"
+
+    - name: Probe OpenBao AppRole login if credentials provided
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/auth/approle/login"
+        method: POST
+        headers: "{{ {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {} }}"
+        body_format: json
+        body:
+          role_id: "{{ _vault_role_id }}"
+          secret_id: "{{ _vault_secret_id }}"
+        status_code: [-1, 200, 400, 401, 403, 404, 500]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_login_probe
+      run_once: true
+      ignore_errors: true
+      when: _has_approle
+
+    - name: Register OpenBao client token from AppRole probe
+      ansible.builtin.set_fact:
+        _vault_token: "{{ _openbao_login_probe.json.auth.client_token }}"
+      when:
+        - _openbao_login_probe.json is defined
+        - _openbao_login_probe.json.auth is defined
+        - _openbao_login_probe.json.auth.client_token is defined
+
+    - name: Fetch target host KV from OpenBao (secret/hosts/<hostname>)
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_hosts_prefix }}{{ inventory_hostname }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_host_kv_resp
+      ignore_errors: true
+      when: (_vault_token | default('') | length) > 0
+
+    - name: Apply OpenBao host variables to host facts
+      ansible.builtin.set_fact:
+        ansible_host: "{{ _openbao_host_kv_resp.json.data.data.ansible_host | default(ansible_host | default(inventory_hostname, true), true) }}"
+        ansible_port: "{{ (_openbao_host_kv_resp.json.data.data.ansible_port | default(ansible_port | default(22))) | int }}"
+      when:
+        - _openbao_host_kv_resp is defined
+        - _openbao_host_kv_resp.json is defined
+        - _openbao_host_kv_resp.json.data is defined
+        - _openbao_host_kv_resp.json.data.data is defined
+
+    - name: Fetch primary admin user credentials from OpenBao (secret/users/<user>)
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ _primary_admin_user }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_admin_user_resp
+      ignore_errors: true
+      when: (_vault_token | default('') | length) > 0
+
+    - name: Fetch bootstrap user credentials from OpenBao (secret/users/<user>)
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ bootstrap_user }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_bootstrap_user_resp
+      ignore_errors: true
+      when: (_vault_token | default('') | length) > 0
+
+    - name: Parse admin and bootstrap user secrets
+      ansible.builtin.set_fact:
+        _admin_user_data: >-
+          {%- if _openbao_admin_user_resp.json.data.data is defined -%}
+            {%- set raw = _openbao_admin_user_resp.json.data.data -%}
+            {{ (raw if raw is not mapping else (raw.values() | first)) | default({}, true) }}
+          {%- else -%}
+            {}
+          {%- endif -%}
+        _bootstrap_user_data: >-
+          {%- if _openbao_bootstrap_user_resp.json.data.data is defined -%}
+            {%- set raw = _openbao_bootstrap_user_resp.json.data.data -%}
+            {{ (raw if raw is not mapping else (raw.values() | first)) | default({}, true) }}
+          {%- else -%}
+            {}
+          {%- endif -%}
+
+    - name: Extract secret item from list if OpenBao secret is a list
+      ansible.builtin.set_fact:
+        _admin_user_entry: "{{ (_admin_user_data | first) if (_admin_user_data is sequence and _admin_user_data is not string and _admin_user_data is not mapping and _admin_user_data | length > 0) else (_admin_user_data if _admin_user_data is mapping else {}) }}"
+        _bootstrap_user_entry: "{{ (_bootstrap_user_data | first) if (_bootstrap_user_data is sequence and _bootstrap_user_data is not string and _bootstrap_user_data is not mapping and _bootstrap_user_data | length > 0) else (_bootstrap_user_data if _bootstrap_user_data is mapping else {}) }}"
+
+    - name: Fetch all target admin users credentials to build accounts structure
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ item }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_all_admins_resp
+      loop: "{{ _normalized_admin_users }}"
+      ignore_errors: true
+      when: (_vault_token | default('') | length) > 0
+
+    - name: Build accounts list for common role from OpenBao keys
+      ansible.builtin.set_fact:
+        accounts: >-
+          {%- set dynamic_accs = [] -%}
+          {%- for u in _normalized_admin_users -%}
+            {%- set user_key = '' -%}
+            {%- if _openbao_all_admins_resp.results is defined -%}
+              {%- for res in _openbao_all_admins_resp.results -%}
+                {%- if res.item == u and res.json is defined and res.json.data is defined and res.json.data.data is defined -%}
+                  {%- set raw_data = res.json.data.data -%}
+                  {%- set entry_list = (raw_data if raw_data is not mapping else (raw_data.values() | first)) -%}
+                  {%- set entry = (entry_list | first) if (entry_list is sequence and entry_list is not string and entry_list is not mapping and entry_list | length > 0) else (entry_list if entry_list is mapping else {}) -%}
+                  {%- set user_key = entry.get('ssh_public_key', '') -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+            {%- set _ = dynamic_accs.append({
+                  'name': u,
+                  'tier': 'admin',
+                  'comment': 'Administrator provisioned via OpenBao',
+                  'shell': '/bin/bash',
+                  'keys': [user_key] if user_key | length > 0 else []
+                }) -%}
+          {%- endfor -%}
+          {{ dynamic_accs }}
+
+    - name: Create temporary SSH private key file for admin user if key provided
+      ansible.builtin.tempfile:
+        state: file
+        suffix: "_bao_admin_key"
+      register: _admin_key_tempfile
+      when:
+        - _admin_user_entry.ssh_private_key is defined
+        - _admin_user_entry.ssh_private_key | length > 0
+
+    - name: Write admin SSH private key to temporary file
+      ansible.builtin.copy:
+        content: "{{ _admin_user_entry.ssh_private_key }}\n"
+        dest: "{{ _admin_key_tempfile.path }}"
+        mode: '0600'
+      when:
+        - _admin_key_tempfile.path is defined
+        - _admin_user_entry.ssh_private_key is defined
+        - _admin_user_entry.ssh_private_key | length > 0
+
+    - name: Probe SSH connection using primary admin user credentials
+      ansible.builtin.command: >-
+        ssh -o BatchMode=yes
+            -o ConnectTimeout=5
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -p {{ ansible_port | default(22) }}
+            {% if _admin_key_tempfile.path is defined %}-i {{ _admin_key_tempfile.path }}{% endif %}
+            {{ _primary_admin_user }}@{{ ansible_host | default(inventory_hostname) }} 'echo OK'
+      register: _admin_ssh_probe
+      changed_when: false
+      failed_when: false
+
+    - name: Set connection mode facts based on admin SSH probe result
+      ansible.builtin.set_fact:
+        _is_already_provisioned: "{{ _admin_ssh_probe.rc == 0 }}"
+
+    - name: Configure connection parameters for already provisioned host (Admin SSH Key mode)
+      ansible.builtin.set_fact:
+        ansible_user: "{{ _primary_admin_user }}"
+        ansible_ssh_private_key_file: "{{ _admin_key_tempfile.path | default(omit) }}"
+        ansible_become_password: "{{ _admin_user_entry.password | default(omit) }}"
+      when: _is_already_provisioned | bool
+
+    - name: Configure connection parameters for unprovisioned host (Bootstrap fallback mode)
+      ansible.builtin.set_fact:
+        ansible_user: "{{ bootstrap_user }}"
+        ansible_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
+        ansible_become_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
+      when: not (_is_already_provisioned | bool)
+
+    - name: Connection decision summary
+      ansible.builtin.debug:
+        msg: >-
+          Host {{ inventory_hostname }}:
+          Status={{ 'Already Provisioned' if _is_already_provisioned else 'Initial Provisioning Needed (Bootstrap Fallback)' }},
+          Connecting User={{ ansible_user }}
+
+# ------------------------------------------------------------------------------
+# Play 2: Provision Baseline Target Hosts
+# ------------------------------------------------------------------------------
 - name: Provision Baseline On-Premise Target Hosts
   hosts: servers:loadbalancers
   become: true
@@ -15,7 +287,7 @@
   pre_tasks:
     - name: Verify connectivity and OS facts
       ansible.builtin.debug:
-        msg: "Provisioning target host: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }})"
+        msg: "Provisioning target host: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }}) using user: {{ ansible_user }}"
 
   roles:
     - role: common
@@ -36,6 +308,20 @@
   post_tasks:
     - name: Target host provisioning completion summary
       ansible.builtin.debug:
-        msg: "Successfully provisioned target host {{ inventory_hostname }}. Access Security (OpenBao SSH CA & Boundary) and OTel Monitoring ready."
+        msg: "Successfully provisioned target host {{ inventory_hostname }}. Root access restricted, Admin accounts ({{ _normalized_admin_users | join(', ') }}) configured."
 
-
+# ------------------------------------------------------------------------------
+# Play 3: Cleanup temporary controller credentials
+# ------------------------------------------------------------------------------
+- name: Cleanup temporary controller credentials
+  hosts: servers:loadbalancers
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Remove temporary admin SSH private key file
+      ansible.builtin.file:
+        path: "{{ _admin_key_tempfile.path }}"
+        state: absent
+      when:
+        - _admin_key_tempfile is defined
+        - _admin_key_tempfile.path is defined
