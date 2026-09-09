@@ -223,6 +223,29 @@
       ansible.builtin.set_fact:
         _effective_admin_user_resp: "{{ _openbao_admin_user_resp if (_openbao_admin_user_resp.status is defined and _openbao_admin_user_resp.status == 200) else (_openbao_admin_user_resp_fallback if (_openbao_admin_user_resp_fallback is defined and _openbao_admin_user_resp_fallback.status is defined and _openbao_admin_user_resp_fallback.status == 200) else _openbao_admin_user_resp) }}"
 
+    # --------------------------------------------------------------------------
+    # Bootstrap 자격증명 조회: 1) 호스트 전용 (hosts/<hostname>/bootstrap) -> 2) 전역 (users/<bootstrap_user>)
+    # --------------------------------------------------------------------------
+    - name: Fetch host-specific bootstrap credentials from OpenBao (hosts/<hostname>/bootstrap)
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_hosts_prefix }}{{ inventory_hostname }}/bootstrap"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_host_bootstrap_resp
+      ignore_errors: true
+      check_mode: false
+      when: (_vault_token | default('') | length) > 0
+
     - name: Fetch bootstrap user credentials from OpenBao (users/<user>)
       ansible.builtin.uri:
         url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ bootstrap_user }}"
@@ -241,7 +264,9 @@
       register: _openbao_bootstrap_user_resp
       ignore_errors: true
       check_mode: false
-      when: (_vault_token | default('') | length) > 0
+      when:
+        - (_vault_token | default('') | length) > 0
+        - (_openbao_host_bootstrap_resp.status is not defined) or (_openbao_host_bootstrap_resp.status != 200)
 
     - name: Fallback fetch bootstrap user credentials from OpenBao with secret/ prefix if initial lookup 404
       ansible.builtin.uri:
@@ -263,11 +288,12 @@
       check_mode: false
       when:
         - (_vault_token | default('') | length) > 0
+        - (_openbao_host_bootstrap_resp.status is not defined) or (_openbao_host_bootstrap_resp.status != 200)
         - (_openbao_bootstrap_user_resp.status is not defined) or (_openbao_bootstrap_user_resp.status != 200)
 
     - name: Merge primary and fallback bootstrap user response
       ansible.builtin.set_fact:
-        _effective_bootstrap_user_resp: "{{ _openbao_bootstrap_user_resp if (_openbao_bootstrap_user_resp.status is defined and _openbao_bootstrap_user_resp.status == 200) else (_openbao_bootstrap_user_resp_fallback if (_openbao_bootstrap_user_resp_fallback is defined and _openbao_bootstrap_user_resp_fallback.status is defined and _openbao_bootstrap_user_resp_fallback.status == 200) else _openbao_bootstrap_user_resp) }}"
+        _effective_bootstrap_user_resp: "{{ _openbao_host_bootstrap_resp if (_openbao_host_bootstrap_resp.status is defined and _openbao_host_bootstrap_resp.status == 200) else (_openbao_bootstrap_user_resp if (_openbao_bootstrap_user_resp.status is defined and _openbao_bootstrap_user_resp.status == 200) else (_openbao_bootstrap_user_resp_fallback if (_openbao_bootstrap_user_resp_fallback is defined and _openbao_bootstrap_user_resp_fallback.status is defined and _openbao_bootstrap_user_resp_fallback.status == 200) else _openbao_bootstrap_user_resp)) }}"
 
     - name: Debug OpenBao user secret lookup response
       ansible.builtin.debug:
@@ -294,10 +320,12 @@
         _resolved_admin_entry: "{{ _raw_admin_entry | combine({'password': _admin_fallback_pwd}) if ((_raw_admin_entry.password is not defined or _raw_admin_entry.password | length == 0) and (_admin_fallback_pwd | length > 0)) else _raw_admin_entry }}"
 
         _boot_raw: "{{ _effective_bootstrap_user_resp.json.data.data if (_effective_bootstrap_user_resp is defined and _effective_bootstrap_user_resp.json is defined and _effective_bootstrap_user_resp.json.data is defined and _effective_bootstrap_user_resp.json.data.data is defined) else {} }}"
-        _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[bootstrap_user] if (bootstrap_user in _boot_raw and (_boot_raw[bootstrap_user] is mapping or (_boot_raw[bootstrap_user] is sequence and _boot_raw[bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
+        _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[bootstrap_user] if (bootstrap_user in _boot_raw and (_boot_raw[bootstrap_user] is mapping or (_boot_raw[bootstrap_user] is sequence and _boot_raw[bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'root_password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
         _boot_list: "{{ _boot_unwrapped if (_boot_unwrapped is sequence and _boot_unwrapped is not string and _boot_unwrapped is not mapping) else [_boot_unwrapped] }}"
         _boot_pwd_matches: "{{ _boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list }}"
-        _resolved_boot_entry: "{{ (_boot_pwd_matches | first) if (_boot_pwd_matches | length > 0) else ((_boot_list | first) if (_boot_list | length > 0 and (_boot_list | first) is mapping) else {}) }}"
+        _raw_boot_entry: "{{ (_boot_pwd_matches | first) if (_boot_pwd_matches | length > 0) else ((_boot_list | first) if (_boot_list | length > 0 and (_boot_list | first) is mapping) else {}) }}"
+        _boot_resolved_pwd: "{{ _raw_boot_entry.password if (_raw_boot_entry.password is defined and _raw_boot_entry.password | length > 0) else (_raw_boot_entry.root_password if (_raw_boot_entry.root_password is defined and _raw_boot_entry.root_password | length > 0) else (_boot_raw.password if (_boot_raw is mapping and 'password' in _boot_raw) else (_boot_raw.root_password if (_boot_raw is mapping and 'root_password' in _boot_raw) else ''))) }}"
+        _resolved_boot_entry: "{{ _raw_boot_entry | combine({'password': _boot_resolved_pwd}) if (_boot_resolved_pwd | length > 0) else _raw_boot_entry }}"
       ansible.builtin.set_fact:
         _admin_user_entry: "{{ _resolved_admin_entry }}"
         _bootstrap_user_entry: "{{ _resolved_boot_entry }}"
