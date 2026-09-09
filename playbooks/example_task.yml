@@ -30,11 +30,29 @@
 - name: Execute Target Host Maintenance or Ad-hoc Tasks
   hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
   become: true
-  gather_facts: true
+  gather_facts: false
 
   vars:
-    # Docker 컨테이너(Semaphore) 내부의 Python 가상환경 경로 누출 방지
-    ansible_python_interpreter: auto_silent
+    # Docker 컨테이너(Semaphore) 내부의 Python 가상환경 경로 누출 방지 및 원격 python3 강제
+    ansible_python_interpreter: /usr/bin/python3
+
+  pre_tasks:
+    - name: Ensure target python interpreter is strictly /usr/bin/python3
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: >-
+          {{
+            ansible_python_interpreter
+            if (ansible_python_interpreter is defined and
+                ansible_python_interpreter | length > 0 and
+                'semaphore' not in (ansible_python_interpreter | string) and
+                'venv' not in (ansible_python_interpreter | string) and
+                not (ansible_python_interpreter | string).startswith('/tmp/') and
+                (ansible_python_interpreter | string) != 'auto_silent')
+            else '/usr/bin/python3'
+          }}
+
+    - name: Gather facts from target host using remote python3
+      ansible.builtin.setup:
 
   tasks:
     - name: Display connection and host summary

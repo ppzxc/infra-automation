@@ -18,9 +18,6 @@
   become: false
 
   vars:
-    # Play 1 (Local execution) 자체는 컨트롤러의 현재 파이썬 환경을 사용하여 실행하도록 격리
-    ansible_python_interpreter: "{{ ansible_playbook_python }}"
-
     # OpenBao (Vault) 네임스페이스 및 마운트 경로 설정 (Cisco switch 백업 플레이북과 동일한 패턴 및 변수명 계층 적용)
     openbao_namespace: "{{ (_local_openbao_namespace | default(vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true), true)) | regex_replace('/+$', '') }}"
     openbao_mount: "{{ _local_openbao_mount | default(vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true), true) }}"
@@ -36,6 +33,15 @@
     _vault_addr: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
 
   tasks:
+    - name: Purge controller fact cache directory to prevent poisoned cache reuse
+      ansible.builtin.file:
+        path: /tmp/ansible_fact_cache
+        state: absent
+      run_once: true
+
+    - name: Clear cached in-memory facts for target hosts
+      ansible.builtin.meta: clear_facts
+
     - name: Set bootstrap user fact with default fallback
       ansible.builtin.set_fact:
         bootstrap_user: "{{ bootstrap_user if (bootstrap_user is defined and bootstrap_user | length > 0) else (lookup('ansible.builtin.env', 'BOOTSTRAP_USER') if (lookup('ansible.builtin.env', 'BOOTSTRAP_USER') | length > 0) else 'root') }}"
@@ -181,6 +187,7 @@
       ansible.builtin.set_fact:
         ansible_host: "{{ (_resolved_bao_host if _resolved_bao_host | length > 0 else (hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true)))) }}"
         ansible_port: "{{ ((_resolved_bao_port if (_resolved_bao_port | string | length > 0) else (hostvars[inventory_hostname].ansible_port if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_port is defined) else (ansible_port | default(22)))) | int) }}"
+        _openbao_python_interpreter: "{{ _host_dict.ansible_python_interpreter | default('', true) }}"
 
     - name: Fetch primary admin user credentials from OpenBao (users/<user>)
       ansible.builtin.uri:
@@ -517,13 +524,14 @@
         ansible_become_password: "{{ _admin_user_entry.password | default(omit) }}"
         ansible_python_interpreter: >-
           {{
-            _host_dict.ansible_python_interpreter
-            if (_host_dict.ansible_python_interpreter is defined and
-                _host_dict.ansible_python_interpreter | length > 0 and
-                'semaphore' not in _host_dict.ansible_python_interpreter and
-                'venv' not in _host_dict.ansible_python_interpreter and
-                not _host_dict.ansible_python_interpreter.startswith('/tmp/'))
-            else 'auto_silent'
+            _openbao_python_interpreter
+            if (_openbao_python_interpreter is defined and
+                _openbao_python_interpreter | length > 0 and
+                'semaphore' not in _openbao_python_interpreter and
+                'venv' not in _openbao_python_interpreter and
+                not _openbao_python_interpreter.startswith('/tmp/') and
+                _openbao_python_interpreter != 'auto_silent')
+            else '/usr/bin/python3'
           }}
       when: _is_already_provisioned | bool
 
@@ -535,13 +543,14 @@
         ansible_become_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
         ansible_python_interpreter: >-
           {{
-            _host_dict.ansible_python_interpreter
-            if (_host_dict.ansible_python_interpreter is defined and
-                _host_dict.ansible_python_interpreter | length > 0 and
-                'semaphore' not in _host_dict.ansible_python_interpreter and
-                'venv' not in _host_dict.ansible_python_interpreter and
-                not _host_dict.ansible_python_interpreter.startswith('/tmp/'))
-            else 'auto_silent'
+            _openbao_python_interpreter
+            if (_openbao_python_interpreter is defined and
+                _openbao_python_interpreter | length > 0 and
+                'semaphore' not in _openbao_python_interpreter and
+                'venv' not in _openbao_python_interpreter and
+                not _openbao_python_interpreter.startswith('/tmp/') and
+                _openbao_python_interpreter != 'auto_silent')
+            else '/usr/bin/python3'
           }}
       when: not (_is_already_provisioned | bool)
 
@@ -560,19 +569,37 @@
 - name: Provision Baseline On-Premise Target Hosts
   hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
   become: true
-  gather_facts: true
+  gather_facts: false
 
   vars:
-    # Docker 컨테이너(Semaphore) 내부의 Python 가상환경 경로 누출 방지
-    ansible_python_interpreter: auto_silent
+    # 원격 Linux 대상 호스트의 표준 Python3 인터프리터 강제
+    ansible_python_interpreter: /usr/bin/python3
 
   pre_tasks:
+    - name: Ensure target python interpreter is strictly /usr/bin/python3
+      ansible.builtin.set_fact:
+        ansible_python_interpreter: >-
+          {{
+            ansible_python_interpreter
+            if (ansible_python_interpreter is defined and
+                ansible_python_interpreter | length > 0 and
+                'semaphore' not in (ansible_python_interpreter | string) and
+                'venv' not in (ansible_python_interpreter | string) and
+                not (ansible_python_interpreter | string).startswith('/tmp/') and
+                (ansible_python_interpreter | string) != 'auto_silent')
+            else '/usr/bin/python3'
+          }}
+
+    - name: Gather facts from target host using remote python3
+      ansible.builtin.setup:
+
     - name: Verify connectivity and OS facts
       ansible.builtin.debug:
         msg:
           "진행 단계": "호스트 기본 OS 환경 및 연결 확인 완료"
           "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }} / 커널 {{ ansible_kernel }})"
           "실행 사용자": "{{ ansible_user }} (Sudo 권한 승격: 활성화)"
+          "Python 인터프리터": "{{ ansible_python_interpreter }}"
 
   roles:
     - role: common

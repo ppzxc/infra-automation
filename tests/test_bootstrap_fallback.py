@@ -478,15 +478,15 @@ def test_bootstrap_user_default_and_override():
 
 
 def test_remote_python_interpreter_configuration():
-    """Verify that site.yml, resolve_connection.yml, and ansible.cfg enforce remote python interpreter discovery (auto_silent) and isolate controller local venv."""
+    """Verify that site.yml, resolve_connection.yml, and ansible.cfg enforce remote python interpreter discovery (/usr/bin/python3) and isolate controller local venv."""
     site_file = ROOT_DIR / "playbooks" / "site.yml"
     with open(site_file, "r", encoding="utf-8") as f:
         plays = yaml.safe_load(f)
 
-    # Check Play 1 vars isolates local python interpreter
+    # Check Play 1 vars does not leak controller python interpreter to remote hosts
     play1_vars = plays[0].get("vars", {})
-    assert play1_vars.get("ansible_python_interpreter") == "{{ ansible_playbook_python }}", (
-        "Play 1 vars must isolate local python interpreter using ansible_playbook_python"
+    assert "ansible_python_interpreter" not in play1_vars, (
+        "Play 1 vars must not set ansible_python_interpreter to avoid controller venv leakage to remote hosts"
     )
 
     # Check Play 1 connection configuration sets ansible_python_interpreter
@@ -495,36 +495,42 @@ def test_remote_python_interpreter_configuration():
     boot_conn_task = next(t for t in play1_tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
 
     assert "ansible_python_interpreter" in admin_conn_task["ansible.builtin.set_fact"]
-    assert "auto_silent" in admin_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "/usr/bin/python3" in admin_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
     assert "ansible_python_interpreter" in boot_conn_task["ansible.builtin.set_fact"]
-    assert "auto_silent" in boot_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "/usr/bin/python3" in boot_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
 
     # Also verify resolve_connection.yml has the identical protection
     resolve_file = ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml"
     with open(resolve_file, "r", encoding="utf-8") as f:
         r_plays = yaml.safe_load(f)
     r_play1_vars = r_plays[0].get("vars", {})
-    assert r_play1_vars.get("ansible_python_interpreter") == "{{ ansible_playbook_python }}"
+    assert "ansible_python_interpreter" not in r_play1_vars
 
     r_play1_tasks = r_plays[0].get("tasks", [])
     r_admin_task = next(t for t in r_play1_tasks if t.get("name") == "Configure connection parameters for already provisioned host (Admin SSH Key mode)")
     r_boot_task = next(t for t in r_play1_tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
-    assert "auto_silent" in r_admin_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
-    assert "auto_silent" in r_boot_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "/usr/bin/python3" in r_admin_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "/usr/bin/python3" in r_boot_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
 
-    # Check Play 2 vars enforces auto_silent to prevent controller venv leak during setup/fact gathering
+    # Check Play 2 vars enforces /usr/bin/python3 and gather_facts: false to prevent controller venv leak
     play2_vars = plays[1].get("vars", {})
-    assert play2_vars.get("ansible_python_interpreter") == "auto_silent", (
-        "Play 2 vars must explicitly set ansible_python_interpreter to auto_silent"
+    assert play2_vars.get("ansible_python_interpreter") == "/usr/bin/python3", (
+        "Play 2 vars must explicitly set ansible_python_interpreter to /usr/bin/python3"
+    )
+    assert plays[1].get("gather_facts") is False, (
+        "Play 2 gather_facts must be false so facts are gathered after python interpreter sanitization"
     )
 
-    # Check example_task.yml also enforces auto_silent on Play 2
+    # Check example_task.yml also enforces /usr/bin/python3 on Play 2
     example_file = ROOT_DIR / "playbooks" / "example_task.yml"
     with open(example_file, "r", encoding="utf-8") as f:
         e_plays = yaml.safe_load(f)
     e_play2_vars = e_plays[1].get("vars", {})
-    assert e_play2_vars.get("ansible_python_interpreter") == "auto_silent", (
-        "example_task.yml Play 2 vars must set ansible_python_interpreter to auto_silent"
+    assert e_play2_vars.get("ansible_python_interpreter") == "/usr/bin/python3", (
+        "example_task.yml Play 2 vars must set ansible_python_interpreter to /usr/bin/python3"
+    )
+    assert e_plays[1].get("gather_facts") is False, (
+        "example_task.yml Play 2 gather_facts must be false"
     )
 
     # Check ansible.cfg defaults interpreter_python = auto_silent
