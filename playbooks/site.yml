@@ -251,55 +251,44 @@
       ansible.builtin.set_fact:
         _effective_bootstrap_user_resp: "{{ _openbao_bootstrap_user_resp if (_openbao_bootstrap_user_resp.status is defined and _openbao_bootstrap_user_resp.status == 200) else (_openbao_bootstrap_user_resp_fallback if (_openbao_bootstrap_user_resp_fallback is defined and _openbao_bootstrap_user_resp_fallback.status is defined and _openbao_bootstrap_user_resp_fallback.status == 200) else _openbao_bootstrap_user_resp) }}"
 
-    - name: Parse admin and bootstrap user secrets
-      ansible.builtin.set_fact:
-        _admin_user_data: >-
-          {%- if _effective_admin_user_resp.json.data.data is defined -%}
-            {%- set raw = _effective_admin_user_resp.json.data.data -%}
-            {%- if raw is mapping and (_primary_admin_user in raw) and (raw[_primary_admin_user] is mapping or (raw[_primary_admin_user] is sequence and raw[_primary_admin_user] is not string)) -%}
-              {{ raw[_primary_admin_user] }}
-            {%- elif raw is mapping and ('ssh_private_key' in raw or 'username' in raw or 'type' in raw or 'password' in raw) -%}
-              {{ raw }}
-            {%- elif raw is mapping and (raw.values() | length > 0) and ((raw.values() | first) is mapping or ((raw.values() | first) is sequence and (raw.values() | first) is not string)) -%}
-              {{ raw.values() | first }}
-            {%- else -%}
-              {{ raw }}
-            {%- endif -%}
-          {%- else -%}
-            {}
-          {%- endif -%}
-        _bootstrap_user_data: >-
-          {%- if _effective_bootstrap_user_resp.json.data.data is defined -%}
-            {%- set raw = _effective_bootstrap_user_resp.json.data.data -%}
-            {%- if raw is mapping and (bootstrap_user in raw) and (raw[bootstrap_user] is mapping or (raw[bootstrap_user] is sequence and raw[bootstrap_user] is not string)) -%}
-              {{ raw[bootstrap_user] }}
-            {%- elif raw is mapping and ('password' in raw or 'username' in raw or 'type' in raw or 'ssh_private_key' in raw) -%}
-              {{ raw }}
-            {%- elif raw is mapping and (raw.values() | length > 0) and ((raw.values() | first) is mapping or ((raw.values() | first) is sequence and (raw.values() | first) is not string)) -%}
-              {{ raw.values() | first }}
-            {%- else -%}
-              {{ raw }}
-            {%- endif -%}
-          {%- else -%}
-            {}
-          {%- endif -%}
+    - name: Debug OpenBao user secret lookup response
+      ansible.builtin.debug:
+        msg:
+          primary_admin_user: "{{ _primary_admin_user }}"
+          admin_status: "{{ _effective_admin_user_resp.status | default('UNSET') }}"
+          admin_url: "{{ _effective_admin_user_resp.url | default('UNSET') }}"
+          admin_msg: "{{ _effective_admin_user_resp.msg | default('N/A') }}"
+          admin_data_keys: "{{ (_effective_admin_user_resp.json.data.data.keys() | list) if (_effective_admin_user_resp.json is defined and _effective_admin_user_resp.json.data is defined and _effective_admin_user_resp.json.data.data is defined and _effective_admin_user_resp.json.data.data is mapping) else [] }}"
+          bootstrap_user: "{{ bootstrap_user }}"
+          bootstrap_status: "{{ _effective_bootstrap_user_resp.status | default('UNSET') }}"
+          bootstrap_url: "{{ _effective_bootstrap_user_resp.url | default('UNSET') }}"
+      when: _effective_admin_user_resp is defined
 
-    - name: Extract secret item from list if OpenBao secret is a list
+    - name: Parse admin and bootstrap user secrets
+      vars:
+        _admin_raw: "{{ _effective_admin_user_resp.json.data.data if (_effective_admin_user_resp is defined and _effective_admin_user_resp.json is defined and _effective_admin_user_resp.json.data is defined and _effective_admin_user_resp.json.data.data is defined) else {} }}"
+        _admin_unwrapped: "{{ (_admin_raw if _admin_raw is not mapping else (_admin_raw[_primary_admin_user] if (_primary_admin_user in _admin_raw and (_admin_raw[_primary_admin_user] is mapping or (_admin_raw[_primary_admin_user] is sequence and _admin_raw[_primary_admin_user] is not string))) else (_admin_raw if ('ssh_private_key' in _admin_raw or 'username' in _admin_raw or 'type' in _admin_raw or 'password' in _admin_raw) else ((_admin_raw.values() | first) if (_admin_raw | length > 0 and ((_admin_raw.values() | first) is mapping or ((_admin_raw.values() | first) is sequence and (_admin_raw.values() | first) is not string))) else _admin_raw)))) }}"
+        _admin_list: "{{ _admin_unwrapped if (_admin_unwrapped is sequence and _admin_unwrapped is not string and _admin_unwrapped is not mapping) else [_admin_unwrapped] }}"
+        _admin_ssh_matches: "{{ _admin_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list }}"
+        _resolved_admin_entry: "{{ (_admin_ssh_matches | first) if (_admin_ssh_matches | length > 0) else ((_admin_list | first) if (_admin_list | length > 0 and (_admin_list | first) is mapping) else {}) }}"
+
+        _boot_raw: "{{ _effective_bootstrap_user_resp.json.data.data if (_effective_bootstrap_user_resp is defined and _effective_bootstrap_user_resp.json is defined and _effective_bootstrap_user_resp.json.data is defined and _effective_bootstrap_user_resp.json.data.data is defined) else {} }}"
+        _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[bootstrap_user] if (bootstrap_user in _boot_raw and (_boot_raw[bootstrap_user] is mapping or (_boot_raw[bootstrap_user] is sequence and _boot_raw[bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
+        _boot_list: "{{ _boot_unwrapped if (_boot_unwrapped is sequence and _boot_unwrapped is not string and _boot_unwrapped is not mapping) else [_boot_unwrapped] }}"
+        _boot_pwd_matches: "{{ _boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list }}"
+        _resolved_boot_entry: "{{ (_boot_pwd_matches | first) if (_boot_pwd_matches | length > 0) else ((_boot_list | first) if (_boot_list | length > 0 and (_boot_list | first) is mapping) else {}) }}"
       ansible.builtin.set_fact:
-        _admin_user_entry: >-
-          {%- if _admin_user_data is sequence and _admin_user_data is not string and _admin_user_data is not mapping and _admin_user_data | length > 0 -%}
-            {%- set ssh_matches = _admin_user_data | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list -%}
-            {{ (ssh_matches | first) if ssh_matches | length > 0 else (_admin_user_data | first) }}
-          {%- else -%}
-            {{ _admin_user_data if _admin_user_data is mapping else {} }}
-          {%- endif -%}
-        _bootstrap_user_entry: >-
-          {%- if _bootstrap_user_data is sequence and _bootstrap_user_data is not string and _bootstrap_user_data is not mapping and _bootstrap_user_data | length > 0 -%}
-            {%- set pwd_matches = _bootstrap_user_data | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list -%}
-            {{ (pwd_matches | first) if pwd_matches | length > 0 else (_bootstrap_user_data | first) }}
-          {%- else -%}
-            {{ _bootstrap_user_data if _bootstrap_user_data is mapping else {} }}
-          {%- endif -%}
+        _admin_user_entry: "{{ _resolved_admin_entry }}"
+        _bootstrap_user_entry: "{{ _resolved_boot_entry }}"
+
+    - name: Debug resolved user entries
+      ansible.builtin.debug:
+        msg:
+          admin_has_entry: "{{ _admin_user_entry is defined and _admin_user_entry is mapping }}"
+          admin_type: "{{ _admin_user_entry.type | default('UNSET') }}"
+          admin_has_private_key: "{{ (_admin_user_entry.ssh_private_key is defined) and (_admin_user_entry.ssh_private_key | length > 0) }}"
+          admin_has_passphrase: "{{ (_admin_user_entry.ssh_passphrase is defined) and (_admin_user_entry.ssh_passphrase | length > 0) }}"
+          bootstrap_has_password: "{{ (_bootstrap_user_entry.password is defined) and (_bootstrap_user_entry.password | length > 0) }}"
 
     - name: Fetch all target admin users credentials to build accounts structure
       ansible.builtin.uri:
