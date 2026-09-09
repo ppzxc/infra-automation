@@ -104,6 +104,7 @@ def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
     
     # Check vars in Play 1 do not contain circular self-references
     vars1 = play1.get("vars", {})
+    assert "bootstrap_user" not in vars1, "bootstrap_user must not be in vars with self-reference to prevent Jinja2 recursion loop"
     assert "openbao_namespace" in vars1
     assert "openbao_namespace | default(openbao_namespace" not in vars1["openbao_namespace"]
     assert "openbao_mount | default(openbao_mount" not in vars1["openbao_mount"]
@@ -464,13 +465,14 @@ def test_bootstrap_user_default_and_override():
         plays = yaml.safe_load(f)
 
     play1 = plays[0]
-    # Check default root in vars
-    vars1 = play1.get("vars", {})
-    assert "bootstrap_user" in vars1
-    assert "default('root'" in vars1["bootstrap_user"]
+    tasks = play1.get("tasks", [])
+
+    # Check default root in task set_fact
+    fact_task = next(t for t in tasks if t.get("name") == "Set bootstrap user fact with default fallback")
+    assert "'root'" in fact_task["ansible.builtin.set_fact"]["bootstrap_user"]
+    assert "bootstrap_user if" in fact_task["ansible.builtin.set_fact"]["bootstrap_user"]
 
     # Check connection parameters use _bootstrap_user_entry.username | default(bootstrap_user)
-    tasks = play1.get("tasks", [])
     conn_task = next(t for t in tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
     assert "_bootstrap_user_entry.username | default(bootstrap_user)" in conn_task["ansible.builtin.set_fact"]["ansible_user"]
 
