@@ -308,6 +308,37 @@
           admin_has_passphrase: "{{ (_admin_user_entry.ssh_passphrase is defined) and (_admin_user_entry.ssh_passphrase | length > 0) }}"
           bootstrap_has_password: "{{ (_bootstrap_user_entry.password is defined) and (_bootstrap_user_entry.password | length > 0) }}"
 
+    - name: Create temporary SSH private key file for admin user if key provided
+      ansible.builtin.tempfile:
+        state: file
+        suffix: "_bao_admin_key"
+      register: _admin_key_tempfile
+      when:
+        - (_admin_user_entry.ssh_private_key | default('')) | length > 0
+
+    - name: Write admin SSH private key to temporary file
+      ansible.builtin.copy:
+        content: "{{ _admin_user_entry.ssh_private_key }}\n"
+        dest: "{{ _admin_key_tempfile.path }}"
+        mode: '0600'
+      when:
+        - _admin_key_tempfile.path is defined
+        - (_admin_user_entry.ssh_private_key | default('')) | length > 0
+
+    - name: Strip passphrase from temporary admin SSH key if passphrase defined
+      ansible.builtin.command: >-
+        ssh-keygen -p -f {{ _admin_key_tempfile.path }} -P {{ _admin_user_entry.ssh_passphrase | quote }} -N ""
+      no_log: true
+      when:
+        - _admin_key_tempfile.path is defined
+        - (_admin_user_entry.ssh_passphrase | default('')) | length > 0
+
+    - name: Debug temporary admin SSH key status
+      ansible.builtin.debug:
+        msg:
+          admin_key_tempfile_created: "{{ _admin_key_tempfile.path is defined }}"
+          admin_key_tempfile_path: "{{ _admin_key_tempfile.path | default('NONE') }}"
+
     - name: Fetch all target admin users credentials to build accounts structure
       ansible.builtin.uri:
         url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ item }}"
@@ -363,34 +394,6 @@
                 }) -%}
           {%- endfor -%}
           {{ dynamic_accs }}
-
-    - name: Create temporary SSH private key file for admin user if key provided
-      ansible.builtin.tempfile:
-        state: file
-        suffix: "_bao_admin_key"
-      register: _admin_key_tempfile
-      when:
-        - _admin_user_entry.ssh_private_key is defined
-        - _admin_user_entry.ssh_private_key | length > 0
-
-    - name: Write admin SSH private key to temporary file
-      ansible.builtin.copy:
-        content: "{{ _admin_user_entry.ssh_private_key }}\n"
-        dest: "{{ _admin_key_tempfile.path }}"
-        mode: '0600'
-      when:
-        - _admin_key_tempfile.path is defined
-        - _admin_user_entry.ssh_private_key is defined
-        - _admin_user_entry.ssh_private_key | length > 0
-
-    - name: Strip passphrase from temporary admin SSH key if passphrase defined
-      ansible.builtin.command: >-
-        ssh-keygen -p -f {{ _admin_key_tempfile.path }} -P {{ _admin_user_entry.ssh_passphrase | quote }} -N ""
-      no_log: true
-      when:
-        - _admin_key_tempfile.path is defined
-        - _admin_user_entry.ssh_passphrase is defined
-        - _admin_user_entry.ssh_passphrase | length > 0
 
     - name: Verify OpenBao target host metadata is resolved
       ansible.builtin.assert:
