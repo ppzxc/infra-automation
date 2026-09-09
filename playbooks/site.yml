@@ -32,16 +32,17 @@
     _vault_auth_method: "{{ vault_auth_method | default(VAULT_AUTH_METHOD | default(lookup('ansible.builtin.env', 'VAULT_AUTH_METHOD') | default('approle' if _has_approle else ('token' if (_vault_token | length > 0) else omit), true), true), true) }}"
     _vault_addr: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
 
+    # 기본 부트스트랩 사용자 (호스트별/전역 OpenBao 시크릿 또는 extra-vars 지정이 없으면 기본 'root' 적용)
+    bootstrap_user: "{{ bootstrap_user | default(lookup('ansible.builtin.env', 'BOOTSTRAP_USER') | default('root', true), true) }}"
+
   tasks:
     - name: Validate mandatory input variables
       ansible.builtin.assert:
         that:
-          - bootstrap_user is defined
-          - bootstrap_user | length > 0
           - (target_admin_users is defined and target_admin_users | length > 0) or (target_admin_user is defined and target_admin_user | length > 0)
         fail_msg: >-
-          [ERROR] 필수 변수 'bootstrap_user' 및 'target_admin_users'(또는 'target_admin_user')가 정의되지 않았습니다!
-          Semaphore UI Environment JSON 또는 '-e "bootstrap_user=root target_admin_users=ppzxc"' 형식으로 주입해야 합니다.
+          [ERROR] 필수 변수 'target_admin_users'(또는 'target_admin_user')가 정의되지 않았습니다!
+          Semaphore UI Environment JSON 또는 '-e "target_admin_users=ppzxc"' 형식으로 주입해야 합니다.
       run_once: true
 
     - name: Normalize target_admin_users list and primary admin user
@@ -514,7 +515,7 @@
 
     - name: Configure connection parameters for unprovisioned host (Bootstrap fallback mode)
       ansible.builtin.set_fact:
-        ansible_user: "{{ bootstrap_user }}"
+        ansible_user: "{{ _bootstrap_user_entry.username | default(bootstrap_user) }}"
         ansible_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
         ansible_ssh_private_key_file: "{{ _boot_key_tempfile.path | default(omit) }}"
         ansible_become_password: "{{ _bootstrap_user_entry.password | default(omit) }}"

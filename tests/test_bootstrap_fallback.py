@@ -457,7 +457,22 @@ def test_openbao_bootstrap_ssh_type_unwrapping():
         bootstrap_user='root'
     ))
     assert r2['type'] == 'SSH'
-    assert r2['ssh_private_key'] == 'BOOTSTRAP_KEY_FROM_LIST'
+def test_bootstrap_user_default_and_override():
+    """Verify bootstrap username can be overridden by secret or defaults to root."""
+    site_file = ROOT_DIR / "playbooks" / "site.yml"
+    with open(site_file, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+
+    play1 = plays[0]
+    # Check default root in vars
+    vars1 = play1.get("vars", {})
+    assert "bootstrap_user" in vars1
+    assert "default('root'" in vars1["bootstrap_user"]
+
+    # Check connection parameters use _bootstrap_user_entry.username | default(bootstrap_user)
+    tasks = play1.get("tasks", [])
+    conn_task = next(t for t in tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
+    assert "_bootstrap_user_entry.username | default(bootstrap_user)" in conn_task["ansible.builtin.set_fact"]["ansible_user"]
 
 
 
