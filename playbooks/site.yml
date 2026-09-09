@@ -323,7 +323,8 @@
         _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[bootstrap_user] if (bootstrap_user in _boot_raw and (_boot_raw[bootstrap_user] is mapping or (_boot_raw[bootstrap_user] is sequence and _boot_raw[bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'root_password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
         _boot_list: "{{ _boot_unwrapped if (_boot_unwrapped is sequence and _boot_unwrapped is not string and _boot_unwrapped is not mapping) else [_boot_unwrapped] }}"
         _boot_pwd_matches: "{{ _boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list }}"
-        _raw_boot_entry: "{{ (_boot_pwd_matches | first) if (_boot_pwd_matches | length > 0) else ((_boot_list | first) if (_boot_list | length > 0 and (_boot_list | first) is mapping) else {}) }}"
+        _boot_ssh_matches: "{{ _boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list }}"
+        _raw_boot_entry: "{{ (_boot_pwd_matches | first) if (_boot_pwd_matches | length > 0) else ((_boot_ssh_matches | first) if (_boot_ssh_matches | length > 0) else ((_boot_list | first) if (_boot_list | length > 0 and (_boot_list | first) is mapping) else {})) }}"
         _boot_resolved_pwd: "{{ _raw_boot_entry.password if (_raw_boot_entry.password is defined and _raw_boot_entry.password | length > 0) else (_raw_boot_entry.root_password if (_raw_boot_entry.root_password is defined and _raw_boot_entry.root_password | length > 0) else (_boot_raw.password if (_boot_raw is mapping and 'password' in _boot_raw) else (_boot_raw.root_password if (_boot_raw is mapping and 'root_password' in _boot_raw) else ''))) }}"
         _resolved_boot_entry: "{{ _raw_boot_entry | combine({'password': _boot_resolved_pwd}) if (_boot_resolved_pwd | length > 0) else _raw_boot_entry }}"
       ansible.builtin.set_fact:
@@ -338,7 +339,10 @@
           admin_has_private_key: "{{ (_admin_user_entry.ssh_private_key is defined) and (_admin_user_entry.ssh_private_key | length > 0) }}"
           admin_has_passphrase: "{{ (_admin_user_entry.ssh_passphrase is defined) and (_admin_user_entry.ssh_passphrase | length > 0) }}"
           admin_has_password: "{{ (_admin_user_entry.password is defined) and (_admin_user_entry.password | length > 0) }}"
+          bootstrap_has_entry: "{{ _bootstrap_user_entry is defined and _bootstrap_user_entry is mapping }}"
+          bootstrap_type: "{{ _bootstrap_user_entry.type | default('UNSET') }}"
           bootstrap_has_password: "{{ (_bootstrap_user_entry.password is defined) and (_bootstrap_user_entry.password | length > 0) }}"
+          bootstrap_has_private_key: "{{ (_bootstrap_user_entry.ssh_private_key is defined) and (_bootstrap_user_entry.ssh_private_key | length > 0) }}"
 
     - name: Create temporary SSH private key file for admin user if key provided
       ansible.builtin.tempfile:
@@ -368,11 +372,41 @@
         - _admin_key_tempfile.path is defined
         - (_admin_user_entry.ssh_passphrase | default('')) | length > 0
 
+    - name: Create temporary SSH private key file for bootstrap user if key provided
+      ansible.builtin.tempfile:
+        state: file
+        suffix: "_bao_boot_key"
+      register: _boot_key_tempfile
+      check_mode: false
+      when:
+        - (_bootstrap_user_entry.ssh_private_key | default('')) | length > 0
+
+    - name: Write bootstrap SSH private key to temporary file
+      ansible.builtin.copy:
+        content: "{{ _bootstrap_user_entry.ssh_private_key }}\n"
+        dest: "{{ _boot_key_tempfile.path }}"
+        mode: '0600'
+      check_mode: false
+      when:
+        - _boot_key_tempfile.path is defined
+        - (_bootstrap_user_entry.ssh_private_key | default('')) | length > 0
+
+    - name: Strip passphrase from temporary bootstrap SSH key if passphrase defined
+      ansible.builtin.command: >-
+        ssh-keygen -p -f {{ _boot_key_tempfile.path }} -P {{ _bootstrap_user_entry.ssh_passphrase | quote }} -N ""
+      check_mode: false
+      no_log: true
+      when:
+        - _boot_key_tempfile.path is defined
+        - (_bootstrap_user_entry.ssh_passphrase | default('')) | length > 0
+
     - name: Debug temporary admin SSH key status
       ansible.builtin.debug:
         msg:
           admin_key_tempfile_created: "{{ _admin_key_tempfile.path is defined }}"
           admin_key_tempfile_path: "{{ _admin_key_tempfile.path | default('NONE') }}"
+          boot_key_tempfile_created: "{{ _boot_key_tempfile.path is defined }}"
+          boot_key_tempfile_path: "{{ _boot_key_tempfile.path | default('NONE') }}"
 
     - name: Fetch all target admin users credentials to build accounts structure
       ansible.builtin.uri:
@@ -482,6 +516,7 @@
       ansible.builtin.set_fact:
         ansible_user: "{{ bootstrap_user }}"
         ansible_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
+        ansible_ssh_private_key_file: "{{ _boot_key_tempfile.path | default(omit) }}"
         ansible_become_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
       when: not (_is_already_provisioned | bool)
 
@@ -557,3 +592,12 @@
       when:
         - _admin_key_tempfile is defined
         - _admin_key_tempfile.path is defined
+
+    - name: Remove temporary bootstrap SSH private key file
+      ansible.builtin.file:
+        path: "{{ _boot_key_tempfile.path }}"
+        state: absent
+      check_mode: false
+      when:
+        - _boot_key_tempfile is defined
+        - _boot_key_tempfile.path is defined

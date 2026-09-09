@@ -120,6 +120,9 @@ def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
         "Create temporary SSH private key file for admin user if key provided",
         "Write admin SSH private key to temporary file",
         "Strip passphrase from temporary admin SSH key if passphrase defined",
+        "Create temporary SSH private key file for bootstrap user if key provided",
+        "Write bootstrap SSH private key to temporary file",
+        "Strip passphrase from temporary bootstrap SSH key if passphrase defined",
         "Probe SSH connection using primary admin user credentials",
     ]
     for task_name in key_tasks:
@@ -127,9 +130,13 @@ def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
         assert task is not None, f"Task '{task_name}' must exist in Play 1"
         assert task.get("check_mode") is False, f"Task '{task_name}' must have check_mode: false"
 
-    cleanup_task = next((t for t in play3.get("tasks", []) if t.get("name") == "Remove temporary admin SSH private key file"), None)
-    assert cleanup_task is not None, "Cleanup task must exist in Play 3"
-    assert cleanup_task.get("check_mode") is False, "Cleanup task must have check_mode: false"
+    cleanup_task_admin = next((t for t in play3.get("tasks", []) if t.get("name") == "Remove temporary admin SSH private key file"), None)
+    assert cleanup_task_admin is not None, "Admin cleanup task must exist in Play 3"
+    assert cleanup_task_admin.get("check_mode") is False, "Admin cleanup task must have check_mode: false"
+
+    cleanup_task_boot = next((t for t in play3.get("tasks", []) if t.get("name") == "Remove temporary bootstrap SSH private key file"), None)
+    assert cleanup_task_boot is not None, "Bootstrap cleanup task must exist in Play 3"
+    assert cleanup_task_boot.get("check_mode") is False, "Bootstrap cleanup task must have check_mode: false"
 
 
 
@@ -400,6 +407,7 @@ def test_openbao_host_specific_bootstrap_unwrapping():
     ))
     assert r1['password'] == 'host_specific_secret_pw'
 
+
     # 2. Host bootstrap with password field
     r2 = yaml.safe_load(tmpl.render(
         _effective_bootstrap_user_resp={'json': {'data': {'data': {
@@ -408,6 +416,49 @@ def test_openbao_host_specific_bootstrap_unwrapping():
         bootstrap_user='root'
     ))
     assert r2['password'] == 'host_specific_secret_pw_2'
+
+
+def test_openbao_bootstrap_ssh_type_unwrapping():
+    """Verify bootstrap secret supports type: SSH with ssh_private_key and ssh_passphrase."""
+    env = Environment()
+    env.filters['combine'] = lambda d1, d2: {**d1, **d2}
+    template_str = """
+    {%- set boot_raw = _effective_bootstrap_user_resp.json.data.data if (_effective_bootstrap_user_resp is defined and _effective_bootstrap_user_resp.json is defined and _effective_bootstrap_user_resp.json.data is defined and _effective_bootstrap_user_resp.json.data.data is defined) else {} -%}
+    {%- set boot_unwrapped = (boot_raw if boot_raw is not mapping else (boot_raw[bootstrap_user] if (bootstrap_user in boot_raw and (boot_raw[bootstrap_user] is mapping or (boot_raw[bootstrap_user] is sequence and boot_raw[bootstrap_user] is not string))) else (boot_raw if ('password' in boot_raw or 'root_password' in boot_raw or 'username' in boot_raw or 'type' in boot_raw or 'ssh_private_key' in boot_raw) else ((boot_raw.values() | first) if (boot_raw | length > 0 and ((boot_raw.values() | first) is mapping or ((boot_raw.values() | first) is sequence and (boot_raw.values() | first) is not string))) else boot_raw)))) -%}
+    {%- set boot_list = boot_unwrapped if (boot_unwrapped is sequence and boot_unwrapped is not string and boot_unwrapped is not mapping) else [boot_unwrapped] -%}
+    {%- set boot_pwd_matches = boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list -%}
+    {%- set boot_ssh_matches = boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list -%}
+    {%- set raw_boot_entry = (boot_pwd_matches | first) if (boot_pwd_matches | length > 0) else ((boot_ssh_matches | first) if (boot_ssh_matches | length > 0) else ((boot_list | first) if (boot_list | length > 0 and (boot_list | first) is mapping) else {})) -%}
+    {%- set boot_resolved_pwd = raw_boot_entry.password if (raw_boot_entry.password is defined and raw_boot_entry.password | length > 0) else (raw_boot_entry.root_password if (raw_boot_entry.root_password is defined and raw_boot_entry.root_password | length > 0) else (boot_raw.password if (boot_raw is mapping and 'password' in boot_raw) else (boot_raw.root_password if (boot_raw is mapping and 'root_password' in boot_raw) else ''))) -%}
+    {%- set resolved_boot_entry = raw_boot_entry | combine({'password': boot_resolved_pwd}) if (boot_resolved_pwd | length > 0) else raw_boot_entry -%}
+    {{ resolved_boot_entry | tojson }}
+    """
+    tmpl = env.from_string(template_str)
+
+    # 1. Single dict format with type SSH
+    r1 = yaml.safe_load(tmpl.render(
+        _effective_bootstrap_user_resp={'json': {'data': {'data': {
+            'username': 'root',
+            'type': 'SSH',
+            'ssh_private_key': 'BOOTSTRAP_SSH_KEY',
+            'ssh_passphrase': 'boot_passphrase'
+        }}}},
+        bootstrap_user='root'
+    ))
+    assert r1['type'] == 'SSH'
+    assert r1['ssh_private_key'] == 'BOOTSTRAP_SSH_KEY'
+    assert r1['ssh_passphrase'] == 'boot_passphrase'
+
+    # 2. List of entries where SSH is matched
+    r2 = yaml.safe_load(tmpl.render(
+        _effective_bootstrap_user_resp={'json': {'data': {'data': [
+            {'type': 'SSH', 'username': 'root', 'ssh_private_key': 'BOOTSTRAP_KEY_FROM_LIST'}
+        ]}}},
+        bootstrap_user='root'
+    ))
+    assert r2['type'] == 'SSH'
+    assert r2['ssh_private_key'] == 'BOOTSTRAP_KEY_FROM_LIST'
+
 
 
 
