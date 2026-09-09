@@ -206,3 +206,53 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
 ```
 
 이 설계를 통해 개발자는 로컬 머신에서 별도의 Vault 서버 없이도 작업을 진행할 수 있으며, Semaphore UI에서는 완전한 중앙 집중식 시크릿 격리가 이루어집니다.
+
+---
+
+## 5. 신규 플레이북 작성을 위한 재사용 연결 모듈 (`common/resolve_connection.yml`)
+
+모든 신규 플레이북에서 복잡한 OpenBao 자격증명 조회, SSH 키 복호화, 지능형 접속 진단(Probe), 부트스트랩 폴백 로직을 중복 구현할 필요 없이 `playbooks/common/` 모듈을 `ansible.builtin.import_playbook`으로 재사용할 수 있습니다.
+
+### (1) 제공되는 공통 모듈
+1. `playbooks/common/resolve_connection.yml`:
+   - OpenBao AppRole / Token 자동 인증 및 Health 체크
+   - 대상 호스트 IP / Port KV 메타데이터 자동 바인딩
+   - 관리자 SSH Private Key 복호화(Passphrase 해제) 및 임시 파일화
+   - 대상 호스트 SSH 사전 진단(Probe) 및 미프로비저닝 시 부트스트랩 자동 폴백
+   - 원격 Python 인터프리터 자동 탐색 (`ansible_python_interpreter: auto_silent`) 강제
+2. `playbooks/common/cleanup_connection.yml`:
+   - 컨트롤러에 임시 생성된 SSH 키 파일 안전 제거
+
+### (2) 신규 플레이북 작성 표준 템플릿
+
+```yaml
+---
+# 1. OpenBao 자격증명 및 서버 접속 연결 사전 해결
+- name: Resolve OpenBao Connection and Credentials
+  ansible.builtin.import_playbook: common/resolve_connection.yml
+
+# 2. 본 작업 플레이 (임의의 작업 수행)
+- name: Execute Custom Host Tasks
+  hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Run custom commands or maintenance tasks
+      ansible.builtin.command: uname -a
+      register: _result
+      changed_when: false
+
+    - name: Print host status
+      ansible.builtin.debug:
+        msg: "Connected successfully to {{ inventory_hostname }}: {{ _result.stdout }}"
+
+# 3. 컨트롤러 임시 키 정리
+- name: Cleanup Controller Temporary Credentials
+  ansible.builtin.import_playbook: common/cleanup_connection.yml
+```
+
+### (3) 특정 호스트만 지정하여 실행 (Semaphore Task Template)
+Semaphore UI 또는 CLI 실행 시 Extra Variable로 `target_hosts`를 지정하여 특정 단일 호스트 또는 그룹만 필터링하여 실행할 수 있습니다:
+```bash
+ansible-playbook -i inventory/hosts.yml playbooks/custom_task.yml -e "target_hosts=ns0332"
+```

@@ -1,0 +1,31 @@
+---
+# ==============================================================================
+# OpenBao Temporary Credentials Cleanup Reusable Playbook
+# ==============================================================================
+# 역할:
+#   컨트롤러 로컬에 생성된 관리자 및 부트스트랩 임시 SSH 개인키 파일을 안전하게 제거
+# ==============================================================================
+
+- name: Cleanup temporary controller credentials
+  hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
+  gather_facts: false
+  connection: local
+  become: false
+  tasks:
+    - name: Remove temporary admin SSH private key file
+      ansible.builtin.file:
+        path: "{{ _admin_key_tempfile.path }}"
+        state: absent
+      check_mode: false
+      when:
+        - _admin_key_tempfile is defined
+        - _admin_key_tempfile.path is defined
+
+    - name: Remove temporary bootstrap SSH private key file
+      ansible.builtin.file:
+        path: "{{ _boot_key_tempfile.path }}"
+        state: absent
+      check_mode: false
+      when:
+        - _boot_key_tempfile is defined
+        - _boot_key_tempfile.path is defined

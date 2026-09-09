@@ -1,16 +1,16 @@
 ---
 # ==============================================================================
-# Infra Automation 마스터 플레이북 (Site Master Playbook)
-# 온프레미스 IDC 인프라 통합 프로비저닝 (일반 서버 및 로드밸런서)
+# OpenBao Dynamic Connection Resolution Reusable Playbook
 # ==============================================================================
-# 실행 예시:
-#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml \
-#     -e "bootstrap_user=root target_admin_users=ppzxc"
+# 역할:
+#   1. Semaphore / OpenBao AppRole & Token 자격증명 자동 감지
+#   2. 대상 노드 IP/Port 메타데이터 조회 및 바인딩
+#   3. 관리자 SSH 개인키 조회, 복호화(Passphrase 해제) 및 임시 파일화
+#   4. 관리자 계정 SSH 접속 사전 진단(Probe)
+#   5. 접속 실패 시 부트스트랩(root/비밀번호/키) 모드로 지능형 폴백 전환
+#   6. 원격 Python 인터프리터 자동 탐색(auto_silent) 강제
 # ==============================================================================
 
-# ------------------------------------------------------------------------------
-# Play 1: Controller Pre-flight & OpenBao Secret Resolution
-# ------------------------------------------------------------------------------
 - name: Controller Pre-flight & Dynamic OpenBao Credential Resolution
   hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
   gather_facts: false
@@ -532,76 +532,3 @@
           "원격 접속 계정": "{{ ansible_user }} ({{ 'SSH 개인키 인증' if _is_already_provisioned else '부트스트랩 계정' }})"
           "Sudo 권한 확보": "{{ 'OpenBao 계정 패스워드 로드 완료' if ((ansible_become_password | default('')) | length > 0) else 'NOPASSWD 또는 기본 권한 사용' }}"
           "실행 계획": "{{ '관리자 계정 자격증명으로 원격 구성 및 패키지 갱신을 진행합니다.' if _is_already_provisioned else '초기 관리자 계정 구성 및 루트 권한 통제를 시작합니다.' }}"
-
-# ------------------------------------------------------------------------------
-# Play 2: Provision Baseline Target Hosts
-# ------------------------------------------------------------------------------
-- name: Provision Baseline On-Premise Target Hosts
-  hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
-  become: true
-  gather_facts: true
-
-  pre_tasks:
-    - name: Verify connectivity and OS facts
-      ansible.builtin.debug:
-        msg:
-          "진행 단계": "호스트 기본 OS 환경 및 연결 확인 완료"
-          "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }} / 커널 {{ ansible_kernel }})"
-          "실행 사용자": "{{ ansible_user }} (Sudo 권한 승격: 활성화)"
-
-  roles:
-    - role: common
-      tags: [common, base]
-
-    - role: docker_engine
-      tags: [docker, containers]
-
-    - role: security
-      tags: [security, ssh, firewall]
-
-    - role: access_security
-      tags: [access, openbao, boundary, security, ssh-ca]
-
-    - role: monitoring
-      tags: [monitoring, metrics, otel]
-
-  post_tasks:
-    - name: Target host provisioning completion summary
-      ansible.builtin.debug:
-        msg:
-          "결과 상태": "호스트 기본 인프라 및 보안 프로비저닝 성공 완료"
-          "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
-          "반영 완료 항목":
-            - "1. 시스템 기반: 타임존(KST), Chrony NTP 동기화, 시스템 최적화(sysctl, limits) 적용"
-            - "2. 계정 및 접근: 관리자 계정({{ _normalized_admin_users | join(', ') }}) 생성, NOPASSWD Sudo 구성, SSH 공개키 등록"
-            - "3. 시스템 보안: SSH 보안 강화(Root 로그인 제한), 방화벽(Firewalld/UFW), Fail2ban 보호 활성화"
-            - "4. 컨테이너 인프라: Docker Engine 최신 런타임 및 Docker Compose 플러그인 설치"
-            - "5. 접근 제어 및 감시: OpenBao SSH CA 신뢰 구성, Boundary 연동 메타데이터, Auditd 감사 규칙 등록"
-            - "6. 통합 관측성: OpenTelemetry Collector 배포 및 메트릭 수집 서비스 기동"
-
-# ------------------------------------------------------------------------------
-# Play 3: Cleanup temporary controller credentials
-# ------------------------------------------------------------------------------
-- name: Cleanup temporary controller credentials
-  hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
-  gather_facts: false
-  connection: local
-  become: false
-  tasks:
-    - name: Remove temporary admin SSH private key file
-      ansible.builtin.file:
-        path: "{{ _admin_key_tempfile.path }}"
-        state: absent
-      check_mode: false
-      when:
-        - _admin_key_tempfile is defined
-        - _admin_key_tempfile.path is defined
-
-    - name: Remove temporary bootstrap SSH private key file
-      ansible.builtin.file:
-        path: "{{ _boot_key_tempfile.path }}"
-        state: absent
-      check_mode: false
-      when:
-        - _boot_key_tempfile is defined
-        - _boot_key_tempfile.path is defined
