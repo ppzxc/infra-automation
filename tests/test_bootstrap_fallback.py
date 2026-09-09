@@ -332,4 +332,48 @@ def test_site_playbook_passphrase_stripping_task_exists():
     assert strip_task.get("no_log") is True
 
 
+def test_openbao_admin_password_fallback_with_ssh_type():
+    """Verify that when admin type is SSH, password field in the same secret or sibling is extracted for sudo."""
+    env = Environment()
+    env.filters['combine'] = lambda d1, d2: {**d1, **d2}
+    template_str = """
+    {%- set admin_raw = _effective_admin_user_resp.json.data.data if (_effective_admin_user_resp is defined and _effective_admin_user_resp.json is defined and _effective_admin_user_resp.json.data is defined and _effective_admin_user_resp.json.data.data is defined) else {} -%}
+    {%- set admin_unwrapped = (admin_raw if admin_raw is not mapping else (admin_raw[_primary_admin_user] if (_primary_admin_user in admin_raw and (admin_raw[_primary_admin_user] is mapping or (admin_raw[_primary_admin_user] is sequence and admin_raw[_primary_admin_user] is not string))) else (admin_raw if ('ssh_private_key' in admin_raw or 'username' in admin_raw or 'type' in admin_raw or 'password' in admin_raw) else ((admin_raw.values() | first) if (admin_raw | length > 0 and ((admin_raw.values() | first) is mapping or ((admin_raw.values() | first) is sequence and (admin_raw.values() | first) is not string))) else admin_raw)))) -%}
+    {%- set admin_list = admin_unwrapped if (admin_unwrapped is sequence and admin_unwrapped is not string and admin_unwrapped is not mapping) else [admin_unwrapped] -%}
+    {%- set admin_ssh_matches = admin_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list -%}
+    {%- set raw_admin_entry = (admin_ssh_matches | first) if (admin_ssh_matches | length > 0) else ((admin_list | first) if (admin_list | length > 0 and (admin_list | first) is mapping) else {}) -%}
+    {%- set admin_pwd_matches = admin_list | selectattr('password', 'defined') | list -%}
+    {%- set admin_fallback_pwd = (admin_pwd_matches | first).password if (admin_pwd_matches | length > 0 and (admin_pwd_matches | first).password is defined) else (admin_raw.password if (admin_raw is mapping and 'password' in admin_raw) else '') -%}
+    {%- set resolved_admin_entry = raw_admin_entry | combine({'password': admin_fallback_pwd}) if ((raw_admin_entry.password is not defined or raw_admin_entry.password | length == 0) and (admin_fallback_pwd | length > 0)) else raw_admin_entry -%}
+    {{ resolved_admin_entry | tojson }}
+    """
+    tmpl = env.from_string(template_str)
+
+    # 1. Password inside the same SSH JSON object
+    r1 = yaml.safe_load(tmpl.render(
+        _effective_admin_user_resp={'json': {'data': {'data': {
+            'username': 'ppzxc',
+            'type': 'SSH',
+            'ssh_private_key': 'KEY',
+            'password': 'sudo_pwd_1'
+        }}}},
+        _primary_admin_user='ppzxc'
+    ))
+    assert r1['type'] == 'SSH'
+    assert r1['ssh_private_key'] == 'KEY'
+    assert r1['password'] == 'sudo_pwd_1'
+
+    # 2. Password inside sibling item in list
+    r2 = yaml.safe_load(tmpl.render(
+        _effective_admin_user_resp={'json': {'data': {'data': [
+            {'type': 'SSH', 'username': 'ppzxc', 'ssh_private_key': 'KEY'},
+            {'type': 'PASSWORD', 'username': 'ppzxc', 'password': 'sudo_pwd_2'}
+        ]}}},
+        _primary_admin_user='ppzxc'
+    ))
+    assert r2['type'] == 'SSH'
+    assert r2['password'] == 'sudo_pwd_2'
+
+
+
 

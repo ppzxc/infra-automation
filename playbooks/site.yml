@@ -288,7 +288,10 @@
         _admin_unwrapped: "{{ (_admin_raw if _admin_raw is not mapping else (_admin_raw[_primary_admin_user] if (_primary_admin_user in _admin_raw and (_admin_raw[_primary_admin_user] is mapping or (_admin_raw[_primary_admin_user] is sequence and _admin_raw[_primary_admin_user] is not string))) else (_admin_raw if ('ssh_private_key' in _admin_raw or 'username' in _admin_raw or 'type' in _admin_raw or 'password' in _admin_raw) else ((_admin_raw.values() | first) if (_admin_raw | length > 0 and ((_admin_raw.values() | first) is mapping or ((_admin_raw.values() | first) is sequence and (_admin_raw.values() | first) is not string))) else _admin_raw)))) }}"
         _admin_list: "{{ _admin_unwrapped if (_admin_unwrapped is sequence and _admin_unwrapped is not string and _admin_unwrapped is not mapping) else [_admin_unwrapped] }}"
         _admin_ssh_matches: "{{ _admin_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list }}"
-        _resolved_admin_entry: "{{ (_admin_ssh_matches | first) if (_admin_ssh_matches | length > 0) else ((_admin_list | first) if (_admin_list | length > 0 and (_admin_list | first) is mapping) else {}) }}"
+        _raw_admin_entry: "{{ (_admin_ssh_matches | first) if (_admin_ssh_matches | length > 0) else ((_admin_list | first) if (_admin_list | length > 0 and (_admin_list | first) is mapping) else {}) }}"
+        _admin_pwd_matches: "{{ _admin_list | selectattr('password', 'defined') | list }}"
+        _admin_fallback_pwd: "{{ (_admin_pwd_matches | first).password if (_admin_pwd_matches | length > 0 and (_admin_pwd_matches | first).password is defined) else (_admin_raw.password if (_admin_raw is mapping and 'password' in _admin_raw) else '') }}"
+        _resolved_admin_entry: "{{ _raw_admin_entry | combine({'password': _admin_fallback_pwd}) if ((_raw_admin_entry.password is not defined or _raw_admin_entry.password | length == 0) and (_admin_fallback_pwd | length > 0)) else _raw_admin_entry }}"
 
         _boot_raw: "{{ _effective_bootstrap_user_resp.json.data.data if (_effective_bootstrap_user_resp is defined and _effective_bootstrap_user_resp.json is defined and _effective_bootstrap_user_resp.json.data is defined and _effective_bootstrap_user_resp.json.data.data is defined) else {} }}"
         _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[bootstrap_user] if (bootstrap_user in _boot_raw and (_boot_raw[bootstrap_user] is mapping or (_boot_raw[bootstrap_user] is sequence and _boot_raw[bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
@@ -306,6 +309,7 @@
           admin_type: "{{ _admin_user_entry.type | default('UNSET') }}"
           admin_has_private_key: "{{ (_admin_user_entry.ssh_private_key is defined) and (_admin_user_entry.ssh_private_key | length > 0) }}"
           admin_has_passphrase: "{{ (_admin_user_entry.ssh_passphrase is defined) and (_admin_user_entry.ssh_passphrase | length > 0) }}"
+          admin_has_password: "{{ (_admin_user_entry.password is defined) and (_admin_user_entry.password | length > 0) }}"
           bootstrap_has_password: "{{ (_bootstrap_user_entry.password is defined) and (_bootstrap_user_entry.password | length > 0) }}"
 
     - name: Create temporary SSH private key file for admin user if key provided
@@ -455,10 +459,12 @@
 
     - name: Connection decision summary
       ansible.builtin.debug:
-        msg: >-
-          Host {{ inventory_hostname }}:
-          Status={{ 'Already Provisioned' if _is_already_provisioned else 'Initial Provisioning Needed (Bootstrap Fallback)' }},
-          Connecting User={{ ansible_user }}
+        msg:
+          "대상 호스트": "{{ inventory_hostname }} (IP: {{ ansible_host | default('UNSET') }})"
+          "프로비저닝 상태": "{{ '기존 배포 완료됨 (Already Provisioned)' if _is_already_provisioned else '신규 호스트 (부트스트랩 모드 실행)' }}"
+          "원격 접속 계정": "{{ ansible_user }} ({{ 'SSH 개인키 인증' if _is_already_provisioned else '부트스트랩 계정' }})"
+          "Sudo 권한 확보": "{{ 'OpenBao 계정 패스워드 로드 완료' if ((ansible_become_password | default('')) | length > 0) else 'NOPASSWD 또는 기본 권한 사용' }}"
+          "실행 계획": "{{ '관리자 계정 자격증명으로 원격 구성 및 패키지 갱신을 진행합니다.' if _is_already_provisioned else '초기 관리자 계정 구성 및 루트 권한 통제를 시작합니다.' }}"
 
 # ------------------------------------------------------------------------------
 # Play 2: Provision Baseline Target Hosts
@@ -471,7 +477,10 @@
   pre_tasks:
     - name: Verify connectivity and OS facts
       ansible.builtin.debug:
-        msg: "Provisioning target host: {{ inventory_hostname }} (OS: {{ ansible_distribution }} {{ ansible_distribution_version }}) using user: {{ ansible_user }}"
+        msg:
+          "진행 단계": "호스트 기본 OS 환경 및 연결 확인 완료"
+          "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }} / 커널 {{ ansible_kernel }})"
+          "실행 사용자": "{{ ansible_user }} (Sudo 권한 승격: 활성화)"
 
   roles:
     - role: common
@@ -492,7 +501,16 @@
   post_tasks:
     - name: Target host provisioning completion summary
       ansible.builtin.debug:
-        msg: "Successfully provisioned target host {{ inventory_hostname }}. Root access restricted, Admin accounts ({{ _normalized_admin_users | join(', ') }}) configured."
+        msg:
+          "결과 상태": "호스트 기본 인프라 및 보안 프로비저닝 성공 완료"
+          "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
+          "반영 완료 항목":
+            - "1. 시스템 기반: 타임존(KST), Chrony NTP 동기화, 시스템 최적화(sysctl, limits) 적용"
+            - "2. 계정 및 접근: 관리자 계정({{ _normalized_admin_users | join(', ') }}) 생성, NOPASSWD Sudo 구성, SSH 공개키 등록"
+            - "3. 시스템 보안: SSH 보안 강화(Root 로그인 제한), 방화벽(Firewalld/UFW), Fail2ban 보호 활성화"
+            - "4. 컨테이너 인프라: Docker Engine 최신 런타임 및 Docker Compose 플러그인 설치"
+            - "5. 접근 제어 및 감시: OpenBao SSH CA 신뢰 구성, Boundary 연동 메타데이터, Auditd 감사 규칙 등록"
+            - "6. 통합 관측성: OpenTelemetry Collector 배포 및 메트릭 수집 서비스 기동"
 
 # ------------------------------------------------------------------------------
 # Play 3: Cleanup temporary controller credentials
