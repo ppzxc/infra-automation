@@ -44,11 +44,18 @@
 
 - name: "[DOC-004] Configure Docker CE official repository (RedHat/Rocky)"
   ansible.builtin.get_url:
-    url: "https://download.docker.com/linux/centos/docker-ce.repo"
+    url: "https://download.docker.com/linux/{{ 'rhel' if ansible_distribution == 'RedHat' else 'centos' }}/docker-ce.repo"
     dest: /etc/yum.repos.d/docker-ce.repo
     owner: root
     group: root
     mode: '0644'
+  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
+
+- name: "[DOC-004-REL] Ensure Docker CE repository releasever points to major version (RedHat/Rocky)"
+  ansible.builtin.replace:
+    path: /etc/yum.repos.d/docker-ce.repo
+    regexp: '\$releasever'
+    replace: "{{ ansible_distribution_major_version }}"
   when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
 
 - name: "[DOC-005] Install Docker repository prerequisites (Debian/Ubuntu)"
@@ -97,6 +104,7 @@
       - docker-compose-plugin
       - acl
     state: present
+    update_cache: true
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
 
 # 4. Deploy Hardened Docker daemon.json
