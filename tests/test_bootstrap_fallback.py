@@ -478,10 +478,16 @@ def test_bootstrap_user_default_and_override():
 
 
 def test_remote_python_interpreter_configuration():
-    """Verify that site.yml and ansible.cfg enforce remote python interpreter discovery (auto_silent) to prevent controller venv propagation."""
+    """Verify that site.yml, resolve_connection.yml, and ansible.cfg enforce remote python interpreter discovery (auto_silent) and isolate controller local venv."""
     site_file = ROOT_DIR / "playbooks" / "site.yml"
     with open(site_file, "r", encoding="utf-8") as f:
         plays = yaml.safe_load(f)
+
+    # Check Play 1 vars isolates local python interpreter
+    play1_vars = plays[0].get("vars", {})
+    assert play1_vars.get("ansible_python_interpreter") == "{{ ansible_playbook_python }}", (
+        "Play 1 vars must isolate local python interpreter using ansible_playbook_python"
+    )
 
     # Check Play 1 connection configuration sets ansible_python_interpreter
     play1_tasks = plays[0].get("tasks", [])
@@ -492,6 +498,19 @@ def test_remote_python_interpreter_configuration():
     assert "auto_silent" in admin_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
     assert "ansible_python_interpreter" in boot_conn_task["ansible.builtin.set_fact"]
     assert "auto_silent" in boot_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+
+    # Also verify resolve_connection.yml has the identical protection
+    resolve_file = ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml"
+    with open(resolve_file, "r", encoding="utf-8") as f:
+        r_plays = yaml.safe_load(f)
+    r_play1_vars = r_plays[0].get("vars", {})
+    assert r_play1_vars.get("ansible_python_interpreter") == "{{ ansible_playbook_python }}"
+
+    r_play1_tasks = r_plays[0].get("tasks", [])
+    r_admin_task = next(t for t in r_play1_tasks if t.get("name") == "Configure connection parameters for already provisioned host (Admin SSH Key mode)")
+    r_boot_task = next(t for t in r_play1_tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
+    assert "auto_silent" in r_admin_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "auto_silent" in r_boot_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
 
     # Check ansible.cfg defaults interpreter_python = auto_silent
     cfg_file = ROOT_DIR / "ansible.cfg"
