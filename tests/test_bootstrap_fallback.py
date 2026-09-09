@@ -22,15 +22,22 @@ def test_site_playbook_syntax_and_structure():
     assert "_vault_auth_method" in content
 
 def test_target_admin_users_normalization_logic():
-    """Verify normalization of target_admin_users from string or list"""
+    """Verify normalization of target_admin_users from string, list, or JSON list string"""
     env = Environment()
+    env.filters['from_yaml'] = lambda s: yaml.safe_load(s)
     template_str = """
-    {%- if target_admin_users is defined and target_admin_users is string -%}
-      {{ target_admin_users.split(',') | map('trim') | reject('equalto', '') | list | tojson }}
-    {%- elif target_admin_users is defined and target_admin_users is iterable and target_admin_users is not mapping -%}
-      {{ target_admin_users | list | tojson }}
-    {%- elif target_admin_user is defined and target_admin_user | length > 0 -%}
-      {{ [target_admin_user] | tojson }}
+    {%- set _admin_source = (target_admin_users | from_yaml) if (target_admin_users is defined and target_admin_users is string and (target_admin_users | trim).startswith('[')) else (target_admin_users if target_admin_users is defined else target_admin_user) -%}
+    {%- if _admin_source is iterable and _admin_source is not string and _admin_source is not mapping -%}
+      {{ _admin_source | list | tojson }}
+    {%- elif _admin_source is string -%}
+      {%- set cleaned = [] -%}
+      {%- for item in _admin_source.replace('[', '').replace(']', '').replace('\"', '').replace(\"'\", '').split(',') -%}
+        {%- set clean_item = item | trim -%}
+        {%- if clean_item | length > 0 -%}
+          {%- set _ = cleaned.append(clean_item) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ cleaned | tojson }}
     {%- else -%}
       {{ [] | tojson }}
     {%- endif -%}
@@ -48,6 +55,14 @@ def test_target_admin_users_normalization_logic():
     # Fallback to target_admin_user single string
     res3 = yaml.safe_load(tmpl.render(target_admin_user="ppzxc"))
     assert res3 == ["ppzxc"]
+
+    # JSON formatted list string (Semaphore Environment injection case)
+    res4 = yaml.safe_load(tmpl.render(target_admin_users='["ppzxc"]'))
+    assert res4 == ["ppzxc"]
+
+    # JSON formatted multi-user list string
+    res5 = yaml.safe_load(tmpl.render(target_admin_users='["ppzxc", "admin2"]'))
+    assert res5 == ["ppzxc", "admin2"]
 
 def test_admin_accounts_generation_from_openbao_keys():
     """Verify dynamic accounts structure generation for common role"""

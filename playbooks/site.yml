@@ -45,8 +45,24 @@
       run_once: true
 
     - name: Normalize target_admin_users list and primary admin user
+      vars:
+        _admin_source: "{{ (target_admin_users | from_yaml) if (target_admin_users is defined and target_admin_users is string and (target_admin_users | trim).startswith('[')) else (target_admin_users if target_admin_users is defined else target_admin_user) }}"
       ansible.builtin.set_fact:
-        _normalized_admin_users: "{{ (target_admin_users.split(',') | map('trim') | reject('equalto', '') | list) if (target_admin_users is defined and target_admin_users is string) else ((target_admin_users | list) if (target_admin_users is defined and target_admin_users is iterable and target_admin_users is not mapping) else ([target_admin_user] if (target_admin_user is defined and target_admin_user | length > 0) else [])) }}"
+        _normalized_admin_users: >-
+          {%- if _admin_source is iterable and _admin_source is not string and _admin_source is not mapping -%}
+            {{ _admin_source | list }}
+          {%- elif _admin_source is string -%}
+            {%- set cleaned = [] -%}
+            {%- for item in _admin_source.replace('[', '').replace(']', '').replace('\"', '').replace(\"'\", '').split(',') -%}
+              {%- set clean_item = item | trim -%}
+              {%- if clean_item | length > 0 -%}
+                {%- set _ = cleaned.append(clean_item) -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ cleaned }}
+          {%- else -%}
+            []
+          {%- endif -%}
 
     - name: Set primary target admin user for connection probing
       ansible.builtin.set_fact:
