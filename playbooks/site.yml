@@ -53,7 +53,9 @@
             {{ _admin_source | list }}
           {%- elif _admin_source is string -%}
             {%- set cleaned = [] -%}
-            {%- for item in _admin_source.replace('[', '').replace(']', '').replace('\"', '').replace(\"'\", '').split(',') -%}
+            {%- set q1 = "'" -%}
+            {%- set q2 = '"' -%}
+            {%- for item in _admin_source.replace('[', '').replace(']', '').replace(q1, '').replace(q2, '').split(',') -%}
               {%- set clean_item = item | trim -%}
               {%- if clean_item | length > 0 -%}
                 {%- set _ = cleaned.append(clean_item) -%}
