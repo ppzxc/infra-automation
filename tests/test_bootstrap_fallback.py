@@ -512,6 +512,21 @@ def test_remote_python_interpreter_configuration():
     assert "auto_silent" in r_admin_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
     assert "auto_silent" in r_boot_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
 
+    # Check Play 2 vars enforces auto_silent to prevent controller venv leak during setup/fact gathering
+    play2_vars = plays[1].get("vars", {})
+    assert play2_vars.get("ansible_python_interpreter") == "auto_silent", (
+        "Play 2 vars must explicitly set ansible_python_interpreter to auto_silent"
+    )
+
+    # Check example_task.yml also enforces auto_silent on Play 2
+    example_file = ROOT_DIR / "playbooks" / "example_task.yml"
+    with open(example_file, "r", encoding="utf-8") as f:
+        e_plays = yaml.safe_load(f)
+    e_play2_vars = e_plays[1].get("vars", {})
+    assert e_play2_vars.get("ansible_python_interpreter") == "auto_silent", (
+        "example_task.yml Play 2 vars must set ansible_python_interpreter to auto_silent"
+    )
+
     # Check ansible.cfg defaults interpreter_python = auto_silent
     cfg_file = ROOT_DIR / "ansible.cfg"
     cfg_content = cfg_file.read_text(encoding="utf-8")

@@ -562,6 +562,10 @@
   become: true
   gather_facts: true
 
+  vars:
+    # Docker 컨테이너(Semaphore) 내부의 Python 가상환경 경로 누출 방지
+    ansible_python_interpreter: auto_silent
+
   pre_tasks:
     - name: Verify connectivity and OS facts
       ansible.builtin.debug:
