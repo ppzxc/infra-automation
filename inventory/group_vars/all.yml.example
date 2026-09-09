@@ -93,6 +93,7 @@ _vault_global_secret: >-
 ansible_user: "{{ _local_ansible_user | default((_vault_node_secret | default({}, true)).ansible_user | default('ppzxc')) }}"
 ansible_password: "{{ _local_ansible_password | default((_vault_node_secret | default({}, true)).ansible_password | default(omit)) }}"
 ansible_become_password: "{{ _local_ansible_become_password | default((_vault_node_secret | default({}, true)).ansible_become_password | default(ansible_password | default(omit))) }}"
+ansible_python_interpreter: "{{ _local_ansible_python_interpreter | default((_vault_node_secret | default({}, true)).ansible_python_interpreter | default('auto_silent', true), true) }}"
 
 # OpenBao SSH CA 공개키
 openbao_ssh_ca_public_key: "{{ _local_openbao_ssh_ca_public_key | default((_vault_global_secret | default({}, true)).openbao_ssh_ca_public_key | default('')) }}"

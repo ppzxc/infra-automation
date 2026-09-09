@@ -49,7 +49,8 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   ```json
   {
     "ansible_host": "39.116.31.40",
-    "ansible_port": 22
+    "ansible_port": 22,
+    "ansible_python_interpreter": "auto_silent"
   }
   ```
   또는 `public_ip` (IDC 기본 호스트 메타데이터 포맷) / `ip` 필드 사용:

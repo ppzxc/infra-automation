@@ -512,6 +512,7 @@
         ansible_user: "{{ _primary_admin_user }}"
         ansible_ssh_private_key_file: "{{ _admin_key_tempfile.path | default(omit) }}"
         ansible_become_password: "{{ _admin_user_entry.password | default(omit) }}"
+        ansible_python_interpreter: "{{ _host_dict.ansible_python_interpreter | default(hostvars[inventory_hostname].ansible_python_interpreter | default('auto_silent', true), true) }}"
       when: _is_already_provisioned | bool
 
     - name: Configure connection parameters for unprovisioned host (Bootstrap fallback mode)
@@ -520,6 +521,7 @@
         ansible_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
         ansible_ssh_private_key_file: "{{ _boot_key_tempfile.path | default(omit) }}"
         ansible_become_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
+        ansible_python_interpreter: "{{ _host_dict.ansible_python_interpreter | default(hostvars[inventory_hostname].ansible_python_interpreter | default('auto_silent', true), true) }}"
       when: not (_is_already_provisioned | bool)
 
     - name: Connection decision summary

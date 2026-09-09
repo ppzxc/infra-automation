@@ -477,6 +477,28 @@ def test_bootstrap_user_default_and_override():
     assert "_bootstrap_user_entry.username | default(bootstrap_user)" in conn_task["ansible.builtin.set_fact"]["ansible_user"]
 
 
+def test_remote_python_interpreter_configuration():
+    """Verify that site.yml and ansible.cfg enforce remote python interpreter discovery (auto_silent) to prevent controller venv propagation."""
+    site_file = ROOT_DIR / "playbooks" / "site.yml"
+    with open(site_file, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+
+    # Check Play 1 connection configuration sets ansible_python_interpreter
+    play1_tasks = plays[0].get("tasks", [])
+    admin_conn_task = next(t for t in play1_tasks if t.get("name") == "Configure connection parameters for already provisioned host (Admin SSH Key mode)")
+    boot_conn_task = next(t for t in play1_tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
+
+    assert "ansible_python_interpreter" in admin_conn_task["ansible.builtin.set_fact"]
+    assert "auto_silent" in admin_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "ansible_python_interpreter" in boot_conn_task["ansible.builtin.set_fact"]
+    assert "auto_silent" in boot_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+
+    # Check ansible.cfg defaults interpreter_python = auto_silent
+    cfg_file = ROOT_DIR / "ansible.cfg"
+    cfg_content = cfg_file.read_text(encoding="utf-8")
+    assert "interpreter_python = auto_silent" in cfg_content
+
+
 
 
 
