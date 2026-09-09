@@ -115,6 +115,23 @@ def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
     assert play3.get("connection") == "local"
     assert play3.get("become") is False, "Play 3 must have become: false so controller does not run sudo on local cleanup"
 
+    # Verify controller credential tasks explicitly set check_mode: false so they run in dry-run/check mode
+    key_tasks = [
+        "Create temporary SSH private key file for admin user if key provided",
+        "Write admin SSH private key to temporary file",
+        "Strip passphrase from temporary admin SSH key if passphrase defined",
+        "Probe SSH connection using primary admin user credentials",
+    ]
+    for task_name in key_tasks:
+        task = next((t for t in play1.get("tasks", []) if t.get("name") == task_name), None)
+        assert task is not None, f"Task '{task_name}' must exist in Play 1"
+        assert task.get("check_mode") is False, f"Task '{task_name}' must have check_mode: false"
+
+    cleanup_task = next((t for t in play3.get("tasks", []) if t.get("name") == "Remove temporary admin SSH private key file"), None)
+    assert cleanup_task is not None, "Cleanup task must exist in Play 3"
+    assert cleanup_task.get("check_mode") is False, "Cleanup task must have check_mode: false"
+
+
 
 def test_site_playbook_host_vars_and_probe_condition():
     """Verify site.yml applies host variable fallback and safe probe result handling."""

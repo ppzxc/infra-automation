@@ -313,6 +313,7 @@
         state: file
         suffix: "_bao_admin_key"
       register: _admin_key_tempfile
+      check_mode: false
       when:
         - (_admin_user_entry.ssh_private_key | default('')) | length > 0
 
@@ -321,6 +322,7 @@
         content: "{{ _admin_user_entry.ssh_private_key }}\n"
         dest: "{{ _admin_key_tempfile.path }}"
         mode: '0600'
+      check_mode: false
       when:
         - _admin_key_tempfile.path is defined
         - (_admin_user_entry.ssh_private_key | default('')) | length > 0
@@ -328,6 +330,7 @@
     - name: Strip passphrase from temporary admin SSH key if passphrase defined
       ansible.builtin.command: >-
         ssh-keygen -p -f {{ _admin_key_tempfile.path }} -P {{ _admin_user_entry.ssh_passphrase | quote }} -N ""
+      check_mode: false
       no_log: true
       when:
         - _admin_key_tempfile.path is defined
@@ -426,11 +429,11 @@
       register: _admin_ssh_probe
       changed_when: false
       failed_when: false
+      check_mode: false
       when:
         - _admin_key_tempfile is defined
         - _admin_key_tempfile.path is defined
-        - _admin_user_entry.ssh_private_key is defined
-        - _admin_user_entry.ssh_private_key | length > 0
+        - (_admin_user_entry.ssh_private_key | default('')) | length > 0
 
     - name: Set connection mode facts based on admin SSH probe result
       ansible.builtin.set_fact:
@@ -504,6 +507,7 @@
       ansible.builtin.file:
         path: "{{ _admin_key_tempfile.path }}"
         state: absent
+      check_mode: false
       when:
         - _admin_key_tempfile is defined
         - _admin_key_tempfile.path is defined
