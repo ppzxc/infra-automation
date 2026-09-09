@@ -51,6 +51,7 @@ def test_ansible_playbooks_structure():
     assert (playbooks_dir / "maintenance.yml").exists(), "maintenance.yml is missing"
     assert (playbooks_dir / "common" / "resolve_connection.yml").exists(), "common/resolve_connection.yml is missing"
     assert (playbooks_dir / "common" / "cleanup_connection.yml").exists(), "common/cleanup_connection.yml is missing"
+    assert (playbooks_dir / "example_task.yml").exists(), "example_task.yml is missing"
 
 
 

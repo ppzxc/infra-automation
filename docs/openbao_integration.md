@@ -223,7 +223,9 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
 2. `playbooks/common/cleanup_connection.yml`:
    - 컨트롤러에 임시 생성된 SSH 키 파일 안전 제거
 
-### (2) 신규 플레이북 작성 표준 템플릿
+### (2) 신규 플레이북 작성 표준 템플릿 (참고 예제: `playbooks/example_task.yml`)
+
+저장소 내 [playbooks/example_task.yml](file:///home/ppzxc/projects/infra-automation/playbooks/example_task.yml) 파일이 바로 복사/참고하여 사용할 수 있는 공식 템플릿입니다.
 
 ```yaml
 ---
@@ -254,5 +256,6 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
 ### (3) 특정 호스트만 지정하여 실행 (Semaphore Task Template)
 Semaphore UI 또는 CLI 실행 시 Extra Variable로 `target_hosts`를 지정하여 특정 단일 호스트 또는 그룹만 필터링하여 실행할 수 있습니다:
 ```bash
-ansible-playbook -i inventory/hosts.yml playbooks/custom_task.yml -e "target_hosts=ns0332"
+ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0332"
 ```
+
