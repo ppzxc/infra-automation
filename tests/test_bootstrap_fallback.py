@@ -197,3 +197,107 @@ def test_openbao_host_kv_unwrapping_logic():
     assert r6['ansible_host'] == 'ns0332'
 
 
+def test_openbao_user_secret_unwrapping_with_type():
+    """Verify that OpenBao user secret extraction handles type: SSH and type: PASSWORD correctly."""
+    env = Environment()
+    template_str = """
+    {%- set admin_raw = _effective_admin_user_resp.json.data.data if (_effective_admin_user_resp is defined and _effective_admin_user_resp.json is defined and _effective_admin_user_resp.json.data is defined and _effective_admin_user_resp.json.data.data is defined) else {} -%}
+    {%- if admin_raw is mapping and (_primary_admin_user in admin_raw) and (admin_raw[_primary_admin_user] is mapping or (admin_raw[_primary_admin_user] is sequence and admin_raw[_primary_admin_user] is not string)) -%}
+      {%- set admin_data = admin_raw[_primary_admin_user] -%}
+    {%- elif admin_raw is mapping and ('ssh_private_key' in admin_raw or 'username' in admin_raw or 'type' in admin_raw or 'password' in admin_raw) -%}
+      {%- set admin_data = admin_raw -%}
+    {%- elif admin_raw is mapping and (admin_raw.values() | length > 0) and ((admin_raw.values() | first) is mapping or ((admin_raw.values() | first) is sequence and (admin_raw.values() | first) is not string)) -%}
+      {%- set admin_data = admin_raw.values() | first -%}
+    {%- else -%}
+      {%- set admin_data = admin_raw -%}
+    {%- endif -%}
+    {%- if admin_data is sequence and admin_data is not string and admin_data is not mapping and admin_data | length > 0 -%}
+      {%- set ssh_matches = admin_data | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list -%}
+      {%- set admin_entry = (ssh_matches | first) if ssh_matches | length > 0 else (admin_data | first) -%}
+    {%- else -%}
+      {%- set admin_entry = admin_data if admin_data is mapping else {} -%}
+    {%- endif -%}
+
+    {%- set boot_raw = _effective_bootstrap_user_resp.json.data.data if (_effective_bootstrap_user_resp is defined and _effective_bootstrap_user_resp.json is defined and _effective_bootstrap_user_resp.json.data is defined and _effective_bootstrap_user_resp.json.data.data is defined) else {} -%}
+    {%- if boot_raw is mapping and (bootstrap_user in boot_raw) and (boot_raw[bootstrap_user] is mapping or (boot_raw[bootstrap_user] is sequence and boot_raw[bootstrap_user] is not string)) -%}
+      {%- set boot_data = boot_raw[bootstrap_user] -%}
+    {%- elif boot_raw is mapping and ('password' in boot_raw or 'username' in boot_raw or 'type' in boot_raw or 'ssh_private_key' in boot_raw) -%}
+      {%- set boot_data = boot_raw -%}
+    {%- elif boot_raw is mapping and (boot_raw.values() | length > 0) and ((boot_raw.values() | first) is mapping or ((boot_raw.values() | first) is sequence and (boot_raw.values() | first) is not string)) -%}
+      {%- set boot_data = boot_raw.values() | first -%}
+    {%- else -%}
+      {%- set boot_data = boot_raw -%}
+    {%- endif -%}
+    {%- if boot_data is sequence and boot_data is not string and boot_data is not mapping and boot_data | length > 0 -%}
+      {%- set pwd_matches = boot_data | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list -%}
+      {%- set boot_entry = (pwd_matches | first) if pwd_matches | length > 0 else (boot_data | first) -%}
+    {%- else -%}
+      {%- set boot_entry = boot_data if boot_data is mapping else {} -%}
+    {%- endif -%}
+
+    {{ {
+      'admin': admin_entry,
+      'bootstrap': boot_entry
+    } | tojson }}
+    """
+    tmpl = env.from_string(template_str)
+
+    # 1. Single dict format with type
+    res1 = yaml.safe_load(tmpl.render(
+        _effective_admin_user_resp={'json': {'data': {'data': {
+            'username': 'ppzxc',
+            'type': 'SSH',
+            'ssh_public_key': 'ssh-ed25519 AAAAC3...',
+            'ssh_private_key': 'KEY_CONTENT',
+            'ssh_passphrase': 'secret_passphrase'
+        }}}},
+        _effective_bootstrap_user_resp={'json': {'data': {'data': {
+            'username': 'root',
+            'type': 'PASSWORD',
+            'password': 'root_password'
+        }}}},
+        _primary_admin_user='ppzxc',
+        bootstrap_user='root'
+    ))
+    assert res1['admin']['type'] == 'SSH'
+    assert res1['admin']['ssh_private_key'] == 'KEY_CONTENT'
+    assert res1['admin']['ssh_passphrase'] == 'secret_passphrase'
+    assert res1['bootstrap']['type'] == 'PASSWORD'
+    assert res1['bootstrap']['password'] == 'root_password'
+
+    # 2. List of entries with different types
+    res2 = yaml.safe_load(tmpl.render(
+        _effective_admin_user_resp={'json': {'data': {'data': [
+            {'type': 'OTHER', 'note': 'irrelevant'},
+            {'type': 'SSH', 'username': 'ppzxc', 'ssh_private_key': 'KEY_LIST_CONTENT'}
+        ]}}},
+        _effective_bootstrap_user_resp={'json': {'data': {'data': [
+            {'type': 'KEY', 'key': 'dummy'},
+            {'type': 'PASSWORD', 'username': 'root', 'password': 'root_from_list'}
+        ]}}},
+        _primary_admin_user='ppzxc',
+        bootstrap_user='root'
+    ))
+    assert res2['admin']['type'] == 'SSH'
+    assert res2['admin']['ssh_private_key'] == 'KEY_LIST_CONTENT'
+    assert res2['bootstrap']['type'] == 'PASSWORD'
+    assert res2['bootstrap']['password'] == 'root_from_list'
+
+
+def test_site_playbook_passphrase_stripping_task_exists():
+    """Verify site.yml contains passphrase stripping command for temporary private key."""
+    site_file = ROOT_DIR / "playbooks" / "site.yml"
+    with open(site_file, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+
+    play1_tasks = plays[0]["tasks"]
+    task_names = [t["name"] for t in play1_tasks]
+
+    assert "Strip passphrase from temporary admin SSH key if passphrase defined" in task_names
+    strip_task = next(t for t in play1_tasks if t["name"] == "Strip passphrase from temporary admin SSH key if passphrase defined")
+    assert "ssh-keygen -p -f" in strip_task["ansible.builtin.command"]
+    assert "ssh_passphrase" in strip_task["ansible.builtin.command"]
+    assert strip_task.get("no_log") is True
+
+
+

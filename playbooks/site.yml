@@ -256,22 +256,50 @@
         _admin_user_data: >-
           {%- if _effective_admin_user_resp.json.data.data is defined -%}
             {%- set raw = _effective_admin_user_resp.json.data.data -%}
-            {{ (raw if raw is not mapping else (raw.values() | first)) | default({}, true) }}
+            {%- if raw is mapping and (_primary_admin_user in raw) and (raw[_primary_admin_user] is mapping or (raw[_primary_admin_user] is sequence and raw[_primary_admin_user] is not string)) -%}
+              {{ raw[_primary_admin_user] }}
+            {%- elif raw is mapping and ('ssh_private_key' in raw or 'username' in raw or 'type' in raw or 'password' in raw) -%}
+              {{ raw }}
+            {%- elif raw is mapping and (raw.values() | length > 0) and ((raw.values() | first) is mapping or ((raw.values() | first) is sequence and (raw.values() | first) is not string)) -%}
+              {{ raw.values() | first }}
+            {%- else -%}
+              {{ raw }}
+            {%- endif -%}
           {%- else -%}
             {}
           {%- endif -%}
         _bootstrap_user_data: >-
           {%- if _effective_bootstrap_user_resp.json.data.data is defined -%}
             {%- set raw = _effective_bootstrap_user_resp.json.data.data -%}
-            {{ (raw if raw is not mapping else (raw.values() | first)) | default({}, true) }}
+            {%- if raw is mapping and (bootstrap_user in raw) and (raw[bootstrap_user] is mapping or (raw[bootstrap_user] is sequence and raw[bootstrap_user] is not string)) -%}
+              {{ raw[bootstrap_user] }}
+            {%- elif raw is mapping and ('password' in raw or 'username' in raw or 'type' in raw or 'ssh_private_key' in raw) -%}
+              {{ raw }}
+            {%- elif raw is mapping and (raw.values() | length > 0) and ((raw.values() | first) is mapping or ((raw.values() | first) is sequence and (raw.values() | first) is not string)) -%}
+              {{ raw.values() | first }}
+            {%- else -%}
+              {{ raw }}
+            {%- endif -%}
           {%- else -%}
             {}
           {%- endif -%}
 
     - name: Extract secret item from list if OpenBao secret is a list
       ansible.builtin.set_fact:
-        _admin_user_entry: "{{ (_admin_user_data | first) if (_admin_user_data is sequence and _admin_user_data is not string and _admin_user_data is not mapping and _admin_user_data | length > 0) else (_admin_user_data if _admin_user_data is mapping else {}) }}"
-        _bootstrap_user_entry: "{{ (_bootstrap_user_data | first) if (_bootstrap_user_data is sequence and _bootstrap_user_data is not string and _bootstrap_user_data is not mapping and _bootstrap_user_data | length > 0) else (_bootstrap_user_data if _bootstrap_user_data is mapping else {}) }}"
+        _admin_user_entry: >-
+          {%- if _admin_user_data is sequence and _admin_user_data is not string and _admin_user_data is not mapping and _admin_user_data | length > 0 -%}
+            {%- set ssh_matches = _admin_user_data | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list -%}
+            {{ (ssh_matches | first) if ssh_matches | length > 0 else (_admin_user_data | first) }}
+          {%- else -%}
+            {{ _admin_user_data if _admin_user_data is mapping else {} }}
+          {%- endif -%}
+        _bootstrap_user_entry: >-
+          {%- if _bootstrap_user_data is sequence and _bootstrap_user_data is not string and _bootstrap_user_data is not mapping and _bootstrap_user_data | length > 0 -%}
+            {%- set pwd_matches = _bootstrap_user_data | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list -%}
+            {{ (pwd_matches | first) if pwd_matches | length > 0 else (_bootstrap_user_data | first) }}
+          {%- else -%}
+            {{ _bootstrap_user_data if _bootstrap_user_data is mapping else {} }}
+          {%- endif -%}
 
     - name: Fetch all target admin users credentials to build accounts structure
       ansible.builtin.uri:
@@ -299,14 +327,23 @@
         accounts: >-
           {%- set dynamic_accs = [] -%}
           {%- for u in _normalized_admin_users -%}
-            {%- set user_key = '' -%}
+            {%- set ns = namespace(user_key='') -%}
             {%- if _openbao_all_admins_resp.results is defined -%}
               {%- for res in _openbao_all_admins_resp.results -%}
                 {%- if res.item == u and res.json is defined and res.json.data is defined and res.json.data.data is defined -%}
                   {%- set raw_data = res.json.data.data -%}
-                  {%- set entry_list = (raw_data if raw_data is not mapping else (raw_data.values() | first)) -%}
-                  {%- set entry = (entry_list | first) if (entry_list is sequence and entry_list is not string and entry_list is not mapping and entry_list | length > 0) else (entry_list if entry_list is mapping else {}) -%}
-                  {%- set user_key = entry.get('ssh_public_key', '') -%}
+                  {%- if raw_data is mapping and (u in raw_data) and (raw_data[u] is mapping or (raw_data[u] is sequence and raw_data[u] is not string)) -%}
+                    {%- set entry_list = raw_data[u] -%}
+                  {%- elif raw_data is mapping and ('ssh_public_key' in raw_data or 'username' in raw_data or 'type' in raw_data) -%}
+                    {%- set entry_list = raw_data -%}
+                  {%- elif raw_data is mapping and (raw_data.values() | length > 0) and ((raw_data.values() | first) is mapping or ((raw_data.values() | first) is sequence and (raw_data.values() | first) is not string)) -%}
+                    {%- set entry_list = raw_data.values() | first -%}
+                  {%- else -%}
+                    {%- set entry_list = raw_data -%}
+                  {%- endif -%}
+                  {%- set matched_entries = (entry_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list) if (entry_list is sequence and entry_list is not string and entry_list is not mapping) else [] -%}
+                  {%- set entry = (matched_entries | first) if matched_entries | length > 0 else ((entry_list | first) if (entry_list is sequence and entry_list is not string and entry_list is not mapping and entry_list | length > 0) else (entry_list if entry_list is mapping else {})) -%}
+                  {%- set ns.user_key = entry.get('ssh_public_key', '') -%}
                 {%- endif -%}
               {%- endfor -%}
             {%- endif -%}
@@ -315,7 +352,7 @@
                   'tier': 'admin',
                   'comment': 'Administrator provisioned via OpenBao',
                   'shell': '/bin/bash',
-                  'keys': [user_key] if user_key | length > 0 else []
+                  'keys': [ns.user_key] if ns.user_key | length > 0 else []
                 }) -%}
           {%- endfor -%}
           {{ dynamic_accs }}
@@ -338,6 +375,15 @@
         - _admin_key_tempfile.path is defined
         - _admin_user_entry.ssh_private_key is defined
         - _admin_user_entry.ssh_private_key | length > 0
+
+    - name: Strip passphrase from temporary admin SSH key if passphrase defined
+      ansible.builtin.command: >-
+        ssh-keygen -p -f {{ _admin_key_tempfile.path }} -P {{ _admin_user_entry.ssh_passphrase | quote }} -N ""
+      no_log: true
+      when:
+        - _admin_key_tempfile.path is defined
+        - _admin_user_entry.ssh_passphrase is defined
+        - _admin_user_entry.ssh_passphrase | length > 0
 
     - name: Verify OpenBao target host metadata is resolved
       ansible.builtin.assert:
