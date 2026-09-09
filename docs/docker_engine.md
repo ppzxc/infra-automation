@@ -27,7 +27,7 @@
 | `DOC-001` | `Remove conflicting packages and Podman stack (RedHat/Rocky)` | `ansible.builtin.package` | RedHat/Rocky | `state: absent` |
 | `DOC-002` | `Remove conflicting packages and old Docker stack (Debian/Ubuntu)` | `ansible.builtin.apt` | Debian/Ubuntu | `state: absent` |
 | `DOC-003` | `Install Docker repository prerequisites (RedHat/Rocky)` | `ansible.builtin.package` | RedHat/Rocky | 패키지 존재 시 `ok` |
-| `DOC-004` | `Configure Docker CE official repository (RedHat/Rocky)` | `ansible.builtin.get_url` | RedHat/Rocky | Checksum 비교 |
+| `DOC-004` | `Configure Docker CE official repository (RedHat/Rocky)` | `ansible.builtin.yum_repository` | RedHat/Rocky | 저장소 정의 일치 시 `ok` |
 | `DOC-005` | `Install Docker repository prerequisites (Debian/Ubuntu)` | `ansible.builtin.apt` | Debian/Ubuntu | 패키지 존재 시 `ok` |
 | `DOC-006` | `Create keyrings directory for apt (Debian/Ubuntu)` | `ansible.builtin.file` | Debian/Ubuntu | 디렉토리 존재 시 `ok` |
 | `DOC-007` | `Download Docker GPG key (Debian/Ubuntu)` | `ansible.builtin.get_url` | Debian/Ubuntu | Checksum 비교 |

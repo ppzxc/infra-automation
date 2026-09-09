@@ -43,19 +43,15 @@
   when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
 
 - name: "[DOC-004] Configure Docker CE official repository (RedHat/Rocky)"
-  ansible.builtin.get_url:
-    url: "https://download.docker.com/linux/{{ 'rhel' if ansible_distribution == 'RedHat' else 'centos' }}/docker-ce.repo"
-    dest: /etc/yum.repos.d/docker-ce.repo
-    owner: root
-    group: root
+  ansible.builtin.yum_repository:
+    name: docker-ce-stable
+    description: "Docker CE Stable - $basearch"
+    baseurl: "https://download.docker.com/linux/{{ 'rhel' if ansible_distribution == 'RedHat' else 'centos' }}/{{ ansible_distribution_major_version }}/$basearch/stable"
+    enabled: true
+    gpgcheck: true
+    gpgkey: "https://download.docker.com/linux/{{ 'rhel' if ansible_distribution == 'RedHat' else 'centos' }}/gpg"
+    file: docker-ce
     mode: '0644'
-  when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
-
-- name: "[DOC-004-REL] Ensure Docker CE repository releasever points to major version (RedHat/Rocky)"
-  ansible.builtin.replace:
-    path: /etc/yum.repos.d/docker-ce.repo
-    regexp: '\$releasever'
-    replace: "{{ ansible_distribution_major_version }}"
   when: ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
 
 - name: "[DOC-005] Install Docker repository prerequisites (Debian/Ubuntu)"
