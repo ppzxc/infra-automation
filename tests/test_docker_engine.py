@@ -46,3 +46,34 @@ def test_docker_ce_install_task_updates_cache():
     
     pkg_args = doc_009.get("ansible.builtin.package", {})
     assert pkg_args.get("update_cache") is True, "[DOC-009] must specify update_cache: true"
+
+def test_docker_ce_repo_imports_gpg_key_and_refreshes_cache():
+    """
+    Verify that RedHat/Rocky targets explicitly import the Docker GPG key via rpm_key
+    and force a DNF/YUM cache refresh before package installation.
+    """
+    tasks_file = ROOT_DIR / "roles" / "docker_engine" / "tasks" / "main.yml"
+    with open(tasks_file, "r", encoding="utf-8") as f:
+        tasks = yaml.safe_load(f)
+
+    # Check DOC-003-GPG
+    doc_gpg = next(
+        (t for t in tasks if isinstance(t, dict) and "[DOC-003-GPG]" in t.get("name", "")),
+        None
+    )
+    assert doc_gpg is not None, "[DOC-003-GPG] task missing from docker_engine tasks"
+    rpm_key = doc_gpg.get("ansible.builtin.rpm_key", {})
+    assert "download.docker.com" in rpm_key.get("key", ""), "DOC-003-GPG must specify Docker GPG key"
+    assert rpm_key.get("state") == "present"
+
+    # Check DOC-004-CACHE
+    doc_cache = next(
+        (t for t in tasks if isinstance(t, dict) and "[DOC-004-CACHE]" in t.get("name", "")),
+        None
+    )
+    assert doc_cache is not None, "[DOC-004-CACHE] task missing from docker_engine tasks"
+    cmd_args = doc_cache.get("ansible.builtin.command", {})
+    cmd_str = cmd_args.get("cmd", "")
+    assert "makecache" in cmd_str, "DOC-004-CACHE must execute makecache"
+    assert doc_cache.get("changed_when") is False, "DOC-004-CACHE must set changed_when: false"
+
