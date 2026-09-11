@@ -72,8 +72,42 @@ def test_docker_ce_repo_imports_gpg_key_and_refreshes_cache():
         None
     )
     assert doc_cache is not None, "[DOC-004-CACHE] task missing from docker_engine tasks"
-    cmd_args = doc_cache.get("ansible.builtin.command", {})
-    cmd_str = cmd_args.get("cmd", "")
+    cmd_val = doc_cache.get("ansible.builtin.command")
+    cmd_str = cmd_val if isinstance(cmd_val, str) else cmd_val.get("cmd", "")
     assert "makecache" in cmd_str, "DOC-004-CACHE must execute makecache"
     assert doc_cache.get("changed_when") is False, "DOC-004-CACHE must set changed_when: false"
+
+def test_docker_ce_repo_architecture_and_cache_refresh_invariants():
+    """
+    Ensure [DOC-004] explicitly uses ansible_architecture in baseurl to prevent $basearch expansion issues,
+    and [DOC-004-CACHE] sets check_mode: false and structured list-based conditionals to prevent unexpected task skips.
+    """
+    tasks_file = ROOT_DIR / "roles" / "docker_engine" / "tasks" / "main.yml"
+    with open(tasks_file, "r", encoding="utf-8") as f:
+        tasks = yaml.safe_load(f)
+
+    doc_004 = next(
+        (t for t in tasks if isinstance(t, dict) and "[DOC-004]" in t.get("name", "")),
+        None
+    )
+    assert doc_004 is not None, "[DOC-004] task missing from docker_engine tasks"
+    repo_args = doc_004.get("ansible.builtin.yum_repository", {})
+    baseurl = repo_args.get("baseurl", "")
+    assert "ansible_architecture" in baseurl, (
+        f"DOC-004 baseurl must explicitly use ansible_architecture instead of $basearch: {baseurl}"
+    )
+
+    doc_cache = next(
+        (t for t in tasks if isinstance(t, dict) and "[DOC-004-CACHE]" in t.get("name", "")),
+        None
+    )
+    assert doc_cache is not None, "[DOC-004-CACHE] task missing from docker_engine tasks"
+    assert doc_cache.get("check_mode") is False, (
+        "DOC-004-CACHE must explicitly set check_mode: false to ensure cache refresh runs even under dry-run/check modes"
+    )
+    when_val = doc_cache.get("when")
+    assert isinstance(when_val, list), (
+        "DOC-004-CACHE when condition must be a structured list matching COMMON-004 standard"
+    )
+
 
