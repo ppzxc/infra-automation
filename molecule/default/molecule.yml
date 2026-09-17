@@ -58,6 +58,14 @@ platforms:
 
 provisioner:
   name: ansible
+  env:
+    # Molecule generates its own ephemeral ansible.cfg that does NOT inherit
+    # this project's ansible.cfg `roles_path`. Without this, ansible-core
+    # falls back to resolving roles relative to the playbook's directory
+    # (molecule/default/roles), so `converge.yml`'s `- role: common` fails
+    # with "role 'common' was not found". Point it explicitly at the
+    # project's real roles/ directory.
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
   inventory:
     group_vars:
       all:
