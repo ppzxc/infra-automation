@@ -149,7 +149,9 @@
   loop:
     - containerd
     - docker
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))
 
 # 6. Add Admin & Docker enabled users to docker group
 - name: "[DOC-013] Add admin user to docker group"
@@ -264,3 +266,4 @@
     - item.0.state | default('present') != 'absent'
     - item.0.docker | default(item.0.tier | default('user') in ['admin', 'operator']) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))
