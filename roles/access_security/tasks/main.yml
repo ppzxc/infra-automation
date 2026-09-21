@@ -111,6 +111,28 @@
     - enable_access_security | default(true) | bool
     - enable_boundary_target | default(true) | bool
 
+- name: "[ACC-009-CHECK] Check for existing Boundary Target Node Metadata"
+  ansible.builtin.stat:
+    path: "{{ boundary_target_metadata_path | default('/etc/boundary/node-metadata.json') }}"
+  register: _boundary_metadata_stat
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_boundary_target | default(true) | bool
+
+# Preserves the first-provisioning timestamp instead of re-templating "now"
+# every run: docs/access_security.md documents [ACC-009]'s idempotency
+# guarantee as "JSON content match -> ok", but stamping provisioned_at with
+# strftime on every run made the content differ every time, so it reported
+# `changed` on every idempotence check even with no real config drift.
+- name: "[ACC-009-READ] Read existing metadata to preserve original provisioned_at"
+  ansible.builtin.slurp:
+    src: "{{ boundary_target_metadata_path | default('/etc/boundary/node-metadata.json') }}"
+  register: _boundary_metadata_raw
+  when:
+    - enable_access_security | default(true) | bool
+    - enable_boundary_target | default(true) | bool
+    - _boundary_metadata_stat.stat.exists | default(false)
+
 - name: "[ACC-009] Write Boundary Target Node Metadata"
   ansible.builtin.copy:
     dest: "{{ boundary_target_metadata_path | default('/etc/boundary/node-metadata.json') }}"
@@ -121,7 +143,7 @@
         "target_type": "{{ boundary_target_type | default('ssh') }}",
         "target_port": {{ boundary_target_port | default(22) }},
         "tags": {{ boundary_worker_tags | default([]) | to_json }},
-        "provisioned_at": "{{ '%Y-%m-%d %H:%M:%S' | strftime }}"
+        "provisioned_at": "{{ (_boundary_metadata_raw.content | b64decode | from_json).provisioned_at if (_boundary_metadata_stat.stat.exists | default(false)) else ('%Y-%m-%d %H:%M:%S' | strftime) }}"
       }
     owner: root
     group: root

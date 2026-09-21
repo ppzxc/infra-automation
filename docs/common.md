@@ -8,7 +8,7 @@
 
 - **표준 타임존 동기화**: 전 노드의 타임존을 표준 시간대(`Asia/Seoul`)로 통일.
 - **레거시 OS 저장소 복구 (CentOS 6/7)**: 공식 EOL로 인해 중단된 yum 미러를 `vault.centos.org` 아카이브 저장소로 자동 치환.
-- **필수 시스템 패키지 및 EPEL 설치**: OS 패밀리(Debian/Ubuntu, RHEL 6/7/8/9/10, Rocky)별 적합한 패키지 관리자(APT, YUM, DNF)를 사용하여 기본 도구(`curl`, `wget`, `git`, `vim`, `net-tools`, `jq`, `ca-certificates`, `tar`, `gzip` 등) 및 EPEL 저장소, 네트워크 소켓 도구(`nc`, `netcat-openbsd`) 설치.
+- **필수 시스템 패키지 및 EPEL 설치**: OS 패밀리(Debian/Ubuntu, RHEL 6/7/8/9/10, Rocky)별 적합한 패키지 관리자(APT, YUM, DNF)를 사용하여 기본 도구(`wget`, `git`, `vim`, `net-tools`, `jq`, `ca-certificates`, `tar`, `gzip` 등) 및 EPEL 저장소, 네트워크 소켓 도구(`nc`, `netcat-openbsd`) 설치. `curl`은 Debian/Ubuntu 및 RHEL/CentOS 6-7에서는 명시적으로 설치하고, RHEL/Rocky 8+에서는 기본 선탑재된 `curl-minimal`(Depsolve 충돌 방지를 위해 교체하지 않음)에 의존.
 - **현대적 진단/분석 도구 (Modern Diagnostics)**: `htop`, `iotop`, `bat`, `ripgrep` (`rg`) 설치 및 Debian 계열 `batcat` -> `bat` 심볼릭 링크 자동 생성.
 - **NTP 시간 동기화 데몬 구성**: 최신 OS에서는 `Chrony`, 레거시 CentOS 6에서는 `NTP`를 구성하여 지정된 사내/공용 NTP 서버와 지속 동기화. 한국 표준시(KRISS: `time.kriss.re.kr`, `time2.kriss.re.kr`), 국내 전용 NTP Pool(`kr.pool.ntp.org`), 글로벌 Anycast(`time.cloudflare.com`)를 조합한 Standard UTC(Leap Smear 미적용) 소스 분리(`ntp_pools`, `ntp_servers`) 구성 지원.
 - **커널 파라미터(sysctl) 최적화**: 10GbE+ IDC 고대역폭 TCP 소켓 버퍼(16MB), Window Scaling, 패킷 큐(`netdev_max_backlog=30000`), TIME_WAIT 소켓 관리(`tcp_max_tw_buckets=1800000`), 파일 디스크립터 한도 확장 및 메모리 스왑 동작 최적화. 선택적 IPv6 비활성화(`disable_ipv6`) 및 추가 확장(`sysctl_extra_settings`) 지원.
@@ -81,4 +81,5 @@
 | `COMMON-018` | `Deploy system-wide custom shell aliases` | `ansible.builtin.template` | All | Checksum 비교 (`aliases.sh.j2`) |
 | `COMMON-019` | `Deploy node environment variables drop-in (/etc/profile.d/98-node-env.sh)` | `ansible.builtin.template` | All | Checksum 비교 (`node-env.sh.j2`) |
 | `COMMON-020` | `Deploy system-wide environment variables (/etc/environment)` | `ansible.builtin.template` | All | Checksum 비교 (`environment.j2`) |
+| `COMMON-021` | `Ensure tzdata package is installed before timezone configuration (Debian/Ubuntu)` | `ansible.builtin.apt` | Debian, Ubuntu | 패키지 기설치 시 `ok` |
 

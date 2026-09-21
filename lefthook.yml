@@ -3,7 +3,9 @@
 # ==============================================================================
 # Pipeline Architecture:
 #   1. pre-commit (Fast ~1s): Gitleaks secret scan + Spec Validator + Pytest
-#   2. pre-push   (Integration): Molecule Multi-OS Docker testing (CentOS 6/7, Rocky 8/9, CentOS Stream 10, Ubuntu 22.04)
+#   2. pre-push   (Integration): Molecule Multi-OS Docker testing (Rocky 8/9,
+#      Ubuntu 22.04 -- CentOS 6/7 and CentOS Stream 10 removed from the
+#      matrix, see tracking comments in molecule/default/molecule.yml)
 # ==============================================================================
 
 pre-commit:

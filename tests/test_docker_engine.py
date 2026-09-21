@@ -77,6 +77,80 @@ def test_docker_ce_repo_imports_gpg_key_and_refreshes_cache():
     assert "makecache" in cmd_str, "DOC-004-CACHE must execute makecache"
     assert doc_cache.get("changed_when") is False, "DOC-004-CACHE must set changed_when: false"
 
+def test_service_tasks_are_check_mode_safe():
+    """
+    ansible.builtin.service/systemd queries real host state (LoadState via systemd) even
+    under --check, so if a prior task in the same role only *simulated* its change (e.g.
+    package install, directory/symlink creation skipped in check mode), a later
+    state-inspecting task can hard-fail dry runs on a host that hasn't actually been
+    provisioned yet (see DOC-012).
+
+    The same "prior task simulated, later task inspects real state" pattern also bit
+    [DOC-020] (ansible.builtin.file, state=link, force=false — inspects whether `src`
+    really exists on disk) and the "Restart docker" handler notified by [DOC-011]. Every
+    task/handler in docker_engine that inspects real host state this way must be guarded
+    so it cleanly skips under --check instead of hard-failing, via either:
+      - a `when` list containing a clause that references ansible_check_mode, or
+      - `ignore_errors: "{{ ansible_check_mode }}"`.
+
+    This check is deliberately generalized over *any* module name that can trigger this
+    class of failure (service/systemd variants, and file with state=link), rather than
+    hardcoding the three sites found during triage, so it also catches e.g. a rewrite
+    from `service` to `systemd` losing its guard along the way.
+    """
+    service_like_modules = {
+        "ansible.builtin.service",
+        "service",
+        "ansible.builtin.systemd",
+        "systemd",
+        "ansible.builtin.systemd_service",
+        "systemd_service",
+    }
+    file_like_modules = {"ansible.builtin.file", "file"}
+
+    def inspects_real_host_state(entry):
+        if service_like_modules & entry.keys():
+            return True
+        for key in file_like_modules:
+            args = entry.get(key)
+            if isinstance(args, dict) and args.get("state") == "link":
+                return True
+        return False
+
+    def is_guarded(entry):
+        when_val = entry.get("when")
+        if isinstance(when_val, list):
+            if any("ansible_check_mode" in str(cond) for cond in when_val):
+                return True
+        elif isinstance(when_val, str) and "ansible_check_mode" in when_val:
+            return True
+        ignore_errors_val = entry.get("ignore_errors")
+        if isinstance(ignore_errors_val, str) and "ansible_check_mode" in ignore_errors_val:
+            return True
+        return False
+
+    files_to_check = [
+        ROOT_DIR / "roles" / "docker_engine" / "tasks" / "main.yml",
+        ROOT_DIR / "roles" / "docker_engine" / "handlers" / "main.yml",
+    ]
+
+    unguarded = []
+    for tasks_file in files_to_check:
+        assert tasks_file.exists(), f"{tasks_file} missing"
+        with open(tasks_file, "r", encoding="utf-8") as f:
+            entries = yaml.safe_load(f)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if inspects_real_host_state(entry) and not is_guarded(entry):
+                unguarded.append(f"{tasks_file.name}: {entry.get('name', '<unnamed>')}")
+
+    assert not unguarded, (
+        "The following tasks/handlers inspect real host state and must be guarded so "
+        "they skip cleanly under --check instead of hard-failing when a prior task in "
+        f"the role was only simulated: {unguarded}"
+    )
+
 def test_docker_ce_repo_architecture_and_cache_refresh_invariants():
     """
     Ensure [DOC-004] explicitly uses ansible_architecture in baseurl to prevent $basearch expansion issues,

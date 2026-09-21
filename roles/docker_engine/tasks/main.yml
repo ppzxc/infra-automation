@@ -149,7 +149,9 @@
   loop:
     - containerd
     - docker
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))
 
 # 6. Add Admin & Docker enabled users to docker group
 - name: "[DOC-013] Add admin user to docker group"
@@ -256,6 +258,9 @@
     group: "{{ item.0.name }}"
     state: link
     force: false
+    # follow defaults to true, which applies owner/group to the symlink's
+    # TARGET instead of the link — silently overwriting DOC-016's ADR-0002 ownership.
+    follow: false
   loop: "{{ accounts | default([]) | product([{'src': '/opt/services', 'dest': 'services'}, {'src': '/data', 'dest': 'data'}]) | list }}"
   when:
     - accounts is defined
@@ -264,3 +269,4 @@
     - item.0.state | default('present') != 'absent'
     - item.0.docker | default(item.0.tier | default('user') in ['admin', 'operator']) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))

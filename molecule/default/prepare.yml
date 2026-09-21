@@ -1,0 +1,82 @@
+---
+- name: Prepare Container Test Environment
+  hosts: all
+  become: true
+  # Deferred: test-rockylinux8's stock Python (3.6.8) cannot parse the
+  # AnsiballZ wrapper ansible-core generates for ANY module -- including the
+  # implicit setup module this gather_facts would otherwise run -- so
+  # gathering here would fail before [PREPARE-000-PY311] ever gets a chance
+  # to fix the interpreter. Facts are gathered explicitly below, after that
+  # bootstrap task, via [PREPARE-000-FACTS].
+  gather_facts: false
+
+  tasks:
+    # geerlingguy/docker-rockylinux8-ansible ships only Python 3.6.8, which
+    # predates the `from __future__ import annotations` syntax (Python 3.7+)
+    # that this project's controller ansible-core embeds in every AnsiballZ
+    # module wrapper -- so every module invocation over the default
+    # interpreter fails with a SyntaxError before the module body runs.
+    # `raw` bypasses AnsiballZ entirely (it just runs a shell command over
+    # the connection plugin), so it's the only way to install a working
+    # interpreter on this image. python3.11 ships in AppStream already
+    # enabled on this image. Confirmed via direct `ansible -m setup` probe
+    # against geerlingguy/docker-rockylinux8-ansible:latest.
+    - name: "[PREPARE-000-PY311] Bootstrap python3.11 via raw (AnsiballZ is incompatible with this image's stock Python 3.6)"
+      ansible.builtin.raw: command -v /usr/bin/python3.11 || dnf install -y python3.11
+      when: inventory_hostname == 'test-rockylinux8'
+      changed_when: false
+
+    - name: "[PREPARE-000-FACTS] Gather facts now that every host has an AnsiballZ-compatible interpreter"
+      ansible.builtin.setup:
+
+    # geerlingguy/docker-*-ansible images are built for `docker exec` access
+    # (molecule's docker driver), not SSH — so they ship without
+    # openssh-server and /etc/ssh/ does not exist at all. Production hosts
+    # are unaffected: HOST_PROVISIONING only ever reaches a host over SSH in
+    # the first place (see the "Probe SSH connection" task in Semaphore task
+    # #155), so sshd is always pre-installed and running there. This is a
+    # test-environment gap, not a role bug — confirmed via:
+    #   docker run --rm geerlingguy/docker-rockylinux9-ansible:latest \
+    #     sh -c "rpm -q openssh-server; ls -la /etc/ssh/"
+    # geerlingguy/docker-ubuntu2204-ansible ships with an empty/stale apt
+    # cache (no `apt-get update` has ever run in the image), so the generic
+    # package module's underlying apt call can't resolve openssh-server and
+    # fails with "No package matching 'openssh-server' is available". RedHat
+    # family images ship a usable dnf/yum metadata cache already, so this is
+    # scoped to Debian family to avoid an unnecessary cache refresh there.
+    - name: "[PREPARE-001-CACHE] Refresh apt cache before installing openssh-server (Debian/Ubuntu)"
+      ansible.builtin.apt:
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: "[PREPARE-001] Ensure openssh-server is installed (container test images omit it)"
+      ansible.builtin.package:
+        name: openssh-server
+        state: present
+
+    # A bare package install does not generate host keys (that normally
+    # happens via sshd-keygen@.service on first boot, which these throwaway
+    # containers never run). Without host keys, `sshd -t` fails with
+    # "no hostkeys available -- exiting", which breaks the `validate:` clause
+    # on the security role's [SEC-001] lineinfile loop. ssh-keygen -A is
+    # idempotent (skips keys that already exist).
+    - name: "[PREPARE-002] Ensure SSH host keys exist (container images ship without them)"
+      ansible.builtin.command: ssh-keygen -A
+      changed_when: false
+
+    # Debian's openssh-server postinst normally creates /run/sshd via
+    # systemd-tmpfiles (see /usr/lib/tmpfiles.d/sshd.conf), which only runs
+    # when sshd starts as a systemd service. These container images install
+    # the package without ever starting sshd as a service, so /run/sshd is
+    # never created -- and `sshd -t` (used by the security role's
+    # `validate:` clause on [SEC-001]) refuses to run without it:
+    # "Missing privilege separation directory: /run/sshd". RockyLinux/RHEL
+    # images do not hit this -- dnf's openssh-server post scriptlet creates
+    # the directory unconditionally, not gated on the service starting
+    # (confirmed: rocky9's [VERIFY-SEC-001] run had no such error).
+    - name: "[PREPARE-003] Ensure /run/sshd privilege separation directory exists (Debian/Ubuntu)"
+      ansible.builtin.file:
+        path: /run/sshd
+        state: directory
+        mode: "0755"
+      when: ansible_os_family == "Debian"

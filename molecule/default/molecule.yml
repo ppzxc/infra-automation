@@ -4,21 +4,59 @@ dependency:
 driver:
   name: docker
 platforms:
-  - name: test-centos6
-    image: geerlingguy/docker-centos6-ansible:latest
-    command: ""
-    privileged: true
-    pre_build_image: true
-
-  - name: test-centos7
-    image: geerlingguy/docker-centos7-ansible:latest
-    command: ""
-    volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-    cgroupns_mode: host
-    privileged: true
-    pre_build_image: true
-
+  # test-centos6 / test-centos7 were removed from this matrix (not just
+  # skipped) rather than fixed in place. Root cause (confirmed via direct
+  # `ansible -m setup` probes against both images): neither ships a Python
+  # 3.7+ interpreter, and none is obtainable from a public repository --
+  # SCL (version-pinned and unpinned URLs), EPEL 7 (only python34/python36),
+  # and IUS (repository shut down, HTTP 404) were all checked and all fail.
+  # This project's controller ansible-core generates AnsiballZ module
+  # wrappers using `from __future__ import annotations` (PEP 563, Python
+  # 3.7+ only), so every standard module invocation SyntaxErrors on these
+  # targets before the module body ever runs -- including the implicit
+  # `setup` module call of `gather_facts`, which fires before any `when:`
+  # condition is evaluated. That means every CentOS 6/7-gated task in
+  # roles/common and roles/security (COMMON-002, COMMON-005, COMMON-010,
+  # SEC-008, SEC-021, etc.) has never actually executed under this
+  # controller: this is unwritten support, not a regression.
+  # A real fix requires a from-scratch `ansible.builtin.raw`-based
+  # provisioning path (bypassing AnsiballZ entirely, with its own
+  # write-temp/validate/move helpers for the `validate:` clauses raw can't
+  # use, and its own changed/unchanged sentinel contract since raw always
+  # reports changed: true) covering common+security parity (docker_engine
+  # excluded). Also confirmed the real Ansible inventory (./inventory) has
+  # exactly two hosts (ns0266, ns0332), neither CentOS 6/7 and both already
+  # provisioned -- so this is tracked as separate, non-blocking follow-up
+  # work rather than done inline here.
+  #
+  # test-centos-stream10 (quay.io/centos/centos:stream10) was also tried and
+  # removed for a different, unrelated reason: this official minimal image
+  # ships no systemd binary at all (confirmed: /usr/lib/systemd/systemd does
+  # not exist), so its PID 1 can only ever be whatever `command:` molecule
+  # passes at `docker create` -- never systemd. `ansible.builtin.service`
+  # (used throughout roles/common and roles/security, including handlers)
+  # is systemctl-based and therefore cannot manage ANY unit on this image;
+  # e.g. COMMON-009 failed with "Could not find the requested service
+  # chronyd: host" even after fixing two earlier, shallower blockers (no
+  # sudo binary -- worked around with a become:false bootstrap task; and
+  # `command: ""` exiting immediately -- worked around with `sleep
+  # infinity`). Those two fixes got past prepare.yml, but converge then hit
+  # the systemd wall, and every subsequent service-managing task (chrony,
+  # then eventually sshd/firewalld/fail2ban/auditd restarts in
+  # roles/security/handlers/main.yml) would fail the same way -- this is not
+  # a one-task gap, it's structural to the image. Unlike CentOS 6/7 (which
+  # never passed under a different controller either), this platform had
+  # never once gone green before removal, so no working coverage was lost.
+  # Gating COMMON-009 (and every downstream service task) behind
+  # `ansible_service_mgr == "systemd"`, mirroring COMMON-017, was
+  # deliberately rejected: that would change production role behavior to
+  # accommodate a broken test image, and ns0332 (a real host) already proves
+  # COMMON-009 works correctly when ansible_service_mgr resolves normally.
+  # A real fix needs either a systemd-as-PID-1 image/tag for CentOS Stream
+  # 10, or dropping `pre_build_image: true` to build a derived image that
+  # bakes systemd in as the entrypoint -- both open-ended, so deferred
+  # alongside the CentOS 6/7 raw-provisioning follow-up above rather than
+  # solved inline here.
   - name: test-rockylinux8
     image: geerlingguy/docker-rockylinux8-ansible:latest
     command: ""
@@ -30,15 +68,6 @@ platforms:
 
   - name: test-rockylinux9
     image: geerlingguy/docker-rockylinux9-ansible:latest
-    command: ""
-    volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-    cgroupns_mode: host
-    privileged: true
-    pre_build_image: true
-
-  - name: test-centos-stream10
-    image: quay.io/centos/centos:stream10
     command: ""
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
@@ -58,7 +87,30 @@ platforms:
 
 provisioner:
   name: ansible
+  env:
+    # Molecule generates its own ephemeral ansible.cfg that does NOT inherit
+    # this project's ansible.cfg `roles_path`. Without this, ansible-core
+    # falls back to resolving roles relative to the playbook's directory
+    # (molecule/default/roles), so `converge.yml`'s `- role: common` fails
+    # with "role 'common' was not found". Point it explicitly at the
+    # project's real roles/ directory.
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
   inventory:
+    host_vars:
+      # geerlingguy/docker-rockylinux8-ansible ships only Python 3.6.8. The
+      # AnsiballZ wrapper this project's controller ansible-core generates
+      # uses `from __future__ import annotations` (Python 3.7+ syntax), so
+      # every module invocation over the default interpreter fails with
+      # "SyntaxError: future feature annotations is not defined" before the
+      # module body ever runs -- confirmed via direct `ansible -m setup`
+      # probe against this image. This is not a role bug: it's a controller
+      # (AnsiballZ)/target Python version mismatch specific to this EOL-ish
+      # test image. python3.11 is available in AppStream but not
+      # preinstalled, so prepare.yml bootstraps it via `raw` (which needs no
+      # interpreter) before facts are gathered; from then on every play uses
+      # this interpreter for that host.
+      test-rockylinux8:
+        ansible_python_interpreter: /usr/bin/python3.11
     group_vars:
       all:
         timezone: "Asia/Seoul"
@@ -79,6 +131,55 @@ provisioner:
         enable_boundary: false
         firewall_allowed_tcp_ports:
           - 22
+        # roles/security/defaults/main.yml ships ssh_password_authentication:
+        # "yes" as a safe, opt-in default (docs/security.md's "PasswordAuthentication
+        # no" hardening is applied "사전 검증 후", i.e. per-host once key auth is
+        # confirmed -- group_vars/all.yml deliberately overrides only
+        # ssh_permit_root_login, not this one). This scenario's accounts all
+        # ship SSH keys, so exercise the hardened value here to verify
+        # [VERIFY-SEC-001]'s assertion without changing the shipped default.
+        ssh_password_authentication: "no"
+        # Reduced smoke-test map for COMMON-011: `net.core.netdev_max_backlog`
+        # is a non-namespaced kernel sysctl. Inside a Docker container's
+        # non-initial network namespace, /proc/sys/net only exposes
+        # per-netns knobs, so this key is absent even with `privileged: true`
+        # (unlike `network_mode: host`, which would also leak container
+        # tuning onto the real host kernel and break test isolation — not
+        # used here on purpose). This is a container-environment limitation,
+        # not a role bug: production hosts expose this key normally, as
+        # confirmed by Semaphore task #155 completing COMMON-011 on ns0332.
+        # Keep the keys asserted by verify.yml's [VERIFY-COMMON-011] block.
+        sysctl_settings:
+          vm.swappiness: 10
+          fs.protected_hardlinks: 1
+          fs.protected_symlinks: 1
+          kernel.randomize_va_space: 2
+        # SEC-007-SERVICES / SEC-016 / SEC-007-DMZ-PORTS / SEC-017 /
+        # SEC-007-INTERNAL-PORTS / SEC-020-RICH CLI-fallback coverage: these
+        # vars exercise the *additive* firewalld paths (--add-service,
+        # --add-source, --add-port, --add-rich-rule) on RHEL/Rocky 7+, which
+        # is exactly what test-rockylinux8's firewall-cmd fallback needs to
+        # prove out (the ALREADY_ENABLED/NOT_ENABLED changed_when contract is
+        # otherwise never exercised by this scenario). Deliberately leave
+        # ssh_allowed_source_ips undefined: defining it would rewire SEC-007's
+        # zone ternary and SEC-006-CLEAN-PUBLIC's SSH stripping, which could
+        # destabilize the already-green rocky9/ubuntu2204 platforms.
+        firewall_allowed_services:
+          - http
+          - https
+        monitoring_allowed_subnets:
+          - "10.99.0.0/24"
+        firewall_dmz_ports:
+          - "9100/tcp"
+        internal_allowed_subnets:
+          - "10.98.0.0/24"
+        firewall_internal_ports:
+          - "5432/tcp"
+        firewall_ingress_rules:
+          - port: "8443"
+            proto: "tcp"
+            sources:
+              - "203.0.113.10/32"
   options:
     diff: true
 

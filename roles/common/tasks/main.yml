@@ -1,4 +1,12 @@
 ---
+- name: "[COMMON-021] Ensure tzdata package is installed before timezone configuration (Debian/Ubuntu)"
+  ansible.builtin.apt:
+    name: tzdata
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
 - name: "[COMMON-001] Set timezone"
   community.general.timezone:
     name: "{{ timezone | default('Asia/Seoul') }}"
@@ -13,7 +21,7 @@
 
 - name: "[COMMON-003] Install common packages (Debian/Ubuntu)"
   ansible.builtin.apt:
-    name: "{{ common_packages + ['iproute2', 'lsb-release', 'gnupg', 'htop', 'iotop', 'sudo', 'netcat-openbsd'] }}"
+    name: "{{ common_packages + ['curl', 'iproute2', 'lsb-release', 'gnupg', 'htop', 'iotop', 'sudo', 'netcat-openbsd'] }}"
     state: present
     update_cache: true
     cache_valid_time: 3600
@@ -30,10 +38,14 @@
 
 - name: "[COMMON-005] Install common packages (RedHat/CentOS 6, 7 via YUM)"
   ansible.builtin.yum:
-    name: "{{ common_packages + ['iproute', 'sudo', 'nc'] }}"
+    name: "{{ common_packages + ['curl', 'iproute', 'sudo', 'nc'] }}"
     state: present
   when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int <= 7
 
+# curl is intentionally omitted here: RHEL/Rocky 8+ ship `curl-minimal` by
+# default, which already provides /usr/bin/curl and conflicts with the full
+# `curl` package (Depsolve Error). Rely on the pre-installed curl-minimal
+# instead of forcing a swap.
 - name: "[COMMON-006] Install common packages (RHEL/Rocky 8, 9, 10 via DNF)"
   ansible.builtin.dnf:
     name: "{{ common_packages + ['iproute', 'sudo', 'nc'] }}"
@@ -126,11 +138,19 @@
     - item.state | default('present') != 'absent'
 
 - name: "[COMMON-013] Ensure accounts exist with tier-specific permissions"
+  vars:
+    # Supplementary groups: sudo/wheel for admin-tier accounts (or item.sudo
+    # overridden explicitly), plus any explicit item.groups. When this
+    # resolves empty (e.g. a non-admin account with no extra groups), `append`
+    # must follow it to `false` — `ansible.builtin.user` hard-fails with
+    # "append is True but all of the following are missing: groups" if
+    # `append: true` is kept while `groups` is omitted.
+    _account_groups: "{{ ( (['sudo' if ansible_os_family == 'Debian' else 'wheel'] if (item.sudo | default(item.tier | default('user') == 'admin')) else []) + (item.groups | default([])) ) | unique }}"
   ansible.builtin.user:
     name: "{{ item.name }}"
     group: "{{ item.name }}"
-    groups: "{{ ( (['sudo' if ansible_os_family == 'Debian' else 'wheel'] if (item.sudo | default(item.tier | default('user') == 'admin')) else []) + (item.groups | default([])) ) | unique | join(',') if ( (['sudo' if ansible_os_family == 'Debian' else 'wheel'] if (item.sudo | default(item.tier | default('user') == 'admin')) else []) + (item.groups | default([])) ) | length > 0 else omit }}"
-    append: true
+    groups: "{{ _account_groups | join(',') if _account_groups | length > 0 else omit }}"
+    append: "{{ _account_groups | length > 0 }}"
     shell: "{{ item.shell | default('/bin/bash') }}"
     comment: "{{ item.comment | default(omit) }}"
     uid: "{{ item.uid | default(omit) }}"
