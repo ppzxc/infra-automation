@@ -20,7 +20,6 @@ ntp_servers:
   - "time.cloudflare.com"
 
 common_packages:
-  - curl
   - wget
   - git
   - vim
