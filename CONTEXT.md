@@ -13,3 +13,9 @@
 - **`docker_engine`**: Automated cleanup of conflicting packages (Podman) and deployment of hardened Docker CE and compose plugins.
 - **`monitoring`**: OpenTelemetry Collector Contrib (`otelcol-contrib`) deployment sending hostmetrics and system logs to the central OpenObserve backend, replacing legacy `node_exporter`.
 - **`common`**: Baseline OS packages, timezone, Chrony/NTP time synchronization, sysctl kernel parameters, and admin accounts.
+
+## Language
+
+**Raw Provisioning Path**:
+A design for provisioning CentOS 6/7 targets (which lack a Python 3.7+ interpreter, so ansible-core's AnsiballZ module wrapper SyntaxErrors on every standard module call) by driving `ansible.builtin.raw` directly and bypassing AnsiballZ entirely. It supplies its own write-temp/validate/move helper to replace module `validate:` clauses, and its own changed/unchanged sentinel contract to preserve this suite's idempotence guarantee despite `raw` always reporting `changed: true`. Covers `roles/common` + `roles/security`; excludes `roles/docker_engine`. Not yet implemented — currently a design in progress, tracked separately from the standard AnsiballZ-based provisioning this suite otherwise uses.
+_Avoid_: raw fallback, raw mode, raw provisioning (imprecise — always the full canonical name)
