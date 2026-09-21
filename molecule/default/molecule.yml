@@ -4,21 +4,59 @@ dependency:
 driver:
   name: docker
 platforms:
-  - name: test-centos6
-    image: geerlingguy/docker-centos6-ansible:latest
-    command: ""
-    privileged: true
-    pre_build_image: true
-
-  - name: test-centos7
-    image: geerlingguy/docker-centos7-ansible:latest
-    command: ""
-    volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-    cgroupns_mode: host
-    privileged: true
-    pre_build_image: true
-
+  # test-centos6 / test-centos7 were removed from this matrix (not just
+  # skipped) rather than fixed in place. Root cause (confirmed via direct
+  # `ansible -m setup` probes against both images): neither ships a Python
+  # 3.7+ interpreter, and none is obtainable from a public repository --
+  # SCL (version-pinned and unpinned URLs), EPEL 7 (only python34/python36),
+  # and IUS (repository shut down, HTTP 404) were all checked and all fail.
+  # This project's controller ansible-core generates AnsiballZ module
+  # wrappers using `from __future__ import annotations` (PEP 563, Python
+  # 3.7+ only), so every standard module invocation SyntaxErrors on these
+  # targets before the module body ever runs -- including the implicit
+  # `setup` module call of `gather_facts`, which fires before any `when:`
+  # condition is evaluated. That means every CentOS 6/7-gated task in
+  # roles/common and roles/security (COMMON-002, COMMON-005, COMMON-010,
+  # SEC-008, SEC-021, etc.) has never actually executed under this
+  # controller: this is unwritten support, not a regression.
+  # A real fix requires a from-scratch `ansible.builtin.raw`-based
+  # provisioning path (bypassing AnsiballZ entirely, with its own
+  # write-temp/validate/move helpers for the `validate:` clauses raw can't
+  # use, and its own changed/unchanged sentinel contract since raw always
+  # reports changed: true) covering common+security parity (docker_engine
+  # excluded). Also confirmed the real Ansible inventory (./inventory) has
+  # exactly two hosts (ns0266, ns0332), neither CentOS 6/7 and both already
+  # provisioned -- so this is tracked as separate, non-blocking follow-up
+  # work rather than done inline here.
+  #
+  # test-centos-stream10 (quay.io/centos/centos:stream10) was also tried and
+  # removed for a different, unrelated reason: this official minimal image
+  # ships no systemd binary at all (confirmed: /usr/lib/systemd/systemd does
+  # not exist), so its PID 1 can only ever be whatever `command:` molecule
+  # passes at `docker create` -- never systemd. `ansible.builtin.service`
+  # (used throughout roles/common and roles/security, including handlers)
+  # is systemctl-based and therefore cannot manage ANY unit on this image;
+  # e.g. COMMON-009 failed with "Could not find the requested service
+  # chronyd: host" even after fixing two earlier, shallower blockers (no
+  # sudo binary -- worked around with a become:false bootstrap task; and
+  # `command: ""` exiting immediately -- worked around with `sleep
+  # infinity`). Those two fixes got past prepare.yml, but converge then hit
+  # the systemd wall, and every subsequent service-managing task (chrony,
+  # then eventually sshd/firewalld/fail2ban/auditd restarts in
+  # roles/security/handlers/main.yml) would fail the same way -- this is not
+  # a one-task gap, it's structural to the image. Unlike CentOS 6/7 (which
+  # never passed under a different controller either), this platform had
+  # never once gone green before removal, so no working coverage was lost.
+  # Gating COMMON-009 (and every downstream service task) behind
+  # `ansible_service_mgr == "systemd"`, mirroring COMMON-017, was
+  # deliberately rejected: that would change production role behavior to
+  # accommodate a broken test image, and ns0332 (a real host) already proves
+  # COMMON-009 works correctly when ansible_service_mgr resolves normally.
+  # A real fix needs either a systemd-as-PID-1 image/tag for CentOS Stream
+  # 10, or dropping `pre_build_image: true` to build a derived image that
+  # bakes systemd in as the entrypoint -- both open-ended, so deferred
+  # alongside the CentOS 6/7 raw-provisioning follow-up above rather than
+  # solved inline here.
   - name: test-rockylinux8
     image: geerlingguy/docker-rockylinux8-ansible:latest
     command: ""
@@ -30,15 +68,6 @@ platforms:
 
   - name: test-rockylinux9
     image: geerlingguy/docker-rockylinux9-ansible:latest
-    command: ""
-    volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:rw
-    cgroupns_mode: host
-    privileged: true
-    pre_build_image: true
-
-  - name: test-centos-stream10
-    image: quay.io/centos/centos:stream10
     command: ""
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
