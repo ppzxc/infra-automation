@@ -67,6 +67,21 @@ provisioner:
     # project's real roles/ directory.
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
   inventory:
+    host_vars:
+      # geerlingguy/docker-rockylinux8-ansible ships only Python 3.6.8. The
+      # AnsiballZ wrapper this project's controller ansible-core generates
+      # uses `from __future__ import annotations` (Python 3.7+ syntax), so
+      # every module invocation over the default interpreter fails with
+      # "SyntaxError: future feature annotations is not defined" before the
+      # module body ever runs -- confirmed via direct `ansible -m setup`
+      # probe against this image. This is not a role bug: it's a controller
+      # (AnsiballZ)/target Python version mismatch specific to this EOL-ish
+      # test image. python3.11 is available in AppStream but not
+      # preinstalled, so prepare.yml bootstraps it via `raw` (which needs no
+      # interpreter) before facts are gathered; from then on every play uses
+      # this interpreter for that host.
+      test-rockylinux8:
+        ansible_python_interpreter: /usr/bin/python3.11
     group_vars:
       all:
         timezone: "Asia/Seoul"
@@ -87,6 +102,55 @@ provisioner:
         enable_boundary: false
         firewall_allowed_tcp_ports:
           - 22
+        # roles/security/defaults/main.yml ships ssh_password_authentication:
+        # "yes" as a safe, opt-in default (docs/security.md's "PasswordAuthentication
+        # no" hardening is applied "사전 검증 후", i.e. per-host once key auth is
+        # confirmed -- group_vars/all.yml deliberately overrides only
+        # ssh_permit_root_login, not this one). This scenario's accounts all
+        # ship SSH keys, so exercise the hardened value here to verify
+        # [VERIFY-SEC-001]'s assertion without changing the shipped default.
+        ssh_password_authentication: "no"
+        # Reduced smoke-test map for COMMON-011: `net.core.netdev_max_backlog`
+        # is a non-namespaced kernel sysctl. Inside a Docker container's
+        # non-initial network namespace, /proc/sys/net only exposes
+        # per-netns knobs, so this key is absent even with `privileged: true`
+        # (unlike `network_mode: host`, which would also leak container
+        # tuning onto the real host kernel and break test isolation — not
+        # used here on purpose). This is a container-environment limitation,
+        # not a role bug: production hosts expose this key normally, as
+        # confirmed by Semaphore task #155 completing COMMON-011 on ns0332.
+        # Keep the keys asserted by verify.yml's [VERIFY-COMMON-011] block.
+        sysctl_settings:
+          vm.swappiness: 10
+          fs.protected_hardlinks: 1
+          fs.protected_symlinks: 1
+          kernel.randomize_va_space: 2
+        # SEC-007-SERVICES / SEC-016 / SEC-007-DMZ-PORTS / SEC-017 /
+        # SEC-007-INTERNAL-PORTS / SEC-020-RICH CLI-fallback coverage: these
+        # vars exercise the *additive* firewalld paths (--add-service,
+        # --add-source, --add-port, --add-rich-rule) on RHEL/Rocky 7+, which
+        # is exactly what test-rockylinux8's firewall-cmd fallback needs to
+        # prove out (the ALREADY_ENABLED/NOT_ENABLED changed_when contract is
+        # otherwise never exercised by this scenario). Deliberately leave
+        # ssh_allowed_source_ips undefined: defining it would rewire SEC-007's
+        # zone ternary and SEC-006-CLEAN-PUBLIC's SSH stripping, which could
+        # destabilize the already-green rocky9/ubuntu2204 platforms.
+        firewall_allowed_services:
+          - http
+          - https
+        monitoring_allowed_subnets:
+          - "10.99.0.0/24"
+        firewall_dmz_ports:
+          - "9100/tcp"
+        internal_allowed_subnets:
+          - "10.98.0.0/24"
+        firewall_internal_ports:
+          - "5432/tcp"
+        firewall_ingress_rules:
+          - port: "8443"
+            proto: "tcp"
+            sources:
+              - "203.0.113.10/32"
   options:
     diff: true
 

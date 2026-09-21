@@ -13,6 +13,19 @@
     name: firewalld
     state: restarted
 
+# firewalld_module_usable is false when ansible.posix.firewalld cannot bind
+# to the target's firewalld D-Bus module (PyGObject ABI lock on RHEL8/Rocky8 --
+# see roles/security/tasks/main.yml SEC-006-PROBE). The firewall-cmd CLI
+# fallback tasks change permanent-only config, so their changes need the same
+# runtime reload that ansible.posix.firewalld normally applies via
+# `immediate: true`. Restarting the service here would be needlessly
+# disruptive (and can race the CLI fallback tasks that already ran
+# `--permanent`); a reload is sufficient and matches firewall-cmd's own
+# idiom.
+- name: Reload firewalld
+  ansible.builtin.command: firewall-cmd --reload
+  changed_when: false
+
 - name: Restart fail2ban
   ansible.builtin.service:
     name: fail2ban
