@@ -96,7 +96,13 @@
         - accounts | length > 0
         - item.name is defined
         - item.state | default('present') != 'absent'
-        - item.keys is defined and item.keys | length > 0
+        # Bracket notation is required here: item is a plain dict with a
+        # "keys" field (the account's SSH public keys), but Jinja2's dot
+        # notation tries getattr(item, 'keys') first, which resolves to
+        # Python's built-in dict.keys() bound method instead of falling
+        # back to item['keys'] -- causing `| length` to fail with
+        # "object of type 'builtin_function_or_method' has no len()".
+        - item['keys'] is defined and item['keys'] | length > 0
 
     - name: Assert SSH authorized_keys exists for accounts with keys
       ansible.builtin.assert:
