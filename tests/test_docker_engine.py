@@ -151,6 +151,61 @@ def test_service_tasks_are_check_mode_safe():
         f"the role was only simulated: {unguarded}"
     )
 
+def test_user_group_membership_tasks_are_check_mode_safe():
+    """
+    ansible.builtin.user validates that every group in `groups`/`group` really exists on
+    the target host, even under --check. [DOC-009] (docker-ce package install, which
+    creates the `docker` group as a package post-install side effect) only *simulates*
+    its change under --check on a host that hasn't been provisioned yet, so any later
+    `user` task that appends a user to the `docker` group hard-fails with "Group docker
+    does not exist" instead of cleanly skipping (see task #165, DOC-013).
+
+    This is the same "prior task simulated, later task inspects real state" class fixed
+    for service/file(state=link) tasks in test_service_tasks_are_check_mode_safe, just
+    for ansible.builtin.user membership checks instead.
+    """
+    def references_docker_group(entry):
+        user_args = entry.get("ansible.builtin.user") or entry.get("user")
+        if not isinstance(user_args, dict):
+            return False
+        for key in ("group", "groups"):
+            val = user_args.get(key)
+            if isinstance(val, str) and "docker" in val:
+                return True
+            if isinstance(val, list) and any("docker" in str(v) for v in val):
+                return True
+        return False
+
+    def is_guarded(entry):
+        when_val = entry.get("when")
+        if isinstance(when_val, list):
+            if any("ansible_check_mode" in str(cond) for cond in when_val):
+                return True
+        elif isinstance(when_val, str) and "ansible_check_mode" in when_val:
+            return True
+        ignore_errors_val = entry.get("ignore_errors")
+        if isinstance(ignore_errors_val, str) and "ansible_check_mode" in ignore_errors_val:
+            return True
+        return False
+
+    tasks_file = ROOT_DIR / "roles" / "docker_engine" / "tasks" / "main.yml"
+    assert tasks_file.exists(), f"{tasks_file} missing"
+    with open(tasks_file, "r", encoding="utf-8") as f:
+        entries = yaml.safe_load(f)
+
+    unguarded = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if references_docker_group(entry) and not is_guarded(entry):
+            unguarded.append(entry.get("name", "<unnamed>"))
+
+    assert not unguarded, (
+        "The following tasks add a user to the `docker` group and must be guarded so "
+        "they skip cleanly under --check instead of hard-failing when DOC-009 (docker-ce "
+        f"install) was only simulated: {unguarded}"
+    )
+
 def test_docker_ce_repo_architecture_and_cache_refresh_invariants():
     """
     Ensure [DOC-004] explicitly uses ansible_architecture in baseurl to prevent $basearch expansion issues,

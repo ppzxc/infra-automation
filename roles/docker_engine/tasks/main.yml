@@ -167,6 +167,7 @@
     - item.state | default('present') != 'absent'
     - item.docker | default(item.tier | default('user') in ['admin', 'operator']) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))
 
 # ==============================================================================
 # 7. ADR-0002 Account, Directory Layout, and Permission Inheritance Standard
@@ -190,7 +191,9 @@
     create_home: false
     system: true
     state: present
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))
 
 - name: "[DOC-016] Create FHS standard service and data directories (/opt/services, /data, /backup)"
   ansible.builtin.file:
@@ -249,6 +252,7 @@
     - item.state | default('present') != 'absent'
     - item.docker | default(item.tier | default('user') in ['admin', 'operator']) | bool
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (ansible_check_mode | default(false))
 
 - name: "[DOC-020] Create convenience symlinks in operator home directory"
   ansible.builtin.file:
