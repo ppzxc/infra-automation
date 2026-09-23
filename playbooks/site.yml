@@ -33,17 +33,28 @@
     _vault_addr: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
 
   tasks:
-    - name: Purge controller fact cache directory to prevent poisoned cache reuse
-      ansible.builtin.file:
-        path: /tmp/ansible_fact_cache
-        state: absent
-      run_once: true
-
-    - name: Recreate empty controller fact cache directory
+    - name: Ensure controller fact cache directory exists
       ansible.builtin.file:
         path: /tmp/ansible_fact_cache
         state: directory
         mode: '0700'
+      run_once: true
+
+    - name: Discover stale controller fact cache entries to purge
+      ansible.builtin.find:
+        paths: /tmp/ansible_fact_cache
+        file_type: any
+        hidden: true
+      register: _stale_fact_cache_entries
+      run_once: true
+
+    - name: Purge stale controller fact cache entries to prevent poisoned cache reuse
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ _stale_fact_cache_entries.files }}"
+      loop_control:
+        label: "{{ item.path }}"
       run_once: true
 
     - name: Clear cached in-memory facts for target hosts
