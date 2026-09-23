@@ -39,6 +39,13 @@
         state: absent
       run_once: true
 
+    - name: Recreate empty controller fact cache directory
+      ansible.builtin.file:
+        path: /tmp/ansible_fact_cache
+        state: directory
+        mode: '0700'
+      run_once: true
+
     - name: Clear cached in-memory facts for target hosts
       ansible.builtin.meta: clear_facts
 
