@@ -65,7 +65,7 @@
 
   | 스트림 | 내용 | 보존 |
   |---|---|---|
-  | `security_logs` | secure, auth.log, audit.log, sudo.log, fail2ban.log, firewalld | 1년 (**TBD-1**: 개인정보처리시스템 포함 시 2년) |
+  | `security_logs` | secure, auth.log, audit.log, sudo.log, fail2ban.log, firewalld | 1년 (대상에 개인정보처리시스템 없음 — 포함 시 2년으로 상향) |
   | `system_logs` | messages, syslog, cron, 패키지 로그, boot, kern | 6개월 |
   | `app_logs` | `otel_extra_logs` 기본 목적지 | 서버 측 결정 |
   | `backup_logs` | §2.6 백업·유지보수·등록 이벤트 | 1년 (2.9.3 증적) |
@@ -126,7 +126,7 @@
 
 ### 2.7 OpenObserve 연결 계약 및 로컬 버퍼링
 
-- **Exporter**: `otlphttp` → `http(s)://<o2>:5080/api/<org>` (**끝 슬래시 금지**, 404), `Authorization: Basic base64(<org>:<o2oi_… 토큰>)`, 로그는 스트림별 `stream-name` 헤더, 메트릭은 메트릭명마다 스트림 자동 생성, gzip 기본값 사용, 사설 CA는 `tls.ca_file`. gRPC(5081)는 `organization` 헤더 필수라 대안으로만 둡니다. (**TBD-3** 참조)
+- **Exporter**: `otlphttp` → `http(s)://<o2>:5080/api/<org>` (**끝 슬래시 금지**, 404), `Authorization: Basic base64(<org>:<o2oi_… 토큰>)`, 로그는 스트림별 `stream-name` 헤더, 메트릭은 메트릭명마다 스트림 자동 생성, gzip 기본값 사용, 사설 CA는 `tls.ca_file`. gRPC(5081)는 대안으로만 둡니다: 원격지 구간의 방화벽/L7 장비가 HTTP/2를 온전히 통과시켜야 하고, 별도 포트와 `organization` 헤더가 필수이며, 배치(1024)·keep-alive 적용 시 호스트당 트래픽 규모에서 성능 이점이 미미합니다. 트레이스 수집 도입 또는 호스트당 수백 KB/s 이상 전송 시 재검토.
 - **커뮤니티판 검증 (OpenObserve v1.0.4 소스)**:
   - 스트림별 보존: `src/compaction/src/retention.rs` `generate_jobs()`가 `stream_settings.data_retention`을 enterprise 게이트 없이 적용, 단 전역 `ZO_COMPACT_DATA_RETENTION_DAYS > 0` 필요(서버 전제).
   - 다중 수집 토큰: `/{org}/ingestion-tokens`(list/create), `/{org}/ingestion-tokens/{name}`(enable/disable) 라우트가 무조건 등록, OSS 분기는 Admin/Root 권한 확인뿐(`src/api/management/src/request/organization/ingestion_tokens.rs`). 토큰은 수집 엔드포인트 전용이며 스트림 단위 스코프는 없습니다.
@@ -177,7 +177,7 @@
   3. 대상 호스트에서 호스트 키(읽기 용도)로 `/etc`를 임시 경로에 복구: `restic restore latest --target /tmp/restore-test-<date> --include /etc`.
   4. 원본과 비교(`diff -r /etc /tmp/restore-test-<date>/etc`, 변경 예상 파일 제외), 소요 시간 측정.
   5. 임시 복구본 삭제.
-  6. 결과서 작성: 일시, 호스트, 스냅샷 ID, 복구 범위, 성공/실패, 소요 시간, 차이점, 개선 조치. 서명자: **TBD-2**.
+  6. 결과서 작성: 일시, 호스트, 스냅샷 ID, 복구 범위, 성공/실패, 소요 시간, 차이점, 개선 조치. 서명(승인): **CISO**.
 - 실패 시 개선 조치를 백로그로 등록하고 다음 분기 테스트에서 재검증.
 
 ---
@@ -216,11 +216,11 @@
 
 ---
 
-## 5. 미결 파라미터 (TBD)
+## 5. 확정된 운영 파라미터
 
-- **TBD-1**: 대상 서버 중 개인정보처리시스템 포함 여부 → `security_logs` 보존 1년/2년 결정.
-- **TBD-2**: 복구 테스트 결과서 서명(승인) 책임자.
-- **TBD-3**: OpenObserve 전송 프로토콜 `otlphttp`(권장) vs gRPC — 조사 권고로 채택했으며 사용자 확인 대기.
+- **개인정보처리시스템 여부**: 대상 서버에 없음 → `security_logs` 보존 1년. 향후 포함되면 2년으로 상향(안전성 확보조치 기준 제8조).
+- **복구 테스트 결과서 승인**: CISO.
+- **OpenObserve 전송 프로토콜**: `otlphttp` 확정 (§2.7).
 
 ---
 
