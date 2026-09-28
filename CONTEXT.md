@@ -19,3 +19,7 @@
 **Raw Provisioning Path**:
 A design for provisioning CentOS 6/7 targets (which lack a Python 3.7+ interpreter, so ansible-core's AnsiballZ module wrapper SyntaxErrors on every standard module call) by driving `ansible.builtin.raw` directly and bypassing AnsiballZ entirely. It supplies its own write-temp/validate/move helper to replace module `validate:` clauses, and its own changed/unchanged sentinel contract to preserve this suite's idempotence guarantee despite `raw` always reporting `changed: true`. Covers `roles/common` + `roles/security`; excludes `roles/docker_engine`. Not yet implemented — currently a design in progress, tracked separately from the standard AnsiballZ-based provisioning this suite otherwise uses.
 _Avoid_: raw fallback, raw mode, raw provisioning (imprecise — always the full canonical name)
+
+**Host Agents**:
+The pair of agents — `otelcol-contrib` (logs + hostmetrics shipped to OpenObserve) and `resticprofile`/`restic` (backups shipped to RustFS over the S3 API) — that are always installed together, never one without the other, on every host in the `servers` group. Collection and backup targets follow the ISMS (not ISMS-P) standard. Their standard configuration is held in Git; per-host overrides and secrets come from OpenBao. Design in progress; not yet implemented.
+_Avoid_: monitoring agent, backup agent (when meaning the pair), sidecar
