@@ -1,0 +1,3 @@
+# Linux-only targets: keep shell scripts, templates and configs LF regardless of
+# core.autocrlf, so hooks and rendered init scripts never get CRLF line endings.
+* text=auto eol=lf

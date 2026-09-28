@@ -107,6 +107,10 @@ while True:
         sys.stdout.flush()
     elif cmd.strip() == "exit":
         break
+    else:
+        # Real IOS reprints the prompt after every command (e.g. terminal length 0)
+        sys.stdout.write("switch-cisco#\\r\\n")
+        sys.stdout.flush()
 """)
 
     mock_bastion.write_text(f"""import sys, subprocess
@@ -161,6 +165,10 @@ while True:
         sys.stdout.flush()
     elif cmd.strip() == "exit":
         break
+    else:
+        # Real IOS reprints the prompt after every command (e.g. terminal length 0)
+        sys.stdout.write("switch-cisco#\\r\\n")
+        sys.stdout.flush()
 """)
 
     mock_switch_bastion.write_text(f"""import sys, subprocess
