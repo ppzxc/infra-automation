@@ -2,6 +2,8 @@
 
 `monitoring` 역할은 OpenTelemetry Collector Contrib(`otelcol-contrib`)을 기반으로 한 온프레미스 단일 에이전트 관제 파이프라인의 배포, 시스템 계정 격리, `hostmetrics` 리시버를 통한 커널/OS 메트릭 수집, 그리고 레거시 `node_exporter` 자동 정리를 수행합니다.
 
+> **재설계 예정 (Host Agents)**: 이 역할은 [ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `playbooks/host_agents.yml` 전용으로 재구성됩니다(수집 표준·스트림·버퍼링·버전 고정·CentOS 6/7 분기). 아래 매트릭스는 **현재 구현**을 기술하며, 계획 태스크는 구현 커밋에서 이 표로 이관됩니다.
+
 ---
 
 ## 1. 개요 및 구현 기능 (What)
