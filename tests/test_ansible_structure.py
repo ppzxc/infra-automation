@@ -25,8 +25,12 @@ def test_ansible_inventory_and_vars():
     assert "servers" in children, "Missing 'servers' group in inventory"
     
     # group_vars verification
+    # all.yml is gitignored (local secrets/overrides); fall back to the tracked
+    # example so fresh clones and worktrees validate the same structure.
     all_vars_file = ROOT_DIR / "inventory" / "group_vars" / "all.yml"
-    assert all_vars_file.exists(), "group_vars/all.yml is missing"
+    if not all_vars_file.exists():
+        all_vars_file = ROOT_DIR / "inventory" / "group_vars" / "all.yml.example"
+    assert all_vars_file.exists(), "group_vars/all.yml(.example) is missing"
     with open(all_vars_file, 'r', encoding='utf-8') as f:
         all_vars = yaml.safe_load(f)
     assert "accounts" in all_vars, "accounts is not defined in all.yml"

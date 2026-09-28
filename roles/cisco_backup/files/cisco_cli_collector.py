@@ -10,6 +10,7 @@ import fcntl
 import json
 import os
 import pty
+import re
 import select
 import socket
 import subprocess
@@ -103,6 +104,9 @@ def extract_clean_config(raw_output: str) -> str:
     return "\n".join(clean_lines).strip() if clean_lines else text.strip()
 
 
+_CONFIG_END_RE = re.compile(rb"(?:^|\n)end\r*\n")
+
+
 def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 30) -> str:
     """Robust interactive logic for Cisco IOS CLI session."""
     def wait_for(pred_fn, wait_timeout=8.0, poll_interval=0.2):
@@ -142,7 +146,9 @@ def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 
         chunk = recv_fn(0.5)
         if chunk:
             out += chunk
-            if b"end\r\n" in chunk or b"end\n" in chunk:
+            # Match on the accumulated buffer: the final "end" line may be split
+            # across reads, and a PTY's onlcr turns "end\r\n" into "end\r\r\n".
+            if _CONFIG_END_RE.search(out):
                 break
             if b"--More--" in chunk or b"--more--" in chunk:
                 send_fn(b" ")
@@ -404,6 +410,7 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
     try:
         # Step 1: Handle Bastion password authentication or immediate shell
         buf = b""
+        shell_buf = b""
         login_start = time.time()
         while time.time() - login_start < 20.0:
             chunk = pty_recv(0.3)
@@ -422,7 +429,9 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
                     buf = b""
                     break
                 elif b"$" in buf or b"#" in buf or b">" in buf:
-                    # Shell prompt reached directly (e.g. pubkey authentication)
+                    # Shell prompt reached directly (e.g. pubkey authentication);
+                    # hand it to Step 2 instead of waiting for a second prompt.
+                    shell_buf = buf
                     break
             if proc.poll() is not None:
                 err_msg = buf.decode(errors="ignore").strip()
@@ -430,17 +439,19 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
 
         # Step 2: Wait for bastion shell prompt ($ or # or >)
         shell_start = time.time()
-        buf = b""
+        buf = shell_buf
         bastion_is_cisco = False
-        while time.time() - shell_start < 10.0:
+        while True:
+            if b"#" in buf or b">" in buf:
+                bastion_is_cisco = True
+                break
+            elif b"$" in buf:
+                break
+            if time.time() - shell_start >= 10.0:
+                break
             chunk = pty_recv(0.3)
             if chunk:
                 buf += chunk
-                if b"#" in buf or b">" in buf:
-                    bastion_is_cisco = True
-                    break
-                elif b"$" in buf:
-                    break
             if proc.poll() is not None:
                 err_msg = buf.decode(errors="ignore").strip()
                 raise RuntimeError(f"Bastion shell exited unexpectedly: {err_msg}")
