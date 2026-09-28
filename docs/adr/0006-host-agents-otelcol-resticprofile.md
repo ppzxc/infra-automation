@@ -36,7 +36,7 @@
 - **미프로비저닝 호스트는 즉시 실패**: 첫 태스크에서 `_is_already_provisioned`를 assert, 아니면 "`site.yml` 먼저 실행". 부트스트랩 root 설치 경로 없음. 신규 호스트는 템플릿 2회(site → Deploy) 실행.
 - **Dry-run**: Config 경로는 check 모드 + `--diff`로 변경 미리보기가 가능해야 합니다.
 - **롤아웃**: 에이전트 play `serial: 25%`; 버전 변경은 runbook대로 `target_hosts`로 카나리 1대 선적용 후 전체.
-- `target_admin_users`는 `resolve_connection`의 필수 변수이므로 세 템플릿 모두 제공해야 합니다.
+- **접속 사용자**: `resolve_connection`이 호스트별로 결정합니다 — OpenBao `hosts/<host>`의 `admin_users`(첫 항목이 SSH 계정) / `bootstrap_user`가 있으면 그 호스트만 해당 계정으로 접속하고, 없으면 템플릿의 `target_admin_users` / `bootstrap_user`를 사용합니다. 따라서 서버마다 다른 관리자 계정으로 Host Agents 설치·설정 변경이 가능하며, 모든 대상 호스트 KV에 `admin_users`가 있으면 템플릿의 `target_admin_users`는 생략할 수 있습니다.
 
 ### 2.2 설정·시크릿 소스 (OpenBao KV 스키마)
 
