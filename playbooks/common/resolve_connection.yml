@@ -64,20 +64,11 @@
       ansible.builtin.set_fact:
         bootstrap_user: "{{ bootstrap_user if (bootstrap_user is defined and bootstrap_user | length > 0) else (lookup('ansible.builtin.env', 'BOOTSTRAP_USER') if (lookup('ansible.builtin.env', 'BOOTSTRAP_USER') | length > 0) else 'root') }}"
 
-    - name: Validate mandatory input variables
-      ansible.builtin.assert:
-        that:
-          - (target_admin_users is defined and target_admin_users | length > 0) or (target_admin_user is defined and target_admin_user | length > 0)
-        fail_msg: >-
-          [ERROR] 필수 변수 'target_admin_users'(또는 'target_admin_user')가 정의되지 않았습니다!
-          Semaphore UI Environment JSON 또는 '-e "target_admin_users=ppzxc"' 형식으로 주입해야 합니다.
-      run_once: true
-
     - name: Normalize target_admin_users list and primary admin user
       vars:
         _admin_source: "{{ (target_admin_users | from_yaml) if (target_admin_users is defined and target_admin_users is string and (target_admin_users | trim).startswith('[')) else (target_admin_users if target_admin_users is defined else target_admin_user) }}"
       ansible.builtin.set_fact:
-        _normalized_admin_users: >-
+        _run_admin_users: >-
           {%- if _admin_source is iterable and _admin_source is not string and _admin_source is not mapping -%}
             {{ _admin_source | list }}
           {%- elif _admin_source is string -%}
@@ -94,10 +85,7 @@
           {%- else -%}
             []
           {%- endif -%}
-
-    - name: Set primary target admin user for connection probing
-      ansible.builtin.set_fact:
-        _primary_admin_user: "{{ _normalized_admin_users | first }}"
+      when: (target_admin_users is defined and target_admin_users | length > 0) or (target_admin_user is defined and target_admin_user | length > 0)
 
     - name: Run OpenBao direct diagnostic health probe from controller
       ansible.builtin.uri:
@@ -206,6 +194,34 @@
         ansible_host: "{{ (_resolved_bao_host if _resolved_bao_host | length > 0 else (hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true)))) }}"
         ansible_port: "{{ ((_resolved_bao_port if (_resolved_bao_port | string | length > 0) else (hostvars[inventory_hostname].ansible_port if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_port is defined) else (ansible_port | default(22)))) | int) }}"
         _openbao_python_interpreter: "{{ _host_dict.ansible_python_interpreter | default('', true) }}"
+        _host_kv_dict: "{{ _host_dict }}"
+
+    # 호스트별 접속 사용자 선택: hosts/<hostname> KV의 admin_users / bootstrap_user가
+    # 있으면 그 호스트에만 적용하고, 없으면 실행 변수(target_admin_users / bootstrap_user)를 사용합니다.
+    - name: Select per-host admin and bootstrap users (host KV > run vars > default)
+      vars:
+        _kv_host: "{{ _host_kv_dict | default({}, true) }}"
+        _kv_admin_source: "{{ _kv_host.admin_users | default([], true) }}"
+        _kv_admin_users: "{{ ([_kv_admin_source] if _kv_admin_source is string else (_kv_admin_source | list)) | map('trim') | select | list }}"
+      ansible.builtin.set_fact:
+        _normalized_admin_users: "{{ _kv_admin_users if (_kv_admin_users | length > 0) else (_run_admin_users | default([])) }}"
+        _admin_users_source: "{{ 'host_kv' if (_kv_admin_users | length > 0) else 'run_vars' }}"
+        # Written to an internal fact: Semaphore passes bootstrap_user as an extra var,
+        # which outranks set_fact, so overriding bootstrap_user itself would be ignored.
+        _bootstrap_user: "{{ _kv_host.bootstrap_user if (_kv_host.bootstrap_user | default('') | length > 0) else bootstrap_user }}"
+
+    - name: Validate an admin user is resolved for every host
+      ansible.builtin.assert:
+        that:
+          - _normalized_admin_users | length > 0
+        fail_msg: >-
+          [ERROR] '{{ inventory_hostname }}'의 관리자 계정을 결정할 수 없습니다!
+          OpenBao hosts/{{ inventory_hostname }} KV에 'admin_users'를 추가하거나,
+          Semaphore UI Environment JSON 또는 '-e "target_admin_users=ppzxc"' 형식으로 'target_admin_users'를 주입해야 합니다.
+
+    - name: Set primary target admin user for connection probing
+      ansible.builtin.set_fact:
+        _primary_admin_user: "{{ _normalized_admin_users | first }}"
 
     - name: Fetch primary admin user credentials from OpenBao (users/<user>)
       ansible.builtin.uri:
@@ -278,7 +294,7 @@
 
     - name: Fetch bootstrap user credentials from OpenBao (users/<user>)
       ansible.builtin.uri:
-        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ bootstrap_user }}"
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ _bootstrap_user }}"
         method: GET
         headers: >-
           {{
@@ -300,7 +316,7 @@
 
     - name: Fallback fetch bootstrap user credentials from OpenBao with secret/ prefix if initial lookup 404
       ansible.builtin.uri:
-        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/secret/{{ openbao_users_prefix }}{{ bootstrap_user }}"
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/secret/{{ openbao_users_prefix }}{{ _bootstrap_user }}"
         method: GET
         headers: >-
           {{
@@ -333,7 +349,7 @@
           admin_url: "{{ _effective_admin_user_resp.url | default('UNSET') }}"
           admin_msg: "{{ _effective_admin_user_resp.msg | default('N/A') }}"
           admin_data_keys: "{{ (_effective_admin_user_resp.json.data.data.keys() | list) if (_effective_admin_user_resp.json is defined and _effective_admin_user_resp.json.data is defined and _effective_admin_user_resp.json.data.data is defined and _effective_admin_user_resp.json.data.data is mapping) else [] }}"
-          bootstrap_user: "{{ bootstrap_user }}"
+          bootstrap_user: "{{ _bootstrap_user }}"
           bootstrap_status: "{{ _effective_bootstrap_user_resp.status | default('UNSET') }}"
           bootstrap_url: "{{ _effective_bootstrap_user_resp.url | default('UNSET') }}"
       when: _effective_admin_user_resp is defined
@@ -350,7 +366,7 @@
         _resolved_admin_entry: "{{ _raw_admin_entry | combine({'password': _admin_fallback_pwd}) if ((_raw_admin_entry.password is not defined or _raw_admin_entry.password | length == 0) and (_admin_fallback_pwd | length > 0)) else _raw_admin_entry }}"
 
         _boot_raw: "{{ _effective_bootstrap_user_resp.json.data.data if (_effective_bootstrap_user_resp is defined and _effective_bootstrap_user_resp.json is defined and _effective_bootstrap_user_resp.json.data is defined and _effective_bootstrap_user_resp.json.data.data is defined) else {} }}"
-        _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[bootstrap_user] if (bootstrap_user in _boot_raw and (_boot_raw[bootstrap_user] is mapping or (_boot_raw[bootstrap_user] is sequence and _boot_raw[bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'root_password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
+        _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[_bootstrap_user] if (_bootstrap_user in _boot_raw and (_boot_raw[_bootstrap_user] is mapping or (_boot_raw[_bootstrap_user] is sequence and _boot_raw[_bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'root_password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
         _boot_list: "{{ _boot_unwrapped if (_boot_unwrapped is sequence and _boot_unwrapped is not string and _boot_unwrapped is not mapping) else [_boot_unwrapped] }}"
         _boot_pwd_matches: "{{ _boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'PASSWORD') | list }}"
         _boot_ssh_matches: "{{ _boot_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list }}"
@@ -555,7 +571,7 @@
 
     - name: Configure connection parameters for unprovisioned host (Bootstrap fallback mode)
       ansible.builtin.set_fact:
-        ansible_user: "{{ _bootstrap_user_entry.username | default(bootstrap_user) }}"
+        ansible_user: "{{ _bootstrap_user_entry.username | default(_bootstrap_user) }}"
         ansible_password: "{{ _bootstrap_user_entry.password | default(omit) }}"
         ansible_ssh_private_key_file: "{{ _boot_key_tempfile.path | default(omit) }}"
         ansible_become_password: "{{ _bootstrap_user_entry.password | default(omit) }}"

@@ -472,9 +472,10 @@ def test_bootstrap_user_default_and_override():
     assert "'root'" in fact_task["ansible.builtin.set_fact"]["bootstrap_user"]
     assert "bootstrap_user if" in fact_task["ansible.builtin.set_fact"]["bootstrap_user"]
 
-    # Check connection parameters use _bootstrap_user_entry.username | default(bootstrap_user)
+    # Check connection parameters use _bootstrap_user_entry.username | default(_bootstrap_user)
+    # (_bootstrap_user = per-host KV override, else the run-level bootstrap_user)
     conn_task = next(t for t in tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
-    assert "_bootstrap_user_entry.username | default(bootstrap_user)" in conn_task["ansible.builtin.set_fact"]["ansible_user"]
+    assert "_bootstrap_user_entry.username | default(_bootstrap_user)" in conn_task["ansible.builtin.set_fact"]["ansible_user"]
 
 
 def test_remote_python_interpreter_configuration():
@@ -543,3 +544,67 @@ def test_remote_python_interpreter_configuration():
 
 
 
+
+
+def _select_users_task(playbook):
+    """Return the per-host user selection task from a playbook's Play 1."""
+    with open(playbook, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+    for task in plays[0]["tasks"]:
+        if task.get("name", "").startswith("Select per-host admin and bootstrap users"):
+            return task
+    raise AssertionError(f"per-host user selection task missing in {playbook}")
+
+
+@pytest.mark.parametrize("playbook", [
+    ROOT_DIR / "playbooks" / "site.yml",
+    ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml",
+])
+def test_per_host_user_selection_precedence(playbook):
+    """hosts/<hostname> KV admin_users / bootstrap_user override the run-level vars for that host only."""
+    task = _select_users_task(playbook)
+    from jinja2.nativetypes import NativeEnvironment
+    env = NativeEnvironment()  # Ansible evaluates templated vars to native types
+
+    def render(expr, ctx):
+        return env.from_string(expr).render(**ctx)
+
+    def resolve(host_kv, run_admins, run_bootstrap):
+        ctx = {"_run_admin_users": run_admins, "bootstrap_user": run_bootstrap}
+        if host_kv is not None:
+            ctx["_host_kv_dict"] = host_kv
+        for name, expr in task["vars"].items():  # vars are ordered; later ones reference earlier ones
+            ctx[name] = render(expr, ctx)
+        facts = task["ansible.builtin.set_fact"]
+        return (
+            render(facts["_normalized_admin_users"], ctx),
+            render(facts["_admin_users_source"], ctx),
+            render(facts["_bootstrap_user"], ctx),
+        )
+
+    # No host fields: current behaviour is kept (run vars win).
+    assert resolve({"ansible_host": "10.0.0.1"}, ["ppzxc"], "root") == (["ppzxc"], "run_vars", "root")
+    # Host KV lookup skipped entirely (_host_kv_dict undefined).
+    assert resolve(None, ["ppzxc"], "root") == (["ppzxc"], "run_vars", "root")
+    # Host KV list overrides run vars; first entry becomes the SSH user.
+    assert resolve({"admin_users": ["svcadm", "ppzxc"]}, ["ppzxc"], "root") == (["svcadm", "ppzxc"], "host_kv", "root")
+    # Host KV string is accepted as a single user; bootstrap_user override.
+    assert resolve({"admin_users": "svcadm", "bootstrap_user": "centos"}, ["ppzxc"], "root") == (["svcadm"], "host_kv", "centos")
+    # Empty host values fall back to run vars.
+    assert resolve({"admin_users": [], "bootstrap_user": ""}, ["ppzxc"], "root") == (["ppzxc"], "run_vars", "root")
+    # Neither source: empty list (the following assert task fails the host).
+    assert resolve({}, [], "root") == ([], "run_vars", "root")
+
+
+def test_per_host_bootstrap_override_survives_extra_vars():
+    """Semaphore passes bootstrap_user as an extra var, which outranks set_fact, so the
+    host KV override must land in an internal fact that downstream tasks read."""
+    for playbook in (ROOT_DIR / "playbooks" / "site.yml", ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml"):
+        task = _select_users_task(playbook)
+        assert "bootstrap_user" not in task["ansible.builtin.set_fact"], f"{playbook}: must not set_fact bootstrap_user directly"
+        assert "_bootstrap_user" in task["ansible.builtin.set_fact"]
+        content = playbook.read_text(encoding="utf-8")
+        after = content[content.index("Select per-host admin and bootstrap users"):]
+        after = after[after.index("\n", after.index("_bootstrap_user:")):]
+        assert "{{ bootstrap_user }}" not in after.replace("bootstrap_user: \"{{ _bootstrap_user }}\"", ""), \
+            f"{playbook}: downstream tasks must read _bootstrap_user"

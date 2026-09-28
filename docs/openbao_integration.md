@@ -63,6 +63,20 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
     "ssh_user": "ppzxc"
   }
   ```
+  > `ssh_user`는 IDC 메타데이터 필드로 **플레이북이 읽지 않습니다**(기존 호스트의 동작이 바뀌지 않도록 의도적으로 무시). 접속 계정을 바꾸려면 아래 `admin_users`를 사용하세요.
+
+  **호스트별 접속 사용자 선택 (선택 필드)**: 해당 호스트에서만 실행 변수를 덮어씁니다. 필드가 없으면 기존 동작(실행 변수 `target_admin_users` / `bootstrap_user`, 기본값 `root`)을 그대로 따릅니다.
+  ```json
+  {
+    "ansible_host": "39.116.31.40",
+    "admin_users": ["svcadm", "ppzxc"],
+    "bootstrap_user": "centos"
+  }
+  ```
+  * `admin_users`: 이 호스트의 관리자 목록(문자열 1개도 허용). **첫 번째 항목이 SSH 접속 계정**이 되며, 목록 전체가 `common` 역할의 `accounts`로 프로비저닝됩니다. 각 사용자의 자격증명은 `users/<user>`에서 조회합니다.
+  * `bootstrap_user`: 이 호스트의 부트스트랩(최초 접속) 계정.
+  * 우선순위: **호스트 KV > 실행 변수 > 기본값**. 어느 쪽에서도 관리자를 결정할 수 없으면 해당 호스트만 실패합니다.
+
   또는 호스트명 키 래핑 사용:
   ```json
   {
@@ -99,7 +113,7 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   ```
 
 ### (3) 부트스트랩 접속 및 관리자 자동 폴백 메커니즘
-* `site.yml` 실행 시 `bootstrap_user`와 `target_admin_users`를 필수로 주입받습니다.
+* `target_admin_users`와 `bootstrap_user`는 실행 단위 기본값입니다. 호스트 KV(`hosts/<hostname>`)의 `admin_users` / `bootstrap_user`가 있으면 그 호스트에서는 KV 값이 우선합니다 ([(1) 호스트별 개별 접속 정보](#1-호스트별-개별-접속-정보) 참고). `target_admin_users`는 모든 대상 호스트의 KV에 `admin_users`가 있을 때만 생략할 수 있습니다.
 * **1차 시도 (관리자 접속)**: OpenBao `users/<target_admin_user>`의 SSH Private Key로 타겟 호스트 접속을 시도합니다. 성공 시 이미 프로비저닝된 상태로 판단하여 해당 키로 플레이북을 실행합니다.
 * **2차 시도 (부트스트랩 폴백)**: 관리자 SSH 연결 실패 시 신규 호스트로 판단, OpenBao `users/<bootstrap_user>`에서 패스워드/키를 취득하여 `ansible_user=bootstrap_user`로 자동 폴백 접속 후 프로비저닝을 수행합니다. 프로비저닝이 완료되면 `root` 원격 접속은 차단되고 등록된 관리자 계정만 유지됩니다.
 
