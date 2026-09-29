@@ -3,6 +3,16 @@
   ansible.builtin.service:
     name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
     state: restarted
+  when: not (raw_provisioning_path | default(false) | bool)
+
+# Raw Provisioning Path (ADR-0005): the service module needs AnsiballZ, which
+# CentOS 6/7 cannot run. `service` works on both SysV and systemd (CentOS 7).
+- name: Restart sshd (raw)
+  ansible.builtin.raw: service sshd restart
+  listen: Restart sshd
+  changed_when: true
+  failed_when: false
+  when: raw_provisioning_path | default(false) | bool
 
 - name: Restart ufw
   community.general.ufw:
