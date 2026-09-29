@@ -180,6 +180,19 @@
     - item.sudo | default(item.tier | default('user') == 'admin') | bool
 
 - name: "[COMMON-015] Deploy SSH public keys for accounts"
+  # A key listed in both accounts[].keys and accounts[].revoked_keys (e.g. rotation lag,
+  # or a static inventory definition that hasn't dropped the old key yet) must never be
+  # deployed here -- otherwise this task re-adds it and COMMON-022 removes it again every
+  # single run, flip-flopping `changed` forever. Compared by type+blob (first two
+  # whitespace-separated tokens) so a different comment or trailing newline still matches.
+  vars:
+    _key_fp: "{{ (item.1.split()[:2] | join(' ')) if (item.1 | trim | length > 0) else '' }}"
+    _revoked_fps: >-
+      {%- set fps = [] -%}
+      {%- for rk in (item.0.revoked_keys | default([])) -%}
+        {%- set _ = fps.append(rk.split()[:2] | join(' ')) -%}
+      {%- endfor -%}
+      {{ fps }}
   ansible.posix.authorized_key:
     user: "{{ item.0.name }}"
     key: "{{ item.1 }}"
@@ -192,6 +205,35 @@
     - item.0.name is defined
     - item.0.state | default('present') != 'absent'
     - item.1 | trim | length > 0
+    - _key_fp not in _revoked_fps
+
+- name: "[COMMON-022] Revoke SSH public keys listed in accounts[].revoked_keys"
+  ansible.posix.authorized_key:
+    user: "{{ item.0.name }}"
+    key: "{{ item.1 }}"
+    state: absent
+  loop: "{{ accounts | default([]) | subelements('revoked_keys', skip_missing=True) }}"
+  ignore_errors: "{{ ansible_check_mode }}"
+  when:
+    - accounts is defined
+    - accounts | length > 0
+    - item.0.name is defined
+    - item.0.state | default('present') != 'absent'
+    - item.1 | trim | length > 0
+
+- name: "[COMMON-023] Remove passwordless sudoers drop-in for removed accounts"
+  # COMMON-014 only writes /etc/sudoers.d/90-<user> for present admin accounts and never
+  # cleans it up, so a removed (state: absent) account's drop-in would otherwise survive
+  # deletion. If the same username is ever recreated it would inherit instant NOPASSWD sudo.
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/90-{{ item.name }}"
+    state: absent
+  loop: "{{ accounts | default([]) }}"
+  when:
+    - accounts is defined
+    - accounts | length > 0
+    - item.name is defined
+    - item.state | default('present') == 'absent'
 
 - name: "[COMMON-016] Configure system security limits (nofile/nproc)"
   community.general.pam_limits:

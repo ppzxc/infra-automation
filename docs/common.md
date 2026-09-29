@@ -82,4 +82,6 @@
 | `COMMON-019` | `Deploy node environment variables drop-in (/etc/profile.d/98-node-env.sh)` | `ansible.builtin.template` | All | Checksum 비교 (`node-env.sh.j2`) |
 | `COMMON-020` | `Deploy system-wide environment variables (/etc/environment)` | `ansible.builtin.template` | All | Checksum 비교 (`environment.j2`) |
 | `COMMON-021` | `Ensure tzdata package is installed before timezone configuration (Debian/Ubuntu)` | `ansible.builtin.apt` | Debian, Ubuntu | 패키지 기설치 시 `ok` |
+| `COMMON-022` | `Revoke SSH public keys listed in accounts[].revoked_keys` | `ansible.posix.authorized_key` | All | 키가 이미 제거되어 있으면 `ok` |
+| `COMMON-023` | `Remove passwordless sudoers drop-in for removed accounts` | `ansible.builtin.file` | All | 파일이 이미 없으면 `ok` |
 

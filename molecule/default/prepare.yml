@@ -80,3 +80,24 @@
         state: directory
         mode: "0755"
       when: ansible_os_family == "Debian"
+
+    # Simulates a host that already went through a prior converge where
+    # "infra-removed" was a present admin account (COMMON-013/COMMON-014
+    # created the user and its NOPASSWD sudoers drop-in). This scenario's
+    # group_vars/all.yml accounts list now declares it `state: absent`, so
+    # [VERIFY-COMMON-023] can prove the drop-in is actually cleaned up on
+    # removal, not merely absent because it was never created.
+    - name: "[PREPARE-004] Seed a pre-existing account and stale sudoers drop-in for the removal scenario"
+      block:
+        - name: "[PREPARE-004-USER] Create the to-be-removed account"
+          ansible.builtin.user:
+            name: infra-removed
+            state: present
+        - name: "[PREPARE-004-SUDOERS] Seed its stale passwordless sudoers drop-in"
+          ansible.builtin.copy:
+            content: "infra-removed ALL=(ALL) NOPASSWD:ALL\n"
+            dest: /etc/sudoers.d/90-infra-removed
+            owner: root
+            group: root
+            mode: "0440"
+            validate: "visudo -cf %s"

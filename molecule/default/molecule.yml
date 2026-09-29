@@ -127,6 +127,23 @@ provisioner:
             tier: "user"
             keys:
               - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyForViewer viewer@molecule"
+          # Exercises COMMON-022 (#26): the key is still listed so COMMON-015
+          # deploys it first, then revoked_keys must remove that exact key,
+          # leaving only the surviving one -- proving revocation actually ran
+          # rather than the key having never existed.
+          - name: "infra-legacy"
+            tier: "operator"
+            keys:
+              - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyForLegacyKept legacy@molecule"
+              - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyToRevoke legacy-old@molecule"
+            revoked_keys:
+              - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestMoleculeKeyToRevoke legacy-old@molecule"
+          # Exercises COMMON-013 (user removal) and COMMON-023 (#26): prepare.yml
+          # seeds this account and its NOPASSWD sudoers drop-in beforehand so
+          # verify.yml can prove the account and the drop-in are both gone,
+          # not merely absent because they were never created.
+          - name: "infra-removed"
+            state: "absent"
         enable_vault_ssh_ca: false
         enable_boundary: false
         firewall_allowed_tcp_ports:
