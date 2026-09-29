@@ -53,7 +53,6 @@
 |---|---|---|---|---|
 | `SEC-001` | `Configure SSH Hardening parameters` | `ansible.builtin.lineinfile` | All | 정규식 매칭 및 상태 일치 시 `ok` (`validate: sshd -t`) |
 
-> **Raw Provisioning Path (CentOS 6/7, `raw_provisioning_path: true`)**: `SEC-001`은 `ansible.builtin.raw`로 대체된다(`SEC-001-RAW-READ`/`SEC-001-RAW-PROBE`/`SEC-001-RAW`, drop-in 제거는 `SEC-001-DROPIN-RAW`). 로컬에서 계산한 콘텐츠의 해시·모드와 원격 `sha256sum`/`stat` 결과가 같으면 `ok`, `sshd -t -f` 검증 실패 시 임시 파일 삭제 후 태스크 실패. 헬퍼: `filter_plugins/raw_provisioning.py` (ADR-0005). `--check`에서는 스킵된다.
 | `SEC-002` | `Ensure UFW is installed (Debian)` | `ansible.builtin.apt` | Debian, Ubuntu | 패키지 기설치 시 `ok` |
 | `SEC-003` | `Allow incoming TCP ports via UFW (Debian)` | `community.general.ufw` | Debian, Ubuntu | 룰 기등록 시 `ok` |
 | `SEC-004` | `Enable UFW with default deny incoming (Debian)` | `community.general.ufw` | Debian, Ubuntu | UFW 활성화 상태면 `ok` |
@@ -74,6 +73,12 @@
 | `SEC-019` | `Configure custom firewall ingress rules with source IP restrictions (UFW)` | `community.general.ufw` | Debian, Ubuntu | 룰 기등록 시 `ok` |
 | `SEC-020` | `Configure custom firewall ingress rules with source IP restrictions (firewalld)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | Rich Rule 기등록 시 `ok` |
 | `SEC-021` | `Configure custom firewall ingress rules with source IP restrictions (iptables)` | `ansible.builtin.iptables` | CentOS 6 | iptables 체인 룰 확인 후 적용 |
+| `SEC-022` | `Remove conflicting sshd_config.d drop-in files (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 파일 존재 시에만 삭제 후 `changed` |
+| `SEC-023` | `Read current sshd_config (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-024` | `Probe sshd_config hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-025` | `Configure SSH Hardening parameters via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 로컬 해시·모드가 원격 `sha256sum`/`stat`과 같으면 `ok` (`sshd -t -f` 검증 실패 시 임시 파일 삭제 후 실패) |
+
+> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가 실행되고, `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
 
 

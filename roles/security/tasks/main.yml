@@ -11,7 +11,7 @@
 # modules, so the sshd drop-in removal and the SEC-001 write use
 # ansible.builtin.raw. Enabled with raw_provisioning_path=true. raw is skipped
 # under --check (ADR-0005 Option A).
-- name: "[SEC-001-DROPIN-RAW] Remove conflicting sshd_config.d drop-in files (raw)"
+- name: "[SEC-022] Remove conflicting sshd_config.d drop-in files (raw)"
   ansible.builtin.raw: >-
     if [ -e /etc/ssh/sshd_config.d/01-permitrootlogin.conf ];
     then rm -f /etc/ssh/sshd_config.d/01-permitrootlogin.conf && echo removed; fi
@@ -41,21 +41,21 @@
 # Content-push sentinel (ADR-0005 2.1): read the current file, compute the
 # desired content locally (lineinfile semantics), probe remote sha256+mode, and
 # report changed only when either differs. Both reads tolerate a missing file.
-- name: "[SEC-001-RAW-READ] Read current sshd_config (raw)"
+- name: "[SEC-023] Read current sshd_config (raw)"
   ansible.builtin.raw: cat /etc/ssh/sshd_config
   register: sec001_raw_current
   changed_when: false
   failed_when: false
   when: raw_provisioning_path | default(false) | bool
 
-- name: "[SEC-001-RAW-PROBE] Probe sshd_config hash and mode (raw)"
+- name: "[SEC-024] Probe sshd_config hash and mode (raw)"
   ansible.builtin.raw: "{{ '/etc/ssh/sshd_config' | raw_probe_cmd }}"
   register: sec001_raw_probe
   changed_when: false
   failed_when: false
   when: raw_provisioning_path | default(false) | bool
 
-- name: "[SEC-001-RAW] Configure SSH Hardening parameters via write-temp/validate/move (raw)"
+- name: "[SEC-025] Configure SSH Hardening parameters via write-temp/validate/move (raw)"
   ansible.builtin.raw: >-
     {{ sec001_raw_content | raw_push_cmd('/etc/ssh/sshd_config', 'root', 'root', '0600',
     '/usr/sbin/sshd -t -f %s') }}
