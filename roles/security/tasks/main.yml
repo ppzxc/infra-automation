@@ -5,20 +5,7 @@
     path: /etc/ssh/sshd_config.d/01-permitrootlogin.conf
     state: absent
   notify: Restart sshd
-  when: not (raw_provisioning_path | default(false) | bool)
-
-# Raw Provisioning Path (ADR-0005): CentOS 6/7 targets cannot run AnsiballZ
-# modules, so the sshd drop-in removal and the SEC-001 write use
-# ansible.builtin.raw. Enabled with raw_provisioning_path=true. raw is skipped
-# under --check (ADR-0005 Option A).
-- name: "[SEC-022] Remove conflicting sshd_config.d drop-in files (raw)"
-  ansible.builtin.raw: >-
-    if [ -e /etc/ssh/sshd_config.d/01-permitrootlogin.conf ];
-    then rm -f /etc/ssh/sshd_config.d/01-permitrootlogin.conf && echo removed; fi
-  register: sec001_dropin_raw
-  changed_when: "'removed' in (sec001_dropin_raw.stdout | default(''))"
-  when: raw_provisioning_path | default(false) | bool
-  notify: Restart sshd
+  when: not raw_provisioning_path | bool
 
 - name: "[SEC-001] Configure SSH Hardening parameters"
   ansible.builtin.lineinfile:
@@ -27,57 +14,59 @@
     line: "{{ item.line }}"
     state: present
     validate: '/usr/sbin/sshd -t -f %s'
-  loop:
-    - { regexp: '^#?Port', line: 'Port {{ ssh_port | default(22) }}' }
-    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin {{ ssh_permit_root_login }}' }
-    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication {{ ssh_password_authentication }}' }
-    - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication {{ ssh_pubkey_authentication }}' }
-    - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries {{ ssh_max_auth_tries }}' }
-    - { regexp: '^#?ClientAliveInterval', line: 'ClientAliveInterval {{ ssh_client_alive_interval }}' }
-    - { regexp: '^#?ClientAliveCountMax', line: 'ClientAliveCountMax {{ ssh_client_alive_count_max }}' }
-  when: not (raw_provisioning_path | default(false) | bool)
+  loop: "{{ ssh_hardening_directives }}"
+  when: not raw_provisioning_path | bool
   notify: Restart sshd
 
-# Content-push sentinel (ADR-0005 2.1): read the current file, compute the
-# desired content locally (lineinfile semantics), probe remote sha256+mode, and
-# report changed only when either differs. Both reads tolerate a missing file.
-- name: "[SEC-023] Read current sshd_config (raw)"
-  ansible.builtin.raw: cat /etc/ssh/sshd_config
-  register: sec001_raw_current
-  changed_when: false
-  # An unreadable/empty sshd_config must abort: otherwise SEC-025 would rebuild
-  # the file from only the managed directives and overwrite the real config.
-  failed_when: (sec001_raw_current.rc | default(1)) != 0 or (sec001_raw_current.stdout | default('') | trim | length) == 0
-  when: raw_provisioning_path | default(false) | bool
-
-- name: "[SEC-024] Probe sshd_config hash and mode (raw)"
-  ansible.builtin.raw: "{{ '/etc/ssh/sshd_config' | raw_probe_cmd }}"
-  register: sec001_raw_probe
-  changed_when: false
-  failed_when: false
-  when: raw_provisioning_path | default(false) | bool
-
-- name: "[SEC-025] Configure SSH Hardening parameters via write-temp/validate/move (raw)"
-  ansible.builtin.raw: >-
-    {{ sec001_raw_content | raw_push_cmd('/etc/ssh/sshd_config', 'root', 'root', '0600',
-    '/usr/sbin/sshd -t -f %s') }}
+# Raw Provisioning Path (ADR-0005): CentOS 6/7 targets cannot run AnsiballZ
+# modules, so SEC-001 is applied with ansible.builtin.raw. Enabled with
+# raw_provisioning_path=true; raw is skipped under --check (ADR-0005 Option A).
+# Content-push sentinel: read the current file, compute the desired content
+# locally (lineinfile semantics), probe remote sha256+mode, and report changed
+# only when either differs.
+- name: SEC-001 raw provisioning path (CentOS 6/7)
+  when: raw_provisioning_path | bool
   vars:
-    sec001_raw_content: >-
-      {{ (sec001_raw_current.stdout | default('')) | raw_set_directives([
-        {'regexp': '^#?Port', 'line': 'Port ' ~ (ssh_port | default(22))},
-        {'regexp': '^#?PermitRootLogin', 'line': 'PermitRootLogin ' ~ ssh_permit_root_login},
-        {'regexp': '^#?PasswordAuthentication', 'line': 'PasswordAuthentication ' ~ ssh_password_authentication},
-        {'regexp': '^#?PubkeyAuthentication', 'line': 'PubkeyAuthentication ' ~ ssh_pubkey_authentication},
-        {'regexp': '^#?MaxAuthTries', 'line': 'MaxAuthTries ' ~ ssh_max_auth_tries},
-        {'regexp': '^#?ClientAliveInterval', 'line': 'ClientAliveInterval ' ~ ssh_client_alive_interval},
-        {'regexp': '^#?ClientAliveCountMax', 'line': 'ClientAliveCountMax ' ~ ssh_client_alive_count_max}
-      ]) }}
-  register: sec001_raw_push
-  changed_when: >-
-    (sec001_raw_probe.stdout | default('')) | raw_push_changed(sec001_raw_content, '0600')
-  failed_when: sec001_raw_push.rc | default(0) != 0
-  when: raw_provisioning_path | default(false) | bool
-  notify: Restart sshd
+    sec001_raw_dest: /etc/ssh/sshd_config
+    sec001_raw_owner: root
+    sec001_raw_group: root
+    sec001_raw_mode: '0600'
+  block:
+    - name: "[SEC-023] Read current sshd_config (raw)"
+      ansible.builtin.raw: "{{ sec001_raw_dest | raw_read_cmd }}"
+      register: sec001_raw_current
+      changed_when: false
+      # An unreadable/empty sshd_config must abort: otherwise SEC-025 would
+      # rebuild the file from only the managed directives.
+      failed_when: (sec001_raw_current.stdout | default('') | raw_read_extract) is none
+
+    - name: "[SEC-024] Probe sshd_config hash and mode (raw)"
+      ansible.builtin.raw: "{{ sec001_raw_dest | raw_probe_cmd }}"
+      register: sec001_raw_probe
+      changed_when: false
+      failed_when: false
+
+    - name: "[SEC-025] Configure SSH Hardening parameters via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ sec001_raw_content | raw_push_cmd(sec001_raw_dest, sec001_raw_owner, sec001_raw_group, sec001_raw_mode,
+        '/usr/sbin/sshd -t -f %s') }}
+      vars:
+        sec001_raw_content: >-
+          {{ (sec001_raw_current.stdout | raw_read_extract) | raw_set_directives(ssh_hardening_directives) }}
+      register: sec001_raw_push
+      changed_when: >-
+        (sec001_raw_probe.stdout | default('')) | raw_push_changed(sec001_raw_content, sec001_raw_mode)
+      failed_when: sec001_raw_push.rc | default(0) != 0
+      notify: Restart sshd
+
+    # Removed only after the new sshd_config passed validation and was moved in.
+    - name: "[SEC-022] Remove conflicting sshd_config.d drop-in files (raw)"
+      ansible.builtin.raw: >-
+        if [ -e /etc/ssh/sshd_config.d/01-permitrootlogin.conf ];
+        then rm -f /etc/ssh/sshd_config.d/01-permitrootlogin.conf && echo removed; fi
+      register: sec001_dropin_raw
+      changed_when: "'removed' in (sec001_dropin_raw.stdout | default(''))"
+      notify: Restart sshd
 
 # 2. Firewall configuration (UFW for Debian/Ubuntu)
 - name: "[SEC-002] Ensure UFW is installed (Debian)"

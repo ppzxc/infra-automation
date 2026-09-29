@@ -813,14 +813,13 @@
         ansible_distribution: CentOS
         ansible_distribution_major_version: "{{ raw_os_release.stdout | regex_search('[0-9]+') }}"
         ansible_distribution_version: "{{ raw_os_release.stdout | regex_search('[0-9]+(\\.[0-9]+)*') | default('unknown', true) }}"
-        ansible_kernel: "n/a (raw)"
       when: raw_provisioning_path | default(false) | bool
 
     - name: Verify connectivity and OS facts
       ansible.builtin.debug:
         msg:
           "진행 단계": "호스트 기본 OS 환경 및 연결 확인 완료"
-          "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }} / 커널 {{ ansible_kernel }})"
+          "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }} / 커널 {{ ansible_kernel | default('n/a') }})"
           "실행 사용자": "{{ ansible_user }} (Sudo 권한 승격: 활성화)"
           "Python 인터프리터": "{{ ansible_python_interpreter }}"
 

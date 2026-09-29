@@ -11,6 +11,16 @@ ssh_client_alive_count_max: 2
 # usable Python; SEC-001 is then applied with ansible.builtin.raw.
 raw_provisioning_path: false
 
+# SEC-001 directives, shared by the lineinfile path and the raw path.
+ssh_hardening_directives:
+  - { regexp: '^#?Port', line: 'Port {{ ssh_port | default(22) }}' }
+  - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin {{ ssh_permit_root_login }}' }
+  - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication {{ ssh_password_authentication }}' }
+  - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication {{ ssh_pubkey_authentication }}' }
+  - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries {{ ssh_max_auth_tries }}' }
+  - { regexp: '^#?ClientAliveInterval', line: 'ClientAliveInterval {{ ssh_client_alive_interval }}' }
+  - { regexp: '^#?ClientAliveCountMax', line: 'ClientAliveCountMax {{ ssh_client_alive_count_max }}' }
+
 # SSH 허용 출발지 IP 목록 (정의 시 지정된 IP/서브넷에 한해서만 ssh_port 허용, 비어있을 경우 0.0.0.0/0 개방)
 ssh_allowed_source_ips: []
 

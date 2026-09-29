@@ -17,7 +17,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
 from raw_provisioning import (  # noqa: E402
-    raw_probe_cmd, raw_push_changed, raw_push_cmd, raw_set_directives,
+    raw_probe_cmd, raw_push_changed, raw_push_cmd, raw_read_cmd,
+    raw_read_extract, raw_set_directives,
 )
 
 OWNER = getpass.getuser()
@@ -138,3 +139,46 @@ def test_set_directives_replaces_or_appends_like_lineinfile():
     # applying again is a fixed point (idempotent)
     assert raw_set_directives(out, [
         {"regexp": "^#?Port", "line": "Port 2222"}]) == out
+
+
+def test_sentinel_ignores_banner_noise_around_probe(tmp_path):
+    dest = tmp_path / "f"
+    push(dest, mode="0640")
+    noisy = "Welcome to legacy host\r\n" + probe(dest).replace("\n", "\r\n") + "motd\r\n"
+    assert raw_push_changed(noisy, CONTENT, "0640") is False
+
+
+def test_read_roundtrips_content_despite_banner_noise(tmp_path):
+    src = tmp_path / "sshd_config"
+    src.write_text(CONTENT)
+    out = sh(raw_read_cmd(str(src))).stdout
+    noisy = "banner\r\n" + out.replace("\n", "\r\n") + "trailer\r\n"
+    assert raw_read_extract(noisy).strip() == CONTENT.strip()
+
+
+def test_read_of_missing_or_empty_file_is_none(tmp_path):
+    assert raw_read_extract(sh(raw_read_cmd(str(tmp_path / "nope"))).stdout) is None
+    empty = tmp_path / "empty"
+    empty.write_text("")
+    assert raw_read_extract(sh(raw_read_cmd(str(empty))).stdout) is None
+    assert raw_read_extract(None) is None
+
+
+def _walk_tasks(tasks):
+    for t in tasks:
+        yield t
+        for key in ("block", "rescue", "always"):
+            yield from _walk_tasks(t.get(key, []) or [])
+
+
+def test_raw_tasks_declare_change_control_and_no_lineinfile_directive_duplication():
+    import yaml
+    role = ROOT_DIR / "roles" / "security"
+    tasks = list(_walk_tasks(yaml.safe_load((role / "tasks" / "main.yml").read_text())))
+    raw = [t for t in tasks if "ansible.builtin.raw" in t]
+    assert raw, "expected raw tasks in the security role"
+    for t in raw:
+        assert "changed_when" in t, t["name"]
+        assert "failed_when" in t or t["name"].startswith("[SEC-022]"), t["name"]
+    # both paths share one directive list
+    assert "ssh_hardening_directives" in (role / "defaults" / "main.yml").read_text()

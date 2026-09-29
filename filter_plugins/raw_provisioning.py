@@ -21,22 +21,47 @@ def raw_sha256(content):
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
+PROBE_MARKER = '__RAW_PROBE__'
+READ_BEGIN = '__RAW_BEGIN__'
+READ_END = '__RAW_END__'
+
+
 def raw_probe_cmd(dest):
-    """Print '<sha256> <mode>' for dest; both fields are empty if it is absent."""
+    """Print '__RAW_PROBE__ <sha256> <mode>' for dest; fields are empty if absent.
+
+    The marker lets the sentinel ignore login banners or other raw noise.
+    """
     d = shlex.quote(dest)
-    return ("printf '%s %s\\n' "
+    return ("printf '%s %s %s\\n' '{m}' "
             "\"$(sha256sum {d} 2>/dev/null | cut -d' ' -f1)\" "
-            "\"$(stat -c %a {d} 2>/dev/null)\"").format(d=d)
+            "\"$(stat -c %a {d} 2>/dev/null)\"").format(m=PROBE_MARKER, d=d)
 
 
 def raw_push_changed(probe_stdout, content, mode):
     """Sentinel: changed when the remote hash OR mode differs.
 
-    An absent dest yields an empty probe, which never equals the expected
-    value, so first provisioning is reported as changed without special-casing.
+    An absent dest (or unusable probe) never equals the expected value, so
+    first provisioning is reported as changed without special-casing.
     """
-    expected = '%s %s' % (raw_sha256(content), _mode_octal(mode))
-    return (probe_stdout or '').strip() != expected
+    expected = '%s %s %s' % (PROBE_MARKER, raw_sha256(content), _mode_octal(mode))
+    lines = [ln.strip() for ln in (probe_stdout or '').splitlines()
+             if ln.strip().startswith(PROBE_MARKER)]
+    return not lines or lines[-1] != expected
+
+
+def raw_read_cmd(path):
+    """cat path between markers, reporting cat's exit status."""
+    return ("printf '\\n{b}\\n'; cat {p}; rc=$?; printf '\\n{e} %s\\n' \"$rc\"; exit 0"
+            ).format(b=READ_BEGIN, e=READ_END, p=shlex.quote(path))
+
+
+def raw_read_extract(stdout):
+    """File content from raw_read_cmd output, or None if unreadable/empty."""
+    m = re.search(r'%s\r?\n(.*)\r?\n%s (\d+)' % (READ_BEGIN, READ_END),
+                  (stdout or '').replace('\r\n', '\n'), re.S)
+    if not m or m.group(2) != '0' or not m.group(1).strip():
+        return None
+    return m.group(1)
 
 
 def raw_push_cmd(content, dest, owner, group, mode, validate):
@@ -77,7 +102,8 @@ def raw_set_directives(current, directives):
 class FilterModule(object):
     def filters(self):
         return {
-            'raw_sha256': raw_sha256,
+            'raw_read_cmd': raw_read_cmd,
+            'raw_read_extract': raw_read_extract,
             'raw_probe_cmd': raw_probe_cmd,
             'raw_push_changed': raw_push_changed,
             'raw_push_cmd': raw_push_cmd,
