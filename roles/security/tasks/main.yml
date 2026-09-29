@@ -45,7 +45,9 @@
   ansible.builtin.raw: cat /etc/ssh/sshd_config
   register: sec001_raw_current
   changed_when: false
-  failed_when: false
+  # An unreadable/empty sshd_config must abort: otherwise SEC-025 would rebuild
+  # the file from only the managed directives and overwrite the real config.
+  failed_when: (sec001_raw_current.rc | default(1)) != 0 or (sec001_raw_current.stdout | default('') | trim | length) == 0
   when: raw_provisioning_path | default(false) | bool
 
 - name: "[SEC-024] Probe sshd_config hash and mode (raw)"
