@@ -223,6 +223,94 @@
       ansible.builtin.set_fact:
         _primary_admin_user: "{{ _normalized_admin_users | first }}"
 
+    # 계정 삭제(Explicit account removal): 호스트 KV의 'removed_users'와 실행 변수
+    # 'target_removed_users'(문자열/리스트/JSON 문자열 모두 허용)를 합집합으로 통합합니다.
+    # Semaphore의 extra vars가 set_fact보다 우선하므로 내부 변수 _removed_users에 저장합니다.
+    - name: Resolve accounts to remove (host KV removed_users + run var, deduped)
+      vars:
+        _kv_removed_source: "{{ (_host_kv_dict | default({}, true)).removed_users | default([], true) }}"
+        _kv_removed_users: "{{ ([_kv_removed_source] if _kv_removed_source is string else (_kv_removed_source | list)) | map('trim') | select | list }}"
+        _run_removed_source: "{{ (target_removed_users | from_yaml) if (target_removed_users is defined and target_removed_users is string and (target_removed_users | trim).startswith('[')) else (target_removed_users if target_removed_users is defined else []) }}"
+        _run_removed_users: >-
+          {%- if _run_removed_source is string -%}
+            {%- set cleaned = [] -%}
+            {%- set q1 = "'" -%}
+            {%- set q2 = '"' -%}
+            {%- for item in _run_removed_source.replace('[', '').replace(']', '').replace(q1, '').replace(q2, '').split(',') -%}
+              {%- set clean_item = item | trim -%}
+              {%- if clean_item | length > 0 -%}
+                {%- set _ = cleaned.append(clean_item) -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ cleaned }}
+          {%- else -%}
+            {{ _run_removed_source | list }}
+          {%- endif -%}
+      ansible.builtin.set_fact:
+        _removed_users: "{{ (_kv_removed_users + _run_removed_users) | unique(case_sensitive=true) | list }}"
+
+    - name: Fetch per-host user credential overrides from OpenBao (hosts/<hostname>/users/<user>)
+      ansible.builtin.uri:
+        url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_hosts_prefix }}{{ inventory_hostname }}/users/{{ item }}"
+        method: GET
+        headers: >-
+          {{
+            {
+              'X-Vault-Token': _vault_token
+            } | combine(
+              {'X-Vault-Namespace': openbao_namespace} if (openbao_namespace | length > 0) else {}
+            )
+          }}
+        status_code: [-1, 200, 403, 404]
+        timeout: 5
+        validate_certs: false
+      register: _openbao_host_users_resp
+      loop: "{{ _normalized_admin_users }}"
+      ignore_errors: true
+      check_mode: false
+      when: (_vault_token | default('') | length) > 0
+
+    # hosts/<hostname>/users/<user>는 평면(flat) 구조입니다: 존재하는 키만 오버라이드로 채택합니다
+    # (값의 존재 여부로 판단합니다 -- 호스트가 ssh_passphrase: "" 로 명시하면 상속된 값을 지웁니다).
+    - name: Build per-host user credential overrides
+      ansible.builtin.set_fact:
+        _host_user_overrides: >-
+          {%- set overrides = {} -%}
+          {%- if _openbao_host_users_resp.results is defined -%}
+            {%- for res in _openbao_host_users_resp.results -%}
+              {%- if res.status is defined and res.status == 200 and res.json is defined and res.json.data is defined and res.json.data.data is defined and res.json.data.data is mapping -%}
+                {%- set raw = res.json.data.data -%}
+                {%- set filtered = {} -%}
+                {%- for f in ['ssh_private_key', 'ssh_passphrase', 'password', 'ssh_public_key', 'revoked_keys'] -%}
+                  {%- if f in raw -%}
+                    {%- set _ = filtered.update({f: raw[f]}) -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {%- set _ = overrides.update({res.item: filtered}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {{ overrides }}
+        _host_user_overrides_denied: >-
+          {%- set denied = [] -%}
+          {%- if _openbao_host_users_resp.results is defined -%}
+            {%- for res in _openbao_host_users_resp.results -%}
+              {%- if res.status is defined and res.status == 403 -%}
+                {%- set _ = denied.append(res.item) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {{ denied }}
+
+    - name: Warn when OpenBao denies read access to a host-level user override
+      ansible.builtin.debug:
+        msg: >-
+          [WARN] hosts/{{ inventory_hostname }}/users/{{ item }} 조회가 403으로 거부되었습니다.
+          해당 사용자의 호스트별 자격증명/공개키 재정의 및 revoked_keys가 적용되지 않습니다.
+          AppRole/Token 정책에 'hosts/{{ inventory_hostname }}/users/*' 읽기 권한을 확인하세요.
+      loop: "{{ _host_user_overrides_denied }}"
+      when: _host_user_overrides_denied | length > 0
+
     - name: Fetch primary admin user credentials from OpenBao (users/<user>)
       ansible.builtin.uri:
         url: "{{ _vault_addr }}/v1/{{ openbao_mount }}/data/{{ openbao_users_prefix }}{{ _primary_admin_user }}"
@@ -364,6 +452,9 @@
         _admin_pwd_matches: "{{ _admin_list | selectattr('password', 'defined') | list }}"
         _admin_fallback_pwd: "{{ (_admin_pwd_matches | first).password if (_admin_pwd_matches | length > 0 and (_admin_pwd_matches | first).password is defined) else (_admin_raw.password if (_admin_raw is mapping and 'password' in _admin_raw) else '') }}"
         _resolved_admin_entry: "{{ _raw_admin_entry | combine({'password': _admin_fallback_pwd}) if ((_raw_admin_entry.password is not defined or _raw_admin_entry.password | length == 0) and (_admin_fallback_pwd | length > 0)) else _raw_admin_entry }}"
+        # hosts/<hostname>/users/<user>의 오버라이드는 키가 "존재"하면 적용합니다(빈 문자열 포함).
+        # 즉 호스트가 ssh_passphrase: "" 를 명시하면 전역 passphrase를 지우는 것으로 취급합니다.
+        _admin_host_override: "{{ (_host_user_overrides | default({}, true)).get(_primary_admin_user, {}) }}"
 
         _boot_raw: "{{ _effective_bootstrap_user_resp.json.data.data if (_effective_bootstrap_user_resp is defined and _effective_bootstrap_user_resp.json is defined and _effective_bootstrap_user_resp.json.data is defined and _effective_bootstrap_user_resp.json.data.data is defined) else {} }}"
         _boot_unwrapped: "{{ (_boot_raw if _boot_raw is not mapping else (_boot_raw[_bootstrap_user] if (_bootstrap_user in _boot_raw and (_boot_raw[_bootstrap_user] is mapping or (_boot_raw[_bootstrap_user] is sequence and _boot_raw[_bootstrap_user] is not string))) else (_boot_raw if ('password' in _boot_raw or 'root_password' in _boot_raw or 'username' in _boot_raw or 'type' in _boot_raw or 'ssh_private_key' in _boot_raw) else ((_boot_raw.values() | first) if (_boot_raw | length > 0 and ((_boot_raw.values() | first) is mapping or ((_boot_raw.values() | first) is sequence and (_boot_raw.values() | first) is not string))) else _boot_raw)))) }}"
@@ -374,7 +465,7 @@
         _boot_resolved_pwd: "{{ _raw_boot_entry.password if (_raw_boot_entry.password is defined and _raw_boot_entry.password | length > 0) else (_raw_boot_entry.root_password if (_raw_boot_entry.root_password is defined and _raw_boot_entry.root_password | length > 0) else (_boot_raw.password if (_boot_raw is mapping and 'password' in _boot_raw) else (_boot_raw.root_password if (_boot_raw is mapping and 'root_password' in _boot_raw) else ''))) }}"
         _resolved_boot_entry: "{{ _raw_boot_entry | combine({'password': _boot_resolved_pwd}) if (_boot_resolved_pwd | length > 0) else _raw_boot_entry }}"
       ansible.builtin.set_fact:
-        _admin_user_entry: "{{ _resolved_admin_entry }}"
+        _admin_user_entry: "{{ _resolved_admin_entry | combine(_admin_host_override) }}"
         _bootstrap_user_entry: "{{ _resolved_boot_entry }}"
 
     - name: Debug resolved user entries
@@ -389,6 +480,19 @@
           bootstrap_type: "{{ _bootstrap_user_entry.type | default('UNSET') }}"
           bootstrap_has_password: "{{ (_bootstrap_user_entry.password is defined) and (_bootstrap_user_entry.password | length > 0) }}"
           bootstrap_has_private_key: "{{ (_bootstrap_user_entry.ssh_private_key is defined) and (_bootstrap_user_entry.ssh_private_key | length > 0) }}"
+
+    # 명시적 계정 삭제(ISMS 2.5.1)가 접속 계정, 부트스트랩 계정, 이번 실행에서 선언된 admin_users를
+    # 지우지 못하도록 결정적으로 차단합니다(SSH 프로브 성공 여부와 무관하게 항상 평가).
+    - name: Refuse removal of connection, bootstrap or declared admin users
+      vars:
+        _removed_conflicts: "{{ _removed_users | default([]) | select('in', [_primary_admin_user] + (_normalized_admin_users | default([])) + [_bootstrap_user, (_bootstrap_user_entry.username | default(''))]) | list }}"
+      ansible.builtin.assert:
+        that:
+          - _removed_conflicts | length == 0
+        fail_msg: >-
+          [REMOVED-USER-CONFLICT] '{{ inventory_hostname }}'에서 removed_users로 지정된 계정 중
+          {{ _removed_conflicts }} 은(는) 접속 계정, 부트스트랩 계정 또는 이번 실행에서 선언된
+          admin_users와 겹칩니다. removed_users에서 제외하거나 admin_users/부트스트랩 설정을 먼저 바꾸세요.
 
     - name: Create temporary SSH private key file for admin user if key provided
       ansible.builtin.tempfile:
@@ -480,7 +584,8 @@
         accounts: >-
           {%- set dynamic_accs = [] -%}
           {%- for u in _normalized_admin_users -%}
-            {%- set ns = namespace(user_key='') -%}
+            {%- set ns = namespace(user_key='', revoked=[]) -%}
+            {%- set u_override = (_host_user_overrides | default({}, true)).get(u, {}) -%}
             {%- if _openbao_all_admins_resp.results is defined -%}
               {%- for res in _openbao_all_admins_resp.results -%}
                 {%- if res.item == u and res.json is defined and res.json.data is defined and res.json.data.data is defined -%}
@@ -496,17 +601,33 @@
                   {%- endif -%}
                   {%- set matched_entries = (entry_list | selectattr('type', 'defined') | selectattr('type', 'equalto', 'SSH') | list) if (entry_list is sequence and entry_list is not string and entry_list is not mapping) else [] -%}
                   {%- set entry = (matched_entries | first) if matched_entries | length > 0 else ((entry_list | first) if (entry_list is sequence and entry_list is not string and entry_list is not mapping and entry_list | length > 0) else (entry_list if entry_list is mapping else {})) -%}
-                  {%- set ns.user_key = entry.get('ssh_public_key', '') -%}
+                  {%- set global_revoked_src = entry.get('revoked_keys', []) -%}
+                  {%- set ns.revoked = ns.revoked + ([global_revoked_src] if global_revoked_src is string else (global_revoked_src | list)) -%}
+                  {%- set ns.user_key = (u_override.ssh_public_key if 'ssh_public_key' in u_override else entry.get('ssh_public_key', '')) -%}
                 {%- endif -%}
               {%- endfor -%}
             {%- endif -%}
+            {%- set host_revoked_src = u_override.get('revoked_keys', []) -%}
+            {%- set ns.revoked = (ns.revoked + ([host_revoked_src] if host_revoked_src is string else (host_revoked_src | list))) | map('trim') | select | unique | list -%}
+            {%- set ns2 = namespace(fps=[]) -%}
+            {%- for rk in ns.revoked -%}
+              {%- set _ = ns2.fps.append(rk.split()[:2] | join(' ')) -%}
+            {%- endfor -%}
+            {%- set user_fp = (ns.user_key.split()[:2] | join(' ')) if (ns.user_key | trim | length > 0) else '' -%}
+            {%- set is_revoked = (user_fp | length > 0) and (user_fp in ns2.fps) -%}
             {%- set _ = dynamic_accs.append({
                   'name': u,
                   'tier': 'admin',
                   'comment': 'Administrator provisioned via OpenBao',
                   'shell': '/bin/bash',
-                  'keys': [ns.user_key] if ns.user_key | length > 0 else []
+                  'keys': [] if is_revoked else ([ns.user_key] if (ns.user_key | trim | length > 0) else []),
+                  'revoked_keys': ns.revoked
                 }) -%}
+          {%- endfor -%}
+          {%- for ru in (_removed_users | default([])) -%}
+            {%- if ru not in _normalized_admin_users -%}
+              {%- set _ = dynamic_accs.append({'name': ru, 'state': 'absent'}) -%}
+            {%- endif -%}
           {%- endfor -%}
           {{ dynamic_accs }}
 

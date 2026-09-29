@@ -87,6 +87,47 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   }
   ```
 
+  **호스트별 사용자 자격증명 재정의 (선택 필드, #26)**: `hosts/<hostname>` 자체가 아니라
+  `secret/data/hosts/<inventory_hostname>/users/<username>`에 **평면(flat) 오브젝트**로 둡니다
+  (`(2) 사용자 계정 자격증명`의 배열 포맷과 다릅니다). 아래 5개 필드만 인식하며, **존재하는
+  키만** 전역 `users/<username>` 값 위에 덮어씁니다 — 값이 비어 있어도 "존재"로 취급되므로,
+  예를 들어 호스트가 평문 키로 교체되어 `ssh_passphrase: ""`를 명시하면 상속된 전역
+  passphrase를 지우는 것으로 처리됩니다(전역 키를 잘못된 passphrase로 복호화 시도하지 않음).
+  ```json
+  {
+    "ssh_private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+    "ssh_passphrase": "",
+    "password": "HostSpecificPassword123!",
+    "ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
+    "revoked_keys": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... old@laptop"]
+  }
+  ```
+  * 조회는 `admin_users`로 해석된 사용자 전원(접속 계정 + `accounts`로 프로비저닝되는 나머지)에 대해
+    호스트마다 반복되므로, OpenBao 조회 횟수가 호스트 × 사용자 수만큼 늘어납니다(허용된 비용).
+  * `secret/` 폴백 없이 404는 정상(해당 호스트에 재정의가 없음)으로 처리합니다. AppRole/Token
+    정책에 `hosts/+/users/*` 읽기 권한이 없어 403이 발생하면, 해당 사용자의 호스트별 재정의와
+    `revoked_keys`가 조용히 적용되지 않으므로 플레이북 출력의 `[WARN]` 메시지로 확인하세요.
+  * `revoked_keys`는 예외적으로 **항상 전역 값과 합집합**입니다(호스트가 이 필드로 전역 폐기를
+    되살릴 수 없음). `ssh_public_key`/`ssh_private_key`/`ssh_passphrase`/`password`는 존재 기준
+    덮어쓰기입니다.
+
+  **명시적 계정 삭제 및 키 폐기 (선택 필드, #26, ISMS 2.5.1 증적)**:
+  ```json
+  {
+    "removed_users": ["legacy-hand-made-account"]
+  }
+  ```
+  * `removed_users`: 이 호스트에서 `common` 역할이 `state: absent`로 제거할 계정 목록(문자열
+    1개도 허용). 실행 변수 `target_removed_users`(문자열/리스트/JSON 문자열 배열 모두 허용)와
+    **합집합**으로 통합되며, `admin_users`에서 자동으로 빠지는 계정은 없습니다(삭제는 항상 명시).
+  * **안전장치**: `removed_users`가 접속 계정, 부트스트랩 계정(호스트별 override 포함), 또는
+    이번 실행에서 선언된 `admin_users`와 겹치면 SSH 프로브 성공 여부와 무관하게 그 호스트만
+    결정적으로 실패합니다(`REMOVED-USER-CONFLICT`).
+  * `accounts[].revoked_keys`(전역 `users/<user>` 또는 호스트별 재정의에서 합집합)에 나열된
+    공개키는 `common` 역할이 `authorized_key: state: absent`로 제거합니다(`exclusive`는 사용하지
+    않으므로 수동으로 추가된 다른 키는 보존됩니다). 배포하려는 키와 폐기 목록이 겹치면 배포되지
+    않습니다(타입+본문 비교, 주석/개행 차이는 무시).
+
 ### (2) 사용자 계정 자격증명 (Users)
 * **경로**: `secret/data/users/<username>` (예: `secret/data/users/ppzxc`, `secret/data/users/root`)
 * **SSH 자격증명 포맷 (JSON Array)**:

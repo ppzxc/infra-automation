@@ -113,6 +113,45 @@
       when:
         - item.skipped is not defined or not item.skipped
 
+    - name: "[VERIFY-COMMON-022] Verify revoked SSH key was removed while the surviving key remains"
+      ansible.builtin.slurp:
+        src: "/home/infra-legacy/.ssh/authorized_keys"
+      register: legacy_auth_keys
+
+    - name: Assert revoked key is gone and the kept key survived
+      ansible.builtin.assert:
+        that:
+          - "'TestMoleculeKeyForLegacyKept' in (legacy_auth_keys.content | b64decode)"
+          - "'TestMoleculeKeyToRevoke' not in (legacy_auth_keys.content | b64decode)"
+        fail_msg: "COMMON-022 did not revoke the listed key, or removed the wrong one."
+
+    - name: "[VERIFY-COMMON-023] Verify removed account and its stale sudoers drop-in are both gone"
+      ansible.builtin.stat:
+        path: /etc/sudoers.d/90-infra-removed
+      register: removed_sudoers_stat
+
+    - name: Assert stale sudoers drop-in for the removed account was deleted
+      ansible.builtin.assert:
+        that:
+          - not removed_sudoers_stat.stat.exists
+        fail_msg: "COMMON-023 did not remove the stale sudoers drop-in for a removed account."
+
+    - name: Verify removed account no longer exists in passwd database
+      ansible.builtin.getent:
+        database: passwd
+        key: infra-removed
+        fail_key: false
+      register: removed_user_getent
+
+    - name: Assert removed account was deleted
+      ansible.builtin.assert:
+        # getent (fail_key: false) still inserts the key with value None when the
+        # lookup fails, so `'infra-removed' not in ansible_facts.getent_passwd` is
+        # always false -- the None value, not key absence, is what proves deletion.
+        that:
+          - ansible_facts.getent_passwd.get('infra-removed') is none
+        fail_msg: "COMMON-013 did not remove the account declared with state: absent."
+
     - name: "[VERIFY-COMMON-016] Verify system security limits configuration"
       ansible.builtin.stat:
         path: /etc/security/limits.d/99-limits.conf
