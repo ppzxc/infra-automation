@@ -52,6 +52,8 @@
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `SEC-001` | `Configure SSH Hardening parameters` | `ansible.builtin.lineinfile` | All | 정규식 매칭 및 상태 일치 시 `ok` (`validate: sshd -t`) |
+
+> **Raw Provisioning Path (CentOS 6/7, `raw_provisioning_path: true`)**: `SEC-001`은 `ansible.builtin.raw`로 대체된다(`SEC-001-RAW-READ`/`SEC-001-RAW-PROBE`/`SEC-001-RAW`, drop-in 제거는 `SEC-001-DROPIN-RAW`). 로컬에서 계산한 콘텐츠의 해시·모드와 원격 `sha256sum`/`stat` 결과가 같으면 `ok`, `sshd -t -f` 검증 실패 시 임시 파일 삭제 후 태스크 실패. 헬퍼: `filter_plugins/raw_provisioning.py` (ADR-0005). `--check`에서는 스킵된다.
 | `SEC-002` | `Ensure UFW is installed (Debian)` | `ansible.builtin.apt` | Debian, Ubuntu | 패키지 기설치 시 `ok` |
 | `SEC-003` | `Allow incoming TCP ports via UFW (Debian)` | `community.general.ufw` | Debian, Ubuntu | 룰 기등록 시 `ok` |
 | `SEC-004` | `Enable UFW with default deny incoming (Debian)` | `community.general.ufw` | Debian, Ubuntu | UFW 활성화 상태면 `ok` |
