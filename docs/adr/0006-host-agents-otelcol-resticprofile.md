@@ -53,7 +53,7 @@
   | `backup_extra_paths` / `backup_exclude_paths` / `backup_pre_hooks` | §2.4 오버라이드 |
 
 - **OpenBao `secret/agents/openobserve`, `secret/agents/rustfs`** (`run_once`): 진짜 공용 시크릿만 — 컨트롤러 전용 OpenObserve 수집 토큰(§2.6), RustFS 유지보수 키(§2.5), 사설 CA. 문서에만 존재하고 코드가 읽지 않는 `global/services` 규약은 사용하지 않습니다.
-- **누락 처리**: 필수 시크릿 누락 → 해당 호스트 실패(에이전트 한 쪽만 설치된 상태 금지); OpenBao 접근 불가 → 일반/check 모드 모두 실패; 오버라이드 목록 부재 → Git 표준만 적용.
+- **누락 처리**: 필수 시크릿 누락 → 해당 호스트 실패(에이전트 한 쪽만 설치된 상태 금지); OpenBao 접근 불가 → 일반/check 모드 모두 실패; 오버라이드 목록 부재 → Git 표준만 적용; `otel_exclude_logs`/`backup_exclude_paths`가 제외 불가 경로(`security_logs` 경로, §2.4 필수 경로)를 지정 → 변경 전 입력 검증 단계에서 해당 호스트 실패(일반/check 모드 동일, 위반 경로와 KV 키를 메시지에 명시). 경고 후 무시는 운영자가 제외가 적용됐다고 오인하므로 기각.
 - **시크릿과 diff 분리**: 시크릿은 `/etc/otelcol-contrib/secrets.env`, `/etc/restic/env`에만 렌더링(`no_log: true`, `diff: false`), 본 설정은 `${env:…}`로 참조 → `--diff`가 시크릿 없이 설정 변경만 보여줍니다.
 
 ### 2.3 otelcol 수집 표준 (ISMS)
