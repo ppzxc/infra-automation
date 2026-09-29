@@ -1,0 +1,4 @@
+---
+# Dev loop verifies whichever roles MOLECULE_ROLES selected; each verify gates on it.
+- import_playbook: ../fast/verify.yml
+- import_playbook: ../slow/verify.yml

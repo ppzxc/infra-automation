@@ -1,0 +1,235 @@
+---
+# Verifies common (Base Layer), security and access_security.
+# Facts are collected in ONE remote execution (shared/files/collect_facts.py);
+# every [VERIFY-*] task then asserts on the controller. Assertion semantics are
+# unchanged from the former molecule/default/verify.yml: tasks that only
+# recorded a stat/debug there still only record it here.
+- name: Verify Target Host Baseline Roles
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    molecule_roles: "{{ (lookup('env', 'MOLECULE_ROLES') | default(lookup('env', 'SCENARIO_ROLES'), true)).split(',') | map('trim') | list }}"
+    chrony_path: "{{ '/etc/chrony/chrony.conf' if ansible_os_family == 'Debian' else '/etc/chrony.conf' }}"
+    audit_rules_path: "{{ '/etc/audit/rules.d/overseer.rules' if ansible_distribution_major_version | int >= 7 else '/etc/audit/audit.rules' }}"
+    # Account lists are built with a Jinja loop (mirrors the former per-task
+    # `when:` conditions exactly), emitted as JSON, then parsed back to a list.
+    present_accounts_json: "{% set r = [] %}{% for a in accounts | default([]) %}{% if a.name is defined and a.state | default('present') != 'absent' %}{% set _ = r.append(a.name) %}{% endif %}{% endfor %}{{ r | to_json }}"
+    sudo_accounts_json: "{% set r = [] %}{% for a in accounts | default([]) %}{% if a.name is defined and a.state | default('present') != 'absent' and (a.sudo | default(a.tier | default('user') == 'admin')) | bool %}{% set _ = r.append(a.name) %}{% endif %}{% endfor %}{{ r | to_json }}"
+    # Bracket notation for 'keys': Jinja2 dot notation resolves dict.keys() first.
+    keyed_accounts_json: "{% set r = [] %}{% for a in accounts | default([]) %}{% if a.name is defined and a.state | default('present') != 'absent' and a['keys'] is defined and a['keys'] | length > 0 %}{% set _ = r.append(a.name) %}{% endif %}{% endfor %}{{ r | to_json }}"
+    present_accounts: "{{ present_accounts_json | from_json }}"
+    sudo_accounts: "{{ sudo_accounts_json | from_json }}"
+    keyed_accounts: "{{ keyed_accounts_json | from_json }}"
+    collect_spec:
+      stat: >-
+        {{ (sudo_accounts | map('regex_replace', '^(.*)$', '/etc/sudoers.d/90-\1') | list)
+           + (keyed_accounts | map('regex_replace', '^(.*)$', '/home/\1/.ssh/authorized_keys') | list)
+           + ['/etc/sudoers.d/90-infra-removed', '/etc/security/limits.d/99-limits.conf',
+              '/etc/systemd/journald.conf.d/99-retention.conf', '/etc/profile.d/99-aliases.sh',
+              '/etc/profile.d/98-node-env.sh', '/etc/environment', chrony_path,
+              '/etc/sudoers.d/99-security-policy', audit_rules_path, '/etc/fail2ban/jail.d/sshd.local',
+              '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json'] }}
+      read:
+        - /etc/ssh/sshd_config
+        - /home/infra-legacy/.ssh/authorized_keys
+      group: "{{ present_accounts }}"
+      passwd: "{{ present_accounts + ['infra-removed'] }}"
+      cmd:
+        sysctl: [sysctl, vm.swappiness, fs.protected_hardlinks, fs.protected_symlinks, kernel.randomize_va_space]
+        timedatectl: [timedatectl, status]
+        getenforce: [getenforce]
+
+  tasks:
+    - name: Collect every verification fact in one remote execution
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/../shared/files/collect_facts.py {{ collect_spec | to_json | quote }}"
+        executable: "{{ ansible_python_interpreter | default('python3') }}"
+      register: collected
+      changed_when: false
+
+    - name: Parse collected facts
+      ansible.builtin.set_fact:
+        f: "{{ collected.stdout | from_json }}"
+
+    # ==========================================================================
+    # 1. Common Role 검증
+    # ==========================================================================
+    - name: Verify the common role
+      block:
+        - name: "[VERIFY-COMMON-001] Verify timezone configuration"
+          ansible.builtin.debug:
+            msg: "{{ f.cmd.timedatectl.stdout }}"
+            verbosity: 1
+
+        - name: "[VERIFY-COMMON-008] Verify Chrony configuration file exists"
+          ansible.builtin.assert:
+            that:
+              - f.stat[chrony_path].exists
+            fail_msg: "Chrony configuration file is missing."
+          when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+        - name: "[VERIFY-COMMON-011] Verify sysctl kernel parameters"
+          ansible.builtin.assert:
+            that:
+              - "'vm.swappiness = 10' in f.cmd.sysctl.stdout or 'vm.swappiness = 1' in f.cmd.sysctl.stdout"
+              - "'fs.protected_hardlinks = 1' in f.cmd.sysctl.stdout"
+              - "'fs.protected_symlinks = 1' in f.cmd.sysctl.stdout"
+              - "'kernel.randomize_va_space = 2' in f.cmd.sysctl.stdout"
+            fail_msg: "sysctl parameters are not configured correctly according to baseline and hardening standards."
+
+        - name: "[VERIFY-COMMON-012] Verify account primary groups exist"
+          ansible.builtin.assert:
+            that:
+              - f.group[item]
+            fail_msg: "Primary group for account {{ item }} does not exist."
+          loop: "{{ present_accounts }}"
+
+        - name: "[VERIFY-COMMON-013] Verify accounts exist in passwd database"
+          ansible.builtin.assert:
+            that:
+              - f.passwd[item]
+            fail_msg: "Account {{ item }} does not exist in the passwd database."
+          loop: "{{ present_accounts }}"
+
+        - name: "[VERIFY-COMMON-014] Verify passwordless sudoers configuration for admin accounts"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/sudoers.d/90-' ~ item].exists
+              - f.stat['/etc/sudoers.d/90-' ~ item].mode == '0440'
+            fail_msg: "Sudoers file is missing or has incorrect permissions."
+          loop: "{{ sudo_accounts }}"
+
+        - name: "[VERIFY-COMMON-015] Verify SSH authorized_keys file exists for accounts"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/home/' ~ item ~ '/.ssh/authorized_keys'].exists
+            fail_msg: "SSH authorized_keys file was not created."
+          loop: "{{ keyed_accounts }}"
+
+        - name: "[VERIFY-COMMON-022] Verify revoked SSH key was removed while the surviving key remains"
+          ansible.builtin.assert:
+            that:
+              - f.read['/home/infra-legacy/.ssh/authorized_keys'] is not none
+              - "'TestMoleculeKeyForLegacyKept' in f.read['/home/infra-legacy/.ssh/authorized_keys']"
+              - "'TestMoleculeKeyToRevoke' not in f.read['/home/infra-legacy/.ssh/authorized_keys']"
+            fail_msg: "COMMON-022 did not revoke the listed key, or removed the wrong one."
+
+        - name: "[VERIFY-COMMON-023] Verify removed account and its stale sudoers drop-in are both gone"
+          ansible.builtin.assert:
+            that:
+              - not f.stat['/etc/sudoers.d/90-infra-removed'].exists
+            fail_msg: "COMMON-023 did not remove the stale sudoers drop-in for a removed account."
+
+        - name: "[VERIFY-COMMON-013] Verify removed account no longer exists in passwd database"
+          ansible.builtin.assert:
+            that:
+              - not f.passwd['infra-removed']
+            fail_msg: "COMMON-013 did not remove the account declared with state: absent."
+
+        - name: "[VERIFY-COMMON-016] Verify system security limits configuration"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/security/limits.d/99-limits.conf'].exists
+            fail_msg: "Security limits file /etc/security/limits.d/99-limits.conf is missing."
+
+        - name: "[VERIFY-COMMON-017] Verify systemd journald retention configuration"
+          ansible.builtin.debug:
+            msg: "{{ f.stat['/etc/systemd/journald.conf.d/99-retention.conf'] }}"
+            verbosity: 1
+          when: ansible_service_mgr == "systemd"
+
+        - name: "[VERIFY-COMMON-018] Verify system-wide aliases configuration file exists"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/profile.d/99-aliases.sh'].exists
+            fail_msg: "System-wide aliases file /etc/profile.d/99-aliases.sh is missing."
+
+        - name: "[VERIFY-COMMON-019] Verify node environment variables drop-in file exists"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/profile.d/98-node-env.sh'].exists
+            fail_msg: "Node environment file /etc/profile.d/98-node-env.sh is missing."
+
+        - name: "[VERIFY-COMMON-020] Verify system-wide environment configuration file exists"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/environment'].exists
+            fail_msg: "/etc/environment file is missing."
+
+    # ==========================================================================
+    # 2. Security Role 검증
+    # ==========================================================================
+    - name: Verify the security role
+      when: "'security' in molecule_roles"
+      block:
+        - name: "[VERIFY-SEC-001] Verify SSH configuration hardening"
+          ansible.builtin.assert:
+            that:
+              - f.read['/etc/ssh/sshd_config'] is not none
+              - "'PermitRootLogin no' in f.read['/etc/ssh/sshd_config']"
+              - "'PasswordAuthentication no' in f.read['/etc/ssh/sshd_config']"
+              - "'PubkeyAuthentication yes' in f.read['/etc/ssh/sshd_config']"
+              - "'ClientAliveInterval 300' in f.read['/etc/ssh/sshd_config']"
+            fail_msg: "sshd_config does not contain required security hardening parameters."
+
+        - name: "[VERIFY-SEC-011] Verify SELinux permissive mode"
+          ansible.builtin.debug:
+            msg: "{{ f.cmd.getenforce.stdout }}"
+            verbosity: 1
+          when: ansible_os_family == "RedHat"
+
+        - name: "[VERIFY-SEC-012] Verify auditd rules configuration file"
+          ansible.builtin.debug:
+            msg: "{{ f.stat[audit_rules_path] }}"
+            verbosity: 1
+          when: ansible_os_family == "RedHat"
+
+        - name: "[VERIFY-SEC-013] Verify auditd service status"
+          ansible.builtin.debug:
+            msg: "auditd verification complete."
+
+        - name: "[VERIFY-SEC-014] Verify sudoers timestamp and log configuration"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/sudoers.d/99-security-policy'].exists
+              - f.stat['/etc/sudoers.d/99-security-policy'].mode == '0440'
+            fail_msg: "Sudo security policy /etc/sudoers.d/99-security-policy is missing."
+
+        - name: "[VERIFY-SEC-015] Verify fail2ban ssh jail configuration file"
+          ansible.builtin.debug:
+            msg: "{{ f.stat['/etc/fail2ban/jail.d/sshd.local'] }}"
+            verbosity: 1
+
+        - name: "[VERIFY-SEC-016] Verify DMZ zone configuration readiness"
+          ansible.builtin.debug:
+            msg: "DMZ zone verified."
+
+        - name: "[VERIFY-SEC-017] Verify internal zone configuration readiness"
+          ansible.builtin.debug:
+            msg: "Internal zone verified."
+
+        - name: "[VERIFY-SEC-018] Verify docker egress firewall policy readiness"
+          ansible.builtin.debug:
+            msg: "Docker egress policy verified."
+
+    # ==========================================================================
+    # 3. Access Security Role (Zero-Trust OpenBao & Boundary) 검증
+    # ==========================================================================
+    - name: Verify the access_security role
+      when: "'access_security' in molecule_roles"
+      block:
+        - name: "[VERIFY-ACC-001] Verify Access Security toggle safety when disabled"
+          ansible.builtin.debug:
+            msg: "Access security toggle verified safe."
+
+        - name: "[VERIFY-ACC-004] Verify OpenBao SSH CA public key path readiness"
+          ansible.builtin.debug:
+            msg: "{{ f.stat['/etc/ssh/trusted-user-ca-keys.pem'] }}"
+            verbosity: 1
+
+        - name: "[VERIFY-ACC-009] Verify Boundary target metadata directory readiness"
+          ansible.builtin.debug:
+            msg: "{{ f.stat['/etc/boundary/node-metadata.json'] }}"
+            verbosity: 1

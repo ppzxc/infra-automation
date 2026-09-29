@@ -1,0 +1,23 @@
+---
+# Shared converge. `molecule_roles` (env MOLECULE_ROLES, comma separated)
+# selects which roles run; `common` is the Base Layer and always runs first,
+# mirroring production apply order (access_security consumes the accounts that
+# common creates).
+- name: Converge Target Hosts
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    scenario_roles: "{{ lookup('env', 'SCENARIO_ROLES') }}"
+    molecule_roles: "{{ (lookup('env', 'MOLECULE_ROLES') | default(scenario_roles, true)).split(',') | map('trim') | list }}"
+
+  tasks:
+    - name: Apply the Base Layer
+      ansible.builtin.include_role:
+        name: common
+
+    - name: Apply the selected roles
+      ansible.builtin.include_role:
+        name: "{{ item }}"
+      loop: "{{ scenario_roles.split(',') | select('in', molecule_roles) | reject('equalto', 'common') | list }}"
