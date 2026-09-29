@@ -89,10 +89,14 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
 
   **호스트별 사용자 자격증명 재정의 (선택 필드, #26)**: `hosts/<hostname>` 자체가 아니라
   `secret/data/hosts/<inventory_hostname>/users/<username>`에 **평면(flat) 오브젝트**로 둡니다
-  (`(2) 사용자 계정 자격증명`의 배열 포맷과 다릅니다). 아래 5개 필드만 인식하며, **존재하는
-  키만** 전역 `users/<username>` 값 위에 덮어씁니다 — 값이 비어 있어도 "존재"로 취급되므로,
-  예를 들어 호스트가 평문 키로 교체되어 `ssh_passphrase: ""`를 명시하면 상속된 전역
-  passphrase를 지우는 것으로 처리됩니다(전역 키를 잘못된 passphrase로 복호화 시도하지 않음).
+  (`(2) 사용자 계정 자격증명`의 배열 포맷과 다릅니다). 인식하는 필드는 두 그룹으로 나뉩니다:
+  - **자격증명 4개** (`ssh_private_key`, `ssh_passphrase`, `password`, `ssh_public_key`): **존재하는
+    키만** 전역 `users/<username>` 값 위에 덮어씁니다 — 값이 비어 있어도 "존재"로 취급되므로,
+    예를 들어 호스트가 평문 키로 교체되어 `ssh_passphrase: ""`를 명시하면 상속된 전역 passphrase를
+    지우는 것으로 처리됩니다(전역 키를 잘못된 passphrase로 복호화 시도하지 않음). 전역
+    `users/<username>` 자체가 없는(404) 신규 계정이라도 호스트 재정의만으로 적용됩니다.
+  - **`revoked_keys`** (별도 취급, 아래 참고): 전역 값과 **항상 합집합**이며 존재 기준 덮어쓰기가
+    아닙니다.
   ```json
   {
     "ssh_private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
@@ -102,14 +106,19 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
     "revoked_keys": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... old@laptop"]
   }
   ```
+  * `common` 역할은 접속(primary) 사용자에게만 `ssh_private_key`/`ssh_passphrase`/`password`를
+    실제로 사용합니다(SSH 연결·sudo 자격증명). `accounts`로만 프로비저닝되는 나머지 사용자는
+    로컬 계정 자체에 비밀번호를 두지 않으므로, 의미 있게 반영되는 필드는 `ssh_public_key`와
+    `revoked_keys`뿐입니다 — 그 외 사용자에 대한 `ssh_private_key`/`ssh_passphrase`/`password`
+    재정의는 저장은 되지만 아무 곳에도 쓰이지 않습니다.
   * 조회는 `admin_users`로 해석된 사용자 전원(접속 계정 + `accounts`로 프로비저닝되는 나머지)에 대해
     호스트마다 반복되므로, OpenBao 조회 횟수가 호스트 × 사용자 수만큼 늘어납니다(허용된 비용).
   * `secret/` 폴백 없이 404는 정상(해당 호스트에 재정의가 없음)으로 처리합니다. AppRole/Token
     정책에 `hosts/+/users/*` 읽기 권한이 없어 403이 발생하면, 해당 사용자의 호스트별 재정의와
     `revoked_keys`가 조용히 적용되지 않으므로 플레이북 출력의 `[WARN]` 메시지로 확인하세요.
   * `revoked_keys`는 예외적으로 **항상 전역 값과 합집합**입니다(호스트가 이 필드로 전역 폐기를
-    되살릴 수 없음). `ssh_public_key`/`ssh_private_key`/`ssh_passphrase`/`password`는 존재 기준
-    덮어쓰기입니다.
+    되살릴 수 없음). 실제로 배포하지 않는 판정(키가 `revoked_keys`와 겹치면 배포 생략)은
+    `common` 역할(COMMON-015) 한 곳에서만 이뤄집니다.
 
   **명시적 계정 삭제 및 키 폐기 (선택 필드, #26, ISMS 2.5.1 증적)**:
   ```json
@@ -120,9 +129,14 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   * `removed_users`: 이 호스트에서 `common` 역할이 `state: absent`로 제거할 계정 목록(문자열
     1개도 허용). 실행 변수 `target_removed_users`(문자열/리스트/JSON 문자열 배열 모두 허용)와
     **합집합**으로 통합되며, `admin_users`에서 자동으로 빠지는 계정은 없습니다(삭제는 항상 명시).
+    지원 형태는 문자열(콤마로 여러 개 구분 가능)과 리스트/JSON 배열 문자열뿐입니다. mapping(객체)
+    형태로 오면 전부 무시되고 `[WARN]` 메시지가 남습니다(키 이름이 계정명으로 오인되는 것을
+    막기 위함이며, 리스트 안의 문자열이 아닌 원소도 조용히 걸러집니다).
   * **안전장치**: `removed_users`가 접속 계정, 부트스트랩 계정(호스트별 override 포함), 또는
     이번 실행에서 선언된 `admin_users`와 겹치면 SSH 프로브 성공 여부와 무관하게 그 호스트만
     결정적으로 실패합니다(`REMOVED-USER-CONFLICT`).
+  * **증적**: 매 실행마다 호스트 KV/실행 변수 각각에서 온 목록과 최종 합집합을 debug로 남깁니다
+    (`Log accounts resolved for removal (ISMS 2.5.1 evidence)`).
   * `accounts[].revoked_keys`(전역 `users/<user>` 또는 호스트별 재정의에서 합집합)에 나열된
     공개키는 `common` 역할이 `authorized_key: state: absent`로 제거합니다(`exclusive`는 사용하지
     않으므로 수동으로 추가된 다른 키는 보존됩니다). 배포하려는 키와 폐기 목록이 겹치면 배포되지

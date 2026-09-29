@@ -136,7 +136,7 @@
           - not removed_sudoers_stat.stat.exists
         fail_msg: "COMMON-023 did not remove the stale sudoers drop-in for a removed account."
 
-    - name: Verify removed account no longer exists in passwd database
+    - name: "[VERIFY-COMMON-013] Verify removed account no longer exists in passwd database"
       ansible.builtin.getent:
         database: passwd
         key: infra-removed

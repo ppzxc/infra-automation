@@ -160,9 +160,12 @@ def test_accounts_use_host_public_key_and_union_revocations(playbook):
 
 
 @pytest.mark.parametrize("playbook", PLAYBOOKS)
-def test_host_cannot_unrevoke_and_revoked_key_is_not_deployed(playbook):
-    """Global revocations always apply; a key that is both deployed and revoked is dropped,
-    compared on type+blob so a different comment or trailing newline still matches."""
+def test_host_cannot_unrevoke_a_globally_revoked_key(playbook):
+    """revoked_keys is the union of global + host values; a host clearing its own list
+    doesn't remove a key that users/<user> already revoked. Actually NOT deploying a
+    key that's also revoked is COMMON-015's job (single source of truth, see its own
+    test) -- this task only has to carry both 'keys' and 'revoked_keys' through untouched,
+    without filtering them against each other and duplicating that rule here too."""
     accs = _accounts(
         playbook,
         ["svcadm"],
@@ -170,8 +173,24 @@ def test_host_cannot_unrevoke_and_revoked_key_is_not_deployed(playbook):
         {"svcadm": {"revoked_keys": []}},
         [],
     )
-    assert accs["svcadm"]["keys"] == []
+    assert accs["svcadm"]["keys"] == [OLD_KEY]  # trimmed; deploy-time filtering happens in COMMON-015
     assert len(accs["svcadm"]["revoked_keys"]) == 1
+
+
+@pytest.mark.parametrize("playbook", PLAYBOOKS)
+def test_host_only_public_key_applies_even_without_a_global_users_entry(playbook):
+    """Regression test: hosts/<host>/users/<user> must win even when users/<user> doesn't
+    exist at all (404) for a brand-new, host-KV-only account -- not just when it exists
+    and the host merely overrides it."""
+    accs = _accounts(
+        playbook,
+        ["newsvc"],
+        {},  # no global users/<user> entry at all for "newsvc" (404 case)
+        {"newsvc": {"ssh_public_key": HOST_KEY}},
+        [],
+    )
+    assert accs["newsvc"]["keys"] == [HOST_KEY]
+    assert accs["newsvc"]["revoked_keys"] == []
 
 
 @pytest.mark.parametrize("playbook", PLAYBOOKS)
@@ -239,7 +258,11 @@ def test_common015_skips_a_key_that_is_also_revoked(key, revoked, expect_deploy)
 # --- real ansible-playbook run with extra vars ------------------------------------
 
 @pytest.mark.skipif(shutil.which("ansible-playbook") is None, reason="ansible-playbook not installed")
-def test_tasks_execute_under_ansible_with_extra_vars(tmp_path):
+@pytest.mark.parametrize("extra_var_value", [
+    "legacy1,legacy2",              # Semaphore-style comma string
+    '["legacy1","legacy2"]',        # Semaphore-style JSON array string
+])
+def test_tasks_execute_under_ansible_with_extra_vars(tmp_path, extra_var_value):
     names = [
         "Resolve accounts to remove",
         "Build per-host user credential overrides",
@@ -279,7 +302,7 @@ def test_tasks_execute_under_ansible_with_extra_vars(tmp_path):
     import os
     res = subprocess.run(
         ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml"),
-         "-e", "target_removed_users=legacy1,legacy2"],
+         "-e", f"target_removed_users={extra_var_value}"],
         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120,
         env={**os.environ, "ANSIBLE_NOCOLOR": "1", "ANSIBLE_STDOUT_CALLBACK": "default",
              "ANSIBLE_DEPRECATION_WARNINGS": "False", "ANSIBLE_LOCALHOST_WARNING": "False"},

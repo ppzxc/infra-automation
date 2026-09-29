@@ -89,11 +89,11 @@
     # removal, not merely absent because it was never created.
     - name: "[PREPARE-004] Seed a pre-existing account and stale sudoers drop-in for the removal scenario"
       block:
-        - name: "[PREPARE-004a] Create the to-be-removed account"
+        - name: "[PREPARE-004-USER] Create the to-be-removed account"
           ansible.builtin.user:
             name: infra-removed
             state: present
-        - name: "[PREPARE-004b] Seed its stale passwordless sudoers drop-in"
+        - name: "[PREPARE-004-SUDOERS] Seed its stale passwordless sudoers drop-in"
           ansible.builtin.copy:
             content: "infra-removed ALL=(ALL) NOPASSWD:ALL\n"
             dest: /etc/sudoers.d/90-infra-removed

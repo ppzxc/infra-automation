@@ -226,28 +226,58 @@
     # 계정 삭제(Explicit account removal): 호스트 KV의 'removed_users'와 실행 변수
     # 'target_removed_users'(문자열/리스트/JSON 문자열 모두 허용)를 합집합으로 통합합니다.
     # Semaphore의 extra vars가 set_fact보다 우선하므로 내부 변수 _removed_users에 저장합니다.
+    # 두 값 모두 같은 매크로로 정규화합니다: 문자열은 콤마로 분리, 리스트는 문자열 원소만
+    # 채택(그 외 타입은 조용히 버림), mapping/그 외 타입은 빈 목록으로 취급합니다 --
+    # mapping을 '| list'로 넘기면 키 이름이 계정명으로 오인되는 사고를 막기 위함입니다.
     - name: Resolve accounts to remove (host KV removed_users + run var, deduped)
       vars:
         _kv_removed_source: "{{ (_host_kv_dict | default({}, true)).removed_users | default([], true) }}"
-        _kv_removed_users: "{{ ([_kv_removed_source] if _kv_removed_source is string else (_kv_removed_source | list)) | map('trim') | select | list }}"
         _run_removed_source: "{{ (target_removed_users | from_yaml) if (target_removed_users is defined and target_removed_users is string and (target_removed_users | trim).startswith('[')) else (target_removed_users if target_removed_users is defined else []) }}"
-        _run_removed_users: >-
-          {%- if _run_removed_source is string -%}
-            {%- set cleaned = [] -%}
-            {%- set q1 = "'" -%}
-            {%- set q2 = '"' -%}
-            {%- for item in _run_removed_source.replace('[', '').replace(']', '').replace(q1, '').replace(q2, '').split(',') -%}
-              {%- set clean_item = item | trim -%}
-              {%- if clean_item | length > 0 -%}
-                {%- set _ = cleaned.append(clean_item) -%}
-              {%- endif -%}
-            {%- endfor -%}
-            {{ cleaned }}
-          {%- else -%}
-            {{ _run_removed_source | list }}
-          {%- endif -%}
+        _removed_users_shape_invalid: "{{ (_kv_removed_source is mapping) or (_run_removed_source is mapping) }}"
+        _removed_users_detail: >-
+          {%- macro _clean_user_list(src) -%}
+            {%- if src is mapping -%}
+              {{ [] }}
+            {%- elif src is string -%}
+              {%- set cleaned = [] -%}
+              {%- for item in src.replace('[', '').replace(']', '').replace("'", '').replace('"', '').split(',') -%}
+                {%- set clean_item = item | trim -%}
+                {%- if clean_item | length > 0 -%}
+                  {%- set _ = cleaned.append(clean_item) -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ cleaned }}
+            {%- elif src is sequence -%}
+              {{ src | select('string') | map('trim') | select | list }}
+            {%- else -%}
+              {{ [] }}
+            {%- endif -%}
+          {%- endmacro -%}
+          {%- set kv = _clean_user_list(_kv_removed_source) -%}
+          {%- set run = _clean_user_list(_run_removed_source) -%}
+          {{ {'from_kv': kv, 'from_run': run, 'union': (kv + run) | unique(case_sensitive=true) | list} }}
       ansible.builtin.set_fact:
-        _removed_users: "{{ (_kv_removed_users + _run_removed_users) | unique(case_sensitive=true) | list }}"
+        _removed_users: "{{ _removed_users_detail.union }}"
+
+    - name: Warn when removed_users has an unsupported shape and was ignored
+      ansible.builtin.debug:
+        msg: >-
+          [WARN] '{{ inventory_hostname }}': host KV 'removed_users' 또는 run var
+          'target_removed_users'가 mapping(객체) 형태입니다. 문자열 목록 또는 JSON
+          배열 문자열만 지원하므로 무시되었습니다.
+          kv={{ _kv_removed_source }}, run={{ _run_removed_source }}
+      when: _removed_users_shape_invalid | bool
+
+    # ISMS 2.5.1 증적: 어떤 계정이, 어느 출처(host KV / run var)에서 삭제 대상으로
+    # 결정됐는지 매 실행마다 남깁니다.
+    - name: Log accounts resolved for removal (ISMS 2.5.1 evidence)
+      ansible.builtin.debug:
+        msg:
+          "대상 호스트": "{{ inventory_hostname }}"
+          "호스트 KV(removed_users)에서": "{{ _removed_users_detail.from_kv }}"
+          "실행 변수(target_removed_users)에서": "{{ _removed_users_detail.from_run }}"
+          "최종 삭제 대상(합집합)": "{{ _removed_users }}"
+      when: _removed_users | length > 0
 
     - name: Fetch per-host user credential overrides from OpenBao (hosts/<hostname>/users/<user>)
       ansible.builtin.uri:
@@ -268,11 +298,20 @@
       loop: "{{ _normalized_admin_users }}"
       ignore_errors: true
       check_mode: false
+      no_log: true
       when: (_vault_token | default('') | length) > 0
 
     # hosts/<hostname>/users/<user>는 평면(flat) 구조입니다: 존재하는 키만 오버라이드로 채택합니다
     # (값의 존재 여부로 판단합니다 -- 호스트가 ssh_passphrase: "" 로 명시하면 상속된 값을 지웁니다).
     - name: Build per-host user credential overrides
+      vars:
+        # docs/openbao_integration.md의 "호스트별 사용자 자격증명 재정의" 표와 1:1로 맞춥니다.
+        _host_user_override_fields:
+          - ssh_private_key
+          - ssh_passphrase
+          - password
+          - ssh_public_key
+          - revoked_keys
       ansible.builtin.set_fact:
         _host_user_overrides: >-
           {%- set overrides = {} -%}
@@ -281,7 +320,7 @@
               {%- if res.status is defined and res.status == 200 and res.json is defined and res.json.data is defined and res.json.data.data is defined and res.json.data.data is mapping -%}
                 {%- set raw = res.json.data.data -%}
                 {%- set filtered = {} -%}
-                {%- for f in ['ssh_private_key', 'ssh_passphrase', 'password', 'ssh_public_key', 'revoked_keys'] -%}
+                {%- for f in _host_user_override_fields -%}
                   {%- if f in raw -%}
                     {%- set _ = filtered.update({f: raw[f]}) -%}
                   {%- endif -%}
@@ -301,6 +340,7 @@
             {%- endfor -%}
           {%- endif -%}
           {{ denied }}
+      no_log: true
 
     - name: Warn when OpenBao denies read access to a host-level user override
       ansible.builtin.debug:
@@ -579,12 +619,17 @@
       check_mode: false
       when: (_vault_token | default('') | length) > 0
 
+    # 참고: 배포 예정 키가 revoked_keys와 겹칠 때 실제로 배포하지 않는 책임은 COMMON-015
+    # 하나에만 둡니다(정적 인벤토리 accounts도 거쳐야 하는 지점이라서). 여기서는 host
+    # override(있으면) 또는 전역 값을 그대로 'keys'/'revoked_keys'에 담아 넘기기만 합니다 --
+    # 예전에는 여기서도 한 번 걸러서 COMMON-015와 로직이 중복됐고, revoked_keys 판정 규칙이
+    # 바뀌면 두 곳을 같이 고쳐야 했습니다.
     - name: Build accounts list for common role from OpenBao keys
       ansible.builtin.set_fact:
         accounts: >-
           {%- set dynamic_accs = [] -%}
           {%- for u in _normalized_admin_users -%}
-            {%- set ns = namespace(user_key='', revoked=[]) -%}
+            {%- set ns = namespace(revoked=[], global_key='') -%}
             {%- set u_override = (_host_user_overrides | default({}, true)).get(u, {}) -%}
             {%- if _openbao_all_admins_resp.results is defined -%}
               {%- for res in _openbao_all_admins_resp.results -%}
@@ -603,24 +648,22 @@
                   {%- set entry = (matched_entries | first) if matched_entries | length > 0 else ((entry_list | first) if (entry_list is sequence and entry_list is not string and entry_list is not mapping and entry_list | length > 0) else (entry_list if entry_list is mapping else {})) -%}
                   {%- set global_revoked_src = entry.get('revoked_keys', []) -%}
                   {%- set ns.revoked = ns.revoked + ([global_revoked_src] if global_revoked_src is string else (global_revoked_src | list)) -%}
-                  {%- set ns.user_key = (u_override.ssh_public_key if 'ssh_public_key' in u_override else entry.get('ssh_public_key', '')) -%}
+                  {%- set ns.global_key = entry.get('ssh_public_key', '') -%}
                 {%- endif -%}
               {%- endfor -%}
             {%- endif -%}
+            {#- 위 for-루프는 전역 users/<u> 조회가 성공했을 때만 실행됩니다. 호스트 전용 공개키는
+               전역 조회가 404여도(신규 계정이 hosts/<host>/users/<u>에만 있는 경우 포함) 항상
+               적용돼야 하므로, user_key는 루프 밖에서 host override 우선으로 결정합니다. #}
             {%- set host_revoked_src = u_override.get('revoked_keys', []) -%}
             {%- set ns.revoked = (ns.revoked + ([host_revoked_src] if host_revoked_src is string else (host_revoked_src | list))) | map('trim') | select | unique | list -%}
-            {%- set ns2 = namespace(fps=[]) -%}
-            {%- for rk in ns.revoked -%}
-              {%- set _ = ns2.fps.append(rk.split()[:2] | join(' ')) -%}
-            {%- endfor -%}
-            {%- set user_fp = (ns.user_key.split()[:2] | join(' ')) if (ns.user_key | trim | length > 0) else '' -%}
-            {%- set is_revoked = (user_fp | length > 0) and (user_fp in ns2.fps) -%}
+            {%- set user_key = ((u_override.ssh_public_key if 'ssh_public_key' in u_override else ns.global_key) | trim) -%}
             {%- set _ = dynamic_accs.append({
                   'name': u,
                   'tier': 'admin',
                   'comment': 'Administrator provisioned via OpenBao',
                   'shell': '/bin/bash',
-                  'keys': [] if is_revoked else ([ns.user_key] if (ns.user_key | trim | length > 0) else []),
+                  'keys': [user_key] if (user_key | length > 0) else [],
                   'revoked_keys': ns.revoked
                 }) -%}
           {%- endfor -%}
