@@ -1,0 +1,133 @@
+---
+# Verifies docker_engine and monitoring (network-dependent roles). Same
+# collect-once structure as molecule/fast/verify.yml; assertion semantics are
+# unchanged from the former molecule/default/verify.yml.
+- name: Verify Target Host Network-Dependent Roles
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    molecule_roles: "{{ (lookup('env', 'MOLECULE_ROLES') | default(lookup('env', 'SCENARIO_ROLES'), true)).split(',') | map('trim') | list }}"
+    otelcol_service_path: "{{ '/etc/systemd/system/otelcol-contrib.service' if ansible_service_mgr == 'systemd' else '/etc/init.d/otelcol-contrib' }}"
+    collect_spec:
+      stat:
+        - /etc/docker/daemon.json
+        - /opt/services
+        - /data
+        - /backup
+        - /etc/profile.d/docker_mgmt.sh
+        - /usr/local/bin/node_exporter
+        - /etc/systemd/system/node_exporter.service
+        - /usr/local/bin/otelcol-contrib
+        - /etc/otelcol/config.yaml
+        - "{{ otelcol_service_path }}"
+      read:
+        - /etc/otelcol/config.yaml
+      group: [dockermgmt, otelcol]
+      passwd: [dockersvc, otelcol]
+
+  tasks:
+    - name: Collect every verification fact in one remote execution
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/../shared/files/collect_facts.py {{ collect_spec | to_json | quote }}"
+        executable: "{{ ansible_python_interpreter | default('python3') }}"
+      register: collected
+      changed_when: false
+
+    - name: Parse collected facts
+      ansible.builtin.set_fact:
+        f: "{{ collected.stdout | from_json }}"
+
+    # ==========================================================================
+    # 4. Docker Engine 검증
+    # ==========================================================================
+    - name: Verify the docker_engine role
+      when: "'docker_engine' in molecule_roles"
+      block:
+        - name: "[VERIFY-DOC-011] Verify hardened Docker daemon configuration exists"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/docker/daemon.json'].exists
+            fail_msg: "Docker daemon configuration /etc/docker/daemon.json is missing."
+          when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+        - name: "[VERIFY-DOC-014] Verify dockermgmt system group exists"
+          ansible.builtin.assert:
+            that:
+              - f.group['dockermgmt']
+            fail_msg: "dockermgmt group does not exist."
+          when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+        - name: "[VERIFY-DOC-015] Verify dockersvc system user exists"
+          ansible.builtin.assert:
+            that:
+              - f.passwd['dockersvc']
+            fail_msg: "dockersvc user does not exist."
+          when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+        - name: "[VERIFY-DOC-016] Verify FHS standard directories exist"
+          ansible.builtin.debug:
+            msg: "{{ item }}: {{ f.stat[item] }}"
+            verbosity: 1
+          loop: [/opt/services, /data, /backup]
+          when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+        - name: "[VERIFY-DOC-018] Verify docker management umask script exists"
+          ansible.builtin.debug:
+            msg: "{{ f.stat['/etc/profile.d/docker_mgmt.sh'] }}"
+            verbosity: 1
+          when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+
+    # ==========================================================================
+    # 5. Monitoring Role (OpenTelemetry Hostmetrics & Log Pipeline) 검증
+    # ==========================================================================
+    - name: Verify the monitoring role
+      when: "'monitoring' in molecule_roles"
+      block:
+        - name: "[VERIFY-MON-CLEANUP-001] Verify legacy node_exporter binary is absent"
+          ansible.builtin.assert:
+            that:
+              - not f.stat['/usr/local/bin/node_exporter'].exists
+            fail_msg: "node_exporter binary should have been removed."
+
+        - name: "[VERIFY-MON-CLEANUP-002] Verify legacy node_exporter systemd unit is absent"
+          ansible.builtin.assert:
+            that:
+              - not f.stat['/etc/systemd/system/node_exporter.service'].exists
+            fail_msg: "node_exporter systemd service unit file should have been removed."
+
+        - name: "[VERIFY-MON-001] Verify otelcol system group exists"
+          ansible.builtin.assert:
+            that:
+              - f.group['otelcol']
+            fail_msg: "otelcol group does not exist."
+
+        - name: "[VERIFY-MON-002] Verify otelcol system user exists"
+          ansible.builtin.assert:
+            that:
+              - f.passwd['otelcol']
+            fail_msg: "otelcol user does not exist."
+
+        - name: "[VERIFY-MON-003] Verify otelcol-contrib binary exists and is executable"
+          ansible.builtin.debug:
+            msg: "{{ f.stat['/usr/local/bin/otelcol-contrib'] }}"
+            verbosity: 1
+
+        - name: "[VERIFY-MON-004] Verify otelcol-contrib configuration file exists"
+          ansible.builtin.assert:
+            that:
+              - f.read['/etc/otelcol/config.yaml'] is not none
+              - "'hostmetrics:' in f.read['/etc/otelcol/config.yaml']"
+              - "'node_exporter' not in f.read['/etc/otelcol/config.yaml']"
+            fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
+
+        - name: "[VERIFY-MON-005] Verify otelcol-contrib service unit or init script"
+          ansible.builtin.assert:
+            that:
+              - f.stat[otelcol_service_path].exists
+            fail_msg: "otelcol-contrib service unit/init script is missing."
+
+        - name: "[VERIFY-MON-006] Verify otelcol-contrib service status"
+          ansible.builtin.debug:
+            msg: "otelcol-contrib hostmetrics verification complete."

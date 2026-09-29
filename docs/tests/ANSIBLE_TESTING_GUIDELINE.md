@@ -70,41 +70,41 @@
 
 ---
 
-### 2) Molecule 실행 명령어
+### 2) Molecule 실행 명령어 (3개 티어, ADR-0007)
+
+| 티어 | 명령 | 범위 | 언제 |
+|---|---|---|---|
+| **Fast Scenario** | `make test-fast` | `common`(Base Layer) + `security` + `access_security`, Rocky 9 (`roles/security`·`roles/common` 변경 시 Rocky 8 추가), idempotence 포함 | pre-push |
+| **Slow Scenario** | `make test-slow` | `docker_engine` + `monitoring` 실제 설치, 3개 OS | 수동/CI |
+| **Full Matrix** | `make test-full` | fast + slow, 3개 OS | **릴리스 전 필수** |
+| 단일 role | `make test-role ROLE=security` | 해당 role + `common`, Rocky 9 | 개발 중 |
 
 ```bash
-cd /home/ppzxc/projects/overseer/ansible
+make test-images                          # 테스트 이미지 빌드/갱신 (Dockerfile 해시가 바뀔 때만 재빌드, FORCE=1 강제)
+make test-role ROLE=security              # 개발 루프
+MOLECULE_SKIP_IDEMPOTENCE=1 make test-role ROLE=security   # 더 빠른 반복(멱등성 검증 생략, 명시적 opt-in)
 
-# ① 전체 풀 라이프사이클 테스트 실행 (Create -> Converge -> Idempotence -> Verify -> Destroy)
-./docker-run.sh molecule test
-
-# ② 단계별 디버깅 실행 (컨테이너를 유지하면서 작업할 때)
-# 1) 컨테이너 기동
-./docker-run.sh molecule create
-
-# 2) Role 적용 (수정 후 반복 실행 가능)
-./docker-run.sh molecule converge
-
-# 3) 멱등성만 별도 검증
-./docker-run.sh molecule idempotence
-
-# 4) 상태 단언(Verify) 태스크만 실행
-./docker-run.sh molecule verify
-
-# 5) 테스트 컨테이너 내부 쉘 접속 (디버깅)
-./docker-run.sh molecule login --host test-rockylinux9
-
-# 6) 테스트 컨테이너 정리 및 종료
-./docker-run.sh molecule destroy
+# 단계별 디버깅 (컨테이너 유지). 시나리오는 -s fast | slow, 인스턴스는 <시나리오>-<OS>
+molecule create   -s fast -p fast-rockylinux9
+molecule converge -s fast
+molecule idempotence -s fast
+molecule verify   -s fast
+molecule login    -s fast --host fast-rockylinux9
+molecule destroy  -s fast
 ```
+
+- 실행 시간은 `ansible.posix.profile_tasks`로 태스크별 기록됩니다(`molecule.yml`의 `ANSIBLE_CALLBACKS_ENABLED`).
+- 고정 인스턴스 이름(`fast-*`, `slow-*`)은 시나리오별로 분리되어 있어 동시에 띄워도 충돌하지 않습니다.
+- 패키지 캐시는 named volume(`infra-test-cache-*`)에 유지됩니다. 초기화: `docker volume rm $(docker volume ls -q -f name=infra-test-cache)`.
 
 ---
 
 ### 3) Molecule 시나리오 구성 파일
 
-- [`molecule/default/molecule.yml`](file:///home/ppzxc/projects/node-provisioner/molecule/default/molecule.yml): 테스트 대상 OS(Rocky Linux, Ubuntu) 및 Docker 드라이버 설정
-- [`molecule/default/converge.yml`](file:///home/ppzxc/projects/node-provisioner/molecule/default/converge.yml): 테스트 실행할 엔트리포인트 플레이북
-- [`molecule/default/verify.yml`](file:///home/ppzxc/projects/node-provisioner/molecule/default/verify.yml): 시스템 상태 단언(Assert) 검증 태스크
+- `molecule/fast/`, `molecule/slow/`: 시나리오별 `molecule.yml`(플랫폼·역할 목록)과 `verify.yml`(단언).
+- `molecule/shared/`: 두 시나리오가 공유하는 `converge.yml`(Base Layer 선적용 + `MOLECULE_ROLES` 선택), `prepare.yml`(매 실행마다 새로 필요한 상태만), `group_vars/all.yml`(fixture), `files/collect_facts.py`.
+- `molecule/images/*.Dockerfile`: Test Image. 실행마다 반복되던 준비(openssh-server, 호스트 키, Rocky 8의 python3.11)만 굽습니다. **role이 설치하는 패키지와 [PREPARE-004]의 삭제 시나리오 시드는 굽지 않습니다** (설치 경로와 COMMON-013/023 검증을 보존하기 위해).
+- `verify.yml`은 `collect_facts.py`로 사실을 **한 번의 원격 실행**으로 수집하고 `assert`는 컨트롤러에서 평가합니다. `[VERIFY-*]` ID는 유지되며 3-Way 검증기는 `molecule/*/verify.yml` 합집합을 검사합니다.
 
 ---
 

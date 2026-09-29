@@ -23,3 +23,27 @@ _Avoid_: raw fallback, raw mode, raw provisioning (imprecise — always the full
 **Host Agents**:
 The pair of agents — `otelcol-contrib` (logs + hostmetrics shipped to OpenObserve) and `resticprofile`/`restic` (backups shipped to RustFS over the S3 API) — that are always installed together, never one without the other, on every host in the `servers` group. Collection and backup targets follow the ISMS (not ISMS-P) standard. Their standard configuration is held in Git; per-host overrides and secrets come from OpenBao. Designed in ADR-0006; not yet implemented.
 _Avoid_: monitoring agent, backup agent (when meaning the pair), sidecar
+
+**Fast Scenario**:
+The molecule scenario run at pre-push. Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
+_Avoid_: default scenario, quick test, smoke test
+
+**Slow Scenario**:
+The molecule scenario covering roles that depend on external networks (`docker_engine`, `monitoring`). Runs real installs, never at pre-push; run manually or from CI.
+_Avoid_: network scenario, integration scenario
+
+**Full Matrix**:
+Every scenario on every supported platform (Rocky 8, Rocky 9, Ubuntu 22.04). The only run that verifies OS-family branches the Representative Platform does not cover. Run on demand and before a release, not at pre-push.
+_Avoid_: full test, all-OS run
+
+**Representative Platform**:
+The platform (Rocky 9) that the Fast Scenario runs on at pre-push unless a change warrants the wider run, standing in for the Full Matrix.
+_Avoid_: primary OS, default platform
+
+**Base Layer**:
+The `common` role, applied before any other role in a scenario because other roles (e.g. `access_security`) depend on the accounts it creates. Mirrors the production apply order.
+_Avoid_: prerequisite role, seed
+
+**Test Image**:
+A derived container image with per-run preparation (SSH server, host keys, Python interpreter) already baked in, so a scenario spends no time on it. Rebuilt only when its definition changes.
+_Avoid_: base image, custom image

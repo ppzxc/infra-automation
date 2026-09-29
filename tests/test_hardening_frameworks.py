@@ -77,6 +77,8 @@ def test_sysctl_and_security_enhanced_params():
     assert "fs.protected_hardlinks" in common_doc
     assert "kernel.randomize_va_space" in common_doc
 
-    verify_file = (ROOT_DIR / "molecule" / "default" / "verify.yml").read_text(encoding="utf-8")
+    verify_file = "\n".join(
+        f.read_text(encoding="utf-8") for f in sorted((ROOT_DIR / "molecule").glob("*/verify.yml"))
+    )
     assert "fs.protected_hardlinks" in verify_file
     assert "kernel.randomize_va_space" in verify_file

@@ -63,7 +63,7 @@
 # hard-lock to the CPython minor version they were compiled against (e.g.
 # cp36 on RockyLinux 8's stock python3.6.8). When ansible_python_interpreter
 # points at a different interpreter for AnsiballZ compatibility (see
-# [PREPARE-000-PY311] in molecule/default/prepare.yml for the test-only
+# [PREPARE-000-PY311] in the molecule Test Images (molecule/images/) for the test-only
 # equivalent of this exact scenario), `import firewall.client` under that
 # interpreter fails with an ABI mismatch, which ansible.posix.firewalld
 # surfaces as an import error rather than a clean skip. ansible-core's

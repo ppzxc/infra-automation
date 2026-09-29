@@ -3,9 +3,11 @@
 # ==============================================================================
 # Pipeline Architecture:
 #   1. pre-commit (~5s): Gitleaks secret scan + Spec Validator + Pytest
-#   2. pre-push   (Integration, ~12min): Molecule Multi-OS Docker testing
-#      (Rocky 8/9, Ubuntu 22.04 -- CentOS 6/7 and CentOS Stream 10 removed
-#      from the matrix, see tracking comments in molecule/default/molecule.yml).
+#   2. pre-push   (Integration, Fast Scenario -- see ADR-0007): common + security +
+#      access_security on Rocky 9 (Rocky 8 added when roles/security or
+#      roles/common changed), idempotence included. docker_engine/monitoring
+#      (Slow Scenario) and Ubuntu run only via `make test-slow` / `make test-full`.
+#      CentOS 6/7 and CentOS Stream 10 are not in the matrix (ADR-0005).
 #      scripts/run-molecule.sh skips pushes that touch no molecule-relevant
 #      path, fails fast on an unresponsive Docker daemon, and serializes runs
 #      across worktrees.
@@ -41,4 +43,4 @@ pre-push:
   commands:
     molecule:
       tags: integration test container
-      run: bash scripts/run-molecule.sh
+      run: bash scripts/run-molecule.sh fast

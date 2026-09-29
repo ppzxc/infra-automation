@@ -4,7 +4,7 @@ Node Provisioner 3-Way Ansible Specification & Traceability Validator
 Validates strict consistency across:
   1. Specification Docs (docs/ansible/*.md)
   2. Implementation Tasks (ansible/roles/*/tasks/main.yml)
-  3. Molecule Verification Tests (ansible/molecule/default/verify.yml)
+  3. Molecule Verification Tests (molecule/*/verify.yml, union across scenarios)
 """
 
 import sys
@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DOCS_DIR = ROOT_DIR / "docs"
 ROLES_DIR = ROOT_DIR / "roles"
-VERIFY_FILE = ROOT_DIR / "molecule" / "default" / "verify.yml"
+VERIFY_FILES = sorted((ROOT_DIR / "molecule").glob("*/verify.yml"))
 
 SPEC_ID_PATTERN = re.compile(r"\[([A-Z]+-\d{3})\]\s*(.+)")
 DOC_TABLE_PATTERN = re.compile(r"\|\s*`([A-Z]+-\d{3})`\s*\|\s*`([^`]+)`\s*\|")
@@ -62,8 +62,8 @@ def extract_code_tasks():
 
 def extract_verify_tests():
     verify_ids = set()
-    if VERIFY_FILE.exists():
-        content = VERIFY_FILE.read_text(encoding="utf-8")
+    for verify_file in VERIFY_FILES:
+        content = verify_file.read_text(encoding="utf-8")
         for match in VERIFY_ID_PATTERN.finditer(content):
             verify_ids.add(match.group(1).strip())
     return verify_ids
