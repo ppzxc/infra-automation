@@ -12,10 +12,12 @@
 #      MOLECULE_SKIP_IDEMPOTENCE=1   `role` only: dev scenario, no idempotence pass (opt-in)
 #      MOLECULE_PLATFORMS      override platform list (space separated, e.g. "rockylinux9")
 #
-# Guards kept from the single-scenario design:
+# Guards:
 # - Docker daemon must answer, or fail fast instead of hanging the push.
 # - Runs are serialized machine-wide (fixed instance names on one daemon).
 # - Whole run is bounded so a stuck container cannot hang the push forever.
+# - scripts/docker-guard.sh kills the run if the Docker daemon freezes mid-run
+#   (observed with Docker Desktop under sustained `docker exec` load).
 # ==============================================================================
 set -eo pipefail
 
@@ -116,8 +118,10 @@ run_scenario() { # scenario platforms...
         local rc=0 pflag="-p $scenario-$p"
         [ "$p" = "all" ] && pflag=""
         log "molecule test -s $scenario $pflag"
-        timeout --kill-after=60 "$RUN_TIMEOUT" molecule test -s "$scenario" $pflag || rc=$?
+        scripts/docker-guard.sh timeout --kill-after=60 "$RUN_TIMEOUT" molecule test -s "$scenario" $pflag || rc=$?
         if [ "$rc" -ne 0 ]; then
+            # 125 = the guard killed the run because the Docker daemon froze; any
+            # docker call (including molecule destroy) would hang, so skip cleanup.
             if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
                 echo "[✗] exceeded ${RUN_TIMEOUT}s; destroying instances."
                 timeout 300 molecule destroy -s "$scenario" || true

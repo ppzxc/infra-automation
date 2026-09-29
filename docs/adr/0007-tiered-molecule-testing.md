@@ -29,6 +29,7 @@
 
 - pre-push는 평소 Rocky 9만 검증하므로(`security`·`common` 변경 시에만 3개 OS) Ubuntu·Rocky 8 전용 분기 회귀와 Docker/otelcol 설치 회귀는 Full Matrix를 돌리기 전까지 잡히지 않을 수 있다. 릴리스 전 체크리스트에 `make test-full`을 명시해 커버리지가 조용히 사라지는 것을 막는다.
 - Test Image는 로컬 빌드가 필요하고 낡을 수 있다. 해시 기반 자동 재빌드로 완화한다.
+- **Docker Desktop(Windows)이 지속적인 `docker exec` 부하에서 멈춘다.** 이 저장소를 개발한 환경(WSL2 + Docker Desktop 4.87~4.93)에서 90초~10분 안에 백엔드가 정지하는 것을 재현했다. Defender, 버전(4.87.0에서도 발생), Resource Saver, 테스트 코드는 원인이 아니었고 근본 원인은 규명하지 못했다. molecule은 호스트 수 × 태스크 수만큼 `docker exec`를 보내므로 호스트 3대 실행이 가장 위험했다. 멈추면 `molecule destroy`를 포함한 모든 docker 호출이 응답하지 않아 pre-push가 최대 `RUN_TIMEOUT`(30분) 동안 막힌다. 그래서 `scripts/docker-guard.sh`가 실행 중 데몬을 주기적으로 확인하고, 연속 실패하면 프로세스 그룹을 종료한 뒤 종료 코드 125로 끝낸다(정리는 다음 실행의 초기 destroy가 맡는다). 원인 해결이 아니라 피해 제한이다.
 
 ## Considered Options
 
