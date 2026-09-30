@@ -25,6 +25,7 @@
         - "{{ otelcol_service_path }}"
       read:
         - /etc/otelcol/config.yaml
+        - "{{ otelcol_service_path }}"
       group: [dockermgmt, otelcol]
       passwd: [dockersvc, otelcol]
 
@@ -198,6 +199,59 @@
               - "'hostmetrics:' in f.read['/etc/otelcol/config.yaml']"
               - "'node_exporter' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
+
+        - name: "[VERIFY-MON-060] Verify the exporter targets <endpoint>/api/<org> without a trailing slash"
+          ansible.builtin.assert:
+            that:
+              - "'endpoint: \"https://openobserve.molecule.invalid:5080/api/default\"' in f.read['/etc/otelcol/config.yaml']"
+              - "'otlphttp/security_logs' in f.read['/etc/otelcol/config.yaml']"
+              - "'block_on_overflow: true' in f.read['/etc/otelcol/config.yaml']"
+              - "'otlp/backend' not in f.read['/etc/otelcol/config.yaml']"
+            fail_msg: "otlphttp exporter endpoint/queue settings are wrong or the legacy gRPC exporter remains."
+
+        - name: "[VERIFY-MON-061] Verify the otelcol storage directory exists and is owned by otelcol"
+          ansible.builtin.stat:
+            path: /var/lib/otelcol/storage
+          register: _verify_otel_storage
+          failed_when: not _verify_otel_storage.stat.exists or _verify_otel_storage.stat.pw_name != 'otelcol'
+
+        - name: "[VERIFY-MON-062] Verify journald receiver is present only when rsyslog is absent"
+          ansible.builtin.stat:
+            path: /usr/sbin/rsyslogd
+          register: _verify_rsyslog
+          failed_when: (('journald:' in f.read['/etc/otelcol/config.yaml']) | bool) == _verify_rsyslog.stat.exists
+
+        - name: "[VERIFY-MON-063] Verify the secrets directory is root-owned 0700"
+          ansible.builtin.stat:
+            path: /etc/otelcol-contrib
+          register: _verify_otel_secdir
+          failed_when: >-
+            not _verify_otel_secdir.stat.exists or _verify_otel_secdir.stat.pw_name != 'root' or
+            _verify_otel_secdir.stat.mode != '0700'
+
+        - name: "[VERIFY-MON-064] Verify docker_stats and OTLP receivers are off by default"
+          ansible.builtin.assert:
+            that:
+              - "'docker_stats:' not in f.read['/etc/otelcol/config.yaml']"
+              - "'4317' not in f.read['/etc/otelcol/config.yaml']"
+            fail_msg: "docker_stats/OTLP receiver must be disabled unless opted in."
+
+        - name: "[VERIFY-MON-065] Verify secrets.env is root-owned 0600 and the config holds no token"
+          ansible.builtin.stat:
+            path: /etc/otelcol-contrib/secrets.env
+          register: _verify_otel_env
+          failed_when: >-
+            not _verify_otel_env.stat.exists or _verify_otel_env.stat.pw_name != 'root' or
+            _verify_otel_env.stat.mode != '0600' or
+            'molecule-fixture-o2-ingest' in f.read['/etc/otelcol/config.yaml']
+
+        - name: "[VERIFY-MON-066] Verify the unit loads the secrets env file and keeps non-root capabilities"
+          ansible.builtin.assert:
+            that:
+              - "'EnvironmentFile=/etc/otelcol-contrib/secrets.env' in f.read[otelcol_service_path]"
+              - "'User=otelcol' in f.read[otelcol_service_path]"
+              - "'AmbientCapabilities=CAP_DAC_READ_SEARCH' in f.read[otelcol_service_path]"
+          when: ansible_service_mgr == 'systemd'
 
         - name: "[VERIFY-MON-005] Verify otelcol-contrib service unit or init script"
           ansible.builtin.assert:
