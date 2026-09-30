@@ -217,9 +217,17 @@
 
         - name: "[VERIFY-MON-062] Verify journald receiver is present only when rsyslog is absent"
           ansible.builtin.stat:
-            path: /usr/sbin/rsyslogd
+            path: "{{ item }}"
+          loop: [/usr/sbin/rsyslogd, /sbin/rsyslogd]
           register: _verify_rsyslog
-          failed_when: (('journald:' in f.read['/etc/otelcol/config.yaml']) | bool) == _verify_rsyslog.stat.exists
+          failed_when: false
+
+        - name: "[VERIFY-MON-062] Verify journald presence mirrors rsyslog absence"
+          ansible.builtin.assert:
+            that:
+              - >-
+                ('journald:' in f.read['/etc/otelcol/config.yaml']) ==
+                (_verify_rsyslog.results | map(attribute='stat.exists') | select | list | length == 0)
 
         - name: "[VERIFY-MON-063] Verify the secrets directory is root-owned 0700"
           ansible.builtin.stat:
@@ -236,6 +244,19 @@
               - "'4317' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "docker_stats/OTLP receiver must be disabled unless opted in."
 
+        - name: "[VERIFY-MON-067] Verify the collection standard: 60s hostmetrics, stream routing, checkpoints, retry, separate metrics"
+          ansible.builtin.assert:
+            that:
+              - "'collection_interval: 60s' in f.read['/etc/otelcol/config.yaml']"
+              - "'routing/logs:' in f.read['/etc/otelcol/config.yaml']"
+              - "'logs/security_logs:' in f.read['/etc/otelcol/config.yaml']"
+              - "'logs/system_logs:' in f.read['/etc/otelcol/config.yaml']"
+              - "'logs/app_logs:' in f.read['/etc/otelcol/config.yaml']"
+              - "'storage: file_storage' in f.read['/etc/otelcol/config.yaml']"
+              - "'max_elapsed_time: 0' in f.read['/etc/otelcol/config.yaml']"
+              - "'otlphttp/metrics' in f.read['/etc/otelcol/config.yaml']"
+              - "'on_rebound: true' in f.read['/etc/otelcol/config.yaml']"
+
         - name: "[VERIFY-MON-065] Verify secrets.env is root-owned 0600 and the config holds no token"
           ansible.builtin.stat:
             path: /etc/otelcol-contrib/secrets.env
@@ -244,6 +265,10 @@
             not _verify_otel_env.stat.exists or _verify_otel_env.stat.pw_name != 'root' or
             _verify_otel_env.stat.mode != '0600' or
             'molecule-fixture-o2-ingest' in f.read['/etc/otelcol/config.yaml']
+
+        - name: "[VERIFY-MON-065] Verify secrets.env carries the basic-auth value"
+          ansible.builtin.command: grep -q '^O2_BASIC_AUTH=.\+' /etc/otelcol-contrib/secrets.env
+          changed_when: false
 
         - name: "[VERIFY-MON-066] Verify the unit loads the secrets env file and keeps non-root capabilities"
           ansible.builtin.assert:

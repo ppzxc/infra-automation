@@ -28,9 +28,9 @@ otel_hostmetrics_interval: "60s"
 otel_hostmetrics_scrapers:
   cpu: {}
   memory: {}
-  load: {}
-  filesystem: {}
   disk: {}
+  filesystem: {}
+  load: {}
   network: {}
   paging: {}
   processes: {}
@@ -38,6 +38,8 @@ otel_hostmetrics_scrapers:
 # Docker 메트릭은 hosts/<host>/agents의 otel_docker_metrics: true인 호스트만 (docker_engine의 docker_metrics_enabled와 별개).
 # otelcol 사용자에게 소켓 접근 권한이 필요하다(예: docker 그룹 멤버십은 docker_engine 책임).
 otel_docker_endpoint: "unix:///var/run/docker.sock"
+# 소켓 읽기용: 이 그룹이 존재하고 otel_docker_metrics인 호스트에서만 otelcol 사용자에 추가한다.
+otel_docker_group: "docker"
 
 # 로컬 OTLP 수신기는 기본 비활성 (인증 없는 수집 포트 노출 방지)
 otel_otlp_enabled: false

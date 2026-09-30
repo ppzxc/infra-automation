@@ -1,4 +1,16 @@
 # Ansible managed — ISMS 수집 표준 (ADR-0006 §2.3, §2.7). 시크릿은 포함하지 않으며 ${env:…}로 secrets.env를 참조한다.
+{% macro o2_common(stream=none) %}
+    endpoint: {{ (o2_endpoint ~ '/api/' ~ o2_org) | to_json }}
+    headers:
+      Authorization: "Basic ${env:O2_BASIC_AUTH}"
+{% if stream %}
+      stream-name: {{ stream }}
+{% endif %}
+{% if o2_ca_file | length > 0 %}
+    tls:
+      ca_file: {{ o2_ca_file | to_json }}
+{% endif %}
+{% endmacro %}
 extensions:
   file_storage:
     directory: {{ otelcol_storage_dir }}
@@ -74,25 +86,17 @@ connectors:
   routing/logs:
     default_pipelines: [logs/app_logs]
     table:
-{% for stream in ['security_logs', 'system_logs'] %}
+{% for stream in host_agents_log_streams if stream != 'app_logs' %}
       - context: log
         condition: attributes["log_type"] == "{{ stream }}"
         pipelines: [logs/{{ stream }}]
 {% endfor %}
 
 exporters:
-{% for stream in ['security_logs', 'system_logs', 'app_logs'] %}
+{% for stream in host_agents_log_streams %}
   # 로그: 소형 영속 bytes 큐 + block_on_overflow + 무한 재시도. 큐가 차면 filelog가 멈추고 원본 파일이 버퍼가 된다.
   otlphttp/{{ stream }}:
-    endpoint: {{ (o2_endpoint ~ '/api/' ~ o2_org) | to_json }}
-    headers:
-      Authorization: "Basic ${env:O2_BASIC_AUTH}"
-      stream-name: {{ stream }}
-{% if o2_ca_file | length > 0 %}
-    tls:
-      ca_file: {{ o2_ca_file | to_json }}
-{% endif %}
-    sending_queue:
+{{ o2_common(stream) }}    sending_queue:
       enabled: true
       storage: file_storage
       sizer: bytes
@@ -104,14 +108,7 @@ exporters:
 {% endfor %}
   # 메트릭: 로그와 분리된 메모리 큐, 역압 없이 폐기 가능.
   otlphttp/metrics:
-    endpoint: {{ (o2_endpoint ~ '/api/' ~ o2_org) | to_json }}
-    headers:
-      Authorization: "Basic ${env:O2_BASIC_AUTH}"
-{% if o2_ca_file | length > 0 %}
-    tls:
-      ca_file: {{ o2_ca_file | to_json }}
-{% endif %}
-    sending_queue:
+{{ o2_common() }}    sending_queue:
       enabled: true
       block_on_overflow: false
 
@@ -122,7 +119,7 @@ service:
       receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}{% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
       processors: [memory_limiter, resource/host]
       exporters: [routing/logs]
-{% for stream in ['security_logs', 'system_logs', 'app_logs'] %}
+{% for stream in host_agents_log_streams %}
     logs/{{ stream }}:
       receivers: [routing/logs]
       processors: [batch]

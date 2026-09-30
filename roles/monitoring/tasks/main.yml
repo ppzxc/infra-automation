@@ -67,11 +67,24 @@
       state: present
     when: enable_otelcol | default(true) | bool
 
+  - name: "[MON-067] Look up the docker socket group (only when docker metrics are enabled)"
+    ansible.builtin.getent:
+      database: group
+      key: "{{ otel_docker_group }}"
+    register: _otelcol_docker_group
+    failed_when: false
+    check_mode: false
+    when:
+      - enable_otelcol | default(true) | bool
+      - host_agents_inputs.otel_docker_metrics | bool
+
   - name: "[MON-002] Create otelcol system user"
     ansible.builtin.user:
       name: "{{ otelcol_user }}"
       group: "{{ otelcol_group }}"
-      groups: "{{ 'adm' if ansible_os_family == 'Debian' else 'systemd-journal' }}"
+      groups: >-
+        {{ ['adm' if ansible_os_family == 'Debian' else 'systemd-journal']
+           + ([otel_docker_group] if (_otelcol_docker_group.ansible_facts.getent_group | default({})) | length > 0 else []) }}
       append: true
       system: true
       shell: /sbin/nologin
@@ -117,14 +130,15 @@
 
   - name: "[MON-062] Detect rsyslog (journald is collected only where rsyslog is absent)"
     ansible.builtin.stat:
-      path: /usr/sbin/rsyslogd
+      path: "{{ item }}"
+    loop: [/usr/sbin/rsyslogd, /sbin/rsyslogd]
     register: _otelcol_rsyslog
     check_mode: false
     when: enable_otelcol | default(true) | bool
 
   - name: "[MON-064] Decide whether the journald receiver is needed"
     ansible.builtin.set_fact:
-      host_agents_journald: "{{ not _otelcol_rsyslog.stat.exists }}"
+      host_agents_journald: "{{ _otelcol_rsyslog.results | map(attribute='stat.exists') | select | list | length == 0 }}"
     when: enable_otelcol | default(true) | bool
 
   - name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"

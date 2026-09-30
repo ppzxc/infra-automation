@@ -603,6 +603,7 @@ def test_otelcol_pinned_version_table_is_consistent():
 
 def _render_config(tmp_path, **over):
     vars_ = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    vars_.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8")))
     vars_.update({
         "inventory_hostname": "h1", "host_agents_os_type": "linux", "host_agents_os_description": "Rocky Linux 9",
         "host_agents_journald": False, "o2_endpoint": "https://o2.example:5080", "o2_org": "default",
@@ -702,3 +703,11 @@ def test_secrets_env_task_is_private_and_undiffed():
     assert env["no_log"] is True and env["diff"] is False
     unit = next(t for t in flat if t.get("name", "").startswith("[MON-005]"))["ansible.builtin.copy"]["content"]
     assert "EnvironmentFile=" in unit and "CAP_DAC_READ_SEARCH" in unit and "User={{ otelcol_user }}" in unit
+
+
+def test_docker_group_is_added_only_via_lookup_and_rsyslog_probes_both_paths():
+    text = (ROLE / "tasks" / "main.yml").read_text(encoding="utf-8")
+    assert "[MON-067]" in text and "otel_docker_group" in text
+    assert "/usr/sbin/rsyslogd, /sbin/rsyslogd" in text
+    consts = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))
+    assert consts["host_agents_log_streams"] == ["security_logs", "system_logs", "app_logs"]

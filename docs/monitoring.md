@@ -142,8 +142,9 @@
 | `MON-054` | `Switch otelcol-contrib install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-051`~`053`) |
 | `MON-060` | `Assert OpenObserve endpoint is configured without a trailing slash` | `ansible.builtin.assert` | modern | 읽기 전용 (비어 있거나 끝 슬래시면 호스트 실패) |
 | `MON-061` | `Ensure otelcol persistent storage directory exists (filelog checkpoints and log queue)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` |
-| `MON-062` | `Detect rsyslog (journald is collected only where rsyslog is absent)` | `ansible.builtin.stat` | modern | 읽기 전용, `check_mode: false` |
+| `MON-062` | `Detect rsyslog (journald is collected only where rsyslog is absent)` | `ansible.builtin.stat` | modern | 읽기 전용, `check_mode: false` (`/usr/sbin`·`/sbin`) |
 | `MON-063` | `Ensure otelcol secrets directory exists` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` (`0700`) |
 | `MON-064` | `Decide whether the journald receiver is needed` | `ansible.builtin.set_fact` | modern | 순수 함수 |
 | `MON-065` | `Deploy otelcol secrets env file (0600, no_log, no diff)` | `ansible.builtin.template` | modern | Checksum 비교 (`no_log`, `diff: false`) |
 | `MON-066` | `Reload systemd units when the otelcol unit changed` | `ansible.builtin.systemd` | modern | 유닛 변경 시에만 실행 (`daemon_reload`) |
+| `MON-067` | `Look up the docker socket group (only when docker metrics are enabled)` | `ansible.builtin.getent` | modern | 읽기 전용, `check_mode: false` (그룹이 있으면 `MON-002`가 otelcol을 추가) |

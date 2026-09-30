@@ -24,7 +24,6 @@ common_packages:
   - tar
   - gzip
 
-
 # Host Agents — OpenObserve 연결 (비시크릿, ADR-0006 §2.7). 수집 토큰은 OpenBao hosts/<host>/agents의 o2_ingest_token.
 # o2_endpoint는 끝 슬래시 없이 지정해야 한다 (미지정 시 Host Agents 실행이 실패).
 # o2_endpoint: "https://openobserve.example.internal:5080"
