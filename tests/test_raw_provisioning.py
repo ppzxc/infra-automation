@@ -1118,3 +1118,29 @@ def test_security_role_shares_drop_unbind_interfaces_with_module_path():
     text = (ROOT_DIR / "roles/security/tasks/main.yml").read_text()
     assert text.count("firewall_drop_unbind_interfaces") >= 3
     assert '- "bond0"' not in text and '- "eno1"' not in text
+
+
+def test_argless_command_filters_accept_the_jinja_piped_value():
+    """`{{ '' | raw_xxx_cmd }}` passes the piped value as the first argument."""
+    import yaml
+    from raw_provisioning import FilterModule, raw_default_route_cmd
+    filters = FilterModule().filters()
+    for name in ("raw_default_iface_cmd", "raw_firewalld_masquerade_off_cmd", "raw_default_route_cmd"):
+        assert filters[name]("")
+    assert raw_default_route_cmd() and raw_default_iface_cmd()
+
+
+def test_raw_gate_precedes_fact_dependent_conditions():
+    """Raw hosts gather no facts; `when` items short-circuit in order, so the raw gate must come first."""
+    import yaml
+    for role in ("common", "security"):
+        tasks = _walk_tasks(yaml.safe_load((ROOT_DIR / "roles" / role / "tasks" / "main.yml").read_text()))
+        for t in tasks:
+            when = t.get("when")
+            if not isinstance(when, list) or not any("_raw_path_effective" in str(c) for c in when):
+                continue
+            gate = next(i for i, c in enumerate(when) if "_raw_path_effective" in str(c))
+            for i, cond in enumerate(when[:gate]):
+                # detect_raw_path.yml sets os_family/distribution*; other facts stay undefined.
+                assert not any(f in str(cond) for f in ("ansible_service_mgr", "ansible_pkg_mgr", "ansible_facts")), (
+                    t.get("name"), cond)

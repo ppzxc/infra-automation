@@ -280,8 +280,8 @@
     group: root
     mode: '0644'
   when:
-    - ansible_service_mgr == "systemd"
     - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
   failed_when: false
 
 - name: "[COMMON-018] Deploy system-wide custom shell aliases"

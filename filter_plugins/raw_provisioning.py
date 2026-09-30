@@ -443,7 +443,7 @@ def raw_firewalld_failed(stdout):
     return _firewalld_answer(stdout) not in ('present', 'absent')
 
 
-def raw_firewalld_masquerade_off_cmd():
+def raw_firewalld_masquerade_off_cmd(_unused=None):
     """Remove masquerade from every zone but ``external``, permanent and runtime; marker if any was removed."""
     return _render(
         'zones="$(firewall-cmd --permanent --get-zones)" || exit 1; c=0; rc=0; '
@@ -454,7 +454,7 @@ def raw_firewalld_masquerade_off_cmd():
         '[ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]', MARK=CHANGED_MARKER)
 
 
-def raw_default_route_cmd():
+def raw_default_route_cmd(_unused=None):
     """Print the kernel's IPv4 route to a public address (``via``/``dev``/``src`` of the default route)."""
     return 'ip -4 route get 1.1.1.1 2>/dev/null | head -1; true'
 
@@ -469,7 +469,7 @@ def raw_parse_default_route(stdout):
     return facts if 'interface' in facts else {}
 
 
-def raw_default_iface_cmd():
+def raw_default_iface_cmd(_unused=None):
     """Print the IPv4 default-route interface (``ansible_default_ipv4.interface``); nothing if none."""
     return r"""ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}'; true"""
 
