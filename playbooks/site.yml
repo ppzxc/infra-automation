@@ -791,9 +791,11 @@
     # Raw 경로 자동 판별 (ADR-0005 §2.5): CentOS 6/7이면 OS fact를 raw로 공급한다.
     - name: Detect raw provisioning path
       ansible.builtin.import_tasks: common/detect_raw_path.yml
+      tags: [always]
 
     - name: Gather facts from target host using remote python3
       ansible.builtin.setup:
+      tags: [always]
       when: not (_raw_path_effective | default(false) | bool)
 
     - name: Verify connectivity and OS facts

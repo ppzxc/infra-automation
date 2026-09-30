@@ -252,6 +252,8 @@ def _effective_expr():
     ({"raw_os_release": {}}, "False"),
     ({"raw_provisioning_path": False, "raw_os_release": {"stdout": "CentOS Linux release 7.9.2009"}}, "False"),
     ({"raw_provisioning_path": True, "raw_os_release": {"stdout": "Rocky Linux release 9.3"}}, "True"),
+    ({"raw_provisioning_path": None, "raw_os_release": {"stdout": "CentOS release 6.10"}}, "True"),
+    ({"raw_provisioning_path": "", "raw_os_release": {"stdout": "Rocky Linux release 9.3"}}, "False"),
     ({"raw_provisioning_path": "false", "raw_os_release": {"stdout": "CentOS release 6.10"}}, "False"),
 ])
 def test_effective_raw_path_precedence(ctx, expected):
@@ -1061,4 +1063,7 @@ def test_playbooks_run_detection_before_setup(playbook):
         names = [next(iter(t.get("ansible.builtin.import_tasks") and ["detect"] or ["x"])) for t in play["pre_tasks"]]
         setup_i = next(i for i, t in enumerate(play["pre_tasks"]) if "ansible.builtin.setup" in t)
         assert "detect" in names[:setup_i]
+        detect_i = next(i for i, t in enumerate(play["pre_tasks"]) if "ansible.builtin.import_tasks" in t)
+        assert play["pre_tasks"][detect_i]["tags"] == ["always"]
+        assert play["pre_tasks"][setup_i]["tags"] == ["always"]
         assert play["pre_tasks"][setup_i]["when"] == "not (_raw_path_effective | default(false) | bool)"

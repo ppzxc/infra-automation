@@ -10,8 +10,10 @@
   pre_tasks:
     - name: Detect raw provisioning path
       ansible.builtin.import_tasks: common/detect_raw_path.yml
+      tags: [always]
     - name: Gather facts (skipped on raw path, OS facts come from detection)
       ansible.builtin.setup:
+      tags: [always]
       when: not (_raw_path_effective | default(false) | bool)
   roles:
     - role: common
@@ -30,8 +32,10 @@
   pre_tasks:
     - name: Detect raw provisioning path
       ansible.builtin.import_tasks: common/detect_raw_path.yml
+      tags: [always]
     - name: Gather facts (skipped on raw path, OS facts come from detection)
       ansible.builtin.setup:
+      tags: [always]
       when: not (_raw_path_effective | default(false) | bool)
   roles:
     - role: common

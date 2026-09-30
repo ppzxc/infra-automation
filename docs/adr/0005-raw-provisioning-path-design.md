@@ -71,7 +71,7 @@ module의 `validate:` 절과 `atomic_move`를 대체하는 표준 헬퍼 시퀀�
 `playbooks/site.yml` Play 2는 `gather_facts: false`를 유지하고, `raw_provisioning_path: true` 호스트에서는 `setup` 대신 `ansible.builtin.raw: cat /etc/redhat-release`로 릴리스 문자열을 읽어 `filter_plugins/raw_provisioning.py`의 `raw_parse_os_release`로 파싱한 뒤 `ansible_os_family`/`ansible_distribution`/`ansible_distribution_major_version`/`ansible_distribution_version`을 `set_fact`로 공급합니다. 릴리스 줄(`<name> release <version>`)이 없으면 `ValueError`로 플레이가 중단되어 잘못된 `major_version` 분기를 막습니다. 그 외 OS는 기존 `setup` 경로를 그대로 사용하므로 동작이 바뀌지 않습니다. 릴리스 줄은 `CentOS`/`Red Hat`으로 시작하는 줄만 인정하므로 로그인 배너의 `... release N` 문구에 오탐하지 않습니다. 파서는 컨테이너 없이 raw 출력 샘플로 pytest 검증합니다(`tests/test_raw_provisioning.py`).
 
 **전제와 한계**:
-- Option A(§2.4)에 따라 `--check`에서는 raw 읽기가 스킵되어 `raw_os_release.stdout`이 없으므로 OS fact 파싱 태스크도 실패합니다(이전 assert 구현과 동일한 한계).
+- Option A(§2.4)에 따라 raw 태스크는 `--check`에서 스킵되지만, 판별 프로브와 OS fact 파싱은 조회 전용 예외로 `--check`에서도 실행됩니다(#51). 인벤토리 `raw_provisioning_path`가 빈 값/None이면 미지정으로 보고 자동 판별을 사용합니다.
 - `ansible_distribution`은 `CentOS`가 아니면 `RedHat`으로 매핑됩니다(이전에는 `CentOS` 고정).
 
 ---

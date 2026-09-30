@@ -23,7 +23,7 @@
     _raw_path_effective: >-
       {{
         (raw_provisioning_path | bool)
-        if raw_provisioning_path is defined
+        if (raw_provisioning_path | default('') | string) not in ['', 'None']
         else ((raw_os_release.stdout | default('')) | raw_classify_os_path) != 'modern'
       }}
 
