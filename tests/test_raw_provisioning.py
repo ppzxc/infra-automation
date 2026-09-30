@@ -189,6 +189,7 @@ def test_raw_tasks_declare_change_control_and_no_lineinfile_directive_duplicatio
     ("CentOS Linux release 7.9.2009 (Core)\n", "CentOS", "7", "7.9.2009"),
     ("Red Hat Enterprise Linux Server release 7.9 (Maipo)\r\n", "RedHat", "7", "7.9"),
     ("Welcome to legacy box\nCentOS release 6.5 (Final)\n", "CentOS", "6", "6.5"),
+    ("Banner: policy release 1.0\nCentOS release 6.5 (Final)\n", "CentOS", "6", "6.5"),
 ])
 def test_raw_os_release_yields_distribution_and_major_version(stdout, distribution, major, version):
     facts = raw_parse_os_release(stdout)

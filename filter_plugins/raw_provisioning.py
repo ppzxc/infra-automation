@@ -100,7 +100,8 @@ def raw_set_directives(current, directives):
 
 
 _RELEASE_RE = re.compile(
-    r'^(?P<name>.+?)\s+release\s+(?P<version>[0-9]+(?:\.[0-9]+)*)', re.MULTILINE)
+    r'^(?P<name>(?:CentOS|Red Hat)[^\n]*?)\s+release\s+(?P<version>[0-9]+(?:\.[0-9]+)*)',
+    re.MULTILINE)
 
 
 def raw_parse_os_release(stdout):
