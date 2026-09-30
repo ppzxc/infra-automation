@@ -66,6 +66,7 @@
         then rm -f /etc/ssh/sshd_config.d/01-permitrootlogin.conf && echo removed; fi
       register: sec001_dropin_raw
       changed_when: "'removed' in (sec001_dropin_raw.stdout | default(''))"
+      failed_when: sec001_dropin_raw.rc | default(0) != 0
       notify: Restart sshd
 
 # Raw Provisioning Path (ADR-0005): the remaining CentOS 6/7 common security
@@ -258,11 +259,7 @@
     permanent: true
     state: disabled
     immediate: true
-  loop:
-    - "{{ firewall_interface | default(ansible_default_ipv4.interface | default('bond0')) }}"
-    - "bond0"
-    - "eno1"
-    - "eno2"
+  loop: "{{ [firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))] + firewall_drop_unbind_interfaces }}"
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
@@ -279,11 +276,7 @@
       - --zone=drop
       - --remove-interface={{ item }}
   register: sec006_unbind_drop_cli
-  loop:
-    - "{{ firewall_interface | default(ansible_default_ipv4.interface | default('bond0')) }}"
-    - "bond0"
-    - "eno1"
-    - "eno2"
+  loop: "{{ [firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))] + firewall_drop_unbind_interfaces }}"
   # --remove-interface follows the same add/remove idempotency convention as
   # --remove-service/--remove-source: rc is always 0, but a no-op emits
   # "Warning: NOT_ENABLED: ..." on stderr when the interface was never bound
@@ -871,6 +864,7 @@
         sec_raw_firewalld_plan: >-
           {{ {
             'interface': firewall_interface,
+            'drop_unbind_interfaces': firewall_drop_unbind_interfaces,
             'interface_zone': firewall_interface_zone,
             'source_zone': firewall_source_zone,
             'ssh_port': ssh_port,

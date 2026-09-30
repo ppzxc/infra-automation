@@ -37,3 +37,17 @@ Ansible과 Semaphore UI는 저장소 루트(`cwd`)를 기준으로 동작하므�
    - 커밋 전 시크릿 유출 검사, 3-Way Spec 검증(`scripts/validate-ansible-specs.py`), 단위 테스트(`pytest tests/`)를 통과해야 합니다.
 2. **3-Way 명세 추적성 유지**
    - 신규 태스크나 역할 변경 시 `docs/*.md` 스펙 테이블과 `roles/*/tasks/main.yml`의 `[SPEC-ID]`, `molecule/*/verify.yml` 검증 테스트를 항상 1:1로 일치시킵니다.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues(`ppzxc/infra-automation`, `gh` CLI)로 이슈를 추적합니다. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+기본 5개 라벨(`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`)을 그대로 씁니다. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+single-context (루트 `CONTEXT.md` + `docs/adr/`). See `docs/agents/domain.md`.

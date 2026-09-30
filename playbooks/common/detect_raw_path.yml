@@ -42,6 +42,24 @@
     ansible_distribution_version: "{{ _raw_os_facts.version }}"
   when: _raw_path_effective | bool
 
+# raw 호스트는 fact를 수집하지 않으므로 common의 node-env/environment 템플릿이
+# 읽는 ansible_default_ipv4(interface/gateway/address)를 읽기 전용 경로 프로브로 채운다.
+- name: Probe default IPv4 route from target host (raw, read-only)
+  ansible.builtin.raw: "{{ '' | raw_default_route_cmd }}"
+  register: raw_default_route
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: false
+  when: _raw_path_effective | bool
+
+- name: Set default IPv4 facts from raw route probe
+  ansible.builtin.set_fact:
+    ansible_default_ipv4: "{{ raw_default_route.stdout | default('') | raw_parse_default_route }}"
+  when:
+    - _raw_path_effective | bool
+    - (raw_default_route.stdout | default('') | raw_parse_default_route) | length > 0
+
 # raw 태스크는 --check에서 스킵되고 module 태스크는 게이트로 스킵되므로,
 # raw 호스트의 dry-run은 아무것도 평가하지 않는다. 조용히 넘어가지 않도록 알린다.
 - name: Warn that raw path hosts are not evaluated under --check
