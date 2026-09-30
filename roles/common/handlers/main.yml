@@ -9,3 +9,13 @@
   ansible.builtin.command: sysctl --system
   changed_when: false
 
+
+# Raw Provisioning Path (ADR-0005): the sysctl module needs AnsiballZ, which
+# CentOS 6/7 cannot run. `-e` ignores unknown keys (e.g. IPv6 off); any other
+# failure fails the handler.
+- name: Apply sysctl (raw)
+  ansible.builtin.raw: sysctl -e -p /etc/sysctl.conf >/dev/null
+  register: common_raw_sysctl_apply
+  changed_when: true
+  failed_when: common_raw_sysctl_apply.rc | default(0) != 0
+  when: raw_provisioning_path | default(false) | bool

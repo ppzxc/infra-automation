@@ -1,3 +1,8 @@
+# Raw Provisioning Path (ADR-0005): set true for CentOS 6/7 targets without a
+# usable Python; the module-based sysctl/accounts/sudoers/keys/limits tasks are
+# then applied with ansible.builtin.raw.
+raw_provisioning_path: false
+
 # 시스템 표준 타임존 및 로케일
 timezone: "Asia/Seoul"
 locale: "en_US.UTF-8"

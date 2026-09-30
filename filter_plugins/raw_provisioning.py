@@ -27,26 +27,29 @@ READ_END = '__RAW_END__'
 
 
 def raw_probe_cmd(dest):
-    """Print '__RAW_PROBE__ <sha256> <mode>' for dest; fields are empty if absent.
+    """Print '__RAW_PROBE__ <sha256> <mode> <owner:group>' for dest; fields are empty if absent.
 
     The marker lets the sentinel ignore login banners or other raw noise.
     """
     d = shlex.quote(dest)
-    return ("printf '%s %s %s\\n' '{m}' "
+    return ("printf '%s %s %s %s\\n' '{m}' "
             "\"$(sha256sum {d} 2>/dev/null | cut -d' ' -f1)\" "
-            "\"$(stat -c %a {d} 2>/dev/null)\"").format(m=PROBE_MARKER, d=d)
+            "\"$(stat -c %a {d} 2>/dev/null)\" "
+            "\"$(stat -c %U:%G {d} 2>/dev/null)\"").format(m=PROBE_MARKER, d=d)
 
 
-def raw_push_changed(probe_stdout, content, mode):
-    """Sentinel: changed when the remote hash OR mode differs.
+def raw_push_changed(probe_stdout, content, mode, owner=None, group=None):
+    """Sentinel: changed when the remote hash, mode OR (if given) owner:group differs.
 
     An absent dest (or unusable probe) never equals the expected value, so
     first provisioning is reported as changed without special-casing.
     """
-    expected = '%s %s %s' % (PROBE_MARKER, raw_sha256(content), _mode_octal(mode))
-    lines = [ln.strip() for ln in (probe_stdout or '').splitlines()
+    expected = ['__RAW_PROBE__', raw_sha256(content), _mode_octal(mode)]
+    if owner is not None:
+        expected.append('%s:%s' % (owner, group))
+    lines = [ln.split() for ln in (probe_stdout or '').splitlines()
              if ln.strip().startswith(PROBE_MARKER)]
-    return not lines or lines[-1] != expected
+    return not lines or lines[-1][:len(expected)] != expected
 
 
 def raw_read_cmd(path):
@@ -55,12 +58,18 @@ def raw_read_cmd(path):
             ).format(b=READ_BEGIN, e=READ_END, p=shlex.quote(path))
 
 
-def raw_read_extract(stdout):
-    """File content from raw_read_cmd output, or None if unreadable/empty."""
+def raw_read_extract(stdout, allow_empty=False):
+    """File content from raw_read_cmd output, or None if unreadable/empty.
+
+    With ``allow_empty`` a missing or empty file yields '' (first provisioning);
+    output without the read markers is still None.
+    """
     m = re.search(r'%s\r?\n(.*)\r?\n%s (\d+)' % (READ_BEGIN, READ_END),
                   (stdout or '').replace('\r\n', '\n'), re.S)
-    if not m or m.group(2) != '0' or not m.group(1).strip():
+    if not m:
         return None
+    if m.group(2) != '0' or not m.group(1).strip():
+        return '' if allow_empty else None
     return m.group(1)
 
 
@@ -99,6 +108,179 @@ def raw_set_directives(current, directives):
     return '\n'.join(lines) + '\n'
 
 
+CHANGED_MARKER = '__RAW_CHANGED__'
+
+
+def raw_changed(stdout):
+    """Sentinel for state-check raw tasks: True when the command echoed the marker."""
+    return any(ln.strip() == CHANGED_MARKER for ln in (stdout or '').splitlines())
+
+
+def _render(template, **tokens):
+    for key, value in tokens.items():
+        template = template.replace('@%s@' % key, value)
+    return template
+
+
+def raw_rm_cmd(path):
+    """rm -f path only when it exists; echo the marker if it did."""
+    return _render('f=@PATH@; if [ -e "$f" ]; then rm -f "$f" && echo @MARK@; fi',
+                   PATH=shlex.quote(path), MARK=CHANGED_MARKER)
+
+
+def raw_group_cmd(name, gid=None):
+    """Create the group (or fix its gid) only when needed; echo the marker if it did."""
+    n = shlex.quote(name)
+    if gid in (None, ''):
+        return ("if ! getent group %s >/dev/null 2>&1; then groupadd %s && echo %s; fi"
+                % (n, n, CHANGED_MARKER))
+    g = shlex.quote(str(gid))
+    return ("if ! getent group %s >/dev/null 2>&1; then groupadd -g %s %s && echo %s; "
+            "elif [ \"$(getent group %s | cut -d: -f3)\" != %s ]; then groupmod -g %s %s && echo %s; fi"
+            % (n, g, n, CHANGED_MARKER, n, g, g, n, CHANGED_MARKER))
+
+
+def raw_user_cmd(name, groups, shell, comment, uid, state, group=None):
+    """useradd/usermod/userdel equivalent of ``ansible.builtin.user`` (append semantics).
+
+    ``group`` is the primary group and defaults to the account name.
+    """
+    n = shlex.quote(name)
+    if state == 'absent':
+        return _render("if getent passwd @USER@ >/dev/null 2>&1; then userdel -r @USER@ && echo @MARK@; fi",
+                       USER=n, MARK=CHANGED_MARKER)
+    primary = shlex.quote(group or name)
+    groups = [g for g in (groups or []) if g]
+    create = ['useradd -m -g %s' % primary]
+    fix = ['set --',
+           '[ "$(id -gn %s)" = %s ] || set -- "$@" -g %s' % (n, primary, primary),
+           '[ "$(getent passwd %s | cut -d: -f7)" = %s ] || set -- "$@" -s %s'
+           % (n, shlex.quote(shell), shlex.quote(shell))]
+    if groups:
+        create.append('-G %s' % shlex.quote(','.join(groups)))
+        fix.append('miss=""; for g in %s; do case " $(id -nG %s) " in *" $g "*) ;; '
+                   '*) miss="$miss,$g";; esac; done' % (' '.join(shlex.quote(g) for g in groups), n))
+        fix.append('[ -z "$miss" ] || set -- "$@" -a -G "${miss#,}"')
+    create.append('-s %s' % shlex.quote(shell))
+    if comment not in (None, ''):
+        create.append('-c %s' % shlex.quote(comment))
+        fix.append('[ "$(getent passwd %s | cut -d: -f5)" = %s ] || set -- "$@" -c %s'
+                   % (n, shlex.quote(comment), shlex.quote(comment)))
+    if uid not in (None, ''):
+        create.append('-u %s' % shlex.quote(str(uid)))
+        fix.append('[ "$(id -u %s)" = %s ] || set -- "$@" -u %s' % (n, shlex.quote(str(uid)), shlex.quote(str(uid))))
+    return ("if ! getent passwd %s >/dev/null 2>&1; then %s %s && echo %s; else %s; "
+            "if [ $# -gt 0 ]; then usermod \"$@\" %s && echo %s; fi; fi"
+            % (n, ' '.join(create), n, CHANGED_MARKER, '; '.join(fix), n, CHANGED_MARKER))
+
+
+def _key_blob(key):
+    key = (key or '').strip()
+    if '\n' in key or '\r' in key:
+        raise ValueError('an authorized key must be a single line')
+    for token in key.split():
+        if token.startswith('AAAA'):
+            return key, token
+    raise ValueError('no base64 key blob found in authorized key: %r' % (key,))
+
+
+def raw_authorized_key_cmd(user, key, state):
+    """Add/replace/remove one public key (matched by its blob) in ~user/.ssh/authorized_keys.
+
+    Rewrites go through a temp file + mv, and ownership/mode of ~/.ssh and the
+    file are corrected like the ``authorized_key`` module does.
+    """
+    key, blob = _key_blob(key)
+    tokens = dict(USER=shlex.quote(user), BLOB=shlex.quote(blob), KEY=shlex.quote(key), MARK=CHANGED_MARKER)
+    lookup = ('h="$(getent passwd @USER@ | cut -d: -f6)"; f="$h/.ssh/authorized_keys"; '
+              'T="$f.raw.tmp"; c=0; ')
+    if state == 'absent':
+        # Nothing to revoke when the account or file is gone.
+        body = ('if [ -n "$h" ] && [ -f "$f" ] && grep -qF -- @BLOB@ "$f"; then '
+                'g="$(id -gn @USER@)" && (umask 077; grep -vF -- @BLOB@ "$f" > "$T"; [ $? -le 1 ]) '
+                '&& chown @USER@:"$g" "$T" && chmod 0600 "$T" && mv -f "$T" "$f" && echo @MARK@ '
+                '|| { rm -f "$T"; false; }; fi')
+    else:
+        body = (
+            'if [ -z "$h" ] || [ ! -d "$h" ]; then echo "no home directory for @USER@" >&2; false; else '
+            'g="$(id -gn @USER@)" || exit 1; '
+            '[ -d "$h/.ssh" ] || { install -d -m 0700 -o @USER@ -g "$g" "$h/.ssh" && c=1; }; '
+            '[ -f "$f" ] || { (umask 077; : > "$f") && c=1; }; '
+            'if ! grep -qxF -- @KEY@ "$f"; then '
+            '(umask 077; grep -vF -- @BLOB@ "$f" > "$T"; [ $? -le 1 ]) && printf \'%s\\n\' @KEY@ >> "$T" '
+            '&& chown @USER@:"$g" "$T" && chmod 0600 "$T" && mv -f "$T" "$f" && c=1 '
+            '|| { rm -f "$T"; false; }; fi; '
+            '[ "$(stat -c %U:%G "$f")" = @USER@:"$g" ] && [ "$(stat -c %a "$f")" = 600 ] '
+            '|| { chown @USER@:"$g" "$f" && chmod 0600 "$f" && c=1; }; '
+            '[ "$(stat -c %U:%G "$h/.ssh")" = @USER@:"$g" ] && [ "$(stat -c %a "$h/.ssh")" = 700 ] '
+            '|| { chown @USER@:"$g" "$h/.ssh" && chmod 0700 "$h/.ssh" && c=1; }; '
+            '[ "$c" = 0 ] || echo @MARK@; fi')
+    return _render(lookup + body, **tokens)
+
+
+def raw_yum_cmd(packages, optional=False):
+    """yum install of missing packages; echo the marker only when something was installed.
+
+    Presence is checked with ``rpm -q --whatprovides`` so capability names such
+    as ``nc`` count as installed. ``optional`` installs one by one and ignores
+    failures (packages unavailable on the OS never make a run "changed").
+    """
+    pkgs = ' '.join(shlex.quote(p) for p in packages)
+    if optional:
+        return _render('for p in @PKGS@; do rpm -q --whatprovides "$p" >/dev/null 2>&1 || '
+                       '{ yum -y install "$p" >/dev/null 2>&1 && echo @MARK@; }; done; true',
+                       PKGS=pkgs, MARK=CHANGED_MARKER)
+    return _render('miss=""; for p in @PKGS@; do rpm -q --whatprovides "$p" >/dev/null 2>&1 || miss="$miss $p"; done; '
+                   'if [ -n "$miss" ]; then yum -y install $miss && echo @MARK@; fi',
+                   PKGS=pkgs, MARK=CHANGED_MARKER)
+
+
+def raw_sysctl_directives(settings):
+    """sysctl module equivalent as raw_set_directives input (``key = value`` lines)."""
+    return [{'regexp': r'^\s*%s\s*=' % re.escape(str(k)), 'line': '%s = %s' % (k, v)}
+            for k, v in (settings or {}).items()]
+
+
+def raw_sysctl_live_cmd(settings):
+    """Align live kernel values with ``settings`` (module ``sysctl_set``); marker if any changed.
+
+    Keys the running kernel does not know (e.g. IPv6 disabled) are skipped. The
+    kernel clamps some values to others (``rmem_default`` <= ``rmem_max``), so
+    the keys are applied twice; only failures of the second pass count.
+    """
+    norm = '"$(sysctl -n {k} 2>/dev/null | tr -s "[:space:]" " " | sed "s/^ //;s/ $//")" = {want}'
+
+    def one_pass(fail_var):
+        out = []
+        for k, v in (settings or {}).items():
+            want = ' '.join(str(v).split())
+            check = norm.format(k=shlex.quote(str(k)), want=shlex.quote(want))
+            # sysctl -w can exit 0 without applying, so verify by reading back.
+            out.append(
+                'if sysctl -n {k} >/dev/null 2>&1; then [ {check} ] || '
+                '{{ sysctl -w {kv} >/dev/null 2>&1; [ {check} ] && c=1 || {f}=1; }}; fi'.format(
+                    k=shlex.quote(str(k)), check=check,
+                    kv=shlex.quote('%s=%s' % (k, want)), f=fail_var))
+        return out
+    parts = ['c=0; rc=0; ignore=0'] + one_pass('ignore') + one_pass('rc')
+    parts.append('[ "$c" = 0 ] || echo %s; [ "$rc" = 0 ]' % CHANGED_MARKER)
+    return '; '.join(parts)
+
+
+def raw_limits_directives(limits):
+    """pam_limits equivalent as raw_set_directives input (one line per domain/type/item)."""
+    return [{'regexp': r'^\s*%s\s+%s\s+%s\s' % (re.escape(str(i['domain'])), re.escape(str(i['limit_type'])),
+                                                re.escape(str(i['limit_item']))),
+             'line': '%s\t%s\t%s\t%s' % (i['domain'], i['limit_type'], i['limit_item'], i['value'])}
+            for i in (limits or [])]
+
+
+def raw_sudoers_line(name):
+    if not re.match(r'^[A-Za-z0-9._-]+$', name or ''):
+        raise ValueError('unsafe account name for sudoers: %r' % (name,))
+    return '%s ALL=(ALL) NOPASSWD:ALL\n' % name
+
+
 _RELEASE_RE = re.compile(
     r'^(?P<name>(?:CentOS|Red Hat)[^\n]*?)\s+release\s+(?P<version>[0-9]+(?:\.[0-9]+)*)',
     re.MULTILINE)
@@ -133,4 +315,14 @@ class FilterModule(object):
             'raw_push_changed': raw_push_changed,
             'raw_push_cmd': raw_push_cmd,
             'raw_set_directives': raw_set_directives,
+            'raw_changed': raw_changed,
+            'raw_group_cmd': raw_group_cmd,
+            'raw_user_cmd': raw_user_cmd,
+            'raw_authorized_key_cmd': raw_authorized_key_cmd,
+            'raw_sysctl_directives': raw_sysctl_directives,
+            'raw_limits_directives': raw_limits_directives,
+            'raw_rm_cmd': raw_rm_cmd,
+            'raw_yum_cmd': raw_yum_cmd,
+            'raw_sysctl_live_cmd': raw_sysctl_live_cmd,
+            'raw_sudoers_line': raw_sudoers_line,
         }

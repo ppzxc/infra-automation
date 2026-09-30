@@ -15,7 +15,9 @@
 - name: "[COMMON-002] Fix EOL CentOS 6 / 7 Vault Repositories"
   ansible.builtin.shell: |
     sed -i -e 's/^mirrorlist/#mirrorlist/g' -e 's|^#baseurl=http://mirror.centos.org/centos/$releasever|baseurl=https://vault.centos.org/{{ ansible_distribution_version }}|g' /etc/yum.repos.d/CentOS-*.repo
-  when: ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 7
+  when:
+    - ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 7
+    - not (raw_provisioning_path | default(false) | bool)
   changed_when: false
   failed_when: false
 
@@ -40,7 +42,9 @@
   ansible.builtin.yum:
     name: "{{ common_packages + ['curl', 'iproute', 'sudo', 'nc'] }}"
     state: present
-  when: ansible_os_family == "RedHat" and ansible_distribution_major_version | int <= 7
+  when:
+    - ansible_os_family == "RedHat" and ansible_distribution_major_version | int <= 7
+    - not (raw_provisioning_path | default(false) | bool)
 
 # curl is intentionally omitted here: RHEL/Rocky 8+ ship `curl-minimal` by
 # default, which already provides /usr/bin/curl and conflicts with the full
@@ -61,6 +65,7 @@
       - ripgrep
     state: present
   failed_when: false
+  when: not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-007-BAT] Ensure bat symlink exists for Debian/Ubuntu (batcat -> bat)"
   ansible.builtin.file:
@@ -102,6 +107,7 @@
     reload: true
     sysctl_set: true
   loop: "{{ sysctl_settings | dict2items }}"
+  when: not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-011-IPV6] Disable IPv6 via sysctl"
   ansible.posix.sysctl:
@@ -111,7 +117,9 @@
     reload: true
     sysctl_set: true
   loop: "{{ sysctl_ipv6_settings | dict2items }}"
-  when: disable_ipv6 | default(false) | bool
+  when:
+    - disable_ipv6 | default(false) | bool
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-011-EXTRA] Apply extra sysctl kernel tuning"
   ansible.posix.sysctl:
@@ -124,6 +132,7 @@
   when:
     - sysctl_extra_settings is defined
     - sysctl_extra_settings | length > 0
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-012] Ensure account primary groups exist"
   ansible.builtin.group:
@@ -136,6 +145,7 @@
     - accounts | length > 0
     - item.name is defined
     - item.state | default('present') != 'absent'
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-013] Ensure accounts exist with tier-specific permissions"
   vars:
@@ -162,6 +172,7 @@
     - accounts is defined
     - accounts | length > 0
     - item.name is defined
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-014] Configure passwordless sudoers for admin accounts"
   ansible.builtin.copy:
@@ -178,6 +189,7 @@
     - item.name is defined
     - item.state | default('present') != 'absent'
     - item.sudo | default(item.tier | default('user') == 'admin') | bool
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-015] Deploy SSH public keys for accounts"
   # A key listed in both accounts[].keys and accounts[].revoked_keys (e.g. rotation lag,
@@ -206,6 +218,7 @@
     - item.0.state | default('present') != 'absent'
     - item.1 | trim | length > 0
     - _key_fp not in _revoked_fps
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-022] Revoke SSH public keys listed in accounts[].revoked_keys"
   ansible.posix.authorized_key:
@@ -220,6 +233,7 @@
     - item.0.name is defined
     - item.0.state | default('present') != 'absent'
     - item.1 | trim | length > 0
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-023] Remove passwordless sudoers drop-in for removed accounts"
   # COMMON-014 only writes /etc/sudoers.d/90-<user> for present admin accounts and never
@@ -234,6 +248,7 @@
     - accounts | length > 0
     - item.name is defined
     - item.state | default('present') == 'absent'
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-016] Configure system security limits (nofile/nproc)"
   community.general.pam_limits:
@@ -243,6 +258,7 @@
     value: "{{ item.value }}"
     dest: /etc/security/limits.d/99-limits.conf
   loop: "{{ system_limits }}"
+  when: not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-017] Configure Systemd Journald retention limits"
   ansible.builtin.copy:
@@ -283,3 +299,222 @@
     owner: root
     group: root
     mode: '0644'
+
+# ==============================================================================
+# Raw Provisioning Path (ADR-0005): CentOS 6/7 targets cannot run AnsiballZ
+# modules, so the module-based tasks above (sysctl, accounts, sudoers, SSH keys,
+# pam_limits) are replaced by ansible.builtin.raw equivalents. Enabled with
+# raw_provisioning_path=true; raw is skipped under --check (ADR-0005 Option A).
+# Content-push tasks use the probe (sha256+mode) sentinel and the
+# write-temp/validate/move helper; state-check tasks echo a changed marker.
+# ==============================================================================
+- name: Common raw provisioning path (CentOS 6/7)
+  when: raw_provisioning_path | default(false) | bool
+  block:
+    - name: "[COMMON-037] Fix EOL CentOS 6 / 7 Vault Repositories (raw)"
+      ansible.builtin.raw: >-
+        sed -i -e 's/^mirrorlist/#mirrorlist/g'
+        -e 's|^#baseurl=http://mirror.centos.org/centos/$releasever|baseurl=https://vault.centos.org/{{ ansible_distribution_version }}|g'
+        /etc/yum.repos.d/CentOS-*.repo
+      changed_when: false
+      failed_when: false
+
+    - name: "[COMMON-038] Install common packages (CentOS 6, 7 via YUM, raw)"
+      ansible.builtin.raw: "{{ (common_packages + ['curl', 'iproute', 'sudo', 'nc']) | raw_yum_cmd }}"
+      register: common_raw_packages
+      changed_when: common_raw_packages.stdout | default('') | raw_changed
+      failed_when: common_raw_packages.rc | default(0) != 0
+
+    - name: "[COMMON-039] Install optional diagnostic tools (raw)"
+      ansible.builtin.raw: "{{ ['htop', 'iotop', 'bat', 'ripgrep'] | raw_yum_cmd(true) }}"
+      register: common_raw_optional
+      changed_when: common_raw_optional.stdout | default('') | raw_changed
+      failed_when: false
+
+    # /etc/sysctl.d is absent on CentOS 6, so both OS versions use sysctl.conf.
+    - name: "[COMMON-024] Read current sysctl.conf (raw)"
+      ansible.builtin.raw: "{{ '/etc/sysctl.conf' | raw_read_cmd }}"
+      register: common_raw_sysctl_current
+      changed_when: false
+      failed_when: (common_raw_sysctl_current.stdout | default('') | raw_read_extract(true)) is none
+
+    - name: "[COMMON-025] Probe sysctl.conf hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/sysctl.conf' | raw_probe_cmd }}"
+      register: common_raw_sysctl_probe
+      changed_when: false
+      failed_when: false
+
+    - name: "[COMMON-026] Apply sysctl kernel tuning via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ common_raw_sysctl_content | raw_push_cmd('/etc/sysctl.conf', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_sysctl_settings: >-
+          {{ sysctl_settings
+             | combine(sysctl_ipv6_settings if (disable_ipv6 | default(false) | bool) else {})
+             | combine(sysctl_extra_settings | default({})) }}
+        common_raw_sysctl_content: >-
+          {{ (common_raw_sysctl_current.stdout | raw_read_extract(true))
+             | raw_set_directives(common_raw_sysctl_settings | raw_sysctl_directives) }}
+      register: common_raw_sysctl_push
+      changed_when: >-
+        (common_raw_sysctl_probe.stdout | default('')) | raw_push_changed(common_raw_sysctl_content, '0644', 'root', 'root')
+      failed_when: common_raw_sysctl_push.rc | default(0) != 0
+      notify: Apply sysctl (raw)
+
+    # Module `sysctl_set: true` parity: the running kernel value is aligned on
+    # every run, not only when sysctl.conf changes.
+    - name: "[COMMON-040] Align live sysctl values with the desired settings (raw)"
+      ansible.builtin.raw: "{{ common_raw_sysctl_settings | raw_sysctl_live_cmd }}"
+      vars:
+        common_raw_sysctl_settings: >-
+          {{ sysctl_settings
+             | combine(sysctl_ipv6_settings if (disable_ipv6 | default(false) | bool) else {})
+             | combine(sysctl_extra_settings | default({})) }}
+      register: common_raw_sysctl_live
+      changed_when: common_raw_sysctl_live.stdout | default('') | raw_changed
+      failed_when: common_raw_sysctl_live.rc | default(0) != 0
+
+    - name: "[COMMON-027] Ensure account primary groups exist (raw)"
+      ansible.builtin.raw: "{{ item.name | raw_group_cmd(item.gid | default(none)) }}"
+      register: common_raw_groups
+      changed_when: common_raw_groups.stdout | default('') | raw_changed
+      failed_when: common_raw_groups.rc | default(0) != 0
+      loop: "{{ accounts | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('') }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') != 'absent'
+
+    - name: "[COMMON-028] Ensure accounts exist with tier-specific permissions (raw)"
+      vars:
+        _account_groups: "{{ ( (['wheel'] if (item.sudo | default(item.tier | default('user') == 'admin')) else []) + (item.groups | default([])) ) | unique }}"
+      ansible.builtin.raw: >-
+        {{ item.name | raw_user_cmd(_account_groups, item.shell | default('/bin/bash'),
+        item.comment | default(none), item.uid | default(none), item.state | default('present')) }}
+      register: common_raw_users
+      changed_when: common_raw_users.stdout | default('') | raw_changed
+      failed_when: common_raw_users.rc | default(0) != 0
+      loop: "{{ accounts | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('') }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+
+    - name: "[COMMON-029] Probe sudoers drop-in hash and mode (raw)"
+      ansible.builtin.raw: "{{ ('/etc/sudoers.d/90-' ~ item.name) | raw_probe_cmd }}"
+      register: common_raw_sudoers_probe
+      changed_when: false
+      failed_when: false
+      loop: "{{ accounts | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('') }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') != 'absent'
+        - item.sudo | default(item.tier | default('user') == 'admin') | bool
+
+    - name: "[COMMON-030] Configure passwordless sudoers via write-temp/validate/move (raw)"
+      vars:
+        _sudoers_content: "{{ item.name | raw_sudoers_line }}"
+        _sudoers_probe: >-
+          {{ (common_raw_sudoers_probe.results | selectattr('item.name', 'equalto', item.name) | first).stdout | default('') }}
+      ansible.builtin.raw: >-
+        {{ _sudoers_content | raw_push_cmd('/etc/sudoers.d/90-' ~ item.name, 'root', 'root', '0440', 'visudo -cf %s') }}
+      register: common_raw_sudoers_push
+      changed_when: _sudoers_probe | raw_push_changed(_sudoers_content, '0440', 'root', 'root')
+      failed_when: common_raw_sudoers_push.rc | default(0) != 0
+      loop: "{{ accounts | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('') }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') != 'absent'
+        - item.sudo | default(item.tier | default('user') == 'admin') | bool
+
+    - name: "[COMMON-031] Deploy SSH public keys for accounts (raw)"
+      # Same revoked-key exclusion as COMMON-015 (compared by type+blob).
+      vars:
+        _key_fp: "{{ (item.1.split()[:2] | join(' ')) if (item.1 | trim | length > 0) else '' }}"
+        _revoked_fps: >-
+          {%- set fps = [] -%}
+          {%- for rk in (item.0.revoked_keys | default([])) -%}
+            {%- set _ = fps.append(rk.split()[:2] | join(' ')) -%}
+          {%- endfor -%}
+          {{ fps }}
+      ansible.builtin.raw: "{{ item.0.name | raw_authorized_key_cmd(item.1, 'present') }}"
+      register: common_raw_keys
+      changed_when: common_raw_keys.stdout | default('') | raw_changed
+      failed_when: common_raw_keys.rc | default(0) != 0
+      loop: "{{ accounts | default([]) | subelements('keys', skip_missing=True) }}"
+      loop_control:
+        label: "{{ item.0.name | default('') }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.0.name is defined
+        - item.0.state | default('present') != 'absent'
+        - item.1 | trim | length > 0
+        - _key_fp not in _revoked_fps
+
+    - name: "[COMMON-032] Revoke SSH public keys listed in accounts[].revoked_keys (raw)"
+      ansible.builtin.raw: "{{ item.0.name | raw_authorized_key_cmd(item.1, 'absent') }}"
+      register: common_raw_revoked_keys
+      changed_when: common_raw_revoked_keys.stdout | default('') | raw_changed
+      failed_when: common_raw_revoked_keys.rc | default(0) != 0
+      loop: "{{ accounts | default([]) | subelements('revoked_keys', skip_missing=True) }}"
+      loop_control:
+        label: "{{ item.0.name | default('') }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.0.name is defined
+        - item.0.state | default('present') != 'absent'
+        - item.1 | trim | length > 0
+
+    - name: "[COMMON-033] Remove passwordless sudoers drop-in for removed accounts (raw)"
+      ansible.builtin.raw: "{{ ('/etc/sudoers.d/90-' ~ item.name) | raw_rm_cmd }}"
+      register: common_raw_sudoers_removed
+      changed_when: common_raw_sudoers_removed.stdout | default('') | raw_changed
+      failed_when: common_raw_sudoers_removed.rc | default(0) != 0
+      loop: "{{ accounts | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('') }}"
+      when:
+        - accounts is defined
+        - accounts | length > 0
+        - item.name is defined
+        - item.state | default('present') == 'absent'
+
+    - name: "[COMMON-036] Read current security limits file (raw)"
+      ansible.builtin.raw: "{{ '/etc/security/limits.d/99-limits.conf' | raw_read_cmd }}"
+      register: common_raw_limits_current
+      changed_when: false
+      failed_when: (common_raw_limits_current.stdout | default('') | raw_read_extract(true)) is none
+
+    - name: "[COMMON-034] Probe security limits file hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/security/limits.d/99-limits.conf' | raw_probe_cmd }}"
+      register: common_raw_limits_probe
+      changed_when: false
+      failed_when: false
+
+    # Merged in place like pam_limits: unrelated lines in the file are kept.
+    - name: "[COMMON-035] Configure system security limits via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ common_raw_limits_content | raw_push_cmd('/etc/security/limits.d/99-limits.conf', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_limits_content: >-
+          {{ (common_raw_limits_current.stdout | raw_read_extract(true))
+             | raw_set_directives(system_limits | raw_limits_directives) }}
+      register: common_raw_limits_push
+      changed_when: >-
+        (common_raw_limits_probe.stdout | default('')) | raw_push_changed(common_raw_limits_content, '0644', 'root', 'root')
+      failed_when: common_raw_limits_push.rc | default(0) != 0
