@@ -10,7 +10,9 @@
 - name: "[COMMON-001] Set timezone"
   community.general.timezone:
     name: "{{ timezone | default('Asia/Seoul') }}"
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-002] Fix EOL CentOS 6 / 7 Vault Repositories"
   ansible.builtin.shell: |
@@ -36,6 +38,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
+    - not (raw_provisioning_path | default(false) | bool)
   failed_when: false
 
 - name: "[COMMON-005] Install common packages (RedHat/CentOS 6, 7 via YUM)"
@@ -82,7 +85,9 @@
     src: chrony.conf.j2
     dest: "{{ '/etc/chrony/chrony.conf' if ansible_os_family == 'Debian' else '/etc/chrony.conf' }}"
     mode: '0644'
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (raw_provisioning_path | default(false) | bool)
   notify: Restart chrony
 
 - name: "[COMMON-009] Ensure Chrony service is running (Modern OS)"
@@ -90,7 +95,9 @@
     name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
     state: started
     enabled: true
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-010] Ensure NTP service is running (CentOS 6 legacy)"
   ansible.builtin.service:
@@ -272,7 +279,9 @@
     owner: root
     group: root
     mode: '0644'
-  when: ansible_service_mgr == "systemd"
+  when:
+    - ansible_service_mgr == "systemd"
+    - not (raw_provisioning_path | default(false) | bool)
   failed_when: false
 
 - name: "[COMMON-018] Deploy system-wide custom shell aliases"
@@ -559,3 +568,69 @@
       register: common_raw_ntp_service
       changed_when: common_raw_ntp_service.stdout | default('') | raw_changed
       failed_when: common_raw_ntp_service.rc | default(0) != 0
+
+# Raw Provisioning Path (ADR-0005), CentOS 7 only: timezone, EPEL, chrony and
+# journald retention. CentOS 6 has no chrony/journald (Upstart) and is skipped;
+# CentOS 7 is always systemd, so COMMON-017's ansible_service_mgr gate becomes
+# the explicit major-version gate of this block. Content pushes use the probe
+# sentinel and write-temp/validate/move helper; `Restart chrony` is delegated
+# to the raw handler.
+- name: Common raw path, CentOS 7 only tasks
+  when:
+    - raw_provisioning_path | default(false) | bool
+    - ansible_distribution == "CentOS"
+    - ansible_distribution_major_version | int == 7
+  block:
+    - name: "[COMMON-045] Set timezone (CentOS 7, raw)"
+      ansible.builtin.raw: "{{ (timezone | default('Asia/Seoul')) | raw_timezone_cmd }}"
+      register: common_raw_timezone
+      changed_when: common_raw_timezone.stdout | default('') | raw_changed
+      failed_when: common_raw_timezone.rc | default(0) != 0
+
+    - name: "[COMMON-046] Install EPEL repository (CentOS 7, raw)"
+      ansible.builtin.raw: "{{ ['epel-release'] | raw_yum_cmd }}"
+      register: common_raw_epel
+      changed_when: common_raw_epel.stdout | default('') | raw_changed
+      failed_when: false
+
+    - name: "[COMMON-047] Probe chrony.conf hash and mode (CentOS 7, raw)"
+      ansible.builtin.raw: "{{ '/etc/chrony.conf' | raw_probe_cmd }}"
+      register: common_raw_chrony_probe
+      changed_when: false
+      failed_when: common_raw_chrony_probe.rc | default(0) != 0
+
+    - name: "[COMMON-048] Configure Chrony NTP servers via write-temp/validate/move (CentOS 7, raw)"
+      ansible.builtin.raw: >-
+        {{ common_raw_chrony_content | raw_push_cmd('/etc/chrony.conf', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_chrony_content: "{{ lookup('ansible.builtin.template', 'chrony.conf.j2') }}"
+      register: common_raw_chrony_push
+      changed_when: >-
+        (common_raw_chrony_probe.stdout | default('')) | raw_push_changed(common_raw_chrony_content, '0644', 'root', 'root')
+      failed_when: common_raw_chrony_push.rc | default(0) != 0
+      notify: Restart chrony
+
+    - name: "[COMMON-049] Ensure Chrony service is running and enabled (CentOS 7, raw)"
+      ansible.builtin.raw: "{{ 'chronyd' | raw_service_cmd }}"
+      register: common_raw_chrony_service
+      changed_when: common_raw_chrony_service.stdout | default('') | raw_changed
+      failed_when: common_raw_chrony_service.rc | default(0) != 0
+
+    - name: "[COMMON-050] Probe journald retention drop-in hash and mode (CentOS 7, raw)"
+      ansible.builtin.raw: "{{ '/etc/systemd/journald.conf.d/99-retention.conf' | raw_probe_cmd }}"
+      register: common_raw_journald_probe
+      changed_when: false
+      failed_when: common_raw_journald_probe.rc | default(0) != 0
+
+    - name: "[COMMON-051] Configure Systemd Journald retention limits via write-temp/validate/move (CentOS 7, raw)"
+      ansible.builtin.raw: >-
+        mkdir -p /etc/systemd/journald.conf.d && {{ common_raw_journald_content | raw_push_cmd('/etc/systemd/journald.conf.d/99-retention.conf', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_journald_content: |
+          [Journal]
+          SystemMaxUse={{ journald_max_use | default('2G') }}
+          MaxRetentionSec={{ journald_max_retention | default('1month') }}
+      register: common_raw_journald_push
+      changed_when: >-
+        (common_raw_journald_probe.stdout | default('')) | raw_push_changed(common_raw_journald_content, '0644', 'root', 'root')
+      failed_when: common_raw_journald_push.rc | default(0) != 0

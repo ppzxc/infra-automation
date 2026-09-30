@@ -105,6 +105,13 @@
 | `COMMON-042` | `Probe ntp.conf hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 조회 전용 |
 | `COMMON-043` | `Configure ntpd servers via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` (`ntp.conf.j2`, `Restart ntpd` 핸들러) |
 | `COMMON-044` | `Ensure ntpd service is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 기동·부팅 활성 상태면 `ok` |
+| `COMMON-045` | `Set timezone (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 현재 타임존이 같으면 `ok` (`timedatectl set-timezone`) |
+| `COMMON-046` | `Install EPEL repository (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 기설치 시 `ok`, `failed_when: false` |
+| `COMMON-047` | `Probe chrony.conf hash and mode (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 조회 전용 |
+| `COMMON-048` | `Configure Chrony NTP servers via write-temp/validate/move (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` (`chrony.conf.j2`, `Restart chrony` 핸들러) |
+| `COMMON-049` | `Ensure Chrony service is running and enabled (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 기동·부팅 활성 상태면 `ok` |
+| `COMMON-050` | `Probe journald retention drop-in hash and mode (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 조회 전용 |
+| `COMMON-051` | `Configure Systemd Journald retention limits via write-temp/validate/move (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` |
 
-> **Raw Provisioning Path (ADR-0005)**: `raw_provisioning_path: true`인 CentOS 6/7 호스트에서는 `COMMON-002`/`005`/`007`/`011*`/`012`/`013`/`014`/`015`/`016`/`022`/`023`이 스킵되고 `COMMON-024`~`COMMON-040`이 대신 실행된다(CentOS 6는 `COMMON-010` 대신 `COMMON-041`~`COMMON-044` ntpd 경로 추가, CentOS 7은 영향 없음)(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: `raw_provisioning_path: true`인 CentOS 6/7 호스트에서는 `COMMON-001`/`002`/`004`/`005`/`007`/`008`/`009`/`011*`/`012`/`013`/`014`/`015`/`016`/`017`/`022`/`023`이 스킵되고 `COMMON-024`~`COMMON-040`이 대신 실행된다(CentOS 6는 `COMMON-010` 대신 `COMMON-041`~`COMMON-044` ntpd 경로 추가, CentOS 7은 `COMMON-001`/`004`/`008`/`009`/`017` 대신 `COMMON-045`~`COMMON-051` 추가; CentOS 6는 Upstart라 journald 없음)(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 

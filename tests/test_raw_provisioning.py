@@ -22,7 +22,7 @@ from raw_provisioning import (  # noqa: E402
     raw_changed, raw_group_cmd, raw_user_cmd, raw_authorized_key_cmd,
     raw_sysctl_directives, raw_limits_directives, raw_sudoers_line,
     raw_rm_cmd, raw_yum_cmd, raw_sysctl_live_cmd, raw_service_cmd,
-    raw_iptables_cmd, raw_iptables_absent,
+    raw_iptables_cmd, raw_iptables_absent, raw_timezone_cmd, raw_selinux_cmd,
 )
 
 OWNER = getpass.getuser()
@@ -667,4 +667,104 @@ def test_centos6_ntp_and_iptables_tasks_are_raw_only_and_controlled():
             assert "ansible.builtin.raw" in c and "changed_when" in c and "failed_when" in c, c["name"]
     handlers = yaml.safe_load((ROOT_DIR / "roles/common/handlers/main.yml").read_text())
     rawh = next(h for h in handlers if h.get("listen") == "Restart ntpd")
+    assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False
+
+
+def _tz_env(tmp_path, current):
+    zone = tmp_path / "zoneinfo"
+    (zone / "Asia").mkdir(parents=True)
+    (zone / "Asia" / "Seoul").write_text("seoul")
+    (zone / "UTC").write_text("utc")
+    local = tmp_path / "localtime"
+    local.symlink_to(zone / current)
+    log = tmp_path / "calls"
+    bindir = _stub_bin(tmp_path, {"timedatectl": 'echo "timedatectl $*" >> %s' % log})
+    return zone, local, bindir, log
+
+
+def test_timezone_set_only_when_it_differs(tmp_path):
+    zone, local, bindir, log = _tz_env(tmp_path, "UTC")
+    cmd = raw_timezone_cmd("Asia/Seoul", str(zone), str(local))
+    r = _run(tmp_path, bindir, cmd)
+    assert r.returncode == 0 and raw_changed(r.stdout)
+    assert log.read_text().strip() == "timedatectl set-timezone Asia/Seoul"
+    log.unlink()
+    local.unlink()
+    local.symlink_to(zone / "Asia" / "Seoul")
+    r = _run(tmp_path, bindir, cmd)
+    assert r.returncode == 0 and not raw_changed(r.stdout) and not log.exists()
+
+
+def test_timezone_unknown_zone_fails_and_unsafe_name_is_rejected(tmp_path):
+    zone, local, bindir, log = _tz_env(tmp_path, "UTC")
+    r = _run(tmp_path, bindir, raw_timezone_cmd("Mars/Base", str(zone), str(local)))
+    assert r.returncode != 0 and not log.exists()
+    with pytest.raises(ValueError):
+        raw_timezone_cmd("UTC; reboot")
+    with pytest.raises(ValueError):
+        raw_timezone_cmd("../etc/passwd")
+
+
+def _selinux_env(tmp_path, config_mode, running):
+    cfg = tmp_path / "selinux_config"
+    cfg.write_text("# comment\nSELINUX=%s\nSELINUXTYPE=targeted\n" % config_mode)
+    log = tmp_path / "calls"
+    bindir = _stub_bin(tmp_path, {"setenforce": 'echo "setenforce $*" >> %s' % log,
+                                  "getenforce": "echo %s" % running})
+    return cfg, bindir, log
+
+
+def test_selinux_config_and_runtime_are_aligned_to_permissive(tmp_path):
+    cfg, bindir, log = _selinux_env(tmp_path, "enforcing", "Enforcing")
+    cmd = raw_selinux_cmd("permissive", "targeted", str(cfg))
+    r = _run(tmp_path, bindir, cmd)
+    assert r.returncode == 0 and raw_changed(r.stdout)
+    assert cfg.read_text() == "# comment\nSELINUX=permissive\nSELINUXTYPE=targeted\n"
+    assert log.read_text().strip() == "setenforce 0"
+    log.unlink()
+    bindir = _stub_bin(tmp_path, {"getenforce": "echo Permissive", "setenforce": "echo x >> %s" % log})
+    r = _run(tmp_path, bindir, cmd)
+    assert r.returncode == 0 and not raw_changed(r.stdout) and not log.exists()
+
+
+def test_selinux_appends_missing_keys_and_tolerates_absent_subsystem(tmp_path):
+    cfg = tmp_path / "selinux_config"
+    cfg.write_text("SELINUX=permissive\n")
+    bindir = _stub_bin(tmp_path, {})
+    no_rt = lambda c: c.replace("command -v getenforce", "false")
+    r = _run(tmp_path, bindir, no_rt(raw_selinux_cmd("permissive", "targeted", str(cfg))))
+    assert r.returncode == 0 and raw_changed(r.stdout)
+    assert cfg.read_text() == "SELINUX=permissive\nSELINUXTYPE=targeted\n"
+    missing = tmp_path / "nope"
+    r = _run(tmp_path, bindir, no_rt(raw_selinux_cmd("permissive", "targeted", str(missing))))
+    assert r.returncode == 0 and not raw_changed(r.stdout) and not missing.exists()
+
+
+def test_selinux_rejects_unsafe_input():
+    with pytest.raises(ValueError):
+        raw_selinux_cmd("bogus", "targeted")
+    with pytest.raises(ValueError):
+        raw_selinux_cmd("permissive", "targeted; reboot")
+
+
+def test_centos7_only_tasks_are_raw_gated_and_controlled():
+    import yaml
+    sec = list(_walk_tasks(yaml.safe_load((ROOT_DIR / "roles/security/tasks/main.yml").read_text())))
+    com = list(_walk_tasks(yaml.safe_load((ROOT_DIR / "roles/common/tasks/main.yml").read_text())))
+    for tasks, gated in ((com, ("[COMMON-001]", "[COMMON-004]", "[COMMON-008]", "[COMMON-009]", "[COMMON-017]")),
+                         (sec, ("[SEC-011]",))):
+        mod = [t for t in tasks if t.get("name", "").startswith(gated)]
+        assert len(mod) == len(gated)
+        assert all("raw_provisioning_path" in str(t.get("when")) for t in mod)
+    for tasks, prefixes in ((com, tuple("[COMMON-%03d]" % n for n in range(45, 52))), (sec, ("[SEC-041]",))):
+        blocks = _blocks_containing(tasks, prefixes)
+        assert len(blocks) == 1 and "== 7" in str(blocks[0]["when"]) and "raw_provisioning_path" in str(blocks[0]["when"])
+        inner = [c for c in blocks[0]["block"] if c["name"].startswith(prefixes)]
+        assert len(inner) == len(prefixes)
+        for c in inner:
+            assert "ansible.builtin.raw" in c and "changed_when" in c and "failed_when" in c, c["name"]
+    handlers = yaml.safe_load((ROOT_DIR / "roles/common/handlers/main.yml").read_text())
+    module = next(h for h in handlers if h["name"] == "Restart chrony")
+    assert "raw_provisioning_path" in str(module["when"])
+    rawh = next(h for h in handlers if h.get("listen") == "Restart chrony")
     assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False

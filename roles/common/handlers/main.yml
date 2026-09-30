@@ -4,6 +4,7 @@
     name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
     state: restarted
     enabled: true
+  when: not (raw_provisioning_path | default(false) | bool)
 
 - name: Apply sysctl
   ansible.builtin.command: sysctl --system
@@ -27,4 +28,13 @@
   register: common_raw_restart_ntpd
   changed_when: true
   failed_when: common_raw_restart_ntpd.rc | default(0) != 0
+  when: raw_provisioning_path | default(false) | bool
+
+# Raw Provisioning Path (ADR-0005), CentOS 7: chronyd restarted via `service`.
+- name: Restart chrony (raw)
+  ansible.builtin.raw: service chronyd restart
+  listen: Restart chrony
+  register: common_raw_restart_chrony
+  changed_when: true
+  failed_when: common_raw_restart_chrony.rc | default(0) != 0
   when: raw_provisioning_path | default(false) | bool

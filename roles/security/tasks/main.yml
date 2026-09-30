@@ -822,6 +822,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
+    - not (raw_provisioning_path | default(false) | bool)
   failed_when: false
   # geerlingguy/docker-*-ansible containers have no SELinux kernel subsystem at
   # all (/sys/fs/selinux is empty, getenforce is absent, /etc/selinux/config
@@ -995,3 +996,19 @@
       when: item.stdout | default('') | raw_iptables_absent
       changed_when: true
       failed_when: sec021_raw_insert.rc | default(0) != 0
+
+# Raw Provisioning Path (ADR-0005), CentOS 7 only: `ansible.posix.selinux`
+# needs AnsiballZ. The raw equivalent persists SELINUX/SELINUXTYPE in
+# /etc/selinux/config and aligns the running mode; the marker is echoed only
+# when something changed. CentOS 6 keeps SELinux untouched (module task is >= 7).
+- name: Security raw SELinux path (CentOS 7)
+  when:
+    - raw_provisioning_path | default(false) | bool
+    - ansible_distribution == "CentOS"
+    - ansible_distribution_major_version | int == 7
+  block:
+    - name: "[SEC-041] Configure SELinux in permissive mode (CentOS 7, raw)"
+      ansible.builtin.raw: "{{ (selinux_mode | default('permissive')) | raw_selinux_cmd(selinux_policy | default('targeted')) }}"
+      register: sec011_raw_selinux
+      changed_when: sec011_raw_selinux.stdout | default('') | raw_changed
+      failed_when: sec011_raw_selinux.rc | default(0) != 0
