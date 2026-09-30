@@ -824,6 +824,17 @@ def test_firewalld_probe_reports_present_absent_and_error(tmp_path):
     assert raw_firewalld_failed("") and raw_firewalld_failed(None) and not raw_firewalld_present("")
 
 
+def test_firewalld_runtime_probe_and_masquerade_runtime(tmp_path):
+    db, bindir = _fwd_env(tmp_path, "public|service|http\n")
+    rule = {"kind": "service", "zone": "public", "value": "http"}
+    r = _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "probe-runtime"))
+    assert raw_firewalld_present(r.stdout)
+    assert "--permanent" not in raw_firewalld_cmd(rule, "probe-runtime")
+    assert "--permanent" in raw_firewalld_cmd(rule, "probe")
+    r = _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(dict(rule, value="https"), "probe-runtime"))
+    assert raw_firewalld_absent(r.stdout)
+
+
 def test_firewalld_add_remove_round_trip_and_rich_rule(tmp_path):
     db, bindir = _fwd_env(tmp_path)
     for rule in ({"kind": "port", "zone": "dmz", "value": "9100/tcp"},
@@ -847,6 +858,7 @@ def test_firewalld_rejects_unsafe_input():
            {"kind": "source", "zone": "work", "value": "1.2.3.4; id"},
            {"kind": "rich-rule", "zone": "public", "value": "1.2.3.4", "port": "22; id"},
            {"kind": "rich-rule", "zone": "public", "value": "1.2.3.4", "port": 22, "proto": "icmp"},
+           {"kind": "rich-rule", "zone": "public", "value": "2001:db8::/32", "port": 22},
            {"kind": "interface", "zone": "public", "value": "eth0 && id"},
            {"kind": "bogus", "zone": "public", "value": "x"})
     for rule in bad:
@@ -934,12 +946,14 @@ def test_centos7_firewalld_tasks_are_raw_gated_and_controlled():
     assert len(fw) >= 30
     for t in fw:
         assert "raw_provisioning_path" in str(t.get("when")), t["name"]
-    prefixes = tuple("[SEC-%03d]" % n for n in range(42, 48))
+    prefixes = tuple("[SEC-%03d]" % n for n in range(42, 51))
     blocks = _blocks_containing(tasks, prefixes)
     assert len(blocks) == 1 and "== 7" in str(blocks[0]["when"]) and "raw_provisioning_path" in str(blocks[0]["when"])
     inner = [c for c in blocks[0]["block"] if c["name"].startswith(prefixes)]
     assert len(inner) == len(prefixes)
     for c in inner:
+        if "ansible.builtin.set_fact" in c:
+            continue
         assert "ansible.builtin.raw" in c and "changed_when" in c and "failed_when" in c, c["name"]
     handlers = yaml.safe_load((ROOT_DIR / "roles/security/handlers/main.yml").read_text())
     module = next(h for h in handlers if h["name"] == "Reload firewalld")

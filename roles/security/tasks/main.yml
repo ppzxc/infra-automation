@@ -853,7 +853,7 @@
       changed_when: false
       failed_when: sec044_raw_iface.rc | default(0) != 0
 
-    - name: Record detected default network interface
+    - name: "[SEC-049] Record detected default network interface (CentOS 7, raw)"
       ansible.builtin.set_fact:
         ansible_default_ipv4:
           interface: "{{ sec044_raw_iface.stdout | trim }}"
@@ -866,23 +866,23 @@
       failed_when: sec045_raw_masq.rc | default(0) != 0
       notify: Reload firewalld
 
-    - name: Build firewalld rule plan
+    - name: "[SEC-050] Build firewalld rule plan (CentOS 7, raw)"
       ansible.builtin.set_fact:
         sec_raw_firewalld_plan: >-
           {{ {
             'interface': firewall_interface,
-            'interface_zone': firewall_interface_zone | default('public'),
-            'source_zone': firewall_source_zone | default('work'),
-            'ssh_port': ssh_port | default(22),
-            'ssh_allowed_source_ips': ssh_allowed_source_ips | default([]),
-            'stale_source_ips': firewall_stale_source_ips | default(ssh_allowed_source_ips | default([])),
-            'allowed_services': firewall_allowed_services | default(['http', 'https']),
-            'allowed_tcp_ports': firewall_allowed_tcp_ports | default([]),
-            'ingress_rules': firewall_ingress_rules | default([]),
+            'interface_zone': firewall_interface_zone,
+            'source_zone': firewall_source_zone,
+            'ssh_port': ssh_port,
+            'ssh_allowed_source_ips': ssh_allowed_source_ips,
+            'stale_source_ips': firewall_stale_source_ips,
+            'allowed_services': firewall_allowed_services,
+            'allowed_tcp_ports': firewall_allowed_tcp_ports,
+            'ingress_rules': firewall_ingress_rules,
             'monitoring_subnets': monitoring_allowed_subnets | default([]),
-            'dmz_ports': firewall_dmz_ports | default([]),
-            'internal_subnets': internal_allowed_subnets | default([]),
-            'internal_ports': firewall_internal_ports | default([])
+            'dmz_ports': firewall_dmz_ports,
+            'internal_subnets': internal_allowed_subnets,
+            'internal_ports': firewall_internal_ports
           } | raw_firewalld_plan }}
 
     - name: "[SEC-046] Probe firewalld permanent rules (CentOS 7, raw)"
@@ -903,9 +903,25 @@
       when: >-
         (item.item.state == 'enabled' and (item.stdout | default('') | raw_firewalld_absent)) or
         (item.item.state == 'disabled' and (item.stdout | default('') | raw_firewalld_present))
-      changed_when: true
-      # Removals are best-effort like the module path (failed_when: false).
+      # Removals are best-effort like the module path (failed_when: false), and a
+      # failed removal changed nothing.
+      changed_when: item.item.state == 'enabled' or sec047_raw_apply.rc | default(1) == 0
       failed_when: item.item.state == 'enabled' and sec047_raw_apply.rc | default(0) != 0
+      notify: Reload firewalld
+
+    # `ansible.posix.firewalld` (immediate: true) also repairs the running
+    # firewall. Permanent-only edits cannot, so compare the runtime with the
+    # plan; any drift reports changed and the raw reload handler realigns it.
+    - name: "[SEC-048] Detect firewalld runtime drift from the rule plan (CentOS 7, raw)"
+      ansible.builtin.raw: "{{ item | raw_firewalld_cmd('probe-runtime') }}"
+      register: sec048_raw_runtime
+      loop: "{{ sec_raw_firewalld_plan }}"
+      loop_control:
+        label: "{{ item.state }} {{ item.kind }} {{ item.value }} in {{ item.zone }}"
+      changed_when: >-
+        (item.state == 'enabled' and (sec048_raw_runtime.stdout | default('') | raw_firewalld_absent)) or
+        (item.state == 'disabled' and (sec048_raw_runtime.stdout | default('') | raw_firewalld_present))
+      failed_when: sec048_raw_runtime.stdout | default('') | raw_firewalld_failed
       notify: Reload firewalld
 
 # 4. Firewall configuration (iptables for CentOS 6 legacy)
