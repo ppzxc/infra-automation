@@ -68,7 +68,7 @@
 | `COMMON-007-BAT` | `Ensure bat symlink exists for Debian/Ubuntu (batcat -> bat)` | `ansible.builtin.file` | Debian, Ubuntu | 심볼릭 링크 존재 시 `ok`, `failed_when: false` |
 | `COMMON-008` | `Configure Chrony NTP servers (Modern OS)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 후 변경 시만 수정 및 핸들러 호출 |
 | `COMMON-009` | `Ensure Chrony service is running (Modern OS)` | `ansible.builtin.service` | RHEL 7+, Debian | 서비스 기동 상태면 `ok` |
-| `COMMON-010` | `Ensure NTP service is running (CentOS 6 legacy)` | `ansible.builtin.service` | CentOS 6 (`raw_provisioning_path=false`) | 서비스 기동 상태면 `ok` |
+| `COMMON-010` | `Ensure NTP service is running (CentOS 6 legacy)` | `ansible.builtin.service` | CentOS 6 (`_raw_path_effective=false`) | 서비스 기동 상태면 `ok` |
 | `COMMON-011` | `Apply sysctl kernel tuning` | `ansible.posix.sysctl` | All | sysctl 값 일치 시 `ok` |
 | `COMMON-011-IPV6` | `Disable IPv6 via sysctl` | `ansible.posix.sysctl` | All | `disable_ipv6: true` 시 적용 |
 | `COMMON-011-EXTRA` | `Apply extra sysctl kernel tuning` | `ansible.posix.sysctl` | All | `sysctl_extra_settings` 정의 시 적용 |
@@ -84,34 +84,34 @@
 | `COMMON-021` | `Ensure tzdata package is installed before timezone configuration (Debian/Ubuntu)` | `ansible.builtin.apt` | Debian, Ubuntu | 패키지 기설치 시 `ok` |
 | `COMMON-022` | `Revoke SSH public keys listed in accounts[].revoked_keys` | `ansible.posix.authorized_key` | All | 키가 이미 제거되어 있으면 `ok` |
 | `COMMON-023` | `Remove passwordless sudoers drop-in for removed accounts` | `ansible.builtin.file` | All | 파일이 이미 없으면 `ok` |
-| `COMMON-024` | `Read current sysctl.conf (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
-| `COMMON-025` | `Probe sysctl.conf hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
-| `COMMON-026` | `Apply sysctl kernel tuning via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 로컬 해시·모드가 원격 `sha256sum`/`stat`과 같으면 `ok` |
-| `COMMON-027` | `Ensure account primary groups exist (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 그룹·gid 일치 시 `ok` (`getent` probe 후 필요할 때만 `groupadd`/`groupmod`) |
-| `COMMON-028` | `Ensure accounts exist with tier-specific permissions (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 계정 속성·보조 그룹 일치 시 `ok` (드리프트 시에만 `useradd`/`usermod`/`userdel`) |
-| `COMMON-029` | `Probe sudoers drop-in hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
-| `COMMON-030` | `Configure passwordless sudoers via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 해시·모드 일치 시 `ok` (`visudo -cf` 검증 실패 시 원본 보존, 임시 파일 삭제 후 실패) |
-| `COMMON-031` | `Deploy SSH public keys for accounts (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 키 blob이 이미 있으면 `ok` |
-| `COMMON-032` | `Revoke SSH public keys listed in accounts[].revoked_keys (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 키가 이미 없으면 `ok` |
-| `COMMON-033` | `Remove passwordless sudoers drop-in for removed accounts (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 파일이 이미 없으면 `ok` |
-| `COMMON-034` | `Probe security limits file hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
-| `COMMON-035` | `Configure system security limits via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 기존 줄을 보존한 채 병합, 해시·모드·소유자 일치 시 `ok` |
-| `COMMON-036` | `Read current security limits file (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
-| `COMMON-037` | `Fix EOL CentOS 6 / 7 Vault Repositories (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | `changed_when: false` |
-| `COMMON-038` | `Install common packages (CentOS 6, 7 via YUM, raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | `rpm -q --whatprovides` 확인 후 미설치 패키지만 설치 |
-| `COMMON-039` | `Install optional diagnostic tools (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 미설치·설치 가능한 패키지만 설치, 실패 무시 |
-| `COMMON-040` | `Align live sysctl values with the desired settings (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 실행 중 커널 값이 다를 때만 `sysctl -w` |
-| `COMMON-041` | `Install ntp package (CentOS 6, raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 패키지 기설치 시 `ok` |
-| `COMMON-042` | `Probe ntp.conf hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 조회 전용 |
-| `COMMON-043` | `Configure ntpd servers via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` (`ntp.conf.j2`, `Restart ntpd` 핸들러) |
-| `COMMON-044` | `Ensure ntpd service is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 기동·부팅 활성 상태면 `ok` |
-| `COMMON-045` | `Set timezone (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 현재 타임존이 같으면 `ok` (`timedatectl set-timezone`) |
-| `COMMON-046` | `Install EPEL repository (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 기설치 시 `ok`, `failed_when: false` |
-| `COMMON-047` | `Probe chrony.conf hash and mode (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 조회 전용 |
-| `COMMON-048` | `Configure Chrony NTP servers via write-temp/validate/move (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` (`chrony.conf.j2`, `Restart chrony` 핸들러) |
-| `COMMON-049` | `Ensure Chrony service is running and enabled (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 기동·부팅 활성 상태면 `ok` |
-| `COMMON-050` | `Probe journald retention drop-in hash and mode (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 조회 전용 |
-| `COMMON-051` | `Configure Systemd Journald retention limits via write-temp/validate/move (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` |
+| `COMMON-024` | `Read current sysctl.conf (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 조회 전용 (`changed_when: false`) |
+| `COMMON-025` | `Probe sysctl.conf hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 조회 전용 (`changed_when: false`) |
+| `COMMON-026` | `Apply sysctl kernel tuning via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 로컬 해시·모드가 원격 `sha256sum`/`stat`과 같으면 `ok` |
+| `COMMON-027` | `Ensure account primary groups exist (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 그룹·gid 일치 시 `ok` (`getent` probe 후 필요할 때만 `groupadd`/`groupmod`) |
+| `COMMON-028` | `Ensure accounts exist with tier-specific permissions (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 계정 속성·보조 그룹 일치 시 `ok` (드리프트 시에만 `useradd`/`usermod`/`userdel`) |
+| `COMMON-029` | `Probe sudoers drop-in hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 조회 전용 (`changed_when: false`) |
+| `COMMON-030` | `Configure passwordless sudoers via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 해시·모드 일치 시 `ok` (`visudo -cf` 검증 실패 시 원본 보존, 임시 파일 삭제 후 실패) |
+| `COMMON-031` | `Deploy SSH public keys for accounts (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 키 blob이 이미 있으면 `ok` |
+| `COMMON-032` | `Revoke SSH public keys listed in accounts[].revoked_keys (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 키가 이미 없으면 `ok` |
+| `COMMON-033` | `Remove passwordless sudoers drop-in for removed accounts (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 파일이 이미 없으면 `ok` |
+| `COMMON-034` | `Probe security limits file hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 조회 전용 (`changed_when: false`) |
+| `COMMON-035` | `Configure system security limits via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 기존 줄을 보존한 채 병합, 해시·모드·소유자 일치 시 `ok` |
+| `COMMON-036` | `Read current security limits file (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 조회 전용 (`changed_when: false`) |
+| `COMMON-037` | `Fix EOL CentOS 6 / 7 Vault Repositories (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | `changed_when: false` |
+| `COMMON-038` | `Install common packages (CentOS 6, 7 via YUM, raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | `rpm -q --whatprovides` 확인 후 미설치 패키지만 설치 |
+| `COMMON-039` | `Install optional diagnostic tools (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 미설치·설치 가능한 패키지만 설치, 실패 무시 |
+| `COMMON-040` | `Align live sysctl values with the desired settings (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`_raw_path_effective`) | 실행 중 커널 값이 다를 때만 `sysctl -w` |
+| `COMMON-041` | `Install ntp package (CentOS 6, raw)` | `ansible.builtin.raw` | CentOS 6 (`_raw_path_effective`) | 패키지 기설치 시 `ok` |
+| `COMMON-042` | `Probe ntp.conf hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6 (`_raw_path_effective`) | 조회 전용 |
+| `COMMON-043` | `Configure ntpd servers via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6 (`_raw_path_effective`) | 해시·모드·소유자가 같으면 `ok` (`ntp.conf.j2`, `Restart ntpd` 핸들러) |
+| `COMMON-044` | `Ensure ntpd service is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6 (`_raw_path_effective`) | 기동·부팅 활성 상태면 `ok` |
+| `COMMON-045` | `Set timezone (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 현재 타임존이 같으면 `ok` (`timedatectl set-timezone`) |
+| `COMMON-046` | `Install EPEL repository (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 기설치 시 `ok`, `failed_when: false` |
+| `COMMON-047` | `Probe chrony.conf hash and mode (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 조회 전용 |
+| `COMMON-048` | `Configure Chrony NTP servers via write-temp/validate/move (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 해시·모드·소유자가 같으면 `ok` (`chrony.conf.j2`, `Restart chrony` 핸들러) |
+| `COMMON-049` | `Ensure Chrony service is running and enabled (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 기동·부팅 활성 상태면 `ok` |
+| `COMMON-050` | `Probe journald retention drop-in hash and mode (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 조회 전용 |
+| `COMMON-051` | `Configure Systemd Journald retention limits via write-temp/validate/move (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 해시·모드·소유자가 같으면 `ok` |
 
-> **Raw Provisioning Path (ADR-0005)**: `raw_provisioning_path: true`인 CentOS 6/7 호스트에서는 `COMMON-001`/`002`/`004`/`005`/`007`/`008`/`009`/`011*`/`012`/`013`/`014`/`015`/`016`/`017`/`022`/`023`이 스킵되고(`COMMON-001`/`004`/`008`/`009`/`017`은 CentOS 7 raw 블록이 대신하며 CentOS 6에서는 실행되지 않는다) `COMMON-024`~`COMMON-040`이 대신 실행된다(CentOS 6는 `COMMON-010` 대신 `COMMON-041`~`COMMON-044` ntpd 경로 추가, CentOS 7은 `COMMON-001`/`004`/`008`/`009`/`017` 대신 `COMMON-045`~`COMMON-051` 추가; CentOS 6는 Upstart라 journald 없음)(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: `/etc/redhat-release` 자동 판별(`_raw_path_effective`; 인벤토리 `raw_provisioning_path` 명시 시 우선)로 raw 경로가 된 CentOS 6/7 호스트에서는 `COMMON-001`/`002`/`004`/`005`/`007`/`008`/`009`/`011*`/`012`/`013`/`014`/`015`/`016`/`017`/`022`/`023`이 스킵되고(`COMMON-001`/`004`/`008`/`009`/`017`은 CentOS 7 raw 블록이 대신하며 CentOS 6에서는 실행되지 않는다) `COMMON-024`~`COMMON-040`이 대신 실행된다(CentOS 6는 `COMMON-010` 대신 `COMMON-041`~`COMMON-044` ntpd 경로 추가, CentOS 7은 `COMMON-001`/`004`/`008`/`009`/`017` 대신 `COMMON-045`~`COMMON-051` 추가; CentOS 6는 Upstart라 journald 없음)(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 

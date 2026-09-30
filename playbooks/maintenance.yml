@@ -20,7 +20,11 @@
 - name: Maintenance and Security Updates for Target Hosts
   hosts: servers
   become: true
-  gather_facts: true
+  gather_facts: false
+  pre_tasks:
+    - name: Detect raw provisioning path and gather facts
+      ansible.builtin.import_tasks: common/detect_raw_path.yml
+      tags: [always]
   roles:
     - role: common
       tags: [common, update]

@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
 from raw_provisioning import (  # noqa: E402
     raw_probe_cmd, raw_push_changed, raw_push_cmd, raw_read_cmd,
-    raw_parse_os_release, raw_read_extract, raw_set_directives,
+    raw_parse_os_release, raw_classify_os_path, raw_read_extract, raw_set_directives,
     raw_changed, raw_group_cmd, raw_user_cmd, raw_authorized_key_cmd,
     raw_sysctl_directives, raw_limits_directives, raw_sudoers_line,
     raw_rm_cmd, raw_yum_cmd, raw_sysctl_live_cmd, raw_service_cmd,
@@ -209,6 +209,55 @@ def test_raw_os_release_yields_distribution_and_major_version(stdout, distributi
 def test_unparseable_raw_os_release_is_rejected(stdout):
     with pytest.raises(Exception):
         raw_parse_os_release(stdout)
+
+
+@pytest.mark.parametrize("stdout, expected", [
+    ("CentOS release 6.10 (Final)\n", "legacy_el6"),
+    ("CentOS Linux release 7.9.2009 (Core)\n", "legacy_el7"),
+    ("Red Hat Enterprise Linux Server release 7.9 (Maipo)\r\n", "legacy_el7"),
+    ("Red Hat Enterprise Linux release 6.10 (Santiago)\n", "legacy_el6"),
+    ("Welcome to legacy box\nCentOS release 6.5 (Final)\n", "legacy_el6"),
+    ("Rocky Linux release 9.3 (Blue Onyx)\n", "modern"),
+    ("Red Hat Enterprise Linux release 9.2 (Plow)\n", "modern"),
+    ("CentOS Stream release 9\n", "modern"),
+    ("cat: /etc/redhat-release: No such file or directory\n", "modern"),
+    ("", "modern"),
+    (None, "modern"),
+])
+def test_raw_classify_os_path(stdout, expected):
+    assert raw_classify_os_path(stdout) == expected
+
+
+def _render(expr, **ctx):
+    from jinja2 import Environment
+    env = Environment()
+    env.filters["raw_classify_os_path"] = raw_classify_os_path
+    env.filters["bool"] = lambda v: str(v).lower() in ("true", "1", "yes")
+    return env.from_string(expr).render(**ctx)
+
+
+EFFECTIVE_EXPR = (ROOT_DIR / "playbooks/common/detect_raw_path.yml").read_text()
+
+
+def _effective_expr():
+    import yaml
+    task = next(t for t in yaml.safe_load(EFFECTIVE_EXPR) if "_raw_path_effective" in (t.get("ansible.builtin.set_fact") or {}))
+    return task["ansible.builtin.set_fact"]["_raw_path_effective"]
+
+
+@pytest.mark.parametrize("ctx, expected", [
+    ({"raw_os_release": {"stdout": "CentOS release 6.10 (Final)"}}, "True"),
+    ({"raw_os_release": {"stdout": "Rocky Linux release 9.3"}}, "False"),
+    ({"raw_os_release": {"stdout": ""}}, "False"),
+    ({"raw_os_release": {}}, "False"),
+    ({"raw_provisioning_path": False, "raw_os_release": {"stdout": "CentOS Linux release 7.9.2009"}}, "False"),
+    ({"raw_provisioning_path": True, "raw_os_release": {"stdout": "Rocky Linux release 9.3"}}, "True"),
+    ({"raw_provisioning_path": None, "raw_os_release": {"stdout": "CentOS release 6.10"}}, "True"),
+    ({"raw_provisioning_path": "", "raw_os_release": {"stdout": "Rocky Linux release 9.3"}}, "False"),
+    ({"raw_provisioning_path": "false", "raw_os_release": {"stdout": "CentOS release 6.10"}}, "False"),
+])
+def test_effective_raw_path_precedence(ctx, expected):
+    assert _render(_effective_expr(), **ctx).strip() == expected
 
 
 # --- common role raw consumers (#31) ---------------------------------------
@@ -419,8 +468,8 @@ def test_common_raw_tasks_declare_change_control_and_gate_module_tasks():
              "COMMON-016", "COMMON-022", "COMMON-023"]
     for t in tasks:
         if any(t.get("name", "").startswith("[%s]" % g) for g in gated):
-            assert "raw_provisioning_path" in str(t.get("when")), t["name"]
-    assert "raw_provisioning_path" in (role / "defaults" / "main.yml").read_text()
+            assert "_raw_path_effective" in str(t.get("when")), t["name"]
+    assert "_raw_path_effective" in (role / "defaults" / "main.yml").read_text()
 
 
 def test_authorized_key_with_changed_comment_replaces_the_line(tmp_path):
@@ -563,7 +612,7 @@ def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers()
     gated = ["SEC-009", "SEC-010", "SEC-012", "SEC-013", "SEC-014", "SEC-015"]
     for t in tasks:
         if any(t.get("name", "").startswith("[%s]" % g) for g in gated):
-            assert "raw_provisioning_path" in str(t.get("when")), t["name"]
+            assert "_raw_path_effective" in str(t.get("when")), t["name"]
     raw = {t["name"]: t for t in tasks if "ansible.builtin.raw" in t}
     for t in raw.values():
         assert "changed_when" in t and "failed_when" in t or t["name"].startswith("[SEC-022]"), t["name"]
@@ -576,7 +625,7 @@ def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers()
     handlers = yaml.safe_load((role / "handlers" / "main.yml").read_text())
     for name in ("Restart fail2ban", "Restart auditd"):
         module = next(h for h in handlers if h["name"] == name)
-        assert "raw_provisioning_path" in str(module["when"])
+        assert "_raw_path_effective" in str(module["when"])
         rawh = next(h for h in handlers if h.get("listen") == name)
         assert "ansible.builtin.raw" in rawh
         assert "failed_when: false" not in str(rawh) and rawh["failed_when"] is not False
@@ -659,11 +708,11 @@ def test_centos6_ntp_and_iptables_tasks_are_raw_only_and_controlled():
     for tasks, gated in ((sec, ("[SEC-008]", "[SEC-021]")), (com, ("[COMMON-010]",))):
         mod = [t for t in tasks if t.get("name", "").startswith(gated)]
         assert len(mod) == len(gated)
-        assert all("raw_provisioning_path" in str(t.get("when")) for t in mod)
+        assert all("_raw_path_effective" in str(t.get("when")) for t in mod)
     for tasks, prefixes in ((sec, ("[SEC-037]", "[SEC-038]", "[SEC-039]", "[SEC-040]")),
                             (com, ("[COMMON-041]", "[COMMON-042]", "[COMMON-043]", "[COMMON-044]"))):
         blocks = _blocks_containing(tasks, prefixes)
-        assert len(blocks) == 1 and "== 6" in str(blocks[0]["when"]) and "raw_provisioning_path" in str(blocks[0]["when"])
+        assert len(blocks) == 1 and "== 6" in str(blocks[0]["when"]) and "_raw_path_effective" in str(blocks[0]["when"])
         inner = [c for c in blocks[0]["block"] if c["name"].startswith(prefixes)]
         assert len(inner) == 4
         for c in inner:
@@ -758,17 +807,17 @@ def test_centos7_only_tasks_are_raw_gated_and_controlled():
                          (sec, ("[SEC-011]",))):
         mod = [t for t in tasks if t.get("name", "").startswith(gated)]
         assert len(mod) == len(gated)
-        assert all("raw_provisioning_path" in str(t.get("when")) for t in mod)
+        assert all("_raw_path_effective" in str(t.get("when")) for t in mod)
     for tasks, prefixes in ((com, tuple("[COMMON-%03d]" % n for n in range(45, 52))), (sec, ("[SEC-041]",))):
         blocks = _blocks_containing(tasks, prefixes)
-        assert len(blocks) == 1 and "== 7" in str(blocks[0]["when"]) and "raw_provisioning_path" in str(blocks[0]["when"])
+        assert len(blocks) == 1 and "== 7" in str(blocks[0]["when"]) and "_raw_path_effective" in str(blocks[0]["when"])
         inner = [c for c in blocks[0]["block"] if c["name"].startswith(prefixes)]
         assert len(inner) == len(prefixes)
         for c in inner:
             assert "ansible.builtin.raw" in c and "changed_when" in c and "failed_when" in c, c["name"]
     handlers = yaml.safe_load((ROOT_DIR / "roles/common/handlers/main.yml").read_text())
     module = next(h for h in handlers if h["name"] == "Restart chrony")
-    assert "raw_provisioning_path" in str(module["when"])
+    assert "_raw_path_effective" in str(module["when"])
     rawh = next(h for h in handlers if h.get("listen") == "Restart chrony")
     assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False
 
@@ -946,10 +995,10 @@ def test_centos7_firewalld_tasks_are_raw_gated_and_controlled():
           or t.get("name", "").startswith(("[SEC-005]", "[SEC-006"))]
     assert len(fw) >= 30
     for t in fw:
-        assert "raw_provisioning_path" in str(t.get("when")), t["name"]
+        assert "_raw_path_effective" in str(t.get("when")), t["name"]
     prefixes = tuple("[SEC-%03d]" % n for n in range(42, 51))
     blocks = _blocks_containing(tasks, prefixes)
-    assert len(blocks) == 1 and "== 7" in str(blocks[0]["when"]) and "raw_provisioning_path" in str(blocks[0]["when"])
+    assert len(blocks) == 1 and "== 7" in str(blocks[0]["when"]) and "_raw_path_effective" in str(blocks[0]["when"])
     inner = [c for c in blocks[0]["block"] if c["name"].startswith(prefixes)]
     assert len(inner) == len(prefixes)
     for c in inner:
@@ -958,7 +1007,7 @@ def test_centos7_firewalld_tasks_are_raw_gated_and_controlled():
         assert "ansible.builtin.raw" in c and "changed_when" in c and "failed_when" in c, c["name"]
     handlers = yaml.safe_load((ROOT_DIR / "roles/security/handlers/main.yml").read_text())
     module = next(h for h in handlers if h["name"] == "Reload firewalld")
-    assert "raw_provisioning_path" in str(module["when"])
+    assert "_raw_path_effective" in str(module["when"])
     rawh = next(h for h in handlers if h.get("listen") == "Reload firewalld")
     assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False
 
@@ -995,3 +1044,30 @@ def test_raw_tasks_never_override_check_mode_and_are_skipped_under_check(tmp_pat
     assert res.returncode == 0, res.stdout + res.stderr
     assert "skipped=1" in res.stdout
     assert not marker.exists()
+
+
+def test_detect_probe_is_read_only_and_tolerant():
+    import yaml
+    probe = next(t for t in yaml.safe_load(EFFECTIVE_EXPR) if "ansible.builtin.raw" in t)
+    assert probe["check_mode"] is False
+    assert probe["failed_when"] is False
+    assert probe["become"] is False
+    assert probe["changed_when"] is False
+
+
+def test_detect_file_gathers_facts_only_off_raw_path():
+    import yaml
+    setup = next(t for t in yaml.safe_load(EFFECTIVE_EXPR) if "ansible.builtin.setup" in t)
+    assert setup["when"] == "not (_raw_path_effective | bool)"
+
+
+@pytest.mark.parametrize("playbook", ["site.yml", "maintenance.yml"])
+def test_target_plays_import_detection_with_always_tag(playbook):
+    import yaml
+    plays = yaml.safe_load((ROOT_DIR / "playbooks" / playbook).read_text())
+    targets = [p for p in plays if p.get("roles") and p.get("hosts") != "overseer"]
+    assert targets
+    for play in targets:
+        imp = [t for t in play["pre_tasks"] if t.get("ansible.builtin.import_tasks") == "common/detect_raw_path.yml"]
+        assert len(imp) == 1 and imp[0]["tags"] == ["always"]
+        assert play["gather_facts"] is False

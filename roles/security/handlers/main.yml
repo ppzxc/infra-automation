@@ -3,7 +3,7 @@
   ansible.builtin.service:
     name: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
     state: restarted
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 # Raw Provisioning Path (ADR-0005): the service module needs AnsiballZ, which
 # CentOS 6/7 cannot run. `service` works on both SysV and systemd (CentOS 7).
@@ -12,7 +12,7 @@
   listen: Restart sshd
   changed_when: true
   failed_when: false
-  when: raw_provisioning_path | default(false) | bool
+  when: _raw_path_effective | default(false) | bool
 
 - name: Restart ufw
   community.general.ufw:
@@ -22,7 +22,7 @@
   ansible.builtin.service:
     name: firewalld
     state: restarted
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 # firewalld_module_usable is false when ansible.posix.firewalld cannot bind
 # to the target's firewalld D-Bus module (PyGObject ABI lock on RHEL8/Rocky8 --
@@ -36,7 +36,7 @@
 - name: Reload firewalld
   ansible.builtin.command: firewall-cmd --reload
   changed_when: false
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 # Raw Provisioning Path (ADR-0005): the raw firewalld tasks edit the permanent
 # config only, so a reload applies it to the running firewall.
@@ -46,7 +46,7 @@
   register: security_raw_reload_firewalld
   changed_when: true
   failed_when: security_raw_reload_firewalld.rc | default(0) != 0
-  when: raw_provisioning_path | default(false) | bool
+  when: _raw_path_effective | default(false) | bool
 
 - name: Restart fail2ban
   ansible.builtin.service:
@@ -54,7 +54,7 @@
     state: restarted
     enabled: true
   failed_when: false
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 
 - name: Restart auditd
@@ -62,7 +62,7 @@
     name: auditd
     state: restarted
   failed_when: false
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 # Raw Provisioning Path (ADR-0005): `service` works on SysV (CentOS 6) and
 # systemd (CentOS 7; auditd only accepts restarts through the service wrapper).
@@ -72,7 +72,7 @@
   register: security_raw_restart_fail2ban
   changed_when: true
   failed_when: security_raw_restart_fail2ban.rc | default(0) != 0
-  when: raw_provisioning_path | default(false) | bool
+  when: _raw_path_effective | default(false) | bool
 
 - name: Restart auditd (raw)
   ansible.builtin.raw: service auditd restart
@@ -80,4 +80,4 @@
   register: security_raw_restart_auditd
   changed_when: true
   failed_when: security_raw_restart_auditd.rc | default(0) != 0
-  when: raw_provisioning_path | default(false) | bool
+  when: _raw_path_effective | default(false) | bool

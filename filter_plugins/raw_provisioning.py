@@ -584,10 +584,28 @@ def raw_parse_os_release(stdout):
     }
 
 
+_LEGACY_PATHS = {'6': 'legacy_el6', '7': 'legacy_el7'}
+
+
+def raw_classify_os_path(stdout):
+    """Classify ``cat /etc/redhat-release`` output as legacy_el6/legacy_el7/modern.
+
+    Tolerant by design: a missing file, empty output or an unrecognised
+    distribution is ``modern`` (standard ``setup`` path) and never raises.
+    The raw path is ``!= 'modern'``; strict parsing stays in raw_parse_os_release.
+    """
+    try:
+        major = raw_parse_os_release(stdout)['major_version']
+    except ValueError:
+        return 'modern'
+    return _LEGACY_PATHS.get(major, 'modern')
+
+
 class FilterModule(object):
     def filters(self):
         return {
             'raw_parse_os_release': raw_parse_os_release,
+            'raw_classify_os_path': raw_classify_os_path,
             'raw_read_cmd': raw_read_cmd,
             'raw_read_extract': raw_read_extract,
             'raw_probe_cmd': raw_probe_cmd,

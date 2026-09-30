@@ -62,13 +62,16 @@ module의 `validate:` 절과 `atomic_move`를 대체하는 표준 헬퍼 시퀀�
 
 현재 인벤토리(`ns0266`, `ns0332`)에는 실제 CentOS 6/7 호스트가 없어 dry-run 가시성 손실이 당장의 리스크는 아니지만, 실제 CentOS 6/7 호스트가 프로비저닝되는 시점에 재검토가 필요한 사항으로 기록합니다(§4 참고).
 
-### 2.5 Fact Gathering 우회 방식 (구현 결정, #30)
+### 2.5 Fact Gathering 우회 방식 및 raw 경로 자동 판별 (구현 결정, #30, #51)
+
+**자동 판별 (#51)**: `playbooks/common/detect_raw_path.yml`이 `site.yml` Play 2와 `maintenance.yml` 대상 호스트 플레이(overseer 제외)의 `pre_tasks`에서 `import_tasks`로 포함되며, 판별 뒤 raw 경로가 아닌 호스트만 `setup`을 실행합니다. raw 호스트는 `--check`에서 경고 메시지를 출력하고 `/etc/redhat-release`를 읽기 전용 raw 프로브(`check_mode: false`, `failed_when: false`, `become: false`)로 조회하고, `raw_classify_os_path`가 `legacy_el6`/`legacy_el7`/`modern`으로 분류합니다(파일 없음·빈 출력·Rocky/RHEL 9/Ubuntu는 `modern`이며 예외를 던지지 않음). 결과는 호스트별 fact `_raw_path_effective`로 기록되고 역할의 게이트/핸들러는 이 fact만 읽습니다. 우선순위: 인벤토리에 명시된 `raw_provisioning_path`(true/false)가 자동 판별보다 우선하고, 미지정이면 판별 결과를 사용합니다. 이 프로브는 조회 전용이므로 §2.4 Option A의 `--check` 스킵 예외이며, 따라서 `--check`에서도 OS fact 파싱이 동작합니다.
+
+**Fact 공급 (#30)**:
 
 `playbooks/site.yml` Play 2는 `gather_facts: false`를 유지하고, `raw_provisioning_path: true` 호스트에서는 `setup` 대신 `ansible.builtin.raw: cat /etc/redhat-release`로 릴리스 문자열을 읽어 `filter_plugins/raw_provisioning.py`의 `raw_parse_os_release`로 파싱한 뒤 `ansible_os_family`/`ansible_distribution`/`ansible_distribution_major_version`/`ansible_distribution_version`을 `set_fact`로 공급합니다. 릴리스 줄(`<name> release <version>`)이 없으면 `ValueError`로 플레이가 중단되어 잘못된 `major_version` 분기를 막습니다. 그 외 OS는 기존 `setup` 경로를 그대로 사용하므로 동작이 바뀌지 않습니다. 릴리스 줄은 `CentOS`/`Red Hat`으로 시작하는 줄만 인정하므로 로그인 배너의 `... release N` 문구에 오탐하지 않습니다. 파서는 컨테이너 없이 raw 출력 샘플로 pytest 검증합니다(`tests/test_raw_provisioning.py`).
 
 **전제와 한계**:
-- raw 경로 진입은 인벤토리의 `raw_provisioning_path: true` 수동 지정에 의존합니다. 미지정 CentOS 6/7 호스트는 `setup`에서 실패하며, 자동 판별은 이 결정의 범위 밖입니다(운영 트리거 방법과 함께 별도 effort).
-- Option A(§2.4)에 따라 `--check`에서는 raw 읽기가 스킵되어 `raw_os_release.stdout`이 없으므로 OS fact 파싱 태스크도 실패합니다(이전 assert 구현과 동일한 한계).
+- Option A(§2.4)에 따라 raw 태스크는 `--check`에서 스킵되지만, 판별 프로브와 OS fact 파싱은 조회 전용 예외로 `--check`에서도 실행됩니다(#51). 인벤토리 `raw_provisioning_path`가 빈 값/None이면 미지정으로 보고 자동 판별을 사용합니다.
 - `ansible_distribution`은 `CentOS`가 아니면 `RedHat`으로 매핑됩니다(이전에는 `CentOS` 고정).
 
 ---

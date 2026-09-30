@@ -12,14 +12,14 @@
     name: "{{ timezone | default('Asia/Seoul') }}"
   when:
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-002] Fix EOL CentOS 6 / 7 Vault Repositories"
   ansible.builtin.shell: |
     sed -i -e 's/^mirrorlist/#mirrorlist/g' -e 's|^#baseurl=http://mirror.centos.org/centos/$releasever|baseurl=https://vault.centos.org/{{ ansible_distribution_version }}|g' /etc/yum.repos.d/CentOS-*.repo
   when:
     - ansible_distribution == "CentOS" and ansible_distribution_major_version | int <= 7
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   changed_when: false
   failed_when: false
 
@@ -38,7 +38,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 - name: "[COMMON-005] Install common packages (RedHat/CentOS 6, 7 via YUM)"
@@ -47,7 +47,7 @@
     state: present
   when:
     - ansible_os_family == "RedHat" and ansible_distribution_major_version | int <= 7
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 # curl is intentionally omitted here: RHEL/Rocky 8+ ship `curl-minimal` by
 # default, which already provides /usr/bin/curl and conflicts with the full
@@ -68,7 +68,7 @@
       - ripgrep
     state: present
   failed_when: false
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-007-BAT] Ensure bat symlink exists for Debian/Ubuntu (batcat -> bat)"
   ansible.builtin.file:
@@ -87,7 +87,7 @@
     mode: '0644'
   when:
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Restart chrony
 
 - name: "[COMMON-009] Ensure Chrony service is running (Modern OS)"
@@ -97,7 +97,7 @@
     enabled: true
   when:
     - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-010] Ensure NTP service is running (CentOS 6 legacy)"
   ansible.builtin.service:
@@ -106,7 +106,7 @@
     enabled: true
   when:
     - ansible_distribution == "CentOS" and ansible_distribution_major_version | int == 6
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-011] Apply sysctl kernel tuning"
   ansible.posix.sysctl:
@@ -116,7 +116,7 @@
     reload: true
     sysctl_set: true
   loop: "{{ sysctl_settings | dict2items }}"
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-011-IPV6] Disable IPv6 via sysctl"
   ansible.posix.sysctl:
@@ -128,7 +128,7 @@
   loop: "{{ sysctl_ipv6_settings | dict2items }}"
   when:
     - disable_ipv6 | default(false) | bool
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-011-EXTRA] Apply extra sysctl kernel tuning"
   ansible.posix.sysctl:
@@ -141,7 +141,7 @@
   when:
     - sysctl_extra_settings is defined
     - sysctl_extra_settings | length > 0
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-012] Ensure account primary groups exist"
   ansible.builtin.group:
@@ -154,7 +154,7 @@
     - accounts | length > 0
     - item.name is defined
     - item.state | default('present') != 'absent'
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-013] Ensure accounts exist with tier-specific permissions"
   vars:
@@ -181,7 +181,7 @@
     - accounts is defined
     - accounts | length > 0
     - item.name is defined
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-014] Configure passwordless sudoers for admin accounts"
   ansible.builtin.copy:
@@ -198,7 +198,7 @@
     - item.name is defined
     - item.state | default('present') != 'absent'
     - item.sudo | default(item.tier | default('user') == 'admin') | bool
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-015] Deploy SSH public keys for accounts"
   # A key listed in both accounts[].keys and accounts[].revoked_keys (e.g. rotation lag,
@@ -227,7 +227,7 @@
     - item.0.state | default('present') != 'absent'
     - item.1 | trim | length > 0
     - _key_fp not in _revoked_fps
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-022] Revoke SSH public keys listed in accounts[].revoked_keys"
   ansible.posix.authorized_key:
@@ -242,7 +242,7 @@
     - item.0.name is defined
     - item.0.state | default('present') != 'absent'
     - item.1 | trim | length > 0
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-023] Remove passwordless sudoers drop-in for removed accounts"
   # COMMON-014 only writes /etc/sudoers.d/90-<user> for present admin accounts and never
@@ -257,7 +257,7 @@
     - accounts | length > 0
     - item.name is defined
     - item.state | default('present') == 'absent'
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-016] Configure system security limits (nofile/nproc)"
   community.general.pam_limits:
@@ -267,7 +267,7 @@
     value: "{{ item.value }}"
     dest: /etc/security/limits.d/99-limits.conf
   loop: "{{ system_limits }}"
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-017] Configure Systemd Journald retention limits"
   ansible.builtin.copy:
@@ -281,7 +281,7 @@
     mode: '0644'
   when:
     - ansible_service_mgr == "systemd"
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 - name: "[COMMON-018] Deploy system-wide custom shell aliases"
@@ -315,12 +315,12 @@
 # Raw Provisioning Path (ADR-0005): CentOS 6/7 targets cannot run AnsiballZ
 # modules, so the module-based tasks above (sysctl, accounts, sudoers, SSH keys,
 # pam_limits) are replaced by ansible.builtin.raw equivalents. Enabled with
-# raw_provisioning_path=true; raw is skipped under --check (ADR-0005 Option A).
+# _raw_path_effective=true; raw is skipped under --check (ADR-0005 Option A).
 # Content-push tasks use the probe (sha256+mode) sentinel and the
 # write-temp/validate/move helper; state-check tasks echo a changed marker.
 # ==============================================================================
 - name: Common raw provisioning path (CentOS 6/7)
-  when: raw_provisioning_path | default(false) | bool
+  when: _raw_path_effective | default(false) | bool
   block:
     - name: "[COMMON-037] Fix EOL CentOS 6 / 7 Vault Repositories (raw)"
       ansible.builtin.raw: >-
@@ -536,7 +536,7 @@
 # CentOS 7 (chrony) is unaffected.
 - name: Common raw NTP path, ntpd (CentOS 6)
   when:
-    - raw_provisioning_path | default(false) | bool
+    - _raw_path_effective | default(false) | bool
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 6
   block:
@@ -577,7 +577,7 @@
 # to the raw handler.
 - name: Common raw path, CentOS 7 only tasks
   when:
-    - raw_provisioning_path | default(false) | bool
+    - _raw_path_effective | default(false) | bool
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 7
   block:
