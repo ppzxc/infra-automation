@@ -552,10 +552,6 @@ def test_service_start_failure_is_propagated(tmp_path):
     assert sh("PATH=%s:$PATH; %s" % (bindir, raw_service_cmd("auditd"))).returncode != 0
 
 
-def raw_jail_when(raw):
-    return next(t for n, t in raw.items() if n.startswith("[SEC-032]")).get("when")
-
-
 def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers():
     import yaml
     role = ROOT_DIR / "roles" / "security"
@@ -571,7 +567,6 @@ def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers()
     sudoers = next(t for n, t in raw.items() if n.startswith("[SEC-027]"))
     assert "visudo -cf %s" in sudoers["ansible.builtin.raw"] and "'0440'" in sudoers["ansible.builtin.raw"]
     # each raw content push notifies the shared restart handler
-    assert "ansible_distribution_major_version | int >= 7" in str(raw_jail_when(raw))
     for prefix, handler in (("[SEC-032]", "Restart fail2ban"), ("[SEC-035]", "Restart auditd")):
         assert next(t for n, t in raw.items() if n.startswith(prefix))["notify"] == handler
     handlers = yaml.safe_load((role / "handlers" / "main.yml").read_text())

@@ -81,8 +81,8 @@
 | `SEC-028` | `Install fail2ban package if available (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 기설치 시 `ok`, 설치 불가여도 `failed_when: false` |
 | `SEC-029` | `Check whether fail2ban is installed (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-030` | `Ensure fail2ban is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 기동·부팅 활성 상태면 `ok` (실패 시 fail) |
-| `SEC-031` | `Probe fail2ban jail hash and mode (raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`; CentOS 6 fail2ban 0.8.x는 jail.d 미지원이라 제외) | 조회 전용 (`changed_when: false`) |
-| `SEC-032` | `Deploy Fail2ban SSH jail configuration via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`; CentOS 6 fail2ban 0.8.x는 jail.d 미지원이라 제외) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`fail2ban-sshd.local.j2`) |
+| `SEC-031` | `Probe fail2ban jail hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-032` | `Deploy Fail2ban SSH jail configuration via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`fail2ban-sshd.local.j2`) |
 | `SEC-033` | `Check whether auditd is installed (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-034` | `Probe auditd rules hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-035` | `Deploy Auditd security audit rules via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`audit.rules.j2`; CentOS 7 `rules.d/overseer.rules`, CentOS 6 `audit.rules`) |
