@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
 from raw_provisioning import (  # noqa: E402
     raw_probe_cmd, raw_push_changed, raw_push_cmd, raw_read_cmd,
-    raw_read_extract, raw_set_directives,
+    raw_parse_os_release, raw_read_extract, raw_set_directives,
 )
 
 OWNER = getpass.getuser()
@@ -182,3 +182,23 @@ def test_raw_tasks_declare_change_control_and_no_lineinfile_directive_duplicatio
         assert "failed_when" in t or t["name"].startswith("[SEC-022]"), t["name"]
     # both paths share one directive list
     assert "ssh_hardening_directives" in (role / "defaults" / "main.yml").read_text()
+
+
+@pytest.mark.parametrize("stdout, distribution, major, version", [
+    ("CentOS release 6.10 (Final)\n", "CentOS", "6", "6.10"),
+    ("CentOS Linux release 7.9.2009 (Core)\n", "CentOS", "7", "7.9.2009"),
+    ("Red Hat Enterprise Linux Server release 7.9 (Maipo)\r\n", "RedHat", "7", "7.9"),
+    ("Welcome to legacy box\nCentOS release 6.5 (Final)\n", "CentOS", "6", "6.5"),
+    ("Banner: policy release 1.0\nCentOS release 6.5 (Final)\n", "CentOS", "6", "6.5"),
+])
+def test_raw_os_release_yields_distribution_and_major_version(stdout, distribution, major, version):
+    facts = raw_parse_os_release(stdout)
+    assert facts == {"distribution": distribution, "major_version": major, "version": version}
+
+
+@pytest.mark.parametrize("stdout", [
+    "", "cat: /etc/redhat-release: No such file or directory\n", "Rocky Linux release\n",
+])
+def test_unparseable_raw_os_release_is_rejected(stdout):
+    with pytest.raises(Exception):
+        raw_parse_os_release(stdout)

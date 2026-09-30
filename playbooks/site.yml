@@ -801,18 +801,19 @@
       changed_when: false
       when: raw_provisioning_path | default(false) | bool
 
-    - name: Fail when the raw OS release cannot be parsed
-      ansible.builtin.assert:
-        that: (raw_os_release.stdout | default('') | regex_search('[0-9]+')) is not none
-        fail_msg: "Cannot determine major version from /etc/redhat-release: {{ raw_os_release.stdout | default('') }}"
+    # raw_parse_os_release aborts the play (ValueError) when the release line is
+    # missing, so no separate assert task is needed. Other OSes keep `setup`.
+    - name: Parse OS release from raw output
+      ansible.builtin.set_fact:
+        _raw_os_facts: "{{ raw_os_release.stdout | raw_parse_os_release }}"
       when: raw_provisioning_path | default(false) | bool
 
     - name: Set OS facts from raw output
       ansible.builtin.set_fact:
         ansible_os_family: RedHat
-        ansible_distribution: CentOS
-        ansible_distribution_major_version: "{{ raw_os_release.stdout | regex_search('[0-9]+') }}"
-        ansible_distribution_version: "{{ raw_os_release.stdout | regex_search('[0-9]+(\\.[0-9]+)*') | default('unknown', true) }}"
+        ansible_distribution: "{{ _raw_os_facts.distribution }}"
+        ansible_distribution_major_version: "{{ _raw_os_facts.major_version }}"
+        ansible_distribution_version: "{{ _raw_os_facts.version }}"
       when: raw_provisioning_path | default(false) | bool
 
     - name: Verify connectivity and OS facts
