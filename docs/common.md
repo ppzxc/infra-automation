@@ -95,7 +95,12 @@
 | `COMMON-032` | `Revoke SSH public keys listed in accounts[].revoked_keys (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 키가 이미 없으면 `ok` |
 | `COMMON-033` | `Remove passwordless sudoers drop-in for removed accounts (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 파일이 이미 없으면 `ok` |
 | `COMMON-034` | `Probe security limits file hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
-| `COMMON-035` | `Configure system security limits via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 해시·모드 일치 시 `ok` |
+| `COMMON-035` | `Configure system security limits via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 기존 줄을 보존한 채 병합, 해시·모드·소유자 일치 시 `ok` |
+| `COMMON-036` | `Read current security limits file (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `COMMON-037` | `Fix EOL CentOS 6 / 7 Vault Repositories (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | `changed_when: false` |
+| `COMMON-038` | `Install common packages (CentOS 6, 7 via YUM, raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | `rpm -q --whatprovides` 확인 후 미설치 패키지만 설치 |
+| `COMMON-039` | `Install optional diagnostic tools (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 미설치·설치 가능한 패키지만 설치, 실패 무시 |
+| `COMMON-040` | `Align live sysctl values with the desired settings (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 실행 중 커널 값이 다를 때만 `sysctl -w` |
 
-> **Raw Provisioning Path (ADR-0005)**: `raw_provisioning_path: true`인 CentOS 6/7 호스트에서는 `COMMON-011*`/`012`/`013`/`014`/`015`/`016`/`022`/`023`이 스킵되고 `COMMON-024`~`COMMON-035`가 대신 실행된다(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: `raw_provisioning_path: true`인 CentOS 6/7 호스트에서는 `COMMON-002`/`005`/`007`/`011*`/`012`/`013`/`014`/`015`/`016`/`022`/`023`이 스킵되고 `COMMON-024`~`COMMON-040`이 대신 실행된다(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
