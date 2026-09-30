@@ -39,6 +39,12 @@ def raw_probe_cmd(dest):
             "\"$(stat -c %U:%G {d} 2>/dev/null)\"").format(m=PROBE_MARKER, d=d)
 
 
+def _marker_answer(stdout, marker):
+    """Tokens after ``marker`` on the last output line that starts with it, or None."""
+    lines = [ln.split() for ln in (stdout or '').splitlines() if ln.strip().startswith(marker)]
+    return lines[-1][1:] if lines else None
+
+
 def raw_push_changed(probe_stdout, content, mode, owner=None, group=None):
     """Sentinel: changed when the remote hash, mode OR (if given) owner:group differs.
 
@@ -48,9 +54,8 @@ def raw_push_changed(probe_stdout, content, mode, owner=None, group=None):
     expected = ['__RAW_PROBE__', raw_sha256(content), _mode_octal(mode)]
     if owner is not None:
         expected.append('%s:%s' % (owner, group))
-    lines = [ln.split() for ln in (probe_stdout or '').splitlines()
-             if ln.strip().startswith(PROBE_MARKER)]
-    return not lines or lines[-1][:len(expected)] != expected
+    answer = _marker_answer(probe_stdout, PROBE_MARKER)
+    return answer is None or [PROBE_MARKER] + answer[:len(expected) - 1] != expected
 
 
 def raw_read_cmd(path):
@@ -333,19 +338,18 @@ def raw_iptables_cmd(port, proto, source, mode):
 
 def raw_iptables_absent(stdout):
     """True only when the probe positively reported the rule missing (never on error/noise)."""
-    lines = [ln.split() for ln in (stdout or '').splitlines() if ln.strip().startswith(IPT_MARKER)]
-    return bool(lines) and lines[-1][1:] == ['absent']
+    return _marker_answer(stdout, IPT_MARKER) == ['absent']
 
 
 def raw_iptables_failed(stdout):
     """True unless the probe ran and answered present/absent."""
-    lines = [ln.split() for ln in (stdout or '').splitlines() if ln.strip().startswith(IPT_MARKER)]
-    return not lines or lines[-1][1:] not in (['present'], ['absent'])
+    return _marker_answer(stdout, IPT_MARKER) not in (['present'], ['absent'])
 
 
 FIREWALLD_MARKER = '__RAW_FIREWALLD__'
 _FIREWALLD_NAME = re.compile(r'[A-Za-z0-9_-]+')
 _FIREWALLD_IFACE = re.compile(r'[A-Za-z0-9_.:-]{1,15}')
+_FIREWALLD_INTERFACE_OPTS = {'add': '--change-interface', 'remove': '--remove-interface'}
 _FIREWALLD_PORT = re.compile(r'(\d{1,5})(?:-(\d{1,5}))?/(tcp|udp)')
 
 
@@ -413,15 +417,15 @@ def raw_firewalld_cmd(rule, mode):
     if mode not in ('add', 'remove'):
         raise ValueError('unknown firewalld mode: %r' % (mode,))
     if kind == 'interface':
-        opt = ('--change-interface=%s' if mode == 'add' else '--remove-interface=%s') % value
+        opt = '%s=%s' % (_FIREWALLD_INTERFACE_OPTS[mode], value)
     else:
         opt = '--%s-%s=%s' % (mode, kind, value)
     return 'firewall-cmd --permanent --zone=%s %s' % (zone, shlex.quote(opt))
 
 
 def _firewalld_answer(stdout):
-    lines = [ln.split() for ln in (stdout or '').splitlines() if ln.strip().startswith(FIREWALLD_MARKER)]
-    return lines[-1][1] if lines and len(lines[-1]) == 2 else None
+    answer = _marker_answer(stdout, FIREWALLD_MARKER)
+    return answer[0] if answer and len(answer) == 1 else None
 
 
 def raw_firewalld_present(stdout):
@@ -464,17 +468,17 @@ def raw_firewalld_plan(cfg):
     internal_ports. Conflicting bindings (drop/trusted) are removed first so
     the following adds cannot hit ZONE_CONFLICT.
     """
-    iz, sz = cfg['interface_zone'], cfg['source_zone']
+    interface_zone, source_zone = cfg['interface_zone'], cfg['source_zone']
     ssh_ips = list(cfg.get('ssh_allowed_source_ips') or [])
     ssh_port = str(cfg.get('ssh_port', 22))
     rules = []
 
     def rule(state, kind, zone, value, **extra):
-        r = {'state': state, 'kind': kind, 'zone': zone, 'value': str(value)}
-        r.update(extra)
-        rules.append(r)
+        entry = {'state': state, 'kind': kind, 'zone': zone, 'value': str(value)}
+        entry.update(extra)
+        rules.append(entry)
 
-    if iz != 'drop':
+    if interface_zone != 'drop':
         for i in dict.fromkeys([cfg.get('interface') or 'bond0', 'bond0', 'eno1', 'eno2']):
             rule('disabled', 'interface', 'drop', i)
     if ssh_ips:
@@ -486,20 +490,20 @@ def raw_firewalld_plan(cfg):
     for ip in ssh_ips:
         rule('disabled', 'rich-rule', 'public', ip, port=ssh_port)
     for z in ('trusted', 'drop'):
-        if z != sz:
+        if z != source_zone:
             for ip in (cfg.get('stale_source_ips') or []):
                 rule('disabled', 'source', z, ip)
     if cfg.get('interface'):
-        rule('enabled', 'interface', iz, cfg['interface'])
+        rule('enabled', 'interface', interface_zone, cfg['interface'])
     if ssh_ips:
         for ip in ssh_ips:
-            rule('enabled', 'source', sz, ip)
-        rule('enabled', 'service', sz, 'ssh')
+            rule('enabled', 'source', source_zone, ip)
+        rule('enabled', 'service', source_zone, 'ssh')
     for ing in (cfg.get('ingress_rules') or []):
         for ip in (ing.get('sources') or []):
-            rule('enabled', 'rich-rule', sz, ip, port=str(ing['port']), proto=ing.get('proto') or 'tcp')
+            rule('enabled', 'rich-rule', source_zone, ip, port=str(ing['port']), proto=ing.get('proto') or 'tcp')
     for s in (cfg.get('allowed_services') or []):
-        rule('enabled', 'service', iz, s)
+        rule('enabled', 'service', interface_zone, s)
     for ip in (cfg.get('monitoring_subnets') or []):
         rule('enabled', 'source', 'dmz', ip)
     for p in (cfg.get('dmz_ports') or []):
@@ -510,7 +514,7 @@ def raw_firewalld_plan(cfg):
         rule('enabled', 'port', 'internal', p)
     for p in (cfg.get('allowed_tcp_ports') or []):
         if str(p) != ssh_port:
-            rule('enabled', 'port', sz if ssh_ips else iz, '%s/tcp' % p)
+            rule('enabled', 'port', source_zone if ssh_ips else interface_zone, '%s/tcp' % p)
     return rules
 
 
