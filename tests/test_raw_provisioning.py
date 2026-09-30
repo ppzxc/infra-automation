@@ -6,6 +6,7 @@ observable effects (files, modes, exit codes) are asserted.
 import getpass
 import grp
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -960,3 +961,37 @@ def test_centos7_firewalld_tasks_are_raw_gated_and_controlled():
     assert "raw_provisioning_path" in str(module["when"])
     rawh = next(h for h in handlers if h.get("listen") == "Reload firewalld")
     assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False
+
+
+def test_raw_tasks_never_override_check_mode_and_are_skipped_under_check(tmp_path):
+    """ADR-0005 Option A: raw has no check-mode support, so it is skipped under --check.
+
+    No raw task may opt back in with ``check_mode: false``, and a raw task run
+    with ``--check`` must be skipped without touching the target.
+    """
+    import yaml
+    for role in ("common", "security"):
+        tasks = _walk_tasks(yaml.safe_load((ROOT_DIR / f"roles/{role}/tasks/main.yml").read_text()))
+        raws = [t for t in tasks if "ansible.builtin.raw" in t]
+        assert raws, role
+        for t in raws:
+            assert t.get("check_mode") is not False, t["name"]
+        handlers = yaml.safe_load((ROOT_DIR / f"roles/{role}/handlers/main.yml").read_text())
+        for h in handlers:
+            if "ansible.builtin.raw" in h:
+                assert h.get("check_mode") is not False, h["name"]
+
+    marker = tmp_path / "touched"
+    play = tmp_path / "play.yml"
+    play.write_text(
+        "- hosts: localhost\n  connection: local\n  gather_facts: false\n  tasks:\n"
+        f"    - ansible.builtin.raw: touch {marker}\n"
+    )
+    ansible = shutil.which("ansible-playbook")
+    if ansible is None:
+        pytest.skip("ansible-playbook not installed")
+    res = subprocess.run([ansible, "-i", "localhost,", "--check", str(play)],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "skipped=1" in res.stdout
+    assert not marker.exists()

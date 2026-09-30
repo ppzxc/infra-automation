@@ -13,7 +13,7 @@
 - 로그/메트릭은 OTLP로 **OpenObserve**(커뮤니티판 v1.0.4, 백엔드 저장소 S3)에, 백업은 S3 API로 **RustFS**(1.0.0, OpenObserve와 동일 서버)에 적재합니다.
 - 수집·백업 대상은 **ISMS**(ISMS-P 아님) 인증기준 2.9.3 백업 및 복구관리, 2.9.4 로그 및 접속기록 관리를 충족해야 합니다. ISMS는 시스템 로그 보존기간·백업 주기에 숫자를 정하지 않고 "조직이 정의한 기준을 실제로 이행하는지"를 심사합니다. 1~2년 보존·월 1회 점검은 개인정보처리시스템 접속기록(안전성 확보조치 기준 제8조)에만 해당합니다.
 - 기존 `roles/monitoring`은 otelcol-contrib 0.108.0을 설치하지만 (a) `creates:` 가드로 업그레이드가 불가능하고, (b) gRPC exporter에 `organization` 헤더가 없어 OpenObserve가 전량 거부하며, (c) `site.yml`·`maintenance.yml`에서 서로 다른 경로로 실행됩니다. restic 코드는 없습니다.
-- CentOS 6/7은 AnsiballZ가 동작하지 않으므로(ADR-0005) Raw Provisioning Path를 확장해야 합니다.
+- CentOS 6/7은 AnsiballZ가 동작하지 않으므로(ADR-0005) Raw Provisioning Path를 확장해야 합니다. (`common`/`security`의 raw 경로는 구현 완료, #28. Host Agents용 확장만 미구현.)
 
 ---
 
