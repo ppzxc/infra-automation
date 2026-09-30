@@ -102,10 +102,16 @@ def test_role_tags_wired():
     main = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
     for imp in main[:2]:
         assert imp["tags"] == ["always"]
-    tags = {t["name"].split("]")[0].lstrip("["): t.get("tags", []) for t in main[2:] if "tags" in t}
-    assert set(tags["MON-004"]) == {"agents_config", "otel"}
-    for spec in ("MON-001", "MON-002", "MON-003", "MON-005", "MON-006"):
-        assert set(tags[spec]) == {"agents_install", "otel"}
+    blocks = {b["name"]: set(b["tags"]) for b in main[2:]}
+    assert blocks == {
+        "Install agents and clean legacy exporter": {"agents_install", "otel"},
+        "Apply otelcol configuration": {"agents_config", "otel"},
+        "Enable otelcol service": {"agents_install", "otel"},
+    }
+    inner = {t["name"].split("]")[0].lstrip("[") for b in main[2:] for t in b["block"] if "name" in t}
+    assert {"MON-011", "MON-001", "MON-003"} <= inner
+    config = next(b for b in main if b["name"] == "Apply otelcol configuration")
+    assert config["block"][0]["name"].startswith("[MON-004]")
     agents = _plays("host_agents.yml")[1]
     assert agents["roles"][0]["tags"] == ["otel"]
 
@@ -119,8 +125,10 @@ def test_probe_and_kv_tasks_run_before_any_change():
     raw = next(t for t in probe if "ansible.builtin.raw" in t and t["name"].startswith("[MON-021]"))
     assert raw["check_mode"] is False and raw["changed_when"] is False
     for t in probe:
-        if t["name"].startswith(("[MON-023]", "[MON-024]")):
+        if t["name"].startswith(("[MON-023]", "[MON-024]", "[MON-027]")):
             assert t["when"] == "host_agents_os_path == 'modern'"
+        if t["name"].startswith("[MON-023]"):
+            assert t["check_mode"] is False and t["changed_when"] is False
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +250,11 @@ def test_secrets_are_never_part_of_the_merged_result():
     ("backup_exclude_paths", "/var/spool/cron", "/var/spool/cron"),
     ("backup_exclude_paths", "/usr/local", "/usr/local"),   # ancestor of a mandatory path
     ("backup_exclude_paths", "/", "/"),
+    ("otel_exclude_logs", "/var/log/secure/", "/var/log/secure/"),
+    ("otel_exclude_logs", "/var/log//secure", "/var/log//secure"),
+    ("otel_exclude_logs", "/var/log/audit", "/var/log/audit"),          # parent dir of audit.log
+    ("otel_exclude_logs", "/var/log/audit/*", "/var/log/audit/*"),
+    ("otel_exclude_logs", "/var/log/sec*", "/var/log/sec*"),
 ])
 def test_non_excludable_exclude_fails_naming_path_and_key(kv_key, entry, item):
     res = _resolve(**{kv_key: [entry]})
@@ -256,6 +269,18 @@ def test_non_excludable_exclude_fails_naming_path_and_key(kv_key, entry, item):
 ])
 def test_malformed_optional_values_are_errors_not_silently_ignored(kv):
     assert _resolve(**kv)["errors"]
+
+
+def test_non_security_glob_exclude_removes_matching_standard_logs():
+    res = _resolve(otel_exclude_logs=["/var/log/mess*"])
+    assert res["errors"] == []
+    assert "/var/log/messages" not in [l["path"] for l in res["otel_logs"]]
+
+
+@pytest.mark.parametrize("shared", [{}, {"a": ""}, None])
+def test_empty_shared_secret_is_an_error(shared):
+    res = host_agents_resolve_inputs(dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p", {"rustfs": shared})
+    assert res["errors"] == ["공유 시크릿 누락 또는 비어 있음: agents/rustfs"]
 
 
 def test_json_encoded_string_lists_are_accepted():
@@ -388,6 +413,13 @@ def test_missing_vault_token_fails_instead_of_previewing_incomplete_config(tmp_p
     res, out = _run_input_tasks(tmp_path, ["good"], openbao, token="", check=True)
     assert res.returncode != 0 and out == {}
     assert "OpenBao 조회 실패" in res.stdout + res.stderr
+
+
+def test_missing_shared_secret_fails_the_host(tmp_path, openbao):
+    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = (404, {"errors": []})
+    res, out = _run_input_tasks(tmp_path, ["good"], openbao)
+    assert res.returncode != 0 and out == {}
+    assert "공유 시크릿 누락 또는 비어 있음: agents/rustfs" in res.stdout + res.stderr
 
 
 def test_fixture_seam_skips_openbao_entirely(tmp_path):

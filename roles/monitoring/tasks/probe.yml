@@ -36,14 +36,33 @@
 
 # 현대 경로에서만 python3를 요구하고 fact를 수집한다. legacy 경로는 AnsiballZ를 쓸 수 없으므로
 # 이 시점 이후 모듈 태스크를 호출하지 않는다.
-- name: "[MON-023] Ensure /usr/bin/python3 exists on modern path"
-  ansible.builtin.raw: >-
-    test -x /usr/bin/python3 && echo PYTHON3_PRESENT ||
-    { if command -v dnf >/dev/null 2>&1; then dnf install -y python3;
-    elif command -v apt-get >/dev/null 2>&1; then apt-get install -y python3; fi; test -x /usr/bin/python3 && echo PYTHON3_INSTALLED; }
+# 읽기 전용 확인은 check 모드에서도 실행되어, 설치가 스킵되는 dry-run에서 python3 부재를
+# setup의 모호한 오류가 아니라 명확한 메시지로 실패시킨다.
+- name: "[MON-023] Check /usr/bin/python3 exists on modern path (raw, read-only)"
+  ansible.builtin.raw: test -x /usr/bin/python3 && echo PYTHON3_PRESENT || echo PYTHON3_ABSENT
   register: host_agents_python3
-  changed_when: "'PYTHON3_INSTALLED' in host_agents_python3.stdout"
-  failed_when: "'PYTHON3_PRESENT' not in host_agents_python3.stdout and 'PYTHON3_INSTALLED' not in host_agents_python3.stdout"
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: host_agents_os_path == 'modern'
+
+- name: "[MON-026] Install python3 on modern path when absent"
+  ansible.builtin.raw: >-
+    if command -v dnf >/dev/null 2>&1; then dnf install -y python3;
+    elif command -v apt-get >/dev/null 2>&1; then apt-get install -y python3; fi;
+    test -x /usr/bin/python3
+  register: host_agents_python3_install
+  changed_when: true
+  when:
+    - host_agents_os_path == 'modern'
+    - "'PYTHON3_ABSENT' in host_agents_python3.stdout"
+    - not ansible_check_mode
+
+- name: "[MON-027] Assert python3 is available on modern path"
+  ansible.builtin.assert:
+    that: "'PYTHON3_PRESENT' in host_agents_python3.stdout or host_agents_python3_install is succeeded"
+    fail_msg: "{{ inventory_hostname }}: /usr/bin/python3가 없습니다(check 모드에서는 설치하지 않음). 먼저 --check 없이 실행하세요."
+    quiet: true
   when: host_agents_os_path == 'modern'
 
 - name: "[MON-024] Gather facts on modern path"
@@ -57,6 +76,6 @@
       (ADR-0006 §2.9, 후속 티켓).
   when: host_agents_os_path != 'modern'
 
-- name: End role for legacy path hosts
+- name: "[MON-028] End role for legacy path hosts"
   ansible.builtin.meta: end_host
   when: host_agents_os_path != 'modern'

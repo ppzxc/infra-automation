@@ -10,6 +10,7 @@ Two concerns live here so they can be tested without a target host:
   playbook can print them without hiding the task output behind ``no_log``.
 """
 
+import fnmatch
 import json
 import re
 
@@ -127,6 +128,13 @@ def _norm_path(path):
     return value.rstrip('/') or '/'
 
 
+def _covers(pattern, path):
+    """True when an exclude entry equals, globs over, or is a parent directory of ``path``."""
+    norm, target = _norm_path(pattern), _norm_path(path)
+    return (norm == target or fnmatch.fnmatchcase(target, norm)
+            or target.startswith(norm.rstrip('/') + '/'))
+
+
 def _is_blank(value):
     return value is None or (isinstance(value, str) and not value.strip())
 
@@ -178,7 +186,7 @@ def _dedupe(items):
 
 
 def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory_backup_paths,
-                               kv_path='hosts/<host>/agents'):
+                               kv_path='hosts/<host>/agents', shared=None):
     """Validate the per-host agents KV and merge it with the Git standard.
 
     Returns ``{'errors': [...], ...merged inputs...}``; the merged part never
@@ -188,6 +196,9 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     """
     kv = host_kv if isinstance(host_kv, dict) else {}
     errors = []
+
+    for name, secret in sorted((shared or {}).items()):
+        errors.extend(host_agents_shared_errors(secret, name))
 
     for key in REQUIRED_KEYS:
         if _is_blank(kv.get(key)):
@@ -202,7 +213,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     docker_metrics = _as_bool(kv.get('otel_docker_metrics'), 'otel_docker_metrics', errors)
 
     for path in exclude_logs:
-        if path in security:
+        if any(_covers(path, sec) for sec in security):
             errors.append("otel_exclude_logs: security_logs 경로는 제외할 수 없습니다: %s (OpenBao %s)"
                           % (path, kv_path))
 
@@ -218,7 +229,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
             errors.append("backup_extra_paths: 절대 경로여야 합니다: %s" % path)
 
     logs = [{'path': p, 'stream': 'security_logs' if p in security else 'system_logs'}
-            for p in _dedupe(standard_logs or []) if p not in exclude_logs]
+            for p in _dedupe(standard_logs or []) if not any(_covers(x, p) for x in exclude_logs)]
     for entry in extra_logs_in:
         if isinstance(entry, str) and entry.strip():
             path, stream = entry.strip(), 'app_logs'
@@ -245,6 +256,13 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     }
 
 
+def host_agents_shared_errors(shared, name):
+    """A shared ``agents/<name>`` secret must exist and carry at least one value."""
+    if not isinstance(shared, dict) or not any(not _is_blank(v) for v in shared.values()):
+        return ["공유 시크릿 누락 또는 비어 있음: agents/%s" % name]
+    return []
+
+
 def host_agents_secrets(host_kv):
     """The required per-host secrets only (call from a ``no_log`` task)."""
     kv = host_kv if isinstance(host_kv, dict) else {}
@@ -258,4 +276,5 @@ class FilterModule(object):
             'host_agents_parse_os_probe': host_agents_parse_os_probe,
             'host_agents_resolve_inputs': host_agents_resolve_inputs,
             'host_agents_secrets': host_agents_secrets,
+            'host_agents_shared_errors': host_agents_shared_errors,
         }
