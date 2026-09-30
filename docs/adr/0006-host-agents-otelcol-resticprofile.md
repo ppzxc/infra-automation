@@ -186,8 +186,7 @@
 
 | 계획 Spec ID | 경로 | 태스크 개요 | 멱등성 방식 |
 |---|---|---|---|
-| `MON-0xx` | modern | raw OS 프로브 → `host_agents_os_path` / python3 + `setup` | 프로브 `changed_when: false` |
-| `MON-0xx` | modern | `_is_already_provisioned` assert, `legacy_el6` 만료 경고 | 읽기 전용 |
+| `MON-0xx` | modern | `legacy_el6` 만료 경고 (raw OS 프로브·`_is_already_provisioned` assert·OpenBao 입력 검증은 구현되어 `docs/monitoring.md` `MON-020~035`로 이관) | 읽기 전용 |
 | `MON-0xx` | modern | otelcol 사용자·그룹, `/var/lib/otelcol/storage`, 버전 디렉터리 | 모듈 상태 비교 |
 | `MON-0xx` | modern | 컨트롤러 캐시 → `copy` 바이너리, SHA256 검증, symlink 교체 | 체크섬/링크 대상 비교 |
 | `MON-0xx` | modern | `secrets.env`(`diff: false`), config 템플릿, `validate` 후 재시작 | 템플릿 체크섬 |

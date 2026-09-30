@@ -37,6 +37,7 @@ otel_auth_header: ""
 
 
 # OpenTelemetry Collector System Logs to Ingest (ISMS/ISMS-P Baseline)
+# 표준 수집 목록. 이 중 vars의 otel_security_log_paths에 속한 경로는 security_logs 스트림으로 라우팅된다.
 otel_system_logs:
   - /var/log/messages
   - /var/log/syslog
@@ -50,6 +51,23 @@ otel_system_logs:
   - /var/log/yum.log
   - /var/log/dpkg.log
   - /var/log/firewalld
+  - /var/log/boot.log
+  - /var/log/kern.log
+  - /var/log/boot.log
+  - /var/log/kern.log
+
+# Host Agents 입력 (host_agents.yml 전용)
+# OpenBao를 조회하지 않고 아래 값을 그대로 사용한다(molecule 등 테스트 전용 seam).
+# 형식: {host: <hosts/<host>/agents 내용>, openobserve: <secret/agents/openobserve>, rustfs: <secret/agents/rustfs>}
+# host_agents_kv_fixture: {}
+
+# Host Agents 입력 (host_agents.yml 전용)
+# OpenBao를 조회하지 않고 아래 값을 그대로 사용한다(molecule 등 테스트 전용 seam).
+# 형식: {host: <hosts/<host>/agents 내용>, openobserve: <agents/openobserve>, rustfs: <agents/rustfs>}
+# host_agents_kv_fixture: {}
+
+# OpenBao TLS 검증. resolve_connection.yml과 동일하게 기본 false(사설 CA)이며, 신뢰 CA가 있으면 true로 올린다.
+host_agents_vault_validate_certs: false
 
 # Legacy node_exporter Cleanup Toggle
 cleanup_legacy_node_exporter: true

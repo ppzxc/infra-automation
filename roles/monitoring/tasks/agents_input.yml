@@ -1,0 +1,83 @@
+---
+# ==============================================================================
+# Host Agents 입력 해석: OpenBao hosts/<host>/agents + secret/agents/* (ADR-0006 §2.2)
+# ==============================================================================
+# 변경 태스크보다 먼저 실행되며, 필수 시크릿 누락 / OpenBao 오류 / 제외 불가 경로 제외 시
+# 해당 호스트를 실패시킨다(check 모드 포함). 조회는 호스트마다 컨트롤러에서 수행한다
+# (호스트별 토큰과 실패 범위를 호스트 단위로 유지하기 위해 run_once를 쓰지 않는다).
+# 응답 본문에 시크릿이 있으므로 조회 태스크는 no_log이고, 실패 사유는 상태 코드로만 보고한다.
+- name: "[MON-030] Fetch agents KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_token_eff: "{{ _vault_token | default(vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true), true) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+    _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
+    _vault_hosts_prefix_eff: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true)) | regex_replace('^secret/', '') }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/{{ item.path }}"
+    method: GET
+    headers: >-
+      {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
+    status_code: [200, 404]
+    timeout: 5
+    validate_certs: "{{ host_agents_vault_validate_certs }}"
+  loop:
+    - { key: host, path: "{{ _vault_hosts_prefix_eff }}{{ inventory_hostname }}/agents" }
+    - { key: openobserve, path: agents/openobserve }
+    - { key: rustfs, path: agents/rustfs }
+  loop_control:
+    label: "{{ item.key }}"
+  register: host_agents_kv_resp
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - host_agents_kv_fixture is not defined
+    - _vault_token_eff | length > 0
+
+- name: "[MON-031] Assert OpenBao answered every agents lookup"
+  vars:
+    _statuses: "{{ host_agents_kv_resp.results | default([]) | map(attribute='status', default=-1) | list }}"
+  ansible.builtin.assert:
+    that: host_agents_kv_fixture is defined or (_statuses | length == 3 and _statuses | select('in', [200, 404]) | list | length == 3)
+    fail_msg: >-
+      {{ inventory_hostname }}: OpenBao 조회 실패 — 변경 없이 중단합니다(check 모드 포함).
+      status(hosts/{{ inventory_hostname }}/agents, agents/openobserve, agents/rustfs)={{ _statuses if _statuses | length > 0 else '토큰 없음/미조회' }}
+    quiet: true
+
+- name: "[MON-032] Resolve agents KV contents (host + shared)"
+  vars:
+    _by_key: >-
+      {{ dict(host_agents_kv_resp.results | default([]) | map(attribute='item.key') | zip(
+           host_agents_kv_resp.results | default([]) | map(attribute='json.data.data', default={}))) }}
+  ansible.builtin.set_fact:
+    _host_agents_kv: >-
+      {{ host_agents_kv_fixture
+         if host_agents_kv_fixture is defined
+         else {'host': _by_key.host | default({}), 'openobserve': _by_key.openobserve | default({}),
+               'rustfs': _by_key.rustfs | default({})} }}
+  no_log: true
+
+# 병합 결과에는 시크릿 값이 없다(경로/스트림/플래그와 오류 메시지뿐).
+- name: "[MON-033] Merge agents inputs with the Git standard"
+  ansible.builtin.set_fact:
+    host_agents_inputs: >-
+      {{ (_host_agents_kv.host | default({})) | host_agents_resolve_inputs(
+           otel_system_logs, otel_security_log_paths, host_agents_backup_mandatory_paths,
+           'hosts/' ~ inventory_hostname ~ '/agents',
+           {'openobserve': _host_agents_kv.openobserve | default({}), 'rustfs': _host_agents_kv.rustfs | default({})}) }}
+
+- name: "[MON-034] Assert agents inputs are valid before any change"
+  ansible.builtin.assert:
+    that: host_agents_inputs.errors | length == 0
+    fail_msg: "{{ inventory_hostname }}: Host Agents 입력 검증 실패 — {{ host_agents_inputs.errors | join('; ') }}"
+    quiet: true
+
+- name: "[MON-035] Set agents secrets as host facts"
+  ansible.builtin.set_fact:
+    host_agents_secrets: "{{ _host_agents_kv.host | host_agents_secrets }}"
+    host_agents_shared_secrets: "{{ {'openobserve': _host_agents_kv.openobserve, 'rustfs': _host_agents_kv.rustfs} }}"
+  no_log: true

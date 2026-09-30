@@ -1,0 +1,81 @@
+---
+# ==============================================================================
+# Host Agents 사전 단계: 프로비저닝 확인 → 원격 OS 프로브 → 경로 분기 (ADR-0006 §2.1, §2.9)
+# ==============================================================================
+# 프로브는 raw 명령만 사용하므로 fact 수집 여부와 무관하게 동일하게 동작한다.
+# 모든 태스크는 main.yml에서 tags: [always]로 import되어 --tags agents_config 실행에서도 수행된다.
+- name: "[MON-020] Assert host was provisioned by site.yml"
+  ansible.builtin.assert:
+    that:
+      - _is_already_provisioned | default(false) | bool
+    fail_msg: >-
+      {{ inventory_hostname }}: site.yml로 프로비저닝되지 않은 호스트입니다.
+      Host Agents는 하드닝되지 않은 호스트에 설치하지 않습니다 — site.yml을 먼저 실행하세요.
+    quiet: true
+
+- name: "[MON-021] Probe OS release and architecture from target host (raw, read-only)"
+  ansible.builtin.raw: "{{ '' | host_agents_os_probe_cmd }}"
+  register: host_agents_os_probe
+  changed_when: false
+  failed_when: host_agents_os_probe.rc | default(0) != 0
+  check_mode: false
+  become: false
+
+- name: "[MON-022] Classify OS path and set host_agents_os facts from probe"
+  vars:
+    _probe: "{{ host_agents_os_probe.stdout | default('') | host_agents_parse_os_probe }}"
+  ansible.builtin.set_fact:
+    host_agents_os_path: "{{ _probe.path }}"
+    host_agents_os_family: "{{ _probe.family }}"
+    host_agents_os_distribution: "{{ _probe.distribution }}"
+    host_agents_os_version: "{{ _probe.version }}"
+    host_agents_os_major_version: "{{ _probe.major_version }}"
+    host_agents_os_arch: "{{ _probe.arch }}"
+    host_agents_os_type: "{{ _probe.type }}"
+    host_agents_os_description: "{{ _probe.description }}"
+
+# 현대 경로에서만 python3를 요구하고 fact를 수집한다. legacy 경로는 AnsiballZ를 쓸 수 없으므로
+# 이 시점 이후 모듈 태스크를 호출하지 않는다.
+# 읽기 전용 확인은 check 모드에서도 실행되어, 설치가 스킵되는 dry-run에서 python3 부재를
+# setup의 모호한 오류가 아니라 명확한 메시지로 실패시킨다.
+- name: "[MON-023] Check /usr/bin/python3 exists on modern path (raw, read-only)"
+  ansible.builtin.raw: test -x /usr/bin/python3 && echo PYTHON3_PRESENT || echo PYTHON3_ABSENT
+  register: host_agents_python3
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: host_agents_os_path == 'modern'
+
+- name: "[MON-026] Install python3 on modern path when absent"
+  ansible.builtin.raw: >-
+    if command -v dnf >/dev/null 2>&1; then dnf install -y python3;
+    elif command -v apt-get >/dev/null 2>&1; then apt-get install -y python3; fi;
+    test -x /usr/bin/python3
+  register: host_agents_python3_install
+  changed_when: true
+  when:
+    - host_agents_os_path == 'modern'
+    - "'PYTHON3_ABSENT' in host_agents_python3.stdout"
+    - not ansible_check_mode
+
+- name: "[MON-027] Assert python3 is available on modern path"
+  ansible.builtin.assert:
+    that: "'PYTHON3_PRESENT' in host_agents_python3.stdout or host_agents_python3_install is succeeded"
+    fail_msg: "{{ inventory_hostname }}: /usr/bin/python3가 없습니다(check 모드에서는 설치하지 않음). 먼저 --check 없이 실행하세요."
+    quiet: true
+  when: host_agents_os_path == 'modern'
+
+- name: "[MON-024] Gather facts on modern path"
+  ansible.builtin.setup:
+  when: host_agents_os_path == 'modern'
+
+- name: "[MON-025] Warn that legacy path hosts are skipped until their tasks land"
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ host_agents_os_path }} 경로는 아직 구현되지 않아 Host Agents 적용을 건너뜁니다
+      (ADR-0006 §2.9, 후속 티켓).
+  when: host_agents_os_path != 'modern'
+
+- name: "[MON-028] End role for legacy path hosts"
+  ansible.builtin.meta: end_host
+  when: host_agents_os_path != 'modern'

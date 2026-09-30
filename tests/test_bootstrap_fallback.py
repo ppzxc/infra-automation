@@ -617,4 +617,5 @@ def test_shared_connection_plays_honour_target_hosts_narrowing():
     for name in ("resolve_connection.yml", "cleanup_connection.yml"):
         with open(ROOT_DIR / "playbooks" / "common" / name, "r", encoding="utf-8") as f:
             hosts = yaml.safe_load(f)[0]["hosts"]
-        assert hosts == "{{ target_hosts | default('servers:loadbalancers') }}"
+        # host_agents.yml narrows via connection_hosts; site.yml keeps the wider default.
+        assert hosts == "{{ connection_hosts | default(target_hosts | default('servers:loadbalancers')) }}"

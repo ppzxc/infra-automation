@@ -14,8 +14,6 @@
       tags: [security, audit]
     - role: docker_engine
       tags: [docker]
-    - role: monitoring
-      tags: [monitoring]
 
 - name: Maintenance and Security Updates for Target Hosts
   hosts: servers
@@ -30,5 +28,3 @@
       tags: [common, update]
     - role: security
       tags: [security, audit]
-    - role: monitoring
-      tags: [monitoring]

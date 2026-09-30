@@ -69,9 +69,6 @@
     - role: access_security
       tags: [access, openbao, boundary, security, ssh-ca]
 
-    - role: monitoring
-      tags: [monitoring, metrics, otel]
-
   post_tasks:
     - name: Target host provisioning completion summary
       ansible.builtin.debug:
@@ -84,7 +81,7 @@
             - "3. 시스템 보안: SSH 보안 강화(Root 로그인 제한), 방화벽(Firewalld/UFW), Fail2ban 보호 활성화"
             - "4. 컨테이너 인프라: Docker Engine 최신 런타임 및 Docker Compose 플러그인 설치"
             - "5. 접근 제어 및 감시: OpenBao SSH CA 신뢰 구성, Boundary 연동 메타데이터, Auditd 감사 규칙 등록"
-            - "6. 통합 관측성: OpenTelemetry Collector 배포 및 메트릭 수집 서비스 기동"
+            - "(관측성/백업 Host Agents는 playbooks/host_agents.yml로 별도 배포합니다)"
 
 # ------------------------------------------------------------------------------
 # Play 3: Cleanup temporary controller credentials (공유 플레이북)

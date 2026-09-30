@@ -30,6 +30,7 @@
    - 운영 하드닝 `daemon.json` 배포 (`DOC-010 ~ DOC-013`: `json-file` log rotation, `live-restore: true`, `metrics-addr: 127.0.0.1:9323`)
 5. **`monitoring`**:
    - OpenTelemetry Collector Contrib(`otelcol-contrib`) 바이너리/서비스 배포 및 원격 OTEL 백엔드로 OTLP 아웃바운드 푸시 (`MON-001 ~ MON-006`)
+   - `playbooks/host_agents.yml` 전용 진입점: OS 프로브·프로비저닝 assert·OpenBao 입력 검증 (`MON-020 ~ MON-035`); `site.yml`/`maintenance.yml`에서는 제외
    - `hostmetrics` receiver를 통한 호스트 CPU, Memory, Disk, Network 등 저수준 시스템 메트릭 직접 수집
    - 레거시 `node_exporter` 데몬/바이너리/유저 자동 정리 (`MON-011 ~ MON-015`)
 6. **`cisco_backup`**:

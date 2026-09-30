@@ -83,3 +83,24 @@ firewall_ingress_rules:
     proto: "tcp"
     sources:
       - "203.0.113.10/32"
+# Host Agents (monitoring, ADR-0006). Connection resolution never runs in
+# molecule, so provide what it would set: the provisioned marker, and the
+# OpenBao-supplied values (hosts/<host>/agents, secret/agents/*) as fixtures.
+# host_agents_kv_fixture makes the role skip every OpenBao lookup.
+_is_already_provisioned: true
+host_agents_kv_fixture:
+  host:
+    o2_ingest_token: "molecule-fixture-o2-ingest"  # gitleaks:allow (molecule fixture, not a secret)
+    rustfs_access_key: "molecule-fixture-rustfs-access"
+    rustfs_secret_key: "molecule-fixture-rustfs-secretkey"
+    restic_password: "molecule-fixture-restic-password"
+    otel_extra_logs:
+      - /var/log/molecule-app/*.log
+    otel_exclude_logs:
+      - /var/log/cron*
+    backup_extra_paths:
+      - /data
+  openobserve:
+    controller_ingest_token: "molecule-fixture-controller-token"
+  rustfs:
+    maintenance_key: "molecule-fixture-maintenance-key"
