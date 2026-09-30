@@ -99,9 +99,33 @@ def raw_set_directives(current, directives):
     return '\n'.join(lines) + '\n'
 
 
+_RELEASE_RE = re.compile(
+    r'^(?P<name>.+?)\s+release\s+(?P<version>[0-9]+(?:\.[0-9]+)*)', re.MULTILINE)
+
+
+def raw_parse_os_release(stdout):
+    """Parse ``cat /etc/redhat-release`` raw output into OS facts.
+
+    Replaces the ``setup`` module, which cannot run on CentOS 6/7 (ADR-0005).
+    Raises ValueError when no ``<name> release <version>`` line is present, so
+    a missing/foreign release file aborts the play instead of guessing.
+    """
+    m = _RELEASE_RE.search((stdout or '').replace('\r', ''))
+    if not m:
+        raise ValueError('cannot determine OS release from raw output: %r' % (stdout,))
+    name = m.group('name').strip()
+    version = m.group('version')
+    return {
+        'distribution': 'CentOS' if name.startswith('CentOS') else 'RedHat',
+        'major_version': version.split('.')[0],
+        'version': version,
+    }
+
+
 class FilterModule(object):
     def filters(self):
         return {
+            'raw_parse_os_release': raw_parse_os_release,
             'raw_read_cmd': raw_read_cmd,
             'raw_read_extract': raw_read_extract,
             'raw_probe_cmd': raw_probe_cmd,

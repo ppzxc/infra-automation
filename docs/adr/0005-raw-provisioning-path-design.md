@@ -62,6 +62,10 @@ module의 `validate:` 절과 `atomic_move`를 대체하는 표준 헬퍼 시퀀�
 
 현재 인벤토리(`ns0266`, `ns0332`)에는 실제 CentOS 6/7 호스트가 없어 dry-run 가시성 손실이 당장의 리스크는 아니지만, 실제 CentOS 6/7 호스트가 프로비저닝되는 시점에 재검토가 필요한 사항으로 기록합니다(§4 참고).
 
+### 2.5 Fact Gathering 우회 방식 (구현 결정, #30)
+
+`playbooks/site.yml` Play 2는 `gather_facts: false`를 유지하고, `raw_provisioning_path: true` 호스트에서는 `setup` 대신 `ansible.builtin.raw: cat /etc/redhat-release`로 릴리스 문자열을 읽어 `filter_plugins/raw_provisioning.py`의 `raw_parse_os_release`로 파싱한 뒤 `ansible_os_family`/`ansible_distribution`/`ansible_distribution_major_version`/`ansible_distribution_version`을 `set_fact`로 공급합니다. 릴리스 줄(`<name> release <version>`)이 없으면 `ValueError`로 플레이가 중단되어 잘못된 `major_version` 분기를 막습니다. 그 외 OS는 기존 `setup` 경로를 그대로 사용하므로 동작이 바뀌지 않습니다. 파서는 컨테이너 없이 raw 출력 샘플로 pytest 검증합니다(`tests/test_raw_provisioning.py`).
+
 ---
 
 ## 3. Architecture Overview
