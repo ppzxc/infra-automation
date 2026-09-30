@@ -253,6 +253,45 @@ def raw_service_cmd(name):
         N=shlex.quote(name), MARK=CHANGED_MARKER)
 
 
+def raw_timezone_cmd(name, zoneinfo='/usr/share/zoneinfo', localtime='/etc/localtime'):
+    """``community.general.timezone`` equivalent for systemd hosts (CentOS 7); marker if it changed.
+
+    The zone must exist under ``zoneinfo``. It is compared with what
+    ``localtime`` resolves to, and ``timedatectl set-timezone`` runs only on drift.
+    """
+    if not re.fullmatch(r'[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*', name or ''):
+        raise ValueError('unsafe timezone name: %r' % (name,))
+    return _render(
+        'z=@ZONE@/@NAME@; if [ ! -f "$z" ]; then echo "unknown timezone" @NAME@ >&2; false; '
+        'elif [ "$(readlink -f @LOCAL@)" = "$(readlink -f "$z")" ]; then true; '
+        'else timedatectl set-timezone @NAME@ && echo @MARK@; fi',
+        ZONE=shlex.quote(zoneinfo), NAME=shlex.quote(name), LOCAL=shlex.quote(localtime), MARK=CHANGED_MARKER)
+
+
+def raw_selinux_cmd(state, policy, config='/etc/selinux/config'):
+    """``ansible.posix.selinux`` equivalent: persist SELINUX/SELINUXTYPE and align the running mode.
+
+    A missing SELinux config file is not created or touched (the running mode is still aligned when ``getenforce`` exists). The
+    runtime mode is only switched between enforcing and permissive, like the
+    module (``disabled`` needs a reboot; it only relaxes enforcing to permissive).
+    """
+    if state not in ('enforcing', 'permissive', 'disabled'):
+        raise ValueError('unsupported selinux state: %r' % (state,))
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', policy or ''):
+        raise ValueError('unsafe selinux policy: %r' % (policy,))
+    runtime = {'enforcing': ('Permissive', '1'), 'permissive': ('Enforcing', '0'), 'disabled': ('Enforcing', '0')}[state]
+    return _render(
+        'f=@CFG@; c=0; rc=0; '
+        'if [ -f "$f" ]; then '
+        'for kv in SELINUX=@STATE@ SELINUXTYPE=@POLICY@; do k="${kv%%=*}"; '
+        'grep -qx "$kv" "$f" || { if grep -q "^$k=" "$f"; then sed -i "s/^$k=.*/$kv/" "$f"; '
+        'else printf "%s\\n" "$kv" >> "$f"; fi && c=1 || rc=1; }; done; fi; '
+        'if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = @FROM@ ]; then '
+        'setenforce @TO@ && c=1 || rc=1; fi; '
+        '[ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]',
+        CFG=shlex.quote(config), STATE=shlex.quote(state), POLICY=shlex.quote(policy), FROM=runtime[0], TO=runtime[1], MARK=CHANGED_MARKER)
+
+
 IPT_MARKER = '__RAW_IPT__'
 
 
@@ -395,6 +434,8 @@ class FilterModule(object):
             'raw_sysctl_live_cmd': raw_sysctl_live_cmd,
             'raw_sudoers_line': raw_sudoers_line,
             'raw_service_cmd': raw_service_cmd,
+            'raw_timezone_cmd': raw_timezone_cmd,
+            'raw_selinux_cmd': raw_selinux_cmd,
             'raw_iptables_cmd': raw_iptables_cmd,
             'raw_iptables_absent': raw_iptables_absent,
             'raw_iptables_failed': raw_iptables_failed,
