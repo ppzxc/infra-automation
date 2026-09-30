@@ -42,6 +42,13 @@ firewall_interface_zone: "public"
 firewall_source_zone: "work"
 firewall_interface: "{{ ansible_default_ipv4.interface | default('bond0') }}"
 
+# drop 존에서 해제(SEC-006-UNBIND-DROP)할 물리 NIC 후보. firewall_interface에 더해 처리되며,
+# module 경로와 raw 경로(raw_firewalld_plan)가 같은 목록을 공유한다.
+firewall_drop_unbind_interfaces:
+  - bond0
+  - eno1
+  - eno2
+
 # 존별 소스 IP 및 포트 분리 정의
 internal_allowed_subnets:
   - "10.0.0.0/8"

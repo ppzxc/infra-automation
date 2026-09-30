@@ -1088,3 +1088,33 @@ def test_common_profile_and_environment_templates_have_raw_equivalents():
         assert "changed_when" in push[0] and "failed_when" in push[0], tpl
     for dest in ("/etc/profile.d/99-aliases.sh", "/etc/profile.d/98-node-env.sh", "/etc/environment"):
         assert any(dest in str(t.get("ansible.builtin.raw")) for t in raw), dest
+
+
+def test_default_route_facts_are_parsed_for_raw_hosts(tmp_path):
+    """Raw hosts gather no facts, so ansible_default_ipv4 must come from the route probe."""
+    from raw_provisioning import raw_default_route_cmd, raw_parse_default_route
+    bindir = _stub_bin(tmp_path, {"ip": 'echo "1.1.1.1 via 39.116.31.254 dev enp2s0  src 39.116.31.59"'})
+    out = _run(tmp_path, bindir, raw_default_route_cmd()).stdout
+    assert raw_parse_default_route(out) == {
+        "interface": "enp2s0", "gateway": "39.116.31.254", "address": "39.116.31.59"}
+    assert raw_parse_default_route("") == {}
+    assert raw_parse_default_route("garbage\n") == {}
+
+
+def test_detect_raw_path_publishes_default_route_before_common_templates():
+    text = (ROOT_DIR / "playbooks/common/detect_raw_path.yml").read_text()
+    assert "raw_default_route_cmd" in text and "ansible_default_ipv4" in text
+
+
+def test_firewalld_plan_unbinds_drop_zone_interfaces_from_the_shared_list():
+    plan = _plan(interface="enp2s0", drop_unbind_interfaces=["bond0", "eno1", "eno2", "enp2s0"])
+    unbound = [r["value"] for r in plan if (r["state"], r["kind"], r["zone"]) == ("disabled", "interface", "drop")]
+    assert unbound == ["enp2s0", "bond0", "eno1", "eno2"]
+    custom = _plan(interface="eth0", drop_unbind_interfaces=["em1"])
+    assert [r["value"] for r in custom if (r["state"], r["kind"], r["zone"]) == ("disabled", "interface", "drop")] == ["eth0", "em1"]
+
+
+def test_security_role_shares_drop_unbind_interfaces_with_module_path():
+    text = (ROOT_DIR / "roles/security/tasks/main.yml").read_text()
+    assert text.count("firewall_drop_unbind_interfaces") >= 3
+    assert '- "bond0"' not in text and '- "eno1"' not in text

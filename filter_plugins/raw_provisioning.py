@@ -454,6 +454,21 @@ def raw_firewalld_masquerade_off_cmd():
         '[ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]', MARK=CHANGED_MARKER)
 
 
+def raw_default_route_cmd():
+    """Print the kernel's IPv4 route to a public address (``via``/``dev``/``src`` of the default route)."""
+    return 'ip -4 route get 1.1.1.1 2>/dev/null | head -1; true'
+
+
+def raw_parse_default_route(stdout):
+    """``ansible_default_ipv4`` subset (interface/gateway/address) from ``raw_default_route_cmd`` output; {} if none."""
+    tokens = (stdout or '').split()
+    facts = {}
+    for key, word in (('interface', 'dev'), ('gateway', 'via'), ('address', 'src')):
+        if word in tokens and tokens.index(word) + 1 < len(tokens):
+            facts[key] = tokens[tokens.index(word) + 1]
+    return facts if 'interface' in facts else {}
+
+
 def raw_default_iface_cmd():
     """Print the IPv4 default-route interface (``ansible_default_ipv4.interface``); nothing if none."""
     return r"""ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}'; true"""
@@ -463,7 +478,7 @@ def raw_firewalld_plan(cfg):
     """Ordered rule list reproducing the module path's firewalld tasks (removals before adds).
 
     ``cfg`` carries the role variables: interface, interface_zone, source_zone,
-    ssh_port, ssh_allowed_source_ips, stale_source_ips, allowed_services,
+    drop_unbind_interfaces, ssh_port, ssh_allowed_source_ips, stale_source_ips, allowed_services,
     allowed_tcp_ports, ingress_rules, monitoring_subnets, dmz_ports, internal_subnets,
     internal_ports. Conflicting bindings (drop/trusted) are removed first so
     the following adds cannot hit ZONE_CONFLICT.
@@ -479,7 +494,7 @@ def raw_firewalld_plan(cfg):
         rules.append(entry)
 
     if interface_zone != 'drop':
-        for i in dict.fromkeys([cfg.get('interface') or 'bond0', 'bond0', 'eno1', 'eno2']):
+        for i in dict.fromkeys([cfg.get('interface') or 'bond0'] + list(cfg.get('drop_unbind_interfaces') or [])):
             rule('disabled', 'interface', 'drop', i)
     if ssh_ips:
         for s in ('ssh', 'cockpit', 'dhcpv6-client'):
@@ -638,5 +653,7 @@ class FilterModule(object):
             'raw_firewalld_failed': raw_firewalld_failed,
             'raw_firewalld_masquerade_off_cmd': raw_firewalld_masquerade_off_cmd,
             'raw_default_iface_cmd': raw_default_iface_cmd,
+            'raw_default_route_cmd': raw_default_route_cmd,
+            'raw_parse_default_route': raw_parse_default_route,
             'raw_firewalld_plan': raw_firewalld_plan,
         }
