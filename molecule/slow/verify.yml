@@ -155,10 +155,41 @@
               - f.passwd['otelcol']
             fail_msg: "otelcol user does not exist."
 
-        - name: "[VERIFY-MON-003] Verify otelcol-contrib binary exists and is executable"
-          ansible.builtin.debug:
-            msg: "{{ f.stat['/usr/local/bin/otelcol-contrib'] }}"
-            verbosity: 1
+        - name: Load pinned version and checksum table from the role
+          ansible.builtin.include_vars:
+            file: "{{ playbook_dir }}/../../roles/monitoring/vars/main.yml"
+            name: _mon_vars
+
+        - name: "[VERIFY-MON-003] Verify otelcol-contrib binary reports the pinned version"
+          ansible.builtin.command: /usr/local/bin/otelcol-contrib --version
+          register: _verify_otel_version
+          changed_when: false
+          failed_when: _mon_vars.host_agents_versions['default'].otelcol_contrib not in _verify_otel_version.stdout
+
+        - name: "[VERIFY-MON-046] Verify the versioned install directory and binary are root-owned 0755"
+          ansible.builtin.stat:
+            path: "{{ _mon_vars.host_agents_install_root }}/otelcol-contrib/{{ _mon_vars.host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib"
+          register: _verify_otel_bin
+          failed_when: >-
+            not _verify_otel_bin.stat.exists or _verify_otel_bin.stat.pw_name != 'root' or
+            _verify_otel_bin.stat.mode != '0755'
+
+        - name: "[VERIFY-MON-051] Verify the install symlink targets the pinned versioned directory"
+          ansible.builtin.stat:
+            path: /usr/local/bin/otelcol-contrib
+            follow: false
+          register: _verify_otel_link
+          failed_when: >-
+            not _verify_otel_link.stat.islnk or
+            _verify_otel_link.stat.lnk_source != _mon_vars.host_agents_install_root ~ '/otelcol-contrib/' ~
+            _mon_vars.host_agents_versions['default'].otelcol_contrib ~ '/otelcol-contrib'
+
+        - name: "[VERIFY-MON-053] Verify at most the current and previous version directories are kept"
+          ansible.builtin.find:
+            paths: "{{ _mon_vars.host_agents_install_root }}/otelcol-contrib"
+            file_type: directory
+          register: _verify_otel_dirs
+          failed_when: _verify_otel_dirs.files | length > 2
 
         - name: "[VERIFY-MON-004] Verify otelcol-contrib configuration file exists"
           ansible.builtin.assert:

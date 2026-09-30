@@ -79,19 +79,16 @@
       state: present
     when: enable_otelcol | default(true) | bool
 
-  - name: "[MON-003] Download and install OpenTelemetry Collector Contrib binary"
-    ansible.builtin.unarchive:
-      src: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ otelcol_version }}/otelcol-contrib_{{ otelcol_version }}_linux_{{ otelcol_arch }}.tar.gz"
-      dest: /usr/local/bin
-      remote_src: true
-      extra_opts:
-        - "otelcol-contrib"
-      creates: /usr/local/bin/otelcol-contrib
-      owner: root
-      group: root
-      mode: '0755'
+  - name: "[MON-003] Deliver pinned OpenTelemetry Collector Contrib binary"
+    ansible.builtin.include_tasks: deliver_binary.yml
+    vars:
+      _otelcol_version: "{{ host_agents_versions['default'].otelcol_contrib }}"
+      _deliver_agent: otelcol-contrib
+      _deliver_binary: otelcol-contrib
+      _deliver_version: "{{ _otelcol_version }}"
+      _deliver_url: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ _otelcol_version }}/otelcol-contrib_{{ _otelcol_version }}_linux_{{ host_agents_os_arch }}.tar.gz"
+      _deliver_sha256: "{{ host_agents_checksums.otelcol_contrib[_otelcol_version][host_agents_os_arch] }}"
     when: enable_otelcol | default(true) | bool
-    notify: Restart otelcol-contrib
 
 
 - name: "Apply otelcol configuration"
@@ -114,13 +111,23 @@
           owner: root
           group: "{{ otelcol_group }}"
           mode: '0640'
+          validate: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib validate --config=%s"
         notify: Restart otelcol-contrib
+
     when: enable_otelcol | default(true) | bool
 
 
 - name: "Enable otelcol service"
   tags: [agents_install, otel]
   block:
+  # 새 설정이 새 바이너리로 검증된 뒤(MON-004-CONF의 template validate)에만 symlink를 교체하고 핸들러가 재시작한다.
+  - name: "[MON-054] Switch otelcol-contrib install symlink to the delivered version"
+    ansible.builtin.include_tasks: switch_binary.yml
+    vars:
+      _deliver_binary: otelcol-contrib
+      _deliver_handler: Restart otelcol-contrib
+    when: enable_otelcol | default(true) | bool
+
   - name: "[MON-005] Create systemd service for otelcol-contrib"
     ansible.builtin.copy:
       dest: /etc/systemd/system/otelcol-contrib.service

@@ -74,6 +74,17 @@
 
 ---
 
+## 3-2. 바이너리 버전 고정과 전달 (`deliver_binary.yml`)
+
+- 버전·SHA256은 `vars/main.yml`의 `host_agents_versions`/`host_agents_checksums`(Git 고정, 호스트별 오버라이드 없음). 버전 상향 PR은 체크섬 변경을 동반하며 upstream `checksums.txt`는 신뢰하지 않습니다. 현재 `default` 경로: otelcol-contrib v0.161.0.
+- 컨트롤러가 tarball을 1회 다운로드해 SHA256을 검증하고 `host_agents_cache_dir`(기본 `~/.cache/host-agents`)에 캐시한 뒤, 인터넷이 없는 호스트에도 `copy`로 푸시합니다.
+- 레이아웃: `/opt/host-agents/otelcol-contrib/<version>/otelcol-contrib`, `/usr/local/bin/otelcol-contrib`는 현재 버전 symlink. 호스트에는 현재+직전 버전 1개만 보존합니다.
+- 순서: `deliver_binary.yml`(푸시 → 호스트 SHA256 == 컨트롤러가 검증한 tarball 바이너리, 불일치 시 호스트 실패·symlink 불변) → 설정 template의 `validate:`가 **새 버전 바이너리**로 새 설정을 검증(실패 시 설정·symlink 모두 불변, 최초 설치 포함) → `switch_binary.yml`(symlink 교체, 핸들러 재시작, 정리). 일반 파일로 남은 기존 바이너리(0.108.0)는 `<agent_dir>/legacy-<binary>`로 보존합니다. 롤백은 버전 표 revert PR 후 재실행.
+- check 모드에서 버전 변경은 `MON-051` symlink diff(`--diff`)와 `MON-045` 표시로 확인합니다.
+- `deliver_binary.yml`/`switch_binary.yml`은 `_deliver_*` 변수로 매개화되어 backup 역할(restic/resticprofile)이 재사용합니다(SPEC-ID `MON-040~054`). 호스트 측 위치·소유자는 `host_agents_bin_dir/owner/group` 기본값(`/usr/local/bin`, `root`)입니다.
+
+---
+
 ## 4. 태스크 매트릭스 (Task Matrix)
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
@@ -85,7 +96,7 @@
 | `MON-015` | `Remove legacy node_exporter group` | `ansible.builtin.group` | All | 그룹 부존재 시 `ok` |
 | `MON-001` | `Create otelcol system group` | `ansible.builtin.group` | All | 그룹 존재 시 `ok` |
 | `MON-002` | `Create otelcol system user` | `ansible.builtin.user` | All | 유저 존재 시 `ok` |
-| `MON-003` | `Download and install OpenTelemetry Collector Contrib binary` | `ansible.builtin.unarchive` | RHEL 7+, Debian | `creates: /usr/local/bin/otelcol-contrib` |
+| `MON-003` | `Deliver pinned OpenTelemetry Collector Contrib binary` | `ansible.builtin.include_tasks` | RHEL 7+, Debian | 버전 디렉터리 존재/symlink 일치 시 `ok` (`creates:` 없음 — 버전 상향 시 롤아웃) |
 | `MON-004` | `Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 (`otelcol-contrib.yaml.j2`) |
 | `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` |
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
@@ -104,3 +115,18 @@
 | `MON-033` | `Merge agents inputs with the Git standard` | `ansible.builtin.set_fact` | All | 순수 함수 (시크릿 미포함) |
 | `MON-034` | `Assert agents inputs are valid before any change` | `ansible.builtin.assert` | All | 읽기 전용 |
 | `MON-035` | `Set agents secrets as host facts` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
+| `MON-040` | `Ensure controller cache directories exist` | `ansible.builtin.file` | controller | 디렉터리 존재 시 `ok` |
+| `MON-041` | `Download pinned release tarball on the controller and verify SHA256` | `ansible.builtin.get_url` | controller | `checksum: sha256:<Git 고정값>` 일치 시 `ok`, 불일치 시 실패 |
+| `MON-042` | `Extract the binary into the controller cache` | `ansible.builtin.unarchive` | controller | `creates` (버전×아키텍처별 캐시) |
+| `MON-043` | `Read the extracted binary SHA256 on the controller` | `ansible.builtin.stat` | controller | 읽기 전용 |
+| `MON-044` | `Read the current install symlink on the host` | `ansible.builtin.stat` | All | 읽기 전용 |
+| `MON-045` | `Show planned version change` | `ansible.builtin.debug` | All | 읽기 전용 (버전 변경 표시; check 모드 diff는 MON-051 symlink diff) |
+| `MON-046` | `Ensure versioned install directory exists` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` |
+| `MON-047` | `Push the verified binary into the versioned directory` | `ansible.builtin.copy` | All | 체크섬 비교 |
+| `MON-048` | `Read the pushed binary SHA256 on the host` | `ansible.builtin.stat` | All | 읽기 전용, `check_mode: false` |
+| `MON-049` | `Assert the pushed binary matches the SHA256 of the verified tarball binary` | `ansible.builtin.assert` | All | 읽기 전용 (불일치 시 호스트 실패, symlink 불변) |
+| `MON-050` | `Preserve a pre-existing regular-file binary before the first symlink switch` | `ansible.builtin.copy` | All | `force: false`; 일반 파일 바이너리가 있을 때만 `legacy-<binary>`로 보존 |
+| `MON-051` | `Point the install symlink at the new version` | `ansible.builtin.file` | All | symlink 일치 시 `ok`; 변경 시 `Restart otelcol-contrib` 핸들러 |
+| `MON-052` | `Find installed version directories` | `ansible.builtin.find` | All | 읽기 전용, `check_mode: false` |
+| `MON-053` | `Prune versions older than the previous one` | `ansible.builtin.file` | All | 현재 + 직전 1개만 보존(재실행에도 직전 유지) |
+| `MON-054` | `Switch otelcol-contrib install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-051`~`053`) |

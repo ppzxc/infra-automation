@@ -1,0 +1,44 @@
+---
+# deliver_binary.yml 이후 symlink 교체와 정리 (ADR-0006 §2.8). 호출 전에 새 바이너리로 설정 검증이 끝나 있어야 한다.
+# 일반 파일로 남은 기존 바이너리(예: 0.108.0)는 삭제하지 않고 <agent_dir>/legacy-<binary>로 보존한다(최초 전환 롤백용).
+- name: "[MON-050] Preserve a pre-existing regular-file binary before the first symlink switch"
+  ansible.builtin.copy:
+    src: "{{ _deliver_link }}"
+    dest: "{{ _deliver_agent_dir }}/legacy-{{ _deliver_binary }}"
+    remote_src: true
+    force: false
+    owner: "{{ host_agents_owner }}"
+    group: "{{ host_agents_group }}"
+    mode: '0755'
+  when:
+    - _deliver_current.stat.exists
+    - not _deliver_current.stat.islnk
+
+- name: "[MON-051] Point the install symlink at the new version"
+  ansible.builtin.file:
+    src: "{{ _deliver_new_path }}"
+    dest: "{{ _deliver_link }}"
+    state: link
+    force: true
+    owner: "{{ host_agents_owner }}"
+    group: "{{ host_agents_group }}"
+  notify: "{{ _deliver_handler }}"
+
+- name: "[MON-052] Find installed version directories"
+  ansible.builtin.find:
+    paths: "{{ _deliver_agent_dir }}"
+    file_type: directory
+  register: _deliver_installed
+  check_mode: false
+
+# 현재 버전 + 직전 버전 1개만 보존한다. 직전 = 교체 전 symlink 대상(현재와 다를 때), 같으면(재실행) 가장 최근에 만든 다른 버전.
+- name: "[MON-053] Prune versions older than the previous one"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  vars:
+    _others: "{{ _deliver_installed.files | rejectattr('path', 'equalto', _deliver_version_dir) | list }}"
+    _linked_prev: "{{ _deliver_current.stat.lnk_source | default('') | dirname }}"
+    _newest_other: "{{ (_others | sort(attribute='mtime') | last).path if _others | length > 0 else '' }}"
+    _keep_prev: "{{ _linked_prev if _linked_prev in (_others | map(attribute='path') | list) else _newest_other }}"
+  loop: "{{ _others | map(attribute='path') | difference([_keep_prev]) | list }}"
