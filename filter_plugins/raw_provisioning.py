@@ -343,6 +343,177 @@ def raw_iptables_failed(stdout):
     return not lines or lines[-1][1:] not in (['present'], ['absent'])
 
 
+FIREWALLD_MARKER = '__RAW_FIREWALLD__'
+_FIREWALLD_NAME = re.compile(r'[A-Za-z0-9_-]+')
+_FIREWALLD_IFACE = re.compile(r'[A-Za-z0-9_.:-]{1,15}')
+_FIREWALLD_PORT = re.compile(r'(\d{1,5})(?:-(\d{1,5}))?/(tcp|udp)')
+
+
+def _firewalld_args(rule):
+    """``firewall-cmd`` option kind and value naming one rule, validated."""
+    kind, zone, value = rule.get('kind'), rule.get('zone'), str(rule.get('value', ''))
+    if not _FIREWALLD_NAME.fullmatch(str(zone or '')):
+        raise ValueError('unsafe firewalld zone: %r' % (zone,))
+    if kind == 'service':
+        if not _FIREWALLD_NAME.fullmatch(value):
+            raise ValueError('unsafe firewalld service: %r' % (value,))
+        return 'service', value
+    if kind == 'port':
+        m = _FIREWALLD_PORT.fullmatch(value)
+        if not m or any(g and not 1 <= int(g) <= 65535 for g in m.groups()[:2]):
+            raise ValueError('invalid firewalld port: %r' % (value,))
+        return 'port', value
+    if kind in ('source', 'rich-rule'):
+        try:
+            # The module path only ever writes IPv4 rules (family="ipv4").
+            ipaddress.IPv4Network(value, strict=False)
+        except ValueError:
+            raise ValueError('invalid firewalld IPv4 source: %r' % (value,))
+        if kind == 'source':
+            return 'source', value
+        port = str(rule.get('port', ''))
+        if not port.isdigit() or not 1 <= int(port) <= 65535:
+            raise ValueError('invalid firewalld rich-rule port: %r' % (port,))
+        proto = str(rule.get('proto') or 'tcp')
+        if proto not in ('tcp', 'udp'):
+            raise ValueError('unsupported firewalld rich-rule protocol: %r' % (proto,))
+        return 'rich-rule', 'rule family="ipv4" source address="%s" port port="%s" protocol="%s" accept' % (value, port, proto)
+    if kind == 'interface':
+        if not _FIREWALLD_IFACE.fullmatch(value):
+            raise ValueError('unsafe firewalld interface: %r' % (value,))
+        return 'interface', value
+    raise ValueError('unknown firewalld rule kind: %r' % (kind,))
+
+
+def raw_firewalld_cmd(rule, mode):
+    """CentOS 7 ``ansible.posix.firewalld`` equivalent (permanent config only; a reload applies it).
+
+    ``rule`` is ``{kind, zone, value[, port]}`` with kind service|port|source|
+    rich-rule|interface. ``probe`` prints ``__RAW_FIREWALLD__ present|absent|error``
+    from firewall-cmd's query exit status (0 yes, 1 no, else error) and always
+    exits 0 (``probe-runtime`` asks the running firewall instead of the permanent
+    config, to detect runtime drift that a reload repairs); ``add``/``remove`` run the matching --permanent option and
+    propagate its exit status. ``interface`` means "bound to ``zone``".
+    """
+    kind, value = _firewalld_args(rule)
+    zone = shlex.quote(rule['zone'])
+    if mode in ('probe', 'probe-runtime'):
+        perm = '--permanent ' if mode == 'probe' else ''
+        if kind == 'interface':
+            return _render(
+                'out="$(firewall-cmd @P@--get-zone-of-interface=@V@ 2>/dev/null)"; rc=$?; '
+                'if [ "$rc" -ne 0 ]; then echo @M@ error; elif [ "$out" = @Z@ ]; then echo @M@ present; '
+                'else echo @M@ absent; fi; exit 0',
+                P=perm, V=shlex.quote(value), Z=zone, M=FIREWALLD_MARKER)
+        return _render(
+            'firewall-cmd @P@--zone=@Z@ @Q@ >/dev/null 2>&1; rc=$?; '
+            'if [ "$rc" -eq 0 ]; then echo @M@ present; elif [ "$rc" -eq 1 ]; then echo @M@ absent; '
+            'else echo @M@ error; fi; exit 0',
+            P=perm, Z=zone, Q=shlex.quote('--query-%s=%s' % (kind, value)), M=FIREWALLD_MARKER)
+    if mode not in ('add', 'remove'):
+        raise ValueError('unknown firewalld mode: %r' % (mode,))
+    if kind == 'interface':
+        opt = ('--change-interface=%s' if mode == 'add' else '--remove-interface=%s') % value
+    else:
+        opt = '--%s-%s=%s' % (mode, kind, value)
+    return 'firewall-cmd --permanent --zone=%s %s' % (zone, shlex.quote(opt))
+
+
+def _firewalld_answer(stdout):
+    lines = [ln.split() for ln in (stdout or '').splitlines() if ln.strip().startswith(FIREWALLD_MARKER)]
+    return lines[-1][1] if lines and len(lines[-1]) == 2 else None
+
+
+def raw_firewalld_present(stdout):
+    """True only when the probe positively reported the rule present."""
+    return _firewalld_answer(stdout) == 'present'
+
+
+def raw_firewalld_absent(stdout):
+    """True only when the probe positively reported the rule absent."""
+    return _firewalld_answer(stdout) == 'absent'
+
+
+def raw_firewalld_failed(stdout):
+    """True unless the probe ran and answered present/absent."""
+    return _firewalld_answer(stdout) not in ('present', 'absent')
+
+
+def raw_firewalld_masquerade_off_cmd():
+    """Remove masquerade from every zone but ``external``, permanent and runtime; marker if any was removed."""
+    return _render(
+        'zones="$(firewall-cmd --permanent --get-zones)" || exit 1; c=0; rc=0; '
+        'for z in $zones; do [ "$z" = external ] && continue; '
+        'for p in --permanent ""; do '
+        'if firewall-cmd $p --zone="$z" --query-masquerade >/dev/null 2>&1; then '
+        'firewall-cmd $p --zone="$z" --remove-masquerade >/dev/null 2>&1 && c=1 || rc=1; fi; done; done; '
+        '[ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]', MARK=CHANGED_MARKER)
+
+
+def raw_default_iface_cmd():
+    """Print the IPv4 default-route interface (``ansible_default_ipv4.interface``); nothing if none."""
+    return r"""ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}'; true"""
+
+
+def raw_firewalld_plan(cfg):
+    """Ordered rule list reproducing the module path's firewalld tasks (removals before adds).
+
+    ``cfg`` carries the role variables: interface, interface_zone, source_zone,
+    ssh_port, ssh_allowed_source_ips, stale_source_ips, allowed_services,
+    allowed_tcp_ports, ingress_rules, monitoring_subnets, dmz_ports, internal_subnets,
+    internal_ports. Conflicting bindings (drop/trusted) are removed first so
+    the following adds cannot hit ZONE_CONFLICT.
+    """
+    iz, sz = cfg['interface_zone'], cfg['source_zone']
+    ssh_ips = list(cfg.get('ssh_allowed_source_ips') or [])
+    ssh_port = str(cfg.get('ssh_port', 22))
+    rules = []
+
+    def rule(state, kind, zone, value, **extra):
+        r = {'state': state, 'kind': kind, 'zone': zone, 'value': str(value)}
+        r.update(extra)
+        rules.append(r)
+
+    if iz != 'drop':
+        for i in dict.fromkeys([cfg.get('interface') or 'bond0', 'bond0', 'eno1', 'eno2']):
+            rule('disabled', 'interface', 'drop', i)
+    if ssh_ips:
+        for s in ('ssh', 'cockpit', 'dhcpv6-client'):
+            rule('disabled', 'service', 'public', s)
+    for z, s in (('dmz', 'ssh'), ('work', 'dhcpv6-client'), ('work', 'cockpit'), ('internal', 'mdns'),
+                 ('internal', 'samba-client'), ('internal', 'dhcpv6-client'), ('internal', 'cockpit')):
+        rule('disabled', 'service', z, s)
+    for ip in ssh_ips:
+        rule('disabled', 'rich-rule', 'public', ip, port=ssh_port)
+    for z in ('trusted', 'drop'):
+        if z != sz:
+            for ip in (cfg.get('stale_source_ips') or []):
+                rule('disabled', 'source', z, ip)
+    if cfg.get('interface'):
+        rule('enabled', 'interface', iz, cfg['interface'])
+    if ssh_ips:
+        for ip in ssh_ips:
+            rule('enabled', 'source', sz, ip)
+        rule('enabled', 'service', sz, 'ssh')
+    for ing in (cfg.get('ingress_rules') or []):
+        for ip in (ing.get('sources') or []):
+            rule('enabled', 'rich-rule', sz, ip, port=str(ing['port']), proto=ing.get('proto') or 'tcp')
+    for s in (cfg.get('allowed_services') or []):
+        rule('enabled', 'service', iz, s)
+    for ip in (cfg.get('monitoring_subnets') or []):
+        rule('enabled', 'source', 'dmz', ip)
+    for p in (cfg.get('dmz_ports') or []):
+        rule('enabled', 'port', 'dmz', p)
+    for ip in (cfg.get('internal_subnets') or []):
+        rule('enabled', 'source', 'internal', ip)
+    for p in (cfg.get('internal_ports') or []):
+        rule('enabled', 'port', 'internal', p)
+    for p in (cfg.get('allowed_tcp_ports') or []):
+        if str(p) != ssh_port:
+            rule('enabled', 'port', sz if ssh_ips else iz, '%s/tcp' % p)
+    return rules
+
+
 def raw_sysctl_directives(settings):
     """sysctl module equivalent as raw_set_directives input (``key = value`` lines)."""
     return [{'regexp': r'^\s*%s\s*=' % re.escape(str(k)), 'line': '%s = %s' % (k, v)}
@@ -439,4 +610,11 @@ class FilterModule(object):
             'raw_iptables_cmd': raw_iptables_cmd,
             'raw_iptables_absent': raw_iptables_absent,
             'raw_iptables_failed': raw_iptables_failed,
+            'raw_firewalld_cmd': raw_firewalld_cmd,
+            'raw_firewalld_present': raw_firewalld_present,
+            'raw_firewalld_absent': raw_firewalld_absent,
+            'raw_firewalld_failed': raw_firewalld_failed,
+            'raw_firewalld_masquerade_off_cmd': raw_firewalld_masquerade_off_cmd,
+            'raw_default_iface_cmd': raw_default_iface_cmd,
+            'raw_firewalld_plan': raw_firewalld_plan,
         }
