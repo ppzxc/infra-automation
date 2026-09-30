@@ -791,7 +791,9 @@
     jump: ACCEPT
     action: insert
   loop: "{{ (firewall_allowed_tcp_ports | default([])) if (ssh_allowed_source_ips is not defined or ssh_allowed_source_ips | length == 0) else (firewall_allowed_tcp_ports | default([]) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list) }}"
-  when: ansible_distribution == "CentOS" and (ansible_distribution_major_version | int == 6)
+  when:
+    - ansible_distribution == "CentOS" and (ansible_distribution_major_version | int == 6)
+    - not (raw_provisioning_path | default(false) | bool)
 
 # 5. Fail2ban configuration (Optional / EPEL dependent)
 - name: "[SEC-009] Install fail2ban package if available"
@@ -944,3 +946,52 @@
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 6
     - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
+    - not (raw_provisioning_path | default(false) | bool)
+
+# Raw Provisioning Path (ADR-0005), CentOS 6 only: the iptables module needs
+# AnsiballZ, so SEC-008/SEC-021 are replaced by probe+mutate raw pairs. Each
+# probe reads `iptables -S INPUT` and the mutate inserts the ACCEPT rule only
+# when it is positively absent (skipped => ok), so re-runs stay idempotent.
+# A probe that cannot answer fails the play rather than guessing.
+# CentOS 7 (firewalld) is unaffected.
+- name: Security raw iptables path (CentOS 6)
+  when:
+    - raw_provisioning_path | default(false) | bool
+    - ansible_distribution == "CentOS"
+    - ansible_distribution_major_version | int == 6
+  block:
+    - name: "[SEC-037] Probe iptables INPUT rules for allowed TCP ports (raw)"
+      ansible.builtin.raw: "{{ item | raw_iptables_cmd('tcp', none, 'probe') }}"
+      register: sec008_raw_probe
+      loop: "{{ (firewall_allowed_tcp_ports | default([])) if (ssh_allowed_source_ips is not defined or ssh_allowed_source_ips | length == 0) else (firewall_allowed_tcp_ports | default([]) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list) }}"
+      changed_when: false
+      failed_when: sec008_raw_probe.stdout | default('') | raw_iptables_failed
+
+    - name: "[SEC-038] Allow incoming TCP ports via iptables (raw)"
+      ansible.builtin.raw: "{{ item.item | raw_iptables_cmd('tcp', none, 'insert') }}"
+      register: sec008_raw_insert
+      loop: "{{ sec008_raw_probe.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stdout | default('') | raw_iptables_absent
+      changed_when: true
+      failed_when: sec008_raw_insert.rc | default(0) != 0
+
+    - name: "[SEC-039] Probe iptables INPUT rules for source-restricted ingress (raw)"
+      ansible.builtin.raw: "{{ item.0.port | raw_iptables_cmd(item.0.proto | default('tcp'), item.1, 'probe') }}"
+      register: sec021_raw_probe
+      loop: "{{ ((firewall_ingress_rules | default([])) + ([{'port': (ssh_port | default(22)), 'proto': 'tcp', 'sources': ssh_allowed_source_ips}] if (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0) else [])) | subelements('sources', skip_missing=True) }}"
+      loop_control:
+        label: "{{ item.0.port }}/{{ item.0.proto | default('tcp') }} from {{ item.1 }}"
+      changed_when: false
+      failed_when: sec021_raw_probe.stdout | default('') | raw_iptables_failed
+
+    - name: "[SEC-040] Allow source-restricted ingress via iptables (raw)"
+      ansible.builtin.raw: "{{ item.item.0.port | raw_iptables_cmd(item.item.0.proto | default('tcp'), item.item.1, 'insert') }}"
+      register: sec021_raw_insert
+      loop: "{{ sec021_raw_probe.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.0.port }}/{{ item.item.0.proto | default('tcp') }} from {{ item.item.1 }}"
+      when: item.stdout | default('') | raw_iptables_absent
+      changed_when: true
+      failed_when: sec021_raw_insert.rc | default(0) != 0

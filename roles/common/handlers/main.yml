@@ -19,3 +19,12 @@
   changed_when: true
   failed_when: common_raw_sysctl_apply.rc | default(0) != 0
   when: raw_provisioning_path | default(false) | bool
+
+# Raw Provisioning Path (ADR-0005), CentOS 6: ntpd is SysV, restarted via `service`.
+- name: Restart ntpd (raw)
+  ansible.builtin.raw: service ntpd restart
+  listen: Restart ntpd
+  register: common_raw_restart_ntpd
+  changed_when: true
+  failed_when: common_raw_restart_ntpd.rc | default(0) != 0
+  when: raw_provisioning_path | default(false) | bool
