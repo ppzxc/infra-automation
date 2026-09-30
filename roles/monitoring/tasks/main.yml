@@ -2,7 +2,7 @@
 # ==============================================================================
 # 1. Legacy Node Exporter Cleanup (Complete Removal)
 # ==============================================================================
-- name: "[MON-CLEANUP-001] Stop and disable legacy node_exporter service"
+- name: "[MON-011] Stop and disable legacy node_exporter service"
   ansible.builtin.systemd:
     name: node_exporter
     state: stopped
@@ -12,7 +12,7 @@
     - ansible_service_mgr == "systemd"
   failed_when: false
 
-- name: "[MON-CLEANUP-002] Remove legacy node_exporter systemd unit file"
+- name: "[MON-012] Remove legacy node_exporter systemd unit file"
   ansible.builtin.file:
     path: /etc/systemd/system/node_exporter.service
     state: absent
@@ -20,13 +20,13 @@
     - cleanup_legacy_node_exporter | default(true) | bool
     - ansible_service_mgr == "systemd"
 
-- name: "[MON-CLEANUP-003] Remove legacy node_exporter binary"
+- name: "[MON-013] Remove legacy node_exporter binary"
   ansible.builtin.file:
     path: /usr/local/bin/node_exporter
     state: absent
   when: cleanup_legacy_node_exporter | default(true) | bool
 
-- name: "[MON-CLEANUP-004] Remove legacy node_exporter user"
+- name: "[MON-014] Remove legacy node_exporter user"
   ansible.builtin.user:
     name: node_exporter
     state: absent
@@ -34,7 +34,7 @@
   when: cleanup_legacy_node_exporter | default(true) | bool
   failed_when: false
 
-- name: "[MON-CLEANUP-005] Remove legacy node_exporter group"
+- name: "[MON-015] Remove legacy node_exporter group"
   ansible.builtin.group:
     name: node_exporter
     state: absent

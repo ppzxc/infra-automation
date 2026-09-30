@@ -4,13 +4,15 @@ from jinja2 import Environment
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+RESOLVE = ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml"
+SITE = ROOT_DIR / "playbooks" / "site.yml"
 
-def test_site_playbook_syntax_and_structure():
-    """Verify site.yml contains variable assertion, probe connection, and fallback aligned with cisco pattern"""
-    site_file = ROOT_DIR / "playbooks" / "site.yml"
-    assert site_file.exists(), "site.yml missing"
+def test_resolve_connection_syntax_and_structure():
+    """Verify resolve_connection.yml contains variable assertion, probe connection, and fallback aligned with cisco pattern"""
+    resolve_file = RESOLVE
+    assert resolve_file.exists(), "resolve_connection.yml missing"
     
-    content = site_file.read_text(encoding='utf-8')
+    content = resolve_file.read_text(encoding='utf-8')
     assert "bootstrap_user" in content
     assert "target_admin_users" in content or "target_admin_user" in content
     assert "openbao_namespace" in content
@@ -91,10 +93,10 @@ def test_admin_accounts_generation_from_openbao_keys():
     assert res[1]["name"] == "admin2"
     assert res[1]["keys"] == ["ssh-rsa AAAAB2..."]
 
-def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
+def test_resolve_connection_controller_plays_privilege_escalation_and_recursion():
     """Verify Play 1 and Play 3 explicitly set become: false, and vars have no self-referencing recursion loops."""
-    site_file = ROOT_DIR / "playbooks" / "site.yml"
-    with open(site_file, "r", encoding="utf-8") as f:
+    resolve_file = RESOLVE
+    with open(resolve_file, "r", encoding="utf-8") as f:
         plays = yaml.safe_load(f)
 
     # Play 1: Controller Pre-flight
@@ -111,8 +113,9 @@ def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
     assert "openbao_hosts_prefix | default(openbao_hosts_prefix" not in vars1["openbao_hosts_prefix"]
     assert "openbao_users_prefix | default(openbao_users_prefix" not in vars1["openbao_users_prefix"]
 
-    # Play 3: Cleanup temporary credentials
-    play3 = plays[2]
+    # Play 3: Cleanup temporary credentials (shared cleanup_connection.yml)
+    with open(ROOT_DIR / "playbooks" / "common" / "cleanup_connection.yml", "r", encoding="utf-8") as f:
+        play3 = yaml.safe_load(f)[0]
     assert play3.get("connection") == "local"
     assert play3.get("become") is False, "Play 3 must have become: false so controller does not run sudo on local cleanup"
 
@@ -141,11 +144,11 @@ def test_site_playbook_controller_plays_privilege_escalation_and_recursion():
 
 
 
-def test_site_playbook_host_vars_and_probe_condition():
+def test_resolve_connection_host_vars_and_probe_condition():
     """Verify site.yml applies host variable fallback and safe probe result handling."""
-    site_file = ROOT_DIR / "playbooks" / "site.yml"
-    content = site_file.read_text(encoding="utf-8")
-    with open(site_file, "r", encoding="utf-8") as f:
+    resolve_file = RESOLVE
+    content = resolve_file.read_text(encoding="utf-8")
+    with open(resolve_file, "r", encoding="utf-8") as f:
         plays = yaml.safe_load(f)
 
     play1_tasks = plays[0]["tasks"]
@@ -324,10 +327,10 @@ def test_openbao_user_secret_unwrapping_with_type():
     assert res2['bootstrap']['password'] == 'root_from_list'
 
 
-def test_site_playbook_passphrase_stripping_task_exists():
-    """Verify site.yml contains passphrase stripping command for temporary private key."""
-    site_file = ROOT_DIR / "playbooks" / "site.yml"
-    with open(site_file, "r", encoding="utf-8") as f:
+def test_resolve_connection_passphrase_stripping_task_exists():
+    """Verify resolve_connection.yml contains passphrase stripping command for temporary private key."""
+    resolve_file = RESOLVE
+    with open(resolve_file, "r", encoding="utf-8") as f:
         plays = yaml.safe_load(f)
 
     play1_tasks = plays[0]["tasks"]
@@ -460,8 +463,8 @@ def test_openbao_bootstrap_ssh_type_unwrapping():
     assert r2['type'] == 'SSH'
 def test_bootstrap_user_default_and_override():
     """Verify bootstrap username can be overridden by secret or defaults to root."""
-    site_file = ROOT_DIR / "playbooks" / "site.yml"
-    with open(site_file, "r", encoding="utf-8") as f:
+    resolve_file = RESOLVE
+    with open(resolve_file, "r", encoding="utf-8") as f:
         plays = yaml.safe_load(f)
 
     play1 = plays[0]
@@ -479,9 +482,9 @@ def test_bootstrap_user_default_and_override():
 
 
 def test_remote_python_interpreter_configuration():
-    """Verify that site.yml, resolve_connection.yml, and ansible.cfg enforce remote python interpreter discovery (/usr/bin/python3) and isolate controller local venv."""
-    site_file = ROOT_DIR / "playbooks" / "site.yml"
-    with open(site_file, "r", encoding="utf-8") as f:
+    """Verify that resolve_connection.yml, site.yml Play 2, and ansible.cfg enforce remote python interpreter discovery (/usr/bin/python3) and isolate controller local venv."""
+    resolve_file = RESOLVE
+    with open(resolve_file, "r", encoding="utf-8") as f:
         plays = yaml.safe_load(f)
 
     # Check Play 1 vars does not leak controller python interpreter to remote hosts
@@ -500,25 +503,14 @@ def test_remote_python_interpreter_configuration():
     assert "ansible_python_interpreter" in boot_conn_task["ansible.builtin.set_fact"]
     assert "/usr/bin/python3" in boot_conn_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
 
-    # Also verify resolve_connection.yml has the identical protection
-    resolve_file = ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml"
-    with open(resolve_file, "r", encoding="utf-8") as f:
-        r_plays = yaml.safe_load(f)
-    r_play1_vars = r_plays[0].get("vars", {})
-    assert "ansible_python_interpreter" not in r_play1_vars
-
-    r_play1_tasks = r_plays[0].get("tasks", [])
-    r_admin_task = next(t for t in r_play1_tasks if t.get("name") == "Configure connection parameters for already provisioned host (Admin SSH Key mode)")
-    r_boot_task = next(t for t in r_play1_tasks if t.get("name") == "Configure connection parameters for unprovisioned host (Bootstrap fallback mode)")
-    assert "/usr/bin/python3" in r_admin_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
-    assert "/usr/bin/python3" in r_boot_task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
-
     # Check Play 2 vars enforces /usr/bin/python3 and gather_facts: false to prevent controller venv leak
-    play2_vars = plays[1].get("vars", {})
+    with open(SITE, "r", encoding="utf-8") as f:
+        site_plays = yaml.safe_load(f)
+    play2_vars = site_plays[1].get("vars", {})
     assert play2_vars.get("ansible_python_interpreter") == "/usr/bin/python3", (
         "Play 2 vars must explicitly set ansible_python_interpreter to /usr/bin/python3"
     )
-    assert plays[1].get("gather_facts") is False, (
+    assert site_plays[1].get("gather_facts") is False, (
         "Play 2 gather_facts must be false so facts are gathered after python interpreter sanitization"
     )
 
@@ -556,13 +548,9 @@ def _select_users_task(playbook):
     raise AssertionError(f"per-host user selection task missing in {playbook}")
 
 
-@pytest.mark.parametrize("playbook", [
-    ROOT_DIR / "playbooks" / "site.yml",
-    ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml",
-])
-def test_per_host_user_selection_precedence(playbook):
+def test_per_host_user_selection_precedence():
     """hosts/<hostname> KV admin_users / bootstrap_user override the run-level vars for that host only."""
-    task = _select_users_task(playbook)
+    task = _select_users_task(RESOLVE)
     from jinja2.nativetypes import NativeEnvironment
     env = NativeEnvironment()  # Ansible evaluates templated vars to native types
 
@@ -599,12 +587,34 @@ def test_per_host_user_selection_precedence(playbook):
 def test_per_host_bootstrap_override_survives_extra_vars():
     """Semaphore passes bootstrap_user as an extra var, which outranks set_fact, so the
     host KV override must land in an internal fact that downstream tasks read."""
-    for playbook in (ROOT_DIR / "playbooks" / "site.yml", ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml"):
-        task = _select_users_task(playbook)
-        assert "bootstrap_user" not in task["ansible.builtin.set_fact"], f"{playbook}: must not set_fact bootstrap_user directly"
-        assert "_bootstrap_user" in task["ansible.builtin.set_fact"]
-        content = playbook.read_text(encoding="utf-8")
-        after = content[content.index("Select per-host admin and bootstrap users"):]
-        after = after[after.index("\n", after.index("_bootstrap_user:")):]
-        assert "{{ bootstrap_user }}" not in after.replace("bootstrap_user: \"{{ _bootstrap_user }}\"", ""), \
-            f"{playbook}: downstream tasks must read _bootstrap_user"
+    playbook = RESOLVE
+    task = _select_users_task(playbook)
+    assert "bootstrap_user" not in task["ansible.builtin.set_fact"], f"{playbook}: must not set_fact bootstrap_user directly"
+    assert "_bootstrap_user" in task["ansible.builtin.set_fact"]
+    content = playbook.read_text(encoding="utf-8")
+    after = content[content.index("Select per-host admin and bootstrap users"):]
+    after = after[after.index("\n", after.index("_bootstrap_user:")):]
+    assert "{{ bootstrap_user }}" not in after.replace("bootstrap_user: \"{{ _bootstrap_user }}\"", ""), \
+        f"{playbook}: downstream tasks must read _bootstrap_user"
+
+
+def test_site_imports_shared_connection_plays_with_always_tag():
+    """site.yml must not carry its own resolve/cleanup copies; both shared imports are
+    tagged always so --tags runs still resolve credentials and delete the temp key."""
+    with open(SITE, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+    imports = [p["ansible.builtin.import_playbook"] for p in plays if "ansible.builtin.import_playbook" in p]
+    assert imports == ["common/resolve_connection.yml", "common/cleanup_connection.yml"]
+    assert plays[0]["ansible.builtin.import_playbook"] == "common/resolve_connection.yml"
+    assert plays[-1]["ansible.builtin.import_playbook"] == "common/cleanup_connection.yml"
+    for p in plays:
+        if "ansible.builtin.import_playbook" in p:
+            assert p["tags"] == ["always"]
+    assert len(plays) == 3
+
+
+def test_shared_connection_plays_honour_target_hosts_narrowing():
+    for name in ("resolve_connection.yml", "cleanup_connection.yml"):
+        with open(ROOT_DIR / "playbooks" / "common" / name, "r", encoding="utf-8") as f:
+            hosts = yaml.safe_load(f)[0]["hosts"]
+        assert hosts == "{{ target_hosts | default('servers:loadbalancers') }}"

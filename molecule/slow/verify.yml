@@ -85,17 +85,36 @@
     - name: Verify the monitoring role
       when: "'monitoring' in molecule_roles"
       block:
-        - name: "[VERIFY-MON-CLEANUP-001] Verify legacy node_exporter binary is absent"
+        - name: "[VERIFY-MON-013] Verify legacy node_exporter binary is absent"
           ansible.builtin.assert:
             that:
               - not f.stat['/usr/local/bin/node_exporter'].exists
             fail_msg: "node_exporter binary should have been removed."
 
-        - name: "[VERIFY-MON-CLEANUP-002] Verify legacy node_exporter systemd unit is absent"
+        - name: "[VERIFY-MON-012] Verify legacy node_exporter systemd unit is absent"
           ansible.builtin.assert:
             that:
               - not f.stat['/etc/systemd/system/node_exporter.service'].exists
             fail_msg: "node_exporter systemd service unit file should have been removed."
+
+        - name: "[VERIFY-MON-011] Verify legacy node_exporter service is not active"
+          ansible.builtin.command: systemctl is-active node_exporter
+          register: _ne_active
+          changed_when: false
+          failed_when: _ne_active.rc == 0
+          when: ansible_service_mgr == "systemd"
+
+        - name: "[VERIFY-MON-014] Verify legacy node_exporter user is absent"
+          ansible.builtin.command: getent passwd node_exporter
+          register: _ne_user
+          changed_when: false
+          failed_when: _ne_user.rc == 0
+
+        - name: "[VERIFY-MON-015] Verify legacy node_exporter group is absent"
+          ansible.builtin.command: getent group node_exporter
+          register: _ne_group
+          changed_when: false
+          failed_when: _ne_group.rc == 0
 
         - name: "[VERIFY-MON-001] Verify otelcol system group exists"
           ansible.builtin.assert:

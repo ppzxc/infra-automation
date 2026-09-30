@@ -31,7 +31,7 @@
 5. **`monitoring`**:
    - OpenTelemetry Collector Contrib(`otelcol-contrib`) 바이너리/서비스 배포 및 원격 OTEL 백엔드로 OTLP 아웃바운드 푸시 (`MON-001 ~ MON-006`)
    - `hostmetrics` receiver를 통한 호스트 CPU, Memory, Disk, Network 등 저수준 시스템 메트릭 직접 수집
-   - 레거시 `node_exporter` 데몬/바이너리/유저 자동 정리 (`MON-CLEANUP-001 ~ MON-CLEANUP-005`)
+   - 레거시 `node_exporter` 데몬/바이너리/유저 자동 정리 (`MON-011 ~ MON-015`)
 6. **`cisco_backup`**:
    - Cisco IOS 네트워크 스위치 `show running-config` 백업 자동 수집 및 무결성 검증 (`CISCO-001 ~ CISCO-005`)
    - 백업 파일 최소 권한(`0600`) 저장, 타임스탬프 네이밍 및 보관 주기(`cisco_backup_retention_days`) 자동 정리

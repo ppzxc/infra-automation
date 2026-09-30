@@ -165,7 +165,7 @@
 ### 2.10 역할 구성 및 SPEC-ID 규약
 
 - `roles/monitoring`(otelcol, 기존 `MON-*` 계승), 신규 `roles/backup`(restic/resticprofile, `BAK-*`).
-- SPEC-ID는 검증기 정규식 `[A-Z]+-\d{3}`(`scripts/validate-ansible-specs.py`)을 따라야 합니다. 경로 구분은 번호 대역으로: `MON-0xx`/`BAK-0xx` = modern, `MON-1xx`/`BAK-1xx` = legacy_el6, `MON-2xx`/`BAK-2xx` = legacy_el7. (기존 `MON-CLEANUP-00x`는 정규식에 맞지 않아 현재 3-Way 검증에서 누락되어 있으며, 구현 시 `MON-0xx` 대역으로 재번호 권장.)
+- SPEC-ID는 검증기 정규식 `[A-Z]+-\d{3}`(`scripts/validate-ansible-specs.py`)을 따라야 합니다. 경로 구분은 번호 대역으로: `MON-0xx`/`BAK-0xx` = modern, `MON-1xx`/`BAK-1xx` = legacy_el6, `MON-2xx`/`BAK-2xx` = legacy_el7. (기존 `MON-CLEANUP-00x`는 `MON-011~015`로 재번호됨.)
 - **스펙 테이블 반영 방식**: 검증기는 `docs/*.md` 테이블의 모든 ID에 대응 태스크를 요구(`MISSING IN CODE`)하므로, 미구현 태스크는 `docs/monitoring.md`·`docs/backup.md` 테이블에 넣지 않습니다. 계획 매트릭스는 본 ADR §3에 두고, 태스크가 구현되는 커밋에서 해당 행을 docs 테이블로 옮기며 `molecule/default/verify.yml`의 `[VERIFY-<ID>]`를 함께 추가합니다.
 
 ### 2.11 복구 테스트 Runbook

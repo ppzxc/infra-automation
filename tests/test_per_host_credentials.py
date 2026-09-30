@@ -14,9 +14,8 @@ from jinja2.nativetypes import NativeEnvironment
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-SITE = ROOT_DIR / "playbooks" / "site.yml"
 RESOLVE = ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml"
-PLAYBOOKS = [SITE, RESOLVE]
+PLAYBOOKS = [RESOLVE]
 COMMON_TASKS = ROOT_DIR / "roles" / "common" / "tasks" / "main.yml"
 
 OLD_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOldKeyBlob old@laptop"
@@ -57,11 +56,6 @@ def _run_task(task, ctx):
 
 def _kv(data, status=200):
     return {"status": status, "json": {"data": {"data": data}}}
-
-
-def test_play1_is_identical_in_site_and_resolve_connection():
-    """site.yml Play 1 and common/resolve_connection.yml must stay in lockstep."""
-    assert _play1_tasks(SITE) == _play1_tasks(RESOLVE)
 
 
 # --- removed_users resolution -------------------------------------------------
