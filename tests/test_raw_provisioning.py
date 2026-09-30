@@ -510,12 +510,19 @@ def test_sysctl_live_values_are_aligned_when_drifted(tmp_path):
     assert r.returncode == 0 and not raw_changed(r.stdout)
 
 
+def _service_cmd(systemd):
+    """The host running the tests may itself have systemctl; force the wanted branch."""
+    cmd = raw_service_cmd("auditd")
+    return cmd if systemd else cmd.replace("command -v systemctl", "false")
+
+
 def _service_stubs(tmp_path, systemd, active, enabled):
     log = tmp_path / "calls"
     ok = lambda flag: "exit 0" if flag else "exit 1"
     scripts = {
         "service": 'if [ "$2" = status ]; then %s; fi; echo "service $*" >> %s' % (ok(active), log),
-        "chkconfig": 'if [ "$#" = 1 ]; then %s; fi; echo "chkconfig $*" >> %s' % (ok(enabled), log),
+        "chkconfig": ('if [ "$1" = --list ]; then echo "$2 0:off 3:%s"; exit 0; fi; echo "chkconfig $*" >> %s'
+                      % ("on" if enabled else "off", log)),
     }
     if systemd:
         scripts["systemctl"] = ('case "$1" in is-active) %s;; is-enabled) %s;; *) echo "systemctl $*" >> %s;; esac'
@@ -526,7 +533,7 @@ def _service_stubs(tmp_path, systemd, active, enabled):
 @pytest.mark.parametrize("systemd", [True, False])
 def test_service_started_and_enabled_only_when_needed(tmp_path, systemd):
     bindir, log = _service_stubs(tmp_path, systemd, active=False, enabled=False)
-    r = sh("PATH=%s; %s" % (bindir, raw_service_cmd("auditd")))
+    r = sh("PATH=%s:$PATH; %s" % (bindir, _service_cmd(systemd)))
     assert r.returncode == 0 and raw_changed(r.stdout)
     calls = log.read_text()
     assert "start" in calls and ("enable" in calls or "chkconfig auditd on" in calls)
@@ -535,14 +542,18 @@ def test_service_started_and_enabled_only_when_needed(tmp_path, systemd):
 @pytest.mark.parametrize("systemd", [True, False])
 def test_service_in_desired_state_is_unchanged(tmp_path, systemd):
     bindir, log = _service_stubs(tmp_path, systemd, active=True, enabled=True)
-    r = sh("PATH=%s; %s" % (bindir, raw_service_cmd("auditd")))
+    r = sh("PATH=%s:$PATH; %s" % (bindir, _service_cmd(systemd)))
     assert r.returncode == 0 and not raw_changed(r.stdout)
     assert not log.exists()
 
 
 def test_service_start_failure_is_propagated(tmp_path):
     bindir = _stub_bin(tmp_path, {"systemctl": 'case "$1" in is-active) exit 1;; *) exit 1;; esac'})
-    assert sh("PATH=%s; %s" % (bindir, raw_service_cmd("auditd"))).returncode != 0
+    assert sh("PATH=%s:$PATH; %s" % (bindir, raw_service_cmd("auditd"))).returncode != 0
+
+
+def raw_jail_when(raw):
+    return next(t for n, t in raw.items() if n.startswith("[SEC-032]")).get("when")
 
 
 def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers():
@@ -560,6 +571,7 @@ def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers()
     sudoers = next(t for n, t in raw.items() if n.startswith("[SEC-027]"))
     assert "visudo -cf %s" in sudoers["ansible.builtin.raw"] and "'0440'" in sudoers["ansible.builtin.raw"]
     # each raw content push notifies the shared restart handler
+    assert "ansible_distribution_major_version | int >= 7" in str(raw_jail_when(raw))
     for prefix, handler in (("[SEC-032]", "Restart fail2ban"), ("[SEC-035]", "Restart auditd")):
         assert next(t for n, t in raw.items() if n.startswith(prefix))["notify"] == handler
     handlers = yaml.safe_load((role / "handlers" / "main.yml").read_text())
@@ -568,3 +580,26 @@ def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers()
         assert "raw_provisioning_path" in str(module["when"])
         rawh = next(h for h in handlers if h.get("listen") == name)
         assert "ansible.builtin.raw" in rawh
+        assert "failed_when: false" not in str(rawh) and rawh["failed_when"] is not False
+
+
+def test_sysv_service_enabled_at_boot_not_just_current_runlevel(tmp_path):
+    bindir = _stub_bin(tmp_path, {
+        "service": "exit 0",
+        "chkconfig": 'if [ "$1" = --list ]; then echo "auditd 0:off 3:off"; exit 0; fi; '
+                     'echo "chkconfig $*" >> %s' % (tmp_path / "calls"),
+    })
+    r = sh("PATH=%s:$PATH; %s" % (bindir, raw_service_cmd("auditd").replace("command -v systemctl", "false")))
+    assert r.returncode == 0 and raw_changed(r.stdout)
+    assert "chkconfig auditd on" in (tmp_path / "calls").read_text()
+
+
+def test_sudoers_policy_rejected_by_visudo_keeps_existing_file(tmp_path):
+    bindir = _stub_bin(tmp_path, {"visudo": "exit 1"})
+    dest = tmp_path / "99-security-policy"
+    dest.write_bytes(b"Defaults timestamp_timeout=15\n")
+    cmd = raw_push_cmd("Defaults bogus\n", str(dest), OWNER, GROUP, "0440", "visudo -cf %s")
+    r = sh("PATH=%s:$PATH; %s" % (bindir, cmd))
+    assert r.returncode != 0
+    assert dest.read_bytes() == b"Defaults timestamp_timeout=15\n"
+    assert list(tmp_path.iterdir()) == [dest, tmp_path / "bin"] or set(tmp_path.iterdir()) == {dest, tmp_path / "bin"}

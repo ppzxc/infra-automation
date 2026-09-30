@@ -57,13 +57,15 @@
 - name: Restart fail2ban (raw)
   ansible.builtin.raw: service fail2ban restart
   listen: Restart fail2ban
+  register: security_raw_restart_fail2ban
   changed_when: true
-  failed_when: false
+  failed_when: security_raw_restart_fail2ban.rc | default(0) != 0
   when: raw_provisioning_path | default(false) | bool
 
 - name: Restart auditd (raw)
   ansible.builtin.raw: service auditd restart
   listen: Restart auditd
+  register: security_raw_restart_auditd
   changed_when: true
-  failed_when: false
+  failed_when: security_raw_restart_auditd.rc | default(0) != 0
   when: raw_provisioning_path | default(false) | bool

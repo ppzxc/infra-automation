@@ -247,7 +247,7 @@ def raw_service_cmd(name):
         'systemctl is-enabled @N@ >/dev/null 2>&1 || { systemctl enable @N@ >/dev/null 2>&1 && c=1 || rc=1; }; '
         'else '
         'service @N@ status >/dev/null 2>&1 || { service @N@ start >/dev/null && c=1 || rc=1; }; '
-        'chkconfig @N@ >/dev/null 2>&1 || { chkconfig @N@ on && c=1 || rc=1; }; '
+        'chkconfig --list @N@ 2>/dev/null | grep -q "3:on" || { chkconfig @N@ on && c=1 || rc=1; }; '
         'fi; [ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]',
         N=shlex.quote(name), MARK=CHANGED_MARKER)
 
