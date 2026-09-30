@@ -70,9 +70,7 @@
 
 # Raw Provisioning Path (ADR-0005): the remaining CentOS 6/7 common security
 # tasks (sudoers, fail2ban, auditd) run through ansible.builtin.raw. Same for
-# both OS versions except the auditd rules path and the fail2ban jail: CentOS 6
-# ships fail2ban 0.8.x, which has no jail.d and no %(sshd_log)s, so SEC-031/032
-# apply to CentOS 7 only. Content-push tasks use the
+# both OS versions except the auditd rules path. Content-push tasks use the
 # probe (sha256+mode+owner) sentinel and the write-temp/validate/move helper;
 # each restart is delegated once to the `Restart <service>` handlers.
 - name: Security raw provisioning path, sudoers/fail2ban/auditd (CentOS 6/7)
@@ -122,9 +120,7 @@
       register: sec015_raw_probe
       changed_when: false
       failed_when: false
-      when:
-        - "'__RAW_RC__ 0' in (sec009_raw_installed.stdout | default(''))"
-        - ansible_distribution_major_version | int >= 7
+      when: "'__RAW_RC__ 0' in (sec009_raw_installed.stdout | default(''))"
 
     - name: "[SEC-032] Deploy Fail2ban SSH jail configuration via write-temp/validate/move (raw)"
       ansible.builtin.raw: >-
@@ -135,9 +131,7 @@
       changed_when: >-
         (sec015_raw_probe.stdout | default('')) | raw_push_changed(sec015_raw_content, '0644', 'root', 'root')
       failed_when: sec015_raw_push.rc | default(0) != 0
-      when:
-        - "'__RAW_RC__ 0' in (sec009_raw_installed.stdout | default(''))"
-        - ansible_distribution_major_version | int >= 7
+      when: "'__RAW_RC__ 0' in (sec009_raw_installed.stdout | default(''))"
       notify: Restart fail2ban
 
     - name: "[SEC-033] Check whether auditd is installed (raw)"
