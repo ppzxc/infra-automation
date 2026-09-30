@@ -85,13 +85,13 @@
     - name: Verify the monitoring role
       when: "'monitoring' in molecule_roles"
       block:
-        - name: "[VERIFY-MON-CLEANUP-001] Verify legacy node_exporter binary is absent"
+        - name: "[VERIFY-MON-011] Verify legacy node_exporter binary is absent"
           ansible.builtin.assert:
             that:
               - not f.stat['/usr/local/bin/node_exporter'].exists
             fail_msg: "node_exporter binary should have been removed."
 
-        - name: "[VERIFY-MON-CLEANUP-002] Verify legacy node_exporter systemd unit is absent"
+        - name: "[VERIFY-MON-012] Verify legacy node_exporter systemd unit is absent"
           ansible.builtin.assert:
             that:
               - not f.stat['/etc/systemd/system/node_exporter.service'].exists
