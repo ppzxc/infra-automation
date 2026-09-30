@@ -7,9 +7,10 @@ ssh_max_auth_tries: 3
 ssh_client_alive_interval: 300
 ssh_client_alive_count_max: 2
 
-# Raw Provisioning Path (ADR-0005): set true for CentOS 6/7 targets without a
-# usable Python; SEC-001 is then applied with ansible.builtin.raw.
-raw_provisioning_path: false
+# Raw Provisioning Path (ADR-0005 §2.5): resolved per host by
+# playbooks/common/detect_raw_path.yml (CentOS 6/7 => true; inventory
+# raw_provisioning_path overrides detection). Gates read only this fact.
+_raw_path_effective: false
 
 # SEC-001 directives, shared by the lineinfile path and the raw path.
 ssh_hardening_directives:

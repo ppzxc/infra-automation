@@ -5,7 +5,7 @@
     path: /etc/ssh/sshd_config.d/01-permitrootlogin.conf
     state: absent
   notify: Restart sshd
-  when: not raw_provisioning_path | bool
+  when: not _raw_path_effective | bool
 
 - name: "[SEC-001] Configure SSH Hardening parameters"
   ansible.builtin.lineinfile:
@@ -15,17 +15,17 @@
     state: present
     validate: '/usr/sbin/sshd -t -f %s'
   loop: "{{ ssh_hardening_directives }}"
-  when: not raw_provisioning_path | bool
+  when: not _raw_path_effective | bool
   notify: Restart sshd
 
 # Raw Provisioning Path (ADR-0005): CentOS 6/7 targets cannot run AnsiballZ
 # modules, so SEC-001 is applied with ansible.builtin.raw. Enabled with
-# raw_provisioning_path=true; raw is skipped under --check (ADR-0005 Option A).
+# _raw_path_effective=true; raw is skipped under --check (ADR-0005 Option A).
 # Content-push sentinel: read the current file, compute the desired content
 # locally (lineinfile semantics), probe remote sha256+mode, and report changed
 # only when either differs.
 - name: SEC-001 raw provisioning path (CentOS 6/7)
-  when: raw_provisioning_path | bool
+  when: _raw_path_effective | bool
   vars:
     sec001_raw_dest: /etc/ssh/sshd_config
     sec001_raw_owner: root
@@ -74,7 +74,7 @@
 # probe (sha256+mode+owner) sentinel and the write-temp/validate/move helper;
 # each restart is delegated once to the `Restart <service>` handlers.
 - name: Security raw provisioning path, sudoers/fail2ban/auditd (CentOS 6/7)
-  when: raw_provisioning_path | default(false) | bool
+  when: _raw_path_effective | default(false) | bool
   block:
     - name: "[SEC-026] Probe sudo policy hash and mode (raw)"
       ansible.builtin.raw: "{{ '/etc/sudoers.d/99-security-policy' | raw_probe_cmd }}"
@@ -198,7 +198,7 @@
     state: present
   when:
     - ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-006] Ensure firewalld service is started and enabled (RHEL/Rocky 7+)"
   ansible.builtin.service:
@@ -207,7 +207,7 @@
     enabled: true
   when:
     - ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 # firewalld's Python bindings (firewall.client, backed by PyGObject's _gi.so)
 # hard-lock to the CPython minor version they were compiled against (e.g.
@@ -244,12 +244,12 @@
   failed_when: false
   when:
     - ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-006-PROBE-FACT] Record firewalld module usability (defaults to usable when the probe did not run, e.g. Debian)"
   ansible.builtin.set_fact:
     firewalld_module_usable: "{{ (firewalld_module_probe.rc | default(0)) == 0 }}"
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-006-UNBIND-DROP] Remove physical network interface from drop zone if moving to another zone"
   ansible.posix.firewalld:
@@ -268,7 +268,7 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface_zone | default('public')) != "drop"
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 - name: "[SEC-006-UNBIND-DROP-CLI] Remove physical network interface from drop zone if moving to another zone (firewall-cmd fallback)"
@@ -294,7 +294,7 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface_zone | default('public')) != "drop"
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
   notify: Reload firewalld
 
@@ -310,7 +310,7 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-006-IFACE-CLI-PROBE] Look up the zone the physical network interface is currently bound to (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -328,7 +328,7 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-006-IFACE-CLI] Bind physical network interface to interface zone (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -348,7 +348,7 @@
     - ansible_distribution_major_version | int >= 7
     - (firewall_interface | default(ansible_default_ipv4.interface | default('bond0'))) | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-006-MASQ] Ensure masquerade is disabled on all zones except external"
@@ -363,7 +363,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   changed_when: false
   failed_when: false
 
@@ -380,7 +380,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 9
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   changed_when: false
   failed_when: false
 
@@ -400,7 +400,7 @@
     - ansible_distribution_major_version | int >= 7
     - ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 - name: "[SEC-006-CLEAN-PUBLIC-CLI] Clean up public zone default open services when restricted (firewall-cmd fallback)"
@@ -421,7 +421,7 @@
     - ansible_distribution_major_version | int >= 7
     - ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
   notify: Reload firewalld
 
@@ -444,7 +444,7 @@
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 - name: "[SEC-006-CLEAN-ZONE-DEFAULTS-CLI] Clean up default unneeded services from dmz, work, internal zones (firewall-cmd fallback)"
@@ -468,7 +468,7 @@
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
   notify: Reload firewalld
 
@@ -485,7 +485,7 @@
     - ansible_distribution_major_version | int >= 7
     - ssh_allowed_source_ips is defined
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 - name: "[SEC-006-CLEAN-PUBLIC-RICH-CLI] Clean up stale rich rules from public zone (firewall-cmd fallback)"
@@ -503,7 +503,7 @@
     - ansible_distribution_major_version | int >= 7
     - ssh_allowed_source_ips is defined
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
   notify: Reload firewalld
 
@@ -521,7 +521,7 @@
     - ssh_allowed_source_ips is defined
     - ssh_allowed_source_ips | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-020-CLI] Configure custom firewall ingress rules with source IP restrictions (firewalld) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -539,7 +539,7 @@
     - ssh_allowed_source_ips is defined
     - ssh_allowed_source_ips | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-007-SSH] Ensure SSH service is enabled in source zone"
@@ -555,7 +555,7 @@
     - ssh_allowed_source_ips is defined
     - ssh_allowed_source_ips | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-007-SSH-CLI] Ensure SSH service is enabled in source zone (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -572,7 +572,7 @@
     - ssh_allowed_source_ips is defined
     - ssh_allowed_source_ips | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-006-CLEAN-STALE-SOURCES] Clean up stale sources from conflicting zones (trusted, drop)"
@@ -588,7 +588,7 @@
     - ansible_distribution_major_version | int >= 7
     - item.0 != (firewall_source_zone | default('work'))
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 - name: "[SEC-006-CLEAN-STALE-SOURCES-CLI] Clean up stale sources from conflicting zones (trusted, drop) (firewall-cmd fallback)"
@@ -606,7 +606,7 @@
     - ansible_distribution_major_version | int >= 7
     - item.0 != (firewall_source_zone | default('work'))
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
   notify: Reload firewalld
 
@@ -624,7 +624,7 @@
     - firewall_allowed_services is defined
     - firewall_allowed_services | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-007-SERVICES-CLI] Allow standard services via firewalld (RHEL/Rocky 7+) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -642,7 +642,7 @@
     - firewall_allowed_services is defined
     - firewall_allowed_services | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-016] Configure dmz zone for monitoring sources (RHEL/Rocky 7+)"
@@ -659,7 +659,7 @@
     - monitoring_allowed_subnets is defined
     - monitoring_allowed_subnets | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-016-CLI] Configure dmz zone for monitoring sources (RHEL/Rocky 7+) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -677,7 +677,7 @@
     - monitoring_allowed_subnets is defined
     - monitoring_allowed_subnets | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-007-DMZ-PORTS] Allow monitoring metric collection ports in dmz zone (RHEL/Rocky 7+)"
@@ -694,7 +694,7 @@
     - firewall_dmz_ports is defined
     - firewall_dmz_ports | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-007-DMZ-PORTS-CLI] Allow monitoring metric collection ports in dmz zone (RHEL/Rocky 7+) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -712,7 +712,7 @@
     - firewall_dmz_ports is defined
     - firewall_dmz_ports | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-017] Configure internal zone for private VPC subnets (RHEL/Rocky 7+)"
@@ -729,7 +729,7 @@
     - internal_allowed_subnets is defined
     - internal_allowed_subnets | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-017-CLI] Configure internal zone for private VPC subnets (RHEL/Rocky 7+) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -747,7 +747,7 @@
     - internal_allowed_subnets is defined
     - internal_allowed_subnets | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-007-INTERNAL-PORTS] Allow internal backend ports in internal zone (RHEL/Rocky 7+)"
@@ -764,7 +764,7 @@
     - firewall_internal_ports is defined
     - firewall_internal_ports | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-007-INTERNAL-PORTS-CLI] Allow internal backend ports in internal zone (RHEL/Rocky 7+) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -782,7 +782,7 @@
     - firewall_internal_ports is defined
     - firewall_internal_ports | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-007] Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)"
@@ -799,7 +799,7 @@
     - firewall_allowed_tcp_ports is defined
     - ((firewall_allowed_tcp_ports | default([])) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list | length) > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-007-CLI] Allow incoming TCP ports via firewalld (RHEL/Rocky 7+) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -817,7 +817,7 @@
     - firewall_allowed_tcp_ports is defined
     - ((firewall_allowed_tcp_ports | default([])) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list | length) > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 # Raw Provisioning Path (ADR-0005), CentOS 7 only: ansible.posix.firewalld needs
@@ -829,7 +829,7 @@
 # `Reload firewalld` handler (raw) applies it to the runtime.
 - name: Security raw firewalld path (CentOS 7)
   when:
-    - raw_provisioning_path | default(false) | bool
+    - _raw_path_effective | default(false) | bool
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 7
   block:
@@ -935,7 +935,7 @@
   loop: "{{ (firewall_allowed_tcp_ports | default([])) if (ssh_allowed_source_ips is not defined or ssh_allowed_source_ips | length == 0) else (firewall_allowed_tcp_ports | default([]) | reject('equalto', (ssh_port | default(22) | string)) | reject('equalto', (ssh_port | default(22) | int)) | list) }}"
   when:
     - ansible_distribution == "CentOS" and (ansible_distribution_major_version | int == 6)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 # 5. Fail2ban configuration (Optional / EPEL dependent)
 - name: "[SEC-009] Install fail2ban package if available"
@@ -944,7 +944,7 @@
     state: present
   register: fail2ban_install_result
   failed_when: false
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-010] Ensure fail2ban is running and enabled (if installed)"
   ansible.builtin.service:
@@ -953,7 +953,7 @@
     enabled: true
   when:
     - fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 # 6. SELinux configuration (Permissive mode)
@@ -964,7 +964,7 @@
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
   # geerlingguy/docker-*-ansible containers have no SELinux kernel subsystem at
   # all (/sys/fs/selinux is empty, getenforce is absent, /etc/selinux/config
@@ -989,7 +989,7 @@
     mode: '0600'
   when:
     - ansible_os_family == "RedHat"
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Restart auditd
   failed_when: false
 
@@ -1000,7 +1000,7 @@
     enabled: true
   when:
     - ansible_os_family == "RedHat"
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   failed_when: false
 
 # 8. Sudo Policy & Log segregation
@@ -1014,7 +1014,7 @@
     group: root
     mode: '0440'
     validate: 'visudo -cf %s'
-  when: not (raw_provisioning_path | default(false) | bool)
+  when: not (_raw_path_effective | default(false) | bool)
 
 # 9. Fail2ban SSH jail deployment
 - name: "[SEC-015] Deploy Fail2ban SSH jail configuration"
@@ -1026,7 +1026,7 @@
     mode: '0644'
   when:
     - fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Restart fail2ban
   failed_when: false
 
@@ -1057,7 +1057,7 @@
     - firewall_ingress_rules is defined
     - firewall_ingress_rules | length > 0
     - firewalld_module_usable | default(true)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[SEC-020-RICH-CLI] Configure custom rich rules with source IP restrictions (firewalld) (firewall-cmd fallback)"
   ansible.builtin.command:
@@ -1075,7 +1075,7 @@
     - firewall_ingress_rules is defined
     - firewall_ingress_rules | length > 0
     - not (firewalld_module_usable | default(true))
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
   notify: Reload firewalld
 
 - name: "[SEC-021] Configure custom firewall ingress rules with source IP restrictions (iptables)"
@@ -1091,7 +1091,7 @@
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 6
     - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
-    - not (raw_provisioning_path | default(false) | bool)
+    - not (_raw_path_effective | default(false) | bool)
 
 # Raw Provisioning Path (ADR-0005), CentOS 6 only: the iptables module needs
 # AnsiballZ, so SEC-008/SEC-021 are replaced by probe+mutate raw pairs. Each
@@ -1101,7 +1101,7 @@
 # CentOS 7 (firewalld) is unaffected.
 - name: Security raw iptables path (CentOS 6)
   when:
-    - raw_provisioning_path | default(false) | bool
+    - _raw_path_effective | default(false) | bool
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 6
   block:
@@ -1147,7 +1147,7 @@
 # when something changed. CentOS 6 keeps SELinux untouched (module task is >= 7).
 - name: Security raw SELinux path (CentOS 7)
   when:
-    - raw_provisioning_path | default(false) | bool
+    - _raw_path_effective | default(false) | bool
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 7
   block:

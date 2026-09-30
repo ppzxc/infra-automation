@@ -6,7 +6,13 @@
 - name: Maintenance and Security Updates for Overseer Control Plane
   hosts: overseer
   become: true
-  gather_facts: true
+  gather_facts: false
+  pre_tasks:
+    - name: Detect raw provisioning path
+      ansible.builtin.import_tasks: common/detect_raw_path.yml
+    - name: Gather facts (skipped on raw path, OS facts come from detection)
+      ansible.builtin.setup:
+      when: not (_raw_path_effective | default(false) | bool)
   roles:
     - role: common
       tags: [common, update]
@@ -20,7 +26,13 @@
 - name: Maintenance and Security Updates for Target Hosts
   hosts: servers
   become: true
-  gather_facts: true
+  gather_facts: false
+  pre_tasks:
+    - name: Detect raw provisioning path
+      ansible.builtin.import_tasks: common/detect_raw_path.yml
+    - name: Gather facts (skipped on raw path, OS facts come from detection)
+      ansible.builtin.setup:
+      when: not (_raw_path_effective | default(false) | bool)
   roles:
     - role: common
       tags: [common, update]
