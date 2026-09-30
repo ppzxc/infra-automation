@@ -67,16 +67,38 @@
       state: present
     when: enable_otelcol | default(true) | bool
 
+  - name: "[MON-067] Look up the docker socket group (only when docker metrics are enabled)"
+    ansible.builtin.getent:
+      database: group
+      key: "{{ otel_docker_group }}"
+    register: _otelcol_docker_group
+    failed_when: false
+    check_mode: false
+    when:
+      - enable_otelcol | default(true) | bool
+      - host_agents_inputs.otel_docker_metrics | bool
+
   - name: "[MON-002] Create otelcol system user"
     ansible.builtin.user:
       name: "{{ otelcol_user }}"
       group: "{{ otelcol_group }}"
-      groups: "{{ 'adm' if ansible_os_family == 'Debian' else 'systemd-journal' }}"
+      groups: >-
+        {{ ['adm' if ansible_os_family == 'Debian' else 'systemd-journal']
+           + ([otel_docker_group] if (_otelcol_docker_group.ansible_facts.getent_group | default({})) | length > 0 else []) }}
       append: true
       system: true
       shell: /sbin/nologin
       create_home: false
       state: present
+    when: enable_otelcol | default(true) | bool
+
+  - name: "[MON-061] Ensure otelcol persistent storage directory exists (filelog checkpoints and log queue)"
+    ansible.builtin.file:
+      path: "{{ otelcol_storage_dir }}"
+      state: directory
+      owner: "{{ otelcol_user }}"
+      group: "{{ otelcol_group }}"
+      mode: '0750'
     when: enable_otelcol | default(true) | bool
 
   - name: "[MON-003] Deliver pinned OpenTelemetry Collector Contrib binary"
@@ -94,6 +116,31 @@
 - name: "Apply otelcol configuration"
   tags: [agents_config, otel]
   block:
+  - name: "[MON-060] Assert OpenObserve endpoint is configured without a trailing slash"
+    ansible.builtin.assert:
+      that:
+        - o2_endpoint | length > 0
+        - not (o2_endpoint is match('.*/$'))
+        - o2_endpoint is match('^https?://')
+      fail_msg: >-
+        {{ inventory_hostname }}: o2_endpoint(inventory/group_vars/servers.yml)가 비어 있거나 형식이 잘못되었습니다
+        (http(s)://host:port, 끝 슬래시 금지 — <endpoint>/api/<org> 경로가 404가 됩니다).
+      quiet: true
+    when: enable_otelcol | default(true) | bool
+
+  - name: "[MON-062] Detect rsyslog (journald is collected only where rsyslog is absent)"
+    ansible.builtin.stat:
+      path: "{{ item }}"
+    loop: [/usr/sbin/rsyslogd, /sbin/rsyslogd]
+    register: _otelcol_rsyslog
+    check_mode: false
+    when: enable_otelcol | default(true) | bool
+
+  - name: "[MON-064] Decide whether the journald receiver is needed"
+    ansible.builtin.set_fact:
+      host_agents_journald: "{{ _otelcol_rsyslog.results | map(attribute='stat.exists') | select | list | length == 0 }}"
+    when: enable_otelcol | default(true) | bool
+
   - name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"
     block:
       - name: "[MON-004-DIR] Ensure OpenTelemetry configuration directory exists"
@@ -103,6 +150,25 @@
           owner: root
           group: "{{ otelcol_group }}"
           mode: '0750'
+
+      - name: "[MON-063] Ensure otelcol secrets directory exists"
+        ansible.builtin.file:
+          path: "{{ otelcol_secrets_dir }}"
+          state: directory
+          owner: root
+          group: root
+          mode: '0700'
+
+      - name: "[MON-065] Deploy otelcol secrets env file (0600, no_log, no diff)"
+        ansible.builtin.template:
+          src: secrets.env.j2
+          dest: "{{ otelcol_secrets_path }}"
+          owner: root
+          group: root
+          mode: '0600'
+        no_log: true
+        diff: false
+        notify: Restart otelcol-contrib
 
       - name: "[MON-004-CONF] Deploy OpenTelemetry Collector configuration"
         ansible.builtin.template:
@@ -140,6 +206,7 @@
         User={{ otelcol_user }}
         Group={{ otelcol_group }}
         Type=simple
+        EnvironmentFile={{ otelcol_secrets_path }}
         ExecStart=/usr/local/bin/otelcol-contrib --config={{ otelcol_config_path }}
         Restart=always
         RestartSec=5
@@ -161,6 +228,15 @@
       - enable_otelcol | default(true) | bool
       - ansible_service_mgr == "systemd"
     notify: Restart otelcol-contrib
+
+  - name: "[MON-066] Reload systemd units when the otelcol unit changed"
+    ansible.builtin.systemd:
+      daemon_reload: true
+    when:
+      - enable_otelcol | default(true) | bool
+      - ansible_service_mgr == "systemd"
+      - otelcol_unit_created is changed
+    changed_when: true
 
   - name: "[MON-005-SYSV] Create SysVinit service script for otelcol-contrib"
     ansible.builtin.template:

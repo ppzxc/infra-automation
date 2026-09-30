@@ -113,7 +113,8 @@ def test_role_tags_wired():
     inner = {t["name"].split("]")[0].lstrip("[") for b in main[2:] for t in b["block"] if "name" in t}
     assert {"MON-011", "MON-001", "MON-003"} <= inner
     config = next(b for b in main if b["name"] == "Apply otelcol configuration")
-    assert config["block"][0]["name"].startswith("[MON-004]")
+    assert config["block"][0]["name"].startswith("[MON-060]")
+    assert any(t["name"].startswith("[MON-004]") for t in config["block"])
     agents = _plays("host_agents.yml")[1]
     assert agents["roles"][0]["tags"] == ["otel"]
 
@@ -594,3 +595,119 @@ def test_otelcol_pinned_version_table_is_consistent():
     assert set(sums) == {"amd64", "arm64"}
     assert all(len(h) == 64 and int(h, 16) >= 0 for h in sums.values())
     assert ver != "0.108.0"
+
+
+# --------------------------------------------------------------------------
+# Collection config (Ticket-4): template rendered with Ansible's own Jinja environment
+# --------------------------------------------------------------------------
+
+def _render_config(tmp_path, **over):
+    vars_ = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    vars_.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8")))
+    vars_.update({
+        "inventory_hostname": "h1", "host_agents_os_type": "linux", "host_agents_os_description": "Rocky Linux 9",
+        "host_agents_journald": False, "o2_endpoint": "https://o2.example:5080", "o2_org": "default",
+        "host_agents_secrets": {"o2_ingest_token": "s3cr3t-token"},
+        "host_agents_inputs": {"otel_docker_metrics": False, "otel_logs": [
+            {"path": "/var/log/secure", "stream": "security_logs"},
+            {"path": "/var/log/messages", "stream": "system_logs"},
+            {"path": "/var/log/app/*.log", "stream": "app_logs"}]},
+    })
+    vars_.update(over)
+    (tmp_path / "vars.yml").write_text(yaml.safe_dump(vars_))
+    pb = tmp_path / "render.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+        "vars_files": [str(tmp_path / "vars.yml")],
+        "tasks": [{"ansible.builtin.template": {"src": str(ROLE / "templates" / "otelcol-contrib.yaml.j2"),
+                                                 "dest": str(tmp_path / "config.yaml")}},
+                  {"ansible.builtin.template": {"src": str(ROLE / "templates" / "secrets.env.j2"),
+                                                 "dest": str(tmp_path / "secrets.env")}}]}]))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    return yaml.safe_load((tmp_path / "config.yaml").read_text()), (tmp_path / "config.yaml").read_text()
+
+
+def test_config_routes_logs_by_stream_to_otlphttp_with_stream_name(tmp_path):
+    cfg, _ = _render_config(tmp_path)
+    for stream in ("security_logs", "system_logs", "app_logs"):
+        exp = cfg["exporters"][f"otlphttp/{stream}"]
+        assert exp["endpoint"] == "https://o2.example:5080/api/default"
+        assert exp["headers"]["stream-name"] == stream
+        assert exp["headers"]["Authorization"] == "Basic ${env:O2_BASIC_AUTH}"
+        q = exp["sending_queue"]
+        assert q["storage"] == "file_storage" and q["sizer"] == "bytes" and q["block_on_overflow"] is True
+        assert exp["retry_on_failure"]["max_elapsed_time"] == 0
+        assert cfg["service"]["pipelines"][f"logs/{stream}"]["exporters"] == [f"otlphttp/{stream}"]
+    assert {c["pipelines"][0] for c in cfg["connectors"]["routing/logs"]["table"]} == {
+        "logs/security_logs", "logs/system_logs"}
+    assert cfg["connectors"]["routing/logs"]["default_pipelines"] == ["logs/app_logs"]
+    assert not any(k.startswith("otlp/") for k in cfg["exporters"])            # no legacy gRPC exporter
+
+
+def test_config_filelog_checkpoints_and_start_at_end(tmp_path):
+    cfg, _ = _render_config(tmp_path)
+    for stream in ("security_logs", "system_logs", "app_logs"):
+        rcv = cfg["receivers"][f"filelog/{stream}"]
+        assert rcv["storage"] == "file_storage" and rcv["start_at"] == "end"
+        assert rcv["attributes"]["log_type"] == stream
+    assert cfg["extensions"]["file_storage"]["compaction"]["on_rebound"] is True
+    assert "operators" not in cfg["receivers"]["filelog/security_logs"]          # raw bodies, no parsing
+
+
+def test_config_metrics_pipeline_is_separate_droppable_and_60s(tmp_path):
+    cfg, _ = _render_config(tmp_path)
+    assert cfg["receivers"]["hostmetrics"]["collection_interval"] == "60s"
+    assert set(cfg["receivers"]["hostmetrics"]["scrapers"]) == {
+        "cpu", "memory", "load", "filesystem", "disk", "network", "paging", "processes"}
+    metrics = cfg["service"]["pipelines"]["metrics"]
+    assert metrics["exporters"] == ["otlphttp/metrics"]
+    mq = cfg["exporters"]["otlphttp/metrics"]["sending_queue"]
+    assert mq["block_on_overflow"] is False and "storage" not in mq
+
+
+def test_config_optional_receivers_are_off_by_default(tmp_path):
+    cfg, _ = _render_config(tmp_path)
+    assert {"journald", "docker_stats", "otlp"}.isdisjoint(cfg["receivers"])
+    on, _ = _render_config(tmp_path, host_agents_journald=True, otel_otlp_enabled=True,
+                           host_agents_inputs={"otel_docker_metrics": True, "otel_logs": [
+                               {"path": "/var/log/secure", "stream": "security_logs"}]})
+    assert {"journald", "docker_stats", "otlp"} <= set(on["receivers"])
+    assert on["receivers"]["otlp"]["protocols"]["grpc"]["endpoint"] == "127.0.0.1:4317"   # loopback only
+    assert "docker_stats" in on["service"]["pipelines"]["metrics"]["receivers"]
+
+
+def test_config_sets_host_identity_and_never_contains_the_token(tmp_path):
+    cfg, text = _render_config(tmp_path, o2_ca_file="/etc/ca.pem")
+    attrs = {a["key"]: a["value"] for a in cfg["processors"]["resource/host"]["attributes"]}
+    assert attrs == {"host.name": "h1", "os.type": "linux", "os.description": "Rocky Linux 9"}
+    assert "s3cr3t-token" not in text
+    assert cfg["exporters"]["otlphttp/metrics"]["tls"]["ca_file"] == "/etc/ca.pem"
+    import base64
+    env = (tmp_path / "secrets.env").read_text()
+    assert f"O2_BASIC_AUTH={base64.b64encode(b'default:s3cr3t-token').decode()}" in env
+
+
+def test_secrets_env_task_is_private_and_undiffed():
+    main = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    flat = []
+
+    def walk(items):
+        for t in items:
+            flat.append(t)
+            walk(t.get("block", []))
+    walk(main)
+    env = next(t for t in flat if t.get("name", "").startswith("[MON-065]"))
+    assert env["ansible.builtin.template"]["mode"] == "0600"
+    assert env["no_log"] is True and env["diff"] is False
+    unit = next(t for t in flat if t.get("name", "").startswith("[MON-005]"))["ansible.builtin.copy"]["content"]
+    assert "EnvironmentFile=" in unit and "CAP_DAC_READ_SEARCH" in unit and "User={{ otelcol_user }}" in unit
+
+
+def test_docker_group_is_added_only_via_lookup_and_rsyslog_probes_both_paths():
+    text = (ROLE / "tasks" / "main.yml").read_text(encoding="utf-8")
+    assert "[MON-067]" in text and "otel_docker_group" in text
+    assert "/usr/sbin/rsyslogd, /sbin/rsyslogd" in text
+    consts = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))
+    assert consts["host_agents_log_streams"] == ["security_logs", "system_logs", "app_logs"]

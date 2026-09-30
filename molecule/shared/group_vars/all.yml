@@ -88,6 +88,8 @@ firewall_ingress_rules:
 # OpenBao-supplied values (hosts/<host>/agents, secret/agents/*) as fixtures.
 # host_agents_kv_fixture makes the role skip every OpenBao lookup.
 _is_already_provisioned: true
+o2_endpoint: "https://openobserve.molecule.invalid:5080"
+o2_org: "default"
 host_agents_kv_fixture:
   host:
     o2_ingest_token: "molecule-fixture-o2-ingest"  # gitleaks:allow (molecule fixture, not a secret)

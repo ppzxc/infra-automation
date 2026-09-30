@@ -85,6 +85,16 @@
 
 ---
 
+## 3-3. 수집 설정 (`otelcol-contrib.yaml.j2`, `MON-060~065`)
+
+- **수신**: 스트림별 `filelog/<stream>`(`start_at: end`, `storage: file_storage`, `log_type` 속성, 본문 원문) + `hostmetrics`(60s, 8 스크레이퍼). journald는 `/usr/sbin/rsyslogd`가 없는 호스트에서만, `docker_stats`는 `otel_docker_metrics: true`인 호스트에서만, 로컬 OTLP 수신기는 `otel_otlp_enabled: true`일 때만 추가됩니다(기본 off).
+- **라우팅**: `logs/in`(memory_limiter, `resource/host`: `host.name`=인벤토리 호스트명, `os.type`, `os.description`) → `routing/logs`(`log_type`) → `security_logs`/`system_logs`/`app_logs` 파이프라인 → 스트림별 `otlphttp` exporter(`stream-name` 헤더).
+- **전송**: `<o2_endpoint>/api/<o2_org>`(끝 슬래시 금지), `Authorization: Basic ${env:O2_BASIC_AUTH}`, 사설 CA는 `o2_ca_file`. 로그 exporter는 `file_storage` 영속 bytes 큐(`otel_log_queue_bytes`) + `block_on_overflow: true` + `max_elapsed_time: 0`; 메트릭은 별도 메모리 큐(`block_on_overflow: false`) 파이프라인입니다. `file_storage`는 `compaction.on_rebound: true`.
+- **시크릿**: `/etc/otelcol-contrib/secrets.env`(`0600`, `no_log`, `diff: false`)에만 있고 설정은 `${env:…}`로 참조합니다. systemd 유닛은 비root `otelcol` + `CAP_DAC_READ_SEARCH` + `EnvironmentFile`.
+- **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 `inventory/group_vars/servers.yml`(Git)에서 지정합니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.
+
+---
+
 ## 4. 태스크 매트릭스 (Task Matrix)
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
@@ -130,3 +140,11 @@
 | `MON-052` | `Find installed version directories` | `ansible.builtin.find` | All | 읽기 전용, `check_mode: false` |
 | `MON-053` | `Prune versions older than the previous one` | `ansible.builtin.file` | All | 현재 + 직전 1개만 보존(재실행에도 직전 유지) |
 | `MON-054` | `Switch otelcol-contrib install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-051`~`053`) |
+| `MON-060` | `Assert OpenObserve endpoint is configured without a trailing slash` | `ansible.builtin.assert` | modern | 읽기 전용 (비어 있거나 끝 슬래시면 호스트 실패) |
+| `MON-061` | `Ensure otelcol persistent storage directory exists (filelog checkpoints and log queue)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` |
+| `MON-062` | `Detect rsyslog (journald is collected only where rsyslog is absent)` | `ansible.builtin.stat` | modern | 읽기 전용, `check_mode: false` (`/usr/sbin`·`/sbin`) |
+| `MON-063` | `Ensure otelcol secrets directory exists` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` (`0700`) |
+| `MON-064` | `Decide whether the journald receiver is needed` | `ansible.builtin.set_fact` | modern | 순수 함수 |
+| `MON-065` | `Deploy otelcol secrets env file (0600, no_log, no diff)` | `ansible.builtin.template` | modern | Checksum 비교 (`no_log`, `diff: false`) |
+| `MON-066` | `Reload systemd units when the otelcol unit changed` | `ansible.builtin.systemd` | modern | 유닛 변경 시에만 실행 (`daemon_reload`) |
+| `MON-067` | `Look up the docker socket group (only when docker metrics are enabled)` | `ansible.builtin.getent` | modern | 읽기 전용, `check_mode: false` (그룹이 있으면 `MON-002`가 otelcol을 추가) |

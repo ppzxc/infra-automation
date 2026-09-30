@@ -33,3 +33,6 @@ host_agents_checksums:
       arm64: "cd5de93213a0dbb90e4998b3b9e4e15ed691ec635cf7cf4147f95799fb16b676"
 
 host_agents_install_root: /opt/host-agents
+
+# 로그 스트림 (라우팅 테이블·exporter·파이프라인이 공유)
+host_agents_log_streams: [security_logs, system_logs, app_logs]

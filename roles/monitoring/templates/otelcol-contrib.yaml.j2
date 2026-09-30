@@ -1,115 +1,131 @@
-# OpenTelemetry Collector Contrib Configuration for Overseer Managed Host
-# Ingests Host Metrics & Docker metrics, system logs, and forwards to Central OTLP Backend
+# Ansible managed — ISMS 수집 표준 (ADR-0006 §2.3, §2.7). 시크릿은 포함하지 않으며 ${env:…}로 secrets.env를 참조한다.
+{% macro o2_common(stream=none) %}
+    endpoint: {{ (o2_endpoint ~ '/api/' ~ o2_org) | to_json }}
+    headers:
+      Authorization: "Basic ${env:O2_BASIC_AUTH}"
+{% if stream %}
+      stream-name: {{ stream }}
+{% endif %}
+{% if o2_ca_file | length > 0 %}
+    tls:
+      ca_file: {{ o2_ca_file | to_json }}
+{% endif %}
+{% endmacro %}
+extensions:
+  file_storage:
+    directory: {{ otelcol_storage_dir }}
+    compaction:
+      on_rebound: true
+      directory: {{ otelcol_storage_dir }}
+      rebound_needed_threshold_mib: 100
+      rebound_trigger_threshold_mib: 10
 
 receivers:
-{% if docker_metrics_enabled | default(false) | bool %}
-  # 1. Prometheus Scrape receiver for Docker daemon metrics (when enabled)
-  prometheus:
-    config:
-      scrape_configs:
-        - job_name: 'docker-engine-local'
-          scrape_interval: 15s
-          static_configs:
-            - targets: ['{{ docker_metrics_address | default("127.0.0.1:9323") }}']
-{% endif %}
-
-  # 2. Hostmetrics receiver for kernel, system & hardware stats
-  hostmetrics:
-    collection_interval: {{ otel_hostmetrics_interval | default("15s") }}
-    scrapers:
-      {{ otel_hostmetrics_scrapers | default({
-        'cpu': {},
-        'memory': {},
-        'disk': {},
-        'filesystem': {},
-        'load': {},
-        'network': {},
-        'paging': {},
-        'processes': {}
-      }) | to_nice_yaml(indent=2) | indent(6) }}
-
-  # 3. Filelog receiver for critical system and audit logs (ISMS/ISMS-P Baseline)
-  filelog/system:
+{% for stream, entries in host_agents_inputs.otel_logs | groupby('stream') %}
+  filelog/{{ stream }}:
     include:
-{% for log_path in otel_system_logs | default([
-  '/var/log/messages',
-  '/var/log/syslog',
-  '/var/log/secure',
-  '/var/log/auth.log',
-  '/var/log/sudo.log',
-  '/var/log/audit/audit.log',
-  '/var/log/cron*',
-  '/var/log/fail2ban.log',
-  '/var/log/dnf.log',
-  '/var/log/yum.log',
-  '/var/log/dpkg.log',
-  '/var/log/firewalld'
-]) %}
-      - {{ log_path }}
+{% for entry in entries %}
+      - {{ entry.path | to_json }}
 {% endfor %}
     start_at: end
+    include_file_path: true
+    storage: file_storage
+    attributes:
+      log_type: {{ stream }}
     retry_on_failure:
       enabled: true
-
-  # 4. Standard OTLP ingestion for application containers/services (Metrics, Logs, and Distributed Tracing)
+{% endfor %}
+{% if host_agents_journald | default(false) | bool %}
+  journald:
+    start_at: end
+    storage: file_storage
+    operators:
+      - type: add
+        field: attributes.log_type
+        value: system_logs
+{% endif %}
+  hostmetrics:
+    collection_interval: {{ otel_hostmetrics_interval }}
+    scrapers:
+{{ otel_hostmetrics_scrapers | to_nice_yaml(indent=2) | indent(6, true) }}
+{% if host_agents_inputs.otel_docker_metrics | bool %}
+  docker_stats:
+    endpoint: {{ otel_docker_endpoint }}
+    collection_interval: {{ otel_hostmetrics_interval }}
+{% endif %}
+{% if otel_otlp_enabled | bool %}
   otlp:
     protocols:
       grpc:
-        endpoint: "0.0.0.0:{{ otel_otlp_grpc_port | default(4317) }}"
+        endpoint: "{{ otel_otlp_bind }}:{{ otel_otlp_grpc_port }}"
       http:
-        endpoint: "0.0.0.0:{{ otel_otlp_http_port | default(4318) }}"
+        endpoint: "{{ otel_otlp_bind }}:{{ otel_otlp_http_port }}"
+{% endif %}
 
 processors:
   memory_limiter:
     check_interval: 1s
     limit_percentage: 75
     spike_limit_percentage: 20
-
   batch:
     send_batch_size: 1024
     timeout: 1s
+  resource/host:
+    attributes:
+      - key: host.name
+        value: {{ inventory_hostname | to_json }}
+        action: upsert
+      - key: os.type
+        value: {{ host_agents_os_type | to_json }}
+        action: upsert
+      - key: os.description
+        value: {{ host_agents_os_description | to_json }}
+        action: upsert
 
-  resourcedetection:
-    detectors: [env, system]
-    timeout: 2s
-    system:
-      hostname_sources: [os]
+connectors:
+  routing/logs:
+    default_pipelines: [logs/app_logs]
+    table:
+{% for stream in host_agents_log_streams if stream != 'app_logs' %}
+      - context: log
+        condition: attributes["log_type"] == "{{ stream }}"
+        pipelines: [logs/{{ stream }}]
+{% endfor %}
 
 exporters:
-  otlp/backend:
-    endpoint: "{{ otel_target_endpoint | default('127.0.0.1:4317') }}"
-    tls:
-      insecure: {{ otel_target_insecure | default(true) | bool | lower }}
-{% if otel_target_headers is defined and otel_target_headers | length > 0 %}
-    headers:
-      {{ otel_target_headers | to_nice_yaml(indent=2) | indent(6) }}
-{% elif otel_auth_header is defined and otel_auth_header | length > 0 %}
-    headers:
-      Authorization: "{{ otel_auth_header }}"
-{% endif %}
+{% for stream in host_agents_log_streams %}
+  # 로그: 소형 영속 bytes 큐 + block_on_overflow + 무한 재시도. 큐가 차면 filelog가 멈추고 원본 파일이 버퍼가 된다.
+  otlphttp/{{ stream }}:
+{{ o2_common(stream) }}    sending_queue:
+      enabled: true
+      storage: file_storage
+      sizer: bytes
+      queue_size: {{ otel_log_queue_bytes }}
+      block_on_overflow: true
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 0
+{% endfor %}
+  # 메트릭: 로그와 분리된 메모리 큐, 역압 없이 폐기 가능.
+  otlphttp/metrics:
+{{ o2_common() }}    sending_queue:
+      enabled: true
+      block_on_overflow: false
 
 service:
+  extensions: [file_storage]
   pipelines:
+    logs/in:
+      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}{% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
+      processors: [memory_limiter, resource/host]
+      exporters: [routing/logs]
+{% for stream in host_agents_log_streams %}
+    logs/{{ stream }}:
+      receivers: [routing/logs]
+      processors: [batch]
+      exporters: [otlphttp/{{ stream }}]
+{% endfor %}
     metrics:
-      receivers: [{% if docker_metrics_enabled | default(false) | bool %}prometheus, {% endif %}hostmetrics, otlp]
-      processors: [memory_limiter, batch, resourcedetection]
-      exporters: [otlp/backend]
-
-    logs:
-      receivers: [filelog/system, otlp]
-      processors: [memory_limiter, batch, resourcedetection]
-      exporters: [otlp/backend]
-
-{% if otel_traces_enabled | default(true) | bool %}
-    # Distributed Traces Pipeline (Forward trace spans from container/apps to OpenObserve)
-    traces:
-      receivers: [otlp]
-      processors: [memory_limiter, batch, resourcedetection]
-      exporters: [otlp/backend]
-{% endif %}
-
-  telemetry:
-    logs:
-      level: info
-
-
+      receivers: [hostmetrics{% if host_agents_inputs.otel_docker_metrics | bool %}, docker_stats{% endif %}{% if otel_otlp_enabled | bool %}, otlp{% endif %}]
+      processors: [memory_limiter, resource/host, batch]
+      exporters: [otlphttp/metrics]
