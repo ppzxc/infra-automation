@@ -23,6 +23,8 @@ from raw_provisioning import (  # noqa: E402
     raw_sysctl_directives, raw_limits_directives, raw_sudoers_line,
     raw_rm_cmd, raw_yum_cmd, raw_sysctl_live_cmd, raw_service_cmd,
     raw_iptables_cmd, raw_iptables_absent, raw_timezone_cmd, raw_selinux_cmd,
+    raw_firewalld_cmd, raw_firewalld_present, raw_firewalld_absent, raw_firewalld_failed,
+    raw_firewalld_masquerade_off_cmd, raw_firewalld_plan, raw_default_iface_cmd,
 )
 
 OWNER = getpass.getuser()
@@ -767,4 +769,180 @@ def test_centos7_only_tasks_are_raw_gated_and_controlled():
     module = next(h for h in handlers if h["name"] == "Restart chrony")
     assert "raw_provisioning_path" in str(module["when"])
     rawh = next(h for h in handlers if h.get("listen") == "Restart chrony")
+    assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False
+
+
+FWD_STUB = r"""#!/bin/sh
+# stateful firewall-cmd stub: state file holds one "zone|kind|value" per line
+db="$FWD_DB"; zone=""; act=""; kind=""; val=""
+for a in "$@"; do case "$a" in
+  --permanent) ;;
+  --zone=*) zone="${a#--zone=}" ;;
+  --get-zones) echo "public work external dmz"; exit 0 ;;
+  --get-zone-of-interface=*) v="${a#*=}"; z=$(grep "|interface|$v$" "$db" | cut -d'|' -f1); echo "${z:-no zone}"; [ -n "$FWD_ERR" ] && exit 5; exit 0 ;;
+  --query-*|--add-*|--remove-*|--change-*) act="${a%%-*}"; rest="${a#--}"; act="${rest%%-*}"; rest="${rest#*-}"; kind="${rest%%=*}"; val="${a#*=}" ;;
+esac; done
+[ -n "$FWD_ERR" ] && exit 5
+case "$act" in
+  query) if [ "$kind" = masquerade ]; then grep -qx "$zone|masquerade|" "$db"; exit $?; fi
+         grep -qxF "$zone|$kind|$val" "$db"; exit $? ;;
+  add) grep -qxF "$zone|$kind|$val" "$db" || echo "$zone|$kind|$val" >> "$db" ;;
+  change) grep -v "|interface|$val$" "$db" > "$db.n"; mv "$db.n" "$db"; echo "$zone|interface|$val" >> "$db" ;;
+  remove) grep -vxF "$zone|$kind|$val" "$db" > "$db.n"; mv "$db.n" "$db"; [ "$kind" = masquerade ] && { grep -vx "$zone|masquerade|" "$db" > "$db.n"; mv "$db.n" "$db"; } ;;
+esac
+exit 0
+"""
+
+
+def _fwd_env(tmp_path, state=""):
+    db = tmp_path / "fwd.db"
+    db.write_text(state)
+    bindir = _stub_bin(tmp_path, {})
+    stub = bindir / "firewall-cmd"
+    stub.write_text(FWD_STUB)
+    stub.chmod(0o755)
+    return db, bindir
+
+
+def _fwd_run(tmp_path, bindir, db, cmd, err=False):
+    return sh("PATH=%s:$PATH; FWD_DB=%s; export FWD_DB; %s%s" % (bindir, db, "FWD_ERR=1; export FWD_ERR; " if err else "", cmd))
+
+
+def test_firewalld_probe_reports_present_absent_and_error(tmp_path):
+    db, bindir = _fwd_env(tmp_path, "work|source|10.0.0.0/8\npublic|interface|eth0\n")
+    for rule, present in (({"kind": "source", "zone": "work", "value": "10.0.0.0/8"}, True),
+                          ({"kind": "source", "zone": "work", "value": "10.1.0.0/16"}, False),
+                          ({"kind": "interface", "zone": "public", "value": "eth0"}, True),
+                          ({"kind": "interface", "zone": "drop", "value": "eth0"}, False),
+                          ({"kind": "interface", "zone": "drop", "value": "eth9"}, False)):
+        r = _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "probe"))
+        assert r.returncode == 0
+        assert raw_firewalld_present(r.stdout) is present and raw_firewalld_absent(r.stdout) is (not present)
+    rule = {"kind": "service", "zone": "public", "value": "http"}
+    r = _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "probe"), err=True)
+    assert r.returncode == 0 and raw_firewalld_failed(r.stdout)
+    assert raw_firewalld_failed("") and raw_firewalld_failed(None) and not raw_firewalld_present("")
+
+
+def test_firewalld_add_remove_round_trip_and_rich_rule(tmp_path):
+    db, bindir = _fwd_env(tmp_path)
+    for rule in ({"kind": "port", "zone": "dmz", "value": "9100/tcp"},
+                 {"kind": "service", "zone": "public", "value": "https"},
+                 {"kind": "source", "zone": "work", "value": "203.0.113.0/24"}):
+        assert _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "add")).returncode == 0
+        assert raw_firewalld_present(_fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "probe")).stdout)
+        assert _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "remove")).returncode == 0
+        assert raw_firewalld_absent(_fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "probe")).stdout)
+    rich = {"kind": "rich-rule", "zone": "public", "value": "203.0.113.5", "port": 22}
+    cmd = raw_firewalld_cmd(rich, "remove")
+    assert 'rule family="ipv4" source address="203.0.113.5" port port="22" protocol="tcp" accept' in cmd.replace("'", "")
+    assert _fwd_run(tmp_path, bindir, db, cmd).returncode == 0
+
+
+def test_firewalld_rejects_unsafe_input():
+    bad = ({"kind": "service", "zone": "public", "value": "http; reboot"},
+           {"kind": "service", "zone": "pub lic", "value": "http"},
+           {"kind": "port", "zone": "dmz", "value": "70000/tcp"},
+           {"kind": "port", "zone": "dmz", "value": "80/icmp"},
+           {"kind": "source", "zone": "work", "value": "1.2.3.4; id"},
+           {"kind": "rich-rule", "zone": "public", "value": "1.2.3.4", "port": "22; id"},
+           {"kind": "rich-rule", "zone": "public", "value": "1.2.3.4", "port": 22, "proto": "icmp"},
+           {"kind": "interface", "zone": "public", "value": "eth0 && id"},
+           {"kind": "bogus", "zone": "public", "value": "x"})
+    for rule in bad:
+        with pytest.raises(ValueError):
+            raw_firewalld_cmd(rule, "probe")
+    with pytest.raises(ValueError):
+        raw_firewalld_cmd({"kind": "service", "zone": "public", "value": "http"}, "flush")
+
+
+def _plan(**over):
+    cfg = {"interface": "eth0", "interface_zone": "public", "source_zone": "work", "ssh_port": 22,
+           "ssh_allowed_source_ips": [], "stale_source_ips": [], "allowed_services": ["http", "https"],
+           "allowed_tcp_ports": ["22", "8080"], "monitoring_subnets": [], "dmz_ports": ["9100/tcp"],
+           "internal_subnets": ["10.0.0.0/8"], "internal_ports": []}
+    cfg.update(over)
+    return raw_firewalld_plan(cfg)
+
+
+def test_firewalld_plan_orders_removals_first_and_mirrors_module_conditions():
+    plan = _plan(ssh_allowed_source_ips=["203.0.113.1"], stale_source_ips=["198.51.100.7"])
+    states = [r["state"] for r in plan]
+    assert states == sorted(states, key=lambda s: s != "disabled")
+    keyset = {(r["state"], r["kind"], r["zone"], r["value"]) for r in plan}
+    assert ("disabled", "service", "public", "cockpit") in keyset
+    assert ("disabled", "source", "trusted", "198.51.100.7") in keyset
+    assert ("enabled", "source", "work", "203.0.113.1") in keyset
+    assert ("enabled", "service", "work", "ssh") in keyset
+    assert ("enabled", "port", "work", "8080/tcp") in keyset
+    assert ("enabled", "port", "work", "22/tcp") not in keyset
+    assert ("disabled", "interface", "drop", "eth0") in keyset and ("enabled", "interface", "public", "eth0") in keyset
+    ing = _plan(ssh_allowed_source_ips=["203.0.113.1"], ingress_rules=[{"port": 53, "proto": "udp", "sources": ["198.51.100.0/24"]}])
+    assert any(r["kind"] == "rich-rule" and r["zone"] == "work" and r["proto"] == "udp" and r["state"] == "enabled" for r in ing)
+    plain = {(r["state"], r["kind"], r["zone"], r["value"]) for r in _plan()}
+    assert ("enabled", "port", "public", "8080/tcp") in plain
+    assert not any(k[2] == "public" and k[1] == "service" and k[0] == "disabled" for k in plain)
+    assert ("enabled", "source", "internal", "10.0.0.0/8") in plain and ("enabled", "port", "dmz", "9100/tcp") in plain
+    assert not any(r["state"] == "disabled" for r in _plan(interface_zone="drop") if r["kind"] == "interface")
+
+
+def test_firewalld_plan_applies_then_second_run_is_unchanged(tmp_path):
+    db, bindir = _fwd_env(tmp_path, "drop|interface|eth0\ntrusted|source|203.0.113.1\n")
+    plan = _plan(ssh_allowed_source_ips=["203.0.113.1"], stale_source_ips=["203.0.113.1"])
+
+    def one_pass():
+        changed = 0
+        for rule in plan:
+            probe = _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, "probe")).stdout
+            if (rule["state"] == "enabled" and raw_firewalld_absent(probe)) or \
+                    (rule["state"] == "disabled" and raw_firewalld_present(probe)):
+                mode = "add" if rule["state"] == "enabled" else "remove"
+                assert _fwd_run(tmp_path, bindir, db, raw_firewalld_cmd(rule, mode)).returncode == 0
+                changed += 1
+        return changed
+
+    assert one_pass() > 0
+    lines = set(db.read_text().split())
+    assert "work|source|203.0.113.1" in lines and "public|interface|eth0" in lines
+    assert "trusted|source|203.0.113.1" not in lines and "drop|interface|eth0" not in lines
+    assert one_pass() == 0
+
+
+def test_firewalld_masquerade_removed_only_outside_external(tmp_path):
+    db, bindir = _fwd_env(tmp_path, "public|masquerade|\nexternal|masquerade|\n")
+    cmd = raw_firewalld_masquerade_off_cmd()
+    r = _fwd_run(tmp_path, bindir, db, cmd)
+    assert r.returncode == 0 and raw_changed(r.stdout)
+    assert db.read_text().split() == ["external|masquerade|"]
+    r = _fwd_run(tmp_path, bindir, db, cmd)
+    assert r.returncode == 0 and not raw_changed(r.stdout)
+
+
+def test_default_iface_cmd_reads_route(tmp_path):
+    bindir = _stub_bin(tmp_path, {"ip": "echo 'default via 10.0.0.1 dev ens192 proto static metric 100'"})
+    assert _run(tmp_path, bindir, raw_default_iface_cmd()).stdout.strip() == "ens192"
+    bindir = _stub_bin(tmp_path, {"ip": "exit 0"})
+    assert _run(tmp_path, bindir, raw_default_iface_cmd()).stdout.strip() == ""
+
+
+def test_centos7_firewalld_tasks_are_raw_gated_and_controlled():
+    import yaml
+    tasks = list(_walk_tasks(yaml.safe_load((ROOT_DIR / "roles/security/tasks/main.yml").read_text())))
+    fw = [t for t in tasks if any(k in t for k in ("ansible.posix.firewalld",))
+          or "firewall-cmd" in str(t.get("ansible.builtin.command", "")) or "firewall-cmd" in str(t.get("ansible.builtin.shell", ""))
+          or t.get("name", "").startswith(("[SEC-005]", "[SEC-006"))]
+    assert len(fw) >= 30
+    for t in fw:
+        assert "raw_provisioning_path" in str(t.get("when")), t["name"]
+    prefixes = tuple("[SEC-%03d]" % n for n in range(42, 48))
+    blocks = _blocks_containing(tasks, prefixes)
+    assert len(blocks) == 1 and "== 7" in str(blocks[0]["when"]) and "raw_provisioning_path" in str(blocks[0]["when"])
+    inner = [c for c in blocks[0]["block"] if c["name"].startswith(prefixes)]
+    assert len(inner) == len(prefixes)
+    for c in inner:
+        assert "ansible.builtin.raw" in c and "changed_when" in c and "failed_when" in c, c["name"]
+    handlers = yaml.safe_load((ROOT_DIR / "roles/security/handlers/main.yml").read_text())
+    module = next(h for h in handlers if h["name"] == "Reload firewalld")
+    assert "raw_provisioning_path" in str(module["when"])
+    rawh = next(h for h in handlers if h.get("listen") == "Reload firewalld")
     assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False

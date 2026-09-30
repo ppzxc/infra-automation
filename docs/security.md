@@ -92,8 +92,14 @@
 | `SEC-039` | `Probe iptables INPUT rules for source-restricted ingress (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 조회 전용 (`iptables -S INPUT`), 응답 불가 시 fail |
 | `SEC-040` | `Allow source-restricted ingress via iptables (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | probe에서 룰이 없을 때만 삽입, 이미 있으면 스킵(`ok`) |
 | `SEC-041` | `Configure SELinux in permissive mode (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | config·실행 모드가 이미 같으면 `ok` (`/etc/selinux/config` 없으면 건너뜀) |
+| `SEC-042` | `Ensure firewalld is installed (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 기설치 시 `ok` (`rpm -q` 확인 후에만 `yum install`) |
+| `SEC-043` | `Ensure firewalld service is started and enabled (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 기동·부팅 활성 상태면 `ok` |
+| `SEC-044` | `Detect default network interface (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 조회 전용 (`ip -4 route show default`, `changed_when: false`) |
+| `SEC-045` | `Disable masquerade on all zones except external (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | `external` 외 존에서 masquerade가 켜져 있을 때만 제거 후 `changed` |
+| `SEC-046` | `Probe firewalld permanent rules (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | 조회 전용 (`firewall-cmd --permanent --query-*` 종료코드), 응답 불가 시 fail |
+| `SEC-047` | `Apply firewalld permanent rules only where they differ (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`) | probe와 원하는 상태가 다를 때만 `--add-*`/`--remove-*` 후 `Reload firewalld`, 같으면 스킵(`ok`) |
 
-> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고 (CentOS 7은 `SEC-011` 대신 `SEC-041`이 실행되고, CentOS 6는 `SEC-008`/`SEC-021` 대신 `SEC-037`~`SEC-040` iptables probe+mutate 쌍이 추가로 실행된다. 룰 영속화(`service iptables save`)는 기존 모듈 경로와 같이 수행하지 않는다), `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고 (CentOS 7은 `SEC-011` 대신 `SEC-041`이 실행되고, CentOS 6는 `SEC-008`/`SEC-021` 대신 `SEC-037`~`SEC-040` iptables probe+mutate 쌍이 추가로 실행되며, CentOS 7은 firewalld 모듈/`firewall-cmd` 폴백 태스크(`SEC-005`~`SEC-007`, `SEC-016`/`SEC-017`/`SEC-020` 등) 대신 `SEC-042`~`SEC-047` firewalld probe+mutate 쌍이 실행된다(제거 규칙을 먼저 적용해 존 충돌을 피하고, 변경은 `permanent`에만 쓰고 raw `Reload firewalld` 핸들러로 반영). 룰 영속화(`service iptables save`)는 기존 모듈 경로와 같이 수행하지 않는다), `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
 
 
