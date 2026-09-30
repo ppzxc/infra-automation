@@ -1071,3 +1071,20 @@ def test_target_plays_import_detection_with_always_tag(playbook):
         imp = [t for t in play["pre_tasks"] if t.get("ansible.builtin.import_tasks") == "common/detect_raw_path.yml"]
         assert len(imp) == 1 and imp[0]["tags"] == ["always"]
         assert play["gather_facts"] is False
+
+
+def test_common_profile_and_environment_templates_have_raw_equivalents():
+    """COMMON-018/019/020 use ansible.builtin.template (AnsiballZ), so on the raw
+    path they must be skipped and replaced by probe + push raw tasks."""
+    import yaml
+    tasks = list(_walk_tasks(yaml.safe_load((ROOT_DIR / "roles/common/tasks/main.yml").read_text())))
+    for prefix in ("[COMMON-018]", "[COMMON-019]", "[COMMON-020]"):
+        mod = next(t for t in tasks if t.get("name", "").startswith(prefix))
+        assert "_raw_path_effective" in str(mod.get("when")), prefix
+    raw = [t for t in tasks if "ansible.builtin.raw" in t]
+    for tpl in ("aliases.sh.j2", "node-env.sh.j2", "environment.j2"):
+        push = [t for t in raw if tpl in str(t.get("vars", ""))]
+        assert len(push) == 1, tpl
+        assert "changed_when" in push[0] and "failed_when" in push[0], tpl
+    for dest in ("/etc/profile.d/99-aliases.sh", "/etc/profile.d/98-node-env.sh", "/etc/environment"):
+        assert any(dest in str(t.get("ansible.builtin.raw")) for t in raw), dest

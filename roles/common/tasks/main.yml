@@ -294,6 +294,7 @@
   when:
     - custom_shell_aliases is defined
     - custom_shell_aliases | length > 0
+    - not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-019] Deploy node environment variables drop-in (/etc/profile.d/98-node-env.sh)"
   ansible.builtin.template:
@@ -302,6 +303,7 @@
     owner: root
     group: root
     mode: '0644'
+  when: not (_raw_path_effective | default(false) | bool)
 
 - name: "[COMMON-020] Deploy system-wide environment variables (/etc/environment)"
   ansible.builtin.template:
@@ -310,6 +312,7 @@
     owner: root
     group: root
     mode: '0644'
+  when: not (_raw_path_effective | default(false) | bool)
 
 # ==============================================================================
 # Raw Provisioning Path (ADR-0005): CentOS 6/7 targets cannot run AnsiballZ
@@ -529,6 +532,62 @@
       changed_when: >-
         (common_raw_limits_probe.stdout | default('')) | raw_push_changed(common_raw_limits_content, '0644', 'root', 'root')
       failed_when: common_raw_limits_push.rc | default(0) != 0
+
+    # Module template parity (COMMON-018/019/020): profile.d drop-ins and
+    # /etc/environment rendered locally and pushed with the probe sentinel.
+    - name: "[COMMON-052] Probe custom shell aliases hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/profile.d/99-aliases.sh' | raw_probe_cmd }}"
+      register: common_raw_aliases_probe
+      changed_when: false
+      failed_when: false
+      when:
+        - custom_shell_aliases is defined
+        - custom_shell_aliases | length > 0
+
+    - name: "[COMMON-053] Deploy system-wide custom shell aliases via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ common_raw_aliases_content | raw_push_cmd('/etc/profile.d/99-aliases.sh', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_aliases_content: "{{ lookup('ansible.builtin.template', 'aliases.sh.j2') }}"
+      register: common_raw_aliases_push
+      changed_when: >-
+        (common_raw_aliases_probe.stdout | default('')) | raw_push_changed(common_raw_aliases_content, '0644', 'root', 'root')
+      failed_when: common_raw_aliases_push.rc | default(0) != 0
+      when:
+        - custom_shell_aliases is defined
+        - custom_shell_aliases | length > 0
+
+    - name: "[COMMON-054] Probe node environment drop-in hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/profile.d/98-node-env.sh' | raw_probe_cmd }}"
+      register: common_raw_node_env_probe
+      changed_when: false
+      failed_when: false
+
+    - name: "[COMMON-055] Deploy node environment variables drop-in via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ common_raw_node_env_content | raw_push_cmd('/etc/profile.d/98-node-env.sh', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_node_env_content: "{{ lookup('ansible.builtin.template', 'node-env.sh.j2') }}"
+      register: common_raw_node_env_push
+      changed_when: >-
+        (common_raw_node_env_probe.stdout | default('')) | raw_push_changed(common_raw_node_env_content, '0644', 'root', 'root')
+      failed_when: common_raw_node_env_push.rc | default(0) != 0
+
+    - name: "[COMMON-056] Probe /etc/environment hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/environment' | raw_probe_cmd }}"
+      register: common_raw_environment_probe
+      changed_when: false
+      failed_when: false
+
+    - name: "[COMMON-057] Deploy system-wide environment variables via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ common_raw_environment_content | raw_push_cmd('/etc/environment', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_environment_content: "{{ lookup('ansible.builtin.template', 'environment.j2') }}"
+      register: common_raw_environment_push
+      changed_when: >-
+        (common_raw_environment_probe.stdout | default('')) | raw_push_changed(common_raw_environment_content, '0644', 'root', 'root')
+      failed_when: common_raw_environment_push.rc | default(0) != 0
 
 # Raw Provisioning Path (ADR-0005), CentOS 6 only: ntpd replaces chrony (COMMON-010
 # raw equivalent). The content push uses the probe sentinel and the

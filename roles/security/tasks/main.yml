@@ -66,6 +66,7 @@
         then rm -f /etc/ssh/sshd_config.d/01-permitrootlogin.conf && echo removed; fi
       register: sec001_dropin_raw
       changed_when: "'removed' in (sec001_dropin_raw.stdout | default(''))"
+      failed_when: sec001_dropin_raw.rc | default(0) != 0
       notify: Restart sshd
 
 # Raw Provisioning Path (ADR-0005): the remaining CentOS 6/7 common security
