@@ -19,6 +19,7 @@
         - /etc/profile.d/docker_mgmt.sh
         - /usr/local/bin/node_exporter
         - /etc/systemd/system/node_exporter.service
+        - /usr/bin/python3
         - /usr/local/bin/otelcol-contrib
         - /etc/otelcol/config.yaml
         - "{{ otelcol_service_path }}"
@@ -85,6 +86,32 @@
     - name: Verify the monitoring role
       when: "'monitoring' in molecule_roles"
       block:
+        # Host Agents 사전 단계(MON-020~024): 역할이 만든 fact와 같은 프로브를 다시 실행해
+        # 실제 플랫폼에서 modern 경로로 분류되고 Ansible fact와 일치하는지 확인한다.
+        - name: "[VERIFY-MON-021] Probe OS release and architecture again (raw, read-only)"
+          ansible.builtin.raw: "{{ '' | host_agents_os_probe_cmd }}"
+          register: _verify_probe
+          changed_when: false
+          become: false
+
+        - name: "[VERIFY-MON-022] Verify the probe classifies this platform as modern and matches gathered facts"
+          vars:
+            _p: "{{ _verify_probe.stdout | host_agents_parse_os_probe }}"
+          ansible.builtin.assert:
+            that:
+              - _p.path == 'modern'
+              - _p.family == ansible_os_family
+              - _p.distribution == ansible_distribution
+              - _p.major_version == ansible_distribution_major_version
+              - _p.arch == ('amd64' if ansible_architecture == 'x86_64' else 'arm64')
+            fail_msg: "OS probe {{ _p }} disagrees with gathered facts."
+
+        - name: "[VERIFY-MON-023] Verify /usr/bin/python3 exists on the modern path"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/usr/bin/python3'].exists
+            fail_msg: "/usr/bin/python3 is missing."
+
         - name: "[VERIFY-MON-013] Verify legacy node_exporter binary is absent"
           ansible.builtin.assert:
             that:

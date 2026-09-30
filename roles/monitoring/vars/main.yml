@@ -1,0 +1,20 @@
+---
+# Host Agents 내부 고정 상수 (ADR-0006) — 외부에서 덮어쓸 수 없다.
+
+# security_logs 스트림으로 라우팅되는 경로. hosts/<host>/agents의 otel_exclude_logs로 제외할 수 없다.
+otel_security_log_paths:
+  - /var/log/secure
+  - /var/log/auth.log
+  - /var/log/audit/audit.log
+  - /var/log/sudo.log
+  - /var/log/fail2ban.log
+  - /var/log/firewalld
+
+# ISMS 2.9.3 필수 백업 경로. hosts/<host>/agents의 backup_exclude_paths로 제외할 수 없다.
+# (roles/backup이 소비하며, 입력 검증은 monitoring이 먼저 실행되므로 여기서 함께 수행한다.)
+host_agents_backup_mandatory_paths:
+  - /etc
+  - /var/spool/cron
+  - /usr/local/bin
+  - /usr/local/etc
+  - /usr/local/sbin

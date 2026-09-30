@@ -9,10 +9,14 @@
 #   4. 관리자 계정 SSH 접속 사전 진단(Probe)
 #   5. 접속 실패 시 부트스트랩(root/비밀번호/키) 모드로 지능형 폴백 전환
 #   6. 원격 Python 인터프리터 자동 탐색(auto_silent) 강제
+#
+# 대상 호스트: 기본 target_hosts(없으면 servers:loadbalancers). import_playbook의
+# vars로 connection_hosts를 넘기면 그 패턴이 우선한다(host_agents.yml은
+# "<target_hosts>:&servers"를 넘겨 에이전트 play와 동일한 호스트 집합만 해석한다).
 # ==============================================================================
 
 - name: Controller Pre-flight & Dynamic OpenBao Credential Resolution
-  hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
+  hosts: "{{ connection_hosts | default(target_hosts | default('servers:loadbalancers')) }}"
   gather_facts: false
   connection: local
   become: false

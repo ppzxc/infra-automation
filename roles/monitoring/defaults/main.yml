@@ -50,6 +50,13 @@ otel_system_logs:
   - /var/log/yum.log
   - /var/log/dpkg.log
   - /var/log/firewalld
+  - /var/log/boot.log
+  - /var/log/kern.log
+
+# Host Agents 입력 (host_agents.yml 전용)
+# OpenBao를 조회하지 않고 아래 값을 그대로 사용한다(molecule 등 테스트 전용 seam).
+# 형식: {host: <hosts/<host>/agents 내용>, openobserve: <secret/agents/openobserve>, rustfs: <secret/agents/rustfs>}
+# host_agents_kv_fixture: {}
 
 # Legacy node_exporter Cleanup Toggle
 cleanup_legacy_node_exporter: true

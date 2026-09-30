@@ -2,7 +2,7 @@
 
 `monitoring` 역할은 OpenTelemetry Collector Contrib(`otelcol-contrib`)을 기반으로 한 온프레미스 단일 에이전트 관제 파이프라인의 배포, 시스템 계정 격리, `hostmetrics` 리시버를 통한 커널/OS 메트릭 수집, 그리고 레거시 `node_exporter` 자동 정리를 수행합니다.
 
-> **재설계 예정 (Host Agents)**: 이 역할은 [ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `playbooks/host_agents.yml` 전용으로 재구성됩니다(수집 표준·스트림·버퍼링·버전 고정·CentOS 6/7 분기). 아래 매트릭스는 **현재 구현**을 기술하며, 계획 태스크는 구현 커밋에서 이 표로 이관됩니다.
+> **Host Agents 전환 중**: 이 역할은 [ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `playbooks/host_agents.yml` 전용입니다. `site.yml`·`maintenance.yml`에서는 더 이상 적용되지 않습니다. 진입점, OS 프로브, OpenBao 입력 검증(`MON-020~037`)은 구현되었고, 수집 표준·스트림·버퍼링·버전 고정·CentOS 6/7 분기는 후속 티켓에서 이 표로 이관됩니다. 아래 매트릭스는 **현재 구현**을 기술합니다.
 
 ---
 
@@ -50,6 +50,28 @@
 
 ---
 
+## 3-1. Host Agents 진입점과 입력 (`playbooks/host_agents.yml`)
+
+- **호스트 집합**: `target_hosts:&servers` (축소만 가능, `servers` 밖으로 확장 불가). 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
+- **롤아웃**: `serial: 25%`, `gather_facts: false`. 프로비저닝 assert·OS 프로브·fact 수집·입력 검증은 모두 역할 안에서 수행됩니다.
+- **태그**: 설치 단계 `agents_install`, 설정/스케줄 단계 `agents_config`, 역할 공통 `otel`(향후 `backup`). 사전 단계(`MON-020~037`)는 `always`라 `--tags agents_config`에서도 수행됩니다. Deploy = 태그 없음, Config = `--tags agents_config`.
+- **사전 단계**: `_is_already_provisioned`가 아니면 즉시 실패("site.yml 먼저 실행") → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. legacy 경로는 후속 티켓 전까지 경고 후 해당 호스트를 건너뜁니다.
+- **OpenBao 입력**: `hosts/<host>/agents`(호스트별)와 `agents/openobserve`, `agents/rustfs`(공용, `run_once`)를 컨트롤러에서 조회합니다.
+
+  | 키 (`hosts/<host>/agents`) | 필수 | 용도 |
+  |---|---|---|
+  | `o2_ingest_token`, `rustfs_access_key`, `rustfs_secret_key`, `restic_password` | 예 | 호스트 전용 시크릿 (누락 시 해당 호스트 실패) |
+  | `otel_extra_logs` | 아니오 | glob(→ `app_logs`) 또는 `{path, stream}` 추가 |
+  | `otel_exclude_logs` | 아니오 | 표준 목록에서 정확히 일치하는 경로 제거. `security_logs` 경로는 제외 불가 |
+  | `otel_docker_metrics` | 아니오 | Docker 메트릭 opt-in |
+  | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
+
+- **실패 조건 (변경 전, check 모드 포함)**: 필수 키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 KV 키를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
+- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
+- **테스트 seam**: `host_agents_kv_fixture`(`{host, openobserve, rustfs}`)가 정의되면 OpenBao를 조회하지 않습니다(molecule 공용 `group_vars`가 `_is_already_provisioned: true`와 함께 제공).
+
+---
+
 ## 4. 태스크 매트릭스 (Task Matrix)
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
@@ -65,6 +87,17 @@
 | `MON-004` | `Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 (`otelcol-contrib.yaml.j2`) |
 | `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` |
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
-
-
-
+| `MON-020` | `Assert host was provisioned by site.yml` | `ansible.builtin.assert` | All | 읽기 전용 |
+| `MON-021` | `Probe OS release and architecture from target host (raw, read-only)` | `ansible.builtin.raw` | All | `changed_when: false`, `check_mode: false` |
+| `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수 |
+| `MON-023` | `Ensure /usr/bin/python3 exists on modern path` | `ansible.builtin.raw` | modern | 존재 시 `ok` (`PYTHON3_INSTALLED`일 때만 changed) |
+| `MON-024` | `Gather facts on modern path` | `ansible.builtin.setup` | modern | 읽기 전용 |
+| `MON-025` | `Warn that legacy path hosts are skipped until their tasks land` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 |
+| `MON-030` | `Fetch per-host agents KV from OpenBao (hosts/<hostname>/agents)` | `ansible.builtin.uri` | All | GET, `check_mode: false`, `no_log` |
+| `MON-031` | `Fetch shared OpenObserve secrets from OpenBao (agents/openobserve)` | `ansible.builtin.uri` | All | GET, `run_once`, `no_log` |
+| `MON-032` | `Fetch shared RustFS secrets from OpenBao (agents/rustfs)` | `ansible.builtin.uri` | All | GET, `run_once`, `no_log` |
+| `MON-033` | `Assert OpenBao answered every agents lookup` | `ansible.builtin.assert` | All | 읽기 전용 (오류 시 check 모드에서도 실패) |
+| `MON-034` | `Resolve agents KV contents (host + shared)` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
+| `MON-035` | `Merge agents inputs with the Git standard` | `ansible.builtin.set_fact` | All | 순수 함수 (시크릿 미포함) |
+| `MON-036` | `Assert agents inputs are valid before any change` | `ansible.builtin.assert` | All | 읽기 전용 |
+| `MON-037` | `Set agents secrets as host facts` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |

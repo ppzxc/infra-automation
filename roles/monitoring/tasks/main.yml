@@ -1,5 +1,18 @@
 ---
 # ==============================================================================
+# 0. Host Agents 사전 단계 (프로비저닝 확인 · OS 프로브 · OpenBao 입력 검증)
+# ==============================================================================
+# tags: [always] — --tags agents_config / backup 실행에서도 반드시 수행되어야
+# host_agents_os_* fact와 host_agents_inputs가 정의된다.
+- name: Probe OS path and ensure python3 and facts
+  ansible.builtin.import_tasks: probe.yml
+  tags: [always]
+
+- name: Resolve and validate Host Agents inputs from OpenBao
+  ansible.builtin.import_tasks: agents_input.yml
+  tags: [always]
+
+# ==============================================================================
 # 1. Legacy Node Exporter Cleanup (Complete Removal)
 # ==============================================================================
 - name: "[MON-011] Stop and disable legacy node_exporter service"
@@ -11,6 +24,7 @@
     - cleanup_legacy_node_exporter | default(true) | bool
     - ansible_service_mgr == "systemd"
   failed_when: false
+  tags: [agents_install, otel]
 
 - name: "[MON-012] Remove legacy node_exporter systemd unit file"
   ansible.builtin.file:
@@ -19,12 +33,14 @@
   when:
     - cleanup_legacy_node_exporter | default(true) | bool
     - ansible_service_mgr == "systemd"
+  tags: [agents_install, otel]
 
 - name: "[MON-013] Remove legacy node_exporter binary"
   ansible.builtin.file:
     path: /usr/local/bin/node_exporter
     state: absent
   when: cleanup_legacy_node_exporter | default(true) | bool
+  tags: [agents_install, otel]
 
 - name: "[MON-014] Remove legacy node_exporter user"
   ansible.builtin.user:
@@ -33,6 +49,7 @@
     remove: true
   when: cleanup_legacy_node_exporter | default(true) | bool
   failed_when: false
+  tags: [agents_install, otel]
 
 - name: "[MON-015] Remove legacy node_exporter group"
   ansible.builtin.group:
@@ -40,6 +57,7 @@
     state: absent
   when: cleanup_legacy_node_exporter | default(true) | bool
   failed_when: false
+  tags: [agents_install, otel]
 
 # ==============================================================================
 # 2. OpenTelemetry Collector Contrib Deployment (OpenObserve Ingestion Pipeline)
@@ -50,6 +68,7 @@
     system: true
     state: present
   when: enable_otelcol | default(true) | bool
+  tags: [agents_install, otel]
 
 - name: "[MON-002] Create otelcol system user"
   ansible.builtin.user:
@@ -62,6 +81,7 @@
     create_home: false
     state: present
   when: enable_otelcol | default(true) | bool
+  tags: [agents_install, otel]
 
 - name: "[MON-003] Download and install OpenTelemetry Collector Contrib binary"
   ansible.builtin.unarchive:
@@ -76,6 +96,7 @@
     mode: '0755'
   when: enable_otelcol | default(true) | bool
   notify: Restart otelcol-contrib
+  tags: [agents_install, otel]
 
 - name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"
   block:
@@ -96,6 +117,7 @@
         mode: '0640'
       notify: Restart otelcol-contrib
   when: enable_otelcol | default(true) | bool
+  tags: [agents_config, otel]
 
 - name: "[MON-005] Create systemd service for otelcol-contrib"
   ansible.builtin.copy:
@@ -130,6 +152,7 @@
     - enable_otelcol | default(true) | bool
     - ansible_service_mgr == "systemd"
   notify: Restart otelcol-contrib
+  tags: [agents_install, otel]
 
 - name: "[MON-005-SYSV] Create SysVinit service script for otelcol-contrib"
   ansible.builtin.template:
@@ -142,6 +165,7 @@
     - enable_otelcol | default(true) | bool
     - ansible_service_mgr != "systemd"
   notify: Restart otelcol-contrib
+  tags: [agents_install, otel]
 
 - name: "[MON-006] Ensure otelcol-contrib service is started and enabled"
   ansible.builtin.service:
@@ -152,6 +176,4 @@
     - enable_otelcol | default(true) | bool
     - not ansible_check_mode or (otelcol_unit_created is defined and not otelcol_unit_created.changed)
   ignore_errors: "{{ ansible_check_mode }}"
-
-
-
+  tags: [agents_install, otel]

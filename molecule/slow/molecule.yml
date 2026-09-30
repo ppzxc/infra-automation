@@ -44,6 +44,8 @@ provisioner:
     # this project's ansible.cfg, so roles_path must be pointed at the real
     # roles/ directory explicitly.
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
+    # Same reason: the project-level filter plugins (host_agents_*, raw_*) are not inherited.
+    ANSIBLE_FILTER_PLUGINS: "${MOLECULE_PROJECT_DIRECTORY}/filter_plugins"
     SCENARIO_ROLES: "common,docker_engine,monitoring"
     ANSIBLE_CALLBACKS_ENABLED: "ansible.posix.timer,ansible.posix.profile_tasks"
     # Per-task overhead (one `docker exec` + module transfer each) dominates
