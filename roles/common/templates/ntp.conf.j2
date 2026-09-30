@@ -1,0 +1,12 @@
+# Managed by Ansible - Overseer (CentOS 6 ntpd)
+driftfile /var/lib/ntp/drift
+
+restrict default kod nomodify notrap nopeer noquery
+restrict -6 default kod nomodify notrap nopeer noquery
+restrict 127.0.0.1
+restrict -6 ::1
+
+{# ntpd 4.2.6 (CentOS 6) has no `pool` directive: pools are plain servers. #}
+{% for host in (ntp_pools | default([])) + (ntp_servers | default([])) %}
+server {{ host }} iburst
+{% endfor %}

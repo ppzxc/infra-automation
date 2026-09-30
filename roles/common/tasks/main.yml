@@ -97,7 +97,9 @@
     name: ntpd
     state: started
     enabled: true
-  when: ansible_distribution == "CentOS" and ansible_distribution_major_version | int == 6
+  when:
+    - ansible_distribution == "CentOS" and ansible_distribution_major_version | int == 6
+    - not (raw_provisioning_path | default(false) | bool)
 
 - name: "[COMMON-011] Apply sysctl kernel tuning"
   ansible.posix.sysctl:
@@ -518,3 +520,42 @@
       changed_when: >-
         (common_raw_limits_probe.stdout | default('')) | raw_push_changed(common_raw_limits_content, '0644', 'root', 'root')
       failed_when: common_raw_limits_push.rc | default(0) != 0
+
+# Raw Provisioning Path (ADR-0005), CentOS 6 only: ntpd replaces chrony (COMMON-010
+# raw equivalent). The content push uses the probe sentinel and the
+# write-temp/validate/move helper; the restart is delegated to `Restart ntpd`.
+# CentOS 7 (chrony) is unaffected.
+- name: Common raw NTP path, ntpd (CentOS 6)
+  when:
+    - raw_provisioning_path | default(false) | bool
+    - ansible_distribution == "CentOS"
+    - ansible_distribution_major_version | int == 6
+  block:
+    - name: "[COMMON-041] Install ntp package (CentOS 6, raw)"
+      ansible.builtin.raw: "{{ ['ntp'] | raw_yum_cmd }}"
+      register: common_raw_ntp_install
+      changed_when: common_raw_ntp_install.stdout | default('') | raw_changed
+      failed_when: common_raw_ntp_install.rc | default(0) != 0
+
+    - name: "[COMMON-042] Probe ntp.conf hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/ntp.conf' | raw_probe_cmd }}"
+      register: common_raw_ntp_probe
+      changed_when: false
+      failed_when: common_raw_ntp_probe.rc | default(0) != 0
+
+    - name: "[COMMON-043] Configure ntpd servers via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ common_raw_ntp_content | raw_push_cmd('/etc/ntp.conf', 'root', 'root', '0644', 'true') }}
+      vars:
+        common_raw_ntp_content: "{{ lookup('ansible.builtin.template', 'ntp.conf.j2') }}"
+      register: common_raw_ntp_push
+      changed_when: >-
+        (common_raw_ntp_probe.stdout | default('')) | raw_push_changed(common_raw_ntp_content, '0644', 'root', 'root')
+      failed_when: common_raw_ntp_push.rc | default(0) != 0
+      notify: Restart ntpd
+
+    - name: "[COMMON-044] Ensure ntpd service is running and enabled (raw)"
+      ansible.builtin.raw: "{{ 'ntpd' | raw_service_cmd }}"
+      register: common_raw_ntp_service
+      changed_when: common_raw_ntp_service.stdout | default('') | raw_changed
+      failed_when: common_raw_ntp_service.rc | default(0) != 0

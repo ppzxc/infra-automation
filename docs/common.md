@@ -68,7 +68,7 @@
 | `COMMON-007-BAT` | `Ensure bat symlink exists for Debian/Ubuntu (batcat -> bat)` | `ansible.builtin.file` | Debian, Ubuntu | 심볼릭 링크 존재 시 `ok`, `failed_when: false` |
 | `COMMON-008` | `Configure Chrony NTP servers (Modern OS)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 후 변경 시만 수정 및 핸들러 호출 |
 | `COMMON-009` | `Ensure Chrony service is running (Modern OS)` | `ansible.builtin.service` | RHEL 7+, Debian | 서비스 기동 상태면 `ok` |
-| `COMMON-010` | `Ensure NTP service is running (CentOS 6 legacy)` | `ansible.builtin.service` | CentOS 6 | 서비스 기동 상태면 `ok` |
+| `COMMON-010` | `Ensure NTP service is running (CentOS 6 legacy)` | `ansible.builtin.service` | CentOS 6 (`raw_provisioning_path=false`) | 서비스 기동 상태면 `ok` |
 | `COMMON-011` | `Apply sysctl kernel tuning` | `ansible.posix.sysctl` | All | sysctl 값 일치 시 `ok` |
 | `COMMON-011-IPV6` | `Disable IPv6 via sysctl` | `ansible.posix.sysctl` | All | `disable_ipv6: true` 시 적용 |
 | `COMMON-011-EXTRA` | `Apply extra sysctl kernel tuning` | `ansible.posix.sysctl` | All | `sysctl_extra_settings` 정의 시 적용 |
@@ -101,6 +101,10 @@
 | `COMMON-038` | `Install common packages (CentOS 6, 7 via YUM, raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | `rpm -q --whatprovides` 확인 후 미설치 패키지만 설치 |
 | `COMMON-039` | `Install optional diagnostic tools (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 미설치·설치 가능한 패키지만 설치, 실패 무시 |
 | `COMMON-040` | `Align live sysctl values with the desired settings (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 실행 중 커널 값이 다를 때만 `sysctl -w` |
+| `COMMON-041` | `Install ntp package (CentOS 6, raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 패키지 기설치 시 `ok` |
+| `COMMON-042` | `Probe ntp.conf hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 조회 전용 |
+| `COMMON-043` | `Configure ntpd servers via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` (`ntp.conf.j2`, `Restart ntpd` 핸들러) |
+| `COMMON-044` | `Ensure ntpd service is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 기동·부팅 활성 상태면 `ok` |
 
-> **Raw Provisioning Path (ADR-0005)**: `raw_provisioning_path: true`인 CentOS 6/7 호스트에서는 `COMMON-002`/`005`/`007`/`011*`/`012`/`013`/`014`/`015`/`016`/`022`/`023`이 스킵되고 `COMMON-024`~`COMMON-040`이 대신 실행된다(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: `raw_provisioning_path: true`인 CentOS 6/7 호스트에서는 `COMMON-002`/`005`/`007`/`011*`/`012`/`013`/`014`/`015`/`016`/`022`/`023`이 스킵되고 `COMMON-024`~`COMMON-040`이 대신 실행된다(CentOS 6는 `COMMON-010` 대신 `COMMON-041`~`COMMON-044` ntpd 경로 추가, CentOS 7은 영향 없음)(sysctl은 CentOS 6에 `/etc/sysctl.d`가 없어 `/etc/sysctl.conf`를 갱신). 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 

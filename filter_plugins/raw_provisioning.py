@@ -8,6 +8,7 @@ changed/unchanged sentinel contract.
 
 import base64
 import hashlib
+import ipaddress
 import re
 import shlex
 
@@ -252,6 +253,57 @@ def raw_service_cmd(name):
         N=shlex.quote(name), MARK=CHANGED_MARKER)
 
 
+IPT_MARKER = '__RAW_IPT__'
+
+
+def _iptables_rule(port, proto, source):
+    """Canonical ``iptables -S INPUT`` spelling of the ACCEPT rule, plus its -I arguments."""
+    port = str(port)
+    if not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise ValueError('invalid port for iptables: %r' % (port,))
+    proto = str(proto or 'tcp')
+    if proto not in ('tcp', 'udp'):
+        raise ValueError('unsupported protocol for iptables: %r' % (proto,))
+    src = ''
+    if source not in (None, ''):
+        try:
+            net = ipaddress.IPv4Network(str(source), strict=False)
+        except ValueError:
+            raise ValueError('invalid IPv4 source for iptables: %r' % (source,))
+        src = '-s %s ' % net.with_prefixlen
+    return '%s-p %s -m %s --dport %d -j ACCEPT' % (src, proto, proto, int(port))
+
+
+def raw_iptables_cmd(port, proto, source, mode):
+    """CentOS 6 iptables ACCEPT rule (``ansible.builtin.iptables`` equivalent) for INPUT.
+
+    ``probe`` prints ``__RAW_IPT__ present|absent|error`` (always exit 0) by
+    matching the normalized ``iptables -S INPUT`` line; ``insert`` puts the rule
+    at position 1 and propagates iptables' exit status. Only IPv4 tcp/udp.
+    """
+    rule = _iptables_rule(port, proto, source)
+    if mode == 'insert':
+        return 'iptables -I INPUT 1 %s' % rule
+    if mode != 'probe':
+        raise ValueError('unknown iptables mode: %r' % (mode,))
+    return _render(
+        'out="$(iptables -S INPUT 2>/dev/null)"; if [ $? -ne 0 ]; then echo @M@ error; '
+        'elif printf \'%s\\n\' "$out" | grep -qxF -- @LINE@; then echo @M@ present; else echo @M@ absent; fi; exit 0',
+        M=IPT_MARKER, LINE=shlex.quote('-A INPUT ' + rule))
+
+
+def raw_iptables_absent(stdout):
+    """True only when the probe positively reported the rule missing (never on error/noise)."""
+    lines = [ln.split() for ln in (stdout or '').splitlines() if ln.strip().startswith(IPT_MARKER)]
+    return bool(lines) and lines[-1][1:] == ['absent']
+
+
+def raw_iptables_failed(stdout):
+    """True unless the probe ran and answered present/absent."""
+    lines = [ln.split() for ln in (stdout or '').splitlines() if ln.strip().startswith(IPT_MARKER)]
+    return not lines or lines[-1][1:] not in (['present'], ['absent'])
+
+
 def raw_sysctl_directives(settings):
     """sysctl module equivalent as raw_set_directives input (``key = value`` lines)."""
     return [{'regexp': r'^\s*%s\s*=' % re.escape(str(k)), 'line': '%s = %s' % (k, v)}
@@ -343,4 +395,7 @@ class FilterModule(object):
             'raw_sysctl_live_cmd': raw_sysctl_live_cmd,
             'raw_sudoers_line': raw_sudoers_line,
             'raw_service_cmd': raw_service_cmd,
+            'raw_iptables_cmd': raw_iptables_cmd,
+            'raw_iptables_absent': raw_iptables_absent,
+            'raw_iptables_failed': raw_iptables_failed,
         }

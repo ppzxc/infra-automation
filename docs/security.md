@@ -58,7 +58,7 @@
 | `SEC-005` | `Ensure firewalld is installed and running (RHEL/Rocky 7+)` | `ansible.builtin.package` | RHEL 7+, Rocky | 패키지 기설치 시 `ok` |
 | `SEC-006` | `Ensure firewalld service is started and enabled (RHEL/Rocky 7+)` | `ansible.builtin.service` | RHEL 7+, Rocky | 서비스 기동 상태면 `ok` |
 | `SEC-007` | `Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | 포트 기등록 시 `ok` |
-| `SEC-008` | `Allow incoming TCP ports via iptables (CentOS 6)` | `ansible.builtin.iptables` | CentOS 6 | iptables 체인 룰 확인 후 적용 |
+| `SEC-008` | `Allow incoming TCP ports via iptables (CentOS 6)` | `ansible.builtin.iptables` | CentOS 6 (`raw_provisioning_path=false`) | iptables 체인 룰 확인 후 적용 |
 | `SEC-009` | `Install fail2ban package if available` | `ansible.builtin.package` | All (`raw_provisioning_path=false`) | 패키지 기설치 시 `ok`, `failed_when: false` |
 | `SEC-010` | `Ensure fail2ban is running and enabled (if installed)` | `ansible.builtin.service` | All (`raw_provisioning_path=false`) | 서비스 기동 상태면 `ok`, `failed_when: false` |
 | `SEC-011` | `Configure SELinux in permissive mode (RHEL/Rocky 7+)` | `ansible.posix.selinux` | RHEL 7+, Rocky | SELinux 상태가 permissive면 `ok` |
@@ -71,7 +71,7 @@
 | `SEC-018` | `Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)` | `ansible.builtin.shell` | RHEL 9+ | 방화벽 정책 일치 시 `ok` |
 | `SEC-019` | `Configure custom firewall ingress rules with source IP restrictions (UFW)` | `community.general.ufw` | Debian, Ubuntu | 룰 기등록 시 `ok` |
 | `SEC-020` | `Configure custom firewall ingress rules with source IP restrictions (firewalld)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | Rich Rule 기등록 시 `ok` |
-| `SEC-021` | `Configure custom firewall ingress rules with source IP restrictions (iptables)` | `ansible.builtin.iptables` | CentOS 6 | iptables 체인 룰 확인 후 적용 |
+| `SEC-021` | `Configure custom firewall ingress rules with source IP restrictions (iptables)` | `ansible.builtin.iptables` | CentOS 6 (`raw_provisioning_path=false`) | iptables 체인 룰 확인 후 적용 |
 | `SEC-022` | `Remove conflicting sshd_config.d drop-in files (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 파일 존재 시에만 삭제 후 `changed` |
 | `SEC-023` | `Read current sshd_config (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-024` | `Probe sshd_config hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
@@ -87,8 +87,12 @@
 | `SEC-034` | `Probe auditd rules hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-035` | `Deploy Auditd security audit rules via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`audit.rules.j2`; CentOS 7 `rules.d/overseer.rules`, CentOS 6 `audit.rules`) |
 | `SEC-036` | `Ensure Auditd service is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 기동·부팅 활성 상태면 `ok` |
+| `SEC-037` | `Probe iptables INPUT rules for allowed TCP ports (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 조회 전용 (`iptables -S INPUT`), 응답 불가 시 fail |
+| `SEC-038` | `Allow incoming TCP ports via iptables (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | probe에서 룰이 없을 때만 `iptables -I INPUT 1`, 이미 있으면 스킵(`ok`) |
+| `SEC-039` | `Probe iptables INPUT rules for source-restricted ingress (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | 조회 전용 (`iptables -S INPUT`), 응답 불가 시 fail |
+| `SEC-040` | `Allow source-restricted ingress via iptables (raw)` | `ansible.builtin.raw` | CentOS 6 (`raw_provisioning_path`) | probe에서 룰이 없을 때만 삽입, 이미 있으면 스킵(`ok`) |
 
-> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고, `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고 (CentOS 6는 `SEC-008`/`SEC-021` 대신 `SEC-037`~`SEC-040` iptables probe+mutate 쌍이 추가로 실행된다. 룰 영속화(`service iptables save`)는 기존 모듈 경로와 같이 수행하지 않는다), `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
 
 

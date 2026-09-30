@@ -22,6 +22,7 @@ from raw_provisioning import (  # noqa: E402
     raw_changed, raw_group_cmd, raw_user_cmd, raw_authorized_key_cmd,
     raw_sysctl_directives, raw_limits_directives, raw_sudoers_line,
     raw_rm_cmd, raw_yum_cmd, raw_sysctl_live_cmd, raw_service_cmd,
+    raw_iptables_cmd, raw_iptables_absent,
 )
 
 OWNER = getpass.getuser()
@@ -598,3 +599,72 @@ def test_sudoers_policy_rejected_by_visudo_keeps_existing_file(tmp_path):
     assert r.returncode != 0
     assert dest.read_bytes() == b"Defaults timestamp_timeout=15\n"
     assert list(tmp_path.iterdir()) == [dest, tmp_path / "bin"] or set(tmp_path.iterdir()) == {dest, tmp_path / "bin"}
+
+
+def _iptables_stub(tmp_path, listing, list_rc=0):
+    log = tmp_path / "calls"
+    return _stub_bin(tmp_path, {
+        "iptables": ('case "$1" in -S) printf "%%s\\n" %s; exit %d;; *) echo "iptables $*" >> %s;; esac'
+                     % (" ".join("'%s'" % ln for ln in listing), list_rc, log)),
+    }), log
+
+
+def test_iptables_probe_reports_present_absent_and_error(tmp_path):
+    bindir, _ = _iptables_stub(tmp_path, ["-P INPUT ACCEPT", "-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT"])
+    present = _run(tmp_path, bindir, raw_iptables_cmd(22, "tcp", None, "probe"))
+    absent = _run(tmp_path, bindir, raw_iptables_cmd(80, "tcp", None, "probe"))
+    assert not raw_iptables_absent(present.stdout) and "present" in present.stdout
+    assert raw_iptables_absent(absent.stdout)
+    bindir, _ = _iptables_stub(tmp_path, [], list_rc=1)
+    broken = _run(tmp_path, bindir, raw_iptables_cmd(22, "tcp", None, "probe"))
+    assert raw_iptables_absent(broken.stdout) is False and "error" in broken.stdout
+
+
+def test_iptables_probe_matches_normalized_source_rule(tmp_path):
+    bindir, _ = _iptables_stub(tmp_path, ["-A INPUT -s 10.1.2.3/32 -p tcp -m tcp --dport 22 -j ACCEPT",
+                                          "-A INPUT -s 10.0.0.0/24 -p udp -m udp --dport 53 -j ACCEPT"])
+    for src, port, proto, absent in (("10.1.2.3", 22, "tcp", False), ("10.1.2.3/32", 22, "tcp", False),
+                                     ("10.0.0.5/24", 53, "udp", False), ("10.1.2.4", 22, "tcp", True),
+                                     (None, 22, "tcp", True)):
+        r = _run(tmp_path, bindir, raw_iptables_cmd(port, proto, src, "probe"))
+        assert raw_iptables_absent(r.stdout) is absent, (src, port, proto, r.stdout)
+
+
+def test_iptables_insert_puts_rule_at_top_and_failure_propagates(tmp_path):
+    bindir, log = _iptables_stub(tmp_path, [])
+    r = _run(tmp_path, bindir, raw_iptables_cmd(8080, "tcp", "192.168.0.0/16", "insert"))
+    assert r.returncode == 0
+    assert log.read_text().strip() == "iptables -I INPUT 1 -s 192.168.0.0/16 -p tcp -m tcp --dport 8080 -j ACCEPT"
+    bindir = _stub_bin(tmp_path, {"iptables": "exit 3"})
+    assert _run(tmp_path, bindir, raw_iptables_cmd(8080, "tcp", None, "insert")).returncode != 0
+
+
+def test_iptables_rejects_unsafe_input():
+    for args in ((22, "icmp", None), ("22; rm -rf /", "tcp", None), (22, "tcp", "1.2.3.4; id"), (70000, "tcp", None)):
+        with pytest.raises(ValueError):
+            raw_iptables_cmd(*args, "probe")
+
+
+def _blocks_containing(tasks, prefixes):
+    return [t for t in tasks if any(str(c.get("name", "")).startswith(prefixes) for c in t.get("block", []) or [])]
+
+
+def test_centos6_ntp_and_iptables_tasks_are_raw_only_and_controlled():
+    import yaml
+    sec = list(_walk_tasks(yaml.safe_load((ROOT_DIR / "roles/security/tasks/main.yml").read_text())))
+    com = list(_walk_tasks(yaml.safe_load((ROOT_DIR / "roles/common/tasks/main.yml").read_text())))
+    for tasks, gated in ((sec, ("[SEC-008]", "[SEC-021]")), (com, ("[COMMON-010]",))):
+        mod = [t for t in tasks if t.get("name", "").startswith(gated)]
+        assert len(mod) == len(gated)
+        assert all("raw_provisioning_path" in str(t.get("when")) for t in mod)
+    for tasks, prefixes in ((sec, ("[SEC-037]", "[SEC-038]", "[SEC-039]", "[SEC-040]")),
+                            (com, ("[COMMON-041]", "[COMMON-042]", "[COMMON-043]", "[COMMON-044]"))):
+        blocks = _blocks_containing(tasks, prefixes)
+        assert len(blocks) == 1 and "== 6" in str(blocks[0]["when"]) and "raw_provisioning_path" in str(blocks[0]["when"])
+        inner = [c for c in blocks[0]["block"] if c["name"].startswith(prefixes)]
+        assert len(inner) == 4
+        for c in inner:
+            assert "ansible.builtin.raw" in c and "changed_when" in c and "failed_when" in c, c["name"]
+    handlers = yaml.safe_load((ROOT_DIR / "roles/common/handlers/main.yml").read_text())
+    rawh = next(h for h in handlers if h.get("listen") == "Restart ntpd")
+    assert "ansible.builtin.raw" in rawh and rawh["failed_when"] is not False
