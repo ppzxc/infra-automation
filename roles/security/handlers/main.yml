@@ -42,6 +42,7 @@
     state: restarted
     enabled: true
   failed_when: false
+  when: not (raw_provisioning_path | default(false) | bool)
 
 
 - name: Restart auditd
@@ -49,3 +50,20 @@
     name: auditd
     state: restarted
   failed_when: false
+  when: not (raw_provisioning_path | default(false) | bool)
+
+# Raw Provisioning Path (ADR-0005): `service` works on SysV (CentOS 6) and
+# systemd (CentOS 7; auditd only accepts restarts through the service wrapper).
+- name: Restart fail2ban (raw)
+  ansible.builtin.raw: service fail2ban restart
+  listen: Restart fail2ban
+  changed_when: true
+  failed_when: false
+  when: raw_provisioning_path | default(false) | bool
+
+- name: Restart auditd (raw)
+  ansible.builtin.raw: service auditd restart
+  listen: Restart auditd
+  changed_when: true
+  failed_when: false
+  when: raw_provisioning_path | default(false) | bool

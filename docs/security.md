@@ -76,8 +76,19 @@
 | `SEC-023` | `Read current sshd_config (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-024` | `Probe sshd_config hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-025` | `Configure SSH Hardening parameters via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 로컬 해시·모드가 원격 `sha256sum`/`stat`과 같으면 `ok` (`sshd -t -f` 검증 실패 시 임시 파일 삭제 후 실패) |
+| `SEC-026` | `Probe sudo policy hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-027` | `Configure Sudo timestamp timeout and log file via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` (`visudo -cf` 검증 실패 시 임시 파일 삭제 후 실패, 원본 보존) |
+| `SEC-028` | `Install fail2ban package if available (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 기설치 시 `ok`, 설치 불가여도 `failed_when: false` |
+| `SEC-029` | `Check whether fail2ban is installed (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-030` | `Ensure fail2ban is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 기동·부팅 활성 상태면 `ok` |
+| `SEC-031` | `Probe fail2ban jail hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-032` | `Deploy Fail2ban SSH jail configuration via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`fail2ban-sshd.local.j2`) |
+| `SEC-033` | `Check whether auditd is installed (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-034` | `Probe auditd rules hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-035` | `Deploy Auditd security audit rules via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`audit.rules.j2`; CentOS 7 `rules.d/overseer.rules`, CentOS 6 `audit.rules`) |
+| `SEC-036` | `Ensure Auditd service is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 기동·부팅 활성 상태면 `ok` |
 
-> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가 실행되고, `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고, `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
 
 

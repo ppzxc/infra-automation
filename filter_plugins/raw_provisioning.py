@@ -235,6 +235,23 @@ def raw_yum_cmd(packages, optional=False):
                    PKGS=pkgs, MARK=CHANGED_MARKER)
 
 
+def raw_service_cmd(name):
+    """Ensure ``name`` is running and enabled on boot (systemd or SysV); marker if anything changed.
+
+    CentOS 7 is systemd (``systemctl``), CentOS 6 is SysV/Upstart (``service`` +
+    ``chkconfig``); the presence of ``systemctl`` selects the branch.
+    """
+    return _render(
+        'c=0; rc=0; if command -v systemctl >/dev/null 2>&1; then '
+        'systemctl is-active @N@ >/dev/null 2>&1 || { systemctl start @N@ && c=1 || rc=1; }; '
+        'systemctl is-enabled @N@ >/dev/null 2>&1 || { systemctl enable @N@ >/dev/null 2>&1 && c=1 || rc=1; }; '
+        'else '
+        'service @N@ status >/dev/null 2>&1 || { service @N@ start >/dev/null && c=1 || rc=1; }; '
+        'chkconfig @N@ >/dev/null 2>&1 || { chkconfig @N@ on && c=1 || rc=1; }; '
+        'fi; [ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]',
+        N=shlex.quote(name), MARK=CHANGED_MARKER)
+
+
 def raw_sysctl_directives(settings):
     """sysctl module equivalent as raw_set_directives input (``key = value`` lines)."""
     return [{'regexp': r'^\s*%s\s*=' % re.escape(str(k)), 'line': '%s = %s' % (k, v)}
@@ -325,4 +342,5 @@ class FilterModule(object):
             'raw_yum_cmd': raw_yum_cmd,
             'raw_sysctl_live_cmd': raw_sysctl_live_cmd,
             'raw_sudoers_line': raw_sudoers_line,
+            'raw_service_cmd': raw_service_cmd,
         }
