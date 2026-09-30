@@ -1009,6 +1009,6 @@
   block:
     - name: "[SEC-041] Configure SELinux in permissive mode (CentOS 7, raw)"
       ansible.builtin.raw: "{{ (selinux_mode | default('permissive')) | raw_selinux_cmd(selinux_policy | default('targeted')) }}"
-      register: sec011_raw_selinux
-      changed_when: sec011_raw_selinux.stdout | default('') | raw_changed
-      failed_when: sec011_raw_selinux.rc | default(0) != 0
+      register: sec041_raw_selinux
+      changed_when: sec041_raw_selinux.stdout | default('') | raw_changed
+      failed_when: sec041_raw_selinux.rc | default(0) != 0

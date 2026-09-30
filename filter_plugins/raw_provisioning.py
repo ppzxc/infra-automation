@@ -259,7 +259,7 @@ def raw_timezone_cmd(name, zoneinfo='/usr/share/zoneinfo', localtime='/etc/local
     The zone must exist under ``zoneinfo``. It is compared with what
     ``localtime`` resolves to, and ``timedatectl set-timezone`` runs only on drift.
     """
-    if not re.match(r'^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$', name or ''):
+    if not re.fullmatch(r'[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*', name or ''):
         raise ValueError('unsafe timezone name: %r' % (name,))
     return _render(
         'z=@ZONE@/@NAME@; if [ ! -f "$z" ]; then echo "unknown timezone" @NAME@ >&2; false; '
@@ -271,13 +271,13 @@ def raw_timezone_cmd(name, zoneinfo='/usr/share/zoneinfo', localtime='/etc/local
 def raw_selinux_cmd(state, policy, config='/etc/selinux/config'):
     """``ansible.posix.selinux`` equivalent: persist SELINUX/SELINUXTYPE and align the running mode.
 
-    A host without the SELinux config (container-like) is left alone. The
+    A missing SELinux config file is not created or touched (the running mode is still aligned when ``getenforce`` exists). The
     runtime mode is only switched between enforcing and permissive, like the
     module (``disabled`` needs a reboot; it only relaxes enforcing to permissive).
     """
     if state not in ('enforcing', 'permissive', 'disabled'):
         raise ValueError('unsupported selinux state: %r' % (state,))
-    if not re.match(r'^[A-Za-z0-9_-]+$', policy or ''):
+    if not re.fullmatch(r'[A-Za-z0-9_-]+', policy or ''):
         raise ValueError('unsafe selinux policy: %r' % (policy,))
     runtime = {'enforcing': ('Permissive', '1'), 'permissive': ('Enforcing', '0'), 'disabled': ('Enforcing', '0')}[state]
     return _render(
@@ -289,7 +289,7 @@ def raw_selinux_cmd(state, policy, config='/etc/selinux/config'):
         'if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" = @FROM@ ]; then '
         'setenforce @TO@ && c=1 || rc=1; fi; '
         '[ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]',
-        CFG=shlex.quote(config), STATE=state, POLICY=policy, FROM=runtime[0], TO=runtime[1], MARK=CHANGED_MARKER)
+        CFG=shlex.quote(config), STATE=shlex.quote(state), POLICY=shlex.quote(policy), FROM=runtime[0], TO=runtime[1], MARK=CHANGED_MARKER)
 
 
 IPT_MARKER = '__RAW_IPT__'

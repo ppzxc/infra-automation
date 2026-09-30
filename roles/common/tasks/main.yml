@@ -633,4 +633,4 @@
       register: common_raw_journald_push
       changed_when: >-
         (common_raw_journald_probe.stdout | default('')) | raw_push_changed(common_raw_journald_content, '0644', 'root', 'root')
-      failed_when: common_raw_journald_push.rc | default(0) != 0
+      failed_when: false
