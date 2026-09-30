@@ -1,0 +1,149 @@
+---
+# Host Agents 바이너리 전달 (ADR-0006 §2.8) — otelcol-contrib와 향후 backup 역할(restic/resticprofile)이 재사용한다.
+# 컨트롤러가 pinned tarball을 1회 다운로드·SHA256 검증·캐시하고, 호스트에는 버전 디렉터리로 푸시한 뒤
+# /usr/local/bin/<binary> symlink를 교체한다. 호출자는 include_tasks의 vars로 아래 값을 넘긴다.
+#   _deliver_agent      : /opt/host-agents/<agent> 디렉터리명 (예: otelcol-contrib)
+#   _deliver_binary     : 설치할 바이너리 이름 (tarball 멤버명과 동일)
+#   _deliver_version    : 고정 버전
+#   _deliver_url        : tarball URL
+#   _deliver_sha256     : tarball SHA256 (Git 고정값)
+#   _deliver_validate   : 새 바이너리 검증 명령 (빈 문자열이면 생략; {{ _deliver_new_path }} 사용 가능)
+#   _deliver_handler    : symlink 교체 시 notify할 핸들러 이름
+- name: Set delivery paths
+  ansible.builtin.set_fact:
+    _deliver_cache_tarball: "{{ host_agents_cache_dir }}/{{ _deliver_agent }}/{{ _deliver_version }}/{{ _deliver_url | basename }}"
+    _deliver_cache_dir: "{{ host_agents_cache_dir }}/{{ _deliver_agent }}/{{ _deliver_version }}/{{ host_agents_os_arch }}"
+    _deliver_agent_dir: "{{ host_agents_install_root }}/{{ _deliver_agent }}"
+    _deliver_version_dir: "{{ host_agents_install_root }}/{{ _deliver_agent }}/{{ _deliver_version }}"
+    _deliver_new_path: "{{ host_agents_install_root }}/{{ _deliver_agent }}/{{ _deliver_version }}/{{ _deliver_binary }}"
+    _deliver_link: "{{ host_agents_bin_dir | default('/usr/local/bin') }}/{{ _deliver_binary }}"
+    _deliver_owner: "{{ host_agents_owner | default('root') }}"
+
+- name: "[MON-053] Ensure controller cache directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ _deliver_cache_tarball | dirname }}"
+    - "{{ _deliver_cache_dir }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+# host_agents_bin_dir/host_agents_owner는 단위 테스트용 seam(기본 /usr/local/bin, root)이다.
+# 아키텍처가 다른 호스트가 같은 캐시를 동시에 쓰지 않도록 throttle: 1.
+- name: "[MON-040] Download pinned release tarball on the controller and verify SHA256"
+  ansible.builtin.get_url:
+    url: "{{ _deliver_url }}"
+    dest: "{{ _deliver_cache_tarball }}"
+    checksum: "sha256:{{ _deliver_sha256 }}"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  throttle: 1
+
+- name: "[MON-041] Extract the binary into the controller cache"
+  ansible.builtin.unarchive:
+    src: "{{ _deliver_cache_tarball }}"
+    dest: "{{ _deliver_cache_dir }}"
+    remote_src: true
+    extra_opts:
+      - "{{ _deliver_binary }}"
+    creates: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  throttle: 1
+
+- name: "[MON-042] Read the extracted binary SHA256 on the controller"
+  ansible.builtin.stat:
+    path: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+    checksum_algorithm: sha256
+  register: _deliver_cached
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+- name: "[MON-043] Read the current install symlink on the host"
+  ansible.builtin.stat:
+    path: "{{ _deliver_link }}"
+    follow: false
+  register: _deliver_current
+
+- name: "[MON-044] Show planned version change"
+  ansible.builtin.debug:
+    msg: >-
+      {{ _deliver_binary }}: {{ (_deliver_current.stat.lnk_source | default('') | dirname | basename) or 'none' }}
+      -> {{ _deliver_version }}
+  when: _deliver_current.stat.lnk_source | default('') != _deliver_new_path
+
+- name: "[MON-045] Ensure versioned install directory exists"
+  ansible.builtin.file:
+    path: "{{ _deliver_version_dir }}"
+    state: directory
+    owner: "{{ _deliver_owner }}"
+    group: "{{ _deliver_owner }}"
+    mode: '0755'
+  register: _deliver_dir
+
+# check 모드에서 디렉터리가 아직 없으면 copy가 대상 디렉터리 부재로 실패하므로 건너뛴다(변경 예정은 위 태스크가 보고).
+- name: "[MON-046] Push the verified binary into the versioned directory"
+  ansible.builtin.copy:
+    src: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+    dest: "{{ _deliver_new_path }}"
+    owner: "{{ _deliver_owner }}"
+    group: "{{ _deliver_owner }}"
+    mode: '0755'
+  when: not ansible_check_mode or not _deliver_dir.changed
+
+- name: "[MON-047] Read the pushed binary SHA256 on the host"
+  ansible.builtin.stat:
+    path: "{{ _deliver_new_path }}"
+    checksum_algorithm: sha256
+  register: _deliver_pushed
+  check_mode: false
+
+- name: "[MON-048] Assert the pushed binary matches the pinned SHA256"
+  ansible.builtin.assert:
+    that:
+      - _deliver_pushed.stat.exists
+      - _deliver_pushed.stat.checksum == _deliver_cached.stat.checksum
+    fail_msg: >-
+      {{ _deliver_new_path }} SHA256 mismatch (expected {{ _deliver_cached.stat.checksum }},
+      got {{ _deliver_pushed.stat.checksum | default('missing') }}); install symlink was not changed.
+  when: not ansible_check_mode or _deliver_pushed.stat.exists
+
+- name: "[MON-049] Validate the new binary before switching the symlink"
+  ansible.builtin.command: "{{ _deliver_validate }}"
+  changed_when: false
+  when:
+    - _deliver_validate | length > 0
+    - not ansible_check_mode
+
+- name: "[MON-050] Point the install symlink at the new version"
+  ansible.builtin.file:
+    src: "{{ _deliver_new_path }}"
+    dest: "{{ _deliver_link }}"
+    state: link
+    force: true
+    owner: "{{ _deliver_owner }}"
+    group: "{{ _deliver_owner }}"
+  notify: "{{ _deliver_handler }}"
+
+- name: "[MON-051] Find installed version directories"
+  ansible.builtin.find:
+    paths: "{{ _deliver_agent_dir }}"
+    file_type: directory
+  register: _deliver_installed
+  check_mode: false
+
+# 현재 버전과 직전 버전(교체 전 symlink 대상) 1개만 보존한다.
+- name: "[MON-052] Prune versions older than the previous one"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ _deliver_installed.files | map(attribute='path')
+       | difference([_deliver_version_dir, _deliver_current.stat.lnk_source | default('') | dirname]) | list }}

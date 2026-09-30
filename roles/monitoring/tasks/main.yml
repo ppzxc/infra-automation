@@ -79,19 +79,26 @@
       state: present
     when: enable_otelcol | default(true) | bool
 
-  - name: "[MON-003] Download and install OpenTelemetry Collector Contrib binary"
-    ansible.builtin.unarchive:
-      src: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ otelcol_version }}/otelcol-contrib_{{ otelcol_version }}_linux_{{ otelcol_arch }}.tar.gz"
-      dest: /usr/local/bin
-      remote_src: true
-      extra_opts:
-        - "otelcol-contrib"
-      creates: /usr/local/bin/otelcol-contrib
-      owner: root
-      group: root
-      mode: '0755'
+  - name: "Check for an existing otelcol configuration to validate the new binary against"
+    ansible.builtin.stat:
+      path: "{{ otelcol_config_path }}"
+    register: _otelcol_existing_config
     when: enable_otelcol | default(true) | bool
-    notify: Restart otelcol-contrib
+
+  - name: "[MON-003] Deliver pinned OpenTelemetry Collector Contrib binary"
+    ansible.builtin.include_tasks: deliver_binary.yml
+    vars:
+      _otelcol_version: "{{ host_agents_versions['default'].otelcol_contrib }}"
+      _deliver_agent: otelcol-contrib
+      _deliver_binary: otelcol-contrib
+      _deliver_version: "{{ _otelcol_version }}"
+      _deliver_url: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ _otelcol_version }}/otelcol-contrib_{{ _otelcol_version }}_linux_{{ host_agents_os_arch }}.tar.gz"
+      _deliver_sha256: "{{ host_agents_checksums.otelcol_contrib[_otelcol_version][host_agents_os_arch] }}"
+      _deliver_validate: >-
+        {{ (host_agents_install_root ~ '/otelcol-contrib/' ~ _otelcol_version ~ '/otelcol-contrib validate --config=' ~ otelcol_config_path)
+           if _otelcol_existing_config.stat.exists | default(false) else '' }}
+      _deliver_handler: Restart otelcol-contrib
+    when: enable_otelcol | default(true) | bool
 
 
 - name: "Apply otelcol configuration"
@@ -114,6 +121,7 @@
           owner: root
           group: "{{ otelcol_group }}"
           mode: '0640'
+          validate: "/usr/local/bin/otelcol-contrib validate --config=%s"
         notify: Restart otelcol-contrib
     when: enable_otelcol | default(true) | bool
 

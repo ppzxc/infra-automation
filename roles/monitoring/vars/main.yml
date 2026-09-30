@@ -18,3 +18,18 @@ host_agents_backup_mandatory_paths:
   - /usr/local/bin
   - /usr/local/etc
   - /usr/local/sbin
+
+# 바이너리 버전 표 (ADR-0006 §2.8). 호스트별 오버라이드 없음. 경로 키는 host_agents_os_path별 분기
+# (legacy_el6/legacy_el7은 후속 티켓에서 행 추가). 버전 상향 PR은 아래 체크섬 변경을 동반해야 한다.
+host_agents_versions:
+  default:
+    otelcol_contrib: "0.161.0"
+
+# 버전×아키텍처별 SHA256 (배포 tarball 기준). upstream checksums.txt는 기준으로 신뢰하지 않는다.
+host_agents_checksums:
+  otelcol_contrib:
+    "0.161.0":
+      amd64: "778c689efa681ff6e4722ce9f66b9b7f57c3ba009ab2e2b43dc2e0315862c731"
+      arm64: "cd5de93213a0dbb90e4998b3b9e4e15ed691ec635cf7cf4147f95799fb16b676"
+
+host_agents_install_root: /opt/host-agents

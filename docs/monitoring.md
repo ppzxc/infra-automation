@@ -74,6 +74,16 @@
 
 ---
 
+## 3-2. 바이너리 버전 고정과 전달 (`deliver_binary.yml`)
+
+- 버전·SHA256은 `vars/main.yml`의 `host_agents_versions`/`host_agents_checksums`(Git 고정, 호스트별 오버라이드 없음). 버전 상향 PR은 체크섬 변경을 동반하며 upstream `checksums.txt`는 신뢰하지 않습니다. 현재 `default` 경로: otelcol-contrib v0.161.0.
+- 컨트롤러가 tarball을 1회 다운로드해 SHA256을 검증하고 `host_agents_cache_dir`(기본 `~/.cache/host-agents`)에 캐시한 뒤, 인터넷이 없는 호스트에도 `copy`로 푸시합니다.
+- 레이아웃: `/opt/host-agents/otelcol-contrib/<version>/otelcol-contrib`, `/usr/local/bin/otelcol-contrib`는 현재 버전 symlink. 호스트에는 현재+직전 버전 1개만 보존합니다.
+- 순서: 푸시 → 호스트 SHA256 == 컨트롤러 검증본(불일치 시 호스트 실패, symlink 불변) → 기존 설정이 있으면 새 바이너리로 `validate` → symlink 교체(핸들러 재시작). 신규 설정은 `template validate`로 재시작 전에 검증됩니다. 롤백은 버전 표 revert PR 후 재실행.
+- `deliver_binary.yml`은 `_deliver_*` 변수로 매개화되어 backup 역할(restic/resticprofile)이 그대로 재사용합니다(SPEC-ID `MON-040~053`).
+
+---
+
 ## 4. 태스크 매트릭스 (Task Matrix)
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
@@ -85,7 +95,7 @@
 | `MON-015` | `Remove legacy node_exporter group` | `ansible.builtin.group` | All | 그룹 부존재 시 `ok` |
 | `MON-001` | `Create otelcol system group` | `ansible.builtin.group` | All | 그룹 존재 시 `ok` |
 | `MON-002` | `Create otelcol system user` | `ansible.builtin.user` | All | 유저 존재 시 `ok` |
-| `MON-003` | `Download and install OpenTelemetry Collector Contrib binary` | `ansible.builtin.unarchive` | RHEL 7+, Debian | `creates: /usr/local/bin/otelcol-contrib` |
+| `MON-003` | `Deliver pinned OpenTelemetry Collector Contrib binary` | `ansible.builtin.include_tasks` | RHEL 7+, Debian | 버전 디렉터리 존재/symlink 일치 시 `ok` (`creates:` 없음 — 버전 상향 시 롤아웃) |
 | `MON-004` | `Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 (`otelcol-contrib.yaml.j2`) |
 | `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` |
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
@@ -104,3 +114,17 @@
 | `MON-033` | `Merge agents inputs with the Git standard` | `ansible.builtin.set_fact` | All | 순수 함수 (시크릿 미포함) |
 | `MON-034` | `Assert agents inputs are valid before any change` | `ansible.builtin.assert` | All | 읽기 전용 |
 | `MON-035` | `Set agents secrets as host facts` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
+| `MON-040` | `Download pinned release tarball on the controller and verify SHA256` | `ansible.builtin.get_url` | controller | `checksum: sha256:<Git 고정값>` 일치 시 `ok`, 불일치 시 실패 |
+| `MON-041` | `Extract the binary into the controller cache` | `ansible.builtin.unarchive` | controller | `creates` (버전×아키텍처별 캐시) |
+| `MON-042` | `Read the extracted binary SHA256 on the controller` | `ansible.builtin.stat` | controller | 읽기 전용 |
+| `MON-043` | `Read the current install symlink on the host` | `ansible.builtin.stat` | All | 읽기 전용 |
+| `MON-044` | `Show planned version change` | `ansible.builtin.debug` | All | 읽기 전용 (check 모드에서 버전 변경 diff 표시) |
+| `MON-045` | `Ensure versioned install directory exists` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` |
+| `MON-046` | `Push the verified binary into the versioned directory` | `ansible.builtin.copy` | All | 체크섬 비교 |
+| `MON-047` | `Read the pushed binary SHA256 on the host` | `ansible.builtin.stat` | All | 읽기 전용, `check_mode: false` |
+| `MON-048` | `Assert the pushed binary matches the pinned SHA256` | `ansible.builtin.assert` | All | 읽기 전용 (불일치 시 호스트 실패, symlink 유지) |
+| `MON-049` | `Validate the new binary before switching the symlink` | `ansible.builtin.command` | All | `changed_when: false`; 기존 설정이 있을 때만 `otelcol-contrib validate` |
+| `MON-050` | `Point the install symlink at the new version` | `ansible.builtin.file` | All | symlink 일치 시 `ok`; 변경 시 `Restart otelcol-contrib` 핸들러 |
+| `MON-051` | `Find installed version directories` | `ansible.builtin.find` | All | 읽기 전용, `check_mode: false` |
+| `MON-052` | `Prune versions older than the previous one` | `ansible.builtin.file` | All | 현재+직전 1개만 보존 |
+| `MON-053` | `Ensure controller cache directories exist` | `ansible.builtin.file` | controller | 디렉터리 존재 시 `ok` |
