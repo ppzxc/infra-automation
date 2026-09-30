@@ -59,13 +59,13 @@
 | `SEC-006` | `Ensure firewalld service is started and enabled (RHEL/Rocky 7+)` | `ansible.builtin.service` | RHEL 7+, Rocky | 서비스 기동 상태면 `ok` |
 | `SEC-007` | `Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | 포트 기등록 시 `ok` |
 | `SEC-008` | `Allow incoming TCP ports via iptables (CentOS 6)` | `ansible.builtin.iptables` | CentOS 6 | iptables 체인 룰 확인 후 적용 |
-| `SEC-009` | `Install fail2ban package if available` | `ansible.builtin.package` | All | 패키지 기설치 시 `ok`, `failed_when: false` |
-| `SEC-010` | `Ensure fail2ban is running and enabled (if installed)` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok`, `failed_when: false` |
+| `SEC-009` | `Install fail2ban package if available` | `ansible.builtin.package` | All (`raw_provisioning_path=false`) | 패키지 기설치 시 `ok`, `failed_when: false` |
+| `SEC-010` | `Ensure fail2ban is running and enabled (if installed)` | `ansible.builtin.service` | All (`raw_provisioning_path=false`) | 서비스 기동 상태면 `ok`, `failed_when: false` |
 | `SEC-011` | `Configure SELinux in permissive mode (RHEL/Rocky 7+)` | `ansible.posix.selinux` | RHEL 7+, Rocky | SELinux 상태가 permissive면 `ok` |
-| `SEC-012` | `Deploy Auditd security audit rules` | `ansible.builtin.template` | RHEL / Rocky | Checksum 비교 (`audit.rules.j2`) |
-| `SEC-013` | `Ensure Auditd service is running and enabled` | `ansible.builtin.service` | RHEL / Rocky | 서비스 기동 상태면 `ok` |
-| `SEC-014` | `Configure Sudo timestamp timeout and log file` | `ansible.builtin.copy` | All | Checksum 비교 (`validate: visudo`) |
-| `SEC-015` | `Deploy Fail2ban SSH jail configuration` | `ansible.builtin.template` | All | Checksum 비교 (`fail2ban-sshd.local.j2`) |
+| `SEC-012` | `Deploy Auditd security audit rules` | `ansible.builtin.template` | RHEL / Rocky (`raw_provisioning_path=false`) | Checksum 비교 (`audit.rules.j2`) |
+| `SEC-013` | `Ensure Auditd service is running and enabled` | `ansible.builtin.service` | RHEL / Rocky (`raw_provisioning_path=false`) | 서비스 기동 상태면 `ok` |
+| `SEC-014` | `Configure Sudo timestamp timeout and log file` | `ansible.builtin.copy` | All (`raw_provisioning_path=false`) | Checksum 비교 (`validate: visudo`) |
+| `SEC-015` | `Deploy Fail2ban SSH jail configuration` | `ansible.builtin.template` | All (`raw_provisioning_path=false`) | Checksum 비교 (`fail2ban-sshd.local.j2`) |
 | `SEC-016` | `Configure dmz zone for monitoring sources (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | DMZ 서브넷 기등록 시 `ok` |
 | `SEC-017` | `Configure internal zone for private VPC subnets (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | Internal 서브넷 기등록 시 `ok` |
 | `SEC-018` | `Ensure egress policy allows forwarding from docker to physical interface zone (RHEL 9+)` | `ansible.builtin.shell` | RHEL 9+ | 방화벽 정책 일치 시 `ok` |
@@ -76,8 +76,19 @@
 | `SEC-023` | `Read current sshd_config (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-024` | `Probe sshd_config hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
 | `SEC-025` | `Configure SSH Hardening parameters via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 로컬 해시·모드가 원격 `sha256sum`/`stat`과 같으면 `ok` (`sshd -t -f` 검증 실패 시 임시 파일 삭제 후 실패) |
+| `SEC-026` | `Probe sudo policy hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-027` | `Configure Sudo timestamp timeout and log file via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 해시·모드·소유자가 같으면 `ok` (`visudo -cf` 검증 실패 시 임시 파일 삭제 후 실패, 원본 보존) |
+| `SEC-028` | `Install fail2ban package if available (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 기설치 시 `ok`, 설치 불가여도 `failed_when: false` |
+| `SEC-029` | `Check whether fail2ban is installed (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-030` | `Ensure fail2ban is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 기동·부팅 활성 상태면 `ok` (실패 시 fail) |
+| `SEC-031` | `Probe fail2ban jail hash and mode (raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`; CentOS 6 fail2ban 0.8.x는 jail.d 미지원이라 제외) | 조회 전용 (`changed_when: false`) |
+| `SEC-032` | `Deploy Fail2ban SSH jail configuration via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 7 (`raw_provisioning_path`; CentOS 6 fail2ban 0.8.x는 jail.d 미지원이라 제외) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`fail2ban-sshd.local.j2`) |
+| `SEC-033` | `Check whether auditd is installed (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-034` | `Probe auditd rules hash and mode (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 조회 전용 (`changed_when: false`) |
+| `SEC-035` | `Deploy Auditd security audit rules via write-temp/validate/move (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 해시·모드·소유자가 같으면 `ok` (`audit.rules.j2`; CentOS 7 `rules.d/overseer.rules`, CentOS 6 `audit.rules`) |
+| `SEC-036` | `Ensure Auditd service is running and enabled (raw)` | `ansible.builtin.raw` | CentOS 6/7 (`raw_provisioning_path`) | 설치된 경우에만, 기동·부팅 활성 상태면 `ok` |
 
-> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가 실행되고, `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+> **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 인벤토리 `host_vars`/`group_vars`에 `raw_provisioning_path: true`를 지정하면 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고, `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
 
 

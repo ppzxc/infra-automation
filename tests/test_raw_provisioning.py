@@ -21,7 +21,7 @@ from raw_provisioning import (  # noqa: E402
     raw_parse_os_release, raw_read_extract, raw_set_directives,
     raw_changed, raw_group_cmd, raw_user_cmd, raw_authorized_key_cmd,
     raw_sysctl_directives, raw_limits_directives, raw_sudoers_line,
-    raw_rm_cmd, raw_yum_cmd, raw_sysctl_live_cmd,
+    raw_rm_cmd, raw_yum_cmd, raw_sysctl_live_cmd, raw_service_cmd,
 )
 
 OWNER = getpass.getuser()
@@ -508,3 +508,98 @@ def test_sysctl_live_values_are_aligned_when_drifted(tmp_path):
     (tmp_path / "state_vm.swappiness").write_text("10\n")
     r = _run(tmp_path, bindir, raw_sysctl_live_cmd(settings))
     assert r.returncode == 0 and not raw_changed(r.stdout)
+
+
+def _service_cmd(systemd):
+    """The host running the tests may itself have systemctl; force the wanted branch."""
+    cmd = raw_service_cmd("auditd")
+    return cmd if systemd else cmd.replace("command -v systemctl", "false")
+
+
+def _service_stubs(tmp_path, systemd, active, enabled):
+    log = tmp_path / "calls"
+    ok = lambda flag: "exit 0" if flag else "exit 1"
+    scripts = {
+        "service": 'if [ "$2" = status ]; then %s; fi; echo "service $*" >> %s' % (ok(active), log),
+        "chkconfig": ('if [ "$1" = --list ]; then echo "$2 0:off 3:%s"; exit 0; fi; echo "chkconfig $*" >> %s'
+                      % ("on" if enabled else "off", log)),
+    }
+    if systemd:
+        scripts["systemctl"] = ('case "$1" in is-active) %s;; is-enabled) %s;; *) echo "systemctl $*" >> %s;; esac'
+                                % (ok(active), ok(enabled), log))
+    return _stub_bin(tmp_path, scripts), log
+
+
+@pytest.mark.parametrize("systemd", [True, False])
+def test_service_started_and_enabled_only_when_needed(tmp_path, systemd):
+    bindir, log = _service_stubs(tmp_path, systemd, active=False, enabled=False)
+    r = sh("PATH=%s:$PATH; %s" % (bindir, _service_cmd(systemd)))
+    assert r.returncode == 0 and raw_changed(r.stdout)
+    calls = log.read_text()
+    assert "start" in calls and ("enable" in calls or "chkconfig auditd on" in calls)
+
+
+@pytest.mark.parametrize("systemd", [True, False])
+def test_service_in_desired_state_is_unchanged(tmp_path, systemd):
+    bindir, log = _service_stubs(tmp_path, systemd, active=True, enabled=True)
+    r = sh("PATH=%s:$PATH; %s" % (bindir, _service_cmd(systemd)))
+    assert r.returncode == 0 and not raw_changed(r.stdout)
+    assert not log.exists()
+
+
+def test_service_start_failure_is_propagated(tmp_path):
+    bindir = _stub_bin(tmp_path, {"systemctl": 'case "$1" in is-active) exit 1;; *) exit 1;; esac'})
+    assert sh("PATH=%s:$PATH; %s" % (bindir, raw_service_cmd("auditd"))).returncode != 0
+
+
+def raw_jail_when(raw):
+    return next(t for n, t in raw.items() if n.startswith("[SEC-032]")).get("when")
+
+
+def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers():
+    import yaml
+    role = ROOT_DIR / "roles" / "security"
+    tasks = list(_walk_tasks(yaml.safe_load((role / "tasks" / "main.yml").read_text())))
+    gated = ["SEC-009", "SEC-010", "SEC-012", "SEC-013", "SEC-014", "SEC-015"]
+    for t in tasks:
+        if any(t.get("name", "").startswith("[%s]" % g) for g in gated):
+            assert "raw_provisioning_path" in str(t.get("when")), t["name"]
+    raw = {t["name"]: t for t in tasks if "ansible.builtin.raw" in t}
+    for t in raw.values():
+        assert "changed_when" in t and "failed_when" in t or t["name"].startswith("[SEC-022]"), t["name"]
+    # sudoers is validated with visudo and mode stays 4-digit octal
+    sudoers = next(t for n, t in raw.items() if n.startswith("[SEC-027]"))
+    assert "visudo -cf %s" in sudoers["ansible.builtin.raw"] and "'0440'" in sudoers["ansible.builtin.raw"]
+    # each raw content push notifies the shared restart handler
+    assert "ansible_distribution_major_version | int >= 7" in str(raw_jail_when(raw))
+    for prefix, handler in (("[SEC-032]", "Restart fail2ban"), ("[SEC-035]", "Restart auditd")):
+        assert next(t for n, t in raw.items() if n.startswith(prefix))["notify"] == handler
+    handlers = yaml.safe_load((role / "handlers" / "main.yml").read_text())
+    for name in ("Restart fail2ban", "Restart auditd"):
+        module = next(h for h in handlers if h["name"] == name)
+        assert "raw_provisioning_path" in str(module["when"])
+        rawh = next(h for h in handlers if h.get("listen") == name)
+        assert "ansible.builtin.raw" in rawh
+        assert "failed_when: false" not in str(rawh) and rawh["failed_when"] is not False
+
+
+def test_sysv_service_enabled_at_boot_not_just_current_runlevel(tmp_path):
+    bindir = _stub_bin(tmp_path, {
+        "service": "exit 0",
+        "chkconfig": 'if [ "$1" = --list ]; then echo "auditd 0:off 3:off"; exit 0; fi; '
+                     'echo "chkconfig $*" >> %s' % (tmp_path / "calls"),
+    })
+    r = sh("PATH=%s:$PATH; %s" % (bindir, raw_service_cmd("auditd").replace("command -v systemctl", "false")))
+    assert r.returncode == 0 and raw_changed(r.stdout)
+    assert "chkconfig auditd on" in (tmp_path / "calls").read_text()
+
+
+def test_sudoers_policy_rejected_by_visudo_keeps_existing_file(tmp_path):
+    bindir = _stub_bin(tmp_path, {"visudo": "exit 1"})
+    dest = tmp_path / "99-security-policy"
+    dest.write_bytes(b"Defaults timestamp_timeout=15\n")
+    cmd = raw_push_cmd("Defaults bogus\n", str(dest), OWNER, GROUP, "0440", "visudo -cf %s")
+    r = sh("PATH=%s:$PATH; %s" % (bindir, cmd))
+    assert r.returncode != 0
+    assert dest.read_bytes() == b"Defaults timestamp_timeout=15\n"
+    assert list(tmp_path.iterdir()) == [dest, tmp_path / "bin"] or set(tmp_path.iterdir()) == {dest, tmp_path / "bin"}

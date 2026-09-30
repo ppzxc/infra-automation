@@ -68,6 +68,113 @@
       changed_when: "'removed' in (sec001_dropin_raw.stdout | default(''))"
       notify: Restart sshd
 
+# Raw Provisioning Path (ADR-0005): the remaining CentOS 6/7 common security
+# tasks (sudoers, fail2ban, auditd) run through ansible.builtin.raw. Same for
+# both OS versions except the auditd rules path and the fail2ban jail: CentOS 6
+# ships fail2ban 0.8.x, which has no jail.d and no %(sshd_log)s, so SEC-031/032
+# apply to CentOS 7 only. Content-push tasks use the
+# probe (sha256+mode+owner) sentinel and the write-temp/validate/move helper;
+# each restart is delegated once to the `Restart <service>` handlers.
+- name: Security raw provisioning path, sudoers/fail2ban/auditd (CentOS 6/7)
+  when: raw_provisioning_path | default(false) | bool
+  block:
+    - name: "[SEC-026] Probe sudo policy hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/sudoers.d/99-security-policy' | raw_probe_cmd }}"
+      register: sec014_raw_probe
+      changed_when: false
+      failed_when: false
+
+    # sudoers is validated with visudo -cf before mv, so a bad policy never
+    # replaces the working one (the failed temp file is removed).
+    - name: "[SEC-027] Configure Sudo timestamp timeout and log file via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ sec014_raw_content | raw_push_cmd('/etc/sudoers.d/99-security-policy', 'root', 'root', '0440', 'visudo -cf %s') }}
+      vars:
+        sec014_raw_content: |
+          Defaults timestamp_timeout={{ sudo_timestamp_timeout | default(15) }}
+          Defaults logfile="{{ sudo_log_file | default('/var/log/sudo.log') }}"
+      register: sec014_raw_push
+      changed_when: >-
+        (sec014_raw_probe.stdout | default('')) | raw_push_changed(sec014_raw_content, '0440', 'root', 'root')
+      failed_when: sec014_raw_push.rc | default(0) != 0
+
+    - name: "[SEC-028] Install fail2ban package if available (raw)"
+      ansible.builtin.raw: "{{ ['fail2ban'] | raw_yum_cmd(true) }}"
+      register: sec009_raw_install
+      changed_when: sec009_raw_install.stdout | default('') | raw_changed
+      failed_when: false
+
+    - name: "[SEC-029] Check whether fail2ban is installed (raw)"
+      ansible.builtin.raw: rpm -q fail2ban >/dev/null 2>&1; echo "__RAW_RC__ $?"
+      register: sec009_raw_installed
+      changed_when: false
+      failed_when: false
+
+    - name: "[SEC-030] Ensure fail2ban is running and enabled (raw)"
+      ansible.builtin.raw: "{{ 'fail2ban' | raw_service_cmd }}"
+      register: sec010_raw_service
+      changed_when: sec010_raw_service.stdout | default('') | raw_changed
+      failed_when: sec010_raw_service.rc | default(0) != 0
+      when: "'__RAW_RC__ 0' in (sec009_raw_installed.stdout | default(''))"
+
+    - name: "[SEC-031] Probe fail2ban jail hash and mode (raw)"
+      ansible.builtin.raw: "{{ '/etc/fail2ban/jail.d/sshd.local' | raw_probe_cmd }}"
+      register: sec015_raw_probe
+      changed_when: false
+      failed_when: false
+      when:
+        - "'__RAW_RC__ 0' in (sec009_raw_installed.stdout | default(''))"
+        - ansible_distribution_major_version | int >= 7
+
+    - name: "[SEC-032] Deploy Fail2ban SSH jail configuration via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ sec015_raw_content | raw_push_cmd('/etc/fail2ban/jail.d/sshd.local', 'root', 'root', '0644', 'true') }}
+      vars:
+        sec015_raw_content: "{{ lookup('ansible.builtin.template', 'fail2ban-sshd.local.j2') }}"
+      register: sec015_raw_push
+      changed_when: >-
+        (sec015_raw_probe.stdout | default('')) | raw_push_changed(sec015_raw_content, '0644', 'root', 'root')
+      failed_when: sec015_raw_push.rc | default(0) != 0
+      when:
+        - "'__RAW_RC__ 0' in (sec009_raw_installed.stdout | default(''))"
+        - ansible_distribution_major_version | int >= 7
+      notify: Restart fail2ban
+
+    - name: "[SEC-033] Check whether auditd is installed (raw)"
+      ansible.builtin.raw: rpm -q audit >/dev/null 2>&1; echo "__RAW_RC__ $?"
+      register: sec012_raw_installed
+      changed_when: false
+      failed_when: false
+
+    - name: "[SEC-034] Probe auditd rules hash and mode (raw)"
+      ansible.builtin.raw: "{{ sec012_raw_dest | raw_probe_cmd }}"
+      vars:
+        sec012_raw_dest: "{{ '/etc/audit/rules.d/overseer.rules' if ansible_distribution_major_version | int >= 7 else '/etc/audit/audit.rules' }}"
+      register: sec012_raw_probe
+      changed_when: false
+      failed_when: false
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
+    - name: "[SEC-035] Deploy Auditd security audit rules via write-temp/validate/move (raw)"
+      ansible.builtin.raw: >-
+        {{ sec012_raw_content | raw_push_cmd(sec012_raw_dest, 'root', 'root', '0600', 'true') }}
+      vars:
+        sec012_raw_dest: "{{ '/etc/audit/rules.d/overseer.rules' if ansible_distribution_major_version | int >= 7 else '/etc/audit/audit.rules' }}"
+        sec012_raw_content: "{{ lookup('ansible.builtin.template', 'audit.rules.j2') }}"
+      register: sec012_raw_push
+      changed_when: >-
+        (sec012_raw_probe.stdout | default('')) | raw_push_changed(sec012_raw_content, '0600', 'root', 'root')
+      failed_when: sec012_raw_push.rc | default(0) != 0
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+      notify: Restart auditd
+
+    - name: "[SEC-036] Ensure Auditd service is running and enabled (raw)"
+      ansible.builtin.raw: "{{ 'auditd' | raw_service_cmd }}"
+      register: sec013_raw_service
+      changed_when: sec013_raw_service.stdout | default('') | raw_changed
+      failed_when: sec013_raw_service.rc | default(0) != 0
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
 # 2. Firewall configuration (UFW for Debian/Ubuntu)
 - name: "[SEC-002] Ensure UFW is installed (Debian)"
   ansible.builtin.apt:
@@ -699,13 +806,16 @@
     state: present
   register: fail2ban_install_result
   failed_when: false
+  when: not (raw_provisioning_path | default(false) | bool)
 
 - name: "[SEC-010] Ensure fail2ban is running and enabled (if installed)"
   ansible.builtin.service:
     name: fail2ban
     state: started
     enabled: true
-  when: fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
+  when:
+    - fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
+    - not (raw_provisioning_path | default(false) | bool)
   failed_when: false
 
 # 6. SELinux configuration (Permissive mode)
@@ -738,7 +848,9 @@
     owner: root
     group: root
     mode: '0600'
-  when: ansible_os_family == "RedHat"
+  when:
+    - ansible_os_family == "RedHat"
+    - not (raw_provisioning_path | default(false) | bool)
   notify: Restart auditd
   failed_when: false
 
@@ -747,7 +859,9 @@
     name: auditd
     state: started
     enabled: true
-  when: ansible_os_family == "RedHat"
+  when:
+    - ansible_os_family == "RedHat"
+    - not (raw_provisioning_path | default(false) | bool)
   failed_when: false
 
 # 8. Sudo Policy & Log segregation
@@ -761,6 +875,7 @@
     group: root
     mode: '0440'
     validate: 'visudo -cf %s'
+  when: not (raw_provisioning_path | default(false) | bool)
 
 # 9. Fail2ban SSH jail deployment
 - name: "[SEC-015] Deploy Fail2ban SSH jail configuration"
@@ -770,7 +885,9 @@
     owner: root
     group: root
     mode: '0644'
-  when: fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
+  when:
+    - fail2ban_install_result is defined and not fail2ban_install_result.failed | default(false)
+    - not (raw_provisioning_path | default(false) | bool)
   notify: Restart fail2ban
   failed_when: false
 
@@ -833,8 +950,3 @@
     - ansible_distribution == "CentOS"
     - ansible_distribution_major_version | int == 6
     - (firewall_ingress_rules is defined and firewall_ingress_rules | length > 0) or (ssh_allowed_source_ips is defined and ssh_allowed_source_ips | length > 0)
-
-
-
-
-
