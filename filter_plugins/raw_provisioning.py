@@ -99,6 +99,114 @@ def raw_set_directives(current, directives):
     return '\n'.join(lines) + '\n'
 
 
+CHANGED_MARKER = '__RAW_CHANGED__'
+
+
+def raw_changed(stdout):
+    """Sentinel for state-check raw tasks: True when the command echoed the marker."""
+    return any(ln.strip() == CHANGED_MARKER for ln in (stdout or '').splitlines())
+
+
+def _render(template, **tokens):
+    for key, value in tokens.items():
+        template = template.replace('@%s@' % key, value)
+    return template
+
+
+def raw_group_cmd(name, gid=None):
+    """Create the group (or fix its gid) only when needed; echo the marker if it did."""
+    cmd = (
+        "if ! getent group @N@ >/dev/null 2>&1; then groupadd@GID@ @N@ && echo @M@;"
+        "@FIX@ fi"
+    )
+    fix = ''
+    if gid not in (None, ''):
+        fix = (" elif [ \"$(getent group @N@ | cut -d: -f3)\" != @G@ ]; then"
+               " groupmod -g @G@ @N@ && echo @M@;")
+    return _render(_render(cmd, GID=(' -g %s' % shlex.quote(str(gid))) if fix else '', FIX=fix),
+                   N=shlex.quote(name), G=shlex.quote(str(gid)) if fix else '', M=CHANGED_MARKER)
+
+
+def raw_user_cmd(name, group, groups, shell, comment, uid, state):
+    """useradd/usermod/userdel equivalent of ``ansible.builtin.user`` (append semantics)."""
+    n = shlex.quote(name)
+    if state == 'absent':
+        return _render("if getent passwd @N@ >/dev/null 2>&1; then userdel -r @N@ && echo @M@; fi",
+                       N=n, M=CHANGED_MARKER)
+    groups = [g for g in (groups or []) if g]
+    create = ['useradd -m -g %s' % shlex.quote(group)]
+    fix = ['set --',
+           '[ "$(id -gn %s)" = %s ] || set -- "$@" -g %s' % (n, shlex.quote(group), shlex.quote(group)),
+           '[ "$(getent passwd %s | cut -d: -f7)" = %s ] || set -- "$@" -s %s'
+           % (n, shlex.quote(shell), shlex.quote(shell))]
+    if groups:
+        create.append('-G %s' % shlex.quote(','.join(groups)))
+        fix.append('miss=""; for g in %s; do case " $(id -nG %s) " in *" $g "*) ;; '
+                   '*) miss="$miss,$g";; esac; done' % (' '.join(shlex.quote(g) for g in groups), n))
+        fix.append('[ -z "$miss" ] || set -- "$@" -a -G "${miss#,}"')
+    create.append('-s %s' % shlex.quote(shell))
+    if comment not in (None, ''):
+        create.append('-c %s' % shlex.quote(comment))
+        fix.append('[ "$(getent passwd %s | cut -d: -f5)" = %s ] || set -- "$@" -c %s'
+                   % (n, shlex.quote(comment), shlex.quote(comment)))
+    if uid not in (None, ''):
+        create.append('-u %s' % shlex.quote(str(uid)))
+        fix.append('[ "$(id -u %s)" = %s ] || set -- "$@" -u %s' % (n, shlex.quote(str(uid)), shlex.quote(str(uid))))
+    # usermod flags must precede the login name; group append (-a -G) was queued last.
+    return ("if ! getent passwd %s >/dev/null 2>&1; then %s %s && echo %s; else %s; "
+            "if [ $# -gt 0 ]; then usermod \"$@\" %s && echo %s; fi; fi"
+            % (n, ' '.join(create), n, CHANGED_MARKER, '; '.join(fix), n, CHANGED_MARKER))
+
+
+def _key_blob(key):
+    key = (key or '').strip()
+    if '\n' in key or '\r' in key:
+        raise ValueError('an authorized key must be a single line')
+    for token in key.split():
+        if token.startswith('AAAA'):
+            return key, token
+    raise ValueError('no base64 key blob found in authorized key: %r' % (key,))
+
+
+def raw_authorized_key_cmd(user, key, state):
+    """Add/remove one public key (matched by its blob) in ~user/.ssh/authorized_keys."""
+    key, blob = _key_blob(key)
+    tokens = dict(U=shlex.quote(user), B=shlex.quote(blob), K=shlex.quote(key), M=CHANGED_MARKER)
+    lookup = 'h="$(getent passwd @U@ | cut -d: -f6)"; f="$h/.ssh/authorized_keys"; '
+    if state == 'absent':
+        # Nothing to revoke when the account or file is gone.
+        body = ('if [ -n "$h" ] && [ -f "$f" ] && grep -qF -- @B@ "$f"; then T="$f.raw.tmp"; '
+                '(umask 077; grep -vF -- @B@ "$f" > "$T"; [ $? -le 1 ]) && cat "$T" > "$f" '
+                '&& rm -f "$T" && echo @M@ || { rm -f "$T"; false; }; fi')
+    else:
+        body = ('if [ -z "$h" ] || [ ! -d "$h" ]; then echo "no home directory for @U@" >&2; false; '
+                'elif [ -f "$f" ] && grep -qF -- @B@ "$f"; then :; '
+                'else g="$(id -gn @U@)" && (umask 077; install -d -m 0700 -o @U@ -g "$g" "$h/.ssh" '
+                '&& touch "$f") && chown @U@:"$g" "$f" && chmod 0600 "$f" '
+                '&& { [ ! -s "$f" ] || [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; } '
+                "&& printf '%s\\n' @K@ >> \"$f\" && echo @M@; fi")
+    return _render(lookup + body, **tokens)
+
+
+def raw_sysctl_directives(settings):
+    """sysctl module equivalent as raw_set_directives input (``key = value`` lines)."""
+    return [{'regexp': r'^\s*%s\s*=' % re.escape(str(k)), 'line': '%s = %s' % (k, v)}
+            for k, v in (settings or {}).items()]
+
+
+def raw_limits_content(limits):
+    """/etc/security/limits.d file body from pam_limits-style items."""
+    rows = ['%s\t%s\t%s\t%s' % (i['domain'], i['limit_type'], i['limit_item'], i['value'])
+            for i in (limits or [])]
+    return '\n'.join(['# Managed by Ansible'] + rows) + '\n'
+
+
+def raw_sudoers_line(name):
+    if not re.match(r'^[A-Za-z0-9._-]+$', name or ''):
+        raise ValueError('unsafe account name for sudoers: %r' % (name,))
+    return '%s ALL=(ALL) NOPASSWD:ALL\n' % name
+
+
 _RELEASE_RE = re.compile(
     r'^(?P<name>(?:CentOS|Red Hat)[^\n]*?)\s+release\s+(?P<version>[0-9]+(?:\.[0-9]+)*)',
     re.MULTILINE)
@@ -133,4 +241,11 @@ class FilterModule(object):
             'raw_push_changed': raw_push_changed,
             'raw_push_cmd': raw_push_cmd,
             'raw_set_directives': raw_set_directives,
+            'raw_changed': raw_changed,
+            'raw_group_cmd': raw_group_cmd,
+            'raw_user_cmd': raw_user_cmd,
+            'raw_authorized_key_cmd': raw_authorized_key_cmd,
+            'raw_sysctl_directives': raw_sysctl_directives,
+            'raw_limits_content': raw_limits_content,
+            'raw_sudoers_line': raw_sudoers_line,
         }
