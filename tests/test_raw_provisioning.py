@@ -1055,15 +1055,19 @@ def test_detect_probe_is_read_only_and_tolerant():
     assert probe["changed_when"] is False
 
 
+def test_detect_file_gathers_facts_only_off_raw_path():
+    import yaml
+    setup = next(t for t in yaml.safe_load(EFFECTIVE_EXPR) if "ansible.builtin.setup" in t)
+    assert setup["when"] == "not (_raw_path_effective | bool)"
+
+
 @pytest.mark.parametrize("playbook", ["site.yml", "maintenance.yml"])
-def test_playbooks_run_detection_before_setup(playbook):
+def test_target_plays_import_detection_with_always_tag(playbook):
     import yaml
     plays = yaml.safe_load((ROOT_DIR / "playbooks" / playbook).read_text())
-    for play in (p for p in plays if p.get("roles")):
-        names = [next(iter(t.get("ansible.builtin.import_tasks") and ["detect"] or ["x"])) for t in play["pre_tasks"]]
-        setup_i = next(i for i, t in enumerate(play["pre_tasks"]) if "ansible.builtin.setup" in t)
-        assert "detect" in names[:setup_i]
-        detect_i = next(i for i, t in enumerate(play["pre_tasks"]) if "ansible.builtin.import_tasks" in t)
-        assert play["pre_tasks"][detect_i]["tags"] == ["always"]
-        assert play["pre_tasks"][setup_i]["tags"] == ["always"]
-        assert play["pre_tasks"][setup_i]["when"] == "not (_raw_path_effective | default(false) | bool)"
+    targets = [p for p in plays if p.get("roles") and p.get("hosts") != "overseer"]
+    assert targets
+    for play in targets:
+        imp = [t for t in play["pre_tasks"] if t.get("ansible.builtin.import_tasks") == "common/detect_raw_path.yml"]
+        assert len(imp) == 1 and imp[0]["tags"] == ["always"]
+        assert play["gather_facts"] is False

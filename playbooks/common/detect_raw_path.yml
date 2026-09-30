@@ -6,6 +6,7 @@
 # raw_provisioning_path(true/false)는 자동 판별보다 우선한다. 이 플레이가
 # raw_provisioning_path를 직접 읽는 유일한 곳이며, 역할의 게이트/핸들러는
 # 결과 fact(_raw_path_effective)만 읽는다.
+# 판별 후 raw 경로가 아닌 호스트는 표준 setup으로 fact를 수집한다.
 # import_tasks로 site.yml/maintenance.yml의 pre_tasks에서 포함된다(플레이 인덱스 불변).
 # 판별 프로브는 읽기 전용이므로 --check에서도 실행된다(ADR-0005 §2.4 예외).
 # ------------------------------------------------------------------------------
@@ -40,3 +41,16 @@
     ansible_distribution_major_version: "{{ _raw_os_facts.major_version }}"
     ansible_distribution_version: "{{ _raw_os_facts.version }}"
   when: _raw_path_effective | bool
+
+# raw 태스크는 --check에서 스킵되고 module 태스크는 게이트로 스킵되므로,
+# raw 호스트의 dry-run은 아무것도 평가하지 않는다. 조용히 넘어가지 않도록 알린다.
+- name: Warn that raw path hosts are not evaluated under --check
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: raw provisioning path host — --check does not evaluate raw tasks (ADR-0005 §2.4)"
+  when:
+    - _raw_path_effective | bool
+    - ansible_check_mode
+
+- name: Gather facts from target host using remote python3
+  ansible.builtin.setup:
+  when: not (_raw_path_effective | bool)

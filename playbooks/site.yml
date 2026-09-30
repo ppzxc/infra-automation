@@ -793,11 +793,6 @@
       ansible.builtin.import_tasks: common/detect_raw_path.yml
       tags: [always]
 
-    - name: Gather facts from target host using remote python3
-      ansible.builtin.setup:
-      tags: [always]
-      when: not (_raw_path_effective | default(false) | bool)
-
     - name: Verify connectivity and OS facts
       ansible.builtin.debug:
         msg:

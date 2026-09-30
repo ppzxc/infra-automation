@@ -64,7 +64,7 @@ module의 `validate:` 절과 `atomic_move`를 대체하는 표준 헬퍼 시퀀�
 
 ### 2.5 Fact Gathering 우회 방식 및 raw 경로 자동 판별 (구현 결정, #30, #51)
 
-**자동 판별 (#51)**: `playbooks/common/detect_raw_path.yml`이 `site.yml` Play 2와 `maintenance.yml` 각 플레이의 `pre_tasks`에서 `setup` 이전에 `/etc/redhat-release`를 읽기 전용 raw 프로브(`check_mode: false`, `failed_when: false`, `become: false`)로 조회하고, `raw_classify_os_path`가 `legacy_el6`/`legacy_el7`/`modern`으로 분류합니다(파일 없음·빈 출력·Rocky/RHEL 9/Ubuntu는 `modern`이며 예외를 던지지 않음). 결과는 호스트별 fact `_raw_path_effective`로 기록되고 역할의 게이트/핸들러는 이 fact만 읽습니다. 우선순위: 인벤토리에 명시된 `raw_provisioning_path`(true/false)가 자동 판별보다 우선하고, 미지정이면 판별 결과를 사용합니다. 이 프로브는 조회 전용이므로 §2.4 Option A의 `--check` 스킵 예외이며, 따라서 `--check`에서도 OS fact 파싱이 동작합니다.
+**자동 판별 (#51)**: `playbooks/common/detect_raw_path.yml`이 `site.yml` Play 2와 `maintenance.yml` 대상 호스트 플레이(overseer 제외)의 `pre_tasks`에서 `import_tasks`로 포함되며, 판별 뒤 raw 경로가 아닌 호스트만 `setup`을 실행합니다. raw 호스트는 `--check`에서 경고 메시지를 출력하고 `/etc/redhat-release`를 읽기 전용 raw 프로브(`check_mode: false`, `failed_when: false`, `become: false`)로 조회하고, `raw_classify_os_path`가 `legacy_el6`/`legacy_el7`/`modern`으로 분류합니다(파일 없음·빈 출력·Rocky/RHEL 9/Ubuntu는 `modern`이며 예외를 던지지 않음). 결과는 호스트별 fact `_raw_path_effective`로 기록되고 역할의 게이트/핸들러는 이 fact만 읽습니다. 우선순위: 인벤토리에 명시된 `raw_provisioning_path`(true/false)가 자동 판별보다 우선하고, 미지정이면 판별 결과를 사용합니다. 이 프로브는 조회 전용이므로 §2.4 Option A의 `--check` 스킵 예외이며, 따라서 `--check`에서도 OS fact 파싱이 동작합니다.
 
 **Fact 공급 (#30)**:
 
