@@ -166,19 +166,27 @@
           changed_when: false
           failed_when: _mon_vars.host_agents_versions['default'].otelcol_contrib not in _verify_otel_version.stdout
 
-        - name: "[VERIFY-MON-040] Verify the install symlink targets the versioned directory"
+        - name: "[VERIFY-MON-046] Verify the versioned install directory and binary are root-owned 0755"
+          ansible.builtin.stat:
+            path: "{{ _mon_vars.host_agents_install_root }}/otelcol-contrib/{{ _mon_vars.host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib"
+          register: _verify_otel_bin
+          failed_when: >-
+            not _verify_otel_bin.stat.exists or _verify_otel_bin.stat.pw_name != 'root' or
+            _verify_otel_bin.stat.mode != '0755'
+
+        - name: "[VERIFY-MON-051] Verify the install symlink targets the pinned versioned directory"
           ansible.builtin.stat:
             path: /usr/local/bin/otelcol-contrib
             follow: false
           register: _verify_otel_link
           failed_when: >-
             not _verify_otel_link.stat.islnk or
-            _verify_otel_link.stat.lnk_source != '/opt/host-agents/otelcol-contrib/' ~
+            _verify_otel_link.stat.lnk_source != _mon_vars.host_agents_install_root ~ '/otelcol-contrib/' ~
             _mon_vars.host_agents_versions['default'].otelcol_contrib ~ '/otelcol-contrib'
 
-        - name: "[VERIFY-MON-048] Verify only the current and previous version directories are kept"
+        - name: "[VERIFY-MON-053] Verify at most the current and previous version directories are kept"
           ansible.builtin.find:
-            paths: /opt/host-agents/otelcol-contrib
+            paths: "{{ _mon_vars.host_agents_install_root }}/otelcol-contrib"
             file_type: directory
           register: _verify_otel_dirs
           failed_when: _verify_otel_dirs.files | length > 2

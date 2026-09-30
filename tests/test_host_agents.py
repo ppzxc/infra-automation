@@ -6,9 +6,11 @@
   ``ansible-playbook`` against a fake OpenBao HTTP server, in normal and check mode.
 """
 
+import hashlib
 import json
 import subprocess
 import sys
+import tarfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -465,40 +467,42 @@ def test_probe_tasks_set_os_facts_with_and_without_pregathered_facts(tmp_path, c
 
 
 # --------------------------------------------------------------------------
-# Pinned binary delivery (Ticket-3): deliver_binary.yml executed for real
+# Pinned binary delivery (Ticket-3): deliver_binary.yml + switch_binary.yml executed for real
 # --------------------------------------------------------------------------
 
-def _make_release(tmp_path, version, ok=True):
-    """Fake release tarball whose binary supports `validate` and `--version`."""
-    import hashlib
-    import tarfile
-    src = tmp_path / f"src-{version}"
-    src.mkdir(exist_ok=True)
-    exe = src / "fake-agent"
-    exe.write_text("#!/bin/sh\n" + ("echo v%s; exit 0\n" % version if ok else "exit 1\n"))
-    exe.chmod(0o755)
+def _make_release(tmp_path, version):
+    """Fake release tarball; bytes are kept stable so repeated runs see the same SHA256."""
     tgz = tmp_path / f"fake-agent_{version}_linux_amd64.tar.gz"
-    if tgz.exists():                    # keep bytes stable so repeated runs see the same SHA256
-        return tgz, hashlib.sha256(tgz.read_bytes()).hexdigest()
-    with tarfile.open(tgz, "w:gz") as t:
-        t.add(exe, arcname="fake-agent")
+    if not tgz.exists():
+        src = tmp_path / f"src-{version}"
+        src.mkdir(exist_ok=True)
+        exe = src / "fake-agent"
+        exe.write_text(f"#!/bin/sh\necho v{version}\n")
+        exe.chmod(0o755)
+        with tarfile.open(tgz, "w:gz") as t:
+            t.add(exe, arcname="fake-agent")
     return tgz, hashlib.sha256(tgz.read_bytes()).hexdigest()
 
 
-def _deliver(tmp_path, version, sha=None, validate="", check=False, tgz=None):
-    tgz, real = (tgz, None) if tgz else _make_release(tmp_path, version)
+def _id(flag):
+    return subprocess.run(["id", flag], capture_output=True, text=True).stdout.strip()
+
+
+def _deliver(tmp_path, version, sha=None, check=False):
+    tgz, real = _make_release(tmp_path, version)
+    tasks = ROLE / "tasks"
+    call_vars = {"_deliver_agent": "fake-agent", "_deliver_binary": "fake-agent",
+                 "_deliver_version": version, "_deliver_url": f"file://{tgz}",
+                 "_deliver_sha256": sha or real, "_deliver_handler": "Restart fake"}
     pb = tmp_path / "deliver.yml"
     pb.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
         "vars": {"host_agents_os_arch": "amd64", "host_agents_cache_dir": str(tmp_path / "cache"),
                  "host_agents_install_root": str(tmp_path / "opt"),
                  "host_agents_bin_dir": str(tmp_path / "bin"),
-                 "host_agents_owner": subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()},
-        "tasks": [{"ansible.builtin.include_tasks": str(ROLE / "tasks" / "deliver_binary.yml"),
-                   "vars": {"_deliver_agent": "fake-agent", "_deliver_binary": "fake-agent",
-                            "_deliver_version": version, "_deliver_url": f"file://{tgz}",
-                            "_deliver_sha256": sha or real,
-                            "_deliver_validate": validate, "_deliver_handler": "Restart fake"}}],
+                 "host_agents_owner": _id("-un"), "host_agents_group": _id("-gn")},
+        "tasks": [{"ansible.builtin.include_tasks": str(tasks / f), "vars": call_vars}
+                  for f in ("deliver_binary.yml", "switch_binary.yml")],
         "handlers": [{"name": "Restart fake", "ansible.builtin.debug": {"msg": "HANDLER-RAN"}}],
     }]))
     (tmp_path / "bin").mkdir(exist_ok=True)
@@ -507,12 +511,20 @@ def _deliver(tmp_path, version, sha=None, validate="", check=False, tgz=None):
                           cwd=ROOT_DIR, timeout=180)
 
 
+def _link_version(tmp_path):
+    return (tmp_path / "bin" / "fake-agent").readlink().parent.name
+
+
+def _kept(tmp_path):
+    return sorted(p.name for p in (tmp_path / "opt" / "fake-agent").iterdir() if p.is_dir())
+
+
 def test_delivery_installs_versioned_dir_and_symlink(tmp_path):
     r = _deliver(tmp_path, "1.0.0")
     assert r.returncode == 0, r.stdout + r.stderr
     link = tmp_path / "bin" / "fake-agent"
     assert link.is_symlink()
-    assert Path(link.readlink()) == tmp_path / "opt" / "fake-agent" / "1.0.0" / "fake-agent"
+    assert link.readlink() == tmp_path / "opt" / "fake-agent" / "1.0.0" / "fake-agent"
     assert "HANDLER-RAN" in r.stdout
     again = _deliver(tmp_path, "1.0.0")            # idempotent: no change, no restart
     assert again.returncode == 0 and "changed=0" in again.stdout
@@ -520,8 +532,7 @@ def test_delivery_installs_versioned_dir_and_symlink(tmp_path):
 
 
 def test_delivery_checksum_mismatch_fails_before_any_install(tmp_path):
-    tgz, _ = _make_release(tmp_path, "1.0.0")
-    r = _deliver(tmp_path, "1.0.0", sha="0" * 64, tgz=tgz)
+    r = _deliver(tmp_path, "1.0.0", sha="0" * 64)
     assert r.returncode != 0
     assert not (tmp_path / "bin" / "fake-agent").exists()
     assert not (tmp_path / "opt" / "fake-agent" / "1.0.0").exists()
@@ -530,27 +541,50 @@ def test_delivery_checksum_mismatch_fails_before_any_install(tmp_path):
 def test_delivery_upgrade_keeps_only_previous_version(tmp_path):
     for v in ("1.0.0", "1.1.0", "1.2.0"):
         assert _deliver(tmp_path, v).returncode == 0
-    kept = sorted(p.name for p in (tmp_path / "opt" / "fake-agent").iterdir())
-    assert kept == ["1.1.0", "1.2.0"]
-    assert (tmp_path / "bin" / "fake-agent").readlink().parent.name == "1.2.0"
+    assert _kept(tmp_path) == ["1.1.0", "1.2.0"]
+    assert _link_version(tmp_path) == "1.2.0"
 
 
-def test_delivery_validate_failure_keeps_current_symlink_and_skips_restart(tmp_path):
-    assert _deliver(tmp_path, "1.0.0").returncode == 0
-    r = _deliver(tmp_path, "1.1.0", validate=f"{tmp_path}/opt/fake-agent/1.1.0/fake-agent validate",
-                 tgz=_make_release(tmp_path, "1.1.0", ok=False)[0])
-    assert r.returncode != 0
-    assert (tmp_path / "bin" / "fake-agent").readlink().parent.name == "1.0.0"
-    assert "HANDLER-RAN" not in r.stdout
+def test_delivery_rerun_of_current_version_keeps_the_previous_version(tmp_path):
+    for v in ("1.0.0", "1.1.0", "1.1.0"):
+        assert _deliver(tmp_path, v).returncode == 0
+    assert _kept(tmp_path) == ["1.0.0", "1.1.0"]
+
+
+def test_delivery_preserves_preexisting_regular_file_binary(tmp_path):
+    legacy = tmp_path / "bin" / "fake-agent"
+    legacy.parent.mkdir()
+    legacy.write_text("old-0.108.0")
+    r = _deliver(tmp_path, "1.0.0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert legacy.is_symlink()
+    assert (tmp_path / "opt" / "fake-agent" / "legacy-fake-agent").read_text() == "old-0.108.0"
 
 
 def test_delivery_check_mode_reports_version_change_without_changing_host(tmp_path):
     assert _deliver(tmp_path, "1.0.0").returncode == 0
     r = _deliver(tmp_path, "1.1.0", check=True)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "1.0.0" in r.stdout and "-> 1.1.0" in r.stdout.replace("\n", " ") or "1.1.0" in r.stdout
-    assert (tmp_path / "bin" / "fake-agent").readlink().parent.name == "1.0.0"
+    assert "fake-agent/1.0.0/fake-agent" in r.stdout and "fake-agent/1.1.0/fake-agent" in r.stdout
+    assert _link_version(tmp_path) == "1.0.0"
     assert not (tmp_path / "opt" / "fake-agent" / "1.1.0" / "fake-agent").exists()
+
+
+def test_config_is_validated_by_the_new_binary_before_the_symlink_switches():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    flat = []
+
+    def walk(items):
+        for t in items:
+            flat.append(t)
+            walk(t.get("block", []))
+    walk(tasks)
+    names = [t.get("name", "") for t in flat]
+    order = {k: next(i for i, n in enumerate(names) if k in n) for k in ("MON-003", "MON-004-CONF", "MON-054")}
+    assert order["MON-003"] < order["MON-004-CONF"] < order["MON-054"]
+    conf = flat[order["MON-004-CONF"]]["ansible.builtin.template"]["validate"]
+    assert "host_agents_install_root" in conf and "host_agents_versions" in conf   # new versioned binary
+    assert "/usr/local/bin/otelcol-contrib" not in conf                             # never the old symlink
 
 
 def test_otelcol_pinned_version_table_is_consistent():
