@@ -150,7 +150,14 @@
 - **공급 경로**: 대상 호스트는 인터넷 불가로 가정. **컨트롤러(Semaphore)가 다운로드·검증·캐시 후 push**(modern: `ansible.builtin.copy`, legacy: §2.9). 전제: 컨트롤러 → GitHub releases HTTPS 허용, 캐시 미스 시 재다운로드(휘발성 컨테이너 대응).
 - **설치 레이아웃**: `/opt/host-agents/<agent>/<version>/<binary>`, `/usr/local/bin/<binary>`는 현재 버전 symlink. 대상 디렉터리 부재 → 설치, symlink 불일치 → 교체 + 핸들러 재시작. `creates:` 제거; check 모드에서 버전 변경이 diff로 표시.
 - **재시작 전 검증**: `otelcol-contrib validate --config=…`, `resticprofile --config … show` 실패 시 태스크 실패·서비스 유지. 롤백 = 버전 표 revert PR 후 재실행. 호스트에는 직전 버전 1개만 보존.
-- **버전 간 설정 차이**: 양 버전 공통 설정 우선, 필요한 곳만 `{% if %}`. **구현 전 확인**: `legacy_el6`(v0.119.0)에서 `sending_queue` 옵션(`block_on_overflow` vs 구 `blocking`, `sizer: bytes`) 지원 여부를 `validate`로 검증; 역압 불가 시 큰 `queue_size` + 무한 재시도로 대체하고 "큐 초과 폐기 가능"을 CentOS 6 예외 목록에 추가.
+- **버전 간 설정 차이**: 양 버전 공통 설정 우선, 필요한 곳만 `{% if %}`. 구현 전 확인 항목이던 `legacy_el6`(v0.119.0)의 `sending_queue` 지원 여부는 아래와 같이 검증했습니다(#48).
+- **`sending_queue` 호환성 검증 결과 (otelcol-contrib v0.119.0, 2026-10-01, #48)**:
+  - **방법**: 공식 릴리스 `otelcol-contrib_0.119.0_linux_amd64.tar.gz`(SHA256 `4ee77545…48111`, `--version` = 0.119.0)로 실제 템플릿 렌더링본을 `otelcol-contrib validate`. 회귀 테스트: `tests/test_host_agents_legacy_el6.py::test_real_otelcol_0_119_0_validates_the_el6_config_and_rejects_the_modern_one`(`OTELCOL_EL6_BIN` 지정 시 실행).
+  - **결과**: modern 설정은 `'sending_queue' has invalid keys: block_on_overflow, sizer`로 거부. 구 이름 `blocking`은 인식됨(잘못된 키는 `invalid keys`, `blocking: maybe`는 타입 오류로 거부되므로 무시되는 키가 아님). `storage: file_storage`, `retry_on_failure.max_elapsed_time: 0`은 그대로 지원.
+  - **역압 동작 확인**: 도달 불가 endpoint, `queue_size: 2`의 영속 큐로 filelog 500줄을 흘린 실험에서 `blocking: false`는 `sending queue is full … Rejecting data`(폐기) 로그가 발생했고 `blocking: true`는 거부 없이 큐 대기(역압)했습니다. 종료 시 처리 중이던 요청의 `interrupted due to shutdown … Dropping data`는 양쪽 동일한 in-flight 항목이며 영속 큐 특성으로 el6 고유 문제가 아닙니다.
+  - **결정**: 문서화된 대체안(큰 `queue_size` + 무한 재시도, "큐 초과 폐기 가능")은 **불필요** — 역압이 유지되므로 §2.7의 "원본 로그 파일 = 버퍼" 보장은 CentOS 6에도 적용됩니다. 템플릿은 `legacy_el6`에서만 `blocking: true`/`false`와 배치 개수 `queue_size`를 렌더링합니다(modern·legacy_el7 렌더링은 불변).
+  - **CentOS 6 예외(축소)**: v0.119.0에는 `sizer: bytes`가 없어 `queue_size`가 bytes가 아닌 **배치(요청) 개수**입니다. `otel_log_queue_batches_legacy_el6: 64` × batch 프로세서 상한 1024건 × 평균 ~1KiB ≈ 스트림당 64MiB(4개 스트림 ≈ 256MiB, modern bytes 예산과 같은 규모). 로그 줄이 평균보다 길면 디스크 사용량이 비례해 커질 수 있으나 상한은 배치 수로 고정됩니다.
+  - **backup 측**: 같은 프로파일 템플릿이 resticprofile v0.29.1 + restic 0.17.3에서 `show`를 통과함을 확인(`…::test_real_resticprofile_0_29_1_accepts_the_profile_with_restic_0_17_3`).
 
 ### 2.9 CentOS 6/7 분기 (ADR-0005 확장)
 
@@ -158,14 +165,15 @@
 - **바이너리 업로드**: 컨트롤러 측 `scp`(`delegate_to: localhost`, `command: scp`, `resolve_connection`의 host/port/user/임시 키) → 원격 `sha256sum`을 Git 고정 해시와 비교(ADR-0005 sentinel 겸용) → 버전 디렉터리 + symlink 교체. 소형 파일(설정/unit/cron)은 ADR-0005 base64 헬퍼. (otelcol-contrib 아티팩트 ~100MB+로 base64-over-raw 불가.)
 - **check 모드 예외 (ADR-0005 §2.4 부분 개정, Host Agents 한정)**: 읽기 전용 프로브(`sha256sum`, `stat`, 비시크릿 파일 `cat`)는 `check_mode: false`로 실행, 변경 raw 태스크는 스킵, 변경 예정 파일 목록과 컨트롤러 렌더링본 vs 원격 내용 diff를 debug로 출력(시크릿 env 파일 제외). ADR-0005의 Option A는 `common`/`security`에 대해 그대로 유지됩니다.
 - **otelcol root 실행 예외 (CentOS 6/7 한정)**: systemd 219는 `AmbientCapabilities`(229+) 미지원, 커널 3.10은 ambient capability(4.3+) 미지원 → 비root `otelcol` + `CAP_DAC_READ_SEARCH`로는 audit.log/secure를 읽을 수 없습니다. legacy는 root로 실행하고 CentOS 7은 나머지 하드닝(`ProtectSystem=full`, `ProtectHome`, `PrivateTmp`, `NoNewPrivileges`) 유지. 로그 파일 그룹/ACL 변경은 `security`·logrotate 책임 침범으로 기각. modern은 비root + capability 유지.
-- **init / 스케줄**: CentOS 6 — 기존 SysV 템플릿(`otelcol-contrib.init.j2`) 헬퍼 배포 + `chkconfig`(sentinel `chkconfig --list`); CentOS 7 — systemd unit 헬퍼 배포 + `daemon-reload`/`enable`(sentinel `is-enabled`); 백업은 양쪽 `/etc/cron.d/host-agents-backup`(sentinel 파일 해시).
-- **대체 경로 없음**: 업로드 후 `<binary> --version` 스모크 테스트, 실패 시 호스트 실패(rsyslog 폴백 없음). 첫 실제 CentOS 6 호스트가 카나리.
-- **배치**: ADR-0005 원칙대로 `roles/monitoring`·`roles/backup` 내부에 `host_agents_os_path` 게이트, `tasks/legacy_el6.yml` / `tasks/legacy_el7.yml`로 `include_tasks`.
+- **init / 스케줄**: CentOS 6 — 기존 SysV 템플릿(`otelcol-contrib.init.j2`, legacy에서 root 실행 + `secrets.env` 적재) 헬퍼 배포 + `chkconfig`(sentinel `chkconfig --list`의 `3:on`, 없을 때만 `--add` + `on`, #48 구현); CentOS 7 — systemd unit 헬퍼 배포 + `daemon-reload`/`enable`(sentinel `is-enabled`); 백업은 양쪽 `/etc/cron.d/host-agents-backup`(sentinel 파일 해시).
+- **대체 경로 없음**: 업로드 후 `<binary> --version` 스모크 테스트, 실패 시 호스트 실패(rsyslog 폴백 없음). 첫 실제 CentOS 6 호스트가 카나리(런북: `docs/monitoring.md` §3-5).
+- **미검증 위험 (CentOS 6 카나리에서 확인)**: OpenSSH 5.3 대상은 SHA-1 `ssh-rsa`만 지원하고, 컨트롤러 OpenSSH 8.8+는 기본 비활성입니다. 바이너리 업로드 `scp`(`raw_scp_argv`)는 Ansible `ssh_args`를 상속하지 않으므로, 레거시 알고리즘 옵션이 필요하면 raw 태스크는 통과해도 업로드가 실패할 수 있습니다. 런북 1단계에서 확인하고 필요 시 `raw_scp_argv`에 옵션 전달을 추가합니다.
+- **배치**: ADR-0005 원칙대로 `roles/monitoring`·`roles/backup` 내부에 `host_agents_os_path` 게이트, `tasks/legacy_el6.yml` / `tasks/legacy_el7.yml`로 `include_tasks`. (구현: 두 OS 차이가 작아 역할마다 `tasks/legacy.yml` 하나를 정적 import하고 OS별 태스크만 조건으로 나눔, #48.)
 
 ### 2.10 역할 구성 및 SPEC-ID 규약
 
 - `roles/monitoring`(otelcol, 기존 `MON-*` 계승), 신규 `roles/backup`(restic/resticprofile, `BAK-*`).
-- SPEC-ID는 검증기 정규식 `[A-Z]+-\d{3}`(`scripts/validate-ansible-specs.py`)을 따라야 합니다. 경로 구분은 번호 대역으로: `MON-0xx`/`BAK-0xx` = modern, `MON-1xx`/`BAK-1xx` = legacy_el6, `MON-2xx`/`BAK-2xx` = legacy_el7. (기존 `MON-CLEANUP-00x`는 `MON-011~015`로 재번호됨.)
+- SPEC-ID는 검증기 정규식 `[A-Z]+-\d{3}`(`scripts/validate-ansible-specs.py`)을 따라야 합니다. 경로 구분은 번호 대역으로: `MON-0xx`/`BAK-0xx` = modern, `MON-1xx`/`BAK-1xx` = legacy_el6, `MON-2xx`/`BAK-2xx` = legacy_el7. (기존 `MON-CLEANUP-00x`는 `MON-011~015`로 재번호됨.) 구현에서 CentOS 6/7은 역할마다 `tasks/legacy.yml` 하나를 공유하므로(#48) 대역은 다음과 같이 해석합니다: `1xx` = CentOS 6 **전용** 태스크(`MON-110~122`), `2xx` = CentOS 7 전용 **또는** 두 legacy 경로 공용 태스크(docs 적용 대상 열에 명시). 예외로 raw 공용 헬퍼 `MON-100~108`(#46, 대역 규약 이전 번호)은 1xx에 있지만 두 OS 공용이며 재번호하지 않습니다. backup은 두 OS 차이가 버전 행뿐이라 `BAK-1xx`가 없습니다.
 - **스펙 테이블 반영 방식**: 검증기는 `docs/*.md` 테이블의 모든 ID에 대응 태스크를 요구(`MISSING IN CODE`)하므로, 미구현 태스크는 `docs/monitoring.md`·`docs/backup.md` 테이블에 넣지 않습니다. 계획 매트릭스는 본 ADR §3에 두고, 태스크가 구현되는 커밋에서 해당 행을 docs 테이블로 옮기며 `molecule/default/verify.yml`의 `[VERIFY-<ID>]`를 함께 추가합니다.
 
 ### 2.11 복구 테스트 Runbook
@@ -186,17 +194,17 @@
 
 | 계획 Spec ID | 경로 | 태스크 개요 | 멱등성 방식 |
 |---|---|---|---|
-| `MON-0xx` | modern | `legacy_el6` 만료 경고 (raw OS 프로브·`_is_already_provisioned` assert·OpenBao 입력 검증은 구현되어 `docs/monitoring.md` `MON-020~035`로 이관) | 읽기 전용 |
+| `MON-0xx` | modern | (`legacy_el6` 만료 경고는 legacy 파일의 `MON-110`으로 구현) (raw OS 프로브·`_is_already_provisioned` assert·OpenBao 입력 검증은 구현되어 `docs/monitoring.md` `MON-020~035`로 이관) | 읽기 전용 |
 | `MON-0xx` | modern | otelcol 사용자·그룹, `/var/lib/otelcol/storage`, 버전 디렉터리 | 모듈 상태 비교 |
 | `MON-0xx` | modern | 컨트롤러 캐시 → `copy` 바이너리, SHA256 검증, symlink 교체 | 체크섬/링크 대상 비교 |
 | `MON-0xx` | modern | `secrets.env`(`diff: false`), config 템플릿, `validate` 후 재시작 | 템플릿 체크섬 |
 | `MON-0xx` | modern | systemd unit(비root + `CAP_DAC_READ_SEARCH`), started/enabled | 파일/서비스 상태 |
-| `MON-1xx` | legacy_el6 | scp 업로드 + 원격 sha256 sentinel, SysV + `chkconfig`, root 실행 | ADR-0005 sentinel |
+| `MON-1xx` | legacy_el6 | SysV + `chkconfig`, journald 없음, 컬렉터 로그 logrotate, 만료 경고 — **구현됨**(#48, `docs/monitoring.md` `MON-110/114/119/121/122`; scp·sentinel 등 공용 단계는 `MON-2xx`) | ADR-0005 sentinel |
 | `MON-2xx` | legacy_el7 | scp 업로드 + 원격 sha256, systemd unit(root, 하드닝 유지) | ADR-0005 sentinel |
 | `BAK-0xx` | modern | restic/resticprofile 바이너리, `/etc/restic`(0700) env/password, profile 템플릿 | 체크섬 |
 | `BAK-0xx` | modern | systemd timer(`Persistent=true`) 또는 Rocky 8 cron, status-file/jsonl, logrotate | 파일 체크섬 |
 | `BAK-0xx` | modern | Deploy 한정 `restic cat config` → `init`, `job=inventory` 이벤트 | 프로브 결과 조건 |
-| `BAK-1xx` | legacy_el6 | 바이너리 scp, env/profile/cron.d 헬퍼 배포 | ADR-0005 sentinel |
+| `BAK-1xx` | legacy_el6 | 해당 없음 — CentOS 6은 `BAK-2xx`를 legacy_el6 버전 행으로 공유(#48, `docs/backup.md` `BAK-201~217`) | ADR-0005 sentinel |
 | `BAK-2xx` | legacy_el7 | 바이너리 scp, env/profile/cron.d 헬퍼 배포 | ADR-0005 sentinel |
 | `BAK-0xx` | controller | Repo Maintenance: `check` → `forget --prune`, 월간 10% read, 이벤트 전송 | Semaphore 스케줄 실행 |
 

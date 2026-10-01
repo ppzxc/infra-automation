@@ -22,13 +22,23 @@ if [ -f /etc/init.d/functions ]; then
 fi
 
 PROG="otelcol-contrib"
-EXEC="/usr/local/bin/$PROG"
+EXEC="{{ host_agents_bin_dir | default('/usr/local/bin') }}/$PROG"
 CONFIG="{{ otelcol_config_path }}"
+SECRETS="{{ otelcol_secrets_path }}"
 PIDFILE="/var/run/$PROG.pid"
-LOGFILE="/var/log/$PROG.log"
+LOGFILE="{{ otelcol_sysv_log_path | default('/var/log/otelcol-contrib.log') }}"
+{% if not (otelcol_run_as_root | default(false) | bool) %}
 USER="{{ otelcol_user }}"
+{% endif %}
 
 [ -e /etc/sysconfig/$PROG ] && . /etc/sysconfig/$PROG
+
+# 설정의 ${env:O2_BASIC_AUTH} 등은 secrets env(0600, root)에서만 공급된다(systemd의 EnvironmentFile 대응).
+if [ -r "$SECRETS" ]; then
+    set -a
+    . "$SECRETS"
+    set +a
+fi
 
 start() {
     [ -x $EXEC ] || exit 5
@@ -39,7 +49,13 @@ start() {
         echo
         return 0
     fi
-    nohup su -s /bin/sh $USER -c "$EXEC --config=$CONFIG" >> $LOGFILE 2>&1 &
+{% if otelcol_run_as_root | default(false) | bool %}
+    # CentOS 6: 커널 2.6.32에는 ambient capability가 없어 root로 실행한다(ADR-0006 §2.9).
+    # stdin까지 끊어야 백그라운드 자식이 raw(SSH) 세션의 파이프를 붙잡지 않는다.
+    nohup "$EXEC" --config="$CONFIG" >> $LOGFILE 2>&1 </dev/null &
+{% else %}
+    nohup su -s /bin/sh $USER -c "$EXEC --config=$CONFIG" >> $LOGFILE 2>&1 </dev/null &
+{% endif %}
     PID=$!
     echo $PID > $PIDFILE
     echo_success 2>/dev/null || echo -n "[ OK ]"
@@ -52,6 +68,13 @@ stop() {
     if [ -f $PIDFILE ]; then
         PID=$(cat $PIDFILE)
         kill -TERM $PID 2>/dev/null
+        # 종료(큐 flush, file_storage 잠금 해제)를 기다려야 restart의 새 프로세스가 storage를 열 수 있다.
+        n=0
+        while kill -0 $PID 2>/dev/null && [ $n -lt 30 ]; do
+            sleep 1
+            n=$((n + 1))
+        done
+        kill -0 $PID 2>/dev/null && kill -KILL $PID 2>/dev/null
         rm -f $PIDFILE
         echo_success 2>/dev/null || echo -n "[ OK ]"
     else

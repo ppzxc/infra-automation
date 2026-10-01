@@ -68,14 +68,3 @@
 - name: "[MON-024] Gather facts on modern path"
   ansible.builtin.setup:
   when: host_agents_os_path == 'modern'
-
-- name: "[MON-025] Warn that legacy_el6 hosts are skipped until their tasks land"
-  ansible.builtin.debug:
-    msg: >-
-      {{ inventory_hostname }}: legacy_el6 경로는 아직 구현되지 않아 Host Agents 적용을 건너뜁니다
-      (ADR-0006 §2.9, 후속 티켓). legacy_el7은 raw 경로로 적용됩니다.
-  when: host_agents_os_path == 'legacy_el6'
-
-- name: "[MON-028] End role for legacy_el6 hosts"
-  ansible.builtin.meta: end_host
-  when: host_agents_os_path == 'legacy_el6'

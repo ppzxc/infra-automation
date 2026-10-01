@@ -715,7 +715,7 @@
             that: '"[MON-200]" in _t and "o2_endpoint is match(''^https?://'')" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -724,7 +724,7 @@
             that: '"[MON-201]" in _t and "/usr/sbin/rsyslogd" in _t and "check_mode: false" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -733,7 +733,7 @@
             that: '"[MON-202]" in _t and "host_agents_journald" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -742,7 +742,7 @@
             that: '"[MON-203]" in _t and "raw_dir_cmd" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -751,7 +751,7 @@
             that: '"[MON-204]" in _t and "''0750''" in _t and "''0700''" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -760,7 +760,7 @@
             that: '"[MON-206]" in _t and "_raw_secret: true" in _t and "_raw_mode: ''0600''" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -769,7 +769,7 @@
             that: '"[MON-207]" in _t and "otelcol-contrib validate --config=%s" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -778,7 +778,7 @@
             that: '"[MON-208]" in _t and "legacy_deliver_binary.yml" in _t and "apply:" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -787,7 +787,7 @@
             that: '"[MON-209]" in _t and "legacy_switch_binary.yml" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -823,16 +823,16 @@
             that: '"[MON-213]" in _t and "otelcol-contrib.service.j2" in _t and "Reload systemd daemon (raw)" in _t and "Restart otelcol-contrib (raw)" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
-        - name: "[VERIFY-MON-214] legacy_el7 flushes handlers before enabling"
+        - name: "[VERIFY-MON-214] legacy paths flush handlers before enabling"
           ansible.builtin.assert:
             that: '"[MON-214]" in _t and "flush_handlers" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -841,13 +841,13 @@
             that: '"[MON-215]" in _t and "raw_service_cmd" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
         - name: "[VERIFY-BAK-201] legacy_el7 probes conditional backup paths over raw"
           ansible.builtin.assert:
-            that: '"[BAK-201]" in _t and "raw_exists_cmd" in _t and "legacy_el7" in _t'
+            that: '"[BAK-201]" in _t and "raw_exists_cmd" in _t and "when: host_agents_is_legacy | bool" in _t'
             quiet: true
           vars:
             _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/main.yml') }}"
@@ -868,7 +868,7 @@
             that: '"[BAK-203]" in _t and "raw_dir_cmd" in _t and "''0700''" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -877,7 +877,7 @@
             that: '"[BAK-204]" in _t and "_raw_secret: true" in _t and "_raw_mode: ''0600''" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -886,7 +886,7 @@
             that: '"[BAK-205]" in _t and "_raw_secret: true" in _t and "restic_password" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -895,7 +895,7 @@
             that: '"[BAK-206]" in _t and "host-agents-backup-event.sh" in _t and "rstrip=false" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -904,7 +904,7 @@
             that: '"[BAK-207]" in _t and "host-agents-backup.logrotate.j2" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -913,7 +913,7 @@
             that: '"[BAK-208]" in _t and "show >/dev/null" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -922,7 +922,7 @@
             that: '"[BAK-209]" in _t and "_deliver_smoke_args: version" in _t and "_deliver_format: bz2" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -931,7 +931,7 @@
             that: '"[BAK-210]" in _t and "_deliver_smoke_args: version" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -940,7 +940,7 @@
             that: '"[BAK-211]" in _t and "legacy_switch_binary.yml" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -949,7 +949,7 @@
             that: '"[BAK-212]" in _t and "legacy_switch_binary.yml" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -958,7 +958,7 @@
             that: '"[BAK-213]" in _t and "host-agents-backup.cron.j2" in _t and "_raw_mode: ''0644''" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -967,7 +967,7 @@
             that: '"[BAK-215]" in _t and "LC_ALL=C" in _t and "no_log: true" in _t and "check_mode: false" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -976,7 +976,7 @@
             that: '"[BAK-216]" in _t and "Is there a repository at the following location?" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
 
@@ -985,6 +985,85 @@
             that: '"[BAK-217]" in _t and "_backup_repo_probe.rc != 0" in _t'
             quiet: true
           vars:
-            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        # Host Agents legacy_el6(CentOS 6 전용 MON-1xx, #48): CentOS 6 Test Image가 없으므로 렌더링 결과·필터 출력으로
+        # 관측 가능한 계약을 검증한다(실행 검증은 tests/test_host_agents_legacy_el6.py, 실제 호스트는 docs/monitoring.md §3-5 런북).
+        # 공용 태스크(MON-2xx, BAK-2xx)는 위 legacy_el7 검증이 같은 legacy.yml을 대상으로 함께 다룬다.
+
+        - name: "[VERIFY-MON-110] legacy_el6 expiry raises a real Ansible warning (never a failure) after 2027-12-31"
+          ansible.builtin.assert:
+            that:
+              - (_msg | host_agents_warn) == _msg
+              - _consts.host_agents_version_expiry.legacy_el6 == '2027-12-31'
+              - ('2027-12-31' > _consts.host_agents_version_expiry.legacy_el6) is false
+              - ('2028-01-01' > _consts.host_agents_version_expiry.legacy_el6) is true
+              - '"[MON-110]" in _t and "host_agents_warn" in _t and "tags: [always]" in _t'
+            quiet: true
+          vars:
+            _msg: "VERIFY-MON-110: host_agents_warn emits this line as a [WARNING] and returns it unchanged"
+            _consts: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/vars/main.yml') | from_yaml }}"
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-114] legacy_el6 never enables the journald receiver"
+          ansible.builtin.assert:
+            that: '"[MON-114]" in _t and "host_agents_journald: false" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-119] legacy_el6 init script runs as root, loads secrets, registers with chkconfig and detaches stdio"
+          ansible.builtin.assert:
+            that:
+              - "'# chkconfig: 2345 90 10' in _init"
+              - "'nohup \"$EXEC\" --config=\"$CONFIG\" >> $LOGFILE 2>&1 </dev/null &' in _init"
+              - "'su -s' not in _init and 'USER=' not in _init"
+              - "'SECRETS=\"/etc/otelcol-contrib/secrets.env\"' in _init and '. \"$SECRETS\"' in _init"
+              - "'LOGFILE=\"/var/log/otelcol-contrib.log\"' in _init"
+            quiet: true
+          vars:
+            _init: >-
+              {{ lookup('ansible.builtin.template', playbook_dir ~ '/../../roles/monitoring/templates/otelcol-contrib.init.j2',
+                        template_vars={'otelcol_run_as_root': true, 'host_agents_bin_dir': '/usr/local/bin',
+                                       'otelcol_config_path': '/etc/otelcol/config.yaml',
+                                       'otelcol_secrets_path': '/etc/otelcol-contrib/secrets.env',
+                                       'otelcol_sysv_log_path': '/var/log/otelcol-contrib.log'}) }}
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-121] legacy_el6 starts and enables the collector with the chkconfig sentinel, never systemctl"
+          ansible.builtin.assert:
+            that:
+              - "'systemctl' not in _cmd"
+              - "'chkconfig --list otelcol-contrib 2>/dev/null | grep -q \"3:on\"' in _cmd"
+              - "'chkconfig --add otelcol-contrib && chkconfig otelcol-contrib on' in _cmd"
+              - "'service otelcol-contrib status' in _cmd and 'service otelcol-contrib start' in _cmd"
+            quiet: true
+          vars:
+            _cmd: "{{ 'otelcol-contrib' | raw_sysv_service_cmd }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-122] legacy_el6 rotates the collector log in place (copytruncate) with a 0644 logrotate file"
+          ansible.builtin.assert:
+            that:
+              - "'/var/log/otelcol-contrib.log {' in _rot.splitlines()"
+              - "'copytruncate' in _rot.split() and 'missingok' in _rot.split()"
+              - _defaults.otelcol_sysv_log_path == '/var/log/otelcol-contrib.log'
+              - _defaults.otelcol_logrotate_path == '/etc/logrotate.d/otelcol-contrib'
+              - '"[MON-122]" in _t and "_raw_mode: ''0644''" in _t'
+            quiet: true
+          vars:
+            _defaults: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/defaults/main.yml') | from_yaml }}"
+            _rot: >-
+              {{ lookup('ansible.builtin.template', playbook_dir ~ '/../../roles/monitoring/templates/otelcol-contrib.logrotate.j2',
+                        template_vars={'otelcol_sysv_log_path': '/var/log/otelcol-contrib.log', 'otelcol_logrotate_rotate': 4}) }}
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false

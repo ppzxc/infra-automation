@@ -19,13 +19,30 @@ host_agents_backup_mandatory_paths:
   - /usr/local/etc
   - /usr/local/sbin
 
-# 바이너리 버전 표 (ADR-0006 §2.8). 호스트별 오버라이드 없음. 경로 키는 host_agents_os_path별 분기
-# (legacy_el6/legacy_el7은 후속 티켓에서 행 추가). 버전 상향 PR은 아래 체크섬 변경을 동반해야 한다.
+# 바이너리 버전 표 (ADR-0006 §2.8). 호스트별 오버라이드 없음. 행은 host_agents_version_row로 고른다:
+# CentOS 6(legacy_el6, 커널 2.6.32)은 Go 1.23 빌드 고정 행, 그 외(modern, legacy_el7)는 default.
+# 버전 상향 PR은 아래 체크섬 변경을 동반해야 한다.
 host_agents_versions:
   default:
     otelcol_contrib: "0.161.0"
     restic: "0.19.1"
     resticprofile: "0.33.1"
+  legacy_el6:
+    otelcol_contrib: "0.119.0"   # go1.23.5
+    restic: "0.17.3"             # go1.23.3
+    resticprofile: "0.29.1"      # go1.23.6
+
+# 기한부 행의 만료일 (Go 보안 패치 없음). 경과 시 경고만 출력한다(실패 아님, MON-110).
+host_agents_version_expiry:
+  legacy_el6: "2027-12-31"
+
+host_agents_version_row: "{{ 'legacy_el6' if (host_agents_os_path | default('modern')) == 'legacy_el6' else 'default' }}"
+
+# CentOS 6/7 raw 경로(legacy_el6, legacy_el7) 여부. OS 경로 목록 비교는 여기 한 곳에만 둔다.
+host_agents_is_legacy: "{{ (host_agents_os_path | default('modern')) in ['legacy_el6', 'legacy_el7'] }}"
+
+# 만료 판정 기준일(YYYY-MM-DD, 컨트롤러 UTC). 운영에서는 덮어쓰지 않는다(테스트만 extra-vars로 고정).
+host_agents_today: "{{ now(utc=true, fmt='%Y-%m-%d') }}"
 
 # 버전×아키텍처별 SHA256 (배포 tarball 기준). upstream checksums.txt는 기준으로 신뢰하지 않는다.
 host_agents_checksums:
@@ -33,15 +50,24 @@ host_agents_checksums:
     "0.161.0":
       amd64: "778c689efa681ff6e4722ce9f66b9b7f57c3ba009ab2e2b43dc2e0315862c731"
       arm64: "cd5de93213a0dbb90e4998b3b9e4e15ed691ec635cf7cf4147f95799fb16b676"
+    "0.119.0":
+      amd64: "4ee77545daaad658f7282bff98704bc1f31107890e2a2e1d4b1fc31da4648111"
+      arm64: "c5f4480504a12d9445ef5c3d754bd2824a2ea5dbc516c0edd52bb05c3e72f1f7"
   # restic은 단일 파일 .bz2 릴리스, resticprofile은 self-update가 없는 빌드(no_self_update)를 고정한다(버전 표 이탈 방지).
   restic:
     "0.19.1":
       amd64: "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c"
       arm64: "a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465"
+    "0.17.3":
+      amd64: "5097faeda6aa13167aae6e36efdba636637f8741fed89bbf015678334632d4d3"
+      arm64: "db27b803534d301cef30577468cf61cb2e242165b8cd6d8cd6efd7001be2e557"
   resticprofile:
     "0.33.1":
       amd64: "1d7027d15e3e2456e585a210f811d0f72ec40f6b3388f00425642ed579165d70"
       arm64: "58e4fd6fbe2bd460ee6823c3693f39a10f0f24c90635f0215c19b0ab20bbf5df"
+    "0.29.1":
+      amd64: "458dbc490a3c4f22ddf152d9fc4505a2db50a4dfea418e731567e5284007b00f"
+      arm64: "c178dfe6072b7afd10f2df7b0ad0dfe009900074aa2f48936d31fde600d641c8"
 
 host_agents_install_root: /opt/host-agents
 

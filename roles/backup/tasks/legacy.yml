@@ -1,12 +1,14 @@
 ---
 # ==============================================================================
-# Host Agents 백업 — CentOS 7 (legacy_el7), raw 경로 (ADR-0006 §2.4~2.5, §2.9)
+# Host Agents 백업 — CentOS 6/7 (legacy_el6, legacy_el7), raw 경로 (ADR-0006 §2.4~2.5, §2.9)
 # ==============================================================================
 # main.yml이 먼저 공용 파생값(BAK-010~013: repo, 소스 목록, 제외, 스케줄, 실행 명령)을 만들어 두었다
 # (BAK-201/202가 조건부 경로 존재를 raw로 확인해 같은 모양의 결과를 제공한다). 여기서는 같은 템플릿을
 # 컨트롤러에서 렌더링해 raw 헬퍼로 올린다. 스케줄은 /etc/cron.d, 결과 jsonl 증적은 modern과 동일하다.
 # 태그 분리는 modern과 동일하다(설치·스케줄·repo init = agents_install, 설정 파일 = agents_config).
-- name: "Deliver restic and resticprofile on CentOS 7"
+# 두 OS의 차이는 버전 행뿐이다: host_agents_version_row가 CentOS 6은 legacy_el6(restic 0.17.3, resticprofile 0.29.1,
+# Go 1.23 빌드), CentOS 7은 default다. 그래서 태스크는 모두 legacy 공용(BAK-2xx)이다.
+- name: "Deliver restic and resticprofile on CentOS 6/7"
   when: enable_backup | bool
   tags: [agents_install, backup]
   block:
@@ -16,7 +18,7 @@
       apply:
         tags: [agents_install, backup]
     vars:
-      _restic_version: "{{ host_agents_versions['default'].restic }}"
+      _restic_version: "{{ host_agents_versions[host_agents_version_row].restic }}"
       _deliver_agent: restic
       _deliver_binary: restic
       _deliver_version: "{{ _restic_version }}"
@@ -31,7 +33,7 @@
       apply:
         tags: [agents_install, backup]
     vars:
-      _rp_version: "{{ host_agents_versions['default'].resticprofile }}"
+      _rp_version: "{{ host_agents_versions[host_agents_version_row].resticprofile }}"
       _deliver_agent: resticprofile
       _deliver_binary: resticprofile
       _deliver_version: "{{ _rp_version }}"
@@ -40,7 +42,7 @@
       _deliver_url: "https://github.com/creativeprojects/resticprofile/releases/download/v{{ _rp_version }}/resticprofile_no_self_update_{{ _rp_version }}_linux_{{ host_agents_os_arch }}.tar.gz"
       _deliver_sha256: "{{ host_agents_checksums.resticprofile[_rp_version][host_agents_os_arch] }}"
 
-- name: "Apply backup configuration on CentOS 7"
+- name: "Apply backup configuration on CentOS 6/7"
   when: enable_backup | bool
   tags: [agents_config, backup]
   block:
@@ -105,10 +107,10 @@
       _raw_mode: '0600'
       _raw_secret: true
       _raw_validate: >-
-        /bin/sh -c 'cp "$1" "$1.yaml" && {{ host_agents_install_root }}/resticprofile/{{ host_agents_versions['default'].resticprofile }}/resticprofile
+        /bin/sh -c 'cp "$1" "$1.yaml" && {{ host_agents_install_root }}/resticprofile/{{ host_agents_versions[host_agents_version_row].resticprofile }}/resticprofile
         -f yaml -c "$1.yaml" -n {{ backup_profile_name }} show >/dev/null; rc=$?; rm -f "$1.yaml"; exit $rc' sh %s
 
-- name: "Enable backup schedule on CentOS 7"
+- name: "Enable backup schedule on CentOS 6/7"
   when: enable_backup | bool
   tags: [agents_install, backup]
   block:
@@ -119,8 +121,8 @@
         tags: [agents_install, backup]
     vars:
       _deliver_agent_dir: "{{ host_agents_install_root }}/restic"
-      _deliver_version_dir: "{{ host_agents_install_root }}/restic/{{ host_agents_versions['default'].restic }}"
-      _deliver_new_path: "{{ host_agents_install_root }}/restic/{{ host_agents_versions['default'].restic }}/restic"
+      _deliver_version_dir: "{{ host_agents_install_root }}/restic/{{ host_agents_versions[host_agents_version_row].restic }}"
+      _deliver_new_path: "{{ host_agents_install_root }}/restic/{{ host_agents_versions[host_agents_version_row].restic }}/restic"
       _deliver_link: "{{ host_agents_bin_dir }}/restic"
       _deliver_binary: restic
       _deliver_handler: Refresh backup tooling
@@ -132,8 +134,8 @@
         tags: [agents_install, backup]
     vars:
       _deliver_agent_dir: "{{ host_agents_install_root }}/resticprofile"
-      _deliver_version_dir: "{{ host_agents_install_root }}/resticprofile/{{ host_agents_versions['default'].resticprofile }}"
-      _deliver_new_path: "{{ host_agents_install_root }}/resticprofile/{{ host_agents_versions['default'].resticprofile }}/resticprofile"
+      _deliver_version_dir: "{{ host_agents_install_root }}/resticprofile/{{ host_agents_versions[host_agents_version_row].resticprofile }}"
+      _deliver_new_path: "{{ host_agents_install_root }}/resticprofile/{{ host_agents_versions[host_agents_version_row].resticprofile }}/resticprofile"
       _deliver_link: "{{ host_agents_bin_dir }}/resticprofile"
       _deliver_binary: resticprofile
       _deliver_handler: Refresh backup tooling

@@ -269,6 +269,17 @@ def host_agents_secrets(host_kv):
     return {key: kv[key] for key in REQUIRED_KEYS if not _is_blank(kv.get(key))}
 
 
+def host_agents_warn(msg):
+    """Emit ``msg`` as a real Ansible ``[WARNING]`` (counted, shown on stderr) and return it unchanged.
+
+    There is no builtin warn action; a ``debug`` line is easy to miss in a long run. Keep the
+    hostname in the message: Ansible prints each identical warning text only once.
+    """
+    from ansible.utils.display import Display
+    Display().warning(str(msg))
+    return msg
+
+
 class FilterModule(object):
     def filters(self):
         return {
@@ -277,4 +288,5 @@ class FilterModule(object):
             'host_agents_resolve_inputs': host_agents_resolve_inputs,
             'host_agents_secrets': host_agents_secrets,
             'host_agents_shared_errors': host_agents_shared_errors,
+            'host_agents_warn': host_agents_warn,
         }

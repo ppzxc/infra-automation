@@ -8,9 +8,14 @@ otelcol_config_path: "/etc/otelcol/config.yaml"
 otelcol_storage_dir: "/var/lib/otelcol/storage"
 otelcol_secrets_dir: "/etc/otelcol-contrib"
 otelcol_secrets_path: "/etc/otelcol-contrib/secrets.env"
-# legacy_el7(CentOS 7, raw 경로)은 root로 실행한다. 그 외(modern)는 비root otelcol + CAP_DAC_READ_SEARCH.
+# legacy_el6/legacy_el7(CentOS 6/7, raw 경로)은 root로 실행한다. 그 외(modern)는 비root otelcol + CAP_DAC_READ_SEARCH.
 otelcol_systemd_unit_dir: /etc/systemd/system
-otelcol_run_as_root: "{{ host_agents_os_path | default('modern') == 'legacy_el7' }}"
+otelcol_sysv_init_dir: /etc/init.d
+# SysV init(CentOS 6 등)에서 컬렉터 자체 stdout/stderr가 쌓이는 파일. legacy_el6은 logrotate(copytruncate)로 회전한다(MON-122).
+otelcol_sysv_log_path: /var/log/otelcol-contrib.log
+otelcol_logrotate_path: /etc/logrotate.d/otelcol-contrib
+otelcol_logrotate_rotate: 4
+otelcol_run_as_root: "{{ host_agents_is_legacy | default(false) | bool }}"
 
 # 컨트롤러 측 바이너리 캐시 (tarball 다운로드 1회 + 추출본). 버전/아키텍처별로 분리된다.
 host_agents_cache_dir: "{{ lookup('ansible.builtin.env', 'HOME') | default('/tmp', true) }}/.cache/host-agents"
@@ -55,6 +60,9 @@ otel_backup_log_path: /var/log/host-agents/backup.jsonl
 
 # 로그 exporter 1개당 영속 큐 크기(bytes, 4개 스트림 합계 ≈ 256MiB). 초과 시 filelog가 역압을 받고 원본 파일이 버퍼가 된다.
 otel_log_queue_bytes: 67108864
+# legacy_el6(v0.119.0)은 sizer: bytes가 없어 queue_size가 배치(요청) 개수다. 배치 ≤ 1024건(batch 프로세서) × 평균 1KiB
+# 기준 64개 ≈ 64MiB로 위 bytes 예산과 맞춘다. 큐가 차면 blocking: true로 filelog가 역압을 받는다(ADR-0006 §2.8).
+otel_log_queue_batches_legacy_el6: 64
 
 # OpenTelemetry Collector System Logs to Ingest (ISMS/ISMS-P Baseline)
 # 표준 수집 목록. 이 중 vars의 otel_security_log_paths에 속한 경로는 security_logs 스트림으로 라우팅된다.
