@@ -118,7 +118,7 @@ CentOS 7 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
    - OpenObserve에 `host.name=<host>`, `os.description=CentOS Linux 7 (Core)` 로그/메트릭 도착, `security_logs` 스트림에 `/var/log/secure` 포함
    - 수동 백업 1회(`resticprofile -n default backup`) 후 `backup.jsonl`에 한 줄이 쌓이고 `backup_logs`에 수집됨
 5. 재실행(멱등): 같은 명령을 다시 실행해 `changed=0`(핸들러 재시작 없음)을 확인합니다.
-6. 이상 없으면 `target_hosts`를 넓혀 나머지 CentOS 7 호스트에 확장합니다(`serial: 25%`). 스모크 테스트 실패(예: 구형 glibc/커널)는 해당 호스트만 실패하며 직전 버전이 계속 동작합니다. 롤백은 버전 표 revert PR 후 재실행입니다.
+6. 이상 없으면 `target_hosts`를 넓혀 나머지 CentOS 7 호스트에 확장합니다(`serial: 25%`). 스모크 테스트 실패(예: 구형 glibc/커널)는 해당 호스트만 실패하며 기존 symlink(직전 버전)가 유지되어 데몬은 그대로 동작합니다(새 버전 디렉터리는 디스크에 남으며 다음 실행에서 정리됩니다). 롤백은 버전 표 revert PR 후 재실행입니다.
 
 ---
 
@@ -135,7 +135,7 @@ CentOS 7 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-002` | `Create otelcol system user` | `ansible.builtin.user` | All | 유저 존재 시 `ok` |
 | `MON-003` | `Deliver pinned OpenTelemetry Collector Contrib binary` | `ansible.builtin.include_tasks` | RHEL 7+, Debian | 버전 디렉터리 존재/symlink 일치 시 `ok` (`creates:` 없음 — 버전 상향 시 롤아웃) |
 | `MON-004` | `Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 (`otelcol-contrib.yaml.j2`) |
-| `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` |
+| `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.template` | Systemd OS | 파일 내용 일치 시 `ok` |
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
 | `MON-020` | `Assert host was provisioned by site.yml` | `ansible.builtin.assert` | All | 읽기 전용 |
 | `MON-021` | `Probe OS release and architecture from target host (raw, read-only)` | `ansible.builtin.raw` | All | `changed_when: false`, `check_mode: false` |
