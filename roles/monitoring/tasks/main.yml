@@ -248,3 +248,10 @@
 - name: Apply otelcol on CentOS 7 over the raw path
   ansible.builtin.import_tasks: legacy_el7.yml
   when: host_agents_os_path == 'legacy_el7'
+
+# ==============================================================================
+# CentOS 6 (legacy_el6): legacy_el6 버전 행 + SysV init/chkconfig로 같은 템플릿을 raw 경로로 적용한다.
+# ==============================================================================
+- name: Apply otelcol on CentOS 6 over the raw path
+  ansible.builtin.import_tasks: legacy_el6.yml
+  when: host_agents_os_path == 'legacy_el6'

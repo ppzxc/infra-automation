@@ -22,13 +22,23 @@ if [ -f /etc/init.d/functions ]; then
 fi
 
 PROG="otelcol-contrib"
-EXEC="/usr/local/bin/$PROG"
+EXEC="{{ host_agents_bin_dir | default('/usr/local/bin') }}/$PROG"
 CONFIG="{{ otelcol_config_path }}"
+SECRETS="{{ otelcol_secrets_path }}"
 PIDFILE="/var/run/$PROG.pid"
 LOGFILE="/var/log/$PROG.log"
+{% if not (otelcol_run_as_root | default(false) | bool) %}
 USER="{{ otelcol_user }}"
+{% endif %}
 
 [ -e /etc/sysconfig/$PROG ] && . /etc/sysconfig/$PROG
+
+# 설정의 ${env:O2_BASIC_AUTH} 등은 secrets env(0600, root)에서만 공급된다(systemd의 EnvironmentFile 대응).
+if [ -r "$SECRETS" ]; then
+    set -a
+    . "$SECRETS"
+    set +a
+fi
 
 start() {
     [ -x $EXEC ] || exit 5
@@ -39,7 +49,12 @@ start() {
         echo
         return 0
     fi
+{% if otelcol_run_as_root | default(false) | bool %}
+    # CentOS 6: 커널 2.6.32에는 ambient capability가 없어 root로 실행한다(ADR-0006 §2.9).
+    nohup "$EXEC" --config="$CONFIG" >> $LOGFILE 2>&1 &
+{% else %}
     nohup su -s /bin/sh $USER -c "$EXEC --config=$CONFIG" >> $LOGFILE 2>&1 &
+{% endif %}
     PID=$!
     echo $PID > $PIDFILE
     echo_success 2>/dev/null || echo -n "[ OK ]"

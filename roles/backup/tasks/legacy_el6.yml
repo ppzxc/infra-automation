@@ -1,0 +1,182 @@
+---
+# ==============================================================================
+# Host Agents 백업 — CentOS 6 (legacy_el6), raw 경로 (ADR-0006 §2.4~2.5, §2.9)
+# ==============================================================================
+# main.yml이 먼저 공용 파생값(BAK-010~013: repo, 소스 목록, 제외, 스케줄, 실행 명령)을 만들어 두었다
+# (BAK-201/202가 legacy 공용으로 조건부 경로 존재를 raw로 확인하고, BAK-012가 legacy_el6 버전 행의 restic 경로를 쓴다).
+# legacy_el7.yml과 같은 구조이며 번호는 BAK-2xx ↔ BAK-1xx로 대응한다. 차이는 버전 행뿐이다(restic 0.17.3,
+# resticprofile v0.29.1, Go 1.23 빌드). 스케줄은 /etc/cron.d, 결과 jsonl 증적은 modern과 동일하다.
+# 태그 분리는 modern과 동일하다(설치·스케줄·repo init = agents_install, 설정 파일 = agents_config).
+- name: "Deliver restic and resticprofile on CentOS 6"
+  when: enable_backup | bool
+  tags: [agents_install, backup]
+  block:
+  - name: "[BAK-109] Deliver the legacy_el6 restic binary (raw)"
+    ansible.builtin.include_tasks:
+      file: "{{ role_path }}/../monitoring/tasks/legacy_deliver_binary.yml"
+      apply:
+        tags: [agents_install, backup]
+    vars:
+      _restic_version: "{{ host_agents_versions[host_agents_version_row].restic }}"
+      _deliver_agent: restic
+      _deliver_binary: restic
+      _deliver_version: "{{ _restic_version }}"
+      _deliver_format: bz2
+      _deliver_smoke_args: version
+      _deliver_url: "https://github.com/restic/restic/releases/download/v{{ _restic_version }}/restic_{{ _restic_version }}_linux_{{ host_agents_os_arch }}.bz2"
+      _deliver_sha256: "{{ host_agents_checksums.restic[_restic_version][host_agents_os_arch] }}"
+
+  - name: "[BAK-110] Deliver the legacy_el6 resticprofile binary (raw)"
+    ansible.builtin.include_tasks:
+      file: "{{ role_path }}/../monitoring/tasks/legacy_deliver_binary.yml"
+      apply:
+        tags: [agents_install, backup]
+    vars:
+      _rp_version: "{{ host_agents_versions[host_agents_version_row].resticprofile }}"
+      _deliver_agent: resticprofile
+      _deliver_binary: resticprofile
+      _deliver_version: "{{ _rp_version }}"
+      _deliver_format: tar
+      _deliver_smoke_args: version
+      _deliver_url: "https://github.com/creativeprojects/resticprofile/releases/download/v{{ _rp_version }}/resticprofile_no_self_update_{{ _rp_version }}_linux_{{ host_agents_os_arch }}.tar.gz"
+      _deliver_sha256: "{{ host_agents_checksums.resticprofile[_rp_version][host_agents_os_arch] }}"
+
+- name: "Apply backup configuration on CentOS 6"
+  when: enable_backup | bool
+  tags: [agents_config, backup]
+  block:
+  - name: "[BAK-103] Ensure restic and result directories exist (raw)"
+    ansible.builtin.raw: "{{ item.path | raw_dir_cmd(host_agents_owner, host_agents_group, item.mode) }}"
+    loop:
+      - { path: "{{ backup_config_dir }}", mode: '0700' }
+      - { path: "{{ backup_cache_dir }}", mode: '0700' }
+      - { path: "{{ backup_log_dir }}", mode: '0755' }
+      - { path: "{{ backup_state_dir }}", mode: '0755' }
+    loop_control:
+      label: "{{ item.path }}"
+    register: _legacy_backup_dirs
+    changed_when: _legacy_backup_dirs.stdout | default('') | raw_changed
+
+  - name: "[BAK-104] Deploy restic credentials env file (raw, 0600, no_log, no diff)"
+    ansible.builtin.import_tasks: "{{ role_path }}/../monitoring/tasks/raw_upload.yml"
+    vars:
+      _raw_dest: "{{ backup_env_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/restic.env.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0600'
+      _raw_secret: true
+
+  - name: "[BAK-105] Deploy restic repository password file (raw, 0600, no_log, no diff)"
+    ansible.builtin.import_tasks: "{{ role_path }}/../monitoring/tasks/raw_upload.yml"
+    vars:
+      _raw_dest: "{{ backup_password_path }}"
+      _raw_content: "{{ host_agents_secrets.restic_password }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0600'
+      _raw_secret: true
+
+  - name: "[BAK-106] Deploy the backup result hook (raw, POSIX sh, one JSON line per run)"
+    ansible.builtin.import_tasks: "{{ role_path }}/../monitoring/tasks/raw_upload.yml"
+    vars:
+      _raw_dest: "{{ backup_event_script_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.file', role_path ~ '/files/host-agents-backup-event.sh', rstrip=false) }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0755'
+
+  - name: "[BAK-107] Deploy logrotate configuration for backup.jsonl (raw)"
+    ansible.builtin.import_tasks: "{{ role_path }}/../monitoring/tasks/raw_upload.yml"
+    vars:
+      _raw_dest: "{{ backup_logrotate_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/host-agents-backup.logrotate.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0644'
+
+  # 새 resticprofile 바이너리로 렌더링본을 검증한 뒤에만 설정이 교체된다(modern BAK-024와 같은 검증 명령).
+  - name: "[BAK-108] Deploy resticprofile profile (raw, validated with resticprofile show)"
+    ansible.builtin.import_tasks: "{{ role_path }}/../monitoring/tasks/raw_upload.yml"
+    vars:
+      _raw_dest: "{{ backup_profile_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/profiles.yaml.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0600'
+      _raw_secret: true
+      _raw_validate: >-
+        /bin/sh -c 'cp "$1" "$1.yaml" && {{ host_agents_install_root }}/resticprofile/{{ host_agents_versions[host_agents_version_row].resticprofile }}/resticprofile
+        -f yaml -c "$1.yaml" -n {{ backup_profile_name }} show >/dev/null; rc=$?; rm -f "$1.yaml"; exit $rc' sh %s
+
+- name: "Enable backup schedule on CentOS 6"
+  when: enable_backup | bool
+  tags: [agents_install, backup]
+  block:
+  - name: "[BAK-111] Switch restic install symlink to the delivered version (raw)"
+    ansible.builtin.include_tasks:
+      file: "{{ role_path }}/../monitoring/tasks/legacy_switch_binary.yml"
+      apply:
+        tags: [agents_install, backup]
+    vars:
+      _deliver_agent_dir: "{{ host_agents_install_root }}/restic"
+      _deliver_version_dir: "{{ host_agents_install_root }}/restic/{{ host_agents_versions[host_agents_version_row].restic }}"
+      _deliver_new_path: "{{ host_agents_install_root }}/restic/{{ host_agents_versions[host_agents_version_row].restic }}/restic"
+      _deliver_link: "{{ host_agents_bin_dir }}/restic"
+      _deliver_binary: restic
+      _deliver_handler: Refresh backup tooling
+
+  - name: "[BAK-112] Switch resticprofile install symlink to the delivered version (raw)"
+    ansible.builtin.include_tasks:
+      file: "{{ role_path }}/../monitoring/tasks/legacy_switch_binary.yml"
+      apply:
+        tags: [agents_install, backup]
+    vars:
+      _deliver_agent_dir: "{{ host_agents_install_root }}/resticprofile"
+      _deliver_version_dir: "{{ host_agents_install_root }}/resticprofile/{{ host_agents_versions[host_agents_version_row].resticprofile }}"
+      _deliver_new_path: "{{ host_agents_install_root }}/resticprofile/{{ host_agents_versions[host_agents_version_row].resticprofile }}/resticprofile"
+      _deliver_link: "{{ host_agents_bin_dir }}/resticprofile"
+      _deliver_binary: resticprofile
+      _deliver_handler: Refresh backup tooling
+
+  - name: "[BAK-113] Deploy backup cron.d schedule (raw)"
+    ansible.builtin.import_tasks: "{{ role_path }}/../monitoring/tasks/raw_upload.yml"
+    vars:
+      _raw_dest: "{{ backup_cron_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/host-agents-backup.cron.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0644'
+
+  # Deploy 한정(agents_config에 속하지 않음): modern BAK-050~052와 같은 판정(rc/메시지, LC_ALL=C, no_log)을 raw로 수행한다.
+  - name: "[BAK-115] Probe whether the restic repository exists (raw, restic cat config)"
+    ansible.builtin.raw: >-
+      set -a; . {{ backup_env_path | quote }}; set +a; export LC_ALL=C;
+      {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path | quote }} -n {{ backup_profile_name }} cat config
+    register: _backup_repo_probe
+    changed_when: false
+    failed_when: false
+    check_mode: false
+    no_log: true
+    when:
+      - backup_init_enabled | bool
+      - not ansible_check_mode
+
+  - name: "[BAK-116] Fail when the repository probe errors for a reason other than a missing repository"
+    ansible.builtin.assert:
+      that: >-
+        _backup_repo_probe.rc == 0 or _backup_repo_probe.rc == 10 or
+        'Is there a repository at the following location?' in (_backup_repo_probe.stdout ~ _backup_repo_probe.stderr)
+      fail_msg: "{{ inventory_hostname }}: restic repository probe failed (rc={{ _backup_repo_probe.rc }}) — 저장소 부재가 아닌 오류라 init하지 않습니다."
+      quiet: true
+    when: _backup_repo_probe is not skipped
+
+  - name: "[BAK-117] Initialize the restic repository when it does not exist (raw)"
+    ansible.builtin.raw: >-
+      set -a; . {{ backup_env_path | quote }}; set +a;
+      {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path | quote }} -n {{ backup_profile_name }} init
+    no_log: true
+    changed_when: true
+    when:
+      - _backup_repo_probe is not skipped
+      - _backup_repo_probe.rc != 0

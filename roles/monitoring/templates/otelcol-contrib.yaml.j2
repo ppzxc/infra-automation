@@ -118,9 +118,15 @@ exporters:
 {{ o2_common(stream) }}    sending_queue:
       enabled: true
       storage: file_storage
+{% if host_agents_os_path | default('modern') == 'legacy_el6' %}
+      # v0.119.0(legacy_el6): bytes 큐와 신규 역압 키 미지원 → 배치 개수 큐 + 구 이름 blocking (validate로 확인, ADR-0006 §2.8)
+      queue_size: {{ otel_log_queue_batches_legacy_el6 }}
+      blocking: true
+{% else %}
       sizer: bytes
       queue_size: {{ otel_log_queue_bytes }}
       block_on_overflow: true
+{% endif %}
     retry_on_failure:
       enabled: true
       max_elapsed_time: 0
@@ -129,7 +135,11 @@ exporters:
   otlphttp/metrics:
 {{ o2_common() }}    sending_queue:
       enabled: true
+{% if host_agents_os_path | default('modern') == 'legacy_el6' %}
+      blocking: false
+{% else %}
       block_on_overflow: false
+{% endif %}
 
 service:
   extensions: [file_storage]
