@@ -451,3 +451,174 @@ def test_hook_records_success_and_failure_through_real_resticprofile(tmp_path):
     ok, bad = [json.loads(ln) for ln in (tmp_path / "b.jsonl").read_text().splitlines()]
     assert ok["success"] is True and ok["host"] == "web01" and ok["command"] == "backup"
     assert bad["success"] is False and bad["exit_code"] != 0 and bad["error"]
+
+
+# --- central Repo Maintenance (Ticket-7) -----------------------------------------------------------------
+
+import sys  # noqa: E402
+
+sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
+from backup_maintenance import (  # noqa: E402
+    backup_maintenance_event,
+    backup_maintenance_events,
+    backup_maintenance_failed,
+    backup_maintenance_subset_due,
+)
+
+MAINT = ROLE / "tasks" / "maintenance.yml"
+MAINT_TASKS = ("[BAK-077]", "[BAK-085]", "[BAK-078]", "[BAK-079]", "[BAK-080]", "[BAK-081]", "[BAK-082]", "[BAK-083]")
+
+
+@pytest.mark.parametrize("date,expected", [
+    ("2026-10-04", True),    # first Sunday
+    ("2026-10-11", False),   # second Sunday
+    ("2026-10-05", False),   # Monday inside the first week
+    ("2026-11-01", True),    # Sunday on the 1st
+    ("2026-02-07", False),   # Saturday on the 7th
+    ("2026-02-01", True),
+])
+def test_monthly_read_subset_is_due_only_on_the_first_sunday(date, expected):
+    assert backup_maintenance_subset_due(date) is expected
+
+
+def test_subset_day_is_judged_in_the_schedule_timezone_not_utc():
+    # Sunday 05:00 KST == Saturday 20:00 UTC: still the first Sunday for the Asia/Seoul schedule.
+    assert backup_maintenance_subset_due("2026-10-03T20:00:00+00:00") is True
+    assert backup_maintenance_subset_due("2026-10-03T20:00:00+00:00", "auto", "UTC") is False
+
+
+def test_read_subset_can_be_forced_or_skipped_and_rejects_unknown_modes():
+    assert backup_maintenance_subset_due("2026-10-11", "always") is True
+    assert backup_maintenance_subset_due("2026-10-04", "never") is False
+    with pytest.raises(ValueError):
+        backup_maintenance_subset_due("2026-10-04", "sometimes")
+
+
+def test_event_payload_matches_the_alert_contract():
+    ok = backup_maintenance_event({"rc": 0, "delta": "0:01:05.123456", "stderr": ""}, "h1", "check")
+    assert ok == {"job": "maintenance", "host": "h1", "command": "check", "success": True, "duration": 65, "error": ""}
+    bad = backup_maintenance_event({"rc": 1, "delta": "1 day, 0:00:02", "stderr": "Fatal: pack \x01 missing\n" + "x" * 900}, "h1", "forget")
+    assert set(bad) == {"job", "host", "command", "success", "duration", "error"}
+    assert bad["success"] is False and bad["duration"] == 86402 and bad["command"] == "forget"
+    assert 0 < len(bad["error"]) <= 500 and "\n" not in bad["error"] and "\x01" not in bad["error"]
+
+
+def test_skipped_steps_emit_no_events_and_do_not_count_as_failures():
+    steps = [{"command": "check", "result": {"rc": 0, "delta": "0:00:01"}},
+             {"command": "check", "result": {"skipped": True}},
+             {"command": "forget", "result": {"skipped": True}}]
+    assert [e["command"] for e in backup_maintenance_events(steps, "h1")] == ["check"]
+    assert backup_maintenance_failed([s["result"] for s in steps]) is False
+    assert backup_maintenance_failed([{"rc": 0}, {"rc": 2}]) is True
+
+
+class _Collector(BaseHTTPRequestHandler):
+    posts = []
+
+    def do_POST(self):  # noqa: N802
+        body = self.rfile.read(int(self.headers["Content-Length"]))
+        type(self).posts.append((self.path, self.headers["Authorization"], json.loads(body)))
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+    def log_message(self, *a):
+        pass
+
+
+@pytest.fixture
+def collector():
+    handler = type("H", (_Collector,), {"posts": []})
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield server, handler.posts
+    server.shutdown()
+
+
+def _maint_tasks():
+    return [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"].startswith(MAINT_TASKS)]
+
+
+def _restic_repo(tmp_path):
+    """A real local restic repository holding two snapshots."""
+    env = dict(os.environ, RESTIC_REPOSITORY=str(tmp_path / "repo"), RESTIC_PASSWORD="pw")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "f").write_text("data")
+    subprocess.run(["restic", "init"], env=env, check=True, capture_output=True)
+    for day in ("2025-01-01", "2025-03-01"):      # different day/week/month so a tight retention policy forgets the older one
+        subprocess.run(["restic", "backup", "--time", f"{day} 03:00:00", str(src)], env=env, check=True, capture_output=True)
+    return env
+
+
+def _maintain(tmp_path, server, **over):
+    vars_ = _vars(
+        _maint_restic_bin=shutil.which("restic"), _maint_restic_password="pw", _maint_access_key="ak",
+        _maint_secret_key="sk", _maint_ingest_token="tok", rustfs_region="", backup_maintenance_ca_file="",
+        backup_maintenance_repository=str(tmp_path / "repo"), o2_endpoint=f"http://127.0.0.1:{server.server_port}",
+        o2_org="default", backup_inventory_validate_certs=False)
+    vars_.update(over)
+    return _run(tmp_path, _maint_tasks(), vars_)
+
+
+def _snapshots(env):
+    return json.loads(subprocess.run(["restic", "snapshots", "--json"], env=env, capture_output=True, text=True).stdout)
+
+
+@needs_restic
+def test_healthy_repo_is_checked_then_pruned_and_reported(tmp_path, collector):
+    server, posts = collector
+    env = _restic_repo(tmp_path)
+    res = _maintain(tmp_path, server, backup_maintenance_read_subset="never",
+                    backup_retention_daily=1, backup_retention_weekly=1, backup_retention_monthly=1)
+    assert res.returncode == 0, res.stdout + res.stderr
+    ((path, auth, events),) = posts
+    assert path == "/api/default/backup_logs/_json"
+    assert base64.b64decode(auth.split()[1]).decode() == "default:tok"
+    assert [(e["command"], e["success"], e["job"], e["host"]) for e in events] == [("check", True, "maintenance", "h1"), ("forget", True, "maintenance", "h1")]
+    assert len(_snapshots(env)) == 1          # retention applied: the older snapshot was forgotten
+
+
+@needs_restic
+def test_failed_check_prevents_prune_and_fails_the_host(tmp_path, collector):
+    server, posts = collector
+    env = _restic_repo(tmp_path)
+    for pack in (tmp_path / "repo" / "data").rglob("*"):
+        if pack.is_file():
+            pack.unlink()                      # index references packs that no longer exist -> check fails
+    res = _maintain(tmp_path, server, backup_maintenance_read_subset="never")
+    assert res.returncode != 0
+    ((_, _, events),) = posts                  # evidence is posted even though the host fails
+    assert [(e["command"], e["success"]) for e in events] == [("check", False)]
+    assert events[0]["error"] and len(events[0]["error"]) <= 500
+    assert len(_snapshots(env)) == 2           # nothing was forgotten or pruned
+
+
+@needs_restic
+def test_monthly_run_adds_the_read_subset_check_before_prune(tmp_path, collector):
+    server, posts = collector
+    _restic_repo(tmp_path)
+    res = _maintain(tmp_path, server, backup_maintenance_read_subset="always")
+    assert res.returncode == 0, res.stdout + res.stderr
+    ((_, _, events),) = posts
+    assert [e["command"] for e in events] == ["check", "check", "forget"]
+
+
+def test_maintenance_uses_the_pinned_restic_and_has_no_version_table_of_its_own():
+    raw = MAINT.read_text(encoding="utf-8")
+    assert "host_agents_versions['default'].restic" in raw and "host_agents_checksums.restic" in raw
+    assert not re.search(r'"?\d+\.\d+\.\d+"?', re.sub(r"v\{\{.*?\}\}", "", raw).replace("0.0", ""))
+    assert "monitoring/vars/main.yml" in raw
+    assert "--keep-daily={{ backup_retention_daily }}" in raw
+
+
+def test_maintenance_playbook_runs_on_the_controller_for_servers_only():
+    (play,) = yaml.safe_load((ROOT_DIR / "playbooks" / "host_agents_maintenance.yml").read_text(encoding="utf-8"))
+    assert play["connection"] == "local" and play["hosts"] == "{{ target_hosts | default('servers') }}:&servers"
+    assert play["tasks"][0]["ansible.builtin.include_role"] == {"name": "backup", "tasks_from": "maintenance"}
+
+
+def test_every_secret_bearing_maintenance_task_is_no_log():
+    names = {"[BAK-071]", "[BAK-072]", "[BAK-077]", "[BAK-085]", "[BAK-078]", "[BAK-079]", "[BAK-080]", "[BAK-081]", "[BAK-082]"}
+    tasks = [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"][:9] in names]
+    assert len(tasks) == len(names) and all(t.get("no_log") is True for t in tasks)

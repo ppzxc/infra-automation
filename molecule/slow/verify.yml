@@ -480,3 +480,163 @@
           ansible.builtin.assert:
             that: backup_inventory_event_enabled is defined and not (backup_inventory_event_enabled | bool)
             quiet: true
+
+        # Repo Maintenance는 컨트롤러에서 실행되므로 호스트 상태가 아닌 고정 계약(버전 표, 판정 함수, 플레이북 배선)을 검증한다.
+        - name: "[VERIFY-BAK-070] Verify the pinned restic version and checksums exist for both architectures"
+          ansible.builtin.assert:
+            that:
+              - host_agents_checksums.restic[host_agents_versions['default'].restic] | length == 2
+            quiet: true
+          vars:
+            _consts: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/vars/main.yml') | from_yaml }}"
+            host_agents_versions: "{{ _consts.host_agents_versions }}"
+            host_agents_checksums: "{{ _consts.host_agents_checksums }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-071] Verify the maintenance task file reads the OpenBao KV through the same agents paths"
+          ansible.builtin.assert:
+            that:
+              - "'agents/rustfs' in _maint"
+              - "'agents/openobserve' in _maint"
+              - "'/agents' in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-072] Verify the maintenance inputs are asserted before any command runs"
+          ansible.builtin.assert:
+            that: "_maint.index('maintenance_access_key') < _maint.index('[BAK-078]')"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-073] Verify the controller architecture map covers amd64 and arm64"
+          ansible.builtin.assert:
+            that: "'x86_64' in _maint and 'aarch64' in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-074] Verify the controller restic uses the shared cache layout"
+          ansible.builtin.assert:
+            that: "'/restic/' in _maint and 'host_agents_cache_dir' in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-075] Verify the controller download is checksum-pinned"
+          ansible.builtin.assert:
+            that: "'checksum: \"sha256:' in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-076] Verify the controller binary is decompressed atomically"
+          ansible.builtin.assert:
+            that: "'.part' in _maint and 'creates:' in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-077] Verify the monthly read-subset is due only on the first Sunday"
+          ansible.builtin.assert:
+            that:
+              - "'2026-10-04' | backup_maintenance_subset_due"
+              - "not ('2026-10-11' | backup_maintenance_subset_due)"
+              - "not ('2026-10-05' | backup_maintenance_subset_due)"
+            quiet: true
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-078] Verify a successful check is reported as a maintenance event"
+          ansible.builtin.assert:
+            that:
+              - "({'rc': 0, 'delta': '0:00:03'} | backup_maintenance_event('h1', 'check')).success"
+              - "({'rc': 0, 'delta': '0:00:03'} | backup_maintenance_event('h1', 'check')).duration == 3"
+            quiet: true
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-079] Verify skipped steps emit no event"
+          ansible.builtin.assert:
+            that: "([{'command': 'check', 'result': {'skipped': true}}] | backup_maintenance_events('h1')) | length == 0"
+            quiet: true
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-080] Verify prune is gated on the check results"
+          ansible.builtin.assert:
+            that:
+              - "[{'rc': 1}, {'skipped': true}] | backup_maintenance_failed"
+              - "not ([{'rc': 0}, {'skipped': true}] | backup_maintenance_failed)"
+              - "'when: not ([_maint_check, _maint_subset] | backup_maintenance_failed)' in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-081] Verify the event payload carries exactly the alert contract fields"
+          ansible.builtin.assert:
+            that: "({'rc': 1, 'delta': '0:00:01', 'stderr': 'boom'} | backup_maintenance_event('h1', 'forget')).keys() | sort | list == ['command', 'duration', 'error', 'host', 'job', 'success']"
+            quiet: true
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-082] Verify the events go to backup_logs with the controller token"
+          ansible.builtin.assert:
+            that: "'backup_logs/_json' in _maint and '_maint_ingest_token' in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-083] Verify the maintenance playbook targets servers from the controller"
+          ansible.builtin.assert:
+            that: "'connection: local' in _pb and 'tasks_from: maintenance' in _pb"
+            quiet: true
+          vars:
+            _pb: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../playbooks/host_agents_maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-084] Verify the controller cache directory is created before the download"
+          ansible.builtin.assert:
+            that: "_maint.index('[BAK-084]') < _maint.index('[BAK-075]')"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-085] Verify the restic environment reuses the derived repository"
+          ansible.builtin.assert:
+            that: "\"'RESTIC_REPOSITORY': _maint_repository\" in _maint"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-086] Verify an unsupported controller architecture is rejected explicitly"
+          ansible.builtin.assert:
+            that: "'[BAK-086]' in _maint and _maint.index('[BAK-086]') < _maint.index('[BAK-074]')"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false

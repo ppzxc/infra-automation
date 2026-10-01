@@ -1,6 +1,6 @@
 # Backup Role Task Specification
 
-> **상태: 구현됨(modern 경로).** legacy_el6/el7 경로·중앙 유지보수(Repo Maintenance)는 후속 티켓입니다. `backup` 역할은 [ADR-0006 Host Agents](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `restic` + `resticprofile`로 `servers` 그룹 전체의 설정 파일을 RustFS(S3 API)에 백업합니다. 항상 `monitoring`(otelcol)과 함께 `playbooks/host_agents.yml`로만 배포됩니다.
+> **상태: 구현됨(modern 경로 + 중앙 Repo Maintenance).** legacy_el6/el7 경로는 후속 티켓입니다. `backup` 역할은 [ADR-0006 Host Agents](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `restic` + `resticprofile`로 `servers` 그룹 전체의 설정 파일을 RustFS(S3 API)에 백업합니다. 항상 `monitoring`(otelcol)과 함께 `playbooks/host_agents.yml`로만 배포됩니다.
 
 ---
 
@@ -10,7 +10,7 @@
 - **호스트별 저장소**: RustFS `host-backups/<host>/`에 호스트 전용 repo, 호스트 전용 백업 키(삭제는 `locks/*`만)와 비밀번호 (§2.5).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
-- **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 실행.
+- **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
 
 ---
 
@@ -83,6 +83,23 @@
 | `BAK-052` | `Initialize the restic repository when it does not exist` | `ansible.builtin.shell` | All | 프로브 결과 조건 (저장소가 없을 때만 `init`) |
 | `BAK-060` | `Assert the controller OpenObserve ingestion token exists` | `ansible.builtin.assert` | All | 읽기 전용 (`no_log`, Deploy 한정 — 토큰 또는 `o2_endpoint` 없으면 호스트 실패) |
 | `BAK-061` | `Emit the job=inventory event to backup_logs` | `ansible.builtin.uri` | All (controller) | Deploy 마지막 태스크이자 한정(`agents_config` 제외, check 모드 제외). 실행마다 이벤트 1건 전송(`changed`) |
+| `BAK-070` | `Load the shared Host Agents version table and constants from monitoring` | `ansible.builtin.include_vars` | Controller | 읽기 전용 (고정 restic 버전·체크섬의 단일 출처 — 별도 버전 표 없음) |
+| `BAK-071` | `Fetch maintenance KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)` | `ansible.builtin.uri` | Controller | GET, `check_mode: false`, `no_log` |
+| `BAK-072` | `Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)` | `ansible.builtin.block` | Controller | 읽기 전용 (`no_log`; 비밀번호·유지보수 키·컨트롤러 토큰·엔드포인트 누락 시 해당 호스트 실패) |
+| `BAK-073` | `Detect the controller architecture for the pinned restic` | `ansible.builtin.command` | Controller | 읽기 전용 (`uname -m`, `run_once`) |
+| `BAK-074` | `Resolve the controller restic paths from the pinned version table` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`run_once`, Deploy와 같은 캐시 경로) |
+| `BAK-075` | `Download the pinned restic release on the controller and verify SHA256` | `ansible.builtin.get_url` | Controller | 체크섬 일치 시 `ok` (`run_once`) |
+| `BAK-076` | `Decompress restic into the shared controller cache` | `ansible.builtin.shell` | Controller | `creates:` 가드 (임시 파일 후 `mv`) |
+| `BAK-077` | `Derive repository and the monthly read-subset decision` | `ansible.builtin.set_fact` | Controller | 순수 함수 (repo = `s3:<endpoint>/<bucket>/<host>`, 월간 read-subset 판정) |
+| `BAK-078` | `Run restic check` | `ansible.builtin.command` | Controller | 읽기 전용 (`changed_when: false`, `failed_when: false` — 결과는 이벤트와 최종 판정에서 처리) |
+| `BAK-079` | `Run restic check --read-data-subset (first Sunday of the month)` | `ansible.builtin.command` | Controller | 읽기 전용, 첫째 일요일(또는 `backup_maintenance_read_subset=always`)에만 실행 |
+| `BAK-080` | `Run restic forget --prune only when every check succeeded` | `ansible.builtin.command` | Controller | 모든 check 성공 시에만 실행 (실패 호스트는 prune 차단), `--retry-lock`, 강제 unlock 없음 |
+| `BAK-081` | `Build the job=maintenance events (host x command)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (건너뛴 명령은 이벤트 없음) |
+| `BAK-082` | `Post the job=maintenance events to backup_logs` | `ansible.builtin.uri` | Controller | 호스트당 1회 전송(`changed`), 컨트롤러 토큰, 인증서 기본 검증 |
+| `BAK-084` | `Ensure the controller restic cache directory exists` | `ansible.builtin.file` | Controller | 디렉터리 존재 시 `ok` (`0755`, `run_once`) |
+| `BAK-085` | `Derive the restic environment from the repository` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`no_log`; 시크릿은 `environment`로만 전달) |
+| `BAK-086` | `Assert the controller architecture is supported` | `ansible.builtin.assert` | Controller | 읽기 전용 (`x86_64`/`aarch64`만 — 고정 릴리스에 없는 아키텍처는 명확한 메시지로 실패) |
+| `BAK-083` | `Fail the host when any maintenance command failed` | `ansible.builtin.assert` | Controller | 이벤트 전송 뒤 판정(전송 실패도 실패로 처리) — 한 호스트라도 실패하면 Semaphore 실행 실패 |
 
 ---
 
@@ -106,3 +123,26 @@
 | 유지보수 누락 | 호스트별 마지막 `command=check`가 **8일** 초과 |
 | 수집 중단 | 호스트 `hostmetrics` 메트릭 부재 **15분** |
 | 미실행 호스트 | `job=inventory` 등록 후 `job=backup` 이벤트가 없음 |
+
+---
+
+## 7. 중앙 Repo Maintenance 런북 (ADR-0006 §2.5)
+
+`playbooks/host_agents_maintenance.yml`(`roles/backup/tasks/maintenance.yml`)는 호스트에 접속하지 않고 컨트롤러에서 `servers` 호스트별 repo를 유지보수합니다.
+
+**Semaphore 템플릿 "Host Agents — Repo Maintenance"**
+
+| 항목 | 값 |
+|---|---|
+| Playbook | `playbooks/host_agents_maintenance.yml` |
+| 스케줄 | 매주 일요일 05:00 (`0 5 * * 0`) |
+| Environment | `VAULT_ADDR`, `VAULT_TOKEN`(또는 `vault_token`), 선택 `VAULT_NAMESPACE`/`VAULT_MOUNT` — 시크릿은 Git에 두지 않음 |
+| 수동 실행 | `-e target_hosts=<host>`(1대), `-e backup_maintenance_read_subset=always\|never` |
+
+**호스트별 순서**: `check` → (첫째 일요일(`backup_maintenance_timezone`, 기본 Asia/Seoul 기준 달력일) 또는 `always`) `check --read-data-subset=10%` → 모든 check가 성공한 경우에만 `forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`. `check`가 실패한 호스트는 `prune`을 건너뜁니다(데이터 삭제 차단). 강제 `unlock`은 하지 않고 `--retry-lock 30m`만 사용합니다.
+
+**OpenBao 입력**: `hosts/<host>/agents`의 `restic_password`(호스트별 repo 비밀번호), `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`(RustFS 유지보수 키 — `forget`/`prune`의 삭제 권한 보유), `agents/openobserve`의 `controller_ingest_token`. `o2_endpoint`/`rustfs_endpoint`/`rustfs_bucket`는 `inventory/group_vars/servers.yml`을 따릅니다. 사설 CA는 컨트롤러 신뢰 저장소에 등록하거나 `backup_maintenance_ca_file`로 지정합니다.
+
+**restic 바이너리**: Deploy와 같은 고정 버전·체크섬(`monitoring/vars/main.yml`)을 컨트롤러 캐시(`host_agents_cache_dir`)에서 사용합니다.
+
+**이벤트**: 호스트×명령마다 `job=maintenance` 이벤트(`host`, `command`(`check`/`forget`), `success`, `duration`, `error`)를 `backup_logs`로 전송하며(§6), 실패 호스트가 하나라도 있으면 Semaphore 실행이 실패합니다. 8일 이상 `check` 이벤트가 없으면 "유지보수 누락" 알림이 발생하므로 Semaphore 스케줄 자체의 중단도 감지됩니다.

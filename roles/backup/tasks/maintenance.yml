@@ -1,0 +1,231 @@
+---
+# ==============================================================================
+# Host Agents — Repo Maintenance (ADR-0006 §2.5, Spec #38 / Ticket-7)
+# ==============================================================================
+# playbooks/host_agents_maintenance.yml이 컨트롤러(connection: local)에서 호스트마다 include_role(tasks_from: maintenance)로 호출한다.
+# restic은 backup 역할이 고정한 버전·체크섬(monitoring/vars/main.yml)을 쓰고 Deploy와 같은 컨트롤러 캐시를 공유한다(별도 버전 표 없음).
+# 순서: check → (첫째 일요일) check --read-data-subset=10% → 모두 성공한 호스트만 forget --prune. 강제 unlock은 하지 않는다.
+# 시크릿(restic 비밀번호, RustFS 유지보수 키, 컨트롤러 토큰)은 OpenBao에서 조회하며 모든 해당 태스크는 no_log이다.
+- name: "[BAK-070] Load the shared Host Agents version table and constants from monitoring"
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/../monitoring/vars/main.yml"
+
+- name: "[BAK-071] Fetch maintenance KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_token_eff: "{{ _vault_token | default(vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true), true) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+    _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
+    _vault_hosts_prefix_eff: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true)) | regex_replace('^secret/', '') }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/{{ item.path }}"
+    method: GET
+    headers: >-
+      {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
+    status_code: [200, 404]
+    timeout: 5
+    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
+  loop:
+    - { key: host, path: "{{ _vault_hosts_prefix_eff }}{{ inventory_hostname }}/agents" }
+    - { key: openobserve, path: agents/openobserve }
+    - { key: rustfs, path: agents/rustfs }
+  loop_control:
+    label: "{{ item.key }}"
+  register: _maint_kv_resp
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - host_agents_kv_fixture is not defined
+    - _vault_token_eff | length > 0
+
+- name: "[BAK-072] Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)"
+  vars:
+    _statuses: "{{ _maint_kv_resp.results | default([]) | map(attribute='status', default=-1) | list }}"
+    _by_key: >-
+      {{ dict(_maint_kv_resp.results | default([]) | map(attribute='item.key') | zip(
+           _maint_kv_resp.results | default([]) | map(attribute='json.data.data', default={}))) }}
+    _kv: >-
+      {{ host_agents_kv_fixture if host_agents_kv_fixture is defined
+         else {'host': _by_key.host | default({}), 'openobserve': _by_key.openobserve | default({}), 'rustfs': _by_key.rustfs | default({})} }}
+  block:
+    - name: Assert OpenBao answered every maintenance lookup
+      ansible.builtin.assert:
+        that: host_agents_kv_fixture is defined or (_statuses | length == 3 and _statuses | select('in', [200, 404]) | list | length == 3)
+        fail_msg: "{{ inventory_hostname }}: OpenBao 조회 실패 — status={{ _statuses if _statuses | length > 0 else '토큰 없음/미조회' }} (VAULT_TOKEN은 Semaphore Environment로 주입)"
+        quiet: true
+
+    - name: Assert the required maintenance secrets exist
+      ansible.builtin.assert:
+        that:
+          - (_kv.host.restic_password | default('')) | length > 0
+          - (_kv.rustfs.maintenance_access_key | default('')) | length > 0
+          - (_kv.rustfs.maintenance_secret_key | default('')) | length > 0
+          - (_kv.openobserve.controller_ingest_token | default('')) | length > 0
+          - o2_endpoint | default('') | length > 0
+          - rustfs_endpoint | default('') | length > 0
+        fail_msg: >-
+          {{ inventory_hostname }}: hosts/{{ inventory_hostname }}/agents의 restic_password, agents/rustfs의 maintenance_access_key/maintenance_secret_key,
+          agents/openobserve의 controller_ingest_token 또는 o2_endpoint/rustfs_endpoint가 없습니다.
+        quiet: true
+
+    - name: Keep the resolved secrets as host facts
+      ansible.builtin.set_fact:
+        _maint_restic_password: "{{ _kv.host.restic_password }}"
+        _maint_access_key: "{{ _kv.rustfs.maintenance_access_key }}"
+        _maint_secret_key: "{{ _kv.rustfs.maintenance_secret_key }}"
+        _maint_ingest_token: "{{ _kv.openobserve.controller_ingest_token }}"
+  no_log: true
+
+- name: "[BAK-073] Detect the controller architecture for the pinned restic"
+  ansible.builtin.command: uname -m
+  register: _maint_uname
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: "[BAK-086] Assert the controller architecture is supported"
+  ansible.builtin.assert:
+    that: _maint_uname.stdout | trim in ['x86_64', 'aarch64']
+    fail_msg: "컨트롤러 아키텍처 {{ _maint_uname.stdout | trim }}는 고정 restic 릴리스(amd64/arm64)에 없습니다."
+    quiet: true
+  run_once: true
+
+- name: "[BAK-074] Resolve the controller restic paths from the pinned version table"
+  vars:
+    _arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[_maint_uname.stdout | trim] | default('') }}"
+    _ver: "{{ host_agents_versions['default'].restic }}"
+  ansible.builtin.set_fact:
+    _maint_arch: "{{ _arch }}"
+    _maint_restic_version: "{{ _ver }}"
+    _maint_restic_url: "https://github.com/restic/restic/releases/download/v{{ _ver }}/restic_{{ _ver }}_linux_{{ _arch }}.bz2"
+    _maint_restic_sha256: "{{ host_agents_checksums.restic[_ver][_arch] }}"
+    _maint_restic_dir: "{{ host_agents_cache_dir }}/restic/{{ _ver }}/{{ _arch }}"
+    _maint_restic_bin: "{{ host_agents_cache_dir }}/restic/{{ _ver }}/{{ _arch }}/restic"
+  run_once: true
+
+- name: "[BAK-084] Ensure the controller restic cache directory exists"
+  ansible.builtin.file:
+    path: "{{ host_agents_cache_dir }}/restic/{{ _maint_restic_version }}"
+    state: directory
+    mode: '0755'
+  run_once: true
+  check_mode: false
+
+- name: "[BAK-075] Download the pinned restic release on the controller and verify SHA256"
+  ansible.builtin.get_url:
+    url: "{{ _maint_restic_url }}"
+    dest: "{{ host_agents_cache_dir }}/restic/{{ _maint_restic_version }}/{{ _maint_restic_url | basename }}"
+    checksum: "sha256:{{ _maint_restic_sha256 }}"
+    mode: '0644'
+  run_once: true
+  check_mode: false
+
+- name: "[BAK-076] Decompress restic into the shared controller cache"
+  ansible.builtin.shell: >-
+    mkdir -p '{{ _maint_restic_dir }}' &&
+    bunzip2 -c '{{ host_agents_cache_dir }}/restic/{{ _maint_restic_version }}/{{ _maint_restic_url | basename }}' > '{{ _maint_restic_bin }}.part' &&
+    chmod 0755 '{{ _maint_restic_bin }}.part' && mv '{{ _maint_restic_bin }}.part' '{{ _maint_restic_bin }}'
+  args:
+    creates: "{{ _maint_restic_bin }}"
+  run_once: true
+  check_mode: false
+
+- name: "[BAK-077] Derive repository and the monthly read-subset decision"
+  vars:
+    _today: "{{ now(utc=true).isoformat() }}"
+  ansible.builtin.set_fact:
+    _maint_repository: "{{ backup_maintenance_repository if backup_maintenance_repository | length > 0 else 's3:' ~ rustfs_endpoint ~ '/' ~ rustfs_bucket ~ '/' ~ inventory_hostname }}"
+    _maint_subset_due: "{{ _today | backup_maintenance_subset_due(backup_maintenance_read_subset, backup_maintenance_timezone) }}"
+  no_log: true
+
+- name: "[BAK-085] Derive the restic environment from the repository"
+  ansible.builtin.set_fact:
+    _maint_env: >-
+      {{ {'RESTIC_REPOSITORY': _maint_repository,
+          'RESTIC_PASSWORD': _maint_restic_password,
+          'AWS_ACCESS_KEY_ID': _maint_access_key,
+          'AWS_SECRET_ACCESS_KEY': _maint_secret_key,
+          'LC_ALL': 'C'}
+         | combine({'AWS_DEFAULT_REGION': rustfs_region} if rustfs_region | length > 0 else {})
+         | combine({'RESTIC_CACERT': backup_maintenance_ca_file} if backup_maintenance_ca_file | length > 0 else {}) }}
+  no_log: true
+
+- name: "[BAK-078] Run restic check"
+  ansible.builtin.command:
+    argv: ["{{ _maint_restic_bin }}", check]
+  environment: "{{ _maint_env }}"
+  register: _maint_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: "[BAK-079] Run restic check --read-data-subset (first Sunday of the month)"
+  ansible.builtin.command:
+    argv: ["{{ _maint_restic_bin }}", check, "--read-data-subset={{ backup_maintenance_read_subset_percent }}"]
+  environment: "{{ _maint_env }}"
+  register: _maint_subset
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: _maint_subset_due | bool
+
+# 어떤 check라도 실패하면 이 호스트의 prune은 실행하지 않는다(손상된 repo에서 데이터를 지우지 않기 위함).
+- name: "[BAK-080] Run restic forget --prune only when every check succeeded"
+  ansible.builtin.command:
+    argv:
+      - "{{ _maint_restic_bin }}"
+      - forget
+      - --keep-daily={{ backup_retention_daily }}
+      - --keep-weekly={{ backup_retention_weekly }}
+      - --keep-monthly={{ backup_retention_monthly }}
+      - --prune
+      - --retry-lock={{ backup_maintenance_retry_lock }}
+  environment: "{{ _maint_env }}"
+  register: _maint_forget
+  changed_when: _maint_forget.rc == 0
+  failed_when: false
+  no_log: true
+  when: not ([_maint_check, _maint_subset] | backup_maintenance_failed)
+
+- name: "[BAK-081] Build the job=maintenance events (host x command)"
+  ansible.builtin.set_fact:
+    _maint_events: >-
+      {{ [{'command': 'check', 'result': _maint_check},
+          {'command': 'check', 'result': _maint_subset | default({'skipped': true})},
+          {'command': 'forget', 'result': _maint_forget | default({'skipped': true})}]
+         | backup_maintenance_events(inventory_hostname) }}
+  no_log: true
+
+- name: "[BAK-082] Post the job=maintenance events to backup_logs"
+  ansible.builtin.uri:
+    url: "{{ o2_endpoint }}/api/{{ o2_org }}/backup_logs/_json"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (o2_org ~ ':' ~ _maint_ingest_token) | b64encode }}"
+    body_format: json
+    body: "{{ _maint_events }}"
+    status_code: [200, 201]
+    timeout: 10
+    validate_certs: "{{ backup_inventory_validate_certs }}"
+  register: _maint_post
+  changed_when: true
+  failed_when: false
+  no_log: true
+  when:
+    - backup_inventory_event_enabled | bool
+    - _maint_events | length > 0
+
+# 이벤트 전송 뒤에 판정하므로 실패한 호스트도 증적이 남고, 한 호스트라도 실패하면 Semaphore 실행이 실패한다.
+- name: "[BAK-083] Fail the host when any maintenance command failed"
+  ansible.builtin.assert:
+    that:
+      - _maint_post is skipped or (_maint_post.status | default(0)) in [200, 201]
+      - >-
+        not ([_maint_check, _maint_subset | default({'skipped': true}), _maint_forget | default({'skipped': true})] | backup_maintenance_failed)
+    fail_msg: >-
+      {{ inventory_hostname }}: repo 유지보수 실패 —
+      {{ _maint_events | rejectattr('success') | map(attribute='command') | list | join(',') }}
+      (check 실패 시 forget --prune은 실행되지 않음). 상세는 backup_logs job=maintenance 이벤트.
+    quiet: true

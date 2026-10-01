@@ -111,4 +111,5 @@ host_agents_kv_fixture:
   openobserve:
     controller_ingest_token: "molecule-fixture-controller-token"
   rustfs:
-    maintenance_key: "molecule-fixture-maintenance-key"
+    maintenance_access_key: "molecule-fixture-maintenance-access"
+    maintenance_secret_key: "molecule-fixture-maintenance-secret"
