@@ -3,7 +3,7 @@
 There is no CentOS 7 image, so (ADR-0006 Seam 3) the legacy path is covered by:
 * structure tests (OS-path gates, tags, SPEC-IDs),
 * byte-identical rendering of the modern ``template`` result vs the legacy ``lookup('template')`` content,
-* the real ``legacy_el7.yml`` task files executed with ``ansible-playbook`` on a local connection, with a fake
+* the real ``legacy.yml`` task files (shared with CentOS 6) executed with ``ansible-playbook`` on a local connection, with a fake
   ``scp``/``systemctl`` on PATH and every host path redirected into a temp dir,
 * the documented canary runbook on the first real CentOS 7 host.
 """
@@ -70,15 +70,18 @@ def test_modern_blocks_are_gated_and_legacy_file_is_imported_behind_the_gate(rol
                             if "block" in t)
         # The shared backup config block gates its module tasks individually (controller-only derivations are shared).
         assert modern or nested_modern, block["name"]
-    imp = next(t for t in main if t.get("ansible.builtin.import_tasks") == "legacy_el7.yml")
-    assert imp["when"] == "host_agents_os_path == 'legacy_el7'"
+    imp = next(t for t in main if t.get("ansible.builtin.import_tasks") == "legacy.yml")
+    assert imp["when"] == "host_agents_is_legacy | bool"
+    consts = _yaml(MON / "vars" / "main.yml")
+    assert consts["host_agents_is_legacy"] == \
+        "{{ (host_agents_os_path | default('modern')) in ['legacy_el6', 'legacy_el7'] }}"
 
 
 def test_backup_shared_derivations_and_event_run_for_legacy_hosts_too():
     main = _yaml(BAK / "tasks" / "main.yml")
     flat = list(_flat(main))
     use_cron = next(t for t in flat if t.get("name", "").startswith("[BAK-012]"))["ansible.builtin.set_fact"]["backup_use_cron"]
-    assert "host_agents_os_path in ['legacy_el6', 'legacy_el7']" in use_cron
+    assert use_cron.startswith("{{ host_agents_is_legacy | bool or")
     stat = next(t for t in flat if t.get("name", "").startswith("[BAK-011]"))
     assert stat["when"] == "host_agents_os_path == 'modern'"
     event_block = next(b for b in main if b.get("name") == "Emit the inventory registration event")
@@ -92,8 +95,7 @@ def test_legacy_task_files_use_only_raw_or_controller_side_modules():
                           "ansible.builtin.include_tasks", "ansible.builtin.meta", "ansible.builtin.debug",
                           "ansible.builtin.get_url", "ansible.builtin.unarchive", "ansible.builtin.shell",
                           "ansible.builtin.stat", "ansible.builtin.file", "ansible.builtin.command"}
-    for path in (MON / "tasks" / "legacy_el7.yml", BAK / "tasks" / "legacy_el7.yml",
-                 MON / "tasks" / "legacy_el6.yml", BAK / "tasks" / "legacy_el6.yml",
+    for path in (MON / "tasks" / "legacy.yml", BAK / "tasks" / "legacy.yml",
                  MON / "tasks" / "legacy_deliver_binary.yml", MON / "tasks" / "legacy_switch_binary.yml"):
         for t in _tasks(path):
             mods = [k for k in t if k.startswith("ansible.builtin.")]
@@ -106,22 +108,22 @@ def test_legacy_task_files_use_only_raw_or_controller_side_modules():
 
 
 def test_legacy_blocks_keep_the_modern_tag_split():
-    for role, expected in ((MON, {"Install otelcol on CentOS 7": {"agents_install", "otel"},
-                                  "Apply otelcol configuration on CentOS 7": {"agents_config", "otel"},
-                                  "Enable otelcol service on CentOS 7": {"agents_install", "otel"}}),
-                           (BAK, {"Deliver restic and resticprofile on CentOS 7": {"agents_install", "backup"},
-                                  "Apply backup configuration on CentOS 7": {"agents_config", "backup"},
-                                  "Enable backup schedule on CentOS 7": {"agents_install", "backup"}})):
-        blocks = {b["name"]: set(b["tags"]) for b in _yaml(role / "tasks" / "legacy_el7.yml")}
+    for role, expected in ((MON, {"Install otelcol on CentOS 6/7": {"agents_install", "otel"},
+                                  "Apply otelcol configuration on CentOS 6/7": {"agents_config", "otel"},
+                                  "Enable otelcol service on CentOS 6/7": {"agents_install", "otel"}}),
+                           (BAK, {"Deliver restic and resticprofile on CentOS 6/7": {"agents_install", "backup"},
+                                  "Apply backup configuration on CentOS 6/7": {"agents_config", "backup"},
+                                  "Enable backup schedule on CentOS 6/7": {"agents_install", "backup"}})):
+        blocks = {b["name"]: set(b["tags"]) for b in _yaml(role / "tasks" / "legacy.yml") if "block" in b}
         assert blocks == expected
     # repo init / inventory event must stay out of agents_config (Config runs never init or register).
-    init = next(b for b in _yaml(BAK / "tasks" / "legacy_el7.yml") if b["name"] == "Enable backup schedule on CentOS 7")
+    init = next(b for b in _yaml(BAK / "tasks" / "legacy.yml") if b["name"] == "Enable backup schedule on CentOS 6/7")
     assert "agents_config" not in init["tags"]
     assert any(t["name"].startswith("[BAK-217]") for t in init["block"])
 
 
 def test_every_binary_include_passes_tags_with_apply():
-    for path in (MON / "tasks" / "legacy_el7.yml", BAK / "tasks" / "legacy_el7.yml"):
+    for path in (MON / "tasks" / "legacy.yml", BAK / "tasks" / "legacy.yml"):
         for t in _tasks(path):
             inc = t.get("ansible.builtin.include_tasks")
             if inc:
@@ -130,21 +132,23 @@ def test_every_binary_include_passes_tags_with_apply():
 
 def test_legacy_profile_validation_matches_the_modern_command():
     modern = _task(BAK / "tasks" / "main.yml", "[BAK-024]")["ansible.builtin.template"]["validate"]
-    legacy = _task(BAK / "tasks" / "legacy_el7.yml", "[BAK-208]")
+    legacy = _task(BAK / "tasks" / "legacy.yml", "[BAK-208]")
     assert legacy["ansible.builtin.import_tasks"].endswith("raw_upload.yml")
-    assert legacy["vars"]["_raw_validate"].split() == modern.split()
+    # Same command; legacy picks the row per host (default on CentOS 7, legacy_el6 on CentOS 6), modern is always default.
+    assert "host_agents_versions[host_agents_version_row].resticprofile" in legacy["vars"]["_raw_validate"]
+    assert legacy["vars"]["_raw_validate"].replace("[host_agents_version_row]", "['default']").split() == modern.split()
     assert legacy["vars"]["_raw_secret"] is True and legacy["vars"]["_raw_mode"] == "0600"
 
 
 def test_secret_files_are_raw_secret_and_unit_is_notifying():
-    for path, prefixes in ((MON / "tasks" / "legacy_el7.yml", ["[MON-206]"]),
-                           (BAK / "tasks" / "legacy_el7.yml", ["[BAK-204]", "[BAK-205]"])):
+    for path, prefixes in ((MON / "tasks" / "legacy.yml", ["[MON-206]"]),
+                           (BAK / "tasks" / "legacy.yml", ["[BAK-204]", "[BAK-205]"])):
         for p in prefixes:
             v = _task(path, p)["vars"]
             assert v["_raw_secret"] is True and v["_raw_mode"] == "0600"
-    unit = _task(MON / "tasks" / "legacy_el7.yml", "[MON-213]")["vars"]
+    unit = _task(MON / "tasks" / "legacy.yml", "[MON-213]")["vars"]
     assert unit["_raw_handler"] == ["Reload systemd daemon (raw)", "Restart otelcol-contrib (raw)"]
-    names = [t["name"] for t in _tasks(MON / "tasks" / "legacy_el7.yml") if "name" in t]
+    names = [t["name"] for t in _tasks(MON / "tasks" / "legacy.yml") if "name" in t]
     assert names.index(next(n for n in names if n.startswith("[MON-209]"))) < names.index(
         next(n for n in names if n.startswith("[MON-213]")))                               # symlink before unit
     assert any("[MON-207]" in n for n in names)
@@ -152,14 +156,37 @@ def test_secret_files_are_raw_secret_and_unit_is_notifying():
     assert "Reload systemd daemon (raw)" in handlers and "Restart otelcol-contrib (raw)" in handlers
 
 
-def test_tasks_carry_the_2xx_ids_and_legacy_tasks_are_not_in_the_modern_bands():
-    for path in (MON / "tasks" / "legacy_el7.yml", MON / "tasks" / "legacy_deliver_binary.yml",
-                 MON / "tasks" / "legacy_switch_binary.yml"):
-        ids = [t["name"].split("]")[0].lstrip("[") for t in _tasks(path) if t.get("name", "").startswith("[")]
-        assert ids and all(i.startswith("MON-2") or i == "MON-210" for i in ids), ids
-    ids = [t["name"].split("]")[0].lstrip("[") for t in _tasks(BAK / "tasks" / "legacy_el7.yml")
-           if t.get("name", "").startswith("[")]
-    assert ids and all(i.startswith("BAK-2") for i in ids)
+def _gated_ids(path):
+    """(SPEC-ID, effective OS gate) for every task in a legacy file; the gate is the task's own os_path condition."""
+    out = []
+    for t in _tasks(path):
+        if not t.get("name", "").startswith("[") or "block" in t:
+            continue
+        conds = t.get("when", [])
+        conds = conds if isinstance(conds, list) else [conds]
+        gate = next((c.split("== ")[1].strip("'") for c in conds if str(c).startswith("host_agents_os_path == ")), None)
+        out.append((t["name"].split("]")[0].lstrip("["), gate))
+    return out
+
+
+def test_spec_id_bands_follow_the_os_gate_of_each_legacy_task():
+    # 1xx = CentOS 6 only, 2xx = CentOS 7 only or shared by both legacy paths (ADR-0006 §3, docs §3-4/3-5).
+    mon = _gated_ids(MON / "tasks" / "legacy.yml")
+    assert mon
+    for spec_id, gate in mon:
+        band = int(spec_id.split("-")[1]) // 100
+        assert band in (1, 2), spec_id
+        assert (gate == "legacy_el6") == (band == 1), (spec_id, gate)
+        assert gate in (None, "legacy_el6", "legacy_el7"), (spec_id, gate)
+    assert {i for i, g in mon if g == "legacy_el6"} == {"MON-110", "MON-114", "MON-119", "MON-121", "MON-122"}
+    assert {i for i, g in mon if g == "legacy_el7"} == {"MON-201", "MON-202", "MON-213", "MON-215"}
+    # Shared raw helpers keep their bands: MON-100~108 (fetch/upload) and MON-210~212 (install dir/smoke/switch).
+    for path in (MON / "tasks" / "legacy_deliver_binary.yml", MON / "tasks" / "legacy_switch_binary.yml",
+                 MON / "tasks" / "raw_upload.yml"):
+        for spec_id, gate in _gated_ids(path):
+            assert gate is None and (100 <= int(spec_id[4:]) <= 108 or 210 <= int(spec_id[4:]) <= 212), spec_id
+    bak = _gated_ids(BAK / "tasks" / "legacy.yml")
+    assert bak and all(i.startswith("BAK-2") and g is None for i, g in bak), bak    # backup differs only by version row
 
 
 # --------------------------------------------------------------------------
@@ -271,7 +298,7 @@ def test_unit_runs_as_root_with_the_remaining_hardening_on_legacy_only(tmp_path)
     assert "User=otelcol" in modern and "AmbientCapabilities=CAP_DAC_READ_SEARCH" in modern
     assert "User=root" not in modern
     assert _yaml(MON / "defaults" / "main.yml")["otelcol_run_as_root"] == \
-        "{{ host_agents_os_path | default('modern') in ['legacy_el6', 'legacy_el7'] }}"
+        "{{ host_agents_is_legacy | default(false) | bool }}"
 
 
 # --------------------------------------------------------------------------
@@ -330,7 +357,7 @@ def _run_mon(tmp_path, check=False, tags=None):
     if not target.exists():
         shutil.copy(tgz, target)
     (tmp_path / "bin").mkdir(exist_ok=True)
-    tasks = [{"ansible.builtin.import_role": {"name": "monitoring", "tasks_from": "legacy_el7.yml"}}]
+    tasks = [{"ansible.builtin.import_role": {"name": "monitoring", "tasks_from": "legacy.yml"}}]
     return _play(tmp_path, tasks, extra, check=check, tags=tags, path_env=_fakebin(tmp_path))
 
 
@@ -379,7 +406,7 @@ def test_smoke_failure_fails_the_host_and_keeps_the_old_symlink(tmp_path):
     shutil.copy(tgz, cache / tgz.name)
     extra["host_agents_versions"] = {"default": dict(extra["host_agents_versions"]["default"], otelcol_contrib="9.9.10")}
     extra["host_agents_checksums"] = {"otelcol_contrib": {"9.9.10": {"amd64": hashlib.sha256(tgz.read_bytes()).hexdigest()}}}
-    res = _play(tmp_path, [{"ansible.builtin.import_role": {"name": "monitoring", "tasks_from": "legacy_el7.yml"}}],
+    res = _play(tmp_path, [{"ansible.builtin.import_role": {"name": "monitoring", "tasks_from": "legacy.yml"}}],
                 extra, path_env=_fakebin(tmp_path))
     assert res.returncode != 0 and "MON-211" in res.stdout
     assert s["bin"].readlink() == old_target                              # fallback: previous version stays in service
@@ -446,7 +473,7 @@ def _run_bak(tmp_path, check=False, tags=None):
         if not (d / f.name).exists():
             shutil.copy(f, d / f.name)
     (tmp_path / "bin").mkdir(exist_ok=True)
-    tasks = [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy_el7.yml"}}]
+    tasks = [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy.yml"}}]
     return _play(tmp_path, tasks, extra, check=check, tags=tags, path_env=_fakebin(tmp_path),
                  handlers=[])
 
@@ -470,7 +497,7 @@ def test_backup_legacy_deploy_writes_cron_profile_evidence_files_and_is_idempote
     (tmp_path / "bin").mkdir()
     extra["backup_init_enabled"] = True
     extra["backup_run_command"] = "%s/bin/resticprofile -f yaml -c %s -n default backup" % (tmp_path, extra["backup_profile_path"])
-    tasks = [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy_el7.yml"}}]
+    tasks = [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy.yml"}}]
     handlers = [{"name": "Refresh backup tooling", "ansible.builtin.debug": {"msg": "refreshed"}}]
     res = _play(tmp_path, tasks, extra, path_env=_fakebin(tmp_path), handlers=handlers)
     assert res.returncode == 0, res.stdout + res.stderr
@@ -497,7 +524,7 @@ def test_backup_legacy_deploy_writes_cron_profile_evidence_files_and_is_idempote
 def test_backup_legacy_install_tag_run_has_no_config_phase_and_config_tag_has_no_install(tmp_path):
     extra = _env_vars(tmp_path)
     _fake_backup_releases(tmp_path)
-    res = _play(tmp_path, [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy_el7.yml"}}],
+    res = _play(tmp_path, [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy.yml"}}],
                 extra, tags="agents_config", path_env=_fakebin(tmp_path))
     # No binaries exist, so the validated profile push fails — but the phase selection is already visible.
     out = res.stdout
@@ -507,10 +534,10 @@ def test_backup_legacy_install_tag_run_has_no_config_phase_and_config_tag_has_no
 
 def test_backup_repo_probe_assertion_matches_the_modern_logic():
     modern = _task(BAK / "tasks" / "main.yml", "[BAK-051]")["ansible.builtin.assert"]["that"]
-    legacy = _task(BAK / "tasks" / "legacy_el7.yml", "[BAK-216]")["ansible.builtin.assert"]["that"]
+    legacy = _task(BAK / "tasks" / "legacy.yml", "[BAK-216]")["ansible.builtin.assert"]["that"]
     assert " ".join(str(modern).split()) == " ".join(str(legacy).split())
     for p in ("[BAK-050]", "[BAK-052]"):
         assert _task(BAK / "tasks" / "main.yml", p)["no_log"] is True
-    assert _task(BAK / "tasks" / "legacy_el7.yml", "[BAK-215]")["no_log"] is True
-    assert "LC_ALL=C" in _task(BAK / "tasks" / "legacy_el7.yml", "[BAK-215]")["ansible.builtin.raw"]
-    assert _task(BAK / "tasks" / "legacy_el7.yml", "[BAK-217]")["no_log"] is True
+    assert _task(BAK / "tasks" / "legacy.yml", "[BAK-215]")["no_log"] is True
+    assert "LC_ALL=C" in _task(BAK / "tasks" / "legacy.yml", "[BAK-215]")["ansible.builtin.raw"]
+    assert _task(BAK / "tasks" / "legacy.yml", "[BAK-217]")["no_log"] is True

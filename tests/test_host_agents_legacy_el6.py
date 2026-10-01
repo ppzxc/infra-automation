@@ -1,7 +1,7 @@
 """Host Agents on CentOS 6 (legacy_el6, ADR-0006 §2.8~2.9, Spec #38 / #48).
 
 There is no CentOS 6 image, so (like legacy_el7) the path is covered by structure tests, the real
-``legacy_el6.yml`` task files executed with ``ansible-playbook`` on a local connection (fake ``scp``,
+``legacy.yml`` task files (shared with CentOS 7) executed with ``ansible-playbook`` on a local connection (fake ``scp``,
 ``service`` and ``chkconfig`` on PATH), the real otelcol-contrib v0.119.0 ``validate`` when the binary is
 available (``OTELCOL_EL6_BIN``), and the documented canary runbook on the first real CentOS 6 host.
 """
@@ -27,7 +27,8 @@ def _env_vars(tmp_path):
     (tmp_path / "etc" / "init.d").mkdir(parents=True, exist_ok=True)
     v.update({"host_agents_os_path": "legacy_el6", "host_agents_os_description": "CentOS release 6.10 (Final)",
               "host_agents_os_major_version": "6", "otelcol_sysv_init_dir": str(tmp_path / "etc" / "init.d"),
-              "host_agents_today": "2026-10-01"})
+              "host_agents_today": "2026-10-01",
+              "otelcol_logrotate_path": str(tmp_path / "etc" / "logrotate.d" / "otelcol-contrib")})
     return v
 
 
@@ -80,7 +81,7 @@ def _mon_extra(tmp_path, el6_version="8.8.8", default_version="1.1.1"):
 
 def _run_mon(tmp_path, extra=None, check=False, tags=None):
     extra = extra or _mon_extra(tmp_path)
-    tasks = [{"ansible.builtin.import_role": {"name": "monitoring", "tasks_from": "legacy_el6.yml"}}]
+    tasks = [{"ansible.builtin.import_role": {"name": "monitoring", "tasks_from": "legacy.yml"}}]
     return _play(tmp_path, tasks, extra, check=check, tags=tags, path_env=_fakebin(tmp_path))
 
 
@@ -88,18 +89,14 @@ def _run_mon(tmp_path, extra=None, check=False, tags=None):
 # Structure: gates and tag split
 # --------------------------------------------------------------------------
 
-def test_both_roles_import_the_el6_file_only_on_legacy_el6_with_the_modern_tag_split():
-    for role, prefix, expected in (
-            (MON, "otelcol", {"Install otelcol on CentOS 6": {"agents_install", "otel"},
-                              "Apply otelcol configuration on CentOS 6": {"agents_config", "otel"},
-                              "Enable otelcol service on CentOS 6": {"agents_install", "otel"}}),
-            (BAK, "backup", {"Deliver restic and resticprofile on CentOS 6": {"agents_install", "backup"},
-                             "Apply backup configuration on CentOS 6": {"agents_config", "backup"},
-                             "Enable backup schedule on CentOS 6": {"agents_install", "backup"}})):
-        imp = next(t for t in _yaml(role / "tasks" / "main.yml") if t.get("ansible.builtin.import_tasks") == "legacy_el6.yml")
-        assert imp["when"] == "host_agents_os_path == 'legacy_el6'"
-        blocks = {t["name"]: set(t["tags"]) for t in _yaml(role / "tasks" / "legacy_el6.yml") if "block" in t}
-        assert blocks == expected
+def test_centos6_shares_the_legacy_file_and_only_its_own_tasks_are_el6_gated():
+    for role in (MON, BAK):
+        imp = next(t for t in _yaml(role / "tasks" / "main.yml") if t.get("ansible.builtin.import_tasks") == "legacy.yml")
+        assert imp["when"] == "host_agents_is_legacy | bool"
+    mon = {t["name"].split("]")[0] + "]": t.get("when") for t in el7._tasks(MON / "tasks" / "legacy.yml")
+           if t.get("name", "").startswith("[")}
+    assert mon["[MON-119]"] == mon["[MON-121]"] == mon["[MON-122]"] == "host_agents_os_path == 'legacy_el6'"
+    assert mon["[MON-213]"] == mon["[MON-215]"] == "host_agents_os_path == 'legacy_el7'"   # no systemd on CentOS 6
 
 
 # --------------------------------------------------------------------------
@@ -134,7 +131,9 @@ def test_expiry_is_a_warning_not_a_failure(tmp_path, today, warned):
     for tags in (None, "agents_config"):                       # Deploy, then Config: the warning shows on both
         res = _run_mon(tmp_path, extra, tags=tags)
         assert res.returncode == 0, res.stdout + res.stderr
-        assert ("legacy_el6 버전 행이 만료" in res.stdout) is warned, res.stdout
+        # A real Ansible warning (stderr "[WARNING]"), not just a debug line.
+        warning = [ln for ln in res.stderr.splitlines() if "[WARNING]" in ln and "legacy_el6 버전 행이 만료" in ln]
+        assert bool(warning) is warned, res.stderr
 
 
 # --------------------------------------------------------------------------
@@ -160,7 +159,7 @@ def test_init_script_runs_as_root_loads_secrets_and_registers_with_chkconfig(tmp
     modern_sysv = _render_init(tmp_path, False)                     # modern non-systemd hosts keep the otelcol user
     assert "su -s /bin/sh $USER" in modern_sysv and 'USER="otelcol"' in modern_sysv
     assert _yaml(MON / "defaults" / "main.yml")["otelcol_run_as_root"] == \
-        "{{ host_agents_os_path | default('modern') in ['legacy_el6', 'legacy_el7'] }}"
+        "{{ host_agents_is_legacy | default(false) | bool }}"
 
 
 def test_init_restart_waits_for_the_old_collector_to_exit_and_passes_the_secret_env(tmp_path):
@@ -191,6 +190,33 @@ def test_init_restart_waits_for_the_old_collector_to_exit_and_passes_the_secret_
         subprocess.run([str(init), "stop"], capture_output=True)
 
 
+def test_init_start_detaches_the_collector_from_the_callers_stdio(tmp_path):
+    # Over raw SSH the session stays open while any child holds its stdin/stdout/stderr.
+    import subprocess
+    text = _render_init(tmp_path, True).replace("/var/run/", str(tmp_path) + "/").replace("/var/log/", str(tmp_path) + "/")
+    assert 'nohup "$EXEC" --config="$CONFIG" >> $LOGFILE 2>&1 </dev/null &' in text
+    assert "</dev/null &" in _render_init(tmp_path, False)                  # the su branch too
+    init = tmp_path / "init.sh"
+    init.write_text(text)
+    init.chmod(0o755)
+    fake = tmp_path / "bin" / "otelcol-contrib"
+    fake.parent.mkdir(exist_ok=True)
+    fake.write_text("#!/bin/sh\nwhile :; do sleep 0.2; done\n")
+    fake.chmod(0o755)
+    (tmp_path / "etc" / "otelcol").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "etc" / "otelcol" / "config.yaml").write_text("x: 1\n")
+    try:
+        p = subprocess.run([str(init), "start"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, timeout=10)                   # returns: no child holds the pipes
+        assert p.returncode == 0
+        pid = (tmp_path / "otelcol-contrib.pid").read_text().strip()
+        fds = {n: os.readlink("/proc/%s/fd/%s" % (pid, n)) for n in ("0", "1", "2")}
+        assert fds["0"] == "/dev/null", fds
+        assert fds["1"] == fds["2"] == str(tmp_path / "otelcol-contrib.log"), fds
+    finally:
+        subprocess.run([str(init), "stop"], capture_output=True)
+
+
 def test_sysv_sentinel_uses_chkconfig_list_and_never_systemctl():
     import sys
     sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
@@ -207,6 +233,11 @@ def test_deploy_installs_init_script_enables_with_chkconfig_and_is_idempotent(tm
     assert res.returncode == 0, res.stdout + res.stderr
     init = tmp_path / "etc" / "init.d" / "otelcol-contrib"
     assert oct(init.stat().st_mode & 0o777) == "0o755" and "chkconfig: 2345" in init.read_text()
+    rot = tmp_path / "etc" / "logrotate.d" / "otelcol-contrib"         # the collector's own log is rotated in place
+    assert oct(rot.stat().st_mode & 0o777) == "0o644"
+    rot_text = rot.read_text()
+    assert "/var/log/otelcol-contrib.log {" in rot_text.splitlines() and "copytruncate" in rot_text.split()
+    assert "LOGFILE=\"/var/log/otelcol-contrib.log\"" in init.read_text()  # same file the init script appends to
     cfg = (tmp_path / "etc" / "otelcol" / "config.yaml").read_text()
     keys = yaml.safe_load(cfg)["exporters"]
     assert keys["otlphttp/security_logs"]["sending_queue"] == {
@@ -216,6 +247,8 @@ def test_deploy_installs_init_script_enables_with_chkconfig_and_is_idempotent(tm
     log = (tmp_path / "sysv.log").read_text().splitlines()
     assert "chkconfig --add otelcol-contrib" in log and "chkconfig otelcol-contrib on" in log
     assert "service otelcol-contrib restart" in log                  # first install restarts through the handler
+    handler = next(h for h in _yaml(MON / "handlers" / "main.yml") if h["name"] == "Restart otelcol-contrib (raw)")
+    assert "service otelcol-contrib restart" in handler["ansible.builtin.raw"]
     assert not (tmp_path / "systemctl.log").exists()
     (tmp_path / "sysv.log").unlink()
     (tmp_path / "scp.log").unlink()
@@ -320,7 +353,7 @@ def _run_bak(tmp_path, tags=None):
         if not (d / f.name).exists():
             shutil.copy(f, d / f.name)
     (tmp_path / "bin").mkdir(exist_ok=True)
-    tasks = [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy_el6.yml"}}]
+    tasks = [{"ansible.builtin.import_role": {"name": "backup", "tasks_from": "legacy.yml"}}]
     handlers = [{"name": "Refresh backup tooling", "ansible.builtin.debug": {"msg": "refreshed"}}]
     return _play(tmp_path, tasks, extra, tags=tags, path_env=_fakebin(tmp_path), handlers=handlers)
 

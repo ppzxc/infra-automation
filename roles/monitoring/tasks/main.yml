@@ -242,16 +242,10 @@
     ignore_errors: "{{ ansible_check_mode }}"
 
 # ==============================================================================
-# CentOS 7 (legacy_el7): 모듈을 쓸 수 없으므로 raw 경로(파일 전달 헬퍼)로 같은 템플릿을 적용한다.
-# static import이므로 when/tags가 가져온 태스크에 그대로 전파된다(tags는 legacy_el7.yml 안의 블록이 지정).
+# CentOS 6/7 (legacy_el6, legacy_el7): 모듈을 쓸 수 없으므로 raw 경로(파일 전달 헬퍼)로 같은 템플릿을 적용한다.
+# static import이므로 when/tags가 가져온 태스크에 그대로 전파된다(tags는 legacy.yml 안의 블록이 지정).
+# OS별 차이(버전 행, systemd vs SysV init)는 legacy.yml 안에서 태스크 조건으로 나뉜다.
 # ==============================================================================
-- name: Apply otelcol on CentOS 7 over the raw path
-  ansible.builtin.import_tasks: legacy_el7.yml
-  when: host_agents_os_path == 'legacy_el7'
-
-# ==============================================================================
-# CentOS 6 (legacy_el6): legacy_el6 버전 행 + SysV init/chkconfig로 같은 템플릿을 raw 경로로 적용한다.
-# ==============================================================================
-- name: Apply otelcol on CentOS 6 over the raw path
-  ansible.builtin.import_tasks: legacy_el6.yml
-  when: host_agents_os_path == 'legacy_el6'
+- name: Apply otelcol on CentOS 6/7 over the raw path
+  ansible.builtin.import_tasks: legacy.yml
+  when: host_agents_is_legacy | bool

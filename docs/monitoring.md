@@ -98,7 +98,9 @@
 
 ## 3-4. CentOS 7 (`legacy_el7`) raw 경로와 카나리 런북 (`MON-2xx`, `BAK-2xx`)
 
-- **경로**: OS 프로브가 `legacy_el7`로 분류한 호스트는 AnsiballZ 모듈(python3)을 쓰지 않고 `tasks/legacy_el7.yml`(monitoring, backup 각각)을 raw 경로로 실행합니다. 같은 템플릿을 컨트롤러에서 렌더링(`lookup('template')`)해 ADR-0005 헬퍼(write-temp → validate → mv, sentinel)로 올리므로 설정·프로파일·cron 내용은 modern과 동일합니다(바이트 단위 테스트). CentOS 6은 §3-5를 따릅니다.
+- **번호 대역**: legacy 경로는 한 파일(`tasks/legacy.yml`)을 CentOS 6/7이 공유합니다. 두 OS가 공유하는 태스크와 CentOS 7 전용 태스크는 `MON-2xx`/`BAK-2xx`(적용 대상 열이 `legacy_el6, legacy_el7` 또는 `legacy_el7`), CentOS 6 전용 태스크만 `MON-1xx`(`MON-110~122`)입니다. raw 공용 헬퍼는 기존 번호를 유지합니다: 파일 전달 `MON-100~108`(`raw_upload.yml`, #46), 설치 디렉터리·스모크·symlink `MON-210~212`. backup은 두 OS 차이가 버전 행뿐이라 CentOS 6 전용 태스크가 없고 모두 `BAK-2xx`입니다. 각 태스크의 OS 조건과 대역 일치는 `tests/test_host_agents_legacy_el7.py::test_spec_id_bands_follow_the_os_gate_of_each_legacy_task`가 강제합니다.
+
+- **경로**: OS 프로브가 `legacy_el7`로 분류한 호스트는 AnsiballZ 모듈(python3)을 쓰지 않고 `tasks/legacy.yml`(monitoring, backup 각각, CentOS 6과 공용)을 raw 경로로 실행합니다. 같은 템플릿을 컨트롤러에서 렌더링(`lookup('template')`)해 ADR-0005 헬퍼(write-temp → validate → mv, sentinel)로 올리므로 설정·프로파일·cron 내용은 modern과 동일합니다(바이트 단위 테스트). CentOS 6은 §3-5를 따릅니다.
 - **바이너리**: 컨트롤러가 pinned tarball을 검증·캐시한 뒤 `scp`로 업로드하고, 원격 `sha256sum`을 *추출 바이너리의* Git 고정 해시와 비교합니다(`MON-104/105`). 버전 디렉터리에서 스모크 테스트(`MON-211`: otelcol `--version`, restic·resticprofile `version`)를 통과해야만 설정 검증과 symlink 교체로 넘어갑니다. 실패하면 그 호스트만 실패하고 기존 symlink(직전 버전)가 유지됩니다.
 - **컬렉터 유닛**: root 실행 + `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome`, `PrivateTmp`(CentOS 7의 systemd 219가 지원하는 항목만). 유닛 변경 시에만 `daemon-reload`, 이후 `is-enabled`/`is-active` sentinel로 `enable`/`start`(`enable --now` 미사용).
 - **백업**: `/etc/cron.d/host-agents-backup`, repo 프로브/`init`은 raw, `backup.jsonl` 증적·logrotate·훅은 modern과 동일합니다. 태그 분리(`agents_install`/`agents_config`)와 Deploy 한정(init, 등록 이벤트)도 동일합니다.
@@ -123,11 +125,11 @@ CentOS 7 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 
 ## 3-5. CentOS 6 (`legacy_el6`) raw 경로와 카나리 런북 (`MON-1xx`, `BAK-1xx`)
 
-- **경로**: `legacy_el7`과 같은 raw 헬퍼(`raw_upload.yml`, `legacy_deliver_binary.yml`, `legacy_switch_binary.yml`)를 `tasks/legacy_el6.yml`(monitoring, backup 각각)에서 호출합니다. 번호는 `BAK-2xx` ↔ `BAK-1xx`로 대응하고, monitoring은 `MON-100~108`이 공용 헬퍼이므로 `MON-110~121`을 씁니다.
-- **버전 행**: `host_agents_version_row`가 `legacy_el6`이면 `host_agents_versions.legacy_el6`(otelcol-contrib v0.119.0, restic 0.17.3, resticprofile v0.29.1 — 모두 Go 1.23 빌드, 커널 2.6.32 지원)을 씁니다. 체크섬은 릴리스 tarball을 직접 받아 계산한 값입니다. 만료일 `2027-12-31`(`host_agents_version_expiry`)이 지나면 `MON-110`이 모든 실행(Deploy/Config/태그)에서 경고만 출력합니다.
-- **컬렉터 init**: `otelcol-contrib.init.j2`를 `/etc/init.d/otelcol-contrib`(`0755`)로 배포합니다. root로 실행하고(커널 2.6.32에는 ambient capability 없음) `/etc/otelcol-contrib/secrets.env`를 `set -a`로 읽어 `${env:O2_BASIC_AUTH}`를 공급합니다. 부팅 등록은 `chkconfig --list otelcol-contrib`의 `3:on`을 sentinel로, 없을 때만 `chkconfig --add` + `chkconfig on`(`MON-121`). 재시작 핸들러는 `service otelcol-contrib restart`이며, `stop`은 이전 프로세스가 종료(큐 flush, `file_storage` 잠금 해제)될 때까지 최대 30초 기다린 뒤에만 pidfile을 지웁니다(초과 시 KILL). 컬렉터 자체 로그 `/var/log/otelcol-contrib.log`에는 아직 logrotate 항목이 없습니다(장기 장애 시 재시도 로그 증가, 후속 과제).
+- **경로**: CentOS 7과 같은 `tasks/legacy.yml`(monitoring, backup 각각)과 raw 헬퍼(`raw_upload.yml`, `legacy_deliver_binary.yml`, `legacy_switch_binary.yml`)를 씁니다. CentOS 6 전용 태스크(`MON-110/114/119/121/122`)만 `host_agents_os_path == 'legacy_el6'` 조건이 붙고, systemd 태스크(`MON-201/202/213/215`)는 `legacy_el7` 조건이라 실행되지 않습니다(번호 대역은 §3-4).
+- **버전 행**: `host_agents_version_row`가 `legacy_el6`이면 `host_agents_versions.legacy_el6`(otelcol-contrib v0.119.0, restic 0.17.3, resticprofile 0.29.1 — 모두 Go 1.23 빌드, 커널 2.6.32 지원)을 씁니다. 체크섬은 릴리스 tarball을 직접 받아 계산한 값입니다. 만료일 `2027-12-31`(`host_agents_version_expiry`)이 지나면 `MON-110`이 모든 실행(Deploy/Config/태그)에서 Ansible `[WARNING]`만 출력합니다(실패 아님). 기준일 `host_agents_today`는 역할 vars(덮어쓰기 대상 아님)입니다.
+- **컬렉터 init**: `otelcol-contrib.init.j2`를 `/etc/init.d/otelcol-contrib`(`0755`)로 배포합니다. root로 실행하고(커널 2.6.32에는 ambient capability 없음) `/etc/otelcol-contrib/secrets.env`를 `set -a`로 읽어 `${env:O2_BASIC_AUTH}`를 공급합니다. 부팅 등록은 `chkconfig --list otelcol-contrib`의 `3:on`을 sentinel로, 없을 때만 `chkconfig --add` + `chkconfig on`(`MON-121`). `start`는 컬렉터의 stdin을 `/dev/null`로, stdout/stderr를 로그 파일로 돌려 raw(SSH) 세션이 백그라운드 자식 때문에 매달리지 않습니다. 재시작 핸들러(`Restart otelcol-contrib (raw)`)는 CentOS 6에서 `service otelcol-contrib restart`이며, `stop`은 이전 프로세스가 종료(큐 flush, `file_storage` 잠금 해제)될 때까지 최대 30초 기다린 뒤에만 pidfile을 지웁니다(초과 시 KILL). 컬렉터 자체 로그 `/var/log/otelcol-contrib.log`는 `/etc/logrotate.d/otelcol-contrib`(`MON-122`, `copytruncate`, 주간 4회 보존)로 회전합니다.
 - **설정**: 같은 `otelcol-contrib.yaml.j2`이며 `sending_queue`만 legacy_el6 분기입니다. v0.119.0은 `sizer`와 `block_on_overflow`를 모르므로(`validate`가 `invalid keys: block_on_overflow, sizer`로 거부) 구 이름 `blocking: true`와 배치 개수 `queue_size`(`otel_log_queue_batches_legacy_el6: 64`)를 씁니다. 역압은 유지됩니다(ADR-0006 §2.8 확인 결과).
-- **백업**: `/etc/cron.d/host-agents-backup`, 프로파일·훅·logrotate·repo 프로브/`init`은 legacy_el7과 동일하며 restic/resticprofile만 legacy_el6 행입니다. 프로파일은 resticprofile v0.29.1 + restic 0.17.3의 `show`를 통과합니다.
+- **백업**: CentOS 7과 같은 태스크(`BAK-2xx`)이며 restic/resticprofile만 legacy_el6 행입니다(`/etc/cron.d/host-agents-backup`, 프로파일·훅·logrotate·repo 프로브/`init` 동일). 프로파일은 resticprofile 0.29.1 + restic 0.17.3의 `show`를 통과합니다.
 
 ### 카나리 런북 (첫 실제 CentOS 6 호스트)
 
@@ -141,7 +143,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
    - `/var/log/otelcol-contrib.log`에 `invalid keys`나 401 오류가 없음(secrets env 적재 확인)
    - OpenObserve에 `os.description=CentOS release 6.x (Final)` 로그/메트릭 도착, `security_logs`에 `/var/log/secure` 포함
    - `restic version`이 `0.17.3`, `resticprofile version`이 `0.29.1`, `/etc/cron.d/host-agents-backup` 존재, 수동 백업 1회 후 `backup.jsonl` → `backup_logs` 수집
-   - `host_agents_today`가 만료일 이후라면 `MON-110` 경고가 출력되는지(실패하지 않는지)
+   - 만료일 이후라면 `MON-110` `[WARNING]`이 출력되는지(실패하지 않는지), `/etc/logrotate.d/otelcol-contrib`이 있고 `logrotate -d /etc/logrotate.d/otelcol-contrib`이 오류 없이 끝나는지
 5. **역압 확인(선택, 유지보수 창)**: OpenObserve 수집을 잠시 차단하고 큐가 차면 `filelog`가 읽기를 멈추며 `sending queue is full` 거부 로그가 없는지 확인한 뒤 복구 후 누락 없이 재개되는지 봅니다.
 6. **재실행(멱등)**: `changed=0`(재시작 없음)을 확인한 뒤 나머지 CentOS 6 호스트로 넓힙니다. 스모크 테스트(`MON-211`) 실패는 해당 호스트만 실패하고 기존 symlink가 유지됩니다.
 
@@ -209,30 +211,23 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-106` | `Push the small file via write-temp/validate/move (raw, base64)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | ADR-0005 sentinel (`raw_push_changed`), check 모드 스킵, 시크릿은 `no_log` |
 | `MON-107` | `Report the planned binary upload in check mode` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (check 모드에서만, 변경 예정 여부 출력) |
 | `MON-108` | `Remove the staged upload after a failed upload or install (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | rescue 전용 (`rm -f` 스테이징 파일 후 실패 유지, `changed_when`/`failed_when` 선언) |
-| `MON-110` | `Warn when the legacy_el6 version row is past its expiry date` | `ansible.builtin.debug` | legacy_el6 | 읽기 전용, `tags: [always]`. `host_agents_today` > `host_agents_version_expiry.legacy_el6`(2027-12-31)이면 경고만 출력(실패 아님) |
-| `MON-111` | `Ensure otelcol persistent storage directory exists (raw)` | `ansible.builtin.raw` | legacy_el6 | `raw_dir_cmd` sentinel (경로·모드·소유자 일치 시 `ok`) |
-| `MON-112` | `Deliver the legacy_el6 OpenTelemetry Collector Contrib binary (raw)` | `ansible.builtin.include_tasks` | legacy_el6 | `legacy_el6` 버전 행(v0.119.0) 컨트롤러 캐시 → scp 업로드, 원격 sha256sum 불일치 시에만 실행 (`MON-040`~`043`, `MON-100`~`108`, `MON-210`~`211`) |
-| `MON-113` | `Assert OpenObserve endpoint is configured without a trailing slash` | `ansible.builtin.assert` | legacy_el6 | 읽기 전용 (MON-060과 같은 조건) |
+| `MON-110` | `Warn when the legacy_el6 version row is past its expiry date` | `ansible.builtin.debug` | legacy_el6 | 읽기 전용, `tags: [always]`. `host_agents_today`(vars, 컨트롤러 UTC) > `host_agents_version_expiry.legacy_el6`(2027-12-31)이면 `host_agents_warn` 필터로 실제 Ansible `[WARNING]`을 출력(실패 아님) |
 | `MON-114` | `Disable the journald receiver on CentOS 6 (no journald)` | `ansible.builtin.set_fact` | legacy_el6 | 순수 함수 (CentOS 6에는 journald가 없어 항상 `false`) |
-| `MON-115` | `Ensure otelcol config and secrets directories exist (raw)` | `ansible.builtin.raw` | legacy_el6 | `raw_dir_cmd` sentinel (`0750`/`0700`, root) |
-| `MON-116` | `Deploy otelcol secrets env file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el6 | ADR-0005 sentinel(`raw_upload.yml`), `_raw_secret`, `no_log`. 변경 시 `Restart otelcol-contrib (raw sysv)` |
-| `MON-117` | `Deploy OpenTelemetry Collector configuration (raw, validated with the legacy_el6 binary)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel + v0.119.0 바이너리 `validate`. 템플릿의 legacy_el6 분기(`queue_size` 배치 수 + `blocking`) 렌더링 |
-| `MON-118` | `Switch otelcol-contrib install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el6 | 설정 검증 뒤 `MON-212` (스모크 테스트 실패 시 도달하지 않음) |
-| `MON-119` | `Deploy SysV init script for otelcol-contrib (raw, runs as root)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel (`/etc/init.d/otelcol-contrib`, `0755`, `bash -n` 검증). root 실행, secrets env를 `set -a`로 적재. 변경 시 재시작 핸들러 |
-| `MON-120` | `Apply pending restart before enabling` | `ansible.builtin.meta` | legacy_el6 | 대기 중인 재시작만 수행 (`flush_handlers`) |
+| `MON-119` | `Deploy SysV init script for otelcol-contrib (raw, runs as root)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel (`/etc/init.d/otelcol-contrib`, `0755`, `bash -n` 검증). root 실행, secrets env를 `set -a`로 적재, `start`는 stdin(`</dev/null`)·stdout·stderr를 모두 끊어 raw 세션을 붙잡지 않음. 변경 시 `Restart otelcol-contrib (raw)`(CentOS 6은 `service … restart`) |
 | `MON-121` | `Ensure otelcol-contrib is started and enabled via chkconfig (raw, sentinel)` | `ansible.builtin.raw` | legacy_el6 | `raw_sysv_service_cmd`: `service status` 실패 시에만 `start`, `chkconfig --list`에 `3:on`이 없을 때만 `chkconfig --add` + `on` |
-| `MON-200` | `Assert OpenObserve endpoint is configured without a trailing slash` | `ansible.builtin.assert` | legacy_el7 | 읽기 전용 (MON-060과 같은 조건) |
+| `MON-122` | `Deploy logrotate configuration for the collector log on CentOS 6 (raw)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel (`/etc/logrotate.d/otelcol-contrib`, `0644`). `/var/log/otelcol-contrib.log`(init 스크립트의 `LOGFILE`)을 `copytruncate`로 주간 회전(재시작 불필요, logrotate 3.7.8 호환 옵션만) |
+| `MON-200` | `Assert OpenObserve endpoint is configured without a trailing slash` | `ansible.builtin.assert` | legacy_el6, legacy_el7 | 읽기 전용 (MON-060과 같은 조건) |
 | `MON-201` | `Detect rsyslog (raw, read-only; journald is collected only where rsyslog is absent)` | `ansible.builtin.raw` | legacy_el7 | `changed_when: false`, `check_mode: false` (`/usr/sbin`·`/sbin`) |
 | `MON-202` | `Decide whether the journald receiver is needed` | `ansible.builtin.set_fact` | legacy_el7 | 순수 함수 |
-| `MON-203` | `Ensure otelcol persistent storage directory exists (raw)` | `ansible.builtin.raw` | legacy_el7 | `raw_dir_cmd` sentinel (경로·모드·소유자 일치 시 `ok`) |
-| `MON-204` | `Ensure otelcol config and secrets directories exist (raw)` | `ansible.builtin.raw` | legacy_el7 | `raw_dir_cmd` sentinel (`0750`/`0700`, root) |
-| `MON-206` | `Deploy otelcol secrets env file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`), `_raw_secret`: check 모드에서도 내용 비노출, `no_log` |
-| `MON-207` | `Deploy OpenTelemetry Collector configuration (raw, validated with the new binary)` | `ansible.builtin.import_tasks` | legacy_el7 | sentinel + 새 버전 바이너리 `validate`(임시 파일 검증 후 mv). modern과 같은 템플릿 렌더링 결과 |
-| `MON-208` | `Deliver pinned OpenTelemetry Collector Contrib binary (raw)` | `ansible.builtin.include_tasks` | legacy_el7 | 컨트롤러 캐시 → scp 업로드, 원격 sha256sum(추출 바이너리 해시) 불일치 시에만 실행 (`MON-040`~`043`, `MON-100`~`108`, `MON-210`~`211`) |
-| `MON-209` | `Switch otelcol-contrib install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el7 | 설정 검증 뒤 `MON-212` (스모크 테스트 실패 시 도달하지 않음) |
+| `MON-203` | `Ensure otelcol persistent storage directory exists (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `raw_dir_cmd` sentinel (경로·모드·소유자 일치 시 `ok`) |
+| `MON-204` | `Ensure otelcol config and secrets directories exist (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `raw_dir_cmd` sentinel (`0750`/`0700`, root) |
+| `MON-206` | `Deploy otelcol secrets env file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`), `_raw_secret`: check 모드에서도 내용 비노출, `no_log` |
+| `MON-207` | `Deploy OpenTelemetry Collector configuration (raw, validated with the new binary)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | sentinel + 새 버전 바이너리 `validate`(임시 파일 검증 후 mv, `host_agents_version_row` 행). modern과 같은 템플릿 렌더링 결과(CentOS 6은 `sending_queue` legacy_el6 분기) |
+| `MON-208` | `Deliver pinned OpenTelemetry Collector Contrib binary (raw)` | `ansible.builtin.include_tasks` | legacy_el6, legacy_el7 | `host_agents_version_row` 행(CentOS 6은 v0.119.0) 컨트롤러 캐시 → scp 업로드, 원격 sha256sum(추출 바이너리 해시) 불일치 시에만 실행 (`MON-040`~`043`, `MON-100`~`108`, `MON-210`~`211`) |
+| `MON-209` | `Switch otelcol-contrib install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el6, legacy_el7 | 설정 검증 뒤 `MON-212` (스모크 테스트 실패 시 도달하지 않음) |
 | `MON-210` | `Ensure the versioned install directory exists (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `raw_dir_cmd` sentinel (`0755`) |
 | `MON-211` | `Smoke-test the delivered binary on the host (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `<binary> --version`(restic류는 `version`) 비정상 종료 시 호스트 실패, symlink 불변. check 모드 스킵 |
 | `MON-212` | `Point the install symlink at the new version (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `raw_switch_binary_cmd`: readlink 비교 후 원자적 교체, 일반 파일 바이너리는 `legacy-<binary>`로 보존, 현재+직전만 보존. 변경 시에만 핸들러 |
 | `MON-213` | `Deploy systemd unit for otelcol-contrib (raw, runs as root)` | `ansible.builtin.import_tasks` | legacy_el7 | sentinel. root 실행 + `NoNewPrivileges`/`ProtectSystem=full`/`ProtectHome`/`PrivateTmp`. 변경 시 `Reload systemd daemon (raw)` + `Restart otelcol-contrib (raw)` |
-| `MON-214` | `Apply pending systemd reload and restart before enabling` | `ansible.builtin.meta` | legacy_el7 | 유닛 변경 시에만 daemon-reload (`flush_handlers`) |
+| `MON-214` | `Apply pending reload and restart before enabling` | `ansible.builtin.meta` | legacy_el6, legacy_el7 | 유닛/init 스크립트 변경 시에만 daemon-reload·재시작 (`flush_handlers`) |
 | `MON-215` | `Ensure otelcol-contrib is enabled and started (raw, sentinel)` | `ansible.builtin.raw` | legacy_el7 | `raw_service_cmd`: `is-enabled`/`is-active` 확인 후에만 enable/start (systemd 219에는 `enable --now`가 없음) |

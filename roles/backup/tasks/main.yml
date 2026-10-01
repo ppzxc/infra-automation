@@ -66,13 +66,13 @@
     register: _backup_conditional_raw
     changed_when: false
     check_mode: false
-    when: host_agents_os_path in ['legacy_el6', 'legacy_el7']
+    when: host_agents_is_legacy | bool
 
   - name: "[BAK-202] Present the raw probe like the modern stat results"
     ansible.builtin.set_fact:
       _backup_conditional:
         results: "{{ _backup_conditional_raw.stdout | default('') | raw_exists_results(backup_conditional_paths) }}"
-    when: host_agents_os_path in ['legacy_el6', 'legacy_el7']
+    when: host_agents_is_legacy | bool
 
   # 버전 행: legacy_el6(CentOS 6)는 Go 1.23 빌드 행, 그 외는 default (monitoring vars의 host_agents_version_row).
   - name: "[BAK-012] Derive repository, source list, excludes and schedule"
@@ -84,7 +84,7 @@
             + (_backup_conditional.results | selectattr('stat.exists') | map(attribute='item') | list)) | unique | list }}
       backup_excludes: "{{ (backup_standard_excludes + host_agents_inputs.backup_exclude_paths) | unique | list }}"
       backup_schedule_offset: "{{ backup_schedule_window_minutes | int | random(seed=inventory_hostname) }}"
-      backup_use_cron: "{{ host_agents_os_path in ['legacy_el6', 'legacy_el7'] or (host_agents_os_family == 'RedHat' and host_agents_os_major_version == '8') or (ansible_service_mgr | default('systemd')) != 'systemd' }}"
+      backup_use_cron: "{{ host_agents_is_legacy | bool or (host_agents_os_family == 'RedHat' and host_agents_os_major_version == '8') or (ansible_service_mgr | default('systemd')) != 'systemd' }}"
 
   - name: "[BAK-013] Derive the scheduled hour/minute and run command"
     ansible.builtin.set_fact:
@@ -275,15 +275,11 @@
       - _backup_repo_probe is not skipped
       - _backup_repo_probe.rc != 0
 
-# CentOS 7 (legacy_el7): 같은 템플릿을 raw 경로로 적용한다(legacy_el7.yml, 태그는 파일 안의 블록이 지정).
-- name: Apply backup on CentOS 7 over the raw path
-  ansible.builtin.import_tasks: legacy_el7.yml
-  when: host_agents_os_path == 'legacy_el7'
-
-# CentOS 6 (legacy_el6): legacy_el6 버전 행의 restic/resticprofile로 같은 템플릿을 raw 경로로 적용한다.
-- name: Apply backup on CentOS 6 over the raw path
-  ansible.builtin.import_tasks: legacy_el6.yml
-  when: host_agents_os_path == 'legacy_el6'
+# CentOS 6/7 (legacy_el6, legacy_el7): 같은 템플릿을 raw 경로로 적용한다(legacy.yml, 태그는 파일 안의 블록이 지정).
+# 두 OS는 버전 행(host_agents_version_row)만 다르다.
+- name: Apply backup on CentOS 6/7 over the raw path
+  ansible.builtin.import_tasks: legacy.yml
+  when: host_agents_is_legacy | bool
 
 - name: "Emit the inventory registration event"
   when: enable_backup | bool

@@ -26,7 +26,7 @@ EXEC="{{ host_agents_bin_dir | default('/usr/local/bin') }}/$PROG"
 CONFIG="{{ otelcol_config_path }}"
 SECRETS="{{ otelcol_secrets_path }}"
 PIDFILE="/var/run/$PROG.pid"
-LOGFILE="/var/log/$PROG.log"
+LOGFILE="{{ otelcol_sysv_log_path | default('/var/log/otelcol-contrib.log') }}"
 {% if not (otelcol_run_as_root | default(false) | bool) %}
 USER="{{ otelcol_user }}"
 {% endif %}
@@ -51,9 +51,10 @@ start() {
     fi
 {% if otelcol_run_as_root | default(false) | bool %}
     # CentOS 6: 커널 2.6.32에는 ambient capability가 없어 root로 실행한다(ADR-0006 §2.9).
-    nohup "$EXEC" --config="$CONFIG" >> $LOGFILE 2>&1 &
+    # stdin까지 끊어야 백그라운드 자식이 raw(SSH) 세션의 파이프를 붙잡지 않는다.
+    nohup "$EXEC" --config="$CONFIG" >> $LOGFILE 2>&1 </dev/null &
 {% else %}
-    nohup su -s /bin/sh $USER -c "$EXEC --config=$CONFIG" >> $LOGFILE 2>&1 &
+    nohup su -s /bin/sh $USER -c "$EXEC --config=$CONFIG" >> $LOGFILE 2>&1 </dev/null &
 {% endif %}
     PID=$!
     echo $PID > $PIDFILE

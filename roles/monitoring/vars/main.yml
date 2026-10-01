@@ -38,6 +38,12 @@ host_agents_version_expiry:
 
 host_agents_version_row: "{{ 'legacy_el6' if (host_agents_os_path | default('modern')) == 'legacy_el6' else 'default' }}"
 
+# CentOS 6/7 raw 경로(legacy_el6, legacy_el7) 여부. OS 경로 목록 비교는 여기 한 곳에만 둔다.
+host_agents_is_legacy: "{{ (host_agents_os_path | default('modern')) in ['legacy_el6', 'legacy_el7'] }}"
+
+# 만료 판정 기준일(YYYY-MM-DD, 컨트롤러 UTC). 운영에서는 덮어쓰지 않는다(테스트만 extra-vars로 고정).
+host_agents_today: "{{ now(utc=true, fmt='%Y-%m-%d') }}"
+
 # 버전×아키텍처별 SHA256 (배포 tarball 기준). upstream checksums.txt는 기준으로 신뢰하지 않는다.
 host_agents_checksums:
   otelcol_contrib:

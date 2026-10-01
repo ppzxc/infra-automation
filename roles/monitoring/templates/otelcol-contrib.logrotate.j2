@@ -1,0 +1,11 @@
+# Ansible managed — SysV init 컬렉터 자체 로그 회전 (CentOS 6, MON-122).
+# init 스크립트가 nohup >>로 열어 둔 파일이므로 재시작 없이 copytruncate로 잘라낸다(logrotate 3.7.8 호환 옵션만).
+{{ otelcol_sysv_log_path }} {
+    weekly
+    rotate {{ otelcol_logrotate_rotate | int }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}

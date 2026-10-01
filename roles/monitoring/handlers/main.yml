@@ -7,16 +7,13 @@
 
 
 
-# legacy_el7 경로(raw): 모듈을 쓸 수 없으므로 systemctl을 raw로 호출한다.
+# legacy 경로(raw): 모듈을 쓸 수 없으므로 서비스 관리자를 raw로 호출한다.
+# CentOS 7은 systemctl, CentOS 6(SysV init)에는 systemctl이 없어 service를 쓴다.
 - name: Reload systemd daemon (raw)
   ansible.builtin.raw: systemctl daemon-reload
   changed_when: true
 
 - name: Restart otelcol-contrib (raw)
-  ansible.builtin.raw: systemctl restart otelcol-contrib
-  changed_when: true
-
-# legacy_el6 경로(raw, SysV init): CentOS 6에는 systemctl이 없다.
-- name: Restart otelcol-contrib (raw sysv)
-  ansible.builtin.raw: service otelcol-contrib restart
+  ansible.builtin.raw: >-
+    {{ 'service otelcol-contrib restart' if host_agents_os_path == 'legacy_el6' else 'systemctl restart otelcol-contrib' }}
   changed_when: true

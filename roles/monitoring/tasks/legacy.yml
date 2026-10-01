@@ -1,13 +1,28 @@
 ---
 # ==============================================================================
-# Host Agents — CentOS 7 (legacy_el7) otelcol 적용, raw 경로 (ADR-0006 §2.9, ADR-0005 부분집합)
+# Host Agents — CentOS 6/7 (legacy_el6, legacy_el7) otelcol 적용, raw 경로 (ADR-0006 §2.8~2.9, ADR-0005 부분집합)
 # ==============================================================================
 # AnsiballZ 모듈을 쓸 수 없으므로 모든 원격 작업은 raw다. modern과 같은 템플릿을 컨트롤러에서 렌더링해
 # (lookup template) write/validate/move 헬퍼로 올리고, 바이너리는 scp + 원격 sha256sum으로 올린다.
 # 컬렉터는 root로 실행한다(CAP_DAC_READ_SEARCH 대신). 태그 분리는 modern과 동일하다.
 # 바이너리 전달/symlink 교체는 include_tasks(+apply로 태그 전달)로 호출한다. fetch_binary.yml이 _deliver_* 파생값을 set_fact로 남기므로
 # 에이전트마다 호출 변수를 include 파라미터로 넘겨 직전 에이전트의 fact에 덮이지 않게 한다.
-- name: "Install otelcol on CentOS 7"
+#
+# 두 OS가 공유하는 태스크는 MON-2xx, CentOS 6 전용은 MON-1xx(MON-110~), CentOS 7 전용은 MON-2xx에 OS 조건을 단다.
+# CentOS 6의 차이: (1) legacy_el6 버전 행(host_agents_version_row, Go 1.23 빌드), (2) journald 없음,
+# (3) SysV init + chkconfig(systemd 없음), (4) 컬렉터 자체 로그 logrotate, (5) 템플릿의 sending_queue 분기(v0.119.0).
+- name: "[MON-110] Warn when the legacy_el6 version row is past its expiry date"
+  ansible.builtin.debug:
+    msg: >-
+      {{ (inventory_hostname ~ ': legacy_el6 버전 행이 만료되었습니다(' ~ host_agents_version_expiry['legacy_el6']
+          ~ ' 경과, Go 보안 패치 없음). CentOS 6 호스트의 교체·폐기 계획을 진행하세요 (ADR-0006 §2.8, 실패가 아닌 경고).')
+         | host_agents_warn }}
+  when:
+    - host_agents_os_path == 'legacy_el6'
+    - host_agents_today | string > host_agents_version_expiry['legacy_el6'] | string
+  tags: [always]
+
+- name: "Install otelcol on CentOS 6/7"
   tags: [agents_install, otel]
   when: enable_otelcol | default(true) | bool
   block:
@@ -22,14 +37,14 @@
       apply:
         tags: [agents_install, otel]
     vars:
-      _otelcol_version: "{{ host_agents_versions['default'].otelcol_contrib }}"
+      _otelcol_version: "{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}"
       _deliver_agent: otelcol-contrib
       _deliver_binary: otelcol-contrib
       _deliver_version: "{{ _otelcol_version }}"
       _deliver_url: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ _otelcol_version }}/otelcol-contrib_{{ _otelcol_version }}_linux_{{ host_agents_os_arch }}.tar.gz"
       _deliver_sha256: "{{ host_agents_checksums.otelcol_contrib[_otelcol_version][host_agents_os_arch] }}"
 
-- name: "Apply otelcol configuration on CentOS 7"
+- name: "Apply otelcol configuration on CentOS 6/7"
   tags: [agents_config, otel]
   when: enable_otelcol | default(true) | bool
   block:
@@ -50,10 +65,18 @@
     register: _otelcol_rsyslog_raw
     changed_when: false
     check_mode: false
+    when: host_agents_os_path == 'legacy_el7'
 
   - name: "[MON-202] Decide whether the journald receiver is needed"
     ansible.builtin.set_fact:
       host_agents_journald: "{{ 'RSYSLOG_ABSENT' in _otelcol_rsyslog_raw.stdout }}"
+    when: host_agents_os_path == 'legacy_el7'
+
+  # CentOS 6에는 journald가 없으므로(rsyslog 기본) 프로브 없이 journald 수신기를 끈다.
+  - name: "[MON-114] Disable the journald receiver on CentOS 6 (no journald)"
+    ansible.builtin.set_fact:
+      host_agents_journald: false
+    when: host_agents_os_path == 'legacy_el6'
 
   - name: "[MON-204] Ensure otelcol config and secrets directories exist (raw)"
     ansible.builtin.raw: "{{ item.path | raw_dir_cmd(host_agents_owner, host_agents_group, item.mode) }}"
@@ -84,10 +107,10 @@
       _raw_owner: "{{ host_agents_owner }}"
       _raw_group: "{{ host_agents_group }}"
       _raw_mode: '0640'
-      _raw_validate: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib validate --config=%s"
+      _raw_validate: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}/otelcol-contrib validate --config=%s"
       _raw_handler: Restart otelcol-contrib (raw)
 
-- name: "Enable otelcol service on CentOS 7"
+- name: "Enable otelcol service on CentOS 6/7"
   tags: [agents_install, otel]
   when: enable_otelcol | default(true) | bool
   block:
@@ -99,8 +122,8 @@
         tags: [agents_install, otel]
     vars:
       _deliver_agent_dir: "{{ host_agents_install_root }}/otelcol-contrib"
-      _deliver_version_dir: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}"
-      _deliver_new_path: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib"
+      _deliver_version_dir: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}"
+      _deliver_new_path: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}/otelcol-contrib"
       _deliver_link: "{{ host_agents_bin_dir }}/otelcol-contrib"
       _deliver_binary: otelcol-contrib
       _deliver_handler: Restart otelcol-contrib (raw)
@@ -114,12 +137,44 @@
       _raw_group: "{{ host_agents_group }}"
       _raw_mode: '0644'
       _raw_handler: ['Reload systemd daemon (raw)', 'Restart otelcol-contrib (raw)']
+    when: host_agents_os_path == 'legacy_el7'
 
-  # 유닛 변경 시에만 daemon-reload(핸들러), 그 뒤에 enable/start를 sentinel로 보장한다(systemd 219에는 enable --now가 없다).
-  - name: "[MON-214] Apply pending systemd reload and restart before enabling"
+  - name: "[MON-119] Deploy SysV init script for otelcol-contrib (raw, runs as root)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ otelcol_sysv_init_dir }}/otelcol-contrib"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/otelcol-contrib.init.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0755'
+      _raw_validate: "/bin/bash -n %s"
+      _raw_handler: Restart otelcol-contrib (raw)
+    when: host_agents_os_path == 'legacy_el6'
+
+  # init 스크립트가 nohup >>로 열어 둔 파일이므로 copytruncate로 회전한다(재시작 불필요, 핸들러 없음).
+  - name: "[MON-122] Deploy logrotate configuration for the collector log on CentOS 6 (raw)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ otelcol_logrotate_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/otelcol-contrib.logrotate.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0644'
+    when: host_agents_os_path == 'legacy_el6'
+
+  # 유닛/스크립트 변경 시에만 daemon-reload·재시작(핸들러), 그 뒤에 enable/start를 sentinel로 보장한다
+  # (systemd 219에는 enable --now가 없다).
+  - name: "[MON-214] Apply pending reload and restart before enabling"
     ansible.builtin.meta: flush_handlers
 
   - name: "[MON-215] Ensure otelcol-contrib is enabled and started (raw, sentinel)"
     ansible.builtin.raw: "{{ 'otelcol-contrib' | raw_service_cmd }}"
     register: _legacy_service
     changed_when: _legacy_service.stdout | default('') | raw_changed
+    when: host_agents_os_path == 'legacy_el7'
+
+  - name: "[MON-121] Ensure otelcol-contrib is started and enabled via chkconfig (raw, sentinel)"
+    ansible.builtin.raw: "{{ 'otelcol-contrib' | raw_sysv_service_cmd }}"
+    register: _legacy_sysv_service
+    changed_when: _legacy_sysv_service.stdout | default('') | raw_changed
+    when: host_agents_os_path == 'legacy_el6'
