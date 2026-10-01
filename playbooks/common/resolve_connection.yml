@@ -260,8 +260,14 @@
           {%- set kv = _clean_user_list(_kv_removed_source) -%}
           {%- set run = _clean_user_list(_run_removed_source) -%}
           {{ {'from_kv': kv, 'from_run': run, 'union': (kv + run) | unique(case_sensitive=true) | list} }}
+      # 태스크 vars는 이 태스크 안에서만 보이므로, 뒤따르는 경고/증적 태스크가 참조하는
+      # 값은 호스트 팩트로 함께 승격합니다(그렇지 않으면 'is undefined'로 플레이가 실패).
       ansible.builtin.set_fact:
         _removed_users: "{{ _removed_users_detail.union }}"
+        _removed_users_detail: "{{ _removed_users_detail }}"
+        _removed_users_shape_invalid: "{{ _removed_users_shape_invalid }}"
+        _kv_removed_source: "{{ _kv_removed_source }}"
+        _run_removed_source: "{{ _run_removed_source }}"
 
     - name: Warn when removed_users has an unsupported shape and was ignored
       ansible.builtin.debug:
