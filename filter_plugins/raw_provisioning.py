@@ -7,6 +7,7 @@ changed/unchanged sentinel contract.
 """
 
 import base64
+import difflib
 import hashlib
 import ipaddress
 import re
@@ -45,17 +46,22 @@ def _marker_answer(stdout, marker):
     return lines[-1][1:] if lines else None
 
 
-def raw_push_changed(probe_stdout, content, mode, owner=None, group=None):
-    """Sentinel: changed when the remote hash, mode OR (if given) owner:group differs.
+def raw_upload_changed(probe_stdout, sha256, mode, owner=None, group=None):
+    """Sentinel for hash-pinned uploads: changed when the remote hash, mode OR (if given) owner:group differs.
 
     An absent dest (or unusable probe) never equals the expected value, so
     first provisioning is reported as changed without special-casing.
     """
-    expected = ['__RAW_PROBE__', raw_sha256(content), _mode_octal(mode)]
+    expected = ['__RAW_PROBE__', sha256, _mode_octal(mode)]
     if owner is not None:
         expected.append('%s:%s' % (owner, group))
     answer = _marker_answer(probe_stdout, PROBE_MARKER)
     return answer is None or [PROBE_MARKER] + answer[:len(expected) - 1] != expected
+
+
+def raw_push_changed(probe_stdout, content, mode, owner=None, group=None):
+    """Content-push sentinel: raw_upload_changed against the hash of ``content``."""
+    return raw_upload_changed(probe_stdout, raw_sha256(content), mode, owner, group)
 
 
 def raw_read_cmd(path):
@@ -99,6 +105,60 @@ def raw_push_cmd(content, dest, owner, group, mode, validate):
         own=shlex.quote('%s:%s' % (owner, group)),
         mode=shlex.quote(str(mode)),
     )
+
+
+_SAFE_REMOTE_PATH = re.compile(r'^/[A-Za-z0-9._/+-]+$')
+
+
+def raw_scp_argv(src, dest, host, port, user, key=None):
+    """argv for a controller-side ``scp`` of ``src`` to ``user@host:dest`` (Host Agents binary upload).
+
+    Used with ``ansible.builtin.command`` ``argv`` so nothing is shell-interpreted locally.
+    ``dest`` is also parsed by the remote side (legacy scp protocol), so it must be a plain
+    absolute path. The host key check is relaxed like the connection probe and ansible.cfg.
+    """
+    if not _SAFE_REMOTE_PATH.match(str(dest)) or '..' in str(dest).split('/'):
+        raise ValueError('unsafe remote scp path: %r' % (dest,))
+    host = str(host)
+    target = '[%s]' % host if ':' in host else host
+    argv = ['scp', '-q', '-B', '-o', 'BatchMode=yes',
+            '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+            '-P', str(int(port))]
+    if key:
+        argv += ['-i', str(key), '-o', 'IdentitiesOnly=yes']
+    return argv + [str(src), '%s@%s:%s' % (user, target, dest)]
+
+
+def raw_upload_finalize_cmd(stage, dest, owner, group, mode, sha256):
+    """Verify the scp'd ``stage`` file against the pinned sha256, then install it at ``dest``.
+
+    scp runs as the unprivileged connection user, so the file lands in a writable staging
+    path; this command (run with become) copies it next to ``dest`` as ``<dest>.raw.tmp``,
+    chown/chmod, atomic mv, and removes the stage. A hash mismatch removes the stage, leaves
+    ``dest`` untouched and exits non-zero.
+    """
+    st = shlex.quote(stage)
+    tmp = shlex.quote(dest + '.raw.tmp')
+    d = shlex.quote(dest)
+    return (
+        "{{ [ \"$(sha256sum {st} 2>/dev/null | cut -d' ' -f1)\" = {h} ] || {{ rm -f {st}; false; }}; }}"
+        " && {{ (umask 077 && cp {st} {tmp}) && chown {own} {tmp} && chmod {mode} {tmp}"
+        " && mv -f {tmp} {d}; }} || {{ rm -f {tmp} {st}; false; }}"
+        " && rm -f {st} && {{ (restorecon -F {d} >/dev/null 2>&1 || true); }}"
+    ).format(st=st, tmp=tmp, d=d, h=shlex.quote(sha256),
+             own=shlex.quote('%s:%s' % (owner, group)), mode=shlex.quote(str(mode)))
+
+
+def raw_check_diff(current, rendered, path, secret=False):
+    """Check-mode text: unified diff of the remote file vs the controller-rendered content.
+
+    A ``secret`` file never has its content (rendered or remote) in the output.
+    """
+    if secret:
+        return '%s: secret content hidden (no diff shown)' % path
+    diff = difflib.unified_diff((current or '').splitlines(), (rendered or '').splitlines(),
+                                fromfile='remote:' + path, tofile='controller:' + path, lineterm='')
+    return '\n'.join(diff) or '%s: no content difference' % path
 
 
 def raw_set_directives(current, directives):
@@ -629,6 +689,10 @@ class FilterModule(object):
             'raw_read_extract': raw_read_extract,
             'raw_probe_cmd': raw_probe_cmd,
             'raw_push_changed': raw_push_changed,
+            'raw_upload_changed': raw_upload_changed,
+            'raw_scp_argv': raw_scp_argv,
+            'raw_upload_finalize_cmd': raw_upload_finalize_cmd,
+            'raw_check_diff': raw_check_diff,
             'raw_push_cmd': raw_push_cmd,
             'raw_set_directives': raw_set_directives,
             'raw_changed': raw_changed,

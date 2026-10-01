@@ -113,6 +113,52 @@
               - f.stat['/usr/bin/python3'].exists
             fail_msg: "/usr/bin/python3 is missing."
 
+        # Host Agents legacy 파일 전달 헬퍼(MON-100~106, #46): 태스크는 legacy 호스트에서만 실행되므로
+        # 여기서는 헬퍼가 렌더링하는 명령·sentinel 계약만 정적으로 검증한다(실행 검증은 tests/test_host_agents.py).
+        - name: "[VERIFY-MON-100] Verify the probe command reports hash, mode and owner behind the marker"
+          ansible.builtin.assert:
+            that:
+              - "'__RAW_PROBE__' in ('/opt/x' | raw_probe_cmd)"
+              - "'sha256sum' in ('/opt/x' | raw_probe_cmd)"
+
+        - name: "[VERIFY-MON-101] Verify the read command is read-only (cat only)"
+          ansible.builtin.assert:
+            that:
+              - "'cat /opt/x' in ('/opt/x' | raw_read_cmd)"
+              - "' > ' not in ('/opt/x' | raw_read_cmd)"
+
+        - name: "[VERIFY-MON-102] Verify the check-mode diff shows controller vs remote changes"
+          ansible.builtin.assert:
+            that:
+              - "'+b=2' in ('a=1' | raw_check_diff('b=2', '/x'))"
+
+        - name: "[VERIFY-MON-103] Verify secret files never expose content in the check-mode output"
+          ansible.builtin.assert:
+            that:
+              - "'hunter2' not in ('hunter2' | raw_check_diff('hunter3', '/x', true))"
+
+        - name: "[VERIFY-MON-104] Verify the scp argv uses the resolved connection values"
+          ansible.builtin.assert:
+            that:
+              - "('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))[-1] == 'ops@h:/var/tmp/b'"
+              - "'2222' in ('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))"
+
+        - name: "[VERIFY-MON-105] Verify the finalize command compares the pinned hash before the atomic move"
+          vars:
+            _fin: "{{ '/var/tmp/b' | raw_upload_finalize_cmd('/opt/b', 'root', 'root', '0755', 'abc123') }}"
+          ansible.builtin.assert:
+            that:
+              - "'abc123' in _fin"
+              - "_fin.index('abc123') < _fin.index('mv -f')"
+
+        - name: "[VERIFY-MON-106] Verify the small-file sentinel is unchanged only when hash and mode match"
+          vars:
+            _h: "{{ 'k=v' | hash('sha256') }}"
+          ansible.builtin.assert:
+            that:
+              - "not (('__RAW_PROBE__ ' ~ _h ~ ' 640') | raw_push_changed('k=v', '0640'))"
+              - "('__RAW_PROBE__ ' ~ _h ~ ' 600') | raw_push_changed('k=v', '0640')"
+
         - name: "[VERIFY-MON-013] Verify legacy node_exporter binary is absent"
           ansible.builtin.assert:
             that:

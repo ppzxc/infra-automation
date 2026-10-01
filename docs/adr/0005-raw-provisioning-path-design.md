@@ -58,6 +58,8 @@ module의 `validate:` 절과 `atomic_move`를 대체하는 표준 헬퍼 시퀀�
 
 ### 2.4 `--check` 모드 지원 방침
 
+> Host Agents 한정 부분 개정: §5 참조 (#46).
+
 **Option A**를 채택합니다: raw 태스크는 `--check` 아래에서 자연스럽게 스킵되며, `check_mode: false`나 `ansible_check_mode` 가드를 별도로 두지 않습니다. 2.1/2.2에서 결정된 sentinel 계약과 헬퍼 설계는 이 결정으로 인해 변경되지 않습니다.
 
 현재 인벤토리(`ns0266`, `ns0332`)에는 실제 CentOS 6/7 호스트가 없어 dry-run 가시성 손실이 당장의 리스크는 아니지만, 실제 CentOS 6/7 호스트가 프로비저닝되는 시점에 재검토가 필요한 사항으로 기록합니다(§4 참고).
@@ -114,3 +116,13 @@ graph TD
   - CentOS 6/7의 raw 태스크는 `--check` 모드에서 dry-run 가시성이 전혀 없습니다(Option A). 현재는 실제 CentOS 6/7 호스트가 인벤토리에 없어 리스크가 없지만, 실제 호스트가 프로비저닝되면 재검토가 필요합니다.
   - raw 경로의 대상 호스트는 `SEC-011`(`major_version >= 7` 게이팅, module 기반 SELinux 재라벨링)의 혜택을 받지 못하므로, `restorecon -F` best-effort 호출로 보완합니다 — 완전한 대체는 아닙니다.
   - `roles/access_security`로의 범위 확장 여부는 이 ADR의 범위 밖입니다. `CONTEXT.md`의 Raw Provisioning Path 정의를 다시 그려야 하는 질문이므로, 이 맵을 재개하는 것이 아니라 향후 별도의 새 효과(effort)에서 다뤄야 합니다.
+
+---
+
+## 5. Host Agents 부분집합 확장 (ADR-0006 §2.9, #46)
+
+`roles/monitoring/tasks/raw_upload.yml`(`MON-100`~`MON-106`)이 Host Agents에 필요한 최소 헬퍼만 제공합니다. `common`/`security`의 Raw Provisioning Path 범위는 바뀌지 않습니다.
+
+- **소형 파일**: 기존 §2.2 write-temp/validate/move 헬퍼(`raw_push_cmd`)와 §2.1 sentinel(`raw_push_changed`, 소유자·그룹 포함)을 그대로 사용합니다.
+- **바이너리**: base64-over-raw 대신 컨트롤러 `delegate_to: localhost`의 `scp`(`raw_scp_argv`, `resolve_connection`의 host/port/user/임시 키)로 비특권 스테이징 경로에 올리고, `raw_upload_finalize_cmd`가 원격 `sha256sum`을 Git 고정 해시와 비교한 뒤에만 `<dest>.raw.tmp` → `mv`로 설치합니다. 불일치 시 실패하며 대상은 변하지 않습니다. 사전 sentinel은 `raw_upload_changed`(고정 해시 + 모드 + 소유자:그룹)입니다.
+- **check 모드 (§2.4 부분 개정, Host Agents 한정)**: 읽기 전용 프로브(`MON-100`/`MON-101`)는 `check_mode: false`로 실행하고, 변경 raw 태스크는 스킵하며, 컨트롤러 렌더링본 vs 원격 diff를 debug로 출력합니다(`raw_check_diff`). 시크릿 env 파일은 원격 내용을 읽지도 출력하지도 않습니다. `common`/`security`는 계속 Option A입니다.
