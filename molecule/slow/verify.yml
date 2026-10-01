@@ -135,13 +135,16 @@
         - name: "[VERIFY-MON-103] Verify secret files never expose content in the check-mode output"
           ansible.builtin.assert:
             that:
-              - "'hunter2' not in ('hunter2' | raw_check_diff('hunter3', '/x', true))"
+              - "'hunter2' not in ('/x' | raw_secret_notice(true))"
+              - "('/x' | raw_secret_notice(true)).endswith('would change')"
 
         - name: "[VERIFY-MON-104] Verify the scp argv uses the resolved connection values"
           ansible.builtin.assert:
             that:
               - "('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))[-1] == 'ops@h:/var/tmp/b'"
               - "'2222' in ('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))"
+              - "'/k' in ('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))"
+              - "'-i' in ('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))"
 
         - name: "[VERIFY-MON-105] Verify the finalize command compares the pinned hash before the atomic move"
           vars:
@@ -158,6 +161,23 @@
             that:
               - "not (('__RAW_PROBE__ ' ~ _h ~ ' 640') | raw_push_changed('k=v', '0640'))"
               - "('__RAW_PROBE__ ' ~ _h ~ ' 600') | raw_push_changed('k=v', '0640')"
+
+        - name: "[VERIFY-MON-107] Verify the helper reports the planned binary upload only in check mode"
+          vars:
+            _raw_tasks: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/raw_upload.yml') }}"
+          ansible.builtin.assert:
+            that:
+              - "'[MON-107]' in _raw_tasks"
+              - "'would upload via scp and install' in _raw_tasks"
+
+        - name: "[VERIFY-MON-108] Verify the helper cleans the staged upload in a rescue that keeps the failure"
+          vars:
+            _raw_tasks: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/raw_upload.yml') }}"
+          ansible.builtin.assert:
+            that:
+              - "'rescue:' in _raw_tasks"
+              - "'[MON-108]' in _raw_tasks"
+              - "'failed_when: true' in _raw_tasks"
 
         - name: "[VERIFY-MON-013] Verify legacy node_exporter binary is absent"
           ansible.builtin.assert:

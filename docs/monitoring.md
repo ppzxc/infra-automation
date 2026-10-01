@@ -154,7 +154,9 @@
 | `MON-100` | `Probe remote hash and mode of the target file (raw, read-only)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `changed_when: false`, `check_mode: false` (ADR-0005 sentinel 입력) |
 | `MON-101` | `Read the remote file for the check-mode diff (raw, read-only, never for secrets)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 읽기 전용, `check_mode: false`, check 모드·비시크릿 파일에서만 실행 |
 | `MON-102` | `Show controller-rendered vs remote diff in check mode (secret files excluded)` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (unified diff 출력, 시크릿 env 제외) |
-| `MON-103` | `Report a secret file change in check mode without its content` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (내용 없이 "hidden"만 출력) |
-| `MON-104` | `Upload the pinned binary to a staging path with scp from the controller` | `ansible.builtin.command` | legacy_el6, legacy_el7 | 원격 sha256/mode sentinel 불일치 시에만 실행, check 모드 스킵, `no_log` (임시 키 경로 비노출) |
+| `MON-103` | `Report a secret file change in check mode without its content` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (내용 없이 변경 예정 여부만 출력) |
+| `MON-104` | `Upload the pinned binary to a staging path with scp from the controller` | `ansible.builtin.command` | legacy_el6, legacy_el7 | 원격 sha256/mode sentinel 불일치 시에만 실행, check 모드 스킵, 실패 시 진단을 위해 `no_log` 없음(키 파일 경로만 노출, 내용 아님) |
 | `MON-105` | `Verify the staged binary against the pinned SHA256 and install it atomically (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 원격 sha256/mode sentinel 불일치 시에만 실행, 해시 불일치 시 실패(대상 불변), check 모드 스킵 |
 | `MON-106` | `Push the small file via write-temp/validate/move (raw, base64)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | ADR-0005 sentinel (`raw_push_changed`), check 모드 스킵, 시크릿은 `no_log` |
+| `MON-107` | `Report the planned binary upload in check mode` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (check 모드에서만, 변경 예정 여부 출력) |
+| `MON-108` | `Remove the staged upload after a failed upload or install (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | rescue 전용 (`rm -f` 스테이징 파일 후 실패 유지, `changed_when`/`failed_when` 선언) |

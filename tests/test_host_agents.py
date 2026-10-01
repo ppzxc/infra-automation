@@ -763,15 +763,20 @@ def _run_raw_upload(tmp_path, vars_, check=False, scp_ok=True):
     return res, log
 
 
-def _bin_vars(tmp_path, content=b"payload-bin"):
+def _owner_group():
     import getpass
     import grp
     import os
+    return getpass.getuser(), grp.getgrgid(os.getgid()).gr_name
+
+
+def _bin_vars(tmp_path, content=b"payload-bin"):
+    own, grp_ = _owner_group()
     src = tmp_path / "cache-bin"
     src.write_bytes(content)
     return {"_raw_src": str(src), "_raw_dest": str(tmp_path / "installed"),
-            "_raw_sha256": hashlib.sha256(content).hexdigest(), "_raw_owner": getpass.getuser(),
-            "_raw_group": grp.getgrgid(os.getgid()).gr_name, "_raw_mode": "0755", "_raw_handler": "H"}
+            "_raw_sha256": hashlib.sha256(content).hexdigest(), "_raw_owner": own,
+            "_raw_group": grp_, "_raw_mode": "0755", "_raw_handler": "H"}
 
 
 def test_raw_upload_binary_uses_resolved_connection_and_is_idempotent(tmp_path):
@@ -781,7 +786,6 @@ def test_raw_upload_binary_uses_resolved_connection_and_is_idempotent(tmp_path):
     assert (tmp_path / "installed").read_bytes() == b"payload-bin"
     argline = log.read_text()
     assert "-P 2222" in argline and "127.0.0.1:" in argline and "/tmp/secret-key-path" in argline
-    assert "secret-key-path" not in res.stdout  # no_log hides the key path
     log.unlink()
     res2, log2 = _run_raw_upload(tmp_path, v)
     assert res2.returncode == 0 and "changed=0" in res2.stdout, res2.stdout
@@ -802,13 +806,11 @@ def test_raw_upload_check_mode_probes_but_never_uploads(tmp_path):
     res, log = _run_raw_upload(tmp_path, v, check=True)
     assert res.returncode == 0, res.stdout + res.stderr
     assert not log.exists() and not (tmp_path / "installed").exists()
+    assert "would upload via scp and install" in res.stdout
 
 
 def test_raw_small_file_check_mode_prints_diff_but_never_secret_content(tmp_path):
-    import getpass
-    import grp
-    import os
-    own, grp_ = getpass.getuser(), grp.getgrgid(os.getgid()).gr_name
+    own, grp_ = _owner_group()
     plain, secret = tmp_path / "app.conf", tmp_path / "secrets.env"
     plain.write_text("level=old\n")
     secret.write_text("TOKEN=old-secret-value\n")
@@ -821,19 +823,32 @@ def test_raw_small_file_check_mode_prints_diff_but_never_secret_content(tmp_path
                                             _raw_secret=True), check=True)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "old-secret-value" not in res.stdout and "new-secret-value" not in res.stdout
-    assert "secret content hidden" in res.stdout
+    assert "secret content hidden" in res.stdout and "would change" in res.stdout
     assert secret.read_text() == "TOKEN=old-secret-value\n"
 
 
 def test_raw_small_file_push_is_idempotent_and_notifies(tmp_path):
-    import getpass
-    import grp
-    import os
+    own, grp_ = _owner_group()
     dest = tmp_path / "app.conf"
-    v = {"_raw_owner": getpass.getuser(), "_raw_group": grp.getgrgid(os.getgid()).gr_name, "_raw_mode": "0640",
+    v = {"_raw_owner": own, "_raw_group": grp_, "_raw_mode": "0640",
          "_raw_dest": str(dest), "_raw_content": "k=v\n", "_raw_handler": "H"}
     res, _ = _run_raw_upload(tmp_path, v)
     assert res.returncode == 0, res.stdout + res.stderr
     assert dest.read_text() == "k=v\n" and "handler-ran" in res.stdout
     res2, _ = _run_raw_upload(tmp_path, v)
     assert "changed=0" in res2.stdout and "handler-ran" not in res2.stdout
+
+
+def test_raw_upload_cleans_staging_when_scp_fails(tmp_path):
+    v = _bin_vars(tmp_path)
+    res, _ = _run_raw_upload(tmp_path, v, scp_ok=False)
+    assert res.returncode != 0
+    assert "MON-108" in res.stdout and not (tmp_path / "installed").exists()
+    assert not list(__import__("pathlib").Path("/var/tmp").glob("installed.*.raw.upload"))
+
+
+def test_raw_upload_password_only_connection_fails_clearly(tmp_path):
+    v = _bin_vars(tmp_path)
+    v["ansible_ssh_private_key_file"] = ""
+    res, _ = _run_raw_upload(tmp_path, v)
+    assert res.returncode != 0 and "private key" in (res.stdout + res.stderr)

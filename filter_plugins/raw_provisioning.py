@@ -110,23 +110,25 @@ def raw_push_cmd(content, dest, owner, group, mode, validate):
 _SAFE_REMOTE_PATH = re.compile(r'^/[A-Za-z0-9._/+-]+$')
 
 
-def raw_scp_argv(src, dest, host, port, user, key=None):
+def raw_scp_argv(src, dest, host, port, user, key):
     """argv for a controller-side ``scp`` of ``src`` to ``user@host:dest`` (Host Agents binary upload).
 
     Used with ``ansible.builtin.command`` ``argv`` so nothing is shell-interpreted locally.
     ``dest`` is also parsed by the remote side (legacy scp protocol), so it must be a plain
     absolute path. The host key check is relaxed like the connection probe and ansible.cfg.
+    scp runs with BatchMode, so a key is required; a password-only connection fails here with
+    a clear message instead of hanging on a prompt.
     """
+    if not key:
+        raise ValueError('scp upload needs the resolved SSH private key (password-only connections are unsupported)')
     if not _SAFE_REMOTE_PATH.match(str(dest)) or '..' in str(dest).split('/'):
         raise ValueError('unsafe remote scp path: %r' % (dest,))
     host = str(host)
     target = '[%s]' % host if ':' in host else host
-    argv = ['scp', '-q', '-B', '-o', 'BatchMode=yes',
+    return ['scp', '-q', '-B', '-o', 'BatchMode=yes',
             '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
-            '-P', str(int(port))]
-    if key:
-        argv += ['-i', str(key), '-o', 'IdentitiesOnly=yes']
-    return argv + [str(src), '%s@%s:%s' % (user, target, dest)]
+            '-P', str(int(port)), '-i', str(key), '-o', 'IdentitiesOnly=yes',
+            str(src), '%s@%s:%s' % (user, target, dest)]
 
 
 def raw_upload_finalize_cmd(stage, dest, owner, group, mode, sha256):
@@ -149,16 +151,16 @@ def raw_upload_finalize_cmd(stage, dest, owner, group, mode, sha256):
              own=shlex.quote('%s:%s' % (owner, group)), mode=shlex.quote(str(mode)))
 
 
-def raw_check_diff(current, rendered, path, secret=False):
-    """Check-mode text: unified diff of the remote file vs the controller-rendered content.
-
-    A ``secret`` file never has its content (rendered or remote) in the output.
-    """
-    if secret:
-        return '%s: secret content hidden (no diff shown)' % path
+def raw_check_diff(current, rendered, path):
+    """Check-mode text: unified diff of the remote file vs the controller-rendered content."""
     diff = difflib.unified_diff((current or '').splitlines(), (rendered or '').splitlines(),
                                 fromfile='remote:' + path, tofile='controller:' + path, lineterm='')
     return '\n'.join(diff) or '%s: no content difference' % path
+
+
+def raw_secret_notice(path, changed):
+    """Check-mode text for a secret file: whether it would change, never its content."""
+    return '%s: secret content hidden (no diff shown); would %s' % (path, 'change' if changed else 'stay unchanged')
 
 
 def raw_set_directives(current, directives):
@@ -693,6 +695,7 @@ class FilterModule(object):
             'raw_scp_argv': raw_scp_argv,
             'raw_upload_finalize_cmd': raw_upload_finalize_cmd,
             'raw_check_diff': raw_check_diff,
+            'raw_secret_notice': raw_secret_notice,
             'raw_push_cmd': raw_push_cmd,
             'raw_set_directives': raw_set_directives,
             'raw_changed': raw_changed,
