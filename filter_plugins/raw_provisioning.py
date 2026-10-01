@@ -196,6 +196,53 @@ def raw_rm_cmd(path):
                    PATH=shlex.quote(path), MARK=CHANGED_MARKER)
 
 
+def raw_dir_cmd(path, owner, group, mode):
+    """Ensure directory ``path`` exists with owner:group and mode; echo the marker if anything changed."""
+    return _render(
+        'p=@P@; [ -d "$p" ] && [ "$(stat -c \'%a %U:%G\' "$p" 2>/dev/null)" = @WANT@ ] || '
+        '{ mkdir -p "$p" && chown @OWN@ "$p" && chmod @MODE@ "$p" && echo @MARK@; }',
+        P=shlex.quote(path), OWN=shlex.quote('%s:%s' % (owner, group)), MODE=shlex.quote(str(mode)),
+        WANT=shlex.quote('%s %s:%s' % (_mode_octal(mode), owner, group)), MARK=CHANGED_MARKER)
+
+
+def raw_switch_binary_cmd(link, new_path, agent_dir, binary):
+    """Atomically point ``link`` at ``new_path`` (``switch_binary.yml`` equivalent for the raw path).
+
+    A pre-existing regular-file binary is preserved once as ``<agent_dir>/legacy-<binary>`` before the
+    first switch. Afterwards only the new version and the previous one (the old link target, or the
+    newest other directory on a re-run) are kept. The marker is echoed only when the link or the
+    preserved copy changed (pruning alone must not restart the daemon).
+    """
+    return _render(
+        'link=@LINK@; new=@NEW@; dir=@DIR@; bin=@BIN@; c=0; cur=$(readlink "$link" 2>/dev/null); nd=$(dirname "$new"); '
+        'if [ -e "$link" ] && [ ! -L "$link" ] && [ ! -e "$dir/legacy-$bin" ]; then '
+        'cp -p "$link" "$dir/legacy-$bin" || exit 1; c=1; fi; '
+        'if [ "$cur" != "$new" ]; then ln -sfn "$new" "$link.raw.tmp" && mv -T "$link.raw.tmp" "$link" || exit 1; c=1; fi; '
+        'if [ -n "$cur" ] && [ "$(dirname "$cur")" != "$nd" ] && [ -d "$(dirname "$cur")" ]; then prev=$(dirname "$cur"); '
+        'else prev=; for d in $(ls -1dt "$dir"/*/ 2>/dev/null); do d=${d%/}; [ "$d" = "$nd" ] || { prev=$d; break; }; done; fi; '
+        'for d in "$dir"/*/; do d=${d%/}; [ -d "$d" ] || continue; '
+        '[ "$d" = "$nd" ] || [ "$d" = "$prev" ] || rm -rf "$d"; done; '
+        '[ "$c" = 0 ] || echo @MARK@; true',
+        LINK=shlex.quote(link), NEW=shlex.quote(new_path), DIR=shlex.quote(agent_dir),
+        BIN=shlex.quote(binary), MARK=CHANGED_MARKER)
+
+
+EXISTS_MARKER = '__RAW_EXISTS__'
+
+
+def raw_exists_cmd(paths):
+    """Print '__RAW_EXISTS__ <path>' for every existing path (read-only)."""
+    return ('for p in %s; do [ -e "$p" ] && echo "%s $p"; done; true'
+            % (' '.join(shlex.quote(p) for p in paths), EXISTS_MARKER))
+
+
+def raw_exists_results(stdout, paths):
+    """``stat`` look-alike results (``item`` + ``stat.exists``) so raw hosts reuse the modern derivations."""
+    found = {ln.split(None, 1)[1].strip() for ln in (stdout or '').splitlines()
+             if ln.startswith(EXISTS_MARKER + ' ')}
+    return [{'item': p, 'stat': {'exists': p in found}} for p in paths]
+
+
 def raw_group_cmd(name, gid=None):
     """Create the group (or fix its gid) only when needed; echo the marker if it did."""
     n = shlex.quote(name)
@@ -704,6 +751,10 @@ class FilterModule(object):
             'raw_authorized_key_cmd': raw_authorized_key_cmd,
             'raw_sysctl_directives': raw_sysctl_directives,
             'raw_limits_directives': raw_limits_directives,
+            'raw_dir_cmd': raw_dir_cmd,
+            'raw_switch_binary_cmd': raw_switch_binary_cmd,
+            'raw_exists_cmd': raw_exists_cmd,
+            'raw_exists_results': raw_exists_results,
             'raw_rm_cmd': raw_rm_cmd,
             'raw_yum_cmd': raw_yum_cmd,
             'raw_sysctl_live_cmd': raw_sysctl_live_cmd,

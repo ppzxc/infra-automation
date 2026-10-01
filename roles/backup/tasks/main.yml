@@ -11,7 +11,9 @@
   tags: [always]
 
 - name: "Deliver restic and resticprofile"
-  when: enable_backup | bool
+  when:
+    - enable_backup | bool
+    - host_agents_os_path == 'modern'
   tags: [agents_install, backup]
   block:
   - name: "[BAK-003] Deliver pinned restic binary"
@@ -57,6 +59,20 @@
     loop: "{{ backup_conditional_paths }}"
     register: _backup_conditional
     check_mode: false
+    when: host_agents_os_path == 'modern'
+
+  - name: "[BAK-201] Check which conditional standard backup paths exist (raw, read-only)"
+    ansible.builtin.raw: "{{ backup_conditional_paths | raw_exists_cmd }}"
+    register: _backup_conditional_raw
+    changed_when: false
+    check_mode: false
+    when: host_agents_os_path == 'legacy_el7'
+
+  - name: "[BAK-202] Present the raw probe like the modern stat results"
+    ansible.builtin.set_fact:
+      _backup_conditional:
+        results: "{{ _backup_conditional_raw.stdout | default('') | raw_exists_results(backup_conditional_paths) }}"
+    when: host_agents_os_path == 'legacy_el7'
 
   - name: "[BAK-012] Derive repository, source list, excludes and schedule"
     ansible.builtin.set_fact:
@@ -67,7 +83,7 @@
             + (_backup_conditional.results | selectattr('stat.exists') | map(attribute='item') | list)) | unique | list }}
       backup_excludes: "{{ (backup_standard_excludes + host_agents_inputs.backup_exclude_paths) | unique | list }}"
       backup_schedule_offset: "{{ backup_schedule_window_minutes | int | random(seed=inventory_hostname) }}"
-      backup_use_cron: "{{ (host_agents_os_family == 'RedHat' and host_agents_os_major_version == '8') or (ansible_service_mgr | default('systemd')) != 'systemd' }}"
+      backup_use_cron: "{{ host_agents_os_path == 'legacy_el7' or (host_agents_os_family == 'RedHat' and host_agents_os_major_version == '8') or (ansible_service_mgr | default('systemd')) != 'systemd' }}"
 
   - name: "[BAK-013] Derive the scheduled hour/minute and run command"
     ansible.builtin.set_fact:
@@ -77,85 +93,89 @@
         {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path }} -n {{ backup_profile_name }} unlock;
         {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path }} -n {{ backup_profile_name }} backup
 
-  - name: "[BAK-020] Ensure restic config directory exists (0700)"
-    ansible.builtin.file:
-      path: "{{ backup_config_dir }}"
-      state: directory
-      owner: root
-      group: root
-      mode: '0700'
+  - name: "Deploy backup files (modern path)"
+    when: host_agents_os_path == 'modern'
+    block:
+      - name: "[BAK-020] Ensure restic config directory exists (0700)"
+        ansible.builtin.file:
+          path: "{{ backup_config_dir }}"
+          state: directory
+          owner: root
+          group: root
+          mode: '0700'
 
-  - name: "[BAK-021] Ensure restic cache directory exists (0700)"
-    ansible.builtin.file:
-      path: "{{ backup_cache_dir }}"
-      state: directory
-      owner: root
-      group: root
-      mode: '0700'
+      - name: "[BAK-021] Ensure restic cache directory exists (0700)"
+        ansible.builtin.file:
+          path: "{{ backup_cache_dir }}"
+          state: directory
+          owner: root
+          group: root
+          mode: '0700'
 
-  - name: "[BAK-022] Deploy restic credentials env file (0600, no_log, no diff)"
-    ansible.builtin.template:
-      src: restic.env.j2
-      dest: "{{ backup_env_path }}"
-      owner: root
-      group: root
-      mode: '0600'
-    no_log: true
-    diff: false
+      - name: "[BAK-022] Deploy restic credentials env file (0600, no_log, no diff)"
+        ansible.builtin.template:
+          src: restic.env.j2
+          dest: "{{ backup_env_path }}"
+          owner: root
+          group: root
+          mode: '0600'
+        no_log: true
+        diff: false
 
-  - name: "[BAK-023] Deploy restic repository password file (0600, no_log, no diff)"
-    ansible.builtin.copy:
-      content: "{{ host_agents_secrets.restic_password }}"
-      dest: "{{ backup_password_path }}"
-      owner: root
-      group: root
-      mode: '0600'
-    no_log: true
-    diff: false
+      - name: "[BAK-023] Deploy restic repository password file (0600, no_log, no diff)"
+        ansible.builtin.copy:
+          content: "{{ host_agents_secrets.restic_password }}"
+          dest: "{{ backup_password_path }}"
+          owner: root
+          group: root
+          mode: '0600'
+        no_log: true
+        diff: false
 
-  - name: "[BAK-025] Ensure backup result directories exist (log 0755, state 0755)"
-    ansible.builtin.file:
-      path: "{{ item }}"
-      state: directory
-      owner: root
-      group: root
-      mode: '0755'
-    loop:
-      - "{{ backup_log_dir }}"
-      - "{{ backup_state_dir }}"
+      - name: "[BAK-025] Ensure backup result directories exist (log 0755, state 0755)"
+        ansible.builtin.file:
+          path: "{{ item }}"
+          state: directory
+          owner: root
+          group: root
+          mode: '0755'
+        loop:
+          - "{{ backup_log_dir }}"
+          - "{{ backup_state_dir }}"
 
-  - name: "[BAK-026] Deploy the backup result hook (POSIX sh, one JSON line per run)"
-    ansible.builtin.copy:
-      src: host-agents-backup-event.sh
-      dest: "{{ backup_event_script_path }}"
-      owner: root
-      group: root
-      mode: '0755'
+      - name: "[BAK-026] Deploy the backup result hook (POSIX sh, one JSON line per run)"
+        ansible.builtin.copy:
+          src: host-agents-backup-event.sh
+          dest: "{{ backup_event_script_path }}"
+          owner: root
+          group: root
+          mode: '0755'
 
-  - name: "[BAK-027] Deploy logrotate configuration for backup.jsonl"
-    ansible.builtin.template:
-      src: host-agents-backup.logrotate.j2
-      dest: "{{ backup_logrotate_path }}"
-      owner: root
-      group: root
-      mode: '0644'
+      - name: "[BAK-027] Deploy logrotate configuration for backup.jsonl"
+        ansible.builtin.template:
+          src: host-agents-backup.logrotate.j2
+          dest: "{{ backup_logrotate_path }}"
+          owner: root
+          group: root
+          mode: '0644'
 
-  # 새 resticprofile 바이너리로 렌더링본을 검증한 뒤에만 설정이 교체된다(실패 시 기존 설정 불변).
-  - name: "[BAK-024] Deploy resticprofile profile (validated with resticprofile show)"
-    ansible.builtin.template:
-      src: profiles.yaml.j2
-      dest: "{{ backup_profile_path }}"
-      owner: root
-      group: root
-      mode: '0600'
-      # validate가 넘기는 임시 파일은 확장자가 없어 resticprofile이 찾지 못하므로 .yaml 사본으로 검증한다.
-      validate: >-
-        /bin/sh -c 'cp "$1" "$1.yaml" && {{ host_agents_install_root }}/resticprofile/{{ host_agents_versions['default'].resticprofile }}/resticprofile
-        -f yaml -c "$1.yaml" -n {{ backup_profile_name }} show >/dev/null; rc=$?; rm -f "$1.yaml"; exit $rc' sh %s
-
+      # 새 resticprofile 바이너리로 렌더링본을 검증한 뒤에만 설정이 교체된다(실패 시 기존 설정 불변).
+      - name: "[BAK-024] Deploy resticprofile profile (validated with resticprofile show)"
+        ansible.builtin.template:
+          src: profiles.yaml.j2
+          dest: "{{ backup_profile_path }}"
+          owner: root
+          group: root
+          mode: '0600'
+          # validate가 넘기는 임시 파일은 확장자가 없어 resticprofile이 찾지 못하므로 .yaml 사본으로 검증한다.
+          validate: >-
+            /bin/sh -c 'cp "$1" "$1.yaml" && {{ host_agents_install_root }}/resticprofile/{{ host_agents_versions['default'].resticprofile }}/resticprofile
+            -f yaml -c "$1.yaml" -n {{ backup_profile_name }} show >/dev/null; rc=$?; rm -f "$1.yaml"; exit $rc' sh %s
 
 - name: "Enable backup schedule"
-  when: enable_backup | bool
+  when:
+    - enable_backup | bool
+    - host_agents_os_path == 'modern'
   tags: [agents_install, backup]
   block:
   - name: "[BAK-030] Switch restic install symlink to the delivered version"
@@ -254,6 +274,15 @@
       - _backup_repo_probe is not skipped
       - _backup_repo_probe.rc != 0
 
+# CentOS 7 (legacy_el7): 같은 템플릿을 raw 경로로 적용한다(legacy_el7.yml, 태그는 파일 안의 블록이 지정).
+- name: Apply backup on CentOS 7 over the raw path
+  ansible.builtin.import_tasks: legacy_el7.yml
+  when: host_agents_os_path == 'legacy_el7'
+
+- name: "Emit the inventory registration event"
+  when: enable_backup | bool
+  tags: [agents_install, backup]
+  block:
   # Deploy 한정(agents_config에 속하지 않음): Config 재적용은 등록 이벤트를 만들지 않는다. 마지막 태스크이므로 앞 단계가 모두 성공해야 등록된다.
   - name: "[BAK-060] Assert the controller OpenObserve ingestion token exists"
     ansible.builtin.assert:

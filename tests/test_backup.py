@@ -127,7 +127,7 @@ def _schedule(tmp_path, host):
     tasks = [dict(t, **{}) for t in tasks]
     for t in tasks:                                           # stat results / OS facts are inputs of the real run
         t.pop("when", None)
-    pre = [{"ansible.builtin.set_fact": {"_backup_conditional": {"results": []}, "ansible_service_mgr": "systemd"}}]
+    pre = [{"ansible.builtin.set_fact": {"_backup_conditional": {"results": []}, "ansible_service_mgr": "systemd", "host_agents_os_path": "modern"}}]
     out = tmp_path / "out.json"
     tasks.append({"ansible.builtin.copy": {"dest": str(out), "content": "{{ {'h': backup_schedule_hour, 'm': backup_schedule_minute} | to_json }}"}})
     vars_ = _vars(inventory_hostname=host, host_agents_os_family="RedHat", host_agents_os_major_version="9",

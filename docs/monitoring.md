@@ -55,7 +55,7 @@
 - **호스트 집합**: `target_hosts:&servers` (축소만 가능, `servers` 밖으로 확장 불가). 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
 - **롤아웃**: `serial: 25%`, `gather_facts: false`. 프로비저닝 assert·OS 프로브·fact 수집·입력 검증은 모두 역할 안에서 수행됩니다.
 - **태그**: 설치 단계 `agents_install`, 설정/스케줄 단계 `agents_config`, 역할 공통 `otel`(향후 `backup`). 사전 단계(`MON-020~035`)는 `always`라 `--tags agents_config`에서도 수행됩니다. Deploy = 태그 없음, Config = `--tags agents_config`.
-- **사전 단계**: `_is_already_provisioned`가 아니면 즉시 실패("site.yml 먼저 실행") → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. legacy 경로는 후속 티켓 전까지 경고 후 해당 호스트를 건너뜁니다.
+- **사전 단계**: `_is_already_provisioned`가 아니면 즉시 실패("site.yml 먼저 실행") → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7)은 raw 경로로 적용되고(§3-4), `legacy_el6`은 후속 티켓 전까지 경고 후 해당 호스트를 건너뜁니다.
 - **OpenBao 입력**: `hosts/<host>/agents`(호스트별)와 `agents/openobserve`, `agents/rustfs`(공용, `run_once`)를 컨트롤러에서 조회합니다.
 
   | 키 (`hosts/<host>/agents`) | 필수 | 용도 |
@@ -96,6 +96,32 @@
 
 ---
 
+## 3-4. CentOS 7 (`legacy_el7`) raw 경로와 카나리 런북 (`MON-2xx`, `BAK-2xx`)
+
+- **경로**: OS 프로브가 `legacy_el7`로 분류한 호스트는 AnsiballZ 모듈(python3)을 쓰지 않고 `tasks/legacy_el7.yml`(monitoring, backup 각각)을 raw 경로로 실행합니다. 같은 템플릿을 컨트롤러에서 렌더링(`lookup('template')`)해 ADR-0005 헬퍼(write-temp → validate → mv, sentinel)로 올리므로 설정·프로파일·cron 내용은 modern과 동일합니다(바이트 단위 테스트). `legacy_el6`은 여전히 건너뜁니다(`MON-025/028`).
+- **바이너리**: 컨트롤러가 pinned tarball을 검증·캐시한 뒤 `scp`로 업로드하고, 원격 `sha256sum`을 *추출 바이너리의* Git 고정 해시와 비교합니다(`MON-104/105`). 버전 디렉터리에서 스모크 테스트(`MON-211`: otelcol `--version`, restic·resticprofile `version`)를 통과해야만 설정 검증과 symlink 교체로 넘어갑니다. 실패하면 그 호스트만 실패하고 기존 symlink(직전 버전)가 유지됩니다.
+- **컬렉터 유닛**: root 실행 + `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome`, `PrivateTmp`(CentOS 7의 systemd 219가 지원하는 항목만). 유닛 변경 시에만 `daemon-reload`, 이후 `is-enabled`/`is-active` sentinel로 `enable`/`start`(`enable --now` 미사용).
+- **백업**: `/etc/cron.d/host-agents-backup`, repo 프로브/`init`은 raw, `backup.jsonl` 증적·logrotate·훅은 modern과 동일합니다. 태그 분리(`agents_install`/`agents_config`)와 Deploy 한정(init, 등록 이벤트)도 동일합니다.
+- **check 모드**: 읽기 전용 프로브만 실행되고 변경 raw 태스크는 건너뜁니다. 비시크릿 파일은 컨트롤러 렌더링본과 원격의 diff를, 시크릿 파일은 변경 예정 여부만 출력합니다.
+- **정리 범위**: `node_exporter` 레거시 정리(`MON-011~015`)는 legacy 경로에 포함하지 않습니다(CentOS 7에는 이 역할로 설치된 적이 없음).
+
+### 카나리 런북 (첫 실제 CentOS 7 호스트)
+
+CentOS 7 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 버전 상향 때도 같은 절차를 씁니다.
+
+1. 사전 확인(컨트롤러에서): 대상이 `site.yml`로 프로비저닝됐고, 호스트에 `sha256sum`, `systemctl`, `/etc/cron.d`가 있으며 접속 사용자가 sudo를 쓸 수 있는지 확인합니다. 접속은 개인키 기반이어야 합니다(비밀번호 전용 연결은 `scp` 단계에서 명확한 메시지로 실패).
+2. `scp` 서브시스템 확인: 컨트롤러의 OpenSSH 9+는 `scp`가 SFTP로 동작합니다. 대상 `sshd_config`에서 `Subsystem sftp`가 꺼져 있으면 모든 업로드가 실패합니다(`MON-104`). 이 경우 대상에서 sftp를 켜거나 컨트롤러에 구버전 프로토콜 `scp -O`를 쓰는 별도 릴리스를 사용해야 합니다(결과를 이 런북에 기록).
+3. dry-run: `ansible-playbook playbooks/host_agents.yml -e target_hosts=<host> --check --diff`. `MON-102/103/107`의 diff와 업로드 예정 보고를 확인합니다(시크릿 내용은 출력되지 않아야 함).
+4. 배포: 같은 명령에서 `--check --diff`를 뺍니다. 확인 항목:
+   - `systemctl status otelcol-contrib`가 active, `/usr/local/bin/otelcol-contrib --version`이 고정 버전, `/opt/host-agents/<agent>/`에 현재+직전만 남음
+   - `/etc/cron.d/host-agents-backup` 존재, `resticprofile ... show` 성공, repo가 생성되고 `job=inventory` 이벤트가 `backup_logs`에 도착
+   - OpenObserve에 `host.name=<host>`, `os.description=CentOS Linux 7 (Core)` 로그/메트릭 도착, `security_logs` 스트림에 `/var/log/secure` 포함
+   - 수동 백업 1회(`resticprofile -n default backup`) 후 `backup.jsonl`에 한 줄이 쌓이고 `backup_logs`에 수집됨
+5. 재실행(멱등): 같은 명령을 다시 실행해 `changed=0`(핸들러 재시작 없음)을 확인합니다.
+6. 이상 없으면 `target_hosts`를 넓혀 나머지 CentOS 7 호스트에 확장합니다(`serial: 25%`). 스모크 테스트 실패(예: 구형 glibc/커널)는 해당 호스트만 실패하며 직전 버전이 계속 동작합니다. 롤백은 버전 표 revert PR 후 재실행입니다.
+
+---
+
 ## 4. 태스크 매트릭스 (Task Matrix)
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
@@ -116,10 +142,10 @@
 | `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수 |
 | `MON-023` | `Check /usr/bin/python3 exists on modern path (raw, read-only)` | `ansible.builtin.raw` | modern | `changed_when: false`, `check_mode: false` |
 | `MON-024` | `Gather facts on modern path` | `ansible.builtin.setup` | modern | 읽기 전용 |
-| `MON-025` | `Warn that legacy path hosts are skipped until their tasks land` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 |
+| `MON-025` | `Warn that legacy_el6 hosts are skipped until their tasks land` | `ansible.builtin.debug` | legacy_el6 | 읽기 전용 |
 | `MON-026` | `Install python3 on modern path when absent` | `ansible.builtin.raw` | modern | 부재 시에만 실행 (check 모드 스킵) |
 | `MON-027` | `Assert python3 is available on modern path` | `ansible.builtin.assert` | modern | 읽기 전용 |
-| `MON-028` | `End role for legacy path hosts` | `ansible.builtin.meta` | legacy_el6, legacy_el7 | 읽기 전용 |
+| `MON-028` | `End role for legacy_el6 hosts` | `ansible.builtin.meta` | legacy_el6 | 읽기 전용 |
 | `MON-030` | `Fetch agents KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)` | `ansible.builtin.uri` | All | GET, `check_mode: false`, `no_log` |
 | `MON-031` | `Assert OpenBao answered every agents lookup` | `ansible.builtin.assert` | All | 읽기 전용 (오류 시 check 모드에서도 실패) |
 | `MON-032` | `Resolve agents KV contents (host + shared)` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
@@ -160,3 +186,18 @@
 | `MON-106` | `Push the small file via write-temp/validate/move (raw, base64)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | ADR-0005 sentinel (`raw_push_changed`), check 모드 스킵, 시크릿은 `no_log` |
 | `MON-107` | `Report the planned binary upload in check mode` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (check 모드에서만, 변경 예정 여부 출력) |
 | `MON-108` | `Remove the staged upload after a failed upload or install (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | rescue 전용 (`rm -f` 스테이징 파일 후 실패 유지, `changed_when`/`failed_when` 선언) |
+| `MON-200` | `Assert OpenObserve endpoint is configured without a trailing slash` | `ansible.builtin.assert` | legacy_el7 | 읽기 전용 (MON-060과 같은 조건) |
+| `MON-201` | `Detect rsyslog (raw, read-only; journald is collected only where rsyslog is absent)` | `ansible.builtin.raw` | legacy_el7 | `changed_when: false`, `check_mode: false` (`/usr/sbin`·`/sbin`) |
+| `MON-202` | `Decide whether the journald receiver is needed` | `ansible.builtin.set_fact` | legacy_el7 | 순수 함수 |
+| `MON-203` | `Ensure otelcol persistent storage directory exists (raw)` | `ansible.builtin.raw` | legacy_el7 | `raw_dir_cmd` sentinel (경로·모드·소유자 일치 시 `ok`) |
+| `MON-204` | `Ensure otelcol config and secrets directories exist (raw)` | `ansible.builtin.raw` | legacy_el7 | `raw_dir_cmd` sentinel (`0750`/`0700`, root) |
+| `MON-206` | `Deploy otelcol secrets env file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`), `_raw_secret`: check 모드에서도 내용 비노출, `no_log` |
+| `MON-207` | `Deploy OpenTelemetry Collector configuration (raw, validated with the new binary)` | `ansible.builtin.import_tasks` | legacy_el7 | sentinel + 새 버전 바이너리 `validate`(임시 파일 검증 후 mv). modern과 같은 템플릿 렌더링 결과 |
+| `MON-208` | `Deliver pinned OpenTelemetry Collector Contrib binary (raw)` | `ansible.builtin.include_tasks` | legacy_el7 | 컨트롤러 캐시 → scp 업로드, 원격 sha256sum(추출 바이너리 해시) 불일치 시에만 실행 (`MON-040`~`043`, `MON-100`~`108`, `MON-210`~`211`) |
+| `MON-209` | `Switch otelcol-contrib install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el7 | 설정 검증 뒤 `MON-212` (스모크 테스트 실패 시 도달하지 않음) |
+| `MON-210` | `Ensure the versioned install directory exists (raw)` | `ansible.builtin.raw` | legacy_el7 | `raw_dir_cmd` sentinel (`0755`) |
+| `MON-211` | `Smoke-test the delivered binary on the host (raw)` | `ansible.builtin.raw` | legacy_el7 | `<binary> --version`(restic류는 `version`) 비정상 종료 시 호스트 실패, symlink 불변. check 모드 스킵 |
+| `MON-212` | `Point the install symlink at the new version (raw)` | `ansible.builtin.raw` | legacy_el7 | `raw_switch_binary_cmd`: readlink 비교 후 원자적 교체, 일반 파일 바이너리는 `legacy-<binary>`로 보존, 현재+직전만 보존. 변경 시에만 핸들러 |
+| `MON-213` | `Deploy systemd unit for otelcol-contrib (raw, runs as root)` | `ansible.builtin.import_tasks` | legacy_el7 | sentinel. root 실행 + `NoNewPrivileges`/`ProtectSystem=full`/`ProtectHome`/`PrivateTmp`. 변경 시 `Reload systemd daemon (raw)` + `Restart otelcol-contrib (raw)` |
+| `MON-214` | `Apply pending systemd reload and restart before enabling` | `ansible.builtin.meta` | legacy_el7 | 유닛 변경 시에만 daemon-reload (`flush_handlers`) |
+| `MON-215` | `Ensure otelcol-contrib is enabled and started (raw, sentinel)` | `ansible.builtin.raw` | legacy_el7 | `raw_service_cmd`: `is-enabled`/`is-active` 확인 후에만 enable/start (systemd 219에는 `enable --now`가 없음) |

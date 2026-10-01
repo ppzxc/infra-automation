@@ -104,13 +104,13 @@ def test_role_tags_wired():
     main = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
     for imp in main[:2]:
         assert imp["tags"] == ["always"]
-    blocks = {b["name"]: set(b["tags"]) for b in main[2:]}
+    blocks = {b["name"]: set(b["tags"]) for b in main[2:] if "block" in b}
     assert blocks == {
         "Install agents and clean legacy exporter": {"agents_install", "otel"},
         "Apply otelcol configuration": {"agents_config", "otel"},
         "Enable otelcol service": {"agents_install", "otel"},
     }
-    inner = {t["name"].split("]")[0].lstrip("[") for b in main[2:] for t in b["block"] if "name" in t}
+    inner = {t["name"].split("]")[0].lstrip("[") for b in main[2:] if "block" in b for t in b["block"] if "name" in t}
     assert {"MON-011", "MON-001", "MON-003"} <= inner
     config = next(b for b in main if b["name"] == "Apply otelcol configuration")
     assert config["block"][0]["name"].startswith("[MON-060]")
@@ -717,7 +717,8 @@ def test_secrets_env_task_is_private_and_undiffed():
     env = next(t for t in flat if t.get("name", "").startswith("[MON-065]"))
     assert env["ansible.builtin.template"]["mode"] == "0600"
     assert env["no_log"] is True and env["diff"] is False
-    unit = next(t for t in flat if t.get("name", "").startswith("[MON-005]"))["ansible.builtin.copy"]["content"]
+    unit_task = next(t for t in flat if t.get("name", "").startswith("[MON-005]"))["ansible.builtin.template"]
+    unit = (ROLE / "templates" / unit_task["src"]).read_text(encoding="utf-8")
     assert "EnvironmentFile=" in unit and "CAP_DAC_READ_SEARCH" in unit and "User={{ otelcol_user }}" in unit
 
 
