@@ -847,7 +847,7 @@
 
         - name: "[VERIFY-BAK-201] legacy_el7 probes conditional backup paths over raw"
           ansible.builtin.assert:
-            that: '"[BAK-201]" in _t and "raw_exists_cmd" in _t and "legacy_el7" in _t'
+            that: '"[BAK-201]" in _t and "raw_exists_cmd" in _t and "when: host_agents_is_legacy | bool" in _t'
             quiet: true
           vars:
             _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/main.yml') }}"
