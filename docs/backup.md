@@ -75,6 +75,6 @@
 | `BAK-043` | `Enable and start the backup timer` | `ansible.builtin.systemd` | Rocky 9/10, Ubuntu, Debian | 상태 비교 (check 모드 제외) |
 | `BAK-044` | `Deploy backup cron.d schedule (Rocky 8 and non-systemd hosts)` | `ansible.builtin.template` | Rocky 8 | Checksum 비교 (`/etc/cron.d/host-agents-backup`) |
 | `BAK-045` | `Remove the cron.d schedule on systemd-timer hosts` | `ansible.builtin.file` | Rocky 9/10, Ubuntu, Debian | `state: absent` (스케줄러 이중 실행 방지) |
-| `BAK-050` | `Probe whether the restic repository exists (restic cat config)` | `ansible.builtin.shell` | All | 읽기 전용 (`changed_when: false`, `check_mode: false`, Deploy 한정 — `agents_config` 제외) |
+| `BAK-050` | `Probe whether the restic repository exists (restic cat config)` | `ansible.builtin.shell` | All | 읽기 전용 (`changed_when: false`, check 모드에서는 건너뜀(바이너리가 아직 없을 수 있음), Deploy 한정 — `agents_config` 제외) |
 | `BAK-051` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | All | 읽기 전용 (저장소 부재가 아닌 오류에서는 init하지 않고 실패) |
 | `BAK-052` | `Initialize the restic repository when it does not exist` | `ansible.builtin.shell` | All | 프로브 결과 조건 (저장소가 없을 때만 `init`) |
