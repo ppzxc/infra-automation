@@ -632,7 +632,7 @@ def _render_config(tmp_path, **over):
 
 def test_config_routes_logs_by_stream_to_otlphttp_with_stream_name(tmp_path):
     cfg, _ = _render_config(tmp_path)
-    for stream in ("security_logs", "system_logs", "app_logs"):
+    for stream in ("security_logs", "system_logs", "app_logs", "backup_logs"):
         exp = cfg["exporters"][f"otlphttp/{stream}"]
         assert exp["endpoint"] == "https://o2.example:5080/api/default"
         assert exp["headers"]["stream-name"] == stream
@@ -642,7 +642,7 @@ def test_config_routes_logs_by_stream_to_otlphttp_with_stream_name(tmp_path):
         assert exp["retry_on_failure"]["max_elapsed_time"] == 0
         assert cfg["service"]["pipelines"][f"logs/{stream}"]["exporters"] == [f"otlphttp/{stream}"]
     assert {c["pipelines"][0] for c in cfg["connectors"]["routing/logs"]["table"]} == {
-        "logs/security_logs", "logs/system_logs"}
+        "logs/security_logs", "logs/system_logs", "logs/backup_logs"}
     assert cfg["connectors"]["routing/logs"]["default_pipelines"] == ["logs/app_logs"]
     assert not any(k.startswith("otlp/") for k in cfg["exporters"])            # no legacy gRPC exporter
 
@@ -655,6 +655,21 @@ def test_config_filelog_checkpoints_and_start_at_end(tmp_path):
         assert rcv["attributes"]["log_type"] == stream
     assert cfg["extensions"]["file_storage"]["compaction"]["on_rebound"] is True
     assert "operators" not in cfg["receivers"]["filelog/security_logs"]          # raw bodies, no parsing
+
+
+def test_config_backup_logs_pipeline_parses_json_and_keeps_the_raw_body(tmp_path):
+    cfg, _ = _render_config(tmp_path)
+    rcv = cfg["receivers"]["filelog/backup_logs"]
+    assert rcv["include"] == ["/var/log/host-agents/backup.jsonl"]
+    assert rcv["storage"] == "file_storage" and rcv["start_at"] == "end"
+    assert rcv["attributes"]["log_type"] == "backup_logs"
+    (op,) = rcv["operators"]
+    assert op["type"] == "json_parser" and op["parse_from"] == "body" and op["parse_to"] == "attributes"
+    assert "preserve_to" not in op and op["timestamp"]["parse_from"] == "attributes.ts"
+    assert "filelog/backup_logs" in cfg["service"]["pipelines"]["logs/in"]["receivers"]
+    assert cfg["service"]["pipelines"]["logs/backup_logs"]["exporters"] == ["otlphttp/backup_logs"]
+    assert cfg["exporters"]["otlphttp/backup_logs"]["headers"]["stream-name"] == "backup_logs"
+    assert "logs/backup_logs" in {c["pipelines"][0] for c in cfg["connectors"]["routing/logs"]["table"]}
 
 
 def test_config_metrics_pipeline_is_separate_droppable_and_60s(tmp_path):
@@ -711,4 +726,4 @@ def test_docker_group_is_added_only_via_lookup_and_rsyslog_probes_both_paths():
     assert "[MON-067]" in text and "otel_docker_group" in text
     assert "/usr/sbin/rsyslogd, /sbin/rsyslogd" in text
     consts = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))
-    assert consts["host_agents_log_streams"] == ["security_logs", "system_logs", "app_logs"]
+    assert consts["host_agents_log_streams"] == ["security_logs", "system_logs", "app_logs", "backup_logs"]

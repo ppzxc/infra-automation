@@ -444,3 +444,39 @@
         - name: "[VERIFY-BAK-051] Verify the probe succeeds once the repository exists"
           ansible.builtin.command: /usr/local/bin/resticprofile -f yaml -c {{ _verify_bak_tmp.stdout | trim }}/p.yaml -n default cat config
           changed_when: false
+
+        - name: "[VERIFY-BAK-025] Verify the result directories exist"
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop: [/var/log/host-agents, /var/lib/host-agents]
+          register: _verify_bak_resdirs
+          failed_when: not item.stat.isdir or item.stat.mode != '0755'
+
+        - name: "[VERIFY-BAK-026] Verify the hook is executable, emits valid one-line JSON and never fails"
+          ansible.builtin.shell: >-
+            test -x /usr/local/sbin/host-agents-backup-event &&
+            d=$(mktemp -d) &&
+            BACKUP_EVENT_LOG=$d/l BACKUP_EVENT_START_FILE=$d/s /usr/local/sbin/host-agents-backup-event start &&
+            ERROR='x "y"' ERROR_EXIT_CODE=2 BACKUP_EVENT_LOG=$d/l BACKUP_EVENT_START_FILE=$d/s /usr/local/sbin/host-agents-backup-event finish h1 &&
+            test "$(wc -l < $d/l)" = 1 &&
+            grep -q '"success":false,"exit_code":2' $d/l &&
+            grep -q '^{"job":"backup","host":"h1"' $d/l
+          changed_when: false
+
+        - name: "[VERIFY-BAK-027] Verify the logrotate configuration is valid for backup.jsonl"
+          ansible.builtin.shell: >-
+            grep -q '^/var/log/host-agents/backup.jsonl {' /etc/logrotate.d/host-agents-backup &&
+            (! command -v logrotate >/dev/null || logrotate -d /etc/logrotate.d/host-agents-backup >/dev/null 2>&1)
+          changed_when: false
+
+        - name: "[VERIFY-BAK-060] Verify the profile wires the hooks and status-file"
+          ansible.builtin.shell: >-
+            grep -q 'status-file: "/var/lib/host-agents/restic-status.json"' /etc/restic/profiles.yaml &&
+            grep -q 'host-agents-backup-event start' /etc/restic/profiles.yaml &&
+            grep -q 'host-agents-backup-event finish {{ inventory_hostname }}' /etc/restic/profiles.yaml
+          changed_when: false
+
+        - name: "[VERIFY-BAK-061] Verify the inventory event is disabled in this OpenObserve-less scenario"
+          ansible.builtin.assert:
+            that: backup_inventory_event_enabled is defined and not (backup_inventory_event_enabled | bool)
+            quiet: true

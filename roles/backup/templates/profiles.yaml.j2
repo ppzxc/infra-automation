@@ -9,6 +9,7 @@ global:
   repository: {{ backup_repository | to_json }}
   password-file: {{ backup_password_path | to_json }}
   cache-dir: {{ backup_cache_dir | to_json }}
+  status-file: {{ backup_status_file | to_json }}
 {% if rustfs_ca_file | length > 0 %}
   cacert: {{ rustfs_ca_file | to_json }}
 {% endif %}
@@ -23,9 +24,10 @@ global:
 {% endfor %}
     exclude-caches: true
     retry-lock: 30m
-{% if host_agents_inputs.backup_pre_hooks | length > 0 %}
     run-before:
+      - {{ (backup_event_script_path ~ ' start') | to_json }}
 {% for hook in host_agents_inputs.backup_pre_hooks %}
       - {{ hook | to_json }}
 {% endfor %}
-{% endif %}
+    run-finally:
+      - {{ (backup_event_script_path ~ ' finish ' ~ (inventory_hostname | quote)) | to_json }}

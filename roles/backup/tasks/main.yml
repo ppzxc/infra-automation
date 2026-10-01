@@ -113,6 +113,33 @@
     no_log: true
     diff: false
 
+  - name: "[BAK-025] Ensure backup result directories exist (log 0755, state 0755)"
+    ansible.builtin.file:
+      path: "{{ item }}"
+      state: directory
+      owner: root
+      group: root
+      mode: '0755'
+    loop:
+      - "{{ backup_log_dir }}"
+      - "{{ backup_state_dir }}"
+
+  - name: "[BAK-026] Deploy the backup result hook (POSIX sh, one JSON line per run)"
+    ansible.builtin.copy:
+      src: host-agents-backup-event.sh
+      dest: "{{ backup_event_script_path }}"
+      owner: root
+      group: root
+      mode: '0755'
+
+  - name: "[BAK-027] Deploy logrotate configuration for backup.jsonl"
+    ansible.builtin.template:
+      src: host-agents-backup.logrotate.j2
+      dest: "{{ backup_logrotate_path }}"
+      owner: root
+      group: root
+      mode: '0644'
+
   # 새 resticprofile 바이너리로 렌더링본을 검증한 뒤에만 설정이 교체된다(실패 시 기존 설정 불변).
   - name: "[BAK-024] Deploy resticprofile profile (validated with resticprofile show)"
     ansible.builtin.template:
@@ -226,3 +253,38 @@
     when:
       - _backup_repo_probe is not skipped
       - _backup_repo_probe.rc != 0
+
+  # Deploy 한정(agents_config에 속하지 않음): Config 재적용은 등록 이벤트를 만들지 않는다. 마지막 태스크이므로 앞 단계가 모두 성공해야 등록된다.
+  - name: "[BAK-060] Assert the controller OpenObserve ingestion token exists"
+    ansible.builtin.assert:
+      that:
+        - (host_agents_shared_secrets.openobserve.controller_ingest_token | default('')) | length > 0
+        - o2_endpoint | length > 0
+      fail_msg: "{{ inventory_hostname }}: agents/openobserve의 controller_ingest_token 또는 o2_endpoint가 없어 등록 이벤트를 보낼 수 없습니다."
+      quiet: true
+    no_log: true
+    when:
+      - backup_inventory_event_enabled | bool
+      - not ansible_check_mode
+
+  - name: "[BAK-061] Emit the job=inventory event to backup_logs"
+    ansible.builtin.uri:
+      url: "{{ o2_endpoint }}/api/{{ o2_org }}/backup_logs/_json"
+      method: POST
+      headers:
+        Authorization: "Basic {{ (o2_org ~ ':' ~ host_agents_shared_secrets.openobserve.controller_ingest_token) | b64encode }}"
+      body_format: json
+      body:
+        - job: inventory
+          host: "{{ inventory_hostname }}"
+          deployed_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+      status_code: [200, 201]
+      timeout: 10
+      validate_certs: "{{ backup_inventory_validate_certs }}"
+    delegate_to: localhost
+    become: false
+    changed_when: true
+    no_log: true
+    when:
+      - backup_inventory_event_enabled | bool
+      - not ansible_check_mode

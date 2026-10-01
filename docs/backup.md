@@ -1,6 +1,6 @@
 # Backup Role Task Specification
 
-> **상태: 구현됨(modern 경로).** legacy_el6/el7 경로·결과 방출(status-file/jsonl/logrotate)·중앙 유지보수는 후속 티켓입니다. `backup` 역할은 [ADR-0006 Host Agents](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `restic` + `resticprofile`로 `servers` 그룹 전체의 설정 파일을 RustFS(S3 API)에 백업합니다. 항상 `monitoring`(otelcol)과 함께 `playbooks/host_agents.yml`로만 배포됩니다.
+> **상태: 구현됨(modern 경로).** legacy_el6/el7 경로·중앙 유지보수(Repo Maintenance)는 후속 티켓입니다. `backup` 역할은 [ADR-0006 Host Agents](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `restic` + `resticprofile`로 `servers` 그룹 전체의 설정 파일을 RustFS(S3 API)에 백업합니다. 항상 `monitoring`(otelcol)과 함께 `playbooks/host_agents.yml`로만 배포됩니다.
 
 ---
 
@@ -45,7 +45,7 @@
 - 📁 `/opt/host-agents/{restic,resticprofile}/<version>/`, `/usr/local/bin/{restic,resticprofile}` (symlink)
 - 🔐 `/etc/restic/` (`0700`): `env`(RustFS 키, `diff: false`), `password`(`0600`), `profiles.yaml`
 - ⏰ `host-agents-backup.service` + `.timer` 또는 `/etc/cron.d/host-agents-backup`
-- 📝 `/var/lib/host-agents/restic-status.json`, `/var/log/host-agents/backup.jsonl` + logrotate 설정
+- 📝 `/var/lib/host-agents/restic-status.json`, `/var/log/host-agents/backup.jsonl`, `/usr/local/sbin/host-agents-backup-event`, `/etc/logrotate.d/host-agents-backup` (§6)
 
 ---
 
@@ -67,6 +67,9 @@
 | `BAK-022` | `Deploy restic credentials env file (0600, no_log, no diff)` | `ansible.builtin.template` | All | Checksum 비교 (`no_log`, `diff: false`, `0600`) |
 | `BAK-023` | `Deploy restic repository password file (0600, no_log, no diff)` | `ansible.builtin.copy` | All | Checksum 비교 (`no_log`, `diff: false`, `0600`) |
 | `BAK-024` | `Deploy resticprofile profile (validated with resticprofile show)` | `ansible.builtin.template` | All | Checksum 비교; 새 바이너리의 `resticprofile show`가 통과해야 교체 (시크릿 미포함) |
+| `BAK-025` | `Ensure backup result directories exist (log 0755, state 0755)` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` (`/var/log/host-agents`, `/var/lib/host-agents`) |
+| `BAK-026` | `Deploy the backup result hook (POSIX sh, one JSON line per run)` | `ansible.builtin.copy` | All | Checksum 비교 (`0755`, POSIX 도구만 — jq 없음) |
+| `BAK-027` | `Deploy logrotate configuration for backup.jsonl` | `ansible.builtin.template` | All | Checksum 비교 (`/etc/logrotate.d/host-agents-backup`, 주간·8회·`create 0640`) |
 | `BAK-030` | `Switch restic install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-050`~`053`) |
 | `BAK-031` | `Switch resticprofile install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-050`~`053`) |
 | `BAK-040` | `Deploy backup systemd service` | `ansible.builtin.template` | Rocky 9/10, Ubuntu, Debian | Checksum 비교 (`ProtectSystem=strict`, 쓰기는 restic 캐시와 `backup_hook_write_paths`(기본 `/var/backups`)만) |
@@ -78,3 +81,28 @@
 | `BAK-050` | `Probe whether the restic repository exists (restic cat config)` | `ansible.builtin.shell` | All | 읽기 전용 (`changed_when: false`, check 모드에서는 건너뜀(바이너리가 아직 없을 수 있음), Deploy 한정 — `agents_config` 제외) |
 | `BAK-051` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | All | 읽기 전용 (저장소 부재가 아닌 오류에서는 init하지 않고 실패) |
 | `BAK-052` | `Initialize the restic repository when it does not exist` | `ansible.builtin.shell` | All | 프로브 결과 조건 (저장소가 없을 때만 `init`) |
+| `BAK-060` | `Assert the controller OpenObserve ingestion token exists` | `ansible.builtin.assert` | All | 읽기 전용 (`no_log`, Deploy 한정 — 토큰 또는 `o2_endpoint` 없으면 호스트 실패) |
+| `BAK-061` | `Emit the job=inventory event to backup_logs` | `ansible.builtin.uri` | All (controller) | Deploy 마지막 태스크이자 한정(`agents_config` 제외, check 모드 제외). 실행마다 이벤트 1건 전송(`changed`) |
+
+---
+
+## 6. 백업 관측성 및 알림 계약 (ADR-0006 §2.6)
+
+호스트는 `resticprofile`의 `run-finally` 훅(`/usr/local/sbin/host-agents-backup-event`)으로 `/var/log/host-agents/backup.jsonl`에 실행마다 한 줄 JSON을 추가하고(`status-file`은 `/var/lib/host-agents/restic-status.json`), `monitoring`의 otelcol이 `json_parser`(본문 원문 유지, 필드는 attributes로 파싱, `ts`를 이벤트 시각으로 사용)로 읽어 OpenObserve `backup_logs` 스트림(보존 1년)으로 보냅니다. 서버 측 알림은 아래 **고정 필드명**만 사용합니다.
+
+| 이벤트 | 발생원 | 필드 |
+|---|---|---|
+| `job=backup` | 호스트 훅 | `job`, `host`, `command`(`backup`), `success`(bool), `exit_code`, `duration`(초), `error`(실패 시 마지막 오류 요약, ≤500자), `ts`(UTC ISO8601) |
+| `job=maintenance` | 중앙 Repo Maintenance(후속 티켓) | `job`, `host`, `command`(`check`/`forget`…), `success`, `duration`, `error` |
+| `job=inventory` | Deploy 종료 시 컨트롤러(`BAK-061`, Config 제외; OpenBao `agents/openobserve`의 `controller_ingest_token`으로 인증, 인증서는 기본 검증) | `job`, `host`, `deployed_at`(UTC ISO8601) |
+
+표준 알림:
+
+| 알림 | 조건 |
+|---|---|
+| 백업 실패 | `job=backup` 이고 `success=false` — 즉시 |
+| 백업 누락 | 호스트별 마지막 `job=backup`·`success=true`가 **26h** 초과 |
+| 무결성 검사 실패 | `job=maintenance`, `command=check`, `success=false` |
+| 유지보수 누락 | 호스트별 마지막 `command=check`가 **8일** 초과 |
+| 수집 중단 | 호스트 `hostmetrics` 메트릭 부재 **15분** |
+| 미실행 호스트 | `job=inventory` 등록 후 `job=backup` 이벤트가 없음 |

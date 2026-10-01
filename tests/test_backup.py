@@ -3,9 +3,14 @@
 Templates are rendered through a local playbook (like tests/test_host_agents.py); the repo probe/init tasks
 are extracted from the role and executed against a real local restic repository.
 """
+import base64
+import json
 import os
+import re
 import shutil
 import subprocess
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -77,16 +82,16 @@ def test_profile_has_mandatory_paths_excludes_hooks_and_no_secrets(tmp_path):
         assert path in prof["backup"]["source"]
     assert {"/home/*/.cache", "**/node_modules", "*.tmp", "*.swp", "/etc/restic/password", "/data/tmp"} <= set(prof["backup"]["exclude"])
     assert prof["backup"]["exclude-caches"] is True and prof["backup"]["retry-lock"] == "30m"
-    assert prof["backup"]["run-before"] == ["pg_dump -f /var/backups/db.sql mydb"]
+    assert prof["backup"]["run-before"][1:] == ["pg_dump -f /var/backups/db.sql mydb"]
     assert prof["repository"] == "s3:https://rustfs.example:9000/host-backups/h1" and prof["cacert"] == "/etc/ca.pem"
     assert prof["password-file"] == "/etc/restic/password"
     assert not any(s in text for s in ("AKIA-secret", "S3-secret", "pw-secret"))
 
 
-def test_profile_omits_hooks_and_ca_when_unset(tmp_path):
+def test_profile_has_only_the_event_hook_and_no_ca_when_unset(tmp_path):
     text = _render(tmp_path, "profiles.yaml.j2", "profiles.yaml", host_agents_inputs={"backup_pre_hooks": []})
     prof = yaml.safe_load(text)["default"]
-    assert "run-before" not in prof["backup"] and "cacert" not in prof
+    assert prof["backup"]["run-before"] == ["/usr/local/sbin/host-agents-backup-event start"] and "cacert" not in prof
 
 
 @needs_restic
@@ -147,7 +152,7 @@ def test_timer_is_persistent_and_service_is_confined(tmp_path):
     timer = _render(tmp_path, "host-agents-backup.timer.j2", "t")
     assert "Persistent=true" in timer and "OnCalendar=*-*-* 02:07:00" in timer
     svc = _render(tmp_path, "host-agents-backup.service.j2", "s")
-    assert "ProtectSystem=strict" in svc and "ReadWritePaths=/var/cache/restic -/var/backups\n" in svc
+    assert "ProtectSystem=strict" in svc and "ReadWritePaths=/var/cache/restic /var/log/host-agents /var/lib/host-agents -/var/backups\n" in svc
     assert "EnvironmentFile=/etc/restic/env" in svc and "User=root" in svc
 
 
@@ -277,3 +282,172 @@ def test_bz2_delivery_decompresses_to_the_plain_binary_name_in_the_cache(tmp_pat
         assert (tmp_path / "opt" / "restic" / "9.9.9" / "restic").read_bytes() == payload
         if attempt == 2:
             assert "MON-055" not in res.stdout or "changed" not in res.stdout.split("MON-055")[1].split("TASK")[0]
+
+
+# --- observability (Ticket-6) ----------------------------------------------------------------------------
+
+HOOK = ROLE / "files" / "host-agents-backup-event.sh"
+
+
+def _hook(tmp_path, *args, env=None):
+    log, start = tmp_path / "backup.jsonl", tmp_path / "backup.start"
+    full = {"PATH": os.environ["PATH"], "BACKUP_EVENT_LOG": str(log), "BACKUP_EVENT_START_FILE": str(start), **(env or {})}
+    res = subprocess.run(["/bin/sh", str(HOOK), *args], env=full, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def test_hook_emits_one_valid_json_line_with_documented_fields_on_success(tmp_path):
+    _hook(tmp_path, "start")
+    (ev,) = _hook(tmp_path, "finish", "web01", env={"PROFILE_COMMAND": "backup"})
+    assert set(ev) == {"job", "host", "command", "success", "exit_code", "duration", "error", "ts"}
+    assert ev["job"] == "backup" and ev["host"] == "web01" and ev["command"] == "backup"
+    assert ev["success"] is True and ev["exit_code"] == 0 and ev["error"] == ""
+    assert isinstance(ev["duration"], int) and ev["duration"] >= 0
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", ev["ts"])
+    assert not (tmp_path / "backup.start").exists()
+    assert len((tmp_path / "backup.jsonl").read_text().splitlines()) == 1
+
+
+def test_hook_reports_failures_and_escapes_hostile_error_text_into_a_single_line(tmp_path):
+    err = 'fatal: "bad" \\ path\nsecond line\ttab \x01 한글'
+    (ev,) = _hook(tmp_path, "finish", "h1", env={"ERROR": err, "ERROR_EXIT_CODE": "3"})
+    assert ev["success"] is False and ev["exit_code"] == 3
+    assert '"bad"' in ev["error"] and "\\" in ev["error"] and "\n" not in ev["error"]
+    assert len((tmp_path / "backup.jsonl").read_text().splitlines()) == 1
+
+
+def test_hook_truncates_long_errors_and_never_fails_the_backup(tmp_path):
+    (ev,) = _hook(tmp_path, "finish", "h1", env={"ERROR": "x" * 5000, "ERROR_EXIT_CODE": "abc"})
+    assert len(ev["error"]) <= 500 and ev["exit_code"] == 1
+    res = subprocess.run(["/bin/sh", str(HOOK), "finish", "h1"], capture_output=True, text=True,
+                         env={"PATH": os.environ["PATH"], "BACKUP_EVENT_LOG": "/nonexistent/dir/x.jsonl"})
+    assert res.returncode == 0
+
+
+def test_hook_uses_posix_tools_only():
+    raw = HOOK.read_text()
+    assert raw.startswith("#!/bin/sh")
+    text = "\n".join(ln for ln in raw.splitlines() if not ln.lstrip().startswith("#"))
+    for banned in ("jq", "python", "perl", "awk -v", "[[", "$'", "echo -e"):
+        assert banned not in text
+    dash = shutil.which("dash")
+    if dash:
+        assert subprocess.run([dash, "-n", str(HOOK)]).returncode == 0
+
+
+def test_profile_wires_status_file_and_hooks_around_user_hooks(tmp_path):
+    prof = yaml.safe_load(_render(tmp_path, "profiles.yaml.j2", "profiles.yaml"))["default"]
+    assert prof["status-file"] == "/var/lib/host-agents/restic-status.json"
+    before = prof["backup"]["run-before"]
+    assert before[0] == "/usr/local/sbin/host-agents-backup-event start"
+    assert "pg_dump -f /var/backups/db.sql mydb" in before
+    assert prof["backup"]["run-finally"] == ["/usr/local/sbin/host-agents-backup-event finish h1"]
+    bare = yaml.safe_load(_render(tmp_path, "profiles.yaml.j2", "p2.yaml", host_agents_inputs={"backup_pre_hooks": []}))["default"]
+    assert bare["backup"]["run-before"] == ["/usr/local/sbin/host-agents-backup-event start"]
+
+
+def test_logrotate_config_covers_the_jsonl_file(tmp_path):
+    conf = _render(tmp_path, "host-agents-backup.logrotate.j2", "lr")
+    assert conf.splitlines()[1] == "/var/log/host-agents/backup.jsonl {"
+    for directive in ("weekly", "rotate 8", "missingok", "notifempty", "compress", "create 0640 root root"):
+        assert directive in conf
+    assert _task("[BAK-027]")["ansible.builtin.template"]["dest"] == "{{ backup_logrotate_path }}"
+
+
+def test_confined_service_may_write_the_result_directories(tmp_path):
+    svc = _render(tmp_path, "host-agents-backup.service.j2", "s")
+    rw = next(ln for ln in svc.splitlines() if ln.startswith("ReadWritePaths="))
+    assert "/var/log/host-agents" in rw and "/var/lib/host-agents" in rw and "/var/cache/restic" in rw
+
+
+def test_hook_script_deploy_is_executable_root_owned():
+    t = _task("[BAK-026]")["ansible.builtin.copy"]
+    assert t["mode"] == "0755" and t["owner"] == "root" and t["dest"] == "{{ backup_event_script_path }}"
+
+
+def test_inventory_event_is_deploy_only_and_last():
+    main = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    for block in main:
+        names = [t.get("name", "")[:9] for t in block.get("block", [])]
+        if "[BAK-061]" in names:
+            assert "agents_config" not in block["tags"]
+            assert names[-1] == "[BAK-061]"
+        if block.get("name") == "Apply backup configuration":
+            assert "[BAK-061]" not in names
+
+
+class _O2(BaseHTTPRequestHandler):
+    seen = []
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers["Content-Length"]))
+        _O2.seen.append((self.path, self.headers.get("Authorization"), json.loads(body)))
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{"code":200}')
+
+    def log_message(self, *a):
+        pass
+
+
+def test_inventory_event_posts_host_and_deployed_at_to_backup_logs(tmp_path):
+    srv = HTTPServer(("127.0.0.1", 0), _O2)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    _O2.seen.clear()
+    try:
+        tasks = [t for t in _tasks() if t.get("name", "").startswith(("[BAK-060]", "[BAK-061]"))]
+        for t in tasks:
+            t.pop("no_log", None)
+            t.pop("delegate_to", None)
+        res = _run(tmp_path, tasks, _vars(o2_endpoint=f"http://127.0.0.1:{srv.server_port}", o2_org="default",
+                                          host_agents_shared_secrets={"openobserve": {"controller_ingest_token": "ctl-tok"}},
+                                          inventory_hostname="web01"))
+    finally:
+        srv.shutdown()
+    assert res.returncode == 0, res.stdout + res.stderr
+    ((path, auth, body),) = _O2.seen
+    assert path == "/api/default/backup_logs/_json"
+    assert auth == "Basic " + base64.b64encode(b"default:ctl-tok").decode()
+    assert len(body) == 1 and body[0]["job"] == "inventory" and body[0]["host"] == "web01"
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", body[0]["deployed_at"])
+
+
+def test_inventory_event_requires_the_controller_token():
+    cond = _task("[BAK-060]")["ansible.builtin.assert"]["that"]
+    assert any("controller_ingest_token" in c for c in cond)
+    assert "backup_inventory_event_enabled | bool" in str(_task("[BAK-061]")["when"])
+    assert "not ansible_check_mode" in str(_task("[BAK-061]")["when"])
+
+
+def test_alert_contract_documents_stable_fields_and_every_standard_alert():
+    doc = (ROOT_DIR / "docs" / "backup.md").read_text(encoding="utf-8")
+    for field in ("`job`", "`host`", "`command`", "`success`", "`exit_code`", "`duration`", "`error`", "`ts`", "`deployed_at`"):
+        assert field in doc
+    for alert in ("백업 실패", "백업 누락", "무결성 검사 실패", "유지보수 누락", "수집 중단", "미실행 호스트", "26h", "8일", "15분"):
+        assert alert in doc
+
+
+@needs_restic
+def test_hook_records_success_and_failure_through_real_resticprofile(tmp_path):
+    (tmp_path / "pw").write_text("pw")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "f").write_text("x")
+    env = dict(os.environ, BACKUP_EVENT_LOG=str(tmp_path / "b.jsonl"), BACKUP_EVENT_START_FILE=str(tmp_path / "s"))
+
+    def run(repo, *cmd):
+        prof = _render(tmp_path, "profiles.yaml.j2", "p.yaml", backup_repository=str(repo), backup_password_path=str(tmp_path / "pw"),
+                       backup_cache_dir=str(tmp_path / "cache"), backup_status_file=str(tmp_path / "status.json"),
+                       backup_sources=[str(tmp_path / "src")], backup_excludes=[], backup_event_script_path=str(HOOK),
+                       host_agents_inputs={"backup_pre_hooks": []}, backup_restic_binary=shutil.which("restic"),
+                       inventory_hostname="web01")
+        return subprocess.run(["resticprofile", "-f", "yaml", "-c", str(tmp_path / "p.yaml"), "-n", "default", *cmd],
+                              env=env, capture_output=True, text=True)
+
+    assert run(tmp_path / "repo", "init").returncode == 0
+    assert run(tmp_path / "repo", "backup").returncode == 0
+    assert (tmp_path / "status.json").exists()
+    assert run(tmp_path / "missing", "backup").returncode != 0
+    ok, bad = [json.loads(ln) for ln in (tmp_path / "b.jsonl").read_text().splitlines()]
+    assert ok["success"] is True and ok["host"] == "web01" and ok["command"] == "backup"
+    assert bad["success"] is False and bad["exit_code"] != 0 and bad["error"]

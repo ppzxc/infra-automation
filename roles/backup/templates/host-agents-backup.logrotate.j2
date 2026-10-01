@@ -1,0 +1,10 @@
+# Ansible managed — 백업 결과 jsonl 회전 (ADR-0006 §2.6). otelcol filelog는 fingerprint로 회전을 따라간다.
+{{ backup_log_path }} {
+    weekly
+    rotate {{ backup_logrotate_rotate | int }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 root root
+}

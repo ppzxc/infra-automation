@@ -46,4 +46,4 @@ host_agents_checksums:
 host_agents_install_root: /opt/host-agents
 
 # 로그 스트림 (라우팅 테이블·exporter·파이프라인이 공유)
-host_agents_log_streams: [security_logs, system_logs, app_logs]
+host_agents_log_streams: [security_logs, system_logs, app_logs, backup_logs]
