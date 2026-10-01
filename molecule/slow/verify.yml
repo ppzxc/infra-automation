@@ -364,3 +364,32 @@
             grep -q '^ProtectSystem=strict' /etc/systemd/system/host-agents-backup.service
           changed_when: false
           when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-021] Verify the restic cache directory is root-owned 0700"
+          ansible.builtin.stat:
+            path: /var/cache/restic
+          register: _verify_bak_cache
+          failed_when: not _verify_bak_cache.stat.exists or _verify_bak_cache.stat.mode != '0700'
+
+        - name: "[VERIFY-BAK-023] Verify the password file is excluded from the backup"
+          ansible.builtin.command: grep -q '/etc/restic/password' /etc/restic/profiles.yaml
+          changed_when: false
+
+        - name: "[VERIFY-BAK-031] Verify the resticprofile symlink exists"
+          ansible.builtin.stat:
+            path: /usr/local/bin/resticprofile
+            follow: false
+          register: _verify_bak_rp
+          failed_when: not _verify_bak_rp.stat.islnk
+
+        - name: "[VERIFY-BAK-043] Verify the backup timer is active on systemd-timer hosts"
+          ansible.builtin.command: systemctl is-active host-agents-backup.timer
+          changed_when: false
+          when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-045] Verify no cron.d schedule coexists with the timer"
+          ansible.builtin.stat:
+            path: /etc/cron.d/host-agents-backup
+          register: _verify_bak_nocron
+          failed_when: _verify_bak_nocron.stat.exists
+          when: not (_bak_use_cron | bool)
