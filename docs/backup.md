@@ -1,6 +1,6 @@
 # Backup Role Task Specification
 
-> **상태: 구현됨(modern 경로 + 중앙 Repo Maintenance).** legacy_el6/el7 경로는 후속 티켓입니다. `backup` 역할은 [ADR-0006 Host Agents](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `restic` + `resticprofile`로 `servers` 그룹 전체의 설정 파일을 RustFS(S3 API)에 백업합니다. 항상 `monitoring`(otelcol)과 함께 `playbooks/host_agents.yml`로만 배포됩니다.
+> **상태: 구현됨(modern, legacy_el7, legacy_el6 경로 + 중앙 Repo Maintenance).** `backup` 역할은 [ADR-0006 Host Agents](adr/0006-host-agents-otelcol-resticprofile.md)에 따라 `restic` + `resticprofile`로 `servers` 그룹 전체의 설정 파일을 RustFS(S3 API)에 백업합니다. 항상 `monitoring`(otelcol)과 함께 `playbooks/host_agents.yml`로만 배포됩니다.
 
 ---
 
@@ -60,7 +60,7 @@
 | `BAK-004` | `Deliver pinned resticprofile binary` | `ansible.builtin.include_tasks` | All | `no_self_update` 빌드 tarball + SHA256 검증 후 버전 디렉터리 푸시 (`MON-040`~`049`) |
 | `BAK-010` | `Assert RustFS endpoint and bucket are configured` | `ansible.builtin.assert` | All | 읽기 전용 (비어 있거나 끝 슬래시/형식 오류면 호스트 실패) |
 | `BAK-011` | `Check which conditional standard backup paths exist` | `ansible.builtin.stat` | All | 읽기 전용, `check_mode: false` (`/opt/services` 존재 시에만 백업 대상에 포함) |
-| `BAK-012` | `Derive repository, source list, excludes and schedule` | `ansible.builtin.set_fact` | All | 순수 함수 (repo = `s3:<endpoint>/<bucket>/<host>`, 필수 경로 + 조건부 + `backup_extra_paths`, Rocky 8은 cron) |
+| `BAK-012` | `Derive repository, source list, excludes and schedule` | `ansible.builtin.set_fact` | All | 순수 함수 (repo = `s3:<endpoint>/<bucket>/<host>`, 필수 경로 + 조건부 + `backup_extra_paths`, CentOS 6/7·Rocky 8은 cron, restic 경로는 `host_agents_version_row` 행) |
 | `BAK-013` | `Derive the scheduled hour/minute and run command` | `ansible.builtin.set_fact` | All | 순수 함수 (`random(seed=inventory_hostname)`으로 02:00~03:59 고정 분, `unlock` 후 `backup`) |
 | `BAK-020` | `Ensure restic config directory exists (0700)` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` (`/etc/restic`, `0700`) |
 | `BAK-021` | `Ensure restic cache directory exists (0700)` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` (`/var/cache/restic`) |
@@ -102,8 +102,8 @@
 | `BAK-083` | `Fail the host when any maintenance command failed` | `ansible.builtin.assert` | Controller | 이벤트 전송 뒤 판정(전송 실패도 실패로 처리) — 한 호스트라도 실패하면 Semaphore 실행 실패 |
 
 ---
-| `BAK-201` | `Check which conditional standard backup paths exist (raw, read-only)` | `ansible.builtin.raw` | legacy_el7 | `changed_when: false`, `check_mode: false` (`raw_exists_cmd`) |
-| `BAK-202` | `Present the raw probe like the modern stat results` | `ansible.builtin.set_fact` | legacy_el7 | 순수 함수 (`BAK-012`가 modern과 같은 식으로 소비) |
+| `BAK-201` | `Check which conditional standard backup paths exist (raw, read-only)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `changed_when: false`, `check_mode: false` (`raw_exists_cmd`) |
+| `BAK-202` | `Present the raw probe like the modern stat results` | `ansible.builtin.set_fact` | legacy_el6, legacy_el7 | 순수 함수 (`BAK-012`가 modern과 같은 식으로 소비) |
 | `BAK-203` | `Ensure restic and result directories exist (raw)` | `ansible.builtin.raw` | legacy_el7 | `raw_dir_cmd` sentinel (`0700`/`0700`/`0755`/`0755`) |
 | `BAK-204` | `Deploy restic credentials env file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el7 | ADR-0005 sentinel, `_raw_secret` (`no_log`, check 모드에서도 내용 비노출) |
 | `BAK-205` | `Deploy restic repository password file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el7 | ADR-0005 sentinel, `_raw_secret` (`no_log`) |
@@ -118,6 +118,20 @@
 | `BAK-215` | `Probe whether the restic repository exists (raw, restic cat config)` | `ansible.builtin.raw` | legacy_el7 | `changed_when: false`, `check_mode: false`, `LC_ALL=C`, `no_log`, Deploy 한정 |
 | `BAK-216` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | legacy_el7 | 읽기 전용 (BAK-051과 같은 rc/메시지 판정) |
 | `BAK-217` | `Initialize the restic repository when it does not exist (raw)` | `ansible.builtin.raw` | legacy_el7 | 프로브 결과 조건 (저장소가 없을 때만 `init`), `no_log` |
+| `BAK-103` | `Ensure restic and result directories exist (raw)` | `ansible.builtin.raw` | legacy_el6 | `raw_dir_cmd` sentinel (`0700`/`0700`/`0755`/`0755`) |
+| `BAK-104` | `Deploy restic credentials env file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el6 | ADR-0005 sentinel, `_raw_secret` (`no_log`, check 모드에서도 내용 비노출) |
+| `BAK-105` | `Deploy restic repository password file (raw, 0600, no_log, no diff)` | `ansible.builtin.import_tasks` | legacy_el6 | ADR-0005 sentinel, `_raw_secret` (`no_log`) |
+| `BAK-106` | `Deploy the backup result hook (raw, POSIX sh, one JSON line per run)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel (modern과 같은 `host-agents-backup-event.sh`, 마지막 개행 포함) |
+| `BAK-107` | `Deploy logrotate configuration for backup.jsonl (raw)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel |
+| `BAK-108` | `Deploy resticprofile profile (raw, validated with resticprofile show)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel + 새 resticprofile(v0.29.1)로 `show` 검증(BAK-024와 같은 명령). 같은 템플릿이 v0.29.1 + restic 0.17.3에서 `show`를 통과함을 오프라인으로 확인 |
+| `BAK-109` | `Deliver the legacy_el6 restic binary (raw)` | `ansible.builtin.include_tasks` | legacy_el6 | 컨트롤러 캐시 → scp, 원격 sha256sum 불일치 시에만 실행, `version` 스모크 테스트 — `legacy_el6` 버전 행(restic 0.17.3 / resticprofile v0.29.1) |
+| `BAK-110` | `Deliver the legacy_el6 resticprofile binary (raw)` | `ansible.builtin.include_tasks` | legacy_el6 | 컨트롤러 캐시 → scp, 원격 sha256sum 불일치 시에만 실행, `version` 스모크 테스트 — `legacy_el6` 버전 행(restic 0.17.3 / resticprofile v0.29.1) |
+| `BAK-111` | `Switch restic install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el6 | `MON-212` 헬퍼 (readlink sentinel), `legacy_el6` 행 버전 디렉터리 |
+| `BAK-112` | `Switch resticprofile install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el6 | `MON-212` 헬퍼 (readlink sentinel), `legacy_el6` 행 버전 디렉터리 |
+| `BAK-113` | `Deploy backup cron.d schedule (raw)` | `ansible.builtin.import_tasks` | legacy_el6 | sentinel (`/etc/cron.d/host-agents-backup`, `0644`). 템플릿은 modern cron.d와 동일 |
+| `BAK-115` | `Probe whether the restic repository exists (raw, restic cat config)` | `ansible.builtin.raw` | legacy_el6 | `changed_when: false`, `check_mode: false`, `LC_ALL=C`, `no_log`, Deploy 한정 |
+| `BAK-116` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | legacy_el6 | 읽기 전용 (BAK-051과 같은 rc/메시지 판정) |
+| `BAK-117` | `Initialize the restic repository when it does not exist (raw)` | `ansible.builtin.raw` | legacy_el6 | 프로브 결과 조건 (저장소가 없을 때만 `init`), `no_log` |
 
 ## 6. 백업 관측성 및 알림 계약 (ADR-0006 §2.6)
 

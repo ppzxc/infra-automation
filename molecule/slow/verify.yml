@@ -988,3 +988,240 @@
             _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
           delegate_to: localhost
           become: false
+
+        # Host Agents legacy_el6(MON-1xx/BAK-1xx, #48): CentOS 6 Test Image가 없으므로 태스크 계약을 정적으로 검증한다
+        # (실행 검증은 tests/test_host_agents_legacy_el6.py, 실제 호스트는 docs/monitoring.md §3-5 카나리 런북).
+
+        - name: "[VERIFY-MON-110] legacy_el6 warns (never fails) once the version row is past its expiry date"
+          ansible.builtin.assert:
+            that: '"[MON-110]" in _t and "host_agents_version_expiry[''legacy_el6'']" in _t and "tags: [always]" in _t and "ansible.builtin.debug" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-111] legacy_el6 creates the otelcol storage directory over raw"
+          ansible.builtin.assert:
+            that: '"[MON-111]" in _t and "raw_dir_cmd" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-112] legacy_el6 delivers the otelcol binary of the legacy_el6 version row"
+          ansible.builtin.assert:
+            that: '"[MON-112]" in _t and "host_agents_versions[host_agents_version_row].otelcol_contrib" in _t and "legacy_deliver_binary.yml" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-113] legacy_el6 asserts the OpenObserve endpoint like the modern path"
+          ansible.builtin.assert:
+            that: '"[MON-113]" in _t and "o2_endpoint is match(''^https?://'')" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-114] legacy_el6 never enables the journald receiver"
+          ansible.builtin.assert:
+            that: '"[MON-114]" in _t and "host_agents_journald: false" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-115] legacy_el6 creates the config (0750) and secrets (0700) directories over raw"
+          ansible.builtin.assert:
+            that: '"[MON-115]" in _t and "''0750''" in _t and "''0700''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-116] legacy_el6 deploys the secrets env file as a private secret"
+          ansible.builtin.assert:
+            that: '"[MON-116]" in _t and "_raw_secret: true" in _t and "_raw_mode: ''0600''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-117] legacy_el6 validates the config with the legacy_el6 binary before it lands"
+          ansible.builtin.assert:
+            that: '"[MON-117]" in _t and "otelcol-contrib validate --config=%s" in _t and "host_agents_version_row" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-118] legacy_el6 switches the symlink only through the raw switch helper"
+          ansible.builtin.assert:
+            that: '"[MON-118]" in _t and "legacy_switch_binary.yml" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-119] legacy_el6 deploys the SysV init script (0755, syntax-checked)"
+          ansible.builtin.assert:
+            that: '"[MON-119]" in _t and "otelcol-contrib.init.j2" in _t and "_raw_mode: ''0755''" in _t and "/bin/bash -n %s" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-120] legacy_el6 flushes the pending restart before enabling"
+          ansible.builtin.assert:
+            that: '"[MON-120]" in _t and "meta: flush_handlers" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-121] legacy_el6 starts and enables the collector with the chkconfig sentinel"
+          ansible.builtin.assert:
+            that: '"[MON-121]" in _t and "raw_sysv_service_cmd" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-103] legacy_el6 creates restic and result directories over raw"
+          ansible.builtin.assert:
+            that: '"[BAK-103]" in _t and "raw_dir_cmd" in _t and "''0700''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-104] legacy_el6 deploys the restic env file as a private secret"
+          ansible.builtin.assert:
+            that: '"[BAK-104]" in _t and "restic.env.j2" in _t and "_raw_secret: true" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-105] legacy_el6 deploys the repository password as a private secret"
+          ansible.builtin.assert:
+            that: '"[BAK-105]" in _t and "host_agents_secrets.restic_password" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-106] legacy_el6 deploys the backup result hook"
+          ansible.builtin.assert:
+            that: '"[BAK-106]" in _t and "host-agents-backup-event.sh" in _t and "_raw_mode: ''0755''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-107] legacy_el6 deploys the logrotate configuration"
+          ansible.builtin.assert:
+            that: '"[BAK-107]" in _t and "host-agents-backup.logrotate.j2" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-108] legacy_el6 validates the profile with the legacy_el6 resticprofile show"
+          ansible.builtin.assert:
+            that: '"[BAK-108]" in _t and "host_agents_versions[host_agents_version_row].resticprofile" in _t and " show " in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-109] legacy_el6 delivers the legacy_el6 restic with a version smoke test"
+          ansible.builtin.assert:
+            that: '"[BAK-109]" in _t and "host_agents_versions[host_agents_version_row].restic" in _t and "_deliver_smoke_args: version" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-110] legacy_el6 delivers the legacy_el6 resticprofile with a version smoke test"
+          ansible.builtin.assert:
+            that: '"[BAK-110]" in _t and "resticprofile_no_self_update_" in _t and "_deliver_smoke_args: version" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-111] legacy_el6 switches the restic symlink"
+          ansible.builtin.assert:
+            that: '"[BAK-111]" in _t and "legacy_switch_binary.yml" in _t and "_deliver_binary: restic" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-112] legacy_el6 switches the resticprofile symlink"
+          ansible.builtin.assert:
+            that: '"[BAK-112]" in _t and "legacy_switch_binary.yml" in _t and "_deliver_binary: resticprofile" in _t and "_deliver_handler: Refresh backup tooling" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-113] legacy_el6 deploys the cron.d schedule"
+          ansible.builtin.assert:
+            that: '"[BAK-113]" in _t and "host-agents-backup.cron.j2" in _t and "_raw_mode: ''0644''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-115] legacy_el6 probes the repository with a pinned locale and no_log"
+          ansible.builtin.assert:
+            that: '"[BAK-115]" in _t and "LC_ALL=C" in _t and "no_log: true" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-116] legacy_el6 fails on repository probe errors other than a missing repository"
+          ansible.builtin.assert:
+            that: '"[BAK-116]" in _t and "Is there a repository at the following location?" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-117] legacy_el6 initializes the repository only when the probe says it is missing"
+          ansible.builtin.assert:
+            that: '"[BAK-117]" in _t and "_backup_repo_probe.rc != 0" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el6.yml') }}"
+          delegate_to: localhost
+          become: false

@@ -1,0 +1,127 @@
+---
+# ==============================================================================
+# Host Agents — CentOS 6 (legacy_el6) otelcol 적용, raw 경로 (ADR-0006 §2.8~2.9, ADR-0005 부분집합)
+# ==============================================================================
+# legacy_el7.yml과 같은 구조(raw 헬퍼, 컨트롤러 렌더링, scp + 원격 sha256sum)이며 차이는 세 가지다.
+#   1. 바이너리는 legacy_el6 버전 행(Go 1.23 빌드, 커널 2.6.32 지원)을 쓴다: host_agents_versions[host_agents_version_row].
+#   2. 컬렉터는 SysV init 스크립트(otelcol-contrib.init.j2, root 실행) + chkconfig로 기동한다(systemd 없음).
+#   3. v0.119.0은 sending_queue의 sizer/block_on_overflow를 모르므로 템플릿이 legacy_el6 분기(blocking, 배치 큐)를 렌더링한다.
+# 태그 분리는 modern/legacy_el7과 동일하다. 만료 경고(MON-110)는 always라 Config/backup 태그 실행에서도 보인다.
+- name: "[MON-110] Warn when the legacy_el6 version row is past its expiry date"
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: legacy_el6 버전 행이 만료되었습니다({{ host_agents_version_expiry['legacy_el6'] }} 경과,
+      Go 보안 패치 없음). CentOS 6 호스트의 교체·폐기 계획을 진행하세요 (ADR-0006 §2.8, 실패가 아닌 경고).
+  when: host_agents_today | string > host_agents_version_expiry['legacy_el6'] | string
+  tags: [always]
+
+- name: "Install otelcol on CentOS 6"
+  tags: [agents_install, otel]
+  when: enable_otelcol | default(true) | bool
+  block:
+  - name: "[MON-111] Ensure otelcol persistent storage directory exists (raw)"
+    ansible.builtin.raw: "{{ otelcol_storage_dir | raw_dir_cmd(host_agents_owner, host_agents_group, '0750') }}"
+    register: _legacy_storage
+    changed_when: _legacy_storage.stdout | default('') | raw_changed
+
+  - name: "[MON-112] Deliver the legacy_el6 OpenTelemetry Collector Contrib binary (raw)"
+    ansible.builtin.include_tasks:
+      file: legacy_deliver_binary.yml
+      apply:
+        tags: [agents_install, otel]
+    vars:
+      _otelcol_version: "{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}"
+      _deliver_agent: otelcol-contrib
+      _deliver_binary: otelcol-contrib
+      _deliver_version: "{{ _otelcol_version }}"
+      _deliver_url: "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{{ _otelcol_version }}/otelcol-contrib_{{ _otelcol_version }}_linux_{{ host_agents_os_arch }}.tar.gz"
+      _deliver_sha256: "{{ host_agents_checksums.otelcol_contrib[_otelcol_version][host_agents_os_arch] }}"
+
+- name: "Apply otelcol configuration on CentOS 6"
+  tags: [agents_config, otel]
+  when: enable_otelcol | default(true) | bool
+  block:
+  - name: "[MON-113] Assert OpenObserve endpoint is configured without a trailing slash"
+    ansible.builtin.assert:
+      that:
+        - o2_endpoint | length > 0
+        - not (o2_endpoint is match('.*/$'))
+        - o2_endpoint is match('^https?://')
+      fail_msg: >-
+        {{ inventory_hostname }}: o2_endpoint(inventory/group_vars/servers.yml)가 비어 있거나 형식이 잘못되었습니다
+        (http(s)://host:port, 끝 슬래시 금지 — <endpoint>/api/<org> 경로가 404가 됩니다).
+      quiet: true
+
+  # CentOS 6에는 journald가 없으므로(rsyslog 기본) 프로브 없이 journald 수신기를 끈다.
+  - name: "[MON-114] Disable the journald receiver on CentOS 6 (no journald)"
+    ansible.builtin.set_fact:
+      host_agents_journald: false
+
+  - name: "[MON-115] Ensure otelcol config and secrets directories exist (raw)"
+    ansible.builtin.raw: "{{ item.path | raw_dir_cmd(host_agents_owner, host_agents_group, item.mode) }}"
+    loop:
+      - { path: "{{ otelcol_config_dir }}", mode: '0750' }
+      - { path: "{{ otelcol_secrets_dir }}", mode: '0700' }
+    loop_control:
+      label: "{{ item.path }}"
+    register: _legacy_cfgdirs
+    changed_when: _legacy_cfgdirs.stdout | default('') | raw_changed
+
+  - name: "[MON-116] Deploy otelcol secrets env file (raw, 0600, no_log, no diff)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ otelcol_secrets_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/secrets.env.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0600'
+      _raw_secret: true
+      _raw_handler: Restart otelcol-contrib (raw sysv)
+
+  - name: "[MON-117] Deploy OpenTelemetry Collector configuration (raw, validated with the legacy_el6 binary)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ otelcol_config_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/otelcol-contrib.yaml.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0640'
+      _raw_validate: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}/otelcol-contrib validate --config=%s"
+      _raw_handler: Restart otelcol-contrib (raw sysv)
+
+- name: "Enable otelcol service on CentOS 6"
+  tags: [agents_install, otel]
+  when: enable_otelcol | default(true) | bool
+  block:
+  # 새 설정이 새 바이너리로 검증된 뒤(MON-117)에만 symlink를 교체한다.
+  - name: "[MON-118] Switch otelcol-contrib install symlink to the delivered version (raw)"
+    ansible.builtin.include_tasks:
+      file: legacy_switch_binary.yml
+      apply:
+        tags: [agents_install, otel]
+    vars:
+      _deliver_agent_dir: "{{ host_agents_install_root }}/otelcol-contrib"
+      _deliver_version_dir: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}"
+      _deliver_new_path: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions[host_agents_version_row].otelcol_contrib }}/otelcol-contrib"
+      _deliver_link: "{{ host_agents_bin_dir }}/otelcol-contrib"
+      _deliver_binary: otelcol-contrib
+      _deliver_handler: Restart otelcol-contrib (raw sysv)
+
+  - name: "[MON-119] Deploy SysV init script for otelcol-contrib (raw, runs as root)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ otelcol_sysv_init_dir }}/otelcol-contrib"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/otelcol-contrib.init.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0755'
+      _raw_validate: "/bin/bash -n %s"
+      _raw_handler: Restart otelcol-contrib (raw sysv)
+
+  - name: "[MON-120] Apply pending restart before enabling"
+    ansible.builtin.meta: flush_handlers
+
+  - name: "[MON-121] Ensure otelcol-contrib is started and enabled via chkconfig (raw, sentinel)"
+    ansible.builtin.raw: "{{ 'otelcol-contrib' | raw_sysv_service_cmd }}"
+    register: _legacy_service
+    changed_when: _legacy_service.stdout | default('') | raw_changed

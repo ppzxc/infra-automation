@@ -52,11 +52,11 @@ def _task(path, prefix):
 # Structure: OS-path gates, tags, IDs
 # --------------------------------------------------------------------------
 
-def test_legacy_el7_is_no_longer_skipped_but_legacy_el6_still_is():
-    probe = {t["name"].split("]")[0].lstrip("["): t for t in _yaml(MON / "tasks" / "probe.yml")}
-    assert probe["MON-025"]["when"] == "host_agents_os_path == 'legacy_el6'"
-    assert probe["MON-028"]["when"] == "host_agents_os_path == 'legacy_el6'"
-    assert "legacy_el7" in probe["MON-025"]["ansible.builtin.debug"]["msg"]
+def test_no_legacy_path_is_skipped_by_the_probe_anymore():
+    # legacy_el6 landed in #48: the probe no longer ends the role for any OS path.
+    probe = _yaml(MON / "tasks" / "probe.yml")
+    assert not [t for t in probe if "ansible.builtin.meta" in t]
+    assert not [t for t in probe if t.get("name", "").startswith(("[MON-025]", "[MON-028]"))]
 
 
 @pytest.mark.parametrize("role", [MON, BAK])
@@ -78,7 +78,7 @@ def test_backup_shared_derivations_and_event_run_for_legacy_hosts_too():
     main = _yaml(BAK / "tasks" / "main.yml")
     flat = list(_flat(main))
     use_cron = next(t for t in flat if t.get("name", "").startswith("[BAK-012]"))["ansible.builtin.set_fact"]["backup_use_cron"]
-    assert "host_agents_os_path == 'legacy_el7'" in use_cron
+    assert "host_agents_os_path in ['legacy_el6', 'legacy_el7']" in use_cron
     stat = next(t for t in flat if t.get("name", "").startswith("[BAK-011]"))
     assert stat["when"] == "host_agents_os_path == 'modern'"
     event_block = next(b for b in main if b.get("name") == "Emit the inventory registration event")
@@ -93,6 +93,7 @@ def test_legacy_task_files_use_only_raw_or_controller_side_modules():
                           "ansible.builtin.get_url", "ansible.builtin.unarchive", "ansible.builtin.shell",
                           "ansible.builtin.stat", "ansible.builtin.file", "ansible.builtin.command"}
     for path in (MON / "tasks" / "legacy_el7.yml", BAK / "tasks" / "legacy_el7.yml",
+                 MON / "tasks" / "legacy_el6.yml", BAK / "tasks" / "legacy_el6.yml",
                  MON / "tasks" / "legacy_deliver_binary.yml", MON / "tasks" / "legacy_switch_binary.yml"):
         for t in _tasks(path):
             mods = [k for k in t if k.startswith("ansible.builtin.")]
@@ -269,7 +270,8 @@ def test_unit_runs_as_root_with_the_remaining_hardening_on_legacy_only(tmp_path)
     assert "CAP_DAC_READ_SEARCH" not in legacy and "AmbientCapabilities" not in legacy
     assert "User=otelcol" in modern and "AmbientCapabilities=CAP_DAC_READ_SEARCH" in modern
     assert "User=root" not in modern
-    assert _yaml(MON / "defaults" / "main.yml")["otelcol_run_as_root"] == "{{ host_agents_os_path | default('modern') == 'legacy_el7' }}"
+    assert _yaml(MON / "defaults" / "main.yml")["otelcol_run_as_root"] == \
+        "{{ host_agents_os_path | default('modern') in ['legacy_el6', 'legacy_el7'] }}"
 
 
 # --------------------------------------------------------------------------

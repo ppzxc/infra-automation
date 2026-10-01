@@ -367,6 +367,22 @@ def raw_service_cmd(name):
         N=shlex.quote(name), MARK=CHANGED_MARKER)
 
 
+def raw_sysv_service_cmd(name):
+    """Ensure a SysV service (CentOS 6) is running and enabled on boot; marker if anything changed.
+
+    Unlike ``raw_service_cmd`` it never looks for ``systemctl``. The boot sentinel is
+    ``chkconfig --list <name>`` showing ``3:on``; otherwise the script is registered with
+    ``chkconfig --add`` (reads its ``# chkconfig:`` header) and switched ``on``.
+    """
+    return _render(
+        'c=0; rc=0; '
+        'service @N@ status >/dev/null 2>&1 || { service @N@ start >/dev/null && c=1 || rc=1; }; '
+        'chkconfig --list @N@ 2>/dev/null | grep -q "3:on" || '
+        '{ { chkconfig --add @N@ && chkconfig @N@ on; } && c=1 || rc=1; }; '
+        '[ "$c" = 0 ] || echo @MARK@; [ "$rc" = 0 ]',
+        N=shlex.quote(name), MARK=CHANGED_MARKER)
+
+
 def raw_timezone_cmd(name, zoneinfo='/usr/share/zoneinfo', localtime='/etc/localtime'):
     """``community.general.timezone`` equivalent for systemd hosts (CentOS 7); marker if it changed.
 
@@ -760,6 +776,7 @@ class FilterModule(object):
             'raw_sysctl_live_cmd': raw_sysctl_live_cmd,
             'raw_sudoers_line': raw_sudoers_line,
             'raw_service_cmd': raw_service_cmd,
+            'raw_sysv_service_cmd': raw_sysv_service_cmd,
             'raw_timezone_cmd': raw_timezone_cmd,
             'raw_selinux_cmd': raw_selinux_cmd,
             'raw_iptables_cmd': raw_iptables_cmd,

@@ -15,3 +15,8 @@
 - name: Restart otelcol-contrib (raw)
   ansible.builtin.raw: systemctl restart otelcol-contrib
   changed_when: true
+
+# legacy_el6 경로(raw, SysV init): CentOS 6에는 systemctl이 없다.
+- name: Restart otelcol-contrib (raw sysv)
+  ansible.builtin.raw: service otelcol-contrib restart
+  changed_when: true
