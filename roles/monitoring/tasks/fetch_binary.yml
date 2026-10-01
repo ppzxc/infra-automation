@@ -1,0 +1,82 @@
+---
+# 컨트롤러 측 바이너리 준비 (ADR-0006 §2.8): pinned release를 1회 다운로드·SHA256 검증하고 캐시에 추출한다.
+# deliver_binary.yml(modern, copy 푸시)과 legacy_deliver_binary.yml(raw 경로, scp 업로드)이 공유한다.
+# 입력/산출 변수는 deliver_binary.yml 헤더와 동일하다. 산출: _deliver_cache_dir, _deliver_cached(추출 바이너리 stat+sha256), 경로 fact.
+- name: Set delivery paths
+  ansible.builtin.set_fact:
+    _deliver_cache_tarball: "{{ host_agents_cache_dir }}/{{ _deliver_agent }}/{{ _deliver_version }}/{{ _deliver_url | basename }}"
+    _deliver_cache_dir: "{{ host_agents_cache_dir }}/{{ _deliver_agent }}/{{ _deliver_version }}/{{ host_agents_os_arch }}"
+    _deliver_agent_dir: "{{ host_agents_install_root }}/{{ _deliver_agent }}"
+    _deliver_version_dir: "{{ host_agents_install_root }}/{{ _deliver_agent }}/{{ _deliver_version }}"
+    _deliver_new_path: "{{ host_agents_install_root }}/{{ _deliver_agent }}/{{ _deliver_version }}/{{ _deliver_binary }}"
+    _deliver_link: "{{ host_agents_bin_dir }}/{{ _deliver_binary }}"
+
+- name: "[MON-040] Ensure controller cache directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ _deliver_cache_tarball | dirname }}"
+    - "{{ _deliver_cache_dir }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+# 아키텍처가 다른 호스트가 같은 캐시를 동시에 쓰지 않도록 throttle: 1.
+- name: "[MON-041] Download pinned release tarball on the controller and verify SHA256"
+  ansible.builtin.get_url:
+    url: "{{ _deliver_url }}"
+    dest: "{{ _deliver_cache_tarball }}"
+    checksum: "sha256:{{ _deliver_sha256 }}"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  throttle: 1
+
+- name: "[MON-042] Extract the binary into the controller cache"
+  ansible.builtin.unarchive:
+    src: "{{ _deliver_cache_tarball }}"
+    dest: "{{ _deliver_cache_dir }}"
+    remote_src: true
+    extra_opts:
+      - "{{ _deliver_binary }}"
+    creates: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  throttle: 1
+  when: _deliver_format | default('tar') == 'tar'
+
+# 단일 파일 .bz2(restic)는 unarchive가 다루지 못하므로 bunzip2로 임시 파일에 푼 뒤 이름을 바꿔 부분 파일이 캐시에 남지 않게 한다.
+- name: "[MON-055] Decompress the single-file bz2 release into the controller cache"
+  ansible.builtin.shell: >-
+    bunzip2 -c '{{ _deliver_cache_tarball }}' > '{{ _deliver_cache_dir }}/{{ _deliver_binary }}.part'
+    && mv '{{ _deliver_cache_dir }}/{{ _deliver_binary }}.part' '{{ _deliver_cache_dir }}/{{ _deliver_binary }}'
+  args:
+    creates: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  throttle: 1
+  when: _deliver_format | default('tar') == 'bz2'
+
+- name: "[MON-056] Make the decompressed binary executable in the controller cache"
+  ansible.builtin.file:
+    path: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  check_mode: false
+  when: _deliver_format | default('tar') == 'bz2'
+
+- name: "[MON-043] Read the extracted binary SHA256 on the controller"
+  ansible.builtin.stat:
+    path: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+    checksum_algorithm: sha256
+  register: _deliver_cached
+  delegate_to: localhost
+  become: false
+  check_mode: false
+

@@ -1,0 +1,33 @@
+---
+# Host Agents 바이너리 전달 — legacy raw 경로 (ADR-0006 §2.8~2.9). deliver_binary.yml의 raw 대응본이며,
+# 입력(_deliver_*)은 동일하고 추가로 _deliver_smoke_args(기본 --version)를 받는다.
+# 컨트롤러가 검증·캐시한 *추출 바이너리*를 scp로 올리고(원격 sha256sum은 추출 바이너리 해시와 비교한다),
+# 새 버전 디렉터리에서 스모크 테스트까지 통과해야 호출자가 symlink를 교체할 수 있다(실패 시 호스트 실패 → 기존 symlink 유지).
+- name: Prepare the verified binary in the controller cache
+  ansible.builtin.import_tasks: fetch_binary.yml
+
+- name: "[MON-210] Ensure the versioned install directory exists (raw)"
+  ansible.builtin.raw: "{{ item | raw_dir_cmd(host_agents_owner, host_agents_group, '0755') }}"
+  loop:
+    - "{{ _deliver_agent_dir }}"
+    - "{{ _deliver_version_dir }}"
+  register: _legacy_dirs
+  changed_when: _legacy_dirs.stdout | default('') | raw_changed
+
+- name: Upload and install the pinned binary over scp
+  ansible.builtin.import_tasks: raw_upload.yml
+  vars:
+    _raw_src: "{{ _deliver_cache_dir }}/{{ _deliver_binary }}"
+    _raw_dest: "{{ _deliver_new_path }}"
+    _raw_sha256: "{{ _deliver_cached.stat.checksum }}"
+    _raw_owner: "{{ host_agents_owner }}"
+    _raw_group: "{{ host_agents_group }}"
+    _raw_mode: '0755'
+
+# 스모크 테스트가 실패하면(깨진 바이너리/비호환 glibc·커널) 이 호스트는 실패하고 symlink는 교체되지 않는다.
+- name: "[MON-211] Smoke-test the delivered binary on the host (raw)"
+  ansible.builtin.raw: "{{ _deliver_new_path | quote }} {{ _deliver_smoke_args | default('--version') }}"
+  register: _legacy_smoke
+  changed_when: false
+  failed_when: _legacy_smoke.rc | default(0) != 0
+  when: not ansible_check_mode

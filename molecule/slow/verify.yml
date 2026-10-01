@@ -706,3 +706,285 @@
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
           delegate_to: localhost
           become: false
+
+        # Host Agents legacy_el7(MON-2xx/BAK-2xx, #47): CentOS 7 Test Image가 없으므로 태스크 계약을 정적으로 검증한다
+        # (실행 검증은 tests/test_host_agents_legacy_el7.py, 실제 호스트는 docs/monitoring.md 카나리 런북).
+
+        - name: "[VERIFY-MON-200] legacy_el7 asserts the OpenObserve endpoint like the modern path"
+          ansible.builtin.assert:
+            that: '"[MON-200]" in _t and "o2_endpoint is match(''^https?://'')" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-201] legacy_el7 detects rsyslog with a read-only raw probe"
+          ansible.builtin.assert:
+            that: '"[MON-201]" in _t and "/usr/sbin/rsyslogd" in _t and "check_mode: false" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-202] legacy_el7 decides the journald receiver from the probe"
+          ansible.builtin.assert:
+            that: '"[MON-202]" in _t and "host_agents_journald" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-203] legacy_el7 creates the otelcol storage directory over raw"
+          ansible.builtin.assert:
+            that: '"[MON-203]" in _t and "raw_dir_cmd" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-204] legacy_el7 creates the config (0750) and secrets (0700) directories over raw"
+          ansible.builtin.assert:
+            that: '"[MON-204]" in _t and "''0750''" in _t and "''0700''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-206] legacy_el7 deploys the secrets env file as a private secret"
+          ansible.builtin.assert:
+            that: '"[MON-206]" in _t and "_raw_secret: true" in _t and "_raw_mode: ''0600''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-207] legacy_el7 validates the config with the new binary before moving it"
+          ansible.builtin.assert:
+            that: '"[MON-207]" in _t and "otelcol-contrib validate --config=%s" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-208] legacy_el7 delivers the pinned binary through the raw upload helper with tags applied"
+          ansible.builtin.assert:
+            that: '"[MON-208]" in _t and "legacy_deliver_binary.yml" in _t and "apply:" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-209] legacy_el7 switches the symlink only through the raw switch helper"
+          ansible.builtin.assert:
+            that: '"[MON-209]" in _t and "legacy_switch_binary.yml" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-210] legacy delivery creates the versioned directory over raw"
+          ansible.builtin.assert:
+            that: '"[MON-210]" in _t and "raw_dir_cmd" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_deliver_binary.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-211] legacy delivery smoke-tests the binary and fails the host"
+          ansible.builtin.assert:
+            that: '"[MON-211]" in _t and "failed_when: _legacy_smoke.rc | default(0) != 0" in _t and "not ansible_check_mode" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_deliver_binary.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-212] legacy switch is a readlink sentinel that notifies only on change"
+          ansible.builtin.assert:
+            that: '"[MON-212]" in _t and "raw_switch_binary_cmd" in _t and "raw_changed" in _t and "notify:" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_switch_binary.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-213] legacy_el7 deploys the root unit and notifies reload and restart"
+          ansible.builtin.assert:
+            that: '"[MON-213]" in _t and "otelcol-contrib.service.j2" in _t and "Reload systemd daemon (raw)" in _t and "Restart otelcol-contrib (raw)" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-214] legacy_el7 flushes handlers before enabling"
+          ansible.builtin.assert:
+            that: '"[MON-214]" in _t and "flush_handlers" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-MON-215] legacy_el7 enables and starts with a sentinel instead of enable --now"
+          ansible.builtin.assert:
+            that: '"[MON-215]" in _t and "raw_service_cmd" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-201] legacy_el7 probes conditional backup paths over raw"
+          ansible.builtin.assert:
+            that: '"[BAK-201]" in _t and "raw_exists_cmd" in _t and "legacy_el7" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/main.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-202] legacy_el7 presents the raw probe like stat results"
+          ansible.builtin.assert:
+            that: '"[BAK-202]" in _t and "raw_exists_results" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/main.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-203] legacy_el7 creates the restic and result directories over raw"
+          ansible.builtin.assert:
+            that: '"[BAK-203]" in _t and "raw_dir_cmd" in _t and "''0700''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-204] legacy_el7 deploys the restic env file as a private secret"
+          ansible.builtin.assert:
+            that: '"[BAK-204]" in _t and "_raw_secret: true" in _t and "_raw_mode: ''0600''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-205] legacy_el7 deploys the repository password as a private secret"
+          ansible.builtin.assert:
+            that: '"[BAK-205]" in _t and "_raw_secret: true" in _t and "restic_password" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-206] legacy_el7 deploys the backup result hook"
+          ansible.builtin.assert:
+            that: '"[BAK-206]" in _t and "host-agents-backup-event.sh" in _t and "rstrip=false" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-207] legacy_el7 deploys the logrotate configuration"
+          ansible.builtin.assert:
+            that: '"[BAK-207]" in _t and "host-agents-backup.logrotate.j2" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-208] legacy_el7 validates the profile with resticprofile show before moving it"
+          ansible.builtin.assert:
+            that: '"[BAK-208]" in _t and "show >/dev/null" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-209] legacy_el7 delivers restic with a version smoke test"
+          ansible.builtin.assert:
+            that: '"[BAK-209]" in _t and "_deliver_smoke_args: version" in _t and "_deliver_format: bz2" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-210] legacy_el7 delivers resticprofile with a version smoke test"
+          ansible.builtin.assert:
+            that: '"[BAK-210]" in _t and "_deliver_smoke_args: version" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-211] legacy_el7 switches the restic symlink"
+          ansible.builtin.assert:
+            that: '"[BAK-211]" in _t and "legacy_switch_binary.yml" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-212] legacy_el7 switches the resticprofile symlink"
+          ansible.builtin.assert:
+            that: '"[BAK-212]" in _t and "legacy_switch_binary.yml" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-213] legacy_el7 deploys the cron.d schedule"
+          ansible.builtin.assert:
+            that: '"[BAK-213]" in _t and "host-agents-backup.cron.j2" in _t and "_raw_mode: ''0644''" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-215] legacy_el7 probes the repository with a pinned locale and no_log"
+          ansible.builtin.assert:
+            that: '"[BAK-215]" in _t and "LC_ALL=C" in _t and "no_log: true" in _t and "check_mode: false" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-216] legacy_el7 fails on repository probe errors other than a missing repository"
+          ansible.builtin.assert:
+            that: '"[BAK-216]" in _t and "Is there a repository at the following location?" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-217] legacy_el7 initializes the repository only when the probe says it is missing"
+          ansible.builtin.assert:
+            that: '"[BAK-217]" in _t and "_backup_repo_probe.rc != 0" in _t'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/legacy_el7.yml') }}"
+          delegate_to: localhost
+          become: false

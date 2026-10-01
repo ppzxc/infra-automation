@@ -1,0 +1,29 @@
+[Unit]
+Description=OpenTelemetry Collector Contrib
+After=network.target
+
+[Service]
+{% if otelcol_run_as_root | default(false) | bool %}
+User=root
+Group=root
+{% else %}
+User={{ otelcol_user }}
+Group={{ otelcol_group }}
+{% endif %}
+Type=simple
+EnvironmentFile={{ otelcol_secrets_path }}
+ExecStart=/usr/local/bin/otelcol-contrib --config={{ otelcol_config_path }}
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+{% if not (otelcol_run_as_root | default(false) | bool) %}
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+{% endif %}
+
+[Install]
+WantedBy=multi-user.target

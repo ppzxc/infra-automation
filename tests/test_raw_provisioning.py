@@ -1227,3 +1227,70 @@ def test_secret_notice_reports_change_state_without_content():
     assert raw_secret_notice("/etc/s.env", True).endswith("would change")
     assert raw_secret_notice("/etc/s.env", False).endswith("would stay unchanged")
     assert "TOKEN" not in raw_secret_notice("/etc/s.env", True)
+
+
+# --------------------------------------------------------------------------
+# Host Agents legacy_el7 helpers (#47): the rendered commands are executed for real.
+# --------------------------------------------------------------------------
+
+def _sh(cmd):
+    import subprocess
+    return subprocess.run(["/bin/sh", "-c", cmd], capture_output=True, text=True)
+
+
+def test_raw_dir_cmd_creates_then_is_idempotent_and_fixes_mode(tmp_path):
+    import getpass
+    import grp
+    import os
+    from raw_provisioning import raw_changed, raw_dir_cmd
+    own, grp_ = getpass.getuser(), grp.getgrgid(os.getgid()).gr_name
+    d = tmp_path / "a" / "b"
+    cmd = raw_dir_cmd(str(d), own, grp_, "0750")
+    first = _sh(cmd)
+    assert first.returncode == 0 and raw_changed(first.stdout) and oct(d.stat().st_mode & 0o777) == "0o750"
+    assert not raw_changed(_sh(cmd).stdout)
+    d.chmod(0o755)
+    assert raw_changed(_sh(cmd).stdout) and oct(d.stat().st_mode & 0o777) == "0o750"
+
+
+def _agent_tree(tmp_path, versions):
+    agent = tmp_path / "opt" / "agent"
+    for i, v in enumerate(versions):
+        (agent / v).mkdir(parents=True)
+        (agent / v / "agent").write_text(v)
+        os.utime(agent / v, (1000 + i, 1000 + i))
+    (tmp_path / "bin").mkdir()
+    return agent, tmp_path / "bin" / "agent"
+
+
+def test_raw_switch_binary_switches_prunes_to_current_plus_previous_and_notifies_once(tmp_path):
+    from raw_provisioning import raw_changed, raw_switch_binary_cmd
+    agent, link = _agent_tree(tmp_path, ["1.0", "1.1", "1.2"])
+    link.symlink_to(agent / "1.1" / "agent")
+    cmd = raw_switch_binary_cmd(str(link), str(agent / "1.2" / "agent"), str(agent), "agent")
+    res = _sh(cmd)
+    assert res.returncode == 0 and raw_changed(res.stdout)
+    assert link.readlink() == agent / "1.2" / "agent"
+    assert sorted(p.name for p in agent.iterdir()) == ["1.1", "1.2"]           # 1.0 pruned, previous kept
+    again = _sh(cmd)
+    assert again.returncode == 0 and not raw_changed(again.stdout)             # idempotent
+    assert sorted(p.name for p in agent.iterdir()) == ["1.1", "1.2"]           # re-run keeps the previous one
+
+
+def test_raw_switch_binary_preserves_a_regular_file_binary_before_the_first_switch(tmp_path):
+    from raw_provisioning import raw_changed, raw_switch_binary_cmd
+    agent, link = _agent_tree(tmp_path, ["1.0"])
+    link.write_text("old-0.108.0")
+    res = _sh(raw_switch_binary_cmd(str(link), str(agent / "1.0" / "agent"), str(agent), "agent"))
+    assert res.returncode == 0 and raw_changed(res.stdout)
+    assert link.is_symlink() and (agent / "legacy-agent").read_text() == "old-0.108.0"
+
+
+def test_raw_exists_helpers_round_trip(tmp_path):
+    from raw_provisioning import raw_exists_cmd, raw_exists_results
+    (tmp_path / "yes").write_text("x")
+    paths = [str(tmp_path / "yes"), str(tmp_path / "no space")]
+    res = _sh(raw_exists_cmd(paths))
+    assert res.returncode == 0
+    assert raw_exists_results(res.stdout, paths) == [
+        {"item": paths[0], "stat": {"exists": True}}, {"item": paths[1], "stat": {"exists": False}}]

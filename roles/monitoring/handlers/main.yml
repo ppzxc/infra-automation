@@ -6,3 +6,12 @@
   failed_when: false
 
 
+
+# legacy_el7 경로(raw): 모듈을 쓸 수 없으므로 systemctl을 raw로 호출한다.
+- name: Reload systemd daemon (raw)
+  ansible.builtin.raw: systemctl daemon-reload
+  changed_when: true
+
+- name: Restart otelcol-contrib (raw)
+  ansible.builtin.raw: systemctl restart otelcol-contrib
+  changed_when: true

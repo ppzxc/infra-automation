@@ -17,6 +17,7 @@
 # ==============================================================================
 - name: "Install agents and clean legacy exporter"
   tags: [agents_install, otel]
+  when: host_agents_os_path == 'modern'
   block:
   - name: "[MON-011] Stop and disable legacy node_exporter service"
     ansible.builtin.systemd:
@@ -115,6 +116,7 @@
 
 - name: "Apply otelcol configuration"
   tags: [agents_config, otel]
+  when: host_agents_os_path == 'modern'
   block:
   - name: "[MON-060] Assert OpenObserve endpoint is configured without a trailing slash"
     ansible.builtin.assert:
@@ -185,6 +187,7 @@
 
 - name: "Enable otelcol service"
   tags: [agents_install, otel]
+  when: host_agents_os_path == 'modern'
   block:
   # 새 설정이 새 바이너리로 검증된 뒤(MON-004-CONF의 template validate)에만 symlink를 교체하고 핸들러가 재시작한다.
   - name: "[MON-054] Switch otelcol-contrib install symlink to the delivered version"
@@ -195,31 +198,9 @@
     when: enable_otelcol | default(true) | bool
 
   - name: "[MON-005] Create systemd service for otelcol-contrib"
-    ansible.builtin.copy:
-      dest: /etc/systemd/system/otelcol-contrib.service
-      content: |
-        [Unit]
-        Description=OpenTelemetry Collector Contrib
-        After=network.target
-
-        [Service]
-        User={{ otelcol_user }}
-        Group={{ otelcol_group }}
-        Type=simple
-        EnvironmentFile={{ otelcol_secrets_path }}
-        ExecStart=/usr/local/bin/otelcol-contrib --config={{ otelcol_config_path }}
-        Restart=always
-        RestartSec=5
-        LimitNOFILE=65535
-        NoNewPrivileges=true
-        ProtectSystem=full
-        ProtectHome=true
-        PrivateTmp=true
-        CapabilityBoundingSet=CAP_DAC_READ_SEARCH
-        AmbientCapabilities=CAP_DAC_READ_SEARCH
-
-        [Install]
-        WantedBy=multi-user.target
+    ansible.builtin.template:
+      src: otelcol-contrib.service.j2
+      dest: "{{ otelcol_systemd_unit_dir }}/otelcol-contrib.service"
       owner: root
       group: root
       mode: '0644'
@@ -260,3 +241,10 @@
       - not ansible_check_mode or (otelcol_unit_created is defined and not otelcol_unit_created.changed)
     ignore_errors: "{{ ansible_check_mode }}"
 
+# ==============================================================================
+# CentOS 7 (legacy_el7): 모듈을 쓸 수 없으므로 raw 경로(파일 전달 헬퍼)로 같은 템플릿을 적용한다.
+# static import이므로 when/tags가 가져온 태스크에 그대로 전파된다(tags는 legacy_el7.yml 안의 블록이 지정).
+# ==============================================================================
+- name: Apply otelcol on CentOS 7 over the raw path
+  ansible.builtin.import_tasks: legacy_el7.yml
+  when: host_agents_os_path == 'legacy_el7'
