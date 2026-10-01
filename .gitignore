@@ -57,7 +57,7 @@ openbao/data/
 postgres/data/
 prometheus/data/
 data/
-backup/
+/backup/
 backups/
 *.log
 

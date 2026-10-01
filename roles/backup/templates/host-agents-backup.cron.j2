@@ -1,0 +1,4 @@
+# Ansible managed — 놓친 실행은 보정되지 않는다(26h 백업 누락 알림으로 보완, ADR-0006 §2.5).
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+{{ backup_schedule_minute | int }} {{ backup_schedule_hour | int }} * * * root set -a; . {{ backup_env_path }}; set +a; {{ backup_run_command }}

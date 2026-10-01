@@ -1,0 +1,11 @@
+---
+# 바이너리 교체는 상주 데몬이 없어 재시작할 대상이 없다(timer/cron이 다음 실행에서 새 symlink를 사용한다).
+# switch_binary.yml의 notify 계약을 충족하기 위한 no-op 핸들러.
+- name: Refresh backup tooling
+  ansible.builtin.debug:
+    msg: "restic/resticprofile symlink updated; the next scheduled backup uses the new binary."
+  changed_when: false
+
+- name: Reload systemd for backup units
+  ansible.builtin.systemd:
+    daemon_reload: true

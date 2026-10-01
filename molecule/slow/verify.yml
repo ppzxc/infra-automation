@@ -358,7 +358,7 @@
           changed_when: false
           when: not (_bak_use_cron | bool)
 
-        - name: "[VERIFY-BAK-041] Verify the timer unit is persistent and the service is confined"
+        - name: "[VERIFY-BAK-040] Verify the timer unit is persistent and the service is confined"
           ansible.builtin.shell: >-
             grep -q '^Persistent=true' /etc/systemd/system/host-agents-backup.timer &&
             grep -q '^ProtectSystem=strict' /etc/systemd/system/host-agents-backup.service

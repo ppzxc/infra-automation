@@ -1,0 +1,31 @@
+# Ansible managed — resticprofile 프로파일 (ADR-0006 §2.4). 시크릿은 포함하지 않는다(/etc/restic/env, /etc/restic/password).
+version: "1"
+
+# resticprofile show는 restic 바이너리의 존재를 요구하므로, 아직 symlink가 교체되기 전에도 검증되도록 버전 디렉터리의 경로를 가리킨다.
+global:
+  restic-binary: {{ backup_restic_binary | to_json }}
+
+{{ backup_profile_name }}:
+  repository: {{ backup_repository | to_json }}
+  password-file: {{ backup_password_path | to_json }}
+  cache-dir: {{ backup_cache_dir | to_json }}
+{% if rustfs_ca_file | length > 0 %}
+  cacert: {{ rustfs_ca_file | to_json }}
+{% endif %}
+  backup:
+    source:
+{% for path in backup_sources %}
+      - {{ path | to_json }}
+{% endfor %}
+    exclude:
+{% for path in backup_excludes %}
+      - {{ path | to_json }}
+{% endfor %}
+    exclude-caches: true
+    retry-lock: 30m
+{% if host_agents_inputs.backup_pre_hooks | length > 0 %}
+    run-before:
+{% for hook in host_agents_inputs.backup_pre_hooks %}
+      - {{ hook | to_json }}
+{% endfor %}
+{% endif %}
