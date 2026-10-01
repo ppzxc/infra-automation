@@ -147,7 +147,7 @@ def test_timer_is_persistent_and_service_is_confined(tmp_path):
     timer = _render(tmp_path, "host-agents-backup.timer.j2", "t")
     assert "Persistent=true" in timer and "OnCalendar=*-*-* 02:07:00" in timer
     svc = _render(tmp_path, "host-agents-backup.service.j2", "s")
-    assert "ProtectSystem=strict" in svc and "ReadWritePaths=/var/cache/restic" in svc
+    assert "ProtectSystem=strict" in svc and "ReadWritePaths=/var/cache/restic -/var/backups\n" in svc
     assert "EnvironmentFile=/etc/restic/env" in svc and "User=root" in svc
 
 
@@ -165,7 +165,7 @@ def test_run_command_unlocks_stale_only_then_backs_up():
 
 def test_cron_scheduler_is_used_only_on_rocky8_or_non_systemd():
     expr = _task("[BAK-012]")["ansible.builtin.set_fact"]["backup_use_cron"]
-    assert "'8'" in expr and "ansible_service_mgr != 'systemd'" in expr
+    assert "'8'" in expr and "ansible_service_mgr | default('systemd')" in expr
 
 
 # --- credentials -----------------------------------------------------------------------------------------

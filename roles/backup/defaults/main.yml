@@ -43,3 +43,8 @@ backup_standard_excludes:
 # 존재할 때만 포함하는 조건부 표준 경로
 backup_conditional_paths:
   - /opt/services
+
+# 서비스 샌드박스(ProtectSystem=strict)에서 backup_pre_hooks(DB 덤프 등)가 쓸 수 있는 추가 경로.
+# systemd의 '-' 접두사로 경로가 없어도 유닛이 실패하지 않는다. 호스트별로 group_vars/host_vars에서 확장한다.
+backup_hook_write_paths:
+  - /var/backups

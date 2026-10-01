@@ -69,7 +69,7 @@
 | `BAK-024` | `Deploy resticprofile profile (validated with resticprofile show)` | `ansible.builtin.template` | All | Checksum 비교; 새 바이너리의 `resticprofile show`가 통과해야 교체 (시크릿 미포함) |
 | `BAK-030` | `Switch restic install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-050`~`053`) |
 | `BAK-031` | `Switch resticprofile install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-050`~`053`) |
-| `BAK-040` | `Deploy backup systemd service` | `ansible.builtin.template` | Rocky 9/10, Ubuntu, Debian | Checksum 비교 (`ProtectSystem=strict`, 쓰기는 restic 캐시만) |
+| `BAK-040` | `Deploy backup systemd service` | `ansible.builtin.template` | Rocky 9/10, Ubuntu, Debian | Checksum 비교 (`ProtectSystem=strict`, 쓰기는 restic 캐시와 `backup_hook_write_paths`(기본 `/var/backups`)만) |
 | `BAK-041` | `Deploy backup systemd timer (Persistent=true)` | `ansible.builtin.template` | Rocky 9/10, Ubuntu, Debian | Checksum 비교 (`Persistent=true`) |
 | `BAK-042` | `Apply pending systemd reload before enabling the timer` | `ansible.builtin.meta` | Rocky 9/10, Ubuntu, Debian | `flush_handlers` (유닛 변경 시에만 `daemon-reload`) |
 | `BAK-043` | `Enable and start the backup timer` | `ansible.builtin.systemd` | Rocky 9/10, Ubuntu, Debian | 상태 비교 (check 모드 제외) |

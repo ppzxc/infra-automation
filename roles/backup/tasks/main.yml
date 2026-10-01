@@ -67,7 +67,7 @@
             + (_backup_conditional.results | selectattr('stat.exists') | map(attribute='item') | list)) | unique | list }}
       backup_excludes: "{{ (backup_standard_excludes + host_agents_inputs.backup_exclude_paths) | unique | list }}"
       backup_schedule_offset: "{{ backup_schedule_window_minutes | int | random(seed=inventory_hostname) }}"
-      backup_use_cron: "{{ (host_agents_os_family == 'RedHat' and host_agents_os_major_version == '8') or ansible_service_mgr != 'systemd' }}"
+      backup_use_cron: "{{ (host_agents_os_family == 'RedHat' and host_agents_os_major_version == '8') or (ansible_service_mgr | default('systemd')) != 'systemd' }}"
 
   - name: "[BAK-013] Derive the scheduled hour/minute and run command"
     ansible.builtin.set_fact:
