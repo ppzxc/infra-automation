@@ -24,6 +24,8 @@ host_agents_backup_mandatory_paths:
 host_agents_versions:
   default:
     otelcol_contrib: "0.161.0"
+    restic: "0.19.1"
+    resticprofile: "0.33.1"
 
 # 버전×아키텍처별 SHA256 (배포 tarball 기준). upstream checksums.txt는 기준으로 신뢰하지 않는다.
 host_agents_checksums:
@@ -31,6 +33,15 @@ host_agents_checksums:
     "0.161.0":
       amd64: "778c689efa681ff6e4722ce9f66b9b7f57c3ba009ab2e2b43dc2e0315862c731"
       arm64: "cd5de93213a0dbb90e4998b3b9e4e15ed691ec635cf7cf4147f95799fb16b676"
+  # restic은 단일 파일 .bz2 릴리스, resticprofile은 self-update가 없는 빌드(no_self_update)를 고정한다(버전 표 이탈 방지).
+  restic:
+    "0.19.1":
+      amd64: "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c"
+      arm64: "a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465"
+  resticprofile:
+    "0.33.1":
+      amd64: "1d7027d15e3e2456e585a210f811d0f72ec40f6b3388f00425642ed579165d70"
+      arm64: "58e4fd6fbe2bd460ee6823c3693f39a10f0f24c90635f0215c19b0ab20bbf5df"
 
 host_agents_install_root: /opt/host-agents
 

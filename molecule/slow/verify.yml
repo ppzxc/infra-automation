@@ -287,3 +287,80 @@
         - name: "[VERIFY-MON-006] Verify otelcol-contrib service status"
           ansible.builtin.debug:
             msg: "otelcol-contrib hostmetrics verification complete."
+
+    # ==========================================================================
+    # 6. Backup Role (restic + resticprofile) 검증
+    # ==========================================================================
+    - name: Verify the backup role
+      when: "'backup' in molecule_roles"
+      vars:
+        _bak_use_cron: "{{ ansible_distribution_major_version == '8' and ansible_os_family == 'RedHat' }}"
+      block:
+        - name: Load the pinned versions
+          ansible.builtin.include_vars:
+            file: "{{ playbook_dir }}/../../roles/monitoring/vars/main.yml"
+            name: _bak_vars
+
+        - name: "[VERIFY-BAK-003] Verify restic reports the pinned version"
+          ansible.builtin.command: /usr/local/bin/restic version
+          register: _verify_restic
+          changed_when: false
+          failed_when: _bak_vars.host_agents_versions['default'].restic not in _verify_restic.stdout
+
+        - name: "[VERIFY-BAK-004] Verify resticprofile reports the pinned version"
+          ansible.builtin.command: /usr/local/bin/resticprofile version
+          register: _verify_rp
+          changed_when: false
+          failed_when: _bak_vars.host_agents_versions['default'].resticprofile not in _verify_rp.stdout
+
+        - name: "[VERIFY-BAK-030] Verify both install symlinks target the pinned versioned directories"
+          ansible.builtin.stat:
+            path: "/usr/local/bin/{{ item.name }}"
+            follow: false
+          loop:
+            - { name: restic, version: "{{ _bak_vars.host_agents_versions['default'].restic }}" }
+            - { name: resticprofile, version: "{{ _bak_vars.host_agents_versions['default'].resticprofile }}" }
+          register: _verify_bak_links
+          failed_when: >-
+            not item.stat.islnk or
+            item.stat.lnk_source != _bak_vars.host_agents_install_root ~ '/' ~ item.item.name ~ '/' ~ item.item.version ~ '/' ~ item.item.name
+          loop_control:
+            label: "{{ item.item.name }}"
+
+        - name: "[VERIFY-BAK-020] Verify /etc/restic is root-owned 0700"
+          ansible.builtin.stat:
+            path: /etc/restic
+          register: _verify_bak_dir
+          failed_when: not _verify_bak_dir.stat.exists or _verify_bak_dir.stat.pw_name != 'root' or _verify_bak_dir.stat.mode != '0700'
+
+        - name: "[VERIFY-BAK-022] Verify the credential files are root-owned 0600"
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop: [/etc/restic/env, /etc/restic/password, /etc/restic/profiles.yaml]
+          register: _verify_bak_files
+          failed_when: not item.stat.exists or item.stat.pw_name != 'root' or item.stat.mode != '0600'
+
+        - name: "[VERIFY-BAK-024] Verify the profile has no secrets, includes mandatory paths and passes resticprofile show"
+          ansible.builtin.shell: >-
+            ! grep -q 'molecule-fixture' /etc/restic/profiles.yaml &&
+            grep -q '/var/spool/cron' /etc/restic/profiles.yaml && grep -q 'retry-lock: 30m' /etc/restic/profiles.yaml &&
+            resticprofile -f yaml -c /etc/restic/profiles.yaml -n default show >/dev/null
+          changed_when: false
+
+        - name: "[VERIFY-BAK-044] Verify the cron.d schedule exists only on Rocky 8"
+          ansible.builtin.stat:
+            path: /etc/cron.d/host-agents-backup
+          register: _verify_bak_cron
+          failed_when: _verify_bak_cron.stat.exists != (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-041] Verify the persistent timer is enabled on systemd-timer hosts"
+          ansible.builtin.command: systemctl is-enabled host-agents-backup.timer
+          changed_when: false
+          when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-041] Verify the timer unit is persistent and the service is confined"
+          ansible.builtin.shell: >-
+            grep -q '^Persistent=true' /etc/systemd/system/host-agents-backup.timer &&
+            grep -q '^ProtectSystem=strict' /etc/systemd/system/host-agents-backup.service
+          changed_when: false
+          when: not (_bak_use_cron | bool)
