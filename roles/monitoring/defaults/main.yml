@@ -47,8 +47,11 @@ otel_otlp_bind: "127.0.0.1"
 otel_otlp_grpc_port: 4317
 otel_otlp_http_port: 4318
 
-# 로그 exporter 1개당 영속 큐 크기(bytes, 3개 스트림 합계 ≈ 256MiB). 초과 시 filelog가 역압을 받고 원본 파일이 버퍼가 된다.
-otel_log_queue_bytes: 89478485
+# 백업 결과 jsonl (backup 역할의 backup_log_path와 같은 값을 유지한다)
+otel_backup_log_path: /var/log/host-agents/backup.jsonl
+
+# 로그 exporter 1개당 영속 큐 크기(bytes, 4개 스트림 합계 ≈ 256MiB). 초과 시 filelog가 역압을 받고 원본 파일이 버퍼가 된다.
+otel_log_queue_bytes: 67108864
 
 # OpenTelemetry Collector System Logs to Ingest (ISMS/ISMS-P Baseline)
 # 표준 수집 목록. 이 중 vars의 otel_security_log_paths에 속한 경로는 security_logs 스트림으로 라우팅된다.

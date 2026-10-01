@@ -35,6 +35,25 @@ receivers:
     retry_on_failure:
       enabled: true
 {% endfor %}
+  # 백업 결과 jsonl (backup 역할의 run-finally 훅이 append). 본문(원문 JSON)은 유지하고 필드를 attributes로 파싱한다.
+  filelog/backup_logs:
+    include:
+      - {{ otel_backup_log_path | to_json }}
+    start_at: end
+    include_file_path: true
+    storage: file_storage
+    attributes:
+      log_type: backup_logs
+    operators:
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: strptime
+          layout: '%Y-%m-%dT%H:%M:%SZ'
+    retry_on_failure:
+      enabled: true
 {% if host_agents_journald | default(false) | bool %}
   journald:
     start_at: end
@@ -116,7 +135,7 @@ service:
   extensions: [file_storage]
   pipelines:
     logs/in:
-      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}{% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
+      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
       processors: [memory_limiter, resource/host]
       exporters: [routing/logs]
 {% for stream in host_agents_log_streams %}

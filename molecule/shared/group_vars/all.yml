@@ -94,6 +94,8 @@ rustfs_endpoint: "https://rustfs.molecule.invalid:9000"
 rustfs_bucket: "host-backups"
 # RustFS가 없으므로 repo init은 끈다(init 동작은 pytest가 로컬 restic으로 검증한다).
 backup_init_enabled: false
+# OpenObserve도 없으므로 등록 이벤트 전송은 끈다(전송은 pytest가 가짜 서버로 검증한다).
+backup_inventory_event_enabled: false
 host_agents_kv_fixture:
   host:
     o2_ingest_token: "molecule-fixture-o2-ingest"  # gitleaks:allow (molecule fixture, not a secret)

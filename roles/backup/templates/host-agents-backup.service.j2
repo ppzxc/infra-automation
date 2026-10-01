@@ -10,7 +10,7 @@ User=root
 EnvironmentFile={{ backup_env_path }}
 ExecStart=/bin/sh -c '{{ backup_run_command }}'
 ProtectSystem=strict
-ReadWritePaths={{ backup_cache_dir }}{% for path in backup_hook_write_paths %} -{{ path }}{% endfor %}
+ReadWritePaths={{ backup_cache_dir }} {{ backup_log_dir }} {{ backup_state_dir }}{% for path in backup_hook_write_paths %} -{{ path }}{% endfor %}
 
 PrivateTmp=true
 NoNewPrivileges=true

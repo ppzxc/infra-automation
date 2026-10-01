@@ -88,7 +88,8 @@
 ## 3-3. 수집 설정 (`otelcol-contrib.yaml.j2`, `MON-060~065`)
 
 - **수신**: 스트림별 `filelog/<stream>`(`start_at: end`, `storage: file_storage`, `log_type` 속성, 본문 원문) + `hostmetrics`(60s, 8 스크레이퍼). journald는 `/usr/sbin/rsyslogd`가 없는 호스트에서만, `docker_stats`는 `otel_docker_metrics: true`인 호스트에서만, 로컬 OTLP 수신기는 `otel_otlp_enabled: true`일 때만 추가됩니다(기본 off).
-- **라우팅**: `logs/in`(memory_limiter, `resource/host`: `host.name`=인벤토리 호스트명, `os.type`, `os.description`) → `routing/logs`(`log_type`) → `security_logs`/`system_logs`/`app_logs` 파이프라인 → 스트림별 `otlphttp` exporter(`stream-name` 헤더).
+- **백업 결과 수집**: 고정 수신기 `filelog/backup_logs`(`otel_backup_log_path`, `log_type: backup_logs`)가 `json_parser`로 필드를 attributes로 올리되 본문 원문은 유지하고 `ts`를 이벤트 시각으로 씁니다. 필드 계약은 [backup.md §6](backup.md).
+- **라우팅**: `logs/in`(memory_limiter, `resource/host`: `host.name`=인벤토리 호스트명, `os.type`, `os.description`) → `routing/logs`(`log_type`) → `security_logs`/`system_logs`/`app_logs`/`backup_logs` 파이프라인 → 스트림별 `otlphttp` exporter(`stream-name` 헤더).
 - **전송**: `<o2_endpoint>/api/<o2_org>`(끝 슬래시 금지), `Authorization: Basic ${env:O2_BASIC_AUTH}`, 사설 CA는 `o2_ca_file`. 로그 exporter는 `file_storage` 영속 bytes 큐(`otel_log_queue_bytes`) + `block_on_overflow: true` + `max_elapsed_time: 0`; 메트릭은 별도 메모리 큐(`block_on_overflow: false`) 파이프라인입니다. `file_storage`는 `compaction.on_rebound: true`.
 - **시크릿**: `/etc/otelcol-contrib/secrets.env`(`0600`, `no_log`, `diff: false`)에만 있고 설정은 `${env:…}`로 참조합니다. systemd 유닛은 비root `otelcol` + `CAP_DAC_READ_SEARCH` + `EnvironmentFile`.
 - **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 `inventory/group_vars/servers.yml`(Git)에서 지정합니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.

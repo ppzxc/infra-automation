@@ -23,6 +23,15 @@ backup_profile_path: /etc/restic/profiles.yaml
 backup_cache_dir: /var/cache/restic
 backup_profile_name: default
 
+# 결과 방출 (ADR-0006 §2.6): status-file + run-finally 훅이 append하는 jsonl을 otelcol이 backup_logs로 수집한다.
+backup_event_script_path: /usr/local/sbin/host-agents-backup-event
+backup_log_dir: /var/log/host-agents
+backup_log_path: /var/log/host-agents/backup.jsonl
+backup_state_dir: /var/lib/host-agents
+backup_status_file: /var/lib/host-agents/restic-status.json
+backup_logrotate_path: /etc/logrotate.d/host-agents-backup
+backup_logrotate_rotate: 8   # 주 단위 회전 보관 개수 (장기 보존은 OpenObserve backup_logs 1년)
+
 # 스케줄: 02:00~03:59 사이 inventory_hostname 시드 고정 분
 backup_schedule_window_minutes: 120
 backup_schedule_start_hour: 2
@@ -31,6 +40,11 @@ backup_cron_path: /etc/cron.d/host-agents-backup
 
 # Deploy(태그 없음) 한정 repo 초기화. RustFS가 없는 테스트(molecule)에서만 false로 끈다.
 backup_init_enabled: true
+
+# Deploy 종료 시 컨트롤러가 OpenObserve backup_logs에 job=inventory 이벤트를 보낸다(컨트롤러 전용 토큰).
+# OpenObserve가 없는 테스트(molecule)에서만 false로 끈다. 컨트롤러가 사설 CA를 신뢰하면 true로 올린다.
+backup_inventory_event_enabled: true
+backup_inventory_validate_certs: false
 
 # 표준 제외 (ISMS 백업 표준). 필수 경로 제외와는 별개이며 모든 호스트에 적용된다.
 backup_standard_excludes:
