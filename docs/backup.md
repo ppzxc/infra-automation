@@ -94,7 +94,7 @@
 |---|---|---|
 | `job=backup` | 호스트 훅 | `job`, `host`, `command`(`backup`), `success`(bool), `exit_code`, `duration`(초), `error`(실패 시 마지막 오류 요약, ≤500자), `ts`(UTC ISO8601) |
 | `job=maintenance` | 중앙 Repo Maintenance(후속 티켓) | `job`, `host`, `command`(`check`/`forget`…), `success`, `duration`, `error` |
-| `job=inventory` | Deploy 종료 시 컨트롤러(`BAK-061`, Config 제외) | `job`, `host`, `deployed_at`(UTC ISO8601) |
+| `job=inventory` | Deploy 종료 시 컨트롤러(`BAK-061`, Config 제외; OpenBao `agents/openobserve`의 `controller_ingest_token`으로 인증, 인증서는 기본 검증) | `job`, `host`, `deployed_at`(UTC ISO8601) |
 
 표준 알림:
 
