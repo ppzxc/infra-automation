@@ -140,6 +140,8 @@
 | `MON-052` | `Find installed version directories` | `ansible.builtin.find` | All | 읽기 전용, `check_mode: false` |
 | `MON-053` | `Prune versions older than the previous one` | `ansible.builtin.file` | All | 현재 + 직전 1개만 보존(재실행에도 직전 유지) |
 | `MON-054` | `Switch otelcol-contrib install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-051`~`053`) |
+| `MON-055` | `Decompress the single-file bz2 release into the controller cache` | `ansible.builtin.shell` | controller | `creates` + `.part` 임시 파일 후 `mv`(부분 파일 방지); `_deliver_format: bz2`(restic)일 때만 |
+| `MON-056` | `Make the decompressed binary executable in the controller cache` | `ansible.builtin.file` | controller | 모드 비교 (`0755`), `_deliver_format: bz2`일 때만 |
 | `MON-060` | `Assert OpenObserve endpoint is configured without a trailing slash` | `ansible.builtin.assert` | modern | 읽기 전용 (비어 있거나 끝 슬래시면 호스트 실패) |
 | `MON-061` | `Ensure otelcol persistent storage directory exists (filelog checkpoints and log queue)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` |
 | `MON-062` | `Detect rsyslog (journald is collected only where rsyslog is absent)` | `ansible.builtin.stat` | modern | 읽기 전용, `check_mode: false` (`/usr/sbin`·`/sbin`) |

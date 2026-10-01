@@ -29,3 +29,10 @@ common_packages:
 # o2_endpoint: "https://openobserve.example.internal:5080"
 # o2_org: "default"
 # o2_ca_file: "/etc/pki/ca-trust/source/anchors/internal-ca.pem"
+
+# Host Agents — RustFS 백업 저장소 (비시크릿, ADR-0006 §2.5). 호스트 키/restic 비밀번호는 OpenBao hosts/<host>/agents.
+# rustfs_endpoint는 끝 슬래시 없이 지정해야 한다 (미지정 시 Host Agents 실행이 실패).
+# rustfs_endpoint: "https://rustfs.example.internal:9000"
+# rustfs_bucket: "host-backups"
+# rustfs_region: ""
+# rustfs_ca_file: "/etc/pki/ca-trust/source/anchors/internal-ca.pem"

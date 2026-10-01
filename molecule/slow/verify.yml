@@ -287,3 +287,160 @@
         - name: "[VERIFY-MON-006] Verify otelcol-contrib service status"
           ansible.builtin.debug:
             msg: "otelcol-contrib hostmetrics verification complete."
+
+    # ==========================================================================
+    # 6. Backup Role (restic + resticprofile) 검증
+    # ==========================================================================
+    - name: Verify the backup role
+      when: "'backup' in molecule_roles"
+      vars:
+        _bak_use_cron: "{{ ansible_distribution_major_version == '8' and ansible_os_family == 'RedHat' }}"
+      block:
+        - name: Load the pinned versions
+          ansible.builtin.include_vars:
+            file: "{{ playbook_dir }}/../../roles/monitoring/vars/main.yml"
+            name: _bak_vars
+
+        - name: "[VERIFY-BAK-003] Verify restic reports the pinned version"
+          ansible.builtin.command: /usr/local/bin/restic version
+          register: _verify_restic
+          changed_when: false
+          failed_when: _bak_vars.host_agents_versions['default'].restic not in _verify_restic.stdout
+
+        - name: "[VERIFY-BAK-004] Verify resticprofile reports the pinned version"
+          ansible.builtin.command: /usr/local/bin/resticprofile version
+          register: _verify_rp
+          changed_when: false
+          failed_when: _bak_vars.host_agents_versions['default'].resticprofile not in _verify_rp.stdout
+
+        - name: "[VERIFY-BAK-030] Verify both install symlinks target the pinned versioned directories"
+          ansible.builtin.stat:
+            path: "/usr/local/bin/{{ item.name }}"
+            follow: false
+          loop:
+            - { name: restic, version: "{{ _bak_vars.host_agents_versions['default'].restic }}" }
+            - { name: resticprofile, version: "{{ _bak_vars.host_agents_versions['default'].resticprofile }}" }
+          register: _verify_bak_links
+          failed_when: >-
+            not item.stat.islnk or
+            item.stat.lnk_source != _bak_vars.host_agents_install_root ~ '/' ~ item.item.name ~ '/' ~ item.item.version ~ '/' ~ item.item.name
+          loop_control:
+            label: "{{ item.item.name }}"
+
+        - name: "[VERIFY-BAK-020] Verify /etc/restic is root-owned 0700"
+          ansible.builtin.stat:
+            path: /etc/restic
+          register: _verify_bak_dir
+          failed_when: not _verify_bak_dir.stat.exists or _verify_bak_dir.stat.pw_name != 'root' or _verify_bak_dir.stat.mode != '0700'
+
+        - name: "[VERIFY-BAK-022] Verify the credential files are root-owned 0600"
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop: [/etc/restic/env, /etc/restic/password, /etc/restic/profiles.yaml]
+          register: _verify_bak_files
+          failed_when: not item.stat.exists or item.stat.pw_name != 'root' or item.stat.mode != '0600'
+
+        - name: "[VERIFY-BAK-024] Verify the profile has no secrets, includes mandatory paths and passes resticprofile show"
+          ansible.builtin.shell: >-
+            ! grep -q 'molecule-fixture' /etc/restic/profiles.yaml &&
+            grep -q '/var/spool/cron' /etc/restic/profiles.yaml && grep -q 'retry-lock: 30m' /etc/restic/profiles.yaml &&
+            resticprofile -f yaml -c /etc/restic/profiles.yaml -n default show >/dev/null
+          changed_when: false
+
+        - name: "[VERIFY-BAK-044] Verify the cron.d schedule exists only on Rocky 8"
+          ansible.builtin.stat:
+            path: /etc/cron.d/host-agents-backup
+          register: _verify_bak_cron
+          failed_when: _verify_bak_cron.stat.exists != (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-041] Verify the persistent timer is enabled on systemd-timer hosts"
+          ansible.builtin.command: systemctl is-enabled host-agents-backup.timer
+          changed_when: false
+          when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-040] Verify the timer unit is persistent and the service is confined"
+          ansible.builtin.shell: >-
+            grep -q '^Persistent=true' /etc/systemd/system/host-agents-backup.timer &&
+            grep -q '^ProtectSystem=strict' /etc/systemd/system/host-agents-backup.service
+          changed_when: false
+          when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-021] Verify the restic cache directory is root-owned 0700"
+          ansible.builtin.stat:
+            path: /var/cache/restic
+          register: _verify_bak_cache
+          failed_when: not _verify_bak_cache.stat.exists or _verify_bak_cache.stat.mode != '0700'
+
+        - name: "[VERIFY-BAK-023] Verify the password file is excluded from the backup"
+          ansible.builtin.command: grep -q '/etc/restic/password' /etc/restic/profiles.yaml
+          changed_when: false
+
+        - name: "[VERIFY-BAK-031] Verify the resticprofile symlink exists"
+          ansible.builtin.stat:
+            path: /usr/local/bin/resticprofile
+            follow: false
+          register: _verify_bak_rp
+          failed_when: not _verify_bak_rp.stat.islnk
+
+        - name: "[VERIFY-BAK-043] Verify the backup timer is active on systemd-timer hosts"
+          ansible.builtin.command: systemctl is-active host-agents-backup.timer
+          changed_when: false
+          when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-045] Verify no cron.d schedule coexists with the timer"
+          ansible.builtin.stat:
+            path: /etc/cron.d/host-agents-backup
+          register: _verify_bak_nocron
+          failed_when: _verify_bak_nocron.stat.exists
+          when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-010] Verify the repository URL is built from the RustFS endpoint, bucket and host"
+          ansible.builtin.command:
+            argv: [grep, -qF, 'repository: "s3:https://rustfs.molecule.invalid:9000/host-backups/{{ inventory_hostname }}"', /etc/restic/profiles.yaml]
+          changed_when: false
+
+        - name: "[VERIFY-BAK-011] Verify /opt/services is a backup source only when it exists"
+          ansible.builtin.shell: >-
+            test -d /opt/services; present=$?;
+            grep -q '"/opt/services"' /etc/restic/profiles.yaml; listed=$?;
+            test "$present" = "$listed"
+          changed_when: false
+
+        - name: "[VERIFY-BAK-012] Verify the standard excludes are rendered"
+          ansible.builtin.shell: grep -q '"\*\*/node_modules"' /etc/restic/profiles.yaml && grep -q '"/etc/restic/password"' /etc/restic/profiles.yaml
+          changed_when: false
+
+        - name: "[VERIFY-BAK-013] Verify the backup runs a stale-only unlock before the backup"
+          ansible.builtin.shell: >-
+            grep -E 'unlock;.*backup' {{ '/etc/cron.d/host-agents-backup' if _bak_use_cron | bool else '/etc/systemd/system/host-agents-backup.service' }} | grep -vq -- '--remove-all'
+          changed_when: false
+
+        - name: "[VERIFY-BAK-040] Verify the service unit is confined and runs as root"
+          ansible.builtin.shell: grep -q '^ProtectSystem=strict' /etc/systemd/system/host-agents-backup.service && grep -q '^ReadWritePaths=/var/cache/restic' /etc/systemd/system/host-agents-backup.service
+          changed_when: false
+          when: not (_bak_use_cron | bool)
+
+        - name: "[VERIFY-BAK-042] Verify systemd knows the timer unit (daemon-reload was applied)"
+          ansible.builtin.command: systemctl cat host-agents-backup.timer
+          changed_when: false
+          when: not (_bak_use_cron | bool)
+
+        # RustFS가 없는 molecule에서는 repo init 태스크가 꺼져 있으므로, 같은 resticprofile 호출을 로컬 repo로 실제 실행해 프로브/init 계약을 확인한다.
+        - name: "[VERIFY-BAK-050] Verify the probe reports a missing repository before init"
+          ansible.builtin.shell: >-
+            d=$(mktemp -d); printf '%s' pw > $d/pw;
+            printf 'version: "1"\ndefault:\n  repository: %s/repo\n  password-file: %s/pw\n' $d $d > $d/p.yaml;
+            LC_ALL=C /usr/local/bin/resticprofile -f yaml -c $d/p.yaml -n default cat config 2>&1 | grep -q 'Is there a repository at the following location?';
+            echo $d
+          register: _verify_bak_tmp
+          changed_when: false
+
+        - name: "[VERIFY-BAK-052] Verify init creates the repository"
+          ansible.builtin.command: /usr/local/bin/resticprofile -f yaml -c {{ _verify_bak_tmp.stdout | trim }}/p.yaml -n default init
+          args:
+            creates: "{{ _verify_bak_tmp.stdout | trim }}/repo/config"
+          changed_when: false
+
+        - name: "[VERIFY-BAK-051] Verify the probe succeeds once the repository exists"
+          ansible.builtin.command: /usr/local/bin/resticprofile -f yaml -c {{ _verify_bak_tmp.stdout | trim }}/p.yaml -n default cat config
+          changed_when: false

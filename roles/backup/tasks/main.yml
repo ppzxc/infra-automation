@@ -1,0 +1,228 @@
+---
+# ==============================================================================
+# Host Agents 백업 (restic + resticprofile, ADR-0006 §2.4~2.5)
+# ==============================================================================
+# 전제: monitoring 역할의 always import(probe.yml, agents_input.yml)가 먼저 실행되어
+# host_agents_os_*, host_agents_inputs, host_agents_secrets가 정의되어 있다(host_agents.yml에서 monitoring이 먼저).
+# 버전·체크섬 표와 설치 경로 상수는 monitoring/vars/main.yml 한 곳에서만 관리한다(include_role은 vars를 공개하지 않으므로 직접 로드).
+- name: "[BAK-001] Load the shared Host Agents version table and constants from monitoring"
+  ansible.builtin.include_vars:
+    file: "{{ role_path }}/../monitoring/vars/main.yml"
+  tags: [always]
+
+- name: "Deliver restic and resticprofile"
+  when: enable_backup | bool
+  tags: [agents_install, backup]
+  block:
+  - name: "[BAK-003] Deliver pinned restic binary"
+    ansible.builtin.include_tasks: "{{ role_path }}/../monitoring/tasks/deliver_binary.yml"
+    vars:
+      _restic_version: "{{ host_agents_versions['default'].restic }}"
+      _deliver_agent: restic
+      _deliver_binary: restic
+      _deliver_version: "{{ _restic_version }}"
+      _deliver_format: bz2
+      _deliver_url: "https://github.com/restic/restic/releases/download/v{{ _restic_version }}/restic_{{ _restic_version }}_linux_{{ host_agents_os_arch }}.bz2"
+      _deliver_sha256: "{{ host_agents_checksums.restic[_restic_version][host_agents_os_arch] }}"
+
+  - name: "[BAK-004] Deliver pinned resticprofile binary"
+    ansible.builtin.include_tasks: "{{ role_path }}/../monitoring/tasks/deliver_binary.yml"
+    vars:
+      _rp_version: "{{ host_agents_versions['default'].resticprofile }}"
+      _deliver_agent: resticprofile
+      _deliver_binary: resticprofile
+      _deliver_version: "{{ _rp_version }}"
+      _deliver_url: "https://github.com/creativeprojects/resticprofile/releases/download/v{{ _rp_version }}/resticprofile_no_self_update_{{ _rp_version }}_linux_{{ host_agents_os_arch }}.tar.gz"
+      _deliver_sha256: "{{ host_agents_checksums.resticprofile[_rp_version][host_agents_os_arch] }}"
+
+- name: "Apply backup configuration"
+  when: enable_backup | bool
+  tags: [agents_config, backup]
+  block:
+  - name: "[BAK-010] Assert RustFS endpoint and bucket are configured"
+    ansible.builtin.assert:
+      that:
+        - rustfs_endpoint | length > 0
+        - rustfs_endpoint is match('^https?://')
+        - not (rustfs_endpoint is match('.*/$'))
+        - rustfs_bucket | length > 0
+      fail_msg: >-
+        {{ inventory_hostname }}: rustfs_endpoint/rustfs_bucket(inventory/group_vars/servers.yml)가 비어 있거나 형식이 잘못되었습니다
+        (http(s)://host:port, 끝 슬래시 금지).
+      quiet: true
+
+  - name: "[BAK-011] Check which conditional standard backup paths exist"
+    ansible.builtin.stat:
+      path: "{{ item }}"
+    loop: "{{ backup_conditional_paths }}"
+    register: _backup_conditional
+    check_mode: false
+
+  - name: "[BAK-012] Derive repository, source list, excludes and schedule"
+    ansible.builtin.set_fact:
+      backup_restic_binary: "{{ host_agents_install_root }}/restic/{{ host_agents_versions['default'].restic }}/restic"
+      backup_repository: "s3:{{ rustfs_endpoint }}/{{ rustfs_bucket }}/{{ inventory_hostname }}"
+      backup_sources: >-
+        {{ (host_agents_inputs.backup_paths
+            + (_backup_conditional.results | selectattr('stat.exists') | map(attribute='item') | list)) | unique | list }}
+      backup_excludes: "{{ (backup_standard_excludes + host_agents_inputs.backup_exclude_paths) | unique | list }}"
+      backup_schedule_offset: "{{ backup_schedule_window_minutes | int | random(seed=inventory_hostname) }}"
+      backup_use_cron: "{{ (host_agents_os_family == 'RedHat' and host_agents_os_major_version == '8') or (ansible_service_mgr | default('systemd')) != 'systemd' }}"
+
+  - name: "[BAK-013] Derive the scheduled hour/minute and run command"
+    ansible.builtin.set_fact:
+      backup_schedule_hour: "{{ backup_schedule_start_hour | int + (backup_schedule_offset | int // 60) }}"
+      backup_schedule_minute: "{{ backup_schedule_offset | int % 60 }}"
+      backup_run_command: >-
+        {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path }} -n {{ backup_profile_name }} unlock;
+        {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path }} -n {{ backup_profile_name }} backup
+
+  - name: "[BAK-020] Ensure restic config directory exists (0700)"
+    ansible.builtin.file:
+      path: "{{ backup_config_dir }}"
+      state: directory
+      owner: root
+      group: root
+      mode: '0700'
+
+  - name: "[BAK-021] Ensure restic cache directory exists (0700)"
+    ansible.builtin.file:
+      path: "{{ backup_cache_dir }}"
+      state: directory
+      owner: root
+      group: root
+      mode: '0700'
+
+  - name: "[BAK-022] Deploy restic credentials env file (0600, no_log, no diff)"
+    ansible.builtin.template:
+      src: restic.env.j2
+      dest: "{{ backup_env_path }}"
+      owner: root
+      group: root
+      mode: '0600'
+    no_log: true
+    diff: false
+
+  - name: "[BAK-023] Deploy restic repository password file (0600, no_log, no diff)"
+    ansible.builtin.copy:
+      content: "{{ host_agents_secrets.restic_password }}"
+      dest: "{{ backup_password_path }}"
+      owner: root
+      group: root
+      mode: '0600'
+    no_log: true
+    diff: false
+
+  # 새 resticprofile 바이너리로 렌더링본을 검증한 뒤에만 설정이 교체된다(실패 시 기존 설정 불변).
+  - name: "[BAK-024] Deploy resticprofile profile (validated with resticprofile show)"
+    ansible.builtin.template:
+      src: profiles.yaml.j2
+      dest: "{{ backup_profile_path }}"
+      owner: root
+      group: root
+      mode: '0600'
+      # validate가 넘기는 임시 파일은 확장자가 없어 resticprofile이 찾지 못하므로 .yaml 사본으로 검증한다.
+      validate: >-
+        /bin/sh -c 'cp "$1" "$1.yaml" && {{ host_agents_install_root }}/resticprofile/{{ host_agents_versions['default'].resticprofile }}/resticprofile
+        -f yaml -c "$1.yaml" -n {{ backup_profile_name }} show >/dev/null; rc=$?; rm -f "$1.yaml"; exit $rc' sh %s
+
+
+- name: "Enable backup schedule"
+  when: enable_backup | bool
+  tags: [agents_install, backup]
+  block:
+  - name: "[BAK-030] Switch restic install symlink to the delivered version"
+    ansible.builtin.include_tasks: "{{ role_path }}/../monitoring/tasks/switch_binary.yml"
+    vars:
+      _deliver_binary: restic
+      _deliver_handler: Refresh backup tooling
+
+  - name: "[BAK-031] Switch resticprofile install symlink to the delivered version"
+    ansible.builtin.include_tasks: "{{ role_path }}/../monitoring/tasks/switch_binary.yml"
+    vars:
+      _deliver_binary: resticprofile
+      _deliver_handler: Refresh backup tooling
+
+  - name: "[BAK-040] Deploy backup systemd service"
+    ansible.builtin.template:
+      src: host-agents-backup.service.j2
+      dest: "{{ backup_systemd_unit_dir }}/host-agents-backup.service"
+      owner: root
+      group: root
+      mode: '0644'
+    when: not backup_use_cron | bool
+    notify: Reload systemd for backup units
+
+  - name: "[BAK-041] Deploy backup systemd timer (Persistent=true)"
+    ansible.builtin.template:
+      src: host-agents-backup.timer.j2
+      dest: "{{ backup_systemd_unit_dir }}/host-agents-backup.timer"
+      owner: root
+      group: root
+      mode: '0644'
+    when: not backup_use_cron | bool
+    notify: Reload systemd for backup units
+
+  - name: "[BAK-042] Apply pending systemd reload before enabling the timer"
+    ansible.builtin.meta: flush_handlers
+
+  - name: "[BAK-043] Enable and start the backup timer"
+    ansible.builtin.systemd:
+      name: host-agents-backup.timer
+      enabled: true
+      state: started
+    when:
+      - not backup_use_cron | bool
+      - not ansible_check_mode
+
+  - name: "[BAK-044] Deploy backup cron.d schedule (Rocky 8 and non-systemd hosts)"
+    ansible.builtin.template:
+      src: host-agents-backup.cron.j2
+      dest: "{{ backup_cron_path }}"
+      owner: root
+      group: root
+      mode: '0644'
+    when: backup_use_cron | bool
+
+  - name: "[BAK-045] Remove the cron.d schedule on systemd-timer hosts"
+    ansible.builtin.file:
+      path: "{{ backup_cron_path }}"
+      state: absent
+    when: not backup_use_cron | bool
+
+  # Deploy(태그 없음/agents_install/backup) 한정. agents_config에는 속하지 않으므로 Config 실행은 init하지 않는다.
+  - name: "[BAK-050] Probe whether the restic repository exists (restic cat config)"
+    ansible.builtin.shell: >-
+      set -a; . {{ backup_env_path | quote }}; set +a; export LC_ALL=C;
+      {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path | quote }} -n {{ backup_profile_name }} cat config
+    args:
+      executable: /bin/sh
+    register: _backup_repo_probe
+    changed_when: false
+    failed_when: false
+    check_mode: false
+    no_log: true
+    when:
+      - backup_init_enabled | bool
+      - not ansible_check_mode
+
+  - name: "[BAK-051] Fail when the repository probe errors for a reason other than a missing repository"
+    ansible.builtin.assert:
+      that: >-
+        _backup_repo_probe.rc == 0 or _backup_repo_probe.rc == 10 or
+        'Is there a repository at the following location?' in (_backup_repo_probe.stdout ~ _backup_repo_probe.stderr)
+      fail_msg: "{{ inventory_hostname }}: restic repository probe failed (rc={{ _backup_repo_probe.rc }}) — 저장소 부재가 아닌 오류라 init하지 않습니다."
+      quiet: true
+    when: _backup_repo_probe is not skipped
+
+  - name: "[BAK-052] Initialize the restic repository when it does not exist"
+    ansible.builtin.shell: >-
+      set -a; . {{ backup_env_path | quote }}; set +a;
+      {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path | quote }} -n {{ backup_profile_name }} init
+    args:
+      executable: /bin/sh
+    no_log: true
+    changed_when: true
+    when:
+      - _backup_repo_probe is not skipped
+      - _backup_repo_probe.rc != 0

@@ -1,6 +1,6 @@
 ---
 # ==============================================================================
-# Host Agents 전용 플레이북 (ADR-0006) — otelcol-contrib 수집 에이전트 (백업 에이전트는 후속 티켓)
+# Host Agents 전용 플레이북 (ADR-0006) — otelcol-contrib 수집 에이전트 + restic/resticprofile 백업 에이전트
 # ==============================================================================
 # Host Agents를 다루는 유일한 진입점이다. monitoring은 site.yml/maintenance.yml에서 제거되었다.
 #
@@ -39,6 +39,9 @@
     - role: monitoring
       become: true
       tags: [otel]
+    - role: backup
+      become: true
+      tags: [backup]
 
 # ------------------------------------------------------------------------------
 # Play 3: 임시 개인키 정리 (공유 플레이북)

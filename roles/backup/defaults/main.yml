@@ -1,0 +1,50 @@
+---
+# Host Agents 백업 (restic + resticprofile, ADR-0006 §2.4~2.5)
+enable_backup: true
+
+# RustFS(S3) 연결 — 비시크릿 공용값은 inventory/group_vars/servers.yml에서 지정한다.
+# 호스트별 repo: s3:<rustfs_endpoint>/<rustfs_bucket>/<inventory_hostname>
+rustfs_endpoint: ""        # 예: https://rustfs.example.internal:9000 (끝 슬래시 금지)
+rustfs_bucket: "host-backups"
+rustfs_region: ""          # 비우면 AWS_DEFAULT_REGION을 설정하지 않는다
+rustfs_ca_file: ""         # 사설 CA 사용 시 호스트상의 CA 파일 경로(restic --cacert)
+
+# 바이너리 전달 헬퍼(monitoring/tasks/deliver_binary.yml 공용)가 쓰는 값 — monitoring defaults와 동일하게 유지한다.
+host_agents_cache_dir: "{{ lookup('ansible.builtin.env', 'HOME') | default('/tmp', true) }}/.cache/host-agents"
+host_agents_bin_dir: /usr/local/bin
+host_agents_owner: root
+host_agents_group: root
+
+# 호스트 측 위치
+backup_config_dir: /etc/restic
+backup_env_path: /etc/restic/env
+backup_password_path: /etc/restic/password
+backup_profile_path: /etc/restic/profiles.yaml
+backup_cache_dir: /var/cache/restic
+backup_profile_name: default
+
+# 스케줄: 02:00~03:59 사이 inventory_hostname 시드 고정 분
+backup_schedule_window_minutes: 120
+backup_schedule_start_hour: 2
+backup_systemd_unit_dir: /etc/systemd/system
+backup_cron_path: /etc/cron.d/host-agents-backup
+
+# Deploy(태그 없음) 한정 repo 초기화. RustFS가 없는 테스트(molecule)에서만 false로 끈다.
+backup_init_enabled: true
+
+# 표준 제외 (ISMS 백업 표준). 필수 경로 제외와는 별개이며 모든 호스트에 적용된다.
+backup_standard_excludes:
+  - /home/*/.cache
+  - "**/node_modules"
+  - "*.tmp"
+  - "*.swp"
+  - /etc/restic/password
+
+# 존재할 때만 포함하는 조건부 표준 경로
+backup_conditional_paths:
+  - /opt/services
+
+# 서비스 샌드박스(ProtectSystem=strict)에서 backup_pre_hooks(DB 덤프 등)가 쓸 수 있는 추가 경로.
+# systemd의 '-' 접두사로 경로가 없어도 유닛이 실패하지 않는다. 호스트별로 group_vars/host_vars에서 확장한다.
+backup_hook_write_paths:
+  - /var/backups

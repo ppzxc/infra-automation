@@ -1,0 +1,16 @@
+# Ansible managed
+[Unit]
+Description=Host Agents daily backup (restic via resticprofile)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile={{ backup_env_path }}
+ExecStart=/bin/sh -c '{{ backup_run_command }}'
+ProtectSystem=strict
+ReadWritePaths={{ backup_cache_dir }}{% for path in backup_hook_write_paths %} -{{ path }}{% endfor %}
+
+PrivateTmp=true
+NoNewPrivileges=true

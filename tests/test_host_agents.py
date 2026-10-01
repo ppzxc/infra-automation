@@ -55,7 +55,7 @@ def test_host_agents_playbook_structure():
     assert agents["hosts"] == "{{ target_hosts | default('servers') }}:&servers"
     assert agents["serial"] == "25%"
     assert agents["gather_facts"] is False
-    assert _role_names(agents) == ["monitoring"]
+    assert _role_names(agents) == ["monitoring", "backup"]
 
 
 def test_shared_connection_plays_accept_connection_hosts_override():
@@ -117,6 +117,7 @@ def test_role_tags_wired():
     assert any(t["name"].startswith("[MON-004]") for t in config["block"])
     agents = _plays("host_agents.yml")[1]
     assert agents["roles"][0]["tags"] == ["otel"]
+    assert agents["roles"][1]["tags"] == ["backup"]
 
 
 def test_probe_and_kv_tasks_run_before_any_change():
