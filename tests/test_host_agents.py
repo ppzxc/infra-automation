@@ -299,7 +299,7 @@ GOOD = dict(REQUIRED, otel_docker_metrics=True, otel_extra_logs=["/opt/app/*.log
 BAD_EXCLUDE = dict(REQUIRED, backup_exclude_paths=["/etc"])
 MISSING = {k: v for k, v in REQUIRED.items() if k != "restic_password"}
 SHARED_O2 = {"controller_token": "shared-o2"}
-SHARED_RUSTFS = {"maintenance_key": "shared-rfs"}
+SHARED_RUSTFS = {"maintenance_access_key": "shared-rfs"}
 
 
 class _FakeOpenBao(BaseHTTPRequestHandler):

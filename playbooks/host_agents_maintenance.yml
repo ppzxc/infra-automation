@@ -1,0 +1,26 @@
+---
+# ==============================================================================
+# Host Agents — Repo Maintenance (ADR-0006 §2.5, Spec #38 / Ticket-7)
+# ==============================================================================
+# 컨트롤러(Semaphore)에서 호스트별 restic repo를 중앙 유지보수한다. 호스트에는 접속하지 않는다(connection: local).
+#   1. restic check            (매주 일요일 05:00 스케줄)
+#   2. 첫째 일요일: check --read-data-subset=10%
+#   3. 위가 모두 성공한 호스트만 forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune
+# 호스트×명령마다 job=maintenance 이벤트를 OpenObserve backup_logs로 전송하고, 한 호스트라도 실패하면 실행이 실패한다.
+# 시크릿(호스트별 restic 비밀번호, RustFS 유지보수 키, 컨트롤러 토큰)은 OpenBao에서 조회한다 — Git/인벤토리에 두지 않는다.
+#
+# Semaphore 템플릿: Host Agents — Repo Maintenance (스케줄 0 5 * * 0, 인벤토리 inventory/hosts.yml)
+# 실행 예시:
+#   ansible-playbook -i inventory/hosts.yml playbooks/host_agents_maintenance.yml
+#   ansible-playbook -i inventory/hosts.yml playbooks/host_agents_maintenance.yml -e target_hosts=ns0266 -e backup_maintenance_read_subset=always
+# ==============================================================================
+- name: Host Agents Repo Maintenance
+  hosts: "{{ target_hosts | default('servers') }}:&servers"
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Run central repo maintenance per host
+      ansible.builtin.include_role:
+        name: backup
+        tasks_from: maintenance

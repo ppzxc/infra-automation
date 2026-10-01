@@ -62,3 +62,18 @@ backup_conditional_paths:
 # systemd의 '-' 접두사로 경로가 없어도 유닛이 실패하지 않는다. 호스트별로 group_vars/host_vars에서 확장한다.
 backup_hook_write_paths:
   - /var/backups
+
+# Repo Maintenance (Semaphore "Host Agents — Repo Maintenance", 컨트롤러 실행, playbooks/host_agents_maintenance.yml)
+# 호스트별 repo에 대해 check → (성공 시) forget --prune. 유지보수 키/컨트롤러 토큰은 OpenBao agents/rustfs, agents/openobserve.
+backup_retention_daily: 7
+backup_retention_weekly: 4
+backup_retention_monthly: 12
+backup_maintenance_retry_lock: 30m
+# 월간 check --read-data-subset=10%: auto(매월 첫째 일요일) | always | never (수동 실행에서 강제/생략)
+backup_maintenance_read_subset: auto
+backup_maintenance_timezone: Asia/Seoul   # 스케줄(일요일 05:00)이 기준으로 삼는 달력 시간대
+backup_maintenance_read_subset_percent: "10%"
+# 컨트롤러에서 RustFS 사설 CA를 신뢰시킬 때의 CA 파일 경로(RESTIC_CACERT). rustfs_ca_file은 호스트 경로이므로 따로 둔다.
+backup_maintenance_ca_file: ""
+# 테스트 전용 seam: 비워 두면 s3:<rustfs_endpoint>/<rustfs_bucket>/<host>를 사용한다(molecule/pytest만 로컬 repo를 지정).
+backup_maintenance_repository: ""
