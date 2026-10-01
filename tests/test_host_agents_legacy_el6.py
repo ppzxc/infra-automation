@@ -163,6 +163,34 @@ def test_init_script_runs_as_root_loads_secrets_and_registers_with_chkconfig(tmp
         "{{ host_agents_os_path | default('modern') in ['legacy_el6', 'legacy_el7'] }}"
 
 
+def test_init_restart_waits_for_the_old_collector_to_exit_and_passes_the_secret_env(tmp_path):
+    # The old collector holds the file_storage lock while it flushes; restart must not start a second one early.
+    import subprocess
+    import time
+    text = _render_init(tmp_path, True).replace("/var/run/", str(tmp_path) + "/").replace("/var/log/", str(tmp_path) + "/")
+    init = tmp_path / "init.sh"
+    init.write_text(text)
+    init.chmod(0o755)
+    fake = tmp_path / "bin" / "otelcol-contrib"
+    fake.parent.mkdir(exist_ok=True)
+    fake.write_text('#!/bin/sh\necho "start auth=$O2_BASIC_AUTH" >> %(t)s/events\n'
+                    'trap \'sleep 2; echo "exit" >> %(t)s/events; exit 0\' TERM\nwhile :; do sleep 0.2; done\n' % {"t": tmp_path})
+    fake.chmod(0o755)
+    (tmp_path / "etc" / "otelcol").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "etc" / "otelcol" / "config.yaml").write_text("x: 1\n")
+    (tmp_path / "etc" / "otelcol-contrib").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "etc" / "otelcol-contrib" / "secrets.env").write_text("O2_BASIC_AUTH=abc123\n")
+    try:
+        assert subprocess.run([str(init), "start"], capture_output=True).returncode == 0
+        time.sleep(0.5)
+        assert subprocess.run([str(init), "restart"], capture_output=True).returncode == 0
+        time.sleep(0.5)
+        assert (tmp_path / "events").read_text().splitlines() == ["start auth=abc123", "exit", "start auth=abc123"]
+        assert subprocess.run([str(init), "status"], capture_output=True).returncode == 0
+    finally:
+        subprocess.run([str(init), "stop"], capture_output=True)
+
+
 def test_sysv_sentinel_uses_chkconfig_list_and_never_systemctl():
     import sys
     sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))

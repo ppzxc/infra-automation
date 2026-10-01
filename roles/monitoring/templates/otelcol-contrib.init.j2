@@ -67,6 +67,13 @@ stop() {
     if [ -f $PIDFILE ]; then
         PID=$(cat $PIDFILE)
         kill -TERM $PID 2>/dev/null
+        # 종료(큐 flush, file_storage 잠금 해제)를 기다려야 restart의 새 프로세스가 storage를 열 수 있다.
+        n=0
+        while kill -0 $PID 2>/dev/null && [ $n -lt 30 ]; do
+            sleep 1
+            n=$((n + 1))
+        done
+        kill -0 $PID 2>/dev/null && kill -KILL $PID 2>/dev/null
         rm -f $PIDFILE
         echo_success 2>/dev/null || echo -n "[ OK ]"
     else
