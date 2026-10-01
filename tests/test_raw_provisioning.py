@@ -1144,3 +1144,86 @@ def test_raw_gate_precedes_fact_dependent_conditions():
                 # detect_raw_path.yml sets os_family/distribution*; other facts stay undefined.
                 assert not any(f in str(cond) for f in ("ansible_service_mgr", "ansible_pkg_mgr", "ansible_facts")), (
                     t.get("name"), cond)
+
+
+# --------------------------------------------------------------------------
+# Host Agents subset (#46): scp upload, hash-pinned sentinel, check-mode diff
+# --------------------------------------------------------------------------
+import hashlib  # noqa: E402
+
+from raw_provisioning import (  # noqa: E402
+    raw_scp_argv, raw_upload_changed, raw_upload_finalize_cmd, raw_check_diff, raw_secret_notice,
+)
+
+BIN = b"\x7fELF-fake-binary\x00" * 64
+BIN_SHA = hashlib.sha256(BIN).hexdigest()
+
+
+def test_scp_argv_uses_resolved_connection_values():
+    argv = raw_scp_argv("/cache/otelcol", "/var/tmp/otelcol.raw.upload", "10.0.0.5", "2222", "ops", "/tmp/k")
+    assert argv[0] == "scp" and argv[-1] == "ops@10.0.0.5:/var/tmp/otelcol.raw.upload"
+    assert argv[argv.index("-P") + 1] == "2222"
+    assert argv[argv.index("-i") + 1] == "/tmp/k"
+    assert argv[-2] == "/cache/otelcol" and "BatchMode=yes" in argv
+
+
+def test_scp_argv_brackets_ipv6():
+    argv = raw_scp_argv("/c/x", "/var/tmp/x", "fe80::1", 22, "ops", "/k")
+    assert argv[-1] == "ops@[fe80::1]:/var/tmp/x"
+
+
+@pytest.mark.parametrize("key", [None, ""])
+def test_scp_argv_requires_a_key_because_batchmode_cannot_prompt(key):
+    with pytest.raises(ValueError, match="private key"):
+        raw_scp_argv("/c/x", "/var/tmp/x", "h", 22, "ops", key)
+
+
+@pytest.mark.parametrize("dest", ["relative/x", "/a b", "/a;rm -rf /", "/a/../b", "/a$(x)"])
+def test_scp_argv_rejects_unsafe_remote_path(dest):
+    with pytest.raises(ValueError):
+        raw_scp_argv("/c/x", dest, "h", 22, "u", "/k")
+
+
+def test_upload_sentinel_pins_hash_and_mode():
+    probe = "banner\n__RAW_PROBE__ %s 755 root:root\n" % BIN_SHA
+    assert raw_upload_changed(probe, BIN_SHA, "0755", "root", "root") is False
+    assert raw_upload_changed(probe, BIN_SHA, "0700", "root", "root") is True
+    assert raw_upload_changed(probe, "0" * 64, "0755", "root", "root") is True
+    assert raw_upload_changed("__RAW_PROBE__   \n", BIN_SHA, "0755") is True
+    assert raw_upload_changed("", BIN_SHA, "0755") is True
+
+
+def test_finalize_installs_only_when_hash_matches(tmp_path):
+    stage, dest = tmp_path / "stage", tmp_path / "bin"
+    stage.write_bytes(BIN)
+    cmd = raw_upload_finalize_cmd(str(stage), str(dest), OWNER, GROUP, "0755", BIN_SHA)
+    assert sh(cmd).returncode == 0
+    assert dest.read_bytes() == BIN and stat.S_IMODE(dest.stat().st_mode) == 0o755
+    assert not stage.exists() and not (tmp_path / "bin.raw.tmp").exists()
+
+
+def test_finalize_hash_mismatch_fails_and_leaves_dest_untouched(tmp_path):
+    stage, dest = tmp_path / "stage", tmp_path / "bin"
+    dest.write_bytes(b"old")
+    stage.write_bytes(BIN + b"tampered")
+    res = sh(raw_upload_finalize_cmd(str(stage), str(dest), OWNER, GROUP, "0755", BIN_SHA))
+    assert res.returncode != 0
+    assert dest.read_bytes() == b"old"
+    assert not stage.exists() and not (tmp_path / "bin.raw.tmp").exists()
+
+
+def test_finalize_missing_stage_fails(tmp_path):
+    res = sh(raw_upload_finalize_cmd(str(tmp_path / "nope"), str(tmp_path / "bin"), OWNER, GROUP, "0755", BIN_SHA))
+    assert res.returncode != 0 and not (tmp_path / "bin").exists()
+
+
+def test_check_diff_shows_changes_and_hides_secrets():
+    out = raw_check_diff("a=1\n", "a=2\n", "/etc/x.conf")
+    assert "-a=1" in out and "+a=2" in out and "/etc/x.conf" in out
+    assert raw_check_diff("a=1", "a=1", "/etc/x.conf").endswith("no content difference")
+
+
+def test_secret_notice_reports_change_state_without_content():
+    assert raw_secret_notice("/etc/s.env", True).endswith("would change")
+    assert raw_secret_notice("/etc/s.env", False).endswith("would stay unchanged")
+    assert "TOKEN" not in raw_secret_notice("/etc/s.env", True)

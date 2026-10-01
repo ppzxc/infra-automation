@@ -727,3 +727,128 @@ def test_docker_group_is_added_only_via_lookup_and_rsyslog_probes_both_paths():
     assert "/usr/sbin/rsyslogd, /sbin/rsyslogd" in text
     consts = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))
     assert consts["host_agents_log_streams"] == ["security_logs", "system_logs", "app_logs", "backup_logs"]
+
+
+# --------------------------------------------------------------------------
+# raw_upload.yml (#46): the real task file under ansible-playbook on a local
+# connection; a fake `scp` on PATH stands in for the network copy.
+# --------------------------------------------------------------------------
+
+def _run_raw_upload(tmp_path, vars_, check=False, scp_ok=True):
+    import getpass
+    import os
+    bindir = tmp_path / "fakebin"
+    bindir.mkdir(exist_ok=True)
+    log = tmp_path / "scp.log"
+    scp = bindir / "scp"
+    scp.write_text('#!/bin/sh\necho "$@" >> %s\n'
+                   'for a; do last="$a"; done\n'
+                   'src=""; for a; do prev="$src"; src="$a"; done\n'
+                   '[ "%s" = ok ] || exit 1\n'
+                   'cp "$prev" "${last#*:}"\n' % (log, "ok" if scp_ok else "fail"))
+    scp.chmod(0o755)
+    play = [{
+        "hosts": "localhost", "gather_facts": False, "connection": "local", "become": False,
+        "vars": {"ansible_user": getpass.getuser(), "ansible_host": "127.0.0.1", "ansible_port": 2222,
+                 "ansible_ssh_private_key_file": "/tmp/secret-key-path"},
+        "tasks": [{"ansible.builtin.include_tasks": str(ROLE / "tasks" / "raw_upload.yml"), "vars": vars_}],
+        "handlers": [{"name": "H", "ansible.builtin.debug": {"msg": "handler-ran"}}],
+    }]
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump(play))
+    env = dict(os.environ, PATH="%s:%s" % (bindir, os.environ["PATH"]), ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins"),
+               ANSIBLE_NOCOLOR="1")
+    cmd = ["ansible-playbook", "-i", "localhost,", str(pb)] + (["--check"] if check else [])
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=ROOT_DIR)
+    return res, log
+
+
+def _owner_group():
+    import getpass
+    import grp
+    import os
+    return getpass.getuser(), grp.getgrgid(os.getgid()).gr_name
+
+
+def _bin_vars(tmp_path, content=b"payload-bin"):
+    own, grp_ = _owner_group()
+    src = tmp_path / "cache-bin"
+    src.write_bytes(content)
+    return {"_raw_src": str(src), "_raw_dest": str(tmp_path / "installed"),
+            "_raw_sha256": hashlib.sha256(content).hexdigest(), "_raw_owner": own,
+            "_raw_group": grp_, "_raw_mode": "0755", "_raw_handler": "H"}
+
+
+def test_raw_upload_binary_uses_resolved_connection_and_is_idempotent(tmp_path):
+    v = _bin_vars(tmp_path)
+    res, log = _run_raw_upload(tmp_path, v)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert (tmp_path / "installed").read_bytes() == b"payload-bin"
+    argline = log.read_text()
+    assert "-P 2222" in argline and "127.0.0.1:" in argline and "/tmp/secret-key-path" in argline
+    log.unlink()
+    res2, log2 = _run_raw_upload(tmp_path, v)
+    assert res2.returncode == 0 and "changed=0" in res2.stdout, res2.stdout
+    assert not log2.exists()  # sentinel matched -> no second upload
+
+
+def test_raw_upload_hash_mismatch_fails_and_keeps_target(tmp_path):
+    v = _bin_vars(tmp_path)
+    v["_raw_sha256"] = "0" * 64
+    (tmp_path / "installed").write_bytes(b"old")
+    res, _ = _run_raw_upload(tmp_path, v)
+    assert res.returncode != 0
+    assert (tmp_path / "installed").read_bytes() == b"old"
+
+
+def test_raw_upload_check_mode_probes_but_never_uploads(tmp_path):
+    v = _bin_vars(tmp_path)
+    res, log = _run_raw_upload(tmp_path, v, check=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert not log.exists() and not (tmp_path / "installed").exists()
+    assert "would upload via scp and install" in res.stdout
+
+
+def test_raw_small_file_check_mode_prints_diff_but_never_secret_content(tmp_path):
+    own, grp_ = _owner_group()
+    plain, secret = tmp_path / "app.conf", tmp_path / "secrets.env"
+    plain.write_text("level=old\n")
+    secret.write_text("TOKEN=old-secret-value\n")
+    base = {"_raw_owner": own, "_raw_group": grp_, "_raw_mode": "0600"}
+    res, _ = _run_raw_upload(tmp_path, dict(base, _raw_dest=str(plain), _raw_content="level=new\n"), check=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "-level=old" in res.stdout and "+level=new" in res.stdout
+    assert plain.read_text() == "level=old\n"
+    res, _ = _run_raw_upload(tmp_path, dict(base, _raw_dest=str(secret), _raw_content="TOKEN=new-secret-value\n",
+                                            _raw_secret=True), check=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "old-secret-value" not in res.stdout and "new-secret-value" not in res.stdout
+    assert "secret content hidden" in res.stdout and "would change" in res.stdout
+    assert secret.read_text() == "TOKEN=old-secret-value\n"
+
+
+def test_raw_small_file_push_is_idempotent_and_notifies(tmp_path):
+    own, grp_ = _owner_group()
+    dest = tmp_path / "app.conf"
+    v = {"_raw_owner": own, "_raw_group": grp_, "_raw_mode": "0640",
+         "_raw_dest": str(dest), "_raw_content": "k=v\n", "_raw_handler": "H"}
+    res, _ = _run_raw_upload(tmp_path, v)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert dest.read_text() == "k=v\n" and "handler-ran" in res.stdout
+    res2, _ = _run_raw_upload(tmp_path, v)
+    assert "changed=0" in res2.stdout and "handler-ran" not in res2.stdout
+
+
+def test_raw_upload_cleans_staging_when_scp_fails(tmp_path):
+    v = _bin_vars(tmp_path)
+    res, _ = _run_raw_upload(tmp_path, v, scp_ok=False)
+    assert res.returncode != 0
+    assert "MON-108" in res.stdout and not (tmp_path / "installed").exists()
+    assert not list(__import__("pathlib").Path("/var/tmp").glob("installed.*.raw.upload"))
+
+
+def test_raw_upload_password_only_connection_fails_clearly(tmp_path):
+    v = _bin_vars(tmp_path)
+    v["ansible_ssh_private_key_file"] = ""
+    res, _ = _run_raw_upload(tmp_path, v)
+    assert res.returncode != 0 and "private key" in (res.stdout + res.stderr)

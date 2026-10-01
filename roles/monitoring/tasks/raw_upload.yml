@@ -1,0 +1,112 @@
+---
+# Host Agents legacy 경로(CentOS 6/7) 파일 전달 헬퍼 (ADR-0005 부분집합, ADR-0006 §2.9).
+# common/security 전체 Raw Provisioning Path가 아니라 Host Agents에 필요한 만큼만 둔다.
+# 호출자는 include_tasks의 vars로 아래 값을 넘긴다.
+#   _raw_dest    : 원격 최종 경로
+#   _raw_owner / _raw_group / _raw_mode : 소유자·그룹·4자리 모드
+#   _raw_src     : (바이너리) 컨트롤러 캐시 파일 경로 → scp 업로드. 아래 _raw_content와 택일
+#   _raw_sha256  : (바이너리) Git 고정 SHA256
+#   _raw_content : (소형 파일) 컨트롤러에서 렌더링한 내용 → base64 헬퍼 배포
+#   _raw_validate: (소형 파일, 선택) %s를 임시 경로로 치환하는 검증 명령 (기본 true)
+#   _raw_secret  : (선택) true면 check 모드 diff에서 내용을 출력하지 않는다
+#   _raw_handler : (선택) 변경 시 notify할 핸들러 이름
+# 전제: 호출 play는 become(root)으로 실행되어야 한다(chown/mv). scp는 비특권 사용자로 /var/tmp 스테이징 경로에 올린다.
+# check 모드: 읽기 전용 프로브만 check_mode: false로 실행하고, 변경 raw 태스크는 스킵하며 diff만 출력한다.
+# 스테이징 이름에 무작위 접미사를 붙여 /var/tmp의 선점(symlink)·동시 업로드 충돌을 피한다.
+- name: Set raw upload staging path
+  ansible.builtin.set_fact:
+    _raw_stage: "/var/tmp/{{ _raw_dest | basename }}.{{ 4294967295 | random }}.raw.upload"
+
+- name: "[MON-100] Probe remote hash and mode of the target file (raw, read-only)"
+  ansible.builtin.raw: "{{ _raw_dest | raw_probe_cmd }}"
+  register: _raw_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Decide whether the target would change
+  ansible.builtin.set_fact:
+    _raw_would_change: >-
+      {{ (_raw_probe.stdout | default(''))
+         | raw_upload_changed(_raw_sha256 if _raw_src is defined else (_raw_content | hash('sha256')),
+                              _raw_mode, _raw_owner, _raw_group) }}
+
+- name: "[MON-101] Read the remote file for the check-mode diff (raw, read-only, never for secrets)"
+  ansible.builtin.raw: "{{ _raw_dest | raw_read_cmd }}"
+  register: _raw_remote
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - ansible_check_mode
+    - _raw_content is defined
+    - not (_raw_secret | default(false) | bool)
+
+- name: "[MON-102] Show controller-rendered vs remote diff in check mode (secret files excluded)"
+  ansible.builtin.debug:
+    msg: >-
+      {{ (_raw_remote.stdout | default('') | raw_read_extract(allow_empty=true) | default('', true))
+         | raw_check_diff(_raw_content | default(''), _raw_dest) }}
+  when:
+    - ansible_check_mode
+    - _raw_content is defined
+    - not (_raw_secret | default(false) | bool)
+
+- name: "[MON-103] Report a secret file change in check mode without its content"
+  ansible.builtin.debug:
+    msg: "{{ _raw_dest | raw_secret_notice(_raw_would_change | bool) }}"
+  when:
+    - ansible_check_mode
+    - _raw_secret | default(false) | bool
+
+- name: "[MON-107] Report the planned binary upload in check mode"
+  ansible.builtin.debug:
+    msg: >-
+      {{ _raw_dest }}: would {{ 'upload via scp and install (sha256 ' ~ _raw_sha256 ~ ')' if _raw_would_change | bool
+         else 'stay unchanged' }}
+  when:
+    - ansible_check_mode
+    - _raw_src is defined
+
+- name: Upload and install the pinned binary
+  when:
+    - _raw_src is defined
+    - not ansible_check_mode
+    - _raw_would_change | bool
+  block:
+    - name: "[MON-104] Upload the pinned binary to a staging path with scp from the controller"
+      ansible.builtin.command:
+        argv: >-
+          {{ _raw_src | raw_scp_argv(_raw_stage, ansible_host | default(inventory_hostname), ansible_port | default(22),
+                                      ansible_user, ansible_ssh_private_key_file | default(None)) }}
+      delegate_to: localhost
+      become: false
+      register: _raw_scp
+      changed_when: true
+      failed_when: _raw_scp.rc | default(0) != 0
+
+    - name: "[MON-105] Verify the staged binary against the pinned SHA256 and install it atomically (raw)"
+      ansible.builtin.raw: >-
+        {{ _raw_stage
+           | raw_upload_finalize_cmd(_raw_dest, _raw_owner, _raw_group, _raw_mode, _raw_sha256) }}
+      register: _raw_install
+      changed_when: true
+      failed_when: _raw_install.rc | default(0) != 0
+      notify: "{{ _raw_handler | default(omit) }}"
+  rescue:
+    - name: "[MON-108] Remove the staged upload after a failed upload or install (raw)"
+      ansible.builtin.raw: "rm -f {{ _raw_stage | quote }}; false"
+      changed_when: true
+      failed_when: true
+
+- name: "[MON-106] Push the small file via write-temp/validate/move (raw, base64)"
+  ansible.builtin.raw: >-
+    {{ _raw_content | raw_push_cmd(_raw_dest, _raw_owner, _raw_group, _raw_mode, _raw_validate | default('true')) }}
+  register: _raw_push
+  changed_when: _raw_would_change | bool
+  failed_when: _raw_push.rc | default(0) != 0
+  no_log: "{{ _raw_secret | default(false) | bool }}"
+  notify: "{{ _raw_handler | default(omit) }}"
+  when:
+    - _raw_content is defined
+    - not ansible_check_mode
