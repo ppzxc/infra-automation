@@ -312,3 +312,34 @@ def test_tasks_execute_under_ansible_with_extra_vars(tmp_path, extra_var_value):
     assert accs["svcadm"]["keys"] == [NEW_KEY]
     assert accs["svcadm"]["revoked_keys"] == [OLD_KEY]
     assert (result["admin"]["ssh_private_key"], result["admin"]["ssh_passphrase"]) == ("HOSTKEY", "")
+
+
+# --- removed_users: facts consumed by later tasks must be promoted -------------
+
+@pytest.mark.parametrize("playbook", PLAYBOOKS)
+@pytest.mark.parametrize("host_kv, run_var, invalid", [
+    ({}, None, False),
+    ({"removed_users": ["olduser"]}, "legacy1", False),
+    ({"removed_users": {"a": 1}}, None, True),
+    ({}, {"a": 1}, True),
+])
+def test_removed_users_follow_up_tasks_see_promoted_facts(playbook, host_kv, run_var, invalid):
+    """Regression: task-level vars are invisible to later tasks (undefined at runtime)."""
+    resolve = _task(playbook, "Resolve accounts to remove")
+    ctx = {"_host_kv_dict": host_kv}
+    if run_var is not None:
+        ctx["target_removed_users"] = run_var
+    facts = _run_task(resolve, ctx)
+    assert facts["_removed_users_shape_invalid"] is invalid
+    for name in ("_removed_users_detail", "_kv_removed_source", "_run_removed_source"):
+        assert name in facts
+
+    # Every promoted-name reference in the follow-up tasks resolves from facts alone.
+    for prefix in ("Warn when removed_users", "Log accounts resolved for removal"):
+        follow = _task(playbook, prefix)
+        assert not follow.get("vars"), f"{prefix}: relies on facts, not task vars"
+        text = json.dumps(follow)
+        for name in ("_removed_users_shape_invalid", "_removed_users_detail",
+                     "_kv_removed_source", "_run_removed_source"):
+            if name in text:
+                assert name in resolve["ansible.builtin.set_fact"], f"{name} not promoted"
