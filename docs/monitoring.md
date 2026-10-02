@@ -92,7 +92,7 @@
 - **라우팅**: `logs/in`(memory_limiter, `resource/host`: `host.name`=인벤토리 호스트명, `os.type`, `os.description`) → `routing/logs`(`log_type`) → `security_logs`/`system_logs`/`app_logs`/`backup_logs` 파이프라인 → 스트림별 `otlphttp` exporter(`stream-name` 헤더).
 - **전송**: `<o2_endpoint>/api/<o2_org>`(끝 슬래시 금지), `Authorization: Basic ${env:O2_BASIC_AUTH}`, 사설 CA는 `o2_ca_file`. 로그 exporter는 `file_storage` 영속 bytes 큐(`otel_log_queue_bytes`) + `block_on_overflow: true` + `max_elapsed_time: 0`; 메트릭은 별도 메모리 큐(`block_on_overflow: false`) 파이프라인입니다. `file_storage`는 `compaction.on_rebound: true`.
 - **시크릿**: `/etc/otelcol-contrib/secrets.env`(`0600`, `no_log`, `diff: false`)에만 있고 설정은 `${env:…}`로 참조합니다. systemd 유닛은 비root `otelcol` + `CAP_DAC_READ_SEARCH` + `EnvironmentFile`.
-- **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 `inventory/group_vars/servers.yml`(Git)에서 지정합니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.
+- **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 **Semaphore Extra variables 또는 `group_vars`(우선) → OpenBao `agents/openobserve`의 같은 이름 키(폴백) → 기본값(`o2_org=default`, 나머지 빈 값)** 순으로 해석합니다. 저장소가 공개라 내부 도메인은 Git에 두지 않고 평상시에는 OpenBao에 둡니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.
 
 ---
 

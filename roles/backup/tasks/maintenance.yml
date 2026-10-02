@@ -56,6 +56,11 @@
         fail_msg: "{{ inventory_hostname }}: OpenBao 조회 실패 — status={{ _statuses if _statuses | length > 0 else '토큰 없음/미조회' }} (VAULT_TOKEN은 Semaphore Environment로 주입)"
         quiet: true
 
+    - name: Expose the shared agents KV so endpoint defaults resolve like the Deploy path
+      ansible.builtin.set_fact:
+        host_agents_shared_secrets: "{{ {'openobserve': _kv.openobserve, 'rustfs': _kv.rustfs} }}"
+        host_agents_host_overrides: "{{ {'rustfs_bucket': ((_kv.host | default({})).rustfs_bucket | default('')) | string | trim} }}"
+
     - name: Assert the required maintenance secrets exist
       ansible.builtin.assert:
         that:
@@ -65,6 +70,7 @@
           - (_kv.openobserve.controller_ingest_token | default('')) | length > 0
           - o2_endpoint | default('') | length > 0
           - rustfs_endpoint | default('') | length > 0
+          - rustfs_bucket is match('^[A-Za-z0-9._-]{3,63}$')
         fail_msg: >-
           {{ inventory_hostname }}: hosts/{{ inventory_hostname }}/agents의 restic_password, agents/rustfs의 maintenance_access_key/maintenance_secret_key,
           agents/openobserve의 controller_ingest_token 또는 o2_endpoint/rustfs_endpoint가 없습니다.
@@ -136,7 +142,7 @@
   vars:
     _today: "{{ now(utc=true).isoformat() }}"
   ansible.builtin.set_fact:
-    _maint_repository: "{{ backup_maintenance_repository if backup_maintenance_repository | length > 0 else 's3:' ~ rustfs_endpoint ~ '/' ~ rustfs_bucket ~ '/' ~ inventory_hostname }}"
+    _maint_repository: "{{ backup_maintenance_repository if backup_maintenance_repository | length > 0 else 's3:' ~ rustfs_endpoint ~ '/' ~ rustfs_bucket }}"
     _maint_subset_due: "{{ _today | backup_maintenance_subset_due(backup_maintenance_read_subset, backup_maintenance_timezone) }}"
   no_log: true
 

@@ -55,7 +55,7 @@
         - not (o2_endpoint is match('.*/$'))
         - o2_endpoint is match('^https?://')
       fail_msg: >-
-        {{ inventory_hostname }}: o2_endpoint(inventory/group_vars/servers.yml)가 비어 있거나 형식이 잘못되었습니다
+        {{ inventory_hostname }}: o2_endpoint(OpenBao agents/openobserve 또는 Extra variables)가 비어 있거나 형식이 잘못되었습니다
         (http(s)://host:port, 끝 슬래시 금지 — <endpoint>/api/<org> 경로가 404가 됩니다).
       quiet: true
 

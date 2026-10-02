@@ -91,7 +91,7 @@
 
 ### 2.5 restic 저장소 구성·스케줄·권한
 
-- **레이아웃**: 버킷 1개(예: `host-backups`), 호스트별 repo `host-backups/<host>/`. 호스트 간 dedup 포기(설정 위주 데이터).
+- **레이아웃 (2026-10-02 개정)**: 호스트(액세스 키)마다 전용 버킷 `backup_prod_<호스트명>`(`hosts/<host>/agents`의 `rustfs_bucket`으로 재정의 가능)과 그 **버킷 루트**의 repo(`s3:<endpoint>/<bucket>`). 호스트 간 dedup 포기(설정 위주 데이터). 호스트 키 정책은 버킷 단위(`locks/*`만 Delete), 중앙 유지보수 키는 `backup_prod_*` 전체 버킷. 버킷 이름의 밑줄 허용 여부는 서버 측 확인 항목.
 - **키 분리(삭제 권한 완화)**:
   - **호스트 키(백업 전용)**: `<host>/*`에 Get/Put/List, Delete는 `<host>/locks/*`만 → 유출돼도 스냅샷·데이터 삭제 불가. restic `backup`이 삭제하는 것은 lock뿐이며 데이터 삭제는 `forget`/`prune`에서만 발생합니다.
   - **유지보수 키(중앙)**: Repo Maintenance 템플릿이 컨트롤러에서 `check`/`forget`/`prune` 실행, 호스트별 repo 비밀번호는 OpenBao에서 조회.
@@ -125,6 +125,8 @@
   | 미실행 호스트 | `job=inventory` 등록 후 백업 이벤트 없음 |
 
 ### 2.7 OpenObserve 연결 계약 및 로컬 버퍼링
+
+- **연결 값 위치 개정 (2026-10-02)**: 엔드포인트·org·CA 경로는 저장소가 공개(PUBLIC)이므로 Git(`servers.yml`)이 아니라 OpenBao `agents/openobserve`(`o2_endpoint`, `o2_org`, `o2_ca_file`)·`agents/rustfs`(`rustfs_endpoint`, `rustfs_bucket`, `rustfs_region`, `rustfs_ca_file`)에 둔다. 해석 순서는 Extra variables·`group_vars` > OpenBao > 역할 기본값이며, 역할 `defaults`가 `host_agents_shared_secrets`를 지연 평가로 참조해 구현한다(Deploy와 Repo Maintenance 공통).
 
 - **Exporter**: `otlphttp` → `http(s)://<o2>:5080/api/<org>` (**끝 슬래시 금지**, 404), `Authorization: Basic base64(<org>:<o2oi_… 토큰>)`, 로그는 스트림별 `stream-name` 헤더, 메트릭은 메트릭명마다 스트림 자동 생성, gzip 기본값 사용, 사설 CA는 `tls.ca_file`. gRPC(5081)는 대안으로만 둡니다: 원격지 구간의 방화벽/L7 장비가 HTTP/2를 온전히 통과시켜야 하고, 별도 포트와 `organization` 헤더가 필수이며, 배치(1024)·keep-alive 적용 시 호스트당 트래픽 규모에서 성능 이점이 미미합니다. 트레이스 수집 도입 또는 호스트당 수백 KB/s 이상 전송 시 재검토.
 - **커뮤니티판 검증 (OpenObserve v1.0.4 소스)**:
@@ -181,7 +183,7 @@
 - **주기**: 분기 1회(ISMS 2.9.3/2.12.2, 정한 주기 미이행 자체가 결함).
 - **절차**:
   1. `servers`에서 무작위 1대 선정(선정 방식과 결과를 결과서에 기록).
-  2. 해당 호스트 repo(`host-backups/<host>/`)의 최신 스냅샷 선택: `restic snapshots --latest 1`.
+  2. 해당 호스트 repo(호스트 전용 버킷 `backup_prod_<host>`)의 최신 스냅샷 선택: `restic snapshots --latest 1`.
   3. 대상 호스트에서 호스트 키(읽기 용도)로 `/etc`를 임시 경로에 복구: `restic restore latest --target /tmp/restore-test-<date> --include /etc`.
   4. 원본과 비교(`diff -r /etc /tmp/restore-test-<date>/etc`, 변경 예상 파일 제외), 소요 시간 측정.
   5. 임시 복구본 삭제.
