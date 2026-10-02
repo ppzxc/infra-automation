@@ -110,21 +110,31 @@ def raw_push_cmd(content, dest, owner, group, mode, validate):
 _SAFE_REMOTE_PATH = re.compile(r'^/[A-Za-z0-9._/+-]+$')
 
 
-def raw_scp_argv(src, dest, host, port, user, key):
+def raw_scp_argv(src, dest, host, port, user, key, password_auth=False):
     """argv for a controller-side ``scp`` of ``src`` to ``user@host:dest`` (Host Agents binary upload).
 
     Used with ``ansible.builtin.command`` ``argv`` so nothing is shell-interpreted locally.
     ``dest`` is also parsed by the remote side (legacy scp protocol), so it must be a plain
     absolute path. The host key check is relaxed like the connection probe and ansible.cfg.
-    scp runs with BatchMode, so a key is required; a password-only connection fails here with
-    a clear message instead of hanging on a prompt.
+    With a key, scp runs with BatchMode so it can never hang on a prompt. Without a key a
+    password-only connection is supported only when ``password_auth`` is true (the per-host
+    ``host_agents_allow_password_auth`` exception, ADR-0006 §2.1): the command is wrapped in
+    ``sshpass -e`` so the password comes from the ``SSHPASS`` environment variable and never
+    appears in argv, logs or the process list. Otherwise it fails here with a clear message.
     """
-    if not key:
-        raise ValueError('scp upload needs the resolved SSH private key (password-only connections are unsupported)')
+    if not key and not password_auth:
+        raise ValueError('scp upload needs the resolved SSH private key (password-only connections need '
+                         'host_agents_allow_password_auth)')
     if not _SAFE_REMOTE_PATH.match(str(dest)) or '..' in str(dest).split('/'):
         raise ValueError('unsafe remote scp path: %r' % (dest,))
     host = str(host)
     target = '[%s]' % host if ':' in host else host
+    if not key:
+        return ['sshpass', '-e', 'scp', '-q',
+                '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+                '-o', 'PubkeyAuthentication=no', '-o', 'PreferredAuthentications=password',
+                '-o', 'NumberOfPasswordPrompts=1',
+                '-P', str(int(port)), str(src), '%s@%s:%s' % (user, target, dest)]
     return ['scp', '-q', '-B', '-o', 'BatchMode=yes',
             '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
             '-P', str(int(port)), '-i', str(key), '-o', 'IdentitiesOnly=yes',

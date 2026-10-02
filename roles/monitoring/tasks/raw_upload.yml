@@ -74,11 +74,27 @@
     - not ansible_check_mode
     - _raw_would_change | bool
   block:
+    # 키 없이 비밀번호로 올리는 호스트(host_agents_allow_password_auth)만: 컨트롤러에 sshpass가 있고 비밀번호가 비어 있지 않은지 업로드 전에 확인한다.
+    - name: "[MON-109] Assert sshpass and a password are available for a keyless upload"
+      ansible.builtin.command: sshpass -V
+      delegate_to: localhost
+      become: false
+      check_mode: false
+      changed_when: false
+      register: _raw_sshpass
+      failed_when: >-
+        _raw_sshpass.rc | default(0) != 0 or (ansible_password | default('')) | length == 0
+      when: (ansible_ssh_private_key_file | default('')) | length == 0
+
     - name: "[MON-104] Upload the pinned binary to a staging path with scp from the controller"
       ansible.builtin.command:
         argv: >-
           {{ _raw_src | raw_scp_argv(_raw_stage, ansible_host | default(inventory_hostname), ansible_port | default(22),
-                                      ansible_user, ansible_ssh_private_key_file | default(None)) }}
+                                      ansible_user, ansible_ssh_private_key_file | default(None),
+                                      (ansible_ssh_private_key_file | default('')) | length == 0) }}
+      environment:
+        SSHPASS: "{{ ansible_password | default('') }}"
+      no_log: "{{ (ansible_ssh_private_key_file | default('')) | length == 0 }}"
       delegate_to: localhost
       become: false
       register: _raw_scp

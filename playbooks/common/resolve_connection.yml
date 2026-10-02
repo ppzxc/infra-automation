@@ -187,10 +187,12 @@
           keys: "{{ (_effective_host_resp.json.data.data.keys() | list) if (_effective_host_resp.json is defined and _effective_host_resp.json.data is defined and _effective_host_resp.json.data.data is defined and _effective_host_resp.json.data.data is mapping) else [] }}"
       when: _effective_host_resp is defined
 
+    # hosts/<hostname> KV 해석: 호스트명 키가 있으면 그 값, 키가 하나뿐이고 값이 오브젝트이면 그 값(중첩 형식)이며,
+    # 그 외에는 평면 오브젝트로 본다. 키가 여러 개인데 첫 값이 오브젝트라는 이유만으로 풀면 admin_users 등이 조용히 사라진다.
     - name: Apply OpenBao and inventory host variables to host facts
       vars:
         _host_raw: "{{ _effective_host_resp.json.data.data if (_effective_host_resp is defined and _effective_host_resp.json is defined and _effective_host_resp.json.data is defined and _effective_host_resp.json.data.data is defined) else {} }}"
-        _host_unwrapped: "{{ (_host_raw if _host_raw is not mapping else (_host_raw[inventory_hostname] if inventory_hostname in _host_raw else ((_host_raw.values() | first) if (_host_raw | length > 0 and (_host_raw.values() | first) is mapping) else _host_raw))) }}"
+        _host_unwrapped: "{{ (_host_raw if _host_raw is not mapping else (_host_raw[inventory_hostname] if inventory_hostname in _host_raw else ((_host_raw.values() | first) if (_host_raw | length == 1 and (_host_raw.values() | first) is mapping) else _host_raw))) }}"
         _host_dict: "{{ (_host_unwrapped | first) if (_host_unwrapped is sequence and _host_unwrapped is not string and _host_unwrapped | length > 0 and (_host_unwrapped | first) is mapping) else (_host_unwrapped if _host_unwrapped is mapping else {}) }}"
         _resolved_bao_host: "{{ _host_dict.ansible_host | default(_host_dict.public_ip | default(_host_dict.ip | default(_host_dict.host | default('', true), true), true), true) }}"
         _resolved_bao_port: "{{ _host_dict.ansible_port | default(_host_dict.port | default('', true), true) }}"

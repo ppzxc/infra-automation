@@ -751,6 +751,10 @@ def _run_raw_upload(tmp_path, vars_, check=False, scp_ok=True):
                    '[ "%s" = ok ] || exit 1\n'
                    'cp "$prev" "${last#*:}"\n' % (log, "ok" if scp_ok else "fail"))
     scp.chmod(0o755)
+    sshpass = bindir / "sshpass"
+    sshpass.write_text('#!/bin/sh\nif [ "$1" = "-V" ]; then echo "sshpass 1.09"; exit 0; fi\n'
+                       'echo "ENV=$SSHPASS ARGS=$*" >> %s/sshpass.log\nshift; shift\nexec "$@"\n' % tmp_path)
+    sshpass.chmod(0o755)
     play = [{
         "hosts": "localhost", "gather_facts": False, "connection": "local", "become": False,
         "vars": {"ansible_user": getpass.getuser(), "ansible_host": "127.0.0.1", "ansible_port": 2222,
@@ -851,11 +855,27 @@ def test_raw_upload_cleans_staging_when_scp_fails(tmp_path):
     assert not list(__import__("pathlib").Path("/var/tmp").glob("installed.*.raw.upload"))
 
 
-def test_raw_upload_password_only_connection_fails_clearly(tmp_path):
+def test_raw_upload_without_key_and_without_password_still_fails_before_any_upload(tmp_path):
+    """키도 비밀번호도 없으면(= 허용 플래그만 있고 자격증명이 비어 있는 경우 포함) 업로드 전에 명확히 실패한다."""
     v = _bin_vars(tmp_path)
     v["ansible_ssh_private_key_file"] = ""
+    v["ansible_password"] = ""
     res, _ = _run_raw_upload(tmp_path, v)
-    assert res.returncode != 0 and "private key" in (res.stdout + res.stderr)
+    text = res.stdout + res.stderr
+    assert res.returncode != 0 and not (tmp_path / "sshpass.log").exists()
+    assert "비밀번호" in text or "password" in text.lower()
+
+
+def test_raw_upload_password_connection_uses_sshpass_and_hides_the_password(tmp_path):
+    """호스트별 허용 호스트: 키 없이 ansible_password만 있으면 sshpass -e로 올리고 비밀번호는 로그/인자에 없다."""
+    v = _bin_vars(tmp_path)
+    v["ansible_ssh_private_key_file"] = ""
+    v["ansible_password"] = "Sup3r-Secret-PW"
+    res, _ = _run_raw_upload(tmp_path, v)
+    text = res.stdout + res.stderr
+    log = (tmp_path / "sshpass.log").read_text()
+    assert "ENV=Sup3r-Secret-PW" in log and "Sup3r-Secret-PW" not in log.split("ARGS=")[1]
+    assert "Sup3r-Secret-PW" not in text
 
 
 # --- 엔드포인트 해석: Extra variables / group_vars(A) > OpenBao agents/*(B) > 역할 기본값 -------------------------
@@ -915,3 +935,33 @@ def test_shared_openbao_bucket_key_is_ignored(tmp_path, openbao):
     """공용 agents/rustfs의 rustfs_bucket은 더는 쓰지 않는다 — 호스트별 버킷만 허용(실수로 공용 버킷에 쌓이지 않게)."""
     _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(dict(_ENDPOINTS_RUSTFS, rustfs_bucket="shared-bucket"))
     assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup_prod_good"
+
+
+def _run_mon020(tmp_path, hosts):
+    tasks = yaml.safe_load((ROLE / "tasks" / "probe.yml").read_text(encoding="utf-8"))[:2]
+    (tmp_path / "play.yml").write_text(yaml.safe_dump([{
+        "hosts": "all", "gather_facts": False, "connection": "local", "tasks": tasks}]))
+    (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"hosts": hosts}}))
+    return subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")],
+                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
+
+
+def test_password_auth_exception_is_allowed_only_for_hosts_that_opt_in_in_their_kv(tmp_path):
+    res = _run_mon020(tmp_path, {
+        "optin": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": True}},
+        "optin_str": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": "true"}},
+        "optout": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": False}},
+        "nokv": {"_is_already_provisioned": False}})
+    text = res.stdout + res.stderr
+    assert "optin: 접속 계정" not in text and "optin_str: 접속 계정" not in text
+    assert "optout: 접속 계정으로 SSH 접속할 수 없는" in text and "nokv: 접속 계정으로 SSH 접속할 수 없는" in text
+    assert "host_agents_allow_password_auth" in text
+
+
+def test_password_auth_exception_leaves_an_audit_warning_only_where_it_applies(tmp_path):
+    res = _run_mon020(tmp_path, {
+        "optin": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": True}},
+        "keyed": {"_is_already_provisioned": True, "_host_kv_dict": {"host_agents_allow_password_auth": True}}})
+    text = res.stdout + res.stderr
+    assert res.returncode == 0, text
+    assert "PASSWORD-AUTH-EXCEPTION optin" in text and "PASSWORD-AUTH-EXCEPTION keyed" not in text

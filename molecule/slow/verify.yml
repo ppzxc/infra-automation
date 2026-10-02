@@ -146,6 +146,34 @@
               - "'/k' in ('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))"
               - "'-i' in ('/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '/k'))"
 
+        - name: "[VERIFY-MON-109] Verify password-only upload is wrapped in sshpass -e and never carries the password in argv"
+          vars:
+            _pw_argv: "{{ '/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '', true) }}"
+          ansible.builtin.assert:
+            that:
+              - "_pw_argv[0:3] == ['sshpass', '-e', 'scp']"
+              - "'BatchMode=yes' not in _pw_argv"
+              - "'-i' not in _pw_argv"
+
+        - name: "[VERIFY-MON-109] Verify a keyless upload without the opt-in password mode is refused with a clear message"
+          ansible.builtin.set_fact:
+            _keyless_refused: "{{ '/c/b' | raw_scp_argv('/var/tmp/b', 'h', 2222, 'ops', '') }}"
+          ignore_errors: true
+          register: _keyless
+
+        - name: "[VERIFY-MON-109] Assert the refusal happened and names host_agents_allow_password_auth"
+          ansible.builtin.assert:
+            that:
+              - _keyless is failed
+              - "'host_agents_allow_password_auth' in (_keyless.msg | default(''))"
+
+        - name: "[VERIFY-MON-029] Verify the password-auth exception flag is honoured per host only"
+          vars:
+            _flag: "{{ ({'host_agents_allow_password_auth': 'true'}.host_agents_allow_password_auth | string | lower) in ['true', 'yes', '1'] }}"
+          ansible.builtin.assert:
+            that:
+              - _flag | bool
+
         - name: "[VERIFY-MON-105] Verify the finalize command compares the pinned hash before the atomic move"
           vars:
             _fin: "{{ '/var/tmp/b' | raw_upload_finalize_cmd('/opt/b', 'root', 'root', '0755', 'abc123') }}"

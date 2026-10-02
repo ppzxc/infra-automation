@@ -55,7 +55,7 @@
 - **호스트 집합**: `target_hosts:&servers` (축소만 가능, `servers` 밖으로 확장 불가). 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
 - **롤아웃**: `serial: 25%`, `gather_facts: false`. 프로비저닝 assert·OS 프로브·fact 수집·입력 검증은 모두 역할 안에서 수행됩니다.
 - **태그**: 설치 단계 `agents_install`, 설정/스케줄 단계 `agents_config`, 역할 공통 `otel`(향후 `backup`). 사전 단계(`MON-020~035`)는 `always`라 `--tags agents_config`에서도 수행됩니다. Deploy = 태그 없음, Config = `--tags agents_config`.
-- **사전 단계**: `_is_already_provisioned`가 아니면 즉시 실패("site.yml 먼저 실행") → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
+- **사전 단계**: `_is_already_provisioned`가 아니고 `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`도 없으면 즉시 실패(아래 "비밀번호 접속 예외" 참고) → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
 - **OpenBao 입력**: `hosts/<host>/agents`(호스트별)와 `agents/openobserve`, `agents/rustfs`(공용, `run_once`)를 컨트롤러에서 조회합니다.
 
   | 키 (`hosts/<host>/agents`) | 필수 | 용도 |
@@ -73,6 +73,16 @@
 - **테스트 seam**: `host_agents_kv_fixture`(`{host, openobserve, rustfs}`)가 정의되면 OpenBao를 조회하지 않습니다(molecule 공용 `group_vars`가 `_is_already_provisioned: true`와 함께 제공).
 
 ---
+
+### 비밀번호 접속 예외 (ADR-0006 §2.1 개정)
+
+SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(CentOS 6/7 등)에도 Host Agents를 설치할 수 있습니다. **호스트별 명시 허용**이 필요합니다.
+
+1. OpenBao `secret/hosts/<호스트>`(접속 정보 KV, `/agents` 아님)에 `"host_agents_allow_password_auth": true`를 추가합니다. 이 플래그가 없는 호스트는 기존처럼 `MON-020`에서 중단됩니다.
+2. 접속 계정은 **root** 또는 **일반 계정 + sudo 비밀번호** 모두 가능합니다. 키가 없으면 호스트는 부트스트랩 모드로 접속하므로 계정과 비밀번호는 `hosts/<호스트>/bootstrap`(우선) 또는 `users/<bootstrap_user>`의 `password`에서 읽고(`bootstrap_user`는 `hosts/<호스트>` KV로 호스트별 지정, 기본 `root`), 일반 계정이면 같은 비밀번호가 sudo 비밀번호(`ansible_become_password`)로 쓰입니다.
+3. `admin_users`는 접속 계정이 아니라 `Validate an admin user is resolved` 단언을 통과시키는 용도입니다(없으면 `resolve_connection`이 중단).
+4. CentOS 6/7 바이너리 업로드는 `sshpass -e scp`(`MON-104`)로 진행합니다. 비밀번호는 `SSHPASS` 환경변수로만 전달되어 인자·프로세스 목록·로그에 나타나지 않습니다(`no_log`). 컨트롤러(Semaphore 러너)에 `sshpass`가 필요하며 없으면 `MON-109`에서 중단합니다. 설정 파일·unit은 기존 base64 raw 전송이라 비밀번호 접속으로 동작합니다.
+5. 이 예외로 설치된 호스트는 실행마다 `PASSWORD-AUTH-EXCEPTION` 경고(`MON-029`)가 남습니다(ISMS 증적). **만료 기준**: 해당 호스트를 `site.yml`로 하드닝(키 인증)하면 플래그를 제거합니다.
 
 ## 3-2. 바이너리 버전 고정과 전달 (`deliver_binary.yml`)
 
@@ -164,11 +174,12 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-004` | `Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 (`otelcol-contrib.yaml.j2`) |
 | `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.template` | Systemd OS | 파일 내용 일치 시 `ok` |
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
-| `MON-020` | `Assert host was provisioned by site.yml` | `ansible.builtin.assert` | All | 읽기 전용 |
+| `MON-020` | `Assert host was provisioned by site.yml (or opted in to password-auth install)` | `ansible.builtin.assert` | All | 읽기 전용 (SSH 키 접속 가능 호스트이거나 `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`를 명시한 호스트만 통과) |
 | `MON-021` | `Probe OS release and architecture from target host (raw, read-only)` | `ansible.builtin.raw` | All | `changed_when: false`, `check_mode: false` |
 | `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수 |
 | `MON-023` | `Check /usr/bin/python3 exists on modern path (raw, read-only)` | `ansible.builtin.raw` | modern | `changed_when: false`, `check_mode: false` |
 | `MON-024` | `Gather facts on modern path` | `ansible.builtin.setup` | modern | 읽기 전용 |
+| `MON-029` | `Warn that this host is installed through the password-auth exception (ISMS evidence)` | `ansible.builtin.debug` | All | 읽기 전용 (비밀번호 예외로 통과한 호스트에만 `PASSWORD-AUTH-EXCEPTION` 경고를 남김) |
 | `MON-026` | `Install python3 on modern path when absent` | `ansible.builtin.raw` | modern | 부재 시에만 실행 (check 모드 스킵) |
 | `MON-027` | `Assert python3 is available on modern path` | `ansible.builtin.assert` | modern | 읽기 전용 |
 | `MON-030` | `Fetch agents KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)` | `ansible.builtin.uri` | All | GET, `check_mode: false`, `no_log` |
@@ -206,6 +217,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-101` | `Read the remote file for the check-mode diff (raw, read-only, never for secrets)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 읽기 전용, `check_mode: false`, check 모드·비시크릿 파일에서만 실행 |
 | `MON-102` | `Show controller-rendered vs remote diff in check mode (secret files excluded)` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (unified diff 출력, 시크릿 env 제외) |
 | `MON-103` | `Report a secret file change in check mode without its content` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (내용 없이 변경 예정 여부만 출력) |
+| `MON-109` | `Assert sshpass and a password are available for a keyless upload` | `ansible.builtin.command` | legacy_el6, legacy_el7 | 읽기 전용 (`sshpass -V`, `check_mode: false`, SSH 키가 없을 때만. `sshpass`가 없거나 비밀번호가 비어 있으면 업로드 전에 호스트 실패) |
 | `MON-104` | `Upload the pinned binary to a staging path with scp from the controller` | `ansible.builtin.command` | legacy_el6, legacy_el7 | 원격 sha256/mode sentinel 불일치 시에만 실행, check 모드 스킵, 실패 시 진단을 위해 `no_log` 없음(키 파일 경로만 노출, 내용 아님) |
 | `MON-105` | `Verify the staged binary against the pinned SHA256 and install it atomically (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 원격 sha256/mode sentinel 불일치 시에만 실행, 해시 불일치 시 실패(대상 불변), check 모드 스킵 |
 | `MON-106` | `Push the small file via write-temp/validate/move (raw, base64)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | ADR-0005 sentinel (`raw_push_changed`), check 모드 스킵, 시크릿은 `no_log` |
