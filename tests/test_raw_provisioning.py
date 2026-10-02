@@ -1178,6 +1178,28 @@ def test_scp_argv_requires_a_key_because_batchmode_cannot_prompt(key):
         raw_scp_argv("/c/x", "/var/tmp/x", "h", 22, "ops", key)
 
 
+@pytest.mark.parametrize("key", [None, ""])
+def test_scp_argv_password_mode_uses_sshpass_with_env_and_never_carries_the_password(key):
+    argv = raw_scp_argv("/cache/otelcol", "/var/tmp/otelcol.raw.upload", "10.0.0.5", "2222", "ops", key, True)
+    assert argv[:3] == ["sshpass", "-e", "scp"]
+    assert argv[-1] == "ops@10.0.0.5:/var/tmp/otelcol.raw.upload" and argv[-2] == "/cache/otelcol"
+    assert argv[argv.index("-P") + 1] == "2222"
+    assert "BatchMode=yes" not in argv and "-i" not in argv
+    assert "PubkeyAuthentication=no" in argv and "PreferredAuthentications=password" in argv
+    assert "NumberOfPasswordPrompts=1" in argv
+
+
+def test_scp_argv_key_wins_over_password_mode():
+    argv = raw_scp_argv("/c/x", "/var/tmp/x", "h", 22, "ops", "/k", True)
+    assert argv[0] == "scp" and "-i" in argv and "BatchMode=yes" in argv
+
+
+def test_scp_argv_password_mode_keeps_the_path_and_ipv6_guards():
+    assert raw_scp_argv("/c/x", "/var/tmp/x", "fe80::1", 22, "ops", None, True)[-1] == "ops@[fe80::1]:/var/tmp/x"
+    with pytest.raises(ValueError):
+        raw_scp_argv("/c/x", "/a;rm -rf /", "h", 22, "u", None, True)
+
+
 @pytest.mark.parametrize("dest", ["relative/x", "/a b", "/a;rm -rf /", "/a/../b", "/a$(x)"])
 def test_scp_argv_rejects_unsafe_remote_path(dest):
     with pytest.raises(ValueError):

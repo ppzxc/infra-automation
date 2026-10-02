@@ -56,7 +56,7 @@ def test_no_legacy_path_is_skipped_by_the_probe_anymore():
     # legacy_el6 landed in #48: the probe no longer ends the role for any OS path.
     probe = _yaml(MON / "tasks" / "probe.yml")
     assert not [t for t in probe if "ansible.builtin.meta" in t]
-    assert not [t for t in probe if t.get("name", "").startswith(("[MON-025]", "[MON-028]"))]
+    assert not [t for t in probe if t.get("name", "").startswith(("[MON-028]",))]
 
 
 @pytest.mark.parametrize("role", [MON, BAK])
@@ -180,11 +180,11 @@ def test_spec_id_bands_follow_the_os_gate_of_each_legacy_task():
         assert gate in (None, "legacy_el6", "legacy_el7"), (spec_id, gate)
     assert {i for i, g in mon if g == "legacy_el6"} == {"MON-110", "MON-114", "MON-119", "MON-121", "MON-122"}
     assert {i for i, g in mon if g == "legacy_el7"} == {"MON-201", "MON-202", "MON-213", "MON-215"}
-    # Shared raw helpers keep their bands: MON-100~108 (fetch/upload) and MON-210~212 (install dir/smoke/switch).
+    # Shared raw helpers keep their bands: MON-100~109 (fetch/upload) and MON-210~212 (install dir/smoke/switch).
     for path in (MON / "tasks" / "legacy_deliver_binary.yml", MON / "tasks" / "legacy_switch_binary.yml",
                  MON / "tasks" / "raw_upload.yml"):
         for spec_id, gate in _gated_ids(path):
-            assert gate is None and (100 <= int(spec_id[4:]) <= 108 or 210 <= int(spec_id[4:]) <= 212), spec_id
+            assert gate is None and (100 <= int(spec_id[4:]) <= 109 or 210 <= int(spec_id[4:]) <= 212), spec_id
     bak = _gated_ids(BAK / "tasks" / "legacy.yml")
     assert bak and all(i.startswith("BAK-2") and g is None for i, g in bak), bak    # backup differs only by version row
 
@@ -541,3 +541,13 @@ def test_backup_repo_probe_assertion_matches_the_modern_logic():
     assert _task(BAK / "tasks" / "legacy.yml", "[BAK-215]")["no_log"] is True
     assert "LC_ALL=C" in _task(BAK / "tasks" / "legacy.yml", "[BAK-215]")["ansible.builtin.raw"]
     assert _task(BAK / "tasks" / "legacy.yml", "[BAK-217]")["no_log"] is True
+
+
+def test_binary_upload_wires_password_auth_through_sshpass_env_without_leaking_it():
+    raw = (MON / "tasks" / "raw_upload.yml").read_text(encoding="utf-8")
+    tasks = yaml.safe_load(raw)
+    scp = next(t for blk in tasks if "block" in blk for t in blk["block"] if t.get("name", "").startswith("[MON-104]"))
+    assert "SSHPASS" in str(scp["environment"]) and "ansible_password" in str(scp["environment"])
+    assert "ansible_password" not in str(scp["ansible.builtin.command"]["argv"])
+    check = next(t for blk in tasks if "block" in blk for t in blk["block"] if t.get("name", "").startswith("[MON-109]"))
+    assert "sshpass" in str(check) and check["delegate_to"] == "localhost" and check["check_mode"] is False

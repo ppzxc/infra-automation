@@ -619,3 +619,45 @@ def test_shared_connection_plays_honour_target_hosts_narrowing():
             hosts = yaml.safe_load(f)[0]["hosts"]
         # host_agents.yml narrows via connection_hosts; site.yml keeps the wider default.
         assert hosts == "{{ connection_hosts | default(target_hosts | default('servers:loadbalancers')) }}"
+
+
+# --- 호스트 KV 해석은 플레이북의 실제 태스크를 실행해 검증한다(식 복사본이 아니라) -------------------------------
+def _run_host_kv_unwrap(tmp_path, kv, hostname="ns0294"):
+    import json
+    import subprocess
+    play = yaml.safe_load((Path(__file__).resolve().parent.parent / "playbooks" / "common" / "resolve_connection.yml")
+                          .read_text(encoding="utf-8"))
+    tasks = [t for p in play for t in p.get("tasks", [])]
+    task = next(t for t in tasks if t.get("name") == "Apply OpenBao and inventory host variables to host facts")
+    dump = {"ansible.builtin.copy": {"content": "{{ _host_kv_dict | to_json }}", "dest": str(tmp_path / "kv.json")}}
+    pb = [{"hosts": "all", "gather_facts": False, "connection": "local", "become": False,
+           "vars": {"_effective_host_resp": {"status": 200, "json": {"data": {"data": kv}}}},
+           "tasks": [task, dump]}]
+    (tmp_path / "pb.yml").write_text(yaml.safe_dump(pb, sort_keys=False))
+    res = subprocess.run(["ansible-playbook", "-i", f"{hostname},", str(tmp_path / "pb.yml"), "-c", "local"],
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    return json.loads((tmp_path / "kv.json").read_text())
+
+
+@pytest.mark.parametrize("kv", [
+    {"hostname": "ns0294", "public_ip": "1.2.3.4", "admin_users": ["root"], "host_agents_allow_password_auth": True},
+    {"meta": {"note": "x"}, "public_ip": "1.2.3.4", "admin_users": ["root"], "host_agents_allow_password_auth": True},
+    {"admin_users": ["root"], "meta": {"note": "x"}, "public_ip": "1.2.3.4", "host_agents_allow_password_auth": True},
+    {"meta": {"note": "x"}, "admin_users": ["root"], "public_ip": "1.2.3.4", "host_agents_allow_password_auth": True},
+], ids=["flat", "object-valued-key-in-the-middle", "object-valued-key-after-first", "object-valued-key-first"])
+def test_a_flat_host_kv_keeps_every_key_even_when_a_value_is_an_object(tmp_path, kv):
+    got = _run_host_kv_unwrap(tmp_path, kv)
+    assert got["admin_users"] == ["root"] and got["host_agents_allow_password_auth"] is True
+    assert got["public_ip"] == "1.2.3.4"
+
+
+def test_a_kv_wrapped_by_the_hostname_is_still_unwrapped(tmp_path):
+    got = _run_host_kv_unwrap(tmp_path, {"ns0294": {"public_ip": "1.2.3.4", "admin_users": ["root"]}})
+    assert got["admin_users"] == ["root"] and got["public_ip"] == "1.2.3.4"
+
+
+def test_a_single_object_valued_key_is_still_unwrapped_for_the_legacy_nested_format(tmp_path):
+    """호스트명이 아닌 임의 키 하나만 있는 중첩 형식(기존 동작)은 유지한다."""
+    got = _run_host_kv_unwrap(tmp_path, {"anything": {"ip": "1.2.3.4", "port": 2222}})
+    assert got["ip"] == "1.2.3.4" and got["port"] == 2222

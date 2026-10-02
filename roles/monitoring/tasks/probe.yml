@@ -4,15 +4,31 @@
 # ==============================================================================
 # 프로브는 raw 명령만 사용하므로 fact 수집 여부와 무관하게 동일하게 동작한다.
 # 모든 태스크는 main.yml에서 tags: [always]로 import되어 --tags agents_config 실행에서도 수행된다.
-- name: "[MON-020] Assert host was provisioned by site.yml"
+# 예외(ADR-0006 §2.1 개정): 비밀번호로만 접속되는 레거시 호스트는 OpenBao hosts/<호스트> KV에
+# host_agents_allow_password_auth: true를 명시한 경우에만 통과한다(호스트별 증적은 OpenBao KV).
+- name: "[MON-020] Assert host was provisioned by site.yml (or opted in to password-auth install)"
+  vars:
+    _pw_exception: "{{ ((_host_kv_dict | default({}, true)).host_agents_allow_password_auth | default(false, true)) | string | lower in ['true', 'yes', '1'] }}"
   ansible.builtin.assert:
     that:
-      - _is_already_provisioned | default(false) | bool
+      - (_is_already_provisioned | default(false) | bool) or (_pw_exception | bool)
     fail_msg: >-
       {{ inventory_hostname }}: 접속 계정으로 SSH 접속할 수 없는 호스트입니다(미프로비저닝으로 판정).
       Host Agents는 OpenBao 접속 계정의 SSH 키로 접속되는 호스트에만 설치합니다 — site.yml을 먼저 실행하거나,
       hosts/<호스트>의 admin_users와 users/<계정>의 ssh_private_key(및 sudo 권한)를 확인하세요.
+      비밀번호로만 접속되는 레거시 호스트는 hosts/<호스트> KV에 host_agents_allow_password_auth: true를 명시해야 합니다.
     quiet: true
+
+- name: "[MON-029] Warn that this host is installed through the password-auth exception (ISMS evidence)"
+  vars:
+    _pw_exception: "{{ ((_host_kv_dict | default({}, true)).host_agents_allow_password_auth | default(false, true)) | string | lower in ['true', 'yes', '1'] }}"
+  ansible.builtin.debug:
+    msg: >-
+      [WARN] PASSWORD-AUTH-EXCEPTION {{ inventory_hostname }}: 하드닝되지 않은 호스트에 비밀번호 접속으로 Host Agents를 설치합니다
+      (hosts/{{ inventory_hostname }} KV host_agents_allow_password_auth). site.yml로 하드닝한 뒤에는 이 플래그를 제거하세요.
+  when:
+    - _pw_exception | bool
+    - not (_is_already_provisioned | default(false) | bool)
 
 - name: "[MON-021] Probe OS release and architecture from target host (raw, read-only)"
   ansible.builtin.raw: "{{ '' | host_agents_os_probe_cmd }}"

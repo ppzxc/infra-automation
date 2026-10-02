@@ -33,7 +33,8 @@
 
   보조 태그: `agents_install`, `agents_config`, `otel`, `backup`.
 - **대상 제한**: `hosts: "{{ target_hosts | default('servers') }}:&servers"` — 축소 가능, `servers` 밖으로 확장 불가. resolve/cleanup도 같은 호스트 집합으로 해석(현재 기본값 `servers:loadbalancers`).
-- **미프로비저닝 호스트는 즉시 실패**: 첫 태스크에서 `_is_already_provisioned`를 assert, 아니면 "`site.yml` 먼저 실행". 부트스트랩 root 설치 경로 없음. 신규 호스트는 템플릿 2회(site → Deploy) 실행.
+- **미프로비저닝 호스트는 즉시 실패**: 첫 태스크에서 `_is_already_provisioned`를 assert, 아니면 "`site.yml` 먼저 실행". 신규 호스트는 템플릿 2회(site → Deploy) 실행.
+- **비밀번호 접속 예외 (2026-10-02 개정, 기존 "부트스트랩 root 설치 경로 없음" 대체)**: SSH 키 없이 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트에도 Host Agents를 설치해야 한다는 운영 요구로, OpenBao `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`를 **명시한 호스트에 한해** `MON-020`을 통과시킨다(실행 단위·전역 허용은 두지 않음). 근거: 예외가 호스트별 OpenBao 기록(ISMS 증적)으로 남고 신규 호스트에 실수로 비밀번호 설치되는 것을 막는다. 비밀번호는 `sshpass -e`(`SSHPASS` 환경변수)로만 전달해 인자·로그에 노출하지 않으며(임시 공개키를 심는 방식은 하드닝 전 호스트의 `authorized_keys`를 바꾸므로 기각), 실행마다 `PASSWORD-AUTH-EXCEPTION` 경고를 남긴다. 이 예외는 하드닝되지 않은 호스트에 에이전트를 올리는 것이며, **만료 기준은 해당 호스트를 `site.yml`로 하드닝한 시점에 플래그를 제거**하는 것이다. 접속 계정은 root와 일반 계정(sudo 비밀번호) 모두 허용.
 - **Dry-run**: Config 경로는 check 모드 + `--diff`로 변경 미리보기가 가능해야 합니다.
 - **롤아웃**: 에이전트 play `serial: 25%`; 버전 변경은 runbook대로 `target_hosts`로 카나리 1대 선적용 후 전체.
 - **접속 사용자**: `resolve_connection`이 호스트별로 결정합니다 — OpenBao `hosts/<host>`의 `admin_users`(첫 항목이 SSH 계정) / `bootstrap_user`가 있으면 그 호스트만 해당 계정으로 접속하고, 없으면 템플릿의 `target_admin_users` / `bootstrap_user`를 사용합니다. 따라서 서버마다 다른 관리자 계정으로 Host Agents 설치·설정 변경이 가능하며, 모든 대상 호스트 KV에 `admin_users`가 있으면 템플릿의 `target_admin_users`는 생략할 수 있습니다.
