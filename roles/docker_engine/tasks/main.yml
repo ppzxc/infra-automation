@@ -203,7 +203,11 @@
     mode: "{{ item.mode }}"
     state: directory
   loop: "{{ docker_fhs_directories }}"
-  when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  when:
+    - ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+    # DOC-015 is skipped under --check, so dockersvc does not exist yet on a new host
+    # and chown would fail with "failed to look up user".
+    - not (ansible_check_mode | default(false))
 
 - name: "[DOC-017] Configure POSIX default and access ACLs for docker management"
   ansible.posix.acl:
