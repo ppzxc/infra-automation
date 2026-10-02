@@ -106,6 +106,8 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
     "revoked_keys": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... old@laptop"]
   }
   ```
+  * 부트스트랩 계정(`bootstrap_user`)의 접속 비밀번호에도 같은 재정의가 적용됩니다. 단, 조회 대상은
+    `admin_users`로 해석된 사용자이므로 부트스트랩 계정이 `admin_users`에 없으면 재정의는 조회되지 않습니다.
   * `common` 역할은 접속(primary) 사용자에게만 `ssh_private_key`/`ssh_passphrase`/`password`를
     실제로 사용합니다(SSH 연결·sudo 자격증명). `accounts`로만 프로비저닝되는 나머지 사용자는
     로컬 계정 자체에 비밀번호를 두지 않으므로, 의미 있게 반영되는 필드는 `ssh_public_key`와
