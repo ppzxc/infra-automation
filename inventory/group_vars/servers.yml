@@ -24,15 +24,10 @@ common_packages:
   - tar
   - gzip
 
-# Host Agents — OpenObserve 연결 (비시크릿, ADR-0006 §2.7). 수집 토큰은 OpenBao hosts/<host>/agents의 o2_ingest_token.
-# o2_endpoint는 끝 슬래시 없이 지정해야 한다 (미지정 시 Host Agents 실행이 실패).
-# o2_endpoint: "https://openobserve.example.internal:5080"
-# o2_org: "default"
-# o2_ca_file: "/etc/pki/ca-trust/source/anchors/internal-ca.pem"
-
-# Host Agents — RustFS 백업 저장소 (비시크릿, ADR-0006 §2.5). 호스트 키/restic 비밀번호는 OpenBao hosts/<host>/agents.
-# rustfs_endpoint는 끝 슬래시 없이 지정해야 한다 (미지정 시 Host Agents 실행이 실패).
-# rustfs_endpoint: "https://rustfs.example.internal:9000"
-# rustfs_bucket: "host-backups"
-# rustfs_region: ""
-# rustfs_ca_file: "/etc/pki/ca-trust/source/anchors/internal-ca.pem"
+# Host Agents — OpenObserve / RustFS 연결 값 (ADR-0006 §2.7, 해석 순서: Extra variables·group_vars > OpenBao > 기본값)
+# 이 저장소는 공개(PUBLIC)이므로 내부 도메인을 여기에 적지 않는다. 평상시에는 OpenBao에 넣는다:
+#   secret/agents/openobserve : o2_endpoint, o2_org, o2_ca_file   (+ controller_ingest_token)
+#   secret/agents/rustfs      : rustfs_endpoint, rustfs_region, rustfs_ca_file (+ maintenance_access_key/secret_key)
+#   secret/hosts/<host>/agents: (선택) rustfs_bucket — 미지정이면 규칙 backup_prod_<호스트명>
+# 값은 끝 슬래시 없이 지정해야 한다 (미지정 시 Host Agents 실행이 실패). 일회성 재정의는 Semaphore Extra variables(-e)로 준다.
+# 사설 CA 경로(o2_ca_file/rustfs_ca_file)는 대상 호스트상의 파일 경로다.

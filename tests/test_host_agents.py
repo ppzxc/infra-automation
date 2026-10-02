@@ -341,10 +341,13 @@ def openbao():
     server.shutdown()
 
 
-def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token="tok", extra_tasks=None):
+def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token="tok", extra_tasks=None,
+                     with_backup_defaults=False):
     role_vars = {}
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
+    if with_backup_defaults:
+        role_vars.update(yaml.safe_load((ROLE.parent / "backup" / "defaults" / "main.yml").read_text(encoding="utf-8")))
     tasks = [{"ansible.builtin.import_tasks": str(ROLE / "tasks" / "agents_input.yml")}]
     tasks.append({
         "name": "Dump result",
@@ -442,8 +445,8 @@ def test_unprovisioned_host_fails_pointing_at_site_yml(tmp_path):
     res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")],
                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
     text = res.stdout + res.stderr
-    assert "fresh: site.yml로 프로비저닝되지 않은" in text and "undef: site.yml로 프로비저닝되지 않은" in text
-    assert "ready: site.yml" not in text and "site.yml을 먼저 실행" in text
+    assert "fresh: 접속 계정으로 SSH 접속할 수 없는" in text and "undef: 접속 계정으로 SSH 접속할 수 없는" in text
+    assert "ready: 접속 계정" not in text and "admin_users" in text and "site.yml" in text
     assert res.returncode != 0
 
 
@@ -853,3 +856,62 @@ def test_raw_upload_password_only_connection_fails_clearly(tmp_path):
     v["ansible_ssh_private_key_file"] = ""
     res, _ = _run_raw_upload(tmp_path, v)
     assert res.returncode != 0 and "private key" in (res.stdout + res.stderr)
+
+
+# --- 엔드포인트 해석: Extra variables / group_vars(A) > OpenBao agents/*(B) > 역할 기본값 -------------------------
+_EFFECTIVE_KEYS = ("o2_endpoint", "o2_org", "o2_ca_file", "rustfs_endpoint", "rustfs_bucket", "rustfs_region", "rustfs_ca_file")
+_ENDPOINTS_O2 = {"controller_ingest_token": "ctl-token", "o2_endpoint": "https://o2.bao.invalid:5080",
+                 "o2_org": "acme", "o2_ca_file": "/etc/pki/o2-ca.pem"}
+_ENDPOINTS_RUSTFS = {"maintenance_access_key": "m-access", "rustfs_endpoint": "https://rfs.bao.invalid:9000",
+                     "rustfs_region": "kr-1", "rustfs_ca_file": "/etc/pki/rfs-ca.pem"}
+
+
+def _effective(tmp_path, openbao, extra_vars=None, host="good"):
+    dump = {"name": "Dump effective endpoints", "check_mode": False, "ansible.builtin.copy": {
+        "content": "{{ {" + ", ".join("'%s': %s" % (k, k) for k in _EFFECTIVE_KEYS) + "} | to_json }}",
+        "dest": f"{tmp_path}/eff.json", "mode": "0600"}}
+    res, _ = _run_input_tasks(tmp_path, [host], openbao, extra_vars=extra_vars, extra_tasks=[dump],
+                              with_backup_defaults=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    return json.loads((tmp_path / "eff.json").read_text())
+
+
+def test_endpoints_come_from_openbao_when_not_set_elsewhere(tmp_path, openbao):
+    _FakeOpenBao.routes["/v1/secret/data/agents/openobserve"] = _kv(_ENDPOINTS_O2)
+    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
+    eff = _effective(tmp_path, openbao)
+    assert eff == {"o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme", "o2_ca_file": "/etc/pki/o2-ca.pem",
+                   "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup_prod_good",
+                   "rustfs_region": "kr-1", "rustfs_ca_file": "/etc/pki/rfs-ca.pem"}
+
+
+def test_extra_vars_win_over_openbao_endpoints(tmp_path, openbao):
+    _FakeOpenBao.routes["/v1/secret/data/agents/openobserve"] = _kv(_ENDPOINTS_O2)
+    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
+    eff = _effective(tmp_path, openbao, extra_vars={"o2_endpoint": "https://o2.extra.invalid:5080",
+                                                    "rustfs_bucket": "extra-bucket"})
+    assert eff["o2_endpoint"] == "https://o2.extra.invalid:5080" and eff["rustfs_bucket"] == "extra-bucket"
+    assert eff["o2_org"] == "acme" and eff["rustfs_endpoint"] == "https://rfs.bao.invalid:9000"
+
+
+def test_endpoint_defaults_apply_when_openbao_has_none(tmp_path, openbao):
+    eff = _effective(tmp_path, openbao)
+    assert eff == {"o2_endpoint": "", "o2_org": "default", "o2_ca_file": "", "rustfs_endpoint": "",
+                   "rustfs_bucket": "backup_prod_good", "rustfs_region": "", "rustfs_ca_file": ""}
+
+
+def test_bucket_follows_the_naming_rule_per_host_and_can_be_overridden_in_the_host_kv(tmp_path, openbao):
+    _FakeOpenBao.routes["/v1/secret/data/hosts/special/agents"] = _kv(dict(REQUIRED, rustfs_bucket="backup_prod_special_a"))
+    assert _effective(tmp_path, openbao, host="special")["rustfs_bucket"] == "backup_prod_special_a"
+    assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup_prod_good"
+
+
+def test_bucket_prefix_variable_changes_the_naming_rule(tmp_path, openbao):
+    eff = _effective(tmp_path, openbao, extra_vars={"rustfs_bucket_prefix": "backup_stg"})
+    assert eff["rustfs_bucket"] == "backup_stg_good"
+
+
+def test_shared_openbao_bucket_key_is_ignored(tmp_path, openbao):
+    """공용 agents/rustfs의 rustfs_bucket은 더는 쓰지 않는다 — 호스트별 버킷만 허용(실수로 공용 버킷에 쌓이지 않게)."""
+    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(dict(_ENDPOINTS_RUSTFS, rustfs_bucket="shared-bucket"))
+    assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup_prod_good"

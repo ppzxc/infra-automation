@@ -79,5 +79,6 @@
 - name: "[MON-035] Set agents secrets as host facts"
   ansible.builtin.set_fact:
     host_agents_secrets: "{{ _host_agents_kv.host | host_agents_secrets }}"
+    host_agents_host_overrides: "{{ {'rustfs_bucket': ((_host_agents_kv.host | default({})).rustfs_bucket | default('')) | string | trim} }}"
     host_agents_shared_secrets: "{{ {'openobserve': _host_agents_kv.openobserve, 'rustfs': _host_agents_kv.rustfs} }}"
   no_log: true

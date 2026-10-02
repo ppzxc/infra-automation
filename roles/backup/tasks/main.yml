@@ -47,10 +47,10 @@
         - rustfs_endpoint | length > 0
         - rustfs_endpoint is match('^https?://')
         - not (rustfs_endpoint is match('.*/$'))
-        - rustfs_bucket | length > 0
+        - rustfs_bucket is match('^[A-Za-z0-9._-]{3,63}$')
       fail_msg: >-
-        {{ inventory_hostname }}: rustfs_endpoint/rustfs_bucket(inventory/group_vars/servers.yml)가 비어 있거나 형식이 잘못되었습니다
-        (http(s)://host:port, 끝 슬래시 금지).
+        {{ inventory_hostname }}: rustfs_endpoint(OpenBao agents/rustfs 또는 Extra variables)나 버킷 이름({{ rustfs_bucket }})이 잘못되었습니다
+        (endpoint: http(s)://host:port, 끝 슬래시 금지 / 버킷: 영숫자, 점, 밑줄, 하이픈 3~63자).
       quiet: true
 
   - name: "[BAK-011] Check which conditional standard backup paths exist"
@@ -78,7 +78,7 @@
   - name: "[BAK-012] Derive repository, source list, excludes and schedule"
     ansible.builtin.set_fact:
       backup_restic_binary: "{{ host_agents_install_root }}/restic/{{ host_agents_versions[host_agents_version_row].restic }}/restic"
-      backup_repository: "s3:{{ rustfs_endpoint }}/{{ rustfs_bucket }}/{{ inventory_hostname }}"
+      backup_repository: "s3:{{ rustfs_endpoint }}/{{ rustfs_bucket }}"
       backup_sources: >-
         {{ (host_agents_inputs.backup_paths
             + (_backup_conditional.results | selectattr('stat.exists') | map(attribute='item') | list)) | unique | list }}

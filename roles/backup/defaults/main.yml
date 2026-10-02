@@ -2,12 +2,20 @@
 # Host Agents 백업 (restic + resticprofile, ADR-0006 §2.4~2.5)
 enable_backup: true
 
-# RustFS(S3) 연결 — 비시크릿 공용값은 inventory/group_vars/servers.yml에서 지정한다.
-# 호스트별 repo: s3:<rustfs_endpoint>/<rustfs_bucket>/<inventory_hostname>
-rustfs_endpoint: ""        # 예: https://rustfs.example.internal:9000 (끝 슬래시 금지)
-rustfs_bucket: "host-backups"
-rustfs_region: ""          # 비우면 AWS_DEFAULT_REGION을 설정하지 않는다
-rustfs_ca_file: ""         # 사설 CA 사용 시 호스트상의 CA 파일 경로(restic --cacert)
+# RustFS(S3) 연결. 우선순위: Extra variables/group_vars > OpenBao agents/rustfs의 같은 이름 키 > 아래 기본값.
+# 저장소가 공개(PUBLIC)라 내부 도메인을 Git에 두지 않는다 — 평상시에는 OpenBao agents/rustfs에 넣는다.
+# 호스트별 repo: s3:<rustfs_endpoint>/<rustfs_bucket> (버킷 루트)
+rustfs_endpoint: "{{ ((host_agents_shared_secrets | default({})).rustfs | default({})).rustfs_endpoint | default('', true) }}"        # 예: https://rustfs.example.internal:9000 (끝 슬래시 금지)
+# 버킷은 호스트(액세스 키)마다 하나다. 해석 순서: Extra variables/group_vars > hosts/<host>/agents의 rustfs_bucket > 규칙 <rustfs_bucket_prefix>_<inventory_hostname>.
+# 공용 agents/rustfs의 rustfs_bucket은 쓰지 않는다(실수로 공용 버킷에 백업이 쌓이는 것을 막는다).
+rustfs_bucket_prefix: "backup_prod"
+rustfs_bucket: "{{ ((host_agents_host_overrides | default({})).rustfs_bucket | default('', true)) or (rustfs_bucket_prefix ~ '_' ~ inventory_hostname) }}"
+rustfs_region: "{{ ((host_agents_shared_secrets | default({})).rustfs | default({})).rustfs_region | default('', true) }}"          # 비우면 AWS_DEFAULT_REGION을 설정하지 않는다
+rustfs_ca_file: "{{ ((host_agents_shared_secrets | default({})).rustfs | default({})).rustfs_ca_file | default('', true) }}"         # 사설 CA 사용 시 호스트상의 CA 파일 경로(restic --cacert)
+
+# OpenObserve 연결 — Repo Maintenance(backup 역할만 로드)와 Deploy 등록 이벤트가 쓴다. monitoring defaults와 동일하게 유지한다.
+o2_endpoint: "{{ ((host_agents_shared_secrets | default({})).openobserve | default({})).o2_endpoint | default('', true) }}"
+o2_org: "{{ ((host_agents_shared_secrets | default({})).openobserve | default({})).o2_org | default('default', true) }}"
 
 # 바이너리 전달 헬퍼(monitoring/tasks/deliver_binary.yml 공용)가 쓰는 값 — monitoring defaults와 동일하게 유지한다.
 host_agents_cache_dir: "{{ lookup('ansible.builtin.env', 'HOME') | default('/tmp', true) }}/.cache/host-agents"
@@ -75,5 +83,5 @@ backup_maintenance_timezone: Asia/Seoul   # 스케줄(일요일 05:00)이 기준
 backup_maintenance_read_subset_percent: "10%"
 # 컨트롤러에서 RustFS 사설 CA를 신뢰시킬 때의 CA 파일 경로(RESTIC_CACERT). rustfs_ca_file은 호스트 경로이므로 따로 둔다.
 backup_maintenance_ca_file: ""
-# 테스트 전용 seam: 비워 두면 s3:<rustfs_endpoint>/<rustfs_bucket>/<host>를 사용한다(molecule/pytest만 로컬 repo를 지정).
+# 테스트 전용 seam: 비워 두면 s3:<rustfs_endpoint>/<rustfs_bucket>를 사용한다(molecule/pytest만 로컬 repo를 지정).
 backup_maintenance_repository: ""

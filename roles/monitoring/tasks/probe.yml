@@ -9,8 +9,9 @@
     that:
       - _is_already_provisioned | default(false) | bool
     fail_msg: >-
-      {{ inventory_hostname }}: site.yml로 프로비저닝되지 않은 호스트입니다.
-      Host Agents는 하드닝되지 않은 호스트에 설치하지 않습니다 — site.yml을 먼저 실행하세요.
+      {{ inventory_hostname }}: 접속 계정으로 SSH 접속할 수 없는 호스트입니다(미프로비저닝으로 판정).
+      Host Agents는 OpenBao 접속 계정의 SSH 키로 접속되는 호스트에만 설치합니다 — site.yml을 먼저 실행하거나,
+      hosts/<호스트>의 admin_users와 users/<계정>의 ssh_private_key(및 sudo 권한)를 확인하세요.
     quiet: true
 
 - name: "[MON-021] Probe OS release and architecture from target host (raw, read-only)"
