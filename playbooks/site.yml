@@ -73,7 +73,7 @@
     - name: Target host provisioning completion summary
       ansible.builtin.debug:
         msg:
-          "결과 상태": "호스트 기본 인프라 및 보안 프로비저닝 성공 완료"
+          "결과 상태": "{{ '호스트 기본 인프라 및 보안 프로비저닝 점검 완료 (check 모드: 실제 변경 없음)' if (ansible_check_mode | default(false)) else '호스트 기본 인프라 및 보안 프로비저닝 성공 완료' }}"
           "대상 서버": "{{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
           "반영 완료 항목":
             - "1. 시스템 기반: 타임존(KST), Chrony NTP 동기화, 시스템 최적화(sysctl, limits) 적용"
