@@ -518,7 +518,9 @@
         _resolved_boot_entry: "{{ _raw_boot_entry | combine({'password': _boot_resolved_pwd}) if (_boot_resolved_pwd | length > 0) else _raw_boot_entry }}"
       ansible.builtin.set_fact:
         _admin_user_entry: "{{ _resolved_admin_entry | combine(_admin_host_override) }}"
-        _bootstrap_user_entry: "{{ _resolved_boot_entry }}"
+        # 부트스트랩 계정도 hosts/<hostname>/users/<user> 오버라이드를 적용합니다(관리자 계정과 동일 규칙).
+        # 적용하지 않으면 호스트별 root 비밀번호가 전역 users/root와 다른 호스트에서 전역 값으로 접속을 시도합니다.
+        _bootstrap_user_entry: "{{ _resolved_boot_entry | combine((_host_user_overrides | default({}, true)).get(_bootstrap_user, {})) }}"
 
     - name: Debug resolved user entries
       ansible.builtin.debug:

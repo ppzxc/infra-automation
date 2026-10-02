@@ -661,3 +661,56 @@ def test_a_single_object_valued_key_is_still_unwrapped_for_the_legacy_nested_for
     """호스트명이 아닌 임의 키 하나만 있는 중첩 형식(기존 동작)은 유지한다."""
     got = _run_host_kv_unwrap(tmp_path, {"anything": {"ip": "1.2.3.4", "port": 2222}})
     assert got["ip"] == "1.2.3.4" and got["port"] == 2222
+
+
+def _parse_secrets_task():
+    with open(RESOLVE, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+    for task in plays[0]["tasks"]:
+        if task.get("name", "") == "Parse admin and bootstrap user secrets":
+            return task
+    raise AssertionError("Parse admin and bootstrap user secrets task missing")
+
+
+def _resolve_secrets(global_user_kv, host_overrides, bootstrap_user="root", admin_user="root"):
+    """Render the real 'Parse admin and bootstrap user secrets' task and return its facts."""
+    from jinja2.nativetypes import NativeEnvironment
+
+    def combine(*dicts):
+        out = {}
+        for d in dicts:
+            out.update(d)
+        return out
+
+    env = NativeEnvironment()
+    env.filters["combine"] = combine
+    resp = {"json": {"data": {"data": global_user_kv}}, "status": 200}
+    ctx = {
+        "_effective_admin_user_resp": resp,
+        "_effective_bootstrap_user_resp": resp,
+        "_primary_admin_user": admin_user,
+        "_bootstrap_user": bootstrap_user,
+        "_host_user_overrides": host_overrides,
+    }
+    task = _parse_secrets_task()
+    for name, expr in task["vars"].items():
+        ctx[name] = env.from_string(expr).render(**ctx)
+    return {k: env.from_string(v).render(**ctx) for k, v in task["ansible.builtin.set_fact"].items()}
+
+
+def test_bootstrap_entry_honours_per_host_user_override():
+    """hosts/<hostname>/users/<user> must also win for the bootstrap account. Otherwise a host whose
+    root password differs from the global users/root one is tried with the wrong password."""
+    glob = {"username": "root", "type": "PASSWORD", "password": "GLOBAL_OLD"}
+    facts = _resolve_secrets(glob, {"root": {"password": "HOST_NEW"}})
+    assert facts["_bootstrap_user_entry"]["password"] == "HOST_NEW"
+    # Fields the override does not carry are kept from the global entry.
+    assert facts["_bootstrap_user_entry"]["type"] == "PASSWORD"
+
+
+def test_bootstrap_entry_unaffected_without_override_or_for_other_user():
+    glob = {"username": "root", "type": "PASSWORD", "password": "GLOBAL_OLD"}
+    assert _resolve_secrets(glob, {})["_bootstrap_user_entry"]["password"] == "GLOBAL_OLD"
+    # An override for a different account must not leak into the bootstrap entry.
+    other = _resolve_secrets(glob, {"svcadm": {"password": "OTHER"}})
+    assert other["_bootstrap_user_entry"]["password"] == "GLOBAL_OLD"
