@@ -107,6 +107,15 @@
               - _p.arch == ('amd64' if ansible_architecture == 'x86_64' else 'arm64')
             fail_msg: "OS probe {{ _p }} disagrees with gathered facts."
 
+        - name: "[VERIFY-MON-025] Verify the probe reads this host's real timezone (the RFC3164 time zone)"
+          vars:
+            _p: "{{ _verify_probe.stdout | host_agents_parse_os_probe }}"
+          ansible.builtin.assert:
+            that:
+              - _p.timezone == '' or _p.timezone is match('^[A-Za-z][A-Za-z0-9_+/-]*$')
+              - "'location: \"' ~ (_p.timezone or timezone | default('Asia/Seoul')) ~ '\"' in f.read['/etc/otelcol/config.yaml']"
+            fail_msg: "Probe timezone {{ _p.timezone }} is not the one rendered into the Envelope Parsing timestamps."
+
         - name: "[VERIFY-MON-023] Verify /usr/bin/python3 exists on the modern path"
           ansible.builtin.assert:
             that:
@@ -293,6 +302,15 @@
               - "'hostmetrics:' in f.read['/etc/otelcol/config.yaml']"
               - "'node_exporter' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
+
+        - name: "[VERIFY-MON-004] Verify Envelope Parsing is rendered (parse errors kept, body not replaced, app_logs untouched)"
+          ansible.builtin.assert:
+            that:
+              - "'on_error: send_quiet' in f.read['/etc/otelcol/config.yaml']"
+              - "'log.parse_error' in f.read['/etc/otelcol/config.yaml']"
+              - "'process.executable.name' in f.read['/etc/otelcol/config.yaml']"
+              - "'preserve_to' not in f.read['/etc/otelcol/config.yaml']"
+              - "'filelog/app_logs:' not in f.read['/etc/otelcol/config.yaml'] or 'regex_parser' not in (f.read['/etc/otelcol/config.yaml'] | regex_findall('(?s)filelog/app_logs:.*?retry_on_failure') | join)"
 
         - name: "[VERIFY-MON-060] Verify the exporter targets <endpoint>/api/<org> without a trailing slash"
           ansible.builtin.assert:

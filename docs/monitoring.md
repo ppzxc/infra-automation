@@ -98,7 +98,13 @@ SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(Cen
 
 ## 3-3. 수집 설정 (`otelcol-contrib.yaml.j2`, `MON-060~065`)
 
-- **수신**: 스트림별 `filelog/<stream>`(`start_at: end`, `storage: file_storage`, `log_type` 속성, 본문 원문) + `hostmetrics`(60s, 8 스크레이퍼). journald는 `/usr/sbin/rsyslogd`가 없는 호스트에서만, `docker_stats`는 `otel_docker_metrics: true`인 호스트에서만, 로컬 OTLP 수신기는 `otel_otlp_enabled: true`일 때만 추가됩니다(기본 off).
+- **수신**: 스트림별 `filelog/<stream>`(`start_at: end`, `storage: file_storage`, `log_type` 속성, 본문 원문 유지, 위 Envelope Parsing으로 필드만 추가) + `hostmetrics`(60s, 8 스크레이퍼). journald는 `/usr/sbin/rsyslogd`가 없는 호스트에서만, `docker_stats`는 `otel_docker_metrics: true`인 호스트에서만, 로컬 OTLP 수신기는 `otel_otlp_enabled: true`일 때만 추가됩니다(기본 off).
+- **Envelope Parsing (ADR-0008, `MON-004`/`MON-207`/`MON-025`)**: 수신 본문(원문)은 바이트 단위로 그대로 두고, 파일별 `if:` 조건 operator가 포맷이 정한 필드만 `Timestamp`·`attributes`·`severity`에 붙입니다(수신기 ID는 그대로). 포맷 표는 `vars/main.yml`의 `otel_log_formats`입니다.
+  - syslog 계열(`messages`, `syslog`, `secure`, `auth.log`, `sudo.log`, `cron*`, `kern.log`, `boot.log`, `firewalld`): RFC3164 시각 → `Timestamp`(Probe가 읽은 호스트 타임존, 연도는 수집 시점 기준 추정), `process.executable.name`, `process.pid`, `message`. 줄에 찍힌 hostname은 버리고 리소스 `host.name`을 유지합니다. PRI가 없으므로 severity는 비웁니다.
+  - `audit/audit.log`: `audit.type`, `audit.serial`, `msg=audit(epoch:serial)`의 시각, 나머지 `key=value`는 `audit.fields`.
+  - `fail2ban.log`(시각·`component`·`process.pid`·`message`·레벨), `dnf.log`(시각·레벨·`message`): 레벨이 있을 때만 `severity_*`. `yum.log`, `dpkg.log`: 시각(`dpkg.action`)만, severity 없음. `journald`: `PRIORITY` → severity(본문 원문 맵 유지). `app_logs`와 사용자 추가 경로는 파싱하지 않습니다.
+  - 포맷에 맞지 않는 줄은 버리지 않고 원문 그대로 보내며 `log.parse_error=true`를 붙입니다(이벤트 시각이 없으면 수집 시각 사용). 키워드로 severity를 추정하지 않습니다.
+  - **Probe 타임존**(`MON-021/022/025`): `/etc/localtime` 링크 대상(systemd 계열), 없으면 `/etc/sysconfig/clock`의 `ZONE=`(CentOS 6)에서 읽어 `host_agents_timezone`에 둡니다. 읽지 못하면 `timezone` 변수(기본 `Asia/Seoul`)로 대체하고 `MON-025`가 WARN을 남깁니다. 세 경로(modern, legacy_el7, legacy_el6) 모두 같은 템플릿이며 0.119.0·0.161.0에서 같은 operator 구성이 동작합니다(pytest `tests/test_envelope_parsing.py`가 실제 바이너리로 검증).
 - **백업 결과 수집**: 고정 수신기 `filelog/backup_logs`(`otel_backup_log_path`, `log_type: backup_logs`)가 `json_parser`로 필드를 attributes로 올리되 본문 원문은 유지하고 `ts`를 이벤트 시각으로 씁니다. 필드 계약은 [backup.md §6](backup.md).
 - **라우팅**: `logs/in`(memory_limiter, `resource/host`: `host.name`=인벤토리 호스트명, `os.type`, `os.name`, `os.version`, `os.description`, `host.arch`, `host.id`(없으면 생략), `host.ip`(인벤토리 `ip` > 호스트 KV `ip` > `public_ip`, 없으면 생략), `deployment.environment.name`; `service.name`은 파일 그룹·수집기별로 따로 부여; 값 정의는 [ADR-0006 §2.3](adr/0006-host-agents-otelcol-resticprofile.md)) → `routing/logs`(`log_type`) → `security_logs`/`system_logs`/`app_logs`/`backup_logs` 파이프라인 → 스트림별 `otlphttp` exporter(`stream-name` 헤더).
 - **전송**: `<o2_endpoint>/api/<o2_org>`(끝 슬래시 금지), `Authorization: Basic ${env:O2_BASIC_AUTH}`, 사설 CA는 `o2_ca_file`. 로그 exporter는 `file_storage` 영속 bytes 큐(`otel_log_queue_bytes`) + `block_on_overflow: true` + `max_elapsed_time: 0`; 메트릭은 별도 메모리 큐(`block_on_overflow: false`) 파이프라인입니다. `file_storage`는 `compaction.on_rebound: true`.
@@ -180,6 +186,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수 |
 | `MON-023` | `Check /usr/bin/python3 exists on modern path (raw, read-only)` | `ansible.builtin.raw` | modern | `changed_when: false`, `check_mode: false` |
 | `MON-024` | `Gather facts on modern path` | `ansible.builtin.setup` | modern | 읽기 전용 |
+| `MON-025` | `Warn when the host timezone could not be read (falling back to the timezone variable)` | `ansible.builtin.debug` | All | 읽기 전용 (Probe가 `/etc/localtime` 링크·`/etc/sysconfig/clock`에서 타임존을 읽지 못한 호스트에만 WARN, `timezone` 변수(기본 `Asia/Seoul`)로 대체) |
 | `MON-029` | `Warn that this host is installed through the password-auth exception (ISMS evidence)` | `ansible.builtin.debug` | All | 읽기 전용 (비밀번호 예외로 통과한 호스트에만 `PASSWORD-AUTH-EXCEPTION` 경고를 남김) |
 | `MON-026` | `Install python3 on modern path when absent` | `ansible.builtin.raw` | modern | 부재 시에만 실행 (check 모드 스킵) |
 | `MON-027` | `Assert python3 is available on modern path` | `ansible.builtin.assert` | modern | 읽기 전용 |
