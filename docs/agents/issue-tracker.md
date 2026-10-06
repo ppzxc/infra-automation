@@ -5,6 +5,15 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
+- **Title prefix**: every spec, map, and ticket title starts with its place in the hierarchy. `#NN` is the parent issue number; tickets are numbered `Ticket-1`, `Ticket-2`, … in dependency order under their Spec.
+
+  | Issue | Prefix |
+  |---|---|
+  | Standalone spec (`/to-spec`) | `[Spec] ` |
+  | Wayfinder map | `[Map] ` |
+  | Wayfinder map child ticket | `[Map #NN / Question] ` |
+  | Spec under a map | `[Map #NN / Spec] ` |
+  | Ticket under a spec (`/to-issues`) | `[Spec #NN / Ticket-N] ` |
 - **Read an issue**: `gh issue view <number> --comments`, filtering comments by `jq` and also fetching labels.
 - **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'` with appropriate `--label` and `--state` filters.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`

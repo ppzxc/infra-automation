@@ -36,6 +36,10 @@ _Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)
 The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
 _Avoid_: log category, stream tag
 
+**Envelope Parsing**:
+Lifting the fields that a log source's fixed format defines (event time, emitting program, pid, severity where the format carries one) out of a log line into structured fields, at the collector, without touching the original line. The original line stays the record's body and is the evidence; parsed fields sit beside it. Interpreting what a message *means* (who logged in, from which address, OCSF normalisation) is not Envelope Parsing and is done centrally in OpenObserve.
+_Avoid_: log parsing (when meaning only this edge layer), normalisation, structuring
+
 **Fast Scenario**:
 The molecule scenario run at pre-push. Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
 _Avoid_: default scenario, quick test, smoke test
