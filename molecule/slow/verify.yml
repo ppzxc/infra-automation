@@ -1142,7 +1142,57 @@
   become: false
   vars:
     _role: "{{ playbook_dir }}/../../roles/openobserve_config"
+    _t: "{{ dict(_o2c_ids | zip(_o2c_tasks)) }}"
+    _o2c_raw: "{{ lookup('ansible.builtin.file', _role ~ '/tasks/main.yml') | replace('{{', '<<') }}"
+    _o2c_all: "{{ _o2c_raw | from_yaml }}"
+    _o2c_tasks: "{{ _o2c_all | selectattr('name', 'match', '^\\[O2C-') | list }}"
+    _o2c_ids: "{{ _o2c_tasks | map(attribute='name') | map('regex_replace', '^\\[(O2C-\\d+)\\].*$', '\\1') | list }}"
   tasks:
+    - name: "[VERIFY-O2C-001] Verify the OpenBao KV read is read-only, GET-only and hides the token"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-001']['ansible.builtin.uri'].method == 'GET'
+          - _t['O2C-001'].check_mode is false and _t['O2C-001'].changed_when is false and _t['O2C-001'].no_log is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-002] Verify the inputs are asserted quietly and never cached as facts"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-002'].block | map(attribute='no_log') | list == [true, true]
+          - _t['O2C-002'].block[0]['ansible.builtin.set_fact'].cacheable is false
+          - _t['O2C-002'].block[1]['ansible.builtin.assert'].quiet is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-010] Verify the state read is a GET loop over the shared path table and the auth fact is not cacheable"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-010']['ansible.builtin.uri'].method == 'GET'
+          - "'loop: \"<< o2c_org | o2c_read_requests }}\"' in _o2c_raw"
+          - _t['O2C-010'].check_mode is false and _t['O2C-010'].changed_when is false and _t['O2C-010'].no_log is true
+          - _t['O2C-003']['ansible.builtin.set_fact'].cacheable is false
+        quiet: true
+
+    - name: "[VERIFY-O2C-011] Verify the per-alert detail read is a GET that works in check mode"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-011']['ansible.builtin.uri'].method == 'GET'
+          - _t['O2C-011'].check_mode is false and _t['O2C-011'].changed_when is false and _t['O2C-011'].no_log is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-012] Verify the plan is computed by the pure o2c_plan filter without side effects"
+      ansible.builtin.assert:
+        that:
+          - "'<< o2c_desired_objects | o2c_plan(' in _o2c_raw"
+          - _t['O2C-012'].no_log is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-013] Verify the plan output lists names only"
+      ansible.builtin.assert:
+        that:
+          - "'o2c_plan_actions | o2c_plan_summary' in _o2c_raw"
+          - "'item.body' not in _o2c_raw.split('[O2C-013]')[1].split('[O2C-020]')[0]"
+        quiet: true
+
     - name: "[VERIFY-O2C-003] Verify the VRL function only adds fields and never rewrites the body"
       ansible.builtin.assert:
         that:
@@ -1156,7 +1206,7 @@
       ansible.builtin.assert:
         that:
           - _tasks | selectattr('name', 'match', '^\\[O2C-020\\]') | map(attribute='when') | first == 'not ansible_check_mode'
-          - _tasks | selectattr('ansible.builtin.uri', 'defined') | rejectattr('no_log', 'equalto', true) | list | length == 0
+          - _tasks | selectattr('name', 'match', '^\\[O2C-(001|010|011|020)\\]') | rejectattr('no_log', 'equalto', true) | list | length == 0
         quiet: true
       vars:
         _tasks: "{{ lookup('ansible.builtin.file', _role ~ '/tasks/main.yml') | from_yaml }}"

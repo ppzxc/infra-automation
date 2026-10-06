@@ -245,6 +245,23 @@ def test_every_api_task_is_no_log_and_writes_are_skipped_in_check_mode():
     assert all(t["check_mode"] is False and t["changed_when"] is False for t in reads)
 
 
+def test_credential_facts_are_never_cacheable_and_reads_use_the_plan_path_table():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("o2c_filter", ROOT_DIR / "filter_plugins" / "openobserve_config.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    reqs = mod.o2c_read_requests("default")
+    assert [r["kind"] for r in reqs] == list(mod.KINDS)
+    assert all(r["path"] == mod.LIST_PATHS[r["kind"]].format(org="default") for r in reqs)
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    flat = [t for top in tasks for t in (top.get("block") or [top])]
+    facts = [t for t in flat if "ansible.builtin.set_fact" in t
+             and ({"o2c_kv", "o2c_auth_headers"} & set(t["ansible.builtin.set_fact"]))]
+    assert len(facts) == 2 and all(t["ansible.builtin.set_fact"].get("cacheable") is False for t in facts)
+    read = next(t for t in tasks if t["name"].startswith("[O2C-010]"))
+    assert read["loop"] == "{{ o2c_org | o2c_read_requests }}"
+
+
 def test_no_secret_value_is_committed_in_the_role_or_playbook():
     text = "".join(p.read_text(encoding="utf-8") for p in [PLAYBOOK, *ROLE.rglob("*") ] if p.is_file())
     assert not re.search(r"https?://[^\s'\"]*(hooks|webhook)[^\s'\"]*/[A-Za-z0-9_-]{16,}", text)
