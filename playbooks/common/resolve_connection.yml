@@ -196,9 +196,12 @@
         _host_dict: "{{ (_host_unwrapped | first) if (_host_unwrapped is sequence and _host_unwrapped is not string and _host_unwrapped | length > 0 and (_host_unwrapped | first) is mapping) else (_host_unwrapped if _host_unwrapped is mapping else {}) }}"
         _resolved_bao_host: "{{ _host_dict.ansible_host | default(_host_dict.public_ip | default(_host_dict.ip | default(_host_dict.host | default('', true), true), true), true) }}"
         _resolved_bao_port: "{{ _host_dict.ansible_port | default(_host_dict.port | default('', true), true) }}"
+        # 관리 IP(`ip`, Host Agents의 host.ip 출처): 인벤토리 ip > KV ip > KV public_ip. 셋 다 없으면 빈 값(생략·WARN은 MON-036).
+        _resolved_bao_ip: "{{ _host_dict.ip | default(_host_dict.public_ip | default('', true), true) }}"
       ansible.builtin.set_fact:
         ansible_host: "{{ (_resolved_bao_host if _resolved_bao_host | length > 0 else (hostvars[inventory_hostname].ansible_host if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_host is defined) else (ansible_host | default(inventory_hostname, true)))) }}"
         ansible_port: "{{ ((_resolved_bao_port if (_resolved_bao_port | string | length > 0) else (hostvars[inventory_hostname].ansible_port if (hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_port is defined) else (ansible_port | default(22)))) | int) }}"
+        ip: "{{ ip if (ip is defined and (ip | string | trim | length) > 0) else _resolved_bao_ip }}"
         _openbao_python_interpreter: "{{ _host_dict.ansible_python_interpreter | default('', true) }}"
         _host_kv_dict: "{{ _host_dict }}"
 

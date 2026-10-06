@@ -714,3 +714,40 @@ def test_bootstrap_entry_unaffected_without_override_or_for_other_user():
     # An override for a different account must not leak into the bootstrap entry.
     other = _resolve_secrets(glob, {"svcadm": {"password": "OTHER"}})
     assert other["_bootstrap_user_entry"]["password"] == "GLOBAL_OLD"
+
+
+def _apply_host_task(playbook):
+    """Return the task that applies OpenBao host variables (ansible_host / ansible_port / ip) to host facts."""
+    with open(playbook, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+    for task in plays[0]["tasks"]:
+        if task.get("name") == "Apply OpenBao and inventory host variables to host facts":
+            return task
+    raise AssertionError(f"host variable apply task missing in {playbook}")
+
+
+def _resolve_ip(host_kv, inventory_ip=None):
+    """Evaluate the `ip` fact the way Ansible does: task vars first, then the set_fact expression."""
+    from jinja2.nativetypes import NativeEnvironment
+    task = _apply_host_task(RESOLVE)
+    env = NativeEnvironment()
+    ctx = {"_host_dict": host_kv}
+    if inventory_ip is not None:
+        ctx["ip"] = inventory_ip
+    ctx["_resolved_bao_ip"] = env.from_string(task["vars"]["_resolved_bao_ip"]).render(**ctx)
+    return env.from_string(task["ansible.builtin.set_fact"]["ip"]).render(**ctx)
+
+
+def test_management_ip_precedence_inventory_then_kv_ip_then_kv_public_ip():
+    """host.ip source (#89): inventory ip > KV ip > KV public_ip, so KV-only hosts such as ns0340 get one."""
+    # Inventory ip is untouched even when the KV has other addresses (ns0266/ns0332 behaviour unchanged).
+    assert _resolve_ip({"ip": "10.0.0.2", "public_ip": "10.0.0.3"}, inventory_ip="10.0.0.1") == "10.0.0.1"
+    # No inventory ip: KV ip wins over public_ip, so a management IP different from the public one can be declared.
+    assert _resolve_ip({"ip": "10.0.0.2", "public_ip": "10.0.0.3"}) == "10.0.0.2"
+    # KV-only host with just public_ip (ns0340).
+    assert _resolve_ip({"public_ip": "218.234.206.78"}) == "218.234.206.78"
+    # An empty inventory value counts as unset.
+    assert _resolve_ip({"public_ip": "218.234.206.78"}, inventory_ip="") == "218.234.206.78"
+    # Nothing anywhere: empty string, left for MON-036 to omit and WARN.
+    assert _resolve_ip({}) == ""
+    assert _resolve_ip({"ip": "", "public_ip": ""}) == ""
