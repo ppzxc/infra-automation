@@ -10,6 +10,29 @@ otel_security_log_paths:
   - /var/log/fail2ban.log
   - /var/log/firewalld
 
+# 표준 수집 경로별 OTel service.name (ADR-0006 §2.3). otel_system_logs의 모든 항목이 여기 있어야 한다
+# (tests/test_host_agents.py가 강제). 없는 경로는 스트림 이름(security/system/app)으로 보고된다.
+otel_log_services:
+  /var/log/messages: syslog
+  /var/log/syslog: syslog
+  /var/log/secure: auth
+  /var/log/auth.log: auth
+  /var/log/sudo.log: sudo
+  /var/log/audit/audit.log: audit
+  /var/log/cron*: cron
+  /var/log/fail2ban.log: fail2ban
+  /var/log/firewalld: firewalld
+  /var/log/dnf.log: package-manager
+  /var/log/yum.log: package-manager
+  /var/log/dpkg.log: package-manager
+  /var/log/boot.log: boot
+  /var/log/kern.log: kernel
+# 고정 수신기·메트릭의 service.name
+otel_service_backup: backup
+otel_service_journald: journald
+otel_service_hostmetrics: host-metrics
+otel_service_docker: docker
+
 # ISMS 2.9.3 필수 백업 경로. hosts/<host>/agents의 backup_exclude_paths로 제외할 수 없다.
 # (roles/backup이 소비하며, 입력 검증은 monitoring이 먼저 실행되므로 여기서 함께 수행한다.)
 host_agents_backup_mandatory_paths:

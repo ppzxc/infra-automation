@@ -61,9 +61,10 @@
   | 키 (`hosts/<host>/agents`) | 필수 | 용도 |
   |---|---|---|
   | `o2_ingest_token`, `rustfs_access_key`, `rustfs_secret_key`, `restic_password` | 예 | 호스트 전용 시크릿 (누락 시 해당 호스트 실패) |
-  | `otel_extra_logs` | 아니오 | glob(→ `app_logs`) 또는 `{path, stream}` 추가 |
+  | `otel_extra_logs` | 아니오 | glob(→ `app_logs`) 또는 `{path, stream, service}` 추가. `service`(소문자·숫자·`.-_`)는 선택, 없으면 스트림 이름(`app` 등)으로 보고 |
   | `otel_exclude_logs` | 아니오 | 표준 목록에서 정확히 일치하는 경로 제거. `security_logs` 경로는 제외 불가 |
   | `otel_docker_metrics` | 아니오 | Docker 메트릭 opt-in |
+  | `host_agents_environment` | 예(호스트별) | `production` \| `staging` \| `development` \| `test`. 인벤토리 변수가 우선이고 없으면 이 KV 키. **그룹 기본값 없음** — 누락·허용 밖 값은 변경 전 실패(`MON-037`) |
   | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
 
 - **실패 조건 (변경 전, check 모드 포함)**: 필수 키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 KV 키를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
@@ -188,6 +189,9 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-033` | `Merge agents inputs with the Git standard` | `ansible.builtin.set_fact` | All | 순수 함수 (시크릿 미포함) |
 | `MON-034` | `Assert agents inputs are valid before any change` | `ansible.builtin.assert` | All | 읽기 전용 |
 | `MON-035` | `Set agents secrets as host facts` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
+| `MON-036` | `Build and validate the resource attributes of this host` | `ansible.builtin.set_fact` | All | 순수 함수 (프로브 값 + 인벤토리 `ip` + `host_agents_environment`) |
+| `MON-037` | `Assert the resource attributes are valid before any change` | `ansible.builtin.assert` | All | 읽기 전용 (환경 누락·허용 밖 값이면 check 모드에서도 실패) |
+| `MON-038` | `Warn about resource attributes left out for this host` | `ansible.builtin.debug` | All | 읽기 전용 (`host.id`/`host.ip`가 없는 호스트에만 WARN) |
 | `MON-040` | `Ensure controller cache directories exist` | `ansible.builtin.file` | controller | 디렉터리 존재 시 `ok` |
 | `MON-041` | `Download pinned release tarball on the controller and verify SHA256` | `ansible.builtin.get_url` | controller | `checksum: sha256:<Git 고정값>` 일치 시 `ok`, 불일치 시 실패 |
 | `MON-042` | `Extract the binary into the controller cache` | `ansible.builtin.unarchive` | controller | `creates` (버전×아키텍처별 캐시) |

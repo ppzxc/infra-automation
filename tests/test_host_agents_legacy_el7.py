@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -23,6 +24,9 @@ import pytest
 import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
+from host_agents import host_agents_resource_attributes  # noqa: E402
+
 MON = ROOT_DIR / "roles" / "monitoring"
 BAK = ROOT_DIR / "roles" / "backup"
 
@@ -223,6 +227,9 @@ def _env_vars(tmp_path):
         "host_agents_secrets": {"o2_ingest_token": "s3cr3t-token", "rustfs_access_key": "AKIA-secret",
                                 "rustfs_secret_key": "S3-secret", "restic_password": "pw-secret"},
         "host_agents_journald": False,
+        "host_agents_resource_attrs": host_agents_resource_attributes(
+            "h1", "production", {"arch": "amd64", "type": "linux", "os_id": "centos", "version": "7.9.2009",
+                                 "description": "CentOS Linux 7 (Core)", "machine_id": ""}, "192.0.2.7"),
         "backup_config_dir": t + "/etc/restic", "backup_env_path": t + "/etc/restic/env",
         "backup_password_path": t + "/etc/restic/password", "backup_profile_path": t + "/etc/restic/profiles.yaml",
         "backup_cache_dir": t + "/var/cache/restic", "backup_event_script_path": t + "/sbin/host-agents-backup-event",

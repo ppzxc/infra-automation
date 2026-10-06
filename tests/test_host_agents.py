@@ -21,8 +21,10 @@ import yaml
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 from host_agents import (  # noqa: E402
+    host_agents_glob_regex,
     host_agents_os_probe_cmd,
     host_agents_parse_os_probe,
+    host_agents_resource_attributes,
     host_agents_resolve_inputs,
     host_agents_secrets,
 )
@@ -139,9 +141,10 @@ def test_probe_and_kv_tasks_run_before_any_change():
 # OS probe classification
 # --------------------------------------------------------------------------
 
-def _probe(os_release="", redhat="", uname="x86_64", noise=""):
+def _probe(os_release="", redhat="", uname="x86_64", noise="", machine_id=""):
     return (f"{noise}\n__HOST_AGENTS_OS_RELEASE__\n{os_release}\n"
-            f"__HOST_AGENTS_REDHAT_RELEASE__\n{redhat}\n__HOST_AGENTS_UNAME_M__\n{uname}\n")
+            f"__HOST_AGENTS_REDHAT_RELEASE__\n{redhat}\n__HOST_AGENTS_MACHINE_ID__\n{machine_id}\n"
+            f"__HOST_AGENTS_UNAME_M__\n{uname}\n")
 
 
 ROCKY9 = 'NAME="Rocky Linux"\nVERSION="9.3 (Blue Onyx)"\nID="rocky"\nID_LIKE="rhel centos fedora"\nVERSION_ID="9.3"\nPRETTY_NAME="Rocky Linux 9.3 (Blue Onyx)"'
@@ -174,6 +177,29 @@ def test_os_probe_versions_and_description():
     assert facts["version"] == "6.10" and facts["description"] == "CentOS release 6.10 (Final)"
 
 
+MACHINE_ID = "0123456789abcdef0123456789abcdef"
+
+
+@pytest.mark.parametrize("args, os_id", [
+    (dict(os_release=ROCKY9, redhat="Rocky Linux release 9.3 (Blue Onyx)"), "rocky"),
+    (dict(os_release=UBUNTU), "ubuntu"),
+    (dict(os_release=CENTOS7, redhat="CentOS Linux release 7.9.2009 (Core)"), "centos"),
+    (dict(redhat="CentOS release 6.10 (Final)"), "centos"),
+    (dict(redhat="Red Hat Enterprise Linux Server release 6.10 (Santiago)"), "rhel"),
+])
+def test_os_probe_derives_an_os_release_style_id(args, os_id):
+    assert host_agents_parse_os_probe(_probe(**args))["os_id"] == os_id
+
+
+def test_os_probe_reads_machine_id_only_when_well_formed():
+    assert host_agents_parse_os_probe(_probe(os_release=UBUNTU, machine_id=MACHINE_ID.upper()))["machine_id"] == MACHINE_ID
+    for bad in ("", "not-a-machine-id", MACHINE_ID[:-1]):
+        assert host_agents_parse_os_probe(_probe(os_release=UBUNTU, machine_id=bad))["machine_id"] == ""
+    # CentOS 6 has no /etc/machine-id: the section is empty and uname still parses
+    el6 = host_agents_parse_os_probe(_probe(redhat="CentOS release 6.10 (Final)", uname="x86_64"))
+    assert el6["machine_id"] == "" and el6["arch"] == "amd64"
+
+
 @pytest.mark.parametrize("output", ["", "no markers at all", _probe(), _probe(os_release='ID=alpine\nVERSION_ID=3.19')])
 def test_os_probe_rejects_unclassifiable_hosts(output):
     with pytest.raises(ValueError):
@@ -197,18 +223,23 @@ REQUIRED = {"o2_ingest_token": "tok-o2-ingest-0001", "rustfs_access_key": "rfs-a
             "rustfs_secret_key": "rfs-secret-0003", "restic_password": "restic-pass-0004"}
 
 
+SERVICES = {"/var/log/messages": "syslog", "/var/log/secure": "auth", "/var/log/audit/audit.log": "audit",
+            "/var/log/cron*": "cron"}
+
+
 def _resolve(**kv):
-    return host_agents_resolve_inputs(dict(REQUIRED, **kv), STANDARD, SECURITY, MANDATORY, "hosts/h/agents")
+    return host_agents_resolve_inputs(dict(REQUIRED, **kv), STANDARD, SECURITY, MANDATORY, "hosts/h/agents",
+                                      service_map=SERVICES)
 
 
 def test_absent_overrides_mean_git_standard_only():
     res = _resolve()
     assert res["errors"] == []
     assert res["otel_logs"] == [
-        {"path": "/var/log/messages", "stream": "system_logs"},
-        {"path": "/var/log/secure", "stream": "security_logs"},
-        {"path": "/var/log/audit/audit.log", "stream": "security_logs"},
-        {"path": "/var/log/cron*", "stream": "system_logs"}]
+        {"path": "/var/log/messages", "stream": "system_logs", "service": "syslog"},
+        {"path": "/var/log/secure", "stream": "security_logs", "service": "auth"},
+        {"path": "/var/log/audit/audit.log", "stream": "security_logs", "service": "audit"},
+        {"path": "/var/log/cron*", "stream": "system_logs", "service": "cron"}]
     assert res["backup_paths"] == MANDATORY
     assert (res["otel_docker_metrics"], res["backup_exclude_paths"], res["backup_pre_hooks"]) == (False, [], [])
 
@@ -342,8 +373,8 @@ def openbao():
 
 
 def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token="tok", extra_tasks=None,
-                     with_backup_defaults=False):
-    role_vars = {}
+                     with_backup_defaults=False, environment="production"):
+    role_vars = {} if environment is None else {"host_agents_environment": environment}
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
     if with_backup_defaults:
@@ -353,7 +384,7 @@ def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token=
         "name": "Dump result",
         "ansible.builtin.copy": {
             "content": "{{ {'inputs': host_agents_inputs, 'secrets': host_agents_secrets,"
-                       " 'shared': host_agents_shared_secrets} | to_json }}",
+                       " 'shared': host_agents_shared_secrets, 'attrs': host_agents_resource_attrs} | to_json }}",
             "dest": f"{tmp_path}/out-{{{{ inventory_hostname }}}}.json", "mode": "0600"},
         "check_mode": False,
     })
@@ -372,6 +403,17 @@ def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token=
                  for h in hosts if (tmp_path / f"out-{h}.json").exists()}
 
 
+@pytest.mark.parametrize("environment, ok", [(None, False), ("prod", False), ("production", True), ("staging", True)])
+@pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
+def test_environment_is_validated_before_any_change_in_both_modes(tmp_path, openbao, check, environment, ok):
+    res, out = _run_input_tasks(tmp_path, ["bare"], openbao, check=check, environment=environment)
+    assert (res.returncode == 0) is ok and (set(out) == {"bare"}) is ok
+    if ok:
+        assert out["bare"]["attrs"]["attributes"]["deployment.environment.name"] == environment
+    else:
+        assert "bare: 리소스 속성 검증 실패" in res.stdout + res.stderr and "host_agents_environment" in res.stdout + res.stderr
+
+
 @pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
 def test_agents_kv_resolution_under_ansible(tmp_path, openbao, check):
     hosts = ["good", "bare", "badexclude", "missing"]
@@ -385,7 +427,10 @@ def test_agents_kv_resolution_under_ansible(tmp_path, openbao, check):
     assert out["good"]["secrets"] == REQUIRED
     assert out["good"]["shared"] == {"openobserve": SHARED_O2, "rustfs": SHARED_RUSTFS}
     assert out["good"]["inputs"]["otel_docker_metrics"] is True
-    assert out["good"]["inputs"]["otel_logs"][-1] == {"path": "/opt/app/*.log", "stream": "app_logs"}
+    assert out["good"]["inputs"]["otel_logs"][-1] == {"path": "/opt/app/*.log", "stream": "app_logs", "service": "app"}
+    services = {l["path"]: l["service"] for l in out["bare"]["inputs"]["otel_logs"]}
+    assert services["/var/log/secure"] == "auth" and services["/var/log/audit/audit.log"] == "audit"
+    assert out["good"]["attrs"]["attributes"]["deployment.environment.name"] == "production"
     bare = out["bare"]["inputs"]
     assert bare["errors"] == [] and bare["otel_docker_metrics"] is False
     assert {l["path"] for l in bare["otel_logs"] if l["stream"] == "security_logs"} >= {
@@ -603,6 +648,70 @@ def test_otelcol_pinned_version_table_is_consistent():
 
 # --------------------------------------------------------------------------
 # Collection config (Ticket-4): template rendered with Ansible's own Jinja environment
+def test_extra_logs_carry_a_service_name_defaulting_to_the_stream():
+    res = _resolve(otel_extra_logs=["/opt/app/*.log", {"path": "/srv/x.log", "stream": "system_logs", "service": "x-svc"},
+                                    {"path": "/srv/y.log", "stream": "security_logs"}])
+    assert res["errors"] == []
+    extra = {l["path"]: l["service"] for l in res["otel_logs"][len(STANDARD):]}
+    assert extra == {"/opt/app/*.log": "app", "/srv/x.log": "x-svc", "/srv/y.log": "security"}
+
+
+@pytest.mark.parametrize("bad", [{"path": "/x.log", "service": "Bad Name"}, {"path": "/x.log", "service": 7},
+                                 {"path": "/x.log", "service": ""}, "/var/log/[ab].log", '/var/log/a"b.log'])
+def test_extra_logs_reject_a_bad_service_or_unsupported_glob(bad):
+    assert _resolve(otel_extra_logs=[bad])["errors"]
+
+
+def test_every_standard_log_path_has_a_service_name():
+    defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    mapped = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))["otel_log_services"]
+    assert not set(defaults["otel_system_logs"]) - set(mapped), "otel_log_services가 otel_system_logs의 경로를 빠뜨렸습니다"
+
+
+@pytest.mark.parametrize("glob, regex", [
+    ("/var/log/secure", "^/var/log/secure$"), ("/var/log/cron*", "^/var/log/cron[^/]*$"),
+    ("/var/log/auth.log", "^/var/log/auth[.]log$"), ("/opt/**/x?.log", "^/opt/.*/x[^/][.]log$")])
+def test_glob_regex_is_anchored_and_has_no_backslash(glob, regex):
+    assert host_agents_glob_regex(glob) == regex and "\\" not in regex
+
+
+# --------------------------------------------------------------------------
+# Resource attributes (ADR-0006 §2.3)
+# --------------------------------------------------------------------------
+
+OS_FACTS = {"machine_id": MACHINE_ID, "arch": "amd64", "type": "linux", "os_id": "rocky", "version": "9.3",
+            "description": "Rocky Linux 9.3"}
+
+
+def test_resource_attributes_use_otel_names_and_the_inventory_hostname():
+    res = host_agents_resource_attributes("ns0266", "production", OS_FACTS, "39.116.31.43")
+    assert res["errors"] == [] and res["omitted"] == []
+    assert res["attributes"] == {
+        "host.name": "ns0266", "host.id": MACHINE_ID, "host.ip": "39.116.31.43", "host.arch": "amd64",
+        "os.type": "linux", "os.name": "rocky", "os.version": "9.3", "os.description": "Rocky Linux 9.3",
+        "deployment.environment.name": "production"}
+
+
+@pytest.mark.parametrize("env", [None, "", "prod", "PRODUCTION", "dev", " "])
+def test_environment_is_mandatory_and_limited_to_the_semconv_vocabulary(env):
+    res = host_agents_resource_attributes("h1", env, OS_FACTS, "192.0.2.1")
+    assert res["errors"] and "deployment.environment.name" not in res["attributes"]
+
+
+@pytest.mark.parametrize("env", ["production", "staging", "development", "test", " staging "])
+def test_every_vocabulary_value_is_accepted(env):
+    assert host_agents_resource_attributes("h1", env, OS_FACTS, "192.0.2.1")["errors"] == []
+
+
+def test_host_id_and_host_ip_are_left_out_and_named_when_unavailable():
+    facts = dict(OS_FACTS, machine_id="")
+    for ip in (None, "", "not-an-ip", "web-01.example"):
+        res = host_agents_resource_attributes("el6", "production", facts, ip)
+        assert res["errors"] == [] and res["omitted"] == ["host.id", "host.ip"]
+        assert "host.id" not in res["attributes"] and "host.ip" not in res["attributes"]
+        assert res["attributes"]["host.name"] == "el6"
+
+
 # --------------------------------------------------------------------------
 
 def _render_config(tmp_path, **over):
@@ -612,10 +721,12 @@ def _render_config(tmp_path, **over):
         "inventory_hostname": "h1", "host_agents_os_type": "linux", "host_agents_os_description": "Rocky Linux 9",
         "host_agents_journald": False, "o2_endpoint": "https://o2.example:5080", "o2_org": "default",
         "host_agents_secrets": {"o2_ingest_token": "s3cr3t-token"},
+        "host_agents_resource_attrs": host_agents_resource_attributes("h1", "production", OS_FACTS, "192.0.2.10"),
         "host_agents_inputs": {"otel_docker_metrics": False, "otel_logs": [
-            {"path": "/var/log/secure", "stream": "security_logs"},
-            {"path": "/var/log/messages", "stream": "system_logs"},
-            {"path": "/var/log/app/*.log", "stream": "app_logs"}]},
+            {"path": "/var/log/secure", "stream": "security_logs", "service": "auth"},
+            {"path": "/var/log/audit/audit.log", "stream": "security_logs", "service": "audit"},
+            {"path": "/var/log/messages", "stream": "system_logs", "service": "syslog"},
+            {"path": "/var/log/app/*.log", "stream": "app_logs", "service": "app"}]},
     })
     vars_.update(over)
     (tmp_path / "vars.yml").write_text(yaml.safe_dump(vars_))
@@ -657,7 +768,21 @@ def test_config_filelog_checkpoints_and_start_at_end(tmp_path):
         assert rcv["storage"] == "file_storage" and rcv["start_at"] == "end"
         assert rcv["attributes"]["log_type"] == stream
     assert cfg["extensions"]["file_storage"]["compaction"]["on_rebound"] is True
-    assert "operators" not in cfg["receivers"]["filelog/security_logs"]          # raw bodies, no parsing
+    # only service.name is stamped (resource-level add); the body is never parsed or rewritten
+    ops = cfg["receivers"]["filelog/security_logs"]["operators"]
+    assert {op["type"] for op in ops} == {"add"} and {op["field"] for op in ops} == {'resource["service.name"]'}
+
+
+def test_config_stamps_service_name_per_log_file_group_keeping_receiver_ids(tmp_path):
+    cfg, _ = _render_config(tmp_path)
+    # the file_storage checkpoint key is the receiver id: it must stay one receiver per stream
+    assert {k for k in cfg["receivers"] if k.startswith("filelog/")} == {
+        "filelog/security_logs", "filelog/system_logs", "filelog/app_logs", "filelog/backup_logs"}
+    ops = {op["value"]: op["if"] for op in cfg["receivers"]["filelog/security_logs"]["operators"]}
+    assert ops == {"auth": 'attributes["log.file.path"] matches "^/var/log/secure$"',
+                   "audit": 'attributes["log.file.path"] matches "^/var/log/audit/audit[.]log$"'}
+    assert cfg["receivers"]["filelog/backup_logs"]["operators"][-1] == {
+        "type": "add", "field": 'resource["service.name"]', "value": "backup"}
 
 
 def test_config_backup_logs_pipeline_parses_json_and_keeps_the_raw_body(tmp_path):
@@ -666,7 +791,8 @@ def test_config_backup_logs_pipeline_parses_json_and_keeps_the_raw_body(tmp_path
     assert rcv["include"] == ["/var/log/host-agents/backup.jsonl"]
     assert rcv["storage"] == "file_storage" and rcv["start_at"] == "end"
     assert rcv["attributes"]["log_type"] == "backup_logs"
-    (op,) = rcv["operators"]
+    op, service = rcv["operators"]
+    assert service["field"] == 'resource["service.name"]' and service["value"] == "backup"
     assert op["type"] == "json_parser" and op["parse_from"] == "body" and op["parse_to"] == "attributes"
     assert "preserve_to" not in op and op["timestamp"]["parse_from"] == "attributes.ts"
     assert "filelog/backup_logs" in cfg["service"]["pipelines"]["logs/in"]["receivers"]
@@ -680,8 +806,9 @@ def test_config_metrics_pipeline_is_separate_droppable_and_60s(tmp_path):
     assert cfg["receivers"]["hostmetrics"]["collection_interval"] == "60s"
     assert set(cfg["receivers"]["hostmetrics"]["scrapers"]) == {
         "cpu", "memory", "load", "filesystem", "disk", "network", "paging", "processes"}
-    metrics = cfg["service"]["pipelines"]["metrics"]
+    metrics = cfg["service"]["pipelines"]["metrics/host"]
     assert metrics["exporters"] == ["otlphttp/metrics"]
+    assert metrics["processors"] == ["memory_limiter", "resource/host", "resource/hostmetrics", "batch"]
     mq = cfg["exporters"]["otlphttp/metrics"]["sending_queue"]
     assert mq["block_on_overflow"] is False and "storage" not in mq
 
@@ -691,16 +818,24 @@ def test_config_optional_receivers_are_off_by_default(tmp_path):
     assert {"journald", "docker_stats", "otlp"}.isdisjoint(cfg["receivers"])
     on, _ = _render_config(tmp_path, host_agents_journald=True, otel_otlp_enabled=True,
                            host_agents_inputs={"otel_docker_metrics": True, "otel_logs": [
-                               {"path": "/var/log/secure", "stream": "security_logs"}]})
+                               {"path": "/var/log/secure", "stream": "security_logs", "service": "auth"}]})
     assert {"journald", "docker_stats", "otlp"} <= set(on["receivers"])
     assert on["receivers"]["otlp"]["protocols"]["grpc"]["endpoint"] == "127.0.0.1:4317"   # loopback only
-    assert "docker_stats" in on["service"]["pipelines"]["metrics"]["receivers"]
+    pipes = on["service"]["pipelines"]
+    assert pipes["metrics/docker"]["receivers"] == ["docker_stats"]
+    assert "resource/docker" in pipes["metrics/docker"]["processors"]
+    # app metrics arriving over OTLP keep the service.name their SDK set: no service.name processor on that pipeline
+    assert pipes["metrics/otlp"]["receivers"] == ["otlp"]
+    assert not {"resource/hostmetrics", "resource/docker"} & set(pipes["metrics/otlp"]["processors"])
+    assert {"metrics/docker", "metrics/otlp"}.isdisjoint(cfg["service"]["pipelines"])
 
 
 def test_config_sets_host_identity_and_never_contains_the_token(tmp_path):
     cfg, text = _render_config(tmp_path, o2_ca_file="/etc/ca.pem")
     attrs = {a["key"]: a["value"] for a in cfg["processors"]["resource/host"]["attributes"]}
-    assert attrs == {"host.name": "h1", "os.type": "linux", "os.description": "Rocky Linux 9"}
+    assert attrs == host_agents_resource_attributes("h1", "production", OS_FACTS, "192.0.2.10")["attributes"]
+    assert attrs["deployment.environment.name"] == "production" and attrs["host.id"] == MACHINE_ID
+    assert {a["action"] for a in cfg["processors"]["resource/host"]["attributes"]} == {"upsert"}
     assert "s3cr3t-token" not in text
     assert cfg["exporters"]["otlphttp/metrics"]["tls"]["ca_file"] == "/etc/ca.pem"
     import base64
@@ -901,7 +1036,7 @@ def test_endpoints_come_from_openbao_when_not_set_elsewhere(tmp_path, openbao):
     _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
     eff = _effective(tmp_path, openbao)
     assert eff == {"o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme", "o2_ca_file": "/etc/pki/o2-ca.pem",
-                   "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup_prod_good",
+                   "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup-prod-good",
                    "rustfs_region": "kr-1", "rustfs_ca_file": "/etc/pki/rfs-ca.pem"}
 
 
@@ -917,24 +1052,24 @@ def test_extra_vars_win_over_openbao_endpoints(tmp_path, openbao):
 def test_endpoint_defaults_apply_when_openbao_has_none(tmp_path, openbao):
     eff = _effective(tmp_path, openbao)
     assert eff == {"o2_endpoint": "", "o2_org": "default", "o2_ca_file": "", "rustfs_endpoint": "",
-                   "rustfs_bucket": "backup_prod_good", "rustfs_region": "", "rustfs_ca_file": ""}
+                   "rustfs_bucket": "backup-prod-good", "rustfs_region": "", "rustfs_ca_file": ""}
 
 
 def test_bucket_follows_the_naming_rule_per_host_and_can_be_overridden_in_the_host_kv(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/hosts/special/agents"] = _kv(dict(REQUIRED, rustfs_bucket="backup_prod_special_a"))
-    assert _effective(tmp_path, openbao, host="special")["rustfs_bucket"] == "backup_prod_special_a"
-    assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup_prod_good"
+    _FakeOpenBao.routes["/v1/secret/data/hosts/special/agents"] = _kv(dict(REQUIRED, rustfs_bucket="backup-prod-special-a"))
+    assert _effective(tmp_path, openbao, host="special")["rustfs_bucket"] == "backup-prod-special-a"
+    assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
 
 
 def test_bucket_prefix_variable_changes_the_naming_rule(tmp_path, openbao):
-    eff = _effective(tmp_path, openbao, extra_vars={"rustfs_bucket_prefix": "backup_stg"})
-    assert eff["rustfs_bucket"] == "backup_stg_good"
+    eff = _effective(tmp_path, openbao, extra_vars={"rustfs_bucket_prefix": "backup-stg"})
+    assert eff["rustfs_bucket"] == "backup-stg-good"
 
 
 def test_shared_openbao_bucket_key_is_ignored(tmp_path, openbao):
     """공용 agents/rustfs의 rustfs_bucket은 더는 쓰지 않는다 — 호스트별 버킷만 허용(실수로 공용 버킷에 쌓이지 않게)."""
     _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(dict(_ENDPOINTS_RUSTFS, rustfs_bucket="shared-bucket"))
-    assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup_prod_good"
+    assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup-prod-good"
 
 
 def _run_mon020(tmp_path, hosts):

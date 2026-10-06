@@ -72,7 +72,28 @@
   | `backup_logs` | §2.6 백업·유지보수·등록 이벤트 | 1년 (2.9.3 증적) |
 
   라우팅: `log_type` 속성 + routing connector → 스트림별 `otlphttp` exporter(각자 `stream-name` 헤더). 로컬 journald는 3개월 유지(`common`).
-- **부가정보**: `host.name` = 인벤토리 호스트명(명시), `os.type`, `os.description`, `log.file.path`, `log_type`. 본문은 원문 그대로(파싱·심각도 재작성 없음).
+- **부가정보 (2026-10-06 개정)**: 모든 로그·메트릭에 OTel semantic convention 이름의 **리소스 속성**을 붙입니다. 본문은 원문 그대로(파싱·심각도 재작성 없음)입니다.
+
+  | 속성 | 값 | 비고 |
+  |---|---|---|
+  | `host.name` | 인벤토리 호스트명 | 기존 결정 유지. Semaphore·Boundary에서 쓰는 이름과 같아야 하므로 OS 호스트명으로 바꾸지 않음 |
+  | `host.id` | `/etc/machine-id` | 이름이 바뀌어도 같은 장비로 추적. 파일이 없는 호스트(CentOS 6)는 **생략**하고 실행 요약에 WARN |
+  | `host.ip` | 인벤토리 `ip` 변수 | 관리 IP 단일값. 값이 없거나 IP가 아니면 생략하고 WARN. semconv는 배열 타입이지만 단일 문자열을 보냄 |
+  | `host.arch` | `amd64` / `arm64` | 프로브(`uname -m`)에서 semconv 값으로 정규화 |
+  | `os.type`, `os.description` | 프로브 | 기존 유지 |
+  | `os.name`, `os.version` | os-release `ID`(소문자), 전체 버전 | CentOS 6은 redhat-release 이름에서 같은 형식으로 도출 |
+  | `deployment.environment.name` | `production` \| `staging` \| `development` \| `test` | **호스트별 필수** `host_agents_environment`. 그룹 기본값을 두지 않고, 누락·허용 밖 값은 변경 전에 실패(MON-037) |
+  | `service.name` | 로그 파일 그룹 / 수집기별 고정값 | 아래 표 |
+
+  `service.name`: `/var/log/secure`·`auth.log`=`auth`, `audit/audit.log`=`audit`, `sudo.log`=`sudo`, `fail2ban.log`=`fail2ban`, `firewalld`=`firewalld`, `messages`·`syslog`=`syslog`, `kern.log`=`kernel`, `boot.log`=`boot`, `cron*`=`cron`, `dnf.log`·`yum.log`·`dpkg.log`=`package-manager`, 백업 jsonl=`backup`, journald=`journald`, hostmetrics=`host-metrics`, docker_stats=`docker`. `otel_extra_logs`의 `{path, stream, service}`는 `service`를 지정할 수 있고 없으면 스트림 이름(`app`)입니다. OTLP로 들어온 앱 신호의 `service.name`은 덮어쓰지 않습니다. `service.namespace`와 소유(`team`)·위치(`site`) 속성은 이번 범위 밖(후속).
+
+  `log_type`은 스트림 라우팅 키, `service.name`은 사람이 필터링하는 값으로 역할이 다릅니다(한 `log_type` 안에 여러 `service.name`).
+
+  **결정과 트레이드오프**:
+  - **`resourcedetection` 프로세서를 쓰지 않습니다.** 프로브가 이미 OS·아키텍처를 구하고, 세 OS 경로(modern·legacy_el7·legacy_el6)가 같은 템플릿을 공유합니다. detector의 기본 `host.name` 소스가 `[dns, os]`라 인벤토리 이름 유지와 충돌하고, `os.type`·`os.description`·`host.arch` 조회 실패 시 detector 전체가 실패하며, `os.name`·`os.version`은 v0.119.0(legacy_el6)에서 확인되지 않아 버전별 분기가 생깁니다. 속성 이름은 OTel 표준 그대로라 표준 준수에는 차이가 없습니다.
+  - **수신기 ID는 스트림 단위(`filelog/<stream>`)로 유지하고** `service.name`은 수신기 안의 `add` operator(`if: attributes["log.file.path"] matches …`)로 붙입니다. `file_storage` 체크포인트가 수신기 ID로 저장되므로(`receiver_filelog_<id>`) 수신기를 서비스 단위로 쪼개면 기존 오프셋이 고아가 되어 재배포 시 로그가 유실됩니다. v0.119.0과 v0.161.0 모두에서 동작을 확인했습니다.
+  - 메트릭 파이프라인은 hostmetrics·docker_stats·OTLP로 나눠 각자 `service.name`을 붙입니다(공용 `resource/host`에서 덮어쓰기 방지).
+  - 효과: 배포 이전 레코드에는 새 필드가 없으므로 OpenObserve 쿼리는 null을 견뎌야 합니다(기존 대시보드·알림 없음으로 가정).
 - **hostmetrics**: `cpu, memory, load, filesystem, disk, network, paging, processes`, 간격 **60s**, 프로세스별 `process` 스크레이퍼 비활성.
 - **docker 메트릭**: 기본 off, `otel_docker_metrics: true`인 호스트만. 구현 시 `docker_engine`의 동명 변수 `docker_metrics_enabled: true`가 role defaults 누수로 덮어쓰지 않도록 `otel_` 접두사로 분리.
 - **오버라이드**: `otel_extra_logs` = glob 목록(→ `app_logs`) 또는 `{path, stream}`; `otel_exclude_logs` = 정확한 경로 일치 제거, 단 `security_logs` 경로는 **제외 불가**.
@@ -92,7 +113,7 @@
 
 ### 2.5 restic 저장소 구성·스케줄·권한
 
-- **레이아웃 (2026-10-02 개정)**: 호스트(액세스 키)마다 전용 버킷 `backup_prod_<호스트명>`(`hosts/<host>/agents`의 `rustfs_bucket`으로 재정의 가능)과 그 **버킷 루트**의 repo(`s3:<endpoint>/<bucket>`). 호스트 간 dedup 포기(설정 위주 데이터). 호스트 키 정책은 버킷 단위(`locks/*`만 Delete), 중앙 유지보수 키는 `backup_prod_*` 전체 버킷. 버킷 이름의 밑줄 허용 여부는 서버 측 확인 항목.
+- **레이아웃 (2026-10-02 개정)**: 호스트(액세스 키)마다 전용 버킷 `backup-prod-<호스트명>`(`hosts/<host>/agents`의 `rustfs_bucket`으로 재정의 가능)과 그 **버킷 루트**의 repo(`s3:<endpoint>/<bucket>`). 호스트 간 dedup 포기(설정 위주 데이터). 호스트 키 정책은 버킷 단위(`locks/*`만 Delete), 중앙 유지보수 키는 `backup-prod-*` 전체 버킷. 버킷 이름의 밑줄 허용 여부는 서버 측 확인 항목.
 - **키 분리(삭제 권한 완화)**:
   - **호스트 키(백업 전용)**: `<host>/*`에 Get/Put/List, Delete는 `<host>/locks/*`만 → 유출돼도 스냅샷·데이터 삭제 불가. restic `backup`이 삭제하는 것은 lock뿐이며 데이터 삭제는 `forget`/`prune`에서만 발생합니다.
   - **유지보수 키(중앙)**: Repo Maintenance 템플릿이 컨트롤러에서 `check`/`forget`/`prune` 실행, 호스트별 repo 비밀번호는 OpenBao에서 조회.
@@ -184,7 +205,7 @@
 - **주기**: 분기 1회(ISMS 2.9.3/2.12.2, 정한 주기 미이행 자체가 결함).
 - **절차**:
   1. `servers`에서 무작위 1대 선정(선정 방식과 결과를 결과서에 기록).
-  2. 해당 호스트 repo(호스트 전용 버킷 `backup_prod_<host>`)의 최신 스냅샷 선택: `restic snapshots --latest 1`.
+  2. 해당 호스트 repo(호스트 전용 버킷 `backup-prod-<host>`)의 최신 스냅샷 선택: `restic snapshots --latest 1`.
   3. 대상 호스트에서 호스트 키(읽기 용도)로 `/etc`를 임시 경로에 복구: `restic restore latest --target /tmp/restore-test-<date> --include /etc`.
   4. 원본과 비교(`diff -r /etc /tmp/restore-test-<date>/etc`, 변경 예상 파일 제외), 소요 시간 측정.
   5. 임시 복구본 삭제.

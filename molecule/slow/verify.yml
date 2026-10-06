@@ -351,6 +351,26 @@
               - "'otlphttp/metrics' in f.read['/etc/otelcol/config.yaml']"
               - "'on_rebound: true' in f.read['/etc/otelcol/config.yaml']"
 
+        - name: "[VERIFY-MON-036] Verify the resource attributes and per-file-group service.name are rendered"
+          ansible.builtin.assert:
+            that:
+              - "'key: deployment.environment.name' in f.read['/etc/otelcol/config.yaml']"
+              - "'value: \"test\"' in f.read['/etc/otelcol/config.yaml']"
+              - "'key: host.ip' in f.read['/etc/otelcol/config.yaml']"
+              - "'key: host.arch' in f.read['/etc/otelcol/config.yaml']"
+              - "'key: os.name' in f.read['/etc/otelcol/config.yaml']"
+              - "'resource[\"service.name\"]' in f.read['/etc/otelcol/config.yaml']"
+              - "'resource/hostmetrics' in f.read['/etc/otelcol/config.yaml']"
+              - "'metrics/host:' in f.read['/etc/otelcol/config.yaml']"
+            fail_msg: "resource attributes or service.name operators are missing from the rendered config."
+
+        - name: "[VERIFY-MON-036] Verify the receiver ids stay one per stream (file_storage checkpoint keys)"
+          ansible.builtin.assert:
+            that:
+              - "'filelog/security_logs:' in f.read['/etc/otelcol/config.yaml']"
+              - "'filelog/system_logs:' in f.read['/etc/otelcol/config.yaml']"
+              - "'filelog/auth:' not in f.read['/etc/otelcol/config.yaml']"
+
         - name: "[VERIFY-MON-065] Verify secrets.env is root-owned 0600 and the config holds no token"
           ansible.builtin.stat:
             path: /etc/otelcol-contrib/secrets.env
@@ -490,7 +510,7 @@
 
         - name: "[VERIFY-BAK-010] Verify the repository URL is built from the RustFS endpoint, bucket and host"
           ansible.builtin.command:
-            argv: [grep, -qF, 'repository: "s3:https://rustfs.molecule.invalid:9000/backup_prod_{{ inventory_hostname }}"', /etc/restic/profiles.yaml]
+            argv: [grep, -qF, 'repository: "s3:https://rustfs.molecule.invalid:9000/backup-prod-{{ inventory_hostname }}"', /etc/restic/profiles.yaml]
           changed_when: false
 
         - name: "[VERIFY-BAK-011] Verify /opt/services is a backup source only when it exists"

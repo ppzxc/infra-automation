@@ -88,6 +88,9 @@ firewall_ingress_rules:
 # OpenBao-supplied values (hosts/<host>/agents, secret/agents/*) as fixtures.
 # host_agents_kv_fixture makes the role skip every OpenBao lookup.
 _is_already_provisioned: true
+# 환경은 호스트별 필수 선언이다(ADR-0006 §2.3). molecule 인벤토리에는 인벤토리 변수로 준다.
+host_agents_environment: "test"
+ip: "192.0.2.10"
 o2_endpoint: "https://openobserve.molecule.invalid:5080"
 o2_org: "default"
 rustfs_endpoint: "https://rustfs.molecule.invalid:9000"

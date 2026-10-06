@@ -29,7 +29,7 @@ def _vars(**over):
     v.update(yaml.safe_load((MON / "vars" / "main.yml").read_text(encoding="utf-8")))
     v.update({
         "inventory_hostname": "h1", "backup_restic_binary": "/opt/host-agents/restic/0.19.1/restic",
-        "backup_repository": "s3:https://rustfs.example:9000/backup_prod_h1",
+        "backup_repository": "s3:https://rustfs.example:9000/backup-prod-h1",
         "backup_sources": ["/etc", "/var/spool/cron", "/usr/local/bin", "/usr/local/etc", "/usr/local/sbin", "/opt/services"],
         "backup_excludes": v["backup_standard_excludes"] + ["/data/tmp"],
         "backup_schedule_hour": 2, "backup_schedule_minute": 7,
@@ -83,7 +83,7 @@ def test_profile_has_mandatory_paths_excludes_hooks_and_no_secrets(tmp_path):
     assert {"/home/*/.cache", "**/node_modules", "*.tmp", "*.swp", "/etc/restic/password", "/data/tmp"} <= set(prof["backup"]["exclude"])
     assert prof["backup"]["exclude-caches"] is True and prof["backup"]["retry-lock"] == "30m"
     assert prof["backup"]["run-before"][1:] == ["pg_dump -f /var/backups/db.sql mydb"]
-    assert prof["repository"] == "s3:https://rustfs.example:9000/backup_prod_h1" and prof["cacert"] == "/etc/ca.pem"
+    assert prof["repository"] == "s3:https://rustfs.example:9000/backup-prod-h1" and prof["cacert"] == "/etc/ca.pem"
     assert prof["password-file"] == "/etc/restic/password"
     assert not any(s in text for s in ("AKIA-secret", "S3-secret", "pw-secret"))
 
@@ -640,18 +640,18 @@ def test_maintenance_resolves_endpoints_from_the_openbao_kv_like_deploy(tmp_path
     assert res.returncode == 0, res.stdout + res.stderr
     assert json.loads((tmp_path / "eff.json").read_text()) == {
         "o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme",
-        "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup_prod_h1"}
+        "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup-prod-h1"}
 
 
 def test_maintenance_bucket_honours_the_host_kv_override(tmp_path):
-    fixture = {"host": {"restic_password": "pw", "rustfs_bucket": "backup_prod_custom"},
+    fixture = {"host": {"restic_password": "pw", "rustfs_bucket": "backup-prod-custom"},
                "openobserve": {"controller_ingest_token": "t", "o2_endpoint": "https://o2.bao.invalid:5080"},
                "rustfs": {"maintenance_access_key": "a", "maintenance_secret_key": "s", "rustfs_endpoint": "https://rfs.bao.invalid:9000"}}
     resolve = [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"].startswith("[BAK-072]")]
     dump = {"name": "Dump", "ansible.builtin.copy": {"content": "{{ rustfs_bucket }}", "dest": str(tmp_path / "bucket.txt")}}
     res = _run(tmp_path, resolve + [dump], _vars(host_agents_kv_fixture=fixture))
     assert res.returncode == 0, res.stdout + res.stderr
-    assert (tmp_path / "bucket.txt").read_text() == "backup_prod_custom"
+    assert (tmp_path / "bucket.txt").read_text() == "backup-prod-custom"
 
 
 def test_deploy_and_maintenance_use_the_bucket_root_as_the_repository():
