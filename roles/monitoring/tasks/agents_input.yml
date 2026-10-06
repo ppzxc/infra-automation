@@ -68,13 +68,38 @@
       {{ (_host_agents_kv.host | default({})) | host_agents_resolve_inputs(
            otel_system_logs, otel_security_log_paths, host_agents_backup_mandatory_paths,
            'hosts/' ~ inventory_hostname ~ '/agents',
-           {'openobserve': _host_agents_kv.openobserve | default({}), 'rustfs': _host_agents_kv.rustfs | default({})}) }}
+           {'openobserve': _host_agents_kv.openobserve | default({}), 'rustfs': _host_agents_kv.rustfs | default({})},
+           otel_log_services) }}
 
 - name: "[MON-034] Assert agents inputs are valid before any change"
   ansible.builtin.assert:
     that: host_agents_inputs.errors | length == 0
     fail_msg: "{{ inventory_hostname }}: Host Agents 입력 검증 실패 — {{ host_agents_inputs.errors | join('; ') }}"
     quiet: true
+
+# 환경은 호스트의 속성이라 그룹 기본값 없이 호스트마다 명시한다(오분류 방지, ADR-0006 §2.3).
+# 우선순위: 인벤토리 변수/Extra variables host_agents_environment > OpenBao hosts/<host>/agents의 같은 이름 키.
+- name: "[MON-036] Build and validate the resource attributes of this host"
+  vars:
+    _env: "{{ host_agents_environment | default((_host_agents_kv.host | default({})).host_agents_environment | default('', true), true) }}"
+  ansible.builtin.set_fact:
+    host_agents_resource_attrs: >-
+      {{ inventory_hostname | host_agents_resource_attributes(_env, {
+           'machine_id': host_agents_machine_id | default(''), 'arch': host_agents_os_arch | default(''),
+           'type': host_agents_os_type | default(''), 'os_id': host_agents_os_id | default(''),
+           'version': host_agents_os_version | default(''), 'description': host_agents_os_description | default('')},
+           ip | default('')) }}
+
+- name: "[MON-037] Assert the resource attributes are valid before any change"
+  ansible.builtin.assert:
+    that: host_agents_resource_attrs.errors | length == 0
+    fail_msg: "{{ inventory_hostname }}: 리소스 속성 검증 실패 — {{ host_agents_resource_attrs.errors | join('; ') }}"
+    quiet: true
+
+- name: "[MON-038] Warn about resource attributes left out for this host"
+  ansible.builtin.debug:
+    msg: "{{ ('[WARN] ' ~ inventory_hostname ~ ': 리소스 속성 생략 — ' ~ (host_agents_resource_attrs.omitted | join(', '))) | host_agents_warn }}"
+  when: host_agents_resource_attrs.omitted | length > 0
 
 - name: "[MON-035] Set agents secrets as host facts"
   ansible.builtin.set_fact:

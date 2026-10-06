@@ -32,6 +32,15 @@ receivers:
     storage: file_storage
     attributes:
       log_type: {{ stream }}
+    # service.name은 파일 그룹별로 붙인다. 수신기 ID(filelog/<stream>)는 file_storage 체크포인트 키라 바꾸지 않고,
+    # 본문은 건드리지 않는다(원문 유지). 글롭은 host_agents_glob_regex가 정규식으로 옮긴다.
+    operators:
+{% for entry in entries %}
+      - type: add
+        field: resource["service.name"]
+        value: {{ (entry.service | default(stream | replace('_logs', ''), true)) | to_json }}
+        if: {{ ('attributes["log.file.path"] matches "' ~ (entry.path | host_agents_glob_regex) ~ '"') | to_json }}
+{% endfor %}
     retry_on_failure:
       enabled: true
 {% endfor %}
@@ -52,6 +61,9 @@ receivers:
           parse_from: attributes.ts
           layout_type: gotime
           layout: '2006-01-02T15:04:05Z07:00'
+      - type: add
+        field: resource["service.name"]
+        value: {{ otel_service_backup | to_json }}
     retry_on_failure:
       enabled: true
 {% if host_agents_journald | default(false) | bool %}
@@ -62,6 +74,9 @@ receivers:
       - type: add
         field: attributes.log_type
         value: system_logs
+      - type: add
+        field: resource["service.name"]
+        value: {{ otel_service_journald | to_json }}
 {% endif %}
   hostmetrics:
     collection_interval: {{ otel_hostmetrics_interval }}
@@ -89,16 +104,24 @@ processors:
   batch:
     send_batch_size: 1024
     timeout: 1s
+  # 호스트 단위 리소스 속성(ADR-0006 §2.3). 값은 MON-036이 검증·조립한다(host.id/host.ip는 없으면 생략).
   resource/host:
     attributes:
-      - key: host.name
-        value: {{ inventory_hostname | to_json }}
+{% for key, value in host_agents_resource_attrs.attributes.items() %}
+      - key: {{ key }}
+        value: {{ value | to_json }}
         action: upsert
-      - key: os.type
-        value: {{ host_agents_os_type | to_json }}
+{% endfor %}
+  # 메트릭 service.name: hostmetrics와 docker_stats를 구분한다. OTLP로 들어온 앱 메트릭의 service.name은 건드리지 않는다.
+  resource/hostmetrics:
+    attributes:
+      - key: service.name
+        value: {{ otel_service_hostmetrics | to_json }}
         action: upsert
-      - key: os.description
-        value: {{ host_agents_os_description | to_json }}
+  resource/docker:
+    attributes:
+      - key: service.name
+        value: {{ otel_service_docker | to_json }}
         action: upsert
 
 connectors:
@@ -154,7 +177,19 @@ service:
       processors: [batch]
       exporters: [otlphttp/{{ stream }}]
 {% endfor %}
-    metrics:
-      receivers: [hostmetrics{% if host_agents_inputs.otel_docker_metrics | bool %}, docker_stats{% endif %}{% if otel_otlp_enabled | bool %}, otlp{% endif %}]
+    metrics/host:
+      receivers: [hostmetrics]
+      processors: [memory_limiter, resource/host, resource/hostmetrics, batch]
+      exporters: [otlphttp/metrics]
+{% if host_agents_inputs.otel_docker_metrics | bool %}
+    metrics/docker:
+      receivers: [docker_stats]
+      processors: [memory_limiter, resource/host, resource/docker, batch]
+      exporters: [otlphttp/metrics]
+{% endif %}
+{% if otel_otlp_enabled | bool %}
+    metrics/otlp:
+      receivers: [otlp]
       processors: [memory_limiter, resource/host, batch]
       exporters: [otlphttp/metrics]
+{% endif %}

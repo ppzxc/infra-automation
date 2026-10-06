@@ -24,6 +24,14 @@ _Avoid_: raw fallback, raw mode, raw provisioning (imprecise — always the full
 The pair of agents — `otelcol-contrib` (logs + hostmetrics shipped to OpenObserve) and `resticprofile`/`restic` (backups shipped to RustFS over the S3 API) — that are always installed together, never one without the other, on every host in the `servers` group. Collection and backup targets follow the ISMS (not ISMS-P) standard. Their standard configuration is held in Git; per-host overrides and secrets come from OpenBao. Designed in ADR-0006; not yet implemented.
 _Avoid_: monitoring agent, backup agent (when meaning the pair), sidecar
 
+**Resource Attribute**:
+A key/value stamped once per host (or per log source) on every log and metric that Host Agents ship — OTel semantic-convention names such as `host.name`, `host.id`, `host.ip`, `host.arch`, `os.name`, `os.version`, `deployment.environment.name` and `service.name`. OpenObserve turns them into stream fields (logs) and series labels (metrics). The values come from the Remote OS Probe and the inventory, not from a collector-side detector. `deployment.environment.name` is declared per host (never defaulted); `host.id` and `host.ip` are left out when the host has none, and the run summary names those hosts. Defined in ADR-0006 §2.3.
+_Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)
+
+**Log Type**:
+The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
+_Avoid_: log category, stream tag
+
 **Fast Scenario**:
 The molecule scenario run at pre-push. Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
 _Avoid_: default scenario, quick test, smoke test

@@ -45,6 +45,8 @@
     host_agents_os_path: "{{ _probe.path }}"
     host_agents_os_family: "{{ _probe.family }}"
     host_agents_os_distribution: "{{ _probe.distribution }}"
+    host_agents_os_id: "{{ _probe.os_id }}"
+    host_agents_machine_id: "{{ _probe.machine_id }}"
     host_agents_os_version: "{{ _probe.version }}"
     host_agents_os_major_version: "{{ _probe.major_version }}"
     host_agents_os_arch: "{{ _probe.arch }}"
