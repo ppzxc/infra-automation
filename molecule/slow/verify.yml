@@ -1134,3 +1134,29 @@
             _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
+
+- name: Verify OpenObserve configuration as code (controller-side static checks)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    _role: "{{ playbook_dir }}/../../roles/openobserve_config"
+  tasks:
+    - name: "[VERIFY-O2C-003] Verify the VRL function only adds fields and never rewrites the body"
+      ansible.builtin.assert:
+        that:
+          - "'.body =' not in _vrl and '.process_executable_name =' not in _vrl"
+          - "'.user_name =' in _vrl and '.source_address =' in _vrl and '.event_outcome =' in _vrl"
+        quiet: true
+      vars:
+        _vrl: "{{ lookup('ansible.builtin.file', _role ~ '/files/vrl/security_semantics.vrl') }}"
+
+    - name: "[VERIFY-O2C-020] Verify writes are skipped in check mode and every API task hides its payload"
+      ansible.builtin.assert:
+        that:
+          - _tasks | selectattr('name', 'match', '^\\[O2C-020\\]') | map(attribute='when') | first == 'not ansible_check_mode'
+          - _tasks | selectattr('ansible.builtin.uri', 'defined') | rejectattr('no_log', 'equalto', true) | list | length == 0
+        quiet: true
+      vars:
+        _tasks: "{{ lookup('ansible.builtin.file', _role ~ '/tasks/main.yml') | from_yaml }}"
