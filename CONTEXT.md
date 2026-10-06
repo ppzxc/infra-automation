@@ -16,6 +16,10 @@
 
 ## Language
 
+**Inventory Hostname**:
+The management number (e.g. `ns0332`) under which a host is listed in the inventory; it is the name Ansible, Semaphore and Boundary use to identify the host and the key for its host-specific variables. It is not the host's FQDN, which is only a value the host carries.
+_Avoid_: hostname, FQDN (when you mean the inventory key), server name
+
 **Raw Provisioning Path**:
 A design for provisioning CentOS 6/7 targets (which lack a Python 3.7+ interpreter, so ansible-core's AnsiballZ module wrapper SyntaxErrors on every standard module call) by driving `ansible.builtin.raw` directly and bypassing AnsiballZ entirely. It supplies its own write-temp/validate/move helper to replace module `validate:` clauses, and its own changed/unchanged sentinel contract to preserve this suite's idempotence guarantee despite `raw` always reporting `changed: true`. Covers `roles/common` + `roles/security`; excludes `roles/docker_engine`. Implemented (ADR-0005, #28): the write-temp/validate/move helper and sentinel contract (`filter_plugins/raw_provisioning.py`), automatic path detection from `/etc/redhat-release` (`raw_classify_os_path`, `playbooks/common/detect_raw_path.yml`; an explicit inventory `raw_provisioning_path` overrides it) and fact bypass via raw parsing (`raw_parse_os_release`), and raw equivalents for every module-based task of `common` and `security` — shared tasks (sysctl, accounts, sudoers, SSH keys, limits, fail2ban, auditd), the CentOS 6-only iptables pair (`SEC-008`/`SEC-021`) and ntpd (`COMMON-010`), and the CentOS 7 firewalld block (`SEC-042`~`SEC-050`). raw tasks are skipped under `--check` (ADR-0005 Option A), so a dry run never changes the target. Host Agents (ADR-0006) extend this path with a minimal helper subset (`roles/monitoring/tasks/raw_upload.yml`, #46): scp binary upload verified against the pinned sha256, plus check-mode read-only probes and diff output; the per-agent legacy tasks are not yet implemented.
 _Avoid_: raw fallback, raw mode, raw provisioning (imprecise — always the full canonical name)

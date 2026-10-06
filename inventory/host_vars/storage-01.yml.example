@@ -1,0 +1,14 @@
+---
+# storage-01 호스트 전용 개별 변수 오버라이드
+# 파일명은 인벤토리 호스트명(Inventory Hostname, 예: storage-01)과 같아야 한다. FQDN(storage-01.idc.internal)이 아니다.
+# 이름이 다르면 Ansible이 이 파일을 병합하지 않는다(#85). 사용 시 `.example`을 뗀 `<인벤토리 호스트명>.yml`로 복사한다.
+firewall_allowed_tcp_ports:
+  - 22    # SSH
+  - 2049  # NFS
+  - 3260  # iSCSI target
+
+# 특정 호스트 전용 커널 파라미터 추가
+sysctl_settings:
+  fs.file-max: 4194304
+  vm.dirty_ratio: 20
+  vm.dirty_background_ratio: 10
