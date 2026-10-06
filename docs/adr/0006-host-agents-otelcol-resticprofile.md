@@ -78,7 +78,7 @@
   |---|---|---|
   | `host.name` | 인벤토리 호스트명 | 기존 결정 유지. Semaphore·Boundary에서 쓰는 이름과 같아야 하므로 OS 호스트명으로 바꾸지 않음 |
   | `host.id` | `/etc/machine-id` | 이름이 바뀌어도 같은 장비로 추적. 파일이 없는 호스트(CentOS 6)는 **생략**하고 실행 요약에 WARN |
-  | `host.ip` | 인벤토리 `ip` 변수 | 관리 IP 단일값. 값이 없거나 IP가 아니면 생략하고 WARN. semconv는 배열 타입이지만 단일 문자열을 보냄 |
+  | `host.ip` | `ip` 변수: 인벤토리 `ip` > OpenBao 호스트 KV `ip` > KV `public_ip` (`resolve_connection.yml`이 해석, #89) | 관리 IP 단일값. 값이 없거나 IP가 아니면 생략하고 WARN. semconv는 배열 타입이지만 단일 문자열을 보냄 |
   | `host.arch` | `amd64` / `arm64` | 프로브(`uname -m`)에서 semconv 값으로 정규화 |
   | `os.type`, `os.description` | 프로브 | 기존 유지 |
   | `os.name`, `os.version` | os-release `ID`(소문자), 전체 버전 | CentOS 6은 redhat-release 이름에서 같은 형식으로 도출 |
