@@ -7,7 +7,7 @@
 ## 1. 개요 및 구현 기능 (What)
 
 - **바이너리 배포**: 컨트롤러가 다운로드·SHA256 검증한 `restic`/`resticprofile`을 버전 디렉터리(`/opt/host-agents/<agent>/<version>/`)에 배치하고 `/usr/local/bin` symlink로 활성화 (ADR-0006 §2.8).
-- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(삭제는 `locks/*`만)와 비밀번호 (§2.5).
+- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(삭제는 `locks/*`만)와 비밀번호 (§2.5). 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
 - **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
@@ -66,7 +66,7 @@
 | `BAK-021` | `Ensure restic cache directory exists (0700)` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` (`/var/cache/restic`) |
 | `BAK-022` | `Deploy restic credentials env file (0600, no_log, no diff)` | `ansible.builtin.template` | All | Checksum 비교 (`no_log`, `diff: false`, `0600`) |
 | `BAK-023` | `Deploy restic repository password file (0600, no_log, no diff)` | `ansible.builtin.copy` | All | Checksum 비교 (`no_log`, `diff: false`, `0600`) |
-| `BAK-024` | `Deploy resticprofile profile (validated with resticprofile show)` | `ansible.builtin.template` | All | Checksum 비교; 새 바이너리의 `resticprofile show`가 통과해야 교체 (시크릿 미포함) |
+| `BAK-024` | `Deploy resticprofile profile (validated with resticprofile show)` | `ansible.builtin.template` | All | Checksum 비교; 새 바이너리의 `resticprofile show`가 통과해야 교체 (시크릿 미포함, `backup.host` = Inventory Hostname) |
 | `BAK-025` | `Ensure backup result directories exist (log 0755, state 0755)` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` (`/var/log/host-agents`, `/var/lib/host-agents`) |
 | `BAK-026` | `Deploy the backup result hook (POSIX sh, one JSON line per run)` | `ansible.builtin.copy` | All | Checksum 비교 (`0755`, POSIX 도구만 — jq 없음) |
 | `BAK-027` | `Deploy logrotate configuration for backup.jsonl` | `ansible.builtin.template` | All | Checksum 비교 (`/etc/logrotate.d/host-agents-backup`, 주간·8회·`create 0640`) |

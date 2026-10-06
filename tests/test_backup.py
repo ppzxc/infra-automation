@@ -82,6 +82,7 @@ def test_profile_has_mandatory_paths_excludes_hooks_and_no_secrets(tmp_path):
         assert path in prof["backup"]["source"]
     assert {"/home/*/.cache", "**/node_modules", "*.tmp", "*.swp", "/etc/restic/password", "/data/tmp"} <= set(prof["backup"]["exclude"])
     assert prof["backup"]["exclude-caches"] is True and prof["backup"]["retry-lock"] == "30m"
+    assert prof["backup"]["host"] == "h1"
     assert prof["backup"]["run-before"][1:] == ["pg_dump -f /var/backups/db.sql mydb"]
     assert prof["repository"] == "s3:https://rustfs.example:9000/backup-prod-h1" and prof["cacert"] == "/etc/ca.pem"
     assert prof["password-file"] == "/etc/restic/password"

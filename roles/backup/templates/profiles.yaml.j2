@@ -14,6 +14,8 @@ global:
   cacert: {{ rustfs_ca_file | to_json }}
 {% endif %}
   backup:
+    # 스냅샷 host 라벨은 OS hostname이 아니라 Inventory Hostname(관리번호, 예: ns0332)으로 고정한다.
+    host: {{ inventory_hostname | to_json }}
     source:
 {% for path in backup_sources %}
       - {{ path | to_json }}
