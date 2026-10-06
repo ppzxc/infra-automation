@@ -1,0 +1,137 @@
+---
+# ==============================================================================
+# OpenObserve 설정 as code (ADR-0008, Spec #93 / Ticket-2) — 컨트롤러 전용
+# ==============================================================================
+# 순서: 입력 해석(OpenBao) → 원하는 상태 도출 → GET으로 현재 상태 조회 → 차이만 계획 → (check 모드가 아니면) POST/PUT.
+# 모든 API 호출 태스크는 no_log다 — 통지 대상(destination)에 webhook URL/토큰이 들어 있다.
+# check 모드: GET과 계획 출력만 한다(쓰기 요청 0건).
+- name: "[O2C-001] Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_token_eff: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+    _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/agents/openobserve"
+    method: GET
+    headers: >-
+      {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
+    status_code: [200, 404]
+    timeout: 5
+    validate_certs: "{{ o2c_vault_validate_certs }}"
+  register: _o2c_kv_resp
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - o2c_kv_fixture is not defined
+    - (vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true)) | length > 0
+
+- name: "[O2C-002] Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)"
+  vars:
+    _kv: "{{ o2c_kv_fixture if o2c_kv_fixture is defined else (_o2c_kv_resp.json.data.data | default({})) }}"
+  block:
+    - name: Keep the resolved KV as a fact
+      ansible.builtin.set_fact:
+        o2c_kv: "{{ _kv }}"
+      no_log: true
+
+    - name: Assert the required inputs exist
+      ansible.builtin.assert:
+        that:
+          - o2c_endpoint | length > 0
+          - o2c_endpoint is match('^https?://[^/]+(/.*[^/])?$')
+          - (o2c_kv.api_user | default('')) | length > 0
+          - (o2c_kv.api_password | default('')) | length > 0
+          - (o2c_kv.alert_webhook_url | default('')) is match('^https?://')
+        fail_msg: >-
+          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요합니다
+          (VAULT_TOKEN은 Semaphore Environment로 주입). 값은 출력하지 않습니다.
+        quiet: true
+      no_log: true
+
+- name: "[O2C-003] Derive the desired OpenObserve objects from the repository definitions"
+  ansible.builtin.set_fact:
+    o2c_desired_objects: >-
+      {{ {'org': o2c_org, 'stream': o2c_stream, 'function_name': o2c_function_name, 'pipeline_name': o2c_pipeline_name,
+          'template_name': o2c_template_name, 'template_body': o2c_template_body, 'destination_name': o2c_destination_name,
+          'webhook_url': o2c_kv.alert_webhook_url,
+          'webhook_headers': ({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
+          'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
+          'alerts': o2c_alerts} | o2c_desired }}
+    o2c_auth_headers:
+      Authorization: "Basic {{ (o2c_kv.api_user ~ ':' ~ o2c_kv.api_password) | b64encode }}"
+  no_log: true
+
+- name: "[O2C-010] Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}{{ item.path }}"
+    method: GET
+    headers: "{{ o2c_auth_headers }}"
+    status_code: 200
+    timeout: 15
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  loop:
+    - { kind: template, path: "/api/{{ o2c_org }}/alerts/templates" }
+    - { kind: destination, path: "/api/{{ o2c_org }}/alerts/destinations" }
+    - { kind: function, path: "/api/{{ o2c_org }}/functions" }
+    - { kind: pipeline, path: "/api/{{ o2c_org }}/pipelines" }
+    - { kind: alert, path: "/api/v2/{{ o2c_org }}/alerts" }
+  loop_control:
+    label: "{{ item.kind }}"
+  register: _o2c_current
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: "[O2C-011] Read each existing alert (the list view carries no query or trigger settings)"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}/api/v2/{{ o2c_org }}/alerts/{{ item.alert_id }}"
+    method: GET
+    headers: "{{ o2c_auth_headers }}"
+    status_code: 200
+    timeout: 15
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  loop: >-
+    {{ (_o2c_current.results | selectattr('item.kind', 'equalto', 'alert') | map(attribute='json') | first).list | default([])
+       | selectattr('alert_id', 'defined') | list }}
+  loop_control:
+    label: "{{ item.name }}"
+  register: _o2c_alert_details
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: "[O2C-012] Plan the writes needed (only objects that differ)"
+  vars:
+    _by_kind: >-
+      {{ dict(_o2c_current.results | map(attribute='item.kind') | zip(_o2c_current.results | map(attribute='json'))) }}
+    _alert_full: "{{ _o2c_alert_details.results | default([]) | o2c_alert_state }}"
+  ansible.builtin.set_fact:
+    o2c_plan_actions: "{{ o2c_desired_objects | o2c_plan(_by_kind | combine({'alert': _alert_full}), o2c_org) }}"
+  no_log: true
+
+- name: "[O2C-013] Show the planned changes (names only, never bodies)"
+  ansible.builtin.debug:
+    msg: "{{ (o2c_plan_actions | o2c_plan_summary) if (o2c_plan_actions | length > 0) else ['OpenObserve가 이미 정의와 일치합니다 (변경 0건)'] }}"
+
+- name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update)"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}{{ item.path }}"
+    method: "{{ item.method }}"
+    headers: "{{ o2c_auth_headers }}"
+    body_format: json
+    body: "{{ item.body }}"
+    status_code: [200, 201]
+    timeout: 30
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  loop: "{{ o2c_plan_actions }}"
+  loop_control:
+    label: "{{ item.op }} {{ item.kind }} {{ item.name }}"
+  changed_when: true
+  no_log: true
+  when: not ansible_check_mode
