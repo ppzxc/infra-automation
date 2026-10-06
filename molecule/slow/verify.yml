@@ -107,6 +107,15 @@
               - _p.arch == ('amd64' if ansible_architecture == 'x86_64' else 'arm64')
             fail_msg: "OS probe {{ _p }} disagrees with gathered facts."
 
+        - name: "[VERIFY-MON-025] Verify the probe reads this host's real timezone (the RFC3164 time zone)"
+          vars:
+            _p: "{{ _verify_probe.stdout | host_agents_parse_os_probe }}"
+          ansible.builtin.assert:
+            that:
+              - _p.timezone == '' or _p.timezone is match('^[A-Za-z][A-Za-z0-9_+/-]*$')
+              - "'location: \"' ~ (_p.timezone or timezone | default('Asia/Seoul')) ~ '\"' in f.read['/etc/otelcol/config.yaml']"
+            fail_msg: "Probe timezone {{ _p.timezone }} is not the one rendered into the Envelope Parsing timestamps."
+
         - name: "[VERIFY-MON-023] Verify /usr/bin/python3 exists on the modern path"
           ansible.builtin.assert:
             that:
@@ -293,6 +302,15 @@
               - "'hostmetrics:' in f.read['/etc/otelcol/config.yaml']"
               - "'node_exporter' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
+
+        - name: "[VERIFY-MON-004] Verify Envelope Parsing is rendered (parse errors kept, body not replaced, app_logs untouched)"
+          ansible.builtin.assert:
+            that:
+              - "'on_error: send_quiet' in f.read['/etc/otelcol/config.yaml']"
+              - "'log.parse_error' in f.read['/etc/otelcol/config.yaml']"
+              - "'process.executable.name' in f.read['/etc/otelcol/config.yaml']"
+              - "'preserve_to' not in f.read['/etc/otelcol/config.yaml']"
+              - "'filelog/app_logs:' not in f.read['/etc/otelcol/config.yaml'] or 'regex_parser' not in (f.read['/etc/otelcol/config.yaml'] | regex_findall('(?s)filelog/app_logs:.*?retry_on_failure') | join)"
 
         - name: "[VERIFY-MON-060] Verify the exporter targets <endpoint>/api/<org> without a trailing slash"
           ansible.builtin.assert:
@@ -1116,3 +1134,79 @@
             _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy.yml') }}"
           delegate_to: localhost
           become: false
+
+- name: Verify OpenObserve configuration as code (controller-side static checks)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    _role: "{{ playbook_dir }}/../../roles/openobserve_config"
+    _t: "{{ dict(_o2c_ids | zip(_o2c_tasks)) }}"
+    _o2c_raw: "{{ lookup('ansible.builtin.file', _role ~ '/tasks/main.yml') | replace('{{', '<<') }}"
+    _o2c_all: "{{ _o2c_raw | from_yaml }}"
+    _o2c_tasks: "{{ _o2c_all | selectattr('name', 'match', '^\\[O2C-') | list }}"
+    _o2c_ids: "{{ _o2c_tasks | map(attribute='name') | map('regex_replace', '^\\[(O2C-\\d+)\\].*$', '\\1') | list }}"
+  tasks:
+    - name: "[VERIFY-O2C-001] Verify the OpenBao KV read is read-only, GET-only and hides the token"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-001']['ansible.builtin.uri'].method == 'GET'
+          - _t['O2C-001'].check_mode is false and _t['O2C-001'].changed_when is false and _t['O2C-001'].no_log is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-002] Verify the inputs are asserted quietly and never cached as facts"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-002'].block | map(attribute='no_log') | list == [true, true]
+          - _t['O2C-002'].block[0]['ansible.builtin.set_fact'].cacheable is false
+          - _t['O2C-002'].block[1]['ansible.builtin.assert'].quiet is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-010] Verify the state read is a GET loop over the shared path table and the auth fact is not cacheable"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-010']['ansible.builtin.uri'].method == 'GET'
+          - "'loop: \"<< o2c_org | o2c_read_requests }}\"' in _o2c_raw"
+          - _t['O2C-010'].check_mode is false and _t['O2C-010'].changed_when is false and _t['O2C-010'].no_log is true
+          - _t['O2C-003']['ansible.builtin.set_fact'].cacheable is false
+        quiet: true
+
+    - name: "[VERIFY-O2C-011] Verify the per-alert detail read is a GET that works in check mode"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-011']['ansible.builtin.uri'].method == 'GET'
+          - _t['O2C-011'].check_mode is false and _t['O2C-011'].changed_when is false and _t['O2C-011'].no_log is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-012] Verify the plan is computed by the pure o2c_plan filter without side effects"
+      ansible.builtin.assert:
+        that:
+          - "'<< o2c_desired_objects | o2c_plan(' in _o2c_raw"
+          - _t['O2C-012'].no_log is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-013] Verify the plan output lists names only"
+      ansible.builtin.assert:
+        that:
+          - "'o2c_plan_actions | o2c_plan_summary' in _o2c_raw"
+          - "'item.body' not in _o2c_raw.split('[O2C-013]')[1].split('[O2C-020]')[0]"
+        quiet: true
+
+    - name: "[VERIFY-O2C-003] Verify the VRL function only adds fields and never rewrites the body"
+      ansible.builtin.assert:
+        that:
+          - "'.body =' not in _vrl and '.process_executable_name =' not in _vrl"
+          - "'.user_name =' in _vrl and '.source_address =' in _vrl and '.event_outcome =' in _vrl"
+        quiet: true
+      vars:
+        _vrl: "{{ lookup('ansible.builtin.file', _role ~ '/files/vrl/security_semantics.vrl') }}"
+
+    - name: "[VERIFY-O2C-020] Verify writes are skipped in check mode and every API task hides its payload"
+      ansible.builtin.assert:
+        that:
+          - _tasks | selectattr('name', 'match', '^\\[O2C-020\\]') | map(attribute='when') | first == 'not ansible_check_mode'
+          - _tasks | selectattr('name', 'match', '^\\[O2C-(001|010|011|020)\\]') | rejectattr('no_log', 'equalto', true) | list | length == 0
+        quiet: true
+      vars:
+        _tasks: "{{ lookup('ansible.builtin.file', _role ~ '/tasks/main.yml') | from_yaml }}"

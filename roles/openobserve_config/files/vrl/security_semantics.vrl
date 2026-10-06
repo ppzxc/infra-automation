@@ -1,0 +1,76 @@
+# OpenObserve VRL ingest function: security_semantics (ADR-0008, Spec #93 / Ticket-2)
+#
+# Runs on the security_logs stream (real-time pipeline, after flatten). It interprets what sshd and sudo messages mean and
+# ADDS fields next to the record; the original `body` and every existing field are never modified. A record that is not an
+# interpretable sshd/sudo line is returned unchanged. Field names follow the OTel semantic conventions; OpenObserve stores the
+# dots as underscores (user.name -> user_name):
+#
+#   user_name, source_address, source_port, event_action (ssh_login | sudo), event_outcome (success | failure),
+#   event_reason (failure only; the "Invalid user" probe line carries it without event_outcome), user_effective_name and process_command_line (sudo only)
+#
+# Keep this file free of secrets and of anything the edge (Envelope Parsing, #91) already provides.
+
+program = string(.process_executable_name) ?? ""
+line = string(.body) ?? ""
+
+if program == "sshd" {
+    accepted, err = parse_regex(line, r'Accepted \S+ for (?P<user>\S+) from (?P<ip>\S+) port (?P<port>\d+)')
+    if err == null {
+        .user_name = accepted.user
+        .source_address = accepted.ip
+        .source_port = to_int(accepted.port) ?? null
+        .event_action = "ssh_login"
+        .event_outcome = "success"
+    } else {
+        failed, err = parse_regex(line, r'Failed \S+ for (?P<invalid>invalid user )?(?P<user>\S+) from (?P<ip>\S+) port (?P<port>\d+)')
+        if err == null {
+            .user_name = failed.user
+            .source_address = failed.ip
+            .source_port = to_int(failed.port) ?? null
+            .event_action = "ssh_login"
+            .event_outcome = "failure"
+            .event_reason = if is_string(failed.invalid) { "invalid user" } else { "failed password" }
+        } else {
+            invalid, err = parse_regex(line, r'Invalid user (?P<user>\S+) from (?P<ip>[^\s]+)(?: port (?P<port>\d+))?')
+            if err == null {
+                .user_name = invalid.user
+                .source_address = invalid.ip
+                if is_string(invalid.port) {
+                    .source_port = to_int(invalid.port) ?? null
+                }
+                .event_action = "ssh_login"
+                # no event_outcome: sshd also logs "Failed password for invalid user ..." for the same attempt, and the
+                # alerts count event_outcome = 'failure', so this probe line must not be counted a second time
+                .event_reason = "invalid user"
+            }
+        }
+    }
+} else if program == "sudo" {
+    ran, err = parse_regex(line, r'(?P<user>[^\s:]+) : (?P<detail>.*?)USER=(?P<effective>\S+) ; COMMAND=(?P<command>.*)$')
+    if err == null {
+        .user_name = ran.user
+        .user_effective_name = ran.effective
+        .process_command_line = ran.command
+        .event_action = "sudo"
+        detail = string(ran.detail) ?? ""
+        if contains(detail, "NOT in sudoers") {
+            .event_outcome = "failure"
+            .event_reason = "NOT in sudoers"
+        } else if contains(detail, "incorrect password attempt") {
+            .event_outcome = "failure"
+            .event_reason = "authentication failure"
+        } else {
+            .event_outcome = "success"
+        }
+    } else {
+        pam, err = parse_regex(line, r'pam_unix\(sudo:auth\): authentication failure;.*\suser=(?P<user>\S+)')
+        if err == null {
+            .user_name = pam.user
+            .event_action = "sudo"
+            .event_outcome = "failure"
+            .event_reason = "authentication failure"
+        }
+    }
+}
+
+.

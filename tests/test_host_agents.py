@@ -141,9 +141,10 @@ def test_probe_and_kv_tasks_run_before_any_change():
 # OS probe classification
 # --------------------------------------------------------------------------
 
-def _probe(os_release="", redhat="", uname="x86_64", noise="", machine_id=""):
+def _probe(os_release="", redhat="", uname="x86_64", noise="", machine_id="", timezone=""):
     return (f"{noise}\n__HOST_AGENTS_OS_RELEASE__\n{os_release}\n"
             f"__HOST_AGENTS_REDHAT_RELEASE__\n{redhat}\n__HOST_AGENTS_MACHINE_ID__\n{machine_id}\n"
+            f"__HOST_AGENTS_TIMEZONE__\n{timezone}\n"
             f"__HOST_AGENTS_UNAME_M__\n{uname}\n")
 
 
@@ -204,6 +205,28 @@ def test_os_probe_reads_machine_id_only_when_well_formed():
 def test_os_probe_rejects_unclassifiable_hosts(output):
     with pytest.raises(ValueError):
         host_agents_parse_os_probe(output)
+
+
+@pytest.mark.parametrize("timezone, expected", [
+    ("/usr/share/zoneinfo/Asia/Seoul", "Asia/Seoul"),                      # systemd family: /etc/localtime link target
+    ("/usr/share/zoneinfo/Etc/UTC", "Etc/UTC"),
+    ("/usr/share/zoneinfo/America/Argentina/Buenos_Aires", "America/Argentina/Buenos_Aires"),
+    ('# The time zone of the machine\nZONE="Asia/Seoul"\nUTC=true\nARC=false', "Asia/Seoul"),   # EL6 /etc/sysconfig/clock
+    ("ZONE=UTC", "UTC"),
+    ("/usr/share/zoneinfo/Asia/Seoul\nZONE=\"Europe/Paris\"", "Asia/Seoul"),   # the link wins
+    ("", ""),                                                              # EL6 copy of the file, no clock file
+    ("/etc/localtime-weird", ""),
+    ('ZONE="../../etc/passwd"', ""),                                       # never trust a path-like value
+    ('ZONE="Asia/Seoul; rm -rf /"', ""),
+])
+def test_os_probe_reads_the_host_timezone_from_localtime_link_or_sysconfig_clock(timezone, expected):
+    os_release, redhat = (ROCKY9, "Rocky Linux release 9.3 (Blue Onyx)")
+    assert host_agents_parse_os_probe(_probe(os_release=os_release, redhat=redhat, timezone=timezone))["timezone"] == expected
+
+
+def test_os_probe_without_a_timezone_section_yields_empty_timezone():
+    out = "__HOST_AGENTS_OS_RELEASE__\n%s\n__HOST_AGENTS_UNAME_M__\nx86_64\n" % UBUNTU
+    assert host_agents_parse_os_probe(out)["timezone"] == ""
 
 
 def test_os_probe_command_runs_and_parses_on_this_host():
@@ -768,8 +791,9 @@ def test_config_filelog_checkpoints_and_start_at_end(tmp_path):
         assert rcv["storage"] == "file_storage" and rcv["start_at"] == "end"
         assert rcv["attributes"]["log_type"] == stream
     assert cfg["extensions"]["file_storage"]["compaction"]["on_rebound"] is True
-    # only service.name is stamped (resource-level add); the body is never parsed or rewritten
-    ops = cfg["receivers"]["filelog/security_logs"]["operators"]
+    # app_logs has no known format: only service.name is stamped (resource-level add), never parsed (ADR-0008).
+    # Envelope Parsing of the standard sources is covered by test_envelope_parsing.py; no operator rewrites the body there either.
+    ops = cfg["receivers"]["filelog/app_logs"]["operators"]
     assert {op["type"] for op in ops} == {"add"} and {op["field"] for op in ops} == {'resource["service.name"]'}
 
 
@@ -778,7 +802,8 @@ def test_config_stamps_service_name_per_log_file_group_keeping_receiver_ids(tmp_
     # the file_storage checkpoint key is the receiver id: it must stay one receiver per stream
     assert {k for k in cfg["receivers"] if k.startswith("filelog/")} == {
         "filelog/security_logs", "filelog/system_logs", "filelog/app_logs", "filelog/backup_logs"}
-    ops = {op["value"]: op["if"] for op in cfg["receivers"]["filelog/security_logs"]["operators"]}
+    ops = {op["value"]: op["if"] for op in cfg["receivers"]["filelog/security_logs"]["operators"]
+           if op["type"] == "add" and op["field"] == 'resource["service.name"]'}
     assert ops == {"auth": 'attributes["log.file.path"] matches "^/var/log/secure$"',
                    "audit": 'attributes["log.file.path"] matches "^/var/log/audit/audit[.]log$"'}
     assert cfg["receivers"]["filelog/backup_logs"]["operators"][-1] == {

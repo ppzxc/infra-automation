@@ -1,0 +1,108 @@
+---
+# OpenObserve 설정 as code (ADR-0008, Spec #93 / Ticket-2) — 컨트롤러(connection: local)에서만 실행한다.
+# 연결 정보와 시크릿은 Git에 두지 않는다: OpenBao agents/openobserve 키
+#   o2_endpoint, o2_org(기본 default), o2_ca_file(선택)  — host_agents와 같은 키
+#   api_user, api_password        — OpenObserve 설정 API(알림·함수·파이프라인)를 쓸 수 있는 계정(수집 토큰과 다름)
+#   alert_webhook_url             — 통지 대상(범용 webhook) URL
+#   alert_webhook_token           — (선택) webhook 인증 토큰. 헤더 이름은 alert_webhook_auth_header(기본 Authorization)
+# Extra variables(-e o2_endpoint=...)가 OpenBao 값보다 우선한다.
+
+o2c_vault_validate_certs: false
+o2c_kv: {}
+o2c_org: "{{ o2_org | default(o2c_kv.o2_org | default('default', true), true) }}"
+o2c_endpoint: "{{ o2_endpoint | default(o2c_kv.o2_endpoint | default('', true), true) }}"
+o2c_ca_file: "{{ o2_ca_file | default(o2c_kv.o2_ca_file | default('', true), true) }}"
+o2c_validate_certs: "{{ o2c_endpoint is match('^https://') }}"
+
+o2c_function_name: security_semantics
+o2c_pipeline_name: security_semantics
+o2c_stream: security_logs
+o2c_template_name: infra-automation-webhook
+o2c_destination_name: infra-automation-webhook
+o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"
+
+# 통지 본문(범용 webhook, JSON). OpenObserve 템플릿 변수를 쓴다.
+o2c_template_body: '{"alert_name": "{alert_name}", "stream": "{stream_name}", "org": "{org_name}", "text": "{alert_name}: {alert_count} 건 ({alert_start_time} ~ {alert_end_time})", "rows": "{rows}"}'
+
+# 임계값
+o2c_ssh_fail_per_source_threshold: 10
+o2c_ssh_fail_per_host_threshold: 50
+o2c_ssh_fail_window_minutes: 5
+o2c_parse_error_percent: 10
+o2c_parse_error_min_lines: 20
+o2c_parse_error_window_minutes: 30
+
+# 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
+# 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
+o2c_alerts:
+  - name: infra-ssh-login-failures-per-source
+    description: "sshd 로그인 실패가 같은 source.address에서 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_source_threshold }}회 이상 (fail2ban이 막지 못하는 분산 공격 단서)"
+    stream: security_logs
+    sql: >-
+      SELECT source_address, host_name, count(*) AS failures FROM "security_logs"
+      WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
+      GROUP BY source_address, host_name HAVING count(*) >= {{ o2c_ssh_fail_per_source_threshold }}
+    period: "{{ o2c_ssh_fail_window_minutes }}"
+    frequency: 1
+    silence: "{{ o2c_ssh_fail_window_minutes }}"
+  - name: infra-ssh-login-failures-per-host
+    description: "한 호스트에서 sshd 로그인 실패가 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_host_threshold }}회 이상"
+    stream: security_logs
+    sql: >-
+      SELECT host_name, count(*) AS failures FROM "security_logs"
+      WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
+      GROUP BY host_name HAVING count(*) >= {{ o2c_ssh_fail_per_host_threshold }}
+    period: "{{ o2c_ssh_fail_window_minutes }}"
+    frequency: 1
+    silence: "{{ o2c_ssh_fail_window_minutes }}"
+  - name: infra-root-login-success
+    description: "root SSH 로그인 성공 (1건부터 즉시) — PermitRootLogin 설정이 우회되었는지 확인"
+    stream: security_logs
+    sql: >-
+      SELECT host_name, source_address, count(*) AS logins FROM "security_logs"
+      WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root'
+      GROUP BY host_name, source_address
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-sudo-escalation-failure
+    description: "sudo 권한상승 실패(authentication failure, NOT in sudoers) — 성공은 알리지 않고 기록만 한다"
+    stream: security_logs
+    sql: >-
+      SELECT host_name, user_name, count(*) AS failures FROM "security_logs"
+      WHERE event_action = 'sudo' AND event_outcome = 'failure'
+      GROUP BY host_name, user_name
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-kernel-disk-errors
+    description: "커널/디스크 오류 패턴(OOM kill, I/O error, EXT4-fs error, XFS Corruption) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
+    stream: system_logs
+    sql: >-
+      SELECT host_name, count(*) AS matches FROM "system_logs"
+      WHERE body LIKE '%Out of memory: Killed process%' OR body LIKE '%I/O error%' OR body LIKE '%EXT4-fs error%'
+      OR (body LIKE '%XFS%' AND body LIKE '%Corruption%')
+      GROUP BY host_name
+    period: 5
+    frequency: 1
+    silence: 15
+  - name: infra-log-parse-errors-security-logs
+    description: "security_logs의 log.parse_error=true 비율이 {{ o2c_parse_error_percent }}% 이상 (수집기 포맷 계약 위반 의심)"
+    stream: security_logs
+    sql: >-
+      SELECT host_name, count(*) AS total FROM "security_logs"
+      GROUP BY host_name HAVING count(*) >= {{ o2c_parse_error_min_lines }}
+      AND sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) * 100 >= {{ o2c_parse_error_percent }} * count(*)
+    period: "{{ o2c_parse_error_window_minutes }}"
+    frequency: 10
+    silence: "{{ o2c_parse_error_window_minutes }}"
+  - name: infra-log-parse-errors-system-logs
+    description: "system_logs의 log.parse_error=true 비율이 {{ o2c_parse_error_percent }}% 이상 (수집기 포맷 계약 위반 의심)"
+    stream: system_logs
+    sql: >-
+      SELECT host_name, count(*) AS total FROM "system_logs"
+      GROUP BY host_name HAVING count(*) >= {{ o2c_parse_error_min_lines }}
+      AND sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) * 100 >= {{ o2c_parse_error_percent }} * count(*)
+    period: "{{ o2c_parse_error_window_minutes }}"
+    frequency: 10
+    silence: "{{ o2c_parse_error_window_minutes }}"

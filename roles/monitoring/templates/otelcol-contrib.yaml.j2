@@ -1,4 +1,4 @@
-# Ansible managed — ISMS 수집 표준 (ADR-0006 §2.3, §2.7). 시크릿은 포함하지 않으며 ${env:…}로 secrets.env를 참조한다.
+# Ansible managed — ISMS 수집 표준 (ADR-0006 §2.3, §2.7, ADR-0008). 시크릿은 포함하지 않으며 ${env:…}로 secrets.env를 참조한다.
 {% macro o2_common(stream=none) %}
     endpoint: {{ (o2_endpoint ~ '/api/' ~ o2_org) | to_json }}
     headers:
@@ -10,6 +10,173 @@
     tls:
       ca_file: {{ o2_ca_file | to_json }}
 {% endif %}
+{% endmacro %}
+{#
+  Envelope Parsing (ADR-0008). 원문 body는 건드리지 않고 포맷이 정한 필드만 attributes/Timestamp/severity에 올린다.
+  regex_parser가 on_error: send_quiet라 맞지 않는 줄은 그대로 통과하고, 그런 줄에는 log.parse_error=true를 붙인다(버리지 않음).
+  연도가 없는 시각(RFC3164, yum)은 collector가 수집 시점 기준으로 추정하고, 타임존은 Probe가 읽은 호스트 값을 쓴다.
+  모든 operator가 같은 if 조건(해당 포맷의 파일)으로 묶여 있어 한 수신기 안에서 파일별로 다른 파서를 쓴다.
+#}
+{% macro env_ops(fmt, members) %}
+{% set paths = [] %}
+{% for e in members %}{% set _ = paths.append('attributes["log.file.path"] matches "' ~ (e.path | host_agents_glob_regex) ~ '"') %}{% endfor %}
+{% set c = '(' ~ (paths | join(' or ')) ~ ')' %}
+{% set tz = (host_agents_timezone | default('Asia/Seoul', true)) | to_json %}
+{% set months = '(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)' %}
+{% set sevmap %}
+          mapping:
+            trace: [HEAVYDEBUG, TRACEDEBUG]
+            debug: [SUBDEBUG, DDEBUG]
+            info2: [NOTICE]
+            fatal: [CRITICAL]
+{% endset %}
+{% if fmt == 'syslog' %}
+      - type: regex_parser
+        parse_from: body
+        parse_to: attributes
+        on_error: send_quiet
+        if: {{ c | to_json }}
+        regex: '^(?P<ts>{{ months }}\s+\d{1,2}\s\d{2}:\d{2}:\d{2})\s(?P<hostname>\S+)\s(?P<process_name>[^\s:\[]+)(?:\[(?P<process_pid>\d+)\])?:\s?(?P<message>.*)$'
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: strptime
+          layout: '%b %e %H:%M:%S'
+          location: {{ tz }}
+{% set g = '(' ~ c ~ ' and attributes["message"] != nil)' %}
+      - type: move
+        from: attributes.process_name
+        to: attributes["process.executable.name"]
+        if: {{ g | to_json }}
+      - type: move
+        from: attributes.process_pid
+        to: attributes["process.pid"]
+        if: {{ (g ~ ' and attributes["process_pid"] != ""') | to_json }}
+      - type: remove
+        field: attributes.process_pid
+        if: {{ (g ~ ' and attributes["process_pid"] == ""') | to_json }}
+      - type: remove
+        field: attributes.hostname
+        if: {{ g | to_json }}
+      - type: remove
+        field: attributes.ts
+        if: {{ g | to_json }}
+{% elif fmt == 'audit' %}
+      - type: regex_parser
+        parse_from: body
+        parse_to: attributes
+        on_error: send_quiet
+        if: {{ c | to_json }}
+        regex: '^type=(?P<audit_type>\S+) msg=audit\((?P<epoch>\d+\.\d+):(?P<audit_serial>\d+)\):\s?(?P<rest>.*)$'
+        timestamp:
+          parse_from: attributes.epoch
+          layout_type: epoch
+          layout: s.ms
+{% set g = '(' ~ c ~ ' and attributes["rest"] != nil)' %}
+      - type: key_value_parser
+        parse_from: attributes.rest
+        parse_to: attributes["audit.fields"]
+        on_error: send_quiet
+        if: {{ g | to_json }}
+      - type: move
+        from: attributes.audit_type
+        to: attributes["audit.type"]
+        if: {{ g | to_json }}
+      - type: move
+        from: attributes.audit_serial
+        to: attributes["audit.serial"]
+        if: {{ g | to_json }}
+      - type: remove
+        field: attributes.epoch
+        if: {{ g | to_json }}
+      - type: remove
+        field: attributes.rest
+        if: {{ g | to_json }}
+{% elif fmt == 'fail2ban' %}
+      - type: regex_parser
+        parse_from: body
+        parse_to: attributes
+        on_error: send_quiet
+        if: {{ c | to_json }}
+        regex: '^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) (?P<component>\S+)\s+\[(?P<process_pid>\d+)\]:\s+(?P<level>[A-Z]+)\s+(?P<message>.*)$'
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: strptime
+          layout: '%Y-%m-%d %H:%M:%S,%L'
+          location: {{ tz }}
+        severity:
+          parse_from: attributes.level
+{{ sevmap }}{% set g = '(' ~ c ~ ' and attributes["message"] != nil)' %}
+      - type: move
+        from: attributes.process_pid
+        to: attributes["process.pid"]
+        if: {{ g | to_json }}
+      - type: remove
+        field: attributes.ts
+        if: {{ g | to_json }}
+      - type: remove
+        field: attributes.level
+        if: {{ g | to_json }}
+{% elif fmt == 'dnf' %}
+      - type: regex_parser
+        parse_from: body
+        parse_to: attributes
+        on_error: send_quiet
+        if: {{ c | to_json }}
+        regex: '^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{4}))\s+(?P<level>[A-Z]+)\s+(?P<message>.*)$'
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: strptime
+          layout: '%Y-%m-%dT%H:%M:%S%z'
+        severity:
+          parse_from: attributes.level
+{{ sevmap }}{% set g = '(' ~ c ~ ' and attributes["message"] != nil)' %}
+      - type: remove
+        field: attributes.ts
+        if: {{ g | to_json }}
+      - type: remove
+        field: attributes.level
+        if: {{ g | to_json }}
+{% elif fmt == 'yum' %}
+      - type: regex_parser
+        parse_from: body
+        parse_to: attributes
+        on_error: send_quiet
+        if: {{ c | to_json }}
+        regex: '^(?P<ts>{{ months }}\s+\d{1,2}\s\d{2}:\d{2}:\d{2})\s(?P<message>.*)$'
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: strptime
+          layout: '%b %e %H:%M:%S'
+          location: {{ tz }}
+{% set g = '(' ~ c ~ ' and attributes["message"] != nil)' %}
+      - type: remove
+        field: attributes.ts
+        if: {{ g | to_json }}
+{% elif fmt == 'dpkg' %}
+      - type: regex_parser
+        parse_from: body
+        parse_to: attributes
+        on_error: send_quiet
+        if: {{ c | to_json }}
+        regex: '^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<dpkg_action>\S+) (?P<message>.*)$'
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: strptime
+          layout: '%Y-%m-%d %H:%M:%S'
+          location: {{ tz }}
+{% set g = '(' ~ c ~ ' and attributes["message"] != nil)' %}
+      - type: move
+        from: attributes.dpkg_action
+        to: attributes["dpkg.action"]
+        if: {{ g | to_json }}
+      - type: remove
+        field: attributes.ts
+        if: {{ g | to_json }}
+{% endif %}
+      - type: add
+        field: attributes["log.parse_error"]
+        value: true
+        if: {{ (c ~ ' and attributes["message"] == nil' if fmt != 'audit' else c ~ ' and attributes["audit.type"] == nil') | to_json }}
 {% endmacro %}
 extensions:
   file_storage:
@@ -41,6 +208,13 @@ receivers:
         value: {{ (entry.service | default(stream | replace('_logs', ''), true)) | to_json }}
         if: {{ ('attributes["log.file.path"] matches "' ~ (entry.path | host_agents_glob_regex) ~ '"') | to_json }}
 {% endfor %}
+{% if stream != 'app_logs' %}
+{% for fmt, fmt_paths in otel_log_formats.items() %}
+{% set members = entries | selectattr('path', 'in', fmt_paths) | list %}
+{% if members | length > 0 %}
+{{ env_ops(fmt, members) }}{% endif %}
+{% endfor %}
+{% endif %}
     retry_on_failure:
       enabled: true
 {% endfor %}
@@ -77,6 +251,17 @@ receivers:
       - type: add
         field: resource["service.name"]
         value: {{ otel_service_journald | to_json }}
+      # journald는 PRIORITY(syslog 0..7)를 갖고 있으므로 severity로 올린다. 본문(원문 맵)은 그대로 둔다.
+      - type: severity_parser
+        parse_from: body["PRIORITY"]
+        if: 'body["PRIORITY"] != nil'
+        mapping:
+          fatal: ['0', '1', '2']
+          error: '3'
+          warn: '4'
+          info2: '5'
+          info: '6'
+          debug: '7'
 {% endif %}
   hostmetrics:
     collection_interval: {{ otel_hostmetrics_interval }}
