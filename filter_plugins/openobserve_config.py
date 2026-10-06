@@ -100,6 +100,11 @@ def _subset(want, have):
     return want == have
 
 
+def o2c_read_requests(org):
+    """GET list requests (``{kind, path}``) for every managed kind, from the same table the plan creates with."""
+    return [{'kind': kind, 'path': LIST_PATHS[kind].format(org=org)} for kind in KINDS]
+
+
 def o2c_plan(desired, existing, org):
     """Writes needed to reach ``desired``. ``existing`` maps kind -> API payload (list or ``{"list": [...]}``).
 
@@ -146,4 +151,5 @@ def o2c_plan_summary(plan):
 class FilterModule(object):
     def filters(self):
         return {'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
-                'o2c_alert_state': o2c_alert_state}
+                'o2c_alert_state': o2c_alert_state,
+                'o2c_read_requests': o2c_read_requests}

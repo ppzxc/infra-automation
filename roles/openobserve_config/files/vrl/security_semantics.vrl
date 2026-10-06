@@ -6,7 +6,7 @@
 # dots as underscores (user.name -> user_name):
 #
 #   user_name, source_address, source_port, event_action (ssh_login | sudo), event_outcome (success | failure),
-#   event_reason (failure only), user_effective_name and process_command_line (sudo only)
+#   event_reason (failure only; the "Invalid user" probe line carries it without event_outcome), user_effective_name and process_command_line (sudo only)
 #
 # Keep this file free of secrets and of anything the edge (Envelope Parsing, #91) already provides.
 
@@ -39,7 +39,8 @@ if program == "sshd" {
                     .source_port = to_int(invalid.port) ?? null
                 }
                 .event_action = "ssh_login"
-                .event_outcome = "failure"
+                # no event_outcome: sshd also logs "Failed password for invalid user ..." for the same attempt, and the
+                # alerts count event_outcome = 'failure', so this probe line must not be counted a second time
                 .event_reason = "invalid user"
             }
         }

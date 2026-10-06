@@ -61,15 +61,25 @@ def _added(before, after):
       "event_action": "ssh_login", "event_outcome": "failure", "event_reason": "invalid user"}),
     ("Invalid user oracle from 198.51.100.7 port 3333",
      {"user_name": "oracle", "source_address": "198.51.100.7", "source_port": 3333,
-      "event_action": "ssh_login", "event_outcome": "failure", "event_reason": "invalid user"}),
+      "event_action": "ssh_login", "event_reason": "invalid user"}),
     ("Invalid user guest from 198.51.100.7",
      {"user_name": "guest", "source_address": "198.51.100.7",
-      "event_action": "ssh_login", "event_outcome": "failure", "event_reason": "invalid user"}),
+      "event_action": "ssh_login", "event_reason": "invalid user"}),
 ])
 def test_sshd_login_lines_become_user_address_port_and_outcome(tmp_path, line, expected):
     rec = _rec("sshd", SSHD + line)
     out = _apply(tmp_path, rec)
     assert _added(rec, out) == expected
+
+
+@pytest.mark.parametrize("line", [
+    "Invalid user oracle from 198.51.100.7 port 3333",
+    "Invalid user guest from 198.51.100.7",
+])
+def test_invalid_user_probe_line_is_not_counted_as_a_second_failure(tmp_path, line):
+    # sshd logs both "Invalid user X from" and "Failed password for invalid user X" for one attempt; alerts count outcomes
+    out = _apply(tmp_path, _rec("sshd", SSHD + line))
+    assert "event_outcome" not in out and out["event_reason"] == "invalid user"
 
 
 @pytest.mark.parametrize("line, expected", [
