@@ -1036,7 +1036,7 @@ def test_endpoints_come_from_openbao_when_not_set_elsewhere(tmp_path, openbao):
     _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
     eff = _effective(tmp_path, openbao)
     assert eff == {"o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme", "o2_ca_file": "/etc/pki/o2-ca.pem",
-                   "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup_prod_good",
+                   "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup-prod-good",
                    "rustfs_region": "kr-1", "rustfs_ca_file": "/etc/pki/rfs-ca.pem"}
 
 
@@ -1052,24 +1052,24 @@ def test_extra_vars_win_over_openbao_endpoints(tmp_path, openbao):
 def test_endpoint_defaults_apply_when_openbao_has_none(tmp_path, openbao):
     eff = _effective(tmp_path, openbao)
     assert eff == {"o2_endpoint": "", "o2_org": "default", "o2_ca_file": "", "rustfs_endpoint": "",
-                   "rustfs_bucket": "backup_prod_good", "rustfs_region": "", "rustfs_ca_file": ""}
+                   "rustfs_bucket": "backup-prod-good", "rustfs_region": "", "rustfs_ca_file": ""}
 
 
 def test_bucket_follows_the_naming_rule_per_host_and_can_be_overridden_in_the_host_kv(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/hosts/special/agents"] = _kv(dict(REQUIRED, rustfs_bucket="backup_prod_special_a"))
-    assert _effective(tmp_path, openbao, host="special")["rustfs_bucket"] == "backup_prod_special_a"
-    assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup_prod_good"
+    _FakeOpenBao.routes["/v1/secret/data/hosts/special/agents"] = _kv(dict(REQUIRED, rustfs_bucket="backup-prod-special-a"))
+    assert _effective(tmp_path, openbao, host="special")["rustfs_bucket"] == "backup-prod-special-a"
+    assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
 
 
 def test_bucket_prefix_variable_changes_the_naming_rule(tmp_path, openbao):
-    eff = _effective(tmp_path, openbao, extra_vars={"rustfs_bucket_prefix": "backup_stg"})
-    assert eff["rustfs_bucket"] == "backup_stg_good"
+    eff = _effective(tmp_path, openbao, extra_vars={"rustfs_bucket_prefix": "backup-stg"})
+    assert eff["rustfs_bucket"] == "backup-stg-good"
 
 
 def test_shared_openbao_bucket_key_is_ignored(tmp_path, openbao):
     """공용 agents/rustfs의 rustfs_bucket은 더는 쓰지 않는다 — 호스트별 버킷만 허용(실수로 공용 버킷에 쌓이지 않게)."""
     _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(dict(_ENDPOINTS_RUSTFS, rustfs_bucket="shared-bucket"))
-    assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup_prod_good"
+    assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup-prod-good"
 
 
 def _run_mon020(tmp_path, hosts):

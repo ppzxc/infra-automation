@@ -113,7 +113,7 @@
 
 ### 2.5 restic 저장소 구성·스케줄·권한
 
-- **레이아웃 (2026-10-02 개정)**: 호스트(액세스 키)마다 전용 버킷 `backup_prod_<호스트명>`(`hosts/<host>/agents`의 `rustfs_bucket`으로 재정의 가능)과 그 **버킷 루트**의 repo(`s3:<endpoint>/<bucket>`). 호스트 간 dedup 포기(설정 위주 데이터). 호스트 키 정책은 버킷 단위(`locks/*`만 Delete), 중앙 유지보수 키는 `backup_prod_*` 전체 버킷. 버킷 이름의 밑줄 허용 여부는 서버 측 확인 항목.
+- **레이아웃 (2026-10-02 개정)**: 호스트(액세스 키)마다 전용 버킷 `backup-prod-<호스트명>`(`hosts/<host>/agents`의 `rustfs_bucket`으로 재정의 가능)과 그 **버킷 루트**의 repo(`s3:<endpoint>/<bucket>`). 호스트 간 dedup 포기(설정 위주 데이터). 호스트 키 정책은 버킷 단위(`locks/*`만 Delete), 중앙 유지보수 키는 `backup-prod-*` 전체 버킷. 버킷 이름의 밑줄 허용 여부는 서버 측 확인 항목.
 - **키 분리(삭제 권한 완화)**:
   - **호스트 키(백업 전용)**: `<host>/*`에 Get/Put/List, Delete는 `<host>/locks/*`만 → 유출돼도 스냅샷·데이터 삭제 불가. restic `backup`이 삭제하는 것은 lock뿐이며 데이터 삭제는 `forget`/`prune`에서만 발생합니다.
   - **유지보수 키(중앙)**: Repo Maintenance 템플릿이 컨트롤러에서 `check`/`forget`/`prune` 실행, 호스트별 repo 비밀번호는 OpenBao에서 조회.
@@ -205,7 +205,7 @@
 - **주기**: 분기 1회(ISMS 2.9.3/2.12.2, 정한 주기 미이행 자체가 결함).
 - **절차**:
   1. `servers`에서 무작위 1대 선정(선정 방식과 결과를 결과서에 기록).
-  2. 해당 호스트 repo(호스트 전용 버킷 `backup_prod_<host>`)의 최신 스냅샷 선택: `restic snapshots --latest 1`.
+  2. 해당 호스트 repo(호스트 전용 버킷 `backup-prod-<host>`)의 최신 스냅샷 선택: `restic snapshots --latest 1`.
   3. 대상 호스트에서 호스트 키(읽기 용도)로 `/etc`를 임시 경로에 복구: `restic restore latest --target /tmp/restore-test-<date> --include /etc`.
   4. 원본과 비교(`diff -r /etc /tmp/restore-test-<date>/etc`, 변경 예상 파일 제외), 소요 시간 측정.
   5. 임시 복구본 삭제.

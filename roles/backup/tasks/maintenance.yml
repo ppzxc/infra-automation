@@ -70,7 +70,7 @@
           - (_kv.openobserve.controller_ingest_token | default('')) | length > 0
           - o2_endpoint | default('') | length > 0
           - rustfs_endpoint | default('') | length > 0
-          - rustfs_bucket is match('^[A-Za-z0-9._-]{3,63}$')
+          - rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
         fail_msg: >-
           {{ inventory_hostname }}: hosts/{{ inventory_hostname }}/agents의 restic_password, agents/rustfs의 maintenance_access_key/maintenance_secret_key,
           agents/openobserve의 controller_ingest_token 또는 o2_endpoint/rustfs_endpoint가 없습니다.

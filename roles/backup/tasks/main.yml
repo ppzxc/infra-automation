@@ -47,10 +47,10 @@
         - rustfs_endpoint | length > 0
         - rustfs_endpoint is match('^https?://')
         - not (rustfs_endpoint is match('.*/$'))
-        - rustfs_bucket is match('^[A-Za-z0-9._-]{3,63}$')
+        - rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
       fail_msg: >-
         {{ inventory_hostname }}: rustfs_endpoint(OpenBao agents/rustfs 또는 Extra variables)나 버킷 이름({{ rustfs_bucket }})이 잘못되었습니다
-        (endpoint: http(s)://host:port, 끝 슬래시 금지 / 버킷: 영숫자, 점, 밑줄, 하이픈 3~63자).
+        (endpoint: http(s)://host:port, 끝 슬래시 금지 / 버킷: S3 규칙 — 소문자·숫자·점·하이픈 3~63자, 밑줄·대문자 불가).
       quiet: true
 
   - name: "[BAK-011] Check which conditional standard backup paths exist"

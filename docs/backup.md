@@ -7,7 +7,7 @@
 ## 1. 개요 및 구현 기능 (What)
 
 - **바이너리 배포**: 컨트롤러가 다운로드·SHA256 검증한 `restic`/`resticprofile`을 버전 디렉터리(`/opt/host-agents/<agent>/<version>/`)에 배치하고 `/usr/local/bin` symlink로 활성화 (ADR-0006 §2.8).
-- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup_prod_<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(삭제는 `locks/*`만)와 비밀번호 (§2.5).
+- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(삭제는 `locks/*`만)와 비밀번호 (§2.5).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
 - **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
@@ -157,7 +157,7 @@
 
 **호스트별 순서**: `check` → (첫째 일요일(`backup_maintenance_timezone`, 기본 Asia/Seoul 기준 달력일) 또는 `always`) `check --read-data-subset=10%` → 모든 check가 성공한 경우에만 `forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`. `check`가 실패한 호스트는 `prune`을 건너뜁니다(데이터 삭제 차단). 강제 `unlock`은 하지 않고 `--retry-lock 30m`만 사용합니다.
 
-**OpenBao 입력**: `hosts/<host>/agents`의 `restic_password`(호스트별 repo 비밀번호), `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`(RustFS 유지보수 키 — `forget`/`prune`의 삭제 권한 보유), `agents/openobserve`의 `controller_ingest_token`. `o2_endpoint`/`rustfs_endpoint`는 Extra variables 또는 `group_vars`가 우선이고, 없으면 `agents/openobserve`의 `o2_endpoint`/`o2_org`, `agents/rustfs`의 `rustfs_endpoint`를 씁니다. 버킷은 Extra variables > `hosts/<host>/agents`의 `rustfs_bucket` > 규칙 `<rustfs_bucket_prefix>_<호스트명>`(기본 `backup_prod_ns****`)이며 공용 `agents/rustfs`의 `rustfs_bucket`은 쓰지 않습니다(Deploy와 같은 해석). 유지보수 키는 모든 호스트 버킷(`backup_prod_*`)에 접근할 수 있어야 합니다. 사설 CA는 컨트롤러 신뢰 저장소에 등록하거나 `backup_maintenance_ca_file`로 지정합니다.
+**OpenBao 입력**: `hosts/<host>/agents`의 `restic_password`(호스트별 repo 비밀번호), `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`(RustFS 유지보수 키 — `forget`/`prune`의 삭제 권한 보유), `agents/openobserve`의 `controller_ingest_token`. `o2_endpoint`/`rustfs_endpoint`는 Extra variables 또는 `group_vars`가 우선이고, 없으면 `agents/openobserve`의 `o2_endpoint`/`o2_org`, `agents/rustfs`의 `rustfs_endpoint`를 씁니다. 버킷은 Extra variables > `hosts/<host>/agents`의 `rustfs_bucket` > 규칙 `<rustfs_bucket_prefix>_<호스트명>`(기본 `backup-prod-ns****`)이며 공용 `agents/rustfs`의 `rustfs_bucket`은 쓰지 않습니다(Deploy와 같은 해석). 유지보수 키는 모든 호스트 버킷(`backup-prod-*`)에 접근할 수 있어야 합니다. 사설 CA는 컨트롤러 신뢰 저장소에 등록하거나 `backup_maintenance_ca_file`로 지정합니다.
 
 **restic 바이너리**: Deploy와 같은 고정 버전·체크섬(`monitoring/vars/main.yml`)을 컨트롤러 캐시(`host_agents_cache_dir`)에서 사용합니다.
 
