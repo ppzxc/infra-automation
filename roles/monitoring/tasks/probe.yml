@@ -52,6 +52,16 @@
     host_agents_os_arch: "{{ _probe.arch }}"
     host_agents_os_type: "{{ _probe.type }}"
     host_agents_os_description: "{{ _probe.description }}"
+    # Envelope Parsing(ADR-0008): RFC3164 시각은 호스트의 실제 타임존으로 해석한다. 읽지 못하면 timezone 변수로 대체한다(MON-025).
+    host_agents_timezone: "{{ _probe.timezone | default('', true) or (timezone | default('Asia/Seoul', true)) }}"
+    host_agents_timezone_probed: "{{ (_probe.timezone | default('', true)) | length > 0 }}"
+
+- name: "[MON-025] Warn when the host timezone could not be read (falling back to the timezone variable)"
+  ansible.builtin.debug:
+    msg: >-
+      {{ ('[WARN] ' ~ inventory_hostname ~ ': 호스트 타임존을 읽지 못해 ' ~ host_agents_timezone
+          ~ '(timezone 변수)로 로그 시각을 해석합니다 — /etc/localtime 링크 또는 /etc/sysconfig/clock을 확인하세요.') | host_agents_warn }}
+  when: not (host_agents_timezone_probed | bool)
 
 # 현대 경로에서만 python3를 요구하고 fact를 수집한다. legacy 경로는 AnsiballZ를 쓸 수 없으므로
 # 이 시점 이후 모듈 태스크를 호출하지 않는다.

@@ -72,7 +72,7 @@
   | `backup_logs` | §2.6 백업·유지보수·등록 이벤트 | 1년 (2.9.3 증적) |
 
   라우팅: `log_type` 속성 + routing connector → 스트림별 `otlphttp` exporter(각자 `stream-name` 헤더). 로컬 journald는 3개월 유지(`common`).
-- **부가정보 (2026-10-06 개정)**: 모든 로그·메트릭에 OTel semantic convention 이름의 **리소스 속성**을 붙입니다. 본문은 원문 그대로입니다. (2026-10-06 이후: 본문은 그대로 두고 Envelope Parsing으로 필드를 추가합니다 — [ADR-0008](0008-log-structuring-edge-envelope-central-semantics.md)이 이 문장의 "파싱 없음"을 대체합니다.)
+- **부가정보 (2026-10-06 개정)**: 모든 로그·메트릭에 OTel semantic convention 이름의 **리소스 속성**을 붙입니다. 본문은 원문 그대로이며 바이트 단위로 바꾸지 않습니다. ADR-0008에 따라 포맷이 정한 필드(시각·프로세스·pid·레벨)만 수집기가 `Timestamp`·`attributes`·`severity`로 **추가**합니다(Envelope Parsing, 구현은 `docs/monitoring.md` §3-3). 이전의 "파싱 없음"은 [ADR-0008](0008-log-structuring-edge-envelope-central-semantics.md)이 대체하며, 메시지 의미 해석은 중앙(OpenObserve)에서 합니다.
 
   | 속성 | 값 | 비고 |
   |---|---|---|

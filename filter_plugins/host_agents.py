@@ -18,7 +18,10 @@ OS_MARKER = '__HOST_AGENTS_OS_RELEASE__'
 REDHAT_MARKER = '__HOST_AGENTS_REDHAT_RELEASE__'
 UNAME_MARKER = '__HOST_AGENTS_UNAME_M__'
 MACHINE_ID_MARKER = '__HOST_AGENTS_MACHINE_ID__'
-_MARKERS = (OS_MARKER, REDHAT_MARKER, UNAME_MARKER, MACHINE_ID_MARKER)
+TIMEZONE_MARKER = '__HOST_AGENTS_TIMEZONE__'
+_MARKERS = (OS_MARKER, REDHAT_MARKER, UNAME_MARKER, MACHINE_ID_MARKER, TIMEZONE_MARKER)
+# IANA zone name as it appears under zoneinfo/ (e.g. Asia/Seoul, Etc/UTC). Anything else is not trusted.
+_TIMEZONE = re.compile(r'^[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+)*$')
 
 _LEGACY_PATHS = {'6': 'legacy_el6', '7': 'legacy_el7'}
 _ARCH = {'x86_64': 'amd64', 'amd64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}
@@ -47,7 +50,9 @@ def host_agents_os_probe_cmd(_unused=''):
     return ("echo {o}; cat /etc/os-release 2>/dev/null; "
             "echo {r}; cat /etc/redhat-release 2>/dev/null; "
             "echo {m}; cat /etc/machine-id 2>/dev/null; "
-            "echo {u}; uname -m").format(o=OS_MARKER, r=REDHAT_MARKER, m=MACHINE_ID_MARKER, u=UNAME_MARKER)
+            "echo {t}; readlink /etc/localtime 2>/dev/null; cat /etc/sysconfig/clock 2>/dev/null; "
+            "echo {u}; uname -m").format(o=OS_MARKER, r=REDHAT_MARKER, m=MACHINE_ID_MARKER,
+                                         t=TIMEZONE_MARKER, u=UNAME_MARKER)
 
 
 def _sections(stdout):
@@ -69,6 +74,25 @@ def _os_release_dict(lines):
         if sep and re.match(r'^[A-Z_]+$', key.strip()):
             result[key.strip()] = value.strip().strip('"').strip("'")
     return result
+
+
+def _timezone(lines):
+    """Host timezone from the probe: the /etc/localtime link target (systemd family), else ZONE= of
+    /etc/sysconfig/clock (CentOS 6, where /etc/localtime is a plain copy). Empty when unreadable or
+    not a plain zone name, so the caller can fall back and warn."""
+    zone = ''
+    for line in lines:
+        line = line.strip()
+        if 'zoneinfo/' in line and not line.startswith('#'):
+            zone = line.split('zoneinfo/', 1)[1]
+            break
+    if not zone:
+        for line in lines:
+            match = re.match(r'^ZONE\s*=\s*["\']?([^"\']*)["\']?\s*$', line.strip())
+            if match:
+                zone = match.group(1)
+                break
+    return zone if _TIMEZONE.match(zone) else ''
 
 
 def host_agents_parse_os_probe(stdout):
@@ -130,6 +154,7 @@ def host_agents_parse_os_probe(stdout):
         'distribution': distribution,
         'os_id': os_name,
         'machine_id': machine_id,
+        'timezone': _timezone(sections.get(TIMEZONE_MARKER, [])),
         'version': version,
         'major_version': major,
         'arch': _ARCH.get(uname, uname),

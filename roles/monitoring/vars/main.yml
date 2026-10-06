@@ -27,6 +27,30 @@ otel_log_services:
   /var/log/dpkg.log: package-manager
   /var/log/boot.log: boot
   /var/log/kern.log: kernel
+# Envelope Parsing(ADR-0008): 포맷이 고정된 표준 로그 경로 -> 파서 종류. 여기에 없는 경로(app_logs, 사용자 추가 경로)는 파싱하지 않는다.
+# syslog = RFC3164(PRI 없음 -> severity 비움), audit = auditd, fail2ban/dnf = 레벨을 가진 포맷, yum/dpkg = 시각만 있는 포맷.
+otel_log_formats:
+  syslog:
+    - /var/log/messages
+    - /var/log/syslog
+    - /var/log/secure
+    - /var/log/auth.log
+    - /var/log/sudo.log
+    - /var/log/cron*
+    - /var/log/kern.log
+    - /var/log/boot.log
+    - /var/log/firewalld
+  audit:
+    - /var/log/audit/audit.log
+  fail2ban:
+    - /var/log/fail2ban.log
+  dnf:
+    - /var/log/dnf.log
+  yum:
+    - /var/log/yum.log
+  dpkg:
+    - /var/log/dpkg.log
+
 # 고정 수신기·메트릭의 service.name
 otel_service_backup: backup
 otel_service_journald: journald
