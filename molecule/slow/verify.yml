@@ -586,6 +586,7 @@
         - name: "[VERIFY-BAK-060] Verify the profile wires the hooks and status-file"
           ansible.builtin.shell: >-
             grep -q 'status-file: "/var/lib/host-agents/restic-status.json"' /etc/restic/profiles.yaml &&
+            grep -qF 'host: "{{ inventory_hostname }}"' /etc/restic/profiles.yaml &&
             grep -q 'host-agents-backup-event start' /etc/restic/profiles.yaml &&
             grep -q 'host-agents-backup-event finish {{ inventory_hostname }}' /etc/restic/profiles.yaml
           changed_when: false
