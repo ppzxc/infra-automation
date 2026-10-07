@@ -36,6 +36,22 @@ _Avoid_: skip list, Limit (for this purpose)
 A key/value stamped once per host (or per log source) on every log and metric that Host Agents ship — OTel semantic-convention names such as `host.name`, `host.id`, `host.ip`, `host.arch`, `os.name`, `os.version`, `deployment.environment.name` and `service.name`. OpenObserve turns them into stream fields (logs) and series labels (metrics). The values come from the Remote OS Probe and the inventory, not from a collector-side detector. `deployment.environment.name` is declared per host (never defaulted); `host.id` and `host.ip` are left out when the host has none, and the run summary names those hosts. Defined in ADR-0006 §2.3.
 _Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)
 
+**Host Audit**:
+A read-only, periodic inspection of managed hosts that never changes a target and produces one consolidated report per run — an overall summary followed by a per-host appendix — covering Asset Inventory, drift from the declared configuration, configuration vulnerabilities and package vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Fixing what it finds belongs to provisioning and maintenance, not to it.
+_Avoid_: audit (when meaning only the CIS audit), scan, compliance check
+
+**Asset Inventory**:
+The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product.
+_Avoid_: CMDB, operational info, server list
+
+**Configuration Vulnerability**:
+A host setting that falls short of the KISA technical vulnerability checklist for Unix servers, 2026 edition — e.g. remote root login allowed, weak password policy. Each finding is named with its edition (`KISA-2026:U-13`), because the editions reuse item numbers for different checks; CIS Benchmark is cited only as a cross-reference, not checked separately.
+_Avoid_: vulnerability (unqualified), misconfiguration
+
+**Package Vulnerability**:
+An installed package version that is affected by a known CVE or vendor security advisory.
+_Avoid_: vulnerability (unqualified), CVE (when meaning the finding on a host)
+
 **Log Type**:
 The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
 _Avoid_: log category, stream tag
