@@ -620,7 +620,7 @@ def test_maintenance_playbook_runs_on_the_controller_for_servers_only():
 
 
 def test_every_secret_bearing_maintenance_task_is_no_log():
-    names = {"[BAK-071]", "[BAK-072]", "[BAK-077]", "[BAK-085]", "[BAK-078]", "[BAK-079]", "[BAK-080]", "[BAK-081]", "[BAK-082]"}
+    names = {"[BAK-087]", "[BAK-088]", "[BAK-071]", "[BAK-072]", "[BAK-077]", "[BAK-085]", "[BAK-078]", "[BAK-079]", "[BAK-080]", "[BAK-081]", "[BAK-082]"}
     tasks = [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"][:9] in names]
     assert len(tasks) == len(names) and all(t.get("no_log") is True for t in tasks)
 
@@ -660,3 +660,73 @@ def test_deploy_and_maintenance_use_the_bucket_root_as_the_repository():
         raw = path.read_text(encoding="utf-8")
         assert "rustfs_bucket }}/{{ inventory_hostname" not in raw and "rustfs_bucket ~ '/' ~ inventory_hostname" not in raw
     assert 'backup_repository: "s3:{{ rustfs_endpoint }}/{{ rustfs_bucket }}"' in (ROLE / "tasks" / "main.yml").read_text(encoding="utf-8")
+
+
+class _FakeBao(BaseHTTPRequestHandler):
+    """AppRole 로그인 + KV v2 읽기만 흉내 내는 OpenBao. 받은 요청을 (method, path, token)으로 기록한다."""
+    requests = []
+
+    def _reply(self, code, body):
+        data = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.requests.append(("POST", self.path, None))
+        if self.path == "/v1/auth/approle/login":
+            return self._reply(200, {"auth": {"client_token": "approle-issued"}})
+        return self._reply(404, {})
+
+    def do_GET(self):
+        self.requests.append(("GET", self.path, self.headers.get("X-Vault-Token")))
+        if self.headers.get("X-Vault-Token") != "approle-issued":
+            return self._reply(403, {"errors": ["permission denied"]})
+        return self._reply(200, {"data": {"data": {}}})
+
+    def log_message(self, *args):
+        pass
+
+
+def test_maintenance_logs_in_with_approle_like_deploy(tmp_path):
+    """Semaphore Environment에 VAULT_ROLE_ID/SECRET_ID만 있을 때도(=Deploy와 같은 설정) 유지보수 KV를 조회한다.
+
+    회귀: Repo Maintenance는 resolve_connection.yml을 import하지 않아 AppRole 로그인이 없었고, 토큰이 비어
+    BAK-071이 전부 skip → 'OpenBao 조회 실패 — status=[-1, -1, -1]'로 모든 호스트가 실패했다.
+    """
+    handler = type("B", (_FakeBao,), {"requests": []})
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {"h1": {}, "h2": {}}}}}}))
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
+        env.update(VAULT_ADDR=f"http://127.0.0.1:{server.server_port}", VAULT_ROLE_ID="rid", VAULT_SECRET_ID="sid")
+        res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"),
+                              str(ROOT_DIR / "playbooks" / "host_agents_maintenance.yml")],
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    finally:
+        server.shutdown()
+    out = res.stdout + res.stderr
+    assert "OpenBao 조회 실패" not in out, out
+    logins = [r for r in handler.requests if r[0] == "POST"]
+    gets = [r for r in handler.requests if r[0] == "GET"]
+    assert logins == [("POST", "/v1/auth/approle/login", None)]
+    assert len(gets) == 6 and all(token == "approle-issued" for _, _, token in gets)
+    # KV가 비어 있으므로 다음 단계(필수 유지보수 시크릿 검증)에서 멈춘다 — 조회 자체는 성공했다는 뜻이다.
+    assert "restic_password" in out
+
+
+def test_maintenance_without_any_openbao_credential_says_so(tmp_path):
+    """토큰도 AppRole도 없으면 status=[-1, -1, -1] 대신 자격증명이 없다고 알려 준다."""
+    (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {"h1": {}}}}}}))
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
+    env.update(VAULT_ADDR="http://127.0.0.1:1")
+    res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"),
+                          str(ROOT_DIR / "playbooks" / "host_agents_maintenance.yml")],
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    out = res.stdout + res.stderr
+    assert res.returncode != 0
+    assert "[-1, -1, -1]" not in out and "VAULT_ROLE_ID" in out, out

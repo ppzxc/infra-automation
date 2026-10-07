@@ -10,6 +10,42 @@
   ansible.builtin.include_vars:
     file: "{{ role_path }}/../monitoring/vars/main.yml"
 
+# Deploy는 resolve_connection.yml이 AppRole(VAULT_ROLE_ID/VAULT_SECRET_ID)로 토큰을 받지만, 유지보수 플레이북은 SSH 접속
+# 해석이 필요 없어 그 플레이를 import하지 않는다. 같은 Semaphore Environment로 동작하도록 로그인만 같은 방식으로 수행한다.
+- name: "[BAK-087] Log in to OpenBao with AppRole when no token is given (same as resolve_connection.yml)"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+    _vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
+    _vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
+    _vault_token_given: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true) }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/auth/approle/login"
+    method: POST
+    headers: "{{ {'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {} }}"
+    body_format: json
+    body:
+      role_id: "{{ _vault_role_id }}"
+      secret_id: "{{ _vault_secret_id }}"
+    status_code: [-1, 200, 400, 401, 403, 404, 500]
+    timeout: 5
+    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
+  register: _maint_approle_login
+  run_once: true
+  check_mode: false
+  no_log: true
+  when:
+    - host_agents_kv_fixture is not defined
+    - _vault_token_given | length == 0
+    - _vault_role_id | length > 0
+    - _vault_secret_id | length > 0
+
+- name: "[BAK-088] Use the AppRole client token for the maintenance KV lookups"
+  ansible.builtin.set_fact:
+    _vault_token: "{{ _maint_approle_login.json.auth.client_token }}"
+  no_log: true
+  when: (_maint_approle_login.json.auth.client_token | default('')) | length > 0
+
 - name: "[BAK-071] Fetch maintenance KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)"
   vars:
     _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
@@ -42,7 +78,8 @@
 
 - name: "[BAK-072] Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)"
   vars:
-    _statuses: "{{ _maint_kv_resp.results | default([]) | map(attribute='status', default=-1) | list }}"
+    # 토큰이 없어 BAK-071이 skip되면 results는 status 없는 항목 3개다 — 빈 목록으로 보고 '자격증명 없음'을 안내한다.
+    _statuses: "{{ _maint_kv_resp.results | default([]) | rejectattr('skipped', 'defined') | map(attribute='status', default=-1) | list }}"
     _by_key: >-
       {{ dict(_maint_kv_resp.results | default([]) | map(attribute='item.key') | zip(
            _maint_kv_resp.results | default([]) | map(attribute='json.data.data', default={}))) }}
@@ -53,7 +90,10 @@
     - name: Assert OpenBao answered every maintenance lookup
       ansible.builtin.assert:
         that: host_agents_kv_fixture is defined or (_statuses | length == 3 and _statuses | select('in', [200, 404]) | list | length == 3)
-        fail_msg: "{{ inventory_hostname }}: OpenBao 조회 실패 — status={{ _statuses if _statuses | length > 0 else '토큰 없음/미조회' }} (VAULT_TOKEN은 Semaphore Environment로 주입)"
+        fail_msg: >-
+          {{ inventory_hostname }}: OpenBao 조회 실패 — {{ ('status=' ~ (_statuses | string)) if _statuses | length > 0
+          else ('AppRole 로그인 실패(status=' ~ (_maint_approle_login.status | default(-1)) ~ ')' if (_maint_approle_login.status is defined)
+          else 'OpenBao 자격증명 없음') }} (Semaphore Environment에 VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN 주입)
         quiet: true
 
     - name: Expose the shared agents KV so endpoint defaults resolve like the Deploy path

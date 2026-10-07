@@ -99,6 +99,8 @@
 | `BAK-084` | `Ensure the controller restic cache directory exists` | `ansible.builtin.file` | Controller | 디렉터리 존재 시 `ok` (`0755`, `run_once`) |
 | `BAK-085` | `Derive the restic environment from the repository` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`no_log`; 시크릿은 `environment`로만 전달) |
 | `BAK-086` | `Assert the controller architecture is supported` | `ansible.builtin.assert` | Controller | 읽기 전용 (`x86_64`/`aarch64`만 — 고정 릴리스에 없는 아키텍처는 명확한 메시지로 실패) |
+| `BAK-087` | `Log in to OpenBao with AppRole when no token is given (same as resolve_connection.yml)` | `ansible.builtin.uri` | Controller | POST `auth/approle/login`, `run_once`, `no_log`, `check_mode: false` — 토큰 미지정 + `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 있을 때만 (Deploy와 같은 Semaphore Environment) |
+| `BAK-088` | `Use the AppRole client token for the maintenance KV lookups` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`no_log`; 발급 토큰을 BAK-071이 우선 사용) |
 | `BAK-083` | `Fail the host when any maintenance command failed` | `ansible.builtin.assert` | Controller | 이벤트 전송 뒤 판정(전송 실패도 실패로 처리) — 한 호스트라도 실패하면 Semaphore 실행 실패 |
 
 ---
