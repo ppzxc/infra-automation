@@ -20,7 +20,7 @@ def test_requirements_includes_lockdown_role():
 
 
 def test_audit_rhel9_cis_playbook_structure():
-    """Verify playbooks/audit_rhel9_cis.yml exists, is safe (audit_only: true), and isolates Rocky 9"""
+    """Verify playbooks/audit_rhel9_cis.yml exists, is blocked from running, and isolates Rocky 9"""
     playbook_file = ROOT_DIR / "playbooks" / "audit_rhel9_cis.yml"
     assert playbook_file.exists(), "playbooks/audit_rhel9_cis.yml must exist"
 
@@ -31,14 +31,16 @@ def test_audit_rhel9_cis_playbook_structure():
     assert len(pb_data) > 0, "Playbook must contain at least one play"
 
     play = pb_data[0]
-    vars_dict = play.get("vars", {})
 
-    # Safety constraint: MUST be audit_only
-    assert vars_dict.get("rhel9_cis_audit_only") is True, "Pilot playbook MUST enforce rhel9_cis_audit_only: true to prevent system alterations"
-
-    # Tasks check: must include ansible-lockdown.rhel9_cis with OS guard
+    # Safety constraint: the role (2.4.0) reads `audit_only`, not `rhel9_cis_audit_only`, so the
+    # pilot would remediate. It must stay blocked by an unconditional fail before the role runs.
     tasks = play.get("tasks", [])
     assert len(tasks) > 0, "Playbook must have tasks"
+    first = tasks[0]
+    assert "ansible.builtin.fail" in first and "when" not in first, "Pilot playbook MUST start with an unconditional ansible.builtin.fail until Host Audit replaces it"
+    assert play.get("pre_tasks") is None and play.get("roles") is None, "Nothing may run before the blocking fail task"
+
+    # Tasks check: must include ansible-lockdown.rhel9_cis with OS guard
 
     role_included = False
     for task in tasks:

@@ -29,6 +29,15 @@
     rhel9_cis_rule_5_3_4: false
 
   tasks:
+    # 실행 차단: 위 변수 이름(rhel9_cis_audit_only, rhel9_cis_rule_*)은 고정된 role 2.4.0이
+    # 읽는 이름(audit_only, rhel9cis_rule_*)과 달라 감사 전용 모드가 켜지지 않고 CIS 교정이
+    # 실행된다. Host Audit([Map] #100)이 이 파일럿을 대체할 때까지 어떤 호스트에서도 돌지 않게 한다.
+    - name: "Block execution — pilot is disabled (would remediate, not audit)"
+      ansible.builtin.fail:
+        msg: >-
+          audit_rhel9_cis.yml은 비활성화되었습니다. 감사 전용 모드가 적용되지 않아 CIS 교정이
+          실행되기 때문입니다. Host Audit(GitHub #100)을 사용하십시오.
+
     - name: "Verify target OS compatibility (Rocky Linux 9 / RHEL 9)"
       ansible.builtin.debug:
         msg: "Starting CIS Benchmark Audit for {{ inventory_hostname }} ({{ ansible_distribution }} {{ ansible_distribution_version }})"
