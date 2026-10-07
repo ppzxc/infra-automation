@@ -15,7 +15,7 @@
 #   ansible-playbook -i inventory/hosts.yml playbooks/host_agents_maintenance.yml -e target_hosts=ns0266 -e backup_maintenance_read_subset=always
 # ==============================================================================
 - name: Host Agents Repo Maintenance
-  hosts: "{{ target_hosts | default('servers') }}:&servers"
+  hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
   connection: local
   gather_facts: false
   become: false

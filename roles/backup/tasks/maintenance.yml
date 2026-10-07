@@ -101,19 +101,23 @@
         host_agents_shared_secrets: "{{ {'openobserve': _kv.openobserve, 'rustfs': _kv.rustfs} }}"
         host_agents_host_overrides: "{{ {'rustfs_bucket': ((_kv.host | default({})).rustfs_bucket | default('')) | string | trim} }}"
 
+    # 빠진 항목의 이름만(값은 절대 아님) 모아 한 번에 보여 준다. 버킷 이름은 시크릿이 아니므로 그대로 보여 준다.
+    # 주의: assert의 fail_msg는 블록의 no_log와 무관하게 출력된다 — 이 목록에 시크릿 값을 넣지 않는다.
     - name: Assert the required maintenance secrets exist
+      vars:
+        _maint_missing: >-
+          {{ (['hosts/' ~ inventory_hostname ~ '/agents.restic_password'] if (_kv.host.restic_password | default('')) | length == 0 else [])
+             + (['agents/rustfs.maintenance_access_key'] if (_kv.rustfs.maintenance_access_key | default('')) | length == 0 else [])
+             + (['agents/rustfs.maintenance_secret_key'] if (_kv.rustfs.maintenance_secret_key | default('')) | length == 0 else [])
+             + (['agents/openobserve.controller_ingest_token'] if (_kv.openobserve.controller_ingest_token | default('')) | length == 0 else [])
+             + (['agents/openobserve.o2_endpoint'] if o2_endpoint | default('') | length == 0 else [])
+             + (['agents/rustfs.rustfs_endpoint'] if rustfs_endpoint | default('') | length == 0 else [])
+             + ([] if rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') else ['rustfs_bucket(S3 이름 규칙 위반: ' ~ rustfs_bucket ~ ')']) }}
       ansible.builtin.assert:
-        that:
-          - (_kv.host.restic_password | default('')) | length > 0
-          - (_kv.rustfs.maintenance_access_key | default('')) | length > 0
-          - (_kv.rustfs.maintenance_secret_key | default('')) | length > 0
-          - (_kv.openobserve.controller_ingest_token | default('')) | length > 0
-          - o2_endpoint | default('') | length > 0
-          - rustfs_endpoint | default('') | length > 0
-          - rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
+        that: _maint_missing | length == 0
         fail_msg: >-
-          {{ inventory_hostname }}: hosts/{{ inventory_hostname }}/agents의 restic_password, agents/rustfs의 maintenance_access_key/maintenance_secret_key,
-          agents/openobserve의 controller_ingest_token 또는 o2_endpoint/rustfs_endpoint가 없습니다.
+          {{ inventory_hostname }}: 유지보수 필수 입력 누락: {{ _maint_missing | join(', ') }}
+          (Host Agents가 적용되지 않은 호스트라면 인벤토리 host_agents_excluded 그룹에 넣는다)
         quiet: true
 
     - name: Keep the resolved secrets as host facts

@@ -4,6 +4,7 @@ Templates are rendered through a local playbook (like tests/test_host_agents.py)
 are extracted from the role and executed against a real local restic repository.
 """
 import base64
+import copy
 import json
 import os
 import re
@@ -615,7 +616,7 @@ def test_maintenance_uses_the_pinned_restic_and_has_no_version_table_of_its_own(
 
 def test_maintenance_playbook_runs_on_the_controller_for_servers_only():
     (play,) = yaml.safe_load((ROOT_DIR / "playbooks" / "host_agents_maintenance.yml").read_text(encoding="utf-8"))
-    assert play["connection"] == "local" and play["hosts"] == "{{ target_hosts | default('servers') }}:&servers"
+    assert play["connection"] == "local" and play["hosts"] == "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
     assert play["tasks"][0]["ansible.builtin.include_role"] == {"name": "backup", "tasks_from": "maintenance"}
 
 
@@ -730,3 +731,39 @@ def test_maintenance_without_any_openbao_credential_says_so(tmp_path):
     out = res.stdout + res.stderr
     assert res.returncode != 0
     assert "[-1, -1, -1]" not in out and "VAULT_ROLE_ID" in out, out
+
+
+def _bak072_tasks():
+    return [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"].startswith("[BAK-072]")]
+
+
+_MAINT_OK_KV = {"host": {"restic_password": "pw"},
+                "openobserve": {"controller_ingest_token": "t", "o2_endpoint": "https://o2.bao.invalid:5080"},
+                "rustfs": {"maintenance_access_key": "a", "maintenance_secret_key": "s",
+                           "rustfs_endpoint": "https://rfs.bao.invalid:9000"}}
+
+
+@pytest.mark.parametrize("section,key,expected", [
+    ("host", "restic_password", "hosts/h1/agents.restic_password"),
+    ("rustfs", "maintenance_access_key", "agents/rustfs.maintenance_access_key"),
+    ("openobserve", "controller_ingest_token", "agents/openobserve.controller_ingest_token"),
+    ("rustfs", "rustfs_endpoint", "agents/rustfs.rustfs_endpoint"),
+])
+def test_maintenance_names_exactly_the_missing_input(tmp_path, section, key, expected):
+    """필수 입력 검증 실패 시 어느 항목이 빠졌는지 이름만(값 없이) 알려 준다 — 7개 조건을 한 문장으로 묶지 않는다."""
+    kv = copy.deepcopy(_MAINT_OK_KV)
+    del kv[section][key]
+    res = _run(tmp_path, _bak072_tasks(), _vars(host_agents_kv_fixture=kv))
+    out = res.stdout + res.stderr
+    assert res.returncode != 0
+    missing = out.split("누락:", 1)[1].splitlines()[0]
+    assert expected in missing
+    assert [m.strip() for m in missing.split("(")[0].split(",") if m.strip()] == [expected], missing
+    assert "pw" not in missing and "https://" not in missing
+
+
+def test_maintenance_reports_an_invalid_bucket_name(tmp_path):
+    kv = copy.deepcopy(_MAINT_OK_KV)
+    kv["host"]["rustfs_bucket"] = "Backup_Prod"
+    res = _run(tmp_path, _bak072_tasks(), _vars(host_agents_kv_fixture=kv))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Backup_Prod)" in res.stdout + res.stderr

@@ -11,7 +11,7 @@
 | 항목 | 내용 |
 |---|---|
 | 플레이북 | `playbooks/host_agents.yml` (태그 없음 = 설치 + 설정 전체) |
-| 대상 호스트 | `target_hosts`(기본 `servers`) ∩ `servers`, 동시 실행 `serial: 25%` |
+| 대상 호스트 | `target_hosts`(기본 `servers`) ∩ `servers`에서 `host_agents_excluded` 그룹을 뺀 호스트, 동시 실행 `serial: 25%` |
 | 실행 순서 | ① OpenBao 연결·자격증명 해석 → ② `monitoring` 역할(otelcol) → ③ `backup` 역할(restic·resticprofile) → ④ 임시 개인키 정리 |
 | 비교 템플릿 | **Host Agents — Config**(`--tags agents_config`)는 설정 재적용만 하며 바이너리 설치, repo 초기화, 등록 이벤트는 하지 않는다 |
 | 신규 호스트 | `site.yml` 실행 후 Deploy 실행 (2회) |

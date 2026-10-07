@@ -38,6 +38,43 @@ IMPORT = "ansible.builtin.import_playbook"
 # Playbook structure
 # --------------------------------------------------------------------------
 
+HOST_AGENTS_PATTERN = "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
+
+
+def _list_hosts(tmp_path, playbook, inventory, *extra):
+    inv = tmp_path / "inv.yml"
+    inv.write_text(yaml.safe_dump(inventory))
+    res = subprocess.run(["ansible-playbook", "-i", str(inv), str(PLAYBOOKS / playbook), "--list-hosts", *extra],
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    plays = res.stdout.split("play #")[1:]
+    return [sorted(l.strip() for l in p.split("hosts (", 1)[1].splitlines()[1:] if l.strip() and ":" not in l)
+            for p in plays]
+
+
+_EXCLUDED_INV = {"all": {"children": {
+    "servers": {"hosts": {"ns0001": {}, "ns0002": {}, "ns0003": {}}},
+    "host_agents_excluded": {"hosts": {"ns0002": {}}}}}}
+
+
+@pytest.mark.parametrize("playbook", ["host_agents.yml", "host_agents_maintenance.yml"])
+def test_hosts_in_host_agents_excluded_are_never_targeted(tmp_path, playbook):
+    """host_agents_excluded 그룹의 호스트는 Deploy·Config·Repo Maintenance 모든 play(연결 해석·정리 포함)에서 빠진다."""
+    plays = _list_hosts(tmp_path, playbook, _EXCLUDED_INV)
+    assert plays and all(hosts == ["ns0001", "ns0003"] for hosts in plays)
+    # target_hosts로 직접 지정해도 제외가 우선한다.
+    plays = _list_hosts(tmp_path, playbook, _EXCLUDED_INV, "-e", "target_hosts=ns0002")
+    assert all(hosts == [] for hosts in plays)
+
+
+@pytest.mark.parametrize("playbook", ["host_agents.yml", "host_agents_maintenance.yml"])
+def test_inventory_without_the_excluded_group_targets_every_server(tmp_path, playbook):
+    """그룹을 정의하지 않은 인벤토리(기존 Semaphore 인벤토리)도 그대로 servers 전체를 대상으로 한다."""
+    inv = {"all": {"children": {"servers": {"hosts": {"ns0001": {}, "ns0002": {}}}}}}
+    plays = _list_hosts(tmp_path, playbook, inv)
+    assert plays and all(hosts == ["ns0001", "ns0002"] for hosts in plays)
+
+
 def _plays(name):
     return yaml.safe_load((PLAYBOOKS / name).read_text(encoding="utf-8"))
 
@@ -52,9 +89,9 @@ def test_host_agents_playbook_structure():
         "common/resolve_connection.yml", None, "common/cleanup_connection.yml"]
     for p in (plays[0], plays[2]):
         assert p["tags"] == ["always"]
-        assert p["vars"]["connection_hosts"] == "{{ target_hosts | default('servers') }}:&servers"
+        assert p["vars"]["connection_hosts"] == HOST_AGENTS_PATTERN
     agents = plays[1]
-    assert agents["hosts"] == "{{ target_hosts | default('servers') }}:&servers"
+    assert agents["hosts"] == HOST_AGENTS_PATTERN
     assert agents["serial"] == "25%"
     assert agents["gather_facts"] is False
     assert _role_names(agents) == ["monitoring", "backup"]

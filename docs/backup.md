@@ -85,7 +85,7 @@
 | `BAK-061` | `Emit the job=inventory event to backup_logs` | `ansible.builtin.uri` | All (controller) | Deploy 마지막 태스크이자 한정(`agents_config` 제외, check 모드 제외). 실행마다 이벤트 1건 전송(`changed`) |
 | `BAK-070` | `Load the shared Host Agents version table and constants from monitoring` | `ansible.builtin.include_vars` | Controller | 읽기 전용 (고정 restic 버전·체크섬의 단일 출처 — 별도 버전 표 없음) |
 | `BAK-071` | `Fetch maintenance KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)` | `ansible.builtin.uri` | Controller | GET, `check_mode: false`, `no_log` |
-| `BAK-072` | `Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)` | `ansible.builtin.block` | Controller | 읽기 전용 (`no_log`; 비밀번호·유지보수 키·컨트롤러 토큰·엔드포인트 누락 시 해당 호스트 실패) |
+| `BAK-072` | `Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)` | `ansible.builtin.block` | Controller | 읽기 전용 (`no_log`; 비밀번호·유지보수 키·컨트롤러 토큰·엔드포인트 누락 또는 버킷 이름 규칙 위반 시 해당 호스트 실패 — 실패 메시지는 누락 항목의 이름만 나열) |
 | `BAK-073` | `Detect the controller architecture for the pinned restic` | `ansible.builtin.command` | Controller | 읽기 전용 (`uname -m`, `run_once`) |
 | `BAK-074` | `Resolve the controller restic paths from the pinned version table` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`run_once`, Deploy와 같은 캐시 경로) |
 | `BAK-075` | `Download the pinned restic release on the controller and verify SHA256` | `ansible.builtin.get_url` | Controller | 체크섬 일치 시 `ok` (`run_once`) |
@@ -153,8 +153,9 @@
 | 항목 | 값 |
 |---|---|
 | Playbook | `playbooks/host_agents_maintenance.yml` |
-| 스케줄 | 매주 일요일 05:00 (`0 5 * * 0`) |
-| Environment | `VAULT_ADDR`, `VAULT_TOKEN`(또는 `vault_token`), 선택 `VAULT_NAMESPACE`/`VAULT_MOUNT` — 시크릿은 Git에 두지 않음 |
+| 스케줄 | 매주 일요일 05:00 KST — Semaphore 스케줄 시간대가 Asia/Seoul이면 `0 5 * * 0`, 기본값 UTC면 `0 20 * * 6` ([semaphore-setup.md](semaphore-setup.md) §6) |
+| Environment | Deploy와 같은 Variable Group: `VAULT_ADDR`, `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(AppRole, BAK-087) 또는 `VAULT_TOKEN`, 선택 `VAULT_NAMESPACE`/`VAULT_MOUNT` — 시크릿은 Git에 두지 않음. 등록 절차는 [semaphore-setup.md](semaphore-setup.md) |
+| 대상 | `servers` 중 인벤토리 `host_agents_excluded` 그룹을 뺀 호스트 (Deploy와 같은 집합) |
 | 수동 실행 | `-e target_hosts=<host>`(1대), `-e backup_maintenance_read_subset=always\|never` |
 
 **호스트별 순서**: `check` → (첫째 일요일(`backup_maintenance_timezone`, 기본 Asia/Seoul 기준 달력일) 또는 `always`) `check --read-data-subset=10%` → 모든 check가 성공한 경우에만 `forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`. `check`가 실패한 호스트는 `prune`을 건너뜁니다(데이터 삭제 차단). 강제 `unlock`은 하지 않고 `--retry-lock 30m`만 사용합니다.

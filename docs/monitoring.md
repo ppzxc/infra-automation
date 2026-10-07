@@ -52,7 +52,7 @@
 
 ## 3-1. Host Agents 진입점과 입력 (`playbooks/host_agents.yml`)
 
-- **호스트 집합**: `target_hosts:&servers` (축소만 가능, `servers` 밖으로 확장 불가). 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
+- **호스트 집합**: `target_hosts:&servers:!host_agents_excluded` (축소만 가능, `servers` 밖으로 확장 불가). 인벤토리 `host_agents_excluded` 그룹의 호스트는 Deploy·Config·Repo Maintenance 모두에서 빠집니다(ADR-0006 §2.1). 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
 - **롤아웃**: `serial: 25%`, `gather_facts: false`. 프로비저닝 assert·OS 프로브·fact 수집·입력 검증은 모두 역할 안에서 수행됩니다.
 - **태그**: 설치 단계 `agents_install`, 설정/스케줄 단계 `agents_config`, 역할 공통 `otel`(향후 `backup`). 사전 단계(`MON-020~035`)는 `always`라 `--tags agents_config`에서도 수행됩니다. Deploy = 태그 없음, Config = `--tags agents_config`.
 - **사전 단계**: `_is_already_provisioned`가 아니고 `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`도 없으면 즉시 실패(아래 "비밀번호 접속 예외" 참고) → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
