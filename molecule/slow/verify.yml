@@ -627,6 +627,29 @@
           delegate_to: localhost
           become: false
 
+        - name: "[VERIFY-BAK-087] Verify the maintenance path logs in with AppRole before the KV lookup"
+          ansible.builtin.assert:
+            that:
+              - "'auth/approle/login' in _maint"
+              - "_maint.index('[BAK-087]') < _maint.index('[BAK-071]')"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
+        - name: "[VERIFY-BAK-088] Verify the issued AppRole token is the one the KV lookup prefers"
+          ansible.builtin.assert:
+            that:
+              - "'_maint_approle_login.json.auth.client_token' in _maint"
+              - "\"_vault_token | default(\" in _maint"
+              - "_maint.index('[BAK-088]') < _maint.index('[BAK-071]')"
+            quiet: true
+          vars:
+            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+          delegate_to: localhost
+          become: false
+
         - name: "[VERIFY-BAK-071] Verify the maintenance task file reads the OpenBao KV through the same agents paths"
           ansible.builtin.assert:
             that:
