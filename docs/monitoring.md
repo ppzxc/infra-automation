@@ -152,7 +152,7 @@ CentOS 7 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 
 CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. §3-4 CentOS 7 런북 절차를 따르되 아래를 바꾸거나 추가합니다.
 
-1. **SSH 알고리즘 확인(가장 먼저)**: CentOS 6의 OpenSSH 5.3은 SHA-1 `ssh-rsa` 서명만 지원하며, 컨트롤러의 OpenSSH 8.8+는 이를 기본 비활성화합니다. `ansible -m raw -a 'cat /etc/redhat-release' <host>`가 실패하면 연결 옵션(`-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa`)이 필요합니다. `MON-104`의 `scp`는 Ansible `ssh_args`를 상속하지 않으므로, raw 태스크가 통과해도 업로드가 실패할 수 있습니다. 결과(필요 여부와 적용 방법)를 이 런북에 기록하고, 필요하면 `raw_scp_argv`에 옵션 전달을 추가하는 후속 작업을 엽니다.
+1. **SSH 알고리즘 확인(가장 먼저)**: CentOS 6의 OpenSSH 5.3은 SHA-1 `ssh-rsa` 서명만 지원하며, 컨트롤러의 OpenSSH 8.8+는 이를 기본 비활성화합니다. `ansible -m raw -a 'cat /etc/redhat-release' <host>`가 실패하면 연결 옵션(`-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa`)이 필요합니다. `MON-104`의 `scp`는 Ansible `ssh_args`를 상속하지 않으므로, `raw_scp_argv`가 `-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa`를 항상 전달합니다(`+`는 기본 알고리즘 뒤에 추가하므로 최신 호스트 협상에는 영향이 없습니다). 실측: ns0294(OpenSSH 5.3)에 러너 OpenSSH 9.9 `scp`가 `no matching host key type found. Their offer: ssh-rsa,ssh-dss`로 실패했습니다.
 2. **scp 프로토콜**: 컨트롤러 OpenSSH 9+의 `scp`는 SFTP를 씁니다. 대상 `sshd_config`의 `Subsystem sftp`가 켜져 있는지 확인합니다(§3-4 2단계와 동일).
 3. **사전 도구**: `sha256sum`, `base64`, `chkconfig`, `service`, `/etc/cron.d`, `/bin/bash`가 있는지 확인합니다(`MON-105/106/119/121`이 사용).
 4. **dry-run** → **배포**: `ansible-playbook playbooks/host_agents.yml -e target_hosts=<host> --check --diff` 후 플래그 없이 실행합니다. 확인 항목:

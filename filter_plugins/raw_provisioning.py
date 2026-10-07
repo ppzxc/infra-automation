@@ -129,14 +129,17 @@ def raw_scp_argv(src, dest, host, port, user, key, password_auth=False):
         raise ValueError('unsafe remote scp path: %r' % (dest,))
     host = str(host)
     target = '[%s]' % host if ':' in host else host
+    # CentOS 6 sshd (OpenSSH 5.3) offers only ssh-rsa/ssh-dss host keys, which OpenSSH 8.8+ disables
+    # by default; '+' appends it so modern hosts still negotiate their stronger algorithms first.
+    legacy = ['-o', 'HostKeyAlgorithms=+ssh-rsa', '-o', 'PubkeyAcceptedAlgorithms=+ssh-rsa']
     if not key:
         return ['sshpass', '-e', 'scp', '-q',
-                '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+                '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null'] + legacy + [
                 '-o', 'PubkeyAuthentication=no', '-o', 'PreferredAuthentications=password',
                 '-o', 'NumberOfPasswordPrompts=1',
                 '-P', str(int(port)), str(src), '%s@%s:%s' % (user, target, dest)]
     return ['scp', '-q', '-B', '-o', 'BatchMode=yes',
-            '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null',
+            '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null'] + legacy + [
             '-P', str(int(port)), '-i', str(key), '-o', 'IdentitiesOnly=yes',
             str(src), '%s@%s:%s' % (user, target, dest)]
 

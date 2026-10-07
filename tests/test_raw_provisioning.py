@@ -1316,3 +1316,11 @@ def test_raw_exists_helpers_round_trip(tmp_path):
     assert res.returncode == 0
     assert raw_exists_results(res.stdout, paths) == [
         {"item": paths[0], "stat": {"exists": True}}, {"item": paths[1], "stat": {"exists": False}}]
+
+
+@pytest.mark.parametrize("key,password_auth", [("/k", False), (None, True)])
+def test_scp_argv_accepts_legacy_ssh_rsa_host_keys_of_centos6_openssh(key, password_auth):
+    # CentOS 6 sshd (OpenSSH 5.3) offers only ssh-rsa/ssh-dss; OpenSSH 9.x disables ssh-rsa by default.
+    argv = raw_scp_argv("/c/x", "/var/tmp/x", "h", 22, "ops", key, password_auth)
+    assert "HostKeyAlgorithms=+ssh-rsa" in argv
+    assert "PubkeyAcceptedAlgorithms=+ssh-rsa" in argv
