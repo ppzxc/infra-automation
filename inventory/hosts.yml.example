@@ -30,6 +30,11 @@ all:
           ansible_user: ppzxc
           ansible_port: 22
 
+    # 2-1. Host Agents 적용 제외 (ADR-0006 §2.1): servers에 있지만 아직 Host Agents를 적용하지 않는 호스트.
+    #      Deploy·Config·Repo Maintenance가 모두 이 그룹을 뺀다. 적용할 때 여기서 제거한다.
+    host_agents_excluded:
+      hosts: {}
+
     # 3. 네트워크 인프라 스위치 그룹 (Cisco IOS Switches)
     cisco_switches:
       hosts:

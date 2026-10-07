@@ -28,6 +28,10 @@ _Avoid_: raw fallback, raw mode, raw provisioning (imprecise — always the full
 The pair of agents — `otelcol-contrib` (logs + hostmetrics shipped to OpenObserve) and `resticprofile`/`restic` (backups shipped to RustFS over the S3 API) — that are always installed together, never one without the other, on every host in the `servers` group. Collection and backup targets follow the ISMS (not ISMS-P) standard. Their standard configuration is held in Git; per-host overrides and secrets come from OpenBao. Designed in ADR-0006; not yet implemented.
 _Avoid_: monitoring agent, backup agent (when meaning the pair), sidecar
 
+**Host Agents Exclusion**:
+Membership of a `servers` host in the inventory group `host_agents_excluded`, meaning Host Agents are not (yet) applied to it. Deploy, Config and Repo Maintenance all leave such a host out, so the exclusion lives in one place instead of per-template Limits or `target_hosts`. Removing the host from the group is how it is brought under Host Agents. Defined in ADR-0006 §2.1.
+_Avoid_: skip list, Limit (for this purpose)
+
 **Resource Attribute**:
 A key/value stamped once per host (or per log source) on every log and metric that Host Agents ship — OTel semantic-convention names such as `host.name`, `host.id`, `host.ip`, `host.arch`, `os.name`, `os.version`, `deployment.environment.name` and `service.name`. OpenObserve turns them into stream fields (logs) and series labels (metrics). The values come from the Remote OS Probe and the inventory, not from a collector-side detector. `deployment.environment.name` is declared per host (never defaulted); `host.id` and `host.ip` are left out when the host has none, and the run summary names those hosts. Defined in ADR-0006 §2.3.
 _Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)

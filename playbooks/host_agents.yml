@@ -24,7 +24,7 @@
 - name: Resolve OpenBao Connection and Credentials
   ansible.builtin.import_playbook: common/resolve_connection.yml
   vars:
-    connection_hosts: "{{ target_hosts | default('servers') }}:&servers"
+    connection_hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
   tags: [always]
 
 # ------------------------------------------------------------------------------
@@ -32,7 +32,7 @@
 # OS 프로브 · 프로비저닝 assert · fact 수집 · OpenBao 입력 검증은 역할 안에서 수행한다.
 # ------------------------------------------------------------------------------
 - name: Apply Host Agents
-  hosts: "{{ target_hosts | default('servers') }}:&servers"
+  hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
   serial: 25%
   gather_facts: false
   roles:
@@ -50,5 +50,5 @@
 - name: Cleanup temporary controller credentials
   ansible.builtin.import_playbook: common/cleanup_connection.yml
   vars:
-    connection_hosts: "{{ target_hosts | default('servers') }}:&servers"
+    connection_hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
   tags: [always]
