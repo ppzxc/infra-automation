@@ -1,0 +1,38 @@
+---
+# ==============================================================================
+# Host Audit — Asset Inventory 수집 (ADR-0009, #120)
+# ==============================================================================
+# 식별·OS(AUD-010)에 이어 하드웨어·운영·패키지·listening 포트·계정·특수권한·Host Agents를
+# raw POSIX sh 조회 한 번으로 읽는다(CentOS 6/7 포함 같은 경로). /etc/shadow·sudoers·
+# 프로세스 이름은 root만 읽을 수 있어 sudo로 실행한다. 쓰기는 하지 않는다.
+# 비밀번호 해시는 호스트에서 상태 단어(set/locked/empty)로 줄인 뒤에만 넘어온다.
+# 선언 값(host_audit_asset)과 특수권한 허용 목록은 Git(인벤토리)에서 기록에 싣는다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-100] Probe Asset Inventory (raw, read-only)"
+  ansible.builtin.raw: "sh -c {{ lookup('ansible.builtin.file', 'inventory_probe.sh') | quote }}"
+  register: _host_audit_inventory_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  ignore_unreachable: true
+  when: host_audit_record.status == 'ok'
+
+- name: "[AUD-101] Add Asset Inventory and declared values to the per-host record"
+  ansible.builtin.set_fact:
+    host_audit_record: >-
+      {{ host_audit_record | combine({
+           'declared': {'asset': _asset},
+           'inventory': (_host_audit_inventory_probe | host_audit_inventory_record)
+                        if host_audit_record.status == 'ok' else None
+         }, recursive=true) }}
+  vars:
+    _asset:
+      purpose: "{{ host_audit_asset.purpose | default('') }}"
+      department: "{{ host_audit_asset.department | default('') }}"
+      owner_role: "{{ host_audit_asset.owner_role | default('') }}"
+      admin_role: "{{ host_audit_asset.admin_role | default('') }}"
+      security_grade: "{{ host_audit_asset.security_grade | default('') }}"
+      privileged_allowlist: >-
+        {{ accounts | default([]) | host_audit_privileged_allowlist(
+             openbao_ssh_allowed_principals | default([]), host_audit_privileged_extra) }}

@@ -28,6 +28,9 @@
       # host_audit_targets is the run's in-memory selection group (prepare.yml), not an inventory fact.
       groups: "{{ group_names | reject('equalto', 'host_audit_targets') | list }}"
 
+- name: Collect Asset Inventory
+  ansible.builtin.include_tasks: inventory.yml
+
 - name: "[AUD-012] Save the per-host record on the runner"
   ansible.builtin.copy:
     content: "{{ host_audit_record | to_nice_json(indent=2) }}\n"

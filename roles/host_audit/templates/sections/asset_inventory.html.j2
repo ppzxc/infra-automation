@@ -1,0 +1,65 @@
+{#- Asset Inventory 섹션 (ISMS 1.2.1, #120). 모델을 그리기만 한다 — 판정은 filter_plugins/host_audit_inventory.py.
+    m.inventory(식별)와 m.asset_inventory.hosts는 같은 호스트 순서다. 전체 패키지 목록은 싣지 않는다(호스트별 JSON). -#}
+{%- set ai = m.asset_inventory -%}
+  <h2 class="pb">2. Asset Inventory <span class="small mute">ISMS 1.2.1</span></h2>
+
+  <p class="small mute">2.1 식별·선언 — 용도·관리 부서·책임자·관리자·보안등급은 Git(host_audit_asset)에 선언한 값이다.</p>
+  <table>
+    <thead><tr><th>호스트</th><th>FQDN · IP</th><th>환경</th>{% for label in ai.declared_labels %}<th>{{ label | e }}</th>{% endfor %}<th>상태</th></tr></thead>
+    <tbody>
+{% for h in m.inventory %}
+{%- set a = ai.hosts[loop.index0] %}
+      <tr>
+        <td class="nowrap">{{ h.host | e }}</td>
+        <td class="small">{{ h.fqdn | e }}<br>{{ h.ips | e }}</td>
+        <td>{% if h.environment_unassigned %}<span class="tag na">{{ h.environment | e }}</span>{% else %}{{ h.environment | e }}{% endif %}</td>
+{% for f in a.declared %}
+        <td class="small">{% if f.unassigned %}<span class="tag na">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</td>
+{% endfor %}
+        <td><span class="tag {{ 'ok' if h.inspected else 'na' }}">{{ h.status_label | e }}</span></td>
+      </tr>
+{% endfor %}
+    </tbody>
+  </table>
+
+  <p class="small mute">2.2 상태 — 운영 체제 지원 종료일은 정적 표(기준일 {{ ai.eol_reviewed_on | e }}) 기준.</p>
+  <table>
+    <thead><tr><th>호스트</th><th>운영 체제 · 지원</th><th>하드웨어</th><th>가동 · 시간 동기화</th><th>패키지</th><th>포트<br><span class="small">외부/로컬</span></th><th>계정</th><th>Host Agents</th></tr></thead>
+    <tbody>
+{% for h in m.inventory %}
+{%- set a = ai.hosts[loop.index0] %}
+      <tr>
+        <td class="nowrap">{{ h.host | e }}</td>
+        <td class="small">{{ h.os | e }}<br>{{ h.kernel_arch | e }}{% if a.eol %}<br><span class="tag {{ 'crit' if a.eol.status in ['eos', 'soon'] else ('ok' if a.eol.status == 'supported' else 'na') }}">{{ a.eol.label | e }}</span>{% if a.eol.date %} <span class="mute">{{ a.eol.date | e }}</span>{% endif %}{% endif %}</td>
+{% if a.collected %}
+        <td class="small">{{ a.hardware.cpu | e }}<br>메모리 {{ a.hardware.memory | e }} · 디스크 {{ a.hardware.disk_total | e }}</td>
+        <td class="small">{{ a.operation.uptime | e }}<br><span class="tag {{ 'ok' if a.operation.timesync_ok else 'crit' }}">{{ a.operation.timesync | e }}</span></td>
+        <td class="small">{{ a.packages.count }}개<br>최종 갱신 {{ a.packages.last_update | e }}</td>
+        <td class="small nowrap">{{ a.ports_external }} / {{ a.ports_local }}</td>
+        <td class="small">로그인 가능 {{ a.login_accounts }} · 특수권한 {{ a.privileged | length }}
+          {%- if a.not_declared %}<br><span class="tag crit">선언 외 {{ a.not_declared | length }}</span>{% endif %}
+          {%- if a.inactive %}<br><span class="tag crit">장기 미사용 {{ a.inactive | length }}</span>{% endif %}</td>
+        <td class="small"><span class="tag {{ 'ok' if a.host_agents_ok else 'crit' }}">{{ a.host_agents | e }}</span></td>
+{% else %}
+        <td colspan="6" class="small"><span class="tag na">점검불가</span> {{ (a.reason or h.status_label) | e }}</td>
+{% endif %}
+      </tr>
+{% endfor %}
+    </tbody>
+  </table>
+
+  <p class="small mute">2.3 계정 발견 — 선언 외 특수권한자, 마지막 로그인 90일 이상 장기 미사용 계정.</p>
+{% if ai.flagged %}
+  <table>
+    <thead><tr><th>호스트</th><th>계정</th><th>판정</th><th>특수권한 근거</th><th>마지막 로그인</th></tr></thead>
+    <tbody>
+{% for u in ai.flagged %}
+      <tr><td class="nowrap">{{ u.host | e }}</td><td class="nowrap">{{ u.name | e }}</td>
+        <td>{% for f in u.flags %}<span class="tag crit">{{ f | e }}</span> {% endfor %}</td>
+        <td class="small">{{ u.privilege | e }}</td><td class="small">{{ u.last_login | e }}</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="note keep">선언 외 특수권한자·장기 미사용 계정 없음.</div>
+{% endif %}

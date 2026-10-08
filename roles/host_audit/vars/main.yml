@@ -1,0 +1,31 @@
+---
+# Host Audit (ADR-0009) — 내부 고정 상수.
+
+# OS 지원 종료일(EOL) 정적 표 (#120). 키는 '<os-release ID>-<주 버전>'(Ubuntu는 '<ID>-<VERSION_ID>').
+# os-release가 없는 CentOS 6은 /etc/redhat-release에서 'centos-6'을 만든다.
+# eol은 무상 표준 지원(보안 업데이트) 종료일이다 — 유상 연장 지원(ELS·ESM)은 반영하지 않는다.
+# reviewed_on(기준일)은 보고서 표지에 찍힌다. 표를 고칠 때 함께 갱신한다.
+host_audit_eol_table:
+  reviewed_on: "2026-10-08"
+  source: "Red Hat·Rocky·AlmaLinux 수명주기, CentOS EOL 공지, Ubuntu·Debian 릴리스 주기"
+  entries:
+    - { match: centos-6, name: "CentOS 6", eol: "2020-11-30" }
+    - { match: centos-7, name: "CentOS 7", eol: "2024-06-30" }
+    - { match: centos-8, name: "CentOS Linux 8", eol: "2021-12-31" }
+    - { match: rhel-7, name: "RHEL 7", eol: "2024-06-30" }
+    - { match: rhel-8, name: "RHEL 8", eol: "2029-05-31" }
+    - { match: rhel-9, name: "RHEL 9", eol: "2032-05-31" }
+    - { match: rhel-10, name: "RHEL 10", eol: "2035-05-31" }
+    - { match: rocky-8, name: "Rocky Linux 8", eol: "2029-05-31" }
+    - { match: rocky-9, name: "Rocky Linux 9", eol: "2032-05-31" }
+    - { match: rocky-10, name: "Rocky Linux 10", eol: "2035-05-31" }
+    - { match: almalinux-8, name: "AlmaLinux 8", eol: "2029-03-01" }
+    - { match: almalinux-9, name: "AlmaLinux 9", eol: "2032-05-31" }
+    - { match: almalinux-10, name: "AlmaLinux 10", eol: "2035-05-31" }
+    - { match: ubuntu-18.04, name: "Ubuntu 18.04 LTS", eol: "2023-05-31" }
+    - { match: ubuntu-20.04, name: "Ubuntu 20.04 LTS", eol: "2025-05-31" }
+    - { match: ubuntu-22.04, name: "Ubuntu 22.04 LTS", eol: "2027-06-01" }
+    - { match: ubuntu-24.04, name: "Ubuntu 24.04 LTS", eol: "2029-05-31" }
+    - { match: debian-10, name: "Debian 10", eol: "2024-06-30" }
+    - { match: debian-11, name: "Debian 11", eol: "2026-08-31" }
+    - { match: debian-12, name: "Debian 12", eol: "2028-06-30" }

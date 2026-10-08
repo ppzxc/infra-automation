@@ -1,6 +1,6 @@
 # Host Audit Role Task Specification
 
-> **상태: 뼈대 구현(#119).** [ADR-0009](adr/0009-host-audit-read-only-inspection.md)의 Host Audit 실행 흐름(대상 확정 → 접속 해석 → 호스트별 읽기 전용 수집 → 보고서 모델 → HTML)을 가장 얇게 관통한다. 지금은 식별(Inventory Hostname, FQDN, IP, 환경)과 운영 체제만 수집하고, 보고서는 러너 로컬에만 남긴다. 나머지 Asset Inventory 항목, Configuration Drift, Configuration Vulnerability, Package Vulnerability, Audit Baseline 비교, RustFS 보관, 메일은 [스펙 #115](https://github.com/ppzxc/infra-automation/issues/115)의 후속 티켓이 이 뼈대에 붙인다.
+> **상태: 뼈대(#119) + Asset Inventory(#120).** [ADR-0009](adr/0009-host-audit-read-only-inspection.md)의 Host Audit 실행 흐름(대상 확정 → 접속 해석 → 호스트별 읽기 전용 수집 → 보고서 모델 → HTML)을 가장 얇게 관통한다. 지금은 식별(Inventory Hostname, FQDN, IP, 환경)과 운영 체제만 수집하고, 보고서는 러너 로컬에만 남긴다. 나머지 Asset Inventory 항목, Configuration Drift, Configuration Vulnerability, Package Vulnerability, Audit Baseline 비교, RustFS 보관, 메일은 [스펙 #115](https://github.com/ppzxc/infra-automation/issues/115)의 후속 티켓이 이 뼈대에 붙인다.
 
 ---
 
@@ -39,11 +39,11 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 └── report.html                       # A4 인쇄용 보고서
 ```
 
-## 4. 호스트별 JSON 구조 (schema_version 1)
+## 4. 호스트별 JSON 구조 (schema_version 2)
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "inventory_hostname": "ns0332",
   "collected_at": "2026-10-08T22:00:07Z",
   "status": "ok",
@@ -103,6 +103,8 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-005` | `Create the runner-local output directory for this run` | `ansible.builtin.file` | 러너 | 실행별 디렉터리 `0700` |
 | `AUD-010` | `Probe host identity and OS (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-011` | `Build the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_host_record` 필터 |
+| `AUD-100` | `Probe Asset Inventory (raw, read-only)` | `ansible.builtin.raw` (`become: true`) | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
+| `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record` 필터 |
 | `AUD-012` | `Save the per-host record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
 | `AUD-020` | `Find the per-host records of this run` | `ansible.builtin.find` | 러너 | 읽기 전용 |
 | `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터 |
@@ -110,12 +112,83 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-023` | `Render the A4 report HTML` | `ansible.builtin.template` | 러너 | 실행별 파일 `0600` |
 | `AUD-024` | `Show where the report was written` | `ansible.builtin.debug` | 러너 | 읽기 전용 |
 
-## 7. 검증
+## 7. Asset Inventory (#120)
+
+ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/inventory_probe.sh`(POSIX sh, sudo)이고, 판정은 `filter_plugins/host_audit_inventory.py`의 `inventory_section`이 한다. 보고서 모델의 `asset_inventory` 키로 들어가며 템플릿 조각은 `templates/sections/asset_inventory*.html.j2`, 호스트별 부록은 `sections/appendix*.html.j2`다.
+
+| 영역 | 수집 (호스트) | 보고서 |
+|---|---|---|
+| 식별 | 호스트명, FQDN, IP (AUD-010) | 표 2.1 |
+| OS·EOL | os-release / redhat-release, 커널, 아키텍처 | 표 2.2, EOS면 요약 경고 띠 |
+| 하드웨어 | CPU 모델·수, 메모리, DMI 제조사·모델·시리얼, 마운트별 디스크 | 표 2.2 요약, 부록 상세 |
+| 운영 | 가동 시간, 마지막 부팅, 시간 동기화(chrony / ntpd / timedatectl) | 표 2.2 |
+| 패키지 | rpm / dpkg 전체 목록, 마지막 갱신일 | 수·마지막 갱신일·주요 패키지(kernel, openssl, openssh, glibc, sudo, docker) 버전만. **전체 목록은 호스트별 JSON에만** |
+| listening 포트 | `ss -tlnp`/`-ulnp`(없으면 `netstat`) | 외부/로컬 수, 부록에 포트·프로세스 |
+| 계정 | passwd, shadow(상태 단어만), wheel·sudo·admin 그룹, sudoers 규칙, lastlog(없으면 lastlog2) | 로그인 가능·특수권한 수, 표 2.3 발견 목록, 부록 계정 표 |
+| Host Agents | otelcol-contrib·restic·resticprofile 바이너리, 서비스·백업 타이머/cron | 정상 / 일부 이상 / 미설치 / 제외(Host Agents Exclusion) |
+
+**판정 규칙**
+
+- **미지정**: `host_audit_asset`의 용도·관리 부서·책임자(직책)·관리자(직책)·보안등급 중 빈 값.
+- **선언 외**: 특수권한자(uid 0, wheel·sudo·admin 그룹 구성원, sudoers 규칙 대상) 중 허용 목록에 없는 계정. 허용 목록은 `accounts`의 sudo 권한 계정(`sudo: true`, 또는 `sudo` 미지정 + `tier: admin`, `state: absent` 제외), `openbao_ssh_allowed_principals`, `host_audit_privileged_extra`, 그리고 root다. sudoers의 `User_Alias` 등 별칭은 펼치지 않는다.
+- **장기 미사용**: 로그인 가능한 셸을 가진 계정 중 `lastlog -t 90`에 없는 계정(기록 없음 포함). 점검 계정과 uid 0 계정은 제외하고 표지에 명시한다. uid 0의 직접 로그인은 Configuration Vulnerability(KISA-2026) 항목이 다룬다. lastlog가 없으면 '마지막 로그인 점검불가'로 표시하고 장기 미사용 판정을 하지 않는다.
+- **EOL**: `roles/host_audit/vars/main.yml`의 `host_audit_eol_table`(기준일 `reviewed_on`, 무상 표준 지원 종료일). 실행 시작일 기준 지난 날짜면 지원 종료(EOS), 180일 이내면 EOL 임박, 표에 없으면 확인 불가.
+- **점검불가**: Asset Inventory 수집이 실패하면 '점검불가(수집 실패)', /etc/shadow를 읽지 못하면 '계정 잠금 상태 점검불가'.
+
+**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값에는 사람 이름이 아니라 직책을 적는다.
+
+**읽기 전용**: 스크립트는 sudo로 돌지만 rpm 조회만은 `nobody`로 낮춰 실행한다(`setpriv`, 없으면 `su`). root로 `rpm -qa`를 돌리면 rpm이 DB를 쓰기 모드로 열어 EL9의 `rpmdb.sqlite-shm` 수정 시각(EL6/7은 Berkeley DB 환경 파일)이 바뀌기 때문이다. molecule `VERIFY-AUD-010`과 pytest의 `centos:6`/`centos:7` 컨테이너 시험이 관리 영역의 메타데이터까지 같은지 확인한다.
+
+**선언 예시** (`inventory/host_vars/<Inventory Hostname>.yml`)
+
+```yaml
+host_audit_asset:
+  purpose: "웹 서비스"
+  department: "인프라팀"
+  owner_role: "인프라팀장"
+  admin_role: "시스템 관리자"
+  security_grade: "2등급"
+```
+
+**호스트별 JSON 추가 필드 (schema_version 2)**: `declared.asset`(위 5개 + `privileged_allowlist`)과 `inventory`가 붙는다. 식별이 실패한 호스트는 `inventory: null`.
+
+```json
+"inventory": {
+  "status": "ok", "reason": "",
+  "hardware": {"cpu_model": "...", "cpu_count": 4, "mem_total_kb": 16266740,
+               "dmi": {"vendor": "Dell Inc.", "product": "PowerEdge R640", "serial": "ABC1234"},
+               "disks": [{"mount": "/", "fstype": "xfs", "size_kb": 52403200, "used_kb": 10485760}]},
+  "operation": {"probe_epoch": 1791496805, "uptime_s": 864000, "boot_epoch": 1790632805,
+                "timesync": {"tools": ["chrony"], "synced": true}},
+  "packages": {"manager": "rpm", "count": 512, "last_update_epoch": 1791000000,
+               "key": {"kernel": ["5.14.0-570.el9"], "openssl": [], "openssh": [], "glibc": [], "sudo": [], "docker": []},
+               "all": [{"name": "glibc", "version": "2.34-168.el9", "arch": "x86_64"}]},
+  "ports": [{"proto": "tcp", "address": "0.0.0.0", "port": 22, "process": "sshd"}],
+  "accounts": {"users": [{"name": "ppzxc", "uid": 1000, "gid": 1000, "shell": "/bin/bash", "login": true,
+                          "password": "set", "last_login": "pts/0 10.0.0.5 Thu Oct 8 ...", "recent_login": true}],
+               "privileged": [{"name": "ppzxc", "via": ["group wheel"], "nopasswd": true}],
+               "shadow_readable": true, "lastlog_available": true},
+  "host_agents": {"otelcol": {"installed": true, "active": true},
+                  "backup": {"installed": true, "scheduled": true}}
+}
+```
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `host_audit_asset` | `{}` | 선언 값 (위 예시) |
+| `host_audit_privileged_extra` | `[]` | 특수권한 허용 목록에 더할 이름 |
+
+## 8. 검증
 
 - **pytest** `tests/test_host_audit.py`는 다음을 검증한다.
   - 기록과 보고서 모델: 접속 실패, 기록 없음, 미지정, FQDN 불일치, KST 표기
   - 프로브 스크립트 출력 형식
   - 템플릿의 인쇄 CSS와 외부 리소스 부재
+- **pytest** `tests/test_host_audit_inventory.py`는 Asset Inventory를 검증한다.
+  - 수집 결과 해석: 8개 영역, 특수권한 근거, 비밀번호 해시 미포함, CentOS 6 출력(netstat, epoch 없는 rpm)
+  - 보고서 모델: 미지정·선언 외·90일 장기 미사용(점검 계정·uid 0 제외)·EOS/임박/미확인·전체 패키지 목록 미포함·수집 실패 점검불가
+  - 수집 스크립트를 이 머신과 `centos:6`·`centos:7` 컨테이너(이미지가 로컬에 있을 때)에서 실제로 실행
 - **molecule Fast Scenario** `molecule/fast/verify.yml`:
-  - `VERIFY-AUD-010`: 수집 전후 관리 영역의 체크섬·메타데이터가 같은지 확인한다.
+  - `VERIFY-AUD-010`: 수집(식별 + Asset Inventory) 전후 관리 영역의 체크섬·메타데이터가 같은지 확인한다.
   - `VERIFY-AUD-012`: 러너에 저장된 JSON 구조를 확인한다.
+  - `VERIFY-AUD-100`: Asset Inventory 기록의 영역별 구조와 값(패키지 수, root 계정, sshd 포트 등)을 확인한다.

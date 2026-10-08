@@ -1,0 +1,7 @@
+{#- 호스트별 부록 (레이아웃 A안). 호스트마다 새 쪽에서 시작하고, 섹션별 부록 조각을 차례로 싣는다.
+    다른 섹션은 아래 루프 안에 자기 조각 include를 한 줄씩 더한다. -#}
+{% for host in m.hosts %}
+{%- set host_index = loop.index0 %}
+  <h2 class="pb">부록 {{ loop.index }}. {{ host | e }}</h2>
+{% include 'sections/appendix_asset_inventory.html.j2' %}
+{% endfor %}

@@ -294,14 +294,34 @@
     - name: "[VERIFY-AUD-012] Verify the per-host record saved on the runner"
       ansible.builtin.assert:
         that:
-          - record.schema_version == 1
+          - record.schema_version == 2
           - record.inventory_hostname == inventory_hostname
           - record.status == 'ok'
           - record.collected_at is match('^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
-          - record.declared.keys() | sort == ['environment', 'fqdn', 'groups', 'ip']
+          - record.declared.keys() | sort == ['asset', 'environment', 'fqdn', 'groups', 'ip']
           - record.identity.keys() | sort == ['account', 'fqdn', 'hostname', 'ips']
           - record.identity.account == 'root'
           - record.os.keys() | sort == ['arch', 'id', 'kernel', 'name', 'redhat_release', 'version_id']
           - record.os.name | length > 0
           - record.os.id in ['rocky', 'ubuntu']
         fail_msg: "Unexpected Host Audit record: {{ record }}"
+
+    - name: "[VERIFY-AUD-100] Verify the Asset Inventory part of the per-host record"
+      ansible.builtin.assert:
+        that:
+          - record.declared.asset.keys() | sort == ['admin_role', 'department', 'owner_role', 'privileged_allowlist', 'purpose', 'security_grade']
+          - record.inventory.status == 'ok'
+          - record.inventory.keys() | sort == ['accounts', 'hardware', 'host_agents', 'operation', 'packages', 'ports', 'reason', 'status']
+          - record.inventory.hardware.cpu_count | int > 0
+          - record.inventory.hardware.mem_total_kb | int > 0
+          - record.inventory.operation.uptime_s is number
+          - record.inventory.packages.manager in ['rpm', 'dpkg']
+          - record.inventory.packages.count | int > 50
+          - record.inventory.packages.all | length == record.inventory.packages.count
+          - record.inventory.packages.key.glibc | length > 0
+          - record.inventory.accounts.shadow_readable
+          - record.inventory.accounts.users | selectattr('name', 'equalto', 'root') | map(attribute='uid') | list == [0]
+          - record.inventory.accounts.privileged | selectattr('name', 'equalto', 'root') | list | length == 1
+          - record.inventory.ports is sequence
+          - "'$6$' not in (record | to_json) and '$y$' not in (record | to_json)"
+        fail_msg: "Unexpected Asset Inventory record: {{ record.inventory.status }} {{ record.inventory.reason | default('') }}"

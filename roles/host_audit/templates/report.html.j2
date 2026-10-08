@@ -51,6 +51,7 @@
     <div>비교 기준</div><div>{{ m.cover.baseline | e }}</div>
     <div>점검 계정</div><div>{{ m.cover.accounts | e }}</div>
     <div>원본 보관</div><div>{{ m.cover.archive | e }}</div>
+{% include 'sections/asset_inventory_cover.html.j2' %}
   </div>
 
   <h2>1. 요약</h2>
@@ -59,6 +60,7 @@
     <div class="tile"><b class="ok">{{ m.summary.hosts_inspected }}</b><span>점검 완료</span></div>
     <div class="tile"><b class="{{ 'crit' if m.summary.hosts_unavailable else 'na' }}">{{ m.summary.hosts_unavailable }}</b><span>점검불가</span></div>
   </div>
+{% include 'sections/asset_inventory_summary.html.j2' %}
 {% if m.unavailable %}
   <div class="note keep"><b>점검불가 항목</b> — 아래 호스트·항목은 이번 실행에서 확인하지 못했습니다.</div>
   <table>
@@ -73,23 +75,9 @@
   <div class="note keep">점검불가 항목 없음.</div>
 {% endif %}
 
-  <h2 class="pb">2. Asset Inventory <span class="small mute">ISMS 1.2.1</span></h2>
-  <table>
-    <thead><tr><th>호스트</th><th>FQDN</th><th>IP</th><th>환경</th><th>운영 체제</th><th>커널 · 아키텍처</th><th>상태</th></tr></thead>
-    <tbody>
-{% for h in m.inventory %}
-      <tr>
-        <td class="nowrap">{{ h.host | e }}</td>
-        <td>{{ h.fqdn | e }}</td>
-        <td class="small">{{ h.ips | e }}</td>
-        <td>{% if h.environment_unassigned %}<span class="tag na">{{ h.environment | e }}</span>{% else %}{{ h.environment | e }}{% endif %}</td>
-        <td>{{ h.os | e }}</td>
-        <td class="small">{{ h.kernel_arch | e }}</td>
-        <td><span class="tag {{ 'ok' if h.inspected else 'na' }}">{{ h.status_label | e }}</span></td>
-      </tr>
-{% endfor %}
-    </tbody>
-  </table>
+{% include 'sections/asset_inventory.html.j2' %}
+
+{% include 'sections/appendix.html.j2' %}
 
   <h2 class="pb keep">검토 및 결재</h2>
   <p class="small mute">발견사항별 조치 의견(조치 / 예외 승인 / 선언 수정)과 검토 결과를 기재한다. 결재된 본 문서가 ISMS 2.11.2 검토 증적이다.</p>

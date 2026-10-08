@@ -31,6 +31,7 @@
       target_hosts: "{{ host_audit_run.target_hosts }}"
       archive: "{{ host_audit_run.output_dir }} (러너 로컬)"
       timezone: "{{ host_audit_run.timezone }}"
+      eol_table: "{{ host_audit_eol_table }}"
 
 - name: "[AUD-022] Save the run metadata on the runner"
   ansible.builtin.copy:

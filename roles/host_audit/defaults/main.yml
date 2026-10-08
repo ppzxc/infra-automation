@@ -14,3 +14,19 @@ host_audit_scope_pattern: "servers:loadbalancers:overseer"
 
 # 보고서 시각 표기 시간대.
 host_audit_timezone: Asia/Seoul
+
+# Asset Inventory 선언 값 (#120). 호스트에서 수집할 수 없는 값은 host_vars/<Inventory Hostname>.yml에
+# 선언한다. 사람 이름이 아니라 직책을 적는다. 비어 있는 키는 보고서에 '미지정'으로 나온다.
+#   host_audit_asset:
+#     purpose: "웹 서비스"            # 용도
+#     department: "인프라팀"          # 관리 부서
+#     owner_role: "인프라팀장"        # 책임자(직책)
+#     admin_role: "시스템 관리자"     # 관리자(직책)
+#     security_grade: "2등급"         # 보안등급
+host_audit_asset: {}
+
+# 특수권한(uid 0, wheel·sudo·admin 그룹, sudoers 규칙) 선언 허용 목록에 더할 이름.
+# 기본 허용 목록은 common의 accounts 중 sudo 권한 계정(sudo: true, 또는 sudo 미지정 + tier admin,
+# state absent 제외)과 access_security의 openbao_ssh_allowed_principals이며 root는 항상 허용한다.
+# 허용 목록에 없는 특수권한자는 보고서에 '선언 외'로 나온다.
+host_audit_privileged_extra: []
