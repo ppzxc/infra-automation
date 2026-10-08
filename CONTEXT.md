@@ -37,7 +37,7 @@ A key/value stamped once per host (or per log source) on every log and metric th
 _Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)
 
 **Host Audit**:
-A read-only, periodic inspection of managed hosts that never changes a target and produces one consolidated report per run — an overall summary followed by a per-host appendix — covering Asset Inventory, Configuration Drift, Configuration Vulnerabilities and Package Vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Fixing what it finds belongs to provisioning and maintenance, not to it.
+A read-only, periodic inspection of managed hosts and produces one consolidated report per run — an overall summary followed by a per-host appendix — covering Asset Inventory, Configuration Drift, Configuration Vulnerabilities and Package Vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Read-only means it leaves every managed state of a host unchanged — configuration files, packages and their caches, repository definitions, services, accounts, kernel settings; the traces of logging in and using privilege (authentication, sudo and audit logs, login records) and temporary files created and removed within the same run are allowed. Fixing what it finds belongs to provisioning and maintenance, not to it.
 _Avoid_: audit (when meaning only the CIS audit), scan, compliance check
 
 **Asset Inventory**:
