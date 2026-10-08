@@ -70,5 +70,51 @@
       report: "{{ host_audit_run.output_dir }}/report.html"
       hosts: "{{ host_audit_model.summary }}"
 
+- name: "[AUD-611] Compute the SHA-256 of the report to attach"
+  ansible.builtin.stat:
+    path: "{{ host_audit_run.output_dir }}/report.html"
+    checksum_algorithm: sha256
+    get_mime: false
+  register: _host_audit_report_stat
+
+# 메일 요약은 실행과 함께 보관해 재발송(resend.yml)이 같은 본문·같은 첨부를 다시 보내게 한다. 주소는 넣지 않는다.
+- name: "[AUD-612] Build the mail summary of this run"
+  ansible.builtin.set_fact:
+    host_audit_mail_doc: >-
+      {{ host_audit_model | host_audit_mail_summary({
+           'sha256': _host_audit_report_stat.stat.checksum,
+           'size': _host_audit_report_stat.stat.size,
+           'file_name': host_audit_run.run_id | host_audit_mail_attachment_name,
+           'archive': ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/'
+                       ~ _host_audit_storage_prefix ~ 'report.html (3년 보관)') if _host_audit_storage_active | bool
+                      else ('러너 ' ~ host_audit_run.output_dir ~ '/report.html (보관 안 함)')}) }}
+
+- name: "[AUD-613] Save the mail summary on the runner"
+  ansible.builtin.copy:
+    content: "{{ host_audit_mail_doc | to_nice_json(indent=2) }}\n"
+    dest: "{{ host_audit_run.output_dir }}/mail_summary.json"
+    mode: '0600'
+
 - name: Keep the originals in the Host Audit bucket
   ansible.builtin.include_tasks: storage_upload.yml
+
+# 업로드가 하나라도 실패하면 메일을 보내지 않는다. Audit Baseline 조회만 실패한 경우는 원본이 다 올라갔으므로
+# 보낸다(보고서 표지에 '조회 실패'가 찍힘). 보관을 끈 실행(host_audit_storage_enabled=false)은 러너 원본으로 보낸다.
+- name: "[AUD-614] Decide whether the originals were kept"
+  vars:
+    _uploaded: "{{ _host_audit_uploads.results | default([]) | map(attribute='status', default=-1) | list }}"
+  ansible.builtin.set_fact:
+    _host_audit_archive_ok: >-
+      {{ (not (host_audit_storage_enabled | bool))
+         or ((_host_audit_storage_active | bool) and (_host_audit_storage_problem | default('보관 비활성') | length == 0)
+             and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0) }}
+    _host_audit_mail_report_path: "{{ host_audit_run.output_dir }}/report.html"
+
+- name: Mail the report
+  ansible.builtin.include_tasks: mail.yml
+
+- name: Judge keeping the originals
+  ansible.builtin.include_tasks: storage_result.yml
+
+- name: Judge the report mail
+  ansible.builtin.include_tasks: mail_result.yml

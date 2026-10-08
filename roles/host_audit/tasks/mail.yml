@@ -1,0 +1,176 @@
+---
+# ==============================================================================
+# Host Audit — 메일 발송 (러너 localhost 전용, ADR-0009 §6, #126)
+# ==============================================================================
+# 보관이 끝난 보고서를 Google Workspace SMTP relay(smtp-relay.gmail.com:587, STARTTLS 필수,
+# IP 인증 — 자격증명 없음)로 보낸다. 본문은 inline CSS 요약(이미지·SVG 없음) + 첨부 SHA-256 +
+# 보관 경로, 첨부는 ASCII 파일명의 자체 완결 .html 1개다.
+# 수신자·발신자는 OpenBao agents/host_audit(mail_to·mail_from)에서 읽고 Extra variables
+# (host_audit_mail_to·host_audit_mail_from)로 덮어쓴다. 주소는 개인정보라 이 파일의 모든 관련
+# 태스크가 no_log이고, 보고서·JSON·실행 메타·로그에 남지 않는다. 수신자마다 따로 보낸다(AUD-606):
+# 한 번에 여러 명에게 보내면 일부 거부 시 모듈 경고가 no_log를 무시하고 주소를 찍고, 수신자끼리
+# 서로의 주소를 보게 된다.
+# 입력(호출자가 정함): host_audit_mail_doc(요약), _host_audit_mail_report_path(첨부할 보고서),
+#   _host_audit_archive_ok(보관 성공 여부 — false면 보내지 않음).
+# 이 파일은 실행을 실패로 끝내지 않는다. 판정은 mail_result.yml(AUD-610)이 보관 판정 뒤에 한다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-600] Decide whether this run sends the report mail"
+  ansible.builtin.set_fact:
+    _host_audit_mail_plan:
+      send: "{{ _skip | length == 0 }}"
+      reason: "{{ _skip }}"
+  vars:
+    _skip: >-
+      {{ '메일 비활성(host_audit_mail_enabled=false)' if not (host_audit_mail_enabled | bool)
+         else ('check 모드 실행 — 보내지 않음' if ansible_check_mode
+         else ('' if _host_audit_archive_ok | default(false) | bool
+         else '원본 보관 실패 — 메일 보내지 않음')) }}
+
+# Extra variables로 수신자와 발신자를 모두 주면 OpenBao를 조회하지 않는다.
+- name: "[AUD-601] Log in to OpenBao with AppRole for the Host Audit mail settings"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+    _vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
+    _vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
+    _vault_token_given: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true) }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/auth/approle/login"
+    method: POST
+    headers: "{{ {'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {} }}"
+    body_format: json
+    body:
+      role_id: "{{ _vault_role_id }}"
+      secret_id: "{{ _vault_secret_id }}"
+    status_code: [-1, 200, 400, 401, 403, 404, 500]
+    timeout: 5
+    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
+  register: _host_audit_mail_login
+  no_log: true
+  when:
+    - _host_audit_mail_plan.send | bool
+    - _host_audit_mail_needs_kv | bool
+    - _vault_token_given | length == 0
+    - _vault_role_id | length > 0
+    - _vault_secret_id | length > 0
+
+- name: "[AUD-602] Fetch the Host Audit mail settings from OpenBao (agents/host_audit)"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_token_eff: "{{ (_host_audit_mail_login.json.auth.client_token | default('')) or (vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true)) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+    _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/agents/host_audit"
+    method: GET
+    headers: >-
+      {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
+    status_code: [-1, 200, 403, 404, 500]
+    timeout: 5
+    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
+  register: _host_audit_mail_kv
+  changed_when: false
+  no_log: true
+  when:
+    - _host_audit_mail_plan.send | bool
+    - _host_audit_mail_needs_kv | bool
+    - _vault_token_eff | length > 0
+
+# 우선순위: Extra variables(host_audit_mail_*) > OpenBao agents/host_audit(mail_*).
+# 문제는 키 이름과 건수로만 남긴다 — 주소 값은 어디에도 쓰지 않는다.
+- name: "[AUD-603] Resolve the mail recipients and sender"
+  vars:
+    _kv: "{{ _host_audit_mail_kv.json.data.data | default({}) if (_host_audit_mail_kv.status | default(-1)) == 200 else {} }}"
+    _to: "{{ (host_audit_mail_to if (host_audit_mail_to | default([], true) | length > 0) else _kv.mail_to | default([])) | host_audit_mail_recipients }}"
+    _from: "{{ (host_audit_mail_from if (host_audit_mail_from | default('', true) | length > 0) else _kv.mail_from | default('')) | host_audit_mail_recipients }}"
+    _lookup_failed: >-
+      {{ (_host_audit_mail_needs_kv | bool) and (_host_audit_mail_kv.status | default(-1)) not in [200, 404] }}
+    _problems: >-
+      {{ (['OpenBao agents/host_audit 조회 실패 또는 자격증명 없음(VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN, 정책에 agents/host_audit 경로)'] if _lookup_failed else [])
+         + (['메일 수신자 없음 — OpenBao agents/host_audit.mail_to 또는 Extra variables host_audit_mail_to에 넣는다'] if _to.addresses | length == 0 else [])
+         + (['수신자(mail_to) 주소 형식 오류 ' ~ _to.invalid ~ '건'] if _to.invalid > 0 else [])
+         + (['발신자 없음 또는 형식 오류 — agents/host_audit.mail_from 또는 host_audit_mail_from(주소 1개)'] if (_from.addresses | length != 1 or _from.invalid > 0) else []) }}
+  ansible.builtin.set_fact:
+    _host_audit_mail_rcpt:
+      to: "{{ _to.addresses }}"
+      sender: "{{ _from.addresses | first | default('') }}"
+    _host_audit_mail_problem: "{{ _problems | join('; ') }}"
+  no_log: true
+  when: _host_audit_mail_plan.send | bool
+
+- name: Send the report mail through the SMTP relay
+  when:
+    - _host_audit_mail_plan.send | bool
+    - _host_audit_mail_problem | length == 0
+  block:
+    - name: "[AUD-604] Create a private temporary directory for the attachment"
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: host-audit-mail.
+      register: _host_audit_mail_tmp
+
+    - name: "[AUD-605] Copy the report under its ASCII attachment name"
+      ansible.builtin.copy:
+        src: "{{ _host_audit_mail_report_path }}"
+        dest: "{{ _host_audit_mail_tmp.path }}/{{ host_audit_mail_doc.report.file_name }}"
+        mode: '0600'
+
+    - name: "[AUD-606] Send the summary and the A4 report (community.general.mail)"
+      community.general.mail:
+        host: "{{ host_audit_mail_host }}"
+        port: "{{ host_audit_mail_port | int }}"
+        secure: "{{ host_audit_mail_secure }}"
+        ehlohost: "{{ host_audit_mail_ehlohost | default(omit, true) }}"
+        timeout: "{{ host_audit_mail_timeout | int }}"
+        sender: "{{ _host_audit_mail_rcpt.sender }}"
+        to: ["{{ item }}"]
+        subject: "{{ host_audit_mail_doc.subject }}"
+        body: "{{ lookup('ansible.builtin.template', 'mail_body.html.j2') }}"
+        subtype: html
+        charset: utf-8
+        attach:
+          - "{{ _host_audit_mail_tmp.path }}/{{ host_audit_mail_doc.report.file_name }}"
+        headers:
+          - "X-Host-Audit-Run-Id={{ host_audit_mail_doc.run_id }}"
+          - "X-Host-Audit-Report-SHA256={{ host_audit_mail_doc.report.sha256 }}"
+      loop: "{{ _host_audit_mail_rcpt.to }}"
+      loop_control:
+        index_var: _host_audit_mail_idx
+        label: "수신자 {{ _host_audit_mail_idx + 1 }}"
+      register: _host_audit_mail_send
+      # failed_when: false, not ignore_errors — ansible-core prints an ignored module error's message
+      # ("Failed to send mail to '<주소>'") even under no_log. failed_when rewrites 'failed' to false,
+      # so AUD-608 judges by rc and the module's success message instead. AUD-610 fails the run.
+      failed_when: false
+      no_log: true
+
+  always:
+    - name: "[AUD-607] Remove the temporary attachment directory"
+      ansible.builtin.file:
+        path: "{{ _host_audit_mail_tmp.path }}"
+        state: absent
+      when: _host_audit_mail_tmp.path is defined
+
+- name: "[AUD-608] Judge the mail outcome without any address"
+  vars:
+    _send: "{{ _host_audit_mail_plan.send | bool }}"
+    _problem: "{{ _host_audit_mail_problem | default('') }}"
+    _judged: >-
+      {{ _host_audit_mail_send | default({'skipped': true})
+         | host_audit_mail_outcome((_host_audit_mail_rcpt.to | default([])) + [_host_audit_mail_rcpt.sender | default('')]) }}
+  ansible.builtin.set_fact:
+    host_audit_mail_outcome:
+      attempted: "{{ _send and _problem | length == 0 }}"
+      sent: "{{ _send and _problem | length == 0 and _judged.sent }}"
+      skipped_reason: "{{ _host_audit_mail_plan.reason }}"
+      error: "{{ _problem if _problem | length > 0 else _judged.error }}"
+      recipients: "{{ _host_audit_mail_rcpt.to | default([]) | length }}"
+  no_log: true
+
+- name: "[AUD-609] Show the mail outcome (counts only)"
+  ansible.builtin.debug:
+    msg: >-
+      {{ ('메일 보냄 — 수신 ' ~ host_audit_mail_outcome.recipients ~ '명, 첨부 ' ~ host_audit_mail_doc.report.file_name
+          ~ ', SHA-256 ' ~ host_audit_mail_doc.report.sha256) if host_audit_mail_outcome.sent | bool
+         else ('메일 안 보냄 — ' ~ host_audit_mail_outcome.skipped_reason) if not (_host_audit_mail_plan.send | bool)
+         else ('메일 실패 — ' ~ host_audit_mail_outcome.error) }}

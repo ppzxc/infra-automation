@@ -1,0 +1,20 @@
+---
+# ==============================================================================
+# Host Audit — 메일 결과 판정 (러너 localhost 전용, ADR-0009 §6, #126)
+# ==============================================================================
+# 보관 판정(storage_result.yml, AUD-516) 뒤에 둔다: 메일이 실패해도 보관된 원본은 그대로이고,
+# 실행만 실패로 끝난다. 메일 비활성·check 모드·보관 실패로 보내지 않은 실행은 여기서 실패하지 않는다
+# (보관 실패는 AUD-516이 이미 실패로 끝낸다). 메시지에는 주소가 없다(AUD-608이 가린 문구).
+# ------------------------------------------------------------------------------
+- name: "[AUD-610] Fail the run when the report mail was not delivered"
+  ansible.builtin.assert:
+    that:
+      - not (_host_audit_mail_plan.send | bool) or (host_audit_mail_outcome.sent | bool)
+    fail_msg: >-
+      Host Audit 메일 발송 실패 — {{ host_audit_mail_outcome.error }}.
+      보고서 원본은 {{ host_audit_mail_doc.report.archive }}에 그대로 있다
+      (실행 ID {{ host_audit_mail_doc.run_id }}로 Host Audit — Resend를 실행해 다시 보낼 수 있다).
+    success_msg: >-
+      {{ 'Host Audit 메일 발송 완료' if host_audit_mail_outcome.sent | bool
+         else 'Host Audit 메일 안 보냄: ' ~ host_audit_mail_outcome.skipped_reason }}
+    quiet: true

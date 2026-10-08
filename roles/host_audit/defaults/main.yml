@@ -115,3 +115,28 @@ host_audit_drift_extra_vars: {}
 # 고치는 것이 원칙이고, 고칠 수 없을 때만 여기에 사유와 함께 올린다. 일치하는 행은 Drift에서 빠지고
 # 보고서에 '제외'로 사유와 건수가 남는다.   spec_id: "COMMON-001"  또는  task: "<SPEC-ID 없는 태스크 이름>"
 host_audit_drift_ignore: []
+
+# --- 메일 발송 (#126, ADR-0009 §6) ------------------------------------------------------------------
+# 보관이 끝난 보고서를 Google Workspace SMTP relay로 보낸다(IP 인증, 자격증명 없음, STARTTLS 필수).
+# false면 보내지 않는다(로컬 시험용). 운영 템플릿은 true로 둔다.
+host_audit_mail_enabled: true
+
+# 수신자·발신자는 개인정보다 — Git에 넣지 않는다. 기본은 OpenBao agents/host_audit의
+# mail_to(목록 또는 쉼표 구분 문자열)·mail_from이고, 아래 Extra variables가 있으면 그 값이 우선한다.
+# 수신자마다 따로 보낸다 — 받는 사람은 다른 수신자의 주소를 보지 않는다.
+host_audit_mail_to: []
+host_audit_mail_from: ""
+
+# SMTP relay. 운영값은 바꾸지 않는다 — 시험용 SMTP(mailpit 등)를 쓸 때만 Extra variables로 덮어쓴다.
+host_audit_mail_host: smtp-relay.gmail.com
+host_audit_mail_port: 587
+# community.general.mail secure: starttls(운영 — STARTTLS를 못 하면 보내지 않음) | never(시험용 평문)
+host_audit_mail_secure: starttls
+# EHLO 이름. Workspace relay 설정이 HELO 도메인을 요구하면 그 이름을 넣는다. 비우면 러너 호스트명.
+host_audit_mail_ehlohost: ""
+host_audit_mail_timeout: 30
+
+# 재발송 (playbooks/host_audit_resend.yml): 보관된 실행 ID. 기본 실행 ID(ha-<UTC 시작 시각>)가 아니면
+# host_audit_resend_month(YYYY-MM, 보고서 시간대 기준 실행 시작 월)를 함께 준다.
+host_audit_resend_run_id: ""
+host_audit_resend_month: ""

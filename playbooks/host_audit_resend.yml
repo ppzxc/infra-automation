@@ -1,0 +1,24 @@
+---
+# ==============================================================================
+# Host Audit 재발송 (ADR-0009 §6, #126) — 보관된 보고서를 다시 메일로 보낸다
+# ==============================================================================
+# 다시 점검하지 않는다. Host Audit 버킷에 보관된 실행의 report.html과 mail_summary.json을
+# 받아 같은 첨부(같은 SHA-256)와 같은 요약으로 다시 보낸다. 대상 호스트에 접속하지 않는다.
+# 수신자는 지금의 OpenBao agents/host_audit 값(또는 Extra variables)이다 — 처음 받은 사람과 다를 수 있다.
+#
+# 실행 예시:
+#   ansible-playbook -i inventory/hosts.yml playbooks/host_audit_resend.yml -e host_audit_resend_run_id=ha-20261031T220000Z
+#   # 기본 실행 ID가 아닐 때(월을 읽을 수 없음):
+#   ansible-playbook ... -e host_audit_resend_run_id=my-run -e host_audit_resend_month=2026-10
+# ==============================================================================
+
+- name: Resend an archived Host Audit report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Download the archived report and mail it again
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: resend

@@ -400,6 +400,7 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | 키 | 내용 | 쓰는 실행 |
 |---|---|---|
 | `<YYYY-MM>/<run_id>/report.html` | A4 보고서 | 모든 실행 |
+| `<YYYY-MM>/<run_id>/mail_summary.json` | 메일 요약(제목·섹션별 한 줄·첨부 SHA-256, 주소 없음) — 재발송이 읽음 (#126) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/run.json` | 실행 메타(`run_kind` 포함) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/findings.json` | 섹션별 발견 색인 `{section: {hosts, ids: {host: [id]}}}`, `resolved`, `baseline_run_id` | 모든 실행 |
 | `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록·SBOM·Trivy 원본, `package_vulnerability.json`, `pointer.json` | 모든 실행 |
@@ -431,6 +432,7 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 - 자격증명·입력 누락: 업로드하지 않는다. 보고서는 만들고(비교 기준 '조회 실패') 실행은 실패로 끝난다(`AUD-516`).
 - Audit Baseline 조회 실패(목록·포인터·findings.json): 비교 없이 보고서를 만들고 원본은 올린 뒤 실행을 실패로 끝낸다.
 - 업로드 실패(파일 하나라도): 실행을 실패로 끝낸다. 정기 실행이면 포인터를 올리지 않아 이 실행은 다음 달 비교 기준이 되지 않는다.
+- 판정 위치(#126): 자격증명은 `storage_credentials.yml`(AUD-500~502, 재발송도 사용), 판정 `AUD-516`은 `storage_result.yml`에 있고 메일 발송(§13) **뒤에** 돈다. 그래서 원본이 다 올라간 실행은 Audit Baseline 조회만 실패했어도 메일이 나가고, 실행은 그 뒤 실패로 끝난다.
 
 ### 11.4 입력 (OpenBao KV v2, Git에는 시크릿 없음)
 
@@ -542,3 +544,99 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 | `AUD-407` | `Remove the callback output (holds raw diff text)` | `ansible.builtin.file` | 러너 | `state: absent` |
 
 검증: pytest `tests/test_host_audit_drift.py` — 실제 `ansible.posix.json` `--check --diff` 출력(`tests/fixtures/host_audit_drift/check_callback.json`, 로컬 호스트 대상 check 실행으로 생성)에서 SPEC-ID 행, 준수·스킵 태스크 제외, diff 원문·no_log 내용 미포함, 실패·접속 실패 호스트, 선언 플레이만 행 생성, 핸들러 제외, 노이즈 제외 표식, Raw 경로·수집 실패 호스트 계획, 하위 실행 실패 시 부분 점검불가, 보고서 모델·템플릿(판단 칸). 하위 실행은 OpenBao 접속이 필요해 molecule 범위 밖이다.
+
+## 13. 메일 발송 (#126)
+
+원본 보관(§11)이 끝난 보고서를 Google Workspace SMTP relay로 보낸다. 러너 localhost의 보고서 단계에서만 동작하고 대상 호스트에는 아무것도 하지 않는다. check 모드에서는 보내지 않는다.
+
+### 13.1 순서와 실패 처리
+
+```text
+report.yml
+  AUD-023 보고서 HTML → AUD-611 SHA-256 → AUD-612·613 메일 요약(mail_summary.json, 주소 없음)
+  storage_upload.yml   AUD-510~515 원본(요약 포함) 업로드
+  AUD-614              보관 성공 판정 — 업로드가 하나라도 실패하면 보내지 않음
+  mail.yml             AUD-600~609 수신자 해석 → 수신자마다 1통 발송 → 결과(주소 없이)
+  storage_result.yml   AUD-516 보관 판정 (실패면 여기서 끝남)
+  mail_result.yml      AUD-610 메일 판정 (실패면 여기서 끝남)
+```
+
+| 상황 | 메일 | 실행 결과 |
+|---|---|---|
+| 업로드 실패·보관 자격증명 없음 | 보내지 않음 | 실패(AUD-516) |
+| 원본은 다 올라가고 Audit Baseline 조회만 실패 | 보냄(표지에 '조회 실패') | 실패(AUD-516) |
+| 메일 실패(접속·STARTTLS·수신자 거부) | 일부 또는 전부 안 감 | 실패(AUD-610), 원본은 버킷에 그대로 — 재발송(§13.4) |
+| 수신자·발신자 없음 또는 형식 오류 | 보내지 않음 | 실패(AUD-610), 키 이름과 건수만 표시 |
+| `host_audit_mail_enabled=false`·check 모드 | 보내지 않음 | 성공 |
+| `host_audit_storage_enabled=false`(시험) | 러너 원본을 보냄(본문에 '보관 안 함') | 메일 결과대로 |
+
+### 13.2 메일 형태
+
+- 제목: `[Host Audit] <정기|수시> 점검 보고서 <시작일> — 취약 n · 긴급/높음 n · 점검불가 n`
+- 본문: `<table>` 레이아웃과 `style=""` 인라인만 쓴다(`<style>`·이미지·SVG·data URI 없음 — Gmail·Outlook이 지운다). 호스트 수 3칸, 섹션별 한 줄 요약(점검불가, Asset Inventory, Configuration Vulnerability, Package Vulnerability, Configuration Drift, Audit Baseline), EOS 호스트, 비교 기준, 첨부 파일명·**SHA-256**·**원본 보관 경로**.
+- 첨부: 보고서 1개, 파일명은 ASCII `host-audit-<run_id>.html`(한글 파일명은 RFC 2231 인코딩이 클라이언트마다 깨진다). 첨부 바이트는 버킷의 `report.html`과 같다.
+- 머리글: `X-Host-Audit-Run-Id`, `X-Host-Audit-Report-SHA256`.
+- **수신자마다 1통**을 보낸다. 받는 사람은 다른 수신자의 주소를 보지 않는다. 또 한 통에 여러 명을 넣으면 일부 거부 시 `community.general.mail`이 거부된 주소를 경고로 찍는데, 모듈 경고는 `no_log`로 가려지지 않는다(실측).
+
+### 13.3 입력 (OpenBao KV v2, Git에는 주소 없음)
+
+| 경로 | 키 | 필수 | 설명 |
+|---|---|---|---|
+| `agents/host_audit` | `mail_to` | ● | 받는 사람. 목록 또는 `,`·`;`·공백 구분 문자열. 중복은 대소문자 무시로 하나만 |
+| `agents/host_audit` | `mail_from` | ● | 보내는 주소 1개. Workspace relay가 허용한 도메인의 역할 주소 |
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `host_audit_mail_enabled` | `true` | false면 보내지 않음 |
+| `host_audit_mail_to` · `host_audit_mail_from` | `[]` · `""` | Extra variables로 OpenBao 값을 덮어씀. 둘 다 주면 OpenBao를 조회하지 않음 |
+| `host_audit_mail_host` · `host_audit_mail_port` | `smtp-relay.gmail.com` · `587` | 운영값. 시험용 SMTP를 쓸 때만 덮어씀 |
+| `host_audit_mail_secure` | `starttls` | STARTTLS를 못 하면 보내지 않음. 시험용 평문은 `never` |
+| `host_audit_mail_ehlohost` | `""` | relay 설정이 HELO 도메인을 요구할 때 그 이름 |
+| `host_audit_mail_timeout` | `30` | SMTP 접속 제한 시간(초) |
+
+주소는 개인정보다. 주소를 다루는 태스크(AUD-601~603, 606, 608)는 모두 `no_log`이고, 오류 문구는 `host_audit_mail_redact`로 주소를 `<수신자>`로 바꾼 뒤에만 보여 준다. 보고서·호스트별 JSON·`run.json`·`mail_summary.json`에는 주소가 들어가지 않는다. 발송 태스크는 `ignore_errors`가 아니라 `failed_when: false`다 — ansible-core는 무시된 모듈 오류의 메시지("Failed to send mail to '<주소>'")를 `no_log`와 상관없이 찍는다(실측). 성공 여부는 `rc`와 모듈의 성공 메시지로 판정한다.
+
+알려진 한계: `community.general.mail`의 STARTTLS는 서버 인증서를 검증하지 않는다(파이썬 `smtplib.starttls()` 기본 컨텍스트). relay 구간은 암호화되지만 중간자 공격을 막지 못한다 — 러너에서 relay까지의 경로는 사내망과 Google 사이 인터넷 구간이다.
+
+### 13.4 재발송
+
+`playbooks/host_audit_resend.yml`(Semaphore 템플릿 Host Audit — Resend)은 다시 점검하지 않는다. 버킷 `<YYYY-MM>/<run_id>/`에서 `report.html`과 `mail_summary.json`을 받아 SHA-256을 비교하고(다르면 보내지 않음), 같은 첨부·같은 요약에 제목 앞 `[재발송]`을 붙여 지금의 수신자에게 보낸다. 받은 보고서는 보낸 뒤 러너에서 지운다.
+
+- `host_audit_resend_run_id`: 보관된 실행 ID(필수, 영문·숫자·`._-`).
+- `host_audit_resend_month`: 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID일 때 `YYYY-MM`(보고서 시간대 기준 실행 시작 월). 기본 형식이면 ID에서 계산한다(예: `ha-20261031T220000Z` → KST 11월 1일 → `2026-11/`).
+- `mail_summary.json`이 없는 실행은 최소 요약(첨부·SHA-256·보관 경로)으로 보낸다.
+
+### 13.5 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-600` | `Decide whether this run sends the report mail` | `ansible.builtin.set_fact` | 러너 | 비활성·check 모드·보관 실패면 보내지 않음 |
+| `AUD-601` | `Log in to OpenBao with AppRole for the Host Audit mail settings` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
+| `AUD-602` | `Fetch the Host Audit mail settings from OpenBao (agents/host_audit)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
+| `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 문제는 키 이름·건수만, `no_log` |
+| `AUD-604` | `Create a private temporary directory for the attachment` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 디렉터리, AUD-607이 삭제 |
+| `AUD-605` | `Copy the report under its ASCII attachment name` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600` |
+| `AUD-606` | `Send the summary and the A4 report (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통, `failed_when: false`, `no_log` |
+| `AUD-607` | `Remove the temporary attachment directory` | `ansible.builtin.file` | 러너 | `always`, `state: absent` |
+| `AUD-608` | `Judge the mail outcome without any address` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_outcome` 필터, `no_log` |
+| `AUD-609` | `Show the mail outcome (counts only)` | `ansible.builtin.debug` | 러너 | 수신자 수·첨부명·SHA-256만 |
+| `AUD-610` | `Fail the run when the report mail was not delivered` | `ansible.builtin.assert` | 러너 | 보관 판정 뒤, 주소 없는 문구 |
+| `AUD-611` | `Compute the SHA-256 of the report to attach` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
+| `AUD-612` | `Build the mail summary of this run` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_summary` 필터 |
+| `AUD-613` | `Save the mail summary on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600`, 원본과 함께 보관 |
+| `AUD-614` | `Decide whether the originals were kept` | `ansible.builtin.set_fact` | 러너 | 업로드 상태 코드만 |
+| `AUD-620` | `Fix the resend metadata and the archived run location` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_prefix` 필터 |
+| `AUD-621` | `Create the runner-local directory for the downloaded report` | `ansible.builtin.file` | 러너 | `0700` |
+| `AUD-622` | `Assert the Host Audit storage key is available for the resend` | `ansible.builtin.assert` | 러너 | 읽기 전용 |
+| `AUD-623` | `Get the archived report` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
+| `AUD-624` | `Get the archived mail summary` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
+| `AUD-625` | `Compute the SHA-256 of the downloaded report` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
+| `AUD-626` | `Assert the archived report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 해시 불일치면 보내지 않음 |
+| `AUD-627` | `Prepare the resend summary and attachment` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
+| `AUD-628` | `Remove the downloaded report from the runner` | `ansible.builtin.file` | 러너 | `state: absent` |
+
+### 13.6 검증
+
+- pytest `tests/test_host_audit_mail.py`: 수신자 정규화(목록·구분 문자열·중복·형식 오류는 건수만), 오류 문구의 주소 가림, 수신자별 발송 결과 판정(일부 실패·`failed_when` 재작성 대비), ASCII 첨부명, 실제 보고서 모델에서 만든 요약(주소 없음), 본문 템플릿(표·인라인만, `<style>`·이미지·SVG 없음, 50KB 미만, 이스케이프), 재발송 위치(KST 월 경계·형식 검사), 태스크 순서(보관 → 메일 → 보관 판정 → 메일 판정)와 `no_log`.
+- 수동 E2E(2026-10-08, 러너 로컬): mailpit(STARTTLS 필수, 자체 서명 인증서, 수신자 허용 규칙) + RustFS + OpenBao dev(namespace `infra/prod/host`)로 실제 report 단계를 돌렸다 — 수신자 3명에게 1통씩 도착, 첨부 SHA-256 = 버킷 `report.html` SHA-256, 재발송 첨부도 같은 해시, 업로드 실패 시 메일 0통·실행 실패, 메일 실패(닫힌 포트·전원 거부·일부 거부) 시 원본 유지·실행 실패, 수신자 없음 시 키 이름만 표시하고 실패, OpenBao `mail_to`(`;` 구분 문자열) 조회. 모든 경우 실행 로그에서 주소 0건. mailpit HTML 검사(caniemail 기준) 본문 지원율 95.5% — 미지원은 classic Outlook의 `max-width`(표 `width="640"` 속성으로 대체)뿐.
+- 운영 확인(운영자, #105 이후): 실제 relay 발송, Gmail·Outlook(웹·classic) 표시, `.html` 첨부 차단 여부.

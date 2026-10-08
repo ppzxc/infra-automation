@@ -7,7 +7,7 @@
 # 정기 실행은 모든 업로드가 성공한 뒤에만 포인터 baseline/<run_id>.json을 올린다 — 반쯤 올라간
 # 실행이 다음 달의 Audit Baseline이 되지 않게 한다. 수시 실행은 포인터를 남기지 않는다.
 # Audit Baseline 조회가 실패해도 원본은 올린다(비교만 빠진 보고서). 업로드 실패 또는 조회 실패는
-# 보고서를 만든 뒤 실행을 실패로 끝낸다. 포인터는 파일로 써서 올린다 — 서명한 SHA-256과 보낸
+# 보고서를 만든 뒤 storage_result.yml(AUD-516)이 실행을 실패로 끝낸다(메일 발송 뒤). 포인터는 파일로 써서 올린다 — 서명한 SHA-256과 보낸
 # 바이트가 같아야 하기 때문이다.
 # ------------------------------------------------------------------------------
 - name: "[AUD-510] Save the findings index of this run on the runner"
@@ -88,30 +88,3 @@
     - host_audit_run.run_kind == 'scheduled'
     - _uploaded | length > 0
     - _uploaded | reject('equalto', 200) | list | length == 0
-
-# 결과는 파일 이름과 상태 코드만 보여 준다(서명 헤더·키는 no_log로 가린다).
-- name: "[AUD-516] Fail the run when the Audit Baseline lookup or keeping the originals failed"
-  vars:
-    _problem: "{{ _host_audit_storage_problem | default('') }}"
-    _failed_uploads: >-
-      {{ _host_audit_uploads.results | default([]) | rejectattr('status', 'equalto', 200)
-         | map(attribute='item.stat.path', default='?') | map('basename') | list }}
-    _pointer_failed: >-
-      {{ host_audit_run.run_kind == 'scheduled' and _problem | length == 0
-         and (_host_audit_pointer_put.status | default(-1)) != 200 }}
-  ansible.builtin.assert:
-    that:
-      - _problem | length == 0
-      - host_audit_baseline_history.state != 'failed'
-      - _failed_uploads | length == 0
-      - not (_pointer_failed | bool)
-    fail_msg: >-
-      Host Audit 원본 보관 실패 — 보고서는 러너 {{ host_audit_run.output_dir }}에 있다.
-      {{ ('보관 입력: ' ~ _problem ~ ' (업로드하지 않음). ') if _problem | length > 0 else '' }}{{
-         ('Audit Baseline 조회 실패: ' ~ host_audit_baseline_history.reason ~ '. ')
-         if host_audit_baseline_history.state == 'failed' and _problem | length == 0 else '' }}{{
-         ('업로드 실패 파일: ' ~ (_failed_uploads | join(', ')) ~ '. ') if _failed_uploads | length > 0 else '' }}{{
-         'Audit Baseline 포인터 업로드 실패(이번 실행은 다음 정기 실행의 비교 기준이 되지 않음). ' if _pointer_failed | bool else '' }}
-    success_msg: "Host Audit 원본 보관: {{ _host_audit_storage_target.bucket | default('') }}/{{ _host_audit_storage_prefix }}"
-    quiet: true
-  when: _host_audit_storage_active | bool

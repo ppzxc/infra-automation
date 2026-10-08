@@ -7,6 +7,11 @@ _host_audit_storage_active: "{{ (host_audit_storage_enabled | bool) and not ansi
 # 이번 실행의 버킷 내 위치 <YYYY-MM>/<run_id>/ (월은 보고서 시간대 기준 실행 시작 월).
 _host_audit_storage_prefix: "{{ host_audit_run | host_audit_storage_prefix(host_audit_run.timezone) }}"
 
+# 메일 발송 (#126). Extra variables로 수신자(host_audit_mail_to)와 발신자(host_audit_mail_from)를
+# 모두 주면 OpenBao agents/host_audit을 조회하지 않는다.
+_host_audit_mail_needs_kv: >-
+  {{ not ((host_audit_mail_to | default([], true) | length > 0) and (host_audit_mail_from | default('', true) | length > 0)) }}
+
 # OS 지원 종료일(EOL) 정적 표 (#120). 키는 '<os-release ID>-<주 버전>'(Ubuntu는 '<ID>-<VERSION_ID>').
 # os-release가 없는 CentOS 6은 /etc/redhat-release에서 'centos-6'을 만든다.
 # eol은 무상 표준 지원(보안 업데이트) 종료일이다 — 유상 연장 지원(ELS·ESM)은 반영하지 않는다.
