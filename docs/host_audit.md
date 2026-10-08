@@ -192,3 +192,68 @@ host_audit_asset:
   - `VERIFY-AUD-010`: 수집(식별 + Asset Inventory) 전후 관리 영역의 체크섬·메타데이터가 같은지 확인한다.
   - `VERIFY-AUD-012`: 러너에 저장된 JSON 구조를 확인한다.
   - `VERIFY-AUD-100`: Asset Inventory 기록의 영역별 구조와 값(패키지 수, root 계정, sshd 포트 등)을 확인한다.
+
+## 9. Package Vulnerability (#123)
+
+설치 패키지 버전이 CVE·벤더 권고에 해당하는지 판정한다(ISMS 2.10.8 · 2.11.2). Vuls는 PoC(#112)에서 기각했고(CentOS 7 CVE 69건 누락, EOL 경고 없음, DB 13.6 GB), Trivy를 SBOM 입력으로 쓴다.
+
+- **호스트(읽기 전용)**: `files/package_probe.sh`를 `raw`로 실행해 릴리스 파일과 패키지 DB만 읽는다(`rpm -qa --queryformat` / `dpkg-query -W`). 아무것도 설치하지 않고 원격 파일도 만들지 않는다. CentOS 6/7도 같은 경로다. 식별 수집(AUD-010)이 `ok`인 호스트만 수집한다. root로 접속한 경우 rpm은 `nobody`로 조회한다(root로 열면 EL9 `rpmdb.sqlite-shm`이 바뀜, #120과 같은 방식). Asset Inventory의 패키지 목록(#120)과 별도로 읽는 이유는 Trivy 판정에 소스 패키지(rpm `SOURCERPM`, deb `source:Package`·`source:Version`)와 EL8+ 모듈 레이블이 필요하기 때문이다.
+- **러너**: 패키지 기록 → CycloneDX 1.5 SBOM(`host_audit_sbom`) → `trivy sbom --offline-scan --skip-db-update`(호스트마다 순차) → 분류(`host_audit_package_findings`) → 섹션 모델(`host_audit_package_section`). 판정·분류·집계는 모두 `filter_plugins/host_audit_packages.py`가 하고 템플릿(`templates/sections/package_vulnerability.html.j2`)은 그리기만 한다.
+- **Trivy 고정**: `vars/trivy.yml`의 버전·SHA256(직접 계산한 값, upstream checksums.txt를 기준으로 쓰지 않음)과 맞는 릴리스만 `get_url checksum`으로 받아 러너 캐시(`host_audit_cache_dir`)에 풀고 실행한다. restic(BAK-075)과 같은 방식이고 커스텀 Semaphore 이미지가 필요 없다. 버전을 올릴 때는 sigstore 번들을 `cosign verify-blob`으로 검증한 뒤 sha256을 직접 계산해 넣는다(절차는 파일 머리말). 2026-03 공급망 사고(GHSA-69fq-xp46-6x23)의 v0.69.4는 쓰지 않는다. 현재 v0.75.0(amd64·arm64 모두 cosign 검증 통과, 2026-10-08).
+- **취약점 DB**: 매 실행 `trivy image --download-db-only`로 갱신한다(`host_audit_trivy_db_repository`로 미러 지정 가능). 갱신에 실패하면 캐시 DB의 `UpdatedAt`이 7일(`host_audit_trivy_db_max_age_days`) 이내일 때만 그 캐시로 판정하고, 넘었거나 캐시가 없으면 섹션 전체를 '점검불가'로 표시한다(실행은 계속). DB 생성 시각과 갱신 여부는 표지의 '취약점 DB'에 찍힌다. 캐시가 실행 사이에 남으려면 러너의 `HOME`(또는 `host_audit_cache_dir`)이 유지돼야 한다.
+- **OS 인식 검사**: Trivy가 결과의 `Metadata.OS`를 수집한 OS 계열·버전과 다르게 인식하면 그 호스트를 '점검불가(OS 인식 불일치)'로 표시한다. OS를 인식하지 못하면 0건이 조용히 나오기 때문이다(PoC 함정).
+- **분류** (건수는 (CVE, 패키지) 쌍 기준, Audit Baseline 동일성 키는 `CVE|패키지`):
+
+| 분류 | 조건 |
+|---|---|
+| 업데이트 가능 | Trivy `fixed`이고, CentOS 6/7이면 수정 버전이 CentOS vault 최종판 이하 |
+| CentOS용 수정본 없음 | CentOS 6/7에서 수정 버전이 vault 최종판보다 높음(RHEL ELS 전용 수정) 또는 vault에 없는 패키지 |
+| 수정 안 함 (will not fix) | Red Hat `will_not_fix`. 상세 표에서 빼고 건수만 따로 센다 |
+| 벤더 미수정 | `affected`, `fix_deferred`, `under_investigation`, `end_of_life` 등 수정 버전이 없음 |
+
+- **CentOS vault 최종판 표**: `files/centos_vault_final/centos-{6,7}.tsv`(패키지 이름 → `vault.centos.org/{6.10,7.9.2009}/{os,updates}/x86_64/Packages/`의 최대 version-release). 파일 이름에 epoch가 없으므로 비교는 epoch를 빼고 한다. CentOS 6/7은 동결됐으므로 다시 만들 필요가 없다.
+- **보고서**: 위험도별 inline SVG 막대, 분류별 건수, 호스트별 건수(EOS 표시), 긴급·높음 상세(will-not-fix 제외, 최대 `host_audit_package_detail_limit`행). 전체 패키지 목록과 전체 발견은 러너 파일에만 남는다.
+
+```text
+<run_id>/
+├── packages/<Inventory Hostname>.json   # 패키지 기록 (아래)
+├── sbom/<Inventory Hostname>.cdx.json   # Trivy 입력 SBOM
+├── trivy/<Inventory Hostname>.json      # Trivy 원본 결과
+└── package_vulnerability.json           # 섹션 모델 (DB 상태, 호스트별 건수, 상세)
+```
+
+패키지 기록(`schema_version` 1): `inventory_hostname`, `collected_at`, `status`(`ok` · `unreachable` · `probe_failed` · `unsupported`), `reason`, `os`(`family` = Trivy OS 계열, `version`, `major`, `name`, `arch`), `format`(`rpm` · `deb`), `packages`(각 `name`, `epoch`, `version`, `release`, `arch`, `src_name`, `src_epoch`, `src_version`, `src_release`, `modularitylabel`).
+
+**SBOM 변환 검증**: `tests/fixtures/host_audit_packages`는 Rocky 8/9, CentOS 6/7, Ubuntu 22.04, Debian 13 공식 이미지에서 `package_probe.sh`를 실행한 출력과, 같은 이미지의 `trivy image` 결과((CVE, 패키지, 설치 버전, 상태, 수정 버전) 쌍)다. 변환한 SBOM을 `trivy sbom`으로 판정한 결과가 6개 OS 모두 `trivy image`와 같았고(차이 0, 2026-10-08, Trivy 0.75.0), 그 SBOM의 sha256을 `sbom_equivalence.json`에 고정했다. 변환기 출력이 바뀌면 pytest가 실패한다. 그때는 같은 비교(이미지에서 프로브 실행 → SBOM → `trivy sbom`과 `trivy image`의 쌍 비교)를 다시 돌려 차이 0을 확인한 뒤 픽스처를 갱신한다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `host_audit_packages_enabled` | `true` | false면 패키지 수집·판정을 건너뛴다 |
+| `host_audit_cache_dir` | `$HOME/.cache/host-audit` | Trivy 바이너리·DB 캐시 |
+| `host_audit_trivy_db_max_age_days` | `7` | 갱신 실패 시 허용하는 캐시 DB 나이 |
+| `host_audit_trivy_db_repository` | (Trivy 기본값) | 취약점 DB 미러 |
+| `host_audit_trivy_db_timeout` | `300` | DB 갱신 최대 시간(초). 넘으면 갱신 실패로 보고 캐시 규칙 적용 |
+| `host_audit_package_detail_limit` | `300` | 긴급·높음 상세 최대 행 수 |
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-300` | `Ensure the runner-local package record directory exists` | `ansible.builtin.file` | 러너 (`delegate_to: localhost`) | 실행별 디렉터리 `0700` |
+| `AUD-301` | `Probe installed packages and release (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu/Debian) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
+| `AUD-302` | `Save the per-host package record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
+| `AUD-310` | `Find the per-host package records of this run` | `ansible.builtin.find` | 러너 | 읽기 전용 |
+| `AUD-311` | `Load the pinned Trivy version table` | `ansible.builtin.include_vars` | 러너 | 읽기 전용 |
+| `AUD-312` | `Detect the runner architecture for the pinned Trivy` | `ansible.builtin.command` | 러너 | `changed_when: false` |
+| `AUD-313` | `Assert the runner architecture is in the pinned Trivy table` | `ansible.builtin.assert` | 러너 | 읽기 전용 |
+| `AUD-314` | `Ensure the runner Trivy cache and this run's scan directories exist` | `ansible.builtin.file` | 러너 | 디렉터리 `0700` |
+| `AUD-315` | `Download the pinned Trivy release on the runner and verify SHA256` | `ansible.builtin.get_url` | 러너 | `checksum: sha256:` (불일치 시 실패) |
+| `AUD-316` | `Extract the verified Trivy binary into the runner cache` | `ansible.builtin.unarchive` | 러너 | `creates` |
+| `AUD-317` | `Fix the runner Trivy command line` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 |
+| `AUD-318` | `Refresh the Trivy vulnerability DB (download only)` | `ansible.builtin.command` | 러너 | `changed_when: false`, `failed_when: false`, `timeout`으로 시간 제한(실패는 AUD-319가 판정) |
+| `AUD-319` | `Decide whether the Trivy DB may be used for this run` | `ansible.builtin.set_fact` | 러너 | `host_audit_trivy_db_state` 필터 |
+| `AUD-320` | `Write the CycloneDX SBOM of each collected host` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
+| `AUD-321` | `Judge each SBOM with Trivy (offline, one host at a time)` | `ansible.builtin.command` | 러너 | `changed_when: false`, 결과 파일 없으면 호스트 '점검불가' |
+| `AUD-322` | `Classify the Trivy findings of each host` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_findings` 필터 |
+| `AUD-323` | `Build the Package Vulnerability section model` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_section` 필터 |
+| `AUD-324` | `Save the Package Vulnerability section on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
+
+검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).

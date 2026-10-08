@@ -1,0 +1,93 @@
+===RELEASE===
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+NAME="Debian GNU/Linux"
+VERSION_ID="13"
+VERSION="13 (trixie)"
+VERSION_CODENAME=trixie
+DEBIAN_VERSION_FULL=13.7
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+DEBIAN_VERSION=13.7
+ARCH=x86_64
+===PKGS_DEB===
+ii 	apt	3.0.3	amd64	apt	3.0.3
+ii 	base-files	13.8+deb13u7	amd64	base-files	13.8+deb13u7
+ii 	base-passwd	3.6.7	amd64	base-passwd	3.6.7
+ii 	bash	5.2.37-2+b10	amd64	bash	5.2.37-2
+ii 	bsdutils	1:2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	coreutils	9.7-3	amd64	coreutils	9.7-3
+ii 	dash	0.5.12-12	amd64	dash	0.5.12-12
+ii 	debconf	1.5.91	all	debconf	1.5.91
+ii 	debian-archive-keyring	2025.1	all	debian-archive-keyring	2025.1
+ii 	debianutils	5.23.2	amd64	debianutils	5.23.2
+ii 	diffutils	1:3.10-4	amd64	diffutils	1:3.10-4
+ii 	dpkg	1.22.22	amd64	dpkg	1.22.22
+ii 	findutils	4.10.0-3	amd64	findutils	4.10.0-3
+ii 	gcc-14-base	14.2.0-19	amd64	gcc-14	14.2.0-19
+ii 	grep	3.11-4	amd64	grep	3.11-4
+ii 	gzip	1.13-1+deb13u1	amd64	gzip	1.13-1+deb13u1
+ii 	hostname	3.25	amd64	hostname	3.25
+ii 	init-system-helpers	1.69~deb13u1	all	init-system-helpers	1.69~deb13u1
+ii 	libacl1	2.3.2-2+b1	amd64	acl	2.3.2-2
+ii 	libapt-pkg7.0	3.0.3	amd64	apt	3.0.3
+ii 	libattr1	1:2.5.2-3	amd64	attr	1:2.5.2-3
+ii 	libaudit-common	1:4.0.2-2+deb13u1	all	audit	1:4.0.2-2+deb13u1
+ii 	libaudit1	1:4.0.2-2+deb13u1	amd64	audit	1:4.0.2-2+deb13u1
+ii 	libblkid1	2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	libbsd0	0.12.2-2	amd64	libbsd	0.12.2-2
+ii 	libbz2-1.0	1.0.8-6	amd64	bzip2	1.0.8-6
+ii 	libc-bin	2.41-12+deb13u4	amd64	glibc	2.41-12+deb13u4
+ii 	libc6	2.41-12+deb13u4	amd64	glibc	2.41-12+deb13u4
+ii 	libcap-ng0	0.8.5-4+b1	amd64	libcap-ng	0.8.5-4
+ii 	libcap2	1:2.75-10+deb13u1+b3	amd64	libcap2	1:2.75-10+deb13u1
+ii 	libcrypt1	1:4.4.38-1	amd64	libxcrypt	1:4.4.38-1
+ii 	libdb5.3t64	5.3.28+dfsg2-9	amd64	db5.3	5.3.28+dfsg2-9
+ii 	libdebconfclient0	0.280	amd64	cdebconf	0.280
+ii 	libgcc-s1	14.2.0-19	amd64	gcc-14	14.2.0-19
+ii 	libgmp10	2:6.3.0+dfsg-3	amd64	gmp	2:6.3.0+dfsg-3
+ii 	libhogweed6t64	3.10.1-1	amd64	nettle	3.10.1-1
+ii 	liblastlog2-2	2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	liblz4-1	1.10.0-4	amd64	lz4	1.10.0-4
+ii 	liblzma5	5.8.1-1+deb13u1	amd64	xz-utils	5.8.1-1+deb13u1
+ii 	libmd0	1.1.0-2+b1	amd64	libmd	1.1.0-2
+ii 	libmount1	2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	libnettle8t64	3.10.1-1	amd64	nettle	3.10.1-1
+ii 	libpam-modules	1.7.0-5	amd64	pam	1.7.0-5
+ii 	libpam-modules-bin	1.7.0-5	amd64	pam	1.7.0-5
+ii 	libpam-runtime	1.7.0-5	all	pam	1.7.0-5
+ii 	libpam0g	1.7.0-5	amd64	pam	1.7.0-5
+ii 	libpcre2-8-0	10.46-1~deb13u3	amd64	pcre2	10.46-1~deb13u3
+ii 	libseccomp2	2.6.0-2	amd64	libseccomp	2.6.0-2
+ii 	libselinux1	3.8.1-1	amd64	libselinux	3.8.1-1
+ii 	libsemanage-common	3.8.1-1	all	libsemanage	3.8.1-1
+ii 	libsemanage2	3.8.1-1	amd64	libsemanage	3.8.1-1
+ii 	libsepol2	3.8.1-1	amd64	libsepol	3.8.1-1
+ii 	libsmartcols1	2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	libsqlite3-0	3.46.1-7+deb13u2	amd64	sqlite3	3.46.1-7+deb13u2
+ii 	libssl3t64	3.5.7-1~deb13u3	amd64	openssl	3.5.7-1~deb13u3
+ii 	libstdc++6	14.2.0-19	amd64	gcc-14	14.2.0-19
+ii 	libsystemd0	257.13-1~deb13u1	amd64	systemd	257.13-1~deb13u1
+ii 	libtinfo6	6.5+20250216-2	amd64	ncurses	6.5+20250216-2
+ii 	libudev1	257.13-1~deb13u1	amd64	systemd	257.13-1~deb13u1
+ii 	libuuid1	2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	libxxhash0	0.8.3-2	amd64	xxhash	0.8.3-2
+ii 	libzstd1	1.5.7+dfsg-1	amd64	libzstd	1.5.7+dfsg-1
+ii 	login	1:4.16.0-2+really2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	login.defs	1:4.17.4-2	all	shadow	1:4.17.4-2
+ii 	mawk	1.3.4.20250131-1	amd64	mawk	1.3.4.20250131-1
+ii 	mount	2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	ncurses-base	6.5+20250216-2	all	ncurses	6.5+20250216-2
+ii 	ncurses-bin	6.5+20250216-2	amd64	ncurses	6.5+20250216-2
+ii 	openssl-provider-legacy	3.5.7-1~deb13u3	amd64	openssl	3.5.7-1~deb13u3
+ii 	passwd	1:4.17.4-2	amd64	shadow	1:4.17.4-2
+ii 	perl-base	5.40.1-6+deb13u1	amd64	perl	5.40.1-6+deb13u1
+ii 	sed	4.9-2+deb13u1	amd64	sed	4.9-2+deb13u1
+ii 	sqv	1.3.0-3+b2	amd64	rust-sequoia-sqv	1.3.0-3
+ii 	sysvinit-utils	3.14-4	amd64	sysvinit	3.14-4
+ii 	tar	1.35+dfsg-3.1	amd64	tar	1.35+dfsg-3.1
+ii 	tzdata	2026c-0+deb13u1	all	tzdata	2026c-0+deb13u1
+ii 	util-linux	2.41.5-0+deb13u1	amd64	util-linux	2.41.5-0+deb13u1
+ii 	zlib1g	1:1.3.dfsg+really1.3.1-1+b1	amd64	zlib	1:1.3.dfsg+really1.3.1-1
+===END===

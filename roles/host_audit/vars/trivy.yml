@@ -1,0 +1,24 @@
+---
+# Host Audit — Package Vulnerability: pinned Trivy release (ADR-0009, #123).
+# Internal constant, not a user override: the runner only executes a Trivy whose tarball matches the
+# SHA256 below (same pattern as restic, BAK-075). Never take upstream checksums.txt as the reference.
+#
+# Updating (a person reviews every bump):
+#   1. Pick a release after the 2026-03 supply-chain incident (GHSA-69fq-xp46-6x23; never v0.69.4).
+#   2. Download both tarballs and their .sigstore.json bundles, then verify each with
+#      cosign verify-blob --bundle <tarball>.sigstore.json \
+#        --certificate-identity-regexp '^https://github.com/aquasecurity/trivy/.github/workflows/' \
+#        --certificate-oidc-issuer https://token.actions.githubusercontent.com <tarball>
+#   3. sha256sum the tarballs yourself and put the values here.
+# v0.75.0: both tarballs verified with cosign v2.6.1 (Verified OK) on 2026-10-08.
+host_audit_trivy_version: "0.75.0"
+
+host_audit_trivy_checksums:
+  "0.75.0":
+    64bit: "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f"
+    ARM64: "a1ee9f6ffb7d112b64ff726a2a0717c21175c1114361391f4a132956751a13b3"
+
+# runner `uname -m` → Trivy release asset suffix
+host_audit_trivy_arch:
+  x86_64: 64bit
+  aarch64: ARM64

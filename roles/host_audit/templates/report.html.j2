@@ -36,6 +36,11 @@
   .sign { width:100%; border-collapse:collapse; margin-top:4mm; }
   .sign td, .sign th { height:16mm; border:1px solid var(--ink); }
   .sign th { height:auto; width:18%; }
+  h3 { font-size:10.5pt; margin:4mm 0 1.5mm; }
+  .pv-top { display:grid; grid-template-columns: 1fr 62mm; gap:4mm; align-items:start; margin:2mm 0; }
+  .pv-bars { width:100%; height:auto; font-size:7px; } .pv-l, .pv-n { fill:var(--ink); }
+  .sev-CRITICAL { fill:#b42318; } .sev-HIGH { fill:#d9480f; } .sev-MEDIUM { fill:#b08800; } .sev-LOW { fill:#5b6470; } .sev-UNKNOWN { fill:#9aa0a6; }
+  .sevt-CRITICAL { color:#b42318; } .sevt-HIGH { color:#d9480f; }
 </style>
 </head>
 <body>
@@ -52,6 +57,9 @@
     <div>점검 계정</div><div>{{ m.cover.accounts | e }}</div>
     <div>원본 보관</div><div>{{ m.cover.archive | e }}</div>
 {% include 'sections/asset_inventory_cover.html.j2' %}
+{%- if m.cover.vuln_db %}
+    <div>취약점 DB</div><div>{{ m.cover.vuln_db | e }}</div>
+{%- endif %}
   </div>
 
   <h2>1. 요약</h2>
@@ -76,6 +84,8 @@
 {% endif %}
 
 {% include 'sections/asset_inventory.html.j2' %}
+
+{% include 'sections/package_vulnerability.html.j2' %}
 
 {% include 'sections/appendix.html.j2' %}
 

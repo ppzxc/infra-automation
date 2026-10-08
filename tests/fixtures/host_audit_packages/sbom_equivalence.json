@@ -1,0 +1,63 @@
+{
+  "collected_at": "2026-10-08T00:00:00Z",
+  "db_updated_at": "2026-10-07T07:38:55.515026687Z",
+  "hosts": {
+    "centos6": {
+      "image": "centos:6",
+      "os": {
+        "EOSL": true,
+        "Family": "centos",
+        "Name": "6.10"
+      },
+      "pairs": 1704,
+      "sbom_sha256": "c54a0d3fd5697f2292244aaaa909d7081199369adfccea16883c3a7c90838a46"
+    },
+    "centos7": {
+      "image": "centos:7",
+      "os": {
+        "EOSL": true,
+        "Family": "centos",
+        "Name": "7.9.2009"
+      },
+      "pairs": 1661,
+      "sbom_sha256": "6c9a35213b364781720ed65bb219799287945b6b08087caff87023c5ccec2016"
+    },
+    "debian13": {
+      "image": "debian:13",
+      "os": {
+        "Family": "debian",
+        "Name": "13.7"
+      },
+      "pairs": 163,
+      "sbom_sha256": "9f840d8b6728269878b6382e13de0cc11d7b451f6b91498596372035d304c642"
+    },
+    "rocky8": {
+      "image": "rockylinux/rockylinux:8",
+      "os": {
+        "Family": "rocky",
+        "Name": "8.10"
+      },
+      "pairs": 233,
+      "sbom_sha256": "f62d41b6165eb8e70043fd6320f5c6ba4b47f0ee321754962fbe98eae9ac6bb5"
+    },
+    "rocky9": {
+      "image": "rockylinux/rockylinux:9",
+      "os": {
+        "Family": "rocky",
+        "Name": "9.8"
+      },
+      "pairs": 176,
+      "sbom_sha256": "a13b2cb6b63d5e46a6c685623e2af5841e799b06d87f17ce8158ec2e3f723728"
+    },
+    "ubuntu2204": {
+      "image": "ubuntu:22.04",
+      "os": {
+        "Family": "ubuntu",
+        "Name": "22.04"
+      },
+      "pairs": 31,
+      "sbom_sha256": "9dc2f25acbb9f7cde66fe8b5a006b4602ca367c600deabc2749f850fb3d3e822"
+    }
+  },
+  "trivy_version": "0.75.0"
+}

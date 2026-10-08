@@ -38,3 +38,7 @@
     mode: '0600'
   delegate_to: localhost
   become: false
+
+- name: Collect the package list for Package Vulnerability (read-only)
+  ansible.builtin.include_tasks: packages.yml
+  when: host_audit_packages_enabled | bool

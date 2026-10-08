@@ -48,6 +48,7 @@ METHOD = ('러너에서 관리 계정으로 SSH 접속해 읽기 전용 명령(a
           '호스트에 프로그램을 설치하거나 설정을 바꾸지 않음.')
 CONTENTS = ['Asset Inventory — 식별, OS·EOL, 하드웨어, 운영, 패키지, listening 포트, 계정·특수권한, Host Agents']
 SCOPE_GROUPS = 'servers · loadbalancers · overseer'
+PACKAGE_CONTENTS = 'Package Vulnerability — 설치 패키지의 CVE·벤더 권고 해당 여부 (Trivy, SBOM 입력)'
 
 
 def _first_line(text, limit=200):
@@ -225,6 +226,11 @@ def host_audit_report_model(records, meta):
     ]
     asset_inventory = inventory_section([record for record, _ in rows], dict(meta, timezone=tz_name))
     unavailable += asset_inventory['unavailable']
+    # Package Vulnerability section model (filter_plugins/host_audit_packages.py), when the run judged packages.
+    package_vulnerability = meta.get('package_vulnerability')
+    package_vulnerability = package_vulnerability if isinstance(package_vulnerability, dict) and package_vulnerability else None
+    if package_vulnerability:
+        unavailable += package_vulnerability.get('unavailable') or []
     accounts = sorted({(r.get('identity') or {}).get('account') for r, _ in rows} - {None, ''})
     run_kind = meta.get('run_kind') or 'on_demand'
     target_hosts = meta.get('target_hosts') or ''
@@ -242,10 +248,11 @@ def host_audit_report_model(records, meta):
             'scope': scope,
             'out_of_scope': OUT_OF_SCOPE,
             'method': METHOD,
-            'contents': CONTENTS,
+            'contents': CONTENTS + ([PACKAGE_CONTENTS] if package_vulnerability else []),
             'baseline': '없음 — Audit Baseline 비교는 아직 적용되지 않음',
             'accounts': ', '.join(accounts) or '-',
             'archive': meta.get('archive', ''),
+            'vuln_db': (package_vulnerability or {}).get('db_label', ''),
         },
         'summary': {
             'hosts_total': len(rows),
@@ -256,6 +263,7 @@ def host_audit_report_model(records, meta):
         'inventory': [row for _, row in rows],
         'hosts': [row['host'] for _, row in rows],
         'asset_inventory': asset_inventory,
+        'package_vulnerability': package_vulnerability,
     }
 
 

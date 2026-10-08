@@ -1,0 +1,1662 @@
+# trivy image centos:7 (Trivy 0.75.0, DB UpdatedAt 2026-10-07T07:38:55.515026687Z): VulnerabilityID PkgName InstalledVersion Status FixedVersion
+CVE-2005-2541	tar	2:1.26-35.el7	will_not_fix	
+CVE-2007-4559	python	2.7.5-89.el7	end_of_life	
+CVE-2007-4559	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2009-5155	glibc	2.17-317.el7	affected	
+CVE-2009-5155	glibc-common	2.17-317.el7	affected	
+CVE-2012-6702	expat	2.1.0-12.el7	will_not_fix	
+CVE-2012-6711	bash	4.2.46-34.el7	will_not_fix	
+CVE-2013-0340	expat	2.1.0-12.el7	will_not_fix	
+CVE-2013-1664	python	2.7.5-89.el7	will_not_fix	
+CVE-2013-1664	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2013-1665	python	2.7.5-89.el7	will_not_fix	
+CVE-2013-1665	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2013-4392	systemd	219-78.el7	will_not_fix	
+CVE-2013-4392	systemd-libs	219-78.el7	will_not_fix	
+CVE-2013-5661	bind-license	32:9.11.4-26.P2.el7	will_not_fix	
+CVE-2013-7040	python	2.7.5-89.el7	will_not_fix	
+CVE-2013-7040	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2014-3477	dbus	1:1.10.24-15.el7	will_not_fix	
+CVE-2014-3477	dbus-libs	1:1.10.24-15.el7	will_not_fix	
+CVE-2014-3532	dbus	1:1.10.24-15.el7	will_not_fix	
+CVE-2014-3532	dbus-libs	1:1.10.24-15.el7	will_not_fix	
+CVE-2014-3533	dbus	1:1.10.24-15.el7	will_not_fix	
+CVE-2014-3533	dbus-libs	1:1.10.24-15.el7	will_not_fix	
+CVE-2014-3564	gpgme	1.3.2-5.el7	will_not_fix	
+CVE-2014-3591	gnupg2	2.0.22-5.el7_5	will_not_fix	
+CVE-2014-3591	libgcrypt	1.5.3-14.el7	will_not_fix	
+CVE-2014-3636	dbus	1:1.10.24-15.el7	under_investigation	
+CVE-2014-3636	dbus-libs	1:1.10.24-15.el7	under_investigation	
+CVE-2014-3637	dbus	1:1.10.24-15.el7	affected	
+CVE-2014-3637	dbus-libs	1:1.10.24-15.el7	affected	
+CVE-2014-3638	dbus	1:1.10.24-15.el7	affected	
+CVE-2014-3638	dbus-libs	1:1.10.24-15.el7	affected	
+CVE-2014-3639	dbus	1:1.10.24-15.el7	affected	
+CVE-2014-3639	dbus-libs	1:1.10.24-15.el7	affected	
+CVE-2014-4043	glibc	2.17-317.el7	will_not_fix	
+CVE-2014-4043	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2014-4617	gnupg2	2.0.22-5.el7_5	will_not_fix	
+CVE-2014-5044	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2014-5044	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2014-5270	libgcrypt	1.5.3-14.el7	will_not_fix	
+CVE-2014-5351	krb5-libs	1.15.1-50.el7	will_not_fix	
+CVE-2014-5461	lua	5.1.4-15.el7	will_not_fix	
+CVE-2014-9114	libblkid	2.23.2-65.el7	will_not_fix	
+CVE-2014-9114	libmount	2.23.2-65.el7	will_not_fix	
+CVE-2014-9114	libuuid	2.23.2-65.el7	will_not_fix	
+CVE-2014-9114	util-linux	2.23.2-65.el7	will_not_fix	
+CVE-2014-9471	coreutils	8.22-24.el7	will_not_fix	
+CVE-2014-9620	file-libs	5.11-37.el7	will_not_fix	
+CVE-2014-9939	binutils	2.27-44.base.el7	affected	
+CVE-2015-0245	dbus	1:1.10.24-15.el7	will_not_fix	
+CVE-2015-0245	dbus-libs	1:1.10.24-15.el7	will_not_fix	
+CVE-2015-0247	libcom_err	1.42.9-19.el7	will_not_fix	
+CVE-2015-0837	gnupg2	2.0.22-5.el7_5	will_not_fix	
+CVE-2015-0837	libgcrypt	1.5.3-14.el7	will_not_fix	
+CVE-2015-1197	cpio	2.11-28.el7	will_not_fix	
+CVE-2015-1572	libcom_err	1.42.9-19.el7	will_not_fix	
+CVE-2015-1606	gnupg2	2.0.22-5.el7_5	will_not_fix	
+CVE-2015-1607	gnupg2	2.0.22-5.el7_5	will_not_fix	
+CVE-2015-2059	libidn	1.28-4.el7	will_not_fix	
+CVE-2015-2327	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2015-2328	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2015-2613	nss-softokn	3.53.1-6.el7_9	will_not_fix	
+CVE-2015-2613	nss-softokn-freebl	3.53.1-6.el7_9	will_not_fix	
+CVE-2015-2695	krb5-libs	1.15.1-50.el7	will_not_fix	
+CVE-2015-2696	krb5-libs	1.15.1-50.el7	will_not_fix	
+CVE-2015-2697	krb5-libs	1.15.1-50.el7	will_not_fix	
+CVE-2015-2808	nss	3.53.1-3.el7_9	will_not_fix	
+CVE-2015-2808	nss-sysinit	3.53.1-3.el7_9	will_not_fix	
+CVE-2015-2808	nss-tools	3.53.1-3.el7_9	will_not_fix	
+CVE-2015-2808	openssl-libs	1:1.0.2k-19.el7	will_not_fix	
+CVE-2015-3153	curl	7.29.0-59.el7	will_not_fix	
+CVE-2015-3153	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2015-3217	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2015-4041	coreutils	8.22-24.el7	affected	
+CVE-2015-4042	coreutils	8.22-24.el7	affected	
+CVE-2015-5073	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2015-5186	audit-libs	2.8.5-4.el7	will_not_fix	
+CVE-2015-5218	libblkid	2.23.2-65.el7	will_not_fix	
+CVE-2015-5218	libmount	2.23.2-65.el7	will_not_fix	
+CVE-2015-5218	libuuid	2.23.2-65.el7	will_not_fix	
+CVE-2015-5218	util-linux	2.23.2-65.el7	will_not_fix	
+CVE-2015-5276	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2015-5276	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2015-7036	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2015-8382	pcre	8.32-17.el7	will_not_fix	
+CVE-2015-8386	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2015-8388	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2015-8391	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2015-8538	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2015-8865	file-libs	5.11-37.el7	will_not_fix	
+CVE-2015-8948	libidn	1.28-4.el7	will_not_fix	
+CVE-2015-8982	glibc	2.17-317.el7	affected	
+CVE-2015-8982	glibc-common	2.17-317.el7	affected	
+CVE-2015-8983	glibc	2.17-317.el7	affected	
+CVE-2015-8983	glibc-common	2.17-317.el7	affected	
+CVE-2015-8984	glibc	2.17-317.el7	affected	
+CVE-2015-8984	glibc-common	2.17-317.el7	affected	
+CVE-2015-8985	glibc	2.17-317.el7	affected	
+CVE-2015-8985	glibc-common	2.17-317.el7	affected	
+CVE-2016-0755	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-0755	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-10228	glibc	2.17-317.el7	will_not_fix	
+CVE-2016-10228	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2016-10254	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2016-10254	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2016-10254	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2016-10255	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2016-10255	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2016-10255	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2016-1234	glibc	2.17-317.el7	will_not_fix	
+CVE-2016-1234	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2016-1938	nss-softokn	3.53.1-6.el7_9	will_not_fix	
+CVE-2016-1938	nss-softokn-freebl	3.53.1-6.el7_9	will_not_fix	
+CVE-2016-1951	nspr	4.25.0-2.el7_9	will_not_fix	
+CVE-2016-2037	cpio	2.11-28.el7	will_not_fix	
+CVE-2016-2183	nss	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-2183	nss-sysinit	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-2183	nss-tools	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-2226	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-2226	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-2226	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-2779	libblkid	2.23.2-65.el7	will_not_fix	
+CVE-2016-2779	libmount	2.23.2-65.el7	will_not_fix	
+CVE-2016-2779	libuuid	2.23.2-65.el7	will_not_fix	
+CVE-2016-2779	util-linux	2.23.2-65.el7	will_not_fix	
+CVE-2016-2781	coreutils	8.22-24.el7	will_not_fix	
+CVE-2016-3189	bzip2-libs	1.0.6-13.el7	will_not_fix	
+CVE-2016-3709	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2016-3709	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2016-4008	libtasn1	4.10-1.el7	will_not_fix	
+CVE-2016-4429	glibc	2.17-317.el7	will_not_fix	
+CVE-2016-4429	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2016-4472	expat	2.1.0-12.el7	will_not_fix	
+CVE-2016-4483	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2016-4483	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2016-4484	dracut	033-572.el7	will_not_fix	
+CVE-2016-4487	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-4487	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-4487	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-4488	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-4488	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-4488	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-4489	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-4489	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-4489	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-4490	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-4490	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-4490	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-4491	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-4491	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-4491	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-4492	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-4492	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-4492	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-4493	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2016-4493	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2016-4493	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2016-4658	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.6
+CVE-2016-4658	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.6
+CVE-2016-4984	openldap	2.4.44-22.el7	will_not_fix	
+CVE-2016-5300	expat	2.1.0-12.el7	will_not_fix	
+CVE-2016-6153	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2016-6170	bind-license	32:9.11.4-26.P2.el7	will_not_fix	
+CVE-2016-6261	libidn	1.28-4.el7	will_not_fix	
+CVE-2016-6262	libidn	1.28-4.el7	will_not_fix	
+CVE-2016-6263	libidn	1.28-4.el7	will_not_fix	
+CVE-2016-6318	cracklib	2.9.0-11.el7	will_not_fix	
+CVE-2016-6318	cracklib-dicts	2.9.0-11.el7	will_not_fix	
+CVE-2016-6321	tar	2:1.26-35.el7	will_not_fix	
+CVE-2016-6349	systemd	219-78.el7	will_not_fix	
+CVE-2016-6349	systemd-libs	219-78.el7	will_not_fix	
+CVE-2016-7091	readline	6.2-11.el7	will_not_fix	
+CVE-2016-8615	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8615	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8616	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8616	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8617	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8617	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8618	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8618	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8619	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8619	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8621	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8621	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8622	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8622	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8623	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8623	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8624	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8624	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8625	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-8625	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-9063	expat	2.1.0-12.el7	will_not_fix	
+CVE-2016-9074	nss	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-9074	nss-sysinit	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-9074	nss-tools	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-9318	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2016-9318	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2016-9574	nss	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-9574	nss-sysinit	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-9574	nss-tools	3.53.1-3.el7_9	will_not_fix	
+CVE-2016-9586	curl	7.29.0-59.el7	will_not_fix	
+CVE-2016-9586	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2016-9840	zlib	1.2.7-18.el7	fixed	1.2.7-21.el7_9.1
+CVE-2017-0663	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-0663	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-1000100	curl	7.29.0-59.el7	will_not_fix	
+CVE-2017-1000100	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2017-1000158	python	2.7.5-89.el7	will_not_fix	
+CVE-2017-1000158	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2017-1000254	curl	7.29.0-59.el7	will_not_fix	
+CVE-2017-1000254	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2017-1000382	vim-minimal	2:7.4.629-7.el7	will_not_fix	
+CVE-2017-10140	libdb	5.3.21-25.el7	will_not_fix	
+CVE-2017-10140	libdb-utils	5.3.21-25.el7	will_not_fix	
+CVE-2017-10684	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-10684	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-10684	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-10685	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-10685	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-10685	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-10790	libtasn1	4.10-1.el7	will_not_fix	
+CVE-2017-10989	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2017-11109	vim-minimal	2:7.4.629-7.el7	will_not_fix	
+CVE-2017-11112	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-11112	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-11112	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-11113	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-11113	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-11113	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-11164	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2017-11164	pcre	8.32-17.el7	will_not_fix	
+CVE-2017-11462	krb5-libs	1.15.1-50.el7	will_not_fix	
+CVE-2017-12449	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12451	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12452	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12453	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12454	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12455	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12456	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12457	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12458	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12799	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-12967	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-13685	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2017-13710	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-13716	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-13728	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13728	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13728	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13729	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13729	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13729	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13730	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13730	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13730	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13731	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13731	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13731	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13732	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13732	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13732	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13733	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13733	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13733	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13734	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13734	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13734	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-13757	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14062	libidn	1.28-4.el7	will_not_fix	
+CVE-2017-14128	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14129	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14130	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14529	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14729	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14745	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14930	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14932	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14933	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14934	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14938	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14939	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14940	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-14974	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15020	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15021	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15022	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15023	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15024	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15025	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15088	krb5-libs	1.15.1-50.el7	will_not_fix	
+CVE-2017-15225	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15286	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2017-15671	glibc	2.17-317.el7	will_not_fix	
+CVE-2017-15671	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2017-15938	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15939	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-15996	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16826	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16827	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16828	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16829	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16830	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16831	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16832	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-16879	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-16879	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-16879	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2017-16931	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-16931	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-16932	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-16932	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-17080	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-17087	vim-minimal	2:7.4.629-7.el7	will_not_fix	
+CVE-2017-17121	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-17122	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-17123	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-17124	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-17125	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-17126	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-18018	coreutils	8.22-24.el7	will_not_fix	
+CVE-2017-18078	systemd	219-78.el7	will_not_fix	
+CVE-2017-18078	systemd-libs	219-78.el7	will_not_fix	
+CVE-2017-5953	vim-minimal	2:7.4.629-7.el7	will_not_fix	
+CVE-2017-5969	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-5969	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-6004	pcre	8.32-17.el7	will_not_fix	
+CVE-2017-6350	vim-minimal	2:7.4.629-7.el7	will_not_fix	
+CVE-2017-6891	libtasn1	4.10-1.el7	will_not_fix	
+CVE-2017-6965	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-6966	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-6969	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7000	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2017-7186	pcre	8.32-17.el7	will_not_fix	
+CVE-2017-7209	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7210	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7223	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7224	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7225	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7226	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7227	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7244	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2017-7244	pcre	8.32-17.el7	will_not_fix	
+CVE-2017-7245	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2017-7245	pcre	8.32-17.el7	will_not_fix	
+CVE-2017-7246	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2017-7246	pcre	8.32-17.el7	will_not_fix	
+CVE-2017-7299	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7300	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7301	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7302	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7303	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7304	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7375	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-7375	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-7407	curl	7.29.0-59.el7	will_not_fix	
+CVE-2017-7407	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2017-7500	rpm	4.11.3-45.el7	will_not_fix	
+CVE-2017-7500	rpm-build-libs	4.11.3-45.el7	will_not_fix	
+CVE-2017-7500	rpm-libs	4.11.3-45.el7	will_not_fix	
+CVE-2017-7500	rpm-python	4.11.3-45.el7	will_not_fix	
+CVE-2017-7501	rpm	4.11.3-45.el7	will_not_fix	
+CVE-2017-7501	rpm-build-libs	4.11.3-45.el7	will_not_fix	
+CVE-2017-7501	rpm-libs	4.11.3-45.el7	will_not_fix	
+CVE-2017-7501	rpm-python	4.11.3-45.el7	will_not_fix	
+CVE-2017-7526	libgcrypt	1.5.3-14.el7	will_not_fix	
+CVE-2017-7607	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2017-7607	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2017-7607	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2017-7608	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2017-7608	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2017-7608	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2017-7609	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2017-7609	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2017-7609	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2017-7610	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2017-7610	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2017-7610	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2017-7611	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2017-7611	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2017-7611	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2017-7612	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2017-7612	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2017-7612	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2017-7613	elfutils-default-yama-scope	0.176-5.el7	will_not_fix	
+CVE-2017-7613	elfutils-libelf	0.176-5.el7	will_not_fix	
+CVE-2017-7613	elfutils-libs	0.176-5.el7	will_not_fix	
+CVE-2017-7614	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-7781	nss-softokn	3.53.1-6.el7_9	will_not_fix	
+CVE-2017-7781	nss-softokn-freebl	3.53.1-6.el7_9	will_not_fix	
+CVE-2017-8392	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8393	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8394	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8395	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8396	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8397	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8398	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8421	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-8804	glibc	2.17-317.el7	will_not_fix	
+CVE-2017-8804	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2017-8817	curl	7.29.0-59.el7	will_not_fix	
+CVE-2017-8817	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2017-8872	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-8872	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9038	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9039	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9040	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9041	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9042	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9043	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9044	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9047	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9047	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9048	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9048	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9049	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9049	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9050	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9050	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2017-9233	expat	2.1.0-12.el7	will_not_fix	
+CVE-2017-9742	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9743	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9744	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9745	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9746	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9747	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9748	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9749	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9750	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9751	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9752	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9753	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9754	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9755	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9756	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9954	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2017-9955	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-1000030	python	2.7.5-89.el7	will_not_fix	
+CVE-2018-1000030	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2018-1000654	libtasn1	4.10-1.el7	will_not_fix	
+CVE-2018-1121	procps-ng	3.3.10-28.el7	will_not_fix	
+CVE-2018-1123	procps-ng	3.3.10-28.el7	will_not_fix	
+CVE-2018-1125	procps-ng	3.3.10-28.el7	will_not_fix	
+CVE-2018-12698	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-12699	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-12934	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-16429	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2018-17360	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-17794	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-17985	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-18483	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-18484	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-18508	nss	3.53.1-3.el7_9	will_not_fix	
+CVE-2018-18508	nss-sysinit	3.53.1-3.el7_9	will_not_fix	
+CVE-2018-18508	nss-tools	3.53.1-3.el7_9	will_not_fix	
+CVE-2018-18605	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-18606	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-18607	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-18700	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-18701	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-19211	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2018-19211	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2018-19211	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2018-19217	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2018-19217	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2018-19217	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2018-19932	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-20002	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-20482	tar	2:1.26-35.el7	will_not_fix	
+CVE-2018-20483	curl	7.29.0-59.el7	will_not_fix	
+CVE-2018-20483	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2018-20657	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-20657	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2018-20657	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2018-20673	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-20673	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2018-20673	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2018-25032	zlib	1.2.7-18.el7	fixed	1.2.7-20.el7_9
+CVE-2018-6003	libtasn1	4.10-1.el7	will_not_fix	
+CVE-2018-6323	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-6759	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-6872	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2018-6954	systemd	219-78.el7	will_not_fix	
+CVE-2018-6954	systemd-libs	219-78.el7	will_not_fix	
+CVE-2018-8740	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2018-9234	gnupg2	2.0.22-5.el7_5	affected	
+CVE-2019-1010204	binutils	2.27-44.base.el7	affected	
+CVE-2019-12900	bzip2-libs	1.0.6-13.el7	end_of_life	
+CVE-2019-12904	libgcrypt	1.5.3-14.el7	will_not_fix	
+CVE-2019-12972	binutils	2.27-44.base.el7	affected	
+CVE-2019-13012	glib2	2.56.1-7.el7	affected	
+CVE-2019-13050	gnupg2	2.0.22-5.el7_5	will_not_fix	
+CVE-2019-13057	openldap	2.4.44-22.el7	will_not_fix	
+CVE-2019-13115	libssh2	1.8.0-4.el7	will_not_fix	
+CVE-2019-13565	openldap	2.4.44-22.el7	will_not_fix	
+CVE-2019-13751	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-13752	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-13753	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-14250	binutils	2.27-44.base.el7	affected	
+CVE-2019-14250	libgcc	4.8.5-44.el7	affected	
+CVE-2019-14250	libstdc++	4.8.5-44.el7	affected	
+CVE-2019-1547	openssl-libs	1:1.0.2k-19.el7	will_not_fix	
+CVE-2019-1551	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2019-1563	openssl-libs	1:1.0.2k-19.el7	will_not_fix	
+CVE-2019-16276	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2019-16276	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2019-17450	binutils	2.27-44.base.el7	affected	
+CVE-2019-17451	binutils	2.27-44.base.el7	affected	
+CVE-2019-17543	lz4	1.8.3-1.el7	will_not_fix	
+CVE-2019-17594	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2019-17594	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2019-17594	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2019-17595	ncurses	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2019-17595	ncurses-base	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2019-17595	ncurses-libs	5.9-14.20130511.el7_4	will_not_fix	
+CVE-2019-18276	bash	4.2.46-34.el7	affected	
+CVE-2019-18348	python	2.7.5-89.el7	will_not_fix	
+CVE-2019-18348	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2019-19244	sqlite	3.7.17-8.el7_7.1	affected	
+CVE-2019-19603	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-19645	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-19880	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-19906	cyrus-sasl-lib	2.1.26-23.el7	will_not_fix	
+CVE-2019-19924	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-20218	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-20807	vim-minimal	2:7.4.629-7.el7	will_not_fix	
+CVE-2019-20907	python	2.7.5-89.el7	fixed	2.7.5-90.el7
+CVE-2019-20907	python-libs	2.7.5-89.el7	fixed	2.7.5-90.el7
+CVE-2019-25013	glibc	2.17-317.el7	fixed	2.17-322.el7_9
+CVE-2019-25013	glibc-common	2.17-317.el7	fixed	2.17-322.el7_9
+CVE-2019-2708	libdb	5.3.21-25.el7	affected	
+CVE-2019-2708	libdb-utils	5.3.21-25.el7	affected	
+CVE-2019-3842	systemd	219-78.el7	will_not_fix	
+CVE-2019-3842	systemd-libs	219-78.el7	will_not_fix	
+CVE-2019-3859	libssh2	1.8.0-4.el7	will_not_fix	
+CVE-2019-3860	libssh2	1.8.0-4.el7	will_not_fix	
+CVE-2019-5827	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-8457	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2019-9074	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2019-9075	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2019-9077	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2019-9169	glibc	2.17-317.el7	will_not_fix	
+CVE-2019-9169	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2019-9674	python	2.7.5-89.el7	will_not_fix	
+CVE-2019-9674	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2019-9923	tar	2:1.26-35.el7	affected	
+CVE-2020-10029	glibc	2.17-317.el7	fixed	2.17-322.el7_9
+CVE-2020-10029	glibc-common	2.17-317.el7	fixed	2.17-322.el7_9
+CVE-2020-10735	python	2.7.5-89.el7	end_of_life	
+CVE-2020-10735	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2020-11023	libgcc	4.8.5-44.el7	fixed	4.8.5-45.el7_9
+CVE-2020-11023	libstdc++	4.8.5-44.el7	fixed	4.8.5-45.el7_9
+CVE-2020-12413	nss	3.53.1-3.el7_9	will_not_fix	
+CVE-2020-12413	nss-sysinit	3.53.1-3.el7_9	will_not_fix	
+CVE-2020-12413	nss-tools	3.53.1-3.el7_9	will_not_fix	
+CVE-2020-12762	json-c	0.11-4.el7_0	will_not_fix	
+CVE-2020-13435	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2020-13529	systemd	219-78.el7	end_of_life	
+CVE-2020-13529	systemd-libs	219-78.el7	end_of_life	
+CVE-2020-13631	sqlite	3.7.17-8.el7_7.1	will_not_fix	
+CVE-2020-13776	systemd	219-78.el7	will_not_fix	
+CVE-2020-13776	systemd-libs	219-78.el7	will_not_fix	
+CVE-2020-14155	pcre	8.32-17.el7	affected	
+CVE-2020-15719	openldap	2.4.44-22.el7	affected	
+CVE-2020-16590	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-16591	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-16592	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-16593	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-16599	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-16845	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2020-16845	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2020-17049	krb5-libs	1.15.1-50.el7	will_not_fix	
+CVE-2020-1752	glibc	2.17-317.el7	will_not_fix	
+CVE-2020-1752	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2020-19185	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19185	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19185	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19186	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19186	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19186	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19187	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19187	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19187	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19188	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19188	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19188	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19189	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19189	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19189	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19190	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19190	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-19190	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2020-1968	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2020-1971	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-21.el7_9
+CVE-2020-21583	libblkid	2.23.2-65.el7	end_of_life	
+CVE-2020-21583	libmount	2.23.2-65.el7	end_of_life	
+CVE-2020-21583	libuuid	2.23.2-65.el7	end_of_life	
+CVE-2020-21583	util-linux	2.23.2-65.el7	end_of_life	
+CVE-2020-22218	libssh2	1.8.0-4.el7	fixed	1.8.0-4.el7_9.1
+CVE-2020-24553	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2020-24553	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2020-24736	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2020-24977	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2020-24977	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2020-25648	nss	3.53.1-3.el7_9	fixed	3.53.1-7.el7_9
+CVE-2020-25648	nss-sysinit	3.53.1-3.el7_9	fixed	3.53.1-7.el7_9
+CVE-2020-25648	nss-tools	3.53.1-3.el7_9	fixed	3.53.1-7.el7_9
+CVE-2020-25692	openldap	2.4.44-22.el7	fixed	2.4.44-23.el7_9
+CVE-2020-25709	openldap	2.4.44-22.el7	fixed	2.4.44-25.el7_9
+CVE-2020-25710	openldap	2.4.44-22.el7	fixed	2.4.44-25.el7_9
+CVE-2020-26116	python	2.7.5-89.el7	fixed	2.7.5-92.el7_9
+CVE-2020-26116	python-libs	2.7.5-89.el7	fixed	2.7.5-92.el7_9
+CVE-2020-26137	python	2.7.5-89.el7	fixed	2.7.5-92.el7_9
+CVE-2020-26137	python-libs	2.7.5-89.el7	fixed	2.7.5-92.el7_9
+CVE-2020-27618	glibc	2.17-317.el7	end_of_life	
+CVE-2020-27618	glibc-common	2.17-317.el7	end_of_life	
+CVE-2020-27619	python	2.7.5-89.el7	end_of_life	
+CVE-2020-27619	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2020-28196	krb5-libs	1.15.1-50.el7	end_of_life	
+CVE-2020-28362	libgcc	4.8.5-44.el7	end_of_life	
+CVE-2020-28362	libstdc++	4.8.5-44.el7	end_of_life	
+CVE-2020-28366	libgcc	4.8.5-44.el7	end_of_life	
+CVE-2020-28366	libstdc++	4.8.5-44.el7	end_of_life	
+CVE-2020-28367	libgcc	4.8.5-44.el7	end_of_life	
+CVE-2020-28367	libstdc++	4.8.5-44.el7	end_of_life	
+CVE-2020-29361	p11-kit	0.23.5-3.el7	will_not_fix	
+CVE-2020-29361	p11-kit-trust	0.23.5-3.el7	will_not_fix	
+CVE-2020-29362	p11-kit	0.23.5-3.el7	will_not_fix	
+CVE-2020-29362	p11-kit-trust	0.23.5-3.el7	will_not_fix	
+CVE-2020-29573	glibc	2.17-317.el7	fixed	2.17-322.el7_9
+CVE-2020-29573	glibc-common	2.17-317.el7	fixed	2.17-322.el7_9
+CVE-2020-35448	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-35493	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-35494	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-35495	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-35496	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-35507	binutils	2.27-44.base.el7	end_of_life	
+CVE-2020-35512	dbus	1:1.10.24-15.el7	end_of_life	
+CVE-2020-35512	dbus-libs	1:1.10.24-15.el7	end_of_life	
+CVE-2020-35525	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2020-35527	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2020-36221	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36222	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36223	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36224	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36225	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36226	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36227	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36228	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36229	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-36230	openldap	2.4.44-22.el7	end_of_life	
+CVE-2020-8177	curl	7.29.0-59.el7	fixed	7.29.0-59.el7_9.1
+CVE-2020-8177	libcurl	7.29.0-59.el7	fixed	7.29.0-59.el7_9.1
+CVE-2020-8231	curl	7.29.0-59.el7	affected	
+CVE-2020-8231	libcurl	7.29.0-59.el7	affected	
+CVE-2020-8284	curl	7.29.0-59.el7	end_of_life	
+CVE-2020-8284	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2020-8285	curl	7.29.0-59.el7	end_of_life	
+CVE-2020-8285	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2020-8492	python	2.7.5-89.el7	will_not_fix	
+CVE-2020-8492	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2020-8622	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.2
+CVE-2020-8623	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.2
+CVE-2020-8624	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.2
+CVE-2020-8625	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.4
+CVE-2020-8991	device-mapper	7:1.02.170-6.el7	affected	
+CVE-2020-8991	device-mapper-libs	7:1.02.170-6.el7	affected	
+CVE-2021-20193	tar	2:1.26-35.el7	end_of_life	
+CVE-2021-20197	binutils	2.27-44.base.el7	end_of_life	
+CVE-2021-20266	rpm	4.11.3-45.el7	end_of_life	
+CVE-2021-20266	rpm-build-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-20266	rpm-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-20266	rpm-python	4.11.3-45.el7	end_of_life	
+CVE-2021-20271	rpm	4.11.3-45.el7	fixed	4.11.3-48.el7_9
+CVE-2021-20271	rpm-build-libs	4.11.3-45.el7	fixed	4.11.3-48.el7_9
+CVE-2021-20271	rpm-libs	4.11.3-45.el7	fixed	4.11.3-48.el7_9
+CVE-2021-20271	rpm-python	4.11.3-45.el7	fixed	4.11.3-48.el7_9
+CVE-2021-20294	binutils	2.27-44.base.el7	end_of_life	
+CVE-2021-22876	curl	7.29.0-59.el7	end_of_life	
+CVE-2021-22876	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2021-22898	curl	7.29.0-59.el7	end_of_life	
+CVE-2021-22898	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2021-22924	curl	7.29.0-59.el7	end_of_life	
+CVE-2021-22924	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2021-22925	curl	7.29.0-59.el7	end_of_life	
+CVE-2021-22925	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2021-22946	curl	7.29.0-59.el7	affected	
+CVE-2021-22946	libcurl	7.29.0-59.el7	affected	
+CVE-2021-22947	curl	7.29.0-59.el7	end_of_life	
+CVE-2021-22947	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2021-23336	python	2.7.5-89.el7	end_of_life	
+CVE-2021-23336	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2021-23840	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-22.el7_9
+CVE-2021-23841	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-22.el7_9
+CVE-2021-25214	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.7
+CVE-2021-25215	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.5
+CVE-2021-25219	bind-license	32:9.11.4-26.P2.el7	end_of_life	
+CVE-2021-25220	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.13
+CVE-2021-27212	openldap	2.4.44-22.el7	will_not_fix	
+CVE-2021-27218	glib2	2.56.1-7.el7	end_of_life	
+CVE-2021-27219	glib2	2.56.1-7.el7	fixed	2.56.1-9.el7_9
+CVE-2021-27918	libgcc	4.8.5-44.el7	end_of_life	
+CVE-2021-27918	libstdc++	4.8.5-44.el7	end_of_life	
+CVE-2021-28153	glib2	2.56.1-7.el7	end_of_life	
+CVE-2021-3177	python	2.7.5-89.el7	fixed	2.7.5-92.el7_9
+CVE-2021-3177	python-libs	2.7.5-89.el7	fixed	2.7.5-92.el7_9
+CVE-2021-3236	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-33294	elfutils-default-yama-scope	0.176-5.el7	end_of_life	
+CVE-2021-33294	elfutils-libelf	0.176-5.el7	end_of_life	
+CVE-2021-33294	elfutils-libs	0.176-5.el7	end_of_life	
+CVE-2021-33560	libgcrypt	1.5.3-14.el7	end_of_life	
+CVE-2021-33574	glibc	2.17-317.el7	end_of_life	
+CVE-2021-33574	glibc-common	2.17-317.el7	end_of_life	
+CVE-2021-3421	rpm	4.11.3-45.el7	end_of_life	
+CVE-2021-3421	rpm-build-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-3421	rpm-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-3421	rpm-python	4.11.3-45.el7	end_of_life	
+CVE-2021-3516	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3516	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3517	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3517	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3518	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3518	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3520	lz4	1.8.3-1.el7	end_of_life	
+CVE-2021-3521	rpm	4.11.3-45.el7	end_of_life	
+CVE-2021-3521	rpm-build-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-3521	rpm-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-3521	rpm-python	4.11.3-45.el7	end_of_life	
+CVE-2021-3537	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3537	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2021-3541	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2021-3541	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2021-35937	rpm	4.11.3-45.el7	end_of_life	
+CVE-2021-35937	rpm-build-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-35937	rpm-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-35937	rpm-python	4.11.3-45.el7	end_of_life	
+CVE-2021-35938	rpm	4.11.3-45.el7	end_of_life	
+CVE-2021-35938	rpm-build-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-35938	rpm-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-35938	rpm-python	4.11.3-45.el7	end_of_life	
+CVE-2021-35939	rpm	4.11.3-45.el7	end_of_life	
+CVE-2021-35939	rpm-build-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-35939	rpm-libs	4.11.3-45.el7	end_of_life	
+CVE-2021-35939	rpm-python	4.11.3-45.el7	end_of_life	
+CVE-2021-35942	glibc	2.17-317.el7	end_of_life	
+CVE-2021-35942	glibc-common	2.17-317.el7	end_of_life	
+CVE-2021-36084	libsepol	2.5-10.el7	affected	
+CVE-2021-36085	libsepol	2.5-10.el7	affected	
+CVE-2021-36086	libsepol	2.5-10.el7	affected	
+CVE-2021-36087	libsepol	2.5-10.el7	affected	
+CVE-2021-36222	krb5-libs	1.15.1-50.el7	end_of_life	
+CVE-2021-3712	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-23.el7_9
+CVE-2021-37322	binutils	2.27-44.base.el7	end_of_life	
+CVE-2021-3733	python	2.7.5-89.el7	end_of_life	
+CVE-2021-3733	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2021-3737	python	2.7.5-89.el7	end_of_life	
+CVE-2021-3737	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2021-37600	libblkid	2.23.2-65.el7	end_of_life	
+CVE-2021-37600	libmount	2.23.2-65.el7	end_of_life	
+CVE-2021-37600	libuuid	2.23.2-65.el7	end_of_life	
+CVE-2021-37600	util-linux	2.23.2-65.el7	end_of_life	
+CVE-2021-37750	krb5-libs	1.15.1-50.el7	fixed	1.15.1-51.el7_9
+CVE-2021-3778	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-3796	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-3800	glib2	2.56.1-7.el7	end_of_life	
+CVE-2021-38185	cpio	2.11-28.el7	end_of_life	
+CVE-2021-3826	binutils	2.27-44.base.el7	end_of_life	
+CVE-2021-3826	libgcc	4.8.5-44.el7	end_of_life	
+CVE-2021-3826	libstdc++	4.8.5-44.el7	end_of_life	
+CVE-2021-3872	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-3903	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-3927	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-39537	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2021-39537	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2021-39537	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2021-3974	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-3984	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-3997	systemd	219-78.el7	end_of_life	
+CVE-2021-3997	systemd-libs	219-78.el7	end_of_life	
+CVE-2021-3999	glibc	2.17-317.el7	end_of_life	
+CVE-2021-3999	glibc-common	2.17-317.el7	end_of_life	
+CVE-2021-4019	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-40528	libgcrypt	1.5.3-14.el7	end_of_life	
+CVE-2021-4069	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-4166	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-4189	python	2.7.5-89.el7	end_of_life	
+CVE-2021-4189	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2021-4192	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-4193	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2021-42574	binutils	2.27-44.base.el7	fixed	2.27-44.base.el7_9.1
+CVE-2021-42574	libgcc	4.8.5-44.el7	will_not_fix	
+CVE-2021-42574	libstdc++	4.8.5-44.el7	will_not_fix	
+CVE-2021-43519	lua	5.1.4-15.el7	end_of_life	
+CVE-2021-43527	nss	3.53.1-3.el7_9	fixed	3.67.0-4.el7_9
+CVE-2021-43527	nss-sysinit	3.53.1-3.el7_9	fixed	3.67.0-4.el7_9
+CVE-2021-43527	nss-tools	3.53.1-3.el7_9	fixed	3.67.0-4.el7_9
+CVE-2021-43618	gmp	1:6.0.0-15.el7	end_of_life	
+CVE-2021-45078	binutils	2.27-44.base.el7	end_of_life	
+CVE-2021-45346	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2021-45960	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2021-46143	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2021-46195	libgcc	4.8.5-44.el7	end_of_life	
+CVE-2021-46195	libstdc++	4.8.5-44.el7	end_of_life	
+CVE-2021-46848	libtasn1	4.10-1.el7	end_of_life	
+CVE-2022-0351	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-0359	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-0391	python	2.7.5-89.el7	end_of_life	
+CVE-2022-0391	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2022-0563	libblkid	2.23.2-65.el7	end_of_life	
+CVE-2022-0563	libmount	2.23.2-65.el7	end_of_life	
+CVE-2022-0563	libuuid	2.23.2-65.el7	end_of_life	
+CVE-2022-0563	util-linux	2.23.2-65.el7	end_of_life	
+CVE-2022-0778	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-25.el7_9
+CVE-2022-1154	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-1271	gzip	1.5-10.el7	fixed	1.5-11.el7_9
+CVE-2022-1271	xz	5.2.2-1.el7	fixed	5.2.2-2.el7_9
+CVE-2022-1271	xz-libs	5.2.2-1.el7	fixed	5.2.2-2.el7_9
+CVE-2022-1292	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2022-1304	libcom_err	1.42.9-19.el7	end_of_life	
+CVE-2022-1619	vim-minimal	2:7.4.629-7.el7	will_not_fix	
+CVE-2022-1621	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-1629	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-1720	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2068	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2022-2124	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2125	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2126	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2129	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2175	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2182	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2183	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2206	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2207	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2208	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2210	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2231	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-22822	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-22823	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-22824	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-22825	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-22826	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-22827	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-2284	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2285	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2286	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2287	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2288	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2289	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-23218	glibc	2.17-317.el7	end_of_life	
+CVE-2022-23218	glibc-common	2.17-317.el7	end_of_life	
+CVE-2022-23219	glibc	2.17-317.el7	end_of_life	
+CVE-2022-23219	glibc-common	2.17-317.el7	end_of_life	
+CVE-2022-23308	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2022-23308	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2022-2343	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2344	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2345	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-23852	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-23990	expat	2.1.0-12.el7	end_of_life	
+CVE-2022-24407	cyrus-sasl-lib	2.1.26-23.el7	fixed	2.1.26-24.el7_9
+CVE-2022-25235	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-25236	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-2526	systemd	219-78.el7	fixed	219-78.el7_9.7
+CVE-2022-2526	systemd-libs	219-78.el7	fixed	219-78.el7_9.7
+CVE-2022-25313	expat	2.1.0-12.el7	end_of_life	
+CVE-2022-25315	expat	2.1.0-12.el7	fixed	2.1.0-14.el7_9
+CVE-2022-2571	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2580	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2581	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2598	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-27774	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-27774	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-27776	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-27776	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-27778	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-27778	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-27779	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-27779	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-27780	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-27780	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-27781	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-27781	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-27782	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-27782	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-27943	libgcc	4.8.5-44.el7	end_of_life	
+CVE-2022-27943	libstdc++	4.8.5-44.el7	end_of_life	
+CVE-2022-2795	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.13
+CVE-2022-2816	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2817	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2819	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2845	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2849	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2862	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2874	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2889	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-29155	openldap	2.4.44-22.el7	will_not_fix	
+CVE-2022-2923	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2946	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-2980	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-29824	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2022-29824	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2022-30115	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-30115	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-3037	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3094	bind-license	32:9.11.4-26.P2.el7	will_not_fix	
+CVE-2022-3153	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3219	gnupg2	2.0.22-5.el7_5	end_of_life	
+CVE-2022-32208	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-32208	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-3234	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3235	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3256	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3296	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3352	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3358	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2022-34903	gnupg2	2.0.22-5.el7_5	end_of_life	
+CVE-2022-3520	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-35252	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-35252	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-35737	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2022-3591	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-3705	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-37434	zlib	1.2.7-18.el7	fixed	1.2.7-21.el7_9
+CVE-2022-38177	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.10
+CVE-2022-38178	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.10
+CVE-2022-3821	systemd	219-78.el7	end_of_life	
+CVE-2022-3821	systemd-libs	219-78.el7	end_of_life	
+CVE-2022-38533	binutils	2.27-44.base.el7	end_of_life	
+CVE-2022-40303	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2022-40303	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2022-40304	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2022-40304	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2022-40674	expat	2.1.0-12.el7	fixed	2.1.0-15.el7_9
+CVE-2022-42010	dbus	1:1.10.24-15.el7	end_of_life	
+CVE-2022-42010	dbus-libs	1:1.10.24-15.el7	end_of_life	
+CVE-2022-42011	dbus	1:1.10.24-15.el7	end_of_life	
+CVE-2022-42011	dbus-libs	1:1.10.24-15.el7	end_of_life	
+CVE-2022-42012	dbus	1:1.10.24-15.el7	end_of_life	
+CVE-2022-42012	dbus-libs	1:1.10.24-15.el7	end_of_life	
+CVE-2022-4285	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2022-42898	krb5-libs	1.15.1-50.el7	fixed	1.15.1-55.el7_9
+CVE-2022-4292	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2022-4304	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2022-43551	curl	7.29.0-59.el7	end_of_life	
+CVE-2022-43551	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2022-43552	curl	7.29.0-59.el7	fixed	7.29.0-59.el7_9.2
+CVE-2022-43552	libcurl	7.29.0-59.el7	fixed	7.29.0-59.el7_9.2
+CVE-2022-43680	expat	2.1.0-12.el7	will_not_fix	
+CVE-2022-4415	systemd	219-78.el7	end_of_life	
+CVE-2022-4415	systemd-libs	219-78.el7	end_of_life	
+CVE-2022-44840	binutils	2.27-44.base.el7	end_of_life	
+CVE-2022-45061	python	2.7.5-89.el7	end_of_life	
+CVE-2022-45061	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2022-45873	systemd	219-78.el7	end_of_life	
+CVE-2022-45873	systemd-libs	219-78.el7	end_of_life	
+CVE-2022-47007	binutils	2.27-44.base.el7	end_of_life	
+CVE-2022-47008	binutils	2.27-44.base.el7	end_of_life	
+CVE-2022-47010	binutils	2.27-44.base.el7	end_of_life	
+CVE-2022-47011	binutils	2.27-44.base.el7	end_of_life	
+CVE-2022-48303	tar	2:1.26-35.el7	will_not_fix	
+CVE-2022-48554	file-libs	5.11-37.el7	end_of_life	
+CVE-2022-48560	python	2.7.5-89.el7	end_of_life	
+CVE-2022-48560	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2022-48565	python	2.7.5-89.el7	end_of_life	
+CVE-2022-48565	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2022-48566	python	2.7.5-89.el7	end_of_life	
+CVE-2022-48566	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2022-49043	libxml2	2.9.1-6.el7.5	will_not_fix	
+CVE-2022-49043	libxml2-python	2.9.1-6.el7.5	will_not_fix	
+CVE-2023-0049	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2023-0051	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-0054	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-0215	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-0286	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-26.el7_9
+CVE-2023-0288	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2023-0433	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2023-0464	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-0465	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-0466	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-0512	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-0767	nss	3.53.1-3.el7_9	fixed	3.79.0-5.el7_9
+CVE-2023-0767	nss-sysinit	3.53.1-3.el7_9	fixed	3.79.0-5.el7_9
+CVE-2023-0767	nss-tools	3.53.1-3.el7_9	fixed	3.79.0-5.el7_9
+CVE-2023-1127	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2023-1170	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-1175	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-1264	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-1579	binutils	2.27-44.base.el7	end_of_life	
+CVE-2023-1972	binutils	2.27-44.base.el7	affected	
+CVE-2023-2283	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2023-24329	python	2.7.5-89.el7	fixed	2.7.5-93.el7_9
+CVE-2023-24329	python-libs	2.7.5-89.el7	fixed	2.7.5-93.el7_9
+CVE-2023-25584	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2023-25585	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2023-25588	binutils	2.27-44.base.el7	will_not_fix	
+CVE-2023-2602	libcap	2.22-11.el7	end_of_life	
+CVE-2023-2603	libcap	2.22-11.el7	end_of_life	
+CVE-2023-2609	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-2610	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-2650	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-26604	systemd	219-78.el7	fixed	219-78.el7_9.11
+CVE-2023-26604	systemd-libs	219-78.el7	fixed	219-78.el7_9.11
+CVE-2023-27043	python	2.7.5-89.el7	end_of_life	
+CVE-2023-27043	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2023-27534	curl	7.29.0-59.el7	affected	
+CVE-2023-27534	libcurl	7.29.0-59.el7	affected	
+CVE-2023-27535	curl	7.29.0-59.el7	will_not_fix	
+CVE-2023-27535	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2023-27536	curl	7.29.0-59.el7	will_not_fix	
+CVE-2023-27536	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2023-27538	curl	7.29.0-59.el7	will_not_fix	
+CVE-2023-27538	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2023-2828	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.14
+CVE-2023-28321	curl	7.29.0-59.el7	will_not_fix	
+CVE-2023-28321	libcurl	7.29.0-59.el7	will_not_fix	
+CVE-2023-28322	curl	7.29.0-59.el7	affected	
+CVE-2023-28322	libcurl	7.29.0-59.el7	affected	
+CVE-2023-28484	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2023-28484	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2023-29469	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2023-29469	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2023-29491	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2023-29491	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2023-29491	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2023-29499	glib2	2.56.1-7.el7	end_of_life	
+CVE-2023-2953	openldap	2.4.44-22.el7	end_of_life	
+CVE-2023-32611	glib2	2.56.1-7.el7	end_of_life	
+CVE-2023-32636	glib2	2.56.1-7.el7	end_of_life	
+CVE-2023-32665	glib2	2.56.1-7.el7	end_of_life	
+CVE-2023-3341	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.15
+CVE-2023-3446	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-34969	dbus	1:1.10.24-15.el7	end_of_life	
+CVE-2023-34969	dbus-libs	1:1.10.24-15.el7	end_of_life	
+CVE-2023-37920	ca-certificates	2020.2.41-70.0.el7_8	end_of_life	
+CVE-2023-3817	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-38546	curl	7.29.0-59.el7	end_of_life	
+CVE-2023-38546	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2023-39615	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2023-39615	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2023-39804	tar	2:1.26-35.el7	affected	
+CVE-2023-4016	procps-ng	3.3.10-28.el7	end_of_life	
+CVE-2023-40217	python	2.7.5-89.el7	fixed	2.7.5-94.el7_9
+CVE-2023-40217	python-libs	2.7.5-89.el7	fixed	2.7.5-94.el7_9
+CVE-2023-4156	gawk	4.0.2-4.el7_3.1	affected	
+CVE-2023-4408	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.16
+CVE-2023-45322	libxml2	2.9.1-6.el7.5	affected	
+CVE-2023-45322	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2023-45853	zlib	1.2.7-18.el7	end_of_life	
+CVE-2023-46246	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-4641	shadow-utils	2:4.6-5.el7	end_of_life	
+CVE-2023-4806	glibc	2.17-317.el7	will_not_fix	
+CVE-2023-4806	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2023-4813	glibc	2.17-317.el7	will_not_fix	
+CVE-2023-4813	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2023-48231	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48232	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48233	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48234	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48235	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48236	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48237	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48706	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-48795	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2023-50387	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.16
+CVE-2023-50495	ncurses	5.9-14.20130511.el7_4	end_of_life	
+CVE-2023-50495	ncurses-base	5.9-14.20130511.el7_4	end_of_life	
+CVE-2023-50495	ncurses-libs	5.9-14.20130511.el7_4	end_of_life	
+CVE-2023-50868	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.16
+CVE-2023-5156	glibc	2.17-317.el7	end_of_life	
+CVE-2023-5156	glibc-common	2.17-317.el7	end_of_life	
+CVE-2023-52425	expat	2.1.0-12.el7	will_not_fix	
+CVE-2023-52426	expat	2.1.0-12.el7	end_of_life	
+CVE-2023-5344	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-5388	nss	3.53.1-3.el7_9	end_of_life	
+CVE-2023-5388	nss-sysinit	3.53.1-3.el7_9	end_of_life	
+CVE-2023-5388	nss-tools	3.53.1-3.el7_9	end_of_life	
+CVE-2023-5441	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-5535	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2023-5678	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2023-6129	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2023-6135	nss	3.53.1-3.el7_9	will_not_fix	
+CVE-2023-6135	nss-sysinit	3.53.1-3.el7_9	will_not_fix	
+CVE-2023-6135	nss-tools	3.53.1-3.el7_9	will_not_fix	
+CVE-2023-6918	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2023-7207	cpio	2.11-28.el7	end_of_life	
+CVE-2023-7216	cpio	2.11-28.el7	affected	
+CVE-2024-0232	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2024-0397	python	2.7.5-89.el7	end_of_life	
+CVE-2024-0397	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2024-0450	python	2.7.5-89.el7	end_of_life	
+CVE-2024-0450	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2024-0727	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2024-10041	pam	1.1.8-23.el7	end_of_life	
+CVE-2024-11053	curl	7.29.0-59.el7	end_of_life	
+CVE-2024-11053	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2024-11187	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.18
+CVE-2024-12133	libtasn1	4.10-1.el7	end_of_life	
+CVE-2024-13176	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2024-1737	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.17
+CVE-2024-1975	bind-license	32:9.11.4-26.P2.el7	fixed	32:9.11.4-26.P2.el7_9.17
+CVE-2024-2236	libgcrypt	1.5.3-14.el7	affected	
+CVE-2024-22365	pam	1.1.8-23.el7	end_of_life	
+CVE-2024-22667	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2024-2398	curl	7.29.0-59.el7	end_of_life	
+CVE-2024-2398	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2024-25062	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2024-25062	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2024-25260	elfutils-default-yama-scope	0.176-5.el7	end_of_life	
+CVE-2024-25260	elfutils-libelf	0.176-5.el7	end_of_life	
+CVE-2024-25260	elfutils-libs	0.176-5.el7	end_of_life	
+CVE-2024-26458	krb5-libs	1.15.1-50.el7	end_of_life	
+CVE-2024-26461	krb5-libs	1.15.1-50.el7	end_of_life	
+CVE-2024-26462	krb5-libs	1.15.1-50.el7	end_of_life	
+CVE-2024-2961	glibc	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-2961	glibc-common	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33599	glibc	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33599	glibc-common	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33600	glibc	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33600	glibc-common	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33601	glibc	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33601	glibc-common	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33602	glibc	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-33602	glibc-common	2.17-317.el7	fixed	2.17-326.el7_9.3
+CVE-2024-34397	glib2	2.56.1-7.el7	end_of_life	
+CVE-2024-34459	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2024-34459	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2024-3596	krb5-libs	1.15.1-50.el7	fixed	1.15.1-55.el7_9.3
+CVE-2024-37370	krb5-libs	1.15.1-50.el7	fixed	1.15.1-55.el7_9.2
+CVE-2024-37371	krb5-libs	1.15.1-50.el7	fixed	1.15.1-55.el7_9.2
+CVE-2024-4032	python	2.7.5-89.el7	end_of_life	
+CVE-2024-4032	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2024-41965	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2024-41996	openssl-libs	1:1.0.2k-19.el7	will_not_fix	
+CVE-2024-43374	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2024-43790	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2024-43802	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2024-45306	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2024-45490	expat	2.1.0-12.el7	end_of_life	
+CVE-2024-45491	expat	2.1.0-12.el7	end_of_life	
+CVE-2024-45492	expat	2.1.0-12.el7	end_of_life	
+CVE-2024-47814	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2024-50602	expat	2.1.0-12.el7	end_of_life	
+CVE-2024-52533	glib2	2.56.1-7.el7	end_of_life	
+CVE-2024-5535	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-26.el7_9.2
+CVE-2024-56171	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.9
+CVE-2024-56171	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.9
+CVE-2024-5642	python	2.7.5-89.el7	end_of_life	
+CVE-2024-5642	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2024-56433	shadow-utils	2:4.6-5.el7	affected	
+CVE-2024-57360	binutils	2.27-44.base.el7	affected	
+CVE-2024-6119	openssl-libs	1:1.0.2k-19.el7	end_of_life	
+CVE-2024-6232	python	2.7.5-89.el7	end_of_life	
+CVE-2024-6232	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2024-6602	nss	3.53.1-3.el7_9	end_of_life	
+CVE-2024-6602	nss-sysinit	3.53.1-3.el7_9	end_of_life	
+CVE-2024-6602	nss-tools	3.53.1-3.el7_9	end_of_life	
+CVE-2024-6923	python	2.7.5-89.el7	will_not_fix	
+CVE-2024-6923	python-libs	2.7.5-89.el7	will_not_fix	
+CVE-2024-7264	curl	7.29.0-59.el7	affected	
+CVE-2024-7264	libcurl	7.29.0-59.el7	affected	
+CVE-2024-7531	nss	3.53.1-3.el7_9	end_of_life	
+CVE-2024-7531	nss-sysinit	3.53.1-3.el7_9	end_of_life	
+CVE-2024-7531	nss-tools	3.53.1-3.el7_9	end_of_life	
+CVE-2024-7592	python	2.7.5-89.el7	affected	
+CVE-2024-7592	python-libs	2.7.5-89.el7	affected	
+CVE-2024-8088	python	2.7.5-89.el7	end_of_life	
+CVE-2024-8088	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2024-8176	expat	2.1.0-12.el7	end_of_life	
+CVE-2024-9287	python	2.7.5-89.el7	end_of_life	
+CVE-2024-9287	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2025-0395	glibc	2.17-317.el7	will_not_fix	
+CVE-2025-0395	glibc-common	2.17-317.el7	will_not_fix	
+CVE-2025-0938	python	2.7.5-89.el7	end_of_life	
+CVE-2025-0938	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2025-11081	binutils	2.27-44.base.el7	affected	
+CVE-2025-11082	binutils	2.27-44.base.el7	affected	
+CVE-2025-11083	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-11412	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-11413	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-11414	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-11468	python	2.7.5-89.el7	affected	
+CVE-2025-11468	python-libs	2.7.5-89.el7	affected	
+CVE-2025-11494	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-11495	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-1150	binutils	2.27-44.base.el7	affected	
+CVE-2025-1151	binutils	2.27-44.base.el7	affected	
+CVE-2025-1152	binutils	2.27-44.base.el7	affected	
+CVE-2025-1153	binutils	2.27-44.base.el7	affected	
+CVE-2025-11839	binutils	2.27-44.base.el7	affected	
+CVE-2025-11840	binutils	2.27-44.base.el7	affected	
+CVE-2025-12084	python	2.7.5-89.el7	fixed	2.7.5-94.el7_9.2
+CVE-2025-12084	python-libs	2.7.5-89.el7	fixed	2.7.5-94.el7_9.2
+CVE-2025-1215	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2025-12781	python	2.7.5-89.el7	affected	
+CVE-2025-12781	python-libs	2.7.5-89.el7	affected	
+CVE-2025-13034	curl	7.29.0-59.el7	affected	
+CVE-2025-13034	libcurl	7.29.0-59.el7	affected	
+CVE-2025-13151	libtasn1	4.10-1.el7	affected	
+CVE-2025-13462	python	2.7.5-89.el7	affected	
+CVE-2025-13462	python-libs	2.7.5-89.el7	affected	
+CVE-2025-13601	glib2	2.56.1-7.el7	fixed	2.56.1-11.el7_9
+CVE-2025-13837	python	2.7.5-89.el7	end_of_life	
+CVE-2025-13837	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2025-14017	curl	7.29.0-59.el7	affected	
+CVE-2025-14017	libcurl	7.29.0-59.el7	affected	
+CVE-2025-14087	glib2	2.56.1-7.el7	fixed	2.56.1-12.el7_9
+CVE-2025-14104	libblkid	2.23.2-65.el7	will_not_fix	
+CVE-2025-14104	libmount	2.23.2-65.el7	will_not_fix	
+CVE-2025-14104	libuuid	2.23.2-65.el7	will_not_fix	
+CVE-2025-14104	util-linux	2.23.2-65.el7	will_not_fix	
+CVE-2025-14512	glib2	2.56.1-7.el7	affected	
+CVE-2025-14524	curl	7.29.0-59.el7	affected	
+CVE-2025-14524	libcurl	7.29.0-59.el7	affected	
+CVE-2025-15079	curl	7.29.0-59.el7	affected	
+CVE-2025-15079	libcurl	7.29.0-59.el7	affected	
+CVE-2025-15224	curl	7.29.0-59.el7	affected	
+CVE-2025-15224	libcurl	7.29.0-59.el7	affected	
+CVE-2025-15281	glibc	2.17-317.el7	affected	
+CVE-2025-15281	glibc-common	2.17-317.el7	affected	
+CVE-2025-15282	python	2.7.5-89.el7	affected	
+CVE-2025-15282	python-libs	2.7.5-89.el7	affected	
+CVE-2025-15366	python	2.7.5-89.el7	fixed	2.7.5-94.el7_9.3
+CVE-2025-15366	python-libs	2.7.5-89.el7	fixed	2.7.5-94.el7_9.3
+CVE-2025-15367	python	2.7.5-89.el7	fixed	2.7.5-94.el7_9.3
+CVE-2025-15367	python-libs	2.7.5-89.el7	fixed	2.7.5-94.el7_9.3
+CVE-2025-15468	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2025-15469	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2025-15661	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2025-1795	python	2.7.5-89.el7	affected	
+CVE-2025-1795	python-libs	2.7.5-89.el7	affected	
+CVE-2025-22134	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2025-24014	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2025-24528	krb5-libs	1.15.1-50.el7	fixed	1.15.1-55.el7_9.4
+CVE-2025-24928	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.9
+CVE-2025-24928	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.9
+CVE-2025-26603	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2025-27113	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2025-27113	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2025-29087	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2025-29088	sqlite	3.7.17-8.el7_7.1	end_of_life	
+CVE-2025-29768	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2025-30258	gnupg2	2.0.22-5.el7_5	end_of_life	
+CVE-2025-3198	binutils	2.27-44.base.el7	affected	
+CVE-2025-32414	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-32414	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-32415	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.13
+CVE-2025-32415	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.13
+CVE-2025-3360	glib2	2.56.1-7.el7	end_of_life	
+CVE-2025-3576	krb5-libs	1.15.1-50.el7	end_of_life	
+CVE-2025-4373	glib2	2.56.1-7.el7	affected	
+CVE-2025-4516	python	2.7.5-89.el7	affected	
+CVE-2025-4516	python-libs	2.7.5-89.el7	affected	
+CVE-2025-45582	tar	2:1.26-35.el7	affected	
+CVE-2025-4598	systemd	219-78.el7	affected	
+CVE-2025-4598	systemd-libs	219-78.el7	affected	
+CVE-2025-47268	iputils	20160308-10.el7	affected	
+CVE-2025-4802	glibc	2.17-317.el7	fixed	2.17-326.el7_9.5
+CVE-2025-4802	glibc-common	2.17-317.el7	fixed	2.17-326.el7_9.5
+CVE-2025-4878	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2025-48964	iputils	20160308-10.el7	affected	
+CVE-2025-49794	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-49794	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-49796	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-49796	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-5245	binutils	2.27-44.base.el7	affected	
+CVE-2025-5278	coreutils	8.22-24.el7	end_of_life	
+CVE-2025-5351	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2025-5372	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2025-53905	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2025-53906	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2025-5987	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2025-6020	pam	1.1.8-23.el7	fixed	1.1.8-23.el7_9.1
+CVE-2025-6021	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-6021	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.10
+CVE-2025-6069	python	2.7.5-89.el7	affected	
+CVE-2025-6069	python-libs	2.7.5-89.el7	affected	
+CVE-2025-6075	python	2.7.5-89.el7	affected	
+CVE-2025-6075	python-libs	2.7.5-89.el7	affected	
+CVE-2025-6170	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2025-6170	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2025-64118	tar	2:1.26-35.el7	affected	
+CVE-2025-66382	expat	2.1.0-12.el7	affected	
+CVE-2025-66861	binutils	2.27-44.base.el7	affected	
+CVE-2025-66862	binutils	2.27-44.base.el7	affected	
+CVE-2025-66863	binutils	2.27-44.base.el7	affected	
+CVE-2025-66864	binutils	2.27-44.base.el7	affected	
+CVE-2025-66865	binutils	2.27-44.base.el7	affected	
+CVE-2025-66866	binutils	2.27-44.base.el7	affected	
+CVE-2025-68160	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2025-68972	gnupg2	2.0.22-5.el7_5	affected	
+CVE-2025-68973	gnupg2	2.0.22-5.el7_5	fixed	2.0.22-5.el7_9.1
+CVE-2025-69418	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2025-69420	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2025-69421	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2025-69644	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-69645	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-69646	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-69647	binutils	2.27-44.base.el7	affected	
+CVE-2025-69648	binutils	2.27-44.base.el7	affected	
+CVE-2025-69649	binutils	2.27-44.base.el7	affected	
+CVE-2025-6965	sqlite	3.7.17-8.el7_7.1	fixed	3.7.17-9.el7_9.1
+CVE-2025-69650	binutils	2.27-44.base.el7	affected	
+CVE-2025-69651	binutils	2.27-44.base.el7	end_of_life	
+CVE-2025-69652	binutils	2.27-44.base.el7	affected	
+CVE-2025-7039	glib2	2.56.1-7.el7	affected	
+CVE-2025-70873	sqlite	3.7.17-8.el7_7.1	affected	
+CVE-2025-7425	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.12
+CVE-2025-7425	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.12
+CVE-2025-7545	binutils	2.27-44.base.el7	affected	
+CVE-2025-7546	binutils	2.27-44.base.el7	affected	
+CVE-2025-8058	glibc	2.17-317.el7	affected	
+CVE-2025-8058	glibc-common	2.17-317.el7	affected	
+CVE-2025-8277	libssh2	1.8.0-4.el7	affected	
+CVE-2025-8291	python	2.7.5-89.el7	end_of_life	
+CVE-2025-8291	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2025-8941	pam	1.1.8-23.el7	fixed	1.1.8-23.el7_9.2
+CVE-2025-9086	curl	7.29.0-59.el7	affected	
+CVE-2025-9086	libcurl	7.29.0-59.el7	affected	
+CVE-2025-9230	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-26.el7_9.1
+CVE-2025-9390	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2025-9714	libxml2	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.14
+CVE-2025-9714	libxml2-python	2.9.1-6.el7.5	fixed	2.9.1-6.el7_9.14
+CVE-2026-0672	python	2.7.5-89.el7	affected	
+CVE-2026-0672	python-libs	2.7.5-89.el7	affected	
+CVE-2026-0864	python	2.7.5-89.el7	affected	
+CVE-2026-0864	python-libs	2.7.5-89.el7	affected	
+CVE-2026-0865	python	2.7.5-89.el7	affected	
+CVE-2026-0865	python-libs	2.7.5-89.el7	affected	
+CVE-2026-0915	glibc	2.17-317.el7	affected	
+CVE-2026-0915	glibc-common	2.17-317.el7	affected	
+CVE-2026-0988	glib2	2.56.1-7.el7	affected	
+CVE-2026-0989	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-0989	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-0990	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-0990	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-0992	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-0992	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-102010	libgcc	4.8.5-44.el7	affected	
+CVE-2026-102010	libstdc++	4.8.5-44.el7	affected	
+CVE-2026-102633	expat	2.1.0-12.el7	affected	
+CVE-2026-105712	gnupg2	2.0.22-5.el7_5	affected	
+CVE-2026-10822	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-11586	curl	7.29.0-59.el7	end_of_life	
+CVE-2026-11586	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2026-11850	krb5-libs	1.15.1-50.el7	affected	
+CVE-2026-11856	curl	7.29.0-59.el7	end_of_life	
+CVE-2026-11856	libcurl	7.29.0-59.el7	end_of_life	
+CVE-2026-11972	python	2.7.5-89.el7	affected	
+CVE-2026-11972	python-libs	2.7.5-89.el7	affected	
+CVE-2026-11979	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-11979	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-12345	python	2.7.5-89.el7	affected	
+CVE-2026-12345	python-libs	2.7.5-89.el7	affected	
+CVE-2026-12610	pam	1.1.8-23.el7	end_of_life	
+CVE-2026-13595	libblkid	2.23.2-65.el7	affected	
+CVE-2026-13595	libmount	2.23.2-65.el7	affected	
+CVE-2026-13595	libuuid	2.23.2-65.el7	affected	
+CVE-2026-13595	util-linux	2.23.2-65.el7	affected	
+CVE-2026-13757	p11-kit	0.23.5-3.el7	affected	
+CVE-2026-13757	p11-kit-trust	0.23.5-3.el7	affected	
+CVE-2026-1484	glib2	2.56.1-7.el7	affected	
+CVE-2026-1485	glib2	2.56.1-7.el7	affected	
+CVE-2026-1489	glib2	2.56.1-7.el7	affected	
+CVE-2026-15003	binutils	2.27-44.base.el7	affected	
+CVE-2026-1502	python	2.7.5-89.el7	affected	
+CVE-2026-1502	python-libs	2.7.5-89.el7	affected	
+CVE-2026-15308	python	2.7.5-89.el7	end_of_life	
+CVE-2026-15308	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2026-15588	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9.1
+CVE-2026-15816	dracut	033-572.el7	fixed	033-577.el7_9
+CVE-2026-16118	glib2	2.56.1-7.el7	will_not_fix	
+CVE-2026-1757	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-1757	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-18374	glibc	2.17-317.el7	affected	
+CVE-2026-18374	glibc-common	2.17-317.el7	affected	
+CVE-2026-18477	tar	2:1.26-35.el7	end_of_life	
+CVE-2026-18503	python	2.7.5-89.el7	affected	
+CVE-2026-18503	python-libs	2.7.5-89.el7	affected	
+CVE-2026-18508	tar	2:1.26-35.el7	end_of_life	
+CVE-2026-18739	popt	1.13-16.el7	affected	
+CVE-2026-18743	popt	1.13-16.el7	affected	
+CVE-2026-18839	popt	1.13-16.el7	affected	
+CVE-2026-19033	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-19542	glibc	2.17-317.el7	affected	
+CVE-2026-19542	glibc-common	2.17-317.el7	affected	
+CVE-2026-19548	binutils	2.27-44.base.el7	affected	
+CVE-2026-19553	python	2.7.5-89.el7	affected	
+CVE-2026-19553	python-libs	2.7.5-89.el7	affected	
+CVE-2026-19617	device-mapper	7:1.02.170-6.el7	affected	
+CVE-2026-19617	device-mapper-libs	7:1.02.170-6.el7	affected	
+CVE-2026-1965	curl	7.29.0-59.el7	affected	
+CVE-2026-1965	libcurl	7.29.0-59.el7	affected	
+CVE-2026-19662	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-19666	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-19667	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-19668	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-19672	python	2.7.5-89.el7	affected	
+CVE-2026-19672	python-libs	2.7.5-89.el7	affected	
+CVE-2026-19941	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-22185	openldap	2.4.44-22.el7	affected	
+CVE-2026-22795	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-22796	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-2297	python	2.7.5-89.el7	end_of_life	
+CVE-2026-2297	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2026-24515	expat	2.1.0-12.el7	affected	
+CVE-2026-24883	gnupg2	2.0.22-5.el7_5	affected	
+CVE-2026-25749	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.1
+CVE-2026-26269	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-27171	zlib	1.2.7-18.el7	affected	
+CVE-2026-28387	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-28388	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-28389	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-28390	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-26.el7_9.2
+CVE-2026-28417	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.1
+CVE-2026-28418	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-28419	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-28420	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-28421	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.1
+CVE-2026-28422	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-31789	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-3276	python	2.7.5-89.el7	affected	
+CVE-2026-3276	python-libs	2.7.5-89.el7	affected	
+CVE-2026-32776	expat	2.1.0-12.el7	affected	
+CVE-2026-32777	expat	2.1.0-12.el7	affected	
+CVE-2026-32778	expat	2.1.0-12.el7	affected	
+CVE-2026-33056	tar	2:1.26-35.el7	affected	
+CVE-2026-33412	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.1
+CVE-2026-34743	xz	5.2.2-1.el7	affected	
+CVE-2026-34743	xz-libs	5.2.2-1.el7	affected	
+CVE-2026-3479	python	2.7.5-89.el7	affected	
+CVE-2026-3479	python-libs	2.7.5-89.el7	affected	
+CVE-2026-34982	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-35177	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-35189	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-35191	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-3592	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-3644	python	2.7.5-89.el7	affected	
+CVE-2026-3644	python-libs	2.7.5-89.el7	affected	
+CVE-2026-3731	libssh2	1.8.0-4.el7	affected	
+CVE-2026-3783	curl	7.29.0-59.el7	affected	
+CVE-2026-3783	libcurl	7.29.0-59.el7	affected	
+CVE-2026-3784	curl	7.29.0-59.el7	affected	
+CVE-2026-3784	libcurl	7.29.0-59.el7	affected	
+CVE-2026-39881	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-40355	krb5-libs	1.15.1-50.el7	affected	
+CVE-2026-40356	krb5-libs	1.15.1-50.el7	affected	
+CVE-2026-4046	glibc	2.17-317.el7	end_of_life	
+CVE-2026-4046	glibc-common	2.17-317.el7	end_of_life	
+CVE-2026-40467	gawk	4.0.2-4.el7_3.1	affected	
+CVE-2026-40468	gawk	4.0.2-4.el7_3.1	affected	
+CVE-2026-4105	systemd	219-78.el7	affected	
+CVE-2026-4105	systemd-libs	219-78.el7	affected	
+CVE-2026-41080	expat	2.1.0-12.el7	affected	
+CVE-2026-41411	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-41990	libgcrypt	1.5.3-14.el7	affected	
+CVE-2026-41991	gzip	1.5-10.el7	affected	
+CVE-2026-41992	gzip	1.5-10.el7	affected	
+CVE-2026-4224	python	2.7.5-89.el7	affected	
+CVE-2026-4224	python-libs	2.7.5-89.el7	affected	
+CVE-2026-42250	bzip2-libs	1.0.6-13.el7	affected	
+CVE-2026-42307	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-42308	python	2.7.5-89.el7	affected	
+CVE-2026-42308	python-libs	2.7.5-89.el7	affected	
+CVE-2026-42772	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-4360	python	2.7.5-89.el7	affected	
+CVE-2026-4360	python-libs	2.7.5-89.el7	affected	
+CVE-2026-43961	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-4437	glibc	2.17-317.el7	affected	
+CVE-2026-4437	glibc-common	2.17-317.el7	affected	
+CVE-2026-4438	glibc	2.17-317.el7	affected	
+CVE-2026-4438	glibc-common	2.17-317.el7	affected	
+CVE-2026-44605	rpm	4.11.3-45.el7	affected	
+CVE-2026-44605	rpm-build-libs	4.11.3-45.el7	affected	
+CVE-2026-44605	rpm-libs	4.11.3-45.el7	affected	
+CVE-2026-44605	rpm-python	4.11.3-45.el7	affected	
+CVE-2026-44656	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-45130	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-45186	expat	2.1.0-12.el7	affected	
+CVE-2026-4519	python	2.7.5-89.el7	fixed	2.7.5-94.el7_9.4
+CVE-2026-4519	python-libs	2.7.5-89.el7	fixed	2.7.5-94.el7_9.4
+CVE-2026-45447	openssl-libs	1:1.0.2k-19.el7	fixed	1:1.0.2k-26.el7_9.2
+CVE-2026-4647	binutils	2.27-44.base.el7	affected	
+CVE-2026-46483	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-47162	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-47167	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-4786	python	2.7.5-89.el7	fixed	2.7.5-94.el7_9.5
+CVE-2026-4786	python-libs	2.7.5-89.el7	fixed	2.7.5-94.el7_9.5
+CVE-2026-4873	curl	7.29.0-59.el7	affected	
+CVE-2026-4873	libcurl	7.29.0-59.el7	affected	
+CVE-2026-4878	libcap	2.22-11.el7	end_of_life	
+CVE-2026-50219	expat	2.1.0-12.el7	end_of_life	
+CVE-2026-52858	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-52859	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2026-53613	libblkid	2.23.2-65.el7	affected	
+CVE-2026-53613	libmount	2.23.2-65.el7	affected	
+CVE-2026-53613	libuuid	2.23.2-65.el7	affected	
+CVE-2026-53613	util-linux	2.23.2-65.el7	affected	
+CVE-2026-53655	tar	2:1.26-35.el7	affected	
+CVE-2026-53910	diffutils	3.3-5.el7	affected	
+CVE-2026-5435	glibc	2.17-317.el7	affected	
+CVE-2026-5435	glibc-common	2.17-317.el7	affected	
+CVE-2026-54369	acl	2.2.51-15.el7	affected	
+CVE-2026-54369	libacl	2.2.51-15.el7	affected	
+CVE-2026-54370	acl	2.2.51-15.el7	affected	
+CVE-2026-54370	libacl	2.2.51-15.el7	affected	
+CVE-2026-54371	libattr	2.4.46-13.el7	affected	
+CVE-2026-54411	pam	1.1.8-23.el7	fixed	1.1.8-23.el7_9.3
+CVE-2026-5450	glibc	2.17-317.el7	fixed	2.17-326.el7_9.6
+CVE-2026-5450	glibc-common	2.17-317.el7	fixed	2.17-326.el7_9.6
+CVE-2026-54872	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-54873	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-54874	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-54875	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-54876	openssl-libs	1:1.0.2k-19.el7	under_investigation	
+CVE-2026-55199	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2026-5545	curl	7.29.0-59.el7	affected	
+CVE-2026-5545	libcurl	7.29.0-59.el7	affected	
+CVE-2026-55693	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-55892	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-56131	expat	2.1.0-12.el7	end_of_life	
+CVE-2026-56132	expat	2.1.0-12.el7	affected	
+CVE-2026-56391	coreutils	8.22-24.el7	end_of_life	
+CVE-2026-56392	coreutils	8.22-24.el7	end_of_life	
+CVE-2026-56403	expat	2.1.0-12.el7	under_investigation	
+CVE-2026-56404	expat	2.1.0-12.el7	end_of_life	
+CVE-2026-56405	expat	2.1.0-12.el7	affected	
+CVE-2026-56407	expat	2.1.0-12.el7	end_of_life	
+CVE-2026-56412	expat	2.1.0-12.el7	affected	
+CVE-2026-5704	tar	2:1.26-35.el7	affected	
+CVE-2026-57053	libidn	1.28-4.el7	affected	
+CVE-2026-57062	gnupg2	2.0.22-5.el7_5	end_of_life	
+CVE-2026-5713	python	2.7.5-89.el7	affected	
+CVE-2026-5713	python-libs	2.7.5-89.el7	affected	
+CVE-2026-57452	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2026-57455	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-57456	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-5773	curl	7.29.0-59.el7	affected	
+CVE-2026-5773	libcurl	7.29.0-59.el7	affected	
+CVE-2026-58010	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9.1
+CVE-2026-58011	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9.1
+CVE-2026-58012	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9.1
+CVE-2026-58013	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9.1
+CVE-2026-58014	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9.1
+CVE-2026-58015	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9.1
+CVE-2026-58016	glib2	2.56.1-7.el7	fixed	2.56.1-13.el7_9
+CVE-2026-58050	libssh2	1.8.0-4.el7	fixed	1.8.0-4.el7_9.2
+CVE-2026-58051	libssh2	1.8.0-4.el7	end_of_life	
+CVE-2026-5928	glibc	2.17-317.el7	affected	
+CVE-2026-5928	glibc-common	2.17-317.el7	affected	
+CVE-2026-5950	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-5958	sed	4.2.2-7.el7	affected	
+CVE-2026-59857	vim-minimal	2:7.4.629-7.el7	end_of_life	
+CVE-2026-59858	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-59871	tar	2:1.26-35.el7	affected	
+CVE-2026-59875	tar	2:1.26-35.el7	affected	
+CVE-2026-6019	python	2.7.5-89.el7	affected	
+CVE-2026-6019	python-libs	2.7.5-89.el7	affected	
+CVE-2026-6100	python	2.7.5-89.el7	end_of_life	
+CVE-2026-6100	python-libs	2.7.5-89.el7	end_of_life	
+CVE-2026-6253	curl	7.29.0-59.el7	affected	
+CVE-2026-6253	libcurl	7.29.0-59.el7	affected	
+CVE-2026-6276	curl	7.29.0-59.el7	affected	
+CVE-2026-6276	libcurl	7.29.0-59.el7	affected	
+CVE-2026-6368	glibc	2.17-317.el7	affected	
+CVE-2026-6368	glibc-common	2.17-317.el7	affected	
+CVE-2026-6429	curl	7.29.0-59.el7	affected	
+CVE-2026-6429	libcurl	7.29.0-59.el7	affected	
+CVE-2026-66032	libssh2	1.8.0-4.el7	fixed	1.8.0-4.el7_9.2
+CVE-2026-66034	libssh2	1.8.0-4.el7	fixed	1.8.0-4.el7_9.2
+CVE-2026-66046	expat	2.1.0-12.el7	affected	
+CVE-2026-66484	cpio	2.11-28.el7	affected	
+CVE-2026-66485	cpio	2.11-28.el7	affected	
+CVE-2026-66486	cpio	2.11-28.el7	affected	
+CVE-2026-6791	glibc	2.17-317.el7	affected	
+CVE-2026-6791	glibc-common	2.17-317.el7	affected	
+CVE-2026-6844	binutils	2.27-44.base.el7	affected	
+CVE-2026-6845	binutils	2.27-44.base.el7	affected	
+CVE-2026-6893	dracut	033-572.el7	fixed	033-577.el7_9
+CVE-2026-7168	curl	7.29.0-59.el7	affected	
+CVE-2026-7168	libcurl	7.29.0-59.el7	affected	
+CVE-2026-7210	python	2.7.5-89.el7	affected	
+CVE-2026-7210	python-libs	2.7.5-89.el7	affected	
+CVE-2026-72897	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-73070	vim-minimal	2:7.4.629-7.el7	under_investigation	
+CVE-2026-73072	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-73073	vim-minimal	2:7.4.629-7.el7	affected	
+CVE-2026-73076	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-73078	vim-minimal	2:7.4.629-7.el7	fixed	2:7.4.629-8.el7_9.2
+CVE-2026-74860	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-74860	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-75029	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-75806	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-7598	libssh2	1.8.0-4.el7	fixed	1.8.0-4.el7_9.2
+CVE-2026-76641	expat	2.1.0-12.el7	affected	
+CVE-2026-76781	libxml2	2.9.1-6.el7.5	end_of_life	
+CVE-2026-76781	libxml2-python	2.9.1-6.el7.5	end_of_life	
+CVE-2026-76957	expat	2.1.0-12.el7	affected	
+CVE-2026-77117	glibc	2.17-317.el7	affected	
+CVE-2026-77117	glibc-common	2.17-317.el7	affected	
+CVE-2026-77119	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-77696	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-7774	python	2.7.5-89.el7	affected	
+CVE-2026-7774	python-libs	2.7.5-89.el7	affected	
+CVE-2026-78301	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-78367	rpm	4.11.3-45.el7	affected	
+CVE-2026-78367	rpm-build-libs	4.11.3-45.el7	affected	
+CVE-2026-78367	rpm-libs	4.11.3-45.el7	affected	
+CVE-2026-78367	rpm-python	4.11.3-45.el7	affected	
+CVE-2026-80274	bind-license	32:9.11.4-26.P2.el7	affected	
+CVE-2026-80489	glibc	2.17-317.el7	affected	
+CVE-2026-80489	glibc-common	2.17-317.el7	affected	
+CVE-2026-8286	curl	7.29.0-59.el7	affected	
+CVE-2026-8286	libcurl	7.29.0-59.el7	affected	
+CVE-2026-84782	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-84783	openssl-libs	1:1.0.2k-19.el7	affected	
+CVE-2026-84837	rpm	4.11.3-45.el7	affected	
+CVE-2026-84837	rpm-build-libs	4.11.3-45.el7	affected	
+CVE-2026-84837	rpm-libs	4.11.3-45.el7	affected	
+CVE-2026-84837	rpm-python	4.11.3-45.el7	affected	
+CVE-2026-86138	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-86138	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-86140	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-86140	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-86142	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-86142	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-86143	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-86143	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-86144	libxml2	2.9.1-6.el7.5	affected	
+CVE-2026-86144	libxml2-python	2.9.1-6.el7.5	affected	
+CVE-2026-86469	glib2	2.56.1-7.el7	affected	
+CVE-2026-86805	glibc	2.17-317.el7	affected	
+CVE-2026-86805	glibc-common	2.17-317.el7	affected	
+CVE-2026-89092	glibc	2.17-317.el7	affected	
+CVE-2026-89092	glibc-common	2.17-317.el7	affected	
+CVE-2026-8924	curl	7.29.0-59.el7	affected	
+CVE-2026-8924	libcurl	7.29.0-59.el7	affected	
+CVE-2026-8927	curl	7.29.0-59.el7	affected	
+CVE-2026-8927	libcurl	7.29.0-59.el7	affected	
+CVE-2026-8932	curl	7.29.0-59.el7	affected	
+CVE-2026-8932	libcurl	7.29.0-59.el7	affected	
+CVE-2026-89329	kpartx	0.4.9-133.el7	affected	
+CVE-2026-90802	binutils	2.27-44.base.el7	under_investigation	
+CVE-2026-90803	binutils	2.27-44.base.el7	under_investigation	
+CVE-2026-90804	binutils	2.27-44.base.el7	under_investigation	
+CVE-2026-90828	binutils	2.27-44.base.el7	under_investigation	
+CVE-2026-90829	binutils	2.27-44.base.el7	under_investigation	
+CVE-2026-90830	binutils	2.27-44.base.el7	under_investigation	
+CVE-2026-90831	binutils	2.27-44.base.el7	under_investigation	
+CVE-2026-93990	expat	2.1.0-12.el7	affected	
+CVE-2026-95519	rpm	4.11.3-45.el7	affected	
+CVE-2026-95519	rpm-build-libs	4.11.3-45.el7	affected	
+CVE-2026-95519	rpm-libs	4.11.3-45.el7	affected	
+CVE-2026-95519	rpm-python	4.11.3-45.el7	affected	
+CVE-2026-95521	rpm	4.11.3-45.el7	affected	
+CVE-2026-95521	rpm-build-libs	4.11.3-45.el7	affected	
+CVE-2026-95521	rpm-libs	4.11.3-45.el7	affected	
+CVE-2026-95521	rpm-python	4.11.3-45.el7	affected	
+CVE-2026-95818	glibc	2.17-317.el7	affected	
+CVE-2026-95818	glibc-common	2.17-317.el7	affected	
+CVE-2026-97399	glibc	2.17-317.el7	affected	
+CVE-2026-97399	glibc-common	2.17-317.el7	affected	

@@ -1,0 +1,32 @@
+# trivy image ubuntu:22.04 (Trivy 0.75.0, DB UpdatedAt 2026-10-07T07:38:55.515026687Z): VulnerabilityID PkgName InstalledVersion Status FixedVersion
+CVE-2022-27943	gcc-12-base	12.3.0-1ubuntu1~22.04.3	affected	
+CVE-2022-27943	libgcc-s1	12.3.0-1ubuntu1~22.04.3	affected	
+CVE-2022-27943	libstdc++6	12.3.0-1ubuntu1~22.04.3	affected	
+CVE-2022-41409	libpcre2-8-0	10.39-3ubuntu0.1	affected	
+CVE-2022-4899	libzstd1	1.4.8+dfsg-3build1	affected	
+CVE-2023-29383	login	1:4.8.1-2ubuntu2.2	affected	
+CVE-2023-29383	passwd	1:4.8.1-2ubuntu2.2	affected	
+CVE-2023-50495	libncurses6	6.3-2ubuntu0.3	affected	
+CVE-2023-50495	libncursesw6	6.3-2ubuntu0.3	affected	
+CVE-2023-50495	libtinfo6	6.3-2ubuntu0.3	affected	
+CVE-2023-50495	ncurses-base	6.3-2ubuntu0.3	affected	
+CVE-2023-50495	ncurses-bin	6.3-2ubuntu0.3	affected	
+CVE-2024-56433	login	1:4.8.1-2ubuntu2.2	affected	
+CVE-2024-56433	passwd	1:4.8.1-2ubuntu2.2	affected	
+CVE-2026-18374	libc-bin	2.35-0ubuntu3.15	affected	
+CVE-2026-18374	libc6	2.35-0ubuntu3.15	affected	
+CVE-2026-18477	tar	1.34+dfsg-1ubuntu0.1.22.04.6	affected	
+CVE-2026-18508	tar	1.34+dfsg-1ubuntu0.1.22.04.6	affected	
+CVE-2026-35189	libssl3	3.0.2-0ubuntu1.29	fixed	3.0.2-0ubuntu1.30
+CVE-2026-40228	libsystemd0	249.11-0ubuntu3.22	affected	
+CVE-2026-40228	libudev1	249.11-0ubuntu3.22	affected	
+CVE-2026-54872	libssl3	3.0.2-0ubuntu1.29	fixed	3.0.2-0ubuntu1.30
+CVE-2026-75805	libssl3	3.0.2-0ubuntu1.29	fixed	3.0.2-0ubuntu1.30
+CVE-2026-75806	libssl3	3.0.2-0ubuntu1.29	fixed	3.0.2-0ubuntu1.30
+CVE-2026-77696	libssl3	3.0.2-0ubuntu1.29	fixed	3.0.2-0ubuntu1.30
+CVE-2026-84782	libssl3	3.0.2-0ubuntu1.29	fixed	3.0.2-0ubuntu1.30
+CVE-2026-85091	zlib1g	1:1.2.11.dfsg-2ubuntu9.2	affected	
+CVE-2026-86145	libpcre2-8-0	10.39-3ubuntu0.1	affected	
+CVE-2026-89092	libc-bin	2.35-0ubuntu3.15	affected	
+CVE-2026-89092	libc6	2.35-0ubuntu3.15	affected	
+CVE-2026-89161	libpcre2-8-0	10.39-3ubuntu0.1	affected	
