@@ -37,7 +37,7 @@ A key/value stamped once per host (or per log source) on every log and metric th
 _Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)
 
 **Host Audit**:
-A read-only, periodic inspection of managed hosts that never changes a target and produces one consolidated report per run — an overall summary followed by a per-host appendix — covering Asset Inventory, drift from the declared configuration, configuration vulnerabilities and package vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Fixing what it finds belongs to provisioning and maintenance, not to it.
+A read-only, periodic inspection of managed hosts that never changes a target and produces one consolidated report per run — an overall summary followed by a per-host appendix — covering Asset Inventory, Configuration Drift, Configuration Vulnerabilities and Package Vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Fixing what it finds belongs to provisioning and maintenance, not to it.
 _Avoid_: audit (when meaning only the CIS audit), scan, compliance check
 
 **Asset Inventory**:
@@ -51,6 +51,10 @@ _Avoid_: vulnerability (unqualified), misconfiguration
 **Package Vulnerability**:
 An installed package version that is affected by a known CVE or vendor security advisory.
 _Avoid_: vulnerability (unqualified), CVE (when meaning the finding on a host)
+
+**Configuration Drift**:
+A difference between the state a host is declared to have in Git (provisioning and Host Agents configuration) and the state it actually has — a change made outside the change process. Reported per host as the declared tasks that would change. A difference from the previous Host Audit is not Configuration Drift but a change since the last audit. Not detectable on Raw Provisioning Path hosts, which Host Audit reports as such.
+_Avoid_: drift (unqualified), config change, diff
 
 **Log Type**:
 The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
