@@ -339,3 +339,14 @@ def test_vault_tables_cover_known_centos_final_versions():
     v7, v6 = _vault("7"), _vault("6")
     assert v7["glibc"] == "2.17-326.el7_9.3" and v7["libxml2"] == "2.9.1-6.el7_9.6"
     assert len(v7) > 7000 and len(v6) > 5000
+
+
+def test_appendix_piece_draws_per_host_counts_or_unavailable():
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE / "templates")))
+    piece = env.get_template("sections/appendix_package_vulnerability.html.j2")
+    s = _section()
+    html = piece.render(m={"package_vulnerability": s}, host="centos7")
+    assert "높음 4" in html and "CentOS용 수정본 없음 1" in html and "EOS" in html
+    assert "점검불가" in piece.render(m={"package_vulnerability": s}, host="rocky9")
+    assert piece.render(m={"package_vulnerability": s}, host="not-collected").strip() == ""
