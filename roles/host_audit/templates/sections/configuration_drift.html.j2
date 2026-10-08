@@ -1,0 +1,56 @@
+{#- Configuration Drift 섹션 (ADR-0009 §1, #124). host_audit_model.configuration_drift를 그리기만 한다.
+    행 판정·집계·요약 문자열은 filter_plugins/host_audit_drift.py가 만든다. diff 원문은 모델에 없다. -#}
+{%- set cd = m.configuration_drift -%}
+{%- if cd %}
+<style>
+  .cd-judge { width:24mm; }
+  .cd-sum { font-size:7.5pt; color:var(--mute); word-break:break-all; }
+</style>
+  <h2 class="pb">3. Configuration Drift <span class="small mute">ISMS 2.9.1 · 2.11.2</span></h2>
+  <p class="small mute">Git에 선언된 상태와 호스트 실제 상태의 차이. 러너가 아래 플레이북을 --check --diff로 실행해 바뀔 태스크를 SPEC-ID 단위로 싣는다(호스트는 바뀌지 않음). diff 원문은 비밀값이 있을 수 있어 싣지 않고 경로·줄 수·속성 이름만 요약한다. 판단 칸에 조치(선언대로 복원) / 선언 수정 / 승인된 변경 중 하나를 기재한다.</p>
+  <table>
+    <thead><tr><th>하위 실행</th><th>명령</th><th>대상</th><th>결과</th></tr></thead>
+    <tbody>
+{% for s in cd.subruns %}
+      <tr>
+        <td class="nowrap">{{ s.label | e }}</td>
+        <td class="small">{{ s.command | e }}</td>
+        <td class="nowrap">{{ s.hosts }}대</td>
+        <td>{% if s.status == 'ok' %}{% if s.rows %}<span class="tag crit">Drift {{ s.changed_hosts }}대 · {{ s.rows }}건</span>{% else %}<span class="tag ok">Drift 없음</span>{% endif %}{% elif s.status == 'skipped' %}<span class="tag na">해당없음</span> <span class="small">{{ s.reason | e }}</span>{% else %}<span class="tag na">점검불가</span> <span class="small">{{ s.reason | e }}</span>{% endif %}</td>
+      </tr>
+{% endfor %}
+    </tbody>
+  </table>
+
+{% if cd.rows %}
+  <h3>Drift 항목 ({{ cd.hosts_with_drift }}대 · {{ cd.rows | length }}건)</h3>
+  <table>
+    <thead><tr><th>호스트</th><th>SPEC-ID</th><th>태스크 · 바뀔 내용(요약)</th><th class="cd-judge">판단(수기)</th></tr></thead>
+    <tbody>
+{% for r in cd.rows %}
+      <tr>
+        <td class="nowrap">{{ r.host | e }}<br><span class="small mute">{{ r.subrun | e }}</span></td>
+        <td class="nowrap">{{ r.spec_id | default('-', true) | e }}</td>
+        <td>{{ r.task | e }}<br><span class="cd-sum">{{ r.summary | e }}</span></td>
+        <td></td>
+      </tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="note keep">Drift 항목 없음.</div>
+{% endif %}
+
+{% if cd.excluded %}
+  <h3>제외(check 모드 노이즈)</h3>
+  <p class="small mute">수렴된 호스트에서도 --check에서 매번 바뀜으로 나오는 태스크. 선언(host_audit_drift_ignore)에 사유와 함께 등록된 것만 제외한다.</p>
+  <table>
+    <thead><tr><th>SPEC-ID · 태스크</th><th>사유</th><th>호스트 수</th></tr></thead>
+    <tbody>
+{% for x in cd.excluded %}
+      <tr><td><span class="nowrap">{{ x.spec_id | default('-', true) | e }}</span> {{ x.task | e }}</td><td class="small">{{ x.reason | e }}</td><td class="nowrap">{{ x.hosts }}대</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{%- endif %}

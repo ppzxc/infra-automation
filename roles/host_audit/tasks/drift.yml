@@ -1,0 +1,68 @@
+---
+# ==============================================================================
+# Host Audit — Configuration Drift (러너 localhost 전용, ADR-0009 §1, #124)
+# ==============================================================================
+# Git 선언(site.yml, Host Agents Config)과 호스트 실제 상태의 차이. 러너가 두 플레이북을
+# --check --diff로 하위 실행하고(ansible.posix.json 콜백) 바뀔 태스크를 호스트별 SPEC-ID 행으로 만든다.
+# check 모드는 관리 상태를 바꾸지 않는다(#117, tests/test_check_mode_read_only.py).
+#
+# 인증: 하위 실행은 평소 Semaphore 실행과 같은 경로로 접속한다. 각 플레이북이 자기
+# resolve_connection/cleanup_connection 플레이를 돌리고, 같은 인벤토리 소스(-i)와 OpenBao 자격증명을
+# 쓴다. 자격증명은 이번 실행의 변수(Semaphore Secret extra var) 또는 환경 변수에서 읽어 하위 프로세스의
+# 환경 변수로만 넘긴다(명령줄·파일에 남기지 않음, no_log).
+#
+# 콜백 출력에는 diff 원문(파일 내용)이 들어 있어 비밀값이 있을 수 있다. 그래서 러너 임시 파일
+# (실행 디렉터리 밖, 0600)에 받아 해석한 뒤 바로 지우고, 보고서·JSON에는 요약(경로·줄 수·속성 이름)만 남긴다.
+# 하위 실행이 통째로 실패하면(시간 초과, 해석 불가) 그 부분만 점검불가로 표시하고 실행은 계속한다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-400] Plan which hosts each Drift sub-run checks"
+  ansible.builtin.set_fact:
+    _host_audit_drift_plan: "{{ _records | host_audit_drift_plan(_targets | intersect(_site_scope), _targets | intersect(_agents_scope), _raw_declared) }}"
+  vars:
+    _targets: "{{ groups['host_audit_targets'] | default([]) }}"
+    _site_scope: "{{ query('ansible.builtin.inventory_hostnames', host_audit_drift_site_pattern) }}"
+    _agents_scope: "{{ query('ansible.builtin.inventory_hostnames', host_audit_drift_agents_pattern) }}"
+    _raw_declared: >-
+      {%- set d = {} -%}
+      {%- for h in _targets -%}
+      {%- set _ = d.update({h: hostvars[h].raw_provisioning_path | default('')}) -%}
+      {%- endfor -%}
+      {{ d }}
+    _records: >-
+      {%- set r = [] -%}
+      {%- for p in _host_audit_record_files.files | map(attribute='path') | sort -%}
+      {%- set _ = r.append(lookup('ansible.builtin.file', p) | from_json) -%}
+      {%- endfor -%}
+      {{ r }}
+
+- name: "[AUD-401] Fix the Drift sub-run definitions"
+  ansible.builtin.set_fact:
+    _host_audit_drift_subruns:
+      - key: site
+        playbook: site.yml
+        args: []
+        plays: ["Provision Baseline On-Premise Target Hosts"]
+        hosts: "{{ _host_audit_drift_plan.site }}"
+      - key: agents
+        playbook: host_agents.yml
+        args: ["--tags", "agents_config"]
+        plays: ["Apply Host Agents"]
+        hosts: "{{ _host_audit_drift_plan.agents }}"
+    _host_audit_drift_runs: {}
+    _host_audit_drift_vars: >-
+      {%- set v = {} -%}
+      {%- for n in host_audit_drift_forward_vars if vars[n] is defined -%}
+      {%- set _ = v.update({n: vars[n]}) -%}
+      {%- endfor -%}
+      {{ v | combine(host_audit_drift_extra_vars) }}
+
+- name: Run each Drift sub-run and parse its result
+  ansible.builtin.include_tasks: drift_subrun.yml
+  loop: "{{ _host_audit_drift_subruns }}"
+  loop_control:
+    loop_var: _drift
+    label: "{{ _drift.key }} ({{ _drift.hosts | length }}대)"
+
+- name: "[AUD-406] Build the Configuration Drift section model"
+  ansible.builtin.set_fact:
+    host_audit_drift_section: "{{ _host_audit_drift_plan | host_audit_drift_section(_host_audit_drift_runs) }}"

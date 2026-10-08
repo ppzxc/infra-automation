@@ -1,0 +1,76 @@
+---
+# ==============================================================================
+# Host Audit — Configuration Drift 하위 실행 1회 (drift.yml이 _drift 루프로 포함, #124)
+# ==============================================================================
+- name: Run one Drift sub-run when it has targets
+  when: _drift.hosts | length > 0
+  block:
+    - name: "[AUD-402] Create a runner temp file for the callback output (outside the run directory)"
+      ansible.builtin.tempfile:
+        state: file
+        suffix: ".drift-{{ _drift.key }}.json"
+      register: _host_audit_drift_tmp
+
+    - name: "[AUD-403] Run the playbook in --check --diff with the JSON callback"
+      ansible.builtin.shell: >-
+        umask 077 &&
+        timeout -k 30 {{ host_audit_drift_timeout | int }}
+        ansible-playbook
+        {% for src in ansible_inventory_sources | default([]) %}-i {{ src | quote }} {% endfor %}
+        {{ (playbook_dir ~ '/' ~ _drift.playbook) | quote }}
+        {{ _drift.args | map('quote') | join(' ') }}
+        --check --diff
+        -e {{ ({'target_hosts': _drift.hosts | join(',')} | combine(_host_audit_drift_vars)) | to_json | quote }}
+        > {{ _host_audit_drift_tmp.path | quote }} 2> {{ (_host_audit_drift_tmp.path ~ '.err') | quote }}
+      args:
+        chdir: "{{ playbook_dir }}/.."
+      environment:
+        ANSIBLE_STDOUT_CALLBACK: ansible.posix.json
+        # timer only prints after the JSON document; profile_tasks would interleave lines with it.
+        ANSIBLE_CALLBACKS_ENABLED: ansible.posix.timer
+        ANSIBLE_FORCE_COLOR: "0"
+        VAULT_ADDR: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR'), true), true) }}"
+        VAULT_NAMESPACE: "{{ vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE'), true), true) }}"
+        VAULT_MOUNT: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT'), true), true) }}"
+        VAULT_ROLE_ID: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID'), true), true) }}"
+        VAULT_SECRET_ID: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID'), true), true) }}"
+        VAULT_TOKEN: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN'), true), true) }}"
+      register: _host_audit_drift_cmd
+      # ansible-playbook exits non-zero when a host failed or was unreachable; that is a per-host
+      # result in the JSON, not a sub-run failure. A missing/unparsable document is judged in AUD-405.
+      failed_when: false
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: "[AUD-404] Read the sub-run stderr tail for the report reason"
+      ansible.builtin.command: tail -n 5 {{ (_host_audit_drift_tmp.path ~ '.err') | quote }}
+      register: _host_audit_drift_err
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: "[AUD-405] Parse the sub-run result into per-host Drift rows"
+      ansible.builtin.set_fact:
+        _host_audit_drift_runs: "{{ _host_audit_drift_runs | combine({_drift.key: _run}) }}"
+      vars:
+        _rc: "{{ _host_audit_drift_cmd.rc | default(-1) }}"
+        _parsed: "{{ lookup('ansible.builtin.file', _host_audit_drift_tmp.path) | host_audit_drift_parse(_drift.hosts, _drift.plays, host_audit_drift_ignore) }}"
+        _run:
+          ran: "{{ (_rc | int) not in [124, 137, -1] }}"
+          rc: "{{ _rc | int }}"
+          error: >-
+            {{ ('시간 초과(' ~ host_audit_drift_timeout ~ '초)') if (_rc | int) in [124, 137]
+               else ('하위 실행 실패(rc=' ~ _rc ~ '): ' ~ (_host_audit_drift_err.stdout_lines | default([]) | last | default('')))
+               if _parsed.status != 'ok' else '' }}
+          parsed: "{{ _parsed }}"
+
+  always:
+    - name: "[AUD-407] Remove the callback output (holds raw diff text)"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ _host_audit_drift_tmp.path | default('') }}"
+        - "{{ (_host_audit_drift_tmp.path | default('')) ~ '.err' }}"
+      when: _host_audit_drift_tmp.path is defined

@@ -269,6 +269,20 @@
   loop: "{{ system_limits }}"
   when: not (_raw_path_effective | default(false) | bool)
 
+# The drop-in directory does not exist on a stock Rocky/Ubuntu install, and COMMON-017's
+# failed_when: false hid the resulting copy failure, so the retention file was never written.
+# Configuration Drift (#124) surfaced it: --check reported the file as missing on converged hosts.
+- name: "[COMMON-017-DIR] Ensure the Systemd Journald drop-in directory exists"
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
+
 - name: "[COMMON-017] Configure Systemd Journald retention limits"
   ansible.builtin.copy:
     dest: /etc/systemd/journald.conf.d/99-retention.conf

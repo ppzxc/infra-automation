@@ -492,3 +492,53 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 | `AUD-516` | `Fail the run when the Audit Baseline lookup or keeping the originals failed` | `ansible.builtin.assert` | 러너 | 파일 이름·상태만 표시 |
 
 검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.
+## 12. Configuration Drift (#124)
+
+Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호스트 실제 상태의 차이(CONTEXT.md Configuration Drift, ADR-0009 §1). 직전 Host Audit과의 차이는 Drift가 아니다(Audit Baseline 비교, #125).
+
+- **방식**: 보고서 플레이(러너 localhost)가 두 플레이북을 `--check --diff`로 하위 실행한다(`tasks/drift.yml`, `tasks/drift_subrun.yml`). `ansible.posix.json` 콜백 결과에서 선언 플레이의 `changed` 태스크를 호스트별 행(SPEC-ID, 태스크 이름, 요약)으로 만든다. check 모드는 관리 상태를 바꾸지 않는다(#117, `tests/test_check_mode_read_only.py`).
+
+  | 하위 실행 | 명령 | 대상(감사 대상과의 교집합) | 행을 만드는 플레이 |
+  |---|---|---|---|
+  | 프로비저닝 | `site.yml --check --diff` | `host_audit_drift_site_pattern` (`servers:loadbalancers`) | `Provision Baseline On-Premise Target Hosts` |
+  | Host Agents Config | `host_agents.yml --tags agents_config --check --diff` | `host_audit_drift_agents_pattern` (`servers:!host_agents_excluded`) | `Apply Host Agents` |
+
+- **인증**: 하위 실행은 평소 Semaphore 실행과 같은 경로로 접속한다. 각 플레이북이 자기 `resolve_connection`·`cleanup_connection` 플레이를 돌리고, 같은 인벤토리 소스(`ansible_inventory_sources`를 `-i`로)와 같은 OpenBao 자격증명을 쓴다. 자격증명(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`·`VAULT_TOKEN`·`VAULT_ADDR`·`VAULT_NAMESPACE`·`VAULT_MOUNT`)은 이번 실행의 변수(Semaphore Secret extra var) 또는 환경 변수에서 읽어 **하위 프로세스 환경 변수로만** 넘긴다. 명령줄과 파일에는 남기지 않고 태스크는 `no_log`다. 그래서 Host Audit 템플릿의 AppRole 정책은 Deploy·Config와 같은 KV 경로(`hosts/<host>`, `users/*`, `hosts/<host>/agents`, `agents/*`)를 읽을 수 있어야 한다. 비밀이 아닌 실행 변수는 `host_audit_drift_forward_vars`(기본 `bootstrap_user`, `target_admin_users`)에 정의돼 있으면 넘기고, 더 필요한 값은 `host_audit_drift_extra_vars`로 준다.
+- **diff 원문 미보관**: 콜백 출력에는 diff 원문(파일 내용)이 있어 비밀값이 있을 수 있다. 러너 임시 파일(실행 디렉터리 밖, `0600`)에 받아 해석한 뒤 `always`에서 지운다. 행 요약에는 경로, 추가·삭제 줄 수, 바뀌는 속성 이름, 반복 항목 수만 남는다. `no_log` 태스크는 '비공개(no_log)'로만 나온다. 핸들러 결과는 바뀐 태스크의 결과일 뿐이라 행을 만들지 않는다.
+- **점검불가**:
+  - Raw Provisioning Path 호스트(CentOS 6/7, 인벤토리 `raw_provisioning_path`가 우선)는 하위 실행에 넣지 않고 '점검불가'와 이유(raw 태스크는 `--check`에서 스킵, ADR-0005)로 표시한다.
+  - Host Audit 수집 단계에서 점검불가였던 호스트는 하위 실행에서 뺀다(이유는 이미 요약의 점검불가 표에 있다).
+  - 하위 실행 안에서 접속 실패·태스크 실패·결과 없음인 호스트는 그 하위 실행에 대해 '점검불가'와 이유로 표시한다. 실패한 태스크 뒤의 태스크는 판정되지 않았다는 뜻이다.
+  - 하위 실행이 통째로 실패하면(시간 초과 `host_audit_drift_timeout`, JSON 해석 불가) 그 하위 실행 부분만 점검불가로 표시하고 Host Audit 실행은 계속된다.
+- **보고서**: 3장 Configuration Drift — 하위 실행별 결과, Drift 항목 표(호스트·SPEC-ID·태스크·요약·**판단(수기)** 칸), 제외 목록. 판단 칸에는 조치(선언대로 복원) / 선언 수정 / 승인된 변경 중 하나를 적는다(ISMS 2.9.1 변경관리 증적). 호스트별 부록에 Drift 건수와 점검불가 이유가 나온다.
+- **Audit Baseline(§11)**: 섹션 모델의 `baseline_findings`로 참여한다. 항목 식별자는 `<하위 실행>:<SPEC-ID>`(SPEC-ID가 없으면 `<하위 실행>:task:<태스크 이름>`)이다. 계획된 하위 실행이 모두 그 호스트를 판정한 경우에만 '점검한 호스트'로 넣어, 하위 실행 실패·시간 초과·호스트 점검불가가 직전 Drift를 '해소'로 바꾸지 않게 한다(그 경우 '확인 불가'). 노이즈로 제외한 행은 발견이 아니다.
+- **check 모드 노이즈**: 수렴된 호스트에서도 `--check`에서 매번 `changed`로 나오는 태스크는 Drift가 아니다. 고치는 것이 원칙이고, 고칠 수 없을 때만 `host_audit_drift_ignore`에 `spec_id`(또는 SPEC-ID 없는 태스크의 `task` 이름)와 `reason`을 올린다. 일치하는 행은 Drift 표에서 빠지고 '제외(check 모드 노이즈)' 표에 사유·호스트 수로 남는다.
+
+- **노이즈 점검 결과(molecule Fast, Rocky 8·9·Ubuntu 22.04, 2026-10-08)**: 수렴(converge) 직후 같은 역할(common·security·access_security)을 `--check --diff`로 다시 돌려 남는 `changed`를 찾았다. 노이즈로 제외할 태스크는 없었고, 아래는 고쳤다.
+  - `COMMON-017`: `/etc/systemd/journald.conf.d`가 기본 설치에 없어 복사가 실패했고 `failed_when: false`가 이를 가려 보존 설정이 한 번도 써지지 않았다(실제 미준수). `COMMON-017-DIR`이 디렉터리를 먼저 만들고, `VERIFY-COMMON-017`은 파일 존재를 단언한다.
+  - `SEC-006-PROBE`: check 모드에서 스킵돼 `firewalld_module_usable`이 기본값 true가 되고, CLI 폴백이 필요한 호스트(Rocky 8 테스트 이미지)에서 `SEC-006-IFACE`가 check 모드에서만 실패했다. 조회 전용이라 `check_mode: false`로 check 모드에서도 실행한다.
+  - `SEC-012`(테스트 컨테이너): audit 패키지가 없어 `/etc/audit/rules.d`가 없고 템플릿이 매번 '새 파일'로 나온다. 실제 호스트에는 auditd가 있으므로 노이즈로 제외하지 않았다. 운영 호스트에서 나오면 실제 미준수다.
+  - 한계: firewall-cmd CLI 폴백 태스크(`command`)는 check 모드에서 스킵되므로 그 호스트의 방화벽 규칙 Drift는 판정되지 않는다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `host_audit_drift_enabled` | `true` | false면 하위 실행을 건너뛴다 |
+| `host_audit_drift_site_pattern` | `servers:loadbalancers` | site.yml 하위 실행 대상 |
+| `host_audit_drift_agents_pattern` | `servers:!host_agents_excluded` | Host Agents Config 하위 실행 대상 |
+| `host_audit_drift_timeout` | `3600` | 하위 실행 하나의 최대 시간(초) |
+| `host_audit_drift_forward_vars` | `[bootstrap_user, target_admin_users]` | 정의돼 있으면 하위 실행에 넘길 실행 변수 이름 |
+| `host_audit_drift_extra_vars` | `{}` | 하위 실행에 더 넘길 비밀 아닌 변수 |
+| `host_audit_drift_ignore` | `[]` | check 모드 노이즈 제외 표식 (`spec_id` 또는 `task`, `reason`) |
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-400` | `Plan which hosts each Drift sub-run checks` | `ansible.builtin.set_fact` | 러너 | `host_audit_drift_plan` 필터 |
+| `AUD-401` | `Fix the Drift sub-run definitions` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 |
+| `AUD-402` | `Create a runner temp file for the callback output (outside the run directory)` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 임시 파일, `always`에서 삭제(AUD-407) |
+| `AUD-403` | `Run the playbook in --check --diff with the JSON callback` | `ansible.builtin.shell` | 러너 (대상 호스트에는 `--check`) | `changed_when: false`, `failed_when: false`, `timeout`으로 시간 제한, `no_log` |
+| `AUD-404` | `Read the sub-run stderr tail for the report reason` | `ansible.builtin.command` | 러너 | `changed_when: false` |
+| `AUD-405` | `Parse the sub-run result into per-host Drift rows` | `ansible.builtin.set_fact` | 러너 | `host_audit_drift_parse` 필터 |
+| `AUD-406` | `Build the Configuration Drift section model` | `ansible.builtin.set_fact` | 러너 | `host_audit_drift_section` 필터 |
+| `AUD-407` | `Remove the callback output (holds raw diff text)` | `ansible.builtin.file` | 러너 | `state: absent` |
+
+검증: pytest `tests/test_host_audit_drift.py` — 실제 `ansible.posix.json` `--check --diff` 출력(`tests/fixtures/host_audit_drift/check_callback.json`, 로컬 호스트 대상 check 실행으로 생성)에서 SPEC-ID 행, 준수·스킵 태스크 제외, diff 원문·no_log 내용 미포함, 실패·접속 실패 호스트, 선언 플레이만 행 생성, 핸들러 제외, 노이즈 제외 표식, Raw 경로·수집 실패 호스트 계획, 하위 실행 실패 시 부분 점검불가, 보고서 모델·템플릿(판단 칸). 하위 실행은 OpenBao 접속이 필요해 molecule 범위 밖이다.

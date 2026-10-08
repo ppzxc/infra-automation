@@ -90,3 +90,28 @@ host_audit_storage_ca_file: ""
 
 # S3 요청 하나의 최대 시간(초).
 host_audit_storage_timeout: 60
+# --- Configuration Drift (#124) ---------------------------------------------------------------
+# 러너가 site.yml과 host_agents.yml(--tags agents_config)을 --check --diff로 하위 실행해, Git 선언과
+# 다른(바뀔) 태스크를 호스트별 SPEC-ID 행으로 싣는다. false면 하위 실행을 건너뛴다.
+host_audit_drift_enabled: true
+
+# 하위 실행이 선언 상태를 갖는 대상(감사 대상과의 교집합). site.yml은 servers·loadbalancers,
+# Host Agents는 servers에서 Host Agents Exclusion을 뺀 집합이다(각 플레이북의 기본 대상과 같다).
+host_audit_drift_site_pattern: "servers:loadbalancers"
+host_audit_drift_agents_pattern: "servers:!host_agents_excluded"
+
+# 하위 실행 하나의 최대 시간(초). 넘으면 그 하위 실행 부분만 점검불가로 표시하고 실행은 계속한다.
+host_audit_drift_timeout: 3600
+
+# 하위 실행에 그대로 넘길 실행 변수(site.yml을 평소 실행할 때 템플릿에 주는 비밀 아닌 값).
+# 아래 이름은 이번 실행에 정의돼 있으면 자동으로 넘긴다. 비밀값은 여기 두지 않는다
+# (OpenBao 자격증명은 하위 프로세스 환경 변수로만 넘긴다).
+host_audit_drift_forward_vars:
+  - bootstrap_user
+  - target_admin_users
+host_audit_drift_extra_vars: {}
+
+# check 모드 노이즈 제외 표식. 정상(수렴된) 호스트에서도 --check에서 매번 changed로 나오는 태스크는
+# 고치는 것이 원칙이고, 고칠 수 없을 때만 여기에 사유와 함께 올린다. 일치하는 행은 Drift에서 빠지고
+# 보고서에 '제외'로 사유와 건수가 남는다.   spec_id: "COMMON-001"  또는  task: "<SPEC-ID 없는 태스크 이름>"
+host_audit_drift_ignore: []
