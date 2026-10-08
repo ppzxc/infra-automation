@@ -11,14 +11,21 @@ Public entry points:
 """
 
 import ipaddress
+import os
+import sys
 from datetime import datetime, timezone
+
+# Section modules live beside this file; Ansible's plugin loader does not put
+# filter_plugins/ on sys.path, so add it before importing them.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from host_audit_inventory import inventory_section  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover - Python < 3.9 runner
     ZoneInfo = None
 
-RECORD_SCHEMA_VERSION = 1
+RECORD_SCHEMA_VERSION = 2
 PROBE_BEGIN = '__HOST_AUDIT_BEGIN__'
 PROBE_END = '__HOST_AUDIT_END__'
 REPORT_TIMEZONE = 'Asia/Seoul'
@@ -39,7 +46,7 @@ UNASSIGNED = '미지정'
 OUT_OF_SCOPE = '네트워크 장비(cisco_switches) 등 Linux 관리 호스트 외 자산'
 METHOD = ('러너에서 관리 계정으로 SSH 접속해 읽기 전용 명령(ansible.builtin.raw)만 실행. '
           '호스트에 프로그램을 설치하거나 설정을 바꾸지 않음.')
-CONTENTS = ['Asset Inventory — 식별(Inventory Hostname, FQDN, IP, 환경), 운영 체제']
+CONTENTS = ['Asset Inventory — 식별, OS·EOL, 하드웨어, 운영, 패키지, listening 포트, 계정·특수권한, Host Agents']
 SCOPE_GROUPS = 'servers · loadbalancers · overseer'
 
 
@@ -216,6 +223,8 @@ def host_audit_report_model(records, meta):
          'reason': record.get('reason') or '-'}
         for record, row in rows if not row['inspected']
     ]
+    asset_inventory = inventory_section([record for record, _ in rows], dict(meta, timezone=tz_name))
+    unavailable += asset_inventory['unavailable']
     accounts = sorted({(r.get('identity') or {}).get('account') for r, _ in rows} - {None, ''})
     run_kind = meta.get('run_kind') or 'on_demand'
     target_hosts = meta.get('target_hosts') or ''
@@ -245,6 +254,8 @@ def host_audit_report_model(records, meta):
         },
         'unavailable': unavailable,
         'inventory': [row for _, row in rows],
+        'hosts': [row['host'] for _, row in rows],
+        'asset_inventory': asset_inventory,
     }
 
 

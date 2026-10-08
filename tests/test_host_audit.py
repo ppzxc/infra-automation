@@ -64,7 +64,7 @@ def ok_probe(stdout):
 def test_record_from_modern_host_keeps_identity_and_os():
     rec = host_audit_host_record(ok_probe(ROCKY9_STDOUT), "ns0332", DECLARED, COLLECTED_AT)
 
-    assert rec["schema_version"] == 1
+    assert rec["schema_version"] == 2
     assert rec["status"] == "ok" and rec["reason"] == ""
     assert rec["collected_at"] == COLLECTED_AT
     assert rec["declared"] == DECLARED
@@ -224,7 +224,11 @@ def test_collection_targets_follow_spec_and_raw_probe_is_read_only():
     play_file = ROOT_DIR / "playbooks" / "host_audit.yml"
     plays = yaml.safe_load(play_file.read_text(encoding="utf-8"))
     defaults = yaml.safe_load((ROOT_DIR / "roles" / "host_audit" / "defaults" / "main.yml").read_text(encoding="utf-8"))
-    tasks = yaml.safe_load((ROOT_DIR / "roles" / "host_audit" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    tasks_dir = ROOT_DIR / "roles" / "host_audit" / "tasks"
+    tasks = []
+    for t in yaml.safe_load((tasks_dir / "main.yml").read_text(encoding="utf-8")):
+        included = t.get("ansible.builtin.include_tasks")
+        tasks += yaml.safe_load((tasks_dir / included).read_text(encoding="utf-8")) if included else [t]
 
     assert defaults["host_audit_scope_pattern"] == "servers:loadbalancers:overseer"
     assert defaults["host_audit_run_kind"] == "on_demand"

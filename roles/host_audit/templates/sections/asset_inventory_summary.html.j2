@@ -1,0 +1,8 @@
+{#- Asset Inventory 요약 경고 띠 (#120): 지원 종료(EOS) OS 호스트. 모델을 그리기만 한다. -#}
+{%- set ai = m.asset_inventory -%}
+{% if ai.eos %}
+  <div class="note keep" style="border-left-color:var(--crit);"><b class="crit">지원 종료(EOS) 운영 체제 {{ ai.eos | length }}대</b> — 보안 업데이트가 더 이상 제공되지 않습니다.
+    {% for e in ai.eos %}<br><span class="nowrap">{{ e.host | e }}</span>: {{ e.os | e }} (지원 종료 {{ e.date | e }}){% endfor %}
+  </div>
+{% endif %}
+  <p class="small mute">Asset Inventory: 선언 외 특수권한자 {{ ai.counts.not_declared }} · 장기 미사용 계정 {{ ai.counts.inactive }} · 선언 미지정 호스트 {{ ai.counts.unassigned_hosts }} · EOS {{ ai.counts.eos }}</p>

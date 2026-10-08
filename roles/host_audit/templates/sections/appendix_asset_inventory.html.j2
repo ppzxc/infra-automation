@@ -1,0 +1,57 @@
+{#- 호스트별 부록 — Asset Inventory 8개 영역 (#120). 모델을 그리기만 한다. -#}
+{%- set h = m.inventory[host_index] -%}
+{%- set a = m.asset_inventory.hosts[host_index] -%}
+  <h3 class="small">Asset Inventory</h3>
+  <div class="kv keep">
+    <div>식별</div><div>{{ h.fqdn | e }} · {{ h.ips | e }} · 환경 {{ h.environment | e }}</div>
+{% for f in a.declared %}
+    <div>{{ f.label | e }}</div><div>{% if f.unassigned %}<span class="tag na">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</div>
+{% endfor %}
+    <div>운영 체제</div><div>{{ h.os | e }} · {{ h.kernel_arch | e }}{% if a.eol %} · <span class="tag {{ 'crit' if a.eol.status in ['eos', 'soon'] else ('ok' if a.eol.status == 'supported' else 'na') }}">{{ a.eol.label | e }}</span> {{ a.eol.date | e }}{% endif %}</div>
+{% if a.collected %}
+    <div>하드웨어</div><div>{{ a.hardware.cpu | e }} · 메모리 {{ a.hardware.memory | e }} · {{ a.hardware.dmi | e }} · 시리얼 {{ a.hardware.serial | e }}</div>
+    <div>운영</div><div>가동 {{ a.operation.uptime | e }} · 마지막 부팅 {{ a.operation.boot | e }} · 시간 동기화 {{ a.operation.timesync | e }} ({{ a.operation.timesync_tools | e }})</div>
+    <div>패키지</div><div>{{ a.packages.manager | e }} {{ a.packages.count }}개 · 최종 갱신 {{ a.packages.last_update | e }}</div>
+    <div>Host Agents</div><div>{{ a.host_agents | e }}</div>
+{% else %}
+    <div>상세</div><div><span class="tag na">점검불가</span> {{ (a.reason or h.status_label) | e }}</div>
+{% endif %}
+  </div>
+{% if a.collected %}
+  <table>
+    <thead><tr><th>마운트</th><th>파일시스템</th><th>크기</th><th>사용률</th></tr></thead>
+    <tbody>
+{% for d in a.hardware.disks %}
+      <tr><td>{{ d.mount | e }}</td><td>{{ d.fstype | e }}</td><td>{{ d.size | e }}</td><td>{{ d.used_pct | e }}</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+  <table>
+    <thead><tr><th>주요 패키지</th><th>설치 버전</th></tr></thead>
+    <tbody>
+{% for p in a.packages.key %}
+      <tr><td class="nowrap">{{ p.name | e }}</td><td class="small">{{ p.versions | e }}</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+  <table>
+    <thead><tr><th>프로토콜</th><th>주소</th><th>포트</th><th>프로세스</th></tr></thead>
+    <tbody>
+{% for p in a.ports %}
+      <tr><td>{{ p.proto | e }}</td><td class="small">{{ p.address | e }}</td><td>{{ p.port }}</td><td class="small">{{ p.process | e }}</td></tr>
+{% else %}
+      <tr><td colspan="4" class="small mute">listening 포트 없음</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+  <table>
+    <thead><tr><th>계정</th><th>UID</th><th>셸</th><th>비밀번호</th><th>특수권한</th><th>마지막 로그인</th><th>판정</th></tr></thead>
+    <tbody>
+{% for u in a.accounts %}
+      <tr><td class="nowrap">{{ u.name | e }}</td><td>{{ u.uid if u.uid is not none else '-' }}</td><td class="small">{{ u.shell | e }}</td><td class="small">{{ u.password | e }}</td>
+        <td class="small">{{ u.privilege | e }}{% if u.nopasswd %} <span class="tag crit">NOPASSWD</span>{% endif %}</td><td class="small">{{ u.last_login | e }}</td>
+        <td>{% for f in u.flags %}<span class="tag crit">{{ f | e }}</span> {% endfor %}</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% endif %}
