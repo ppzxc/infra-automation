@@ -25,5 +25,6 @@
 * Host Agents — Deploy 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상
 * [Log Structuring ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md) - 엣지 Envelope Parsing + 중앙(OpenObserve VRL·알림) 의미 해석
 * [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일
+* [Host Audit 태스크 명세](host_audit.md) - 실행 흐름, 호스트별 JSON 구조(schema_version 1), 변수, AUD-xxx 태스크 매트릭스
 * [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 (CIS 감사 파일럿은 ADR-0009로 대체·제거)
 

@@ -44,6 +44,8 @@ provisioner:
     # this project's ansible.cfg, so roles_path must be pointed at the real
     # roles/ directory explicitly.
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
+    # verify runs the host_audit collection, whose filters live in the project's filter_plugins/.
+    ANSIBLE_FILTER_PLUGINS: "${MOLECULE_PROJECT_DIRECTORY}/filter_plugins"
     SCENARIO_ROLES: "common,security,access_security"
     ANSIBLE_CALLBACKS_ENABLED: "ansible.posix.timer,ansible.posix.profile_tasks"
     # Per-task overhead (one `docker exec` + module transfer each) dominates

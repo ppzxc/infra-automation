@@ -1,0 +1,51 @@
+---
+# ==============================================================================
+# Host Audit — 보고서 (러너 localhost 전용, ADR-0009)
+# ==============================================================================
+# 러너에 저장된 호스트별 JSON만 입력으로 보고서 모델을 만들고(host_audit_report_model),
+# 템플릿은 모델을 그리기만 한다. 수집 전에 실패한 대상(접속 정보 해석 실패 등)은
+# 기록이 없어도 대상 목록(host_audit_targets)으로 보고서에 '점검불가'로 남는다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-020] Find the per-host records of this run"
+  ansible.builtin.find:
+    paths: "{{ host_audit_run.output_dir }}/hosts"
+    patterns: "*.json"
+  register: _host_audit_record_files
+
+- name: "[AUD-021] Build the report model from the per-host records"
+  ansible.builtin.set_fact:
+    host_audit_model: "{{ _records | host_audit_report_model(_meta) }}"
+  vars:
+    _records: >-
+      {%- set r = [] -%}
+      {%- for p in _host_audit_record_files.files | map(attribute='path') | sort -%}
+      {%- set _ = r.append(lookup('ansible.builtin.file', p) | from_json) -%}
+      {%- endfor -%}
+      {{ r }}
+    _meta:
+      run_id: "{{ host_audit_run.run_id }}"
+      run_kind: "{{ host_audit_run.run_kind }}"
+      started_at: "{{ host_audit_run.started_at }}"
+      generated_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+      targets: "{{ groups['host_audit_targets'] | default([]) }}"
+      target_hosts: "{{ host_audit_run.target_hosts }}"
+      archive: "{{ host_audit_run.output_dir }} (러너 로컬)"
+      timezone: "{{ host_audit_run.timezone }}"
+
+- name: "[AUD-022] Save the run metadata on the runner"
+  ansible.builtin.copy:
+    content: "{{ host_audit_run | combine({'targets': groups['host_audit_targets'] | default([])}) | to_nice_json(indent=2) }}\n"
+    dest: "{{ host_audit_run.output_dir }}/run.json"
+    mode: '0600'
+
+- name: "[AUD-023] Render the A4 report HTML"
+  ansible.builtin.template:
+    src: report.html.j2
+    dest: "{{ host_audit_run.output_dir }}/report.html"
+    mode: '0600'
+
+- name: "[AUD-024] Show where the report was written"
+  ansible.builtin.debug:
+    msg:
+      report: "{{ host_audit_run.output_dir }}/report.html"
+      hosts: "{{ host_audit_model.summary }}"

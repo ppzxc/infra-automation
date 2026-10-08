@@ -1,0 +1,51 @@
+---
+# ==============================================================================
+# Host Audit — 실행 준비 (러너 localhost 전용, ADR-0009)
+# ==============================================================================
+# 실행 ID·시작 시각·출력 디렉터리를 실행당 한 번만 정하고, 점검 대상을
+# 인메모리 그룹 host_audit_targets로 고정한다. 이후 플레이는 이 그룹만 본다.
+# 대상 = host_audit_scope_pattern(servers:loadbalancers:overseer) ∩ target_hosts.
+# Host Agents Exclusion 호스트도 대상이다(Host Audit은 모든 관리 호스트를 점검).
+# ------------------------------------------------------------------------------
+- name: "[AUD-001] Assert Host Audit run kind is supported"
+  ansible.builtin.assert:
+    that:
+      - host_audit_run_kind in ['scheduled', 'on_demand']
+    fail_msg: "host_audit_run_kind는 scheduled 또는 on_demand여야 합니다 (현재: {{ host_audit_run_kind }})"
+    quiet: true
+
+- name: "[AUD-002] Fix the run start time once per run"
+  ansible.builtin.set_fact:
+    _host_audit_started_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+
+- name: "[AUD-003] Fix Host Audit run metadata"
+  ansible.builtin.set_fact:
+    host_audit_run:
+      run_id: "{{ _run_id }}"
+      run_kind: "{{ host_audit_run_kind }}"
+      started_at: "{{ _host_audit_started_at }}"
+      target_hosts: "{{ target_hosts | default('') }}"
+      output_dir: "{{ host_audit_output_root }}/{{ _run_id }}"
+      timezone: "{{ host_audit_timezone }}"
+  vars:
+    _run_id: "{{ host_audit_run_id | default('ha-' ~ (_host_audit_started_at | regex_replace('[-:]', ''))) }}"
+
+- name: "[AUD-004] Select Host Audit targets into the host_audit_targets group"
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    groups: host_audit_targets
+  loop: "{{ _in_scope | intersect(_requested) if (target_hosts | default('') | length > 0) else _in_scope }}"
+  vars:
+    _in_scope: "{{ query('ansible.builtin.inventory_hostnames', host_audit_scope_pattern) }}"
+    _requested: "{{ query('ansible.builtin.inventory_hostnames', target_hosts | default('all')) }}"
+  changed_when: false
+
+- name: "[AUD-005] Create the runner-local output directory for this run"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - "{{ host_audit_output_root }}"
+    - "{{ host_audit_run.output_dir }}"
+    - "{{ host_audit_run.output_dir }}/hosts"
