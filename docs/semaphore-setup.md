@@ -1,6 +1,6 @@
-# Semaphore 셋업 가이드 (Host Agents · OpenObserve)
+# Semaphore 셋업 가이드 (Host Agents · OpenObserve · Host Audit)
 
-> Semaphore UI에 Host Agents 템플릿 3개와 OpenObserve — Config를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
+> Semaphore UI에 Host Agents 템플릿 3개, OpenObserve — Config, Host Audit 템플릿 3개를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
 > OpenBao 구조와 공통 접속 모듈은 [openbao_integration.md](openbao_integration.md), 배포 내용은 [Host Agents 배포 내역서](host-agents-deploy-inventory-simple.md)를 본다.
 
 ---
@@ -11,9 +11,9 @@
 2. Repository: `ppzxc/infra-automation`, branch `main`
 3. Inventory: Static 인벤토리 (Semaphore UI에서 편집, `inventory/hosts.yml.example` 형식)
 4. Variable Group(Environment): OpenBao 접속 값 (모든 템플릿 공용 1개)
-5. Task Template 4개 (아래 §5)
-6. Schedule: Repo Maintenance만 (주 1회)
-7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → OpenObserve — Config
+5. Task Template 7개 (아래 §5)
+6. Schedule: Repo Maintenance(주 1회), Host Audit — Monthly(월 1회)
+7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → OpenObserve — Config → Host Audit(§7.1)
 
 ---
 
@@ -30,6 +30,10 @@
 | OpenBao, OpenObserve, RustFS로 가는 네트워크 | KV 조회, 이벤트 전송, repo 유지보수 |
 | 쓰기 가능한 `$HOME/.cache/host-agents` | 검증된 바이너리 캐시 |
 | 사설 CA를 쓴다면 러너 신뢰 저장소에 CA 등록 | OpenObserve 등록 이벤트와 Repo Maintenance는 인증서를 검증함 |
+| **Host Audit** 추가: GitHub releases(Trivy 바이너리)와 Trivy 취약점 DB 레지스트리로 나가는 HTTPS | Package Vulnerability. DB 레지스트리는 `host_audit_trivy_db_repository`로 내부 미러를 지정할 수 있다 |
+| **Host Audit** 추가: `smtp-relay.gmail.com:587` 아웃바운드, 러너의 공인 IP가 Workspace relay 허용 IP에 등록 | 메일 발송(IP 인증, STARTTLS) — [SMTP 릴레이 확보](https://github.com/ppzxc/infra-automation/issues/105) |
+| **Host Audit** 추가: 실행 사이에 유지되는 `$HOME/.cache/host-audit`(또는 `host_audit_cache_dir`) | Trivy 바이너리·DB 캐시. 유지되지 않으면 DB 갱신 실패 시 7일 캐시 규칙이 동작하지 않아 Package Vulnerability가 점검불가로 나온다 |
+| **Host Audit** 추가: `timeout` 명령, 메모리 1024M 이상 | Trivy DB 갱신 시간 제한, Trivy 판정(호스트마다 순차) |
 
 Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로그의 `Starting galaxy collection install process`로 Semaphore가 설치하는 것을 확인할 수 있다.
 
@@ -101,9 +105,9 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 | 경로 | 쓰는 템플릿 |
 |---|---|
-| `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config (SSH 접속) |
-| `hosts/<host>/agents` | Deploy, Config, Repo Maintenance |
-| `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config |
+| `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config, Host Audit (SSH 접속) |
+| `hosts/<host>/agents` | Deploy, Config, Repo Maintenance, Host Audit (Configuration Drift의 Config `--check` 하위 실행) |
+| `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config, Host Audit (Configuration Drift) |
 | `agents/rustfs` | Deploy, Config, Repo Maintenance, Host Audit(엔드포인트) |
 | `agents/host_audit` | Host Audit, Host Audit — Resend (전용 보관 키 `storage_access_key`/`storage_secret_key`, 선택 `storage_bucket`·`storage_endpoint`·`storage_region` — [host_audit.md §11](host_audit.md#11-보관과-audit-baseline-125); 메일 수신자 `mail_to`·발신자 `mail_from` — [host_audit.md §13](host_audit.md#13-메일-발송-126)) |
 
@@ -124,7 +128,22 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | 수동 | `servers` |
 | Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
 | OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | 수동 | localhost (OpenObserve API) |
+| Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함) |
+| Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
 | Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | 수동 | localhost (Host Audit 버킷 → 메일) |
+
+**Host Audit — Monthly와 On-demand** ([host_audit.md](host_audit.md), ADR-0009)
+
+- 둘은 같은 플레이북이고 실행 종류만 다르다. **Monthly의 결과만 Audit Baseline이 된다.** 다음 정기 실행이 이 결과와 비교해 신규·지속·해소·재발을 표시한다. On-demand(기본값 `on_demand`)는 보관·발송되지만 기준선이 되지 않는다.
+- `host_audit_run_kind=scheduled`는 Monthly 템플릿의 CLI args에만 고정한다. On-demand에 넣거나 Extra variables로 넘기지 않는다. 부분 대상(`target_hosts`)으로 돈 실행이 기준선이 되면 다음 정기 실행에서 나머지 호스트의 발견이 모두 '신규'로 나온다.
+- Monthly 템플릿을 수동 **Run**하는 것은 그 달 정기 실행이 실패했을 때 다시 돌리는 경우만이다. 그 실행도 기준선이 된다.
+- On-demand에서 쓸 수 있는 Extra variables:
+  - `{"target_hosts": "ns0266,ns0270"}`: 대상 좁히기(Inventory Hostname)
+  - `{"host_audit_mail_to": "a@example.com"}`: 이번 실행만 수신자 덮어쓰기(로그에 나오지 않는다)
+  - `{"host_audit_mail_enabled": false}`, `{"host_audit_storage_enabled": false}`: 시험 실행. 보관을 끄면 비교하지 않고 러너 로컬에만 남는다
+  - `{"host_audit_drift_enabled": false}`, `{"host_audit_packages_enabled": false}`: 해당 섹션 수집·판정을 건너뛴다(정기 실행에는 쓰지 않는다)
+- Host Audit은 `--check`로 돌리지 않는다. 그 자체가 읽기 전용이고, check 모드에서는 보관·발송을 하지 않는다.
+- Variable Group은 §4의 것을 그대로 쓴다. Configuration Drift가 `site.yml`·Host Agents Config를 하위 실행하므로 AppRole이 Deploy·Config와 같은 KV 경로를 읽을 수 있어야 한다(§4 표).
 
 **Host Audit 보고서 다시 보내기 (Host Audit — Resend)**
 
@@ -152,7 +171,9 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 ---
 
-## 6. Schedule (Repo Maintenance)
+## 6. Schedule
+
+### 6.1 Repo Maintenance
 
 | 항목 | 값 |
 |---|---|
@@ -164,7 +185,19 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 - "첫째 일요일" 판정(10% 읽기 검사)은 플레이북이 `backup_maintenance_timezone: Asia/Seoul` 기준 날짜로 한다. 스케줄을 UTC 토요일 20:00으로 잡아도 KST로는 일요일이라 판정이 맞다.
 - 호스트의 백업은 KST 02:00~03:59에 돈다. 그래서 05:00 유지보수와 겹치지 않는다.
 
-Deploy, Config, OpenObserve — Config는 스케줄을 걸지 않는다.
+### 6.2 Host Audit — Monthly
+
+| 항목 | 값 |
+|---|---|
+| Template | Host Audit — Monthly |
+| 의도한 시각 | 매월 1일 07:00 **KST** |
+| Cron | Semaphore 스케줄 시간대가 **Asia/Seoul**이면 `0 7 1 * *`. 기본값인 **UTC**면 07:00 KST가 전달 말일 22:00 UTC라 표준 cron으로 표현할 수 없으므로 `0 0 1 * *`(1일 09:00 KST)로 잡는다 |
+
+- 저장하기 전에 **Next run**이 KST 1일 07:00(또는 09:00)인지 확인한다. 보관 경로의 월(`<YYYY-MM>/`)은 KST 기준 실행 시작 월이다.
+- 07:00은 호스트 백업(KST 02:00~03:59)과 Repo Maintenance(일요일 05:00)가 끝난 뒤다. Configuration Drift 하위 실행이 대상 수에 비례해 오래 걸릴 수 있다(`host_audit_drift_timeout` 기본 3600초).
+- **점검 주기**: ISMS 2.11.2(취약점 점검 및 조치)는 정기 점검을 요구한다. 내부 지침에는 **분기 1회 이상** 점검하고 결과를 결재·보관하도록 정하고, 그 이행 수단으로 **월 1회 자동 실행**(이 스케줄)을 둔다. 월 보고서 중 분기마다 최소 한 부는 결재란에 서명해 ISMS 증적 보관 위치에 둔다.
+
+Deploy, Config, OpenObserve — Config, Host Audit — On-demand, Host Audit — Resend는 스케줄을 걸지 않는다.
 
 ---
 
@@ -180,6 +213,22 @@ Deploy, Config, OpenObserve — Config는 스케줄을 걸지 않는다.
 
 OpenObserve에서 `backup_logs` 스트림에 `job=inventory`, `job=backup`(다음 날 새벽), `job=maintenance` 이벤트가 들어오는지 확인한다.
 
+### 7.1 Host Audit 첫 실행
+
+준비: RustFS `host-audit` 버킷과 전용 키([host_audit.md §11.5](host_audit.md#115-버킷-준비-운영자-1회)), OpenBao `agents/host_audit`의 보관 키·`mail_to`·`mail_from`(§4), [SMTP 릴레이 확보](https://github.com/ppzxc/infra-automation/issues/105).
+
+| 순서 | 실행 | 확인 |
+|---|---|---|
+| 1 | On-demand + `target_hosts=<1대>` + `host_audit_storage_enabled=false` + `host_audit_mail_enabled=false` | 접속, 수집, 보고서 생성(`AUD-024` 경로). 4개 섹션이 모두 나오는지, 점검불가 사유 확인 |
+| 2 | On-demand + `target_hosts=<1대>` | 버킷 `<YYYY-MM>/<run_id>/` 업로드, 메일 수신, 본문의 SHA-256 = 첨부 해시, 로그에 수신자 주소 0건 |
+| 3 | Resend + `host_audit_resend_run_id=<2의 run_id>` | 같은 해시로 재발송 |
+| 4 | On-demand(전체) | 실행 시간, 러너 메모리, CentOS 6/7·Host Agents Exclusion 호스트가 보고서에 있는지 |
+| 5 | Configuration Drift 노이즈 정리 | [Configuration Drift 티켓](https://github.com/ppzxc/infra-automation/issues/124) 댓글의 절차(수렴 호스트에 두 번 실행, 남는 행은 고치거나 `host_audit_drift_ignore`) |
+| 6 | Monthly 템플릿 수동 Run 1회 | 첫 Audit Baseline. 표지의 비교 기준이 '첫 실행', 버킷에 `baseline/<run_id>.json` 생성 |
+| 7 | 다음 달 1일 스케줄 실행 | 비교 기준이 6의 run_id, 신규·지속·해소·재발 표시 |
+
+첫 정기 보고서(6)는 출력해 검토·결재란에 서명하고 ISMS 증적 보관 위치에 둔다. 결과(run_id, 보관 경로)는 [Semaphore 구성과 첫 운영 실행 티켓](https://github.com/ppzxc/infra-automation/issues/127)에 기록한다.
+
 ---
 
 ## 8. 자주 겪는 문제
@@ -194,3 +243,6 @@ OpenObserve에서 `backup_logs` 스트림에 `job=inventory`, `job=backup`(다�
 | `유지보수 필수 입력 누락: hosts/<host>/agents.restic_password` | Host Agents가 적용되지 않은 호스트다 | 적용 전이면 `host_agents_excluded` 그룹에 넣는다 |
 | CentOS 6/7 업로드 실패(MON-109) | 러너에 `sshpass`가 없다 | 러너 이미지에 설치 |
 | 대상이 0대로 끝난다 | `target_hosts`가 `servers` 밖이거나, FQDN으로 입력했거나, `host_agents_excluded`에 속한 호스트다 | Inventory Hostname으로 입력, 제외 그룹 확인 |
+| Host Audit 보고서는 만들어졌는데 실행이 실패로 끝난다 | 보관(업로드·Audit Baseline 조회) 또는 메일 단계 실패. 보고서는 러너에 남고, 업로드됐다면 버킷에도 있다 | 로그의 `AUD-5xx`/`AUD-6xx` 메시지 확인. 메일만 실패했으면 Resend로 다시 보낸다 |
+| Package Vulnerability가 매번 점검불가 | Trivy DB 갱신 실패 + 7일 이내 캐시 없음(러너 `HOME`이 실행마다 초기화) | DB 레지스트리 접근 확인, `host_audit_cache_dir`를 유지되는 경로로, 또는 `host_audit_trivy_db_repository`로 내부 미러 |
+| 비교 기준이 매달 '첫 실행'으로 나온다 | 정기 실행이 실패해 `baseline/` 포인터가 생기지 않았거나, Monthly 템플릿에 `-e host_audit_run_kind=scheduled`가 빠졌다 | §5 Monthly CLI args 확인, 실패 원인 해결 후 Monthly 수동 Run |

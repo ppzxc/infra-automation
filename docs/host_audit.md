@@ -1,6 +1,6 @@
 # Host Audit Role Task Specification
 
-> **상태: 뼈대(#119) + Asset Inventory(#120).** [ADR-0009](adr/0009-host-audit-read-only-inspection.md)의 Host Audit 실행 흐름(대상 확정 → 접속 해석 → 호스트별 읽기 전용 수집 → 보고서 모델 → HTML)을 가장 얇게 관통한다. 지금은 식별(Inventory Hostname, FQDN, IP, 환경)과 운영 체제만 수집하고, 보고서는 러너 로컬에만 남긴다. 나머지 Asset Inventory 항목, Configuration Drift, Configuration Vulnerability, Package Vulnerability, Audit Baseline 비교, RustFS 보관, 메일은 [스펙 #115](https://github.com/ppzxc/infra-automation/issues/115)의 후속 티켓이 이 뼈대에 붙인다.
+> **상태: 구현 완료(#119~#126), 첫 운영 실행 대기(#127).** [ADR-0009](adr/0009-host-audit-read-only-inspection.md)의 Host Audit — 대상 확정 → 접속 해석 → 호스트별 읽기 전용 수집(Asset Inventory, Configuration Vulnerability KISA-2026 U-01~U-67, Package Vulnerability) → Configuration Drift 하위 실행 → 보고서 모델 → A4 HTML → RustFS 보관·Audit Baseline 비교 → 메일. Semaphore 템플릿·스케줄·첫 실행 순서는 [semaphore-setup.md §5~§7](semaphore-setup.md#5-task-template).
 
 ---
 
