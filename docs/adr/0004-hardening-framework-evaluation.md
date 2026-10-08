@@ -1,6 +1,6 @@
 # 4. Evaluation and Adoption Strategy for Security Hardening Frameworks (`dev-sec` & `ansible-lockdown`)
 
-- **Status**: Accepted
+- **Status**: Accepted — 결정 1(CIS 감사 파일럿)·3(Remediation 로드맵)은 [ADR-0009](0009-host-audit-read-only-inspection.md)로 대체(Superseded)
 - **Date**: 2026-09-03
 - **Deciders**: Overseer Engineering Team & User
 - **Context**: On-Premise Target Server Security Baseline & CIS Compliance Strategy
@@ -42,6 +42,7 @@
    - Rocky Linux 9 노드를 대상으로 시스템 변경 없이 취약점을 진단하는 **감사 전용 모드(`rhel9_cis_audit_only: true`)** 플레이북(`playbooks/audit_rhel9_cis.yml`)을 구성합니다.
    - 기존 무인 프로비저닝 메인 플로우(`playbooks/provision_hosts.yml`, `site.yml`)와 철저히 분리하여 운영 안정성을 보장합니다.
    - **2026-10-07 정정 — 파일럿 실행 차단**: 고정된 `ansible-lockdown.rhel9_cis` 2.4.0은 `audit_only`·`rhel9cis_rule_*`를 읽으므로, 플레이북의 `rhel9_cis_audit_only`·`rhel9_cis_rule_*`는 무시되어 감사 전용 모드도 예외 규칙도 적용되지 않습니다(CIS 교정이 실행됨). 또 2.4.0은 감사 모드에서도 git·goss를 호스트에 설치하므로 "시스템 변경 없는 진단"이라는 전제가 성립하지 않습니다. 플레이북 첫 태스크에 무조건 `ansible.builtin.fail`을 두어 실행을 막았고, Configuration Vulnerability 점검은 Host Audit([Map] #100, KISA-2026 기준)이 대체합니다. 근거: `docs/research/host-audit-configuration-vulnerability-baseline.md`(#102).
+   - **2026-10-08 — 파일럿 제거**: ADR-0009(Host Audit)가 이 파일럿을 대체하여 `playbooks/audit_rhel9_cis.yml`과 `requirements.yml`의 `ansible-lockdown.rhel9_cis` 의존성을 삭제했습니다(#118).
 
 2. **기존 역할(Security, Common) 중심의 우수 룰 내재화**:
    - `dev-sec` 및 CIS 벤치마크 중 운영 영향도가 없고 보안성을 증대시키는 안전한 커널 파라미터(`fs.protected_hardlinks`, `fs.protected_symlinks`, `kernel.randomize_va_space`)를 `roles/common/defaults/main.yml`에 선별 반영합니다.

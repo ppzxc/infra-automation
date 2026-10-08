@@ -15,8 +15,3 @@ collections:
   - name: cisco.ios
     version: ">=7.0.0"
 
-roles:
-  - name: ansible-lockdown.rhel9_cis
-    src: https://github.com/ansible-lockdown/RHEL9-CIS.git
-    version: "2.4.0"
-

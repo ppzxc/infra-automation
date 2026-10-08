@@ -123,6 +123,10 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
 | OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | 수동 | localhost (OpenObserve API) |
 
+**CIS 감사 파일럿 템플릿 삭제**
+
+`playbooks/audit_rhel9_cis.yml`은 저장소에서 제거됐다(ADR-0009, #118). Semaphore에 이 플레이북을 가리키는 템플릿을 만들어 둔 적이 있으면 프로젝트 → Task Templates에서 해당 템플릿의 스케줄을 먼저 지우고 템플릿을 삭제한다. 남겨 두면 실행 시 플레이북을 찾지 못해 실패한다.
+
 **특정 호스트만 실행할 때**
 
 - 실행 시 Extra variables로 `{"target_hosts": "ns0266"}`을 넘긴다. 값은 FQDN이 아니라 Inventory Hostname이다.

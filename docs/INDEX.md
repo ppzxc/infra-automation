@@ -24,5 +24,6 @@
 * [Semaphore 셋업 가이드](semaphore-setup.md) - Key Store·Repository·Inventory·Variable Group·Host Agents/OpenObserve 템플릿·스케줄(UTC/KST) 등록 절차와 자주 겪는 문제
 * Host Agents — Deploy 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상
 * [Log Structuring ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md) - 엣지 Envelope Parsing + 중앙(OpenObserve VRL·알림) 의미 해석
-* [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 및 파일럿 전략
+* [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일
+* [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 (CIS 감사 파일럿은 ADR-0009로 대체·제거)
 
