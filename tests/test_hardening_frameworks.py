@@ -4,54 +4,14 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-def test_requirements_includes_lockdown_role():
-    """Verify requirements.yml defines the pilot ansible-lockdown.rhel9_cis role"""
-    req_file = ROOT_DIR / "requirements.yml"
-    assert req_file.exists(), "requirements.yml missing"
-    with open(req_file, "r", encoding="utf-8") as f:
-        req_data = yaml.safe_load(f)
-
-    roles = req_data.get("roles", [])
+def test_cis_audit_pilot_removed():
+    """The CIS audit pilot (ADR-0004) is superseded by Host Audit (ADR-0009) and must not return"""
+    assert not (ROOT_DIR / "playbooks" / "audit_rhel9_cis.yml").exists()
+    req_data = yaml.safe_load((ROOT_DIR / "requirements.yml").read_text(encoding="utf-8"))
+    roles = req_data.get("roles") or []
     role_names = [r["name"] if isinstance(r, dict) else r for r in roles]
-    assert "ansible-lockdown.rhel9_cis" in role_names, "ansible-lockdown.rhel9_cis role should be listed in requirements.yml for audit pilot"
-    target_role = next(r for r in roles if (isinstance(r, dict) and r.get("name") == "ansible-lockdown.rhel9_cis"))
-    assert target_role.get("src") == "https://github.com/ansible-lockdown/RHEL9-CIS.git"
-    assert target_role.get("version") == "2.4.0"
+    assert "ansible-lockdown.rhel9_cis" not in role_names
 
-
-def test_audit_rhel9_cis_playbook_structure():
-    """Verify playbooks/audit_rhel9_cis.yml exists, is blocked from running, and isolates Rocky 9"""
-    playbook_file = ROOT_DIR / "playbooks" / "audit_rhel9_cis.yml"
-    assert playbook_file.exists(), "playbooks/audit_rhel9_cis.yml must exist"
-
-    with open(playbook_file, "r", encoding="utf-8") as f:
-        pb_data = yaml.safe_load(f)
-
-    assert isinstance(pb_data, list), "Playbook must be a list of plays"
-    assert len(pb_data) > 0, "Playbook must contain at least one play"
-
-    play = pb_data[0]
-
-    # Safety constraint: the role (2.4.0) reads `audit_only`, not `rhel9_cis_audit_only`, so the
-    # pilot would remediate. It must stay blocked by an unconditional fail before the role runs.
-    tasks = play.get("tasks", [])
-    assert len(tasks) > 0, "Playbook must have tasks"
-    first = tasks[0]
-    assert "ansible.builtin.fail" in first and "when" not in first, "Pilot playbook MUST start with an unconditional ansible.builtin.fail until Host Audit replaces it"
-    assert play.get("pre_tasks") is None and play.get("roles") is None, "Nothing may run before the blocking fail task"
-
-    # Tasks check: must include ansible-lockdown.rhel9_cis with OS guard
-
-    role_included = False
-    for task in tasks:
-        include_role = task.get("ansible.builtin.include_role") or task.get("include_role")
-        if include_role and include_role.get("name") == "ansible-lockdown.rhel9_cis":
-            role_included = True
-            when_cond = task.get("when", [])
-            when_str = str(when_cond)
-            assert "ansible_distribution_major_version" in when_str or "ansible_os_family" in when_str, "Must guard CIS role with OS version checks"
-
-    assert role_included, "Playbook must include ansible-lockdown.rhel9_cis role"
 
 def test_adr_evaluation_doc_exists():
     """Verify ADR documentation exists for hardening framework evaluation"""
@@ -61,6 +21,7 @@ def test_adr_evaluation_doc_exists():
     assert "dev-sec" in content
     assert "ansible-lockdown" in content
     assert "audit_only" in content.lower()
+    assert "ADR-0009" in content, "ADR-0004 must point to ADR-0009, which supersedes its CIS audit pilot"
 
 def test_sysctl_and_security_enhanced_params():
     """Verify safe sysctl and kernel parameters from hardening standards are incorporated in common defaults, docs, and tests"""
