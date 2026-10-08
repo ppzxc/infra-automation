@@ -77,7 +77,7 @@
 | `COMMON-014` | `Configure passwordless sudoers for admin accounts` | `ansible.builtin.copy` | All | Checksum 비교 (`validate: visudo`) |
 | `COMMON-015` | `Deploy SSH public keys for accounts` | `ansible.posix.authorized_key` | All | 공개키 등록되어 있으면 `ok` |
 | `COMMON-016` | `Configure system security limits (nofile/nproc)` | `community.general.pam_limits` | All | `/etc/security/limits.d/99-limits.conf` 한도 일치 시 `ok` |
-| `COMMON-017` | `Configure Systemd Journald retention limits` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` |
+| `COMMON-017` | `Configure Systemd Journald retention limits` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` (drop-in 디렉터리 `/etc/systemd/journald.conf.d`는 `COMMON-017-DIR`이 `0755`로 먼저 만든다) |
 | `COMMON-018` | `Deploy system-wide custom shell aliases` | `ansible.builtin.template` | All | Checksum 비교 (`aliases.sh.j2`) |
 | `COMMON-019` | `Deploy node environment variables drop-in (/etc/profile.d/98-node-env.sh)` | `ansible.builtin.template` | All | Checksum 비교 (`node-env.sh.j2`) |
 | `COMMON-020` | `Deploy system-wide environment variables (/etc/environment)` | `ansible.builtin.template` | All | Checksum 비교 (`environment.j2`) |

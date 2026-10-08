@@ -229,7 +229,7 @@
 # executables, self-contained via their own platform-python shebang) succeed
 # unconditionally. Every ansible.posix.firewalld task below therefore has a
 # firewall-cmd CLI sibling gated on this fact being false.
-- name: "[SEC-006-PROBE] Probe whether ansible.posix.firewalld's Python bindings import cleanly on the target interpreter"
+- name: "[SEC-006-PROBE] Probe whether ansible.posix.firewalld's Python bindings import cleanly on the target interpreter (read-only)"
   # ansible_python_interpreter is only defined here when a play/inventory
   # explicitly overrides it (e.g. this scenario's test-rockylinux8 host_vars,
   # which force python3.11 because the image's stock 3.6 can't parse
@@ -243,6 +243,10 @@
   register: firewalld_module_probe
   changed_when: false
   failed_when: false
+  # Runs under --check too (an import is read-only): when skipped, firewalld_module_usable
+  # defaulted to true and SEC-006-IFACE failed in check mode on hosts that need the CLI
+  # fallback, so Configuration Drift (#124) could not judge them.
+  check_mode: false
   when:
     - ansible_os_family == "RedHat" and (ansible_distribution_major_version | int >= 7)
     - not (_raw_path_effective | default(false) | bool)

@@ -35,6 +35,10 @@ CONTROLLER_TASK_FILES = {
     "roles/backup/tasks/maintenance.yml",
     # playbooks/openobserve_config.yml (hosts: localhost, connection: local) 전용 롤.
     "roles/openobserve_config/tasks/main.yml",
+    # playbooks/host_audit.yml의 보고서 플레이(hosts: localhost)가 report.yml을 거쳐 호출한다.
+    # 하위 실행 자체가 --check라 호스트를 바꾸지 않는다(Configuration Drift, #124).
+    "roles/host_audit/tasks/drift.yml",
+    "roles/host_audit/tasks/drift_subrun.yml",
 }
 
 TASK_KEYWORDS = {

@@ -85,6 +85,8 @@
 
 {% include 'sections/asset_inventory.html.j2' %}
 
+{% include 'sections/configuration_drift.html.j2' %}
+
 {% if m.config_vulnerability is defined %}{% include 'sections/config_vulnerability.html.j2' %}{% endif %}
 
 {% include 'sections/package_vulnerability.html.j2' %}

@@ -16,6 +16,10 @@
   ansible.builtin.include_tasks: packages_scan.yml
   when: host_audit_packages_enabled | bool
 
+- name: Check Configuration Drift with --check sub-runs
+  ansible.builtin.include_tasks: drift.yml
+  when: host_audit_drift_enabled | bool
+
 - name: Look up the Host Audit storage and the Audit Baseline
   ansible.builtin.include_tasks: storage_lookup.yml
 
@@ -46,6 +50,7 @@
       kisa_exceptions: "{{ host_audit_kisa_exceptions }}"
       baseline_history: "{{ host_audit_baseline_history }}"
       package_results: "{{ _host_audit_package_results | default([]) }}"
+      configuration_drift: "{{ host_audit_drift_section | default({}) }}"
 
 - name: "[AUD-022] Save the run metadata on the runner"
   ansible.builtin.copy:

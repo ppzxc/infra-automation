@@ -1,0 +1,418 @@
+{
+    "custom_stats": {},
+    "global_custom_stats": {},
+    "plays": [
+        {
+            "play": {
+                "duration": {
+                    "end": "2026-10-08T14:15:47.703553Z",
+                    "start": "2026-10-08T14:15:36.040837Z"
+                },
+                "id": "28c5c8d3-4de2-4afe-7314-000000000004",
+                "name": "Fixture play",
+                "path": "/srv/drift-fixture/pb.yml:1"
+            },
+            "tasks": [
+                {
+                    "hosts": {
+                        "hosta": {
+                            "action": "ansible.builtin.copy",
+                            "changed": true,
+                            "diff": [
+                                {
+                                    "after": "new line\nkeep\nadded\n",
+                                    "after_header": "/srv/drift-fixture/t/conf.txt",
+                                    "before": "old line\nkeep\n",
+                                    "before_header": "/srv/drift-fixture/t/conf.txt"
+                                }
+                            ]
+                        },
+                        "hostb": {
+                            "action": "ansible.builtin.copy",
+                            "changed": true,
+                            "diff": [
+                                {
+                                    "after": "new line\nkeep\nadded\n",
+                                    "after_header": "/srv/drift-fixture/t/conf.txt",
+                                    "before": "old line\nkeep\n",
+                                    "before_header": "/srv/drift-fixture/t/conf.txt"
+                                }
+                            ]
+                        },
+                        "hostc": {
+                            "action": "ansible.builtin.copy",
+                            "changed": false,
+                            "exception": "(traceback unavailable)",
+                            "msg": "Task failed: Failed to connect to the host via ssh: ssh: connect to host 192.0.2.1 port 22: Connection timed out",
+                            "unreachable": true
+                        }
+                    },
+                    "task": {
+                        "duration": {
+                            "end": "2026-10-08T14:15:46.085695Z",
+                            "start": "2026-10-08T14:15:36.044708Z"
+                        },
+                        "id": "28c5c8d3-4de2-4afe-7314-000000000006",
+                        "name": "[FIX-001] Template a config (changed with diff)",
+                        "path": "/srv/drift-fixture/pb.yml:5"
+                    }
+                },
+                {
+                    "hosts": {
+                        "hosta": {
+                            "action": "ansible.builtin.copy",
+                            "changed": false,
+                            "checksum": "418bcc7202260b19dd7daffe4e26495591fa8608",
+                            "dest": "/srv/drift-fixture/t/same.txt",
+                            "diff": {
+                                "after": {
+                                    "path": "/srv/drift-fixture/t/same.txt"
+                                },
+                                "before": {
+                                    "path": "/srv/drift-fixture/t/same.txt"
+                                }
+                            },
+                            "gid": 1000,
+                            "group": "root",
+                            "mode": "0644",
+                            "owner": "root",
+                            "path": "/srv/drift-fixture/t/same.txt",
+                            "size": 14,
+                            "state": "file",
+                            "uid": 1000
+                        },
+                        "hostb": {
+                            "action": "ansible.builtin.copy",
+                            "changed": false,
+                            "checksum": "418bcc7202260b19dd7daffe4e26495591fa8608",
+                            "dest": "/srv/drift-fixture/t/same.txt",
+                            "diff": {
+                                "after": {
+                                    "path": "/srv/drift-fixture/t/same.txt"
+                                },
+                                "before": {
+                                    "path": "/srv/drift-fixture/t/same.txt"
+                                }
+                            },
+                            "gid": 1000,
+                            "group": "root",
+                            "mode": "0644",
+                            "owner": "root",
+                            "path": "/srv/drift-fixture/t/same.txt",
+                            "size": 14,
+                            "state": "file",
+                            "uid": 1000
+                        }
+                    },
+                    "task": {
+                        "duration": {
+                            "end": "2026-10-08T14:15:46.458038Z",
+                            "start": "2026-10-08T14:15:46.086482Z"
+                        },
+                        "id": "28c5c8d3-4de2-4afe-7314-000000000007",
+                        "name": "[FIX-002] Already compliant file",
+                        "path": "/srv/drift-fixture/pb.yml:10"
+                    }
+                },
+                {
+                    "hosts": {
+                        "hosta": {
+                            "_ansible_no_log": true,
+                            "action": "ansible.builtin.copy",
+                            "censored": "the output has been hidden due to the fact that 'no_log: true' was specified for this result",
+                            "changed": true
+                        },
+                        "hostb": {
+                            "_ansible_no_log": true,
+                            "action": "ansible.builtin.copy",
+                            "censored": "the output has been hidden due to the fact that 'no_log: true' was specified for this result",
+                            "changed": true
+                        }
+                    },
+                    "task": {
+                        "duration": {
+                            "end": "2026-10-08T14:15:46.975695Z",
+                            "start": "2026-10-08T14:15:46.459159Z"
+                        },
+                        "id": "28c5c8d3-4de2-4afe-7314-000000000008",
+                        "name": "[FIX-003] Secret file (no_log)",
+                        "path": "/srv/drift-fixture/pb.yml:15"
+                    }
+                },
+                {
+                    "hosts": {
+                        "hosta": {
+                            "action": "ansible.builtin.lineinfile",
+                            "changed": true,
+                            "msg": "All items completed",
+                            "results": [
+                                {
+                                    "_ansible_item_label": "keep",
+                                    "ansible_loop_var": "item",
+                                    "backup": "",
+                                    "changed": false,
+                                    "diff": [
+                                        {
+                                            "after": "old line\nkeep\n",
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (content)",
+                                            "before": "old line\nkeep\n",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (content)"
+                                        },
+                                        {
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (file attributes)",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (file attributes)"
+                                        }
+                                    ],
+                                    "item": "keep",
+                                    "msg": ""
+                                },
+                                {
+                                    "_ansible_item_label": "x=1",
+                                    "ansible_loop_var": "item",
+                                    "backup": "",
+                                    "changed": true,
+                                    "diff": [
+                                        {
+                                            "after": "old line\nkeep\nx=1\n",
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (content)",
+                                            "before": "old line\nkeep\n",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (content)"
+                                        },
+                                        {
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (file attributes)",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (file attributes)"
+                                        }
+                                    ],
+                                    "item": "x=1",
+                                    "msg": "line added"
+                                },
+                                {
+                                    "_ansible_item_label": "y=2",
+                                    "ansible_loop_var": "item",
+                                    "backup": "",
+                                    "changed": true,
+                                    "diff": [
+                                        {
+                                            "after": "old line\nkeep\ny=2\n",
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (content)",
+                                            "before": "old line\nkeep\n",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (content)"
+                                        },
+                                        {
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (file attributes)",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (file attributes)"
+                                        }
+                                    ],
+                                    "item": "y=2",
+                                    "msg": "line added"
+                                }
+                            ]
+                        },
+                        "hostb": {
+                            "action": "ansible.builtin.lineinfile",
+                            "changed": true,
+                            "msg": "All items completed",
+                            "results": [
+                                {
+                                    "_ansible_item_label": "keep",
+                                    "ansible_loop_var": "item",
+                                    "backup": "",
+                                    "changed": false,
+                                    "diff": [
+                                        {
+                                            "after": "old line\nkeep\n",
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (content)",
+                                            "before": "old line\nkeep\n",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (content)"
+                                        },
+                                        {
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (file attributes)",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (file attributes)"
+                                        }
+                                    ],
+                                    "item": "keep",
+                                    "msg": ""
+                                },
+                                {
+                                    "_ansible_item_label": "x=1",
+                                    "ansible_loop_var": "item",
+                                    "backup": "",
+                                    "changed": true,
+                                    "diff": [
+                                        {
+                                            "after": "old line\nkeep\nx=1\n",
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (content)",
+                                            "before": "old line\nkeep\n",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (content)"
+                                        },
+                                        {
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (file attributes)",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (file attributes)"
+                                        }
+                                    ],
+                                    "item": "x=1",
+                                    "msg": "line added"
+                                },
+                                {
+                                    "_ansible_item_label": "y=2",
+                                    "ansible_loop_var": "item",
+                                    "backup": "",
+                                    "changed": true,
+                                    "diff": [
+                                        {
+                                            "after": "old line\nkeep\ny=2\n",
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (content)",
+                                            "before": "old line\nkeep\n",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (content)"
+                                        },
+                                        {
+                                            "after_header": "/srv/drift-fixture/t/conf.txt (file attributes)",
+                                            "before_header": "/srv/drift-fixture/t/conf.txt (file attributes)"
+                                        }
+                                    ],
+                                    "item": "y=2",
+                                    "msg": "line added"
+                                }
+                            ]
+                        }
+                    },
+                    "task": {
+                        "duration": {
+                            "end": "2026-10-08T14:15:47.501997Z",
+                            "start": "2026-10-08T14:15:46.976483Z"
+                        },
+                        "id": "28c5c8d3-4de2-4afe-7314-000000000009",
+                        "name": "[FIX-004] Looped lines",
+                        "path": "/srv/drift-fixture/pb.yml:21"
+                    }
+                },
+                {
+                    "hosts": {
+                        "hosta": {
+                            "action": "ansible.builtin.command",
+                            "changed": false,
+                            "false_condition": "not ansible_check_mode",
+                            "skip_reason": "Conditional result was False",
+                            "skipped": true
+                        },
+                        "hostb": {
+                            "action": "ansible.builtin.command",
+                            "changed": false,
+                            "false_condition": "not ansible_check_mode",
+                            "skip_reason": "Conditional result was False",
+                            "skipped": true
+                        }
+                    },
+                    "task": {
+                        "duration": {
+                            "end": "2026-10-08T14:15:47.514651Z",
+                            "start": "2026-10-08T14:15:47.503024Z"
+                        },
+                        "id": "28c5c8d3-4de2-4afe-7314-00000000000a",
+                        "name": "[FIX-005] Skipped in check",
+                        "path": "/srv/drift-fixture/pb.yml:26"
+                    }
+                },
+                {
+                    "hosts": {
+                        "hosta": {
+                            "action": "ansible.builtin.file",
+                            "changed": true,
+                            "diff": {
+                                "after": {
+                                    "path": "/srv/drift-fixture/t/newdir",
+                                    "state": "directory"
+                                },
+                                "before": {
+                                    "path": "/srv/drift-fixture/t/newdir",
+                                    "state": "absent"
+                                }
+                            },
+                            "path": "/srv/drift-fixture/t/newdir"
+                        },
+                        "hostb": {
+                            "action": "ansible.builtin.file",
+                            "changed": true,
+                            "diff": {
+                                "after": {
+                                    "path": "/srv/drift-fixture/t/newdir",
+                                    "state": "directory"
+                                },
+                                "before": {
+                                    "path": "/srv/drift-fixture/t/newdir",
+                                    "state": "absent"
+                                }
+                            },
+                            "path": "/srv/drift-fixture/t/newdir"
+                        }
+                    },
+                    "task": {
+                        "duration": {
+                            "end": "2026-10-08T14:15:47.686509Z",
+                            "start": "2026-10-08T14:15:47.515329Z"
+                        },
+                        "id": "28c5c8d3-4de2-4afe-7314-00000000000b",
+                        "name": "Unlabelled task changes",
+                        "path": "/srv/drift-fixture/pb.yml:29"
+                    }
+                },
+                {
+                    "hosts": {
+                        "hosta": {
+                            "action": "ansible.builtin.fail",
+                            "changed": false,
+                            "false_condition": "inventory_hostname == 'hostb'",
+                            "skip_reason": "Conditional result was False",
+                            "skipped": true
+                        },
+                        "hostb": {
+                            "action": "ansible.builtin.fail",
+                            "changed": false,
+                            "exception": "(traceback unavailable)",
+                            "failed": true,
+                            "msg": "boom"
+                        }
+                    },
+                    "task": {
+                        "duration": {
+                            "end": "2026-10-08T14:15:47.703553Z",
+                            "start": "2026-10-08T14:15:47.688304Z"
+                        },
+                        "id": "28c5c8d3-4de2-4afe-7314-00000000000c",
+                        "name": "[FIX-006] Fails on second host",
+                        "path": "/srv/drift-fixture/pb.yml:34"
+                    }
+                }
+            ]
+        }
+    ],
+    "stats": {
+        "hosta": {
+            "changed": 4,
+            "failures": 0,
+            "ignored": 0,
+            "ok": 5,
+            "rescued": 0,
+            "skipped": 2,
+            "unreachable": 0
+        },
+        "hostb": {
+            "changed": 4,
+            "failures": 1,
+            "ignored": 0,
+            "ok": 5,
+            "rescued": 0,
+            "skipped": 1,
+            "unreachable": 0
+        },
+        "hostc": {
+            "changed": 0,
+            "failures": 0,
+            "ignored": 0,
+            "ok": 0,
+            "rescued": 0,
+            "skipped": 0,
+            "unreachable": 1
+        }
+    }
+}

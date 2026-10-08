@@ -135,9 +135,10 @@
             fail_msg: "Security limits file /etc/security/limits.d/99-limits.conf is missing."
 
         - name: "[VERIFY-COMMON-017] Verify systemd journald retention configuration"
-          ansible.builtin.debug:
-            msg: "{{ f.stat['/etc/systemd/journald.conf.d/99-retention.conf'] }}"
-            verbosity: 1
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/systemd/journald.conf.d/99-retention.conf'].exists
+            fail_msg: "COMMON-017 did not write /etc/systemd/journald.conf.d/99-retention.conf (drop-in directory missing?)."
           when: ansible_service_mgr == "systemd"
 
         - name: "[VERIFY-COMMON-018] Verify system-wide aliases configuration file exists"

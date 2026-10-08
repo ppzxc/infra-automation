@@ -1,0 +1,12 @@
+{#- 호스트별 부록 — Configuration Drift (#124). 모델을 그리기만 한다. -#}
+{%- set cd = m.configuration_drift -%}
+{%- if cd and host in cd.by_host %}
+{%- set d = cd.by_host[host] %}
+  <h3 class="small">Configuration Drift</h3>
+  <div class="kv keep">
+    <div>Drift</div><div>{% if d.rows %}{{ d.rows | length }}건 ({% for r in d.rows %}{{ r.spec_id | default(r.task, true) | e }}{% if not loop.last %}, {% endif %}{% endfor %}){% else %}없음{% endif %}{% if d.excluded %} · 제외 {{ d.excluded | length }}건{% endif %}</div>
+{%- for u in d.unavailable %}
+    <div>{{ u.subrun | e }}</div><div><span class="tag na">{{ u.label | e }}</span> {{ u.reason | e }}</div>
+{%- endfor %}
+  </div>
+{%- endif %}
