@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — 버려질 코드. [Map #100 / Question] 보고서 레이아웃(#109) 판단용.
+  Host Audit A4 인쇄용 통합 보고서의 레이아웃 3안을 ?variant=A|B|C 로 전환한다.
+  모든 데이터는 예시(가짜)다. KISA 항목 번호·CVE 번호도 실제 값이 아니다.
+  열기: 브라우저로 이 파일을 연다. 인쇄 미리보기(Ctrl+P, A4)로 쪽 나눔을 확인한다.
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Host Audit 보고서 — 레이아웃 프로토타입</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm 18mm 14mm;
+    @bottom-center { content: "Host Audit 2026-10 정기 · " counter(page) " / " counter(pages); font-size: 8pt; color: #666; } }
+  :root { --ink:#1b1f24; --mute:#5b6470; --line:#c9cfd6; --soft:#f3f5f7;
+          --crit:#b42318; --high:#d9480f; --med:#b7791f; --low:#3b6ea5; --ok:#2f7d32; --na:#7a7f87; }
+  * { box-sizing: border-box; }
+  body { margin:0; color:var(--ink); font: 9.5pt/1.45 "Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR","Noto Sans CJK KR",sans-serif; background:#e9ecef; }
+  .sheet { width:210mm; min-height:297mm; margin:12px auto; padding:16mm 14mm 18mm; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.15); }
+  @media print { body{background:#fff} .sheet{margin:0; padding:0; width:auto; min-height:0; box-shadow:none} .noprint{display:none!important} }
+  .pb { break-before: page; }
+  .keep { break-inside: avoid; }
+  h1 { font-size:20pt; margin:0 0 4mm; } h2 { font-size:13pt; margin:7mm 0 2.5mm; padding-bottom:1mm; border-bottom:1.5px solid var(--ink); }
+  h3 { font-size:10.5pt; margin:5mm 0 2mm; } p { margin:1.5mm 0; }
+  .mute { color:var(--mute); } .small { font-size:8pt; }
+  table { width:100%; border-collapse:collapse; margin:1.5mm 0 3mm; font-size:8.5pt; }
+  thead { display: table-header-group; } tr { break-inside: avoid; }
+  th, td { border:1px solid var(--line); padding:1.2mm 1.6mm; text-align:left; vertical-align:top; }
+  th { background:var(--soft); font-weight:600; }
+  td.num, th.num { text-align:right; font-variant-numeric: tabular-nums; }
+  .tag { display:inline-block; padding:0 1.6mm; border-radius:2mm; font-size:7.5pt; font-weight:600; border:1px solid currentColor; white-space:nowrap; }
+  .crit{color:var(--crit)} .high{color:var(--high)} .med{color:var(--med)} .low{color:var(--low)} .ok{color:var(--ok)} .na{color:var(--na)}
+  .new{color:var(--crit)} .rec{color:#8a1c7c} .per{color:var(--med)} .res{color:var(--ok)}
+  .kv { display:grid; grid-template-columns: 34mm 1fr; gap:.6mm 3mm; font-size:9pt; } .kv div:nth-child(odd){ color:var(--mute); }
+  .tiles { display:grid; grid-template-columns: repeat(4,1fr); gap:3mm; margin:3mm 0; }
+  .tile { border:1px solid var(--line); padding:2.5mm; } .tile b { display:block; font-size:16pt; } .tile span { font-size:8pt; color:var(--mute); }
+  .banner { border-left:4px solid var(--crit); background:#fdf1f0; padding:2mm 3mm; margin:2mm 0; }
+  .note { border-left:4px solid var(--na); background:var(--soft); padding:2mm 3mm; margin:2mm 0; font-size:8.5pt; }
+  .sign { width:100%; border-collapse:collapse; margin-top:4mm; } .sign td, .sign th { height:16mm; border:1px solid var(--ink); }
+  .sign th { height:auto; width:18%; }
+  .grid-host { display:grid; grid-template-columns: 1fr 1fr; gap:2mm 6mm; }
+  .heat td { text-align:center; font-weight:600; }
+  .h0{background:#e8f3ea} .h1{background:#fff4d6} .h2{background:#ffe0cc} .h3{background:#f9d0cc} .hx{background:#eceef1; color:var(--na)}
+  .rank { font-size:13pt; font-weight:700; color:var(--mute); text-align:center; width:9mm; }
+  #bar { position:fixed; left:50%; bottom:14px; transform:translateX(-50%); background:#111; color:#fff; border-radius:999px; padding:6px 10px; display:flex; gap:10px; align-items:center; font:13px system-ui,sans-serif; box-shadow:0 4px 14px rgba(0,0,0,.35); z-index:9; }
+  #bar button { background:#333; color:#fff; border:0; border-radius:999px; width:28px; height:28px; cursor:pointer; font-size:14px; }
+  #bar .lbl { min-width:250px; text-align:center; }
+  .proto { background:#fff3bf; border:1px dashed #b7791f; padding:2mm 3mm; font-size:8.5pt; margin-bottom:4mm; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="bar" class="noprint">
+  <button id="prev" title="이전 (←)">‹</button><span class="lbl" id="lbl"></span><button id="next" title="다음 (→)">›</button>
+</div>
+<script>
+// ───────────────────────── 예시 데이터 (가짜) ─────────────────────────
+const META = {
+  title: "Host Audit 점검 보고서", run: "2026-10 정기", runId: "ha-20261005-0500",
+  when: "2026-10-05 05:00 ~ 05:18 (KST)", baseline: "2026-09 정기 실행 (ha-20260907-0500)",
+  scope: "servers · loadbalancers · overseer (총 5대). 네트워크 장비 등 그 외 자산은 범위 밖",
+  method: "Ansible 읽기 전용 실행(관리 상태 불변). 설정: KISA-2026 Unix 항목(raw stdin). 패키지: Trivy(SBOM). 드리프트: site.yml·Host Agents Config --check --diff",
+  account: "점검 계정: 관리 계정(Deploy와 동일). 이 계정은 장기 미사용 판정에서 제외",
+  eolTable: "EOL 표 기준일 2026-09-30",
+  archive: "s3://host-audit/2026-10/ha-20261005-0500/ (SHA-256은 발송 메일 본문에 기재)",
+};
+const HOSTS = [
+  { id:"ns0266", fqdn:"ns0266.nanoit.kr", ip:"10.0.2.66", env:"production", os:"Rocky Linux 9.6", kernel:"5.14.0-570", eol:"2032-05-31", eolState:"ok",
+    hw:"8 vCPU · 32 GiB · / 61%, /data 78%", dmi:"Dell PowerEdge R650 · SN 7XK…", purpose:"웹 서비스", dept:"인프라팀", owner:"인프라팀장", admin:"인프라팀 선임", grade:"2등급",
+    pkgs:{count:812, key:"kernel 5.14.0-570 · openssl 3.2.2 · openssh 8.7p1 · glibc 2.34 · sudo 1.9.5 · docker 28.3", lastUpd:"2026-09-12"},
+    ports:"22 sshd · 80/443 nginx · 9100 otelcol", agents:"otelcol 동작 · 백업 2026-10-05 02:31 성공",
+    priv:[{u:"root",how:"uid 0",decl:true},{u:"ppzxc",how:"sudo NOPASSWD",decl:true},{u:"deploy-old",how:"wheel",decl:false}],
+    dormant:[{u:"deploy-old",last:"2026-05-02",days:156}],
+    drift:[{spec:"SEC-012",task:"sshd_config: PermitRootLogin",sum:"yes → no 로 되돌릴 예정",st:"new"},{spec:"COMMON-031",task:"sysctl vm.swappiness",sum:"60 → 10",st:"per"}],
+    cfg:[{code:"KISA-2026:U-01",name:"root 계정 원격 접속 제한",res:"취약",st:"new"},{code:"KISA-2026:U-28",name:"접속 IP·포트 제한",res:"예외(승인)",st:"per",ex:"Docker 구간 · 만료 2027-03-31"},{code:"KISA-2026:U-xx",name:"패스워드 최소 길이",res:"양호",st:"res"}],
+    vuln:{crit:0,high:3,med:11,low:9, top:[{cve:"CVE-2026-xxxx1",pkg:"openssl",sev:"high",fix:"3.2.2-6",st:"new"},{cve:"CVE-2025-xxxx2",pkg:"glibc",sev:"high",fix:"2.34-168",st:"per"},{cve:"CVE-2025-xxxx3",pkg:"sudo",sev:"high",fix:"1.9.5p2-12",st:"rec"}]},
+    resolved:2 },
+  { id:"ns0332", fqdn:"ns0332.nanoit.kr", ip:"10.0.3.32", env:"production", os:"Rocky Linux 9.6", kernel:"5.14.0-570", eol:"2032-05-31", eolState:"ok",
+    hw:"16 vCPU · 64 GiB · / 44%", dmi:"Dell PowerEdge R750 · SN 9QM…", purpose:null, dept:null, owner:null, admin:null, grade:null,
+    pkgs:{count:1043, key:"kernel 5.14.0-570 · openssl 3.2.2 · openssh 8.7p1 · glibc 2.34 · sudo 1.9.5 · docker 28.3", lastUpd:"2026-09-12"},
+    ports:"22 sshd · 5432 postgres(127.0.0.1) · 9100 otelcol", agents:"otelcol 동작 · 백업 2026-10-05 02:47 성공",
+    priv:[{u:"root",how:"uid 0",decl:true},{u:"ppzxc",how:"sudo NOPASSWD",decl:true}], dormant:[],
+    drift:[],
+    cfg:[{code:"KISA-2026:U-01",name:"root 계정 원격 접속 제한",res:"양호",st:null},{code:"KISA-2026:U-28",name:"접속 IP·포트 제한",res:"예외(승인)",st:"per",ex:"Docker 구간 · 만료 2027-03-31"}],
+    vuln:{crit:0,high:1,med:6,low:4, top:[{cve:"CVE-2025-xxxx2",pkg:"glibc",sev:"high",fix:"2.34-168",st:"per"}]}, resolved:5 },
+  { id:"ns0101", fqdn:"ns0101.nanoit.kr", ip:"10.0.1.1", env:"production", os:"CentOS 7.9", kernel:"3.10.0-1160", eol:"2024-06-30", eolState:"eol",
+    hw:"4 vCPU · 8 GiB · / 83%", dmi:"점검불가", purpose:"레거시 정산 배치", dept:"정산개발팀", owner:"정산개발팀장", admin:"정산개발팀 책임", grade:"1등급",
+    pkgs:{count:498, key:"kernel 3.10.0-1160 · openssl 1.0.2k · openssh 7.4p1 · glibc 2.17 · sudo 1.8.23", lastUpd:"2024-05-20"},
+    ports:"22 sshd · 8080 java", agents:"otelcol 동작 · 백업 2026-10-05 03:12 성공",
+    priv:[{u:"root",how:"uid 0",decl:true},{u:"batch",how:"sudo ALL",decl:false}], dormant:[{u:"olduser",last:"2025-11-30",days:309}],
+    drift:null, driftWhy:"Raw Provisioning Path — raw 태스크는 --check에서 건너뜀(ADR-0005)",
+    cfg:[{code:"KISA-2026:U-01",name:"root 계정 원격 접속 제한",res:"취약",st:"rec"},{code:"KISA-2026:U-xx",name:"패스워드 해시 알고리즘",res:"점검불가(수동)",st:null}],
+    vuln:{crit:4,high:57,med:212,low:96, wontfix:438, noCentosFix:69, top:[{cve:"CVE-2024-xxxx4",pkg:"glibc",sev:"crit",fix:"RHEL 7 ELS 전용 — CentOS 수정본 없음",st:"per"},{cve:"CVE-2025-xxxx5",pkg:"openssl",sev:"high",fix:"RHEL 7 ELS 전용 — CentOS 수정본 없음",st:"new"}]}, resolved:0 },
+  { id:"lb01", fqdn:"lb01.nanoit.kr", ip:"10.0.0.40", env:"production", os:"Ubuntu 22.04", kernel:"5.15.0-140", eol:"2027-06-30", eolState:"ok",
+    hw:"2 vCPU · 4 GiB · / 37%", dmi:"VMware Virtual Platform", purpose:"L7 로드밸런서", dept:"인프라팀", owner:"인프라팀장", admin:null, grade:"2등급",
+    pkgs:{count:611, key:"kernel 5.15.0-140 · openssl 3.0.2 · openssh 8.9p1 · glibc 2.35 · sudo 1.9.9", lastUpd:"2026-09-29"},
+    ports:"22 sshd · 80/443 haproxy · 9100 otelcol", agents:"Host Agents 미적용(host_agents_excluded)",
+    priv:[{u:"root",how:"uid 0",decl:true},{u:"ppzxc",how:"sudo",decl:true}], dormant:[],
+    drift:[{spec:"SEC-040",task:"ufw default deny",sum:"allow → deny",st:"new"}],
+    cfg:[{code:"KISA-2026:U-01",name:"root 계정 원격 접속 제한",res:"양호",st:null}],
+    vuln:{crit:0,high:0,med:2,low:5, top:[]}, resolved:1 },
+  { id:"overseer", fqdn:"overseer.nanoit.kr", ip:"10.0.0.10", env:"production", os:"Rocky Linux 9.6", kernel:"5.14.0-570", eol:"2032-05-31", eolState:"ok",
+    hw:"8 vCPU · 16 GiB · / 52%", dmi:"Dell PowerEdge R450 · SN 2AB…", purpose:"중앙 관리(Control Plane)", dept:"인프라팀", owner:"인프라팀장", admin:"인프라팀 선임", grade:"1등급",
+    pkgs:{count:702, key:"kernel 5.14.0-570 · openssl 3.2.2 · openssh 8.7p1 · glibc 2.34 · sudo 1.9.5 · docker 28.3", lastUpd:"2026-09-30"},
+    ports:"22 sshd · 443 caddy · 8200 openbao · 3000 semaphore", agents:"otelcol 동작 · 백업 2026-10-05 02:05 성공",
+    priv:[{u:"root",how:"uid 0",decl:true},{u:"ppzxc",how:"sudo NOPASSWD",decl:true}], dormant:[],
+    drift:[], cfg:[{code:"KISA-2026:U-01",name:"root 계정 원격 접속 제한",res:"양호",st:null}],
+    vuln:{crit:0,high:0,med:3,low:2, top:[]}, resolved:3 },
+];
+// ───────────────────────── 공통 조각 ─────────────────────────
+const ST = {new:["신규","new"],rec:["재발","rec"],per:["지속","per"],res:["해소","res"]};
+const SEV = {crit:["긴급","crit"],high:["높음","high"],med:["중간","med"],low:["낮음","low"]};
+const tag = (t,c)=>`<span class="tag ${c}">${t}</span>`;
+const st = s => s ? tag(...ST[s]) : "";
+const sev = s => tag(...SEV[s]);
+const decl = v => v ?? tag("미지정","na");
+const resTag = r => r==="취약"?tag(r,"crit"):r==="양호"?tag(r,"ok"):r.startsWith("예외")?tag(r,"med"):tag(r,"na");
+const sum = k => HOSTS.reduce((a,h)=>a+(h.vuln[k]||0),0);
+const driftN = h => h.drift===null ? null : h.drift.length;
+const cfgBad = h => h.cfg.filter(c=>c.res==="취약").length;
+const counts = () => {
+  const all = HOSTS.flatMap(h=>[...(h.drift||[]),...h.cfg.filter(c=>c.res==="취약"),...h.vuln.top]);
+  return { n:all.filter(x=>x.st==="new").length, r:all.filter(x=>x.st==="rec").length, p:all.filter(x=>x.st==="per").length, s:HOSTS.reduce((a,h)=>a+h.resolved,0) };
+};
+const cover = (subtitle)=>`
+  <div class="proto noprint">PROTOTYPE · 예시 데이터 · 레이아웃 ${subtitle}</div>
+  <div class="mute small">ISMS 2.11.2 점검 결과 보고서 · 대외비</div>
+  <h1>${META.title}</h1>
+  <div class="kv keep">
+    <div>점검일시</div><div>${META.when} · ${META.run} (${META.runId})</div>
+    <div>점검대상</div><div>${META.scope}</div>
+    <div>점검방법</div><div>${META.method}</div>
+    <div>점검내용</div><div>Asset Inventory · Configuration Drift · Configuration Vulnerability · Package Vulnerability</div>
+    <div>비교 기준</div><div>Audit Baseline: ${META.baseline}</div>
+    <div>참고</div><div>${META.account} · ${META.eolTable}</div>
+    <div>원본 보관</div><div>${META.archive}</div>
+  </div>`;
+const eolBanner = ()=>{ const e=HOSTS.filter(h=>h.eolState==="eol");
+  return e.length?`<div class="banner keep"><b>EOS 운영 체제 ${e.length}대</b> — ${e.map(h=>`${h.id}(${h.os}, EOL ${h.eol})`).join(", ")}. 보완대책·대응계획 필요(ISMS 2.10.8 결함사례 2).</div>`:""; };
+const naNote = ()=>`<div class="note keep"><b>점검불가 항목</b> — ${HOSTS.filter(h=>h.drift===null).map(h=>`${h.id}: Configuration Drift (${h.driftWhy})`).join("; ")}; ns0101: KISA-2026:U-xx 수동 확인 필요, DMI 정보.</div>`;
+const signOff = ()=>`
+  <h2 class="keep">검토 및 결재</h2>
+  <p class="small mute">발견사항별 조치 의견(조치 / 예외 승인 / 선언 수정)과 검토 결과를 기재한다. 결재된 본 문서가 ISMS 2.5.6·2.9.1·2.11.2 검토 증적이다.</p>
+  <table class="sign keep"><tr><th>구분</th><th>성명·직책</th><th>일자</th><th>의견</th><th>서명</th></tr>
+  <tr><th>검토자</th><td></td><td></td><td></td><td></td></tr>
+  <tr><th>정보보호 책임자</th><td></td><td></td><td></td><td></td></tr></table>`;
+const svgBars = ()=>{ const d=[["긴급",sum("crit"),"#b42318"],["높음",sum("high"),"#d9480f"],["중간",sum("med"),"#b7791f"],["낮음",sum("low"),"#3b6ea5"]];
+  const max=Math.max(...d.map(x=>x[1])); return `<svg width="100%" viewBox="0 0 400 92" role="img" aria-label="위험도별 패키지 취약점">${d.map((x,i)=>`<text x="0" y="${16+i*22}" font-size="11">${x[0]}</text><rect x="44" y="${5+i*22}" width="${Math.max(2,300*x[1]/max)}" height="14" fill="${x[2]}"/><text x="${50+300*x[1]/max}" y="${16+i*22}" font-size="11">${x[1]}</text>`).join("")}</svg>`; };
+// 호스트별 상세 (부록에 재사용)
+const hostDetail = h=>`
+  <h3 class="keep">${h.id} · ${h.fqdn} · ${h.os} ${h.eolState==="eol"?tag("EOL","crit"):""}</h3>
+  <div class="grid-host small keep">
+    <div><b>식별</b> ${h.ip} · ${h.env}<br><b>OS</b> ${h.os} · 커널 ${h.kernel} · EOL ${h.eol}<br><b>HW</b> ${h.hw}<br><b>DMI</b> ${h.dmi}</div>
+    <div><b>용도</b> ${decl(h.purpose)} · <b>등급</b> ${decl(h.grade)}<br><b>부서</b> ${decl(h.dept)}<br><b>책임자</b> ${decl(h.owner)} · <b>관리자</b> ${decl(h.admin)}<br><b>Host Agents</b> ${h.agents}</div>
+    <div><b>패키지</b> ${h.pkgs.count}개 · 마지막 갱신 ${h.pkgs.lastUpd}<br>${h.pkgs.key}</div>
+    <div><b>포트</b> ${h.ports}</div>
+  </div>
+  <table><thead><tr><th>특수권한자</th><th>권한</th><th>선언</th></tr></thead><tbody>
+  ${h.priv.map(p=>`<tr><td>${p.u}</td><td>${p.how}</td><td>${p.decl?tag("선언됨","ok"):tag("선언 외","crit")}</td></tr>`).join("")}
+  ${h.dormant.map(d=>`<tr><td>${d.u}</td><td>마지막 로그인 ${d.last}</td><td>${tag(d.days+"일 미사용","med")}</td></tr>`).join("")}</tbody></table>`;
+// ───────────────────────── A: 섹션 우선 (통제항목별 보고서) ─────────────────────────
+function VariantA(){
+  const c=counts();
+  return `<div class="sheet">${cover("A — 섹션 우선")}
+  <h2>1. 요약</h2>
+  <div class="tiles"><div class="tile"><b>${HOSTS.length}</b><span>점검 호스트</span></div><div class="tile"><b class="new">${c.n}</b><span>신규 발견</span></div><div class="tile"><b class="rec">${c.r}</b><span>재발</span></div><div class="tile"><b class="res">${c.s}</b><span>해소(기준선 대비)</span></div></div>
+  ${eolBanner()}${naNote()}
+  <h2>2. Asset Inventory <span class="small mute">ISMS 1.2.1 · 2.1.3 · 2.5.5 · 2.5.6</span></h2>
+  <table><thead><tr><th>호스트</th><th>OS (EOL)</th><th>용도</th><th>책임자</th><th>등급</th><th>패키지</th><th>선언 외 특수권한</th><th>90일+ 미사용</th></tr></thead><tbody>
+  ${HOSTS.map(h=>`<tr><td>${h.id}</td><td>${h.os}${h.eolState==="eol"?" "+tag("EOL","crit"):""}</td><td>${decl(h.purpose)}</td><td>${decl(h.owner)}</td><td>${decl(h.grade)}</td><td class="num">${h.pkgs.count}</td><td>${h.priv.filter(p=>!p.decl).map(p=>p.u).join(", ")||"-"}</td><td>${h.dormant.map(d=>d.u).join(", ")||"-"}</td></tr>`).join("")}</tbody></table>
+  <h2 class="pb">3. Configuration Drift <span class="small mute">ISMS 2.9.1</span></h2>
+  <table><thead><tr><th>호스트</th><th>SPEC-ID</th><th>태스크</th><th>요약</th><th>상태</th><th>판단(수기)</th></tr></thead><tbody>
+  ${HOSTS.flatMap(h=>h.drift===null?[`<tr><td>${h.id}</td><td colspan="5">${tag("점검불가","na")} ${h.driftWhy}</td></tr>`]:h.drift.length?h.drift.map(d=>`<tr><td>${h.id}</td><td>${d.spec}</td><td>${d.task}</td><td>${d.sum}</td><td>${st(d.st)}</td><td style="width:22mm"></td></tr>`):[`<tr><td>${h.id}</td><td colspan="5" class="mute">드리프트 없음</td></tr>`]).join("")}</tbody></table>
+  <h2>4. Configuration Vulnerability <span class="small mute">ISMS 2.11.2 · KISA-2026</span></h2>
+  <table><thead><tr><th>호스트</th><th>항목</th><th>점검 내용</th><th>결과</th><th>상태</th><th>비고</th></tr></thead><tbody>
+  ${HOSTS.flatMap(h=>h.cfg.filter(x=>x.res!=="양호").map(x=>`<tr><td>${h.id}</td><td>${x.code}</td><td>${x.name}</td><td>${resTag(x.res)}</td><td>${st(x.st)}</td><td class="small">${x.ex||""}</td></tr>`)).join("")}</tbody></table>
+  <p class="small mute">양호 항목은 호스트별 부록에 수록.</p>
+  <h2 class="pb">5. Package Vulnerability <span class="small mute">ISMS 2.10.8 · 2.11.2</span></h2>
+  ${svgBars()}
+  <table><thead><tr><th>호스트</th><th class="num">긴급</th><th class="num">높음</th><th class="num">중간</th><th class="num">낮음</th><th>비고</th></tr></thead><tbody>
+  ${HOSTS.map(h=>`<tr><td>${h.id}</td><td class="num crit">${h.vuln.crit}</td><td class="num high">${h.vuln.high}</td><td class="num">${h.vuln.med}</td><td class="num">${h.vuln.low}</td><td class="small">${h.vuln.noCentosFix?`CentOS 수정본 없음 ${h.vuln.noCentosFix} · Red Hat 미수정(will not fix) ${h.vuln.wontfix} 별도`:""}</td></tr>`).join("")}</tbody></table>
+  <h3>긴급·높음 상세</h3>
+  <table><thead><tr><th>호스트</th><th>CVE</th><th>패키지</th><th>위험도</th><th>수정 버전</th><th>상태</th></tr></thead><tbody>
+  ${HOSTS.flatMap(h=>h.vuln.top.map(v=>`<tr><td>${h.id}</td><td>${v.cve}</td><td>${v.pkg}</td><td>${sev(v.sev)}</td><td class="small">${v.fix}</td><td>${st(v.st)}</td></tr>`)).join("")}</tbody></table>
+  <h2 class="pb">부록. 호스트별 상세</h2>
+  ${HOSTS.map(hostDetail).join("")}
+  ${signOff()}</div>`;
+}
+// ───────────────────────── B: 호스트 우선 (호스트별 1쪽 카드) ─────────────────────────
+function VariantB(){
+  const cell=(v,lvl)=>v===null?`<td class="hx">점검불가</td>`:`<td class="h${lvl}">${v}</td>`;
+  const lv=n=>n===0?0:n<3?1:n<10?2:3;
+  return `<div class="sheet">${cover("B — 호스트 우선")}
+  ${eolBanner()}
+  <h2>호스트 × 영역 현황</h2>
+  <table class="heat"><thead><tr><th style="text-align:left">호스트</th><th>OS</th><th>선언 미지정</th><th>선언 외 특수권한</th><th>드리프트</th><th>설정 취약</th><th>패키지 긴급·높음</th><th>해소</th></tr></thead><tbody>
+  ${HOSTS.map(h=>{const miss=[h.purpose,h.dept,h.owner,h.admin,h.grade].filter(x=>!x).length;const pv=h.priv.filter(p=>!p.decl).length;const vh=h.vuln.crit+h.vuln.high;
+    return `<tr><td style="text-align:left">${h.id}</td>${h.eolState==="eol"?`<td class="h3">EOL</td>`:`<td class="h0">${h.os.replace("Rocky Linux","Rocky")}</td>`}${cell(miss,lv(miss))}${cell(pv,pv?3:0)}${cell(driftN(h),lv(driftN(h)??0))}${cell(cfgBad(h),cfgBad(h)?3:0)}${cell(vh,lv(vh))}<td class="h0">${h.resolved}</td></tr>`;}).join("")}</tbody></table>
+  <p class="small mute">초록 = 없음 · 노랑 = 1~2 · 주황 = 3~9 · 빨강 = 10 이상 또는 즉시 검토. 회색 = 점검불가.</p>
+  ${naNote()}
+  ${HOSTS.map(h=>`<div class="pb"></div>${hostDetail(h)}
+    <h3>Configuration Drift</h3>${h.drift===null?`<p>${tag("점검불가","na")} ${h.driftWhy}</p>`:h.drift.length?`<table><thead><tr><th>SPEC-ID</th><th>태스크</th><th>요약</th><th>상태</th><th>판단(수기)</th></tr></thead><tbody>${h.drift.map(d=>`<tr><td>${d.spec}</td><td>${d.task}</td><td>${d.sum}</td><td>${st(d.st)}</td><td style="width:22mm"></td></tr>`).join("")}</tbody></table>`:`<p class="mute">드리프트 없음</p>`}
+    <h3>Configuration Vulnerability (KISA-2026)</h3><table><thead><tr><th>항목</th><th>점검 내용</th><th>결과</th><th>상태</th><th>비고</th></tr></thead><tbody>${h.cfg.map(x=>`<tr><td>${x.code}</td><td>${x.name}</td><td>${resTag(x.res)}</td><td>${st(x.st)}</td><td class="small">${x.ex||""}</td></tr>`).join("")}</tbody></table>
+    <h3>Package Vulnerability</h3><p>긴급 <b class="crit">${h.vuln.crit}</b> · 높음 <b class="high">${h.vuln.high}</b> · 중간 ${h.vuln.med} · 낮음 ${h.vuln.low}${h.vuln.noCentosFix?` · CentOS 수정본 없음 ${h.vuln.noCentosFix} · will not fix ${h.vuln.wontfix} 별도`:""}</p>
+    ${h.vuln.top.length?`<table><thead><tr><th>CVE</th><th>패키지</th><th>위험도</th><th>수정 버전</th><th>상태</th></tr></thead><tbody>${h.vuln.top.map(v=>`<tr><td>${v.cve}</td><td>${v.pkg}</td><td>${sev(v.sev)}</td><td class="small">${v.fix}</td><td>${st(v.st)}</td></tr>`).join("")}</tbody></table>`:""}`).join("")}
+  <div class="pb"></div>${signOff()}</div>`;
+}
+// ───────────────────────── C: 발견사항 우선 (위험 순위 대장) ─────────────────────────
+function VariantC(){
+  const W={crit:4,high:3,"취약":3,drift:2,priv:3,dormant:2,decl:1,eol:4};
+  const sb={new:3,rec:4,per:1};
+  const F=[];
+  HOSTS.forEach(h=>{
+    if(h.eolState==="eol") F.push({w:W.eol+3,h:h.id,kind:"EOS OS",ctl:"2.10.8",what:`${h.os} — EOL ${h.eol}, 대응계획 필요`,st:"per"});
+    h.vuln.top.forEach(v=>F.push({w:W[v.sev]+(sb[v.st]||0),h:h.id,kind:"패키지",ctl:"2.10.8",what:`${v.cve} ${v.pkg} (${SEV[v.sev][0]}) → ${v.fix}`,st:v.st}));
+    h.cfg.filter(x=>x.res==="취약").forEach(x=>F.push({w:W["취약"]+(sb[x.st]||0),h:h.id,kind:"설정",ctl:"2.11.2",what:`${x.code} ${x.name}`,st:x.st}));
+    (h.drift||[]).forEach(d=>F.push({w:W.drift+(sb[d.st]||0),h:h.id,kind:"드리프트",ctl:"2.9.1",what:`${d.spec} ${d.task}: ${d.sum}`,st:d.st}));
+    h.priv.filter(p=>!p.decl).forEach(p=>F.push({w:W.priv+1,h:h.id,kind:"특수권한",ctl:"2.5.5",what:`선언 외 특수권한자 ${p.u} (${p.how})`,st:"new"}));
+    h.dormant.forEach(d=>F.push({w:W.dormant,h:h.id,kind:"계정",ctl:"2.5.6",what:`${d.u} ${d.days}일 미사용 (마지막 ${d.last})`,st:"per"}));
+    const miss=[["용도",h.purpose],["부서",h.dept],["책임자",h.owner],["관리자",h.admin],["등급",h.grade]].filter(x=>!x[1]).map(x=>x[0]);
+    if(miss.length) F.push({w:W.decl,h:h.id,kind:"자산 선언",ctl:"1.2.1·2.1.3",what:`미지정: ${miss.join(", ")}`,st:"per"});
+  });
+  F.sort((a,b)=>b.w-a.w);
+  return `<div class="sheet">${cover("C — 발견사항 우선")}
+  <h2>판정 요약</h2>
+  <div class="tiles"><div class="tile"><b>${F.length}</b><span>조치·검토 대상</span></div><div class="tile"><b class="new">${F.filter(f=>f.st==="new").length}</b><span>신규</span></div><div class="tile"><b class="rec">${F.filter(f=>f.st==="rec").length}</b><span>재발</span></div><div class="tile"><b class="res">${HOSTS.reduce((a,h)=>a+h.resolved,0)}</b><span>해소</span></div></div>
+  ${naNote()}
+  <h2>조치·검토 대장 <span class="small mute">우선순위 = 위험도 + 재발/신규 가중</span></h2>
+  <table><thead><tr><th>#</th><th>호스트</th><th>구분</th><th>ISMS</th><th>내용</th><th>상태</th><th style="width:24mm">조치 의견(수기)</th></tr></thead><tbody>
+  ${F.map((f,i)=>`<tr><td class="rank">${i+1}</td><td>${f.h}</td><td>${f.kind}</td><td class="small">${f.ctl}</td><td>${f.what}</td><td>${st(f.st)}</td><td></td></tr>`).join("")}</tbody></table>
+  ${signOff()}
+  <h2 class="pb">부록 1. Asset Inventory</h2>
+  <table class="small"><thead><tr><th>호스트</th><th>IP · 환경</th><th>OS · 커널 · EOL</th><th>HW</th><th>용도 · 부서 · 책임자 · 등급</th><th>패키지</th><th>포트</th></tr></thead><tbody>
+  ${HOSTS.map(h=>`<tr><td>${h.id}</td><td>${h.ip}<br>${h.env}</td><td>${h.os}<br>${h.kernel}<br>EOL ${h.eol}</td><td>${h.hw}</td><td>${decl(h.purpose)} · ${decl(h.dept)}<br>${decl(h.owner)} · ${decl(h.grade)}</td><td>${h.pkgs.count}개<br>갱신 ${h.pkgs.lastUpd}</td><td>${h.ports}</td></tr>`).join("")}</tbody></table>
+  <h2>부록 2. 영역별 집계</h2>
+  <table><thead><tr><th>호스트</th><th class="num">드리프트</th><th class="num">설정 취약</th><th class="num">긴급</th><th class="num">높음</th><th class="num">중간</th><th class="num">낮음</th></tr></thead><tbody>
+  ${HOSTS.map(h=>`<tr><td>${h.id}</td><td class="num">${driftN(h)??"점검불가"}</td><td class="num">${cfgBad(h)}</td><td class="num">${h.vuln.crit}</td><td class="num">${h.vuln.high}</td><td class="num">${h.vuln.med}</td><td class="num">${h.vuln.low}</td></tr>`).join("")}</tbody></table>
+  </div>`;
+}
+// ───────────────────────── 전환 막대 ─────────────────────────
+const V = [["A","섹션 우선 — ISMS 통제항목별"],["B","호스트 우선 — 호스트별 1쪽"],["C","발견사항 우선 — 조치 대장"]];
+const R = {A:VariantA,B:VariantB,C:VariantC};
+function show(k){ const p=new URLSearchParams(location.search); p.set("variant",k); history.replaceState(null,"","?"+p);
+  document.getElementById("root").innerHTML=R[k](); const v=V.find(x=>x[0]===k); document.getElementById("lbl").textContent=`${v[0]} (${v[1]})`;
+  console.log("[prototype] variant",k,{hosts:HOSTS.length,counts:counts()}); }
+const cur=()=>new URLSearchParams(location.search).get("variant")||"A";
+const step=d=>{const i=V.findIndex(x=>x[0]===cur());show(V[(i+d+V.length)%V.length][0]);};
+document.getElementById("prev").onclick=()=>step(-1); document.getElementById("next").onclick=()=>step(1);
+addEventListener("keydown",e=>{ if(e.target.closest("input,textarea,[contenteditable]"))return; if(e.key==="ArrowLeft")step(-1); if(e.key==="ArrowRight")step(1); });
+show(R[cur()]?cur():"A");
+</script>
+</body>
+</html>
