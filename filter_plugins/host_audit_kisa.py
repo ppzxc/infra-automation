@@ -43,6 +43,11 @@ STATUS_OK = 'ok'
 STATUS_FAILED = 'failed'
 
 CATEGORY_ACCOUNT = '계정 관리'
+CATEGORY_FILE = '파일 및 디렉토리 관리'
+CATEGORY_SERVICE = '서비스 관리'
+CATEGORY_PATCH = '패치 관리'
+CATEGORY_LOG = '로그 관리'
+CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH, CATEGORY_LOG]
 
 # KISA-2026 Unix items implemented so far. title/severity/criteria follow the
 # 2026 guide's item descriptions as quoted by 9u4a/kisa-infra-audit (MIT); cis
@@ -88,6 +93,122 @@ ITEMS = {
              'criteria': 'SHA-2 이상(SHA-256, SHA-512, yescrypt)의 안전한 알고리즘을 사용하는 경우 양호',
              'cis': '5.3.3.4.3, 5.4.1.4'},
 }
+
+
+def _item(title, severity, category, criteria, cis=''):
+    return {'title': title, 'severity': severity, 'category': category, 'criteria': criteria, 'cis': cis}
+
+
+# #122: 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67.
+# 판정 기준 문장은 가이드의 양호 기준을 옮기고, 자동화 범위(괄호)를 덧붙였다. cis는 참조 열이다.
+ITEMS.update({
+    'U-14': _item('root 홈, 패스 디렉터리 권한 및 패스 설정', '상', CATEGORY_FILE,
+                  'PATH 환경변수에 "."이 맨 앞이나 중간에 포함되지 않은 경우 양호 (전역·root 프로필)'),
+    'U-15': _item('파일 및 디렉터리 소유자 설정', '상', CATEGORY_FILE,
+                  '소유자가 존재하지 않는 파일 및 디렉터리가 없는 경우 양호 (로컬 디스크 파일시스템)', '7.1.12'),
+    'U-16': _item('/etc/passwd 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
+                  '/etc/passwd 소유자 root, 권한 644 이하인 경우 양호', '7.1.1'),
+    'U-17': _item('시스템 시작 스크립트 권한 설정', '상', CATEGORY_FILE,
+                  '시작 스크립트 소유자가 root이고 일반 사용자 쓰기 권한이 없는 경우 양호 (init.d, /etc/systemd/system)'),
+    'U-18': _item('/etc/shadow 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
+                  '/etc/shadow 소유자 root, 권한 400 이하인 경우 양호', '7.1.5'),
+    'U-19': _item('/etc/hosts 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
+                  '/etc/hosts 소유자 root, 권한 644 이하인 경우 양호'),
+    'U-20': _item('/etc/(x)inetd.conf 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
+                  '/etc/(x)inetd.conf 소유자 root, 권한 600 이하인 경우 양호 (없으면 해당없음)'),
+    'U-21': _item('/etc/(r)syslog.conf 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
+                  '/etc/(r)syslog.conf 소유자 root(bin, sys), 권한 640 이하인 경우 양호'),
+    'U-22': _item('/etc/services 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
+                  '/etc/services 소유자 root(bin, sys), 권한 644 이하인 경우 양호'),
+    'U-23': _item('SUID, SGID, Sticky bit 설정 파일 점검', '상', CATEGORY_FILE,
+                  '주요 실행 파일에 불필요한 SUID/SGID가 없는 경우 양호 (목록으로 수동 판정)', '7.1.13'),
+    'U-24': _item('사용자, 시스템 환경변수 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
+                  '환경변수 파일 소유자가 root 또는 해당 계정이고 root·소유자 외 쓰기 권한이 없는 경우 양호', '7.2.10'),
+    'U-25': _item('world writable 파일 점검', '상', CATEGORY_FILE,
+                  'world writable 파일이 없거나 설정 이유를 인지하고 있는 경우 양호 (있으면 목록으로 수동 판정)', '7.1.11'),
+    'U-26': _item('/dev에 존재하지 않는 device 파일 점검', '상', CATEGORY_FILE,
+                  '/dev에 major·minor 번호가 없는 device 파일이 없는 경우 양호'),
+    'U-27': _item('$HOME/.rhosts, hosts.equiv 사용 금지', '상', CATEGORY_FILE,
+                  'r-command 미사용, 또는 사용 시 소유자 root/해당 계정·권한 600 이하·"+" 설정 없음인 경우 양호'),
+    'U-28': _item('접속 IP 및 포트 제한', '상', CATEGORY_FILE,
+                  '접속을 허용할 특정 호스트에 대한 IP 주소 및 포트 제한을 설정한 경우 양호 (Docker 구간은 수동)', '4.1.2'),
+    'U-29': _item('hosts.lpd 파일 소유자 및 권한 설정', '하', CATEGORY_FILE,
+                  'hosts.lpd 파일이 없거나, 소유자 root·권한 600 이하인 경우 양호'),
+    'U-30': _item('UMASK 설정 관리', '중', CATEGORY_FILE,
+                  'UMASK 값이 022 이상으로 설정된 경우 양호', '5.4.3.3'),
+    'U-31': _item('홈디렉토리 소유자 및 권한 설정', '중', CATEGORY_FILE,
+                  '홈 디렉터리 소유자가 해당 계정이고 타 사용자 쓰기 권한이 없는 경우 양호', '7.2.9'),
+    'U-32': _item('홈 디렉토리로 지정한 디렉토리의 존재 관리', '중', CATEGORY_FILE,
+                  '홈 디렉터리가 존재하지 않는 계정이 발견되지 않는 경우 양호', '7.2.9'),
+    'U-33': _item('숨겨진 파일 및 디렉토리 검색 및 제거', '하', CATEGORY_FILE,
+                  '의심스러운 숨겨진 파일 및 디렉터리를 제거한 경우 양호 (목록으로 수동 판정)'),
+    'U-34': _item('Finger 서비스 비활성화', '상', CATEGORY_SERVICE, 'Finger 서비스가 비활성화된 경우 양호'),
+    'U-35': _item('공유 서비스에 대한 익명 접근 제한 설정', '상', CATEGORY_SERVICE,
+                  '공유 서비스(FTP·NFS·Samba)를 쓰지 않거나 익명 접근을 제한한 경우 양호'),
+    'U-36': _item('r 계열 서비스 비활성화', '상', CATEGORY_SERVICE,
+                  'r 계열(rlogin, rsh, rexec) 서비스가 비활성화된 경우 양호'),
+    'U-37': _item('crontab 설정파일 권한 설정 미흡', '상', CATEGORY_SERVICE,
+                  'crontab·at 명령 권한 750 이하, cron·at 관련 파일 소유자 root·권한 640 이하인 경우 양호',
+                  '2.4.1.2~2.4.1.8, 2.4.2.1'),
+    'U-38': _item('DoS 공격에 취약한 서비스 비활성화', '상', CATEGORY_SERVICE,
+                  'echo, discard, daytime, chargen 서비스가 비활성화된 경우 양호'),
+    'U-39': _item('불필요한 NFS 서비스 비활성화', '상', CATEGORY_SERVICE,
+                  '불필요한 NFS 서비스 관련 데몬이 비활성화된 경우 양호'),
+    'U-40': _item('NFS 접근 통제', '상', CATEGORY_SERVICE,
+                  'NFS 공유에 접근 통제가 설정되어 있고 설정 파일 권한이 644 이하인 경우 양호 (NFS 미사용 시 해당없음)'),
+    'U-41': _item('불필요한 automountd 제거', '상', CATEGORY_SERVICE,
+                  'automountd(autofs) 서비스가 비활성화된 경우 양호'),
+    'U-42': _item('불필요한 RPC 서비스 비활성화', '상', CATEGORY_SERVICE,
+                  '가이드가 열거한 불필요한 RPC 서비스가 비활성화된 경우 양호'),
+    'U-43': _item('NIS, NIS+ 점검', '상', CATEGORY_SERVICE,
+                  'NIS 서비스가 비활성화되어 있거나 불가피 시 NIS+를 사용하는 경우 양호'),
+    'U-44': _item('tftp, talk 서비스 비활성화', '상', CATEGORY_SERVICE,
+                  'tftp, talk, ntalk 서비스가 비활성화된 경우 양호'),
+    'U-45': _item('메일 서비스 버전 점검', '상', CATEGORY_SERVICE,
+                  '메일 서비스 버전이 최신인 경우 양호 (버전으로 수동 판정, 미사용 시 해당없음)'),
+    'U-46': _item('일반 사용자의 메일 서비스 실행 방지', '상', CATEGORY_SERVICE,
+                  '일반 사용자의 메일 큐 조작(q 옵션) 실행을 막은 경우 양호 (미사용 시 해당없음)'),
+    'U-47': _item('스팸 메일 릴레이 제한', '상', CATEGORY_SERVICE,
+                  '메일 릴레이 제한이 설정된 경우 양호 (미사용 시 해당없음)'),
+    'U-48': _item('expn, vrfy 명령어 제한', '중', CATEGORY_SERVICE,
+                  'noexpn, novrfy(또는 동등) 설정이 적용된 경우 양호 (미사용 시 해당없음)'),
+    'U-49': _item('DNS 보안 버전 패치', '상', CATEGORY_SERVICE,
+                  'DNS 서비스를 주기적으로 패치 관리하는 경우 양호 (버전으로 수동 판정, 미사용 시 해당없음)'),
+    'U-50': _item('DNS ZoneTransfer 설정', '상', CATEGORY_SERVICE,
+                  'Zone Transfer를 허가된 사용자에게만 허용한 경우 양호 (미사용 시 해당없음)'),
+    'U-51': _item('DNS 서비스의 취약한 동적 업데이트 설정 금지', '중', CATEGORY_SERVICE,
+                  '동적 업데이트를 쓰지 않거나 접근 통제를 적용한 경우 양호 (미사용 시 해당없음)'),
+    'U-52': _item('Telnet 서비스 비활성화', '중', CATEGORY_SERVICE, 'Telnet 서비스를 사용하지 않는 경우 양호'),
+    'U-53': _item('FTP 서비스 정보 노출 제한', '하', CATEGORY_SERVICE,
+                  'FTP 접속 배너에 노출되는 정보가 없는 경우 양호 (미사용 시 해당없음)'),
+    'U-54': _item('암호화되지 않는 FTP 서비스 비활성화', '중', CATEGORY_SERVICE,
+                  '암호화되지 않은 FTP 서비스가 비활성화된 경우 양호'),
+    'U-55': _item('FTP 계정 shell 제한', '중', CATEGORY_SERVICE,
+                  'ftp 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호 (계정 없으면 해당없음)'),
+    'U-56': _item('FTP 서비스 접근 제어 설정', '하', CATEGORY_SERVICE,
+                  '특정 IP·호스트만 FTP에 접속하도록 접근 제어를 설정한 경우 양호 (미사용 시 해당없음)'),
+    'U-57': _item('Ftpusers 파일 설정', '중', CATEGORY_SERVICE,
+                  'root 계정의 FTP 접속을 차단한 경우 양호 (미사용 시 해당없음)'),
+    'U-58': _item('불필요한 SNMP 서비스 구동 점검', '중', CATEGORY_SERVICE, 'SNMP 서비스를 사용하지 않는 경우 양호'),
+    'U-59': _item('안전한 SNMP 버전 사용', '상', CATEGORY_SERVICE,
+                  'SNMP v3 이상을 사용하는 경우 양호 (미사용 시 해당없음)'),
+    'U-60': _item('SNMP Community String 복잡성 설정', '중', CATEGORY_SERVICE,
+                  'public·private가 아니고 영문+숫자 10자 이상 또는 영문+숫자+특수문자 8자 이상인 경우 양호'),
+    'U-61': _item('SNMP Access Control 설정', '상', CATEGORY_SERVICE,
+                  'SNMP 접근 허용 대상을 제한한 경우 양호 (미사용 시 해당없음)'),
+    'U-62': _item('로그인 시 경고 메시지 설정', '하', CATEGORY_SERVICE,
+                  '서버 및 사용 중인 원격 서비스에 로그온 경고 메시지가 설정된 경우 양호', '1.7.1~1.7.3, 5.1.5'),
+    'U-63': _item('sudo 명령어 접근 관리', '중', CATEGORY_SERVICE,
+                  '/etc/sudoers 소유자 root, 권한 640 이하인 경우 양호 (없으면 해당없음)'),
+    'U-64': _item('주기적 보안 패치 및 벤더 권고사항 적용', '상', CATEGORY_PATCH,
+                  '패치 적용 정책을 수립하여 주기적으로 관리하는 경우 양호 (수동, 미적용 패치는 Package Vulnerability)'),
+    'U-65': _item('NTP 및 시각 동기화 설정', '중', CATEGORY_LOG,
+                  'NTP 및 시각 동기화 설정이 기준에 따라 적용된 경우 양호', '2.3.1'),
+    'U-66': _item('정책에 따른 시스템 로깅 설정', '중', CATEGORY_LOG,
+                  '로그 기록 정책에 따라 로그를 남기는 경우 양호 (syslog 데몬 동작·인증 로그 규칙)'),
+    'U-67': _item('로그 디렉터리 소유자 및 권한 설정', '중', CATEGORY_LOG,
+                  '로그 디렉터리 내 로그 파일의 소유자가 root이고 권한이 644 이하인 경우 양호', '6.2.4.1'),
+})
 
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'
@@ -326,8 +447,9 @@ def host_audit_kisa_section(model, records, register=None, today=None):
 
     summary = [dict(_item_meta(code), counts=[counts[code][v] for v in VERDICTS]) for code in codes]
     implemented = sorted(ITEMS)
-    scope_text = '%s Unix — %s %s~%s (%d개 항목)' % (
-        EDITION, CATEGORY_ACCOUNT, implemented[0], implemented[-1], len(implemented))
+    categories = [c for c in CATEGORIES if any(m['category'] == c for m in ITEMS.values())]
+    scope_text = '%s Unix — %s~%s (%d개 항목: %s)' % (
+        EDITION, implemented[0], implemented[-1], len(implemented), '·'.join(categories))
 
     cover['contents'] = list(cover.get('contents') or []) + [
         'Configuration Vulnerability — %s, 판정 5종(양호·취약·예외(승인)·해당없음·점검불가(수동)), CIS는 참조' % scope_text]

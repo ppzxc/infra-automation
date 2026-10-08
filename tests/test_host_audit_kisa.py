@@ -6,7 +6,9 @@ filters the playbook uses; the report section is asserted through the model and
 the rendered template.
 """
 import datetime
+import getpass
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -47,7 +49,8 @@ def exception(code="KISA-2026:U-02", **overrides):
     return entry
 
 
-ALL_GOOD = ["U-%02d|GOOD|ok" % i for i in range(1, 14)]
+ALL_CODES = range(1, 68)  # KISA-2026 Unix U-01..U-67
+ALL_GOOD = ["U-%02d|GOOD|ok" % i for i in ALL_CODES]
 
 
 # ------------------------------------------------------------ parser: five verdicts
@@ -177,8 +180,8 @@ def _model(records, register=()):
 
 
 def test_section_shows_findings_other_than_good_and_appendix_has_everything():
-    lines_a = ["U-%02d|GOOD|ok" % i for i in range(1, 14) if i not in (2, 6)] + ["U-02|VULN|max", "U-06|NA|no su"]
-    lines_b = ["U-%02d|GOOD|ok" % i for i in range(1, 14) if i != 2] + ["U-02|VULN|max"]
+    lines_a = ["U-%02d|GOOD|ok" % i for i in ALL_CODES if i not in (2, 6)] + ["U-02|VULN|max", "U-06|NA|no su"]
+    lines_b = ["U-%02d|GOOD|ok" % i for i in ALL_CODES if i != 2] + ["U-02|VULN|max"]
     records = [_record("ns0001", lines_a), _record("ns0002", lines_b)]
     cv = _model(records)["config_vulnerability"]
 
@@ -225,7 +228,7 @@ def test_template_renders_section_appendix_and_register():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
     register = [exception("KISA-2026:U-02"),
                 exception("KISA-2026:U-28", approver="", approved_on="", expires_on="")]
-    lines = ["U-%02d|GOOD|ok-evidence-%02d" % (i, i) for i in range(1, 14) if i != 2] + ["U-02|VULN|max"]
+    lines = ["U-%02d|GOOD|ok-evidence-%02d" % (i, i) for i in ALL_CODES if i != 2] + ["U-02|VULN|max"]
     model = _model([_record("ns0332", lines, register)], register)
     html = env.get_template("report.html.j2").render(host_audit_model=model)
 
@@ -252,9 +255,35 @@ def _write(root, rel, text, mode=0o644):
     path.chmod(mode)
 
 
-def _run(root):
-    env = {"KISA_ROOT": str(root), "PATH": "/usr/bin:/bin"}
-    out = subprocess.run(["sh", "-s"], input=_script(), capture_output=True, text=True, env=env, timeout=60)
+def _stub_bin(root, procs=(), units=(), ports=(), commands=None):
+    """Hermetic stand-ins for the host queries the checks make (ps, ss, systemctl, ...).
+
+    The scripts read files under KISA_ROOT, but running processes, units and listening
+    ports come from commands; these stubs make them part of the fixture instead of the
+    machine running pytest. ``commands`` adds further stub executables (name -> sh body).
+    """
+    bindir = root.parent / (root.name + "-bin")
+    bindir.mkdir(exist_ok=True)
+    stubs = {
+        "ps": "printf '%s\\n' " + " ".join("'%s'" % p for p in procs) if procs else "exit 0",
+        "systemctl": ('[ "$1" = is-active ] || exit 1\nfor u in ' + " ".join(units or ["__none__"])
+                      + '; do for a in "$@"; do [ "$a" = "$u" ] && exit 0; done; done\nexit 3'),
+        "ss": "echo 'State Recv-Q Send-Q Local Address:Port Peer Address:Port'\n" + "".join(
+            "echo 'LISTEN 0 128 0.0.0.0:%d 0.0.0.0:*'\n" % p for p in ports),
+    }
+    stubs.update(commands or {})
+    for name, body in stubs.items():
+        path = bindir / name
+        path.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+        path.chmod(0o755)
+    return bindir
+
+
+def _run(root, shell="sh", **stubs):
+    env = {"KISA_ROOT": str(root), "PATH": "%s:/usr/bin:/bin" % _stub_bin(root, **stubs),
+           "KISA_FAKE_ROOT_OWNER": getpass.getuser()}
+    out = subprocess.run(shell.split() + ["-s"], input=_script(), capture_output=True, text=True, env=env,
+                         timeout=120)
     assert out.returncode == 0, out.stderr
     return out.stdout
 
@@ -307,10 +336,10 @@ def test_check_scripts_on_hardened_root(tmp_path):
     rows = _status(stdout)
 
     assert set(rows) == set(ITEMS)
-    expected = {"U-01": "GOOD", "U-02": "GOOD", "U-03": "GOOD", "U-04": "GOOD", "U-05": "GOOD",
+    account = {"U-01": "GOOD", "U-02": "GOOD", "U-03": "GOOD", "U-04": "GOOD", "U-05": "GOOD",
                 "U-06": "GOOD", "U-07": "MANUAL", "U-08": "MANUAL", "U-09": "GOOD", "U-10": "GOOD",
                 "U-11": "GOOD", "U-12": "GOOD", "U-13": "GOOD"}
-    assert {code: st for code, (st, _) in rows.items()} == expected, stdout
+    assert {code: rows[code][0] for code in account} == account, stdout
     assert "deny=5" in rows["U-03"][1]
     assert "root,ppzxc" in rows["U-07"][1]
     assert "wheel=ppzxc" in rows["U-08"][1]
@@ -375,3 +404,192 @@ def test_kisa_tasks_run_read_only_via_stdin_and_record_results():
     names = [t.get("name", "") for t in main]
     kisa_at = next(i for i, t in enumerate(main) if t.get("ansible.builtin.include_tasks") == "kisa.yml")
     assert kisa_at < next(i for i, n in enumerate(names) if n.startswith("[AUD-012]"))
+
+
+# ------------------------------------------------------------ #122: U-14..U-67
+
+
+def test_catalog_covers_every_kisa_2026_unix_item_in_five_categories():
+    from host_audit_kisa import CATEGORIES
+
+    assert sorted(ITEMS) == ["U-%02d" % i for i in ALL_CODES]
+    assert [ITEMS[c]["category"] for c in ("U-13", "U-14", "U-33", "U-34", "U-63", "U-64", "U-65", "U-67")] == [
+        CATEGORIES[0], CATEGORIES[1], CATEGORIES[1], CATEGORIES[2], CATEGORIES[2], CATEGORIES[3], CATEGORIES[4],
+        CATEGORIES[4]]
+    for code, meta in ITEMS.items():
+        assert meta["title"] and meta["severity"] in ("상", "중", "하") and meta["criteria"], code
+    scripts = sorted(p.stem for p in KISA_DIR.glob("U-*.sh"))
+    assert scripts == sorted(ITEMS)
+
+
+# A host shaped like a provisioned server: only root logs in, logging, time sync, sshd banner,
+# TCP Wrapper default deny. Every item must be judged (no silent gaps).
+SERVER = {
+    "etc/passwd": "root:x:0:0:root:/root:/bin/bash\nbin:x:1:1:bin:/bin:/sbin/nologin\n"
+                  "nobody:x:65534:65534::/:/sbin/nologin\n",
+    "etc/group": "root:x:0:\nbin:x:1:\nwheel:x:10:\nnobody:x:65534:\n",
+    "etc/login.defs": "PASS_MAX_DAYS 90\nPASS_MIN_DAYS 1\nENCRYPT_METHOD SHA512\nUMASK 022\n",
+    "etc/profile": "umask 022\nreadonly TMOUT=600\n",
+    "etc/hosts": "127.0.0.1 localhost\n",
+    "etc/services": "ssh 22/tcp\n",
+    "etc/hosts.deny": "ALL: ALL\n",
+    "etc/motd": "Authorized users only. All activity is monitored.\n",
+    "etc/issue.net": "Authorized users only.\n",
+    "etc/ssh/sshd_config": "PermitRootLogin no\nBanner /etc/issue.net\n",
+    "etc/rsyslog.conf": "authpriv.* /var/log/secure\n*.info /var/log/messages\n",
+    "etc/chrony.conf": "server ntp.example.internal iburst\n",
+    "etc/crontab": "SHELL=/bin/sh\n",
+    "etc/systemd/system/app.service": "[Service]\nExecStart=/bin/true\n",
+    "root/.bashrc": "PATH=$PATH:$HOME/bin\n",
+    "var/log/messages": "",
+    "var/log/secure": "",
+}
+SERVER_MODES = {"etc/shadow": 0o400, "etc/sudoers": 0o440, "etc/rsyslog.conf": 0o600, "etc/crontab": 0o600,
+                "var/log/messages": 0o600, "var/log/secure": 0o600}
+SERVER_STUBS = {"procs": ("systemd", "sshd", "rsyslogd", "chronyd", "crond")}
+
+
+def _server(root, extra=None, modes=None):
+    tree = dict(SERVER, **{"etc/shadow": "root:$6$s$HASHVALUE:19000:1:90:7:::\n", "etc/sudoers": "root ALL=(ALL) ALL\n"})
+    tree.update(extra or {})
+    all_modes = dict(SERVER_MODES, **(modes or {}))
+    for rel, text in tree.items():
+        _write(root, rel, text, all_modes.get(rel, 0o644))
+    (root / "dev").mkdir(exist_ok=True)
+    (root / "tmp").mkdir(exist_ok=True)
+    return root
+
+
+EXPECTED_SERVER = {
+    "U-14": "GOOD", "U-15": "GOOD", "U-16": "GOOD", "U-17": "GOOD", "U-18": "GOOD", "U-19": "GOOD",
+    "U-20": "NA", "U-21": "GOOD", "U-22": "GOOD", "U-23": "GOOD", "U-24": "GOOD", "U-25": "GOOD",
+    "U-26": "GOOD", "U-27": "GOOD", "U-28": "GOOD", "U-29": "GOOD", "U-30": "GOOD", "U-31": "GOOD",
+    "U-32": "GOOD", "U-33": "GOOD", "U-34": "GOOD", "U-35": "GOOD", "U-36": "GOOD", "U-37": "GOOD",
+    "U-38": "GOOD", "U-39": "GOOD", "U-40": "NA", "U-41": "GOOD", "U-42": "GOOD", "U-43": "GOOD",
+    "U-44": "GOOD", "U-45": "NA", "U-46": "NA", "U-47": "NA", "U-48": "NA", "U-49": "NA", "U-50": "NA",
+    "U-51": "NA", "U-52": "GOOD", "U-53": "NA", "U-54": "GOOD", "U-55": "NA", "U-56": "NA", "U-57": "NA",
+    "U-58": "GOOD", "U-59": "NA", "U-60": "NA", "U-61": "NA", "U-62": "GOOD", "U-63": "GOOD", "U-64": "MANUAL",
+    "U-65": "GOOD", "U-66": "GOOD", "U-67": "GOOD",
+}
+
+
+def test_remaining_items_on_a_provisioned_server(tmp_path):
+    root = _server(tmp_path / "root")
+    stdout = _run(root, **SERVER_STUBS)
+    rows = _status(stdout)
+
+    assert set(rows) == set(ITEMS), stdout
+    got = {code: rows[code][0] for code in EXPECTED_SERVER}
+    assert got == EXPECTED_SERVER, "\n".join("%s %s %s" % (c, got[c], rows[c][1]) for c in got
+                                             if got[c] != EXPECTED_SERVER[c])
+    assert "TCP Wrapper" in rows["U-28"][1]
+    assert "chronyd" in rows["U-65"][1] and "rsyslogd" in rows["U-66"][1]
+    assert "HASHVALUE" not in stdout
+
+
+WEAK_SERVER = {
+    "etc/passwd": "root:x:0:0:root:/root:/bin/bash\nghost:x:1002:1002::/home/ghost:/bin/bash\n"
+                  "ftp:x:14:50:FTP:/var/ftp:/bin/bash\n",
+    "etc/profile": "umask 002\nPATH=.:$PATH\n",
+    "etc/hosts.equiv": "+\n",
+    "etc/xinetd.d/finger": "service finger\n{\n disable = no\n}\n",
+    "etc/xinetd.d/echo-stream": "service echo\n{\n disable = no\n}\n",
+    "etc/xinetd.d/tftp": "service tftp\n{\n disable = no\n}\n",
+    "etc/exports": "/srv *(rw,no_root_squash)\n",
+    "etc/snmp/snmpd.conf": "rocommunity public\nrwcommunity S3cretCommunity\n",
+    "etc/systemd/system/app.service": "[Service]\n",
+    "etc/motd": "",
+    "etc/ssh/sshd_config": "PermitRootLogin no\n",
+    "dev/leftover": "x",
+    "var/log/messages": "",
+}
+WEAK_MODES = {"etc/passwd": 0o666, "etc/systemd/system/app.service": 0o666, "etc/sudoers": 0o644,
+              "var/log/messages": 0o666, "etc/crontab": 0o644, "etc/hosts.deny": 0o644}
+WEAK_STUBS = {"procs": ("systemd", "sshd", "nfsd", "automount", "ypbind", "snmpd"), "ports": (23, 513)}
+
+
+def test_remaining_items_on_a_weak_server(tmp_path):
+    root = tmp_path / "root"
+    _server(root)
+    for rel in ("etc/hosts.deny", "etc/rsyslog.conf", "etc/chrony.conf", "etc/issue.net"):
+        (root / rel).unlink()
+    for rel, text in WEAK_SERVER.items():
+        _write(root, rel, text, WEAK_MODES.get(rel, 0o644))
+    for rel, mode in WEAK_MODES.items():
+        if (root / rel).exists():
+            (root / rel).chmod(mode)
+    stdout = _run(root, **WEAK_STUBS)
+    rows = _status(stdout)
+
+    for code in ("U-14", "U-16", "U-17", "U-26", "U-27", "U-28", "U-30", "U-32", "U-34", "U-36", "U-37",
+                 "U-38", "U-39", "U-40", "U-41", "U-43", "U-44", "U-52", "U-55", "U-58", "U-59", "U-60",
+                 "U-61", "U-62", "U-63", "U-65", "U-66", "U-67"):
+        assert rows[code][0] == "VULN", (code, rows[code])
+    assert "/etc/profile=.:$PATH" in rows["U-14"][1]
+    assert "/dev/leftover" in rows["U-26"][1]
+    assert "'+' entry" in rows["U-27"][1]
+    assert "ghost:/home/ghost" in rows["U-32"][1]
+    assert "513/tcp" in rows["U-36"][1]
+    assert "echo-stream" in rows["U-38"][1]
+    assert "/srv" in rows["U-40"][1]
+    # 'public' is a default; 'S3cretCommunity' (letters+digits, 15 chars) meets the rule
+    assert "1 of 2 community" in rows["U-60"][1]
+    # SNMP community strings are secrets: never in the evidence
+    assert "S3cretCommunity" not in stdout and "public" not in rows["U-60"][1]
+    assert rows["U-35"][0] == "VULN" and "no_root_squash" in rows["U-35"][1]
+
+
+def test_postfix_mail_items(tmp_path):
+    root = _server(tmp_path / "root", extra={"usr/sbin/postsuper": ""}, modes={"usr/sbin/postsuper": 0o755})
+    postconf = ('case "$*" in *mail_version*) echo 3.5.25 ;; *disable_vrfy_command*) echo no ;;\n'
+                '*relay*) echo "permit_mynetworks, reject_unauth_destination"; echo "" ;; esac')
+    rows = _status(_run(root, procs=SERVER_STUBS["procs"] + ("master",), commands={"postconf": postconf}))
+    assert rows["U-45"] == ("MANUAL", "postfix 3.5.25; compare with vendor latest and Package Vulnerability")
+    assert rows["U-46"][0] == "VULN" and "/usr/sbin/postsuper mode=755" in rows["U-46"][1]
+    assert rows["U-47"][0] == "GOOD"
+    assert rows["U-48"][0] == "VULN"
+
+
+def test_u28_docker_segment_is_manual_and_the_register_exception_applies(tmp_path):
+    root = _server(tmp_path / "root")
+    (root / "sys" / "class" / "net" / "docker0").mkdir(parents=True)
+    stdout = _run(root, procs=SERVER_STUBS["procs"] + ("dockerd",))
+    status, evidence = _status(stdout)["U-28"]
+    assert status == "MANUAL" and "Docker" in evidence
+
+    defaults = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    register = [dict(defaults["host_audit_kisa_exceptions"][0], approver="정보보호 책임자",
+                     approved_on="2026-10-01", expires_on="2027-09-30")]
+    result = host_audit_kisa_result({"rc": 0, "stdout": stdout}, register, "ns0332", ["servers"], TODAY)
+    assert verdicts(result)["KISA-2026:U-28"] == EXCEPTION
+
+    pending = host_audit_kisa_result({"rc": 0, "stdout": stdout}, defaults["host_audit_kisa_exceptions"],
+                                     "ns0332", ["servers"], TODAY)
+    item = next(it for it in pending["results"] if it["code"] == "KISA-2026:U-28")
+    assert item["verdict"] == MANUAL and item["exception"]["state"] == "승인 대기"
+
+
+def test_script_sent_without_comment_lines_judges_the_same_and_fits_one_argument(tmp_path, monkeypatch):
+    import re
+    import shlex
+
+    tasks = yaml.safe_load((ROLE_DIR / "tasks" / "kisa.yml").read_text(encoding="utf-8"))
+    assert "regex_replace('(?m)^[ \\t]*#.*\\n', '')" in tasks[0]["vars"]["_host_audit_kisa_script"]
+    full = _script()
+    sent = re.sub(r"(?m)^[ \t]*#.*\n", "", full)
+    root = _server(tmp_path / "root")
+    reference = _status(_run(root, **SERVER_STUBS))
+    monkeypatch.setattr(sys.modules[__name__], "_script", lambda: sent)
+    assert _status(_run(root, **SERVER_STUBS)) == reference
+    # raw → become sh -c → SSH sh -c: two more quoting layers must stay well under 128 KiB
+    cmd = shlex.quote("echo BECOME-SUCCESS ; printf '%s\\n' " + shlex.quote(sent) + " | sh -s")
+    assert len(shlex.quote(cmd).encode()) < 100 * 1024
+
+
+@pytest.mark.parametrize("shell", ["dash", "bash --posix", "bash"])
+def test_check_scripts_agree_across_posix_shells(tmp_path, shell):
+    if not shutil.which(shell.split()[0]):
+        pytest.skip("%s not installed" % shell)
+    root = _server(tmp_path / "root")
+    reference = _status(_run(root, **SERVER_STUBS))
+    assert _status(_run(root, shell=shell, **SERVER_STUBS)) == reference

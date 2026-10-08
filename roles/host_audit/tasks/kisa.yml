@@ -13,8 +13,10 @@
   ansible.builtin.raw: "printf '%s\\n' {{ _host_audit_kisa_script | quote }} | sh -s"
   vars:
     _host_audit_kisa_files: "{{ ['kisa/_lib.sh'] + (query('ansible.builtin.fileglob', role_path ~ '/files/kisa/U-*.sh') | sort) + ['kisa/_end.sh'] }}"
+    # 줄 전체 주석은 빼고 보낸다(#122): 스크립트가 raw 명령 한 줄(인자)로 가므로 sudo·SSH 인용이
+    # 겹쳐도 리눅스 단일 인자 상한(MAX_ARG_STRLEN 128KiB)보다 충분히 작게 유지한다.
     _host_audit_kisa_script: |
-      {% for f in _host_audit_kisa_files %}{{ lookup('ansible.builtin.file', f) }}
+      {% for f in _host_audit_kisa_files %}{{ lookup('ansible.builtin.file', f) | regex_replace('(?m)^[ \t]*#.*\n', '') }}
       {% endfor %}
   register: _host_audit_kisa_probe
   changed_when: false
