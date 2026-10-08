@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "host-audit-retain-3y",
+      "Status": "Enabled",
+      "Filter": {"Prefix": ""},
+      "Expiration": {"Days": 1095},
+      "NoncurrentVersionExpiration": {"NoncurrentDays": 1}
+    }
+  ]
+}

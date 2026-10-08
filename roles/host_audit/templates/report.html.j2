@@ -89,6 +89,8 @@
 
 {% include 'sections/package_vulnerability.html.j2' %}
 
+{% if m.baseline is defined %}{% include 'sections/audit_baseline.html.j2' %}{% endif %}
+
 {% include 'sections/appendix.html.j2' %}
 
   <h2 class="pb keep">검토 및 결재</h2>

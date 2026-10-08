@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_inventory import inventory_section  # noqa: E402
 from host_audit_kisa import host_audit_kisa_section, run_date as kisa_run_date  # noqa: E402
+from host_audit_baseline import host_audit_baseline_section  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo
@@ -267,8 +268,10 @@ def host_audit_report_model(records, meta):
         'package_vulnerability': package_vulnerability,
     }
     # Configuration Vulnerability (KISA-2026, #121): exception expiry is judged on the run date.
-    return host_audit_kisa_section(model, records, meta.get('kisa_exceptions') or [],
-                                   kisa_run_date(meta.get('started_at'), tz_name))
+    model = host_audit_kisa_section(model, records, meta.get('kisa_exceptions') or [],
+                                    kisa_run_date(meta.get('started_at'), tz_name))
+    # Audit Baseline (#125) runs last: it marks the findings every section above produced.
+    return host_audit_baseline_section(model, meta.get('baseline_history'), dict(meta, timezone=tz_name))
 
 
 class FilterModule(object):

@@ -1,0 +1,82 @@
+{#- Audit Baseline 대비 변경 섹션 (ADR-0009 §5, #125).
+    host_audit_model.baseline을 그리기만 한다. 판정은 filter_plugins/host_audit_baseline.py. -#}
+{%- set b = host_audit_model.baseline -%}
+<style>
+  .bl-counts td.n { text-align:right; width:13mm; }
+  .bl-counts td.zero { color:#b8bec5; }
+  .tag.warn { color:#b54708; }
+</style>
+  <h2 class="pb">Audit Baseline 대비 변경 <span class="small mute">ISMS 2.11.2 · 1.2.1</span></h2>
+{% if b.state != 'ok' %}
+  <div class="note keep">{{ host_audit_model.cover.baseline | e }}</div>
+{% else %}
+  <p class="small mute">비교 기준: {{ host_audit_model.cover.baseline | e }}. 동일성 기준은 (Inventory Hostname, 섹션, 항목). 재발은 지난 12개월 정기 실행에서 해소됐던 항목의 재등장이고, 확인 불가는 기준선에 있었지만 이번에 그 호스트를 점검하지 못한 항목이다. 수시 실행은 보관하되 비교 기준이 되지 않는다.</p>
+{% if b.compared %}
+  <table class="bl-counts">
+    <thead><tr><th>섹션</th>{% for s in b.statuses %}<th class="nowrap">{{ s | e }}</th>{% endfor %}</tr></thead>
+    <tbody>
+{% for r in b.count_rows %}
+      <tr><td>{{ r.section | e }}</td>{% for n in r.counts %}<td class="n {{ b.status_classes[loop.index0] if n else 'zero' }}">{{ n }}</td>{% endfor %}</tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="note keep">첫 정기 실행 전이라 비교하지 않았다 — 각 섹션의 발견은 '첫 실행'으로 표시된다.</div>
+{% endif %}
+
+{% if b.recurring %}
+  <h3>재발</h3>
+  <table>
+    <thead><tr><th>호스트</th><th>섹션</th><th>항목</th></tr></thead>
+    <tbody>
+{% for r in b.recurring %}
+      <tr><td class="nowrap">{{ r.host | e }}</td><td class="nowrap">{{ r.section | e }}</td><td>{{ r.item | e }} <span class="tag {{ r.class }}">{{ r.status | e }}</span></td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+{% if b.resolved %}
+  <h3>해소</h3>
+  <table>
+    <thead><tr><th>호스트</th><th>섹션</th><th>항목</th></tr></thead>
+    <tbody>
+{% for r in b.resolved %}
+      <tr><td class="nowrap">{{ r.host | e }}</td><td class="nowrap">{{ r.section | e }}</td><td>{{ r.item | e }}</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+{% if b.unknown %}
+  <h3>확인 불가</h3>
+  <p class="small mute">기준선에 있던 항목이지만 이번 실행에서 해당 호스트·섹션을 점검하지 못했다.</p>
+  <table>
+    <thead><tr><th>호스트</th><th>섹션</th><th>항목</th></tr></thead>
+    <tbody>
+{% for r in b.unknown %}
+      <tr><td class="nowrap">{{ r.host | e }}</td><td class="nowrap">{{ r.section | e }}</td><td>{{ r.item | e }}</td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+{% if b.compared %}
+  <h3>Asset Inventory 변경 (새 계정·포트·특수권한자)</h3>
+{% if b.asset_changes %}
+  <table>
+    <thead><tr><th>호스트</th><th>구분</th><th>항목</th><th>변경</th></tr></thead>
+    <tbody>
+{% for r in b.asset_changes %}
+      <tr><td class="nowrap">{{ r.host | e }}</td><td class="nowrap">{{ r.kind | e }}</td><td>{{ r.item | e }}</td><td><span class="tag {{ r.class }}">{{ r.change | e }}</span></td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="note keep">기준선 대비 새 계정·포트·특수권한자 없음.</div>
+{% endif %}
+{% endif %}
+{% if b.truncated %}
+  <p class="small mute">외 {{ b.truncated }}건은 원본 보관 위치의 findings.json에 있다.</p>
+{% endif %}
+{% endif %}

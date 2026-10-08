@@ -323,3 +323,105 @@ host_audit_asset:
 | `AUD-201` | `Add KISA-2026 verdicts to the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_kisa_result` 필터 |
 
 검증: pytest `tests/test_host_audit_kisa.py`(판정 5종, 예외 유효·만료·승인 대기·범위, 보고서 섹션·부록, 가짜 루트에서의 스크립트 판정과 해시 미노출), molecule Fast `VERIFY-AUD-200`·`VERIFY-AUD-201`(점검 실행·판정 기록). 읽기 전용은 `VERIFY-AUD-010` 스냅샷 사이에서 함께 확인된다.
+
+## 11. 보관과 Audit Baseline (#125)
+
+실행마다 러너의 실행 디렉터리 전체를 RustFS **Host Audit 전용 버킷**(기본 `host-audit`)에 올리고, 직전 정기 실행(Audit Baseline)과 비교해 모든 섹션의 발견을 표시한다. 모든 동작은 러너 localhost의 보고서 단계에서 일어나고 대상 호스트에는 아무것도 하지 않는다. check 모드에서는 조회·업로드를 하지 않는다.
+
+### 11.1 버킷 레이아웃
+
+| 키 | 내용 | 쓰는 실행 |
+|---|---|---|
+| `<YYYY-MM>/<run_id>/report.html` | A4 보고서 | 모든 실행 |
+| `<YYYY-MM>/<run_id>/run.json` | 실행 메타(`run_kind` 포함) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/findings.json` | 섹션별 발견 색인 `{section: {hosts, ids: {host: [id]}}}`, `resolved`, `baseline_run_id` | 모든 실행 |
+| `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록·SBOM·Trivy 원본, `package_vulnerability.json`, `pointer.json` | 모든 실행 |
+| `baseline/<run_id>.json` | 포인터 `{run_id, run_kind, started_at, findings_key, resolved}` | **정기 실행만**, 모든 업로드 성공 후 |
+
+`<YYYY-MM>`은 보고서 시간대(`host_audit_timezone`) 기준 실행 시작 월이다. 수시 실행은 보관하되 포인터를 쓰지 않으므로 Audit Baseline이 되지 않는다.
+
+**기준선 찾기**: `baseline/` 목록 1회(ListObjectsV2) → 지난 12개월(+1일) 안에 수정된 포인터만 Get → 이번 실행보다 먼저 시작한 정기 실행 중 가장 최근 것이 Audit Baseline → 그 `findings_key`를 Get. 재발 판정은 같은 포인터들의 `resolved` 목록(정기 실행이 해소로 표시한 항목)을 쓴다. 포인터 목록은 1,000개(월 1회 기준 80년 이상)까지 한 번에 읽는다.
+
+### 11.2 상태 판정
+
+동일성 키는 (Inventory Hostname, 섹션, 항목 식별자)다. 항목 식별자: Configuration Vulnerability는 `KISA-2026:U-NN`(판정이 취약·예외(승인)일 때만 발견, 점검불가(수동)는 제외), Package Vulnerability는 `CVE|패키지`, Asset Inventory는 `account:<이름>`·`port:<proto>/<port>`·`privileged:<이름>`.
+
+| 상태 | 뜻 |
+|---|---|
+| 신규 | 기준선에 없음 |
+| 지속 | 기준선에도 있음 |
+| 재발 | 기준선에 없고, 지난 12개월 정기 실행이 해소로 표시했던 항목 |
+| 해소 | 기준선에 있었고 이번에 없음(그 호스트·섹션을 이번에 점검함) — 정기 실행만 재발 이력에 남긴다 |
+| 확인 불가 | 기준선에 있었지만 이번에 그 호스트·섹션을 점검하지 못함 |
+| 첫 실행 | 기준선(이전 정기 실행)이 없음 |
+
+Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **신규**·**삭제**만 표시하고, 이번에 처음 점검한 호스트의 항목은 변경으로 세지 않는다. 보고서에는 Configuration Vulnerability '양호 외 항목'의 호스트 옆, Package Vulnerability '긴급·높음 상세'의 CVE 옆에 상태 배지가 붙고, 'Audit Baseline 대비 변경' 섹션에 섹션별 건수·재발·해소·확인 불가·Asset Inventory 변경이 나온다. 표지의 '비교 기준'에 Audit Baseline 실행 ID, '원본 보관'에 버킷 경로가 찍힌다.
+
+**새 섹션의 참여 방법**: 섹션 모델에 `baseline_findings: {hosts: [점검한 호스트], findings: [{host, id, label}]}`를 넣으면 같은 규칙으로 비교된다(예: Configuration Drift). 보고서 모델 빌더에서 Audit Baseline은 마지막에 적용된다.
+
+### 11.3 실패 처리
+
+- 자격증명·입력 누락: 업로드하지 않는다. 보고서는 만들고(비교 기준 '조회 실패') 실행은 실패로 끝난다(`AUD-516`).
+- Audit Baseline 조회 실패(목록·포인터·findings.json): 비교 없이 보고서를 만들고 원본은 올린 뒤 실행을 실패로 끝낸다.
+- 업로드 실패(파일 하나라도): 실행을 실패로 끝낸다. 정기 실행이면 포인터를 올리지 않아 이 실행은 다음 달 비교 기준이 되지 않는다.
+
+### 11.4 입력 (OpenBao KV v2, Git에는 시크릿 없음)
+
+| 경로 | 키 | 필수 | 설명 |
+|---|---|---|---|
+| `agents/host_audit` | `storage_access_key`, `storage_secret_key` | ● | Host Audit 전용 키(Put·Get·List). 백업·유지보수 키 재사용 금지 |
+| `agents/host_audit` | `storage_bucket` | | 기본 `host-audit` |
+| `agents/host_audit` | `storage_endpoint` | | 비우면 `agents/rustfs.rustfs_endpoint` |
+| `agents/host_audit` | `storage_region` | | 기본 `us-east-1` |
+
+로그인은 Host Agents와 같은 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`) 또는 `VAULT_TOKEN`이다. AppRole 정책에 `agents/host_audit`, `agents/rustfs` 읽기가 있어야 한다. 시험할 때는 Extra variables `host_audit_storage`(endpoint·bucket·access_key·secret_key·region)로 OpenBao를 건너뛸 수 있고, 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `host_audit_storage_enabled` | `true` | false면 러너 로컬만, 비교 안 함 |
+| `host_audit_storage_bucket` | `host-audit` | 버킷 기본값 |
+| `host_audit_storage` | `{}` | 보관 대상 직접 지정(시험용, Extra variables) |
+| `host_audit_storage_validate_certs` · `host_audit_storage_ca_file` | `true` · `""` | RustFS TLS 검증 · 사설 CA(러너 경로) |
+| `host_audit_storage_timeout` | `60` | S3 요청 하나의 최대 시간(초) |
+
+S3 요청은 `ansible.builtin.uri`에 AWS Signature V4 헤더(`host_audit_s3_request`, 표준 라이브러리만 사용)를 붙여 보낸다 — 러너 이미지에 boto3·aws-cli를 추가하지 않는다. 업로드 본문의 SHA-256을 서명에 넣는다.
+
+### 11.5 버킷 준비 (운영자, 1회)
+
+설정 파일은 `roles/host_audit/files/storage/`에 있다. RustFS 1.0.1 컨테이너에 아래 절차를 그대로 적용해 확인했다(2026-10-08).
+
+```bash
+export AWS_ACCESS_KEY_ID=<RustFS 관리자 키> AWS_SECRET_ACCESS_KEY=<…> AWS_DEFAULT_REGION=us-east-1
+S3="aws --endpoint-url https://<rustfs>:9000 s3api"
+# 1) Object Lock을 켠 버킷(버저닝 자동 활성) — 생성 시에만 켤 수 있다
+$S3 create-bucket --bucket host-audit --object-lock-enabled-for-bucket
+# 2) 기본 보존 GOVERNANCE 1095일(3년)
+$S3 put-object-lock-configuration --bucket host-audit --object-lock-configuration file://host-audit-object-lock.json
+# 3) 수명주기 3년: 1095일 뒤 만료, 이전 버전은 다음 날 삭제
+$S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configuration file://host-audit-lifecycle.json
+```
+
+전용 키: 정책 `host-audit-putget-policy.json`(`s3:PutObject`·`s3:GetObject` on `host-audit/*`, `s3:ListBucket` on `host-audit`, Delete 없음)을 만들고 Host Audit 전용 사용자에 붙인 뒤 키를 OpenBao `agents/host_audit`에 넣는다. RustFS 콘솔(Identity → Policies/Users) 또는 `rc admin`(MinIO 호환 관리 API `/rustfs/admin/v3/add-canned-policy`, `add-user`, `idp/builtin/policy/attach`)으로 한다. 확인 결과: 이 키로 Put·Get·List는 성공, Delete·다른 버킷 쓰기·수명주기 변경은 `AccessDenied`.
+
+**Object Lock (RustFS 1.0.1 확인)**: 생성 시 Object Lock을 켜면 버저닝이 함께 켜지고, 기본 보존과 객체별 보존(`x-amz-object-lock-mode`)이 적용되며, 보존 중인 버전 삭제는 `AccessDenied`로 거부된다(COMPLIANCE로 확인). **GOVERNANCE**를 권장한다 — 개인정보나 시크릿이 잘못 올라갔을 때 관리자가 우회 권한으로 지울 수 있어야 하고, 전용 키에는 Delete도 우회 권한도 없으므로 점검 원본은 그대로 보호된다. 같은 키로 덮어쓰면 새 버전이 생길 뿐 이전 버전은 보존된다. Host Agents의 restic 버킷은 Object Lock을 끈다(ADR-0006) — 이 버킷과 다르다.
+
+### 11.6 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-500` | `Log in to OpenBao with AppRole for the Host Audit storage key` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
+| `AUD-501` | `Fetch the Host Audit storage KV from OpenBao (agents/host_audit, agents/rustfs)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
+| `AUD-502` | `Resolve the Host Audit storage target and dedicated key` | `ansible.builtin.set_fact` | 러너 | 누락 항목은 이름만, `no_log` |
+| `AUD-503` | `List the Audit Baseline pointers of scheduled runs` | `ansible.builtin.uri` (S3 ListObjectsV2) | 러너 | 읽기 전용, `no_log` |
+| `AUD-504` | `Get the pointers of scheduled runs within the 12-month window` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
+| `AUD-505` | `Get the findings of the Audit Baseline run` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
+| `AUD-506` | `Decide the Audit Baseline state of this run` | `ansible.builtin.set_fact` | 러너 | `ok`·`failed`·`disabled` |
+| `AUD-510` | `Save the findings index of this run on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
+| `AUD-511` | `Save the Audit Baseline pointer of a scheduled run on the runner` | `ansible.builtin.copy` | 러너 | 정기 실행만, `0600` |
+| `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용 |
+| `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
+| `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log` |
+| `AUD-515` | `Upload the Audit Baseline pointer of a scheduled run` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 정기 실행·전체 업로드 성공 시만, `no_log` |
+| `AUD-516` | `Fail the run when the Audit Baseline lookup or keeping the originals failed` | `ansible.builtin.assert` | 러너 | 파일 이름·상태만 표시 |
+
+검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.

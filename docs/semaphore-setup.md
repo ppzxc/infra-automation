@@ -104,7 +104,8 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config (SSH 접속) |
 | `hosts/<host>/agents` | Deploy, Config, Repo Maintenance |
 | `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config |
-| `agents/rustfs` | Deploy, Config, Repo Maintenance |
+| `agents/rustfs` | Deploy, Config, Repo Maintenance, Host Audit(엔드포인트) |
+| `agents/host_audit` | Host Audit (전용 보관 키 `storage_access_key`/`storage_secret_key`, 선택 `storage_bucket`·`storage_endpoint`·`storage_region` — [host_audit.md §11](host_audit.md#11-보관과-audit-baseline-125)) |
 
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
 - **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
