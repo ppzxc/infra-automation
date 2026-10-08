@@ -326,24 +326,27 @@
           - "'$6$' not in (record | to_json) and '$y$' not in (record | to_json)"
         fail_msg: "Unexpected Asset Inventory record: {{ record.inventory.status }} {{ record.inventory.reason | default('') }}"
 
-    # Configuration Vulnerability (KISA-2026, #121): 점검은 위 VERIFY-AUD-010 스냅샷 사이에서
-    # 함께 돌았으므로 읽기 전용은 이미 확인됐다. 여기서는 점검이 실제로 돌았는지 본다.
+    # Configuration Vulnerability (KISA-2026, #121·#122): 점검은 위 VERIFY-AUD-010 스냅샷 사이에서
+    # 함께 돌았으므로 읽기 전용은 이미 확인됐다. 여기서는 U-01~U-67 전 항목이 판정을 냈는지 본다
+    # (result에 NONE이 없음 = 스크립트가 빠짐없이 출력).
     - name: "[VERIFY-AUD-200] Verify KISA-2026 checks ran on the host"
       ansible.builtin.assert:
         that:
           - record.config_vulnerability.status == 'ok'
           - record.config_vulnerability.edition == 'KISA-2026'
-          - record.config_vulnerability.results | length == 13
+          - record.config_vulnerability.results | length == 67
           - record.config_vulnerability.results | map(attribute='result') | difference(['GOOD', 'VULN', 'NA', 'MANUAL']) | length == 0
         fail_msg: "KISA-2026 checks did not run: {{ record.config_vulnerability | default('missing') }}"
 
     - name: "[VERIFY-AUD-201] Verify KISA-2026 verdicts and evidence are recorded"
       ansible.builtin.assert:
         that:
-          - record.config_vulnerability.results | map(attribute='code') | select('match', '^KISA-2026:U-\d{2}$') | list | length == 13
+          - record.config_vulnerability.results | map(attribute='code') | select('match', '^KISA-2026:U-\d{2}$') | list | length == 67
           - record.config_vulnerability.results | map(attribute='verdict') | difference(['양호', '취약', '예외(승인)', '해당없음', '점검불가(수동)']) | length == 0
           - record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-05') | map(attribute='verdict') | first == '양호'
           - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-01') | first).evidence is search('PermitRootLogin')
+          - record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-16') | map(attribute='verdict') | first == '양호'
+          - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-23') | first).evidence is search('/su')
         fail_msg: "Unexpected KISA-2026 verdicts: {{ record.config_vulnerability.results }}"
 
 # ------------------------------------------------------------------------------
