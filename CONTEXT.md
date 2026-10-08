@@ -56,6 +56,10 @@ _Avoid_: vulnerability (unqualified), CVE (when meaning the finding on a host)
 A difference between the state a host is declared to have in Git (provisioning and Host Agents configuration) and the state it actually has — a change made outside the change process. Reported per host as the declared tasks that would change. A difference from the previous Host Audit is not Configuration Drift but a change since the last audit. Not detectable on Raw Provisioning Path hosts, which Host Audit reports as such.
 _Avoid_: drift (unqualified), config change, diff
 
+**Audit Baseline**:
+The previous scheduled Host Audit run, against which the current run marks each finding as new, resolved, recurring or persisting and each Asset Inventory change (new account, port, privileged user). An on-demand run is kept but never becomes the baseline. A finding is recurring when a scheduled run in the past twelve months had marked it resolved.
+_Avoid_: previous run (when an on-demand run could be meant), last audit, snapshot
+
 **Log Type**:
 The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
 _Avoid_: log category, stream tag
