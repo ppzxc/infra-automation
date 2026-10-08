@@ -150,7 +150,7 @@
       _raw_mode: '0644'
 
   # Deploy 한정(agents_config에 속하지 않음): modern BAK-050~052와 같은 판정(rc/메시지, LC_ALL=C, no_log)을 raw로 수행한다.
-  - name: "[BAK-215] Probe whether the restic repository exists (raw, restic cat config)"
+  - name: "[BAK-215] Probe whether the restic repository exists (raw, read-only, restic cat config)"
     ansible.builtin.raw: >-
       set -a; . {{ backup_env_path | quote }}; set +a; export LC_ALL=C;
       {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path | quote }} -n {{ backup_profile_name }} cat config

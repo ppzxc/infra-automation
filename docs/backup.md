@@ -78,7 +78,7 @@
 | `BAK-043` | `Enable and start the backup timer` | `ansible.builtin.systemd` | Rocky 9/10, Ubuntu, Debian | 상태 비교 (check 모드 제외) |
 | `BAK-044` | `Deploy backup cron.d schedule (Rocky 8 and non-systemd hosts)` | `ansible.builtin.template` | Rocky 8 | Checksum 비교 (`/etc/cron.d/host-agents-backup`) |
 | `BAK-045` | `Remove the cron.d schedule on systemd-timer hosts` | `ansible.builtin.file` | Rocky 9/10, Ubuntu, Debian | `state: absent` (스케줄러 이중 실행 방지) |
-| `BAK-050` | `Probe whether the restic repository exists (restic cat config)` | `ansible.builtin.shell` | All | 읽기 전용 (`changed_when: false`, check 모드에서는 건너뜀(바이너리가 아직 없을 수 있음), Deploy 한정 — `agents_config` 제외) |
+| `BAK-050` | `Probe whether the restic repository exists (read-only, restic cat config)` | `ansible.builtin.shell` | All | 읽기 전용 (`changed_when: false`, check 모드에서는 건너뜀(바이너리가 아직 없을 수 있음), Deploy 한정 — `agents_config` 제외) |
 | `BAK-051` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | All | 읽기 전용 (저장소 부재가 아닌 오류에서는 init하지 않고 실패) |
 | `BAK-052` | `Initialize the restic repository when it does not exist` | `ansible.builtin.shell` | All | 프로브 결과 조건 (저장소가 없을 때만 `init`) |
 | `BAK-060` | `Assert the controller OpenObserve ingestion token exists` | `ansible.builtin.assert` | All | 읽기 전용 (`no_log`, Deploy 한정 — 토큰 또는 `o2_endpoint` 없으면 호스트 실패) |
@@ -117,7 +117,7 @@
 | `BAK-211` | `Switch restic install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el6, legacy_el7 | `MON-212` 헬퍼 (readlink sentinel) |
 | `BAK-212` | `Switch resticprofile install symlink to the delivered version (raw)` | `ansible.builtin.include_tasks` | legacy_el6, legacy_el7 | `MON-212` 헬퍼 (readlink sentinel) |
 | `BAK-213` | `Deploy backup cron.d schedule (raw)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | sentinel (`/etc/cron.d/host-agents-backup`, `0644`). 템플릿은 modern cron.d와 동일 |
-| `BAK-215` | `Probe whether the restic repository exists (raw, restic cat config)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `changed_when: false`, `check_mode: false`, `LC_ALL=C`, `no_log`, Deploy 한정 |
+| `BAK-215` | `Probe whether the restic repository exists (raw, read-only, restic cat config)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `changed_when: false`, `check_mode: false`, `LC_ALL=C`, `no_log`, Deploy 한정 |
 | `BAK-216` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | legacy_el6, legacy_el7 | 읽기 전용 (BAK-051과 같은 rc/메시지 판정) |
 | `BAK-217` | `Initialize the restic repository when it does not exist (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 프로브 결과 조건 (저장소가 없을 때만 `init`), `no_log` |
 

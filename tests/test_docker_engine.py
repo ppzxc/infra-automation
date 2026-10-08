@@ -209,7 +209,8 @@ def test_user_group_membership_tasks_are_check_mode_safe():
 def test_docker_ce_repo_architecture_and_cache_refresh_invariants():
     """
     Ensure [DOC-004] explicitly uses ansible_architecture in baseurl to prevent $basearch expansion issues,
-    and [DOC-004-CACHE] sets check_mode: false and structured list-based conditionals to prevent unexpected task skips.
+    and [DOC-004-CACHE] uses structured list-based conditionals and is skipped under --check so a dry run
+    never rewrites the package cache (ADR-0009 §1, #117).
     """
     tasks_file = ROOT_DIR / "roles" / "docker_engine" / "tasks" / "main.yml"
     with open(tasks_file, "r", encoding="utf-8") as f:
@@ -231,8 +232,8 @@ def test_docker_ce_repo_architecture_and_cache_refresh_invariants():
         None
     )
     assert doc_cache is not None, "[DOC-004-CACHE] task missing from docker_engine tasks"
-    assert doc_cache.get("check_mode") is False, (
-        "DOC-004-CACHE must explicitly set check_mode: false to ensure cache refresh runs even under dry-run/check modes"
+    assert doc_cache.get("check_mode") is not False, (
+        "DOC-004-CACHE must not set check_mode: false — --check must leave the package cache untouched"
     )
     when_val = doc_cache.get("when")
     assert isinstance(when_val, list), (
