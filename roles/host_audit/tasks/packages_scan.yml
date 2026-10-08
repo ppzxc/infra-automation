@@ -1,0 +1,161 @@
+---
+# ==============================================================================
+# Host Audit — Package Vulnerability 판정 (러너 localhost 전용, ADR-0009, #123)
+# ==============================================================================
+# 호스트별 패키지 기록 → CycloneDX SBOM → Trivy(오프라인 판정) → 섹션 모델.
+# Trivy는 고정 버전 표(vars/trivy.yml)의 SHA256과 맞는 릴리스만 받아 러너 캐시에 두고 실행한다
+# (restic BAK-075와 같은 방식, 커스텀 Semaphore 이미지 없음). 판정은 호스트마다 순차 실행한다
+# (프로세스당 메모리 약 100MB, 러너 1024M).
+# 취약점 DB는 매 실행 --download-db-only로 갱신한다. 실패하면 7일 이내 캐시로 진행하고,
+# 그보다 오래됐거나 캐시가 없으면 섹션 전체를 점검불가로 표시한다(실행은 계속).
+# ------------------------------------------------------------------------------
+- name: "[AUD-310] Find the per-host package records of this run"
+  ansible.builtin.find:
+    paths: "{{ host_audit_run.output_dir }}/packages"
+    patterns: "*.json"
+  register: _host_audit_package_files
+
+- name: "[AUD-311] Load the pinned Trivy version table"
+  ansible.builtin.include_vars:
+    file: trivy.yml
+
+- name: "[AUD-312] Detect the runner architecture for the pinned Trivy"
+  ansible.builtin.command: uname -m
+  register: _host_audit_uname
+  changed_when: false
+
+- name: "[AUD-313] Assert the runner architecture is in the pinned Trivy table"
+  ansible.builtin.assert:
+    that:
+      - (_host_audit_uname.stdout | trim) in host_audit_trivy_arch
+      - host_audit_trivy_arch[_host_audit_uname.stdout | trim] in host_audit_trivy_checksums[host_audit_trivy_version]
+    fail_msg: "러너 아키텍처 {{ _host_audit_uname.stdout | trim }}는 고정 Trivy {{ host_audit_trivy_version }} 릴리스에 없습니다."
+    quiet: true
+
+- name: "[AUD-314] Ensure the runner Trivy cache and this run's scan directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - "{{ host_audit_cache_dir }}"
+    - "{{ _trivy_dir }}"
+    - "{{ host_audit_cache_dir }}/trivy-cache"
+    - "{{ host_audit_run.output_dir }}/sbom"
+    - "{{ host_audit_run.output_dir }}/trivy"
+  vars:
+    _trivy_dir: "{{ host_audit_cache_dir }}/trivy/{{ host_audit_trivy_version }}/{{ host_audit_trivy_arch[_host_audit_uname.stdout | trim] }}"
+
+- name: "[AUD-315] Download the pinned Trivy release on the runner and verify SHA256"
+  ansible.builtin.get_url:
+    url: "https://github.com/aquasecurity/trivy/releases/download/v{{ host_audit_trivy_version }}/{{ _asset }}"
+    dest: "{{ _trivy_dir }}/{{ _asset }}"
+    checksum: "sha256:{{ host_audit_trivy_checksums[host_audit_trivy_version][_arch] }}"
+    mode: '0644'
+  vars:
+    _arch: "{{ host_audit_trivy_arch[_host_audit_uname.stdout | trim] }}"
+    _asset: "trivy_{{ host_audit_trivy_version }}_Linux-{{ _arch }}.tar.gz"
+    _trivy_dir: "{{ host_audit_cache_dir }}/trivy/{{ host_audit_trivy_version }}/{{ _arch }}"
+
+- name: "[AUD-316] Extract the verified Trivy binary into the runner cache"
+  ansible.builtin.unarchive:
+    src: "{{ _trivy_dir }}/trivy_{{ host_audit_trivy_version }}_Linux-{{ _arch }}.tar.gz"
+    dest: "{{ _trivy_dir }}"
+    remote_src: true
+    include:
+      - trivy
+    creates: "{{ _trivy_dir }}/trivy"
+    mode: '0755'
+  vars:
+    _arch: "{{ host_audit_trivy_arch[_host_audit_uname.stdout | trim] }}"
+    _trivy_dir: "{{ host_audit_cache_dir }}/trivy/{{ host_audit_trivy_version }}/{{ _arch }}"
+
+- name: "[AUD-317] Fix the runner Trivy command line"
+  ansible.builtin.set_fact:
+    _host_audit_trivy: >-
+      {{ [host_audit_cache_dir ~ '/trivy/' ~ host_audit_trivy_version ~ '/' ~ host_audit_trivy_arch[_host_audit_uname.stdout | trim] ~ '/trivy',
+          '--cache-dir', host_audit_cache_dir ~ '/trivy-cache'] }}
+
+- name: "[AUD-318] Refresh the Trivy vulnerability DB (download only)"
+  ansible.builtin.command:
+    # Trivy keeps retrying an unreachable registry for minutes; `timeout` (coreutils/busybox) bounds it so a
+    # failed refresh falls back to the cache rule (AUD-319) instead of stalling the run.
+    argv: >-
+      {{ ['timeout', host_audit_trivy_db_timeout | string] + _host_audit_trivy
+         + ['image', '--download-db-only', '--quiet', '--no-progress']
+         + (['--db-repository', host_audit_trivy_db_repository] if host_audit_trivy_db_repository | length > 0 else []) }}
+  register: _host_audit_trivy_db_refresh
+  changed_when: false
+  failed_when: false
+
+- name: "[AUD-319] Decide whether the Trivy DB may be used for this run"
+  ansible.builtin.set_fact:
+    host_audit_trivy_db: >-
+      {{ ((_host_audit_trivy_db_refresh.rc | default(1)) == 0)
+         | host_audit_trivy_db_state(_metadata, now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                                     host_audit_trivy_db_max_age_days, _host_audit_trivy_db_refresh.stderr | default('')) }}
+  vars:
+    _metadata_text: "{{ lookup('ansible.builtin.file', host_audit_cache_dir ~ '/trivy-cache/db/metadata.json', errors='ignore') | default('', true) }}"
+    _metadata: "{{ _metadata_text | from_json if _metadata_text | length > 0 else {} }}"
+
+- name: "[AUD-320] Write the CycloneDX SBOM of each collected host"
+  ansible.builtin.copy:
+    content: "{{ _record | host_audit_sbom | to_json }}\n"
+    dest: "{{ host_audit_run.output_dir }}/sbom/{{ _record.inventory_hostname }}.cdx.json"
+    mode: '0600'
+  loop: "{{ _host_audit_package_files.files | map(attribute='path') | sort }}"
+  loop_control:
+    label: "{{ item | basename }}"
+  vars:
+    _record: "{{ lookup('ansible.builtin.file', item) | from_json }}"
+  when:
+    - host_audit_trivy_db.usable
+    - _record.status == 'ok'
+
+- name: "[AUD-321] Judge each SBOM with Trivy (offline, one host at a time)"
+  ansible.builtin.command:
+    argv: >-
+      {{ _host_audit_trivy + ['sbom', '--quiet', '--skip-db-update', '--offline-scan', '--skip-version-check',
+                              '--scanners', 'vuln', '--format', 'json',
+                              '--output', host_audit_run.output_dir ~ '/trivy/' ~ _host ~ '.json',
+                              host_audit_run.output_dir ~ '/sbom/' ~ _host ~ '.cdx.json'] }}
+  loop: "{{ _host_audit_package_files.files | map(attribute='path') | sort }}"
+  loop_control:
+    label: "{{ _host }}"
+  vars:
+    _host: "{{ item | basename | regex_replace('\\.json$', '') }}"
+    _record: "{{ lookup('ansible.builtin.file', item) | from_json }}"
+  register: _host_audit_trivy_scans
+  changed_when: false
+  failed_when: false
+  when:
+    - host_audit_trivy_db.usable
+    - _record.status == 'ok'
+
+- name: "[AUD-322] Classify the Trivy findings of each host"
+  ansible.builtin.set_fact:
+    _host_audit_package_results: "{{ _host_audit_package_results | default([]) + [_result] }}"
+  loop: "{{ _host_audit_package_files.files | map(attribute='path') | sort }}"
+  loop_control:
+    label: "{{ _record.inventory_hostname }}"
+  vars:
+    _record: "{{ lookup('ansible.builtin.file', item) | from_json }}"
+    _trivy_text: "{{ lookup('ansible.builtin.file', host_audit_run.output_dir ~ '/trivy/' ~ _record.inventory_hostname ~ '.json', errors='ignore') | default('', true) }}"
+    _os: "{{ _record.os | default({}, true) }}"
+    _vault: >-
+      {{ lookup('ansible.builtin.file', 'centos_vault_final/centos-' ~ _os.major ~ '.tsv') | host_audit_parse_vault_final
+         if (_os.family | default('')) == 'centos' and (_os.major | default('')) in ['6', '7'] else {} }}
+    _result: "{{ (_trivy_text | from_json if _trivy_text | length > 0 else none) | host_audit_package_findings(_record, _vault) }}"
+  when: host_audit_trivy_db.usable
+
+- name: "[AUD-323] Build the Package Vulnerability section model"
+  ansible.builtin.set_fact:
+    host_audit_package_section: >-
+      {{ _host_audit_package_results | default([])
+         | host_audit_package_section(host_audit_trivy_db, host_audit_trivy_version, host_audit_package_detail_limit) }}
+
+- name: "[AUD-324] Save the Package Vulnerability section on the runner"
+  ansible.builtin.copy:
+    content: "{{ host_audit_package_section | to_nice_json(indent=2) }}\n"
+    dest: "{{ host_audit_run.output_dir }}/package_vulnerability.json"
+    mode: '0600'

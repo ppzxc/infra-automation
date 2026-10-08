@@ -30,3 +30,22 @@ host_audit_asset: {}
 # state absent 제외)과 access_security의 openbao_ssh_allowed_principals이며 root는 항상 허용한다.
 # 허용 목록에 없는 특수권한자는 보고서에 '선언 외'로 나온다.
 host_audit_privileged_extra: []
+
+# --- Package Vulnerability (#123) -------------------------------------------------------------
+# 설치 패키지 목록을 읽어 러너에서 Trivy(SBOM 입력)로 판정한다. false면 수집·판정을 모두 건너뛴다.
+host_audit_packages_enabled: true
+
+# 러너의 Trivy 바이너리·취약점 DB 캐시. 실행 사이에 남아 있어야 DB 갱신 실패 시 캐시(7일)로 진행할 수 있다.
+host_audit_cache_dir: "{{ lookup('ansible.builtin.env', 'HOME') | default('/tmp', true) }}/.cache/host-audit"
+
+# DB 갱신이 실패했을 때 허용하는 캐시 DB의 최대 나이(일, DB UpdatedAt 기준). 넘으면 섹션 전체가 점검불가.
+host_audit_trivy_db_max_age_days: 7
+
+# 취약점 DB 저장소. 비우면 Trivy 기본값(mirror.gcr.io/aquasec/trivy-db:2). 사내 미러를 쓸 때만 지정한다.
+host_audit_trivy_db_repository: ""
+
+# 보고서 '긴급·높음 상세' 표의 최대 행 수. 나머지는 러너의 package_vulnerability.json에만 남는다.
+host_audit_package_detail_limit: 300
+
+# DB 갱신 최대 시간(초). 넘으면 갱신 실패로 보고 캐시 규칙을 적용한다(저장소에 닿지 않을 때 Trivy가 오래 재시도함).
+host_audit_trivy_db_timeout: 300

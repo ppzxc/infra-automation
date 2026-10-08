@@ -1,0 +1,38 @@
+---
+# ==============================================================================
+# Host Audit — Package Vulnerability 수집 (호스트별, ADR-0009, #123)
+# ==============================================================================
+# 대상 호스트에서는 패키지 DB와 릴리스 파일을 raw로 읽기만 한다(rpm -qa / dpkg-query -W).
+# 호스트에 아무것도 설치하지 않고 원격 파일도 만들지 않는다(CentOS 6 ~ Rocky 10, Ubuntu/Debian 동일 경로).
+# 판정(SBOM 변환 → Trivy)은 러너가 보고서 단계에서 한다(packages_scan.yml).
+# 전체 패키지 목록은 러너의 packages/<호스트>.json에만 남고 보고서에는 싣지 않는다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-300] Ensure the runner-local package record directory exists"
+  ansible.builtin.file:
+    path: "{{ hostvars['localhost'].host_audit_run.output_dir }}/packages"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: "[AUD-301] Probe installed packages and release (raw, read-only)"
+  ansible.builtin.raw: "sh -c {{ lookup('ansible.builtin.file', 'package_probe.sh') | quote }}"
+  register: _host_audit_package_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: false
+  ignore_unreachable: true
+  when: host_audit_record.status == 'ok'
+
+- name: "[AUD-302] Save the per-host package record on the runner"
+  ansible.builtin.copy:
+    content: "{{ _record | to_nice_json(indent=2) }}\n"
+    dest: "{{ hostvars['localhost'].host_audit_run.output_dir }}/packages/{{ inventory_hostname }}.json"
+    mode: '0600'
+  vars:
+    _record: "{{ _host_audit_package_probe | host_audit_package_record(inventory_hostname, now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')) }}"
+  delegate_to: localhost
+  become: false
+  when: host_audit_record.status == 'ok'

@@ -325,3 +325,28 @@
           - record.inventory.ports is sequence
           - "'$6$' not in (record | to_json) and '$y$' not in (record | to_json)"
         fail_msg: "Unexpected Asset Inventory record: {{ record.inventory.status }} {{ record.inventory.reason | default('') }}"
+
+# ------------------------------------------------------------------------------
+# Host Audit — Package Vulnerability 수집 기록 (#123)
+# ------------------------------------------------------------------------------
+# 패키지 프로브(AUD-301)는 위 수집 단계에서 함께 돌았고, 관리 영역 불변은 VERIFY-AUD-010이 이미 확인했다.
+# 여기서는 러너에 남은 패키지 기록의 구조만 본다. Trivy 판정은 molecule 범위 밖(네트워크·DB 필요).
+- name: Verify the Host Audit package record
+  hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    package_record: "{{ lookup('ansible.builtin.file', hostvars['localhost'].host_audit_run.output_dir ~ '/packages/' ~ inventory_hostname ~ '.json') | from_json }}"
+  tasks:
+    - name: "[VERIFY-AUD-302] Verify the per-host package record saved on the runner"
+      ansible.builtin.assert:
+        that:
+          - package_record.schema_version == 1
+          - package_record.inventory_hostname == inventory_hostname
+          - package_record.status == 'ok'
+          - package_record.format in ['rpm', 'deb']
+          - package_record.os.family in ['rocky', 'ubuntu']
+          - package_record.os.version | length > 0
+          - package_record.packages | length > 50
+          - package_record.packages[0].keys() | sort == ['arch', 'epoch', 'modularitylabel', 'name', 'release', 'src_epoch', 'src_name', 'src_release', 'src_version', 'version']
+        fail_msg: "Unexpected Host Audit package record: {{ package_record | dict2items | rejectattr('key', 'equalto', 'packages') | items2dict }}"
