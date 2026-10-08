@@ -36,6 +36,30 @@ _Avoid_: skip list, Limit (for this purpose)
 A key/value stamped once per host (or per log source) on every log and metric that Host Agents ship — OTel semantic-convention names such as `host.name`, `host.id`, `host.ip`, `host.arch`, `os.name`, `os.version`, `deployment.environment.name` and `service.name`. OpenObserve turns them into stream fields (logs) and series labels (metrics). The values come from the Remote OS Probe and the inventory, not from a collector-side detector. `deployment.environment.name` is declared per host (never defaulted); `host.id` and `host.ip` are left out when the host has none, and the run summary names those hosts. Defined in ADR-0006 §2.3.
 _Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)
 
+**Host Audit**:
+A read-only, periodic inspection of managed hosts and produces one consolidated report per run — an overall summary followed by a per-host appendix — covering Asset Inventory, Configuration Drift, Configuration Vulnerabilities and Package Vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Read-only means it leaves every managed state of a host unchanged — configuration files, packages and their caches, repository definitions, services, accounts, kernel settings; the traces of logging in and using privilege (authentication, sudo and audit logs, login records) and temporary files created and removed within the same run are allowed. Fixing what it finds belongs to provisioning and maintenance, not to it.
+_Avoid_: audit (when meaning only the CIS audit), scan, compliance check
+
+**Asset Inventory**:
+The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. Part of it is collected from the host; the rest — purpose, owning department, owner and administrator (by role, never by name) and security grade — cannot be, so it is declared per host in Git, and a host with none declared is shown as unassigned. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product. Covers only the hosts Host Audit inspects, not network devices.
+_Avoid_: CMDB, operational info, server list
+
+**Configuration Vulnerability**:
+A host setting that falls short of the KISA technical vulnerability checklist for Unix servers, 2026 edition — e.g. remote root login allowed, weak password policy. Each finding is named with its edition (`KISA-2026:U-13`), because the editions reuse item numbers for different checks; CIS Benchmark is cited only as a cross-reference, not checked separately.
+_Avoid_: vulnerability (unqualified), misconfiguration
+
+**Package Vulnerability**:
+An installed package version that is affected by a known CVE or vendor security advisory.
+_Avoid_: vulnerability (unqualified), CVE (when meaning the finding on a host)
+
+**Configuration Drift**:
+A difference between the state a host is declared to have in Git (provisioning and Host Agents configuration) and the state it actually has — a change made outside the change process. Reported per host as the declared tasks that would change. A difference from the previous Host Audit is not Configuration Drift but a change since the last audit. Not detectable on Raw Provisioning Path hosts, which Host Audit reports as such.
+_Avoid_: drift (unqualified), config change, diff
+
+**Audit Baseline**:
+The previous scheduled Host Audit run, against which the current run marks each finding as new, resolved, recurring or persisting and each Asset Inventory change (new account, port, privileged user). An on-demand run is kept but never becomes the baseline. A finding is recurring when a scheduled run in the past twelve months had marked it resolved.
+_Avoid_: previous run (when an on-demand run could be meant), last audit, snapshot
+
 **Log Type**:
 The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
 _Avoid_: log category, stream tag
