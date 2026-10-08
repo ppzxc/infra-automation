@@ -16,6 +16,9 @@
   ansible.builtin.include_tasks: packages_scan.yml
   when: host_audit_packages_enabled | bool
 
+- name: Look up the Host Audit storage and the Audit Baseline
+  ansible.builtin.include_tasks: storage_lookup.yml
+
 - name: "[AUD-021] Build the report model from the per-host records"
   ansible.builtin.set_fact:
     host_audit_model: "{{ _records | host_audit_report_model(_meta) }}"
@@ -33,11 +36,16 @@
       generated_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
       targets: "{{ groups['host_audit_targets'] | default([]) }}"
       target_hosts: "{{ host_audit_run.target_hosts }}"
-      archive: "{{ host_audit_run.output_dir }} (러너 로컬)"
+      archive: >-
+        {{ ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/' ~ _host_audit_storage_prefix
+            ~ ' (3년 보관) · 러너 ' ~ host_audit_run.output_dir) if _host_audit_storage_active | bool
+           else (host_audit_run.output_dir ~ ' (러너 로컬, 보관 안 함)') }}
       timezone: "{{ host_audit_run.timezone }}"
       eol_table: "{{ host_audit_eol_table }}"
       package_vulnerability: "{{ host_audit_package_section | default({}) }}"
       kisa_exceptions: "{{ host_audit_kisa_exceptions }}"
+      baseline_history: "{{ host_audit_baseline_history }}"
+      package_results: "{{ _host_audit_package_results | default([]) }}"
 
 - name: "[AUD-022] Save the run metadata on the runner"
   ansible.builtin.copy:
@@ -56,3 +64,6 @@
     msg:
       report: "{{ host_audit_run.output_dir }}/report.html"
       hosts: "{{ host_audit_model.summary }}"
+
+- name: Keep the originals in the Host Audit bucket
+  ansible.builtin.include_tasks: storage_upload.yml

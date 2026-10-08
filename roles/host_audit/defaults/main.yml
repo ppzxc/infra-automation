@@ -70,3 +70,23 @@ host_audit_kisa_exceptions:
     approver: ""
     approved_on: ""
     expires_on: ""
+
+# --- 보관과 Audit Baseline (#125, ADR-0009 §5) -----------------------------------------------------
+# 실행마다 보고서·호스트별 JSON·실행 메타를 RustFS Host Audit 전용 버킷의 <YYYY-MM>/<run_id>/에 올리고,
+# 직전 정기 실행(Audit Baseline)과 비교해 발견을 신규·지속·재발·해소로 표시한다.
+# false면 러너 로컬에만 남기고 비교도 하지 않는다(로컬 시험용). 운영 템플릿은 true로 둔다.
+host_audit_storage_enabled: true
+
+# 버킷 이름 기본값. OpenBao agents/host_audit.storage_bucket이 있으면 그 값이 우선한다.
+host_audit_storage_bucket: host-audit
+
+# 보관 대상을 직접 지정할 때만 쓴다(OpenBao 조회를 건너뜀). 키를 Git에 넣지 말고 Extra variables로 준다.
+#   {"endpoint": "https://rustfs.example:9000", "bucket": "host-audit", "access_key": "...", "secret_key": "...", "region": "us-east-1"}
+host_audit_storage: {}
+
+# RustFS TLS 검증과 사설 CA 파일(러너 경로). 비우면 시스템 CA를 쓴다.
+host_audit_storage_validate_certs: true
+host_audit_storage_ca_file: ""
+
+# S3 요청 하나의 최대 시간(초).
+host_audit_storage_timeout: 60
