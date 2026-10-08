@@ -1,0 +1,35 @@
+---
+# ==============================================================================
+# Host Audit — Configuration Vulnerability (KISA-2026 Unix, ADR-0009, #121)
+# ==============================================================================
+# 점검 스크립트(files/kisa: _lib.sh + U-NN.sh + _end.sh)를 이어 붙여 raw로 `sh -s`의
+# stdin에 넣는다. 호스트에 파일을 남기지 않고(원격 임시 파일 없음), Python 없이
+# CentOS 6 ~ Rocky 10, Ubuntu에서 같은 경로로 돈다. /etc/shadow·`sshd -T`를 읽어야 해서
+# 이 태스크만 root로 승격한다(sudo 흔적은 Host Audit 허용 범위).
+# 판정(5종)과 예외 레지스터 적용은 host_audit_kisa_result 필터가 하고, 결과는
+# 호스트별 기록의 config_vulnerability에 들어간다. 식별 수집에 실패한 호스트는 건너뛴다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-200] Run KISA-2026 Unix checks (raw, read-only)"
+  ansible.builtin.raw: "printf '%s\\n' {{ _host_audit_kisa_script | quote }} | sh -s"
+  vars:
+    _host_audit_kisa_files: "{{ ['kisa/_lib.sh'] + (query('ansible.builtin.fileglob', role_path ~ '/files/kisa/U-*.sh') | sort) + ['kisa/_end.sh'] }}"
+    _host_audit_kisa_script: |
+      {% for f in _host_audit_kisa_files %}{{ lookup('ansible.builtin.file', f) }}
+      {% endfor %}
+  register: _host_audit_kisa_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  ignore_unreachable: true
+  when: host_audit_record.status == 'ok'
+
+- name: "[AUD-201] Add KISA-2026 verdicts to the per-host audit record"
+  ansible.builtin.set_fact:
+    host_audit_record: >-
+      {{ host_audit_record | combine({'config_vulnerability':
+           _host_audit_kisa_probe | host_audit_kisa_result(host_audit_kisa_exceptions, inventory_hostname,
+             group_names | reject('equalto', 'host_audit_targets') | list, _run_date)}) }}
+  vars:
+    _run_date: "{{ hostvars['localhost'].host_audit_run.started_at | host_audit_kisa_run_date(hostvars['localhost'].host_audit_run.timezone) }}"
+  when: host_audit_record.status == 'ok'

@@ -32,7 +32,7 @@ LOCK_FILE="/tmp/infra-automation-molecule.lock"
 
 RELEVANT_PATHS=(
     roles/common roles/security roles/access_security roles/docker_engine roles/monitoring
-    roles/host_audit filter_plugins/host_audit.py filter_plugins/host_audit_inventory.py filter_plugins/host_audit_packages.py
+    roles/host_audit filter_plugins/host_audit.py filter_plugins/host_audit_inventory.py filter_plugins/host_audit_packages.py filter_plugins/host_audit_kisa.py
     molecule/ ansible.cfg requirements.yml
     scripts/run-molecule.sh scripts/build-test-images.sh lefthook.yml
 )
