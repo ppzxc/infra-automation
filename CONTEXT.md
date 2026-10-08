@@ -41,7 +41,7 @@ A read-only, periodic inspection of managed hosts that never changes a target an
 _Avoid_: audit (when meaning only the CIS audit), scan, compliance check
 
 **Asset Inventory**:
-The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product.
+The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. Part of it is collected from the host; the rest — purpose, owning department, owner and administrator (by role, never by name) and security grade — cannot be, so it is declared per host in Git, and a host with none declared is shown as unassigned. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product. Covers only the hosts Host Audit inspects, not network devices.
 _Avoid_: CMDB, operational info, server list
 
 **Configuration Vulnerability**:
