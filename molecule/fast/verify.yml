@@ -233,3 +233,75 @@
           ansible.builtin.debug:
             msg: "{{ f.stat['/etc/boundary/node-metadata.json'] }}"
             verbosity: 1
+
+# ==============================================================================
+# 4. Host Audit 읽기 전용 보장 (ADR-0009, #119)
+# ==============================================================================
+# 수집 단계를 실제로 돌리고, 그 전후로 관리 영역의 체크섬·메타데이터가 같은지 본다.
+# 스냅샷도 raw로 찍는다: 모듈(Python)을 돌리면 /usr의 __pycache__가 생겨
+# 스냅샷 자체가 관리 영역을 바꿀 수 있기 때문이다. 로그 디렉터리와 /tmp는 제외한다.
+- name: Prepare a Host Audit run on the controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    host_audit_output_root: "{{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/host_audit"
+  tasks:
+    - name: Fix run metadata and the output directory
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: prepare
+
+- name: Verify Host Audit collection leaves managed state unchanged
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    snapshot_script: |
+      paths=""
+      for p in /etc /usr /var/lib/rpm /var/lib/dnf /var/lib/yum /var/lib/dpkg /var/lib/apt \
+               /var/cache/dnf /var/cache/yum /var/cache/apt /var/spool/cron; do
+        [ -e "$p" ] && paths="$paths $p"
+      done
+      echo "paths:$paths"
+      find $paths -xdev -printf '%p|%y|%m|%U|%G|%s|%T@|%l\n' 2>/dev/null | LC_ALL=C sort | sha256sum
+      find $paths -xdev -type f -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum
+    record: "{{ lookup('ansible.builtin.file', hostvars['localhost'].host_audit_run.output_dir ~ '/hosts/' ~ inventory_hostname ~ '.json') | from_json }}"
+
+  tasks:
+    - name: Snapshot managed areas before Host Audit collection
+      ansible.builtin.raw: "sh -c {{ snapshot_script | quote }}"
+      register: snapshot_before
+      changed_when: false
+
+    - name: Run Host Audit collection
+      ansible.builtin.include_role:
+        name: host_audit
+
+    - name: Snapshot managed areas after Host Audit collection
+      ansible.builtin.raw: "sh -c {{ snapshot_script | quote }}"
+      register: snapshot_after
+      changed_when: false
+
+    - name: "[VERIFY-AUD-010] Verify managed areas are unchanged by Host Audit collection"
+      ansible.builtin.assert:
+        that:
+          - snapshot_before.stdout_lines | length == 3
+          - snapshot_before.stdout == snapshot_after.stdout
+        fail_msg: "Host Audit changed managed state: before={{ snapshot_before.stdout_lines }} after={{ snapshot_after.stdout_lines }}"
+
+    - name: "[VERIFY-AUD-012] Verify the per-host record saved on the runner"
+      ansible.builtin.assert:
+        that:
+          - record.schema_version == 1
+          - record.inventory_hostname == inventory_hostname
+          - record.status == 'ok'
+          - record.collected_at is match('^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+          - record.declared.keys() | sort == ['environment', 'fqdn', 'groups', 'ip']
+          - record.identity.keys() | sort == ['account', 'fqdn', 'hostname', 'ips']
+          - record.identity.account == 'root'
+          - record.os.keys() | sort == ['arch', 'id', 'kernel', 'name', 'redhat_release', 'version_id']
+          - record.os.name | length > 0
+          - record.os.id in ['rocky', 'ubuntu']
+        fail_msg: "Unexpected Host Audit record: {{ record }}"

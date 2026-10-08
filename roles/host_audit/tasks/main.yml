@@ -1,0 +1,37 @@
+---
+# ==============================================================================
+# Host Audit — 호스트별 읽기 전용 수집 (ADR-0009)
+# ==============================================================================
+# 대상 호스트에서는 raw 조회만 실행한다(Python·모듈 없음 → CentOS 6/7 포함 동일 경로,
+# 원격 임시 파일 없음). 결과는 러너에 호스트별 JSON으로 저장한다.
+# 접속 실패는 실행을 멈추지 않는다: ignore_unreachable로 기록을 남기고
+# 보고서에 '점검불가(접속 실패)'로 나온다.
+# 실행 메타(host_audit_run)는 prepare.yml이 localhost에 한 번 정한 값을 읽는다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-010] Probe host identity and OS (raw, read-only)"
+  ansible.builtin.raw: "sh -c {{ lookup('ansible.builtin.file', 'identity_probe.sh') | quote }}"
+  register: _host_audit_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: false
+  ignore_unreachable: true
+
+- name: "[AUD-011] Build the per-host audit record"
+  ansible.builtin.set_fact:
+    host_audit_record: "{{ _host_audit_probe | host_audit_host_record(inventory_hostname, _declared, now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')) }}"
+  vars:
+    _declared:
+      fqdn: "{{ fqdn | default('') }}"
+      ip: "{{ ip | default('') }}"
+      environment: "{{ host_agents_environment | default('') }}"
+      # host_audit_targets is the run's in-memory selection group (prepare.yml), not an inventory fact.
+      groups: "{{ group_names | reject('equalto', 'host_audit_targets') | list }}"
+
+- name: "[AUD-012] Save the per-host record on the runner"
+  ansible.builtin.copy:
+    content: "{{ host_audit_record | to_nice_json(indent=2) }}\n"
+    dest: "{{ hostvars['localhost'].host_audit_run.output_dir }}/hosts/{{ inventory_hostname }}.json"
+    mode: '0600'
+  delegate_to: localhost
+  become: false

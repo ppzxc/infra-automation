@@ -1,0 +1,16 @@
+---
+# Host Audit (ADR-0009) — 사용자가 덮어쓸 수 있는 기본값.
+
+# 실행 종류: scheduled(Host Audit — Monthly, Audit Baseline이 됨) | on_demand(수시).
+# Semaphore 템플릿에 고정한다.
+host_audit_run_kind: on_demand
+
+# 호스트별 원본 JSON과 보고서 HTML을 남길 러너 로컬 디렉터리의 상위 경로.
+# 실행마다 <root>/<run_id>/ 아래에 hosts/<Inventory Hostname>.json, run.json, report.html을 만든다.
+host_audit_output_root: "{{ lookup('ansible.builtin.env', 'HOST_AUDIT_OUTPUT_ROOT') | default('/tmp/host_audit', true) }}"
+
+# 점검 대상 그룹. target_hosts를 주면 이 집합과의 교집합만 점검한다.
+host_audit_scope_pattern: "servers:loadbalancers:overseer"
+
+# 보고서 시각 표기 시간대.
+host_audit_timezone: Asia/Seoul
