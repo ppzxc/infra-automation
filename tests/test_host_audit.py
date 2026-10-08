@@ -235,6 +235,10 @@ def test_collection_targets_follow_spec_and_raw_probe_is_read_only():
     collect = next(p for p in plays if p.get("hosts") == "host_audit_targets")
     assert collect["gather_facts"] is False, "CentOS 6/7 have no usable Python; collection is raw-only"
     target_modules = {k for t in tasks for k in t if k.startswith("ansible.builtin.")}
+    # Section checks live in their own task files included from main.yml; they obey the same rule.
+    for inc in [t["ansible.builtin.include_tasks"] for t in tasks if "ansible.builtin.include_tasks" in t]:
+        tasks = tasks + yaml.safe_load((ROOT_DIR / "roles" / "host_audit" / "tasks" / inc).read_text(encoding="utf-8"))
+    tasks = [t for t in tasks if "ansible.builtin.include_tasks" not in t]
     remote = [t for t in tasks if t.get("delegate_to") != "localhost"]
     assert all("ansible.builtin.raw" in t or "ansible.builtin.set_fact" in t for t in remote), target_modules
     probe = next(t for t in tasks if "ansible.builtin.raw" in t)

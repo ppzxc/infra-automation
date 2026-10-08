@@ -31,6 +31,9 @@
 - name: Collect Asset Inventory
   ansible.builtin.include_tasks: inventory.yml
 
+- name: Check Configuration Vulnerability (KISA-2026)
+  ansible.builtin.include_tasks: kisa.yml
+
 - name: "[AUD-012] Save the per-host record on the runner"
   ansible.builtin.copy:
     content: "{{ host_audit_record | to_nice_json(indent=2) }}\n"

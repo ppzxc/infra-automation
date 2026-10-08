@@ -257,3 +257,69 @@ host_audit_asset:
 | `AUD-324` | `Save the Package Vulnerability section on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 
 검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).
+
+## 10. Configuration Vulnerability (KISA-2026, #121)
+
+- **기준**: KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」 Unix 서버 항목. 항목 코드는 판을 붙여 `KISA-2026:U-NN`으로 적는다(2021판과 번호가 다르다). CIS RHEL 9 Benchmark v2.0.0 규칙 번호는 참조 열로만 둔다. 근거: `docs/research/host-audit-configuration-vulnerability-baseline.md`(#102, `research/host-audit-configuration-vulnerability-baseline` 브랜치).
+- **구현 범위**: 계정 관리 분류 U-01~U-13. 나머지 분류(파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67)는 같은 틀에 항목 스크립트와 `ITEMS` 항목을 더해 붙인다.
+- **실행**: `roles/host_audit/files/kisa/`의 `_lib.sh` + `U-NN.sh`(이름순) + `_end.sh`를 이어 붙여 `ansible.builtin.raw`로 `sh -s`에 넣는다. 호스트에 파일을 남기지 않고 Python이 필요 없어 CentOS 6 ~ Rocky 10, Ubuntu에서 같은 경로로 돈다. `/etc/shadow`와 `sshd -T`를 읽어야 해서 이 태스크만 root로 승격한다. 식별 수집(`AUD-010`)에 실패한 호스트는 건너뛴다.
+- **출력 규약**: 표식(`__HOST_AUDIT_KISA_BEGIN__`/`__HOST_AUDIT_KISA_END__`) 사이에 항목마다 `U-NN|<GOOD·VULN·NA·MANUAL>|증적` 한 줄. 증적은 설정 값·계정 이름·개수만 담고 비밀번호 해시 같은 비밀값은 싣지 않는다. 스크립트는 `KISA_ROOT`로 점검할 루트를 바꿀 수 있어 pytest가 가짜 `/etc`로 판정을 검증한다.
+- **판정 5종**: 양호 · 취약 · 예외(승인) · 해당없음 · 점검불가(수동). 스크립트가 결과를 내지 않은 항목은 양호로 두지 않고 점검불가(수동)로 둔다. 판정과 예외 적용은 `filter_plugins/host_audit_kisa.py`의 `host_audit_kisa_result`가 한다.
+- **예외 레지스터**: `host_audit_kisa_exceptions`(role defaults, Git). 항목마다 `code`, 적용 범위(`hosts`/`groups`, 비우면 전체), `reason`(사유), `risk`(위험성), `mitigation`(보완대책), `approver`(직책), `approved_on`, `expires_on`을 둔다(ISMS 2.11.2 "사유·위험성·보완대책 보고", 결함사례 2 "승인 이력").
+
+  | 레지스터 상태 | 조건 | 판정에 미치는 영향 |
+  |---|---|---|
+  | 유효 | 필수 항목·승인자·승인일이 있고 만료일이 실행일(KST) 이후 | 취약·점검불가(수동) → 예외(승인) |
+  | 만료 | 만료일이 실행일보다 앞 | 취약·점검불가(수동) → 취약 |
+  | 승인 대기 | 승인자 또는 승인일이 없음 | 바꾸지 않음(보고서에 '승인 대기' 표시) |
+  | 형식 오류 | 사유·위험성·보완대책 중 빠진 것이 있거나 만료일이 날짜가 아님 | 바꾸지 않음 |
+
+  양호·해당없음은 예외가 있어도 바뀌지 않는다. 첫 항목은 Docker 구간의 `KISA-2026:U-28`(접속 IP 및 포트 제한)이며 승인 전이라 '승인 대기'다. U-28 점검이 구현되면 그때부터 판정에 적용된다.
+- **보고서**: "4. Configuration Vulnerability" 섹션에 항목별 판정 건수, 양호 외 항목(취약·점검불가(수동)·예외(승인), 항목·판정별로 호스트 묶음), 예외 레지스터를 싣는다. 양호 항목과 증적은 호스트별 부록(`sections/appendix_config_vulnerability.html.j2`)에 싣는다. 섹션 모델은 `host_audit_report_model`이 `host_audit_kisa_section`을 불러 `config_vulnerability` 키로 넣고, 예외 레지스터는 실행 메타의 `kisa_exceptions`로 넘어간다. 점검이 돌지 못한 호스트는 요약의 점검불가 표에 'Configuration Vulnerability'로 나온다.
+
+### 10.1 구현 항목 (계정 관리)
+
+| 코드 | 항목 (중요도) | 자동 판정 방법 | CIS 참조 |
+|---|---|---|---|
+| `KISA-2026:U-01` | root 계정 원격 접속 제한 (상) | `sshd -T`(실패 시 `sshd_config`)의 `PermitRootLogin`이 `no`이고 telnet(23/tcp) listening이 없으면 양호 | 5.1.20 |
+| `KISA-2026:U-02` | 비밀번호 관리정책 설정 (상) | `PASS_MAX_DAYS` ≤ 90, `PASS_MIN_DAYS` ≥ 1, 문자 종류 3종+8자 또는 2종+10자(pwquality·PAM 인자) | 5.3.3.2.2, 5.3.3.2.3, 5.4.1.1, 5.4.1.2 |
+| `KISA-2026:U-03` | 계정 잠금 임계값 설정 (상) | auth 스택 pam_faillock·pam_tally2·pam_tally의 `deny`(없으면 faillock.conf, 기본 3)가 1~10 | 5.3.3.1.1 |
+| `KISA-2026:U-04` | 비밀번호 파일 보호 (상) | `/etc/passwd` 비밀번호 필드가 모두 `x`(잠금 표시 허용)이고 `/etc/shadow` 존재 | 7.2.1 |
+| `KISA-2026:U-05` | root 이외의 UID가 '0' 금지 (상) | UID 0 계정이 root뿐 | 5.4.2.1 |
+| `KISA-2026:U-06` | 사용자 계정 su 기능 제한 (상) | `/etc/pam.d/su`의 pam_wheel.so, 또는 su가 root 외 그룹 소유·other 실행 불가. su 없으면 해당없음 | 5.2.7 |
+| `KISA-2026:U-07` | 불필요한 계정 제거 (하) | 점검불가(수동) — 로그인 가능 계정 목록을 증적으로 | - |
+| `KISA-2026:U-08` | 관리자 그룹에 최소한의 계정 포함 (중) | 점검불가(수동) — GID 0 그룹·기본 그룹 GID 0 계정·wheel/sudo/admin 구성원을 증적으로 | 5.4.2.2, 5.4.2.3 |
+| `KISA-2026:U-09` | 계정이 존재하지 않는 GID 금지 (하) | 모든 계정의 기본 GID가 `/etc/group`에 있음 | 7.2.3 |
+| `KISA-2026:U-10` | 동일한 UID 금지 (중) | 중복 UID 없음 | 7.2.4 |
+| `KISA-2026:U-11` | 사용자 shell 점검 (하) | 가이드가 나열한 시스템 계정(daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher)의 셸이 nologin/false | 5.4.2.7 |
+| `KISA-2026:U-12` | 세션 종료 시간 설정 (하) | 전역 sh 프로필의 `TMOUT`이 1~600초(여러 곳이면 가장 큰 값) | 5.4.3.2 |
+| `KISA-2026:U-13` | 안전한 비밀번호 암호화 알고리즘 사용 (중) | `/etc/shadow`에 MD5·Blowfish·DES 해시가 없고 `ENCRYPT_METHOD`·pam_unix 설정이 약한 알고리즘이 아님 | 5.3.3.4.3, 5.4.1.4 |
+
+항목명·중요도·판단 기준 문장은 `9u4a/kisa-infra-audit`(MIT, 2026판 기준)가 가이드에서 인용한 항목 설명을 따랐고, 873쪽 PDF 원문과 직접 대조하지는 않았다. 판정 스크립트는 그 설명을 참고해 새로 작성했다(코드 차용 없음).
+
+### 10.2 호스트별 JSON 추가 필드
+
+```json
+"config_vulnerability": {
+  "edition": "KISA-2026",
+  "status": "ok",
+  "reason": "",
+  "results": [
+    {"code": "KISA-2026:U-02", "result": "VULN", "verdict": "예외(승인)",
+     "evidence": "PASS_MAX_DAYS=99999 PASS_MIN_DAYS=0 ...",
+     "exception": {"state": "유효", "reason": "...", "risk": "...", "mitigation": "...",
+                   "approver": "정보보호 책임자", "approved_on": "2026-09-01", "expires_on": "2026-12-31"}}
+  ]
+}
+```
+
+`result`는 스크립트 원판정(`GOOD`·`VULN`·`NA`·`MANUAL`, 출력이 없으면 `NONE`), `verdict`는 예외 레지스터를 적용한 최종 판정이다. 점검이 돌지 못하면 `status`가 `failed`이고 `results`는 비어 있다. 식별 수집에 실패한 호스트에는 이 필드가 없다.
+
+### 10.3 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-200` | `Run KISA-2026 Unix checks (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true`, root 승격 |
+| `AUD-201` | `Add KISA-2026 verdicts to the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_kisa_result` 필터 |
+
+검증: pytest `tests/test_host_audit_kisa.py`(판정 5종, 예외 유효·만료·승인 대기·범위, 보고서 섹션·부록, 가짜 루트에서의 스크립트 판정과 해시 미노출), molecule Fast `VERIFY-AUD-200`·`VERIFY-AUD-201`(점검 실행·판정 기록). 읽기 전용은 `VERIFY-AUD-010` 스냅샷 사이에서 함께 확인된다.

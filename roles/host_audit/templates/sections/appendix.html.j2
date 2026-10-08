@@ -4,5 +4,6 @@
 {%- set host_index = loop.index0 %}
   <h2 class="pb">부록 {{ loop.index }}. {{ host | e }}</h2>
 {% include 'sections/appendix_asset_inventory.html.j2' %}
+{% include 'sections/appendix_config_vulnerability.html.j2' %}
 {% include 'sections/appendix_package_vulnerability.html.j2' %}
 {% endfor %}

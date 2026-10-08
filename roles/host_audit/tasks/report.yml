@@ -37,6 +37,7 @@
       timezone: "{{ host_audit_run.timezone }}"
       eol_table: "{{ host_audit_eol_table }}"
       package_vulnerability: "{{ host_audit_package_section | default({}) }}"
+      kisa_exceptions: "{{ host_audit_kisa_exceptions }}"
 
 - name: "[AUD-022] Save the run metadata on the runner"
   ansible.builtin.copy:

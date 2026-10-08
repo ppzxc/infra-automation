@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 # filter_plugins/ on sys.path, so add it before importing them.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_inventory import inventory_section  # noqa: E402
+from host_audit_kisa import host_audit_kisa_section, run_date as kisa_run_date  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo
@@ -238,7 +239,7 @@ def host_audit_report_model(records, meta):
     if target_hosts:
         scope += ' (target_hosts: %s)' % target_hosts
 
-    return {
+    model = {
         'title': 'Host Audit 점검 보고서',
         'cover': {
             'run_id': meta.get('run_id', ''),
@@ -265,6 +266,9 @@ def host_audit_report_model(records, meta):
         'asset_inventory': asset_inventory,
         'package_vulnerability': package_vulnerability,
     }
+    # Configuration Vulnerability (KISA-2026, #121): exception expiry is judged on the run date.
+    return host_audit_kisa_section(model, records, meta.get('kisa_exceptions') or [],
+                                   kisa_run_date(meta.get('started_at'), tz_name))
 
 
 class FilterModule(object):
