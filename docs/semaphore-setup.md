@@ -105,11 +105,12 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | `hosts/<host>/agents` | Deploy, Config, Repo Maintenance |
 | `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config |
 | `agents/rustfs` | Deploy, Config, Repo Maintenance, Host Audit(엔드포인트) |
-| `agents/host_audit` | Host Audit (전용 보관 키 `storage_access_key`/`storage_secret_key`, 선택 `storage_bucket`·`storage_endpoint`·`storage_region` — [host_audit.md §11](host_audit.md#11-보관과-audit-baseline-125)) |
+| `agents/host_audit` | Host Audit, Host Audit — Resend (전용 보관 키 `storage_access_key`/`storage_secret_key`, 선택 `storage_bucket`·`storage_endpoint`·`storage_region` — [host_audit.md §11](host_audit.md#11-보관과-audit-baseline-125); 메일 수신자 `mail_to`·발신자 `mail_from` — [host_audit.md §13](host_audit.md#13-메일-발송-126)) |
 
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
 - **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
 - **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_url`. 선택으로 `alert_webhook_token`.
+- **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 실행할 때 Extra variables `{"host_audit_mail_to": "a@example.com"}`로 덮어쓴다(값은 로그에 나오지 않는다).
 
 ---
 
@@ -123,6 +124,14 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | 수동 | `servers` |
 | Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
 | OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | 수동 | localhost (OpenObserve API) |
+| Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | 수동 | localhost (Host Audit 버킷 → 메일) |
+
+**Host Audit 보고서 다시 보내기 (Host Audit — Resend)**
+
+- 다시 점검하지 않고, 버킷에 보관된 실행의 보고서를 같은 첨부(같은 SHA-256)로 다시 보낸다. 메일 발송이 실패했거나 받는 사람을 추가할 때 쓴다.
+- Extra variables `{"host_audit_resend_run_id": "ha-20261031T220000Z"}` — 실행 ID는 메일 제목 아래·본문 상단, 실패 메시지, Semaphore 로그(`AUD-003`)에 있다.
+- 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID면 `"host_audit_resend_month": "2026-11"`(KST 기준 실행 시작 월)을 함께 준다.
+- 수신자는 지금의 OpenBao `agents/host_audit.mail_to`다(또는 `host_audit_mail_to`). 받은 보고서의 SHA-256이 보관된 요약의 값과 다르면 보내지 않는다.
 
 **CIS 감사 파일럿 템플릿 삭제**
 

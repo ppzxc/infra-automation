@@ -1,0 +1,60 @@
+{#- Host Audit 메일 본문 요약 (#126). 요약(mail_summary.json)을 그리기만 한다.
+    Gmail·Outlook 호환: <table> 레이아웃 + style="" 인라인만, <style>·이미지·SVG 없음. -#}
+{%- set s = host_audit_mail_doc -%}
+{%- set colors = {'crit': '#b42318', 'warn': '#b54708', 'ok': '#067647', 'na': '#475467'} -%}
+{%- set font = "font-family:'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',Arial,sans-serif;" -%}
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{{ s.title | e }}</title></head>
+<body style="margin:0;padding:0;background:#f2f4f7;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f2f4f7;">
+<tr><td align="center" style="padding:16px 8px;">
+<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px;max-width:100%;background:#ffffff;border:1px solid #d0d5dd;{{ font }}">
+  <tr><td style="padding:16px 20px;background:#101828;color:#ffffff;{{ font }}">
+    <div style="font-size:18px;font-weight:bold;">{{ s.title | e }}{% if s.resent | default(false) %} (재발송){% endif %}</div>
+    <div style="font-size:12px;color:#d0d5dd;padding-top:4px;">{{ s.run_kind | e }} 실행 · {{ s.run_id | e }}{% if s.started_at %} · 시작 {{ s.started_at | e }}{% endif %}</div>
+  </td></tr>
+{% if s.hosts.total is defined %}
+  <tr><td style="padding:16px 20px 4px 20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td width="33%" align="center" style="padding:10px;border:1px solid #eaecf0;{{ font }}"><div style="font-size:22px;font-weight:bold;color:#101828;">{{ s.hosts.total }}</div><div style="font-size:12px;color:#475467;">점검 대상 호스트</div></td>
+        <td width="33%" align="center" style="padding:10px;border:1px solid #eaecf0;{{ font }}"><div style="font-size:22px;font-weight:bold;color:{{ colors.ok }};">{{ s.hosts.inspected }}</div><div style="font-size:12px;color:#475467;">점검 완료</div></td>
+        <td width="33%" align="center" style="padding:10px;border:1px solid #eaecf0;{{ font }}"><div style="font-size:22px;font-weight:bold;color:{{ colors.crit if s.hosts.unavailable else colors.na }};">{{ s.hosts.unavailable }}</div><div style="font-size:12px;color:#475467;">점검불가</div></td>
+      </tr>
+    </table>
+  </td></tr>
+{% endif %}
+  <tr><td style="padding:12px 20px 4px 20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+{% for line in s.lines %}
+      <tr>
+        <td width="34%" valign="top" style="padding:7px 8px;border-bottom:1px solid #eaecf0;font-size:13px;font-weight:bold;color:#344054;{{ font }}">{{ line.section | e }}</td>
+        <td valign="top" style="padding:7px 8px;border-bottom:1px solid #eaecf0;font-size:13px;color:{{ colors[line.level] | default(colors.na) }};{{ font }}">{{ line.text | e }}</td>
+      </tr>
+{% endfor %}
+    </table>
+  </td></tr>
+{% if s.eos %}
+  <tr><td style="padding:8px 20px 4px 20px;font-size:13px;color:{{ colors.crit }};{{ font }}">
+    <b>지원 종료(EOS) 운영 체제</b>{% for e in s.eos %}<br>{{ e.host | e }}: {{ e.os | e }} (지원 종료 {{ e.date | e }}){% endfor %}
+  </td></tr>
+{% endif %}
+{% if s.baseline %}
+  <tr><td style="padding:8px 20px 0 20px;font-size:12px;color:#475467;{{ font }}">비교 기준: {{ s.baseline | e }}</td></tr>
+{% endif %}
+  <tr><td style="padding:14px 20px 16px 20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f9fafb;border:1px solid #eaecf0;">
+      <tr><td style="padding:10px 12px;font-size:12px;color:#344054;line-height:1.6;{{ font }}">
+        <b>첨부</b> {{ s.report.file_name | e }} — A4 인쇄용 전체 보고서. 브라우저(Chrome·Edge)로 열어 인쇄합니다.<br>
+        <b>SHA-256</b> <span style="font-family:Consolas,'Courier New',monospace;word-break:break-all;">{{ s.report.sha256 | e }}</span><br>
+        <b>원본 보관</b> {{ s.report.archive | e }}
+      </td></tr>
+    </table>
+    <div style="padding-top:10px;font-size:11px;color:#667085;{{ font }}">이 메일은 Host Audit(읽기 전용 정기 점검)이 자동으로 보냈습니다. 첨부의 SHA-256이 보관 원본과 같은지 확인할 수 있습니다.</div>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

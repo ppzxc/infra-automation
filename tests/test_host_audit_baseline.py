@@ -320,7 +320,7 @@ def _tasks(name):
 
 
 def test_storage_never_uses_backup_or_maintenance_keys():
-    for name in ("storage_lookup.yml", "storage_upload.yml"):
+    for name in ("storage_credentials.yml", "storage_lookup.yml", "storage_upload.yml", "storage_result.yml"):
         text = (ROLE_DIR / "tasks" / name).read_text(encoding="utf-8")
         for forbidden in ("maintenance_access_key", "maintenance_secret_key", "backup_access_key", "rustfs_access_key"):
             assert forbidden not in text
@@ -332,7 +332,8 @@ def test_pointer_is_uploaded_only_for_a_scheduled_run_after_every_upload_succeed
     when = " ".join(pointer_task["when"])
     assert "run_kind == 'scheduled'" in when
     assert "reject('equalto', 200)" in when
-    final = upload[-1]
+    assert all("ansible.builtin.assert" not in t for t in upload), "storage_upload.yml must not fail the run before the mail (#126)"
+    final = _tasks("storage_result.yml")[-1]
     assert "ansible.builtin.assert" in final and "[AUD-516]" in final["name"]
     assert "host_audit_baseline_history.state != 'failed'" in final["ansible.builtin.assert"]["that"]
 
@@ -343,8 +344,9 @@ def test_report_builds_the_model_between_lookup_and_upload_and_secrets_stay_hidd
     lookup = next(i for i, t in enumerate(report) if t.get("ansible.builtin.include_tasks") == "storage_lookup.yml")
     build = next(i for i, n in enumerate(names) if "[AUD-021]" in n)
     upload = next(i for i, t in enumerate(report) if t.get("ansible.builtin.include_tasks") == "storage_upload.yml")
-    assert lookup < build < upload
-    for name in ("storage_lookup.yml", "storage_upload.yml"):
+    result = next(i for i, t in enumerate(report) if t.get("ansible.builtin.include_tasks") == "storage_result.yml")
+    assert lookup < build < upload < result
+    for name in ("storage_credentials.yml", "storage_lookup.yml", "storage_upload.yml"):
         for task in _tasks(name):
             if "ansible.builtin.uri" in task or "[AUD-502]" in task.get("name", ""):
                 assert task.get("no_log") is True, task["name"]
