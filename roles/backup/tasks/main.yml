@@ -239,7 +239,7 @@
     when: not backup_use_cron | bool
 
   # Deploy(태그 없음/agents_install/backup) 한정. agents_config에는 속하지 않으므로 Config 실행은 init하지 않는다.
-  - name: "[BAK-050] Probe whether the restic repository exists (restic cat config)"
+  - name: "[BAK-050] Probe whether the restic repository exists (read-only, restic cat config)"
     ansible.builtin.shell: >-
       set -a; . {{ backup_env_path | quote }}; set +a; export LC_ALL=C;
       {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path | quote }} -n {{ backup_profile_name }} cat config

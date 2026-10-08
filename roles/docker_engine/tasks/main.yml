@@ -58,7 +58,8 @@
     gpgkey: "https://download.docker.com/linux/{{ 'rhel' if ansible_distribution == 'RedHat' else 'centos' }}/gpg"
     file: docker-ce
     mode: '0644'
-  check_mode: false
+  # No check_mode: false here — a --check run (Host Audit Configuration Drift, ADR-0009 §1)
+  # must leave repository definitions untouched; it reports `changed` instead of writing.
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
@@ -66,10 +67,11 @@
 - name: "[DOC-004-CACHE] Refresh package manager cache for Docker repository (RedHat/Rocky)"
   ansible.builtin.command: "{{ 'dnf makecache --refresh' if (ansible_distribution_major_version | int >= 8) else 'yum makecache' }}"
   changed_when: false
-  check_mode: false
+  # makecache rewrites the package cache, so it is skipped under --check (ADR-0009 §1).
   when:
     - ansible_os_family == "RedHat"
     - ansible_distribution_major_version | int >= 7
+    - not (ansible_check_mode | default(false))
 
 - name: "[DOC-005] Install Docker repository prerequisites (Debian/Ubuntu)"
   ansible.builtin.apt:
@@ -119,6 +121,10 @@
     state: present
     update_cache: true
   when: ansible_distribution_major_version | int >= 7 or ansible_os_family == "Debian"
+  # Under --check on a host without the Docker repo yet, DOC-004/DOC-008 only simulated the
+  # repo, so dnf/apt cannot resolve docker-ce and this would hard-fail the dry run. On a
+  # provisioned host the repo exists and the check reports real drift as usual.
+  ignore_errors: "{{ ansible_check_mode }}"
 
 # 4. Deploy Hardened Docker daemon.json
 - name: "[DOC-010] Create /etc/docker directory"
