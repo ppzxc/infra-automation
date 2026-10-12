@@ -118,7 +118,7 @@
 수집 규칙:
 - **없는 파일은 오류가 아니다.** OS 계열이 다르거나 해당 서비스가 없으면 그냥 매칭되지 않는다. 그래서 목록은 RHEL과 Debian의 합집합으로 둔다.
 - **배포 이후 새로 쓰인 줄부터 수집한다**(`start_at: end`). 기존 내용은 소급하지 않는다. 읽은 위치는 `/var/lib/otelcol/storage`에 저장되므로 재시작해도 중복되거나 빠지지 않는다.
-- **원문 본문은 바꾸지 않는다.** 파서는 시각, 프로세스명, PID, severity, audit 필드만 attributes에 올린다. 포맷이 맞지 않는 줄도 버리지 않고 `log.parse_error=true`를 붙여 보낸다.
+- **원문 본문은 바꾸지 않는다.** 파서는 시각, 프로세스명, PID, severity, audit 필드만 attributes에 올린다. 포맷이 맞지 않는 줄도 버리지 않고 `log.parse_error=true`를 붙여 보낸다(파싱에 성공한 줄은 `false`).
 - **security_logs 경로 6종은 호스트 KV `otel_exclude_logs`로 제외할 수 없다.** 시도하면 해당 호스트는 변경 전에 실패한다. 나머지 system_logs 경로는 제외할 수 있다.
 - **호스트별 추가 경로**: KV `otel_extra_logs`로 추가하며, 스트림 기본값은 `app_logs`다. 추가 경로에는 파서를 적용하지 않는다.
 

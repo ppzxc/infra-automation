@@ -14,6 +14,7 @@
 {#
   Envelope Parsing (ADR-0008). 원문 body는 건드리지 않고 포맷이 정한 필드만 attributes/Timestamp/severity에 올린다.
   regex_parser가 on_error: send_quiet라 맞지 않는 줄은 그대로 통과하고, 그런 줄에는 log.parse_error=true를 붙인다(버리지 않음).
+  성공한 줄에는 log.parse_error=false를 명시한다 — 실패가 없어도 OpenObserve에 컬럼이 생겨 파싱 실패율 알림 SQL이 동작한다.
   연도가 없는 시각(RFC3164, yum)은 collector가 수집 시점 기준으로 추정하고, 타임존은 Probe가 읽은 호스트 값을 쓴다.
   모든 operator가 같은 if 조건(해당 포맷의 파일)으로 묶여 있어 한 수신기 안에서 파일별로 다른 파서를 쓴다.
 #}
@@ -177,6 +178,10 @@
         field: attributes["log.parse_error"]
         value: true
         if: {{ (c ~ ' and attributes["message"] == nil' if fmt != 'audit' else c ~ ' and attributes["audit.type"] == nil') | to_json }}
+      - type: add
+        field: attributes["log.parse_error"]
+        value: false
+        if: {{ (c ~ ' and attributes["message"] != nil' if fmt != 'audit' else c ~ ' and attributes["audit.type"] != nil') | to_json }}
 {% endmacro %}
 extensions:
   file_storage:
