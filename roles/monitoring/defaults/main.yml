@@ -1,6 +1,8 @@
 ---
 # OpenTelemetry Collector Contrib
-enable_otelcol: true
+# Host Agents Backup Only(인벤토리 그룹 host_agents_backup_only) 호스트는 otelcol을 설치·설정하지 않고 백업만 받는다.
+# 그룹 소속에서 파생한다 — Semaphore Static 인벤토리에는 저장소 inventory/group_vars가 적용되지 않는다.
+enable_otelcol: "{{ 'host_agents_backup_only' not in group_names }}"
 otelcol_user: "otelcol"
 otelcol_group: "otelcol"
 otelcol_config_dir: "/etc/otelcol"

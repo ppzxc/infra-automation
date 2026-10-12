@@ -399,6 +399,20 @@ def test_host_agents_state_and_exclusion():
     assert host(model, "ns0333")["host_agents"] == "제외(Host Agents Exclusion)"
 
 
+def test_backup_only_host_is_normal_without_otelcol():
+    """Host Agents Backup Only 호스트는 otelcol 없이 백업이 설치·예약돼 있으면 정상이다."""
+    no_otel = ROCKY9_INVENTORY.replace("agent_otelcol_active=active", "agent_otelcol_active=inactive")
+    no_otel = "\n".join(l for l in no_otel.splitlines() if l != "agent_bin=otelcol-contrib")
+    groups = ("servers", "host_agents_backup_only")
+    model = host_audit_report_model([record("ns0327", ROCKY9_IDENTITY, no_otel, groups=groups)], meta())
+    assert host(model, "ns0327")["host_agents"] == "정상(백업 전용)"
+    assert host(model, "ns0327")["host_agents_ok"] is True
+
+    unscheduled = no_otel.replace("agent_backup_timer_active=active", "agent_backup_timer_active=inactive")
+    model = host_audit_report_model([record("ns0327", ROCKY9_IDENTITY, unscheduled, groups=groups)], meta())
+    assert host(model, "ns0327")["host_agents"] == "일부 이상"
+
+
 def test_privileged_allowlist_from_declared_accounts():
     accounts = [{"name": "ppzxc", "tier": "admin"}, {"name": "op", "tier": "operator"},
                 {"name": "ops2", "tier": "operator", "sudo": True}, {"name": "gone", "tier": "admin",

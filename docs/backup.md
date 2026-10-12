@@ -155,7 +155,7 @@
 | Playbook | `playbooks/host_agents_maintenance.yml` |
 | 스케줄 | 매주 일요일 05:00 KST — Semaphore 스케줄 시간대가 Asia/Seoul이면 `0 5 * * 0`, 기본값 UTC면 `0 20 * * 6` ([semaphore-setup.md](semaphore-setup.md) §6) |
 | Environment | Deploy와 같은 Variable Group: `VAULT_ADDR`, `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(AppRole, BAK-087) 또는 `VAULT_TOKEN`, 선택 `VAULT_NAMESPACE`/`VAULT_MOUNT` — 시크릿은 Git에 두지 않음. 등록 절차는 [semaphore-setup.md](semaphore-setup.md) |
-| 대상 | `servers` 중 인벤토리 `host_agents_excluded` 그룹을 뺀 호스트 (Deploy와 같은 집합) |
+| 대상 | `servers` 중 인벤토리 `host_agents_excluded` 그룹을 뺀 호스트 (Deploy와 같은 집합, `host_agents_backup_only` 호스트 포함) |
 | 수동 실행 | `-e target_hosts=<host>`(1대), `-e backup_maintenance_read_subset=always\|never` |
 
 **호스트별 순서**: `check` → (첫째 일요일(`backup_maintenance_timezone`, 기본 Asia/Seoul 기준 달력일) 또는 `always`) `check --read-data-subset=10%` → 모든 check가 성공한 경우에만 `forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`. `check`가 실패한 호스트는 `prune`을 건너뜁니다(데이터 삭제 차단). 강제 `unlock`은 하지 않고 `--retry-lock 30m`만 사용합니다.

@@ -125,7 +125,7 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 | 패키지 | rpm / dpkg 전체 목록, 마지막 갱신일 | 수·마지막 갱신일·주요 패키지(kernel, openssl, openssh, glibc, sudo, docker) 버전만. **전체 목록은 호스트별 JSON에만** |
 | listening 포트 | `ss -tlnp`/`-ulnp`(없으면 `netstat`) | 외부/로컬 수, 부록에 포트·프로세스 |
 | 계정 | passwd, shadow(상태 단어만), wheel·sudo·admin 그룹, sudoers 규칙, lastlog(없으면 lastlog2) | 로그인 가능·특수권한 수, 표 2.3 발견 목록, 부록 계정 표 |
-| Host Agents | otelcol-contrib·restic·resticprofile 바이너리, 서비스·백업 타이머/cron | 정상 / 일부 이상 / 미설치 / 제외(Host Agents Exclusion) |
+| Host Agents | otelcol-contrib·restic·resticprofile 바이너리, 서비스·백업 타이머/cron | 정상 / 정상(백업 전용) / 일부 이상 / 미설치 / 제외(Host Agents Exclusion). `host_agents_backup_only` 호스트는 otelcol 없이 백업이 설치·예약돼 있으면 정상(백업 전용) |
 
 **판정 규칙**
 

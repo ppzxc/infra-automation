@@ -52,7 +52,7 @@
 
 ## 3-1. Host Agents 진입점과 입력 (`playbooks/host_agents.yml`)
 
-- **호스트 집합**: `target_hosts:&servers:!host_agents_excluded` (축소만 가능, `servers` 밖으로 확장 불가). 인벤토리 `host_agents_excluded` 그룹의 호스트는 Deploy·Config·Repo Maintenance 모두에서 빠집니다(ADR-0006 §2.1). 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
+- **호스트 집합**: `target_hosts:&servers:!host_agents_excluded` (축소만 가능, `servers` 밖으로 확장 불가). 인벤토리 `host_agents_excluded` 그룹의 호스트는 Deploy·Config·Repo Maintenance 모두에서 빠집니다(ADR-0006 §2.1). `host_agents_backup_only` 그룹의 호스트는 대상에 남지만 `enable_otelcol`이 `false`로 파생되어 otelcol 블록(설치·설정·서비스, legacy node_exporter 정리 포함)을 모두 건너뜁니다. 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
 - **롤아웃**: `serial: 25%`, `gather_facts: false`. 프로비저닝 assert·OS 프로브·fact 수집·입력 검증은 모두 역할 안에서 수행됩니다.
 - **태그**: 설치 단계 `agents_install`, 설정/스케줄 단계 `agents_config`, 역할 공통 `otel`(향후 `backup`). 사전 단계(`MON-020~035`)는 `always`라 `--tags agents_config`에서도 수행됩니다. Deploy = 태그 없음, Config = `--tags agents_config`.
 - **사전 단계**: `_is_already_provisioned`가 아니고 `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`도 없으면 즉시 실패(아래 "비밀번호 접속 예외" 참고) → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
@@ -60,7 +60,7 @@
 
   | 키 (`hosts/<host>/agents`) | 필수 | 용도 |
   |---|---|---|
-  | `o2_ingest_token`, `rustfs_access_key`, `rustfs_secret_key`, `restic_password` | 예 | 호스트 전용 시크릿 (누락 시 해당 호스트 실패) |
+  | `o2_ingest_token`, `rustfs_access_key`, `rustfs_secret_key`, `restic_password` | 예 | 호스트 전용 시크릿 (누락 시 해당 호스트 실패). `host_agents_backup_only` 호스트는 `o2_ingest_token` 불필요 |
   | `otel_extra_logs` | 아니오 | glob(→ `app_logs`) 또는 `{path, stream, service}` 추가. `service`(소문자·숫자·`.-_`)는 선택, 없으면 스트림 이름(`app` 등)으로 보고 |
   | `otel_exclude_logs` | 아니오 | 표준 목록에서 정확히 일치하는 경로 제거. `security_logs` 경로는 제외 불가 |
   | `otel_docker_metrics` | 아니오 | Docker 메트릭 opt-in |
