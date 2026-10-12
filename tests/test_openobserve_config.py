@@ -143,9 +143,42 @@ def test_template_body_is_a_naver_works_text_message(o2):
     assert _apply(o2).returncode == 0
     body = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])
     assert body["content"]["type"] == "text"
-    for var in ("{alert_name}", "{stream_name}", "{alert_count}", "{alert_start_time}", "{alert_end_time}"):
-        assert var in body["content"]["text"]
+    # 행동 가능한 알림: 심각도·제목·무슨 일·왜 중요·조치·런북·대상 행·대시보드 링크·발생 구간
+    for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action}", "{runbook}",
+                "{rows}", "{alert_url}", "{alert_start_time}", "{alert_end_time}", "{alert_name}"):
+        assert var in body["content"]["text"], var
     assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
+
+
+RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
+
+
+def test_every_alert_is_actionable(o2):
+    """모든 알림은 심각도·제목·무슨 일·왜 중요·조치·런북 링크와 대상 행 템플릿을 갖는다(PagerDuty/Google SRE 원칙)."""
+    assert _apply(o2).returncode == 0
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for name, alert in o2.store["alert"].items():
+        ctx = alert["context_attributes"]
+        assert ctx["severity"] in ("P1 긴급", "P2 경고", "P3 주의"), name
+        assert ctx["severity_icon"] in ("🔴", "🟠", "🟡"), name
+        for key in ("title", "what", "why", "action"):
+            assert ctx[key].strip() and '"' not in ctx[key] and "\n" not in ctx[key], (name, key)
+        anchor = ctx["runbook"].split("#", 1)[1]
+        assert ctx["runbook"].startswith("https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#")
+        assert f'<a id="{anchor}"></a>' in runbook, (name, anchor)
+        assert alert["row_template_type"] == "String" and alert["row_template"].startswith("• "), name
+        # 행 템플릿의 {필드}는 모두 그 알림 SQL이 SELECT하는 컬럼이다
+        import re as _re
+        fields = set(_re.findall(r"\{(\w+)\}", alert["row_template"]))
+        assert fields and all(f in alert["query_condition"]["sql"] for f in fields), (name, fields)
+
+
+def test_severity_mapping_follows_impact(o2):
+    assert _apply(o2).returncode == 0
+    sev = {n: a["context_attributes"]["severity"] for n, a in o2.store["alert"].items()}
+    assert sev["infra-root-login-success"] == sev["infra-kernel-disk-errors"] == "P1 긴급"
+    assert sev["infra-ssh-login-failures-per-source"] == sev["infra-sudo-escalation-failure"] == "P2 경고"
+    assert sev["infra-log-parse-errors-security-logs"] == "P3 주의"
 
 
 def test_webhook_auth_header_name_comes_from_openbao(o2):

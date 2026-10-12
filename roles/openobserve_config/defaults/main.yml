@@ -22,8 +22,11 @@ o2c_template_name: infra-automation-webhook
 o2c_destination_name: infra-automation-webhook
 o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"
 
-# 통지 본문: 네이버웍스 봇 text 메시지({"content": {"type": "text", "text": ...}}). OpenObserve 템플릿 변수를 쓴다.
-o2c_template_body: '{"content": {"type": "text", "text": "🚨 [OpenObserve 알림] {alert_name}\n\n• 스트림: {stream_name} (org {org_name})\n• 건수: {alert_count}\n• 기간: {alert_start_time} ~ {alert_end_time}\n• 내용: {rows}"}}'
+# 통지 본문: 네이버웍스 봇 text 메시지({"content": {"type": "text", "text": ...}}).
+# 행동 가능한 알림(PagerDuty·Google SRE 원칙): 심각도·제목 → 무슨 일 → 왜 중요 → 대상(행) → 조치 → 런북·대시보드 → 발생 구간.
+# {severity}·{title}·{what}·{why}·{action}·{runbook}은 알림별 context_attributes, {rows}는 알림별 row_template이다.
+o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
+o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 무슨 일: {what}\n■ 왜 중요: {why}\n■ 대상:\n{rows}\n■ 조치: {action}\n\n▶ 런북: {runbook}\n▶ 로그 보기: {alert_url}\n⏱ 발생: {alert_start_time} ~ {alert_end_time} (UTC) · 규칙 {alert_name}"}}'
 
 # 임계값
 o2c_ssh_fail_per_source_threshold: 10
@@ -37,6 +40,14 @@ o2c_parse_error_window_minutes: 30
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
 o2c_alerts:
   - name: infra-ssh-login-failures-per-source
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "한 출발지에서 SSH 로그인 실패 급증"
+    what: "같은 출발지 IP에서 {{ o2c_ssh_fail_window_minutes }}분 동안 SSH 로그인 실패가 {{ o2c_ssh_fail_per_source_threshold }}회 이상 발생했습니다."
+    why: "무차별 대입(brute-force) 공격의 전형적인 징후입니다. fail2ban이 막지 못하고 있을 수 있습니다."
+    action: "① 출발지가 사내·작업자 IP인지 확인 ② 외부 IP면 방화벽 차단과 fail2ban 동작 확인 ③ 같은 IP의 로그인 성공 기록이 있으면 P1로 격상"
+    runbook: "{{ o2c_runbook_base }}#ssh-login-failures-per-source"
+    row_template: '• {source_address} → {host_name}: 실패 {failures}회'
     description: "sshd 로그인 실패가 같은 source.address에서 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_source_threshold }}회 이상 (fail2ban이 막지 못하는 분산 공격 단서)"
     stream: security_logs
     sql: >-
@@ -47,6 +58,14 @@ o2c_alerts:
     frequency: 1
     silence: "{{ o2c_ssh_fail_window_minutes }}"
   - name: infra-ssh-login-failures-per-host
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "한 서버에 SSH 로그인 실패 급증"
+    what: "한 서버에서 {{ o2c_ssh_fail_window_minutes }}분 동안 SSH 로그인 실패가 {{ o2c_ssh_fail_per_host_threshold }}회 이상 발생했습니다."
+    why: "여러 출발지에서 분산 공격을 받고 있거나 자동화 작업이 잘못된 자격증명으로 반복 접속하는 상황입니다."
+    action: "① 로그 보기로 출발지 분포 확인 ② 분산 공격이면 SSH 포트 노출 범위(방화벽) 축소 ③ 내부 자동화면 해당 작업의 자격증명 갱신"
+    runbook: "{{ o2c_runbook_base }}#ssh-login-failures-per-host"
+    row_template: '• {host_name}: 실패 {failures}회'
     description: "한 호스트에서 sshd 로그인 실패가 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_host_threshold }}회 이상"
     stream: security_logs
     sql: >-
@@ -57,6 +76,14 @@ o2c_alerts:
     frequency: 1
     silence: "{{ o2c_ssh_fail_window_minutes }}"
   - name: infra-root-login-success
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "root 계정 원격 로그인 성공"
+    what: "root 계정으로 SSH 로그인이 성공했습니다."
+    why: "root 직접 접속은 정책상 금지 대상(PermitRootLogin)이며 접속자 식별이 불가능합니다. 침해 또는 설정 우회일 수 있습니다(ISMS 2.5 사용자 인증)."
+    action: "① 출발지와 시각을 작업 일정·작업자와 대조 ② 확인되지 않으면 해당 서버 root 비밀번호 변경·세션 종료 후 보안 담당 보고 ③ 승인된 작업이면 작업 기록에 남기기"
+    runbook: "{{ o2c_runbook_base }}#root-login-success"
+    row_template: '• {host_name} ← {source_address} ({logins}회)'
     description: "root SSH 로그인 성공 (1건부터 즉시) — PermitRootLogin 설정이 우회되었는지 확인"
     stream: security_logs
     sql: >-
@@ -67,6 +94,14 @@ o2c_alerts:
     frequency: 1
     silence: 5
   - name: infra-sudo-escalation-failure
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "sudo 권한 상승 실패"
+    what: "sudo 인증 실패 또는 sudoers에 없는 사용자의 권한 상승 시도가 있었습니다."
+    why: "계정 탈취 후 권한 상승을 시도하는 단계일 수 있습니다. 단순 비밀번호 오입력일 수도 있습니다."
+    action: "① 해당 사용자에게 시도 여부 확인 ② 본인이 아니면 계정 잠금·비밀번호 변경 ③ 반복되면 접속 경로(출발지) 추적"
+    runbook: "{{ o2c_runbook_base }}#sudo-escalation-failure"
+    row_template: '• {host_name} / 사용자 {user_name}: 실패 {failures}회'
     description: "sudo 권한상승 실패(authentication failure, NOT in sudoers) — 성공은 알리지 않고 기록만 한다"
     stream: security_logs
     sql: >-
@@ -77,6 +112,14 @@ o2c_alerts:
     frequency: 1
     silence: 5
   - name: infra-kernel-disk-errors
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "커널·디스크 오류 발생"
+    what: "OOM으로 프로세스가 강제 종료됐거나 디스크 I/O·파일시스템 오류가 기록됐습니다."
+    why: "서비스 중단이나 데이터 손상으로 이어질 수 있는 장애 전조입니다."
+    action: "① 로그 보기에서 오류 원문 확인(OOM인지 I/O인지) ② OOM이면 메모리 사용 상위 프로세스·한도 점검 ③ I/O·FS 오류면 즉시 백업 상태 확인 후 디스크 교체·fsck 계획"
+    runbook: "{{ o2c_runbook_base }}#kernel-disk-errors"
+    row_template: '• {host_name}: 오류 패턴 {matches}건'
     description: "커널/디스크 오류 패턴(OOM kill, I/O error, EXT4-fs error, XFS Corruption) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
     stream: system_logs
     sql: >-
@@ -88,20 +131,38 @@ o2c_alerts:
     frequency: 1
     silence: 15
   - name: infra-log-parse-errors-security-logs
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "보안 로그 해석 실패율 상승"
+    what: "security_logs에서 형식을 해석하지 못한 로그 비율이 {{ o2c_parse_error_percent }}% 이상입니다."
+    why: "해석되지 않은 보안 로그는 위 보안 알림(로그인 실패·root 로그인·sudo)에 잡히지 않아 탐지 공백이 생깁니다."
+    action: "① 해당 서버의 sshd·sudo 로그 형식 변경(패키지 업데이트) 여부 확인 ② 수집기(otelcol) 설정과 VRL 함수 수정 필요성 검토 ③ 업무 시간에 처리"
+    runbook: "{{ o2c_runbook_base }}#log-parse-errors"
+    row_template: '• {host_name}: {total}줄 중 {parse_errors}줄 해석 실패'
     description: "security_logs의 log.parse_error=true 비율이 {{ o2c_parse_error_percent }}% 이상 (수집기 포맷 계약 위반 의심)"
     stream: security_logs
     sql: >-
-      SELECT host_name, count(*) AS total FROM "security_logs"
+      SELECT host_name, count(*) AS total,
+      sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) AS parse_errors FROM "security_logs"
       GROUP BY host_name HAVING count(*) >= {{ o2c_parse_error_min_lines }}
       AND sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) * 100 >= {{ o2c_parse_error_percent }} * count(*)
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
     silence: "{{ o2c_parse_error_window_minutes }}"
   - name: infra-log-parse-errors-system-logs
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "시스템 로그 해석 실패율 상승"
+    what: "system_logs에서 형식을 해석하지 못한 로그 비율이 {{ o2c_parse_error_percent }}% 이상입니다."
+    why: "해석되지 않은 시스템 로그는 커널·디스크 오류 알림에 잡히지 않을 수 있습니다."
+    action: "① 해당 서버의 로그 형식 변경 여부 확인 ② 수집기(otelcol) 설정 점검 ③ 업무 시간에 처리"
+    runbook: "{{ o2c_runbook_base }}#log-parse-errors"
+    row_template: '• {host_name}: {total}줄 중 {parse_errors}줄 해석 실패'
     description: "system_logs의 log.parse_error=true 비율이 {{ o2c_parse_error_percent }}% 이상 (수집기 포맷 계약 위반 의심)"
     stream: system_logs
     sql: >-
-      SELECT host_name, count(*) AS total FROM "system_logs"
+      SELECT host_name, count(*) AS total,
+      sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) AS parse_errors FROM "system_logs"
       GROUP BY host_name HAVING count(*) >= {{ o2c_parse_error_min_lines }}
       AND sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) * 100 >= {{ o2c_parse_error_percent }} * count(*)
     period: "{{ o2c_parse_error_window_minutes }}"
