@@ -19,7 +19,7 @@
 
   입력 필드는 엣지(#91)가 만든 `process_executable_name`(= `sshd`/`sudo`)와 원문 `body`입니다. 엣지와 필드 계약이 바뀌면 같은 PR(또는 연속 PR)에서 함께 고칩니다.
 - **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수(`after_flatten: true`) → `security_logs`.
-- **통지 대상**: 범용 webhook 하나(`infra-automation-webhook`)와 JSON 본문 템플릿. 등급별 분리는 범위 밖입니다.
+- **통지 대상**: webhook 하나(`infra-automation-webhook`) — 네이버웍스 봇 text API(`{"content": {"type": "text", "text": ...}}`)로 보내는 본문 템플릿과 `Content-Type: application/json` 헤더. 등급별 분리는 범위 밖입니다.
 - **알림 규칙 6종(7개 정의)**: 모두 위 대상으로 보냅니다.
 
   | 이름 | 조건 |
@@ -47,7 +47,7 @@
 | `o2_endpoint`, `o2_org`, `o2_ca_file` | 호스트 에이전트와 같은 연결 값 |
 | `api_user`, `api_password` | 설정 API(함수·파이프라인·알림)를 쓸 수 있는 OpenObserve 계정 (수집 토큰과 별개) |
 | `alert_webhook_url` | 통지 webhook URL |
-| `alert_webhook_token`, `alert_webhook_auth_header` | (선택) 인증 토큰과 헤더 이름(기본 `Authorization`) |
+| `alert_webhook_token`, `alert_webhook_auth_header` | (선택) 인증 토큰과 헤더 이름(기본 `Authorization`, 네이버웍스 봇은 `X-NANOIT-ACCESS`) |
 
 ---
 

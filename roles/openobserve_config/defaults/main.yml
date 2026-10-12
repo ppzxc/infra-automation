@@ -3,8 +3,9 @@
 # 연결 정보와 시크릿은 Git에 두지 않는다: OpenBao agents/openobserve 키
 #   o2_endpoint, o2_org(기본 default), o2_ca_file(선택)  — host_agents와 같은 키
 #   api_user, api_password        — OpenObserve 설정 API(알림·함수·파이프라인)를 쓸 수 있는 계정(수집 토큰과 다름)
-#   alert_webhook_url             — 통지 대상(범용 webhook) URL
-#   alert_webhook_token           — (선택) webhook 인증 토큰. 헤더 이름은 alert_webhook_auth_header(기본 Authorization)
+#   alert_webhook_url             — 통지 대상 webhook URL (네이버웍스 봇 text API)
+#   alert_webhook_token           — (선택) webhook 인증 토큰. 헤더 이름은 alert_webhook_auth_header(기본 Authorization,
+#                                   네이버웍스 봇은 X-NANOIT-ACCESS)
 # Extra variables(-e o2_endpoint=...)가 OpenBao 값보다 우선한다.
 
 o2c_vault_validate_certs: false
@@ -21,8 +22,8 @@ o2c_template_name: infra-automation-webhook
 o2c_destination_name: infra-automation-webhook
 o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"
 
-# 통지 본문(범용 webhook, JSON). OpenObserve 템플릿 변수를 쓴다.
-o2c_template_body: '{"alert_name": "{alert_name}", "stream": "{stream_name}", "org": "{org_name}", "text": "{alert_name}: {alert_count} 건 ({alert_start_time} ~ {alert_end_time})", "rows": "{rows}"}'
+# 통지 본문: 네이버웍스 봇 text 메시지({"content": {"type": "text", "text": ...}}). OpenObserve 템플릿 변수를 쓴다.
+o2c_template_body: '{"content": {"type": "text", "text": "🚨 [OpenObserve 알림] {alert_name}\n\n• 스트림: {stream_name} (org {org_name})\n• 건수: {alert_count}\n• 기간: {alert_start_time} ~ {alert_end_time}\n• 내용: {rows}"}}'
 
 # 임계값
 o2c_ssh_fail_per_source_threshold: 10

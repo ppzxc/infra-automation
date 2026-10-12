@@ -138,6 +138,23 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert set(o2.store["alert"]) == EXPECTED_ALERTS and paths[4:] == ["/api/v2/default/alerts"] * len(EXPECTED_ALERTS)
 
 
+def test_template_body_is_a_naver_works_text_message(o2):
+    """통지 본문은 네이버웍스 봇 형식 {"content": {"type": "text", "text": ...}} 이다."""
+    assert _apply(o2).returncode == 0
+    body = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])
+    assert body["content"]["type"] == "text"
+    for var in ("{alert_name}", "{stream_name}", "{alert_count}", "{alert_start_time}", "{alert_end_time}"):
+        assert var in body["content"]["text"]
+    assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
+
+
+def test_webhook_auth_header_name_comes_from_openbao(o2):
+    kv = dict(KV, alert_webhook_auth_header="X-NANOIT-ACCESS")
+    assert _apply(o2, kv=kv).returncode == 0
+    assert o2.store["destination"]["infra-automation-webhook"]["headers"] == {
+        "Content-Type": "application/json", "X-NANOIT-ACCESS": "WEBHOOK-TOKEN-abc"}
+
+
 def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions(o2):
     assert _apply(o2).returncode == 0
     fn = o2.store["function"]["security_semantics"]
@@ -147,7 +164,8 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     func_node = next(n["data"] for n in pl["nodes"] if n["data"]["node_type"] == "function")
     assert func_node["name"] == "security_semantics" and func_node["after_flatten"] is True
     dest = o2.store["destination"]["infra-automation-webhook"]
-    assert dest["url"] == WEBHOOK_URL and dest["headers"] == {"Authorization": "WEBHOOK-TOKEN-abc"} and dest["type"] == "http"
+    assert dest["url"] == WEBHOOK_URL and dest["type"] == "http"
+    assert dest["headers"] == {"Content-Type": "application/json", "Authorization": "WEBHOOK-TOKEN-abc"}
     assert dest["template"] == "infra-automation-webhook"
     by = o2.store["alert"]
     assert all(a["destinations"] == ["infra-automation-webhook"] and a["enabled"] for a in by.values())
@@ -232,7 +250,7 @@ def test_missing_inputs_fail_before_any_request(o2, missing):
 def test_webhook_without_token_sends_no_auth_header(o2):
     res = _apply(o2, kv={k: v for k, v in KV.items() if k != "alert_webhook_token"})
     assert res.returncode == 0, res.stdout + res.stderr
-    assert o2.store["destination"]["infra-automation-webhook"]["headers"] == {}
+    assert o2.store["destination"]["infra-automation-webhook"]["headers"] == {"Content-Type": "application/json"}
 
 
 def test_every_api_task_is_no_log_and_writes_are_skipped_in_check_mode():
