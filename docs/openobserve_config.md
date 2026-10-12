@@ -35,7 +35,7 @@
   임계값은 `roles/openobserve_config/defaults/main.yml`의 `o2c_*` 변수입니다. 파싱 실패율 알림의 기본값(10%, 최소 20줄, 30분 창)도 `o2c_parse_error_percent`, `o2c_parse_error_min_lines`, `o2c_parse_error_window_minutes`로 조정합니다(SSH 실패는 `o2c_ssh_fail_per_source_threshold`, `o2c_ssh_fail_per_host_threshold`, `o2c_ssh_fail_window_minutes`).
 
   - **`Invalid user X from ...` 줄**: sshd는 같은 시도에 대해 `Failed password for invalid user X`도 남깁니다. 실패가 두 번 집계되지 않도록 `Invalid user` 줄은 `event_reason=invalid user`와 주소·사용자만 붙이고 `event_outcome`은 붙이지 않습니다(알림은 `event_outcome='failure'`만 셉니다). 비밀번호 시도 없이 끝나는 사용자 열거는 `Failed password` 줄이 없어 실패로 집계되지 않으며, 필요하면 `event_reason='invalid user'` 조건의 별도 알림을 추가합니다.
-  - **파싱 실패율의 한계**: 분모는 스트림·호스트의 전체 줄 수입니다. `otel_log_formats`에 없는 경로(사용자 추가 경로, 표에서 뺀 `sudo.log`/`boot.log`/`firewalld`)의 줄도 분모에 들어가 비율이 희석될 수 있습니다. 이런 경로는 파서를 적용하지 않아 `log.parse_error` 자체가 붙지 않으므로 오탐은 없지만, 해당 줄이 많은 호스트는 실제 실패율보다 낮게 보입니다. 이 변경 이전 레코드는 새 필드가 null이라 조건에서 빠집니다.
+  - **파싱 실패율의 한계**: 분모는 스트림·호스트의 전체 줄 수입니다. `otel_log_formats`에 없는 경로(사용자 추가 경로, 표에서 뺀 `sudo.log`/`boot.log`/`firewalld`)의 줄도 분모에 들어가 비율이 희석될 수 있습니다. 이런 경로는 파서를 적용하지 않아 `log.parse_error` 자체가 붙지 않으므로 오탐은 없지만, 해당 줄이 많은 호스트는 실제 실패율보다 낮게 보입니다. 이 변경 이전 레코드는 새 필드가 null이라 조건에서 빠집니다. 수집기는 파싱한 줄마다 `log.parse_error`를 `true`/`false`로 명시합니다. 이 필드가 스트림에 한 번도 들어오지 않으면 OpenObserve가 `unknown field`로 알림 쿼리를 거부합니다(알림 상태 "오류").
 
 ---
 

@@ -20,5 +20,6 @@ Host Agents가 로그를 원문 그대로만 보내서 severity 필터, 필드 �
 - severity는 **포맷이 실제로 갖고 있을 때만** 채운다(journald `PRIORITY`, fail2ban·dnf 레벨 등). rsyslog 기본 파일 포맷은 PRI를 남기지 않으므로 syslog 파일의 severity는 비어 있고, 이런 로그의 오류 알림은 패턴 기반으로 만든다. 키워드로 severity를 추정하지 않는다.
 - 이벤트 시각은 `Timestamp`, 수집 시각은 `ObservedTimestamp`에 둔다. RFC3164 줄에는 타임존이 없으므로 Probe가 읽은 **호스트의 실제 타임존**으로 해석한다(읽지 못하면 `timezone` 변수로 대체하고 WARN). 연도는 수집 시점 기준으로 추정한다.
 - 파싱에 실패한 줄도 버리지 않고 원문 그대로 보내며 `log.parse_error=true`를 붙인다. 파싱 실패율도 알림 대상이다.
+  - (2026-10-12 개정) 파싱에 성공한 줄에는 `log.parse_error=false`를 명시한다. 실패가 한 번도 없으면 OpenObserve 스트림에 컬럼이 생기지 않아 파싱 실패율 알림 SQL이 `unknown field`로 계속 오류였다.
 - `app_logs`는 포맷을 알 수 없으므로 파싱하지 않는다.
 - 이 변경 이전 레코드에는 새 필드가 없으므로 쿼리와 알림은 null을 견뎌야 한다.

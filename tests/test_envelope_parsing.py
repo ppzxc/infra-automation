@@ -192,7 +192,9 @@ def _check(rec, line, exp, tz):
     for key in exp.get("absent", []):
         assert key not in attrs, (key, attrs)
     if "log.parse_error" not in exp["attrs"]:
-        assert "log.parse_error" not in attrs, attrs
+        # 파싱에 성공한 줄도 log.parse_error=false를 명시한다 — 실패가 한 번도 없으면 OpenObserve에 컬럼이
+        # 생기지 않아 파싱 실패율 알림 SQL이 'unknown field'로 계속 오류가 났다
+        assert attrs.get("log.parse_error") is False, attrs
     for gone in ("ts", "hostname", "level", "epoch", "rest", "process_name", "process_pid", "audit_type", "audit_serial"):
         assert gone not in attrs, (gone, attrs)
     assert int(rec.get("severityNumber", 0)) == exp["sev"], rec
