@@ -38,7 +38,7 @@ IMPORT = "ansible.builtin.import_playbook"
 # Playbook structure
 # --------------------------------------------------------------------------
 
-HOST_AGENTS_PATTERN = "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
+HOST_AGENTS_PATTERN = r"{{ target_hosts | default('servers') | regex_replace('\s*,\s*', ':') }}:&servers:!host_agents_excluded"
 
 
 def _list_hosts(tmp_path, playbook, inventory, *extra):
@@ -65,6 +65,19 @@ def test_hosts_in_host_agents_excluded_are_never_targeted(tmp_path, playbook):
     # target_hosts로 직접 지정해도 제외가 우선한다.
     plays = _list_hosts(tmp_path, playbook, _EXCLUDED_INV, "-e", "target_hosts=ns0002")
     assert all(hosts == [] for hosts in plays)
+
+
+@pytest.mark.parametrize("playbook", ["host_agents.yml", "host_agents_maintenance.yml"])
+@pytest.mark.parametrize("target", ["ns0001,ns0002,ns0003,lb01", "ns0001, ns0002, ns0003, lb01",
+                                    "ns0001:ns0002:ns0003:lb01"])
+def test_multi_host_target_keeps_the_servers_and_exclusion_filter_on_every_host(tmp_path, playbook, target):
+    """Survey에 쉼표로 여러 대를 넣어도 모든 호스트에 servers 교집합·제외가 걸린다.
+
+    쉼표가 있으면 Ansible은 패턴을 쉼표로만 나누므로, 뒤에 ':&servers:!host_agents_excluded'를 이어 붙이면
+    마지막 호스트에만 필터가 붙어 그 호스트는 빠지고 앞 호스트는 제외 그룹이어도 대상이 된다(#266)."""
+    inv = {"all": {"children": {**_EXCLUDED_INV["all"]["children"], "loadbalancers": {"hosts": {"lb01": {}}}}}}
+    plays = _list_hosts(tmp_path, playbook, inv, "-e", json.dumps({"target_hosts": target}))  # Semaphore Survey와 같은 JSON
+    assert plays and all(hosts == ["ns0001", "ns0003"] for hosts in plays)
 
 
 @pytest.mark.parametrize("playbook", ["host_agents.yml", "host_agents_maintenance.yml"])

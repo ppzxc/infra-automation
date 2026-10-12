@@ -1,6 +1,6 @@
 # Semaphore 셋업 가이드 (Host Agents · OpenObserve · Host Audit)
 
-> Semaphore UI에 Host Agents 템플릿 3개, OpenObserve — Config, Host Audit 템플릿 3개를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
+> Semaphore UI에 Host Agents 템플릿 4개, OpenObserve — Config, Host Audit 템플릿 3개를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
 > OpenBao 구조와 공통 접속 모듈은 [openbao_integration.md](openbao_integration.md), 배포 내용은 [Host Agents 배포 내역서](host-agents-deploy-inventory-simple.md)를 본다.
 
 ---
@@ -11,7 +11,7 @@
 2. Repository: `ppzxc/infra-automation`, branch `main`
 3. Inventory: Static 인벤토리 (Semaphore UI에서 편집, `inventory/hosts.yml.example` 형식)
 4. Variable Group(Environment): OpenBao 접속 값 (모든 템플릿 공용 1개)
-5. Task Template 7개 (아래 §5)
+5. Task Template 8개 (아래 §5)
 6. Schedule: Repo Maintenance(주 1회), Host Audit — Monthly(월 1회)
 7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → OpenObserve — Config → Host Audit(§7.1)
 
@@ -62,7 +62,7 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 인벤토리에는 Inventory Hostname(관리번호, 예: `ns0332`)만 있다. 접속 IP와 포트는 OpenBao에서 동적으로 채운다. Host Agents 대상은 `servers` 그룹이다.
 
-**Host Agents를 적용하지 않는 호스트**: Semaphore Static 인벤토리에서 `servers`에는 두되 `host_agents_excluded` 그룹에도 넣는다. Deploy·Config·Repo Maintenance가 모두 이 그룹을 뺀다. 템플릿의 Limit이나 `target_hosts`로 따로 빼지 않는다.
+**Host Agents를 적용하지 않는 호스트**: Semaphore Static 인벤토리에서 `servers`에는 두되 `host_agents_excluded` 그룹에도 넣는다. Deploy·Config·Backup·Repo Maintenance가 모두 이 그룹을 뺀다. 템플릿의 Limit이나 `target_hosts`로 따로 빼지 않는다.
 
 ```yaml
 all:
@@ -80,7 +80,7 @@ all:
 
 ## 4. Variable Group (Environment)
 
-Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maintenance도 Deploy와 같은 AppRole로 로그인한다(BAK-087).
+Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maintenance도 Deploy와 같은 AppRole로 로그인한다(BAK-087).
 
 > **OpenObserve — Config는 AppRole 로그인을 하지 않고 `VAULT_TOKEN`만 쓴다**(O2C-001). 같은 Variable Group을 붙이되 `VAULT_TOKEN` Secret이 있어야 하며, 없으면 입력 누락으로 실패한다.
 
@@ -126,6 +126,7 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 |---|---|---|---|---|---|
 | Host Agents — Deploy | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 |
 | Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `servers` |
+| Host Agents — Backup | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 (restic·resticprofile만) |
 | Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
 | OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | (없음) | 수동 | localhost (OpenObserve API) |
 | Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | (없음 — 두지 않는다) | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함) |
@@ -138,15 +139,21 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 | 템플릿 | 변수 | 형식 | 기본값 | 필수 |
 |---|---|---|---|---|
-| Deploy, Config | `target_hosts` | String | `servers`(전체) | 예 |
+| Deploy, Config, Backup | `target_hosts` | String | `servers`(전체) | 예 |
 | On-demand | `target_hosts` | String | (비움 = 전체) | 아니오 |
 | On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |
 | Resend | `host_audit_resend_run_id` | String | (없음) | 예 |
 | Resend | `host_audit_resend_month` | String `YYYY-MM` | (비움) | 아니오 |
 
-- Deploy·Config의 `target_hosts`는 비워 두지 않는다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 기본값이 적용되지 않고 대상 패턴이 깨진다. Host Audit은 빈 값을 전체로 처리한다.
+- Deploy·Config·Backup의 `target_hosts`는 비워 두지 않는다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 기본값이 적용되지 않고 대상 패턴이 깨진다. Host Audit은 빈 값을 전체로 처리한다.
 - Monthly에는 Survey를 두지 않는다. 정기 실행은 항상 전체 대상·보관·발송이어야 Audit Baseline이 맞다.
 - Survey에 없는 변수(아래의 `host_audit_mail_to`, `host_audit_drift_enabled`, `backup_maintenance_read_subset` 등)는 API로 실행할 때 `POST /api/project/<id>/tasks`의 `environment`(JSON 문자열)로 넘긴다. 자주 쓰게 되면 해당 템플릿 Survey에 추가한다.
+
+**restic 백업만 적용할 때 (Host Agents — Backup)**
+
+- Deploy에서 `backup` 역할만 실행한다. restic·resticprofile 바이너리 배포, 백업 설정, timer/cron, repo 초기화, `job=inventory` 이벤트까지 하고 otelcol은 건드리지 않는다. OS 프로브, OpenBao 입력 검증, 연결 해석·임시 개인키 정리는 `always` 태그라 함께 돈다.
+- 멱등이라 백업 설정만 바꿨을 때도 이 템플릿을 다시 돌리면 된다. 이미 수렴한 설치·스케줄 단계는 `ok`로 지나간다.
+- restic **설정만** 따로 돌리는 템플릿은 두지 않는다. `--tags agents_config,backup`은 교집합이 아니라 합집합이라 otel 설정과 restic 설치가 같이 돈다. `--tags agents_config --skip-tags otel`은 쓰지 않는다. `monitoring` 역할 전체가 `otel` 태그를 물려받아 `always`인 OS 프로브·입력 검증까지 건너뛰므로 backup이 입력 미정의로 실패한다.
 
 **Host Audit — Monthly와 On-demand** ([host_audit.md](host_audit.md), ADR-0009)
 
@@ -173,7 +180,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 **특정 호스트만 실행할 때**
 
-- Run 창의 Survey `target_hosts`에 `ns0266`처럼 넣는다(Deploy·Config 기본값 `servers`는 전체). 값은 FQDN이 아니라 Inventory Hostname이다. Limit 칸은 쓰지 않는다.
+- Run 창의 Survey `target_hosts`에 `ns0266`처럼 넣는다(Deploy·Config·Backup 기본값 `servers`는 전체). 값은 FQDN이 아니라 Inventory Hostname이다. Limit 칸은 쓰지 않는다.
 - `target_hosts`는 플레이북 안에서 `servers`와 교집합을 구한다. `servers`에 없는 이름을 넣으면 오류 없이 대상 0대로 끝난다.
 - Limit을 템플릿에 고정하지 않는다. 고정해 두면 일부 호스트만 처리되고도 성공으로 표시된다. 스케줄로 도는 Repo Maintenance에서는 특히 주의한다.
 
@@ -212,7 +219,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - 07:00은 호스트 백업(KST 02:00~03:59)과 Repo Maintenance(일요일 05:00)가 끝난 뒤다. Configuration Drift 하위 실행이 대상 수에 비례해 오래 걸릴 수 있다(`host_audit_drift_timeout` 기본 3600초).
 - **점검 주기**: ISMS 2.11.2(취약점 점검 및 조치)는 정기 점검을 요구한다. 내부 지침에는 **분기 1회 이상** 점검하고 결과를 결재·보관하도록 정하고, 그 이행 수단으로 **월 1회 자동 실행**(이 스케줄)을 둔다. 월 보고서 중 분기마다 최소 한 부는 결재란에 서명해 ISMS 증적 보관 위치에 둔다.
 
-Deploy, Config, OpenObserve — Config, Host Audit — On-demand, Host Audit — Resend는 스케줄을 걸지 않는다.
+Deploy, Config, Backup, OpenObserve — Config, Host Audit — On-demand, Host Audit — Resend는 스케줄을 걸지 않는다.
 
 ---
 
