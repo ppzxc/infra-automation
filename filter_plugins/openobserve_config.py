@@ -22,6 +22,7 @@ ITEM_PATHS = {
     'alert': '/api/v2/{org}/alerts/{key}',
 }
 ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; the others by name
+CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
 SECRET_KINDS = ('destination',)                                # url and headers carry the webhook credentials
 
@@ -49,6 +50,10 @@ def o2c_desired(spec):
             'trigger_condition': {'period': alert['period'], 'operator': '>=', 'threshold': alert.get('threshold', 1),
                                   'frequency': alert['frequency'], 'frequency_type': 'minutes', 'silence': alert['silence']},
             'destinations': [dest], 'enabled': True, 'description': alert['description'],
+            # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action}·{runbook}로 쓰는 알림별 변수,
+            # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수)
+            'context_attributes': {k: alert[k] for k in CONTEXT_KEYS},
+            'row_template': alert['row_template'], 'row_template_type': 'String',
         }})
     for item in out:
         if item['kind'] == 'function':   # the server fills in defaults for the rest (num_args, streams, ...)

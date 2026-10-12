@@ -20,6 +20,7 @@
   입력 필드는 엣지(#91)가 만든 `process_executable_name`(= `sshd`/`sudo`)와 원문 `body`입니다. 엣지와 필드 계약이 바뀌면 같은 PR(또는 연속 PR)에서 함께 고칩니다.
 - **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수(`after_flatten: true`) → `security_logs`.
 - **통지 대상**: webhook 하나(`infra-automation-webhook`) — 네이버웍스 봇 text API(`{"content": {"type": "text", "text": ...}}`)로 보내는 본문 템플릿과 `Content-Type: application/json` 헤더. 등급별 분리는 범위 밖입니다.
+- **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 무슨 일, 왜 중요, 대상(알림별 `row_template`), 조치, [런북](runbooks/alerts.md) 링크, 로그 보기 링크, 발생 구간. 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
 - **알림 규칙 6종(7개 정의)**: 모두 위 대상으로 보냅니다.
 
   | 이름 | 조건 |
