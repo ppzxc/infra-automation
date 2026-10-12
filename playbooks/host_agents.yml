@@ -7,11 +7,13 @@
 # Semaphore 템플릿:
 #   Host Agents — Deploy : 태그 없음 (설치 + 설정 전체)
 #   Host Agents — Config : --tags agents_config [--check --diff] (설정 재적용만)
+#   Host Agents — Backup : --tags backup (restic/resticprofile만 설치 + 설정)
 # 보조 태그: agents_install, agents_config, otel, backup
 #
 # 실행 예시:
 #   ansible-playbook -i inventory/hosts.yml playbooks/host_agents.yml
 #   ansible-playbook -i inventory/hosts.yml playbooks/host_agents.yml -e target_hosts=ns0266   # 카나리 1대
+#   ansible-playbook -i inventory/hosts.yml playbooks/host_agents.yml --tags backup            # restic만
 #
 # 신규 호스트는 템플릿을 2회 실행한다: site.yml → Host Agents — Deploy.
 # ==============================================================================
@@ -20,11 +22,12 @@
 # Play 1: 연결/자격증명 해석 (공유 플레이북)
 # tags: [always] — --tags 실행에서도 자격증명 해석이 스킵되지 않도록 강제
 # 에이전트 play와 같은 호스트 집합(target_hosts ∩ servers)만 해석한다.
+# target_hosts의 쉼표는 ':'로 바꾼다 — 쉼표가 남으면 Ansible이 쉼표로만 나눠 ':&servers:!host_agents_excluded'가 마지막 호스트에만 붙는다.
 # ------------------------------------------------------------------------------
 - name: Resolve OpenBao Connection and Credentials
   ansible.builtin.import_playbook: common/resolve_connection.yml
   vars:
-    connection_hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
+    connection_hosts: "{{ target_hosts | default('servers') | regex_replace('\\s*,\\s*', ':') }}:&servers:!host_agents_excluded"
   tags: [always]
 
 # ------------------------------------------------------------------------------
@@ -32,7 +35,7 @@
 # OS 프로브 · 프로비저닝 assert · fact 수집 · OpenBao 입력 검증은 역할 안에서 수행한다.
 # ------------------------------------------------------------------------------
 - name: Apply Host Agents
-  hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
+  hosts: "{{ target_hosts | default('servers') | regex_replace('\\s*,\\s*', ':') }}:&servers:!host_agents_excluded"
   serial: 25%
   gather_facts: false
   roles:
@@ -50,5 +53,5 @@
 - name: Cleanup temporary controller credentials
   ansible.builtin.import_playbook: common/cleanup_connection.yml
   vars:
-    connection_hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
+    connection_hosts: "{{ target_hosts | default('servers') | regex_replace('\\s*,\\s*', ':') }}:&servers:!host_agents_excluded"
   tags: [always]

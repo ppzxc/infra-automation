@@ -56,3 +56,4 @@
 - restic repo가 없으면 초기화한다.
 - 완료 시 OpenObserve `backup_logs`에 `job=inventory` 등록 이벤트를 보낸다.
 - 설정만 다시 적용할 때는 **Host Agents — Config**(`--tags agents_config`)를 쓴다.
+- otelcol은 두고 restic·resticprofile만 설치·설정할 때는 **Host Agents — Backup**(`--tags backup`)을 쓴다.

@@ -616,7 +616,7 @@ def test_maintenance_uses_the_pinned_restic_and_has_no_version_table_of_its_own(
 
 def test_maintenance_playbook_runs_on_the_controller_for_servers_only():
     (play,) = yaml.safe_load((ROOT_DIR / "playbooks" / "host_agents_maintenance.yml").read_text(encoding="utf-8"))
-    assert play["connection"] == "local" and play["hosts"] == "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"
+    assert play["connection"] == "local" and play["hosts"] == r"{{ target_hosts | default('servers') | regex_replace('\s*,\s*', ':') }}:&servers:!host_agents_excluded"
     assert play["tasks"][0]["ansible.builtin.include_role"] == {"name": "backup", "tasks_from": "maintenance"}
 
 
