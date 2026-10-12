@@ -708,6 +708,31 @@ def test_bootstrap_entry_honours_per_host_user_override():
     assert facts["_bootstrap_user_entry"]["type"] == "PASSWORD"
 
 
+def _host_user_override_loop():
+    with open(RESOLVE, "r", encoding="utf-8") as f:
+        plays = yaml.safe_load(f)
+    for task in plays[0]["tasks"]:
+        if task.get("name", "").startswith("Fetch per-host user credential overrides from OpenBao"):
+            return task["loop"]
+    raise AssertionError("per-host user override fetch task missing")
+
+
+@pytest.mark.parametrize("admins, bootstrap, expected", [
+    (["root"], "root", ["root"]),                  # same account: fetched once
+    (["root"], "bot", ["root", "bot"]),            # bootstrap account outside admin_users (ns0217)
+    (["ppzxc", "svcadm"], "root", ["ppzxc", "svcadm", "root"]),
+])
+def test_host_user_overrides_are_fetched_for_the_bootstrap_account_too(admins, bootstrap, expected):
+    """hosts/<hostname>/users/<bootstrap_user>를 조회하지 않으면, 부트스트랩 계정이 admin_users에 없을 때
+    호스트 전용 비밀번호가 비어 접속이 거부된다(ns0217 bot, Semaphore #280)."""
+    from jinja2.nativetypes import NativeEnvironment
+    env = NativeEnvironment()
+    env.filters["unique"] = lambda xs: list(dict.fromkeys(xs))
+    rendered = env.from_string(_host_user_override_loop()).render(
+        _normalized_admin_users=admins, _bootstrap_user=bootstrap)
+    assert list(rendered) == expected
+
+
 def test_bootstrap_entry_unaffected_without_override_or_for_other_user():
     glob = {"username": "root", "type": "PASSWORD", "password": "GLOBAL_OLD"}
     assert _resolve_secrets(glob, {})["_bootstrap_user_entry"]["password"] == "GLOBAL_OLD"
