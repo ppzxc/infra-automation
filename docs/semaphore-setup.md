@@ -114,7 +114,7 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
 - **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
 - **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_url`. 선택으로 `alert_webhook_token`.
-- **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 실행할 때 Extra variables `{"host_audit_mail_to": "a@example.com"}`로 덮어쓴다(값은 로그에 나오지 않는다).
+- **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 `host_audit_mail_to`로 덮어쓴다(값은 로그에 나오지 않는다). 템플릿 Survey에는 두지 않으므로 API 실행의 `environment`로 넘긴다(§5 실행 시 입력).
 
 ---
 
@@ -122,34 +122,49 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 공통 설정: Inventory `inventory/hosts.yml`, Repository `infra-automation`, Variable Group은 §4의 것, **Limit은 비움**.
 
-| 이름 | Playbook | CLI args | 실행 방식 | 대상 |
+| 이름 | Playbook | CLI args | Survey variables | 실행 방식 | 대상 |
+|---|---|---|---|---|---|
+| Host Agents — Deploy | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 |
+| Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `servers` |
+| Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
+| OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | (없음) | 수동 | localhost (OpenObserve API) |
+| Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | (없음 — 두지 않는다) | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함) |
+| Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | `target_hosts`, `host_audit_mail_enabled`, `host_audit_storage_enabled` | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
+| Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |
+
+**실행 시 입력 (Survey variables)**
+
+Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Message, 템플릿이 허용한 Prompt(Limit 등), 템플릿에 정의한 **Survey variables**만 보인다. 실행할 때 넘길 변수는 템플릿 편집 → Survey Variables에 정의한다(값은 `--extra-vars`로 전달된다).
+
+| 템플릿 | 변수 | 형식 | 기본값 | 필수 |
 |---|---|---|---|---|
-| Host Agents — Deploy | `playbooks/host_agents.yml` | (없음) | 수동 | `servers`, 한 번에 25%씩 |
-| Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | 수동 | `servers` |
-| Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
-| OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | 수동 | localhost (OpenObserve API) |
-| Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함) |
-| Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
-| Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | 수동 | localhost (Host Audit 버킷 → 메일) |
+| Deploy, Config | `target_hosts` | String | `servers`(전체) | 예 |
+| On-demand | `target_hosts` | String | (비움 = 전체) | 아니오 |
+| On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |
+| Resend | `host_audit_resend_run_id` | String | (없음) | 예 |
+| Resend | `host_audit_resend_month` | String `YYYY-MM` | (비움) | 아니오 |
+
+- Deploy·Config의 `target_hosts`는 비워 두지 않는다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 기본값이 적용되지 않고 대상 패턴이 깨진다. Host Audit은 빈 값을 전체로 처리한다.
+- Monthly에는 Survey를 두지 않는다. 정기 실행은 항상 전체 대상·보관·발송이어야 Audit Baseline이 맞다.
+- Survey에 없는 변수(아래의 `host_audit_mail_to`, `host_audit_drift_enabled`, `backup_maintenance_read_subset` 등)는 API로 실행할 때 `POST /api/project/<id>/tasks`의 `environment`(JSON 문자열)로 넘긴다. 자주 쓰게 되면 해당 템플릿 Survey에 추가한다.
 
 **Host Audit — Monthly와 On-demand** ([host_audit.md](host_audit.md), ADR-0009)
 
 - 둘은 같은 플레이북이고 실행 종류만 다르다. **Monthly의 결과만 Audit Baseline이 된다.** 다음 정기 실행이 이 결과와 비교해 신규·지속·해소·재발을 표시한다. On-demand(기본값 `on_demand`)는 보관·발송되지만 기준선이 되지 않는다.
-- `host_audit_run_kind=scheduled`는 Monthly 템플릿의 CLI args에만 고정한다. On-demand에 넣거나 Extra variables로 넘기지 않는다. 부분 대상(`target_hosts`)으로 돈 실행이 기준선이 되면 다음 정기 실행에서 나머지 호스트의 발견이 모두 '신규'로 나온다.
+- `host_audit_run_kind=scheduled`는 Monthly 템플릿의 CLI args에만 고정한다. On-demand의 CLI args·Survey에 넣지 않는다. 부분 대상(`target_hosts`)으로 돈 실행이 기준선이 되면 다음 정기 실행에서 나머지 호스트의 발견이 모두 '신규'로 나온다.
 - Monthly 템플릿을 수동 **Run**하는 것은 그 달 정기 실행이 실패했을 때 다시 돌리는 경우만이다. 그 실행도 기준선이 된다.
-- On-demand에서 쓸 수 있는 Extra variables:
-  - `{"target_hosts": "ns0266,ns0270"}`: 대상 좁히기(Inventory Hostname)
-  - `{"host_audit_mail_to": "a@example.com"}`: 이번 실행만 수신자 덮어쓰기(로그에 나오지 않는다)
-  - `{"host_audit_mail_enabled": false}`, `{"host_audit_storage_enabled": false}`: 시험 실행. 보관을 끄면 비교하지 않고 러너 로컬에만 남는다
-  - `{"host_audit_drift_enabled": false}`, `{"host_audit_packages_enabled": false}`: 해당 섹션 수집·판정을 건너뛴다(정기 실행에는 쓰지 않는다)
+- On-demand에서 쓸 수 있는 변수:
+  - Survey `target_hosts`(예: `ns0266,ns0270`): 대상 좁히기(Inventory Hostname)
+  - Survey `host_audit_mail_enabled`·`host_audit_storage_enabled`를 `false`로: 시험 실행. 보관을 끄면 비교하지 않고 러너 로컬에만 남는다
+  - API `environment`만: `{"host_audit_mail_to": "a@example.com"}` 이번 실행만 수신자 덮어쓰기(로그에 나오지 않는다), `{"host_audit_drift_enabled": false}`·`{"host_audit_packages_enabled": false}` 해당 섹션 수집·판정 건너뛰기(정기 실행에는 쓰지 않는다)
 - Host Audit은 `--check`로 돌리지 않는다. 그 자체가 읽기 전용이고, check 모드에서는 보관·발송을 하지 않는다.
 - Variable Group은 §4의 것을 그대로 쓴다. Configuration Drift가 `site.yml`·Host Agents Config를 하위 실행하므로 AppRole이 Deploy·Config와 같은 KV 경로를 읽을 수 있어야 한다(§4 표).
 
 **Host Audit 보고서 다시 보내기 (Host Audit — Resend)**
 
 - 다시 점검하지 않고, 버킷에 보관된 실행의 보고서를 같은 첨부(같은 SHA-256)로 다시 보낸다. 메일 발송이 실패했거나 받는 사람을 추가할 때 쓴다.
-- Extra variables `{"host_audit_resend_run_id": "ha-20261031T220000Z"}` — 실행 ID는 메일 제목 아래·본문 상단, 실패 메시지, Semaphore 로그(`AUD-003`)에 있다.
-- 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID면 `"host_audit_resend_month": "2026-11"`(KST 기준 실행 시작 월)을 함께 준다.
+- Survey `host_audit_resend_run_id`(예: `ha-20261031T220000Z`) — 실행 ID는 메일 제목 아래·본문 상단, 실패 메시지, Semaphore 로그(`AUD-003`)에 있다.
+- 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID면 Survey `host_audit_resend_month`에 `2026-11`(KST 기준 실행 시작 월)을 함께 준다.
 - 수신자는 지금의 OpenBao `agents/host_audit.mail_to`다(또는 `host_audit_mail_to`). 받은 보고서의 SHA-256이 보관된 요약의 값과 다르면 보내지 않는다.
 
 **CIS 감사 파일럿 템플릿 삭제**
@@ -158,14 +173,14 @@ Host Agents 3개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 **특정 호스트만 실행할 때**
 
-- 실행 시 Extra variables로 `{"target_hosts": "ns0266"}`을 넘긴다. 값은 FQDN이 아니라 Inventory Hostname이다.
+- Run 창의 Survey `target_hosts`에 `ns0266`처럼 넣는다(Deploy·Config 기본값 `servers`는 전체). 값은 FQDN이 아니라 Inventory Hostname이다. Limit 칸은 쓰지 않는다.
 - `target_hosts`는 플레이북 안에서 `servers`와 교집합을 구한다. `servers`에 없는 이름을 넣으면 오류 없이 대상 0대로 끝난다.
 - Limit을 템플릿에 고정하지 않는다. 고정해 두면 일부 호스트만 처리되고도 성공으로 표시된다. 스케줄로 도는 Repo Maintenance에서는 특히 주의한다.
 
 **미리 보기**
 
 - Config와 OpenObserve — Config는 CLI args에 `--check --diff`를 추가하면 바뀔 내용만 보여 준다. 별도 템플릿으로 두거나 실행할 때 추가한다.
-- Repo Maintenance를 수동으로 돌릴 때 쓸 수 있는 Extra variables:
+- Repo Maintenance를 수동으로 돌릴 때 쓸 수 있는 변수(Survey가 없으므로 API `environment`로 넘긴다):
   - `{"backup_maintenance_read_subset": "always"}`: 10% 데이터 읽기 검사를 강제
   - `{"backup_maintenance_read_subset": "never"}`: 10% 데이터 읽기 검사를 생략
 
