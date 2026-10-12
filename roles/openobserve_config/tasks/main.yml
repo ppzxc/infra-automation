@@ -58,7 +58,7 @@
       {{ {'org': o2c_org, 'stream': o2c_stream, 'function_name': o2c_function_name, 'pipeline_name': o2c_pipeline_name,
           'template_name': o2c_template_name, 'template_body': o2c_template_body, 'destination_name': o2c_destination_name,
           'webhook_url': o2c_kv.alert_webhook_url,
-          'webhook_headers': ({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
+          'webhook_headers': {'Content-Type': 'application/json'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
           'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
           'alerts': o2c_alerts} | o2c_desired }}
     o2c_auth_headers:
