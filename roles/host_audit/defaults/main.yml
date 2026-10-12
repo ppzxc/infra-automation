@@ -10,7 +10,8 @@ host_audit_run_kind: on_demand
 host_audit_output_root: "{{ lookup('ansible.builtin.env', 'HOST_AUDIT_OUTPUT_ROOT') | default('/tmp/host_audit', true) }}"
 
 # 점검 대상 그룹. target_hosts를 주면 이 집합과의 교집합만 점검한다.
-host_audit_scope_pattern: "servers:loadbalancers:overseer"
+# Semaphore 인벤토리의 host_audit_excluded 그룹(러너에서 접속할 수 없는 호스트 등)은 뺀다.
+host_audit_scope_pattern: "servers:loadbalancers:overseer:!host_audit_excluded"
 
 # 보고서 시각 표기 시간대.
 host_audit_timezone: Asia/Seoul

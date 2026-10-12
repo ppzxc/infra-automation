@@ -230,7 +230,7 @@ def test_collection_targets_follow_spec_and_raw_probe_is_read_only():
         included = t.get("ansible.builtin.include_tasks")
         tasks += yaml.safe_load((tasks_dir / included).read_text(encoding="utf-8")) if included else [t]
 
-    assert defaults["host_audit_scope_pattern"] == "servers:loadbalancers:overseer"
+    assert defaults["host_audit_scope_pattern"] == "servers:loadbalancers:overseer:!host_audit_excluded"
     assert defaults["host_audit_run_kind"] == "on_demand"
     collect = next(p for p in plays if p.get("hosts") == "host_audit_targets")
     assert collect["gather_facts"] is False, "CentOS 6/7 have no usable Python; collection is raw-only"

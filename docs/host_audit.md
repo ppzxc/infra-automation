@@ -12,7 +12,7 @@
   3. 호스트별 수집 (`tasks/main.yml`)
   4. 임시 키 정리 (`common/cleanup_connection.yml`)
   5. 보고서 (localhost, `tasks/report.yml`)
-- **대상**: `host_audit_scope_pattern`(`servers:loadbalancers:overseer`) ∩ `target_hosts`. Host Agents Exclusion 호스트와 CentOS 6/7 호스트도 대상이다. 네트워크 장비(`cisco_switches`)는 범위 밖이며 보고서 표지에 그렇게 적는다.
+- **대상**: `host_audit_scope_pattern`(`servers:loadbalancers:overseer:!host_audit_excluded`) ∩ `target_hosts`. Host Agents Exclusion 호스트와 CentOS 6/7 호스트도 대상이다. Semaphore 인벤토리의 `host_audit_excluded` 그룹(러너에서 접속할 수 없는 호스트 등)은 대상이 아니며 보고서에도 나오지 않는다. 네트워크 장비(`cisco_switches`)는 범위 밖이며 보고서 표지에 그렇게 적는다.
 - **읽기 전용 수집**: 대상 호스트에서는 `ansible.builtin.raw`로 POSIX sh 조회(`roles/host_audit/files/identity_probe.sh`)만 실행한다. Python·모듈·원격 임시 파일이 없고 `gather_facts: false`라 CentOS 6/7도 같은 경로로 수집한다.
 - **접속 실패**: 수집 태스크는 `ignore_unreachable: true`라 한 호스트가 실패해도 실행이 계속된다. 접속 실패는 `unreachable`, 수집 실패는 `probe_failed`로 기록된다. 접속 해석 단계에서 실패해 기록이 없는 대상은 보고서 모델이 대상 목록과 비교해 찾아낸다. 셋 모두 보고서에 '점검불가'와 이유로 나온다.
 - **보고서 모델**: `filter_plugins/host_audit.py`의 `host_audit_report_model(records, meta)` 하나가 판단·집계·라벨을 모두 정한다. 템플릿 `report.html.j2`는 모델을 그리기만 한다.
@@ -88,7 +88,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_run_kind` | `on_demand` | `scheduled`(Audit Baseline이 됨) · `on_demand`. Semaphore 템플릿에 고정 |
 | `host_audit_run_id` | `ha-<UTC 시작 시각>` | 실행 ID. 보통 지정하지 않음 |
 | `host_audit_output_root` | env `HOST_AUDIT_OUTPUT_ROOT` 또는 `/tmp/host_audit` | 러너 출력 상위 경로 |
-| `host_audit_scope_pattern` | `servers:loadbalancers:overseer` | 점검 대상 그룹 |
+| `host_audit_scope_pattern` | `servers:loadbalancers:overseer:!host_audit_excluded` | 점검 대상 그룹 |
 | `host_audit_timezone` | `Asia/Seoul` | 보고서 시각 표기 |
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
 
@@ -252,8 +252,8 @@ host_audit_asset:
 | `AUD-319` | `Decide whether the Trivy DB may be used for this run` | `ansible.builtin.set_fact` | 러너 | `host_audit_trivy_db_state` 필터 |
 | `AUD-320` | `Write the CycloneDX SBOM of each collected host` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 | `AUD-321` | `Judge each SBOM with Trivy (offline, one host at a time)` | `ansible.builtin.command` | 러너 | `changed_when: false`, 결과 파일 없으면 호스트 '점검불가' |
-| `AUD-322` | `Classify the Trivy findings of each host` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_findings` 필터 |
-| `AUD-323` | `Build the Package Vulnerability section model` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_section` 필터 |
+| `AUD-322` | `Classify the Trivy findings of each host` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_findings` 필터. 호스트별 결과는 `register`로만 모은다(리스트 누적 금지 — 메모리가 호스트 수의 제곱) |
+| `AUD-323` | `Build the Package Vulnerability section model` | `ansible.builtin.set_fact` | 러너 | AUD-322 결과를 한 번에 모아 `host_audit_package_section` 필터 |
 | `AUD-324` | `Save the Package Vulnerability section on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 
 검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).
