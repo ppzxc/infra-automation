@@ -310,7 +310,8 @@
         timeout: 5
         validate_certs: false
       register: _openbao_host_users_resp
-      loop: "{{ _normalized_admin_users }}"
+      # 부트스트랩 계정도 조회한다 — admin_users에 없는 부트스트랩 계정(예: bot)의 호스트 전용 비밀번호가 비지 않도록.
+      loop: "{{ (_normalized_admin_users + [_bootstrap_user]) | unique }}"
       ignore_errors: true
       check_mode: false
       no_log: true
