@@ -416,10 +416,14 @@ def _account_rows(accounts, allowlist, audit_account):
     return rows
 
 
-def _agents_label(agents, excluded):
+def _agents_label(agents, excluded, backup_only=False):
     if excluded:
         return '제외(Host Agents Exclusion)'
     otel, backup = agents['otelcol'], agents['backup']
+    if backup_only:  # Host Agents Backup Only: otelcol은 설치하지 않으므로 백업만 본다
+        if backup['installed'] and backup['scheduled']:
+            return '정상(백업 전용)'
+        return '미설치' if not backup['installed'] else '일부 이상'
     if otel['active'] and backup['installed'] and backup['scheduled']:
         return '정상'
     if not otel['installed'] and not backup['installed']:
@@ -432,7 +436,9 @@ def _host_section(record, eol_table, today, tz):
     declared, allowlist = _declared(record)
     os_info = record.get('os')
     inventory = record.get('inventory') or {}
-    excluded = 'host_agents_excluded' in ((record.get('declared') or {}).get('groups') or [])
+    groups = (record.get('declared') or {}).get('groups') or []
+    excluded = 'host_agents_excluded' in groups
+    backup_only = 'host_agents_backup_only' in groups
     base = {'host': host, 'declared': declared, 'eol': _eol(os_info, eol_table, today) if os_info else None,
             'collected': inventory.get('status') == 'ok', 'reason': inventory.get('reason', '')}
     unavailable = []
@@ -492,8 +498,9 @@ def _host_section(record, eol_table, today, tz):
         'privileged': [a for a in account_rows if a['privilege']],
         'not_declared': [a['name'] for a in account_rows if NOT_DECLARED in a['flags']],
         'inactive': [a['name'] for a in account_rows if INACTIVE in a['flags']],
-        'host_agents': _agents_label(inventory['host_agents'], excluded),
-        'host_agents_ok': _agents_label(inventory['host_agents'], excluded) in ('정상', '제외(Host Agents Exclusion)'),
+        'host_agents': _agents_label(inventory['host_agents'], excluded, backup_only),
+        'host_agents_ok': _agents_label(inventory['host_agents'], excluded, backup_only)
+        in ('정상', '정상(백업 전용)', '제외(Host Agents Exclusion)'),
     })
     return base, unavailable
 

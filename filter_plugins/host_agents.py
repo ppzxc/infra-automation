@@ -37,6 +37,8 @@ _MACHINE_ID = re.compile(r'^[0-9a-f]{32}$')
 _DEBIAN_LIKE = {'debian', 'ubuntu'}
 
 REQUIRED_KEYS = ('o2_ingest_token', 'rustfs_access_key', 'rustfs_secret_key', 'restic_password')
+# Required only where otelcol is installed (not on Host Agents Backup Only hosts).
+OTEL_ONLY_KEYS = ('o2_ingest_token',)
 LOG_STREAMS = ('security_logs', 'system_logs', 'app_logs')
 
 
@@ -317,7 +319,8 @@ def _dedupe(items):
 
 
 def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory_backup_paths,
-                               kv_path='hosts/<host>/agents', shared=None, service_map=None):
+                               kv_path='hosts/<host>/agents', shared=None, service_map=None,
+                               otel_enabled=True):
     """Validate the per-host agents KV and merge it with the Git standard.
 
     Returns ``{'errors': [...], ...merged inputs...}``; the merged part never
@@ -328,6 +331,8 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     Every log entry carries the ``service`` (OTel ``service.name``) it is reported under: the
     ``service_map`` entry for a standard path, the ``service`` key of an ``otel_extra_logs`` item,
     otherwise the stream name without ``_logs``.
+
+    With ``otel_enabled`` false (Host Agents Backup Only) the otelcol-only keys are not required.
     """
     kv = host_kv if isinstance(host_kv, dict) else {}
     errors = []
@@ -336,6 +341,8 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
         errors.extend(host_agents_shared_errors(secret, name))
 
     for key in REQUIRED_KEYS:
+        if key in OTEL_ONLY_KEYS and not otel_enabled:
+            continue
         if _is_blank(kv.get(key)):
             errors.append("필수 키 누락: %s (OpenBao %s)" % (key, kv_path))
 

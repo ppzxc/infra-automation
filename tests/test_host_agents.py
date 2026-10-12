@@ -110,6 +110,22 @@ def test_host_agents_playbook_structure():
     assert _role_names(agents) == ["monitoring", "backup"]
 
 
+@pytest.mark.parametrize("tasks_file", ["main.yml", "legacy.yml"])
+def test_every_otel_block_is_gated_by_enable_otelcol(tasks_file):
+    """otel 태그 블록은 모두 enable_otelcol로 막힌다 — Host Agents Backup Only 호스트에는 otelcol 단계가 하나도 돌지 않는다."""
+    tasks = yaml.safe_load((ROLE / "tasks" / tasks_file).read_text(encoding="utf-8"))
+    otel = [t for t in tasks if "otel" in (t.get("tags") or []) and "always" not in (t.get("tags") or [])]
+    assert otel
+    for t in otel:
+        when = t.get("when") or []
+        assert any("enable_otelcol" in w for w in ([when] if isinstance(when, str) else when)), t["name"]
+
+
+def test_enable_otelcol_follows_backup_only_group_membership():
+    default = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))["enable_otelcol"]
+    assert default == "{{ 'host_agents_backup_only' not in group_names }}"
+
+
 def test_shared_connection_plays_accept_connection_hosts_override():
     for name in ("resolve_connection.yml", "cleanup_connection.yml"):
         hosts = yaml.safe_load((PLAYBOOKS / "common" / name).read_text(encoding="utf-8"))[0]["hosts"]
@@ -342,6 +358,14 @@ def test_missing_required_key_is_an_error_naming_key_and_path(missing, blank):
     assert len(res["errors"]) == 1 and missing in res["errors"][0] and "hosts/h/agents" in res["errors"][0]
 
 
+def test_otelcol_only_keys_are_not_required_when_otel_is_disabled():
+    kv = {k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}
+    assert host_agents_resolve_inputs(kv, STANDARD, SECURITY, MANDATORY, "p", otel_enabled=False)["errors"] == []
+    res = host_agents_resolve_inputs(dict(kv, restic_password=""), STANDARD, SECURITY, MANDATORY, "p",
+                                     otel_enabled=False)
+    assert res["errors"] == ["필수 키 누락: restic_password (OpenBao p)"]
+
+
 def test_secrets_are_never_part_of_the_merged_result():
     res = _resolve()
     assert not any(v in json.dumps(res) for v in REQUIRED.values())
@@ -434,6 +458,8 @@ def openbao():
         "/v1/secret/data/hosts/bare/agents": _kv(REQUIRED),
         "/v1/secret/data/hosts/badexclude/agents": _kv(BAD_EXCLUDE),
         "/v1/secret/data/hosts/missing/agents": _kv(MISSING),
+        "/v1/secret/data/hosts/backuponly/agents": _kv({k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}),
+        "/v1/secret/data/hosts/notoken/agents": _kv({k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}),
         "/v1/secret/data/hosts/nokv/agents": (404, {"errors": []}),
         "/v1/secret/data/hosts/denied/agents": (403, {"errors": ["permission denied"]}),
         "/v1/secret/data/agents/openobserve": _kv(SHARED_O2),
@@ -446,7 +472,7 @@ def openbao():
 
 
 def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token="tok", extra_tasks=None,
-                     with_backup_defaults=False, environment="production"):
+                     with_backup_defaults=False, environment="production", backup_only_hosts=()):
     role_vars = {} if environment is None else {"host_agents_environment": environment}
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
@@ -464,7 +490,8 @@ def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token=
     (tmp_path / "play.yml").write_text(yaml.safe_dump([{
         "hosts": "all", "gather_facts": False, "connection": "local", "become": False,
         "vars": role_vars, "tasks": tasks + (extra_tasks or [])}]))
-    inv = {"all": {"hosts": {h: {"_vault_token": token} for h in hosts}, "vars": {"vault_addr": addr}}}
+    inv = {"all": {"hosts": {h: {"_vault_token": token} for h in hosts}, "vars": {"vault_addr": addr},
+                   "children": {"host_agents_backup_only": {"hosts": {h: {} for h in backup_only_hosts}}}}}
     (tmp_path / "inv.yml").write_text(yaml.safe_dump(inv))
     cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml"), "-e", "vault_namespace=''"]
     if check:
@@ -510,6 +537,17 @@ def test_agents_kv_resolution_under_ansible(tmp_path, openbao, check):
         "/var/log/secure", "/var/log/audit/audit.log"}
     for secret in REQUIRED.values():                          # secrets never reach the console
         assert secret not in text
+
+
+@pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
+def test_backup_only_host_does_not_need_the_otelcol_ingest_token(tmp_path, openbao, check):
+    """Host Agents Backup Only 호스트는 o2_ingest_token 없이 통과하고, 그룹 밖 호스트는 같은 KV로 실패한다."""
+    res, out = _run_input_tasks(tmp_path, ["backuponly", "notoken"], openbao, check=check,
+                                backup_only_hosts=["backuponly"])
+    text = res.stdout + res.stderr
+    assert set(out) == {"backuponly"} and res.returncode != 0
+    assert "notoken: Host Agents 입력 검증 실패" in text and "필수 키 누락: o2_ingest_token" in text
+    assert out["backuponly"]["secrets"] == {k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}
 
 
 @pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])

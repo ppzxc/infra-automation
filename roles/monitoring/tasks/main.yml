@@ -17,7 +17,9 @@
 # ==============================================================================
 - name: "Install agents and clean legacy exporter"
   tags: [agents_install, otel]
-  when: host_agents_os_path == 'modern'
+  when:
+    - host_agents_os_path == 'modern'
+    - enable_otelcol | bool
   block:
   - name: "[MON-011] Stop and disable legacy node_exporter service"
     ansible.builtin.systemd:
@@ -116,7 +118,9 @@
 
 - name: "Apply otelcol configuration"
   tags: [agents_config, otel]
-  when: host_agents_os_path == 'modern'
+  when:
+    - host_agents_os_path == 'modern'
+    - enable_otelcol | bool
   block:
   - name: "[MON-060] Assert OpenObserve endpoint is configured without a trailing slash"
     ansible.builtin.assert:
@@ -187,7 +191,9 @@
 
 - name: "Enable otelcol service"
   tags: [agents_install, otel]
-  when: host_agents_os_path == 'modern'
+  when:
+    - host_agents_os_path == 'modern'
+    - enable_otelcol | bool
   block:
   # 새 설정이 새 바이너리로 검증된 뒤(MON-004-CONF의 template validate)에만 symlink를 교체하고 핸들러가 재시작한다.
   - name: "[MON-054] Switch otelcol-contrib install symlink to the delivered version"

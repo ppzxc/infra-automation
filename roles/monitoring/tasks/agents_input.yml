@@ -69,7 +69,7 @@
            otel_system_logs, otel_security_log_paths, host_agents_backup_mandatory_paths,
            'hosts/' ~ inventory_hostname ~ '/agents',
            {'openobserve': _host_agents_kv.openobserve | default({}), 'rustfs': _host_agents_kv.rustfs | default({})},
-           otel_log_services) }}
+           otel_log_services, enable_otelcol | default(true) | bool) }}
 
 - name: "[MON-034] Assert agents inputs are valid before any change"
   ansible.builtin.assert:

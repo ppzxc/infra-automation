@@ -64,6 +64,8 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **Host Agents를 적용하지 않는 호스트**: Semaphore Static 인벤토리에서 `servers`에는 두되 `host_agents_excluded` 그룹에도 넣는다. Deploy·Config·Backup·Repo Maintenance가 모두 이 그룹을 뺀다. 템플릿의 Limit이나 `target_hosts`로 따로 빼지 않는다.
 
+**백업만 적용하는 호스트**: 로그를 다른 체계가 수집하는 호스트는 `servers`에 두고 `host_agents_backup_only` 그룹에도 넣는다(ADR-0006 §2.1). Deploy·Config·Backup이 이 호스트에는 otelcol 단계를 건너뛰고 restic·resticprofile만 적용하며, Repo Maintenance도 포함한다. OpenBao `hosts/<host>/agents`에 `o2_ingest_token`은 없어도 된다. 매일의 `job=backup` 결과는 OpenObserve로 가지 않는다. `host_agents_excluded`와 함께 넣지 않는다(제외가 우선한다).
+
 ```yaml
 all:
   children:
@@ -71,9 +73,13 @@ all:
       hosts:
         ns0266: {}
         ns0270: {}
+        ns0294: {}
     host_agents_excluded:   # Host Agents 미적용. 적용할 때 여기서 뺀다.
       hosts:
         ns0266: {}
+    host_agents_backup_only:   # otelcol 없이 백업만.
+      hosts:
+        ns0270: {}
 ```
 
 ---
