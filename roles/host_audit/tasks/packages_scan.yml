@@ -132,9 +132,13 @@
     - host_audit_trivy_db.usable
     - _record.status == 'ok'
 
+# 호스트별 결과는 register로만 모은다. set_fact로 리스트를 누적하면(list + [result]) 항목마다
+# 그때까지의 전체 리스트가 결과로 남아 메모리가 호스트 수의 제곱으로 늘고, 17대에서 1024M 러너의
+# 워커가 죽었다("A worker was found in a dead state").
 - name: "[AUD-322] Classify the Trivy findings of each host"
   ansible.builtin.set_fact:
-    _host_audit_package_results: "{{ _host_audit_package_results | default([]) + [_result] }}"
+    _host_audit_package_result: "{{ _result }}"
+  register: _host_audit_package_classified
   loop: "{{ _host_audit_package_files.files | map(attribute='path') | sort }}"
   loop_control:
     label: "{{ _record.inventory_hostname }}"
@@ -150,9 +154,14 @@
 
 - name: "[AUD-323] Build the Package Vulnerability section model"
   ansible.builtin.set_fact:
+    _host_audit_package_results: "{{ _classified }}"
     host_audit_package_section: >-
-      {{ _host_audit_package_results | default([])
+      {{ _classified
          | host_audit_package_section(host_audit_trivy_db, host_audit_trivy_version, host_audit_package_detail_limit) }}
+  vars:
+    _classified: >-
+      {{ _host_audit_package_classified.results | default([]) | selectattr('ansible_facts', 'defined')
+         | map(attribute='ansible_facts._host_audit_package_result') | list }}
 
 - name: "[AUD-324] Save the Package Vulnerability section on the runner"
   ansible.builtin.copy:

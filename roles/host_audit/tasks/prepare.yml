@@ -4,7 +4,7 @@
 # ==============================================================================
 # 실행 ID·시작 시각·출력 디렉터리를 실행당 한 번만 정하고, 점검 대상을
 # 인메모리 그룹 host_audit_targets로 고정한다. 이후 플레이는 이 그룹만 본다.
-# 대상 = host_audit_scope_pattern(servers:loadbalancers:overseer) ∩ target_hosts.
+# 대상 = host_audit_scope_pattern(servers:loadbalancers:overseer:!host_audit_excluded) ∩ target_hosts.
 # Host Agents Exclusion 호스트도 대상이다(Host Audit은 모든 관리 호스트를 점검).
 # ------------------------------------------------------------------------------
 - name: "[AUD-001] Assert Host Audit run kind is supported"

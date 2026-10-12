@@ -15,6 +15,7 @@ update the fixtures only when it still shows 0 differences. pytest itself needs 
 """
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -350,3 +351,49 @@ def test_appendix_piece_draws_per_host_counts_or_unavailable():
     assert "높음 4" in html and "CentOS용 수정본 없음 1" in html and "EOS" in html
     assert "점검불가" in piece.render(m={"package_vulnerability": s}, host="rocky9")
     assert piece.render(m={"package_vulnerability": s}, host="not-collected").strip() == ""
+
+
+def test_classify_keeps_each_hosts_result_once_instead_of_carrying_the_accumulated_list(tmp_path):
+    """AUD-322 loops over every host. Accumulating with set_fact (list + [result]) made each item's
+    result carry every earlier host's findings: O(N²) memory, and 17 hosts killed the 1024M runner
+    worker ("A worker was found in a dead state", task 265). Each item must carry only its own host."""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out = tmp_path / "run"
+    (out / "packages").mkdir(parents=True)
+    (out / "trivy").mkdir()
+    hosts = ["h1", "h2", "h3"]
+    for h in hosts:
+        record = {"inventory_hostname": h, "status": "ok", "packages": [{"name": "openssl"}],
+                  "os": {"family": "ubuntu", "major": "22", "version": "22.04", "name": "Ubuntu 22.04"}}
+        trivy = {"Metadata": {"OS": {"Family": "ubuntu", "Name": "22.04"}},
+                 "Results": [{"Vulnerabilities": [{"VulnerabilityID": "CVE-2024-%s" % h, "PkgName": "openssl",
+                                                   "InstalledVersion": "3.0.2", "FixedVersion": "3.0.3",
+                                                   "Status": "fixed", "Severity": "HIGH"}]}]}
+        (out / "packages" / ("%s.json" % h)).write_text(json.dumps(record))
+        (out / "trivy" / ("%s.json" % h)).write_text(json.dumps(trivy))
+    tasks = _tasks("packages_scan.yml")
+    classify = next(t for t in tasks if "[AUD-322]" in t["name"])
+    section = next(t for t in tasks if "[AUD-323]" in t["name"])
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+        "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_trivy_db": {"usable": True},
+                 "host_audit_trivy_version": "0.0.0", "host_audit_package_detail_limit": 300},
+        "tasks": [{"ansible.builtin.find": {"paths": str(out / "packages"), "patterns": "*.json"},
+                   "register": "_host_audit_package_files"}, classify, section,
+                  {"ansible.builtin.debug": {"var": "_host_audit_package_results | map(attribute='host') | list"}}],
+    }], allow_unicode=True))
+    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
+               ANSIBLE_CALLBACKS_ENABLED="ansible.posix.timer")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
+    plays = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
+    items = next(t for t in plays if "[AUD-322]" in t["task"]["name"])["hosts"]["localhost"]["results"]
+    for item in items:
+        own = item["item"].rsplit("/", 1)[-1][:-len(".json")]
+        carried = json.dumps(item.get("ansible_facts", {}))
+        assert [h for h in hosts if h != own and "CVE-2024-%s" % h in carried] == [], own
+    shown = plays[-1]["hosts"]["localhost"]
+    assert shown["_host_audit_package_results | map(attribute='host') | list"] == hosts
