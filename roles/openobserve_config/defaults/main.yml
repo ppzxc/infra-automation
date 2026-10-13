@@ -6,6 +6,9 @@
 #   alert_webhook_url             — 통지 대상 webhook URL (네이버웍스 봇 text API)
 #   alert_webhook_token           — (선택) webhook 인증 토큰. 헤더 이름은 alert_webhook_auth_header(기본 Authorization,
 #                                   네이버웍스 봇은 X-NANOIT-ACCESS)
+#   normal_sources                — (선택) root 로그인 정상 출발지 목록 [{address: <IP>, kind: semaphore|office}, ...] (Spec #184 / Ticket-8).
+#                                   저장소에는 주소를 두지 않는다. semaphore 종류는 어느 root 알림에도 걸리지 않고,
+#                                   office(사무실·S2S) 종류는 P3 하루 요약에만, 그 밖의 출발지는 P1에 걸린다.
 # Extra variables(-e o2_endpoint=...)가 OpenBao 값보다 우선한다.
 
 o2c_vault_validate_certs: false
@@ -35,6 +38,17 @@ o2c_ssh_fail_window_minutes: 5
 o2c_parse_error_percent: 10
 o2c_parse_error_min_lines: 20
 o2c_parse_error_window_minutes: 30
+
+# 정상 출발지(OpenBao normal_sources). 주소는 O2C-002에서 IP 문자 형식을 검증하므로 SQL에 그대로 넣는다.
+o2c_normal_sources: "{{ o2c_kv.normal_sources | default([], true) }}"
+o2c_normal_addresses: "{{ o2c_normal_sources | map(attribute='address') | list }}"
+o2c_office_addresses: "{{ o2c_normal_sources | selectattr('kind', 'equalto', 'office') | map(attribute='address') | list }}"
+# 외부 출발지 P1: 목록에 있는 모든 출발지를 뺀다. 목록이 비어 있으면 조건을 두지 않는다(모든 root 로그인이 P1).
+o2c_root_external_filter: >-
+  {{ (" AND (source_address IS NULL OR source_address NOT IN ('" ~ (o2c_normal_addresses | join("', '")) ~ "'))") if o2c_normal_addresses | length > 0 else '' }}
+# 사무실 P3: office 종류만. 목록이 비어 있으면 IN ('')라 아무것도 잡지 않는다.
+o2c_root_office_filter: >-
+  {{ "source_address IN ('" ~ (o2c_office_addresses | join("', '")) ~ "')" }}
 
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
@@ -78,21 +92,39 @@ o2c_alerts:
   - name: infra-root-login-success
     severity: "P1 긴급"
     severity_icon: "🔴"
-    title: "root 계정 원격 로그인 성공"
-    what: "root 계정으로 SSH 로그인이 성공했습니다."
+    title: "root 계정 원격 로그인 성공 (외부 출발지)"
+    what: "정상 출발지(Semaphore·사무실) 목록에 없는 출발지에서 root 계정으로 SSH 로그인이 성공했습니다."
     why: "root 직접 접속은 정책상 금지 대상(PermitRootLogin)이며 접속자 식별이 불가능합니다. 침해 또는 설정 우회일 수 있습니다(ISMS 2.5 사용자 인증)."
     action: "① 출발지와 시각을 작업 일정·작업자와 대조 ② 확인되지 않으면 해당 서버 root 비밀번호 변경·세션 종료 후 보안 담당 보고 ③ 승인된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#root-login-success"
     row_template: '• {host_name} ← {source_address} ({logins}회)'
-    description: "root SSH 로그인 성공 (1건부터 즉시) — PermitRootLogin 설정이 우회되었는지 확인"
+    description: "정상 출발지(OpenBao normal_sources) 밖의 root SSH 로그인 성공 (1건부터 즉시) — PermitRootLogin 설정이 우회되었는지 확인"
     stream: security_logs
     sql: >-
       SELECT host_name, source_address, count(*) AS logins FROM "security_logs"
-      WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root'
+      WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root'{{ o2c_root_external_filter }}
       GROUP BY host_name, source_address
     period: 5
     frequency: 1
     silence: 5
+  - name: infra-root-login-office-daily
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "사무실·S2S 출발지 root 로그인 (하루 요약)"
+    what: "사무실·S2S 출발지에서 root 계정으로 SSH 로그인이 성공했습니다. 하루에 한 번 요약해 알립니다."
+    why: "정책(PermitRootLogin)상 root 직접 접속은 금지 대상이지만 사내 출발지라 침해보다는 정책 위반·작업 습관일 가능성이 높습니다. 기록으로 남깁니다."
+    action: "① 작업자와 작업 내용을 확인 ② 일반 계정 + sudo로 전환하도록 안내 ③ 확인되지 않는 접속이면 P1 절차(root 로그인 성공)로 격상"
+    runbook: "{{ o2c_runbook_base }}#root-login-office-daily"
+    row_template: '• {host_name} ← {source_address} ({logins}회)'
+    description: "사무실·S2S 출발지(OpenBao normal_sources, kind=office)의 root SSH 로그인 성공 — 하루 1번 P3 요약(period·silence 1440)"
+    stream: security_logs
+    sql: >-
+      SELECT host_name, source_address, count(*) AS logins FROM "security_logs"
+      WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root' AND {{ o2c_root_office_filter }}
+      GROUP BY host_name, source_address
+    period: 1440
+    frequency: 1
+    silence: 1440
   - name: infra-sudo-escalation-failure
     severity: "P2 경고"
     severity_icon: "🟠"

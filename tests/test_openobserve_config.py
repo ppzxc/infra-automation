@@ -27,7 +27,7 @@ KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_
       "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
-    "infra-sudo-escalation-failure", "infra-kernel-disk-errors",
+    "infra-root-login-office-daily", "infra-sudo-escalation-failure", "infra-kernel-disk-errors",
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
 }
 SELFTEST = "infra-alert-selftest"   # 통지 경로 자가 시험 알림(Spec #184 / Ticket-2) — 검증 전용 스트림에 건다
@@ -499,6 +499,107 @@ def test_ingest_token_is_not_printed(o2):
     res = _apply(o2, "-vvv")
     assert "INGEST-TOKEN-qrs" not in res.stdout + res.stderr
     assert base64.b64encode(b"default:INGEST-TOKEN-qrs").decode() not in res.stdout + res.stderr
+
+
+# --- root 로그인 정상 출발지 (Spec #184 / Ticket-8) ---------------------------------------------------------------------
+# 정상 출발지 목록은 OpenBao(agents/openobserve)의 normal_sources에만 있다. 아래 주소는 문서용(TEST-NET-1) 가짜 값이다.
+SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP = "192.0.2.10", "192.0.2.20", "192.0.2.21"
+SOURCES = [{"address": SEMAPHORE_IP, "kind": "semaphore"}, {"address": OFFICE_IP, "kind": "office"},
+           {"address": OFFICE_S2S_IP, "kind": "office"}]
+KV_SOURCES = dict(KV, normal_sources=SOURCES)
+
+
+def _sql(o2, name):
+    return o2.store["alert"][name]["query_condition"]["sql"]
+
+
+def test_external_root_login_alert_excludes_every_normal_source_and_stays_p1_event_alert(o2):
+    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    alert = o2.store["alert"]["infra-root-login-success"]
+    sql = alert["query_condition"]["sql"]
+    for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP):
+        assert f"'{ip}'" in sql
+    assert "NOT IN" in sql and "user_name = 'root'" in sql
+    assert alert["context_attributes"]["severity"] == "P1 긴급"
+    assert alert["trigger_condition"]["threshold"] == 1 and alert["trigger_condition"]["silence"] == 5
+
+
+def test_office_root_login_alert_is_a_daily_p3_summary_of_office_sources_only(o2):
+    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    alert = o2.store["alert"]["infra-root-login-office-daily"]
+    sql = alert["query_condition"]["sql"]
+    assert f"'{OFFICE_IP}'" in sql and f"'{OFFICE_S2S_IP}'" in sql and SEMAPHORE_IP not in sql
+    assert "user_name = 'root'" in sql and "NOT IN" not in sql
+    assert alert["context_attributes"]["severity"] == "P3 주의"
+    assert alert["trigger_condition"]["period"] == 1440 and alert["trigger_condition"]["silence"] == 1440
+
+
+def test_ssh_failure_alerts_ignore_the_normal_source_list(o2):
+    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    for name in ("infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host"):
+        assert not any(ip in _sql(o2, name) for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP)), name
+
+
+def test_without_a_source_list_every_root_login_is_p1_and_the_office_alert_matches_nothing(o2):
+    assert _apply(o2).returncode == 0
+    assert "NOT IN" not in _sql(o2, "infra-root-login-success")
+    assert "IN ('')" in _sql(o2, "infra-root-login-office-daily")
+
+
+def test_changing_the_source_list_updates_only_the_root_alerts(o2):
+    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    o2.writes.clear()
+    moved = dict(KV, normal_sources=[{"address": "192.0.2.99", "kind": "office"}])
+    assert _apply(o2, kv=moved).returncode == 0
+    ids = {o2.store["alert"][n]["alert_id"] for n in ("infra-root-login-success", "infra-root-login-office-daily")}
+    assert {p.rsplit("/", 1)[1] for _, p, _ in o2.writes} == ids and all(m == "PUT" for m, _, _ in o2.writes)
+
+
+def test_source_addresses_never_reach_the_output(o2):
+    res = _apply(o2, "-vvv", kv=KV_SOURCES)
+    assert res.returncode == 0, res.stdout + res.stderr
+    for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP):
+        assert ip not in res.stdout + res.stderr
+
+
+@pytest.mark.parametrize("bad", [{"address": "1.2.3.4' OR '1'='1", "kind": "office"},
+                                 {"address": "192.0.2.5", "kind": "partner"}, {"address": "", "kind": "office"}])
+def test_invalid_source_entries_fail_before_any_request(o2, bad):
+    res = _apply(o2, kv=dict(KV, normal_sources=[bad]))
+    assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+    assert "1' OR" not in res.stdout + res.stderr
+
+
+def test_verification_places_normal_sources_in_the_synthetic_records_by_kind(o2):
+    res = _apply(o2, kv=KV_SOURCES)
+    assert res.returncode == 0, res.stdout + res.stderr
+    recs = [r for _, _, rs in o2.ingests for r in rs if r.get("user_name") == "root"]
+    by_host = {r["host_name"].rsplit("-", 1)[0]: r["source_address"] for r in recs}
+    assert by_host["verify-root-semaphore"] == SEMAPHORE_IP and by_host["verify-root-office"] == OFFICE_IP
+    assert by_host["verify-root-external"] not in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP)
+    assert not any("@" in str(r.get("source_address", "")) for r in recs)
+
+
+def test_verification_skips_kind_specific_cases_when_the_list_has_no_such_kind(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    hosts = {r["host_name"] for _, _, rs in o2.ingests for r in rs}
+    assert not any(h.startswith(("verify-root-semaphore-", "verify-root-office-")) for h in hosts)
+    assert any(h.startswith("verify-root-external-") for h in hosts)
+
+
+def test_root_fixtures_cover_semaphore_office_and_external_for_both_root_alerts():
+    cases = lambda n: {c["host"]: c["fires"] for c in FIXTURES[n]["cases"]}  # noqa: E731
+    p1, p3 = cases("infra-root-login-success"), cases("infra-root-login-office-daily")
+    assert p1["verify-root-external"] is True and p1["verify-root-semaphore"] is False and p1["verify-root-office"] is False
+    assert p3["verify-office-p3-office"] is True and p3["verify-office-p3-semaphore"] is False and p3["verify-office-p3-external"] is False
+
+
+def test_a_committed_file_never_holds_a_real_looking_internal_address():
+    """가짜 OpenObserve 테스트와 픽스처는 문서용 대역(192.0.2/198.51.100/203.0.113)만 쓴다."""
+    text = (ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8") + (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
+    for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text):
+        assert ip.startswith(("192.0.2.", "198.51.100.", "203.0.113.")), ip
 
 
 # --- 통지 경로 자가 시험 (Spec #184 / Ticket-2) -------------------------------------------------------------------------

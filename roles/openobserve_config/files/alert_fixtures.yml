@@ -43,11 +43,21 @@ infra-ssh-login-failures-per-host:
         - {repeat: 49, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.22}
 infra-root-login-success:
   cases:
-    - name: root SSH 로그인 성공
-      host: verify-root-success
+    - name: 외부 출발지 root SSH 로그인 성공
+      host: verify-root-external
       fires: true
       records:
         - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 198.51.100.7}
+    - name: Semaphore 출발지 root 로그인은 알리지 않는다 (배포 때마다 울리던 P1)
+      host: verify-root-semaphore
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@semaphore"}
+    - name: 사무실 출발지 root 로그인은 P1이 아니라 P3 요약이다
+      host: verify-root-office
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@office"}
     - name: 일반 사용자 로그인 성공
       host: verify-root-other-user
       fires: false
@@ -58,6 +68,28 @@ infra-root-login-success:
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: failure, user_name: root, source_address: 198.51.100.9}
+infra-root-login-office-daily:
+  cases:
+    - name: 사무실·S2S 출발지 root 로그인 성공
+      host: verify-office-p3-office
+      fires: true
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@office"}
+    - name: Semaphore 출발지는 어느 root 알림에도 걸리지 않는다
+      host: verify-office-p3-semaphore
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@semaphore"}
+    - name: 외부 출발지는 P3 요약이 아니라 P1이다
+      host: verify-office-p3-external
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 198.51.100.7}
+    - name: 사무실 출발지의 일반 사용자 로그인
+      host: verify-office-p3-other-user
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: deploy, source_address: "@office"}
 infra-sudo-escalation-failure:
   cases:
     - name: sudo 인증 실패
