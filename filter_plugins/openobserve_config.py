@@ -153,8 +153,92 @@ def o2c_plan_summary(plan):
     return ['%s %s %s' % (a['op'], a['kind'], a['name']) for a in plan]
 
 
+# --- 알림 검증 단계 (Spec #184 / Ticket-1) -----------------------------------------------------------------------------
+# 합성 레코드를 검증 전용 스트림(운영 스트림명 + 접미사)에 넣고, 알림 SQL의 스트림명만 바꿔 검색한 결과를 기대와 비교한다.
+# 호스트 이름에 실행 ID를 붙여 이전 실행의 잔여 데이터와 섞이지 않게 하고, 알림마다 자기 케이스의 호스트만 판정한다.
+SEARCH_PATH = '/api/{org}/_search?type=logs'
+INGEST_PATH = '/api/{org}/{stream}/_json'
+DEFAULT_ROW_KEY = 'host_name'
+
+
+def _host(case, run_id):
+    return '%s-%s' % (case['host'], run_id)
+
+
+def _verify_stream(stream, suffix):
+    return stream + suffix
+
+
+def _rewrite_sql(sql, stream, suffix):
+    quoted, target = '"%s"' % stream, '"%s"' % _verify_stream(stream, suffix)
+    if quoted not in sql:
+        raise ValueError('알림 SQL에 스트림 %s 이(가) 없어 검증 스트림으로 바꿀 수 없습니다' % quoted)
+    return sql.replace(quoted, target)
+
+
+def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3600 * 1000000):
+    """Requests of the verification step: ``{ingest: [{stream, path, records}], searches: [...]}``.
+
+    Every alert needs fixtures (a firing and a non-firing case at least); a missing one is a configuration error.
+    """
+    ingest, searches = {}, []
+    for alert in alerts:
+        name, stream = alert['name'], alert['stream']
+        spec = (fixtures or {}).get(name)
+        if not spec or not spec.get('cases'):
+            raise ValueError('알림 %s 에 검증 픽스처(files/alert_fixtures.yml)가 없습니다' % name)
+        hosts = {}
+        for case in spec['cases']:
+            host = _host(case, run_id)
+            hosts[host] = {'case': case['name'], 'fires': bool(case['fires']), 'known_failure': case.get('known_failure') or ''}
+            for rec in case['records']:
+                rec = dict(rec)
+                repeat = rec.pop('repeat', 1)
+                ingest.setdefault(stream, []).extend(dict(rec, host_name=host) for _ in range(repeat))
+        searches.append({
+            'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
+            'path': SEARCH_PATH.format(org=org), 'hosts': hosts,
+            'body': {'query': {'sql': _rewrite_sql(alert['sql'], stream, suffix), 'start_time': start_us,
+                               'end_time': start_us + window_us, 'from': 0, 'size': 1000}}})
+    return {'ingest': [{'stream': _verify_stream(s, suffix), 'path': INGEST_PATH.format(org=org, stream=_verify_stream(s, suffix)),
+                        'records': recs} for s, recs in ingest.items()],
+            'searches': searches}
+
+
+def _judge(hits, search):
+    seen = {h.get(search['row_key']) for h in (hits or []) if isinstance(h, dict)}
+    for host, exp in search['hosts'].items():
+        got = host in seen
+        if got != exp['fires']:
+            yield exp, ("알림 %s / 케이스 '%s': 발화해야 하는데 발화하지 않았습니다" % (search['alert'], exp['case']) if exp['fires']
+                        else "알림 %s / 케이스 '%s': 발화하면 안 되는데 발화했습니다" % (search['alert'], exp['case']))
+
+
+def o2c_verify_failures(hits, search):
+    """Mismatches that fail the job (cases flagged ``known_failure`` are excluded)."""
+    return [msg for exp, msg in _judge(hits, search) if not exp['known_failure']]
+
+
+def o2c_verify_known(hits, search):
+    """Mismatches on cases flagged ``known_failure`` — reported but never blocking."""
+    return ['%s [알려진 실패: %s]' % (msg, exp['known_failure']) for exp, msg in _judge(hits, search) if exp['known_failure']]
+
+
+def o2c_alert_history_errors(history, alert_names):
+    """Names of managed alerts whose most recent evaluation ended in ``error``."""
+    hits = history.get('hits', history.get('list', [])) if isinstance(history, dict) else (history or [])
+    latest = {}
+    for h in hits:
+        if isinstance(h, dict) and h.get('alert_name') in alert_names:
+            if h['alert_name'] not in latest or (h.get('timestamp') or 0) >= (latest[h['alert_name']].get('timestamp') or 0):
+                latest[h['alert_name']] = h
+    return sorted(n for n, h in latest.items() if str(h.get('status', '')).lower() == 'error')
+
+
 class FilterModule(object):
     def filters(self):
         return {'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
                 'o2c_alert_state': o2c_alert_state,
-                'o2c_read_requests': o2c_read_requests}
+                'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
+                'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
+                'o2c_alert_history_errors': o2c_alert_history_errors}
