@@ -131,9 +131,9 @@ firewall_ingress_rules: []
 
 
 # Firewalld 존별 서브넷 매핑 (internal=사내망/VPC, dmz=모니터링 수집기 IP)
+# 172.16.0.0/12는 Docker 브리지 대역(172.17~)과 겹쳐 컨테이너 트래픽이 internal 존으로 분류되므로 넣지 않는다(#179).
 internal_allowed_subnets:
   - "10.0.0.0/8"
-  - "172.16.0.0/12"
   - "192.168.0.0/16"
 
 monitoring_allowed_subnets: []
