@@ -239,6 +239,44 @@ nc -vz -w 5 <주소> <포트>
 3. ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. 이는 ns0266의 Silent Host 알림으로 잡힌다.
 
 **편입·폐기**: 대상 목록은 인벤토리에서 만들므로 호스트를 편입·폐기하면 `Host Agents — Deploy`(또는 Config)를 ns0266에 다시 반영해야 한다.
+<a id="backup-failure"></a>
+## 🟠 백업 실패 (`infra-backup-failure`)
+
+`backup_logs`에서 `job=backup`, `success=false` 이벤트가 오면 발생 즉시 P2로 한 번 알린다(Event Alert). 호스트는 `host` 필드다.
+
+**왜 중요한가**: 복구 지점이 늘지 않는다. 방치하면 26시간 뒤 백업 누락으로 이어진다.
+
+**확인**: 행의 호스트에서 `tail -1 /var/log/host-agents/backup.jsonl`의 `error`, 저장소(RustFS) 접속·자격증명·디스크 여유.
+
+**대응**: 원인을 고친 뒤 호스트에서 백업을 수동 실행해 성공을 확인한다.
+
+<a id="integrity-check-failure"></a>
+## 🟠 백업 저장소 무결성 검사 실패 (`infra-integrity-check-failure`)
+
+Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤트를 즉시 P2로 알린다(Event Alert).
+
+**왜 중요한가**: 저장소 손상 가능성이 있고, 실패한 호스트는 prune이 차단된다.
+
+**확인·대응**: Semaphore Repo Maintenance 실행 로그에서 해당 호스트의 check 오류를 보고 `restic check`로 손상 범위를 확인한다. 손상이면 복구·재초기화와 백업 재실행을 계획한다.
+
+<a id="backup-missing"></a>
+## 🟠 백업 누락 (`infra-backup-missing`)
+
+수집 로스터 호스트(Backup Only 제외, ns0266·ns0332 포함)의 마지막 성공 `job=backup`이 26시간을 넘으면 하루 1번 P2로 알린다(State Alert). 배포만 되고 한 번도 백업하지 않은 호스트도 걸린다.
+
+**확인**
+1. **같은 호스트의 Silent Host 알림이 있는지 먼저 확인한다.** 수집기가 멈췄다면 백업은 돌았어도 이벤트만 빠진 것일 수 있다.
+2. 호스트의 `/etc/cron.d/host-agents-backup`(또는 systemd timer)과 `/var/log/host-agents/backup.jsonl` 마지막 줄을 본다. 놓친 실행은 보정되지 않는다.
+3. 신규 편입 호스트면 Host Agents Deploy가 실행됐는지 확인한다.
+
+**구분**: 서버 다운은 Unreachable Host(서버 응답 없음), 수집기 중단은 Silent Host, 백업 이벤트만 없는 것이 백업 누락이다.
+
+<a id="maintenance-missing"></a>
+## 🟠 유지보수 누락 (`infra-maintenance-missing`)
+
+유지보수 로스터(Backup Only 포함) 호스트의 마지막 `command=check`가 8일을 넘으면 하루 1번 P2로 알린다(State Alert). Backup Only 호스트는 백업 이벤트를 보내지 않으므로 백업 누락이 아니라 이 알림과 무결성 검사 실패로만 감시된다.
+
+**확인·대응**: Semaphore Repo Maintenance 템플릿의 최근 실행과 스케줄, 해당 호스트가 제외·접속 실패로 건너뛰어졌는지 확인한 뒤 수동으로 Repo Maintenance를 실행한다.
 
 ---
 

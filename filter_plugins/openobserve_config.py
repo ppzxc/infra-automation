@@ -281,6 +281,21 @@ def o2c_absence_sql(hosts, stream, level):
     return ' UNION ALL '.join(_absence_branch(h, stream, level) for h in hosts)
 
 
+def o2c_missing_sql(hosts, stream, field, cond):
+    """One row per roster host without a record matching ``cond`` (e.g. no successful backup) in the alert window.
+
+    ``field`` is the stream's host column (``host`` for backup_logs, ``host_name`` elsewhere). Same UNION ALL branch shape as
+    the Silent Host SQL; an empty roster yields a branch that can never return a row.
+    """
+    if not _HOST_RE.match(field):
+        raise ValueError('SQL에 넣을 수 없는 필드 이름: %s' % field)
+    if not hosts:
+        return 'SELECT \'none\' AS %s, count(*) AS n FROM "%s" WHERE %s HAVING count(*) < 0' % (field, stream, cond)
+    return ' UNION ALL '.join(
+        'SELECT \'%s\' AS %s, count(*) AS n FROM "%s" WHERE %s = \'%s\' AND %s HAVING count(*) < 1' % (h, field, stream, field, h, cond)
+        for h in hosts)
+
+
 # --- 알림 검증 단계 (Spec #184 / Ticket-1) -----------------------------------------------------------------------------
 # 합성 레코드를 검증 전용 스트림(운영 스트림명 + 접미사)에 넣고, 알림 SQL의 스트림명만 바꿔 검색한 결과를 기대와 비교한다.
 # 호스트 이름에 실행 ID를 붙여 이전 실행의 잔여 데이터와 섞이지 않게 하고, 알림마다 자기 케이스의 호스트만 판정한다.
@@ -337,7 +352,11 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                 ts = rec.pop('ts', None)   # 합성 스크레이프 시각(시작 기준 초) — 메트릭은 _timestamp별로 묶어 판정한다
                 stamps = [{}] * repeat if ts is None else [{'_timestamp': start_us + int(t) * 1000000} for t in
                                                            (ts if isinstance(ts, list) else [ts])]
-                ingest.setdefault(stream, []).extend(dict(rec, host_name=host, **st) for st in stamps)
+                ingest.setdefault(stream, []).extend(dict(rec, **{spec.get('host_field', DEFAULT_ROW_KEY): host}, **st) for st in stamps)
+        missing = alert.get('missing')
+        if missing:
+            roster = list((rosters or {}).get(missing['roster']) or []) + sorted(hosts)
+            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'])
         if absence:
             roster = list((rosters or {}).get(absence['roster']) or []) + sorted(hosts)
             sql = o2c_absence_sql(roster, stream, absence['level'])
@@ -399,4 +418,5 @@ class FilterModule(object):
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
                 'o2c_alert_history_errors': o2c_alert_history_errors,
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
-                'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql}
+                'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
+                'o2c_missing_sql': o2c_missing_sql}

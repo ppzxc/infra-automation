@@ -495,3 +495,84 @@ infra-unreachable-host:
       fires: false
       records:
         - {ts: [-240, -180, -120, -60, 0], tcpcheck_endpoint: "192.0.2.52:22", value: 1}
+# --- 백업 알림 (Spec #184 / Ticket-5) --- backup_logs는 호스트가 host 필드다(host_field). 부재형은 케이스 호스트가 (가짜) 로스터에 들어간다.
+# ts는 검증 실행 시작 기준 초(음수 = 과거). 백업 누락 창은 26시간, 유지보수 누락 창은 8일이다.
+infra-backup-failure:
+  row_key: host
+  host_field: host
+  cases:
+    - name: 백업 실패 이벤트
+      host: verify-backup-failed
+      fires: true
+      records:
+        - {job: backup, success: false, error: "repository unreachable"}
+    - name: 백업 성공은 발화하지 않는다
+      host: verify-backup-ok
+      fires: false
+      records:
+        - {job: backup, success: true}
+    - name: 유지보수 실패는 백업 실패가 아니다
+      host: verify-backup-maint-failed
+      fires: false
+      records:
+        - {job: maintenance, command: check, success: false}
+infra-integrity-check-failure:
+  row_key: host
+  host_field: host
+  cases:
+    - name: 무결성 검사 실패 이벤트
+      host: verify-check-failed
+      fires: true
+      records:
+        - {job: maintenance, command: check, success: false}
+    - name: 무결성 검사 성공은 발화하지 않는다
+      host: verify-check-ok
+      fires: false
+      records:
+        - {job: maintenance, command: check, success: true}
+    - name: 다른 유지보수 명령(forget) 실패는 검사 실패가 아니다
+      host: verify-check-forget-failed
+      fires: false
+      records:
+        - {job: maintenance, command: forget, success: false}
+    - name: 백업 실패는 무결성 검사 실패가 아니다
+      host: verify-check-backup-failed
+      fires: false
+      records:
+        - {job: backup, success: false}
+infra-backup-missing:
+  row_key: host
+  host_field: host
+  cases:
+    - name: 가짜 로스터 호스트가 백업 이벤트를 한 번도 보내지 않았다
+      host: verify-backup-missing-never
+      fires: true
+      records: []
+    - name: 성공 백업이 없고 실패만 있으면 누락이다
+      host: verify-backup-missing-only-failed
+      fires: true
+      records:
+        - {ts: -600, job: backup, success: false}
+    - name: 최근 성공 백업이 있으면 발화하지 않는다
+      host: verify-backup-missing-fresh
+      fires: false
+      records:
+        - {ts: -600, job: backup, success: true}
+infra-maintenance-missing:
+  row_key: host
+  host_field: host
+  cases:
+    - name: 가짜 로스터 호스트에 check 기록이 한 번도 없다
+      host: verify-maint-missing-never
+      fires: true
+      records: []
+    - name: 백업 이벤트만 있고 check가 없으면 누락이다
+      host: verify-maint-missing-backup-only
+      fires: true
+      records:
+        - {ts: -600, job: backup, success: true}
+    - name: 최근 check가 있으면 발화하지 않는다
+      host: verify-maint-missing-fresh
+      fires: false
+      records:
+        - {ts: -600, job: maintenance, command: check, success: true}
