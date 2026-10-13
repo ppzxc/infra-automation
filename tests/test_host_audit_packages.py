@@ -397,3 +397,82 @@ def test_classify_keeps_each_hosts_result_once_instead_of_carrying_the_accumulat
         assert [h for h in hosts if h != own and "CVE-2024-%s" % h in carried] == [], own
     shown = plays[-1]["hosts"]["localhost"]
     assert shown["_host_audit_package_results | map(attribute='host') | list"] == hosts
+
+
+def _run_classify(tmp_path, cases):
+    """Run the real AUD-322/323 tasks. ``cases``: host -> (trivy output text or None for no file, AUD-321 rc).
+    The AUD-321 register is faked with the shape ``command`` gives per loop item (``item`` = record path, ``rc``)."""
+    out = tmp_path / "run"
+    (out / "packages").mkdir(parents=True)
+    (out / "trivy").mkdir()
+    scans = []
+    for h, (text, rc) in cases.items():
+        record = {"inventory_hostname": h, "status": "ok", "packages": [{"name": "openssl"}],
+                  "os": {"family": "ubuntu", "major": "22", "version": "22.04", "name": "Ubuntu 22.04"}}
+        path = out / "packages" / ("%s.json" % h)
+        path.write_text(json.dumps(record))
+        if text is not None:
+            (out / "trivy" / ("%s.json" % h)).write_text(text)
+        scans.append({"item": str(path), "rc": rc, "changed": False, "failed": False})
+    tasks = _tasks("packages_scan.yml")
+    classify = next(t for t in tasks if "[AUD-322]" in t["name"])
+    section = next(t for t in tasks if "[AUD-323]" in t["name"])
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+        "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_trivy_db": {"usable": True},
+                 "host_audit_trivy_version": "0.0.0", "host_audit_package_detail_limit": 300,
+                 "_host_audit_trivy_scans": {"results": scans}},
+        "tasks": [{"ansible.builtin.find": {"paths": str(out / "packages"), "patterns": "*.json"},
+                   "register": "_host_audit_package_files"}, classify, section,
+                  {"ansible.builtin.debug": {"var": "host_audit_package_section"}}],
+    }], allow_unicode=True))
+    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
+    plays = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
+    return plays[-1]["hosts"]["localhost"]["host_audit_package_section"]
+
+
+def _good_trivy(cve):
+    return json.dumps({"Metadata": {"OS": {"Family": "ubuntu", "Name": "22.04"}},
+                       "Results": [{"Vulnerabilities": [{"VulnerabilityID": cve, "PkgName": "openssl",
+                                                         "InstalledVersion": "3.0.2", "FixedVersion": "3.0.3",
+                                                         "Status": "fixed", "Severity": "HIGH"}]}]})
+
+
+def test_failed_trivy_marks_only_that_host_unavailable_with_the_cause_and_the_run_continues(tmp_path):
+    """#154: task 287 — Trivy OOM-killed on 3 hosts must not look healthy. Four failure shapes, plus healthy hosts."""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    good = _good_trivy("CVE-2024-1")
+    section = _run_classify(tmp_path, {
+        "a-ok": (good, 0),
+        "b-rc137": (good, 137),                              # rc != 0 although the JSON looks valid
+        "c-empty": ("", 0),                                  # 0-byte output
+        "d-truncated": (good[:len(good) // 2], 0),           # killed mid-write
+        "e-nofile": (None, 2),                               # no result file
+        "f-ok": (good, 0),
+    })
+    assert {h["host"]: h["inspected"] for h in section["hosts"]} == {
+        "a-ok": True, "b-rc137": False, "c-empty": False, "d-truncated": False, "e-nofile": False, "f-ok": True}
+    reasons = {u["host"]: u["reason"] for u in section["unavailable"]}
+    assert set(reasons) == {"b-rc137", "c-empty", "d-truncated", "e-nofile"}
+    assert all(u["item"] == "Package Vulnerability" and u["label"] == "점검불가" for u in section["unavailable"])
+    assert "rc=137" in reasons["b-rc137"] and "OOM-kill" in reasons["b-rc137"]
+    assert "비어" in reasons["c-empty"]
+    assert "JSON" in reasons["d-truncated"]
+    assert "rc=2" in reasons["e-nofile"]
+    assert section["total"] == 2  # the two healthy hosts are still judged
+
+
+def test_trivy_rc_decides_before_the_output_and_describes_signal_kills():
+    ok = json.loads(_good_trivy("CVE-1"))
+    rec = _record("ubuntu2204")
+    ok["Metadata"]["OS"] = {"Family": "ubuntu", "Name": rec["os"]["version"]}
+    assert host_audit_package_findings(ok, rec, None, 0)["status"] == "ok"
+    killed = host_audit_package_findings(ok, rec, None, 137)
+    assert killed["status"] == "scan_failed" and "rc=137" in killed["reason"] and "OOM-kill" in killed["reason"]
+    assert "OOM-kill" in host_audit_package_findings(None, rec, None, -9)["reason"]  # Ansible reports signal kills as -9
+    assert "OOM-kill" not in host_audit_package_findings(ok, rec, None, 1)["reason"]

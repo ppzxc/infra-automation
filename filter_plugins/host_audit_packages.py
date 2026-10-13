@@ -20,6 +20,7 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -518,11 +519,41 @@ def _classify(vuln, os_info, vault):
     return CLASS_UPDATE
 
 
-def host_audit_package_findings(trivy_result, record, vault_final=None):
+def _scan_failure(trivy_result, scan_rc):
+    """Reason a Trivy run cannot be trusted, or '' when it can (#154).
+
+    The rc of the Trivy run is checked first: a killed Trivy (137 = SIGKILL, usually the OOM killer; Ansible
+    reports a signal kill as -9) can still leave a file that parses. Then the output itself: missing,
+    empty or cut off mid-write (kill during the JSON write).
+    """
+    if scan_rc not in (None, 0):
+        reason = 'Trivy 실행 실패 (rc=%s' % scan_rc
+        if scan_rc in (137, -9):
+            reason += ', OOM-kill 추정 — 러너 메모리 확인'
+        return reason + ')'
+    if trivy_result is None:
+        return 'Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)'
+    if isinstance(trivy_result, str):
+        if not trivy_result.strip():
+            return 'Trivy 출력이 비어 있음 (rc=%s)' % ('-' if scan_rc is None else scan_rc)
+        try:
+            parsed = json.loads(trivy_result)
+        except ValueError:
+            return 'Trivy 출력 JSON이 잘렸거나 손상됨 (rc=%s)' % ('-' if scan_rc is None else scan_rc)
+        if not isinstance(parsed, dict):
+            return 'Trivy 출력 JSON이 손상됨 (rc=%s)' % ('-' if scan_rc is None else scan_rc)
+    elif not isinstance(trivy_result, dict):
+        return 'Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)'
+    return ''
+
+
+def host_audit_package_findings(trivy_result, record, vault_final=None, scan_rc=None):
     """Trivy JSON (``trivy sbom --format json``) for one host → classified host result.
 
     Fails the host (status ``scan_failed``) when Trivy did not recognise the OS the host
     reported: an unrecognised OS silently yields 0 findings (Vuls PoC #112 §SBOM 변환기 검증).
+    ``trivy_result``: parsed dict, or the raw output text (parsed here so a truncated file fails only this host),
+    or None when there is no file. ``scan_rc``: rc of the AUD-321 Trivy run for this host (None = unknown).
     ``vault_final``: {package name: final 'version-release' in the CentOS vault} for CentOS 6/7.
     """
     host = record['inventory_hostname']
@@ -541,9 +572,12 @@ def host_audit_package_findings(trivy_result, record, vault_final=None):
         result.update(status=record.get('status') or 'probe_failed',
                       reason='패키지 수집 실패 — %s' % (record.get('reason') or '-'))
         return result
-    if not isinstance(trivy_result, dict):
-        result.update(status='scan_failed', reason='Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)')
+    failure = _scan_failure(trivy_result, scan_rc)
+    if failure:
+        result.update(status='scan_failed', reason=failure)
         return result
+    if isinstance(trivy_result, str):
+        trivy_result = json.loads(trivy_result)
     meta_os = (trivy_result.get('Metadata') or {}).get('OS') or {}
     if meta_os.get('Family') != os_info.get('family') or str(meta_os.get('Name')) != str(os_info.get('version')):
         result.update(status='scan_failed',
