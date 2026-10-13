@@ -36,6 +36,20 @@ o2c_parse_error_percent: 10
 o2c_parse_error_min_lines: 20
 o2c_parse_error_window_minutes: 30
 
+# 리소스 알림(Spec #184 / Ticket-3). 제외 파일시스템 유형은 Git 기본값, /boot·/boot/efi는 감시한다.
+# 호스트·마운트 예외와 임계값 덮어쓰기는 OpenBao agents/openobserve(비어 있어도 동작):
+#   alert_resource_exclusions: [{host: ns0297, mount: /data, metric: disk(선택: disk|inode|memory)}]
+#   alert_resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
+o2c_resource_p2_threshold: 90
+o2c_resource_p1_threshold: 95
+o2c_resource_excluded_fstypes: [squashfs, iso9660, tmpfs, devtmpfs, overlay]
+o2c_resource_cfg:
+  p2: "{{ o2c_resource_p2_threshold }}"
+  p1: "{{ o2c_resource_p1_threshold }}"
+  fstypes: "{{ o2c_resource_excluded_fstypes }}"
+  exclusions: "{{ o2c_kv.alert_resource_exclusions | default([], true) }}"
+  thresholds: "{{ o2c_kv.alert_resource_thresholds | default([], true) }}"
+
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
 o2c_alerts:
@@ -168,6 +182,102 @@ o2c_alerts:
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
     silence: "{{ o2c_parse_error_window_minutes }}"
+  - name: infra-disk-usage-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "디스크 사용률 높음"
+    what: "디스크 사용률이 15분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
+    why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 서비스 장애로 이어집니다."
+    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#disk-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "디스크 사용률 15분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
+    stream: system_filesystem_usage
+    stream_type: metrics
+    sql: "{{ 'disk' | o2c_resource_sql('P2', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 1440
+  - name: infra-disk-usage-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "디스크 사용률 임계 초과"
+    what: "디스크 사용률이 15분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
+    why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
+    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#disk-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "디스크 사용률 15분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
+    stream: system_filesystem_usage
+    stream_type: metrics
+    sql: "{{ 'disk' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 60
+  - name: infra-inode-usage-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "inode 사용률 높음"
+    what: "inode 사용률이 15분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
+    why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 서비스 장애로 이어집니다."
+    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#inode-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "inode 사용률 15분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
+    stream: system_filesystem_inodes_usage
+    stream_type: metrics
+    sql: "{{ 'inode' | o2c_resource_sql('P2', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 1440
+  - name: infra-inode-usage-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "inode 사용률 임계 초과"
+    what: "inode 사용률이 15분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
+    why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
+    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#inode-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "inode 사용률 15분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
+    stream: system_filesystem_inodes_usage
+    stream_type: metrics
+    sql: "{{ 'inode' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 60
+  - name: infra-memory-usage-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "메모리 사용률 높음"
+    what: "메모리 사용률이 10분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
+    why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 OOM kill·서비스 중단로 이어집니다."
+    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#memory-usage"
+    row_template: '• {host_name}: 사용률 {usage_pct}%'
+    description: "메모리 사용률 10분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
+    stream: system_memory_usage
+    stream_type: metrics
+    sql: "{{ 'memory' | o2c_resource_sql('P2', o2c_resource_cfg) }}"
+    period: 10
+    frequency: 5
+    silence: 1440
+  - name: infra-memory-usage-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "메모리 사용률 임계 초과"
+    what: "메모리 사용률이 10분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
+    why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
+    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#memory-usage"
+    row_template: '• {host_name}: 사용률 {usage_pct}%'
+    description: "메모리 사용률 10분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
+    stream: system_memory_usage
+    stream_type: metrics
+    sql: "{{ 'memory' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
+    period: 10
+    frequency: 5
+    silence: 60
 
 # 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고
 # 알림 SQL(스트림명만 교체)을 검색해 기대와 비교한다. 운영 스트림·알림·통지 대상은 건드리지 않는다.

@@ -29,6 +29,16 @@ EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
     "infra-sudo-escalation-failure", "infra-kernel-disk-errors",
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
+    "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
+    "infra-memory-usage-p2", "infra-memory-usage-p1",
+}
+RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
+    "infra-disk-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_usage"),
+    "infra-disk-usage-p1": ("P1 긴급", 60, 15, "system_filesystem_usage"),
+    "infra-inode-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_inodes_usage"),
+    "infra-inode-usage-p1": ("P1 긴급", 60, 15, "system_filesystem_inodes_usage"),
+    "infra-memory-usage-p2": ("P2 경고", 1440, 10, "system_memory_usage"),
+    "infra-memory-usage-p1": ("P1 긴급", 60, 10, "system_memory_usage"),
 }
 
 
@@ -371,7 +381,8 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     res = _apply(o2)
     assert res.returncode == 0, res.stdout + res.stderr
     streams = {p.split("/")[3] for p, _, _ in o2.ingests}
-    assert streams == {"security_logs_alert_verify", "system_logs_alert_verify"}
+    assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
+                       "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify"}
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
@@ -455,3 +466,67 @@ def test_ingest_token_is_not_printed(o2):
     res = _apply(o2, "-vvv")
     assert "INGEST-TOKEN-qrs" not in res.stdout + res.stderr
     assert base64.b64encode(b"default:INGEST-TOKEN-qrs").decode() not in res.stdout + res.stderr
+
+
+# --- 리소스 고갈 알림 (Spec #184 / Ticket-3) ------------------------------------------------------------------------------
+
+def _sql(o2, name):
+    return o2.store["alert"][name]["query_condition"]["sql"]
+
+
+def test_resource_alerts_are_metric_state_alerts_with_grade_and_renotify_interval(o2):
+    assert _apply(o2).returncode == 0
+    for name, (sev, silence, period, stream) in RESOURCE_ALERTS.items():
+        a = o2.store["alert"][name]
+        assert a["stream_type"] == "metrics" and a["stream_name"] == stream, name
+        assert a["context_attributes"]["severity"] == sev, name
+        assert a["trigger_condition"]["silence"] == silence and a["trigger_condition"]["period"] == period, name
+        assert a["query_condition"]["type"] == "sql"
+        assert {"host_name", "usage_pct"} <= set(re.findall(r"\{(\w+)\}", a["row_template"])), name
+    assert "mountpoint" in o2.store["alert"]["infra-disk-usage-p1"]["row_template"]
+
+
+def test_existing_log_alerts_stay_logs(o2):
+    assert _apply(o2).returncode == 0
+    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS):
+        assert o2.store["alert"][name]["stream_type"] == "logs", name
+
+
+def test_resource_sql_groups_by_timestamp_uses_min_and_default_thresholds_and_fstype_exclusions(o2):
+    assert _apply(o2).returncode == 0
+    p2, p1 = _sql(o2, "infra-disk-usage-p2"), _sql(o2, "infra-disk-usage-p1")
+    for sql in (p2, p1):
+        assert "GROUP BY host_name, mountpoint, device, _timestamp" in sql and "min(" in sql
+        for t in ("squashfs", "iso9660", "tmpfs", "devtmpfs", "overlay"):
+            assert f"'{t}'" in sql
+        assert "/boot" not in sql   # /boot, /boot/efi는 제외하지 않는다
+    assert ">= 90" in p2 and "< 95" in p2 and ">= 95" in p1
+    mem = _sql(o2, "infra-memory-usage-p1")
+    assert "slab_unreclaimable" in mem and "GROUP BY host_name, _timestamp" in mem
+
+
+def test_openbao_exclusions_and_threshold_overrides_reach_the_sql(o2):
+    kv = dict(KV, alert_resource_exclusions=[{"host": "ns0297", "mount": "/data"}, {"host": "ns0288", "metric": "memory"}],
+              alert_resource_thresholds=[{"host": "ns0300", "mount": "/var", "p2": 97, "p1": 99}])
+    assert _apply(o2, kv=kv).returncode == 0
+    disk = _sql(o2, "infra-disk-usage-p2")
+    assert "NOT (host_name = 'ns0297' AND mountpoint = '/data')" in disk and "ns0288" not in disk
+    assert "ns0288" in _sql(o2, "infra-memory-usage-p2")
+    assert "host_name = 'ns0300' AND mountpoint = '/var' THEN 97" in disk
+    assert "THEN 99" in _sql(o2, "infra-disk-usage-p1") and "ns0300" not in _sql(o2, "infra-memory-usage-p1")
+
+
+def test_empty_openbao_resource_keys_work_and_second_run_changes_nothing_with_them(o2):
+    kv = dict(KV, alert_resource_exclusions=[{"host": "ns0297", "mount": "/data"}])
+    assert _apply(o2, kv=kv).returncode == 0
+    o2.writes.clear()
+    assert _apply(o2, kv=kv).returncode == 0 and o2.writes == []
+
+
+def test_resource_fixtures_cover_the_ns0334_case_squashfs_and_below_threshold():
+    cases = {c["name"]: c for spec in FIXTURES.values() for c in spec["cases"]}
+    text = yaml.safe_dump(FIXTURES)
+    assert "ns0334" in text and "squashfs" in text
+    for name in RESOURCE_ALERTS:
+        assert {c["fires"] for c in FIXTURES[name]["cases"]} == {True, False}, name
+    assert cases

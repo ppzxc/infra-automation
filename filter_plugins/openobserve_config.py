@@ -45,7 +45,7 @@ def o2c_desired(spec):
     ]
     for alert in spec['alerts']:
         out.append({'kind': 'alert', 'name': alert['name'], 'body': {
-            'name': alert['name'], 'stream_type': 'logs', 'stream_name': alert['stream'], 'is_real_time': False,
+            'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
             'query_condition': {'type': 'sql', 'sql': alert['sql']},
             'trigger_condition': {'period': alert['period'], 'operator': '>=', 'threshold': alert.get('threshold', 1),
                                   'frequency': alert['frequency'], 'frequency_type': 'minutes', 'silence': alert['silence']},
@@ -153,6 +153,70 @@ def o2c_plan_summary(plan):
     return ['%s %s %s' % (a['op'], a['kind'], a['name']) for a in plan]
 
 
+# --- 리소스 고갈 알림 SQL (Spec #184 / Ticket-3) ------------------------------------------------------------------------
+# 사용률은 _timestamp별로 묶은 뒤(구간 전체 max()는 근사, 메모리 합계는 중복 합산) 구간 최솟값으로 판정한다.
+# P2는 [p2, p1) 구간만, P1은 p1 이상만 잡아 같은 대상에 동시 통지하지 않는다.
+_RESOURCE = {
+    'disk': {'stream': 'system_filesystem_usage', 'mount': True,
+             'used': "state = 'used'", 'total': "state IN ('used', 'free')"},
+    'inode': {'stream': 'system_filesystem_inodes_usage', 'mount': True,
+              'used': "state = 'used'", 'total': "state IN ('used', 'free')"},
+    'memory': {'stream': 'system_memory_usage', 'mount': False,
+               'used': "state = 'used'", 'total': "state <> 'slab_unreclaimable'"},
+}
+
+
+def _q(value):
+    return "'%s'" % str(value).replace("'", "''")
+
+
+def _num(value):
+    value = float(value)
+    return str(int(value)) if value % 1 == 0 else str(value)
+
+
+def _applies(entry, metric):
+    return entry.get('metric') in (None, '', metric) and (not entry.get('mount') or _RESOURCE[metric]['mount'])
+
+
+def _target(entry):
+    cond = ['host_name = %s' % _q(entry['host'])]
+    if entry.get('mount'):
+        cond.append('mountpoint = %s' % _q(entry['mount']))
+    return ' AND '.join(cond)
+
+
+def _threshold(metric, key, default, overrides):
+    hits = [e for e in (overrides or []) if e.get('host') and e.get(key) is not None and _applies(e, metric)]
+    hits.sort(key=lambda e: not e.get('mount'))   # 마운트까지 지정한 항목이 먼저
+    if not hits:
+        return _num(default)
+    whens = ' '.join('WHEN %s THEN %s' % (_target(e), _num(e[key])) for e in hits)
+    return 'CASE %s ELSE %s END' % (whens, _num(default))
+
+
+def o2c_resource_sql(metric, level, cfg):
+    """SQL of a resource alert. ``cfg``: p2, p1, fstypes, exclusions, thresholds (OpenBao overrides, may be empty)."""
+    r = _RESOURCE[metric]
+    keys = ['host_name'] + (['mountpoint'] if r['mount'] else [])
+    inner_keys = keys + (['device'] if r['mount'] else [])
+    where = []
+    if r['mount']:
+        where.append('type NOT IN (%s)' % ', '.join(_q(t) for t in cfg['fstypes']))
+    for e in cfg.get('exclusions') or []:
+        if e.get('host') and _applies(e, metric):
+            where.append('NOT (%s)' % _target(e))
+    lo = _threshold(metric, 'p2', cfg['p2'], cfg.get('thresholds'))
+    hi = _threshold(metric, 'p1', cfg['p1'], cfg.get('thresholds'))
+    cond = ('min(pct) >= %s AND min(pct) < %s' % (lo, hi)) if level == 'P2' else 'min(pct) >= %s' % hi
+    return ('SELECT %s, round(min(pct), 1) AS usage_pct FROM (SELECT %s, _timestamp, '
+            'sum(CASE WHEN %s THEN value ELSE 0 END) * 100.0 / sum(CASE WHEN %s THEN value ELSE 0 END) AS pct '
+            'FROM "%s"%s GROUP BY %s, _timestamp HAVING sum(CASE WHEN %s THEN value ELSE 0 END) > 0) '
+            'GROUP BY %s HAVING %s') % (
+        ', '.join(keys), ', '.join(inner_keys), r['used'], r['total'], r['stream'],
+        (' WHERE ' + ' AND '.join(where)) if where else '', ', '.join(inner_keys), r['total'], ', '.join(keys), cond)
+
+
 # --- 알림 검증 단계 (Spec #184 / Ticket-1) -----------------------------------------------------------------------------
 # 합성 레코드를 검증 전용 스트림(운영 스트림명 + 접미사)에 넣고, 알림 SQL의 스트림명만 바꿔 검색한 결과를 기대와 비교한다.
 # 호스트 이름에 실행 ID를 붙여 이전 실행의 잔여 데이터와 섞이지 않게 하고, 알림마다 자기 케이스의 호스트만 판정한다.
@@ -194,7 +258,10 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
             for rec in case['records']:
                 rec = dict(rec)
                 repeat = rec.pop('repeat', 1)
-                ingest.setdefault(stream, []).extend(dict(rec, host_name=host) for _ in range(repeat))
+                ts = rec.pop('ts', None)   # 합성 스크레이프 시각(시작 기준 초) — 메트릭은 _timestamp별로 묶어 판정한다
+                stamps = [{}] * repeat if ts is None else [{'_timestamp': start_us + int(t) * 1000000} for t in
+                                                           (ts if isinstance(ts, list) else [ts])]
+                ingest.setdefault(stream, []).extend(dict(rec, host_name=host, **st) for st in stamps)
         searches.append({
             'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
             'path': SEARCH_PATH.format(org=org), 'hosts': hosts,
@@ -238,7 +305,7 @@ def o2c_alert_history_errors(history, alert_names):
 class FilterModule(object):
     def filters(self):
         return {'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
-                'o2c_alert_state': o2c_alert_state,
+                'o2c_alert_state': o2c_alert_state, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
                 'o2c_alert_history_errors': o2c_alert_history_errors}
