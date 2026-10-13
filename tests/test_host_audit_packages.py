@@ -453,17 +453,20 @@ def test_failed_trivy_marks_only_that_host_unavailable_with_the_cause_and_the_ru
         "c-empty": ("", 0),                                  # 0-byte output
         "d-truncated": (good[:len(good) // 2], 0),           # killed mid-write
         "e-nofile": (None, 2),                               # no result file
+        "g-nofile-rc0": (None, 0),                           # file missing although rc=0: the lookup(errors=ignore) path
         "f-ok": (good, 0),
     })
     assert {h["host"]: h["inspected"] for h in section["hosts"]} == {
-        "a-ok": True, "b-rc137": False, "c-empty": False, "d-truncated": False, "e-nofile": False, "f-ok": True}
+        "a-ok": True, "b-rc137": False, "c-empty": False, "d-truncated": False, "e-nofile": False,
+        "g-nofile-rc0": False, "f-ok": True}
     reasons = {u["host"]: u["reason"] for u in section["unavailable"]}
-    assert set(reasons) == {"b-rc137", "c-empty", "d-truncated", "e-nofile"}
+    assert set(reasons) == {"b-rc137", "c-empty", "d-truncated", "e-nofile", "g-nofile-rc0"}
     assert all(u["item"] == "Package Vulnerability" and u["label"] == "점검불가" for u in section["unavailable"])
     assert "rc=137" in reasons["b-rc137"] and "OOM-kill" in reasons["b-rc137"]
     assert "비어" in reasons["c-empty"]
     assert "JSON" in reasons["d-truncated"]
     assert "rc=2" in reasons["e-nofile"]
+    assert "결과 없음" in reasons["g-nofile-rc0"] and "rc=0" in reasons["g-nofile-rc0"]
     assert section["total"] == 2  # the two healthy hosts are still judged
 
 

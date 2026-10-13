@@ -532,7 +532,7 @@ def _scan_failure(trivy_result, scan_rc):
             reason += ', OOM-kill 추정 — 러너 메모리 확인'
         return reason + ')'
     if trivy_result is None:
-        return 'Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)'
+        return 'Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)' + ('' if scan_rc is None else ' rc=%s' % scan_rc)
     if isinstance(trivy_result, str):
         if not trivy_result.strip():
             return 'Trivy 출력이 비어 있음 (rc=%s)' % ('-' if scan_rc is None else scan_rc)
