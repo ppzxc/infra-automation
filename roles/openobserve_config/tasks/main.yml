@@ -115,7 +115,7 @@
   ansible.builtin.debug:
     msg: "{{ (o2c_plan_actions | o2c_plan_summary) if (o2c_plan_actions | length > 0) else ['OpenObserve가 이미 정의와 일치합니다 (변경 0건)'] }}"
 
-- name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update)"
+- name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)"
   ansible.builtin.uri:
     url: "{{ o2c_endpoint }}{{ item.path }}"
     method: "{{ item.method }}"

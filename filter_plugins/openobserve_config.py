@@ -24,7 +24,8 @@ ITEM_PATHS = {
 ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; the others by name
 CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
-SECRET_KINDS = ('destination',)                                # url and headers carry the webhook credentials
+MANAGED_PREFIX = 'infra-'   # 이 접두어의 알림만 이 저장소가 소유한다
+SECRET_KINDS =('destination',)                                # url and headers carry the webhook credentials
 
 
 def o2c_desired(spec):
@@ -131,6 +132,13 @@ def o2c_plan(desired, existing, org):
             if kind in INJECT_ID:
                 body = dict(body, **{ID_FIELD[kind]: key})
             plan.append(_action(kind, want, 'update', 'PUT', ITEM_PATHS[kind].format(org=org, key=key), body))
+    # 저장소 정의에서 빠지거나 이름이 바뀐 관리 대상(infra- 접두어) 알림은 서버에서 지운다. 접두어 밖 알림은 건드리지 않는다
+    wanted = {d['name'] for d in desired if d['kind'] == 'alert'}
+    for cur in _items(existing.get('alert')):
+        name = cur.get('name') or ''
+        if name.startswith(MANAGED_PREFIX) and name not in wanted and cur.get('alert_id'):
+            plan.append({'kind': 'alert', 'name': name, 'op': 'delete', 'method': 'DELETE', 'secret': False, 'body': {},
+                         'path': ITEM_PATHS['alert'].format(org=org, key=cur['alert_id'])})
     return plan
 
 

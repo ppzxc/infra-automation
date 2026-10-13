@@ -6,13 +6,13 @@
 
 ## 1. 개요 (What)
 
-- **VRL ingest function `security_semantics`** (`roles/openobserve_config/files/vrl/security_semantics.vrl`): `security_logs`의 sshd·sudo 메시지를 해석해 필드를 **추가**합니다. 원문 `body`와 기존 필드는 바꾸지 않으며, 해석할 수 없는 레코드는 그대로 통과합니다. 필드는 OTel semantic conventions를 따르고 OpenObserve가 점을 밑줄로 저장하므로 아래 이름으로 보입니다.
+- **VRL ingest function `security_semantics`** (`roles/openobserve_config/files/vrl/security_semantics.vrl`): `security_logs`의 sshd·sudo·su 메시지를 해석해 필드를 **추가**합니다. 원문 `body`와 기존 필드는 바꾸지 않으며, 해석할 수 없는 레코드는 그대로 통과합니다. 필드는 OTel semantic conventions를 따르고 OpenObserve가 점을 밑줄로 저장하므로 아래 이름으로 보입니다.
 
   | 필드 | 의미 |
   |---|---|
   | `user_name` (`user.name`) | sshd 로그인 대상 사용자 / sudo를 실행한 사용자 |
   | `source_address`, `source_port` (`source.address`, `source.port`) | sshd 원격 주소·포트 (`Invalid user` 줄에 포트가 없으면 `source_port` 없음) |
-  | `event_action` | `ssh_login` 또는 `sudo` |
+  | `event_action` | `ssh_login`, `sudo` 또는 `su` |
   | `event_outcome` | `success` 또는 `failure` |
   | `event_reason` | 실패 사유: `failed password`, `invalid user`, `NOT in sudoers`, `authentication failure` |
   | `user_effective_name`, `process_command_line` | sudo 대상 사용자(`USER=`)와 실행 명령(`COMMAND=`) — sudo 성공은 알림 없이 이 필드로 감사 기록만 남김 |
@@ -28,7 +28,7 @@
   | `infra-ssh-login-failures-per-source` | `source_address`별 5분 10회 이상 sshd 로그인 실패 |
   | `infra-ssh-login-failures-per-host` | 호스트별 5분 50회 이상 sshd 로그인 실패 |
   | `infra-root-login-success` | root SSH 로그인 성공 1건부터 |
-  | `infra-sudo-escalation-failure` | sudo `authentication failure`/`NOT in sudoers` 1건부터 (성공은 알리지 않음) |
+  | `infra-sudo-escalation-failure` | sudo/su `authentication failure`/`NOT in sudoers` 1건부터 (`event_action IN (sudo, su)`, 성공은 알리지 않음) |
   | `infra-kernel-disk-errors` | `system_logs`의 `Out of memory: Killed process`, `I/O error`, `EXT4-fs error`, `XFS ... Corruption` (severity가 아닌 패턴 기반) |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
 
@@ -74,7 +74,7 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-011` | `Read each existing alert (the list view carries no query or trigger settings)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
 | `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음) |
 | `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력) |
-| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update)` | `ansible.builtin.uri` | Controller | 계획된 차이만 전송 (`changed_when: true`, check 모드 제외, `no_log`) |
+| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)` | `ansible.builtin.uri` | Controller | 계획된 차이만 전송 — 저장소 정의에 없는 `infra-` 접두어 알림은 DELETE, 접두어 밖 알림은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
 
 ### 알림 검증 단계 (Spec #184 / Ticket-1)
 

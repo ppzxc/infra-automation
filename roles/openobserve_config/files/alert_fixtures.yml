@@ -70,6 +70,16 @@ infra-sudo-escalation-failure:
       fires: false
       records:
         - {event_action: sudo, event_outcome: success, user_name: alice}
+    - name: su 인증 실패
+      host: verify-su-failure
+      fires: true
+      records:
+        - {event_action: su, event_outcome: failure, user_name: alice}
+    - name: su 성공은 기록만 한다
+      host: verify-su-success
+      fires: false
+      records:
+        - {event_action: su, event_outcome: success, user_name: alice}
 infra-kernel-disk-errors:
   cases:
     - name: OOM kill (대문자 Out of memory)

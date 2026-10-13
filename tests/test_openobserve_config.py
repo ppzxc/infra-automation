@@ -130,6 +130,18 @@ class FakeO2:
             def do_PUT(self):  # noqa: N802
                 self._write("PUT")
 
+            def do_DELETE(self):  # noqa: N802
+                outer.auth.add(self.headers.get("Authorization"))
+                length = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(length)
+                kind, key = self._route()
+                outer.writes.append(("DELETE", self.path, None))
+                name = next((n for n, v in outer.store[kind].items() if v.get("alert_id") == key), None)
+                if name is None:
+                    return self._send(404, {})
+                del outer.store[kind][name]
+                self._send(200, {"code": 200})
+
             def log_message(self, *a):
                 pass
 
@@ -290,6 +302,32 @@ def test_check_mode_reads_and_plans_but_writes_nothing(o2):
     for expected in ("create template infra-automation-webhook", "create function security_semantics",
                      "create alert infra-root-login-success"):
         assert expected in res.stdout
+
+
+def _seed_stale(o2):
+    o2.store["alert"]["infra-old-renamed"] = {"alert_id": "stale1", "name": "infra-old-renamed", "enabled": True}
+    o2.store["alert"]["team-custom-alert"] = {"alert_id": "other1", "name": "team-custom-alert", "enabled": True}
+
+
+def test_infra_alert_missing_from_the_repository_is_deleted_and_others_are_kept(o2):
+    assert _apply(o2).returncode == 0
+    _seed_stale(o2)
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", "/api/v2/default/alerts/stale1")]
+    assert "infra-old-renamed" not in o2.store["alert"] and "team-custom-alert" in o2.store["alert"]
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0 and o2.writes == []
+
+
+def test_check_mode_lists_the_alerts_to_delete_without_writing(o2):
+    assert _apply(o2).returncode == 0
+    _seed_stale(o2)
+    o2.writes.clear()
+    res = _apply(o2, "--check")
+    assert res.returncode == 0 and o2.writes == []
+    assert "delete alert infra-old-renamed" in res.stdout and "team-custom-alert" not in res.stdout
 
 
 def test_check_mode_after_apply_reports_no_changes(o2):

@@ -101,15 +101,15 @@ sudo grep "<출발지IP>" /var/log/secure | tail
 ---
 
 <a id="sudo-escalation-failure"></a>
-## 🟠 sudo 권한 상승 실패 (`infra-sudo-escalation-failure`)
+## 🟠 sudo/su 권한 상승 실패 (`infra-sudo-escalation-failure`)
 
-**조건**: sudo 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. sudo 성공은 알리지 않고 기록만 한다.
+**조건**: sudo/su 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. 성공은 알리지 않고 기록만 한다.
 
 **왜 중요한가**: 탈취한 일반 계정으로 권한 상승을 시도하는 단계일 수 있다. 단순 비밀번호 오입력도 같은 기록을 남긴다.
 
 **확인**
 ```bash
-sudo grep -E "sudo: .*(authentication failure|NOT in sudoers)" /var/log/secure | tail
+sudo grep -E "(sudo|su)(\[[0-9]+\])?: .*(authentication failure|NOT in sudoers|FAILED SU)" /var/log/secure | tail
 last -i <사용자> | head
 ```
 
