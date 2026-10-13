@@ -303,6 +303,15 @@ def _stream_host_ids(directory, host):
     return set(f['id'] for f in result.get('findings') or [])
 
 
+def _base_file_ids(directory, host):
+    """Finding ids of one host of the previous findings.json, from the per-host file host_audit_baseline_load wrote."""
+    try:
+        with open(os.path.join(directory, '%s.json' % quote(host, safe='')), 'rb') as handle:
+            return set(json.loads(handle.read().decode('utf-8')) or [])
+    except (IOError, OSError, ValueError):
+        return set()
+
+
 def _part_host_ids(part):
     """(host, set of finding ids) of an index part, one host at a time."""
     if part.get('stream'):
@@ -370,7 +379,7 @@ def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WIND
     """Mark every finding of ``index`` against the Audit Baseline.
 
     ``baseline``: the stored findings document of the previous scheduled run, or None
-    (first run). ``pointers``: pointer documents of scheduled runs (each with
+    (first run). Its Package section may carry ``ids_dir``/``ids_hosts`` (per-host id files) instead of ``ids`` (#156). ``pointers``: pointer documents of scheduled runs (each with
     ``started_at`` and ``resolved`` keys) used for 재발 within ``window_days``.
     Returns {'status': {key: status}, 'recurring': [keys], 'counts': {section: {status: n}}, 'resolved': [keys], 'unknown': [keys],
     'asset_changes': [{'host', 'id', 'change'}]}.
@@ -395,7 +404,14 @@ def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WIND
         cur_hosts = set(part['hosts'])
         base = base_sections.get(section)
         base_hosts = set((base or {}).get('hosts') or [])
-        base_ids = (base or {}).get('ids') or {}
+        base_dir = (base or {}).get('ids_dir')  # the ids stay in per-host files (#156)
+        if base_dir:
+            base_ids = dict((h, None) for h in (base or {}).get('ids_hosts') or [])
+        else:
+            base_ids = (base or {}).get('ids') or {}
+
+        def base_for(host):
+            return _base_file_ids(base_dir, host) if base_dir else set(base_ids.get(host) or [])
         if section == SECTION_ASSET:
             cur_keys = set(_key(section, f['host'], f['id']) for f in part['findings'])
             base_keys = set(_key(section, h, i) for h, ids in base_ids.items() for i in ids)
@@ -414,7 +430,7 @@ def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WIND
         seen = set()
         for host, ids in _part_host_ids(part):
             seen.add(host)
-            base_set = set(base_ids.get(host) or [])
+            base_set = base_for(host)
             for fid in ids:
                 key = _key(section, host, fid)
                 if baseline is None:
@@ -431,9 +447,9 @@ def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WIND
                 if not part.get('stream') or track is None or key in track:
                     out['status'][key] = status
             (resolved if host in cur_hosts else unknown).extend(_key(section, host, i) for i in base_set - ids)
-        for host, base_list in base_ids.items():  # hosts the baseline had findings for and this run has none
+        for host in base_ids:  # hosts the baseline had findings for and this run has none
             if host not in seen:
-                (resolved if host in cur_hosts else unknown).extend(_key(section, host, i) for i in set(base_list))
+                (resolved if host in cur_hosts else unknown).extend(_key(section, host, i) for i in base_for(host))
         out['resolved'].extend(sorted(resolved))
         out['unknown'].extend(sorted(unknown))
     return out
