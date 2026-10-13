@@ -25,7 +25,7 @@ ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; th
 CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
 MANAGED_PREFIX = 'infra-'   # 이 접두어의 알림만 이 저장소가 소유한다
-SECRET_KINDS =('destination',)                                # url and headers carry the webhook credentials
+SECRET_KINDS = ('destination',)                               # url and headers carry the webhook credentials
 
 
 def o2c_desired(spec):

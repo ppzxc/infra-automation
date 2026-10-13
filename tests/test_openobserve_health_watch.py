@@ -154,14 +154,24 @@ def test_webhook_secret_is_not_printed(world):
     assert "SECRET-WEBHOOK-PATH" not in out and "tok-123" not in out
 
 
+@pytest.mark.parametrize("missing", ["O2_HEALTH_URL", "O2_WEBHOOK_URL"])
+def test_missing_config_fails_the_unit_and_names_the_missing_setting(world, missing):
+    lines = [l for l in world.env_file.read_text().splitlines() if not l.startswith(missing + "=")]
+    world.env_file.write_text("\n".join(lines) + "\n")
+    res = run_check(world)
+    other = ({"O2_HEALTH_URL", "O2_WEBHOOK_URL"} - {missing}).pop()
+    assert res.returncode != 0 and missing in res.stderr and other not in res.stderr
+    assert posts(world) == []
+
+
 # --- 배포 태스크 -------------------------------------------------------------------------------
 
-def _deploy(tmp_path, is_checker):
+def _deploy(tmp_path, is_checker, os_path="modern", expect_ok=True):
     t = tmp_path
     vars_ = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text())
     vars_.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text()))
     vars_.update({
-        "role_path": str(ROLE), "host_agents_os_path": "modern", "ansible_service_mgr": "sysv",
+        "role_path": str(ROLE), "host_agents_os_path": os_path, "ansible_service_mgr": "sysv",
         "host_agents_o2_health_checker": "localhost" if is_checker else "ns0266",
         "o2_endpoint": "https://o2.example:5080", "o2_ca_file": "",
         "host_agents_shared_secrets": {"openobserve": {
@@ -181,7 +191,8 @@ def _deploy(tmp_path, is_checker):
         "tasks": [{"ansible.builtin.import_tasks": str(TASKS)}]}]))
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, cwd=ROOT, timeout=120)
-    assert res.returncode == 0, res.stdout + res.stderr
+    if expect_ok:
+        assert res.returncode == 0, res.stdout + res.stderr
     return res
 
 
@@ -207,6 +218,16 @@ def test_other_hosts_get_nothing(tmp_path):
     _deploy(tmp_path, False)
     assert list((tmp_path / "sbin").iterdir()) == [] and list((tmp_path / "units").iterdir()) == []
     assert not (tmp_path / "etc").exists()
+
+
+def test_checker_host_on_a_non_modern_path_fails_loudly_instead_of_silently_skipping(tmp_path):
+    res = _deploy(tmp_path, True, os_path="legacy_el7", expect_ok=False)
+    assert res.returncode != 0 and "OpenObserve 생존 타이머" in res.stdout + res.stderr
+    assert list((tmp_path / "units").iterdir()) == []
+
+
+def test_non_checker_host_on_a_non_modern_path_is_not_an_error(tmp_path):
+    _deploy(tmp_path, False, os_path="legacy_el7")
 
 
 def test_checker_host_is_declared_in_role_defaults_and_defaults_to_ns0266():
