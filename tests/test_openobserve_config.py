@@ -31,6 +31,7 @@ EXPECTED_ALERTS = {
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
+    "infra-silent-host-p2", "infra-silent-host-p1",
 }
 RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
     "infra-disk-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_usage"),
@@ -42,6 +43,13 @@ RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, strea
 }
 SELFTEST = "infra-alert-selftest"   # 통지 경로 자가 시험 알림(Spec #184 / Ticket-2) — 검증 전용 스트림에 건다
 SELFTEST_STREAM = "alert_selftest_alert_verify"
+
+
+def _same_roster_alert(name, stored, sql):
+    """Roster (absence) SQL of the same alert — the verification adds fake hosts to the roster, so the host names differ."""
+    def is_roster(q):
+        return "AS host_name, count(*) AS n FROM" in q
+    return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql)
 
 
 class FakeO2:
@@ -77,14 +85,15 @@ class FakeO2:
 
             def _fire(self, sql, stream):
                 """What a correct engine returns: the hosts of the firing, non-known-failure cases of the alert owning this SQL."""
-                run_hosts = {r["host_name"] for _, _, recs in outer.ingests for r in recs}
+                run_ids = {r["host_name"].rsplit("-", 1)[1] for _, _, recs in outer.ingests for r in recs}
                 for alert in outer.store["alert"].values():
                     prod = alert["stream_name"]
-                    if stream != prod + "_alert_verify" or alert["query_condition"]["sql"].replace(f'"{prod}"', f'"{stream}"') != sql:
+                    stored = alert["query_condition"]["sql"].replace(f'"{prod}"', f'"{stream}"')
+                    if stream != prod + "_alert_verify" or not (stored == sql or _same_roster_alert(alert["name"], stored, sql)):
                         continue
                     cases = outer.fixtures[alert["name"]]["cases"]
-                    return [{"host_name": h} for h in sorted(run_hosts)
-                            for c in cases if h.startswith(c["host"] + "-") and c["fires"] and not c.get("known_failure")]
+                    return [{"host_name": f'{c["host"]}-{rid}'} for rid in sorted(run_ids)
+                            for c in cases if c["fires"] and not c.get("known_failure")]
                 return []
 
             def do_GET(self):  # noqa: N802
@@ -172,10 +181,10 @@ def o2():
     srv.close()
 
 
-def _apply(o2, *args, kv=None, extra=None):
+def _apply(o2, *args, kv=None, extra=None, inventory="localhost,"):
     extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, **(extra or {})}
     env = dict(os.environ, ANSIBLE_NOCOLOR="1")
-    cmd = ["ansible-playbook", "-i", "localhost,", str(PLAYBOOK), "-e", f"o2_endpoint={o2.url}",
+    cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), "-e", f"o2_endpoint={o2.url}",
            "-e", json.dumps({"o2c_kv_fixture": kv or KV, **extra}), *args]
     res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     return res
@@ -647,7 +656,7 @@ def test_resource_alerts_are_metric_state_alerts_with_grade_and_renotify_interva
 
 def test_existing_log_alerts_stay_logs(o2):
     assert _apply(o2).returncode == 0
-    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS):
+    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS) - {"infra-silent-host-p2", "infra-silent-host-p1"}:
         assert o2.store["alert"][name]["stream_type"] == "logs", name
 
 
@@ -738,3 +747,116 @@ def test_selftest_ingest_task_is_no_log_and_not_run_in_check_mode():
     tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
     t = next(t for t in tasks if t["name"].startswith("[O2C-037"))
     assert t["no_log"] is True and "not ansible_check_mode" in str(t["when"]) and "o2c_verify_notify" in str(t["when"])
+
+
+# --- Silent Host와 수집 로스터 (Spec #184 / Ticket-4) --------------------------------------------------------------------
+def _inventory(tmp_path, servers, excluded=(), backup_only=()):
+    groups = {"servers": {"hosts": {h: {} for h in servers}},
+              "host_agents_excluded": {"hosts": {h: {} for h in excluded}},
+              "host_agents_backup_only": {"hosts": {h: {} for h in backup_only}}}
+    path = tmp_path / "hosts.yml"
+    path.write_text(yaml.safe_dump({"all": {"children": groups}}), encoding="utf-8")
+    return path
+
+
+def _branch_hosts(sql):
+    return set(re.findall(r"SELECT '([^']+)' AS host_name", sql))
+
+
+SERVERS = ["ns0001", "ns0002", "ns0003", "ns0004", "ns0266", "ns0332"]
+
+
+def test_silent_host_roster_is_servers_minus_exclusion_and_backup_only_and_keeps_ns0266_and_ns0332(o2, tmp_path):
+    inv = _inventory(tmp_path, SERVERS, excluded=["ns0002"], backup_only=["ns0003"])
+    res = _apply(o2, inventory=inv)
+    assert res.returncode == 0, res.stdout + res.stderr
+    for name in ("infra-silent-host-p2", "infra-silent-host-p1"):
+        sql = _sql(o2, name)
+        assert _branch_hosts(sql) == {"ns0001", "ns0004", "ns0266", "ns0332"}, name
+        # 인라인 로스터 JOIN은 이 OpenObserve 버전에서 틀린 결과를 낸다 — UNION ALL 가지 방식만 쓴다
+        assert "UNION ALL" in sql and "HAVING" in sql and "< 1" in sql
+        for banned in ("VALUES", "unnest", "JOIN"):
+            assert banned.lower() not in sql.lower(), (name, banned)
+
+
+def test_silent_host_alerts_are_state_alerts_p2_and_p1_on_the_memory_heartbeat(o2, tmp_path):
+    assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
+    p2, p1 = o2.store["alert"]["infra-silent-host-p2"], o2.store["alert"]["infra-silent-host-p1"]
+    for a in (p2, p1):
+        assert a["stream_type"] == "metrics" and a["stream_name"] == "system_memory_usage" and a["query_condition"]["type"] == "sql"
+        assert a["trigger_condition"]["period"] == 180 and a["trigger_condition"]["frequency"] == 5
+        assert "{host_name}" in a["row_template"]
+        assert "같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인" in a["context_attributes"]["action"]
+    assert p2["context_attributes"]["severity"] == "P2 경고" and p2["trigger_condition"]["silence"] == 1440
+    assert p1["context_attributes"]["severity"] == "P1 긴급" and p1["trigger_condition"]["silence"] == 60
+    # P2는 15분 없음(3시간 미만), P1은 3시간 없음 — 같은 호스트에 동시에 오지 않는다
+    assert "900000000" in p2["query_condition"]["sql"] and "count(*) >= 1" in p2["query_condition"]["sql"]
+    assert "count(*) >= 1" not in p1["query_condition"]["sql"]
+
+
+def test_silent_host_p1_warns_that_the_log_gap_is_not_recoverable_after_about_5_hours(o2, tmp_path):
+    assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
+    ctx = o2.store["alert"]["infra-silent-host-p1"]["context_attributes"]
+    text = ctx["what"] + ctx["why"] + ctx["action"]
+    assert "약 5시간" in text and "OpenObserve로 복구되지 않음" in text
+
+
+def test_changing_the_inventory_changes_the_roster_sql_and_a_rerun_with_the_same_inventory_writes_nothing(o2, tmp_path):
+    inv = _inventory(tmp_path, SERVERS)
+    assert _apply(o2, inventory=inv).returncode == 0
+    o2.writes.clear()
+    assert _apply(o2, inventory=inv).returncode == 0 and o2.writes == []
+    inv = _inventory(tmp_path, SERVERS + ["ns0500"], excluded=["ns0001"])
+    assert _apply(o2, inventory=inv).returncode == 0
+    updated = {p for m, p, _ in o2.writes if m == "PUT"}
+    ids = {n: o2.store["alert"][n]["alert_id"] for n in ("infra-silent-host-p2", "infra-silent-host-p1")}
+    assert updated == {f"/api/v2/default/alerts/{i}" for i in ids.values()}
+    hosts = _branch_hosts(_sql(o2, "infra-silent-host-p1"))
+    assert "ns0500" in hosts and "ns0001" not in hosts
+
+
+def test_expired_planned_stop_exception_is_ignored_and_a_valid_one_removes_the_host(o2, tmp_path):
+    kv = dict(KV, silent_host_exceptions=[{"host": "ns0001", "expires": "2000-01-01"},
+                                          {"host": "ns0004", "expires": "2999-12-31"}])
+    assert _apply(o2, kv=kv, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
+    for name in ("infra-silent-host-p2", "infra-silent-host-p1"):
+        hosts = _branch_hosts(_sql(o2, name))
+        assert "ns0001" in hosts and "ns0004" not in hosts, name
+
+
+@pytest.mark.parametrize("bad", [{"host": "ns0001"}, {"host": "ns0001", "expires": "soon"},
+                                 {"expires": "2999-12-31"}, {"host": "ns0001' OR '1'='1", "expires": "2999-12-31"}])
+def test_planned_stop_exception_without_a_valid_expiry_fails_before_any_request(o2, tmp_path, bad):
+    res = _apply(o2, kv=dict(KV, silent_host_exceptions=[bad]), inventory=_inventory(tmp_path, SERVERS))
+    assert res.returncode != 0 and o2.writes == [] and o2.reads == []
+
+
+def test_verification_puts_fake_roster_hosts_into_the_searched_silent_host_sql(o2, tmp_path):
+    res = _apply(o2, inventory=_inventory(tmp_path, SERVERS))
+    assert res.returncode == 0, res.stdout + res.stderr
+    for name in ("infra-silent-host-p2", "infra-silent-host-p1"):
+        is_p2 = name.endswith("p2")
+        searched = next(sql for stream, sql in o2.searches
+                        if stream == "system_memory_usage_alert_verify" and "UNION ALL" in sql and ("count(*) >= 1" in sql) == is_p2)
+        hosts = _branch_hosts(searched)
+        for case in FIXTURES[name]["cases"]:
+            assert any(h.startswith(case["host"] + "-") for h in hosts), (name, case["host"])
+        assert "ns0266" in hosts
+
+
+def test_silent_host_fixtures_cover_p2_p1_and_present_hosts():
+    p2, p1 = FIXTURES["infra-silent-host-p2"]["cases"], FIXTURES["infra-silent-host-p1"]["cases"]
+    assert {c["fires"] for c in p2} == {True, False} and {c["fires"] for c in p1} == {True, False}
+    names = " ".join(c["name"] for c in p2 + p1)
+    assert "3시간" in names and "15분" in names
+
+
+def test_roster_follows_check_mode_without_writes(o2, tmp_path):
+    res = _apply(o2, "--check", inventory=_inventory(tmp_path, SERVERS))
+    assert res.returncode == 0 and o2.writes == [] and "infra-silent-host-p1" in res.stdout
+
+
+def test_semaphore_docs_say_the_config_template_reads_the_servers_inventory():
+    setup = (ROOT_DIR / "docs" / "semaphore-setup.md").read_text(encoding="utf-8")
+    row = next(line for line in setup.splitlines() if line.startswith("| OpenObserve — Config |"))
+    assert "servers" in row

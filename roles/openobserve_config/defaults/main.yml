@@ -9,6 +9,9 @@
 #   normal_sources                — (선택) root 로그인 정상 출발지 목록 [{address: <IP>, kind: semaphore|office}, ...] (Spec #184 / Ticket-8).
 #                                   저장소에는 주소를 두지 않는다. semaphore 종류는 어느 root 알림에도 걸리지 않고,
 #                                   office(사무실·S2S) 종류는 P3 하루 요약에만, 그 밖의 출발지는 P1에 걸린다.
+#   silent_host_exceptions        — (선택) Silent Host 계획 정지 예외 [{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason: ...}] (Spec #184 / Ticket-4).
+#                                   만료일(expires)은 필수이며 형식이 틀리면 요청 전에 실패한다. 만료일이 지난 항목은 로스터 생성 때 무시되어
+#                                   해제를 잊어도 감시가 돌아온다.
 # Extra variables(-e o2_endpoint=...)가 OpenBao 값보다 우선한다.
 
 o2c_vault_validate_certs: false
@@ -63,6 +66,25 @@ o2c_resource_cfg:
   fstypes: "{{ o2c_resource_excluded_fstypes }}"
   exclusions: "{{ o2c_kv.alert_resource_exclusions | default([], true) }}"
   thresholds: "{{ o2c_kv.alert_resource_thresholds | default([], true) }}"
+
+# 로스터(Spec #184 / Ticket-4): 실행 시 인벤토리 그룹에서 만든다(OpenObserve — Config 템플릿은 servers 인벤토리를 읽는다).
+#   수집 로스터   = servers - host_agents_excluded - host_agents_backup_only (ns0266·ns0332 포함) — Silent Host·백업 누락
+#   유지보수 로스터 = servers - host_agents_excluded — 유지보수 누락
+# 호스트 이름은 인벤토리 호스트명(관리번호)이며 수집기가 보내는 host_name과 같다. 편입·폐기 후 Config를 다시 실행하면 따라온다.
+o2c_today: "{{ now(utc=true).strftime('%Y-%m-%d') }}"
+o2c_silent_exceptions: "{{ o2c_kv.silent_host_exceptions | default([], true) }}"
+o2c_roster_collect: "{{ groups | o2c_roster('collect') }}"
+o2c_roster_maintenance: "{{ groups | o2c_roster('maintenance') }}"
+# Silent Host는 계획 정지 예외 중 만료되지 않은 호스트를 뺀 수집 로스터를 쓴다.
+o2c_roster_silent: "{{ o2c_roster_collect | o2c_without_exceptions(o2c_silent_exceptions, o2c_today) }}"
+o2c_rosters:
+  collect: "{{ o2c_roster_collect }}"
+  maintenance: "{{ o2c_roster_maintenance }}"
+  silent: "{{ o2c_roster_silent }}"
+
+# OpenObserve가 수신하는 가장 오래된 이벤트(ZO_INGEST_ALLOWED_UPTO, 기본 5시간 — 공식 문서). 2026-10 수집기 중단 사고(#161)에서 5시간보다
+# 오래된 로그가 거부된 것으로도 확인됐다. 서버 값을 바꿨다면 Silent Host P1 문구와 이 값이 어긋나므로 함께 고친다.
+o2c_ingest_allowed_hours: 5
 
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
@@ -332,6 +354,41 @@ o2c_alerts:
     stream_type: metrics
     sql: "{{ 'memory' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
     period: 10
+    frequency: 5
+    silence: 60
+
+  - name: infra-silent-host-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "Silent Host: 메트릭이 15분 넘게 끊김"
+    what: "수집 로스터의 호스트에서 메트릭 하트비트(system_memory_usage)가 15분 넘게 오지 않습니다(3시간 미만)."
+    why: "수집기가 멈췄거나 서버가 내려갔을 수 있습니다. 방치하면 3시간 뒤 P1이 되고, 약 {{ o2c_ingest_allowed_hours }}시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않습니다."
+    action: "① 같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인 — 서버·네트워크부터 복구 ② 서버가 살아 있으면 otelcol-contrib 서비스 상태 확인·재기동 ③ 며칠 이상 계획 정지하는 호스트면 OpenBao silent_host_exceptions에 만료일과 함께 등록"
+    runbook: "{{ o2c_runbook_base }}#silent-host"
+    row_template: '• {host_name}'
+    description: "수집 로스터 호스트의 system_memory_usage가 15분 없음, 3시간 미만 (State Alert, 재통지 1440분) — UNION ALL 로스터 가지 방식"
+    stream: system_memory_usage
+    stream_type: metrics
+    absence: {level: p2, roster: silent}
+    sql: "{{ o2c_roster_silent | o2c_absence_sql('system_memory_usage', 'p2') }}"
+    period: 180
+    frequency: 5
+    silence: 1440
+  - name: infra-silent-host-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "Silent Host: 메트릭이 3시간 넘게 끊김"
+    what: "수집 로스터의 호스트에서 메트릭 하트비트(system_memory_usage)가 3시간 넘게 오지 않습니다."
+    why: "약 {{ o2c_ingest_allowed_hours }}시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음 — ISMS 로그 증거가 중앙에서 영구히 빠집니다(호스트에는 원본이 남아 있습니다)."
+    action: "① 같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인 — 서버·네트워크부터 복구 ② 서버가 살아 있으면 otelcol-contrib 서비스 상태 확인·재기동 ③ 수집이 재개되면 끊긴 구간 로그가 5시간 한도 안에 들어오는지 확인하고, 넘었다면 호스트 원본 로그를 보존"
+    runbook: "{{ o2c_runbook_base }}#silent-host"
+    row_template: '• {host_name}'
+    description: "수집 로스터 호스트의 system_memory_usage가 3시간 없음 (State Alert, 재통지 60분) — UNION ALL 로스터 가지 방식"
+    stream: system_memory_usage
+    stream_type: metrics
+    absence: {level: p1, roster: silent}
+    sql: "{{ o2c_roster_silent | o2c_absence_sql('system_memory_usage', 'p1') }}"
+    period: 180
     frequency: 5
     silence: 60
 

@@ -430,3 +430,48 @@ infra-memory-usage-p1:
         - {ts: [0, 60, 120], state: free, value: 300}
         - {ts: 180, state: used, value: 5000}
         - {ts: 180, state: free, value: 5000}
+
+# --- Silent Host (Spec #184 / Ticket-4) --- 부재형 알림: 모든 케이스의 호스트가 (가짜) 로스터에 들어가고, records가 비면 데이터가 없는 호스트다.
+# ts는 검증 실행 시작(약 5분 전) 기준 초다. 음수는 더 과거 — 최근 15분은 ts > -600, 3시간 창은 ts > -10500 부근이다.
+infra-silent-host-p2:
+  cases:
+    - name: 하트비트가 15분 넘게 끊겼지만 3시간 미만이면 P2
+      host: verify-silent-p2-gap
+      fires: true
+      records:
+        - {ts: [-3600, -3540, -3480], state: used, value: 1}
+    - name: 하트비트가 최근 15분 안에 오면 발화하지 않는다
+      host: verify-silent-p2-alive
+      fires: false
+      records:
+        - {ts: [-3600, 0, 60], state: used, value: 1}
+    - name: 3시간 넘게 끊겼으면 P1이라 P2에 중복 통지하지 않는다
+      host: verify-silent-p2-long
+      fires: false
+      records:
+        - {ts: [-12000], state: used, value: 1}
+    - name: 데이터가 한 번도 없는 호스트는 P1 몫이다
+      host: verify-silent-p2-never
+      fires: false
+      records: []
+infra-silent-host-p1:
+  cases:
+    - name: 3시간 넘게 하트비트가 없으면 P1 (마지막 데이터 3시간 25분 전)
+      host: verify-silent-p1-long
+      fires: true
+      records:
+        - {ts: [-12000], state: used, value: 1}
+    - name: 데이터가 한 번도 없는 호스트도 P1
+      host: verify-silent-p1-never
+      fires: true
+      records: []
+    - name: 15분만 끊긴 호스트는 P2라 P1에 통지하지 않는다
+      host: verify-silent-p1-gap
+      fires: false
+      records:
+        - {ts: [-3600, -3540], state: used, value: 1}
+    - name: 하트비트가 계속 오는 호스트는 발화하지 않는다
+      host: verify-silent-p1-alive
+      fires: false
+      records:
+        - {ts: [0, 60, 120], state: used, value: 1}

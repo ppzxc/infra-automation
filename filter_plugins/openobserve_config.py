@@ -225,6 +225,62 @@ def o2c_resource_sql(metric, level, cfg):
         (' WHERE ' + ' AND '.join(where)) if where else '', ', '.join(inner_keys), r['total'], ', '.join(keys), cond)
 
 
+# --- 로스터와 부재 감지 (Spec #184 / Ticket-4) --------------------------------------------------------------------------
+# 로스터는 실행 시 인벤토리 그룹에서 만든다. 부재 감지는 호스트마다 `HAVING count(*) < 1` 가지를 UNION ALL로 이은 SQL이다
+# (인라인 VALUES/unnest JOIN은 이 OpenObserve 버전에서 틀린 결과를 낸다 — docs/research 참고).
+import re as _re
+_HOST_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+_DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
+SILENT_RECENT_US = 15 * 60 * 1000000   # P2: 최근 15분 없음
+
+
+def _group(groups, name):
+    return set((groups or {}).get(name) or [])
+
+
+def o2c_roster(groups, kind):
+    """Inventory hostnames of a roster. ``collect``: servers - Exclusion - Backup Only. ``maintenance``: servers - Exclusion."""
+    if kind not in ('collect', 'maintenance'):
+        raise ValueError('알 수 없는 로스터 종류: %s' % kind)
+    hosts = _group(groups, 'servers') - _group(groups, 'host_agents_excluded')
+    if kind == 'collect':
+        hosts -= _group(groups, 'host_agents_backup_only')
+    bad = sorted(h for h in hosts if not _HOST_RE.match(str(h)))
+    if bad:
+        raise ValueError('SQL에 넣을 수 없는 인벤토리 호스트 이름: %s' % ', '.join(bad))
+    return sorted(hosts)
+
+
+def o2c_valid_exceptions(exceptions):
+    """True when every planned-stop exception has a safe ``host`` and a mandatory ``YYYY-MM-DD`` ``expires``."""
+    return all(isinstance(e, dict) and _HOST_RE.match(str(e.get('host') or '')) and _DATE_RE.match(str(e.get('expires') or ''))
+               for e in exceptions or [])
+
+
+def o2c_without_exceptions(roster, exceptions, today):
+    """Roster minus the hosts of planned-stop exceptions that have not expired (``expires`` >= ``today``); expired ones are ignored."""
+    stopped = {e['host'] for e in exceptions or [] if str(e['expires']) >= str(today)}
+    return [h for h in roster if h not in stopped]
+
+
+def _absence_branch(host, stream, level):
+    head = 'SELECT \'%s\' AS host_name, count(*) AS n FROM "%s" WHERE host_name = \'%s\' HAVING ' % (host, stream, host)
+    if level == 'p1':   # 조회 구간(3시간) 전체에 없음
+        return head + 'count(*) < 1'
+    # p2: 조회 구간에는 있었지만(P1 대상 아님) 최근 15분은 없음
+    return head + ('count(*) >= 1 AND sum(CASE WHEN _timestamp >= to_unixtime(now()) * 1000000 - %d THEN 1 ELSE 0 END) < 1'
+                   % SILENT_RECENT_US)
+
+
+def o2c_absence_sql(hosts, stream, level):
+    """One row per roster host that has no data. An empty roster yields a branch that can never return a row."""
+    if level not in ('p1', 'p2'):
+        raise ValueError('알 수 없는 등급: %s' % level)
+    if not hosts:
+        return 'SELECT \'none\' AS host_name, count(*) AS n FROM "%s" HAVING count(*) < 0' % stream
+    return ' UNION ALL '.join(_absence_branch(h, stream, level) for h in hosts)
+
+
 # --- 알림 검증 단계 (Spec #184 / Ticket-1) -----------------------------------------------------------------------------
 # 합성 레코드를 검증 전용 스트림(운영 스트림명 + 접미사)에 넣고, 알림 SQL의 스트림명만 바꿔 검색한 결과를 기대와 비교한다.
 # 호스트 이름에 실행 ID를 붙여 이전 실행의 잔여 데이터와 섞이지 않게 하고, 알림마다 자기 케이스의 호스트만 판정한다.
@@ -248,12 +304,14 @@ def _rewrite_sql(sql, stream, suffix):
     return sql.replace(quoted, target)
 
 
-def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3600 * 1000000, sources=None):
+def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3600 * 1000000, sources=None, rosters=None):
     """Requests of the verification step: ``{ingest: [{stream, path, records}], searches: [...]}``.
 
     Every alert needs fixtures (a firing and a non-firing case at least); a missing one is a configuration error.
     A record's ``source_address`` may be ``@<kind>`` (e.g. ``@semaphore``): it resolves to the first normal source of that
     kind in ``sources`` (OpenBao, never committed). A case with an unresolvable placeholder is skipped.
+    An alert with ``absence: {level, roster}`` gets its SQL rebuilt from ``rosters[roster]`` plus the fake host of every case,
+    so "no data" is verified against hosts that really are on the roster. A case may have no records at all.
     """
     by_kind = {}
     for src in sources or []:
@@ -265,6 +323,8 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
         if not spec or not spec.get('cases'):
             raise ValueError('알림 %s 에 검증 픽스처(files/alert_fixtures.yml)가 없습니다' % name)
         hosts = {}
+        absence = alert.get('absence')
+        sql = alert['sql']
         for case in spec['cases']:
             records = [_resolve(r, by_kind) for r in case['records']]
             if any(r is None for r in records):
@@ -278,10 +338,14 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                 stamps = [{}] * repeat if ts is None else [{'_timestamp': start_us + int(t) * 1000000} for t in
                                                            (ts if isinstance(ts, list) else [ts])]
                 ingest.setdefault(stream, []).extend(dict(rec, host_name=host, **st) for st in stamps)
+        if absence:
+            roster = list((rosters or {}).get(absence['roster']) or []) + sorted(hosts)
+            sql = o2c_absence_sql(roster, stream, absence['level'])
+        period_us = int(alert.get('period', 0)) * 60 * 1000000   # 알림의 조회 구간만큼 거슬러 올라가 검색한다
         searches.append({
             'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
             'path': SEARCH_PATH.format(org=org), 'hosts': hosts,
-            'body': {'query': {'sql': _rewrite_sql(alert['sql'], stream, suffix), 'start_time': start_us,
+            'body': {'query': {'sql': _rewrite_sql(sql, stream, suffix), 'start_time': start_us - period_us,
                                'end_time': start_us + window_us, 'from': 0, 'size': 1000}}})
     return {'ingest': [{'stream': _verify_stream(s, suffix), 'path': INGEST_PATH.format(org=org, stream=_verify_stream(s, suffix)),
                         'records': recs} for s, recs in ingest.items()],
@@ -333,4 +397,6 @@ class FilterModule(object):
                 'o2c_alert_state': o2c_alert_state, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
-                'o2c_alert_history_errors': o2c_alert_history_errors}
+                'o2c_alert_history_errors': o2c_alert_history_errors,
+                'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
+                'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql}
