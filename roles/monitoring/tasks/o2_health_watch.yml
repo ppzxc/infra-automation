@@ -4,6 +4,17 @@
 # ==============================================================================
 # OpenObserve 헬스(/healthz)가 실패하면 OpenObserve를 거치지 않고 네이버웍스 webhook으로 직접 P1을 보낸다.
 # webhook 값은 OpenBao agents/openobserve(alert_webhook_url/_token/_auth_header)를 그대로 쓴다.
+- name: "[MON-219] Assert the checker host uses the modern path so the health timer is not silently skipped"
+  ansible.builtin.assert:
+    that:
+      - host_agents_os_path == 'modern'
+    fail_msg: >-
+      {{ inventory_hostname }}: 검사하는 쪽 호스트(host_agents_o2_health_checker)는 modern 경로여야 합니다
+      (현재 {{ host_agents_os_path }}). 건너뛰면 OpenObserve 생존 타이머(OpenObserve 응답 없음 P1 직접 통지)가
+      조용히 빠지므로 중단합니다. legacy 호스트는 검사하는 쪽으로 지정할 수 없습니다.
+    quiet: true
+  when: inventory_hostname == host_agents_o2_health_checker
+
 - name: "Deploy the OpenObserve health timer on the checker host only"
   when:
     - inventory_hostname == host_agents_o2_health_checker

@@ -15,8 +15,13 @@ STATE_DIR="${O2_HEALTH_STATE_DIR:-/var/lib/openobserve-health}"
 RENOTIFY_MIN="${O2_HEALTH_RENOTIFY_MINUTES:-60}"
 MARKER="$STATE_DIR/notified"
 
-if [ -z "$HEALTH_URL" ] || [ -z "${O2_WEBHOOK_URL:-}" ]; then
-  echo "openobserve-health: O2_HEALTH_URL 또는 O2_WEBHOOK_URL 설정이 없습니다" >&2
+# 설정 누락은 조용히 넘기지 않는다: 어느 값이 없는지 stderr(journal)에 남기고 0이 아닌 종료코드로
+# systemd 유닛을 failed로 만든다(생존 확인이 꺼진 채 방치되지 않게).
+missing=()
+[ -z "$HEALTH_URL" ] && missing+=(O2_HEALTH_URL)
+[ -z "${O2_WEBHOOK_URL:-}" ] && missing+=(O2_WEBHOOK_URL)
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "openobserve-health: 설정 누락 (${missing[*]}) — $ENV_FILE 를 확인하세요. 생존 확인이 동작하지 않습니다" >&2
   exit 2
 fi
 
