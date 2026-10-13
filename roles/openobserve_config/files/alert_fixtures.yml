@@ -476,6 +476,25 @@ infra-silent-host-p1:
       records:
         - {ts: [0, 60, 120], state: used, value: 1}
 
+# --- 서버 도달성 (Spec #184 / Ticket-6, ADR-0010) --- tcpcheck.status는 60초마다 1(접속 성공)/0(실패). 검사하는 쪽은 host_name, 대상은 tcpcheck_endpoint.
+infra-unreachable-host:
+  cases:
+    - name: status 0이 5분 연속이면 발화
+      host: verify-unreach-down
+      fires: true
+      records:
+        - {ts: [-240, -180, -120, -60, 0], tcpcheck_endpoint: "192.0.2.50:22", value: 0}
+    - name: 중간에 1이 섞이면 지속이 아니라 발화하지 않는다
+      host: verify-unreach-flap
+      fires: false
+      records:
+        - {ts: [-240, -180, -60, 0], tcpcheck_endpoint: "192.0.2.51:22", value: 0}
+        - {ts: -120, tcpcheck_endpoint: "192.0.2.51:22", value: 1}
+    - name: 접속이 계속 되면 발화하지 않는다
+      host: verify-unreach-up
+      fires: false
+      records:
+        - {ts: [-240, -180, -120, -60, 0], tcpcheck_endpoint: "192.0.2.52:22", value: 1}
 # --- 백업 알림 (Spec #184 / Ticket-5) --- backup_logs는 호스트가 host 필드다(host_field). 부재형은 케이스 호스트가 (가짜) 로스터에 들어간다.
 # ts는 검증 실행 시작 기준 초(음수 = 과거). 백업 누락 창은 26시간, 유지보수 누락 창은 8일이다.
 infra-backup-failure:

@@ -214,6 +214,31 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 
 ---
 
+<a id="unreachable-host"></a>
+## 🔴 서버 응답 없음 — Unreachable Host (`infra-unreachable-host`)
+
+Semaphore 호스트(ns0266)의 수집기가 `servers` 전체(Host Agents Backup Only 포함)의 SSH 포트에 60초마다 접속을 시도하고, `tcpcheck.status`가 5분 연속 0(접속 실패)이면 P1이다. 통지 행에 대상 `<주소>:<포트>`가 나온다. P1이라 해소될 때까지 60분마다 다시 온다.
+
+**왜 중요한가**: 서버·네트워크가 내려갔을 가능성이 크다. 접속이 된다고 OS가 건강하다는 뜻은 아니며 이 알림은 도달성만 본다.
+
+**Silent Host와의 구분**
+| 알림 | 의미 | 보는 곳 |
+|---|---|---|
+| 서버 응답 없음 | 서버의 SSH 포트에 접속이 안 됨(서버·네트워크 다운) | ns0266이 외부에서 확인 |
+| Silent Host | 서버가 보내던 메트릭 하트비트가 끊김(수집기 중단 또는 서버 다운) | 서버 안의 수집기가 보냄 |
+
+서버가 다운이면 두 알림이 같은 호스트에 함께 올 수 있다(수집 로스터 호스트). 이때는 서버 응답 없음이 원인이므로 서버·네트워크부터 복구하고, 복구되면 수집기도 돌아와 Silent Host가 멈춘다. Backup Only 호스트는 로그를 보내지 않아 Silent Host 대상이 아니며 이 알림으로만 감시된다. 서버 응답 없음 없이 Silent Host만 오면 서버는 살아 있고 수집기만 멈춘 것이다.
+
+**확인**
+```bash
+# ns0266에서 해당 주소·포트로 직접
+nc -vz -w 5 <주소> <포트>
+```
+1. 접속이 안 되면 서버 전원·콘솔·네트워크 경로를 확인한다. 서버가 계획 정지라면 그대로 둔다(정지 중에는 계속 온다).
+2. 접속이 되는데 알림이 온다면 ns0266 수집기(`otelcol-contrib`) 상태, ns0266에서 대상까지의 방화벽 경로, 인벤토리의 `ansible_port`가 실제 SSH 포트와 같은지 본다.
+3. ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. 이는 ns0266의 Silent Host 알림으로 잡힌다.
+
+**편입·폐기**: 대상 목록은 인벤토리에서 만들므로 호스트를 편입·폐기하면 `Host Agents — Deploy`(또는 Config)를 ns0266에 다시 반영해야 한다.
 <a id="backup-failure"></a>
 ## 🟠 백업 실패 (`infra-backup-failure`)
 

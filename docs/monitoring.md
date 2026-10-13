@@ -98,7 +98,7 @@ SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(Cen
 
 ## 3-3. 수집 설정 (`otelcol-contrib.yaml.j2`, `MON-060~065`)
 
-- **수신**: 스트림별 `filelog/<stream>`(`start_at: end`, `storage: file_storage`, `log_type` 속성, 본문 원문 유지, 위 Envelope Parsing으로 필드만 추가) + `hostmetrics`(60s, 8 스크레이퍼). journald는 `/usr/sbin/rsyslogd`가 없는 호스트에서만, `docker_stats`는 `otel_docker_metrics: true`인 호스트에서만, 로컬 OTLP 수신기는 `otel_otlp_enabled: true`일 때만 추가됩니다(기본 off).
+- **수신**: 스트림별 `filelog/<stream>`(`start_at: end`, `storage: file_storage`, `log_type` 속성, 본문 원문 유지, 위 Envelope Parsing으로 필드만 추가) + `hostmetrics`(60s, 8 스크레이퍼). journald는 `/usr/sbin/rsyslogd`가 없는 호스트에서만, `docker_stats`는 `otel_docker_metrics: true`인 호스트에서만, 로컬 OTLP 수신기는 `otel_otlp_enabled: true`일 때만 추가됩니다(기본 off). `tcp_check`(서버 도달성, ADR-0010)는 검사하는 쪽 호스트(`host_agents_o2_health_checker`, 기본 ns0266)에만 붙어 `servers` 전체(Backup Only 포함)의 `<ansible_host>:<ansible_port>`를 60초마다 확인하고 별도 `metrics/tcpcheck` 파이프라인으로 보냅니다. contrib 0.161.0 행에 포함되며(legacy_el6의 0.119.0에는 없음) 편입·폐기 후에는 검사하는 쪽에 설정을 다시 반영해야 합니다.
 - **Envelope Parsing (ADR-0008, `MON-004`/`MON-207`/`MON-025`)**: 수신 본문(원문)은 바이트 단위로 그대로 두고, 파일별 `if:` 조건 operator가 포맷이 정한 필드만 `Timestamp`·`attributes`·`severity`에 붙입니다(수신기 ID는 그대로). 포맷 표는 `vars/main.yml`의 `otel_log_formats`입니다.
   - syslog 계열(`messages`, `syslog`, `secure`, `auth.log`, `sudo.log`, `cron*`, `kern.log`): RFC3164 시각 → `Timestamp`(Probe가 읽은 호스트 타임존, 연도는 수집 시점 기준 추정), `process.executable.name`, `process.pid`, `message`. 줄에 찍힌 hostname은 버리고 리소스 `host.name`을 유지합니다. PRI가 없으므로 severity는 비웁니다.
   - `audit/audit.log`: `audit.type`, `audit.serial`, `msg=audit(epoch:serial)`의 시각, 나머지 `key=value`는 `audit.fields`.

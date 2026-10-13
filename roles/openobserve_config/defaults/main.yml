@@ -392,6 +392,24 @@ o2c_alerts:
     frequency: 5
     silence: 60
 
+  - name: infra-unreachable-host
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "서버 응답 없음 (Unreachable Host)"
+    what: "검사하는 쪽(ns0266)에서 이 서버의 SSH 포트에 5분 연속 접속하지 못했습니다."
+    why: "서버나 네트워크가 내려갔을 가능성이 큽니다. 접속이 된다고 OS가 건강하다는 뜻은 아니며, 이 알림은 도달성만 봅니다(ADR-0010)."
+    action: "① 서버 전원·콘솔·네트워크 경로 확인 ② 같은 호스트의 Silent Host 알림이 함께 오면 같은 사건이다 — 서버가 복구되면 수집기도 돌아온다 ③ 서버가 살아 있는데 이 알림만 오면 ns0266에서 해당 포트로의 경로(방화벽)와 SSH 포트 설정 확인"
+    runbook: "{{ o2c_runbook_base }}#unreachable-host"
+    row_template: '• {tcpcheck_endpoint} (검사: {host_name})'
+    description: "tcpcheck.status가 5분 구간 최댓값 0 — 검사하는 쪽이 servers 전체의 SSH 포트를 60초마다 확인 (State Alert, 재통지 60분)"
+    stream: tcpcheck_status
+    stream_type: metrics
+    sql: >-
+      SELECT host_name, tcpcheck_endpoint, max(value) AS status FROM "tcpcheck_status"
+      GROUP BY host_name, tcpcheck_endpoint HAVING max(value) = 0
+    period: 5
+    frequency: 1
+    silence: 60
   - name: infra-backup-failure
     severity: "P2 경고"
     severity_icon: "🟠"

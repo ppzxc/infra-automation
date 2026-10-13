@@ -31,7 +31,7 @@ EXPECTED_ALERTS = {
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
-    "infra-silent-host-p2", "infra-silent-host-p1",
+    "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
     "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
 }
 RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
@@ -447,7 +447,8 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     assert res.returncode == 0, res.stdout + res.stderr
     streams = {p.split("/")[3] for p, _, _ in o2.ingests}
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
-                       "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify", "backup_logs_alert_verify"}
+                       "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify", "tcpcheck_status_alert_verify",
+                       "backup_logs_alert_verify"}
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
@@ -659,9 +660,20 @@ def test_resource_alerts_are_metric_state_alerts_with_grade_and_renotify_interva
     assert "mountpoint" in o2.store["alert"]["infra-disk-usage-p1"]["row_template"]
 
 
+def test_unreachable_host_is_a_p1_state_alert_on_tcpcheck_status_zero_for_5_minutes(o2):
+    assert _apply(o2).returncode == 0
+    a = o2.store["alert"]["infra-unreachable-host"]
+    assert a["stream_type"] == "metrics" and a["stream_name"] == "tcpcheck_status"
+    assert a["context_attributes"]["severity"] == "P1 긴급"
+    assert a["trigger_condition"]["period"] == 5 and a["trigger_condition"]["silence"] == 60
+    sql = a["query_condition"]["sql"]
+    assert "max(value) = 0" in sql and "tcpcheck_endpoint" in sql
+    assert "{tcpcheck_endpoint}" in a["row_template"]
+
+
 def test_existing_log_alerts_stay_logs(o2):
     assert _apply(o2).returncode == 0
-    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS) - {"infra-silent-host-p2", "infra-silent-host-p1"}:
+    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS) - {"infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host"}:
         assert o2.store["alert"][name]["stream_type"] == "logs", name
 
 
