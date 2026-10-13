@@ -96,17 +96,17 @@ o2c_alerts:
   - name: infra-sudo-escalation-failure
     severity: "P2 경고"
     severity_icon: "🟠"
-    title: "sudo 권한 상승 실패"
-    what: "sudo 인증 실패 또는 sudoers에 없는 사용자의 권한 상승 시도가 있었습니다."
+    title: "sudo/su 권한 상승 실패"
+    what: "sudo/su 인증 실패 또는 sudoers에 없는 사용자의 권한 상승 시도가 있었습니다."
     why: "계정 탈취 후 권한 상승을 시도하는 단계일 수 있습니다. 단순 비밀번호 오입력일 수도 있습니다."
     action: "① 해당 사용자에게 시도 여부 확인 ② 본인이 아니면 계정 잠금·비밀번호 변경 ③ 반복되면 접속 경로(출발지) 추적"
     runbook: "{{ o2c_runbook_base }}#sudo-escalation-failure"
     row_template: '• {host_name} / 사용자 {user_name}: 실패 {failures}회'
-    description: "sudo 권한상승 실패(authentication failure, NOT in sudoers) — 성공은 알리지 않고 기록만 한다"
+    description: "sudo/su 권한상승 실패(authentication failure, NOT in sudoers) — 성공은 알리지 않고 기록만 한다"
     stream: security_logs
     sql: >-
       SELECT host_name, user_name, count(*) AS failures FROM "security_logs"
-      WHERE event_action = 'sudo' AND event_outcome = 'failure'
+      WHERE event_action IN ('sudo','su') AND event_outcome = 'failure'
       GROUP BY host_name, user_name
     period: 5
     frequency: 1

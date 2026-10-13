@@ -5,8 +5,8 @@
 # interpretable sshd/sudo line is returned unchanged. Field names follow the OTel semantic conventions; OpenObserve stores the
 # dots as underscores (user.name -> user_name):
 #
-#   user_name, source_address, source_port, event_action (ssh_login | sudo), event_outcome (success | failure),
-#   event_reason (failure only; the "Invalid user" probe line carries it without event_outcome), user_effective_name and process_command_line (sudo only)
+#   user_name, source_address, source_port, event_action (ssh_login | sudo | su), event_outcome (success | failure),
+#   event_reason (failure only; the "Invalid user" probe line carries it without event_outcome), user_effective_name (sudo, su) and process_command_line (sudo only)
 #
 # Keep this file free of secrets and of anything the edge (Envelope Parsing, #91) already provides.
 
@@ -68,6 +68,26 @@ if program == "sshd" {
             .user_name = pam.user
             .event_action = "sudo"
             .event_outcome = "failure"
+            .event_reason = "authentication failure"
+        }
+    }
+} else if program == "su" {
+    # pam_unix(su:auth) / pam_unix(su-l:auth): user= is the target account, ruser= the person who ran su
+    pam, err = parse_regex(line, r'pam_unix\(su(?:-l)?:auth\): authentication failure;.*\sruser=(?P<ruser>\S*)\s.*\buser=(?P<target>\S+)')
+    if err == null {
+        .user_name = pam.ruser
+        .user_effective_name = pam.target
+        .event_action = "su"
+        .event_outcome = "failure"
+        .event_reason = "authentication failure"
+    } else {
+        # Ubuntu also logs "FAILED SU (to root) alice on pts/0" for the same attempt: tag it without event_outcome
+        # so the attempt is not counted twice (same approach as the sshd "Invalid user" probe line)
+        failed, err = parse_regex(line, r'FAILED SU \(to (?P<target>\S+)\) (?P<user>\S+) on ')
+        if err == null {
+            .user_name = failed.user
+            .user_effective_name = failed.target
+            .event_action = "su"
             .event_reason = "authentication failure"
         }
     }
