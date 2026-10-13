@@ -196,6 +196,36 @@ host_audit_asset:
   - `VERIFY-AUD-012`: 러너에 저장된 JSON 구조를 확인한다.
   - `VERIFY-AUD-100`: Asset Inventory 기록의 영역별 구조와 값(패키지 수, root 계정, sshd 포트 등)을 확인한다.
 
+### 8.1 러너 메모리·시간 harness (#153, Spec #148)
+
+Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니면서 OOM으로 죽은 일(task 265, 287)을 숫자로
+재현하고, 이후 개선(#148의 Ticket 3·4·6)의 효과를 비교하기 위한 측정 도구다. `scripts/host_audit_memory_harness.py`.
+
+- **입력**: 호스트 수와 호스트당 CVE 수. 합성 실행 디렉터리(`hosts/`, `packages/`, `trivy/`)와 이전 정기 실행의
+  findings(Audit Baseline)를 만든다. 이전 findings는 현재 발견의 80%가 그대로이고 20%만큼은 해소된 것으로 만든다.
+- **범위**: 실제 태스크를 `ansible-playbook`으로 돌린다. Package Vulnerability 분류·섹션(AUD-322~324),
+  보고서 모델(AUD-021), findings 인덱스 저장(AUD-510), Audit Baseline 비교. 태스크는 role의 YAML에서 ID로
+  뽑아 쓰므로 태스크가 바뀌면 harness도 바뀐 태스크를 잰다. Trivy 판정(AUD-321)은 합성 결과 파일로 대신한다.
+- **지표**: `ansible-playbook` 프로세스 트리 전체(자식 포함)의 RSS 합계 최대값과 소요 시간. 러너 컨테이너의 OOM은
+  cgroup 단위라 본 프로세스만 재면 일을 서브프로세스로 옮겼을 때 좋아진 것처럼 보일 수 있다. 본 프로세스 최대값은 참고로만
+  함께 출력한다. 0.1초 간격 샘플링이고 부모·자식이 공유하는 페이지를 중복 집계하므로 약간 크게 나온다.
+- **실행**:
+  - `python3 scripts/host_audit_memory_harness.py --hosts 24 --cves 23000` (결과는 JSON으로 출력)
+  - `pytest -m heavy_harness -s tests/test_host_audit_memory_harness.py` (같은 실운영 규모)
+  - 기본 `pytest`는 무거운 실행을 제외하고, 작은 규모(3대 × 20건)로 harness가 끝까지 도는지만 확인한다.
+- **현재 기준값(2026-10-13, 개선 전, 비교 기준)**:
+
+| 항목 | 값 |
+|---|---|
+| 규모 | 24대 × 호스트당 23,000건 = 552,000건 |
+| 프로세스 트리 최대 RSS | 3,765 MB |
+| `ansible-playbook` 본 프로세스 최대 RSS | 1,845 MB |
+| 소요 시간 합계 | 220.5초 (AUD-322 104초, AUD-323 65초, AUD-021 27초, AUD-510 5초) |
+| 조건 | 개발 머신(WSL2, 32 CPU, 24GB), ansible-core 2.21.4, Python 3.14.4, forks=1, 러너 컨테이너 한도 없음 |
+
+  실운영 러너의 한도는 4G다(1G에서 task 287이 AUD-021에서 죽었다). 트리 최대치 3.8GB는 그 한도에 거의 닿는다.
+  절대값은 머신과 버전에 따라 달라지므로 개선 효과는 같은 머신에서 전후를 비교한다.
+
 ## 9. Package Vulnerability (#123)
 
 설치 패키지 버전이 CVE·벤더 권고에 해당하는지 판정한다(ISMS 2.10.8 · 2.11.2). Vuls는 PoC(#112)에서 기각했고(CentOS 7 CVE 69건 누락, EOL 경고 없음, DB 13.6 GB), Trivy를 SBOM 입력으로 쓴다.
