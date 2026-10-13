@@ -1,0 +1,86 @@
+---
+# ==============================================================================
+# OpenObserve 생존 타이머 (Spec #184 / Ticket-7) — 검사하는 쪽 호스트(host_agents_o2_health_checker, ns0266)에만 배포
+# ==============================================================================
+# OpenObserve 헬스(/healthz)가 실패하면 OpenObserve를 거치지 않고 네이버웍스 webhook으로 직접 P1을 보낸다.
+# webhook 값은 OpenBao agents/openobserve(alert_webhook_url/_token/_auth_header)를 그대로 쓴다.
+- name: "[MON-219] Assert the checker host uses the modern path so the health timer is not silently skipped"
+  ansible.builtin.assert:
+    that:
+      - host_agents_os_path == 'modern'
+    fail_msg: >-
+      {{ inventory_hostname }}: 검사하는 쪽 호스트(host_agents_o2_health_checker)는 modern 경로여야 합니다
+      (현재 {{ host_agents_os_path }}). 건너뛰면 OpenObserve 생존 타이머(OpenObserve 응답 없음 P1 직접 통지)가
+      조용히 빠지므로 중단합니다. legacy 호스트는 검사하는 쪽으로 지정할 수 없습니다.
+    quiet: true
+  when: inventory_hostname == host_agents_o2_health_checker
+
+- name: "Deploy the OpenObserve health timer on the checker host only"
+  when:
+    - inventory_hostname == host_agents_o2_health_checker
+    - host_agents_os_path == 'modern'
+  block:
+    - name: "[MON-220] Assert the alert webhook URL is available for the health timer"
+      ansible.builtin.assert:
+        that:
+          - (((host_agents_shared_secrets | default({})).openobserve | default({})).alert_webhook_url | default('')) is match('^https?://')
+        fail_msg: >-
+          {{ inventory_hostname }}: OpenBao agents/openobserve의 alert_webhook_url이 없거나 형식이 잘못되어
+          OpenObserve 생존 타이머를 배포할 수 없습니다(OpenObserve — Config와 같은 값을 쓴다).
+        quiet: true
+
+    - name: "[MON-221] Ensure OpenObserve health config and state directories exist"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ host_agents_owner }}"
+        group: "{{ host_agents_group }}"
+        mode: '0700'
+      loop:
+        - "{{ o2_health_config_dir }}"
+        - "{{ o2_health_state_dir }}"
+
+    - name: "[MON-222] Deploy the OpenObserve health check script"
+      ansible.builtin.copy:
+        src: "{{ role_path }}/files/openobserve-health-check.sh"
+        dest: "{{ o2_health_script_path }}"
+        owner: "{{ host_agents_owner }}"
+        group: "{{ host_agents_group }}"
+        mode: '0755'
+
+    - name: "[MON-223] Deploy the OpenObserve health env file (0600, no_log, no diff)"
+      ansible.builtin.template:
+        src: "{{ role_path }}/templates/openobserve-health.env.j2"
+        dest: "{{ o2_health_config_dir }}/env"
+        owner: "{{ host_agents_owner }}"
+        group: "{{ host_agents_group }}"
+        mode: '0600'
+      no_log: true
+      diff: false
+
+    - name: "[MON-224] Deploy the OpenObserve health service and timer units"
+      ansible.builtin.template:
+        src: "{{ role_path }}/templates/openobserve-health.{{ item }}.j2"
+        dest: "{{ otelcol_systemd_unit_dir }}/openobserve-health.{{ item }}"
+        owner: "{{ host_agents_owner }}"
+        group: "{{ host_agents_group }}"
+        mode: '0644'
+      loop: [service, timer]
+      register: _o2_health_units
+
+    - name: "[MON-225] Reload systemd units when the OpenObserve health units changed"
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when:
+        - ansible_service_mgr == "systemd"
+        - _o2_health_units is changed
+      changed_when: true
+
+    - name: "[MON-226] Ensure the OpenObserve health timer is enabled and running"
+      ansible.builtin.systemd:
+        name: openobserve-health.timer
+        state: started
+        enabled: true
+      when:
+        - ansible_service_mgr == "systemd"
+        - not ansible_check_mode or not (_o2_health_units is changed)

@@ -6,6 +6,12 @@
 #   alert_webhook_url             — 통지 대상 webhook URL (네이버웍스 봇 text API)
 #   alert_webhook_token           — (선택) webhook 인증 토큰. 헤더 이름은 alert_webhook_auth_header(기본 Authorization,
 #                                   네이버웍스 봇은 X-NANOIT-ACCESS)
+#   normal_sources                — (선택) root 로그인 정상 출발지 목록 [{address: <IP>, kind: semaphore|office}, ...] (Spec #184 / Ticket-8).
+#                                   저장소에는 주소를 두지 않는다. semaphore 종류는 어느 root 알림에도 걸리지 않고,
+#                                   office(사무실·S2S) 종류는 P3 하루 요약에만, 그 밖의 출발지는 P1에 걸린다.
+#   silent_host_exceptions        — (선택) Silent Host 계획 정지 예외 [{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason: ...}] (Spec #184 / Ticket-4).
+#                                   만료일(expires)은 필수이며 형식이 틀리면 요청 전에 실패한다. 만료일이 지난 항목은 로스터 생성 때 무시되어
+#                                   해제를 잊어도 감시가 돌아온다.
 # Extra variables(-e o2_endpoint=...)가 OpenBao 값보다 우선한다.
 
 o2c_vault_validate_certs: false
@@ -35,6 +41,51 @@ o2c_ssh_fail_window_minutes: 5
 o2c_parse_error_percent: 10
 o2c_parse_error_min_lines: 20
 o2c_parse_error_window_minutes: 30
+
+# 정상 출발지(OpenBao normal_sources). 주소는 O2C-002에서 IP 문자 형식을 검증하므로 SQL에 그대로 넣는다.
+o2c_normal_sources: "{{ o2c_kv.normal_sources | default([], true) }}"
+o2c_normal_addresses: "{{ o2c_normal_sources | map(attribute='address') | list }}"
+o2c_office_addresses: "{{ o2c_normal_sources | selectattr('kind', 'equalto', 'office') | map(attribute='address') | list }}"
+# 외부 출발지 P1: 목록에 있는 모든 출발지를 뺀다. 목록이 비어 있으면 조건을 두지 않는다(모든 root 로그인이 P1).
+o2c_root_external_filter: >-
+  {{ (" AND (source_address IS NULL OR source_address NOT IN ('" ~ (o2c_normal_addresses | join("', '")) ~ "'))") if o2c_normal_addresses | length > 0 else '' }}
+# 사무실 P3: office 종류만. 목록이 비어 있으면 IN ('')라 아무것도 잡지 않는다.
+o2c_root_office_filter: >-
+  {{ "source_address IN ('" ~ (o2c_office_addresses | join("', '")) ~ "')" }}
+
+# 리소스 알림(Spec #184 / Ticket-3). 제외 파일시스템 유형은 Git 기본값, /boot·/boot/efi는 감시한다.
+# 호스트·마운트 예외와 임계값 덮어쓰기는 OpenBao agents/openobserve(비어 있어도 동작):
+#   alert_resource_exclusions: [{host: ns0297, mount: /data, metric: disk(선택: disk|inode|memory)}]
+#   alert_resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
+o2c_resource_p2_threshold: 90
+o2c_resource_p1_threshold: 95
+o2c_resource_excluded_fstypes: [squashfs, iso9660, tmpfs, devtmpfs, overlay]
+o2c_resource_cfg:
+  p2: "{{ o2c_resource_p2_threshold }}"
+  p1: "{{ o2c_resource_p1_threshold }}"
+  fstypes: "{{ o2c_resource_excluded_fstypes }}"
+  exclusions: "{{ o2c_kv.alert_resource_exclusions | default([], true) }}"
+  thresholds: "{{ o2c_kv.alert_resource_thresholds | default([], true) }}"
+
+# 로스터(Spec #184 / Ticket-4): 실행 시 인벤토리 그룹에서 만든다(OpenObserve — Config 템플릿은 servers 인벤토리를 읽는다).
+#   수집 로스터   = servers - host_agents_excluded - host_agents_backup_only (ns0266·ns0332 포함) — Silent Host·백업 누락
+#   유지보수 로스터 = servers - host_agents_excluded — 유지보수 누락
+# 호스트 이름은 인벤토리 호스트명(관리번호)이며 수집기가 보내는 host_name과 같다. 편입·폐기 후 Config를 다시 실행하면 따라온다.
+o2c_today: "{{ now(utc=true).strftime('%Y-%m-%d') }}"
+o2c_silent_exceptions: "{{ o2c_kv.silent_host_exceptions | default([], true) }}"
+o2c_roster_collect: "{{ groups | o2c_roster('collect') }}"
+o2c_roster_maintenance: "{{ groups | o2c_roster('maintenance') }}"
+# Silent Host는 계획 정지 예외 중 만료되지 않은 호스트를 뺀 수집 로스터를 쓴다.
+o2c_roster_silent: "{{ o2c_roster_collect | o2c_without_exceptions(o2c_silent_exceptions, o2c_today) }}"
+o2c_rosters:
+  collect: "{{ o2c_roster_collect }}"
+  maintenance: "{{ o2c_roster_maintenance }}"
+  silent: "{{ o2c_roster_silent }}"
+
+# OpenObserve가 수신하는 가장 오래된 이벤트(ZO_INGEST_ALLOWED_UPTO, 기본 5시간 — 공식 문서). 2026-10 수집기 중단 사고(#161)에서 5시간보다
+# 오래된 로그가 거부된 것으로도 확인됐다. 서버 값을 바꿨다면 Silent Host P1 문구와 이 값이 어긋나므로 함께 고친다.
+# 주의: 서버(ns0332) 실제 값은 미확인 — 운영 반영 때 ZO_INGEST_ALLOWED_UPTO를 확인하고 다르면 이 값을 맞춘다.
+o2c_ingest_allowed_hours: 5
 
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
@@ -78,58 +129,100 @@ o2c_alerts:
   - name: infra-root-login-success
     severity: "P1 긴급"
     severity_icon: "🔴"
-    title: "root 계정 원격 로그인 성공"
-    what: "root 계정으로 SSH 로그인이 성공했습니다."
+    title: "root 계정 원격 로그인 성공 (외부 출발지)"
+    what: "정상 출발지(Semaphore·사무실) 목록에 없는 출발지에서 root 계정으로 SSH 로그인이 성공했습니다."
     why: "root 직접 접속은 정책상 금지 대상(PermitRootLogin)이며 접속자 식별이 불가능합니다. 침해 또는 설정 우회일 수 있습니다(ISMS 2.5 사용자 인증)."
     action: "① 출발지와 시각을 작업 일정·작업자와 대조 ② 확인되지 않으면 해당 서버 root 비밀번호 변경·세션 종료 후 보안 담당 보고 ③ 승인된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#root-login-success"
     row_template: '• {host_name} ← {source_address} ({logins}회)'
-    description: "root SSH 로그인 성공 (1건부터 즉시) — PermitRootLogin 설정이 우회되었는지 확인"
+    description: "정상 출발지(OpenBao normal_sources) 밖의 root SSH 로그인 성공 (1건부터 즉시) — PermitRootLogin 설정이 우회되었는지 확인"
     stream: security_logs
     sql: >-
       SELECT host_name, source_address, count(*) AS logins FROM "security_logs"
-      WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root'
+      WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root'{{ o2c_root_external_filter }}
       GROUP BY host_name, source_address
     period: 5
     frequency: 1
     silence: 5
+  - name: infra-root-login-office-daily
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "사무실·S2S 출발지 root 로그인 (하루 요약)"
+    what: "사무실·S2S 출발지에서 root 계정으로 SSH 로그인이 성공했습니다. 하루에 한 번 요약해 알립니다."
+    why: "정책(PermitRootLogin)상 root 직접 접속은 금지 대상이지만 사내 출발지라 침해보다는 정책 위반·작업 습관일 가능성이 높습니다. 기록으로 남깁니다."
+    action: "① 작업자와 작업 내용을 확인 ② 일반 계정 + sudo로 전환하도록 안내 ③ 확인되지 않는 접속이면 P1 절차(root 로그인 성공)로 격상"
+    runbook: "{{ o2c_runbook_base }}#root-login-office-daily"
+    row_template: '• {host_name} ← {source_address} ({logins}회)'
+    description: "사무실·S2S 출발지(OpenBao normal_sources, kind=office)의 root SSH 로그인 성공 — 하루 1번 P3 요약(period·silence 1440)"
+    stream: security_logs
+    sql: >-
+      SELECT host_name, source_address, count(*) AS logins FROM "security_logs"
+      WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root' AND {{ o2c_root_office_filter }}
+      GROUP BY host_name, source_address
+    period: 1440
+    frequency: 1
+    silence: 1440
   - name: infra-sudo-escalation-failure
     severity: "P2 경고"
     severity_icon: "🟠"
-    title: "sudo 권한 상승 실패"
-    what: "sudo 인증 실패 또는 sudoers에 없는 사용자의 권한 상승 시도가 있었습니다."
+    title: "sudo/su 권한 상승 실패"
+    what: "sudo/su 인증 실패 또는 sudoers에 없는 사용자의 권한 상승 시도가 있었습니다."
     why: "계정 탈취 후 권한 상승을 시도하는 단계일 수 있습니다. 단순 비밀번호 오입력일 수도 있습니다."
     action: "① 해당 사용자에게 시도 여부 확인 ② 본인이 아니면 계정 잠금·비밀번호 변경 ③ 반복되면 접속 경로(출발지) 추적"
     runbook: "{{ o2c_runbook_base }}#sudo-escalation-failure"
     row_template: '• {host_name} / 사용자 {user_name}: 실패 {failures}회'
-    description: "sudo 권한상승 실패(authentication failure, NOT in sudoers) — 성공은 알리지 않고 기록만 한다"
+    description: "sudo/su 권한상승 실패(authentication failure, NOT in sudoers) — 성공은 알리지 않고 기록만 한다"
     stream: security_logs
     sql: >-
       SELECT host_name, user_name, count(*) AS failures FROM "security_logs"
-      WHERE event_action = 'sudo' AND event_outcome = 'failure'
+      WHERE event_action IN ('sudo','su') AND event_outcome = 'failure'
       GROUP BY host_name, user_name
     period: 5
     frequency: 1
     silence: 5
-  - name: infra-kernel-disk-errors
+  - name: infra-oom-kill
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "OOM kill로 프로세스 강제 종료"
+    what: "메모리 부족(OOM)으로 커널이 프로세스를 강제 종료했습니다."
+    why: "서비스 프로세스가 죽었을 수 있고, 같은 원인이 반복되면 다른 서비스와 서버 전체로 번질 수 있습니다."
+    action: "① 행의 종료된 프로세스가 서비스면 재기동 상태 확인 ② 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit) 점검 ③ 반복되면 메모리 증설·한도 조정 계획"
+    runbook: "{{ o2c_runbook_base }}#oom-kill"
+    row_template: '• {host_name}: 종료된 프로세스 {killed_process} ({kills}건)'
+    description: "OOM kill (Killed process / Kill process / invoked oom-killer, 대소문자 무시) — cgroup·CentOS 6/7 형식 포함"
+    stream: system_logs
+    sql: >-
+      SELECT host_name,
+      CASE WHEN lower(body) LIKE '%kill%process%'
+      THEN regexp_replace(body, '^.*[Kk]ill(?:ed)? process [0-9]+ [(]([^)]*)[)].*$', '\1')
+      ELSE 'oom-killer 호출' END AS killed_process,
+      count(*) AS kills FROM "system_logs"
+      WHERE lower(body) LIKE '%killed process%' OR lower(body) LIKE '%out of memory: kill process%'
+      OR lower(body) LIKE '%invoked oom-killer%'
+      GROUP BY host_name, killed_process
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-disk-fs-errors
     severity: "P1 긴급"
     severity_icon: "🔴"
-    title: "커널·디스크 오류 발생"
-    what: "OOM으로 프로세스가 강제 종료됐거나 디스크 I/O·파일시스템 오류가 기록됐습니다."
-    why: "서비스 중단이나 데이터 손상으로 이어질 수 있는 장애 전조입니다."
-    action: "① 로그 보기에서 오류 원문 확인(OOM인지 I/O인지) ② OOM이면 메모리 사용 상위 프로세스·한도 점검 ③ I/O·FS 오류면 즉시 백업 상태 확인 후 디스크 교체·fsck 계획"
-    runbook: "{{ o2c_runbook_base }}#kernel-disk-errors"
+    title: "디스크 I/O·파일시스템 오류 발생"
+    what: "디스크 I/O 오류 또는 파일시스템 손상(EXT4/XFS) 오류가 기록됐습니다."
+    why: "디스크 고장이나 데이터 손상의 전조로, 데이터 손실로 이어질 수 있어 즉시 확인해야 합니다."
+    action: "① 로그 보기에서 오류 원문과 장치 확인 ② 즉시 백업 상태 확인(restic snapshots) ③ 파일시스템이 읽기 전용이면 서비스 영향 판단 후 디스크 교체·fsck 일정"
+    runbook: "{{ o2c_runbook_base }}#disk-fs-errors"
     row_template: '• {host_name}: 오류 패턴 {matches}건'
-    description: "커널/디스크 오류 패턴(OOM kill, I/O error, EXT4-fs error, XFS Corruption) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
+    description: "디스크·파일시스템 오류 (I/O error, EXT4-fs error, XFS Corruption, blk_update_request, Buffer I/O error) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
     stream: system_logs
     sql: >-
       SELECT host_name, count(*) AS matches FROM "system_logs"
-      WHERE body LIKE '%Out of memory: Killed process%' OR body LIKE '%I/O error%' OR body LIKE '%EXT4-fs error%'
-      OR (body LIKE '%XFS%' AND body LIKE '%Corruption%')
+      WHERE lower(body) LIKE '%i/o error%' OR lower(body) LIKE '%ext4-fs error%'
+      OR (lower(body) LIKE '%xfs%' AND lower(body) LIKE '%corruption%')
+      OR lower(body) LIKE '%blk_update_request%' OR lower(body) LIKE '%buffer i/o error%'
       GROUP BY host_name
     period: 5
     frequency: 1
-    silence: 15
+    silence: 5
   - name: infra-log-parse-errors-security-logs
     severity: "P3 주의"
     severity_icon: "🟡"
@@ -168,3 +261,252 @@ o2c_alerts:
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
     silence: "{{ o2c_parse_error_window_minutes }}"
+  - name: infra-disk-usage-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "디스크 사용률 높음"
+    what: "디스크 사용률이 15분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
+    why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 서비스 장애로 이어집니다."
+    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#disk-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "디스크 사용률 15분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
+    stream: system_filesystem_usage
+    stream_type: metrics
+    sql: "{{ 'disk' | o2c_resource_sql('P2', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 1440
+  - name: infra-disk-usage-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "디스크 사용률 임계 초과"
+    what: "디스크 사용률이 15분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
+    why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
+    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#disk-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "디스크 사용률 15분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
+    stream: system_filesystem_usage
+    stream_type: metrics
+    sql: "{{ 'disk' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 60
+  - name: infra-inode-usage-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "inode 사용률 높음"
+    what: "inode 사용률이 15분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
+    why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 서비스 장애로 이어집니다."
+    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#inode-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "inode 사용률 15분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
+    stream: system_filesystem_inodes_usage
+    stream_type: metrics
+    sql: "{{ 'inode' | o2c_resource_sql('P2', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 1440
+  - name: infra-inode-usage-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "inode 사용률 임계 초과"
+    what: "inode 사용률이 15분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
+    why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
+    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#inode-usage"
+    row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
+    description: "inode 사용률 15분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
+    stream: system_filesystem_inodes_usage
+    stream_type: metrics
+    sql: "{{ 'inode' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
+    period: 15
+    frequency: 5
+    silence: 60
+  - name: infra-memory-usage-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "메모리 사용률 높음"
+    what: "메모리 사용률이 10분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
+    why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 OOM kill·서비스 중단로 이어집니다."
+    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#memory-usage"
+    row_template: '• {host_name}: 사용률 {usage_pct}%'
+    description: "메모리 사용률 10분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
+    stream: system_memory_usage
+    stream_type: metrics
+    sql: "{{ 'memory' | o2c_resource_sql('P2', o2c_resource_cfg) }}"
+    period: 10
+    frequency: 5
+    silence: 1440
+  - name: infra-memory-usage-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "메모리 사용률 임계 초과"
+    what: "메모리 사용률이 10분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
+    why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
+    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
+    runbook: "{{ o2c_runbook_base }}#memory-usage"
+    row_template: '• {host_name}: 사용률 {usage_pct}%'
+    description: "메모리 사용률 10분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
+    stream: system_memory_usage
+    stream_type: metrics
+    sql: "{{ 'memory' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
+    period: 10
+    frequency: 5
+    silence: 60
+
+  - name: infra-silent-host-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "Silent Host: 메트릭이 15분 넘게 끊김"
+    what: "수집 로스터의 호스트에서 메트릭 하트비트(system_memory_usage)가 15분 넘게 오지 않습니다(3시간 미만)."
+    why: "수집기가 멈췄거나 서버가 내려갔을 수 있습니다. 방치하면 3시간 뒤 P1이 되고, 약 {{ o2c_ingest_allowed_hours }}시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않습니다."
+    action: "① 같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인 — 서버·네트워크부터 복구 ② 서버가 살아 있으면 otelcol-contrib 서비스 상태 확인·재기동 ③ 며칠 이상 계획 정지하는 호스트면 OpenBao silent_host_exceptions에 만료일과 함께 등록"
+    runbook: "{{ o2c_runbook_base }}#silent-host"
+    row_template: '• {host_name}'
+    description: "수집 로스터 호스트의 system_memory_usage가 15분 없음, 3시간 미만 (State Alert, 재통지 1440분) — UNION ALL 로스터 가지 방식"
+    stream: system_memory_usage
+    stream_type: metrics
+    absence: {level: p2, roster: silent}
+    sql: "{{ o2c_roster_silent | o2c_absence_sql('system_memory_usage', 'p2') }}"
+    period: 180
+    frequency: 5
+    silence: 1440
+  - name: infra-silent-host-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "Silent Host: 메트릭이 3시간 넘게 끊김"
+    what: "수집 로스터의 호스트에서 메트릭 하트비트(system_memory_usage)가 3시간 넘게 오지 않습니다."
+    why: "약 {{ o2c_ingest_allowed_hours }}시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음 — ISMS 로그 증거가 중앙에서 영구히 빠집니다(호스트에는 원본이 남아 있습니다)."
+    action: "① 같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인 — 서버·네트워크부터 복구 ② 서버가 살아 있으면 otelcol-contrib 서비스 상태 확인·재기동 ③ 수집이 재개되면 끊긴 구간 로그가 5시간 한도 안에 들어오는지 확인하고, 넘었다면 호스트 원본 로그를 보존"
+    runbook: "{{ o2c_runbook_base }}#silent-host"
+    row_template: '• {host_name}'
+    description: "수집 로스터 호스트의 system_memory_usage가 3시간 없음 (State Alert, 재통지 60분) — UNION ALL 로스터 가지 방식"
+    stream: system_memory_usage
+    stream_type: metrics
+    absence: {level: p1, roster: silent}
+    sql: "{{ o2c_roster_silent | o2c_absence_sql('system_memory_usage', 'p1') }}"
+    period: 180
+    frequency: 5
+    silence: 60
+
+  - name: infra-unreachable-host
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "서버 응답 없음 (Unreachable Host)"
+    what: "검사하는 쪽(ns0266)에서 이 서버의 SSH 포트에 5분 연속 접속하지 못했습니다."
+    why: "서버나 네트워크가 내려갔을 가능성이 큽니다. 접속이 된다고 OS가 건강하다는 뜻은 아니며, 이 알림은 도달성만 봅니다(ADR-0010)."
+    action: "① 서버 전원·콘솔·네트워크 경로 확인 ② 같은 호스트의 Silent Host 알림이 함께 오면 같은 사건이다 — 서버가 복구되면 수집기도 돌아온다 ③ 서버가 살아 있는데 이 알림만 오면 ns0266에서 해당 포트로의 경로(방화벽)와 SSH 포트 설정 확인"
+    runbook: "{{ o2c_runbook_base }}#unreachable-host"
+    row_template: '• {tcpcheck_endpoint} (검사: {host_name})'
+    description: "tcpcheck.status가 5분 구간 최댓값 0 — 검사하는 쪽이 servers 전체의 SSH 포트를 60초마다 확인 (State Alert, 재통지 60분)"
+    stream: tcpcheck_status
+    stream_type: metrics
+    sql: >-
+      SELECT host_name, tcpcheck_endpoint, max(value) AS status FROM "tcpcheck_status"
+      GROUP BY host_name, tcpcheck_endpoint HAVING max(value) = 0
+    period: 5
+    frequency: 1
+    silence: 60
+  - name: infra-backup-failure
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "백업 실패"
+    what: "restic 백업이 실패했습니다(job=backup, success=false)."
+    why: "다음 백업 전에 고치지 않으면 복구 지점이 늘어나지 않고, 반복되면 백업 누락 알림으로 이어집니다."
+    action: "① 행의 호스트에서 /var/log/host-agents/backup.jsonl 마지막 줄의 error 확인 ② 저장소(RustFS) 접속·자격증명·디스크 여유 점검 ③ 원인을 고친 뒤 호스트에서 백업을 수동 실행해 성공 확인"
+    runbook: "{{ o2c_runbook_base }}#backup-failure"
+    row_template: '• {host}: 실패 {failures}건'
+    description: "백업 실패 (job=backup, success=false) — Event Alert, backup_logs의 호스트는 host 필드"
+    stream: backup_logs
+    sql: >-
+      SELECT host, count(*) AS failures FROM "backup_logs"
+      WHERE job = 'backup' AND success = false
+      GROUP BY host
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-integrity-check-failure
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "백업 저장소 무결성 검사 실패"
+    what: "Repo Maintenance의 restic check가 실패했습니다(job=maintenance, command=check, success=false)."
+    why: "저장소가 손상됐을 수 있습니다. 실패한 호스트는 prune이 차단되어 저장소가 계속 커집니다."
+    action: "① Semaphore Repo Maintenance 실행 로그에서 해당 호스트의 check 오류 확인 ② restic check로 손상 범위 확인 ③ 손상이면 저장소 복구·재초기화와 백업 재실행 계획"
+    runbook: "{{ o2c_runbook_base }}#integrity-check-failure"
+    row_template: '• {host}: 실패 {failures}건'
+    description: "무결성 검사 실패 (job=maintenance, command=check, success=false) — Event Alert, 호스트는 host 필드"
+    stream: backup_logs
+    sql: >-
+      SELECT host, count(*) AS failures FROM "backup_logs"
+      WHERE job = 'maintenance' AND command = 'check' AND success = false
+      GROUP BY host
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-backup-missing
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "백업 누락: 마지막 성공 백업이 26시간 넘음"
+    what: "수집 로스터의 호스트에서 성공한 백업(job=backup)이 26시간 넘게 없습니다(한 번도 백업하지 않은 호스트 포함)."
+    why: "복구 지점이 하루 넘게 갱신되지 않고 있습니다. 놓친 실행은 보정되지 않습니다."
+    action: "① 같은 호스트의 Silent Host 알림이 있는지 먼저 확인 — 수집기 중단으로 이벤트만 빠진 것일 수 있음 ② 호스트의 /etc/cron.d/host-agents-backup(또는 systemd timer)과 /var/log/host-agents/backup.jsonl 확인 ③ 신규 편입이면 Host Agents Deploy 실행 여부 확인"
+    runbook: "{{ o2c_runbook_base }}#backup-missing"
+    row_template: '• {host}'
+    description: "수집 로스터 호스트의 마지막 성공 job=backup > 26h (State Alert, 재통지 1440분) — Backup Only 호스트는 제외"
+    stream: backup_logs
+    missing: {roster: collect, field: host, cond: "job = 'backup' AND success = true"}
+    sql: "{{ o2c_roster_collect | o2c_missing_sql('backup_logs', 'host', \"job = 'backup' AND success = true\") }}"
+    period: 1560
+    frequency: 60
+    silence: 1440
+  - name: infra-maintenance-missing
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "유지보수 누락: 마지막 무결성 검사가 8일 넘음"
+    what: "유지보수 로스터의 호스트에서 무결성 검사(job=maintenance, command=check) 기록이 8일 넘게 없습니다."
+    why: "Repo Maintenance가 멈췄거나 해당 호스트가 건너뛰어지고 있습니다. 저장소 손상을 발견하지 못하고 prune도 이뤄지지 않습니다."
+    action: "① Semaphore Repo Maintenance 템플릿의 최근 실행과 스케줄 확인 ② 해당 호스트가 제외·접속 실패로 건너뛰어졌는지 확인 ③ 수동으로 Repo Maintenance를 실행"
+    runbook: "{{ o2c_runbook_base }}#maintenance-missing"
+    row_template: '• {host}'
+    description: "유지보수 로스터(Backup Only 포함) 호스트의 마지막 command=check > 8일 (State Alert, 재통지 1440분)"
+    stream: backup_logs
+    missing: {roster: maintenance, field: host, cond: "job = 'maintenance' AND command = 'check'"}
+    sql: "{{ o2c_roster_maintenance | o2c_missing_sql('backup_logs', 'host', \"job = 'maintenance' AND command = 'check'\") }}"
+    period: 11520
+    frequency: 60
+    silence: 1440
+
+# 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고
+# 알림 SQL(스트림명만 교체)을 검색해 기대와 비교한다. 운영 스트림·알림·통지 대상은 건드리지 않는다.
+# 수집 인증은 OpenBao agents/openobserve의 controller_ingest_token(컨트롤러 전용, 설정 API 계정과 다름).
+o2c_verify_stream_suffix: _alert_verify
+o2c_verify_retries: 6       # 수집 직후 검색에 보이기까지 걸리는 시간을 기다린다
+o2c_verify_delay: 5
+o2c_alert_fixtures: "{{ lookup('ansible.builtin.file', role_path ~ '/files/alert_fixtures.yml') | from_yaml }}"
+
+# 통지 경로 자가 시험(Spec #184 / Ticket-2): 검증 전용 스트림에 거는 상설 알림 1개. 기본 실행에서는 레코드가 없어 울리지 않고,
+# o2c_verify_notify=true일 때만 레코드 1건을 넣어 템플릿·destination·webhook까지 실제로 통지한다(통지에 [TEST]가 붙는다).
+o2c_verify_notify: false
+o2c_selftest_stream: "alert_selftest{{ o2c_verify_stream_suffix }}"
+o2c_selftest_alert:
+  name: infra-alert-selftest
+  severity: "TEST"
+  severity_icon: "🧪"
+  title: "알림 통지 경로 시험 (실제 장애 아님)"
+  what: "OpenObserve — Config가 o2c_verify_notify=true로 실행되어 통지 경로 시험 레코드를 넣었습니다."
+  why: "알림 템플릿·통지 대상·webhook이 끝까지 동작하는지 확인하는 시험이며 실제 장애가 아닙니다."
+  action: "이 통지가 도착했으면 통지 경로는 정상입니다. 조치할 것이 없습니다."
+  runbook: "{{ o2c_runbook_base }}"
+  row_template: '• {host_name}: 시험 레코드 {records}건'
+  description: "통지 경로 자가 시험 — 검증 전용 스트림에 o2c_verify_notify=true 실행 때만 레코드가 들어간다"
+  stream: "{{ o2c_selftest_stream }}"
+  sql: >-
+    SELECT host_name, count(*) AS records FROM "{{ o2c_selftest_stream }}"
+    GROUP BY host_name
+  period: 5
+  frequency: 1
+  silence: 5

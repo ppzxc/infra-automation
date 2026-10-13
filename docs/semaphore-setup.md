@@ -66,6 +66,8 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **백업만 적용하는 호스트**: 로그를 다른 체계가 수집하는 호스트는 `servers`에 두고 `host_agents_backup_only` 그룹에도 넣는다(ADR-0006 §2.1). Deploy·Config·Backup이 이 호스트에는 otelcol 단계를 건너뛰고 restic·resticprofile만 적용하며, Repo Maintenance도 포함한다. OpenBao `hosts/<host>/agents`에 `o2_ingest_token`은 없어도 된다. 매일의 `job=backup` 결과는 OpenObserve로 가지 않는다. `host_agents_excluded`와 함께 넣지 않는다(제외가 우선한다).
 
+**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0332 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `agents/openobserve`의 `silent_host_exceptions`(만료일 필수)에 등록한다.
+
 **Host Audit에서 빼는 호스트**: 러너(Semaphore 서버)에서 접속할 수 없는 호스트 등은 `host_audit_excluded` 그룹에 넣는다. Host Audit — Monthly·On-demand가 이 그룹을 빼며(`host_audit_scope_pattern`), 보고서와 Asset Inventory에도 나오지 않는다. 다른 템플릿에는 영향이 없다.
 
 ```yaml
@@ -124,7 +126,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
 - **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
-- **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_url`(네이버웍스 봇 text API). 선택으로 `alert_webhook_token`·`alert_webhook_auth_header`(봇은 `X-NANOIT-ACCESS`).
+- **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_url`(네이버웍스 봇 text API). 알림 검증용 `controller_ingest_token`(합성 레코드 주입). 선택으로 `alert_webhook_token`·`alert_webhook_auth_header`(봇은 `X-NANOIT-ACCESS`).
 - **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 `host_audit_mail_to`로 덮어쓴다(값은 로그에 나오지 않는다). 템플릿 Survey에는 두지 않으므로 API 실행의 `environment`로 넘긴다(§5 실행 시 입력).
 
 ---
@@ -139,7 +141,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `servers` |
 | Host Agents — Backup | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 (restic·resticprofile만) |
 | Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
-| OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | (없음) | 수동 | localhost (OpenObserve API) |
+| OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | (없음) | 수동 | localhost (OpenObserve API). Silent Host 로스터를 만들려고 `servers` 인벤토리를 읽는다 |
 | Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | (없음 — 두지 않는다) | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함, `host_audit_excluded` 제외) |
 | Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | `target_hosts`, `host_audit_mail_enabled`, `host_audit_storage_enabled` | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
 | Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |

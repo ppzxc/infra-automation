@@ -46,8 +46,12 @@
           - (o2c_kv.api_user | default('')) | length > 0
           - (o2c_kv.api_password | default('')) | length > 0
           - (o2c_kv.alert_webhook_url | default('')) is match('^https?://')
+          # 정상 출발지는 SQL에 들어가므로 IP 문자와 알려진 종류만 허용한다
+          - (o2c_normal_sources | selectattr('address', 'match', '^[0-9A-Fa-f.:]+$') | selectattr('kind', 'in', ['semaphore', 'office']) | list | length) == (o2c_normal_sources | length)
+          # Silent Host 계획 정지 예외는 SQL에 들어가므로 호스트 이름 문자와 만료일(YYYY-MM-DD)이 필수다
+          - o2c_silent_exceptions | o2c_valid_exceptions
         fail_msg: >-
-          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요합니다
+          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
           (VAULT_TOKEN은 Semaphore Environment로 주입). 값은 출력하지 않습니다.
         quiet: true
       no_log: true
@@ -60,7 +64,7 @@
           'webhook_url': o2c_kv.alert_webhook_url,
           'webhook_headers': {'Content-Type': 'application/json'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
           'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
-          'alerts': o2c_alerts} | o2c_desired }}
+          'alerts': o2c_alerts, 'selftest_alert': o2c_selftest_alert} | o2c_desired }}
     o2c_auth_headers:
       Authorization: "Basic {{ (o2c_kv.api_user ~ ':' ~ o2c_kv.api_password) | b64encode }}"
     cacheable: false   # credentials never go to the fact cache (ansible.cfg fact_caching = jsonfile)
@@ -115,7 +119,7 @@
   ansible.builtin.debug:
     msg: "{{ (o2c_plan_actions | o2c_plan_summary) if (o2c_plan_actions | length > 0) else ['OpenObserve가 이미 정의와 일치합니다 (변경 0건)'] }}"
 
-- name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update)"
+- name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)"
   ansible.builtin.uri:
     url: "{{ o2c_endpoint }}{{ item.path }}"
     method: "{{ item.method }}"
@@ -132,3 +136,132 @@
   changed_when: true
   no_log: true
   when: not ansible_check_mode
+
+# ------------------------------------------------------------------------------
+# 알림 검증 단계 (Spec #184 / Ticket-1) — 반영 직후 매번. check 모드에서는 요청을 보내지 않는다.
+# ① SQL 논리: 합성 레코드 주입 → 스트림명만 바꾼 알림 SQL 검색 → 기대 행과 비교
+# ② 평가 오류: alerts/history 최근 평가가 error인 알림이 있으면 실패
+# ------------------------------------------------------------------------------
+- name: "[O2C-030] Plan the alert verification (synthetic records and rewritten searches)"
+  vars:
+    _start_us: "{{ ((now(utc=true).timestamp() - 300) * 1000000) | int }}"
+    _run_id: "{{ now(utc=true).timestamp() | int }}"
+  ansible.builtin.set_fact:
+    o2c_verify: >-
+      {{ o2c_alerts | o2c_verify_plan(o2c_alert_fixtures, o2c_org, o2c_verify_stream_suffix, _run_id, _start_us | int, sources=o2c_normal_sources, rosters=o2c_rosters) }}
+    o2c_verify_auth_headers:
+      Authorization: "Basic {{ (o2c_org ~ ':' ~ (o2c_kv.controller_ingest_token | default(''))) | b64encode }}"
+    cacheable: false   # credentials never go to the fact cache
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "[O2C-031] Assert the controller ingest token exists (needed to inject the synthetic records)"
+  ansible.builtin.assert:
+    that:
+      - (o2c_kv.controller_ingest_token | default('')) | length > 0
+    fail_msg: "알림 검증에 agents/openobserve의 controller_ingest_token이 필요합니다. 값은 출력하지 않습니다."
+    quiet: true
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "[O2C-032] Inject the synthetic records into the verification streams"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}{{ item.path }}"
+    method: POST
+    headers: "{{ o2c_verify_auth_headers }}"
+    body_format: json
+    body: "{{ item.records }}"
+    status_code: [200, 201]
+    timeout: 30
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  loop: "{{ o2c_verify.ingest }}"
+  loop_control:
+    label: "{{ item.stream }}"
+  changed_when: false   # 검증 전용 스트림에만 쓰며 운영 상태를 바꾸지 않는다
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "[O2C-033] Run each alert SQL against its verification stream and compare with the expected rows"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}{{ item.path }}"
+    method: POST
+    headers: "{{ o2c_auth_headers }}"
+    body_format: json
+    body: "{{ item.body }}"
+    status_code: 200
+    timeout: 30
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  loop: "{{ o2c_verify.searches }}"
+  loop_control:
+    label: "{{ item.alert }}"
+  register: _o2c_verify_search
+  until: (_o2c_verify_search.json.hits | default([])) | o2c_verify_failures(item) | length == 0
+  retries: "{{ o2c_verify_retries }}"
+  delay: "{{ o2c_verify_delay }}"
+  failed_when: false   # 불일치는 아래에서 알림·케이스 이름과 함께 한 번에 보고한다
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "[O2C-034] Fail when an alert did not fire (or fired) as the fixtures expect"
+  vars:
+    _hits: "{{ item.json.hits | default([]) if (item.json is defined and item.status | default(0) == 200) else [] }}"
+    _failed: "{{ _hits | o2c_verify_failures(item.item) }}"
+    _known: "{{ _hits | o2c_verify_known(item.item) }}"
+    _error: "{{ ['알림 %s: 검증 검색 요청이 실패했습니다 (HTTP %s)' % (item.item.alert, item.status | default('연결 실패'))] if item.status | default(0) != 200 else [] }}"
+  ansible.builtin.debug:
+    msg: "{{ (_error + _failed + _known) if (_error + _failed + _known) | length > 0 else ['알림 ' ~ item.item.alert ~ ': 검증 통과'] }}"
+  loop: "{{ _o2c_verify_search.results }}"
+  loop_control:
+    label: "{{ item.item.alert }}"
+  failed_when: (_error + _failed) | length > 0
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: "[O2C-035] Read the recent alert evaluation history"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}/api/v2/{{ o2c_org }}/alerts/history"
+    method: GET
+    headers: "{{ o2c_auth_headers }}"
+    status_code: 200
+    timeout: 15
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  register: _o2c_history
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "[O2C-036] Fail when the latest evaluation of a managed alert ended in error"
+  vars:
+    _errored: "{{ _o2c_history.json | o2c_alert_history_errors(o2c_alerts | map(attribute='name') | list) }}"
+  ansible.builtin.assert:
+    that: _errored | length == 0
+    fail_msg: "최근 평가가 오류인 알림이 있습니다(필드 없음 등): {{ _errored | join(', ') }}"
+    quiet: true
+  when: not ansible_check_mode
+
+# ------------------------------------------------------------------------------
+# 통지 경로 자가 시험 (Spec #184 / Ticket-2) — o2c_verify_notify=true일 때만, check 모드에서는 하지 않는다.
+# 상설 자가 시험 알림(infra-alert-selftest)이 보는 검증 전용 스트림에 레코드 1건을 넣어 네이버웍스 [TEST] 통지를 일으킨다.
+# ------------------------------------------------------------------------------
+- name: "[O2C-037] Inject one self-test record so the standing self-test alert notifies (only with o2c_verify_notify=true)"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}/api/{{ o2c_org }}/{{ o2c_selftest_stream }}/_json"
+    method: POST
+    headers: "{{ o2c_verify_auth_headers }}"
+    body_format: json
+    body:
+      - host_name: "selftest-{{ now(utc=true).timestamp() | int }}"
+        message: "[TEST] notification path self-test"
+    status_code: [200, 201]
+    timeout: 30
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  changed_when: false   # 검증 전용 스트림에만 쓰며 운영 상태를 바꾸지 않는다
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - o2c_verify_notify | bool

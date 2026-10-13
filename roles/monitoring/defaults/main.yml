@@ -108,3 +108,18 @@ host_agents_vault_validate_certs: false
 # Legacy node_exporter Cleanup Toggle
 cleanup_legacy_node_exporter: true
 
+# OpenObserve 생존 타이머 (Spec #184 / Ticket-7): 이 호스트에만 5분 주기 확인 타이머를 배포한다.
+# OpenObserve(ns0332)가 죽으면 OpenObserve를 거치지 않고 네이버웍스 webhook(OpenBao agents/openobserve의 alert_webhook_url)으로 직접 P1을 보낸다.
+host_agents_o2_health_checker: ns0266
+o2_health_config_dir: /etc/openobserve-health
+o2_health_state_dir: /var/lib/openobserve-health
+o2_health_script_path: /usr/local/sbin/openobserve-health-check
+o2_health_interval: 5min
+o2_health_renotify_minutes: 60
+
+# 서버 도달성 검사(Spec #184 / Ticket-6, ADR-0010): 같은 검사하는 쪽 호스트의 otelcol에만 tcp_check 수신기를 붙인다.
+# tcp_check는 contrib 0.161.0(modern/legacy_el7 행)에 있다. legacy_el6 행(0.119.0)에는 없으므로 검사하는 쪽을 CentOS 6에 두지 않는다.
+# 대상 목록은 인벤토리에서 만들므로 호스트를 편입·폐기하면 검사하는 쪽에 Host Agents 설정을 다시 반영해야 한다.
+otel_tcpcheck_enabled: "{{ inventory_hostname == host_agents_o2_health_checker }}"
+otel_tcpcheck_interval: "60s"
+
