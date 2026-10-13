@@ -385,10 +385,17 @@ def _keep_run(tmp_path):
     return out, files
 
 
-def _run_keep_tasks(tmp_path, out, extra_vars=None):
+_KEEP_IDS = ("AUD-517", "AUD-518", "AUD-519", "AUD-520", "AUD-512", "AUD-513")
+
+
+def _run_keep_tasks(tmp_path, out, extra_vars=None, report=None):
+    """Run the keep tasks on the runner; return {relative path: SHA-256} of what AUD-513 would upload.
+
+    When ``report`` is a dict it receives {task name: localhost result} of every task run.
+    """
     upload = _tasks("storage_upload.yml")
-    keep = [t for t in upload if any("[%s]" % i in t["name"] for i in ("AUD-517", "AUD-518", "AUD-512", "AUD-513"))]
-    assert len(keep) == 4
+    keep = [t for t in upload if any("[%s]" % i in t["name"] for i in _KEEP_IDS)]
+    assert len(keep) == len(_KEEP_IDS)
     pb = tmp_path / "pb.yml"
     pb.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
@@ -402,6 +409,8 @@ def _run_keep_tasks(tmp_path, out, extra_vars=None):
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
     plays = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
+    if report is not None:
+        report.update({t["task"]["name"]: t["hosts"].get("localhost", {}) for t in plays})
     return {s["path"][len(str(out)) + 1:]: s["checksum"] for s in plays[-1]["hosts"]["localhost"]["msg"]}
 
 
@@ -435,8 +444,56 @@ def test_originals_stay_uncompressed_when_nothing_is_kept(tmp_path):
         assert (out / rel).read_bytes() == data, rel
 
 
-def test_gzip_objects_are_uploaded_as_gzip_without_transparent_decoding():
+def test_gzip_objects_are_uploaded_as_gzip_without_transparent_decoding(tmp_path):
     upload = next(t for t in _tasks("storage_upload.yml") if "[AUD-514]" in t["name"])
-    headers = upload["ansible.builtin.uri"]["headers"]
-    assert "application/gzip" in headers and r"\.gz$" in headers
-    assert "Content-Encoding" not in headers, "clients must get the stored .gz bytes, not a decoded body"
+    assert "Content-Encoding" not in upload["ansible.builtin.uri"]["headers"], \
+        "clients must get the stored .gz bytes, not a decoded body"
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    expected = {"report.html": "text/html; charset=utf-8", "trivy/h1.json.gz": "application/gzip",
+                "sbom/h1.cdx.json.gz": "application/gzip", "run.json": "application/json",
+                "hosts/h1.json": "application/json"}
+    pb = tmp_path / "ct.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "tasks": [{"ansible.builtin.debug": {"msg": "{{ _content_type }}"},
+                   "vars": {"_rel": "{{ item }}", "_content_type": upload["vars"]["_content_type"]},
+                   "loop": sorted(expected)}],
+    }]))
+    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
+    task = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"][0]
+    assert {r["item"]: r["msg"] for r in task["hosts"]["localhost"]["results"]} == expected
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the file mode that forces the failure")
+def test_an_original_that_fails_to_compress_is_kept_alone_and_named(tmp_path):
+    """A failed gzip must not leave a partial <file>.gz next to the original (both would be locked for 3 years)."""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out, files = _keep_run(tmp_path)
+    partial = out / "trivy/h2.json.gz"  # a truncated .gz left by an earlier, interrupted attempt
+    partial.write_bytes(b"\x1f\x8b\x08")
+    partial.chmod(0o400)  # archive cannot rewrite it, so compressing h2.json fails
+    report = {}
+    stats = _run_keep_tasks(tmp_path, out, report=report)
+
+    assert "trivy/h2.json" in stats and "trivy/h2.json.gz" not in stats, "only the original is kept"
+    assert not partial.exists()
+    assert (out / "trivy/h2.json").read_bytes() == files["trivy/h2.json"]
+    assert stats["trivy/h2.json"] == hashlib.sha256(files["trivy/h2.json"]).hexdigest()
+    assert "trivy/h1.json.gz" in stats and "sbom/h1.cdx.json.gz" in stats, "the others are still compressed"
+    warned = next(r for n, r in report.items() if "[AUD-520]" in n)
+    assert "h2.json" in str(warned.get("msg")) and "h1.json" not in str(warned.get("msg"))
+
+
+def test_no_compression_warning_when_every_original_compresses(tmp_path):
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out, _ = _keep_run(tmp_path)
+    report = {}
+    _run_keep_tasks(tmp_path, out, report=report)
+    warned = next(r for n, r in report.items() if "[AUD-520]" in n)
+    assert warned.get("skipped") is True

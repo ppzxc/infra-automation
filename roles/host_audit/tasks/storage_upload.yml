@@ -51,6 +51,25 @@
   register: _host_audit_compressed
   failed_when: false
 
+# archive는 <파일>.gz에 바로 쓴다(임시 파일·이름 바꾸기 없음). 압축이 중간에 실패하면 잘린 .gz가,
+# 원본 삭제만 실패하면 온전한 .gz가 원본 옆에 남아 둘 다 3년 잠금 버킷에 올라간다. 원본이 남아 있으면
+# 그 .gz는 지운다 — "원본이 있으면 .gz는 없다". 원본이 지워졌으면 .gz가 유일한 사본이므로 남긴다.
+# (러너 localhost 전용이라 exists 테스트가 보는 파일시스템이 대상 파일시스템이다.)
+- name: "[AUD-519] Remove the .gz of originals that failed to compress"
+  ansible.builtin.file:
+    path: "{{ item }}.gz"
+    state: absent
+  loop: "{{ _host_audit_compress_files.files | default([]) | map(attribute='path') | select('exists') | sort }}"
+  loop_control:
+    label: "{{ item | basename }}.gz"
+
+- name: "[AUD-520] Show the originals kept uncompressed because compression failed"
+  vars:
+    _uncompressed: "{{ _host_audit_compress_files.files | default([]) | map(attribute='path') | select('exists') | map('basename') | sort }}"
+  ansible.builtin.debug:
+    msg: "압축 실패로 원본 그대로 보관하는 파일: {{ _uncompressed | join(', ') }}"
+  when: _uncompressed | length > 0
+
 - name: "[AUD-512] Find every file of this run to keep"
   ansible.builtin.find:
     paths: "{{ host_audit_run.output_dir }}"
@@ -74,14 +93,14 @@
     _rel: "{{ item.stat.path | regex_replace('^' ~ (host_audit_run.output_dir | regex_escape) ~ '/', '') }}"
     _req: >-
       {{ _host_audit_storage_target | host_audit_s3_request('PUT', _host_audit_storage_prefix ~ _rel, none, item.stat.checksum) }}
+    _content_type: >-
+      {{ {'.html': 'text/html; charset=utf-8', '.gz': 'application/gzip'}.get((_rel | splitext)[1], 'application/json') }}
   ansible.builtin.uri:
     url: "{{ _req.url }}"
     method: PUT
     src: "{{ item.stat.path }}"
     remote_src: true
-    headers: >-
-      {{ _req.headers | combine({'Content-Type': 'text/html; charset=utf-8' if _rel is match('.*\.html$')
-         else ('application/gzip' if _rel is match('.*\.gz$') else 'application/json')}) }}
+    headers: "{{ _req.headers | combine({'Content-Type': _content_type}) }}"
     status_code: [-1, 200, 400, 403, 404, 409, 500, 503]
     timeout: "{{ host_audit_storage_timeout }}"
     validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
