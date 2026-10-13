@@ -151,7 +151,7 @@
       _raw_handler: Restart otelcol-contrib (raw)
     when: host_agents_os_path == 'legacy_el6'
 
-  # init 스크립트가 nohup >>로 열어 둔 파일이므로 copytruncate로 회전한다(재시작 불필요, 핸들러 없음).
+  # init 스크립트가 setsid + >> 리다이렉트로 열어 둔 파일이므로 copytruncate로 회전한다(재시작 불필요, 핸들러 없음).
   - name: "[MON-122] Deploy logrotate configuration for the collector log on CentOS 6 (raw)"
     ansible.builtin.import_tasks: raw_upload.yml
     vars:

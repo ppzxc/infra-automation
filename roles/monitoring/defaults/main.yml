@@ -17,6 +17,18 @@ otelcol_sysv_init_dir: /etc/init.d
 otelcol_sysv_log_path: /var/log/otelcol-contrib.log
 otelcol_logrotate_path: /etc/logrotate.d/otelcol-contrib
 otelcol_logrotate_rotate: 4
+# 재시작 생존 확인 튜너블 (MON-119 init 스크립트, MON-216 핸들러). 값의 근거는 여기 한 곳에서만 설명한다.
+# - otelcol_sysv_start_grace(3초): init `start` 뒤 PID 생존을 보기 전 대기. 설정 오류·file_storage 잠금 충돌 같은
+#   기동 직후 종료는 1~2초 안에 일어나므로 3초면 잡히고, 부팅·수동 start가 길어지지 않는다.
+# - otelcol_alive_grace_seconds(5초): 재시작 뒤 MON-216 핸들러가 상태를 읽기 전(그리고 재시도 start 뒤·EL7 activating 재확인 간격)
+#   대기. init의 start 유예(3초)보다 길게 두어 유예 직후에 죽는 경우까지 한 번 더 본다.
+# - otelcol_sysv_stop_timeout(30초): TERM 후 큐 flush·file_storage 잠금 해제를 기다리는 최대 시간(기존 동작 유지).
+#   넘기면 KILL하고 소멸을 최대 10초(고정) 더 확인하며, 그래도 남아 있으면 stop·restart가 실패한다.
+# - otelcol_sysv_pid_path: init 스크립트의 pidfile 위치.
+otelcol_sysv_pid_path: /var/run/otelcol-contrib.pid
+otelcol_sysv_start_grace: 3
+otelcol_sysv_stop_timeout: 30
+otelcol_alive_grace_seconds: 5
 otelcol_run_as_root: "{{ host_agents_is_legacy | default(false) | bool }}"
 
 # 컨트롤러 측 바이너리 캐시 (tarball 다운로드 1회 + 추출본). 버전/아키텍처별로 분리된다.

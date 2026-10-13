@@ -348,6 +348,7 @@ def _fake_otel_release(tmp_path):
 
 def _mon_extra(tmp_path):
     extra = _env_vars(tmp_path)
+    extra["otelcol_alive_grace_seconds"] = 0
     tgz, sha, _ = _fake_otel_release(tmp_path)
     extra["host_agents_versions"] = {"default": dict(extra["host_agents_versions"]["default"], otelcol_contrib="9.9.9")}
     extra["host_agents_checksums"] = dict(extra["host_agents_checksums"],
