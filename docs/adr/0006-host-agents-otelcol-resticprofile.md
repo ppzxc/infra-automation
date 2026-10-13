@@ -137,16 +137,18 @@
 
 - **호스트 방출**: `status-file: /var/lib/host-agents/restic-status.json`(덮어쓰기형 상태) + `run-finally` 훅이 한 줄 JSON을 `/var/log/host-agents/backup.jsonl`에 append(`tr -d '\n'` 등 POSIX 도구만, jq 없음) → filelog + `json_parser`(본문 원문 유지) → `backup_logs`. logrotate 설정 동반. (`prometheus-save-to-file`은 otelcol prometheus receiver가 HTTP scrape 전용이라 불채택.)
 - **중앙 보고**: Repo Maintenance가 호스트×명령마다 `/api/<org>/backup_logs/_json`으로 `job=maintenance`, `host`, `command`, `success`, `duration`, `error` 이벤트 전송(컨트롤러 전용 토큰). Deploy 종료 시 `job=inventory`(`host`, `deployed_at`) 등록 이벤트.
-- **표준 알림 계약** (규칙 생성·통지 채널은 서버 측):
+- **표준 알림 계약** (규칙 생성·통지 채널은 서버 측 — Spec #184에서 OpenObserve 알림 as-code로 구현, 등급·재통지 용어는 `CONTEXT.md`의 Event Alert / State Alert):
 
-  | 조건 | 기준 |
-  |---|---|
-  | 백업 실패 | `job=backup`, `success=false` 즉시 |
-  | 백업 누락 | 호스트별 마지막 성공 백업 > **26h** |
-  | 무결성 검사 실패 | `job=maintenance`, `command=check`, `success=false` |
-  | 유지보수 누락 | 호스트별 마지막 check > **8일** |
-  | 수집 중단 | 호스트 hostmetrics 부재 > **15분** |
-  | 미실행 호스트 | `job=inventory` 등록 후 백업 이벤트 없음 |
+  | 조건 | 기준 | 종류 | 등급 |
+  |---|---|---|---|
+  | 백업 실패 | `job=backup`, `success=false` 즉시 | Event | P2 |
+  | 백업 누락 | 수집 로스터 호스트별 마지막 성공 백업 > **26h** (한 번도 백업하지 않은 호스트 포함, Backup Only 제외) | State | P2 |
+  | 무결성 검사 실패 | `job=maintenance`, `command=check`, `success=false` | Event | P2 |
+  | 유지보수 누락 | 유지보수 로스터(Backup Only 포함) 호스트별 마지막 check > **8일** | State | P2 |
+  | 수집 중단 | Silent Host: 수집 로스터 호스트의 메트릭 하트비트 부재 > **15분**(P2), > **3시간**(P1) | State | P2/P1 |
+
+  - `backup_logs`의 호스트 식별은 `host` 필드다(maintenance·inventory 이벤트는 `host_name`이 비어 있음).
+  - 2026-10 보정(Spec #184 / Ticket-5): 등급을 명시하고, 로스터 기반 부재 감지(`UNION ALL … HAVING count(*) < 1`)가 "미실행 호스트"(`job=inventory` 등록 후 백업 이벤트 없음) 행을 대체해 삭제했다. 배포만 되고 백업한 적 없는 호스트도 백업 누락으로 잡힌다.
 
 ### 2.7 OpenObserve 연결 계약 및 로컬 버퍼링
 

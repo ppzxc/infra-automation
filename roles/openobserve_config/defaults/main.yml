@@ -392,6 +392,75 @@ o2c_alerts:
     frequency: 5
     silence: 60
 
+  - name: infra-backup-failure
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "백업 실패"
+    what: "restic 백업이 실패했습니다(job=backup, success=false)."
+    why: "다음 백업 전에 고치지 않으면 복구 지점이 늘어나지 않고, 반복되면 백업 누락 알림으로 이어집니다."
+    action: "① 행의 호스트에서 /var/log/host-agents/backup.jsonl 마지막 줄의 error 확인 ② 저장소(RustFS) 접속·자격증명·디스크 여유 점검 ③ 원인을 고친 뒤 호스트에서 백업을 수동 실행해 성공 확인"
+    runbook: "{{ o2c_runbook_base }}#backup-failure"
+    row_template: '• {host}: 실패 {failures}건'
+    description: "백업 실패 (job=backup, success=false) — Event Alert, backup_logs의 호스트는 host 필드"
+    stream: backup_logs
+    sql: >-
+      SELECT host, count(*) AS failures FROM "backup_logs"
+      WHERE job = 'backup' AND success = false
+      GROUP BY host
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-integrity-check-failure
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "백업 저장소 무결성 검사 실패"
+    what: "Repo Maintenance의 restic check가 실패했습니다(job=maintenance, command=check, success=false)."
+    why: "저장소가 손상됐을 수 있습니다. 실패한 호스트는 prune이 차단되어 저장소가 계속 커집니다."
+    action: "① Semaphore Repo Maintenance 실행 로그에서 해당 호스트의 check 오류 확인 ② restic check로 손상 범위 확인 ③ 손상이면 저장소 복구·재초기화와 백업 재실행 계획"
+    runbook: "{{ o2c_runbook_base }}#integrity-check-failure"
+    row_template: '• {host}: 실패 {failures}건'
+    description: "무결성 검사 실패 (job=maintenance, command=check, success=false) — Event Alert, 호스트는 host 필드"
+    stream: backup_logs
+    sql: >-
+      SELECT host, count(*) AS failures FROM "backup_logs"
+      WHERE job = 'maintenance' AND command = 'check' AND success = false
+      GROUP BY host
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-backup-missing
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "백업 누락: 마지막 성공 백업이 26시간 넘음"
+    what: "수집 로스터의 호스트에서 성공한 백업(job=backup)이 26시간 넘게 없습니다(한 번도 백업하지 않은 호스트 포함)."
+    why: "복구 지점이 하루 넘게 갱신되지 않고 있습니다. 놓친 실행은 보정되지 않습니다."
+    action: "① 같은 호스트의 Silent Host 알림이 있는지 먼저 확인 — 수집기 중단으로 이벤트만 빠진 것일 수 있음 ② 호스트의 /etc/cron.d/host-agents-backup(또는 systemd timer)과 /var/log/host-agents/backup.jsonl 확인 ③ 신규 편입이면 Host Agents Deploy 실행 여부 확인"
+    runbook: "{{ o2c_runbook_base }}#backup-missing"
+    row_template: '• {host}'
+    description: "수집 로스터 호스트의 마지막 성공 job=backup > 26h (State Alert, 재통지 1440분) — Backup Only 호스트는 제외"
+    stream: backup_logs
+    missing: {roster: collect, field: host, cond: "job = 'backup' AND success = true"}
+    sql: "{{ o2c_roster_collect | o2c_missing_sql('backup_logs', 'host', \"job = 'backup' AND success = true\") }}"
+    period: 1560
+    frequency: 60
+    silence: 1440
+  - name: infra-maintenance-missing
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "유지보수 누락: 마지막 무결성 검사가 8일 넘음"
+    what: "유지보수 로스터의 호스트에서 무결성 검사(job=maintenance, command=check) 기록이 8일 넘게 없습니다."
+    why: "Repo Maintenance가 멈췄거나 해당 호스트가 건너뛰어지고 있습니다. 저장소 손상을 발견하지 못하고 prune도 이뤄지지 않습니다."
+    action: "① Semaphore Repo Maintenance 템플릿의 최근 실행과 스케줄 확인 ② 해당 호스트가 제외·접속 실패로 건너뛰어졌는지 확인 ③ 수동으로 Repo Maintenance를 실행"
+    runbook: "{{ o2c_runbook_base }}#maintenance-missing"
+    row_template: '• {host}'
+    description: "유지보수 로스터(Backup Only 포함) 호스트의 마지막 command=check > 8일 (State Alert, 재통지 1440분)"
+    stream: backup_logs
+    missing: {roster: maintenance, field: host, cond: "job = 'maintenance' AND command = 'check'"}
+    sql: "{{ o2c_roster_maintenance | o2c_missing_sql('backup_logs', 'host', \"job = 'maintenance' AND command = 'check'\") }}"
+    period: 11520
+    frequency: 60
+    silence: 1440
+
 # 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고
 # 알림 SQL(스트림명만 교체)을 검색해 기대와 비교한다. 운영 스트림·알림·통지 대상은 건드리지 않는다.
 # 수집 인증은 OpenBao agents/openobserve의 controller_ingest_token(컨트롤러 전용, 설정 API 계정과 다름).

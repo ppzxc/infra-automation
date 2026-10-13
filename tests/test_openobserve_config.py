@@ -32,6 +32,7 @@ EXPECTED_ALERTS = {
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
     "infra-silent-host-p2", "infra-silent-host-p1",
+    "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
 }
 RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
     "infra-disk-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_usage"),
@@ -48,8 +49,11 @@ SELFTEST_STREAM = "alert_selftest_alert_verify"
 def _same_roster_alert(name, stored, sql):
     """Roster (absence) SQL of the same alert — the verification adds fake hosts to the roster, so the host names differ."""
     def is_roster(q):
-        return "AS host_name, count(*) AS n FROM" in q
-    return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql)
+        return "AS host_name, count(*) AS n FROM" in q or "AS host, count(*) AS n FROM" in q
+    def shape(q):   # the roster hosts differ; the extra condition of each branch (e.g. job = 'backup' AND success = true) must match
+        conds = (re.search(r"WHERE (?:(?:host|host_name) = '[^']*'(?: AND )?)?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
+        return {m.group(1) if m else "" for m in conds}
+    return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql) and shape(stored) == shape(sql)
 
 
 class FakeO2:
@@ -85,14 +89,15 @@ class FakeO2:
 
             def _fire(self, sql, stream):
                 """What a correct engine returns: the hosts of the firing, non-known-failure cases of the alert owning this SQL."""
-                run_ids = {r["host_name"].rsplit("-", 1)[1] for _, _, recs in outer.ingests for r in recs}
+                run_ids = {(r.get("host_name") or r["host"]).rsplit("-", 1)[1] for _, _, recs in outer.ingests for r in recs}
                 for alert in outer.store["alert"].values():
                     prod = alert["stream_name"]
                     stored = alert["query_condition"]["sql"].replace(f'"{prod}"', f'"{stream}"')
                     if stream != prod + "_alert_verify" or not (stored == sql or _same_roster_alert(alert["name"], stored, sql)):
                         continue
                     cases = outer.fixtures[alert["name"]]["cases"]
-                    return [{"host_name": f'{c["host"]}-{rid}'} for rid in sorted(run_ids)
+                    key = outer.fixtures[alert["name"]].get("row_key", "host_name")
+                    return [{key: f'{c["host"]}-{rid}'} for rid in sorted(run_ids)
                             for c in cases if c["fires"] and not c.get("known_failure")]
                 return []
 
@@ -442,14 +447,14 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     assert res.returncode == 0, res.stdout + res.stderr
     streams = {p.split("/")[3] for p, _, _ in o2.ingests}
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
-                       "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify"}
+                       "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify", "backup_logs_alert_verify"}
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
         assert stream.endswith("_alert_verify") and 'FROM "security_logs"' not in sql and 'FROM "system_logs"' not in sql
     # 운영 스트림·운영 알림은 건드리지 않는다: 쓰기는 설정 객체뿐이고 합성 레코드는 검증 스트림에만 간다
     assert all("/_json" not in p for _, p, _ in o2.writes)
-    hosts = {r["host_name"] for _, _, recs in o2.ingests for r in recs}
+    hosts = {r.get("host_name") or r["host"] for _, _, recs in o2.ingests for r in recs}
     assert any(h.startswith("verify-oom-upper-") for h in hosts)
 
 
@@ -469,7 +474,7 @@ def test_job_fails_and_names_the_alert_and_case_when_an_alert_does_not_fire(o2):
 
 def test_job_fails_when_an_alert_fires_on_a_record_that_must_not_fire(o2):
     o2.search_override = lambda stream, sql, hits: hits + ([{"host_name": next(
-        r["host_name"] for _, _, recs in o2.ingests for r in recs if r["host_name"].startswith("verify-root-other-user-"))}]
+        r["host_name"] for _, _, recs in o2.ingests for r in recs if r.get("host_name", "").startswith("verify-root-other-user-"))}]
         if "user_name = 'root'" in sql else [])
     res = _apply(o2)
     assert res.returncode != 0
@@ -621,7 +626,7 @@ def test_verification_places_normal_sources_in_the_synthetic_records_by_kind(o2)
 def test_verification_skips_kind_specific_cases_when_the_list_has_no_such_kind(o2):
     res = _apply(o2)
     assert res.returncode == 0, res.stdout + res.stderr
-    hosts = {r["host_name"] for _, _, rs in o2.ingests for r in rs}
+    hosts = {r.get("host_name") or r["host"] for _, _, rs in o2.ingests for r in rs}
     assert not any(h.startswith(("verify-root-semaphore-", "verify-root-office-")) for h in hosts)
     assert any(h.startswith("verify-root-external-") for h in hosts)
 
@@ -809,7 +814,8 @@ def test_changing_the_inventory_changes_the_roster_sql_and_a_rerun_with_the_same
     inv = _inventory(tmp_path, SERVERS + ["ns0500"], excluded=["ns0001"])
     assert _apply(o2, inventory=inv).returncode == 0
     updated = {p for m, p, _ in o2.writes if m == "PUT"}
-    ids = {n: o2.store["alert"][n]["alert_id"] for n in ("infra-silent-host-p2", "infra-silent-host-p1")}
+    ids = {n: o2.store["alert"][n]["alert_id"] for n in ("infra-silent-host-p2", "infra-silent-host-p1",
+                                                         "infra-backup-missing", "infra-maintenance-missing")}
     assert updated == {f"/api/v2/default/alerts/{i}" for i in ids.values()}
     hosts = _branch_hosts(_sql(o2, "infra-silent-host-p1"))
     assert "ns0500" in hosts and "ns0001" not in hosts
@@ -860,3 +866,78 @@ def test_semaphore_docs_say_the_config_template_reads_the_servers_inventory():
     setup = (ROOT_DIR / "docs" / "semaphore-setup.md").read_text(encoding="utf-8")
     row = next(line for line in setup.splitlines() if line.startswith("| OpenObserve — Config |"))
     assert "servers" in row
+
+
+# --- 백업 알림 (Spec #184 / Ticket-5) ---------------------------------------------------------------------------------
+BACKUP_EVENTS = {"infra-backup-failure": ("backup", "success = false"),
+                 "infra-integrity-check-failure": ("maintenance", "command = 'check' AND success = false")}
+BACKUP_MISSING = {"infra-backup-missing": 1560, "infra-maintenance-missing": 11520}
+BACKUP_ALERTS = {*BACKUP_EVENTS, *BACKUP_MISSING}
+
+
+def _branch_hosts_as(sql):
+    return set(re.findall(r"SELECT '([^']+)' AS host,", sql))
+
+
+def test_backup_failure_and_integrity_failure_are_p2_event_alerts_on_backup_logs_keyed_by_host(o2, tmp_path):
+    assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
+    for name, (job, cond) in BACKUP_EVENTS.items():
+        a = o2.store["alert"][name]
+        assert a["stream_name"] == "backup_logs" and a["context_attributes"]["severity"] == "P2 경고"
+        sql = a["query_condition"]["sql"]
+        assert f"job = '{job}'" in sql and cond in sql and "GROUP BY host" in sql and "host_name" not in sql, name
+        assert a["trigger_condition"]["silence"] == a["trigger_condition"]["period"] == 5
+        assert "{host}" in a["row_template"]
+
+
+def test_backup_and_maintenance_missing_are_daily_p2_state_alerts_over_their_rosters(o2, tmp_path):
+    inv = _inventory(tmp_path, SERVERS, excluded=["ns0002"], backup_only=["ns0003"])
+    assert _apply(o2, inventory=inv).returncode == 0
+    backup, maint = (o2.store["alert"][n] for n in ("infra-backup-missing", "infra-maintenance-missing"))
+    for name, period in BACKUP_MISSING.items():
+        a = o2.store["alert"][name]
+        assert a["stream_name"] == "backup_logs" and a["context_attributes"]["severity"] == "P2 경고"
+        assert a["trigger_condition"]["period"] == period and a["trigger_condition"]["silence"] == 1440
+        sql = a["query_condition"]["sql"]
+        assert "UNION ALL" in sql and "HAVING count(*) < 1" in sql and "AS host," in sql and "host_name" not in sql
+        for banned in ("VALUES", "unnest", "JOIN"):
+            assert banned.lower() not in sql.lower()
+    assert "job = 'backup' AND success = true" in backup["query_condition"]["sql"]
+    assert "command = 'check'" in maint["query_condition"]["sql"]
+    # 수집 로스터는 Backup Only를 뺀다(이벤트를 안 보내 거짓 누락), 유지보수 로스터는 Backup Only를 포함한다
+    assert _branch_hosts_as(backup["query_condition"]["sql"]) == {"ns0001", "ns0004", "ns0266", "ns0332"}
+    assert _branch_hosts_as(maint["query_condition"]["sql"]) == {"ns0001", "ns0003", "ns0004", "ns0266", "ns0332"}
+
+
+def test_backup_missing_action_starts_with_the_silent_host_check_and_runbook_anchors_exist(o2, tmp_path):
+    assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
+    ctx = o2.store["alert"]["infra-backup-missing"]["context_attributes"]
+    assert ctx["action"].startswith("① 같은 호스트의 Silent Host 알림이 있는지 먼저 확인")
+    runbook = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
+    for name in BACKUP_ALERTS:
+        anchor = o2.store["alert"][name]["context_attributes"]["runbook"].split("#")[1]
+        assert f'<a id="{anchor}"></a>' in runbook, name
+
+
+def test_verification_uses_the_host_field_for_backup_logs_and_fake_roster_hosts_for_missing_alerts(o2, tmp_path):
+    assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
+    recs = [r for p, _, rs in o2.ingests if "backup_logs_alert_verify" in p for r in rs]
+    assert recs and all("host" in r and "host_name" not in r for r in recs)
+    searched = [sql for stream, sql in o2.searches if stream == "backup_logs_alert_verify" and "UNION ALL" in sql]
+    hosts = set().union(*(_branch_hosts_as(q) for q in searched))
+    for name in BACKUP_MISSING:
+        for case in FIXTURES[name]["cases"]:
+            assert any(h.startswith(case["host"] + "-") for h in hosts), (name, case["host"])
+
+
+def test_backup_fixtures_cover_failed_events_and_fake_roster_host_missing():
+    for name in BACKUP_ALERTS:
+        assert {c["fires"] for c in FIXTURES[name]["cases"]} == {True, False}
+        assert FIXTURES[name]["row_key"] == "host" and FIXTURES[name]["host_field"] == "host"
+    assert any(c["records"] == [] and c["fires"] for c in FIXTURES["infra-backup-missing"]["cases"])
+
+
+def test_adr_0006_alert_contract_has_grades_and_no_unexecuted_host_row():
+    adr = next((ROOT_DIR / "docs" / "adr").glob("0006-*.md")).read_text(encoding="utf-8")
+    table = adr[adr.index("표준 알림 계약"):adr.index("### 2.7")]
+    assert "| 미실행 호스트" not in table and "P2" in table
