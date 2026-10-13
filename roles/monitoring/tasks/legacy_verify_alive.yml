@@ -1,0 +1,26 @@
+---
+# legacy 재시작 핸들러의 사후 생존 확인 (CentOS 6 service status, CentOS 7 systemctl is-active).
+# 죽었으면 start를 1회 재시도·재확인하고, 그래도 죽어 있으면 로그 꼬리와 함께 해당 호스트만 실패시킨다. raw는 check 모드에서 스킵된다(재시작도 스킵).
+- name: "[MON-216] Verify otelcol-contrib stayed alive after restart (raw)"
+  ansible.builtin.raw: >-
+    sleep {{ otelcol_alive_grace_seconds | int }};
+    {% if host_agents_os_path == 'legacy_el6' %}
+    service otelcol-contrib status
+    || { echo "otelcol-contrib is not running after restart; retrying start once";
+    service otelcol-contrib start;
+    sleep {{ otelcol_alive_grace_seconds | int }};
+    service otelcol-contrib status
+    || { echo "otelcol-contrib is still not running after retry; last lines of {{ otelcol_sysv_log_path }}:";
+    tail -n 20 {{ otelcol_sysv_log_path }}; exit 1; }; }
+    {% else %}
+    systemctl is-active otelcol-contrib
+    || { echo "otelcol-contrib is not active after restart; retrying start once";
+    systemctl start otelcol-contrib;
+    sleep {{ otelcol_alive_grace_seconds | int }};
+    systemctl is-active otelcol-contrib
+    || { echo "otelcol-contrib is still not active after retry; journal tail:";
+    journalctl -u otelcol-contrib -n 20 --no-pager; exit 1; }; }
+    {% endif %}
+  register: _otelcol_alive
+  changed_when: false
+  failed_when: _otelcol_alive.rc | default(0) != 0

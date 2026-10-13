@@ -935,6 +935,20 @@
           delegate_to: localhost
           become: false
 
+        - name: "[VERIFY-MON-216] legacy restart handler is followed by a liveness check that fails the host with a log tail"
+          ansible.builtin.assert:
+            that:
+              - '"[MON-216]" in _t and "service otelcol-contrib status" in _t and "systemctl is-active otelcol-contrib" in _t'
+              - '"tail -n 20" in _t and "journalctl -u otelcol-contrib" in _t and "exit 1" in _t'
+              - '"service otelcol-contrib start" in _t and "systemctl start otelcol-contrib" in _t'
+              - '"listen: Restart otelcol-contrib (raw)" in _h and "legacy_verify_alive.yml" in _h'
+            quiet: true
+          vars:
+            _t: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/tasks/legacy_verify_alive.yml') }}"
+            _h: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/monitoring/handlers/main.yml') }}"
+          delegate_to: localhost
+          become: false
+
         - name: "[VERIFY-BAK-201] legacy_el7 probes conditional backup paths over raw"
           ansible.builtin.assert:
             that: '"[BAK-201]" in _t and "raw_exists_cmd" in _t and "when: host_agents_is_legacy | bool" in _t'

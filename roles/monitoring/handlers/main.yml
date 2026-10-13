@@ -17,3 +17,9 @@
   ansible.builtin.raw: >-
     {{ 'service otelcol-contrib restart' if host_agents_os_path == 'legacy_el6' else 'systemctl restart otelcol-contrib' }}
   changed_when: true
+
+# 재시작 뒤 수집기가 살아 있는지 확인한다(MON-216). 같은 topic을 listen하므로 위 재시작 핸들러 직후에 실행되며,
+# 죽어 있으면 그 호스트만 실패한다(나머지 호스트는 계속 진행).
+- name: Verify otelcol-contrib is alive after restart (raw)
+  ansible.builtin.include_tasks: "{{ role_path }}/tasks/legacy_verify_alive.yml"
+  listen: Restart otelcol-contrib (raw)

@@ -25,8 +25,12 @@ PROG="otelcol-contrib"
 EXEC="{{ host_agents_bin_dir | default('/usr/local/bin') }}/$PROG"
 CONFIG="{{ otelcol_config_path }}"
 SECRETS="{{ otelcol_secrets_path }}"
-PIDFILE="/var/run/$PROG.pid"
+PIDFILE="{{ otelcol_sysv_pid_path | default('/var/run/otelcol-contrib.pid') }}"
 LOGFILE="{{ otelcol_sysv_log_path | default('/var/log/otelcol-contrib.log') }}"
+# start 후 이 시간(초) 안에 프로세스가 죽으면 start를 실패시킨다(조용한 수집 중단 방지, Spec #161).
+START_GRACE={{ otelcol_sysv_start_grace | default(3) }}
+# TERM 후 종료를 기다리는 최대 시간(초). 넘기면 KILL하고 소멸을 확인한다.
+STOP_TIMEOUT={{ otelcol_sysv_stop_timeout | default(30) }}
 {% if not (otelcol_run_as_root | default(false) | bool) %}
 USER="{{ otelcol_user }}"
 {% endif %}
@@ -49,15 +53,26 @@ start() {
         echo
         return 0
     fi
+    rm -f $PIDFILE
+    # setsid로 세션·제어 터미널과 분리한다(pty 세션 종료 시 SIGHUP 경쟁으로 조용히 죽는 것을 방지).
+    # setsid가 fork할 수 있으므로 pid는 sh -c가 exec 전에 직접 pidfile에 기록한다($$는 exec 후에도 같은 pid).
 {% if otelcol_run_as_root | default(false) | bool %}
     # CentOS 6: 커널 2.6.32에는 ambient capability가 없어 root로 실행한다(ADR-0006 §2.9).
     # stdin까지 끊어야 백그라운드 자식이 raw(SSH) 세션의 파이프를 붙잡지 않는다.
-    nohup "$EXEC" --config="$CONFIG" >> $LOGFILE 2>&1 </dev/null &
+    setsid /bin/sh -c 'echo $$ > "$1"; exec "$2" --config="$3"' sh "$PIDFILE" "$EXEC" "$CONFIG" >> $LOGFILE 2>&1 </dev/null &
 {% else %}
-    nohup su -s /bin/sh $USER -c "$EXEC --config=$CONFIG" >> $LOGFILE 2>&1 </dev/null &
+    setsid /bin/sh -c 'echo $$ > "$1"; exec su -s /bin/sh "$2" -c "$3 --config=$4"' sh "$PIDFILE" "$USER" "$EXEC" "$CONFIG" >> $LOGFILE 2>&1 </dev/null &
 {% endif %}
-    PID=$!
-    echo $PID > $PIDFILE
+    sleep $START_GRACE
+    PID=$(cat $PIDFILE 2>/dev/null)
+    if [ -z "$PID" ] || ! kill -0 $PID 2>/dev/null; then
+        rm -f $PIDFILE
+        echo_failure 2>/dev/null || echo -n "[ FAILED ]"
+        echo
+        echo "$PROG exited within ${START_GRACE}s of start; last lines of $LOGFILE:" >&2
+        tail -n 20 $LOGFILE >&2
+        return 1
+    fi
     echo_success 2>/dev/null || echo -n "[ OK ]"
     echo
     return 0
@@ -70,11 +85,25 @@ stop() {
         kill -TERM $PID 2>/dev/null
         # 종료(큐 flush, file_storage 잠금 해제)를 기다려야 restart의 새 프로세스가 storage를 열 수 있다.
         n=0
-        while kill -0 $PID 2>/dev/null && [ $n -lt 30 ]; do
+        while kill -0 $PID 2>/dev/null && [ $n -lt $STOP_TIMEOUT ]; do
             sleep 1
             n=$((n + 1))
         done
-        kill -0 $PID 2>/dev/null && kill -KILL $PID 2>/dev/null
+        if kill -0 $PID 2>/dev/null; then
+            kill -KILL $PID 2>/dev/null
+            # KILL 직후에도 소멸(잠금 해제)을 확인한 뒤에만 pidfile을 지운다.
+            n=0
+            while kill -0 $PID 2>/dev/null && [ $n -lt 10 ]; do
+                sleep 1
+                n=$((n + 1))
+            done
+            if kill -0 $PID 2>/dev/null; then
+                echo_failure 2>/dev/null || echo -n "[ FAILED ]"
+                echo
+                echo "$PROG (pid $PID) did not exit after KILL" >&2
+                return 1
+            fi
+        fi
         rm -f $PIDFILE
         echo_success 2>/dev/null || echo -n "[ OK ]"
     else
@@ -105,7 +134,7 @@ case "$1" in
         status_fn
         ;;
     restart)
-        stop
+        stop || exit 1
         sleep 1
         start
         ;;

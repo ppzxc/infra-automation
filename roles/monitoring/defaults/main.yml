@@ -17,6 +17,8 @@ otelcol_sysv_init_dir: /etc/init.d
 otelcol_sysv_log_path: /var/log/otelcol-contrib.log
 otelcol_logrotate_path: /etc/logrotate.d/otelcol-contrib
 otelcol_logrotate_rotate: 4
+# legacy 재시작 직후 수집기 생존을 확인하기 전 대기(초). 시작 직후 곧바로 죽는 경우를 잡는다(MON-216).
+otelcol_alive_grace_seconds: 5
 otelcol_run_as_root: "{{ host_agents_is_legacy | default(false) | bool }}"
 
 # 컨트롤러 측 바이너리 캐시 (tarball 다운로드 1회 + 추출본). 버전/아키텍처별로 분리된다.
