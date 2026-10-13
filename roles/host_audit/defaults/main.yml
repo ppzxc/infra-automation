@@ -141,3 +141,7 @@ host_audit_mail_timeout: 30
 # host_audit_resend_month(YYYY-MM, 보고서 시간대 기준 실행 시작 월)를 함께 준다.
 host_audit_resend_run_id: ""
 host_audit_resend_month: ""
+
+# 러너 출력 상위 경로 아래에서 이 일수가 지난 실행 디렉터리는 다음 실행 초기에 지운다(#157).
+# 정상 종료한 실행은 끝에서 정책대로 지우므로(cleanup.yml) 이 값은 중간에 죽은 실행의 찌꺼기를 위한 것이다.
+host_audit_output_retention_days: 7

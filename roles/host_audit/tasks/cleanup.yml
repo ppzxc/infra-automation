@@ -1,0 +1,60 @@
+---
+# ==============================================================================
+# Host Audit — 이번 실행 디렉터리 정리 (러너 localhost 전용, #157)
+# ==============================================================================
+# report.yml의 always 구간에서 돈다: AUD-516·AUD-610이 assert로 실행을 끝내도 정책대로 처리된다.
+# 지우는 대상은 이번 실행의 output_dir 하나다(host_audit_output_root는 지우지 않는다).
+#
+#   보관 성공(업로드·포인터·Audit Baseline 조회 모두 정상) → 지운다(메일 결과와 무관, 재발송은 버킷에서)
+#   보관 꺼짐 + 메일 발송 성공                                → 지운다
+#   보관 꺼짐 + 메일 실패·미발송                               → 남긴다(러너 사본이 유일)
+#   보관 실패(업로드 실패·보관 입력 누락 등)                    → 남긴다(AUD-516 메시지가 가리킴)
+#   check 모드·경로 검증 실패                                  → 지우지 않는다
+# 판정에 쓰는 값이 없으면(앞 단계가 일찍 끝남) 남기는 쪽으로 기운다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-630] Decide whether to remove this run's output directory"
+  vars:
+    _root: "{{ host_audit_output_root | regex_replace('/+$', '') }}"
+    _run_id: "{{ host_audit_run.run_id }}"
+    _path_ok: >-
+      {{ _root.startswith('/') and _root | length > 1
+         and _run_id is match('^[A-Za-z0-9][A-Za-z0-9._-]*$') and not _run_id.startswith('resend-')
+         and host_audit_run.run_kind != 'resend'
+         and host_audit_run.output_dir == _root ~ '/' ~ _run_id }}
+    _uploaded: "{{ _host_audit_uploads.results | default([]) | map(attribute='status', default=-1) | list }}"
+    _pointer_failed: >-
+      {{ host_audit_run.run_kind == 'scheduled' and (_host_audit_pointer_put.status | default(-1)) != 200 }}
+    _kept_in_bucket: >-
+      {{ (host_audit_storage_enabled | bool) and (_host_audit_storage_active | bool)
+         and (_host_audit_storage_problem | default('x')) | length == 0
+         and (host_audit_baseline_history.state | default('failed')) != 'failed'
+         and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0
+         and not (_pointer_failed | bool) }}
+    _mail_sent: >-
+      {{ (_host_audit_mail_plan.send | default(false) | bool) and (host_audit_mail_outcome.sent | default(false) | bool) }}
+    _reason: >-
+      {{ {'remove': false, 'reason': 'check 모드'} if ansible_check_mode
+         else ({'remove': false, 'reason': '경로 검증 실패(이번 실행 디렉터리가 출력 상위 경로 바로 아래가 아님)'} if not (_path_ok | bool)
+         else ({'remove': true, 'reason': '원본이 버킷에 보관됨'} if _kept_in_bucket | bool
+         else ({'remove': true, 'reason': '보관 꺼짐, 메일 발송 성공'} if (not (host_audit_storage_enabled | bool)) and (_mail_sent | bool)
+         else ({'remove': false, 'reason': '보관 꺼짐, 메일 실패 또는 미발송 - 러너 사본이 유일함'} if not (host_audit_storage_enabled | bool)
+         else {'remove': false, 'reason': '원본 보관이 끝나지 않음 - 보관 실패 메시지가 이 디렉터리를 가리킴'})))) }}
+  ansible.builtin.set_fact:
+    _host_audit_cleanup:
+      remove: "{{ _reason.remove }}"
+      reason: "{{ _reason.reason }}"
+
+- name: "[AUD-631] Remove this run's output directory"
+  ansible.builtin.file:
+    path: "{{ host_audit_run.output_dir }}"
+    state: absent
+  when:
+    - not ansible_check_mode
+    - _host_audit_cleanup.remove | bool
+
+- name: "[AUD-632] Show where the kept run directory is and why"
+  ansible.builtin.debug:
+    msg: "Host Audit 실행 디렉터리 남김: {{ host_audit_run.output_dir }} — {{ _host_audit_cleanup.reason }}"
+  when:
+    - not ansible_check_mode
+    - not (_host_audit_cleanup.remove | bool)

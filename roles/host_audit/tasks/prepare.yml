@@ -49,3 +49,28 @@
     - "{{ host_audit_output_root }}"
     - "{{ host_audit_run.output_dir }}"
     - "{{ host_audit_run.output_dir }}/hosts"
+
+# OOM 등으로 중간에 죽은 실행은 끝 정리(cleanup.yml)까지 가지 못한다. 실행 초기에 출력 상위 경로 바로
+# 아래의 디렉터리 중 host_audit_output_retention_days일이 지난 것만 지운다. 이번 실행 디렉터리와
+# 재발송용(resend-*) 디렉터리, 디렉터리가 아닌 항목은 건드리지 않는다. check 모드에서는 지우지 않는다.
+- name: "[AUD-006] Find the run directories older than the retention days"
+  ansible.builtin.find:
+    paths: "{{ host_audit_output_root }}"
+    file_type: directory
+    recurse: false
+    age: "{{ host_audit_output_retention_days | int }}d"
+    age_stamp: mtime
+    excludes:
+      - "resend-*"
+  register: _host_audit_old_runs
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: "[AUD-007] Remove the run directories older than the retention days"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _host_audit_old_runs.files | default([]) | rejectattr('path', 'equalto', host_audit_run.output_dir) | list }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: not ansible_check_mode

@@ -88,6 +88,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_run_kind` | `on_demand` | `scheduled`(Audit Baseline이 됨) · `on_demand`. Semaphore 템플릿에 고정 |
 | `host_audit_run_id` | `ha-<UTC 시작 시각>` | 실행 ID. 보통 지정하지 않음 |
 | `host_audit_output_root` | env `HOST_AUDIT_OUTPUT_ROOT` 또는 `/tmp/host_audit` | 러너 출력 상위 경로 |
+| `host_audit_output_retention_days` | `7` | 출력 상위 경로 아래에서 이 일수가 지난 실행 디렉터리를 다음 실행 초기에 지움(#157, §14) |
 | `host_audit_scope_pattern` | `servers:loadbalancers:overseer:!host_audit_excluded` | 점검 대상 그룹 |
 | `host_audit_timezone` | `Asia/Seoul` | 보고서 시각 표기 |
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
@@ -101,6 +102,8 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-003` | `Fix Host Audit run metadata` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 |
 | `AUD-004` | `Select Host Audit targets into the host_audit_targets group` | `ansible.builtin.add_host` | 러너 | 인메모리 그룹, `changed_when: false` |
 | `AUD-005` | `Create the runner-local output directory for this run` | `ansible.builtin.file` | 러너 | 실행별 디렉터리 `0700` |
+| `AUD-006` | `Find the run directories older than the retention days` | `ansible.builtin.find` | 러너 | 읽기 전용, 출력 상위 경로 바로 아래의 디렉터리만, `resend-*` 제외, check 모드 건너뜀 |
+| `AUD-007` | `Remove the run directories older than the retention days` | `ansible.builtin.file` | 러너 | `state: absent`, 이번 실행 디렉터리 제외, check 모드 건너뜀 |
 | `AUD-010` | `Probe host identity and OS (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-011` | `Build the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_host_record` 필터 |
 | `AUD-100` | `Probe Asset Inventory (raw, read-only)` | `ansible.builtin.raw` (`become: true`) | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
@@ -642,6 +645,41 @@ report.yml
 | `AUD-626` | `Assert the archived report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 해시 불일치면 보내지 않음 |
 | `AUD-627` | `Prepare the resend summary and attachment` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
 | `AUD-628` | `Remove the downloaded report from the runner` | `ansible.builtin.file` | 러너 | `state: absent` |
+
+## 14. 러너 디렉터리 정리 (#157)
+
+러너의 `<host_audit_output_root>/<run_id>`는 실행당 약 3.6GB다. 두 곳에서 정리한다.
+
+### 14.1 이번 실행분 (`cleanup.yml`, 보고서 단계의 `always`)
+
+AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·메일·두 판정을 묶은 block의 `always`에서 돈다 — 실행이 실패로 끝나도 정책대로 처리된다. 지우는 것은 이번 실행의 `output_dir` 하나이고 `host_audit_output_root`는 지우지 않는다.
+
+| 상황 | 동작 |
+|---|---|
+| 보관 성공 | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
+| 보관 꺼짐(`host_audit_storage_enabled=false`), 메일 발송 성공 | 지운다. |
+| 보관 꺼짐, 메일 실패 또는 미발송 | 남긴다. 러너 사본이 유일하다. |
+| 보관 실패(업로드 실패, 보관 입력 누락) | 남긴다. AUD-516 메시지가 이 디렉터리를 가리킨다. |
+| check 모드 | 지우지 않는다. |
+
+"보관 성공"은 AUD-516이 통과하는 조건과 같다: 보관 입력 이상 없음, 업로드 전부 200, 정기 실행은 포인터 업로드 200, Audit Baseline 조회가 `failed`가 아님. Audit Baseline 조회만 실패한 실행은 AUD-516이 실패로 끝내고 메시지가 러너 디렉터리를 가리키므로 남긴다. 판정에 쓸 값이 없으면(앞 단계가 일찍 끝남) 남긴다. 남긴 경우 실행 로그에 경로와 이유를 보여 준다(`AUD-632`).
+
+**경로 검증**: `output_dir`이 정확히 `<host_audit_output_root>/<run_id>`(출력 상위 경로 바로 아래 한 단계)이고, `run_id`가 `[A-Za-z0-9][A-Za-z0-9._-]*`이며 `resend-`로 시작하지 않을 때만 지운다. 하나라도 어긋나면 지우지 않고 이유를 보여 준다.
+
+### 14.2 오래된 실행 디렉터리 (`prepare.yml`)
+
+OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실행 초기(`AUD-005` 뒤)에 출력 상위 경로 바로 아래 디렉터리 중 `host_audit_output_retention_days`(기본 **7일**, 수정 시각 기준)가 지난 것만 지운다. 이번 실행 디렉터리, 재발송용 `resend-*` 디렉터리, 디렉터리가 아닌 항목은 건드리지 않는다. check 모드에서는 지우지 않는다.
+
+### 14.3 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-630` | `Decide whether to remove this run's output directory` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 판정, 경로 검증 포함 |
+| `AUD-631` | `Remove this run's output directory` | `ansible.builtin.file` | 러너 | `state: absent`, 이번 실행 `output_dir`만, check 모드 건너뜀 |
+| `AUD-632` | `Show where the kept run directory is and why` | `ansible.builtin.debug` | 러너 | 남긴 경우만, 경로와 이유 |
+(AUD-006·007은 §6 매트릭스)
+
+검증: pytest `tests/test_host_audit_cleanup.py` — report.yml의 실제 마지막 block(AUD-516·AUD-610·정리)을 러너에서 돌려 위 표의 각 상황(AUD-610 실패·AUD-516 실패 포함)과 경로 검증(출력 상위 경로 자체, 밖, 하위, `resend-*`)을, `prepare.yml`의 AUD-005~007을 실제 디렉터리 수정 시각으로 돌려 N일 규칙을 확인한다.
 
 ### 13.6 검증
 

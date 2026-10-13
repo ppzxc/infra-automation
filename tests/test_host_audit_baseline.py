@@ -344,8 +344,16 @@ def test_pointer_is_uploaded_only_for_a_scheduled_run_after_every_upload_succeed
     assert "host_audit_baseline_history.state != 'failed'" in final["ansible.builtin.assert"]["that"]
 
 
+def _flat(tasks):
+    """Tasks in file order, descending into block/always (report.yml wraps its tail, #157)."""
+    for t in tasks:
+        yield t
+        for key in ("block", "rescue", "always"):
+            yield from _flat(t.get(key) or [])
+
+
 def test_report_builds_the_model_between_lookup_and_upload_and_secrets_stay_hidden():
-    report = _tasks("report.yml")
+    report = list(_flat(_tasks("report.yml")))
     names = [t.get("name", "") for t in report]
     lookup = next(i for i, t in enumerate(report) if t.get("ansible.builtin.include_tasks") == "storage_lookup.yml")
     build = next(i for i, n in enumerate(names) if "[AUD-021]" in n)
