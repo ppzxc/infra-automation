@@ -72,6 +72,10 @@ _Avoid_: log category, stream tag
 Lifting the fields that a log source's fixed format defines (event time, emitting program, pid, severity where the format carries one) out of a log line into structured fields, at the collector, without touching the original line. The original line stays the record's body and is the evidence; parsed fields sit beside it. Interpreting what a message *means* (who logged in, from which address, OCSF normalisation) is not Envelope Parsing and is done centrally in OpenObserve.
 _Avoid_: log parsing (when meaning only this edge layer), normalisation, structuring
 
+**Silent Host**:
+A host that the inventory says should be shipping to OpenObserve (a `servers` host with Host Agents applied, neither a Host Agents Exclusion nor Host Agents Backup Only) but from which no logs or metrics have arrived for a set time. It says nothing about whether the server itself is up: a running server whose collector has died is a Silent Host, and a server that is down is one too until another tool tells them apart.
+_Avoid_: host down, dead host, offline host (they imply the server itself is down)
+
 **Fast Scenario**:
 The molecule scenario run at pre-push. Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
 _Avoid_: default scenario, quick test, smoke test
