@@ -21,13 +21,14 @@
 - **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수(`after_flatten: true`) → `security_logs`.
 - **통지 대상**: webhook 하나(`infra-automation-webhook`) — 네이버웍스 봇 text API(`{"content": {"type": "text", "text": ...}}`)로 보내는 본문 템플릿과 `Content-Type: application/json` 헤더. 등급별 분리는 범위 밖입니다.
 - **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 무슨 일, 왜 중요, 대상(알림별 `row_template`), 조치, [런북](runbooks/alerts.md) 링크, 로그 보기 링크, 발생 구간. 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
-- **알림 규칙 6종(7개 정의)**: 모두 위 대상으로 보냅니다.
+- **알림 규칙 7종(8개 정의)**: 모두 위 대상으로 보냅니다.
 
   | 이름 | 조건 |
   |---|---|
   | `infra-ssh-login-failures-per-source` | `source_address`별 5분 10회 이상 sshd 로그인 실패 |
   | `infra-ssh-login-failures-per-host` | 호스트별 5분 50회 이상 sshd 로그인 실패 |
-  | `infra-root-login-success` | root SSH 로그인 성공 1건부터 |
+  | `infra-root-login-success` | 정상 출발지 목록 밖의 root SSH 로그인 성공 1건부터 (P1, Event Alert). Semaphore·사무실 종류 출발지는 제외 |
+  | `infra-root-login-office-daily` | 사무실 종류 출발지의 root SSH 로그인 성공, 하루 1번 요약 (P3, period·silence 1440) |
   | `infra-sudo-escalation-failure` | sudo `authentication failure`/`NOT in sudoers` 1건부터 (성공은 알리지 않음) |
   | `infra-kernel-disk-errors` | `system_logs`의 `Out of memory: Killed process`, `I/O error`, `EXT4-fs error`, `XFS ... Corruption` (severity가 아닌 패턴 기반) |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
@@ -48,6 +49,7 @@
 | `o2_endpoint`, `o2_org`, `o2_ca_file` | 호스트 에이전트와 같은 연결 값 |
 | `api_user`, `api_password` | 설정 API(함수·파이프라인·알림)를 쓸 수 있는 OpenObserve 계정 (수집 토큰과 별개) |
 | `alert_webhook_url` | 통지 webhook URL |
+| `normal_sources` | (선택) root 로그인 정상 출발지 `[{address: <IP>, kind: semaphore\|office}]`. Semaphore는 어느 root 알림에도 걸리지 않고 office(사무실·S2S)는 P3 하루 요약에만, 그 밖은 P1. SSH 실패 급증 알림에는 적용하지 않음. 주소는 IP 문자·종류를 검증하며 출력하지 않음 |
 | `alert_webhook_token`, `alert_webhook_auth_header` | (선택) 인증 토큰과 헤더 이름(기본 `Authorization`, 네이버웍스 봇은 `X-NANOIT-ACCESS`) |
 
 ---

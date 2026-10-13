@@ -176,11 +176,16 @@ def _rewrite_sql(sql, stream, suffix):
     return sql.replace(quoted, target)
 
 
-def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3600 * 1000000):
+def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3600 * 1000000, sources=None):
     """Requests of the verification step: ``{ingest: [{stream, path, records}], searches: [...]}``.
 
     Every alert needs fixtures (a firing and a non-firing case at least); a missing one is a configuration error.
+    A record's ``source_address`` may be ``@<kind>`` (e.g. ``@semaphore``): it resolves to the first normal source of that
+    kind in ``sources`` (OpenBao, never committed). A case with an unresolvable placeholder is skipped.
     """
+    by_kind = {}
+    for src in sources or []:
+        by_kind.setdefault(src.get('kind'), src.get('address'))
     ingest, searches = {}, []
     for alert in alerts:
         name, stream = alert['name'], alert['stream']
@@ -189,9 +194,12 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
             raise ValueError('알림 %s 에 검증 픽스처(files/alert_fixtures.yml)가 없습니다' % name)
         hosts = {}
         for case in spec['cases']:
+            records = [_resolve(r, by_kind) for r in case['records']]
+            if any(r is None for r in records):
+                continue
             host = _host(case, run_id)
             hosts[host] = {'case': case['name'], 'fires': bool(case['fires']), 'known_failure': case.get('known_failure') or ''}
-            for rec in case['records']:
+            for rec in records:
                 rec = dict(rec)
                 repeat = rec.pop('repeat', 1)
                 ingest.setdefault(stream, []).extend(dict(rec, host_name=host) for _ in range(repeat))
@@ -203,6 +211,15 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
     return {'ingest': [{'stream': _verify_stream(s, suffix), 'path': INGEST_PATH.format(org=org, stream=_verify_stream(s, suffix)),
                         'records': recs} for s, recs in ingest.items()],
             'searches': searches}
+
+
+def _resolve(rec, by_kind):
+    addr = rec.get('source_address')
+    if isinstance(addr, str) and addr.startswith('@'):
+        if not by_kind.get(addr[1:]):
+            return None
+        rec = dict(rec, source_address=by_kind[addr[1:]])
+    return rec
 
 
 def _judge(hits, search):
