@@ -153,11 +153,11 @@ def _render_init(tmp_path, root):
 def test_init_script_runs_as_root_loads_secrets_and_registers_with_chkconfig(tmp_path):
     legacy = _render_init(tmp_path, True)
     assert "# chkconfig: 2345 90 10" in legacy                     # chkconfig --add reads this header
-    assert 'nohup "$EXEC" --config="$CONFIG"' in legacy and "su -s" not in legacy and 'USER="' not in legacy
+    assert 'exec "$2" --config="$3"' in legacy and "setsid" in legacy and "su -s" not in legacy and 'USER="' not in legacy
     assert 'SECRETS="%s/etc/otelcol-contrib/secrets.env"' % tmp_path in legacy and '. "$SECRETS"' in legacy
     assert 'EXEC="%s/bin/$PROG"' % tmp_path in legacy
     modern_sysv = _render_init(tmp_path, False)                     # modern non-systemd hosts keep the otelcol user
-    assert "su -s /bin/sh $USER" in modern_sysv and 'USER="otelcol"' in modern_sysv
+    assert "exec su -s /bin/sh" in modern_sysv and 'USER="otelcol"' in modern_sysv
     assert _yaml(MON / "defaults" / "main.yml")["otelcol_run_as_root"] == \
         "{{ host_agents_is_legacy | default(false) | bool }}"
 
@@ -194,7 +194,7 @@ def test_init_start_detaches_the_collector_from_the_callers_stdio(tmp_path):
     # Over raw SSH the session stays open while any child holds its stdin/stdout/stderr.
     import subprocess
     text = _render_init(tmp_path, True).replace("/var/run/", str(tmp_path) + "/").replace("/var/log/", str(tmp_path) + "/")
-    assert 'nohup "$EXEC" --config="$CONFIG" >> $LOGFILE 2>&1 </dev/null &' in text
+    assert 'setsid /bin/sh -c' in text and '>> $LOGFILE 2>&1 </dev/null &' in text
     assert "</dev/null &" in _render_init(tmp_path, False)                  # the su branch too
     init = tmp_path / "init.sh"
     init.write_text(text)
