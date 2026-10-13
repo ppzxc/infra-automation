@@ -5,11 +5,17 @@ Signature V4 examples, the Audit Baseline statuses through the report model the
 template draws, and the storage settings through the files the operator applies.
 No network: the RustFS end-to-end run is described in docs/host_audit.md §11.
 """
+import gzip
+import hashlib
 import json
+import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -350,3 +356,87 @@ def test_report_builds_the_model_between_lookup_and_upload_and_secrets_stay_hidd
         for task in _tasks(name):
             if "ansible.builtin.uri" in task or "[AUD-502]" in task.get("name", ""):
                 assert task.get("no_log") is True, task["name"]
+
+
+# ------------------------------------------------------------------------------
+# Keeping the large Trivy·SBOM originals gzip-compressed (#151)
+# ------------------------------------------------------------------------------
+def _keep_run(tmp_path):
+    """A runner run directory with every kind of file the archive keeps."""
+    out = tmp_path / "run"
+    files = {
+        "report.html": b"<html>report</html>",
+        "run.json": b'{"run_kind": "scheduled"}\n',
+        "mail_summary.json": b'{"report": {"sha256": "ab"}}\n',
+        "findings.json": b'{"kisa": {}}\n',
+        "pointer.json": b'{"run_id": "ha-1"}\n',
+        "package_vulnerability.json": b"{}\n",
+        "hosts/h1.json": b'{"inventory_hostname": "h1"}\n',
+        "packages/h1.json": b'{"packages": []}\n',
+        "trivy/h1.json": json.dumps({"Results": [{"Vulnerabilities": [
+            {"VulnerabilityID": "CVE-2024-0001", "Description": "한글 " * 500,
+             "References": ["https://example/%d" % i for i in range(200)]}]}]}, ensure_ascii=False).encode(),
+        "trivy/h2.json": b'{"Results": []}',
+        "sbom/h1.cdx.json": json.dumps({"bomFormat": "CycloneDX", "components": [{"name": "openssl"}] * 300}).encode(),
+    }
+    for rel, data in files.items():
+        (out / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out / rel).write_bytes(data)
+    return out, files
+
+
+def _run_keep_tasks(tmp_path, out, extra_vars=None):
+    upload = _tasks("storage_upload.yml")
+    keep = [t for t in upload if any("[%s]" % i in t["name"] for i in ("AUD-517", "AUD-518", "AUD-512", "AUD-513"))]
+    assert len(keep) == 4
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+        "vars": dict({"host_audit_run": {"output_dir": str(out)}, "_host_audit_storage_active": True,
+                      "_host_audit_storage_problem": ""}, **(extra_vars or {})),
+        "tasks": keep + [{"ansible.builtin.debug": {
+            "msg": "{{ _host_audit_keep_stats.results | default([]) | map(attribute='stat', default={}) | list }}"}}],
+    }], allow_unicode=True))
+    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
+    plays = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
+    return {s["path"][len(str(out)) + 1:]: s["checksum"] for s in plays[-1]["hosts"]["localhost"]["msg"]}
+
+
+def test_trivy_and_sbom_originals_are_kept_as_lossless_gzip_and_everything_else_as_is(tmp_path):
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out, files = _keep_run(tmp_path)
+    stats = _run_keep_tasks(tmp_path, out)
+
+    compressed = {"trivy/h1.json", "trivy/h2.json", "sbom/h1.cdx.json"}
+    assert sorted(stats) == sorted([r + ".gz" for r in compressed] + [r for r in files if r not in compressed])
+    for rel in compressed:
+        gz = (out / (rel + ".gz")).read_bytes()
+        assert gz[:2] == b"\x1f\x8b"
+        assert gzip.decompress(gz) == files[rel], rel  # gunzip gives back the original, byte for byte
+        assert not (out / rel).exists(), "the uncompressed original must not be uploaded too"
+        assert stats[rel + ".gz"] == hashlib.sha256(gz).hexdigest(), "the kept SHA-256 is the uploaded object's"
+    assert (out / "trivy/h1.json.gz").stat().st_size < len(files["trivy/h1.json"])
+    for rel, data in files.items():
+        if rel not in compressed:
+            assert (out / rel).read_bytes() == data, rel
+            assert stats[rel] == hashlib.sha256(data).hexdigest()
+
+
+def test_originals_stay_uncompressed_when_nothing_is_kept(tmp_path):
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out, files = _keep_run(tmp_path)
+    assert _run_keep_tasks(tmp_path, out, {"_host_audit_storage_active": False}) == {}
+    for rel, data in files.items():
+        assert (out / rel).read_bytes() == data, rel
+
+
+def test_gzip_objects_are_uploaded_as_gzip_without_transparent_decoding():
+    upload = next(t for t in _tasks("storage_upload.yml") if "[AUD-514]" in t["name"])
+    headers = upload["ansible.builtin.uri"]["headers"]
+    assert "application/gzip" in headers and r"\.gz$" in headers
+    assert "Content-Encoding" not in headers, "clients must get the stored .gz bytes, not a decoded body"

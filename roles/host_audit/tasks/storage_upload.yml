@@ -23,6 +23,34 @@
     mode: '0600'
   when: host_audit_run.run_kind == 'scheduled'
 
+# 큰 원본(Trivy 결과 호스트당 약 200~250 MB, SBOM)은 내용 그대로 gzip해서 <파일>.gz로 올린다(#151).
+# 원본은 지운다 — 두 벌 올라가지 않게. 보고서·run.json·mail_summary.json·findings.json·포인터는 압축하지 않는다
+# (재발송·Audit Baseline 조회가 그대로 읽는다). 압축 실패는 실행을 멈추지 않는다: 그 원본은 압축 없이 올라간다.
+- name: "[AUD-517] Find the Trivy and SBOM originals of this run to compress"
+  ansible.builtin.find:
+    paths:
+      - "{{ host_audit_run.output_dir }}/trivy"
+      - "{{ host_audit_run.output_dir }}/sbom"
+    patterns: ["*.json"]
+    file_type: file
+  register: _host_audit_compress_files
+  when:
+    - _host_audit_storage_active | bool
+    - _host_audit_storage_problem | default('보관 비활성') | length == 0
+
+- name: "[AUD-518] Compress the Trivy and SBOM originals losslessly (gzip)"
+  community.general.archive:
+    path: "{{ item }}"
+    dest: "{{ item }}.gz"
+    format: gz
+    remove: true
+    mode: '0600'
+  loop: "{{ _host_audit_compress_files.files | default([]) | map(attribute='path') | sort }}"
+  loop_control:
+    label: "{{ item | basename }}"
+  register: _host_audit_compressed
+  failed_when: false
+
 - name: "[AUD-512] Find every file of this run to keep"
   ansible.builtin.find:
     paths: "{{ host_audit_run.output_dir }}"
@@ -52,7 +80,8 @@
     src: "{{ item.stat.path }}"
     remote_src: true
     headers: >-
-      {{ _req.headers | combine({'Content-Type': 'text/html; charset=utf-8' if _rel is match('.*\.html$') else 'application/json'}) }}
+      {{ _req.headers | combine({'Content-Type': 'text/html; charset=utf-8' if _rel is match('.*\.html$')
+         else ('application/gzip' if _rel is match('.*\.gz$') else 'application/json')}) }}
     status_code: [-1, 200, 400, 403, 404, 409, 500, 503]
     timeout: "{{ host_audit_storage_timeout }}"
     validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
