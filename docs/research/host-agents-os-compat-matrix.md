@@ -110,7 +110,7 @@ What the systemd generator needs from the host (master):
 
 ### 5. Init systems
 
-- **CentOS 6**: Upstart 0.6.5 is PID 1, but services are classic SysV scripts under `/etc/init.d` managed with `chkconfig`/`service`. `roles/monitoring/templates/otelcol-contrib.init.j2` is already a SysV script (nohup + pidfile), so otelcol needs nothing new here. restic/resticprofile are cron-driven and need no init script. cron comes from `cronie` with `/etc/cron.d`. The bare `centos:6` and `centos:7` Docker images do not include cronie, so real hosts need to be checked for it.
+- **CentOS 6**: Upstart 0.6.5 is PID 1, but services are classic SysV scripts under `/etc/init.d` managed with `chkconfig`/`service`. `roles/monitoring/templates/otelcol-contrib.init.j2` is already a SysV script (setsid + pidfile), so otelcol needs nothing new here. restic/resticprofile are cron-driven and need no init script. cron comes from `cronie` with `/etc/cron.d`. The bare `centos:6` and `centos:7` Docker images do not include cronie, so real hosts need to be checked for it.
 - **CentOS 7 and later, Ubuntu, Debian**: systemd units.
 
 ## Recommended fallbacks

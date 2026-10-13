@@ -941,6 +941,7 @@
               - '"[MON-216]" in _t and "service otelcol-contrib status" in _t and "systemctl is-active otelcol-contrib" in _t'
               - '"tail -n 20" in _t and "journalctl -u otelcol-contrib" in _t and "exit 1" in _t'
               - '"service otelcol-contrib start" in _t and "systemctl start otelcol-contrib" in _t'
+              - '"activating" in _t and "failed_when: false" in _h'
               - '"listen: Restart otelcol-contrib (raw)" in _h and "legacy_verify_alive.yml" in _h'
             quiet: true
           vars:
@@ -1126,7 +1127,8 @@
           ansible.builtin.assert:
             that:
               - "'# chkconfig: 2345 90 10' in _init"
-              - "'nohup \"$EXEC\" --config=\"$CONFIG\" >> $LOGFILE 2>&1 </dev/null &' in _init"
+              - "'setsid /bin/sh -c' in _init and 'exec \"$2\" --config=\"$3\"' in _init"
+              - "'>> $LOGFILE 2>&1 </dev/null &' in _init and 'nohup' not in _init"
               - "'su -s' not in _init and 'USER=' not in _init"
               - "'SECRETS=\"/etc/otelcol-contrib/secrets.env\"' in _init and '. \"$SECRETS\"' in _init"
               - "'LOGFILE=\"/var/log/otelcol-contrib.log\"' in _init"

@@ -17,6 +17,9 @@
   ansible.builtin.raw: >-
     {{ 'service otelcol-contrib restart' if host_agents_os_path == 'legacy_el6' else 'systemctl restart otelcol-contrib' }}
   changed_when: true
+  # restart의 종료코드는 삼킨다: EL6 init은 start 유예 안에 죽으면 rc=1이고, 여기서 실패하면 같은 topic의
+  # MON-216 핸들러가 건너뛰어져 재시도 없이 끝난다. 실패 판정은 반드시 MON-216(생존 확인 -> start 재시도 -> 호스트 failed)이 한다.
+  failed_when: false
 
 # 재시작 뒤 수집기가 살아 있는지 확인한다(MON-216). 같은 topic을 listen하므로 위 재시작 핸들러 직후에 실행되며,
 # 죽어 있으면 그 호스트만 실패한다(나머지 호스트는 계속 진행).

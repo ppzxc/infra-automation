@@ -1,25 +1,40 @@
 ---
 # legacy 재시작 핸들러의 사후 생존 확인 (CentOS 6 service status, CentOS 7 systemctl is-active).
-# 죽었으면 start를 1회 재시도·재확인하고, 그래도 죽어 있으면 로그 꼬리와 함께 해당 호스트만 실패시킨다. raw는 check 모드에서 스킵된다(재시작도 스킵).
+# 재시작 핸들러는 실패를 삼키므로 실패 판정은 전부 여기서 한다: 생존 확인 -> 죽어 있으면 start 1회 재시도 -> 재확인 ->
+# 그래도 죽어 있으면 로그 꼬리와 함께 해당 호스트만 실패(나머지 호스트는 계속). raw는 check 모드에서 스킵된다(재시작도 스킵).
+# 대기 시간은 otelcol_alive_grace_seconds(defaults 참고). 재시도 start의 출력은 버린다(실패 시 아래 꼬리와 중복되므로).
 - name: "[MON-216] Verify otelcol-contrib stayed alive after restart (raw)"
-  ansible.builtin.raw: >-
-    sleep {{ otelcol_alive_grace_seconds | int }};
+  ansible.builtin.raw: |
+    sleep {{ otelcol_alive_grace_seconds | int }}
     {% if host_agents_os_path == 'legacy_el6' %}
-    service otelcol-contrib status
-    || { echo "otelcol-contrib is not running after restart; retrying start once";
-    service otelcol-contrib start;
-    sleep {{ otelcol_alive_grace_seconds | int }};
-    service otelcol-contrib status
-    || { echo "otelcol-contrib is still not running after retry; last lines of {{ otelcol_sysv_log_path }}:";
-    tail -n 20 {{ otelcol_sysv_log_path }}; exit 1; }; }
+    if ! service otelcol-contrib status; then
+      echo "otelcol-contrib is not running after restart; retrying start once"
+      service otelcol-contrib start >/dev/null 2>&1
+      sleep {{ otelcol_alive_grace_seconds | int }}
+      if ! service otelcol-contrib status; then
+        echo "otelcol-contrib is still not running after retry; last lines of {{ otelcol_sysv_log_path }}:"
+        tail -n 20 {{ otelcol_sysv_log_path }}
+        exit 1
+      fi
+    fi
     {% else %}
-    systemctl is-active otelcol-contrib
-    || { echo "otelcol-contrib is not active after restart; retrying start once";
-    systemctl start otelcol-contrib;
-    sleep {{ otelcol_alive_grace_seconds | int }};
-    systemctl is-active otelcol-contrib
-    || { echo "otelcol-contrib is still not active after retry; journal tail:";
-    journalctl -u otelcol-contrib -n 20 --no-pager; exit 1; }; }
+    # Restart=always 유닛은 크래시와 재기동 사이에 "activating"(auto-restart)이고 is-active가 실패로 읽힌다.
+    # activating인 동안은 유예만큼 기다려 다시 읽는다(최대 3회).
+    n=0
+    while [ "$(systemctl is-active otelcol-contrib)" = activating ] && [ $n -lt 3 ]; do
+      sleep {{ otelcol_alive_grace_seconds | int }}
+      n=$((n + 1))
+    done
+    if ! systemctl is-active otelcol-contrib; then
+      echo "otelcol-contrib is not active after restart; retrying start once"
+      systemctl start otelcol-contrib >/dev/null 2>&1
+      sleep {{ otelcol_alive_grace_seconds | int }}
+      if ! systemctl is-active otelcol-contrib; then
+        echo "otelcol-contrib is still not active after retry; journal tail:"
+        journalctl -u otelcol-contrib -n 20 --no-pager
+        exit 1
+      fi
+    fi
     {% endif %}
   register: _otelcol_alive
   changed_when: false
