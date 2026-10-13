@@ -132,6 +132,8 @@
     - host_audit_trivy_db.usable
     - _record.status == 'ok'
 
+# Trivy 실패(rc≠0, 빈 출력, 잘린 JSON, 결과 파일 없음)는 그 호스트만 Package Vulnerability 점검불가로 두고
+# 실행은 계속한다(#154). task 287에서 OOM-kill된 호스트가 정상처럼 보이면 안 된다.
 # 호스트별 결과는 register로만 모은다. set_fact로 리스트를 누적하면(list + [result]) 항목마다
 # 그때까지의 전체 리스트가 결과로 남아 메모리가 호스트 수의 제곱으로 늘고, 17대에서 1024M 러너의
 # 워커가 죽었다("A worker was found in a dead state").
@@ -144,12 +146,15 @@
     label: "{{ _record.inventory_hostname }}"
   vars:
     _record: "{{ lookup('ansible.builtin.file', item) | from_json }}"
-    _trivy_text: "{{ lookup('ansible.builtin.file', host_audit_run.output_dir ~ '/trivy/' ~ _record.inventory_hostname ~ '.json', errors='ignore') | default('', true) }}"
+    # 결과 파일 없음(lookup이 문자열이 아닌 값을 돌려줌)은 none, 빈 파일은 ''로 구분한다. 원문은 필터가 파싱한다.
+    _trivy_raw: "{{ lookup('ansible.builtin.file', host_audit_run.output_dir ~ '/trivy/' ~ _record.inventory_hostname ~ '.json', errors='ignore') }}"
+    _trivy_text: "{{ _trivy_raw if _trivy_raw is string else none }}"
+    _scan: "{{ _host_audit_trivy_scans.results | default([]) | selectattr('item', 'equalto', item) | list | first | default({}) }}"
     _os: "{{ _record.os | default({}, true) }}"
     _vault: >-
       {{ lookup('ansible.builtin.file', 'centos_vault_final/centos-' ~ _os.major ~ '.tsv') | host_audit_parse_vault_final
          if (_os.family | default('')) == 'centos' and (_os.major | default('')) in ['6', '7'] else {} }}
-    _result: "{{ (_trivy_text | from_json if _trivy_text | length > 0 else none) | host_audit_package_findings(_record, _vault) }}"
+    _result: "{{ _trivy_text | host_audit_package_findings(_record, _vault, _scan.rc | default(none)) }}"
   when: host_audit_trivy_db.usable
 
 - name: "[AUD-323] Build the Package Vulnerability section model"

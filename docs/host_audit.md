@@ -234,6 +234,11 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 - **러너**: 패키지 기록 → CycloneDX 1.5 SBOM(`host_audit_sbom`) → `trivy sbom --offline-scan --skip-db-update`(호스트마다 순차) → 분류(`host_audit_package_findings`) → 섹션 모델(`host_audit_package_section`). 판정·분류·집계는 모두 `filter_plugins/host_audit_packages.py`가 하고 템플릿(`templates/sections/package_vulnerability.html.j2`)은 그리기만 한다.
 - **Trivy 고정**: `vars/trivy.yml`의 버전·SHA256(직접 계산한 값, upstream checksums.txt를 기준으로 쓰지 않음)과 맞는 릴리스만 `get_url checksum`으로 받아 러너 캐시(`host_audit_cache_dir`)에 풀고 실행한다. restic(BAK-075)과 같은 방식이고 커스텀 Semaphore 이미지가 필요 없다. 버전을 올릴 때는 sigstore 번들을 `cosign verify-blob`으로 검증한 뒤 sha256을 직접 계산해 넣는다(절차는 파일 머리말). 2026-03 공급망 사고(GHSA-69fq-xp46-6x23)의 v0.69.4는 쓰지 않는다. 현재 v0.75.0(amd64·arm64 모두 cosign 검증 통과, 2026-10-08).
 - **취약점 DB**: 매 실행 `trivy image --download-db-only`로 갱신한다(`host_audit_trivy_db_repository`로 미러 지정 가능). 갱신에 실패하면 캐시 DB의 `UpdatedAt`이 7일(`host_audit_trivy_db_max_age_days`) 이내일 때만 그 캐시로 판정하고, 넘었거나 캐시가 없으면 섹션 전체를 '점검불가'로 표시한다(실행은 계속). DB 생성 시각과 갱신 여부는 표지의 '취약점 DB'에 찍힌다. 캐시가 실행 사이에 남으려면 러너의 `HOME`(또는 `host_audit_cache_dir`)이 유지돼야 한다.
+- **Trivy 실패 처리 (#154)**: AUD-321이 `failed_when: false`로 계속 진행한 뒤 AUD-322가 호스트마다 다음을 '점검불가'(`scan_failed`)로 표시한다. 사유에 Trivy의 rc가 들어가고 137(또는 Ansible이 시그널 종료로 보고하는 -9)이면 'OOM-kill 추정'이 붙는다. 다른 호스트의 판정과 실행은 계속된다. 순서는 rc → 결과 파일 → 내용이다(rc≠0이면 파일이 유효해 보여도 신뢰하지 않는다).
+  - rc≠0
+  - 출력이 비어 있음(0바이트)
+  - 잘린 JSON(쓰는 도중 종료). 원문 파싱은 필터가 하므로 한 호스트의 손상이 AUD-322 전체를 멈추지 않는다.
+  - 결과 파일 없음
 - **OS 인식 검사**: Trivy가 결과의 `Metadata.OS`를 수집한 OS 계열·버전과 다르게 인식하면 그 호스트를 '점검불가(OS 인식 불일치)'로 표시한다. OS를 인식하지 못하면 0건이 조용히 나오기 때문이다(PoC 함정).
 - **분류** (건수는 (CVE, 패키지) 쌍 기준, Audit Baseline 동일성 키는 `CVE|패키지`):
 
@@ -284,12 +289,12 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 | `AUD-318` | `Refresh the Trivy vulnerability DB (download only)` | `ansible.builtin.command` | 러너 | `changed_when: false`, `failed_when: false`, `timeout`으로 시간 제한(실패는 AUD-319가 판정) |
 | `AUD-319` | `Decide whether the Trivy DB may be used for this run` | `ansible.builtin.set_fact` | 러너 | `host_audit_trivy_db_state` 필터 |
 | `AUD-320` | `Write the CycloneDX SBOM of each collected host` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
-| `AUD-321` | `Judge each SBOM with Trivy (offline, one host at a time)` | `ansible.builtin.command` | 러너 | `changed_when: false`, 결과 파일 없으면 호스트 '점검불가' |
-| `AUD-322` | `Classify the Trivy findings of each host` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_findings` 필터. 호스트별 결과는 `register`로만 모은다(리스트 누적 금지 — 메모리가 호스트 수의 제곱) |
+| `AUD-321` | `Judge each SBOM with Trivy (offline, one host at a time)` | `ansible.builtin.command` | 러너 | `changed_when: false`, `failed_when: false`(실패 판정은 AUD-322가 rc로 한다) |
+| `AUD-322` | `Classify the Trivy findings of each host` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_findings` 필터(AUD-321의 호스트별 rc와 결과 원문을 넘겨 rc≠0·빈 출력·잘린 JSON·파일 없음을 호스트 '점검불가'로, #154). 호스트별 결과는 `register`로만 모은다(리스트 누적 금지 — 메모리가 호스트 수의 제곱) |
 | `AUD-323` | `Build the Package Vulnerability section model` | `ansible.builtin.set_fact` | 러너 | AUD-322 결과를 한 번에 모아 `host_audit_package_section` 필터 |
 | `AUD-324` | `Save the Package Vulnerability section on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 
-검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).
+검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정, Trivy 실패 4경우 점검불가·나머지 호스트 계속). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).
 
 ## 10. Configuration Vulnerability (KISA-2026, #121)
 
