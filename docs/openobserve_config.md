@@ -6,13 +6,13 @@
 
 ## 1. 개요 (What)
 
-- **VRL ingest function `security_semantics`** (`roles/openobserve_config/files/vrl/security_semantics.vrl`): `security_logs`의 sshd·sudo 메시지를 해석해 필드를 **추가**합니다. 원문 `body`와 기존 필드는 바꾸지 않으며, 해석할 수 없는 레코드는 그대로 통과합니다. 필드는 OTel semantic conventions를 따르고 OpenObserve가 점을 밑줄로 저장하므로 아래 이름으로 보입니다.
+- **VRL ingest function `security_semantics`** (`roles/openobserve_config/files/vrl/security_semantics.vrl`): `security_logs`의 sshd·sudo·su 메시지를 해석해 필드를 **추가**합니다. 원문 `body`와 기존 필드는 바꾸지 않으며, 해석할 수 없는 레코드는 그대로 통과합니다. 필드는 OTel semantic conventions를 따르고 OpenObserve가 점을 밑줄로 저장하므로 아래 이름으로 보입니다.
 
   | 필드 | 의미 |
   |---|---|
   | `user_name` (`user.name`) | sshd 로그인 대상 사용자 / sudo를 실행한 사용자 |
   | `source_address`, `source_port` (`source.address`, `source.port`) | sshd 원격 주소·포트 (`Invalid user` 줄에 포트가 없으면 `source_port` 없음) |
-  | `event_action` | `ssh_login` 또는 `sudo` |
+  | `event_action` | `ssh_login`, `sudo` 또는 `su` |
   | `event_outcome` | `success` 또는 `failure` |
   | `event_reason` | 실패 사유: `failed password`, `invalid user`, `NOT in sudoers`, `authentication failure` |
   | `user_effective_name`, `process_command_line` | sudo 대상 사용자(`USER=`)와 실행 명령(`COMMAND=`) — sudo 성공은 알림 없이 이 필드로 감사 기록만 남김 |
@@ -29,7 +29,7 @@
   | `infra-ssh-login-failures-per-host` | 호스트별 5분 50회 이상 sshd 로그인 실패 |
   | `infra-root-login-success` | 정상 출발지 목록 밖의 root SSH 로그인 성공 1건부터 (P1, Event Alert). Semaphore·사무실 종류 출발지는 제외 |
   | `infra-root-login-office-daily` | 사무실 종류 출발지의 root SSH 로그인 성공, 하루 1번 요약 (P3, period·silence 1440) |
-  | `infra-sudo-escalation-failure` | sudo `authentication failure`/`NOT in sudoers` 1건부터 (성공은 알리지 않음) |
+  | `infra-sudo-escalation-failure` | sudo/su `authentication failure`/`NOT in sudoers` 1건부터 (`event_action IN (sudo, su)`, 성공은 알리지 않음) |
   | `infra-kernel-disk-errors` | `system_logs`의 `Out of memory: Killed process`, `I/O error`, `EXT4-fs error`, `XFS ... Corruption` (severity가 아닌 패턴 기반) |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
 
@@ -76,7 +76,7 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-011` | `Read each existing alert (the list view carries no query or trigger settings)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
 | `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음) |
 | `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력) |
-| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update)` | `ansible.builtin.uri` | Controller | 계획된 차이만 전송 (`changed_when: true`, check 모드 제외, `no_log`) |
+| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)` | `ansible.builtin.uri` | Controller | 계획된 차이만 전송 — 저장소 정의에 없는 `infra-` 접두어 알림은 DELETE, 접두어 밖 알림은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
 
 ### 알림 검증 단계 (Spec #184 / Ticket-1)
 
@@ -95,3 +95,10 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-034` | `Fail when an alert did not fire (or fired) as the fixtures expect` | `ansible.builtin.debug` | Controller | 불일치 시 알림·케이스 이름과 함께 실패 |
 | `O2C-035` | `Read the recent alert evaluation history` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `no_log`) |
 | `O2C-036` | `Fail when the latest evaluation of a managed alert ended in error` | `ansible.builtin.assert` | Controller | 평가 오류가 있으면 실패 |
+| `O2C-037` | `Inject one self-test record so the standing self-test alert notifies (only with o2c_verify_notify=true)` | `ansible.builtin.uri` | Controller | 검증 전용 스트림에만 POST (`changed_when: false`, `no_log`), `o2c_verify_notify`가 참일 때만, check 모드 제외 |
+
+### 통지 경로 자가 시험 (Spec #184 / Ticket-2)
+
+- 상설 알림 `infra-alert-selftest`가 검증 전용 스트림(`alert_selftest<o2c_verify_stream_suffix>`)을 본다. Config가 멱등하게 관리하며 운영 스트림은 보지 않는다.
+- 기본 실행에서는 레코드가 없어 통지가 가지 않는다. `-e o2c_verify_notify=true`로 실행하면 레코드 1건(`O2C-037`)을 넣어 템플릿·destination·webhook까지 실제로 통지하며, 메시지 첫 줄은 `🧪 [TEST] 알림 통지 경로 시험 (실제 장애 아님)`이다. check 모드에서는 넣지 않는다.
+- 알림은 조회 구간 5분·silence 5분이라 레코드 1건당 통지는 1회다. 반영 직후가 아니라 다음 평가(최대 1분 뒤)에 통지가 도착한다.
