@@ -157,25 +157,49 @@ o2c_alerts:
     period: 5
     frequency: 1
     silence: 5
-  - name: infra-kernel-disk-errors
+  - name: infra-oom-kill
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "OOM kill로 프로세스 강제 종료"
+    what: "메모리 부족(OOM)으로 커널이 프로세스를 강제 종료했습니다."
+    why: "서비스 프로세스가 죽었을 수 있고, 같은 원인이 반복되면 다른 서비스와 서버 전체로 번질 수 있습니다."
+    action: "① 행의 종료된 프로세스가 서비스면 재기동 상태 확인 ② 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit) 점검 ③ 반복되면 메모리 증설·한도 조정 계획"
+    runbook: "{{ o2c_runbook_base }}#oom-kill"
+    row_template: '• {host_name}: 종료된 프로세스 {killed_process} ({kills}건)'
+    description: "OOM kill (Killed process / Kill process / invoked oom-killer, 대소문자 무시) — cgroup·CentOS 6/7 형식 포함"
+    stream: system_logs
+    sql: >-
+      SELECT host_name,
+      CASE WHEN lower(body) LIKE '%kill%process%'
+      THEN regexp_replace(body, '^.*[Kk]ill(?:ed)? process [0-9]+ [(]([^)]*)[)].*$', '\1')
+      ELSE 'oom-killer 호출' END AS killed_process,
+      count(*) AS kills FROM "system_logs"
+      WHERE lower(body) LIKE '%killed process%' OR lower(body) LIKE '%out of memory: kill process%'
+      OR lower(body) LIKE '%invoked oom-killer%'
+      GROUP BY host_name, killed_process
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-disk-fs-errors
     severity: "P1 긴급"
     severity_icon: "🔴"
-    title: "커널·디스크 오류 발생"
-    what: "OOM으로 프로세스가 강제 종료됐거나 디스크 I/O·파일시스템 오류가 기록됐습니다."
-    why: "서비스 중단이나 데이터 손상으로 이어질 수 있는 장애 전조입니다."
-    action: "① 로그 보기에서 오류 원문 확인(OOM인지 I/O인지) ② OOM이면 메모리 사용 상위 프로세스·한도 점검 ③ I/O·FS 오류면 즉시 백업 상태 확인 후 디스크 교체·fsck 계획"
-    runbook: "{{ o2c_runbook_base }}#kernel-disk-errors"
+    title: "디스크 I/O·파일시스템 오류 발생"
+    what: "디스크 I/O 오류 또는 파일시스템 손상(EXT4/XFS) 오류가 기록됐습니다."
+    why: "디스크 고장이나 데이터 손상의 전조로, 데이터 손실로 이어질 수 있어 즉시 확인해야 합니다."
+    action: "① 로그 보기에서 오류 원문과 장치 확인 ② 즉시 백업 상태 확인(restic snapshots) ③ 파일시스템이 읽기 전용이면 서비스 영향 판단 후 디스크 교체·fsck 일정"
+    runbook: "{{ o2c_runbook_base }}#disk-fs-errors"
     row_template: '• {host_name}: 오류 패턴 {matches}건'
-    description: "커널/디스크 오류 패턴(OOM kill, I/O error, EXT4-fs error, XFS Corruption) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
+    description: "디스크·파일시스템 오류 (I/O error, EXT4-fs error, XFS Corruption, blk_update_request, Buffer I/O error) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
     stream: system_logs
     sql: >-
       SELECT host_name, count(*) AS matches FROM "system_logs"
-      WHERE body LIKE '%Out of memory: Killed process%' OR body LIKE '%I/O error%' OR body LIKE '%EXT4-fs error%'
-      OR (body LIKE '%XFS%' AND body LIKE '%Corruption%')
+      WHERE lower(body) LIKE '%i/o error%' OR lower(body) LIKE '%ext4-fs error%'
+      OR (lower(body) LIKE '%xfs%' AND lower(body) LIKE '%corruption%')
+      OR lower(body) LIKE '%blk_update_request%' OR lower(body) LIKE '%buffer i/o error%'
       GROUP BY host_name
     period: 5
     frequency: 1
-    silence: 15
+    silence: 5
   - name: infra-log-parse-errors-security-logs
     severity: "P3 주의"
     severity_icon: "🟡"

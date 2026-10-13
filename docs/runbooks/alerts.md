@@ -65,23 +65,44 @@ last -i root | head
 
 ---
 
-<a id="kernel-disk-errors"></a>
-## 🔴 커널·디스크 오류 발생 (`infra-kernel-disk-errors`)
+<a id="oom-kill"></a>
+## 🟠 OOM kill로 프로세스 강제 종료 (`infra-oom-kill`)
 
-**조건**: `system_logs`에 `Out of memory: Killed process`, `I/O error`, `EXT4-fs error`, `XFS ... Corruption` 패턴이 5분 안에 1건 이상.
+**조건**: `system_logs`에 `Killed process`, `Out of memory: Kill process`, `invoked oom-killer`가 대소문자와 상관없이 5분 안에 1건 이상. 컨테이너 cgroup OOM(`Memory cgroup out of memory: Killed process`)과 CentOS 6/7 형식을 포함한다. 같은 상태는 조회 구간(5분)마다 다시 통지된다(Event Alert).
 
-**왜 중요한가**: OOM은 서비스 프로세스가 강제 종료됐다는 뜻이고, I/O·파일시스템 오류는 디스크 고장이나 데이터 손상의 전조다.
+**왜 중요한가**: 서비스 프로세스가 강제 종료됐다는 뜻이다. 반복되면 다른 서비스와 서버 전체로 번진다.
 
 **확인**
 ```bash
-sudo dmesg -T | grep -iE "out of memory|i/o error|ext4-fs error|xfs" | tail
-free -h; ps aux --sort=-%mem | head -5          # OOM
-sudo smartctl -H /dev/sdX; df -h; mount | grep ro, # 디스크
+sudo dmesg -T | grep -iE "out of memory|killed process|oom-killer" | tail
+free -h; ps aux --sort=-%mem | head -5
+docker stats --no-stream        # 컨테이너 한도(cgroup) OOM이면
 ```
 
 **대응**
-- OOM: 종료된 프로세스가 서비스면 재기동 상태를 확인하고, 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit)를 점검한다.
-- I/O·FS 오류: 먼저 백업 상태를 확인한다(RustFS snapshot, `restic snapshots`). 파일시스템이 읽기 전용으로 바뀌었으면 서비스 영향을 판단하고 디스크 교체·fsck 일정을 잡는다.
+- `■ 대상`의 종료된 프로세스가 서비스면 재기동 상태를 확인한다.
+- 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit)를 점검하고, 반복되면 증설이나 한도 조정을 계획한다.
+
+**격상**: 같은 호스트에서 OOM이 반복되며 핵심 서비스가 계속 죽으면 P1로 다룬다.
+
+---
+
+<a id="disk-fs-errors"></a>
+## 🔴 디스크 I/O·파일시스템 오류 발생 (`infra-disk-fs-errors`)
+
+**조건**: `system_logs`에 `I/O error`, `EXT4-fs error`, `XFS ... Corruption`, `blk_update_request`, `Buffer I/O error`가 대소문자와 상관없이 5분 안에 1건 이상(Event Alert).
+
+**왜 중요한가**: 디스크 고장이나 데이터 손상의 전조다. 프로세스 종료(OOM)와 달리 데이터 손실 위험이 있어 P1로 따로 통지한다.
+
+**확인**
+```bash
+sudo dmesg -T | grep -iE "i/o error|ext4-fs error|xfs|blk_update_request" | tail
+sudo smartctl -H /dev/sdX; df -h; mount | grep "ro,"
+```
+
+**대응**
+- 먼저 백업 상태를 확인한다(RustFS snapshot, `restic snapshots`).
+- 파일시스템이 읽기 전용으로 바뀌었으면 서비스 영향을 판단하고 디스크 교체·fsck 일정을 잡는다.
 
 **격상**: 파일시스템이 읽기 전용으로 바뀌었거나 같은 디스크 오류가 반복되면 하드웨어 장애로 IDC에 연락한다.
 

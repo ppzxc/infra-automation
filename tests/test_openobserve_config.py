@@ -27,7 +27,7 @@ KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_
       "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
-    "infra-root-login-office-daily", "infra-sudo-escalation-failure", "infra-kernel-disk-errors",
+    "infra-root-login-office-daily", "infra-sudo-escalation-failure", "infra-oom-kill", "infra-disk-fs-errors",
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
@@ -236,8 +236,8 @@ def test_every_alert_is_actionable(o2):
 def test_severity_mapping_follows_impact(o2):
     assert _apply(o2).returncode == 0
     sev = {n: a["context_attributes"]["severity"] for n, a in o2.store["alert"].items()}
-    assert sev["infra-root-login-success"] == sev["infra-kernel-disk-errors"] == "P1 긴급"
-    assert sev["infra-ssh-login-failures-per-source"] == sev["infra-sudo-escalation-failure"] == "P2 경고"
+    assert sev["infra-root-login-success"] == sev["infra-disk-fs-errors"] == "P1 긴급"
+    assert sev["infra-ssh-login-failures-per-source"] == sev["infra-sudo-escalation-failure"] == sev["infra-oom-kill"] == "P2 경고"
     assert sev["infra-log-parse-errors-security-logs"] == "P3 주의"
 
 
@@ -267,9 +267,16 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"].count("HAVING count(*) >= 50") == 1
     assert by["infra-ssh-login-failures-per-source"]["trigger_condition"]["period"] == 5
     assert "user_name = 'root'" in by["infra-root-login-success"]["query_condition"]["sql"]
-    assert by["infra-kernel-disk-errors"]["stream_name"] == "system_logs"
-    for pattern in ("Out of memory: Killed process", "I/O error", "EXT4-fs error", "Corruption"):
-        assert pattern in by["infra-kernel-disk-errors"]["query_condition"]["sql"]
+    assert "infra-kernel-disk-errors" not in by
+    oom, disk = by["infra-oom-kill"], by["infra-disk-fs-errors"]
+    assert oom["stream_name"] == disk["stream_name"] == "system_logs"
+    oom_sql, disk_sql = oom["query_condition"]["sql"].lower(), disk["query_condition"]["sql"].lower()
+    assert "lower(body)" in oom_sql and "killed process" in oom_sql and "invoked oom-killer" in oom_sql
+    for pattern in ("i/o error", "ext4-fs error", "corruption", "blk_update_request", "buffer i/o error"):
+        assert pattern in disk_sql
+    # Event Alert: 재통지(silence)는 조회 구간과 같다
+    for a in (oom, disk):
+        assert a["trigger_condition"]["silence"] == a["trigger_condition"]["period"] == 5
     assert "log_parse_error" in by["infra-log-parse-errors-security-logs"]["query_condition"]["sql"]
 
 
@@ -434,7 +441,7 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     # 운영 스트림·운영 알림은 건드리지 않는다: 쓰기는 설정 객체뿐이고 합성 레코드는 검증 스트림에만 간다
     assert all("/_json" not in p for _, p, _ in o2.writes)
     hosts = {r["host_name"] for _, _, recs in o2.ingests for r in recs}
-    assert any(h.startswith("verify-kernel-oom-upper-") for h in hosts)
+    assert any(h.startswith("verify-oom-upper-") for h in hosts)
 
 
 def test_second_run_with_verification_still_changes_nothing_in_the_configuration(o2):
@@ -445,10 +452,10 @@ def test_second_run_with_verification_still_changes_nothing_in_the_configuration
 
 
 def test_job_fails_and_names_the_alert_and_case_when_an_alert_does_not_fire(o2):
-    o2.search_override = lambda stream, sql, hits: [] if "Killed process" in sql else hits
+    o2.search_override = lambda stream, sql, hits: [] if "oom-killer" in sql else hits
     res = _apply(o2)
     assert res.returncode != 0
-    assert "infra-kernel-disk-errors / 케이스 'OOM kill (대문자 Out of memory)': 발화해야 하는데 발화하지 않았습니다" in res.stdout
+    assert "infra-oom-kill / 케이스 'OOM kill (대문자 Out of memory)': 발화해야 하는데 발화하지 않았습니다" in res.stdout
 
 
 def test_job_fails_when_an_alert_fires_on_a_record_that_must_not_fire(o2):
@@ -460,20 +467,31 @@ def test_job_fails_when_an_alert_fires_on_a_record_that_must_not_fire(o2):
     assert "케이스 '일반 사용자 로그인 성공': 발화하면 안 되는데 발화했습니다" in res.stdout
 
 
-def test_known_failure_case_is_reported_but_does_not_fail_the_job(o2):
-    """OOM 소문자 사례는 현재 알림이 놓친다 — 엔진이 그렇게 답해도(발화 안 함) 알려진 실패로만 표시한다."""
+def test_no_fixture_is_marked_as_a_known_failure_any_more(o2):
+    assert not [c for spec in FIXTURES.values() for c in spec["cases"] if "known_failure" in c]
     res = _apply(o2)
     assert res.returncode == 0, res.stdout + res.stderr
-    assert "infra-kernel-disk-errors / 케이스 '컨테이너 cgroup OOM kill (소문자 out of memory) — 실제로 놓친 사례'" in res.stdout
-    assert "알려진 실패" in res.stdout
+    assert "알려진 실패" not in res.stdout
 
 
-def test_known_failure_that_the_engine_now_catches_is_not_reported_as_failure(o2):
-    o2.search_override = lambda stream, sql, hits: hits + ([{"host_name": next(
-        r["host_name"] for _, _, recs in o2.ingests for r in recs if r["host_name"].startswith("verify-kernel-oom-cgroup-"))}]
-        if "Killed process" in sql else [])
-    res = _apply(o2)
-    assert res.returncode == 0 and "알려진 실패" not in res.stdout
+def test_oom_and_disk_fixtures_cover_case_and_os_variants():
+    bodies = " ".join(r["body"] for c in FIXTURES["infra-oom-kill"]["cases"] for r in c["records"])
+    assert "Memory cgroup out of memory: Killed process" in bodies and "Out of memory: Kill process" in bodies
+    assert "invoked oom-killer" in bodies
+    disk = " ".join(r["body"] for c in FIXTURES["infra-disk-fs-errors"]["cases"] for r in c["records"])
+    assert "Buffer I/O error" in disk and "blk_update_request" in disk
+    # 서로의 영역을 침범하지 않는다: OOM 로그는 디스크 알림에, 디스크 오류는 OOM 알림에 걸리지 않는다
+    assert any(not c["fires"] and "Killed process" in c["records"][0]["body"] for c in FIXTURES["infra-disk-fs-errors"]["cases"])
+    assert any(not c["fires"] and "I/O error" in c["records"][0]["body"] for c in FIXTURES["infra-oom-kill"]["cases"])
+
+
+def test_replaced_kernel_disk_alert_is_deleted_from_the_server(o2):
+    assert _apply(o2).returncode == 0
+    o2.store["alert"]["infra-kernel-disk-errors"] = {"alert_id": "old-kernel", "name": "infra-kernel-disk-errors", "enabled": True}
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    assert ("DELETE", "/api/v2/default/alerts/old-kernel", None) in o2.writes
+    assert "infra-kernel-disk-errors" not in o2.store["alert"]
 
 
 def test_job_fails_when_the_latest_evaluation_of_an_alert_is_an_error(o2):
