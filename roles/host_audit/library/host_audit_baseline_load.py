@@ -65,17 +65,9 @@ import os
 
 from ansible.module_utils.basic import AnsibleModule
 
-try:
-    from urllib.parse import quote
-except ImportError:  # pragma: no cover - Python 2
-    from urllib import quote
+from ansible.module_utils.host_audit_files import host_audit_host_file
 
 SECTION = 'package_vulnerability'
-
-
-def host_file(directory, host):
-    """Per-host id file (the host name is percent-encoded so it cannot leave the directory)."""
-    return os.path.join(directory, '%s.json' % quote(host, safe=''))
 
 
 def load(src, ids_dir):
@@ -100,7 +92,7 @@ def load(src, ids_dir):
             os.remove(os.path.join(ids_dir, name))
     total = 0
     for host, ids in ids_by_host.items():
-        fd = os.open(host_file(ids_dir, host), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(host_audit_host_file(ids_dir, host), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, 'w') as out:
             out.write(json.dumps(list(ids or []), ensure_ascii=False))
         total += len(ids or [])

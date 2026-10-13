@@ -77,6 +77,7 @@ import os
 
 from ansible.module_utils.basic import AnsibleModule
 
+from ansible.module_utils.host_audit_files import host_audit_host_file
 from ansible.module_utils.host_audit_packages import (
     host_audit_package_findings, host_audit_package_summary, parse_vault_final)
 
@@ -145,14 +146,14 @@ def main():
     except (IOError, OSError, ValueError) as exc:
         module.fail_json(msg='패키지 기록을 읽을 수 없음: %s (%s)' % (p['record'], exc))
     host = str(record.get('inventory_hostname') or '')
-    if not host or '/' in host or host in ('.', '..'):
-        module.fail_json(msg='패키지 기록의 inventory_hostname이 파일 이름으로 쓸 수 없는 값: %r' % host)
+    if not host:
+        module.fail_json(msg='패키지 기록의 inventory_hostname이 비어 있음: %r' % host)
 
     trivy = _read_trivy(p['trivy_result'])
     result = host_audit_package_findings(trivy, record, _vault(record, p['vault_dir']), p['scan_rc'])
     del trivy  # the parsed Trivy document is the big one; the process ends right after, but do not rely on that
 
-    target = os.path.join(p['results_dir'], '%s.json' % host)
+    target = host_audit_host_file(p['results_dir'], host)
     changed = False
     if not module.check_mode:
         if not os.path.isdir(p['results_dir']):

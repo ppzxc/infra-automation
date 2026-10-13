@@ -22,7 +22,10 @@ import threading
 import time
 from pathlib import Path
 
-import psutil
+try:
+    import psutil
+except ImportError:  # 개발·측정용 의존성: 러너 이미지에는 필요 없다
+    sys.exit("psutil이 필요합니다(프로세스 트리 RSS 측정): pip install psutil")
 import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent

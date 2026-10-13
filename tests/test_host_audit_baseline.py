@@ -435,6 +435,19 @@ def test_archive_excludes_trivy_and_package_findings_and_keeps_the_rest_as_is(tm
     assert (out / "trivy/h1.json").exists() and (out / "package_findings/h1.json").exists()
 
 
+def test_the_upload_list_has_the_trivy_version_record_but_neither_trivy_nor_package_findings(tmp_path):
+    """AUD-512/513 (#159): trivy_version.json (tool and DB the verdicts came from) is archived; the big raw
+    trivy/ output and the runner-only package_findings/ are not. Nothing else in the role reads archive objects
+    for them, and there are no .gz objects any more (#151 was reversed)."""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out, _ = _keep_run(tmp_path)
+    stats = _run_keep_tasks(tmp_path, out)
+    assert "trivy_version.json" in stats
+    assert not any(rel.startswith("trivy/") or rel.startswith("package_findings/") for rel in stats)
+    assert not any(rel.endswith(".gz") for rel in stats)
+
+
 def test_nothing_is_kept_when_archiving_is_off(tmp_path):
     if not shutil.which("ansible-playbook"):
         pytest.skip("ansible-playbook not installed")

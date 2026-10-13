@@ -51,8 +51,9 @@
     - "{{ host_audit_run.output_dir }}/hosts"
 
 # OOM 등으로 중간에 죽은 실행은 끝 정리(cleanup.yml)까지 가지 못한다. 실행 초기에 출력 상위 경로 바로
-# 아래의 디렉터리 중 host_audit_output_retention_days일이 지난 것만 지운다. 이번 실행 디렉터리와
-# 재발송용(resend-*) 디렉터리, 디렉터리가 아닌 항목은 건드리지 않는다. check 모드에서는 지우지 않는다.
+# 아래의 디렉터리 중 이름이 run_id 규칙([A-Za-z0-9][A-Za-z0-9._-]*, AUD-630과 같음)에 맞고
+# host_audit_output_retention_days일이 지난 것만 지운다. 이번 실행 디렉터리와 재발송용(resend-*)
+# 디렉터리, 규칙에 맞지 않는 이름, 디렉터리가 아닌 항목은 건드리지 않는다. check 모드에서는 지우지 않는다.
 - name: "[AUD-006] Find the run directories older than the retention days"
   ansible.builtin.find:
     paths: "{{ host_audit_output_root }}"
@@ -60,8 +61,12 @@
     recurse: false
     age: "{{ host_audit_output_retention_days | int }}d"
     age_stamp: mtime
+    use_regex: true
+    # 실행 디렉터리 이름 규칙은 AUD-630의 run_id 검증과 같다. 이 규칙에 맞지 않는 이름은 우리 것이 아니므로 지우지 않는다.
+    patterns:
+      - '^[A-Za-z0-9][A-Za-z0-9._-]*$'
     excludes:
-      - "resend-*"
+      - '^resend-'
   register: _host_audit_old_runs
   check_mode: false
   when: not ansible_check_mode

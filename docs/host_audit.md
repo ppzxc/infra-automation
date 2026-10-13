@@ -102,7 +102,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-003` | `Fix Host Audit run metadata` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 |
 | `AUD-004` | `Select Host Audit targets into the host_audit_targets group` | `ansible.builtin.add_host` | 러너 | 인메모리 그룹, `changed_when: false` |
 | `AUD-005` | `Create the runner-local output directory for this run` | `ansible.builtin.file` | 러너 | 실행별 디렉터리 `0700` |
-| `AUD-006` | `Find the run directories older than the retention days` | `ansible.builtin.find` | 러너 | 읽기 전용, 출력 상위 경로 바로 아래의 디렉터리만, `resend-*` 제외, check 모드 건너뜀 |
+| `AUD-006` | `Find the run directories older than the retention days` | `ansible.builtin.find` | 러너 | 읽기 전용, 출력 상위 경로 바로 아래의 디렉터리만, 이름이 run_id 규칙(`[A-Za-z0-9][A-Za-z0-9._-]*`, `AUD-630`과 같음)에 맞는 것만, `resend-*` 제외, check 모드 건너뜀 |
 | `AUD-007` | `Remove the run directories older than the retention days` | `ansible.builtin.file` | 러너 | `state: absent`, 이번 실행 디렉터리 제외, check 모드 건너뜀 |
 | `AUD-010` | `Probe host identity and OS (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-011` | `Build the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_host_record` 필터 |
@@ -243,6 +243,8 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 | 소요 시간 합계 | 26.3초 | 17.2초 | -35% |
 
   처음 측정값(3,765 MB, #153 기준값)과 비교하면 프로세스 트리 최대 RSS가 약 92% 줄었다(3,765 → 285 MB). 남은 피크는 AUD-508 모듈이 이전 `findings.json`(약 44만 건 id)을 한 번 읽어 나누는 별도 프로세스(수백 MB, 끝나면 반환)다.
+
+  **측정 한계(주의)**: 위 "개선 전"(#155 반영본) harness는 이전 findings의 id 약 44만 건을 플레이북 변수로 싣는 방식이라, 그 변수 자체가 본 프로세스 약 1.2 GB, 트리 약 2.2 GB의 고정 비용이었다. 이 비용은 harness가 만든 것이고 실운영의 전 단계와 같다고 볼 수 없다(실운영은 AUD-505 `uri` 결과가 같은 크기의 변수가 되므로 비슷하긴 하지만 harness의 변수 주입과 똑같지는 않다). 그래서 #156의 -87%(트리)·-93%(본 프로세스)는 harness 기준이고, 실운영에서 #156 하나로 줄어드는 양은 이 표보다 작을 가능성이 높다. 개선 효과의 근거로는 "이전 findings 때문에 늘어나던 변수 비용이 없어졌다"는 구조 변화를 쓰고, 실운영 수치는 실제 정기 실행에서 다시 재야 한다. harness는 `psutil`(`pip install psutil`)이 필요하고, 없으면 안내 메시지를 내고 끝난다(테스트는 건너뜀). `scripts/measure_trivy_concurrency.py`도 같다.
 
   실운영 러너의 한도는 4G다(1G에서 task 287이 AUD-021에서 죽었다). 트리 최대치 3.8GB는 그 한도에 거의 닿는다.
   절대값은 머신과 버전에 따라 달라지므로 개선 효과는 같은 머신에서 전후를 비교한다.
@@ -741,7 +743,7 @@ AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·�
 
 ### 14.2 오래된 실행 디렉터리 (`prepare.yml`)
 
-OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실행 초기(`AUD-005` 뒤)에 출력 상위 경로 바로 아래 디렉터리 중 `host_audit_output_retention_days`(기본 **7일**, 수정 시각 기준)가 지난 것만 지운다. 이번 실행 디렉터리, 재발송용 `resend-*` 디렉터리, 디렉터리가 아닌 항목은 건드리지 않는다. check 모드에서는 지우지 않는다.
+OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실행 초기(`AUD-005` 뒤)에 출력 상위 경로 바로 아래 디렉터리 중 이름이 run_id 규칙(`[A-Za-z0-9][A-Za-z0-9._-]*`, `AUD-630`의 검증과 같은 식)에 맞고 `host_audit_output_retention_days`(기본 **7일**, 수정 시각 기준)가 지난 것만 지운다. 규칙에 맞지 않는 이름(`.`·`_`·`-`로 시작, 공백 포함 등)은 이 역할이 만든 것이 아니므로 건드리지 않는다. 이번 실행 디렉터리, 재발송용 `resend-*` 디렉터리, 디렉터리가 아닌 항목은 건드리지 않는다. check 모드에서는 지우지 않는다.
 
 ### 14.3 태스크 매트릭스
 

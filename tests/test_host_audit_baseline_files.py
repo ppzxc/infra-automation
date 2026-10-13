@@ -22,6 +22,19 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
 from host_audit_baseline import FIRST, NEW, PERSIST, host_audit_baseline_section  # noqa: E402
 
+import ansible.module_utils  # noqa: E402
+
+ansible.module_utils.__path__.append(str(ROLE / "module_utils"))  # what ANSIBLE_MODULE_UTILS does for a run
+
+
+def _load_module(name):
+    spec = importlib.util.spec_from_file_location(name, ROLE / "library" / ("%s.py" % name))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+writer = _load_module("host_audit_findings_write")
 _spec = importlib.util.spec_from_file_location("host_audit_baseline_load", ROLE / "library" / "host_audit_baseline_load.py")
 loader = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(loader)
@@ -200,3 +213,39 @@ def test_a_damaged_baseline_or_failed_download_still_fails_the_lookup_but_not_th
     assert history["state"] == "failed" and "findings.json" in history["reason"]
     history, _ = _decide(tmp_path / "missing", None, status=404)
     assert history["state"] == "failed" and "404" in history["reason"]
+
+
+# ---- one file-name rule for every writer and reader (#148) ------------------
+
+ODD_HOST = "web/01 ../ü"
+
+
+def test_an_unusual_host_name_is_written_and_read_under_the_same_file_name_everywhere(tmp_path):
+    from host_audit_files import host_audit_host_file
+
+    # previous findings.json -> per-host ids (baseline_load)
+    old = json.loads(json.dumps(OLD_FORMAT))
+    old["sections"][PKG] = {"hosts": [ODD_HOST], "ids": {ODD_HOST: ["CVE-1|openssl"]}}
+    src = tmp_path / "previous_findings.json"
+    src.write_text(json.dumps(old))
+    previous = tmp_path / "previous"
+    split, _, _ = loader.load(str(src), str(previous))
+    assert [p.name for p in previous.iterdir()] == [Path(host_audit_host_file(str(previous), ODD_HOST)).name]
+
+    # this run's per-host findings, named by the same rule (as host_audit_package_scan does)
+    current = tmp_path / "package_findings"
+    current.mkdir()
+    findings = [{"id": "CVE-1|openssl", "cve": "CVE-1", "package": "openssl"}]
+    Path(host_audit_host_file(str(current), ODD_HOST)).write_text(
+        json.dumps({"host": ODD_HOST, "status": "ok", "findings": findings}))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["package_findings", "previous", "previous_findings.json"]
+
+    # the findings writer reads it ...
+    assert writer._host_ids(str(current), ODD_HOST) == ["CVE-1|openssl"]
+    # ... and so does the comparison, which also finds the previous id: persisting, not new
+    model = {"cover": {"baseline": ""},
+             PKG: {"status": "ok", "hosts": [{"host": ODD_HOST, "inspected": True}],
+                   "details": [{"host": ODD_HOST, "id": "CVE-1|openssl", "cve": "CVE-1", "package": "openssl"}]}}
+    out = host_audit_baseline_section(model, {"state": "ok", "baseline": split, "pointers": []},
+                                      dict(RUN_META, package_findings_dir=str(current)))
+    assert [d["baseline"]["status"] for d in out[PKG]["details"]] == [PERSIST]

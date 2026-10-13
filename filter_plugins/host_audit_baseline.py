@@ -44,6 +44,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 runner
     ZoneInfo = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from host_audit_files import host_audit_host_file  # noqa: E402
 from host_audit_kisa import EXCEPTION, ITEMS as KISA_ITEMS, VULNERABLE  # noqa: E402
 
 DOC_SCHEMA_VERSION = 1
@@ -274,8 +275,11 @@ def _package_stream(model, package_findings_dir):
 def host_audit_findings_index(model, package_results=None, package_findings_dir=None):
     """{section: {'hosts': [...], 'findings': [...]}} for every section of the model.
 
-    Package Vulnerability comes either from ``package_results`` (in-memory results with their findings) or, when
-    ``package_findings_dir`` is given, as a part that names the files to stream from (no findings in memory).
+    Package Vulnerability comes from ``package_findings_dir`` as a part that names the files to stream from (no
+    findings in memory); this is the only path the role uses (report.yml passes just the directory, #155).
+    ``package_results`` (in-memory results with their findings) is the shape before #155. It is kept for the tests
+    only, as the reference that the file path must give the same statuses as (tests/test_host_audit_baseline*.py,
+    tests/test_host_audit_packages.py); do not pass it from a task, it holds every finding of every host.
     """
     model = model or {}
     index = {}
@@ -296,7 +300,7 @@ def host_audit_findings_index(model, package_results=None, package_findings_dir=
 def _stream_host_ids(directory, host):
     """Finding ids of one host from its file (empty when the file is missing)."""
     try:
-        with open(os.path.join(directory, '%s.json' % host), 'rb') as handle:
+        with open(host_audit_host_file(directory, host), 'rb') as handle:
             result = json.loads(handle.read().decode('utf-8'))
     except (IOError, OSError, ValueError):
         return set()
@@ -306,7 +310,7 @@ def _stream_host_ids(directory, host):
 def _base_file_ids(directory, host):
     """Finding ids of one host of the previous findings.json, from the per-host file host_audit_baseline_load wrote."""
     try:
-        with open(os.path.join(directory, '%s.json' % quote(host, safe='')), 'rb') as handle:
+        with open(host_audit_host_file(directory, host), 'rb') as handle:
             return set(json.loads(handle.read().decode('utf-8')) or [])
     except (IOError, OSError, ValueError):
         return set()

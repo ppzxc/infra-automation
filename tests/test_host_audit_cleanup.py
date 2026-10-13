@@ -207,6 +207,30 @@ def test_only_run_directories_older_than_the_retention_days_are_removed(tmp_path
     assert (root / "stray.txt").exists()    # only directories
 
 
+def test_a_directory_whose_name_is_not_a_run_id_survives_however_old_it_is(tmp_path):
+    root = tmp_path / "host_audit"
+    out = root / "ha-new"
+    names = ("ha-old", ".hidden", "-dash", "_under", "my backups", "ha old", "resend-x")
+    for name in names + ("ha-new",):
+        (root / name).mkdir(parents=True)
+        (root / name / "f").write_text("x")
+        _age(root / name, 30)
+    res = _prepare(tmp_path, root, out)
+    assert res.returncode == 0, res.stdout[-1500:]
+    assert not (root / "ha-old").exists()
+    for name in names[1:] + ("ha-new",):
+        assert (root / name).exists(), name
+
+
+def test_the_old_directory_name_rule_is_the_run_id_rule_of_aud_630():
+    """AUD-006 deletes only names that AUD-630 would accept as a run_id (one pattern, written in both places)."""
+    prepare = next(t for t in _load("prepare.yml") if "[AUD-006]" in t["name"])
+    pattern = prepare["ansible.builtin.find"]["patterns"][0]
+    cleanup = next(t for t in _load("cleanup.yml") if "[AUD-630]" in t["name"])
+    assert "_run_id is match('%s')" % pattern in cleanup["vars"]["_path_ok"]
+    assert prepare["ansible.builtin.find"]["use_regex"] is True
+
+
 def test_retention_days_default_is_documented_and_positive():
     defaults = yaml.safe_load((ROOT_DIR / "roles/host_audit/defaults/main.yml").read_text())
     days = defaults["host_audit_output_retention_days"]

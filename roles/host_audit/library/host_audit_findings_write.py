@@ -19,7 +19,7 @@ short_description: Write findings.json of a Host Audit run, reading the Package 
 description:
   - Writes C(document) as JSON to C(dest) (mode 0600). When C(package_index) names a directory, the
     C(package_vulnerability) section (C(hosts) and the sorted unique C(ids) per host) is added from
-    C(<dir>/<host>.json) one host at a time, so the ids are never all in memory.
+    C(<dir>/<percent-encoded host>.json) one host at a time, so the ids are never all in memory.
   - The result is the document the Audit Baseline compares against in the next scheduled run.
 options:
   document:
@@ -61,6 +61,7 @@ import json
 import os
 
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.host_audit_files import host_audit_host_file
 
 SECTION = 'package_vulnerability'
 
@@ -72,7 +73,7 @@ def _dump(value):
 def _host_ids(directory, host):
     """Sorted unique finding ids of one host ([] when the host has no file)."""
     try:
-        with open(os.path.join(directory, '%s.json' % host), 'rb') as handle:
+        with open(host_audit_host_file(directory, host), 'rb') as handle:
             result = json.loads(handle.read().decode('utf-8'))
     except (IOError, OSError, ValueError):
         return []
