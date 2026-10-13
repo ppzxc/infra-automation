@@ -1,0 +1,11 @@
+# Ansible managed
+[Unit]
+Description=OpenObserve health check every {{ o2_health_interval }}
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ o2_health_interval }}
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

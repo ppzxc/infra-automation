@@ -108,3 +108,12 @@ host_agents_vault_validate_certs: false
 # Legacy node_exporter Cleanup Toggle
 cleanup_legacy_node_exporter: true
 
+# OpenObserve 생존 타이머 (Spec #184 / Ticket-7): 이 호스트에만 5분 주기 확인 타이머를 배포한다.
+# OpenObserve(ns0332)가 죽으면 OpenObserve를 거치지 않고 네이버웍스 webhook(OpenBao agents/openobserve의 alert_webhook_url)으로 직접 P1을 보낸다.
+host_agents_o2_health_checker: ns0266
+o2_health_config_dir: /etc/openobserve-health
+o2_health_state_dir: /var/lib/openobserve-health
+o2_health_script_path: /usr/local/sbin/openobserve-health-check
+o2_health_interval: 5min
+o2_health_renotify_minutes: 60
+
