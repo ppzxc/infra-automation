@@ -217,8 +217,8 @@ host_audit_asset:
 ```text
 <run_id>/
 ├── packages/<Inventory Hostname>.json   # 패키지 기록 (아래)
-├── sbom/<Inventory Hostname>.cdx.json   # Trivy 입력 SBOM
-├── trivy/<Inventory Hostname>.json      # Trivy 원본 결과
+├── sbom/<Inventory Hostname>.cdx.json   # Trivy 입력 SBOM (보관 업로드 때 .cdx.json.gz로 압축, §11.1)
+├── trivy/<Inventory Hostname>.json      # Trivy 원본 결과 (보관 업로드 때 .json.gz로 압축, §11.1)
 └── package_vulnerability.json           # 섹션 모델 (DB 상태, 호스트별 건수, 상세)
 ```
 
@@ -403,10 +403,14 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | `<YYYY-MM>/<run_id>/mail_summary.json` | 메일 요약(제목·섹션별 한 줄·첨부 SHA-256, 주소 없음) — 재발송이 읽음 (#126) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/run.json` | 실행 메타(`run_kind` 포함) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/findings.json` | 섹션별 발견 색인 `{section: {hosts, ids: {host: [id]}}}`, `resolved`, `baseline_run_id` | 모든 실행 |
-| `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록·SBOM·Trivy 원본, `package_vulnerability.json`, `pointer.json` | 모든 실행 |
+| `<YYYY-MM>/<run_id>/trivy/<host>.json.gz` | Trivy 원본 결과를 gzip한 것(내용 그대로, `Content-Type: application/gzip`) (#151) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/sbom/<host>.cdx.json.gz` | Trivy 입력 SBOM(CycloneDX)을 gzip한 것(내용 그대로) (#151) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록(`packages/`), `package_vulnerability.json`, `pointer.json` (압축 안 함) | 모든 실행 |
 | `baseline/<run_id>.json` | 포인터 `{run_id, run_kind, started_at, findings_key, resolved}` | **정기 실행만**, 모든 업로드 성공 후 |
 
 `<YYYY-MM>`은 보고서 시간대(`host_audit_timezone`) 기준 실행 시작 월이다. 수시 실행은 보관하되 포인터를 쓰지 않으므로 Audit Baseline이 되지 않는다.
+
+**용량과 압축 (#151)**: 버킷은 GOVERNANCE 3년 보존이라 올린 뒤에는 지울 수 없다. 전체 실행(24대) 1회가 압축 전 약 3.57 GiB였고, 대부분이 `trivy/<host>.json`(호스트당 약 200~250 MB, 크기 대부분이 `References`·`Description`)이다. 그래서 업로드 직전(`AUD-517`·`AUD-518`) `trivy/*.json`과 `sbom/*.json`만 `community.general.archive`(`format: gz`, 단일 파일은 tar 없이 gzip)로 `<파일>.gz`를 만들고 원본은 지운다. 필드를 빼지 않으므로 `gunzip -c trivy/<host>.json.gz`가 Trivy 원본과 바이트 단위로 같다. `report.html`·`run.json`·`mail_summary.json`·`findings.json`·`pointer.json`(Audit Baseline 조회 `AUD-503~506`과 재발송 `AUD-623~624`가 읽는 파일)은 압축하지 않는다. 보관 해시(`AUD-513` SHA-256, 업로드 서명에 들어감)는 실제로 올리는 `.gz` 객체의 값이다. `Content-Encoding`은 붙이지 않는다 — 내려받은 바이트가 저장된 `.gz` 그대로여야 한다. 압축이 실패한 파일은 실행을 멈추지 않고 압축 없이 원래 이름으로 올라간다. `archive`는 `<파일>.gz`에 바로 쓰므로(임시 파일 없음) 실패하면 잘린 `.gz`가, 원본 삭제만 실패하면 온전한 `.gz`가 원본 옆에 남는다 — 둘 다 올라가면 지울 수 없다. 그래서 원본이 남아 있는 파일의 `.gz`는 `AUD-519`가 지운다("원본이 있으면 그 `.gz`는 없다"; 원본이 이미 지워졌다면 `.gz`가 유일한 사본이라 남긴다). 압축 없이 보관하는 파일 이름은 `AUD-520`이 실행 로그에 보여 준다(파일 이름만). 보관을 하지 않는 실행(check 모드, `host_audit_storage_enabled=false`, 보관 입력 누락)은 러너 파일을 압축하지 않는다.
 
 **기준선 찾기**: `baseline/` 목록 1회(ListObjectsV2) → 지난 12개월(+1일) 안에 수정된 포인터만 Get → 이번 실행보다 먼저 시작한 정기 실행 중 가장 최근 것이 Audit Baseline → 그 `findings_key`를 Get. 재발 판정은 같은 포인터들의 `resolved` 목록(정기 실행이 해소로 표시한 항목)을 쓴다. 포인터 목록은 1,000개(월 1회 기준 80년 이상)까지 한 번에 읽는다.
 
@@ -487,13 +491,17 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 | `AUD-506` | `Decide the Audit Baseline state of this run` | `ansible.builtin.set_fact` | 러너 | `ok`·`failed`·`disabled` |
 | `AUD-510` | `Save the findings index of this run on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 | `AUD-511` | `Save the Audit Baseline pointer of a scheduled run on the runner` | `ansible.builtin.copy` | 러너 | 정기 실행만, `0600` |
+| `AUD-517` | `Find the Trivy and SBOM originals of this run to compress` | `ansible.builtin.find` | 러너 | 읽기 전용, 보관하는 실행만 |
+| `AUD-518` | `Compress the Trivy and SBOM originals losslessly (gzip)` | `community.general.archive` | 러너 | `<파일>.gz` `0600`, 원본 삭제(이미 압축했으면 대상 없음), 실패해도 원본을 그대로 올림 |
+| `AUD-519` | `Remove the .gz of originals that failed to compress` | `ansible.builtin.file` | 러너 | 원본이 남은 파일의 잘리거나 남은 `<파일>.gz` 삭제 — 원본과 `.gz`가 함께 올라가지 않음 |
+| `AUD-520` | `Show the originals kept uncompressed because compression failed` | `ansible.builtin.debug` | 러너 | 압축 실패가 있을 때만, 파일 이름만 표시 |
 | `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용 |
 | `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
 | `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log` |
 | `AUD-515` | `Upload the Audit Baseline pointer of a scheduled run` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 정기 실행·전체 업로드 성공 시만, `no_log` |
 | `AUD-516` | `Fail the run when the Audit Baseline lookup or keeping the originals failed` | `ansible.builtin.assert` | 러너 | 파일 이름·상태만 표시 |
 
-검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.
+검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건, #151: `AUD-517~520`·`AUD-512`·`AUD-513`을 러너에서 실제로 돌려 Trivy·SBOM만 `.gz`로 바뀌고 `gunzip` 결과가 원본과 바이트 단위로 같으며 원본은 남지 않고, 나머지 파일은 그대로이며, 보관 SHA-256이 `.gz` 객체의 값인지와 보관하지 않는 실행은 압축하지 않는지, 압축이 실패하면(쓸 수 없는 잘린 `.gz`가 미리 있음) `AUD-519`·`AUD-520`까지 돌려 원본만 보관되고 `.gz`는 남지 않으며 실패 파일 이름만 표시되는지, 객체별 `Content-Type`(`.gz`는 `application/gzip`, `Content-Encoding` 없음)). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.
 ## 12. Configuration Drift (#124)
 
 Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호스트 실제 상태의 차이(CONTEXT.md Configuration Drift, ADR-0009 §1). 직전 Host Audit과의 차이는 Drift가 아니다(Audit Baseline 비교, #125).
@@ -554,7 +562,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 ```text
 report.yml
   AUD-023 보고서 HTML → AUD-611 SHA-256 → AUD-612·613 메일 요약(mail_summary.json, 주소 없음)
-  storage_upload.yml   AUD-510~515 원본(요약 포함) 업로드
+  storage_upload.yml   AUD-510~515, 517~520 원본(요약 포함, Trivy·SBOM은 gzip) 업로드
   AUD-614              보관 성공 판정 — 업로드가 하나라도 실패하면 보내지 않음
   mail.yml             AUD-600~609 수신자 해석 → 수신자마다 1통 발송 → 결과(주소 없이)
   storage_result.yml   AUD-516 보관 판정 (실패면 여기서 끝남)

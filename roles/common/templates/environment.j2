@@ -11,7 +11,7 @@ NODE_INTERFACE="{{ firewall_interface | default(ansible_default_ipv4.interface |
 NODE_GATEWAY="{{ default_gateway | default(ansible_default_ipv4.gateway | default('')) }}"
 NODE_ENV="{{ node_env | default('production') }}"
 NODE_IDC="{{ node_idc | default('main') }}"
-NODE_ROLE="{{ node_role | default(group_names | reject('equalto', 'all') | first | default('server')) }}"
+NODE_ROLE="{{ node_role | default(group_names | node_role_from_groups) }}"
 NODE_ADMIN_USER="{{ (accounts | default([]) | selectattr('tier', 'defined') | selectattr('tier', 'equalto', 'admin') | map(attribute='name') | first) | default((accounts | default([]) | map(attribute='name') | first) | default('ppzxc')) }}"
 NODE_SSH_PORT="{{ ssh_port | default(22) }}"
 OTEL_EXPORTER_OTLP_ENDPOINT="{{ ('http://' + otel_target_endpoint) if (otel_target_endpoint is defined and not otel_target_endpoint.startswith('http://') and not otel_target_endpoint.startswith('https://')) else (otel_target_endpoint | default('http://127.0.0.1:4317')) }}"
