@@ -227,7 +227,7 @@ def _flatten(tasks):
 
 
 def test_report_keeps_then_mails_then_judges_storage_then_mail():
-    report = _tasks("report.yml")
+    report = list(_flatten(_tasks("report.yml")))
     includes = [t.get("ansible.builtin.include_tasks") for t in report]
     names = [t.get("name", "") for t in report]
     summary_saved = next(i for i, n in enumerate(names) if "[AUD-613]" in n)

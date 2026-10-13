@@ -3,18 +3,20 @@
 # Host Audit — 원본 보관 (러너 localhost 전용, ADR-0009 §5, #125)
 # ==============================================================================
 # 보고서가 러너에 만들어진 뒤, 이번 실행 디렉터리 전체(report.html, run.json, findings.json,
-# hosts/·packages/·sbom/·trivy/ 원본)를 RustFS Host Audit 버킷의 <YYYY-MM>/<run_id>/에 올린다.
+# hosts/·packages/·sbom/ 원본과 Trivy 버전·DB 기록. 러너 전용 trivy/·package_findings/는 제외, #159·#155)를 RustFS Host Audit 버킷의 <YYYY-MM>/<run_id>/에 올린다.
 # 정기 실행은 모든 업로드가 성공한 뒤에만 포인터 baseline/<run_id>.json을 올린다 — 반쯤 올라간
 # 실행이 다음 달의 Audit Baseline이 되지 않게 한다. 수시 실행은 포인터를 남기지 않는다.
 # Audit Baseline 조회가 실패해도 원본은 올린다(비교만 빠진 보고서). 업로드 실패 또는 조회 실패는
 # 보고서를 만든 뒤 storage_result.yml(AUD-516)이 실행을 실패로 끝낸다(메일 발송 뒤). 포인터는 파일로 써서 올린다 — 서명한 SHA-256과 보낸
 # 바이트가 같아야 하기 때문이다.
 # ------------------------------------------------------------------------------
+# Package Vulnerability의 발견 id(수십만 건)는 모델에 없다. 모듈이 package_findings/<호스트>.json에서 호스트 하나씩
+# 읽어 findings.json에 쓴다(#155). 나머지 섹션은 모델의 document 그대로다.
 - name: "[AUD-510] Save the findings index of this run on the runner"
-  ansible.builtin.copy:
-    content: "{{ host_audit_model.baseline.document | to_json }}\n"
+  host_audit_findings_write:
+    document: "{{ host_audit_model.baseline.document }}"
+    package_index: "{{ host_audit_model.baseline.package_index | default({}) }}"
     dest: "{{ host_audit_run.output_dir }}/findings.json"
-    mode: '0600'
 
 - name: "[AUD-511] Save the Audit Baseline pointer of a scheduled run on the runner"
   ansible.builtin.copy:
@@ -23,53 +25,10 @@
     mode: '0600'
   when: host_audit_run.run_kind == 'scheduled'
 
-# 큰 원본(Trivy 결과 호스트당 약 200~250 MB, SBOM)은 내용 그대로 gzip해서 <파일>.gz로 올린다(#151).
-# 원본은 지운다 — 두 벌 올라가지 않게. 보고서·run.json·mail_summary.json·findings.json·포인터는 압축하지 않는다
-# (재발송·Audit Baseline 조회가 그대로 읽는다). 압축 실패는 실행을 멈추지 않는다: 그 원본은 압축 없이 올라간다.
-- name: "[AUD-517] Find the Trivy and SBOM originals of this run to compress"
-  ansible.builtin.find:
-    paths:
-      - "{{ host_audit_run.output_dir }}/trivy"
-      - "{{ host_audit_run.output_dir }}/sbom"
-    patterns: ["*.json"]
-    file_type: file
-  register: _host_audit_compress_files
-  when:
-    - _host_audit_storage_active | bool
-    - _host_audit_storage_problem | default('보관 비활성') | length == 0
-
-- name: "[AUD-518] Compress the Trivy and SBOM originals losslessly (gzip)"
-  community.general.archive:
-    path: "{{ item }}"
-    dest: "{{ item }}.gz"
-    format: gz
-    remove: true
-    mode: '0600'
-  loop: "{{ _host_audit_compress_files.files | default([]) | map(attribute='path') | sort }}"
-  loop_control:
-    label: "{{ item | basename }}"
-  register: _host_audit_compressed
-  failed_when: false
-
-# archive는 <파일>.gz에 바로 쓴다(임시 파일·이름 바꾸기 없음). 압축이 중간에 실패하면 잘린 .gz가,
-# 원본 삭제만 실패하면 온전한 .gz가 원본 옆에 남아 둘 다 3년 잠금 버킷에 올라간다. 원본이 남아 있으면
-# 그 .gz는 지운다 — "원본이 있으면 .gz는 없다". 원본이 지워졌으면 .gz가 유일한 사본이므로 남긴다.
-# (러너 localhost 전용이라 exists 테스트가 보는 파일시스템이 대상 파일시스템이다.)
-- name: "[AUD-519] Remove the .gz of originals that failed to compress"
-  ansible.builtin.file:
-    path: "{{ item }}.gz"
-    state: absent
-  loop: "{{ _host_audit_compress_files.files | default([]) | map(attribute='path') | select('exists') | sort }}"
-  loop_control:
-    label: "{{ item | basename }}.gz"
-
-- name: "[AUD-520] Show the originals kept uncompressed because compression failed"
-  vars:
-    _uncompressed: "{{ _host_audit_compress_files.files | default([]) | map(attribute='path') | select('exists') | map('basename') | sort }}"
-  ansible.builtin.debug:
-    msg: "압축 실패로 원본 그대로 보관하는 파일: {{ _uncompressed | join(', ') }}"
-  when: _uncompressed | length > 0
-
+# 보관 대상은 이번 실행 디렉터리에서 trivy/와 package_findings/를 뺀 전부다(#159, #151의 gzip 결정을 뒤집음).
+# trivy/ 원본은 24대 기준 실행당 약 3.5 GiB라 3년 잠금 버킷에 올리지 않는다. 대신 sbom/(약 30 MB, 압축 없이)과
+# 판정 당시 Trivy 버전·DB 기록(trivy_version.json, AUD-326)을 올려 보관된 SBOM으로 다시 판정할 수 있게 한다.
+# 판정 당시 결과는 findings.json·package_vulnerability.json이 갖는다. 파일은 바꾸거나 압축하지 않고 그대로 올린다.
 - name: "[AUD-512] Find every file of this run to keep"
   ansible.builtin.find:
     paths: "{{ host_audit_run.output_dir }}"
@@ -85,7 +44,9 @@
     path: "{{ item }}"
     checksum_algorithm: sha256
     get_mime: false
-  loop: "{{ _host_audit_keep_files.files | default([]) | map(attribute='path') | sort }}"
+  loop: >-
+    {{ _host_audit_keep_files.files | default([]) | map(attribute='path')
+       | reject('match', '^' ~ (host_audit_run.output_dir | regex_escape) ~ '/(trivy|package_findings)/') | sort }}
   register: _host_audit_keep_stats
 
 - name: "[AUD-514] Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)"
@@ -94,7 +55,7 @@
     _req: >-
       {{ _host_audit_storage_target | host_audit_s3_request('PUT', _host_audit_storage_prefix ~ _rel, none, item.stat.checksum) }}
     _content_type: >-
-      {{ {'.html': 'text/html; charset=utf-8', '.gz': 'application/gzip'}.get((_rel | splitext)[1], 'application/json') }}
+      {{ {'.html': 'text/html; charset=utf-8'}.get((_rel | splitext)[1], 'application/json') }}
   ansible.builtin.uri:
     url: "{{ _req.url }}"
     method: PUT

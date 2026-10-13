@@ -88,6 +88,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_run_kind` | `on_demand` | `scheduled`(Audit Baseline이 됨) · `on_demand`. Semaphore 템플릿에 고정 |
 | `host_audit_run_id` | `ha-<UTC 시작 시각>` | 실행 ID. 보통 지정하지 않음 |
 | `host_audit_output_root` | env `HOST_AUDIT_OUTPUT_ROOT` 또는 `/tmp/host_audit` | 러너 출력 상위 경로 |
+| `host_audit_output_retention_days` | `7` | 출력 상위 경로 아래에서 이 일수가 지난 실행 디렉터리를 다음 실행 초기에 지움(#157, §14) |
 | `host_audit_scope_pattern` | `servers:loadbalancers:overseer:!host_audit_excluded` | 점검 대상 그룹 |
 | `host_audit_timezone` | `Asia/Seoul` | 보고서 시각 표기 |
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
@@ -101,13 +102,15 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-003` | `Fix Host Audit run metadata` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 |
 | `AUD-004` | `Select Host Audit targets into the host_audit_targets group` | `ansible.builtin.add_host` | 러너 | 인메모리 그룹, `changed_when: false` |
 | `AUD-005` | `Create the runner-local output directory for this run` | `ansible.builtin.file` | 러너 | 실행별 디렉터리 `0700` |
+| `AUD-006` | `Find the run directories older than the retention days` | `ansible.builtin.find` | 러너 | 읽기 전용, 출력 상위 경로 바로 아래의 디렉터리만, 이름이 run_id 규칙(`[A-Za-z0-9][A-Za-z0-9._-]*`, `AUD-630`과 같음)에 맞는 것만, `resend-*` 제외, check 모드 건너뜀 |
+| `AUD-007` | `Remove the run directories older than the retention days` | `ansible.builtin.file` | 러너 | `state: absent`, 이번 실행 디렉터리 제외, check 모드 건너뜀 |
 | `AUD-010` | `Probe host identity and OS (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-011` | `Build the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_host_record` 필터 |
 | `AUD-100` | `Probe Asset Inventory (raw, read-only)` | `ansible.builtin.raw` (`become: true`) | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record` 필터 |
 | `AUD-012` | `Save the per-host record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
 | `AUD-020` | `Find the per-host records of this run` | `ansible.builtin.find` | 러너 | 읽기 전용 |
-| `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터 |
+| `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터. Package 발견은 넘기지 않고 `package_findings_dir`(파일 디렉터리)만 넘긴다(#155) |
 | `AUD-022` | `Save the run metadata on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 | `AUD-023` | `Render the A4 report HTML` | `ansible.builtin.template` | 러너 | 실행별 파일 `0600` |
 | `AUD-024` | `Show where the report was written` | `ansible.builtin.debug` | 러너 | 읽기 전용 |
@@ -193,14 +196,83 @@ host_audit_asset:
   - `VERIFY-AUD-012`: 러너에 저장된 JSON 구조를 확인한다.
   - `VERIFY-AUD-100`: Asset Inventory 기록의 영역별 구조와 값(패키지 수, root 계정, sshd 포트 등)을 확인한다.
 
+### 8.1 러너 메모리·시간 harness (#153, Spec #148)
+
+Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니면서 OOM으로 죽은 일(task 265, 287)을 숫자로
+재현하고, 이후 개선(#148의 Ticket 3·4·6)의 효과를 비교하기 위한 측정 도구다. 역할 밖 플레이북이라 role의 `library/`·`module_utils/`를 `ANSIBLE_LIBRARY`·`ANSIBLE_MODULE_UTILS`로 지정한다(#155). `scripts/host_audit_memory_harness.py`.
+
+- **입력**: 호스트 수와 호스트당 CVE 수. 합성 실행 디렉터리(`hosts/`, `packages/`, `trivy/`)와 이전 정기 실행의
+  findings(Audit Baseline)를 만든다. 이전 findings는 현재 발견의 80%가 그대로이고 20%만큼은 해소된 것으로 만든다.
+- **범위**: 실제 태스크를 `ansible-playbook`으로 돌린다. Package Vulnerability 분류·섹션(AUD-322~324),
+  보고서 모델(AUD-021), findings 인덱스 저장(AUD-510), Audit Baseline 비교. 태스크는 role의 YAML에서 ID로
+  뽑아 쓰므로 태스크가 바뀌면 harness도 바뀐 태스크를 잰다. Trivy 판정(AUD-321)은 합성 결과 파일로 대신한다.
+- **지표**: `ansible-playbook` 프로세스 트리 전체(자식 포함)의 RSS 합계 최대값과 소요 시간. 러너 컨테이너의 OOM은
+  cgroup 단위라 본 프로세스만 재면 일을 서브프로세스로 옮겼을 때 좋아진 것처럼 보일 수 있다. 본 프로세스 최대값은 참고로만
+  함께 출력한다. 0.1초 간격 샘플링이고 부모·자식이 공유하는 페이지를 중복 집계하므로 약간 크게 나온다.
+- **실행**:
+  - `python3 scripts/host_audit_memory_harness.py --hosts 24 --cves 23000` (결과는 JSON으로 출력)
+  - `pytest -m heavy_harness -s tests/test_host_audit_memory_harness.py` (같은 실운영 규모)
+  - 기본 `pytest`는 무거운 실행을 제외하고, 작은 규모(3대 × 20건)로 harness가 끝까지 도는지만 확인한다.
+- **현재 기준값(2026-10-13, 개선 전, 비교 기준)**:
+
+| 항목 | 값 |
+|---|---|
+| 규모 | 24대 × 호스트당 23,000건 = 552,000건 |
+| 프로세스 트리 최대 RSS | 3,765 MB |
+| `ansible-playbook` 본 프로세스 최대 RSS | 1,845 MB |
+| 소요 시간 합계 | 220.5초 (AUD-322 104초, AUD-323 65초, AUD-021 27초, AUD-510 5초) |
+| 조건 | 개발 머신(WSL2, 32 CPU, 24GB), ansible-core 2.21.4, Python 3.14.4, forks=1, 러너 컨테이너 한도 없음 |
+
+- **#155 적용 후 측정(2026-10-13, 같은 머신·같은 조건, 같은 날 개선 전 재측정 포함)**: 발견을 파일로 돌리고(§9) AUD-322를 모듈로 바꾼 결과다.
+
+| 항목 | 개선 전(#155 이전) | 개선 후 | 변화 |
+|---|---|---|---|
+| 프로세스 트리 최대 RSS | 3,736 MB (기준값 3,765 MB) | 2,175 MB | -42% |
+| `ansible-playbook` 본 프로세스 최대 RSS | 1,827 MB (기준값 1,845 MB) | 1,235 MB | -32% |
+| 소요 시간 합계 | 211.2초 | 31.5초 | -85% |
+| 단계별 | AUD-322 80초, AUD-323 77초, AUD-021 30초, AUD-510 4.4초 | AUD-322 9.2초, AUD-323 0.5초, AUD-021 5.3초, AUD-510 1.9초 | |
+
+  남은 1.2 GB는 #155가 줄이는 대상이 아니었고 #156이 줄였다(아래). harness가 이전 실행의 findings(Audit Baseline, 약 44만 건 id)를 플레이북 변수로 싣는 비용이고, 태스크를 하나도 돌리지 않고 변수만 싣는 플레이북이 이미 본 프로세스 1,259 MB, 트리 2,186 MB를 쓴다(트리는 태스크 워커가 fork로 복사돼 두 배로 집계됨). 실운영에서는 AUD-505의 `uri` 결과가 같은 크기의 변수가 된다(Audit Baseline 쪽 개선은 별도 티켓). 그 고정 비용을 뺀 #155 몫의 최대 증가분은 개선 전 약 570 MB(본 프로세스)에서 개선 후 0(변수만 실은 상태보다 낮음)이 됐다. 합성 Trivy 파일은 호스트당 약 5 MB로 실제(200~250 MB)보다 작아서 파싱 피크는 harness에 거의 드러나지 않는다. 실제 크기에서는 그 피크가 `ansible-playbook`이 아니라 호스트마다 끝나는 모듈 프로세스에서만 생긴다.
+
+- **#156 적용 후 측정(2026-10-13, 같은 머신·같은 조건, 직전 #155 반영본과 같은 날 비교)**: 이전 실행의 `findings.json`을 변수가 아니라 러너 파일로 받고(AUD-505), 별도 프로세스 모듈이 Package id를 호스트별 파일로 나눠(AUD-508) 비교가 호스트 하나씩 읽게 했다(§11.2). harness도 같은 태스크(AUD-507·508·506)를 돈다. 이전 findings는 `package_findings/previous_findings.json`에 미리 놓아 S3 다운로드를 대신한다.
+
+| 항목 | #155 반영본(개선 전) | 개선 후 | 변화 |
+|---|---|---|---|
+| 프로세스 트리 최대 RSS | 2,171 MB | 285 MB | -87% |
+| `ansible-playbook` 본 프로세스 최대 RSS | 1,236 MB | 91 MB | -93% |
+| 소요 시간 합계 | 26.3초 | 17.2초 | -35% |
+
+  처음 측정값(3,765 MB, #153 기준값)과 비교하면 프로세스 트리 최대 RSS가 약 92% 줄었다(3,765 → 285 MB). 남은 피크는 AUD-508 모듈이 이전 `findings.json`(약 44만 건 id)을 한 번 읽어 나누는 별도 프로세스(수백 MB, 끝나면 반환)다.
+
+  **측정 한계(주의)**: 위 "개선 전"(#155 반영본) harness는 이전 findings의 id 약 44만 건을 플레이북 변수로 싣는 방식이라, 그 변수 자체가 본 프로세스 약 1.2 GB, 트리 약 2.2 GB의 고정 비용이었다. 이 비용은 harness가 만든 것이고 실운영의 전 단계와 같다고 볼 수 없다(실운영은 AUD-505 `uri` 결과가 같은 크기의 변수가 되므로 비슷하긴 하지만 harness의 변수 주입과 똑같지는 않다). 그래서 #156의 -87%(트리)·-93%(본 프로세스)는 harness 기준이고, 실운영에서 #156 하나로 줄어드는 양은 이 표보다 작을 가능성이 높다. 개선 효과의 근거로는 "이전 findings 때문에 늘어나던 변수 비용이 없어졌다"는 구조 변화를 쓰고, 실운영 수치는 실제 정기 실행에서 다시 재야 한다. harness는 `psutil`(`pip install psutil`)이 필요하고, 없으면 안내 메시지를 내고 끝난다(테스트는 건너뜀). `scripts/measure_trivy_concurrency.py`도 같다.
+
+  실운영 러너의 한도는 4G다(1G에서 task 287이 AUD-021에서 죽었다). 트리 최대치 3.8GB는 그 한도에 거의 닿는다.
+  절대값은 머신과 버전에 따라 달라지므로 개선 효과는 같은 머신에서 전후를 비교한다.
+
 ## 9. Package Vulnerability (#123)
 
 설치 패키지 버전이 CVE·벤더 권고에 해당하는지 판정한다(ISMS 2.10.8 · 2.11.2). Vuls는 PoC(#112)에서 기각했고(CentOS 7 CVE 69건 누락, EOL 경고 없음, DB 13.6 GB), Trivy를 SBOM 입력으로 쓴다.
 
 - **호스트(읽기 전용)**: `files/package_probe.sh`를 `raw`로 실행해 릴리스 파일과 패키지 DB만 읽는다(`rpm -qa --queryformat` / `dpkg-query -W`). 아무것도 설치하지 않고 원격 파일도 만들지 않는다. CentOS 6/7도 같은 경로다. 식별 수집(AUD-010)이 `ok`인 호스트만 수집한다. root로 접속한 경우 rpm은 `nobody`로 조회한다(root로 열면 EL9 `rpmdb.sqlite-shm`이 바뀜, #120과 같은 방식). Asset Inventory의 패키지 목록(#120)과 별도로 읽는 이유는 Trivy 판정에 소스 패키지(rpm `SOURCERPM`, deb `source:Package`·`source:Version`)와 EL8+ 모듈 레이블이 필요하기 때문이다.
-- **러너**: 패키지 기록 → CycloneDX 1.5 SBOM(`host_audit_sbom`) → `trivy sbom --offline-scan --skip-db-update`(호스트마다 순차) → 분류(`host_audit_package_findings`) → 섹션 모델(`host_audit_package_section`). 판정·분류·집계는 모두 `filter_plugins/host_audit_packages.py`가 하고 템플릿(`templates/sections/package_vulnerability.html.j2`)은 그리기만 한다.
+- **러너**: 패키지 기록 → CycloneDX 1.5 SBOM(`host_audit_sbom`) → `trivy sbom --offline-scan --skip-db-update`(호스트마다 순차) → 분류(`host_audit_package_findings`) → 섹션 모델(`host_audit_package_section`). 판정·분류·집계 규칙은 모두 `filter_plugins/host_audit_packages.py`에 있고 템플릿(`templates/sections/package_vulnerability.html.j2`)은 그리기만 한다. 호스트별 분류(AUD-322)는 그 규칙을 쓰는 커스텀 모듈이 한다(아래 '발견은 파일로, 요약만 변수로').
 - **Trivy 고정**: `vars/trivy.yml`의 버전·SHA256(직접 계산한 값, upstream checksums.txt를 기준으로 쓰지 않음)과 맞는 릴리스만 `get_url checksum`으로 받아 러너 캐시(`host_audit_cache_dir`)에 풀고 실행한다. restic(BAK-075)과 같은 방식이고 커스텀 Semaphore 이미지가 필요 없다. 버전을 올릴 때는 sigstore 번들을 `cosign verify-blob`으로 검증한 뒤 sha256을 직접 계산해 넣는다(절차는 파일 머리말). 2026-03 공급망 사고(GHSA-69fq-xp46-6x23)의 v0.69.4는 쓰지 않는다. 현재 v0.75.0(amd64·arm64 모두 cosign 검증 통과, 2026-10-08).
 - **취약점 DB**: 매 실행 `trivy image --download-db-only`로 갱신한다(`host_audit_trivy_db_repository`로 미러 지정 가능). 갱신에 실패하면 캐시 DB의 `UpdatedAt`이 7일(`host_audit_trivy_db_max_age_days`) 이내일 때만 그 캐시로 판정하고, 넘었거나 캐시가 없으면 섹션 전체를 '점검불가'로 표시한다(실행은 계속). DB 생성 시각과 갱신 여부는 표지의 '취약점 DB'에 찍힌다. 캐시가 실행 사이에 남으려면 러너의 `HOME`(또는 `host_audit_cache_dir`)이 유지돼야 한다.
+- **Trivy 실패 처리 (#154)**: AUD-321이 `failed_when: false`로 계속 진행한 뒤 AUD-322가 호스트마다 다음을 '점검불가'(`scan_failed`)로 표시한다. 사유에 Trivy의 rc가 들어가고 137(또는 Ansible이 시그널 종료로 보고하는 -9)이면 'OOM-kill 추정'이 붙는다. 다른 호스트의 판정과 실행은 계속된다. 순서는 rc → 결과 파일 → 내용이다(rc≠0이면 파일이 유효해 보여도 신뢰하지 않는다).
+  - rc≠0
+  - 출력이 비어 있음(0바이트)
+  - 잘린 JSON(쓰는 도중 종료). 원문 파싱은 필터가 하므로 한 호스트의 손상이 AUD-322 전체를 멈추지 않는다.
+  - 결과 파일 없음
+- **발견은 파일로, 요약만 변수로 (#155)**: 발견 약 55만 건이 `set_fact`·보고서 모델·템플릿 평가를 거치며 메모리에 오르던 두 경로(AUD-322/323의 호스트별 결과, AUD-021 `package_results` → findings 색인)를 파일 기반으로 바꿨다.
+  - **커스텀 모듈을 쓴 이유**: 필터는 `ansible-playbook` 프로세스 안에서 돌아 Trivy 결과 파싱 같은 일시적 피크가 그대로 최대 메모리로 남는다. 모듈은 별도 프로세스라 끝나면 메모리를 돌려준다. 이 저장소의 첫 커스텀 모듈이다(#156에서 `host_audit_baseline_load.py`가 추가돼 모두 셋): `roles/host_audit/library/host_audit_package_scan.py`(AUD-322), `host_audit_findings_write.py`(AUD-510).
+  - **FQCN 예외**: 세 모듈(`host_audit_package_scan`, `host_audit_findings_write`, `host_audit_baseline_load`)은 역할 안(`library/`)의 로컬 모듈이라 컬렉션 FQCN이 없다(스펙 #155가 role `library/`를 지정). 다른 태스크 모듈은 그대로 FQCN이다.
+  - **회귀 확인**: 변경 전 코드(b1665bb)의 필터로 같은 합성 입력의 섹션 모델·Audit Baseline 결과·`findings.json`을 따로 기록해(`tests/fixtures/host_audit_packages/golden_before_155.json`) 변경 후 결과가 같음을 비교한다.
+  - **규칙은 한 벌**: 모듈은 `roles/host_audit/module_utils/host_audit_packages.py`로 `filter_plugins/host_audit_packages.py`를 심볼릭 링크해 같은 분류·실패 판정을 쓴다(필터와 갈라지지 않게). 역할 밖 플레이북(harness·pytest)은 `ANSIBLE_LIBRARY`·`ANSIBLE_MODULE_UTILS`로 이 디렉터리를 가리킨다.
+  - **AUD-322**: 호스트마다 모듈이 기록과 Trivy 결과를 읽어 분류하고 `package_findings/<호스트>.json`에 발견 전체를 쓴다. 돌려주는 값은 요약(심각도·분류별 건수, 긴급·높음 상세 후보 최대 `host_audit_package_detail_limit`행과 총수, 파일 경로)이다. 상세 후보 상위 N행의 합집합에 전체 상위 N행이 들어 있으므로 요약만으로 섹션 모델이 같아진다. Trivy 실패 판정(rc → 파일 → 내용, 4경우)은 #154 그대로다.
+  - **AUD-323**: 요약만 모아 `host_audit_package_section`으로 섹션 모델을 만든다. `_host_audit_package_results` 사실은 더 없다.
+  - **AUD-021 / Audit Baseline**: 메타에서 `package_results`를 빼고 `package_findings_dir`를 넘긴다. 비교는 호스트 파일을 하나씩 읽어 하고(호스트 단위 집합), 상태는 보고서가 그리는 상세 행의 키만 남기며 건수·재발·해소·확인 불가는 따로 센다. 보고서 결과(섹션 건수, 상세, 부록, Audit Baseline 배지)는 이전과 같다(pytest가 같은 합성 입력으로 이전 방식의 결과와 비교).
+  - **AUD-510**: `findings.json`의 Package 섹션(`hosts`, 호스트별 정렬·중복 제거한 `ids`)은 모델 대신 파일에서 호스트 하나씩 읽어 쓴다. 모델의 `baseline.document`에는 이 섹션이 없고 `baseline.package_index`(`dir`, 점검된 `hosts`)가 대신 있다. 저장되는 `findings.json`의 형식은 그대로다(Audit Baseline 비교가 다음 달에 그대로 읽는다).
+  - **보관(AUD-512~513) 결정**: `package_findings/`는 **보관하지 않는다**. 호스트당 수 MB(약 23,000건 기준)이고, 같은 내용을 보관되는 `sbom/<호스트>.cdx.json`을 Trivy로 다시 판정해 뽑을 수 있으며(CentOS는 vault 표 포함, §11.1 재판정), 발견 id는 보관되는 `findings.json`에 들어 있다. 다만 재판정은 **그 시점의 취약점 DB**를 쓰므로 판정 당시와 결과가 다를 수 있다 — 판정 당시 기록은 `findings.json`과 `package_vulnerability.json`이다. 3년 잠금 버킷에 중복 용량을 얹지 않는다. 그래서 AUD-513의 대상에서 뺀다(AUD-512 find 결과를 거른다, `trivy/`와 함께). 보관 실패로 디렉터리가 남을 때(#157)는 이 파일도 함께 남는다. 보관이 성공하면 디렉터리와 함께 정리된다.
+  - **이전 실행의 findings.json (#156)**: Audit Baseline 조회(AUD-505)로 받은 지난 실행의 `findings.json`도 변수로 오르지 않는다. 러너 파일(`package_findings/previous_findings.json`)로 받아 AUD-508 모듈이 Package id를 `package_findings/previous/<호스트>.json`으로 나누고, `host_audit_baseline_history.baseline`에는 나머지 작은 섹션과 그 디렉터리 위치만 남는다. 상세는 §11.2·§11.6.
 - **OS 인식 검사**: Trivy가 결과의 `Metadata.OS`를 수집한 OS 계열·버전과 다르게 인식하면 그 호스트를 '점검불가(OS 인식 불일치)'로 표시한다. OS를 인식하지 못하면 0건이 조용히 나오기 때문이다(PoC 함정).
 - **분류** (건수는 (CVE, 패키지) 쌍 기준, Audit Baseline 동일성 키는 `CVE|패키지`):
 
@@ -217,8 +289,10 @@ host_audit_asset:
 ```text
 <run_id>/
 ├── packages/<Inventory Hostname>.json   # 패키지 기록 (아래)
-├── sbom/<Inventory Hostname>.cdx.json   # Trivy 입력 SBOM (보관 업로드 때 .cdx.json.gz로 압축, §11.1)
-├── trivy/<Inventory Hostname>.json      # Trivy 원본 결과 (보관 업로드 때 .json.gz로 압축, §11.1)
+├── sbom/<Inventory Hostname>.cdx.json   # Trivy 입력 SBOM (압축 없이 보관, §11.1)
+├── trivy/<Inventory Hostname>.json      # Trivy 원본 결과. 러너 전용, 보관하지 않음 (#159, §11.1)
+├── trivy_version.json                   # 판정에 쓴 Trivy 버전·DB 메타데이터 (보관, AUD-326)
+├── package_findings/<Inventory Hostname>.json  # 호스트별 분류 결과(발견 전체). 러너 전용, 보관하지 않음 (#155)
 └── package_vulnerability.json           # 섹션 모델 (DB 상태, 호스트별 건수, 상세)
 ```
 
@@ -251,12 +325,14 @@ host_audit_asset:
 | `AUD-318` | `Refresh the Trivy vulnerability DB (download only)` | `ansible.builtin.command` | 러너 | `changed_when: false`, `failed_when: false`, `timeout`으로 시간 제한(실패는 AUD-319가 판정) |
 | `AUD-319` | `Decide whether the Trivy DB may be used for this run` | `ansible.builtin.set_fact` | 러너 | `host_audit_trivy_db_state` 필터 |
 | `AUD-320` | `Write the CycloneDX SBOM of each collected host` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
-| `AUD-321` | `Judge each SBOM with Trivy (offline, one host at a time)` | `ansible.builtin.command` | 러너 | `changed_when: false`, 결과 파일 없으면 호스트 '점검불가' |
-| `AUD-322` | `Classify the Trivy findings of each host` | `ansible.builtin.set_fact` | 러너 | `host_audit_package_findings` 필터. 호스트별 결과는 `register`로만 모은다(리스트 누적 금지 — 메모리가 호스트 수의 제곱) |
-| `AUD-323` | `Build the Package Vulnerability section model` | `ansible.builtin.set_fact` | 러너 | AUD-322 결과를 한 번에 모아 `host_audit_package_section` 필터 |
+| `AUD-321` | `Judge each SBOM with Trivy (offline, one host at a time)` | `ansible.builtin.command` | 러너 | `changed_when: false`, `failed_when: false`(실패 판정은 AUD-322가 rc로 한다) |
+| `AUD-322` | `Classify the Trivy findings of each host` | `host_audit_package_scan` (role `library/` 커스텀 모듈) | 러너 | 호스트마다 별도 프로세스가 패키지 기록·`trivy/<호스트>.json`을 직접 읽어 분류하고 발견 전체를 `package_findings/<호스트>.json`(`0600`)에 쓴다. 돌려주는 값은 요약(건수·상세 후보·파일 경로)뿐이고 `set_fact`로 만들지 않는다(#155). AUD-321의 호스트별 rc와 결과 파일로 rc≠0·빈 출력·잘린 JSON·파일 없음을 호스트 '점검불가'로 판정한다(#154). 호스트별 결과는 `register`로만 모은다(리스트 누적 금지 — 메모리가 호스트 수의 제곱) |
+| `AUD-323` | `Build the Package Vulnerability section model` | `ansible.builtin.set_fact` | 러너 | AUD-322의 요약을 한 번에 모아 `host_audit_package_section` 필터(발견 전체는 메모리에 없다) |
 | `AUD-324` | `Save the Package Vulnerability section on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
+| `AUD-325` | `Read the Trivy version and vulnerability DB metadata` | `ansible.builtin.command` | 러너 | `trivy version --format json`(`timeout 60`), `changed_when: false`, `failed_when: false` (실패는 AUD-326이 대체값으로 처리) |
+| `AUD-326` | `Save the Trivy version and DB record of this run on the runner` | `ansible.builtin.copy` | 러너 | `trivy_version.json` `0600`, `host_audit_trivy_provenance` 필터, DB를 못 써도 기록, 보관 대상 (#159) |
 
-검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).
+검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정, Trivy 실패 4경우 점검불가·나머지 호스트 계속). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).
 
 ## 10. Configuration Vulnerability (KISA-2026, #121)
 
@@ -403,14 +479,16 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | `<YYYY-MM>/<run_id>/mail_summary.json` | 메일 요약(제목·섹션별 한 줄·첨부 SHA-256, 주소 없음) — 재발송이 읽음 (#126) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/run.json` | 실행 메타(`run_kind` 포함) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/findings.json` | 섹션별 발견 색인 `{section: {hosts, ids: {host: [id]}}}`, `resolved`, `baseline_run_id` | 모든 실행 |
-| `<YYYY-MM>/<run_id>/trivy/<host>.json.gz` | Trivy 원본 결과를 gzip한 것(내용 그대로, `Content-Type: application/gzip`) (#151) | 모든 실행 |
-| `<YYYY-MM>/<run_id>/sbom/<host>.cdx.json.gz` | Trivy 입력 SBOM(CycloneDX)을 gzip한 것(내용 그대로) (#151) | 모든 실행 |
-| `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록(`packages/`), `package_vulnerability.json`, `pointer.json` (압축 안 함) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/trivy_version.json` | 판정 당시 Trivy 버전·취약점 DB 메타데이터 `{trivy_version, db_version, db_updated_at, db_downloaded_at, db_next_update, db_status, db_refreshed, source}` (#159) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/sbom/<host>.cdx.json` | Trivy 입력 SBOM(CycloneDX), 압축 없이 그대로. 다시 판정하는 입력이다(아래 재판정) (#159) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록(`packages/`), `package_vulnerability.json`, `pointer.json`. `trivy/`와 `package_findings/`는 올리지 않음(§9) | 모든 실행 |
 | `baseline/<run_id>.json` | 포인터 `{run_id, run_kind, started_at, findings_key, resolved}` | **정기 실행만**, 모든 업로드 성공 후 |
 
 `<YYYY-MM>`은 보고서 시간대(`host_audit_timezone`) 기준 실행 시작 월이다. 수시 실행은 보관하되 포인터를 쓰지 않으므로 Audit Baseline이 되지 않는다.
 
-**용량과 압축 (#151)**: 버킷은 GOVERNANCE 3년 보존이라 올린 뒤에는 지울 수 없다. 전체 실행(24대) 1회가 압축 전 약 3.57 GiB였고, 대부분이 `trivy/<host>.json`(호스트당 약 200~250 MB, 크기 대부분이 `References`·`Description`)이다. 그래서 업로드 직전(`AUD-517`·`AUD-518`) `trivy/*.json`과 `sbom/*.json`만 `community.general.archive`(`format: gz`, 단일 파일은 tar 없이 gzip)로 `<파일>.gz`를 만들고 원본은 지운다. 필드를 빼지 않으므로 `gunzip -c trivy/<host>.json.gz`가 Trivy 원본과 바이트 단위로 같다. `report.html`·`run.json`·`mail_summary.json`·`findings.json`·`pointer.json`(Audit Baseline 조회 `AUD-503~506`과 재발송 `AUD-623~624`가 읽는 파일)은 압축하지 않는다. 보관 해시(`AUD-513` SHA-256, 업로드 서명에 들어감)는 실제로 올리는 `.gz` 객체의 값이다. `Content-Encoding`은 붙이지 않는다 — 내려받은 바이트가 저장된 `.gz` 그대로여야 한다. 압축이 실패한 파일은 실행을 멈추지 않고 압축 없이 원래 이름으로 올라간다. `archive`는 `<파일>.gz`에 바로 쓰므로(임시 파일 없음) 실패하면 잘린 `.gz`가, 원본 삭제만 실패하면 온전한 `.gz`가 원본 옆에 남는다 — 둘 다 올라가면 지울 수 없다. 그래서 원본이 남아 있는 파일의 `.gz`는 `AUD-519`가 지운다("원본이 있으면 그 `.gz`는 없다"; 원본이 이미 지워졌다면 `.gz`가 유일한 사본이라 남긴다). 압축 없이 보관하는 파일 이름은 `AUD-520`이 실행 로그에 보여 준다(파일 이름만). 보관을 하지 않는 실행(check 모드, `host_audit_storage_enabled=false`, 보관 입력 누락)은 러너 파일을 압축하지 않는다.
+**용량 (#159, #151을 뒤집음)**: 버킷은 GOVERNANCE 3년 보존이라 올린 뒤에는 지울 수 없다. 전체 실행(24대) 1회가 약 3.57 GiB였고 대부분이 `trivy/<host>.json`(호스트당 약 200~250 MB, 대부분이 `References`·`Description`)이다. #151은 이를 gzip해 올리기로 했지만(#147 옵션 2), 그래도 지울 수 없는 용량이 크고 판정 원본은 SBOM에서 다시 만들 수 있어 `trivy/`를 **아예 올리지 않기로 바꿨다**(옵션 1). 실행당 보관 용량은 SBOM 등 약 30 MB다. 그래서 압축 단계(`AUD-517`~`AUD-520`)는 없앴고 `sbom/`도 압축하지 않는다(작아서 이득이 적고, 보관한 파일이 곧 업로드한 파일이다). 보관 해시(`AUD-513` SHA-256)는 올리는 파일 그대로의 값이고, `AUD-512`가 찾은 파일에서 `trivy/`와 `package_findings/`를 뺀다. 러너의 `trivy/`는 정리 정책(§14, #157)이 그대로 다룬다.
+
+**판정 기록과 재판정 (#159)**: 판정 당시 Trivy 버전과 취약점 DB 메타데이터(DB 버전, `UpdatedAt`, `DownloadedAt`, `NextUpdate`)를 `AUD-325`가 `trivy version --format json`으로 읽고 `AUD-326`이 실행 결과 `trivy_version.json`에 적어 함께 보관한다(DB를 못 써도 기록하며, `trivy version`이 실패하면 고정 버전과 DB 메타데이터 파일 값으로 대신하고 `source`에 표시). 상세 증적이 필요하면 보관된 `sbom/<host>.cdx.json`을 내려받아 `trivy_version.json`의 버전과 같은 Trivy로 `trivy sbom --scanners vuln --format json <SBOM>`을 한 번 더 돌린다. **한계**: 재판정은 그 시점의 DB를 쓴다(DB는 보관하지 않는다). 판정 당시와 건수가 다를 수 있고(새 CVE 추가, 수정본 반영), 판정 당시 기록은 `findings.json`·`package_vulnerability.json`뿐이다. `trivy_version.json`의 `db_updated_at`은 당시 DB의 시점을 알려 줄 뿐 그 DB를 복원하지는 못한다. CentOS 6/7 분류(`CentOS용 수정본 없음`)는 재판정 결과에 vault 표(`files/centos_vault_final/`)를 적용해 다시 만든다.
 
 **기준선 찾기**: `baseline/` 목록 1회(ListObjectsV2) → 지난 12개월(+1일) 안에 수정된 포인터만 Get → 이번 실행보다 먼저 시작한 정기 실행 중 가장 최근 것이 Audit Baseline → 그 `findings_key`를 Get. 재발 판정은 같은 포인터들의 `resolved` 목록(정기 실행이 해소로 표시한 항목)을 쓴다. 포인터 목록은 1,000개(월 1회 기준 80년 이상)까지 한 번에 읽는다.
 
@@ -426,6 +504,8 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | 해소 | 기준선에 있었고 이번에 없음(그 호스트·섹션을 이번에 점검함) — 정기 실행만 재발 이력에 남긴다 |
 | 확인 불가 | 기준선에 있었지만 이번에 그 호스트·섹션을 점검하지 못함 |
 | 첫 실행 | 기준선(이전 정기 실행)이 없음 |
+
+**기준선 읽기 (#156)**: 이전 `findings.json`은 형식이 그대로(변경 없음)이고 읽는 방법만 파일 기반이다. AUD-505가 러너 파일로 받고, AUD-508(`host_audit_baseline_load`)이 `sections.package_vulnerability.ids`를 `package_findings/previous/<호스트>.json`으로 나눈다. 비교는 이번 실행의 호스트 파일과 이 파일을 호스트 하나씩 읽어 하므로 판정은 이전과 같다(`tests/test_host_audit_baseline_files.py`가 이전 형식의 기준선으로 확인). 조회 실패(파일 없음·손상, 상태 코드≠200)는 AUD-506이 이전과 같이 `failed`로 판정한다.
 
 Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **신규**·**삭제**만 표시하고, 이번에 처음 점검한 호스트의 항목은 변경으로 세지 않는다. 보고서에는 Configuration Vulnerability '양호 외 항목'의 호스트 옆, Package Vulnerability '긴급·높음 상세'의 CVE 옆에 상태 배지가 붙고, 'Audit Baseline 대비 변경' 섹션에 섹션별 건수·재발·해소·확인 불가·Asset Inventory 변경이 나온다. 표지의 '비교 기준'에 Audit Baseline 실행 ID, '원본 보관'에 버킷 경로가 찍힌다.
 
@@ -487,21 +567,19 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 | `AUD-502` | `Resolve the Host Audit storage target and dedicated key` | `ansible.builtin.set_fact` | 러너 | 누락 항목은 이름만, `no_log` |
 | `AUD-503` | `List the Audit Baseline pointers of scheduled runs` | `ansible.builtin.uri` (S3 ListObjectsV2) | 러너 | 읽기 전용, `no_log` |
 | `AUD-504` | `Get the pointers of scheduled runs within the 12-month window` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
-| `AUD-505` | `Get the findings of the Audit Baseline run` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
+| `AUD-507` | `Make the runner-only directory for the previous findings` | `ansible.builtin.file` | 러너 | `package_findings/`와 `previous/`, `0700` (보관하지 않는 디렉터리, #155·#156) |
+| `AUD-505` | `Get the findings of the Audit Baseline run` | `ansible.builtin.uri` (S3 GetObject, `dest`) | 러너 | 읽기 전용, `no_log`. 내용은 변수가 아니라 `package_findings/previous_findings.json`(`0600`)로 받는다 (#156) |
+| `AUD-508` | `Split the previous findings into per-host id files` | `host_audit_baseline_load` (role `library/` 커스텀 모듈) | 러너 | `no_log`. Package id를 호스트별 파일(`0600`)로 나누고 나머지만 돌려줌. 파일 없음·손상은 `valid=false` → AUD-506이 조회 실패 |
 | `AUD-506` | `Decide the Audit Baseline state of this run` | `ansible.builtin.set_fact` | 러너 | `ok`·`failed`·`disabled` |
-| `AUD-510` | `Save the findings index of this run on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
+| `AUD-510` | `Save the findings index of this run on the runner` | `host_audit_findings_write` (role `library/` 커스텀 모듈) | 러너 | 실행별 파일 `0600`. 다른 섹션은 모델의 document 그대로, Package 발견 id는 `package_findings/<호스트>.json`에서 호스트 하나씩 읽어 쓴다(#155) |
 | `AUD-511` | `Save the Audit Baseline pointer of a scheduled run on the runner` | `ansible.builtin.copy` | 러너 | 정기 실행만, `0600` |
-| `AUD-517` | `Find the Trivy and SBOM originals of this run to compress` | `ansible.builtin.find` | 러너 | 읽기 전용, 보관하는 실행만 |
-| `AUD-518` | `Compress the Trivy and SBOM originals losslessly (gzip)` | `community.general.archive` | 러너 | `<파일>.gz` `0600`, 원본 삭제(이미 압축했으면 대상 없음), 실패해도 원본을 그대로 올림 |
-| `AUD-519` | `Remove the .gz of originals that failed to compress` | `ansible.builtin.file` | 러너 | 원본이 남은 파일의 잘리거나 남은 `<파일>.gz` 삭제 — 원본과 `.gz`가 함께 올라가지 않음 |
-| `AUD-520` | `Show the originals kept uncompressed because compression failed` | `ansible.builtin.debug` | 러너 | 압축 실패가 있을 때만, 파일 이름만 표시 |
 | `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용 |
 | `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
 | `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log` |
 | `AUD-515` | `Upload the Audit Baseline pointer of a scheduled run` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 정기 실행·전체 업로드 성공 시만, `no_log` |
 | `AUD-516` | `Fail the run when the Audit Baseline lookup or keeping the originals failed` | `ansible.builtin.assert` | 러너 | 파일 이름·상태만 표시 |
 
-검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건, #151: `AUD-517~520`·`AUD-512`·`AUD-513`을 러너에서 실제로 돌려 Trivy·SBOM만 `.gz`로 바뀌고 `gunzip` 결과가 원본과 바이트 단위로 같으며 원본은 남지 않고, 나머지 파일은 그대로이며, 보관 SHA-256이 `.gz` 객체의 값인지와 보관하지 않는 실행은 압축하지 않는지, 압축이 실패하면(쓸 수 없는 잘린 `.gz`가 미리 있음) `AUD-519`·`AUD-520`까지 돌려 원본만 보관되고 `.gz`는 남지 않으며 실패 파일 이름만 표시되는지, 객체별 `Content-Type`(`.gz`는 `application/gzip`, `Content-Encoding` 없음)). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.
+검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건, #159: `AUD-512`·`AUD-513`을 러너에서 실제로 돌려 `trivy/`·`package_findings/`가 보관 대상에서 빠지고 `sbom/`·`trivy_version.json`·나머지 파일은 압축·변경 없이 원본 그대로이며 보관 SHA-256이 파일의 값인지, 보관하지 않는 실행은 아무것도 올리지 않는지, 압축 단계(`AUD-517~520`)가 없는지, `AUD-325`·`AUD-326`이 DB 판정 뒤에 조건 없이 도는지). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.
 ## 12. Configuration Drift (#124)
 
 Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호스트 실제 상태의 차이(CONTEXT.md Configuration Drift, ADR-0009 §1). 직전 Host Audit과의 차이는 Drift가 아니다(Audit Baseline 비교, #125).
@@ -562,7 +640,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 ```text
 report.yml
   AUD-023 보고서 HTML → AUD-611 SHA-256 → AUD-612·613 메일 요약(mail_summary.json, 주소 없음)
-  storage_upload.yml   AUD-510~515, 517~520 원본(요약 포함, Trivy·SBOM은 gzip) 업로드
+  storage_upload.yml   AUD-510~515 원본(요약 포함, trivy/·package_findings/ 제외) 업로드
   AUD-614              보관 성공 판정 — 업로드가 하나라도 실패하면 보내지 않음
   mail.yml             AUD-600~609 수신자 해석 → 수신자마다 1통 발송 → 결과(주소 없이)
   storage_result.yml   AUD-516 보관 판정 (실패면 여기서 끝남)
@@ -642,6 +720,41 @@ report.yml
 | `AUD-626` | `Assert the archived report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 해시 불일치면 보내지 않음 |
 | `AUD-627` | `Prepare the resend summary and attachment` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
 | `AUD-628` | `Remove the downloaded report from the runner` | `ansible.builtin.file` | 러너 | `state: absent` |
+
+## 14. 러너 디렉터리 정리 (#157)
+
+러너의 `<host_audit_output_root>/<run_id>`는 실행당 약 3.6GB다. 두 곳에서 정리한다.
+
+### 14.1 이번 실행분 (`cleanup.yml`, 보고서 단계의 `always`)
+
+AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·메일·두 판정을 묶은 block의 `always`에서 돈다 — 실행이 실패로 끝나도 정책대로 처리된다. 지우는 것은 이번 실행의 `output_dir` 하나이고 `host_audit_output_root`는 지우지 않는다.
+
+| 상황 | 동작 |
+|---|---|
+| 보관 성공 | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
+| 보관 꺼짐(`host_audit_storage_enabled=false`), 메일 발송 성공 | 지운다. |
+| 보관 꺼짐, 메일 실패 또는 미발송 | 남긴다. 러너 사본이 유일하다. |
+| 보관 실패(업로드 실패, 보관 입력 누락) | 남긴다. AUD-516 메시지가 이 디렉터리를 가리킨다. |
+| check 모드 | 지우지 않는다. |
+
+"보관 성공"은 AUD-516이 통과하는 조건과 같다: 보관 입력 이상 없음, 업로드 전부 200, 정기 실행은 포인터 업로드 200, Audit Baseline 조회가 `failed`가 아님. Audit Baseline 조회만 실패한 실행은 AUD-516이 실패로 끝내고 메시지가 러너 디렉터리를 가리키므로 남긴다. 판정에 쓸 값이 없으면(앞 단계가 일찍 끝남) 남긴다. 남긴 경우 실행 로그에 경로와 이유를 보여 준다(`AUD-632`).
+
+**경로 검증**: `output_dir`이 정확히 `<host_audit_output_root>/<run_id>`(출력 상위 경로 바로 아래 한 단계)이고, `run_id`가 `[A-Za-z0-9][A-Za-z0-9._-]*`이며 `resend-`로 시작하지 않을 때만 지운다. 하나라도 어긋나면 지우지 않고 이유를 보여 준다.
+
+### 14.2 오래된 실행 디렉터리 (`prepare.yml`)
+
+OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실행 초기(`AUD-005` 뒤)에 출력 상위 경로 바로 아래 디렉터리 중 이름이 run_id 규칙(`[A-Za-z0-9][A-Za-z0-9._-]*`, `AUD-630`의 검증과 같은 식)에 맞고 `host_audit_output_retention_days`(기본 **7일**, 수정 시각 기준)가 지난 것만 지운다. 규칙에 맞지 않는 이름(`.`·`_`·`-`로 시작, 공백 포함 등)은 이 역할이 만든 것이 아니므로 건드리지 않는다. 이번 실행 디렉터리, 재발송용 `resend-*` 디렉터리, 디렉터리가 아닌 항목은 건드리지 않는다. check 모드에서는 지우지 않는다.
+
+### 14.3 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-630` | `Decide whether to remove this run's output directory` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 판정, 경로 검증 포함 |
+| `AUD-631` | `Remove this run's output directory` | `ansible.builtin.file` | 러너 | `state: absent`, 이번 실행 `output_dir`만, check 모드 건너뜀 |
+| `AUD-632` | `Show where the kept run directory is and why` | `ansible.builtin.debug` | 러너 | 남긴 경우만, 경로와 이유 |
+(AUD-006·007은 §6 매트릭스)
+
+검증: pytest `tests/test_host_audit_cleanup.py` — report.yml의 실제 마지막 block(AUD-516·AUD-610·정리)을 러너에서 돌려 위 표의 각 상황(AUD-610 실패·AUD-516 실패 포함)과 경로 검증(출력 상위 경로 자체, 밖, 하위, `resend-*`)을, `prepare.yml`의 AUD-005~007을 실제 디렉터리 수정 시각으로 돌려 N일 규칙을 확인한다.
 
 ### 13.6 검증
 

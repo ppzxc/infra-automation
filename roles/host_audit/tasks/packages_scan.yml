@@ -43,6 +43,7 @@
     - "{{ host_audit_cache_dir }}/trivy-cache"
     - "{{ host_audit_run.output_dir }}/sbom"
     - "{{ host_audit_run.output_dir }}/trivy"
+    - "{{ host_audit_run.output_dir }}/package_findings"
   vars:
     _trivy_dir: "{{ host_audit_cache_dir }}/trivy/{{ host_audit_trivy_version }}/{{ host_audit_trivy_arch[_host_audit_uname.stdout | trim] }}"
 
@@ -98,6 +99,26 @@
     _metadata_text: "{{ lookup('ansible.builtin.file', host_audit_cache_dir ~ '/trivy-cache/db/metadata.json', errors='ignore') | default('', true) }}"
     _metadata: "{{ _metadata_text | from_json if _metadata_text | length > 0 else {} }}"
 
+# 판정에 쓴 Trivy 버전·취약점 DB 메타데이터를 실행 결과로 남긴다(#159). 보관은 trivy/ 원본을 올리지 않으므로,
+# 이 기록과 보관된 sbom/이 "그때 무엇으로 판정했나"의 증거다. DB를 못 써도(점검불가) 기록한다.
+# `trivy version`이 실패하면(시간 초과 포함) 고정 버전과 DB 메타데이터 파일 값으로 대신한다.
+- name: "[AUD-325] Read the Trivy version and vulnerability DB metadata"
+  ansible.builtin.command:
+    argv: "{{ ['timeout', '60'] + _host_audit_trivy + ['version', '--format', 'json'] }}"
+  register: _host_audit_trivy_version_out
+  changed_when: false
+  failed_when: false
+
+- name: "[AUD-326] Save the Trivy version and DB record of this run on the runner"
+  ansible.builtin.copy:
+    content: >-
+      {{ (_host_audit_trivy_version_out.rc | default(1))
+         | host_audit_trivy_provenance(_host_audit_trivy_version_out.stdout | default(''),
+                                       host_audit_trivy_version, host_audit_trivy_db)
+         | to_nice_json(indent=2) }}
+    dest: "{{ host_audit_run.output_dir }}/trivy_version.json"
+    mode: '0600'
+
 - name: "[AUD-320] Write the CycloneDX SBOM of each collected host"
   ansible.builtin.copy:
     content: "{{ _record | host_audit_sbom | to_json }}\n"
@@ -132,36 +153,38 @@
     - host_audit_trivy_db.usable
     - _record.status == 'ok'
 
-# 호스트별 결과는 register로만 모은다. set_fact로 리스트를 누적하면(list + [result]) 항목마다
-# 그때까지의 전체 리스트가 결과로 남아 메모리가 호스트 수의 제곱으로 늘고, 17대에서 1024M 러너의
-# 워커가 죽었다("A worker was found in a dead state").
+# Trivy 실패(rc≠0, 빈 출력, 잘린 JSON, 결과 파일 없음)는 그 호스트만 Package Vulnerability 점검불가로 두고
+# 실행은 계속한다(#154). task 287에서 OOM-kill된 호스트가 정상처럼 보이면 안 된다.
+# 발견 전체는 ansible-playbook이 들고 다니지 않는다(#155). 커스텀 모듈(library/host_audit_package_scan.py)이
+# 호스트마다 별도 프로세스에서 Trivy 결과를 읽어 분류하고, 발견 전체를 package_findings/<호스트>.json에 쓰고,
+# 요약(건수·상세 후보·파일 경로)만 돌려준다. 필터로 하면 피크가 ansible-playbook 프로세스에 그대로 남는다.
+# 모듈은 끝나면 메모리를 반환한다. 호스트별 결과는 register로만 모은다(set_fact 누적은 호스트 수의 제곱, task 265).
 - name: "[AUD-322] Classify the Trivy findings of each host"
-  ansible.builtin.set_fact:
-    _host_audit_package_result: "{{ _result }}"
+  host_audit_package_scan:
+    record: "{{ item }}"
+    trivy_result: "{{ host_audit_run.output_dir }}/trivy/{{ item | basename }}"
+    results_dir: "{{ host_audit_run.output_dir }}/package_findings"
+    vault_dir: "{{ role_path }}/files/centos_vault_final"
+    scan_rc: "{{ _scan.rc | default(omit) }}"
+    detail_limit: "{{ host_audit_package_detail_limit }}"
   register: _host_audit_package_classified
   loop: "{{ _host_audit_package_files.files | map(attribute='path') | sort }}"
   loop_control:
-    label: "{{ _record.inventory_hostname }}"
+    label: "{{ item | basename | regex_replace('\\.json$', '') }}"
   vars:
-    _record: "{{ lookup('ansible.builtin.file', item) | from_json }}"
-    _trivy_text: "{{ lookup('ansible.builtin.file', host_audit_run.output_dir ~ '/trivy/' ~ _record.inventory_hostname ~ '.json', errors='ignore') | default('', true) }}"
-    _os: "{{ _record.os | default({}, true) }}"
-    _vault: >-
-      {{ lookup('ansible.builtin.file', 'centos_vault_final/centos-' ~ _os.major ~ '.tsv') | host_audit_parse_vault_final
-         if (_os.family | default('')) == 'centos' and (_os.major | default('')) in ['6', '7'] else {} }}
-    _result: "{{ (_trivy_text | from_json if _trivy_text | length > 0 else none) | host_audit_package_findings(_record, _vault) }}"
+    _scan: "{{ _host_audit_trivy_scans.results | default([]) | selectattr('item', 'equalto', item) | list | first | default({}) }}"
   when: host_audit_trivy_db.usable
 
+# 섹션 모델은 호스트별 요약만으로 만든다. 발견 전체는 이 시점에도 메모리에 없다.
 - name: "[AUD-323] Build the Package Vulnerability section model"
   ansible.builtin.set_fact:
-    _host_audit_package_results: "{{ _classified }}"
     host_audit_package_section: >-
-      {{ _classified
+      {{ _summaries
          | host_audit_package_section(host_audit_trivy_db, host_audit_trivy_version, host_audit_package_detail_limit) }}
   vars:
-    _classified: >-
-      {{ _host_audit_package_classified.results | default([]) | selectattr('ansible_facts', 'defined')
-         | map(attribute='ansible_facts._host_audit_package_result') | list }}
+    _summaries: >-
+      {{ _host_audit_package_classified.results | default([]) | selectattr('package_host', 'defined')
+         | map(attribute='package_host') | list }}
 
 - name: "[AUD-324] Save the Package Vulnerability section on the runner"
   ansible.builtin.copy:

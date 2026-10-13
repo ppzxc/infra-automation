@@ -44,6 +44,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 runner
     ZoneInfo = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from host_audit_files import host_audit_host_file  # noqa: E402
 from host_audit_kisa import EXCEPTION, ITEMS as KISA_ITEMS, VULNERABLE  # noqa: E402
 
 DOC_SCHEMA_VERSION = 1
@@ -258,8 +259,28 @@ def _package_findings(model, package_results):
     return {'hosts': hosts, 'findings': findings}
 
 
-def host_audit_findings_index(model, package_results=None):
-    """{section: {'hosts': [...], 'findings': [...]}} for every section of the model."""
+def _package_stream(model, package_findings_dir):
+    """The Package Vulnerability part of the index when the findings stay in files (#155).
+
+    Nothing is read here: ``stream`` is the directory of ``<host>.json`` files that ``host_audit_package_scan``
+    wrote, and the compare and the stored document read it one host at a time.
+    """
+    section = model.get(SECTION_PACKAGE) or {}
+    if not section or section.get('status') not in (None, 'ok'):
+        return {'hosts': [], 'findings': []}
+    hosts = sorted(h['host'] for h in section.get('hosts') or [] if h.get('inspected'))
+    return {'hosts': hosts, 'findings': [], 'stream': package_findings_dir}
+
+
+def host_audit_findings_index(model, package_results=None, package_findings_dir=None):
+    """{section: {'hosts': [...], 'findings': [...]}} for every section of the model.
+
+    Package Vulnerability comes from ``package_findings_dir`` as a part that names the files to stream from (no
+    findings in memory); this is the only path the role uses (report.yml passes just the directory, #155).
+    ``package_results`` (in-memory results with their findings) is the shape before #155. It is kept for the tests
+    only, as the reference that the file path must give the same statuses as (tests/test_host_audit_baseline*.py,
+    tests/test_host_audit_packages.py); do not pass it from a task, it holds every finding of every host.
+    """
     model = model or {}
     index = {}
     if model.get(SECTION_ASSET):
@@ -267,12 +288,45 @@ def host_audit_findings_index(model, package_results=None):
     if model.get(SECTION_KISA):
         index[SECTION_KISA] = _kisa_findings(model)
     if model.get(SECTION_PACKAGE):
-        index[SECTION_PACKAGE] = _package_findings(model, package_results)
+        index[SECTION_PACKAGE] = (_package_stream(model, package_findings_dir) if package_findings_dir
+                                  else _package_findings(model, package_results))
     for name, value in model.items():
         if isinstance(value, dict) and isinstance(value.get('baseline_findings'), dict):
             index[name] = {'hosts': list(value['baseline_findings'].get('hosts') or []),
                            'findings': list(value['baseline_findings'].get('findings') or [])}
     return index
+
+
+def _stream_host_ids(directory, host):
+    """Finding ids of one host from its file (empty when the file is missing)."""
+    try:
+        with open(host_audit_host_file(directory, host), 'rb') as handle:
+            result = json.loads(handle.read().decode('utf-8'))
+    except (IOError, OSError, ValueError):
+        return set()
+    return set(f['id'] for f in result.get('findings') or [])
+
+
+def _base_file_ids(directory, host):
+    """Finding ids of one host of the previous findings.json, from the per-host file host_audit_baseline_load wrote."""
+    try:
+        with open(host_audit_host_file(directory, host), 'rb') as handle:
+            return set(json.loads(handle.read().decode('utf-8')) or [])
+    except (IOError, OSError, ValueError):
+        return set()
+
+
+def _part_host_ids(part):
+    """(host, set of finding ids) of an index part, one host at a time."""
+    if part.get('stream'):
+        for host in part['hosts']:
+            yield host, _stream_host_ids(part['stream'], host)
+        return
+    grouped = {}
+    for f in part['findings']:
+        grouped.setdefault(f['host'], set()).add(f['id'])
+    for host in sorted(grouped):
+        yield host, grouped[host]
 
 
 def _key(section, host, fid):
@@ -288,6 +342,8 @@ def _compact(index):
     """Stored form: {section: {'hosts': [...], 'ids': {host: [ids]}}} (labels are rebuilt from ids)."""
     out = {}
     for section, part in index.items():
+        if part.get('stream'):  # written from the files by host_audit_findings_write
+            continue
         ids = {}
         for f in part['findings']:
             ids.setdefault(f['host'], []).append(f['id'])
@@ -323,14 +379,16 @@ def _badge(status):
     return {'status': status, 'class': STATUS_CLASSES.get(status, 'na')}
 
 
-def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WINDOW_DAYS):
+def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WINDOW_DAYS, track=None):
     """Mark every finding of ``index`` against the Audit Baseline.
 
     ``baseline``: the stored findings document of the previous scheduled run, or None
-    (first run). ``pointers``: pointer documents of scheduled runs (each with
+    (first run). Its Package section may carry ``ids_dir``/``ids_hosts`` (per-host id files) instead of ``ids`` (#156). ``pointers``: pointer documents of scheduled runs (each with
     ``started_at`` and ``resolved`` keys) used for 재발 within ``window_days``.
-    Returns {'status': {key: status}, 'resolved': [keys], 'unknown': [keys],
+    Returns {'status': {key: status}, 'recurring': [keys], 'counts': {section: {status: n}}, 'resolved': [keys], 'unknown': [keys],
     'asset_changes': [{'host', 'id', 'change'}]}.
+    A part that streams its findings from files (Package Vulnerability, #155) is compared one host at a time and
+    ``status`` holds only the keys in ``track`` for it (the rows the report draws); ``counts`` has every one.
     """
     run = run or {}
     started = _parse_utc(run.get('started_at')) or datetime.now(timezone.utc)
@@ -344,15 +402,23 @@ def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WIND
             continue
         recurring.update(p.get('resolved') or [])
 
-    out = {'status': {}, 'resolved': [], 'unknown': [], 'asset_changes': []}
+    out = {'status': {}, 'counts': {}, 'recurring': [], 'resolved': [], 'unknown': [], 'asset_changes': []}
     base_sections = (baseline or {}).get('sections') or {}
     for section, part in (index or {}).items():
-        cur_keys = set(_key(section, f['host'], f['id']) for f in part['findings'])
         cur_hosts = set(part['hosts'])
         base = base_sections.get(section)
         base_hosts = set((base or {}).get('hosts') or [])
-        base_keys = set(_key(section, h, i) for h, ids in ((base or {}).get('ids') or {}).items() for i in ids)
+        base_dir = (base or {}).get('ids_dir')  # the ids stay in per-host files (#156)
+        if base_dir:
+            base_ids = dict((h, None) for h in (base or {}).get('ids_hosts') or [])
+        else:
+            base_ids = (base or {}).get('ids') or {}
+
+        def base_for(host):
+            return _base_file_ids(base_dir, host) if base_dir else set(base_ids.get(host) or [])
         if section == SECTION_ASSET:
+            cur_keys = set(_key(section, f['host'], f['id']) for f in part['findings'])
+            base_keys = set(_key(section, h, i) for h, ids in base_ids.items() for i in ids)
             if baseline is None:
                 continue
             for k in sorted(cur_keys - base_keys):
@@ -363,20 +429,33 @@ def host_audit_baseline_compare(index, baseline, pointers, run, window_days=WIND
                 if _split_key(k)[1] in cur_hosts:
                     out['asset_changes'].append({'key': k, 'change': REMOVED})
             continue
-        for k in cur_keys:
-            if baseline is None:
-                out['status'][k] = FIRST
-            elif k in base_keys:
-                out['status'][k] = PERSIST
-            elif k in recurring:
-                out['status'][k] = RECUR
-            else:
-                out['status'][k] = NEW
-        for k in sorted(base_keys - cur_keys):
-            if _split_key(k)[1] in cur_hosts:
-                out['resolved'].append(k)
-            else:
-                out['unknown'].append(k)
+        counts = out['counts'].setdefault(section, {})
+        resolved, unknown = [], []
+        seen = set()
+        for host, ids in _part_host_ids(part):
+            seen.add(host)
+            base_set = base_for(host)
+            for fid in ids:
+                key = _key(section, host, fid)
+                if baseline is None:
+                    status = FIRST
+                elif fid in base_set:
+                    status = PERSIST
+                elif key in recurring:
+                    status = RECUR
+                else:
+                    status = NEW
+                counts[status] = counts.get(status, 0) + 1
+                if status == RECUR:
+                    out['recurring'].append(key)
+                if not part.get('stream') or track is None or key in track:
+                    out['status'][key] = status
+            (resolved if host in cur_hosts else unknown).extend(_key(section, host, i) for i in base_set - ids)
+        for host in base_ids:  # hosts the baseline had findings for and this run has none
+            if host not in seen:
+                (resolved if host in cur_hosts else unknown).extend(_key(section, host, i) for i in base_for(host))
+        out['resolved'].extend(sorted(resolved))
+        out['unknown'].extend(sorted(unknown))
     return out
 
 
@@ -439,13 +518,17 @@ def host_audit_baseline_section(model, history=None, meta=None):
     tz_name = meta.get('timezone') or 'Asia/Seoul'
     run = {'run_id': meta.get('run_id', ''), 'run_kind': meta.get('run_kind') or 'on_demand',
            'started_at': meta.get('started_at', '')}
-    index = host_audit_findings_index(model, meta.get('package_results'))
+    package_dir = meta.get('package_findings_dir')
+    index = host_audit_findings_index(model, meta.get('package_results'), package_dir)
+    # Findings that stay in files keep a status only for the rows the report draws (the detail table).
+    track = set(_key(SECTION_PACKAGE, d['host'], d.get('id') or '%s|%s' % (d['cve'], d['package']))
+                for d in (model.get(SECTION_PACKAGE) or {}).get('details') or [])
     state = history.get('state') or 'disabled'
     baseline = history.get('baseline') if state == 'ok' else None
     cover = dict(model.get('cover') or {})
 
     if state == 'ok':
-        compare = host_audit_baseline_compare(index, baseline, history.get('pointers'), run)
+        compare = host_audit_baseline_compare(index, baseline, history.get('pointers'), run, track=track)
         if baseline is None:
             cover['baseline'] = '없음 — 첫 정기 실행 전이라 비교하지 않음 (모든 발견을 첫 실행으로 표시)'
         else:
@@ -453,15 +536,15 @@ def host_audit_baseline_section(model, history=None, meta=None):
                 baseline.get('run_id', ''), _local_text(baseline.get('started_at'), tz_name))
         model = _annotate(model, compare)
     else:
-        compare = {'status': {}, 'resolved': [], 'unknown': [], 'asset_changes': []}
+        compare = {'status': {}, 'counts': {}, 'recurring': [], 'resolved': [], 'unknown': [], 'asset_changes': []}
         cover['baseline'] = ('조회 실패 — %s (이번 보고서는 비교하지 않음, 실행은 실패로 끝남)' % (history.get('reason') or '-')
                              if state == 'failed' else '비교 안 함 — 보관이 비활성화된 실행')
     model['cover'] = cover
 
     counts = {}
-    for k, s in compare['status'].items():
-        section = _split_key(k)[0]
-        counts.setdefault(section, dict((x, 0) for x in STATUSES + [FIRST]))[s] += 1
+    for section, by_status in compare['counts'].items():
+        for status, n in by_status.items():
+            counts.setdefault(section, dict((x, 0) for x in STATUSES + [FIRST]))[status] += n
     for k in compare['resolved']:
         counts.setdefault(_split_key(k)[0], dict((x, 0) for x in STATUSES + [FIRST]))[RESOLVED] += 1
     for k in compare['unknown']:
@@ -469,7 +552,7 @@ def host_audit_baseline_section(model, history=None, meta=None):
     count_rows = [{'section': SECTION_TITLES.get(s, s), 'counts': [c[x] for x in STATUSES], 'first': c[FIRST]}
                   for s, c in sorted(counts.items())]
 
-    recurring = sorted(k for k, s in compare['status'].items() if s == RECUR)
+    recurring = sorted(compare['recurring'])
     asset_rows = []
     for change in compare['asset_changes'][:LIST_LIMIT]:
         _section, host, fid = _split_key(change['key'])
@@ -483,7 +566,7 @@ def host_audit_baseline_section(model, history=None, meta=None):
         'run_kind': run['run_kind'],
         'started_at': run['started_at'],
         'baseline_run_id': (baseline or {}).get('run_id', ''),
-        'sections': _compact(index),
+        'sections': _compact(index),  # without the part that streams from files (stored by host_audit_findings_write)
         # Only a scheduled run marks findings resolved for the 12-month 재발 rule.
         'resolved': compare['resolved'] if run['run_kind'] == 'scheduled' else [],
     }
@@ -505,6 +588,8 @@ def host_audit_baseline_section(model, history=None, meta=None):
         'pointer': {'run_id': run['run_id'], 'run_kind': run['run_kind'], 'started_at': run['started_at'],
                     'findings_key': '', 'resolved': document['resolved']},
     }
+    if (index.get(SECTION_PACKAGE) or {}).get('stream'):
+        model['baseline']['package_index'] = {'dir': package_dir, 'hosts': index[SECTION_PACKAGE]['hosts']}
     return model
 
 

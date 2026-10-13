@@ -13,13 +13,16 @@ Flow (roles/host_audit/tasks/packages.yml → packages_scan.yml):
    metadata → fresh / cached (≤ 7 days) / unavailable (> 7 days or none).
 4. ``host_audit_package_findings``: Trivy JSON for one host → classified findings
    (업데이트 가능 · CentOS용 수정본 없음 · 수정 안 함(will not fix) · 벤더 미수정).
-5. ``host_audit_package_section``: all hosts → the report section model the template draws.
+5. ``host_audit_package_section``: all hosts → the report section model the template draws. It takes the per-host
+   summaries (``host_audit_package_summary``) that the runner module ``host_audit_package_scan`` returns; the
+   findings themselves stay in ``package_findings/<host>.json`` (#155).
 """
 
 from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -495,6 +498,39 @@ def host_audit_trivy_db_state(refresh_ok, metadata, now, max_age_days=DB_MAX_AGE
     return state
 
 
+def host_audit_trivy_provenance(rc, stdout, pinned_version, db_state):
+    """What judged this run: Trivy version and vulnerability DB metadata (#159).
+
+    ``rc``/``stdout``: result of ``trivy version --format json`` (``Version``, ``VulnerabilityDB`` with
+    ``Version``/``UpdatedAt``/``NextUpdate``/``DownloadedAt``). If it fails or is not JSON, the pinned version and
+    the DB state of ``host_audit_trivy_db_state`` (from ``<cache>/db/metadata.json``) are recorded instead, and
+    ``source`` says so. The archive does not keep ``trivy/`` any more, so this record plus the archived
+    ``sbom/`` is how a past judgement can be reproduced (with the then-current DB, see docs/host_audit.md).
+    """
+    db_state = db_state or {}
+    parsed = None
+    if rc == 0 and (stdout or '').strip():
+        try:
+            parsed = json.loads(stdout)
+        except ValueError:
+            parsed = None
+    if not isinstance(parsed, dict) or not parsed.get('Version'):
+        parsed = None
+    vdb = (parsed or {}).get('VulnerabilityDB') or {}
+    record = {
+        'trivy_version': parsed['Version'] if parsed else str(pinned_version),
+        'db_version': vdb.get('Version') if parsed else None,
+        'db_updated_at': vdb.get('UpdatedAt') if parsed and vdb.get('UpdatedAt') else (db_state.get('updated_at') or None),
+        'db_downloaded_at': (vdb.get('DownloadedAt') if parsed and vdb.get('DownloadedAt')
+                             else (db_state.get('downloaded_at') or None)),
+        'db_next_update': vdb.get('NextUpdate') if parsed else None,
+        'db_status': db_state.get('status'),
+        'db_refreshed': db_state.get('refreshed'),
+        'source': 'trivy version' if parsed else 'pinned version, DB metadata file',
+    }
+    return record
+
+
 # ------------------------------------------------------------------------------
 # 4. Trivy JSON → classified findings for one host
 # ------------------------------------------------------------------------------
@@ -518,11 +554,41 @@ def _classify(vuln, os_info, vault):
     return CLASS_UPDATE
 
 
-def host_audit_package_findings(trivy_result, record, vault_final=None):
+def _scan_failure(trivy_result, scan_rc):
+    """Reason a Trivy run cannot be trusted, or '' when it can (#154).
+
+    The rc of the Trivy run is checked first: a killed Trivy (137 = SIGKILL, usually the OOM killer; Ansible
+    reports a signal kill as -9) can still leave a file that parses. Then the output itself: missing,
+    empty or cut off mid-write (kill during the JSON write).
+    """
+    if scan_rc not in (None, 0):
+        reason = 'Trivy 실행 실패 (rc=%s' % scan_rc
+        if scan_rc in (137, -9):
+            reason += ', OOM-kill 추정 — 러너 메모리 확인'
+        return reason + ')'
+    if trivy_result is None:
+        return 'Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)' + ('' if scan_rc is None else ' rc=%s' % scan_rc)
+    if isinstance(trivy_result, str):
+        if not trivy_result.strip():
+            return 'Trivy 출력이 비어 있음 (rc=%s)' % ('-' if scan_rc is None else scan_rc)
+        try:
+            parsed = json.loads(trivy_result)
+        except ValueError:
+            return 'Trivy 출력 JSON이 잘렸거나 손상됨 (rc=%s)' % ('-' if scan_rc is None else scan_rc)
+        if not isinstance(parsed, dict):
+            return 'Trivy 출력 JSON이 손상됨 (rc=%s)' % ('-' if scan_rc is None else scan_rc)
+    elif not isinstance(trivy_result, dict):
+        return 'Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)'
+    return ''
+
+
+def host_audit_package_findings(trivy_result, record, vault_final=None, scan_rc=None):
     """Trivy JSON (``trivy sbom --format json``) for one host → classified host result.
 
     Fails the host (status ``scan_failed``) when Trivy did not recognise the OS the host
     reported: an unrecognised OS silently yields 0 findings (Vuls PoC #112 §SBOM 변환기 검증).
+    ``trivy_result``: parsed dict, or the raw output text (parsed here so a truncated file fails only this host),
+    or None when there is no file. ``scan_rc``: rc of the AUD-321 Trivy run for this host (None = unknown).
     ``vault_final``: {package name: final 'version-release' in the CentOS vault} for CentOS 6/7.
     """
     host = record['inventory_hostname']
@@ -541,9 +607,12 @@ def host_audit_package_findings(trivy_result, record, vault_final=None):
         result.update(status=record.get('status') or 'probe_failed',
                       reason='패키지 수집 실패 — %s' % (record.get('reason') or '-'))
         return result
-    if not isinstance(trivy_result, dict):
-        result.update(status='scan_failed', reason='Trivy 판정 결과 없음 (판정 실패, 러너 로그 참고)')
+    failure = _scan_failure(trivy_result, scan_rc)
+    if failure:
+        result.update(status='scan_failed', reason=failure)
         return result
+    if isinstance(trivy_result, str):
+        trivy_result = json.loads(trivy_result)
     meta_os = (trivy_result.get('Metadata') or {}).get('OS') or {}
     if meta_os.get('Family') != os_info.get('family') or str(meta_os.get('Name')) != str(os_info.get('version')):
         result.update(status='scan_failed',
@@ -595,6 +664,32 @@ def _bars(counts):
     } for s in SEVERITIES]
 
 
+def host_audit_package_summary(host_result, detail_limit=300):
+    """Classified host result (with every finding) → the summary the report needs, without the findings (#155).
+
+    Counts per severity and class, plus the rows the detail table can draw: 긴급·높음 except will-not-fix, in the
+    finding order, at most ``detail_limit``. ``details_total`` is how many such rows the host has. The first
+    ``detail_limit`` rows of every host contain the first ``detail_limit`` rows of all hosts, so the section can be
+    built from the summaries alone. The full list is not part of the summary: the scan module keeps it in a file.
+    """
+    detail_limit = int(detail_limit)
+    summary = dict((k, v) for k, v in host_result.items() if k != 'findings')
+    summary['severity'] = dict((s, 0) for s in SEVERITIES)
+    summary['classes'] = dict((c, 0) for c in CLASSES)
+    summary['total'] = 0
+    summary['details'] = []
+    summary['details_total'] = 0
+    for f in host_result.get('findings') or []:
+        summary['severity'][f['severity']] += 1
+        summary['classes'][f['class']] += 1
+        summary['total'] += 1
+        if f['severity'] in ('CRITICAL', 'HIGH') and f['class'] != CLASS_WILL_NOT_FIX:
+            summary['details_total'] += 1
+            if len(summary['details']) < detail_limit:
+                summary['details'].append(f)
+    return summary
+
+
 def host_audit_package_section(host_results, db_state, trivy_version='', detail_limit=300):
     """Classified host results + DB state → the Package Vulnerability section model.
 
@@ -634,7 +729,10 @@ def host_audit_package_section(host_results, db_state, trivy_version='', detail_
     totals = dict((s, 0) for s in SEVERITIES)
     classes = dict((c, 0) for c in CLASSES)
     details = []
+    details_total = 0
     for hr in sorted(host_results or [], key=lambda h: h['host']):
+        if 'severity' not in hr:  # a result that still carries its findings (host_audit_package_findings)
+            hr = host_audit_package_summary(hr, detail_limit)
         row = {
             'host': hr['host'],
             'os': hr.get('os', ''),
@@ -642,26 +740,25 @@ def host_audit_package_section(host_results, db_state, trivy_version='', detail_
             'packages': hr.get('packages', 0),
             'inspected': hr.get('status') == STATUS_OK,
             'reason': hr.get('reason', ''),
-            'severity': dict((s, 0) for s in SEVERITIES),
-            'classes': dict((c, 0) for c in CLASSES),
-            'total': 0,
+            'severity': dict(hr['severity']),
+            'classes': dict(hr['classes']),
+            'total': hr['total'],
         }
         if not row['inspected']:
             unavailable.append({'host': hr['host'], 'item': SECTION, 'label': UNAVAILABLE_LABEL,
                                 'reason': hr.get('reason') or '-'})
-        for f in hr.get('findings') or []:
-            row['severity'][f['severity']] += 1
-            row['classes'][f['class']] += 1
-            row['total'] += 1
-            totals[f['severity']] += 1
-            classes[f['class']] += 1
-            if f['severity'] in ('CRITICAL', 'HIGH') and f['class'] != CLASS_WILL_NOT_FIX:
-                d = dict(f)
-                d['host'] = hr['host']
-                d['severity_label'] = SEVERITY_LABELS[f['severity']]
-                d['class_label'] = CLASS_LABELS[f['class']]
-                d['fixed_label'] = f['fixed'] or '-'
-                details.append(d)
+        for s in SEVERITIES:
+            totals[s] += hr['severity'][s]
+        for c in CLASSES:
+            classes[c] += hr['classes'][c]
+        details_total += hr['details_total']
+        for f in hr['details']:
+            d = dict(f)
+            d['host'] = hr['host']
+            d['severity_label'] = SEVERITY_LABELS[f['severity']]
+            d['class_label'] = CLASS_LABELS[f['class']]
+            d['fixed_label'] = f['fixed'] or '-'
+            details.append(d)
         section['hosts'].append(row)
     details.sort(key=lambda d: (SEVERITIES.index(d['severity']), d['host'], d['cve'], d['package']))
     section['totals'] = totals
@@ -671,7 +768,7 @@ def host_audit_package_section(host_results, db_state, trivy_version='', detail_
     section['by_host'] = dict((h['host'], h) for h in section['hosts'])  # per-host appendix lookup
     section['bars'] = _bars(totals)
     section['details'] = details[:detail_limit]
-    section['details_truncated'] = max(0, len(details) - detail_limit)
+    section['details_truncated'] = max(0, details_total - detail_limit)
     return section
 
 
@@ -694,7 +791,9 @@ class FilterModule(object):
             'host_audit_package_record': host_audit_package_record,
             'host_audit_sbom': host_audit_sbom,
             'host_audit_trivy_db_state': host_audit_trivy_db_state,
+            'host_audit_trivy_provenance': host_audit_trivy_provenance,
             'host_audit_package_findings': host_audit_package_findings,
+            'host_audit_package_summary': host_audit_package_summary,
             'host_audit_package_section': host_audit_package_section,
             'host_audit_parse_vault_final': parse_vault_final,
         }
