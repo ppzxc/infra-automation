@@ -600,3 +600,60 @@ def test_audit_report_model_gets_a_findings_directory_not_the_package_results():
     assert "package_results" not in meta
     assert "package_findings" in meta["package_findings_dir"]
     assert "_host_audit_package_results" not in (ROLE / "tasks" / "packages_scan.yml").read_text(encoding="utf-8")
+
+
+# ------------------------------------------------------------------------------
+# #155: the output recorded from the code before this change (b1665bb) is the independent expected value
+# ------------------------------------------------------------------------------
+GOLDEN = FIXTURES / "golden_before_155.json"
+
+
+def _golden_scenario():
+    """The synthetic input the golden file was recorded with, on the filters of b1665bb (findings held in memory)."""
+    ubuntu = [_vuln("CVE-2024-%04d" % n, ["CRITICAL", "HIGH", "MEDIUM", "LOW"][n % 4], pkg="pkg%d" % (n % 5))
+              for n in range(400)]
+    ubuntu += [ubuntu[0], _vuln("CVE-W", "HIGH", status="will_not_fix", fixed=""),
+               _vuln("CVE-U", "CRITICAL", status="affected", fixed="")]
+    centos = [_vuln("CVE-C-1", "HIGH", pkg="glibc", fixed="2.17-326.el7_9.3"),
+              _vuln("CVE-C-2", "CRITICAL", pkg="glibc", fixed="2.17-999.el7"),
+              _vuln("CVE-C-3", "HIGH", pkg="not-in-vault", fixed="9.9")]
+    return {"a-ubuntu": (json.dumps(_trivy_doc(ubuntu)), 0),
+            "b-centos7": (json.dumps(_trivy_doc(centos, "centos", "7")), 0),
+            "c-clean": (json.dumps(_trivy_doc([])), 0),
+            "d-killed": (json.dumps(_trivy_doc(ubuntu)), 137),
+            "e-empty": ("", 0)}, {"b-centos7": CENTOS7}
+
+
+def test_report_model_and_findings_json_equal_the_output_recorded_before_155(tmp_path):
+    from host_audit_baseline import host_audit_baseline_section
+    from host_audit_packages import host_audit_package_summary
+    cases, os_by_host = _golden_scenario()
+    legacy = _legacy_results(cases, os_by_host)
+    out = tmp_path / "package_findings"
+    out.mkdir()
+    for hr in legacy:  # what host_audit_package_scan writes
+        (out / ("%s.json" % hr["host"])).write_text(json.dumps(hr))
+    ids = lambda hr: sorted(set(f["id"] for f in hr["findings"]))  # noqa: E731
+    base = {"schema_version": 1, "run_id": "ha-prev", "started_at": "2026-10-01T00:00:00Z", "sections": {
+        "package_vulnerability": {"hosts": ["a-ubuntu", "b-centos7", "gone"], "ids": {
+            "a-ubuntu": ids(legacy[0])[:200] + ["CVE-OLD|zlib"], "b-centos7": ["CVE-C-1|glibc"], "gone": ["CVE-X|bash"]}}}}
+    history = {"state": "ok", "baseline": base, "pointers": [
+        {"run_id": "ha-old", "run_kind": "scheduled", "started_at": "2026-09-01T00:00:00Z",
+         "resolved": ["package_vulnerability|a-ubuntu|CVE-OLD|zlib",
+                      "package_vulnerability|a-ubuntu|CVE-2024-0300|pkg0"]}]}
+    meta = {"run_id": "ha-new", "run_kind": "scheduled", "started_at": "2026-11-01T00:00:00Z", "timezone": "Asia/Seoul"}
+    section = host_audit_package_section([host_audit_package_summary(hr, 25) for hr in legacy],
+                                         {"usable": True}, "0.0.0", 25)
+    model = host_audit_baseline_section({"cover": {"baseline": ""}, "package_vulnerability": section}, history,
+                                        dict(meta, package_findings_dir=str(out)))
+    index = model["baseline"].pop("package_index")
+    # AUD-510 puts the ids from the files into findings.json
+    stored = {"hosts": sorted(index["hosts"]), "ids": {}}
+    for h in index["hosts"]:
+        got = ids(json.loads((out / ("%s.json" % h)).read_text()))
+        if got:
+            stored["ids"][h] = got
+    model["baseline"]["document"]["sections"]["package_vulnerability"] = stored
+    recorded = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    assert json.loads(json.dumps(section)) == recorded["section"]
+    assert json.loads(json.dumps(model)) == recorded["model"]

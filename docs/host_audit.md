@@ -252,6 +252,8 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
   - 결과 파일 없음
 - **발견은 파일로, 요약만 변수로 (#155)**: 발견 약 55만 건이 `set_fact`·보고서 모델·템플릿 평가를 거치며 메모리에 오르던 두 경로(AUD-322/323의 호스트별 결과, AUD-021 `package_results` → findings 색인)를 파일 기반으로 바꿨다.
   - **커스텀 모듈을 쓴 이유**: 필터는 `ansible-playbook` 프로세스 안에서 돌아 Trivy 결과 파싱 같은 일시적 피크가 그대로 최대 메모리로 남는다. 모듈은 별도 프로세스라 끝나면 메모리를 돌려준다. 이 저장소의 첫 커스텀 모듈이다: `roles/host_audit/library/host_audit_package_scan.py`(AUD-322), `host_audit_findings_write.py`(AUD-510).
+  - **FQCN 예외**: 두 모듈은 역할 안(`library/`)의 로컬 모듈이라 컬렉션 FQCN이 없다(스펙 #155가 role `library/`를 지정). 다른 태스크 모듈은 그대로 FQCN이다.
+  - **회귀 확인**: 변경 전 코드(b1665bb)의 필터로 같은 합성 입력의 섹션 모델·Audit Baseline 결과·`findings.json`을 따로 기록해(`tests/fixtures/host_audit_packages/golden_before_155.json`) 변경 후 결과가 같음을 비교한다.
   - **규칙은 한 벌**: 모듈은 `roles/host_audit/module_utils/host_audit_packages.py`로 `filter_plugins/host_audit_packages.py`를 심볼릭 링크해 같은 분류·실패 판정을 쓴다(필터와 갈라지지 않게). 역할 밖 플레이북(harness·pytest)은 `ANSIBLE_LIBRARY`·`ANSIBLE_MODULE_UTILS`로 이 디렉터리를 가리킨다.
   - **AUD-322**: 호스트마다 모듈이 기록과 Trivy 결과를 읽어 분류하고 `package_findings/<호스트>.json`에 발견 전체를 쓴다. 돌려주는 값은 요약(심각도·분류별 건수, 긴급·높음 상세 후보 최대 `host_audit_package_detail_limit`행과 총수, 파일 경로)이다. 상세 후보 상위 N행의 합집합에 전체 상위 N행이 들어 있으므로 요약만으로 섹션 모델이 같아진다. Trivy 실패 판정(rc → 파일 → 내용, 4경우)은 #154 그대로다.
   - **AUD-323**: 요약만 모아 `host_audit_package_section`으로 섹션 모델을 만든다. `_host_audit_package_results` 사실은 더 없다.

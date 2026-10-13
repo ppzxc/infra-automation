@@ -1,0 +1,2023 @@
+{
+ "model": {
+  "baseline": {
+   "asset_changes": [],
+   "baseline_run_id": "ha-prev",
+   "compared": true,
+   "count_rows": [
+    {
+     "counts": [
+      203,
+      1,
+      201,
+      1,
+      1
+     ],
+     "first": 0,
+     "section": "Package Vulnerability"
+    }
+   ],
+   "document": {
+    "baseline_run_id": "ha-prev",
+    "resolved": [
+     "package_vulnerability|a-ubuntu|CVE-OLD|zlib"
+    ],
+    "run_id": "ha-new",
+    "run_kind": "scheduled",
+    "schema_version": 1,
+    "sections": {
+     "package_vulnerability": {
+      "hosts": [
+       "a-ubuntu",
+       "b-centos7",
+       "c-clean"
+      ],
+      "ids": {
+       "a-ubuntu": [
+        "CVE-2024-0000|pkg0",
+        "CVE-2024-0001|pkg1",
+        "CVE-2024-0002|pkg2",
+        "CVE-2024-0003|pkg3",
+        "CVE-2024-0004|pkg4",
+        "CVE-2024-0005|pkg0",
+        "CVE-2024-0006|pkg1",
+        "CVE-2024-0007|pkg2",
+        "CVE-2024-0008|pkg3",
+        "CVE-2024-0009|pkg4",
+        "CVE-2024-0010|pkg0",
+        "CVE-2024-0011|pkg1",
+        "CVE-2024-0012|pkg2",
+        "CVE-2024-0013|pkg3",
+        "CVE-2024-0014|pkg4",
+        "CVE-2024-0015|pkg0",
+        "CVE-2024-0016|pkg1",
+        "CVE-2024-0017|pkg2",
+        "CVE-2024-0018|pkg3",
+        "CVE-2024-0019|pkg4",
+        "CVE-2024-0020|pkg0",
+        "CVE-2024-0021|pkg1",
+        "CVE-2024-0022|pkg2",
+        "CVE-2024-0023|pkg3",
+        "CVE-2024-0024|pkg4",
+        "CVE-2024-0025|pkg0",
+        "CVE-2024-0026|pkg1",
+        "CVE-2024-0027|pkg2",
+        "CVE-2024-0028|pkg3",
+        "CVE-2024-0029|pkg4",
+        "CVE-2024-0030|pkg0",
+        "CVE-2024-0031|pkg1",
+        "CVE-2024-0032|pkg2",
+        "CVE-2024-0033|pkg3",
+        "CVE-2024-0034|pkg4",
+        "CVE-2024-0035|pkg0",
+        "CVE-2024-0036|pkg1",
+        "CVE-2024-0037|pkg2",
+        "CVE-2024-0038|pkg3",
+        "CVE-2024-0039|pkg4",
+        "CVE-2024-0040|pkg0",
+        "CVE-2024-0041|pkg1",
+        "CVE-2024-0042|pkg2",
+        "CVE-2024-0043|pkg3",
+        "CVE-2024-0044|pkg4",
+        "CVE-2024-0045|pkg0",
+        "CVE-2024-0046|pkg1",
+        "CVE-2024-0047|pkg2",
+        "CVE-2024-0048|pkg3",
+        "CVE-2024-0049|pkg4",
+        "CVE-2024-0050|pkg0",
+        "CVE-2024-0051|pkg1",
+        "CVE-2024-0052|pkg2",
+        "CVE-2024-0053|pkg3",
+        "CVE-2024-0054|pkg4",
+        "CVE-2024-0055|pkg0",
+        "CVE-2024-0056|pkg1",
+        "CVE-2024-0057|pkg2",
+        "CVE-2024-0058|pkg3",
+        "CVE-2024-0059|pkg4",
+        "CVE-2024-0060|pkg0",
+        "CVE-2024-0061|pkg1",
+        "CVE-2024-0062|pkg2",
+        "CVE-2024-0063|pkg3",
+        "CVE-2024-0064|pkg4",
+        "CVE-2024-0065|pkg0",
+        "CVE-2024-0066|pkg1",
+        "CVE-2024-0067|pkg2",
+        "CVE-2024-0068|pkg3",
+        "CVE-2024-0069|pkg4",
+        "CVE-2024-0070|pkg0",
+        "CVE-2024-0071|pkg1",
+        "CVE-2024-0072|pkg2",
+        "CVE-2024-0073|pkg3",
+        "CVE-2024-0074|pkg4",
+        "CVE-2024-0075|pkg0",
+        "CVE-2024-0076|pkg1",
+        "CVE-2024-0077|pkg2",
+        "CVE-2024-0078|pkg3",
+        "CVE-2024-0079|pkg4",
+        "CVE-2024-0080|pkg0",
+        "CVE-2024-0081|pkg1",
+        "CVE-2024-0082|pkg2",
+        "CVE-2024-0083|pkg3",
+        "CVE-2024-0084|pkg4",
+        "CVE-2024-0085|pkg0",
+        "CVE-2024-0086|pkg1",
+        "CVE-2024-0087|pkg2",
+        "CVE-2024-0088|pkg3",
+        "CVE-2024-0089|pkg4",
+        "CVE-2024-0090|pkg0",
+        "CVE-2024-0091|pkg1",
+        "CVE-2024-0092|pkg2",
+        "CVE-2024-0093|pkg3",
+        "CVE-2024-0094|pkg4",
+        "CVE-2024-0095|pkg0",
+        "CVE-2024-0096|pkg1",
+        "CVE-2024-0097|pkg2",
+        "CVE-2024-0098|pkg3",
+        "CVE-2024-0099|pkg4",
+        "CVE-2024-0100|pkg0",
+        "CVE-2024-0101|pkg1",
+        "CVE-2024-0102|pkg2",
+        "CVE-2024-0103|pkg3",
+        "CVE-2024-0104|pkg4",
+        "CVE-2024-0105|pkg0",
+        "CVE-2024-0106|pkg1",
+        "CVE-2024-0107|pkg2",
+        "CVE-2024-0108|pkg3",
+        "CVE-2024-0109|pkg4",
+        "CVE-2024-0110|pkg0",
+        "CVE-2024-0111|pkg1",
+        "CVE-2024-0112|pkg2",
+        "CVE-2024-0113|pkg3",
+        "CVE-2024-0114|pkg4",
+        "CVE-2024-0115|pkg0",
+        "CVE-2024-0116|pkg1",
+        "CVE-2024-0117|pkg2",
+        "CVE-2024-0118|pkg3",
+        "CVE-2024-0119|pkg4",
+        "CVE-2024-0120|pkg0",
+        "CVE-2024-0121|pkg1",
+        "CVE-2024-0122|pkg2",
+        "CVE-2024-0123|pkg3",
+        "CVE-2024-0124|pkg4",
+        "CVE-2024-0125|pkg0",
+        "CVE-2024-0126|pkg1",
+        "CVE-2024-0127|pkg2",
+        "CVE-2024-0128|pkg3",
+        "CVE-2024-0129|pkg4",
+        "CVE-2024-0130|pkg0",
+        "CVE-2024-0131|pkg1",
+        "CVE-2024-0132|pkg2",
+        "CVE-2024-0133|pkg3",
+        "CVE-2024-0134|pkg4",
+        "CVE-2024-0135|pkg0",
+        "CVE-2024-0136|pkg1",
+        "CVE-2024-0137|pkg2",
+        "CVE-2024-0138|pkg3",
+        "CVE-2024-0139|pkg4",
+        "CVE-2024-0140|pkg0",
+        "CVE-2024-0141|pkg1",
+        "CVE-2024-0142|pkg2",
+        "CVE-2024-0143|pkg3",
+        "CVE-2024-0144|pkg4",
+        "CVE-2024-0145|pkg0",
+        "CVE-2024-0146|pkg1",
+        "CVE-2024-0147|pkg2",
+        "CVE-2024-0148|pkg3",
+        "CVE-2024-0149|pkg4",
+        "CVE-2024-0150|pkg0",
+        "CVE-2024-0151|pkg1",
+        "CVE-2024-0152|pkg2",
+        "CVE-2024-0153|pkg3",
+        "CVE-2024-0154|pkg4",
+        "CVE-2024-0155|pkg0",
+        "CVE-2024-0156|pkg1",
+        "CVE-2024-0157|pkg2",
+        "CVE-2024-0158|pkg3",
+        "CVE-2024-0159|pkg4",
+        "CVE-2024-0160|pkg0",
+        "CVE-2024-0161|pkg1",
+        "CVE-2024-0162|pkg2",
+        "CVE-2024-0163|pkg3",
+        "CVE-2024-0164|pkg4",
+        "CVE-2024-0165|pkg0",
+        "CVE-2024-0166|pkg1",
+        "CVE-2024-0167|pkg2",
+        "CVE-2024-0168|pkg3",
+        "CVE-2024-0169|pkg4",
+        "CVE-2024-0170|pkg0",
+        "CVE-2024-0171|pkg1",
+        "CVE-2024-0172|pkg2",
+        "CVE-2024-0173|pkg3",
+        "CVE-2024-0174|pkg4",
+        "CVE-2024-0175|pkg0",
+        "CVE-2024-0176|pkg1",
+        "CVE-2024-0177|pkg2",
+        "CVE-2024-0178|pkg3",
+        "CVE-2024-0179|pkg4",
+        "CVE-2024-0180|pkg0",
+        "CVE-2024-0181|pkg1",
+        "CVE-2024-0182|pkg2",
+        "CVE-2024-0183|pkg3",
+        "CVE-2024-0184|pkg4",
+        "CVE-2024-0185|pkg0",
+        "CVE-2024-0186|pkg1",
+        "CVE-2024-0187|pkg2",
+        "CVE-2024-0188|pkg3",
+        "CVE-2024-0189|pkg4",
+        "CVE-2024-0190|pkg0",
+        "CVE-2024-0191|pkg1",
+        "CVE-2024-0192|pkg2",
+        "CVE-2024-0193|pkg3",
+        "CVE-2024-0194|pkg4",
+        "CVE-2024-0195|pkg0",
+        "CVE-2024-0196|pkg1",
+        "CVE-2024-0197|pkg2",
+        "CVE-2024-0198|pkg3",
+        "CVE-2024-0199|pkg4",
+        "CVE-2024-0200|pkg0",
+        "CVE-2024-0201|pkg1",
+        "CVE-2024-0202|pkg2",
+        "CVE-2024-0203|pkg3",
+        "CVE-2024-0204|pkg4",
+        "CVE-2024-0205|pkg0",
+        "CVE-2024-0206|pkg1",
+        "CVE-2024-0207|pkg2",
+        "CVE-2024-0208|pkg3",
+        "CVE-2024-0209|pkg4",
+        "CVE-2024-0210|pkg0",
+        "CVE-2024-0211|pkg1",
+        "CVE-2024-0212|pkg2",
+        "CVE-2024-0213|pkg3",
+        "CVE-2024-0214|pkg4",
+        "CVE-2024-0215|pkg0",
+        "CVE-2024-0216|pkg1",
+        "CVE-2024-0217|pkg2",
+        "CVE-2024-0218|pkg3",
+        "CVE-2024-0219|pkg4",
+        "CVE-2024-0220|pkg0",
+        "CVE-2024-0221|pkg1",
+        "CVE-2024-0222|pkg2",
+        "CVE-2024-0223|pkg3",
+        "CVE-2024-0224|pkg4",
+        "CVE-2024-0225|pkg0",
+        "CVE-2024-0226|pkg1",
+        "CVE-2024-0227|pkg2",
+        "CVE-2024-0228|pkg3",
+        "CVE-2024-0229|pkg4",
+        "CVE-2024-0230|pkg0",
+        "CVE-2024-0231|pkg1",
+        "CVE-2024-0232|pkg2",
+        "CVE-2024-0233|pkg3",
+        "CVE-2024-0234|pkg4",
+        "CVE-2024-0235|pkg0",
+        "CVE-2024-0236|pkg1",
+        "CVE-2024-0237|pkg2",
+        "CVE-2024-0238|pkg3",
+        "CVE-2024-0239|pkg4",
+        "CVE-2024-0240|pkg0",
+        "CVE-2024-0241|pkg1",
+        "CVE-2024-0242|pkg2",
+        "CVE-2024-0243|pkg3",
+        "CVE-2024-0244|pkg4",
+        "CVE-2024-0245|pkg0",
+        "CVE-2024-0246|pkg1",
+        "CVE-2024-0247|pkg2",
+        "CVE-2024-0248|pkg3",
+        "CVE-2024-0249|pkg4",
+        "CVE-2024-0250|pkg0",
+        "CVE-2024-0251|pkg1",
+        "CVE-2024-0252|pkg2",
+        "CVE-2024-0253|pkg3",
+        "CVE-2024-0254|pkg4",
+        "CVE-2024-0255|pkg0",
+        "CVE-2024-0256|pkg1",
+        "CVE-2024-0257|pkg2",
+        "CVE-2024-0258|pkg3",
+        "CVE-2024-0259|pkg4",
+        "CVE-2024-0260|pkg0",
+        "CVE-2024-0261|pkg1",
+        "CVE-2024-0262|pkg2",
+        "CVE-2024-0263|pkg3",
+        "CVE-2024-0264|pkg4",
+        "CVE-2024-0265|pkg0",
+        "CVE-2024-0266|pkg1",
+        "CVE-2024-0267|pkg2",
+        "CVE-2024-0268|pkg3",
+        "CVE-2024-0269|pkg4",
+        "CVE-2024-0270|pkg0",
+        "CVE-2024-0271|pkg1",
+        "CVE-2024-0272|pkg2",
+        "CVE-2024-0273|pkg3",
+        "CVE-2024-0274|pkg4",
+        "CVE-2024-0275|pkg0",
+        "CVE-2024-0276|pkg1",
+        "CVE-2024-0277|pkg2",
+        "CVE-2024-0278|pkg3",
+        "CVE-2024-0279|pkg4",
+        "CVE-2024-0280|pkg0",
+        "CVE-2024-0281|pkg1",
+        "CVE-2024-0282|pkg2",
+        "CVE-2024-0283|pkg3",
+        "CVE-2024-0284|pkg4",
+        "CVE-2024-0285|pkg0",
+        "CVE-2024-0286|pkg1",
+        "CVE-2024-0287|pkg2",
+        "CVE-2024-0288|pkg3",
+        "CVE-2024-0289|pkg4",
+        "CVE-2024-0290|pkg0",
+        "CVE-2024-0291|pkg1",
+        "CVE-2024-0292|pkg2",
+        "CVE-2024-0293|pkg3",
+        "CVE-2024-0294|pkg4",
+        "CVE-2024-0295|pkg0",
+        "CVE-2024-0296|pkg1",
+        "CVE-2024-0297|pkg2",
+        "CVE-2024-0298|pkg3",
+        "CVE-2024-0299|pkg4",
+        "CVE-2024-0300|pkg0",
+        "CVE-2024-0301|pkg1",
+        "CVE-2024-0302|pkg2",
+        "CVE-2024-0303|pkg3",
+        "CVE-2024-0304|pkg4",
+        "CVE-2024-0305|pkg0",
+        "CVE-2024-0306|pkg1",
+        "CVE-2024-0307|pkg2",
+        "CVE-2024-0308|pkg3",
+        "CVE-2024-0309|pkg4",
+        "CVE-2024-0310|pkg0",
+        "CVE-2024-0311|pkg1",
+        "CVE-2024-0312|pkg2",
+        "CVE-2024-0313|pkg3",
+        "CVE-2024-0314|pkg4",
+        "CVE-2024-0315|pkg0",
+        "CVE-2024-0316|pkg1",
+        "CVE-2024-0317|pkg2",
+        "CVE-2024-0318|pkg3",
+        "CVE-2024-0319|pkg4",
+        "CVE-2024-0320|pkg0",
+        "CVE-2024-0321|pkg1",
+        "CVE-2024-0322|pkg2",
+        "CVE-2024-0323|pkg3",
+        "CVE-2024-0324|pkg4",
+        "CVE-2024-0325|pkg0",
+        "CVE-2024-0326|pkg1",
+        "CVE-2024-0327|pkg2",
+        "CVE-2024-0328|pkg3",
+        "CVE-2024-0329|pkg4",
+        "CVE-2024-0330|pkg0",
+        "CVE-2024-0331|pkg1",
+        "CVE-2024-0332|pkg2",
+        "CVE-2024-0333|pkg3",
+        "CVE-2024-0334|pkg4",
+        "CVE-2024-0335|pkg0",
+        "CVE-2024-0336|pkg1",
+        "CVE-2024-0337|pkg2",
+        "CVE-2024-0338|pkg3",
+        "CVE-2024-0339|pkg4",
+        "CVE-2024-0340|pkg0",
+        "CVE-2024-0341|pkg1",
+        "CVE-2024-0342|pkg2",
+        "CVE-2024-0343|pkg3",
+        "CVE-2024-0344|pkg4",
+        "CVE-2024-0345|pkg0",
+        "CVE-2024-0346|pkg1",
+        "CVE-2024-0347|pkg2",
+        "CVE-2024-0348|pkg3",
+        "CVE-2024-0349|pkg4",
+        "CVE-2024-0350|pkg0",
+        "CVE-2024-0351|pkg1",
+        "CVE-2024-0352|pkg2",
+        "CVE-2024-0353|pkg3",
+        "CVE-2024-0354|pkg4",
+        "CVE-2024-0355|pkg0",
+        "CVE-2024-0356|pkg1",
+        "CVE-2024-0357|pkg2",
+        "CVE-2024-0358|pkg3",
+        "CVE-2024-0359|pkg4",
+        "CVE-2024-0360|pkg0",
+        "CVE-2024-0361|pkg1",
+        "CVE-2024-0362|pkg2",
+        "CVE-2024-0363|pkg3",
+        "CVE-2024-0364|pkg4",
+        "CVE-2024-0365|pkg0",
+        "CVE-2024-0366|pkg1",
+        "CVE-2024-0367|pkg2",
+        "CVE-2024-0368|pkg3",
+        "CVE-2024-0369|pkg4",
+        "CVE-2024-0370|pkg0",
+        "CVE-2024-0371|pkg1",
+        "CVE-2024-0372|pkg2",
+        "CVE-2024-0373|pkg3",
+        "CVE-2024-0374|pkg4",
+        "CVE-2024-0375|pkg0",
+        "CVE-2024-0376|pkg1",
+        "CVE-2024-0377|pkg2",
+        "CVE-2024-0378|pkg3",
+        "CVE-2024-0379|pkg4",
+        "CVE-2024-0380|pkg0",
+        "CVE-2024-0381|pkg1",
+        "CVE-2024-0382|pkg2",
+        "CVE-2024-0383|pkg3",
+        "CVE-2024-0384|pkg4",
+        "CVE-2024-0385|pkg0",
+        "CVE-2024-0386|pkg1",
+        "CVE-2024-0387|pkg2",
+        "CVE-2024-0388|pkg3",
+        "CVE-2024-0389|pkg4",
+        "CVE-2024-0390|pkg0",
+        "CVE-2024-0391|pkg1",
+        "CVE-2024-0392|pkg2",
+        "CVE-2024-0393|pkg3",
+        "CVE-2024-0394|pkg4",
+        "CVE-2024-0395|pkg0",
+        "CVE-2024-0396|pkg1",
+        "CVE-2024-0397|pkg2",
+        "CVE-2024-0398|pkg3",
+        "CVE-2024-0399|pkg4",
+        "CVE-U|openssl",
+        "CVE-W|openssl"
+       ],
+       "b-centos7": [
+        "CVE-C-1|glibc",
+        "CVE-C-2|glibc",
+        "CVE-C-3|not-in-vault"
+       ]
+      }
+     }
+    },
+    "started_at": "2026-11-01T00:00:00Z"
+   },
+   "failed": false,
+   "pointer": {
+    "findings_key": "",
+    "resolved": [
+     "package_vulnerability|a-ubuntu|CVE-OLD|zlib"
+    ],
+    "run_id": "ha-new",
+    "run_kind": "scheduled",
+    "started_at": "2026-11-01T00:00:00Z"
+   },
+   "reason": "",
+   "recurring": [
+    {
+     "class": "crit",
+     "host": "a-ubuntu",
+     "item": "CVE-2024-0300 pkg0",
+     "section": "Package Vulnerability",
+     "status": "재발"
+    }
+   ],
+   "resolved": [
+    {
+     "class": "ok",
+     "host": "a-ubuntu",
+     "item": "CVE-OLD zlib",
+     "section": "Package Vulnerability",
+     "status": "해소"
+    }
+   ],
+   "state": "ok",
+   "status_classes": [
+    "crit",
+    "crit",
+    "warn",
+    "ok",
+    "na"
+   ],
+   "statuses": [
+    "신규",
+    "재발",
+    "지속",
+    "해소",
+    "확인 불가"
+   ],
+   "truncated": 0,
+   "unknown": [
+    {
+     "class": "na",
+     "host": "gone",
+     "item": "CVE-X bash",
+     "section": "Package Vulnerability",
+     "status": "확인 불가"
+    }
+   ]
+  },
+  "cover": {
+   "baseline": "ha-prev (정기, 2026-10-01 09:00 (KST) 시작) — 신규·지속·재발·해소 표시, 재발은 지난 12개월 정기 실행 기준"
+  },
+  "package_vulnerability": {
+   "bars": [
+    {
+     "bar": 128.7,
+     "count": 102,
+     "label": "긴급",
+     "severity": "CRITICAL"
+    },
+    {
+     "bar": 130.0,
+     "count": 103,
+     "label": "높음",
+     "severity": "HIGH"
+    },
+    {
+     "bar": 126.2,
+     "count": 100,
+     "label": "중간",
+     "severity": "MEDIUM"
+    },
+    {
+     "bar": 126.2,
+     "count": 100,
+     "label": "낮음",
+     "severity": "LOW"
+    },
+    {
+     "bar": 0.0,
+     "count": 0,
+     "label": "미분류",
+     "severity": "UNKNOWN"
+    }
+   ],
+   "by_host": {
+    "a-ubuntu": {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 1,
+      "update": 400,
+      "will_not_fix": 1
+     },
+     "eosl": false,
+     "host": "a-ubuntu",
+     "inspected": true,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "",
+     "severity": {
+      "CRITICAL": 101,
+      "HIGH": 101,
+      "LOW": 100,
+      "MEDIUM": 100,
+      "UNKNOWN": 0
+     },
+     "total": 402
+    },
+    "b-centos7": {
+     "classes": {
+      "no_centos_fix": 2,
+      "unfixed": 0,
+      "update": 1,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "b-centos7",
+     "inspected": true,
+     "os": "CentOS Linux 7",
+     "packages": 1,
+     "reason": "",
+     "severity": {
+      "CRITICAL": 1,
+      "HIGH": 2,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 3
+    },
+    "c-clean": {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 0,
+      "update": 0,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "c-clean",
+     "inspected": true,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "",
+     "severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 0
+    },
+    "d-killed": {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 0,
+      "update": 0,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "d-killed",
+     "inspected": false,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "Trivy 실행 실패 (rc=137, OOM-kill 추정 — 러너 메모리 확인)",
+     "severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 0
+    },
+    "e-empty": {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 0,
+      "update": 0,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "e-empty",
+     "inspected": false,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "Trivy 출력이 비어 있음 (rc=0)",
+     "severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 0
+    }
+   },
+   "class_labels": {
+    "no_centos_fix": "CentOS용 수정본 없음",
+    "unfixed": "벤더 미수정",
+    "update": "업데이트 가능",
+    "will_not_fix": "수정 안 함 (will not fix)"
+   },
+   "class_rows": [
+    {
+     "count": 401,
+     "key": "update",
+     "label": "업데이트 가능"
+    },
+    {
+     "count": 2,
+     "key": "no_centos_fix",
+     "label": "CentOS용 수정본 없음"
+    },
+    {
+     "count": 1,
+     "key": "will_not_fix",
+     "label": "수정 안 함 (will not fix)"
+    },
+    {
+     "count": 1,
+     "key": "unfixed",
+     "label": "벤더 미수정"
+    }
+   ],
+   "classes": {
+    "no_centos_fix": 2,
+    "unfixed": 1,
+    "update": 401,
+    "will_not_fix": 1
+   },
+   "db": {
+    "usable": true
+   },
+   "db_label": "취약점 DB 없음",
+   "details": [
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0000",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0000|pkg0",
+     "installed": "3.0.2",
+     "package": "pkg0",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0000"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0004",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0004|pkg4",
+     "installed": "3.0.2",
+     "package": "pkg4",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0004"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0008",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0008|pkg3",
+     "installed": "3.0.2",
+     "package": "pkg3",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0008"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0012",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0012|pkg2",
+     "installed": "3.0.2",
+     "package": "pkg2",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0012"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0016",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0016|pkg1",
+     "installed": "3.0.2",
+     "package": "pkg1",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0016"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0020",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0020|pkg0",
+     "installed": "3.0.2",
+     "package": "pkg0",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0020"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0024",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0024|pkg4",
+     "installed": "3.0.2",
+     "package": "pkg4",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0024"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0028",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0028|pkg3",
+     "installed": "3.0.2",
+     "package": "pkg3",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0028"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0032",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0032|pkg2",
+     "installed": "3.0.2",
+     "package": "pkg2",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0032"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0036",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0036|pkg1",
+     "installed": "3.0.2",
+     "package": "pkg1",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0036"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0040",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0040|pkg0",
+     "installed": "3.0.2",
+     "package": "pkg0",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0040"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0044",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0044|pkg4",
+     "installed": "3.0.2",
+     "package": "pkg4",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0044"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0048",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0048|pkg3",
+     "installed": "3.0.2",
+     "package": "pkg3",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0048"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0052",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0052|pkg2",
+     "installed": "3.0.2",
+     "package": "pkg2",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0052"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0056",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0056|pkg1",
+     "installed": "3.0.2",
+     "package": "pkg1",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0056"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0060",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0060|pkg0",
+     "installed": "3.0.2",
+     "package": "pkg0",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0060"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0064",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0064|pkg4",
+     "installed": "3.0.2",
+     "package": "pkg4",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0064"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0068",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0068|pkg3",
+     "installed": "3.0.2",
+     "package": "pkg3",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0068"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0072",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0072|pkg2",
+     "installed": "3.0.2",
+     "package": "pkg2",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0072"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0076",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0076|pkg1",
+     "installed": "3.0.2",
+     "package": "pkg1",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0076"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0080",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0080|pkg0",
+     "installed": "3.0.2",
+     "package": "pkg0",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0080"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0084",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0084|pkg4",
+     "installed": "3.0.2",
+     "package": "pkg4",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0084"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0088",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0088|pkg3",
+     "installed": "3.0.2",
+     "package": "pkg3",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0088"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0092",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0092|pkg2",
+     "installed": "3.0.2",
+     "package": "pkg2",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0092"
+    },
+    {
+     "baseline": {
+      "class": "warn",
+      "status": "지속"
+     },
+     "class": "update",
+     "class_label": "업데이트 가능",
+     "cve": "CVE-2024-0096",
+     "fixed": "3.0.3",
+     "fixed_label": "3.0.3",
+     "host": "a-ubuntu",
+     "id": "CVE-2024-0096|pkg1",
+     "installed": "3.0.2",
+     "package": "pkg1",
+     "severity": "CRITICAL",
+     "severity_label": "긴급",
+     "status": "fixed",
+     "title": "t CVE-2024-0096"
+    }
+   ],
+   "details_truncated": 179,
+   "hosts": [
+    {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 1,
+      "update": 400,
+      "will_not_fix": 1
+     },
+     "eosl": false,
+     "host": "a-ubuntu",
+     "inspected": true,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "",
+     "severity": {
+      "CRITICAL": 101,
+      "HIGH": 101,
+      "LOW": 100,
+      "MEDIUM": 100,
+      "UNKNOWN": 0
+     },
+     "total": 402
+    },
+    {
+     "classes": {
+      "no_centos_fix": 2,
+      "unfixed": 0,
+      "update": 1,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "b-centos7",
+     "inspected": true,
+     "os": "CentOS Linux 7",
+     "packages": 1,
+     "reason": "",
+     "severity": {
+      "CRITICAL": 1,
+      "HIGH": 2,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 3
+    },
+    {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 0,
+      "update": 0,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "c-clean",
+     "inspected": true,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "",
+     "severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 0
+    },
+    {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 0,
+      "update": 0,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "d-killed",
+     "inspected": false,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "Trivy 실행 실패 (rc=137, OOM-kill 추정 — 러너 메모리 확인)",
+     "severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 0
+    },
+    {
+     "classes": {
+      "no_centos_fix": 0,
+      "unfixed": 0,
+      "update": 0,
+      "will_not_fix": 0
+     },
+     "eosl": false,
+     "host": "e-empty",
+     "inspected": false,
+     "os": "Ubuntu 22.04",
+     "packages": 1,
+     "reason": "Trivy 출력이 비어 있음 (rc=0)",
+     "severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "LOW": 0,
+      "MEDIUM": 0,
+      "UNKNOWN": 0
+     },
+     "total": 0
+    }
+   ],
+   "reason": "",
+   "severity_labels": {
+    "CRITICAL": "긴급",
+    "HIGH": "높음",
+    "LOW": "낮음",
+    "MEDIUM": "중간",
+    "UNKNOWN": "미분류"
+   },
+   "status": "ok",
+   "title": "Package Vulnerability",
+   "total": 405,
+   "totals": {
+    "CRITICAL": 102,
+    "HIGH": 103,
+    "LOW": 100,
+    "MEDIUM": 100,
+    "UNKNOWN": 0
+   },
+   "trivy_version": "0.0.0",
+   "unavailable": [
+    {
+     "host": "d-killed",
+     "item": "Package Vulnerability",
+     "label": "점검불가",
+     "reason": "Trivy 실행 실패 (rc=137, OOM-kill 추정 — 러너 메모리 확인)"
+    },
+    {
+     "host": "e-empty",
+     "item": "Package Vulnerability",
+     "label": "점검불가",
+     "reason": "Trivy 출력이 비어 있음 (rc=0)"
+    }
+   ]
+  }
+ },
+ "section": {
+  "bars": [
+   {
+    "bar": 128.7,
+    "count": 102,
+    "label": "긴급",
+    "severity": "CRITICAL"
+   },
+   {
+    "bar": 130.0,
+    "count": 103,
+    "label": "높음",
+    "severity": "HIGH"
+   },
+   {
+    "bar": 126.2,
+    "count": 100,
+    "label": "중간",
+    "severity": "MEDIUM"
+   },
+   {
+    "bar": 126.2,
+    "count": 100,
+    "label": "낮음",
+    "severity": "LOW"
+   },
+   {
+    "bar": 0.0,
+    "count": 0,
+    "label": "미분류",
+    "severity": "UNKNOWN"
+   }
+  ],
+  "by_host": {
+   "a-ubuntu": {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 1,
+     "update": 400,
+     "will_not_fix": 1
+    },
+    "eosl": false,
+    "host": "a-ubuntu",
+    "inspected": true,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "",
+    "severity": {
+     "CRITICAL": 101,
+     "HIGH": 101,
+     "LOW": 100,
+     "MEDIUM": 100,
+     "UNKNOWN": 0
+    },
+    "total": 402
+   },
+   "b-centos7": {
+    "classes": {
+     "no_centos_fix": 2,
+     "unfixed": 0,
+     "update": 1,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "b-centos7",
+    "inspected": true,
+    "os": "CentOS Linux 7",
+    "packages": 1,
+    "reason": "",
+    "severity": {
+     "CRITICAL": 1,
+     "HIGH": 2,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 3
+   },
+   "c-clean": {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 0,
+     "update": 0,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "c-clean",
+    "inspected": true,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "",
+    "severity": {
+     "CRITICAL": 0,
+     "HIGH": 0,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 0
+   },
+   "d-killed": {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 0,
+     "update": 0,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "d-killed",
+    "inspected": false,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "Trivy 실행 실패 (rc=137, OOM-kill 추정 — 러너 메모리 확인)",
+    "severity": {
+     "CRITICAL": 0,
+     "HIGH": 0,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 0
+   },
+   "e-empty": {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 0,
+     "update": 0,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "e-empty",
+    "inspected": false,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "Trivy 출력이 비어 있음 (rc=0)",
+    "severity": {
+     "CRITICAL": 0,
+     "HIGH": 0,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 0
+   }
+  },
+  "class_labels": {
+   "no_centos_fix": "CentOS용 수정본 없음",
+   "unfixed": "벤더 미수정",
+   "update": "업데이트 가능",
+   "will_not_fix": "수정 안 함 (will not fix)"
+  },
+  "class_rows": [
+   {
+    "count": 401,
+    "key": "update",
+    "label": "업데이트 가능"
+   },
+   {
+    "count": 2,
+    "key": "no_centos_fix",
+    "label": "CentOS용 수정본 없음"
+   },
+   {
+    "count": 1,
+    "key": "will_not_fix",
+    "label": "수정 안 함 (will not fix)"
+   },
+   {
+    "count": 1,
+    "key": "unfixed",
+    "label": "벤더 미수정"
+   }
+  ],
+  "classes": {
+   "no_centos_fix": 2,
+   "unfixed": 1,
+   "update": 401,
+   "will_not_fix": 1
+  },
+  "db": {
+   "usable": true
+  },
+  "db_label": "취약점 DB 없음",
+  "details": [
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0000",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0000|pkg0",
+    "installed": "3.0.2",
+    "package": "pkg0",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0000"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0004",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0004|pkg4",
+    "installed": "3.0.2",
+    "package": "pkg4",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0004"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0008",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0008|pkg3",
+    "installed": "3.0.2",
+    "package": "pkg3",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0008"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0012",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0012|pkg2",
+    "installed": "3.0.2",
+    "package": "pkg2",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0012"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0016",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0016|pkg1",
+    "installed": "3.0.2",
+    "package": "pkg1",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0016"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0020",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0020|pkg0",
+    "installed": "3.0.2",
+    "package": "pkg0",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0020"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0024",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0024|pkg4",
+    "installed": "3.0.2",
+    "package": "pkg4",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0024"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0028",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0028|pkg3",
+    "installed": "3.0.2",
+    "package": "pkg3",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0028"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0032",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0032|pkg2",
+    "installed": "3.0.2",
+    "package": "pkg2",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0032"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0036",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0036|pkg1",
+    "installed": "3.0.2",
+    "package": "pkg1",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0036"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0040",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0040|pkg0",
+    "installed": "3.0.2",
+    "package": "pkg0",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0040"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0044",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0044|pkg4",
+    "installed": "3.0.2",
+    "package": "pkg4",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0044"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0048",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0048|pkg3",
+    "installed": "3.0.2",
+    "package": "pkg3",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0048"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0052",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0052|pkg2",
+    "installed": "3.0.2",
+    "package": "pkg2",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0052"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0056",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0056|pkg1",
+    "installed": "3.0.2",
+    "package": "pkg1",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0056"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0060",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0060|pkg0",
+    "installed": "3.0.2",
+    "package": "pkg0",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0060"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0064",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0064|pkg4",
+    "installed": "3.0.2",
+    "package": "pkg4",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0064"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0068",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0068|pkg3",
+    "installed": "3.0.2",
+    "package": "pkg3",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0068"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0072",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0072|pkg2",
+    "installed": "3.0.2",
+    "package": "pkg2",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0072"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0076",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0076|pkg1",
+    "installed": "3.0.2",
+    "package": "pkg1",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0076"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0080",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0080|pkg0",
+    "installed": "3.0.2",
+    "package": "pkg0",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0080"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0084",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0084|pkg4",
+    "installed": "3.0.2",
+    "package": "pkg4",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0084"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0088",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0088|pkg3",
+    "installed": "3.0.2",
+    "package": "pkg3",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0088"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0092",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0092|pkg2",
+    "installed": "3.0.2",
+    "package": "pkg2",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0092"
+   },
+   {
+    "class": "update",
+    "class_label": "업데이트 가능",
+    "cve": "CVE-2024-0096",
+    "fixed": "3.0.3",
+    "fixed_label": "3.0.3",
+    "host": "a-ubuntu",
+    "id": "CVE-2024-0096|pkg1",
+    "installed": "3.0.2",
+    "package": "pkg1",
+    "severity": "CRITICAL",
+    "severity_label": "긴급",
+    "status": "fixed",
+    "title": "t CVE-2024-0096"
+   }
+  ],
+  "details_truncated": 179,
+  "hosts": [
+   {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 1,
+     "update": 400,
+     "will_not_fix": 1
+    },
+    "eosl": false,
+    "host": "a-ubuntu",
+    "inspected": true,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "",
+    "severity": {
+     "CRITICAL": 101,
+     "HIGH": 101,
+     "LOW": 100,
+     "MEDIUM": 100,
+     "UNKNOWN": 0
+    },
+    "total": 402
+   },
+   {
+    "classes": {
+     "no_centos_fix": 2,
+     "unfixed": 0,
+     "update": 1,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "b-centos7",
+    "inspected": true,
+    "os": "CentOS Linux 7",
+    "packages": 1,
+    "reason": "",
+    "severity": {
+     "CRITICAL": 1,
+     "HIGH": 2,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 3
+   },
+   {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 0,
+     "update": 0,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "c-clean",
+    "inspected": true,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "",
+    "severity": {
+     "CRITICAL": 0,
+     "HIGH": 0,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 0
+   },
+   {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 0,
+     "update": 0,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "d-killed",
+    "inspected": false,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "Trivy 실행 실패 (rc=137, OOM-kill 추정 — 러너 메모리 확인)",
+    "severity": {
+     "CRITICAL": 0,
+     "HIGH": 0,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 0
+   },
+   {
+    "classes": {
+     "no_centos_fix": 0,
+     "unfixed": 0,
+     "update": 0,
+     "will_not_fix": 0
+    },
+    "eosl": false,
+    "host": "e-empty",
+    "inspected": false,
+    "os": "Ubuntu 22.04",
+    "packages": 1,
+    "reason": "Trivy 출력이 비어 있음 (rc=0)",
+    "severity": {
+     "CRITICAL": 0,
+     "HIGH": 0,
+     "LOW": 0,
+     "MEDIUM": 0,
+     "UNKNOWN": 0
+    },
+    "total": 0
+   }
+  ],
+  "reason": "",
+  "severity_labels": {
+   "CRITICAL": "긴급",
+   "HIGH": "높음",
+   "LOW": "낮음",
+   "MEDIUM": "중간",
+   "UNKNOWN": "미분류"
+  },
+  "status": "ok",
+  "title": "Package Vulnerability",
+  "total": 405,
+  "totals": {
+   "CRITICAL": 102,
+   "HIGH": 103,
+   "LOW": 100,
+   "MEDIUM": 100,
+   "UNKNOWN": 0
+  },
+  "trivy_version": "0.0.0",
+  "unavailable": [
+   {
+    "host": "d-killed",
+    "item": "Package Vulnerability",
+    "label": "점검불가",
+    "reason": "Trivy 실행 실패 (rc=137, OOM-kill 추정 — 러너 메모리 확인)"
+   },
+   {
+    "host": "e-empty",
+    "item": "Package Vulnerability",
+    "label": "점검불가",
+    "reason": "Trivy 출력이 비어 있음 (rc=0)"
+   }
+  ]
+ }
+}
