@@ -2,7 +2,7 @@
 """Host Audit 러너 메모리·시간 측정 harness (#153, Spec #148).
 
 합성 데이터(호스트 수 x 호스트당 CVE 수)로 실행 디렉터리와 이전 정기 실행의 findings를 만들고,
-실제 태스크(AUD-322~324 분류·섹션, AUD-021 보고서 모델, AUD-510 findings 저장, Audit Baseline 비교)를
+실제 태스크(AUD-322~324 분류·섹션, AUD-507·508·506 이전 findings 읽기, AUD-021 보고서 모델, AUD-510 findings 저장, Audit Baseline 비교)를
 ansible-playbook으로 돌린다. 지표는 프로세스 트리 전체(자식 포함)의 최대 RSS 합계와 소요 시간이다.
 러너 컨테이너의 OOM은 cgroup 단위라 ansible-playbook 본 프로세스만 재면 일을 서브프로세스로 옮긴 것이
 개선처럼 보일 수 있다. 그래서 본 프로세스 최대값은 참고용으로만 함께 적는다.
@@ -102,7 +102,9 @@ def generate_run(out, hosts, cves):
         # 이전 실행: 현재 발견의 80%는 그대로(지속), 나머지 20%만큼은 이번에 사라진 다른 CVE(해소)
         prior_ids[h] = sorted(set("%s|%s" % (v["VulnerabilityID"], v["PkgName"]) for v in vulns[: cves * 4 // 5]) |
                               set("CVE-2023-%d|pkg0" % n for n in range(cves // 5)))
-    (out / "previous_findings.json").write_text(json.dumps({
+    # AUD-505(uri dest)가 받아 둔 이전 정기 실행의 findings.json 자리(#156): 변수가 아니라 러너 파일이다.
+    (out / "package_findings").mkdir(parents=True, exist_ok=True)
+    (out / "package_findings" / "previous_findings.json").write_text(json.dumps({
         "run_id": "previous", "sections": {SECTION: {"hosts": sorted(prior_ids), "ids": prior_ids}}}))
     return out
 
@@ -114,7 +116,6 @@ def _pick(filename, *ids):
 
 def build_playbook(out, hosts):
     out = Path(out)
-    previous = json.loads((out / "previous_findings.json").read_text())
     names = [_name(i) for i in range(hosts)]
     play = {
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
@@ -124,10 +125,14 @@ def build_playbook(out, hosts):
                                "timezone": "Asia/Seoul", "target_hosts": names, "output_dir": str(out)},
             "host_audit_trivy_db": {"usable": True}, "host_audit_trivy_version": "0.0.0",
             "role_path": str(ROLE),
-            "_host_audit_storage_active": False,
-            "host_audit_baseline_history": {"state": "ok", "reason": "", "baseline": previous, "pointers": []},
+            # 보관은 실제 업로드 없이 Audit Baseline 조회 태스크(AUD-507·508·506)만 돈다. AUD-505의 S3 다운로드는
+            # generate_run이 같은 파일을 미리 놓아 대신한다.
+            "_host_audit_storage_active": True, "_host_audit_storage_problem": "", "_host_audit_storage_target": {},
+            "_host_audit_storage_prefix": "harness/",
+            "_host_audit_pointer_list": {"status": 200}, "_host_audit_pointer_docs": {"results": []},
+            "_host_audit_baseline_get": {"status": 200},
         },
-        "tasks": (_pick("report.yml", "AUD-020") + _pick("packages_scan.yml", "AUD-310", "AUD-322", "AUD-323", "AUD-324")
+        "tasks": (_pick("storage_lookup.yml", "AUD-507", "AUD-508", "AUD-506") + _pick("report.yml", "AUD-020") + _pick("packages_scan.yml", "AUD-310", "AUD-322", "AUD-323", "AUD-324")
                   + _pick("report.yml", "AUD-021") + _pick("storage_upload.yml", "AUD-510")),
     }
     return [play]

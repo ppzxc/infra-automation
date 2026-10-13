@@ -54,6 +54,20 @@
     - _host_audit_storage_problem | length == 0
     - (_host_audit_pointer_list.status | default(-1)) == 200
 
+# 이전 findings.json은 변수가 아니라 러너 파일로 받는다(#156). package_findings/ 아래라 보관 업로드에 들어가지 않는다(#155).
+- name: "[AUD-507] Make the runner-only directory for the previous findings"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - "{{ host_audit_run.output_dir }}/package_findings"
+    - "{{ host_audit_run.output_dir }}/package_findings/previous"
+  when:
+    - _host_audit_storage_active | bool
+    - _host_audit_storage_problem | length == 0
+    - (_host_audit_pointer_list.status | default(-1)) == 200
+
 - name: "[AUD-505] Get the findings of the Audit Baseline run"
   vars:
     _pointers: "{{ _host_audit_pointer_docs.results | default([]) | map(attribute='content', default='') | map('host_audit_json_loads') | select | list }}"
@@ -63,7 +77,8 @@
     url: "{{ _req.url }}"
     method: GET
     headers: "{{ _req.headers }}"
-    return_content: true
+    dest: "{{ host_audit_run.output_dir }}/package_findings/previous_findings.json"
+    mode: '0600'
     status_code: [-1, 200, 403, 404, 500, 503]
     timeout: "{{ host_audit_storage_timeout }}"
     validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
@@ -77,13 +92,28 @@
     - (_host_audit_pointer_list.status | default(-1)) == 200
     - _pick is not none
 
+# 모듈이 별도 프로세스에서 파일을 읽어 Package id(수십만 건)를 호스트별 파일로 나누고, 나머지(작은 섹션)만 돌려준다.
+- name: "[AUD-508] Split the previous findings into per-host id files"
+  host_audit_baseline_load:
+    src: "{{ host_audit_run.output_dir }}/package_findings/previous_findings.json"
+    ids_dir: "{{ host_audit_run.output_dir }}/package_findings/previous"
+  register: _host_audit_baseline_loaded
+  no_log: true
+  when:
+    - _host_audit_storage_active | bool
+    - _host_audit_storage_problem | length == 0
+    - (_host_audit_pointer_list.status | default(-1)) == 200
+    - _host_audit_baseline_get is defined
+    - _host_audit_baseline_get is not skipped
+    - (_host_audit_baseline_get.status | default(-1)) == 200
+
 - name: "[AUD-506] Decide the Audit Baseline state of this run"
   vars:
     _list_status: "{{ _host_audit_pointer_list.status | default(-1) }}"
     _doc_statuses: "{{ _host_audit_pointer_docs.results | default([]) | map(attribute='status', default=-1) | list }}"
     _pointers: "{{ _host_audit_pointer_docs.results | default([]) | map(attribute='content', default='') | map('host_audit_json_loads') | select | list }}"
     _baseline_wanted: "{{ _host_audit_baseline_get is defined and _host_audit_baseline_get is not skipped }}"
-    _baseline_doc: "{{ (_host_audit_baseline_get.content | default('')) | host_audit_json_loads if _baseline_wanted else none }}"
+    _baseline_doc: "{{ (_host_audit_baseline_loaded.baseline | default(none)) if _baseline_wanted else none }}"
     _failure: >-
       {{ _host_audit_storage_problem if _host_audit_storage_problem | length > 0
          else ('baseline/ 목록 조회 실패(status=' ~ _list_status ~ ')' if _list_status | int != 200

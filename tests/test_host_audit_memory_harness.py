@@ -33,7 +33,7 @@ def test_generate_makes_run_directory_and_previous_findings(tmp_path):
     assert len(list((tmp_path / "packages").glob("*.json"))) == 3
     trivy = json.loads((tmp_path / "trivy" / "h002.json").read_text())
     assert len(trivy["Results"][0]["Vulnerabilities"]) == 5
-    prior = json.loads((tmp_path / "previous_findings.json").read_text())
+    prior = json.loads((tmp_path / "package_findings" / "previous_findings.json").read_text())
     assert len(prior["sections"]["package_vulnerability"]["hosts"]) == 3
 
 
