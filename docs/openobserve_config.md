@@ -33,6 +33,8 @@
   | `infra-kernel-disk-errors` | `system_logs`의 `Out of memory: Killed process`, `I/O error`, `EXT4-fs error`, `XFS ... Corruption` (severity가 아닌 패턴 기반) |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
 
+  - **리소스 알림 6개 정의 (Spec #184 / Ticket-3, `stream_type: metrics`)**: `infra-disk-usage-p2/-p1`(`system_filesystem_usage`), `infra-inode-usage-p2/-p1`(`system_filesystem_inodes_usage`), `infra-memory-usage-p2/-p1`(`system_memory_usage`). 알림 정의의 `stream_type`(생략하면 `logs`)이 알림 생성 요청에 그대로 들어간다. 사용률은 `_timestamp`별로 묶은 뒤 구간 최솟값(디스크·inode 15분, 메모리 10분)이 P2 90%~95% 미만 / P1 95% 이상일 때 발화하고 State Alert로 P1 60분·P2 1440분 후 재통지한다. 메모리는 `used` ÷ (`slab_unreclaimable`을 뺀 state 합). 제외 파일시스템 유형(`o2c_resource_excluded_fstypes`)과 임계값(`o2c_resource_p2_threshold`, `o2c_resource_p1_threshold`)은 Git 기본값이고, OpenBao의 호스트·마운트 예외와 임계값 덮어쓰기는 SQL로 만들어 반영한다(`o2c_resource_sql` 필터). 검증 단계는 메트릭 알림도 `logs` 유형의 검증 스트림에 합성 지표 레코드(`ts`로 스크레이프 시각 지정)를 넣어 SQL 논리만 확인한다.
+
   임계값은 `roles/openobserve_config/defaults/main.yml`의 `o2c_*` 변수입니다. 파싱 실패율 알림의 기본값(10%, 최소 20줄, 30분 창)도 `o2c_parse_error_percent`, `o2c_parse_error_min_lines`, `o2c_parse_error_window_minutes`로 조정합니다(SSH 실패는 `o2c_ssh_fail_per_source_threshold`, `o2c_ssh_fail_per_host_threshold`, `o2c_ssh_fail_window_minutes`).
 
   - **`Invalid user X from ...` 줄**: sshd는 같은 시도에 대해 `Failed password for invalid user X`도 남깁니다. 실패가 두 번 집계되지 않도록 `Invalid user` 줄은 `event_reason=invalid user`와 주소·사용자만 붙이고 `event_outcome`은 붙이지 않습니다(알림은 `event_outcome='failure'`만 셉니다). 비밀번호 시도 없이 끝나는 사용자 열거는 `Failed password` 줄이 없어 실패로 집계되지 않으며, 필요하면 `event_reason='invalid user'` 조건의 별도 알림을 추가합니다.
@@ -50,6 +52,7 @@
 | `api_user`, `api_password` | 설정 API(함수·파이프라인·알림)를 쓸 수 있는 OpenObserve 계정 (수집 토큰과 별개) |
 | `alert_webhook_url` | 통지 webhook URL |
 | `normal_sources` | (선택) root 로그인 정상 출발지 `[{address: <IP>, kind: semaphore\|office}]`. Semaphore는 어느 root 알림에도 걸리지 않고 office(사무실·S2S)는 P3 하루 요약에만, 그 밖은 P1. SSH 실패 급증 알림에는 적용하지 않음. 주소는 IP 문자·종류를 검증하며 출력하지 않음 |
+| `alert_resource_exclusions`, `alert_resource_thresholds` | (선택, 비어 있어도 동작) 리소스 알림의 호스트·마운트 예외 `[{host, mount?, metric?}]`와 임계값 덮어쓰기 `[{host, mount?, metric?, p2?, p1?}]` (`metric`: disk·inode·memory) |
 | `alert_webhook_token`, `alert_webhook_auth_header` | (선택) 인증 토큰과 헤더 이름(기본 `Authorization`, 네이버웍스 봇은 `X-NANOIT-ACCESS`) |
 
 ---

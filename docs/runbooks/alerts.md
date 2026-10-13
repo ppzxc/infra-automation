@@ -7,9 +7,15 @@
 
 | 심각도 | 의미 | 응답 목표 |
 |---|---|---|
-| 🔴 P1 긴급 | 침해 또는 장애가 진행 중일 수 있다 | 즉시 확인 (업무 시간 외 포함) |
-| 🟠 P2 경고 | 공격 시도나 이상 징후. 아직 피해는 확인되지 않았다 | 당일 확인 |
+| 🔴 P1 긴급 | 장애·데이터 손실·침해가 진행 중이거나 수 시간 내 임박 | 즉시 확인 (업무 시간 외 포함) |
+| 🟠 P2 경고 | 방치하면 하루~며칠 내 P1이 된다 | 당일 확인 |
 | 🟡 P3 주의 | 탐지·수집 품질 문제. 직접 피해는 없다 | 업무 시간에 처리 |
+
+### 재통지 원칙 (Event Alert / State Alert)
+
+- **Event Alert**: 사건이 일어났다는 알림. silence가 조회 구간과 같아 구간마다 1번만 온다.
+- **State Alert**: 어떤 상태가 계속된다는 알림. 상태가 이어지는 동안 P1은 60분, P2·P3은 1440분(하루 1번)마다 다시 온다. 복구 통지는 없다(통지가 멈추면 복구).
+- 이중 등급 알림(디스크·inode·메모리)은 P2가 "P2 이상 P1 미만" 구간만 잡아 같은 대상에 P1·P2가 동시에 오지 않는다.
 
 ## 공통 절차
 
@@ -171,3 +177,50 @@ sudo rm -f /var/lib/openobserve-health/notified
 sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobserve-health-check
 ```
 네이버웍스에 `[P1 긴급] OpenObserve 응답 없음`이 도착하면 정상이다(종료코드 0). 통지 뒤 60분 동안은 같은 장애로 보고 재통지하지 않으므로, 이 시험 뒤에는 위 첫 줄처럼 상태 파일을 지운다(실제 장애가 아니므로 상태가 남지 않게 한다).
+
+---
+
+## 리소스 알림 (디스크·inode·메모리)
+
+사용률은 `_timestamp`별로 묶은 값의 **조회 구간 최솟값**으로 판정한다(구간 내내 높아야 발화). 디스크·inode는 15분, 메모리는 10분. 90% 이상 95% 미만은 P2(재통지 1440분), 95% 이상은 P1(재통지 60분). 통지 행에 호스트·마운트·사용률이 나온다. squashfs·iso9660·tmpfs·devtmpfs·overlay는 감시하지 않고 `/boot`·`/boot/efi`는 감시한다. 항상 높게 쓰는 볼륨은 OpenBao `agents/openobserve`의 `alert_resource_exclusions`(호스트·마운트 예외)나 `alert_resource_thresholds`(임계값 덮어쓰기)에 넣고 `OpenObserve — Config`를 다시 실행한다.
+
+<a id="disk-usage"></a>
+### 🟠/🔴 디스크 사용률 (`infra-disk-usage-p2`, `infra-disk-usage-p1`)
+
+**왜 중요한가**: 가득 차면 로그·DB·백업 쓰기가 실패한다.
+
+**확인**
+```bash
+df -hT <마운트>
+sudo du -xh <마운트> --max-depth=2 | sort -h | tail -20
+docker system df   # Docker 사용 호스트
+```
+
+**대응**: 큰 파일·오래된 로그·Docker 이미지/볼륨을 정리하거나 증설한다. 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외를 등록한다.
+
+<a id="inode-usage"></a>
+### 🟠/🔴 inode 사용률 (`infra-inode-usage-p2`, `infra-inode-usage-p1`)
+
+**왜 중요한가**: 용량이 남아도 inode가 다하면 파일을 만들 수 없다(작은 파일 폭증).
+
+**확인**
+```bash
+df -i <마운트>
+sudo du -x --inodes <마운트> --max-depth=3 | sort -n | tail -20
+```
+
+**대응**: 작은 파일이 몰린 디렉터리(세션·캐시·메일 큐 등)를 정리하고 원인 프로세스를 고친다.
+
+<a id="memory-usage"></a>
+### 🟠/🔴 메모리 사용률 (`infra-memory-usage-p2`, `infra-memory-usage-p1`)
+
+사용률 = `used` ÷ (`slab_unreclaimable`을 뺀 `system_memory_usage` state 합). 캐시·버퍼는 사용량에 들어가지 않는다.
+
+**확인**
+```bash
+free -m
+ps aux --sort=-%mem | head
+docker stats --no-stream   # Docker 사용 호스트
+```
+
+**대응**: 메모리를 많이 쓰는 프로세스·컨테이너의 누수와 한도를 점검하고 재기동하거나 증설한다. OOM kill이 이미 있었는지 시스템 로그에서 확인한다.
