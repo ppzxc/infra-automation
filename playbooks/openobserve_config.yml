@@ -7,10 +7,10 @@
 # GET으로 현재 상태와 비교해 차이가 있는 객체만 POST/PUT하며, --check에서는 변경 예정 목록만 보여 준다.
 # 시크릿(API 계정, webhook URL/토큰)은 OpenBao agents/openobserve에서 조회한다 — Git에 두지 않는다.
 #
-# Semaphore 템플릿: OpenObserve — Config (localhost, 인벤토리 무관)
+# Semaphore 템플릿: OpenObserve — Config (localhost 실행. Silent Host 로스터를 만들려고 servers 인벤토리를 읽는다)
 # 실행 예시:
-#   ansible-playbook playbooks/openobserve_config.yml --check
-#   ansible-playbook playbooks/openobserve_config.yml
+#   ansible-playbook -i inventory/hosts.yml playbooks/openobserve_config.yml --check
+#   ansible-playbook -i inventory/hosts.yml playbooks/openobserve_config.yml
 # ==============================================================================
 - name: Apply OpenObserve configuration as code
   hosts: localhost

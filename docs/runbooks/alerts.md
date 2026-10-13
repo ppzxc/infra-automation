@@ -199,6 +199,19 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 ```
 네이버웍스에 `[P1 긴급] OpenObserve 응답 없음`이 도착하면 정상이다(종료코드 0). 통지 뒤 60분 동안은 같은 장애로 보고 재통지하지 않으므로, 이 시험 뒤에는 위 첫 줄처럼 상태 파일을 지운다(실제 장애가 아니므로 상태가 남지 않게 한다).
 
+<a id="silent-host"></a>
+## 🟠/🔴 Silent Host — 메트릭 하트비트 끊김 (`infra-silent-host-p2`, `infra-silent-host-p1`)
+
+수집 로스터 호스트(인벤토리 `servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0332 포함)에서 `system_memory_usage` 하트비트가 15분 넘게 끊기면 P2(3시간 미만), 3시간 넘게 끊기면 P1이다. 같은 호스트에 P2와 P1이 동시에 오지 않는다. 서버가 내려가도(서버 응답 없음) 수집기가 멈춰도 같이 걸린다.
+
+**왜 중요한가**: OpenObserve는 약 5시간보다 오래된 로그를 받지 않는다. 이 시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음 — ISMS 로그 증거가 중앙에서 영구히 빠진다(2026-10 CentOS 6 수집기 중단 사고, #161).
+
+**확인**
+1. 같은 호스트의 서버 응답 없음(Unreachable Host) 알림이 있으면 그쪽이 원인이다. 서버·네트워크부터 복구한다.
+2. 서버가 살아 있으면 호스트에서 `systemctl status otelcol-contrib`(CentOS 6은 `service otelcol-contrib status`)와 최근 로그를 본다.
+
+**대응**: 수집기를 재기동하고 하트비트가 돌아오는지 본다. P1이면 끊긴 구간 로그가 5시간 한도 안에 들어오는지 확인하고, 넘었다면 호스트의 원본 로그를 보존한다. 며칠 이상 계획 정지하는 호스트는 OpenBao `silent_host_exceptions`에 만료일과 함께 등록하고 `OpenObserve — Config`를 다시 실행한다. 호스트를 편입·폐기했다면 같은 Config 재실행이 필요하다.
+
 ---
 
 ## 리소스 알림 (디스크·inode·메모리)

@@ -34,12 +34,16 @@
   | `infra-disk-fs-errors` (P1) | `system_logs`의 `I/O error`, `EXT4-fs error`, `XFS ... Corruption`, `blk_update_request`, `Buffer I/O error` (대소문자 무시, severity가 아닌 패턴 기반). 옛 `infra-kernel-disk-errors`를 대체하며 서버에서 삭제된다 |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
 
+  - **Silent Host 2개 정의 (Spec #184 / Ticket-4, `stream_type: metrics`)**: `infra-silent-host-p2`(수집 로스터 호스트의 `system_memory_usage`가 15분 없음, 3시간 미만 — P2, 재통지 1440분)와 `infra-silent-host-p1`(3시간 없음 — P1, 재통지 60분). 둘 다 조회 구간 180분이며, P2 SQL은 "구간에는 있었지만 최근 15분은 없음"만 잡아 같은 호스트에 P1과 동시에 오지 않는다. SQL은 로스터 호스트마다 `SELECT '<호스트>' AS host_name, count(*) … HAVING count(*) < 1` 가지를 `UNION ALL`로 이은 형태다(인라인 `VALUES`/`unnest` JOIN은 이 버전에서 틀린 결과를 내므로 쓰지 않는다). P1 문구는 "약 5시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음"을 안내한다 — OpenObserve `ZO_INGEST_ALLOWED_UPTO` 기본값 5시간(공식 문서)이며 `o2c_ingest_allowed_hours`로 표현하고 서버 값을 바꾸면 함께 고친다. 로스터는 실행 시 인벤토리 그룹에서 만든다(아래 "로스터와 계획 정지 예외").
+
   - **리소스 알림 6개 정의 (Spec #184 / Ticket-3, `stream_type: metrics`)**: `infra-disk-usage-p2/-p1`(`system_filesystem_usage`), `infra-inode-usage-p2/-p1`(`system_filesystem_inodes_usage`), `infra-memory-usage-p2/-p1`(`system_memory_usage`). 알림 정의의 `stream_type`(생략하면 `logs`)이 알림 생성 요청에 그대로 들어간다. 사용률은 `_timestamp`별로 묶은 뒤 구간 최솟값(디스크·inode 15분, 메모리 10분)이 P2 90%~95% 미만 / P1 95% 이상일 때 발화하고 State Alert로 P1 60분·P2 1440분 후 재통지한다. 메모리는 `used` ÷ (`slab_unreclaimable`을 뺀 state 합). 제외 파일시스템 유형(`o2c_resource_excluded_fstypes`)과 임계값(`o2c_resource_p2_threshold`, `o2c_resource_p1_threshold`)은 Git 기본값이고, OpenBao의 호스트·마운트 예외와 임계값 덮어쓰기는 SQL로 만들어 반영한다(`o2c_resource_sql` 필터). 검증 단계는 메트릭 알림도 `logs` 유형의 검증 스트림에 합성 지표 레코드(`ts`로 스크레이프 시각 지정)를 넣어 SQL 논리만 확인한다.
 
   임계값은 `roles/openobserve_config/defaults/main.yml`의 `o2c_*` 변수입니다. 파싱 실패율 알림의 기본값(10%, 최소 20줄, 30분 창)도 `o2c_parse_error_percent`, `o2c_parse_error_min_lines`, `o2c_parse_error_window_minutes`로 조정합니다(SSH 실패는 `o2c_ssh_fail_per_source_threshold`, `o2c_ssh_fail_per_host_threshold`, `o2c_ssh_fail_window_minutes`).
 
   - **`Invalid user X from ...` 줄**: sshd는 같은 시도에 대해 `Failed password for invalid user X`도 남깁니다. 실패가 두 번 집계되지 않도록 `Invalid user` 줄은 `event_reason=invalid user`와 주소·사용자만 붙이고 `event_outcome`은 붙이지 않습니다(알림은 `event_outcome='failure'`만 셉니다). 비밀번호 시도 없이 끝나는 사용자 열거는 `Failed password` 줄이 없어 실패로 집계되지 않으며, 필요하면 `event_reason='invalid user'` 조건의 별도 알림을 추가합니다.
   - **파싱 실패율의 한계**: 분모는 스트림·호스트의 전체 줄 수입니다. `otel_log_formats`에 없는 경로(사용자 추가 경로, 표에서 뺀 `sudo.log`/`boot.log`/`firewalld`)의 줄도 분모에 들어가 비율이 희석될 수 있습니다. 이런 경로는 파서를 적용하지 않아 `log.parse_error` 자체가 붙지 않으므로 오탐은 없지만, 해당 줄이 많은 호스트는 실제 실패율보다 낮게 보입니다. 이 변경 이전 레코드는 새 필드가 null이라 조건에서 빠집니다. 수집기는 파싱한 줄마다 `log.parse_error`를 `true`/`false`로 명시합니다. 이 필드가 스트림에 한 번도 들어오지 않으면 OpenObserve가 `unknown field`로 알림 쿼리를 거부합니다(알림 상태 "오류").
+
+  - **로스터와 계획 정지 예외 (Spec #184 / Ticket-4)**: `OpenObserve — Config`는 localhost에서 돌지만 인벤토리의 그룹을 읽는다(`servers` 인벤토리 필요). 수집 로스터 = `servers` − Host Agents Exclusion(`host_agents_excluded`) − Host Agents Backup Only(`host_agents_backup_only`)이고 ns0266·ns0332를 포함한다. 유지보수 로스터 = `servers` − Host Agents Exclusion이다. 호스트 이름은 인벤토리 호스트명(관리번호)이며 수집기가 보내는 `host_name`과 같다. 호스트 편입·폐기 뒤에는 Config를 다시 실행해야 한다. 계획 정지 예외(OpenBao `silent_host_exceptions: [{host, expires: YYYY-MM-DD}]`)는 만료일이 필수이고, 만료일이 지난 항목은 로스터 생성 때 무시되어 해제를 잊어도 감시가 돌아온다. 검증 단계는 모든 케이스의 가짜 호스트를 로스터에 넣어 "데이터가 없으면 발화하고, 있으면 발화하지 않는지"를 확인한다.
 
 ---
 
@@ -54,6 +58,7 @@
 | `alert_webhook_url` | 통지 webhook URL |
 | `normal_sources` | (선택) root 로그인 정상 출발지 `[{address: <IP>, kind: semaphore\|office}]`. Semaphore는 어느 root 알림에도 걸리지 않고 office(사무실·S2S)는 P3 하루 요약에만, 그 밖은 P1. SSH 실패 급증 알림에는 적용하지 않음. 주소는 IP 문자·종류를 검증하며 출력하지 않음 |
 | `alert_resource_exclusions`, `alert_resource_thresholds` | (선택, 비어 있어도 동작) 리소스 알림의 호스트·마운트 예외 `[{host, mount?, metric?}]`와 임계값 덮어쓰기 `[{host, mount?, metric?, p2?, p1?}]` (`metric`: disk·inode·memory) |
+| `silent_host_exceptions` | (선택) Silent Host 계획 정지 예외 `[{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason?}]`. 만료일 필수(없거나 형식이 틀리면 요청 전에 실패), 만료일이 지난 항목은 무시 |
 | `alert_webhook_token`, `alert_webhook_auth_header` | (선택) 인증 토큰과 헤더 이름(기본 `Authorization`, 네이버웍스 봇은 `X-NANOIT-ACCESS`) |
 
 ---
@@ -61,8 +66,8 @@
 ## 3. 실행
 
 ```bash
-ansible-playbook playbooks/openobserve_config.yml --check   # 변경 예정 목록만 출력, 쓰기 요청 0건
-ansible-playbook playbooks/openobserve_config.yml
+ansible-playbook -i inventory/hosts.yml playbooks/openobserve_config.yml --check   # 변경 예정 목록만 출력, 쓰기 요청 0건
+ansible-playbook -i inventory/hosts.yml playbooks/openobserve_config.yml
 ```
 
 GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)/PUT(수정)합니다. 의존 순서는 템플릿 → 통지 대상 → 함수 → 파이프라인 → 알림입니다.
