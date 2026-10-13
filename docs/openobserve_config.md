@@ -21,7 +21,7 @@
 - **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수(`after_flatten: true`) → `security_logs`.
 - **통지 대상**: webhook 하나(`infra-automation-webhook`) — 네이버웍스 봇 text API(`{"content": {"type": "text", "text": ...}}`)로 보내는 본문 템플릿과 `Content-Type: application/json` 헤더. 등급별 분리는 범위 밖입니다.
 - **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 무슨 일, 왜 중요, 대상(알림별 `row_template`), 조치, [런북](runbooks/alerts.md) 링크, 로그 보기 링크, 발생 구간. 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
-- **알림 규칙 6종(7개 정의)**: 모두 위 대상으로 보냅니다.
+- **알림 규칙 7종(8개 정의)**: 모두 위 대상으로 보냅니다.
 
   | 이름 | 조건 |
   |---|---|
@@ -29,7 +29,8 @@
   | `infra-ssh-login-failures-per-host` | 호스트별 5분 50회 이상 sshd 로그인 실패 |
   | `infra-root-login-success` | root SSH 로그인 성공 1건부터 |
   | `infra-sudo-escalation-failure` | sudo/su `authentication failure`/`NOT in sudoers` 1건부터 (`event_action IN (sudo, su)`, 성공은 알리지 않음) |
-  | `infra-kernel-disk-errors` | `system_logs`의 `Out of memory: Killed process`, `I/O error`, `EXT4-fs error`, `XFS ... Corruption` (severity가 아닌 패턴 기반) |
+  | `infra-oom-kill` (P2) | `system_logs`의 `Killed process`·`Kill process`·`invoked oom-killer`를 대소문자 무시(`lower(body)`)로 매칭. 행에 호스트·종료된 프로세스명 |
+  | `infra-disk-fs-errors` (P1) | `system_logs`의 `I/O error`, `EXT4-fs error`, `XFS ... Corruption`, `blk_update_request`, `Buffer I/O error` (대소문자 무시, severity가 아닌 패턴 기반). 옛 `infra-kernel-disk-errors`를 대체하며 서버에서 삭제된다 |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
 
   임계값은 `roles/openobserve_config/defaults/main.yml`의 `o2c_*` 변수입니다. 파싱 실패율 알림의 기본값(10%, 최소 20줄, 30분 창)도 `o2c_parse_error_percent`, `o2c_parse_error_min_lines`, `o2c_parse_error_window_minutes`로 조정합니다(SSH 실패는 `o2c_ssh_fail_per_source_threshold`, `o2c_ssh_fail_per_host_threshold`, `o2c_ssh_fail_window_minutes`).
@@ -80,7 +81,7 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 
 반영(`O2C-020`) 직후 매번 실행한다. check 모드에서는 요청을 보내지 않는다. 운영 스트림·운영 알림·통지 대상은 건드리지 않는다.
 
-- **① SQL 논리**: `files/alert_fixtures.yml`의 합성 레코드(알림마다 "발화해야 하는" 케이스와 "발화하면 안 되는" 케이스)를 검증 전용 스트림(`<운영 스트림><o2c_verify_stream_suffix>`, 기본 `_alert_verify`)에 넣고, 알림 SQL의 스트림명만 바꿔 검색 API로 실행해 기대와 비교한다. 케이스 호스트에 실행 ID가 붙어 이전 실행 데이터와 섞이지 않는다. 불일치하면 알림·케이스 이름을 출력하고 실패한다. `known_failure`가 붙은 케이스는 경고만 한다(고친 티켓에서 표시를 삭제).
+- **① SQL 논리**: `files/alert_fixtures.yml`의 합성 레코드(알림마다 "발화해야 하는" 케이스와 "발화하면 안 되는" 케이스)를 검증 전용 스트림(`<운영 스트림><o2c_verify_stream_suffix>`, 기본 `_alert_verify`)에 넣고, 알림 SQL의 스트림명만 바꿔 검색 API로 실행해 기대와 비교한다. 케이스 호스트에 실행 ID가 붙어 이전 실행 데이터와 섞이지 않는다. 불일치하면 알림·케이스 이름을 출력하고 실패한다. `known_failure`(선택)가 붙은 케이스는 경고만 한다. 현재 이 표시가 붙은 케이스는 없다.
 - **② 평가 오류**: `GET /api/v2/<org>/alerts/history`에서 관리 대상 알림의 가장 최근 평가가 `error`이면 실패한다.
 - 합성 레코드 주입은 OpenBao `agents/openobserve`의 `controller_ingest_token`(컨트롤러 전용)으로 인증한다. 새 알림은 픽스처가 없으면 검증이 실패한다.
 
