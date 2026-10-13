@@ -44,7 +44,7 @@ def o2c_desired(spec):
          'body': {'name': spec['function_name'], 'function': spec['vrl'].strip(), 'params': 'row', 'transType': 0}},
         _pipeline(org, stream, spec['pipeline_name'], spec['function_name']),
     ]
-    for alert in spec['alerts']:
+    for alert in list(spec['alerts']) + ([spec['selftest_alert']] if spec.get('selftest_alert') else []):
         out.append({'kind': 'alert', 'name': alert['name'], 'body': {
             'name': alert['name'], 'stream_type': 'logs', 'stream_name': alert['stream'], 'is_real_time': False,
             'query_condition': {'type': 'sql', 'sql': alert['sql']},

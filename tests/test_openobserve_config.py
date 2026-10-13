@@ -30,6 +30,8 @@ EXPECTED_ALERTS = {
     "infra-sudo-escalation-failure", "infra-kernel-disk-errors",
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
 }
+SELFTEST = "infra-alert-selftest"   # 통지 경로 자가 시험 알림(Spec #184 / Ticket-2) — 검증 전용 스트림에 건다
+SELFTEST_STREAM = "alert_selftest_alert_verify"
 
 
 class FakeO2:
@@ -180,7 +182,8 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     paths = [p for _, p, _ in o2.writes]
     assert paths[:4] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
                          "/api/default/pipelines"]
-    assert set(o2.store["alert"]) == EXPECTED_ALERTS and paths[4:] == ["/api/v2/default/alerts"] * len(EXPECTED_ALERTS)
+    assert set(o2.store["alert"]) == EXPECTED_ALERTS | {SELFTEST}
+    assert paths[4:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
 
 
 def test_template_body_is_a_naver_works_text_message(o2):
@@ -203,6 +206,8 @@ def test_every_alert_is_actionable(o2):
     assert _apply(o2).returncode == 0
     runbook = RUNBOOK.read_text(encoding="utf-8")
     for name, alert in o2.store["alert"].items():
+        if name == SELFTEST:
+            continue
         ctx = alert["context_attributes"]
         assert ctx["severity"] in ("P1 긴급", "P2 경고", "P3 주의"), name
         assert ctx["severity_icon"] in ("🔴", "🟠", "🟡"), name
@@ -247,6 +252,7 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert dest["template"] == "infra-automation-webhook"
     by = o2.store["alert"]
     assert all(a["destinations"] == ["infra-automation-webhook"] and a["enabled"] for a in by.values())
+    assert SELFTEST in by
     assert by["infra-ssh-login-failures-per-source"]["query_condition"]["sql"].count("HAVING count(*) >= 10") == 1
     assert by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"].count("HAVING count(*) >= 50") == 1
     assert by["infra-ssh-login-failures-per-source"]["trigger_condition"]["period"] == 5
@@ -493,3 +499,53 @@ def test_ingest_token_is_not_printed(o2):
     res = _apply(o2, "-vvv")
     assert "INGEST-TOKEN-qrs" not in res.stdout + res.stderr
     assert base64.b64encode(b"default:INGEST-TOKEN-qrs").decode() not in res.stdout + res.stderr
+
+
+# --- 통지 경로 자가 시험 (Spec #184 / Ticket-2) -------------------------------------------------------------------------
+def _selftest_ingests(o2):
+    return [(p, a, recs) for p, a, recs in o2.ingests if p.split("/")[3] == SELFTEST_STREAM]
+
+
+def test_standing_selftest_alert_is_managed_on_a_verification_only_stream_and_is_idempotent(o2):
+    assert _apply(o2).returncode == 0
+    alert = o2.store["alert"][SELFTEST]
+    assert alert["stream_name"] == SELFTEST_STREAM and alert["destinations"] == ["infra-automation-webhook"]
+    assert alert["enabled"] is True and alert["stream_type"] == "logs"
+    # 운영 스트림을 보지 않으므로 운영 데이터로는 발화하지 않는다
+    assert alert["stream_name"] not in ("security_logs", "system_logs")
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and o2.writes == [] and _changed(res) == 0
+
+
+def test_selftest_notification_is_clearly_marked_as_a_test(o2):
+    assert _apply(o2).returncode == 0
+    ctx = o2.store["alert"][SELFTEST]["context_attributes"]
+    assert ctx["severity"] == "TEST"       # 통지 첫 줄이 "<아이콘> [TEST] <제목>"이 된다
+    assert all(ctx[k].strip() and '"' not in ctx[k] and "\n" not in ctx[k] for k in ("title", "what", "why", "action", "runbook"))
+    assert "시험" in ctx["title"] and o2.store["alert"][SELFTEST]["row_template"].startswith("• ")
+
+
+def test_default_run_sends_no_selftest_record(o2):
+    assert _apply(o2).returncode == 0
+    assert _selftest_ingests(o2) == []
+
+
+def test_verify_notify_injects_exactly_one_selftest_record_with_the_controller_token(o2):
+    res = _apply(o2, extra={"o2c_verify_notify": True})
+    assert res.returncode == 0, res.stdout + res.stderr
+    sent = _selftest_ingests(o2)
+    assert len(sent) == 1 and len(sent[0][2]) == 1
+    assert sent[0][1] == "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()
+    assert sent[0][2][0]["host_name"].startswith("selftest")
+
+
+def test_verify_notify_is_off_in_check_mode(o2):
+    res = _apply(o2, "--check", extra={"o2c_verify_notify": True})
+    assert res.returncode == 0 and o2.ingests == []
+
+
+def test_selftest_ingest_task_is_no_log_and_not_run_in_check_mode():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    t = next(t for t in tasks if t["name"].startswith("[O2C-037"))
+    assert t["no_log"] is True and "not ansible_check_mode" in str(t["when"]) and "o2c_verify_notify" in str(t["when"])

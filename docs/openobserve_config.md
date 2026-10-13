@@ -93,3 +93,10 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-034` | `Fail when an alert did not fire (or fired) as the fixtures expect` | `ansible.builtin.debug` | Controller | 불일치 시 알림·케이스 이름과 함께 실패 |
 | `O2C-035` | `Read the recent alert evaluation history` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `no_log`) |
 | `O2C-036` | `Fail when the latest evaluation of a managed alert ended in error` | `ansible.builtin.assert` | Controller | 평가 오류가 있으면 실패 |
+| `O2C-037` | `Inject one self-test record so the standing self-test alert notifies (only with o2c_verify_notify=true)` | `ansible.builtin.uri` | Controller | 검증 전용 스트림에만 POST (`changed_when: false`, `no_log`), `o2c_verify_notify`가 참일 때만, check 모드 제외 |
+
+### 통지 경로 자가 시험 (Spec #184 / Ticket-2)
+
+- 상설 알림 `infra-alert-selftest`가 검증 전용 스트림(`alert_selftest<o2c_verify_stream_suffix>`)을 본다. Config가 멱등하게 관리하며 운영 스트림은 보지 않는다.
+- 기본 실행에서는 레코드가 없어 통지가 가지 않는다. `-e o2c_verify_notify=true`로 실행하면 레코드 1건(`O2C-037`)을 넣어 템플릿·destination·webhook까지 실제로 통지하며, 메시지 첫 줄은 `🧪 [TEST] 알림 통지 경로 시험 (실제 장애 아님)`이다. check 모드에서는 넣지 않는다.
+- 알림은 조회 구간 5분·silence 5분이라 레코드 1건당 통지는 1회다. 반영 직후가 아니라 다음 평가(최대 1분 뒤)에 통지가 도착한다.

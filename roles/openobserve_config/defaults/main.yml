@@ -176,3 +176,26 @@ o2c_verify_stream_suffix: _alert_verify
 o2c_verify_retries: 6       # 수집 직후 검색에 보이기까지 걸리는 시간을 기다린다
 o2c_verify_delay: 5
 o2c_alert_fixtures: "{{ lookup('ansible.builtin.file', role_path ~ '/files/alert_fixtures.yml') | from_yaml }}"
+
+# 통지 경로 자가 시험(Spec #184 / Ticket-2): 검증 전용 스트림에 거는 상설 알림 1개. 기본 실행에서는 레코드가 없어 울리지 않고,
+# o2c_verify_notify=true일 때만 레코드 1건을 넣어 템플릿·destination·webhook까지 실제로 통지한다(통지에 [TEST]가 붙는다).
+o2c_verify_notify: false
+o2c_selftest_stream: "alert_selftest{{ o2c_verify_stream_suffix }}"
+o2c_selftest_alert:
+  name: infra-alert-selftest
+  severity: "TEST"
+  severity_icon: "🧪"
+  title: "알림 통지 경로 시험 (실제 장애 아님)"
+  what: "OpenObserve — Config가 o2c_verify_notify=true로 실행되어 통지 경로 시험 레코드를 넣었습니다."
+  why: "알림 템플릿·통지 대상·webhook이 끝까지 동작하는지 확인하는 시험이며 실제 장애가 아닙니다."
+  action: "이 통지가 도착했으면 통지 경로는 정상입니다. 조치할 것이 없습니다."
+  runbook: "{{ o2c_runbook_base }}"
+  row_template: '• {host_name}: 시험 레코드 {records}건'
+  description: "통지 경로 자가 시험 — 검증 전용 스트림에 o2c_verify_notify=true 실행 때만 레코드가 들어간다"
+  stream: "{{ o2c_selftest_stream }}"
+  sql: >-
+    SELECT host_name, count(*) AS records FROM "{{ o2c_selftest_stream }}"
+    GROUP BY host_name
+  period: 5
+  frequency: 1
+  silence: 5
