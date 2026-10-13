@@ -46,8 +46,10 @@
           - (o2c_kv.api_user | default('')) | length > 0
           - (o2c_kv.api_password | default('')) | length > 0
           - (o2c_kv.alert_webhook_url | default('')) is match('^https?://')
+          # 정상 출발지는 SQL에 들어가므로 IP 문자와 알려진 종류만 허용한다
+          - (o2c_normal_sources | selectattr('address', 'match', '^[0-9A-Fa-f.:]+$') | selectattr('kind', 'in', ['semaphore', 'office']) | list | length) == (o2c_normal_sources | length)
         fail_msg: >-
-          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요합니다
+          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}] 형식이어야 합니다
           (VAULT_TOKEN은 Semaphore Environment로 주입). 값은 출력하지 않습니다.
         quiet: true
       no_log: true
@@ -144,7 +146,7 @@
     _run_id: "{{ now(utc=true).timestamp() | int }}"
   ansible.builtin.set_fact:
     o2c_verify: >-
-      {{ o2c_alerts | o2c_verify_plan(o2c_alert_fixtures, o2c_org, o2c_verify_stream_suffix, _run_id, _start_us | int) }}
+      {{ o2c_alerts | o2c_verify_plan(o2c_alert_fixtures, o2c_org, o2c_verify_stream_suffix, _run_id, _start_us | int, sources=o2c_normal_sources) }}
     o2c_verify_auth_headers:
       Authorization: "Basic {{ (o2c_org ~ ':' ~ (o2c_kv.controller_ingest_token | default(''))) | b64encode }}"
     cacheable: false   # credentials never go to the fact cache

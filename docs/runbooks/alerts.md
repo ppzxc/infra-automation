@@ -14,18 +14,20 @@
 ## 공통 절차
 
 1. 메시지의 `▶ 로그 보기`로 OpenObserve에서 원문 로그를 연다. 시각은 UTC다(KST = UTC+9).
-2. `■ 대상`의 호스트·출발지·사용자를 작업 일정, 배포 기록(Semaphore Task 이력)과 대조한다. Semaphore(39.116.31.43)와 사무실(59.25.177.53)에서 시작된 접속은 대부분 운영 작업이다.
+2. `■ 대상`의 호스트·출발지·사용자를 작업 일정, 배포 기록(Semaphore Task 이력)과 대조한다. Semaphore와 사무실에서 시작된 접속은 대부분 운영 작업이다(정상 출발지 목록은 OpenBao `normal_sources`).
 3. 대응하면 결과(원인, 조치, 담당자)를 기록한다. ISMS 2.11.5(사고 대응) 증적이 된다.
 4. 같은 알림이 반복되고 원인이 정상 작업이면 임계값이나 예외 조건을 고치는 PR을 낸다. 알림을 끄지 않는다.
 
 ---
 
 <a id="root-login-success"></a>
-## 🔴 root 계정 원격 로그인 성공 (`infra-root-login-success`)
+## 🔴 root 계정 원격 로그인 성공 — 외부 출발지 (`infra-root-login-success`)
 
-**조건**: `security_logs`에서 `user_name = 'root'`인 SSH 로그인 성공이 5분 안에 1건 이상.
+**조건**: `security_logs`에서 `user_name = 'root'`인 SSH 로그인 성공이 5분 안에 1건 이상이고, 출발지가 **정상 출발지 목록에 없을 때**. 목록의 Semaphore 종류 출발지는 이 알림에 걸리지 않고, 사무실 종류 출발지는 아래 P3 하루 요약으로 간다.
 
-**왜 중요한가**: root 직접 접속은 누가 접속했는지 식별할 수 없고, 프로비저닝 이후에는 막혀야 한다(`PermitRootLogin`, KISA U-01). 성공 기록은 침해이거나 설정이 우회된 것이다.
+**정상 출발지 목록**: OpenBao `agents/openobserve`의 `normal_sources`(`[{"address": "<IP>", "kind": "semaphore|office"}]`)에만 둔다. 저장소에는 주소를 두지 않는다. 바꾼 뒤 `OpenObserve — Config`를 다시 실행하면 반영된다. 목록이 비어 있으면 모든 root 로그인이 이 P1로 온다. SSH 로그인 실패 급증 알림에는 이 목록을 적용하지 않는다(정상 출발지의 실패 급증도 신호다).
+
+**왜 중요한가**: root 직접 접속은 누가 접속했는지 식별할 수 없고, 프로비저닝 이후에는 막혀야 한다(`PermitRootLogin`, KISA U-01). 정상 출발지가 아닌 곳의 성공 기록은 침해이거나 설정이 우회된 것이다.
 
 **확인**
 ```bash
@@ -36,11 +38,24 @@ last -i root | head
 ```
 
 **대응**
-- 출발지가 Semaphore·사무실이고 작업 시각과 맞으면 정상 작업이다. 부트스트랩 모드(아직 site.yml로 프로비저닝되지 않은 호스트)에서는 root 접속이 정상이다.
+- 출발지가 새로 편입된 Semaphore·사무실 주소로 확인되면 `normal_sources`에 추가하고 Config를 다시 실행한다. 부트스트랩 모드(아직 site.yml로 프로비저닝되지 않은 호스트)에서는 root 접속이 정상이지만 출발지는 보통 Semaphore 목록에 있다.
 - 확인되지 않은 접속이면: 해당 세션 종료(`pkill -KILL -t <tty>`), root 비밀번호 변경, OpenBao 값 갱신, 보안 담당에게 보고한다.
 - `PermitRootLogin`이 `yes`로 되어 있으면 site.yml(`security` 역할)을 다시 적용한다.
 
 **격상**: 출발지가 외부 IP이고 작업자가 확인되지 않으면 즉시 침해 대응으로 전환한다.
+
+---
+
+<a id="root-login-office-daily"></a>
+## 🟡 사무실·S2S 출발지 root 로그인 — 하루 요약 (`infra-root-login-office-daily`)
+
+**조건**: `normal_sources`에서 `kind=office`인 출발지의 root SSH 로그인 성공. 조회 구간·재통지 모두 1440분이라 하루에 한 번 요약으로 온다.
+
+**왜 중요한가**: 사내 출발지라 침해 가능성은 낮지만 root 직접 접속은 정책 위반이다. 기록으로 남기고 습관을 바로잡는다.
+
+**대응**
+- 작업자와 작업 내용을 확인하고 일반 계정 + sudo로 전환하도록 안내한다.
+- 사무실 주소가 아닌 것으로 밝혀지거나 작업자가 확인되지 않으면 위 P1 절차(외부 출발지)로 격상한다.
 
 ---
 
