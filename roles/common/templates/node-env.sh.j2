@@ -18,7 +18,7 @@ export NODE_GATEWAY="{{ default_gateway | default(ansible_default_ipv4.gateway |
 # 3. Environment & Organization Metadata
 export NODE_ENV="{{ node_env | default('production') }}"
 export NODE_IDC="{{ node_idc | default('main') }}"
-export NODE_ROLE="{{ node_role | default(group_names | reject('equalto', 'all') | first | default('server')) }}"
+export NODE_ROLE="{{ node_role | default(group_names | node_role_from_groups) }}"
 export NODE_ADMIN_USER="{{ (accounts | default([]) | selectattr('tier', 'defined') | selectattr('tier', 'equalto', 'admin') | map(attribute='name') | first) | default((accounts | default([]) | map(attribute='name') | first) | default('ppzxc')) }}"
 export NODE_SSH_PORT="{{ ssh_port | default(22) }}"
 
