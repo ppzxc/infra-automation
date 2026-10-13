@@ -76,6 +76,18 @@ _Avoid_: log parsing (when meaning only this edge layer), normalisation, structu
 A host that the inventory says should be shipping to OpenObserve (a `servers` host with Host Agents applied, neither a Host Agents Exclusion nor Host Agents Backup Only) but from which no logs or metrics have arrived for a set time. It says nothing about whether the server itself is up: a running server whose collector has died is a Silent Host, and a server that is down is one too until another tool tells them apart.
 _Avoid_: host down, dead host, offline host (they imply the server itself is down)
 
+**Unreachable Host**:
+A `servers` host whose SSH port the central prober on the Semaphore host cannot connect to. It says the server or the network path to it is down, not that its collector stopped; a host that is reachable but sends nothing is a Silent Host instead. Applies to every `servers` host, including Host Agents Backup Only hosts that ship nothing to OpenObserve.
+_Avoid_: host down, dead host (when the prober has not actually failed to connect)
+
+**Event Alert**:
+An alert where each matching log line is itself the incident (a root login, a burst of SSH failures, a kernel I/O error). Once the moment passes there is nothing left to fix, so it is notified once per occurrence window and not repeated.
+_Avoid_: instant alert, log alert
+
+**State Alert**:
+An alert on a condition that persists until someone fixes it (a disk nearly full, a Silent Host, a missing backup). It keeps firing while the condition holds, so it is re-notified at an interval set by its severity rather than every evaluation. Its going quiet is the only sign of recovery.
+_Avoid_: threshold alert, metric alert (a log-based alert can be a State Alert too)
+
 **Fast Scenario**:
 The molecule scenario run at pre-push. Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
 _Avoid_: default scenario, quick test, smoke test
