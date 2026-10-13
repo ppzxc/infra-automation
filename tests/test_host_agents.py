@@ -825,7 +825,7 @@ def test_host_id_and_host_ip_are_left_out_and_named_when_unavailable():
 
 # --------------------------------------------------------------------------
 
-def _render_config(tmp_path, **over):
+def _render_config(tmp_path, _inventory=None, **over):
     vars_ = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
     vars_.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8")))
     vars_.update({
@@ -842,6 +842,10 @@ def _render_config(tmp_path, **over):
     vars_.update(over)
     (tmp_path / "vars.yml").write_text(yaml.safe_dump(vars_))
     pb = tmp_path / "render.yml"
+    inv = "localhost,"
+    if _inventory:
+        (tmp_path / "inv.yml").write_text(yaml.safe_dump(_inventory))
+        inv = str(tmp_path / "inv.yml")
     pb.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
         "vars_files": [str(tmp_path / "vars.yml")],
@@ -849,7 +853,7 @@ def _render_config(tmp_path, **over):
                                                  "dest": str(tmp_path / "config.yaml")}},
                   {"ansible.builtin.template": {"src": str(ROLE / "templates" / "secrets.env.j2"),
                                                  "dest": str(tmp_path / "secrets.env")}}]}]))
-    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+    res = subprocess.run(["ansible-playbook", "-i", inv, str(pb)], capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
     assert res.returncode == 0, res.stdout + res.stderr
     return yaml.safe_load((tmp_path / "config.yaml").read_text()), (tmp_path / "config.yaml").read_text()
@@ -1213,3 +1217,26 @@ def test_password_auth_exception_leaves_an_audit_warning_only_where_it_applies(t
     text = res.stdout + res.stderr
     assert res.returncode == 0, text
     assert "PASSWORD-AUTH-EXCEPTION optin" in text and "PASSWORD-AUTH-EXCEPTION keyed" not in text
+
+
+# --- 서버 도달성 tcp_check (Spec #184 / Ticket-6, ADR-0010) -------------------------------------------------------
+
+def _reach_inventory():
+    hosts = {"ns0001": {"ansible_host": "192.0.2.1", "ansible_port": 22},
+             "ns0002": {"ansible_host": "192.0.2.2", "ansible_port": 2222}, "ns0003": {}}
+    return {"all": {"hosts": {"localhost": {"ansible_connection": "local"}}, "children": {
+        "servers": {"hosts": hosts}, "host_agents_backup_only": {"hosts": {"ns0003": {}}}}}}
+
+
+def test_only_the_checker_host_gets_tcp_check_for_every_server_with_its_ssh_port(tmp_path):
+    over = dict(_inventory=_reach_inventory(), inventory_hostname="localhost", host_agents_o2_health_checker="localhost")
+    (tmp_path / "checker").mkdir()
+    cfg, _ = _render_config(tmp_path / "checker", **over)
+    rx = cfg["receivers"]["tcp_check"]
+    assert rx["collection_interval"] == "60s"
+    assert [t["endpoint"] for t in rx["targets"]] == ["192.0.2.1:22", "192.0.2.2:2222", "ns0003:22"]   # Backup Only 포함
+    pipe = cfg["service"]["pipelines"]["metrics/tcpcheck"]
+    assert pipe["receivers"] == ["tcp_check"] and pipe["exporters"] == ["otlphttp/metrics"]
+    (tmp_path / "other").mkdir()
+    other, _ = _render_config(tmp_path / "other", **dict(over, host_agents_o2_health_checker="ns0266"))
+    assert "tcp_check" not in other["receivers"] and "metrics/tcpcheck" not in other["service"]["pipelines"]

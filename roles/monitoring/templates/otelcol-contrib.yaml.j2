@@ -272,6 +272,15 @@ receivers:
     collection_interval: {{ otel_hostmetrics_interval }}
     scrapers:
 {{ otel_hostmetrics_scrapers | to_nice_yaml(indent=2) | indent(6, true) }}
+{% if otel_tcpcheck_enabled | bool %}
+  # 서버 도달성(ADR-0010): 검사하는 쪽 호스트에만. 대상은 servers 전체(Host Agents Backup Only 포함)의 SSH 포트.
+  tcp_check:
+    collection_interval: {{ otel_tcpcheck_interval }}
+    targets:
+{% for h in groups['servers'] | default([]) | sort %}
+      - endpoint: {{ ((hostvars[h].ansible_host | default(h, true)) ~ ':' ~ (hostvars[h].ansible_port | default(22, true))) | to_json }}
+{% endfor %}
+{% endif %}
 {% if host_agents_inputs.otel_docker_metrics | bool %}
   docker_stats:
     endpoint: {{ otel_docker_endpoint }}
@@ -371,6 +380,12 @@ service:
       receivers: [hostmetrics]
       processors: [memory_limiter, resource/host, resource/hostmetrics, batch]
       exporters: [otlphttp/metrics]
+{% if otel_tcpcheck_enabled | bool %}
+    metrics/tcpcheck:
+      receivers: [tcp_check]
+      processors: [memory_limiter, resource/host, batch]
+      exporters: [otlphttp/metrics]
+{% endif %}
 {% if host_agents_inputs.otel_docker_metrics | bool %}
     metrics/docker:
       receivers: [docker_stats]

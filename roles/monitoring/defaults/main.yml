@@ -117,3 +117,9 @@ o2_health_script_path: /usr/local/sbin/openobserve-health-check
 o2_health_interval: 5min
 o2_health_renotify_minutes: 60
 
+# 서버 도달성 검사(Spec #184 / Ticket-6, ADR-0010): 같은 검사하는 쪽 호스트의 otelcol에만 tcp_check 수신기를 붙인다.
+# tcp_check는 contrib 0.161.0(modern/legacy_el7 행)에 있다. legacy_el6 행(0.119.0)에는 없으므로 검사하는 쪽을 CentOS 6에 두지 않는다.
+# 대상 목록은 인벤토리에서 만들므로 호스트를 편입·폐기하면 검사하는 쪽에 Host Agents 설정을 다시 반영해야 한다.
+otel_tcpcheck_enabled: "{{ inventory_hostname == host_agents_o2_health_checker }}"
+otel_tcpcheck_interval: "60s"
+
