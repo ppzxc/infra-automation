@@ -1,0 +1,9 @@
+# Ansible managed
+[Unit]
+Description=OpenObserve health check (direct P1 webhook on failure)
+Documentation=https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md
+
+[Service]
+Type=oneshot
+Environment=O2_HEALTH_ENV_FILE={{ o2_health_config_dir }}/env
+ExecStart={{ o2_health_script_path }}
