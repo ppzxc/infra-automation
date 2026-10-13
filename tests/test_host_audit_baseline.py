@@ -422,6 +422,19 @@ def _run_keep_tasks(tmp_path, out, extra_vars=None, report=None):
     return {s["path"][len(str(out)) + 1:]: s["checksum"] for s in plays[-1]["hosts"]["localhost"]["msg"]}
 
 
+def test_package_findings_files_are_runner_only_and_not_archived(tmp_path):
+    """#155 decision: package_findings/<host>.json is derived from the archived trivy original and its ids are in the
+    archived findings.json, so it is not uploaded (a 3-year locked bucket must not get the duplicate)."""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out, files = _keep_run(tmp_path)
+    (out / "package_findings").mkdir()
+    (out / "package_findings" / "h1.json").write_text('{"host": "h1", "findings": []}')
+    stats = _run_keep_tasks(tmp_path, out)
+    assert not [rel for rel in stats if rel.startswith("package_findings/")]
+    assert "findings.json" in stats and "trivy/h1.json.gz" in stats
+
+
 def test_trivy_and_sbom_originals_are_kept_as_lossless_gzip_and_everything_else_as_is(tmp_path):
     if not shutil.which("ansible-playbook"):
         pytest.skip("ansible-playbook not installed")

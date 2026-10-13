@@ -49,7 +49,7 @@
       package_vulnerability: "{{ host_audit_package_section | default({}) }}"
       kisa_exceptions: "{{ host_audit_kisa_exceptions }}"
       baseline_history: "{{ host_audit_baseline_history }}"
-      package_results: "{{ _host_audit_package_results | default([]) }}"
+      package_findings_dir: "{{ host_audit_run.output_dir }}/package_findings"
       configuration_drift: "{{ host_audit_drift_section | default({}) }}"
 
 - name: "[AUD-022] Save the run metadata on the runner"

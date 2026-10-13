@@ -123,6 +123,7 @@ def build_playbook(out, hosts):
             "host_audit_run": {"run_id": "harness", "run_kind": "scheduled", "started_at": STARTED_AT,
                                "timezone": "Asia/Seoul", "target_hosts": names, "output_dir": str(out)},
             "host_audit_trivy_db": {"usable": True}, "host_audit_trivy_version": "0.0.0",
+            "role_path": str(ROLE),
             "_host_audit_storage_active": False,
             "host_audit_baseline_history": {"state": "ok", "reason": "", "baseline": previous, "pointers": []},
         },
@@ -145,7 +146,9 @@ def run(workdir, hosts, cves, interval=0.1):
     generate_run(workdir, hosts, cves)
     pb = workdir / "harness_playbook.yml"
     pb.write_text(yaml.safe_dump(build_playbook(workdir, hosts), allow_unicode=True))
-    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.builtin.default", ANSIBLE_FORKS="1")
+    # 역할 밖 플레이북이므로 role의 library/(커스텀 모듈, #155)와 module_utils/를 직접 알려 준다.
+    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.builtin.default", ANSIBLE_FORKS="1",
+               ANSIBLE_LIBRARY=str(ROLE / "library"), ANSIBLE_MODULE_UTILS=str(ROLE / "module_utils"))
     m = measure(["ansible-playbook", "-i", "localhost,", str(pb)], interval=interval, cwd=str(ROOT_DIR), env=env)
     return {"hosts": hosts, "cves_per_host": cves, "total_cves": hosts * cves,
             "returncode": m["returncode"], "elapsed_s": m["elapsed_s"],

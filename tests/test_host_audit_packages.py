@@ -353,86 +353,98 @@ def test_appendix_piece_draws_per_host_counts_or_unavailable():
     assert piece.render(m={"package_vulnerability": s}, host="not-collected").strip() == ""
 
 
-def test_classify_keeps_each_hosts_result_once_instead_of_carrying_the_accumulated_list(tmp_path):
-    """AUD-322 loops over every host. Accumulating with set_fact (list + [result]) made each item's
-    result carry every earlier host's findings: O(N²) memory, and 17 hosts killed the 1024M runner
-    worker ("A worker was found in a dead state", task 265). Each item must carry only its own host."""
-    if not shutil.which("ansible-playbook"):
-        pytest.skip("ansible-playbook not installed")
-    out = tmp_path / "run"
-    (out / "packages").mkdir(parents=True)
-    (out / "trivy").mkdir()
-    hosts = ["h1", "h2", "h3"]
-    for h in hosts:
-        record = {"inventory_hostname": h, "status": "ok", "packages": [{"name": "openssl"}],
-                  "os": {"family": "ubuntu", "major": "22", "version": "22.04", "name": "Ubuntu 22.04"}}
-        trivy = {"Metadata": {"OS": {"Family": "ubuntu", "Name": "22.04"}},
-                 "Results": [{"Vulnerabilities": [{"VulnerabilityID": "CVE-2024-%s" % h, "PkgName": "openssl",
-                                                   "InstalledVersion": "3.0.2", "FixedVersion": "3.0.3",
-                                                   "Status": "fixed", "Severity": "HIGH"}]}]}
-        (out / "packages" / ("%s.json" % h)).write_text(json.dumps(record))
-        (out / "trivy" / ("%s.json" % h)).write_text(json.dumps(trivy))
-    tasks = _tasks("packages_scan.yml")
-    classify = next(t for t in tasks if "[AUD-322]" in t["name"])
-    section = next(t for t in tasks if "[AUD-323]" in t["name"])
-    pb = tmp_path / "pb.yml"
-    pb.write_text(yaml.safe_dump([{
-        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
-        "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_trivy_db": {"usable": True},
-                 "host_audit_trivy_version": "0.0.0", "host_audit_package_detail_limit": 300},
-        "tasks": [{"ansible.builtin.find": {"paths": str(out / "packages"), "patterns": "*.json"},
-                   "register": "_host_audit_package_files"}, classify, section,
-                  {"ansible.builtin.debug": {"var": "_host_audit_package_results | map(attribute='host') | list"}}],
-    }], allow_unicode=True))
-    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
-               ANSIBLE_CALLBACKS_ENABLED="ansible.posix.timer")
-    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
-                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
-    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
-    plays = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
-    items = next(t for t in plays if "[AUD-322]" in t["task"]["name"])["hosts"]["localhost"]["results"]
-    for item in items:
-        own = item["item"].rsplit("/", 1)[-1][:-len(".json")]
-        carried = json.dumps(item.get("ansible_facts", {}))
-        assert [h for h in hosts if h != own and "CVE-2024-%s" % h in carried] == [], own
-    shown = plays[-1]["hosts"]["localhost"]
-    assert shown["_host_audit_package_results | map(attribute='host') | list"] == hosts
+def _scan_env(**extra):
+    """ansible-playbook environment that finds the role's own module (library/) and its module_utils the way a
+    role-run task does. The role-less test playbooks need it spelled out."""
+    return dict(os.environ, ANSIBLE_LIBRARY=str(ROLE / "library"), ANSIBLE_MODULE_UTILS=str(ROLE / "module_utils"),
+                ANSIBLE_STDOUT_CALLBACK="ansible.posix.json", **extra)
 
 
-def _run_classify(tmp_path, cases):
-    """Run the real AUD-322/323 tasks. ``cases``: host -> (trivy output text or None for no file, AUD-321 rc).
-    The AUD-321 register is faked with the shape ``command`` gives per loop item (``item`` = record path, ``rc``)."""
-    out = tmp_path / "run"
-    (out / "packages").mkdir(parents=True)
-    (out / "trivy").mkdir()
+def _trivy_doc(vulns, family="ubuntu", name="22.04"):
+    return {"Metadata": {"OS": {"Family": family, "Name": name}}, "Results": [{"Vulnerabilities": vulns}]}
+
+
+def _vuln(cve, severity="HIGH", pkg="openssl", status="fixed", fixed="3.0.3", installed="3.0.2"):
+    return {"VulnerabilityID": cve, "PkgName": pkg, "InstalledVersion": installed, "FixedVersion": fixed,
+            "Status": status, "Severity": severity, "Title": "t %s" % cve}
+
+
+def _write_run(out, cases, os_info=None, os_by_host=None):
+    """cases: host -> (trivy output text or None for no file, AUD-321 rc). Returns the fake AUD-321 register items
+    (the shape ``command`` gives per loop item: ``item`` = record path, ``rc``)."""
+    os_info = os_info or {"family": "ubuntu", "major": "22", "version": "22.04", "name": "Ubuntu 22.04"}
+    for sub in ("packages", "trivy", "package_findings"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
     scans = []
     for h, (text, rc) in cases.items():
         record = {"inventory_hostname": h, "status": "ok", "packages": [{"name": "openssl"}],
-                  "os": {"family": "ubuntu", "major": "22", "version": "22.04", "name": "Ubuntu 22.04"}}
+                  "os": (os_by_host or {}).get(h, os_info)}
         path = out / "packages" / ("%s.json" % h)
         path.write_text(json.dumps(record))
         if text is not None:
             (out / "trivy" / ("%s.json" % h)).write_text(text)
         scans.append({"item": str(path), "rc": rc, "changed": False, "failed": False})
+    return scans
+
+
+def _run_scan_tasks(tmp_path, out, scans, detail_limit=300, extra_vars=None):
+    """Run the real AUD-322/323 tasks; return the localhost task results of the whole play keyed by task name."""
     tasks = _tasks("packages_scan.yml")
     classify = next(t for t in tasks if "[AUD-322]" in t["name"])
     section = next(t for t in tasks if "[AUD-323]" in t["name"])
     pb = tmp_path / "pb.yml"
     pb.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
-        "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_trivy_db": {"usable": True},
-                 "host_audit_trivy_version": "0.0.0", "host_audit_package_detail_limit": 300,
-                 "_host_audit_trivy_scans": {"results": scans}},
+        "vars": dict({"host_audit_run": {"output_dir": str(out)}, "host_audit_trivy_db": {"usable": True},
+                      "host_audit_trivy_version": "0.0.0", "host_audit_package_detail_limit": detail_limit,
+                      "role_path": str(ROLE), "_host_audit_trivy_scans": {"results": scans}}, **(extra_vars or {})),
         "tasks": [{"ansible.builtin.find": {"paths": str(out / "packages"), "patterns": "*.json"},
-                   "register": "_host_audit_package_files"}, classify, section,
-                  {"ansible.builtin.debug": {"var": "host_audit_package_section"}}],
+                   "register": "_host_audit_package_files", "name": "find"}, classify, section,
+                  {"ansible.builtin.debug": {"var": "host_audit_package_section"}, "name": "show"}],
     }], allow_unicode=True))
-    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json")
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
-                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=_scan_env())
     assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
     plays = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
-    return plays[-1]["hosts"]["localhost"]["host_audit_package_section"]
+    return dict((t["task"]["name"], t["hosts"]["localhost"]) for t in plays)
+
+
+def test_classify_returns_summaries_and_file_paths_never_the_findings(tmp_path):
+    """#155: AUD-322 must not carry a host's findings in the loop result or in facts. The module writes them to
+    <run>/package_findings/<host>.json and returns the counts, the top details and the path. (Older shapes: set_fact
+    accumulation was O(N^2) and killed the 1024M worker in task 265; the in-process filter kept every finding in
+    ansible-playbook's memory in task 287.)"""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    out = tmp_path / "run"
+    hosts = ["h1", "h2", "h3"]
+    cases = {h: (json.dumps(_trivy_doc([_vuln("CVE-2024-%s-%d" % (h, n), "HIGH") for n in range(5)]
+                                       + [_vuln("CVE-LOW-%s-%d" % (h, n), "LOW") for n in range(7)])), 0)
+             for h in hosts}
+    ran = _run_scan_tasks(tmp_path, out, _write_run(out, cases), detail_limit=2)
+    items = ran["[AUD-322] Classify the Trivy findings of each host"]["results"]
+    assert [i["item"].rsplit("/", 1)[-1] for i in items] == ["h1.json", "h2.json", "h3.json"]
+    for item in items:
+        host = item["item"].rsplit("/", 1)[-1][:-len(".json")]
+        assert "ansible_facts" not in item, "the per-host result must not become a fact"
+        carried = json.dumps(item)
+        assert "CVE-LOW" not in carried, "findings below the detail threshold must stay in the file"
+        assert [h for h in hosts if h != host and "CVE-2024-%s" % h in carried] == [], host
+        assert len(item["package_host"]["details"]) == 2, "at most detail_limit detail rows come back"
+        file = out / "package_findings" / ("%s.json" % host)
+        assert len(json.loads(file.read_text())["findings"]) == 12, "the file holds every finding of the host"
+        assert oct(file.stat().st_mode & 0o777) == "0o600"
+    section = ran["show"]["host_audit_package_section"]
+    assert [h["host"] for h in section["hosts"]] == hosts and section["total"] == 36
+    assert len(section["details"]) == 2 and section["details_truncated"] == 13
+    assert '"findings"' not in json.dumps(ran["[AUD-323] Build the Package Vulnerability section model"])
+
+
+def _run_classify(tmp_path, cases):
+    """Run the real AUD-322/323 tasks with failing/odd Trivy outputs; return the section model."""
+    out = tmp_path / "run"
+    ran = _run_scan_tasks(tmp_path, out, _write_run(out, cases))
+    return ran["show"]["host_audit_package_section"]
 
 
 def _good_trivy(cve):
@@ -479,3 +491,112 @@ def test_trivy_rc_decides_before_the_output_and_describes_signal_kills():
     assert killed["status"] == "scan_failed" and "rc=137" in killed["reason"] and "OOM-kill" in killed["reason"]
     assert "OOM-kill" in host_audit_package_findings(None, rec, None, -9)["reason"]  # Ansible reports signal kills as -9
     assert "OOM-kill" not in host_audit_package_findings(ok, rec, None, 1)["reason"]
+
+
+# ------------------------------------------------------------------------------
+# #155: same report as before, findings on disk instead of in ansible-playbook
+# ------------------------------------------------------------------------------
+CENTOS7 = {"family": "centos", "major": "7", "version": "7", "name": "CentOS Linux 7"}
+
+
+def _mixed_cases():
+    """Every classification, severities, a duplicate, a failed Trivy and a clean host."""
+    ubuntu = [_vuln("CVE-2024-%04d" % n, ["CRITICAL", "HIGH", "MEDIUM", "LOW"][n % 4], pkg="pkg%d" % (n % 5))
+              for n in range(40)]
+    ubuntu += [ubuntu[0], _vuln("CVE-W", "HIGH", status="will_not_fix", fixed=""),
+               _vuln("CVE-U", "CRITICAL", status="affected", fixed="")]
+    centos = [_vuln("CVE-C-1", "HIGH", pkg="glibc", fixed="2.17-326.el7_9.3"),     # in the vault: updatable
+              _vuln("CVE-C-2", "CRITICAL", pkg="glibc", fixed="2.17-999.el7"),     # newer than the vault: no CentOS fix
+              _vuln("CVE-C-3", "HIGH", pkg="not-in-vault", fixed="9.9")]
+    return {
+        "a-ubuntu": (json.dumps(_trivy_doc(ubuntu)), 0),
+        "b-centos7": (json.dumps(_trivy_doc(centos, "centos", "7")), 0),
+        "c-clean": (json.dumps(_trivy_doc([])), 0),
+        "d-killed": (json.dumps(_trivy_doc(ubuntu)), 137),
+        "e-empty": ("", 0),
+    }, {"b-centos7": CENTOS7}
+
+
+def _legacy_results(cases, os_by_host):
+    """What the in-process filters built before #155 (kept as the reference for the same synthetic input)."""
+    out = []
+    for h, (text, rc) in cases.items():
+        os_info = os_by_host.get(h, {"family": "ubuntu", "major": "22", "version": "22.04", "name": "Ubuntu 22.04"})
+        record = {"inventory_hostname": h, "status": "ok", "packages": [{"name": "openssl"}], "os": os_info}
+        vault = _vault(os_info["major"]) if os_info["family"] == "centos" else {}
+        out.append(host_audit_package_findings(text, record, vault, rc))
+    return out
+
+
+def test_section_model_is_the_same_as_the_in_process_filters_gave(tmp_path):
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    cases, os_by_host = _mixed_cases()
+    out = tmp_path / "run"
+    ran = _run_scan_tasks(tmp_path, out, _write_run(out, cases, os_by_host=os_by_host), detail_limit=6)
+    new = ran["show"]["host_audit_package_section"]
+    old = host_audit_package_section(_legacy_results(cases, os_by_host), {"usable": True}, "0.0.0", 6)
+    assert new == old
+    assert new["total"] > 40 and new["details_truncated"] > 0 and len(new["unavailable"]) == 2
+
+
+def test_report_model_baseline_and_findings_json_are_the_same_as_before(tmp_path):
+    """The Audit Baseline section (counts, badges, rows) and the stored findings.json built from the files on disk
+    equal what the old path built from the in-memory results of the same input."""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    from host_audit_baseline import host_audit_baseline_section
+    cases, os_by_host = _mixed_cases()
+    out = tmp_path / "run"
+    ran = _run_scan_tasks(tmp_path, out, _write_run(out, cases, os_by_host=os_by_host), detail_limit=6)
+    section = ran["show"]["host_audit_package_section"]
+    legacy = _legacy_results(cases, os_by_host)
+    ids = lambda hr: sorted(set(f["id"] for f in hr["findings"]))  # noqa: E731
+    base = {"schema_version": 1, "run_id": "ha-prev", "started_at": "2026-10-01T00:00:00Z", "sections": {
+        "package_vulnerability": {"hosts": ["a-ubuntu", "b-centos7", "gone"], "ids": {
+            "a-ubuntu": ids(legacy[0])[:20] + ["CVE-OLD|zlib"], "b-centos7": ["CVE-C-1|glibc"], "gone": ["CVE-X|bash"]}}}}
+    history = {"state": "ok", "baseline": base, "pointers": [
+        {"run_id": "ha-old", "run_kind": "scheduled", "started_at": "2026-09-01T00:00:00Z",
+         "resolved": ["package_vulnerability|a-ubuntu|CVE-OLD|zlib", "package_vulnerability|a-ubuntu|CVE-2024-0030|pkg0"]}]}
+    meta = {"run_id": "ha-new", "run_kind": "scheduled", "started_at": "2026-11-01T00:00:00Z", "timezone": "Asia/Seoul"}
+    model = {"cover": {"baseline": ""}, "package_vulnerability": section}
+    old = host_audit_baseline_section(dict(model), history, dict(meta, package_results=legacy))
+    new = host_audit_baseline_section(dict(model), history, dict(meta, package_findings_dir=str(out / "package_findings")))
+
+    old_doc, new_doc = old["baseline"].pop("document"), new["baseline"].pop("document")
+    new_index = new["baseline"].pop("package_index")
+    for key in old["baseline"]:
+        assert new["baseline"][key] == old["baseline"][key], key
+    assert new == old
+    assert new_index["hosts"] == sorted(h["host"] for h in legacy if h["status"] == "ok")
+    assert "package_vulnerability" not in new_doc["sections"], "the ids stay on disk, not in the model"
+    assert new_doc == dict(old_doc, sections={k: v for k, v in old_doc["sections"].items()
+                                              if k != "package_vulnerability"})
+
+    # AUD-510 merges the ids from the files into findings.json: identical to the document the old path stored
+    save = next(t for t in _tasks("storage_upload.yml") if "[AUD-510]" in t["name"])
+    dest = tmp_path / "findings.json"
+    pb = tmp_path / "pb510.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+        "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"baseline": {
+            "document": new_doc, "package_index": new_index}}},
+        "tasks": [dict(save)],
+    }], allow_unicode=True))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=_scan_env())
+    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
+    written = json.loads((out / "findings.json").read_text())
+    assert written == old_doc
+    assert oct((out / "findings.json").stat().st_mode & 0o777) == "0o600"
+    assert all(ids(hr) == written["sections"]["package_vulnerability"]["ids"].get(hr["host"], [])
+               for hr in legacy if hr["status"] == "ok")
+
+
+def test_audit_report_model_gets_a_findings_directory_not_the_package_results():
+    """AUD-021 must not pass ``package_results`` (every finding of every host) into the report model."""
+    build = next(t for t in _tasks("report.yml") if "[AUD-021]" in t.get("name", ""))
+    meta = build["vars"]["_meta"]
+    assert "package_results" not in meta
+    assert "package_findings" in meta["package_findings_dir"]
+    assert "_host_audit_package_results" not in (ROLE / "tasks" / "packages_scan.yml").read_text(encoding="utf-8")

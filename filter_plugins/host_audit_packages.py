@@ -13,7 +13,9 @@ Flow (roles/host_audit/tasks/packages.yml → packages_scan.yml):
    metadata → fresh / cached (≤ 7 days) / unavailable (> 7 days or none).
 4. ``host_audit_package_findings``: Trivy JSON for one host → classified findings
    (업데이트 가능 · CentOS용 수정본 없음 · 수정 안 함(will not fix) · 벤더 미수정).
-5. ``host_audit_package_section``: all hosts → the report section model the template draws.
+5. ``host_audit_package_section``: all hosts → the report section model the template draws. It takes the per-host
+   summaries (``host_audit_package_summary``) that the runner module ``host_audit_package_scan`` returns; the
+   findings themselves stay in ``package_findings/<host>.json`` (#155).
 """
 
 from __future__ import absolute_import, division, print_function
@@ -629,6 +631,32 @@ def _bars(counts):
     } for s in SEVERITIES]
 
 
+def host_audit_package_summary(host_result, detail_limit=300):
+    """Classified host result (with every finding) → the summary the report needs, without the findings (#155).
+
+    Counts per severity and class, plus the rows the detail table can draw: 긴급·높음 except will-not-fix, in the
+    finding order, at most ``detail_limit``. ``details_total`` is how many such rows the host has. The first
+    ``detail_limit`` rows of every host contain the first ``detail_limit`` rows of all hosts, so the section can be
+    built from the summaries alone. The full list is not part of the summary: the scan module keeps it in a file.
+    """
+    detail_limit = int(detail_limit)
+    summary = dict((k, v) for k, v in host_result.items() if k != 'findings')
+    summary['severity'] = dict((s, 0) for s in SEVERITIES)
+    summary['classes'] = dict((c, 0) for c in CLASSES)
+    summary['total'] = 0
+    summary['details'] = []
+    summary['details_total'] = 0
+    for f in host_result.get('findings') or []:
+        summary['severity'][f['severity']] += 1
+        summary['classes'][f['class']] += 1
+        summary['total'] += 1
+        if f['severity'] in ('CRITICAL', 'HIGH') and f['class'] != CLASS_WILL_NOT_FIX:
+            summary['details_total'] += 1
+            if len(summary['details']) < detail_limit:
+                summary['details'].append(f)
+    return summary
+
+
 def host_audit_package_section(host_results, db_state, trivy_version='', detail_limit=300):
     """Classified host results + DB state → the Package Vulnerability section model.
 
@@ -668,7 +696,10 @@ def host_audit_package_section(host_results, db_state, trivy_version='', detail_
     totals = dict((s, 0) for s in SEVERITIES)
     classes = dict((c, 0) for c in CLASSES)
     details = []
+    details_total = 0
     for hr in sorted(host_results or [], key=lambda h: h['host']):
+        if 'severity' not in hr:  # a result that still carries its findings (host_audit_package_findings)
+            hr = host_audit_package_summary(hr, detail_limit)
         row = {
             'host': hr['host'],
             'os': hr.get('os', ''),
@@ -676,26 +707,25 @@ def host_audit_package_section(host_results, db_state, trivy_version='', detail_
             'packages': hr.get('packages', 0),
             'inspected': hr.get('status') == STATUS_OK,
             'reason': hr.get('reason', ''),
-            'severity': dict((s, 0) for s in SEVERITIES),
-            'classes': dict((c, 0) for c in CLASSES),
-            'total': 0,
+            'severity': dict(hr['severity']),
+            'classes': dict(hr['classes']),
+            'total': hr['total'],
         }
         if not row['inspected']:
             unavailable.append({'host': hr['host'], 'item': SECTION, 'label': UNAVAILABLE_LABEL,
                                 'reason': hr.get('reason') or '-'})
-        for f in hr.get('findings') or []:
-            row['severity'][f['severity']] += 1
-            row['classes'][f['class']] += 1
-            row['total'] += 1
-            totals[f['severity']] += 1
-            classes[f['class']] += 1
-            if f['severity'] in ('CRITICAL', 'HIGH') and f['class'] != CLASS_WILL_NOT_FIX:
-                d = dict(f)
-                d['host'] = hr['host']
-                d['severity_label'] = SEVERITY_LABELS[f['severity']]
-                d['class_label'] = CLASS_LABELS[f['class']]
-                d['fixed_label'] = f['fixed'] or '-'
-                details.append(d)
+        for s in SEVERITIES:
+            totals[s] += hr['severity'][s]
+        for c in CLASSES:
+            classes[c] += hr['classes'][c]
+        details_total += hr['details_total']
+        for f in hr['details']:
+            d = dict(f)
+            d['host'] = hr['host']
+            d['severity_label'] = SEVERITY_LABELS[f['severity']]
+            d['class_label'] = CLASS_LABELS[f['class']]
+            d['fixed_label'] = f['fixed'] or '-'
+            details.append(d)
         section['hosts'].append(row)
     details.sort(key=lambda d: (SEVERITIES.index(d['severity']), d['host'], d['cve'], d['package']))
     section['totals'] = totals
@@ -705,7 +735,7 @@ def host_audit_package_section(host_results, db_state, trivy_version='', detail_
     section['by_host'] = dict((h['host'], h) for h in section['hosts'])  # per-host appendix lookup
     section['bars'] = _bars(totals)
     section['details'] = details[:detail_limit]
-    section['details_truncated'] = max(0, len(details) - detail_limit)
+    section['details_truncated'] = max(0, details_total - detail_limit)
     return section
 
 
@@ -729,6 +759,7 @@ class FilterModule(object):
             'host_audit_sbom': host_audit_sbom,
             'host_audit_trivy_db_state': host_audit_trivy_db_state,
             'host_audit_package_findings': host_audit_package_findings,
+            'host_audit_package_summary': host_audit_package_summary,
             'host_audit_package_section': host_audit_package_section,
             'host_audit_parse_vault_final': parse_vault_final,
         }

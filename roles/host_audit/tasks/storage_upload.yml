@@ -3,18 +3,20 @@
 # Host Audit — 원본 보관 (러너 localhost 전용, ADR-0009 §5, #125)
 # ==============================================================================
 # 보고서가 러너에 만들어진 뒤, 이번 실행 디렉터리 전체(report.html, run.json, findings.json,
-# hosts/·packages/·sbom/·trivy/ 원본)를 RustFS Host Audit 버킷의 <YYYY-MM>/<run_id>/에 올린다.
+# hosts/·packages/·sbom/·trivy/ 원본. 러너 전용 package_findings/는 제외, #155)를 RustFS Host Audit 버킷의 <YYYY-MM>/<run_id>/에 올린다.
 # 정기 실행은 모든 업로드가 성공한 뒤에만 포인터 baseline/<run_id>.json을 올린다 — 반쯤 올라간
 # 실행이 다음 달의 Audit Baseline이 되지 않게 한다. 수시 실행은 포인터를 남기지 않는다.
 # Audit Baseline 조회가 실패해도 원본은 올린다(비교만 빠진 보고서). 업로드 실패 또는 조회 실패는
 # 보고서를 만든 뒤 storage_result.yml(AUD-516)이 실행을 실패로 끝낸다(메일 발송 뒤). 포인터는 파일로 써서 올린다 — 서명한 SHA-256과 보낸
 # 바이트가 같아야 하기 때문이다.
 # ------------------------------------------------------------------------------
+# Package Vulnerability의 발견 id(수십만 건)는 모델에 없다. 모듈이 package_findings/<호스트>.json에서 호스트 하나씩
+# 읽어 findings.json에 쓴다(#155). 나머지 섹션은 모델의 document 그대로다.
 - name: "[AUD-510] Save the findings index of this run on the runner"
-  ansible.builtin.copy:
-    content: "{{ host_audit_model.baseline.document | to_json }}\n"
+  host_audit_findings_write:
+    document: "{{ host_audit_model.baseline.document }}"
+    package_index: "{{ host_audit_model.baseline.package_index | default({}) }}"
     dest: "{{ host_audit_run.output_dir }}/findings.json"
-    mode: '0600'
 
 - name: "[AUD-511] Save the Audit Baseline pointer of a scheduled run on the runner"
   ansible.builtin.copy:
@@ -85,7 +87,9 @@
     path: "{{ item }}"
     checksum_algorithm: sha256
     get_mime: false
-  loop: "{{ _host_audit_keep_files.files | default([]) | map(attribute='path') | sort }}"
+  loop: >-
+    {{ _host_audit_keep_files.files | default([]) | map(attribute='path')
+       | reject('match', '^' ~ (host_audit_run.output_dir | regex_escape) ~ '/package_findings/') | sort }}
   register: _host_audit_keep_stats
 
 - name: "[AUD-514] Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)"
