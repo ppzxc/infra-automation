@@ -259,7 +259,7 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
   - **AUD-323**: 요약만 모아 `host_audit_package_section`으로 섹션 모델을 만든다. `_host_audit_package_results` 사실은 더 없다.
   - **AUD-021 / Audit Baseline**: 메타에서 `package_results`를 빼고 `package_findings_dir`를 넘긴다. 비교는 호스트 파일을 하나씩 읽어 하고(호스트 단위 집합), 상태는 보고서가 그리는 상세 행의 키만 남기며 건수·재발·해소·확인 불가는 따로 센다. 보고서 결과(섹션 건수, 상세, 부록, Audit Baseline 배지)는 이전과 같다(pytest가 같은 합성 입력으로 이전 방식의 결과와 비교).
   - **AUD-510**: `findings.json`의 Package 섹션(`hosts`, 호스트별 정렬·중복 제거한 `ids`)은 모델 대신 파일에서 호스트 하나씩 읽어 쓴다. 모델의 `baseline.document`에는 이 섹션이 없고 `baseline.package_index`(`dir`, 점검된 `hosts`)가 대신 있다. 저장되는 `findings.json`의 형식은 그대로다(Audit Baseline 비교가 다음 달에 그대로 읽는다).
-  - **보관(AUD-512~518) 결정**: `package_findings/`는 **보관하지 않는다**. 호스트당 수 MB(약 23,000건 기준)이고, 같은 내용이 보관되는 `trivy/<호스트>.json.gz`(+ CentOS vault 표)에서 다시 만들어지며, 발견 id는 보관되는 `findings.json`에 들어 있다. 3년 잠금 버킷에 중복 용량을 얹지 않는다. 그래서 AUD-513의 대상에서 뺀다(AUD-512 find 결과를 거른다). 압축 대상(AUD-517)도 아니다. 보관 실패로 디렉터리가 남을 때(#157)는 이 파일도 함께 남는다. 보관이 성공하면 디렉터리와 함께 정리된다.
+  - **보관(AUD-512~513) 결정**: `package_findings/`는 **보관하지 않는다**. 호스트당 수 MB(약 23,000건 기준)이고, 같은 내용을 보관되는 `sbom/<호스트>.cdx.json`을 Trivy로 다시 판정해 뽑을 수 있으며(CentOS는 vault 표 포함, §11.1 재판정), 발견 id는 보관되는 `findings.json`에 들어 있다. 다만 재판정은 **그 시점의 취약점 DB**를 쓰므로 판정 당시와 결과가 다를 수 있다 — 판정 당시 기록은 `findings.json`과 `package_vulnerability.json`이다. 3년 잠금 버킷에 중복 용량을 얹지 않는다. 그래서 AUD-513의 대상에서 뺀다(AUD-512 find 결과를 거른다, `trivy/`와 함께). 보관 실패로 디렉터리가 남을 때(#157)는 이 파일도 함께 남는다. 보관이 성공하면 디렉터리와 함께 정리된다.
   - **한계**: Audit Baseline 조회(AUD-505)로 받은 지난 실행의 `findings.json`은 아직 `host_audit_baseline_history` 변수로 메모리에 오른다(이 티켓 범위 밖).
 - **OS 인식 검사**: Trivy가 결과의 `Metadata.OS`를 수집한 OS 계열·버전과 다르게 인식하면 그 호스트를 '점검불가(OS 인식 불일치)'로 표시한다. OS를 인식하지 못하면 0건이 조용히 나오기 때문이다(PoC 함정).
 - **분류** (건수는 (CVE, 패키지) 쌍 기준, Audit Baseline 동일성 키는 `CVE|패키지`):
@@ -277,8 +277,9 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 ```text
 <run_id>/
 ├── packages/<Inventory Hostname>.json   # 패키지 기록 (아래)
-├── sbom/<Inventory Hostname>.cdx.json   # Trivy 입력 SBOM (보관 업로드 때 .cdx.json.gz로 압축, §11.1)
-├── trivy/<Inventory Hostname>.json      # Trivy 원본 결과 (보관 업로드 때 .json.gz로 압축, §11.1)
+├── sbom/<Inventory Hostname>.cdx.json   # Trivy 입력 SBOM (압축 없이 보관, §11.1)
+├── trivy/<Inventory Hostname>.json      # Trivy 원본 결과. 러너 전용, 보관하지 않음 (#159, §11.1)
+├── trivy_version.json                   # 판정에 쓴 Trivy 버전·DB 메타데이터 (보관, AUD-326)
 ├── package_findings/<Inventory Hostname>.json  # 호스트별 분류 결과(발견 전체). 러너 전용, 보관하지 않음 (#155)
 └── package_vulnerability.json           # 섹션 모델 (DB 상태, 호스트별 건수, 상세)
 ```
@@ -316,6 +317,8 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 | `AUD-322` | `Classify the Trivy findings of each host` | `host_audit_package_scan` (role `library/` 커스텀 모듈) | 러너 | 호스트마다 별도 프로세스가 패키지 기록·`trivy/<호스트>.json`을 직접 읽어 분류하고 발견 전체를 `package_findings/<호스트>.json`(`0600`)에 쓴다. 돌려주는 값은 요약(건수·상세 후보·파일 경로)뿐이고 `set_fact`로 만들지 않는다(#155). AUD-321의 호스트별 rc와 결과 파일로 rc≠0·빈 출력·잘린 JSON·파일 없음을 호스트 '점검불가'로 판정한다(#154). 호스트별 결과는 `register`로만 모은다(리스트 누적 금지 — 메모리가 호스트 수의 제곱) |
 | `AUD-323` | `Build the Package Vulnerability section model` | `ansible.builtin.set_fact` | 러너 | AUD-322의 요약을 한 번에 모아 `host_audit_package_section` 필터(발견 전체는 메모리에 없다) |
 | `AUD-324` | `Save the Package Vulnerability section on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
+| `AUD-325` | `Read the Trivy version and vulnerability DB metadata` | `ansible.builtin.command` | 러너 | `trivy version --format json`(`timeout 60`), `changed_when: false`, `failed_when: false` (실패는 AUD-326이 대체값으로 처리) |
+| `AUD-326` | `Save the Trivy version and DB record of this run on the runner` | `ansible.builtin.copy` | 러너 | `trivy_version.json` `0600`, `host_audit_trivy_provenance` 필터, DB를 못 써도 기록, 보관 대상 (#159) |
 
 검증: pytest `tests/test_host_audit_packages.py`(기록 파싱, SBOM 동등성 고정, DB 7일 규칙, CentOS 수정본 없음·will-not-fix 분류, 섹션·보고서 모델, 템플릿, Trivy 고정, Trivy 실패 4경우 점검불가·나머지 호스트 계속). molecule Fast Scenario는 패키지 프로브를 포함한 수집 전후 관리 영역이 같은지(`VERIFY-AUD-010`)와 패키지 기록 구조(`VERIFY-AUD-302`)를 확인한다. Trivy 판정 자체는 molecule 범위 밖이다(스펙 #115 테스트 결정 ②).
 
@@ -464,14 +467,16 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | `<YYYY-MM>/<run_id>/mail_summary.json` | 메일 요약(제목·섹션별 한 줄·첨부 SHA-256, 주소 없음) — 재발송이 읽음 (#126) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/run.json` | 실행 메타(`run_kind` 포함) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/findings.json` | 섹션별 발견 색인 `{section: {hosts, ids: {host: [id]}}}`, `resolved`, `baseline_run_id` | 모든 실행 |
-| `<YYYY-MM>/<run_id>/trivy/<host>.json.gz` | Trivy 원본 결과를 gzip한 것(내용 그대로, `Content-Type: application/gzip`) (#151) | 모든 실행 |
-| `<YYYY-MM>/<run_id>/sbom/<host>.cdx.json.gz` | Trivy 입력 SBOM(CycloneDX)을 gzip한 것(내용 그대로) (#151) | 모든 실행 |
-| `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록(`packages/`), `package_vulnerability.json`, `pointer.json` (압축 안 함). `package_findings/`는 올리지 않음(§9) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/trivy_version.json` | 판정 당시 Trivy 버전·취약점 DB 메타데이터 `{trivy_version, db_version, db_updated_at, db_downloaded_at, db_next_update, db_status, db_refreshed, source}` (#159) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/sbom/<host>.cdx.json` | Trivy 입력 SBOM(CycloneDX), 압축 없이 그대로. 다시 판정하는 입력이다(아래 재판정) (#159) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록(`packages/`), `package_vulnerability.json`, `pointer.json`. `trivy/`와 `package_findings/`는 올리지 않음(§9) | 모든 실행 |
 | `baseline/<run_id>.json` | 포인터 `{run_id, run_kind, started_at, findings_key, resolved}` | **정기 실행만**, 모든 업로드 성공 후 |
 
 `<YYYY-MM>`은 보고서 시간대(`host_audit_timezone`) 기준 실행 시작 월이다. 수시 실행은 보관하되 포인터를 쓰지 않으므로 Audit Baseline이 되지 않는다.
 
-**용량과 압축 (#151)**: 버킷은 GOVERNANCE 3년 보존이라 올린 뒤에는 지울 수 없다. 전체 실행(24대) 1회가 압축 전 약 3.57 GiB였고, 대부분이 `trivy/<host>.json`(호스트당 약 200~250 MB, 크기 대부분이 `References`·`Description`)이다. 그래서 업로드 직전(`AUD-517`·`AUD-518`) `trivy/*.json`과 `sbom/*.json`만 `community.general.archive`(`format: gz`, 단일 파일은 tar 없이 gzip)로 `<파일>.gz`를 만들고 원본은 지운다. 필드를 빼지 않으므로 `gunzip -c trivy/<host>.json.gz`가 Trivy 원본과 바이트 단위로 같다. `report.html`·`run.json`·`mail_summary.json`·`findings.json`·`pointer.json`(Audit Baseline 조회 `AUD-503~506`과 재발송 `AUD-623~624`가 읽는 파일)은 압축하지 않는다. 보관 해시(`AUD-513` SHA-256, 업로드 서명에 들어감)는 실제로 올리는 `.gz` 객체의 값이다. `Content-Encoding`은 붙이지 않는다 — 내려받은 바이트가 저장된 `.gz` 그대로여야 한다. 압축이 실패한 파일은 실행을 멈추지 않고 압축 없이 원래 이름으로 올라간다. `archive`는 `<파일>.gz`에 바로 쓰므로(임시 파일 없음) 실패하면 잘린 `.gz`가, 원본 삭제만 실패하면 온전한 `.gz`가 원본 옆에 남는다 — 둘 다 올라가면 지울 수 없다. 그래서 원본이 남아 있는 파일의 `.gz`는 `AUD-519`가 지운다("원본이 있으면 그 `.gz`는 없다"; 원본이 이미 지워졌다면 `.gz`가 유일한 사본이라 남긴다). 압축 없이 보관하는 파일 이름은 `AUD-520`이 실행 로그에 보여 준다(파일 이름만). 보관을 하지 않는 실행(check 모드, `host_audit_storage_enabled=false`, 보관 입력 누락)은 러너 파일을 압축하지 않는다.
+**용량 (#159, #151을 뒤집음)**: 버킷은 GOVERNANCE 3년 보존이라 올린 뒤에는 지울 수 없다. 전체 실행(24대) 1회가 약 3.57 GiB였고 대부분이 `trivy/<host>.json`(호스트당 약 200~250 MB, 대부분이 `References`·`Description`)이다. #151은 이를 gzip해 올리기로 했지만(#147 옵션 2), 그래도 지울 수 없는 용량이 크고 판정 원본은 SBOM에서 다시 만들 수 있어 `trivy/`를 **아예 올리지 않기로 바꿨다**(옵션 1). 실행당 보관 용량은 SBOM 등 약 30 MB다. 그래서 압축 단계(`AUD-517`~`AUD-520`)는 없앴고 `sbom/`도 압축하지 않는다(작아서 이득이 적고, 보관한 파일이 곧 업로드한 파일이다). 보관 해시(`AUD-513` SHA-256)는 올리는 파일 그대로의 값이고, `AUD-512`가 찾은 파일에서 `trivy/`와 `package_findings/`를 뺀다. 러너의 `trivy/`는 정리 정책(§14, #157)이 그대로 다룬다.
+
+**판정 기록과 재판정 (#159)**: 판정 당시 Trivy 버전과 취약점 DB 메타데이터(DB 버전, `UpdatedAt`, `DownloadedAt`, `NextUpdate`)를 `AUD-325`가 `trivy version --format json`으로 읽고 `AUD-326`이 실행 결과 `trivy_version.json`에 적어 함께 보관한다(DB를 못 써도 기록하며, `trivy version`이 실패하면 고정 버전과 DB 메타데이터 파일 값으로 대신하고 `source`에 표시). 상세 증적이 필요하면 보관된 `sbom/<host>.cdx.json`을 내려받아 `trivy_version.json`의 버전과 같은 Trivy로 `trivy sbom --scanners vuln --format json <SBOM>`을 한 번 더 돌린다. **한계**: 재판정은 그 시점의 DB를 쓴다(DB는 보관하지 않는다). 판정 당시와 건수가 다를 수 있고(새 CVE 추가, 수정본 반영), 판정 당시 기록은 `findings.json`·`package_vulnerability.json`뿐이다. `trivy_version.json`의 `db_updated_at`은 당시 DB의 시점을 알려 줄 뿐 그 DB를 복원하지는 못한다. CentOS 6/7 분류(`CentOS용 수정본 없음`)는 재판정 결과에 vault 표(`files/centos_vault_final/`)를 적용해 다시 만든다.
 
 **기준선 찾기**: `baseline/` 목록 1회(ListObjectsV2) → 지난 12개월(+1일) 안에 수정된 포인터만 Get → 이번 실행보다 먼저 시작한 정기 실행 중 가장 최근 것이 Audit Baseline → 그 `findings_key`를 Get. 재발 판정은 같은 포인터들의 `resolved` 목록(정기 실행이 해소로 표시한 항목)을 쓴다. 포인터 목록은 1,000개(월 1회 기준 80년 이상)까지 한 번에 읽는다.
 
@@ -552,17 +557,13 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 | `AUD-506` | `Decide the Audit Baseline state of this run` | `ansible.builtin.set_fact` | 러너 | `ok`·`failed`·`disabled` |
 | `AUD-510` | `Save the findings index of this run on the runner` | `host_audit_findings_write` (role `library/` 커스텀 모듈) | 러너 | 실행별 파일 `0600`. 다른 섹션은 모델의 document 그대로, Package 발견 id는 `package_findings/<호스트>.json`에서 호스트 하나씩 읽어 쓴다(#155) |
 | `AUD-511` | `Save the Audit Baseline pointer of a scheduled run on the runner` | `ansible.builtin.copy` | 러너 | 정기 실행만, `0600` |
-| `AUD-517` | `Find the Trivy and SBOM originals of this run to compress` | `ansible.builtin.find` | 러너 | 읽기 전용, 보관하는 실행만 |
-| `AUD-518` | `Compress the Trivy and SBOM originals losslessly (gzip)` | `community.general.archive` | 러너 | `<파일>.gz` `0600`, 원본 삭제(이미 압축했으면 대상 없음), 실패해도 원본을 그대로 올림 |
-| `AUD-519` | `Remove the .gz of originals that failed to compress` | `ansible.builtin.file` | 러너 | 원본이 남은 파일의 잘리거나 남은 `<파일>.gz` 삭제 — 원본과 `.gz`가 함께 올라가지 않음 |
-| `AUD-520` | `Show the originals kept uncompressed because compression failed` | `ansible.builtin.debug` | 러너 | 압축 실패가 있을 때만, 파일 이름만 표시 |
 | `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용 |
 | `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
 | `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log` |
 | `AUD-515` | `Upload the Audit Baseline pointer of a scheduled run` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 정기 실행·전체 업로드 성공 시만, `no_log` |
 | `AUD-516` | `Fail the run when the Audit Baseline lookup or keeping the originals failed` | `ansible.builtin.assert` | 러너 | 파일 이름·상태만 표시 |
 
-검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건, #151: `AUD-517~520`·`AUD-512`·`AUD-513`을 러너에서 실제로 돌려 Trivy·SBOM만 `.gz`로 바뀌고 `gunzip` 결과가 원본과 바이트 단위로 같으며 원본은 남지 않고, 나머지 파일은 그대로이며, 보관 SHA-256이 `.gz` 객체의 값인지와 보관하지 않는 실행은 압축하지 않는지, 압축이 실패하면(쓸 수 없는 잘린 `.gz`가 미리 있음) `AUD-519`·`AUD-520`까지 돌려 원본만 보관되고 `.gz`는 남지 않으며 실패 파일 이름만 표시되는지, 객체별 `Content-Type`(`.gz`는 `application/gzip`, `Content-Encoding` 없음)). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.
+검증: pytest `tests/test_host_audit_baseline.py`(AWS SigV4 공개 예제 서명 일치, 경로·포트·키 인코딩, 목록 XML, KST 월 경계, 12개월 창, 기준선 선택(수시 실행 제외), 신규·지속·재발·해소·확인 불가·첫 실행, Asset Inventory 신규·삭제, 배지·표지·저장 문서, 정책·수명주기·보존 설정, 포인터 업로드 조건, #159: `AUD-512`·`AUD-513`을 러너에서 실제로 돌려 `trivy/`·`package_findings/`가 보관 대상에서 빠지고 `sbom/`·`trivy_version.json`·나머지 파일은 압축·변경 없이 원본 그대로이며 보관 SHA-256이 파일의 값인지, 보관하지 않는 실행은 아무것도 올리지 않는지, 압축 단계(`AUD-517~520`)가 없는지, `AUD-325`·`AUD-326`이 DB 판정 뒤에 조건 없이 도는지). RustFS 1.0.1 컨테이너로 서명 요청의 Put·Get·List, 전용 정책의 거부 동작, Object Lock, 위 버킷 준비 절차를 수동으로 확인했다. molecule은 보고서 단계를 돌리지 않으므로 이 절의 태스크는 molecule 검증 대상이 아니다.
 ## 12. Configuration Drift (#124)
 
 Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호스트 실제 상태의 차이(CONTEXT.md Configuration Drift, ADR-0009 §1). 직전 Host Audit과의 차이는 Drift가 아니다(Audit Baseline 비교, #125).
@@ -623,7 +624,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 ```text
 report.yml
   AUD-023 보고서 HTML → AUD-611 SHA-256 → AUD-612·613 메일 요약(mail_summary.json, 주소 없음)
-  storage_upload.yml   AUD-510~515, 517~520 원본(요약 포함, Trivy·SBOM은 gzip) 업로드
+  storage_upload.yml   AUD-510~515 원본(요약 포함, trivy/·package_findings/ 제외) 업로드
   AUD-614              보관 성공 판정 — 업로드가 하나라도 실패하면 보내지 않음
   mail.yml             AUD-600~609 수신자 해석 → 수신자마다 1통 발송 → 결과(주소 없이)
   storage_result.yml   AUD-516 보관 판정 (실패면 여기서 끝남)

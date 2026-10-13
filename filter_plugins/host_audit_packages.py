@@ -498,6 +498,39 @@ def host_audit_trivy_db_state(refresh_ok, metadata, now, max_age_days=DB_MAX_AGE
     return state
 
 
+def host_audit_trivy_provenance(rc, stdout, pinned_version, db_state):
+    """What judged this run: Trivy version and vulnerability DB metadata (#159).
+
+    ``rc``/``stdout``: result of ``trivy version --format json`` (``Version``, ``VulnerabilityDB`` with
+    ``Version``/``UpdatedAt``/``NextUpdate``/``DownloadedAt``). If it fails or is not JSON, the pinned version and
+    the DB state of ``host_audit_trivy_db_state`` (from ``<cache>/db/metadata.json``) are recorded instead, and
+    ``source`` says so. The archive does not keep ``trivy/`` any more, so this record plus the archived
+    ``sbom/`` is how a past judgement can be reproduced (with the then-current DB, see docs/host_audit.md).
+    """
+    db_state = db_state or {}
+    parsed = None
+    if rc == 0 and (stdout or '').strip():
+        try:
+            parsed = json.loads(stdout)
+        except ValueError:
+            parsed = None
+    if not isinstance(parsed, dict) or not parsed.get('Version'):
+        parsed = None
+    vdb = (parsed or {}).get('VulnerabilityDB') or {}
+    record = {
+        'trivy_version': parsed['Version'] if parsed else str(pinned_version),
+        'db_version': vdb.get('Version') if parsed else None,
+        'db_updated_at': vdb.get('UpdatedAt') if parsed and vdb.get('UpdatedAt') else (db_state.get('updated_at') or None),
+        'db_downloaded_at': (vdb.get('DownloadedAt') if parsed and vdb.get('DownloadedAt')
+                             else (db_state.get('downloaded_at') or None)),
+        'db_next_update': vdb.get('NextUpdate') if parsed else None,
+        'db_status': db_state.get('status'),
+        'db_refreshed': db_state.get('refreshed'),
+        'source': 'trivy version' if parsed else 'pinned version, DB metadata file',
+    }
+    return record
+
+
 # ------------------------------------------------------------------------------
 # 4. Trivy JSON → classified findings for one host
 # ------------------------------------------------------------------------------
@@ -758,6 +791,7 @@ class FilterModule(object):
             'host_audit_package_record': host_audit_package_record,
             'host_audit_sbom': host_audit_sbom,
             'host_audit_trivy_db_state': host_audit_trivy_db_state,
+            'host_audit_trivy_provenance': host_audit_trivy_provenance,
             'host_audit_package_findings': host_audit_package_findings,
             'host_audit_package_summary': host_audit_package_summary,
             'host_audit_package_section': host_audit_package_section,

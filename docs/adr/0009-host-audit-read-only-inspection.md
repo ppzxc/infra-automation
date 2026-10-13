@@ -32,3 +32,4 @@ date: 2026-10-08
 - 쪽번호는 Chrome·Edge 131+에서 인쇄할 때만 나온다.
 - 메일은 Google Workspace SMTP relay(IP 인증, TLS 필수)를 쓰므로 overseer 공인 IP가 바뀌면 관리 콘솔 허용 목록도 바꿔야 한다. 수신자·발신자 주소는 Git에 두지 않고 OpenBao에서 주입한다.
 - ADR-0004의 CIS 감사 파일럿은 이 결정으로 대체된다.
+- **보관 용량 결정 (#147 → #151 → #159)**: Trivy 원본(`trivy/`)은 24대 기준 실행당 약 3.5 GiB이고 3년 잠금 버킷이라 지울 수 없다. #147/#151은 gzip해 올리기(옵션 2)로 정했으나, #159에서 **`trivy/`를 보관하지 않는 쪽(옵션 1)으로 뒤집었다**. 이유는 (1) 대부분이 `References`·`Description`이라 압축해도 지울 수 없는 용량이 크고, (2) 원본은 보관되는 `sbom/`(약 30 MB)을 Trivy로 다시 판정해 얻을 수 있고, (3) 판정 당시 결과는 `findings.json`·`package_vulnerability.json`이 이미 증적이기 때문이다. 판정 당시 Trivy 버전·DB 메타데이터(`trivy_version.json`)를 함께 보관한다. 한계: 재판정은 그 시점의 DB를 쓰므로 판정 당시와 결과가 다를 수 있고 DB 자체는 보관하지 않는다. 압축 단계는 없앴다. `package_findings/`도 보관하지 않는다(SBOM 재판정으로 다시 만든다).

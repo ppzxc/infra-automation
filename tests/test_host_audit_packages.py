@@ -34,6 +34,7 @@ from host_audit_packages import (  # noqa: E402
     host_audit_package_section,
     host_audit_sbom,
     host_audit_trivy_db_state,
+    host_audit_trivy_provenance,
     parse_vault_final,
     rpm_vr_compare,
 )
@@ -657,3 +658,65 @@ def test_report_model_and_findings_json_equal_the_output_recorded_before_155(tmp
     recorded = json.loads(GOLDEN.read_text(encoding="utf-8"))
     assert json.loads(json.dumps(section)) == recorded["section"]
     assert json.loads(json.dumps(model)) == recorded["model"]
+
+
+# ------------------------------------------------------------------------------
+# Trivy version + DB record of a run (#159): what judged this run, kept with the archived SBOMs
+# ------------------------------------------------------------------------------
+TRIVY_VERSION_JSON = json.dumps({
+    "Version": "0.75.0",
+    "VulnerabilityDB": {"Version": 2, "NextUpdate": "2026-10-08T12:38:55Z",
+                        "UpdatedAt": "2026-10-07T07:38:55Z", "DownloadedAt": "2026-10-08T12:58:07Z"},
+})
+
+
+def test_trivy_provenance_takes_version_and_db_from_trivy_version_output():
+    rec = host_audit_trivy_provenance(0, TRIVY_VERSION_JSON, "0.75.0", _fresh_db())
+    assert rec["trivy_version"] == "0.75.0"
+    assert rec["db_version"] == 2
+    assert rec["db_updated_at"] == "2026-10-07T07:38:55Z"
+    assert rec["db_downloaded_at"] == "2026-10-08T12:58:07Z"
+    assert rec["db_next_update"] == "2026-10-08T12:38:55Z"
+    assert rec["db_status"] == "fresh" and rec["db_refreshed"] is True
+    assert rec["source"] == "trivy version"
+
+
+@pytest.mark.parametrize("rc, out", [(1, ""), (0, ""), (0, "not json"), (124, TRIVY_VERSION_JSON)])
+def test_trivy_provenance_falls_back_to_the_pinned_version_and_db_state_when_trivy_version_fails(rc, out):
+    rec = host_audit_trivy_provenance(rc, out, "0.75.0", _fresh_db())
+    assert rec["trivy_version"] == "0.75.0"
+    assert rec["db_updated_at"] == "2026-10-07T07:38:55Z" and rec["db_downloaded_at"] == "2026-10-08T12:58:07Z"
+    assert rec["db_version"] is None and rec["db_next_update"] is None
+    assert rec["source"] == "pinned version, DB metadata file"
+
+
+def test_trivy_provenance_records_an_unavailable_db():
+    rec = host_audit_trivy_provenance(1, "", "0.75.0", host_audit_trivy_db_state(False, {}, NOW))
+    assert rec["db_status"] == "unavailable" and rec["db_updated_at"] is None and rec["trivy_version"] == "0.75.0"
+
+
+def test_trivy_version_tasks_write_trivy_version_json_with_a_fake_trivy(tmp_path):
+    """AUD-325/326 as written in packages_scan.yml, with a fake `trivy` that answers `version --format json`."""
+    if not shutil.which("ansible-playbook"):
+        pytest.skip("ansible-playbook not installed")
+    tasks = yaml.safe_load((ROOT_DIR / "roles" / "host_audit" / "tasks" / "packages_scan.yml").read_text(encoding="utf-8"))
+    picked = [t for t in tasks if "[AUD-325]" in t["name"] or "[AUD-326]" in t["name"]]
+    assert len(picked) == 2
+    fake = tmp_path / "trivy"
+    fake.write_text("#!/bin/sh\necho '%s'\n" % TRIVY_VERSION_JSON)
+    fake.chmod(0o755)
+    out = tmp_path / "run"
+    out.mkdir()
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+        "vars": {"host_audit_run": {"output_dir": str(out)}, "_host_audit_trivy": [str(fake)],
+                 "host_audit_trivy_version": "0.75.0", "host_audit_trivy_db": _fresh_db()},
+        "tasks": picked,
+    }], allow_unicode=True))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300)
+    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
+    rec = json.loads((out / "trivy_version.json").read_text(encoding="utf-8"))
+    assert rec["trivy_version"] == "0.75.0" and rec["db_version"] == 2 and rec["source"] == "trivy version"
+    assert (out / "trivy_version.json").stat().st_mode & 0o777 == 0o600

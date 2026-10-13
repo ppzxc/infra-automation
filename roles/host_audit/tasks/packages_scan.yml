@@ -99,6 +99,26 @@
     _metadata_text: "{{ lookup('ansible.builtin.file', host_audit_cache_dir ~ '/trivy-cache/db/metadata.json', errors='ignore') | default('', true) }}"
     _metadata: "{{ _metadata_text | from_json if _metadata_text | length > 0 else {} }}"
 
+# 판정에 쓴 Trivy 버전·취약점 DB 메타데이터를 실행 결과로 남긴다(#159). 보관은 trivy/ 원본을 올리지 않으므로,
+# 이 기록과 보관된 sbom/이 "그때 무엇으로 판정했나"의 증거다. DB를 못 써도(점검불가) 기록한다.
+# `trivy version`이 실패하면(시간 초과 포함) 고정 버전과 DB 메타데이터 파일 값으로 대신한다.
+- name: "[AUD-325] Read the Trivy version and vulnerability DB metadata"
+  ansible.builtin.command:
+    argv: "{{ ['timeout', '60'] + _host_audit_trivy + ['version', '--format', 'json'] }}"
+  register: _host_audit_trivy_version_out
+  changed_when: false
+  failed_when: false
+
+- name: "[AUD-326] Save the Trivy version and DB record of this run on the runner"
+  ansible.builtin.copy:
+    content: >-
+      {{ (_host_audit_trivy_version_out.rc | default(1))
+         | host_audit_trivy_provenance(_host_audit_trivy_version_out.stdout | default(''),
+                                       host_audit_trivy_version, host_audit_trivy_db)
+         | to_nice_json(indent=2) }}
+    dest: "{{ host_audit_run.output_dir }}/trivy_version.json"
+    mode: '0600'
+
 - name: "[AUD-320] Write the CycloneDX SBOM of each collected host"
   ansible.builtin.copy:
     content: "{{ _record | host_audit_sbom | to_json }}\n"

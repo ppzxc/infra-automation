@@ -5,7 +5,6 @@ Signature V4 examples, the Audit Baseline statuses through the report model the
 template draws, and the storage settings through the files the operator applies.
 No network: the RustFS end-to-end run is described in docs/host_audit.md §11.
 """
-import gzip
 import hashlib
 import json
 import os
@@ -367,10 +366,10 @@ def test_report_builds_the_model_between_lookup_and_upload_and_secrets_stay_hidd
 
 
 # ------------------------------------------------------------------------------
-# Keeping the large Trivy·SBOM originals gzip-compressed (#151)
+# Keeping the originals: trivy/ is not archived, sbom/ and the Trivy version·DB record are (#159, reverses #151)
 # ------------------------------------------------------------------------------
 def _keep_run(tmp_path):
-    """A runner run directory with every kind of file the archive keeps."""
+    """A runner run directory with every kind of file the run produces."""
     out = tmp_path / "run"
     files = {
         "report.html": b"<html>report</html>",
@@ -379,13 +378,13 @@ def _keep_run(tmp_path):
         "findings.json": b'{"kisa": {}}\n',
         "pointer.json": b'{"run_id": "ha-1"}\n',
         "package_vulnerability.json": b"{}\n",
+        "trivy_version.json": b'{"trivy_version": "0.75.0"}\n',
         "hosts/h1.json": b'{"inventory_hostname": "h1"}\n',
         "packages/h1.json": b'{"packages": []}\n',
-        "trivy/h1.json": json.dumps({"Results": [{"Vulnerabilities": [
-            {"VulnerabilityID": "CVE-2024-0001", "Description": "한글 " * 500,
-             "References": ["https://example/%d" % i for i in range(200)]}]}]}, ensure_ascii=False).encode(),
+        "trivy/h1.json": b'{"Results": [{"Vulnerabilities": []}]}',
         "trivy/h2.json": b'{"Results": []}',
         "sbom/h1.cdx.json": json.dumps({"bomFormat": "CycloneDX", "components": [{"name": "openssl"}] * 300}).encode(),
+        "package_findings/h1.json": b'{"host": "h1", "findings": []}',
     }
     for rel, data in files.items():
         (out / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -393,14 +392,11 @@ def _keep_run(tmp_path):
     return out, files
 
 
-_KEEP_IDS = ("AUD-517", "AUD-518", "AUD-519", "AUD-520", "AUD-512", "AUD-513")
+_KEEP_IDS = ("AUD-512", "AUD-513")
 
 
-def _run_keep_tasks(tmp_path, out, extra_vars=None, report=None):
-    """Run the keep tasks on the runner; return {relative path: SHA-256} of what AUD-513 would upload.
-
-    When ``report`` is a dict it receives {task name: localhost result} of every task run.
-    """
+def _run_keep_tasks(tmp_path, out, extra_vars=None):
+    """Run the keep tasks on the runner; return {relative path: SHA-256} of what AUD-513 would upload."""
     upload = _tasks("storage_upload.yml")
     keep = [t for t in upload if any("[%s]" % i in t["name"] for i in _KEEP_IDS)]
     assert len(keep) == len(_KEEP_IDS)
@@ -417,46 +413,29 @@ def _run_keep_tasks(tmp_path, out, extra_vars=None, report=None):
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
     plays = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
-    if report is not None:
-        report.update({t["task"]["name"]: t["hosts"].get("localhost", {}) for t in plays})
     return {s["path"][len(str(out)) + 1:]: s["checksum"] for s in plays[-1]["hosts"]["localhost"]["msg"]}
 
 
-def test_package_findings_files_are_runner_only_and_not_archived(tmp_path):
-    """#155 decision: package_findings/<host>.json is derived from the archived trivy original and its ids are in the
-    archived findings.json, so it is not uploaded (a 3-year locked bucket must not get the duplicate)."""
-    if not shutil.which("ansible-playbook"):
-        pytest.skip("ansible-playbook not installed")
-    out, files = _keep_run(tmp_path)
-    (out / "package_findings").mkdir()
-    (out / "package_findings" / "h1.json").write_text('{"host": "h1", "findings": []}')
-    stats = _run_keep_tasks(tmp_path, out)
-    assert not [rel for rel in stats if rel.startswith("package_findings/")]
-    assert "findings.json" in stats and "trivy/h1.json.gz" in stats
-
-
-def test_trivy_and_sbom_originals_are_kept_as_lossless_gzip_and_everything_else_as_is(tmp_path):
+def test_archive_excludes_trivy_and_package_findings_and_keeps_the_rest_as_is(tmp_path):
+    """#159: trivy/ (~3.5 GiB per run) is not archived; sbom/ is re-scannable evidence and is kept uncompressed,
+    together with the Trivy version·DB record. package_findings/ (#155) stays runner-only."""
     if not shutil.which("ansible-playbook"):
         pytest.skip("ansible-playbook not installed")
     out, files = _keep_run(tmp_path)
     stats = _run_keep_tasks(tmp_path, out)
 
-    compressed = {"trivy/h1.json", "trivy/h2.json", "sbom/h1.cdx.json"}
-    assert sorted(stats) == sorted([r + ".gz" for r in compressed] + [r for r in files if r not in compressed])
-    for rel in compressed:
-        gz = (out / (rel + ".gz")).read_bytes()
-        assert gz[:2] == b"\x1f\x8b"
-        assert gzip.decompress(gz) == files[rel], rel  # gunzip gives back the original, byte for byte
-        assert not (out / rel).exists(), "the uncompressed original must not be uploaded too"
-        assert stats[rel + ".gz"] == hashlib.sha256(gz).hexdigest(), "the kept SHA-256 is the uploaded object's"
-    assert (out / "trivy/h1.json.gz").stat().st_size < len(files["trivy/h1.json"])
-    for rel, data in files.items():
-        if rel not in compressed:
-            assert (out / rel).read_bytes() == data, rel
-            assert stats[rel] == hashlib.sha256(data).hexdigest()
+    assert not [rel for rel in stats if rel.startswith(("trivy/", "package_findings/"))]
+    kept = {r for r in files if not r.startswith(("trivy/", "package_findings/"))}
+    assert set(stats) == kept
+    assert {"sbom/h1.cdx.json", "trivy_version.json", "findings.json", "report.html", "pointer.json"} <= set(stats)
+    for rel in kept:
+        assert (out / rel).read_bytes() == files[rel], "nothing is rewritten or compressed: " + rel
+        assert stats[rel] == hashlib.sha256(files[rel]).hexdigest()
+    # the excluded files stay on the runner (cleanup and the #157 keep policy own them)
+    assert (out / "trivy/h1.json").exists() and (out / "package_findings/h1.json").exists()
 
 
-def test_originals_stay_uncompressed_when_nothing_is_kept(tmp_path):
+def test_nothing_is_kept_when_archiving_is_off(tmp_path):
     if not shutil.which("ansible-playbook"):
         pytest.skip("ansible-playbook not installed")
     out, files = _keep_run(tmp_path)
@@ -465,56 +444,20 @@ def test_originals_stay_uncompressed_when_nothing_is_kept(tmp_path):
         assert (out / rel).read_bytes() == data, rel
 
 
-def test_gzip_objects_are_uploaded_as_gzip_without_transparent_decoding(tmp_path):
-    upload = next(t for t in _tasks("storage_upload.yml") if "[AUD-514]" in t["name"])
-    assert "Content-Encoding" not in upload["ansible.builtin.uri"]["headers"], \
-        "clients must get the stored .gz bytes, not a decoded body"
-    if not shutil.which("ansible-playbook"):
-        pytest.skip("ansible-playbook not installed")
-    expected = {"report.html": "text/html; charset=utf-8", "trivy/h1.json.gz": "application/gzip",
-                "sbom/h1.cdx.json.gz": "application/gzip", "run.json": "application/json",
-                "hosts/h1.json": "application/json"}
-    pb = tmp_path / "ct.yml"
-    pb.write_text(yaml.safe_dump([{
-        "hosts": "localhost", "connection": "local", "gather_facts": False,
-        "tasks": [{"ansible.builtin.debug": {"msg": "{{ _content_type }}"},
-                   "vars": {"_rel": "{{ item }}", "_content_type": upload["vars"]["_content_type"]},
-                   "loop": sorted(expected)}],
-    }]))
-    env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json")
-    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
-                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
-    assert res.returncode == 0, res.stdout[-2000:] + res.stderr[-2000:]
-    task = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"][0]
-    assert {r["item"]: r["msg"] for r in task["hosts"]["localhost"]["results"]} == expected
+def test_there_is_no_compression_step_any_more():
+    names = " ".join(t["name"] for t in _tasks("storage_upload.yml"))
+    assert not any("[AUD-%d]" % i in names for i in (517, 518, 519, 520))
+    text = (ROLE_DIR / "tasks" / "storage_upload.yml").read_text(encoding="utf-8")
+    assert "community.general.archive" not in text and "application/gzip" not in text
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the file mode that forces the failure")
-def test_an_original_that_fails_to_compress_is_kept_alone_and_named(tmp_path):
-    """A failed gzip must not leave a partial <file>.gz next to the original (both would be locked for 3 years)."""
-    if not shutil.which("ansible-playbook"):
-        pytest.skip("ansible-playbook not installed")
-    out, files = _keep_run(tmp_path)
-    partial = out / "trivy/h2.json.gz"  # a truncated .gz left by an earlier, interrupted attempt
-    partial.write_bytes(b"\x1f\x8b\x08")
-    partial.chmod(0o400)  # archive cannot rewrite it, so compressing h2.json fails
-    report = {}
-    stats = _run_keep_tasks(tmp_path, out, report=report)
-
-    assert "trivy/h2.json" in stats and "trivy/h2.json.gz" not in stats, "only the original is kept"
-    assert not partial.exists()
-    assert (out / "trivy/h2.json").read_bytes() == files["trivy/h2.json"]
-    assert stats["trivy/h2.json"] == hashlib.sha256(files["trivy/h2.json"]).hexdigest()
-    assert "trivy/h1.json.gz" in stats and "sbom/h1.cdx.json.gz" in stats, "the others are still compressed"
-    warned = next(r for n, r in report.items() if "[AUD-520]" in n)
-    assert "h2.json" in str(warned.get("msg")) and "h1.json" not in str(warned.get("msg"))
-
-
-def test_no_compression_warning_when_every_original_compresses(tmp_path):
-    if not shutil.which("ansible-playbook"):
-        pytest.skip("ansible-playbook not installed")
-    out, _ = _keep_run(tmp_path)
-    report = {}
-    _run_keep_tasks(tmp_path, out, report=report)
-    warned = next(r for n, r in report.items() if "[AUD-520]" in n)
-    assert warned.get("skipped") is True
+def test_trivy_version_record_is_written_after_the_db_decision_and_even_without_a_usable_db():
+    packages = _tasks("packages_scan.yml")
+    names = [t["name"] for t in packages]
+    db = next(i for i, n in enumerate(names) if "[AUD-319]" in n)
+    ver = next(i for i, n in enumerate(names) if "[AUD-325]" in n)
+    rec = next(i for i, n in enumerate(names) if "[AUD-326]" in n)
+    assert db < ver < rec
+    assert packages[rec]["ansible.builtin.copy"]["dest"].endswith("/trivy_version.json")
+    assert packages[rec]["ansible.builtin.copy"]["mode"] == "0600"
+    assert "when" not in packages[ver] and "when" not in packages[rec]
