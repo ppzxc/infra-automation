@@ -1,0 +1,138 @@
+---
+# 알림 검증 단계(Spec #184 / Ticket-1)용 합성 레코드. 알림 이름 → 케이스 목록.
+# - 레코드는 VRL(security_semantics) 처리 후의 모양이다(검증 스트림에는 파이프라인이 없다).
+# - host는 케이스마다 유일해야 한다. 실행 시 host_name으로 주입되고 실행 ID가 붙어 케이스를 구분한다.
+# - fires: 이 케이스의 호스트가 알림 SQL 결과에 나와야 하면 true, 나오면 안 되면 false.
+# - known_failure: 알려진 결함. 기대와 달라도 작업을 막지 않고 경고만 한다(고친 티켓에서 이 줄을 삭제).
+# - repeat: 같은 레코드를 N번 넣는다. row_key: 결과 행에서 호스트를 읽는 컬럼(기본 host_name).
+infra-ssh-login-failures-per-source:
+  cases:
+    - name: 같은 출발지에서 5분 안에 10회 실패
+      host: verify-ssh-src-burst
+      fires: true
+      records:
+        - {repeat: 10, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.10}
+    - name: 실패 9회는 임계 미만
+      host: verify-ssh-src-below
+      fires: false
+      records:
+        - {repeat: 9, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.11}
+    - name: 출발지가 달라 각각 임계 미만
+      host: verify-ssh-src-spread
+      fires: false
+      records:
+        - {repeat: 5, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.12}
+        - {repeat: 5, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.13}
+    - name: 로그인 성공은 실패로 세지 않는다
+      host: verify-ssh-src-success
+      fires: false
+      records:
+        - {repeat: 12, event_action: ssh_login, event_outcome: success, user_name: admin, source_address: 203.0.113.14}
+infra-ssh-login-failures-per-host:
+  cases:
+    - name: 한 서버에 여러 출발지로 50회 실패
+      host: verify-ssh-host-burst
+      fires: true
+      records:
+        - {repeat: 25, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.20}
+        - {repeat: 25, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.21}
+    - name: 실패 49회는 임계 미만
+      host: verify-ssh-host-below
+      fires: false
+      records:
+        - {repeat: 49, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.22}
+infra-root-login-success:
+  cases:
+    - name: root SSH 로그인 성공
+      host: verify-root-success
+      fires: true
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 198.51.100.7}
+    - name: 일반 사용자 로그인 성공
+      host: verify-root-other-user
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: deploy, source_address: 198.51.100.8}
+    - name: root 로그인 실패는 이 알림이 아니다
+      host: verify-root-failure
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: failure, user_name: root, source_address: 198.51.100.9}
+infra-sudo-escalation-failure:
+  cases:
+    - name: sudo 인증 실패
+      host: verify-sudo-failure
+      fires: true
+      records:
+        - {event_action: sudo, event_outcome: failure, user_name: alice}
+    - name: sudo 성공은 기록만 한다
+      host: verify-sudo-success
+      fires: false
+      records:
+        - {event_action: sudo, event_outcome: success, user_name: alice}
+infra-kernel-disk-errors:
+  cases:
+    - name: OOM kill (대문자 Out of memory)
+      host: verify-kernel-oom-upper
+      fires: true
+      records:
+        - {body: "kernel: Out of memory: Killed process 4242 (java) total-vm:8123456kB, anon-rss:6543210kB"}
+    - name: 컨테이너 cgroup OOM kill (소문자 out of memory) — 실제로 놓친 사례
+      host: verify-kernel-oom-cgroup
+      fires: true
+      known_failure: "OOM 소문자 메시지를 놓친다 — Ticket-10(OOM kill 알림 재작성)에서 수정"
+      records:
+        - {body: "kernel: Memory cgroup out of memory: Killed process 31337 (python3) total-vm:2048000kB, anon-rss:1900000kB"}
+    - name: 디스크 I/O error
+      host: verify-kernel-io-error
+      fires: true
+      records:
+        - {body: "kernel: blk_update_request: I/O error, dev sda, sector 123456"}
+    - name: EXT4 파일시스템 오류
+      host: verify-kernel-ext4
+      fires: true
+      records:
+        - {body: "kernel: EXT4-fs error (device sda1): ext4_find_entry:1455: inode #2: comm ls: reading directory lblock 0"}
+    - name: XFS 손상
+      host: verify-kernel-xfs
+      fires: true
+      records:
+        - {body: "kernel: XFS (sdb1): Corruption detected. Unmount and run xfs_repair"}
+    - name: 평범한 시스템 로그
+      host: verify-kernel-benign
+      fires: false
+      records:
+        - {body: "systemd[1]: Started Session 4021 of user deploy."}
+infra-log-parse-errors-security-logs:
+  cases:
+    - name: 20줄 중 2줄 해석 실패(10%)
+      host: verify-parse-sec-high
+      fires: true
+      records:
+        - {repeat: 18, event_action: ssh_login, log_parse_error: false}
+        - {repeat: 2, log_parse_error: true}
+    - name: 20줄 중 1줄 해석 실패(5%)
+      host: verify-parse-sec-low
+      fires: false
+      records:
+        - {repeat: 19, event_action: ssh_login, log_parse_error: false}
+        - {repeat: 1, log_parse_error: true}
+    - name: 최소 줄 수(20) 미만이면 전부 실패여도 알리지 않는다
+      host: verify-parse-sec-few
+      fires: false
+      records:
+        - {repeat: 19, log_parse_error: true}
+infra-log-parse-errors-system-logs:
+  cases:
+    - name: 20줄 중 2줄 해석 실패(10%)
+      host: verify-parse-sys-high
+      fires: true
+      records:
+        - {repeat: 18, body: "systemd[1]: Started Session 1.", log_parse_error: false}
+        - {repeat: 2, body: "garbled", log_parse_error: true}
+    - name: 20줄 중 1줄 해석 실패(5%)
+      host: verify-parse-sys-low
+      fires: false
+      records:
+        - {repeat: 19, body: "systemd[1]: Started Session 1.", log_parse_error: false}
+        - {repeat: 1, body: "garbled", log_parse_error: true}

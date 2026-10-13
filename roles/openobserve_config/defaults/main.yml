@@ -168,3 +168,11 @@ o2c_alerts:
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
     silence: "{{ o2c_parse_error_window_minutes }}"
+
+# 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고
+# 알림 SQL(스트림명만 교체)을 검색해 기대와 비교한다. 운영 스트림·알림·통지 대상은 건드리지 않는다.
+# 수집 인증은 OpenBao agents/openobserve의 controller_ingest_token(컨트롤러 전용, 설정 API 계정과 다름).
+o2c_verify_stream_suffix: _alert_verify
+o2c_verify_retries: 6       # 수집 직후 검색에 보이기까지 걸리는 시간을 기다린다
+o2c_verify_delay: 5
+o2c_alert_fixtures: "{{ lookup('ansible.builtin.file', role_path ~ '/files/alert_fixtures.yml') | from_yaml }}"

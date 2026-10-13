@@ -75,3 +75,21 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음) |
 | `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력) |
 | `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update)` | `ansible.builtin.uri` | Controller | 계획된 차이만 전송 (`changed_when: true`, check 모드 제외, `no_log`) |
+
+### 알림 검증 단계 (Spec #184 / Ticket-1)
+
+반영(`O2C-020`) 직후 매번 실행한다. check 모드에서는 요청을 보내지 않는다. 운영 스트림·운영 알림·통지 대상은 건드리지 않는다.
+
+- **① SQL 논리**: `files/alert_fixtures.yml`의 합성 레코드(알림마다 "발화해야 하는" 케이스와 "발화하면 안 되는" 케이스)를 검증 전용 스트림(`<운영 스트림><o2c_verify_stream_suffix>`, 기본 `_alert_verify`)에 넣고, 알림 SQL의 스트림명만 바꿔 검색 API로 실행해 기대와 비교한다. 케이스 호스트에 실행 ID가 붙어 이전 실행 데이터와 섞이지 않는다. 불일치하면 알림·케이스 이름을 출력하고 실패한다. `known_failure`가 붙은 케이스는 경고만 한다(고친 티켓에서 표시를 삭제).
+- **② 평가 오류**: `GET /api/v2/<org>/alerts/history`에서 관리 대상 알림의 가장 최근 평가가 `error`이면 실패한다.
+- 합성 레코드 주입은 OpenBao `agents/openobserve`의 `controller_ingest_token`(컨트롤러 전용)으로 인증한다. 새 알림은 픽스처가 없으면 검증이 실패한다.
+
+| ID | Task | Module | Target | Notes |
+|---|---|---|---|---|
+| `O2C-030` | `Plan the alert verification (synthetic records and rewritten searches)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_verify_plan`), check 모드 제외, `no_log` |
+| `O2C-031` | `Assert the controller ingest token exists (needed to inject the synthetic records)` | `ansible.builtin.assert` | Controller | 토큰이 없으면 주입 전에 실패 |
+| `O2C-032` | `Inject the synthetic records into the verification streams` | `ansible.builtin.uri` | Controller | 검증 스트림에만 POST (`changed_when: false`, `no_log`) |
+| `O2C-033` | `Run each alert SQL against its verification stream and compare with the expected rows` | `ansible.builtin.uri` | Controller | 검색 POST, 수집 지연을 위해 재시도 (`no_log`) |
+| `O2C-034` | `Fail when an alert did not fire (or fired) as the fixtures expect` | `ansible.builtin.debug` | Controller | 불일치 시 알림·케이스 이름과 함께 실패 |
+| `O2C-035` | `Read the recent alert evaluation history` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `no_log`) |
+| `O2C-036` | `Fail when the latest evaluation of a managed alert ended in error` | `ansible.builtin.assert` | Controller | 평가 오류가 있으면 실패 |

@@ -24,7 +24,7 @@ PLAYBOOK = ROOT_DIR / "playbooks" / "openobserve_config.yml"
 
 WEBHOOK_URL = "https://hooks.example.internal/o2/SECRET-PATH-123"
 KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_webhook_url": WEBHOOK_URL,
-      "alert_webhook_token": "WEBHOOK-TOKEN-abc"}
+      "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
     "infra-sudo-escalation-failure", "infra-kernel-disk-errors",
@@ -40,6 +40,11 @@ class FakeO2:
         self.writes = []
         self.reads = []
         self.auth = set()
+        self.ingests = []        # (path, auth header, records) of the verification step
+        self.searches = []       # (stream, sql) of the verification step
+        self.history = []        # alert evaluation history entries returned by GET alerts/history
+        self.search_override = None   # fn(stream, sql, hits) -> hits, to simulate an engine that disagrees
+        self.fixtures = yaml.safe_load((ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8"))
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -58,8 +63,22 @@ class FakeO2:
                 self.end_headers()
                 self.wfile.write(data)
 
+            def _fire(self, sql, stream):
+                """What a correct engine returns: the hosts of the firing, non-known-failure cases of the alert owning this SQL."""
+                run_hosts = {r["host_name"] for _, _, recs in outer.ingests for r in recs}
+                for alert in outer.store["alert"].values():
+                    prod = alert["stream_name"]
+                    if stream != prod + "_alert_verify" or alert["query_condition"]["sql"].replace(f'"{prod}"', f'"{stream}"') != sql:
+                        continue
+                    cases = outer.fixtures[alert["name"]]["cases"]
+                    return [{"host_name": h} for h in sorted(run_hosts)
+                            for c in cases if h.startswith(c["host"] + "-") and c["fires"] and not c.get("known_failure")]
+                return []
+
             def do_GET(self):  # noqa: N802
                 outer.auth.add(self.headers.get("Authorization"))
+                if self.path.split("?")[0] == "/api/v2/default/alerts/history":
+                    return self._send(200, {"total": len(outer.history), "hits": outer.history})
                 kind, key = self._route()
                 outer.reads.append(self.path)
                 if kind is None:
@@ -75,6 +94,19 @@ class FakeO2:
             def _write(self, method):
                 outer.auth.add(self.headers.get("Authorization"))
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                path = self.path.split("?")[0]
+                m = re.fullmatch(r"/api/default/([^/]+)/_json", path)
+                if m and method == "POST":
+                    outer.ingests.append((self.path, self.headers.get("Authorization"), body))
+                    return self._send(200, {"code": 200})
+                if path == "/api/default/_search" and method == "POST":
+                    sql = body["query"]["sql"]
+                    stream = re.search(r'FROM "([^"]+)"', sql).group(1)
+                    hits = self._fire(sql, stream)
+                    if outer.search_override:
+                        hits = outer.search_override(stream, sql, hits)
+                    outer.searches.append((stream, sql))
+                    return self._send(200, {"hits": hits, "total": len(hits)})
                 kind, key = self._route()
                 outer.writes.append((method, self.path, body))
                 if kind is None:
@@ -117,9 +149,10 @@ def o2():
 
 
 def _apply(o2, *args, kv=None, extra=None):
+    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, **(extra or {})}
     env = dict(os.environ, ANSIBLE_NOCOLOR="1")
     cmd = ["ansible-playbook", "-i", "localhost,", str(PLAYBOOK), "-e", f"o2_endpoint={o2.url}",
-           "-e", json.dumps({"o2c_kv_fixture": kv or KV, **(extra or {})}), *args]
+           "-e", json.dumps({"o2c_kv_fixture": kv or KV, **extra}), *args]
     res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     return res
 
@@ -271,7 +304,8 @@ def test_secrets_never_reach_the_output(o2):
     assert res.returncode == 0, res.stdout + res.stderr
     for secret in ("API-PASSWORD-xyz", "WEBHOOK-TOKEN-abc", "SECRET-PATH-123"):
         assert secret not in res.stdout + res.stderr
-    assert o2.auth == {"Basic " + base64.b64encode(b"cfg@example.com:API-PASSWORD-xyz").decode()}
+    assert o2.auth == {"Basic " + base64.b64encode(b"cfg@example.com:API-PASSWORD-xyz").decode(),
+                       "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}   # 설정 API 계정 + 검증 주입 토큰
 
 
 @pytest.mark.parametrize("missing", ["api_user", "api_password", "alert_webhook_url"])
@@ -318,3 +352,106 @@ def test_no_secret_value_is_committed_in_the_role_or_playbook():
     assert not re.search(r"https?://[^\s'\"]*(hooks|webhook)[^\s'\"]*/[A-Za-z0-9_-]{16,}", text)
     defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
     assert not any(k for k in defaults if "password" in k or "token" in k)
+
+
+# --- 알림 검증 단계 (Spec #184 / Ticket-1) --------------------------------------------------------------------------------
+
+FIXTURES = yaml.safe_load((ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8"))
+
+
+def test_every_existing_alert_has_a_firing_and_a_non_firing_fixture_with_a_unique_host():
+    assert set(FIXTURES) == EXPECTED_ALERTS
+    hosts = [c["host"] for spec in FIXTURES.values() for c in spec["cases"]]
+    assert len(hosts) == len(set(hosts))
+    for name, spec in FIXTURES.items():
+        assert {c["fires"] for c in spec["cases"]} == {True, False}, name
+
+
+def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_controller_token_and_searches_rewritten_sql(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    streams = {p.split("/")[3] for p, _, _ in o2.ingests}
+    assert streams == {"security_logs_alert_verify", "system_logs_alert_verify"}
+    assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
+    assert len(o2.searches) == len(EXPECTED_ALERTS)
+    for stream, sql in o2.searches:
+        assert stream.endswith("_alert_verify") and 'FROM "security_logs"' not in sql and 'FROM "system_logs"' not in sql
+    # 운영 스트림·운영 알림은 건드리지 않는다: 쓰기는 설정 객체뿐이고 합성 레코드는 검증 스트림에만 간다
+    assert all("/_json" not in p for _, p, _ in o2.writes)
+    hosts = {r["host_name"] for _, _, recs in o2.ingests for r in recs}
+    assert any(h.startswith("verify-kernel-oom-upper-") for h in hosts)
+
+
+def test_second_run_with_verification_still_changes_nothing_in_the_configuration(o2):
+    assert _apply(o2).returncode == 0
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and o2.writes == [] and _changed(res) == 0
+
+
+def test_job_fails_and_names_the_alert_and_case_when_an_alert_does_not_fire(o2):
+    o2.search_override = lambda stream, sql, hits: [] if "Killed process" in sql else hits
+    res = _apply(o2)
+    assert res.returncode != 0
+    assert "infra-kernel-disk-errors / 케이스 'OOM kill (대문자 Out of memory)': 발화해야 하는데 발화하지 않았습니다" in res.stdout
+
+
+def test_job_fails_when_an_alert_fires_on_a_record_that_must_not_fire(o2):
+    o2.search_override = lambda stream, sql, hits: hits + ([{"host_name": next(
+        r["host_name"] for _, _, recs in o2.ingests for r in recs if r["host_name"].startswith("verify-root-other-user-"))}]
+        if "user_name = 'root'" in sql else [])
+    res = _apply(o2)
+    assert res.returncode != 0
+    assert "케이스 '일반 사용자 로그인 성공': 발화하면 안 되는데 발화했습니다" in res.stdout
+
+
+def test_known_failure_case_is_reported_but_does_not_fail_the_job(o2):
+    """OOM 소문자 사례는 현재 알림이 놓친다 — 엔진이 그렇게 답해도(발화 안 함) 알려진 실패로만 표시한다."""
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "infra-kernel-disk-errors / 케이스 '컨테이너 cgroup OOM kill (소문자 out of memory) — 실제로 놓친 사례'" in res.stdout
+    assert "알려진 실패" in res.stdout
+
+
+def test_known_failure_that_the_engine_now_catches_is_not_reported_as_failure(o2):
+    o2.search_override = lambda stream, sql, hits: hits + ([{"host_name": next(
+        r["host_name"] for _, _, recs in o2.ingests for r in recs if r["host_name"].startswith("verify-kernel-oom-cgroup-"))}]
+        if "Killed process" in sql else [])
+    res = _apply(o2)
+    assert res.returncode == 0 and "알려진 실패" not in res.stdout
+
+
+def test_job_fails_when_the_latest_evaluation_of_an_alert_is_an_error(o2):
+    o2.history = [{"alert_name": "infra-root-login-success", "status": "ok", "timestamp": 100},
+                  {"alert_name": "infra-root-login-success", "status": "error", "timestamp": 200, "error": "field missing"}]
+    res = _apply(o2)
+    assert res.returncode != 0 and "infra-root-login-success" in res.stdout
+
+
+def test_an_old_evaluation_error_that_has_since_recovered_does_not_fail_the_job(o2):
+    o2.history = [{"alert_name": "infra-root-login-success", "status": "error", "timestamp": 100},
+                  {"alert_name": "infra-root-login-success", "status": "ok", "timestamp": 200}]
+    assert _apply(o2).returncode == 0
+
+
+def test_check_mode_sends_no_verification_requests(o2):
+    res = _apply(o2, "--check")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert o2.ingests == [] and o2.searches == [] and not any("history" in r for r in o2.reads)
+
+
+def test_missing_controller_ingest_token_fails_the_verification(o2):
+    res = _apply(o2, kv={k: v for k, v in KV.items() if k != "controller_ingest_token"})
+    assert res.returncode != 0 and o2.ingests == []
+
+
+def test_verification_never_leaks_secrets_and_every_verify_uri_task_is_no_log():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    verify = [t for t in tasks if t["name"][:8] in ("[O2C-032", "[O2C-033", "[O2C-035")]
+    assert len(verify) == 3 and all(t["no_log"] is True and t["when"] == "not ansible_check_mode" for t in verify)
+
+
+def test_ingest_token_is_not_printed(o2):
+    res = _apply(o2, "-vvv")
+    assert "INGEST-TOKEN-qrs" not in res.stdout + res.stderr
+    assert base64.b64encode(b"default:INGEST-TOKEN-qrs").decode() not in res.stdout + res.stderr
