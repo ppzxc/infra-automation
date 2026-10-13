@@ -40,6 +40,8 @@ RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, strea
     "infra-memory-usage-p2": ("P2 경고", 1440, 10, "system_memory_usage"),
     "infra-memory-usage-p1": ("P1 긴급", 60, 10, "system_memory_usage"),
 }
+SELFTEST = "infra-alert-selftest"   # 통지 경로 자가 시험 알림(Spec #184 / Ticket-2) — 검증 전용 스트림에 건다
+SELFTEST_STREAM = "alert_selftest_alert_verify"
 
 
 class FakeO2:
@@ -140,6 +142,18 @@ class FakeO2:
             def do_PUT(self):  # noqa: N802
                 self._write("PUT")
 
+            def do_DELETE(self):  # noqa: N802
+                outer.auth.add(self.headers.get("Authorization"))
+                length = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(length)
+                kind, key = self._route()
+                outer.writes.append(("DELETE", self.path, None))
+                name = next((n for n, v in outer.store[kind].items() if v.get("alert_id") == key), None)
+                if name is None:
+                    return self._send(404, {})
+                del outer.store[kind][name]
+                self._send(200, {"code": 200})
+
             def log_message(self, *a):
                 pass
 
@@ -178,7 +192,8 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     paths = [p for _, p, _ in o2.writes]
     assert paths[:4] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
                          "/api/default/pipelines"]
-    assert set(o2.store["alert"]) == EXPECTED_ALERTS and paths[4:] == ["/api/v2/default/alerts"] * len(EXPECTED_ALERTS)
+    assert set(o2.store["alert"]) == EXPECTED_ALERTS | {SELFTEST}
+    assert paths[4:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
 
 
 def test_template_body_is_a_naver_works_text_message(o2):
@@ -201,6 +216,8 @@ def test_every_alert_is_actionable(o2):
     assert _apply(o2).returncode == 0
     runbook = RUNBOOK.read_text(encoding="utf-8")
     for name, alert in o2.store["alert"].items():
+        if name == SELFTEST:
+            continue
         ctx = alert["context_attributes"]
         assert ctx["severity"] in ("P1 긴급", "P2 경고", "P3 주의"), name
         assert ctx["severity_icon"] in ("🔴", "🟠", "🟡"), name
@@ -245,6 +262,7 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert dest["template"] == "infra-automation-webhook"
     by = o2.store["alert"]
     assert all(a["destinations"] == ["infra-automation-webhook"] and a["enabled"] for a in by.values())
+    assert SELFTEST in by
     assert by["infra-ssh-login-failures-per-source"]["query_condition"]["sql"].count("HAVING count(*) >= 10") == 1
     assert by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"].count("HAVING count(*) >= 50") == 1
     assert by["infra-ssh-login-failures-per-source"]["trigger_condition"]["period"] == 5
@@ -300,6 +318,32 @@ def test_check_mode_reads_and_plans_but_writes_nothing(o2):
     for expected in ("create template infra-automation-webhook", "create function security_semantics",
                      "create alert infra-root-login-success"):
         assert expected in res.stdout
+
+
+def _seed_stale(o2):
+    o2.store["alert"]["infra-old-renamed"] = {"alert_id": "stale1", "name": "infra-old-renamed", "enabled": True}
+    o2.store["alert"]["team-custom-alert"] = {"alert_id": "other1", "name": "team-custom-alert", "enabled": True}
+
+
+def test_infra_alert_missing_from_the_repository_is_deleted_and_others_are_kept(o2):
+    assert _apply(o2).returncode == 0
+    _seed_stale(o2)
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", "/api/v2/default/alerts/stale1")]
+    assert "infra-old-renamed" not in o2.store["alert"] and "team-custom-alert" in o2.store["alert"]
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0 and o2.writes == []
+
+
+def test_check_mode_lists_the_alerts_to_delete_without_writing(o2):
+    assert _apply(o2).returncode == 0
+    _seed_stale(o2)
+    o2.writes.clear()
+    res = _apply(o2, "--check")
+    assert res.returncode == 0 and o2.writes == []
+    assert "delete alert infra-old-renamed" in res.stdout and "team-custom-alert" not in res.stdout
 
 
 def test_check_mode_after_apply_reports_no_changes(o2):
@@ -530,3 +574,52 @@ def test_resource_fixtures_cover_the_ns0334_case_squashfs_and_below_threshold():
     for name in RESOURCE_ALERTS:
         assert {c["fires"] for c in FIXTURES[name]["cases"]} == {True, False}, name
     assert cases
+
+# --- 통지 경로 자가 시험 (Spec #184 / Ticket-2) -------------------------------------------------------------------------
+def _selftest_ingests(o2):
+    return [(p, a, recs) for p, a, recs in o2.ingests if p.split("/")[3] == SELFTEST_STREAM]
+
+
+def test_standing_selftest_alert_is_managed_on_a_verification_only_stream_and_is_idempotent(o2):
+    assert _apply(o2).returncode == 0
+    alert = o2.store["alert"][SELFTEST]
+    assert alert["stream_name"] == SELFTEST_STREAM and alert["destinations"] == ["infra-automation-webhook"]
+    assert alert["enabled"] is True and alert["stream_type"] == "logs"
+    # 운영 스트림을 보지 않으므로 운영 데이터로는 발화하지 않는다
+    assert alert["stream_name"] not in ("security_logs", "system_logs")
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and o2.writes == [] and _changed(res) == 0
+
+
+def test_selftest_notification_is_clearly_marked_as_a_test(o2):
+    assert _apply(o2).returncode == 0
+    ctx = o2.store["alert"][SELFTEST]["context_attributes"]
+    assert ctx["severity"] == "TEST"       # 통지 첫 줄이 "<아이콘> [TEST] <제목>"이 된다
+    assert all(ctx[k].strip() and '"' not in ctx[k] and "\n" not in ctx[k] for k in ("title", "what", "why", "action", "runbook"))
+    assert "시험" in ctx["title"] and o2.store["alert"][SELFTEST]["row_template"].startswith("• ")
+
+
+def test_default_run_sends_no_selftest_record(o2):
+    assert _apply(o2).returncode == 0
+    assert _selftest_ingests(o2) == []
+
+
+def test_verify_notify_injects_exactly_one_selftest_record_with_the_controller_token(o2):
+    res = _apply(o2, extra={"o2c_verify_notify": True})
+    assert res.returncode == 0, res.stdout + res.stderr
+    sent = _selftest_ingests(o2)
+    assert len(sent) == 1 and len(sent[0][2]) == 1
+    assert sent[0][1] == "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()
+    assert sent[0][2][0]["host_name"].startswith("selftest")
+
+
+def test_verify_notify_is_off_in_check_mode(o2):
+    res = _apply(o2, "--check", extra={"o2c_verify_notify": True})
+    assert res.returncode == 0 and o2.ingests == []
+
+
+def test_selftest_ingest_task_is_no_log_and_not_run_in_check_mode():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    t = next(t for t in tasks if t["name"].startswith("[O2C-037"))
+    assert t["no_log"] is True and "not ansible_check_mode" in str(t["when"]) and "o2c_verify_notify" in str(t["when"])

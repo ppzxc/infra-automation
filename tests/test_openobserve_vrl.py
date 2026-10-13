@@ -122,3 +122,34 @@ def test_body_and_existing_fields_are_never_modified(tmp_path):
     out = _apply(tmp_path, rec)
     assert out["body"] == rec["body"] and out["custom"] == "keep" and out["host_ip"] == "10.9.9.9"
     assert out["process_executable_name"] == "sshd"
+
+
+SU = "Mar  5 10:11:12 host1 su[77]: "
+
+
+@pytest.mark.parametrize("line, expected", [
+    # EL6 / EL7+ / Ubuntu: PAM이 남기는 인증 실패 줄 (user=는 대상 계정, ruser가 실행한 사람)
+    ("pam_unix(su:auth): authentication failure; logname=alice uid=500 euid=0 tty=pts/0 ruser=alice rhost=  user=root",
+     {"user_name": "alice", "user_effective_name": "root", "event_action": "su", "event_outcome": "failure",
+      "event_reason": "authentication failure"}),
+    ("pam_unix(su-l:auth): authentication failure; logname=bob uid=1000 euid=1000 tty=/dev/pts/1 ruser=bob rhost=  user=root",
+     {"user_name": "bob", "user_effective_name": "root", "event_action": "su", "event_outcome": "failure",
+      "event_reason": "authentication failure"}),
+    # Ubuntu가 같은 시도에 한 번 더 남기는 줄은 두 번 세지 않도록 결과(event_outcome) 없이 su로만 표시한다
+    ("FAILED SU (to root) alice on pts/0",
+     {"user_name": "alice", "user_effective_name": "root", "event_action": "su", "event_reason": "authentication failure"}),
+])
+def test_su_authentication_failures_become_su_failure(tmp_path, line, expected):
+    rec = _rec("su", SU + line)
+    assert _added(rec, _apply(tmp_path, rec)) == expected
+
+
+@pytest.mark.parametrize("line", [
+    "pam_unix(su:session): session opened for user root by alice(uid=1000)",
+    "(to root) alice on pts/0",
+    "Successful su for root by alice",
+])
+def test_successful_su_is_not_a_failure(tmp_path, line):
+    rec = _rec("su", SU + line)
+    out = _apply(tmp_path, rec)
+    assert out.get("event_outcome") != "failure" and out["body"] == rec["body"]
