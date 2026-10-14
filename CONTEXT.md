@@ -36,6 +36,10 @@ _Avoid_: skip list, Limit (for this purpose)
 Membership of a `servers` host in the inventory group `host_agents_backup_only`, meaning it gets only the backup agent (`resticprofile`/`restic`) and no `otelcol-contrib`, because its logs are collected by a separate system. Deploy, Config, Backup and Repo Maintenance still include it; every otelcol step is skipped and the per-host ingestion token is not required. Its daily backup results are not shipped to OpenObserve. Defined in ADR-0006 §2.1 (2026-10-12 amendment).
 _Avoid_: partial exclusion, otel exclusion
 
+**FUNA Cluster**:
+The three `servers` hosts ns0325, ns0327 and ns0338 that together serve the FUNA API behind a shared VIP, each running the app plus the cluster infrastructure (Caddy, keepalived, Valkey) that is installed and configured by hand. ns0270 is not part of it, although older documents group it with these hosts as the "API cluster".
+_Avoid_: API cluster, API servers, funa nodes (when ns0270 might be included)
+
 **Resource Attribute**:
 A key/value stamped once per host (or per log source) on every log and metric that Host Agents ship — OTel semantic-convention names such as `host.name`, `host.id`, `host.ip`, `host.arch`, `os.name`, `os.version`, `deployment.environment.name` and `service.name`. OpenObserve turns them into stream fields (logs) and series labels (metrics). The values come from the Remote OS Probe and the inventory, not from a collector-side detector. `deployment.environment.name` is declared per host (never defaulted); `host.id` and `host.ip` are left out when the host has none, and the run summary names those hosts. Defined in ADR-0006 §2.3.
 _Avoid_: label, tag, metadata (imprecise — they differ per signal in OTel)
