@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -68,6 +69,7 @@ class FakeO2:
         self.searches = []       # (stream, sql) of the verification step
         self.history = []        # alert evaluation history entries returned by GET alerts/history
         self.search_override = None   # fn(stream, sql, hits) -> hits, to simulate an engine that disagrees
+        self.missing_streams = {SELFTEST_STREAM}   # 아직 레코드가 없는 스트림 — 레코드가 들어오기 전에는 알림 생성이 404
         self.fixtures = yaml.safe_load((ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8"))
         outer = self
 
@@ -140,6 +142,9 @@ class FakeO2:
                 items = outer.store[kind]
                 if method == "POST":
                     rec = dict(body)
+                    if kind == "alert" and body["stream_name"] in outer.missing_streams and not any(
+                            p.split("/")[3] == body["stream_name"] for p, _, _ in outer.ingests):
+                        return self._send(404, {"code": 404, "message": "stream not found"})   # 실제 서버: 데이터 없는 스트림에는 알림을 못 만든다
                     if kind == "alert":
                         rec["alert_id"] = uuid.uuid4().hex
                     if kind == "pipeline":
@@ -448,7 +453,7 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     streams = {p.split("/")[3] for p, _, _ in o2.ingests}
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
                        "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify", "tcpcheck_status_alert_verify",
-                       "backup_logs_alert_verify"}
+                       "backup_logs_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
@@ -741,12 +746,33 @@ def test_selftest_notification_is_clearly_marked_as_a_test(o2):
     assert "시험" in ctx["title"] and o2.store["alert"][SELFTEST]["row_template"].startswith("• ")
 
 
-def test_default_run_sends_no_selftest_record(o2):
+def test_first_run_seeds_the_missing_selftest_stream_with_one_past_record_before_creating_its_alert(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    sent = _selftest_ingests(o2)
+    assert len(sent) == 1 and len(sent[0][2]) == 1
+    assert sent[0][1] == "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()
+    # 알림 조회 구간(5분)보다 오래된 시각이라 시드 레코드로는 통지가 나가지 않는다
+    age_s = time.time() - sent[0][2][0]["_timestamp"] / 1_000_000
+    assert age_s > o2.store["alert"][SELFTEST]["trigger_condition"]["period"] * 60 and age_s < 5 * 3600
+    assert SELFTEST in o2.store["alert"]
+
+
+def test_default_run_sends_no_selftest_record_once_the_selftest_alert_exists(o2):
+    assert _apply(o2).returncode == 0
+    o2.ingests.clear()
     assert _apply(o2).returncode == 0
     assert _selftest_ingests(o2) == []
 
 
+def test_selftest_seed_is_skipped_in_check_mode(o2):
+    res = _apply(o2, "--check")
+    assert res.returncode == 0 and o2.ingests == []
+
+
 def test_verify_notify_injects_exactly_one_selftest_record_with_the_controller_token(o2):
+    assert _apply(o2).returncode == 0
+    o2.ingests.clear()
     res = _apply(o2, extra={"o2c_verify_notify": True})
     assert res.returncode == 0, res.stdout + res.stderr
     sent = _selftest_ingests(o2)

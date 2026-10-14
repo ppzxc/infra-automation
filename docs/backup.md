@@ -153,7 +153,7 @@
 | 항목 | 값 |
 |---|---|
 | Playbook | `playbooks/host_agents_maintenance.yml` |
-| 스케줄 | 매주 일요일 05:00 KST — Semaphore 스케줄 시간대가 Asia/Seoul이면 `0 5 * * 0`, 기본값 UTC면 `0 20 * * 6` ([semaphore-setup.md](semaphore-setup.md) §6) |
+| 스케줄 | 매일 05:00 KST — Semaphore 스케줄 시간대가 Asia/Seoul이면 `0 5 * * *`, 기본값 UTC면 `0 20 * * *` ([semaphore-setup.md](semaphore-setup.md) §6) |
 | Environment | Deploy와 같은 Variable Group: `VAULT_ADDR`, `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(AppRole, BAK-087) 또는 `VAULT_TOKEN`, 선택 `VAULT_NAMESPACE`/`VAULT_MOUNT` — 시크릿은 Git에 두지 않음. 등록 절차는 [semaphore-setup.md](semaphore-setup.md) |
 | 대상 | `servers` 중 인벤토리 `host_agents_excluded` 그룹을 뺀 호스트 (Deploy와 같은 집합, `host_agents_backup_only` 호스트 포함) |
 | 수동 실행 | `-e target_hosts=<host>`(1대), `-e backup_maintenance_read_subset=always\|never` |

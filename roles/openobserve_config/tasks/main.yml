@@ -146,6 +146,40 @@
   ansible.builtin.debug:
     msg: "{{ (o2c_plan_actions | o2c_plan_summary) if (o2c_plan_actions | length > 0) else ['OpenObserve가 이미 정의와 일치합니다 (변경 0건)'] }}"
 
+# 시드(O2C-014)와 합성 레코드(O2C-032)는 둘 다 수집 토큰이 필요하므로, 토큰 검사(O2C-031)를 어떤 쓰기보다 먼저 한다.
+- name: "[O2C-031] Assert the controller ingest token exists (needed to inject the synthetic records)"
+  ansible.builtin.assert:
+    that:
+      - (o2c_kv.controller_ingest_token | default('')) | length > 0
+    fail_msg: "알림 검증에 agents/openobserve의 controller_ingest_token이 필요합니다. 값은 출력하지 않습니다."
+    quiet: true
+  no_log: true
+  when: not ansible_check_mode
+
+# OpenObserve는 레코드가 한 번도 들어오지 않은 스트림에는 알림을 만들지 못한다(404). 자가 시험 알림의 검증 전용 스트림은
+# 처음에 비어 있으므로, 그 알림을 만들 때만 조회 구간(5분)보다 오래된 시드 레코드 1건으로 스트림을 먼저 만든다 — 통지는 나가지 않는다.
+# 수집기가 만드는 운영 스트림(tcpcheck_status 등)은 여기서 만들지 않는다: 수집기가 배포되어야 생긴다.
+- name: "[O2C-014] Seed the empty self-test stream with one past record before its alert is created"
+  ansible.builtin.uri:
+    url: "{{ o2c_endpoint }}/api/{{ o2c_org }}/{{ o2c_selftest_stream }}/_json"
+    method: POST
+    headers:
+      Authorization: "Basic {{ (o2c_org ~ ':' ~ (o2c_kv.controller_ingest_token | default(''))) | b64encode }}"
+    body_format: json
+    body:
+      - _timestamp: "{{ ((now().timestamp() - o2c_selftest_seed_age_s) * 1000000) | int }}"   # now(utc=true)는 naive라 .timestamp()가 현지 시각으로 해석한다
+        host_name: "selftest-seed"
+        message: "stream seed (not a notification test)"
+    status_code: [200, 201]
+    timeout: 30
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  changed_when: false   # 검증 전용 스트림에만 쓰며 운영 상태를 바꾸지 않는다
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - o2c_plan_actions | selectattr('op', 'equalto', 'create') | selectattr('kind', 'equalto', 'alert') | selectattr('name', 'equalto', o2c_selftest_alert.name) | list | length > 0
+
 - name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)"
   ansible.builtin.uri:
     url: "{{ o2c_endpoint }}{{ item.path }}"
@@ -171,7 +205,7 @@
 # ------------------------------------------------------------------------------
 - name: "[O2C-030] Plan the alert verification (synthetic records and rewritten searches)"
   vars:
-    _start_us: "{{ ((now(utc=true).timestamp() - 300) * 1000000) | int }}"
+    _start_us: "{{ ((now().timestamp() - 300) * 1000000) | int }}"   # now(utc=true)는 naive라 .timestamp()가 현지 시각으로 해석한다
     _run_id: "{{ now(utc=true).timestamp() | int }}"
   ansible.builtin.set_fact:
     o2c_verify: >-
@@ -179,15 +213,6 @@
     o2c_verify_auth_headers:
       Authorization: "Basic {{ (o2c_org ~ ':' ~ (o2c_kv.controller_ingest_token | default(''))) | b64encode }}"
     cacheable: false   # credentials never go to the fact cache
-  no_log: true
-  when: not ansible_check_mode
-
-- name: "[O2C-031] Assert the controller ingest token exists (needed to inject the synthetic records)"
-  ansible.builtin.assert:
-    that:
-      - (o2c_kv.controller_ingest_token | default('')) | length > 0
-    fail_msg: "알림 검증에 agents/openobserve의 controller_ingest_token이 필요합니다. 값은 출력하지 않습니다."
-    quiet: true
   no_log: true
   when: not ansible_check_mode
 

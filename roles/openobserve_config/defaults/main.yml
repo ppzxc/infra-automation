@@ -495,6 +495,8 @@ o2c_alert_fixtures: "{{ lookup('ansible.builtin.file', role_path ~ '/files/alert
 # o2c_verify_notify=true일 때만 레코드 1건을 넣어 템플릿·destination·webhook까지 실제로 통지한다(통지에 [TEST]가 붙는다).
 o2c_verify_notify: false
 o2c_selftest_stream: "alert_selftest{{ o2c_verify_stream_suffix }}"
+# 빈 스트림을 만드는 시드 레코드의 나이(초, O2C-014). 알림 조회 구간(5분)보다 길고 OpenObserve 수집 허용 범위(기본 5시간)보다 짧아야 한다.
+o2c_selftest_seed_age_s: 3600
 o2c_selftest_alert:
   name: infra-alert-selftest
   severity: "TEST"
