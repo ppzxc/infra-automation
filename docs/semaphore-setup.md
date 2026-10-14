@@ -12,7 +12,7 @@
 3. Inventory: Static 인벤토리 (Semaphore UI에서 편집, `inventory/hosts.yml.example` 형식)
 4. Variable Group(Environment): OpenBao 접속 값 (모든 템플릿 공용 1개)
 5. Task Template 8개 (아래 §5)
-6. Schedule: Repo Maintenance(주 1회), Host Audit — Monthly(월 1회)
+6. Schedule: Repo Maintenance(매일), Host Audit — Monthly(월 1회)
 7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → OpenObserve — Config → Host Audit(§7.1)
 
 ---
@@ -213,11 +213,11 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 | 항목 | 값 |
 |---|---|
 | Template | Host Agents — Repo Maintenance |
-| 의도한 시각 | 매주 일요일 05:00 **KST** |
-| Cron | Semaphore 스케줄 시간대가 **Asia/Seoul**이면 `0 5 * * 0`, 기본값인 **UTC**면 `0 20 * * 6`(토요일 20:00 UTC) |
+| 의도한 시각 | 매일 05:00 **KST** |
+| Cron | Semaphore 스케줄 시간대가 **Asia/Seoul**이면 `0 5 * * *`, 기본값인 **UTC**면 `0 20 * * *`(전날 20:00 UTC) |
 
-- Semaphore 스케줄은 기본적으로 **UTC**로 계산한다. 서버 설정 `SEMAPHORE_SCHEDULE_TIMEZONE=Asia/Seoul`(또는 config의 `schedule.timezone`)로 바꿀 수 있다. 저장하기 전에 화면에 표시되는 **Next run**이 KST 일요일 05:00인지 확인한다.
-- "첫째 일요일" 판정(10% 읽기 검사)은 플레이북이 `backup_maintenance_timezone: Asia/Seoul` 기준 날짜로 한다. 스케줄을 UTC 토요일 20:00으로 잡아도 KST로는 일요일이라 판정이 맞다.
+- Semaphore 스케줄은 기본적으로 **UTC**로 계산한다. 서버 설정 `SEMAPHORE_SCHEDULE_TIMEZONE=Asia/Seoul`(또는 config의 `schedule.timezone`)로 바꿀 수 있다. 저장하기 전에 화면에 표시되는 **Next run**이 KST 05:00인지 확인한다.
+- 매일 돌아도 10% 읽기 검사는 "첫째 일요일"에만 한다. 판정은 플레이북이 `backup_maintenance_timezone: Asia/Seoul` 기준 날짜로 하므로, 스케줄을 UTC 20:00으로 잡아도 KST 날짜로 맞게 판정된다.
 - 호스트의 백업은 KST 02:00~03:59에 돈다. 그래서 05:00 유지보수와 겹치지 않는다.
 
 ### 6.2 Host Audit — Monthly
@@ -229,7 +229,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 | Cron | Semaphore 스케줄 시간대가 **Asia/Seoul**이면 `0 7 1 * *`. 기본값인 **UTC**면 07:00 KST가 전달 말일 22:00 UTC라 표준 cron으로 표현할 수 없으므로 `0 0 1 * *`(1일 09:00 KST)로 잡는다 |
 
 - 저장하기 전에 **Next run**이 KST 1일 07:00(또는 09:00)인지 확인한다. 보관 경로의 월(`<YYYY-MM>/`)은 KST 기준 실행 시작 월이다.
-- 07:00은 호스트 백업(KST 02:00~03:59)과 Repo Maintenance(일요일 05:00)가 끝난 뒤다. Configuration Drift 하위 실행이 대상 수에 비례해 오래 걸릴 수 있다(`host_audit_drift_timeout` 기본 3600초).
+- 07:00은 호스트 백업(KST 02:00~03:59)과 Repo Maintenance(매일 05:00)가 끝난 뒤다. Configuration Drift 하위 실행이 대상 수에 비례해 오래 걸릴 수 있다(`host_audit_drift_timeout` 기본 3600초).
 - **점검 주기**: ISMS 2.11.2(취약점 점검 및 조치)는 정기 점검을 요구한다. 내부 지침에는 **분기 1회 이상** 점검하고 결과를 결재·보관하도록 정하고, 그 이행 수단으로 **월 1회 자동 실행**(이 스케줄)을 둔다. 월 보고서 중 분기마다 최소 한 부는 결재란에 서명해 ISMS 증적 보관 위치에 둔다.
 
 Deploy, Config, Backup, OpenObserve — Config, Host Audit — On-demand, Host Audit — Resend는 스케줄을 걸지 않는다.

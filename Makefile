@@ -46,7 +46,7 @@ spec-check:
 	@python3 scripts/validate-ansible-specs.py
 
 test-unit:
-	@pytest tests/ -v
+	@if python3 -c "import xdist" 2>/dev/null; then pytest tests/ -v -n 6; else pytest tests/ -v; fi
 
 test-scripts:
 	@./scripts/test_firewalld_docker.sh

@@ -1250,6 +1250,17 @@
       vars:
         _vrl: "{{ lookup('ansible.builtin.file', _role ~ '/files/vrl/security_semantics.vrl') }}"
 
+    - name: "[VERIFY-O2C-014] Verify the self-test stream seed runs only when the self-test alert is created, never in check mode, and is older than the alert window"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-014']['ansible.builtin.uri'].method == 'POST'
+          - _t['O2C-014'].no_log is true and _t['O2C-014'].changed_when is false
+          - "'not ansible_check_mode' in _t['O2C-014'].when"
+          - _t['O2C-014'].when | select('search', 'o2c_selftest_alert.name') | list | length == 1
+          - _t['O2C-014']['ansible.builtin.uri'].body[0]._timestamp is search('o2c_selftest_seed_age_s')
+          - _o2c_raw.index('[O2C-014]') < _o2c_raw.index('[O2C-020]')
+        quiet: true
+
     - name: "[VERIFY-O2C-020] Verify writes are skipped in check mode and every API task hides its payload"
       ansible.builtin.assert:
         that:

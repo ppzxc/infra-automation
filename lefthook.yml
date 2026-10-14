@@ -36,7 +36,14 @@ pre-commit:
 
     pytest:
       tags: test unit quality
-      run: pytest tests/ -v
+      # 테스트마다 ansible-playbook을 실제로 실행해 직렬로는 40분 넘게 걸린다. pytest-xdist가 있으면 6개 워커로 병렬 실행한다.
+      run: |
+        if python3 -c "import xdist" 2>/dev/null; then
+          pytest tests/ -v -n 6
+        else
+          echo "[i] pytest-xdist 없음 — 직렬 실행(느림). 'pip install pytest-xdist'로 설치하면 병렬 실행된다."
+          pytest tests/ -v
+        fi
 
 pre-push:
   parallel: false

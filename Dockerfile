@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir \
     molecule \
     "molecule-plugins[docker]" \
     pytest-testinfra \
+    pytest-xdist \
     docker \
     hvac \
     cryptography \
