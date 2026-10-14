@@ -80,6 +80,10 @@ _Avoid_: host down, dead host, offline host (they imply the server itself is dow
 A `servers` host whose SSH port the central prober on the Semaphore host cannot connect to. It says the server or the network path to it is down, not that its collector stopped; a host that is reachable but sends nothing is a Silent Host instead. Applies to every `servers` host, including Host Agents Backup Only hosts that ship nothing to OpenObserve.
 _Avoid_: host down, dead host (when the prober has not actually failed to connect)
 
+**Watched Port**:
+A network switch port whose description marks it as `Core:` or `Transit:` (switch-to-switch links and links out of the site). Only a Watched Port going down is an incident; any other port being down is normal (unused, reserved, or a server link that Unreachable Host already covers). A port is watched by labelling it on the switch, not by listing it in alert configuration.
+_Avoid_: uplink, important port, monitored port (every port is polled; only Watched Ports alert)
+
 **Event Alert**:
 An alert where each matching log line is itself the incident (a root login, a burst of SSH failures, a kernel I/O error). Once the moment passes there is nothing left to fix, so it is notified once per occurrence window and not repeated.
 _Avoid_: instant alert, log alert
