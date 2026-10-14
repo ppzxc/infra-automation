@@ -95,7 +95,7 @@ all:
 
 Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maintenance도 Deploy와 같은 AppRole로 로그인한다(BAK-087).
 
-> **OpenObserve — Config는 AppRole 로그인을 하지 않고 `VAULT_TOKEN`만 쓴다**(O2C-001). 같은 Variable Group을 붙이되 `VAULT_TOKEN` Secret이 있어야 하며, 없으면 입력 누락으로 실패한다.
+> **OpenObserve — Config도 같은 AppRole로 로그인한다**(O2C-000). 받은 토큰을 `VAULT_TOKEN`보다 먼저 쓰고, AppRole 값이 없거나 로그인이 실패할 때만 `VAULT_TOKEN`으로 조회한다(O2C-001). 둘 다 쓸 수 없으면 입력 누락으로 실패하며, 실패 메시지에 OpenBao 응답 코드가 나온다.
 
 **Environment variables**
 

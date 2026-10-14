@@ -15,6 +15,9 @@
 # Extra variables(-e o2_endpoint=...)가 OpenBao 값보다 우선한다.
 
 o2c_vault_validate_certs: false
+# OpenBao AppRole 입력(O2C-000). 로그인해 받은 토큰이 VAULT_TOKEN보다 먼저다(O2C-001).
+o2c_vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
+o2c_vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
 o2c_kv: {}
 o2c_org: "{{ o2_org | default(o2c_kv.o2_org | default('default', true), true) }}"
 o2c_endpoint: "{{ o2_endpoint | default(o2c_kv.o2_endpoint | default('', true), true) }}"

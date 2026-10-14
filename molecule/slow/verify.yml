@@ -1187,6 +1187,15 @@
     _o2c_tasks: "{{ _o2c_all | selectattr('name', 'match', '^\\[O2C-') | list }}"
     _o2c_ids: "{{ _o2c_tasks | map(attribute='name') | map('regex_replace', '^\\[(O2C-\\d+)\\].*$', '\\1') | list }}"
   tasks:
+    - name: "[VERIFY-O2C-000] Verify the AppRole login is a quiet POST that runs in check mode and its token comes before VAULT_TOKEN"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-000']['ansible.builtin.uri'].method == 'POST'
+          - _t['O2C-000']['ansible.builtin.uri'].url is search('/v1/auth/approle/login')
+          - _t['O2C-000'].check_mode is false and _t['O2C-000'].changed_when is false and _t['O2C-000'].no_log is true
+          - _t['O2C-001'].vars._vault_token_eff is match('<< \\(_o2c_approle_login.json.auth.client_token')
+        quiet: true
+
     - name: "[VERIFY-O2C-001] Verify the OpenBao KV read is read-only, GET-only and hides the token"
       ansible.builtin.assert:
         that:
