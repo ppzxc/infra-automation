@@ -1211,19 +1211,21 @@
           - _t['O2C-002'].block[1]['ansible.builtin.assert'].quiet is true
         quiet: true
 
-    - name: "[VERIFY-O2C-010] Verify the state read is a GET loop over the shared path table and the auth fact is not cacheable"
+    - name: "[VERIFY-O2C-010] Verify the state read is one parallel GET batch over the shared path table and the auth fact is not cacheable"
       ansible.builtin.assert:
         that:
-          - _t['O2C-010']['ansible.builtin.uri'].method == 'GET'
-          - "'loop: \"<< o2c_org | o2c_read_requests }}\"' in _o2c_raw"
+          - _t['O2C-010'].o2c_http.parallel is true
+          - "'o2c_org | o2c_read_requests' in _t['O2C-010'].o2c_http.requests"
+          - "'method' not in _t['O2C-010'].o2c_http.requests"
           - _t['O2C-010'].check_mode is false and _t['O2C-010'].changed_when is false and _t['O2C-010'].no_log is true
           - _t['O2C-003']['ansible.builtin.set_fact'].cacheable is false
         quiet: true
 
-    - name: "[VERIFY-O2C-011] Verify the per-alert detail read is a GET that works in check mode"
+    - name: "[VERIFY-O2C-011] Verify the per-alert detail read is a parallel GET batch that works in check mode"
       ansible.builtin.assert:
         that:
-          - _t['O2C-011']['ansible.builtin.uri'].method == 'GET'
+          - _t['O2C-011'].o2c_http.parallel is true
+          - "'alerts/{alert_id}' in _t['O2C-011'].o2c_http.requests"
           - _t['O2C-011'].check_mode is false and _t['O2C-011'].changed_when is false and _t['O2C-011'].no_log is true
         quiet: true
 
@@ -1265,6 +1267,7 @@
       ansible.builtin.assert:
         that:
           - _tasks | selectattr('name', 'match', '^\\[O2C-020\\]') | map(attribute='when') | first == 'not ansible_check_mode'
+          - _tasks | selectattr('name', 'match', '^\\[O2C-020\\]') | map(attribute='o2c_http') | map(attribute='parallel', default=false) | first == false
           - _tasks | selectattr('name', 'match', '^\\[O2C-(001|010|011|020)\\]') | rejectattr('no_log', 'equalto', true) | list | length == 0
         quiet: true
       vars:
