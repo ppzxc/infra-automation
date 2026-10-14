@@ -1,0 +1,62 @@
+---
+# ==============================================================================
+# 서버 도달성(tcp_check) 대상 해석 (Spec #184 / Ticket-6, ADR-0010, Issue #203)
+# ==============================================================================
+# 검사하는 쪽 호스트(host_agents_o2_health_checker)만 실행한다. servers 전체의 SSH 주소·포트를 OpenBao hosts/<host>에서 직접 읽는다.
+# 포트는 인벤토리가 아니라 OpenBao에만 있고, 연결 해석(resolve_connection.yml)은 실행 대상 호스트만 하므로
+# hostvars를 쓰면 부분 실행(target_hosts=ns0266)에서 나머지가 모두 22로 만들어져 도달성 알림이 오발화한다.
+# OpenBao가 200·404 외로 답하면 22로 짐작하지 않고 실패시킨다. 응답 본문에 시크릿이 있으므로 조회는 no_log다.
+- name: "[MON-227] Fetch the SSH endpoint of every server from OpenBao (hosts/<hostname>)"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_token_eff: "{{ _vault_token | default(vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true), true) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+    _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
+    _vault_hosts_prefix_eff: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true)) | regex_replace('^secret/', '') }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/{{ _vault_hosts_prefix_eff }}{{ item }}"
+    method: GET
+    headers: >-
+      {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
+    status_code: [200, 404]
+    timeout: 5
+    validate_certs: "{{ host_agents_vault_validate_certs }}"
+  loop: "{{ otel_tcpcheck_roster }}"
+  loop_control:
+    label: "{{ item }}"
+  register: otel_tcpcheck_kv_resp
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - otel_tcpcheck_enabled | bool
+    - otel_tcpcheck_kv_fixture is not defined
+    - _vault_token_eff | length > 0
+
+- name: "[MON-228] Assert OpenBao answered every server endpoint lookup"
+  vars:
+    _bad: >-
+      {{ otel_tcpcheck_kv_resp.results | default([]) | rejectattr('status', 'in', [200, 404]) | map(attribute='item') | list }}
+    _statuses: "{{ otel_tcpcheck_kv_resp.results | default([]) | rejectattr('status', 'in', [200, 404]) | map(attribute='status', default=-1) | list }}"
+  ansible.builtin.assert:
+    that:
+      - otel_tcpcheck_kv_fixture is defined or (otel_tcpcheck_kv_resp.results | default([]) | length) == (otel_tcpcheck_roster | length)
+      - otel_tcpcheck_kv_fixture is defined or _bad | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }}: 서버 도달성 대상을 만들 수 없습니다 — OpenBao hosts/<host> 조회 실패(변경 없이 중단).
+      실패 호스트={{ _bad if _bad | length > 0 else '없음(토큰 없음/미조회)' }}, status={{ _statuses if _statuses | length > 0 else '-' }}
+    quiet: true
+  when: otel_tcpcheck_enabled | bool
+
+- name: "[MON-229] Build the server reachability targets (address:port) from the OpenBao values"
+  vars:
+    _kv_by_host: >-
+      {{ otel_tcpcheck_kv_fixture if otel_tcpcheck_kv_fixture is defined
+         else dict(otel_tcpcheck_kv_resp.results | map(attribute='item') | zip(otel_tcpcheck_kv_resp.results | map(attribute='json.data.data', default={}))) }}
+  ansible.builtin.set_fact:
+    otel_tcpcheck_targets: "{{ otel_tcpcheck_roster | host_agents_tcpcheck_targets(_kv_by_host, hostvars) }}"
+  no_log: true
+  when: otel_tcpcheck_enabled | bool

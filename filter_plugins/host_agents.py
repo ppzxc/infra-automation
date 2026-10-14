@@ -437,6 +437,47 @@ def host_agents_warn(msg):
     return msg
 
 
+def _blank(value):
+    return value is None or str(value).strip() == ''
+
+
+def _tcpcheck_host_kv(name, raw):
+    """OpenBao hosts/<host> 본문을 평면 dict로 푼다(resolve_connection.yml과 같은 규칙: 호스트명 키 → 키가 하나뿐인 오브젝트 → 평면)."""
+    if not isinstance(raw, dict):
+        return {}
+    if isinstance(raw.get(name), dict):
+        return raw[name]
+    if len(raw) == 1 and isinstance(next(iter(raw.values())), dict):
+        return next(iter(raw.values()))
+    return raw
+
+
+def host_agents_tcpcheck_targets(roster, kv_by_host, inventory_by_host=None):
+    """서버 도달성(tcp_check) 대상 'address:port' 목록 — 실행 범위(target_hosts)와 무관하게 OpenBao 값으로 만든다.
+
+    주소·포트 해석은 playbooks/common/resolve_connection.yml과 같다. 주소: KV ansible_host → public_ip → ip → host → 인벤토리 ansible_host → 호스트명.
+    포트: KV ansible_port → port → 인벤토리 ansible_port → 22 (정수가 아니면 다음 후보). roster 순서를 유지한다.
+    """
+    inventory_by_host = {} if inventory_by_host is None else inventory_by_host   # 평면 dict 또는 Ansible hostvars
+    targets = []
+    for name in roster:
+        kv = _tcpcheck_host_kv(name, (kv_by_host or {}).get(name))
+        inv = inventory_by_host.get(name) or {}
+        address = next((str(v).strip() for v in (kv.get('ansible_host'), kv.get('public_ip'), kv.get('ip'), kv.get('host'),
+                                                  inv.get('ansible_host')) if not _blank(v)), name)
+        port = 22
+        for candidate in (kv.get('ansible_port'), kv.get('port'), inv.get('ansible_port')):
+            if _blank(candidate):
+                continue
+            try:
+                port = int(str(candidate).strip())
+                break
+            except ValueError:
+                continue
+        targets.append('%s:%d' % (address, port))
+    return targets
+
+
 class FilterModule(object):
     def filters(self):
         return {
@@ -447,5 +488,6 @@ class FilterModule(object):
             'host_agents_resource_attributes': host_agents_resource_attributes,
             'host_agents_secrets': host_agents_secrets,
             'host_agents_shared_errors': host_agents_shared_errors,
+            'host_agents_tcpcheck_targets': host_agents_tcpcheck_targets,
             'host_agents_warn': host_agents_warn,
         }

@@ -235,10 +235,11 @@ Semaphore 호스트(ns0266)의 수집기가 `servers` 전체(Host Agents Backup 
 nc -vz -w 5 <주소> <포트>
 ```
 1. 접속이 안 되면 서버 전원·콘솔·네트워크 경로를 확인한다. 서버가 계획 정지라면 그대로 둔다(정지 중에는 계속 온다).
-2. 접속이 되는데 알림이 온다면 ns0266 수집기(`otelcol-contrib`) 상태, ns0266에서 대상까지의 방화벽 경로, 인벤토리의 `ansible_port`가 실제 SSH 포트와 같은지 본다.
+2. 접속이 되는데 알림이 온다면 ns0266 수집기(`otelcol-contrib`) 상태, ns0266에서 대상까지의 방화벽 경로, OpenBao `hosts/<호스트>`의 `ansible_port`·`public_ip`가 실제 SSH 포트·주소와 같은지 본다(대상은 OpenBao 값으로 만든다).
 3. ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. 이는 ns0266의 Silent Host 알림으로 잡힌다.
 
-**편입·폐기**: 대상 목록은 인벤토리에서 만들므로 호스트를 편입·폐기하면 `Host Agents — Deploy`(또는 Config)를 ns0266에 다시 반영해야 한다.
+**편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `hosts/<호스트>`(주소 `public_ip`, 비표준 SSH 포트 `ansible_port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `Host Agents — Deploy`(또는 Config)를 ns0266에 다시 반영해야 한다.
+**제외**: 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 `host_agents_tcpcheck_excluded`(`inventory/group_vars/servers.yml`)에 호스트 이름을 넣는다. 접속 못 하는 이유가 없어지면 목록에서 뺀다.
 <a id="backup-failure"></a>
 ## 🟠 백업 실패 (`infra-backup-failure`)
 

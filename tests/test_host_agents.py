@@ -27,6 +27,7 @@ from host_agents import (  # noqa: E402
     host_agents_resource_attributes,
     host_agents_resolve_inputs,
     host_agents_secrets,
+    host_agents_tcpcheck_targets,
 )
 
 PLAYBOOKS = ROOT_DIR / "playbooks"
@@ -464,6 +465,10 @@ def openbao():
         "/v1/secret/data/hosts/denied/agents": (403, {"errors": ["permission denied"]}),
         "/v1/secret/data/agents/openobserve": _kv(SHARED_O2),
         "/v1/secret/data/agents/rustfs": _kv(SHARED_RUSTFS),
+        # tcpcheck 대상 해석(hosts/<host>): 주소는 public_ip, 비표준 SSH 포트는 ansible_port (Issue #203)
+        "/v1/secret/data/hosts/svc-std": _kv({"public_ip": "192.0.2.10", "fqdn": "svc-std.example.internal"}),
+        "/v1/secret/data/hosts/svc-odd": _kv({"public_ip": "192.0.2.11", "ansible_port": 8487}),
+        "/v1/secret/data/hosts/svc-denied": (403, {"errors": ["permission denied"]}),
     }
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1221,22 +1226,92 @@ def test_password_auth_exception_leaves_an_audit_warning_only_where_it_applies(t
 
 # --- 서버 도달성 tcp_check (Spec #184 / Ticket-6, ADR-0010) -------------------------------------------------------
 
-def _reach_inventory():
-    hosts = {"ns0001": {"ansible_host": "192.0.2.1", "ansible_port": 22},
-             "ns0002": {"ansible_host": "192.0.2.2", "ansible_port": 2222}, "ns0003": {}}
-    return {"all": {"hosts": {"localhost": {"ansible_connection": "local"}}, "children": {
-        "servers": {"hosts": hosts}, "host_agents_backup_only": {"hosts": {"ns0003": {}}}}}}
-
-
-def test_only_the_checker_host_gets_tcp_check_for_every_server_with_its_ssh_port(tmp_path):
-    over = dict(_inventory=_reach_inventory(), inventory_hostname="localhost", host_agents_o2_health_checker="localhost")
+def test_only_the_checker_host_gets_tcp_check_for_every_target_in_the_resolved_list(tmp_path):
+    targets = ["192.0.2.1:22", "192.0.2.2:2222", "ns0003:22"]
+    over = dict(otel_tcpcheck_targets=targets, inventory_hostname="localhost", host_agents_o2_health_checker="localhost")
     (tmp_path / "checker").mkdir()
     cfg, _ = _render_config(tmp_path / "checker", **over)
     rx = cfg["receivers"]["tcp_check"]
     assert rx["collection_interval"] == "60s"
-    assert [t["endpoint"] for t in rx["targets"]] == ["192.0.2.1:22", "192.0.2.2:2222", "ns0003:22"]   # Backup Only 포함
+    assert [t["endpoint"] for t in rx["targets"]] == targets
     pipe = cfg["service"]["pipelines"]["metrics/tcpcheck"]
     assert pipe["receivers"] == ["tcp_check"] and pipe["exporters"] == ["otlphttp/metrics"]
     (tmp_path / "other").mkdir()
     other, _ = _render_config(tmp_path / "other", **dict(over, host_agents_o2_health_checker="ns0266"))
     assert "tcp_check" not in other["receivers"] and "metrics/tcpcheck" not in other["service"]["pipelines"]
+
+
+# --- tcpcheck 대상 해석: 실행 범위와 무관하게 OpenBao에서 읽는다 (Issue #203) --------------------------------------------
+
+def test_tcpcheck_targets_use_the_connection_rules_of_resolve_connection():
+    f = host_agents_tcpcheck_targets
+    kv = {"ns0001": {"public_ip": "192.0.2.1"},                                  # 주소: public_ip, 포트: 22
+          "ns0002": {"public_ip": "192.0.2.2", "ansible_port": 8487},            # 비표준 포트는 KV에서
+          "ns0003": {"ansible_host": "192.0.2.3", "public_ip": "192.0.2.9", "ip": "10.0.0.3", "ansible_port": "77"},   # ansible_host가 먼저
+          "ns0004": {"ip": "10.0.0.4", "port": 2001},                            # ip → host 순서, port 키
+          "ns0005": {"host": "192.0.2.5"}}
+    assert f(["ns0001", "ns0002", "ns0003", "ns0004", "ns0005"], kv) == [
+        "192.0.2.1:22", "192.0.2.2:8487", "192.0.2.3:77", "10.0.0.4:2001", "192.0.2.5:22"]
+
+
+def test_tcpcheck_targets_fall_back_to_the_inventory_and_then_the_name_and_port_22():
+    f = host_agents_tcpcheck_targets
+    inv = {"ns0001": {"ansible_host": "192.0.2.1", "ansible_port": 2222}, "ns0002": {"ansible_host": "", "ansible_port": ""}}
+    assert f(["ns0001", "ns0002", "ns0003"], {"ns0001": {}}, inv) == ["192.0.2.1:2222", "ns0002:22", "ns0003:22"]
+    # KV가 인벤토리보다 우선한다
+    assert f(["ns0001"], {"ns0001": {"public_ip": "192.0.2.77", "ansible_port": 8487}}, inv) == ["192.0.2.77:8487"]
+
+
+def test_tcpcheck_targets_accept_the_nested_kv_format_and_ignore_an_invalid_port():
+    f = host_agents_tcpcheck_targets
+    assert f(["ns0001"], {"ns0001": {"ns0001": {"public_ip": "192.0.2.1", "ansible_port": 8487}}}) == ["192.0.2.1:8487"]
+    assert f(["ns0001"], {"ns0001": {"public_ip": "192.0.2.1", "ansible_port": "abc"}}) == ["192.0.2.1:22"]
+
+
+def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token="tok", others=()):
+    role_vars = {}
+    for f in ("defaults", "vars"):
+        role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
+    role_vars.update({"host_agents_o2_health_checker": checker, "host_agents_tcpcheck_excluded": list(excluded)})
+    tasks = [{"ansible.builtin.import_tasks": str(ROLE / "tasks" / "tcpcheck_targets.yml")},
+             {"name": "Dump targets", "ansible.builtin.copy": {
+                 "content": "{{ (otel_tcpcheck_targets | default(None)) | to_json }}",
+                 "dest": f"{tmp_path}/targets-{{{{ inventory_hostname }}}}.json", "mode": "0600"}, "check_mode": False}]
+    (tmp_path / "play.yml").write_text(yaml.safe_dump([{
+        "hosts": "all:!servers", "gather_facts": False, "connection": "local", "become": False, "vars": role_vars, "tasks": tasks}]))
+    hosts = {h: dict((inventory_hosts or {}).get(h, {})) for h in [checker, *others, *servers]}
+    inv = {"all": {"hosts": {h: {"_vault_token": token, **v} for h, v in hosts.items()},
+                   "vars": {"vault_addr": addr, "vault_namespace": ""},
+                   "children": {"servers": {"hosts": {h: {} for h in servers}}}}}
+    (tmp_path / "inv.yml").write_text(yaml.safe_dump(inv))
+    res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")],
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR)
+    out = {h: json.loads((tmp_path / f"targets-{h}.json").read_text()) for h in hosts if (tmp_path / f"targets-{h}.json").exists()}
+    return res, out
+
+
+def test_checker_resolves_every_server_endpoint_from_openbao_regardless_of_the_run_scope(tmp_path, openbao):
+    # 인벤토리에는 포트가 없다(실제 값은 OpenBao에만 있다) — 부분 실행에서도 비표준 포트가 맞아야 한다
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd", "svc-none"], inventory_hosts={"svc-none": {"ansible_host": "192.0.2.9"}})
+    assert res.returncode == 0, res.stdout + res.stderr
+    # 로스터는 호스트명 정렬: svc-none(OpenBao 404 → 인벤토리 주소), svc-odd(KV 비표준 포트), svc-std
+    assert out["chk"] == ["192.0.2.9:22", "192.0.2.11:8487", "192.0.2.10:22"]
+
+
+def test_excluded_servers_are_not_probed(tmp_path, openbao):
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd"], excluded=["svc-odd"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["192.0.2.10:22"]
+
+
+def test_a_non_checker_host_gets_no_targets(tmp_path, openbao):
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std"], others=["not-the-checker"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["192.0.2.10:22"] and out["not-the-checker"] is None
+
+
+def test_an_openbao_error_fails_the_checker_instead_of_silently_guessing_port_22(tmp_path, openbao):
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-denied"])
+    text = res.stdout + res.stderr
+    assert res.returncode != 0 and out == {}
+    assert "svc-denied" in text and "403" in text

@@ -262,4 +262,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-223` | `Deploy the OpenObserve health env file (0600, no_log, no diff)` | `ansible.builtin.template` | modern, 검사 호스트 | webhook URL·토큰(OpenBao 기존 값)을 담는 시크릿 파일 `0600`, `no_log`, diff 없음 |
 | `MON-224` | `Deploy the OpenObserve health service and timer units` | `ansible.builtin.template` | modern, 검사 호스트 | `openobserve-health.service`(oneshot)와 `.timer`(`OnUnitActiveSec=5min`) `0644` |
 | `MON-225` | `Reload systemd units when the OpenObserve health units changed` | `ansible.builtin.systemd` | modern, 검사 호스트 | 유닛 변경 시에만 `daemon_reload` |
+| `MON-227` | `Fetch the SSH endpoint of every server from OpenBao (hosts/<hostname>)` | `ansible.builtin.uri` | 검사 호스트 | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`, `no_log`). `servers`에서 `host_agents_tcpcheck_excluded`를 뺀 모든 호스트를 OpenBao에서 직접 읽어 실행 범위(`target_hosts`)와 무관하게 같은 목록이 나온다 |
+| `MON-228` | `Assert OpenBao answered every server endpoint lookup` | `ansible.builtin.assert` | 검사 호스트 | 읽기 전용 (200·404 외 응답이 있으면 포트를 22로 짐작하지 않고 변경 없이 실패, 호스트 이름과 status만 보고) |
+| `MON-229` | `Build the server reachability targets (address:port) from the OpenBao values` | `ansible.builtin.set_fact` | 검사 호스트 | 순수 함수 (`host_agents_tcpcheck_targets`: 주소 `ansible_host→public_ip→ip→host→인벤토리→호스트명`, 포트 `ansible_port→port→인벤토리→22`, resolve_connection과 같은 규칙) |
 | `MON-226` | `Ensure the OpenObserve health timer is enabled and running` | `ansible.builtin.systemd` | modern, 검사 호스트 | 타이머 `enabled` + `started` |
