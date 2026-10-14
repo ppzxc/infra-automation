@@ -1268,7 +1268,7 @@ def test_tcpcheck_targets_accept_the_nested_kv_format_and_ignore_an_invalid_port
     assert f(["ns0001"], {"ns0001": {"public_ip": "192.0.2.1", "ansible_port": "abc"}}) == ["192.0.2.1:22"]
 
 
-def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token="tok", others=()):
+def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token="tok", others=(), excluded_group=None):
     role_vars = {}
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
@@ -1283,6 +1283,8 @@ def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inv
     inv = {"all": {"hosts": {h: {"_vault_token": token, **v} for h, v in hosts.items()},
                    "vars": {"vault_addr": addr, "vault_namespace": ""},
                    "children": {"servers": {"hosts": {h: {} for h in servers}}}}}
+    if excluded_group is not None:   # Semaphore 인벤토리의 tcpcheck_excluded 그룹(host_agents_excluded와 같은 방식)
+        inv["all"]["children"]["tcpcheck_excluded"] = {"hosts": {h: {} for h in excluded_group}}
     (tmp_path / "inv.yml").write_text(yaml.safe_dump(inv))
     res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")],
                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR)
@@ -1302,6 +1304,19 @@ def test_excluded_servers_are_not_probed(tmp_path, openbao):
     res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd"], excluded=["svc-odd"])
     assert res.returncode == 0, res.stdout + res.stderr
     assert out["chk"] == ["192.0.2.10:22"]
+
+
+def test_servers_in_the_tcpcheck_excluded_inventory_group_are_not_probed(tmp_path, openbao):
+    # Semaphore 인벤토리는 DB에 저장된 static-yaml이라 저장소 group_vars가 아니라 인벤토리 그룹으로 제외한다 (Issue #205)
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd"], excluded_group=["svc-odd"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["192.0.2.10:22"]
+
+
+def test_group_and_variable_exclusions_are_combined(tmp_path, openbao):
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd", "svc-none"], excluded=["svc-odd"], excluded_group=["svc-std"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["svc-none:22"]
 
 
 def test_a_non_checker_host_gets_no_targets(tmp_path, openbao):

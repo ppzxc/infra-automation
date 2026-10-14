@@ -239,7 +239,7 @@ nc -vz -w 5 <주소> <포트>
 3. ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. 이는 ns0266의 Silent Host 알림으로 잡힌다.
 
 **편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `hosts/<호스트>`(주소 `public_ip`, 비표준 SSH 포트 `ansible_port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `Host Agents — Deploy`(또는 Config)를 ns0266에 다시 반영해야 한다.
-**제외**: 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 `host_agents_tcpcheck_excluded`(`inventory/group_vars/servers.yml`)에 호스트 이름을 넣는다. 접속 못 하는 이유가 없어지면 목록에서 뺀다.
+**제외**: 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 Semaphore 인벤토리(`hosts`)의 `tcpcheck_excluded` 그룹에 넣는다(`host_agents_excluded`와 같은 방식). 접속 못 하는 이유가 없어지면 그룹에서 뺀다. 목록에서 빠진 서버는 도달성 알림을 받지 못한다. Extra variables `host_agents_tcpcheck_excluded`로도 지정할 수 있다. 저장소의 `inventory/group_vars`는 Semaphore에서 읽히지 않으니 거기에 두지 않는다.
 <a id="backup-failure"></a>
 ## 🟠 백업 실패 (`infra-backup-failure`)
 

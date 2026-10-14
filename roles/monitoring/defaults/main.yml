@@ -123,7 +123,10 @@ o2_health_renotify_minutes: 60
 # 부분 실행(target_hosts)에서도 같은 목록이 나온다. 호스트를 편입·폐기하면 검사하는 쪽에 Host Agents 설정을 다시 반영해야 한다.
 otel_tcpcheck_enabled: "{{ inventory_hostname == host_agents_o2_health_checker }}"
 otel_tcpcheck_interval: "60s"
-# 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버(이름만, 시크릿 아님). 목록에 있으면 대상에서 빠진다.
+# 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 대상에서 빠진다(이름만, 시크릿 아님). 제외 방법 두 가지를 합친다:
+#   - Semaphore 인벤토리의 `tcpcheck_excluded` 그룹(host_agents_excluded·host_audit_excluded와 같은 방식, 평상시 방법)
+#   - 변수 host_agents_tcpcheck_excluded(Extra variables 재정의용)
+# Semaphore 인벤토리는 DB에 저장된 static-yaml이라 저장소 inventory/group_vars는 읽히지 않는다 — 그룹으로 지정한다.
 host_agents_tcpcheck_excluded: []
-otel_tcpcheck_roster: "{{ groups['servers'] | default([]) | difference(host_agents_tcpcheck_excluded) | sort }}"
+otel_tcpcheck_roster: "{{ groups['servers'] | default([]) | difference(host_agents_tcpcheck_excluded | union(groups['tcpcheck_excluded'] | default([]))) | sort }}"
 
