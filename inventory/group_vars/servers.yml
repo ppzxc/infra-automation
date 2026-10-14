@@ -24,6 +24,12 @@ common_packages:
   - tar
   - gzip
 
+# 서버 도달성(Unreachable Host, ADR-0010) 검사 대상에서 뺄 서버: ns0266에서 접속할 수 없는 것이 정상인 서버(이름만 적는다).
+# 접속 못 하는 이유가 해소되면 목록에서 뺀다. 목록에서 빠진 서버는 도달성 알림을 받지 못한다.
+host_agents_tcpcheck_excluded:
+  - ns0229
+  - ns0246
+
 # Host Agents — OpenObserve / RustFS 연결 값 (ADR-0006 §2.7, 해석 순서: Extra variables·group_vars > OpenBao > 기본값)
 # 이 저장소는 공개(PUBLIC)이므로 내부 도메인을 여기에 적지 않는다. 평상시에는 OpenBao에 넣는다:
 #   secret/agents/openobserve : o2_endpoint, o2_org, o2_ca_file   (+ controller_ingest_token)

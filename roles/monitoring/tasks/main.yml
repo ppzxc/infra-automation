@@ -12,6 +12,11 @@
   ansible.builtin.import_tasks: agents_input.yml
   tags: [always]
 
+# 서버 도달성 대상: 검사하는 쪽만(태스크 안 when). 설정 렌더링(MON-004-CONF, legacy.yml)보다 먼저 실행한다.
+- name: Resolve the server reachability targets from OpenBao
+  ansible.builtin.import_tasks: tcpcheck_targets.yml
+  tags: [agents_install, agents_config]
+
 # ==============================================================================
 # 1. Legacy Node Exporter Cleanup (Complete Removal)
 # ==============================================================================
