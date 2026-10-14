@@ -410,10 +410,37 @@ def o2c_alert_history_errors(history, alert_names):
     return sorted(n for n, h in latest.items() if str(h.get('status', '')).lower() == 'error')
 
 
+def o2c_as_requests(items, path=None, path_key='path', method_key=None, default_method='GET', body_key=None, label=None):
+    """Turn ``items`` into the ``requests`` list of the ``o2c_http`` module, keeping each original item for the results.
+
+    ``path`` is a format string over the item (e.g. ``/api/v2/org/alerts/{alert_id}``); otherwise ``item[path_key]`` is used.
+    ``label`` (format string over the item) names the request in failure messages — never put secrets in it.
+    """
+    out = []
+    for item in items or []:
+        out.append({'path': path.format(**item) if path else item[path_key],
+                    'method': item.get(method_key, default_method) if method_key else default_method,
+                    'body': item.get(body_key) if body_key else None,
+                    'label': label.format(**item) if label else (path.format(**item) if path else item[path_key]),
+                    'item': item})
+    return out
+
+
+def o2c_verify_pending(results):
+    """Names of the alerts whose verification search still mismatches (or whose request failed) — the retry loop waits on these."""
+    pending = []
+    for r in results or []:
+        search = r['item']
+        hits = (r.get('json') or {}).get('hits', []) if r.get('status') == 200 else []
+        if r.get('status') != 200 or o2c_verify_failures(hits, search):
+            pending.append(search['alert'])
+    return pending
+
+
 class FilterModule(object):
     def filters(self):
         return {'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
-                'o2c_alert_state': o2c_alert_state, 'o2c_resource_sql': o2c_resource_sql,
+                'o2c_alert_state': o2c_alert_state, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
                 'o2c_alert_history_errors': o2c_alert_history_errors,

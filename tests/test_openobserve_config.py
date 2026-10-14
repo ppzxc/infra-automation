@@ -402,12 +402,15 @@ def test_webhook_without_token_sends_no_auth_header(o2):
 
 def test_every_api_task_is_no_log_and_writes_are_skipped_in_check_mode():
     tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
-    uri_tasks = [t for t in tasks if "ansible.builtin.uri" in t]
-    assert uri_tasks and all(t.get("no_log") is True for t in uri_tasks)
+    api_tasks = [t for t in tasks if "ansible.builtin.uri" in t or "o2c_http" in t]
+    assert api_tasks and all(t.get("no_log") is True for t in api_tasks)
     apply = next(t for t in tasks if t["name"].startswith("[O2C-020]"))
-    assert apply["when"] == "not ansible_check_mode" and apply["changed_when"] is True
+    assert apply["when"] == "not ansible_check_mode" and apply["changed_when"] == "o2c_plan_actions | length > 0"
+    assert "parallel" not in apply["o2c_http"]   # 쓰기는 계획된 순서(템플릿→대상→함수→파이프라인→알림)대로 하나씩 보낸다
     reads = [t for t in tasks if t["name"][:9] in ("[O2C-010]", "[O2C-011]")]
-    assert all(t["check_mode"] is False and t["changed_when"] is False for t in reads)
+    assert all(t["check_mode"] is False and t["changed_when"] is False and t["o2c_http"]["parallel"] is True for t in reads)
+    # 같은 모듈이 check 모드에서는 GET만 보내므로(모듈 테스트) 쓰기 태스크는 이중으로 막혀 있다
+    assert all(t["o2c_http"].get("headers") for t in api_tasks if "o2c_http" in t)
 
 
 def test_credential_facts_are_never_cacheable_and_reads_use_the_plan_path_table():
@@ -424,7 +427,7 @@ def test_credential_facts_are_never_cacheable_and_reads_use_the_plan_path_table(
              and ({"o2c_kv", "o2c_auth_headers"} & set(t["ansible.builtin.set_fact"]))]
     assert len(facts) == 2 and all(t["ansible.builtin.set_fact"].get("cacheable") is False for t in facts)
     read = next(t for t in tasks if t["name"].startswith("[O2C-010]"))
-    assert read["loop"] == "{{ o2c_org | o2c_read_requests }}"
+    assert "o2c_org | o2c_read_requests" in read["o2c_http"]["requests"]
 
 
 def test_no_secret_value_is_committed_in_the_role_or_playbook():
@@ -979,3 +982,122 @@ def test_adr_0006_alert_contract_has_grades_and_no_unexecuted_host_row():
     adr = next((ROOT_DIR / "docs" / "adr").glob("0006-*.md")).read_text(encoding="utf-8")
     table = adr[adr.index("표준 알림 계약"):adr.index("### 2.7")]
     assert "| 미실행 호스트" not in table and "P2" in table
+
+
+# --- 요청 일괄 처리 모듈 o2c_http와 필터 (Issue #207: Config 속도) -----------------------------------------------------------
+import sys  # noqa: E402
+
+sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
+from openobserve_config import o2c_as_requests, o2c_verify_pending  # noqa: E402
+
+
+def test_as_requests_builds_path_body_label_and_keeps_the_original_item():
+    items = [{"kind": "alert", "path": "/api/default/alerts", "op": "create", "name": "a", "body": {"x": 1}}]
+    assert o2c_as_requests(items, method_key="method", default_method="POST", body_key="body", label="{op} {kind} {name}") == [
+        {"path": "/api/default/alerts", "method": "POST", "body": {"x": 1}, "label": "create alert a", "item": items[0]}]
+    alerts = [{"alert_id": "abc", "name": "n1"}]
+    assert o2c_as_requests(alerts, path="/api/v2/default/alerts/{alert_id}", label="{name}") == [
+        {"path": "/api/v2/default/alerts/abc", "method": "GET", "body": None, "label": "n1", "item": alerts[0]}]
+
+
+def _search(alert, fires_host, hosts):
+    return {"alert": alert, "row_key": "host_name",
+            "hosts": {h: {"case": c, "fires": f, "known_failure": None} for h, (c, f) in hosts.items()}}
+
+
+def test_verify_pending_lists_alerts_that_do_not_match_yet_or_whose_request_failed():
+    ok = _search("a1", None, {"h1": ("fires", True), "h2": ("quiet", False)})
+    pend = _search("a2", None, {"h3": ("fires", True)})
+    down = _search("a3", None, {"h4": ("fires", True)})
+    results = [{"item": ok, "status": 200, "json": {"hits": [{"host_name": "h1"}]}},
+               {"item": pend, "status": 200, "json": {"hits": []}},
+               {"item": down, "status": -1}]
+    assert o2c_verify_pending(results) == ["a2", "a3"]
+    assert o2c_verify_pending([results[0]]) == []
+
+
+def _module_play(tmp_path, url, module_args, check=False):
+    play = tmp_path / "m.yml"
+    play.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
+        {"name": "go", "o2c_http": module_args, "register": "r", "ignore_errors": True},
+        {"copy": {"content": "{{ r | to_json }}", "dest": str(tmp_path / "out.json")}, "check_mode": False}]}]))
+    cmd = ["ansible-playbook", "-i", "localhost,", str(play), "-M", str(ROLE / "library"), "-e", "ansible_python_interpreter=" + sys.executable]
+    if check:
+        cmd.append("--check")
+    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    return res, (json.loads((tmp_path / "out.json").read_text()) if (tmp_path / "out.json").exists() else None)
+
+
+class _Echo(BaseHTTPRequestHandler):
+    seen = []
+
+    def _do(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n).decode() if n else ""
+        _Echo.seen.append((self.command, self.path, body, self.headers.get("Authorization"), self.headers.get("Content-Type")))
+        status = 404 if self.path.startswith("/missing") else 200
+        data = json.dumps({"path": self.path, "echo": body}).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    do_GET = do_POST = do_PUT = do_DELETE = _do  # noqa: N815
+
+    def log_message(self, *a):
+        pass
+
+
+@pytest.fixture()
+def echo():
+    _Echo.seen = []
+    srv = HTTPServer(("127.0.0.1", 0), _Echo)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_port}"
+    srv.shutdown()
+
+
+def _reqs(*specs):
+    return [{"path": p, "method": m, "body": b, "label": f"{m} {p}", "item": {"n": i}} for i, (m, p, b) in enumerate(specs)]
+
+
+def test_module_returns_results_in_request_order_with_status_json_and_item(tmp_path, echo):
+    reqs = _reqs(("GET", "/a", None), ("POST", "/b", {"k": "v"}), ("GET", "/c", None))
+    res, out = _module_play(tmp_path, echo, {"base_url": echo, "requests": reqs, "headers": {"Authorization": "Basic SECRET"}, "parallel": True})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert [r["item"]["n"] for r in out["results"]] == [0, 1, 2]
+    assert [r["status"] for r in out["results"]] == [200, 200, 200]
+    assert out["results"][1]["json"]["path"] == "/b" and json.loads(out["results"][1]["json"]["echo"]) == {"k": "v"}
+    sent = {(m, p): (a, c) for m, p, _, a, c in _Echo.seen}
+    assert sent[("POST", "/b")] == ("Basic SECRET", "application/json")
+
+
+def test_module_fails_on_a_status_outside_the_allowed_list_and_names_the_request_but_not_the_secret(tmp_path, echo):
+    reqs = _reqs(("GET", "/a", None), ("GET", "/missing", None))
+    res, out = _module_play(tmp_path, echo, {"base_url": echo, "requests": reqs, "headers": {"Authorization": "Basic SECRET"}})
+    text = res.stdout + res.stderr
+    assert out["failed"] is True and "404" in out["msg"] and "GET /missing" in out["msg"]
+    assert "SECRET" not in text and "SECRET" not in json.dumps(out)
+
+
+def test_module_records_the_status_without_failing_when_asked_and_runs_writes_in_order(tmp_path, echo):
+    reqs = _reqs(("POST", "/1", {}), ("PUT", "/missing", {}), ("DELETE", "/3", {}))
+    res, out = _module_play(tmp_path, echo, {"base_url": echo, "requests": reqs, "headers": {}, "fail_on_status": False})
+    assert out.get("failed") is not True
+    assert [r["status"] for r in out["results"]] == [200, 404, 200]
+    assert [(m, p) for m, p, *_ in _Echo.seen] == [("POST", "/1"), ("PUT", "/missing"), ("DELETE", "/3")]   # 순서대로
+
+
+def test_module_does_not_send_writes_in_check_mode_but_still_reads(tmp_path, echo):
+    reqs = _reqs(("GET", "/r", None), ("POST", "/w", {}))
+    res, out = _module_play(tmp_path, echo, {"base_url": echo, "requests": reqs, "headers": {}}, check=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert [(m, p) for m, p, *_ in _Echo.seen] == [("GET", "/r")]
+    assert [r["status"] for r in out["results"]] == [200, None] and out["results"][1]["skipped"] is True
+
+
+def test_module_reports_a_connection_failure_as_status_minus_one_when_not_failing(tmp_path):
+    res, out = _module_play(tmp_path, "http://127.0.0.1:1", {"base_url": "http://127.0.0.1:1", "requests": _reqs(("GET", "/a", None)),
+                                                              "headers": {}, "fail_on_status": False, "timeout": 2})
+    assert out["results"][0]["status"] == -1

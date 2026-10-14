@@ -85,14 +85,16 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-001` | `Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `check_mode: false`, `no_log`) |
 | `O2C-002` | `Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)` | `ansible.builtin.assert` | Controller | 읽기 전용 (필수 입력이 없으면 요청 전에 실패, `no_log`) |
 | `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 템플릿·대상·함수·파이프라인·알림) |
-| `O2C-010` | `Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
-| `O2C-011` | `Read each existing alert (the list view carries no query or trigger settings)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
+| `O2C-010` | `Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
+| `O2C-011` | `Read each existing alert (the list view carries no query or trigger settings)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
 | `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음) |
 | `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력) |
 | `O2C-014` | `Seed the empty self-test stream with one past record before its alert is created` | `ansible.builtin.uri` | Controller | 자가 시험 알림을 새로 만들 때만 검증 전용 스트림에 조회 구간보다 오래된(기본 1시간 전) 레코드 1건을 넣어 스트림을 만든다 — 통지 없음 (`changed_when: false`, check 모드 제외, `no_log`) |
-| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)` | `ansible.builtin.uri` | Controller | 계획된 차이만 전송 — 저장소 정의에 없는 `infra-` 접두어 알림은 DELETE, 접두어 밖 알림은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
+| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)` | `o2c_http` | Controller | 계획된 차이만 전송 — 저장소 정의에 없는 `infra-` 접두어 알림은 DELETE, 접두어 밖 알림은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
 
 ### 알림 검증 단계 (Spec #184 / Ticket-1)
+
+> **`o2c_http` 모듈** (`roles/openobserve_config/library/o2c_http.py`, Issue #207): 위 표에서 `ansible.builtin.uri`를 `loop`로 돌리던 태스크를 요청 목록을 한 번의 모듈 실행으로 보내게 바꿨다. `uri` loop는 항목마다 모듈 프로세스를 새로 띄워(약 0.4초) 알림 수에 비례해 느렸다(상태 조회·상세 조회·검증이 합쳐 약 50초). 결과는 `uri` loop의 `results`(`item`·`status`·`json`)와 같은 모양이라 필터·검증 태스크는 그대로다. 읽기·검색·검증 레코드 주입(`parallel: true`)은 동시에 보내고, 쓰기(`O2C-020`)는 계획된 순서(템플릿→대상→함수→파이프라인→알림)대로 하나씩 보내며 앞 요청이 실패하면 멈춘다. check 모드에서는 GET만 보낸다. 헤더(Authorization)는 `no_log`로 가려지고 실패 메시지에는 요청 이름과 상태만 나온다. `O2C-033`의 재시도는 항목별에서 전체 검색 재전송으로 바뀌었다(불일치가 남은 알림이 없을 때까지 `o2c_verify_retries`×`o2c_verify_delay`). 모듈이 role 전용이라 FQCN이 없다.
 
 반영(`O2C-020`) 직후 매번 실행한다. check 모드에서는 요청을 보내지 않는다. 운영 스트림·운영 알림·통지 대상은 건드리지 않는다.
 
@@ -104,8 +106,8 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 |---|---|---|---|---|
 | `O2C-030` | `Plan the alert verification (synthetic records and rewritten searches)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_verify_plan`), check 모드 제외, `no_log` |
 | `O2C-031` | `Assert the controller ingest token exists (needed to inject the synthetic records)` | `ansible.builtin.assert` | Controller | 토큰이 없으면 주입 전에 실패 |
-| `O2C-032` | `Inject the synthetic records into the verification streams` | `ansible.builtin.uri` | Controller | 검증 스트림에만 POST (`changed_when: false`, `no_log`) |
-| `O2C-033` | `Run each alert SQL against its verification stream and compare with the expected rows` | `ansible.builtin.uri` | Controller | 검색 POST, 수집 지연을 위해 재시도 (`no_log`) |
+| `O2C-032` | `Inject the synthetic records into the verification streams` | `o2c_http` | Controller | 검증 스트림에만 POST (`changed_when: false`, `no_log`) |
+| `O2C-033` | `Run each alert SQL against its verification stream and compare with the expected rows` | `o2c_http` | Controller | 검색 POST, 수집 지연을 위해 재시도 (`no_log`) |
 | `O2C-034` | `Fail when an alert did not fire (or fired) as the fixtures expect` | `ansible.builtin.debug` | Controller | 불일치 시 알림·케이스 이름과 함께 실패 |
 | `O2C-035` | `Read the recent alert evaluation history` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `no_log`) |
 | `O2C-036` | `Fail when the latest evaluation of a managed alert ended in error` | `ansible.builtin.assert` | Controller | 평가 오류가 있으면 실패 |

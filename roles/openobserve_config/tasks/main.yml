@@ -97,37 +97,35 @@
     cacheable: false   # credentials never go to the fact cache (ansible.cfg fact_caching = jsonfile)
   no_log: true
 
+# 아래 API 호출 태스크는 role 안의 o2c_http 모듈(library/o2c_http.py)을 쓴다 — ansible.builtin.uri를 loop로 돌리면
+# 항목마다 모듈 프로세스를 새로 띄워(약 0.4초) 알림 수에 비례해 느리다. 결과는 uri loop의 results(item/status/json)와 같은 모양이다.
 - name: "[O2C-010] Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)"
-  ansible.builtin.uri:
-    url: "{{ o2c_endpoint }}{{ item.path }}"
-    method: GET
+  o2c_http:
+    base_url: "{{ o2c_endpoint }}"
     headers: "{{ o2c_auth_headers }}"
-    status_code: 200
+    requests: "{{ o2c_org | o2c_read_requests | o2c_as_requests(label='{kind}') }}"
     timeout: 15
+    parallel: true
     validate_certs: "{{ o2c_validate_certs | bool }}"
     ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
-  loop: "{{ o2c_org | o2c_read_requests }}"
-  loop_control:
-    label: "{{ item.kind }}"
   register: _o2c_current
   changed_when: false
   check_mode: false
   no_log: true
 
 - name: "[O2C-011] Read each existing alert (the list view carries no query or trigger settings)"
-  ansible.builtin.uri:
-    url: "{{ o2c_endpoint }}/api/v2/{{ o2c_org }}/alerts/{{ item.alert_id }}"
-    method: GET
+  vars:
+    _alert_list: >-
+      {{ (_o2c_current.results | selectattr('item.kind', 'equalto', 'alert') | map(attribute='json') | first).list | default([])
+         | selectattr('alert_id', 'defined') | list }}
+  o2c_http:
+    base_url: "{{ o2c_endpoint }}"
     headers: "{{ o2c_auth_headers }}"
-    status_code: 200
+    requests: "{{ _alert_list | o2c_as_requests(path='/api/v2/' ~ o2c_org ~ '/alerts/{alert_id}', label='{name}') }}"
     timeout: 15
+    parallel: true
     validate_certs: "{{ o2c_validate_certs | bool }}"
     ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
-  loop: >-
-    {{ (_o2c_current.results | selectattr('item.kind', 'equalto', 'alert') | map(attribute='json') | first).list | default([])
-       | selectattr('alert_id', 'defined') | list }}
-  loop_control:
-    label: "{{ item.name }}"
   register: _o2c_alert_details
   changed_when: false
   check_mode: false
@@ -181,20 +179,15 @@
     - o2c_plan_actions | selectattr('op', 'equalto', 'create') | selectattr('kind', 'equalto', 'alert') | selectattr('name', 'equalto', o2c_selftest_alert.name) | list | length > 0
 
 - name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)"
-  ansible.builtin.uri:
-    url: "{{ o2c_endpoint }}{{ item.path }}"
-    method: "{{ item.method }}"
+  o2c_http:
+    base_url: "{{ o2c_endpoint }}"
     headers: "{{ o2c_auth_headers }}"
-    body_format: json
-    body: "{{ item.body }}"
+    requests: "{{ o2c_plan_actions | o2c_as_requests(method_key='method', body_key='body', label='{op} {kind} {name}') }}"
     status_code: [200, 201]
     timeout: 30
     validate_certs: "{{ o2c_validate_certs | bool }}"
     ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
-  loop: "{{ o2c_plan_actions }}"
-  loop_control:
-    label: "{{ item.op }} {{ item.kind }} {{ item.name }}"
-  changed_when: true
+  changed_when: o2c_plan_actions | length > 0   # 쓰기는 계획된 순서대로 하나씩 보내고 앞 요청이 실패하면 멈춘다
   no_log: true
   when: not ansible_check_mode
 
@@ -217,39 +210,33 @@
   when: not ansible_check_mode
 
 - name: "[O2C-032] Inject the synthetic records into the verification streams"
-  ansible.builtin.uri:
-    url: "{{ o2c_endpoint }}{{ item.path }}"
-    method: POST
+  o2c_http:
+    base_url: "{{ o2c_endpoint }}"
     headers: "{{ o2c_verify_auth_headers }}"
-    body_format: json
-    body: "{{ item.records }}"
+    requests: "{{ o2c_verify.ingest | o2c_as_requests(default_method='POST', body_key='records', label='{stream}') }}"
     status_code: [200, 201]
     timeout: 30
+    parallel: true   # 서로 다른 검증 스트림이라 순서가 의미 없다
     validate_certs: "{{ o2c_validate_certs | bool }}"
     ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
-  loop: "{{ o2c_verify.ingest }}"
-  loop_control:
-    label: "{{ item.stream }}"
   changed_when: false   # 검증 전용 스트림에만 쓰며 운영 상태를 바꾸지 않는다
   no_log: true
   when: not ansible_check_mode
 
 - name: "[O2C-033] Run each alert SQL against its verification stream and compare with the expected rows"
-  ansible.builtin.uri:
-    url: "{{ o2c_endpoint }}{{ item.path }}"
-    method: POST
+  o2c_http:
+    base_url: "{{ o2c_endpoint }}"
     headers: "{{ o2c_auth_headers }}"
-    body_format: json
-    body: "{{ item.body }}"
-    status_code: 200
+    requests: "{{ o2c_verify.searches | o2c_as_requests(default_method='POST', body_key='body', label='{alert}') }}"
+    status_code: [200]
+    fail_on_status: false   # 상태 코드는 아래에서 알림 이름과 함께 한 번에 보고한다
     timeout: 30
+    parallel: true
     validate_certs: "{{ o2c_validate_certs | bool }}"
     ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
-  loop: "{{ o2c_verify.searches }}"
-  loop_control:
-    label: "{{ item.alert }}"
   register: _o2c_verify_search
-  until: (_o2c_verify_search.json.hits | default([])) | o2c_verify_failures(item) | length == 0
+  # 수집 직후에는 검색에 안 보일 수 있어 전체를 다시 보낸다(검색은 빠르다). 일치하지 않는 알림이 없을 때까지 기다린다.
+  until: (_o2c_verify_search.results | o2c_verify_pending) | length == 0
   retries: "{{ o2c_verify_retries }}"
   delay: "{{ o2c_verify_delay }}"
   failed_when: false   # 불일치는 아래에서 알림·케이스 이름과 함께 한 번에 보고한다

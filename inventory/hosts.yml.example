@@ -36,7 +36,7 @@ all:
       hosts: {}
 
     # 2-2. 서버 도달성 검사 제외 (ADR-0010): ns0266(검사하는 쪽)에서 접속할 수 없는 것이 정상인 servers 호스트.
-    #      Unreachable Host 알림 대상에서 빠진다. 접속 못 하는 이유가 해소되면 여기서 제거한다.
+    #      Unreachable Host 알림 대상에서 빠진다(예: 내부 IP만 있어 포트 포워딩으로만 접근하는 서버). 접속 못 하는 이유가 해소되면 여기서 제거한다.
     tcpcheck_excluded:
       hosts: {}
 
