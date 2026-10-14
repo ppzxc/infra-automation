@@ -5,10 +5,36 @@
 # 순서: 입력 해석(OpenBao) → 원하는 상태 도출 → GET으로 현재 상태 조회 → 차이만 계획 → (check 모드가 아니면) POST/PUT.
 # 모든 API 호출 태스크는 no_log다 — 통지 대상(destination)에 webhook URL/토큰이 들어 있다.
 # check 모드: GET과 계획 출력만 한다(쓰기 요청 0건).
+# OpenBao 인증: AppRole(VAULT_ROLE_ID/VAULT_SECRET_ID)이 있으면 로그인해 받은 토큰을 먼저 쓰고, 없거나 실패하면 VAULT_TOKEN을 쓴다.
+# Semaphore의 다른 템플릿과 같은 순서다 — 만료된 VAULT_TOKEN 때문에 KV가 비어 입력 누락으로 실패하던 문제를 막는다.
+- name: "[O2C-000] Log in to OpenBao with AppRole for the OpenObserve configuration KV"
+  vars:
+    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+  ansible.builtin.uri:
+    url: "{{ _vault_addr_eff }}/v1/auth/approle/login"
+    method: POST
+    headers: "{{ {'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {} }}"
+    body_format: json
+    body:
+      role_id: "{{ o2c_vault_role_id }}"
+      secret_id: "{{ o2c_vault_secret_id }}"
+    status_code: [-1, 200, 400, 401, 403, 404, 500]
+    timeout: 5
+    validate_certs: "{{ o2c_vault_validate_certs }}"
+  register: _o2c_approle_login
+  changed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - o2c_kv_fixture is not defined
+    - o2c_vault_role_id | length > 0
+    - o2c_vault_secret_id | length > 0
+
 - name: "[O2C-001] Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)"
   vars:
     _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
-    _vault_token_eff: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true) }}"
+    _vault_token_eff: "{{ (_o2c_approle_login.json.auth.client_token | default('')) or (vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true)) }}"
     _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
     _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
   ansible.builtin.uri:
@@ -26,7 +52,7 @@
   no_log: true
   when:
     - o2c_kv_fixture is not defined
-    - (vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true)) | length > 0
+    - _vault_token_eff | length > 0
 
 - name: "[O2C-002] Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)"
   vars:
@@ -52,7 +78,8 @@
           - o2c_silent_exceptions | o2c_valid_exceptions
         fail_msg: >-
           agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
-          (VAULT_TOKEN은 Semaphore Environment로 주입). 값은 출력하지 않습니다.
+          (OpenBao 인증은 Semaphore Environment의 VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN). 값은 출력하지 않습니다.
+          OpenBao 응답: AppRole 로그인 {{ _o2c_approle_login.status | default('시도 안 함') }}, KV 조회 {{ _o2c_kv_resp.status | default('시도 안 함') }}.
         quiet: true
       no_log: true
 
