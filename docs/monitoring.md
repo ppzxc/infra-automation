@@ -64,13 +64,14 @@
   | `otel_extra_logs` | 아니오 | glob(→ `app_logs`) 또는 `{path, stream, service}` 추가. `service`(소문자·숫자·`.-_`)는 선택, 없으면 스트림 이름(`app` 등)으로 보고 |
   | `otel_exclude_logs` | 아니오 | 표준 목록에서 정확히 일치하는 경로 제거. `security_logs` 경로는 제외 불가 |
   | `otel_docker_metrics` | 아니오 | Docker 메트릭 opt-in |
+  | `otel_container_logs` | 아니오 | docker 컨테이너 로그 수집 opt-in(기본 꺼짐, modern 호스트만). 아래 §3-3 "컨테이너 로그" |
   | `host_agents_environment` | 예(호스트별) | `production` \| `staging` \| `development` \| `test`. 인벤토리 변수가 우선이고 없으면 이 KV 키. **그룹 기본값 없음** — 누락·허용 밖 값은 변경 전 실패(`MON-037`) |
   | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
 
 - **실패 조건 (변경 전, check 모드 포함)**: 필수 키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 KV 키를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
 - **공유 시크릿**: `agents/openobserve`, `agents/rustfs`가 없거나 값이 비어 있으면 실패합니다(조회는 호스트마다 수행, TLS 검증은 `host_agents_vault_validate_certs`).
 - **제외 판정**: `otel_exclude_logs`는 경로 정규화 후 동일/glob/상위 디렉터리가 `security_logs` 경로를 덮으면 실패합니다(`/var/log/audit`, `/var/log/secure*` 포함).
-- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
+- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `otel_container_logs`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
 - **테스트 seam**: `host_agents_kv_fixture`(`{host, openobserve, rustfs}`)가 정의되면 OpenBao를 조회하지 않습니다(molecule 공용 `group_vars`가 `_is_already_provisioned: true`와 함께 제공).
 
 ---
@@ -99,6 +100,7 @@ SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(Cen
 ## 3-3. 수집 설정 (`otelcol-contrib.yaml.j2`, `MON-060~065`)
 
 - **수신**: 스트림별 `filelog/<stream>`(`start_at: end`, `storage: file_storage`, `log_type` 속성, 본문 원문 유지, 위 Envelope Parsing으로 필드만 추가) + `hostmetrics`(60s, 8 스크레이퍼). journald는 `/usr/sbin/rsyslogd`가 없는 호스트에서만, `docker_stats`는 `otel_docker_metrics: true`인 호스트에서만, 로컬 OTLP 수신기는 `otel_otlp_enabled: true`일 때만 추가됩니다(기본 off). `tcp_check`(서버 도달성, ADR-0010)는 검사하는 쪽 호스트(`host_agents_o2_health_checker`, 기본 ns0266)에만 붙어 `servers` 전체(Backup Only 포함)의 `<ansible_host>:<ansible_port>`를 60초마다 확인하고 별도 `metrics/tcpcheck` 파이프라인으로 보냅니다. contrib 0.161.0 행에 포함되며(legacy_el6의 0.119.0에는 없음) 편입·폐기 후에는 검사하는 쪽에 설정을 다시 반영해야 합니다.
+- **컨테이너 로그 (`otel_container_logs: true`, ADR-0006 §2.3 개정, `MON-068`/`MON-069`)**: 컨테이너가 compose에서 journald 로그 드라이버와 `logging.options.labels`(`com.docker.compose.project`, `com.docker.compose.service`)를 쓴다는 전제다. 수신기 `journald/containers`는 `CONTAINER_NAME`이 있는 항목만 받아(operator `filter`로 나머지 drop) `log_type=app_logs`, `service.name=<프로젝트>-<서비스>`(journal 필드 `COM_DOCKER_COMPOSE_PROJECT`/`_SERVICE`; 라벨이 없으면 컨테이너 이름), `container.name`, `PRIORITY`→severity를 붙이고 본문(journal 원문 맵)은 바꾸지 않는다(ADR-0008). 같은 조건에서 기존 `journald` 수신기(rsyslog가 없는 호스트용, `system_logs`)는 컨테이너 항목을 받지 않고, rsyslog가 있는 호스트에는 `/etc/rsyslog.d/00-host-agents-containers.conf`(`if ($!CONTAINER_NAME != "") then { stop }`, `0644`, 변경 시 rsyslog 재시작)를 둬 시스템 로그 파일 중복을 막는다. 꺼진 호스트(기본)는 수신기도 규칙도 렌더링되지 않고, 이미 있던 규칙은 `MON-069`가 지운다. 원본 필드명(`COM_DOCKER_COMPOSE_*`)은 docker의 라벨→journal 필드 변환(대문자, `.`→`_`)에 의존하므로 실제 FUNA 호스트의 `journalctl -o json`으로 확인한다. legacy(CentOS 6/7 raw) 경로에서는 지원하지 않아 켜도 수신기를 만들지 않는다.
 - **Envelope Parsing (ADR-0008, `MON-004`/`MON-207`/`MON-025`)**: 수신 본문(원문)은 바이트 단위로 그대로 두고, 파일별 `if:` 조건 operator가 포맷이 정한 필드만 `Timestamp`·`attributes`·`severity`에 붙입니다(수신기 ID는 그대로). 포맷 표는 `vars/main.yml`의 `otel_log_formats`입니다.
   - syslog 계열(`messages`, `syslog`, `secure`, `auth.log`, `sudo.log`, `cron*`, `kern.log`): RFC3164 시각 → `Timestamp`(Probe가 읽은 호스트 타임존, 연도는 수집 시점 기준 추정), `process.executable.name`, `process.pid`, `message`. 줄에 찍힌 hostname은 버리고 리소스 `host.name`을 유지합니다. PRI가 없으므로 severity는 비웁니다.
   - `audit/audit.log`: `audit.type`, `audit.serial`, `msg=audit(epoch:serial)`의 시각, 나머지 `key=value`는 `audit.fields`.
@@ -224,6 +226,8 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-065` | `Deploy otelcol secrets env file (0600, no_log, no diff)` | `ansible.builtin.template` | modern | Checksum 비교 (`no_log`, `diff: false`) |
 | `MON-066` | `Reload systemd units when the otelcol unit changed` | `ansible.builtin.systemd` | modern | 유닛 변경 시에만 실행 (`daemon_reload`) |
 | `MON-067` | `Look up the docker socket group (only when docker metrics are enabled)` | `ansible.builtin.getent` | modern | 읽기 전용, `check_mode: false` (그룹이 있으면 `MON-002`가 otelcol을 추가) |
+| `MON-068` | `Deploy the rsyslog rule that keeps container journal entries out of the system log files` | `ansible.builtin.template` | modern | Checksum 비교 (`otel_container_logs` 호스트 중 rsyslog가 있는 곳만, `0644`, 변경 시 `Restart rsyslog` 핸들러) |
+| `MON-069` | `Remove the rsyslog container rule when container logs are not collected` | `ansible.builtin.file` | modern | 파일이 없으면 `ok` (꺼진 호스트·rsyslog 없는 호스트) |
 | `MON-100` | `Probe remote hash and mode of the target file (raw, read-only)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `changed_when: false`, `check_mode: false` (ADR-0005 sentinel 입력) |
 | `MON-101` | `Read the remote file for the check-mode diff (raw, read-only, never for secrets)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 읽기 전용, `check_mode: false`, check 모드·비시크릿 파일에서만 실행 |
 | `MON-102` | `Show controller-rendered vs remote diff in check mode (secret files excluded)` | `ansible.builtin.debug` | legacy_el6, legacy_el7 | 읽기 전용 (unified diff 출력, 시크릿 env 제외) |

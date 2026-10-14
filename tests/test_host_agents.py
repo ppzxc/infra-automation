@@ -8,6 +8,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -332,6 +333,13 @@ def test_absent_overrides_mean_git_standard_only():
         {"path": "/var/log/cron*", "stream": "system_logs", "service": "cron"}]
     assert res["backup_paths"] == MANDATORY
     assert (res["otel_docker_metrics"], res["backup_exclude_paths"], res["backup_pre_hooks"]) == (False, [], [])
+    assert res["otel_container_logs"] is False
+
+
+def test_container_logs_flag_is_opt_in_and_accepts_string_booleans():
+    assert _resolve(otel_container_logs="true")["otel_container_logs"] is True
+    assert _resolve(otel_container_logs=True)["otel_container_logs"] is True
+    assert _resolve(otel_container_logs="false")["otel_container_logs"] is False
 
 
 def test_extra_lists_are_appended_and_exclude_lists_subtracted():
@@ -396,7 +404,7 @@ def test_non_excludable_exclude_fails_naming_path_and_key(kv_key, entry, item):
 
 
 @pytest.mark.parametrize("kv", [
-    {"otel_docker_metrics": "maybe"}, {"otel_exclude_logs": "not-json"}, {"otel_exclude_logs": {"a": 1}},
+    {"otel_docker_metrics": "maybe"}, {"otel_container_logs": "maybe"}, {"otel_exclude_logs": "not-json"}, {"otel_exclude_logs": {"a": 1}},
     {"otel_extra_logs": [{"path": "relative.log"}]}, {"otel_extra_logs": [{"path": "/x", "stream": "backup_logs"}]},
     {"otel_extra_logs": [42]}, {"backup_extra_paths": ["relative"]}, {"backup_pre_hooks": [1]},
 ])
@@ -988,6 +996,74 @@ def test_docker_group_is_added_only_via_lookup_and_rsyslog_probes_both_paths():
     assert "/usr/sbin/rsyslogd, /sbin/rsyslogd" in text
     consts = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))
     assert consts["host_agents_log_streams"] == ["security_logs", "system_logs", "app_logs", "backup_logs"]
+
+
+def _rsyslog_rule_tasks():
+    main = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    flat = []
+
+    def walk(items):
+        for t in items:
+            flat.append(t)
+            walk(t.get("block", []))
+    walk(main)
+    return (next(t for t in flat if t.get("name", "").startswith("[MON-068]")),
+            next(t for t in flat if t.get("name", "").startswith("[MON-069]")))
+
+
+def _run_rsyslog_rule(tmp_path, flag, journald, check=False):
+    deploy, remove = _rsyslog_rule_tasks()
+    deploy = dict(deploy)
+    deploy["ansible.builtin.template"] = dict(
+        deploy["ansible.builtin.template"], src=str(ROLE / "templates" / "rsyslog-containers.conf.j2"),
+        owner=os.getuid(), group=os.getgid())                                  # the runner is not root
+    rule = tmp_path / "00-host-agents-containers.conf"
+    play = [{
+        "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+        "vars": {"otel_rsyslog_container_rule_path": str(rule), "enable_otelcol": True,
+                 "host_agents_journald": journald, "host_agents_inputs": {"otel_container_logs": flag}},
+        "tasks": [deploy, remove],
+        "handlers": [{"name": "Restart rsyslog", "ansible.builtin.debug": {"msg": "RESTART-RSYSLOG"}}]}]
+    pb = tmp_path / "rule.yml"
+    pb.write_text(yaml.safe_dump(play))
+    cmd = ["ansible-playbook", "-i", "localhost,", str(pb)] + (["--check"] if check else [])
+    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    return rule, res.stdout
+
+
+def test_rsyslog_container_rule_is_rendered_only_for_opted_in_hosts_with_rsyslog(tmp_path):
+    rule, out = _run_rsyslog_rule(tmp_path, flag=True, journald=False)
+    assert 'if ($!CONTAINER_NAME != "") then {' in rule.read_text() and "stop" in rule.read_text()
+    assert oct(rule.stat().st_mode & 0o777) == "0o644" and "RESTART-RSYSLOG" in out
+    _, again = _run_rsyslog_rule(tmp_path, flag=True, journald=False)          # idempotent: no change, no restart
+    assert "changed=0" in again and "RESTART-RSYSLOG" not in again
+    _, off = _run_rsyslog_rule(tmp_path, flag=False, journald=False)           # opt-out cleans the rule up
+    assert not rule.exists() and "RESTART-RSYSLOG" in off
+
+
+@pytest.mark.parametrize("flag,journald", [(False, False), (False, True), (True, True)])
+def test_rsyslog_container_rule_stays_absent_otherwise(tmp_path, flag, journald):
+    rule, out = _run_rsyslog_rule(tmp_path, flag=flag, journald=journald)
+    assert not rule.exists() and "changed=0" in out and "RESTART-RSYSLOG" not in out
+
+
+def test_rsyslog_container_rule_check_mode_changes_nothing(tmp_path):
+    rule, out = _run_rsyslog_rule(tmp_path, flag=True, journald=False, check=True)
+    assert not rule.exists() and "changed=1" in out
+    rule.write_text("stale")
+    rule, out = _run_rsyslog_rule(tmp_path, flag=False, journald=False, check=True)
+    assert rule.read_text() == "stale"                                         # removal is only reported
+
+
+def test_rsyslog_container_rule_tasks_declare_mode_and_handler():
+    deploy, remove = _rsyslog_rule_tasks()
+    tpl = deploy["ansible.builtin.template"]
+    assert (tpl["owner"], tpl["group"], tpl["mode"]) == ("root", "root", "0644")
+    assert deploy["notify"] == remove["notify"] == "Restart rsyslog"
+    assert "check_mode" not in deploy and "check_mode" not in remove
+    handlers = yaml.safe_load((ROLE / "handlers" / "main.yml").read_text(encoding="utf-8"))
+    assert any(h["name"] == "Restart rsyslog" for h in handlers)
 
 
 # --------------------------------------------------------------------------

@@ -356,6 +356,22 @@
               - "'4317' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "docker_stats/OTLP receiver must be disabled unless opted in."
 
+        - name: "[VERIFY-MON-068] Check the rsyslog container rule file"
+          ansible.builtin.stat:
+            path: /etc/rsyslog.d/00-host-agents-containers.conf
+          register: _verify_container_rule
+
+        - name: "[VERIFY-MON-068] Verify the container log receiver and rsyslog rule are absent unless opted in"
+          ansible.builtin.assert:
+            that:
+              - "'journald/containers' not in f.read['/etc/otelcol/config.yaml']"
+              - not _verify_container_rule.stat.exists
+            fail_msg: "container log receiver/rsyslog rule must not exist without otel_container_logs."
+
+        - name: "[VERIFY-MON-069] Verify the stale rsyslog container rule is removed when container logs are off"
+          ansible.builtin.assert:
+            that: not _verify_container_rule.stat.exists
+
         - name: "[VERIFY-MON-067] Verify the collection standard: 60s hostmetrics, stream routing, checkpoints, retry, separate metrics"
           ansible.builtin.assert:
             that:
