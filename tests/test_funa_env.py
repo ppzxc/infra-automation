@@ -23,12 +23,15 @@ ROLE = ROOT_DIR / "roles" / "funa_env"
 USER_GROUP = grp.getgrgid(os.getgid()).gr_name
 
 NODE = {"FUNA_NODE_EXTERNAL_HOSTNAME": "n1.funa.test", "FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME": "*.n1.funa.test",
-        "ansible_password": "ssh-pass-SECRET"}
+        "CLOUDFLARE_API_TOKEN": "cf-token-SECRET", "ansible_password": "ssh-pass-SECRET"}
 CLUSTER = {"FUNA_FLOATING_HOSTNAME": "vip.funa.test", "FUNA_HEALTH_CHECK_URI": "/health", "FUNA_SERVICE_NAME": "funa",
-           "FUNA_NOTIFICATION_HEADER": "[FUNA] alert", "TZ": "Asia/Seoul"}
-PROXY = {"FUNA_ADMIN_TOKEN": "admin-token-SECRET", "CLOUDFLARE_API_TOKEN": "cf-token-SECRET", "DB_PASSWORD": "db-pass-SECRET"}
-VRRP = {"SMTP_PASSWORD": "smtp-pass-SECRET", "BOT_TOKEN": "bot-token-SECRET"}
-SECRETS = [v for d in (PROXY, VRRP) for v in d.values()] + ["ssh-pass-SECRET"]
+           "FUNA_NOTIFICATION_HEADER": "[FUNA] alert", "TZ": "Asia/Seoul",
+           "FUNA_NOTIFICATION_SMTP_FROM": "a@funa.test", "FUNA_NOTIFICATION_SMTP_HOST": "smtp.funa.test",
+           "FUNA_NOTIFICATION_SMTP_PORT": 25, "FUNA_NOTIFICATION_SMTP_TO": "b@funa.test",
+           "FUNA_NOTIFICATION_SMTP_USERNAME": "user", "FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL": "https://bot.funa.test/x"}
+PROXY = {"FUNA_ADMIN_TOKEN": "admin-token-SECRET", "DB_PASSWORD": "db-pass-SECRET"}
+VRRP = {"FUNA_NOTIFICATION_SMTP_PASSWORD": "smtp-pass-SECRET", "FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN": "bot-token-SECRET"}
+SECRETS = [v for d in (PROXY, VRRP) for v in d.values()] + ["ssh-pass-SECRET", "cf-token-SECRET"]
 
 
 class _FakeOpenBao(BaseHTTPRequestHandler):
@@ -122,7 +125,7 @@ def test_renders_files_with_modes_and_consumer_separation(tmp_path, openbao):
     assert kv["FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME"] == "'*.n1.funa.test'"
     assert "ansible_password" not in cluster.read_text()
     # 소비자별 분리: proxy 파일에는 keepalived 시크릿이 없고 그 반대도 같다
-    assert set(_kv_of(proxy)) == set(PROXY) and set(_kv_of(vrrp)) == set(VRRP)
+    assert set(_kv_of(proxy)) == set(PROXY) | {"CLOUDFLARE_API_TOKEN"} and set(_kv_of(vrrp)) == set(VRRP)
     assert not any(v in proxy.read_text() for v in VRRP.values())
     assert not any(v in vrrp.read_text() for v in PROXY.values())
     assert not any(s in cluster.read_text() for s in SECRETS)
@@ -147,7 +150,7 @@ def test_second_run_changes_nothing(tmp_path, openbao):
 def test_login_shell_loader_loads_readable_files_only(tmp_path, openbao):
     _, d, prof = run(tmp_path, openbao)
     (d / "vrrp.secrets.env").chmod(0o000)
-    script = f'. {prof}/funa-cluster.sh; echo "$TZ|$DB_PASSWORD|$BOT_TOKEN"'
+    script = f'. {prof}/funa-cluster.sh; echo "$TZ|$DB_PASSWORD|$FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN"'
     out = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
     (d / "vrrp.secrets.env").chmod(0o640)
     tz, db, bot = out.stdout.strip().split("|")
@@ -163,6 +166,8 @@ def test_host_outside_the_group_gets_nothing(tmp_path, openbao):
 @pytest.mark.parametrize("routes, expect", [
     ({"/v1/secret/data/clusters/funa/proxy": _kv({k: v for k, v in PROXY.items() if k != "DB_PASSWORD"})},
      "required key DB_PASSWORD is missing"),
+    ({"/v1/secret/data/hosts/n1": _kv({k: v for k, v in NODE.items() if k != "CLOUDFLARE_API_TOKEN"})},
+     "clusters/funa/proxy: required key CLOUDFLARE_API_TOKEN is missing"),
     ({"/v1/secret/data/clusters/funa": _kv({k: v for k, v in CLUSTER.items() if k != "TZ"})},
      "required key TZ is missing"),
     ({"/v1/secret/data/hosts/n1": _kv({"ansible_password": "ssh-pass-SECRET"})},

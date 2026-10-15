@@ -27,10 +27,10 @@ KV 키 이름이 곧 환경 변수 이름이다. 이 문서와 저장소에는 �
 
 | OpenBao 경로 | 렌더링 위치 | 읽는 키 | 필수 키 (없으면 실패) |
 |---|---|---|---|
-| `hosts/<Inventory Hostname>` | `cluster.env` | `funa_env_node_keys`에 적은 키만(이 KV에는 접속 정보도 있다) | `FUNA_NODE_EXTERNAL_HOSTNAME`, `FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME` |
-| `clusters/funa` | `cluster.env` | 키 전부 | `FUNA_FLOATING_HOSTNAME`, `FUNA_HEALTH_CHECK_URI`, `FUNA_SERVICE_NAME`, `FUNA_NOTIFICATION_HEADER`, `TZ` |
-| `clusters/funa/proxy` | `proxy.secrets.env` | 키 전부(비어 있으면 실패) | `FUNA_ADMIN_TOKEN`, `CLOUDFLARE_API_TOKEN`, `DB_PASSWORD` |
-| `clusters/funa/vrrp` | `vrrp.secrets.env` | 키 전부(비어 있으면 실패) | 없음(`funa_env_required_vrrp_keys`로 추가) |
+| `hosts/<Inventory Hostname>` | `cluster.env` / `proxy.secrets.env` | `funa_env_node_keys`(→ `cluster.env`)와 `funa_env_node_secret_keys`(→ `proxy.secrets.env`)에 적은 키만(이 KV에는 접속 정보도 있다) | `FUNA_NODE_EXTERNAL_HOSTNAME`, `FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME`, `CLOUDFLARE_API_TOKEN`(노드마다 값이 다르다) |
+| `clusters/funa` | `cluster.env` | 키 전부 | `FUNA_FLOATING_HOSTNAME`, `FUNA_HEALTH_CHECK_URI`, `FUNA_SERVICE_NAME`, `FUNA_NOTIFICATION_HEADER`, `FUNA_NOTIFICATION_SMTP_{FROM,HOST,PORT,TO,USERNAME}`, `FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL`, `TZ` |
+| `clusters/funa/proxy` | `proxy.secrets.env` | 키 전부(비어 있으면 실패) | `FUNA_ADMIN_TOKEN`, `DB_PASSWORD`(`CLOUDFLARE_API_TOKEN`은 노드 KV와 합쳐 확인) |
+| `clusters/funa/vrrp` | `vrrp.secrets.env` | 키 전부(비어 있으면 실패) | `FUNA_NOTIFICATION_SMTP_PASSWORD`, `FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN` |
 
 - 필수 키 목록과 노드 키 목록은 `roles/funa_env/defaults/main.yml`에서 바꾼다.
 - 경로가 없거나(404) 키가 빠지거나 값이 비면 **무엇이 빠졌는지 경로와 키 이름**을 대며 실패한다. 값은 출력하지 않는다.

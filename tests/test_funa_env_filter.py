@@ -10,8 +10,9 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 from funa_env import HEADER, funa_env_kv_by_key, funa_env_resolve  # noqa: E402
 
 NODE_KEYS = ["FUNA_NODE_EXTERNAL_HOSTNAME"]
+NODE_SECRET_KEYS = ["NODE_TOKEN"]
 KV = {
-    "node": {"FUNA_NODE_EXTERNAL_HOSTNAME": "n1.example.test", "ansible_password": "ssh-secret"},
+    "node": {"FUNA_NODE_EXTERNAL_HOSTNAME": "n1.example.test", "NODE_TOKEN": "node-secret", "ansible_password": "ssh-secret"},
     "cluster": {"TZ": "Asia/Seoul", "FUNA_SERVICE_NAME": "funa"},
     "proxy": {"CLOUDFLARE_API_TOKEN": "cf-secret", "DB_PASSWORD": "passw0rd"},
     "vrrp": {"BOT_TOKEN": "vrrp-secret"},
@@ -22,7 +23,7 @@ def resolve(kv=None, **over):
     kv = dict(KV if kv is None else kv)
     return funa_env_resolve(kv, NODE_KEYS, over.get("cluster_req", ["TZ"]),
                             over.get("proxy_req", ["CLOUDFLARE_API_TOKEN"]), over.get("vrrp_req", []),
-                            "clusters/funa", "hosts/n1")
+                            "clusters/funa", "hosts/n1", NODE_SECRET_KEYS)
 
 
 def test_files_hold_only_their_own_values():
@@ -34,6 +35,7 @@ def test_files_hold_only_their_own_values():
     assert "CLOUDFLARE_API_TOKEN=cf-secret\n" in out["proxy"] and "vrrp-secret" not in out["proxy"]
     assert out["vrrp"] == HEADER + "BOT_TOKEN=vrrp-secret\n"
     assert "cf-secret" not in out["cluster"] + out["vrrp"]
+    assert "NODE_TOKEN=node-secret\n" in out["proxy"] and "node-secret" not in out["cluster"] + out["vrrp"]
 
 
 def test_output_is_deterministic():
@@ -56,6 +58,7 @@ def test_values_are_quoted_only_when_needed(value, line):
     ("missing cluster path", {"cluster": None}, "clusters/funa: OpenBao path does not exist"),
     ("missing proxy path", {"proxy": None}, "clusters/funa/proxy: OpenBao path does not exist"),
     ("missing node key", {"node": {}}, "hosts/n1: required key FUNA_NODE_EXTERNAL_HOSTNAME is missing"),
+    ("missing node secret", {"node": {"FUNA_NODE_EXTERNAL_HOSTNAME": "x"}}, "hosts/n1: required key NODE_TOKEN is missing"),
     ("missing cluster key", {"cluster": {}}, "clusters/funa: required key TZ is missing"),
     ("empty required", {"cluster": {"TZ": ""}}, "clusters/funa: required key TZ is missing"),
     ("empty vrrp", {"vrrp": {}}, "clusters/funa/vrrp: no keys"),

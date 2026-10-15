@@ -12,7 +12,8 @@ funa_env_owner_group: root
 funa_env_group: "{{ docker_mgmt_group | default('dockermgmt') }}"
 
 # 값의 원천(OpenBao). 값은 Git에 두지 않는다.
-#   hosts/<host>                  노드별 비시크릿: funa_env_node_keys에 적은 키만 읽는다(같은 KV에 접속 정보가 있다)
+#   hosts/<host>                  노드별 값: funa_env_node_keys(→ cluster.env)와 funa_env_node_secret_keys(→ proxy.secrets.env)에
+#                                 적은 키만 읽는다(같은 KV에 접속 정보가 있다)
 #   clusters/funa                 클러스터 공통 비시크릿: 키 전부 → cluster.env
 #   clusters/funa/proxy           Caddy 시크릿: 키 전부 → proxy.secrets.env
 #   clusters/funa/vrrp            keepalived 시크릿: 키 전부 → vrrp.secrets.env
@@ -23,17 +24,29 @@ funa_env_node_keys:
   - FUNA_NODE_EXTERNAL_HOSTNAME
   - FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME
 
+# 노드마다 값이 다른 시크릿: hosts/<host>에서 읽어 proxy.secrets.env로 보낸다(예: 노드별 Cloudflare 토큰).
+funa_env_node_secret_keys:
+  - CLOUDFLARE_API_TOKEN
+
 # 반드시 있어야 하는 키(없으면 이름을 대며 실패한다). 나머지 키는 있는 대로 렌더링한다.
 funa_env_required_cluster_keys:
   - FUNA_FLOATING_HOSTNAME
   - FUNA_HEALTH_CHECK_URI
   - FUNA_SERVICE_NAME
   - FUNA_NOTIFICATION_HEADER
+  - FUNA_NOTIFICATION_SMTP_FROM
+  - FUNA_NOTIFICATION_SMTP_HOST
+  - FUNA_NOTIFICATION_SMTP_PORT
+  - FUNA_NOTIFICATION_SMTP_TO
+  - FUNA_NOTIFICATION_SMTP_USERNAME
+  - FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL
   - TZ
 funa_env_required_proxy_keys:
   - FUNA_ADMIN_TOKEN
   - CLOUDFLARE_API_TOKEN
   - DB_PASSWORD
-funa_env_required_vrrp_keys: []
+funa_env_required_vrrp_keys:
+  - FUNA_NOTIFICATION_SMTP_PASSWORD
+  - FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN
 
 funa_env_validate_certs: true

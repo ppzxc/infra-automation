@@ -149,7 +149,7 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
 
 ### (1-1) FUNA Cluster 환경 값 (`funa_env`, #222)
 `funa_cluster` 그룹 호스트에만 쓰인다. **값은 이 문서와 Git에 두지 않는다.** KV 키 이름이 곧 환경 변수 이름이다. 자세한 필수 키는 [docs/funa_env.md](funa_env.md).
-* `secret/data/hosts/<inventory_hostname>`: 노드별 비시크릿 키 `FUNA_NODE_EXTERNAL_HOSTNAME`, `FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME`을 기존 호스트 KV에 **추가**한다(역할은 이 키들만 읽는다).
+* `secret/data/hosts/<inventory_hostname>`: 노드별 키 `FUNA_NODE_EXTERNAL_HOSTNAME`, `FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME`(→ `cluster.env`)과 노드마다 값이 다른 시크릿 `CLOUDFLARE_API_TOKEN`(→ `proxy.secrets.env`)을 기존 호스트 KV에 **추가**한다(역할은 이 키들만 읽는다).
 * `secret/data/clusters/funa`: 클러스터 공통 비시크릿(→ `cluster.env`, `0644`). 키 전부를 렌더링한다.
 * `secret/data/clusters/funa/proxy`: Caddy 시크릿(→ `proxy.secrets.env`, `0640 root:dockermgmt`).
 * `secret/data/clusters/funa/vrrp`: keepalived 시크릿(→ `vrrp.secrets.env`, `0640 root:dockermgmt`).

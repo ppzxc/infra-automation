@@ -63,16 +63,18 @@ def funa_env_kv_by_key(results):
 
 
 def funa_env_resolve(kv, node_keys, required_cluster, required_proxy, required_vrrp,
-                     cluster_path, host_path):
+                     cluster_path, host_path, node_secret_keys=()):
     """Build the three env files from the OpenBao reads.
 
+    ``node_secret_keys`` are per-node secrets read from the host KV and written to the
+    proxy file (e.g. a Caddy token that differs per node).
     ``kv`` maps node/cluster/proxy/vrrp to the KV data, or None when the path
     does not exist. Returns ``{'errors': [...], 'cluster': text, 'proxy': text,
     'vrrp': text}``; the texts are empty when there are errors.
     """
     errors = []
     sources = (
-        ('node', host_path, node_keys),
+        ('node', host_path, list(node_keys) + list(node_secret_keys)),
         ('cluster', cluster_path, required_cluster),
         ('proxy', cluster_path + '/proxy', required_proxy),
         ('vrrp', cluster_path + '/vrrp', required_vrrp),
@@ -86,22 +88,27 @@ def funa_env_resolve(kv, node_keys, required_cluster, required_proxy, required_v
         elif name in ('proxy', 'vrrp') and not value:
             errors.append('%s: no keys' % path)
         data[name] = value
-        _missing(value, required, path, errors)
+        if name != 'proxy':
+            _missing(value, required, path, errors)
 
     # Node values only come from the declared keys; hosts/<host> also holds SSH credentials.
     node = {k: data['node'][k] for k in node_keys if k in data['node']}
+    node_secrets = {k: data['node'][k] for k in node_secret_keys if k in data['node']}
     cluster = dict(data['cluster'])
     cluster.update(node)
+    proxy = dict(data['proxy'])
+    proxy.update(node_secrets)
+    _missing(proxy, required_proxy, cluster_path + '/proxy', errors)
     for name in ('proxy', 'vrrp'):
-        for key in sorted(set(data[name]) & set(cluster)):
+        for key in sorted(set(proxy if name == 'proxy' else data[name]) & set(cluster)):
             errors.append('%s: %s is also in the non-secret cluster values' % (cluster_path + '/' + name, key))
-    both = sorted(set(data['proxy']) & set(data['vrrp']))
+    both = sorted(set(proxy) & set(data['vrrp']))
     errors.extend('%s: %s is in both consumer secret files' % (cluster_path, k) for k in both)
 
     out = {'errors': errors, 'cluster': '', 'proxy': '', 'vrrp': ''}
     rendered = {
         'cluster': _render(cluster, cluster_path, errors),
-        'proxy': _render(data['proxy'], cluster_path + '/proxy', errors),
+        'proxy': _render(proxy, cluster_path + '/proxy', errors),
         'vrrp': _render(data['vrrp'], cluster_path + '/vrrp', errors),
     }
     if not errors:

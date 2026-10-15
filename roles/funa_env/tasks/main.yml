@@ -80,7 +80,7 @@
           {{ (funa_env_kv_fixture if funa_env_kv_fixture is defined else (funa_env_kv_resp.results | default([]) | funa_env_kv_by_key))
              | funa_env_resolve(funa_env_node_keys, funa_env_required_cluster_keys,
                                 funa_env_required_proxy_keys, funa_env_required_vrrp_keys,
-                                funa_env_cluster_path, funa_env_host_path) }}
+                                funa_env_cluster_path, funa_env_host_path, funa_env_node_secret_keys) }}
       no_log: true
 
     # 오류 목록에는 경로와 키 이름만 있고 값은 없다.
