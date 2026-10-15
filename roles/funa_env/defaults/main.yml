@@ -23,6 +23,7 @@ funa_env_host_path: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') |
 funa_env_node_keys:
   - FUNA_NODE_EXTERNAL_HOSTNAME
   - FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME
+  - FUNA_NOTIFICATION_HEADER
 
 # 노드마다 값이 다른 시크릿: hosts/<host>에서 읽어 proxy.secrets.env로 보낸다(예: 노드별 Cloudflare 토큰).
 funa_env_node_secret_keys:
@@ -33,7 +34,6 @@ funa_env_required_cluster_keys:
   - FUNA_FLOATING_HOSTNAME
   - FUNA_HEALTH_CHECK_URI
   - FUNA_SERVICE_NAME
-  - FUNA_NOTIFICATION_HEADER
   - FUNA_NOTIFICATION_SMTP_FROM
   - FUNA_NOTIFICATION_SMTP_HOST
   - FUNA_NOTIFICATION_SMTP_PORT

@@ -23,9 +23,10 @@ ROLE = ROOT_DIR / "roles" / "funa_env"
 USER_GROUP = grp.getgrgid(os.getgid()).gr_name
 
 NODE = {"FUNA_NODE_EXTERNAL_HOSTNAME": "n1.funa.test", "FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME": "*.n1.funa.test",
+        "FUNA_NOTIFICATION_HEADER": "[FUNA n1] alert",
         "CLOUDFLARE_API_TOKEN": "cf-token-SECRET", "ansible_password": "ssh-pass-SECRET"}
 CLUSTER = {"FUNA_FLOATING_HOSTNAME": "vip.funa.test", "FUNA_HEALTH_CHECK_URI": "/health", "FUNA_SERVICE_NAME": "funa",
-           "FUNA_NOTIFICATION_HEADER": "[FUNA] alert", "TZ": "Asia/Seoul",
+           "TZ": "Asia/Seoul",
            "FUNA_NOTIFICATION_SMTP_FROM": "a@funa.test", "FUNA_NOTIFICATION_SMTP_HOST": "smtp.funa.test",
            "FUNA_NOTIFICATION_SMTP_PORT": 25, "FUNA_NOTIFICATION_SMTP_TO": "b@funa.test",
            "FUNA_NOTIFICATION_SMTP_USERNAME": "user", "FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL": "https://bot.funa.test/x"}
@@ -123,6 +124,8 @@ def test_renders_files_with_modes_and_consumer_separation(tmp_path, openbao):
     kv = _kv_of(cluster)
     assert kv["FUNA_NODE_EXTERNAL_HOSTNAME"] == "n1.funa.test" and kv["TZ"] == "Asia/Seoul"
     assert kv["FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME"] == "'*.n1.funa.test'"
+    # 알림 헤더는 노드의 호스트명이 들어가므로 노드 KV에서 온다(클러스터 공통 KV에는 없다).
+    assert kv["FUNA_NOTIFICATION_HEADER"] == "'[FUNA n1] alert'"
     assert "ansible_password" not in cluster.read_text()
     # 소비자별 분리: proxy 파일에는 keepalived 시크릿이 없고 그 반대도 같다
     assert set(_kv_of(proxy)) == set(PROXY) | {"CLOUDFLARE_API_TOKEN"} and set(_kv_of(vrrp)) == set(VRRP)
