@@ -306,79 +306,119 @@ def test_real_collector_journald_priority_becomes_severity_and_body_is_kept(tmp_
 
 CONTAINER_INPUTS = {"otel_docker_metrics": False, "otel_container_logs": True, "otel_logs": [
     {"path": "/var/log/secure", "stream": "security_logs", "service": "auth"}]}
+CID_API, CID_BARE, CID_FULL = "a" * 64, "b" * 64, "c" * 64
+COMPOSE = {"com.docker.compose.project": "funa", "com.docker.compose.service": "api"}
+COMPOSE_FULL = dict(COMPOSE, **{"com.docker.compose.container-number": "2", "org.opencontainers.image.version": "1.4.2"})
 
 
-def _run_journald(binary, tmp_path, receivers, entries):
-    """Feed journal entries through a fake journalctl into the given rendered journald receivers."""
-    fake = tmp_path / "bin"
-    fake.mkdir(exist_ok=True)
-    lines = []
-    for i, entry in enumerate(entries):
-        entry = dict(entry, __CURSOR=f"c{i}", __REALTIME_TIMESTAMP=str(1709601072000000 + i * 1000))
-        lines.append(json.dumps(entry))
-    script = fake / "journalctl"
-    script.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\nsleep 60\n")
-    script.chmod(0o755)
-    rcv = {name: {"start_at": "beginning", "operators": r["operators"]} for name, r in receivers.items()}
-    harness = {"receivers": rcv, "exporters": {"file": {"path": str(tmp_path / "out.json")}},
-               "service": {"pipelines": {"logs": {"receivers": list(rcv), "exporters": ["file"]}}}}
-    (tmp_path / "h.yaml").write_text(yaml.safe_dump(harness))
-    old = os.environ["PATH"]
-    os.environ["PATH"] = f"{fake}:{old}"
-    try:
-        return _run(binary, tmp_path / "h.yaml", tmp_path / "out.json", len(entries))
-    finally:
-        os.environ["PATH"] = old
+def _docker_line(log, stream="stdout", attrs=None):
+    row = {"log": log, "stream": stream, "time": "2026-10-15T02:20:00.123456789Z"}
+    if attrs is not None:
+        row["attrs"] = attrs
+    return json.dumps(row)
 
 
-CONTAINER_ENTRIES = [
-    {"MESSAGE": "api up", "CONTAINER_NAME": "funa-api-1", "PRIORITY": "6",
-     "COM_DOCKER_COMPOSE_PROJECT": "funa", "COM_DOCKER_COMPOSE_SERVICE": "api"},
-    {"MESSAGE": "boom on stderr", "CONTAINER_NAME": "funa-worker-1", "PRIORITY": "3",
-     "COM_DOCKER_COMPOSE_PROJECT": "funa", "COM_DOCKER_COMPOSE_SERVICE": "worker"},
-    {"MESSAGE": "no compose labels", "CONTAINER_NAME": "standalone", "PRIORITY": "6"},
-    {"MESSAGE": "sshd says hi", "SYSLOG_IDENTIFIER": "sshd", "PRIORITY": "6"},
-]
+def _split_like_docker(text, size=16384):
+    """json-file splits one long line into 16KiB pieces; only the last piece keeps the trailing newline."""
+    parts = [text[i:i + size] for i in range(0, len(text), size)]
+    return [p + ("\n" if k == len(parts) - 1 else "") for k, p in enumerate(parts)]
+
+
+def _containers_harness(tmp_path, cfg, files):
+    """The rendered filelog/containers receiver, pointed at fake json-file logs under tmp_path."""
+    root = tmp_path / "docker" / "containers"
+    for cid, rows in files.items():
+        f = root / cid / f"{cid}-json.log"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    rcv = yaml.safe_load(yaml.safe_dump(cfg["receivers"]["filelog/containers"]).replace(
+        "/var/lib/docker/containers", str(root)))
+    rcv["start_at"] = "beginning"
+    rcv.pop("storage", None)
+    rcv.pop("retry_on_failure", None)
+    out = tmp_path / "out.json"
+    harness = {"receivers": {"filelog/containers": rcv}, "exporters": {"file": {"path": str(out)}},
+               "service": {"pipelines": {"logs": {"receivers": ["filelog/containers"], "exporters": ["file"]}},
+                           "telemetry": {"metrics": {"level": "none"}}}}
+    path = tmp_path / "containers.yaml"
+    path.write_text(yaml.safe_dump(harness))
+    return root, path, out
 
 
 @pytest.mark.skipif(not os.environ.get("OTELCOL_BIN_0_161_0"), reason="set OTELCOL_BIN_0_161_0")
-def test_real_collector_container_entries_become_app_logs_with_compose_service_name(tmp_path):
+def test_real_collector_container_files_become_app_logs_with_compose_service_name(tmp_path):
     binary = _binary("0.161.0")
     cfg, _ = _render(tmp_path, "modern", host_agents_inputs=CONTAINER_INPUTS)
-    recs = _run_journald(binary, tmp_path, {"journald": cfg["receivers"]["journald/containers"]}, CONTAINER_ENTRIES)
-    got = {r["_body"]["MESSAGE"]: r for r in recs}
-    assert set(got) == {"api up", "boom on stderr", "no compose labels"}, "non-container entries must not arrive"
-    for r in recs:
-        assert r["_attrs"]["log_type"] == "app_logs"
-    api = got["api up"]
-    assert api["_res"]["service.name"] == "funa-api" and api["_attrs"]["container.name"] == "funa-api-1"
-    assert api["_body"]["MESSAGE"] == "api up" and api["_body"]["CONTAINER_NAME"] == "funa-api-1"   # body kept
-    assert got["boom on stderr"]["_res"]["service.name"] == "funa-worker"
-    assert int(got["boom on stderr"]["severityNumber"]) == ERROR
-    assert got["no compose labels"]["_res"]["service.name"] == "standalone"
+    big = "y" * 40000
+    files = {
+        CID_API: [_docker_line('{"level":"INFO","message":"hello"}\n', attrs=COMPOSE),
+                  _docker_line("boom on stderr\n", "stderr", COMPOSE),
+                  _docker_line("z" * 6000 + "\n", attrs=COMPOSE)]
+                 + [_docker_line(p, attrs=COMPOSE) for p in _split_like_docker(big)]
+                 + [_docker_line("after big\n", attrs=COMPOSE)],
+        CID_BARE: [_docker_line("no labels\n")],
+        CID_FULL: [_docker_line("with number and version\n", attrs=COMPOSE_FULL)],
+    }
+    _, path, out = _containers_harness(tmp_path, cfg, files)
+    recs = _run(binary, path, out, 7)
+    got = {r["_body"]: r for r in recs}
+    assert len(recs) == 7, [r["_body"][:30] for r in recs]
+    hello = got['{"level":"INFO","message":"hello"}']
+    assert hello["_res"]["service.name"] == "funa-api" and hello["_res"]["container.id"] == CID_API
+    assert hello["_attrs"]["log_type"] == "app_logs" and hello["_attrs"]["log.iostream"] == "stdout"
+    assert hello["_attrs"]["attrs"]["com.docker.compose.service"] == "api"          # labels kept as sent
+    assert got["boom on stderr"]["_attrs"]["log.iostream"] == "stderr"
+    assert int(got["boom on stderr"].get("severityNumber", 0)) == 0                  # stderr is not an error level
+    assert got["z" * 6000]["_body"] == "z" * 6000                                    # no 4096-byte cut
+    assert got[big]["_body"] == big, "16KiB pieces must be recombined into the original line"
+    assert got["no labels"]["_res"]["service.name"] == "container"
+    assert got["no labels"]["_res"]["container.id"] == CID_BARE
+    assert "after big" in got and all(not r["_body"].endswith("\n") for r in recs)
+    full = got["with number and version"]["_res"]
+    assert (full["service.name"], full["container.name"], full["service.version"]) == ("funa-api", "funa-api-2", "1.4.2")
+    for body in ("no labels", '{"level":"INFO","message":"hello"}'):               # labels absent -> no invented name/version
+        assert "container.name" not in got[body]["_res"] and "service.version" not in got[body]["_res"]
 
 
 @pytest.mark.skipif(not os.environ.get("OTELCOL_BIN_0_161_0"), reason="set OTELCOL_BIN_0_161_0")
-def test_real_collector_system_journald_drops_container_entries_when_container_logs_are_on(tmp_path):
+def test_real_collector_container_files_survive_docker_rotation(tmp_path):
     binary = _binary("0.161.0")
-    cfg, _ = _render(tmp_path, "modern", host_agents_journald=True, host_agents_inputs=CONTAINER_INPUTS)
-    recs = _run_journald(binary, tmp_path, {"journald": cfg["receivers"]["journald"]}, CONTAINER_ENTRIES)
-    assert [r["_body"]["MESSAGE"] for r in recs] == ["sshd says hi"]
-    assert recs[0]["_attrs"]["log_type"] == "system_logs"
+    cfg, _ = _render(tmp_path, "modern", host_agents_inputs=CONTAINER_INPUTS)
+    root, path, out = _containers_harness(tmp_path, cfg, {CID_API: [_docker_line("before-1\n", attrs=COMPOSE)]})
+    live = root / CID_API / f"{CID_API}-json.log"
+    proc = subprocess.Popen([binary, f"--config={path}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline and len(_read(out)) < 1:
+            time.sleep(0.5)
+        # json-file rotation: rename the live file, start a new one, and keep writing to both for a moment
+        live.rename(live.with_name(live.name + ".1"))
+        live.write_text(_docker_line("after-1\n", attrs=COMPOSE) + "\n" + _docker_line("after-2\n", attrs=COMPOSE) + "\n")
+        deadline = time.time() + 20
+        while time.time() < deadline and len(_read(out)) < 3:
+            time.sleep(0.5)
+        time.sleep(1.5)
+        bodies = sorted(r["_body"] for r in _read(out))
+    finally:
+        proc.terminate()
+        proc.wait(timeout=20)
+    assert bodies == ["after-1", "after-2", "before-1"], bodies                    # nothing lost, nothing duplicated
 
 
 def test_container_logs_receiver_is_rendered_only_when_the_host_opts_in(tmp_path):
     off, off_text = _render(tmp_path, "modern", host_agents_journald=True)
-    assert "journald/containers" not in off["receivers"]
-    assert "journald/containers" not in off["service"]["pipelines"]["logs/in"]["receivers"]
+    assert "filelog/containers" not in off["receivers"]
+    assert "filelog/containers" not in off["service"]["pipelines"]["logs/in"]["receivers"]
     assert not [o for o in off["receivers"]["journald"]["operators"] if o["type"] == "filter"]
-    assert "CONTAINER_NAME" not in off_text
+    assert "json-file" not in off_text and "/var/lib/docker/containers" not in off_text
     on, _ = _render(tmp_path, "modern", host_agents_journald=True, host_agents_inputs=CONTAINER_INPUTS)
-    assert "journald/containers" in on["service"]["pipelines"]["logs/in"]["receivers"]
-    assert [o["type"] for o in on["receivers"]["journald"]["operators"]][0] == "filter"
-    # the default (key absent) renders exactly as before; legacy raw paths never get the receiver
+    assert "filelog/containers" in on["service"]["pipelines"]["logs/in"]["receivers"]
+    assert on["receivers"]["filelog/containers"]["include"] == ["/var/lib/docker/containers/*/*-json.log"]
+    assert "journald/containers" not in on["receivers"]                          # not the journald path any more
+    assert not [o for o in on["receivers"]["journald"]["operators"] if o["type"] == "filter"]
+    # legacy raw paths never get the receiver
     legacy, _ = _render(tmp_path, "legacy_el7", host_agents_inputs=CONTAINER_INPUTS)
-    assert "journald/containers" not in legacy["receivers"]
+    assert "filelog/containers" not in legacy["receivers"]
 
 
 def test_envelope_operators_are_conditional_per_file_and_never_rewrite_the_body(tmp_path):

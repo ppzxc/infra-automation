@@ -998,7 +998,7 @@ def test_docker_group_is_added_only_via_lookup_and_rsyslog_probes_both_paths():
     assert consts["host_agents_log_streams"] == ["security_logs", "system_logs", "app_logs", "backup_logs"]
 
 
-def _rsyslog_rule_tasks():
+def _rsyslog_rule_task():
     main = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
     flat = []
 
@@ -1007,22 +1007,17 @@ def _rsyslog_rule_tasks():
             flat.append(t)
             walk(t.get("block", []))
     walk(main)
-    return (next(t for t in flat if t.get("name", "").startswith("[MON-068]")),
-            next(t for t in flat if t.get("name", "").startswith("[MON-069]")))
+    return next(t for t in flat if t.get("name", "").startswith("[MON-068]"))
 
 
-def _run_rsyslog_rule(tmp_path, flag, journald, check=False):
-    deploy, remove = _rsyslog_rule_tasks()
-    deploy = dict(deploy)
-    deploy["ansible.builtin.template"] = dict(
-        deploy["ansible.builtin.template"], src=str(ROLE / "templates" / "rsyslog-containers.conf.j2"),
-        owner=os.getuid(), group=os.getgid())                                  # the runner is not root
+def _run_rsyslog_rule_removal(tmp_path, existing, check=False):
     rule = tmp_path / "00-host-agents-containers.conf"
+    if existing:
+        rule.write_text("if ($!CONTAINER_NAME != \"\") then {\n    stop\n}\n")
     play = [{
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
-        "vars": {"otel_rsyslog_container_rule_path": str(rule), "enable_otelcol": True,
-                 "host_agents_journald": journald, "host_agents_inputs": {"otel_container_logs": flag}},
-        "tasks": [deploy, remove],
+        "vars": {"otel_rsyslog_container_rule_path": str(rule), "enable_otelcol": True},
+        "tasks": [_rsyslog_rule_task()],
         "handlers": [{"name": "Restart rsyslog", "ansible.builtin.debug": {"msg": "RESTART-RSYSLOG"}}]}]
     pb = tmp_path / "rule.yml"
     pb.write_text(yaml.safe_dump(play))
@@ -1032,36 +1027,24 @@ def _run_rsyslog_rule(tmp_path, flag, journald, check=False):
     return rule, res.stdout
 
 
-def test_rsyslog_container_rule_is_rendered_only_for_opted_in_hosts_with_rsyslog(tmp_path):
-    rule, out = _run_rsyslog_rule(tmp_path, flag=True, journald=False)
-    assert 'if ($!CONTAINER_NAME != "") then {' in rule.read_text() and "stop" in rule.read_text()
-    assert oct(rule.stat().st_mode & 0o777) == "0o644" and "RESTART-RSYSLOG" in out
-    _, again = _run_rsyslog_rule(tmp_path, flag=True, journald=False)          # idempotent: no change, no restart
-    assert "changed=0" in again and "RESTART-RSYSLOG" not in again
-    _, off = _run_rsyslog_rule(tmp_path, flag=False, journald=False)           # opt-out cleans the rule up
-    assert not rule.exists() and "RESTART-RSYSLOG" in off
+def test_obsolete_rsyslog_container_rule_is_removed_with_a_restart(tmp_path):
+    rule, out = _run_rsyslog_rule_removal(tmp_path, existing=True)
+    assert not rule.exists() and "RESTART-RSYSLOG" in out
 
 
-@pytest.mark.parametrize("flag,journald", [(False, False), (False, True), (True, True)])
-def test_rsyslog_container_rule_stays_absent_otherwise(tmp_path, flag, journald):
-    rule, out = _run_rsyslog_rule(tmp_path, flag=flag, journald=journald)
+def test_hosts_without_the_obsolete_rule_see_no_change(tmp_path):
+    rule, out = _run_rsyslog_rule_removal(tmp_path, existing=False)
     assert not rule.exists() and "changed=0" in out and "RESTART-RSYSLOG" not in out
 
 
-def test_rsyslog_container_rule_check_mode_changes_nothing(tmp_path):
-    rule, out = _run_rsyslog_rule(tmp_path, flag=True, journald=False, check=True)
-    assert not rule.exists() and "changed=1" in out
-    rule.write_text("stale")
-    rule, out = _run_rsyslog_rule(tmp_path, flag=False, journald=False, check=True)
-    assert rule.read_text() == "stale"                                         # removal is only reported
+def test_rsyslog_rule_removal_check_mode_changes_nothing(tmp_path):
+    rule, out = _run_rsyslog_rule_removal(tmp_path, existing=True, check=True)
+    assert rule.exists() and "changed=1" in out                                  # only reported, the file stays
 
 
-def test_rsyslog_container_rule_tasks_declare_mode_and_handler():
-    deploy, remove = _rsyslog_rule_tasks()
-    tpl = deploy["ansible.builtin.template"]
-    assert (tpl["owner"], tpl["group"], tpl["mode"]) == ("root", "root", "0644")
-    assert deploy["notify"] == remove["notify"] == "Restart rsyslog"
-    assert "check_mode" not in deploy and "check_mode" not in remove
+def test_rsyslog_rule_removal_task_notifies_the_handler_and_is_check_safe():
+    task = _rsyslog_rule_task()
+    assert task["notify"] == "Restart rsyslog" and "check_mode" not in task
     handlers = yaml.safe_load((ROLE / "handlers" / "main.yml").read_text(encoding="utf-8"))
     assert any(h["name"] == "Restart rsyslog" for h in handlers)
 

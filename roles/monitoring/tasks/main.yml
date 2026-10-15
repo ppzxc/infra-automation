@@ -152,29 +152,14 @@
       host_agents_journald: "{{ _otelcol_rsyslog.results | map(attribute='stat.exists') | select | list | length == 0 }}"
     when: enable_otelcol | default(true) | bool
 
-  # 컨테이너 로그를 otelcol이 수집하는 호스트는 rsyslog가 같은 항목을 시스템 로그 파일에 쓰지 않게 막는다.
-  # 꺼진 호스트는 규칙 파일이 없는 상태로 유지한다(켰다 끈 호스트의 규칙도 정리). rsyslog가 없으면 둘 곳이 없으므로 둘 다 건너뛴다.
-  - name: "[MON-068] Deploy the rsyslog rule that keeps container journal entries out of the system log files"
-    ansible.builtin.template:
-      src: rsyslog-containers.conf.j2
-      dest: "{{ otel_rsyslog_container_rule_path }}"
-      owner: root
-      group: root
-      mode: '0644'
-    notify: Restart rsyslog
-    when:
-      - enable_otelcol | default(true) | bool
-      - host_agents_inputs.otel_container_logs | default(false) | bool
-      - not (host_agents_journald | bool)
-
-  - name: "[MON-069] Remove the rsyslog container rule when container logs are not collected"
+  # 이전 구현(journald 로그 드라이버)이 배포했던 rsyslog 규칙은 이제 필요 없다(컨테이너는 json-file 파일로 수집한다). 있으면 지우고 rsyslog를 재시작한다.
+  # compose를 json-file로 전환한 뒤에 적용해야 한다: journald 드라이버 컨테이너가 남아 있으면 이 규칙이 없을 때 출력이 시스템 로그 파일로 샌다.
+  - name: "[MON-068] Remove the obsolete rsyslog container rule (container logs are read from json-file)"
     ansible.builtin.file:
       path: "{{ otel_rsyslog_container_rule_path }}"
       state: absent
     notify: Restart rsyslog
-    when:
-      - enable_otelcol | default(true) | bool
-      - not (host_agents_inputs.otel_container_logs | default(false) | bool) or (host_agents_journald | bool)
+    when: enable_otelcol | default(true) | bool
 
   - name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"
     block:
