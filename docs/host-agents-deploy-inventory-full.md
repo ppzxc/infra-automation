@@ -128,7 +128,7 @@
 |---|---|---|---|---|
 | `filelog/backup_logs` | 항상 | backup_logs | backup | `/var/log/host-agents/backup.jsonl`(백업 결과, 4.4 참고). JSON 필드를 attributes로 파싱 |
 | `journald` | rsyslog가 **없는** 호스트만. legacy_el6은 항상 끔 | system_logs | journald | journal 전체. `PRIORITY`를 severity로 매핑 |
-| `journald/containers` | KV `otel_container_logs: true`인 modern 호스트만 (기본 꺼짐) | app_logs | `<프로젝트>-<서비스>`(compose 라벨, 없으면 컨테이너 이름) | docker journald 로그 드라이버 항목(`CONTAINER_NAME`이 있는 항목)만. 컨테이너 이름은 `container.name`, `PRIORITY`는 severity, 본문은 원문 그대로. 켜면 `journald` 수신기는 컨테이너 항목을 받지 않고, rsyslog가 있는 호스트에는 같은 항목을 시스템 로그 파일에 쓰지 않는 규칙(`/etc/rsyslog.d/00-host-agents-containers.conf`)을 둔다 |
+| `filelog/containers` | KV `otel_container_logs: true`인 modern 호스트만 (기본 꺼짐) | app_logs | `<프로젝트>-<서비스>`(compose 라벨, 없으면 `container`) | docker `json-file` 파일(`/var/lib/docker/containers/*/*-json.log`). 라벨은 줄의 `attrs`로, 컨테이너 ID는 `container.id`로, stdout/stderr는 `log.iostream`으로 싣고 16KiB로 쪼개진 줄은 합친다. 본문은 줄 끝 개행만 뗀다. Docker 소켓 불필요 |
 | `otlp` | 기본 **비활성**(`otel_otlp_enabled: false`) | app_logs·메트릭 | 앱이 지정 | 켜면 `127.0.0.1:4317`(gRPC)과 `:4318`(HTTP)에서 받음 |
 
 ### 3.4 기본 수집 메트릭
@@ -263,7 +263,7 @@
 | | `rustfs_bucket` | | 버킷 재정의 |
 | | `otel_extra_logs`, `otel_exclude_logs` | | 수집 경로 추가·제외 |
 | | `otel_docker_metrics` | | docker 메트릭 수집 |
-| | `otel_container_logs` | | docker 컨테이너 로그 수집(`app_logs`). 컨테이너는 compose에서 journald 로그 드라이버와 `logging.options.labels`(`com.docker.compose.project`, `com.docker.compose.service`)를 써야 `service.name`이 `<프로젝트>-<서비스>`가 된다 |
+| | `otel_container_logs` | | docker 컨테이너 로그 수집(`app_logs`). 컨테이너는 compose에서 `json-file` 드라이버(`max-size`·`max-file` 필수)와 `logging.options.labels`(`com.docker.compose.project`, `com.docker.compose.service`, 선택 `com.docker.compose.container-number`·`org.opencontainers.image.version`)를 써야 `service.name`이 `<프로젝트>-<서비스>`가 되고, 선택 라벨이 있으면 `container.name`·`service.version`도 붙는다 |
 | | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | | 백업 경로 추가·제외, 사전 훅 |
 | `agents/openobserve` | `o2_endpoint`, `o2_org`, `o2_ca_file`, `controller_ingest_token` | endpoint·token 필수 | 전송 대상과 등록 이벤트 |
 | `agents/rustfs` | `rustfs_endpoint`, `rustfs_region`, `rustfs_ca_file` | endpoint 필수 | 백업 대상 |

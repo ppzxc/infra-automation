@@ -184,7 +184,7 @@
         if: {{ (c ~ ' and attributes["message"] != nil' if fmt != 'audit' else c ~ ' and attributes["audit.type"] != nil') | to_json }}
 {% endmacro %}
 {#
-  컨테이너 로그(hosts/<host>/agents의 otel_container_logs). journald가 있는 modern 경로에서만 켠다(legacy는 raw 경로라 rsyslog 규칙을 배포하지 않아 이중 수집이 된다).
+  컨테이너 로그(hosts/<host>/agents의 otel_container_logs). docker json-file 드라이버 파일을 읽으므로 검증한 modern 경로에서만 켠다.
 #}
 {% set container_logs = (host_agents_inputs.otel_container_logs | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
 extensions:
@@ -254,11 +254,6 @@ receivers:
     start_at: end
     storage: file_storage
     operators:
-{% if container_logs %}
-      # 컨테이너 항목은 journald/containers가 app_logs로 보낸다(system_logs 중복 방지).
-      - type: filter
-        expr: 'body["CONTAINER_NAME"] != nil'
-{% endif %}
       - type: add
         field: attributes.log_type
         value: system_logs
@@ -278,39 +273,61 @@ receivers:
           debug: '7'
 {% endif %}
 {% if container_logs %}
-  # docker journald 로그 드라이버 항목(CONTAINER_NAME이 있는 항목)만 app_logs로 받는다. 본문(원문 맵)은 건드리지 않는다.
-  # service.name은 compose 라벨 <프로젝트>-<서비스>(journald 필드 COM_DOCKER_COMPOSE_PROJECT/SERVICE, 컨테이너에 logging.options.labels 필요),
-  # 라벨이 없으면 컨테이너 이름. 컨테이너 이름은 container.name 속성에 남긴다.
-  journald/containers:
+  # docker json-file 드라이버 파일(컨테이너 1개 = 파일 1개)을 글롭 하나로 읽는다. 수신기 ID는 체크포인트 키라 바꾸지 않는다.
+  # 컨테이너가 compose 라벨을 json-file `labels` 옵션으로 싣는다는 전제: 줄마다 attrs에 라벨이 붙고(container operator가 attributes.attrs로 보존),
+  # service.name은 <프로젝트>-<서비스>, 라벨이 없으면 "container"다. 컨테이너 ID는 파일명에서 container.id로 올린다(이름·버전은 container-number·OCI version 라벨이 있을 때만). 본문은 줄 끝 개행만 뗀다.
+  # Docker가 16KiB로 쪼갠 줄(마지막 조각만 개행으로 끝남)은 recombine이 합친다. 이름이 바뀐 로테이션 파일은 filelog가 이어서 읽는다.
+  filelog/containers:
+    include:
+      - {{ otel_container_log_glob | to_json }}
     start_at: end
+    include_file_path: true
     storage: file_storage
     operators:
-      - type: filter
-        expr: 'body["CONTAINER_NAME"] == nil'
+      - type: container
+        format: docker
+        add_metadata_from_filepath: false
+      - type: recombine
+        combine_field: body
+        combine_with: ""
+        is_last_entry: 'body matches "\\n$"'
+        source_identifier: attributes["log.file.path"]
+        max_log_size: {{ otel_container_max_log_size }}
+      - type: add
+        field: body
+        value: EXPR(trimSuffix(body, "\n"))
       - type: add
         field: attributes.log_type
         value: app_logs
-      - type: add
-        field: attributes["container.name"]
-        value: EXPR(body["CONTAINER_NAME"])
+      - type: regex_parser
+        parse_from: attributes["log.file.name"]
+        parse_to: attributes
+        regex: '^(?P<container_id>[0-9a-f]{64})-json\.log$'
+        on_error: send_quiet
+      - type: move
+        from: attributes.container_id
+        to: resource["container.id"]
+        if: 'attributes["container_id"] != nil'
       - type: add
         field: resource["service.name"]
-        value: EXPR(body["COM_DOCKER_COMPOSE_PROJECT"] + "-" + body["COM_DOCKER_COMPOSE_SERVICE"])
-        if: 'body["COM_DOCKER_COMPOSE_PROJECT"] != nil and body["COM_DOCKER_COMPOSE_SERVICE"] != nil'
+        value: EXPR(attributes["attrs"]["com.docker.compose.project"] + "-" + attributes["attrs"]["com.docker.compose.service"])
+        if: 'attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.project"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil'
       - type: add
         field: resource["service.name"]
-        value: EXPR(body["CONTAINER_NAME"])
-        if: 'body["COM_DOCKER_COMPOSE_PROJECT"] == nil or body["COM_DOCKER_COMPOSE_SERVICE"] == nil'
-      - type: severity_parser
-        parse_from: body["PRIORITY"]
-        if: 'body["PRIORITY"] != nil'
-        mapping:
-          fatal: ['0', '1', '2']
-          error: '3'
-          warn: '4'
-          info2: '5'
-          info: '6'
-          debug: '7'
+        value: {{ otel_container_default_service | to_json }}
+        if: 'resource["service.name"] == nil'
+      # compose가 붙이는 container-number 라벨이 있으면 컨테이너 이름을 <프로젝트>-<서비스>-<번호>로 재구성한다(container_name: 직접 지정 시 실제 이름과 다를 수 있다).
+      - type: add
+        field: resource["container.name"]
+        value: EXPR(attributes["attrs"]["com.docker.compose.project"] + "-" + attributes["attrs"]["com.docker.compose.service"] + "-" + attributes["attrs"]["com.docker.compose.container-number"])
+        if: 'attributes["attrs"] != nil and attributes["attrs"]["com.docker.compose.project"] != nil and attributes["attrs"]["com.docker.compose.service"] != nil and attributes["attrs"]["com.docker.compose.container-number"] != nil'
+      # 이미지의 OCI 버전 라벨이 있으면 service.version으로 올린다.
+      - type: add
+        field: resource["service.version"]
+        value: EXPR(attributes["attrs"]["org.opencontainers.image.version"])
+        if: 'attributes["attrs"] != nil and attributes["attrs"]["org.opencontainers.image.version"] != nil'
+    retry_on_failure:
+      enabled: true
 {% endif %}
   hostmetrics:
     collection_interval: {{ otel_hostmetrics_interval }}
@@ -411,7 +428,7 @@ service:
   extensions: [file_storage]
   pipelines:
     logs/in:
-      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if container_logs %}journald/containers, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
+      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if container_logs %}filelog/containers, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
       processors: [memory_limiter, resource/host]
       exporters: [routing/logs]
 {% for stream in host_agents_log_streams %}

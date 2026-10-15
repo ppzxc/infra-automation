@@ -64,8 +64,13 @@ otel_docker_endpoint: "unix:///var/run/docker.sock"
 # 소켓 읽기용: 이 그룹이 존재하고 otel_docker_metrics인 호스트에서만 otelcol 사용자에 추가한다.
 otel_docker_group: "docker"
 
-# 컨테이너 로그(hosts/<host>/agents의 otel_container_logs: true)는 journald/containers 수신기가 app_logs로 보낸다.
-# rsyslog가 있는 호스트는 같은 항목을 시스템 로그 파일에 쓰지 않도록 이 규칙 파일을 둔다(system_logs 중복 방지).
+# 컨테이너 로그(hosts/<host>/agents의 otel_container_logs: true): docker json-file 드라이버 파일을 filelog/containers가 읽는다.
+otel_container_log_glob: /var/lib/docker/containers/*/*-json.log
+# 한 줄(분할 조각 재결합 후) 최대 크기. 넘으면 recombine이 그 시점에 내보낸다.
+otel_container_max_log_size: 1048576
+# compose 라벨이 없는 컨테이너의 service.name
+otel_container_default_service: container
+# 이전 구현(journald 드라이버)이 배포했던 rsyslog 규칙 파일. 지금은 사용하지 않으며 남아 있으면 지운다(MON-068).
 otel_rsyslog_container_rule_path: /etc/rsyslog.d/00-host-agents-containers.conf
 
 # 로컬 OTLP 수신기는 기본 비활성 (인증 없는 수집 포트 노출 방지)
