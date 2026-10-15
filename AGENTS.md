@@ -32,6 +32,7 @@ Ansible과 Semaphore UI는 저장소 루트(`cwd`)를 기준으로 동작하므�
    - 시크릿은 Semaphore UI의 Environment(-e) 주입 또는 OpenBao/Vault lookup 플러그인을 활용합니다.
 2. **권한 최소화**
    - 민감한 설정/키 파일은 반드시 `mode: '0600'` 이하로 제한합니다.
+   - **예외: 시크릿 env 파일은 `mode: '0640'` `root:dockermgmt`입니다.** compose는 `env_file:`을 *실행한 사용자* 권한으로 읽는데 실행 주체가 `docker` 그룹의 개인 운영자 계정이고, `docker` 그룹은 root와 같은 권한이라 이 그룹에게 읽기를 막아도 실질적인 보호가 늘지 않습니다. 막는 대상은 `dockermgmt`가 아닌 계정입니다. 예외는 소비자별로 나눈 시크릿 env 파일(예: `funa_env`의 `proxy.secrets.env`, `vrrp.secrets.env`)에만 적용합니다(근거: ADR-0002 개정, #222).
 
 ## 5. 품질 검증 및 린팅 (CI & Pre-Commit)
 1. **Git Pre-Commit Hook 필수 준수**

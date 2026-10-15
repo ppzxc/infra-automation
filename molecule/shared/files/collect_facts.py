@@ -22,9 +22,13 @@ out = {"stat": {}, "read": {}, "group": {}, "passwd": {}, "cmd": {}}
 for path in spec.get("stat", []):
     try:
         st = os.stat(path)
-        out["stat"][path] = {"exists": True, "mode": "%04o" % (st.st_mode & 0o7777)}
+        try:
+            owner, group = pwd.getpwuid(st.st_uid).pw_name, grp.getgrgid(st.st_gid).gr_name
+        except KeyError:
+            owner, group = str(st.st_uid), str(st.st_gid)
+        out["stat"][path] = {"exists": True, "mode": "%04o" % (st.st_mode & 0o7777), "owner": owner, "group": group}
     except OSError:
-        out["stat"][path] = {"exists": False, "mode": None}
+        out["stat"][path] = {"exists": False, "mode": None, "owner": None, "group": None}
 
 for path in spec.get("read", []):
     try:

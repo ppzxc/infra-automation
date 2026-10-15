@@ -21,3 +21,52 @@
       ansible.builtin.include_role:
         name: "{{ item }}"
       loop: "{{ scenario_roles.split(',') | select('in', molecule_roles) | reject('equalto', 'common') | list }}"
+
+# #220: firewall_unmanaged 그룹 소속 호스트는 방화벽 입력이 바뀌어도 방화벽 설정을 건드리지 않는다.
+# 위 converge로 방화벽이 수렴된 뒤 호스트를 그룹에 넣고, 허용 포트와 소스 제한 인그레스 규칙을
+# 일부러 바꿔 security 역할을 다시 적용한다. 앞뒤 스냅샷이 verify의 [VERIFY-SEC-051]에서 같아야 한다(security 역할이 있는 시나리오에서만 실행).
+- name: Converge firewall_unmanaged host
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    fw_snapshot_cmd: >-
+      cat /etc/firewalld/zones/*.xml /etc/firewalld/firewalld.conf
+      /etc/ufw/user.rules /etc/ufw/user6.rules /etc/ufw/ufw.conf 2>/dev/null; true
+
+  tasks:
+    - name: Run only when the security role is part of the scenario
+      when: "'security' in (lookup('env', 'SCENARIO_ROLES') | default('', true)).split(',')"
+      block:
+        - name: Join the firewall_unmanaged group
+          ansible.builtin.group_by:
+            key: firewall_unmanaged
+          changed_when: false
+
+        - name: Snapshot firewall configuration before
+          ansible.builtin.shell: "{{ fw_snapshot_cmd }}"
+          register: fw_before
+          changed_when: false
+
+        - name: Re-apply the security role with different firewall inputs
+          ansible.builtin.include_role:
+            name: security
+          vars:
+            firewall_allowed_tcp_ports: [22, 9999]
+            firewall_ingress_rules:
+              - { port: "9999", proto: tcp, sources: ["203.0.113.9/32"] }
+
+        - name: Snapshot firewall configuration after
+          ansible.builtin.shell: "{{ fw_snapshot_cmd }}"
+          register: fw_after
+          changed_when: false
+
+        - name: Keep the snapshots for the verify phase
+          ansible.builtin.copy:
+            content: "{{ item.content }}"
+            dest: "{{ item.dest }}"
+            mode: "0600"
+          loop:
+            - { dest: /var/tmp/fw-unmanaged-before.txt, content: "{{ fw_before.stdout }}" }
+            - { dest: /var/tmp/fw-unmanaged-after.txt, content: "{{ fw_after.stdout }}" }

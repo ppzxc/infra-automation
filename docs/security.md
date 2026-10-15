@@ -101,8 +101,12 @@
 | `SEC-048` | `Detect firewalld runtime drift from the rule plan (CentOS 7, raw)` | `ansible.builtin.raw` | CentOS 7 (`_raw_path_effective`) | 실행 중 방화벽이 규칙 계획과 같으면 `ok`, 다르면 `changed` 후 `Reload firewalld` |
 | `SEC-049` | `Record detected default network interface (CentOS 7, raw)` | `ansible.builtin.set_fact` | CentOS 7 (`_raw_path_effective`) | 팩트 설정 전용 (`ansible_default_ipv4` 미정의 시에만) |
 | `SEC-050` | `Build firewalld rule plan (CentOS 7, raw)` | `ansible.builtin.set_fact` | CentOS 7 (`_raw_path_effective`) | 팩트 설정 전용 (`raw_firewalld_plan`, 제거 규칙 우선 정렬) |
+| `SEC-051` | `Apply firewall configuration tasks unless the host is in firewall_unmanaged` | `block` (`when: security_firewall_managed`) | All | 인벤토리 그룹 `firewall_unmanaged` 소속이면 UFW·firewalld·iptables·CentOS 6/7 raw 방화벽 태스크 전체를 건너뜀(`skipping`) |
+| `SEC-052` | `Apply custom firewall ingress rules unless the host is in firewall_unmanaged` | `block` (`when: security_firewall_managed`) | All | 소스 IP 제한 인그레스 규칙(UFW·firewalld·iptables·raw iptables)도 같은 그룹이면 건너뜀 |
 
 > **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 `/etc/redhat-release` 자동 판별(`_raw_path_effective`, 인벤토리 `raw_provisioning_path`로 명시하면 그 값이 우선)에 따라 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고 (CentOS 7은 `SEC-011` 대신 `SEC-041`이 실행되고, CentOS 6는 `SEC-008`/`SEC-021` 대신 `SEC-037`~`SEC-040` iptables probe+mutate 쌍이 추가로 실행되며, CentOS 7은 firewalld 모듈/`firewall-cmd` 폴백 태스크(`SEC-005`~`SEC-007`, `SEC-016`/`SEC-017`/`SEC-020` 등) 대신 `SEC-042`~`SEC-050` firewalld probe+mutate 쌍(런타임 drift 감지 포함)이 실행된다(제거 규칙을 먼저 적용해 존 충돌을 피하고, 변경은 `permanent`에만 쓰고 raw `Reload firewalld` 핸들러로 반영). 룰 영속화(`service iptables save`)는 기존 모듈 경로와 같이 수행하지 않는다), `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
+
+> **방화벽 관리 제외 (`firewall_unmanaged`, #220)**: Semaphore 인벤토리에서 `servers`에 두면서 그룹 `firewall_unmanaged`에도 넣은 호스트는 `SEC-051`/`SEC-052` 게이트가 방화벽 태스크(UFW·firewalld·iptables, CentOS 7 raw 경로 포함)를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo 정책은 그대로 적용한다. 기본값 `security_firewall_managed`는 그룹 소속에서 파생한다(Semaphore 인벤토리는 static이라 group_vars를 쓰지 않음). Host Audit 드리프트는 같은 인벤토리로 `site.yml`을 check 실행하므로 같은 규칙을 따른다. docker daemon이 관리하는 체인(`docker_iptables`)은 이 그룹과 무관하다. 프로비저닝 전에 `--check --diff`로 방화벽 태스크가 하나도 나오지 않는지 확인한다.
 
 
 

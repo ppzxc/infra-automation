@@ -1,0 +1,131 @@
+---
+# ==============================================================================
+# FUNA Cluster 환경 파일 렌더링 (#222)
+# ==============================================================================
+# OpenBao 값을 Ansible이 읽어 노드에 파일로 렌더링한다. compose는 env_file:로 이 파일을 직접 읽고,
+# 로그인 셸은 profile.d 로더를 통한다. 시크릿은 소비자별 파일로 나눠 각 컨테이너가 필요한 것만 받는다.
+# 그룹 funa_cluster에 속하지 않은 호스트에는 아무것도 만들지 않는다.
+# 시크릿이 든 태스크는 no_log, 시크릿 파일 태스크는 diff: false. 실패 메시지는 경로·키 이름만 말한다.
+- name: FUNA Cluster environment files
+  when: funa_env_enabled | bool
+  block:
+    - name: "[FUNA-001] Look up the dockermgmt group"
+      ansible.builtin.getent:
+        database: group
+        key: "{{ funa_env_group }}"
+        fail_key: false
+      check_mode: false
+
+    - name: "[FUNA-002] Assert the dockermgmt group exists (docker_engine runs first)"
+      vars:
+        _group_present: "{{ (getent_group | default({})).get(funa_env_group) is not none }}"
+      ansible.builtin.assert:
+        that: _group_present | bool
+        fail_msg: >-
+          {{ inventory_hostname }}: 그룹 {{ funa_env_group }}이(가) 없습니다.
+          docker_engine 역할(DOC-014)이 먼저 적용되어야 환경 파일을 렌더링할 수 있습니다.
+        quiet: true
+      when: not (ansible_check_mode | default(false))
+
+    # check 모드에서 그룹이 아직 없는 호스트(docker_engine이 변경만 시뮬레이션)는 파일 렌더링 없이 넘어간다.
+    - name: "[FUNA-002-FACT] Record whether the dockermgmt group exists"
+      ansible.builtin.set_fact:
+        _funa_env_group_present: "{{ (getent_group | default({})).get(funa_env_group) is not none }}"
+
+    - name: "[FUNA-003] Fetch OpenBao KV (hosts/<host>, clusters/funa, clusters/funa/proxy, clusters/funa/vrrp)"
+      vars:
+        _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
+        _vault_token_eff: "{{ _vault_token | default(vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true), true) }}"
+        _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
+        _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
+      ansible.builtin.uri:
+        url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/{{ item.path }}"
+        method: GET
+        headers: >-
+          {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
+        status_code: [200, 404]
+        timeout: 5
+        validate_certs: "{{ funa_env_validate_certs }}"
+      loop:
+        - { key: node, path: "{{ funa_env_host_path }}" }
+        - { key: cluster, path: "{{ funa_env_cluster_path }}" }
+        - { key: proxy, path: "{{ funa_env_cluster_path }}/proxy" }
+        - { key: vrrp, path: "{{ funa_env_cluster_path }}/vrrp" }
+      loop_control:
+        label: "{{ item.key }}"
+      register: funa_env_kv_resp
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      no_log: true
+      when:
+        - funa_env_kv_fixture is not defined
+        - _vault_token_eff | length > 0
+
+    - name: "[FUNA-004] Assert OpenBao answered every FUNA lookup"
+      vars:
+        _statuses: "{{ funa_env_kv_resp.results | default([]) | map(attribute='status', default=-1) | list }}"
+      ansible.builtin.assert:
+        that: funa_env_kv_fixture is defined or (_statuses | length == 4 and _statuses | select('in', [200, 404]) | list | length == 4)
+        fail_msg: >-
+          {{ inventory_hostname }}: OpenBao 조회 실패 — 변경 없이 중단합니다.
+          status({{ funa_env_host_path }}, {{ funa_env_cluster_path }}, {{ funa_env_cluster_path }}/proxy, {{ funa_env_cluster_path }}/vrrp)={{ _statuses if _statuses | length > 0 else '토큰 없음/미조회' }}
+        quiet: true
+
+    - name: "[FUNA-005] Build the environment files from the KV contents"
+      ansible.builtin.set_fact:
+        _funa_env: >-
+          {{ (funa_env_kv_fixture if funa_env_kv_fixture is defined else (funa_env_kv_resp.results | default([]) | funa_env_kv_by_key))
+             | funa_env_resolve(funa_env_node_keys, funa_env_required_cluster_keys,
+                                funa_env_required_proxy_keys, funa_env_required_vrrp_keys,
+                                funa_env_cluster_path, funa_env_host_path, funa_env_node_secret_keys) }}
+      no_log: true
+
+    # 오류 목록에는 경로와 키 이름만 있고 값은 없다.
+    - name: "[FUNA-006] Assert the OpenBao values are complete and valid"
+      ansible.builtin.assert:
+        that: _funa_env.errors | length == 0
+        fail_msg: "{{ inventory_hostname }}: FUNA 환경 값 검증 실패 — {{ _funa_env.errors | join('; ') }}"
+        quiet: true
+
+    - name: "[FUNA-007] Ensure the environment directory exists"
+      ansible.builtin.file:
+        path: "{{ funa_env_dir }}"
+        state: directory
+        owner: "{{ funa_env_owner }}"
+        group: "{{ funa_env_owner_group }}"
+        mode: '0755'
+      when: _funa_env_group_present | bool
+
+    - name: "[FUNA-008] Render the non-secret environment file (cluster.env)"
+      ansible.builtin.copy:
+        content: "{{ _funa_env.cluster }}"
+        dest: "{{ funa_env_dir }}/cluster.env"
+        owner: "{{ funa_env_owner }}"
+        group: "{{ funa_env_owner_group }}"
+        mode: '0644'
+      when: _funa_env_group_present | bool
+
+    - name: "[FUNA-009] Render the consumer secret environment files (proxy, vrrp)"
+      ansible.builtin.copy:
+        content: "{{ _funa_env[item] }}"
+        dest: "{{ funa_env_dir }}/{{ item }}.secrets.env"
+        owner: "{{ funa_env_owner }}"
+        group: "{{ funa_env_group }}"
+        mode: '0640'
+      loop: [proxy, vrrp]
+      loop_control:
+        label: "{{ item }}"
+      no_log: true
+      diff: false
+      when: _funa_env_group_present | bool
+
+    - name: "[FUNA-010] Deploy the login shell loader (profile.d)"
+      ansible.builtin.template:
+        src: funa-cluster.sh.j2
+        dest: "{{ funa_env_profile_dir }}/funa-cluster.sh"
+        owner: "{{ funa_env_owner }}"
+        group: "{{ funa_env_owner_group }}"
+        mode: '0644'

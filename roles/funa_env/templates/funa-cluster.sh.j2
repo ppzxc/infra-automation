@@ -1,0 +1,11 @@
+# Managed by Ansible (funa_env). Do not edit.
+# FUNA Cluster 환경 값을 로그인 셸에 올린다. 읽을 수 있는 파일만 불러온다
+# (시크릿 파일은 dockermgmt 그룹만 읽는다). 운영 alias는 common 역할(99-aliases.sh)이 배포한다.
+for _funa_env_file in {{ funa_env_dir }}/cluster.env {{ funa_env_dir }}/proxy.secrets.env {{ funa_env_dir }}/vrrp.secrets.env; do
+    if [ -r "$_funa_env_file" ]; then
+        set -a
+        . "$_funa_env_file"
+        set +a
+    fi
+done
+unset _funa_env_file

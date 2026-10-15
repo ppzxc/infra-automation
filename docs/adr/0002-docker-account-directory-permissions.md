@@ -46,7 +46,7 @@ OS 기본 계정 충돌을 방지하기 위해 컨테이너 데몬 계정은 **�
 /opt/services/                      # [설정 및 코드] Git 형상관리 대상 (용량 가벼움, 권한: 2775)
 ├── librenms/
 │   ├── compose.yml
-│   ├── .env                       # 시크릿 환경변수 (권한: 600)
+│   ├── .env                       # 비시크릿 보간 값 (시크릿은 Ansible이 렌더링한 소비자별 env 파일, 아래 개정 참고)
 │   └── config/                    # 커스텀 설정 파일 (syslog-ng.conf, custom.conf 등)
 ├── openbao/
 │   └── compose.yml
@@ -92,7 +92,7 @@ OS 기본 계정 충돌을 방지하기 위해 컨테이너 데몬 계정은 **�
 컨테이너 이미지의 특성에 따라 다음과 같이 이원화된 표준을 적용합니다:
 
 1. **LinuxServer.io 및 PUID/PGID 지원 이미지**:
-   - `.env`에 `PUID=998`, `PGID=2000` 주입하여 실행.
+   - `.env`(비시크릿 보간 값)에 `PUID=998`, `PGID=2000` 주입하여 실행.
 2. **공식 오픈소스 이미지 (MariaDB, PostgreSQL, OpenBao, Redis 등)**:
    - **원칙 1**: `user: "998:2000"`으로 안전하게 실행 가능한 이미지는 Compose에 `user` 파라미터 지정.
    - **원칙 2**: 내부 고정 UID(예: `mysql:999`, `postgres:999`, `vault:100`)로 실행해야 하는 공식 이미지는, 호스트의 해당 서비스 데이터 디렉터리에 POSIX ACL을 추가 부여하여 운영자 그룹(`dockermgmt`)과 컨테이너 데몬 간 읽기/쓰기를 양방향 보장:
@@ -143,3 +143,9 @@ graph TD
   - **FHS 표준화**: 대용량 볼륨(`/data`)과 설정 코드(`/opt/services`)가 분리되어 백업 및 스토리지 마운트 용이.
 - **사이드이펙트 방지 (Mitigations)**:
   - 전역 `/etc/profile`을 무조건 `umask 002`로 변경하지 않고 `dockermgmt` 소속 사용자 세션에만 선별 적용하여 시스템 데몬 보안성 유지.
+
+---
+
+## 5. Amendments (개정)
+
+- **2026-10-15 (#222)**: `.env`는 **비시크릿 보간 값**을 담는 파일이다. 시크릿은 `.env`에 두지 않고 **Ansible이 OpenBao에서 렌더링한 소비자별 env 파일**(예: FUNA Cluster의 `/etc/funa-cluster/proxy.secrets.env`, `0640 root:dockermgmt`)로 컨테이너마다 필요한 것만 `env_file:`로 넘긴다. 시크릿 파일 권한이 0600이 아닌 이유(compose가 `docker` 그룹의 개인 운영자 권한으로 읽음)는 AGENTS.md §4의 예외에 있다.
