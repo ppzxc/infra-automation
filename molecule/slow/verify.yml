@@ -23,9 +23,16 @@
         - /usr/local/bin/otelcol-contrib
         - /etc/otelcol/config.yaml
         - "{{ otelcol_service_path }}"
+        - /etc/funa-cluster/cluster.env
+        - /etc/funa-cluster/proxy.secrets.env
+        - /etc/funa-cluster/vrrp.secrets.env
+        - /etc/profile.d/funa-cluster.sh
       read:
         - /etc/otelcol/config.yaml
         - "{{ otelcol_service_path }}"
+        - /etc/funa-cluster/cluster.env
+        - /etc/funa-cluster/proxy.secrets.env
+        - /etc/funa-cluster/vrrp.secrets.env
       group: [dockermgmt, otelcol]
       passwd: [dockersvc, otelcol]
 
@@ -40,6 +47,83 @@
     - name: Parse collected facts
       ansible.builtin.set_fact:
         f: "{{ collected.stdout | from_json }}"
+
+    # ==========================================================================
+    # funa_env 검증 (#222): 그룹 소속 호스트만 파일을 받는다
+    # ==========================================================================
+    - name: Verify the funa_env role
+      when: "'funa_env' in molecule_roles"
+      block:
+        # 001~006은 OpenBao 조회·검증 태스크다. molecule에는 OpenBao가 없어 funa_env_kv_fixture가 조회를 대신하므로
+        # (조회·실패 경로는 tests/test_funa_env.py가 가짜 OpenBao로 검증) 여기서는 그 결과가 파일에 반영됐는지 본다.
+        - name: "[VERIFY-FUNA-001] Verify the dockermgmt group the files are owned by exists"
+          ansible.builtin.assert:
+            that: f.group['dockermgmt']
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-002] Verify the group check let the rendering run (files exist for funa_cluster hosts)"
+          ansible.builtin.assert:
+            that: f.stat['/etc/funa-cluster/cluster.env'].exists
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-003] Verify the node values reached cluster.env"
+          ansible.builtin.assert:
+            that: "'FUNA_NODE_EXTERNAL_HOSTNAME=node.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-004] Verify the cluster values reached cluster.env"
+          ansible.builtin.assert:
+            that: "'FUNA_FLOATING_HOSTNAME=vip.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-005] Verify every file was built from the KV contents"
+          ansible.builtin.assert:
+            that:
+              - f.read['/etc/funa-cluster/proxy.secrets.env'] | length > 0
+              - f.read['/etc/funa-cluster/vrrp.secrets.env'] | length > 0
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-006] Verify the files carry the Managed-by header (validated content only)"
+          ansible.builtin.assert:
+            that: "f.read['/etc/funa-cluster/cluster.env'].startswith('# Managed by Ansible (funa_env)')"
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-007] Verify the FUNA environment directory and files exist only for funa_cluster hosts"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/funa-cluster/cluster.env'].exists == ('funa_cluster' in group_names)
+              - f.stat['/etc/funa-cluster/proxy.secrets.env'].exists == ('funa_cluster' in group_names)
+              - f.stat['/etc/profile.d/funa-cluster.sh'].exists == ('funa_cluster' in group_names)
+
+        - name: "[VERIFY-FUNA-008] Verify the non-secret environment file (0644 root:root, no secrets)"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/funa-cluster/cluster.env'].mode == '0644'
+              - f.stat['/etc/funa-cluster/cluster.env'].owner == 'root'
+              - f.stat['/etc/funa-cluster/cluster.env'].group == 'root'
+              - "'TZ=Asia/Seoul' in f.read['/etc/funa-cluster/cluster.env']"
+              - "'molecule-' not in f.read['/etc/funa-cluster/cluster.env']"
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-009] Verify the consumer secret files (0640 root:dockermgmt, separated)"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/funa-cluster/proxy.secrets.env'].mode == '0640'
+              - f.stat['/etc/funa-cluster/vrrp.secrets.env'].mode == '0640'
+              - f.stat['/etc/funa-cluster/proxy.secrets.env'].owner == 'root'
+              - f.stat['/etc/funa-cluster/proxy.secrets.env'].group == 'dockermgmt'
+              - f.stat['/etc/funa-cluster/vrrp.secrets.env'].group == 'dockermgmt'
+              - "'CLOUDFLARE_API_TOKEN=molecule-cf' in f.read['/etc/funa-cluster/proxy.secrets.env']"
+              - "'molecule-smtp' not in f.read['/etc/funa-cluster/proxy.secrets.env']"
+              - "'SMTP_PASSWORD=molecule-smtp' in f.read['/etc/funa-cluster/vrrp.secrets.env']"
+              - "'molecule-cf' not in f.read['/etc/funa-cluster/vrrp.secrets.env']"
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-010] Verify the profile.d loader"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/profile.d/funa-cluster.sh'].mode == '0644'
+          when: "'funa_cluster' in group_names"
 
     # ==========================================================================
     # 4. Docker Engine 검증

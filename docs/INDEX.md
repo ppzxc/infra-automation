@@ -1,6 +1,6 @@
 # Infra Automation Ansible Roles Index & Matrix
 
-`infra-automation` 프로젝트는 단일 책임 원칙(SRP)에 따라 모듈화된 5대 핵심 역할을 통해 온프레미스 대상 호스트의 라이프사이클을 관리하며, 본 디렉토리는 관련 스펙과 추적 매트릭스를 포함합니다.
+`infra-automation` 프로젝트는 단일 책임 원칙(SRP)에 따라 모듈화된 핵심 역할을 통해 온프레미스 대상 호스트의 라이프사이클을 관리하며, 본 디렉토리는 관련 스펙과 추적 매트릭스를 포함합니다.
 
 ---
 
@@ -14,6 +14,7 @@
 6. [Host Backup (`backup`)](backup.md) - restic + resticprofile 기반 호스트 설정 백업(RustFS S3), ISMS 2.9.3 표준, 중앙 Repo Maintenance 포함
 7. [Cisco IOS Switch Backup (`cisco_backup`)](cisco_backup.md) - Cisco 네트워크 스위치 `show running-config` 수집, 무결성 검증, 보관 주기 자동화 및 Semaphore UI 연동
 8. [OpenObserve Config (`openobserve_config`)](openobserve_config.md) - 컨트롤러 전용. OpenObserve VRL ingest function(sshd/sudo 해석)·파이프라인·통지 webhook·알림 규칙을 코드로 관리하고 API로 반영 (ADR-0008)
+9. [FUNA Env (`funa_env`)](funa_env.md) - FUNA Cluster 환경 값을 OpenBao에서 읽어 `/etc/funa-cluster/`의 비시크릿 파일과 소비자별 시크릿 파일(0640 root:dockermgmt)로 렌더링 (#222)
 
 ---
 
@@ -27,4 +28,4 @@
 * [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일
 * [Host Audit 태스크 명세](host_audit.md) - 실행 흐름, 호스트별 JSON 구조(schema_version 1), 변수, AUD-xxx 태스크 매트릭스
 * [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 (CIS 감사 파일럿은 ADR-0009로 대체·제거)
-
+* [Compose 프로젝트·서비스 이름 규칙 ADR-0011](adr/0011-compose-project-and-service-naming.md) - 수동 관리 docker compose의 `name:` 명시, 구성요소 서비스명, `<프로젝트>-<서비스>` 식별자 (FUNA Cluster 편입)

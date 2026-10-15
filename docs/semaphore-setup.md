@@ -68,6 +68,10 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0332 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `agents/openobserve`의 `silent_host_exceptions`(만료일 필수)에 등록한다.
 
+**방화벽을 건드리지 않는 호스트**: `servers`(또는 `loadbalancers`)에 두면서 `firewall_unmanaged` 그룹에도 넣는다. HOST PROVISIONING(`site.yml`)이 이 호스트의 방화벽(UFW·firewalld·iptables, CentOS 7 raw 경로 포함) 태스크를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo 정책은 그대로 적용한다. Host Audit 드리프트 검사는 같은 인벤토리로 `site.yml`을 check 실행하므로 따로 설정할 것이 없다. 프로비저닝 전에 `--check --diff`로 방화벽 태스크가 하나도 나오지 않는지 확인한다(#220).
+
+**FUNA Cluster 호스트**: `servers`에 두면서 `funa_cluster` 그룹에도 넣는다(ns0325·ns0327·ns0338). HOST PROVISIONING(`site.yml`)이 `docker_engine` 뒤에 `funa_env` 역할을 실행해 OpenBao 값으로 `/etc/funa-cluster/`의 환경 파일을 렌더링한다. 그룹에 없는 호스트에는 아무것도 생기지 않는다. 필요한 OpenBao 경로와 키는 `docs/funa_env.md`(#222). 이 그룹은 `NODE_ROLE`에 쓰이지 않는다.
+
 **Host Audit에서 빼는 호스트**: 러너(Semaphore 서버)에서 접속할 수 없는 호스트 등은 `host_audit_excluded` 그룹에 넣는다. Host Audit — Monthly·On-demand가 이 그룹을 빼며(`host_audit_scope_pattern`), 보고서와 Asset Inventory에도 나오지 않는다. 다른 템플릿에는 영향이 없다.
 
 ```yaml
@@ -87,6 +91,12 @@ all:
     host_audit_excluded:   # Host Audit 대상에서 뺀다(러너에서 접속 불가 등).
       hosts:
         ns0332: {}
+    firewall_unmanaged:   # HOST PROVISIONING이 방화벽만 건드리지 않는다.
+      hosts:
+        ns0325: {}
+    funa_cluster:   # FUNA Cluster 환경 파일 렌더링(funa_env).
+      hosts:
+        ns0325: {}
 ```
 
 ---

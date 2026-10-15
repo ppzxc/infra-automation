@@ -46,7 +46,7 @@ provisioner:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
     # Same reason: the project-level filter plugins (host_agents_*, raw_*) are not inherited.
     ANSIBLE_FILTER_PLUGINS: "${MOLECULE_PROJECT_DIRECTORY}/filter_plugins"
-    SCENARIO_ROLES: "common,docker_engine,monitoring,backup"
+    SCENARIO_ROLES: "common,docker_engine,funa_env,monitoring,backup"
     ANSIBLE_CALLBACKS_ENABLED: "ansible.posix.timer,ansible.posix.profile_tasks"
     # Per-task overhead (one `docker exec` + module transfer each) dominates
     # runtime, not any single task. Pipelining sends the module over stdin
@@ -58,7 +58,19 @@ provisioner:
     # scenarios cannot drift apart.
     links:
       group_vars: ../shared/group_vars
+    # funa_env(#222)는 그룹 소속 호스트에만 파일을 만든다. Rocky 9 한 대만 넣어 나머지가 아무것도 받지 않음을 함께 검증한다.
+    groups:
+      funa_cluster:
+        hosts:
+          slow-rockylinux9: {}
     host_vars:
+      # OpenBao 대신 쓰는 가짜 값(funa_env_kv_fixture가 있으면 OpenBao 조회를 건너뛴다).
+      slow-rockylinux9:
+        funa_env_kv_fixture:
+          node: {FUNA_NODE_EXTERNAL_HOSTNAME: node.funa.invalid, FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME: "*.node.funa.invalid"}
+          cluster: {FUNA_FLOATING_HOSTNAME: vip.funa.invalid, FUNA_HEALTH_CHECK_URI: /health, FUNA_SERVICE_NAME: funa, FUNA_NOTIFICATION_HEADER: "[FUNA]", TZ: Asia/Seoul}
+          proxy: {FUNA_ADMIN_TOKEN: molecule-admin, CLOUDFLARE_API_TOKEN: molecule-cf, DB_PASSWORD: molecule-db}
+          vrrp: {SMTP_PASSWORD: molecule-smtp}
       # The Test Image bakes python3.11 because the stock 3.6 cannot parse the
       # AnsiballZ wrapper (from __future__ import annotations, Python 3.7+).
       slow-rockylinux8:

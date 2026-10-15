@@ -1,0 +1,39 @@
+---
+# FUNA Cluster 환경 파일 (#222, docs/funa_env.md)
+# 인벤토리 그룹 funa_cluster 소속 호스트에만 적용한다. Semaphore 인벤토리는 static이라
+# group_vars를 쓸 수 없어 그룹 소속에서 파생한다(enable_otelcol, security_firewall_managed와 같은 방식).
+funa_env_enabled: "{{ 'funa_cluster' in group_names }}"
+
+# 렌더링 위치와 소유. dockermgmt는 docker_engine 역할(DOC-014)이 만든다.
+funa_env_dir: /etc/funa-cluster
+funa_env_profile_dir: /etc/profile.d
+funa_env_owner: root
+funa_env_owner_group: root
+funa_env_group: "{{ docker_mgmt_group | default('dockermgmt') }}"
+
+# 값의 원천(OpenBao). 값은 Git에 두지 않는다.
+#   hosts/<host>                  노드별 비시크릿: funa_env_node_keys에 적은 키만 읽는다(같은 KV에 접속 정보가 있다)
+#   clusters/funa                 클러스터 공통 비시크릿: 키 전부 → cluster.env
+#   clusters/funa/proxy           Caddy 시크릿: 키 전부 → proxy.secrets.env
+#   clusters/funa/vrrp            keepalived 시크릿: 키 전부 → vrrp.secrets.env
+# KV 키 이름이 곧 환경 변수 이름이다.
+funa_env_cluster_path: clusters/funa
+funa_env_host_path: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true) | regex_replace('^secret/', '')) ~ inventory_hostname }}"
+funa_env_node_keys:
+  - FUNA_NODE_EXTERNAL_HOSTNAME
+  - FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME
+
+# 반드시 있어야 하는 키(없으면 이름을 대며 실패한다). 나머지 키는 있는 대로 렌더링한다.
+funa_env_required_cluster_keys:
+  - FUNA_FLOATING_HOSTNAME
+  - FUNA_HEALTH_CHECK_URI
+  - FUNA_SERVICE_NAME
+  - FUNA_NOTIFICATION_HEADER
+  - TZ
+funa_env_required_proxy_keys:
+  - FUNA_ADMIN_TOKEN
+  - CLOUDFLARE_API_TOKEN
+  - DB_PASSWORD
+funa_env_required_vrrp_keys: []
+
+funa_env_validate_certs: true
