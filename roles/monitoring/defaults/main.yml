@@ -64,6 +64,10 @@ otel_docker_endpoint: "unix:///var/run/docker.sock"
 # 소켓 읽기용: 이 그룹이 존재하고 otel_docker_metrics인 호스트에서만 otelcol 사용자에 추가한다.
 otel_docker_group: "docker"
 
+# 컨테이너 로그(hosts/<host>/agents의 otel_container_logs: true)는 journald/containers 수신기가 app_logs로 보낸다.
+# rsyslog가 있는 호스트는 같은 항목을 시스템 로그 파일에 쓰지 않도록 이 규칙 파일을 둔다(system_logs 중복 방지).
+otel_rsyslog_container_rule_path: /etc/rsyslog.d/00-host-agents-containers.conf
+
 # 로컬 OTLP 수신기는 기본 비활성 (인증 없는 수집 포트 노출 방지)
 otel_otlp_enabled: false
 otel_otlp_bind: "127.0.0.1"

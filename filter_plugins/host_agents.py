@@ -353,6 +353,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     exclude_paths = _string_list(kv.get('backup_exclude_paths'), 'backup_exclude_paths', errors)
     pre_hooks = _string_list(kv.get('backup_pre_hooks'), 'backup_pre_hooks', errors)
     docker_metrics = _as_bool(kv.get('otel_docker_metrics'), 'otel_docker_metrics', errors)
+    container_logs = _as_bool(kv.get('otel_container_logs'), 'otel_container_logs', errors)
 
     for path in exclude_logs:
         if any(_covers(path, sec) for sec in security):
@@ -407,6 +408,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
         'errors': errors,
         'otel_logs': logs,
         'otel_docker_metrics': docker_metrics,
+        'otel_container_logs': container_logs,
         'backup_paths': _dedupe(list(mandatory_backup_paths or []) + extra_paths),
         'backup_exclude_paths': _dedupe(exclude_paths),
         'backup_pre_hooks': pre_hooks,

@@ -183,6 +183,10 @@
         value: false
         if: {{ (c ~ ' and attributes["message"] != nil' if fmt != 'audit' else c ~ ' and attributes["audit.type"] != nil') | to_json }}
 {% endmacro %}
+{#
+  컨테이너 로그(hosts/<host>/agents의 otel_container_logs). journald가 있는 modern 경로에서만 켠다(legacy는 raw 경로라 rsyslog 규칙을 배포하지 않아 이중 수집이 된다).
+#}
+{% set container_logs = (host_agents_inputs.otel_container_logs | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
 extensions:
   file_storage:
     directory: {{ otelcol_storage_dir }}
@@ -250,6 +254,11 @@ receivers:
     start_at: end
     storage: file_storage
     operators:
+{% if container_logs %}
+      # 컨테이너 항목은 journald/containers가 app_logs로 보낸다(system_logs 중복 방지).
+      - type: filter
+        expr: 'body["CONTAINER_NAME"] != nil'
+{% endif %}
       - type: add
         field: attributes.log_type
         value: system_logs
@@ -257,6 +266,41 @@ receivers:
         field: resource["service.name"]
         value: {{ otel_service_journald | to_json }}
       # journald는 PRIORITY(syslog 0..7)를 갖고 있으므로 severity로 올린다. 본문(원문 맵)은 그대로 둔다.
+      - type: severity_parser
+        parse_from: body["PRIORITY"]
+        if: 'body["PRIORITY"] != nil'
+        mapping:
+          fatal: ['0', '1', '2']
+          error: '3'
+          warn: '4'
+          info2: '5'
+          info: '6'
+          debug: '7'
+{% endif %}
+{% if container_logs %}
+  # docker journald 로그 드라이버 항목(CONTAINER_NAME이 있는 항목)만 app_logs로 받는다. 본문(원문 맵)은 건드리지 않는다.
+  # service.name은 compose 라벨 <프로젝트>-<서비스>(journald 필드 COM_DOCKER_COMPOSE_PROJECT/SERVICE, 컨테이너에 logging.options.labels 필요),
+  # 라벨이 없으면 컨테이너 이름. 컨테이너 이름은 container.name 속성에 남긴다.
+  journald/containers:
+    start_at: end
+    storage: file_storage
+    operators:
+      - type: filter
+        expr: 'body["CONTAINER_NAME"] == nil'
+      - type: add
+        field: attributes.log_type
+        value: app_logs
+      - type: add
+        field: attributes["container.name"]
+        value: EXPR(body["CONTAINER_NAME"])
+      - type: add
+        field: resource["service.name"]
+        value: EXPR(body["COM_DOCKER_COMPOSE_PROJECT"] + "-" + body["COM_DOCKER_COMPOSE_SERVICE"])
+        if: 'body["COM_DOCKER_COMPOSE_PROJECT"] != nil and body["COM_DOCKER_COMPOSE_SERVICE"] != nil'
+      - type: add
+        field: resource["service.name"]
+        value: EXPR(body["CONTAINER_NAME"])
+        if: 'body["COM_DOCKER_COMPOSE_PROJECT"] == nil or body["COM_DOCKER_COMPOSE_SERVICE"] == nil'
       - type: severity_parser
         parse_from: body["PRIORITY"]
         if: 'body["PRIORITY"] != nil'
@@ -367,7 +411,7 @@ service:
   extensions: [file_storage]
   pipelines:
     logs/in:
-      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
+      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if container_logs %}journald/containers, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
       processors: [memory_limiter, resource/host]
       exporters: [routing/logs]
 {% for stream in host_agents_log_streams %}

@@ -34,7 +34,8 @@
   보조 태그: `agents_install`, `agents_config`, `otel`, `backup`.
 - **대상 제한**: `hosts: "{{ target_hosts | default('servers') }}:&servers:!host_agents_excluded"` — 축소 가능, `servers` 밖으로 확장 불가. resolve/cleanup도 같은 호스트 집합으로 해석(현재 기본값 `servers:loadbalancers`).
 - **적용 제외 그룹 (2026-10-07 개정)**: `servers`에 있지만 Host Agents를 아직 적용하지 않는 호스트는 인벤토리 `host_agents_excluded` 그룹에 넣는다. Deploy·Config·Repo Maintenance가 같은 패턴으로 제외하므로 템플릿마다 Limit이나 `target_hosts`로 따로 빼지 않는다(스케줄 실행에서 잊히는 수동 제외를 막는다). `target_hosts`로 직접 지정해도 제외가 우선하며, 그룹이 없는 인벤토리는 Ansible 경고 한 줄과 함께 `servers` 전체를 대상으로 한다. 적용 시점에 그룹에서 빼는 것이 곧 편입 절차다.
-- **백업 전용 그룹 (2026-10-12 개정)**: 로그를 다른 수집 체계가 맡는 호스트(예: 자체 OpenObserve로 수집하는 API 클러스터 ns0270·ns0325·ns0327·ns0338)는 `servers`에 두고 인벤토리 `host_agents_backup_only` 그룹에도 넣는다. 이 호스트에는 resticprofile/restic만 적용하고 otelcol 단계(설치·설정·서비스, legacy node_exporter 정리 포함)는 하나도 실행하지 않는다. `enable_otelcol` 기본값을 그룹 소속에서 파생하므로(Semaphore Static 인벤토리에는 저장소 `inventory/group_vars`가 적용되지 않음) Deploy·Config·Backup·Host Audit Drift가 같은 규칙을 따르고, 호스트별 `o2_ingest_token`은 필수가 아니다. Repo Maintenance와 컨트롤러가 보내는 `job=inventory`·`job=maintenance` 이벤트는 그대로다. 대신 매일의 `job=backup` 결과(호스트 jsonl을 otelcol이 수집)는 OpenObserve로 가지 않는다 — 백업 성공 여부는 Repo Maintenance의 check와 Host Audit의 백업 타이머 상태로 확인한다.
+- **백업 전용 그룹 (2026-10-12 개정)**: 로그를 다른 수집 체계가 맡는 호스트(예: 자체 OpenObserve로 수집하는 ns0270)는 `servers`에 두고 인벤토리 `host_agents_backup_only` 그룹에도 넣는다. 이 호스트에는 resticprofile/restic만 적용하고 otelcol 단계(설치·설정·서비스, legacy node_exporter 정리 포함)는 하나도 실행하지 않는다. `enable_otelcol` 기본값을 그룹 소속에서 파생하므로(Semaphore Static 인벤토리에는 저장소 `inventory/group_vars`가 적용되지 않음) Deploy·Config·Backup·Host Audit Drift가 같은 규칙을 따르고, 호스트별 `o2_ingest_token`은 필수가 아니다. Repo Maintenance와 컨트롤러가 보내는 `job=inventory`·`job=maintenance` 이벤트는 그대로다. 대신 매일의 `job=backup` 결과(호스트 jsonl을 otelcol이 수집)는 OpenObserve로 가지 않는다 — 백업 성공 여부는 Repo Maintenance의 check와 Host Audit의 백업 타이머 상태로 확인한다.
+- **FUNA Cluster의 Backup Only 해제 (2026-10-14 개정)**: 위 개정(2026-10-12)은 "API 클러스터는 자체 OpenObserve로 수집한다"며 ns0270·ns0325·ns0327·ns0338을 Backup Only 예로 들었으나, FUNA Cluster(ns0325·ns0327·ns0338, `CONTEXT.md`)는 자체 OpenObserve로 수집하지 않는다. 이 호스트들은 Backup Only가 아니라 로그·메트릭을 중앙 OpenObserve로 보내는 일반 호스트로 편입한다(인벤토리 `host_agents_backup_only`에서 뺀다). ns0270은 FUNA Cluster가 아니며 이 개정의 대상이 아니다. 이 호스트들의 컨테이너 로그는 §2.3의 `otel_container_logs`로 수집한다.
 - **미프로비저닝 호스트는 즉시 실패**: 첫 태스크에서 `_is_already_provisioned`를 assert, 아니면 "`site.yml` 먼저 실행". 신규 호스트는 템플릿 2회(site → Deploy) 실행.
 - **비밀번호 접속 예외 (2026-10-02 개정, 기존 "부트스트랩 root 설치 경로 없음" 대체)**: SSH 키 없이 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트에도 Host Agents를 설치해야 한다는 운영 요구로, OpenBao `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`를 **명시한 호스트에 한해** `MON-020`을 통과시킨다(실행 단위·전역 허용은 두지 않음). 근거: 예외가 호스트별 OpenBao 기록(ISMS 증적)으로 남고 신규 호스트에 실수로 비밀번호 설치되는 것을 막는다. 비밀번호는 `sshpass -e`(`SSHPASS` 환경변수)로만 전달해 인자·로그에 노출하지 않으며(임시 공개키를 심는 방식은 하드닝 전 호스트의 `authorized_keys`를 바꾸므로 기각), 실행마다 `PASSWORD-AUTH-EXCEPTION` 경고를 남긴다. 이 예외는 하드닝되지 않은 호스트에 에이전트를 올리는 것이며, **만료 기준은 해당 호스트를 `site.yml`로 하드닝한 시점에 플래그를 제거**하는 것이다. 접속 계정은 root와 일반 계정(sudo 비밀번호) 모두 허용.
 - **Dry-run**: Config 경로는 check 모드 + `--diff`로 변경 미리보기가 가능해야 합니다.
@@ -53,6 +54,7 @@
   | `restic_password` | 호스트별 repo 비밀번호(분실 = 복구 불가 → OpenBao 자체 백업 전제) |
   | `otel_extra_logs` / `otel_exclude_logs` | §2.3 오버라이드 |
   | `otel_docker_metrics` | docker 메트릭 opt-in |
+  | `otel_container_logs` | docker 컨테이너 로그 수집 opt-in (§2.3) |
   | `backup_extra_paths` / `backup_exclude_paths` / `backup_pre_hooks` | §2.4 오버라이드 |
 
 - **OpenBao `secret/agents/openobserve`, `secret/agents/rustfs`** (`run_once`): 진짜 공용 시크릿만 — 컨트롤러 전용 OpenObserve 수집 토큰(§2.6), RustFS 유지보수 키(§2.5), 사설 CA. 문서에만 존재하고 코드가 읽지 않는 `global/services` 규약은 사용하지 않습니다.
@@ -98,6 +100,7 @@
   - 효과: 배포 이전 레코드에는 새 필드가 없으므로 OpenObserve 쿼리는 null을 견뎌야 합니다(기존 대시보드·알림 없음으로 가정).
 - **hostmetrics**: `cpu, memory, load, filesystem, disk, network, paging, processes`, 간격 **60s**, 프로세스별 `process` 스크레이퍼 비활성.
 - **docker 메트릭**: 기본 off, `otel_docker_metrics: true`인 호스트만. 구현 시 `docker_engine`의 동명 변수 `docker_metrics_enabled: true`가 role defaults 누수로 덮어쓰지 않도록 `otel_` 접두사로 분리.
+- **컨테이너 로그 (2026-10-14 개정)**: 기본 off, `otel_container_logs: true`인 modern 호스트만. 컨테이너는 compose에서 journald 로그 드라이버와 compose 라벨 전달 옵션(`com.docker.compose.project`, `com.docker.compose.service`)을 쓴다는 전제다. 전용 수신기 `journald/containers`가 `CONTAINER_NAME`이 있는 항목만 받아 `app_logs`로 보내고 `service.name`은 `<프로젝트>-<서비스>`(예: `funa-api`), 컨테이너 이름은 `container.name`에 남기며 본문은 바꾸지 않는다(ADR-0008). 기존 `journald` 수신기(rsyslog가 없는 호스트용, `system_logs`)와는 별개 경로이며, 켜진 호스트에서는 그 수신기가 컨테이너 항목을 받지 않고 rsyslog에는 컨테이너 항목을 시스템 로그 파일에 쓰지 않는 규칙을 배포해 `system_logs`와 중복되지 않게 한다. 다른 호스트의 수집 설정은 바뀌지 않는다.
 - **오버라이드**: `otel_extra_logs` = glob 목록(→ `app_logs`) 또는 `{path, stream}`; `otel_exclude_logs` = 정확한 경로 일치 제거, 단 `security_logs` 경로는 **제외 불가**.
 - **범위 외**: 시간 동기화 점검(2.9.6)은 `common`(chrony) 책임, 동기화 이상은 messages로 이미 수집.
 

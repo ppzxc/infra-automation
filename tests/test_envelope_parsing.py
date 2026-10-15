@@ -304,6 +304,83 @@ def test_real_collector_journald_priority_becomes_severity_and_body_is_kept(tmp_
         assert re.match(r"^m\d$", r["_body"]["MESSAGE"]) and "__CURSOR" in r["_body"]
 
 
+CONTAINER_INPUTS = {"otel_docker_metrics": False, "otel_container_logs": True, "otel_logs": [
+    {"path": "/var/log/secure", "stream": "security_logs", "service": "auth"}]}
+
+
+def _run_journald(binary, tmp_path, receivers, entries):
+    """Feed journal entries through a fake journalctl into the given rendered journald receivers."""
+    fake = tmp_path / "bin"
+    fake.mkdir(exist_ok=True)
+    lines = []
+    for i, entry in enumerate(entries):
+        entry = dict(entry, __CURSOR=f"c{i}", __REALTIME_TIMESTAMP=str(1709601072000000 + i * 1000))
+        lines.append(json.dumps(entry))
+    script = fake / "journalctl"
+    script.write_text("#!/bin/sh\ncat <<'EOF'\n" + "\n".join(lines) + "\nEOF\nsleep 60\n")
+    script.chmod(0o755)
+    rcv = {name: {"start_at": "beginning", "operators": r["operators"]} for name, r in receivers.items()}
+    harness = {"receivers": rcv, "exporters": {"file": {"path": str(tmp_path / "out.json")}},
+               "service": {"pipelines": {"logs": {"receivers": list(rcv), "exporters": ["file"]}}}}
+    (tmp_path / "h.yaml").write_text(yaml.safe_dump(harness))
+    old = os.environ["PATH"]
+    os.environ["PATH"] = f"{fake}:{old}"
+    try:
+        return _run(binary, tmp_path / "h.yaml", tmp_path / "out.json", len(entries))
+    finally:
+        os.environ["PATH"] = old
+
+
+CONTAINER_ENTRIES = [
+    {"MESSAGE": "api up", "CONTAINER_NAME": "funa-api-1", "PRIORITY": "6",
+     "COM_DOCKER_COMPOSE_PROJECT": "funa", "COM_DOCKER_COMPOSE_SERVICE": "api"},
+    {"MESSAGE": "boom on stderr", "CONTAINER_NAME": "funa-worker-1", "PRIORITY": "3",
+     "COM_DOCKER_COMPOSE_PROJECT": "funa", "COM_DOCKER_COMPOSE_SERVICE": "worker"},
+    {"MESSAGE": "no compose labels", "CONTAINER_NAME": "standalone", "PRIORITY": "6"},
+    {"MESSAGE": "sshd says hi", "SYSLOG_IDENTIFIER": "sshd", "PRIORITY": "6"},
+]
+
+
+@pytest.mark.skipif(not os.environ.get("OTELCOL_BIN_0_161_0"), reason="set OTELCOL_BIN_0_161_0")
+def test_real_collector_container_entries_become_app_logs_with_compose_service_name(tmp_path):
+    binary = _binary("0.161.0")
+    cfg, _ = _render(tmp_path, "modern", host_agents_inputs=CONTAINER_INPUTS)
+    recs = _run_journald(binary, tmp_path, {"journald": cfg["receivers"]["journald/containers"]}, CONTAINER_ENTRIES)
+    got = {r["_body"]["MESSAGE"]: r for r in recs}
+    assert set(got) == {"api up", "boom on stderr", "no compose labels"}, "non-container entries must not arrive"
+    for r in recs:
+        assert r["_attrs"]["log_type"] == "app_logs"
+    api = got["api up"]
+    assert api["_res"]["service.name"] == "funa-api" and api["_attrs"]["container.name"] == "funa-api-1"
+    assert api["_body"]["MESSAGE"] == "api up" and api["_body"]["CONTAINER_NAME"] == "funa-api-1"   # body kept
+    assert got["boom on stderr"]["_res"]["service.name"] == "funa-worker"
+    assert int(got["boom on stderr"]["severityNumber"]) == ERROR
+    assert got["no compose labels"]["_res"]["service.name"] == "standalone"
+
+
+@pytest.mark.skipif(not os.environ.get("OTELCOL_BIN_0_161_0"), reason="set OTELCOL_BIN_0_161_0")
+def test_real_collector_system_journald_drops_container_entries_when_container_logs_are_on(tmp_path):
+    binary = _binary("0.161.0")
+    cfg, _ = _render(tmp_path, "modern", host_agents_journald=True, host_agents_inputs=CONTAINER_INPUTS)
+    recs = _run_journald(binary, tmp_path, {"journald": cfg["receivers"]["journald"]}, CONTAINER_ENTRIES)
+    assert [r["_body"]["MESSAGE"] for r in recs] == ["sshd says hi"]
+    assert recs[0]["_attrs"]["log_type"] == "system_logs"
+
+
+def test_container_logs_receiver_is_rendered_only_when_the_host_opts_in(tmp_path):
+    off, off_text = _render(tmp_path, "modern", host_agents_journald=True)
+    assert "journald/containers" not in off["receivers"]
+    assert "journald/containers" not in off["service"]["pipelines"]["logs/in"]["receivers"]
+    assert not [o for o in off["receivers"]["journald"]["operators"] if o["type"] == "filter"]
+    assert "CONTAINER_NAME" not in off_text
+    on, _ = _render(tmp_path, "modern", host_agents_journald=True, host_agents_inputs=CONTAINER_INPUTS)
+    assert "journald/containers" in on["service"]["pipelines"]["logs/in"]["receivers"]
+    assert [o["type"] for o in on["receivers"]["journald"]["operators"]][0] == "filter"
+    # the default (key absent) renders exactly as before; legacy raw paths never get the receiver
+    legacy, _ = _render(tmp_path, "legacy_el7", host_agents_inputs=CONTAINER_INPUTS)
+    assert "journald/containers" not in legacy["receivers"]
+
+
 def test_envelope_operators_are_conditional_per_file_and_never_rewrite_the_body(tmp_path):
     cfg, _ = _render(tmp_path, "modern")
     for name in ("filelog/security_logs", "filelog/system_logs"):
