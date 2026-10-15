@@ -96,3 +96,8 @@ fail2ban_maxretry: 5
 
 
 
+
+# 방화벽 관리 제외 (#220): 인벤토리 그룹 firewall_unmanaged 소속 호스트는 방화벽 태스크(UFW·firewalld·iptables,
+# CentOS 6/7 raw 경로 포함)를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo는 그대로 적용한다.
+# Semaphore 인벤토리는 static이라 group_vars를 쓸 수 없어 그룹 소속에서 파생한다(enable_otelcol과 같은 방식).
+security_firewall_managed: "{{ 'firewall_unmanaged' not in group_names }}"

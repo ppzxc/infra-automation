@@ -34,6 +34,8 @@
       read:
         - /etc/ssh/sshd_config
         - /home/infra-legacy/.ssh/authorized_keys
+        - /var/tmp/fw-unmanaged-before.txt
+        - /var/tmp/fw-unmanaged-after.txt
       group: "{{ present_accounts }}"
       passwd: "{{ present_accounts + ['infra-removed'] }}"
       cmd:
@@ -214,6 +216,22 @@
         - name: "[VERIFY-SEC-018] Verify docker egress firewall policy readiness"
           ansible.builtin.debug:
             msg: "Docker egress policy verified."
+
+        # converge의 두 번째 플레이가 firewall_unmanaged 그룹에 넣은 상태에서 방화벽 입력(허용 포트)을 바꿔
+        # security 역할을 다시 적용하고 방화벽 설정 파일 스냅샷을 앞뒤로 남긴다.
+        - name: "[VERIFY-SEC-051] Verify firewall config is untouched for a firewall_unmanaged host"
+          ansible.builtin.assert:
+            that:
+              - f.read['/var/tmp/fw-unmanaged-before.txt'] is not none
+              - f.read['/var/tmp/fw-unmanaged-before.txt'] == f.read['/var/tmp/fw-unmanaged-after.txt']
+              - "'9999' not in f.read['/var/tmp/fw-unmanaged-after.txt']"
+            fail_msg: "firewall_unmanaged host's firewall configuration changed."
+
+        - name: "[VERIFY-SEC-052] Verify custom ingress rules are untouched for a firewall_unmanaged host"
+          ansible.builtin.assert:
+            that:
+              - "'203.0.113.9' not in f.read['/var/tmp/fw-unmanaged-after.txt']"
+            fail_msg: "custom ingress rule was applied to a firewall_unmanaged host."
 
     # ==========================================================================
     # 3. Access Security Role (Zero-Trust OpenBao & Boundary) 검증
