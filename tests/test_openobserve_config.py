@@ -1279,7 +1279,7 @@ def _run_memory_alert_on_sqlite(sql, case):
     """Execute the rendered alert SQL on the case's synthetic records (portable SQL subset) and return the firing hosts."""
     db = sqlite3.connect(":memory:")
     for stream in ("system_linux_memory_available", "system_memory_limit"):
-        db.execute(f'CREATE TABLE "{stream}" (host_name TEXT, _timestamp INTEGER, value REAL)')
+        db.execute(f'CREATE TABLE "{stream}" (host_name TEXT, _timestamp INTEGER, value INTEGER)')   # 합성 레코드는 정수로 적재된다(나눗셈이 잘리면 안 된다)
     for rec in case["records"]:
         stream = rec.get("stream", "system_linux_memory_available")
         for t in (rec["ts"] if isinstance(rec["ts"], list) else [rec["ts"]]):
