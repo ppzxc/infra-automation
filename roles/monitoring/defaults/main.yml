@@ -70,6 +70,11 @@ otel_container_log_glob: /var/lib/docker/containers/*/*-json.log
 otel_container_max_log_size: 1048576
 # compose 라벨이 없는 컨테이너의 service.name
 otel_container_default_service: container
+# 컨테이너 JSON 로그의 trace context 키 형식(레벨 파싱용 임시 JSON 최상위 키, Spec #253). 형식마다 trace_parser 하나가 만들어진다.
+# trace_flags는 형식에 있을 때만 적는다. funa는 trace_id/span_id/trace_flags, Caddy는 traceID/spanID.
+otel_container_trace_keys:
+  - {trace_id: trace_id, span_id: span_id, trace_flags: trace_flags}
+  - {trace_id: traceID, span_id: spanID}
 # 이전 구현(journald 드라이버)이 배포했던 rsyslog 규칙 파일. 지금은 사용하지 않으며 남아 있으면 지운다(MON-068).
 otel_rsyslog_container_rule_path: /etc/rsyslog.d/00-host-agents-containers.conf
 

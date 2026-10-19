@@ -423,6 +423,70 @@ def test_real_collector_container_levels_become_severity_only_where_the_format_h
             assert rec.get("severityText"), line                                  # 레벨이 있는 줄은 원문 레벨 텍스트를 함께 싣는다
 
 
+# 컨테이너 로그 trace context(Spec #253, ADR-0008): JSON 줄의 trace id 필드를 LogRecord의 TraceID/SpanID/flags로 올린다.
+TID, SID, TID2, SID2 = "4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", "0af7651916cd43dd8448eb211c80319c", "b7ad6b7169203331"
+ZERO_T, ZERO_S = "0" * 32, "0" * 16
+TRACE_CASES = [
+    # (line, expected (traceId, spanId, flags & 0xff or None when the format has no flags) or None = no trace context)
+    ('{"@timestamp":"2026-10-19T03:59:02Z","message":"funa","level":"INFO","trace_id":"%s","span_id":"%s","trace_flags":"01"}' % (TID, SID), (TID, SID, 1)),
+    ('{"@timestamp":"2026-10-19T03:59:03Z","message":"funa unsampled","level":"INFO","trace_id":"%s","span_id":"%s","trace_flags":"00"}' % (TID2, SID2), (TID2, SID2, 0)),
+    ('{"level":"info","ts":1792383282.66,"logger":"http.log.access","msg":"caddy","traceID":"%s","spanID":"%s"}' % (TID2, SID2), (TID2, SID2, None)),
+    ('{"message":"funa no trace id","level":"INFO"}', None),
+    ('{"message":"all zero","trace_id":"%s","span_id":"%s","trace_flags":"00"}' % (ZERO_T, ZERO_S), None),
+    ('{"level":"info","msg":"caddy all zero","traceID":"%s","spanID":"%s"}' % (ZERO_T, ZERO_S), None),
+    ('{"message":"empty ids","trace_id":"","span_id":""}', None),
+    ('{"message":"malformed id","trace_id":"not-hex","span_id":"zz"}', None),
+    ('{"message":"id of wrong type","trace_id":12345,"span_id":true}', None),
+    ('{"message":"nested is not top level","log":{"trace_id":"%s","span_id":"%s"}}' % (TID, SID), None),
+    ('plain line trace_id=%s span_id=%s' % (TID, SID), None),
+    ('{broken json "trace_id":"%s","span_id":"%s"' % (TID, SID), None),
+]
+
+
+def _trace_run(tmp_path, version, inputs=CONTAINER_INPUTS, **over):
+    binary = _binary(version)
+    cfg, _ = _render(tmp_path, "modern", host_agents_inputs=inputs, **over)   # legacy 경로는 수신기를 만들지 않아 같은 수신기 설정을 두 바이너리로 돌린다
+    files = {CID_API: [_docker_line(line + "\n", attrs=COMPOSE) for line, _ in TRACE_CASES]}
+    _, path, out = _containers_harness(tmp_path, cfg, files)
+    return _run(binary, path, out, len(TRACE_CASES))
+
+
+@pytest.mark.parametrize("app_telemetry", [False, True])
+@pytest.mark.parametrize("version", list(VERSIONS))
+def test_real_collector_container_trace_ids_become_log_trace_context_and_body_is_untouched(tmp_path, version, app_telemetry):
+    recs = _trace_run(tmp_path, version, dict(CONTAINER_INPUTS, otel_app_telemetry=app_telemetry))
+    got = {r["_body"]: r for r in recs}
+    assert len(recs) == len(TRACE_CASES)
+    for line, exp in TRACE_CASES:
+        rec = got[line]                                                           # 본문은 바이트 그대로, 줄은 빠지지 않는다
+        if exp is None:
+            assert not rec.get("traceId") and not rec.get("spanId"), (line, rec)
+            assert int(rec.get("flags", 0)) & 0xFF == 0, line
+        else:
+            assert (rec.get("traceId"), rec.get("spanId")) == (exp[0], exp[1]), (line, rec)
+            if exp[2] is not None:
+                assert int(rec.get("flags", 0)) & 0xFF == exp[2], (line, rec.get("flags"))
+        assert "log.parse_error" not in rec["_attrs"], line
+        assert not [k for k in rec["_attrs"] if k.startswith("_")], (line, rec["_attrs"])
+
+
+@pytest.mark.parametrize("version", list(VERSIONS))
+def test_container_trace_context_keeps_the_existing_severity_result(tmp_path, version):
+    recs = _trace_run(tmp_path, version)
+    got = {r["_body"]: int(r.get("severityNumber", 0)) for r in recs}
+    assert got[TRACE_CASES[0][0]] == INFO and got[TRACE_CASES[2][0]] == INFO and got[TRACE_CASES[3][0]] == INFO
+
+
+def test_container_trace_keys_are_variables_and_default_to_the_funa_and_caddy_formats(tmp_path):
+    cfg, _ = _render(tmp_path, "modern", host_agents_inputs=CONTAINER_INPUTS,
+                     otel_container_trace_keys=[{"trace_id": "tid", "span_id": "sid"}])
+    text = yaml.safe_dump(cfg["receivers"]["filelog/containers"])
+    assert "attributes._lvl.tid" in text and "attributes._lvl.trace_id" not in text
+    default, _ = _render(tmp_path, "modern", host_agents_inputs=CONTAINER_INPUTS)
+    text = yaml.safe_dump(default["receivers"]["filelog/containers"])
+    assert "attributes._lvl.trace_id" in text and "attributes._lvl.traceID" in text
+
+
 @pytest.mark.skipif(not os.environ.get("OTELCOL_BIN_0_161_0"), reason="set OTELCOL_BIN_0_161_0")
 def test_real_collector_container_files_survive_docker_rotation(tmp_path):
     binary = _binary("0.161.0")

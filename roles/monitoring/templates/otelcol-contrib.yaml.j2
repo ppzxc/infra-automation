@@ -339,6 +339,21 @@ receivers:
           debug2: ["-"]
           info: ["*"]
           warn: ["#"]
+      # trace context(Spec #253): 같은 임시 JSON(_lvl)의 trace id 키를 LogRecord의 TraceID/SpanID/flags로 올린다(otel_app_telemetry와 무관).
+      # 32자리 16진수이면서 전부 0이 아닌 id만 올린다. 그 외(없음, 빈 값, 전부 0, 형식 오류)는 건너뛰므로 trace context도 오류도 없다.
+{% for k in otel_container_trace_keys %}
+      - type: trace_parser
+        trace_id:
+          parse_from: attributes._lvl.{{ k.trace_id }}
+        span_id:
+          parse_from: attributes._lvl.{{ k.span_id }}
+{% if k.trace_flags is defined %}
+        trace_flags:
+          parse_from: attributes._lvl.{{ k.trace_flags }}
+{% endif %}
+        if: 'attributes["_lvl"] != nil and type(attributes["_lvl"]["{{ k.trace_id }}"]) == "string" and attributes["_lvl"]["{{ k.trace_id }}"] matches "^[0-9a-fA-F]{32}$" and not (attributes["_lvl"]["{{ k.trace_id }}"] matches "^0+$") and type(attributes["_lvl"]["{{ k.span_id }}"]) == "string" and attributes["_lvl"]["{{ k.span_id }}"] matches "^[0-9a-fA-F]{16}$" and not (attributes["_lvl"]["{{ k.span_id }}"] matches "^0+$")'
+        on_error: send_quiet
+{% endfor %}
       - type: remove
         field: attributes._lvl
         if: 'attributes["_lvl"] != nil'
