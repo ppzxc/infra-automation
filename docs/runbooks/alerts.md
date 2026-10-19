@@ -108,6 +108,31 @@ sudo smartctl -H /dev/sdX; df -h; mount | grep "ro,"
 
 ---
 
+<a id="app-log-errors"></a>
+## 🟠 컨테이너 로그에 ERROR 이상 기록 (`infra-app-log-errors`)
+
+**조건**: `app_logs`에서 수집기가 올린 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄이 호스트·컨테이너별로 5분 안에 1건 이상(Event Alert).
+
+**레벨이 올라오는 형식**: JSON 한 줄 로그의 `level` 또는 `log.level`(앱·Caddy), valkey 텍스트 로그의 레벨 문자. keepalived처럼 레벨이 없는 로그와 JSON이 아닌 줄(스택 트레이스 이어지는 줄 등)은 알림 대상이 아니다(키워드로 추정하지 않는다). WARN은 알리지 않고 검색용으로만 남는다.
+
+**왜 중요한가**: 앱 장애, 요청 실패, DB·큐·캐시 연결 문제의 첫 신호일 수 있다.
+
+**확인**
+```bash
+# OpenObserve에서: app_logs, host_name=<행의 호스트>, container_name=<행의 컨테이너>, severity가 error 이상
+# 노드에서 직접 볼 때
+docker logs --since 10m <컨테이너 이름> 2>&1 | grep -iE '"level":"(error|fatal)"' | tail
+```
+
+**대응**
+- ERROR 원문과 직전 줄로 원인을 좁힌다(DB·RabbitMQ·valkey 연결, 설정 오류).
+- 같은 시각의 VIP 전환, valkey 알림, Silent Host가 있는지 대조한다.
+- 서비스 영향이 있으면 해당 노드를 서비스에서 뺀다(valkey 수동 페일오버 → keepalived 정지).
+
+**격상**: 여러 노드에서 동시에 오거나 앱 헬스가 DOWN이면 서비스 장애로 처리한다.
+
+---
+
 <a id="ssh-login-failures-per-source"></a>
 ## 🟠 한 출발지에서 SSH 로그인 실패 급증 (`infra-ssh-login-failures-per-source`)
 

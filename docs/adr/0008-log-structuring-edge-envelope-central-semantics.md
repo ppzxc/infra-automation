@@ -22,4 +22,5 @@ Host Agents가 로그를 원문 그대로만 보내서 severity 필터, 필드 �
 - 파싱에 실패한 줄도 버리지 않고 원문 그대로 보내며 `log.parse_error=true`를 붙인다. 파싱 실패율도 알림 대상이다.
   - (2026-10-12 개정) 파싱에 성공한 줄에는 `log.parse_error=false`를 명시한다. 실패가 한 번도 없으면 OpenObserve 스트림에 컬럼이 생기지 않아 파싱 실패율 알림 SQL이 `unknown field`로 계속 오류였다.
 - `app_logs`는 포맷을 알 수 없으므로 파싱하지 않는다.
+  - (2026-10-19 개정, Spec #236) 컨테이너 로그(`filelog/containers`)에 한해 **레벨만** 올린다. JSON 한 줄 로그의 `level`·`log.level`과 valkey의 레벨 문자처럼 포맷이 실제로 레벨을 가진 줄만 `severity`로 올리고, 해당 없는 줄은 비운다(추정 금지). 본문은 그대로고 `log.parse_error`는 붙이지 않는다. 사용자가 추가한 `app_logs` 파일 경로는 여전히 파싱하지 않는다.
 - 이 변경 이전 레코드에는 새 필드가 없으므로 쿼리와 알림은 null을 견뎌야 한다.

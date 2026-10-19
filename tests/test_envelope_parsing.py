@@ -29,6 +29,7 @@ VERSIONS = {"0.119.0": ("OTELCOL_BIN_0_119_0", "legacy_el6"), "0.161.0": ("OTELC
 
 # severity numbers of the OTel log data model
 INFO, INFO2, WARN, ERROR, FATAL, DEBUG, TRACE = 9, 10, 13, 17, 21, 5, 1
+UNSET, DEBUG2 = 0, 6
 
 SYSLOG_OK = "Mar  5 10:11:12 host1 sshd[1234]: Accepted publickey for root from 10.0.0.1 port 22 ssh2"
 SYSLOG_NOPID = "Jan  2 00:00:01 host1 kernel: [    0.000000] Linux version 5.14"
@@ -380,6 +381,48 @@ def test_real_collector_container_files_become_app_logs_with_compose_service_nam
         assert "container.name" not in got[body]["_res"] and "service.version" not in got[body]["_res"]
 
 
+# 컨테이너 로그 레벨(Spec #236): 포맷이 실제로 레벨을 가진 줄만 severity를 채운다. 본문은 그대로, 임시 속성은 남기지 않는다.
+CONTAINER_LEVEL_CASES = [
+    ('{"@timestamp":"2026-10-19T03:59:02Z","@version":"1","message":"m1","logger_name":"a.B","level":"INFO"}', INFO),
+    ('{"@timestamp":"2026-10-19T03:59:03Z","@version":"1","message":"m2","logger_name":"a.B","level":"WARN"}', WARN),
+    ('{"@timestamp":"2026-10-19T03:59:04Z","@version":"1","message":"m3","logger_name":"a.B","level":"ERROR"}', ERROR),
+    ('{"@timestamp":"2026-10-19T03:59:05Z","message":"m4","log":{"level":"ERROR","logger":"a.B"},"service":{"name":"funa"}}', ERROR),
+    ('{"@timestamp":"2026-10-19T03:59:06Z","message":"m5","log":{"level":"WARN","logger":"a.B"}}', WARN),
+    ('{"level":"info","ts":1792383282.66,"logger":"http.log.access","msg":"handled request"}', INFO),
+    ('{"level":"error","ts":1792383283.66,"logger":"http.log.access","msg":"handled request","status":502}', ERROR),
+    ('{"level":"debug","ts":1792383284.66,"logger":"tls","msg":"m"}', DEBUG),
+    ('{"level":"fatal","ts":1792383285.66,"msg":"m"}', FATAL),
+    ('1:M 19 Oct 2026 12:58:42.761 * Partial resynchronization request accepted.', INFO),
+    ('1:S 19 Oct 2026 12:58:43.001 # Connection with master lost.', WARN),
+    ('1:M 19 Oct 2026 12:58:44.001 . DB 0: 3 keys', DEBUG),
+    ('1:M 19 Oct 2026 12:58:45.001 - Accepted 10.0.0.1:5000', DEBUG2),
+    ('Mon Oct 19 12:58:32 2026: Sending gratuitous ARP on bond0', UNSET),
+    ('plain app line mentioning ERROR in the text', UNSET),
+    ('{"level":"WARN","log":{"level":"ERROR"},"message":"both level keys: the top-level one wins"}', WARN),
+    ('{"message":"json without any level"}', UNSET),
+    ('{"level":"verbose-unknown","message":"unknown level word"}', UNSET),
+    ('{broken json "level":"ERROR"', UNSET),
+]
+
+
+@pytest.mark.skipif(not os.environ.get("OTELCOL_BIN_0_161_0"), reason="set OTELCOL_BIN_0_161_0")
+def test_real_collector_container_levels_become_severity_only_where_the_format_has_a_level(tmp_path):
+    binary = _binary("0.161.0")
+    cfg, _ = _render(tmp_path, "modern", host_agents_inputs=CONTAINER_INPUTS)
+    files = {CID_API: [_docker_line(line + "\n", attrs=COMPOSE) for line, _ in CONTAINER_LEVEL_CASES]}
+    _, path, out = _containers_harness(tmp_path, cfg, files)
+    recs = _run(binary, path, out, len(CONTAINER_LEVEL_CASES))
+    got = {r["_body"]: r for r in recs}
+    assert len(recs) == len(CONTAINER_LEVEL_CASES)
+    for line, sev in CONTAINER_LEVEL_CASES:
+        rec = got[line]                                                           # 본문은 바이트 그대로
+        assert int(rec.get("severityNumber", 0)) == sev, (line, rec.get("severityNumber"))
+        assert "log.parse_error" not in rec["_attrs"], line                       # app_logs는 parse_error를 붙이지 않는다
+        assert not [k for k in rec["_attrs"] if k.startswith("_")], (line, rec["_attrs"])      # 임시 속성(_lvl, _vk)은 남기지 않는다
+        if sev:
+            assert rec.get("severityText"), line                                  # 레벨이 있는 줄은 원문 레벨 텍스트를 함께 싣는다
+
+
 @pytest.mark.skipif(not os.environ.get("OTELCOL_BIN_0_161_0"), reason="set OTELCOL_BIN_0_161_0")
 def test_real_collector_container_files_survive_docker_rotation(tmp_path):
     binary = _binary("0.161.0")
@@ -461,3 +504,15 @@ def test_probe_sets_timezone_fact_with_variable_fallback_and_warns_only_when_unr
     assert warn["when"] == "not (host_agents_timezone_probed | bool)"
     # one probe feeds every path (modern, legacy_el7, legacy_el6): the imported file has no os-path gate
     assert "when" not in next(t for t in probe if t["name"].startswith("[MON-021]"))
+
+
+def test_container_error_levels_in_the_collector_mapping_match_the_alert_sql(tmp_path):
+    """error 이상으로 치는 레벨 단어는 수집기 매핑과 알림 SQL이 같아야 한다(한쪽만 바꾸면 알림이 조용히 어긋난다)."""
+    cfg, _ = _render(tmp_path, "modern", host_agents_inputs=CONTAINER_INPUTS)
+    ops = [o for o in cfg["receivers"]["filelog/containers"]["operators"] if o["type"] == "severity_parser"]
+    mapping = ops[0]["mapping"]
+    from_collector = set(mapping["error"]) | set(mapping["fatal"])
+    defaults = (base.ROOT_DIR / "roles" / "openobserve_config" / "defaults" / "main.yml").read_text(encoding="utf-8")
+    sql = re.search(r"lower\(severity\) IN \(([^)]*)\)", defaults).group(1)
+    from_alert = set(re.findall(r"'([^']+)'", sql))
+    assert from_collector == from_alert

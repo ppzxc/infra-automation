@@ -34,6 +34,7 @@ EXPECTED_ALERTS = {
     "infra-memory-usage-p2", "infra-memory-usage-p1",
     "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
     "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
+    "infra-app-log-errors",
 }
 RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
     "infra-disk-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_usage"),
@@ -258,6 +259,7 @@ def test_severity_mapping_follows_impact(o2):
     assert sev["infra-root-login-success"] == sev["infra-disk-fs-errors"] == "P1 긴급"
     assert sev["infra-ssh-login-failures-per-source"] == sev["infra-sudo-escalation-failure"] == sev["infra-oom-kill"] == "P2 경고"
     assert sev["infra-log-parse-errors-security-logs"] == "P3 주의"
+    assert sev["infra-app-log-errors"] == "P2 경고"
 
 
 def test_webhook_auth_header_name_comes_from_openbao(o2):
@@ -456,11 +458,12 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     streams = {p.split("/")[3] for p, _, _ in o2.ingests}
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
                        "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify", "tcpcheck_status_alert_verify",
-                       "backup_logs_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
+                       "backup_logs_alert_verify", "app_logs_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
         assert stream.endswith("_alert_verify") and 'FROM "security_logs"' not in sql and 'FROM "system_logs"' not in sql
+        assert 'FROM "app_logs"' not in sql          # 운영 app_logs가 아니라 검증 스트림을 조회한다
     # 운영 스트림·운영 알림은 건드리지 않는다: 쓰기는 설정 객체뿐이고 합성 레코드는 검증 스트림에만 간다
     assert all("/_json" not in p for _, p, _ in o2.writes)
     hosts = {r.get("host_name") or r["host"] for _, _, recs in o2.ingests for r in recs}
@@ -1101,3 +1104,17 @@ def test_module_reports_a_connection_failure_as_status_minus_one_when_not_failin
     res, out = _module_play(tmp_path, "http://127.0.0.1:1", {"base_url": "http://127.0.0.1:1", "requests": _reqs(("GET", "/a", None)),
                                                               "headers": {}, "fail_on_status": False, "timeout": 2})
     assert out["results"][0]["status"] == -1
+
+
+def test_app_log_error_alert_is_a_p2_event_alert_on_error_or_worse_per_host_and_container(o2):
+    """컨테이너 로그 ERROR 알림(Spec #236): severity가 error 이상인 줄만, 호스트·컨테이너별 5분 1건부터. WARN 이하와 레벨 없는 줄은 알리지 않는다."""
+    assert _apply(o2).returncode == 0
+    alert = o2.store["alert"]["infra-app-log-errors"]
+    sql = alert["query_condition"]["sql"]
+    assert alert["stream_name"] == "app_logs" and alert["stream_type"] == "logs"
+    assert "lower(severity) IN (" in sql and "GROUP BY host_name, container_name" in sql
+    for level in ("'error'", "'fatal'", "'critical'", "'panic'", "'dpanic'"):
+        assert level in sql, level
+    assert "'warn'" not in sql and "'info'" not in sql and "body" not in sql      # 키워드가 아니라 파싱된 레벨만 본다
+    assert alert["trigger_condition"]["period"] == 5 and alert["trigger_condition"]["silence"] == 5
+    assert alert["context_attributes"]["severity"] == "P2 경고"
