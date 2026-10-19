@@ -413,60 +413,69 @@ infra-inode-usage-p1:
         - {ts: [0, 60, 120], state: free, value: 1, mountpoint: /, type: ext4, device: /dev/vda1}
         - {ts: 180, state: used, value: 50, mountpoint: /, type: ext4, device: /dev/vda1}
         - {ts: 180, state: free, value: 50, mountpoint: /, type: ext4, device: /dev/vda1}
+# 메모리: 사용률 = 1 - available / limit. available 레코드는 알림의 기본 스트림(system_linux_memory_available), limit 레코드는 stream: system_memory_limit
 infra-memory-usage-p2:
   cases:
-    - name: 메모리 92%는 P2 구간
+    - name: 메모리 92%는 P2 구간 (available 800 / limit 10000)
       host: verify-mem-p2-92
       fires: true
       records:
-        - {ts: [0, 60, 120, 180], state: used, value: 9200}
-        - {ts: [0, 60, 120, 180], state: free, value: 800}
-        - {ts: [0, 60, 120, 180], state: slab_unreclaimable, value: 1000}
+        - {ts: [0, 60, 120, 180], value: 800}
+        - {ts: [0, 60, 120, 180], stream: system_memory_limit, value: 10000}
     - name: 메모리 89%는 임계 미만
       host: verify-mem-p2-89
       fires: false
       records:
-        - {ts: [0, 60, 120, 180], state: used, value: 8900}
-        - {ts: [0, 60, 120, 180], state: free, value: 1100}
-        - {ts: [0, 60, 120, 180], state: slab_unreclaimable, value: 1000}
+        - {ts: [0, 60, 120, 180], value: 1100}
+        - {ts: [0, 60, 120, 180], stream: system_memory_limit, value: 10000}
     - name: 메모리 97%는 P1 구간이라 P2에 중복 통지하지 않는다
       host: verify-mem-p2-97
       fires: false
       records:
-        - {ts: [0, 60, 120, 180], state: used, value: 9700}
-        - {ts: [0, 60, 120, 180], state: free, value: 300}
-        - {ts: [0, 60, 120, 180], state: slab_unreclaimable, value: 1000}
-    - name: slab_unreclaimable은 분모에서 제외(포함하면 89%로 미달)
-      host: verify-mem-p2-slab
-      fires: true
+        - {ts: [0, 60, 120, 180], value: 300}
+        - {ts: [0, 60, 120, 180], stream: system_memory_limit, value: 10000}
+    - name: limit 스트림만 있는 호스트(available 결손)는 오탐하지 않는다 — 결손은 Silent Host 몫
+      host: verify-mem-p2-noavail
+      fires: false
       records:
-        - {ts: [0, 60, 120, 180], state: used, value: 9100}
-        - {ts: [0, 60, 120, 180], state: free, value: 900}
-        - {ts: [0, 60, 120, 180], state: slab_unreclaimable, value: 1000}
+        - {ts: [0, 60, 120, 180], stream: system_memory_limit, value: 10000}
+    - name: available 스트림만 있는 호스트(limit 결손)는 오탐하지 않는다
+      host: verify-mem-p2-nolimit
+      fires: false
+      records:
+        - {ts: [0, 60, 120, 180], value: 800}
 infra-memory-usage-p1:
   cases:
     - name: 메모리 97%는 P1
       host: verify-mem-p1-97
       fires: true
       records:
-        - {ts: [0, 60, 120, 180], state: used, value: 9700}
-        - {ts: [0, 60, 120, 180], state: free, value: 300}
-        - {ts: [0, 60, 120, 180], state: slab_unreclaimable, value: 1000}
+        - {ts: [0, 60, 120, 180], value: 300}
+        - {ts: [0, 60, 120, 180], stream: system_memory_limit, value: 10000}
     - name: 메모리 94%는 P1 미만
       host: verify-mem-p1-94
       fires: false
       records:
-        - {ts: [0, 60, 120, 180], state: used, value: 9400}
-        - {ts: [0, 60, 120, 180], state: free, value: 600}
-        - {ts: [0, 60, 120, 180], state: slab_unreclaimable, value: 1000}
+        - {ts: [0, 60, 120, 180], value: 600}
+        - {ts: [0, 60, 120, 180], stream: system_memory_limit, value: 10000}
     - name: 메모리 구간 중 한 번 낮아지면 지속이 아니다
       host: verify-mem-p1-dip
       fires: false
       records:
-        - {ts: [0, 60, 120], state: used, value: 9700}
-        - {ts: [0, 60, 120], state: free, value: 300}
-        - {ts: 180, state: used, value: 5000}
-        - {ts: 180, state: free, value: 5000}
+        - {ts: [0, 60, 120], value: 300}
+        - {ts: [0, 60, 120], stream: system_memory_limit, value: 10000}
+        - {ts: 180, value: 5000}
+        - {ts: 180, stream: system_memory_limit, value: 10000}
+    - name: limit 스트림만 있는 호스트(available 결손)는 오탐하지 않는다 — 결손은 Silent Host 몫
+      host: verify-mem-p1-noavail
+      fires: false
+      records:
+        - {ts: [0, 60, 120, 180], stream: system_memory_limit, value: 10000}
+    - name: available 스트림만 있는 호스트(limit 결손)는 오탐하지 않는다
+      host: verify-mem-p1-nolimit
+      fires: false
+      records:
+        - {ts: [0, 60, 120, 180], value: 300}
 
 # --- Silent Host (Spec #184 / Ticket-4) --- 부재형 알림: 모든 케이스의 호스트가 (가짜) 로스터에 들어가고, records가 비면 데이터가 없는 호스트다.
 # ts는 검증 실행 시작(약 5분 전) 기준 초다. 음수는 더 과거 — 최근 15분은 ts > -600, 3시간 창은 ts > -10500 부근이다.

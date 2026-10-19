@@ -178,8 +178,8 @@ _RESOURCE = {
              'used': "state = 'used'", 'total': "state IN ('used', 'free')"},
     'inode': {'stream': 'system_filesystem_inodes_usage', 'mount': True,
               'used': "state = 'used'", 'total': "state IN ('used', 'free')"},
-    'memory': {'stream': 'system_memory_usage', 'mount': False,
-               'used': "state = 'used'", 'total': "state <> 'slab_unreclaimable'"},
+    # 메모리는 1 - available / limit (Spec #253 / Ticket-6): 두 스트림을 UNION ALL로 이어 _timestamp별로 짝짓는다(스트림 JOIN은 쓰지 않는다)
+    'memory': {'stream': 'system_linux_memory_available', 'limit_stream': 'system_memory_limit', 'mount': False},
 }
 
 
@@ -215,6 +215,8 @@ def _threshold(metric, key, default, overrides):
 def o2c_resource_sql(metric, level, cfg):
     """SQL of a resource alert. ``cfg``: p2, p1, fstypes, exclusions, thresholds (OpenBao overrides, may be empty)."""
     r = _RESOURCE[metric]
+    if metric == 'memory':
+        return _memory_sql(r, level, cfg)
     keys = ['host_name'] + (['mountpoint'] if r['mount'] else [])
     inner_keys = keys + (['device'] if r['mount'] else [])
     where = []
@@ -232,6 +234,20 @@ def o2c_resource_sql(metric, level, cfg):
             'GROUP BY %s HAVING %s') % (
         ', '.join(keys), ', '.join(inner_keys), r['used'], r['total'], r['stream'],
         (' WHERE ' + ' AND '.join(where)) if where else '', ', '.join(inner_keys), r['total'], ', '.join(keys), cond)
+
+
+def _memory_sql(r, level, cfg):
+    # 두 스트림 중 한쪽만 있는 _timestamp는 HAVING에서 걸러져 판정하지 않는다(데이터 결손은 Silent Host가 맡는다).
+    where = ''.join(' AND NOT (%s)' % _target(e) for e in cfg.get('exclusions') or [] if e.get('host') and _applies(e, 'memory'))
+    lo = _threshold('memory', 'p2', cfg['p2'], cfg.get('thresholds'))
+    hi = _threshold('memory', 'p1', cfg['p1'], cfg.get('thresholds'))
+    cond = ('min(pct) >= %s AND min(pct) < %s' % (lo, hi)) if level == 'P2' else 'min(pct) >= %s' % hi
+    branch = 'SELECT host_name, _timestamp, %d AS src, value FROM "%s" WHERE value IS NOT NULL%s'
+    avail, limit = 'max(CASE WHEN src = 1 THEN value END)', 'max(CASE WHEN src = 2 THEN value END)'
+    return ('SELECT host_name, round(min(pct), 1) AS usage_pct FROM (SELECT host_name, _timestamp, '
+            '(1 - %s / %s) * 100.0 AS pct FROM (%s UNION ALL %s) GROUP BY host_name, _timestamp '
+            'HAVING %s IS NOT NULL AND %s > 0) GROUP BY host_name HAVING %s') % (
+        avail, limit, branch % (1, r['stream'], where), branch % (2, r['limit_stream'], where), avail, limit, cond)
 
 
 # --- 로스터와 부재 감지 (Spec #184 / Ticket-4) --------------------------------------------------------------------------
@@ -331,11 +347,13 @@ def _verify_stream(stream, suffix):
     return stream + suffix
 
 
-def _rewrite_sql(sql, stream, suffix):
-    quoted, target = '"%s"' % stream, '"%s"' % _verify_stream(stream, suffix)
-    if quoted not in sql:
-        raise ValueError('알림 SQL에 스트림 %s 이(가) 없어 검증 스트림으로 바꿀 수 없습니다' % quoted)
-    return sql.replace(quoted, target)
+def _rewrite_sql(sql, stream, suffix, extra=()):
+    for name in (stream,) + tuple(extra):
+        quoted, target = '"%s"' % name, '"%s"' % _verify_stream(name, suffix)
+        if quoted not in sql:
+            raise ValueError('알림 SQL에 스트림 %s 이(가) 없어 검증 스트림으로 바꿀 수 없습니다' % quoted)
+        sql = sql.replace(quoted, target)
+    return sql
 
 
 def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3600 * 1000000, sources=None, rosters=None):
@@ -368,10 +386,11 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
             for rec in records:
                 rec = dict(rec)
                 repeat = rec.pop('repeat', 1)
+                rec_stream = rec.pop('stream', stream)   # 한 알림이 여러 스트림을 보면 레코드마다 대상 스트림을 지정한다
                 ts = rec.pop('ts', None)   # 합성 스크레이프 시각(시작 기준 초) — 메트릭은 _timestamp별로 묶어 판정한다
                 stamps = [{}] * repeat if ts is None else [{'_timestamp': start_us + int(t) * 1000000} for t in
                                                            (ts if isinstance(ts, list) else [ts])]
-                ingest.setdefault(stream, []).extend(dict(rec, **{spec.get('host_field', DEFAULT_ROW_KEY): host}, **st) for st in stamps)
+                ingest.setdefault(rec_stream, []).extend(dict(rec, **{spec.get('host_field', DEFAULT_ROW_KEY): host}, **st) for st in stamps)
         missing = alert.get('missing')
         if missing:
             roster = list((rosters or {}).get(missing['roster']) or []) + sorted(hosts)
@@ -383,7 +402,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
         searches.append({
             'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
             'path': SEARCH_PATH.format(org=org), 'hosts': hosts,
-            'body': {'query': {'sql': _rewrite_sql(sql, stream, suffix), 'start_time': start_us - period_us,
+            'body': {'query': {'sql': _rewrite_sql(sql, stream, suffix, alert.get('extra_streams') or ()), 'start_time': start_us - period_us,
                                'end_time': start_us + window_us, 'from': 0, 'size': 1000}}})
     return {'ingest': [{'stream': _verify_stream(s, suffix), 'path': INGEST_PATH.format(org=org, stream=_verify_stream(s, suffix)),
                         'records': recs} for s, recs in ingest.items()],

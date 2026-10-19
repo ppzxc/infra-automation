@@ -41,8 +41,8 @@ RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, strea
     "infra-disk-usage-p1": ("P1 긴급", 60, 15, "system_filesystem_usage"),
     "infra-inode-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_inodes_usage"),
     "infra-inode-usage-p1": ("P1 긴급", 60, 15, "system_filesystem_inodes_usage"),
-    "infra-memory-usage-p2": ("P2 경고", 1440, 10, "system_memory_usage"),
-    "infra-memory-usage-p1": ("P1 긴급", 60, 10, "system_memory_usage"),
+    "infra-memory-usage-p2": ("P2 경고", 1440, 10, "system_linux_memory_available"),
+    "infra-memory-usage-p1": ("P1 긴급", 60, 10, "system_linux_memory_available"),
 }
 SELFTEST = "infra-alert-selftest"   # 통지 경로 자가 시험 알림(Spec #184 / Ticket-2) — 검증 전용 스트림에 건다
 SELFTEST_STREAM = "alert_selftest_alert_verify"
@@ -97,6 +97,7 @@ class FakeO2:
                 for alert in outer.store["alert"].values():
                     prod = alert["stream_name"]
                     stored = alert["query_condition"]["sql"].replace(f'"{prod}"', f'"{stream}"')
+                    stored = re.sub(r'"(system_memory_limit)"', r'"\1_alert_verify"', stored)   # 두 번째 스트림(#259)
                     if stream != prod + "_alert_verify" or not (stored == sql or _same_roster_alert(alert["name"], stored, sql)):
                         continue
                     cases = outer.fixtures[alert["name"]]["cases"]
@@ -468,7 +469,8 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     assert res.returncode == 0, res.stdout + res.stderr
     streams = {p.split("/")[3] for p, _, _ in o2.ingests}
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
-                       "system_filesystem_inodes_usage_alert_verify", "system_memory_usage_alert_verify", "tcpcheck_status_alert_verify",
+                       "system_filesystem_inodes_usage_alert_verify", "system_linux_memory_available_alert_verify", "system_memory_usage_alert_verify",   # Silent Host 하트비트
+                       "system_memory_limit_alert_verify", "tcpcheck_status_alert_verify",
                        "backup_logs_alert_verify", "app_logs_alert_verify", "jvm_memory_used_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
@@ -709,7 +711,7 @@ def test_resource_sql_groups_by_timestamp_uses_min_and_default_thresholds_and_fs
         assert "/boot" not in sql   # /boot, /boot/efi는 제외하지 않는다
     assert ">= 90" in p2 and "< 95" in p2 and ">= 95" in p1
     mem = _sql(o2, "infra-memory-usage-p1")
-    assert "slab_unreclaimable" in mem and "GROUP BY host_name, _timestamp" in mem
+    assert "GROUP BY host_name, _timestamp" in mem and "min(pct)" in mem
 
 
 def test_openbao_exclusions_and_threshold_overrides_reach_the_sql(o2):
@@ -1245,3 +1247,60 @@ def test_app_telemetry_roster_lookup_task_is_read_only_and_no_log():
     t = next(t for t in tasks if t["name"].startswith("[O2C-004]"))
     assert t["no_log"] is True and t["changed_when"] is False and t["check_mode"] is False
     assert "o2c_app_telemetry_kv_fixture is not defined" in str(t["when"])
+
+
+# --- 메모리 사용률 알림: 1 - available / limit (Spec #253 / Ticket-6, #259) -------------------------------------------------
+import sqlite3
+
+MEM_ALERTS = ("infra-memory-usage-p2", "infra-memory-usage-p1")
+
+
+def test_memory_alert_sql_uses_available_and_limit_streams_not_usage_states(o2):
+    assert _apply(o2).returncode == 0
+    for name in MEM_ALERTS:
+        sql = _sql(o2, name)
+        assert '"system_linux_memory_available"' in sql and '"system_memory_limit"' in sql, name
+        assert "system_memory_usage" not in sql and "slab_unreclaimable" not in sql and "state" not in sql, name
+
+
+def _run_memory_alert_on_sqlite(sql, case):
+    """Execute the rendered alert SQL on the case's synthetic records (portable SQL subset) and return the firing hosts."""
+    db = sqlite3.connect(":memory:")
+    for stream in ("system_linux_memory_available", "system_memory_limit"):
+        db.execute(f'CREATE TABLE "{stream}" (host_name TEXT, _timestamp INTEGER, value REAL)')
+    for rec in case["records"]:
+        stream = rec.get("stream", "system_linux_memory_available")
+        for t in (rec["ts"] if isinstance(rec["ts"], list) else [rec["ts"]]):
+            db.execute(f'INSERT INTO "{stream}" VALUES (?, ?, ?)', (case["host"], t, rec["value"]))
+    return {r[0] for r in db.execute(sql)}
+
+
+@pytest.mark.parametrize("name", MEM_ALERTS)
+def test_memory_alert_fixtures_fire_as_expected_when_the_rendered_sql_runs(o2, name):
+    assert _apply(o2).returncode == 0
+    sql = _sql(o2, name)
+    for case in FIXTURES[name]["cases"]:
+        fired = _run_memory_alert_on_sqlite(sql, case)
+        assert (case["host"] in fired) == case["fires"], (name, case["name"])
+
+
+def test_memory_alert_fixtures_include_a_host_missing_either_stream(o2):
+    for name in MEM_ALERTS:
+        cases = FIXTURES[name]["cases"]
+        only_avail = [c for c in cases if {r.get("stream", "system_linux_memory_available") for r in c["records"]} == {"system_linux_memory_available"}]
+        only_limit = [c for c in cases if {r.get("stream", "system_linux_memory_available") for r in c["records"]} == {"system_memory_limit"}]
+        assert only_avail and only_limit, name
+        assert all(not c["fires"] for c in only_avail + only_limit), name
+
+
+def test_memory_alert_keeps_thresholds_severity_and_silence_and_openbao_overrides(o2):
+    kv = dict(KV, alert_resource_exclusions=[{"host": "ns0288", "metric": "memory"}],
+              alert_resource_thresholds=[{"host": "ns0300", "metric": "memory", "p2": 97, "p1": 99}])
+    assert _apply(o2, kv=kv).returncode == 0
+    p2, p1 = _sql(o2, "infra-memory-usage-p2"), _sql(o2, "infra-memory-usage-p1")
+    assert "THEN 97" in p2 and "THEN 99" in p1
+    assert "ns0288" in p2 and "ns0288" in p1 and "THEN 99" in p1
+    for name in MEM_ALERTS:
+        sev, silence, period, _ = RESOURCE_ALERTS[name]
+        a = o2.store["alert"][name]
+        assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence)

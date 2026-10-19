@@ -356,7 +356,7 @@ sudo du -x --inodes <마운트> --max-depth=3 | sort -n | tail -20
 <a id="memory-usage"></a>
 ### 🟠/🔴 메모리 사용률 (`infra-memory-usage-p2`, `infra-memory-usage-p1`)
 
-사용률 = `used` ÷ (`slab_unreclaimable`을 뺀 `system_memory_usage` state 합). 캐시·버퍼는 사용량에 들어가지 않는다.
+사용률 = `1 − system.linux.memory.available / system.memory.limit`(`system_linux_memory_available`·`system_memory_limit`). 회수 가능한 캐시·버퍼는 사용량에 들어가지 않는다.
 
 **확인**
 ```bash

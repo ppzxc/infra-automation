@@ -365,8 +365,9 @@ o2c_alerts:
     action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
     runbook: "{{ o2c_runbook_base }}#memory-usage"
     row_template: '• {host_name}: 사용률 {usage_pct}%'
-    description: "메모리 사용률 10분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
-    stream: system_memory_usage
+    description: "메모리 사용률(1 − available/limit) 10분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
+    stream: system_linux_memory_available
+    extra_streams: [system_memory_limit]
     stream_type: metrics
     sql: "{{ 'memory' | o2c_resource_sql('P2', o2c_resource_cfg) }}"
     period: 10
@@ -381,8 +382,9 @@ o2c_alerts:
     action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
     runbook: "{{ o2c_runbook_base }}#memory-usage"
     row_template: '• {host_name}: 사용률 {usage_pct}%'
-    description: "메모리 사용률 10분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
-    stream: system_memory_usage
+    description: "메모리 사용률(1 − available/limit) 10분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
+    stream: system_linux_memory_available
+    extra_streams: [system_memory_limit]
     stream_type: metrics
     sql: "{{ 'memory' | o2c_resource_sql('P1', o2c_resource_cfg) }}"
     period: 10
