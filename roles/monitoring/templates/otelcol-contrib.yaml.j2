@@ -187,6 +187,7 @@
   컨테이너 로그(hosts/<host>/agents의 otel_container_logs). docker json-file 드라이버 파일을 읽으므로 검증한 modern 경로에서만 켠다.
 #}
 {% set container_logs = (host_agents_inputs.otel_container_logs | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
+{% set app_telemetry = host_agents_inputs.otel_app_telemetry | default(false) | bool %}
 extensions:
   file_storage:
     directory: {{ otelcol_storage_dir }}
@@ -416,11 +417,10 @@ receivers:
     endpoint: {{ otel_docker_endpoint }}
     collection_interval: {{ otel_hostmetrics_interval }}
 {% endif %}
-{% if otel_otlp_enabled | bool %}
+{% if app_telemetry %}
+  # 컨테이너 앱 텔레메트리(hosts/<host>/agents의 otel_app_telemetry, ADR-0012): HTTP만 연다(gRPC 없음).
   otlp:
     protocols:
-      grpc:
-        endpoint: "{{ otel_otlp_bind }}:{{ otel_otlp_grpc_port }}"
       http:
         endpoint: "{{ otel_otlp_bind }}:{{ otel_otlp_http_port }}"
 {% endif %}
@@ -492,12 +492,23 @@ exporters:
 {% else %}
       block_on_overflow: false
 {% endif %}
+{% if app_telemetry %}
+  # 트레이스: app_traces 스트림 하나. 메모리 큐라 로그의 디스크 큐와 공간을 다투지 않는다.
+  otlphttp/app_traces:
+{{ o2_common(otel_app_traces_stream) }}    sending_queue:
+      enabled: true
+{% if host_agents_os_path | default('modern') == 'legacy_el6' %}
+      blocking: false
+{% else %}
+      block_on_overflow: false
+{% endif %}
+{% endif %}
 
 service:
   extensions: [file_storage]
   pipelines:
     logs/in:
-      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if container_logs %}filelog/containers, {% endif %}{% if otel_otlp_enabled | bool %}otlp, {% endif %}]
+      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if container_logs %}filelog/containers, {% endif %}]
       processors: [memory_limiter, resource/host]
       exporters: [routing/logs]
 {% for stream in host_agents_log_streams %}
@@ -522,7 +533,12 @@ service:
       processors: [memory_limiter, resource/host, resource/docker, batch]
       exporters: [otlphttp/metrics]
 {% endif %}
-{% if otel_otlp_enabled | bool %}
+{% if app_telemetry %}
+    # OTLP 로그는 어떤 파이프라인에도 넣지 않는다(컨테이너 로그와 중복되므로 수신기 단계에서 버려진다).
+    traces/otlp:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/host, batch]
+      exporters: [otlphttp/app_traces]
     metrics/otlp:
       receivers: [otlp]
       processors: [memory_limiter, resource/host, batch]

@@ -334,6 +334,18 @@ def test_absent_overrides_mean_git_standard_only():
     assert res["backup_paths"] == MANDATORY
     assert (res["otel_docker_metrics"], res["backup_exclude_paths"], res["backup_pre_hooks"]) == (False, [], [])
     assert res["otel_container_logs"] is False
+    assert res["otel_app_telemetry"] is False
+
+
+def test_app_telemetry_flag_is_opt_in_and_accepts_string_booleans():
+    assert _resolve(otel_app_telemetry="true")["otel_app_telemetry"] is True
+    assert _resolve(otel_app_telemetry=True)["otel_app_telemetry"] is True
+    assert _resolve(otel_app_telemetry="false")["otel_app_telemetry"] is False
+
+
+def test_app_telemetry_flag_that_is_not_boolean_fails_naming_the_key():
+    res = _resolve(otel_app_telemetry="maybe")
+    assert len(res["errors"]) == 1 and "otel_app_telemetry" in res["errors"][0] and "maybe" in res["errors"][0]
 
 
 def test_container_logs_flag_is_opt_in_and_accepts_string_booleans():
@@ -404,7 +416,7 @@ def test_non_excludable_exclude_fails_naming_path_and_key(kv_key, entry, item):
 
 
 @pytest.mark.parametrize("kv", [
-    {"otel_docker_metrics": "maybe"}, {"otel_container_logs": "maybe"}, {"otel_exclude_logs": "not-json"}, {"otel_exclude_logs": {"a": 1}},
+    {"otel_docker_metrics": "maybe"}, {"otel_container_logs": "maybe"}, {"otel_app_telemetry": "maybe"}, {"otel_exclude_logs": "not-json"}, {"otel_exclude_logs": {"a": 1}},
     {"otel_extra_logs": [{"path": "relative.log"}]}, {"otel_extra_logs": [{"path": "/x", "stream": "backup_logs"}]},
     {"otel_extra_logs": [42]}, {"backup_extra_paths": ["relative"]}, {"backup_pre_hooks": [1]},
 ])
@@ -946,18 +958,42 @@ def test_config_metrics_pipeline_is_separate_droppable_and_60s(tmp_path):
 def test_config_optional_receivers_are_off_by_default(tmp_path):
     cfg, _ = _render_config(tmp_path)
     assert {"journald", "docker_stats", "otlp"}.isdisjoint(cfg["receivers"])
-    on, _ = _render_config(tmp_path, host_agents_journald=True, otel_otlp_enabled=True,
-                           host_agents_inputs={"otel_docker_metrics": True, "otel_logs": [
+    on, _ = _render_config(tmp_path, host_agents_journald=True,
+                           host_agents_inputs={"otel_docker_metrics": True, "otel_app_telemetry": True, "otel_logs": [
                                {"path": "/var/log/secure", "stream": "security_logs", "service": "auth"}]})
     assert {"journald", "docker_stats", "otlp"} <= set(on["receivers"])
-    assert on["receivers"]["otlp"]["protocols"]["grpc"]["endpoint"] == "127.0.0.1:4317"   # loopback only
     pipes = on["service"]["pipelines"]
     assert pipes["metrics/docker"]["receivers"] == ["docker_stats"]
     assert "resource/docker" in pipes["metrics/docker"]["processors"]
     # app metrics arriving over OTLP keep the service.name their SDK set: no service.name processor on that pipeline
     assert pipes["metrics/otlp"]["receivers"] == ["otlp"]
     assert not {"resource/hostmetrics", "resource/docker"} & set(pipes["metrics/otlp"]["processors"])
-    assert {"metrics/docker", "metrics/otlp"}.isdisjoint(cfg["service"]["pipelines"])
+    assert {"metrics/docker", "metrics/otlp", "traces/otlp"}.isdisjoint(cfg["service"]["pipelines"])
+
+
+def test_app_telemetry_switch_opens_only_the_otlp_http_receiver_on_all_addresses(tmp_path):
+    on, _ = _render_config(tmp_path, host_agents_inputs={"otel_docker_metrics": False, "otel_app_telemetry": True,
+                                                         "otel_logs": []})
+    protocols = on["receivers"]["otlp"]["protocols"]
+    assert list(protocols) == ["http"]                                  # no gRPC
+    assert protocols["http"]["endpoint"].startswith("0.0.0.0:")
+    pipes = on["service"]["pipelines"]
+    assert pipes["traces/otlp"]["receivers"] == ["otlp"]
+    assert pipes["traces/otlp"]["processors"] == ["memory_limiter", "resource/host", "batch"]
+    assert pipes["traces/otlp"]["exporters"] == ["otlphttp/app_traces"]
+    assert pipes["metrics/otlp"]["processors"] == ["memory_limiter", "resource/host", "batch"]
+    assert pipes["metrics/otlp"]["exporters"] == ["otlphttp/metrics"]
+    exp = on["exporters"]["otlphttp/app_traces"]
+    assert exp["headers"]["stream-name"] == "app_traces"
+    assert exp["sending_queue"]["enabled"] is True and "storage" not in exp["sending_queue"]   # memory queue
+    assert "otlp" not in pipes["logs/in"]["receivers"]                  # OTLP logs are never exported
+
+
+def test_switch_off_renders_no_otlp_receiver_traces_pipeline_or_trace_exporter(tmp_path):
+    off, text = _render_config(tmp_path, otel_otlp_enabled=True)    # the retired role variable has no effect
+    assert "otlp" not in off["receivers"] and "otlp" not in off["service"]["pipelines"]["logs/in"]["receivers"]
+    assert not [p for p in off["service"]["pipelines"] if p.startswith("traces")]
+    assert "otlphttp/app_traces" not in off["exporters"] and "app_traces" not in text
 
 
 def test_config_sets_host_identity_and_never_contains_the_token(tmp_path):

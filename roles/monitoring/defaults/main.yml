@@ -94,11 +94,12 @@ otel_container_trace_keys:
 # 이전 구현(journald 드라이버)이 배포했던 rsyslog 규칙 파일. 지금은 사용하지 않으며 남아 있으면 지운다(MON-068).
 otel_rsyslog_container_rule_path: /etc/rsyslog.d/00-host-agents-containers.conf
 
-# 로컬 OTLP 수신기는 기본 비활성 (인증 없는 수집 포트 노출 방지)
-otel_otlp_enabled: false
-otel_otlp_bind: "127.0.0.1"
-otel_otlp_grpc_port: 4317
+# 컨테이너 앱 텔레메트리(hosts/<host>/agents의 otel_app_telemetry: true, ADR-0012): 켠 호스트만 OTLP HTTP 수신기(gRPC 없음)를
+# 모든 주소에 바인드하고 traces/metrics 파이프라인을 만든다. 외부 노출은 호스트 방화벽(public 존 기본 거부)이 막는다.
+otel_otlp_bind: "0.0.0.0"
 otel_otlp_http_port: 4318
+# 트레이스는 OpenObserve 스트림 하나로 모은다(View Trace 기본 선택이 흔들리지 않도록). 트레이스 전용 exporter의 stream-name.
+otel_app_traces_stream: app_traces
 
 # 백업 결과 jsonl (backup 역할의 backup_log_path와 같은 값을 유지한다)
 otel_backup_log_path: /var/log/host-agents/backup.jsonl
