@@ -513,6 +513,23 @@ infra-silent-host-p1:
       records:
         - {ts: [0, 60, 120], state: used, value: 1}
 
+# --- 앱 텔레메트리 무소식 (Spec #253 / Ticket-8) --- jvm_memory_used는 모든 JVM이 공유하므로 service_name=funa인 레코드만 센다. 조회 구간은 15분이다.
+infra-app-telemetry-silent:
+  cases:
+    - name: 로스터 호스트가 funa JVM 메트릭을 한 번도 보내지 않았다
+      host: verify-app-silent-never
+      fires: true
+      records: []
+    - name: 다른 서비스의 JVM 메트릭만 오면 funa는 무소식이다
+      host: verify-app-silent-other
+      fires: true
+      records:
+        - {ts: [-60, 0], service_name: other-jvm, value: 1}
+    - name: funa JVM 메트릭이 15분 안에 오면 발화하지 않는다
+      host: verify-app-silent-alive
+      fires: false
+      records:
+        - {ts: [-60, 0], service_name: funa, value: 1}
 # --- 서버 도달성 (Spec #184 / Ticket-6, ADR-0010) --- tcpcheck.status는 60초마다 1(접속 성공)/0(실패). 검사하는 쪽은 host_name, 대상은 tcpcheck_endpoint.
 infra-unreachable-host:
   cases:

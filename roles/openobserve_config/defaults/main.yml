@@ -80,10 +80,20 @@ o2c_roster_collect: "{{ groups | o2c_roster('collect') }}"
 o2c_roster_maintenance: "{{ groups | o2c_roster('maintenance') }}"
 # Silent Host는 계획 정지 예외 중 만료되지 않은 호스트를 뺀 수집 로스터를 쓴다.
 o2c_roster_silent: "{{ o2c_roster_collect | o2c_without_exceptions(o2c_silent_exceptions, o2c_today) }}"
+# 앱 텔레메트리 무소식(Spec #253 / Ticket-8): 수집 로스터 중 OpenBao hosts/<host>/agents의 otel_app_telemetry가 true인 호스트(O2C-004·005)에서
+# Silent Host와 같은 계획 정지 예외를 뺀다. 스위치가 꺼진 호스트는 들어가지 않는다.
+o2c_app_switch_on: []
+o2c_roster_app: "{{ o2c_app_switch_on | o2c_without_exceptions(o2c_silent_exceptions, o2c_today) }}"
 o2c_rosters:
   collect: "{{ o2c_roster_collect }}"
   maintenance: "{{ o2c_roster_maintenance }}"
   silent: "{{ o2c_roster_silent }}"
+  app: "{{ o2c_roster_app }}"
+
+# 트레이스 스트림 보존 기간(Spec #253 / Ticket-8, ADR-0012): 스트림이 이미 있을 때만 맞춘다(없으면 건너뜀 — 첫 span이 들어와야 생긴다).
+# 운영 규칙: org당 트레이스 스트림은 o2c_traces_stream 하나만 둔다(View Trace가 이름순 첫 트레이스 스트림을 기본으로 고르므로, #251).
+o2c_traces_stream: app_traces
+o2c_traces_retention_days: 30
 
 # OpenObserve가 수신하는 가장 오래된 이벤트(ZO_INGEST_ALLOWED_UPTO, 기본 5시간 — 공식 문서). 2026-10 수집기 중단 사고(#161)에서 5시간보다
 # 오래된 로그가 거부된 것으로도 확인됐다. 서버 값을 바꿨다면 Silent Host P1 문구와 이 값이 어긋나므로 함께 고친다.
@@ -499,6 +509,23 @@ o2c_alerts:
     sql: "{{ o2c_roster_maintenance | o2c_missing_sql('backup_logs', 'host', \"job = 'maintenance' AND command = 'check'\") }}"
     period: 11520
     frequency: 60
+    silence: 1440
+  - name: infra-app-telemetry-silent
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "앱 텔레메트리 무소식: funa JVM 메트릭이 15분 넘게 끊김"
+    what: "otel_app_telemetry를 켠 호스트에서 funa JVM 메트릭(jvm_memory_used, service_name=funa)이 15분 넘게 오지 않습니다."
+    why: "앱 텔레메트리 경로(funa → 노드 수집기 → OpenObserve)가 알림 없이 끊긴 상태입니다. 2026-10-01처럼 트레이스와 앱 메트릭이 조용히 버려질 수 있습니다."
+    action: "① 같은 호스트의 Silent Host 알림이 있으면 수집기 전체가 원인 — 그쪽부터 복구 ② 호스트의 otelcol-contrib 상태와 OTLP 수신기 설정 확인 ③ funa 컨테이너의 OTLP exporter 설정과 컨테이너 상태 확인 ④ 의도적으로 껐다면 OpenBao hosts/<host>/agents의 otel_app_telemetry를 끄고 Config를 다시 실행"
+    runbook: "{{ o2c_runbook_base }}#app-telemetry-silent"
+    row_template: '• {host_name}'
+    description: "otel_app_telemetry를 켠 호스트의 funa JVM 메트릭(jvm_memory_used)이 15분 없음 (State Alert, 재통지 1440분) — UNION ALL 로스터 가지 방식"
+    stream: jvm_memory_used
+    stream_type: metrics
+    missing: {roster: app, field: host_name, cond: "service_name = 'funa'"}
+    sql: "{{ o2c_roster_app | o2c_missing_sql('jvm_memory_used', 'host_name', \"service_name = 'funa'\") }}"
+    period: 15
+    frequency: 5
     silence: 1440
 
 # 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고

@@ -6,13 +6,14 @@ Pure functions so the desired state and the change plan are unit-testable withou
 ``o2c_plan``     compares them with what the OpenObserve API returned and lists only the writes that are needed.
 """
 
-KINDS = ('template', 'destination', 'function', 'pipeline', 'alert')   # apply order: dependencies first
+KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
     'template': '/api/{org}/alerts/templates',
     'destination': '/api/{org}/alerts/destinations',
     'function': '/api/{org}/functions',
     'pipeline': '/api/{org}/pipelines',
     'alert': '/api/v2/{org}/alerts',
+    'trace_stream': '/api/{org}/streams?type=traces',   # 트레이스 스트림 목록(이름·설정). 스트림은 첫 span이 들어와야 생긴다
 }
 ITEM_PATHS = {
     'template': '/api/{org}/alerts/templates/{key}',
@@ -20,6 +21,7 @@ ITEM_PATHS = {
     'function': '/api/{org}/functions/{key}',
     'pipeline': '/api/{org}/pipelines/{key}',
     'alert': '/api/v2/{org}/alerts/{key}',
+    'trace_stream': '/api/{org}/streams/{key}/settings?type=traces',
 }
 ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; the others by name
 CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
@@ -56,6 +58,11 @@ def o2c_desired(spec):
             'context_attributes': {k: alert[k] for k in CONTEXT_KEYS},
             'row_template': alert['row_template'], 'row_template_type': 'String',
         }})
+    # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8): 스트림이 이미 있을 때만 맞춘다(없으면 o2c_plan이 건너뛴다)
+    if spec.get('traces_stream'):
+        out.append({'kind': 'trace_stream', 'name': spec['traces_stream'], 'optional': True,
+                    'body': {'data_retention': spec['traces_retention_days']},
+                    'match': {'settings': {'data_retention': spec['traces_retention_days']}}})
     for item in out:
         if item['kind'] == 'function':   # the server fills in defaults for the rest (num_args, streams, ...)
             item['match'] = {k: item['body'][k] for k in ('name', 'function')}
@@ -122,6 +129,8 @@ def o2c_plan(desired, existing, org):
         for want in (d for d in desired if d['kind'] == kind):
             cur = have.get(want['name'])
             body = want['body']
+            if cur is None and want.get('optional'):
+                continue   # 대상이 아직 없으면 만들지 않고 건너뛴다(스트림은 서버가 첫 수집 때 만든다)
             if cur is None:
                 plan.append(_action(kind, want, 'create', 'POST', LIST_PATHS[kind].format(org=org), body))
                 continue
@@ -232,6 +241,16 @@ import re as _re
 _HOST_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 _DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
 SILENT_RECENT_US = 15 * 60 * 1000000   # P2: 최근 15분 없음
+
+
+def o2c_app_telemetry_roster(roster, kv_by_host):
+    """Roster hosts whose OpenBao ``hosts/<host>/agents`` has ``otel_app_telemetry: true`` (a real boolean; absent means off)."""
+    return [h for h in roster or [] if ((kv_by_host or {}).get(h) or {}).get('otel_app_telemetry') is True]
+
+
+def o2c_host_items(hosts):
+    """``[{host: <name>}, ...]`` so a host list can go through ``o2c_as_requests`` (path ``.../{host}/agents``)."""
+    return [{'host': h} for h in hosts or []]
 
 
 def _group(groups, name):
@@ -446,4 +465,5 @@ class FilterModule(object):
                 'o2c_alert_history_errors': o2c_alert_history_errors,
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
                 'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
-                'o2c_missing_sql': o2c_missing_sql}
+                'o2c_missing_sql': o2c_missing_sql, 'o2c_app_telemetry_roster': o2c_app_telemetry_roster,
+                'o2c_host_items': o2c_host_items}
