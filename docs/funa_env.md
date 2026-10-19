@@ -35,6 +35,8 @@ KV 키 이름이 곧 환경 변수 이름이다. 이 문서와 저장소에는 �
 - 필수 키 목록과 노드 키 목록은 `roles/funa_env/defaults/main.yml`에서 바꾼다.
 - 경로가 없거나(404) 키가 빠지거나 값이 비면 **무엇이 빠졌는지 경로와 키 이름**을 대며 실패한다. 값은 출력하지 않는다.
 - 시크릿 키(`proxy`·`vrrp` 경로)가 `cluster` 값에 같은 이름으로 있으면 비시크릿 파일로 새는 것이므로 실패한다.
+- 값에 `${`로 시작하는 셸 참조(`${NAME}`, `${NAME:-default}` 등)가 들어 있으면 렌더링 전에 `경로: 키 contains a shell reference`로 실패한다(비시크릿·시크릿·노드별 값 모두, 값은 출력하지 않는다). 옛 `global_env.sh`에서 옮겨 온 참조 문자열이 그대로 Caddy와 알림 문구에 남는 사고(#225 카나리)를 막는다. `$NAME`과 값 중간·끝의 `$` 한 글자는 막지 않는다(비밀번호에 `$`가 들어갈 수 있다).
+  - **근거(Compose 공식 문서 <https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/>)**: 보간은 따옴표 없는 값과 큰따옴표 값에만 적용되고, 작은따옴표 값은 그대로 둔다. 이 역할은 `$`가 든 값을 항상 작은따옴표로 감싸므로 `$NAME`은 문자 그대로 전달된다. 그래서 `${` 존재 여부만 판정한다. 값에 `${`가 있다는 것은 옛 참조가 옮겨졌다는 신호이지 정상 비밀번호가 아니다.
 - 값에 개행·NUL·작은따옴표가 있거나 키 이름이 환경 변수 이름이 아니면 실패한다. 공백·`$`·`#` 등이 있는 값은 작은따옴표로 감싸(compose dotenv와 셸이 같게 읽도록) 쓴다.
 - `COMPOSE_PROJECT_NAME`을 이 파일들에 넣지 않는다(ADR-0011).
 
@@ -53,7 +55,7 @@ Semaphore Static 인벤토리에서 FUNA Cluster 호스트를 `servers`에 두�
 | `FUNA-003` | `Fetch OpenBao KV (hosts/<host>, clusters/funa, clusters/funa/proxy, clusters/funa/vrrp)` | `ansible.builtin.uri` | All | 조회 전용, 컨트롤러에서 호스트마다 실행, `no_log` |
 | `FUNA-004` | `Assert OpenBao answered every FUNA lookup` | `ansible.builtin.assert` | All | 조회 전용. 200/404 외 응답이나 토큰 없음은 상태 코드만 대며 실패 |
 | `FUNA-005` | `Build the environment files from the KV contents` | `ansible.builtin.set_fact` | All | 메모리 내 계산(`funa_env_resolve`), `no_log` |
-| `FUNA-006` | `Assert the OpenBao values are complete and valid` | `ansible.builtin.assert` | All | 조회 전용. 빠진 경로·키를 이름으로만 보고 |
+| `FUNA-006` | `Assert the OpenBao values are complete and valid` | `ansible.builtin.assert` | All | 조회 전용. 빠진 경로·키와 셸 참조(`${`)가 든 키를 이름으로만 보고 |
 | `FUNA-007` | `Ensure the environment directory exists` | `ansible.builtin.file` | All | `0755 root:root` 일치 시 `ok` |
 | `FUNA-008` | `Render the non-secret environment file (cluster.env)` | `ansible.builtin.copy` | All | 내용·권한 비교 (`0644 root:root`) |
 | `FUNA-009` | `Render the consumer secret environment files (proxy, vrrp)` | `ansible.builtin.copy` | All | 내용·권한 비교 (`0640 root:dockermgmt`), `no_log`·`diff: false` |
