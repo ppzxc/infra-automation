@@ -328,6 +328,15 @@
     mode: '0644'
   when: not (_raw_path_effective | default(false) | bool)
 
+# 읽기 전용 확인이라 check 모드에서도 실행된다. 파일이 아직 없으면(rc 2) 쓰지 않은 것이므로 통과한다.
+- name: "[COMMON-058] Assert shell env files carry no OTLP endpoint variable (read-only)"
+  ansible.builtin.command: grep -c OTEL_EXPORTER_OTLP_ENDPOINT /etc/profile.d/98-node-env.sh /etc/environment
+  register: _common_otlp_env_grep
+  changed_when: false
+  failed_when: _common_otlp_env_grep.rc == 0
+  check_mode: false
+  when: not (_raw_path_effective | default(false) | bool)
+
 # ==============================================================================
 # Raw Provisioning Path (ADR-0005): CentOS 6/7 targets cannot run AnsiballZ
 # modules, so the module-based tasks above (sysctl, accounts, sudoers, SSH keys,

@@ -400,10 +400,11 @@ receivers:
   hostmetrics:
     collection_interval: {{ otel_hostmetrics_interval }}
     scrapers:
-{% set conntrack_scrapers = {'network': {'metrics': {'system.network.conntrack.count': {'enabled': true}, 'system.network.conntrack.max': {'enabled': true}}}} %}
 {# conntrack은 Probe가 커널 파일을 확인한 호스트에서만 켠다(없으면 network 스크레이퍼가 매 주기 부분 오류를 낸다). #}
-{% set hostmetrics_scrapers = otel_hostmetrics_scrapers | combine(otel_hostmetrics_scrapers_legacy_el6, recursive=true) if host_agents_os_path | default('modern') == 'legacy_el6' else otel_hostmetrics_scrapers %}
-{{ (hostmetrics_scrapers | combine(conntrack_scrapers, recursive=true) if (host_agents_conntrack | default(false) | bool) else hostmetrics_scrapers) | to_nice_yaml(indent=2) | indent(6, true) }}
+{% set hostmetrics_scrapers = otel_hostmetrics_scrapers
+   | combine(otel_hostmetrics_scrapers_legacy_el6 if legacy else {}, recursive=true)
+   | combine(otel_hostmetrics_scrapers_conntrack if (host_agents_conntrack | default(false) | bool) else {}, recursive=true) %}
+{{ hostmetrics_scrapers | to_nice_yaml(indent=2) | indent(6, true) }}
 {% if otel_tcpcheck_enabled | bool %}
   # 서버 도달성(ADR-0010): 검사하는 쪽 호스트에만. 대상은 servers 전체(Backup Only 포함, 제외 목록 빼고)의 SSH 주소:포트이며 tasks/tcpcheck_targets.yml이 OpenBao에서 만든다.
   tcp_check:
@@ -539,7 +540,7 @@ exporters:
 {{ o2_common(stream) }}    sending_queue:
       enabled: true
       storage: file_storage
-{% if host_agents_os_path | default('modern') == 'legacy_el6' %}
+{% if legacy %}
       # v0.119.0(legacy_el6): bytes 큐와 신규 역압 키 미지원 → 배치 개수 큐 + 구 이름 blocking (validate로 확인, ADR-0006 §2.8)
       queue_size: {{ otel_log_queue_batches_legacy_el6 }}
       blocking: true
@@ -556,7 +557,7 @@ exporters:
   otlphttp/metrics:
 {{ o2_common() }}    sending_queue:
       enabled: true
-{% if host_agents_os_path | default('modern') == 'legacy_el6' %}
+{% if legacy %}
       blocking: false
 {% else %}
       block_on_overflow: false
@@ -566,7 +567,7 @@ exporters:
   otlphttp/app_traces:
 {{ o2_common(otel_app_traces_stream) }}    sending_queue:
       enabled: true
-{% if host_agents_os_path | default('modern') == 'legacy_el6' %}
+{% if legacy %}
       blocking: false
 {% else %}
       block_on_overflow: false

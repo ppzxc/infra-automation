@@ -73,6 +73,12 @@ otel_hostmetrics_scrapers_legacy_el6:
   cpu:
     metrics:
       system.cpu.logical.count: {enabled: true}
+# conntrack 호스트(host_agents_conntrack, Probe가 커널 conntrack 파일을 확인)에만 더하는 network 스크레이퍼 설정.
+otel_hostmetrics_scrapers_conntrack:
+  network:
+    metrics:
+      system.network.conntrack.count: {enabled: true}
+      system.network.conntrack.max: {enabled: true}
 
 # Docker 메트릭은 hosts/<host>/agents의 otel_docker_metrics: true인 호스트만 (docker_engine의 docker_metrics_enabled와 별개).
 # otelcol 사용자에게 소켓 접근 권한이 필요하다(예: docker 그룹 멤버십은 docker_engine 책임).

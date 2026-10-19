@@ -188,7 +188,8 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
 | `MON-020` | `Assert host was provisioned by site.yml (or opted in to password-auth install)` | `ansible.builtin.assert` | All | 읽기 전용 (SSH 키 접속 가능 호스트이거나 `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`를 명시한 호스트만 통과) |
 | `MON-021` | `Probe OS release and architecture from target host (raw, read-only)` | `ansible.builtin.raw` | All | `changed_when: false`, `check_mode: false` |
-| `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수. 프로브가 커널 conntrack 파일(count·max)을 읽기만 하고 `host_agents_conntrack` fact를 만든다. 참인 호스트의 설정에서만 `system.network.conntrack.count/.max`가 켜진다(스위치 없음, modern·raw 공통) |
+| `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수. |
+| `MON-039` | `Set host_agents_conntrack fact from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수. 프로브가 커널 conntrack 파일(count·max)을 읽기만 하고 `host_agents_conntrack` fact를 만든다. 참인 호스트의 설정에서만 `system.network.conntrack.count/.max`가 켜진다(스위치 없음, modern·raw 공통) |
 | `MON-023` | `Check /usr/bin/python3 exists on modern path (raw, read-only)` | `ansible.builtin.raw` | modern | `changed_when: false`, `check_mode: false` |
 | `MON-024` | `Gather facts on modern path` | `ansible.builtin.setup` | modern | 읽기 전용 |
 | `MON-025` | `Warn when the host timezone could not be read (falling back to the timezone variable)` | `ansible.builtin.debug` | All | 읽기 전용 (Probe가 `/etc/localtime` 링크·`/etc/sysconfig/clock`에서 타임존을 읽지 못한 호스트에만 WARN, `timezone` 변수(기본 `Asia/Seoul`)로 대체) |

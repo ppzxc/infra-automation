@@ -193,7 +193,7 @@
               - _p.arch == ('amd64' if ansible_architecture == 'x86_64' else 'arm64')
             fail_msg: "OS probe {{ _p }} disagrees with gathered facts."
 
-        - name: "[VERIFY-MON-022] Verify the conntrack fact follows the kernel files and gates the conntrack metrics"
+        - name: "[VERIFY-MON-039] Verify the conntrack fact follows the kernel files and gates the conntrack metrics"
           vars:
             _p: "{{ _verify_probe.stdout | host_agents_parse_os_probe }}"
             _ct: "{{ 'system.network.conntrack.count' in f.read['/etc/otelcol/config.yaml'] }}"
