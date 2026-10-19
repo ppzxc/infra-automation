@@ -2,7 +2,7 @@
 
 - Ticket: [#243](https://github.com/ppzxc/infra-automation/issues/243) (map [#239](https://github.com/ppzxc/infra-automation/issues/239))
 - Date: 2026-10-19
-- Versions checked: OTel Java agent **v2.30.0** (bundles `opentelemetry-samplers` **1.58.0-alpha**, SDK 1.64.0), otelcol-contrib **v0.161.0**, Caddy **v2.11.x** (source read at v2.11.7, with version gates noted). Every source link points at the matching tag.
+- Versions checked: OTel Java agent **v2.30.0** (bundles `opentelemetry-samplers` **1.58.0-alpha**, SDK 1.64.0), otelcol-contrib **v0.161.0**, Caddy **v2.11.x** (source read at v2.11.7, with version gates noted). Source links point at the matching tag where one exists. The contrib samplers README, the OTel Go SDK files, opentelemetry.io and spring.io links point at `main` or the live docs.
 - Method: read source and READMEs at those tags with `gh api`. Official docs came through Context7 (`/open-telemetry/opentelemetry-java-instrumentation`, `/open-telemetry/opentelemetry-collector-contrib`, `/websites/opentelemetry_io`, `/websites/spring_io_spring-boot`) and opentelemetry.io. Local files read: funa `docker/prod/{compose.yml,Dockerfile,example.application.yml}`, funa ADR-0033, `caddy-boilerplate/cluster/runtime/Caddyfile`.
 - The **Business Telemetry** definition comes from the map #239 notes ("지도를 그리며 합의한 것"). It is not in `CONTEXT.md` on `main` yet.
 - **Caveat.** Every Caddy-side statement below is based on the **caddy-boilerplate** Caddyfile (cluster variant), not on the node-local `/opt/services/proxy` file. Check the live file before relying on the root-origin table.
@@ -18,7 +18,7 @@
    - It is reachable **only through declarative configuration** (`-Dotel.config.file`). `OTEL_TRACES_SAMPLER` cannot select it.
    - Declarative config **ignores every `OTEL_*` env var not templated in the YAML**, which changes ADR-0033's env-only model.
    - The pieces are alpha or experimental, and 2.32 already deprecates `rule_based_routing` in favour of `composite/development` `rule_based`.
-3. **`OTEL_INSTRUMENTATION_SPRING_SCHEDULING_ENABLED=false` works against trace-level dropping.** It removes the one INTERNAL span that could serve as a single droppable root, so each JDBC call inside the `@Scheduled` job becomes its own root CLIENT span.
+3. **`OTEL_INSTRUMENTATION_SPRING_SCHEDULING_ENABLED=false` works against trace-level dropping.** It removes the one INTERNAL span that could serve as a single droppable root, so each JDBC call inside the `@Scheduled` job becomes its own root CLIENT span (the agent's MyBatis instrumentation is off by default, so no MyBatis span wraps it).
 4. **Collector:**
    - **`filter` is span-level.** It can't see the rest of the trace. Dropping a noisy root leaves its children as orphans, and dropping children needs an attribute those children carry (they don't carry the root's `url.path`).
    - **`tail_sampling` is trace-level.** It holds spans in memory for `decision_wait` and its default verdict is **not sampled**, so it needs `always_sample` plus a `drop` policy.
@@ -45,7 +45,7 @@
 | Docker/compose healthcheck | funa compose defines none | – | – |
 | `/healthz/app`-style app health proxied through a `@valid_hosts` route (if the live Caddyfile has one) | Goes through `tracing`, so Caddy injects a sampled `traceparent` | **Caddy** | Scope `tracing` in Caddy, or collector `tail_sampling`. A funa sampler can only drop funa's half. |
 | API docs (swagger and similar) | funa has no springdoc at runtime: `swagger-parser` is a test-only dependency (`libs.versions.toml`, `testImplementation`). If docs are served, they would arrive through a `@valid_hosts` route | **Caddy** | Same as above |
-| `@Scheduled` job (`CodeServiceImpl.execute` refreshes a code cache, default once a day) | `OTEL_INSTRUMENTATION_SPRING_SCHEDULING_ENABLED=false` is set, so there is no INTERNAL root. `mapper.findAll()` becomes a root JDBC CLIENT span on a `scheduling-N` thread | **funa** (JDBC CLIENT root) | Agent sampler matching `thread.name` (§2.3) |
+| `@Scheduled` job (`CodeServiceImpl.execute` refreshes a code cache, default once a day) | `OTEL_INSTRUMENTATION_SPRING_SCHEDULING_ENABLED=false` is set, so there is no INTERNAL root. `mapper.findAll()` is MyBatis, but the agent's `mybatis-3.2` instrumentation is **off by default** in 2.30 (`defaultEnabled()` returns `false`, [MyBatisInstrumentationModule][mybatis-mod]), so the first span is the root JDBC CLIENT span on a `scheduling-N` thread | **funa** (JDBC CLIENT root) | Agent sampler matching `thread.name` (§2.3) |
 | Lettuce reconnect / background commands | Commands issued outside a request have no parent, so they become CLIENT roots (verify in real data) | **funa** | Agent sampler (CLIENT kind) |
 | RabbitMQ consumer (`DummyListener` `@RabbitListener`) | A CONSUMER span. It is a child if the producer propagated context, and a root otherwise | **funa** (root only if no producer context) | Agent sampler or collector. Whether it counts as noise is a definition question: the map says RabbitMQ child spans are business. |
 
@@ -87,10 +87,16 @@ funa compose places funa only on the external `backend` bridge network, under al
   - Keep `SPRING_SCHEDULING_ENABLED=false`: the scheduled JDBC call is a root CLIENT span on a `scheduling-` thread. Drop it with a CLIENT-kind rule `thread.name: ^scheduling-`. Spring Boot's documented example prefix is `scheduling-`, funa doesn't override it, and virtual threads are off in `example.application.yml` ([Boot task scheduling][boot-sched]).
   - Or re-enable it: the job becomes one INTERNAL root with children, and an INTERNAL-kind rule on `thread.name` drops the whole job trace.
   - Either way works. Re-enabling gives a clean single root if a job ever needs to be kept for debugging.
+- **The propagator must be declared.** The configuration schema says an omitted `propagator` means "a noop propagator is used" ([opentelemetry-configuration schema][cfg-schema]). Without `propagator: composite: [tracecontext, baggage]` funa would stop extracting Caddy's `traceparent`. Every business SERVER span would then be a root, and the rule would judge business traffic too. The propagator goes on the list of things to port, next to the exporters and the instrumentation switches.
+- **If MyBatis instrumentation is ever enabled**, the scheduled job's first span becomes a MyBatis INTERNAL span with JDBC as a child, so the chain needs an INTERNAL-kind `thread.name` level as well. The sketch includes one so that it survives either setting.
 - **Sketch** (not validated against the 2.30 parser; replace the management path with the real value at deploy time):
 
 ```yaml
 file_format: "1.0"
+propagator:                          # omitted = noop: funa would stop following Caddy
+  composite:
+    - tracecontext:
+    - baggage:
 tracer_provider:
   sampler:
     parent_based:
@@ -106,7 +112,12 @@ tracer_provider:
                 - { action: DROP, attribute: thread.name, pattern: "^scheduling-" }
                 - { action: DROP, attribute: thread.name, pattern: "^lettuce-" }   # verify thread names in real data
               fallback_sampler:
-                always_on:
+                rule_based_routing:  # INTERNAL roots: scheduler job if spring-scheduling or mybatis is enabled
+                  span_kind: INTERNAL
+                  rules:
+                    - { action: DROP, attribute: thread.name, pattern: "^scheduling-" }
+                  fallback_sampler:
+                    always_on:
 ```
 
 ### 2.4 Caddy's side of the sampled flag
@@ -133,12 +144,14 @@ tracer_provider:
   - **RabbitMQ: can break.** If funa on node A publishes and funa on node B consumes, B's CONSUMER spans reach B's collector without A's root. B then decides on a **partial trace** with only its own spans. Use the design below so a partial trace defaults to keep. Whether funa publishes across nodes was not checked; `DummyListener` is only a consumer.
 - **Decision flow.**
   - Any `drop` → not sampled. Any `sample` → sampled. **Otherwise not sampled** ([tail README §Policy Decision Flow][tail-readme]). `invert_match` decisions are deprecated in favour of `drop` and `not`.
-  - The shape is therefore `always_sample` plus a `drop` policy whose sub-policies (`ottl_condition`, `string_attribute` with regex) fire only on **positive noise evidence**. Example: a span with `IsRootSpan() and IsMatch(span.attributes["url.path"], "...")`, or `resource.attributes["service.name"] == "<caddy service>" and span.name matches a docs path`.
+  - The shape is therefore `always_sample` plus `drop` policies that fire only on **positive noise evidence**.
+  - **The sub-policies of one `drop` are ANDed.** `Drop.Evaluate` returns Dropped only if *every* sub-policy says sampled, and NotSampled as soon as one doesn't ([drop.go][tail-drop]). Use **one `drop` policy per noise pattern**, or one `ottl_condition` sub-policy whose `span` condition list is ORed. Don't list several patterns as sub-policies of one `drop`.
+  - **Match Caddy-rooted noise on Caddy's SERVER span, not on root-ness.** Example: `resource.attributes["service.name"] == "<caddy service>" and span.kind == SPAN_KIND_SERVER and IsMatch(span.attributes["url.path"], "<docs regex>")`. `IsRootSpan()` misses the Caddy span whenever a client sent its own `traceparent` (§2.4). For funa-origin noise without a parent, `IsRootSpan()` is fine.
   - Traces with no evidence, including partial traces, are then kept.
 - **Timing.**
   - `decision_wait` defaults to 30s. `sampling_strategy` defaults to `trace-complete`.
-  - `decision_wait_after_root_received` (default 0s, off) lets the decision come early once the root arrives. In this topology the Caddy root ends last, after funa's spans, so this fits well.
-  - Both SDKs batch-export on roughly 5s schedules, so `decision_wait` must cover export delay plus request duration.
+  - `decision_wait_after_root_received` (default 0s, off) lets the decision come early once the root arrives. The Caddy root *ends* last, but it doesn't necessarily *arrive* last. Caddy and funa each export on their own batch schedule (about 5s), so funa's spans can reach the collector after Caddy's root. Set this value to at least the other SDK's export delay. Spans that still arrive late are safe in the `always_sample` + positive-evidence `drop` design: they are judged alone and kept, or follow a cached decision.
+  - `decision_wait` must cover export delay plus request duration.
   - `span-ingest` mode decides per batch with no re-evaluation, which doesn't fit "decide by the root".
 - **Memory.**
   - The processor keeps up to `num_traces` traces (default 50,000) in a ring buffer. Overflow evicts the oldest trace **unsampled** (`otelcol_processor_tail_sampling_sampling_trace_dropped_too_early`).
@@ -170,7 +183,7 @@ tracer_provider:
 ### 4.2 Caddy metrics
 
 - **Version gate.** `metrics { otlp }` (push via OTLP from the Prometheus registry) was added in commit `2a3ed96f` (2026-04-25) and is **present at v2.11.3, absent at v2.11.2** ([metrics.go@v2.11.3][caddy-metrics-3]). Check the node's exact patch version. Earlier versions need Prometheus scraping instead.
-- **Labels.** Caddy HTTP metrics are labelled `server`, `handler`, `code`, `method`, plus `host` with `per_host`. **There is no path label** ([metrics.go@v2.11.7][caddy-metrics]). Probe traffic is visible only as `handler="static_response"` and can't be separated from other static responses by path.
+- **Labels.** Caddy HTTP metrics are labelled `server`, `handler`, `code`, `method`, plus `host` with `per_host`. **There is no path label** ([metrics.go@v2.11.7][caddy-metrics]). Probe traffic can't be separated by path. What the `handler` label holds for it is unverified: since `dc360828` Caddy records metrics once per route rather than per handler (`newMetricsInstrumentedRoute(ctx, handler, ...)`), so the value may not be `static_response`.
 - **Cardinality hazard.** `shouldAllowHostMetrics` allows a raw lower-cased `r.Host` when the host is in the configured host matchers, **or** when `ObserveCatchallHosts`, **or** when `isHTTPS && hasHTTPSServer`. Otherwise it uses `_other` ([metrics.go L270–L285, L326–L335][caddy-metrics]).
   - With the boilerplate's `per_host` and `observe_catchall_hosts`, plus a wildcard site and certificate, **every subdomain, or any Host header that passes TLS/SNI, becomes its own `host` value**. Under `strict_sni_host` the Host must equal the SNI.
   - That is the "unserved hosts" noise. The `_other` protection is effectively bypassed by the HTTPS auto-allow.
@@ -191,7 +204,7 @@ tracer_provider:
   - It drops management-port SERVER roots and scheduler/Lettuce CLIENT roots with their whole subtree, at zero collector cost.
   - Price: an ADR-0033 amendment (env → YAML), an alpha/experimental dependency, and a sampler migration when upgrading past 2.31.
   - Alternative if declarative config is too much: skip it and rely on layer 3.
-- **Layer 3, node collector traces pipeline.** Run `tail_sampling` with `always_sample` plus positive-evidence `drop` sub-policies (Caddy-rooted noise paths, funa root noise if layer 2 isn't adopted).
+- **Layer 3, node collector traces pipeline.** Run `tail_sampling` with `always_sample` plus one positive-evidence `drop` policy per noise pattern (Caddy-rooted noise paths matched on Caddy's SERVER span, funa root noise if layer 2 isn't adopted).
   - Set `decision_wait_after_root_received`, `non_sampled_cache_size` and `maximum_trace_size_bytes`.
   - Size `num_traces` after real volume is measured.
   - Avoid `filter` on traces except for childless single spans, and never ahead of `tail_sampling` on roots.
@@ -203,7 +216,8 @@ tracer_provider:
 2. **Root CLIENT spans in real data.** Do JDBC and Lettuce calls outside a request produce root CLIENT spans in 2.30, and what are the Lettuce thread names?
 3. **Env var for declarative config.** Does agent 2.30 accept `OTEL_CONFIG_FILE` as an env var, or only `-Dotel.config.file` (`JAVA_TOOL_OPTIONS`)? Does it parse a nested `rule_based_routing` as `fallback_sampler`?
 4. **RabbitMQ.** Does funa publish to queues consumed on another node? This decides whether `tail_sampling` sees partial traces. Are root CONSUMER spans (no producer context) business or noise?
-5. **`http.route` for management.** What exact value does the agent record for the management server's actuator requests?
+5. **Propagator default in the agent.** The schema says omitted = noop. Confirm that agent 2.30 behaves this way and doesn't add tracecontext by itself.
+6. **`http.route` for management.** What exact value does the agent record for the management server's actuator requests?
 
 ## Sources
 
@@ -230,6 +244,9 @@ tracer_provider:
 [filter-readme]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.161.0/processor/filterprocessor/README.md
 [tail-readme]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.161.0/processor/tailsamplingprocessor/README.md
 [transform-readme]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.161.0/processor/transformprocessor/README.md
+[mybatis-mod]: https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/v2.30.0/instrumentation/mybatis-3.2/javaagent/src/main/java/io/opentelemetry/javaagent/instrumentation/mybatis/v3_2/MyBatisInstrumentationModule.java
+[cfg-schema]: https://github.com/open-telemetry/opentelemetry-configuration/blob/main/schema/opentelemetry_configuration.yaml
+[tail-drop]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.161.0/processor/tailsamplingprocessor/internal/sampling/drop.go
 [ottlfuncs]: https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.161.0/pkg/ottl/ottlfuncs/README.md#isrootspan
 [semconv-http]: https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
 
@@ -243,4 +260,5 @@ tracer_provider:
 - otelcol-contrib v0.161.0: [filter][filter-readme], [tail_sampling][tail-readme], [transform][transform-readme], [OTTL `IsRootSpan`][ottlfuncs]
 - [Semantic conventions: HTTP metrics][semconv-http]
 - [Spring Boot task scheduling][boot-sched]
+- [MyBatis instrumentation module (v2.30.0)][mybatis-mod], [declarative configuration schema][cfg-schema], [tail_sampling drop.go (v0.161.0)][tail-drop]
 - Local: funa `docker/prod/compose.yml`, `docker/prod/Dockerfile`, `docker/prod/example.application.yml`, `docs/adr/0033-…`. `caddy-boilerplate/cluster/runtime/Caddyfile`
