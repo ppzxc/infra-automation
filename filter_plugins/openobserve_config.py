@@ -240,6 +240,7 @@ def o2c_resource_sql(metric, level, cfg):
 
 
 def _memory_sql(r, level, cfg):
+    # 나눗셈을 실수로 한다: 정수로 적재된 값(합성 검증 레코드)이면 available/limit이 0으로 잘려 사용률이 100%가 된다.
     # 두 스트림 중 한쪽만 있는 _timestamp는 HAVING에서 걸러져 판정하지 않는다(데이터 결손은 Silent Host가 맡는다).
     where = ''.join(' AND NOT (%s)' % _target(e) for e in cfg.get('exclusions') or [] if e.get('host') and _applies(e, 'memory'))
     lo = _threshold('memory', 'p2', cfg['p2'], cfg.get('thresholds'))
@@ -250,7 +251,7 @@ def _memory_sql(r, level, cfg):
     limit = 'max(CASE WHEN src = %d THEN value END)' % _SRC_LIMIT
     available_stream, limit_stream = r['streams']
     return ('SELECT host_name, round(min(pct), 1) AS usage_pct FROM (SELECT host_name, _timestamp, '
-            '(1 - %s / %s) * 100.0 AS pct FROM (%s UNION ALL %s) GROUP BY host_name, _timestamp '
+            '(1.0 - %s * 1.0 / %s) * 100.0 AS pct FROM (%s UNION ALL %s) GROUP BY host_name, _timestamp '
             'HAVING %s IS NOT NULL AND %s > 0) GROUP BY host_name HAVING %s') % (
         avail, limit, branch % (_SRC_AVAILABLE, available_stream, where), branch % (_SRC_LIMIT, limit_stream, where), avail, limit, cond)
 
