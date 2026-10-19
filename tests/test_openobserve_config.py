@@ -34,7 +34,7 @@ EXPECTED_ALERTS = {
     "infra-memory-usage-p2", "infra-memory-usage-p1",
     "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
     "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
-    "infra-app-log-errors",
+    "infra-app-log-errors", "infra-app-telemetry-silent",
 }
 RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
     "infra-disk-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_usage"),
@@ -70,6 +70,7 @@ class FakeO2:
         self.searches = []       # (stream, sql) of the verification step
         self.history = []        # alert evaluation history entries returned by GET alerts/history
         self.search_override = None   # fn(stream, sql, hits) -> hits, to simulate an engine that disagrees
+        self.trace_streams = {}   # 트레이스 스트림 이름 -> data_retention(일). 비어 있으면 아직 첫 span이 들어오지 않은 서버다
         self.missing_streams = {SELFTEST_STREAM}   # 아직 레코드가 없는 스트림 — 레코드가 들어오기 전에는 알림 생성이 404
         self.fixtures = yaml.safe_load((ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8"))
         outer = self
@@ -109,6 +110,11 @@ class FakeO2:
                 outer.auth.add(self.headers.get("Authorization"))
                 if self.path.split("?")[0] == "/api/v2/default/alerts/history":
                     return self._send(200, {"total": len(outer.history), "hits": outer.history})
+                if self.path.split("?")[0] == "/api/default/streams":
+                    outer.reads.append(self.path)
+                    assert self.path.endswith("type=traces")
+                    return self._send(200, {"list": [{"name": n, "stream_type": "traces", "settings": {"data_retention": d}}
+                                                     for n, d in outer.trace_streams.items()], "total": len(outer.trace_streams)})
                 kind, key = self._route()
                 outer.reads.append(self.path)
                 if kind is None:
@@ -137,6 +143,11 @@ class FakeO2:
                         hits = outer.search_override(stream, sql, hits)
                     outer.searches.append((stream, sql))
                     return self._send(200, {"hits": hits, "total": len(hits)})
+                m = re.fullmatch(r"/api/default/streams/([^/]+)/settings", path)
+                if m and method == "PUT":
+                    outer.writes.append((method, self.path, body))
+                    outer.trace_streams[m.group(1)] = body["data_retention"]
+                    return self._send(200, {"code": 200})
                 kind, key = self._route()
                 outer.writes.append((method, self.path, body))
                 if kind is None:
@@ -460,7 +471,7 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
                        "system_filesystem_inodes_usage_alert_verify", "system_linux_memory_available_alert_verify", "system_memory_usage_alert_verify",   # Silent Host 하트비트
                        "system_memory_limit_alert_verify", "tcpcheck_status_alert_verify",
-                       "backup_logs_alert_verify", "app_logs_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
+                       "backup_logs_alert_verify", "app_logs_alert_verify", "jvm_memory_used_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
@@ -686,7 +697,7 @@ def test_unreachable_host_is_a_p1_state_alert_on_tcpcheck_status_zero_for_5_minu
 
 def test_existing_log_alerts_stay_logs(o2):
     assert _apply(o2).returncode == 0
-    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS) - {"infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host"}:
+    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS) - {"infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host", "infra-app-telemetry-silent"}:
         assert o2.store["alert"][name]["stream_type"] == "logs", name
 
 
@@ -1120,6 +1131,122 @@ def test_app_log_error_alert_is_a_p2_event_alert_on_error_or_worse_per_host_and_
     assert "'warn'" not in sql and "'info'" not in sql and "body" not in sql      # 키워드가 아니라 파싱된 레벨만 본다
     assert alert["trigger_condition"]["period"] == 5 and alert["trigger_condition"]["silence"] == 5
     assert alert["context_attributes"]["severity"] == "P2 경고"
+
+
+# --- app_traces 보존 기간과 앱 텔레메트리 무소식 알림 (Spec #253 / Ticket-8) ---------------------------------------------
+SETTINGS_PATH = "/api/default/streams/app_traces/settings?type=traces"
+APP_ALERT = "infra-app-telemetry-silent"
+
+
+def _settings_writes(o2):
+    return [w for w in o2.writes if "/settings" in w[1]]
+
+
+def test_traces_retention_step_skips_when_the_stream_is_absent_and_does_not_fail(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert _settings_writes(o2) == [] and o2.trace_streams == {}
+    assert any(r.endswith("/api/default/streams?type=traces") for r in o2.reads)   # 존재 여부는 읽어서 확인한다
+
+
+def test_traces_retention_is_set_to_30_days_when_present_and_the_second_run_changes_nothing(o2):
+    o2.trace_streams["app_traces"] = 0   # 0 = 서버 전역 값(365일)을 따름
+    assert _apply(o2).returncode == 0
+    assert _settings_writes(o2) == [("PUT", SETTINGS_PATH, {"data_retention": 30})]
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and _settings_writes(o2) == [] and o2.writes == []
+
+
+def test_second_run_reports_changed_0_with_the_retention_already_in_place(o2):
+    o2.trace_streams["app_traces"] = 0
+    assert _apply(o2).returncode == 0
+    res = _apply(o2)
+    assert res.returncode == 0 and _changed(res) == 0, res.stdout
+
+
+def test_only_the_app_traces_stream_is_touched(o2):
+    o2.trace_streams.update({"app_traces": 30, "other_traces": 0})
+    assert _apply(o2).returncode == 0 and _settings_writes(o2) == []
+
+
+def test_check_mode_plans_the_retention_but_writes_nothing(o2):
+    o2.trace_streams["app_traces"] = 365
+    res = _apply(o2, "--check")
+    assert res.returncode == 0 and o2.writes == [] and "update trace_stream app_traces" in res.stdout
+
+
+def _app_kv(*hosts, off=()):
+    return {h: {"otel_app_telemetry": True} for h in hosts} | {h: {"otel_app_telemetry": False} for h in off}
+
+
+def _app_apply(o2, tmp_path, kv_by_host, **kw):
+    extra = {"o2c_app_telemetry_kv_fixture": kv_by_host}
+    return _apply(o2, inventory=_inventory(tmp_path, SERVERS, **kw), extra=extra)
+
+
+def test_app_telemetry_silent_roster_holds_only_hosts_with_the_switch_on(o2, tmp_path):
+    kv = _app_kv("ns0001", "ns0004", off=["ns0002"])   # ns0003은 키가 없다(꺼짐), ns0002는 명시적으로 꺼짐
+    res = _app_apply(o2, tmp_path, kv)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert _branch_hosts(_sql(o2, APP_ALERT)) == {"ns0001", "ns0004"}
+
+
+def test_app_telemetry_roster_ignores_hosts_outside_the_collect_roster_and_planned_stops(o2, tmp_path):
+    kv = dict(KV, silent_host_exceptions=[{"host": "ns0004", "expires": "2999-12-31"}])
+    fixture = _app_kv("ns0001", "ns0002", "ns0003", "ns0004", "ns0999")
+    res = _apply(o2, kv=kv, inventory=_inventory(tmp_path, SERVERS, excluded=["ns0002"], backup_only=["ns0003"]),
+                 extra={"o2c_app_telemetry_kv_fixture": fixture})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert _branch_hosts(_sql(o2, APP_ALERT)) == {"ns0001"}
+
+
+def test_app_telemetry_roster_is_empty_when_no_host_has_the_switch_and_never_fires(o2, tmp_path):
+    assert _app_apply(o2, tmp_path, {}).returncode == 0
+    sql = _sql(o2, APP_ALERT)
+    assert _branch_hosts(sql) == {"none"} and "HAVING count(*) < 0" in sql
+
+
+def test_app_telemetry_silent_follows_the_state_alert_rules(o2, tmp_path):
+    assert _app_apply(o2, tmp_path, _app_kv("ns0001", "ns0004")).returncode == 0
+    a = o2.store["alert"][APP_ALERT]
+    sql = a["query_condition"]["sql"]
+    assert a["stream_type"] == "metrics" and a["stream_name"] == "jvm_memory_used" and a["query_condition"]["type"] == "sql"
+    assert "service_name = 'funa'" in sql and "HAVING count(*) < 1" in sql and "UNION ALL" in sql
+    assert a["trigger_condition"]["period"] == 15 and a["trigger_condition"]["frequency"] == 5
+    assert a["trigger_condition"]["silence"] == 1440 and a["context_attributes"]["severity"] == "P2 경고"
+    assert "{host_name}" in a["row_template"] and a["destinations"] == ["infra-automation-webhook"]
+    for banned in ("VALUES", "unnest", "JOIN"):
+        assert banned.lower() not in sql.lower()
+
+
+def test_switching_a_host_on_changes_only_the_app_alert_and_a_rerun_writes_nothing(o2, tmp_path):
+    inv = _inventory(tmp_path, SERVERS)
+    on = {"o2c_app_telemetry_kv_fixture": _app_kv("ns0001")}
+    assert _apply(o2, inventory=inv, extra=on).returncode == 0
+    o2.writes.clear()
+    assert _apply(o2, inventory=inv, extra=on).returncode == 0 and o2.writes == []
+    assert _apply(o2, inventory=inv, extra={"o2c_app_telemetry_kv_fixture": _app_kv("ns0001", "ns0004")}).returncode == 0
+    assert [(m, p) for m, p, _ in o2.writes] == [("PUT", f"/api/v2/default/alerts/{o2.store['alert'][APP_ALERT]['alert_id']}")]
+
+
+def test_app_telemetry_fixtures_cover_firing_and_quiet_cases_and_verification_uses_the_roster_sql(o2, tmp_path):
+    cases = FIXTURES[APP_ALERT]["cases"]
+    assert {c["fires"] for c in cases} == {True, False}
+    assert all(r.get("service_name") for c in cases for r in c["records"])
+    res = _app_apply(o2, tmp_path, _app_kv("ns0001"))
+    assert res.returncode == 0, res.stdout + res.stderr
+    searched = next(sql for stream, sql in o2.searches if stream == "jvm_memory_used_alert_verify")
+    for c in cases:
+        assert any(h.startswith(c["host"] + "-") for h in _branch_hosts(searched)), c["host"]
+    assert "ns0001" in _branch_hosts(searched)
+
+
+def test_app_telemetry_roster_lookup_task_is_read_only_and_no_log():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    t = next(t for t in tasks if t["name"].startswith("[O2C-004]"))
+    assert t["no_log"] is True and t["changed_when"] is False and t["check_mode"] is False
+    assert "o2c_app_telemetry_kv_fixture is not defined" in str(t["when"])
 
 
 # --- 메모리 사용률 알림: 1 - available / limit (Spec #253 / Ticket-6, #259) -------------------------------------------------

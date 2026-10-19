@@ -239,6 +239,22 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 
 ---
 
+<a id="app-telemetry-silent"></a>
+## 🟠 앱 텔레메트리 무소식 — funa JVM 메트릭 끊김 (`infra-app-telemetry-silent`)
+
+OpenBao `hosts/<host>/agents`의 `otel_app_telemetry`가 켜진 호스트에서 funa JVM 메트릭(`jvm_memory_used`, `service_name=funa`)이 15분 넘게 오지 않으면 온다. 스위치가 꺼진 호스트는 대상이 아니다. 대상 목록은 `OpenObserve — Config`를 실행할 때 만들어지므로 스위치를 바꾸면 Config를 다시 실행한다.
+
+**왜 중요한가**: 2026-10-01처럼 앱 텔레메트리(트레이스, 앱 메트릭)가 알림 없이 버려질 수 있다.
+
+**확인**
+1. 같은 호스트의 Silent Host 알림이 있으면 수집기 전체가 원인이다. 그쪽부터 복구한다.
+2. 호스트에서 `systemctl status otelcol-contrib`와 OTLP 수신기 설정(스위치가 렌더링에 반영됐는지)을 본다.
+3. funa 컨테이너가 떠 있는지, OTLP exporter 환경 변수가 맞는지 본다.
+
+**대응**: 원인을 고치고 메트릭이 돌아오는지 본다. 의도적으로 끈 것이면 `otel_app_telemetry`를 끄고 Config를 다시 실행한다.
+
+---
+
 <a id="unreachable-host"></a>
 ## 🔴 서버 응답 없음 — Unreachable Host (`infra-unreachable-host`)
 

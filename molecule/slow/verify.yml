@@ -1327,6 +1327,24 @@
           - _t['O2C-002'].block[1]['ansible.builtin.assert'].quiet is true
         quiet: true
 
+    - name: "[VERIFY-O2C-004] Verify the app telemetry switch read is a parallel read-only OpenBao GET batch that tolerates only 200 and 404"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-004'].o2c_http.parallel is true
+          - _t['O2C-004'].o2c_http.status_code == [200, 404]
+          - "'/agents' in _t['O2C-004'].o2c_http.requests"
+          - _t['O2C-004'].check_mode is false and _t['O2C-004'].changed_when is false and _t['O2C-004'].no_log is true
+          - "'o2c_app_telemetry_kv_fixture is not defined' in _t['O2C-004'].when"
+        quiet: true
+
+    - name: "[VERIFY-O2C-005] Verify only the host names with the switch on are kept as a fact (no KV body, never cached)"
+      ansible.builtin.assert:
+        that:
+          - "'o2c_app_telemetry_roster(' in _t['O2C-005']['ansible.builtin.set_fact'].o2c_app_switch_on"
+          - _t['O2C-005']['ansible.builtin.set_fact'].cacheable is false
+          - _t['O2C-005'].no_log is true
+        quiet: true
+
     - name: "[VERIFY-O2C-010] Verify the state read is one parallel GET batch over the shared path table and the auth fact is not cacheable"
       ansible.builtin.assert:
         that:
