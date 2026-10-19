@@ -22,6 +22,8 @@
         - /usr/bin/python3
         - /usr/local/bin/otelcol-contrib
         - /etc/otelcol/config.yaml
+        - /proc/sys/net/netfilter/nf_conntrack_count
+        - /proc/sys/net/netfilter/nf_conntrack_max
         - "{{ otelcol_service_path }}"
         - /etc/funa-cluster/cluster.env
         - /etc/funa-cluster/proxy.secrets.env
@@ -190,6 +192,16 @@
               - _p.major_version == ansible_distribution_major_version
               - _p.arch == ('amd64' if ansible_architecture == 'x86_64' else 'arm64')
             fail_msg: "OS probe {{ _p }} disagrees with gathered facts."
+
+        - name: "[VERIFY-MON-022] Verify the conntrack fact follows the kernel files and gates the conntrack metrics"
+          vars:
+            _p: "{{ _verify_probe.stdout | host_agents_parse_os_probe }}"
+            _ct: "{{ 'system.network.conntrack.count' in f.read['/etc/otelcol/config.yaml'] }}"
+          ansible.builtin.assert:
+            that:
+              - _p.conntrack | bool == (f.stat['/proc/sys/net/netfilter/nf_conntrack_count'].exists and f.stat['/proc/sys/net/netfilter/nf_conntrack_max'].exists)
+              - _ct | bool == (_p.conntrack | bool)
+            fail_msg: "conntrack fact {{ _p.conntrack }} disagrees with the kernel files or the rendered config."
 
         - name: "[VERIFY-MON-025] Verify the probe reads this host's real timezone (the RFC3164 time zone)"
           vars:
@@ -384,6 +396,13 @@
             that:
               - f.read['/etc/otelcol/config.yaml'] is not none
               - "'hostmetrics:' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.cpu.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.linux.memory.available' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.memory.limit' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.memory.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.filesystem.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.paging.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system:' in f.read['/etc/otelcol/config.yaml']"
               - "'node_exporter' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
 
@@ -450,6 +469,7 @@
             that:
               - "'filelog/containers' not in f.read['/etc/otelcol/config.yaml']"
               - not _verify_container_rule.stat.exists
+              - "'attributes._lvl.trace_id' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "container log receiver must not exist without otel_container_logs, and the obsolete rsyslog rule must be removed."
 
         - name: "[VERIFY-MON-067] Verify the collection standard: 60s hostmetrics, stream routing, checkpoints, retry, separate metrics"

@@ -142,7 +142,6 @@ monitoring_allowed_subnets: []
 #   - "192.168.10.50/32"
 
 # OpenTelemetry 중앙 관제 타겟 설정
-otel_target_endpoint: "127.0.0.1:4317"
 otel_target_insecure: true
 otel_target_headers: {}
 otel_auth_header: "{{ _local_otel_auth_header | default((_vault_global_secret | default({}, true)).otel_auth_header | default('')) }}"
