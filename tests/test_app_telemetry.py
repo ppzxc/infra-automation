@@ -21,6 +21,7 @@ TRACE_A = "a" * 32
 def _render(tmp_path, version, **over):
     over.setdefault("host_agents_os_path", h.VERSIONS[version][1])
     over.setdefault("host_agents_inputs", INPUTS)
+    over.setdefault("otel_trace_decision_wait", "2s")      # tail_sampling holds spans for this long
     cfg, _ = base._render_config(tmp_path, **over)
     return cfg
 
@@ -33,9 +34,9 @@ def test_otlp_spans_and_metrics_reach_their_exporters_and_logs_reach_none(tmp_pa
     harness = h.OtlpHarness(tmp_path, cfg)
     assert set(harness.files) == {"otlphttp/app_traces", "otlphttp/metrics"}
     with harness.running(binary) as col:
-        # the SDK claims another host: the collector's Resource Attribute wins, service.name stays the app's
+        # (only Caddy-rooted traces pass the noise rules) the SDK claims another host: the collector's Resource Attribute wins, service.name stays the app's
         spoof = {"host.name": "spoofed", "deployment.environment.name": "spoofed"}
-        assert col.send("traces", h.resource_spans("funa", [h.span(TRACE_A, "1" * 16, "GET /x"),
+        assert col.send("traces", h.resource_spans("caddy", [h.span(TRACE_A, "1" * 16, "GET /x"),
                                                      h.span(TRACE_A, "2" * 16, "SELECT", parent="1" * 16)], spoof)) == 200
         assert col.send("metrics", h.resource_metrics("caddy", [h.gauge("caddy_http_requests_total", 7)], spoof)) == 200
         col.send("logs", h.resource_logs("funa", [h.log_record("otlp-log")]))     # rejected or dropped, never exported
@@ -46,7 +47,7 @@ def test_otlp_spans_and_metrics_reach_their_exporters_and_logs_reach_none(tmp_pa
     assert sorted(s["name"] for s in spans) == ["GET /x", "SELECT"]
     metrics = harness.read("otlphttp/metrics", "metrics")
     assert [m["name"] for m in metrics] == ["caddy_http_requests_total"]
-    for item, service in [(spans[0], "funa"), (metrics[0], "caddy")]:
+    for item, service in [(spans[0], "caddy"), (metrics[0], "caddy")]:
         assert item["_res"]["service.name"] == service
         assert item["_res"]["host.name"] == host["host.name"] != "spoofed"
         assert item["_res"]["deployment.environment.name"] == host["deployment.environment.name"]

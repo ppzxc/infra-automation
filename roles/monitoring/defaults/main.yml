@@ -100,6 +100,15 @@ otel_otlp_bind: "0.0.0.0"
 otel_otlp_http_port: 4318
 # 트레이스는 OpenObserve 스트림 하나로 모은다(View Trace 기본 선택이 흔들리지 않도록). 트레이스 전용 exporter의 stream-name.
 otel_app_traces_stream: app_traces
+# 잡음 규칙(Spec #253 / Ticket-7). /docs 아래는 트레이스와 funa http.server.* 메트릭에서 버린다(OTTL 정규식).
+otel_app_docs_regex: "^/docs(/|$)"
+# funa 관리 경로 접두어("/"로 시작). 비공개 값이라 저장소 기본값은 비워 둔다. 비면 http.server.* 관리 경로 규칙은 렌더링하지 않는다.
+# 값은 Semaphore Environment(-e) 등 비공개 경로로 주입한다.
+otel_app_management_path: ""
+# tail_sampling: decision_wait는 SDK export 지연(약 5초)과 요청 시간을 덮어야 한다. num_traces 초과 시 가장 오래된 트레이스가 버려진다.
+otel_trace_decision_wait: 15s
+otel_trace_num_traces: 20000
+otel_trace_non_sampled_cache_size: 20000
 
 # 백업 결과 jsonl (backup 역할의 backup_log_path와 같은 값을 유지한다)
 otel_backup_log_path: /var/log/host-agents/backup.jsonl

@@ -979,9 +979,9 @@ def test_app_telemetry_switch_opens_only_the_otlp_http_receiver_on_all_addresses
     assert protocols["http"]["endpoint"].startswith("0.0.0.0:")
     pipes = on["service"]["pipelines"]
     assert pipes["traces/otlp"]["receivers"] == ["otlp"]
-    assert pipes["traces/otlp"]["processors"] == ["memory_limiter", "resource/host", "batch"]
+    assert pipes["traces/otlp"]["processors"] == ["memory_limiter", "resource/host", "tail_sampling", "batch"]
     assert pipes["traces/otlp"]["exporters"] == ["otlphttp/app_traces"]
-    assert pipes["metrics/otlp"]["processors"] == ["memory_limiter", "resource/host", "batch"]
+    assert pipes["metrics/otlp"]["processors"] == ["memory_limiter", "resource/host", "filter/app_metrics", "batch"]
     assert pipes["metrics/otlp"]["exporters"] == ["otlphttp/metrics"]
     exp = on["exporters"]["otlphttp/app_traces"]
     assert exp["headers"]["stream-name"] == "app_traces"

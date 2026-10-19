@@ -187,6 +187,7 @@
   컨테이너 로그(hosts/<host>/agents의 otel_container_logs). docker json-file 드라이버 파일을 읽으므로 검증한 modern 경로에서만 켠다.
 #}
 {% set container_logs = (host_agents_inputs.otel_container_logs | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
+{% set legacy = (host_agents_os_path | default('modern')) == 'legacy_el6' %}
 {% set app_telemetry = host_agents_inputs.otel_app_telemetry | default(false) | bool %}
 extensions:
   file_storage:
@@ -441,6 +442,74 @@ processors:
         value: {{ value | to_json }}
         action: upsert
 {% endfor %}
+{% if app_telemetry %}
+  # Business Telemetry 잡음 규칙(ADR-0012, 갈래 B). 트레이스는 Caddy span이 든 트레이스만 남기고 /docs 아래는 버린다.
+  # 정책 판정: drop이 하나라도 있으면 버림, sample이 하나라도 있으면 남김, 둘 다 없으면 버림(= Caddy가 시작하지 않은 트레이스).
+  # drop 정책은 하위 정책이 AND라서 패턴마다 정책 하나를 둔다. 늦게 온 span이 단독으로 다시 판정되지 않도록 non_sampled_cache_size를 둔다.
+  tail_sampling:
+    decision_wait: {{ otel_trace_decision_wait }}
+    num_traces: {{ otel_trace_num_traces }}
+{% if legacy %}
+    # legacy_el6(0.119.0)에는 drop 정책과 non_sampled_cache_size가 없다. and 정책으로 "Caddy span이 있고 문서 경로 span이 없는" 트레이스만 남긴다.
+    # invert_match는 트레이스의 모든 span이 패턴에 안 걸릴 때만 참이다.
+    policies:
+      - name: caddy-business-not-docs
+        type: and
+        and:
+          and_sub_policy:
+            - name: caddy
+              type: string_attribute
+              string_attribute:
+                key: service.name
+                values: [caddy]
+{% for key in ['url.path', 'http.route'] %}
+            - name: no-docs-{{ key | replace('.', '-') }}
+              type: string_attribute
+              string_attribute:
+                key: {{ key }}
+                values: [{{ otel_app_docs_regex | to_json }}]
+                enabled_regex_matching: true
+                invert_match: true
+{% endfor %}
+{% else %}
+    decision_cache:
+      non_sampled_cache_size: {{ otel_trace_non_sampled_cache_size }}
+    policies:
+      - name: caddy-business
+        type: string_attribute
+        string_attribute:
+          key: service.name
+          values: [caddy]
+      - name: drop-docs
+        type: drop
+        drop:
+          drop_sub_policy:
+            - name: docs-path
+              type: ottl_condition
+              ottl_condition:
+                error_mode: ignore
+                span:
+                  - {{ ('IsMatch(attributes["url.path"], "' ~ otel_app_docs_regex ~ '")') | to_json }}
+                  - {{ ('IsMatch(attributes["http.route"], "' ~ otel_app_docs_regex ~ '")') | to_json }}
+{% endif %}
+  # 메트릭 잡음 규칙: Caddy 출처는 caddy_http_*만, http.server.*는 http.route가 문서·관리 경로인 데이터포인트를 버린다.
+  # 관리 경로(otel_app_management_path)는 비공개 값이라 저장소 기본값이 비어 있고, 비면 그 경로 규칙만 렌더링하지 않는다.
+{% set route_regex = '^(' ~ (['/docs'] + ([otel_app_management_path | regex_escape | replace('\\', '\\\\')] if otel_app_management_path | default('') | length > 0 else [])) | join('|') ~ ')(/|$)' %}
+{% set noise_conditions = [
+  'resource.attributes["service.name"] == "caddy" and not IsMatch(metric.name, "^caddy_http_")',
+  'IsMatch(metric.name, "^http[.]server[.]") and IsMatch(' ~ ('attributes' if legacy else 'datapoint.attributes') ~ '["http.route"], "' ~ route_regex ~ '")'] %}
+  filter/app_metrics:
+    error_mode: ignore
+{% if legacy %}
+    metrics:
+      datapoint:
+{% else %}
+    metric_conditions:
+{% endif %}
+{% for c in noise_conditions %}
+      - {{ c | to_json }}
+{% endfor %}
+{% endif %}
   # 메트릭 service.name: hostmetrics와 docker_stats를 구분한다. OTLP로 들어온 앱 메트릭의 service.name은 건드리지 않는다.
   resource/hostmetrics:
     attributes:
@@ -524,7 +593,7 @@ service:
 {% if otel_tcpcheck_enabled | bool %}
     metrics/tcpcheck:
       receivers: [tcp_check]
-      processors: [memory_limiter, resource/host, batch]
+      processors: [memory_limiter, resource/host, filter/app_metrics, batch]
       exporters: [otlphttp/metrics]
 {% endif %}
 {% if host_agents_inputs.otel_docker_metrics | bool %}
@@ -537,10 +606,10 @@ service:
     # OTLP 로그는 어떤 파이프라인에도 넣지 않는다(컨테이너 로그와 중복되므로 수신기 단계에서 버려진다).
     traces/otlp:
       receivers: [otlp]
-      processors: [memory_limiter, resource/host, batch]
+      processors: [memory_limiter, resource/host, tail_sampling, batch]
       exporters: [otlphttp/app_traces]
     metrics/otlp:
       receivers: [otlp]
-      processors: [memory_limiter, resource/host, batch]
+      processors: [memory_limiter, resource/host, filter/app_metrics, batch]
       exporters: [otlphttp/metrics]
 {% endif %}
