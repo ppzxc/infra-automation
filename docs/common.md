@@ -15,7 +15,7 @@
 - **시스템 자원 보안 한도 (Ulimit)**: `nofile` 및 `nproc` 한도를 65,535로 상향하여 고부하 분산 애플리케이션 및 데몬 병목 제거.
 - **표준 3계층 사용자 계정 및 SSH 접근 환경 (Accounts)**: 관리자(`admin`), 서비스 운영자(`operator`), 일반 사용자(`user`) 3계층 역할 모델 기반 계정 생성, 계층별 패스워드리스 `sudoers` 권한 부여 및 SSH 공개키 배포.
 - **시스템 전역 쉘 별칭 (Custom Shell Aliases)**: 모든 사용자가 대화형 셸에서 공통으로 사용할 수 있는 Docker, Compose, Firewalld 단축 명령어(`/etc/profile.d/99-aliases.sh`) 배포.
-- **노드 식별 및 시스템 환경변수 배포**: `NODE_NAME`(단축 관리번호), `NODE_HOSTNAME`(FQDN), `NODE_INTERNAL_HOSTNAME`, `NODE_WILDCARD_HOSTNAME`, `NODE_PRIMARY_IPV4`, `NODE_INTERFACE`, `NODE_GATEWAY`, `NODE_ENV`, `NODE_IDC`, `NODE_ROLE`, `NODE_ADMIN_USER`, `NODE_SSH_PORT`, `OTEL_EXPORTER_OTLP_ENDPOINT` 등을 `/etc/profile.d/98-node-env.sh` 및 `/etc/environment`에 자동 주입.
+- **노드 식별 및 시스템 환경변수 배포**: `NODE_NAME`(단축 관리번호), `NODE_HOSTNAME`(FQDN), `NODE_INTERNAL_HOSTNAME`, `NODE_WILDCARD_HOSTNAME`, `NODE_PRIMARY_IPV4`, `NODE_INTERFACE`, `NODE_GATEWAY`, `NODE_ENV`, `NODE_IDC`, `NODE_ROLE`, `NODE_ADMIN_USER`, `NODE_SSH_PORT` 등을 `/etc/profile.d/98-node-env.sh` 및 `/etc/environment`에 자동 주입.
   - `NODE_ROLE`: `node_role` 명시값이 우선이고, 없으면 `group_names`에서 `all`과 운영 선택·제외 그룹(`host_agents_*`, `host_audit_*`)을 건너뛴 첫 역할 그룹(`servers`, `loadbalancers`, `overseer` 등), 역할 그룹이 없으면 `server`. 식은 `filter_plugins/node_env.py`의 `node_role_from_groups` 한 곳에 있다(#150). 선택 그룹을 더해도 `/etc/environment`가 흔들리지 않는다.
 
 ---
@@ -81,7 +81,7 @@
 | `COMMON-017` | `Configure Systemd Journald retention limits` | `ansible.builtin.copy` | Systemd OS | 파일 내용 일치 시 `ok` (drop-in 디렉터리 `/etc/systemd/journald.conf.d`는 `COMMON-017-DIR`이 `0755`로 먼저 만든다) |
 | `COMMON-018` | `Deploy system-wide custom shell aliases` | `ansible.builtin.template` | All | Checksum 비교 (`aliases.sh.j2`) |
 | `COMMON-019` | `Deploy node environment variables drop-in (/etc/profile.d/98-node-env.sh)` | `ansible.builtin.template` | All | Checksum 비교 (`node-env.sh.j2`) |
-| `COMMON-020` | `Deploy system-wide environment variables (/etc/environment)` | `ansible.builtin.template` | All | Checksum 비교 (`environment.j2`) |
+| `COMMON-020` | `Deploy system-wide environment variables (/etc/environment)` | `ansible.builtin.template` | All | Checksum 비교 (`environment.j2`). `COMMON-019`/`COMMON-020` 출력에 `OTEL_EXPORTER_OTLP_ENDPOINT`를 쓰지 않는다(ADR-0012, #258). `otel_target_endpoint` 변수는 더 이상 쓰는 곳이 없어 제거했다 |
 | `COMMON-021` | `Ensure tzdata package is installed before timezone configuration (Debian/Ubuntu)` | `ansible.builtin.apt` | Debian, Ubuntu | 패키지 기설치 시 `ok` |
 | `COMMON-022` | `Revoke SSH public keys listed in accounts[].revoked_keys` | `ansible.posix.authorized_key` | All | 키가 이미 제거되어 있으면 `ok` |
 | `COMMON-023` | `Remove passwordless sudoers drop-in for removed accounts` | `ansible.builtin.file` | All | 파일이 이미 없으면 `ok` |
