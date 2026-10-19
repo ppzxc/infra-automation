@@ -22,6 +22,8 @@
         - /usr/bin/python3
         - /usr/local/bin/otelcol-contrib
         - /etc/otelcol/config.yaml
+        - /proc/sys/net/netfilter/nf_conntrack_count
+        - /proc/sys/net/netfilter/nf_conntrack_max
         - "{{ otelcol_service_path }}"
         - /etc/funa-cluster/cluster.env
         - /etc/funa-cluster/proxy.secrets.env
@@ -190,6 +192,16 @@
               - _p.major_version == ansible_distribution_major_version
               - _p.arch == ('amd64' if ansible_architecture == 'x86_64' else 'arm64')
             fail_msg: "OS probe {{ _p }} disagrees with gathered facts."
+
+        - name: "[VERIFY-MON-039] Verify the conntrack fact follows the kernel files and gates the conntrack metrics"
+          vars:
+            _p: "{{ _verify_probe.stdout | host_agents_parse_os_probe }}"
+            _ct: "{{ 'system.network.conntrack.count' in f.read['/etc/otelcol/config.yaml'] }}"
+          ansible.builtin.assert:
+            that:
+              - _p.conntrack | bool == (f.stat['/proc/sys/net/netfilter/nf_conntrack_count'].exists and f.stat['/proc/sys/net/netfilter/nf_conntrack_max'].exists)
+              - _ct | bool == (_p.conntrack | bool)
+            fail_msg: "conntrack fact {{ _p.conntrack }} disagrees with the kernel files or the rendered config."
 
         - name: "[VERIFY-MON-025] Verify the probe reads this host's real timezone (the RFC3164 time zone)"
           vars:
@@ -384,6 +396,13 @@
             that:
               - f.read['/etc/otelcol/config.yaml'] is not none
               - "'hostmetrics:' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.cpu.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.linux.memory.available' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.memory.limit' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.memory.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.filesystem.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.paging.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system:' in f.read['/etc/otelcol/config.yaml']"
               - "'node_exporter' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
 
@@ -450,6 +469,7 @@
             that:
               - "'filelog/containers' not in f.read['/etc/otelcol/config.yaml']"
               - not _verify_container_rule.stat.exists
+              - "'attributes._lvl.trace_id' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "container log receiver must not exist without otel_container_logs, and the obsolete rsyslog rule must be removed."
 
         - name: "[VERIFY-MON-067] Verify the collection standard: 60s hostmetrics, stream routing, checkpoints, retry, separate metrics"
@@ -1305,6 +1325,24 @@
           - _t['O2C-002'].block | map(attribute='no_log') | list == [true, true]
           - _t['O2C-002'].block[0]['ansible.builtin.set_fact'].cacheable is false
           - _t['O2C-002'].block[1]['ansible.builtin.assert'].quiet is true
+        quiet: true
+
+    - name: "[VERIFY-O2C-004] Verify the app telemetry switch read is a parallel read-only OpenBao GET batch that tolerates only 200 and 404"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-004'].o2c_http.parallel is true
+          - _t['O2C-004'].o2c_http.status_code == [200, 404]
+          - "'/agents' in _t['O2C-004'].o2c_http.requests"
+          - _t['O2C-004'].check_mode is false and _t['O2C-004'].changed_when is false and _t['O2C-004'].no_log is true
+          - "'o2c_app_telemetry_kv_fixture is not defined' in _t['O2C-004'].when"
+        quiet: true
+
+    - name: "[VERIFY-O2C-005] Verify only the host names with the switch on are kept as a fact (no KV body, never cached)"
+      ansible.builtin.assert:
+        that:
+          - "'o2c_app_telemetry_roster(' in _t['O2C-005']['ansible.builtin.set_fact'].o2c_app_switch_on"
+          - _t['O2C-005']['ansible.builtin.set_fact'].cacheable is false
+          - _t['O2C-005'].no_log is true
         quiet: true
 
     - name: "[VERIFY-O2C-010] Verify the state read is one parallel GET batch over the shared path table and the auth fact is not cacheable"

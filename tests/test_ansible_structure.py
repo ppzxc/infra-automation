@@ -41,7 +41,6 @@ def test_ansible_inventory_and_vars():
         assert "tier" in acc, f"account {acc} missing 'tier'"
         assert acc["tier"] in ["admin", "operator", "user"], f"Invalid tier {acc['tier']}"
     assert "timezone" in all_vars, "timezone is not defined in all.yml"
-    assert "otel_target_endpoint" in all_vars, "otel_target_endpoint is not defined in all.yml"
 
     # servers group_vars verification
     servers_vars_file = ROOT_DIR / "inventory" / "group_vars" / "servers.yml"
@@ -139,7 +138,8 @@ def test_monitoring_node_exporter_removed_and_hostmetrics_enabled():
     template_content = template_file.read_text(encoding='utf-8')
     assert "node_exporter" not in template_content, "Template should not contain node_exporter references"
     assert "hostmetrics:" in template_content, "Template must configure hostmetrics receiver"
-    assert "traces:" not in template_content, "Traces pipeline is out of scope (ADR-0006 §2.7)"
+    # Traces exist only behind the otel_app_telemetry switch (ADR-0012); the off-state is covered by test_host_agents.py
+    assert "{% if app_telemetry %}" in template_content, "Traces pipeline must sit behind the otel_app_telemetry switch"
 
 def test_security_enhanced_firewall_ingress_rules():
     """Verify security role host firewall ingress rules integration"""

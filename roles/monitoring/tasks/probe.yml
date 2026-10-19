@@ -56,6 +56,14 @@
     host_agents_timezone: "{{ _probe.timezone | default('', true) or (timezone | default('Asia/Seoul', true)) }}"
     host_agents_timezone_probed: "{{ (_probe.timezone | default('', true)) | length > 0 }}"
 
+# conntrack(Spec #253): 커널 conntrack 파일이 있는 호스트에서만 conntrack 메트릭을 켠다. modern·raw 경로가 같은 프로브를 쓴다.
+# 프로브 출력만 읽는 순수 fact 설정이라 MON-022와 같이 check 모드에서도 실행된다.
+- name: "[MON-039] Set host_agents_conntrack fact from probe"
+  vars:
+    _probe: "{{ host_agents_os_probe.stdout | default('') | host_agents_parse_os_probe }}"
+  ansible.builtin.set_fact:
+    host_agents_conntrack: "{{ _probe.conntrack | bool }}"
+
 - name: "[MON-025] Warn when the host timezone could not be read (falling back to the timezone variable)"
   ansible.builtin.debug:
     msg: >-

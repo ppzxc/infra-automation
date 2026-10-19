@@ -49,14 +49,36 @@ o2_ca_file: "{{ ((host_agents_shared_secrets | default({})).openobserve | defaul
 # OpenTelemetry Hostmetrics Receiver (ADR-0006 §2.3: 60s)
 otel_hostmetrics_interval: "60s"
 otel_hostmetrics_scrapers:
-  cpu: {}
-  memory: {}
+  cpu:
+    metrics:
+      system.cpu.utilization: {enabled: true}
+  memory:
+    metrics:
+      system.linux.memory.available: {enabled: true}
+      system.memory.limit: {enabled: true}
+      system.memory.utilization: {enabled: true}
   disk: {}
-  filesystem: {}
+  filesystem:
+    metrics:
+      system.filesystem.utilization: {enabled: true}
   load: {}
   network: {}
-  paging: {}
+  paging:
+    metrics:
+      system.paging.utilization: {enabled: true}
   processes: {}
+  system: {}
+# legacy_el6(0.119.0)에만 더하는 스크레이퍼 설정. 0.161.0은 system.cpu.logical.count를 기본으로 내므로 요청하지 않는다.
+otel_hostmetrics_scrapers_legacy_el6:
+  cpu:
+    metrics:
+      system.cpu.logical.count: {enabled: true}
+# conntrack 호스트(host_agents_conntrack, Probe가 커널 conntrack 파일을 확인)에만 더하는 network 스크레이퍼 설정.
+otel_hostmetrics_scrapers_conntrack:
+  network:
+    metrics:
+      system.network.conntrack.count: {enabled: true}
+      system.network.conntrack.max: {enabled: true}
 
 # Docker 메트릭은 hosts/<host>/agents의 otel_docker_metrics: true인 호스트만 (docker_engine의 docker_metrics_enabled와 별개).
 # otelcol 사용자에게 소켓 접근 권한이 필요하다(예: docker 그룹 멤버십은 docker_engine 책임).
@@ -70,14 +92,29 @@ otel_container_log_glob: /var/lib/docker/containers/*/*-json.log
 otel_container_max_log_size: 1048576
 # compose 라벨이 없는 컨테이너의 service.name
 otel_container_default_service: container
+# 컨테이너 JSON 로그의 trace context 키 형식(레벨 파싱용 임시 JSON 최상위 키, Spec #253). 형식마다 trace_parser 하나가 만들어진다.
+# trace_flags는 형식에 있을 때만 적는다. funa는 trace_id/span_id/trace_flags, Caddy는 traceID/spanID.
+otel_container_trace_keys:
+  - {trace_id: trace_id, span_id: span_id, trace_flags: trace_flags}
+  - {trace_id: traceID, span_id: spanID}
 # 이전 구현(journald 드라이버)이 배포했던 rsyslog 규칙 파일. 지금은 사용하지 않으며 남아 있으면 지운다(MON-068).
 otel_rsyslog_container_rule_path: /etc/rsyslog.d/00-host-agents-containers.conf
 
-# 로컬 OTLP 수신기는 기본 비활성 (인증 없는 수집 포트 노출 방지)
-otel_otlp_enabled: false
-otel_otlp_bind: "127.0.0.1"
-otel_otlp_grpc_port: 4317
+# 컨테이너 앱 텔레메트리(hosts/<host>/agents의 otel_app_telemetry: true, ADR-0012): 켠 호스트만 OTLP HTTP 수신기(gRPC 없음)를
+# 모든 주소에 바인드하고 traces/metrics 파이프라인을 만든다. 외부 노출은 호스트 방화벽(public 존 기본 거부)이 막는다.
+otel_otlp_bind: "0.0.0.0"
 otel_otlp_http_port: 4318
+# 트레이스는 OpenObserve 스트림 하나로 모은다(View Trace 기본 선택이 흔들리지 않도록). 트레이스 전용 exporter의 stream-name.
+otel_app_traces_stream: app_traces
+# 잡음 규칙(Spec #253 / Ticket-7). /docs 아래는 트레이스와 funa http.server.* 메트릭에서 버린다(OTTL 정규식).
+otel_app_docs_regex: "^/docs(/|$)"
+# funa 관리 경로 접두어("/"로 시작). 비공개 값이라 저장소 기본값은 비워 둔다. 비면 http.server.* 관리 경로 규칙은 렌더링하지 않는다.
+# 값은 Semaphore Environment(-e) 등 비공개 경로로 주입한다.
+otel_app_management_path: ""
+# tail_sampling: decision_wait는 SDK export 지연(약 5초)과 요청 시간을 덮어야 한다. num_traces 초과 시 가장 오래된 트레이스가 버려진다.
+otel_trace_decision_wait: 15s
+otel_trace_num_traces: 20000
+otel_trace_non_sampled_cache_size: 20000
 
 # 백업 결과 jsonl (backup 역할의 backup_log_path와 같은 값을 유지한다)
 otel_backup_log_path: /var/log/host-agents/backup.jsonl

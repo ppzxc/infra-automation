@@ -161,6 +161,12 @@
               - f.stat['/etc/environment'].exists
             fail_msg: "/etc/environment file is missing."
 
+        - name: "[VERIFY-COMMON-058] Verify host shell env files carry no OTLP endpoint variable"
+          ansible.builtin.command: grep -c OTEL_EXPORTER_OTLP_ENDPOINT /etc/profile.d/98-node-env.sh /etc/environment
+          register: _common_otlp_env_grep
+          changed_when: false
+          failed_when: _common_otlp_env_grep.rc == 0
+
     # ==========================================================================
     # 2. Security Role 검증
     # ==========================================================================

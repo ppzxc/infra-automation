@@ -6,13 +6,14 @@ Pure functions so the desired state and the change plan are unit-testable withou
 ``o2c_plan``     compares them with what the OpenObserve API returned and lists only the writes that are needed.
 """
 
-KINDS = ('template', 'destination', 'function', 'pipeline', 'alert')   # apply order: dependencies first
+KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
     'template': '/api/{org}/alerts/templates',
     'destination': '/api/{org}/alerts/destinations',
     'function': '/api/{org}/functions',
     'pipeline': '/api/{org}/pipelines',
     'alert': '/api/v2/{org}/alerts',
+    'trace_stream': '/api/{org}/streams?type=traces',   # 트레이스 스트림 목록(이름·설정). 스트림은 첫 span이 들어와야 생긴다
 }
 ITEM_PATHS = {
     'template': '/api/{org}/alerts/templates/{key}',
@@ -20,6 +21,7 @@ ITEM_PATHS = {
     'function': '/api/{org}/functions/{key}',
     'pipeline': '/api/{org}/pipelines/{key}',
     'alert': '/api/v2/{org}/alerts/{key}',
+    'trace_stream': '/api/{org}/streams/{key}/settings?type=traces',
 }
 ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; the others by name
 CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
@@ -56,6 +58,11 @@ def o2c_desired(spec):
             'context_attributes': {k: alert[k] for k in CONTEXT_KEYS},
             'row_template': alert['row_template'], 'row_template_type': 'String',
         }})
+    # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8): 스트림이 이미 있을 때만 맞춘다(없으면 o2c_plan이 건너뛴다)
+    if spec.get('traces_stream'):
+        out.append({'kind': 'trace_stream', 'name': spec['traces_stream'], 'optional': True,
+                    'body': {'data_retention': spec['traces_retention_days']},
+                    'match': {'settings': {'data_retention': spec['traces_retention_days']}}})
     for item in out:
         if item['kind'] == 'function':   # the server fills in defaults for the rest (num_args, streams, ...)
             item['match'] = {k: item['body'][k] for k in ('name', 'function')}
@@ -122,6 +129,8 @@ def o2c_plan(desired, existing, org):
         for want in (d for d in desired if d['kind'] == kind):
             cur = have.get(want['name'])
             body = want['body']
+            if cur is None and want.get('optional'):
+                continue   # 대상이 아직 없으면 만들지 않고 건너뛴다(스트림은 서버가 첫 수집 때 만든다)
             if cur is None:
                 plan.append(_action(kind, want, 'create', 'POST', LIST_PATHS[kind].format(org=org), body))
                 continue
@@ -165,13 +174,16 @@ def o2c_plan_summary(plan):
 # 사용률은 _timestamp별로 묶은 뒤(구간 전체 max()는 근사, 메모리 합계는 중복 합산) 구간 최솟값으로 판정한다.
 # P2는 [p2, p1) 구간만, P1은 p1 이상만 잡아 같은 대상에 동시 통지하지 않는다.
 _RESOURCE = {
-    'disk': {'stream': 'system_filesystem_usage', 'mount': True,
+    'disk': {'streams': ('system_filesystem_usage',), 'mount': True,
              'used': "state = 'used'", 'total': "state IN ('used', 'free')"},
-    'inode': {'stream': 'system_filesystem_inodes_usage', 'mount': True,
+    'inode': {'streams': ('system_filesystem_inodes_usage',), 'mount': True,
               'used': "state = 'used'", 'total': "state IN ('used', 'free')"},
-    'memory': {'stream': 'system_memory_usage', 'mount': False,
-               'used': "state = 'used'", 'total': "state <> 'slab_unreclaimable'"},
+    # 메모리는 1 - available / limit (Spec #253 / Ticket-6): 두 스트림을 UNION ALL로 이어 _timestamp별로 짝짓는다(스트림 JOIN은 쓰지 않는다)
+    # streams는 (조회 스트림, 함께 읽는 스트림...) 순서다. 메모리는 (available, limit).
+    'memory': {'streams': ('system_linux_memory_available', 'system_memory_limit'), 'mount': False},
 }
+# 메모리 SQL의 UNION ALL 가지가 어느 스트림 값인지 구분하는 src 열의 값
+_SRC_AVAILABLE, _SRC_LIMIT = 1, 2
 
 
 def _q(value):
@@ -206,6 +218,8 @@ def _threshold(metric, key, default, overrides):
 def o2c_resource_sql(metric, level, cfg):
     """SQL of a resource alert. ``cfg``: p2, p1, fstypes, exclusions, thresholds (OpenBao overrides, may be empty)."""
     r = _RESOURCE[metric]
+    if metric == 'memory':
+        return _memory_sql(r, level, cfg)
     keys = ['host_name'] + (['mountpoint'] if r['mount'] else [])
     inner_keys = keys + (['device'] if r['mount'] else [])
     where = []
@@ -221,8 +235,24 @@ def o2c_resource_sql(metric, level, cfg):
             'sum(CASE WHEN %s THEN value ELSE 0 END) * 100.0 / sum(CASE WHEN %s THEN value ELSE 0 END) AS pct '
             'FROM "%s"%s GROUP BY %s, _timestamp HAVING sum(CASE WHEN %s THEN value ELSE 0 END) > 0) '
             'GROUP BY %s HAVING %s') % (
-        ', '.join(keys), ', '.join(inner_keys), r['used'], r['total'], r['stream'],
+        ', '.join(keys), ', '.join(inner_keys), r['used'], r['total'], r['streams'][0],
         (' WHERE ' + ' AND '.join(where)) if where else '', ', '.join(inner_keys), r['total'], ', '.join(keys), cond)
+
+
+def _memory_sql(r, level, cfg):
+    # 두 스트림 중 한쪽만 있는 _timestamp는 HAVING에서 걸러져 판정하지 않는다(데이터 결손은 Silent Host가 맡는다).
+    where = ''.join(' AND NOT (%s)' % _target(e) for e in cfg.get('exclusions') or [] if e.get('host') and _applies(e, 'memory'))
+    lo = _threshold('memory', 'p2', cfg['p2'], cfg.get('thresholds'))
+    hi = _threshold('memory', 'p1', cfg['p1'], cfg.get('thresholds'))
+    cond = ('min(pct) >= %s AND min(pct) < %s' % (lo, hi)) if level == 'P2' else 'min(pct) >= %s' % hi
+    branch = 'SELECT host_name, _timestamp, %d AS src, value FROM "%s" WHERE value IS NOT NULL%s'
+    avail = 'max(CASE WHEN src = %d THEN value END)' % _SRC_AVAILABLE
+    limit = 'max(CASE WHEN src = %d THEN value END)' % _SRC_LIMIT
+    available_stream, limit_stream = r['streams']
+    return ('SELECT host_name, round(min(pct), 1) AS usage_pct FROM (SELECT host_name, _timestamp, '
+            '(1 - %s / %s) * 100.0 AS pct FROM (%s UNION ALL %s) GROUP BY host_name, _timestamp '
+            'HAVING %s IS NOT NULL AND %s > 0) GROUP BY host_name HAVING %s') % (
+        avail, limit, branch % (_SRC_AVAILABLE, available_stream, where), branch % (_SRC_LIMIT, limit_stream, where), avail, limit, cond)
 
 
 # --- 로스터와 부재 감지 (Spec #184 / Ticket-4) --------------------------------------------------------------------------
@@ -232,6 +262,16 @@ import re as _re
 _HOST_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 _DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
 SILENT_RECENT_US = 15 * 60 * 1000000   # P2: 최근 15분 없음
+
+
+def o2c_app_telemetry_roster(roster, kv_by_host):
+    """Roster hosts whose OpenBao ``hosts/<host>/agents`` has ``otel_app_telemetry: true`` (a real boolean; absent means off)."""
+    return [h for h in roster or [] if ((kv_by_host or {}).get(h) or {}).get('otel_app_telemetry') is True]
+
+
+def o2c_host_items(hosts):
+    """``[{host: <name>}, ...]`` so a host list can go through ``o2c_as_requests`` (path ``.../{host}/agents``)."""
+    return [{'host': h} for h in hosts or []]
 
 
 def _group(groups, name):
@@ -312,11 +352,18 @@ def _verify_stream(stream, suffix):
     return stream + suffix
 
 
-def _rewrite_sql(sql, stream, suffix):
-    quoted, target = '"%s"' % stream, '"%s"' % _verify_stream(stream, suffix)
-    if quoted not in sql:
-        raise ValueError('알림 SQL에 스트림 %s 이(가) 없어 검증 스트림으로 바꿀 수 없습니다' % quoted)
-    return sql.replace(quoted, target)
+def _alert_streams(alert):
+    """All streams an alert's SQL reads: its own ``stream`` first, then ``extra_streams``."""
+    return (alert['stream'],) + tuple(alert.get('extra_streams') or ())
+
+
+def _rewrite_sql(sql, streams, suffix):
+    for name in streams:
+        quoted, target = '"%s"' % name, '"%s"' % _verify_stream(name, suffix)
+        if quoted not in sql:
+            raise ValueError('알림 SQL에 스트림 %s 이(가) 없어 검증 스트림으로 바꿀 수 없습니다' % quoted)
+        sql = sql.replace(quoted, target)
+    return sql
 
 
 def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3600 * 1000000, sources=None, rosters=None):
@@ -349,10 +396,11 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
             for rec in records:
                 rec = dict(rec)
                 repeat = rec.pop('repeat', 1)
+                rec_stream = rec.pop('stream', stream)   # 한 알림이 여러 스트림을 보면 레코드마다 대상 스트림을 지정한다
                 ts = rec.pop('ts', None)   # 합성 스크레이프 시각(시작 기준 초) — 메트릭은 _timestamp별로 묶어 판정한다
                 stamps = [{}] * repeat if ts is None else [{'_timestamp': start_us + int(t) * 1000000} for t in
                                                            (ts if isinstance(ts, list) else [ts])]
-                ingest.setdefault(stream, []).extend(dict(rec, **{spec.get('host_field', DEFAULT_ROW_KEY): host}, **st) for st in stamps)
+                ingest.setdefault(rec_stream, []).extend(dict(rec, **{spec.get('host_field', DEFAULT_ROW_KEY): host}, **st) for st in stamps)
         missing = alert.get('missing')
         if missing:
             roster = list((rosters or {}).get(missing['roster']) or []) + sorted(hosts)
@@ -364,7 +412,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
         searches.append({
             'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
             'path': SEARCH_PATH.format(org=org), 'hosts': hosts,
-            'body': {'query': {'sql': _rewrite_sql(sql, stream, suffix), 'start_time': start_us - period_us,
+            'body': {'query': {'sql': _rewrite_sql(sql, _alert_streams(alert), suffix), 'start_time': start_us - period_us,
                                'end_time': start_us + window_us, 'from': 0, 'size': 1000}}})
     return {'ingest': [{'stream': _verify_stream(s, suffix), 'path': INGEST_PATH.format(org=org, stream=_verify_stream(s, suffix)),
                         'records': recs} for s, recs in ingest.items()],
@@ -446,4 +494,5 @@ class FilterModule(object):
                 'o2c_alert_history_errors': o2c_alert_history_errors,
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
                 'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
-                'o2c_missing_sql': o2c_missing_sql}
+                'o2c_missing_sql': o2c_missing_sql, 'o2c_app_telemetry_roster': o2c_app_telemetry_roster,
+                'o2c_host_items': o2c_host_items}

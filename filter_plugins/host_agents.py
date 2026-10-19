@@ -19,7 +19,8 @@ REDHAT_MARKER = '__HOST_AGENTS_REDHAT_RELEASE__'
 UNAME_MARKER = '__HOST_AGENTS_UNAME_M__'
 MACHINE_ID_MARKER = '__HOST_AGENTS_MACHINE_ID__'
 TIMEZONE_MARKER = '__HOST_AGENTS_TIMEZONE__'
-_MARKERS = (OS_MARKER, REDHAT_MARKER, UNAME_MARKER, MACHINE_ID_MARKER, TIMEZONE_MARKER)
+CONNTRACK_MARKER = '__HOST_AGENTS_CONNTRACK__'
+_MARKERS = (OS_MARKER, REDHAT_MARKER, UNAME_MARKER, MACHINE_ID_MARKER, TIMEZONE_MARKER, CONNTRACK_MARKER)
 # IANA zone name as it appears under zoneinfo/ (e.g. Asia/Seoul, Etc/UTC). Anything else is not trusted.
 _TIMEZONE = re.compile(r'^[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+)*$')
 
@@ -53,7 +54,9 @@ def host_agents_os_probe_cmd(_unused=''):
             "echo {r}; cat /etc/redhat-release 2>/dev/null; "
             "echo {m}; cat /etc/machine-id 2>/dev/null; "
             "echo {t}; readlink /etc/localtime 2>/dev/null; cat /etc/sysconfig/clock 2>/dev/null; "
-            "echo {u}; uname -m").format(o=OS_MARKER, r=REDHAT_MARKER, m=MACHINE_ID_MARKER,
+            "echo {c}; if test -r /proc/sys/net/netfilter/nf_conntrack_count "
+            "&& test -r /proc/sys/net/netfilter/nf_conntrack_max; then echo present; else echo absent; fi; "
+            "echo {u}; uname -m").format(c=CONNTRACK_MARKER, o=OS_MARKER, r=REDHAT_MARKER, m=MACHINE_ID_MARKER,
                                          t=TIMEZONE_MARKER, u=UNAME_MARKER)
 
 
@@ -108,6 +111,7 @@ def host_agents_parse_os_probe(stdout):
     redhat_line = next((ln.strip() for ln in sections.get(REDHAT_MARKER, []) if ln.strip()), '')
     uname = next((ln.strip() for ln in sections.get(UNAME_MARKER, []) if ln.strip()), '')
     machine_id = next((ln.strip().lower() for ln in sections.get(MACHINE_ID_MARKER, []) if ln.strip()), '')
+    conntrack = next((ln.strip() for ln in sections.get(CONNTRACK_MARKER, []) if ln.strip()), '') == 'present'
     if not _MACHINE_ID.match(machine_id):
         machine_id = ''
 
@@ -157,6 +161,7 @@ def host_agents_parse_os_probe(stdout):
         'os_id': os_name,
         'machine_id': machine_id,
         'timezone': _timezone(sections.get(TIMEZONE_MARKER, [])),
+        'conntrack': conntrack,
         'version': version,
         'major_version': major,
         'arch': _ARCH.get(uname, uname),
@@ -354,6 +359,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     pre_hooks = _string_list(kv.get('backup_pre_hooks'), 'backup_pre_hooks', errors)
     docker_metrics = _as_bool(kv.get('otel_docker_metrics'), 'otel_docker_metrics', errors)
     container_logs = _as_bool(kv.get('otel_container_logs'), 'otel_container_logs', errors)
+    app_telemetry = _as_bool(kv.get('otel_app_telemetry'), 'otel_app_telemetry', errors)
 
     for path in exclude_logs:
         if any(_covers(path, sec) for sec in security):
@@ -409,6 +415,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
         'otel_logs': logs,
         'otel_docker_metrics': docker_metrics,
         'otel_container_logs': container_logs,
+        'otel_app_telemetry': app_telemetry,
         'backup_paths': _dedupe(list(mandatory_backup_paths or []) + extra_paths),
         'backup_exclude_paths': _dedupe(exclude_paths),
         'backup_pre_hooks': pre_hooks,

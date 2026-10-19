@@ -72,3 +72,6 @@ Thumbs.db
 # Local Tools and Binaries (Lefthook, Gitleaks, etc.)
 .bin/
 
+
+# Local tool caches
+.cache/
