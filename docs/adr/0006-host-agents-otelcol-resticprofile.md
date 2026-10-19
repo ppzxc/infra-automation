@@ -55,6 +55,7 @@
   | `otel_extra_logs` / `otel_exclude_logs` | §2.3 오버라이드 |
   | `otel_docker_metrics` | docker 메트릭 opt-in |
   | `otel_container_logs` | docker 컨테이너 로그 수집 opt-in (§2.3) |
+  | `otel_app_telemetry` | 컨테이너 앱 텔레메트리(OTLP HTTP 수신) opt-in (ADR-0012) |
   | `backup_extra_paths` / `backup_exclude_paths` / `backup_pre_hooks` | §2.4 오버라이드 |
 
 - **OpenBao `secret/agents/openobserve`, `secret/agents/rustfs`** (`run_once`): 진짜 공용 시크릿만 — 컨트롤러 전용 OpenObserve 수집 토큰(§2.6), RustFS 유지보수 키(§2.5), 사설 CA. 문서에만 존재하고 코드가 읽지 않는 `global/services` 규약은 사용하지 않습니다.
@@ -63,7 +64,7 @@
 
 ### 2.3 otelcol 수집 표준 (ISMS)
 
-- **수신기**: 모든 OS에서 `filelog`; journald는 rsyslog가 없는 호스트(예: 최소 설치 Debian 12+)에서만 추가. 로컬 OTLP 4317/4318 수신기는 **기본 비활성**(옵션).
+- **수신기**: 모든 OS에서 `filelog`; journald는 rsyslog가 없는 호스트(예: 최소 설치 Debian 12+)에서만 추가. 로컬 OTLP 수신기는 **기본 비활성**이며 `otel_app_telemetry: true`인 호스트만 HTTP로 연다(ADR-0012).
 - **표준 로그**: `/var/log/messages`, `syslog`, `secure`, `auth.log`, `sudo.log`, `audit/audit.log`, `cron*`, `fail2ban.log`, `dnf.log`, `yum.log`, `dpkg.log`, `firewalld`, `boot.log`, `kern.log`. `wtmp`/`btmp`/`lastlog`(바이너리)는 수집하지 않으며, 접속·인증 증적은 auditd `USER_LOGIN`/`USER_AUTH` + secure/auth.log로 충족합니다.
 - **체크포인트 필수**: `file_storage` 확장(`/var/lib/otelcol/storage`)에 filelog 오프셋 저장 — 재시작/설정 재적용 시 누락 없음. 최초 설치는 `start_at: end`(과거 로그 백필 없음).
 - **스트림** (OpenObserve에서 스트림별 보존):
