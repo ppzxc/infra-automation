@@ -91,9 +91,8 @@ def test_errors_never_contain_values():
 ])
 @pytest.mark.parametrize("value", ["${LEAKVAL}", "${LEAKVAL:-x}", "pre-${LEAKVAL}-post"])
 def test_shell_reference_is_rejected_by_path_and_key_only(source, path, value):
-    kv = {**KV, source: {**KV[source], "FUNA_NODE_EXTERNAL_HOSTNAME" if source == "node" else "REF_KEY": value}}
-    out = resolve(kv)
     key = "FUNA_NODE_EXTERNAL_HOSTNAME" if source == "node" else "REF_KEY"
+    out = resolve({**KV, source: {**KV[source], key: value}})
     expect = "%s: %s contains a shell reference" % (path, key)
     assert expect in out["errors"], out["errors"]
     assert "LEAKVAL" not in " ".join(out["errors"])

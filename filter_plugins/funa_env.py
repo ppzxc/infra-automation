@@ -47,7 +47,7 @@ def _render(mapping, label, errors):
 
 
 def _shell_refs(mapping, label, errors):
-    """Report values holding ``${`` (compose would interpolate it); a lone ``$`` is fine."""
+    """Report values holding ``${`` (a leftover shell reference that would reach Caddy and alerts verbatim); a lone ``$`` is fine."""
     for key in sorted(mapping):
         value = _scalar(mapping[key])
         if value is not None and '${' in value:
