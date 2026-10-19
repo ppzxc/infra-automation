@@ -129,7 +129,7 @@
 | `filelog/backup_logs` | 항상 | backup_logs | backup | `/var/log/host-agents/backup.jsonl`(백업 결과, 4.4 참고). JSON 필드를 attributes로 파싱 |
 | `journald` | rsyslog가 **없는** 호스트만. legacy_el6은 항상 끔 | system_logs | journald | journal 전체. `PRIORITY`를 severity로 매핑 |
 | `filelog/containers` | KV `otel_container_logs: true`인 modern 호스트만 (기본 꺼짐) | app_logs | `<프로젝트>-<서비스>`(compose 라벨, 없으면 `container`) | docker `json-file` 파일(`/var/lib/docker/containers/*/*-json.log`). 라벨은 줄의 `attrs`로, 컨테이너 ID는 `container.id`로, stdout/stderr는 `log.iostream`으로 싣고 16KiB로 쪼개진 줄은 합친다. 본문은 줄 끝 개행만 뗀다. Docker 소켓 불필요 |
-| `otlp` | 기본 **비활성**(`otel_otlp_enabled: false`) | app_logs·메트릭 | 앱이 지정 | 켜면 `127.0.0.1:4317`(gRPC)과 `:4318`(HTTP)에서 받음 |
+| `otlp` | 기본 **비활성**. KV `otel_app_telemetry: true`인 호스트만(ADR-0012) | 트레이스·메트릭(로그 파이프라인에는 넣지 않음) | 앱이 지정 | HTTP만(gRPC 없음), 모든 주소의 `otel_otlp_http_port`에서 받음. 외부 노출은 방화벽이 막음 |
 
 ### 3.4 기본 수집 메트릭
 
@@ -154,6 +154,7 @@
 |---|---|---|---|---|
 | 로그 | `otlphttp/<stream>` ×4 (`security_logs`, `system_logs`, `app_logs`, `backup_logs`) | `<o2_endpoint>/api/<o2_org>`, 헤더 `stream-name: <stream>` | 디스크 영속 큐, 스트림당 64MiB(합계 약 256MiB). legacy_el6은 배치 64개 | 큐가 차면 수집을 멈추고(역압) 원본 파일을 버퍼로 쓴다. 재시도 무제한 |
 | 메트릭 | `otlphttp/metrics` | 동일 | 메모리 큐 | 버림(역압 없음) |
+| 트레이스 | `otlphttp/app_traces` (`otel_app_telemetry`일 때만) | 동일, 헤더 `stream-name: app_traces` | 메모리 큐 | 버림(역압 없음) |
 
 - 인증은 HTTP Basic(`Authorization: Basic ${env:O2_BASIC_AUTH}`)이고 값은 `secrets.env`에서 읽는다.
 - 사설 CA를 쓰면 `o2_ca_file`을 `tls.ca_file`에 넣는다.
@@ -263,6 +264,7 @@
 | | `rustfs_bucket` | | 버킷 재정의 |
 | | `otel_extra_logs`, `otel_exclude_logs` | | 수집 경로 추가·제외 |
 | | `otel_docker_metrics` | | docker 메트릭 수집 |
+| | `otel_app_telemetry` | | boolean. 컨테이너 앱 텔레메트리(OTLP HTTP 수신, traces → `app_traces`, metrics) 수신 |
 | | `otel_container_logs` | | docker 컨테이너 로그 수집(`app_logs`). 컨테이너는 compose에서 `json-file` 드라이버(`max-size`·`max-file` 필수)와 `logging.options.labels`(`com.docker.compose.project`, `com.docker.compose.service`, 선택 `com.docker.compose.container-number`·`org.opencontainers.image.version`)를 써야 `service.name`이 `<프로젝트>-<서비스>`가 되고, 선택 라벨이 있으면 `container.name`·`service.version`도 붙는다 |
 | | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | | 백업 경로 추가·제외, 사전 훅 |
 | `agents/openobserve` | `o2_endpoint`, `o2_org`, `o2_ca_file`, `controller_ingest_token` | endpoint·token 필수 | 전송 대상과 등록 이벤트 |
