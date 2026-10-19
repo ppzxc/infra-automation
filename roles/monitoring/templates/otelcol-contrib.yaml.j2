@@ -383,7 +383,9 @@ receivers:
   hostmetrics:
     collection_interval: {{ otel_hostmetrics_interval }}
     scrapers:
-{{ otel_hostmetrics_scrapers | to_nice_yaml(indent=2) | indent(6, true) }}
+{% set conntrack_scrapers = {'network': {'metrics': {'system.network.conntrack.count': {'enabled': true}, 'system.network.conntrack.max': {'enabled': true}}}} %}
+{# conntrack은 Probe가 커널 파일을 확인한 호스트에서만 켠다(없으면 network 스크레이퍼가 매 주기 부분 오류를 낸다). #}
+{{ (otel_hostmetrics_scrapers | combine(conntrack_scrapers, recursive=true) if (host_agents_conntrack | default(false) | bool) else otel_hostmetrics_scrapers) | to_nice_yaml(indent=2) | indent(6, true) }}
 {% if otel_tcpcheck_enabled | bool %}
   # 서버 도달성(ADR-0010): 검사하는 쪽 호스트에만. 대상은 servers 전체(Backup Only 포함, 제외 목록 빼고)의 SSH 주소:포트이며 tasks/tcpcheck_targets.yml이 OpenBao에서 만든다.
   tcp_check:
