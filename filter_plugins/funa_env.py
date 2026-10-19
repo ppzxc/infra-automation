@@ -46,6 +46,14 @@ def _render(mapping, label, errors):
     return ''.join(lines)
 
 
+def _shell_refs(mapping, label, errors):
+    """Report values holding ``${`` (compose would interpolate it); a lone ``$`` is fine."""
+    for key in sorted(mapping):
+        value = _scalar(mapping[key])
+        if value is not None and '${' in value:
+            errors.append('%s: %s contains a shell reference' % (label, key))
+
+
 def _missing(mapping, required, label, errors):
     for key in required:
         value = _scalar(mapping.get(key))
@@ -94,6 +102,11 @@ def funa_env_resolve(kv, node_keys, required_cluster, required_proxy, required_v
     # Node values only come from the declared keys; hosts/<host> also holds SSH credentials.
     node = {k: data['node'][k] for k in node_keys if k in data['node']}
     node_secrets = {k: data['node'][k] for k in node_secret_keys if k in data['node']}
+    _shell_refs(node, host_path, errors)
+    _shell_refs(node_secrets, host_path, errors)
+    _shell_refs(data['cluster'], cluster_path, errors)
+    _shell_refs(data['proxy'], cluster_path + '/proxy', errors)
+    _shell_refs(data['vrrp'], cluster_path + '/vrrp', errors)
     cluster = dict(data['cluster'])
     cluster.update(node)
     proxy = dict(data['proxy'])

@@ -83,6 +83,30 @@ def test_errors_never_contain_values():
         assert value not in text
 
 
+@pytest.mark.parametrize("source, path", [
+    ("cluster", "clusters/funa"),
+    ("proxy", "clusters/funa/proxy"),
+    ("vrrp", "clusters/funa/vrrp"),
+    ("node", "hosts/n1"),
+])
+@pytest.mark.parametrize("value", ["${LEAKVAL}", "${LEAKVAL:-x}", "pre-${LEAKVAL}-post"])
+def test_shell_reference_is_rejected_by_path_and_key_only(source, path, value):
+    kv = {**KV, source: {**KV[source], "FUNA_NODE_EXTERNAL_HOSTNAME" if source == "node" else "REF_KEY": value}}
+    out = resolve(kv)
+    key = "FUNA_NODE_EXTERNAL_HOSTNAME" if source == "node" else "REF_KEY"
+    expect = "%s: %s contains a shell reference" % (path, key)
+    assert expect in out["errors"], out["errors"]
+    assert "LEAKVAL" not in " ".join(out["errors"])
+    assert out["cluster"] == out["proxy"] == out["vrrp"] == ""
+
+
+@pytest.mark.parametrize("value", ["pa$word", "ends-with$", "$", "$NAME", "a$$b"])
+def test_dollar_without_brace_passes(value):
+    out = resolve({**KV, "proxy": {**KV["proxy"], "DB_PASSWORD": value}})
+    assert out["errors"] == []
+    assert "DB_PASSWORD='%s'\n" % value in out["proxy"]
+
+
 def test_kv_by_key_maps_status_to_data_or_none():
     results = [
         {"item": {"key": "node"}, "status": 200, "json": {"data": {"data": {"A": "1"}}}},
