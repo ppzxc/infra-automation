@@ -396,6 +396,13 @@
             that:
               - f.read['/etc/otelcol/config.yaml'] is not none
               - "'hostmetrics:' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.cpu.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.linux.memory.available' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.memory.limit' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.memory.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.filesystem.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system.paging.utilization' in f.read['/etc/otelcol/config.yaml']"
+              - "'system:' in f.read['/etc/otelcol/config.yaml']"
               - "'node_exporter' not in f.read['/etc/otelcol/config.yaml']"
             fail_msg: "otelcol-contrib configuration must contain hostmetrics receiver and not contain node_exporter."
 

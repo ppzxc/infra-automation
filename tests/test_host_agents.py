@@ -935,7 +935,7 @@ def test_config_metrics_pipeline_is_separate_droppable_and_60s(tmp_path):
     cfg, _ = _render_config(tmp_path)
     assert cfg["receivers"]["hostmetrics"]["collection_interval"] == "60s"
     assert set(cfg["receivers"]["hostmetrics"]["scrapers"]) == {
-        "cpu", "memory", "load", "filesystem", "disk", "network", "paging", "processes"}
+        "cpu", "memory", "load", "filesystem", "disk", "network", "paging", "processes", "system"}
     metrics = cfg["service"]["pipelines"]["metrics/host"]
     assert metrics["exporters"] == ["otlphttp/metrics"]
     assert metrics["processors"] == ["memory_limiter", "resource/host", "resource/hostmetrics", "batch"]
