@@ -41,7 +41,6 @@ def test_ansible_inventory_and_vars():
         assert "tier" in acc, f"account {acc} missing 'tier'"
         assert acc["tier"] in ["admin", "operator", "user"], f"Invalid tier {acc['tier']}"
     assert "timezone" in all_vars, "timezone is not defined in all.yml"
-    assert "otel_target_endpoint" in all_vars, "otel_target_endpoint is not defined in all.yml"
 
     # servers group_vars verification
     servers_vars_file = ROOT_DIR / "inventory" / "group_vars" / "servers.yml"

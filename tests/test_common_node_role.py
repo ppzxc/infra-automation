@@ -44,3 +44,17 @@ def test_templates_render_role_group(template):
 def test_templates_explicit_node_role_wins(template):
     groups = ["host_agents_backup_only", "servers"]
     assert _render_node_role(template, group_names=groups, node_role="db") == "db"
+
+
+@pytest.mark.parametrize("template", ["environment.j2", "node-env.sh.j2"])
+@pytest.mark.parametrize("ctx", [{}, {"otel_target_endpoint": "10.0.0.1:4317"}])
+def test_templates_do_not_export_otlp_endpoint(template, ctx):
+    """ADR-0012: no host-shell OTLP endpoint; other variables stay."""
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)))
+    env.filters.update(FilterModule().filters())
+    out = env.get_template(template).render(
+        inventory_hostname="ns0270", ansible_default_ipv4={}, group_names=["servers"],
+        custom_environment_variables={"FOO": "bar"}, **ctx)
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in out
+    for name in ("NODE_NAME", "NODE_SSH_PORT", "FOO"):
+        assert f"{name}=\"" in out
