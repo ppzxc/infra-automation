@@ -205,7 +205,10 @@ def o2():
 
 
 def _apply(o2, *args, kv=None, extra=None, inventory="localhost,"):
-    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, **(extra or {})}
+    # 앱 텔레메트리 스위치는 OpenBao에서 읽고 토큰이 없으면 실패하므로, 기본은 "아무 호스트도 안 켬" 픽스처다(None이면 픽스처 없음).
+    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, "o2c_app_telemetry_kv_fixture": {}, **(extra or {})}
+    if extra["o2c_app_telemetry_kv_fixture"] is None:
+        del extra["o2c_app_telemetry_kv_fixture"]
     env = dict(os.environ, ANSIBLE_NOCOLOR="1")
     cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), "-e", f"o2_endpoint={o2.url}",
            "-e", json.dumps({"o2c_kv_fixture": kv or KV, **extra}), *args]
@@ -1240,6 +1243,15 @@ def test_app_telemetry_fixtures_cover_firing_and_quiet_cases_and_verification_us
     for c in cases:
         assert any(h.startswith(c["host"] + "-") for h in _branch_hosts(searched)), c["host"]
     assert "ns0001" in _branch_hosts(searched)
+
+
+def test_missing_openbao_token_fails_instead_of_emptying_the_app_telemetry_roster(o2, tmp_path, monkeypatch):
+    for var in ("VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID"):
+        monkeypatch.delenv(var, raising=False)
+    res = _apply(o2, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_app_telemetry_kv_fixture": None})   # roster has hosts, no switch fixture, no token
+    assert res.returncode != 0
+    assert "OpenBao" in res.stdout and "O2C-004" not in res.stderr
+    assert o2.writes == []
 
 
 def test_app_telemetry_roster_lookup_task_is_read_only_and_no_log():

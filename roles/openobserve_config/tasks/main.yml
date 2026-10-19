@@ -86,6 +86,21 @@
 # 무소식 알림(infra-app-telemetry-silent)의 로스터는 스위치가 켜진 호스트만이다(Spec #253 / Ticket-8). 스위치(otel_app_telemetry)는 인벤토리가 아니라
 # OpenBao hosts/<host>/agents에만 있으므로 수집 로스터 호스트마다 읽는다. 200·404 외로 답하면 짐작하지 않고 실패한다(호스트가 감시에서 조용히 빠지지 않도록).
 # 응답 본문에 시크릿이 있으므로 no_log이고, 스위치 값(true)만 O2C-005에서 골라 쓴다.
+- name: Assert an OpenBao token is available to read the app telemetry switches
+  vars:
+    _vault_token_eff: "{{ (_o2c_approle_login.json.auth.client_token | default('')) or (vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true)) }}"
+  ansible.builtin.assert:
+    that:
+      - _vault_token_eff | length > 0
+    fail_msg: >-
+      수집 로스터 호스트의 앱 텔레메트리 스위치를 OpenBao에서 읽을 토큰이 없습니다(AppRole 로그인 실패이거나 VAULT_TOKEN이 비어 있음).
+      비어 있는 채로 진행하면 무소식 알림 로스터가 조용히 비므로 실패합니다.
+    quiet: true
+  no_log: true
+  when:
+    - o2c_app_telemetry_kv_fixture is not defined
+    - o2c_roster_collect | length > 0
+
 - name: "[O2C-004] Read the otel_app_telemetry switch of every collect-roster host from OpenBao (hosts/<host>/agents)"
   vars:
     _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"

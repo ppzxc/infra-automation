@@ -75,3 +75,34 @@ def test_rendered_switch_on_config_passes_collector_validation(tmp_path, version
 def base_storage_dir():
     import yaml
     return yaml.safe_load((base.ROLE / "defaults" / "main.yml").read_text())["otelcol_storage_dir"]
+
+
+def _referenced_processors(cfg):
+    return {p for pipe in cfg["service"]["pipelines"].values() for p in pipe.get("processors", [])}
+
+
+@pytest.mark.parametrize("switch", [False, True])
+@pytest.mark.parametrize("tcpcheck", [False, True])
+def test_every_pipeline_processor_is_defined(tmp_path, switch, tcpcheck):
+    cfg = _render(tmp_path, "0.161.0", otel_tcpcheck_enabled=tcpcheck, otel_tcpcheck_targets=["192.0.2.1:22"],
+                  host_agents_inputs=dict(INPUTS, otel_app_telemetry=switch))
+    undefined = _referenced_processors(cfg) - set(cfg["processors"]) - {"memory_limiter"}
+    assert not undefined
+
+
+@pytest.mark.parametrize("version", ["0.161.0"])      # tcp_check ships only in the 0.161.0 row (ADR-0010)
+@pytest.mark.parametrize("switch", [False, True])
+def test_tcpcheck_config_passes_collector_validation(tmp_path, version, switch):
+    import subprocess
+    import yaml
+    binary = h.binary(version)
+    cfg = _render(tmp_path, version, otel_tcpcheck_enabled=True, otel_tcpcheck_targets=["192.0.2.1:22"],
+                  host_agents_inputs=dict(INPUTS, otel_app_telemetry=switch))
+    assert cfg["service"]["pipelines"]["metrics/tcpcheck"]["processors"] == ["memory_limiter", "resource/host", "batch"]
+    doc = dict(cfg)
+    doc["processors"] = dict(doc["processors"], memory_limiter={"check_interval": "1s", "limit_mib": 400, "spike_limit_mib": 100})
+    path = tmp_path / "validate.yaml"
+    path.write_text(yaml.safe_dump(doc).replace(base_storage_dir(), str(tmp_path)))
+    res = subprocess.run([binary, "validate", f"--config={path}"], capture_output=True, text=True,
+                         env={"O2_BASIC_AUTH": "dGVzdA==", "PATH": "/usr/bin:/bin"})
+    assert res.returncode == 0, res.stdout + res.stderr
