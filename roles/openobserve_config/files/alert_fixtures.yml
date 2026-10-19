@@ -181,6 +181,43 @@ infra-disk-fs-errors:
       fires: false
       records:
         - {body: "systemd[1]: Started Session 4021 of user deploy."}
+infra-app-log-errors:
+  cases:
+    - name: 앱 ERROR(대문자, logstash·ECS 형식)
+      host: verify-applog-error-upper
+      fires: true
+      records:
+        - {container_name: funa-api-1, severity: ERROR, body: '{"level":"ERROR","message":"boom"}'}
+    - name: Caddy error(소문자)
+      host: verify-applog-error-lower
+      fires: true
+      records:
+        - {container_name: proxy-caddy-1, severity: error, body: '{"level":"error","msg":"dial tcp: connection refused"}'}
+    - name: fatal은 error 이상이다
+      host: verify-applog-fatal
+      fires: true
+      records:
+        - {container_name: proxy-caddy-1, severity: fatal, body: '{"level":"fatal","msg":"m"}'}
+    - name: WARN은 알리지 않는다
+      host: verify-applog-warn
+      fires: false
+      records:
+        - {container_name: funa-api-1, severity: WARN, body: '{"level":"WARN","message":"Cannot reconnect"}'}
+    - name: INFO는 알리지 않는다
+      host: verify-applog-info
+      fires: false
+      records:
+        - {container_name: funa-api-1, severity: INFO, body: '{"level":"INFO","message":"ok"}'}
+    - name: 레벨이 없는 줄은 본문에 ERROR가 있어도 알리지 않는다
+      host: verify-applog-nolevel
+      fires: false
+      records:
+        - {container_name: vrrp-keepalived-1, severity: "0", body: "Sending gratuitous ARP ERROR in text"}
+    - name: valkey 경고 문자(#)는 알리지 않는다
+      host: verify-applog-valkey-warning
+      fires: false
+      records:
+        - {container_name: cache-valkey-7000-1, severity: "#", body: "1:S 19 Oct 2026 12:58:43.001 # Connection with master lost."}
 infra-log-parse-errors-security-logs:
   cases:
     - name: 20줄 중 2줄 해석 실패(10%)

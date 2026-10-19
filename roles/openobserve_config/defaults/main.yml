@@ -226,6 +226,24 @@ o2c_alerts:
     period: 5
     frequency: 1
     silence: 5
+  - name: infra-app-log-errors
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "컨테이너 로그에 ERROR 이상 기록"
+    what: "컨테이너(앱·Caddy·valkey 등) 로그에 ERROR 이상 레벨의 줄이 기록됐습니다."
+    why: "앱 장애나 요청 실패, 의존 서비스(DB·큐·캐시) 연결 문제의 첫 신호일 수 있습니다. WARN은 알리지 않으므로 이 알림이 오면 서비스 영향이 시작됐을 수 있습니다."
+    action: "① 행의 호스트·컨테이너 로그에서 ERROR 원문과 직전 줄 확인 ② 같은 시각의 다른 알림(VIP 전환, valkey, Silent Host)과 대조 ③ 서비스 영향이 있으면 해당 노드를 서비스에서 빼고 원인 조치"
+    runbook: "{{ o2c_runbook_base }}#app-log-errors"
+    row_template: '• {host_name} / {container_name}: ERROR 이상 {errors}건'
+    description: "app_logs의 severity가 error 이상(error·err·severe·fatal·critical·panic·dpanic, 대소문자 무시)인 줄 — 수집기가 JSON level·log.level·valkey 레벨 문자로 올린 값만 본다(키워드 추정 없음). WARN 이하와 레벨이 없는 줄은 알리지 않는다"
+    stream: app_logs
+    sql: >-
+      SELECT host_name, container_name, count(*) AS errors FROM "app_logs"
+      WHERE lower(severity) IN ('error','err','severe','fatal','critical','panic','dpanic')
+      GROUP BY host_name, container_name
+    period: 5
+    frequency: 1
+    silence: 5
   - name: infra-log-parse-errors-security-logs
     severity: "P3 주의"
     severity_icon: "🟡"

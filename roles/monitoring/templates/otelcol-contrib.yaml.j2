@@ -296,6 +296,57 @@ receivers:
       - type: add
         field: body
         value: EXPR(trimSuffix(body, "\n"))
+      # 레벨(Spec #236, ADR-0008): 포맷이 실제로 레벨을 가진 줄만 severity로 올린다. 키워드로 추정하지 않으므로 해당 없는 줄(keepalived 등)은 severity가 비고,
+      # 본문은 그대로이며 파싱용 임시 속성(_lvl, _vk)은 바로 지운다. app_logs에는 log.parse_error를 붙이지 않는다(대상이 아닌 줄이 오탐이 되므로).
+      # JSON 한 줄 로그: 최상위 level(logstash 형식·Caddy) 또는 log.level(ECS 형식).
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes._lvl
+        if: 'body matches "^\\{"'
+        on_error: send_quiet
+      - type: severity_parser
+        parse_from: attributes._lvl.level
+        preset: none
+        if: 'attributes["_lvl"] != nil and attributes["_lvl"]["level"] != nil'
+        on_error: send_quiet
+        mapping: &container_levels
+          trace: [trace]
+          debug: [debug]
+          info: [info]
+          warn: [warn, warning]
+          error: [error, err, severe]
+          fatal: [fatal, critical, panic, dpanic]
+      - type: severity_parser
+        parse_from: attributes._lvl.log.level
+        preset: none
+        if: 'attributes["_lvl"] != nil and attributes["_lvl"]["level"] == nil and attributes["_lvl"]["log"] != nil and attributes["_lvl"]["log"]["level"] != nil'
+        on_error: send_quiet
+        mapping: *container_levels
+      # valkey 텍스트 로그: `<pid>:<역할> <일> <월> <연도> <시각> <레벨 문자> ...` (. debug, - verbose→debug2, * notice→info, # warning→warn)
+      - type: regex_parser
+        parse_from: body
+        parse_to: attributes
+        regex: '^\d+:[XCSM] \d{2} [A-Za-z]{3} \d{4} [0-9:.]+ (?P<_vk>[.*#-]) '
+        if: 'body matches "^\\d+:[XCSM] "'
+        on_error: send_quiet
+      - type: severity_parser
+        parse_from: attributes._vk
+        preset: none
+        if: 'attributes["_vk"] != nil'
+        on_error: send_quiet
+        mapping:
+          debug: ["."]
+          debug2: ["-"]
+          info: ["*"]
+          warn: ["#"]
+      - type: remove
+        field: attributes._lvl
+        if: 'attributes["_lvl"] != nil'
+        on_error: send_quiet
+      - type: remove
+        field: attributes._vk
+        if: 'attributes["_vk"] != nil'
+        on_error: send_quiet
       - type: add
         field: attributes.log_type
         value: app_logs
