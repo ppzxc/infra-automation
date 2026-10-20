@@ -19,9 +19,21 @@
 
   입력 필드는 엣지(#91)가 만든 `process_executable_name`(= `sshd`/`sudo`)와 원문 `body`입니다. 엣지와 필드 계약이 바뀌면 같은 PR(또는 연속 PR)에서 함께 고칩니다.
 - **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수(`after_flatten: true`) → `security_logs`.
+- **VRL ingest function `switch_syslog_semantics`** (`roles/openobserve_config/files/vrl/switch_syslog_semantics.vrl`, Spec #277): `system_logs`에서 `service_name = switch-syslog`인 레코드(스위치 syslog, #276)만 해석해 장비와 Cisco 메시지 필드를 **추가**합니다. 원문 `body`와 기존 필드(`host_name`은 수집 서버, `severity`는 항상 0)는 바꾸지 않고, `%FACILITY-SEVERITY-MNEMONIC:` 형식이 아닌 줄과 다른 서비스(서버 로그)는 그대로 통과합니다. 이 서비스 검사는 파이프라인 조건 노드가 아니라 함수 안에 있습니다(조건 노드에서 걸러진 레코드가 출력 노드에 닿지 않아 서버 로그가 사라지는 위험을 피하고, VRL 테스트로 검증하기 위해서).
+
+  | 필드 | 의미 |
+  |---|---|
+  | `device_name` | 원문의 장비 이름을 소문자로 정규화하고 도메인을 뗀 값(`NS0347-3560X.corp` → `ns0347-3560x`). 주소만 찍는 장비는 주소 그대로 |
+  | `device_id` | 관리번호(Inventory Hostname): `device_name` 앞부분의 `ns` + 숫자(`ns0347`). 패턴이 없으면 필드가 없고 `device_name`만 남는다 |
+  | `cisco_facility`, `cisco_mnemonic` | `%SW_MATM-4-MACFLAP_NOTIF`의 `SW_MATM`, `MACFLAP_NOTIF` |
+  | `event_name` | 메시지 코드 전체(`SW_MATM-4-MACFLAP_NOTIF`). 잡음·알림 목록이 이 값을 쓴다 |
+  | `log_syslog_severity_code`, `log_syslog_severity_name` | 메시지 코드의 심각도 0~7과 이름(OTel `log.syslog.severity.*`). Cisco 메시지는 심각도를 실제로 가지므로 채운다(ADR-0008) |
+
+  입력 형식은 `수신 시각 / 송신 주소 / 장비 이름: [순번: ][*]장비 시각(ms, 시간대) : %FAC-SEV-MNEM: 설명`입니다. **장비 시각은 연도가 없고 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)를 바꾸지 않으며**, 장비 시각은 원문에 그대로 남습니다.
+- **파이프라인** `switch_syslog_semantics`: `system_logs` 실시간 소스 → 함수(`after_flatten: true`) → `system_logs`. 같은 스트림에 다른 파이프라인은 없습니다.
 - **통지 대상**: webhook 하나(`infra-automation-webhook`) — 네이버웍스 봇 text API(`{"content": {"type": "text", "text": ...}}`)로 보내는 본문 템플릿과 `Content-Type: application/json` 헤더. 등급별 분리는 범위 밖입니다.
 - **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 무슨 일, 왜 중요, 대상(알림별 `row_template`), 조치, [런북](runbooks/alerts.md) 링크, 로그 보기 링크, 발생 구간. 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
-- **알림 규칙 7종(8개 정의)**: 모두 위 대상으로 보냅니다.
+- **알림 규칙**: 모두 위 대상으로 보냅니다. 스위치 syslog 알림 6개(아래 "스위치 syslog 알림")와 리소스·백업·Silent Host 등은 표 아래에 따로 적었습니다.
 
   | 이름 | 조건 |
   |---|---|
@@ -34,6 +46,23 @@
   | `infra-disk-fs-errors` (P1) | `system_logs`의 `I/O error`, `EXT4-fs error`, `XFS ... Corruption`, `blk_update_request`, `Buffer I/O error` (대소문자 무시, severity가 아닌 패턴 기반). 옛 `infra-kernel-disk-errors`를 대체하며 서버에서 삭제된다 |
   | `infra-app-log-errors` (P2) | `app_logs`의 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄을 호스트·컨테이너별로 5분 1건부터(Event Alert). 레벨은 수집기가 JSON `level`·`log.level`, valkey 레벨 문자에서 올린 값이며 키워드 추정은 없다. WARN은 알리지 않는다 (Spec #236) |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
+
+  - **스위치 syslog 알림 6개 정의 (Spec #277, `system_logs`의 `service_name = 'switch-syslog'`)**: 장비는 `coalesce(device_id, device_name)`(관리번호, 없으면 정규화된 이름)로 집계해 서버 알림과 같은 이름 체계(`ns0xxx`)로 모인다. 임계값·목록·기준 시간은 모두 역할 기본 변수(`o2c_switch_*`)이고 알림 문구는 `o2c_alerts`에 있다. SQL은 **파싱된 모든 줄이 갖는 필드(`device_id`·`device_name`·`event_name`·`log_syslog_severity_code`)와 `body`만 참조한다**: 일부 메시지에만 생기는 필드(변경 주체, 인터페이스 이름)를 참조하면 그 메시지가 한 번도 오지 않은 동안 스트림에 컬럼이 없어 알림이 `unknown field`로 계속 오류가 나고 `O2C-036`이 이후 실행을 막기 때문이다. 변경 주체·포트는 `body`에서 뽑는다(`regexp_replace`, `LIKE`).
+
+    | 이름 | 등급 | 조건 (기본값) |
+    |---|---|---|
+    | `infra-switch-config-change` | P2, Event | `o2c_switch_config_change_events`(`SYS-5-CONFIG_I`) 1건부터, 5분 구간. 행에 장비와 원문의 변경 주체 |
+    | `infra-switch-login-failures` | P2, Event | `o2c_switch_login_fail_events`(`SEC_LOGIN-4-LOGIN_FAILED`)가 장비별 5분에 5회 이상 (`o2c_switch_login_fail_threshold`, `_window_minutes`) |
+    | `infra-switch-severity-critical` | P1, Event | `log_syslog_severity_code <= o2c_switch_severity_max`(2), 즉시. 잡음 목록 제외 |
+    | `infra-switch-uplink-down` | P1, Event | `o2c_switch_uplinks`의 (장비, 포트)에 대한 link down·line protocol down·administratively down. **목록이 비면(기본) 규칙이 만들어지지 않는다** — 서버에 이미 있으면 계획이 지운다 |
+    | `infra-switch-mac-flap` | P2, Event | `o2c_switch_macflap_events`(`SW_MATM-4-MACFLAP_NOTIF`)가 장비별 10분에 2회 이상, 계속되면 60분마다 재통지 |
+    | `infra-switch-syslog-silent` | P2, State | `o2c_switch_syslog_roster`(명시 목록, 기본 `ns0250`·`ns0347`) 장비별 `switch-syslog`가 24시간(`o2c_switch_silent_hours`) 없음, 재통지 1440분. 로스터 호스트마다 `UNION ALL` 가지(`o2c_missing_sql`). 장비 자체 다운은 SNMP 알림(#175)의 몫이다 |
+
+    - **잡음 억제**: `o2c_switch_noise_events`(기본 `ADJ-3-RESOLVE_REQ`, ARP 해소 실패)의 코드는 위 알림(수신 중단 제외)에서 뺀다. 이 줄도 검색은 되고 수신 중단 판단에는 수신으로 센다.
+    - **업링크 목록**: 항목은 `{device: <관리번호>, port: <인터페이스>}`이며 포트는 약어(`Gi1/0/49`)와 전체 이름(`GigabitEthernet1/0/49`)을 모두 받는다. 링크 상태 메시지는 전체 이름, MAC 플랩 메시지는 약어로 찍히기 때문이다. 포트는 `body`의 `Interface <이름>, changed state to down`으로 맞추고 쉼표가 `Gi1/0/4`와 `Gi1/0/49`를 구분한다. CONTEXT.md의 `Watched Port`(스위치 포트 설명 라벨, SNMP·#175)와는 별개이며 syslog에는 포트 설명이 없어 목록이 필요하다.
+    - **수신 중단**: 스위치 syslog는 이벤트가 있을 때만 전송되므로 조용한 것과 고장을 구분하지 못한다. 기준을 길게(24시간) 두고 2주 관찰 뒤 조정한다. 명시한 장비만 보므로 전송을 설정하지 않은 장비가 허위 알림을 만들지 않으며, 새 장비는 전송 확인 뒤 목록에 더한다. 기본 목록(`ns0250`, `ns0347`)은 스펙 작성 때 원문 샘플에서 확인한 장비이며, 보내지 않는 장비가 섞여 있으면 24시간 뒤 알림이 온다.
+    - **검증 단계**: 업링크 규칙은 검증 때 케이스의 가짜 장비를 `watch_port`로 목록에 더해 SQL을 다시 만들고, 수신 중단은 가짜 장비를 로스터에 더한다(`off_roster: true` 케이스는 더하지 않아 "목록 밖 장비는 알리지 않음"을 확인). 장비별 집계의 분리는 "장비마다 임계 미만"인 케이스들이 모두 발화하지 않는 것으로 확인한다. 로컬 테스트는 검증 검색 SQL을 합성 레코드 위에서 실제로 실행해 발화 장비가 픽스처의 `fires`와 일치하는지 본다.
+    - **첫 반영 때 바로 울릴 수 있는 알림**: MAC 플랩(한 장비에서 3시간에 25건, 10분 평균 1.4건이라 기본 2회는 현재 상태에서도 울린다). 수신 중단은 기본 목록 장비가 24시간 넘게 조용하면 첫 평가에서 울린다. 새 필드(`device_id` 등)는 파이프라인이 반영된 뒤 처음 들어온 줄부터 붙으므로, 반영 직후 한 번은 알림 평가가 `unknown field`로 오류일 수 있고 다음 줄이 들어오면 정상이 된다(`O2C-036`이 실패하면 잠시 뒤 Config를 다시 실행한다).
 
   - **Silent Host 2개 정의 (Spec #184 / Ticket-4, `stream_type: metrics`)**: `infra-silent-host-p2`(수집 로스터 호스트의 `system_memory_usage`가 15분 없음, 3시간 미만 — P2, 재통지 1440분)와 `infra-silent-host-p1`(3시간 없음 — P1, 재통지 60분). 둘 다 조회 구간 180분이며, P2 SQL은 "구간에는 있었지만 최근 15분은 없음"만 잡아 같은 호스트에 P1과 동시에 오지 않는다. SQL은 로스터 호스트마다 `SELECT '<호스트>' AS host_name, count(*) … HAVING count(*) < 1` 가지를 `UNION ALL`로 이은 형태다(인라인 `VALUES`/`unnest` JOIN은 이 버전에서 틀린 결과를 내므로 쓰지 않는다). P1 문구는 "약 5시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음"을 안내한다 — OpenObserve `ZO_INGEST_ALLOWED_UPTO` 기본값 5시간(공식 문서)이며 `o2c_ingest_allowed_hours`로 표현하고 서버 값을 바꾸면 함께 고친다. **5시간은 공식 문서 기본값일 뿐 ns0332 서버의 실제 값은 확인하지 못했다 — 운영 반영 때 ns0332의 `ZO_INGEST_ALLOWED_UPTO`를 확인하고 다르면 `o2c_ingest_allowed_hours`를 맞춘다.** 로스터는 실행 시 인벤토리 그룹에서 만든다(아래 "로스터와 계획 정지 예외").
 
@@ -88,8 +117,8 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 |---|---|---|---|---|
 | `O2C-000` | `Log in to OpenBao with AppRole for the OpenObserve configuration KV` | `ansible.builtin.uri` | Controller | 읽기 전용 (토큰 발급만, `changed_when: false`, `check_mode: false`, `no_log`. `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 없으면 건너뛰고 `VAULT_TOKEN`을 쓴다) |
 | `O2C-001` | `Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `check_mode: false`, `no_log`) |
-| `O2C-002` | `Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)` | `ansible.builtin.assert` | Controller | 읽기 전용 (필수 입력이 없으면 요청 전에 실패, `no_log`) |
-| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 템플릿·대상·함수·파이프라인·알림) |
+| `O2C-002` | `Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)` | `ansible.builtin.assert` | Controller | 읽기 전용 (필수 입력이 없으면 요청 전에 실패, `no_log`. 스위치 syslog 알림 목록(메시지 코드·수신 중단 장비·업링크 포트)은 SQL에 들어가므로 형식도 여기서 검증) |
+| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 템플릿·대상·함수 2개(`security_semantics`, `switch_syslog_semantics`)·파이프라인 2개·알림. `enabled`가 거짓인 알림(업링크 목록이 빈 규칙)은 `o2c_alerts_active`에서 빠진다) |
 | `O2C-004` | `Read the otel_app_telemetry switch of every collect-roster host from OpenBao (hosts/<host>/agents)` | `o2c_http` | Controller | 읽기 전용 (수집 로스터 호스트마다 병렬 GET, 200·404만 허용하고 그 밖은 실패, `changed_when: false`, `check_mode: false`, `no_log`. 테스트 픽스처 `o2c_app_telemetry_kv_fixture`가 있거나 토큰이 없으면 건너뛰되, 읽을 호스트가 있는데 토큰이 없으면 이 태스크 앞의 assert가 실행을 실패시켜 로스터가 조용히 비지 않게 한다) |
 | `O2C-005` | `Keep the hosts with the otel_app_telemetry switch on (the roster of the app telemetry silent alert)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_app_telemetry_roster`: `otel_app_telemetry`가 boolean `true`인 호스트 이름만 남김, KV 본문은 팩트로 두지 않음, `no_log`) |
 | `O2C-010` | `Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |

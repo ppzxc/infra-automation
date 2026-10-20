@@ -5,6 +5,7 @@
 # - fires: 이 케이스의 호스트가 알림 SQL 결과에 나와야 하면 true, 나오면 안 되면 false.
 # - known_failure: (선택) 알려진 결함 표시. 있으면 기대와 달라도 작업을 막지 않고 경고만 한다. 현재 사용 중인 케이스 없음.
 # - repeat: 같은 레코드를 N번 넣는다. row_key: 결과 행에서 호스트를 읽는 컬럼(기본 host_name).
+# - off_roster: (부재형 알림) 이 케이스의 가짜 호스트를 로스터에 넣지 않는다. watch_port: (업링크 알림) 이 케이스의 가짜 장비가 감시하는 포트.
 infra-ssh-login-failures-per-source:
   cases:
     - name: 같은 출발지에서 5분 안에 10회 실패
@@ -639,3 +640,173 @@ infra-maintenance-missing:
       fires: false
       records:
         - {ts: -600, job: maintenance, command: check, success: true}
+
+# --- 스위치 syslog 알림 (Spec #277) --- 레코드는 switch_syslog_semantics VRL 처리 후의 모양이다(service_name, device_name/device_id, event_name,
+# log_syslog_severity_code). 장비 식별자 device_id가 케이스 호스트다(host_field). 송신 주소는 문서용 대역만 쓴다.
+# 장비별 집계의 분리는 "장비마다 임계 미만" 케이스가 함께 있으면서 모두 발화하지 않는 것으로 확인한다(합치면 임계를 넘는다).
+infra-switch-config-change:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 설정 변경 메시지 1건
+      host: verify-sw-config-change
+      fires: true
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: SYS-5-CONFIG_I, log_syslog_severity_code: 5, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %SYS-5-CONFIG_I: Configured from console by admin on vty0 (203.0.113.7)"}
+    - name: 같은 심각도의 다른 메시지는 설정 변경이 아니다
+      host: verify-sw-config-other
+      fires: false
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: SYS-5-RESTART, log_syslog_severity_code: 5, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %SYS-5-RESTART: System restarted"}
+    - name: 다른 서비스의 줄은 같은 코드여도 스위치 알림이 아니다
+      host: verify-sw-config-other-service
+      fires: false
+      records:
+        - {service_name: syslog, device_name: verify-sw, event_name: SYS-5-CONFIG_I, log_syslog_severity_code: 5, body: "Oct 20 10:00:00 server01 app: %SYS-5-CONFIG_I: quoted by another program"}
+infra-switch-login-failures:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 5분 안에 로그인 실패 5회
+      host: verify-sw-login-burst
+      fires: true
+      records:
+        - {repeat: 5, service_name: switch-syslog, device_name: verify-sw, event_name: SEC_LOGIN-4-LOGIN_FAILED, log_syslog_severity_code: 4, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: admin] [Source: 203.0.113.7] [localport: 22] [Reason: Login Authentication Failed]"}
+    - name: 실패 4회는 임계 미만 (장비 A)
+      host: verify-sw-login-below-a
+      fires: false
+      records:
+        - {repeat: 4, service_name: switch-syslog, device_name: verify-sw, event_name: SEC_LOGIN-4-LOGIN_FAILED, log_syslog_severity_code: 4, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: admin]"}
+    - name: 실패 4회는 임계 미만 (장비 B, 장비마다 따로 센다)
+      host: verify-sw-login-below-b
+      fires: false
+      records:
+        - {repeat: 4, service_name: switch-syslog, device_name: verify-sw, event_name: SEC_LOGIN-4-LOGIN_FAILED, log_syslog_severity_code: 4, body: "Oct 20 10:00:00 203.0.113.6 ns0347-3560X: Oct 20 10:00:00.001 KST: %SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: admin]"}
+    - name: 로그인 성공은 실패로 세지 않는다
+      host: verify-sw-login-success
+      fires: false
+      records:
+        - {repeat: 6, service_name: switch-syslog, device_name: verify-sw, event_name: SEC_LOGIN-5-LOGIN_SUCCESS, log_syslog_severity_code: 5, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %SEC_LOGIN-5-LOGIN_SUCCESS: Login Success [user: admin]"}
+infra-switch-severity-critical:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 심각도 0 (emergency)
+      host: verify-sw-sev-0
+      fires: true
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: TEST-0-EMERGENCY, log_syslog_severity_code: 0, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %TEST-0-EMERGENCY: synthetic"}
+    - name: 심각도 2 (critical)
+      host: verify-sw-sev-2
+      fires: true
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: TEST-2-CRITICAL, log_syslog_severity_code: 2, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %TEST-2-CRITICAL: synthetic"}
+    - name: 심각도 3 (error)은 이 알림이 아니다
+      host: verify-sw-sev-3
+      fires: false
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINK-3-UPDOWN, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/3, changed state to down"}
+    - name: 잡음 목록의 코드는 심각도가 높아도 제외한다
+      host: verify-sw-sev-noise
+      fires: false
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: ADJ-3-RESOLVE_REQ, log_syslog_severity_code: 2, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %ADJ-3-RESOLVE_REQ: Adj resolve request: Failed to resolve 203.0.113.9 Vlan7"}
+    - name: 다른 서비스의 심각도 2 줄은 알리지 않는다
+      host: verify-sw-sev-other-service
+      fires: false
+      records:
+        - {service_name: kernel, device_name: verify-sw, event_name: TEST-2-CRITICAL, log_syslog_severity_code: 2, body: "kernel: synthetic"}
+# 업링크 다운: 목록이 비어 있으면 알림이 만들어지지 않으므로 이 픽스처는 목록이 있을 때만 쓰인다. watch_port는 이 케이스의 (가짜) 장비를 목록에 더한다.
+infra-switch-uplink-down:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 감시 포트의 링크 다운 (약어로 적은 포트)
+      host: verify-sw-uplink-down
+      fires: true
+      watch_port: Gi1/0/49
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINK-3-UPDOWN, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/49, changed state to down"}
+    - name: 감시 포트의 line protocol 다운 (전체 이름으로 적은 포트)
+      host: verify-sw-uplink-lineproto
+      fires: true
+      watch_port: GigabitEthernet1/0/49
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINEPROTO-5-UPDOWN, log_syslog_severity_code: 5, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %LINEPROTO-5-UPDOWN: Line protocol on Interface GigabitEthernet1/0/49, changed state to down"}
+    - name: 감시 포트를 관리자가 shutdown
+      host: verify-sw-uplink-admin-down
+      fires: true
+      watch_port: Gi1/0/49
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINK-5-CHANGED, log_syslog_severity_code: 5, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-5-CHANGED: Interface GigabitEthernet1/0/49, changed state to administratively down"}
+    - name: 감시 포트가 올라온 것은 알리지 않는다
+      host: verify-sw-uplink-up
+      fires: false
+      watch_port: Gi1/0/49
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINK-3-UPDOWN, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/49, changed state to up"}
+    - name: 같은 장비의 목록에 없는 포트 다운 (미사용 포트)
+      host: verify-sw-uplink-other-port
+      fires: false
+      watch_port: Gi1/0/49
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINK-3-UPDOWN, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/48, changed state to down"}
+    - name: Gi1/0/4 감시 중 Gi1/0/49 다운은 다른 포트다
+      host: verify-sw-uplink-prefix-port
+      fires: false
+      watch_port: Gi1/0/4
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINK-3-UPDOWN, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/49, changed state to down"}
+    - name: 목록에 없는 장비의 포트 다운
+      host: verify-sw-uplink-other-device
+      fires: false
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: LINK-3-UPDOWN, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.6 ns0347-3560X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/49, changed state to down"}
+infra-switch-mac-flap:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 10분 안에 MAC 플랩 2회
+      host: verify-sw-flap-burst
+      fires: true
+      records:
+        - {repeat: 2, service_name: switch-syslog, device_name: verify-sw, event_name: SW_MATM-4-MACFLAP_NOTIF, log_syslog_severity_code: 4, body: "Oct 20 10:00:00 203.0.113.6 ns0347-3560X: Oct 20 10:00:00.001 KST: %SW_MATM-4-MACFLAP_NOTIF: Host 0011.2233.4455 in vlan 7 is flapping between port Gi0/13 and port Gi0/14"}
+    - name: 플랩 1회는 임계 미만 (장비 A)
+      host: verify-sw-flap-below-a
+      fires: false
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: SW_MATM-4-MACFLAP_NOTIF, log_syslog_severity_code: 4, body: "Oct 20 10:00:00 203.0.113.6 ns0347-3560X: Oct 20 10:00:00.001 KST: %SW_MATM-4-MACFLAP_NOTIF: Host 0011.2233.4455 in vlan 7 is flapping between port Gi0/13 and port Gi0/14"}
+    - name: 플랩 1회는 임계 미만 (장비 B, 장비마다 따로 센다)
+      host: verify-sw-flap-below-b
+      fires: false
+      records:
+        - {service_name: switch-syslog, device_name: verify-sw, event_name: SW_MATM-4-MACFLAP_NOTIF, log_syslog_severity_code: 4, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %SW_MATM-4-MACFLAP_NOTIF: Host 0011.2233.4455 in vlan 7 is flapping between port Gi0/1 and port Gi0/2"}
+    - name: 잡음 메시지(ARP 해소 실패)만 많은 장비
+      host: verify-sw-flap-noise-only
+      fires: false
+      records:
+        - {repeat: 10, service_name: switch-syslog, device_name: verify-sw, event_name: ADJ-3-RESOLVE_REQ, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %ADJ-3-RESOLVE_REQ: Adj resolve request: Failed to resolve 203.0.113.9 Vlan7"}
+# 수신 중단: 케이스 호스트(device_id)가 (가짜) 감시 목록에 들어간다. off_roster는 목록에 넣지 않는다.
+infra-switch-syslog-silent:
+  row_key: device_id
+  host_field: device_id
+  cases:
+    - name: 감시 목록의 장비에서 로그가 한 줄도 없다
+      host: verify-sw-silent-none
+      fires: true
+      records: []
+    - name: 최근 로그가 있는 장비
+      host: verify-sw-silent-fresh
+      fires: false
+      records:
+        - {ts: -600, service_name: switch-syslog, device_name: verify-sw, event_name: SW_MATM-4-MACFLAP_NOTIF, log_syslog_severity_code: 4, body: "Oct 20 10:00:00 203.0.113.6 ns0347-3560X: Oct 20 10:00:00.001 KST: %SW_MATM-4-MACFLAP_NOTIF: synthetic"}
+    - name: 잡음 메시지만 오는 장비도 수신 중이다
+      host: verify-sw-silent-noise-only
+      fires: false
+      records:
+        - {ts: -600, service_name: switch-syslog, device_name: verify-sw, event_name: ADJ-3-RESOLVE_REQ, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %ADJ-3-RESOLVE_REQ: synthetic"}
+    - name: 감시 목록에 없는 장비는 로그가 없어도 알리지 않는다
+      host: verify-sw-silent-off-roster
+      fires: false
+      off_roster: true
+      records: []

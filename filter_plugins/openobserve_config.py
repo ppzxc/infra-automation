@@ -42,10 +42,15 @@ def o2c_desired(spec):
          'body': {'name': dest, 'type': 'http', 'url': spec['webhook_url'], 'method': 'post',
                   'headers': dict(spec.get('webhook_headers') or {}), 'template': spec['template_name'],
                   'skip_tls_verify': False, 'output_format': 'json'}},
-        {'kind': 'function', 'name': spec['function_name'],
-         'body': {'name': spec['function_name'], 'function': spec['vrl'].strip(), 'params': 'row', 'transType': 0}},
-        _pipeline(org, stream, spec['pipeline_name'], spec['function_name']),
     ]
+    # 의미 해석 함수와 파이프라인: 보안 로그(security_semantics)가 기본이고, 스위치 syslog(Spec #277)는 system_logs에 하나 더 건다
+    semantics = [{'stream': stream, 'function_name': spec['function_name'], 'pipeline_name': spec['pipeline_name'], 'vrl': spec['vrl'],
+                  'description': 'ADR-0008: sshd/sudo semantics (managed by infra-automation)'}]
+    if spec.get('switch_syslog'):
+        semantics.append(dict(spec['switch_syslog'], description='ADR-0008: switch syslog semantics (managed by infra-automation)'))
+    out += [{'kind': 'function', 'name': sem['function_name'],
+             'body': {'name': sem['function_name'], 'function': sem['vrl'].strip(), 'params': 'row', 'transType': 0}} for sem in semantics]
+    out += [_pipeline(org, sem['stream'], sem['pipeline_name'], sem['function_name'], sem['description']) for sem in semantics]
     for alert in list(spec['alerts']) + ([spec['selftest_alert']] if spec.get('selftest_alert') else []):
         out.append({'kind': 'alert', 'name': alert['name'], 'body': {
             'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
@@ -71,12 +76,12 @@ def o2c_desired(spec):
     return out
 
 
-def _pipeline(org, stream, name, function_name):
+def _pipeline(org, stream, name, function_name, description):
     source = {'source_type': 'realtime', 'org_id': org, 'stream_name': stream, 'stream_type': 'logs'}
     node = lambda nid, data, io, x: {'id': nid, 'data': data, 'io_type': io, 'position': {'x': x, 'y': 100}}  # noqa: E731
     stream_node = {'node_type': 'stream', 'org_id': org, 'stream_name': stream, 'stream_type': 'logs'}
     body = {
-        'name': name, 'description': 'ADR-0008: sshd/sudo semantics (managed by infra-automation)', 'enabled': True,
+        'name': name, 'description': description, 'enabled': True,
         'source': source,
         'nodes': [
             node('input', dict(stream_node), 'input', 50),
@@ -374,7 +379,9 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
     A record's ``source_address`` may be ``@<kind>`` (e.g. ``@semaphore``): it resolves to the first normal source of that
     kind in ``sources`` (OpenBao, never committed). A case with an unresolvable placeholder is skipped.
     An alert with ``absence: {level, roster}`` gets its SQL rebuilt from ``rosters[roster]`` plus the fake host of every case,
-    so "no data" is verified against hosts that really are on the roster. A case may have no records at all.
+    so "no data" is verified against hosts that really are on the roster (a case with ``off_roster: true`` stays off it).
+    A case may have no records at all. An alert with ``uplinks`` (the configured list of ``{device, port}``, may be empty) gets its
+    SQL rebuilt with the ``watch_port`` of every case appended as a watched port of that case's fake device.
     """
     by_kind = {}
     for src in sources or []:
@@ -393,7 +400,8 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
             if any(r is None for r in records):
                 continue
             host = _host(case, run_id)
-            hosts[host] = {'case': case['name'], 'fires': bool(case['fires']), 'known_failure': case.get('known_failure') or ''}
+            hosts[host] = {'case': case['name'], 'fires': bool(case['fires']), 'known_failure': case.get('known_failure') or '',
+                           'off_roster': bool(case.get('off_roster'))}
             for rec in records:
                 rec = dict(rec)
                 repeat = rec.pop('repeat', 1)
@@ -404,11 +412,16 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                 ingest.setdefault(rec_stream, []).extend(dict(rec, **{spec.get('host_field', DEFAULT_ROW_KEY): host}, **st) for st in stamps)
         missing = alert.get('missing')
         if missing:
-            roster = list((rosters or {}).get(missing['roster']) or []) + sorted(hosts)
+            roster = list((rosters or {}).get(missing['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
             sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'])
         if absence:
-            roster = list((rosters or {}).get(absence['roster']) or []) + sorted(hosts)
+            roster = list((rosters or {}).get(absence['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
             sql = o2c_absence_sql(roster, stream, absence['level'])
+        if alert.get('uplinks') is not None:
+            # 업링크 목록(장비, 포트)에 케이스의 가짜 장비를 `watch_port`로 더해 "목록에 있으면 발화, 없으면 발화하지 않음"을 검증한다
+            watched = list(alert['uplinks'] or []) + [{'device': _host(c, run_id), 'port': c['watch_port']}
+                                                      for c in spec['cases'] if c.get('watch_port') and _host(c, run_id) in hosts]
+            sql = o2c_switch_uplink_sql(watched, alert.get('noise_events'))
         period_us = int(alert.get('period', 0)) * 60 * 1000000   # 알림의 조회 구간만큼 거슬러 올라가 검색한다
         searches.append({
             'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
@@ -486,6 +499,72 @@ def o2c_verify_pending(results):
     return pending
 
 
+# --- 스위치 syslog 알림 (Spec #277) -------------------------------------------------------------------------------------
+# 스위치 syslog는 system_logs에 service_name=switch-syslog로 들어오고, switch_syslog_semantics VRL이 장비(device_id/device_name)·
+# Cisco 메시지 코드(event_name)·심각도(log_syslog_severity_code)를 붙인다. 알림 SQL은 파싱된 모든 줄이 갖는 필드와 body만 참조한다
+# (일부 메시지에만 생기는 필드를 참조하면 그 메시지가 한 번도 오지 않은 동안 스트림에 컬럼이 없어 알림이 unknown field로 계속 오류가 난다).
+# 목록(잡음·설정 변경·로그인 실패·MAC 플랩 메시지 코드, 업링크 (장비, 포트), 수신 중단 감시 장비)은 SQL에 들어가므로 요청 전에 형식을 검증한다.
+_EVENT_RE = _re.compile(r'^[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+$')
+_MANAGEMENT_RE = _re.compile(r'^ns[0-9]+$')
+_PORT_RE = _re.compile(r'^[A-Za-z][A-Za-z-]*[0-9][0-9/.:]*$')
+_IFACE_SPLIT = _re.compile(r'^([A-Za-z-]+?)([0-9].*)$')
+# 약어 → 로그에 찍히는 전체 이름. LINK-3-UPDOWN은 전체 이름(GigabitEthernet1/0/49), MAC 플랩은 약어(Gi1/0/49)로 찍힌다.
+_IFACE_PREFIX = {'gi': 'GigabitEthernet', 'fa': 'FastEthernet', 'te': 'TenGigabitEthernet', 'fo': 'FortyGigabitEthernet',
+                 'twe': 'TwentyFiveGigE', 'hu': 'HundredGigE', 'po': 'Port-channel', 'eth': 'Ethernet'}
+UPLINK_EVENTS = ('LINK-3-UPDOWN', 'LINEPROTO-5-UPDOWN', 'LINK-5-CHANGED')   # 링크 다운, 라인 프로토콜 다운, 관리자 shutdown
+
+
+def o2c_valid_switch_events(events):
+    """True when every item is a Cisco message code as printed without the percent sign (``SW_MATM-4-MACFLAP_NOTIF``)."""
+    return all(isinstance(e, str) and _EVENT_RE.match(e) for e in events or [])
+
+
+def o2c_valid_switch_roster(devices):
+    """True when every item is a management number (``ns0250``) — what the VRL stores in ``device_id``."""
+    return all(isinstance(d, str) and _MANAGEMENT_RE.match(d) for d in devices or [])
+
+
+def o2c_valid_switch_uplinks(entries):
+    """True when every entry is ``{device: <management number>, port: <interface name>}`` with a safe port name (``/`` allowed)."""
+    return all(isinstance(e, dict) and _MANAGEMENT_RE.match(str(e.get('device') or '')) and _PORT_RE.match(str(e.get('port') or ''))
+               for e in entries or [])
+
+
+def _canonical_interface(port):
+    """The port as the link-state messages print it (``Gi1/0/49`` -> ``GigabitEthernet1/0/49``); other names are kept."""
+    m = _IFACE_SPLIT.match(port)
+    if m and m.group(1).lower() in _IFACE_PREFIX:
+        return _IFACE_PREFIX[m.group(1).lower()] + m.group(2)
+    return port
+
+
+def o2c_switch_noise_filter(events):
+    """`` AND event_name NOT IN (...)`` for the noise message codes; empty when the list is empty."""
+    return (' AND event_name NOT IN (%s)' % ', '.join(_q(e) for e in events)) if events else ''
+
+
+def o2c_switch_uplink_sql(entries, noise_events=None):
+    """SQL of the uplink-down alert: a link/line-protocol message saying ``down`` (or ``administratively down``) for a listed (device, port).
+
+    The port is matched in ``body`` (``Interface <name>, changed state to down``) so the query needs no port column. The trailing
+    comma keeps ``Gi1/0/1`` from matching ``Gi1/0/10``. An empty list yields a condition that can never be true.
+    """
+    pairs = []
+    for e in entries or []:
+        name = _canonical_interface(str(e['port'])).lower()
+        down, admin = ("lower(body) LIKE %s" % _q('%%interface %s, changed state to %s%%' % (name, tail)) for tail in ('down', 'administratively down'))
+        pairs.append('(device_id = %s AND (%s OR %s))' % (_q(e['device']), down, admin))
+    return ('SELECT coalesce(device_id, device_name) AS device, '
+            "regexp_replace(body, '^.*[Ii]nterface ([^ ,]+),.*$', '\\1') AS port, count(*) AS downs FROM \"system_logs\" "
+            "WHERE service_name = 'switch-syslog' AND event_name IN (%s)%s AND (%s) GROUP BY device, port") % (
+        ', '.join(_q(ev) for ev in UPLINK_EVENTS), o2c_switch_noise_filter(noise_events), ' OR '.join(pairs) if pairs else '1 = 0')
+
+
+def o2c_enabled_alerts(alerts):
+    """The alerts that are created: an alert whose ``enabled`` renders false (e.g. the uplink alert with an empty port list) is left out."""
+    return [a for a in alerts or [] if str(a.get('enabled', True)).strip().lower() not in ('false', '0', '')]
+
+
 class FilterModule(object):
     def filters(self):
         return {'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
@@ -496,4 +575,7 @@ class FilterModule(object):
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
                 'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
                 'o2c_missing_sql': o2c_missing_sql, 'o2c_app_telemetry_roster': o2c_app_telemetry_roster,
-                'o2c_host_items': o2c_host_items}
+                'o2c_host_items': o2c_host_items,
+                'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
+                'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
+                'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts}

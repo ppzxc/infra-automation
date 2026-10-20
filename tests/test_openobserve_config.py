@@ -35,7 +35,11 @@ EXPECTED_ALERTS = {
     "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
     "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
     "infra-app-log-errors", "infra-app-telemetry-silent",
+    "infra-switch-config-change", "infra-switch-login-failures", "infra-switch-severity-critical",
+    "infra-switch-mac-flap", "infra-switch-syslog-silent",   # 스위치 syslog(Spec #277)
 }
+UPLINK_ALERT = "infra-switch-uplink-down"   # 업링크 목록(o2c_switch_uplinks)이 비어 있으면 만들어지지 않는다
+UPLINKS = [{"device": "ns0250", "port": "Gi1/0/1"}]
 RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
     "infra-disk-usage-p2": ("P2 경고", 1440, 15, "system_filesystem_usage"),
     "infra-disk-usage-p1": ("P1 긴급", 60, 15, "system_filesystem_usage"),
@@ -50,12 +54,20 @@ SELFTEST_STREAM = "alert_selftest_alert_verify"
 
 def _same_roster_alert(name, stored, sql):
     """Roster (absence) SQL of the same alert — the verification adds fake hosts to the roster, so the host names differ."""
+    if name == UPLINK_ALERT:   # the verification adds the fake devices of the cases as watched ports — only that list differs
+        pairs = lambda q: re.sub(r"AND \(\(device_id = .*\)\) GROUP BY", "AND (<pairs>) GROUP BY", q)   # noqa: E731
+        return pairs(stored) == pairs(sql) != stored
     def is_roster(q):
-        return "AS host_name, count(*) AS n FROM" in q or "AS host, count(*) AS n FROM" in q
+        return any(f"AS {col}, count(*) AS n FROM" in q for col in ("host_name", "host", "device_id"))
     def shape(q):   # the roster hosts differ; the extra condition of each branch (e.g. job = 'backup' AND success = true) must match
-        conds = (re.search(r"WHERE (?:(?:host|host_name) = '[^']*'(?: AND )?)?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
+        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?)?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
         return {m.group(1) if m else "" for m in conds}
     return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql) and shape(stored) == shape(sql)
+
+
+def _case_host(rec):
+    """The (fake) host of a synthetic record: backup_logs use host, switch syslog uses device_id, the others host_name."""
+    return rec.get("host_name") or rec.get("host") or rec["device_id"]
 
 
 class FakeO2:
@@ -93,7 +105,7 @@ class FakeO2:
 
             def _fire(self, sql, stream):
                 """What a correct engine returns: the hosts of the firing, non-known-failure cases of the alert owning this SQL."""
-                run_ids = {(r.get("host_name") or r["host"]).rsplit("-", 1)[1] for _, _, recs in outer.ingests for r in recs}
+                run_ids = {_case_host(r).rsplit("-", 1)[1] for _, _, recs in outer.ingests for r in recs}
                 for alert in outer.store["alert"].values():
                     prod = alert["stream_name"]
                     stored = alert["query_condition"]["sql"].replace(f'"{prod}"', f'"{stream}"')
@@ -225,10 +237,10 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert res.returncode == 0, res.stdout + res.stderr
     assert all(m == "POST" for m, _, _ in o2.writes)
     paths = [p for _, p, _ in o2.writes]
-    assert paths[:4] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
-                         "/api/default/pipelines"]
+    assert paths[:6] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
+                         "/api/default/functions", "/api/default/pipelines", "/api/default/pipelines"]   # 보안 로그와 스위치 syslog 의미 해석 각 1개
     assert set(o2.store["alert"]) == EXPECTED_ALERTS | {SELFTEST}
-    assert paths[4:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
+    assert paths[6:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
 
 
 def test_template_body_is_a_naver_works_text_message(o2):
@@ -460,7 +472,7 @@ FIXTURES = yaml.safe_load((ROLE / "files" / "alert_fixtures.yml").read_text(enco
 
 
 def test_every_existing_alert_has_a_firing_and_a_non_firing_fixture_with_a_unique_host():
-    assert set(FIXTURES) == EXPECTED_ALERTS
+    assert set(FIXTURES) == EXPECTED_ALERTS | {UPLINK_ALERT}
     hosts = [c["host"] for spec in FIXTURES.values() for c in spec["cases"]]
     assert len(hosts) == len(set(hosts))
     for name, spec in FIXTURES.items():
@@ -482,7 +494,7 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
         assert 'FROM "app_logs"' not in sql          # 운영 app_logs가 아니라 검증 스트림을 조회한다
     # 운영 스트림·운영 알림은 건드리지 않는다: 쓰기는 설정 객체뿐이고 합성 레코드는 검증 스트림에만 간다
     assert all("/_json" not in p for _, p, _ in o2.writes)
-    hosts = {r.get("host_name") or r["host"] for _, _, recs in o2.ingests for r in recs}
+    hosts = {_case_host(r) for _, _, recs in o2.ingests for r in recs}
     assert any(h.startswith("verify-oom-upper-") for h in hosts)
 
 
@@ -654,7 +666,7 @@ def test_verification_places_normal_sources_in_the_synthetic_records_by_kind(o2)
 def test_verification_skips_kind_specific_cases_when_the_list_has_no_such_kind(o2):
     res = _apply(o2)
     assert res.returncode == 0, res.stdout + res.stderr
-    hosts = {r.get("host_name") or r["host"] for _, _, rs in o2.ingests for r in rs}
+    hosts = {_case_host(r) for _, _, rs in o2.ingests for r in rs}
     assert not any(h.startswith(("verify-root-semaphore-", "verify-root-office-")) for h in hosts)
     assert any(h.startswith("verify-root-external-") for h in hosts)
 
@@ -1316,3 +1328,180 @@ def test_memory_alert_keeps_thresholds_severity_and_silence_and_openbao_override
         sev, silence, period, _ = RESOURCE_ALERTS[name]
         a = o2.store["alert"][name]
         assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence)
+
+
+# --- 스위치 syslog 필드 추출과 로그 알림 (Spec #277) ----------------------------------------------------------------------
+from openobserve_config import (o2c_enabled_alerts, o2c_switch_noise_filter, o2c_switch_uplink_sql,  # noqa: E402
+                                o2c_valid_switch_events, o2c_valid_switch_roster, o2c_valid_switch_uplinks)
+
+SWITCH_ALERTS = {   # name -> (severity, period minutes, silence minutes)
+    "infra-switch-config-change": ("P2 경고", 5, 5),
+    "infra-switch-login-failures": ("P2 경고", 5, 5),
+    "infra-switch-severity-critical": ("P1 긴급", 5, 5),
+    "infra-switch-mac-flap": ("P2 경고", 10, 60),
+    "infra-switch-syslog-silent": ("P2 경고", 1440, 1440),
+}
+SWITCH_FN = "switch_syslog_semantics"
+
+
+def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_windows(o2):
+    assert _apply(o2).returncode == 0
+    for name, (sev, period, silence) in SWITCH_ALERTS.items():
+        a = o2.store["alert"][name]
+        assert a["stream_name"] == "system_logs" and a["stream_type"] == "logs", name
+        assert a["context_attributes"]["severity"] == sev, name
+        assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence), name
+        assert a["destinations"] == ["infra-automation-webhook"] and a["enabled"], name
+        assert "switch-syslog" in a["query_condition"]["sql"], name
+
+
+def test_switch_function_and_pipeline_are_added_beside_the_security_ones_and_the_security_pipeline_is_untouched(o2):
+    assert _apply(o2).returncode == 0
+    assert set(o2.store["function"]) == {"security_semantics", SWITCH_FN}
+    fn = o2.store["function"][SWITCH_FN]
+    assert fn["function"] == (ROLE / "files" / "vrl" / "switch_syslog_semantics.vrl").read_text().strip() and fn["params"] == "row"
+    pl = o2.store["pipeline"][SWITCH_FN]
+    assert pl["source"]["stream_name"] == "system_logs" and pl["source"]["source_type"] == "realtime" and pl["enabled"] is True
+    node = next(n["data"] for n in pl["nodes"] if n["data"]["node_type"] == "function")
+    assert node["name"] == SWITCH_FN and node["after_flatten"] is True
+    # 서버 로그를 거르는 일은 함수 안의 service_name 검사가 한다(조건 노드는 쓰지 않는다)
+    assert not [n for n in pl["nodes"] if n["data"]["node_type"] == "condition"]
+    assert o2.store["pipeline"]["security_semantics"]["source"]["stream_name"] == "security_logs"
+
+
+def test_switch_function_drift_is_repaired_by_a_single_update(o2):
+    assert _apply(o2).returncode == 0
+    o2.store["function"][SWITCH_FN]["function"] = "# stale\n."
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    ((method, path, _),) = o2.writes
+    assert (method, path) == ("PUT", f"/api/default/functions/{SWITCH_FN}")
+
+
+def test_uplink_alert_is_not_created_while_the_port_list_is_empty(o2):
+    assert _apply(o2).returncode == 0
+    assert UPLINK_ALERT not in o2.store["alert"]
+    assert all(UPLINK_ALERT not in sql for _, sql in o2.searches)
+
+
+def test_uplink_alert_is_created_with_a_list_verified_and_removed_again_when_the_list_is_emptied(o2):
+    res = _apply(o2, extra={"o2c_switch_uplinks": UPLINKS})
+    assert res.returncode == 0, res.stdout + res.stderr
+    a = o2.store["alert"][UPLINK_ALERT]
+    sql = a["query_condition"]["sql"]
+    assert a["context_attributes"]["severity"] == "P1 긴급" and a["stream_name"] == "system_logs"
+    assert "device_id = 'ns0250'" in sql and "interface gigabitethernet1/0/1, changed state to down" in sql   # 약어가 전체 이름으로 풀린다
+    assert any("interface gigabitethernet1/0/49, changed state to down" in s for _, s in o2.searches)   # 검증은 케이스 장비를 목록에 더해 돌린다
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", f"/api/v2/default/alerts/{a['alert_id']}")]
+    assert UPLINK_ALERT not in o2.store["alert"]
+
+
+def test_every_switch_alert_has_a_runbook_entry_with_the_list_update_procedure():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for anchor in ("switch-config-change", "switch-login-failures", "switch-severity-critical", "switch-uplink-down",
+                   "switch-mac-flap", "switch-syslog-silent"):
+        assert f'<a id="{anchor}"></a>' in runbook, anchor
+    for token in ("o2c_switch_uplinks", "o2c_switch_syslog_roster", "o2c_switch_noise_events"):
+        assert token in runbook, token
+
+
+def test_default_noise_list_holds_the_arp_resolution_failure_and_every_alert_excludes_it(o2):
+    assert _apply(o2).returncode == 0
+    for name in ("infra-switch-config-change", "infra-switch-login-failures", "infra-switch-severity-critical", "infra-switch-mac-flap"):
+        assert "event_name NOT IN ('ADJ-3-RESOLVE_REQ')" in _sql(o2, name), name
+    assert "NOT IN" not in _sql(o2, "infra-switch-syslog-silent")   # 잡음 줄도 수신으로 센다
+
+
+def test_switch_thresholds_and_lists_come_from_role_variables(o2):
+    assert _apply(o2).returncode == 0
+    o2.writes.clear()
+    extra = {"o2c_switch_noise_events": ["ADJ-3-RESOLVE_REQ", "LINK-3-UPDOWN"], "o2c_switch_macflap_threshold": 7,
+             "o2c_switch_login_fail_threshold": 9, "o2c_switch_syslog_roster": ["ns0250"], "o2c_switch_silent_hours": 48}
+    assert _apply(o2, extra=extra).returncode == 0
+    assert "HAVING count(*) >= 7" in _sql(o2, "infra-switch-mac-flap") and "HAVING count(*) >= 9" in _sql(o2, "infra-switch-login-failures")
+    assert "'ADJ-3-RESOLVE_REQ', 'LINK-3-UPDOWN'" in _sql(o2, "infra-switch-severity-critical")
+    silent = o2.store["alert"]["infra-switch-syslog-silent"]
+    assert _branch_devices(silent["query_condition"]["sql"]) == {"ns0250"} and silent["trigger_condition"]["period"] == 2880
+
+
+def _branch_devices(sql):
+    return set(re.findall(r"SELECT '([^']+)' AS device_id", sql))
+
+
+def test_default_silent_roster_is_the_explicit_list_of_confirmed_senders_and_the_default_window_is_24_hours(o2):
+    assert _apply(o2).returncode == 0
+    silent = o2.store["alert"]["infra-switch-syslog-silent"]
+    assert _branch_devices(silent["query_condition"]["sql"]) == {"ns0250", "ns0347"}   # 인벤토리 전체가 아니라 명시 목록
+    assert silent["trigger_condition"]["period"] == 24 * 60 and "HAVING count(*) < 1" in silent["query_condition"]["sql"]
+
+
+@pytest.mark.parametrize("extra", [
+    {"o2c_switch_noise_events": ["ADJ-3-RESOLVE_REQ' OR '1'='1"]},
+    {"o2c_switch_macflap_events": ["SW_MATM-9-MACFLAP_NOTIF"]},   # 심각도는 0~7
+    {"o2c_switch_syslog_roster": ["ns0250' OR '1'='1"]},
+    {"o2c_switch_syslog_roster": ["server01"]},
+    {"o2c_switch_uplinks": [{"device": "ns0250", "port": "Gi1/0/1' OR '1'='1"}]},
+    {"o2c_switch_uplinks": [{"device": "core1", "port": "Gi1/0/1"}]},
+])
+def test_invalid_switch_lists_fail_before_any_request(o2, extra):
+    res = _apply(o2, extra=extra)
+    assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+    assert "1' OR" not in res.stdout + res.stderr
+
+
+def test_switch_filters_validate_and_build_safe_sql():
+    assert o2c_valid_switch_events(["SW_MATM-4-MACFLAP_NOTIF", "ADJ-3-RESOLVE_REQ"]) and not o2c_valid_switch_events(["SW_MATM-8-X"])
+    assert o2c_valid_switch_roster(["ns0250"]) and not o2c_valid_switch_roster(["NS0250", "ns0250 "])
+    assert o2c_valid_switch_uplinks([{"device": "ns0250", "port": "Gi1/0/49"}, {"device": "ns0347", "port": "Port-channel1"}])
+    assert not o2c_valid_switch_uplinks([{"device": "ns0250", "port": "Gi1/0/49%"}, {"device": "ns0250"}])
+    assert o2c_switch_noise_filter([]) == "" and o2c_switch_noise_filter(["A-3-B"]) == " AND event_name NOT IN ('A-3-B')"
+    sql = o2c_switch_uplink_sql([{"device": "ns0250", "port": "Gi1/0/4"}, {"device": "ns0250", "port": "Te1/1/1"}])
+    assert "interface gigabitethernet1/0/4, changed state to down" in sql and "interface tengigabitethernet1/1/1, changed state to" in sql
+    assert o2c_switch_uplink_sql([]).count("1 = 0") == 1   # 빈 목록은 어떤 줄도 잡지 않는다
+    assert [a["name"] for a in o2c_enabled_alerts([{"name": "a"}, {"name": "b", "enabled": False}, {"name": "c", "enabled": "False"},
+                                                   {"name": "d", "enabled": True}])] == ["a", "d"]
+
+
+def _run_alert_on_sqlite(sql, records):
+    """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows."""
+    db = sqlite3.connect(":memory:")
+    db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
+    columns = sorted({k for r in records for k in r})
+    db.execute('CREATE TABLE "system_logs_alert_verify" (%s)' % ", ".join(f'"{c}"' for c in columns))
+    for r in records:
+        db.execute('INSERT INTO "system_logs_alert_verify" VALUES (%s)' % ", ".join("?" * len(columns)), [r.get(c) for c in columns])
+    cur = db.execute(sql)
+    names = [d[0] for d in cur.description]
+    return [dict(zip(names, row)) for row in cur.fetchall()]
+
+
+SWITCH_MARKERS = {   # alert -> a fragment only its search carries
+    "infra-switch-config-change": "'SYS-5-CONFIG_I'", "infra-switch-login-failures": "'SEC_LOGIN-4-LOGIN_FAILED'",
+    "infra-switch-severity-critical": "log_syslog_severity_code <=", UPLINK_ALERT: "changed state to down",
+    "infra-switch-mac-flap": "'SW_MATM-4-MACFLAP_NOTIF'", "infra-switch-syslog-silent": "AS device_id, count(*) AS n",
+}
+
+
+def test_switch_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_on_the_synthetic_records(o2):
+    """The searches the verification step sends (rewritten SQL) are executed on the injected records — not just compared by name."""
+    res = _apply(o2, extra={"o2c_switch_uplinks": UPLINKS})
+    assert res.returncode == 0, res.stdout + res.stderr
+    records = [r for p, _, rs in o2.ingests if "/system_logs_alert_verify/" in p for r in rs]
+    searches = [sql for stream, sql in o2.searches if stream == "system_logs_alert_verify"]
+    for name, marker in SWITCH_MARKERS.items():
+        (sql,) = [s for s in searches if marker in s]
+        spec = FIXTURES[name]
+        fired = {m.group(1) for row in _run_alert_on_sqlite(sql, records) if (m := re.fullmatch(r"(.+)-\d+", str(row[spec["row_key"]])))}
+        assert fired == {c["host"] for c in spec["cases"] if c["fires"]}, name
+
+
+def test_switch_fixtures_cover_every_alert_with_firing_and_quiet_cases_and_off_roster_and_other_services():
+    for name in list(SWITCH_ALERTS) + [UPLINK_ALERT]:
+        cases = FIXTURES[name]["cases"]
+        assert {c["fires"] for c in cases} == {True, False}, name
+        assert FIXTURES[name]["host_field"] == "device_id", name
+    assert any(c.get("off_roster") for c in FIXTURES["infra-switch-syslog-silent"]["cases"])
+    assert any(r.get("service_name") != "switch-syslog" for n in SWITCH_ALERTS for c in FIXTURES[n]["cases"] for r in c["records"])
+    assert any(c.get("watch_port") for c in FIXTURES[UPLINK_ALERT]["cases"])
