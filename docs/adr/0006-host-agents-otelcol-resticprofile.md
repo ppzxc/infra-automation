@@ -72,7 +72,7 @@
   | 스트림 | 내용 | 보존 |
   |---|---|---|
   | `security_logs` | secure, auth.log, audit.log, sudo.log, fail2ban.log, firewalld | 1년 (대상에 개인정보처리시스템 없음 — 포함 시 2년으로 상향) |
-  | `system_logs` | messages, syslog, cron, 패키지 로그, boot, kern | 6개월 |
+  | `system_logs` | messages, syslog, cron, 패키지 로그, boot, kern | 1년 (2026-10-20 개정: 6개월 → 1년. 로그 보관 정책을 1년으로 통일했고, OpenObserve 서버 전역 보관 365일과 같다) |
   | `app_logs` | `otel_extra_logs` 기본 목적지 | 서버 측 결정 |
   | `backup_logs` | §2.6 백업·유지보수·등록 이벤트 | 1년 (2.9.3 증적) |
 
