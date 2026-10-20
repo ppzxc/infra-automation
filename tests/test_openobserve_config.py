@@ -60,14 +60,14 @@ def _same_roster_alert(name, stored, sql):
     def is_roster(q):
         return any(f"AS {col}, count(*) AS n FROM" in q for col in ("host_name", "host", "device_id"))
     def shape(q):   # the roster hosts differ; the extra condition of each branch (e.g. job = 'backup' AND success = true) must match
-        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?)?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
+        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?|\((?:host|host_name|device_id) = '[^']*' OR lower\(body\) LIKE '[^']*'\) AND )?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
         return {m.group(1) if m else "" for m in conds}
     return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql) and shape(stored) == shape(sql)
 
 
 def _case_host(rec):
     """The (fake) host of a synthetic record: backup_logs use host, switch syslog uses device_id, the others host_name."""
-    return rec.get("host_name") or rec.get("host") or rec["device_id"]
+    return rec.get("host_name") or rec.get("host") or rec.get("device_id") or re.search(r" (verify-\S+?)-3560X:", rec["body"]).group(1)   # 변환 전 레코드는 원문에서
 
 
 class FakeO2:
@@ -1475,6 +1475,26 @@ def _run_alert_on_sqlite(sql, records):
     cur = db.execute(sql)
     names = [d[0] for d in cur.description]
     return [dict(zip(names, row)) for row in cur.fetchall()]
+
+
+def test_silent_alert_counts_a_record_that_only_names_the_device_in_its_raw_body(o2):
+    """Records written before the switch pipeline existed have no device_id; they must still count as "received"."""
+    assert _apply(o2).returncode == 0
+    sql = _sql(o2, "infra-switch-syslog-silent")
+    for device in ("ns0250", "ns0347"):
+        assert f"(device_id = '{device}' OR lower(body) LIKE '% {device}%')" in sql, device
+    assert "HAVING count(*) < 1" in sql
+
+
+def test_silent_alert_does_not_fire_right_after_the_pipeline_is_applied_when_old_logs_exist(o2):
+    """The first evaluation after the pipeline change sees old records (raw body only) next to a few processed ones."""
+    assert _apply(o2).returncode == 0
+    sql = _sql(o2, "infra-switch-syslog-silent").replace('"system_logs"', '"system_logs_alert_verify"')
+    other = {"service_name": "switch-syslog", "device_id": "ns0999", "body": "Oct 20 17:50:00 203.0.113.9 ns0999-3560X: x"}   # device_id 컬럼이 있는 스키마
+    old = [{"service_name": "switch-syslog", "body": "Oct 20 17:48:40 203.0.113.9 NS0347-3560X: Oct 20 17:48:39.702 KST: %SW_MATM-4-MACFLAP_NOTIF: x"},
+           {"service_name": "switch-syslog", "body": "Oct 20 17:48:35 203.0.113.8 ns0250-3750X: Oct 20 17:48:34.411 KST: %ADJ-3-RESOLVE_REQ: x"}]
+    assert _run_alert_on_sqlite(sql, old + [other]) == []   # 두 장비 모두 수신 중 → 발화 없음
+    assert {row["device_id"] for row in _run_alert_on_sqlite(sql, old[:1] + [other])} == {"ns0250"}   # 한 장비만 조용하면 그 장비만 발화
 
 
 SWITCH_MARKERS = {   # alert -> a fragment only its search carries

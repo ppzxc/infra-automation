@@ -327,18 +327,28 @@ def o2c_absence_sql(hosts, stream, level):
     return ' UNION ALL '.join(_absence_branch(h, stream, level) for h in hosts)
 
 
-def o2c_missing_sql(hosts, stream, field, cond):
+def o2c_missing_sql(hosts, stream, field, cond, body_match=False):
     """One row per roster host without a record matching ``cond`` (e.g. no successful backup) in the alert window.
 
     ``field`` is the stream's host column (``host`` for backup_logs, ``host_name`` elsewhere). Same UNION ALL branch shape as
     the Silent Host SQL; an empty roster yields a branch that can never return a row.
+
+    ``body_match``: a record also counts for the host when its raw ``body`` names the host (``lower(body) LIKE '% <host>%'``).
+    ``field`` only exists on records the ingest pipeline already processed, so without this the first evaluation after a pipeline
+    change sees no data for any host and reports every host as silent.
     """
     if not _HOST_RE.match(field):
         raise ValueError('SQL에 넣을 수 없는 필드 이름: %s' % field)
     if not hosts:
         return 'SELECT \'none\' AS %s, count(*) AS n FROM "%s" WHERE %s HAVING count(*) < 0' % (field, stream, cond)
+
+    def who(h):
+        if body_match:
+            return "(%s = '%s' OR lower(body) LIKE '%% %s%%')" % (field, h, h.lower())
+        return "%s = '%s'" % (field, h)
+
     return ' UNION ALL '.join(
-        'SELECT \'%s\' AS %s, count(*) AS n FROM "%s" WHERE %s = \'%s\' AND %s HAVING count(*) < 1' % (h, field, stream, field, h, cond)
+        'SELECT \'%s\' AS %s, count(*) AS n FROM "%s" WHERE %s AND %s HAVING count(*) < 1' % (h, field, stream, who(h), cond)
         for h in hosts)
 
 
@@ -404,16 +414,20 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                            'off_roster': bool(case.get('off_roster'))}
             for rec in records:
                 rec = dict(rec)
+                # omit_host_field: 변환 전 레코드(호스트 필드 없이 원문만 있음)를 흉내 낸다. 원문의 {host}가 가짜 호스트로 바뀐다
+                host_fields = {} if rec.pop('omit_host_field', False) else {spec.get('host_field', DEFAULT_ROW_KEY): host}
+                if not host_fields and isinstance(rec.get('body'), str):
+                    rec['body'] = rec['body'].replace('{host}', host)
                 repeat = rec.pop('repeat', 1)
                 rec_stream = rec.pop('stream', stream)   # 한 알림이 여러 스트림을 보면 레코드마다 대상 스트림을 지정한다
                 ts = rec.pop('ts', None)   # 합성 스크레이프 시각(시작 기준 초) — 메트릭은 _timestamp별로 묶어 판정한다
                 stamps = [{}] * repeat if ts is None else [{'_timestamp': start_us + int(t) * 1000000} for t in
                                                            (ts if isinstance(ts, list) else [ts])]
-                ingest.setdefault(rec_stream, []).extend(dict(rec, **{spec.get('host_field', DEFAULT_ROW_KEY): host}, **st) for st in stamps)
+                ingest.setdefault(rec_stream, []).extend(dict(rec, **host_fields, **st) for st in stamps)
         missing = alert.get('missing')
         if missing:
             roster = list((rosters or {}).get(missing['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
-            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'])
+            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'], bool(missing.get('body_match')))
         if absence:
             roster = list((rosters or {}).get(absence['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
             sql = o2c_absence_sql(roster, stream, absence['level'])

@@ -665,8 +665,8 @@ o2c_alerts:
     row_template: '• {device_id}'
     description: "수신 중단 감시 목록(o2c_switch_syslog_roster)의 스위치별 switch-syslog가 {{ o2c_switch_silent_hours }}시간 없음 (State Alert, 재통지 1440분) — 장비 자체 다운은 SNMP 알림(#175)의 몫"
     stream: system_logs
-    missing: {roster: switch, field: device_id, cond: "service_name = 'switch-syslog'"}
-    sql: "{{ o2c_switch_syslog_roster | o2c_missing_sql('system_logs', 'device_id', \"service_name = 'switch-syslog'\") }}"
+    missing: {roster: switch, field: device_id, cond: "service_name = 'switch-syslog'", body_match: true}
+    sql: "{{ o2c_switch_syslog_roster | o2c_missing_sql('system_logs', 'device_id', \"service_name = 'switch-syslog'\", true) }}"
     period: "{{ o2c_switch_silent_hours * 60 }}"
     frequency: 60
     silence: 1440
