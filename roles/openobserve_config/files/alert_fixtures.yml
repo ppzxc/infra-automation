@@ -805,6 +805,11 @@ infra-switch-syslog-silent:
       fires: false
       records:
         - {ts: -600, service_name: switch-syslog, device_name: verify-sw, event_name: ADJ-3-RESOLVE_REQ, log_syslog_severity_code: 3, body: "Oct 20 10:00:00 203.0.113.5 ns0250-3750X: Oct 20 10:00:00.001 KST: %ADJ-3-RESOLVE_REQ: synthetic"}
+    - name: 변환 전 레코드(device_id 필드 없이 원문만 있음)도 수신 중이다
+      host: verify-sw-silent-legacy
+      fires: false
+      records:
+        - {ts: -600, omit_host_field: true, service_name: switch-syslog, body: "Oct 20 10:00:00 203.0.113.7 {host}-3560X: Oct 20 10:00:00.002 KST: %SW_MATM-4-MACFLAP_NOTIF: Host 0000.0000.0001 in vlan 7 is flapping between port Gi0/1 and port Gi0/2"}
     - name: 감시 목록에 없는 장비는 로그가 없어도 알리지 않는다
       host: verify-sw-silent-off-roster
       fires: false

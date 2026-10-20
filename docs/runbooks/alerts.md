@@ -342,6 +342,8 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 - `o2c_switch_noise_events`(잡음 메시지 코드): 반복되는 의미 없는 메시지를 `FACILITY-SEVERITY-MNEMONIC`로 추가한다. 기본값은 ARP 해소 실패(`ADJ-3-RESOLVE_REQ`)다. 잡음으로 뺀 줄도 검색은 그대로 되고 수신 중단 판단에는 수신으로 센다. 설정 변경·로그인 실패·MAC 플랩 메시지 코드를 잡음에 넣으면 그 알림도 꺼지므로 넣지 않는다.
 - 임계값: `o2c_switch_login_fail_threshold`(기본 5회/5분), `o2c_switch_macflap_threshold`(기본 2회/10분), `o2c_switch_severity_max`(기본 2), `o2c_switch_silent_hours`(기본 24시간).
 
+**수신 중단 판정**: `device_id` 필드가 있거나 원문에 장비 이름(관리번호)이 있으면 수신 중으로 센다. 파이프라인을 반영한 직후에도, 새 장비를 목록에 더한 직후에도 이전 로그 때문에 오탐이 나지 않는다. 원문에서 찾으므로 다른 장비 메시지가 이 장비 이름을 본문에 언급하면 조용한 장비를 놓칠 수 있다(관리번호는 보통 본문에 나오지 않는다).
+
 **수신 중단 알림의 한계**: 스위치 syslog는 이벤트가 있을 때만 전송되므로 조용한 장비와 고장난 전송을 구분하지 못한다. 그래서 기준 시간을 24시간으로 길게 두었다. 2주 관찰한 뒤 오탐이 있으면 `o2c_switch_silent_hours`를 늘리고, 놓치는 것이 있으면 줄인다. 장비 자체가 내려간 것은 이 알림이 아니라 SNMP 알림(#175)이 맡는다.
 
 <a id="switch-config-change"></a>
