@@ -27,6 +27,10 @@ o2c_validate_certs: "{{ o2c_endpoint is match('^https://') }}"
 o2c_function_name: security_semantics
 o2c_pipeline_name: security_semantics
 o2c_stream: security_logs
+# 스위치 syslog 의미 해석(Spec #277): system_logs의 service_name=switch-syslog 레코드에만 필드를 더한다(서버 로그는 그대로 통과).
+o2c_switch_function_name: switch_syslog_semantics
+o2c_switch_pipeline_name: switch_syslog_semantics
+o2c_switch_stream: system_logs
 o2c_template_name: infra-automation-webhook
 o2c_destination_name: infra-automation-webhook
 o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"
@@ -44,6 +48,32 @@ o2c_ssh_fail_window_minutes: 5
 o2c_parse_error_percent: 10
 o2c_parse_error_min_lines: 20
 o2c_parse_error_window_minutes: 30
+
+# 스위치 syslog 알림(Spec #277). 값은 모두 역할 기본 변수이며 Semaphore Environment(-e)로 덮어쓴다 — 저장소에는 IP·포트·계정을 두지 않는다.
+# 메시지 코드는 Cisco가 찍는 그대로 `%`를 뺀 형태(FACILITY-SEVERITY-MNEMONIC)다. 형식은 O2C-002에서 검증한다(SQL에 들어간다).
+# 잡음 억제: 이 코드의 줄은 스위치 알림에서 빠진다(검색은 그대로 된다). ARP 해소 실패(ADJ-3-RESOLVE_REQ)는 최근 샘플의 75%를 차지한 반복 메시지다.
+o2c_switch_noise_events: [ADJ-3-RESOLVE_REQ]
+o2c_switch_config_change_events: [SYS-5-CONFIG_I]
+o2c_switch_login_fail_events: [SEC_LOGIN-4-LOGIN_FAILED]
+o2c_switch_login_fail_threshold: 5
+o2c_switch_login_fail_window_minutes: 5
+# 심각도 0(emergency)부터 이 값(2, critical)까지가 즉시 P1이다. 링크 다운은 심각도 3이라 여기에 걸리지 않는다.
+o2c_switch_severity_max: 2
+o2c_switch_macflap_events: [SW_MATM-4-MACFLAP_NOTIF]
+# 최근 관찰: 한 장비에서 3시간에 25건(10분에 평균 1.4건). 기본 2회는 그 장비의 지금 상태에서도 울린다.
+o2c_switch_macflap_threshold: 2
+o2c_switch_macflap_window_minutes: 10
+# 플랩이 계속되는 동안의 재통지 간격(분). 같은 사건으로 구간마다 울리지 않도록 조회 구간보다 길게 둔다.
+o2c_switch_macflap_silence_minutes: 60
+# 업링크 포트 다운: 감시할 (장비 관리번호, 포트) 목록. 비어 있으면(기본) 알림 규칙을 만들지 않는다 — 링크 다운은 심각도 3이라 목록 없이 알리면
+# 미사용 포트 다운이 전부 알림이 된다. 포트는 약어(Gi1/0/49)나 전체 이름(GigabitEthernet1/0/49) 어느 쪽이든 쓴다. 예: [{device: ns0250, port: Gi1/0/49}]
+o2c_switch_uplinks: []
+# 수신 중단 감시 대상 스위치(관리번호). 명시한 장비만 본다 — 아직 전송을 설정하지 않은 장비가 허위 알림을 만들지 않는다.
+# 기본값은 스펙을 쓸 때 전송이 확인된 장비다(미확인: 목록의 장비가 기준 시간 동안 아무것도 보내지 않으면 발화한다). 전송을 설정한 장비는 여기에 더한다.
+o2c_switch_syslog_roster: [ns0250, ns0347]
+# 스위치 syslog는 이벤트가 있을 때만 전송되므로 조용한 것과 고장을 구분하지 못한다. 기준 시간은 길게 두고 2주 관찰 뒤 조정한다.
+o2c_switch_silent_hours: 24
+o2c_switch_noise_filter: "{{ o2c_switch_noise_events | o2c_switch_noise_filter }}"
 
 # 정상 출발지(OpenBao normal_sources). 주소는 O2C-002에서 IP 문자 형식을 검증하므로 SQL에 그대로 넣는다.
 o2c_normal_sources: "{{ o2c_kv.normal_sources | default([], true) }}"
@@ -89,6 +119,7 @@ o2c_rosters:
   maintenance: "{{ o2c_roster_maintenance }}"
   silent: "{{ o2c_roster_silent }}"
   app: "{{ o2c_roster_app }}"
+  switch: "{{ o2c_switch_syslog_roster }}"
 
 # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8, ADR-0012): 스트림이 이미 있을 때만 맞춘다(없으면 건너뜀 — 첫 span이 들어와야 생긴다).
 # 운영 규칙: org당 트레이스 스트림은 o2c_traces_stream 하나만 둔다(View Trace가 이름순 첫 트레이스 스트림을 기본으로 고르므로, #251).
@@ -529,6 +560,119 @@ o2c_alerts:
     period: 15
     frequency: 5
     silence: 1440
+
+  # --- 스위치 syslog (Spec #277) --- 모두 system_logs의 service_name='switch-syslog'. 장비는 coalesce(device_id, device_name)(관리번호, 없으면 정규화된 이름)로 집계한다.
+  # SQL은 파싱된 모든 줄이 갖는 필드와 body만 참조한다(일부 메시지에만 생기는 필드는 body에서 뽑는다 — 없는 컬럼은 알림을 unknown field 오류로 만든다).
+  - name: infra-switch-config-change
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 설정 변경 감지"
+    what: "스위치에서 설정 변경 메시지({{ o2c_switch_config_change_events | join(', ') }})가 기록됐습니다."
+    why: "승인되지 않은 설정 변경이면 네트워크 장애나 침해의 시작일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다."
+    action: "① 대상의 변경 주체(사용자·접속 방식·주소)를 작업 일정과 대조 ② 승인된 작업이 아니면 장비 접속 차단과 설정 백업(Cisco Backup) 비교 ③ 승인된 작업이면 작업 기록에 남기기"
+    runbook: "{{ o2c_runbook_base }}#switch-config-change"
+    row_template: '• {device}: 설정 변경 {changes}건 — {detail}'
+    description: "스위치 설정 변경 메시지({{ o2c_switch_config_change_events | join(', ') }}) 1건부터 (Event Alert) — 행에 장비와 원문의 변경 주체"
+    stream: system_logs
+    sql: >-
+      SELECT coalesce(device_id, device_name) AS device,
+      regexp_replace(body, '^[^%]*%[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+: ', '') AS detail, count(*) AS changes FROM "system_logs"
+      WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_config_change_events | join("', '") }}'){{ o2c_switch_noise_filter }}
+      GROUP BY device, detail
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-switch-login-failures
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 로그인 실패 반복"
+    what: "한 스위치에서 {{ o2c_switch_login_fail_window_minutes }}분 동안 로그인 실패({{ o2c_switch_login_fail_events | join(', ') }})가 {{ o2c_switch_login_fail_threshold }}회 이상 발생했습니다."
+    why: "스위치 관리 접속에 대한 무차별 대입 시도일 수 있습니다. 스위치는 모든 서버의 통신 경로입니다."
+    action: "① 로그 보기에서 실패 줄의 사용자·출발지 확인 ② 외부·미확인 출발지면 해당 접속 경로(ACL·방화벽) 차단 ③ 작업자 오입력이면 계정 확인 후 기록"
+    runbook: "{{ o2c_runbook_base }}#switch-login-failures"
+    row_template: '• {device}: 로그인 실패 {failures}회'
+    description: "스위치 로그인 실패({{ o2c_switch_login_fail_events | join(', ') }})가 장비별로 {{ o2c_switch_login_fail_window_minutes }}분 동안 {{ o2c_switch_login_fail_threshold }}회 이상 (Event Alert)"
+    stream: system_logs
+    sql: >-
+      SELECT coalesce(device_id, device_name) AS device, count(*) AS failures FROM "system_logs"
+      WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_login_fail_events | join("', '") }}'){{ o2c_switch_noise_filter }}
+      GROUP BY device HAVING count(*) >= {{ o2c_switch_login_fail_threshold }}
+    period: "{{ o2c_switch_login_fail_window_minutes }}"
+    frequency: 1
+    silence: "{{ o2c_switch_login_fail_window_minutes }}"
+  - name: infra-switch-severity-critical
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "스위치 중요 장애 메시지 (심각도 {{ o2c_switch_severity_max }} 이하)"
+    what: "스위치가 심각도 {{ o2c_switch_severity_max }} 이하(0 emergency, 1 alert, 2 critical)의 메시지를 기록했습니다."
+    why: "스위치 하드웨어·전원·스택 같은 중대한 장애를 뜻합니다. 방치하면 그 스위치에 연결된 서버가 함께 끊길 수 있습니다."
+    action: "① 행의 메시지 코드와 로그 보기의 원문 확인 ② 장비 콘솔·전원·스택·팬 상태 확인 ③ 하드웨어 문제면 이중화 경로로 서비스 전환 후 교체 일정 수립"
+    runbook: "{{ o2c_runbook_base }}#switch-severity-critical"
+    row_template: '• {device}: {event_name} (심각도 {severity_code}) {events}건'
+    description: "스위치 syslog 심각도 0~{{ o2c_switch_severity_max }}(Cisco 메시지 코드의 심각도)는 즉시 P1, 잡음 목록은 제외 (Event Alert)"
+    stream: system_logs
+    sql: >-
+      SELECT coalesce(device_id, device_name) AS device, event_name, min(log_syslog_severity_code) AS severity_code, count(*) AS events FROM "system_logs"
+      WHERE service_name = 'switch-syslog' AND log_syslog_severity_code <= {{ o2c_switch_severity_max }}{{ o2c_switch_noise_filter }}
+      GROUP BY device, event_name
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-switch-uplink-down
+    enabled: "{{ o2c_switch_uplinks | length > 0 }}"
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "스위치 업링크 포트 다운"
+    what: "감시 목록(o2c_switch_uplinks)에 있는 스위치 포트의 링크가 내려갔습니다."
+    why: "스위치 사이나 사이트 밖으로 나가는 핵심 연결이 끊긴 것입니다. 이중화가 없으면 그 아래 서버가 모두 고립됩니다."
+    action: "① 행의 장비·포트와 반대편 장비 상태 확인 ② 케이블·광모듈·반대편 포트의 shutdown 여부 확인 ③ 복구되지 않으면 우회 경로 확보와 회선 사업자 연락"
+    runbook: "{{ o2c_runbook_base }}#switch-uplink-down"
+    row_template: '• {device} {port}: 링크 다운 {downs}건'
+    description: "감시 목록의 (장비, 포트)에 대한 link down / line protocol down / administratively down 메시지 (Event Alert) — 목록이 비면 이 규칙은 만들지 않는다"
+    stream: system_logs
+    uplinks: "{{ o2c_switch_uplinks }}"
+    noise_events: "{{ o2c_switch_noise_events }}"
+    sql: "{{ o2c_switch_uplinks | o2c_switch_uplink_sql(o2c_switch_noise_events) }}"
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-switch-mac-flap
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 MAC 플랩 감지"
+    what: "한 스위치에서 {{ o2c_switch_macflap_window_minutes }}분 동안 MAC 플랩({{ o2c_switch_macflap_events | join(', ') }})이 {{ o2c_switch_macflap_threshold }}회 이상 발생했습니다."
+    why: "L2 루프나 같은 MAC을 쓰는 장비의 이동·이중 연결 신호입니다. 방치하면 해당 VLAN 통신이 불안정해지고 브로드캐스트 폭풍으로 번질 수 있습니다."
+    action: "① 로그 보기에서 플랩하는 MAC·VLAN·두 포트 확인 ② 두 포트 중 한쪽 끝 장비(서버 이중화 본딩·가상 스위치·루프 케이블)를 점검 ③ 의도한 이중 연결이면 본딩 모드를 확인하고 아니면 포트를 분리"
+    runbook: "{{ o2c_runbook_base }}#switch-mac-flap"
+    row_template: '• {device}: MAC 플랩 {flaps}회'
+    description: "스위치 MAC 플랩({{ o2c_switch_macflap_events | join(', ') }})이 장비별로 {{ o2c_switch_macflap_window_minutes }}분 동안 {{ o2c_switch_macflap_threshold }}회 이상 (재통지 {{ o2c_switch_macflap_silence_minutes }}분)"
+    stream: system_logs
+    sql: >-
+      SELECT coalesce(device_id, device_name) AS device, count(*) AS flaps FROM "system_logs"
+      WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_macflap_events | join("', '") }}'){{ o2c_switch_noise_filter }}
+      GROUP BY device HAVING count(*) >= {{ o2c_switch_macflap_threshold }}
+    period: "{{ o2c_switch_macflap_window_minutes }}"
+    frequency: 1
+    silence: "{{ o2c_switch_macflap_silence_minutes }}"
+  - name: infra-switch-syslog-silent
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 syslog 수신 중단: {{ o2c_switch_silent_hours }}시간 넘게 로그 없음"
+    what: "수신 중단 감시 목록(o2c_switch_syslog_roster)의 스위치에서 {{ o2c_switch_silent_hours }}시간 넘게 syslog가 도착하지 않았습니다."
+    why: "스위치의 전송 설정이 사라졌거나 수신 경로가 막혔을 수 있습니다. 그동안의 설정 변경·로그인 이력이 중앙에 남지 않습니다. 스위치는 이벤트가 있을 때만 보내므로 오래 조용한 정상 장비일 수도 있습니다."
+    action: "① 스위치에서 logging host 설정과 logging trap 수준 확인 ② 수신 서버의 방화벽·수신 서비스 상태 확인(#276) ③ 장비가 원래 조용한 것이면 기준 시간(o2c_switch_silent_hours)을 늘리고, 철거·교체했으면 감시 목록에서 뺀다"
+    runbook: "{{ o2c_runbook_base }}#switch-syslog-silent"
+    row_template: '• {device_id}'
+    description: "수신 중단 감시 목록(o2c_switch_syslog_roster)의 스위치별 switch-syslog가 {{ o2c_switch_silent_hours }}시간 없음 (State Alert, 재통지 1440분) — 장비 자체 다운은 SNMP 알림(#175)의 몫"
+    stream: system_logs
+    missing: {roster: switch, field: device_id, cond: "service_name = 'switch-syslog'"}
+    sql: "{{ o2c_switch_syslog_roster | o2c_missing_sql('system_logs', 'device_id', \"service_name = 'switch-syslog'\") }}"
+    period: "{{ o2c_switch_silent_hours * 60 }}"
+    frequency: 60
+    silence: 1440
+
+# 실제로 만드는 알림: `enabled`가 거짓인 알림(업링크 목록이 빈 업링크 다운 규칙)은 만들지 않는다. 서버에 이미 있으면 계획이 지운다.
+o2c_alerts_active: "{{ o2c_alerts | o2c_enabled_alerts }}"
 
 # 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고
 # 알림 SQL(스트림명만 교체)을 검색해 기대와 비교한다. 운영 스트림·알림·통지 대상은 건드리지 않는다.

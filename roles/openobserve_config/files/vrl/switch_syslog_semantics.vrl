@@ -1,0 +1,53 @@
+# OpenObserve VRL ingest function: switch_syslog_semantics (ADR-0008, Spec #277)
+#
+# Runs on the system_logs stream (real-time pipeline, after flatten) but only touches records whose service_name is
+# `switch-syslog` (network switch syslog received by the collection server, Spec #276). Every other record, and every switch
+# line that is not a Cisco `%FACILITY-SEVERITY-MNEMONIC:` message, is returned unchanged. The original `body` and every
+# existing field (including `host_name`, which is the collection server, and `severity`, which is always 0) are never modified;
+# fields are only ADDED. OpenObserve stores the dots of an OTel attribute name as underscores:
+#
+#   device_name                 device name from the line, lower-cased, domain part removed (NS0347-3560X.example -> ns0347-3560x)
+#   device_id                   management number (Inventory Hostname): the leading `ns` + digits of device_name; absent when the name has none
+#   cisco_facility              FACILITY of %FACILITY-SEVERITY-MNEMONIC (SW_MATM)
+#   cisco_mnemonic              MNEMONIC (MACFLAP_NOTIF)
+#   event_name                  the whole message code as Cisco prints it, without the percent sign (SW_MATM-4-MACFLAP_NOTIF)
+#   log_syslog_severity_code    0..7 from the message code (OTel log.syslog.severity.code)
+#   log_syslog_severity_name    emergency, alert, critical, error, warning, notice, informational, debug
+#
+# Expected line: "<receive time> <sender address> <device name>: [<sequence>: ][*|.]<device time, ms, zone>: %FAC-SEV-MNEM: <text>".
+# The device clock has no year and depends on the device's zone, so `_timestamp` (receive time) stays the time of record.
+# Keep this file free of secrets and of anything the collector already provides.
+
+service = string(.service_name) ?? ""
+line = string(.body) ?? ""
+
+if service == "switch-syslog" {
+    parsed, err = parse_regex(line, r'^(?:<\d+>)?[A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+(?P<device>[^\s:]+):\s.*?%(?P<facility>[A-Za-z0-9_]+)-(?P<severity>[0-7])-(?P<mnemonic>[A-Za-z0-9_]+):')
+    if err == null {
+        device = downcase(string(parsed.device) ?? "")
+        # a device that logs its address instead of a name keeps the whole address; a name loses its domain part
+        if !match(device, r'^\d{1,3}(\.\d{1,3}){3}$') {
+            short = split(device, ".", limit: 2)
+            device = string(short[0]) ?? device
+        }
+        .device_name = device
+
+        management, err = parse_regex(device, r'^(?P<id>ns\d+)')
+        if err == null {
+            .device_id = management.id
+        }
+
+        facility = string(parsed.facility) ?? ""
+        mnemonic = string(parsed.mnemonic) ?? ""
+        severity = string(parsed.severity) ?? ""
+        code = to_int(severity) ?? -1
+        .cisco_facility = facility
+        .cisco_mnemonic = mnemonic
+        .event_name = facility + "-" + severity + "-" + mnemonic
+        .log_syslog_severity_code = code
+        names = {"0": "emergency", "1": "alert", "2": "critical", "3": "error", "4": "warning", "5": "notice", "6": "informational", "7": "debug"}
+        .log_syslog_severity_name = get(names, [severity]) ?? null
+    }
+}
+
+.

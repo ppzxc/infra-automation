@@ -322,6 +322,92 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 
 ---
 
+## 스위치 syslog 알림 (Spec #277)
+
+스위치 syslog는 수신 서버(#276)를 거쳐 `system_logs`에 `service_name=switch-syslog`로 들어오고, `switch_syslog_semantics` 함수가 로그 한 줄에 장비와 Cisco 메시지 필드를 붙인다. `host_name`은 스위치가 아니라 로그를 받는 서버이고 `severity`는 항상 0이므로, 스위치로 거를 때는 아래 필드를 쓴다. 원문 `body`는 바뀌지 않는다.
+
+| 필드 | 뜻 |
+|---|---|
+| `device_id` | 관리번호(`ns0347`). 장비 이름 앞부분의 `ns` + 숫자이며 인벤토리 호스트명과 같다. 이름에 없으면 필드가 없다 |
+| `device_name` | 원문의 장비 이름을 소문자로 바꾸고 도메인을 뗀 값(`ns0347-3560x`). 알림은 `device_id`가 없으면 이 값으로 장비를 센다 |
+| `cisco_facility`, `cisco_mnemonic` | `%SW_MATM-4-MACFLAP_NOTIF`의 `SW_MATM`, `MACFLAP_NOTIF` |
+| `event_name` | 메시지 코드 전체(`SW_MATM-4-MACFLAP_NOTIF`, `%` 제외). 잡음·알림 목록은 이 값으로 적는다 |
+| `log_syslog_severity_code`, `log_syslog_severity_name` | 메시지 코드의 심각도 0~7과 이름(emergency, alert, critical, error, warning, notice, informational, debug) |
+
+**한계**: 장비 시각은 연도가 없고 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)가 기준이다. 장비 시각은 원문에 그대로 있다. 알림은 일부 메시지에만 생기는 필드를 쓰지 않고 `body`에서 뽑는다(그 메시지가 한 번도 오지 않은 동안 컬럼이 없어 알림이 `unknown field`로 오류가 나지 않게).
+
+**목록 갱신 절차**: 아래 목록은 모두 역할 기본 변수(`roles/openobserve_config/defaults/main.yml`)이며 Semaphore의 `OpenObserve — Config` 템플릿 Environment(`-e`)나 저장소 기본값을 고쳐 반영한다. 고친 뒤 **`OpenObserve — Config`를 다시 실행**해야 알림 SQL이 바뀐다.
+- `o2c_switch_syslog_roster`(수신 중단 감시 장비, 관리번호 목록): 새 스위치에 syslog 전송을 설정하고 로그가 `switch-syslog`로 도착하는 것을 확인한 **뒤에** 추가한다. 철거·교체한 장비는 뺀다. 전송을 설정하지 않은 장비를 넣으면 허위 알림이 온다.
+- `o2c_switch_uplinks`(업링크 포트 다운 감시, `[{device: ns0250, port: Gi1/0/49}]`): 포트는 약어(`Gi1/0/49`)와 전체 이름(`GigabitEthernet1/0/49`) 어느 쪽이든 쓴다(링크 다운 메시지는 전체 이름, MAC 플랩 메시지는 약어로 찍힌다). **목록이 비어 있으면 규칙 자체가 만들어지지 않는다.** 링크 다운은 심각도 3이라 미사용 포트 다운까지 전부 알림이 되므로 핵심 연결만 넣는다. 용어 `Watched Port`(CONTEXT.md)는 SNMP 감시(#175)의 라벨 기반 개념이며 이 로그 기반 목록과 별개다.
+- `o2c_switch_noise_events`(잡음 메시지 코드): 반복되는 의미 없는 메시지를 `FACILITY-SEVERITY-MNEMONIC`로 추가한다. 기본값은 ARP 해소 실패(`ADJ-3-RESOLVE_REQ`)다. 잡음으로 뺀 줄도 검색은 그대로 되고 수신 중단 판단에는 수신으로 센다. 설정 변경·로그인 실패·MAC 플랩 메시지 코드를 잡음에 넣으면 그 알림도 꺼지므로 넣지 않는다.
+- 임계값: `o2c_switch_login_fail_threshold`(기본 5회/5분), `o2c_switch_macflap_threshold`(기본 2회/10분), `o2c_switch_severity_max`(기본 2), `o2c_switch_silent_hours`(기본 24시간).
+
+**수신 중단 알림의 한계**: 스위치 syslog는 이벤트가 있을 때만 전송되므로 조용한 장비와 고장난 전송을 구분하지 못한다. 그래서 기준 시간을 24시간으로 길게 두었다. 2주 관찰한 뒤 오탐이 있으면 `o2c_switch_silent_hours`를 늘리고, 놓치는 것이 있으면 줄인다. 장비 자체가 내려간 것은 이 알림이 아니라 SNMP 알림(#175)이 맡는다.
+
+<a id="switch-config-change"></a>
+### 🟠 스위치 설정 변경 감지 (`infra-switch-config-change`)
+
+**조건**: `SYS-5-CONFIG_I`(설정 모드를 마칠 때 장비가 남기는 메시지) 1건부터 5분 구간마다 한 번(Event Alert). 대상 행에 장비와 원문의 변경 주체(`Configured from console by <사용자> on vty0 (<주소>)`)가 나온다.
+
+**왜 중요한가**: 승인되지 않은 설정 변경은 장애나 침해의 시작이다. 변경 이력은 ISMS 변경 관리 증적이다.
+
+**확인**: 행의 사용자·접속 방식·주소를 작업 일정(Semaphore 이력, 작업 요청)과 대조한다. 로그 보기에서 같은 장비의 직전 로그인 기록을 본다. Cisco Backup의 직전 설정과 비교하면 바뀐 줄을 알 수 있다.
+
+**대응**: 승인되지 않은 변경이면 해당 계정·접속 경로를 막고 직전 설정으로 되돌린 뒤 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다.
+
+<a id="switch-login-failures"></a>
+### 🟠 스위치 로그인 실패 반복 (`infra-switch-login-failures`)
+
+**조건**: 한 장비에서 `SEC_LOGIN-4-LOGIN_FAILED`가 5분 안에 5회 이상(Event Alert, 기본값은 `o2c_switch_login_fail_threshold`).
+
+**확인**: 로그 보기에서 실패 줄의 `[user: ...] [Source: ...]`를 본다. 출발지가 사내(작업자·Semaphore)인지 외부인지 구분한다.
+
+**대응**: 외부·미확인 출발지면 스위치의 관리 접속 ACL과 방화벽을 점검해 막는다. 작업자의 반복 오입력이면 기록만 남긴다. 같은 출발지의 로그인 성공이 이어졌으면 설정 변경 알림도 함께 확인한다.
+
+<a id="switch-severity-critical"></a>
+### 🔴 스위치 중요 장애 메시지 (`infra-switch-severity-critical`)
+
+**조건**: 메시지 코드의 심각도가 0~2(emergency·alert·critical)인 줄이 5분 안에 1건 이상(Event Alert). 잡음 목록의 코드는 제외한다.
+
+**왜 중요한가**: 하드웨어·전원·스택·메모리 같은 중대한 장애이며 그 스위치 아래 서버가 함께 끊길 수 있다.
+
+**확인**: 행의 `event_name`과 로그 보기의 원문을 읽는다. 장비 콘솔 또는 다른 경로로 `show logging`, `show environment`, `show switch`(스택)를 본다.
+
+**대응**: 하드웨어 문제면 이중화 경로로 서비스를 옮기고 교체 일정을 잡는다. 이미 알려진 무해한 반복 메시지면 `o2c_switch_noise_events`에 추가하는 PR을 낸다.
+
+<a id="switch-uplink-down"></a>
+### 🔴 스위치 업링크 포트 다운 (`infra-switch-uplink-down`)
+
+**조건**: `o2c_switch_uplinks`에 적은 (장비, 포트)에 대해 `LINK-3-UPDOWN`·`LINEPROTO-5-UPDOWN`·`LINK-5-CHANGED`가 `down` 또는 `administratively down`으로 바뀐 줄이 5분 안에 1건 이상(Event Alert). **목록이 비어 있으면 이 알림은 없다.**
+
+**확인**: 행의 장비·포트와 반대편 장비의 포트 상태, 케이블·광모듈을 확인한다. `administratively down`이면 누군가 shutdown한 것이므로 설정 변경 알림과 대조한다.
+
+**대응**: 복구되지 않으면 우회 경로를 확보하고 회선·장비 담당에게 연락한다. 이중화로 이미 우회되고 있으면 복구 일정을 잡는다.
+
+<a id="switch-mac-flap"></a>
+### 🟠 스위치 MAC 플랩 감지 (`infra-switch-mac-flap`)
+
+**조건**: 한 장비에서 `SW_MATM-4-MACFLAP_NOTIF`가 10분 안에 2회 이상(기본값은 `o2c_switch_macflap_threshold`). 플랩이 계속되면 60분(`o2c_switch_macflap_silence_minutes`)마다 다시 온다.
+
+**왜 중요한가**: 같은 MAC이 두 포트 사이를 오가는 것은 L2 루프나 장비 이동·이중 연결의 신호다. 방치하면 VLAN 통신이 불안정해진다.
+
+**확인**: 로그 보기에서 원문의 MAC, VLAN, 두 포트(`Gi0/13`, `Gi0/14`)를 읽는다. 그 두 포트에 무엇이 연결됐는지 본다(서버 이중화 본딩, 가상 스위치, 루프 케이블, 무선 AP).
+
+**대응**: 서버의 이중화 구성이면 본딩 모드(active-backup/LACP)와 스위치 쪽 EtherChannel 설정이 맞는지 본다. 루프면 케이블을 분리한다. 의도된 구성이라면 스위치 설정을 고치거나 임계값을 조정한다.
+
+<a id="switch-syslog-silent"></a>
+### 🟠 스위치 syslog 수신 중단 (`infra-switch-syslog-silent`)
+
+**조건**: `o2c_switch_syslog_roster`의 스위치가 24시간(`o2c_switch_silent_hours`) 넘게 `switch-syslog` 로그를 보내지 않음(State Alert, 하루 1번 재통지). 목록에 없는 장비는 보지 않는다.
+
+**왜 중요한가**: 전송 설정이나 수신 경로가 끊기면 그동안의 설정 변경·로그인 이력이 중앙에 남지 않는다. 스위치는 이벤트가 있을 때만 보내므로 오래 조용한 정상 장비일 수도 있다.
+
+**확인**: 스위치에서 `show running-config | include logging`으로 `logging host`와 `logging trap` 수준을 본다. 수신 서버의 방화벽과 수신 서비스 상태(#276)를 본다. 해당 장비의 `ns` 번호와 `device_id`가 같은지 로그 보기에서 확인한다.
+
+**대응**: 설정이 사라졌으면 복구한다. 원래 조용한 장비면 기준 시간을 늘린다. 철거·교체한 장비면 목록에서 뺀다.
+
+---
+
 ## 리소스 알림 (디스크·inode·메모리)
 
 사용률은 `_timestamp`별로 묶은 값의 **조회 구간 최솟값**으로 판정한다(구간 내내 높아야 발화). 디스크·inode는 15분, 메모리는 10분. 90% 이상 95% 미만은 P2(재통지 1440분), 95% 이상은 P1(재통지 60분). 통지 행에 호스트·마운트·사용률이 나온다. squashfs·iso9660·tmpfs·devtmpfs·overlay는 감시하지 않고 `/boot`·`/boot/efi`는 감시한다. 항상 높게 쓰는 볼륨은 OpenBao `agents/openobserve`의 `alert_resource_exclusions`(호스트·마운트 예외)나 `alert_resource_thresholds`(임계값 덮어쓰기)에 넣고 `OpenObserve — Config`를 다시 실행한다.
