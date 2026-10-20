@@ -80,14 +80,12 @@ all:
     servers:
       hosts:
         ns0266: {}
-        ns0270: {}
         ns0294: {}
     host_agents_excluded:   # Host Agents 미적용. 적용할 때 여기서 뺀다.
       hosts:
         ns0266: {}
-    host_agents_backup_only:   # otelcol 없이 백업만.
-      hosts:
-        ns0270: {}
+    host_agents_backup_only:   # otelcol 없이 백업만. 지금은 비어 있다.
+      hosts: {}
     host_audit_excluded:   # Host Audit 대상에서 뺀다(러너에서 접속 불가 등).
       hosts:
         ns0332: {}
@@ -185,7 +183,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - `host_audit_run_kind=scheduled`는 Monthly 템플릿의 CLI args에만 고정한다. On-demand의 CLI args·Survey에 넣지 않는다. 부분 대상(`target_hosts`)으로 돈 실행이 기준선이 되면 다음 정기 실행에서 나머지 호스트의 발견이 모두 '신규'로 나온다.
 - Monthly 템플릿을 수동 **Run**하는 것은 그 달 정기 실행이 실패했을 때 다시 돌리는 경우만이다. 그 실행도 기준선이 된다.
 - On-demand에서 쓸 수 있는 변수:
-  - Survey `target_hosts`(예: `ns0266,ns0270`): 대상 좁히기(Inventory Hostname)
+  - Survey `target_hosts`(예: `ns0266,ns0294`): 대상 좁히기(Inventory Hostname)
   - Survey `host_audit_mail_enabled`·`host_audit_storage_enabled`를 `false`로: 시험 실행. 보관을 끄면 비교하지 않고 러너 로컬에만 남는다
   - API `environment`만: `{"host_audit_mail_to": "a@example.com"}` 이번 실행만 수신자 덮어쓰기(로그에 나오지 않는다), `{"host_audit_drift_enabled": false}`·`{"host_audit_packages_enabled": false}` 해당 섹션 수집·판정 건너뛰기(정기 실행에는 쓰지 않는다)
 - Host Audit은 `--check`로 돌리지 않는다. 그 자체가 읽기 전용이고, check 모드에서는 보관·발송을 하지 않는다.
