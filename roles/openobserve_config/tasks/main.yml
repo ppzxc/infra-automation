@@ -153,6 +153,7 @@
           'webhook_url': o2c_kv.alert_webhook_url,
           'webhook_headers': {'Content-Type': 'application/json'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
           'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
+          'fortigate': {'function_name': o2c_fortigate_function_name, 'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/fortigate_semantics.vrl')},
           'switch_syslog': {'stream': o2c_switch_stream, 'function_name': o2c_switch_function_name, 'pipeline_name': o2c_switch_pipeline_name,
                             'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/switch_syslog_semantics.vrl')},
           'alerts': o2c_alerts_active, 'selftest_alert': o2c_selftest_alert,
