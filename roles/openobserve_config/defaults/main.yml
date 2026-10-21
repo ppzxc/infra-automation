@@ -67,6 +67,9 @@ o2c_ssh_fail_window_minutes: 5
 o2c_parse_error_percent: 10
 o2c_parse_error_min_lines: 20
 o2c_parse_error_window_minutes: 30
+# 디스크 지연 알림(infra-disk-read-latency·infra-disk-write-latency)이 평균 지연을 믿을 최소 초당 요청 수(IOPS).
+# 입출력이 거의 없을 때 느린 요청 한두 건이 평균을 끌어올리는 오탐을 막는다. 너무 높이면 진짜 문제를 가리니 낮게 유지한다.
+o2c_disk_latency_min_iops: 5
 
 # 스위치 syslog 알림(Spec #277). 값은 모두 역할 기본 변수이며 Semaphore Environment(-e)로 덮어쓴다 — 저장소에는 IP·포트·계정을 두지 않는다.
 # 메시지 코드는 Cisco가 찍는 그대로 `%`를 뺀 형태(FACILITY-SEVERITY-MNEMONIC)다. 형식은 O2C-002에서 검증한다(SQL에 들어간다).
@@ -1069,36 +1072,36 @@ o2c_alerts:
     severity: "P2 경고"
     severity_icon: "🟠"
     title: "디스크 읽기 지연 높음 (100ms 초과)"
-    what: "디스크 읽기 요청의 평균 처리 시간이 100ms를 넘었습니다."
+    what: "디스크 읽기 요청의 평균 처리 시간이 10분 내내 100ms를 넘었고, 그동안 읽기 요청도 초당 {{ o2c_disk_latency_min_iops }}건 이상이었습니다."
     why: "디스크가 느려져 읽기 위주 서비스(DB 조회, 파일 서빙)의 응답이 지연됩니다. 디스크 고장의 전조일 수 있습니다."
     action: "① 대상 호스트·장치에서 iostat -x로 읽기 지연과 사용률 확인 ② dmesg·SMART로 디스크 오류 확인 ③ 지속되면 디스크 교체 또는 I/O 부하 분산"
     runbook: "{{ o2c_runbook_base }}#disk-read-latency"
     row_template: '• {host_name} {device}: 읽기 지연 {value}ms'
-    description: "디스크 읽기 평균 지연(처리 시간 / 요청 수)이 100ms 초과 (PromQL, State Alert, 재통지 60분)"
+    description: "디스크 읽기 평균 지연(처리 시간 / 요청 수)이 100ms 초과이면서 읽기 IOPS가 o2c_disk_latency_min_iops 이상 (PromQL, 평가 10분, State Alert, 재통지 60분)"
     stream: system_disk_operation_time
     stream_type: metrics
-    promql: "sum by(host_name,device)(rate(system_disk_operation_time{direction='read'}[5m])) / sum by(host_name,device)(rate(system_disk_operations{direction='read'}[5m])) * 1000"
+    promql: "(sum by(host_name,device)(rate(system_disk_operation_time{direction='read'}[5m])) / sum by(host_name,device)(rate(system_disk_operations{direction='read'}[5m])) * 1000) and on(host_name,device) (sum by(host_name,device)(rate(system_disk_operations{direction='read'}[5m])) >= {{ o2c_disk_latency_min_iops }})"
     promql_operator: ">"
     promql_value: 100
-    period: 5
+    period: 10
     frequency: 5
     silence: 60
   - name: infra-disk-write-latency
     severity: "P2 경고"
     severity_icon: "🟠"
     title: "디스크 쓰기 지연 높음 (100ms 초과)"
-    what: "디스크 쓰기 요청의 평균 처리 시간이 100ms를 넘었습니다."
+    what: "디스크 쓰기 요청의 평균 처리 시간이 10분 내내 100ms를 넘었고, 그동안 쓰기 요청도 초당 {{ o2c_disk_latency_min_iops }}건 이상이었습니다."
     why: "디스크가 느려져 쓰기 위주 서비스(DB 커밋, 로그 기록, 백업)가 지연됩니다. 디스크 고장의 전조일 수 있습니다."
     action: "① 대상 호스트·장치에서 iostat -x로 쓰기 지연과 사용률 확인 ② dmesg·SMART로 디스크 오류 확인 ③ 지속되면 디스크 교체 또는 쓰기 부하 분산"
     runbook: "{{ o2c_runbook_base }}#disk-write-latency"
     row_template: '• {host_name} {device}: 쓰기 지연 {value}ms'
-    description: "디스크 쓰기 평균 지연(처리 시간 / 요청 수)이 100ms 초과 (PromQL, State Alert, 재통지 60분)"
+    description: "디스크 쓰기 평균 지연(처리 시간 / 요청 수)이 100ms 초과이면서 쓰기 IOPS가 o2c_disk_latency_min_iops 이상 (PromQL, 평가 10분, State Alert, 재통지 60분)"
     stream: system_disk_operation_time
     stream_type: metrics
-    promql: "sum by(host_name,device)(rate(system_disk_operation_time{direction='write'}[5m])) / sum by(host_name,device)(rate(system_disk_operations{direction='write'}[5m])) * 1000"
+    promql: "(sum by(host_name,device)(rate(system_disk_operation_time{direction='write'}[5m])) / sum by(host_name,device)(rate(system_disk_operations{direction='write'}[5m])) * 1000) and on(host_name,device) (sum by(host_name,device)(rate(system_disk_operations{direction='write'}[5m])) >= {{ o2c_disk_latency_min_iops }})"
     promql_operator: ">"
     promql_value: 100
-    period: 5
+    period: 10
     frequency: 5
     silence: 60
   - name: infra-inode-fill-24h
@@ -1138,18 +1141,19 @@ o2c_alerts:
     frequency: 5
     silence: 60
   - name: infra-swap-usage
-    severity: "P2 경고"
-    severity_icon: "🟠"
-    title: "스왑 사용률 높음 (80% 초과)"
-    what: "스왑 사용률이 10분 내내 80%를 넘었습니다."
-    why: "메모리가 부족해 디스크 스왑에 의존하고 있어 서비스가 크게 느려지고 곧 OOM kill이 날 수 있습니다."
-    action: "① 대상 호스트에서 free -m과 메모리 상위 프로세스 확인 ② 메모리 누수·한도 초과 프로세스 재기동 또는 한도 조정 ③ 상시 부족이면 메모리 증설"
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "스왑 사용률 높음 (80% 초과, 사용 가능 메모리 10% 미만)"
+    what: "스왑 사용률이 10분 내내 80%를 넘었고, 그동안 사용 가능 메모리도 전체의 10% 미만이었습니다."
+    why: "스왑이 가득 찬 것만으로는 문제가 아닙니다(오래된 페이지가 밀려난 정상 상태가 많음). 사용 가능 메모리까지 부족하면 메모리가 모자라 서비스가 느려지고 OOM kill이 날 수 있습니다."
+    action: "① 대상 호스트에서 free -m과 vmstat 1 5로 사용 가능 메모리와 스왑 입출력(si/so) 확인 ② 메모리 누수·한도 초과 프로세스 재기동 또는 한도 조정 ③ 상시 부족이면 메모리 증설"
     runbook: "{{ o2c_runbook_base }}#swap-usage"
     row_template: '• {host_name} {device}: 스왑 사용률 {value}%'
-    description: "스왑 사용률이 80% 초과 (PromQL, State Alert, 재통지 1440분)"
+    description: "스왑 사용률이 80% 초과이면서 사용 가능 메모리가 10% 미만 (PromQL, P3, State Alert, 재통지 1440분)"
     stream: system_paging_utilization
+    extra_streams: [system_linux_memory_available, system_memory_limit]
     stream_type: metrics
-    promql: "system_paging_utilization{state='used'} * 100"
+    promql: "(system_paging_utilization{state='used'} * 100) and on(host_name) ((sum by(host_name)(system_linux_memory_available) / sum by(host_name)(system_memory_limit)) < 0.10)"
     promql_operator: ">"
     promql_value: 80
     period: 10
@@ -1158,16 +1162,17 @@ o2c_alerts:
   - name: infra-memory-pressure
     severity: "P2 경고"
     severity_icon: "🟠"
-    title: "메모리 압박: 주요 페이지 폴트 급증"
-    what: "주요(major) 페이지 폴트가 초당 1000건을 넘었습니다."
-    why: "필요한 메모리 페이지를 디스크에서 읽어 오고 있다는 뜻으로, 메모리가 부족해 서비스가 크게 느려집니다."
+    title: "메모리 압박: 주요 페이지 폴트 급증, 사용 가능 메모리 10% 미만"
+    what: "주요(major) 페이지 폴트가 초당 1000건을 넘었고, 사용 가능 메모리도 전체의 10% 미만입니다."
+    why: "필요한 메모리 페이지를 디스크에서 읽어 오는데 여유 메모리마저 부족해, 서비스가 크게 느려집니다. 메모리가 충분한 DB 호스트의 정상 디스크 읽기는 이 알림이 아닙니다."
     action: "① 대상 호스트에서 free -m, vmstat으로 메모리·스왑 상태 확인 ② 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit) 점검 ③ 반복되면 메모리 증설·한도 조정"
     runbook: "{{ o2c_runbook_base }}#memory-pressure"
     row_template: '• {host_name}: 주요 페이지 폴트 초당 {value}건'
-    description: "주요 페이지 폴트가 초당 1000건 초과 (PromQL, State Alert, 재통지 60분)"
+    description: "주요 페이지 폴트가 초당 1000건 초과이면서 사용 가능 메모리가 10% 미만 (PromQL, State Alert, 재통지 60분)"
     stream: system_paging_faults
+    extra_streams: [system_linux_memory_available, system_memory_limit]
     stream_type: metrics
-    promql: "sum by(host_name)(rate(system_paging_faults{type='major'}[5m]))"
+    promql: "sum by(host_name)(rate(system_paging_faults{type='major'}[5m])) and on(host_name) ((sum by(host_name)(system_linux_memory_available) / sum by(host_name)(system_memory_limit)) < 0.10)"
     promql_operator: ">"
     promql_value: 1000
     period: 5

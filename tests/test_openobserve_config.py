@@ -52,11 +52,11 @@ PROMQL_ALERTS = {
     "infra-cpu-iowait": ("P2 경고", 5, 5, 60, ">", 10, "system_cpu_utilization"),
     "infra-cpu-steal": ("P2 경고", 5, 5, 60, ">", 10, "system_cpu_utilization"),
     "infra-disk-io-saturation": ("P2 경고", 5, 5, 60, ">", 10, "system_disk_weighted_io_time"),
-    "infra-disk-read-latency": ("P2 경고", 5, 5, 60, ">", 100, "system_disk_operation_time"),
-    "infra-disk-write-latency": ("P2 경고", 5, 5, 60, ">", 100, "system_disk_operation_time"),
+    "infra-disk-read-latency": ("P2 경고", 10, 5, 60, ">", 100, "system_disk_operation_time"),
+    "infra-disk-write-latency": ("P2 경고", 10, 5, 60, ">", 100, "system_disk_operation_time"),
     "infra-inode-fill-24h": ("P2 경고", 30, 30, 1440, ">", 0, "system_filesystem_inodes_usage"),
     "infra-conntrack-limit": ("P2 경고", 5, 5, 60, ">", 80, "system_network_conntrack_count"),
-    "infra-swap-usage": ("P2 경고", 10, 5, 1440, ">", 80, "system_paging_utilization"),
+    "infra-swap-usage": ("P3 주의", 10, 5, 1440, ">", 80, "system_paging_utilization"),
     "infra-memory-pressure": ("P2 경고", 5, 5, 60, ">", 1000, "system_paging_faults"),
 }
 UPLINK_ALERT = "infra-switch-uplink-down"   # 업링크 목록(o2c_switch_uplinks)이 비어 있으면 만들어지지 않는다
@@ -2272,6 +2272,33 @@ def test_caddy_4xx_needs_100_requests_in_10_minutes_and_5xx_keeps_10():
     assert "code!~'401|499'" in by["infra-caddy-4xx-error-rate"]
 
 
+AVAILABLE_UNDER_10 = "((sum by(host_name)(system_linux_memory_available) / sum by(host_name)(system_memory_limit)) < 0.10)"
+
+
+def test_swap_usage_is_p3_and_needs_low_available_memory_too():
+    a = {d["name"]: d for d in PROMQL_DEFS}["infra-swap-usage"]
+    assert a["severity"] == "P3 주의" and a["severity_icon"] == "🟡"
+    assert a["promql"].count(" and on(host_name) ") == 1 and a["promql"].endswith(AVAILABLE_UNDER_10)
+    assert a["promql"].startswith("(system_paging_utilization{state='used'} * 100) and on(host_name)")
+    assert a["promql_value"] == 80 and "10%" in a["what"] and "10%" in a["title"] and "사용 가능 메모리" in a["description"]
+
+
+def test_memory_pressure_keeps_1000_major_faults_and_needs_low_available_memory_too():
+    a = {d["name"]: d for d in PROMQL_DEFS}["infra-memory-pressure"]
+    assert a["promql"] == "sum by(host_name)(rate(system_paging_faults{type='major'}[5m])) and on(host_name) " + AVAILABLE_UNDER_10
+    assert a["promql_value"] == 1000 and a["severity"] == "P2 경고" and "10%" in a["what"]
+
+
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_disk_latency_needs_minimum_iops_from_a_variable_and_ten_minute_period(direction):
+    a = {d["name"]: d for d in PROMQL_DEFS}[f"infra-disk-{direction}-latency"]
+    q = a["promql"]
+    assert DEFAULTS["o2c_disk_latency_min_iops"] == 5
+    assert q.endswith(f" and on(host_name,device) (sum by(host_name,device)(rate(system_disk_operations{{direction='{direction}'}}[5m])) >= {{{{ o2c_disk_latency_min_iops }}}})")
+    assert q.count("{{ o2c_disk_latency_min_iops }}") == 1 and "{{ o2c_disk_latency_min_iops }}" in a["what"]
+    assert (a["promql_value"], a["period"]) == (100, 10)
+
+
 def test_every_promql_alert_has_a_runbook_section_and_a_spec_row():
     runbook, spec = RUNBOOK.read_text(encoding="utf-8"), (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
     for a in PROMQL_DEFS:
@@ -2303,6 +2330,19 @@ def test_log_alerts_keep_the_sql_condition_and_the_link_label(o2):
         # 원문 링크가 있으면 {alert_url}은 "상세 보기"로 두고 원문은 raw_log_line에 싣는다. 없으면 "로그 보기" 그대로
         has_raw = bool(a["context_attributes"]["raw_log_line"])
         assert a["context_attributes"]["link_label"] == ("상세 보기" if has_raw else "로그 보기"), name
+
+
+def test_promql_alert_conditions_are_rendered_with_the_iops_variable_and_converge(o2):
+    assert _apply(o2).returncode == 0
+    for d in ("read", "write"):
+        q = o2.store["alert"][f"infra-disk-{d}-latency"]["query_condition"]["promql"]
+        assert ">= 5)" in q and "{{" not in q and _balanced(q)
+    assert o2.store["alert"]["infra-swap-usage"]["query_condition"]["promql"].endswith("< 0.10)")
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0 and o2.writes == []
+    assert _apply(o2, extra={"o2c_disk_latency_min_iops": 20}).returncode == 0
+    puts = sorted(p for m, p, _ in o2.writes if m == "PUT")
+    assert len(puts) == 2 and ">= 20)" in o2.store["alert"]["infra-disk-write-latency"]["query_condition"]["promql"]
 
 
 def test_promql_alerts_converge_and_a_drift_is_one_update(o2):
