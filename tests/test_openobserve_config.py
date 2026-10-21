@@ -1574,7 +1574,8 @@ def test_switch_fixtures_cover_every_alert_with_firing_and_quiet_cases_and_off_r
 
 # --- 방화벽(포티게이트) 로그 알림 (Spec #282 / Ticket-3) -----------------------------------------------------------------
 # 입력 로그는 FortiOS Log Message Reference로 만든 합성 줄이다. 실장비 샘플(비공개 경로)로 키 이름·값 모양을 다시 검증해야 한다.
-from openobserve_config import o2c_fortigate_match, o2c_missing_sql, o2c_valid_fortigate_roster, o2c_valid_fortigate_values  # noqa: E402
+from openobserve_config import (o2c_fortigate_match, o2c_fortigate_vrl, o2c_missing_sql, o2c_valid_fortigate_aliases,  # noqa: E402
+                                o2c_valid_fortigate_roster, o2c_valid_fortigate_values)
 
 FORTIGATE_ALERTS = {   # name -> (severity, period minutes, silence minutes)
     "infra-fortigate-admin-login-failures": ("P2 경고", 5, 30),
@@ -1602,7 +1603,7 @@ def test_firewall_match_condition_accepts_quoted_and_bare_values_and_rejects_uns
 
 
 def test_firewall_roster_accepts_a_member_pair_written_with_plus_and_counts_any_member_as_receiving():
-    assert o2c_valid_fortigate_roster(["ns0399", "ns0380+ns0381"]) and not o2c_valid_fortigate_roster(["ns0380+", "ns0399' OR '1", "fw1"])
+    assert o2c_valid_fortigate_roster(["ns0399", "ns0380+ns0381"]) and not o2c_valid_fortigate_roster(["ns0380+", "ns0399' OR '1", "fw 1", "a%b", ""])
     sql = o2c_missing_sql(["ns0380+ns0381"], "security_logs", "device_id", "service_name = 'fortigate-syslog'", "devname")
     assert sql.startswith("SELECT 'ns0380+ns0381' AS device_id") and "HAVING count(*) < 1" in sql
     assert "device_id = 'ns0380'" in sql and "device_id = 'ns0381'" in sql and """LIKE '%devname="ns0381%'""" in sql
@@ -1668,7 +1669,12 @@ def test_silent_alert_watches_only_the_explicit_list_and_the_default_list_is_emp
 
 @pytest.mark.parametrize("extra", [
     {"o2c_fortigate_syslog_roster": ["ns0399' OR '1'='1"]},
-    {"o2c_fortigate_syslog_roster": ["server01"]},
+    {"o2c_fortigate_syslog_roster": ["Example Branch FW"]},
+    {"o2c_fortigate_device_aliases": {"example_branch_fw": "server01"}},
+    {"o2c_fortigate_device_aliases": {"example_branch_fw": "ns0000' OR '1'='1"}},
+    {"o2c_fortigate_device_aliases": {"example\"fw": "ns0000"}},
+    {"o2c_fortigate_device_aliases": {"fw.corp": "ns0000"}},
+    {"o2c_fortigate_device_aliases": ["ns0000"]},
     {"o2c_fortigate_policy_cfgpaths": ["firewall.policy' OR '1'='1"]},
     {"o2c_fortigate_detection_severities": ["critical%"]},
     {"o2c_fortigate_approved_start_hour": 18, "o2c_fortigate_approved_end_hour": 9},
@@ -1739,3 +1745,40 @@ def test_missing_sql_without_field_column_matches_only_on_body_and_still_counts_
     only_body = [{"service_name": "fortigate-syslog", "body": 'devname="ns0381" x'}]   # device_id 컬럼 자체가 없다
     assert _run_alert_on_sqlite(table, only_body, "t") == []
     assert len(_run_alert_on_sqlite(table, [{"service_name": "fortigate-syslog", "body": 'devname="ns0399" x'}], "t")) == 1
+
+
+# 장비 이름 별칭(Spec #282): 관리번호로 hostname을 못 바꾼 장비는 원래 이름을 그대로 쓴다. 이름은 가짜(Example_Branch_FW)만 쓴다.
+ALIASES = {"example_branch_fw": "ns0000"}
+
+
+def test_alias_table_defaults_to_empty_and_the_function_body_carries_it_only_when_set(o2):
+    assert _apply(o2).returncode == 0
+    base = o2.store["function"][FORTIGATE_FN]["function"]
+    assert "device_aliases = {}" in base and "example_branch_fw" not in base
+    assert _apply(o2, extra={"o2c_fortigate_device_aliases": ALIASES}).returncode == 0
+    changed = o2.store["function"][FORTIGATE_FN]["function"]
+    assert '"example_branch_fw": "ns0000"' in changed and changed != base   # 변수가 바뀌면 함수가 갱신된다
+
+
+def test_alias_validation_accepts_normalized_names_and_management_numbers_only():
+    assert o2c_valid_fortigate_aliases({}) and o2c_valid_fortigate_aliases(ALIASES) and o2c_valid_fortigate_aliases(None)
+    for bad in ({"Example_Branch_FW": "ns0000"}, {"fw.corp": "ns0000"}, {"fw": "server01"}, {"fw": "ns0000+ns0001"}, {"f w": "ns0000"}, ["x"]):
+        assert not o2c_valid_fortigate_aliases(bad)
+
+
+def test_alias_injection_leaves_the_source_unchanged_for_an_empty_table_and_rejects_a_source_without_the_marker():
+    src = "a = 1\ndevice_aliases = {}  # marker\n.\n"
+    assert o2c_fortigate_vrl(src, {}) == src
+    assert o2c_fortigate_vrl(src, ALIASES) == 'a = 1\ndevice_aliases = {"example_branch_fw": "ns0000"}\n.\n'
+    with pytest.raises(ValueError):
+        o2c_fortigate_vrl("a = 1\n", ALIASES)
+
+
+def test_silent_roster_accepts_the_original_device_name_case_insensitively():
+    assert o2c_valid_fortigate_roster(["Example_Branch_FW", "ns0380+ns0381"])
+    sql = o2c_missing_sql(["Example_Branch_FW"], "security_logs", "device_id", "service_name = 'fortigate-syslog'", "devname", False)
+    table_sql = sql.replace('"security_logs"', '"t"')
+    for devname in ("Example_Branch_FW", "EXAMPLE_BRANCH_FW", "example_branch_fw"):
+        assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname="%s" x' % devname}], "t") == []
+        assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname=%s x' % devname}], "t") == []
+    assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname="other_fw" x'}], "t") != []

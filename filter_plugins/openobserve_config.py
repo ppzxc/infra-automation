@@ -52,7 +52,8 @@ def o2c_desired(spec):
     # (security_semantics → fortigate_semantics). 서비스 검사는 각 함수 안에 있어 서로의 레코드를 건드리지 않는다.
     chained = []
     if spec.get('fortigate'):
-        chained.append(spec['fortigate'])
+        fortigate = dict(spec['fortigate'], vrl=o2c_fortigate_vrl(spec['fortigate']['vrl'], spec['fortigate'].get('aliases')))
+        chained.append(fortigate)
         semantics[0]['then'] = [spec['fortigate']['function_name']]
     out += [{'kind': 'function', 'name': sem['function_name'],
              'body': {'name': sem['function_name'], 'function': sem['vrl'].strip(), 'params': 'row', 'transType': 0}}
@@ -270,6 +271,7 @@ def _memory_sql(r, level, cfg):
 # --- 로스터와 부재 감지 (Spec #184 / Ticket-4) --------------------------------------------------------------------------
 # 로스터는 실행 시 인벤토리 그룹에서 만든다. 부재 감지는 호스트마다 `HAVING count(*) < 1` 가지를 UNION ALL로 이은 SQL이다
 # (인라인 VALUES/unnest JOIN은 이 OpenObserve 버전에서 틀린 결과를 낸다 — docs/research 참고).
+import json
 import re as _re
 _HOST_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 _DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -600,7 +602,13 @@ def o2c_switch_uplink_sql(entries, noise_events=None):
 # FortiOS 기본 형식은 값을 따옴표로 감싸지만 실장비 샘플로 확인하기 전이라 따옴표 있는 값과 없는 값을 모두 받는다.
 _KEY_RE = _re.compile(r'^[a-z][a-z0-9_]*$')
 _VALUE_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
-_FORTIGATE_MEMBER_RE = _re.compile(r'^ns[0-9]+(\+ns[0-9]+)*$')
+# 수신 중단 감시 목록 항목: 관리번호(ns0399) 또는 장비 이름 그대로(hostname을 관리번호로 못 바꾼 장비). `+`로 HA 멤버를 묶는다.
+# SQL LIKE에 들어가므로 따옴표·%·공백은 막는다(`_`는 LIKE에서 한 글자 와일드카드지만 더 넓게 맞출 뿐이다).
+_FORTIGATE_NAME = r'[A-Za-z0-9][A-Za-z0-9_-]*'
+_FORTIGATE_MEMBER_RE = _re.compile(r'^%s(\+%s)*$' % (_FORTIGATE_NAME, _FORTIGATE_NAME))
+_FORTIGATE_ALIAS_KEY_RE = _re.compile(r'^[a-z0-9][a-z0-9_-]*$')   # 소문자 정규화한 devname(도메인 제외)
+_FORTIGATE_ALIAS_VALUE_RE = _re.compile(r'^ns[0-9]+$')
+_FORTIGATE_ALIAS_MARKER_RE = _re.compile(r'^device_aliases = \{\}.*$', _re.M)
 
 
 def o2c_valid_fortigate_values(values):
@@ -609,8 +617,28 @@ def o2c_valid_fortigate_values(values):
 
 
 def o2c_valid_fortigate_roster(devices):
-    """True when every item is a management number (``ns0399``) or an HA member pair joined with ``+`` (``ns0380+ns0381``)."""
+    """True when every item is a management number (``ns0399``), a device name as sent in ``devname`` or an HA pair joined with ``+`` (``ns0380+ns0381``)."""
     return all(isinstance(d, str) and _FORTIGATE_MEMBER_RE.match(d) for d in devices or [])
+
+
+def o2c_valid_fortigate_aliases(aliases):
+    """True when ``aliases`` maps normalized device names (lower case, no domain) to management numbers (``ns`` + digits)."""
+    if aliases is None:
+        return True
+    return isinstance(aliases, dict) and all(
+        isinstance(k, str) and isinstance(v, str) and _FORTIGATE_ALIAS_KEY_RE.match(k) and _FORTIGATE_ALIAS_VALUE_RE.match(v) for k, v in aliases.items())
+
+
+def o2c_fortigate_vrl(source, aliases):
+    """The firewall VRL with the alias table written into its ``device_aliases = {}`` line (an empty table leaves the source as is)."""
+    if not aliases:
+        return source
+    if not o2c_valid_fortigate_aliases(aliases):
+        raise ValueError('방화벽 장비 이름 별칭 형식이 올바르지 않다')
+    if not _FORTIGATE_ALIAS_MARKER_RE.search(source):
+        raise ValueError('VRL 소스에 `device_aliases = {}` 줄이 없다')
+    literal = json.dumps(dict(sorted(aliases.items())))   # JSON 객체는 VRL 객체 리터럴이다(키·값은 위에서 안전한 문자만 허용)
+    return _FORTIGATE_ALIAS_MARKER_RE.sub(lambda _m: 'device_aliases = %s' % literal, source, count=1)
 
 
 def o2c_fortigate_match(key, values):
@@ -642,5 +670,6 @@ class FilterModule(object):
                 'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
                 'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
                 'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts,
-                'o2c_valid_fortigate_values': o2c_valid_fortigate_values, 'o2c_valid_fortigate_roster': o2c_valid_fortigate_roster,
+                'o2c_valid_fortigate_values': o2c_valid_fortigate_values, 'o2c_valid_fortigate_aliases': o2c_valid_fortigate_aliases,
+                'o2c_fortigate_vrl': o2c_fortigate_vrl, 'o2c_valid_fortigate_roster': o2c_valid_fortigate_roster,
                 'o2c_fortigate_match': o2c_fortigate_match}

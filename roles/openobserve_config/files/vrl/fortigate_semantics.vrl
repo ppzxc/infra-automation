@@ -7,7 +7,8 @@
 # OpenObserve stores the dots of an OTel attribute name as underscores:
 #
 #   device_name              devname lower-cased, domain part removed (NS0399.corp -> ns0399)
-#   device_id                management number (Inventory Hostname): the leading `ns` + digits of device_name; absent when the name has none
+#   device_id                management number (Inventory Hostname): the value of device_name in `device_aliases` (devices whose hostname could not
+#                            be changed to the management number); else the leading `ns` + digits of device_name; absent when neither applies
 #   fortigate_log_type       type    (traffic | event | utm ...)
 #   fortigate_log_subtype    subtype (system | vpn | ha | ips | forward ...)
 #   event_action             action, lower-cased (login, edit, tunnel-up, dropped, deny); absent when the line has none (e.g. HA events)
@@ -20,6 +21,9 @@
 # The device clock depends on the device's zone, so `_timestamp` (receive time) stays the time of record.
 # NOTE: written from the Log Message Reference, not from real device samples (none exist yet) - re-verify against real lines.
 # Keep this file free of secrets and of anything the collector already provides.
+
+# Written by the role from o2c_fortigate_device_aliases (normalized devname -> management number). Keep this line as is: it is the injection point.
+device_aliases = {}  # o2c_fortigate_device_aliases
 
 service = string(.service_name) ?? ""
 line = string(.body) ?? ""
@@ -51,9 +55,14 @@ if service == "fortigate-syslog" {
                 short = split(devname, ".", limit: 2)
                 devname = string(short[0]) ?? devname
                 .device_name = devname
-                management, merr = parse_regex(devname, r'^(?P<id>ns\d+)')
-                if merr == null {
-                    .device_id = management.id
+                aliased = string(get(device_aliases, [devname]) ?? null) ?? ""
+                if aliased != "" {
+                    .device_id = aliased
+                } else {
+                    management, merr = parse_regex(devname, r'^(?P<id>ns\d+)')
+                    if merr == null {
+                        .device_id = management.id
+                    }
                 }
             }
 
