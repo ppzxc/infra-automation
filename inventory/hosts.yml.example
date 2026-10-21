@@ -47,6 +47,14 @@ all:
     provision_excluded:
       hosts: {}
 
+    # 2-4. 프로비저닝 허용 목록(기본 거부): Host Provisioning은 이 그룹에 속한 호스트만 target_hosts로 받는다.
+    #      비어 있음이 기본이며, 그룹이 없거나 비어 있으면 모든 프로비저닝이 접속 전에 거부된다.
+    #      운영 절차: 호스트를 여기에 넣고(예: ns0001) 실행한 뒤 끝나면 다시 뺀다.
+    #      provision_excluded는 영구 거부이며 이 그룹보다 우선한다(둘 다 속하면 거부).
+    provision_allowed:
+      hosts: {}
+      # ns0001: {}   # 작업 중에만 임시로 추가
+
     # 3. 네트워크 인프라 스위치 그룹 (Cisco IOS Switches)
     cisco_switches:
       hosts:
