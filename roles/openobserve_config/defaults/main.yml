@@ -81,7 +81,7 @@ o2c_switch_noise_filter: "{{ o2c_switch_noise_events | o2c_switch_noise_filter }
 # 방화벽(포티게이트) 로그 알림(Spec #282 / Ticket-3): security_logs의 service_name=fortigate-syslog. 값은 모두 역할 기본 변수이며 Semaphore Environment(-e)로 덮어쓴다.
 # 입력은 합성 로그(FortiOS Log Message Reference 기준)로만 검증했다. 실장비 샘플(비공개 경로)로 키 이름·값 모양을 확인한 뒤 확정한다.
 # 알림 SQL은 service_name과 원문 body의 key=value만 읽는다: 첫 방화벽 줄이 들어오기 전에는 security_logs에 방화벽 컬럼(device_id 등)이 없어서
-# 그 컬럼을 참조하면 알림 평가가 매번 오류가 나고 O2C-036이 Config 실행을 막는다(장비는 아직 전송을 설정하지 않았다).
+# 그 컬럼을 참조하면 알림 평가가 매번 오류가 나고 O2C-036이 Config 실행을 막는다(장비가 전송을 시작하기 전에도 규칙이 유효해야 한다).
 # 관리자 로그인 연속 실패: 한 출발지에서 구간 안에 이 횟수 이상. 같은 공격이 이어져도 재통지는 silence 간격으로만 온다.
 o2c_fortigate_login_fail_threshold: 5
 o2c_fortigate_login_fail_window_minutes: 5
@@ -99,7 +99,7 @@ o2c_fortigate_ha_silence_minutes: 30
 o2c_fortigate_detection_severities: [critical]
 o2c_fortigate_detection_silence_minutes: 60
 # 수신 중단 감시 대상 장비(관리번호). 명시한 장비만 본다. HA 쌍은 `ns0380+ns0381`처럼 `+`로 묶어 쓰며 어느 한 멤버라도 보내면 수신 중이다.
-# 기본값은 비어 있다(opt in): 방화벽 3대 모두 syslog 전송을 아직 설정하지 않았다. 전송을 시작하고 로그가 들어오는 것을 확인한 장비를 그때 더한다
+# 기본값은 비어 있다(opt in). 장비가 전송을 시작하고 로그가 들어오는 것을 확인한 장비를 그때 더한다
 # (사무실이 먼저). 미리 넣으면 전송 설정 전까지 허위 알림이 계속 온다. 목록이 비어도 알림 규칙은 있지만 절대 행을 돌려주지 않는다.
 o2c_fortigate_syslog_roster: []
 # 방화벽은 로그가 계속 나오므로 기준 시간은 스위치(o2c_switch_silent_hours, 24시간)보다 짧다. 전송 로그를 정책별로 줄인 장비가 오탐을 내면 관찰 뒤 늘린다.
@@ -824,8 +824,8 @@ o2c_alerts:
     row_template: '• {device_id}'
     description: "수신 중단 감시 목록(o2c_fortigate_syslog_roster)의 방화벽별 fortigate-syslog가 {{ o2c_fortigate_silent_minutes }}분 없음 (State Alert, 재통지 1440분) — 목록이 비면 행을 돌려주지 않는다"
     stream: security_logs
-    missing: {roster: fortigate, field: device_id, cond: "service_name = 'fortigate-syslog'", body_match: devname}
-    sql: "{{ o2c_fortigate_syslog_roster | o2c_missing_sql('security_logs', 'device_id', \"service_name = 'fortigate-syslog'\", 'devname') }}"
+    missing: {roster: fortigate, field: device_id, cond: "service_name = 'fortigate-syslog'", body_match: devname, field_column: false}
+    sql: "{{ o2c_fortigate_syslog_roster | o2c_missing_sql('security_logs', 'device_id', \"service_name = 'fortigate-syslog'\", 'devname', false) }}"
     period: "{{ o2c_fortigate_silent_minutes }}"
     frequency: 10
     silence: 1440

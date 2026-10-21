@@ -15,7 +15,7 @@
 #   user_name                user; absent when empty or N/A
 #   fortigate_policy_id      policyid as an integer (0 is the implicit deny policy)
 #
-# Expected line (FortiOS 7.2/7.4 default key=value format): `[<PRI>][syslog header] date=... time=... devname="..." type="..." ...`.
+# Expected line (FortiOS default key=value format): `[<PRI>][syslog header] date=... time=... devname="..." type="..." ...`.
 # Values are bare or double-quoted (quoted values may hold spaces and text that looks like keys; they are consumed as one value).
 # The device clock depends on the device's zone, so `_timestamp` (receive time) stays the time of record.
 # NOTE: written from the Log Message Reference, not from real device samples (none exist yet) - re-verify against real lines.

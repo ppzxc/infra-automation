@@ -9,13 +9,10 @@
     that:
       - fortigate_device is match('^[A-Za-z0-9-]+$')
       - fortigate_backup_member_source in ['hostname', 'serial']
-      - ansible_host is defined
-      - ansible_host | length > 0
-      - ansible_host != inventory_hostname
       - fortigate_backup_retention_days | int > 0
     fail_msg: >-
       [FORTIGATE-TARGET] {{ inventory_hostname }}: fortigate_device는 영문·숫자·하이픈만(밑줄 금지),
-      ansible_host는 접속 대상 주소여야 하고, 멤버 출처는 hostname 또는 serial이며, 보관 일수는 1 이상이어야 한다.
+      멤버 출처는 hostname 또는 serial이며, 보관 일수는 1 이상이어야 한다(접속 주소는 FGBK-004에서 본다).
 
 - name: "[FGBK-002] Log in to OpenBao with AppRole when no API token or Vault token is given"
   ansible.builtin.uri:
@@ -34,35 +31,37 @@
   delegate_to: localhost
   no_log: true
   when:
-    - fortigate_api_token | length == 0
     - fortigate_backup_vault_token | length == 0
     - fortigate_backup_vault_role_id | length > 0
     - fortigate_backup_vault_secret_id | length > 0
 
-- name: "[FGBK-003] Fetch the API token from OpenBao KV when it is not injected"
+- name: "[FGBK-003] Fetch the API token and connection info from OpenBao KV when OpenBao access is given"
   vars:
     _fgbk_vault_token: "{{ fortigate_backup_vault_token if (fortigate_backup_vault_token | length > 0) else (fortigate_backup_approle_login.json.auth.client_token | default('')) }}"
   ansible.builtin.uri:
     url: "{{ fortigate_backup_vault_addr }}/v1/{{ fortigate_backup_openbao_mount }}/data/{{ fortigate_backup_openbao_prefix }}{{ inventory_hostname }}"
     method: GET
     headers: "{{ {'X-Vault-Token': _fgbk_vault_token} | combine({'X-Vault-Namespace': fortigate_backup_openbao_namespace} if (fortigate_backup_openbao_namespace | length > 0) else {}) }}"
-    status_code: [200]
+    status_code: [200, 404]
     timeout: 10
   register: fortigate_backup_kv_response
   check_mode: false
   delegate_to: localhost
   no_log: true
   when:
-    - fortigate_api_token | length == 0
     - (fortigate_backup_vault_token | length > 0) or ((fortigate_backup_approle_login.json.auth.client_token | default('')) | length > 0)
 
-- name: "[FGBK-004] Resolve and assert the read-only API token"
+- name: "[FGBK-004] Resolve and assert the read-only API token and the connection target"
   ansible.builtin.assert:
     that:
       - (fortigate_api_token | length > 0) or ((fortigate_backup_kv_response.json.data.data.api_token | default('')) | length > 0)
+      - _fgbk_address | length > 0
+      - _fgbk_port | string is match('^[0-9]+$')
     fail_msg: >-
-      [FORTIGATE-TOKEN] {{ inventory_hostname }}: API 토큰이 없다. Semaphore Environment의 fortigate_api_token
-      또는 OpenBao KV {{ fortigate_backup_openbao_prefix }}{{ inventory_hostname }}의 api_token으로 주입한다.
+      [FORTIGATE-TOKEN] {{ inventory_hostname }}: API 토큰 또는 접속 주소·포트를 알 수 없다(값은 로그에 남기지 않는다).
+      토큰은 Semaphore Environment의 fortigate_api_token 또는 OpenBao KV {{ fortigate_backup_openbao_prefix }}{{ inventory_hostname }}의 api_token,
+      주소는 인벤토리의 ansible_host 또는 같은 KV의 ansible_host로 주입하고 포트는 KV ansible_port 또는 fortigate_backup_api_port다.
+  no_log: true
 
 - name: "[FGBK-005] Ensure local backup destination directory exists (0700)"
   ansible.builtin.file:
@@ -70,190 +69,194 @@
     state: directory
     mode: '0700'
 
-- name: "[FGBK-006] Query the system status through the same connection to identify the responding member"
+# 토큰·응답 멤버 계산은 한 곳(블록 vars)에서 한다. 블록 vars는 사용 시점에 계산되므로 앞 태스크의 register 결과를 그대로 쓰고 fact로 남지 않는다.
+- name: Query the device, derive the responding member and save the configuration (FGBK-006 to FGBK-011)
   vars:
     _fgbk_token: "{{ fortigate_api_token if (fortigate_api_token | length > 0) else fortigate_backup_kv_response.json.data.data.api_token }}"
-  ansible.builtin.uri:
-    url: "{{ fortigate_backup_scheme }}://{{ ansible_host }}:{{ fortigate_backup_api_port }}/api/v2/monitor/system/status"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ _fgbk_token }}"
-    return_content: true
-    validate_certs: "{{ fortigate_backup_validate_certs }}"
-    timeout: "{{ fortigate_backup_timeout }}"
-    status_code: [-1, 200, 301, 302, 400, 401, 403, 404, 405, 500, 502, 503]
-  register: fortigate_backup_status
-  changed_when: false
-  check_mode: false
-  delegate_to: localhost
-  no_log: true
-
-- name: "[FGBK-007] Verify the status response names the responding member"
-  vars:
     _fgbk_member_raw: "{{ (fortigate_backup_status.json.results.hostname | default('')) if fortigate_backup_member_source == 'hostname' else (fortigate_backup_status.json.serial | default('')) }}"
-  ansible.builtin.assert:
-    that:
-      - fortigate_backup_status.status | default(-1) == 200
-      - fortigate_backup_status.json is defined
-      - (_fgbk_member_raw | string | regex_replace('[^A-Za-z0-9-]', '-') | trim('-')) | length > 0
-    fail_msg: >-
-      [FORTIGATE-STATUS] {{ inventory_hostname }}: 시스템 상태 응답이 비정상이거나 응답 멤버({{ fortigate_backup_member_source }})를 알 수 없다
-      (HTTP 상태 {{ fortigate_backup_status.status | default('연결 실패') }}). 파일을 저장하지 않았다.
+    _fgbk_member: "{{ _fgbk_member_raw | string | regex_replace('[^A-Za-z0-9-]', '-') | trim('-') }}"
+  block:
+    - name: "[FGBK-006] Query the system status through the same connection to identify the responding member"
+      ansible.builtin.uri:
+        url: "{{ fortigate_backup_scheme }}://{{ _fgbk_target }}:{{ _fgbk_port }}/api/v2/monitor/system/status"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ _fgbk_token }}"
+        return_content: true
+        validate_certs: "{{ fortigate_backup_validate_certs }}"
+        timeout: "{{ fortigate_backup_timeout }}"
+        status_code: [-1, 200, 301, 302, 400, 401, 403, 404, 405, 500, 502, 503]
+      register: fortigate_backup_status
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      no_log: true
 
-- name: "[FGBK-008] Derive the responding member and the backup file name"
+    - name: "[FGBK-007] Verify the status response names the responding member"
+      ansible.builtin.assert:
+        that:
+          - fortigate_backup_status.status | default(-1) == 200
+          - fortigate_backup_status.json is defined
+          - _fgbk_member | length > 0
+        fail_msg: >-
+          [FORTIGATE-STATUS] {{ inventory_hostname }}: 시스템 상태 응답이 비정상이거나 응답 멤버({{ fortigate_backup_member_source }})를 알 수 없다
+          (HTTP 상태 {{ fortigate_backup_status.status | default('연결 실패') }}). 파일을 저장하지 않았다.
+
+    - name: "[FGBK-008] Derive the responding member and the backup file name"
+      ansible.builtin.set_fact:
+        fortigate_backup_member: "{{ _fgbk_member }}"
+        fortigate_backup_file_prefix: "{{ fortigate_device }}_"
+        fortigate_backup_file_name: "{{ fortigate_device }}_{{ _fgbk_member }}_{{ now(fmt='%Y%m%dT%H%M%S') }}.conf"
+
+    - name: "[FGBK-009] Download the full configuration from the target's management address"
+      ansible.builtin.uri:
+        url: "{{ fortigate_backup_scheme }}://{{ _fgbk_target }}:{{ _fgbk_port }}/api/v2/monitor/system/config/backup?scope={{ fortigate_backup_scope }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ _fgbk_token }}"
+        return_content: true
+        validate_certs: "{{ fortigate_backup_validate_certs }}"
+        timeout: "{{ fortigate_backup_timeout }}"
+        status_code: [-1, 200, 301, 302, 400, 401, 403, 404, 405, 500, 502, 503]
+      register: fortigate_backup_response
+      changed_when: false
+      check_mode: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: "[FGBK-010] Verify the response is a non-empty FortiOS configuration"
+      ansible.builtin.assert:
+        that:
+          - fortigate_backup_response.status | default(-1) == 200
+          - (fortigate_backup_response.content | default('')) | length > 0
+          - (fortigate_backup_response.content | default('')).startswith('#config-version=')
+        fail_msg: >-
+          [FORTIGATE-RESPONSE] {{ inventory_hostname }}: 설정 응답이 비정상이다(HTTP 상태 {{ fortigate_backup_response.status | default('연결 실패') }},
+          본문 길이 {{ (fortigate_backup_response.content | default('')) | length }}). 파일을 저장하지 않았다.
+
+    - name: "[FGBK-011] Save the configuration to the backup destination (0600)"
+      ansible.builtin.copy:
+        content: "{{ fortigate_backup_response.content }}"
+        dest: "{{ fortigate_backup_dir }}/{{ fortigate_backup_file_name }}"
+        mode: '0600'
+        force: false
+      no_log: true
+      diff: false
+
+# 보관 정리(FGBK-012·013)는 변경 감지·알림이 실패해도(예: FGBK-021) 건너뛰지 않는다. 알림 실패는 호스트 실패로 남는다.
+- name: Compare with the previous backup, alert on changes and always apply retention (FGBK-014 to FGBK-021, FGBK-012 to FGBK-013)
   vars:
-    _fgbk_member_raw: "{{ (fortigate_backup_status.json.results.hostname | default('')) if fortigate_backup_member_source == 'hostname' else (fortigate_backup_status.json.serial | default('')) }}"
-  ansible.builtin.set_fact:
-    fortigate_backup_member: "{{ _fgbk_member_raw | string | regex_replace('[^A-Za-z0-9-]', '-') | trim('-') }}"
-    fortigate_backup_file_prefix: "{{ fortigate_device }}_"
-    fortigate_backup_file_name: "{{ fortigate_device }}_{{ _fgbk_member_raw | string | regex_replace('[^A-Za-z0-9-]', '-') | trim('-') }}_{{ now(fmt='%Y%m%dT%H%M%S') }}.conf"
-
-- name: "[FGBK-009] Download the full configuration from the target's management address"
-  vars:
-    _fgbk_token: "{{ fortigate_api_token if (fortigate_api_token | length > 0) else fortigate_backup_kv_response.json.data.data.api_token }}"
-  ansible.builtin.uri:
-    url: "{{ fortigate_backup_scheme }}://{{ ansible_host }}:{{ fortigate_backup_api_port }}/api/v2/monitor/system/config/backup?scope={{ fortigate_backup_scope }}"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ _fgbk_token }}"
-    return_content: true
-    validate_certs: "{{ fortigate_backup_validate_certs }}"
-    timeout: "{{ fortigate_backup_timeout }}"
-    status_code: [-1, 200, 301, 302, 400, 401, 403, 404, 405, 500, 502, 503]
-  register: fortigate_backup_response
-  changed_when: false
-  check_mode: false
-  delegate_to: localhost
-  no_log: true
-
-- name: "[FGBK-010] Verify the response is a non-empty FortiOS configuration"
-  ansible.builtin.assert:
-    that:
-      - fortigate_backup_response.status | default(-1) == 200
-      - (fortigate_backup_response.content | default('')) | length > 0
-      - (fortigate_backup_response.content | default('')).startswith('#config-version=')
-    fail_msg: >-
-      [FORTIGATE-RESPONSE] {{ inventory_hostname }}: 설정 응답이 비정상이다(HTTP 상태 {{ fortigate_backup_response.status | default('연결 실패') }},
-      본문 길이 {{ (fortigate_backup_response.content | default('')) | length }}). 파일을 저장하지 않았다.
-
-- name: "[FGBK-011] Save the configuration to the backup destination (0600)"
-  ansible.builtin.copy:
-    content: "{{ fortigate_backup_response.content }}"
-    dest: "{{ fortigate_backup_dir }}/{{ fortigate_backup_file_name }}"
-    mode: '0600'
-    force: false
-  no_log: true
-  diff: false
-
-- name: "[FGBK-014] Find the backup files of this target to locate the previous backup"
-  ansible.builtin.find:
-    paths: "{{ fortigate_backup_dir }}"
-    patterns: "{{ fortigate_backup_file_prefix }}*.conf"
-    recurse: false
-  register: fortigate_backup_history
-
-- name: "[FGBK-015] Pick the previous backup of the same target (member may differ)"
-  ansible.builtin.set_fact:
-    fortigate_backup_previous_name: "{{ fortigate_backup_history.files | map(attribute='path') | map('basename') | list | fortigate_backup_previous(fortigate_backup_file_name, fortigate_backup_file_prefix) }}"
-
-- name: "[FGBK-016] Read the previous backup for comparison"
-  ansible.builtin.slurp:
-    src: "{{ fortigate_backup_dir }}/{{ fortigate_backup_previous_name }}"
-  register: fortigate_backup_previous_content
-  no_log: true
-  when: fortigate_backup_previous_name | length > 0
-
-- name: "[FGBK-017] Compare with the previous backup and keep only section and item names"
-  ansible.builtin.set_fact:
-    fortigate_backup_member_changed: "{{ (fortigate_backup_previous_name | fortigate_backup_member(fortigate_backup_file_prefix)) != fortigate_backup_member }}"
-    fortigate_backup_changes: "{{ fortigate_backup_response.content | fortigate_config_changes(fortigate_backup_previous_content.content | b64decode, ((fortigate_backup_previous_name | fortigate_backup_member(fortigate_backup_file_prefix)) != fortigate_backup_member)) | list }}"
-  no_log: true
-  when: fortigate_backup_previous_name | length > 0
-
-- name: "[FGBK-018] Report the changed sections (names only, no values)"
-  ansible.builtin.debug:
-    msg: >-
-      [FORTIGATE-CHANGE] {{ fortigate_device }}: 직전 백업({{ fortigate_backup_previous_name }})과 설정이 다르다.
-      {{ fortigate_backup_changes | join(' / ') }}
-  when:
-    - fortigate_backup_previous_name | length > 0
-    - fortigate_backup_changes | length > 0
-
-- name: "[FGBK-019] Assert the alert webhook is configured when a change is detected"
-  ansible.builtin.assert:
-    that:
-      - fortigate_backup_alert_webhook_url is match('^https?://')
-    fail_msg: >-
-      [FORTIGATE-ALERT] {{ fortigate_device }}: 설정 변경을 감지했으나 알림 webhook(fortigate_backup_alert_webhook_url)이 없어
-      알리지 못했다. 변경 항목: {{ fortigate_backup_changes | join(' / ') }}
-  when:
-    - fortigate_backup_previous_name | length > 0
-    - fortigate_backup_changes | length > 0
-
-- name: "[FGBK-020] Send the configuration change alert once"
-  vars:
-    _fgbk_items: "{{ fortigate_backup_changes[:fortigate_backup_alert_max_items | int] | map('regex_replace', '^', '  - ') | join('\n') }}"
-    _fgbk_more: "{{ ('\n  - 외 ' ~ (fortigate_backup_changes | length - (fortigate_backup_alert_max_items | int)) ~ '건') if (fortigate_backup_changes | length > (fortigate_backup_alert_max_items | int)) else '' }}"
     _fgbk_prev_member: "{{ fortigate_backup_previous_name | fortigate_backup_member(fortigate_backup_file_prefix) }}"
-    _fgbk_member_note: "{{ (' (응답 멤버가 ' ~ _fgbk_prev_member ~ '에서 ' ~ fortigate_backup_member ~ '로 바뀐 비교: 멤버 고유 설정은 제외)') if fortigate_backup_member_changed | bool else '' }}"
-    _fgbk_text: |-
-      🟠 [P2 경고] 포티게이트 설정 변경 감지
+    _fgbk_member_changed: "{{ _fgbk_prev_member != fortigate_backup_member }}"
+  block:
+    - name: "[FGBK-014] Find the backup files of this target to locate the previous backup"
+      ansible.builtin.find:
+        paths: "{{ fortigate_backup_dir }}"
+        patterns: "{{ fortigate_backup_file_prefix }}*.conf"
+        recurse: false
+      register: fortigate_backup_history
 
-      ■ 무슨 일: 방화벽 설정이 직전 백업과 달라졌습니다.
-      ■ 왜 중요: 승인되지 않은 설정 변경이면 접근 통제 약화나 침해의 시작일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다.
-      ■ 대상: {{ fortigate_device }} (멤버 {{ fortigate_backup_member }}){{ _fgbk_member_note }}
-      ■ 변경 항목(이름만, 값은 표시하지 않음):
-      {{ _fgbk_items }}{{ _fgbk_more }}
-      ■ 조치: ① 변경 시각 전후 작업 요청·변경 기록과 대조 ② 승인된 작업이 아니면 장비 관리자 계정·접속 경로를 점검하고 직전 백업({{ fortigate_backup_previous_name }})과 비교해 되돌리기 ③ 승인된 작업이면 변경 기록에 남기기
+    - name: "[FGBK-015] Pick the previous backup of the same target (member may differ)"
+      ansible.builtin.set_fact:
+        fortigate_backup_previous_name: "{{ fortigate_backup_history.files | map(attribute='path') | map('basename') | list | fortigate_backup_previous(fortigate_backup_file_name, fortigate_backup_file_prefix) }}"
 
-      ▶ 런북: {{ fortigate_backup_alert_runbook }}
-      ⏱ 발생: {{ now(utc=true, fmt='%Y-%m-%d %H:%M:%S') }} (UTC) · 규칙 fortigate-config-change
-  ansible.builtin.uri:
-    url: "{{ fortigate_backup_alert_webhook_url }}"
-    method: POST
-    headers: "{{ {'Content-Type': 'application/json'} | combine({fortigate_backup_alert_webhook_auth_header: fortigate_backup_alert_webhook_token} if (fortigate_backup_alert_webhook_token | length > 0) else {}) }}"
-    body_format: json
-    body:
-      content:
-        type: text
-        text: "{{ _fgbk_text }}"
-    status_code: [200, 201, 202, 204]
-    timeout: 15
-  register: fortigate_backup_alert_result
-  retries: 2
-  delay: 3
-  until: fortigate_backup_alert_result.status | default(-1) in [200, 201, 202, 204]
-  failed_when: false
-  check_mode: false
-  delegate_to: localhost
-  no_log: true
-  when:
-    - fortigate_backup_previous_name | length > 0
-    - fortigate_backup_changes | length > 0
+    - name: "[FGBK-016] Read the previous backup for comparison"
+      ansible.builtin.slurp:
+        src: "{{ fortigate_backup_dir }}/{{ fortigate_backup_previous_name }}"
+      register: fortigate_backup_previous_content
+      no_log: true
+      when: fortigate_backup_previous_name | length > 0
 
-- name: "[FGBK-021] Assert the alert was delivered"
-  ansible.builtin.assert:
-    that:
-      - fortigate_backup_alert_result.status | default(-1) in [200, 201, 202, 204]
-    fail_msg: >-
-      [FORTIGATE-ALERT] {{ fortigate_device }}: 설정 변경 알림 전송에 실패했다(HTTP 상태 {{ fortigate_backup_alert_result.status | default('연결 실패') }}).
-      백업은 저장됐고 같은 변경은 다시 알리지 않으므로 사람이 직접 확인해야 한다. 변경 항목: {{ fortigate_backup_changes | join(' / ') }}
-  when:
-    - fortigate_backup_previous_name | length > 0
-    - fortigate_backup_changes | length > 0
+    - name: "[FGBK-017] Compare with the previous backup and keep only section and item names"
+      ansible.builtin.set_fact:
+        fortigate_backup_member_changed: "{{ _fgbk_member_changed }}"
+        fortigate_backup_changes: "{{ fortigate_backup_response.content | fortigate_config_changes(fortigate_backup_previous_content.content | b64decode, _fgbk_member_changed | bool) | list }}"
+      no_log: true
+      when: fortigate_backup_previous_name | length > 0
 
-- name: "[FGBK-012] Find backup files of this target older than the retention period"
-  ansible.builtin.find:
-    paths: "{{ fortigate_backup_dir }}"
-    patterns: "{{ fortigate_backup_file_prefix }}*.conf"
-    age: "{{ fortigate_backup_retention_days | int }}d"
-    recurse: false
-  register: fortigate_backup_expired
+    - name: "[FGBK-018] Report the changed sections (names only, no values)"
+      ansible.builtin.debug:
+        msg: >-
+          [FORTIGATE-CHANGE] {{ fortigate_device }}: 직전 백업({{ fortigate_backup_previous_name }})과 설정이 다르다.
+          {{ fortigate_backup_changes | join(' / ') }}
+      when:
+        - fortigate_backup_previous_name | length > 0
+        - fortigate_backup_changes | length > 0
 
-- name: "[FGBK-013] Delete the expired backup files of this target"
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: absent
-  loop: "{{ fortigate_backup_expired.files }}"
-  loop_control:
-    label: "{{ item.path | basename }}"
+    - name: "[FGBK-019] Assert the alert webhook is configured when a change is detected"
+      ansible.builtin.assert:
+        that:
+          - fortigate_backup_alert_webhook_url is match('^https?://')
+        fail_msg: >-
+          [FORTIGATE-ALERT] {{ fortigate_device }}: 설정 변경을 감지했으나 알림 webhook(fortigate_backup_alert_webhook_url)이 없어
+          알리지 못했다. 변경 항목: {{ fortigate_backup_changes | join(' / ') }}
+      when:
+        - fortigate_backup_previous_name | length > 0
+        - fortigate_backup_changes | length > 0
+
+    - name: "[FGBK-020] Send the configuration change alert once"
+      vars:
+        _fgbk_items: "{{ fortigate_backup_changes[:fortigate_backup_alert_max_items | int] | map('regex_replace', '^', '  - ') | join('\n') }}"
+        _fgbk_more: "{{ ('\n  - 외 ' ~ (fortigate_backup_changes | length - (fortigate_backup_alert_max_items | int)) ~ '건') if (fortigate_backup_changes | length > (fortigate_backup_alert_max_items | int)) else '' }}"
+        _fgbk_member_note: "{{ (' (응답 멤버가 ' ~ _fgbk_prev_member ~ '에서 ' ~ fortigate_backup_member ~ '로 바뀐 비교: 멤버 고유 설정은 제외)') if fortigate_backup_member_changed | bool else '' }}"
+        _fgbk_text: |-
+          🟠 [P2 경고] 포티게이트 설정 변경 감지
+
+          ■ 무슨 일: 방화벽 설정이 직전 백업과 달라졌습니다.
+          ■ 왜 중요: 승인되지 않은 설정 변경이면 접근 통제 약화나 침해의 시작일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다.
+          ■ 대상: {{ fortigate_device }} (멤버 {{ fortigate_backup_member }}){{ _fgbk_member_note }}
+          ■ 변경 항목(이름만, 값은 표시하지 않음):
+          {{ _fgbk_items }}{{ _fgbk_more }}
+          ■ 조치: ① 변경 시각 전후 작업 요청·변경 기록과 대조 ② 승인된 작업이 아니면 장비 관리자 계정·접속 경로를 점검하고 직전 백업({{ fortigate_backup_previous_name }})과 비교해 되돌리기 ③ 승인된 작업이면 변경 기록에 남기기
+
+          ▶ 런북: {{ fortigate_backup_alert_runbook }}
+          ⏱ 발생: {{ now(utc=true, fmt='%Y-%m-%d %H:%M:%S') }} (UTC) · 규칙 fortigate-config-change
+      ansible.builtin.uri:
+        url: "{{ fortigate_backup_alert_webhook_url }}"
+        method: POST
+        headers: "{{ {'Content-Type': 'application/json'} | combine({fortigate_backup_alert_webhook_auth_header: fortigate_backup_alert_webhook_token} if (fortigate_backup_alert_webhook_token | length > 0) else {}) }}"
+        body_format: json
+        body:
+          content:
+            type: text
+            text: "{{ _fgbk_text }}"
+        status_code: [200, 201, 202, 204]
+        timeout: 15
+      register: fortigate_backup_alert_result
+      retries: 2
+      delay: 3
+      until: fortigate_backup_alert_result.status | default(-1) in [200, 201, 202, 204]
+      failed_when: false
+      check_mode: false
+      delegate_to: localhost
+      no_log: true
+      when:
+        - fortigate_backup_previous_name | length > 0
+        - fortigate_backup_changes | length > 0
+
+    - name: "[FGBK-021] Assert the alert was delivered"
+      ansible.builtin.assert:
+        that:
+          - fortigate_backup_alert_result.status | default(-1) in [200, 201, 202, 204]
+        fail_msg: >-
+          [FORTIGATE-ALERT] {{ fortigate_device }}: 설정 변경 알림 전송에 실패했다(HTTP 상태 {{ fortigate_backup_alert_result.status | default('연결 실패') }}).
+          백업은 저장됐고 같은 변경은 다시 알리지 않으므로 사람이 직접 확인해야 한다. 변경 항목: {{ fortigate_backup_changes | join(' / ') }}
+      when:
+        - fortigate_backup_previous_name | length > 0
+        - fortigate_backup_changes | length > 0
+  always:
+    - name: "[FGBK-012] Find backup files of this target older than the retention period"
+      ansible.builtin.find:
+        paths: "{{ fortigate_backup_dir }}"
+        patterns: "{{ fortigate_backup_file_prefix }}*.conf"
+        age: "{{ fortigate_backup_retention_days | int }}d"
+        recurse: false
+      register: fortigate_backup_expired
+
+    - name: "[FGBK-013] Delete the expired backup files of this target"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ fortigate_backup_expired.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"

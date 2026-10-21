@@ -109,7 +109,7 @@ def test_sudo_lines_become_user_command_and_outcome(tmp_path, line, expected):
     _rec("kernel", "Out of memory: Killed process 1234 (java)"),
     # another program that merely quotes the text must not be interpreted
     _rec("logger", "Accepted publickey for root from 10.0.0.1 port 22 ssh2"),
-    {"body": "no program field at all, Failed password for x from 1.2.3.4 port 1"},
+    {"body": "no program field at all, Failed password for x from 192.0.2.4 port 1"},
     {"process_executable_name": "sshd"},
     {"process_executable_name": "sshd", "body": 12345},
 ])
@@ -248,7 +248,7 @@ def test_server_logs_and_other_services_are_not_affected(tmp_path, rec):
     {"service_name": "fortigate-syslog", "host_name": "ns0266",
      "body": 'date=2026-10-21 time=10:00:00 devname="FW-A" type="event" subtype="system" action="login" status="failed" user="admin"'},
     {"service_name": "fortigate-syslog", "host_name": "ns0266",
-     "body": 'type="utm" subtype="ips" action="dropped" msg="Failed password for x from 1.2.3.4 port 1"'},
+     "body": 'type="utm" subtype="ips" action="dropped" msg="Failed password for x from 192.0.2.4 port 1"'},
 ])
 def test_fortigate_records_on_security_logs_pass_the_security_function_unchanged(tmp_path, rec):
     assert _apply(tmp_path, copy.deepcopy(rec)) == rec

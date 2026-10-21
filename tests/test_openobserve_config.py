@@ -62,7 +62,7 @@ def _same_roster_alert(name, stored, sql):
     def is_roster(q):
         return any(f"AS {col}, count(*) AS n FROM" in q for col in ("host_name", "host", "device_id"))
     def shape(q):   # the roster hosts differ; the extra condition of each branch (e.g. job = 'backup' AND success = true) must match
-        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?|\((?:(?:host|host_name|device_id) = '[^']*' OR )+(?:lower\(body\) LIKE '[^']*'(?: OR )?)*\) AND )?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
+        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?|\((?:(?:host|host_name|device_id) = '[^']*' OR )*(?:lower\(body\) LIKE '[^']*'(?: OR )?)*\) AND )?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
         return {m.group(1) if m else "" for m in conds}
     return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql) and shape(stored) == shape(sql)
 
@@ -648,7 +648,7 @@ def test_source_addresses_never_reach_the_output(o2):
         assert ip not in res.stdout + res.stderr
 
 
-@pytest.mark.parametrize("bad", [{"address": "1.2.3.4' OR '1'='1", "kind": "office"},
+@pytest.mark.parametrize("bad", [{"address": "192.0.2.4' OR '1'='1", "kind": "office"},
                                  {"address": "192.0.2.5", "kind": "partner"}, {"address": "", "kind": "office"}])
 def test_invalid_source_entries_fail_before_any_request(o2, bad):
     res = _apply(o2, kv=dict(KV, normal_sources=[bad]))
@@ -1721,3 +1721,21 @@ def test_every_firewall_alert_has_a_runbook_entry_that_states_the_synthetic_inpu
         assert f'<a id="{anchor}"></a>' in runbook and f"(`{name}`)" in runbook, name
     for token in ("o2c_fortigate_syslog_roster", "o2c_fortigate_approved_start_hour", "o2c_fortigate_account_cfgpaths", "합성", "실장비"):
         assert token in runbook, token
+
+
+def test_firewall_silent_sql_does_not_read_the_device_id_column_even_with_a_roster(o2):
+    """The WHERE clause must use only columns that always exist: device_id appears in security_logs only after the first processed firewall line."""
+    assert _apply(o2, extra={"o2c_fortigate_syslog_roster": ["ns0399", "ns0380+ns0381"]}).returncode == 0
+    sql = _sql(o2, "infra-fortigate-syslog-silent")
+    assert "ns0380" in sql and "ns0381" in sql and "ns0399" in sql
+    assert not re.search(r"(?<![A-Za-z_'\"])device_id\s*=", sql) and "WHERE device_id" not in sql
+    assert 'LIKE \'%devname="ns0381%\'' in sql
+
+
+def test_missing_sql_without_field_column_matches_only_on_body_and_still_counts_a_pair_member():
+    sql = o2c_missing_sql(["ns0380+ns0381"], "security_logs", "device_id", "service_name = 'fortigate-syslog'", "devname", field_column=False)
+    assert sql.startswith("SELECT 'ns0380+ns0381' AS device_id") and "device_id =" not in sql
+    table = sql.replace('"security_logs"', '"t"').replace("AS device_id", "AS device")
+    only_body = [{"service_name": "fortigate-syslog", "body": 'devname="ns0381" x'}]   # device_id 컬럼 자체가 없다
+    assert _run_alert_on_sqlite(table, only_body, "t") == []
+    assert len(_run_alert_on_sqlite(table, [{"service_name": "fortigate-syslog", "body": 'devname="ns0399" x'}], "t")) == 1

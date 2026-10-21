@@ -427,7 +427,7 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 
 방화벽 syslog는 [수신 경로](fortigate-syslog.md)를 거쳐 `security_logs`에 `service_name=fortigate-syslog`로 들어온다. 알림 6개는 스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)을 쓴다.
 
-> **입력 로그는 합성이다.** 알림 조건과 검증 레코드는 FortiOS 7.2/7.4 Log Message Reference의 기본 key=value 형식으로 만든 가짜 줄이다. **실장비 샘플(비공개 경로)로 키 이름과 값 모양을 다시 검증하기 전까지 확정이 아니다.** 확인할 항목: `subtype`/`action`/`status`(관리자 로그인 실패), `cfgpath`·`user`·`time`(설정 변경), `subtype=ha`와 `logdesc`, `type=utm`·`severity`·`attack`, `devname`. 샘플과 다르면 `roles/openobserve_config/defaults/main.yml`의 알림 SQL, 검증 레코드(`files/alert_fixtures.yml`)를 함께 고친다. 장비 쪽 로그 전송은 아직 설정하지 않았으므로 지금은 알림이 울릴 일이 없다.
+> **입력 로그는 합성이다.** 알림 조건과 검증 레코드는 공식 Log Message Reference의 기본 key=value 형식으로 만든 가짜 줄이다. **실장비 샘플(비공개 경로)로 키 이름과 값 모양을 다시 검증하기 전까지 확정이 아니다.** 확인할 항목: `subtype`/`action`/`status`(관리자 로그인 실패), `cfgpath`·`user`·`time`(설정 변경), `subtype=ha`와 `logdesc`, `type=utm`·`severity`·`attack`, `devname`. 샘플과 다르면 `roles/openobserve_config/defaults/main.yml`의 알림 SQL, 검증 레코드(`files/alert_fixtures.yml`)를 함께 고친다. 장비가 로그를 보내기 전에는 알림이 울릴 일이 없다.
 
 | 알림 | 등급 | 조건 (기본값) | 재통지 |
 |---|---|---|---|
@@ -443,7 +443,7 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 **공통 한계**: 알림 SQL은 `service_name`과 원문 `body`의 `key=value`만 읽는다. `security_logs`에는 첫 방화벽 줄이 들어오기 전까지 방화벽 필드(`device_id` 등) 컬럼이 없어서, 그 컬럼을 참조하면 알림 평가가 매번 오류가 나고 Config 실행(`O2C-036`)이 막히기 때문이다. 필드 추출([OpenObserve 구성](../openobserve_config.md), #285)과 별개로 동작한다. 따옴표 있는 값(`subtype="ha"`)과 없는 값(`subtype=ha`)을 모두 받는다.
 
 **목록 갱신 절차**: 아래 값은 모두 역할 기본 변수(`roles/openobserve_config/defaults/main.yml`)이며 Semaphore의 `OpenObserve — Config` 템플릿 Environment(`-e`)나 저장소 기본값을 고친 뒤 **`OpenObserve — Config`를 다시 실행**해야 반영된다. 잘못된 형식(장비 이름, 경로 문자, 승인 시간)은 요청 전에 실패한다.
-- `o2c_fortigate_syslog_roster`(수신 중단 감시 장비): **기본값은 비어 있다.** 방화벽 3대(`ns0380`, `ns0381`, `ns0399`) 모두 장비 쪽 로그 전송을 아직 설정하지 않았고, 전송 전 장비를 넣으면 허위 알림이 계속 오기 때문이다. 장비가 로그를 보내기 시작하고 `security_logs`에 도착하는 것을 확인한 **뒤에** 관리번호를 더한다(사무실 `ns0399`가 먼저). IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤에는 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶어 한 항목으로 쓴다(어느 한 멤버라도 보내면 수신 중). 목록에 없는 장비는 로그가 없어도 알리지 않는다. 목록이 비면 규칙은 있지만 행을 돌려주지 않는다.
+- `o2c_fortigate_syslog_roster`(수신 중단 감시 장비): **기본값은 비어 있다.** 전송을 시작하기 전 장비(`ns0380`, `ns0381`, `ns0399`)를 넣으면 허위 알림이 계속 오기 때문이다. 장비가 로그를 보내기 시작하고 `security_logs`에 도착하는 것을 확인한 **뒤에** 관리번호를 더한다(사무실 `ns0399`가 먼저). IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤에는 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶어 한 항목으로 쓴다(어느 한 멤버라도 보내면 수신 중). 목록에 없는 장비는 로그가 없어도 알리지 않는다. 목록이 비면 규칙은 있지만 행을 돌려주지 않는다.
 - `o2c_fortigate_approved_start_hour`, `o2c_fortigate_approved_end_hour`(승인 시간, 기본 9, 18, 끝 미포함): 변경 로그 원문의 `time=`(장비 시계)을 읽는다. **장비 시간대가 운영 시간대(KST)여야 한다.** 시각이 없는 줄은 승인 시간 밖으로 본다. 요일은 구분하지 않는다.
 - `o2c_fortigate_policy_cfgpaths`, `o2c_fortigate_account_cfgpaths`(변경을 알릴 `cfgpath`): 기본은 정책(`firewall.policy`, `firewall.policy6`, `firewall.proxy-policy`)과 계정(`system.admin`, `system.accprofile`, `system.api-user`, `user.local`, `user.group`)이다.
 - `o2c_fortigate_detection_severities`(기본 `critical`), `o2c_fortigate_login_fail_threshold`(기본 5), `o2c_fortigate_silent_minutes`(기본 120, 스위치 24시간보다 짧다. 방화벽은 로그가 계속 나오므로), 재통지 간격 `o2c_fortigate_*_silence_minutes`.

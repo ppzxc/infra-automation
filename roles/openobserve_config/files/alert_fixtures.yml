@@ -994,7 +994,7 @@ infra-fortigate-syslog-silent:
       host: verify-fw-silent-fresh
       fires: false
       records:
-        - {ts: -600, service_name: fortigate-syslog, device_name: verify-fw, body: 'date=2026-10-20 time=10:00:00 devname="verify-fw" type="event" subtype="system" msg="synthetic"'}
+        - {ts: -600, service_name: fortigate-syslog, device_name: verify-fw, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" msg="synthetic"'}
     - name: 변환 전 레코드(device_id 필드 없이 원문만 있음)도 수신 중이다
       host: verify-fw-silent-legacy
       fires: false
