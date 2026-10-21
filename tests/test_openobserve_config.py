@@ -282,10 +282,10 @@ def test_template_body_is_a_naver_works_text_message(o2):
                 "{rows:20}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
         assert var in body["content"]["text"], var
     assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
-    # 시각 줄은 알림 평가 시각({alert_trigger_time_str})과 (KST) 표기다. 결과 행 _timestamp 기반 변수는 최종 SELECT에 _timestamp가 없으면 비어 쓰지 않는다
+    # 시각 줄은 알림 평가 시각({alert_trigger_time_str})과 (UTC) 표기다(alert_trigger_time_str은 tz_offset을 따르지 않고 UTC 그대로). 결과 행 _timestamp 기반 변수는 최종 SELECT에 _timestamp가 없으면 비어 쓰지 않는다
     tpl = o2.store["template"]["infra-automation-webhook"]["body"]
-    assert "⏱ 발생: {alert_trigger_time_str} (KST) · 규칙 {alert_name}" in body["content"]["text"]
-    assert "alert_start_time" not in tpl and "alert_end_time" not in tpl and "UTC" not in tpl
+    assert "⏱ 발생: {alert_trigger_time_str} (UTC) · 규칙 {alert_name}" in body["content"]["text"]
+    assert "alert_start_time" not in tpl and "alert_end_time" not in tpl and "(KST)" not in tpl
 
 
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
