@@ -56,3 +56,12 @@ all:
           # 경유지(Bastion) 스위치를 경유해야 하는 경우 SSH ProxyJump 지정 예시:
           # ansible_ssh_common_args: '-o ProxyJump=admin@192.168.1.1:22'
 
+    # 4. FortiGate 방화벽 그룹 (설정 백업, docs/fortigate_backup.md). 호스트 = 접속 대상(IDC HA 클러스터 1, 사무실 1).
+    #    HA 관리 인터페이스가 없어 IDC 쌍은 클러스터(현재 active) 주소 하나로 접속한다. 호스트명은 관리번호(파일명의 <장비>).
+    #    실제 응답 멤버는 접속 후 조회한다. 아래 주소는 문서용 예시다.
+    fortigate_firewalls:
+      hosts:
+        ns0380:
+          ansible_host: 192.0.2.11
+        ns0399:
+          ansible_host: 192.0.2.21
