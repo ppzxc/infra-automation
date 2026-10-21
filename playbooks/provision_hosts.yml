@@ -1,9 +1,96 @@
 ---
 # ==============================================================================
-# 온프레미스 IDC 대상 호스트(Target Hosts) 프로비저닝 플레이북 (하위 호환 래퍼)
+# Host Provisioning 진입점 (Semaphore 전용 래퍼)
 # 실제 프로비저닝 로직은 playbooks/site.yml에 통합되어 있습니다.
+#
+# Semaphore는 이 파일만 쓴다. 인벤토리를 공용으로 쓰므로 대상(target_hosts)을
+# 반드시 명시해야 하며, 비우면 servers·loadbalancers 전체가 아니라 즉시 실패한다.
+# site.yml 직접 실행(기본 대상 servers:loadbalancers)은 CLI 전용이다.
+#
+# 입력 변수:
+#   target_hosts        필수. 인벤토리 호스트명을 쉼표로 구분 (예: ns0001,ns0002)
+#   provision_max_hosts 선택. 한 번에 허용하는 최대 호스트 수 (기본 5)
+#   target_admin_users  선택. 관리자 계정 목록
 # ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Pre-flight: 어떤 호스트에도 접속하기 전에 대상 지정이 올바른지 검증 (localhost)
+# tags: [always] — --tags 실행에서도 검증이 스킵되지 않도록 강제
+# ------------------------------------------------------------------------------
+- name: Validate Explicit Provisioning Targets
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tags: [always]
+
+  vars:
+    _provision_max_hosts: "{{ provision_max_hosts | default(5) | int }}"
+    _provision_raw: "{{ target_hosts | default('') if (target_hosts | default('') is string) else '' }}"
+    _provision_names: "{{ _provision_raw.split(',') if _provision_raw | length > 0 else [] }}"
+    # 호스트 이름 문자 집합: 패턴 연산자(: ! & * 등)와 공백을 거부한다.
+    _provision_name_re: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+
+  tasks:
+    - name: Require target_hosts to be a non-empty string
+      ansible.builtin.assert:
+        that:
+          - target_hosts is defined
+          - target_hosts is string
+          - (target_hosts | trim | length) > 0
+          - (_provision_names | reject('match', '^[ ,]*$') | list | length) > 0
+        quiet: true
+        fail_msg: >-
+          target_hosts가 지정되지 않았습니다. 프로비저닝은 반드시 대상 서버를 지정해야 합니다.
+          인벤토리 호스트명을 쉼표로 구분해 넣으세요 (예: ns0001,ns0002).
+
+    - name: Allow only comma-separated plain host names
+      ansible.builtin.assert:
+        that:
+          - _provision_names | reject('match', _provision_name_re) | list | length == 0
+        quiet: true
+        fail_msg: >-
+          target_hosts 형식이 올바르지 않습니다: '{{ _provision_raw }}'.
+          쉼표로 구분한 호스트 이름만 허용합니다. 호스트 패턴(:, !, &, *), 공백, 빈 항목은 쓸 수 없습니다.
+
+    - name: Reject inventory group names as targets
+      ansible.builtin.assert:
+        that:
+          - _provision_names | select('in', groups.keys() | list) | list | length == 0
+        quiet: true
+        fail_msg: >-
+          target_hosts에 인벤토리 그룹 이름이 있습니다:
+          {{ _provision_names | select('in', groups.keys() | list) | list | join(', ') }}.
+          그룹이 아니라 개별 호스트 이름을 지정하세요.
+
+    - name: Require every target to be an inventory host
+      ansible.builtin.assert:
+        that:
+          - _provision_names | reject('in', groups['all']) | list | length == 0
+        quiet: true
+        fail_msg: >-
+          인벤토리에 없는 호스트가 target_hosts에 있습니다:
+          {{ _provision_names | reject('in', groups['all']) | list | join(', ') }}.
+
+    - name: Reject hosts in the provision_excluded inventory group
+      ansible.builtin.assert:
+        that:
+          - _provision_names | select('in', groups['provision_excluded'] | default([])) | list | length == 0
+        quiet: true
+        fail_msg: >-
+          프로비저닝 제외 그룹(provision_excluded)에 속한 호스트가 target_hosts에 있습니다:
+          {{ _provision_names | select('in', groups['provision_excluded'] | default([])) | list | join(', ') }}.
+          이 호스트는 프로비저닝 대상이 아닙니다. 인벤토리에서 그룹을 바꾸기 전에는 지정할 수 없습니다.
+
+    - name: Enforce the maximum number of provisioning targets
+      ansible.builtin.assert:
+        that:
+          - (_provision_names | unique | list | length) <= (_provision_max_hosts | int)
+        quiet: true
+        fail_msg: >-
+          프로비저닝 대상이 상한을 초과했습니다: {{ _provision_names | unique | list | length }}대
+          (provision_max_hosts={{ _provision_max_hosts }}).
+          더 많은 호스트를 대상으로 하려면 provision_max_hosts 값을 명시적으로 올리세요.
 
 - name: Import Site Master Playbook
   ansible.builtin.import_playbook: site.yml
-

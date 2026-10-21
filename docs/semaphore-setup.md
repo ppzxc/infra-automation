@@ -72,6 +72,8 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **FUNA Cluster 호스트**: `servers`에 두면서 `funa_cluster` 그룹에도 넣는다(ns0325·ns0327·ns0338). HOST PROVISIONING(`site.yml`)이 `docker_engine` 뒤에 `funa_env` 역할을 실행해 OpenBao 값으로 `/etc/funa-cluster/`의 환경 파일을 렌더링한다. 그룹에 없는 호스트에는 아무것도 생기지 않는다. 필요한 OpenBao 경로와 키는 `docs/funa_env.md`(#222). 이 그룹은 `NODE_ROLE`에 쓰이지 않는다.
 
+**프로비저닝에서 영구히 빼는 호스트**: 편입하면 안 되는 호스트(Semaphore 자신, 관리번호 재부여 대기 호스트 등)는 `provision_excluded` 그룹에 넣는다. Host Provisioning의 사전 검증이 이 그룹의 호스트가 `target_hosts`에 있으면 접속 전에 실패시킨다. 그룹이 인벤토리에 없으면 빈 그룹으로 본다. 다른 템플릿에는 영향이 없다.
+
 **Host Audit에서 빼는 호스트**: 러너(Semaphore 서버)에서 접속할 수 없는 호스트 등은 `host_audit_excluded` 그룹에 넣는다. Host Audit — Monthly·On-demand가 이 그룹을 빼며(`host_audit_scope_pattern`), 보고서와 Asset Inventory에도 나오지 않는다. 다른 템플릿에는 영향이 없다.
 
 ```yaml
@@ -92,6 +94,8 @@ all:
     firewall_unmanaged:   # HOST PROVISIONING이 방화벽만 건드리지 않는다.
       hosts:
         ns0325: {}
+    provision_excluded:   # Host Provisioning 대상으로 지정할 수 없다.
+      hosts: {}
     funa_cluster:   # FUNA Cluster 환경 파일 렌더링(funa_env).
       hosts:
         ns0325: {}
@@ -146,6 +150,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 | 이름 | Playbook | CLI args | Survey variables | 실행 방식 | 대상 |
 |---|---|---|---|---|---|
+| Host Provisioning | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_admin_users` | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). 지정하지 않으면 접속 전에 실패한다 |
 | Host Agents — Deploy | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 |
 | Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `servers` |
 | Host Agents — Backup | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 (restic·resticprofile만) |
@@ -161,12 +166,16 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 | 템플릿 | 변수 | 형식 | 기본값 | 필수 |
 |---|---|---|---|---|
+| Host Provisioning | `target_hosts` | String | (없음) | 예 |
+| Host Provisioning | `target_admin_users` | String | (없음) | 예 |
 | Deploy, Config, Backup | `target_hosts` | String | `servers`(전체) | 예 |
 | On-demand | `target_hosts` | String | (비움 = 전체) | 아니오 |
 | On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |
 | Resend | `host_audit_resend_run_id` | String | (없음) | 예 |
 | Resend | `host_audit_resend_month` | String `YYYY-MM` | (비움) | 아니오 |
 
+- **Host Provisioning은 `playbooks/provision_hosts.yml`만 쓴다.** `site.yml`을 Semaphore 템플릿에 직접 연결하지 않는다. `site.yml` 직접 실행(기본 대상 `servers:loadbalancers`)은 CLI 전용이다. 인벤토리를 공용으로 쓰므로 대상 지정이 없으면 새로 추가된 서버까지 전부 프로비저닝되기 때문이다.
+- Host Provisioning의 `target_hosts`는 인벤토리 호스트명을 쉼표로 구분한 문자열이다(예: `ns0001,ns0002`). `provision_hosts.yml`의 사전 검증(localhost)이 접속 전에 다음을 확인하고 어기면 한국어 메시지로 즉시 실패한다. 값이 없거나 비어 있음, 호스트 패턴(`:`, `!`, `&`, `*`)·공백·빈 항목, 인벤토리에 없는 이름, 그룹 이름(`all`·`servers`·`loadbalancers` 등), `provision_excluded` 소속 호스트, 개수가 `provision_max_hosts`(기본 5)를 넘음. 더 많은 호스트를 한 번에 하려면 `provision_max_hosts`를 명시적으로 올린다(Environment 또는 API `environment`). 이 검증은 `--tags`로도 건너뛸 수 없다.
 - Deploy·Config·Backup의 `target_hosts`는 비워 두지 않는다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 기본값이 적용되지 않고 대상 패턴이 깨진다. Host Audit은 빈 값을 전체로 처리한다.
 - Monthly에는 Survey를 두지 않는다. 정기 실행은 항상 전체 대상·보관·발송이어야 Audit Baseline이 맞다.
 - Survey에 없는 변수(아래의 `host_audit_mail_to`, `host_audit_drift_enabled`, `backup_maintenance_read_subset` 등)는 API로 실행할 때 `POST /api/project/<id>/tasks`의 `environment`(JSON 문자열)로 넘긴다. 자주 쓰게 되면 해당 템플릿 Survey에 추가한다.
