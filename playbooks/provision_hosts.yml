@@ -9,6 +9,8 @@
 #
 # 입력 변수:
 #   target_hosts        필수. 인벤토리 호스트명을 쉼표로 구분 (예: ns0001,ns0002)
+#                       모두 인벤토리 그룹 provision_allowed에 속해야 한다(기본 거부, opt-in).
+#                       provision_excluded는 영구 거부이며 allowed보다 우선한다.
 #   provision_max_hosts 선택. 한 번에 허용하는 최대 호스트 수 (기본 5)
 #   target_admin_users  선택. 관리자 계정 목록
 # ==============================================================================
@@ -81,6 +83,17 @@
           프로비저닝 제외 그룹(provision_excluded)에 속한 호스트가 target_hosts에 있습니다:
           {{ _provision_names | select('in', groups['provision_excluded'] | default([])) | list | join(', ') }}.
           이 호스트는 프로비저닝 대상이 아닙니다. 인벤토리에서 그룹을 바꾸기 전에는 지정할 수 없습니다.
+
+    - name: Require every target to be in the provision_allowed inventory group
+      ansible.builtin.assert:
+        that:
+          - _provision_names | reject('in', groups['provision_allowed'] | default([])) | list | length == 0
+        quiet: true
+        fail_msg: >-
+          허용 목록(provision_allowed)에 없는 호스트:
+          {{ _provision_names | reject('in', groups['provision_allowed'] | default([])) | unique | list | join(', ') }}.
+          기본은 모두 거부입니다. 프로비저닝하려면 Semaphore 인벤토리의 provision_allowed 그룹에
+          해당 호스트를 넣고 실행한 뒤, 끝나면 다시 빼세요.
 
     - name: Enforce the maximum number of provisioning targets
       ansible.builtin.assert:

@@ -38,6 +38,12 @@ all:
 """
 
 
+ALLOWED_ALL = "".join(
+    f"        ns000{i}: {{}}\n" for i in range(1, 7)
+) + "        lb0001: {}\n"
+ALLOWED_GROUP = "    provision_allowed:\n      hosts:\n" + ALLOWED_ALL
+
+
 def _plays():
     return yaml.safe_load(PROVISION.read_text(encoding="utf-8"))
 
@@ -73,7 +79,7 @@ def test_site_yml_default_target_is_kept_for_cli():
 def inv(tmp_path_factory):
     d = tmp_path_factory.mktemp("provision")
     f = d / "hosts.yml"
-    f.write_text(INVENTORY)
+    f.write_text(INVENTORY + ALLOWED_GROUP)
     return f
 
 
@@ -154,7 +160,7 @@ def test_valid_target_hosts_limit_provisioning_to_named_hosts(inv):
 def inv_excluded(tmp_path_factory):
     d = tmp_path_factory.mktemp("provision_excluded")
     f = d / "hosts.yml"
-    f.write_text(INVENTORY + "    provision_excluded:\n      hosts:\n        ns0002: {}\n")
+    f.write_text(INVENTORY + ALLOWED_GROUP + "    provision_excluded:\n      hosts:\n        ns0002: {}\n")
     return f
 
 
@@ -176,3 +182,61 @@ def test_provision_excluded_group_name_is_not_a_valid_target(inv_excluded):
 def test_missing_provision_excluded_group_passes(inv, preflight_only):
     r = run(preflight_only, inv, target_hosts="ns0001")
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+# ------------------------------------------------------- provision_allowed ----
+
+def _write_inv(tmp_path_factory, name, extra):
+    d = tmp_path_factory.mktemp(name)
+    f = d / "hosts.yml"
+    f.write_text(INVENTORY + extra)
+    return f
+
+
+def _assert_not_allowed(r, *listed, unlisted=()):
+    assert_rejected(r)
+    out = r.stdout + r.stderr
+    assert "허용 목록(provision_allowed)에 없는 호스트" in out, out
+    for h in listed:
+        assert h in out.split("허용 목록(provision_allowed)에 없는 호스트", 1)[1], out
+    for h in unlisted:
+        assert h not in out.split("허용 목록(provision_allowed)에 없는 호스트", 1)[1].split("\n\n")[0], out
+
+
+def test_missing_provision_allowed_group_denies_everything(tmp_path_factory):
+    f = _write_inv(tmp_path_factory, "no_allowed", "")
+    _assert_not_allowed(run(PROVISION, f, target_hosts="ns0001"), "ns0001")
+
+
+def test_empty_provision_allowed_group_denies_everything(tmp_path_factory):
+    f = _write_inv(tmp_path_factory, "empty_allowed", "    provision_allowed:\n      hosts: {}\n")
+    _assert_not_allowed(run(PROVISION, f, target_hosts="ns0001"), "ns0001")
+
+
+def test_host_outside_provision_allowed_is_rejected(tmp_path_factory):
+    f = _write_inv(tmp_path_factory, "other_allowed",
+                   "    provision_allowed:\n      hosts:\n        ns0003: {}\n")
+    _assert_not_allowed(run(PROVISION, f, target_hosts="ns0001"), "ns0001")
+
+
+def test_subset_of_provision_allowed_passes(tmp_path_factory, preflight_only):
+    f = _write_inv(tmp_path_factory, "subset_allowed",
+                   "    provision_allowed:\n      hosts:\n        ns0001: {}\n        ns0002: {}\n")
+    r = run(preflight_only, f, target_hosts="ns0001")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_allowed_and_excluded_host_is_rejected(tmp_path_factory):
+    f = _write_inv(tmp_path_factory, "allowed_excluded",
+                   "    provision_allowed:\n      hosts:\n        ns0001: {}\n        ns0002: {}\n"
+                   "    provision_excluded:\n      hosts:\n        ns0002: {}\n")
+    r = run(PROVISION, f, target_hosts="ns0002")
+    assert_rejected(r)
+    assert "provision_excluded" in r.stdout + r.stderr
+
+
+def test_mixed_targets_list_only_the_not_allowed_hosts(tmp_path_factory):
+    f = _write_inv(tmp_path_factory, "mixed_allowed",
+                   "    provision_allowed:\n      hosts:\n        ns0001: {}\n")
+    r = run(PROVISION, f, target_hosts="ns0001,ns0002")
+    _assert_not_allowed(r, "ns0002", unlisted=("ns0001",))
