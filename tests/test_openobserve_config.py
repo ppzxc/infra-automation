@@ -178,6 +178,11 @@ class FakeO2:
                         rec["pipeline_id"] = uuid.uuid4().hex
                     items[body["name"]] = rec
                 else:
+                    if kind == "pipeline":
+                        # 실제 서버: 갱신은 PUT /pipelines(본문의 pipeline_id). /pipelines/{id}는 조회·삭제 전용이라 PUT이 405다
+                        if key is not None:
+                            return self._send(405, {})
+                        key = body["pipeline_id"]
                     name = next(n for n, v in items.items() if key in (n, v.get("alert_id"), v.get("pipeline_id")))
                     items[name] = dict(items[name], **body)
                 self._send(200, {"code": 200})
@@ -366,7 +371,7 @@ def test_pipeline_drift_is_repaired_with_its_id(o2):
     o2.writes.clear()
     assert _apply(o2).returncode == 0
     ((method, path, body),) = o2.writes
-    assert (method, path) == ("PUT", f"/api/default/pipelines/{pid}") and body["pipeline_id"] == pid and body["enabled"] is True
+    assert (method, path) == ("PUT", "/api/default/pipelines") and body["pipeline_id"] == pid and body["enabled"] is True
 
 
 def test_check_mode_reads_and_plans_but_writes_nothing(o2):
@@ -1401,7 +1406,7 @@ def test_a_security_pipeline_deployed_before_the_firewall_function_is_extended_b
     o2.writes.clear()
     assert _apply(o2).returncode == 0
     ((method, path, body),) = o2.writes
-    assert (method, path) == ("PUT", f"/api/default/pipelines/{pl['pipeline_id']}")
+    assert (method, path) == ("PUT", "/api/default/pipelines")
     assert [n["data"]["name"] for n in body["nodes"] if n["data"]["node_type"] == "function"] == ["security_semantics", FORTIGATE_FN]
 
 
