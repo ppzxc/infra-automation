@@ -427,7 +427,7 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 
 방화벽 syslog는 [수신 경로](fortigate-syslog.md)를 거쳐 `security_logs`에 `service_name=fortigate-syslog`로 들어온다. 알림 6개는 스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)을 쓴다.
 
-> **입력 로그는 합성이다.** 알림 조건과 검증 레코드는 공식 Log Message Reference의 기본 key=value 형식으로 만든 가짜 줄이다. **실장비 샘플(비공개 경로)로 키 이름과 값 모양을 다시 검증하기 전까지 확정이 아니다.** 확인할 항목: `subtype`/`action`/`status`(관리자 로그인 실패), `cfgpath`·`user`·`time`(설정 변경), `subtype=ha`와 `logdesc`, `type=utm`·`severity`·`attack`, `devname`. 샘플과 다르면 `roles/openobserve_config/defaults/main.yml`의 알림 SQL, 검증 레코드(`files/alert_fixtures.yml`)를 함께 고친다. 장비가 로그를 보내기 전에는 알림이 울릴 일이 없다.
+> **실로그 샘플로 검증됨**(검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃·로그인 실패 줄, 실제 장비가 만든 웹필터·앱제어 줄, IPv6 주소). 실장비 줄을 가짜 값으로 치환한 `tests/fixtures/fortigate_real_lines.tsv`(합성이 아닌 실장비 모양)를 알림 SQL에 넣어 발화·미발화를 확인한다. 실측으로 고친 점: 실제 바이러스 로그에는 `severity` 키가 없어 `subtype=virus`·`eventtype=infected`를 중대 탐지로 함께 센다. 로그 전송 설정 변경(`log.syslogd.*`, `log.setting`)은 기본 감시 대상이 아니다(`o2c_fortigate_policy_cfgpaths`에 더하면 알린다). 검증되지 않은 종류의 줄이 처음 들어오면 `subtype`/`action`/`status`, `cfgpath`·`user`·`time`, `logdesc`, `severity`·`attack`, `devname`을 샘플과 다시 대조하고, 다르면 알림 SQL(`roles/openobserve_config/defaults/main.yml`)과 검증 레코드(`files/alert_fixtures.yml`)를 함께 고친다.
 
 | 알림 | 등급 | 조건 (기본값) | 재통지 |
 |---|---|---|---|
@@ -435,7 +435,7 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 | `infra-fortigate-change-unapproved` | 🔴 P1 | 정책·계정 변경이 승인 시간(기본 9~18시) 밖 | 5분(구간과 같음) |
 | `infra-fortigate-change-approved` | 🟡 P3 | 정책·계정 변경이 승인 시간 안, 하루 1번 요약 | 하루 |
 | `infra-fortigate-ha-failover` | 🟠 P2 | HA 로그(`subtype=ha`) 1건부터 | 30분 |
-| `infra-fortigate-critical-detection` | 🔴 P1 | UTM 탐지(`type=utm`) 중 `severity=critical` 1건부터 | 60분 |
+| `infra-fortigate-critical-detection` | 🔴 P1 | UTM 탐지(`type=utm`) 중 `severity=critical` 또는 바이러스 감염(`subtype=virus`·`eventtype=infected`) 1건부터 | 60분 |
 | `infra-fortigate-syslog-silent` | 🟠 P2 | 감시 목록의 방화벽이 120분 넘게 로그 없음 | 하루 |
 
 **중복 알림 방지**: 모든 알림이 재통지 간격(silence)을 가진다. 같은 공격·같은 HA 전환 반복은 위 간격마다 한 번만 알리고, 변경 알림은 조회 구간(5분)과 같아 같은 줄을 두 번 알리지 않는다. 승인 시간 안의 변경은 하루 1번 요약으로만 가므로 정상 작업이 P1을 만들지 않는다.
@@ -482,7 +482,7 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 <a id="fortigate-ha-failover"></a>
 ### 🟠 방화벽 HA 전환·이상 (`infra-fortigate-ha-failover`)
 
-**조건**: `subtype=ha` 로그 1건부터. 행에 장비 이름과 `logdesc`(HA 이벤트 종류)가 나온다. 모든 HA 로그를 대상으로 하므로 실장비 샘플에서 정보성 줄이 많으면 범위를 좁힌다.
+**조건**: `subtype=ha` 로그 1건부터. 행에 장비 이름과 `logdesc`(HA 이벤트 종류)가 나온다. 모든 HA 로그를 대상으로 하므로 실장비에서 정보성 줄이 많으면 범위를 좁힌다(실제 HA 전환 줄은 아직 검증되지 않았다).
 
 **왜 중요한가**: 통신은 이어지더라도 이중화가 깨져 다음 장애에서 서비스가 끊길 수 있다. 전환이 반복되면 세션이 끊긴다.
 

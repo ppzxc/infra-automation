@@ -391,3 +391,75 @@ def test_names_missing_from_the_alias_table_still_use_the_ns_number_and_an_empty
     assert out["device_id"] == "ns0380"
     out = _apply_fgt_with_aliases(tmp_path, _fgt('type="event" subtype="ha" msg="x"', dev="Example_Branch_FW"), {})
     assert out["device_name"] == "example_branch_fw" and "device_id" not in out
+
+
+# 실로그 샘플 검증(Spec #282): 실제 FortiOS 줄을 가짜 값으로 치환한 tests/fixtures/fortigate_real_lines.tsv
+# 검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계,
+# UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃,
+# 웹필터·앱제어의 실제 장비 줄(장비 테스트 생성 줄만 있음), IPv6 주소.
+REAL_LINES_FILE = ROOT_DIR / "tests" / "fixtures" / "fortigate_real_lines.tsv"
+
+
+def _real_line(name):
+    for raw in REAL_LINES_FILE.read_text(encoding="utf-8").splitlines():
+        if raw and not raw.startswith("#"):
+            key, _tag, line = raw.split("\t", 2)
+            if key == name:
+                return line
+    raise KeyError(name)
+
+
+def _real_rec(name):
+    return {"service_name": "fortigate-syslog", "host_name": "collector01", "severity": 0, "body": _real_line(name)}
+
+
+OFFICE = {"device_name": "example_branch_fw", "device_id": "ns0001"}   # 관리번호 없는 장비는 별칭표로 관리번호를 얻는다
+IDC1 = {"device_name": "ns0001", "device_id": "ns0001"}
+REAL_CASES = {
+    "login_failed": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "login",
+                              "source_address": "192.0.2.11", "user_name": "example-admin"}),
+    "login_success": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "login",
+                               "source_address": "192.0.2.11", "user_name": "example-admin"}),
+    "policy_edit_gui": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "edit",
+                                 "source_address": "192.0.2.11", "user_name": "example-admin"}),
+    "syslogd_filter_edit": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "edit",
+                                     "source_address": "192.0.2.11", "user_name": "example-admin"}),
+    "local_in_deny": (OFFICE, {"fortigate_log_type": "traffic", "fortigate_log_subtype": "local", "event_action": "deny",
+                               "source_address": "192.0.2.12", "fortigate_policy_id": 0}),
+    "forward_accept": (OFFICE, {"fortigate_log_type": "traffic", "fortigate_log_subtype": "forward", "event_action": "accept",
+                                "source_address": "192.0.2.13", "fortigate_policy_id": 8}),
+    "forward_deny_policy0": (IDC1, {"fortigate_log_type": "traffic", "fortigate_log_subtype": "forward", "event_action": "deny",
+                                    "source_address": "192.0.2.16", "fortigate_policy_id": 0}),
+    # user="<상대 장비 IP>" 는 사용자가 아니다: user_name을 만들지 않는다
+    "vpn_tunnel_stats": (IDC1, {"fortigate_log_type": "event", "fortigate_log_subtype": "vpn", "event_action": "tunnel-stats",
+                                "source_address": "192.0.2.10"}),
+    # ui="ha_daemon" 에는 주소가 없다: source_address를 만들지 않는다
+    "policy_edit_ha_daemon": ({"device_name": "ns0002", "device_id": "ns0002"},
+                              {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "edit",
+                               "user_name": "example-admin"}),
+    "policy_edit_jsconsole": (IDC1, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "edit",
+                                     "source_address": "192.0.2.10", "user_name": "example-admin"}),
+    "log_setting_edit": (IDC1, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "edit",
+                                "source_address": "192.0.2.10", "user_name": "example-admin"}),
+    "ips_high": (IDC1, {"fortigate_log_type": "utm", "fortigate_log_subtype": "ips", "event_action": "detected",
+                        "source_address": "192.0.2.61", "user_name": "user5", "fortigate_policy_id": 0}),
+    "virus_infected": (IDC1, {"fortigate_log_type": "utm", "fortigate_log_subtype": "virus", "event_action": "passthrough",
+                              "source_address": "192.0.2.61", "user_name": "user", "fortigate_policy_id": 1}),
+    "dlp_info": (IDC1, {"fortigate_log_type": "utm", "fortigate_log_subtype": "dlp", "event_action": "block",
+                        "source_address": "192.0.2.61", "user_name": "user4", "fortigate_policy_id": 1}),
+    "anomaly_critical": (IDC1, {"fortigate_log_type": "utm", "fortigate_log_subtype": "anomaly", "event_action": "clear_session",
+                                "source_address": "192.0.2.61", "fortigate_policy_id": 0}),
+    "ha_interface_failed": (IDC1, {"fortigate_log_type": "event", "fortigate_log_subtype": "ha"}),   # action 키가 없다
+    "fsso_logon": (IDC1, {"fortigate_log_type": "event", "fortigate_log_subtype": "user", "event_action": "fss0-logon",
+                          "source_address": "192.0.2.66", "user_name": "user"}),
+    "endpoint_license": (IDC1, {"fortigate_log_type": "event", "fortigate_log_subtype": "endpoint", "event_action": "add"}),
+}
+
+
+@pytest.mark.parametrize("name", sorted(REAL_CASES))
+def test_real_firewall_lines_get_the_expected_fields(tmp_path, name):
+    ident, expected = REAL_CASES[name]
+    rec = _real_rec(name)
+    out = _apply_fgt_with_aliases(tmp_path, copy.deepcopy(rec), {"example_branch_fw": "ns0001"})
+    assert _added(rec, out) == {**ident, **expected}
+    assert all(out[k] == v for k, v in rec.items())   # 원문과 기존 필드는 그대로

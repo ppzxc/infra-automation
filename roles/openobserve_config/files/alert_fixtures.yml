@@ -817,7 +817,7 @@ infra-switch-syslog-silent:
       records: []
 
 # --- 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3) ---
-# 입력은 FortiOS Log Message Reference로 만든 합성 줄이다(실장비 샘플 아님). 알림 SQL은 원문 body의 key=value만 읽으므로(변환 전 레코드와 같다)
+# 입력은 Log Message Reference 기준 합성 줄이고 바이러스 케이스는 실제 줄 모양이다(실로그 전체 검증은 tests/fixtures/fortigate_real_lines.tsv). 알림 SQL은 원문 body의 key=value만 읽으므로(변환 전 레코드와 같다)
 # 레코드는 omit_host_field로 장비 이름 필드 없이 원문만 넣고, 원문의 devname="{host}"가 케이스 호스트로 바뀐다. service_name은 방화벽 수신 경로의 값이다.
 # 승인 시간은 기본 9시~18시(끝 미포함)다: 03시·23시·18시는 밖, 10시·09시는 안, time= 이 없는 줄은 밖으로 본다.
 infra-fortigate-admin-login-failures:
@@ -971,6 +971,16 @@ infra-fortigate-critical-detection:
       fires: false
       records:
         - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="utm" subtype="ips" level="warning" severity="high" action="dropped" attack="Synthetic.Scan.Test"'}
+    - name: 실제 모양의 바이러스 감염 탐지는 severity 키가 없어도 센다
+      host: verify-fw-detect-virus
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'Oct 21 13:43:40 192.0.2.60 date=2026-10-21 time=13:44:11 devname="{host}" devid="FGT-EXAMPLE-0001" logid="0211008192" type="utm" subtype="virus" eventtype="infected" level="warning" vd="root" policyid=1 policytype="policy" msg="File is infected." action="passthrough" service="NNTP" sessionid=1131176238 srcip=192.0.2.61 dstip=192.0.2.62 srcport=41751 dstport=80 filename="file_test2" virus="virus_test3" viruscat="cat2" crscore=50 craction=2 crlevel="critical"'}
+    - name: 바이러스 로그라도 파일 이름 차단(eventtype=filename)은 감염이 아니다
+      host: verify-fw-detect-virus-filename
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'Oct 21 13:43:40 192.0.2.60 date=2026-10-21 time=13:44:11 devname="{host}" logid="0212008448" type="utm" subtype="virus" eventtype="filename" level="warning" vd="root" policyid=1 msg="File is blocked." action="passthrough" srcip=192.0.2.61 dstip=192.0.2.62 filename="file_test2" crscore=5 craction=2 crlevel="low"'}
     - name: utm이 아닌 로그의 critical은 세지 않는다
       host: verify-fw-detect-not-utm
       fires: false
