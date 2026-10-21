@@ -20,7 +20,7 @@
 ## 2. 설정 위치와 함정
 
 - **syslog-ng 사용자 설정은 컨테이너의 `/data/syslog-ng/*.conf`에 둔다.** 메인 설정이 이 경로만 `@include`한다. `conf.d`에 마운트한 파일은 읽히지 않는다(과거 보관 설정이 한 번도 로드되지 않은 원인). 파일을 둔 뒤 컨테이너를 재생성하지 말고 `syslog-ng-ctl reload`로 설정만 다시 읽힌다.
-- **OpenObserve 전송은 호스트 KV `otel_extra_logs`로 한다.** OpenBao의 해당 호스트 `agents` 항목에 `path=/var/log/remote/*/*.log`, `stream=system_logs`, `service=switch-syslog`를 넣고 Semaphore **Host Agents — Config**를 그 호스트에만 실행한다. KV는 PATCH가 막혀 있어 전체를 읽어 합친 뒤 `cas`로 쓴다. 시크릿 키가 같은 항목에 있으니 값을 출력하지 않는다.
+- **OpenObserve 전송은 호스트 KV `otel_extra_logs`로 한다.** OpenBao의 해당 호스트 `agents` 항목에 `path=/var/log/remote/*/*.log`, `stream=system_logs`, `service=switch-syslog`를 넣고 Semaphore **Host Agents — Config All**를 그 호스트에만 실행한다. KV는 PATCH가 막혀 있어 전체를 읽어 합친 뒤 `cas`로 쓴다. 시크릿 키가 같은 항목에 있으니 값을 출력하지 않는다.
 - 추가 경로에는 파서가 적용되지 않는다(ADR-0006 §2.3). 장비·심각도 필드는 #277의 중앙 변환이 만든다.
 
 ## 3. 점검 절차
