@@ -138,6 +138,7 @@
 | `o2c_plan_only` | `false` | `true`이면 OpenObserve 읽기·계획 계산·`O2C-013` 출력까지만 하고 쓰기·합성 레코드 주입·시드·검증 단계 전에 정상 종료한다(`O2C-015`·`O2C-016`) |
 
 - **삭제는 명시적 폐기 목록만**: 예전에는 저장소 정의에 없는 `infra-` 접두어 알림을 서버에서 지웠다. 다른 세션이 OpenObserve에 직접 만든 `infra-` 알림 16개가 이 규칙으로 지워진 사고가 있어, 이제 접두어만 보고 지우지 않는다. 알림을 정의에서 빼거나 이름을 바꿀 때는 옛 이름을 `o2c_retired_alerts`에 더한다(서버에 없으면 아무 일도 없다).
+- **스트림이 바뀐 알림은 삭제 후 재생성(폐기 목록의 유일한 예외)**: OpenObserve는 알림 PUT으로 `stream_name`·`stream_type`을 바꾸지 못한다. 서버 알림의 스트림 이름 또는 종류가 정의와 다르면(예: 서버 `system_memory_usage`, 정의 `system_linux_memory_available`) update는 반영되지 않은 채 매 실행 계획에 남는다. 그래서 `o2c_plan`은 같은 이름의 알림을 `recreate`(DELETE)와 `create`(POST, 이유 `stream changed`) 한 쌍으로 계획하고, `O2C-013`은 이를 `recreate alert <이름> (stream changed)` 한 줄(이름만)로 보인다. 이 삭제는 **같은 계획에서 재생성이 따라붙는 경우에만** 생기며, 정의에 없는 알림이나 폐기 목록 밖 알림의 삭제 규칙은 그대로다. 서버가 스트림 필드를 응답하지 않으면 차이로 보지 않는다. 반영(`O2C-020`)은 삭제 → 생성 순으로 하나씩 보내고 앞 요청이 실패하면 멈춘다. **위험**: DELETE 성공 뒤 POST가 실패하면(예: 새 스트림에 아직 데이터가 없어 404) 그 알림이 서버에 없는 채로 끝나 감시 공백이 생긴다. **복구**: 원인을 고친 뒤 `OpenObserve — Config`를 다시 실행한다. 서버에 없는 알림은 create로 계획되어 복구된다. 반영 전에 계획 전용 실행으로 `recreate` 줄과 새 스트림의 데이터 유무를 확인한다. 재생성한 알림은 `alert_id`가 바뀌고 서버 쪽 알림 이력·재통지 상태는 초기화된다.
 - **관리 밖 알림 표시**: 서버에 `infra-` 접두어로 있지만 저장소 정의에도 폐기 목록에도 없는 알림은 건드리지 않고, `O2C-013` 출력에 `unmanaged infra- alert on server (kept): <이름들>` 한 줄로 이름만 나열한다(본문 없음). 반영 전에 눈으로 볼 수 있게 하는 용도다.
 - **계획 전용**: Semaphore에서는 `OpenObserve — Config` 실행의 task `environment`(Extra variables)에 `{"o2c_plan_only": true}`를 준다. 출력 끝에 `plan only: no changes were made`가 나오고 쓰기·주입은 0건이다. Semaphore에는 dry run이 없어 계획을 실행한 뒤에야 읽게 되므로, 반영 전에 계획 전용으로 먼저 확인한다.
 
@@ -167,12 +168,12 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-005` | `Keep the hosts with the otel_app_telemetry switch on (the roster of the app telemetry silent alert)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_app_telemetry_roster`: `otel_app_telemetry`가 boolean `true`인 호스트 이름만 남김, KV 본문은 팩트로 두지 않음, `no_log`) |
 | `O2C-010` | `Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
 | `O2C-011` | `Read each existing alert (the list view carries no query or trigger settings)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
-| `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음, 삭제는 폐기 목록만. 알림이 쓰는 destination이 서버에도 저장소 정의에도 없으면 쓰기 전에 실패 — `o2c_p1_destination`이 없는 대상을 가리키는 경우) |
-| `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력, 관리 밖 `infra-` 알림은 `unmanaged infra- alert on server (kept): …` 줄로 이름만) |
+| `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음, 삭제는 폐기 목록만(예외: 알림의 스트림 이름·종류가 정의와 다르면 `recreate`→`create` 한 쌍). 알림이 쓰는 destination이 서버에도 저장소 정의에도 없으면 쓰기 전에 실패 — `o2c_p1_destination`이 없는 대상을 가리키는 경우) |
+| `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력, 스트림이 바뀐 알림은 `recreate alert <이름> (stream changed)` 한 줄, 관리 밖 `infra-` 알림은 `unmanaged infra- alert on server (kept): …` 줄로 이름만) |
 | `O2C-015` | `Report that this is a plan-only run (no changes will be made)` | `ansible.builtin.debug` | Controller | 읽기 전용 (`o2c_plan_only`가 참일 때만 `plan only: no changes were made` 출력) |
 | `O2C-016` | `End the play after the plan when o2c_plan_only is true (before any write or injection)` | `ansible.builtin.meta` | Controller | 읽기 전용 (`o2c_plan_only`가 참이면 시드·반영·주입·검증 전에 정상 종료, 실패 아님) |
 | `O2C-014` | `Seed the empty self-test stream with one past record before its alert is created` | `ansible.builtin.uri` | Controller | 자가 시험 알림을 새로 만들 때만 검증 전용 스트림에 조회 구간보다 오래된(기본 1시간 전) 레코드 1건을 넣어 스트림을 만든다 — 통지 없음 (`changed_when: false`, check 모드 제외, `no_log`) |
-| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)` | `o2c_http` | Controller | 계획된 차이만 전송 — 폐기 목록(`o2c_retired_alerts`)에 있는 알림만 DELETE, 그 밖의 알림(관리 밖 `infra-` 포함)은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
+| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE retired alerts / recreate alerts whose stream changed)` | `o2c_http` | Controller | 계획된 차이만 전송 — 폐기 목록(`o2c_retired_alerts`)에 있는 알림만 DELETE, 스트림이 바뀐 알림만 같은 계획에서 DELETE 뒤 POST(재생성), 그 밖의 알림(관리 밖 `infra-` 포함)은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
 
 ### 알림 검증 단계 (Spec #184 / Ticket-1)
 

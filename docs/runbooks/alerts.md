@@ -560,6 +560,8 @@ docker stats --no-stream   # Docker 사용 호스트
 
 **대응**: 메모리를 많이 쓰는 프로세스·컨테이너의 누수와 한도를 점검하고 재기동하거나 증설한다. OOM kill이 이미 있었는지 시스템 로그에서 확인한다.
 
+**알림 정의가 바뀌어 `OpenObserve — Config` 계획에 `recreate alert infra-memory-usage-p1 (stream changed)`가 나오면**: 서버 알림의 스트림이 정의와 달라 삭제 후 재생성하는 것이다(PUT은 스트림을 못 바꾼다). 반영 중 생성이 실패하면 알림이 서버에 없는 채로 남으므로 원인(새 스트림에 데이터 없음 등)을 고친 뒤 Config를 다시 실행한다.
+
 ---
 
 ## 메트릭(PromQL) 알림
