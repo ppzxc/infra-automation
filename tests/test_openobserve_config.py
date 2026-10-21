@@ -40,6 +40,25 @@ EXPECTED_ALERTS = {
     "infra-fortigate-admin-login-failures", "infra-fortigate-change-unapproved", "infra-fortigate-change-approved",
     "infra-fortigate-ha-failover", "infra-fortigate-critical-detection", "infra-fortigate-syslog-silent",   # 방화벽(Spec #282 / Ticket-3)
 }
+# PromQL 알림 16개(#282): name -> (severity, period, frequency, silence, operator, value, stream)
+PROMQL_ALERTS = {
+    "infra-cpu-usage-p1": ("P1 긴급", 10, 5, 60, ">=", 90, "system_cpu_utilization"),
+    "infra-cpu-usage-p2": ("P2 경고", 10, 5, 1440, ">=", 0, "system_cpu_utilization"),
+    "infra-caddy-5xx-error-rate": ("P1 긴급", 10, 5, 60, ">=", 5, "caddy_http_request_duration_seconds_count"),
+    "infra-caddy-4xx-error-rate": ("P3 주의", 10, 5, 1440, ">=", 5, "caddy_http_request_duration_seconds_count"),
+    "infra-disk-fill-24h": ("P2 경고", 30, 30, 1440, ">=", 0, "system_filesystem_usage"),
+    "infra-network-errors": ("P2 경고", 10, 5, 60, ">=", 1, "system_network_errors"),
+    "infra-cpu-load-saturation": ("P2 경고", 10, 5, 60, ">", 2, "system_cpu_load_average_1m"),
+    "infra-cpu-iowait": ("P2 경고", 5, 5, 60, ">", 10, "system_cpu_utilization"),
+    "infra-cpu-steal": ("P2 경고", 5, 5, 60, ">", 10, "system_cpu_utilization"),
+    "infra-disk-io-saturation": ("P2 경고", 5, 5, 60, ">", 10, "system_disk_weighted_io_time"),
+    "infra-disk-read-latency": ("P2 경고", 5, 5, 60, ">", 100, "system_disk_operation_time"),
+    "infra-disk-write-latency": ("P2 경고", 5, 5, 60, ">", 100, "system_disk_operation_time"),
+    "infra-inode-fill-24h": ("P2 경고", 30, 30, 1440, ">", 0, "system_filesystem_inodes_usage"),
+    "infra-conntrack-limit": ("P2 경고", 5, 5, 60, ">", 80, "system_network_conntrack_count"),
+    "infra-swap-usage": ("P2 경고", 10, 5, 1440, ">", 80, "system_paging_utilization"),
+    "infra-memory-pressure": ("P2 경고", 5, 5, 60, ">", 1000, "system_paging_faults"),
+}
 UPLINK_ALERT = "infra-switch-uplink-down"   # 업링크 목록(o2c_switch_uplinks)이 비어 있으면 만들어지지 않는다
 UPLINKS = [{"device": "ns0250", "port": "Gi1/0/1"}]
 RESOURCE_ALERTS = {  # name -> (severity, silence minutes, period minutes, stream)
@@ -110,6 +129,8 @@ class FakeO2:
                 run_ids = {_case_host(r).rsplit("-", 1)[1] for _, _, recs in outer.ingests for r in recs}
                 for alert in outer.store["alert"].values():
                     prod = alert["stream_name"]
+                    if alert["query_condition"]["type"] == "promql":
+                        continue   # PromQL 알림은 합성 레코드 검증 대상이 아니다
                     stored = alert["query_condition"]["sql"].replace(f'"{prod}"', f'"{stream}"')
                     stored = re.sub(r'"(system_memory_limit)"', r'"\1_alert_verify"', stored)   # 두 번째 스트림(#259)
                     if stream != prod + "_alert_verify" or not (stored == sql or _same_roster_alert(alert["name"], stored, sql)):
@@ -247,8 +268,8 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert paths[:7] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
                          "/api/default/functions", "/api/default/functions", "/api/default/pipelines",
                          "/api/default/pipelines"]   # 함수 3개(보안·스위치·방화벽), 파이프라인 2개(보안 로그는 함수 둘을 잇는다)
-    assert set(o2.store["alert"]) == EXPECTED_ALERTS | {SELFTEST}
-    assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
+    assert set(o2.store["alert"]) == EXPECTED_ALERTS | set(PROMQL_ALERTS) | {SELFTEST}
+    assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + len(PROMQL_ALERTS) + 1)
 
 
 def test_template_body_is_a_naver_works_text_message(o2):
@@ -258,12 +279,13 @@ def test_template_body_is_a_naver_works_text_message(o2):
     assert body["content"]["type"] == "text"
     # 행동 가능한 알림: 심각도·제목·무슨 일·왜 중요·조치·런북·대상 행·대시보드 링크·발생 구간
     for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action}", "{runbook}",
-                "{rows}", "{alert_url}", "{alert_start_time}", "{alert_end_time}", "{alert_name}"):
+                "{rows:20}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_start_time}", "{alert_end_time}", "{alert_name}"):
         assert var in body["content"]["text"], var
     assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
 
 
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
+PROMQL_ROW_FIELDS = {"value", "host_name", "device", "mountpoint", "direction"}   # PromQL 행 템플릿이 쓸 수 있는 값(숫자 value와 안전한 레이블)
 
 
 def test_every_alert_is_actionable(o2):
@@ -285,6 +307,9 @@ def test_every_alert_is_actionable(o2):
         # 행 템플릿의 {필드}는 모두 그 알림 SQL이 SELECT하는 컬럼이다
         import re as _re
         fields = set(_re.findall(r"\{(\w+)\}", alert["row_template"]))
+        if alert["query_condition"]["type"] == "promql":   # 결과의 value와 시리즈 레이블
+            assert fields and fields <= PROMQL_ROW_FIELDS and "value" in fields, (name, fields)
+            continue
         assert fields and all(f in alert["query_condition"]["sql"] for f in fields), (name, fields)
 
 
@@ -2059,7 +2084,7 @@ def test_action_filter_keeps_an_empty_action_empty():
 def test_template_uses_the_new_labels_and_not_the_old_ones(o2):
     assert _apply(o2).returncode == 0
     text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
-    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상:\n{rows}", "■ 조치:{action}", "▶ 런북: ", "▶ 로그 보기: ", "⏱ 발생: "):
+    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:20}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 발생: "):
         assert label in text, label
     assert "무슨 일" not in text and "왜 중요" not in text
 
@@ -2078,7 +2103,7 @@ def test_every_alert_action_is_one_numbered_line_per_item_after_rendering(o2):
     assert _apply(o2).returncode == 0
     defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
     source = {a["name"]: a["action"] for a in defaults["o2c_alerts"]}
-    assert len(o2.store["alert"]) >= 36
+    assert len(o2.store["alert"]) >= 36 + len(PROMQL_ALERTS)
     for name, alert in o2.store["alert"].items():
         action = alert["context_attributes"]["action"]
         lines = action.split("\n")
@@ -2144,3 +2169,210 @@ def test_retired_names_need_the_infra_format_and_no_duplicates(names, ok):
 def test_a_current_alert_definition_on_the_retired_list_is_a_conflict():
     assert o2c.o2c_retired_conflicts(["infra-a", "infra-b"], ["infra-b", "infra-c"]) == ["infra-b"]
     assert o2c.o2c_retired_conflicts(["infra-a"], ["infra-c"]) == []
+
+
+# --- PromQL 알림 (#282): 정의 복원, 수렴, 검증 제외, 템플릿(행 수 제한·링크 라벨), P1 전용 destination ----------------------------------
+DEFAULTS = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+PROMQL_DEFS = [a for a in DEFAULTS["o2c_alerts"] if a.get("promql")]
+P1_DEST = "ops-p1-webhook"
+SUBQUERY_OVER_SUM = re.compile(r"sum by\([^)]*\)\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\[\d+[smhd]:\d+[smhd]\]")
+
+
+def _balanced(text):
+    stack, pairs, in_quote = [], {")": "(", "]": "[", "}": "{"}, False
+    for ch in text:
+        if ch == "'":
+            in_quote = not in_quote
+        elif in_quote:
+            continue
+        elif ch in "([{":
+            stack.append(ch)
+        elif ch in pairs and (not stack or stack.pop() != pairs[ch]):
+            return False
+    return not stack and not in_quote
+
+
+def test_promql_definitions_are_the_sixteen_restored_alerts_with_unique_infra_names():
+    names = [a["name"] for a in DEFAULTS["o2c_alerts"]]
+    assert len(names) == len(set(names))
+    assert {a["name"] for a in PROMQL_DEFS} == set(PROMQL_ALERTS) and len(PROMQL_DEFS) == 16
+    assert all(re.fullmatch(r"infra-[a-z0-9-]+", n) for n in PROMQL_ALERTS)
+
+
+@pytest.mark.parametrize("alert", PROMQL_DEFS, ids=lambda a: a["name"])
+def test_promql_definition_is_well_formed_and_matches_the_handoff(alert):
+    sev, period, freq, silence, op, value, stream = PROMQL_ALERTS[alert["name"]]
+    q = alert["promql"]
+    assert isinstance(q, str) and q.strip() and _balanced(q), alert["name"]
+    assert not SUBQUERY_OVER_SUM.search(q), "sum by() 결과를 서브쿼리로 감싸면 OpenObserve에서 빈 결과가 나온다"
+    assert alert["severity"] == sev and alert["severity_icon"] == {"P1": "🔴", "P2": "🟠", "P3": "🟡"}[sev[:2]]
+    assert (alert["period"], alert["frequency"], alert["silence"]) == (period, freq, silence)
+    assert (alert["promql_operator"], alert["promql_value"], alert["stream"], alert["stream_type"]) == (op, value, stream, "metrics")
+    assert "sql" not in alert and alert["row_template"].startswith("• ")
+    assert '"' not in alert["row_template"] and "\\" not in alert["row_template"]   # 행 값을 JSON 본문에 그대로 넣으므로 템플릿이 따옴표·역슬래시를 만들지 않는다
+    fields = set(re.findall(r"\{(\w+)\}", alert["row_template"]))
+    assert "value" in fields and fields <= PROMQL_ROW_FIELDS
+    for key in ("title", "what", "why"):
+        assert alert[key].strip() and '"' not in alert[key] and "\n" not in alert[key], key
+    assert len(re.findall("[①-⑳]", alert["action"])) >= 2 and alert["runbook"].endswith("#" + alert["name"].removeprefix("infra-"))
+    assert re.search(r"\d+분", alert["description"]) and "재통지" in alert["description"]
+
+
+def test_subquery_over_sum_by_check_catches_the_known_bad_shape():
+    assert SUBQUERY_OVER_SUM.search("sum by(host_name)(rate(x[5m]))[6h:5m]")
+    assert not SUBQUERY_OVER_SUM.search("min_over_time((1 - avg by(host_name)(x{a='b'}))[10m:1m])")
+
+
+def test_caddy_4xx_needs_100_requests_in_10_minutes_and_5xx_keeps_10():
+    by = {a["name"]: a["promql"] for a in PROMQL_DEFS}
+    assert by["infra-caddy-4xx-error-rate"].endswith("[10m])) >= 100)")
+    assert by["infra-caddy-5xx-error-rate"].endswith("[10m])) >= 10)")
+    assert "code!~'401|499'" in by["infra-caddy-4xx-error-rate"]
+
+
+def test_every_promql_alert_has_a_runbook_section_and_a_spec_row():
+    runbook, spec = RUNBOOK.read_text(encoding="utf-8"), (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    for a in PROMQL_DEFS:
+        anchor = a["runbook"].split("#", 1)[1]
+        assert f'<a id="{anchor}"></a>' in runbook and f"`{a['name']}`" in runbook, a["name"]
+        assert f"`{a['name']}`" in spec, a["name"]
+
+
+def test_promql_alerts_are_created_as_promql_metrics_alerts_to_the_current_destination(o2):
+    assert _apply(o2).returncode == 0
+    for name, (sev, period, freq, silence, op, value, stream) in PROMQL_ALERTS.items():
+        a = o2.store["alert"][name]
+        assert a["stream_type"] == "metrics" and a["stream_name"] == stream and a["is_real_time"] is False, name
+        qc = a["query_condition"]
+        assert qc["type"] == "promql" and qc["promql"].strip() and "sql" not in qc, name
+        assert qc["promql_condition"] == {"column": "value", "operator": op, "value": value}, name
+        assert a["trigger_condition"] == {"period": period, "operator": ">=", "threshold": 1, "frequency": freq,
+                                          "frequency_type": "minutes", "silence": silence, "align_time": True}, name
+        assert a["destinations"] == ["infra-automation-webhook"] and a["row_template_type"] == "String" and a["enabled"] is True, name
+        assert a["context_attributes"]["severity"] == sev and a["context_attributes"]["link_label"] == "상세 보기", name
+        assert a["context_attributes"]["action"].startswith("\n1. "), name
+
+
+def test_log_alerts_keep_the_sql_condition_and_the_log_link_label(o2):
+    assert _apply(o2).returncode == 0
+    for name in EXPECTED_ALERTS:
+        a = o2.store["alert"][name]
+        assert a["query_condition"]["type"] == "sql" and "align_time" not in a["trigger_condition"], name
+        assert a["context_attributes"]["link_label"] == "로그 보기", name
+
+
+def test_promql_alerts_converge_and_a_drift_is_one_update(o2):
+    assert _apply(o2).returncode == 0
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0 and o2.writes == []
+    alert = o2.store["alert"]["infra-swap-usage"]
+    alert["query_condition"]["promql_condition"]["value"] = 50
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    assert [(m, p) for m, p, _ in o2.writes] == [("PUT", f"/api/v2/default/alerts/{alert['alert_id']}")]
+    assert o2.store["alert"]["infra-swap-usage"]["query_condition"]["promql_condition"]["value"] == 80
+
+
+def test_promql_alerts_are_not_verified_with_synthetic_records_but_their_evaluation_errors_still_fail(o2):
+    assert _apply(o2).returncode == 0
+    assert len(o2.searches) == len(EXPECTED_ALERTS)
+    assert not any(s in PROMQL_ALERTS for s in FIXTURES)   # 픽스처도 없다(같은 스트림을 쓰는 기존 알림의 합성 레코드만 들어간다)
+    o2.history = [{"alert_name": "infra-swap-usage", "status": "error", "timestamp": 1}]
+    res = _apply(o2)
+    assert res.returncode != 0 and "infra-swap-usage" in res.stdout
+
+
+def _desired_spec(alerts, p1=""):
+    return {"org": "default", "stream": "security_logs", "destination_name": "dest-a", "template_name": "tpl", "template_body": "{}",
+            "webhook_url": "https://hooks.example.internal/x", "function_name": "f", "pipeline_name": "p", "vrl": "x",
+            "alerts": alerts, "p1_destination": p1}
+
+
+def _alert_bodies(spec):
+    return {d["name"]: d["body"] for d in o2c.o2c_desired(spec) if d["kind"] == "alert"}
+
+
+def test_a_promql_alert_must_be_on_a_metrics_stream():
+    alert = dict(PROMQL_DEFS[0], stream_type="logs", action="① a ② b")
+    with pytest.raises(ValueError, match="metrics"):
+        o2c.o2c_desired(_desired_spec([alert]))
+
+
+def test_promql_body_is_built_and_compared_as_a_subset_of_what_the_server_returns():
+    want = next(d for d in o2c.o2c_desired(_desired_spec([dict(PROMQL_DEFS[0], action="① a ② b")])) if d["kind"] == "alert")
+    stored = dict(want["body"], alert_id="a1", owner="x", updated_at=1, query_condition=dict(want["body"]["query_condition"], sql=""))
+    existing = {"alert": [stored], "destination": [{"name": "dest-a"}]}
+    assert o2c.o2c_plan([want], existing, "default") == []
+    stored["query_condition"]["promql_condition"] = dict(stored["query_condition"]["promql_condition"], value=1)
+    assert [a["op"] for a in o2c.o2c_plan([want], existing, "default")] == ["update"]
+
+
+def test_verify_plan_skips_promql_alerts_even_without_fixtures():
+    plan = o2c.o2c_verify_plan([PROMQL_DEFS[0]], {}, "default", "_v", "1", 0)
+    assert plan == {"ingest": [], "searches": []}
+
+
+@pytest.mark.parametrize("dest, sev, expected", [("", "P1 긴급", "dest-a"), ("ops-p1", "P1 긴급", "ops-p1"),
+                                                  ("ops-p1", "P2 경고", "dest-a"), ("ops-p1", "P3 주의", "dest-a")])
+def test_p1_destination_applies_to_p1_alerts_only_and_defaults_to_the_current_destination(dest, sev, expected):
+    alert = dict(PROMQL_DEFS[0], severity=sev, action="① a ② b")
+    assert _alert_bodies(_desired_spec([alert], dest))[alert["name"]]["destinations"] == [expected]
+
+
+def test_default_p1_destination_is_empty():
+    assert DEFAULTS["o2c_p1_destination"] == ""
+
+
+def test_p1_destination_routes_every_p1_alert_log_or_metric_and_nothing_else(o2):
+    o2.store["destination"][P1_DEST] = {"name": P1_DEST}
+    assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0
+    for name, a in o2.store["alert"].items():
+        p1 = a["context_attributes"]["severity"].startswith("P1")
+        assert a["destinations"] == [P1_DEST if p1 else "infra-automation-webhook"], name
+    assert o2.store["alert"]["infra-root-login-success"]["destinations"] == [P1_DEST]
+    assert o2.store["alert"]["infra-cpu-usage-p1"]["destinations"] == [P1_DEST]
+    assert o2.store["alert"][SELFTEST]["destinations"] == ["infra-automation-webhook"]
+    o2.writes.clear()
+    assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0 and o2.writes == []
+
+
+def test_p1_destination_that_does_not_exist_fails_before_any_write(o2):
+    res = _apply(o2, extra={"o2c_p1_destination": P1_DEST})
+    assert res.returncode != 0 and o2.writes == []
+
+
+def test_clearing_the_p1_destination_moves_p1_alerts_back_with_updates_only_for_them(o2):
+    o2.store["destination"][P1_DEST] = {"name": P1_DEST}
+    assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    p1 = {n for n, a in o2.store["alert"].items() if a["context_attributes"]["severity"].startswith("P1")}
+    assert {p.rsplit("/", 1)[1] for _, p, _ in o2.writes} == {o2.store["alert"][n]["alert_id"] for n in p1}
+    assert all(m == "PUT" for m, _, _ in o2.writes)
+
+
+@pytest.mark.parametrize("bad", ["ops p1", "ops/p1", "ops;p1", "한글"])
+def test_invalid_p1_destination_name_fails_before_any_request(o2, bad):
+    res = _apply(o2, extra={"o2c_p1_destination": bad})
+    assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+
+
+def test_missing_destinations_lists_names_known_neither_to_the_repository_nor_the_server():
+    desired = [{"kind": "destination", "name": "a"}, {"kind": "alert", "name": "x", "body": {"destinations": ["a", "b"]}}]
+    assert o2c.o2c_missing_destinations(desired, {}) == ["b"]
+    assert o2c.o2c_missing_destinations(desired, {"destination": {"list": [{"name": "b"}]}}) == []
+
+
+def test_row_values_with_quotes_and_backslashes_must_be_escaped_to_keep_the_body_json(o2):
+    """OpenObserve가 {rows:20} 값을 이스케이프하는지는 실서버에서만 알 수 있다(배포 후 시험).
+    여기서는 (1) 이스케이프된 값은 본문이 유효 JSON이고 (2) 이스케이프 없는 따옴표는 본문을 깨뜨림을 확인하며, 그래서 PromQL 행 템플릿은 숫자 value와 레이블만 쓴다."""
+    assert _apply(o2).returncode == 0
+    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
+    row = '• host"a \\ b: CPU 91%'
+    escaped = json.dumps(row, ensure_ascii=False)[1:-1]
+    text = json.loads(tpl.replace("{rows:20}", escaped))["content"]["text"]
+    assert row in text and "■ 대상 {alert_count}건:" in text
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(tpl.replace("{rows:20}", row))
+    for a in PROMQL_DEFS:
+        assert not re.search(r'["\\]', a["row_template"]), a["name"]
