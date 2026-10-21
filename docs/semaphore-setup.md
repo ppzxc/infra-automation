@@ -72,7 +72,7 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **FUNA Cluster 호스트**: `servers`에 두면서 `funa_cluster` 그룹에도 넣는다(ns0325·ns0327·ns0338). HOST PROVISIONING(`site.yml`)이 `docker_engine` 뒤에 `funa_env` 역할을 실행해 OpenBao 값으로 `/etc/funa-cluster/`의 환경 파일을 렌더링한다. 그룹에 없는 호스트에는 아무것도 생기지 않는다. 필요한 OpenBao 경로와 키는 `docs/funa_env.md`(#222). 이 그룹은 `NODE_ROLE`에 쓰이지 않는다.
 
-**프로비저닝에서 영구히 빼는 호스트**: 편입하면 안 되는 호스트(Semaphore 자신, 관리번호 재부여 대기 호스트 등)는 `provision_excluded` 그룹에 넣는다. Host Provisioning의 사전 검증이 이 그룹의 호스트가 `target_hosts`에 있으면 접속 전에 실패시킨다. 그룹이 인벤토리에 없으면 빈 그룹으로 본다. 다른 템플릿에는 영향이 없다. 이 그룹은 영구 거부이며 `provision_allowed`보다 우선한다(허용 목록에도 있는 호스트라도 거부).
+**프로비저닝에서 영구히 빼는 호스트**: 운영 중 절대 프로비저닝하지 않는 호스트(Semaphore 자신, 중앙 OpenObserve/RustFS 호스트, 관리번호 재부여 대기 호스트)만 `provision_excluded` 그룹에 넣는다. 그 밖의 호스트를 막는 일은 이 그룹이 아니라 아래 `provision_allowed` 기본 거부가 맡으므로, 호스트를 여기에 광범위하게 나열하지 않는다. Host Provisioning의 사전 검증이 이 그룹의 호스트가 `target_hosts`에 있으면 접속 전에 실패시킨다. 그룹이 인벤토리에 없으면 빈 그룹으로 본다. 다른 템플릿에는 영향이 없다. 이 그룹은 영구 거부이며 `provision_allowed`보다 우선한다(허용 목록에도 있는 호스트라도 거부).
 
 **프로비저닝을 허용하는 호스트(기본 거부)**: Host Provisioning은 `provision_allowed` 그룹에 속한 호스트만 `target_hosts`로 받는다. 그룹이 없거나 비어 있으면(기본 상태) 어떤 호스트도 허용되지 않아 모든 프로비저닝이 접속 전에 실패한다. 그래서 `servers`에 새로 추가된 호스트는 자동으로 막힌다. 운영 절차는 허용 → 실행 → 허용 해제다. (1) Semaphore 인벤토리의 `provision_allowed` 그룹에 대상 호스트를 넣는다. (2) Host Provisioning을 `target_hosts`로 실행한다. (3) 끝나면 그룹에서 호스트를 다시 뺀다.
 
@@ -96,8 +96,10 @@ all:
     firewall_unmanaged:   # HOST PROVISIONING이 방화벽만 건드리지 않는다.
       hosts:
         ns0325: {}
-    provision_excluded:   # Host Provisioning 영구 거부. provision_allowed보다 우선한다.
-      hosts: {}
+    provision_excluded:   # Host Provisioning 영구 거부(Semaphore 자신 등 소수만). provision_allowed보다 우선한다.
+      hosts:
+        ns0266: {}
+        ns0332: {}
     provision_allowed:   # Host Provisioning 허용 목록(기본 거부). 비어 있음이 기본. 작업 전에 넣고 끝나면 뺀다.
       hosts: {}
     funa_cluster:   # FUNA Cluster 환경 파일 렌더링(funa_env).
