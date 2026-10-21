@@ -28,7 +28,7 @@ ITEM_PATHS = {
 ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; the others by name
 CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
-MANAGED_PREFIX = 'infra-'   # 이 접두어의 알림만 이 저장소가 소유한다
+MANAGED_PREFIX = 'infra-'   # 알림 이름 접두어. 서버에서 지우는 근거는 아니다: 삭제는 폐기 목록(o2c_retired_alerts)의 이름뿐이고, 접두어만 있는 알림은 건드리지 않고 알려 준다
 SECRET_KINDS = ('destination',)                               # url and headers carry the webhook credentials
 
 
@@ -145,10 +145,11 @@ def o2c_read_requests(org):
     return [{'kind': kind, 'path': LIST_PATHS[kind].format(org=org)} for kind in KINDS]
 
 
-def o2c_plan(desired, existing, org):
+def o2c_plan(desired, existing, org, retired=()):
     """Writes needed to reach ``desired``. ``existing`` maps kind -> API payload (list or ``{"list": [...]}``).
 
-    Each action: ``{kind, name, op (create|update), method, path, body, secret}``. Nothing is returned for objects that already match.
+    Each action: ``{kind, name, op (create|update|delete), method, path, body, secret}``. Nothing is returned for objects that already match.
+    An alert is deleted only when it exists on the server and its name is in ``retired`` (the explicit list); the prefix alone never deletes.
     """
     plan = []
     for kind in KINDS:
@@ -168,14 +169,35 @@ def o2c_plan(desired, existing, org):
             if kind in INJECT_ID:
                 body = dict(body, **{ID_FIELD[kind]: key})
             plan.append(_action(kind, want, 'update', 'PUT', ITEM_PATHS[kind].format(org=org, key=key), body))
-    # 저장소 정의에서 빠지거나 이름이 바뀐 관리 대상(infra- 접두어) 알림은 서버에서 지운다. 접두어 밖 알림은 건드리지 않는다
-    wanted = {d['name'] for d in desired if d['kind'] == 'alert'}
+    # 삭제는 명시적 폐기 목록에 있는 알림뿐이다. 접두어(infra-)만 보고 지우면 다른 곳에서 만든 알림까지 지운다(사고)
+    retired = set(retired or ())
     for cur in _items(existing.get('alert')):
         name = cur.get('name') or ''
-        if name.startswith(MANAGED_PREFIX) and name not in wanted and cur.get('alert_id'):
+        if name in retired and cur.get('alert_id'):
             plan.append({'kind': 'alert', 'name': name, 'op': 'delete', 'method': 'DELETE', 'secret': False, 'body': {},
                          'path': ITEM_PATHS['alert'].format(org=org, key=cur['alert_id'])})
     return plan
+
+
+def o2c_unmanaged_alerts(desired, existing, retired=()):
+    """Sorted names of ``infra-`` alerts on the server that are neither defined in the repository nor retired: kept untouched, only reported."""
+    known = {d['name'] for d in desired if d['kind'] == 'alert'} | set(retired or ())
+    return sorted({i.get('name') for i in _items(existing.get('alert'))
+                   if str(i.get('name') or '').startswith(MANAGED_PREFIX) and i.get('name') not in known})
+
+
+_RETIRED_RE = re.compile(r'^infra-[a-z0-9-]+$')
+
+
+def o2c_valid_retired_alerts(names):
+    """True when ``names`` is a list of ``infra-`` alert names (``^infra-[a-z0-9-]+$``) without duplicates."""
+    return (isinstance(names, (list, tuple)) and all(isinstance(n, str) and _RETIRED_RE.match(n) for n in names)
+            and len(set(names)) == len(names))
+
+
+def o2c_retired_conflicts(retired, current_names):
+    """Retired names that are also current alert definitions (deleting them would remove a live alert)."""
+    return sorted(set(retired or ()) & set(current_names or ()))
 
 
 def _action(kind, want, op, method, path, body):
@@ -686,7 +708,8 @@ def o2c_enabled_alerts(alerts):
 
 class FilterModule(object):
     def filters(self):
-        return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
+        return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_unmanaged_alerts': o2c_unmanaged_alerts,
+                'o2c_valid_retired_alerts': o2c_valid_retired_alerts, 'o2c_retired_conflicts': o2c_retired_conflicts, 'o2c_plan_summary': o2c_plan_summary,
                 'o2c_alert_state': o2c_alert_state, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,

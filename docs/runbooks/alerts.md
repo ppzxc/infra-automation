@@ -55,7 +55,7 @@ last -i root | head
 <a id="root-login-known"></a>
 ## 🟠 root 계정 원격 로그인 성공 — 알고 있는 출발지 (`infra-root-login-known`)
 
-**조건**: `user_name = 'root'`인 SSH 로그인 성공이 5분 안에 1건 이상이고, 출발지가 `normal_sources`에 있거나(kind 무관: semaphore·office) 목록에 없는 사설 대역(10/8, 172.16/12, 192.168/16, 127/8, 169.254/16)일 때. 재통지 간격은 기본 60분이고 역할 변수 `o2c_root_known_silence_minutes`로 바꾼다. 이전의 하루 요약 알림(`infra-root-login-office-daily`, P3)을 대체하며 기존 알림은 반영 때 삭제된다.
+**조건**: `user_name = 'root'`인 SSH 로그인 성공이 5분 안에 1건 이상이고, 출발지가 `normal_sources`에 있거나(kind 무관: semaphore·office) 목록에 없는 사설 대역(10/8, 172.16/12, 192.168/16, 127/8, 169.254/16)일 때. 재통지 간격은 기본 60분이고 역할 변수 `o2c_root_known_silence_minutes`로 바꾼다. 이전의 하루 요약 알림(`infra-root-login-office-daily`, P3)을 대체하며 기존 알림은 기본 폐기 목록(`o2c_retired_alerts`)에 있어 반영 때 삭제된다.
 
 **왜 중요한가**: 알고 있는 출발지여도 정책상 금지된 root 직접 접속(`PermitRootLogin`)이 일어났다는 뜻이다. 등록된 출발지면 작업·배포일 가능성이 높고, 미등록 사설 출발지면 내부 이동(횡적 이동) 가능성을 확인해야 한다.
 

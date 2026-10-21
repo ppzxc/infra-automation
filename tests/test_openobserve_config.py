@@ -388,25 +388,83 @@ def _seed_stale(o2):
     o2.store["alert"]["team-custom-alert"] = {"alert_id": "other1", "name": "team-custom-alert", "enabled": True}
 
 
-def test_infra_alert_missing_from_the_repository_is_deleted_and_others_are_kept(o2):
+RETIRED = "infra-root-login-office-daily"   # 기본 폐기 목록의 한 건
+UNMANAGED_LINE = "unmanaged infra- alert on server (kept): "
+
+
+def test_only_alerts_on_the_retired_list_are_deleted_and_other_infra_alerts_are_kept_and_listed(o2):
     assert _apply(o2).returncode == 0
     _seed_stale(o2)
+    o2.store["alert"][RETIRED] = {"alert_id": "retired1", "name": RETIRED, "enabled": True}
     o2.writes.clear()
     res = _apply(o2)
     assert res.returncode == 0, res.stdout + res.stderr
-    assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", "/api/v2/default/alerts/stale1")]
-    assert "infra-old-renamed" not in o2.store["alert"] and "team-custom-alert" in o2.store["alert"]
+    assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", "/api/v2/default/alerts/retired1")]
+    assert RETIRED not in o2.store["alert"]
+    assert "infra-old-renamed" in o2.store["alert"] and "team-custom-alert" in o2.store["alert"]
+    assert UNMANAGED_LINE + "infra-old-renamed" in res.stdout and "team-custom-alert" not in res.stdout
     o2.writes.clear()
     assert _apply(o2).returncode == 0 and o2.writes == []
 
 
-def test_check_mode_lists_the_alerts_to_delete_without_writing(o2):
+def test_check_mode_lists_the_retired_alert_to_delete_without_writing(o2):
     assert _apply(o2).returncode == 0
     _seed_stale(o2)
+    o2.store["alert"][RETIRED] = {"alert_id": "retired1", "name": RETIRED, "enabled": True}
     o2.writes.clear()
     res = _apply(o2, "--check")
     assert res.returncode == 0 and o2.writes == []
-    assert "delete alert infra-old-renamed" in res.stdout and "team-custom-alert" not in res.stdout
+    assert f"delete alert {RETIRED}" in res.stdout and "delete alert infra-old-renamed" not in res.stdout
+    assert UNMANAGED_LINE + "infra-old-renamed" in res.stdout
+
+
+def test_a_name_added_to_the_retired_list_is_deleted(o2):
+    assert _apply(o2).returncode == 0
+    _seed_stale(o2)
+    o2.writes.clear()
+    assert _apply(o2, extra={"o2c_retired_alerts": ["infra-old-renamed"]}).returncode == 0
+    assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", "/api/v2/default/alerts/stale1")]
+
+
+@pytest.mark.parametrize("retired", [["Infra-Upper"], ["infra-"], ["other-alert"], ["infra-a", "infra-a"], ["infra-root-login-known"],
+                                     ["infra x"], ["infra-a;drop"]])
+def test_invalid_or_conflicting_retired_list_fails_before_any_request(o2, retired):
+    res = _apply(o2, extra={"o2c_retired_alerts": retired})
+    assert res.returncode != 0
+    assert o2.reads == [] and o2.writes == [] and o2.ingests == []
+
+
+def test_plan_only_reads_and_prints_the_plan_but_writes_and_injects_nothing(o2):
+    assert _apply(o2).returncode == 0
+    _seed_stale(o2)
+    o2.store["alert"][RETIRED] = {"alert_id": "retired1", "name": RETIRED, "enabled": True}
+    o2.store["function"]["security_semantics"]["function"] = "# drift\n."
+    o2.writes.clear()
+    o2.ingests.clear()
+    o2.searches.clear()
+    reads_before = len(o2.reads)
+    res = _apply(o2, extra={"o2c_plan_only": True})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert len(o2.reads) > reads_before
+    assert o2.writes == [] and o2.ingests == [] and o2.searches == []
+    assert f"delete alert {RETIRED}" in res.stdout and "update function security_semantics" in res.stdout
+    assert UNMANAGED_LINE + "infra-old-renamed" in res.stdout
+    assert "plan only: no changes were made" in res.stdout
+    assert RETIRED in o2.store["alert"]
+
+
+def test_plan_only_on_a_fresh_server_creates_nothing(o2):
+    res = _apply(o2, extra={"o2c_plan_only": True})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert o2.writes == [] and o2.ingests == [] and o2.searches == []
+    assert "create alert infra-root-login-success" in res.stdout and "plan only: no changes were made" in res.stdout
+    assert all(not v for v in o2.store.values())
+
+
+def test_plan_only_false_keeps_the_normal_apply(o2):
+    res = _apply(o2, extra={"o2c_plan_only": False})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert o2.writes and o2.ingests and "plan only: no changes were made" not in res.stdout
 
 
 def test_check_mode_after_apply_reports_no_changes(o2):
@@ -547,11 +605,13 @@ def test_oom_and_disk_fixtures_cover_case_and_os_variants():
     assert any(not c["fires"] and "I/O error" in c["records"][0]["body"] for c in FIXTURES["infra-oom-kill"]["cases"])
 
 
-def test_replaced_kernel_disk_alert_is_deleted_from_the_server(o2):
+def test_replaced_kernel_disk_alert_is_kept_unless_it_is_retired(o2):
     assert _apply(o2).returncode == 0
     o2.store["alert"]["infra-kernel-disk-errors"] = {"alert_id": "old-kernel", "name": "infra-kernel-disk-errors", "enabled": True}
     o2.writes.clear()
     assert _apply(o2).returncode == 0
+    assert o2.writes == [] and "infra-kernel-disk-errors" in o2.store["alert"]
+    assert _apply(o2, extra={"o2c_retired_alerts": ["infra-kernel-disk-errors"]}).returncode == 0
     assert ("DELETE", "/api/v2/default/alerts/old-kernel", None) in o2.writes
     assert "infra-kernel-disk-errors" not in o2.store["alert"]
 
@@ -1509,7 +1569,7 @@ def test_uplink_alert_is_not_created_while_the_port_list_is_empty(o2):
     assert all(UPLINK_ALERT not in sql for _, sql in o2.searches)
 
 
-def test_uplink_alert_is_created_with_a_list_verified_and_removed_again_when_the_list_is_emptied(o2):
+def test_uplink_alert_is_created_with_a_list_verified_and_only_removed_when_the_list_is_emptied_and_it_is_retired(o2):
     res = _apply(o2, extra={"o2c_switch_uplinks": UPLINKS})
     assert res.returncode == 0, res.stdout + res.stderr
     a = o2.store["alert"][UPLINK_ALERT]
@@ -1518,7 +1578,10 @@ def test_uplink_alert_is_created_with_a_list_verified_and_removed_again_when_the
     assert "device_id = 'ns0250'" in sql and "interface gigabitethernet1/0/1, changed state to down" in sql   # 약어가 전체 이름으로 풀린다
     assert any("interface gigabitethernet1/0/49, changed state to down" in s for _, s in o2.searches)   # 검증은 케이스 장비를 목록에 더해 돌린다
     o2.writes.clear()
-    assert _apply(o2).returncode == 0
+    res = _apply(o2)   # 목록이 비어도 폐기 목록에 없으면 지우지 않고 관리 밖으로 알려 준다
+    assert res.returncode == 0 and o2.writes == [] and UPLINK_ALERT in o2.store["alert"]
+    assert "unmanaged infra- alert on server (kept): " + UPLINK_ALERT in res.stdout
+    assert _apply(o2, extra={"o2c_retired_alerts": [UPLINK_ALERT]}).returncode == 0
     assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", f"/api/v2/default/alerts/{a['alert_id']}")]
     assert UPLINK_ALERT not in o2.store["alert"]
 
@@ -2031,3 +2094,53 @@ def test_second_run_after_the_action_conversion_changes_nothing(o2):
     assert _apply(o2).returncode == 0
     o2.writes.clear()
     assert _apply(o2).returncode == 0 and o2.writes == []
+
+
+# --- o2c_plan 단위: 삭제는 폐기 목록만, 관리 밖 infra- 알림은 건드리지 않고 알려 준다 ---------------------------------------------------
+import importlib.util as _ilu   # noqa: E402
+
+_spec = _ilu.spec_from_file_location("o2c_filters", ROOT_DIR / "filter_plugins" / "openobserve_config.py")
+o2c = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(o2c)
+
+
+def _alert_want(name):
+    body = {"name": name, "enabled": True}
+    return {"kind": "alert", "name": name, "body": body, "match": body, "secret": False}
+
+
+def _server(*names):
+    return {"alert": [{"alert_id": "id-" + n, "name": n, "enabled": True} for n in names]}
+
+
+def test_plan_deletes_a_retired_alert_that_exists_on_the_server():
+    plan = o2c.o2c_plan([], _server("infra-gone"), "default", retired=["infra-gone"])
+    assert [(a["op"], a["name"], a["path"]) for a in plan] == [("delete", "infra-gone", "/api/v2/default/alerts/id-infra-gone")]
+
+
+def test_plan_ignores_a_retired_alert_that_is_not_on_the_server():
+    assert o2c.o2c_plan([], _server("infra-other"), "default", retired=["infra-gone"]) == []
+
+
+def test_plan_never_deletes_an_infra_alert_that_is_not_retired_and_lists_it_as_unmanaged():
+    existing = _server("infra-kept-by-hand", "infra-defined", "infra-gone", "team-x")
+    desired = [_alert_want("infra-defined")]
+    plan = o2c.o2c_plan(desired, existing, "default", retired=["infra-gone"])
+    assert [a["name"] for a in plan if a["op"] == "delete"] == ["infra-gone"]
+    assert o2c.o2c_unmanaged_alerts(desired, existing, ["infra-gone"]) == ["infra-kept-by-hand"]
+
+
+def test_plan_without_a_retired_list_deletes_nothing():
+    assert o2c.o2c_plan([], _server("infra-a", "infra-b"), "default") == []
+
+
+@pytest.mark.parametrize("names,ok", [([], True), (["infra-a", "infra-b-1"], True), (["Infra-a"], False), (["infra-"], False),
+                                      (["team-a"], False), (["infra-a", "infra-a"], False), (["infra a"], False), ([1], False),
+                                      ("infra-a", False)])
+def test_retired_names_need_the_infra_format_and_no_duplicates(names, ok):
+    assert o2c.o2c_valid_retired_alerts(names) is ok
+
+
+def test_a_current_alert_definition_on_the_retired_list_is_a_conflict():
+    assert o2c.o2c_retired_conflicts(["infra-a", "infra-b"], ["infra-b", "infra-c"]) == ["infra-b"]
+    assert o2c.o2c_retired_conflicts(["infra-a"], ["infra-c"]) == []

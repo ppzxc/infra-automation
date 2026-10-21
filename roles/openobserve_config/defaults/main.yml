@@ -858,6 +858,15 @@ o2c_alerts:
 # 실제로 만드는 알림: `enabled`가 거짓인 알림(업링크 목록이 빈 업링크 다운 규칙)은 만들지 않는다. 서버에 이미 있으면 계획이 지운다.
 o2c_alerts_active: "{{ o2c_alerts | o2c_enabled_alerts }}"
 
+# 서버에서 지우는 알림은 이 목록(알림 이름)에 있는 것뿐이다. 접두어(infra-)만 보고 지우지 않는다 — 다른 곳에서 직접 만든 알림까지 지워지는 사고가 있었다.
+# 알림을 정의에서 빼거나 이름을 바꿀 때는 옛 이름을 여기에 더한다(서버에 있을 때만 지우고, 없으면 아무 일도 없다).
+# 저장소 정의에도 폐기 목록에도 없는 infra- 알림은 건드리지 않고 O2C-013 계획 출력에 이름만 나열한다. 형식(^infra-[a-z0-9-]+$)·중복·현행 정의와의 충돌은 O2C-002가 검증한다.
+o2c_retired_alerts:
+  - infra-root-login-office-daily
+
+# true이면 OpenObserve를 읽고 계획을 계산해 출력(O2C-013)한 뒤, 쓰기·합성 레코드 주입·시드 전에 정상 종료한다(실패 아님). Semaphore에서는 task environment의 {"o2c_plan_only": true}.
+o2c_plan_only: false
+
 # 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고
 # 알림 SQL(스트림명만 교체)을 검색해 기대와 비교한다. 운영 스트림·알림·통지 대상은 건드리지 않는다.
 # 수집 인증은 OpenBao agents/openobserve의 controller_ingest_token(컨트롤러 전용, 설정 API 계정과 다름).

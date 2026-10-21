@@ -223,6 +223,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 **미리 보기**
 
 - Config와 OpenObserve — Config는 CLI args에 `--check --diff`를 추가하면 바뀔 내용만 보여 준다. 별도 템플릿으로 두거나 실행할 때 추가한다.
+- **OpenObserve — Config는 반영 전에 계획 전용으로 먼저 확인한다.** Semaphore에는 dry run이 없어 계획을 실행한 뒤에야 읽게 되므로, task `environment`에 `{"o2c_plan_only": true}`를 넣어 먼저 실행한다. OpenObserve를 읽고 계획(`O2C-013`)과 관리 밖 `infra-` 알림 줄(`unmanaged infra- alert on server (kept): …`)만 출력하고, 마지막에 `plan only: no changes were made`를 남긴 채 쓰기·주입 없이 정상 종료한다. 계획에서 `delete alert`가 의도한 폐기 알림뿐인지 확인한 뒤 `o2c_plan_only` 없이 다시 실행한다. 서버에서 지우는 알림은 역할 변수 `o2c_retired_alerts`에 이름이 있는 것뿐이다(접두어만으로는 지우지 않는다, [OpenObserve Config 명세](openobserve_config.md)).
 - Repo Maintenance를 수동으로 돌릴 때 쓸 수 있는 변수(Survey가 없으므로 API `environment`로 넘긴다):
   - `{"backup_maintenance_read_subset": "always"}`: 10% 데이터 읽기 검사를 강제
   - `{"backup_maintenance_read_subset": "never"}`: 10% 데이터 읽기 검사를 생략
