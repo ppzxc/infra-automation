@@ -19,7 +19,7 @@ ITEM_PATHS = {
     'template': '/api/{org}/alerts/templates/{key}',
     'destination': '/api/{org}/alerts/destinations/{key}',
     'function': '/api/{org}/functions/{key}',
-    'pipeline': '/api/{org}/pipelines/{key}',
+    'pipeline': '/api/{org}/pipelines',   # 갱신은 PUT /pipelines(본문의 pipeline_id). /pipelines/{id}는 조회·삭제 전용이라 PUT이 405다
     'alert': '/api/v2/{org}/alerts/{key}',
     'trace_stream': '/api/{org}/streams/{key}/settings?type=traces',
 }
