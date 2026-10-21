@@ -13,13 +13,14 @@
 #   fortigate_log_subtype    subtype (system | vpn | ha | ips | forward ...)
 #   event_action             action, lower-cased (login, edit, tunnel-up, dropped, deny); absent when the line has none (e.g. HA events)
 #   source_address           srcip; else remip (VPN events); else the address inside ui="https(192.0.2.10)" (admin login, config change)
-#   user_name                user; absent when empty or N/A
+#   user_name                user; absent when empty, N/A or the peer address of a tunnel (user equals remip)
 #   fortigate_policy_id      policyid as an integer (0 is the implicit deny policy)
 #
 # Expected line (FortiOS default key=value format): `[<PRI>][syslog header] date=... time=... devname="..." type="..." ...`.
 # Values are bare or double-quoted (quoted values may hold spaces and text that looks like keys; they are consumed as one value).
 # The device clock depends on the device's zone, so `_timestamp` (receive time) stays the time of record.
-# NOTE: written from the Log Message Reference, not from real device samples (none exist yet) - re-verify against real lines.
+# Verified against real FortiOS lines (tests/fixtures/fortigate_real_lines.tsv: admin login, config change, traffic, IPsec stats, UTM, HA interface, FSSO);
+# not verified: real HA state-change lines, SSL VPN user login/logout lines.
 # Keep this file free of secrets and of anything the collector already provides.
 
 # Written by the role from o2c_fortigate_device_aliases (normalized devname -> management number). Keep this line as is: it is the injection point.
@@ -86,7 +87,8 @@ if service == "fortigate-syslog" {
             }
 
             user = string(kv.user) ?? ""
-            if user != "" && downcase(user) != "n/a" {
+            # VPN tunnel statistics carry user="<peer gateway address>", which is the remote device and not a user
+            if user != "" && downcase(user) != "n/a" && user != (string(kv.remip) ?? "") {
                 .user_name = user
             }
 

@@ -1782,3 +1782,79 @@ def test_silent_roster_accepts_the_original_device_name_case_insensitively():
         assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname="%s" x' % devname}], "t") == []
         assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname=%s x' % devname}], "t") == []
     assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname="other_fw" x'}], "t") != []
+
+
+# --- 실로그 샘플로 방화벽 알림 SQL 검증 (Spec #282) --------------------------------------------------------------------
+# tests/fixtures/fortigate_real_lines.tsv: 실제 FortiOS 줄을 가짜 값으로 치환한 것이다. 알림 SQL은 body와 service_name만 읽으므로
+# 레코드는 {service_name, body, source_address}다(source_address는 변환 함수가 srcip, 없으면 ui의 주소로 채운 값).
+# 검증 범위: 관리자 로그인 실패/성공, 정책·로그 설정 변경, 트래픽, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패 줄.
+# 검증되지 않은 것: HA 전환(상태 변경) 실제 줄, 실제 장비가 만든 웹필터·앱제어 줄, SSL VPN 로그인 실패 줄.
+REAL_LINES = {}
+for _raw in (ROOT_DIR / "tests" / "fixtures" / "fortigate_real_lines.tsv").read_text(encoding="utf-8").splitlines():
+    if _raw and not _raw.startswith("#"):
+        _name, _tag, _line = _raw.split("\t", 2)
+        REAL_LINES[_name] = _line
+REAL_SOURCE = {"login_failed": "192.0.2.11", "login_success": "192.0.2.11"}
+
+
+def _real(name, times=1, at=None):
+    """Records made of one real line; ``at`` replaces the device time (HH:MM:SS) of the line."""
+    body = REAL_LINES[name] if at is None else re.sub(r" time=\d\d:\d\d:\d\d ", f" time={at} ", REAL_LINES[name], count=1)
+    return [{"service_name": "fortigate-syslog", "body": body, "source_address": REAL_SOURCE.get(name)} for _ in range(times)]
+
+
+def _real_rows(o2, alert, records, **extra):
+    assert _apply(o2, extra=extra).returncode == 0
+    return _run_alert_on_sqlite(_sql(o2, alert).replace('"security_logs"', '"t"'), records, "t")
+
+
+def test_real_admin_login_failures_fire_only_from_five_failed_admin_logins_of_one_source(o2):
+    rows = _real_rows(o2, "infra-fortigate-admin-login-failures", _real("login_failed", 5))
+    assert [(r["device"], r["source_address"], r["failures"]) for r in rows] == [("example_branch_fw", "192.0.2.11", 5)]
+    quiet = _real("login_failed", 4) + _real("login_success", 9) + _real("local_in_deny", 9) + _real("policy_edit_gui", 9)
+    assert _real_rows(o2, "infra-fortigate-admin-login-failures", quiet) == []
+
+
+@pytest.mark.parametrize("at, fires_unapproved", [("03:10:00", True), ("14:15:43", False), ("08:59:59", True), ("09:00:00", False), ("18:00:00", True)])
+def test_real_policy_changes_split_by_the_device_time_into_unapproved_and_approved(o2, at, fires_unapproved):
+    records = _real("policy_edit_gui", at=at) + _real("policy_edit_jsconsole", at=at)
+    out = _real_rows(o2, "infra-fortigate-change-unapproved", records)
+    inside = _real_rows(o2, "infra-fortigate-change-approved", records)
+    assert bool(out) is fires_unapproved and bool(inside) is not fires_unapproved
+    rows = out or inside
+    assert {(r["device"], r["cfgpath"], r["admin"], r["changes"]) for r in rows} == {("example_branch_fw", "firewall.policy", "example-admin", 1),
+                                                                                       ("ns0001", "firewall.policy", "example-admin", 1)}
+
+
+def test_real_changes_of_other_config_paths_and_non_config_lines_do_not_fire_the_change_alerts(o2):
+    records = [r for n in ("syslogd_filter_edit", "log_setting_edit", "login_success", "forward_accept", "ips_high") for r in _real(n, at="03:10:00")]
+    assert _real_rows(o2, "infra-fortigate-change-unapproved", records) == []
+    assert _real_rows(o2, "infra-fortigate-change-approved", _real("log_setting_edit")) == []
+
+
+def test_real_logging_config_paths_can_be_added_to_the_watched_changes_by_a_role_variable(o2):
+    extra = {"o2c_fortigate_policy_cfgpaths": ["firewall.policy", "log.syslogd.filter", "log.setting"]}
+    rows = _real_rows(o2, "infra-fortigate-change-unapproved", _real("syslogd_filter_edit", at="03:10:00") + _real("log_setting_edit", at="03:10:00"), **extra)
+    assert {r["cfgpath"] for r in rows} == {"log.syslogd.filter", "log.setting"}
+
+
+def test_real_ha_alert_fires_on_the_ha_line_only(o2):
+    rows = _real_rows(o2, "infra-fortigate-ha-failover", _real("ha_interface_failed"))
+    assert [(r["device"], r["event"], r["events"]) for r in rows] == [("ns0001", "HA device interface failed", 1)]
+    others = [r for n in REAL_LINES if n != "ha_interface_failed" for r in _real(n)]
+    assert _real_rows(o2, "infra-fortigate-ha-failover", others) == []
+
+
+def test_real_critical_detection_fires_on_a_critical_severity_and_on_an_infected_file_but_not_on_lower_severities(o2):
+    rows = _real_rows(o2, "infra-fortigate-critical-detection", _real("anomaly_critical"))
+    assert [(r["device"], r["attack"], r["detections"]) for r in rows] == [("ns0001", "tcp_syn_flood", 1)]
+    rows = _real_rows(o2, "infra-fortigate-critical-detection", _real("virus_infected"))   # 실제 바이러스 로그에는 severity 키가 없다
+    assert [(r["device"], r["attack"], r["detections"]) for r in rows] == [("ns0001", "virus_test3", 1)]
+    quiet = [r for n in ("ips_high", "dlp_info", "forward_deny_policy0", "login_failed", "ha_interface_failed", "fsso_logon") for r in _real(n)]
+    assert _real_rows(o2, "infra-fortigate-critical-detection", quiet) == []
+
+
+def test_real_lines_keep_the_silent_alert_quiet_for_a_device_that_sent_and_fire_for_one_that_did_not(o2):
+    records = _real("login_failed") + _real("forward_deny_policy0")   # 사무실(관리번호 없는 이름), idc 장비
+    rows = _real_rows(o2, "infra-fortigate-syslog-silent", records, o2c_fortigate_syslog_roster=["Example_Branch_FW", "ns0001", "ns0399"])
+    assert {r["device_id"] for r in rows} == {"ns0399"}

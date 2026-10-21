@@ -37,6 +37,7 @@ def test_public_docs_and_code_have_no_model_version_or_current_device_state():
 def test_firewall_tests_use_only_reserved_documentation_addresses():
     """Synthetic addresses in firewall tests must come from RFC 5737 (192.0.2/24, 198.51.100/24, 203.0.113/24), loopback or private ranges."""
     ok = re.compile(r"^(127\.|10\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)")
-    for rel in ("tests/test_openobserve_vrl.py", "tests/test_fortigate_backup.py", "tests/test_fortigate_runbook.py", "tests/test_openobserve_config.py"):
+    for rel in ("tests/test_openobserve_vrl.py", "tests/test_fortigate_backup.py", "tests/test_fortigate_runbook.py", "tests/test_openobserve_config.py",
+                "tests/fixtures/fortigate_real_lines.tsv"):
         for ip in re.findall(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])", (ROOT / rel).read_text()):
             assert ok.match(ip), (rel, ip)

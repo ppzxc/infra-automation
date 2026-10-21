@@ -67,6 +67,6 @@
 ## 5. 알려진 한계
 
 - 원문 시각의 시간대는 장비 설정에 의존한다. 증적 기준 시각은 수집 시각이다.
-- **필드 추출은 합성 입력으로만 검증됐다.** `fortigate_semantics`와 그 테스트(`tests/test_openobserve_vrl.py`)는 공식 Log Message Reference의 기본 key=value 형식으로 만든 가짜 줄을 쓴다. 사무실 장비(`ns0399`)의 실제 로그 샘플(비공개 경로)을 받으면 키 이름(`devname`, `type`, `subtype`, `action`, `srcip`, `remip`, `ui`, `user`, `policyid`)과 값 모양(따옴표, `N/A`, 관리자 접속 줄의 주소 위치)을 대조해 규칙과 테스트를 고친다. 그 전에는 `security_logs`에서 `device_id`·`event_action` 등이 비어 있는 줄이 있을 수 있다.
-- 알림(관리자 로그인 실패·정책·계정 변경·HA 전환·중대 탐지·수신 중단)은 [알림 런북](alerts.md)의 방화벽 절이 다룬다(Spec #282 / Ticket-3, 같은 합성 입력 한계). 설정 백업·변경 알림은 이 런북의 범위 밖이다([알림 런북](alerts.md#fortigate-config-change)).
+- **필드 추출은 실로그 샘플로 검증됨**(검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃·로그인 실패 줄, 실제 장비가 만든 웹필터·앱제어 줄, IPv6 주소). 실제 FortiOS 줄을 가짜 값(IP는 `192.0.2.x`, 장비 `Example_Branch_FW`·`ns0001`, 계정 `example-admin`)으로 치환한 `tests/fixtures/fortigate_real_lines.tsv`를 `tests/test_openobserve_vrl.py`가 함수에 통과시킨다. 실측으로 고친 점: VPN 터널 통계 줄의 `user="<상대 장비 주소>"`는 사용자가 아니라서 `user_name`을 만들지 않는다. `ui="ha_daemon"`처럼 주소가 없는 줄은 `source_address`가 비고, HA 줄은 `action` 키가 없어 `event_action`이 비는 것이 정상이다. 검증되지 않은 종류의 줄이 처음 들어오면 필드가 비어 있는지 확인한다.
+- 알림(관리자 로그인 실패·정책·계정 변경·HA 전환·중대 탐지·수신 중단)은 [알림 런북](alerts.md)의 방화벽 절이 다룬다(Spec #282 / Ticket-3, 같은 실로그 샘플로 검증, 검증 범위·한계는 같다). 설정 백업·변경 알림은 이 런북의 범위 밖이다([알림 런북](alerts.md#fortigate-config-change)).
 - 허용 트래픽은 수집하지 않으므로 "허용된 접속이 있었는지"는 이 로그로 증명되지 않는다. 중요 구간만 정책별로 켠 범위에서만 남는다.
