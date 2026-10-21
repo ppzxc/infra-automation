@@ -2376,3 +2376,64 @@ def test_row_values_with_quotes_and_backslashes_must_be_escaped_to_keep_the_body
         json.loads(tpl.replace("{rows:20}", row))
     for a in PROMQL_DEFS:
         assert not re.search(r'["\\]', a["row_template"]), a["name"]
+
+
+# --- 스트림이 바뀐 알림: update가 아니라 삭제 후 재생성 -------------------------------------------------------------------------------
+def _alert_stream_want(name, stream="s_new", stream_type="logs"):
+    body = {"name": name, "stream_name": stream, "stream_type": stream_type, "enabled": True}
+    return {"kind": "alert", "name": name, "body": body, "match": body, "secret": False}
+
+
+def _server_stream(name, stream, stream_type="logs"):
+    return {"alert": [{"alert_id": "id-" + name, "name": name, "stream_name": stream, "stream_type": stream_type, "enabled": True}]}
+
+
+def test_plan_recreates_an_alert_whose_stream_name_differs():
+    plan = o2c.o2c_plan([_alert_stream_want("infra-a")], _server_stream("infra-a", "s_old"), "default")
+    assert [(a["op"], a["method"], a["name"]) for a in plan] == [("recreate", "DELETE", "infra-a"), ("create", "POST", "infra-a")]
+    assert plan[0]["path"] == "/api/v2/default/alerts/id-infra-a" and plan[1]["body"]["stream_name"] == "s_new"
+    assert o2c.o2c_plan_summary(plan) == ["recreate alert infra-a (stream changed)"]
+
+
+def test_plan_recreates_an_alert_whose_stream_type_differs():
+    plan = o2c.o2c_plan([_alert_stream_want("infra-a", stream_type="metrics")], _server_stream("infra-a", "s_new", "logs"), "default")
+    assert [a["op"] for a in plan] == ["recreate", "create"]
+
+
+def test_plan_does_nothing_when_the_stream_matches():
+    assert o2c.o2c_plan([_alert_stream_want("infra-a")], _server_stream("infra-a", "s_new"), "default") == []
+
+
+def test_plan_updates_instead_when_only_other_fields_differ_and_when_the_server_reports_no_stream():
+    want = _alert_stream_want("infra-a")
+    plan = o2c.o2c_plan([want], {"alert": [dict(_server_stream("infra-a", "s_new")["alert"][0], enabled=False)]}, "default")
+    assert [a["op"] for a in plan] == ["update"]
+    plan = o2c.o2c_plan([want], {"alert": [{"alert_id": "id-infra-a", "name": "infra-a", "enabled": False}]}, "default")
+    assert [a["op"] for a in plan] == ["update"]
+
+
+def test_plan_recreate_leaves_alerts_not_in_the_definition_alone():
+    existing = {"alert": _server_stream("infra-a", "s_old")["alert"] + _server_stream("infra-other", "s_x")["alert"]}
+    plan = o2c.o2c_plan([_alert_stream_want("infra-a")], existing, "default")
+    assert [(a["op"], a["name"]) for a in plan] == [("recreate", "infra-a"), ("create", "infra-a")]
+
+
+def test_plan_recreate_name_is_not_deleted_twice_even_if_it_is_retired():
+    plan = o2c.o2c_plan([_alert_stream_want("infra-a")], _server_stream("infra-a", "s_old"), "default", retired=["infra-a"])
+    assert [a["op"] for a in plan] == ["recreate", "create"]
+
+
+def test_recreate_on_the_server_deletes_then_creates_with_the_definition_and_then_converges(o2):
+    assert _apply(o2).returncode == 0
+    name = "infra-memory-usage-p1"
+    o2.store["alert"][name] = dict(o2.store["alert"][name], stream_name="system_memory_usage")   # 서버에는 예전 스트림으로 남은 알림
+    old_id = o2.store["alert"][name]["alert_id"]
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert f"recreate alert {name} (stream changed)" in res.stdout
+    assert [(m, p) for m, p, _ in o2.writes] == [("DELETE", f"/api/v2/default/alerts/{old_id}"), ("POST", "/api/v2/default/alerts")]
+    assert o2.store["alert"][name]["stream_name"] == "system_linux_memory_available" and o2.store["alert"][name]["alert_id"] != old_id
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and o2.writes == [] and "(stream changed)" not in res.stdout

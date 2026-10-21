@@ -26,6 +26,7 @@ ITEM_PATHS = {
     'trace_stream': '/api/{org}/streams/{key}/settings?type=traces',
 }
 ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; the others by name
+STREAM_CHANGED = 'stream changed'   # 삭제 후 재생성의 이유(알림의 스트림 이름·종류는 PUT으로 못 바꾼다)
 CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
 MANAGED_PREFIX = 'infra-'   # 알림 이름 접두어. 서버에서 지우는 근거는 아니다: 삭제는 폐기 목록(o2c_retired_alerts)의 이름뿐이고, 접두어만 있는 알림은 건드리지 않고 알려 준다
@@ -164,6 +165,8 @@ def o2c_plan(desired, existing, org, retired=()):
 
     Each action: ``{kind, name, op (create|update|delete), method, path, body, secret}``. Nothing is returned for objects that already match.
     An alert is deleted only when it exists on the server and its name is in ``retired`` (the explicit list); the prefix alone never deletes.
+    The one exception is an alert whose ``stream_name``/``stream_type`` differs from the definition: the server cannot move an alert to another
+    stream with PUT, so the plan has ``recreate`` (DELETE) immediately followed by ``create`` (POST, ``reason`` = ``stream changed``) of the same name.
     """
     missing = o2c_missing_destinations(desired, existing)
     if missing:
@@ -180,6 +183,12 @@ def o2c_plan(desired, existing, org, retired=()):
                 plan.append(_action(kind, want, 'create', 'POST', LIST_PATHS[kind].format(org=org), body))
                 continue
             seen = _project_pipeline(cur) if kind == 'pipeline' else cur
+            if kind == 'alert' and cur.get('alert_id') and _stream_changed(body, cur):
+                # PUT은 stream_name/stream_type을 바꾸지 못해 update가 반영되지 않고 매번 계획에 남는다 → 삭제 후 재생성(항상 짝으로 계획)
+                plan.append({'kind': kind, 'name': want['name'], 'op': 'recreate', 'method': 'DELETE', 'secret': False, 'body': {},
+                             'reason': STREAM_CHANGED, 'path': ITEM_PATHS[kind].format(org=org, key=cur['alert_id'])})
+                plan.append(dict(_action(kind, want, 'create', 'POST', LIST_PATHS[kind].format(org=org), body), reason=STREAM_CHANGED))
+                continue
             if _subset(want['match'], seen):
                 continue
             key = cur.get(ID_FIELD[kind]) if kind in ID_FIELD else want['name']
@@ -187,13 +196,18 @@ def o2c_plan(desired, existing, org, retired=()):
                 body = dict(body, **{ID_FIELD[kind]: key})
             plan.append(_action(kind, want, 'update', 'PUT', ITEM_PATHS[kind].format(org=org, key=key), body))
     # 삭제는 명시적 폐기 목록에 있는 알림뿐이다. 접두어(infra-)만 보고 지우면 다른 곳에서 만든 알림까지 지운다(사고)
-    retired = set(retired or ())
+    retired = set(retired or ()) - {a['name'] for a in plan if a['op'] == 'recreate'}
     for cur in _items(existing.get('alert')):
         name = cur.get('name') or ''
         if name in retired and cur.get('alert_id'):
             plan.append({'kind': 'alert', 'name': name, 'op': 'delete', 'method': 'DELETE', 'secret': False, 'body': {},
                          'path': ITEM_PATHS['alert'].format(org=org, key=cur['alert_id'])})
     return plan
+
+
+def _stream_changed(body, cur):
+    """True when the server alert reports a stream (name or type) other than the definition's. A field the server did not report is not a difference."""
+    return any(k in cur and cur[k] != body.get(k) for k in ('stream_name', 'stream_type'))
 
 
 def o2c_missing_destinations(desired, existing):
@@ -244,7 +258,13 @@ def o2c_alert_state(detail_results):
 
 def o2c_plan_summary(plan):
     """Lines safe to print (no bodies: the destination holds the webhook credentials)."""
-    return ['%s %s %s' % (a['op'], a['kind'], a['name']) for a in plan]
+    lines = []
+    for a in plan:
+        if a['op'] == 'recreate':   # 삭제와 재생성이 한 쌍이다: 한 줄로 보이고, 짝인 create는 따로 적지 않는다
+            lines.append('recreate %s %s (%s)' % (a['kind'], a['name'], a['reason']))
+        elif not (a['op'] == 'create' and a.get('reason')):
+            lines.append('%s %s %s' % (a['op'], a['kind'], a['name']))
+    return lines
 
 
 # --- 리소스 고갈 알림 SQL (Spec #184 / Ticket-3) ------------------------------------------------------------------------
