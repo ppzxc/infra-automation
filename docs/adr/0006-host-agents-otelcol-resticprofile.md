@@ -27,8 +27,8 @@
 
   | 템플릿 | 실행 | 내용 |
   |---|---|---|
-  | Host Agents — Deploy | 태그 없음 | 바이너리·계정·디렉터리·init unit·설정·스케줄 전체, restic repo `init`, 종료 시 `job=inventory` 등록 이벤트 |
-  | Host Agents — Config | `--tags agents_config` | 설정 템플릿·스케줄만 재적용(핸들러 재시작), check + `--diff` 지원 |
+  | Host Agents — Deploy All | 태그 없음 | 바이너리·계정·디렉터리·init unit·설정·스케줄 전체, restic repo `init`, 종료 시 `job=inventory` 등록 이벤트 |
+  | Host Agents — Config All | `--tags agents_config` | otelcol과 restic의 설정 템플릿·스케줄만 재적용(핸들러 재시작, 설치·repo 초기화 없음), check + `--diff` 지원 |
   | Host Agents — Repo Maintenance | Semaphore 스케줄 | 컨트롤러에서 호스트별 `check` → `forget --prune` (§2.5) |
 
   보조 태그: `agents_install`, `agents_config`, `otel`, `backup`.

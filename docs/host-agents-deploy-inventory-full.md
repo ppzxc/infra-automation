@@ -1,6 +1,6 @@
-# Host Agents — Deploy 배포 내역서 (Full)
+# Host Agents — Deploy All 배포 내역서 (Full)
 
-> Semaphore 템플릿 **Host Agents — Deploy**가 대상 호스트에 설치·구성하는 otelcol-contrib, restic, resticprofile의 상세 내역이다.
+> Semaphore 템플릿 **Host Agents — Deploy All**가 대상 호스트에 설치·구성하는 otelcol-contrib, restic, resticprofile의 상세 내역이다.
 > 요약본은 [host-agents-deploy-inventory-simple.md](host-agents-deploy-inventory-simple.md), 설계 근거는 [ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md)·[ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md), 태스크 명세는 [monitoring.md](monitoring.md)·[backup.md](backup.md)를 본다.
 > 본 문서의 값은 Git 기본값(`roles/*/defaults`, `roles/monitoring/vars`) 기준이며, 호스트별 OpenBao KV로 추가·제외된 항목은 반영하지 않는다.
 
@@ -13,7 +13,7 @@
 | 플레이북 | `playbooks/host_agents.yml` (태그 없음 = 설치 + 설정 전체) |
 | 대상 호스트 | `target_hosts`(기본 `servers`) ∩ `servers`에서 `host_agents_excluded` 그룹을 뺀 호스트, 동시 실행 `serial: 25%`. `host_agents_backup_only` 호스트에는 otelcol 항목을 설치하지 않고 restic·resticprofile만 설치 |
 | 실행 순서 | ① OpenBao 연결·자격증명 해석 → ② `monitoring` 역할(otelcol) → ③ `backup` 역할(restic·resticprofile) → ④ 임시 개인키 정리 |
-| 비교 템플릿 | **Host Agents — Config**(`--tags agents_config`)는 설정 재적용만 하며 바이너리 설치, repo 초기화, 등록 이벤트는 하지 않는다 |
+| 비교 템플릿 | **Host Agents — Config All**(`--tags agents_config`)는 otelcol과 restic의 설정만 재적용하며 바이너리 설치, repo 초기화, 등록 이벤트는 하지 않는다 |
 | 신규 호스트 | `site.yml` 실행 후 Deploy 실행 (2회) |
 
 ### OS 경로

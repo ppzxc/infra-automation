@@ -215,7 +215,7 @@ systemctl list-timers openobserve-health.timer
 journalctl -u openobserve-health.service -n 20
 ```
 
-**대응**: ns0332의 OpenObserve 서비스·디스크·메모리를 복구한다. 복구 뒤 Silent Host 알림이 남아 있으면 수집 재개를 확인한다. ns0266에서 타이머 자체가 안 돌면 `Host Agents — Config`를 다시 실행한다.
+**대응**: ns0332의 OpenObserve 서비스·디스크·메모리를 복구한다. 복구 뒤 Silent Host 알림이 남아 있으면 수집 재개를 확인한다. ns0266에서 타이머 자체가 안 돌면 `Host Agents — Config All`를 다시 실행한다.
 
 **수동 검증 절차** (배포 후 한 번, 또는 webhook 값을 바꾼 뒤): ns0266에서 대상 URL을 틀린 값으로 한 번 실행해 통지가 도착하는지 본다.
 ```bash
@@ -279,7 +279,7 @@ nc -vz -w 5 <주소> <포트>
 2. 접속이 되는데 알림이 온다면 ns0266 수집기(`otelcol-contrib`) 상태, ns0266에서 대상까지의 방화벽 경로, OpenBao `hosts/<호스트>`의 `ansible_port`·`public_ip`가 실제 SSH 포트·주소와 같은지 본다(대상은 OpenBao 값으로 만든다).
 3. ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. 이는 ns0266의 Silent Host 알림으로 잡힌다.
 
-**편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `hosts/<호스트>`(주소 `public_ip`, 비표준 SSH 포트 `ansible_port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `Host Agents — Deploy`(또는 Config)를 ns0266에 다시 반영해야 한다.
+**편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `hosts/<호스트>`(주소 `public_ip`, 비표준 SSH 포트 `ansible_port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `Host Agents — Deploy All`(또는 Config)를 ns0266에 다시 반영해야 한다.
 **제외**: 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 Semaphore 인벤토리(`hosts`)의 `tcpcheck_excluded` 그룹에 넣는다(`host_agents_excluded`와 같은 방식). 현재 `ns0229`·`ns0246`이 들어 있다: 순수 내부 IP(10.10.10.x)만 할당된 서버라 공인 `218.234.206.79`의 포트 2002·2001 포워딩으로만 접근하고, ns0266에서는 이 경로가 막혀 있다(`connect: no route to host`). 그래서 서버 도달성 감시의 사각지대다. 접속 못 하는 이유가 없어지면 그룹에서 뺀다. 목록에서 빠진 서버는 도달성 알림을 받지 못한다. Extra variables `host_agents_tcpcheck_excluded`로도 지정할 수 있다. 저장소의 `inventory/group_vars`는 Semaphore에서 읽히지 않으니 거기에 두지 않는다.
 <a id="backup-failure"></a>
 ## 🟠 백업 실패 (`infra-backup-failure`)

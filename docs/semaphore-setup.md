@@ -151,9 +151,9 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | 이름 | Playbook | CLI args | Survey variables | 실행 방식 | 대상 |
 |---|---|---|---|---|---|
 | Host Provisioning | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_admin_users` | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). 지정하지 않으면 접속 전에 실패한다 |
-| Host Agents — Deploy | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 |
-| Host Agents — Config | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `servers` |
-| Host Agents — Backup | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `servers`, 한 번에 25%씩 (restic·resticprofile만) |
+| Host Agents — Deploy All | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `target_hosts`로 지정(필수, 전체는 `servers` 입력), 한 번에 25%씩. otelcol과 restic 모두 설치·설정 |
+| Host Agents — Config All | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `target_hosts`로 지정(필수). otelcol과 restic **설정 모두** 재적용(설치·repo 초기화·등록 이벤트는 하지 않음) |
+| Host Agents — Deploy Restic | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `target_hosts`로 지정(필수), 한 번에 25%씩 (restic·resticprofile만 설치·설정) |
 | Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
 | OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | (없음) | 수동 | localhost (OpenObserve API). Silent Host 로스터를 만들려고 `servers` 인벤토리를 읽는다 |
 | Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | (없음 — 두지 않는다) | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함, `host_audit_excluded` 제외) |
@@ -167,8 +167,8 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 | 템플릿 | 변수 | 형식 | 기본값 | 필수 |
 |---|---|---|---|---|
 | Host Provisioning | `target_hosts` | String | (없음) | 예 |
-| Host Provisioning | `target_admin_users` | String | (없음) | 예 |
-| Deploy, Config, Backup | `target_hosts` | String | `servers`(전체) | 예 |
+| Host Provisioning | `target_admin_users` | String | 템플릿에 설정한 기본값(관리자 계정 JSON 목록) | 아니오 |
+| Deploy All, Config All, Deploy Restic | `target_hosts` | String | (없음) | 예 |
 | On-demand | `target_hosts` | String | (비움 = 전체) | 아니오 |
 | On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |
 | Resend | `host_audit_resend_run_id` | String | (없음) | 예 |
@@ -176,11 +176,12 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 - **Host Provisioning은 `playbooks/provision_hosts.yml`만 쓴다.** `site.yml`을 Semaphore 템플릿에 직접 연결하지 않는다. `site.yml` 직접 실행(기본 대상 `servers:loadbalancers`)은 CLI 전용이다. 인벤토리를 공용으로 쓰므로 대상 지정이 없으면 새로 추가된 서버까지 전부 프로비저닝되기 때문이다.
 - Host Provisioning의 `target_hosts`는 인벤토리 호스트명을 쉼표로 구분한 문자열이다(예: `ns0001,ns0002`). `provision_hosts.yml`의 사전 검증(localhost)이 접속 전에 다음을 확인하고 어기면 한국어 메시지로 즉시 실패한다. 값이 없거나 비어 있음, 호스트 패턴(`:`, `!`, `&`, `*`)·공백·빈 항목, 인벤토리에 없는 이름, 그룹 이름(`all`·`servers`·`loadbalancers` 등), `provision_excluded` 소속 호스트, 개수가 `provision_max_hosts`(기본 5)를 넘음. 더 많은 호스트를 한 번에 하려면 `provision_max_hosts`를 명시적으로 올린다(Environment 또는 API `environment`). 이 검증은 `--tags`로도 건너뛸 수 없다.
-- Deploy·Config·Backup의 `target_hosts`는 비워 두지 않는다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 기본값이 적용되지 않고 대상 패턴이 깨진다. Host Audit은 빈 값을 전체로 처리한다.
+- Deploy All·Config All·Deploy Restic의 `target_hosts`는 **기본값이 없고 비워 둘 수 없다**(Survey 필수). 인벤토리가 공용이라 새 서버가 계속 추가되므로, 대상을 입력하지 않아 전체에 도는 일을 막는다. 전체에 적용하려면 `servers`를 직접 입력한다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 대상 패턴이 깨지므로 Survey 필수가 이를 막는 장치다. Host Audit은 빈 값을 전체로 처리한다.
+- **Config All이 하는 일**: otelcol 설정과 restic 설정을 모두 재적용한다. restic 설정 블록(`roles/backup/tasks/main.yml`)이 `agents_config`와 `backup` 두 태그를 모두 가져서, `--tags agents_config`가 두 에이전트의 설정을 함께 돌린다. 설치와 repo 초기화, 등록 이벤트는 Deploy All·Deploy Restic에만 있다.
 - Monthly에는 Survey를 두지 않는다. 정기 실행은 항상 전체 대상·보관·발송이어야 Audit Baseline이 맞다.
 - Survey에 없는 변수(아래의 `host_audit_mail_to`, `host_audit_drift_enabled`, `backup_maintenance_read_subset` 등)는 API로 실행할 때 `POST /api/project/<id>/tasks`의 `environment`(JSON 문자열)로 넘긴다. 자주 쓰게 되면 해당 템플릿 Survey에 추가한다.
 
-**restic 백업만 적용할 때 (Host Agents — Backup)**
+**restic 백업만 적용할 때 (Host Agents — Deploy Restic)**
 
 - Deploy에서 `backup` 역할만 실행한다. restic·resticprofile 바이너리 배포, 백업 설정, timer/cron, repo 초기화, `job=inventory` 이벤트까지 하고 otelcol은 건드리지 않는다. OS 프로브, OpenBao 입력 검증, 연결 해석·임시 개인키 정리는 `always` 태그라 함께 돈다.
 - 멱등이라 백업 설정만 바꿨을 때도 이 템플릿을 다시 돌리면 된다. 이미 수렴한 설치·스케줄 단계는 `ok`로 지나간다.
@@ -211,7 +212,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 **특정 호스트만 실행할 때**
 
-- Run 창의 Survey `target_hosts`에 `ns0266`처럼 넣는다(Deploy·Config·Backup 기본값 `servers`는 전체). 값은 FQDN이 아니라 Inventory Hostname이다. Limit 칸은 쓰지 않는다.
+- Run 창의 Survey `target_hosts`에 `ns0266`처럼 넣는다(기본값이 없다. 전체는 `servers`를 직접 입력). 값은 FQDN이 아니라 Inventory Hostname이다. Limit 칸은 쓰지 않는다.
 - `target_hosts`는 플레이북 안에서 `servers`와 교집합을 구한다. `servers`에 없는 이름을 넣으면 오류 없이 대상 0대로 끝난다.
 - Limit을 템플릿에 고정하지 않는다. 고정해 두면 일부 호스트만 처리되고도 성공으로 표시된다. 스케줄로 도는 Repo Maintenance에서는 특히 주의한다.
 
@@ -258,9 +259,9 @@ Deploy, Config, Backup, OpenObserve — Config, Host Audit — On-demand, Host A
 
 | 순서 | 실행 | 확인 |
 |---|---|---|
-| 1 | Host Agents — Config + `--check --diff` + `target_hosts=<1대>` | OpenBao 로그인과 KV 검증 통과(필수 키 누락 시 변경 전에 실패) |
-| 2 | Host Agents — Deploy + `target_hosts=<1대>` | otelcol 서비스 기동, repo 초기화, 마지막에 `job=inventory` 이벤트 전송 |
-| 3 | Host Agents — Deploy (전체) | 신규 호스트는 `site.yml`을 먼저 실행한 뒤 Deploy |
+| 1 | Host Agents — Config All + `--check --diff` + `target_hosts=<1대>` | OpenBao 로그인과 KV 검증 통과(필수 키 누락 시 변경 전에 실패) |
+| 2 | Host Agents — Deploy All + `target_hosts=<1대>` | otelcol 서비스 기동, repo 초기화, 마지막에 `job=inventory` 이벤트 전송 |
+| 3 | Host Agents — Deploy All (전체) | 신규 호스트는 `site.yml`을 먼저 실행한 뒤 Deploy |
 | 4 | Host Agents — Repo Maintenance (수동 Run) | `[BAK-087]` AppRole 로그인 → check → forget, `job=maintenance` 이벤트 |
 | 5 | OpenObserve — Config + `--check` → 실제 실행 | VRL 함수, 파이프라인, 통지 대상, 알림 반영 |
 

@@ -1,6 +1,6 @@
-# Host Agents — Deploy 배포 내역서 (Simple)
+# Host Agents — Deploy All 배포 내역서 (Simple)
 
-> Semaphore **Host Agents — Deploy**(`playbooks/host_agents.yml`, 태그 없음)가 설치하는 항목의 요약이다. 경로별 권한, SHA256, 파서 등 상세 내용은 [Full 버전](host-agents-deploy-inventory-full.md)을 본다.
+> Semaphore **Host Agents — Deploy All**(`playbooks/host_agents.yml`, 태그 없음)가 설치하는 항목의 요약이다. 경로별 권한, SHA256, 파서 등 상세 내용은 [Full 버전](host-agents-deploy-inventory-full.md)을 본다.
 
 ## 1. 설치 구성요소
 
@@ -55,5 +55,5 @@
 
 - restic repo가 없으면 초기화한다.
 - 완료 시 OpenObserve `backup_logs`에 `job=inventory` 등록 이벤트를 보낸다.
-- 설정만 다시 적용할 때는 **Host Agents — Config**(`--tags agents_config`)를 쓴다.
-- otelcol은 두고 restic·resticprofile만 설치·설정할 때는 **Host Agents — Backup**(`--tags backup`)을 쓴다.
+- 설정만 다시 적용할 때는 **Host Agents — Config All**(`--tags agents_config`)를 쓴다. otelcol과 restic 설정이 모두 재적용된다.
+- otelcol은 두고 restic·resticprofile만 설치·설정할 때는 **Host Agents — Deploy Restic**(`--tags backup`)을 쓴다.

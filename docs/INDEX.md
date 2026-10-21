@@ -24,7 +24,7 @@
 * [OpenBao & Semaphore UI Secret Management Integration](openbao_integration.md) - OpenBao KV v2 동적 시크릿 및 Semaphore UI 최신 연동 가이드
 * [Host Agents (otelcol + resticprofile) ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md) - Host Agents 설치·재구성, ISMS 수집/백업 표준, OpenBao KV 스키마, CentOS 6/7 분기
 * [Semaphore 셋업 가이드](semaphore-setup.md) - Key Store·Repository·Inventory·Variable Group·Host Agents/OpenObserve 템플릿·스케줄(UTC/KST) 등록 절차와 자주 겪는 문제
-* Host Agents — Deploy 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상
+* Host Agents — Deploy All 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상
 * [Log Structuring ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md) - 엣지 Envelope Parsing + 중앙(OpenObserve VRL·알림) 의미 해석
 * [스위치 syslog 수신 경로 런북](runbooks/switch-syslog.md) - 스위치 syslog → syslog-ng → 파일 보관 → otelcol → OpenObserve 경로, 설정 위치와 점검 절차(#276)
 * [포티게이트 방화벽 로그 수신 런북](runbooks/fortigate-syslog.md) - 방화벽 syslog → `security_logs`(`fortigate-syslog`) 경로, 장비 쪽 로그 거름 기준, HA 멤버 구성, 점검·편입 절차(#283)

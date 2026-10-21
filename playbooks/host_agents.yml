@@ -5,9 +5,9 @@
 # Host Agents를 다루는 유일한 진입점이다. monitoring은 site.yml/maintenance.yml에서 제거되었다.
 #
 # Semaphore 템플릿:
-#   Host Agents — Deploy : 태그 없음 (설치 + 설정 전체)
-#   Host Agents — Config : --tags agents_config [--check --diff] (설정 재적용만)
-#   Host Agents — Backup : --tags backup (restic/resticprofile만 설치 + 설정)
+#   Host Agents — Deploy All : 태그 없음 (설치 + 설정 전체)
+#   Host Agents — Config All : --tags agents_config [--check --diff] (설정 재적용만)
+#   Host Agents — Deploy Restic : --tags backup (restic/resticprofile만 설치 + 설정)
 # 보조 태그: agents_install, agents_config, otel, backup
 #
 # 실행 예시:
@@ -15,7 +15,7 @@
 #   ansible-playbook -i inventory/hosts.yml playbooks/host_agents.yml -e target_hosts=ns0266   # 카나리 1대
 #   ansible-playbook -i inventory/hosts.yml playbooks/host_agents.yml --tags backup            # restic만
 #
-# 신규 호스트는 템플릿을 2회 실행한다: site.yml → Host Agents — Deploy.
+# 신규 호스트는 템플릿을 2회 실행한다: site.yml → Host Agents — Deploy All.
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
