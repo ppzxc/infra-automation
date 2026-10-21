@@ -28,7 +28,7 @@ KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_
       "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
-    "infra-root-login-office-daily", "infra-sudo-escalation-failure", "infra-oom-kill", "infra-disk-fs-errors",
+    "infra-root-login-known", "infra-sudo-escalation-failure", "infra-oom-kill", "infra-disk-fs-errors",
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
@@ -276,7 +276,7 @@ def test_every_alert_is_actionable(o2):
         ctx = alert["context_attributes"]
         assert ctx["severity"] in ("P1 긴급", "P2 경고", "P3 주의"), name
         assert ctx["severity_icon"] in ("🔴", "🟠", "🟡"), name
-        for key in ("title", "what", "why", "action"):
+        for key in ("title", "what", "why"):
             assert ctx[key].strip() and '"' not in ctx[key] and "\n" not in ctx[key], (name, key)
         anchor = ctx["runbook"].split("#", 1)[1]
         assert ctx["runbook"].startswith("https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#")
@@ -615,14 +615,92 @@ def test_external_root_login_alert_excludes_every_normal_source_and_stays_p1_eve
     assert alert["trigger_condition"]["threshold"] == 1 and alert["trigger_condition"]["silence"] == 5
 
 
-def test_office_root_login_alert_is_a_daily_p3_summary_of_office_sources_only(o2):
+def test_known_root_login_alert_is_a_p2_event_alert_of_registered_and_private_sources(o2):
     assert _apply(o2, kv=KV_SOURCES).returncode == 0
-    alert = o2.store["alert"]["infra-root-login-office-daily"]
+    alert = o2.store["alert"]["infra-root-login-known"]
     sql = alert["query_condition"]["sql"]
-    assert f"'{OFFICE_IP}'" in sql and f"'{OFFICE_S2S_IP}'" in sql and SEMAPHORE_IP not in sql
-    assert "user_name = 'root'" in sql and "NOT IN" not in sql
-    assert alert["context_attributes"]["severity"] == "P3 주의"
-    assert alert["trigger_condition"]["period"] == 1440 and alert["trigger_condition"]["silence"] == 1440
+    assert "infra-root-login-office-daily" not in o2.store["alert"]
+    for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP):   # kind 무관: semaphore·office 모두 P2
+        assert f"'{ip}'" in sql
+    assert "user_name = 'root'" in sql and "NOT IN" not in sql and "source_address LIKE '10.%'" in sql
+    assert alert["context_attributes"]["severity"] == "P2 경고"
+    assert alert["context_attributes"]["runbook"].endswith("#root-login-known")
+    trigger = alert["trigger_condition"]
+    assert (trigger["period"], trigger["threshold"], trigger["silence"]) == (5, 1, 60)
+
+
+def test_known_root_login_silence_comes_from_the_role_variable_and_must_be_an_integer(o2):
+    assert _apply(o2, extra={"o2c_root_known_silence_minutes": 180}).returncode == 0
+    assert o2.store["alert"]["infra-root-login-known"]["trigger_condition"]["silence"] == 180
+    res = _apply(o2, extra={"o2c_root_known_silence_minutes": "1h"})
+    assert res.returncode != 0
+
+
+def test_private_ranges_are_plain_like_patterns_with_172_16_to_31_expanded(o2):
+    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    for name in ("infra-root-login-success", "infra-root-login-known"):
+        sql = _sql(o2, name)
+        for pat in ("10.%", "192.168.%", "127.%", "169.254.%", "172.16.%", "172.24.%", "172.31.%"):
+            assert f"'{pat}'" in sql, (name, pat)
+        assert "'172.15.%'" not in sql and "'172.32.%'" not in sql and "'172.%'" not in sql
+
+
+def test_without_a_source_list_every_public_root_login_is_p1_and_private_ones_are_p2(o2):
+    """normal_sources가 비어 있을 때: 공인 출발지는 모두 P1, 사설 대역은 P2, 등록 출발지 조건(IN)은 두지 않는다."""
+    assert _apply(o2).returncode == 0
+    assert "NOT IN" not in _sql(o2, "infra-root-login-success")
+    known = _sql(o2, "infra-root-login-known")
+    assert " IN (" not in known and "source_address LIKE '10.%'" in known and "IN ('')" not in known
+
+
+def _root_rows(o2, kv, records):
+    """Both root alert SQLs run on sqlite over the records; returns the sets of fired hosts (P1, P2)."""
+    assert _apply(o2, kv=kv).returncode == 0
+    fired = []
+    for name in ("infra-root-login-success", "infra-root-login-known"):
+        sql = _sql(o2, name).replace('"security_logs"', '"t"')
+        fired.append({r["host_name"] for r in _run_alert_on_sqlite(sql, records, "t")})
+    return fired
+
+
+def _login(host, source, user="root", outcome="success"):
+    return {"host_name": host, "event_action": "ssh_login", "event_outcome": outcome, "user_name": user, "source_address": source}
+
+
+ROOT_CASES = [  # (host, source, user, outcome, P1, P2)
+    ("public", "198.51.100.7", "root", "success", True, False),
+    ("semaphore", SEMAPHORE_IP, "root", "success", False, True),
+    ("office", OFFICE_IP, "root", "success", False, True),
+    ("s2s", OFFICE_S2S_IP, "root", "success", False, True),
+    ("private-10", "10.0.0.8", "root", "success", False, True),
+    ("private-172-16", "172.16.0.8", "root", "success", False, True),
+    ("private-172-31", "172.31.255.1", "root", "success", False, True),
+    ("private-192-168", "192.168.0.8", "root", "success", False, True),
+    ("loopback", "127.0.0.1", "root", "success", False, True),
+    ("linklocal", "169.254.1.1", "root", "success", False, True),
+    ("public-172-32", ".".join(("172", "32", "0", "1")), "root", "success", True, False),
+    ("public-172-15", ".".join(("172", "15", "0", "1")), "root", "success", True, False),
+    ("public-near-192", ".".join(("192", "169", "0", "1")), "root", "success", True, False),
+    ("no-source", None, "root", "success", True, False),
+    ("other-user-public", "198.51.100.7", "deploy", "success", False, False),
+    ("other-user-private", "10.0.0.8", "deploy", "success", False, False),
+    ("failed-public", "198.51.100.7", "root", "failure", False, False),
+    ("failed-registered", SEMAPHORE_IP, "root", "failure", False, False),
+]
+
+
+def test_root_alert_sql_splits_logins_into_p1_external_and_p2_known_on_the_real_rows(o2):
+    p1, p2 = _root_rows(o2, KV_SOURCES, [_login(h, src, u, o) for h, src, u, o, _, _ in ROOT_CASES])
+    assert p1 == {h for h, _, _, _, a, _ in ROOT_CASES if a}
+    assert p2 == {h for h, _, _, _, _, b in ROOT_CASES if b}
+    assert not p1 & p2   # 한 로그인은 한 계층에만 걸린다
+
+
+def test_root_alert_sql_with_an_empty_source_list_sends_public_to_p1_and_private_to_p2(o2):
+    p1, p2 = _root_rows(o2, KV, [_login(h, src, u, o) for h, src, u, o, _, _ in ROOT_CASES])
+    registered = {"semaphore", "office", "s2s"}   # 목록이 비면 192.0.2.x는 그냥 공인 출발지다
+    assert registered <= p1 and not registered & p2
+    assert {"private-10", "loopback", "linklocal", "private-172-16"} <= p2 and not {"private-10", "loopback"} & p1
 
 
 def test_ssh_failure_alerts_ignore_the_normal_source_list(o2):
@@ -631,18 +709,12 @@ def test_ssh_failure_alerts_ignore_the_normal_source_list(o2):
         assert not any(ip in _sql(o2, name) for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP)), name
 
 
-def test_without_a_source_list_every_root_login_is_p1_and_the_office_alert_matches_nothing(o2):
-    assert _apply(o2).returncode == 0
-    assert "NOT IN" not in _sql(o2, "infra-root-login-success")
-    assert "IN ('')" in _sql(o2, "infra-root-login-office-daily")
-
-
 def test_changing_the_source_list_updates_only_the_root_alerts(o2):
     assert _apply(o2, kv=KV_SOURCES).returncode == 0
     o2.writes.clear()
     moved = dict(KV, normal_sources=[{"address": "192.0.2.99", "kind": "office"}])
     assert _apply(o2, kv=moved).returncode == 0
-    ids = {o2.store["alert"][n]["alert_id"] for n in ("infra-root-login-success", "infra-root-login-office-daily")}
+    ids = {o2.store["alert"][n]["alert_id"] for n in ("infra-root-login-success", "infra-root-login-known")}
     assert {p.rsplit("/", 1)[1] for _, p, _ in o2.writes} == ids and all(m == "PUT" for m, _, _ in o2.writes)
 
 
@@ -675,22 +747,24 @@ def test_verification_skips_kind_specific_cases_when_the_list_has_no_such_kind(o
     res = _apply(o2)
     assert res.returncode == 0, res.stdout + res.stderr
     hosts = {_case_host(r) for _, _, rs in o2.ingests for r in rs}
-    assert not any(h.startswith(("verify-root-semaphore-", "verify-root-office-")) for h in hosts)
+    assert not any(h.startswith(("verify-root-semaphore-", "verify-root-office-", "verify-known-semaphore-", "verify-known-office-")) for h in hosts)
     assert any(h.startswith("verify-root-external-") for h in hosts)
 
 
-def test_root_fixtures_cover_semaphore_office_and_external_for_both_root_alerts():
+def test_root_fixtures_cover_every_tier_for_both_root_alerts():
     cases = lambda n: {c["host"]: c["fires"] for c in FIXTURES[n]["cases"]}  # noqa: E731
-    p1, p3 = cases("infra-root-login-success"), cases("infra-root-login-office-daily")
+    p1, p2 = cases("infra-root-login-success"), cases("infra-root-login-known")
     assert p1["verify-root-external"] is True and p1["verify-root-semaphore"] is False and p1["verify-root-office"] is False
-    assert p3["verify-office-p3-office"] is True and p3["verify-office-p3-semaphore"] is False and p3["verify-office-p3-external"] is False
+    assert p1["verify-root-private"] is False and p1["verify-root-failure"] is False and p1["verify-root-other-user"] is False
+    assert p2["verify-known-semaphore"] is True and p2["verify-known-office"] is True and p2["verify-known-private"] is True
+    assert p2["verify-known-external"] is False and p2["verify-known-other-user"] is False and p2["verify-known-failure"] is False
 
 
 def test_a_committed_file_never_holds_a_real_looking_internal_address():
     """가짜 OpenObserve 테스트와 픽스처는 문서용 대역(192.0.2/198.51.100/203.0.113)만 쓴다."""
     text = (ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8") + (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
     for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text):
-        assert ip.startswith(("192.0.2.", "198.51.100.", "203.0.113.")), ip
+        assert ip.startswith(("192.0.2.", "198.51.100.", "203.0.113.", "10.0.0.")), ip   # 10.0.0.x는 미등록 사설 대역 케이스용 가짜 값
 
 
 # --- 리소스 고갈 알림 (Spec #184 / Ticket-3) ------------------------------------------------------------
@@ -784,7 +858,8 @@ def test_selftest_notification_is_clearly_marked_as_a_test(o2):
     assert _apply(o2).returncode == 0
     ctx = o2.store["alert"][SELFTEST]["context_attributes"]
     assert ctx["severity"] == "TEST"       # 통지 첫 줄이 "<아이콘> [TEST] <제목>"이 된다
-    assert all(ctx[k].strip() and '"' not in ctx[k] and "\n" not in ctx[k] for k in ("title", "what", "why", "action", "runbook"))
+    assert all(ctx[k].strip() and '"' not in ctx[k] and "\n" not in ctx[k] for k in ("title", "what", "why", "runbook"))
+    assert ctx["action"].startswith("\n1. ") and '"' not in ctx["action"]
     assert "시험" in ctx["title"] and o2.store["alert"][SELFTEST]["row_template"].startswith("• ")
 
 
@@ -992,7 +1067,7 @@ def test_backup_and_maintenance_missing_are_daily_p2_state_alerts_over_their_ros
 def test_backup_missing_action_starts_with_the_silent_host_check_and_runbook_anchors_exist(o2, tmp_path):
     assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
     ctx = o2.store["alert"]["infra-backup-missing"]["context_attributes"]
-    assert ctx["action"].startswith("① 같은 호스트의 Silent Host 알림이 있는지 먼저 확인")
+    assert ctx["action"].startswith("\n1. 같은 호스트의 Silent Host 알림이 있는지 먼저 확인")
     runbook = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
     for name in BACKUP_ALERTS:
         anchor = o2.store["alert"][name]["context_attributes"]["runbook"].split("#")[1]
@@ -1890,3 +1965,69 @@ def test_real_lines_keep_the_silent_alert_quiet_for_a_device_that_sent_and_fire_
     records = _real("login_failed") + _real("forward_deny_policy0")   # 사무실(관리번호 없는 이름), idc 장비
     rows = _real_rows(o2, "infra-fortigate-syslog-silent", records, o2c_fortigate_syslog_roster=["Example_Branch_FW", "ns0001", "ns0399"])
     assert {r["device_id"] for r in rows} == {"ns0399"}
+
+
+# --- 알림 메시지 형식: 라벨·조치 줄 나눔 (Spec #282 후속) -----------------------------------------------------------------
+def _filters():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("o2c_filter_fmt", ROOT_DIR / "filter_plugins" / "openobserve_config.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("count", [2, 3, 4])
+def test_action_filter_splits_circled_numbers_into_numbered_lines(count):
+    marks = "①②③④"[:count]
+    text = " ".join(f"{m} 항목{i}" for i, m in enumerate(marks, 1))
+    expected = "".join(f"\n{i}. 항목{i}" for i in range(1, count + 1))
+    assert _filters().o2c_action_lines(text) == expected
+
+
+def test_action_filter_turns_a_single_sentence_into_one_numbered_line():
+    assert _filters().o2c_action_lines("로그를 확인한다") == "\n1. 로그를 확인한다"
+
+
+def test_action_filter_keeps_an_empty_action_empty():
+    assert _filters().o2c_action_lines("") == "" and _filters().o2c_action_lines("   ") == ""
+
+
+
+def test_template_uses_the_new_labels_and_not_the_old_ones(o2):
+    assert _apply(o2).returncode == 0
+    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
+    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상:\n{rows}", "■ 조치:{action}", "▶ 런북: ", "▶ 로그 보기: ", "⏱ 발생: "):
+        assert label in text, label
+    assert "무슨 일" not in text and "왜 중요" not in text
+
+
+def test_rendered_body_with_a_multiline_action_is_valid_json(o2):
+    """OpenObserve는 context_attributes를 JSON 이스케이프해서 본문에 넣는다 — 개행이 있어도 본문 JSON이 깨지지 않는다."""
+    assert _apply(o2).returncode == 0
+    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
+    action = _filters().o2c_action_lines("① 하나 ② 둘 ③ 셋")
+    rendered = tpl.replace("{action}", json.dumps(action, ensure_ascii=False)[1:-1])
+    text = json.loads(rendered)["content"]["text"]
+    assert "■ 조치:\n1. 하나\n2. 둘\n3. 셋\n\n▶ 런북" in text
+
+
+def test_every_alert_action_is_one_numbered_line_per_item_after_rendering(o2):
+    assert _apply(o2).returncode == 0
+    defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    source = {a["name"]: a["action"] for a in defaults["o2c_alerts"]}
+    assert len(o2.store["alert"]) >= 36
+    for name, alert in o2.store["alert"].items():
+        action = alert["context_attributes"]["action"]
+        lines = action.split("\n")
+        assert lines[0] == "" and len(lines) >= 2, name
+        assert [ln.split(". ", 1)[0] for ln in lines[1:]] == [str(i) for i in range(1, len(lines))], name
+        assert not re.search("[①-⑳]", action) and all(ln.split(". ", 1)[1].strip() for ln in lines[1:]), name
+        if name in source:
+            assert len(lines) - 1 == max(1, len(re.findall("[①-⑳]", source[name]))), name
+
+
+def test_second_run_after_the_action_conversion_changes_nothing(o2):
+    """계획의 비교는 변환된 값 기준이다 — 반영 직후 두 번째 실행은 변경 0건이다."""
+    assert _apply(o2).returncode == 0
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0 and o2.writes == []
