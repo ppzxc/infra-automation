@@ -18,7 +18,20 @@
   | `user_effective_name`, `process_command_line` | sudo 대상 사용자(`USER=`)와 실행 명령(`COMMAND=`) — sudo 성공은 알림 없이 이 필드로 감사 기록만 남김 |
 
   입력 필드는 엣지(#91)가 만든 `process_executable_name`(= `sshd`/`sudo`)와 원문 `body`입니다. 엣지와 필드 계약이 바뀌면 같은 PR(또는 연속 PR)에서 함께 고칩니다.
-- **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수(`after_flatten: true`) → `security_logs`.
+- **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수 `security_semantics` → 함수 `fortigate_semantics`(둘 다 `after_flatten: true`) → `security_logs`.
+- **VRL ingest function `fortigate_semantics`** (`roles/openobserve_config/files/vrl/fortigate_semantics.vrl`, Spec #282 / Ticket-2): `security_logs`에서 `service_name = fortigate-syslog`인 레코드(포티게이트 방화벽 syslog, [런북](runbooks/fortigate-syslog.md))만 해석해 필드를 **추가**합니다. 원문 `body`와 기존 필드(`host_name`은 수집 서버, `severity`는 항상 0)는 바꾸지 않고, `type=` 키가 없는 줄과 다른 서비스(서버·스위치 포함) 레코드는 그대로 통과합니다. 소스 스트림당 파이프라인은 하나라 별도 파이프라인 없이 보안 로그 파이프라인에서 `security_semantics` 다음 함수로 잇습니다(서비스 검사는 각 함수 안에 있어 서로의 레코드를 건드리지 않습니다). 필드 이름은 OTel 관례를 따르고 OpenObserve가 점을 밑줄로 저장합니다.
+
+  | 필드 | 원문 키 | 의미 |
+  |---|---|---|
+  | `device_name` | `devname` | 소문자로 정규화하고 도메인을 뗀 장비 이름(`NS0399` → `ns0399`). HA 멤버는 이름으로 구분한다 |
+  | `device_id` | `devname` | 관리번호(Inventory Hostname): `device_name` 앞부분의 `ns` + 숫자(`ns0380`·`ns0381`·`ns0399`). 패턴이 없으면 필드가 없다 |
+  | `fortigate_log_type`, `fortigate_log_subtype` | `type`, `subtype` | 로그 유형·하위 유형(`event`/`system`·`vpn`·`ha`, `utm`/`ips`, `traffic`/`forward`). OTel에 대응 이름이 없어 벤더 접두어를 쓴다 |
+  | `event_action` | `action` | 소문자로 정규화한 동작(`login`, `edit`, `tunnel-up`, `dropped`, `deny`). 키가 없는 줄(HA 이벤트 등)에는 없다 |
+  | `source_address` | `srcip` → `remip` → `ui` | 출발지. `srcip`가 없으면 VPN의 `remip`, 그것도 없으면 관리자 접속·설정 변경의 `ui="https(주소)"` 괄호 안 주소 |
+  | `user_name` | `user` | 사용자. 비었거나 `N/A`이면 필드가 없다 |
+  | `fortigate_policy_id` | `policyid` | 정책 식별자(정수, 0은 암묵적 거부 정책) |
+
+  입력은 FortiOS 7.2/7.4 기본 `key=value` 형식(`[<PRI>][syslog 헤더] date=… devname="…" type="…" …`)이며 값은 맨몸이거나 큰따옴표로 감싼다(따옴표 안의 공백과 `key=` 꼴 텍스트는 한 값으로 읽는다). 장비 시각은 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)를 바꾸지 않는다. **지금 규칙과 테스트 입력은 공식 Log Message Reference로 합성한 것이다. 실장비 로그 샘플이 아직 없으므로(장비 syslog 미설정) 사무실 장비(`ns0399`)의 실제 샘플로 키 이름과 값 모양을 재검증해야 한다.**
 - **VRL ingest function `switch_syslog_semantics`** (`roles/openobserve_config/files/vrl/switch_syslog_semantics.vrl`, Spec #277): `system_logs`에서 `service_name = switch-syslog`인 레코드(스위치 syslog, #276)만 해석해 장비와 Cisco 메시지 필드를 **추가**합니다. 원문 `body`와 기존 필드(`host_name`은 수집 서버, `severity`는 항상 0)는 바꾸지 않고, `%FACILITY-SEVERITY-MNEMONIC:` 형식이 아닌 줄과 다른 서비스(서버 로그)는 그대로 통과합니다. 이 서비스 검사는 파이프라인 조건 노드가 아니라 함수 안에 있습니다(조건 노드에서 걸러진 레코드가 출력 노드에 닿지 않아 서버 로그가 사라지는 위험을 피하고, VRL 테스트로 검증하기 위해서).
 
   | 필드 | 의미 |
@@ -119,7 +132,7 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-000` | `Log in to OpenBao with AppRole for the OpenObserve configuration KV` | `ansible.builtin.uri` | Controller | 읽기 전용 (토큰 발급만, `changed_when: false`, `check_mode: false`, `no_log`. `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 없으면 건너뛰고 `VAULT_TOKEN`을 쓴다) |
 | `O2C-001` | `Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `check_mode: false`, `no_log`) |
 | `O2C-002` | `Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)` | `ansible.builtin.assert` | Controller | 읽기 전용 (필수 입력이 없으면 요청 전에 실패, `no_log`. 스위치 syslog 알림 목록(메시지 코드·수신 중단 장비·업링크 포트)은 SQL에 들어가므로 형식도 여기서 검증) |
-| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 템플릿·대상·함수 2개(`security_semantics`, `switch_syslog_semantics`)·파이프라인 2개·알림. `enabled`가 거짓인 알림(업링크 목록이 빈 규칙)은 `o2c_alerts_active`에서 빠진다) |
+| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 템플릿·대상·함수 3개(`security_semantics`, `fortigate_semantics`, `switch_syslog_semantics`)·파이프라인 2개(보안 로그 파이프라인은 함수 둘을 잇는다)·알림. `enabled`가 거짓인 알림(업링크 목록이 빈 규칙)은 `o2c_alerts_active`에서 빠진다) |
 | `O2C-004` | `Read the otel_app_telemetry switch of every collect-roster host from OpenBao (hosts/<host>/agents)` | `o2c_http` | Controller | 읽기 전용 (수집 로스터 호스트마다 병렬 GET, 200·404만 허용하고 그 밖은 실패, `changed_when: false`, `check_mode: false`, `no_log`. 테스트 픽스처 `o2c_app_telemetry_kv_fixture`가 있거나 토큰이 없으면 건너뛰되, 읽을 호스트가 있는데 토큰이 없으면 이 태스크 앞의 assert가 실행을 실패시켜 로스터가 조용히 비지 않게 한다) |
 | `O2C-005` | `Keep the hosts with the otel_app_telemetry switch on (the roster of the app telemetry silent alert)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_app_telemetry_roster`: `otel_app_telemetry`가 boolean `true`인 호스트 이름만 남김, KV 본문은 팩트로 두지 않음, `no_log`) |
 | `O2C-010` | `Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |

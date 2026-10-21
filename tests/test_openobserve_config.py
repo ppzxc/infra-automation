@@ -237,10 +237,11 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert res.returncode == 0, res.stdout + res.stderr
     assert all(m == "POST" for m, _, _ in o2.writes)
     paths = [p for _, p, _ in o2.writes]
-    assert paths[:6] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
-                         "/api/default/functions", "/api/default/pipelines", "/api/default/pipelines"]   # 보안 로그와 스위치 syslog 의미 해석 각 1개
+    assert paths[:7] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
+                         "/api/default/functions", "/api/default/functions", "/api/default/pipelines",
+                         "/api/default/pipelines"]   # 함수 3개(보안·스위치·방화벽), 파이프라인 2개(보안 로그는 함수 둘을 잇는다)
     assert set(o2.store["alert"]) == EXPECTED_ALERTS | {SELFTEST}
-    assert paths[6:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
+    assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
 
 
 def test_template_body_is_a_naver_works_text_message(o2):
@@ -1357,7 +1358,7 @@ def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_
 
 def test_switch_function_and_pipeline_are_added_beside_the_security_ones_and_the_security_pipeline_is_untouched(o2):
     assert _apply(o2).returncode == 0
-    assert set(o2.store["function"]) == {"security_semantics", SWITCH_FN}
+    assert set(o2.store["function"]) == {"security_semantics", SWITCH_FN, FORTIGATE_FN}
     fn = o2.store["function"][SWITCH_FN]
     assert fn["function"] == (ROLE / "files" / "vrl" / "switch_syslog_semantics.vrl").read_text().strip() and fn["params"] == "row"
     pl = o2.store["pipeline"][SWITCH_FN]
@@ -1367,6 +1368,48 @@ def test_switch_function_and_pipeline_are_added_beside_the_security_ones_and_the
     # 서버 로그를 거르는 일은 함수 안의 service_name 검사가 한다(조건 노드는 쓰지 않는다)
     assert not [n for n in pl["nodes"] if n["data"]["node_type"] == "condition"]
     assert o2.store["pipeline"]["security_semantics"]["source"]["stream_name"] == "security_logs"
+
+
+FORTIGATE_FN = "fortigate_semantics"
+
+
+def test_firewall_function_runs_in_the_security_pipeline_right_after_the_security_function(o2):
+    """Spec #282 / Ticket-2: one pipeline per source stream, so the firewall function is chained, not a second pipeline on security_logs."""
+    assert _apply(o2).returncode == 0
+    fn = o2.store["function"][FORTIGATE_FN]
+    assert fn["function"] == (ROLE / "files" / "vrl" / "fortigate_semantics.vrl").read_text().strip() and fn["params"] == "row"
+    assert set(o2.store["pipeline"]) == {"security_semantics", SWITCH_FN}
+    pl = o2.store["pipeline"]["security_semantics"]
+    assert pl["source"]["stream_name"] == "security_logs" and pl["enabled"] is True
+    functions = [n for n in pl["nodes"] if n["data"]["node_type"] == "function"]
+    assert [(n["data"]["name"], n["data"]["after_flatten"]) for n in functions] == [("security_semantics", True), (FORTIGATE_FN, True)]
+    # input -> security_semantics -> fortigate_semantics -> output, and no condition node (the service check lives in the function)
+    edges = {(e["source"], e["target"]) for e in pl["edges"]}
+    ids = {n["data"].get("name") or n["io_type"]: n["id"] for n in pl["nodes"]}
+    assert edges == {(next(n["id"] for n in pl["nodes"] if n["io_type"] == "input"), ids["security_semantics"]),
+                     (ids["security_semantics"], ids[FORTIGATE_FN]),
+                     (ids[FORTIGATE_FN], next(n["id"] for n in pl["nodes"] if n["io_type"] == "output"))}
+    assert not [n for n in pl["nodes"] if n["data"]["node_type"] == "condition"]
+
+
+def test_a_security_pipeline_deployed_before_the_firewall_function_is_extended_by_a_single_update(o2):
+    assert _apply(o2).returncode == 0
+    pl = o2.store["pipeline"]["security_semantics"]
+    pl["nodes"] = [n for n in pl["nodes"] if n["data"].get("name") != FORTIGATE_FN]   # the old one-function shape
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    ((method, path, body),) = o2.writes
+    assert (method, path) == ("PUT", f"/api/default/pipelines/{pl['pipeline_id']}")
+    assert [n["data"]["name"] for n in body["nodes"] if n["data"]["node_type"] == "function"] == ["security_semantics", FORTIGATE_FN]
+
+
+def test_firewall_function_drift_is_repaired_by_a_single_update(o2):
+    assert _apply(o2).returncode == 0
+    o2.store["function"][FORTIGATE_FN]["function"] = "# stale\n."
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    ((method, path, _),) = o2.writes
+    assert (method, path) == ("PUT", f"/api/default/functions/{FORTIGATE_FN}")
 
 
 def test_switch_function_drift_is_repaired_by_a_single_update(o2):

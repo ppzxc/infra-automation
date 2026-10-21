@@ -31,6 +31,9 @@ o2c_stream: security_logs
 o2c_switch_function_name: switch_syslog_semantics
 o2c_switch_pipeline_name: switch_syslog_semantics
 o2c_switch_stream: system_logs
+# 방화벽(포티게이트) 로그 필드 추출(Spec #282 / Ticket-2): security_logs의 service_name=fortigate-syslog 레코드에만 필드를 더한다.
+# 소스 스트림당 파이프라인이 하나라 별도 파이프라인 없이 보안 로그 파이프라인(o2c_pipeline_name)에서 security_semantics 다음 함수로 잇는다.
+o2c_fortigate_function_name: fortigate_semantics
 o2c_template_name: infra-automation-webhook
 o2c_destination_name: infra-automation-webhook
 o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"

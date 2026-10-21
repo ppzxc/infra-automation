@@ -1,0 +1,93 @@
+# OpenObserve VRL ingest function: fortigate_semantics (ADR-0008, Spec #282 / Ticket-2)
+#
+# Runs on the security_logs stream (real-time pipeline, after flatten, right after security_semantics) but only touches records
+# whose service_name is `fortigate-syslog` (FortiGate firewall syslog received by the collection server, #283). Every other record,
+# and every firewall line without a `type=` key, is returned unchanged. The original `body` and every existing field (including
+# `host_name`, which is the collection server, and `severity`, which is always 0) are never modified; fields are only ADDED.
+# OpenObserve stores the dots of an OTel attribute name as underscores:
+#
+#   device_name              devname lower-cased, domain part removed (NS0399.corp -> ns0399)
+#   device_id                management number (Inventory Hostname): the leading `ns` + digits of device_name; absent when the name has none
+#   fortigate_log_type       type    (traffic | event | utm ...)
+#   fortigate_log_subtype    subtype (system | vpn | ha | ips | forward ...)
+#   event_action             action, lower-cased (login, edit, tunnel-up, dropped, deny); absent when the line has none (e.g. HA events)
+#   source_address           srcip; else remip (VPN events); else the address inside ui="https(192.0.2.10)" (admin login, config change)
+#   user_name                user; absent when empty or N/A
+#   fortigate_policy_id      policyid as an integer (0 is the implicit deny policy)
+#
+# Expected line (FortiOS 7.2/7.4 default key=value format): `[<PRI>][syslog header] date=... time=... devname="..." type="..." ...`.
+# Values are bare or double-quoted (quoted values may hold spaces and text that looks like keys; they are consumed as one value).
+# The device clock depends on the device's zone, so `_timestamp` (receive time) stays the time of record.
+# NOTE: written from the Log Message Reference, not from real device samples (none exist yet) - re-verify against real lines.
+# Keep this file free of secrets and of anything the collector already provides.
+
+service = string(.service_name) ?? ""
+line = string(.body) ?? ""
+
+if service == "fortigate-syslog" {
+    pairs, err = parse_regex_all(line, r'(?:^|\s)(?P<key>[A-Za-z_][A-Za-z0-9_]*)=(?:"(?P<quoted>[^"]*)"|(?P<bare>\S*))')
+    if err == null {
+        kv = {}
+        for_each(array!(pairs)) -> |_index, pair| {
+            key = string(pair.key) ?? ""
+            value = string(pair.quoted) ?? string(pair.bare) ?? ""
+            # a key repeated later in the line (inside a free-text value is already consumed above) keeps the first value
+            existing = get(kv, [key]) ?? null
+            if existing == null {
+                kv = set!(kv, [key], value)
+            }
+        }
+
+        log_type = string(kv.type) ?? ""
+        if log_type != "" {
+            .fortigate_log_type = log_type
+            subtype = string(kv.subtype) ?? ""
+            if subtype != "" {
+                .fortigate_log_subtype = subtype
+            }
+
+            devname = downcase(string(kv.devname) ?? "")
+            if devname != "" {
+                short = split(devname, ".", limit: 2)
+                devname = string(short[0]) ?? devname
+                .device_name = devname
+                management, merr = parse_regex(devname, r'^(?P<id>ns\d+)')
+                if merr == null {
+                    .device_id = management.id
+                }
+            }
+
+            action = downcase(string(kv.action) ?? "")
+            if action != "" {
+                .event_action = action
+            }
+
+            address = string(kv.srcip) ?? ""
+            if address == "" {
+                address = string(kv.remip) ?? ""
+            }
+            if address == "" {
+                ui, uerr = parse_regex(string(kv.ui) ?? "", r'\((?P<ip>[0-9A-Fa-f.:]+)\)')
+                if uerr == null {
+                    address = string(ui.ip) ?? ""
+                }
+            }
+            if address != "" {
+                .source_address = address
+            }
+
+            user = string(kv.user) ?? ""
+            if user != "" && downcase(user) != "n/a" {
+                .user_name = user
+            }
+
+            policy_text = string(kv.policyid) ?? ""
+            policy = to_int(policy_text) ?? null
+            if policy != null {
+                .fortigate_policy_id = policy
+            }
+        }
+    }
+}
+
+.

@@ -48,9 +48,17 @@ def o2c_desired(spec):
                   'description': 'ADR-0008: sshd/sudo semantics (managed by infra-automation)'}]
     if spec.get('switch_syslog'):
         semantics.append(dict(spec['switch_syslog'], description='ADR-0008: switch syslog semantics (managed by infra-automation)'))
+    # 방화벽 로그(Spec #282)도 security_logs에 들어오지만 소스 스트림당 파이프라인은 하나라, 보안 로그 파이프라인에서 함수를 이어 붙인다
+    # (security_semantics → fortigate_semantics). 서비스 검사는 각 함수 안에 있어 서로의 레코드를 건드리지 않는다.
+    chained = []
+    if spec.get('fortigate'):
+        chained.append(spec['fortigate'])
+        semantics[0]['then'] = [spec['fortigate']['function_name']]
     out += [{'kind': 'function', 'name': sem['function_name'],
-             'body': {'name': sem['function_name'], 'function': sem['vrl'].strip(), 'params': 'row', 'transType': 0}} for sem in semantics]
-    out += [_pipeline(org, sem['stream'], sem['pipeline_name'], sem['function_name'], sem['description']) for sem in semantics]
+             'body': {'name': sem['function_name'], 'function': sem['vrl'].strip(), 'params': 'row', 'transType': 0}}
+            for sem in semantics[:1] + chained + semantics[1:]]
+    out += [_pipeline(org, sem['stream'], sem['pipeline_name'], [sem['function_name']] + sem.get('then', []), sem['description'])
+            for sem in semantics]
     for alert in list(spec['alerts']) + ([spec['selftest_alert']] if spec.get('selftest_alert') else []):
         out.append({'kind': 'alert', 'name': alert['name'], 'body': {
             'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
@@ -76,25 +84,23 @@ def o2c_desired(spec):
     return out
 
 
-def _pipeline(org, stream, name, function_name, description):
+def _pipeline(org, stream, name, function_names, description):
     source = {'source_type': 'realtime', 'org_id': org, 'stream_name': stream, 'stream_type': 'logs'}
     node = lambda nid, data, io, x: {'id': nid, 'data': data, 'io_type': io, 'position': {'x': x, 'y': 100}}  # noqa: E731
     stream_node = {'node_type': 'stream', 'org_id': org, 'stream_name': stream, 'stream_type': 'logs'}
+    fn_nodes = [node('function' if i == 0 else 'function-%d' % (i + 1),
+                     {'node_type': 'function', 'name': fn, 'after_flatten': True, 'num_args': 0}, 'default', 300 + 250 * i)
+                for i, fn in enumerate(function_names)]
+    chain = ['input'] + [n['id'] for n in fn_nodes] + ['output']
     body = {
         'name': name, 'description': description, 'enabled': True,
         'source': source,
-        'nodes': [
-            node('input', dict(stream_node), 'input', 50),
-            node('function', {'node_type': 'function', 'name': function_name, 'after_flatten': True, 'num_args': 0},
-                 'default', 300),
-            node('output', dict(stream_node), 'output', 550),
-        ],
-        'edges': [{'id': 'input-function', 'source': 'input', 'target': 'function'},
-                  {'id': 'function-output', 'source': 'function', 'target': 'output'}],
+        'nodes': [node('input', dict(stream_node), 'input', 50)] + fn_nodes + [node('output', dict(stream_node), 'output', 300 + 250 * len(fn_nodes))],
+        'edges': [{'id': '%s-%s' % (a, b), 'source': a, 'target': b} for a, b in zip(chain, chain[1:])],
     }
-    # the server rewrites ids/positions; what makes the pipeline "the same" is its source, its state and the function it runs
+    # the server rewrites ids/positions; what makes the pipeline "the same" is its source, its state and the functions it runs, in order
     match = {'name': name, 'enabled': True, 'source': {'stream_name': stream, 'source_type': 'realtime'},
-             'function': {'name': function_name, 'after_flatten': True}}
+             'functions': [{'name': fn, 'after_flatten': True} for fn in function_names]}
     return {'kind': 'pipeline', 'name': name, 'body': body, 'match': match}
 
 
@@ -105,9 +111,9 @@ def _items(payload):
 
 
 def _project_pipeline(item):
-    fn = next((n.get('data', {}) for n in item.get('nodes', []) if n.get('data', {}).get('node_type') == 'function'), {})
+    fns = [n.get('data', {}) for n in item.get('nodes', []) if n.get('data', {}).get('node_type') == 'function']
     return {'name': item.get('name'), 'enabled': item.get('enabled'), 'source': item.get('source', {}),
-            'function': {'name': fn.get('name'), 'after_flatten': fn.get('after_flatten')}}
+            'functions': [{'name': fn.get('name'), 'after_flatten': fn.get('after_flatten')} for fn in fns]}
 
 
 def _subset(want, have):
