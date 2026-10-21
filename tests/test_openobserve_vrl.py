@@ -367,3 +367,27 @@ def test_firewall_lines_that_cannot_be_interpreted_pass_through_unchanged(tmp_pa
 ])
 def test_server_switch_and_other_service_records_are_not_affected_by_the_firewall_function(tmp_path, rec):
     assert _apply_fgt(tmp_path, copy.deepcopy(rec)) == rec
+
+
+# 장비 이름 별칭(Spec #282): 원래 이름을 그대로 쓰는 장비는 별칭표로 관리번호를 얻는다. 이름은 가짜다.
+def _apply_fgt_with_aliases(tmp_path, record, aliases):
+    import sys
+    sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
+    from openobserve_config import o2c_fortigate_vrl
+    program = tmp_path / "fortigate_aliased.vrl"
+    program.write_text(o2c_fortigate_vrl(FORTIGATE_VRL_FILE.read_text(), aliases))
+    return _apply(tmp_path, record, program=program)
+
+
+@pytest.mark.parametrize("dev", ["Example_Branch_FW", "EXAMPLE_BRANCH_FW", "example_branch_fw.corp.example"])
+def test_aliased_device_name_gets_the_management_number_and_keeps_the_normalized_name(tmp_path, dev):
+    out = _apply_fgt_with_aliases(tmp_path, _fgt('type="event" subtype="ha" msg="x"', dev=dev), {"example_branch_fw": "ns0000"})
+    assert out["device_id"] == "ns0000" and out["device_name"] == "example_branch_fw"
+
+
+def test_names_missing_from_the_alias_table_still_use_the_ns_number_and_an_empty_table_changes_nothing(tmp_path):
+    aliases = {"example_branch_fw": "ns0000"}
+    out = _apply_fgt_with_aliases(tmp_path, _fgt('type="event" subtype="ha" msg="x"', dev="NS0380"), aliases)
+    assert out["device_id"] == "ns0380"
+    out = _apply_fgt_with_aliases(tmp_path, _fgt('type="event" subtype="ha" msg="x"', dev="Example_Branch_FW"), {})
+    assert out["device_name"] == "example_branch_fw" and "device_id" not in out

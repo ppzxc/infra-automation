@@ -61,7 +61,7 @@
 2. 비공개 체크리스트에 장비 항목을 더하고 로그 전송과 정책별 로그 설정을 적용한다.
 3. syslog-ng 수신 허용 목록에 출발지(HA 쌍은 공통 출발지 1개)를 더하고 `syslog-ng-ctl reload`로 설정만 다시 읽힌다.
 4. 3절의 점검 절차로 파일 생성과 `security_logs` 도착을 확인한다.
-5. 로그가 `security_logs`에 도착하는 것을 확인한 뒤 수신 중단 감시 목록(`o2c_fortigate_syslog_roster`, HA 쌍은 `ns0380+ns0381`)에 더한다([알림 런북](alerts.md)). 설정 백업 대상 등 다른 티켓의 목록도 더한다.
+5. 로그가 `security_logs`에 도착하는 것을 확인한 뒤 수신 중단 감시 목록(`o2c_fortigate_syslog_roster`, HA 쌍은 `ns0380+ns0381`, hostname을 관리번호로 못 바꾼 장비는 원래 이름 그대로도 가능, 관리번호 매핑은 `o2c_fortigate_device_aliases`)에 더한다([알림 런북](alerts.md)). 설정 백업 대상 등 다른 티켓의 목록도 더한다.
 6. 비공개 체크리스트에 완료 일자를 적는다.
 
 ## 5. 알려진 한계

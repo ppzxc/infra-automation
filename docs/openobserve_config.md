@@ -24,14 +24,14 @@
   | 필드 | 원문 키 | 의미 |
   |---|---|---|
   | `device_name` | `devname` | 소문자로 정규화하고 도메인을 뗀 장비 이름(`NS0399` → `ns0399`). HA 멤버는 이름으로 구분한다 |
-  | `device_id` | `devname` | 관리번호(Inventory Hostname): `device_name` 앞부분의 `ns` + 숫자(`ns0380`·`ns0381`·`ns0399`). 패턴이 없으면 필드가 없다 |
+  | `device_id` | `devname` | 관리번호(Inventory Hostname). `device_name`이 별칭표 `o2c_fortigate_device_aliases`에 있으면 그 관리번호, 없으면 `device_name` 앞부분의 `ns` + 숫자(`ns0380`·`ns0381`). 둘 다 아니면 필드가 없다 |
   | `fortigate_log_type`, `fortigate_log_subtype` | `type`, `subtype` | 로그 유형·하위 유형(`event`/`system`·`vpn`·`ha`, `utm`/`ips`, `traffic`/`forward`). OTel에 대응 이름이 없어 벤더 접두어를 쓴다 |
   | `event_action` | `action` | 소문자로 정규화한 동작(`login`, `edit`, `tunnel-up`, `dropped`, `deny`). 키가 없는 줄(HA 이벤트 등)에는 없다 |
   | `source_address` | `srcip` → `remip` → `ui` | 출발지. `srcip`가 없으면 VPN의 `remip`, 그것도 없으면 관리자 접속·설정 변경의 `ui="https(주소)"` 괄호 안 주소 |
   | `user_name` | `user` | 사용자. 비었거나 `N/A`이면 필드가 없다 |
   | `fortigate_policy_id` | `policyid` | 정책 식별자(정수, 0은 암묵적 거부 정책) |
 
-  입력은 FortiOS 기본 `key=value` 형식(`[<PRI>][syslog 헤더] date=… devname="…" type="…" …`)이며 값은 맨몸이거나 큰따옴표로 감싼다(따옴표 안의 공백과 `key=` 꼴 텍스트는 한 값으로 읽는다). 장비 시각은 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)를 바꾸지 않는다. **지금 규칙과 테스트 입력은 공식 Log Message Reference로 합성한 것이다. 실장비 로그 샘플이 아직 없으므로(장비 syslog 미설정) 사무실 장비(`ns0399`)의 실제 샘플로 키 이름과 값 모양을 재검증해야 한다.**
+  입력은 FortiOS 기본 `key=value` 형식(`[<PRI>][syslog 헤더] date=… devname="…" type="…" …`)이며 값은 맨몸이거나 큰따옴표로 감싼다(따옴표 안의 공백과 `key=` 꼴 텍스트는 한 값으로 읽는다). 장비 시각은 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)를 바꾸지 않는다. **장비 이름 별칭(`o2c_fortigate_device_aliases`)**: 계정 권한 문제로 hostname을 관리번호로 바꾸지 못한 장비는 기존 이름을 그대로 `devname`에 싣는다. 이런 장비의 `device_id`를 채우려고 `{소문자 정규화한 devname: 관리번호}` 별칭표(기본 `{}`)를 둔다(예: `{example_branch_fw: ns0000}`). 키는 `device_name`과 같은 값(소문자, 도메인 제외)이고 값은 `ns` + 숫자여야 하며, `O2C-002`가 요청 전에 형식을 검증한다. 표는 `o2c_desired`가 함수 소스의 `device_aliases = {}` 줄에 JSON 객체로 써 넣으므로 값이 바뀌면 다음 `OpenObserve — Config` 실행에서 함수가 갱신된다. `device_name`은 별칭과 상관없이 정규화한 `devname` 그대로다. 공개 저장소라 실제 이름과 별칭 값은 저장소에 쓰지 않고 Semaphore Environment(Extra variables)로 주입한다. **지금 규칙과 테스트 입력은 공식 Log Message Reference로 합성한 것이다. 실장비 로그 샘플이 아직 없으므로(장비 syslog 미설정) 사무실 장비(`ns0399`)의 실제 샘플로 키 이름과 값 모양을 재검증해야 한다.**
 - **VRL ingest function `switch_syslog_semantics`** (`roles/openobserve_config/files/vrl/switch_syslog_semantics.vrl`, Spec #277): `system_logs`에서 `service_name = switch-syslog`인 레코드(스위치 syslog, #276)만 해석해 장비와 Cisco 메시지 필드를 **추가**합니다. 원문 `body`와 기존 필드(`host_name`은 수집 서버, `severity`는 항상 0)는 바꾸지 않고, `%FACILITY-SEVERITY-MNEMONIC:` 형식이 아닌 줄과 다른 서비스(서버 로그)는 그대로 통과합니다. 이 서비스 검사는 파이프라인 조건 노드가 아니라 함수 안에 있습니다(조건 노드에서 걸러진 레코드가 출력 노드에 닿지 않아 서버 로그가 사라지는 위험을 피하고, VRL 테스트로 검증하기 위해서).
 
   | 필드 | 의미 |
@@ -78,7 +78,7 @@
     - **검증 단계**: 업링크 규칙은 검증 때 케이스의 가짜 장비를 `watch_port`로 목록에 더해 SQL을 다시 만들고, 수신 중단은 가짜 장비를 로스터에 더한다(`off_roster: true` 케이스는 더하지 않아 "목록 밖 장비는 알리지 않음"을 확인). 장비별 집계의 분리는 "장비마다 임계 미만"인 케이스들이 모두 발화하지 않는 것으로 확인한다. 로컬 테스트는 검증 검색 SQL을 합성 레코드 위에서 실제로 실행해 발화 장비가 픽스처의 `fires`와 일치하는지 본다.
     - **첫 반영 때 바로 울릴 수 있는 알림**: MAC 플랩(한 장비에서 3시간에 25건, 10분 평균 1.4건이라 기본 2회는 현재 상태에서도 울린다). 수신 중단은 기본 목록 장비가 24시간 넘게 조용하면 첫 평가에서 울린다. 새 필드(`device_id` 등)는 파이프라인이 반영된 뒤 처음 들어온 줄부터 붙으므로, 반영 직후 한 번은 알림 평가가 `unknown field`로 오류일 수 있고 다음 줄이 들어오면 정상이 된다(`O2C-036`이 실패하면 잠시 뒤 Config를 다시 실행한다).
 
-  - **방화벽(포티게이트) 로그 알림 6개 정의 (Spec #282 / Ticket-3, `security_logs`의 `service_name = 'fortigate-syslog'`)**: 서버·스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)이다. 임계값·목록·승인 시간·재통지 간격은 모두 역할 기본 변수(`o2c_fortigate_*`)이고 값이 SQL에 들어가므로 형식을 `O2C-002`에서 요청 전에 검증한다(장비 이름, `key=value` 문자, 승인 시간 0~24 정수·시작 < 끝). **입력 로그는 합성이며 실장비 샘플(비공개 경로)로 키 이름·값 모양을 다시 검증해야 한다.** 장비 쪽 로그 전송이 아직 설정되지 않았으므로 확정 전에는 알림이 울릴 일이 없다.
+  - **방화벽(포티게이트) 로그 알림 6개 정의 (Spec #282 / Ticket-3, `security_logs`의 `service_name = 'fortigate-syslog'`)**: 서버·스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)이다. 임계값·목록·승인 시간·재통지 간격은 모두 역할 기본 변수(`o2c_fortigate_*`)이고 값이 SQL에 들어가므로 형식을 `O2C-002`에서 요청 전에 검증한다(장비 이름·별칭표, `key=value` 문자, 승인 시간 0~24 정수·시작 < 끝). **입력 로그는 합성이며 실장비 샘플(비공개 경로)로 키 이름·값 모양을 다시 검증해야 한다.** 장비 쪽 로그 전송이 아직 설정되지 않았으므로 확정 전에는 알림이 울릴 일이 없다.
 
     | 이름 | 등급 | 조건 (기본값) |
     |---|---|---|
@@ -87,7 +87,7 @@
     | `infra-fortigate-change-approved` | P3, 요약 | 같은 변경이 승인 시간 안 — 하루 1번(period·silence 1440) |
     | `infra-fortigate-ha-failover` | P2, Event | `subtype=ha` 1건부터, 재통지 30분(전환 반복 방지) |
     | `infra-fortigate-critical-detection` | P1, Event | `type=utm` 중 `severity`가 `o2c_fortigate_detection_severities`(기본 `critical`), 재통지 60분 |
-    | `infra-fortigate-syslog-silent` | P2, State | `o2c_fortigate_syslog_roster`(명시 목록)의 장비별 `fortigate-syslog`가 `o2c_fortigate_silent_minutes`(기본 120분, 스위치 24시간보다 짧음) 없음, 재통지 1440분 |
+    | `infra-fortigate-syslog-silent` | P2, State | `o2c_fortigate_syslog_roster`(명시 목록, 관리번호 또는 `devname` 그대로의 이름, 대소문자 무관)의 장비별 `fortigate-syslog`가 `o2c_fortigate_silent_minutes`(기본 120분, 스위치 24시간보다 짧음) 없음, 재통지 1440분 |
 
     - **SQL은 방화벽 컬럼을 참조하지 않는다**: `security_logs`에는 첫 방화벽 줄이 들어오기 전까지 `device_id` 같은 컬럼이 없어, 참조하면 알림 평가가 매번 오류가 나고 `O2C-036`이 Config 실행을 막는다(장비는 아직 전송 전). 그래서 `service_name`과 원문 `body`의 `key=value`(`o2c_fortigate_match`: 따옴표 있는 값·없는 값 모두), 장비 이름은 `devname`에서 읽는다. 로그인 실패 행의 출발지만 기존 `source_address` 컬럼(sshd 알림이 이미 쓴다)을 쓴다. #285 필드 추출과 독립이다.
     - **승인 시간 안/밖**: 변경 로그 원문의 `time=HH:MM:SS`(장비 시계)에서 시를 읽는다(`CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(... AS INT) ELSE -1 END`). 시작 포함·끝 미포함이며 시각이 없는 줄은 -1이라 승인 시간 밖이다. 같은 줄이 두 알림에 동시에 걸리지 않는다. 요일은 구분하지 않으며 장비 시간대가 운영 시간대(KST)여야 한다. 수신 시각(`_timestamp`)이 아니라 장비 시각을 쓰는 이유는 승인 시간이 장비에서 작업한 시각의 문제이고, 검증 레코드가 실행 시각과 무관하게 결정적이기 때문이다.
@@ -147,8 +147,8 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 |---|---|---|---|---|
 | `O2C-000` | `Log in to OpenBao with AppRole for the OpenObserve configuration KV` | `ansible.builtin.uri` | Controller | 읽기 전용 (토큰 발급만, `changed_when: false`, `check_mode: false`, `no_log`. `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 없으면 건너뛰고 `VAULT_TOKEN`을 쓴다) |
 | `O2C-001` | `Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `check_mode: false`, `no_log`) |
-| `O2C-002` | `Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)` | `ansible.builtin.assert` | Controller | 읽기 전용 (필수 입력이 없으면 요청 전에 실패, `no_log`. 스위치 syslog 알림 목록(메시지 코드·수신 중단 장비·업링크 포트)은 SQL에 들어가므로 형식도 여기서 검증) |
-| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 템플릿·대상·함수 3개(`security_semantics`, `fortigate_semantics`, `switch_syslog_semantics`)·파이프라인 2개(보안 로그 파이프라인은 함수 둘을 잇는다)·알림. `enabled`가 거짓인 알림(업링크 목록이 빈 규칙)은 `o2c_alerts_active`에서 빠진다) |
+| `O2C-002` | `Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)` | `ansible.builtin.assert` | Controller | 읽기 전용 (필수 입력이 없으면 요청 전에 실패, `no_log`. 스위치 syslog 알림 목록(메시지 코드·수신 중단 장비·업링크 포트)과 방화벽 목록·장비 이름 별칭표(`o2c_fortigate_device_aliases`)는 SQL·VRL에 들어가므로 형식도 여기서 검증) |
+| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 템플릿·대상·함수 3개(`security_semantics`, `fortigate_semantics`(별칭표를 소스에 주입), `switch_syslog_semantics`)·파이프라인 2개(보안 로그 파이프라인은 함수 둘을 잇는다)·알림. `enabled`가 거짓인 알림(업링크 목록이 빈 규칙)은 `o2c_alerts_active`에서 빠진다) |
 | `O2C-004` | `Read the otel_app_telemetry switch of every collect-roster host from OpenBao (hosts/<host>/agents)` | `o2c_http` | Controller | 읽기 전용 (수집 로스터 호스트마다 병렬 GET, 200·404만 허용하고 그 밖은 실패, `changed_when: false`, `check_mode: false`, `no_log`. 테스트 픽스처 `o2c_app_telemetry_kv_fixture`가 있거나 토큰이 없으면 건너뛰되, 읽을 호스트가 있는데 토큰이 없으면 이 태스크 앞의 assert가 실행을 실패시켜 로스터가 조용히 비지 않게 한다) |
 | `O2C-005` | `Keep the hosts with the otel_app_telemetry switch on (the roster of the app telemetry silent alert)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_app_telemetry_roster`: `otel_app_telemetry`가 boolean `true`인 호스트 이름만 남김, KV 본문은 팩트로 두지 않음, `no_log`) |
 | `O2C-010` | `Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
