@@ -261,7 +261,7 @@ def test_fortigate_records_on_security_logs_pass_the_security_function_unchanged
 # key=value 형식(date, time, devname, devid, type, subtype, action, srcip, user, policyid, ui, remip)을 근거로 만들었다.
 # 키 이름·값 모양은 실장비 샘플로 재검증해야 한다(런북 docs/runbooks/fortigate-syslog.md 5절). IP는 문서용 예약 대역만 쓴다.
 FORTIGATE_VRL_FILE = ROOT_DIR / "roles" / "openobserve_config" / "files" / "vrl" / "fortigate_semantics.vrl"
-FGT_HEAD = 'date=2026-10-21 time=10:00:00 devname="{dev}" devid="FGT60F0000000000" '
+FGT_HEAD = 'date=2026-10-21 time=10:00:00 devname="{dev}" devid="FGT-EXAMPLE-0000" '
 
 
 def _fgt(rest, dev="NS0399", **extra):
