@@ -1684,6 +1684,9 @@ def test_silent_alert_watches_only_the_explicit_list_and_the_default_list_is_emp
     {"o2c_fortigate_detection_severities": ["critical%"]},
     {"o2c_fortigate_approved_start_hour": 18, "o2c_fortigate_approved_end_hour": 9},
     {"o2c_fortigate_approved_start_hour": "9; DROP"},
+    {"o2c_fortigate_ha_ignored_logids": ["0108037903' OR '1'='1"]},
+    {"o2c_fortigate_ha_ignored_logids": ["abc"]},
+    {"o2c_fortigate_ha_ignored_logids": [108037903]},
 ])
 def test_invalid_firewall_variables_fail_before_any_request(o2, extra):
     res = _apply(o2, extra=extra)
@@ -1848,6 +1851,30 @@ def test_real_ha_alert_fires_on_the_ha_line_only(o2):
     assert [(r["device"], r["event"], r["events"]) for r in rows] == [("ns0001", "HA device interface failed", 1)]
     others = [r for n in REAL_LINES if n != "ha_interface_failed" for r in _real(n)]
     assert _real_rows(o2, "infra-fortigate-ha-failover", others) == []
+
+
+HA_SYNC_INFO = ('date=2026-10-21 time=13:44:11 devname="ns0002" logid="0108037903" type="event" subtype="ha" level="information" '
+                'logdesc="Synchronization status with primary" msg="The sync status with the primary"')
+HA_SYNTHETIC_CHANGE = ('date=2026-10-21 time=13:45:00 devname="ns0002" logid="0108037999" type="event" subtype="ha" level="critical" '
+                       'logdesc="Synthetic member state changed" msg="synthetic state change"')   # 합성: 상태 변경 성격의 가짜 logid
+
+
+def _ha(body):
+    return [{"service_name": "fortigate-syslog", "body": body}]
+
+
+def test_ha_alert_skips_the_informational_sync_log_by_default_but_still_fires_on_other_ha_logids(o2):
+    assert _real_rows(o2, "infra-fortigate-ha-failover", _ha(HA_SYNC_INFO)) == []
+    rows = _real_rows(o2, "infra-fortigate-ha-failover", _ha(HA_SYNC_INFO) + _ha(HA_SYNTHETIC_CHANGE))
+    assert [(r["device"], r["events"]) for r in rows] == [("ns0002", 1)]
+    assert 'NOT LIKE \'%logid="0108037903"%\'' in _sql(o2, "infra-fortigate-ha-failover")
+
+
+def test_ha_ignored_logids_is_a_role_variable_and_an_empty_list_counts_every_ha_line(o2):
+    rows = _real_rows(o2, "infra-fortigate-ha-failover", _ha(HA_SYNC_INFO), o2c_fortigate_ha_ignored_logids=[])
+    assert [r["events"] for r in rows] == [1] and "NOT LIKE" not in _sql(o2, "infra-fortigate-ha-failover")
+    extra = {"o2c_fortigate_ha_ignored_logids": ["0108037903", "0108037999"]}
+    assert _real_rows(o2, "infra-fortigate-ha-failover", _ha(HA_SYNC_INFO) + _ha(HA_SYNTHETIC_CHANGE), **extra) == []
 
 
 def test_real_critical_detection_fires_on_a_critical_severity_and_on_an_infected_file_but_not_on_lower_severities(o2):

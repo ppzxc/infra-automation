@@ -947,6 +947,17 @@ infra-fortigate-ha-failover:
       fires: true
       records:
         - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname={host} type=event subtype=ha level=critical msg=heartbeat-lost'}
+    - name: 정보성 동기화 상태 로그(logid 0108037903)는 HA 전환이 아니므로 알리지 않는다
+      host: verify-fw-ha-sync-info
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" logid="0108037903" type="event" subtype="ha" level="information" logdesc="Synchronization status with primary" msg="The sync status with the primary"'}
+    # 합성 줄: 상태 변경 성격의 가짜 logid(0108037999). 같은 subtype=ha여도 제외 목록에 없는 logid는 알린다.
+    - name: 같은 subtype=ha라도 제외 목록에 없는 logid는 알린다(합성)
+      host: verify-fw-ha-other-logid
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" logid="0108037999" type="event" subtype="ha" level="critical" logdesc="Synthetic member state changed" msg="synthetic state change"'}
     - name: 시스템 이벤트는 HA가 아니다
       host: verify-fw-ha-system
       fires: false

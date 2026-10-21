@@ -93,6 +93,7 @@
           # 장비 이름 → 관리번호 별칭표는 VRL 소스에 들어간다: 키는 소문자 정규화한 devname, 값은 관리번호(ns+숫자)
           - o2c_fortigate_device_aliases | o2c_valid_fortigate_aliases
           - (o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths + o2c_fortigate_detection_severities) | o2c_valid_fortigate_values
+          - o2c_fortigate_ha_ignored_logids | o2c_valid_fortigate_logids
           - (o2c_fortigate_approved_start_hour | string) is match('^[0-9]+$')
           - (o2c_fortigate_approved_end_hour | string) is match('^[0-9]+$')
           - (o2c_fortigate_approved_start_hour | int) < (o2c_fortigate_approved_end_hour | int)
@@ -101,7 +102,7 @@
         fail_msg: >-
           agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
           (스위치 syslog 알림 변수는 o2c_switch_*_events가 FACILITY-SEVERITY-MNEMONIC 코드 목록, o2c_switch_syslog_roster가 [ns0250, ...], o2c_switch_uplinks가 [{device: ns0250, port: Gi1/0/49}] 형식이어야 합니다)
-          (방화벽 알림 변수는 o2c_fortigate_syslog_roster가 [ns0399, 장비 이름, ns0380+ns0381], o2c_fortigate_device_aliases가 {소문자 장비 이름: ns관리번호}, 승인 시간이 0~24 정수(시작 < 끝) 형식이어야 합니다)
+          (방화벽 알림 변수는 o2c_fortigate_syslog_roster가 [ns0399, 장비 이름, ns0380+ns0381], o2c_fortigate_device_aliases가 {소문자 장비 이름: ns관리번호}, 승인 시간이 0~24 정수(시작 < 끝), o2c_fortigate_ha_ignored_logids가 숫자 문자열 목록 형식이어야 합니다)
           (OpenBao 인증은 Semaphore Environment의 VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN). 값은 출력하지 않습니다.
           OpenBao 응답: AppRole 로그인 {{ _o2c_approle_login.status | default('시도 안 함') }}, KV 조회 {{ _o2c_kv_resp.status | default('시도 안 함') }}.
         quiet: true
