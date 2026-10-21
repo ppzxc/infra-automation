@@ -53,10 +53,10 @@
   | `infra-ssh-login-failures-per-source` | `source_address`별 5분 10회 이상 sshd 로그인 실패 |
   | `infra-ssh-login-failures-per-host` | 호스트별 5분 50회 이상 sshd 로그인 실패 |
   | `infra-root-login-success` | root SSH 로그인 성공 1건부터, 출발지가 정상 출발지 목록에도 사설 대역(10/8·172.16/12·192.168/16·127/8·169.254/16)에도 없을 때 (P1 외부 출발지, Event Alert) |
-  | `infra-root-login-known` | root SSH 로그인 성공 1건부터, 출발지가 정상 출발지 목록에 있거나(kind 무관) 미등록 사설 대역일 때 (P2, Event Alert, period 5분, 재통지 `o2c_root_known_silence_minutes` 기본 60분). 이전 `infra-root-login-office-daily`(P3)를 대체하며 반영 때 삭제됨 |
+  | `infra-root-login-known` | root SSH 로그인 성공 1건부터, 출발지가 정상 출발지 목록에 있거나(kind 무관) 미등록 사설 대역일 때 (P2, Event Alert, period 5분, 재통지 `o2c_root_known_silence_minutes` 기본 60분). 이전 `infra-root-login-office-daily`(P3)를 대체하며, 이 이름이 기본 폐기 목록(`o2c_retired_alerts`)에 있어 반영 때 서버에서 삭제됨 |
   | `infra-sudo-escalation-failure` | sudo/su `authentication failure`/`NOT in sudoers` 1건부터 (`event_action IN (sudo, su)`, 성공은 알리지 않음) |
   | `infra-oom-kill` (P2) | `system_logs`의 `Killed process`·`Kill process`·`invoked oom-killer`를 대소문자 무시(`lower(body)`)로 매칭. 행에 호스트·종료된 프로세스명 |
-  | `infra-disk-fs-errors` (P1) | `system_logs`의 `I/O error`, `EXT4-fs error`, `XFS ... Corruption`, `blk_update_request`, `Buffer I/O error` (대소문자 무시, severity가 아닌 패턴 기반). 옛 `infra-kernel-disk-errors`를 대체하며 서버에서 삭제된다 |
+  | `infra-disk-fs-errors` (P1) | `system_logs`의 `I/O error`, `EXT4-fs error`, `XFS ... Corruption`, `blk_update_request`, `Buffer I/O error` (대소문자 무시, severity가 아닌 패턴 기반). 옛 `infra-kernel-disk-errors`를 대체한다(서버에 남아 있으면 `o2c_retired_alerts`에 더해 지운다) |
   | `infra-app-log-errors` (P2) | `app_logs`의 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄을 호스트·컨테이너별로 5분 1건부터(Event Alert). 레벨은 수집기가 JSON `level`·`log.level`, valkey 레벨 문자에서 올린 값이며 키워드 추정은 없다. WARN은 알리지 않는다 (Spec #236) |
   | `infra-log-parse-errors-security-logs` / `-system-logs` | `log.parse_error=true` 비율이 10% 이상(최소 20줄, 30분 창) |
 
@@ -67,7 +67,7 @@
     | `infra-switch-config-change` | P2, Event | `o2c_switch_config_change_events`(`SYS-5-CONFIG_I`) 1건부터, 5분 구간. 행에 장비와 원문의 변경 주체 |
     | `infra-switch-login-failures` | P2, Event | `o2c_switch_login_fail_events`(`SEC_LOGIN-4-LOGIN_FAILED`)가 장비별 5분에 5회 이상 (`o2c_switch_login_fail_threshold`, `_window_minutes`) |
     | `infra-switch-severity-critical` | P1, Event | `log_syslog_severity_code <= o2c_switch_severity_max`(2), 즉시. 잡음 목록 제외 |
-    | `infra-switch-uplink-down` | P1, Event | `o2c_switch_uplinks`의 (장비, 포트)에 대한 link down·line protocol down·administratively down. **목록이 비면(기본) 규칙이 만들어지지 않는다** — 서버에 이미 있으면 계획이 지운다 |
+    | `infra-switch-uplink-down` | P1, Event | `o2c_switch_uplinks`의 (장비, 포트)에 대한 link down·line protocol down·administratively down. **목록이 비면(기본) 규칙이 만들어지지 않는다** — 서버에 이미 있어도 지우지 않는다(지우려면 `o2c_retired_alerts`에 더한다) |
     | `infra-switch-mac-flap` | P2, Event | `o2c_switch_macflap_events`(`SW_MATM-4-MACFLAP_NOTIF`)가 장비별 10분에 2회 이상, 계속되면 60분마다 재통지 |
     | `infra-switch-syslog-silent` | P2, State | `o2c_switch_syslog_roster`(명시 목록, 기본 `ns0250`·`ns0347`) 장비별 `switch-syslog`가 24시간(`o2c_switch_silent_hours`) 없음, 재통지 1440분. 로스터 호스트마다 `UNION ALL` 가지(`o2c_missing_sql`). 장비 자체 다운은 SNMP 알림(#175)의 몫이다 |
 
@@ -128,12 +128,24 @@
 | `silent_host_exceptions` | (선택) Silent Host 계획 정지 예외 `[{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason?}]`. 만료일 필수(없거나 형식이 틀리면 요청 전에 실패), 만료일이 지난 항목은 무시 |
 | `alert_webhook_token`, `alert_webhook_auth_header` | (선택) 인증 토큰과 헤더 이름(기본 `Authorization`, 네이버웍스 봇은 `X-NANOIT-ACCESS`) |
 
+### 역할 변수: 삭제 규칙과 계획 전용 실행
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `o2c_retired_alerts` | `["infra-root-login-office-daily"]` | 서버에서 지우는 알림 이름 목록. 서버에 있으면서 이 목록에 있는 알림만 DELETE한다. `O2C-002`가 요청 전에 `^infra-[a-z0-9-]+$` 형식·중복 없음을 검증하고, 현행 알림 정의의 이름이 들어 있으면 실패시킨다 |
+| `o2c_plan_only` | `false` | `true`이면 OpenObserve 읽기·계획 계산·`O2C-013` 출력까지만 하고 쓰기·합성 레코드 주입·시드·검증 단계 전에 정상 종료한다(`O2C-015`·`O2C-016`) |
+
+- **삭제는 명시적 폐기 목록만**: 예전에는 저장소 정의에 없는 `infra-` 접두어 알림을 서버에서 지웠다. 다른 세션이 OpenObserve에 직접 만든 `infra-` 알림 16개가 이 규칙으로 지워진 사고가 있어, 이제 접두어만 보고 지우지 않는다. 알림을 정의에서 빼거나 이름을 바꿀 때는 옛 이름을 `o2c_retired_alerts`에 더한다(서버에 없으면 아무 일도 없다).
+- **관리 밖 알림 표시**: 서버에 `infra-` 접두어로 있지만 저장소 정의에도 폐기 목록에도 없는 알림은 건드리지 않고, `O2C-013` 출력에 `unmanaged infra- alert on server (kept): <이름들>` 한 줄로 이름만 나열한다(본문 없음). 반영 전에 눈으로 볼 수 있게 하는 용도다.
+- **계획 전용**: Semaphore에서는 `OpenObserve — Config` 실행의 task `environment`(Extra variables)에 `{"o2c_plan_only": true}`를 준다. 출력 끝에 `plan only: no changes were made`가 나오고 쓰기·주입은 0건이다. Semaphore에는 dry run이 없어 계획을 실행한 뒤에야 읽게 되므로, 반영 전에 계획 전용으로 먼저 확인한다.
+
 ---
 
 ## 3. 실행
 
 ```bash
 ansible-playbook -i inventory/hosts.yml playbooks/openobserve_config.yml --check   # 변경 예정 목록만 출력, 쓰기 요청 0건
+ansible-playbook -i inventory/hosts.yml playbooks/openobserve_config.yml -e o2c_plan_only=true   # 계획만 출력하고 정상 종료(쓰기·주입 0건)
 ansible-playbook -i inventory/hosts.yml playbooks/openobserve_config.yml
 ```
 
@@ -153,10 +165,12 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-005` | `Keep the hosts with the otel_app_telemetry switch on (the roster of the app telemetry silent alert)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_app_telemetry_roster`: `otel_app_telemetry`가 boolean `true`인 호스트 이름만 남김, KV 본문은 팩트로 두지 않음, `no_log`) |
 | `O2C-010` | `Read the current OpenObserve state (templates, destinations, functions, pipelines, alerts)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
 | `O2C-011` | `Read each existing alert (the list view carries no query or trigger settings)` | `o2c_http` | Controller | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`) |
-| `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음) |
-| `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력) |
+| `O2C-012` | `Plan the writes needed (only objects that differ)` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_plan`: 원하는 상태 ⊆ 현재 상태이면 쓰기 없음, 삭제는 폐기 목록만) |
+| `O2C-013` | `Show the planned changes (names only, never bodies)` | `ansible.builtin.debug` | Controller | 읽기 전용 (check 모드 포함 항상 출력, 본문 미출력, 관리 밖 `infra-` 알림은 `unmanaged infra- alert on server (kept): …` 줄로 이름만) |
+| `O2C-015` | `Report that this is a plan-only run (no changes will be made)` | `ansible.builtin.debug` | Controller | 읽기 전용 (`o2c_plan_only`가 참일 때만 `plan only: no changes were made` 출력) |
+| `O2C-016` | `End the play after the plan when o2c_plan_only is true (before any write or injection)` | `ansible.builtin.meta` | Controller | 읽기 전용 (`o2c_plan_only`가 참이면 시드·반영·주입·검증 전에 정상 종료, 실패 아님) |
 | `O2C-014` | `Seed the empty self-test stream with one past record before its alert is created` | `ansible.builtin.uri` | Controller | 자가 시험 알림을 새로 만들 때만 검증 전용 스트림에 조회 구간보다 오래된(기본 1시간 전) 레코드 1건을 넣어 스트림을 만든다 — 통지 없음 (`changed_when: false`, check 모드 제외, `no_log`) |
-| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)` | `o2c_http` | Controller | 계획된 차이만 전송 — 저장소 정의에 없는 `infra-` 접두어 알림은 DELETE, 접두어 밖 알림은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
+| `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE stale infra- alerts)` | `o2c_http` | Controller | 계획된 차이만 전송 — 폐기 목록(`o2c_retired_alerts`)에 있는 알림만 DELETE, 그 밖의 알림(관리 밖 `infra-` 포함)은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
 
 ### 알림 검증 단계 (Spec #184 / Ticket-1)
 
