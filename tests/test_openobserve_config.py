@@ -2253,12 +2253,14 @@ def test_promql_alerts_are_created_as_promql_metrics_alerts_to_the_current_desti
         assert a["context_attributes"]["action"].startswith("\n1. "), name
 
 
-def test_log_alerts_keep_the_sql_condition_and_the_log_link_label(o2):
+def test_log_alerts_keep_the_sql_condition_and_the_link_label(o2):
     assert _apply(o2).returncode == 0
     for name in EXPECTED_ALERTS:
         a = o2.store["alert"][name]
         assert a["query_condition"]["type"] == "sql" and "align_time" not in a["trigger_condition"], name
-        assert a["context_attributes"]["link_label"] == "로그 보기", name
+        # 원문 링크가 있으면 {alert_url}은 "상세 보기"로 두고 원문은 raw_log_line에 싣는다. 없으면 "로그 보기" 그대로
+        has_raw = bool(a["context_attributes"]["raw_log_line"])
+        assert a["context_attributes"]["link_label"] == ("상세 보기" if has_raw else "로그 보기"), name
 
 
 def test_promql_alerts_converge_and_a_drift_is_one_update(o2):
@@ -2437,3 +2439,118 @@ def test_recreate_on_the_server_deletes_then_creates_with_the_definition_and_the
     o2.writes.clear()
     res = _apply(o2)
     assert res.returncode == 0 and o2.writes == [] and "(stream changed)" not in res.stdout
+
+
+# --- 원문 로그 링크 (#282): 알림 SQL에서 원문 조회 SQL을 파생해 `/web/logs?...period=1d&query=<base64>`로 연다 -------------
+def _filters():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("o2c_filters", ROOT_DIR / "filter_plugins" / "openobserve_config.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _decode_raw_url(url):
+    from urllib.parse import parse_qs, urlsplit
+    parts = urlsplit(url)
+    qs = parse_qs(parts.query)
+    return parts.path, {k: v[0] for k, v in qs.items()}, base64.b64decode(qs["query"][0]).decode("utf-8")
+
+
+def _raw_line(alert):
+    return alert["context_attributes"]["raw_log_line"]
+
+
+def _raw_url(alert):
+    line = _raw_line(alert)
+    assert line.startswith("\n▶ 로그 보기: "), line
+    return line.split(": ", 1)[1]
+
+
+def test_raw_log_sql_keeps_where_verbatim_and_drops_select_list_group_by_and_having():
+    f = _filters()
+    sql = ("SELECT host_name, count(*) AS failures FROM \"security_logs\" "
+           "WHERE event_action = 'ssh_login' AND (user_name = 'root' OR note = 'from where') "
+           "GROUP BY host_name HAVING count(*) >= 10")
+    assert f.o2c_raw_log_sql(sql, "security_logs") == (
+        'SELECT * FROM "security_logs" WHERE event_action = \'ssh_login\' AND (user_name = \'root\' OR note = \'from where\') '
+        "ORDER BY _timestamp DESC LIMIT 200")
+
+
+def test_raw_log_sql_without_where_or_with_union_subquery_join_is_skipped():
+    f = _filters()
+    assert f.o2c_raw_log_sql('SELECT h, count(*) FROM "s" GROUP BY h HAVING count(*) > 1', "s") == ""   # HAVING만: 원문이 대상을 대변 못 함
+    assert f.o2c_raw_log_sql("SELECT 'a' AS h FROM \"s\" WHERE x = 1 UNION ALL SELECT 'b' FROM \"s\" WHERE y = 2", "s") == ""
+    assert f.o2c_raw_log_sql('SELECT h FROM "s" WHERE x IN (SELECT x FROM "t")', "s") == ""
+    assert f.o2c_raw_log_sql('SELECT h FROM "s" JOIN "t" ON s.a = t.a WHERE x = 1', "s") == ""
+    assert f.o2c_raw_log_sql('SELECT h FROM "other" WHERE x = 1', "s") == ""   # 알림 스트림과 다른 FROM
+    assert f.o2c_raw_log_sql("", "s") == ""
+
+
+def test_raw_log_url_round_trips_the_sql_with_quotes_and_non_ascii_and_uses_a_relative_period():
+    f = _filters()
+    sql = "SELECT * FROM \"system_logs\" WHERE body LIKE '%it''s \"quoted\" 한글 + / =%' ORDER BY _timestamp DESC LIMIT 200"
+    url = f.o2c_raw_log_url("https://o2.example.test/", "default", "system_logs", sql)
+    path, qs, decoded = _decode_raw_url(url)
+    assert url.startswith("https://o2.example.test/web/logs?") and path == "/web/logs"
+    assert decoded == sql
+    assert qs["period"] == "1d" and "from" not in qs and "to" not in qs   # 정적 from/to를 박지 않는다
+    assert (qs["stream"], qs["stream_type"], qs["sql_mode"], qs["org_identifier"]) == ("system_logs", "logs", "true", "default")
+    assert "+" not in url.split("query=")[1].split("&")[0] and "/" not in url.split("query=")[1].split("&")[0]   # base64의 + / 는 퍼센트 인코딩
+
+
+def test_log_alerts_with_a_derivable_where_carry_the_raw_log_link_and_the_others_do_not(o2):
+    assert _apply(o2).returncode == 0
+    alerts = o2.store["alert"]
+    for name in ("infra-ssh-login-failures-per-source", "infra-root-login-success", "infra-oom-kill", "infra-disk-fs-errors",
+                 "infra-switch-config-change", "infra-backup-failure"):
+        ctx = alerts[name]["context_attributes"]
+        path, qs, decoded = _decode_raw_url(_raw_url(alerts[name]))
+        assert path == "/web/logs" and qs["stream"] == alerts[name]["stream_name"], name
+        assert decoded.startswith('SELECT * FROM "%s" WHERE ' % alerts[name]["stream_name"]), name
+        assert decoded.endswith("ORDER BY _timestamp DESC LIMIT 200"), name
+        assert not re.search(r"group by|having|count\(", decoded, re.I), name
+        assert ctx["link_label"] == "상세 보기", name   # {alert_url}(알림 화면)은 상세, 원문은 별도 줄
+    where = _decode_raw_url(_raw_url(alerts["infra-ssh-login-failures-per-host"]))[2]
+    assert "event_action = 'ssh_login' AND event_outcome = 'failure'" in where
+    # raw_sql 직접 지정: HAVING만으로 거르는 집계
+    for name, stream in (("infra-log-parse-errors-security-logs", "security_logs"), ("infra-log-parse-errors-system-logs", "system_logs")):
+        assert _decode_raw_url(_raw_url(alerts[name]))[2] == (
+            'SELECT * FROM "%s" WHERE log_parse_error = true ORDER BY _timestamp DESC LIMIT 200' % stream)
+    # 파생 불가·메트릭·PromQL·자가 시험은 기존 링크와 라벨을 그대로 둔다
+    for name, alert in alerts.items():
+        ctx = alert["context_attributes"]
+        if name in ("infra-backup-missing", "infra-maintenance-missing", "infra-switch-syslog-silent", "infra-silent-host-p1", "infra-app-telemetry-silent", "infra-disk-usage-p1", SELFTEST) \
+                or name in PROMQL_ALERTS:
+            assert _raw_line(alert) == "", name
+        assert ctx["link_label"] in ("로그 보기", "상세 보기"), name
+        if _raw_line(alert) == "" and alert["stream_type"] == "logs" and name != SELFTEST:
+            assert ctx["link_label"] == "로그 보기", name
+
+
+def test_template_places_the_raw_log_line_right_after_the_alert_url(o2):
+    assert _apply(o2).returncode == 0
+    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
+    assert "▶ {link_label}: {alert_url}{raw_log_line}\n" in text
+
+
+def test_without_a_web_url_no_alert_gets_a_raw_log_link_and_the_second_run_changes_nothing(o2):
+    assert _apply(o2, extra={"o2c_web_url": ""}).returncode == 0
+    assert all(_raw_line(a) == "" for a in o2.store["alert"].values())
+    o2.writes.clear()
+    res = _apply(o2, extra={"o2c_web_url": ""})
+    assert res.returncode == 0 and _changed(res) == 0 and o2.writes == []
+
+
+def test_raw_log_link_run_converges_and_a_changed_web_url_updates_only_the_log_alerts(o2):
+    assert _apply(o2).returncode == 0
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and o2.writes == [], res.stdout
+    assert _changed(res) == 0
+    assert _raw_url(o2.store["alert"]["infra-oom-kill"]).startswith(o2.url + "/web/logs?")   # 기본 베이스는 연결 엔드포인트
+    res = _apply(o2, extra={"o2c_web_url": "https://o2.public.example.test"})
+    assert res.returncode == 0
+    assert all(m == "PUT" for m, _, _ in o2.writes) and o2.writes
+    assert _raw_url(o2.store["alert"]["infra-oom-kill"]).startswith("https://o2.public.example.test/web/logs?")
+    assert _raw_line(o2.store["alert"]["infra-backup-missing"]) == ""

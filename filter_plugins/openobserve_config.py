@@ -6,7 +6,9 @@ Pure functions so the desired state and the change plan are unit-testable withou
 ``o2c_plan``     compares them with what the OpenObserve API returned and lists only the writes that are needed.
 """
 
+import base64
 import re
+from urllib.parse import quote
 
 KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
@@ -31,6 +33,8 @@ CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', '
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
 MANAGED_PREFIX = 'infra-'   # 알림 이름 접두어. 서버에서 지우는 근거는 아니다: 삭제는 폐기 목록(o2c_retired_alerts)의 이름뿐이고, 접두어만 있는 알림은 건드리지 않고 알려 준다
 LINK_LABEL_LOG, LINK_LABEL_METRIC = '로그 보기', '상세 보기'   # 통지 본문의 ▶ {link_label}: {alert_url}
+RAW_LOG_PERIOD = '1d'   # 원문 로그 링크의 조회 구간. 웹 UI의 `period=<N><m|h|d>` 상대 구간이라 링크를 연 시점부터 거슬러 올라간다
+RAW_LOG_LIMIT = 200
 SECRET_KINDS = ('destination',)                               # url and headers carry the webhook credentials
 
 
@@ -45,6 +49,89 @@ def o2c_action_lines(text):
     items = [i.strip() for i in _CIRCLED.split(str(text or ''))]
     items = [i for i in items if i]
     return ''.join('\n%d. %s' % (n, item) for n, item in enumerate(items, 1))
+
+
+_SQL_KEYWORDS = ('select', 'from', 'where', 'group', 'having', 'order', 'limit', 'union', 'intersect', 'except', 'join', 'with', 'offset')
+
+
+def _top_level_keywords(sql):
+    """``[(keyword, start, end)]``: 따옴표 문자열·큰따옴표 식별자·괄호 밖(깊이 0)의 SQL 키워드 위치. 괄호 안에 SELECT가 있으면 ``('subselect', ...)``."""
+    found, depth, i, n = [], 0, 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch in ('\'', '"'):   # 따옴표 안은 건너뛴다(같은 따옴표 두 개는 이스케이프)
+            j = i + 1
+            while j < n:
+                if sql[j] == ch:
+                    if j + 1 < n and sql[j + 1] == ch:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            i = j + 1
+        elif ch == '(':
+            depth += 1
+            i += 1
+        elif ch == ')':
+            depth -= 1
+            i += 1
+        elif ch.isalpha() or ch == '_':
+            j = i
+            while j < n and (sql[j].isalnum() or sql[j] == '_'):
+                j += 1
+            word = sql[i:j].lower()
+            if depth == 0 and word in _SQL_KEYWORDS:
+                found.append((word, i, j))
+            elif depth > 0 and word in ('select', 'union', 'with'):
+                found.append(('subselect', i, j))
+            i = j
+        else:
+            i += 1
+    return found
+
+
+def o2c_raw_log_sql(sql, stream, limit=RAW_LOG_LIMIT):
+    """집계 알림 SQL에서 원문 로그 조회 SQL을 만든다: ``SELECT * FROM "<스트림>" WHERE <기존 조건> ORDER BY _timestamp DESC LIMIT N``.
+
+    SELECT 목록·GROUP BY·HAVING은 버리고 WHERE 식은 글자 그대로 둔다. 안전하게 못 만들면 빈 문자열이다(링크 없음):
+    조건(WHERE)이 없는 SQL(HAVING만으로 거르는 집계는 원문이 알림 대상을 대변하지 못한다), UNION·JOIN·WITH·서브쿼리,
+    FROM이 알림 스트림 하나가 아닌 SQL.
+    """
+    text = ' '.join(str(sql or '').split())
+    kws = _top_level_keywords(text)
+    names = [k for k, _, _ in kws]
+    if not names or names[0] != 'select' or names.count('select') != 1 or names.count('from') != 1 or names.count('where') != 1:
+        return ''
+    if any(k in names for k in ('subselect', 'union', 'intersect', 'except', 'join', 'with', 'limit', 'offset')):
+        return ''
+    start = {k: (a, b) for k, a, b in kws}
+    from_end = start['from'][1]
+    where_start, where_end = start['where']
+    if from_end > where_start or text[from_end:where_start].strip() != '"%s"' % stream:
+        return ''
+    stops = [a for k, a, _ in kws if k in ('group', 'having', 'order') and a > where_end]
+    cond = text[where_end:min(stops) if stops else len(text)].strip()
+    if not cond:
+        return ''
+    return 'SELECT * FROM "%s" WHERE %s ORDER BY _timestamp DESC LIMIT %d' % (stream, cond, int(limit))
+
+
+def o2c_raw_log_url(web_url, org, stream, sql, period=RAW_LOG_PERIOD):
+    """OpenObserve 웹 UI가 원문 로그를 바로 여는 URL(단축 URL이 가리키는 `/web/logs?...` 형태).
+
+    SQL은 UTF-8 base64(표준 알파벳)를 쿼리 문자열로 퍼센트 인코딩한다(`+`·`/`·`=`가 값 안에서 깨지지 않게). 조회 구간은 `period`
+    상대값이라 from/to를 정적으로 박지 않는다.
+    """
+    query = quote(base64.b64encode(sql.encode('utf-8')).decode('ascii'), safe='')
+    return ('%s/web/logs?stream_type=logs&stream=%s&period=%s&sql_mode=true&query=%s&org_identifier=%s&type=alerts&show_histogram=false'
+            % (str(web_url).rstrip('/'), quote(stream, safe=''), period, query, quote(org, safe='')))
+
+
+def _raw_log_sql(alert):
+    """알림 정의가 원문 조회 SQL을 갖는가: ``raw_sql`` 직접 지정이 먼저, 없으면 로그 SQL 알림에서 파생. 메트릭·PromQL·자가 시험은 없다."""
+    if alert.get('promql') or alert.get('stream_type', 'logs') != 'logs' or alert.get('raw_link') is False:   # raw_link: false는 명시적 거절(부재 알림)
+        return ''
+    return str(alert.get('raw_sql') or '').strip() or o2c_raw_log_sql(alert.get('sql'), alert['stream'])
 
 
 def o2c_desired(spec):
@@ -78,7 +165,8 @@ def o2c_desired(spec):
     out += [_pipeline(org, sem['stream'], sem['pipeline_name'], [sem['function_name']] + sem.get('then', []), sem['description'])
             for sem in semantics]
     p1_dest = spec.get('p1_destination') or dest   # 비어 있으면(기본) 모든 알림이 같은 대상이다. 값이 있으면 P1만 그 대상으로 간다
-    for alert in list(spec['alerts']) + ([spec['selftest_alert']] if spec.get('selftest_alert') else []):
+    selftest = spec.get('selftest_alert')
+    for alert in list(spec['alerts']) + ([selftest] if selftest else []):
         promql = alert.get('promql')
         if promql:
             if alert.get('stream_type') != 'metrics':
@@ -91,6 +179,7 @@ def o2c_desired(spec):
                    'frequency': alert['frequency'], 'frequency_type': 'minutes', 'silence': alert['silence']}
         if promql:
             trigger['align_time'] = True   # 평가 시각을 frequency 경계에 맞춘다(PromQL은 시각이 어긋나면 구간 창이 달라진다)
+        raw_sql = _raw_log_sql(alert) if spec.get('web_url') and alert is not selftest else ''
         out.append({'kind': 'alert', 'name': alert['name'], 'body': {
             'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
             'query_condition': query, 'trigger_condition': trigger,
@@ -99,7 +188,9 @@ def o2c_desired(spec):
             # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action}·{runbook}로 쓰는 알림별 변수,
             # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수). link_label은 {alert_url}의 라벨이다(로그 알림 "로그 보기", 메트릭 알림 "상세 보기").
             'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, action=o2c_action_lines(alert['action']),
-                                       link_label=LINK_LABEL_METRIC if promql else LINK_LABEL_LOG),
+                                       link_label=LINK_LABEL_METRIC if promql or raw_sql else LINK_LABEL_LOG,
+                                       raw_log_line=('\n▶ %s: %s' % (LINK_LABEL_LOG, o2c_raw_log_url(spec['web_url'], org, alert['stream'], raw_sql))
+                                                     if raw_sql else '')),
             'row_template': alert['row_template'], 'row_template_type': 'String',
         }})
     # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8): 스트림이 이미 있을 때만 맞춘다(없으면 o2c_plan이 건너뛴다)
@@ -760,7 +851,7 @@ class FilterModule(object):
     def filters(self):
         return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_missing_destinations': o2c_missing_destinations, 'o2c_unmanaged_alerts': o2c_unmanaged_alerts,
                 'o2c_valid_retired_alerts': o2c_valid_retired_alerts, 'o2c_retired_conflicts': o2c_retired_conflicts, 'o2c_plan_summary': o2c_plan_summary,
-                'o2c_alert_state': o2c_alert_state, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
+                'o2c_alert_state': o2c_alert_state, 'o2c_raw_log_sql': o2c_raw_log_sql, 'o2c_raw_log_url': o2c_raw_log_url, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
                 'o2c_alert_history_errors': o2c_alert_history_errors,

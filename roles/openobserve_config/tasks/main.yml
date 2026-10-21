@@ -171,7 +171,7 @@
     o2c_desired_objects: >-
       {{ {'org': o2c_org, 'stream': o2c_stream, 'function_name': o2c_function_name, 'pipeline_name': o2c_pipeline_name,
           'template_name': o2c_template_name, 'template_body': o2c_template_body, 'destination_name': o2c_destination_name,
-          'webhook_url': o2c_kv.alert_webhook_url, 'p1_destination': o2c_p1_destination,
+          'webhook_url': o2c_kv.alert_webhook_url, 'web_url': o2c_web_url, 'p1_destination': o2c_p1_destination,
           'webhook_headers': {'Content-Type': 'application/json'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
           'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
           'fortigate': {'function_name': o2c_fortigate_function_name, 'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/fortigate_semantics.vrl'),
