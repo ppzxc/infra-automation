@@ -815,3 +815,193 @@ infra-switch-syslog-silent:
       fires: false
       off_roster: true
       records: []
+
+# --- 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3) ---
+# 입력은 FortiOS Log Message Reference로 만든 합성 줄이다(실장비 샘플 아님). 알림 SQL은 원문 body의 key=value만 읽으므로(변환 전 레코드와 같다)
+# 레코드는 omit_host_field로 장비 이름 필드 없이 원문만 넣고, 원문의 devname="{host}"가 케이스 호스트로 바뀐다. service_name은 방화벽 수신 경로의 값이다.
+# 승인 시간은 기본 9시~18시(끝 미포함)다: 03시·23시·18시는 밖, 10시·09시는 안, time= 이 없는 줄은 밖으로 본다.
+infra-fortigate-admin-login-failures:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 같은 출발지에서 5분 안에 관리자 로그인 실패 5회
+      host: verify-fw-login-burst
+      fires: true
+      records:
+        - {repeat: 5, omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.50, body: 'date=2026-10-20 time=10:00:00 devname="{host}" devid="FGT000000000000" logid="0100032002" type="event" subtype="system" level="alert" logdesc="Admin login failed" srcip=203.0.113.50 user="admin" ui="https(203.0.113.50)" action="login" status="failed" reason="name_invalid" msg="Administrator admin login failed from https(203.0.113.50) because of invalid user name"'}
+    - name: 실패 4회는 임계 미만
+      host: verify-fw-login-below
+      fires: false
+      records:
+        - {repeat: 4, omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.51, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" logdesc="Admin login failed" user="admin" ui="ssh(203.0.113.51)" action="login" status="failed" reason="passwd_invalid"'}
+    - name: 출발지가 달라 각각 임계 미만 (출발지마다 따로 센다)
+      host: verify-fw-login-spread
+      fires: false
+      records:
+        - {repeat: 3, omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.52, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" user="admin" action="login" status="failed"'}
+        - {repeat: 3, omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.53, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" user="admin" action="login" status="failed"'}
+    - name: 로그인 성공은 실패로 세지 않는다
+      host: verify-fw-login-success
+      fires: false
+      records:
+        - {repeat: 6, omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.54, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" logdesc="Admin login successful" user="admin" ui="https(203.0.113.54)" action="login" status="success"'}
+    - name: VPN 사용자 로그인 실패는 관리자 로그인이 아니다
+      host: verify-fw-login-vpn
+      fires: false
+      records:
+        - {repeat: 6, omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.55, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="vpn" logdesc="SSL VPN login fail" user="alice" action="ssl-login-fail" status="failed" remip=203.0.113.55'}
+    - name: 다른 서비스의 같은 문구는 세지 않는다
+      host: verify-fw-login-other-service
+      fires: false
+      records:
+        - {repeat: 6, omit_host_field: true, service_name: sshd, source_address: 203.0.113.56, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" user="admin" action="login" status="failed"'}
+infra-fortigate-change-unapproved:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 승인 시간 밖(03시) 정책 변경
+      host: verify-fw-unapproved-policy
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=03:10:00 devname="{host}" devid="FGT000000000000" logid="0100044546" type="event" subtype="system" level="information" logdesc="Object attribute configured" user="admin" ui="GUI(203.0.113.9)" action="Edit" cfgpath="firewall.policy" cfgobj="3" cfgattr="status[enable->disable]" msg="Edit firewall.policy 3"'}
+    - name: 승인 시간 밖(23시) 관리자 계정 변경
+      host: verify-fw-unapproved-account
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=23:50:00 devname="{host}" type="event" subtype="system" logdesc="Object configured" user="admin" ui="ssh(203.0.113.9)" action="Add" cfgpath="system.admin" cfgobj="backdoor" msg="Add system.admin backdoor"'}
+    - name: 종료 시각 18시 정각은 승인 시간 밖 (끝은 포함하지 않는다)
+      host: verify-fw-unapproved-boundary
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=18:00:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="firewall.policy6" cfgobj="9"'}
+    - name: 시각이 없는 줄은 승인 시간 밖으로 본다
+      host: verify-fw-unapproved-notime
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="firewall.policy" cfgobj="3"'}
+    - name: 승인 시간 안(10시) 변경은 이 알림이 아니다
+      host: verify-fw-unapproved-inside
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:30:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="firewall.policy" cfgobj="3"'}
+    - name: 승인 시간 안 시작 시각 9시 정각
+      host: verify-fw-unapproved-start
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=09:00:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="system.admin" cfgobj="admin"'}
+    - name: 감시 대상 경로가 아닌 변경은 밤에도 알리지 않는다
+      host: verify-fw-unapproved-other-path
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=03:10:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="system.interface" cfgobj="port1"'}
+    - name: 다른 서비스의 같은 문구는 세지 않는다
+      host: verify-fw-unapproved-other-service
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: sshd, body: 'date=2026-10-20 time=03:10:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="firewall.policy"'}
+infra-fortigate-change-approved:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 승인 시간 안(10시) 정책 변경
+      host: verify-fw-approved-policy
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:30:00 devname="{host}" type="event" subtype="system" logdesc="Object attribute configured" user="admin" ui="GUI(203.0.113.9)" action="Edit" cfgpath="firewall.policy" cfgobj="3"'}
+    - name: 승인 시간 안 시작 시각 9시 정각 계정 변경
+      host: verify-fw-approved-start
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=09:00:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="user.local" cfgobj="alice"'}
+    - name: 승인 시간 밖(03시) 변경은 이 알림이 아니다
+      host: verify-fw-approved-outside
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=03:10:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="firewall.policy" cfgobj="3"'}
+    - name: 종료 시각 18시 정각은 승인 시간 밖
+      host: verify-fw-approved-boundary
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=18:00:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="firewall.policy" cfgobj="3"'}
+    - name: 시각이 없는 줄은 승인 시간 안으로 세지 않는다
+      host: verify-fw-approved-notime
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="firewall.policy"'}
+    - name: 감시 대상 경로가 아닌 변경은 알리지 않는다
+      host: verify-fw-approved-other-path
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:30:00 devname="{host}" type="event" subtype="system" user="admin" action="Edit" cfgpath="system.interface" cfgobj="port1"'}
+infra-fortigate-ha-failover:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: HA 로그(따옴표 있는 형식)
+      host: verify-fw-ha-quoted
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" logid="0100020010" type="event" subtype="ha" level="critical" logdesc="Virtual cluster member state changed" msg="Virtual cluster 1 member state changed to primary"'}
+    - name: HA 로그(따옴표 없는 형식)
+      host: verify-fw-ha-bare
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname={host} type=event subtype=ha level=critical msg=heartbeat-lost'}
+    - name: 시스템 이벤트는 HA가 아니다
+      host: verify-fw-ha-system
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" logdesc="Admin login successful" action="login" status="success"'}
+    - name: 다른 서비스의 같은 문구는 세지 않는다
+      host: verify-fw-ha-other-service
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: sshd, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="ha"'}
+infra-fortigate-critical-detection:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: IPS 심각도 critical 탐지
+      host: verify-fw-detect-critical
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" logid="0419016384" type="utm" subtype="ips" eventtype="signature" level="alert" severity="critical" srcip=203.0.113.60 dstip=203.0.113.61 action="dropped" attack="Synthetic.Exploit.Test" msg="synthetic detection"'}
+    - name: 심각도 high는 기본 목록(critical)에 없다
+      host: verify-fw-detect-high
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="utm" subtype="ips" level="warning" severity="high" action="dropped" attack="Synthetic.Scan.Test"'}
+    - name: utm이 아닌 로그의 critical은 세지 않는다
+      host: verify-fw-detect-not-utm
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="event" subtype="system" level="critical" severity="critical" msg="synthetic"'}
+    - name: 다른 서비스의 같은 문구는 세지 않는다
+      host: verify-fw-detect-other-service
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: sshd, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="utm" subtype="ips" severity="critical" attack="x"'}
+# 수신 중단: 케이스 호스트(device_id)가 (가짜) 감시 목록에 들어간다. off_roster는 목록에 넣지 않는다. HA 쌍(`a+b`)은 SQL 단위 시험에서 다룬다.
+infra-fortigate-syslog-silent:
+  row_key: device_id
+  host_field: device_id
+  cases:
+    - name: 감시 목록의 방화벽에서 로그가 한 줄도 없다
+      host: verify-fw-silent-none
+      fires: true
+      records: []
+    - name: 최근 로그가 있는 방화벽
+      host: verify-fw-silent-fresh
+      fires: false
+      records:
+        - {ts: -600, service_name: fortigate-syslog, device_name: verify-fw, body: 'date=2026-10-20 time=10:00:00 devname="verify-fw" type="event" subtype="system" msg="synthetic"'}
+    - name: 변환 전 레코드(device_id 필드 없이 원문만 있음)도 수신 중이다
+      host: verify-fw-silent-legacy
+      fires: false
+      records:
+        - {ts: -600, omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-20 time=10:00:00 devname="{host}" type="traffic" subtype="forward" action="deny"'}
+    - name: 감시 목록에 없는 방화벽은 로그가 없어도 알리지 않는다
+      host: verify-fw-silent-off-roster
+      fires: false
+      off_roster: true
+      records: []

@@ -252,3 +252,118 @@ def test_server_logs_and_other_services_are_not_affected(tmp_path, rec):
 ])
 def test_fortigate_records_on_security_logs_pass_the_security_function_unchanged(tmp_path, rec):
     assert _apply(tmp_path, copy.deepcopy(rec)) == rec
+
+
+# --------------------------------------------------------------------------
+# 방화벽 필드 추출(Spec #282 / Ticket-2): fortigate_semantics
+#
+# 주의: 아래 입력은 합성이다. 실제 장비 로그 샘플이 아직 없어(장비 syslog 미설정) FortiOS 7.2/7.4 Log Message Reference의 기본
+# key=value 형식(date, time, devname, devid, type, subtype, action, srcip, user, policyid, ui, remip)을 근거로 만들었다.
+# 키 이름·값 모양은 실장비 샘플로 재검증해야 한다(런북 docs/runbooks/fortigate-syslog.md 5절). IP는 문서용 예약 대역만 쓴다.
+FORTIGATE_VRL_FILE = ROOT_DIR / "roles" / "openobserve_config" / "files" / "vrl" / "fortigate_semantics.vrl"
+FGT_HEAD = 'date=2026-10-21 time=10:00:00 devname="{dev}" devid="FGT60F0000000000" '
+
+
+def _fgt(rest, dev="NS0399", **extra):
+    # what the pipeline hands over: host_name is the collection server, severity is always 0, body is the line as received
+    return {"service_name": "fortigate-syslog", "host_name": "collector01", "severity": 0,
+            "body": FGT_HEAD.format(dev=dev) + rest, **extra}
+
+
+def _apply_fgt(tmp_path, record):
+    return _apply(tmp_path, record, program=FORTIGATE_VRL_FILE)
+
+
+FGT_CASES = {
+    "admin_login": ('logid="0100032001" type="event" subtype="system" level="information" vd="root" logdesc="Admin login successful" '
+                    'action="login" status="success" user="admin" ui="https(192.0.2.10)" msg="Administrator admin logged in successfully"',
+                    {"event_action": "login", "user_name": "admin", "source_address": "192.0.2.10", "fortigate_log_type": "event",
+                     "fortigate_log_subtype": "system"}),
+    "admin_login_failed": ('logid="0100032002" type="event" subtype="system" level="alert" vd="root" logdesc="Admin login failed" '
+                           'action="login" status="failed" user="admin" ui="ssh(192.0.2.11)" reason="passwd_invalid"',
+                           {"event_action": "login", "user_name": "admin", "source_address": "192.0.2.11",
+                            "fortigate_log_type": "event", "fortigate_log_subtype": "system"}),
+    "config_change": ('logid="0100044546" type="event" subtype="system" level="information" vd="root" logdesc="Attribute configured" '
+                      'action="Edit" user="admin" ui="GUI(192.0.2.10)" cfgpath="firewall.policy" cfgobj="7" msg="Edit firewall.policy 7"',
+                      {"event_action": "edit", "user_name": "admin", "source_address": "192.0.2.10", "fortigate_log_type": "event",
+                       "fortigate_log_subtype": "system"}),
+    "vpn": ('logid="0101039424" type="event" subtype="vpn" level="information" vd="root" logdesc="SSL VPN tunnel up" '
+            'action="tunnel-up" remip=192.0.2.20 user="vpnuser" reason="login successfully"',
+            {"event_action": "tunnel-up", "user_name": "vpnuser", "source_address": "192.0.2.20", "fortigate_log_type": "event",
+             "fortigate_log_subtype": "vpn"}),
+    "utm_ips": ('logid="0419016384" type="utm" subtype="ips" eventtype="signature" level="alert" vd="root" srcip=192.0.2.30 '
+                'dstip=198.51.100.5 policyid=12 action="dropped" attack="Example.Attack" severity="high"',
+                {"event_action": "dropped", "source_address": "192.0.2.30", "fortigate_policy_id": 12, "fortigate_log_type": "utm",
+                 "fortigate_log_subtype": "ips"}),
+    "policy_deny": ('logid="0000000013" type="traffic" subtype="forward" level="notice" vd="root" srcip=192.0.2.40 dstip=198.51.100.6 '
+                    'policyid=0 action="deny" service="HTTPS"',
+                    {"event_action": "deny", "source_address": "192.0.2.40", "fortigate_policy_id": 0, "fortigate_log_type": "traffic",
+                     "fortigate_log_subtype": "forward"}),
+    "ha": ('logid="0104035001" type="event" subtype="ha" level="critical" vd="root" logdesc="HA state changed" '
+           'msg="Virtual cluster 1 member state changed from standby to primary"',
+           {"fortigate_log_type": "event", "fortigate_log_subtype": "ha"}),
+}
+
+
+@pytest.mark.parametrize("case", sorted(FGT_CASES))
+def test_firewall_line_gets_device_type_subtype_action_source_user_and_policy_fields(tmp_path, case):
+    rest, expected = FGT_CASES[case]
+    rec = _fgt(rest)
+    expected = {"device_name": "ns0399", "device_id": "ns0399", **expected}
+    assert _added(rec, _apply_fgt(tmp_path, rec)) == expected
+
+
+@pytest.mark.parametrize("dev, name, ident", [("NS0380", "ns0380", "ns0380"), ("ns0381", "ns0381", "ns0381"), ("Ns0399", "ns0399", "ns0399"),
+                                              ("NS0399.corp.example", "ns0399", "ns0399"), ("lab-fw", "lab-fw", None)])
+def test_device_name_is_normalized_and_the_management_number_comes_from_it(tmp_path, dev, name, ident):
+    out = _apply_fgt(tmp_path, _fgt('type="event" subtype="ha" msg="x"', dev=dev))
+    assert out["device_name"] == name and out.get("device_id") == ident
+
+
+def test_syslog_header_and_priority_before_the_key_values_do_not_matter(tmp_path):
+    rec = _fgt('type="traffic" subtype="forward" srcip=192.0.2.40 action="deny"')
+    rec["body"] = "<189>Oct 21 10:00:00 ns0399 " + rec["body"]
+    assert _apply_fgt(tmp_path, rec)["source_address"] == "192.0.2.40"
+
+
+def test_quoted_values_with_spaces_and_embedded_key_names_are_not_mistaken_for_fields(tmp_path):
+    rec = _fgt('type="event" subtype="system" action="login" user="john doe" msg="user=intruder srcip=198.51.100.99 action=deny" ui="https(192.0.2.10)"')
+    out = _apply_fgt(tmp_path, rec)
+    assert (out["user_name"], out["source_address"], out["event_action"]) == ("john doe", "192.0.2.10", "login")
+
+
+@pytest.mark.parametrize("unset", ['user="N/A"', 'user=""', "user=N/A"])
+def test_unset_user_is_left_out_instead_of_stored_as_a_value(tmp_path, unset):
+    out = _apply_fgt(tmp_path, _fgt(f'type="traffic" subtype="forward" srcip=192.0.2.40 {unset}'))
+    assert "user_name" not in out
+
+
+def test_firewall_body_and_existing_fields_are_never_modified(tmp_path):
+    rec = _fgt(FGT_CASES["admin_login"][0], custom="keep")
+    out = _apply_fgt(tmp_path, rec)
+    for key, value in rec.items():
+        assert out[key] == value, key   # body byte for byte, host_name stays the collection server, severity stays 0
+
+
+@pytest.mark.parametrize("body", [
+    "garbage that is not a log line",
+    "date=2026-10-21 time=10:00:00 devname=\"ns0399\" no type key here",
+    "Oct 21 10:00:00 ns0399 something=else",
+    "",
+])
+def test_firewall_lines_that_cannot_be_interpreted_pass_through_unchanged(tmp_path, body):
+    rec = {"service_name": "fortigate-syslog", "host_name": "collector01", "body": body}
+    assert _apply_fgt(tmp_path, copy.deepcopy(rec)) == rec
+
+
+@pytest.mark.parametrize("rec", [
+    # same FortiGate-looking text, but a server log, a switch line or another service: not touched
+    {"service_name": "sshd", "host_name": "ns0001", "body": FGT_HEAD.format(dev="ns0399") + FGT_CASES["utm_ips"][0]},
+    {"service_name": "switch-syslog", "host_name": "collector01", "body": FGT_HEAD.format(dev="ns0399") + FGT_CASES["utm_ips"][0]},
+    {"host_name": "ns0001", "body": FGT_HEAD.format(dev="ns0399") + FGT_CASES["utm_ips"][0]},
+    {"service_name": "fortigate-syslog"},
+    {"service_name": "fortigate-syslog", "body": 12345},
+    {"service_name": 7, "body": FGT_HEAD.format(dev="ns0399") + FGT_CASES["utm_ips"][0]},
+])
+def test_server_switch_and_other_service_records_are_not_affected_by_the_firewall_function(tmp_path, rec):
+    assert _apply_fgt(tmp_path, copy.deepcopy(rec)) == rec

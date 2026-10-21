@@ -88,9 +88,18 @@
           - (o2c_switch_noise_events + o2c_switch_config_change_events + o2c_switch_login_fail_events + o2c_switch_macflap_events) | o2c_valid_switch_events
           - o2c_switch_syslog_roster | o2c_valid_switch_roster
           - o2c_switch_uplinks | o2c_valid_switch_uplinks
+          # 방화벽 알림의 목록·승인 시간도 SQL에 들어간다(Spec #282 / Ticket-3): 장비는 관리번호 또는 HA 쌍(ns0380+ns0381), 경로·심각도는 key=value 문자만, 시는 0~24 정수(시작 < 끝)
+          - o2c_fortigate_syslog_roster | o2c_valid_fortigate_roster
+          - (o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths + o2c_fortigate_detection_severities) | o2c_valid_fortigate_values
+          - (o2c_fortigate_approved_start_hour | string) is match('^[0-9]+$')
+          - (o2c_fortigate_approved_end_hour | string) is match('^[0-9]+$')
+          - (o2c_fortigate_approved_start_hour | int) < (o2c_fortigate_approved_end_hour | int)
+          - (o2c_fortigate_approved_end_hour | int) <= 24
+          - (o2c_fortigate_silent_minutes | string) is match('^[0-9]+$')
         fail_msg: >-
           agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
           (스위치 syslog 알림 변수는 o2c_switch_*_events가 FACILITY-SEVERITY-MNEMONIC 코드 목록, o2c_switch_syslog_roster가 [ns0250, ...], o2c_switch_uplinks가 [{device: ns0250, port: Gi1/0/49}] 형식이어야 합니다)
+          (방화벽 알림 변수는 o2c_fortigate_syslog_roster가 [ns0399, ns0380+ns0381], 승인 시간이 0~24 정수(시작 < 끝) 형식이어야 합니다)
           (OpenBao 인증은 Semaphore Environment의 VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN). 값은 출력하지 않습니다.
           OpenBao 응답: AppRole 로그인 {{ _o2c_approle_login.status | default('시도 안 함') }}, KV 조회 {{ _o2c_kv_resp.status | default('시도 안 함') }}.
         quiet: true
@@ -153,6 +162,7 @@
           'webhook_url': o2c_kv.alert_webhook_url,
           'webhook_headers': {'Content-Type': 'application/json'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
           'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
+          'fortigate': {'function_name': o2c_fortigate_function_name, 'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/fortigate_semantics.vrl')},
           'switch_syslog': {'stream': o2c_switch_stream, 'function_name': o2c_switch_function_name, 'pipeline_name': o2c_switch_pipeline_name,
                             'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/switch_syslog_semantics.vrl')},
           'alerts': o2c_alerts_active, 'selftest_alert': o2c_selftest_alert,
