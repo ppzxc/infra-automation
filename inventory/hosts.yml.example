@@ -40,6 +40,13 @@ all:
     tcpcheck_excluded:
       hosts: {}
 
+    # 2-3. 프로비저닝 제외: 편입하면 안 되는 호스트(Semaphore 자신, 관리번호 재부여 대기 호스트 등).
+    #      Host Provisioning(provision_hosts.yml)의 사전 검증이 이 그룹의 호스트를 target_hosts에 넣으면
+    #      접속 전에 실패시킨다. 그룹이 없으면 빈 그룹으로 본다. 다른 제외 그룹과 달리 servers에 속하지
+    #      않아도 되며, 영구 차단이 필요한 호스트만 둔다.
+    provision_excluded:
+      hosts: {}
+
     # 3. 네트워크 인프라 스위치 그룹 (Cisco IOS Switches)
     cisco_switches:
       hosts:
