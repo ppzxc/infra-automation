@@ -792,6 +792,20 @@ def test_extra_logs_carry_a_service_name_defaulting_to_the_stream():
     assert extra == {"/opt/app/*.log": "app", "/srv/x.log": "x-svc", "/srv/y.log": "security"}
 
 
+def test_switch_and_fortigate_syslog_paths_never_overlap_and_route_to_their_own_streams():
+    """Spec #282: switch syslog stays on system_logs, firewall syslog goes to security_logs/fortigate-syslog.
+
+    The firewall files live one directory deeper than the switch glob reaches, so no line is collected twice."""
+    switch = {"path": "/var/log/remote/*/*.log", "stream": "system_logs", "service": "switch-syslog"}
+    fw = {"path": "/var/log/remote/fortigate/*/*.log", "stream": "security_logs", "service": "fortigate-syslog"}
+    res = _resolve(otel_extra_logs=[switch, fw])
+    assert res["errors"] == []
+    extra = {l["path"]: (l["stream"], l["service"]) for l in res["otel_logs"][len(STANDARD):]}
+    assert extra == {switch["path"]: ("system_logs", "switch-syslog"), fw["path"]: ("security_logs", "fortigate-syslog")}
+    # '*' does not cross '/', so the switch glob depth (2) cannot reach a firewall file (depth 3)
+    assert switch["path"].count("/") < fw["path"].count("/")
+
+
 @pytest.mark.parametrize("bad", [{"path": "/x.log", "service": "Bad Name"}, {"path": "/x.log", "service": 7},
                                  {"path": "/x.log", "service": ""}, "/var/log/[ab].log", '/var/log/a"b.log'])
 def test_extra_logs_reject_a_bad_service_or_unsupported_glob(bad):

@@ -240,3 +240,15 @@ def test_body_and_existing_fields_are_never_modified(tmp_path):
 ])
 def test_server_logs_and_other_services_are_not_affected(tmp_path, rec):
     assert _apply_switch(tmp_path, copy.deepcopy(rec)) == rec
+
+
+# --------------------------------------------------------------------------
+# 방화벽 syslog(Spec #282): security_logs의 fortigate-syslog 레코드는 security_semantics를 그대로 통과한다
+@pytest.mark.parametrize("rec", [
+    {"service_name": "fortigate-syslog", "host_name": "ns0266",
+     "body": 'date=2026-10-21 time=10:00:00 devname="FW-A" type="event" subtype="system" action="login" status="failed" user="admin"'},
+    {"service_name": "fortigate-syslog", "host_name": "ns0266",
+     "body": 'type="utm" subtype="ips" action="dropped" msg="Failed password for x from 1.2.3.4 port 1"'},
+])
+def test_fortigate_records_on_security_logs_pass_the_security_function_unchanged(tmp_path, rec):
+    assert _apply(tmp_path, copy.deepcopy(rec)) == rec
