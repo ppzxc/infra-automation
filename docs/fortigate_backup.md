@@ -19,7 +19,7 @@
 ## 2. 왜 구현해야 하는가? (Why)
 
 1. 장비 교체·설정 실수 시 최신 설정으로 복구해야 한다(ISMS 2.9.3 백업 및 복구관리, 변경관리 증적).
-2. 직전 백업과 비교해 승인 없는 변경을 감지하는 후속 티켓(#286)의 입력이 된다.
+2. 직전 백업과 비교해 승인 없는 변경을 감지하고 알린다(7절, #286).
 3. 백업 계정이 탈취돼도 피해가 작아야 한다: 읽기 전용 프로파일, 접속 허용 출발지는 Semaphore만.
 
 ---
@@ -41,8 +41,16 @@
 | `FGBK-011` | `Save the configuration to the backup destination (0600)` | `ansible.builtin.copy` | Controller / Localhost | 원자적 쓰기, `0600`, `no_log`, 같은 이름이 있으면 덮어쓰지 않음 |
 | `FGBK-012` | `Find backup files of this target older than the retention period` | `ansible.builtin.find` | Controller / Localhost | 읽기 전용 (`<장비>_*.conf`, 수정 시각 기준) |
 | `FGBK-013` | `Delete the expired backup files of this target` | `ansible.builtin.file` | Controller / Localhost | `state: absent` |
+| `FGBK-014` | `Find the backup files of this target to locate the previous backup` | `ansible.builtin.find` | Controller / Localhost | 읽기 전용 (`<장비>_*.conf`) |
+| `FGBK-015` | `Pick the previous backup of the same target (member may differ)` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수 (마지막 `_` 뒤 시각 기준 직전 파일, 멤버 무관, 없으면 빈 값) |
+| `FGBK-016` | `Read the previous backup for comparison` | `ansible.builtin.slurp` | Controller / Localhost | 읽기 전용, `no_log`, 직전 백업이 있을 때만 |
+| `FGBK-017` | `Compare with the previous backup and keep only section and item names` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수, `no_log`, `#` 헤더 줄 제외, 값은 결과에 넣지 않음 |
+| `FGBK-018` | `Report the changed sections (names only, no values)` | `ansible.builtin.debug` | Controller / Localhost | 읽기 전용, 변경이 있을 때만 |
+| `FGBK-019` | `Assert the alert webhook is configured when a change is detected` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (변경이 있는데 webhook이 없으면 실패) |
+| `FGBK-020` | `Send the configuration change alert once` | `ansible.builtin.uri` | Controller / Localhost | POST, `no_log`, 변경이 있을 때만(변경이 없거나 첫 백업이면 건너뜀) |
+| `FGBK-021` | `Assert the alert was delivered` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (전송 실패 시 호스트 실패) |
 
-테스트는 [tests/test_fortigate_backup.py](../tests/test_fortigate_backup.py)다. 구조·3-Way 추적성은 정적으로, 동작(대상별 저장·응답 멤버 파일명·장애 전환 시 멤버 변경·`0600`, 상태·설정 응답이 비정상이거나 비면 저장 안 함과 실패, 보관 일수 정리, 토큰 비노출)은 장비를 로컬 HTTP 서버로 모사해 역할을 실제 실행해 검증한다. 장비에는 닿지 않는다.
+테스트는 [tests/test_fortigate_backup.py](../tests/test_fortigate_backup.py)다. 구조·3-Way 추적성은 정적으로, 동작(대상별 저장·응답 멤버 파일명·장애 전환 시 멤버 변경·`0600`, 상태·설정 응답이 비정상이거나 비면 저장 안 함과 실패, 보관 일수 정리, 토큰 비노출, 설정 변경 알림·첫 백업·멤버 전환·비밀 비노출)은 장비를 로컬 HTTP 서버(장비와 알림 수신기)로 모사해 역할을 실제 실행해 검증한다. 장비에는 닿지 않는다.
 
 ---
 
@@ -58,7 +66,7 @@
 - **#286의 비교 기준은 접속 대상 단위다.** 같은 `<장비>_` 접두사 파일 중 현재(가장 큰 이름)의 **바로 앞 시각 파일이 직전 백업**이며, 멤버가 같을 필요가 없다. 파일명으로 정렬할 때는 `<장비>_` 뒤의 멤버가 아니라 **마지막 `_` 뒤의 시각**을 키로 써야 한다(멤버 이름이 정렬에 섞이면 안 된다).
 - **장애 전환**: active가 바뀌면 같은 대상인데 멤버 자리가 달라진 파일이 나온다(예: `ns0380_fw-a_…` 다음 `ns0380_fw-b_…`). 이 경우 설정 차이는 설정 변경이 아니라 멤버 고유 설정(hostname, HA 우선순위, 관리 인터페이스)에서 나올 수 있으므로 #286은 멤버가 바뀐 비교임을 알림에 표시하고 멤버 고유 줄을 변경으로 오탐하지 않게 다뤄야 한다.
 - 백업이 실패하면 파일이 생기지 않으므로 "파일이 있다 = 유효한 설정"이다.
-- 헤더 `#config-version=` 줄에 장비 버전·빌드 정보가 있어 펌웨어 업데이트만으로도 달라질 수 있다. 비교 규칙은 #286에서 정한다.
+- 헤더 `#config-version=` 줄에 장비 버전·빌드 정보가 있어 펌웨어 업데이트만으로도 달라질 수 있다. `#`로 시작하는 헤더 줄은 비교에서 제외한다(7절).
 
 ### 알려진 한계
 
@@ -97,6 +105,22 @@
 
 ---
 
-## 7. 장비 쪽 준비 (사람이 수행)
+## 7. 설정 변경 감지와 알림 (#286)
+
+백업을 저장한 직후(보관 정리 전) 같은 접속 대상의 **직전 백업**과 비교해 달라졌을 때만 알린다.
+
+- **직전 백업**: 같은 `<장비>_` 파일 중 현재 바로 앞 시각의 파일이다. 정렬 키는 마지막 `_` 뒤 시각이고 멤버는 같지 않아도 된다(4절 계약). 없으면(첫 백업, 직전 파일이 보관 정리로 없어진 경우) 비교·알림 없이 정상 종료한다.
+- **비교에서 제외**: `#`로 시작하는 헤더 줄(`#config-version`의 빌드·사용자·시각 등 매번 바뀌는 값). 이 줄만 다르면 알림이 없다. 줄은 섹션·항목(`config`/`edit`) 단위로 파싱하고 따옴표 안의 여러 줄 값(인증서)은 한 값으로 본다.
+- **멤버가 바뀐 비교**: 장애 전환으로 직전 백업과 응답 멤버가 다르면 멤버 고유 설정(`config system global`의 `hostname`, `config system ha`의 `priority`)은 변경으로 세지 않고, 알림에 멤버 변경 비교임을 적는다.
+- **반복 알림 금지(멱등)**: 비교는 항상 "직전 백업 대 이번 백업"이므로 같은 변경은 변경이 처음 보인 실행에서만 한 번 알린다. 다음 실행은 변경 후 상태끼리 비교해 조용하다.
+- **비밀 비노출**: 알림과 로그에는 섹션·항목 이름과 바뀐 설정 키 이름만 나온다(예: `config system admin > edit "admin" (변경: password)`). 값(VPN 사전 공유 키, 관리자 해시, 인증서)은 어느 곳에도 쓰지 않으며, 설정을 다루는 태스크는 `no_log`다. 항목은 기본 20개까지 보이고 나머지는 건수로 줄인다.
+- **통지 형식**: 기존 알림 형식(등급 P2, 무슨 일, 왜 중요, 대상, 조치, 런북)을 따라 네이버웍스 webhook으로 직접 보낸다. 런북은 [alerts.md](runbooks/alerts.md#fortigate-config-change)다.
+- **설정**: `fortigate_backup_alert_webhook_url`(필수, 변경이 있을 때만 필요), `fortigate_backup_alert_webhook_token`, `fortigate_backup_alert_webhook_auth_header`(기본 `X-NANOIT-ACCESS`)를 Semaphore Environment로 주입한다. OpenBao `agents/openobserve`의 `alert_webhook_*`와 같은 값이다. 저장소에는 두지 않는다.
+- **알림 실패**: webhook이 없거나 전송이 실패하면(3회 시도) 호스트를 `FORTIGATE-ALERT`로 실패 처리하고 변경 항목 이름을 로그에 남긴다. 백업은 이미 저장돼 같은 변경을 다시 알리지 않으므로 이때는 사람이 변경 항목을 확인해야 한다.
+- **한계**: 값이 바뀐 사실만 알리고 무엇으로 바뀌었는지는 보여 주지 않는다(원본은 백업 파일 `diff`로 사람이 확인). 설정 키 이름이 같은 값 변경은 키 이름만 나온다.
+
+---
+
+## 8. 장비 쪽 준비 (사람이 수행)
 
 API 계정 생성은 자동화하지 않는다. 최소 권한 관리자 프로파일과 REST API 관리자를 대상마다(IDC 쌍은 HA 동기화로 한 번) 만들고, 접속 허용 출발지(trusted host)를 Semaphore로 제한하고, 토큰을 위 경로로 주입한다. **주의: `config/backup` API는 완전 읽기 전용 프로파일로는 거부될 수 있다.** 벤더 연동 문서 중에는 백업을 위해 시스템 관련 접근 그룹에 쓰기 권한이 필요하다고 한 것이 있어(FortiOS 버전별로 다름) 7.2.13과 7.4.12에서 실제로 백업과 `system/status`가 되는 가장 낮은 권한 프로파일을 사람이 확인해 정한다. 이 프로파일은 trusted host로 Semaphore 출발지만 허용해 위험을 줄인다. 상세 명령과 체크리스트는 FortiOS 버전에 따라 달라 로컬 비공개 자료에서 관리한다(공개 저장소 원칙).

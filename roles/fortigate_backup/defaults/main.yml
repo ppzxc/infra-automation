@@ -38,3 +38,11 @@ fortigate_backup_vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | d
 fortigate_backup_vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
 fortigate_backup_vault_role_id: "{{ lookup('ansible.builtin.env', 'VAULT_ROLE_ID') }}"
 fortigate_backup_vault_secret_id: "{{ lookup('ansible.builtin.env', 'VAULT_SECRET_ID') }}"
+
+# 설정 변경 알림 (#286). 직전 백업과 달라졌을 때만 네이버웍스 webhook으로 한 번 보낸다.
+# webhook URL·토큰은 Semaphore Environment로 주입한다(OpenBao agents/openobserve의 alert_webhook_url과 같은 값). 저장소에 두지 않는다.
+fortigate_backup_alert_webhook_url: ""
+fortigate_backup_alert_webhook_token: ""
+fortigate_backup_alert_webhook_auth_header: X-NANOIT-ACCESS
+fortigate_backup_alert_max_items: 20
+fortigate_backup_alert_runbook: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#fortigate-config-change"
