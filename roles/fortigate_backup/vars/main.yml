@@ -1,0 +1,10 @@
+---
+# 내부 파생값(사용 시점에 계산). 접속 정보는 OpenBao KV `<prefix><인벤토리 호스트명>`의 스위치 시크릿과 같은 키 이름을 쓴다:
+# ansible_host(주소), ansible_port(포트, 문자열), fqdn(도메인). 값은 로그에 남기지 않는다(관련 태스크는 no_log).
+_fgbk_kv: "{{ fortigate_backup_kv_response.json.data.data | default({}) }}"
+# 인벤토리의 ansible_host가 이미 있으면(호스트명과 다르면) 그것이 우선이고, 없으면 KV의 ansible_host다.
+_fgbk_address: "{{ ansible_host if (ansible_host | default('') | length > 0 and ansible_host != inventory_hostname) else (_fgbk_kv.ansible_host | default('')) }}"
+# 접속 대상은 KV fqdn이 있으면 fqdn(인증서 이름 검증), 없으면 주소다.
+_fgbk_target: "{{ _fgbk_kv.fqdn | default('', true) or _fgbk_address }}"
+# 포트: KV ansible_port, 없으면 fortigate_backup_api_port.
+_fgbk_port: "{{ _fgbk_kv.ansible_port | default('', true) or fortigate_backup_api_port }}"

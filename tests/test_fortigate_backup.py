@@ -73,10 +73,25 @@ def test_doc_records_naming_layout_and_decisions():
         assert needle in doc, needle
 
 
+def _tasks_by_id():
+    """Tasks keyed by Spec ID, including those inside block/always sections."""
+    found = {}
+
+    def walk(items):
+        for t in items:
+            m = re.match(r"\[(FGBK-\d{3})\]", t.get("name", ""))
+            if m:
+                found[m.group(1)] = t
+            for key in ("block", "rescue", "always"):
+                walk(t.get(key) or [])
+
+    walk(yaml.safe_load((ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")))
+    return found
+
+
 def test_no_plaintext_token_or_unprotected_secret_tasks():
-    tasks = yaml.safe_load((ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8"))
-    by_id = {re.match(r"\[(FGBK-\d{3})\]", t["name"]).group(1): t for t in tasks}
-    for tid in ("FGBK-002", "FGBK-003", "FGBK-006", "FGBK-009", "FGBK-011"):
+    by_id = _tasks_by_id()
+    for tid in ("FGBK-002", "FGBK-003", "FGBK-004", "FGBK-006", "FGBK-009", "FGBK-011"):
         assert by_id[tid].get("no_log") is True, tid
     assert by_id["FGBK-011"]["ansible.builtin.copy"]["mode"] == "0600"
     assert by_id["FGBK-005"]["ansible.builtin.file"]["mode"] == "0700"
@@ -91,7 +106,7 @@ class _Device:
         self.mode = "ok"
         self.config = CONFIG_BODY
         self.hostname = "fw-primary"
-        self.serial = "FGT70GTEST000001"
+        self.serial = "FGTSERIAL000001"
         self.requests = []
         outer = self
 
@@ -109,7 +124,7 @@ class _Device:
                     else:
                         code = 200
                         body = json.dumps({"http_status": 200, "serial": outer.serial,
-                                           "results": {"hostname": outer.hostname}, "version": "v7.2.13"})
+                                           "results": {"hostname": outer.hostname}, "version": "vA"})
                 elif outer.mode == "empty":
                     code, body = 200, ""
                 elif outer.mode == "html":
@@ -151,8 +166,8 @@ def ansible_env(tmp_path):
     return tmp_path
 
 
-def _run(env_dir, device, backup_dir, targets=("ns0380",), token=SECRET_TOKEN, extra=None):
-    hosts = {inv: {"ansible_host": "127.0.0.1"} for inv in targets}
+def _run(env_dir, device, backup_dir, targets=("ns0380",), token=SECRET_TOKEN, extra=None, host_vars=None, env_extra=None, drop_port=False):
+    hosts = {inv: ({"ansible_host": "127.0.0.1"} if host_vars is None else dict(host_vars)) for inv in targets}
     (env_dir / "inv.yml").write_text(yaml.safe_dump({"all": {"hosts": hosts}}), encoding="utf-8")
     ev = {
         "fortigate_backup_dir": str(backup_dir),
@@ -161,10 +176,13 @@ def _run(env_dir, device, backup_dir, targets=("ns0380",), token=SECRET_TOKEN, e
         "fortigate_api_token": token,
         "fortigate_backup_timeout": 5,
     }
+    if drop_port:
+        del ev["fortigate_backup_api_port"]
     ev.update(extra or {})
     (env_dir / "ev.yml").write_text(yaml.safe_dump(ev), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
     env["ANSIBLE_CONFIG"] = str(env_dir / "ansible.cfg")
+    env.update(env_extra or {})
     return subprocess.run(
         ["ansible-playbook", "-i", str(env_dir / "inv.yml"), str(env_dir / "play.yml"), "-e", f"@{env_dir / 'ev.yml'}"],
         capture_output=True, text=True, env=env, cwd=env_dir,
@@ -213,7 +231,7 @@ def test_serial_can_be_member_and_name_is_sanitized(ansible_env, device, tmp_pat
     for f in _files(out):
         f.unlink()
     assert _run(ansible_env, device, out, extra={"fortigate_backup_member_source": "serial"}).returncode == 0
-    assert FILE_RE.match(_files(out)[0].name)["member"] == "FGT70GTEST000001"
+    assert FILE_RE.match(_files(out)[0].name)["member"] == "FGTSERIAL000001"
 
 
 @pytest.mark.parametrize("mode", ["empty", "html", "error"])
@@ -321,7 +339,7 @@ HASH = "SH2xYz9SECRETADMINHASHvalue"
 PSK = "ENC SECRETPSKvalue123456"
 
 
-def _cfg(version="FGT70G-v7.2.13-build1:opmode=0:vdom=0:user=admin", hostname="fw-primary", extra=""):
+def _cfg(version="FGT-vA-build1:opmode=0:vdom=0:user=admin", hostname="fw-primary", extra=""):
     return (
         f"#config-version={version}\n#conf_file_ver=123\n#buildno=1\n"
         f"config system global\n    set hostname \"{hostname}\"\n    set admintimeout 5\nend\n"
@@ -389,7 +407,7 @@ def test_first_backup_has_no_alert_and_no_error(ansible_env, device, hook, tmp_p
 
 
 def test_unchanged_or_header_only_change_does_not_alert(ansible_env, device, hook, tmp_path):
-    _, r2 = _two_runs(ansible_env, device, tmp_path / "bk", hook, _cfg(), _cfg(version="FGT70G-v7.2.14-build9:opmode=0:vdom=0:user=other"))
+    _, r2 = _two_runs(ansible_env, device, tmp_path / "bk", hook, _cfg(), _cfg(version="FGT-vB-build9:opmode=0:vdom=0:user=other"))
     assert r2.returncode == 0, r2.stdout + r2.stderr
     assert hook.posts == []
 
@@ -495,3 +513,125 @@ def test_multiline_values_do_not_break_parsing():
     cert = 'config vpn certificate local\n    edit "c"\n        set certificate "-----BEGIN CERTIFICATE-----\nAAAA\nend\n-----END CERTIFICATE-----\n"\n    next\nend\n'
     assert f(_cfg() + cert, _cfg() + cert, False) == []
     assert len(f(_cfg() + cert.replace("AAAA", "BBBB"), _cfg() + cert, False)) == 1
+
+
+def test_retention_runs_even_when_the_alert_cannot_be_delivered_but_the_host_still_fails(ansible_env, device, tmp_path):
+    """FGBK-012/013 must not be skipped by the FGBK-021 failure, or a webhook outage lets backups pile up without limit."""
+    out = tmp_path / "bk"
+    out.mkdir()
+    device.config = _cfg()
+    assert _run(ansible_env, device, out).returncode == 0
+    expired = out / "ns0380_fw-old_20200101T000000.conf"
+    expired.write_text("x", encoding="utf-8")
+    old = time.time() - 100 * 86400
+    os.utime(expired, (old, old))
+    device.config = _cfg().replace("admintimeout 5", "admintimeout 9")
+    time.sleep(1.1)
+    res = _run(ansible_env, device, out)   # webhook 없음: 변경 알림이 나가지 못한다
+    assert res.returncode != 0 and "FORTIGATE-ALERT" in res.stdout + res.stderr
+    assert not expired.exists()
+
+
+def test_tasks_compute_token_and_member_once():
+    tasks = (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
+    assert tasks.count("fortigate_backup_kv_response.json.data.data.api_token }}") == 1
+    assert tasks.count("regex_replace('[^A-Za-z0-9-]'") == 1
+    assert tasks.count("fortigate_backup_member(fortigate_backup_file_prefix)") == 1
+
+
+def test_doc_records_why_there_is_no_molecule_verify():
+    doc = (ROOT_DIR / "docs" / "fortigate_backup.md").read_text(encoding="utf-8")
+    assert "molecule" in doc and "cisco_backup" in doc and "pytest" in doc
+    assert not (ROLE_DIR / "molecule").exists()
+
+
+# --------------------------------------------------------------------------
+# OpenBao KV 접속 정보 (ansible_host / ansible_port / fqdn, 스위치 시크릿과 같은 키 이름)
+# --------------------------------------------------------------------------
+class _Bao:
+    """Minimal OpenBao KV v2 stand-in: serves one secret per path and records the requests."""
+
+    def __init__(self, data, status=200):
+        outer = self
+        self.requests = []
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                outer.requests.append((self.path, self.headers.get("X-Vault-Token"), self.headers.get("X-Vault-Namespace")))
+                body = json.dumps({"data": {"data": data}}) if status == 200 else "{}"
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body.encode())))
+                self.end_headers()
+                self.wfile.write(body.encode())
+
+        self.server = HTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def env(self):
+        return {"VAULT_ADDR": self.url, "VAULT_TOKEN": "bao-test-token", "VAULT_NAMESPACE": "infra/prod/host"}
+
+    def close(self):
+        self.server.shutdown()
+
+
+@pytest.fixture
+def bao_factory():
+    made = []
+
+    def make(data, status=200):
+        b = _Bao(data, status)
+        made.append(b)
+        return b
+
+    yield make
+    for b in made:
+        b.close()
+
+
+def test_connection_info_comes_from_kv_when_inventory_has_only_the_host_name(ansible_env, device, bao_factory, tmp_path):
+    """Semaphore inventories list host names only: address and port come from the KV, and the file is saved as usual."""
+    bao = bao_factory({"api_token": SECRET_TOKEN, "ansible_host": "127.0.0.1", "ansible_port": str(device.port)})
+    res = _run(ansible_env, device, tmp_path / "bk", token="", host_vars={}, drop_port=True, env_extra=bao.env())
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert len(_files(tmp_path / "bk")) == 1 and device.requests
+    assert bao.requests[0][0] == "/v1/secret/data/fortigate/ns0380" and bao.requests[0][2] == "infra/prod/host"
+    assert "127.0.0.1" not in res.stdout + res.stderr and str(device.port) not in res.stdout + res.stderr   # 주소·포트는 로그에 없다
+
+
+def test_fqdn_in_kv_is_the_connection_target_and_the_inventory_address_still_wins_for_the_address(ansible_env, device, bao_factory, tmp_path):
+    """fqdn (certificate name) is preferred as the target; here it is localhost, which only resolves when it is really used."""
+    bao = bao_factory({"api_token": SECRET_TOKEN, "fqdn": "localhost", "ansible_host": "203.0.113.77"})
+    res = _run(ansible_env, device, tmp_path / "bk", token="", env_extra=bao.env())   # 인벤토리 ansible_host=127.0.0.1이 KV 주소보다 우선
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert device.requests and not any("203.0.113.77" in r[0] for r in device.requests)
+
+
+def test_kv_address_is_used_when_inventory_has_none_and_kv_port_beats_the_variable(ansible_env, device, bao_factory, tmp_path):
+    bao = bao_factory({"api_token": SECRET_TOKEN, "ansible_host": "127.0.0.1", "ansible_port": str(device.port)})
+    res = _run(ansible_env, device, tmp_path / "bk", token="", host_vars={}, extra={"fortigate_backup_api_port": 1}, env_extra=bao.env())
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_kv_without_connection_keys_keeps_the_old_behaviour_and_missing_address_fails_without_values(ansible_env, device, bao_factory, tmp_path):
+    bao = bao_factory({"api_token": SECRET_TOKEN})
+    assert _run(ansible_env, device, tmp_path / "bk", token="", env_extra=bao.env()).returncode == 0   # 인벤토리 ansible_host 사용
+    res = _run(ansible_env, device, tmp_path / "bk2", token="", host_vars={}, env_extra=bao.env())     # 주소가 어디에도 없다
+    assert res.returncode != 0 and "FORTIGATE-TOKEN" in res.stdout + res.stderr
+    assert SECRET_TOKEN not in res.stdout + res.stderr
+
+
+def test_inventory_address_and_injected_token_work_even_when_the_kv_path_does_not_exist(ansible_env, device, bao_factory, tmp_path):
+    bao = bao_factory({}, status=404)
+    res = _run(ansible_env, device, tmp_path / "bk", env_extra=bao.env())
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_doc_names_the_kv_connection_keys_without_values():
+    doc = (ROOT_DIR / "docs" / "fortigate_backup.md").read_text(encoding="utf-8")
+    for key in ("ansible_host", "ansible_port", "fqdn"):
+        assert f"`{key}`" in doc, key

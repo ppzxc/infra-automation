@@ -333,7 +333,7 @@ def o2c_absence_sql(hosts, stream, level):
     return ' UNION ALL '.join(_absence_branch(h, stream, level) for h in hosts)
 
 
-def o2c_missing_sql(hosts, stream, field, cond, body_match=False):
+def o2c_missing_sql(hosts, stream, field, cond, body_match=False, field_column=True):
     """One row per roster host without a record matching ``cond`` (e.g. no successful backup) in the alert window.
 
     ``field`` is the stream's host column (``host`` for backup_logs, ``host_name`` elsewhere). Same UNION ALL branch shape as
@@ -343,16 +343,22 @@ def o2c_missing_sql(hosts, stream, field, cond, body_match=False):
     such as ``devname`` matches the key's value instead: ``lower(body) LIKE '%devname="<host>%'``). A host ``a+b`` is an HA pair: either member counts.
     ``field`` only exists on records the ingest pipeline already processed, so without this the first evaluation after a pipeline
     change sees no data for any host and reports every host as silent.
+
+    ``field_column=False``: ``field`` is only the output column alias and the WHERE clause never reads it (needs ``body_match``).
+    Use it when the column may not exist yet (it is created by the first processed record); referencing a missing column makes
+    every evaluation fail.
     """
     if not _HOST_RE.match(field):
         raise ValueError('SQL에 넣을 수 없는 필드 이름: %s' % field)
+    if not field_column and not body_match:
+        raise ValueError('field_column=False에는 body_match가 필요하다')
     if not hosts:
         return 'SELECT \'none\' AS %s, count(*) AS n FROM "%s" WHERE %s HAVING count(*) < 0' % (field, stream, cond)
 
     def who(h):
         # `a+b`는 HA 멤버 쌍이다: 어느 한쪽이라도 보내면 수신 중이다(대기 멤버는 평소 조용하고 장애 전환 뒤에는 반대가 된다)
         members = h.split('+')
-        conds = ["%s = '%s'" % (field, m) for m in members]
+        conds = ["%s = '%s'" % (field, m) for m in members] if field_column else []
         if body_match:
             for m in members:
                 # True: 스위치 syslog 머리말(`... ns0250-3750X:`)에서 `' <호스트>'`. 문자열: 그 키의 값(`devname="ns0399"`, 따옴표 없는 `devname=ns0399`도)
@@ -429,7 +435,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                 rec = dict(rec)
                 # omit_host_field: 변환 전 레코드(호스트 필드 없이 원문만 있음)를 흉내 낸다. 원문의 {host}가 가짜 호스트로 바뀐다
                 host_fields = {} if rec.pop('omit_host_field', False) else {spec.get('host_field', DEFAULT_ROW_KEY): host}
-                if not host_fields and isinstance(rec.get('body'), str):
+                if isinstance(rec.get('body'), str):
                     rec['body'] = rec['body'].replace('{host}', host)
                 repeat = rec.pop('repeat', 1)
                 rec_stream = rec.pop('stream', stream)   # 한 알림이 여러 스트림을 보면 레코드마다 대상 스트림을 지정한다
@@ -440,7 +446,8 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
         missing = alert.get('missing')
         if missing:
             roster = list((rosters or {}).get(missing['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
-            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'], missing.get('body_match') or False)
+            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'], missing.get('body_match') or False,
+                                 missing.get('field_column', True))
         if absence:
             roster = list((rosters or {}).get(absence['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
             sql = o2c_absence_sql(roster, stream, absence['level'])
@@ -590,7 +597,7 @@ def o2c_switch_uplink_sql(entries, noise_events=None):
 # --- 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3) ---------------------------------------------------------------------
 # 방화벽 줄은 security_logs에 service_name=fortigate-syslog로 들어온다. 이 스트림에는 첫 방화벽 줄이 들어오기 전까지 방화벽 컬럼
 # (device_id, fortigate_log_subtype ...)이 없으므로 알림 SQL은 service_name과 원문 body의 key=value만 읽는다(없는 컬럼은 평가 오류가 된다).
-# FortiOS 7.2/7.4 기본 형식은 값을 따옴표로 감싸지만 실장비 샘플로 확인하기 전이라 따옴표 있는 값과 없는 값을 모두 받는다.
+# FortiOS 기본 형식은 값을 따옴표로 감싸지만 실장비 샘플로 확인하기 전이라 따옴표 있는 값과 없는 값을 모두 받는다.
 _KEY_RE = _re.compile(r'^[a-z][a-z0-9_]*$')
 _VALUE_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 _FORTIGATE_MEMBER_RE = _re.compile(r'^ns[0-9]+(\+ns[0-9]+)*$')
