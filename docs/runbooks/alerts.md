@@ -410,6 +410,97 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 
 ---
 
+## 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3)
+
+방화벽 syslog는 [수신 경로](fortigate-syslog.md)를 거쳐 `security_logs`에 `service_name=fortigate-syslog`로 들어온다. 알림 6개는 스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)을 쓴다.
+
+> **입력 로그는 합성이다.** 알림 조건과 검증 레코드는 FortiOS 7.2/7.4 Log Message Reference의 기본 key=value 형식으로 만든 가짜 줄이다. **실장비 샘플(비공개 경로)로 키 이름과 값 모양을 다시 검증하기 전까지 확정이 아니다.** 확인할 항목: `subtype`/`action`/`status`(관리자 로그인 실패), `cfgpath`·`user`·`time`(설정 변경), `subtype=ha`와 `logdesc`, `type=utm`·`severity`·`attack`, `devname`. 샘플과 다르면 `roles/openobserve_config/defaults/main.yml`의 알림 SQL, 검증 레코드(`files/alert_fixtures.yml`)를 함께 고친다. 장비 쪽 로그 전송은 아직 설정하지 않았으므로 지금은 알림이 울릴 일이 없다.
+
+| 알림 | 등급 | 조건 (기본값) | 재통지 |
+|---|---|---|---|
+| `infra-fortigate-admin-login-failures` | 🟠 P2 | 한 출발지에서 관리자 로그인 실패가 5분 안에 5회 이상 | 30분 |
+| `infra-fortigate-change-unapproved` | 🔴 P1 | 정책·계정 변경이 승인 시간(기본 9~18시) 밖 | 5분(구간과 같음) |
+| `infra-fortigate-change-approved` | 🟡 P3 | 정책·계정 변경이 승인 시간 안, 하루 1번 요약 | 하루 |
+| `infra-fortigate-ha-failover` | 🟠 P2 | HA 로그(`subtype=ha`) 1건부터 | 30분 |
+| `infra-fortigate-critical-detection` | 🔴 P1 | UTM 탐지(`type=utm`) 중 `severity=critical` 1건부터 | 60분 |
+| `infra-fortigate-syslog-silent` | 🟠 P2 | 감시 목록의 방화벽이 120분 넘게 로그 없음 | 하루 |
+
+**중복 알림 방지**: 모든 알림이 재통지 간격(silence)을 가진다. 같은 공격·같은 HA 전환 반복은 위 간격마다 한 번만 알리고, 변경 알림은 조회 구간(5분)과 같아 같은 줄을 두 번 알리지 않는다. 승인 시간 안의 변경은 하루 1번 요약으로만 가므로 정상 작업이 P1을 만들지 않는다.
+
+**공통 한계**: 알림 SQL은 `service_name`과 원문 `body`의 `key=value`만 읽는다. `security_logs`에는 첫 방화벽 줄이 들어오기 전까지 방화벽 필드(`device_id` 등) 컬럼이 없어서, 그 컬럼을 참조하면 알림 평가가 매번 오류가 나고 Config 실행(`O2C-036`)이 막히기 때문이다. 필드 추출([OpenObserve 구성](../openobserve_config.md), #285)과 별개로 동작한다. 따옴표 있는 값(`subtype="ha"`)과 없는 값(`subtype=ha`)을 모두 받는다.
+
+**목록 갱신 절차**: 아래 값은 모두 역할 기본 변수(`roles/openobserve_config/defaults/main.yml`)이며 Semaphore의 `OpenObserve — Config` 템플릿 Environment(`-e`)나 저장소 기본값을 고친 뒤 **`OpenObserve — Config`를 다시 실행**해야 반영된다. 잘못된 형식(장비 이름, 경로 문자, 승인 시간)은 요청 전에 실패한다.
+- `o2c_fortigate_syslog_roster`(수신 중단 감시 장비): **기본값은 비어 있다.** 방화벽 3대(`ns0380`, `ns0381`, `ns0399`) 모두 장비 쪽 로그 전송을 아직 설정하지 않았고, 전송 전 장비를 넣으면 허위 알림이 계속 오기 때문이다. 장비가 로그를 보내기 시작하고 `security_logs`에 도착하는 것을 확인한 **뒤에** 관리번호를 더한다(사무실 `ns0399`가 먼저). IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤에는 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶어 한 항목으로 쓴다(어느 한 멤버라도 보내면 수신 중). 목록에 없는 장비는 로그가 없어도 알리지 않는다. 목록이 비면 규칙은 있지만 행을 돌려주지 않는다.
+- `o2c_fortigate_approved_start_hour`, `o2c_fortigate_approved_end_hour`(승인 시간, 기본 9, 18, 끝 미포함): 변경 로그 원문의 `time=`(장비 시계)을 읽는다. **장비 시간대가 운영 시간대(KST)여야 한다.** 시각이 없는 줄은 승인 시간 밖으로 본다. 요일은 구분하지 않는다.
+- `o2c_fortigate_policy_cfgpaths`, `o2c_fortigate_account_cfgpaths`(변경을 알릴 `cfgpath`): 기본은 정책(`firewall.policy`, `firewall.policy6`, `firewall.proxy-policy`)과 계정(`system.admin`, `system.accprofile`, `system.api-user`, `user.local`, `user.group`)이다.
+- `o2c_fortigate_detection_severities`(기본 `critical`), `o2c_fortigate_login_fail_threshold`(기본 5), `o2c_fortigate_silent_minutes`(기본 120, 스위치 24시간보다 짧다. 방화벽은 로그가 계속 나오므로), 재통지 간격 `o2c_fortigate_*_silence_minutes`.
+
+<a id="fortigate-admin-login-failures"></a>
+### 🟠 방화벽 관리자 로그인 연속 실패 (`infra-fortigate-admin-login-failures`)
+
+**조건**: `subtype=system`, `action=login`, `status=failed`인 줄이 같은 출발지에서 5분 안에 5회 이상(`o2c_fortigate_login_fail_threshold`). VPN 사용자 로그인 실패는 관리자 로그인이 아니라 대상이 아니다.
+
+**왜 중요한가**: 방화벽 관리자 계정이 뚫리면 모든 통신 정책을 바꿀 수 있다(무차별 대입의 전형).
+
+**확인**: 행의 출발지가 사내 작업자·Semaphore인지 본다. 로그 보기에서 실패한 계정과 접속 방식(`ui`: GUI/ssh)을 읽는다. 같은 출발지의 로그인 성공이 이어졌는지 본다.
+
+**대응**: 외부·미확인 출발지면 관리 접속 허용 주소(trusted host)와 관리 인터페이스 노출 범위를 점검해 막는다. 성공이 이어졌으면 계정 변경 알림(아래)과 함께 보고 계정을 잠근다. 작업자의 오입력이면 기록만 남긴다.
+
+<a id="fortigate-change-unapproved"></a>
+### 🔴 방화벽 정책·계정 변경, 승인 시간 밖 (`infra-fortigate-change-unapproved`)
+
+**조건**: `cfgpath`가 정책·계정 목록에 있는 변경이 승인 시간(장비 시계 기준 9~18시) 밖에 기록됨. 시각을 읽을 수 없는 줄도 포함한다. 행에 장비, 변경 대상(`cfgpath`), 관리자가 나온다.
+
+**왜 중요한가**: 승인되지 않은 정책·계정 변경은 차단 해제나 백도어 계정 생성일 수 있다. 변경 이력은 ISMS 변경 관리 증적이다.
+
+**확인**: 행의 관리자와 `cfgpath`를 작업 요청·Semaphore 이력과 대조한다. 로그 보기에서 `cfgattr`(바뀐 값)과 접속 방식·출발지(`ui`)를 읽는다. 직전 [FortiGate Backup](../fortigate_backup.md)과 비교하면 바뀐 설정을 알 수 있다.
+
+**대응**: 승인된 긴급 작업이 아니면 해당 관리자 계정을 잠그고 직전 설정으로 되돌리며 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다.
+
+<a id="fortigate-change-approved"></a>
+### 🟡 방화벽 정책·계정 변경, 승인 시간 안 하루 요약 (`infra-fortigate-change-approved`)
+
+**조건**: 위와 같은 변경이 승인 시간 안에 기록됨. 하루에 한 번 요약한다.
+
+**왜 중요한가**: 정상 작업이 대부분이지만 변경 관리 증적으로 그날의 작업 요청과 대조해야 한다. 대응 작업이 없는 변경은 계정 도용일 수 있다.
+
+**확인·대응**: 행의 관리자·변경 대상을 그날의 작업 요청과 대조해 결과를 작업 기록에 남긴다. 대응 작업이 없는 변경이면 승인 시간 밖 변경 절차(P1)로 격상한다.
+
+<a id="fortigate-ha-failover"></a>
+### 🟠 방화벽 HA 전환·이상 (`infra-fortigate-ha-failover`)
+
+**조건**: `subtype=ha` 로그 1건부터. 행에 장비 이름과 `logdesc`(HA 이벤트 종류)가 나온다. 모든 HA 로그를 대상으로 하므로 실장비 샘플에서 정보성 줄이 많으면 범위를 좁힌다.
+
+**왜 중요한가**: 통신은 이어지더라도 이중화가 깨져 다음 장애에서 서비스가 끊길 수 있다. 전환이 반복되면 세션이 끊긴다.
+
+**확인**: 장비 이름으로 지금 주 장비가 어느 멤버인지 본다(IDC 쌍은 멤버마다 장비 이름이 다르다). 전환 직전의 인터페이스·전원·하트비트 로그를 본다. **IDC 쌍은 secondary가 직접 로그를 보내지 못하는 수용 위험이 있으므로**([수신 런북](fortigate-syslog.md) 2절) 대기 멤버 쪽 사정은 장비 접속이나 다른 경로로 확인해야 한다.
+
+**대응**: 멤버가 복구되지 않으면 교체·점검 일정을 잡는다. 계획된 작업(재부팅, 펌웨어)이면 작업 기록에 남긴다.
+
+<a id="fortigate-critical-detection"></a>
+### 🔴 방화벽 중대 보안 탐지 (`infra-fortigate-critical-detection`)
+
+**조건**: `type=utm` 로그 중 `severity`가 `critical`(`o2c_fortigate_detection_severities`)인 것 1건부터. 행에 장비와 탐지 이름(`attack`)이 나온다.
+
+**왜 중요한가**: 알려진 취약점 공격이나 악성코드가 방화벽을 지나가려 했다. 차단됐더라도 공격 대상에 이미 닿았는지 확인해야 한다.
+
+**확인**: 로그 보기에서 출발지·목적지·조치(`action`: 차단 `dropped`/`blocked`, 통과 `pass`/`monitor`)를 본다. 출발지가 내부 호스트인지 본다.
+
+**대응**: 통과였거나 내부 호스트가 출발지면 그 호스트를 격리하고 점검한다. 외부의 반복 공격이면 차단 정책 추가를 검토한다. 결과를 사고 기록(ISMS 2.11.5)에 남긴다.
+
+<a id="fortigate-syslog-silent"></a>
+### 🟠 방화벽 syslog 수신 중단 (`infra-fortigate-syslog-silent`)
+
+**조건**: `o2c_fortigate_syslog_roster`의 방화벽이 120분(`o2c_fortigate_silent_minutes`) 넘게 `fortigate-syslog` 로그를 보내지 않음(State Alert, 하루 1번 재통지). 목록이 기본값(빈 목록)이면 어떤 장비도 보지 않는다. 장비 이름은 원문의 `devname`으로 찾는다.
+
+**왜 중요한가**: 전송 설정이나 수신 경로가 끊기면 그동안의 관리자 접속·정책 변경 이력이 중앙에 남지 않는다(ISMS 로그 1년 보관의 공백).
+
+**확인**: 장비의 로그 전송 설정(대상, 형식, 출발지 고정)이 그대로인지 본다. 수신 서버의 허용 목록과 syslog-ng 상태를 [수신 런북 3절](fortigate-syslog.md)대로 확인한다. HA 쌍은 장애 전환 뒤 새 primary 이름으로 이어지는지 본다.
+
+**대응**: 설정이 사라졌으면 복구한다. 철거·교체한 장비면 목록에서 뺀다. 로그가 원래 적은 장비(정책별 로그를 최소화)면 기준 시간을 늘린다. IDC 쌍에서 secondary가 조용한 것은 정상이다(쌍을 `+`로 묶어 감시).
+
+---
+
 ## 리소스 알림 (디스크·inode·메모리)
 
 사용률은 `_timestamp`별로 묶은 값의 **조회 구간 최솟값**으로 판정한다(구간 내내 높아야 발화). 디스크·inode는 15분, 메모리는 10분. 90% 이상 95% 미만은 P2(재통지 1440분), 95% 이상은 P1(재통지 60분). 통지 행에 호스트·마운트·사용률이 나온다. squashfs·iso9660·tmpfs·devtmpfs·overlay는 감시하지 않고 `/boot`·`/boot/efi`는 감시한다. 항상 높게 쓰는 볼륨은 OpenBao `agents/openobserve`의 `alert_resource_exclusions`(호스트·마운트 예외)나 `alert_resource_thresholds`(임계값 덮어쓰기)에 넣고 `OpenObserve — Config`를 다시 실행한다.

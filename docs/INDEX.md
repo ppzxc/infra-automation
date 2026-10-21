@@ -14,7 +14,7 @@
 6. [Host Backup (`backup`)](backup.md) - restic + resticprofile 기반 호스트 설정 백업(RustFS S3), ISMS 2.9.3 표준, 중앙 Repo Maintenance 포함
 7. [Cisco IOS Switch Backup (`cisco_backup`)](cisco_backup.md) - Cisco 네트워크 스위치 `show running-config` 수집, 무결성 검증, 보관 주기 자동화 및 Semaphore UI 연동
 8. [FortiGate Backup (`fortigate_backup`)](fortigate_backup.md) - FortiGate IDC 클러스터·사무실 장비별 설정 백업(접속 대상 단위, 응답 멤버를 파일명에), 파일명 `<장비>_<멤버>_<시각>`, 90일 보관, 원격 보관·암호화 결정 (#284)
-9. [OpenObserve Config (`openobserve_config`)](openobserve_config.md) - 컨트롤러 전용. OpenObserve VRL ingest function(sshd/sudo 해석)·파이프라인·통지 webhook·알림 규칙을 코드로 관리하고 API로 반영 (ADR-0008)
+9. [OpenObserve Config (`openobserve_config`)](openobserve_config.md) - 컨트롤러 전용. OpenObserve VRL ingest function(sshd/sudo 해석)·파이프라인·통지 webhook·알림 규칙(서버·스위치·방화벽 로그 알림, 방화벽은 #287, 대응 절차는 [알림 런북](runbooks/alerts.md))을 코드로 관리하고 API로 반영 (ADR-0008)
 10. [FUNA Env (`funa_env`)](funa_env.md) - FUNA Cluster 환경 값을 OpenBao에서 읽어 `/etc/funa-cluster/`의 비시크릿 파일과 소비자별 시크릿 파일(0640 root:dockermgmt)로 렌더링 (#222)
 
 ---
