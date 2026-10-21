@@ -1,0 +1,22 @@
+---
+# ==============================================================================
+# FortiGate 방화벽 설정 백업 플레이북
+# ==============================================================================
+# 호스트 = HA 멤버(각자 자신의 관리 주소) + 사무실 장비. VIP로 받지 않는다.
+# 인벤토리 호스트 변수: ansible_host(멤버 관리 주소), fortigate_device, fortigate_member.
+# API 토큰은 Semaphore Environment(fortigate_api_token) 또는 OpenBao KV로 주입한다.
+#
+# 실행 예:
+#   ansible-playbook -i inventory/hosts.yml playbooks/backup_fortigate.yml
+# Semaphore 예약: 매일 03:30 (docs/fortigate_backup.md 6절)
+# ==============================================================================
+
+- name: Backup FortiGate firewall configuration
+  hosts: fortigate_firewalls
+  gather_facts: false
+  connection: local
+  become: false
+
+  roles:
+    - role: fortigate_backup
+      tags: [fortigate, backup, network]
