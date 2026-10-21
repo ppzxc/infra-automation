@@ -482,7 +482,7 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 <a id="fortigate-ha-failover"></a>
 ### 🟠 방화벽 HA 전환·이상 (`infra-fortigate-ha-failover`)
 
-**조건**: `subtype=ha` 로그 1건부터. 행에 장비 이름과 `logdesc`(HA 이벤트 종류)가 나온다. 모든 HA 로그를 대상으로 하므로 실장비에서 정보성 줄이 많으면 범위를 좁힌다(실제 HA 전환 줄은 아직 검증되지 않았다).
+**조건**: `subtype=ha` 로그 1건부터. 행에 장비 이름과 `logdesc`(HA 이벤트 종류)가 나온다. 정보성 동기화 로그(secondary가 주기적으로 남기는 동기화 상태 줄, logid `0108037903`)는 제외한다. 제외 목록은 변수 `o2c_fortigate_ha_ignored_logids`(숫자 문자열 목록, 빈 목록이면 HA 로그 전부)로 조정한다. 실장비에서 다른 정보성 줄이 알림을 일으키면 그 logid를 목록에 더한다(실제 HA 전환 줄은 아직 검증되지 않았다).
 
 **왜 중요한가**: 통신은 이어지더라도 이중화가 깨져 다음 장애에서 서비스가 끊길 수 있다. 전환이 반복되면 세션이 끊긴다.
 

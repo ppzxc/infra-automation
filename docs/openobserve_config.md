@@ -78,14 +78,14 @@
     - **검증 단계**: 업링크 규칙은 검증 때 케이스의 가짜 장비를 `watch_port`로 목록에 더해 SQL을 다시 만들고, 수신 중단은 가짜 장비를 로스터에 더한다(`off_roster: true` 케이스는 더하지 않아 "목록 밖 장비는 알리지 않음"을 확인). 장비별 집계의 분리는 "장비마다 임계 미만"인 케이스들이 모두 발화하지 않는 것으로 확인한다. 로컬 테스트는 검증 검색 SQL을 합성 레코드 위에서 실제로 실행해 발화 장비가 픽스처의 `fires`와 일치하는지 본다.
     - **첫 반영 때 바로 울릴 수 있는 알림**: MAC 플랩(한 장비에서 3시간에 25건, 10분 평균 1.4건이라 기본 2회는 현재 상태에서도 울린다). 수신 중단은 기본 목록 장비가 24시간 넘게 조용하면 첫 평가에서 울린다. 새 필드(`device_id` 등)는 파이프라인이 반영된 뒤 처음 들어온 줄부터 붙으므로, 반영 직후 한 번은 알림 평가가 `unknown field`로 오류일 수 있고 다음 줄이 들어오면 정상이 된다(`O2C-036`이 실패하면 잠시 뒤 Config를 다시 실행한다).
 
-  - **방화벽(포티게이트) 로그 알림 6개 정의 (Spec #282 / Ticket-3, `security_logs`의 `service_name = 'fortigate-syslog'`)**: 서버·스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)이다. 임계값·목록·승인 시간·재통지 간격은 모두 역할 기본 변수(`o2c_fortigate_*`)이고 값이 SQL에 들어가므로 형식을 `O2C-002`에서 요청 전에 검증한다(장비 이름·별칭표, `key=value` 문자, 승인 시간 0~24 정수·시작 < 끝). **실로그 샘플로 검증됨(검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃·로그인 실패 줄, 실제 장비가 만든 웹필터·앱제어 줄, IPv6 주소).** 실측으로 `infra-fortigate-critical-detection`이 바이러스 감염(`subtype=virus`·`eventtype=infected`, 실제 로그에는 `severity` 키가 없음)도 센다. 로그 전송 설정 변경(`log.syslogd.*`, `log.setting`)은 기본 감시 대상이 아니며 `o2c_fortigate_policy_cfgpaths`로 더할 수 있다.
+  - **방화벽(포티게이트) 로그 알림 6개 정의 (Spec #282 / Ticket-3, `security_logs`의 `service_name = 'fortigate-syslog'`)**: 서버·스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)이다. 임계값·목록·승인 시간·재통지 간격은 모두 역할 기본 변수(`o2c_fortigate_*`)이고 값이 SQL에 들어가므로 형식을 `O2C-002`에서 요청 전에 검증한다(장비 이름·별칭표, `key=value` 문자, 승인 시간 0~24 정수·시작 < 끝, HA 제외 logid는 숫자만). **실로그 샘플로 검증됨(검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃·로그인 실패 줄, 실제 장비가 만든 웹필터·앱제어 줄, IPv6 주소).** 실측으로 `infra-fortigate-critical-detection`이 바이러스 감염(`subtype=virus`·`eventtype=infected`, 실제 로그에는 `severity` 키가 없음)도 센다. 로그 전송 설정 변경(`log.syslogd.*`, `log.setting`)은 기본 감시 대상이 아니며 `o2c_fortigate_policy_cfgpaths`로 더할 수 있다.
 
     | 이름 | 등급 | 조건 (기본값) |
     |---|---|---|
     | `infra-fortigate-admin-login-failures` | P2, Event | `subtype=system`·`action=login`·`status=failed`가 출발지별 5분에 5회 이상, 재통지 30분 |
     | `infra-fortigate-change-unapproved` | P1, Event | `cfgpath`가 정책·계정 목록(`o2c_fortigate_policy_cfgpaths`, `_account_cfgpaths`)인 변경이 승인 시간(`o2c_fortigate_approved_start_hour`~`_end_hour`, 기본 9~18, 장비 시계) 밖. 시각을 읽지 못한 줄 포함 |
     | `infra-fortigate-change-approved` | P3, 요약 | 같은 변경이 승인 시간 안 — 하루 1번(period·silence 1440) |
-    | `infra-fortigate-ha-failover` | P2, Event | `subtype=ha` 1건부터, 재통지 30분(전환 반복 방지) |
+    | `infra-fortigate-ha-failover` | P2, Event | `subtype=ha` 1건부터(정보성 동기화 로그 등 `o2c_fortigate_ha_ignored_logids` 기본 `["0108037903"]`는 제외, 빈 목록이면 전부), 재통지 30분(전환 반복 방지) |
     | `infra-fortigate-critical-detection` | P1, Event | `type=utm` 중 `severity`가 `o2c_fortigate_detection_severities`(기본 `critical`), 재통지 60분 |
     | `infra-fortigate-syslog-silent` | P2, State | `o2c_fortigate_syslog_roster`(명시 목록, 관리번호 또는 `devname` 그대로의 이름, 대소문자 무관)의 장비별 `fortigate-syslog`가 `o2c_fortigate_silent_minutes`(기본 120분, 스위치 24시간보다 짧음) 없음, 재통지 1440분 |
 

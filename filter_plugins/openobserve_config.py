@@ -601,6 +601,7 @@ def o2c_switch_uplink_sql(entries, noise_events=None):
 # (device_id, fortigate_log_subtype ...)이 없으므로 알림 SQL은 service_name과 원문 body의 key=value만 읽는다(없는 컬럼은 평가 오류가 된다).
 # FortiOS 기본 형식은 값을 따옴표로 감싸지만 실장비 샘플로 확인하기 전이라 따옴표 있는 값과 없는 값을 모두 받는다.
 _KEY_RE = _re.compile(r'^[a-z][a-z0-9_]*$')
+_LOGID_RE = _re.compile(r'^[0-9]+$')
 _VALUE_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 # 수신 중단 감시 목록 항목: 관리번호(ns0399) 또는 장비 이름 그대로(hostname을 관리번호로 못 바꾼 장비). `+`로 HA 멤버를 묶는다.
 # SQL LIKE에 들어가므로 따옴표·%·공백은 막는다(`_`는 LIKE에서 한 글자 와일드카드지만 더 넓게 맞출 뿐이다).
@@ -651,6 +652,18 @@ def o2c_fortigate_match(key, values):
     return '(%s)' % ' OR '.join(parts)
 
 
+def o2c_valid_fortigate_logids(logids):
+    """True when ``logids`` is a list of digit strings (a FortiOS ``logid``), safe to put in a ``NOT LIKE`` condition."""
+    return isinstance(logids, (list, tuple)) and all(isinstance(v, str) and _LOGID_RE.match(v) for v in logids)
+
+
+def o2c_fortigate_exclude_logids(logids):
+    """`` AND body NOT LIKE '%logid="<id>"%' ...`` for each logid ('' when the list is empty) — lines of these logids are left out of the count."""
+    if not o2c_valid_fortigate_logids(logids or []):
+        raise ValueError('방화벽 로그 조건에 넣을 수 없는 logid')
+    return ''.join(" AND body NOT LIKE '%%logid=\"%s\"%%'" % v for v in logids or [])
+
+
 def o2c_enabled_alerts(alerts):
     """The alerts that are created: an alert whose ``enabled`` renders false (e.g. the uplink alert with an empty port list) is left out."""
     return [a for a in alerts or [] if str(a.get('enabled', True)).strip().lower() not in ('false', '0', '')]
@@ -663,6 +676,7 @@ class FilterModule(object):
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
                 'o2c_alert_history_errors': o2c_alert_history_errors,
+                'o2c_valid_fortigate_logids': o2c_valid_fortigate_logids, 'o2c_fortigate_exclude_logids': o2c_fortigate_exclude_logids,
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
                 'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
                 'o2c_missing_sql': o2c_missing_sql, 'o2c_app_telemetry_roster': o2c_app_telemetry_roster,
