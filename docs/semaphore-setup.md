@@ -72,9 +72,9 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **FUNA Cluster 호스트**: `servers`에 두면서 `funa_cluster` 그룹에도 넣는다(ns0325·ns0327·ns0338). HOST PROVISIONING(`site.yml`)이 `docker_engine` 뒤에 `funa_env` 역할을 실행해 OpenBao 값으로 `/etc/funa-cluster/`의 환경 파일을 렌더링한다. 그룹에 없는 호스트에는 아무것도 생기지 않는다. 필요한 OpenBao 경로와 키는 `docs/funa_env.md`(#222). 이 그룹은 `NODE_ROLE`에 쓰이지 않는다.
 
-**프로비저닝에서 영구히 빼는 호스트**: 운영 중 절대 프로비저닝하지 않는 호스트(Semaphore 자신, 중앙 OpenObserve/RustFS 호스트, 관리번호 재부여 대기 호스트)만 `provision_excluded` 그룹에 넣는다. 그 밖의 호스트를 막는 일은 이 그룹이 아니라 아래 `provision_allowed` 기본 거부가 맡으므로, 호스트를 여기에 광범위하게 나열하지 않는다. Host Provisioning의 사전 검증이 이 그룹의 호스트가 `target_hosts`에 있으면 접속 전에 실패시킨다. 그룹이 인벤토리에 없으면 빈 그룹으로 본다. 다른 템플릿에는 영향이 없다. 이 그룹은 영구 거부이며 `provision_allowed`보다 우선한다(허용 목록에도 있는 호스트라도 거부).
+**프로비저닝에서 제외하는 호스트**: 기본은 `servers`의 모든 호스트를 `provision_excluded` 그룹에 둔다. 새 호스트가 `servers`에 추가되면 먼저 이 그룹에도 넣는다. 프로비저닝 대상으로 **확인된 호스트만** 이 그룹에서 빼고 아래 `provision_allowed`로 옮긴다. Semaphore 자신, 중앙 OpenObserve/RustFS 호스트, 관리번호 재부여 대기 호스트는 허용 목록에 넣지 않는다. Host Provisioning의 사전 검증이 이 그룹의 호스트가 `target_hosts`에 있으면 접속 전에 실패시킨다. 그룹이 인벤토리에 없으면 빈 그룹으로 본다. 다른 템플릿에는 영향이 없다. 이 그룹은 `provision_allowed`보다 우선한다(허용 목록에도 있는 호스트라도 거부). 그러므로 대상으로 옮길 때는 제외에서 먼저 빼야 한다.
 
-**프로비저닝을 허용하는 호스트(기본 거부)**: Host Provisioning은 `provision_allowed` 그룹에 속한 호스트만 `target_hosts`로 받는다. 그룹이 없거나 비어 있으면(기본 상태) 어떤 호스트도 허용되지 않아 모든 프로비저닝이 접속 전에 실패한다. 그래서 `servers`에 새로 추가된 호스트는 자동으로 막힌다. 운영 절차는 허용 → 실행 → 허용 해제다. (1) Semaphore 인벤토리의 `provision_allowed` 그룹에 대상 호스트를 넣는다. (2) Host Provisioning을 `target_hosts`로 실행한다. (3) 끝나면 그룹에서 호스트를 다시 뺀다.
+**프로비저닝을 허용하는 호스트(기본 거부)**: Host Provisioning은 `provision_allowed` 그룹에 속한 호스트만 `target_hosts`로 받는다. 그룹이 없거나 비어 있으면(기본 상태) 어떤 호스트도 허용되지 않아 모든 프로비저닝이 접속 전에 실패한다. 그래서 `servers`에 새로 추가된 호스트는 자동으로 막힌다. 운영 절차는 확인 → 허용 → 실행 → 허용 해제다. (1) 대상 호스트가 프로비저닝 대상임을 확인한다. (2) Semaphore 인벤토리에서 `provision_excluded`에서 빼고 `provision_allowed`에 넣는다. (3) Host Provisioning을 `target_hosts`로 실행한다. (4) 끝나면 `provision_allowed`에서 빼고 다시 `provision_excluded`에 넣는다.
 
 **Host Audit에서 빼는 호스트**: 러너(Semaphore 서버)에서 접속할 수 없는 호스트 등은 `host_audit_excluded` 그룹에 넣는다. Host Audit — Monthly·On-demand가 이 그룹을 빼며(`host_audit_scope_pattern`), 보고서와 Asset Inventory에도 나오지 않는다. 다른 템플릿에는 영향이 없다.
 
@@ -96,11 +96,11 @@ all:
     firewall_unmanaged:   # HOST PROVISIONING이 방화벽만 건드리지 않는다.
       hosts:
         ns0325: {}
-    provision_excluded:   # Host Provisioning 영구 거부(Semaphore 자신 등 소수만). provision_allowed보다 우선한다.
+    provision_excluded:   # Host Provisioning 제외. 기본은 servers 전체. 확인된 대상만 빼서 provision_allowed로 옮긴다. provision_allowed보다 우선한다.
       hosts:
         ns0266: {}
         ns0332: {}
-    provision_allowed:   # Host Provisioning 허용 목록(기본 거부). 비어 있음이 기본. 작업 전에 넣고 끝나면 뺀다.
+    provision_allowed:   # Host Provisioning 허용 목록(기본 거부). 비어 있음이 기본. 확인된 대상만 제외에서 빼고 넣는다.
       hosts: {}
     funa_cluster:   # FUNA Cluster 환경 파일 렌더링(funa_env).
       hosts:
@@ -181,7 +181,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 | Resend | `host_audit_resend_month` | String `YYYY-MM` | (비움) | 아니오 |
 
 - **Host Provisioning은 `playbooks/provision_hosts.yml`만 쓴다.** `site.yml`을 Semaphore 템플릿에 직접 연결하지 않는다. `site.yml` 직접 실행(기본 대상 `servers:loadbalancers`)은 CLI 전용이다. 인벤토리를 공용으로 쓰므로 대상 지정이 없으면 새로 추가된 서버까지 전부 프로비저닝되기 때문이다.
-- Host Provisioning의 `target_hosts`는 인벤토리 호스트명을 쉼표로 구분한 문자열이다(예: `ns0001,ns0002`). `provision_hosts.yml`의 사전 검증(localhost)이 접속 전에 다음을 확인하고 어기면 한국어 메시지로 즉시 실패한다. 값이 없거나 비어 있음, 호스트 패턴(`:`, `!`, `&`, `*`)·공백·빈 항목, 인벤토리에 없는 이름, 그룹 이름(`all`·`servers`·`loadbalancers` 등), `provision_excluded` 소속 호스트(영구 거부, 우선), `provision_allowed`에 없는 호스트(그룹이 없거나 비어 있으면 모두 거부, 허용하려면 그룹에 넣고 끝나면 뺀다), 개수가 `provision_max_hosts`(기본 5)를 넘음. 더 많은 호스트를 한 번에 하려면 `provision_max_hosts`를 명시적으로 올린다(Environment 또는 API `environment`). 이 검증은 `--tags`로도 건너뛸 수 없다.
+- Host Provisioning의 `target_hosts`는 인벤토리 호스트명을 쉼표로 구분한 문자열이다(예: `ns0001,ns0002`). `provision_hosts.yml`의 사전 검증(localhost)이 접속 전에 다음을 확인하고 어기면 한국어 메시지로 즉시 실패한다. 값이 없거나 비어 있음, 호스트 패턴(`:`, `!`, `&`, `*`)·공백·빈 항목, 인벤토리에 없는 이름, 그룹 이름(`all`·`servers`·`loadbalancers` 등), `provision_excluded` 소속 호스트(제외, 허용보다 우선), `provision_allowed`에 없는 호스트(그룹이 없거나 비어 있으면 모두 거부, 허용하려면 그룹에 넣고 끝나면 뺀다), 개수가 `provision_max_hosts`(기본 5)를 넘음. 더 많은 호스트를 한 번에 하려면 `provision_max_hosts`를 명시적으로 올린다(Environment 또는 API `environment`). 이 검증은 `--tags`로도 건너뛸 수 없다.
 - Deploy All·Config All·Deploy Restic의 `target_hosts`는 **기본값이 없고 비워 둘 수 없다**(Survey 필수). 인벤토리가 공용이라 새 서버가 계속 추가되므로, 대상을 입력하지 않아 전체에 도는 일을 막는다. 전체에 적용하려면 `servers`를 직접 입력한다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 대상 패턴이 깨지므로 Survey 필수가 이를 막는 장치다. Host Audit은 빈 값을 전체로 처리한다.
 - **Config All이 하는 일**: otelcol 설정과 restic 설정을 모두 재적용한다. restic 설정 블록(`roles/backup/tasks/main.yml`)이 `agents_config`와 `backup` 두 태그를 모두 가져서, `--tags agents_config`가 두 에이전트의 설정을 함께 돌린다. 설치와 repo 초기화, 등록 이벤트는 Deploy All·Deploy Restic에만 있다.
 - Monthly에는 Survey를 두지 않는다. 정기 실행은 항상 전체 대상·보관·발송이어야 Audit Baseline이 맞다.

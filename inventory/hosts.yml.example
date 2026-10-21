@@ -40,9 +40,9 @@ all:
     tcpcheck_excluded:
       hosts: {}
 
-    # 2-3. 프로비저닝 영구 거부: 운영 중 절대 프로비저닝하지 않는 호스트만 둔다
-    #      (Semaphore 자신, 중앙 OpenObserve/RustFS 호스트, 관리번호 재부여 대기 호스트 등).
-    #      그 밖의 호스트는 여기에 나열하지 않는다. 기본 거부(2-4 provision_allowed)가 막는다.
+    # 2-3. 프로비저닝 제외: 기본은 servers의 모든 호스트를 여기에 둔다(새 호스트도 먼저 여기에 넣는다).
+    #      프로비저닝 대상으로 확인된 호스트만 여기서 빼서 2-4 provision_allowed로 옮긴다.
+    #      Semaphore 자신, 중앙 OpenObserve/RustFS 호스트, 관리번호 재부여 대기 호스트는 허용 목록에 넣지 않는다.
     #      Host Provisioning(provision_hosts.yml)의 사전 검증이 이 그룹의 호스트를 target_hosts에 넣으면
     #      접속 전에 실패시킨다. 그룹이 없으면 빈 그룹으로 본다. 다른 제외 그룹과 달리 servers에 속하지
     #      않아도 된다.
@@ -52,8 +52,8 @@ all:
 
     # 2-4. 프로비저닝 허용 목록(기본 거부): Host Provisioning은 이 그룹에 속한 호스트만 target_hosts로 받는다.
     #      비어 있음이 기본이며, 그룹이 없거나 비어 있으면 모든 프로비저닝이 접속 전에 거부된다.
-    #      운영 절차: 호스트를 여기에 넣고(예: ns0001) 실행한 뒤 끝나면 다시 뺀다.
-    #      provision_excluded는 영구 거부이며 이 그룹보다 우선한다(둘 다 속하면 거부).
+    #      운영 절차: 대상으로 확인된 호스트를 provision_excluded에서 빼고 여기에 넣은 뒤(예: ns0001) 실행한다.
+    #      provision_excluded가 이 그룹보다 우선한다(둘 다 속하면 거부). 그래서 반드시 제외에서 먼저 빼야 한다.
     provision_allowed:
       hosts: {}
       # ns0001: {}   # 작업 중에만 임시로 추가

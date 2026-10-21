@@ -10,7 +10,7 @@
 # 입력 변수:
 #   target_hosts        필수. 인벤토리 호스트명을 쉼표로 구분 (예: ns0001,ns0002)
 #                       모두 인벤토리 그룹 provision_allowed에 속해야 한다(기본 거부, opt-in).
-#                       provision_excluded는 영구 거부이며 allowed보다 우선한다.
+#                       provision_excluded(제외)가 allowed보다 우선한다.
 #   provision_max_hosts 선택. 한 번에 허용하는 최대 호스트 수 (기본 5)
 #   target_admin_users  선택. 관리자 계정 목록
 # ==============================================================================
