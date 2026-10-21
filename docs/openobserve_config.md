@@ -45,7 +45,7 @@
   입력 형식은 `수신 시각 / 송신 주소 / 장비 이름: [순번: ][*]장비 시각(ms, 시간대) : %FAC-SEV-MNEM: 설명`입니다. **장비 시각은 연도가 없고 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)를 바꾸지 않으며**, 장비 시각은 원문에 그대로 남습니다.
 - **파이프라인** `switch_syslog_semantics`: `system_logs` 실시간 소스 → 함수(`after_flatten: true`) → `system_logs`. 같은 스트림에 다른 파이프라인은 없습니다.
 - **통지 대상**: webhook 하나(`infra-automation-webhook`) — 네이버웍스 봇 text API(`{"content": {"type": "text", "text": ...}}`)로 보내는 본문 템플릿과 `Content-Type: application/json` 헤더. 기본은 등급과 무관하게 이 대상 하나입니다. 선택 변수 `o2c_p1_destination`을 주면 P1 알림만 그 destination으로 보냅니다(아래 변수 표).
-- **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 현상(`■ 현상`), 영향(`■ 영향`), 대상(알림별 `row_template`), 조치(`■ 조치:` 다음 줄부터 `1.` `2.` `3.` 항목마다 한 줄 — 알림 정의는 `① … ② …` 한 줄로 두고 `o2c_action_lines` 필터가 렌더링 단계에서 줄로 나눈다), [런북](runbooks/alerts.md) 링크, 링크(원문 로그 링크를 만들 수 있는 로그 알림은 `▶ 상세 보기: {alert_url}`에 이어 `▶ 로그 보기: <원문 URL>`, 만들 수 없는 로그 알림은 `▶ 로그 보기: {alert_url}`, 메트릭 PromQL 알림은 `▶ 상세 보기` — `context_attributes.link_label`·`raw_log_line`, 아래 "원문 로그 링크"), 발생 구간. 대상 머리는 `■ 대상 {alert_count}건:`, 행은 `{rows:20}`으로 20줄까지만 싣습니다(OpenObserve 템플릿 변수 `{rows:N}`·`{alert_count}`). 행 값의 따옴표·역슬래시가 JSON 본문을 깨는지는 실서버에서만 확인할 수 있어 배포 뒤 시험이 필요합니다(단위 테스트는 행 템플릿 필드가 안전한 값만 쓰는지까지 봅니다). 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
+- **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 현상(`■ 현상`), 영향(`■ 영향`), 대상(알림별 `row_template`), 조치(`■ 조치:` 다음 줄부터 `1.` `2.` `3.` 항목마다 한 줄 — 알림 정의는 `① … ② …` 한 줄로 두고 `o2c_action_lines` 필터가 렌더링 단계에서 줄로 나눈다), [런북](runbooks/alerts.md) 링크, 링크(원문 로그 링크를 만들 수 있는 로그 알림은 `▶ 상세 보기: {alert_url}`에 이어 `▶ 로그 보기: <원문 URL>`, 만들 수 없는 로그 알림은 `▶ 로그 보기: {alert_url}`, 메트릭 PromQL 알림은 `▶ 상세 보기` — `context_attributes.link_label`·`raw_log_line`, 아래 "원문 로그 링크"), 발생 시각(`⏱ 발생: {alert_trigger_time_str} (KST)`, 아래 "시각 표기와 JSON 이스케이프"). 대상 머리는 `■ 대상 {alert_count}건:`, 행은 `{rows:20}`으로 20줄까지만 싣습니다(OpenObserve 템플릿 변수 `{rows:N}`·`{alert_count}`). 행 값의 따옴표·역슬래시가 JSON 본문을 깨는지는 자가 시험 알림으로 배포 뒤 확인합니다(아래 "시각 표기와 JSON 이스케이프"). 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
 - **알림 규칙**: 모두 위 대상으로 보냅니다. 스위치 syslog 알림 6개(아래 "스위치 syslog 알림")와 리소스·백업·Silent Host 등은 표 아래에 따로 적었습니다.
 
   | 이름 | 조건 |
@@ -134,6 +134,8 @@
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `o2c_retired_alerts` | `["infra-root-login-office-daily"]` | 서버에서 지우는 알림 이름 목록. 서버에 있으면서 이 목록에 있는 알림만 DELETE한다. `O2C-002`가 요청 전에 `^infra-[a-z0-9-]+$` 형식·중복 없음을 검증하고, 현행 알림 정의의 이름이 들어 있으면 실패시킨다 |
+| `o2c_tz_offset` | `540` | 알림 정의 최상위 `tz_offset`(분 단위 UTC 오프셋). 540 = KST(+09:00). 통지의 `⏱ 발생` 시각 표기에 쓰인다. |
+| `o2c_selftest_escape_probe` | `a"b\c` | 자가 시험 레코드의 `probe` 필드 값(따옴표·역슬래시). 통지 행의 JSON 이스케이프 확인용. |
 | `o2c_p1_destination` | `""` | (선택) P1 알림만 보낼 destination 이름. 비어 있으면(기본) 모든 알림이 `o2c_destination_name`(`infra-automation-webhook`)으로 간다. 값이 있으면 심각도 P1 알림만 그 destination을 쓰고 나머지는 기본 대상이다. 이 destination과 템플릿·웹훅은 역할이 만들지 않는다 — 서버에 미리 있어야 하고 없으면 `O2C-012` 계획이 쓰기 전에 실패한다. 형식(영문·숫자·`.`·`_`·`-`)은 `O2C-002`가 검증한다 |
 | `o2c_plan_only` | `false` | `true`이면 OpenObserve 읽기·계획 계산·`O2C-013` 출력까지만 하고 쓰기·합성 레코드 주입·시드·검증 단계 전에 정상 종료한다(`O2C-015`·`O2C-016`) |
 
@@ -206,6 +208,13 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-035` | `Read the recent alert evaluation history` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `no_log`) |
 | `O2C-036` | `Fail when the latest evaluation of a managed alert ended in error` | `ansible.builtin.assert` | Controller | 평가 오류가 있으면 실패 |
 | `O2C-037` | `Inject one self-test record so the standing self-test alert notifies (only with o2c_verify_notify=true)` | `ansible.builtin.uri` | Controller | 검증 전용 스트림에만 POST (`changed_when: false`, `no_log`), `o2c_verify_notify`가 참일 때만, check 모드 제외 |
+
+### 시각 표기와 JSON 이스케이프 (#282)
+
+- **`⏱ 발생` 시각**: `{alert_trigger_time_str}`(알림이 평가된 시각, 형식 `%Y-%m-%dT%H:%M:%S`)을 쓴다. 옛 `{alert_start_time}`/`{alert_end_time}`은 결과 행 `_timestamp`의 최소/최대라 최종 SELECT에 `_timestamp`가 없는 알림(대부분)에서 값이 비거나 어긋나서 쓰지 않는다. 근거: OpenObserve 문서 "Templates"의 변수 표(`alert_trigger_time` = 평가 시각 µs, `alert_trigger_time_str` = 그 형식화 값)와 소스 `src/core/src/alerts/notifications/context.rs`의 `NotificationContext`(`alert_trigger_time`, `alert_trigger_time_str`).
+- **KST 표기**: 알림 정의 최상위 `tz_offset`(분 단위 UTC 오프셋, `trigger_condition` 안이 아님 — OpenObserve 테스트 데이터 `AlertMultiRealTime.json` 구조)을 `o2c_tz_offset`(기본 `540` = +09:00)으로 모든 알림(로그·PromQL·자가 시험)에 넣는다. 값을 바꾸면 O2C-012가 알림 전체를 갱신한다. 한계: 소스·문서에서 `alert_trigger_time_str`이 `tz_offset`을 따르는지까지는 확인하지 못했다(문서는 `alert_start_time`류와 달리 오프셋을 말하지 않는다). 그래서 배포 뒤 통지의 시각이 KST(현재 시각 + 9시간 기준)인지 확인하고, UTC로 나오면 `(KST)` 표기를 `(UTC)`로 되돌리거나 다른 방법을 택한다.
+- **행 값의 JSON 이스케이프**: 통지 본문 템플릿이 JSON 문자열이라 `{rows}`의 행 값(`{detail}`·`{killed_process}`·`{attack}`·`{event}` 같은 로그 원문)에 `"`·`\`가 이스케이프 없이 들어가면 webhook 본문이 깨져 통지가 실패한다. OpenObserve 소스(`custom.rs`)는 `context_attributes`를 `process_variable_replace`(`format_variable_value`가 따옴표·개행·제어 문자를 이스케이프)로 치환하므로 행 값도 같은 경로일 것으로 보지만, 확인된 것은 아니다. 자가 시험 알림이 이를 확인한다: `o2c_verify_notify=true`로 실행하면 시험 레코드(O2C-037)에 `probe` 필드로 `a"b\c`(`o2c_selftest_escape_probe`)가 실리고 행 템플릿 `• {host_name}: 시험 레코드 {records}건 · 이스케이프 시험 값 {probe}`이 그것을 쓴다. 통지가 정상 도착하고 `a"b\c`가 그대로 보이면 이스케이프가 된다.
+- **이스케이프가 안 될 때의 대안**: ① 행 템플릿에서 원문 필드(`{detail}` 등)를 빼고 호스트·건수 같은 안전한 값만 쓴다(PromQL 알림 행은 이미 숫자 `value`와 안전한 레이블만 쓴다). ② 수집 파이프라인 VRL(`security_semantics.vrl`)이나 알림 SQL 단계에서 `"`·`\`를 치환해(`replace`) 위험 문자를 없앤다. 오프라인 테스트는 주입되는 값과 행 템플릿 구성만 검증하고 실제 이스케이프는 배포 뒤 통지로만 확인한다.
 
 ### 통지 경로 자가 시험 (Spec #184 / Ticket-2)
 
