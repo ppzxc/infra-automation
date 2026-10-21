@@ -78,6 +78,22 @@
     - **검증 단계**: 업링크 규칙은 검증 때 케이스의 가짜 장비를 `watch_port`로 목록에 더해 SQL을 다시 만들고, 수신 중단은 가짜 장비를 로스터에 더한다(`off_roster: true` 케이스는 더하지 않아 "목록 밖 장비는 알리지 않음"을 확인). 장비별 집계의 분리는 "장비마다 임계 미만"인 케이스들이 모두 발화하지 않는 것으로 확인한다. 로컬 테스트는 검증 검색 SQL을 합성 레코드 위에서 실제로 실행해 발화 장비가 픽스처의 `fires`와 일치하는지 본다.
     - **첫 반영 때 바로 울릴 수 있는 알림**: MAC 플랩(한 장비에서 3시간에 25건, 10분 평균 1.4건이라 기본 2회는 현재 상태에서도 울린다). 수신 중단은 기본 목록 장비가 24시간 넘게 조용하면 첫 평가에서 울린다. 새 필드(`device_id` 등)는 파이프라인이 반영된 뒤 처음 들어온 줄부터 붙으므로, 반영 직후 한 번은 알림 평가가 `unknown field`로 오류일 수 있고 다음 줄이 들어오면 정상이 된다(`O2C-036`이 실패하면 잠시 뒤 Config를 다시 실행한다).
 
+  - **방화벽(포티게이트) 로그 알림 6개 정의 (Spec #282 / Ticket-3, `security_logs`의 `service_name = 'fortigate-syslog'`)**: 서버·스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)이다. 임계값·목록·승인 시간·재통지 간격은 모두 역할 기본 변수(`o2c_fortigate_*`)이고 값이 SQL에 들어가므로 형식을 `O2C-002`에서 요청 전에 검증한다(장비 이름, `key=value` 문자, 승인 시간 0~24 정수·시작 < 끝). **입력 로그는 합성이며 실장비 샘플(비공개 경로)로 키 이름·값 모양을 다시 검증해야 한다.** 장비 쪽 로그 전송이 아직 설정되지 않았으므로 확정 전에는 알림이 울릴 일이 없다.
+
+    | 이름 | 등급 | 조건 (기본값) |
+    |---|---|---|
+    | `infra-fortigate-admin-login-failures` | P2, Event | `subtype=system`·`action=login`·`status=failed`가 출발지별 5분에 5회 이상, 재통지 30분 |
+    | `infra-fortigate-change-unapproved` | P1, Event | `cfgpath`가 정책·계정 목록(`o2c_fortigate_policy_cfgpaths`, `_account_cfgpaths`)인 변경이 승인 시간(`o2c_fortigate_approved_start_hour`~`_end_hour`, 기본 9~18, 장비 시계) 밖. 시각을 읽지 못한 줄 포함 |
+    | `infra-fortigate-change-approved` | P3, 요약 | 같은 변경이 승인 시간 안 — 하루 1번(period·silence 1440) |
+    | `infra-fortigate-ha-failover` | P2, Event | `subtype=ha` 1건부터, 재통지 30분(전환 반복 방지) |
+    | `infra-fortigate-critical-detection` | P1, Event | `type=utm` 중 `severity`가 `o2c_fortigate_detection_severities`(기본 `critical`), 재통지 60분 |
+    | `infra-fortigate-syslog-silent` | P2, State | `o2c_fortigate_syslog_roster`(명시 목록)의 장비별 `fortigate-syslog`가 `o2c_fortigate_silent_minutes`(기본 120분, 스위치 24시간보다 짧음) 없음, 재통지 1440분 |
+
+    - **SQL은 방화벽 컬럼을 참조하지 않는다**: `security_logs`에는 첫 방화벽 줄이 들어오기 전까지 `device_id` 같은 컬럼이 없어, 참조하면 알림 평가가 매번 오류가 나고 `O2C-036`이 Config 실행을 막는다(장비는 아직 전송 전). 그래서 `service_name`과 원문 `body`의 `key=value`(`o2c_fortigate_match`: 따옴표 있는 값·없는 값 모두), 장비 이름은 `devname`에서 읽는다. 로그인 실패 행의 출발지만 기존 `source_address` 컬럼(sshd 알림이 이미 쓴다)을 쓴다. #285 필드 추출과 독립이다.
+    - **승인 시간 안/밖**: 변경 로그 원문의 `time=HH:MM:SS`(장비 시계)에서 시를 읽는다(`CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(... AS INT) ELSE -1 END`). 시작 포함·끝 미포함이며 시각이 없는 줄은 -1이라 승인 시간 밖이다. 같은 줄이 두 알림에 동시에 걸리지 않는다. 요일은 구분하지 않으며 장비 시간대가 운영 시간대(KST)여야 한다. 수신 시각(`_timestamp`)이 아니라 장비 시각을 쓰는 이유는 승인 시간이 장비에서 작업한 시각의 문제이고, 검증 레코드가 실행 시각과 무관하게 결정적이기 때문이다.
+    - **수신 중단 감시 목록은 기본이 비어 있다(opt in)**: 방화벽 3대가 모두 아직 전송을 설정하지 않았고, 전송 전 장비를 목록에 두면 허위 알림이 계속 온다. 장비가 로그를 보내기 시작한 것을 확인한 뒤 관리번호를 더한다(사무실 먼저). 목록이 비면 규칙은 있지만 절대 행을 돌려주지 않는 가지 하나만 남고(앱 텔레메트리 무소식과 같은 방식), 목록에 없는 장비는 로그가 없어도 알리지 않는다. IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶으면 어느 한 멤버라도 보낼 때 수신 중으로 센다. 레코드가 `device_id`로 일치하거나 원문의 `devname`이 그 이름이면 수신으로 센다(파이프라인 반영 전 레코드 포함).
+    - **검증 단계**: 알림은 변환 전 모양(원문만 있는 레코드, `omit_host_field`)의 합성 레코드로 검증한다. 승인 시간 경계(9시 정각은 안, 18시 정각은 밖), 시각 없는 줄, 목록 밖 `cfgpath`, 다른 서비스의 같은 문구, 목록에 없는 장비(`off_roster`)가 발화하지 않는 케이스를 포함한다.
+
   - **Silent Host 2개 정의 (Spec #184 / Ticket-4, `stream_type: metrics`)**: `infra-silent-host-p2`(수집 로스터 호스트의 `system_memory_usage`가 15분 없음, 3시간 미만 — P2, 재통지 1440분)와 `infra-silent-host-p1`(3시간 없음 — P1, 재통지 60분). 둘 다 조회 구간 180분이며, P2 SQL은 "구간에는 있었지만 최근 15분은 없음"만 잡아 같은 호스트에 P1과 동시에 오지 않는다. SQL은 로스터 호스트마다 `SELECT '<호스트>' AS host_name, count(*) … HAVING count(*) < 1` 가지를 `UNION ALL`로 이은 형태다(인라인 `VALUES`/`unnest` JOIN은 이 버전에서 틀린 결과를 내므로 쓰지 않는다). P1 문구는 "약 5시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음"을 안내한다 — OpenObserve `ZO_INGEST_ALLOWED_UPTO` 기본값 5시간(공식 문서)이며 `o2c_ingest_allowed_hours`로 표현하고 서버 값을 바꾸면 함께 고친다. **5시간은 공식 문서 기본값일 뿐 ns0332 서버의 실제 값은 확인하지 못했다 — 운영 반영 때 ns0332의 `ZO_INGEST_ALLOWED_UPTO`를 확인하고 다르면 `o2c_ingest_allowed_hours`를 맞춘다.** 로스터는 실행 시 인벤토리 그룹에서 만든다(아래 "로스터와 계획 정지 예외").
 
   - **서버 응답 없음 `infra-unreachable-host` (Spec #184 / Ticket-6, ADR-0010, `stream_type: metrics`)**: `tcpcheck_status`(otelcol `tcp_check` 수신기의 `tcpcheck.status`, 접속 성공 1/실패 0)가 5분 조회 구간 최댓값 0이면 발화하는 P1 State Alert(재통지 60분). 행은 대상 `tcpcheck_endpoint`(`<주소>:<포트>`)와 검사한 호스트(`host_name`). 수집은 Host Agents가 검사하는 쪽 호스트(`host_agents_o2_health_checker`, ns0266) 수집기에만 붙인다(`roles/monitoring`, 대상은 `servers` 전체 + 각 호스트 `ansible_port`). Silent Host SQL에서 이 알림 대상 호스트를 빼는 서브쿼리는 실서버 검증 전이라 적용하지 않았고, 서버가 다운되면 두 알림이 함께 울린다(Silent Host 조치 첫 줄이 "같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인"으로 안내).

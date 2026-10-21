@@ -339,7 +339,8 @@ def o2c_missing_sql(hosts, stream, field, cond, body_match=False):
     ``field`` is the stream's host column (``host`` for backup_logs, ``host_name`` elsewhere). Same UNION ALL branch shape as
     the Silent Host SQL; an empty roster yields a branch that can never return a row.
 
-    ``body_match``: a record also counts for the host when its raw ``body`` names the host (``lower(body) LIKE '% <host>%'``).
+    ``body_match``: a record also counts for the host when its raw ``body`` names the host (``lower(body) LIKE '% <host>%'``; a string
+    such as ``devname`` matches the key's value instead: ``lower(body) LIKE '%devname="<host>%'``). A host ``a+b`` is an HA pair: either member counts.
     ``field`` only exists on records the ingest pipeline already processed, so without this the first evaluation after a pipeline
     change sees no data for any host and reports every host as silent.
     """
@@ -349,9 +350,15 @@ def o2c_missing_sql(hosts, stream, field, cond, body_match=False):
         return 'SELECT \'none\' AS %s, count(*) AS n FROM "%s" WHERE %s HAVING count(*) < 0' % (field, stream, cond)
 
     def who(h):
+        # `a+b`는 HA 멤버 쌍이다: 어느 한쪽이라도 보내면 수신 중이다(대기 멤버는 평소 조용하고 장애 전환 뒤에는 반대가 된다)
+        members = h.split('+')
+        conds = ["%s = '%s'" % (field, m) for m in members]
         if body_match:
-            return "(%s = '%s' OR lower(body) LIKE '%% %s%%')" % (field, h, h.lower())
-        return "%s = '%s'" % (field, h)
+            for m in members:
+                # True: 스위치 syslog 머리말(`... ns0250-3750X:`)에서 `' <호스트>'`. 문자열: 그 키의 값(`devname="ns0399"`, 따옴표 없는 `devname=ns0399`도)
+                prefixes = [' '] if body_match is True else ['%s="' % body_match, '%s=' % body_match]
+                conds += ["lower(body) LIKE '%%%s%s%%'" % (prefix, m.lower()) for prefix in prefixes]
+        return '(%s)' % ' OR '.join(conds) if len(conds) > 1 else conds[0]
 
     return ' UNION ALL '.join(
         'SELECT \'%s\' AS %s, count(*) AS n FROM "%s" WHERE %s AND %s HAVING count(*) < 1' % (h, field, stream, who(h), cond)
@@ -433,7 +440,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
         missing = alert.get('missing')
         if missing:
             roster = list((rosters or {}).get(missing['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
-            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'], bool(missing.get('body_match')))
+            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'], missing.get('body_match') or False)
         if absence:
             roster = list((rosters or {}).get(absence['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
             sql = o2c_absence_sql(roster, stream, absence['level'])
@@ -580,6 +587,35 @@ def o2c_switch_uplink_sql(entries, noise_events=None):
         ', '.join(_q(ev) for ev in UPLINK_EVENTS), o2c_switch_noise_filter(noise_events), ' OR '.join(pairs) if pairs else '1 = 0')
 
 
+# --- 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3) ---------------------------------------------------------------------
+# 방화벽 줄은 security_logs에 service_name=fortigate-syslog로 들어온다. 이 스트림에는 첫 방화벽 줄이 들어오기 전까지 방화벽 컬럼
+# (device_id, fortigate_log_subtype ...)이 없으므로 알림 SQL은 service_name과 원문 body의 key=value만 읽는다(없는 컬럼은 평가 오류가 된다).
+# FortiOS 7.2/7.4 기본 형식은 값을 따옴표로 감싸지만 실장비 샘플로 확인하기 전이라 따옴표 있는 값과 없는 값을 모두 받는다.
+_KEY_RE = _re.compile(r'^[a-z][a-z0-9_]*$')
+_VALUE_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+_FORTIGATE_MEMBER_RE = _re.compile(r'^ns[0-9]+(\+ns[0-9]+)*$')
+
+
+def o2c_valid_fortigate_values(values):
+    """True when every item is safe to put in a ``key=value`` match (letters, digits, ``.``, ``_``, ``-``)."""
+    return all(isinstance(v, str) and _VALUE_RE.match(v) for v in values or [])
+
+
+def o2c_valid_fortigate_roster(devices):
+    """True when every item is a management number (``ns0399``) or an HA member pair joined with ``+`` (``ns0380+ns0381``)."""
+    return all(isinstance(d, str) and _FORTIGATE_MEMBER_RE.match(d) for d in devices or [])
+
+
+def o2c_fortigate_match(key, values):
+    """``(body LIKE '% key="v"%' OR body LIKE '% key=v %' ...)`` — the line has ``key`` set to one of ``values`` (quoted or bare)."""
+    if not _KEY_RE.match(str(key)) or not values or not o2c_valid_fortigate_values(values):
+        raise ValueError('방화벽 로그 조건에 넣을 수 없는 키 또는 값: %s' % key)
+    parts = []
+    for v in values:
+        parts += ["body LIKE '%% %s=\"%s\"%%'" % (key, v), "body LIKE '%% %s=%s %%'" % (key, v)]
+    return '(%s)' % ' OR '.join(parts)
+
+
 def o2c_enabled_alerts(alerts):
     """The alerts that are created: an alert whose ``enabled`` renders false (e.g. the uplink alert with an empty port list) is left out."""
     return [a for a in alerts or [] if str(a.get('enabled', True)).strip().lower() not in ('false', '0', '')]
@@ -598,4 +634,6 @@ class FilterModule(object):
                 'o2c_host_items': o2c_host_items,
                 'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
                 'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
-                'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts}
+                'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts,
+                'o2c_valid_fortigate_values': o2c_valid_fortigate_values, 'o2c_valid_fortigate_roster': o2c_valid_fortigate_roster,
+                'o2c_fortigate_match': o2c_fortigate_match}
