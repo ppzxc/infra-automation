@@ -279,9 +279,13 @@ def test_template_body_is_a_naver_works_text_message(o2):
     assert body["content"]["type"] == "text"
     # 행동 가능한 알림: 심각도·제목·무슨 일·왜 중요·조치·런북·대상 행·대시보드 링크·발생 구간
     for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action}", "{runbook}",
-                "{rows:20}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_start_time}", "{alert_end_time}", "{alert_name}"):
+                "{rows:20}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
         assert var in body["content"]["text"], var
     assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
+    # 시각 줄은 알림 평가 시각({alert_trigger_time_str})과 (KST) 표기다. 결과 행 _timestamp 기반 변수는 최종 SELECT에 _timestamp가 없으면 비어 쓰지 않는다
+    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
+    assert "⏱ 발생: {alert_trigger_time_str} (KST) · 규칙 {alert_name}" in body["content"]["text"]
+    assert "alert_start_time" not in tpl and "alert_end_time" not in tpl and "UTC" not in tpl
 
 
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
@@ -937,6 +941,44 @@ def test_standing_selftest_alert_is_managed_on_a_verification_only_stream_and_is
     o2.writes.clear()
     res = _apply(o2)
     assert res.returncode == 0 and o2.writes == [] and _changed(res) == 0
+
+
+def test_every_alert_carries_the_top_level_kst_tz_offset_and_converges(o2):
+    """tz_offset은 trigger_condition이 아니라 알림 최상위 필드다. 로그·PromQL·자가 시험 알림 모두 540(KST)이고 2회차는 변경 0건이다."""
+    assert _apply(o2).returncode == 0
+    assert len(o2.store["alert"]) == len(EXPECTED_ALERTS) + len(PROMQL_ALERTS) + 1
+    for name, a in o2.store["alert"].items():
+        assert a["tz_offset"] == 540 and "tz_offset" not in a["trigger_condition"], name
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and o2.writes == [] and _changed(res) == 0
+
+
+def test_tz_offset_is_a_variable_and_a_changed_value_updates_every_alert_once(o2):
+    assert _apply(o2).returncode == 0
+    o2.writes.clear()
+    res = _apply(o2, extra={"o2c_tz_offset": 0})
+    assert res.returncode == 0
+    assert {w[0] for w in o2.writes} == {"PUT"} and len(o2.writes) == len(o2.store["alert"])
+    assert {a["tz_offset"] for a in o2.store["alert"].values()} == {0}
+
+
+def test_desired_alert_tz_offset_defaults_to_zero_without_the_spec_key():
+    alert = dict(PROMQL_DEFS[0], action="① a ② b")
+    assert _alert_bodies(_desired_spec([alert]))[alert["name"]]["tz_offset"] == 0
+    assert _alert_bodies(dict(_desired_spec([alert]), tz_offset=540))[alert["name"]]["tz_offset"] == 540
+
+
+def test_selftest_record_and_row_template_carry_a_quote_and_backslash_probe(o2):
+    """행 값의 따옴표·역슬래시가 webhook JSON을 깨는지 통지에서 눈으로 확인할 수 있게 시험 레코드에 `a"b\\c`를 싣고 행 템플릿이 그것을 쓴다."""
+    assert _apply(o2).returncode == 0
+    o2.ingests.clear()
+    assert _apply(o2, extra={"o2c_verify_notify": True}).returncode == 0
+    (record,) = _selftest_ingests(o2)[0][2]
+    assert record["probe"] == 'a"b\\c' and '"' in record["probe"] and "\\" in record["probe"]
+    alert = o2.store["alert"][SELFTEST]
+    assert "{probe}" in alert["row_template"] and "probe" in alert["query_condition"]["sql"]
+    assert not re.search(r'["\\]', alert["row_template"])   # 템플릿 자체는 따옴표·역슬래시를 만들지 않는다
 
 
 def test_selftest_notification_is_clearly_marked_as_a_test(o2):

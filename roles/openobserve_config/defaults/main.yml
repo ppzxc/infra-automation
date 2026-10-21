@@ -52,8 +52,13 @@ o2c_p1_destination: ""
 # {link_label}은 메트릭(PromQL) 알림과 원문 링크가 있는 로그 알림이 "상세 보기"(= {alert_url}, 알림 화면), 원문 링크가 없는 로그 알림이 "로그 보기"다.
 # {raw_log_line}은 원문 로그 링크를 만들 수 있는 로그 알림에서만 "\n▶ 로그 보기: <원문 URL>" 줄이고 나머지는 빈 문자열이다(o2c_desired가 채운다).
 # 알림 SQL에서 WHERE만 남겨 파생하거나 알림 정의의 선택 필드 raw_sql로 직접 지정한다(o2c_raw_log_sql). {alert_url}은 컨텍스트 값 안에서 치환되지 않아 줄째 따로 둔다.
+# 시각 줄: {alert_trigger_time_str}(알림이 평가된 시각, 형식 %Y-%m-%dT%H:%M:%S)을 쓴다. 옛 {alert_start_time}/{alert_end_time}은 결과 행 _timestamp의
+# 최소/최대라 최종 SELECT에 _timestamp가 없는 알림(대부분)에서 값이 비거나 어긋난다. 근거: OpenObserve 문서 "Templates"의 변수 표(alert_trigger_time =
+# 평가 시각 µs, alert_trigger_time_str = 그 형식화 값)와 소스 src/core/src/alerts/notifications/context.rs의 NotificationContext.
+# 표기 (KST)는 알림 정의 최상위 tz_offset=o2c_tz_offset(기본 540분)에 기댄다. 이 변수가 tz_offset을 따르는지는 실서버에서 확인한다(docs/openobserve_config.md).
+# 행 값({detail} 등 로그 원문)은 소스 custom.rs에서 JSON 이스케이프되는 경로(process_variable_replace → format_variable_value)로 치환되는 것으로 보이나 실서버 확인 전이다.
 o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
-o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 발생: {alert_start_time} ~ {alert_end_time} (UTC) · 규칙 {alert_name}"}}'
+o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 발생: {alert_trigger_time_str} (KST) · 규칙 {alert_name}"}}'
 
 # 임계값
 o2c_ssh_fail_per_source_threshold: 10
@@ -1195,6 +1200,10 @@ o2c_verify_notify: false
 o2c_selftest_stream: "alert_selftest{{ o2c_verify_stream_suffix }}"
 # 빈 스트림을 만드는 시드 레코드의 나이(초, O2C-014). 알림 조회 구간(5분)보다 길고 OpenObserve 수집 허용 범위(기본 5시간)보다 짧아야 한다.
 o2c_selftest_seed_age_s: 3600
+# 알림 평가 시각대(분 단위 UTC 오프셋, 최상위 tz_offset). 540 = KST(+09:00). 모든 알림(로그·PromQL·자가 시험)에 같은 값이 들어간다(O2C-012 계획).
+o2c_tz_offset: 540
+# 자가 시험 레코드의 JSON 이스케이프 시험 값(따옴표·역슬래시). 통지 행({probe})에 실려 webhook 본문이 깨지지 않는지 배포 뒤 눈으로 확인한다.
+o2c_selftest_escape_probe: 'a"b\c'
 o2c_selftest_alert:
   name: infra-alert-selftest
   severity: "TEST"
@@ -1204,12 +1213,12 @@ o2c_selftest_alert:
   why: "알림 템플릿·통지 대상·webhook이 끝까지 동작하는지 확인하는 시험이며 실제 장애가 아닙니다."
   action: "이 통지가 도착했으면 통지 경로는 정상입니다. 조치할 것이 없습니다."
   runbook: "{{ o2c_runbook_base }}"
-  row_template: '• {host_name}: 시험 레코드 {records}건'
+  row_template: '• {host_name}: 시험 레코드 {records}건 · 이스케이프 시험 값 {probe}'
   description: "통지 경로 자가 시험 — 검증 전용 스트림에 o2c_verify_notify=true 실행 때만 레코드가 들어간다"
   stream: "{{ o2c_selftest_stream }}"
   sql: >-
-    SELECT host_name, count(*) AS records FROM "{{ o2c_selftest_stream }}"
-    GROUP BY host_name
+    SELECT host_name, probe, count(*) AS records FROM "{{ o2c_selftest_stream }}"
+    GROUP BY host_name, probe
   period: 5
   frequency: 1
   silence: 5

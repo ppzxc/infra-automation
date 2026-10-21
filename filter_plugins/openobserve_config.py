@@ -185,6 +185,8 @@ def o2c_desired(spec):
             'query_condition': query, 'trigger_condition': trigger,
             'destinations': [p1_dest if str(alert.get('severity', '')).startswith('P1') else dest],
             'enabled': True, 'description': alert['description'],
+            # 알림 평가 시각대: 최상위 tz_offset(분 단위 UTC 오프셋, trigger_condition 안이 아님 — OpenObserve 테스트 데이터 AlertMultiRealTime.json 구조)
+            'tz_offset': int(spec.get('tz_offset', 0)),
             # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action}·{runbook}로 쓰는 알림별 변수,
             # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수). link_label은 {alert_url}의 라벨이다(로그 알림 "로그 보기", 메트릭 알림 "상세 보기").
             'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, action=o2c_action_lines(alert['action']),
