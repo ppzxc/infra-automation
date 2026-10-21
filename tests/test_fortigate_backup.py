@@ -80,7 +80,7 @@ def test_no_plaintext_token_or_unprotected_secret_tasks():
         assert by_id[tid].get("no_log") is True, tid
     assert by_id["FGBK-011"]["ansible.builtin.copy"]["mode"] == "0600"
     assert by_id["FGBK-005"]["ansible.builtin.file"]["mode"] == "0700"
-    assert "token" not in (ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8").replace("api_token", "").replace("vault_token", "").replace("X-Vault-Token", "")
+    assert "token" not in (ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8").replace("api_token", "").replace("webhook_token", "").replace("vault_token", "").replace("X-Vault-Token", "")
 
 
 # --------------------------------------------------------------------------
@@ -89,6 +89,7 @@ def test_no_plaintext_token_or_unprotected_secret_tasks():
 class _Device:
     def __init__(self):
         self.mode = "ok"
+        self.config = CONFIG_BODY
         self.hostname = "fw-primary"
         self.serial = "FGT70GTEST000001"
         self.requests = []
@@ -116,7 +117,7 @@ class _Device:
                 elif outer.mode == "error":
                     code, body = 500, "boom"
                 else:
-                    code, body = 200, CONFIG_BODY
+                    code, body = 200, outer.config
                 self.send_response(code)
                 if self.path.startswith("/api/v2/monitor/system/status") and code == 200:
                     self.send_header("Content-Type", "application/json")
@@ -311,3 +312,186 @@ def test_underscore_in_device_rejected(ansible_env, device, tmp_path):
     res = _run(ansible_env, device, tmp_path / "bk", extra={"fortigate_device": "bad_name"})
     assert res.returncode != 0
     assert device.requests == []
+
+
+# --------------------------------------------------------------------------
+# 설정 변경 감지 (#286): 알림 수신기는 로컬 HTTP 서버로 모사한다.
+# --------------------------------------------------------------------------
+HASH = "SH2xYz9SECRETADMINHASHvalue"
+PSK = "ENC SECRETPSKvalue123456"
+
+
+def _cfg(version="FGT70G-v7.2.13-build1:opmode=0:vdom=0:user=admin", hostname="fw-primary", extra=""):
+    return (
+        f"#config-version={version}\n#conf_file_ver=123\n#buildno=1\n"
+        f"config system global\n    set hostname \"{hostname}\"\n    set admintimeout 5\nend\n"
+        f"config system admin\n    edit \"admin\"\n        set password ENC {HASH}\n    next\nend\n"
+        f"config vpn ipsec phase1-interface\n    edit \"site-a\"\n        set psksecret {PSK}\n    next\nend\n"
+        + extra
+    )
+
+
+class _Hook:
+    def __init__(self):
+        self.posts = []
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", 0))
+                outer.posts.append((self.path, self.headers.get("X-NANOIT-ACCESS"), self.rfile.read(n).decode()))
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        self.server = HTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/hook"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def texts(self):
+        return [json.loads(b)["content"]["text"] for _, _, b in self.posts]
+
+    def close(self):
+        self.server.shutdown()
+
+
+@pytest.fixture
+def hook():
+    h = _Hook()
+    yield h
+    h.close()
+
+
+def _drift_run(env_dir, device, out, hook, **extra):
+    ev = {"fortigate_backup_alert_webhook_url": hook.url, "fortigate_backup_alert_webhook_token": "hook-token-xyz"}
+    ev.update(extra)
+    return _run(env_dir, device, out, extra=ev)
+
+
+def _two_runs(env_dir, device, out, hook, first, second):
+    device.config = first
+    r1 = _drift_run(env_dir, device, out, hook)
+    assert r1.returncode == 0, r1.stdout + r1.stderr
+    device.config = second
+    time.sleep(1.1)
+    r2 = _drift_run(env_dir, device, out, hook)
+    return r1, r2
+
+
+def test_first_backup_has_no_alert_and_no_error(ansible_env, device, hook, tmp_path):
+    device.config = _cfg()
+    res = _drift_run(ansible_env, device, tmp_path / "bk", hook)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert hook.posts == []
+
+
+def test_unchanged_or_header_only_change_does_not_alert(ansible_env, device, hook, tmp_path):
+    _, r2 = _two_runs(ansible_env, device, tmp_path / "bk", hook, _cfg(), _cfg(version="FGT70G-v7.2.14-build9:opmode=0:vdom=0:user=other"))
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert hook.posts == []
+
+
+def test_change_alerts_once_with_target_member_and_runbook_without_secrets(ansible_env, device, hook, tmp_path):
+    out = tmp_path / "bk"
+    changed = _cfg(extra='config firewall policy\n    edit 7\n        set name "allow-all"\n    next\nend\n').replace("admintimeout 5", "admintimeout 480")
+    r1, r2 = _two_runs(ansible_env, device, out, hook, _cfg(), changed)
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert len(hook.posts) == 1
+    text = hook.texts()[0]
+    for needle in ("P2", "■ 무슨 일", "■ 왜 중요", "■ 대상", "■ 조치", "▶ 런북", "#fortigate-config-change", "ns0380", "fw-primary",
+                   "config firewall policy", "config system global"):
+        assert needle in text, needle
+    assert hook.posts[0][1] == "hook-token-xyz"
+    # 같은 변경으로 다시 실행해도 반복 알림 없음
+    time.sleep(1.1)
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    assert len(hook.posts) == 1
+    # 비밀 값은 알림·로그 어디에도 없다
+    everything = text + r1.stdout + r1.stderr + r2.stdout + r2.stderr
+    for secret in (HASH, "SECRETPSKvalue123456", "hook-token-xyz", hook.url, "allow-all", "480"):
+        assert secret not in everything, secret
+
+
+def test_secret_only_change_alerts_but_never_prints_values(ansible_env, device, hook, tmp_path):
+    changed = _cfg().replace(PSK, "ENC ROTATEDPSKvalue999")
+    _, r2 = _two_runs(ansible_env, device, tmp_path / "bk", hook, _cfg(), changed)
+    assert len(hook.posts) == 1
+    assert "vpn ipsec phase1-interface" in hook.texts()[0]
+    assert "ROTATEDPSKvalue999" not in hook.texts()[0] + r2.stdout + r2.stderr
+    assert "SECRETPSKvalue123456" not in hook.texts()[0] + r2.stdout + r2.stderr
+
+
+def test_member_failover_does_not_flag_member_specific_lines_but_marks_member_change(ansible_env, device, hook, tmp_path):
+    out = tmp_path / "bk"
+    device.config = _cfg()
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    device.hostname = "fw-secondary"
+    device.config = _cfg(hostname="fw-secondary")
+    time.sleep(1.1)
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    assert hook.posts == []  # 멤버 고유 줄(hostname)만 다르면 변경이 아니다
+    device.config = _cfg(hostname="fw-secondary").replace("admintimeout 5", "admintimeout 9")
+    time.sleep(1.1)
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    assert len(hook.posts) == 1  # 직전과 같은 멤버의 실제 변경: 알림
+    assert "멤버 고유" not in hook.texts()[0]
+    device.hostname = "fw-primary"
+    device.config = _cfg(hostname="fw-primary").replace("admintimeout 5", "admintimeout 11")
+    time.sleep(1.1)
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    assert len(hook.posts) == 2
+    assert "fw-secondary" in hook.texts()[1] and "fw-primary" in hook.texts()[1]
+    assert "멤버 고유" in hook.texts()[1]
+
+
+def test_alert_failure_or_missing_webhook_fails_host_loudly(ansible_env, device, tmp_path):
+    out = tmp_path / "bk"
+    device.config = _cfg()
+    assert _run(ansible_env, device, out).returncode == 0
+    device.config = _cfg().replace("admintimeout 5", "admintimeout 9")
+    time.sleep(1.1)
+    res = _run(ansible_env, device, out)
+    assert res.returncode != 0
+    assert "FORTIGATE-ALERT" in res.stdout + res.stderr
+    assert "config system global" in res.stdout + res.stderr  # 요지는 로그에 남는다(값 없음)
+    assert "admintimeout 9" not in res.stdout + res.stderr
+
+
+def _filters():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fgdrift", ROLE_DIR / "filter_plugins" / "fortigate_config_drift.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.FilterModule().filters()
+
+
+def test_previous_backup_is_by_trailing_timestamp_not_member_name():
+    f = _filters()["fortigate_backup_previous"]
+    names = ["ns0380_zz-member_20260101T000000.conf", "ns0380_aa-member_20260102T000000.conf",
+             "ns0380_mm-member_20260103T000000.conf", "ns0399_fw_20260102T120000.conf"]
+    assert f(names, "ns0380_mm-member_20260103T000000.conf", "ns0380_") == "ns0380_aa-member_20260102T000000.conf"
+    assert f(["ns0380_a_20260101T000000.conf"], "ns0380_a_20260101T000000.conf", "ns0380_") == ""
+
+
+def test_changes_report_names_only_and_ignore_comment_lines():
+    f = _filters()["fortigate_config_changes"]
+    a = _cfg()
+    assert f(a, _cfg(version="other"), False) == []
+    got = f(_cfg().replace(HASH, "NEWHASH"), a, False)
+    assert got == ['config system admin > edit "admin" (변경: password)']
+
+
+def test_previous_that_is_not_a_fortios_config_is_no_baseline():
+    f = _filters()["fortigate_config_changes"]
+    assert f(_cfg(), "x", False) == []
+    assert f(_cfg(), "", False) == []
+
+
+def test_multiline_values_do_not_break_parsing():
+    f = _filters()["fortigate_config_changes"]
+    cert = 'config vpn certificate local\n    edit "c"\n        set certificate "-----BEGIN CERTIFICATE-----\nAAAA\nend\n-----END CERTIFICATE-----\n"\n    next\nend\n'
+    assert f(_cfg() + cert, _cfg() + cert, False) == []
+    assert len(f(_cfg() + cert.replace("AAAA", "BBBB"), _cfg() + cert, False)) == 1

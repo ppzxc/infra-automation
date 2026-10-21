@@ -73,5 +73,5 @@
 
 - 원문 시각의 시간대는 장비 설정에 의존한다. 증적 기준 시각은 수집 시각이다.
 - **필드 추출은 합성 입력으로만 검증됐다.** `fortigate_semantics`와 그 테스트(`tests/test_openobserve_vrl.py`)는 FortiOS 7.2/7.4 Log Message Reference의 기본 key=value 형식으로 만든 가짜 줄을 쓴다. 사무실 장비(`ns0399`)의 실제 로그 샘플(비공개 경로)을 받으면 키 이름(`devname`, `type`, `subtype`, `action`, `srcip`, `remip`, `ui`, `user`, `policyid`)과 값 모양(따옴표, `N/A`, 관리자 접속 줄의 주소 위치)을 대조해 규칙과 테스트를 고친다. 그 전에는 `security_logs`에서 `device_id`·`event_action` 등이 비어 있는 줄이 있을 수 있다.
-- 알림(관리자 로그인 실패·정책·계정 변경·HA 전환·중대 탐지·수신 중단)은 [알림 런북](alerts.md)의 방화벽 절이 다룬다(Spec #282 / Ticket-3, 같은 합성 입력 한계). 설정 백업은 이 런북의 범위 밖이다.
+- 알림(관리자 로그인 실패·정책·계정 변경·HA 전환·중대 탐지·수신 중단)은 [알림 런북](alerts.md)의 방화벽 절이 다룬다(Spec #282 / Ticket-3, 같은 합성 입력 한계). 설정 백업·변경 알림은 이 런북의 범위 밖이다([알림 런북](alerts.md#fortigate-config-change)).
 - 허용 트래픽은 수집하지 않으므로 "허용된 접속이 있었는지"는 이 로그로 증명되지 않는다. 중요 구간만 정책별로 켠 범위에서만 남는다.
