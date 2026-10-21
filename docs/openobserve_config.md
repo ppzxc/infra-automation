@@ -45,15 +45,15 @@
   입력 형식은 `수신 시각 / 송신 주소 / 장비 이름: [순번: ][*]장비 시각(ms, 시간대) : %FAC-SEV-MNEM: 설명`입니다. **장비 시각은 연도가 없고 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)를 바꾸지 않으며**, 장비 시각은 원문에 그대로 남습니다.
 - **파이프라인** `switch_syslog_semantics`: `system_logs` 실시간 소스 → 함수(`after_flatten: true`) → `system_logs`. 같은 스트림에 다른 파이프라인은 없습니다.
 - **통지 대상**: webhook 하나(`infra-automation-webhook`) — 네이버웍스 봇 text API(`{"content": {"type": "text", "text": ...}}`)로 보내는 본문 템플릿과 `Content-Type: application/json` 헤더. 등급별 분리는 범위 밖입니다.
-- **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 무슨 일, 왜 중요, 대상(알림별 `row_template`), 조치, [런북](runbooks/alerts.md) 링크, 로그 보기 링크, 발생 구간. 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
+- **알림 메시지**: 행동 가능한 형식 — 심각도(🔴P1·🟠P2·🟡P3)와 제목, 현상(`■ 현상`), 영향(`■ 영향`), 대상(알림별 `row_template`), 조치(`■ 조치:` 다음 줄부터 `1.` `2.` `3.` 항목마다 한 줄 — 알림 정의는 `① … ② …` 한 줄로 두고 `o2c_action_lines` 필터가 렌더링 단계에서 줄로 나눈다), [런북](runbooks/alerts.md) 링크, 로그 보기 링크, 발생 구간. 알림별 문구는 `o2c_alerts`의 `severity`·`title`·`what`·`why`·`action`·`runbook`(`context_attributes`로 전달)에 둔다.
 - **알림 규칙**: 모두 위 대상으로 보냅니다. 스위치 syslog 알림 6개(아래 "스위치 syslog 알림")와 리소스·백업·Silent Host 등은 표 아래에 따로 적었습니다.
 
   | 이름 | 조건 |
   |---|---|
   | `infra-ssh-login-failures-per-source` | `source_address`별 5분 10회 이상 sshd 로그인 실패 |
   | `infra-ssh-login-failures-per-host` | 호스트별 5분 50회 이상 sshd 로그인 실패 |
-  | `infra-root-login-success` | 정상 출발지 목록 밖의 root SSH 로그인 성공 1건부터 (P1, Event Alert). Semaphore·사무실 종류 출발지는 제외 |
-  | `infra-root-login-office-daily` | 사무실 종류 출발지의 root SSH 로그인 성공, 하루 1번 요약 (P3, period·silence 1440) |
+  | `infra-root-login-success` | root SSH 로그인 성공 1건부터, 출발지가 정상 출발지 목록에도 사설 대역(10/8·172.16/12·192.168/16·127/8·169.254/16)에도 없을 때 (P1 외부 출발지, Event Alert) |
+  | `infra-root-login-known` | root SSH 로그인 성공 1건부터, 출발지가 정상 출발지 목록에 있거나(kind 무관) 미등록 사설 대역일 때 (P2, Event Alert, period 5분, 재통지 `o2c_root_known_silence_minutes` 기본 60분). 이전 `infra-root-login-office-daily`(P3)를 대체하며 반영 때 삭제됨 |
   | `infra-sudo-escalation-failure` | sudo/su `authentication failure`/`NOT in sudoers` 1건부터 (`event_action IN (sudo, su)`, 성공은 알리지 않음) |
   | `infra-oom-kill` (P2) | `system_logs`의 `Killed process`·`Kill process`·`invoked oom-killer`를 대소문자 무시(`lower(body)`)로 매칭. 행에 호스트·종료된 프로세스명 |
   | `infra-disk-fs-errors` (P1) | `system_logs`의 `I/O error`, `EXT4-fs error`, `XFS ... Corruption`, `blk_update_request`, `Buffer I/O error` (대소문자 무시, severity가 아닌 패턴 기반). 옛 `infra-kernel-disk-errors`를 대체하며 서버에서 삭제된다 |
@@ -78,7 +78,7 @@
     - **검증 단계**: 업링크 규칙은 검증 때 케이스의 가짜 장비를 `watch_port`로 목록에 더해 SQL을 다시 만들고, 수신 중단은 가짜 장비를 로스터에 더한다(`off_roster: true` 케이스는 더하지 않아 "목록 밖 장비는 알리지 않음"을 확인). 장비별 집계의 분리는 "장비마다 임계 미만"인 케이스들이 모두 발화하지 않는 것으로 확인한다. 로컬 테스트는 검증 검색 SQL을 합성 레코드 위에서 실제로 실행해 발화 장비가 픽스처의 `fires`와 일치하는지 본다.
     - **첫 반영 때 바로 울릴 수 있는 알림**: MAC 플랩(한 장비에서 3시간에 25건, 10분 평균 1.4건이라 기본 2회는 현재 상태에서도 울린다). 수신 중단은 기본 목록 장비가 24시간 넘게 조용하면 첫 평가에서 울린다. 새 필드(`device_id` 등)는 파이프라인이 반영된 뒤 처음 들어온 줄부터 붙으므로, 반영 직후 한 번은 알림 평가가 `unknown field`로 오류일 수 있고 다음 줄이 들어오면 정상이 된다(`O2C-036`이 실패하면 잠시 뒤 Config를 다시 실행한다).
 
-  - **방화벽(포티게이트) 로그 알림 6개 정의 (Spec #282 / Ticket-3, `security_logs`의 `service_name = 'fortigate-syslog'`)**: 서버·스위치 알림과 같은 통지 경로·메시지 형식(등급, 무슨 일, 왜 중요, 대상, 조치, 런북 링크)이다. 임계값·목록·승인 시간·재통지 간격은 모두 역할 기본 변수(`o2c_fortigate_*`)이고 값이 SQL에 들어가므로 형식을 `O2C-002`에서 요청 전에 검증한다(장비 이름·별칭표, `key=value` 문자, 승인 시간 0~24 정수·시작 < 끝, HA 제외 logid는 숫자만). **실로그 샘플로 검증됨(검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃·로그인 실패 줄, 실제 장비가 만든 웹필터·앱제어 줄, IPv6 주소).** 실측으로 `infra-fortigate-critical-detection`이 바이러스 감염(`subtype=virus`·`eventtype=infected`, 실제 로그에는 `severity` 키가 없음)도 센다. 로그 전송 설정 변경(`log.syslogd.*`, `log.setting`)은 기본 감시 대상이 아니며 `o2c_fortigate_policy_cfgpaths`로 더할 수 있다.
+  - **방화벽(포티게이트) 로그 알림 6개 정의 (Spec #282 / Ticket-3, `security_logs`의 `service_name = 'fortigate-syslog'`)**: 서버·스위치 알림과 같은 통지 경로·메시지 형식(등급, 현상, 영향, 대상, 조치, 런북 링크)이다. 임계값·목록·승인 시간·재통지 간격은 모두 역할 기본 변수(`o2c_fortigate_*`)이고 값이 SQL에 들어가므로 형식을 `O2C-002`에서 요청 전에 검증한다(장비 이름·별칭표, `key=value` 문자, 승인 시간 0~24 정수·시작 < 끝, HA 제외 logid는 숫자만). **실로그 샘플로 검증됨(검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃·로그인 실패 줄, 실제 장비가 만든 웹필터·앱제어 줄, IPv6 주소).** 실측으로 `infra-fortigate-critical-detection`이 바이러스 감염(`subtype=virus`·`eventtype=infected`, 실제 로그에는 `severity` 키가 없음)도 센다. 로그 전송 설정 변경(`log.syslogd.*`, `log.setting`)은 기본 감시 대상이 아니며 `o2c_fortigate_policy_cfgpaths`로 더할 수 있다.
 
     | 이름 | 등급 | 조건 (기본값) |
     |---|---|---|
@@ -123,7 +123,7 @@
 | `o2_endpoint`, `o2_org`, `o2_ca_file` | 호스트 에이전트와 같은 연결 값 |
 | `api_user`, `api_password` | 설정 API(함수·파이프라인·알림)를 쓸 수 있는 OpenObserve 계정 (수집 토큰과 별개) |
 | `alert_webhook_url` | 통지 webhook URL |
-| `normal_sources` | (선택) root 로그인 정상 출발지 `[{address: <IP>, kind: semaphore\|office}]`. Semaphore는 어느 root 알림에도 걸리지 않고 office(사무실·S2S)는 P3 하루 요약에만, 그 밖은 P1. SSH 실패 급증 알림에는 적용하지 않음. 주소는 IP 문자·종류를 검증하며 출력하지 않음 |
+| `normal_sources` | (선택) root 로그인 정상 출발지 `[{address: <IP>, kind: semaphore\|office}]`. `kind`는 구분용이고 판정은 같다: 목록의 출발지는 P1(외부 출발지)에서 빠지고 P2(알고 있는 출발지)로 간다. 목록에 없어도 사설 대역(10/8·172.16/12·192.168/16·127/8·169.254/16)은 P2, 공인은 P1. 목록이 비면 공인은 모두 P1. SSH 실패 급증 알림에는 적용하지 않음. 주소는 IP 문자·종류를 검증하며 출력하지 않음 |
 | `alert_resource_exclusions`, `alert_resource_thresholds` | (선택, 비어 있어도 동작) 리소스 알림의 호스트·마운트 예외 `[{host, mount?, metric?}]`와 임계값 덮어쓰기 `[{host, mount?, metric?, p2?, p1?}]` (`metric`: disk·inode·memory) |
 | `silent_host_exceptions` | (선택) Silent Host 계획 정지 예외 `[{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason?}]`. 만료일 필수(없거나 형식이 틀리면 요청 전에 실패), 만료일이 지난 항목은 무시 |
 | `alert_webhook_token`, `alert_webhook_auth_header` | (선택) 인증 토큰과 헤더 이름(기본 `Authorization`, 네이버웍스 봇은 `X-NANOIT-ACCESS`) |

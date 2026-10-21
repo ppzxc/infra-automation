@@ -44,21 +44,26 @@ infra-ssh-login-failures-per-host:
         - {repeat: 49, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.22}
 infra-root-login-success:
   cases:
-    - name: 외부 출발지 root SSH 로그인 성공
+    - name: 공인 미등록 출발지 root SSH 로그인 성공
       host: verify-root-external
       fires: true
       records:
         - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 198.51.100.7}
-    - name: Semaphore 출발지 root 로그인은 알리지 않는다 (배포 때마다 울리던 P1)
+    - name: Semaphore 등록 출발지 root 로그인은 P1이 아니라 P2다
       host: verify-root-semaphore
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@semaphore"}
-    - name: 사무실 출발지 root 로그인은 P1이 아니라 P3 요약이다
+    - name: 사무실 등록 출발지 root 로그인은 P1이 아니라 P2다
       host: verify-root-office
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@office"}
+    - name: 미등록 사설 대역 출발지는 P1이 아니라 P2다
+      host: verify-root-private
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 10.0.0.8}
     - name: 일반 사용자 로그인 성공
       host: verify-root-other-user
       fires: false
@@ -69,28 +74,39 @@ infra-root-login-success:
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: failure, user_name: root, source_address: 198.51.100.9}
-infra-root-login-office-daily:
+# 정상 출발지 목록이 비면 등록 출발지 케이스(@semaphore·@office)는 건너뛰고, 공인 출발지는 모두 P1·사설 대역은 P2로 검증된다.
+infra-root-login-known:
   cases:
-    - name: 사무실·S2S 출발지 root 로그인 성공
-      host: verify-office-p3-office
+    - name: Semaphore 등록 출발지 root 로그인 성공
+      host: verify-known-semaphore
+      fires: true
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@semaphore"}
+    - name: 사무실·S2S 등록 출발지 root 로그인 성공
+      host: verify-known-office
       fires: true
       records:
         - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@office"}
-    - name: Semaphore 출발지는 어느 root 알림에도 걸리지 않는다
-      host: verify-office-p3-semaphore
-      fires: false
+    - name: 미등록 사설 대역 출발지 root 로그인 성공
+      host: verify-known-private
+      fires: true
       records:
-        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: "@semaphore"}
-    - name: 외부 출발지는 P3 요약이 아니라 P1이다
-      host: verify-office-p3-external
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 10.0.0.8}
+    - name: 공인 미등록 출발지는 P2가 아니라 P1이다
+      host: verify-known-external
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 198.51.100.7}
-    - name: 사무실 출발지의 일반 사용자 로그인
-      host: verify-office-p3-other-user
+    - name: 등록 출발지의 일반 사용자 로그인
+      host: verify-known-other-user
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: success, user_name: deploy, source_address: "@office"}
+    - name: 등록 출발지의 root 로그인 실패
+      host: verify-known-failure
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: failure, user_name: root, source_address: "@semaphore"}
 infra-sudo-escalation-failure:
   cases:
     - name: sudo 인증 실패

@@ -6,6 +6,8 @@ Pure functions so the desired state and the change plan are unit-testable withou
 ``o2c_plan``     compares them with what the OpenObserve API returned and lists only the writes that are needed.
 """
 
+import re
+
 KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
     'template': '/api/{org}/alerts/templates',
@@ -28,6 +30,19 @@ CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', '
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
 MANAGED_PREFIX = 'infra-'   # 이 접두어의 알림만 이 저장소가 소유한다
 SECRET_KINDS = ('destination',)                               # url and headers carry the webhook credentials
+
+
+_CIRCLED = re.compile('[\u2460-\u2473]')   # ①~⑳
+
+
+def o2c_action_lines(text):
+    """``① a ② b`` -> ``"\\n1. a\\n2. b"``: 조치를 항목마다 한 줄로 나눈다(앞에 개행 — 템플릿은 ``■ 조치:{action}``).
+
+    ①이 없는 문장은 ``1.`` 한 줄이 된다. 빈 문자열은 그대로 비운다. 알림 정의는 한 줄(① … ② …)로 두고 렌더링 단계에서만 바꾼다.
+    """
+    items = [i.strip() for i in _CIRCLED.split(str(text or ''))]
+    items = [i for i in items if i]
+    return ''.join('\n%d. %s' % (n, item) for n, item in enumerate(items, 1))
 
 
 def o2c_desired(spec):
@@ -69,7 +84,7 @@ def o2c_desired(spec):
             'destinations': [dest], 'enabled': True, 'description': alert['description'],
             # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action}·{runbook}로 쓰는 알림별 변수,
             # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수)
-            'context_attributes': {k: alert[k] for k in CONTEXT_KEYS},
+            'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, action=o2c_action_lines(alert['action'])),
             'row_template': alert['row_template'], 'row_template_type': 'String',
         }})
     # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8): 스트림이 이미 있을 때만 맞춘다(없으면 o2c_plan이 건너뛴다)
@@ -671,7 +686,7 @@ def o2c_enabled_alerts(alerts):
 
 class FilterModule(object):
     def filters(self):
-        return {'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
+        return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_plan_summary': o2c_plan_summary,
                 'o2c_alert_state': o2c_alert_state, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
