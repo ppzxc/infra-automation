@@ -31,6 +31,9 @@ o2c_stream: security_logs
 o2c_switch_function_name: switch_syslog_semantics
 o2c_switch_pipeline_name: switch_syslog_semantics
 o2c_switch_stream: system_logs
+# 방화벽(포티게이트) 로그 필드 추출(Spec #282 / Ticket-2): security_logs의 service_name=fortigate-syslog 레코드에만 필드를 더한다.
+# 소스 스트림당 파이프라인이 하나라 별도 파이프라인 없이 보안 로그 파이프라인(o2c_pipeline_name)에서 security_semantics 다음 함수로 잇는다.
+o2c_fortigate_function_name: fortigate_semantics
 o2c_template_name: infra-automation-webhook
 o2c_destination_name: infra-automation-webhook
 o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"
@@ -74,6 +77,47 @@ o2c_switch_syslog_roster: [ns0250, ns0347]
 # 스위치 syslog는 이벤트가 있을 때만 전송되므로 조용한 것과 고장을 구분하지 못한다. 기준 시간은 길게 두고 2주 관찰 뒤 조정한다.
 o2c_switch_silent_hours: 24
 o2c_switch_noise_filter: "{{ o2c_switch_noise_events | o2c_switch_noise_filter }}"
+
+# 방화벽(포티게이트) 로그 알림(Spec #282 / Ticket-3): security_logs의 service_name=fortigate-syslog. 값은 모두 역할 기본 변수이며 Semaphore Environment(-e)로 덮어쓴다.
+# 실로그 샘플로 검증됨(검증 범위: 관리자 로그인 실패/성공, 정책·로그 설정 변경, 트래픽, UTM ips·virus·dlp·anomaly, HA 인터페이스 실패 줄).
+# 검증되지 않은 것: HA 전환(상태 변경) 실제 줄, 실제 장비가 만든 웹필터·앱제어 줄, SSL VPN 로그인 실패 줄. 해당 줄이 들어오면 키 이름을 다시 확인한다.
+# 로그 전송 설정 자체의 변경(log.syslogd.*, log.setting)은 기본 감시 대상이 아니다. 필요하면 o2c_fortigate_policy_cfgpaths에 더한다.
+# 알림 SQL은 service_name과 원문 body의 key=value만 읽는다: 첫 방화벽 줄이 들어오기 전에는 security_logs에 방화벽 컬럼(device_id 등)이 없어서
+# 그 컬럼을 참조하면 알림 평가가 매번 오류가 나고 O2C-036이 Config 실행을 막는다(장비가 전송을 시작하기 전에도 규칙이 유효해야 한다).
+# 관리자 로그인 연속 실패: 한 출발지에서 구간 안에 이 횟수 이상. 같은 공격이 이어져도 재통지는 silence 간격으로만 온다.
+o2c_fortigate_login_fail_threshold: 5
+o2c_fortigate_login_fail_window_minutes: 5
+o2c_fortigate_login_fail_silence_minutes: 30
+# 정책·계정 변경: 변경 로그의 cfgpath 값(따옴표 안 전체 경로). 이 경로의 변경만 알린다.
+o2c_fortigate_policy_cfgpaths: [firewall.policy, firewall.policy6, firewall.proxy-policy]
+o2c_fortigate_account_cfgpaths: [system.admin, system.accprofile, system.api-user, user.local, user.group]
+# 승인 시간(장비 시계 기준 시, 시작 포함·끝 미포함, 0~24). 변경 로그 원문의 time=HH:MM:SS를 읽으므로 장비 시간대가 운영 시간대(KST)여야 한다.
+# 시각이 없거나 읽을 수 없는 줄은 승인 시간 밖으로 본다. 요일은 구분하지 않는다(주말 변경도 이 시간대면 승인 시간 안).
+o2c_fortigate_approved_start_hour: 9
+o2c_fortigate_approved_end_hour: 18
+# HA 전환: subtype=ha 로그. 전환이 반복(플래핑)되어도 이 간격으로만 다시 알린다.
+o2c_fortigate_ha_silence_minutes: 30
+# 중대 보안 탐지: type=utm 로그 중 severity가 이 값인 것(IPS·이상 징후 등). 실제 안티바이러스 로그에는 severity 키가 없으므로
+# 바이러스 감염 탐지(subtype=virus, eventtype=infected)는 심각도와 무관하게 중대 탐지로 센다. 같은 탐지의 재통지 간격은 아래 분이다.
+o2c_fortigate_detection_severities: [critical]
+o2c_fortigate_detection_silence_minutes: 60
+# 수신 중단 감시 대상 장비(관리번호). 명시한 장비만 본다. HA 쌍은 `ns0380+ns0381`처럼 `+`로 묶어 쓰며 어느 한 멤버라도 보내면 수신 중이다.
+# 기본값은 비어 있다(opt in). 장비가 전송을 시작하고 로그가 들어오는 것을 확인한 장비를 그때 더한다
+# (사무실이 먼저). 미리 넣으면 전송 설정 전까지 허위 알림이 계속 온다. 목록이 비어도 알림 규칙은 있지만 절대 행을 돌려주지 않는다.
+# 항목은 관리번호이거나, hostname을 관리번호로 바꾸지 못한 장비의 원래 이름(devname 그대로, 대소문자 무관)이다.
+o2c_fortigate_syslog_roster: []
+# 장비 이름 → 관리번호 별칭표. hostname을 관리번호로 못 바꾼 장비의 device_id를 채운다(키는 소문자 정규화한 devname, 도메인 제외).
+# 표에 없는 이름은 `ns`+숫자 추출을 쓴다. 공개 저장소라 실제 이름은 여기 쓰지 않고 Semaphore Environment/Extra variables로 넣는다.
+# 예: {example_branch_fw: ns0000}. 값이 바뀌면 다음 Config 실행에서 fortigate_semantics 함수가 갱신된다.
+o2c_fortigate_device_aliases: {}
+# 방화벽은 로그가 계속 나오므로 기준 시간은 스위치(o2c_switch_silent_hours, 24시간)보다 짧다. 전송 로그를 정책별로 줄인 장비가 오탐을 내면 관찰 뒤 늘린다.
+o2c_fortigate_silent_minutes: 120
+# 장비 이름은 원문의 devname(소문자, 도메인 제외). 시각은 원문의 time=(장비 시계)에서 시를 읽고 못 읽으면 -1이다.
+o2c_fortigate_device_sql: >-
+  CASE WHEN body LIKE '% devname=%' THEN lower(regexp_replace(body, '^.* devname="?([^" .]*).*$', '\1')) ELSE 'unknown' END
+o2c_fortigate_hour_sql: >-
+  CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(regexp_replace(body, '^.* time=([0-9][0-9]):.*$', '\1') AS INT) ELSE -1 END
+o2c_fortigate_in_hours_sql: "{{ o2c_fortigate_hour_sql }} >= {{ o2c_fortigate_approved_start_hour }} AND {{ o2c_fortigate_hour_sql }} < {{ o2c_fortigate_approved_end_hour }}"
 
 # 정상 출발지(OpenBao normal_sources). 주소는 O2C-002에서 IP 문자 형식을 검증하므로 SQL에 그대로 넣는다.
 o2c_normal_sources: "{{ o2c_kv.normal_sources | default([], true) }}"
@@ -120,6 +164,7 @@ o2c_rosters:
   silent: "{{ o2c_roster_silent }}"
   app: "{{ o2c_roster_app }}"
   switch: "{{ o2c_switch_syslog_roster }}"
+  fortigate: "{{ o2c_fortigate_syslog_roster }}"
 
 # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8, ADR-0012): 스트림이 이미 있을 때만 맞춘다(없으면 건너뜀 — 첫 span이 들어와야 생긴다).
 # 운영 규칙: org당 트레이스 스트림은 o2c_traces_stream 하나만 둔다(View Trace가 이름순 첫 트레이스 스트림을 기본으로 고르므로, #251).
@@ -669,6 +714,130 @@ o2c_alerts:
     sql: "{{ o2c_switch_syslog_roster | o2c_missing_sql('system_logs', 'device_id', \"service_name = 'switch-syslog'\", true) }}"
     period: "{{ o2c_switch_silent_hours * 60 }}"
     frequency: 60
+    silence: 1440
+
+  # --- 방화벽 포티게이트 (Spec #282 / Ticket-3) --- 모두 security_logs의 service_name='fortigate-syslog'. 장비는 원문 devname에서 뽑는다.
+  - name: infra-fortigate-admin-login-failures
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "방화벽 관리자 로그인 연속 실패"
+    what: "한 출발지에서 {{ o2c_fortigate_login_fail_window_minutes }}분 동안 방화벽 관리자 로그인 실패가 {{ o2c_fortigate_login_fail_threshold }}회 이상 발생했습니다."
+    why: "방화벽 관리 접속에 대한 무차별 대입 시도일 수 있습니다. 관리자 계정이 뚫리면 모든 통신 정책을 바꿀 수 있습니다(ISMS 2.5 사용자 인증)."
+    action: "① 행의 출발지가 사내 작업자·Semaphore인지 확인 ② 외부·미확인 출발지면 관리 접속 허용 주소(trusted host)와 관리 인터페이스 노출 범위를 점검해 차단 ③ 작업자의 오입력이면 계정 확인 후 기록, 같은 출발지의 로그인 성공이 있으면 계정 변경 알림도 확인"
+    runbook: "{{ o2c_runbook_base }}#fortigate-admin-login-failures"
+    row_template: '• {device}: 출발지 {source_address} 로그인 실패 {failures}회'
+    description: "방화벽 관리자 로그인 실패(subtype=system, action=login, status=failed)가 장비·출발지별로 {{ o2c_fortigate_login_fail_window_minutes }}분 동안 {{ o2c_fortigate_login_fail_threshold }}회 이상 (Event Alert, 재통지 {{ o2c_fortigate_login_fail_silence_minutes }}분)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_fortigate_device_sql }} AS device, source_address, count(*) AS failures FROM "security_logs"
+      WHERE service_name = 'fortigate-syslog' AND {{ 'subtype' | o2c_fortigate_match(['system']) }}
+      AND {{ 'action' | o2c_fortigate_match(['login']) }} AND {{ 'status' | o2c_fortigate_match(['failed']) }}
+      GROUP BY device, source_address HAVING count(*) >= {{ o2c_fortigate_login_fail_threshold }}
+    period: "{{ o2c_fortigate_login_fail_window_minutes }}"
+    frequency: 1
+    silence: "{{ o2c_fortigate_login_fail_silence_minutes }}"
+  - name: infra-fortigate-change-unapproved
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "방화벽 정책·계정 변경 (승인 시간 밖)"
+    what: "승인 시간({{ o2c_fortigate_approved_start_hour }}시~{{ o2c_fortigate_approved_end_hour }}시, 장비 시계) 밖에 방화벽의 정책 또는 관리자 계정 설정이 변경됐습니다."
+    why: "승인되지 않은 정책·계정 변경은 통신 차단 해제나 백도어 계정 생성일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다(ISMS 2.9.1 변경관리)."
+    action: "① 행의 관리자와 변경 대상(cfgpath)을 작업 요청·Semaphore 이력과 대조 ② 승인된 긴급 작업이 아니면 해당 관리자 계정 잠금과 직전 설정 백업(FortiGate Backup) 비교 후 되돌리기, 보안 담당 보고 ③ 승인된 작업이면 작업 기록에 남기기"
+    runbook: "{{ o2c_runbook_base }}#fortigate-change-unapproved"
+    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin})'
+    description: "방화벽 정책({{ o2c_fortigate_policy_cfgpaths | join(', ') }})·계정({{ o2c_fortigate_account_cfgpaths | join(', ') }}) 변경이 승인 시간 밖 (Event Alert) — 시각을 읽지 못한 줄도 포함"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_fortigate_device_sql }} AS device,
+      CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
+      CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
+      count(*) AS changes FROM "security_logs"
+      WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
+      AND NOT ({{ o2c_fortigate_in_hours_sql }})
+      GROUP BY device, cfgpath, admin
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-fortigate-change-approved
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "방화벽 정책·계정 변경 (승인 시간 안, 하루 요약)"
+    what: "승인 시간({{ o2c_fortigate_approved_start_hour }}시~{{ o2c_fortigate_approved_end_hour }}시, 장비 시계) 안에 방화벽의 정책 또는 관리자 계정 설정이 변경됐습니다. 하루에 한 번 요약해 알립니다."
+    why: "승인 시간 안의 변경은 대부분 정상 작업이지만 변경 관리 증적으로 매일 대조해야 합니다. 승인된 작업 목록에 없는 변경이면 계정 도용일 수 있습니다."
+    action: "① 행의 관리자·변경 대상을 그날의 작업 요청과 대조 ② 대응 작업이 없는 변경은 승인 시간 밖 변경 절차(P1)로 격상 ③ 대조 결과를 작업 기록에 남기기"
+    runbook: "{{ o2c_runbook_base }}#fortigate-change-approved"
+    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin})'
+    description: "방화벽 정책({{ o2c_fortigate_policy_cfgpaths | join(', ') }})·계정({{ o2c_fortigate_account_cfgpaths | join(', ') }}) 변경이 승인 시간 안 — 하루 1번 P3 요약(period·silence 1440)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_fortigate_device_sql }} AS device,
+      CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
+      CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
+      count(*) AS changes FROM "security_logs"
+      WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
+      AND ({{ o2c_fortigate_in_hours_sql }})
+      GROUP BY device, cfgpath, admin
+    period: 1440
+    frequency: 1
+    silence: 1440
+  - name: infra-fortigate-ha-failover
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "방화벽 HA 전환·이상 감지"
+    what: "방화벽 HA 로그(subtype=ha)가 기록됐습니다. 주 장비가 바뀌었거나 멤버·하트비트 상태가 변했을 수 있습니다."
+    why: "통신은 이어지더라도 이중화가 깨져 다음 장애에서 서비스가 끊길 수 있고, 전환이 반복되면 세션 끊김이 생깁니다."
+    action: "① 행의 장비 이름으로 지금 주 장비가 어느 멤버인지 확인 ② 전환 직전 같은 장비의 인터페이스·전원·하트비트 로그 확인 ③ 한쪽 멤버가 복구되지 않으면 교체·점검 일정을 잡고, 계획된 작업이면 작업 기록에 남기기"
+    runbook: "{{ o2c_runbook_base }}#fortigate-ha-failover"
+    row_template: '• {device}: {event} {events}건'
+    description: "방화벽 HA 로그(subtype=ha) 1건부터 (Event Alert, 재통지 {{ o2c_fortigate_ha_silence_minutes }}분) — 전환 반복 때 알림이 쏟아지지 않도록 재통지 간격을 길게 둔다"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_fortigate_device_sql }} AS device,
+      CASE WHEN body LIKE '% logdesc="%' THEN regexp_replace(body, '^.* logdesc="([^"]*)".*$', '\1') ELSE 'HA 이벤트' END AS event,
+      count(*) AS events FROM "security_logs"
+      WHERE service_name = 'fortigate-syslog' AND {{ 'subtype' | o2c_fortigate_match(['ha']) }}
+      GROUP BY device, event
+    period: 5
+    frequency: 1
+    silence: "{{ o2c_fortigate_ha_silence_minutes }}"
+  - name: infra-fortigate-critical-detection
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "방화벽 중대 보안 탐지"
+    what: "방화벽 보안 기능(IPS·안티바이러스 등)이 심각도 {{ o2c_fortigate_detection_severities | join('·') }} 탐지를 기록했습니다."
+    why: "알려진 취약점 공격이나 악성코드가 방화벽을 지나가려 했습니다. 차단됐더라도 공격 대상 시스템에 이미 닿았는지 확인해야 합니다."
+    action: "① 행의 탐지 이름과 로그 보기의 출발지·목적지·조치(차단/통과) 확인 ② 통과(pass·monitor)였거나 내부 호스트가 출발지면 해당 호스트 격리와 점검 ③ 외부 출발지의 반복 공격이면 차단 정책 추가 검토, 결과를 사고 기록에 남기기"
+    runbook: "{{ o2c_runbook_base }}#fortigate-critical-detection"
+    row_template: '• {device}: {attack} {detections}건'
+    description: "방화벽 UTM 탐지(type=utm) 중 severity가 {{ o2c_fortigate_detection_severities | join(', ') }} 인 것 1건부터 (Event Alert, 재통지 {{ o2c_fortigate_detection_silence_minutes }}분)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_fortigate_device_sql }} AS device,
+      CASE WHEN body LIKE '% attack="%' THEN regexp_replace(body, '^.* attack="([^"]*)".*$', '\1')
+      WHEN body LIKE '% virus="%' THEN regexp_replace(body, '^.* virus="([^"]*)".*$', '\1') ELSE '-' END AS attack,
+      count(*) AS detections FROM "security_logs"
+      WHERE service_name = 'fortigate-syslog' AND {{ 'type' | o2c_fortigate_match(['utm']) }}
+      AND ({{ 'severity' | o2c_fortigate_match(o2c_fortigate_detection_severities) }}
+      OR ({{ 'subtype' | o2c_fortigate_match(['virus']) }} AND {{ 'eventtype' | o2c_fortigate_match(['infected']) }}))
+      GROUP BY device, attack
+    period: 5
+    frequency: 1
+    silence: "{{ o2c_fortigate_detection_silence_minutes }}"
+  - name: infra-fortigate-syslog-silent
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "방화벽 syslog 수신 중단: {{ o2c_fortigate_silent_minutes }}분 넘게 로그 없음"
+    what: "수신 중단 감시 목록(o2c_fortigate_syslog_roster)의 방화벽에서 {{ o2c_fortigate_silent_minutes }}분 넘게 syslog가 도착하지 않았습니다(HA 쌍은 두 멤버 모두 조용할 때)."
+    why: "장비의 전송 설정이 사라졌거나 수신 경로가 막혔을 수 있습니다. 그동안의 관리자 접속·정책 변경 이력이 중앙에 남지 않습니다(ISMS 2.9.4 로그 및 접속기록 관리)."
+    action: "① 장비의 로그 전송 설정(대상·형식·출발지 고정)이 그대로인지 확인 ② 수신 서버의 방화벽 허용 목록·syslog-ng 상태 확인(런북 fortigate-syslog.md 3절) ③ 장비가 철거·교체됐으면 감시 목록에서 빼고, 로그가 원래 적은 장비면 기준 시간(o2c_fortigate_silent_minutes)을 늘리기"
+    runbook: "{{ o2c_runbook_base }}#fortigate-syslog-silent"
+    row_template: '• {device_id}'
+    description: "수신 중단 감시 목록(o2c_fortigate_syslog_roster)의 방화벽별 fortigate-syslog가 {{ o2c_fortigate_silent_minutes }}분 없음 (State Alert, 재통지 1440분) — 목록이 비면 행을 돌려주지 않는다"
+    stream: security_logs
+    missing: {roster: fortigate, field: device_id, cond: "service_name = 'fortigate-syslog'", body_match: devname, field_column: false}
+    sql: "{{ o2c_fortigate_syslog_roster | o2c_missing_sql('security_logs', 'device_id', \"service_name = 'fortigate-syslog'\", 'devname', false) }}"
+    period: "{{ o2c_fortigate_silent_minutes }}"
+    frequency: 10
     silence: 1440
 
 # 실제로 만드는 알림: `enabled`가 거짓인 알림(업링크 목록이 빈 업링크 다운 규칙)은 만들지 않는다. 서버에 이미 있으면 계획이 지운다.

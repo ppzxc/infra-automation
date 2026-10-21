@@ -37,6 +37,8 @@ EXPECTED_ALERTS = {
     "infra-app-log-errors", "infra-app-telemetry-silent",
     "infra-switch-config-change", "infra-switch-login-failures", "infra-switch-severity-critical",
     "infra-switch-mac-flap", "infra-switch-syslog-silent",   # 스위치 syslog(Spec #277)
+    "infra-fortigate-admin-login-failures", "infra-fortigate-change-unapproved", "infra-fortigate-change-approved",
+    "infra-fortigate-ha-failover", "infra-fortigate-critical-detection", "infra-fortigate-syslog-silent",   # 방화벽(Spec #282 / Ticket-3)
 }
 UPLINK_ALERT = "infra-switch-uplink-down"   # 업링크 목록(o2c_switch_uplinks)이 비어 있으면 만들어지지 않는다
 UPLINKS = [{"device": "ns0250", "port": "Gi1/0/1"}]
@@ -60,14 +62,14 @@ def _same_roster_alert(name, stored, sql):
     def is_roster(q):
         return any(f"AS {col}, count(*) AS n FROM" in q for col in ("host_name", "host", "device_id"))
     def shape(q):   # the roster hosts differ; the extra condition of each branch (e.g. job = 'backup' AND success = true) must match
-        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?|\((?:host|host_name|device_id) = '[^']*' OR lower\(body\) LIKE '[^']*'\) AND )?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
+        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?|\((?:(?:host|host_name|device_id) = '[^']*' OR )*(?:lower\(body\) LIKE '[^']*'(?: OR )?)*\) AND )?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
         return {m.group(1) if m else "" for m in conds}
     return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql) and shape(stored) == shape(sql)
 
 
 def _case_host(rec):
     """The (fake) host of a synthetic record: backup_logs use host, switch syslog uses device_id, the others host_name."""
-    return rec.get("host_name") or rec.get("host") or rec.get("device_id") or re.search(r" (verify-\S+?)-3560X:", rec["body"]).group(1)   # 변환 전 레코드는 원문에서
+    return rec.get("host_name") or rec.get("host") or rec.get("device_id") or re.search(r'(?: |devname="?)(verify-\S+?)(?:-3560X:|"| )', rec["body"]).group(1)   # 변환 전 레코드는 원문에서
 
 
 class FakeO2:
@@ -237,10 +239,11 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert res.returncode == 0, res.stdout + res.stderr
     assert all(m == "POST" for m, _, _ in o2.writes)
     paths = [p for _, p, _ in o2.writes]
-    assert paths[:6] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
-                         "/api/default/functions", "/api/default/pipelines", "/api/default/pipelines"]   # 보안 로그와 스위치 syslog 의미 해석 각 1개
+    assert paths[:7] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
+                         "/api/default/functions", "/api/default/functions", "/api/default/pipelines",
+                         "/api/default/pipelines"]   # 함수 3개(보안·스위치·방화벽), 파이프라인 2개(보안 로그는 함수 둘을 잇는다)
     assert set(o2.store["alert"]) == EXPECTED_ALERTS | {SELFTEST}
-    assert paths[6:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
+    assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + 1)
 
 
 def test_template_body_is_a_naver_works_text_message(o2):
@@ -645,7 +648,7 @@ def test_source_addresses_never_reach_the_output(o2):
         assert ip not in res.stdout + res.stderr
 
 
-@pytest.mark.parametrize("bad", [{"address": "1.2.3.4' OR '1'='1", "kind": "office"},
+@pytest.mark.parametrize("bad", [{"address": "192.0.2.4' OR '1'='1", "kind": "office"},
                                  {"address": "192.0.2.5", "kind": "partner"}, {"address": "", "kind": "office"}])
 def test_invalid_source_entries_fail_before_any_request(o2, bad):
     res = _apply(o2, kv=dict(KV, normal_sources=[bad]))
@@ -1357,7 +1360,7 @@ def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_
 
 def test_switch_function_and_pipeline_are_added_beside_the_security_ones_and_the_security_pipeline_is_untouched(o2):
     assert _apply(o2).returncode == 0
-    assert set(o2.store["function"]) == {"security_semantics", SWITCH_FN}
+    assert set(o2.store["function"]) == {"security_semantics", SWITCH_FN, FORTIGATE_FN}
     fn = o2.store["function"][SWITCH_FN]
     assert fn["function"] == (ROLE / "files" / "vrl" / "switch_syslog_semantics.vrl").read_text().strip() and fn["params"] == "row"
     pl = o2.store["pipeline"][SWITCH_FN]
@@ -1367,6 +1370,48 @@ def test_switch_function_and_pipeline_are_added_beside_the_security_ones_and_the
     # 서버 로그를 거르는 일은 함수 안의 service_name 검사가 한다(조건 노드는 쓰지 않는다)
     assert not [n for n in pl["nodes"] if n["data"]["node_type"] == "condition"]
     assert o2.store["pipeline"]["security_semantics"]["source"]["stream_name"] == "security_logs"
+
+
+FORTIGATE_FN = "fortigate_semantics"
+
+
+def test_firewall_function_runs_in_the_security_pipeline_right_after_the_security_function(o2):
+    """Spec #282 / Ticket-2: one pipeline per source stream, so the firewall function is chained, not a second pipeline on security_logs."""
+    assert _apply(o2).returncode == 0
+    fn = o2.store["function"][FORTIGATE_FN]
+    assert fn["function"] == (ROLE / "files" / "vrl" / "fortigate_semantics.vrl").read_text().strip() and fn["params"] == "row"
+    assert set(o2.store["pipeline"]) == {"security_semantics", SWITCH_FN}
+    pl = o2.store["pipeline"]["security_semantics"]
+    assert pl["source"]["stream_name"] == "security_logs" and pl["enabled"] is True
+    functions = [n for n in pl["nodes"] if n["data"]["node_type"] == "function"]
+    assert [(n["data"]["name"], n["data"]["after_flatten"]) for n in functions] == [("security_semantics", True), (FORTIGATE_FN, True)]
+    # input -> security_semantics -> fortigate_semantics -> output, and no condition node (the service check lives in the function)
+    edges = {(e["source"], e["target"]) for e in pl["edges"]}
+    ids = {n["data"].get("name") or n["io_type"]: n["id"] for n in pl["nodes"]}
+    assert edges == {(next(n["id"] for n in pl["nodes"] if n["io_type"] == "input"), ids["security_semantics"]),
+                     (ids["security_semantics"], ids[FORTIGATE_FN]),
+                     (ids[FORTIGATE_FN], next(n["id"] for n in pl["nodes"] if n["io_type"] == "output"))}
+    assert not [n for n in pl["nodes"] if n["data"]["node_type"] == "condition"]
+
+
+def test_a_security_pipeline_deployed_before_the_firewall_function_is_extended_by_a_single_update(o2):
+    assert _apply(o2).returncode == 0
+    pl = o2.store["pipeline"]["security_semantics"]
+    pl["nodes"] = [n for n in pl["nodes"] if n["data"].get("name") != FORTIGATE_FN]   # the old one-function shape
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    ((method, path, body),) = o2.writes
+    assert (method, path) == ("PUT", f"/api/default/pipelines/{pl['pipeline_id']}")
+    assert [n["data"]["name"] for n in body["nodes"] if n["data"]["node_type"] == "function"] == ["security_semantics", FORTIGATE_FN]
+
+
+def test_firewall_function_drift_is_repaired_by_a_single_update(o2):
+    assert _apply(o2).returncode == 0
+    o2.store["function"][FORTIGATE_FN]["function"] = "# stale\n."
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    ((method, path, _),) = o2.writes
+    assert (method, path) == ("PUT", f"/api/default/functions/{FORTIGATE_FN}")
 
 
 def test_switch_function_drift_is_repaired_by_a_single_update(o2):
@@ -1464,14 +1509,14 @@ def test_switch_filters_validate_and_build_safe_sql():
                                                    {"name": "d", "enabled": True}])] == ["a", "d"]
 
 
-def _run_alert_on_sqlite(sql, records):
+def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
     """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows."""
     db = sqlite3.connect(":memory:")
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
     columns = sorted({k for r in records for k in r})
-    db.execute('CREATE TABLE "system_logs_alert_verify" (%s)' % ", ".join(f'"{c}"' for c in columns))
+    db.execute('CREATE TABLE "%s" (%s)' % (stream, ", ".join(f'"{c}"' for c in columns)))
     for r in records:
-        db.execute('INSERT INTO "system_logs_alert_verify" VALUES (%s)' % ", ".join("?" * len(columns)), [r.get(c) for c in columns])
+        db.execute('INSERT INTO "%s" VALUES (%s)' % (stream, ", ".join("?" * len(columns))), [r.get(c) for c in columns])
     cur = db.execute(sql)
     names = [d[0] for d in cur.description]
     return [dict(zip(names, row)) for row in cur.fetchall()]
@@ -1525,3 +1570,291 @@ def test_switch_fixtures_cover_every_alert_with_firing_and_quiet_cases_and_off_r
     assert any(c.get("off_roster") for c in FIXTURES["infra-switch-syslog-silent"]["cases"])
     assert any(r.get("service_name") != "switch-syslog" for n in SWITCH_ALERTS for c in FIXTURES[n]["cases"] for r in c["records"])
     assert any(c.get("watch_port") for c in FIXTURES[UPLINK_ALERT]["cases"])
+
+
+# --- 방화벽(포티게이트) 로그 알림 (Spec #282 / Ticket-3) -----------------------------------------------------------------
+# 입력 로그는 FortiOS Log Message Reference로 만든 합성 줄이다. 실장비 샘플(비공개 경로)로 키 이름·값 모양을 다시 검증해야 한다.
+from openobserve_config import (o2c_fortigate_match, o2c_fortigate_vrl, o2c_missing_sql, o2c_valid_fortigate_aliases,  # noqa: E402
+                                o2c_valid_fortigate_roster, o2c_valid_fortigate_values)
+
+FORTIGATE_ALERTS = {   # name -> (severity, period minutes, silence minutes)
+    "infra-fortigate-admin-login-failures": ("P2 경고", 5, 30),
+    "infra-fortigate-change-unapproved": ("P1 긴급", 5, 5),
+    "infra-fortigate-change-approved": ("P3 주의", 1440, 1440),
+    "infra-fortigate-ha-failover": ("P2 경고", 5, 30),
+    "infra-fortigate-critical-detection": ("P1 긴급", 5, 60),
+    "infra-fortigate-syslog-silent": ("P2 경고", 120, 1440),
+}
+FORTIGATE_MARKERS = {   # alert -> a fragment only its search carries
+    "infra-fortigate-admin-login-failures": "HAVING count(*) >=", "infra-fortigate-change-unapproved": "NOT (CASE WHEN",
+    "infra-fortigate-change-approved": "AND (CASE WHEN", "infra-fortigate-ha-failover": 'subtype="ha"',
+    "infra-fortigate-critical-detection": 'severity="critical"', "infra-fortigate-syslog-silent": "AS device_id, count(*) AS n",
+}
+
+
+def test_firewall_match_condition_accepts_quoted_and_bare_values_and_rejects_unsafe_input():
+    cond = o2c_fortigate_match("subtype", ["ha"])
+    assert """body LIKE '% subtype="ha"%'""" in cond and "body LIKE '% subtype=ha %'" in cond
+    assert o2c_fortigate_match("cfgpath", ["system.admin", "user.local"]).count(" OR ") == 3
+    for key, values in (("sub type", ["ha"]), ("subtype", ["ha' OR '1'='1"]), ("subtype", [])):
+        with pytest.raises(ValueError):
+            o2c_fortigate_match(key, values)
+    assert o2c_valid_fortigate_values(["firewall.policy", "critical"]) and not o2c_valid_fortigate_values(["a'b"])
+
+
+def test_firewall_roster_accepts_a_member_pair_written_with_plus_and_counts_any_member_as_receiving():
+    assert o2c_valid_fortigate_roster(["ns0399", "ns0380+ns0381"]) and not o2c_valid_fortigate_roster(["ns0380+", "ns0399' OR '1", "fw 1", "a%b", ""])
+    sql = o2c_missing_sql(["ns0380+ns0381"], "security_logs", "device_id", "service_name = 'fortigate-syslog'", "devname")
+    assert sql.startswith("SELECT 'ns0380+ns0381' AS device_id") and "HAVING count(*) < 1" in sql
+    assert "device_id = 'ns0380'" in sql and "device_id = 'ns0381'" in sql and """LIKE '%devname="ns0381%'""" in sql
+    standby_only = [{"service_name": "fortigate-syslog", "device_id": "ns0381", "body": 'devname="ns0381" x'}]
+    quiet = [{"service_name": "fortigate-syslog", "device_id": "ns0399", "body": 'devname="ns0399" x'}]
+    table_sql = sql.replace('"security_logs"', '"t"')
+    assert _run_alert_on_sqlite(table_sql, standby_only, "t") == []   # 한 멤버라도 보내면 쌍은 수신 중
+    assert [r["device_id"] for r in _run_alert_on_sqlite(table_sql, quiet, "t")] == ["ns0380+ns0381"]
+
+
+def test_firewall_alerts_are_created_on_security_logs_with_the_specified_grades_windows_and_silences(o2):
+    assert _apply(o2).returncode == 0
+    for name, (sev, period, silence) in FORTIGATE_ALERTS.items():
+        a = o2.store["alert"][name]
+        assert a["stream_name"] == "security_logs" and a["stream_type"] == "logs", name
+        assert a["context_attributes"]["severity"] == sev, name
+        assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence), name
+        assert a["destinations"] == ["infra-automation-webhook"] and a["enabled"], name
+        assert "fortigate-syslog" in a["query_condition"]["sql"], name
+        for key in ("what", "why", "action", "runbook"):
+            assert a["context_attributes"][key].strip(), (name, key)
+        assert a["context_attributes"]["runbook"].endswith("#" + name.removeprefix("infra-")), name
+
+
+def test_firewall_alert_sql_needs_no_firewall_column_so_it_is_valid_before_the_first_firewall_line_arrives(o2):
+    """security_logs has no firewall column until a firewall line is ingested; a missing column would fail every evaluation (O2C-036)."""
+    assert _apply(o2).returncode == 0
+    for name in FORTIGATE_ALERTS:
+        sql = _sql(o2, name).replace("AS device_id", "")
+        for column in ("device_id", "device_name", "fortigate_log_type", "fortigate_log_subtype", "fortigate_policy_id"):
+            assert not re.search(rf"(?<![A-Za-z_'\"]){column}(?![A-Za-z_'\"])", sql), (name, column)
+
+
+def test_approved_hours_split_changes_into_unapproved_p1_and_approved_p3_and_every_value_is_a_role_variable(o2):
+    assert _apply(o2).returncode == 0
+    out, inside = _sql(o2, "infra-fortigate-change-unapproved"), _sql(o2, "infra-fortigate-change-approved")
+    assert "NOT (" in out and ">= 9" in out and "< 18" in out and "NOT (" not in inside and ">= 9" in inside
+    extra = {"o2c_fortigate_approved_start_hour": 8, "o2c_fortigate_approved_end_hour": 20, "o2c_fortigate_login_fail_threshold": 9,
+             "o2c_fortigate_silent_minutes": 45, "o2c_fortigate_detection_severities": ["critical", "high"],
+             "o2c_fortigate_policy_cfgpaths": ["firewall.policy"], "o2c_fortigate_account_cfgpaths": ["system.admin"],
+             "o2c_fortigate_syslog_roster": ["ns0399", "ns0380+ns0381"]}
+    assert _apply(o2, extra=extra).returncode == 0
+    assert ">= 8" in _sql(o2, "infra-fortigate-change-unapproved") and "< 20" in _sql(o2, "infra-fortigate-change-approved")
+    assert "HAVING count(*) >= 9" in _sql(o2, "infra-fortigate-admin-login-failures")
+    assert 'severity="high"' in _sql(o2, "infra-fortigate-critical-detection")
+    assert 'cfgpath="firewall.policy6"' not in _sql(o2, "infra-fortigate-change-approved")
+    silent = o2.store["alert"]["infra-fortigate-syslog-silent"]
+    assert silent["trigger_condition"]["period"] == 45
+    assert set(re.findall(r"SELECT '([^']+)' AS device_id", silent["query_condition"]["sql"])) == {"ns0399", "ns0380+ns0381"}
+
+
+def test_silent_alert_watches_only_the_explicit_list_and_the_default_list_is_empty_and_the_window_is_shorter_than_the_switch_one(o2):
+    """The default list is empty: no firewall sends logs yet, so any default member would raise a false alert (opt in as each starts sending)."""
+    assert _apply(o2).returncode == 0
+    silent = o2.store["alert"]["infra-fortigate-syslog-silent"]
+    assert set(re.findall(r"SELECT '([^']+)' AS device_id", silent["query_condition"]["sql"])) == {"none"}   # 절대 행을 돌려주지 않는 가지 하나
+    assert "HAVING count(*) < 0" in silent["query_condition"]["sql"]
+    assert silent["trigger_condition"]["period"] < o2.store["alert"]["infra-switch-syslog-silent"]["trigger_condition"]["period"]
+    assert _apply(o2, extra={"o2c_fortigate_syslog_roster": ["ns0399"]}).returncode == 0
+    sql = _sql(o2, "infra-fortigate-syslog-silent")
+    assert "'ns0399'" in sql and "ns0380" not in sql and "ns0381" not in sql   # 목록에 없는 장비는 허위 알림을 만들지 않는다
+
+
+@pytest.mark.parametrize("extra", [
+    {"o2c_fortigate_syslog_roster": ["ns0399' OR '1'='1"]},
+    {"o2c_fortigate_syslog_roster": ["Example Branch FW"]},
+    {"o2c_fortigate_device_aliases": {"example_branch_fw": "server01"}},
+    {"o2c_fortigate_device_aliases": {"example_branch_fw": "ns0000' OR '1'='1"}},
+    {"o2c_fortigate_device_aliases": {"example\"fw": "ns0000"}},
+    {"o2c_fortigate_device_aliases": {"fw.corp": "ns0000"}},
+    {"o2c_fortigate_device_aliases": ["ns0000"]},
+    {"o2c_fortigate_policy_cfgpaths": ["firewall.policy' OR '1'='1"]},
+    {"o2c_fortigate_detection_severities": ["critical%"]},
+    {"o2c_fortigate_approved_start_hour": 18, "o2c_fortigate_approved_end_hour": 9},
+    {"o2c_fortigate_approved_start_hour": "9; DROP"},
+])
+def test_invalid_firewall_variables_fail_before_any_request(o2, extra):
+    res = _apply(o2, extra=extra)
+    assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+    assert "1' OR" not in res.stdout + res.stderr
+
+
+def test_firewall_alerts_do_not_break_the_existing_ones(o2):
+    assert _apply(o2).returncode == 0
+    assert (EXPECTED_ALERTS - set(FORTIGATE_ALERTS)) <= set(o2.store["alert"])
+    for name, (sev, period, silence) in SWITCH_ALERTS.items():
+        trigger = o2.store["alert"][name]["trigger_condition"]
+        assert (trigger["period"], trigger["silence"]) == (period, silence)
+    assert FORTIGATE_FN in o2.store["function"]
+
+
+def test_firewall_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_on_the_synthetic_records(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    records = [r for p, _, rs in o2.ingests if "/security_logs_alert_verify/" in p for r in rs]
+    searches = [sql for stream, sql in o2.searches if stream == "security_logs_alert_verify" and "fortigate-syslog" in sql]
+    for name, marker in FORTIGATE_MARKERS.items():
+        (sql,) = [s for s in searches if marker in s]
+        spec = FIXTURES[name]
+        own = {c["host"] for c in spec["cases"]}   # the alerts share one stream: like the verification step, judge only this alert's own cases
+        fired = {m.group(1) for row in _run_alert_on_sqlite(sql, records, "security_logs_alert_verify")
+                 if (m := re.fullmatch(r"(.+)-[0-9a-f]+", str(row[spec["row_key"]]))) and m.group(1) in own}
+        assert fired == {c["host"] for c in spec["cases"] if c["fires"]}, name
+
+
+def test_firewall_fixtures_cover_every_alert_with_firing_and_quiet_cases_and_boundaries():
+    for name in FORTIGATE_ALERTS:
+        cases = FIXTURES[name]["cases"]
+        assert {c["fires"] for c in cases} == {True, False}, name
+        assert all(r.get("service_name") for c in cases for r in c["records"]), name
+    assert any(c.get("off_roster") for c in FIXTURES["infra-fortigate-syslog-silent"]["cases"])
+    assert any(r.get("service_name") != "fortigate-syslog" for n in FORTIGATE_ALERTS for c in FIXTURES[n]["cases"] for r in c["records"])
+    names = " ".join(c["name"] for c in FIXTURES["infra-fortigate-change-unapproved"]["cases"] + FIXTURES["infra-fortigate-change-approved"]["cases"])
+    assert "승인 시간 안" in names and "승인 시간 밖" in names and "시각이 없는" in names
+
+
+def test_every_firewall_alert_has_a_runbook_entry_that_states_the_synthetic_input_caveat_and_the_list_procedure():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for name in FORTIGATE_ALERTS:
+        anchor = name.removeprefix("infra-")
+        assert f'<a id="{anchor}"></a>' in runbook and f"(`{name}`)" in runbook, name
+    for token in ("o2c_fortigate_syslog_roster", "o2c_fortigate_approved_start_hour", "o2c_fortigate_account_cfgpaths", "합성", "실장비"):
+        assert token in runbook, token
+
+
+def test_firewall_silent_sql_does_not_read_the_device_id_column_even_with_a_roster(o2):
+    """The WHERE clause must use only columns that always exist: device_id appears in security_logs only after the first processed firewall line."""
+    assert _apply(o2, extra={"o2c_fortigate_syslog_roster": ["ns0399", "ns0380+ns0381"]}).returncode == 0
+    sql = _sql(o2, "infra-fortigate-syslog-silent")
+    assert "ns0380" in sql and "ns0381" in sql and "ns0399" in sql
+    assert not re.search(r"(?<![A-Za-z_'\"])device_id\s*=", sql) and "WHERE device_id" not in sql
+    assert 'LIKE \'%devname="ns0381%\'' in sql
+
+
+def test_missing_sql_without_field_column_matches_only_on_body_and_still_counts_a_pair_member():
+    sql = o2c_missing_sql(["ns0380+ns0381"], "security_logs", "device_id", "service_name = 'fortigate-syslog'", "devname", field_column=False)
+    assert sql.startswith("SELECT 'ns0380+ns0381' AS device_id") and "device_id =" not in sql
+    table = sql.replace('"security_logs"', '"t"').replace("AS device_id", "AS device")
+    only_body = [{"service_name": "fortigate-syslog", "body": 'devname="ns0381" x'}]   # device_id 컬럼 자체가 없다
+    assert _run_alert_on_sqlite(table, only_body, "t") == []
+    assert len(_run_alert_on_sqlite(table, [{"service_name": "fortigate-syslog", "body": 'devname="ns0399" x'}], "t")) == 1
+
+
+# 장비 이름 별칭(Spec #282): 관리번호로 hostname을 못 바꾼 장비는 원래 이름을 그대로 쓴다. 이름은 가짜(Example_Branch_FW)만 쓴다.
+ALIASES = {"example_branch_fw": "ns0000"}
+
+
+def test_alias_table_defaults_to_empty_and_the_function_body_carries_it_only_when_set(o2):
+    assert _apply(o2).returncode == 0
+    base = o2.store["function"][FORTIGATE_FN]["function"]
+    assert "device_aliases = {}" in base and "example_branch_fw" not in base
+    assert _apply(o2, extra={"o2c_fortigate_device_aliases": ALIASES}).returncode == 0
+    changed = o2.store["function"][FORTIGATE_FN]["function"]
+    assert '"example_branch_fw": "ns0000"' in changed and changed != base   # 변수가 바뀌면 함수가 갱신된다
+
+
+def test_alias_validation_accepts_normalized_names_and_management_numbers_only():
+    assert o2c_valid_fortigate_aliases({}) and o2c_valid_fortigate_aliases(ALIASES) and o2c_valid_fortigate_aliases(None)
+    for bad in ({"Example_Branch_FW": "ns0000"}, {"fw.corp": "ns0000"}, {"fw": "server01"}, {"fw": "ns0000+ns0001"}, {"f w": "ns0000"}, ["x"]):
+        assert not o2c_valid_fortigate_aliases(bad)
+
+
+def test_alias_injection_leaves_the_source_unchanged_for_an_empty_table_and_rejects_a_source_without_the_marker():
+    src = "a = 1\ndevice_aliases = {}  # marker\n.\n"
+    assert o2c_fortigate_vrl(src, {}) == src
+    assert o2c_fortigate_vrl(src, ALIASES) == 'a = 1\ndevice_aliases = {"example_branch_fw": "ns0000"}\n.\n'
+    with pytest.raises(ValueError):
+        o2c_fortigate_vrl("a = 1\n", ALIASES)
+
+
+def test_silent_roster_accepts_the_original_device_name_case_insensitively():
+    assert o2c_valid_fortigate_roster(["Example_Branch_FW", "ns0380+ns0381"])
+    sql = o2c_missing_sql(["Example_Branch_FW"], "security_logs", "device_id", "service_name = 'fortigate-syslog'", "devname", False)
+    table_sql = sql.replace('"security_logs"', '"t"')
+    for devname in ("Example_Branch_FW", "EXAMPLE_BRANCH_FW", "example_branch_fw"):
+        assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname="%s" x' % devname}], "t") == []
+        assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname=%s x' % devname}], "t") == []
+    assert _run_alert_on_sqlite(table_sql, [{"service_name": "fortigate-syslog", "body": 'devname="other_fw" x'}], "t") != []
+
+
+# --- 실로그 샘플로 방화벽 알림 SQL 검증 (Spec #282) --------------------------------------------------------------------
+# tests/fixtures/fortigate_real_lines.tsv: 실제 FortiOS 줄을 가짜 값으로 치환한 것이다. 알림 SQL은 body와 service_name만 읽으므로
+# 레코드는 {service_name, body, source_address}다(source_address는 변환 함수가 srcip, 없으면 ui의 주소로 채운 값).
+# 검증 범위: 관리자 로그인 실패/성공, 정책·로그 설정 변경, 트래픽, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패 줄.
+# 검증되지 않은 것: HA 전환(상태 변경) 실제 줄, 실제 장비가 만든 웹필터·앱제어 줄, SSL VPN 로그인 실패 줄.
+REAL_LINES = {}
+for _raw in (ROOT_DIR / "tests" / "fixtures" / "fortigate_real_lines.tsv").read_text(encoding="utf-8").splitlines():
+    if _raw and not _raw.startswith("#"):
+        _name, _tag, _line = _raw.split("\t", 2)
+        REAL_LINES[_name] = _line
+REAL_SOURCE = {"login_failed": "192.0.2.11", "login_success": "192.0.2.11"}
+
+
+def _real(name, times=1, at=None):
+    """Records made of one real line; ``at`` replaces the device time (HH:MM:SS) of the line."""
+    body = REAL_LINES[name] if at is None else re.sub(r" time=\d\d:\d\d:\d\d ", f" time={at} ", REAL_LINES[name], count=1)
+    return [{"service_name": "fortigate-syslog", "body": body, "source_address": REAL_SOURCE.get(name)} for _ in range(times)]
+
+
+def _real_rows(o2, alert, records, **extra):
+    assert _apply(o2, extra=extra).returncode == 0
+    return _run_alert_on_sqlite(_sql(o2, alert).replace('"security_logs"', '"t"'), records, "t")
+
+
+def test_real_admin_login_failures_fire_only_from_five_failed_admin_logins_of_one_source(o2):
+    rows = _real_rows(o2, "infra-fortigate-admin-login-failures", _real("login_failed", 5))
+    assert [(r["device"], r["source_address"], r["failures"]) for r in rows] == [("example_branch_fw", "192.0.2.11", 5)]
+    quiet = _real("login_failed", 4) + _real("login_success", 9) + _real("local_in_deny", 9) + _real("policy_edit_gui", 9)
+    assert _real_rows(o2, "infra-fortigate-admin-login-failures", quiet) == []
+
+
+@pytest.mark.parametrize("at, fires_unapproved", [("03:10:00", True), ("14:15:43", False), ("08:59:59", True), ("09:00:00", False), ("18:00:00", True)])
+def test_real_policy_changes_split_by_the_device_time_into_unapproved_and_approved(o2, at, fires_unapproved):
+    records = _real("policy_edit_gui", at=at) + _real("policy_edit_jsconsole", at=at)
+    out = _real_rows(o2, "infra-fortigate-change-unapproved", records)
+    inside = _real_rows(o2, "infra-fortigate-change-approved", records)
+    assert bool(out) is fires_unapproved and bool(inside) is not fires_unapproved
+    rows = out or inside
+    assert {(r["device"], r["cfgpath"], r["admin"], r["changes"]) for r in rows} == {("example_branch_fw", "firewall.policy", "example-admin", 1),
+                                                                                       ("ns0001", "firewall.policy", "example-admin", 1)}
+
+
+def test_real_changes_of_other_config_paths_and_non_config_lines_do_not_fire_the_change_alerts(o2):
+    records = [r for n in ("syslogd_filter_edit", "log_setting_edit", "login_success", "forward_accept", "ips_high") for r in _real(n, at="03:10:00")]
+    assert _real_rows(o2, "infra-fortigate-change-unapproved", records) == []
+    assert _real_rows(o2, "infra-fortigate-change-approved", _real("log_setting_edit")) == []
+
+
+def test_real_logging_config_paths_can_be_added_to_the_watched_changes_by_a_role_variable(o2):
+    extra = {"o2c_fortigate_policy_cfgpaths": ["firewall.policy", "log.syslogd.filter", "log.setting"]}
+    rows = _real_rows(o2, "infra-fortigate-change-unapproved", _real("syslogd_filter_edit", at="03:10:00") + _real("log_setting_edit", at="03:10:00"), **extra)
+    assert {r["cfgpath"] for r in rows} == {"log.syslogd.filter", "log.setting"}
+
+
+def test_real_ha_alert_fires_on_the_ha_line_only(o2):
+    rows = _real_rows(o2, "infra-fortigate-ha-failover", _real("ha_interface_failed"))
+    assert [(r["device"], r["event"], r["events"]) for r in rows] == [("ns0001", "HA device interface failed", 1)]
+    others = [r for n in REAL_LINES if n != "ha_interface_failed" for r in _real(n)]
+    assert _real_rows(o2, "infra-fortigate-ha-failover", others) == []
+
+
+def test_real_critical_detection_fires_on_a_critical_severity_and_on_an_infected_file_but_not_on_lower_severities(o2):
+    rows = _real_rows(o2, "infra-fortigate-critical-detection", _real("anomaly_critical"))
+    assert [(r["device"], r["attack"], r["detections"]) for r in rows] == [("ns0001", "tcp_syn_flood", 1)]
+    rows = _real_rows(o2, "infra-fortigate-critical-detection", _real("virus_infected"))   # 실제 바이러스 로그에는 severity 키가 없다
+    assert [(r["device"], r["attack"], r["detections"]) for r in rows] == [("ns0001", "virus_test3", 1)]
+    quiet = [r for n in ("ips_high", "dlp_info", "forward_deny_policy0", "login_failed", "ha_interface_failed", "fsso_logon") for r in _real(n)]
+    assert _real_rows(o2, "infra-fortigate-critical-detection", quiet) == []
+
+
+def test_real_lines_keep_the_silent_alert_quiet_for_a_device_that_sent_and_fire_for_one_that_did_not(o2):
+    records = _real("login_failed") + _real("forward_deny_policy0")   # 사무실(관리번호 없는 이름), idc 장비
+    rows = _real_rows(o2, "infra-fortigate-syslog-silent", records, o2c_fortigate_syslog_roster=["Example_Branch_FW", "ns0001", "ns0399"])
+    assert {r["device_id"] for r in rows} == {"ns0399"}

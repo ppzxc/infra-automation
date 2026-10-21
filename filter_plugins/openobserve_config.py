@@ -48,9 +48,18 @@ def o2c_desired(spec):
                   'description': 'ADR-0008: sshd/sudo semantics (managed by infra-automation)'}]
     if spec.get('switch_syslog'):
         semantics.append(dict(spec['switch_syslog'], description='ADR-0008: switch syslog semantics (managed by infra-automation)'))
+    # 방화벽 로그(Spec #282)도 security_logs에 들어오지만 소스 스트림당 파이프라인은 하나라, 보안 로그 파이프라인에서 함수를 이어 붙인다
+    # (security_semantics → fortigate_semantics). 서비스 검사는 각 함수 안에 있어 서로의 레코드를 건드리지 않는다.
+    chained = []
+    if spec.get('fortigate'):
+        fortigate = dict(spec['fortigate'], vrl=o2c_fortigate_vrl(spec['fortigate']['vrl'], spec['fortigate'].get('aliases')))
+        chained.append(fortigate)
+        semantics[0]['then'] = [spec['fortigate']['function_name']]
     out += [{'kind': 'function', 'name': sem['function_name'],
-             'body': {'name': sem['function_name'], 'function': sem['vrl'].strip(), 'params': 'row', 'transType': 0}} for sem in semantics]
-    out += [_pipeline(org, sem['stream'], sem['pipeline_name'], sem['function_name'], sem['description']) for sem in semantics]
+             'body': {'name': sem['function_name'], 'function': sem['vrl'].strip(), 'params': 'row', 'transType': 0}}
+            for sem in semantics[:1] + chained + semantics[1:]]
+    out += [_pipeline(org, sem['stream'], sem['pipeline_name'], [sem['function_name']] + sem.get('then', []), sem['description'])
+            for sem in semantics]
     for alert in list(spec['alerts']) + ([spec['selftest_alert']] if spec.get('selftest_alert') else []):
         out.append({'kind': 'alert', 'name': alert['name'], 'body': {
             'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
@@ -76,25 +85,23 @@ def o2c_desired(spec):
     return out
 
 
-def _pipeline(org, stream, name, function_name, description):
+def _pipeline(org, stream, name, function_names, description):
     source = {'source_type': 'realtime', 'org_id': org, 'stream_name': stream, 'stream_type': 'logs'}
     node = lambda nid, data, io, x: {'id': nid, 'data': data, 'io_type': io, 'position': {'x': x, 'y': 100}}  # noqa: E731
     stream_node = {'node_type': 'stream', 'org_id': org, 'stream_name': stream, 'stream_type': 'logs'}
+    fn_nodes = [node('function' if i == 0 else 'function-%d' % (i + 1),
+                     {'node_type': 'function', 'name': fn, 'after_flatten': True, 'num_args': 0}, 'default', 300 + 250 * i)
+                for i, fn in enumerate(function_names)]
+    chain = ['input'] + [n['id'] for n in fn_nodes] + ['output']
     body = {
         'name': name, 'description': description, 'enabled': True,
         'source': source,
-        'nodes': [
-            node('input', dict(stream_node), 'input', 50),
-            node('function', {'node_type': 'function', 'name': function_name, 'after_flatten': True, 'num_args': 0},
-                 'default', 300),
-            node('output', dict(stream_node), 'output', 550),
-        ],
-        'edges': [{'id': 'input-function', 'source': 'input', 'target': 'function'},
-                  {'id': 'function-output', 'source': 'function', 'target': 'output'}],
+        'nodes': [node('input', dict(stream_node), 'input', 50)] + fn_nodes + [node('output', dict(stream_node), 'output', 300 + 250 * len(fn_nodes))],
+        'edges': [{'id': '%s-%s' % (a, b), 'source': a, 'target': b} for a, b in zip(chain, chain[1:])],
     }
-    # the server rewrites ids/positions; what makes the pipeline "the same" is its source, its state and the function it runs
+    # the server rewrites ids/positions; what makes the pipeline "the same" is its source, its state and the functions it runs, in order
     match = {'name': name, 'enabled': True, 'source': {'stream_name': stream, 'source_type': 'realtime'},
-             'function': {'name': function_name, 'after_flatten': True}}
+             'functions': [{'name': fn, 'after_flatten': True} for fn in function_names]}
     return {'kind': 'pipeline', 'name': name, 'body': body, 'match': match}
 
 
@@ -105,9 +112,9 @@ def _items(payload):
 
 
 def _project_pipeline(item):
-    fn = next((n.get('data', {}) for n in item.get('nodes', []) if n.get('data', {}).get('node_type') == 'function'), {})
+    fns = [n.get('data', {}) for n in item.get('nodes', []) if n.get('data', {}).get('node_type') == 'function']
     return {'name': item.get('name'), 'enabled': item.get('enabled'), 'source': item.get('source', {}),
-            'function': {'name': fn.get('name'), 'after_flatten': fn.get('after_flatten')}}
+            'functions': [{'name': fn.get('name'), 'after_flatten': fn.get('after_flatten')} for fn in fns]}
 
 
 def _subset(want, have):
@@ -264,6 +271,7 @@ def _memory_sql(r, level, cfg):
 # --- 로스터와 부재 감지 (Spec #184 / Ticket-4) --------------------------------------------------------------------------
 # 로스터는 실행 시 인벤토리 그룹에서 만든다. 부재 감지는 호스트마다 `HAVING count(*) < 1` 가지를 UNION ALL로 이은 SQL이다
 # (인라인 VALUES/unnest JOIN은 이 OpenObserve 버전에서 틀린 결과를 낸다 — docs/research 참고).
+import json
 import re as _re
 _HOST_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 _DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
@@ -327,25 +335,38 @@ def o2c_absence_sql(hosts, stream, level):
     return ' UNION ALL '.join(_absence_branch(h, stream, level) for h in hosts)
 
 
-def o2c_missing_sql(hosts, stream, field, cond, body_match=False):
+def o2c_missing_sql(hosts, stream, field, cond, body_match=False, field_column=True):
     """One row per roster host without a record matching ``cond`` (e.g. no successful backup) in the alert window.
 
     ``field`` is the stream's host column (``host`` for backup_logs, ``host_name`` elsewhere). Same UNION ALL branch shape as
     the Silent Host SQL; an empty roster yields a branch that can never return a row.
 
-    ``body_match``: a record also counts for the host when its raw ``body`` names the host (``lower(body) LIKE '% <host>%'``).
+    ``body_match``: a record also counts for the host when its raw ``body`` names the host (``lower(body) LIKE '% <host>%'``; a string
+    such as ``devname`` matches the key's value instead: ``lower(body) LIKE '%devname="<host>%'``). A host ``a+b`` is an HA pair: either member counts.
     ``field`` only exists on records the ingest pipeline already processed, so without this the first evaluation after a pipeline
     change sees no data for any host and reports every host as silent.
+
+    ``field_column=False``: ``field`` is only the output column alias and the WHERE clause never reads it (needs ``body_match``).
+    Use it when the column may not exist yet (it is created by the first processed record); referencing a missing column makes
+    every evaluation fail.
     """
     if not _HOST_RE.match(field):
         raise ValueError('SQL에 넣을 수 없는 필드 이름: %s' % field)
+    if not field_column and not body_match:
+        raise ValueError('field_column=False에는 body_match가 필요하다')
     if not hosts:
         return 'SELECT \'none\' AS %s, count(*) AS n FROM "%s" WHERE %s HAVING count(*) < 0' % (field, stream, cond)
 
     def who(h):
+        # `a+b`는 HA 멤버 쌍이다: 어느 한쪽이라도 보내면 수신 중이다(대기 멤버는 평소 조용하고 장애 전환 뒤에는 반대가 된다)
+        members = h.split('+')
+        conds = ["%s = '%s'" % (field, m) for m in members] if field_column else []
         if body_match:
-            return "(%s = '%s' OR lower(body) LIKE '%% %s%%')" % (field, h, h.lower())
-        return "%s = '%s'" % (field, h)
+            for m in members:
+                # True: 스위치 syslog 머리말(`... ns0250-3750X:`)에서 `' <호스트>'`. 문자열: 그 키의 값(`devname="ns0399"`, 따옴표 없는 `devname=ns0399`도)
+                prefixes = [' '] if body_match is True else ['%s="' % body_match, '%s=' % body_match]
+                conds += ["lower(body) LIKE '%%%s%s%%'" % (prefix, m.lower()) for prefix in prefixes]
+        return '(%s)' % ' OR '.join(conds) if len(conds) > 1 else conds[0]
 
     return ' UNION ALL '.join(
         'SELECT \'%s\' AS %s, count(*) AS n FROM "%s" WHERE %s AND %s HAVING count(*) < 1' % (h, field, stream, who(h), cond)
@@ -416,7 +437,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                 rec = dict(rec)
                 # omit_host_field: 변환 전 레코드(호스트 필드 없이 원문만 있음)를 흉내 낸다. 원문의 {host}가 가짜 호스트로 바뀐다
                 host_fields = {} if rec.pop('omit_host_field', False) else {spec.get('host_field', DEFAULT_ROW_KEY): host}
-                if not host_fields and isinstance(rec.get('body'), str):
+                if isinstance(rec.get('body'), str):
                     rec['body'] = rec['body'].replace('{host}', host)
                 repeat = rec.pop('repeat', 1)
                 rec_stream = rec.pop('stream', stream)   # 한 알림이 여러 스트림을 보면 레코드마다 대상 스트림을 지정한다
@@ -427,7 +448,8 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
         missing = alert.get('missing')
         if missing:
             roster = list((rosters or {}).get(missing['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
-            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'], bool(missing.get('body_match')))
+            sql = o2c_missing_sql(roster, stream, missing['field'], missing['cond'], missing.get('body_match') or False,
+                                 missing.get('field_column', True))
         if absence:
             roster = list((rosters or {}).get(absence['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
             sql = o2c_absence_sql(roster, stream, absence['level'])
@@ -574,6 +596,61 @@ def o2c_switch_uplink_sql(entries, noise_events=None):
         ', '.join(_q(ev) for ev in UPLINK_EVENTS), o2c_switch_noise_filter(noise_events), ' OR '.join(pairs) if pairs else '1 = 0')
 
 
+# --- 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3) ---------------------------------------------------------------------
+# 방화벽 줄은 security_logs에 service_name=fortigate-syslog로 들어온다. 이 스트림에는 첫 방화벽 줄이 들어오기 전까지 방화벽 컬럼
+# (device_id, fortigate_log_subtype ...)이 없으므로 알림 SQL은 service_name과 원문 body의 key=value만 읽는다(없는 컬럼은 평가 오류가 된다).
+# FortiOS 기본 형식은 값을 따옴표로 감싸지만 실장비 샘플로 확인하기 전이라 따옴표 있는 값과 없는 값을 모두 받는다.
+_KEY_RE = _re.compile(r'^[a-z][a-z0-9_]*$')
+_VALUE_RE = _re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+# 수신 중단 감시 목록 항목: 관리번호(ns0399) 또는 장비 이름 그대로(hostname을 관리번호로 못 바꾼 장비). `+`로 HA 멤버를 묶는다.
+# SQL LIKE에 들어가므로 따옴표·%·공백은 막는다(`_`는 LIKE에서 한 글자 와일드카드지만 더 넓게 맞출 뿐이다).
+_FORTIGATE_NAME = r'[A-Za-z0-9][A-Za-z0-9_-]*'
+_FORTIGATE_MEMBER_RE = _re.compile(r'^%s(\+%s)*$' % (_FORTIGATE_NAME, _FORTIGATE_NAME))
+_FORTIGATE_ALIAS_KEY_RE = _re.compile(r'^[a-z0-9][a-z0-9_-]*$')   # 소문자 정규화한 devname(도메인 제외)
+_FORTIGATE_ALIAS_VALUE_RE = _re.compile(r'^ns[0-9]+$')
+_FORTIGATE_ALIAS_MARKER_RE = _re.compile(r'^device_aliases = \{\}.*$', _re.M)
+
+
+def o2c_valid_fortigate_values(values):
+    """True when every item is safe to put in a ``key=value`` match (letters, digits, ``.``, ``_``, ``-``)."""
+    return all(isinstance(v, str) and _VALUE_RE.match(v) for v in values or [])
+
+
+def o2c_valid_fortigate_roster(devices):
+    """True when every item is a management number (``ns0399``), a device name as sent in ``devname`` or an HA pair joined with ``+`` (``ns0380+ns0381``)."""
+    return all(isinstance(d, str) and _FORTIGATE_MEMBER_RE.match(d) for d in devices or [])
+
+
+def o2c_valid_fortigate_aliases(aliases):
+    """True when ``aliases`` maps normalized device names (lower case, no domain) to management numbers (``ns`` + digits)."""
+    if aliases is None:
+        return True
+    return isinstance(aliases, dict) and all(
+        isinstance(k, str) and isinstance(v, str) and _FORTIGATE_ALIAS_KEY_RE.match(k) and _FORTIGATE_ALIAS_VALUE_RE.match(v) for k, v in aliases.items())
+
+
+def o2c_fortigate_vrl(source, aliases):
+    """The firewall VRL with the alias table written into its ``device_aliases = {}`` line (an empty table leaves the source as is)."""
+    if not aliases:
+        return source
+    if not o2c_valid_fortigate_aliases(aliases):
+        raise ValueError('방화벽 장비 이름 별칭 형식이 올바르지 않다')
+    if not _FORTIGATE_ALIAS_MARKER_RE.search(source):
+        raise ValueError('VRL 소스에 `device_aliases = {}` 줄이 없다')
+    literal = json.dumps(dict(sorted(aliases.items())))   # JSON 객체는 VRL 객체 리터럴이다(키·값은 위에서 안전한 문자만 허용)
+    return _FORTIGATE_ALIAS_MARKER_RE.sub(lambda _m: 'device_aliases = %s' % literal, source, count=1)
+
+
+def o2c_fortigate_match(key, values):
+    """``(body LIKE '% key="v"%' OR body LIKE '% key=v %' ...)`` — the line has ``key`` set to one of ``values`` (quoted or bare)."""
+    if not _KEY_RE.match(str(key)) or not values or not o2c_valid_fortigate_values(values):
+        raise ValueError('방화벽 로그 조건에 넣을 수 없는 키 또는 값: %s' % key)
+    parts = []
+    for v in values:
+        parts += ["body LIKE '%% %s=\"%s\"%%'" % (key, v), "body LIKE '%% %s=%s %%'" % (key, v)]
+    return '(%s)' % ' OR '.join(parts)
+
+
 def o2c_enabled_alerts(alerts):
     """The alerts that are created: an alert whose ``enabled`` renders false (e.g. the uplink alert with an empty port list) is left out."""
     return [a for a in alerts or [] if str(a.get('enabled', True)).strip().lower() not in ('false', '0', '')]
@@ -592,4 +669,7 @@ class FilterModule(object):
                 'o2c_host_items': o2c_host_items,
                 'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
                 'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
-                'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts}
+                'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts,
+                'o2c_valid_fortigate_values': o2c_valid_fortigate_values, 'o2c_valid_fortigate_aliases': o2c_valid_fortigate_aliases,
+                'o2c_fortigate_vrl': o2c_fortigate_vrl, 'o2c_valid_fortigate_roster': o2c_valid_fortigate_roster,
+                'o2c_fortigate_match': o2c_fortigate_match}
