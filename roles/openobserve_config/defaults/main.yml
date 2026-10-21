@@ -55,10 +55,10 @@ o2c_p1_destination: ""
 # 시각 줄: {alert_trigger_time_str}(알림이 평가된 시각, 형식 %Y-%m-%dT%H:%M:%S)을 쓴다. 옛 {alert_start_time}/{alert_end_time}은 결과 행 _timestamp의
 # 최소/최대라 최종 SELECT에 _timestamp가 없는 알림(대부분)에서 값이 비거나 어긋난다. 근거: OpenObserve 문서 "Templates"의 변수 표(alert_trigger_time =
 # 평가 시각 µs, alert_trigger_time_str = 그 형식화 값)와 소스 src/core/src/alerts/notifications/context.rs의 NotificationContext.
-# 표기 (KST)는 알림 정의 최상위 tz_offset=o2c_tz_offset(기본 540분)에 기댄다. 이 변수가 tz_offset을 따르는지는 실서버에서 확인한다(docs/openobserve_config.md).
+# 표기는 (UTC)다. 실서버 수신 결과 alert_trigger_time_str은 알림 정의의 tz_offset(540)을 따르지 않고 UTC 그대로였다(실제 UTC 13:31이 13:31로 옴). KST를 보장하는 변수는 확인하지 못해 추측으로 (KST)를 붙이지 않는다.
 # 행 값({detail} 등 로그 원문)은 소스 custom.rs에서 JSON 이스케이프되는 경로(process_variable_replace → format_variable_value)로 치환되는 것으로 보이나 실서버 확인 전이다.
 o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
-o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 발생: {alert_trigger_time_str} (KST) · 규칙 {alert_name}"}}'
+o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 발생: {alert_trigger_time_str} (UTC) · 규칙 {alert_name}"}}'
 
 # 임계값
 o2c_ssh_fail_per_source_threshold: 10
@@ -1200,7 +1200,8 @@ o2c_verify_notify: false
 o2c_selftest_stream: "alert_selftest{{ o2c_verify_stream_suffix }}"
 # 빈 스트림을 만드는 시드 레코드의 나이(초, O2C-014). 알림 조회 구간(5분)보다 길고 OpenObserve 수집 허용 범위(기본 5시간)보다 짧아야 한다.
 o2c_selftest_seed_age_s: 3600
-# 알림 평가 시각대(분 단위 UTC 오프셋, 최상위 tz_offset). 540 = KST(+09:00). 모든 알림(로그·PromQL·자가 시험)에 같은 값이 들어간다(O2C-012 계획).
+# 알림 정의 최상위 tz_offset(분 단위 UTC 오프셋). 540 = KST(+09:00). 모든 알림(로그·PromQL·자가 시험)에 같은 값이 들어간다(O2C-012 계획).
+# 통지의 ⏱ 발생 표시 시각에는 영향이 없다(alert_trigger_time_str은 UTC 그대로). 값을 바꾸면 알림 전체가 1회 갱신될 뿐이다.
 o2c_tz_offset: 540
 # 자가 시험 레코드의 JSON 이스케이프 시험 값(따옴표·역슬래시). 통지 행({probe})에 실려 webhook 본문이 깨지지 않는지 배포 뒤 눈으로 확인한다.
 o2c_selftest_escape_probe: 'a"b\c'

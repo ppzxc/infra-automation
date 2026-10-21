@@ -134,7 +134,7 @@
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `o2c_retired_alerts` | `["infra-root-login-office-daily"]` | 서버에서 지우는 알림 이름 목록. 서버에 있으면서 이 목록에 있는 알림만 DELETE한다. `O2C-002`가 요청 전에 `^infra-[a-z0-9-]+$` 형식·중복 없음을 검증하고, 현행 알림 정의의 이름이 들어 있으면 실패시킨다 |
-| `o2c_tz_offset` | `540` | 알림 정의 최상위 `tz_offset`(분 단위 UTC 오프셋). 540 = KST(+09:00). 통지의 `⏱ 발생` 시각 표기에 쓰인다. |
+| `o2c_tz_offset` | `540` | 알림 정의 최상위 `tz_offset`(분 단위 UTC 오프셋). 540 = KST(+09:00). 통지의 `⏱ 발생` 표시 시각에는 영향이 없다(UTC로 표기). |
 | `o2c_selftest_escape_probe` | `a"b\c` | 자가 시험 레코드의 `probe` 필드 값(따옴표·역슬래시). 통지 행의 JSON 이스케이프 확인용. |
 | `o2c_p1_destination` | `""` | (선택) P1 알림만 보낼 destination 이름. 비어 있으면(기본) 모든 알림이 `o2c_destination_name`(`infra-automation-webhook`)으로 간다. 값이 있으면 심각도 P1 알림만 그 destination을 쓰고 나머지는 기본 대상이다. 이 destination과 템플릿·웹훅은 역할이 만들지 않는다 — 서버에 미리 있어야 하고 없으면 `O2C-012` 계획이 쓰기 전에 실패한다. 형식(영문·숫자·`.`·`_`·`-`)은 `O2C-002`가 검증한다 |
 | `o2c_plan_only` | `false` | `true`이면 OpenObserve 읽기·계획 계산·`O2C-013` 출력까지만 하고 쓰기·합성 레코드 주입·시드·검증 단계 전에 정상 종료한다(`O2C-015`·`O2C-016`) |
@@ -212,7 +212,8 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 ### 시각 표기와 JSON 이스케이프 (#282)
 
 - **`⏱ 발생` 시각**: `{alert_trigger_time_str}`(알림이 평가된 시각, 형식 `%Y-%m-%dT%H:%M:%S`)을 쓴다. 옛 `{alert_start_time}`/`{alert_end_time}`은 결과 행 `_timestamp`의 최소/최대라 최종 SELECT에 `_timestamp`가 없는 알림(대부분)에서 값이 비거나 어긋나서 쓰지 않는다. 근거: OpenObserve 문서 "Templates"의 변수 표(`alert_trigger_time` = 평가 시각 µs, `alert_trigger_time_str` = 그 형식화 값)와 소스 `src/core/src/alerts/notifications/context.rs`의 `NotificationContext`(`alert_trigger_time`, `alert_trigger_time_str`).
-- **KST 표기**: 알림 정의 최상위 `tz_offset`(분 단위 UTC 오프셋, `trigger_condition` 안이 아님 — OpenObserve 테스트 데이터 `AlertMultiRealTime.json` 구조)을 `o2c_tz_offset`(기본 `540` = +09:00)으로 모든 알림(로그·PromQL·자가 시험)에 넣는다. 값을 바꾸면 O2C-012가 알림 전체를 갱신한다. 한계: 소스·문서에서 `alert_trigger_time_str`이 `tz_offset`을 따르는지까지는 확인하지 못했다(문서는 `alert_start_time`류와 달리 오프셋을 말하지 않는다). 그래서 배포 뒤 통지의 시각이 KST(현재 시각 + 9시간 기준)인지 확인하고, UTC로 나오면 `(KST)` 표기를 `(UTC)`로 되돌리거나 다른 방법을 택한다.
+- **시각 표기는 UTC**: 배포 뒤 실제 수신 결과, 실제 UTC 13:31(KST 22:31)에 발생한 알림이 `⏱ 발생: 2026-10-21T13:31:03`으로 왔다. `alert_trigger_time_str`은 알림 정의의 `tz_offset`(540)을 따르지 않고 UTC 그대로라, 표기를 `(UTC)`로 바로잡았다(#305의 `(KST)`는 오탐 표기였다). KST로 보장되는 변수는 확인하지 못했다(문서 변수 표는 `alert_trigger_time_str`을 `2024-12-02T11:27:40` 형식으로만 설명하고 오프셋을 말하지 않는다). 후보는 (1) `alert_start_time`/`alert_end_time`이 `tz_offset`을 따르는지 실서버 확인(단 결과 행 `_timestamp` 기반이라 대부분의 알림에서 비어 쓸 수 없음), (2) `alert_trigger_time`(µs) 원값은 포맷 방법이 템플릿에 없어 불가, (3) 웹훅 수신 쪽(Google Chat 등 중계)에서 변환이다. 근거 없이 `(KST)`를 다시 붙이지 않는다.
+- **`tz_offset=540`은 유지하되 표시 시각에는 영향이 없다**: 알림 정의 최상위 `tz_offset`(분 단위 UTC 오프셋, `trigger_condition` 안이 아님 — OpenObserve 테스트 데이터 `AlertMultiRealTime.json` 구조)을 `o2c_tz_offset`(기본 `540`)으로 모든 알림(로그·PromQL·자가 시험)에 넣는다. 통지의 `⏱ 발생` 시각은 바뀌지 않는다. `alert_start_time`류나 OpenObserve 내부 시각 처리가 이 값을 쓸 수 있어 제거 근거도 없으므로 유지한다(제거하면 모든 알림이 PUT 1회 갱신되고 되돌려도 마찬가지다). 값을 바꾸면 O2C-012가 알림 전체를 1회 갱신한다.
 - **행 값의 JSON 이스케이프**: 통지 본문 템플릿이 JSON 문자열이라 `{rows}`의 행 값(`{detail}`·`{killed_process}`·`{attack}`·`{event}` 같은 로그 원문)에 `"`·`\`가 이스케이프 없이 들어가면 webhook 본문이 깨져 통지가 실패한다. OpenObserve 소스(`custom.rs`)는 `context_attributes`를 `process_variable_replace`(`format_variable_value`가 따옴표·개행·제어 문자를 이스케이프)로 치환하므로 행 값도 같은 경로일 것으로 보지만, 확인된 것은 아니다. 자가 시험 알림이 이를 확인한다: `o2c_verify_notify=true`로 실행하면 시험 레코드(O2C-037)에 `probe` 필드로 `a"b\c`(`o2c_selftest_escape_probe`)가 실리고 행 템플릿 `• {host_name}: 시험 레코드 {records}건 · 이스케이프 시험 값 {probe}`이 그것을 쓴다. 통지가 정상 도착하고 `a"b\c`가 그대로 보이면 이스케이프가 된다.
 - **이스케이프가 안 될 때의 대안**: ① 행 템플릿에서 원문 필드(`{detail}` 등)를 빼고 호스트·건수 같은 안전한 값만 쓴다(PromQL 알림 행은 이미 숫자 `value`와 안전한 레이블만 쓴다). ② 수집 파이프라인 VRL(`security_semantics.vrl`)이나 알림 SQL 단계에서 `"`·`\`를 치환해(`replace`) 위험 문자를 없앤다. 오프라인 테스트는 주입되는 값과 행 템플릿 구성만 검증하고 실제 이스케이프는 배포 뒤 통지로만 확인한다.
 
