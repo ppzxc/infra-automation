@@ -29,6 +29,7 @@ ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; th
 CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
 MANAGED_PREFIX = 'infra-'   # 알림 이름 접두어. 서버에서 지우는 근거는 아니다: 삭제는 폐기 목록(o2c_retired_alerts)의 이름뿐이고, 접두어만 있는 알림은 건드리지 않고 알려 준다
+LINK_LABEL_LOG, LINK_LABEL_METRIC = '로그 보기', '상세 보기'   # 통지 본문의 ▶ {link_label}: {alert_url}
 SECRET_KINDS = ('destination',)                               # url and headers carry the webhook credentials
 
 
@@ -75,16 +76,29 @@ def o2c_desired(spec):
             for sem in semantics[:1] + chained + semantics[1:]]
     out += [_pipeline(org, sem['stream'], sem['pipeline_name'], [sem['function_name']] + sem.get('then', []), sem['description'])
             for sem in semantics]
+    p1_dest = spec.get('p1_destination') or dest   # 비어 있으면(기본) 모든 알림이 같은 대상이다. 값이 있으면 P1만 그 대상으로 간다
     for alert in list(spec['alerts']) + ([spec['selftest_alert']] if spec.get('selftest_alert') else []):
+        promql = alert.get('promql')
+        if promql:
+            if alert.get('stream_type') != 'metrics':
+                raise ValueError('PromQL 알림 %s 은(는) stream_type이 metrics여야 합니다' % alert['name'])
+            query = {'type': 'promql', 'promql': promql,
+                     'promql_condition': {'column': 'value', 'operator': alert.get('promql_operator', '>='), 'value': alert['promql_value']}}
+        else:
+            query = {'type': 'sql', 'sql': alert['sql']}
+        trigger = {'period': alert['period'], 'operator': '>=', 'threshold': alert.get('threshold', 1),
+                   'frequency': alert['frequency'], 'frequency_type': 'minutes', 'silence': alert['silence']}
+        if promql:
+            trigger['align_time'] = True   # 평가 시각을 frequency 경계에 맞춘다(PromQL은 시각이 어긋나면 구간 창이 달라진다)
         out.append({'kind': 'alert', 'name': alert['name'], 'body': {
             'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
-            'query_condition': {'type': 'sql', 'sql': alert['sql']},
-            'trigger_condition': {'period': alert['period'], 'operator': '>=', 'threshold': alert.get('threshold', 1),
-                                  'frequency': alert['frequency'], 'frequency_type': 'minutes', 'silence': alert['silence']},
-            'destinations': [dest], 'enabled': True, 'description': alert['description'],
+            'query_condition': query, 'trigger_condition': trigger,
+            'destinations': [p1_dest if str(alert.get('severity', '')).startswith('P1') else dest],
+            'enabled': True, 'description': alert['description'],
             # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action}·{runbook}로 쓰는 알림별 변수,
-            # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수)
-            'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, action=o2c_action_lines(alert['action'])),
+            # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수). link_label은 {alert_url}의 라벨이다(로그 알림 "로그 보기", 메트릭 알림 "상세 보기").
+            'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, action=o2c_action_lines(alert['action']),
+                                       link_label=LINK_LABEL_METRIC if promql else LINK_LABEL_LOG),
             'row_template': alert['row_template'], 'row_template_type': 'String',
         }})
     # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8): 스트림이 이미 있을 때만 맞춘다(없으면 o2c_plan이 건너뛴다)
@@ -151,6 +165,9 @@ def o2c_plan(desired, existing, org, retired=()):
     Each action: ``{kind, name, op (create|update|delete), method, path, body, secret}``. Nothing is returned for objects that already match.
     An alert is deleted only when it exists on the server and its name is in ``retired`` (the explicit list); the prefix alone never deletes.
     """
+    missing = o2c_missing_destinations(desired, existing)
+    if missing:
+        raise ValueError('알림 대상(destination)이 서버에도 저장소 정의에도 없습니다: %s' % ', '.join(missing))
     plan = []
     for kind in KINDS:
         have = {i.get('name'): i for i in _items(existing.get(kind))}
@@ -177,6 +194,17 @@ def o2c_plan(desired, existing, org, retired=()):
             plan.append({'kind': 'alert', 'name': name, 'op': 'delete', 'method': 'DELETE', 'secret': False, 'body': {},
                          'path': ITEM_PATHS['alert'].format(org=org, key=cur['alert_id'])})
     return plan
+
+
+def o2c_missing_destinations(desired, existing):
+    """Sorted destination names that alerts use but neither the repository (the managed destination) nor the server has.
+
+    Matters for the optional P1 destination (``o2c_p1_destination``): it is only a name, so an alert that points at a
+    destination nobody created would be rejected by the server midway through the writes; this fails the plan first.
+    """
+    known = {d['name'] for d in desired if d['kind'] == 'destination'} | {i.get('name') for i in _items(existing.get('destination'))}
+    used = {n for d in desired if d['kind'] == 'alert' for n in d['body'].get('destinations') or []}
+    return sorted(used - known)
 
 
 def o2c_unmanaged_alerts(desired, existing, retired=()):
@@ -456,6 +484,8 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
         by_kind.setdefault(src.get('kind'), src.get('address'))
     ingest, searches = {}, []
     for alert in alerts:
+        if alert.get('promql'):
+            continue   # PromQL 알림은 합성 레코드로 검증하지 않는다(메트릭 스트림에 넣지 않는다). 평가 오류는 O2C-036이 본다
         name, stream = alert['name'], alert['stream']
         spec = (fixtures or {}).get(name)
         if not spec or not spec.get('cases'):
@@ -708,7 +738,7 @@ def o2c_enabled_alerts(alerts):
 
 class FilterModule(object):
     def filters(self):
-        return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_unmanaged_alerts': o2c_unmanaged_alerts,
+        return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_missing_destinations': o2c_missing_destinations, 'o2c_unmanaged_alerts': o2c_unmanaged_alerts,
                 'o2c_valid_retired_alerts': o2c_valid_retired_alerts, 'o2c_retired_conflicts': o2c_retired_conflicts, 'o2c_plan_summary': o2c_plan_summary,
                 'o2c_alert_state': o2c_alert_state, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
