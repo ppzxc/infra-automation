@@ -20,6 +20,8 @@ TEMPLATES = ROOT_DIR / "roles" / "common" / "templates"
     (["host_audit_excluded", "host_agents_excluded", "servers"], "servers"),
     (["all", "loadbalancers"], "loadbalancers"),
     (["firewall_unmanaged", "funa_cluster", "servers"], "servers"),
+    (["agents_only", "provision_excluded", "servers", "setup_partial"], "servers"),
+    (["provision_allowed", "servers", "setup_complete"], "servers"),
     (["host_agents_excluded"], "server"),
     ([], "server"),
 ])
