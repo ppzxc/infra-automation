@@ -1435,6 +1435,23 @@
           - _o2c_raw.index('[O2C-014]') < _o2c_raw.index('[O2C-020]')
         quiet: true
 
+    - name: "[VERIFY-O2C-018] Verify the short URL registration posts to /short, hides its payload, skips check mode and runs before the alert writes"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-018']['o2c_http'].requests is search('o2c_short_url_requests')
+          - _t['O2C-018'].no_log is true and _t['O2C-018'].changed_when is false
+          - _t['O2C-018'].when == 'not ansible_check_mode'
+          - _o2c_raw.index('[O2C-016]') < _o2c_raw.index('[O2C-018]') < _o2c_raw.index('[O2C-020]')
+        quiet: true
+
+    - name: "[VERIFY-O2C-019] Verify a short URL that differs from the computed one stops the run before the alert writes"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-019']['ansible.builtin.assert'].that[0] is search('o2c_short_url_mismatches')
+          - _t['O2C-019'].when == 'not ansible_check_mode'
+          - _o2c_raw.index('[O2C-018]') < _o2c_raw.index('[O2C-019]') < _o2c_raw.index('[O2C-020]')
+        quiet: true
+
     - name: "[VERIFY-O2C-020] Verify writes are skipped in check mode and every API task hides its payload"
       ansible.builtin.assert:
         that:
