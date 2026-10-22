@@ -24,6 +24,7 @@ funa_env_node_keys:
   - FUNA_NODE_EXTERNAL_HOSTNAME
   - FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME
   - FUNA_NOTIFICATION_HEADER
+  - FUNA_NODE_NAME
 
 # 노드마다 값이 다른 시크릿: hosts/<host>에서 읽어 proxy.secrets.env로 보낸다(예: 노드별 Cloudflare 토큰).
 funa_env_node_secret_keys:

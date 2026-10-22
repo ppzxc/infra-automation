@@ -23,7 +23,7 @@ ROLE = ROOT_DIR / "roles" / "funa_env"
 USER_GROUP = grp.getgrgid(os.getgid()).gr_name
 
 NODE = {"FUNA_NODE_EXTERNAL_HOSTNAME": "n1.funa.test", "FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME": "*.n1.funa.test",
-        "FUNA_NOTIFICATION_HEADER": "[FUNA n1] alert",
+        "FUNA_NOTIFICATION_HEADER": "[FUNA n1] alert", "FUNA_NODE_NAME": "n1",
         "CLOUDFLARE_API_TOKEN": "cf-token-SECRET", "ansible_password": "ssh-pass-SECRET"}
 CLUSTER = {"FUNA_FLOATING_HOSTNAME": "vip.funa.test", "FUNA_HEALTH_CHECK_URI": "/health", "FUNA_SERVICE_NAME": "funa",
            "TZ": "Asia/Seoul",
@@ -126,6 +126,8 @@ def test_renders_files_with_modes_and_consumer_separation(tmp_path, openbao):
     assert kv["FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME"] == "'*.n1.funa.test'"
     # 알림 헤더는 노드의 호스트명이 들어가므로 노드 KV에서 온다(클러스터 공통 KV에는 없다).
     assert kv["FUNA_NOTIFICATION_HEADER"] == "'[FUNA n1] alert'"
+    # funa 로그의 service.node.name 이 기본값 local 로 남지 않도록 노드 이름도 노드 KV 에서 온다(funa#337).
+    assert kv["FUNA_NODE_NAME"] == "n1"
     assert "ansible_password" not in cluster.read_text()
     # 소비자별 분리: proxy 파일에는 keepalived 시크릿이 없고 그 반대도 같다
     assert set(_kv_of(proxy)) == set(PROXY) | {"CLOUDFLARE_API_TOKEN"} and set(_kv_of(vrrp)) == set(VRRP)
@@ -175,6 +177,8 @@ def test_host_outside_the_group_gets_nothing(tmp_path, openbao):
      "required key TZ is missing"),
     ({"/v1/secret/data/hosts/n1": _kv({"ansible_password": "ssh-pass-SECRET"})},
      "required key FUNA_NODE_EXTERNAL_HOSTNAME is missing"),
+    ({"/v1/secret/data/hosts/n1": _kv({k: v for k, v in NODE.items() if k != "FUNA_NODE_NAME"})},
+     "hosts/n1: required key FUNA_NODE_NAME is missing"),
     ({"/v1/secret/data/clusters/funa/vrrp": (404, {"errors": []})}, "clusters/funa/vrrp: OpenBao path does not exist"),
 ])
 def test_missing_values_fail_naming_what_is_missing(tmp_path, openbao, routes, expect):

@@ -67,7 +67,7 @@ provisioner:
       # OpenBao 대신 쓰는 가짜 값(funa_env_kv_fixture가 있으면 OpenBao 조회를 건너뛴다).
       slow-rockylinux9:
         funa_env_kv_fixture:
-          node: {FUNA_NODE_EXTERNAL_HOSTNAME: node.funa.invalid, FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME: "*.node.funa.invalid", FUNA_NOTIFICATION_HEADER: "[FUNA node]", CLOUDFLARE_API_TOKEN: molecule-cf}
+          node: {FUNA_NODE_EXTERNAL_HOSTNAME: node.funa.invalid, FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME: "*.node.funa.invalid", FUNA_NOTIFICATION_HEADER: "[FUNA node]", FUNA_NODE_NAME: node, CLOUDFLARE_API_TOKEN: molecule-cf}
           cluster: {FUNA_FLOATING_HOSTNAME: vip.funa.invalid, FUNA_HEALTH_CHECK_URI: /health, FUNA_SERVICE_NAME: funa, TZ: Asia/Seoul, FUNA_NOTIFICATION_SMTP_FROM: a@funa.invalid, FUNA_NOTIFICATION_SMTP_HOST: smtp.funa.invalid, FUNA_NOTIFICATION_SMTP_PORT: 25, FUNA_NOTIFICATION_SMTP_TO: b@funa.invalid, FUNA_NOTIFICATION_SMTP_USERNAME: user, FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL: "https://bot.funa.invalid/x"}
           proxy: {FUNA_ADMIN_TOKEN: molecule-admin, DB_PASSWORD: molecule-db}
           vrrp: {FUNA_NOTIFICATION_SMTP_PASSWORD: molecule-smtp, FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN: molecule-bot}

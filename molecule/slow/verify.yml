@@ -70,7 +70,9 @@
 
         - name: "[VERIFY-FUNA-003] Verify the node values reached cluster.env"
           ansible.builtin.assert:
-            that: "'FUNA_NODE_EXTERNAL_HOSTNAME=node.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
+            that:
+              - "'FUNA_NODE_EXTERNAL_HOSTNAME=node.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
+              - "'FUNA_NODE_NAME=node' in f.read['/etc/funa-cluster/cluster.env']"
           when: "'funa_cluster' in group_names"
 
         - name: "[VERIFY-FUNA-004] Verify the cluster values reached cluster.env"
