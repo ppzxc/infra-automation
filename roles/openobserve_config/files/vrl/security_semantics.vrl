@@ -13,7 +13,8 @@
 program = string(.process_executable_name) ?? ""
 line = string(.body) ?? ""
 
-if program == "sshd" {
+# OpenSSH 9.8+는 인증·세션 기록을 별도 프로세스 sshd-session으로 남긴다(메시지 형식은 sshd와 같다).
+if program == "sshd" || program == "sshd-session" {
     accepted, err = parse_regex(line, r'Accepted \S+ for (?P<user>\S+) from (?P<ip>\S+) port (?P<port>\d+)')
     if err == null {
         .user_name = accepted.user
