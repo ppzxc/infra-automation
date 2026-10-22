@@ -58,6 +58,18 @@ all:
       hosts: {}
       # ns0001: {}   # 작업 중에만 임시로 추가
 
+    # 2-5. 설치 상태 분류(정보용, 어떤 플레이도 대상으로 쓰지 않는다): 서버에 직접 접속해 프로비저닝·로그·백업이
+    #      어디까지 적용됐는지 확인한 결과를 남긴다. 적용이 덜 된 서버에 추가 작업이 나가는 일을 막는 용도다.
+    #      setup_complete(모두 확인) / setup_partial(일부만) / agents_only(Host Agents만) / setup_unverified(미확인).
+    setup_complete:
+      hosts: {}
+    setup_partial:
+      hosts: {}
+    agents_only:
+      hosts: {}
+    setup_unverified:
+      hosts: {}
+
     # 3. 네트워크 인프라 스위치 그룹 (Cisco IOS Switches)
     cisco_switches:
       hosts:
