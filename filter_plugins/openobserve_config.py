@@ -222,6 +222,9 @@ def o2c_desired(spec):
             'query_condition': query, 'trigger_condition': trigger,
             'destinations': [p1_dest if str(alert.get('severity', '')).startswith('P1') else dest],
             'enabled': True, 'description': alert['description'],
+            # 지속 조건(#318): 첫 일치 뒤 이 초만큼 조건이 이어져야 발화한다(Prometheus `for:`). 알림 최상위 필드이고 서버 기본값은 0(즉시 발화)이다.
+            # 0도 항상 보낸다: 빼면 60분 → 0으로 줄인 정의가 부분집합 비교에서 같게 보여 서버에 옛 값이 남는다.
+            'pending_period_sec': int(alert.get('pending_minutes') or 0) * 60,
             # 알림 평가 시각대: 최상위 tz_offset(분 단위 UTC 오프셋, trigger_condition 안이 아님 — OpenObserve 테스트 데이터 AlertMultiRealTime.json 구조)
             'tz_offset': int(spec.get('tz_offset', 0)),
             # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action}·{runbook}로 쓰는 알림별 변수,
@@ -881,6 +884,55 @@ def o2c_fortigate_exclude_logids(logids):
     return ''.join(" AND body NOT LIKE '%%logid=\"%s\"%%'" % v for v in logids or [])
 
 
+# --- 보안 로그 알림의 문구 목록 (#318) ---------------------------------------------------------------------------------
+# 위험 명령 sudo 알림은 sudo 명령 줄(process_command_line, 소문자)에 목록의 문구가 들어 있는지 LIKE로 본다. 목록은 역할 변수이고
+# SQL에 들어가므로 문구는 소문자·숫자·공백·`.`·`_`·`/`·`=`·`-`만, 라벨은 따옴표·역슬래시·%가 없는 글자만 허용한다(O2C-002에서 검증).
+_LIKE_PATTERN_RE = _re.compile(r'^[a-z0-9 ._/=-]+$')
+_LIKE_LABEL_RE = _re.compile(r'^[^\'"\\%\n]+$')
+_GROUP_NAME_RE = _re.compile(r'^[a-z_][a-z0-9_-]*$')
+SERVICE_STOP_VERBS = ('systemctl stop %s', 'systemctl disable %s', 'systemctl disable --now %s', 'systemctl mask %s',
+                      'systemctl kill %s', 'service %s stop')
+
+
+def o2c_valid_like_groups(groups):
+    """True when ``groups`` is a list of ``{label, patterns}`` with safe labels and lower-case LIKE phrases (no quote, no ``%``)."""
+    return isinstance(groups, (list, tuple)) and all(
+        isinstance(g, dict) and isinstance(g.get('label'), str) and _LIKE_LABEL_RE.match(g['label'])
+        and isinstance(g.get('patterns'), (list, tuple)) and g['patterns']
+        and all(isinstance(p, str) and _LIKE_PATTERN_RE.match(p) for p in g['patterns']) for g in groups)
+
+
+def o2c_valid_group_names(names):
+    """True when every item is a Unix group or service name (lower case letters, digits, ``_``, ``-``)."""
+    return isinstance(names, (list, tuple)) and all(isinstance(n, str) and _GROUP_NAME_RE.match(n) for n in names)
+
+
+def o2c_sudo_risky_groups(groups, services, label):
+    """The risky command groups plus one group (``label``) that stops, disables or masks each protected service."""
+    if not o2c_valid_group_names(services):
+        raise ValueError('보호 서비스 이름 형식이 올바르지 않다')
+    extra = [{'label': label, 'patterns': [verb % s for s in services for verb in SERVICE_STOP_VERBS]}] if services else []
+    out = list(groups or []) + extra
+    if not o2c_valid_like_groups(out):
+        raise ValueError('위험 명령 목록 형식이 올바르지 않다')
+    return out
+
+
+def o2c_like_any(groups, column):
+    """``(lower(<column>) LIKE '%p1%' OR ...)`` over every phrase of every group."""
+    if not _GROUP_NAME_RE.match(column) or not o2c_valid_like_groups(groups):
+        raise ValueError('LIKE 조건에 넣을 수 없는 열 또는 문구')
+    return '(%s)' % ' OR '.join("lower(%s) LIKE '%%%s%%'" % (column, p) for g in groups for p in g['patterns'])
+
+
+def o2c_like_label(groups, column):
+    """``CASE WHEN <group 1 phrases> THEN '<label 1>' ... ELSE '기타' END``: which group a line matched (first match wins)."""
+    if not _GROUP_NAME_RE.match(column) or not o2c_valid_like_groups(groups):
+        raise ValueError('LIKE 조건에 넣을 수 없는 열 또는 문구')
+    whens = ' '.join("WHEN %s THEN '%s'" % (o2c_like_any([g], column), g['label']) for g in groups)
+    return 'CASE %s ELSE \'기타\' END' % whens
+
+
 def o2c_enabled_alerts(alerts):
     """The alerts that are created: an alert whose ``enabled`` renders false (e.g. the uplink alert with an empty port list) is left out."""
     return [a for a in alerts or [] if str(a.get('enabled', True)).strip().lower() not in ('false', '0', '')]
@@ -904,4 +956,6 @@ class FilterModule(object):
                 'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts,
                 'o2c_valid_fortigate_values': o2c_valid_fortigate_values, 'o2c_valid_fortigate_aliases': o2c_valid_fortigate_aliases,
                 'o2c_fortigate_vrl': o2c_fortigate_vrl, 'o2c_valid_fortigate_roster': o2c_valid_fortigate_roster,
-                'o2c_fortigate_match': o2c_fortigate_match}
+                'o2c_fortigate_match': o2c_fortigate_match,
+                'o2c_valid_like_groups': o2c_valid_like_groups, 'o2c_valid_group_names': o2c_valid_group_names,
+                'o2c_sudo_risky_groups': o2c_sudo_risky_groups, 'o2c_like_any': o2c_like_any, 'o2c_like_label': o2c_like_label}

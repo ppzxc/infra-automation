@@ -1065,3 +1065,146 @@ infra-fortigate-syslog-silent:
       fires: false
       off_roster: true
       records: []
+# --- 보안 로그 알림 (#318) --- 원문 줄은 실로그 모양(sshd·auditd·pam_faillock)을 따르되 호스트·계정·주소는 가짜 값이다.
+# 계정 잠금(pam_faillock·pam_tally2) 줄은 7일·30일 실로그에 없어 linux-pam 소스의 문구로 만든 합성 줄이다(실장비 줄로 다시 검증해야 한다).
+infra-ssh-bruteforce-success:
+  cases:
+    - name: 같은 출발지에서 실패 10회 뒤 성공
+      host: verify-brute-success
+      fires: true
+      records:
+        - {repeat: 10, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.30}
+        - {event_action: ssh_login, event_outcome: success, user_name: admin, source_address: 203.0.113.30}
+    - name: 실패 9회 뒤 성공은 임계 미만
+      host: verify-brute-below
+      fires: false
+      records:
+        - {repeat: 9, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.31}
+        - {event_action: ssh_login, event_outcome: success, user_name: admin, source_address: 203.0.113.31}
+    - name: 실패만 있고 성공이 없으면 이 알림이 아니다(출발지별 실패 급증 알림이 본다)
+      host: verify-brute-no-success
+      fires: false
+      records:
+        - {repeat: 12, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.32}
+    - name: 실패한 출발지와 성공한 출발지가 다르다
+      host: verify-brute-other-source
+      fires: false
+      records:
+        - {repeat: 12, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.33}
+        - {event_action: ssh_login, event_outcome: success, user_name: admin, source_address: 198.51.100.33}
+infra-account-change:
+  cases:
+    - name: useradd 계정 추가(auditd ADD_USER)
+      host: verify-acct-add
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=ADD_USER msg=audit(1792628134.764:49128): pid=2510385 uid=0 auid=1002 ses=313 subj=kernel msg=''op=add-user acct="svcverify" exe="/usr/sbin/useradd" hostname=? addr=? terminal=? res=success'' UID="root" AUID="opsverify"'}
+    - name: 특권 그룹(wheel) 가입(auditd USER_MGMT)
+      host: verify-acct-wheel
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=USER_MGMT msg=audit(1792628133.696:49104): pid=2510319 uid=0 auid=1002 ses=313 subj=kernel msg=''op=add-user-to-group grp="wheel" acct="opsverify" exe="/usr/sbin/usermod" hostname=? addr=? terminal=? res=success'' UID="root" AUID="opsverify"'}
+    - name: 비밀번호 변경(auditd USER_CHAUTHTOK)
+      host: verify-acct-passwd
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=USER_CHAUTHTOK msg=audit(1792628200.100:49200): pid=2511000 uid=0 auid=1002 ses=313 subj=kernel msg=''op=PAM:chauthtok grantors=pam_unix acct="opsverify" exe="/usr/bin/passwd" hostname=? addr=? terminal=pts/0 res=success'' UID="root" AUID="opsverify"'}
+    - name: usermod --help 실행 기록(exec_log EXECVE·SYSCALL)은 계정 변경이 아니다
+      host: verify-acct-exec-help
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=EXECVE msg=audit(1792655949.866:4856533): argc=2 a0="/sbin/usermod" a1="--help"'}
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792655949.866:4856533): arch=c000003e syscall=59 success=yes exit=0 comm="usermod" exe="/usr/sbin/usermod" key="exec_log" AUID="opsverify" UID="root"'}
+    - name: 로그인 계정 확인(USER_ACCT)은 계정 변경이 아니다
+      host: verify-acct-login
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=USER_ACCT msg=audit(1792628300.100:49300): pid=2512000 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''op=PAM:accounting grantors=pam_unix acct="opsverify" exe="/usr/sbin/sshd" hostname=203.0.113.40 addr=203.0.113.40 terminal=ssh res=success'' UID="root" AUID="unset"'}
+    - name: shadow-utils syslog 줄은 auditd 기록과 중복이라 세지 않는다
+      host: verify-acct-syslog
+      fires: false
+      records:
+        - {service_name: auth, process_executable_name: useradd, body: "Oct 22 09:15:34 {host} useradd[2510385]: new user: name=svcverify, UID=2000, GID=2000, home=/home/svcverify, shell=/sbin/nologin, from=none"}
+infra-sudo-risky-command:
+  cases:
+    - name: sudo setenforce 0
+      host: verify-sudo-risky-selinux
+      fires: true
+      records:
+        - {event_action: sudo, event_outcome: success, user_name: alice, user_effective_name: root, process_command_line: /usr/sbin/setenforce 0}
+    - name: sudo systemctl stop auditd
+      host: verify-sudo-risky-auditd
+      fires: true
+      records:
+        - {event_action: sudo, event_outcome: success, user_name: alice, user_effective_name: root, process_command_line: /bin/systemctl stop auditd}
+    - name: sudo iptables -F (대문자 옵션)
+      host: verify-sudo-risky-iptables
+      fires: true
+      records:
+        - {event_action: sudo, event_outcome: success, user_name: alice, user_effective_name: root, process_command_line: /sbin/iptables -F}
+    - name: 서비스 재시작은 위험 명령이 아니다
+      host: verify-sudo-risky-restart
+      fires: false
+      records:
+        - {event_action: sudo, event_outcome: success, user_name: alice, user_effective_name: root, process_command_line: /bin/systemctl restart rsyslog}
+    - name: 규칙 조회와 보호 대상이 아닌 서비스 중지는 아니다
+      host: verify-sudo-risky-readonly
+      fires: false
+      records:
+        - {event_action: sudo, event_outcome: success, user_name: alice, user_effective_name: root, process_command_line: /sbin/iptables -nvL INPUT --line-numbers}
+        - {event_action: sudo, event_outcome: success, user_name: alice, user_effective_name: root, process_command_line: /bin/systemctl stop backup-audit-daily.service}
+    - name: 실패한 sudo는 이 알림이 아니다(권한 상승 실패 알림이 본다)
+      host: verify-sudo-risky-failed
+      fires: false
+      records:
+        - {event_action: sudo, event_outcome: failure, user_name: alice, user_effective_name: root, process_command_line: /usr/sbin/setenforce 0}
+infra-auditd-stopped:
+  cases:
+    - name: auditd 종료(DAEMON_END) 뒤 시작 기록 없음
+      host: verify-auditd-end
+      fires: true
+      records:
+        - {ts: 0, service_name: audit, body: 'type=DAEMON_END msg=audit(1792047582.149:8718): op=terminate auid=0 uid=0 ses=4294967295 pid=1 subj=kernel res=success AUID="root" UID="root"'}
+    - name: 감사 비활성화(auditctl -e 0)
+      host: verify-auditd-disabled
+      fires: true
+      records:
+        - {ts: 0, service_name: audit, body: 'type=CONFIG_CHANGE msg=audit(1792047600.100:9000): op=set audit_enabled=0 old=1 auid=1002 ses=313 subj=kernel res=1 AUID="opsverify"'}
+    - name: auditd 재시작(종료 뒤 시작)은 알리지 않는다
+      host: verify-auditd-restart
+      fires: false
+      records:
+        - {ts: 0, service_name: audit, body: 'type=DAEMON_END msg=audit(1792047582.149:8718): op=terminate auid=0 uid=0 ses=4294967295 pid=1 subj=kernel res=success AUID="root" UID="root"'}
+        - {ts: 1, service_name: audit, body: 'type=DAEMON_START msg=audit(1792048411.454:580): op=start ver=3.1.5 format=enriched auid=4294967295 pid=1185 uid=0 ses=4294967295 res=success AUID="unset" UID="root"'}
+    - name: 다른 서비스의 SERVICE_STOP은 이 알림이 아니다
+      host: verify-auditd-other-service
+      fires: false
+      records:
+        - {ts: 0, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46621): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+infra-account-lockout:
+  cases:
+    - name: pam_faillock 잠금(syslog)
+      host: verify-lock-faillock
+      fires: true
+      records:
+        - {service_name: auth, process_executable_name: sshd, body: "Oct 22 10:00:00 {host} sshd[1234]: pam_faillock(sshd:auth): Consecutive login failures for user admin account temporarily locked"}
+    - name: pam_faillock 잠금(auditd RESP_ACCT_LOCK)
+      host: verify-lock-audit
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=RESP_ACCT_LOCK msg=audit(1792630000.100:50000): pid=1234 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''op=pam_faillock suid=1001 exe="/usr/sbin/sshd" hostname=? addr=? terminal=ssh res=success'' UID="root" AUID="unset"'}
+    - name: pam_tally2 잠금(EL7)
+      host: verify-lock-tally2
+      fires: true
+      records:
+        - {service_name: auth, process_executable_name: sshd, body: "Oct 22 10:00:00 {host} sshd[1234]: pam_tally2(sshd:auth): user admin (1001) tally 6, deny 5"}
+    - name: 로그인 성공 기록의 grantors=pam_faillock은 잠금이 아니다
+      host: verify-lock-grantors
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=CRED_ACQ msg=audit(1792133356.571:43530): pid=2333648 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''op=PAM:setcred grantors=pam_faillock,pam_localuser,pam_unix acct="admin" exe="/usr/libexec/openssh/sshd-session" hostname=203.0.113.50 addr=203.0.113.50 terminal=ssh res=success'' UID="root" AUID="unset"'}
+    - name: 점검 스크립트 본문에 나온 pam_faillock 문구는 잠금이 아니다
+      host: verify-lock-script
+      fires: false
+      records:
+        - {service_name: sudo, body: 'Oct 19 09:16:10 {host} sudo[2919962]:   alice : (command continued) kisa_emit U-03 VULN "no pam_faillock/pam_tally2/pam_tally in auth stack" deny=3'}
