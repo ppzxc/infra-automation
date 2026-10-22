@@ -1,0 +1,4 @@
+# Ansible managed — RAID 상태 수집기 (#335). 읽기 전용이며 결과는 {{ otel_raid_status_log_path }}에 남는다.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/{{ raid_status_interval_minutes | int }} * * * * root RAID_STATUS_LOG={{ otel_raid_status_log_path }} RAID_STATUS_LOCK={{ raid_status_state_dir }}/raid-status.lock RAID_STATUS_TIMEOUT={{ raid_status_timeout_seconds | int }} {{ raid_status_script_path }} >/dev/null 2>&1

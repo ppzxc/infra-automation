@@ -442,6 +442,77 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 
 ---
 
+## RAID 상태 알림 (Spec #322 / Ticket-13, #335)
+
+Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, cron 5분)가 HP Smart Array 도구(`ssacli` → `hpssacli` → `hpacucli`)의 `ctrl all show config detail`을 읽어 `host_status_logs` 스트림에 정규화 레코드를 남긴다. 수집은 읽기 전용이고 도구를 설치하지 않는다. 레코드 종류(`kind`)는 `controller`·`logical_drive`·`physical_drive`·`cache_battery`·`tool_status`다. 도구 원문의 모든 키·값은 레코드마다 `raw`(JSON 문자열)에 있다. 필드 정의와 근거는 [hardware-raid-metrics-industry-standard.md](../research/hardware-raid-metrics-industry-standard.md) §6·§8을 본다.
+
+판독 1회로는 울리지 않는다. 15분 구간에 같은 대상의 이상 판독이 2건 이상(연속 2회 수집)이어야 한다. 모두 P2다.
+
+**서버에서 직접 확인**: `sudo ssacli ctrl all show config detail`(CentOS 6/7 일부는 `hpssacli`). 설정을 바꾸는 명령(`modify`·`create`·`delete`)은 쓰지 않는다. 최근 수집 결과는 `/var/log/host-agents/raid.jsonl`이다.
+
+<a id="raid-write-cache-disabled"></a>
+## 🟠 RAID 컨트롤러 쓰기 캐시 꺼짐 (`infra-raid-write-cache-disabled`)
+
+컨트롤러가 쓰기 캐시를 끄고 디스크에 바로 쓰고 있다. `cache_status`가 `permanently_disabled`·`failed`이거나, 배터리 충전 중이 아닌데 `temporarily_disabled`인 경우다. 재통지는 하루 1번이다.
+
+**영향**: 데이터 손실 위험은 없다. 백업 전원 없이 캐시에 데이터를 두지 않으려고 컨트롤러가 스스로 끈 것이다. 대신 쓰기가 디스크 속도로 떨어져 DB 커밋·로그 기록이 계속 느려진다.
+
+**원인별 조치** (행의 `cache_reason`)
+- `Cable Error` / `cable error to the centralized backup power source`: 배터리(HPE Smart Storage Battery)와 컨트롤러 사이 케이블을 다시 꽂거나 교체한다.
+- `battery/capacitor is not attached` / `no backup power source attached`: 배터리 모듈이 없다. 모듈을 장착한다.
+- 배터리 충전 중(`backup_power_operation=charging`)의 일시 비활성은 정상 동작이라 알리지 않는다. 충전이 36시간 넘게 끝나지 않으면 배터리가 고장으로 바뀌어 배터리 고장 알림이 받는다.
+
+**하지 말 것**: `No-Battery Write Cache`를 켜서 해결하지 않는다. 정전 때 캐시의 쓰기가 사라져 DB가 깨질 수 있다.
+
+2026-10-22 조사 때 이미 꺼져 있던 호스트는 ns0288·ns0325·ns0329(영구)와 ns0334·ns0338(케이블 오류)이다.
+
+<a id="raid-controller-fault"></a>
+## 🟠 RAID 컨트롤러 상태 이상 (`infra-raid-controller-fault`)
+
+컨트롤러가 자기 상태(`Controller Status`)를 OK가 아닌 값으로 보고한다. 캐시만 꺼진 것은 이 알림이 아니다.
+
+**확인·대응**: `ssacli ctrl all show status`, `dmesg | grep -i hpsa`, iLO 이벤트 로그(IML)를 본다. 펌웨어 갱신이나 컨트롤러 교체를 HPE 지원과 계획한다. 그 사이 백업이 최신인지 확인한다.
+
+<a id="raid-logical-drive-degraded"></a>
+## 🟠 RAID 논리 드라이브 저하·고장 (`infra-raid-logical-drive-degraded`)
+
+논리 드라이브가 저하(`Interim Recovery Mode`, 재구축 중 `Recovering`) 또는 고장(`Failed`)이다. 이중화가 깨진 상태라 재통지는 60분이다.
+
+**확인·대응**: 행의 `raw_state`(재구축 진행률 포함)를 보고 `ssacli ctrl all show config`로 고장 디스크를 찾는다. 디스크를 교체하고 재구축이 끝날 때까지 지켜본다. 확장(`Transforming`) 같은 계획된 작업은 정상으로 보고 알리지 않는다.
+
+<a id="raid-physical-drive-fault"></a>
+## 🟠 RAID 물리 디스크 고장·고장 예측 (`infra-raid-physical-drive-fault`)
+
+물리 디스크가 `Failed` 또는 `Predictive Failure`다. 고장 예측은 컨트롤러가 SMART 등으로 판단한 결과이며, 아직 데이터 손실은 없다.
+
+**확인·대응**: 행의 슬롯(`physicaldrive 1I:1:2` 등)을 보고 `ssacli ctrl all show config detail`에서 모델·용량을 확인한다. 같은 규격 디스크를 확보해 핫 스왑으로 교체하고 재구축 완료를 확인한다.
+
+<a id="raid-cache-battery-fault"></a>
+## 🟠 RAID 캐시 배터리 고장 (`infra-raid-cache-battery-fault`)
+
+쓰기 캐시를 지키는 배터리·캐패시터가 `Failed`다. 충전 중(`Recharging`)은 고장이 아니라 알리지 않는다.
+
+**확인·대응**: `ssacli ctrl all show detail`의 `Battery/Capacitor Status`를 확인하고 배터리 교체를 계획한다. 교체 뒤 충전이 끝나 `Cache Status`가 OK로 돌아오는지 본다.
+
+<a id="raid-collection-error"></a>
+## 🟠 RAID 상태 수집 실패 (`infra-raid-collection-error`)
+
+관리 도구가 60초 안에 답하지 않거나(`timeout`) 오류로 끝난(`error`) 실행이 20분에 3회 이상이다. 수집이 실패하는 동안에는 위 RAID 알림이 나가지 않는다.
+
+**확인·대응**: 서버에서 `timeout 60 ssacli ctrl all show status`를 직접 실행한다. HPE 문서는 재구축·포맷처럼 I/O가 많을 때 도구가 응답하지 않을 수 있다고 안내한다. 그런 작업 중이 아니면 `dmesg`의 hpsa 메시지를 본다. 도구가 없는 호스트(`no_tool`)나 컨트롤러가 없는 호스트(`no_controller`)는 알리지 않는다.
+
+<a id="host-status-silent"></a>
+## 🟠 호스트 상태 점검 무소식 (`infra-host-status-silent`)
+
+수집 로스터 호스트에서 RAID 상태 수집기의 실행 기록(`kind=tool_status`)이 30분 넘게 없다. 도구가 없는 호스트도 실행마다 `no_tool` 기록을 남기므로, 기록이 없으면 수집기 자체가 돌지 않는 것이다. 재통지는 하루 1번이다.
+
+**확인**
+1. **같은 호스트의 Silent Host 알림이 있는지 먼저 확인한다.** 수집기(otelcol) 전체가 멈췄다면 그쪽부터 복구한다.
+2. 호스트의 `/etc/cron.d/host-agents-raid-status`와 `/var/log/host-agents/raid.jsonl` 마지막 줄을 본다.
+3. 신규 편입 호스트면 Host Agents Deploy가 실행됐는지 확인한다. 배포 순서상 Deploy 전에 Config가 먼저 반영되면 모든 호스트에서 이 알림이 난다.
+
+---
+
 ## 스위치 syslog 알림 (Spec #277)
 
 스위치 syslog는 수신 서버(#276)를 거쳐 `system_logs`에 `service_name=switch-syslog`로 들어오고, `switch_syslog_semantics` 함수가 로그 한 줄에 장비와 Cisco 메시지 필드를 붙인다. `host_name`은 스위치가 아니라 로그를 받는 서버이고 `severity`는 항상 0이므로, 스위치로 거를 때는 아래 필드를 쓴다. 원문 `body`는 바뀌지 않는다.

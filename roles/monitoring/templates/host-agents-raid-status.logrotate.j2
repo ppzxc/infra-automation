@@ -1,0 +1,10 @@
+# Ansible managed — RAID 상태 jsonl 회전 (#335). otelcol filelog는 fingerprint로 회전을 따라간다.
+{{ otel_raid_status_log_path }} {
+    daily
+    rotate {{ raid_status_logrotate_rotate | int }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 root root
+}

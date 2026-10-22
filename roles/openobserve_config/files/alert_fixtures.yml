@@ -679,6 +679,121 @@ infra-maintenance-missing:
       fires: false
       records:
         - {ts: -600, job: maintenance, command: check, success: true}
+# --- RAID 상태 알림 (Spec #322 / Ticket-13, #335) --- 레코드는 host-agents-raid-status가 남기는 정규화 JSON 줄의 모양이다.
+# 값은 tests/fixtures/raid_ssacli의 실제 출력(2026-10-22)에서 나온 것이다. 수집은 5분마다라 "2회 연속"은 ts [-300, 0]이다.
+infra-raid-write-cache-disabled:
+  cases:
+    - name: 배터리 없음으로 영구 비활성(ns0325 모양)
+      host: verify-raid-cache-perm
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: controller, hw_name: "Smart Array P440ar in Slot 0 (Embedded)", hw_state: ok, cache_status: permanently_disabled, cache_reason: "Cache disabled; backup power source is not attached", backup_power: none, backup_power_operation: none}
+    - name: 배터리 케이블 오류로 일시 비활성(ns0334 모양)
+      host: verify-raid-cache-cable
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: controller, hw_name: "Smart Array P440ar in Slot 0 (Embedded)", hw_state: ok, cache_status: temporarily_disabled, cache_reason: "cable error to the centralized backup power source", backup_power: battery, backup_power_operation: none}
+    - name: 배터리 충전 중의 일시 비활성은 정상 동작이다
+      host: verify-raid-cache-charging
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: controller, hw_name: "Smart Array P440 in Slot 2", hw_state: ok, cache_status: temporarily_disabled, cache_reason: "", backup_power: battery, backup_power_operation: charging}
+    - name: 판독 1회만으로는 울리지 않는다
+      host: verify-raid-cache-once
+      fires: false
+      records:
+        - {ts: 0, kind: controller, hw_name: "Smart Array P440 in Slot 2", hw_state: ok, cache_status: permanently_disabled, cache_reason: "Cable Error", backup_power: none, backup_power_operation: none}
+    - name: 캐시 정상
+      host: verify-raid-cache-ok
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: controller, hw_name: "Smart Array P440 in Slot 2", hw_state: ok, cache_status: ok, cache_reason: "", backup_power: battery, backup_power_operation: none}
+infra-raid-controller-fault:
+  cases:
+    - name: 컨트롤러 상태가 OK가 아니다
+      host: verify-raid-ctrl-failed
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: controller, hw_name: "Smart Array P440 in Slot 2", hw_state: failed, raw_state: "Failed"}
+    - name: 컨트롤러 정상(캐시만 꺼짐)은 컨트롤러 이상이 아니다
+      host: verify-raid-ctrl-ok
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: controller, hw_name: "Smart Array P440 in Slot 2", hw_state: ok, raw_state: "OK", cache_status: permanently_disabled}
+infra-raid-logical-drive-degraded:
+  cases:
+    - name: 재구축 중(저하)
+      host: verify-raid-ld-rebuild
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: logical_drive, hw_name: "logicaldrive 1", hw_state: degraded, raw_state: "Recovering, 41% complete", operation: rebuild}
+    - name: 고장
+      host: verify-raid-ld-failed
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: logical_drive, hw_name: "logicaldrive 1", hw_state: failed, raw_state: "Failed", operation: none}
+    - name: 확장 같은 계획된 작업은 정상이다
+      host: verify-raid-ld-expand
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: logical_drive, hw_name: "logicaldrive 1", hw_state: ok, raw_state: "Transforming, 12% complete", operation: expand}
+infra-raid-physical-drive-fault:
+  cases:
+    - name: 디스크 고장
+      host: verify-raid-pd-failed
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: physical_drive, hw_name: "physicaldrive 1I:1:2", hw_state: failed, raw_state: "Failed"}
+    - name: 디스크 고장 예측
+      host: verify-raid-pd-predictive
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: physical_drive, hw_name: "physicaldrive 1I:1:3", hw_state: predicted_failure, raw_state: "Predictive Failure"}
+    - name: 정상 디스크
+      host: verify-raid-pd-ok
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: physical_drive, hw_name: "physicaldrive 1I:1:1", hw_state: ok, raw_state: "OK"}
+infra-raid-cache-battery-fault:
+  cases:
+    - name: 배터리 고장
+      host: verify-raid-bat-failed
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: cache_battery, hw_name: "Smart Array P440 in Slot 2 cache backup power", hw_state: failed, raw_state: "Failed"}
+    - name: 충전 중은 고장이 아니다
+      host: verify-raid-bat-charging
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: cache_battery, hw_name: "Smart Array P440 in Slot 2 cache backup power", hw_state: degraded, raw_state: "Recharging"}
+infra-raid-collection-error:
+  cases:
+    - name: 도구가 3회 연속 시간 초과
+      host: verify-raid-tool-timeout
+      fires: true
+      records:
+        - {ts: [-600, -300, 0], kind: tool_status, status: timeout, message: "no answer within 60s"}
+    - name: 오류 2회는 임계 미만
+      host: verify-raid-tool-error-twice
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: tool_status, status: error, message: "Error: x"}
+    - name: 도구 없음은 수집 실패가 아니다
+      host: verify-raid-tool-none
+      fires: false
+      records:
+        - {ts: [-600, -300, 0], kind: tool_status, status: no_tool, message: ""}
+infra-host-status-silent:
+  cases:
+    - name: 가짜 로스터 호스트가 점검 기록을 한 번도 보내지 않았다
+      host: verify-host-status-never
+      fires: true
+      records: []
+    - name: 도구가 없어도 실행 기록(no_tool)이 오면 발화하지 않는다
+      host: verify-host-status-no-tool
+      fires: false
+      records:
+        - {ts: -300, kind: tool_status, status: no_tool, message: ""}
 
 # --- 스위치 syslog 알림 (Spec #277) --- 레코드는 switch_syslog_semantics VRL 처리 후의 모양이다(service_name, device_name/device_id, event_name,
 # log_syslog_severity_code). 장비 식별자 device_id가 케이스 호스트다(host_field). 송신 주소는 문서용 대역만 쓴다.

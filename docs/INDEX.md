@@ -28,6 +28,7 @@
 * [Log Structuring ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md) - 엣지 Envelope Parsing + 중앙(OpenObserve VRL·알림) 의미 해석
 * [스위치 syslog 수신 경로 런북](runbooks/switch-syslog.md) - 스위치 syslog → syslog-ng → 파일 보관 → otelcol → OpenObserve 경로, 설정 위치와 점검 절차(#276)
 * [포티게이트 방화벽 로그 수신 런북](runbooks/fortigate-syslog.md) - 방화벽 syslog → `security_logs`(`fortigate-syslog`) 경로, 장비 쪽 로그 거름 기준, HA 멤버 구성, 점검·편입 절차(#283)
+* [HP Smart Array 관리 도구(ssacli) 설치·점검 런북](runbooks/hp-raid-tool.md) - RAID 상태 수집기가 쓰는 도구의 설치 절차·버전·설치 기록(#334, #335)
 * [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일
 * [Host Audit 태스크 명세](host_audit.md) - 실행 흐름, 호스트별 JSON 구조(schema_version 1), 변수, AUD-xxx 태스크 매트릭스
 * [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 (CIS 감사 파일럿은 ADR-0009로 대체·제거)
