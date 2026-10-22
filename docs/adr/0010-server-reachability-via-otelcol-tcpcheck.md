@@ -17,6 +17,6 @@ date: 2026-10-13
 ## Consequences
 
 - 검사하는 쪽 ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. ns0266 자신은 Silent Host 로스터로 잡는다.
-- OpenObserve(ns0332)는 자기가 죽은 것을 알릴 수 없다. 그래서 ns0266의 systemd 타이머가 5분마다 OpenObserve 헬스 엔드포인트를 확인하고, 실패하면 네이버웍스 webhook으로 직접 통지한다. ns0266과 ns0332가 동시에 죽는 경우는 감수한다.
+- OpenObserve(ns0331)는 자기가 죽은 것을 알릴 수 없다. 그래서 ns0266의 systemd 타이머가 5분마다 OpenObserve 헬스 엔드포인트를 확인하고, 실패하면 네이버웍스 webhook으로 직접 통지한다. ns0266과 ns0331가 동시에 죽는 경우는 감수한다.
 - SSH 포트에 접속이 된다고 OS가 건강하다는 뜻은 아니다. 이 알림은 도달성만 본다.
 - Uptime Kuma는 funa 서비스 감시만 맡고, LibreNMS는 네트워크 장비만 맡는다.

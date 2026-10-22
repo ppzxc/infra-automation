@@ -142,7 +142,7 @@
 
 | 속성 | 출처 | 비고 |
 |---|---|---|
-| `host.name` | Inventory Hostname (예: `ns0332`) | OS hostname이 아님 |
+| `host.name` | Inventory Hostname (예: `ns0331`) | OS hostname이 아님 |
 | `host.id` | `/etc/machine-id` | 없으면(CentOS 6) 생략하고 경고 |
 | `host.ip` | 인벤토리 `ip` → KV `ip` → KV `public_ip` | 모두 없으면 생략하고 경고 |
 | `host.arch`, `os.type`, `os.name`, `os.version`, `os.description` | OS 프로브 | |
@@ -219,7 +219,7 @@
 |---|---|
 | Repository | `s3:<rustfs_endpoint>/<bucket>` (버킷 루트) |
 | 버킷 | `backup-prod-<inventory_hostname>`. 호스트 KV `rustfs_bucket`으로 재정의 가능하고, 공용 `agents/rustfs`의 버킷 값은 쓰지 않음 |
-| 스냅샷 host 라벨 | Inventory Hostname(예: `ns0332`) |
+| 스냅샷 host 라벨 | Inventory Hostname(예: `ns0331`) |
 | 스케줄 | 매일 **02:00~03:59** 중 하나. `inventory_hostname`을 시드로 분을 고정하므로 호스트마다 다르고 실행마다 같음 |
 | 실행 명령 | `resticprofile -f yaml -c /etc/restic/profiles.yaml -n default unlock; ... backup` |
 | 잠금 대기 | `retry-lock: 30m` |
@@ -232,7 +232,7 @@
 백업이 한 번 돌 때마다 한 줄씩 append되고, otelcol이 `backup_logs` 스트림으로 보낸다.
 
 ```json
-{"job":"backup","host":"ns0332","command":"backup","success":true,"exit_code":0,"duration":42,"error":"","ts":"2026-10-07T17:23:00Z"}
+{"job":"backup","host":"ns0331","command":"backup","success":true,"exit_code":0,"duration":42,"error":"","ts":"2026-10-07T17:23:00Z"}
 ```
 
 | 필드 | 의미 |

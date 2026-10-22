@@ -50,7 +50,7 @@ ssh_password_authentication: "no"
 # tuning onto the real host kernel and break test isolation — not
 # used here on purpose). This is a container-environment limitation,
 # not a role bug: production hosts expose this key normally, as
-# confirmed by Semaphore task #155 completing COMMON-011 on ns0332.
+# confirmed by Semaphore task #155 completing COMMON-011 on ns0331.
 # Keep the keys asserted by verify.yml's [VERIFY-COMMON-011] block.
 sysctl_settings:
   vm.swappiness: 10

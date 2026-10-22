@@ -2,8 +2,8 @@
 
 - Ticket: [#164](https://github.com/ppzxc/infra-automation/issues/164) (map [#162](https://github.com/ppzxc/infra-automation/issues/162))
 - Date: 2026-10-13
-- Version checked: ns0332 OpenObserve reports `build_type: opensource`, `commit_hash: 1e257e69…` on `GET /config`. That commit is tag **v1.0.4**. Every source link below points at that tag.
-- Method: (1) read the v1.0.4 source of the alert model, evaluator, scheduler and notification code; (2) read the official docs through Context7; (3) ran read-only queries against ns0332 (`POST /api/default/_search`, `GET /api/default/prometheus/api/v1/query[_range]`, `GET /api/v2/default/alerts`, `GET /api/default/streams`). Nothing was created or changed on the server.
+- Version checked: ns0331 OpenObserve reports `build_type: opensource`, `commit_hash: 1e257e69…` on `GET /config`. That commit is tag **v1.0.4**. Every source link below points at that tag.
+- Method: (1) read the v1.0.4 source of the alert model, evaluator, scheduler and notification code; (2) read the official docs through Context7; (3) ran read-only queries against ns0331 (`POST /api/default/_search`, `GET /api/default/prometheus/api/v1/query[_range]`, `GET /api/v2/default/alerts`, `GET /api/default/streams`). Nothing was created or changed on the server.
 
 ## TL;DR
 
@@ -31,7 +31,7 @@ The API model is `Alert` in [`api/management/src/models/alerts/mod.rs`][m-api]. 
 
 One alert has exactly one `stream_type`. Every stream named in its SQL is schema-checked under that type, so **one SQL alert cannot mix metrics and logs streams**. For example, it can't use a metrics roster for a `backup_logs` alert ([core/alerts/mod.rs][c-mod], `get_stream_schema_from_cache(org, stream, stream_type)`).
 
-Evaluation window: the scheduler always evaluates `[end − period, end]` (`start_time = final_end_time − period`, [scheduler/handlers.rs][c-sched]), so `period` really is the lookback for both SQL and PromQL. The stream's `max_query_range` caps it. That is `0` (unlimited) on every ns0332 stream.
+Evaluation window: the scheduler always evaluates `[end − period, end]` (`start_time = final_end_time − period`, [scheduler/handlers.rs][c-sched]), so `period` really is the lookback for both SQL and PromQL. The stream's `max_query_range` caps it. That is `0` (unlimited) on every ns0331 stream.
 
 PromQL specifics ([core/alerts/mod.rs][c-mod]):
 - The alert runs a **range** query over `period` with `step = max(minimal, period / MAX_DATA_POINTS)` and takes `samples.last()` of each series, which is the last sample *present* in the window, not the value at `end`. A series that recovered (or vanished) can keep firing until its old samples leave the window. Keep `period` short, 1 to 5 minutes.
@@ -44,7 +44,7 @@ PromQL specifics ([core/alerts/mod.rs][c-mod]):
 | Option | Verdict | Evidence |
 |---|---|---|
 | "No data" alert feature | **Does not exist** in v1.0.4 opensource. The docs only mention Datadog's `notify_no_data` as something to "configure the equivalent" for | [docs: Datadog migration][d-dd]; no such field in `Alert`/`TriggerCondition` [m-alert], [m-mod] |
-| Anomaly detection | **Enterprise only.** Routes sit under `#[cfg(feature = "enterprise")]`, and ns0332 is `opensource` | [router][c-router] lines ~1033–1042; [docs: alert types][d-alerts] |
+| Anomaly detection | **Enterprise only.** Routes sit under `#[cfg(feature = "enterprise")]`, and ns0331 is `opensource` | [router][c-router] lines ~1033–1042; [docs: alert types][d-alerts] |
 | `operator: '<'`, `threshold: 1` (count alert, zero rows) | **Fires silently.** The evaluator returns `data = Some([])`, so the level is Critical and the state/history say "fired". The scheduler only notifies `if let Some(data) … && !data.is_empty()`. The comment says verbatim: *"a `<`/`<=` alert can match with an EMPTY payload … only the notification is skipped."* | [c-mod] count path; [c-sched] ~2168–2180 |
 | Aggregation condition (`aggregation.having`) | Doesn't help. It classifies the groups that come back, and a silent host returns no group | [c-mod] |
 | `multi_time_range` (`offSet` comparisons) | Runs extra copies of the SQL at shifted windows. It doesn't produce rows for absent keys, so it doesn't solve absence | `CompareHistoricData` [m-mod] |
@@ -53,7 +53,7 @@ PromQL specifics ([core/alerts/mod.rs][c-mod]):
 | **SQL that emits a row per missing key** | **Works.** Ungrouped `count(*) … HAVING count(*) < 1` returns exactly one row when nothing matched. `UNION ALL` of such branches gives one row per missing host | live tests below |
 | Long `period` + `max(_timestamp)` staleness | Works, but it ages out | live tests below |
 
-### Live tests on ns0332 (read-only)
+### Live tests on ns0331 (read-only)
 
 At test time, 9 hosts had last sent data about 21.5 hours earlier. This is the CentOS 6 incident in #161.
 

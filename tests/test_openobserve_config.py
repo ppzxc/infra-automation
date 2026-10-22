@@ -1050,16 +1050,16 @@ def _branch_hosts(sql):
     return set(re.findall(r"SELECT '([^']+)' AS host_name", sql))
 
 
-SERVERS = ["ns0001", "ns0002", "ns0003", "ns0004", "ns0266", "ns0332"]
+SERVERS = ["ns0001", "ns0002", "ns0003", "ns0004", "ns0266", "ns0331"]
 
 
-def test_silent_host_roster_is_servers_minus_exclusion_and_backup_only_and_keeps_ns0266_and_ns0332(o2, tmp_path):
+def test_silent_host_roster_is_servers_minus_exclusion_and_backup_only_and_keeps_ns0266_and_ns0331(o2, tmp_path):
     inv = _inventory(tmp_path, SERVERS, excluded=["ns0002"], backup_only=["ns0003"])
     res = _apply(o2, inventory=inv)
     assert res.returncode == 0, res.stdout + res.stderr
     for name in ("infra-silent-host-p2", "infra-silent-host-p1"):
         sql = _sql(o2, name)
-        assert _branch_hosts(sql) == {"ns0001", "ns0004", "ns0266", "ns0332"}, name
+        assert _branch_hosts(sql) == {"ns0001", "ns0004", "ns0266", "ns0331"}, name
         # 인라인 로스터 JOIN은 이 OpenObserve 버전에서 틀린 결과를 낸다 — UNION ALL 가지 방식만 쓴다
         assert "UNION ALL" in sql and "HAVING" in sql and "< 1" in sql
         for banned in ("VALUES", "unnest", "JOIN"):
@@ -1187,8 +1187,8 @@ def test_backup_and_maintenance_missing_are_daily_p2_state_alerts_over_their_ros
     assert "job = 'backup' AND success = true" in backup["query_condition"]["sql"]
     assert "command = 'check'" in maint["query_condition"]["sql"]
     # 수집 로스터는 Backup Only를 뺀다(이벤트를 안 보내 거짓 누락), 유지보수 로스터는 Backup Only를 포함한다
-    assert _branch_hosts_as(backup["query_condition"]["sql"]) == {"ns0001", "ns0004", "ns0266", "ns0332"}
-    assert _branch_hosts_as(maint["query_condition"]["sql"]) == {"ns0001", "ns0003", "ns0004", "ns0266", "ns0332"}
+    assert _branch_hosts_as(backup["query_condition"]["sql"]) == {"ns0001", "ns0004", "ns0266", "ns0331"}
+    assert _branch_hosts_as(maint["query_condition"]["sql"]) == {"ns0001", "ns0003", "ns0004", "ns0266", "ns0331"}
 
 
 def test_backup_missing_action_starts_with_the_silent_host_check_and_runbook_anchors_exist(o2, tmp_path):

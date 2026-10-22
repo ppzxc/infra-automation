@@ -21,8 +21,8 @@ COLLECTED_AT = "2026-10-08T22:00:05Z"
 
 ROCKY9_STDOUT = """Welcome banner line
 __HOST_AUDIT_BEGIN__
-hostname=ns0332
-fqdn=ns0332.nanoit.kr
+hostname=ns0331
+fqdn=ns0331.nanoit.kr
 account=ppzxc
 kernel=5.14.0-570.el9.x86_64
 arch=x86_64
@@ -50,7 +50,7 @@ ip=10.0.0.101 192.168.10.5
 __HOST_AUDIT_END__
 """
 
-DECLARED = {"fqdn": "ns0332.nanoit.kr", "ip": "10.0.0.32", "environment": "production",
+DECLARED = {"fqdn": "ns0331.nanoit.kr", "ip": "10.0.0.32", "environment": "production",
             "groups": ["servers"]}
 
 
@@ -62,13 +62,13 @@ def ok_probe(stdout):
 
 
 def test_record_from_modern_host_keeps_identity_and_os():
-    rec = host_audit_host_record(ok_probe(ROCKY9_STDOUT), "ns0332", DECLARED, COLLECTED_AT)
+    rec = host_audit_host_record(ok_probe(ROCKY9_STDOUT), "ns0331", DECLARED, COLLECTED_AT)
 
     assert rec["schema_version"] == 2
     assert rec["status"] == "ok" and rec["reason"] == ""
     assert rec["collected_at"] == COLLECTED_AT
     assert rec["declared"] == DECLARED
-    assert rec["identity"] == {"hostname": "ns0332", "fqdn": "ns0332.nanoit.kr",
+    assert rec["identity"] == {"hostname": "ns0331", "fqdn": "ns0331.nanoit.kr",
                                "ips": ["10.0.0.32", "2001:db8::32"], "account": "ppzxc"}
     assert rec["os"]["id"] == "rocky"
     assert rec["os"]["version_id"] == "9.6"
@@ -119,7 +119,7 @@ def test_probe_script_output_parses_on_this_machine():
 def run_meta(**overrides):
     meta = {"run_id": "ha-20261008T220005Z", "run_kind": "scheduled",
             "started_at": "2026-10-08T22:00:05Z", "generated_at": "2026-10-08T22:03:40Z",
-            "targets": ["ns0332", "ns0266", "ns0101"], "target_hosts": "",
+            "targets": ["ns0331", "ns0266", "ns0101"], "target_hosts": "",
             "archive": "/tmp/host_audit/ha-20261008T220005Z (러너 로컬)"}
     meta.update(overrides)
     return meta
@@ -127,7 +127,7 @@ def run_meta(**overrides):
 
 def records():
     return [
-        host_audit_host_record(ok_probe(ROCKY9_STDOUT), "ns0332", DECLARED, COLLECTED_AT),
+        host_audit_host_record(ok_probe(ROCKY9_STDOUT), "ns0331", DECLARED, COLLECTED_AT),
         host_audit_host_record({"unreachable": True, "msg": "ssh: connect timed out"},
                                "ns0266", DECLARED, COLLECTED_AT),
     ]
@@ -153,14 +153,14 @@ def test_model_reports_every_target_including_unreachable_and_unrecorded():
     assert model["summary"] == {"hosts_total": 3, "hosts_inspected": 1, "hosts_unavailable": 2}
     labels = {u["host"]: u["label"] for u in model["unavailable"]}
     assert labels == {"ns0266": "점검불가(접속 실패)", "ns0101": "점검불가(접속 준비 실패)"}
-    assert [row["host"] for row in model["inventory"]] == ["ns0101", "ns0266", "ns0332"]
+    assert [row["host"] for row in model["inventory"]] == ["ns0101", "ns0266", "ns0331"]
 
 
 def test_model_inventory_row_for_inspected_host():
     model = host_audit_report_model(records(), run_meta())
-    row = next(r for r in model["inventory"] if r["host"] == "ns0332")
+    row = next(r for r in model["inventory"] if r["host"] == "ns0331")
 
-    assert row["fqdn"] == "ns0332.nanoit.kr"
+    assert row["fqdn"] == "ns0331.nanoit.kr"
     assert row["ips"] == "10.0.0.32, 2001:db8::32"
     assert row["environment"] == "production" and not row["environment_unassigned"]
     assert row["os"] == "Rocky Linux 9.6 (Blue Onyx)"
@@ -178,11 +178,11 @@ def test_model_falls_back_to_declared_values_and_marks_unassigned_environment():
 
 
 def test_model_flags_fqdn_that_differs_from_inventory():
-    rec = host_audit_host_record(ok_probe(ROCKY9_STDOUT), "ns0332",
+    rec = host_audit_host_record(ok_probe(ROCKY9_STDOUT), "ns0331",
                                  dict(DECLARED, fqdn="old.nanoit.kr"), COLLECTED_AT)
-    row = host_audit_report_model([rec], run_meta(targets=["ns0332"]))["inventory"][0]
+    row = host_audit_report_model([rec], run_meta(targets=["ns0331"]))["inventory"][0]
 
-    assert row["fqdn"] == "ns0332.nanoit.kr (인벤토리: old.nanoit.kr)"
+    assert row["fqdn"] == "ns0331.nanoit.kr (인벤토리: old.nanoit.kr)"
 
 
 def test_model_names_requested_subset_and_on_demand_kind():
@@ -216,7 +216,7 @@ def test_report_template_renders_the_model():
 
     for text in ("Host Audit 점검 보고서", "점검일시", "점검대상", "점검방법", "점검내용", "비교 기준",
                  "점검 계정", "원본 보관", "점검불가(접속 실패)", "Asset Inventory",
-                 "검토 및 결재", "정보보호 책임자", "ns0332.nanoit.kr"):
+                 "검토 및 결재", "정보보호 책임자", "ns0331.nanoit.kr"):
         assert text in html
 
 

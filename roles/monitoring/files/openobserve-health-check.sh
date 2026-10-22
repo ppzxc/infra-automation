@@ -40,7 +40,7 @@ if [ -e "$MARKER" ]; then
 fi
 
 host="$(hostname -s 2>/dev/null || echo unknown)"
-text="🔴 [P1 긴급] OpenObserve 응답 없음\\n\\n■ 무슨 일: OpenObserve 헬스 확인이 실패했습니다 (검사 호스트 ${host}).\\n■ 왜 중요: OpenObserve가 죽으면 알림 시스템 자체가 동작하지 않아 다른 장애도 통지되지 않습니다.\\n■ 대상: ${HEALTH_URL%%\\?*}\\n■ 조치: ① ns0332에서 OpenObserve 서비스·디스크·메모리 확인 ② 복구 후 Host Agents 수집 재개와 Silent Host 알림 확인\\n\\n▶ 런북: https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#openobserve-health"
+text="🔴 [P1 긴급] OpenObserve 응답 없음\\n\\n■ 무슨 일: OpenObserve 헬스 확인이 실패했습니다 (검사 호스트 ${host}).\\n■ 왜 중요: OpenObserve가 죽으면 알림 시스템 자체가 동작하지 않아 다른 장애도 통지되지 않습니다.\\n■ 대상: ${HEALTH_URL%%\\?*}\\n■ 조치: ① ns0331에서 OpenObserve 서비스·디스크·메모리 확인 ② 복구 후 Host Agents 수집 재개와 Silent Host 알림 확인\\n\\n▶ 런북: https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#openobserve-health"
 body="{\"content\": {\"type\": \"text\", \"text\": \"${text}\"}}"
 
 # webhook URL·토큰이 프로세스 목록에 보이지 않도록 curl 설정을 stdin으로 넘긴다.

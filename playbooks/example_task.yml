@@ -11,11 +11,11 @@
 #      ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml
 #
 #   2) 특정 단일 호스트 또는 그룹 대상 (target_hosts 변수 사용):
-#      ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0332"
+#      ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0331"
 #
 #   3) Semaphore UI Task Template 등록 시:
 #      - Playbook: playbooks/example_task.yml
-#      - Environment / Extra vars: {"target_hosts": "ns0332"} (선택 사항)
+#      - Environment / Extra vars: {"target_hosts": "ns0331"} (선택 사항)
 # ==============================================================================
 
 # ------------------------------------------------------------------------------

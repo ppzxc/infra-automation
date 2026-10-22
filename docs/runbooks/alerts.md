@@ -203,20 +203,20 @@ last -i <사용자> | head
 <a id="openobserve-health"></a>
 ## 🔴 OpenObserve 응답 없음 (ns0266 `openobserve-health.timer`)
 
-**조건**: ns0266이 5분마다 OpenObserve `/healthz`를 확인해, 실패하면 OpenObserve를 거치지 않고 네이버웍스 webhook으로 직접 P1을 보낸다. 같은 장애는 60분마다만 다시 통지하고 복구 통지는 없다(통지가 멈추면 복구). ns0266·ns0332 동시 장애는 감수한다.
+**조건**: ns0266이 5분마다 OpenObserve `/healthz`를 확인해, 실패하면 OpenObserve를 거치지 않고 네이버웍스 webhook으로 직접 P1을 보낸다. 같은 장애는 60분마다만 다시 통지하고 복구 통지는 없다(통지가 멈추면 복구). ns0266·ns0331 동시 장애는 감수한다.
 
 **왜 중요한가**: OpenObserve가 죽으면 이 문서의 모든 알림이 동작하지 않는다.
 
 **확인**
 ```bash
-# ns0332
+# ns0331
 systemctl status openobserve; df -h; free -m
 # ns0266 (확인 쪽)
 systemctl list-timers openobserve-health.timer
 journalctl -u openobserve-health.service -n 20
 ```
 
-**대응**: ns0332의 OpenObserve 서비스·디스크·메모리를 복구한다. 복구 뒤 Silent Host 알림이 남아 있으면 수집 재개를 확인한다. ns0266에서 타이머 자체가 안 돌면 `Host Agents — Config All`를 다시 실행한다.
+**대응**: ns0331의 OpenObserve 서비스·디스크·메모리를 복구한다. 복구 뒤 Silent Host 알림이 남아 있으면 수집 재개를 확인한다. ns0266에서 타이머 자체가 안 돌면 `Host Agents — Config All`를 다시 실행한다.
 
 **수동 검증 절차** (배포 후 한 번, 또는 webhook 값을 바꾼 뒤): ns0266에서 대상 URL을 틀린 값으로 한 번 실행해 통지가 도착하는지 본다.
 ```bash
@@ -228,7 +228,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="silent-host"></a>
 ## 🟠/🔴 Silent Host — 메트릭 하트비트 끊김 (`infra-silent-host-p2`, `infra-silent-host-p1`)
 
-수집 로스터 호스트(인벤토리 `servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0332 포함)에서 `system_memory_usage` 하트비트가 15분 넘게 끊기면 P2(3시간 미만), 3시간 넘게 끊기면 P1이다. 같은 호스트에 P2와 P1이 동시에 오지 않는다. 서버가 내려가도(서버 응답 없음) 수집기가 멈춰도 같이 걸린다.
+수집 로스터 호스트(인벤토리 `servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)에서 `system_memory_usage` 하트비트가 15분 넘게 끊기면 P2(3시간 미만), 3시간 넘게 끊기면 P1이다. 같은 호스트에 P2와 P1이 동시에 오지 않는다. 서버가 내려가도(서버 응답 없음) 수집기가 멈춰도 같이 걸린다.
 
 **왜 중요한가**: OpenObserve는 약 5시간보다 오래된 로그를 받지 않는다. 이 시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음 — ISMS 로그 증거가 중앙에서 영구히 빠진다(2026-10 CentOS 6 수집기 중단 사고, #161).
 
@@ -305,7 +305,7 @@ Repo Maintenance의 `job=maintenance`, `command=check`, `success=false` 이벤�
 <a id="backup-missing"></a>
 ## 🟠 백업 누락 (`infra-backup-missing`)
 
-수집 로스터 호스트(Backup Only 제외, ns0266·ns0332 포함)의 마지막 성공 `job=backup`이 26시간을 넘으면 하루 1번 P2로 알린다(State Alert). 배포만 되고 한 번도 백업하지 않은 호스트도 걸린다.
+수집 로스터 호스트(Backup Only 제외, ns0266·ns0331 포함)의 마지막 성공 `job=backup`이 26시간을 넘으면 하루 1번 P2로 알린다(State Alert). 배포만 되고 한 번도 백업하지 않은 호스트도 걸린다.
 
 **확인**
 1. **같은 호스트의 Silent Host 알림이 있는지 먼저 확인한다.** 수집기가 멈췄다면 백업은 돌았어도 이벤트만 빠진 것일 수 있다.

@@ -44,19 +44,19 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 ```json
 {
   "schema_version": 2,
-  "inventory_hostname": "ns0332",
+  "inventory_hostname": "ns0331",
   "collected_at": "2026-10-08T22:00:07Z",
   "status": "ok",
   "reason": "",
   "declared": {
-    "fqdn": "ns0332.nanoit.kr",
+    "fqdn": "ns0331.nanoit.kr",
     "ip": "10.0.0.32",
     "environment": "production",
     "groups": ["servers"]
   },
   "identity": {
-    "hostname": "ns0332",
-    "fqdn": "ns0332.nanoit.kr",
+    "hostname": "ns0331",
+    "fqdn": "ns0331.nanoit.kr",
     "ips": ["10.0.0.32"],
     "account": "ppzxc"
   },

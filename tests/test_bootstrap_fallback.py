@@ -194,7 +194,7 @@ def test_openbao_host_kv_unwrapping_logic():
     # 1. Flat schema with ansible_host
     r1 = yaml.safe_load(tmpl.render(
         _openbao_host_kv_resp={'json': {'data': {'data': {'ansible_host': '39.116.31.40', 'ansible_port': 22}}}},
-        inventory_hostname='ns0332', hostvars={}
+        inventory_hostname='ns0331', hostvars={}
     ))
     assert r1['ansible_host'] == '39.116.31.40'
     assert r1['ansible_port'] == 22
@@ -202,14 +202,14 @@ def test_openbao_host_kv_unwrapping_logic():
     # 2. Flat schema with 'ip'
     r2 = yaml.safe_load(tmpl.render(
         _openbao_host_kv_resp={'json': {'data': {'data': {'ip': '39.116.31.40'}}}},
-        inventory_hostname='ns0332', hostvars={}
+        inventory_hostname='ns0331', hostvars={}
     ))
     assert r2['ansible_host'] == '39.116.31.40'
 
     # 3. Nested dictionary keyed by hostname
     r3 = yaml.safe_load(tmpl.render(
-        _openbao_host_kv_resp={'json': {'data': {'data': {'ns0332': {'ip': '39.116.31.40', 'port': 2222}}}}},
-        inventory_hostname='ns0332', hostvars={}
+        _openbao_host_kv_resp={'json': {'data': {'data': {'ns0331': {'ip': '39.116.31.40', 'port': 2222}}}}},
+        inventory_hostname='ns0331', hostvars={}
     ))
     assert r3['ansible_host'] == '39.116.31.40'
     assert r3['ansible_port'] == 2222
@@ -217,27 +217,27 @@ def test_openbao_host_kv_unwrapping_logic():
     # 4. Array of dictionaries
     r4 = yaml.safe_load(tmpl.render(
         _openbao_host_kv_resp={'json': {'data': {'data': [{'ansible_host': '39.116.31.40'}]}}},
-        inventory_hostname='ns0332', hostvars={}
+        inventory_hostname='ns0331', hostvars={}
     ))
     assert r4['ansible_host'] == '39.116.31.40'
 
     # 5. Flat schema with 'public_ip'
     r5 = yaml.safe_load(tmpl.render(
         _openbao_host_kv_resp={'json': {'data': {'data': {
-            'hostname': 'ns0332',
+            'hostname': 'ns0331',
             'public_ip': '39.116.31.40',
             'ssh_user': 'ppzxc'
         }}}},
-        inventory_hostname='ns0332', hostvars={}
+        inventory_hostname='ns0331', hostvars={}
     ))
     assert r5['ansible_host'] == '39.116.31.40'
 
     # 6. Missing in OpenBao, fallback to inventory_hostname
     r6 = yaml.safe_load(tmpl.render(
         _openbao_host_kv_resp={},
-        inventory_hostname='ns0332', hostvars={}
+        inventory_hostname='ns0331', hostvars={}
     ))
-    assert r6['ansible_host'] == 'ns0332'
+    assert r6['ansible_host'] == 'ns0331'
 
 
 def test_openbao_user_secret_unwrapping_with_type():
@@ -765,7 +765,7 @@ def _resolve_ip(host_kv, inventory_ip=None):
 
 def test_management_ip_precedence_inventory_then_kv_ip_then_kv_public_ip():
     """host.ip source (#89): inventory ip > KV ip > KV public_ip, so KV-only hosts such as ns0340 get one."""
-    # Inventory ip is untouched even when the KV has other addresses (ns0266/ns0332 behaviour unchanged).
+    # Inventory ip is untouched even when the KV has other addresses (ns0266/ns0331 behaviour unchanged).
     assert _resolve_ip({"ip": "10.0.0.2", "public_ip": "10.0.0.3"}, inventory_ip="10.0.0.1") == "10.0.0.1"
     # No inventory ip: KV ip wins over public_ip, so a management IP different from the public one can be declared.
     assert _resolve_ip({"ip": "10.0.0.2", "public_ip": "10.0.0.3"}) == "10.0.0.2"
