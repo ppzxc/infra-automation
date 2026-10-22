@@ -60,5 +60,9 @@ Semaphore Static 인벤토리에서 FUNA Cluster 호스트를 `servers`에 두�
 | `FUNA-008` | `Render the non-secret environment file (cluster.env)` | `ansible.builtin.copy` | All | 내용·권한 비교 (`0644 root:root`) |
 | `FUNA-009` | `Render the consumer secret environment files (proxy, vrrp)` | `ansible.builtin.copy` | All | 내용·권한 비교 (`0640 root:dockermgmt`), `no_log`·`diff: false` |
 | `FUNA-010` | `Deploy the login shell loader (profile.d)` | `ansible.builtin.template` | All | 내용·권한 비교 (`funa-cluster.sh.j2`) |
+| `FUNA-011` | `Look up the keepalived config directory` | `ansible.builtin.stat` | All | 조회 전용(`check_mode: false`) |
+| `FUNA-012` | `Keep the keepalived config directory root-only (script security)` | `ansible.builtin.file` | All | `0755 root:root` 일치 시 `ok`. 디렉터리가 없으면 건너뛴다(만들지 않는다) |
+| `FUNA-013` | `Find the keepalived scripts and config files` | `ansible.builtin.find` | All | 조회 전용(`check_mode: false`), `*.sh`·`*.conf`만 |
+| `FUNA-014` | `Keep the keepalived scripts and config files root-owned and not writable` | `ansible.builtin.file` | All | 스크립트 `0755`, 설정 `0644`, `root:root` 일치 시 `ok` |
 
 > 이 역할은 OpenBao 조회 외에 `shell`/`command`를 쓰지 않는다. 값이 바뀌면 파일만 갱신하며 서비스를 재기동하지 않는다. compose는 다음 `up`에서 새 값을 읽는다.

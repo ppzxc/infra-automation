@@ -34,7 +34,7 @@ EXPECTED_ALERTS = {
     "infra-memory-usage-p2", "infra-memory-usage-p1",
     "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
     "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
-    "infra-app-log-errors", "infra-app-telemetry-silent",
+    "infra-app-log-errors", "infra-app-telemetry-silent", "infra-keepalived-script-disabled",
     "infra-switch-config-change", "infra-switch-login-failures", "infra-switch-severity-critical",
     "infra-switch-mac-flap", "infra-switch-syslog-silent",   # 스위치 syslog(Spec #277)
     "infra-fortigate-admin-login-failures", "infra-fortigate-change-unapproved", "infra-fortigate-change-approved",

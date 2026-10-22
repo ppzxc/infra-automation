@@ -109,6 +109,27 @@ sudo smartctl -H /dev/sdX; df -h; mount | grep "ro,"
 
 ---
 
+<a id="keepalived-script-disabled"></a>
+## 🔴 keepalived 헬스 체크·알림 스크립트가 비활성화됨 (`infra-keepalived-script-disabled`)
+
+**조건**: `app_logs`에서 컨테이너 `vrrp-keepalived-1`의 로그에 `Unsafe permissions found for script` 또는 `Disabling track script`가 5분 안에 1건 이상(Event Alert). keepalived는 레벨이 없는 로그라 문구로 잡는다.
+
+**왜 중요한가**: keepalived는 `enable_script_security`가 켜져 있으면 스크립트와 그 디렉터리를 root가 아닌 그룹이 쓸 수 있을 때 스크립트를 **조용히 비활성화**한다. 헬스 체크(`check.sh`)가 꺼지면 funa가 내려가도 FAULT 전환과 VIP 페일오버가 없고, 알림(`notify.sh`)이 꺼지면 상태가 바뀌어도 봇에 알림이 가지 않는다. 권한은 keepalived가 **시작할 때만** 검사하므로 이 줄은 재시작 직후 한 번만 남는다.
+
+**확인**
+```bash
+ls -ld /opt/services/vrrp/config /opt/services/vrrp/config/*.sh   # 목표: 디렉터리 root:root 0755, 스크립트 root:root 0755
+docker logs vrrp-keepalived-1 2>&1 | grep -iE "unsafe permissions|disabling track|VRRP_Script"
+```
+
+**대응**
+- Semaphore에서 `Host Provisioning`(대상 호스트를 `target_hosts`로)을 실행하면 `funa_env`(FUNA-011~014)가 권한을 `root:root 0755`/`0644`로 맞춘다. 급하면 `sudo chown root:root`와 `sudo chmod 0755`로 직접 고쳐도 된다.
+- 권한은 시작 시에만 검사하므로 고친 뒤 keepalived 컨테이너를 **재생성**해야 반영된다(VIP가 잠깐 이동하고 상태 전이 알림이 온다). 시작 로그에 `Unsafe permissions`가 없고 `VRRP_Script(check) succeeded`가 보이면 정상이다.
+
+**격상**: 같은 노드에서 반복되거나 여러 노드에서 동시에 나오면 `/opt/services`의 SGID·기본 ACL 상속(DOC-016/017)과 운영자 umask(DOC-018) 때문에 누가 스크립트를 새로 만들었는지 확인한다.
+
+---
+
 <a id="app-log-errors"></a>
 ## 🟠 컨테이너 로그에 ERROR 이상 기록 (`infra-app-log-errors`)
 

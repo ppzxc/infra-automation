@@ -129,3 +129,41 @@
         owner: "{{ funa_env_owner }}"
         group: "{{ funa_env_owner_group }}"
         mode: '0644'
+
+    # keepalived가 start 때만 검사하는 스크립트 보안(enable_script_security)을 지킨다(infra-automation#314).
+    # 디렉터리가 SGID·그룹 쓰기이거나 스크립트 소유가 root가 아니면 헬스 체크(check.sh)와 알림(notify.sh)이 비활성화되어
+    # funa가 내려가도 VIP 전환·봇 알림이 나가지 않는다. 파일 권한만 고치고 서비스는 재기동하지 않는다.
+    - name: "[FUNA-011] Look up the keepalived config directory"
+      ansible.builtin.stat:
+        path: "{{ funa_env_vrrp_config_dir }}"
+      register: _funa_env_vrrp_dir
+      check_mode: false
+
+    - name: "[FUNA-012] Keep the keepalived config directory root-only (script security)"
+      ansible.builtin.file:
+        path: "{{ funa_env_vrrp_config_dir }}"
+        state: directory
+        owner: "{{ funa_env_owner }}"
+        group: "{{ funa_env_owner_group }}"
+        mode: '0755'
+      when: _funa_env_vrrp_dir.stat.exists and _funa_env_vrrp_dir.stat.isdir
+
+    - name: "[FUNA-013] Find the keepalived scripts and config files"
+      ansible.builtin.find:
+        paths: "{{ funa_env_vrrp_config_dir }}"
+        patterns: ['*.sh', '*.conf']
+        file_type: file
+      register: _funa_env_vrrp_files
+      check_mode: false
+      when: _funa_env_vrrp_dir.stat.exists and _funa_env_vrrp_dir.stat.isdir
+
+    - name: "[FUNA-014] Keep the keepalived scripts and config files root-owned and not writable"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: "{{ funa_env_owner }}"
+        group: "{{ funa_env_owner_group }}"
+        mode: "{{ '0755' if item.path.endswith('.sh') else '0644' }}"
+      loop: "{{ _funa_env_vrrp_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _funa_env_vrrp_files.files is defined
