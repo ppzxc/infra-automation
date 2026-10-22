@@ -169,6 +169,18 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 5. **역압 확인(선택, 유지보수 창)**: OpenObserve 수집을 잠시 차단하고 큐가 차면 `filelog`가 읽기를 멈추며 `sending queue is full` 거부 로그가 없는지 확인한 뒤 복구 후 누락 없이 재개되는지 봅니다.
 6. **재실행(멱등)**: `changed=0`(재시작 없음)을 확인한 뒤 나머지 CentOS 6 호스트로 넓힙니다. 스모크 테스트(`MON-211`) 실패는 해당 호스트만 실패하고 기존 symlink가 유지됩니다.
 
+## 3-6. RAID 상태 수집기 (`raid_status.yml`, `MON-230~234`, `MON-240~243`, Spec #322 / Ticket-13, #335)
+
+- **무엇**: HP Smart Array 관리 도구(`ssacli` → `hpssacli` → `hpacucli` 순서로 처음 찾은 것)가 있으면 cron이 5분마다 `ctrl all show config detail`을 한 번 읽어 `/var/log/host-agents/raid.jsonl`에 정규화 JSON 줄을 append한다. 레코드 종류는 `controller`·`logical_drive`·`physical_drive`·`cache_battery`·`tool_status`이고, 도구 원문의 모든 키·값은 레코드마다 `raw`(JSON 문자열)에 담는다. 필드 이름과 상태 어휘는 OpenTelemetry `hw.*` 규약을 따른다(`docs/research/hardware-raid-metrics-industry-standard.md` §6).
+- **읽기 전용·설치 없음**: 스크립트는 도구에 `version`과 `ctrl all show config detail`만 넘긴다. 도구가 없으면 아무것도 설치하지 않고 `tool_status=no_tool` 한 줄만 남긴다(#322 결정: 읽기 전용 수집은 Host Agents의 일부라 에이전트만 깔린 호스트에도 배포하고, 패키지 설치는 프로비저닝 대상에서만 한다). 도구 설치 기록은 #334에 있다.
+- **안전장치**: 실행 전체를 `flock -n` 하나로 감싸 겹치면 `status=locked`만 남긴다. 도구 호출마다 `timeout`(기본 60초, CentOS 6의 coreutils 8.4는 `-k`가 없어 TERM만)과 `nice -n 19`를 건다. 한 실행의 줄은 임시 파일에 모았다가 한 번에 붙인다. 어떤 경우에도 종료 코드는 0이고 결과는 `tool_status`(`ok`·`no_tool`·`no_controller`·`timeout`·`error`·`locked`)로만 드러난다.
+- **이식성**: POSIX sh와 POSIX awk만 쓴다(jq·python 없음). 같은 픽스처가 CentOS 6(gawk 3.1.7)·CentOS 7(gawk 4.0.2)·Ubuntu 22.04(mawk)에서 같은 결과를 내는 것을 컨테이너로 확인했다. 테스트는 `tests/test_raid_status.py`이며 운영 서버 3계열(hpssacli 2.20·2.40, ssacli 3.30·6.60)의 실제 출력(시리얼·WWN 제거)을 픽스처로 쓴다.
+- **스케줄**: 모든 OS에서 `/etc/cron.d/host-agents-raid-status` 하나로 통일한다(5분 주기라 놓친 실행 보정이 필요 없고, CentOS 6에는 systemd가 없다). `enable_raid_status: false`면 modern 경로는 cron 파일을 지운다(`MON-234`).
+- **수집 경로**: otelcol `filelog/host_status_logs`가 JSON으로 파싱해 `host_status_logs` 스트림으로 보낸다(`service.name=raid`). 백업 결과처럼 본문(원문 JSON)은 유지한다. 같은 수신기에 다른 점검 결과(시각 동기, #336)를 `otel_host_status_logs`로 더한다.
+- **로그 회전**: `/etc/logrotate.d/host-agents-raid-status`가 매일 회전, 3개 보관(`create 0640 root root`). otelcol은 modern에서 `CAP_DAC_READ_SEARCH`, legacy에서 root로 읽는다.
+- **알림**: `docs/openobserve_config.md`의 RAID 상태 알림 7개(`infra-raid-*`, `infra-host-status-silent`)와 런북 `docs/runbooks/alerts.md#raid-write-cache-disabled` 이하.
+- **롤아웃 순서**: Host Agents Deploy(카나리: CentOS 6·CentOS 7·Rocky 9 각 1대) → OpenObserve에 `host_status_logs` 레코드와 컬럼 도착 확인 → 전체 Deploy → `OpenObserve — Config`(plan 결과를 읽은 뒤 적용). Config를 먼저 적용하면 알림 SQL이 아직 없는 컬럼을 읽고, 무소식 알림이 모든 호스트에서 난다.
+
 ---
 
 ## 4. 태스크 매트릭스 (Task Matrix)
@@ -273,3 +285,12 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-228` | `Assert OpenBao answered every server endpoint lookup` | `ansible.builtin.assert` | 검사 호스트 | 읽기 전용 (200·404 외 응답이 있으면 포트를 22로 짐작하지 않고 변경 없이 실패, 호스트 이름과 status만 보고) |
 | `MON-229` | `Build the server reachability targets (address:port) from the OpenBao values` | `ansible.builtin.set_fact` | 검사 호스트 | 순수 함수 (`host_agents_tcpcheck_targets`: 주소 `ansible_host→public_ip→ip→host→인벤토리→호스트명`, 포트 `ansible_port→port→인벤토리→22`, resolve_connection과 같은 규칙) |
 | `MON-226` | `Ensure the OpenObserve health timer is enabled and running` | `ansible.builtin.systemd` | modern, 검사 호스트 | 타이머 `enabled` + `started` |
+| `MON-230` | `Ensure the Host Agents result and state directories exist (0755)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` (`/var/log/host-agents`, `/var/lib/host-agents`, root `0755`, 백업 역할 `BAK-025`와 같은 속성) |
+| `MON-231` | `Deploy the RAID status collector script (POSIX sh, read-only)` | `ansible.builtin.copy` | modern | Checksum 비교 (`/usr/local/sbin/host-agents-raid-status`, `0755`) |
+| `MON-232` | `Deploy logrotate configuration for raid.jsonl` | `ansible.builtin.template` | modern | Checksum 비교 (`0644`) |
+| `MON-233` | `Deploy the RAID status cron.d schedule` | `ansible.builtin.template` | modern | Checksum 비교 (`/etc/cron.d/host-agents-raid-status`, 5분 주기, root, `0644`) |
+| `MON-234` | `Remove the RAID status cron.d schedule when the collector is disabled` | `ansible.builtin.file` | modern | `enable_raid_status: false`일 때만, 파일 부존재 시 `ok` |
+| `MON-240` | `Ensure the Host Agents result and state directories exist (raw, 0755)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `raw_dir_cmd` sentinel (`0755`) |
+| `MON-241` | `Deploy the RAID status collector script (raw, POSIX sh, read-only)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |
+| `MON-242` | `Deploy logrotate configuration for raid.jsonl (raw)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |
+| `MON-243` | `Deploy the RAID status cron.d schedule (raw)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |

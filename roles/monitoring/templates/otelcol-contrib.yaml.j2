@@ -251,6 +251,33 @@ receivers:
         value: {{ otel_service_backup | to_json }}
     retry_on_failure:
       enabled: true
+  # 호스트 상태 점검 jsonl(RAID 상태 등, #335). 백업과 같이 본문(원문 JSON)은 유지하고 필드를 attributes로 파싱한다.
+  filelog/host_status_logs:
+    include:
+{% for entry in otel_host_status_logs %}
+      - {{ entry.path | to_json }}
+{% endfor %}
+    start_at: end
+    include_file_path: true
+    storage: file_storage
+    attributes:
+      log_type: host_status_logs
+    operators:
+      - type: json_parser
+        parse_from: body
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05Z07:00'
+{% for entry in otel_host_status_logs %}
+      - type: add
+        field: resource["service.name"]
+        value: {{ entry.service | to_json }}
+        if: {{ ('attributes["log.file.path"] == "' ~ entry.path ~ '"') | to_json }}
+{% endfor %}
+    retry_on_failure:
+      enabled: true
 {% if host_agents_journald | default(false) | bool %}
   journald:
     start_at: end
@@ -578,7 +605,7 @@ service:
   extensions: [file_storage]
   pipelines:
     logs/in:
-      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if container_logs %}filelog/containers, {% endif %}]
+      receivers: [{% for stream, _ in host_agents_inputs.otel_logs | groupby('stream') %}filelog/{{ stream }}, {% endfor %}filelog/backup_logs, filelog/host_status_logs, {% if host_agents_journald | default(false) | bool %}journald, {% endif %}{% if container_logs %}filelog/containers, {% endif %}]
       processors: [memory_limiter, resource/host]
       exporters: [routing/logs]
 {% for stream in host_agents_log_streams %}

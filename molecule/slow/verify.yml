@@ -564,6 +564,49 @@
               - "'AmbientCapabilities=CAP_DAC_READ_SEARCH' in f.read[otelcol_service_path]"
           when: ansible_service_mgr == 'systemd'
 
+        - name: "[VERIFY-MON-230] Check the RAID status collector files"
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - /var/log/host-agents
+            - /var/lib/host-agents
+            - /usr/local/sbin/host-agents-raid-status
+            - /etc/logrotate.d/host-agents-raid-status
+            - /etc/cron.d/host-agents-raid-status
+          register: _verify_raid_files
+
+        - name: "[VERIFY-MON-231] Verify the RAID status collector script, logrotate and cron are root-owned with the documented modes"
+          ansible.builtin.assert:
+            that:
+              - _verify_raid_files.results | map(attribute='stat.exists') | list == [true, true, true, true, true]
+              - _verify_raid_files.results | map(attribute='stat.pw_name') | unique | list == ['root']
+              - (_verify_raid_files.results | map(attribute='stat.mode') | list) == ['0755', '0755', '0755', '0644', '0644']
+
+        - name: "[VERIFY-MON-232] Read the RAID status logrotate and cron files"
+          ansible.builtin.slurp:
+            src: "{{ item }}"
+          loop:
+            - /etc/logrotate.d/host-agents-raid-status
+            - /etc/cron.d/host-agents-raid-status
+          register: _verify_raid_cfg
+
+        - name: "[VERIFY-MON-233] Verify the cron runs the collector every 5 minutes as root and logrotate recreates raid.jsonl"
+          ansible.builtin.assert:
+            that:
+              - "'/var/log/host-agents/raid.jsonl {' in (_verify_raid_cfg.results[0].content | b64decode)"
+              - "'create 0640 root root' in (_verify_raid_cfg.results[0].content | b64decode)"
+              - "'*/5 * * * * root ' in (_verify_raid_cfg.results[1].content | b64decode)"
+              - "'/usr/local/sbin/host-agents-raid-status' in (_verify_raid_cfg.results[1].content | b64decode)"
+
+        - name: "[VERIFY-MON-231] Run the collector once and verify it leaves exactly one tool_status line (no RAID tool in the test image)"
+          ansible.builtin.shell: |
+            set -e
+            RAID_STATUS_LOG=/tmp/verify-raid.jsonl RAID_STATUS_LOCK=/tmp/verify-raid.lock /usr/local/sbin/host-agents-raid-status
+            grep -c '"kind":"tool_status","family":"smartarray","tool":"none","tool_version":"","status":"no_tool"' /tmp/verify-raid.jsonl
+          register: _verify_raid_run
+          changed_when: false
+          failed_when: _verify_raid_run.rc != 0 or _verify_raid_run.stdout | trim != '1'
+
         - name: "[VERIFY-MON-005] Verify otelcol-contrib service unit or init script"
           ansible.builtin.assert:
             that:

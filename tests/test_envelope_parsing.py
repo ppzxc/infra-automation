@@ -123,9 +123,10 @@ def _harness(tmp_path, cfg, files):
         rcv["start_at"] = "beginning"
         rcv.pop("storage", None)
         rcv.pop("retry_on_failure", None)
-        if name == "filelog/backup_logs":
+        if name in ("filelog/backup_logs", "filelog/host_status_logs"):
             rcv["include"] = []
     receivers.pop("filelog/backup_logs", None)
+    receivers.pop("filelog/host_status_logs", None)
     out = tmp_path / "out.json"
     harness = {"receivers": receivers, "exporters": {"file": {"path": str(out)}},
                "service": {"pipelines": {"logs": {"receivers": list(receivers), "exporters": ["file"]}}}}
@@ -544,7 +545,8 @@ def test_envelope_operators_are_conditional_per_file_and_never_rewrite_the_body(
 def test_receiver_ids_stay_one_per_stream_for_the_checkpoint_key(tmp_path):
     cfg, _ = _render(tmp_path, "modern")
     assert {k for k in cfg["receivers"] if k.startswith("filelog/")} == {
-        "filelog/security_logs", "filelog/system_logs", "filelog/app_logs", "filelog/backup_logs"}
+        "filelog/security_logs", "filelog/system_logs", "filelog/app_logs", "filelog/backup_logs",
+        "filelog/host_status_logs"}
 
 
 def test_syslog_timestamp_location_follows_the_probed_host_timezone(tmp_path):

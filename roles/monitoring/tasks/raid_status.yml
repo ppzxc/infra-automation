@@ -1,0 +1,96 @@
+---
+# ==============================================================================
+# RAID 상태 수집기 (Spec #322 / Ticket-13, #335)
+# ==============================================================================
+# 읽기 전용 점검 스크립트라 Host Agents의 일부로 보고 에이전트만 깔린 호스트에도 배포한다(#322 결정 Q5).
+# 도구(ssacli 등)는 설치하지 않는다. 없으면 스크립트가 tool_status=no_tool 한 줄만 남긴다.
+# 실행은 모든 OS에서 cron.d 하나로 통일한다(5분 주기, CentOS 6에는 systemd가 없다).
+# 결과 파일은 백업 결과와 같은 /var/log/host-agents에 두며, otelcol이 filelog/host_status_logs로 읽는다.
+
+- name: "Deploy the RAID status collector"
+  when:
+    - host_agents_os_path == 'modern'
+    - enable_raid_status | bool
+  block:
+  - name: "[MON-230] Ensure the Host Agents result and state directories exist (0755)"
+    ansible.builtin.file:
+      path: "{{ item }}"
+      state: directory
+      owner: root
+      group: root
+      mode: '0755'
+    loop:
+      - "{{ otel_raid_status_log_path | dirname }}"
+      - "{{ raid_status_state_dir }}"
+
+  - name: "[MON-231] Deploy the RAID status collector script (POSIX sh, read-only)"
+    ansible.builtin.copy:
+      src: host-agents-raid-status.sh
+      dest: "{{ raid_status_script_path }}"
+      owner: root
+      group: root
+      mode: '0755'
+
+  - name: "[MON-232] Deploy logrotate configuration for raid.jsonl"
+    ansible.builtin.template:
+      src: host-agents-raid-status.logrotate.j2
+      dest: "{{ raid_status_logrotate_path }}"
+      owner: root
+      group: root
+      mode: '0644'
+
+  - name: "[MON-233] Deploy the RAID status cron.d schedule"
+    ansible.builtin.template:
+      src: host-agents-raid-status.cron.j2
+      dest: "{{ raid_status_cron_path }}"
+      owner: root
+      group: root
+      mode: '0644'
+
+- name: "[MON-234] Remove the RAID status cron.d schedule when the collector is disabled"
+  ansible.builtin.file:
+    path: "{{ raid_status_cron_path }}"
+    state: absent
+  when:
+    - host_agents_os_path == 'modern'
+    - not enable_raid_status | bool
+
+- name: "Deploy the RAID status collector on CentOS 6/7 (raw)"
+  when:
+    - host_agents_is_legacy | bool
+    - enable_raid_status | bool
+  block:
+  - name: "[MON-240] Ensure the Host Agents result and state directories exist (raw, 0755)"
+    ansible.builtin.raw: "{{ item | raw_dir_cmd(host_agents_owner, host_agents_group, '0755') }}"
+    loop:
+      - "{{ otel_raid_status_log_path | dirname }}"
+      - "{{ raid_status_state_dir }}"
+    register: _legacy_raid_dirs
+    changed_when: _legacy_raid_dirs.stdout | default('') | raw_changed
+
+  - name: "[MON-241] Deploy the RAID status collector script (raw, POSIX sh, read-only)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ raid_status_script_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.file', role_path ~ '/files/host-agents-raid-status.sh', rstrip=false) }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0755'
+
+  - name: "[MON-242] Deploy logrotate configuration for raid.jsonl (raw)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ raid_status_logrotate_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/host-agents-raid-status.logrotate.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0644'
+
+  - name: "[MON-243] Deploy the RAID status cron.d schedule (raw)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ raid_status_cron_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/host-agents-raid-status.cron.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0644'

@@ -119,7 +119,27 @@ otel_trace_non_sampled_cache_size: 20000
 # 백업 결과 jsonl (backup 역할의 backup_log_path와 같은 값을 유지한다)
 otel_backup_log_path: /var/log/host-agents/backup.jsonl
 
-# 로그 exporter 1개당 영속 큐 크기(bytes, 4개 스트림 합계 ≈ 256MiB). 초과 시 filelog가 역압을 받고 원본 파일이 버퍼가 된다.
+# 호스트 상태 점검 jsonl (Spec #322 / Ticket-13, #335): 주기 실행되는 읽기 전용 점검 스크립트가 append하고
+# filelog/host_status_logs가 JSON으로 파싱해 host_status_logs 스트림으로 보낸다. 파일마다 service.name을 단다.
+otel_raid_status_log_path: /var/log/host-agents/raid.jsonl
+otel_host_status_logs:
+  - { path: "{{ otel_raid_status_log_path }}", service: raid }
+
+# RAID 상태 수집기 (#335, docs/research/hardware-raid-metrics-industry-standard.md).
+# HP Smart Array 도구(ssacli → hpssacli → hpacucli)가 있으면 cron이 5분마다 `ctrl all show config detail`을 읽어
+# 정규화 JSON 줄을 남긴다. 도구는 설치하지 않는다(없으면 tool_status=no_tool). false면 cron을 지워 수집을 멈춘다.
+enable_raid_status: true
+raid_status_script_path: /usr/local/sbin/host-agents-raid-status
+raid_status_cron_path: /etc/cron.d/host-agents-raid-status
+raid_status_logrotate_path: /etc/logrotate.d/host-agents-raid-status
+raid_status_state_dir: /var/lib/host-agents
+raid_status_interval_minutes: 5
+# 도구 호출 1회의 제한 시간(초). HPE는 재구축 중 응답이 늦을 수 있다고 안내한다. 주기(5분) 안에 끝나는 값으로 둔다.
+raid_status_timeout_seconds: 60
+# 하루 약 288회 실행 × 호스트당 수 KB. 매일 회전, 장기 보존은 OpenObserve 쪽이다.
+raid_status_logrotate_rotate: 3
+
+# 로그 exporter 1개당 영속 큐 크기(bytes, 5개 스트림 합계 ≈ 320MiB). 초과 시 filelog가 역압을 받고 원본 파일이 버퍼가 된다.
 otel_log_queue_bytes: 67108864
 # legacy_el6(v0.119.0)은 sizer: bytes가 없어 queue_size가 배치(요청) 개수다. 배치 ≤ 1024건(batch 프로세서) × 평균 1KiB
 # 기준 64개 ≈ 64MiB로 위 bytes 예산과 맞춘다. 큐가 차면 blocking: true로 filelog가 역압을 받는다(ADR-0006 §2.8).

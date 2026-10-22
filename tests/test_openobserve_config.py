@@ -42,6 +42,9 @@ EXPECTED_ALERTS = {
     "infra-fortigate-ha-failover", "infra-fortigate-critical-detection", "infra-fortigate-syslog-silent",   # 방화벽(Spec #282 / Ticket-3)
     "infra-ssh-bruteforce-success", "infra-account-change", "infra-sudo-risky-command", "infra-auditd-stopped",
     "infra-account-lockout",   # 보안 로그 알림(#318)
+    "infra-raid-write-cache-disabled", "infra-raid-controller-fault", "infra-raid-logical-drive-degraded",
+    "infra-raid-physical-drive-fault", "infra-raid-cache-battery-fault", "infra-raid-collection-error",
+    "infra-host-status-silent",   # RAID 상태(#335)
 }
 # PromQL 알림 17개(#282 복원, #318 정비): name -> (severity, period, frequency, silence, operator, value, stream, pending minutes)
 PROMQL_ALERTS = {
@@ -592,7 +595,8 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
                        "system_filesystem_inodes_usage_alert_verify", "system_linux_memory_available_alert_verify", "system_memory_usage_alert_verify",   # Silent Host 하트비트
                        "system_memory_limit_alert_verify", "tcpcheck_status_alert_verify",
-                       "backup_logs_alert_verify", "app_logs_alert_verify", "jvm_memory_used_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
+                       "backup_logs_alert_verify", "app_logs_alert_verify", "jvm_memory_used_alert_verify",
+                       "host_status_logs_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
@@ -1108,7 +1112,8 @@ def test_changing_the_inventory_changes_the_roster_sql_and_a_rerun_with_the_same
     assert _apply(o2, inventory=inv).returncode == 0
     updated = {p for m, p, _ in o2.writes if m == "PUT"}
     ids = {n: o2.store["alert"][n]["alert_id"] for n in ("infra-silent-host-p2", "infra-silent-host-p1",
-                                                         "infra-backup-missing", "infra-maintenance-missing")}
+                                                         "infra-backup-missing", "infra-maintenance-missing",
+                                                         "infra-host-status-silent")}
     assert updated == {f"/api/v2/default/alerts/{i}" for i in ids.values()}
     hosts = _branch_hosts(_sql(o2, "infra-silent-host-p1"))
     assert "ns0500" in hosts and "ns0001" not in hosts
@@ -2873,3 +2878,54 @@ def test_every_new_alert_has_a_runbook_section_and_a_spec_mention():
         anchor = name.removeprefix("infra-")
         assert f'<a id="{anchor}"></a>' in runbook and f"`{name}`" in runbook and f"`{name}`" in spec, name
     assert "pending_period_sec" in spec and "pending_minutes" in spec
+
+
+# --- RAID 상태 알림 (Spec #322 / Ticket-13, #335) ---------------------------------------------------------------------------
+RAID_ALERTS = {   # alert -> a fragment only its search carries
+    "infra-raid-write-cache-disabled": "kind = 'controller'\nAND (cache_status",
+    "infra-raid-controller-fault": "kind = 'controller' AND hw_state <> 'ok'",
+    "infra-raid-logical-drive-degraded": "kind = 'logical_drive'",
+    "infra-raid-physical-drive-fault": "kind = 'physical_drive'",
+    "infra-raid-cache-battery-fault": "kind = 'cache_battery'",
+    "infra-raid-collection-error": "status IN ('timeout', 'error')",
+    "infra-host-status-silent": "UNION ALL",
+}
+
+
+def test_raid_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_on_the_synthetic_records(o2):
+    """The searches the verification step sends are executed on the injected records (sqlite), not just compared by name."""
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    records = [r for p, _, rs in o2.ingests if "/host_status_logs_alert_verify/" in p for r in rs]
+    searches = [sql for stream, sql in o2.searches if stream == "host_status_logs_alert_verify"]
+    assert len(searches) == len(RAID_ALERTS)
+    for name, marker in RAID_ALERTS.items():
+        found = [s for s in searches if marker.replace("\n", " ") in s.replace("\n", " ")]
+        assert len(found) == 1, (name, found)
+        spec = FIXTURES[name]
+        own = {c["host"] for c in spec["cases"]}   # the alerts share one stream: judge only this alert's own cases
+        fired = {m.group(1) for row in _run_alert_on_sqlite(found[0], records, "host_status_logs_alert_verify")
+                 if (m := re.fullmatch(r"(.+)-[0-9a-f]+", str(row["host_name"]))) and m.group(1) in own}
+        assert fired == {c["host"] for c in spec["cases"] if c["fires"]}, name
+
+
+def test_raid_alerts_are_p2_with_a_two_reading_window_and_a_runbook_entry(o2):
+    assert _apply(o2).returncode == 0
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for name in RAID_ALERTS:
+        alert = o2.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == "P2 경고", name
+        assert alert["stream_name"] == "host_status_logs", name
+        assert f"(`{name}`)" in runbook, name
+    for name in set(RAID_ALERTS) - {"infra-raid-collection-error", "infra-host-status-silent"}:
+        trigger = o2.store["alert"][name]["trigger_condition"]
+        assert (trigger["period"], trigger["frequency"]) == (15, 5), name
+        assert "HAVING count(*) >= 2" in o2.store["alert"][name]["query_condition"]["sql"], name
+
+
+def test_raid_alert_sql_reads_only_fields_every_record_of_its_kind_carries():
+    """OpenObserve rejects SQL on columns that do not exist yet: the alerts read only fields the collector always emits."""
+    script = (ROOT_DIR / "roles" / "monitoring" / "files" / "host-agents-raid-status.sh").read_text(encoding="utf-8")
+    for field in ("kind", "hw_state", "hw_name", "raw_state", "cache_status", "cache_reason", "backup_power_operation",
+                  "status", "message"):
+        assert f'\\"{field}\\":' in script or f'"{field}":' in script, field
