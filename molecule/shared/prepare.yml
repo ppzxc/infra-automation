@@ -41,3 +41,28 @@
             group: root
             mode: "0440"
             validate: "visudo -cf %s"
+
+    # funa_env의 keepalived 설정 권한 유지(FUNA-011~014)를 검증하려고 keepalived가 비활성화하는 상태를 미리 만든다.
+    - name: "[PREPARE-005] Seed an unsafe keepalived config directory (group writable, SGID) for funa_cluster hosts"
+      when: "'funa_cluster' in group_names"
+      block:
+        - name: "[PREPARE-005-DIR] Create the directory with the unsafe mode"
+          ansible.builtin.file:
+            path: /opt/services/vrrp/config
+            state: directory
+            owner: root
+            group: root
+            mode: "2775"
+        - name: "[PREPARE-005-FILES] Create scripts and config with group write"
+          ansible.builtin.copy:
+            content: "#!/bin/bash\nexit 0\n"
+            dest: "/opt/services/vrrp/config/{{ item.name }}"
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop:
+            - {name: check.sh, mode: "0775"}
+            - {name: notify.sh, mode: "0775"}
+            - {name: keepalived.conf, mode: "0664"}
+          loop_control:
+            label: "{{ item.name }}"

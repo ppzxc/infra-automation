@@ -198,6 +198,29 @@ infra-disk-fs-errors:
       fires: false
       records:
         - {body: "systemd[1]: Started Session 4021 of user deploy."}
+infra-keepalived-script-disabled:
+  cases:
+    - name: check.sh 비활성화(Unsafe permissions)
+      host: verify-keepalived-unsafe-check
+      fires: true
+      records:
+        - {container_name: vrrp-keepalived-1, severity: "0", body: "Mon Oct 19 12:58:24 2026: Unsafe permissions found for script '/etc/keepalived/check.sh' - disabling."}
+    - name: 트랙 스크립트 비활성화
+      host: verify-keepalived-disable-track
+      fires: true
+      records:
+        - {container_name: vrrp-keepalived-1, severity: "0", body: "Mon Oct 19 12:58:24 2026: Disabling track script check due to insecure"}
+    - name: 정상 시작 로그는 알리지 않는다
+      host: verify-keepalived-script-ok
+      fires: false
+      records:
+        - {container_name: vrrp-keepalived-1, severity: "0", body: "Mon Oct 22 17:00:46 2026: VRRP_Script(check) succeeded"}
+        - {container_name: vrrp-keepalived-1, severity: "0", body: "Mon Oct 22 17:00:46 2026: (VI_69) Entering BACKUP STATE"}
+    - name: 다른 컨테이너의 같은 문구는 알리지 않는다
+      host: verify-keepalived-other-container
+      fires: false
+      records:
+        - {container_name: funa-api-1, severity: INFO, body: "Unsafe permissions found for script (다른 컨테이너)"}
 infra-app-log-errors:
   cases:
     - name: 앱 ERROR(대문자, logstash·ECS 형식)

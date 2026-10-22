@@ -29,6 +29,10 @@
         - /etc/funa-cluster/proxy.secrets.env
         - /etc/funa-cluster/vrrp.secrets.env
         - /etc/profile.d/funa-cluster.sh
+        - /opt/services/vrrp/config
+        - /opt/services/vrrp/config/check.sh
+        - /opt/services/vrrp/config/notify.sh
+        - /opt/services/vrrp/config/keepalived.conf
       read:
         - /etc/otelcol/config.yaml
         - "{{ otelcol_service_path }}"
@@ -127,6 +131,38 @@
           ansible.builtin.assert:
             that:
               - f.stat['/etc/profile.d/funa-cluster.sh'].mode == '0644'
+          when: "'funa_cluster' in group_names"
+
+        # 011~014: keepalived 설정 디렉터리 권한 유지(infra-automation#314). 준비 단계가 그룹 쓰기·SGID 상태를 만들어 둔다.
+        - name: "[VERIFY-FUNA-011] Verify the keepalived config directory was found"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/opt/services/vrrp/config'].exists
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-012] Verify the keepalived config directory is root-only (0755 root:root, no SGID)"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/opt/services/vrrp/config'].mode == '0755'
+              - f.stat['/opt/services/vrrp/config'].owner == 'root'
+              - f.stat['/opt/services/vrrp/config'].group == 'root'
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-013] Verify the scripts and config files were found (they were seeded writable)"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/opt/services/vrrp/config/check.sh'].exists
+              - f.stat['/opt/services/vrrp/config/keepalived.conf'].exists
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-014] Verify the scripts are 0755 and the config 0644, all root:root"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/opt/services/vrrp/config/check.sh'].mode == '0755'
+              - f.stat['/opt/services/vrrp/config/notify.sh'].mode == '0755'
+              - f.stat['/opt/services/vrrp/config/keepalived.conf'].mode == '0644'
+              - f.stat['/opt/services/vrrp/config/check.sh'].owner == 'root'
+              - f.stat['/opt/services/vrrp/config/check.sh'].group == 'root'
           when: "'funa_cluster' in group_names"
 
     # ==========================================================================

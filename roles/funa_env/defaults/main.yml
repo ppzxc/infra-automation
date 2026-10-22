@@ -11,6 +11,11 @@ funa_env_owner: root
 funa_env_owner_group: root
 funa_env_group: "{{ docker_mgmt_group | default('dockermgmt') }}"
 
+# keepalived 설정 디렉터리(infra-automation#314). enable_script_security가 켜져 있어 이 디렉터리를 root가 아닌 그룹이 쓸 수 있으면
+# keepalived가 헬스 체크·알림 스크립트를 조용히 비활성화한다. /opt/services의 SGID·기본 ACL로 새 항목이 dockermgmt 그룹 쓰기로 생기므로
+# 있으면 매번 root 전용으로 맞춘다(없으면 건드리지 않는다). 소유는 funa_env_owner/funa_env_owner_group을 쓴다.
+funa_env_vrrp_config_dir: /opt/services/vrrp/config
+
 # 값의 원천(OpenBao). 값은 Git에 두지 않는다.
 #   hosts/<host>                  노드별 값: funa_env_node_keys(→ cluster.env)와 funa_env_node_secret_keys(→ proxy.secrets.env)에
 #                                 적은 키만 읽는다(같은 KV에 접속 정보가 있다)

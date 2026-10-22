@@ -152,6 +152,50 @@ def test_second_run_changes_nothing(tmp_path, openbao):
     assert re.search(r"n1\s*:.*changed=0", res.stdout), res.stdout
 
 
+def _unsafe_vrrp_dir(tmp_path):
+    """keepalived가 스크립트를 비활성화하는 상태: 디렉터리 SGID·그룹 쓰기, 스크립트 그룹 쓰기(infra-automation#314)."""
+    d = tmp_path / "vrrp" / "config"
+    d.mkdir(parents=True)
+    d.chmod(0o2775)
+    for name, mode in (("check.sh", 0o775), ("notify.sh", 0o775), ("keepalived.conf", 0o664), ("note.txt", 0o666)):
+        f = d / name
+        f.write_text("x\n")
+        f.chmod(mode)
+    return d
+
+
+def test_keepalived_config_is_kept_root_only_for_script_security(tmp_path, openbao):
+    d = _unsafe_vrrp_dir(tmp_path)
+    res, _, _ = run(tmp_path, openbao, extra={"funa_env_vrrp_config_dir": str(d)})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert _mode(d) == 0o755, oct(_mode(d))
+    assert _mode(d / "check.sh") == 0o755 and _mode(d / "notify.sh") == 0o755
+    assert _mode(d / "keepalived.conf") == 0o644
+    # 스크립트·설정이 아닌 파일은 건드리지 않는다.
+    assert _mode(d / "note.txt") == 0o666
+
+
+def test_keepalived_config_permissions_are_idempotent(tmp_path, openbao):
+    d = _unsafe_vrrp_dir(tmp_path)
+    run(tmp_path, openbao, extra={"funa_env_vrrp_config_dir": str(d)})
+    res, _, _ = run(tmp_path, openbao, extra={"funa_env_vrrp_config_dir": str(d)})
+    assert re.search(r"n1\s*:.*changed=0", res.stdout), res.stdout
+
+
+def test_missing_keepalived_config_directory_is_ignored(tmp_path, openbao):
+    d = tmp_path / "no-such" / "config"
+    res, _, _ = run(tmp_path, openbao, extra={"funa_env_vrrp_config_dir": str(d)})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert not d.exists()
+
+
+def test_keepalived_config_of_a_host_outside_the_group_is_untouched(tmp_path, openbao):
+    d = _unsafe_vrrp_dir(tmp_path)
+    res, _, _ = run(tmp_path, openbao, groups=(), extra={"funa_env_vrrp_config_dir": str(d)})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert _mode(d) == 0o2775 and _mode(d / "check.sh") == 0o775
+
+
 def test_login_shell_loader_loads_readable_files_only(tmp_path, openbao):
     _, d, prof = run(tmp_path, openbao)
     (d / "vrrp.secrets.env").chmod(0o000)

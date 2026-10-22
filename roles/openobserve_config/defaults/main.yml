@@ -345,6 +345,25 @@ o2c_alerts:
     period: 5
     frequency: 1
     silence: 5
+  - name: infra-keepalived-script-disabled
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "keepalived 헬스 체크·알림 스크립트가 비활성화됨"
+    what: "keepalived가 스크립트 권한이 안전하지 않다며 헬스 체크(check.sh) 또는 알림(notify.sh) 스크립트를 비활성화했습니다."
+    why: "비활성화되면 funa가 내려가도 FAULT 전환·VIP 페일오버·봇 알림이 나가지 않아 장애가 조용히 이어집니다. keepalived는 권한을 시작할 때만 검사하므로 이 줄은 재시작 직후에 한 번 남습니다."
+    action: "① 노드에서 ls -ld /opt/services/vrrp/config 와 스크립트 소유·권한 확인(디렉터리 root:root 0755, 스크립트 root:root 0755) ② Semaphore Host Provisioning(funa_env)으로 권한 복구 ③ keepalived 컨테이너 재생성 후 시작 로그에 Unsafe permissions가 없는지 확인"
+    runbook: "{{ o2c_runbook_base }}#keepalived-script-disabled"
+    row_template: '• {host_name}: 비활성화 로그 {matches}건'
+    description: "app_logs의 keepalived 컨테이너 로그에 'Unsafe permissions found for script' 또는 'Disabling track script' (keepalived는 레벨이 없어 문구로 잡는다)"
+    stream: app_logs
+    sql: >-
+      SELECT host_name, count(*) AS matches FROM "app_logs"
+      WHERE container_name = 'vrrp-keepalived-1'
+      AND (lower(body) LIKE '%unsafe permissions found for script%' OR lower(body) LIKE '%disabling track script%')
+      GROUP BY host_name
+    period: 5
+    frequency: 1
+    silence: 5
   - name: infra-app-log-errors
     severity: "P2 경고"
     severity_icon: "🟠"
