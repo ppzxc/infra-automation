@@ -176,6 +176,8 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-015` | `Report that this is a plan-only run (no changes will be made)` | `ansible.builtin.debug` | Controller | 읽기 전용 (`o2c_plan_only`가 참일 때만 `plan only: no changes were made` 출력) |
 | `O2C-016` | `End the play after the plan when o2c_plan_only is true (before any write or injection)` | `ansible.builtin.meta` | Controller | 읽기 전용 (`o2c_plan_only`가 참이면 시드·반영·주입·검증 전에 정상 종료, 실패 아님) |
 | `O2C-014` | `Seed the empty self-test stream with one past record before its alert is created` | `ansible.builtin.uri` | Controller | 자가 시험 알림을 새로 만들 때만 검증 전용 스트림에 조회 구간보다 오래된(기본 1시간 전) 레코드 1건을 넣어 스트림을 만든다 — 통지 없음 (`changed_when: false`, check 모드 제외, `no_log`) |
+| `O2C-018` | `Register the short URLs of the raw log links (POST /api/{org}/short)` | `o2c_http` | Controller | 통지 본문 원문 로그 링크의 단축 URL을 서버에 등록한다. 같은 원본이면 같은 id라 멱등 (`changed_when: false`, check 모드 제외, `no_log`) |
+| `O2C-019` | `Fail when a registered short URL differs from the one put in the notification body` | `ansible.builtin.assert` | Controller | 등록 응답의 `short_url`이 계획에서 계산한 값(md5 가운데 16자)과 다르거나 등록이 실패하면 실패 (check 모드 제외) |
 | `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE retired alerts / recreate alerts whose stream changed)` | `o2c_http` | Controller | 계획된 차이만 전송 — 폐기 목록(`o2c_retired_alerts`)에 있는 알림만 DELETE, 스트림이 바뀐 알림만 같은 계획에서 DELETE 뒤 POST(재생성), 그 밖의 알림(관리 밖 `infra-` 포함)은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
 
 ### 원문 로그 링크 (#282, `O2C-003`)

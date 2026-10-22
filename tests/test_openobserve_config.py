@@ -6,6 +6,7 @@ check mode writes nothing, and secrets never reach the output or the repository.
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -105,6 +106,8 @@ class FakeO2:
         self.search_override = None   # fn(stream, sql, hits) -> hits, to simulate an engine that disagrees
         self.trace_streams = {}   # 트레이스 스트림 이름 -> data_retention(일). 비어 있으면 아직 첫 span이 들어오지 않은 서버다
         self.missing_streams = {SELFTEST_STREAM}   # 아직 레코드가 없는 스트림 — 레코드가 들어오기 전에는 알림 생성이 404
+        self.shorts = {}          # 단축 id -> 원본 URL (POST /api/default/short). 같은 원본이면 같은 id(멱등)
+        self.short_collide = False   # 참이면 서버가 해시 충돌로 시각을 섞은 다른 id를 준다(실제 서버의 충돌 경로)
         self.fixtures = yaml.safe_load((ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8"))
         outer = self
 
@@ -178,6 +181,11 @@ class FakeO2:
                         hits = outer.search_override(stream, sql, hits)
                     outer.searches.append((stream, sql))
                     return self._send(200, {"hits": hits, "total": len(hits)})
+                if path == "/api/default/short" and method == "POST":
+                    original = body["original_url"]
+                    digest = hashlib.md5((original + ("1792650000000000" if outer.short_collide else "")).encode()).hexdigest()
+                    outer.shorts[digest[8:24]] = original
+                    return self._send(200, {"short_url": "https://o2-server.example.test/web/short/%s?org_identifier=default" % digest[8:24]})
                 m = re.fullmatch(r"/api/default/streams/([^/]+)/settings", path)
                 if m and method == "PUT":
                     outer.writes.append((method, self.path, body))
@@ -2337,7 +2345,7 @@ def test_promql_alert_conditions_are_rendered_with_the_iops_variable_and_converg
     for d in ("read", "write"):
         q = o2.store["alert"][f"infra-disk-{d}-latency"]["query_condition"]["promql"]
         assert ">= 5)" in q and "{{" not in q and _balanced(q)
-    assert o2.store["alert"]["infra-swap-usage"]["query_condition"]["promql"].endswith("< 0.10)")
+    assert o2.store["alert"]["infra-swap-usage"]["query_condition"]["promql"].endswith("< 0.10))")
     o2.writes.clear()
     assert _apply(o2).returncode == 0 and o2.writes == []
     assert _apply(o2, extra={"o2c_disk_latency_min_iops": 20}).returncode == 0
@@ -2544,9 +2552,19 @@ def _raw_line(alert):
 
 
 def _raw_url(alert):
+    """통지 본문에 실린 원문 로그 링크(단축 URL)."""
     line = _raw_line(alert)
     assert line.startswith("\n▶ 로그 보기: "), line
     return line.split(": ", 1)[1]
+
+
+def _raw_original(o2, alert):
+    """단축 URL이 가리키는 원본(`/web/logs?...`). Config가 서버에 등록했어야 찾을 수 있다."""
+    m = re.fullmatch(r"(.+)/web/short/([0-9a-f]{16})\?org_identifier=default", _raw_url(alert))
+    assert m and m.group(2) in o2.shorts, _raw_url(alert)
+    original = o2.shorts[m.group(2)]
+    assert hashlib.md5(original.encode()).hexdigest()[8:24] == m.group(2)
+    return original
 
 
 def test_raw_log_sql_keeps_where_verbatim_and_drops_select_list_group_by_and_having():
@@ -2587,17 +2605,17 @@ def test_log_alerts_with_a_derivable_where_carry_the_raw_log_link_and_the_others
     for name in ("infra-ssh-login-failures-per-source", "infra-root-login-success", "infra-oom-kill", "infra-disk-fs-errors",
                  "infra-switch-config-change", "infra-backup-failure"):
         ctx = alerts[name]["context_attributes"]
-        path, qs, decoded = _decode_raw_url(_raw_url(alerts[name]))
+        path, qs, decoded = _decode_raw_url(_raw_original(o2, alerts[name]))
         assert path == "/web/logs" and qs["stream"] == alerts[name]["stream_name"], name
         assert decoded.startswith('SELECT * FROM "%s" WHERE ' % alerts[name]["stream_name"]), name
         assert decoded.endswith("ORDER BY _timestamp DESC LIMIT 200"), name
         assert not re.search(r"group by|having|count\(", decoded, re.I), name
         assert ctx["link_label"] == "상세 보기", name   # {alert_url}(알림 화면)은 상세, 원문은 별도 줄
-    where = _decode_raw_url(_raw_url(alerts["infra-ssh-login-failures-per-host"]))[2]
+    where = _decode_raw_url(_raw_original(o2, alerts["infra-ssh-login-failures-per-host"]))[2]
     assert "event_action = 'ssh_login' AND event_outcome = 'failure'" in where
     # raw_sql 직접 지정: HAVING만으로 거르는 집계
     for name, stream in (("infra-log-parse-errors-security-logs", "security_logs"), ("infra-log-parse-errors-system-logs", "system_logs")):
-        assert _decode_raw_url(_raw_url(alerts[name]))[2] == (
+        assert _decode_raw_url(_raw_original(o2, alerts[name]))[2] == (
             'SELECT * FROM "%s" WHERE log_parse_error = true ORDER BY _timestamp DESC LIMIT 200' % stream)
     # 파생 불가·메트릭·PromQL·자가 시험은 기존 링크와 라벨을 그대로 둔다
     for name, alert in alerts.items():
@@ -2630,9 +2648,55 @@ def test_raw_log_link_run_converges_and_a_changed_web_url_updates_only_the_log_a
     res = _apply(o2)
     assert res.returncode == 0 and o2.writes == [], res.stdout
     assert _changed(res) == 0
-    assert _raw_url(o2.store["alert"]["infra-oom-kill"]).startswith(o2.url + "/web/logs?")   # 기본 베이스는 연결 엔드포인트
+    assert _raw_url(o2.store["alert"]["infra-oom-kill"]).startswith(o2.url + "/web/short/")   # 기본 베이스는 연결 엔드포인트
+    assert _raw_original(o2, o2.store["alert"]["infra-oom-kill"]).startswith(o2.url + "/web/logs?")
     res = _apply(o2, extra={"o2c_web_url": "https://o2.public.example.test"})
     assert res.returncode == 0
     assert all(m == "PUT" for m, _, _ in o2.writes) and o2.writes
-    assert _raw_url(o2.store["alert"]["infra-oom-kill"]).startswith("https://o2.public.example.test/web/logs?")
+    assert _raw_url(o2.store["alert"]["infra-oom-kill"]).startswith("https://o2.public.example.test/web/short/")
+    assert _raw_original(o2, o2.store["alert"]["infra-oom-kill"]).startswith("https://o2.public.example.test/web/logs?")
     assert _raw_line(o2.store["alert"]["infra-backup-missing"]) == ""
+
+
+# --- 단축 URL: 통지 본문의 원문 로그 링크는 서버에 묻지 않고 계산한 단축 URL이고, 반영 때 등록한다 ----------------------------
+def test_short_url_is_the_middle_of_the_md5_like_the_server():
+    f = _filters()
+    original = ("https://openobserve.ns0331.nanoit.kr/web/logs?stream_type=logs&stream=system_logs&period=15m&sql_mode=true"
+                "&query=U0VMRUNUICogRlJPTSAic3lzdGVtX2xvZ3MiIExJTUlUIDEw&org_identifier=default&type=alerts&show_histogram=false")
+    # 실서버(v1.0.4)가 이 원본에 돌려준 값(2026-10-22 실측)
+    assert f.o2c_short_url("https://openobserve.ns0331.nanoit.kr/", "default", original) == \
+        "https://openobserve.ns0331.nanoit.kr/web/short/d39e007b3b7a5af5?org_identifier=default"
+
+
+def test_short_url_mismatch_compares_only_the_id_and_flags_failures():
+    f = _filters()
+    exp = "https://a.example.test/web/short/0123456789abcdef?org_identifier=default"
+    ok = {"status": 200, "json": {"short_url": "https://other-host.example.test/web/short/0123456789abcdef?org_identifier=default"}, "item": {"expected": exp}}
+    clash = {"status": 200, "json": {"short_url": "https://a.example.test/web/short/fedcba9876543210?org_identifier=default"}, "item": {"expected": exp}}
+    down = {"status": 500, "json": {}, "item": {"expected": exp}}
+    assert f.o2c_short_url_mismatches([ok]) == []
+    assert f.o2c_short_url_mismatches([ok, clash, down]) == [exp, exp]
+
+
+def test_every_raw_log_link_is_registered_once_and_the_notification_never_carries_the_long_url(o2):
+    assert _apply(o2).returncode == 0
+    lines = [a["context_attributes"]["raw_log_line"] for a in o2.store["alert"].values() if a["context_attributes"]["raw_log_line"]]
+    assert lines and all("/web/logs?" not in line and "/web/short/" in line for line in lines)
+    assert len(o2.shorts) == len({line for line in lines})
+    for alert in o2.store["alert"].values():
+        if alert["context_attributes"]["raw_log_line"]:
+            _raw_original(o2, alert)
+
+
+def test_a_short_url_hash_collision_stops_before_any_alert_write(o2):
+    o2.short_collide = True
+    res = _apply(o2)
+    assert res.returncode != 0 and "O2C-019" in res.stdout
+    assert not any("/alerts" in p for m, p, _ in o2.writes if m in ("POST", "PUT"))
+
+
+def test_promql_alerts_round_the_value_so_notifications_carry_no_decimals(o2):
+    assert _apply(o2).returncode == 0
+    defs = {a["name"]: a["promql"] for a in PROMQL_DEFS}
+    for name, q in defs.items():
+        assert o2.store["alert"][name]["query_condition"]["promql"] == "round(%s)" % q.replace("{{ o2c_disk_latency_min_iops }}", "5"), name

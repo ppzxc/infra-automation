@@ -7,6 +7,7 @@ Pure functions so the desired state and the change plan are unit-testable withou
 """
 
 import base64
+import hashlib
 import re
 from urllib.parse import quote
 
@@ -127,6 +128,38 @@ def o2c_raw_log_url(web_url, org, stream, sql, period=RAW_LOG_PERIOD):
             % (str(web_url).rstrip('/'), quote(stream, safe=''), period, query, quote(org, safe='')))
 
 
+def o2c_short_url(web_url, org, original_url):
+    """OpenObserve 단축 URL을 서버에 묻지 않고 계산한다(계획 단계는 쓰기 없이 비교해야 한다).
+
+    서버 규칙: short_id = md5(original_url) 32자 중 가운데 16자(src/config/src/utils/md5.rs ``short_hash``),
+    URL = <web_url>/web/short/<short_id>?org_identifier=<org>(src/core/src/short_url.rs). 해시 충돌 시 서버는 시각을 섞은
+    다른 id를 주므로, 반영 단계(O2C-019)가 등록 응답과 이 값을 대조해 다르면 실패한다.
+    """
+    digest = hashlib.md5(original_url.encode('utf-8')).hexdigest()
+    return '%s/web/short/%s?org_identifier=%s' % (str(web_url).rstrip('/'), digest[8:24], quote(org, safe=''))
+
+
+def o2c_short_url_requests(desired, org):
+    """원문 로그 링크마다 단축 URL 등록 요청(POST /api/{org}/short)을 만든다. 같은 원본이면 서버가 같은 id를 돌려준다(멱등)."""
+    links = sorted({(o['short_link']['original'], o['short_link']['short']) for o in desired or [] if o.get('short_link')})
+    return [{'method': 'POST', 'path': '/api/%s/short' % org, 'body': {'original_url': original}, 'expected': short}
+            for original, short in links]
+
+
+def _short_id(url):
+    m = re.search(r'/web/short/([0-9a-f]+)', str(url or ''))
+    return m.group(1) if m else None
+
+
+def o2c_short_url_mismatches(results):
+    """등록 응답의 단축 id가 계산값과 다르거나 요청이 실패한 항목(계산값 목록). 비어 있어야 통지 본문의 링크가 열린다.
+
+    호스트 부분은 비교하지 않는다: 서버는 자기 ZO_WEB_URL로 답하고 통지 본문은 o2c_web_url을 쓰는데, 둘 다 같은 서버를 가리키면 링크가 열린다.
+    """
+    return [r['item']['expected'] for r in results or []
+            if r.get('status') not in (200, 201) or _short_id((r.get('json') or {}).get('short_url')) != _short_id(r['item']['expected'])]
+
+
 def _raw_log_sql(alert):
     """알림 정의가 원문 조회 SQL을 갖는가: ``raw_sql`` 직접 지정이 먼저, 없으면 로그 SQL 알림에서 파생. 메트릭·PromQL·자가 시험은 없다."""
     if alert.get('promql') or alert.get('stream_type', 'logs') != 'logs' or alert.get('raw_link') is False:   # raw_link: false는 명시적 거절(부재 알림)
@@ -171,7 +204,9 @@ def o2c_desired(spec):
         if promql:
             if alert.get('stream_type') != 'metrics':
                 raise ValueError('PromQL 알림 %s 은(는) stream_type이 metrics여야 합니다' % alert['name'])
-            query = {'type': 'promql', 'promql': promql,
+            # 통지 행의 {value}가 소수점 없이 나오도록 결과를 정수로 반올림한다(OpenObserve PromQL round() 지원 실측).
+            # 임계 비교도 반올림 값으로 하므로 경계에서 ±0.5 차이가 날 수 있다.
+            query = {'type': 'promql', 'promql': 'round(%s)' % promql,
                      'promql_condition': {'column': 'value', 'operator': alert.get('promql_operator', '>='), 'value': alert['promql_value']}}
         else:
             query = {'type': 'sql', 'sql': alert['sql']}
@@ -180,7 +215,9 @@ def o2c_desired(spec):
         if promql:
             trigger['align_time'] = True   # 평가 시각을 frequency 경계에 맞춘다(PromQL은 시각이 어긋나면 구간 창이 달라진다)
         raw_sql = _raw_log_sql(alert) if spec.get('web_url') and alert is not selftest else ''
-        out.append({'kind': 'alert', 'name': alert['name'], 'body': {
+        raw_url = o2c_raw_log_url(spec['web_url'], org, alert['stream'], raw_sql) if raw_sql else ''
+        raw_short = o2c_short_url(spec['web_url'], org, raw_url) if raw_url else ''
+        out.append(dict({'kind': 'alert', 'name': alert['name'], 'body': {
             'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
             'query_condition': query, 'trigger_condition': trigger,
             'destinations': [p1_dest if str(alert.get('severity', '')).startswith('P1') else dest],
@@ -191,10 +228,10 @@ def o2c_desired(spec):
             # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수). link_label은 {alert_url}의 라벨이다(로그 알림 "로그 보기", 메트릭 알림 "상세 보기").
             'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, action=o2c_action_lines(alert['action']),
                                        link_label=LINK_LABEL_METRIC if promql or raw_sql else LINK_LABEL_LOG,
-                                       raw_log_line=('\n▶ %s: %s' % (LINK_LABEL_LOG, o2c_raw_log_url(spec['web_url'], org, alert['stream'], raw_sql))
-                                                     if raw_sql else '')),
+                                       # 원문 링크는 단축 URL로 싣는다(긴 base64 쿼리 대신). 등록은 반영 단계 O2C-019가 한다
+                                       raw_log_line=('\n▶ %s: %s' % (LINK_LABEL_LOG, raw_short) if raw_short else '')),
             'row_template': alert['row_template'], 'row_template_type': 'String',
-        }})
+        }}, **({'short_link': {'original': raw_url, 'short': raw_short}} if raw_short else {})))
     # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8): 스트림이 이미 있을 때만 맞춘다(없으면 o2c_plan이 건너뛴다)
     if spec.get('traces_stream'):
         out.append({'kind': 'trace_stream', 'name': spec['traces_stream'], 'optional': True,
@@ -853,7 +890,7 @@ class FilterModule(object):
     def filters(self):
         return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_missing_destinations': o2c_missing_destinations, 'o2c_unmanaged_alerts': o2c_unmanaged_alerts,
                 'o2c_valid_retired_alerts': o2c_valid_retired_alerts, 'o2c_retired_conflicts': o2c_retired_conflicts, 'o2c_plan_summary': o2c_plan_summary,
-                'o2c_alert_state': o2c_alert_state, 'o2c_raw_log_sql': o2c_raw_log_sql, 'o2c_raw_log_url': o2c_raw_log_url, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
+                'o2c_alert_state': o2c_alert_state, 'o2c_raw_log_sql': o2c_raw_log_sql, 'o2c_raw_log_url': o2c_raw_log_url, 'o2c_short_url': o2c_short_url, 'o2c_short_url_requests': o2c_short_url_requests, 'o2c_short_url_mismatches': o2c_short_url_mismatches, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,
                 'o2c_verify_failures': o2c_verify_failures, 'o2c_verify_known': o2c_verify_known,
                 'o2c_alert_history_errors': o2c_alert_history_errors,

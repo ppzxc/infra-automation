@@ -281,6 +281,32 @@
     - not ansible_check_mode
     - o2c_plan_actions | selectattr('op', 'equalto', 'create') | selectattr('kind', 'equalto', 'alert') | selectattr('name', 'equalto', o2c_selftest_alert.name) | list | length > 0
 
+# 통지 본문의 원문 로그 링크는 단축 URL이다. 단축 id는 원본 URL의 md5로 정해져 계획(O2C-003)이 서버에 묻지 않고 계산하고,
+# 여기서 서버에 등록한다(같은 원본이면 같은 id — 멱등). 해시 충돌로 서버가 다른 id를 주면 링크가 열리지 않으므로 O2C-019가 멈춘다.
+- name: "[O2C-018] Register the short URLs of the raw log links (POST /api/{org}/short)"
+  o2c_http:
+    base_url: "{{ o2c_endpoint }}"
+    headers: "{{ o2c_auth_headers }}"
+    requests: "{{ o2c_desired_objects | o2c_short_url_requests(o2c_org) | o2c_as_requests(method_key='method', body_key='body', label='short url {expected}') }}"
+    status_code: [200, 201]
+    timeout: 15
+    parallel: true
+    validate_certs: "{{ o2c_validate_certs | bool }}"
+    ca_path: "{{ o2c_ca_file if o2c_ca_file | length > 0 else omit }}"
+  register: _o2c_short_urls
+  changed_when: false   # 같은 원본이면 서버가 같은 id를 돌려준다(이미 있으면 쓰지 않는다)
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "[O2C-019] Fail when a registered short URL differs from the one put in the notification body"
+  ansible.builtin.assert:
+    that:
+      - _o2c_short_urls.results | default([]) | o2c_short_url_mismatches | length == 0
+    fail_msg: >-
+      단축 URL 등록 결과가 통지 본문에 넣은 값과 다릅니다(해시 충돌 또는 등록 실패): {{ _o2c_short_urls.results | default([]) | o2c_short_url_mismatches | join(', ') }}
+    quiet: true
+  when: not ansible_check_mode
+
 - name: "[O2C-020] Apply the planned changes to OpenObserve (POST create / PUT update / DELETE retired alerts / recreate alerts whose stream changed)"
   o2c_http:
     base_url: "{{ o2c_endpoint }}"
