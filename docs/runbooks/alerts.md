@@ -15,7 +15,8 @@
 
 - **Event Alert**: 사건이 일어났다는 알림. silence가 조회 구간과 같아 구간마다 1번만 온다.
 - **State Alert**: 어떤 상태가 계속된다는 알림. 상태가 이어지는 동안 P1은 60분, P2·P3은 1440분(하루 1번)마다 다시 온다. 복구 통지는 없다(통지가 멈추면 복구).
-- 이중 등급 알림(디스크·inode·메모리)은 P2가 "P2 이상 P1 미만" 구간만 잡아 같은 대상에 P1·P2가 동시에 오지 않는다.
+- 이중 등급 알림(디스크·inode·메모리)은 P2가 "P2 이상 P1 미만" 구간만 잡아 같은 대상에 P1·P2가 동시에 오지 않는다. CPU 사용률(P2 90% 이상 / P3 80~90%)과 디스크 고갈 전망(P1 4시간 / P2 24시간)도 같다.
+- **지속 조건(#318)**: "N분 지속"이라고 적힌 알림은 조건이 처음 맞은 뒤 N분 동안 평가마다 계속 맞아야 울린다(알림의 `pending_period_sec`, Prometheus `for:`와 같은 뜻). 한 번이라도 안 맞으면 처음부터 다시 센다. PromQL 알림의 평가 한 번은 조회 구간 안의 한 점만 넘어도 맞는 것으로 치므로, "내내"는 조회 구간이 아니라 이 대기로 만든다.
 
 ## 공통 절차
 
@@ -205,6 +206,103 @@ last -i <사용자> | head
 **대응**
 - 해당 사용자에게 시도 여부를 확인한다.
 - 본인이 아니면 계정을 잠그고(`usermod -L`), 비밀번호를 바꾸고, 그 계정의 접속 출발지를 추적한다.
+
+---
+
+<a id="ssh-bruteforce-success"></a>
+## 🔴 SSH 무차별 대입 뒤 로그인 성공 (`infra-ssh-bruteforce-success`)
+
+**조건**: 같은 `source_address`가 15분(`o2c_ssh_bruteforce_window_minutes`) 안에 한 서버에서 SSH 로그인에 10회(`o2c_ssh_bruteforce_min_failures`) 이상 실패하고 1번 이상 성공(재통지 15분). 사용자 이름은 따지지 않는다. Elastic "Potential Successful Linux SSH Brute Force"와 같은 생각이고, 실패 임계는 출발지별 실패 급증 알림(P2)과 같다. 이 알림이 생기기 전 그 알림의 "성공 기록이 있으면 P1로 격상" 절차를 자동으로 하는 것이다.
+
+**왜 중요한가**: 무차별 대입이 성공했을 수 있다. 계정이 탈취됐다면 공격자는 이미 서버 안에 있다.
+
+**확인**
+```bash
+sudo grep "<출발지IP>" /var/log/secure | grep -E "Accepted|Failed" | tail -30
+last -i | grep "<출발지IP>"
+```
+
+**대응**
+- 출발지가 사무실·Semaphore면 비밀번호를 여러 번 틀린 작업자일 가능성이 크다. 작업자에게 확인하고 기록을 남긴다.
+- 확인되지 않으면 성공한 계정의 비밀번호를 바꾸고 세션을 끊는다(`pkill -u <계정>`). 출발지를 방화벽에서 막고 보안 담당에게 보고한다. 성공 뒤 그 계정의 sudo·계정 변경 기록(아래 알림들)을 본다.
+
+**한계**: 수집 함수(`security_semantics`)는 프로그램 이름이 `sshd`인 줄만 해석한다. OpenSSH 9.8 이후의 `sshd-session` 줄(2026-10-22 기준 5개 호스트)은 `event_action`이 비어 이 알림과 다른 SSH 알림에 잡히지 않는다. 함수를 고치기 전까지 그 호스트들은 감시 공백이다.
+
+---
+
+<a id="account-change"></a>
+## 🟠 계정·그룹 변경 (`infra-account-change`)
+
+**조건**: auditd 계정 관리 기록(`ADD_USER`·`DEL_USER`·`ADD_GROUP`·`DEL_GROUP`·`USER_MGMT`·`GRP_MGMT`·`USER_CHAUTHTOK`·`GRP_CHAUTHTOK`·`CHUSER_ID`·`CHGRP_ID`·`ACCT_LOCK`·`ACCT_UNLOCK`)이 5분 안에 1건 이상(재통지 5분). 행은 호스트·종류·실행 계정(auditd `AUID`)으로 묶인다. 종류는 특권 그룹 변경(`o2c_privileged_groups`: wheel·sudo·docker·root), 비밀번호 변경, 계정·그룹 추가, 계정·그룹 삭제, 계정·그룹 속성 변경이다. shadow-utils의 syslog 줄(`useradd[…]: new user: …`)은 같은 사건의 중복이라 세지 않는다. `usermod --help` 같은 실행 기록(`exec_log` EXECVE)도 세지 않는다.
+
+**왜 중요한가**: 계정 추가와 특권 그룹 가입은 침입자가 발판을 남기는 전형적인 수법이다. 다만 Semaphore 프로비저닝도 같은 기록을 남긴다(7일 표본의 변경은 모두 프로비저닝이었다). 그래서 P2로 두고 특권 그룹 변경은 행에서 구분한다.
+
+**확인**
+```bash
+sudo ausearch -m ADD_USER,DEL_USER,USER_MGMT,GRP_MGMT,USER_CHAUTHTOK -ts recent -i
+getent group wheel sudo docker
+```
+
+**대응**
+- 실행 계정과 시각을 Semaphore 작업 이력과 대조한다. 프로비저닝이면 끝이다.
+- 계획에 없던 변경이면 대상 계정을 잠그고(`usermod -L`) 특권 그룹에서 뺀 뒤(`gpasswd -d <계정> <그룹>`) 보안 담당에게 보고한다.
+
+---
+
+<a id="sudo-risky-command"></a>
+## 🔴 sudo로 위험 명령 실행 (`infra-sudo-risky-command`)
+
+**조건**: 성공한 sudo 기록의 명령 줄(`process_command_line`, 소문자)에 위험 명령 문구가 붙은 그대로 들어 있음(재통지 5분). 문구는 역할 변수 `o2c_sudo_risky_commands`(SELinux 해제 `setenforce 0`, 방화벽 규칙 초기화 `iptables -F`·`nft flush ruleset`·`firewall-cmd --panic-on`, 감사 규칙 끄기·삭제 `auditctl -e 0`·`auditctl -D`, 계정 삭제 `userdel`, 명령 기록 삭제 `history -c`, 불변 속성 해제 `chattr -i`)와 `o2c_sudo_protected_services`(auditd·rsyslog·systemd-journald·firewalld·otelcol-contrib)를 `systemctl stop|disable|mask|kill`, `service … stop`하는 명령이다. `restart`는 세지 않는다. 통지 행에는 명령 원문 대신 종류만 싣는다(명령 줄에 비밀값이 섞인 사례가 있다).
+
+**왜 중요한가**: 흔적을 지우거나 방어를 끄는 단계에서 쓰는 명령이다. 계획된 작업이 아니면 침해가 진행 중일 수 있다.
+
+**확인**
+```bash
+sudo grep "COMMAND=" /var/log/secure | tail -20     # 또는 /var/log/sudo.log
+getenforce; sudo systemctl is-active auditd rsyslog firewalld otelcol-contrib
+```
+
+**대응**
+- 사용자에게 작업 여부를 묻고 작업 일정과 대조한다.
+- 확인되지 않으면 그 계정의 세션을 끊고 비밀번호를 바꾼다. 꺼진 기능(SELinux, 방화벽, auditd, rsyslog)을 즉시 복구하고 보안 담당에게 보고한다.
+
+**한계**: Ansible(Semaphore)의 become 작업은 `sudo … COMMAND=/bin/sh -c echo BECOME-SUCCESS-…; python3 …`로만 남아 실제 명령이 보이지 않는다. 이 알림은 사람이 직접 친 sudo 명령만 잡는다.
+
+---
+
+<a id="auditd-stopped"></a>
+## 🔴 감사 데몬(auditd) 종료 또는 감사 비활성화 (`infra-auditd-stopped`)
+
+**조건**: auditd 기록(`security_logs`, `service_name=audit`)에서 종료(`DAEMON_END`·`DAEMON_ABORT`)나 감사 끄기(`CONFIG_CHANGE … audit_enabled=0`)의 마지막 시각이 시작(`DAEMON_START`, `audit_enabled=1`)의 마지막 시각보다 늦은 상태가 2분(`pending_minutes`) 이어짐(조회 10분, 재통지 10분). 재시작은 시작 기록이 곧 따라와 풀린다.
+
+**왜 이렇게 판정하나**: 정상 종료 순서에서 수집기(otelcol-contrib)가 auditd보다 먼저 멈춘다. 그래서 재부팅 때의 `DAEMON_END`는 부팅 뒤에 늦게 들어와 조회 구간(이벤트 시각 기준) 밖에 놓이고 울리지 않는다(실측: ns0338 재부팅에서 수집기 정지가 `DAEMON_END`보다 2초 빨랐다). rsyslog·journald의 `SERVICE_STOP`은 재부팅 중 수집기가 아직 살아 있을 때 들어와 오탐이 나므로 이 알림에서 뺐다. 그 서비스를 sudo로 멈추는 명령은 위 위험 명령 알림이 잡는다.
+
+**왜 중요한가**: auditd가 멈추면 그 뒤의 명령 실행·계정 변경·설정 파일 접근 기록이 남지 않는다. 침입자가 먼저 끄는 대상이다.
+
+**확인**
+```bash
+sudo systemctl status auditd
+sudo auditctl -s        # enabled 1이어야 한다
+```
+
+**대응**: 멈춰 있으면 즉시 `sudo service auditd start`, `sudo auditctl -e 1`로 복구한다. 직전 sudo·로그인 기록으로 누가 멈췄는지 확인하고, 계획에 없던 중단이면 보안 담당에게 보고한다.
+
+---
+
+<a id="account-lockout"></a>
+## 🟠 로그인 실패 누적으로 계정 잠김 (`infra-account-lockout`)
+
+**조건**: 계정 잠금 기록이 5분 안에 1건 이상(재통지 5분). pam_faillock syslog `Consecutive login failures for user <계정> account temporarily locked`, auditd `RESP_ACCT_LOCK` 또는 `ANOM_LOGIN_FAILURES`(`op=pam_faillock`), EL7 이하 pam_tally2 `tally N, deny M`. 로그인 성공 기록의 `grantors=pam_faillock`은 잠금이 아니라 세지 않는다. **잠금 문구는 linux-pam 소스에서 가져왔고 7일·30일 실로그에 잠금 기록이 없어 합성 줄로만 검증했다.** 실제 잠금이 처음 생기면 원문을 보고 패턴을 확인한다.
+
+**왜 중요한가**: 특정 계정을 노린 비밀번호 추측이거나 자격증명이 바뀐 자동화 작업의 반복 실패다. 잠긴 동안 정상 사용자도 로그인하지 못한다.
+
+**확인**
+```bash
+sudo faillock --user <계정>
+sudo grep -E "faillock|pam_tally2" /var/log/secure | tail
+```
+
+**대응**: 직전 실패의 출발지가 외부면 방화벽에서 막는다. 내부 자동화면 자격증명을 고친다. 본인 확인 뒤 `sudo faillock --user <계정> --reset`으로 잠금을 푼다.
 
 ---
 
@@ -587,12 +685,16 @@ docker stats --no-stream   # Docker 사용 호스트
 
 ## 메트릭(PromQL) 알림
 
-`metrics` 스트림을 PromQL로 평가하는 알림 16개다(Spec #282). 통지에는 `▶ 상세 보기` 링크가 나오고, `■ 대상`의 값은 PromQL 결과의 `value`다. 모두 호스트 수집기(OTel hostmetrics·Caddy)의 메트릭이며 호스트 이름은 `host_name` 레이블이다. 알림 정의는 `o2c_alerts`의 `promql` 항목이고 합성 레코드 검증(O2C-030~034)은 적용하지 않는다(평가 오류는 O2C-036이 본다). 모두 State Alert이며 재통지는 P1 60분, 그 밖은 정의의 `silence`(60분 또는 1440분)다.
+`metrics` 스트림을 PromQL로 평가하는 알림 17개다(Spec #282, #318에서 업계 기준으로 정비). 통지에는 `▶ 상세 보기` 링크가 나오고, `■ 대상`의 값은 PromQL 결과의 `value`(정수로 반올림)다. 모두 호스트 수집기(OTel hostmetrics·Caddy)의 메트릭이며 호스트 이름은 `host_name` 레이블이다. 알림 정의는 `o2c_alerts`의 `promql` 항목이고 합성 레코드 검증(O2C-030~034)은 적용하지 않는다(평가 오류는 O2C-036이 본다). 모두 State Alert이며 재통지는 P1 60분, 그 밖은 정의의 `silence`(60분 또는 1440분)다.
+
+**평가 방식(#318)**: OpenObserve는 평가 한 번에 조회 구간(period) 안의 **한 점만** 조건을 넘어도 일치로 본다. 그래서 조회 구간을 늘리면 오히려 더 잘 울린다. "N분 지속"은 알림의 대기(`pending_minutes` → `pending_period_sec`)로 만들고, 조회 구간은 평가 주기와 같게(5분/5분) 둔다. 기준은 node-mixin 규칙의 `for`(15분~1시간)다. 근거와 전수 비교는 [조사 문서](../research/alert-conditions-industry-baseline.md)에 있다.
 
 <a id="cpu-usage-p1"></a>
-### 🔴 CPU 사용률 매우 높음 (`infra-cpu-usage-p1`)
+### 🟠 CPU 사용률 매우 높음 (`infra-cpu-usage-p1`)
 
-**조건**: 호스트 CPU 사용률(1 − idle)의 10분 최솟값이 90% 이상(조회 5분마다, 재통지 60분).
+**조건**: 호스트 CPU 사용률(1 − idle − iowait − steal)이 90% 이상, 5분마다 평가해 15분 지속(재통지 60분). 이름은 그대로지만 등급은 **P2**다(#318).
+
+**이유(업계 관행)**: node-mixin `NodeCPUHighUsage`는 같은 90%를 `for: 15m`, 등급 `info`로 둔다. 단일 호스트 리소스 경보는 호출(page) 대상이 아니다. iowait와 steal은 CPU가 일하는 시간이 아니라 아래 별도 알림이 본다(kubernetes-mixin도 사용률에서 뺀다).
 
 **왜 중요한가**: CPU가 포화되면 서비스 응답과 관리 접속, 수집기까지 밀린다.
 
@@ -605,11 +707,11 @@ docker stats --no-stream   # Docker 사용 호스트
 **대응**: 폭주한 프로세스·컨테이너의 원인(배포, 배치, 공격 트래픽)을 조치한다. 지속되면 증설이나 부하 분산을 검토한다.
 
 <a id="cpu-usage-p2"></a>
-### 🟠 CPU 사용률 높음 (`infra-cpu-usage-p2`)
+### 🟡 CPU 사용률 높음 (`infra-cpu-usage-p2`)
 
-**조건**: 같은 지표가 10분 내내 80% 이상 90% 미만(재통지 1440분). 90% 이상은 위 P1만 울려 같은 호스트에 동시에 오지 않는다.
+**조건**: 같은 지표가 80% 이상 90% 미만, 5분마다 평가해 15분 지속(재통지 1440분). 등급은 **P3**다(#318). 90% 이상은 위 P2만 울려 같은 호스트에 동시에 오지 않는다.
 
-**왜 중요한가**: 방치하면 P1로 올라간다.
+**왜 중요한가**: 방치하면 90%를 넘어 위 알림으로 올라간다.
 
 **확인**: 위 P1과 같다. 일시적인 배치·배포인지 상시 부하인지 시각을 본다.
 
@@ -640,7 +742,7 @@ docker stats --no-stream   # Docker 사용 호스트
 <a id="disk-fill-24h"></a>
 ### 🟠 디스크 24시간 내 가득 참 전망 (`infra-disk-fill-24h`)
 
-**조건**: 최근 6시간 여유 공간의 감소 추세(`deriv`)로 계산한 소진 시간이 24시간 미만이고 사용률이 60% 이상인 파일시스템(ext4·xfs·ext3·btrfs, 읽기·쓰기 마운트). 30분마다 평가하고 재통지 1440분. 행에 호스트·마운트·남은 시간(시간)이 나온다.
+**조건**: 최근 6시간 여유 공간의 감소 추세(`deriv`)로 계산한 소진 시간이 24시간 미만이고 사용률이 60% 이상인 파일시스템(ext4·xfs·ext3·btrfs, 읽기·쓰기 마운트)이 1시간 지속(30분마다 평가, 재통지 1440분). node-mixin `NodeFilesystemSpaceFillingUp`(warning, `for: 1h`)과 같다. 아래 4시간 P1 조건(사용률 80% 이상, 4시간 미만)에 걸린 파일시스템은 이 알림에서 뺀다. 행에 호스트·마운트·남은 시간(시간)이 나온다.
 
 **왜 중요한가**: 사용률 알림(90%·95%)보다 먼저 급증하는 쓰기를 알려 준다.
 
@@ -652,10 +754,21 @@ sudo du -xh <마운트> --max-depth=2 | sort -h | tail -20
 
 **대응**: 급증한 로그·덤프·Docker 데이터를 정리하거나 로테이션을 조정한다. 정상 증가면 증설을 계획한다.
 
+<a id="disk-fill-4h"></a>
+### 🔴 디스크 4시간 내 가득 참 전망 (`infra-disk-fill-4h`)
+
+**조건**: 사용률 80% 이상(여유 20% 미만)인 파일시스템이 최근 6시간 감소 추세대로면 4시간 안에 가득 차는 상태가 1시간 지속(10분마다 평가, 재통지 60분). node-mixin `NodeFilesystemSpaceFillingUp`(critical, `for: 1h`)과 같다. 같은 파일시스템에는 위 24시간 P2가 오지 않는다.
+
+**왜 중요한가**: 몇 시간 안에 디스크가 가득 차 서비스·DB·로그 기록이 멈춘다. 업무 시간 외라도 지금 조치한다.
+
+**확인**: 위 24시간 알림과 같다. `ls -lt`로 최근 커지는 파일, `lsof +L1`로 지웠지만 열려 있는 파일을 본다.
+
+**대응**: 폭주하는 로그·덤프를 정리하거나 원인 프로세스를 멈춘다. 정리할 수 없으면 볼륨을 늘린다.
+
 <a id="network-errors"></a>
 ### 🟠 네트워크 인터페이스 오류 (`infra-network-errors`)
 
-**조건**: 물리 인터페이스(`lo`·veth·docker·br-·virbr·cni·flannel·cali 제외)의 수신 또는 송신 오류가 10분 동안 10건 이상(재통지 60분). 행에 호스트·인터페이스·방향이 나온다.
+**조건**: 물리 인터페이스(`lo`·veth·docker·br-·virbr·cni·flannel·cali 제외)의 5분 오류/패킷 비율이 1% 초과이고 같은 5분 오류가 10건 이상인 상태가 1시간 지속(5분마다 평가, 재통지 60분). node-mixin `NodeNetworkReceiveErrs`·`TransmitErrs`(비율 1%, `for: 1h`)와 같다. 예전의 절대 건수(10분 10건)는 트래픽이 많은 인터페이스에서는 아주 낮은 비율에도 울렸다. 비율 비교는 반올림 전에 PromQL 안에서 한다. 행에 호스트·인터페이스·방향·오류 비율(%)이 나온다.
 
 **왜 중요한가**: 케이블, NIC, 스위치 포트, 드라이버 문제의 신호이며 패킷 손실로 이어진다.
 
@@ -670,7 +783,7 @@ ethtool <인터페이스>   # 속도·duplex 협상
 <a id="cpu-load-saturation"></a>
 ### 🟠 CPU 부하 포화 (`infra-cpu-load-saturation`)
 
-**조건**: 1분 load average를 논리 코어 수로 나눈 값이 2 초과(재통지 60분).
+**조건**: 1분 load average를 논리 코어 수로 나눈 값이 2 초과, 5분마다 평가해 15분 지속(재통지 60분). node-mixin `NodeSystemSaturation`과 같다. 비교는 반올림 전에 PromQL 안에서 한다(예전에는 반올림 때문에 실제로 2.5부터 울렸다).
 
 **왜 중요한가**: 실행 대기 작업이 코어 수의 2배를 넘어 응답이 지연된다.
 
@@ -679,9 +792,9 @@ ethtool <인터페이스>   # 속도·duplex 협상
 **대응**: 원인 프로세스·배치를 줄이거나 증설을 검토한다.
 
 <a id="cpu-iowait"></a>
-### 🟠 CPU iowait 높음 (`infra-cpu-iowait`)
+### 🟡 CPU iowait 높음 (`infra-cpu-iowait`)
 
-**조건**: 호스트 평균 iowait 비율이 10% 초과(5분 구간, 재통지 60분).
+**조건**: 호스트 평균 iowait 비율이 10% 초과, 5분마다 평가해 15분 지속(재통지 1440분). 등급은 **P3**다(#318). iowait는 증상이 아니라 원인 지표이고 디스크 지연·포화 알림과 겹친다.
 
 **왜 중요한가**: 디스크가 느리거나 포화되어 서비스 지연과 load 상승을 일으킨다.
 
@@ -690,9 +803,9 @@ ethtool <인터페이스>   # 속도·duplex 협상
 **대응**: 백업·배치가 원인이면 시간대를 조정한다. 디스크 이상이면 교체를 검토한다.
 
 <a id="cpu-steal"></a>
-### 🟠 CPU steal 높음 (`infra-cpu-steal`)
+### 🟡 CPU steal 높음 (`infra-cpu-steal`)
 
-**조건**: 호스트 평균 steal 비율이 10% 초과(5분 구간, 재통지 60분).
+**조건**: 호스트 평균 steal 비율이 10% 초과, 5분마다 평가해 30분 지속(재통지 1440분). 등급은 **P3**다(#318). 조치가 하이퍼바이저 쪽이라 당일 대응 대상이 아니다.
 
 **왜 중요한가**: 같은 물리 서버의 다른 가상 머신(noisy neighbor) 때문에 이 서버의 성능이 떨어진다.
 
@@ -703,7 +816,7 @@ ethtool <인터페이스>   # 속도·duplex 협상
 <a id="disk-io-saturation"></a>
 ### 🟠 디스크 I/O 포화 (`infra-disk-io-saturation`)
 
-**조건**: 장치별 평균 I/O 큐 깊이(`system_disk_weighted_io_time`의 5분 증가율)가 10 초과(재통지 60분). 행에 호스트·장치·큐 깊이가 나온다.
+**조건**: 디스크 장치별 평균 I/O 큐 깊이(`system_disk_weighted_io_time`의 5분 증가율)가 10 초과, 5분마다 평가해 30분 지속(재통지 60분). node-mixin `NodeDiskIOSaturation`(`for: 30m`)과 같다. 장치는 `^(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+|xvd[a-z]+|dm-[0-9]+|md[0-9]+)$`만 본다(파티션 `sda3` 등 중복 제외). OpenObserve 정규식은 앞뒤가 고정되지 않아 `^(…)$`가 필요하다. LVM 호스트는 물리 장치(`sda`)와 `dm-0`이 따로 잡힐 수 있다. 행에 호스트·장치·큐 깊이가 나온다.
 
 **왜 중요한가**: 요청이 처리 속도보다 빨리 쌓여 읽기·쓰기 지연이 커진다.
 
@@ -714,31 +827,33 @@ ethtool <인터페이스>   # 속도·duplex 협상
 <a id="disk-read-latency"></a>
 ### 🟠 디스크 읽기 지연 (`infra-disk-read-latency`)
 
-**조건**: 장치별 읽기 평균 지연(처리 시간 ÷ 요청 수)이 100ms 초과이면서 같은 장치의 읽기 요청이 초당 5건 이상(`o2c_disk_latency_min_iops`)일 때, 10분 구간(재통지 60분). 입출력이 거의 없을 때 느린 요청 한두 건이 평균을 올리는 오탐을 막으려는 하한이다. 지연 평균은 5분 증가율로 계산하므로 평가 기간을 10분으로 늘려 한 번의 튐으로 울리지 않게 했다.
+**조건**: 디스크 장치별 **30분 평균** 읽기 지연(처리 시간 ÷ 요청 수)이 100ms 초과이고 같은 30분의 읽기 요청이 초당 5건 이상(`o2c_disk_latency_min_iops`)인 상태가 30분 지속(5분마다 평가, 재통지 60분). 장치 필터는 위 I/O 포화와 같다(파티션 중복 제외). 요청 하한은 입출력이 거의 없을 때 느린 요청 한두 건이 평균을 올리는 오탐을 막는다.
 
-**이유(업계 관행)**: 지연 알림은 "지연 임계 AND 최소 요청량"을 함께 요구하는 것이 일반적이다. 하한은 낮게(5건/초) 두어 실제 장애를 가리지 않는다.
+**이유(#318)**: 예전 정의(5분 증가율, 조회 10분)는 "10분 내내"라고 적었지만 실제로는 10분 안의 한 점만 넘어도 울렸다. 그래서 2분짜리 쓰기 몰림(ns0338, 2026-10-22)에도 울렸다. 조회 구간을 늘리면 한 점이 걸릴 기회가 늘어 오히려 더 잘 울린다. 지금은 평균 창을 30분으로 늘리고 30분 대기를 더했다. 업계 기준도 "지속되는" 지연을 본다(Microsoft 10~15ms "consistently", VMware 10ms "sustained"). 임계 100ms는 HDD·쓰기 캐시 없는 RAID를 고려한 값이다.
 
-**왜 중요한가**: 읽기 위주 서비스의 응답이 지연되고 디스크 고장의 전조일 수 있다.
+**왜 중요한가**: 읽기 위주 서비스의 응답이 지연되고 디스크 고장이나 RAID 컨트롤러 캐시 이상의 신호일 수 있다.
 
-**확인**: `iostat -x 1 5`로 읽기 지연을 보고 `dmesg`·SMART(`smartctl -a <장치>`)로 디스크 오류를 본다.
+**확인**: `iostat -x 1 5`로 읽기 지연을 보고 `dmesg`·SMART(`smartctl -a <장치>`)로 디스크 오류를, HP 서버는 `ssacli ctrl all show status`로 컨트롤러 캐시·배터리 상태를 본다.
 
 **대응**: 오류가 있으면 디스크 교체를 계획하고, 부하 문제면 I/O를 분산한다.
 
 <a id="disk-write-latency"></a>
 ### 🟠 디스크 쓰기 지연 (`infra-disk-write-latency`)
 
-**조건**: 장치별 쓰기 평균 지연이 100ms 초과이면서 같은 장치의 쓰기 요청이 초당 5건 이상(`o2c_disk_latency_min_iops`)일 때, 10분 구간(재통지 60분). 읽기 지연과 같은 이유(저활동 오탐 방지, 10분 평가)다.
+**조건**: 디스크 장치별 30분 평균 쓰기 지연이 100ms 초과이고 같은 30분의 쓰기 요청이 초당 5건 이상(`o2c_disk_latency_min_iops`)인 상태가 30분 지속(5분마다 평가, 재통지 60분). 읽기 지연과 같은 이유다.
 
-**왜 중요한가**: 쓰기 위주 서비스(DB 커밋, 로그 기록, 백업)가 지연되고 디스크 고장의 전조일 수 있다.
+**실서버 점검(2026-10-22, 이 정의로 지난 24시간을 5분 단위로 계산)**: ns0288(쓰기 캐시 영구 비활성)은 30분 평균이 계속 100ms를 넘어 최장 약 11시간 이어졌고, ns0272·ns0273도 30분 이상 이어진 구간이 각각 5번 있었다(만성). ns0338의 2분 몰림은 30분 평균 최대 97ms라 걸리지 않았다.
+
+**왜 중요한가**: 쓰기 위주 서비스(DB 커밋, 로그 기록, 백업)가 지연된다. RAID 컨트롤러 쓰기 캐시가 꺼졌거나(배터리 고장·미장착) 디스크 고장의 신호일 수 있다.
 
 **확인**: 위 읽기 지연과 같다. 백업이나 대량 쓰기가 같은 시각에 있었는지도 본다.
 
-**대응**: 오류가 있으면 디스크를 교체하고, 부하 문제면 쓰기를 분산하거나 시간대를 옮긴다.
+**대응**: 오류가 있으면 디스크를 교체하고, 컨트롤러 캐시가 꺼져 있으면 배터리·캐시 모듈을 점검한다. 부하 문제면 쓰기를 분산하거나 시간대를 옮긴다. 원인이 분명한 만성 호스트(캐시 비활성)는 하드웨어 조치 전까지 매일 울리므로 조치 일정을 티켓으로 추적한다.
 
 <a id="inode-fill-24h"></a>
 ### 🟠 inode 24시간 내 고갈 전망 (`infra-inode-fill-24h`)
 
-**조건**: 최근 1시간 여유 inode의 감소 추세로 계산한 소진 시간이 24시간 미만인 파일시스템(30분마다 평가, 재통지 1440분). 행에 호스트·마운트·남은 시간이 나온다.
+**조건**: 여유 inode가 40% 미만이고 최근 6시간 여유 inode의 감소 추세로 계산한 소진 시간이 24시간 미만인 파일시스템이 1시간 지속(30분마다 평가, 재통지 1440분). node-mixin `NodeFilesystemFilesFillingUp`(warning)과 같다. 예전의 1시간 추세는 임시 파일 생성 폭주에 흔들렸다. 행에 호스트·마운트·남은 시간이 나온다.
 
 **왜 중요한가**: 용량이 남아도 inode가 다하면 파일을 만들 수 없다.
 
@@ -787,7 +902,7 @@ ps aux --sort=-%mem | head
 <a id="memory-pressure"></a>
 ### 🟠 메모리 압박 — 주요 페이지 폴트 (`infra-memory-pressure`)
 
-**조건**: 주요(major) 페이지 폴트가 초당 1000건 초과이면서 같은 호스트의 사용 가능 메모리가 전체의 10% 미만(5분 구간, 재통지 60분).
+**조건**: 주요(major) 페이지 폴트가 초당 1000건 초과이면서 같은 호스트의 사용 가능 메모리가 전체의 10% 미만인 상태가 15분 지속(5분마다 평가, 재통지 60분). node-mixin `NodeMemoryMajorPagesFaults`(`for: 15m`)와 같은 지속 조건이다.
 
 **이유**: 여유 메모리가 충분한 DB 호스트가 디스크에서 데이터를 읽는 정상 패턴(mysqld 등)은 major fault가 많아도 메모리 압박이 아니다. 사용 가능 메모리 조건을 AND로 더해 이를 거른다.
 

@@ -40,25 +40,28 @@ EXPECTED_ALERTS = {
     "infra-switch-mac-flap", "infra-switch-syslog-silent",   # 스위치 syslog(Spec #277)
     "infra-fortigate-admin-login-failures", "infra-fortigate-change-unapproved", "infra-fortigate-change-approved",
     "infra-fortigate-ha-failover", "infra-fortigate-critical-detection", "infra-fortigate-syslog-silent",   # 방화벽(Spec #282 / Ticket-3)
+    "infra-ssh-bruteforce-success", "infra-account-change", "infra-sudo-risky-command", "infra-auditd-stopped",
+    "infra-account-lockout",   # 보안 로그 알림(#318)
 }
-# PromQL 알림 16개(#282): name -> (severity, period, frequency, silence, operator, value, stream)
+# PromQL 알림 17개(#282 복원, #318 정비): name -> (severity, period, frequency, silence, operator, value, stream, pending minutes)
 PROMQL_ALERTS = {
-    "infra-cpu-usage-p1": ("P1 긴급", 10, 5, 60, ">=", 90, "system_cpu_utilization"),
-    "infra-cpu-usage-p2": ("P2 경고", 10, 5, 1440, ">=", 0, "system_cpu_utilization"),
-    "infra-caddy-5xx-error-rate": ("P1 긴급", 10, 5, 60, ">=", 5, "caddy_http_request_duration_seconds_count"),
-    "infra-caddy-4xx-error-rate": ("P3 주의", 10, 5, 1440, ">=", 5, "caddy_http_request_duration_seconds_count"),
-    "infra-disk-fill-24h": ("P2 경고", 30, 30, 1440, ">=", 0, "system_filesystem_usage"),
-    "infra-network-errors": ("P2 경고", 10, 5, 60, ">=", 1, "system_network_errors"),
-    "infra-cpu-load-saturation": ("P2 경고", 10, 5, 60, ">", 2, "system_cpu_load_average_1m"),
-    "infra-cpu-iowait": ("P2 경고", 5, 5, 60, ">", 10, "system_cpu_utilization"),
-    "infra-cpu-steal": ("P2 경고", 5, 5, 60, ">", 10, "system_cpu_utilization"),
-    "infra-disk-io-saturation": ("P2 경고", 5, 5, 60, ">", 10, "system_disk_weighted_io_time"),
-    "infra-disk-read-latency": ("P2 경고", 10, 5, 60, ">", 100, "system_disk_operation_time"),
-    "infra-disk-write-latency": ("P2 경고", 10, 5, 60, ">", 100, "system_disk_operation_time"),
-    "infra-inode-fill-24h": ("P2 경고", 30, 30, 1440, ">", 0, "system_filesystem_inodes_usage"),
-    "infra-conntrack-limit": ("P2 경고", 5, 5, 60, ">", 80, "system_network_conntrack_count"),
-    "infra-swap-usage": ("P3 주의", 10, 5, 1440, ">", 80, "system_paging_utilization"),
-    "infra-memory-pressure": ("P2 경고", 5, 5, 60, ">", 1000, "system_paging_faults"),
+    "infra-cpu-usage-p1": ("P2 경고", 5, 5, 60, ">=", 90, "system_cpu_utilization", 15),
+    "infra-cpu-usage-p2": ("P3 주의", 5, 5, 1440, ">=", 0, "system_cpu_utilization", 15),
+    "infra-caddy-5xx-error-rate": ("P1 긴급", 10, 5, 60, ">=", 5, "caddy_http_request_duration_seconds_count", 0),
+    "infra-caddy-4xx-error-rate": ("P3 주의", 10, 5, 1440, ">=", 5, "caddy_http_request_duration_seconds_count", 0),
+    "infra-disk-fill-24h": ("P2 경고", 30, 30, 1440, ">=", 0, "system_filesystem_usage", 60),
+    "infra-disk-fill-4h": ("P1 긴급", 10, 10, 60, ">=", 0, "system_filesystem_usage", 60),
+    "infra-network-errors": ("P2 경고", 5, 5, 60, ">=", 0, "system_network_errors", 60),
+    "infra-cpu-load-saturation": ("P2 경고", 5, 5, 60, ">=", 0, "system_cpu_load_average_1m", 15),
+    "infra-cpu-iowait": ("P3 주의", 5, 5, 1440, ">", 10, "system_cpu_utilization", 15),
+    "infra-cpu-steal": ("P3 주의", 5, 5, 1440, ">", 10, "system_cpu_utilization", 30),
+    "infra-disk-io-saturation": ("P2 경고", 5, 5, 60, ">", 10, "system_disk_weighted_io_time", 30),
+    "infra-disk-read-latency": ("P2 경고", 5, 5, 60, ">", 100, "system_disk_operation_time", 30),
+    "infra-disk-write-latency": ("P2 경고", 5, 5, 60, ">", 100, "system_disk_operation_time", 30),
+    "infra-inode-fill-24h": ("P2 경고", 30, 30, 1440, ">=", 0, "system_filesystem_inodes_usage", 60),
+    "infra-conntrack-limit": ("P2 경고", 5, 5, 60, ">", 80, "system_network_conntrack_count", 0),
+    "infra-swap-usage": ("P3 주의", 10, 5, 1440, ">", 80, "system_paging_utilization", 0),
+    "infra-memory-pressure": ("P2 경고", 5, 5, 60, ">", 1000, "system_paging_faults", 15),
 }
 UPLINK_ALERT = "infra-switch-uplink-down"   # 업링크 목록(o2c_switch_uplinks)이 비어 있으면 만들어지지 않는다
 UPLINKS = [{"device": "ns0250", "port": "Gi1/0/1"}]
@@ -2242,21 +2245,26 @@ def _balanced(text):
     return not stack and not in_quote
 
 
-def test_promql_definitions_are_the_sixteen_restored_alerts_with_unique_infra_names():
+def test_promql_definitions_are_the_seventeen_alerts_with_unique_infra_names():
     names = [a["name"] for a in DEFAULTS["o2c_alerts"]]
     assert len(names) == len(set(names))
-    assert {a["name"] for a in PROMQL_DEFS} == set(PROMQL_ALERTS) and len(PROMQL_DEFS) == 16
+    assert {a["name"] for a in PROMQL_DEFS} == set(PROMQL_ALERTS) and len(PROMQL_DEFS) == 17
     assert all(re.fullmatch(r"infra-[a-z0-9-]+", n) for n in PROMQL_ALERTS)
 
 
 @pytest.mark.parametrize("alert", PROMQL_DEFS, ids=lambda a: a["name"])
-def test_promql_definition_is_well_formed_and_matches_the_handoff(alert):
-    sev, period, freq, silence, op, value, stream = PROMQL_ALERTS[alert["name"]]
+def test_promql_definition_is_well_formed_and_matches_the_definition_table(alert):
+    sev, period, freq, silence, op, value, stream, pending = PROMQL_ALERTS[alert["name"]]
     q = alert["promql"]
     assert isinstance(q, str) and q.strip() and _balanced(q), alert["name"]
     assert not SUBQUERY_OVER_SUM.search(q), "sum by() 결과를 서브쿼리로 감싸면 OpenObserve에서 빈 결과가 나온다"
+    assert not re.search(r"\[\d+[smhd]:\d+[smhd]\]", q), "서브쿼리는 OpenObserve에서 지속 조건을 만들지 못한다(#318)"
     assert alert["severity"] == sev and alert["severity_icon"] == {"P1": "🔴", "P2": "🟠", "P3": "🟡"}[sev[:2]]
     assert (alert["period"], alert["frequency"], alert["silence"]) == (period, freq, silence)
+    assert int(alert.get("pending_minutes", 0)) == pending
+    if pending:   # 지속 조건 알림은 period를 frequency와 같게 둔다(한 평가 = period 안의 한 점, 연속성은 pending이 만든다)
+        assert period == freq, alert["name"]
+        assert "내내" not in alert["what"] + alert["description"], "PromQL 평가는 구간 안의 한 점이라 '내내'가 성립하지 않는다"
     assert (alert["promql_operator"], alert["promql_value"], alert["stream"], alert["stream_type"]) == (op, value, stream, "metrics")
     assert "sql" not in alert and alert["row_template"].startswith("• ")
     assert '"' not in alert["row_template"] and "\\" not in alert["row_template"]   # 행 값을 JSON 본문에 그대로 넣으므로 템플릿이 따옴표·역슬래시를 만들지 않는다
@@ -2297,14 +2305,51 @@ def test_memory_pressure_keeps_1000_major_faults_and_needs_low_available_memory_
     assert a["promql_value"] == 1000 and a["severity"] == "P2 경고" and "10%" in a["what"]
 
 
+DISK_DEVICES = "device=~'^(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+|xvd[a-z]+|dm-[0-9]+|md[0-9]+)$'"
+
+
 @pytest.mark.parametrize("direction", ["read", "write"])
-def test_disk_latency_needs_minimum_iops_from_a_variable_and_ten_minute_period(direction):
+def test_disk_latency_is_a_30_minute_average_on_whole_devices_with_minimum_iops_and_30_minute_pending(direction):
     a = {d["name"]: d for d in PROMQL_DEFS}[f"infra-disk-{direction}-latency"]
     q = a["promql"]
     assert DEFAULTS["o2c_disk_latency_min_iops"] == 5
-    assert q.endswith(f" and on(host_name,device) (sum by(host_name,device)(rate(system_disk_operations{{direction='{direction}'}}[5m])) >= {{{{ o2c_disk_latency_min_iops }}}})")
+    assert q.endswith(f" and on(host_name,device) (sum by(host_name,device)(rate(system_disk_operations{{direction='{direction}',{DISK_DEVICES}}}[30m])) >= {{{{ o2c_disk_latency_min_iops }}}})")
+    assert q.count("[30m]") == 3 and "[5m]" not in q and q.count(DISK_DEVICES) == 3   # 지연 분자·분모·IOPS 하한 모두 30분 평균, 파티션 제외
     assert q.count("{{ o2c_disk_latency_min_iops }}") == 1 and "{{ o2c_disk_latency_min_iops }}" in a["what"]
-    assert (a["promql_value"], a["period"]) == (100, 10)
+    assert (a["promql_value"], a["period"], a["frequency"], a["pending_minutes"]) == (100, 5, 5, 30)
+    assert "30분" in a["what"] and "내내" not in a["what"]
+
+
+def test_openobserve_regex_matchers_are_anchored_where_whole_names_matter():
+    """OpenObserve 레이블 정규식은 앞뒤가 고정되지 않는다(실측: 'sd[a-z]+'가 sda1에 맞음). 장치·CPU 상태 필터는 ^(...)$로 감싼다."""
+    by = {d["name"]: d["promql"] for d in PROMQL_DEFS}
+    assert by["infra-disk-io-saturation"].count(DISK_DEVICES) == 1
+    for name in ("infra-cpu-usage-p1", "infra-cpu-usage-p2"):
+        assert "state=~'^(idle|wait|steal)$'" in by[name] and "min_over_time" not in by[name]
+
+
+def test_small_thresholds_are_compared_inside_the_query_before_rounding():
+    """Config가 round()로 감싸 비교하므로 1%·코어당 2 같은 작은 임계는 PromQL 안에서 비교하고 바깥은 >= 0이다."""
+    by = {d["name"]: d for d in PROMQL_DEFS}
+    for name, inner in (("infra-network-errors", " * 100) > 1)"), ("infra-cpu-load-saturation", "system_cpu_logical_count) > 2")):
+        assert inner in by[name]["promql"] and (by[name]["promql_operator"], by[name]["promql_value"]) == (">=", 0), name
+    assert "system_network_packets" in by["infra-network-errors"]["promql"] and "increase(system_network_errors" in by["infra-network-errors"]["promql"]
+
+
+def test_disk_fill_4h_is_p1_and_the_24h_alert_leaves_its_filesystems_to_it():
+    by = {d["name"]: d for d in PROMQL_DEFS}
+    four, day = by["infra-disk-fill-4h"]["promql"], by["infra-disk-fill-24h"]["promql"]
+    assert "/ 3600) < 4)" in four and ">= 80)" in four and "[6h]" in four
+    assert " unless on(host_name,mountpoint,device) (" in day and day.split(" unless ")[1].count("< 4)") == 1   # 같은 파일시스템에 P1·P2가 함께 오지 않는다
+    inode = by["infra-inode-fill-24h"]["promql"]
+    assert "[1h]" not in inode and inode.count("[6h]") == 2 and "< 40)" in inode
+
+
+def test_cpu_alerts_are_downgraded_without_renaming():
+    by = {d["name"]: d for d in DEFAULTS["o2c_alerts"]}
+    assert by["infra-cpu-usage-p1"]["severity"] == "P2 경고" and by["infra-cpu-usage-p2"]["severity"] == "P3 주의"
+    assert by["infra-cpu-iowait"]["severity"] == by["infra-cpu-steal"]["severity"] == "P3 주의"
+    assert not set(DEFAULTS["o2c_retired_alerts"]) & set(by)
 
 
 def test_every_promql_alert_has_a_runbook_section_and_a_spec_row():
@@ -2317,8 +2362,9 @@ def test_every_promql_alert_has_a_runbook_section_and_a_spec_row():
 
 def test_promql_alerts_are_created_as_promql_metrics_alerts_to_the_current_destination(o2):
     assert _apply(o2).returncode == 0
-    for name, (sev, period, freq, silence, op, value, stream) in PROMQL_ALERTS.items():
+    for name, (sev, period, freq, silence, op, value, stream, pending) in PROMQL_ALERTS.items():
         a = o2.store["alert"][name]
+        assert a["pending_period_sec"] == pending * 60, name
         assert a["stream_type"] == "metrics" and a["stream_name"] == stream and a["is_real_time"] is False, name
         qc = a["query_condition"]
         assert qc["type"] == "promql" and qc["promql"].strip() and "sql" not in qc, name
@@ -2422,7 +2468,8 @@ def test_p1_destination_routes_every_p1_alert_log_or_metric_and_nothing_else(o2)
         p1 = a["context_attributes"]["severity"].startswith("P1")
         assert a["destinations"] == [P1_DEST if p1 else "infra-automation-webhook"], name
     assert o2.store["alert"]["infra-root-login-success"]["destinations"] == [P1_DEST]
-    assert o2.store["alert"]["infra-cpu-usage-p1"]["destinations"] == [P1_DEST]
+    assert o2.store["alert"]["infra-disk-fill-4h"]["destinations"] == [P1_DEST]
+    assert o2.store["alert"]["infra-cpu-usage-p1"]["destinations"] == ["infra-automation-webhook"]   # #318에서 P2로 내렸다
     assert o2.store["alert"][SELFTEST]["destinations"] == ["infra-automation-webhook"]
     o2.writes.clear()
     assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0 and o2.writes == []
@@ -2700,3 +2747,129 @@ def test_promql_alerts_round_the_value_so_notifications_carry_no_decimals(o2):
     defs = {a["name"]: a["promql"] for a in PROMQL_DEFS}
     for name, q in defs.items():
         assert o2.store["alert"][name]["query_condition"]["promql"] == "round(%s)" % q.replace("{{ o2c_disk_latency_min_iops }}", "5"), name
+
+
+# --- 지속 조건 pending_period_sec (#318): 알림 최상위 필드, 0도 항상 보내고 계획 비교에 들어간다 --------------------------------
+def _one_alert_want(**extra):
+    alert = dict(PROMQL_DEFS[0], action="① a ② b", **extra)
+    return next(d for d in o2c.o2c_desired(_desired_spec([alert])) if d["kind"] == "alert")
+
+
+def test_pending_minutes_become_top_level_pending_period_sec_and_zero_is_always_sent():
+    want = _one_alert_want()
+    assert want["body"]["pending_period_sec"] == 15 * 60 and "pending_period_sec" not in want["body"]["trigger_condition"]
+    assert _one_alert_want(pending_minutes="30")["body"]["pending_period_sec"] == 1800   # 템플릿 렌더링 값(문자열)도 정수로
+    no_pending = dict(PROMQL_DEFS[0], action="① a ② b")
+    no_pending.pop("pending_minutes", None)
+    body = next(d for d in o2c.o2c_desired(_desired_spec([no_pending])) if d["kind"] == "alert")["body"]
+    assert body["pending_period_sec"] == 0   # 빼면 60 → 0으로 줄인 정의가 부분집합 비교에서 같게 보여 서버에 옛 값이 남는다
+
+
+@pytest.mark.parametrize("server, minutes, ops", [(900, 15, []), (0, 15, ["update"]), (900, 0, ["update"]), (1800, 15, ["update"])])
+def test_plan_compares_pending_period_sec_and_converges(server, minutes, ops):
+    want = _one_alert_want(pending_minutes=minutes)
+    stored = dict(want["body"], alert_id="a1", pending_period_sec=server)
+    existing = {"alert": [stored], "destination": [{"name": "dest-a"}]}
+    plan = o2c.o2c_plan([want], existing, "default")
+    assert [a["op"] for a in plan] == ops
+    if plan:   # 반영한 서버 상태(GET 응답에 pending_period_sec가 남는 것은 실서버 v1.0.4에서 확인)로 다시 계획하면 변경이 없다
+        existing["alert"] = [dict(stored, **plan[0]["body"])]
+        assert o2c.o2c_plan([want], existing, "default") == []
+
+
+def test_pending_drift_on_the_server_is_one_update_and_the_rerun_writes_nothing(o2):
+    assert _apply(o2).returncode == 0
+    assert o2.store["alert"]["infra-disk-write-latency"]["pending_period_sec"] == 1800
+    assert o2.store["alert"]["infra-oom-kill"]["pending_period_sec"] == 0 and o2.store["alert"]["infra-auditd-stopped"]["pending_period_sec"] == 120
+    alert = o2.store["alert"]["infra-disk-write-latency"]
+    alert["pending_period_sec"] = 0   # 서버에서 누군가 대기를 지운 상태
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    assert [(m, p) for m, p, _ in o2.writes] == [("PUT", f"/api/v2/default/alerts/{alert['alert_id']}")]
+    assert o2.store["alert"]["infra-disk-write-latency"]["pending_period_sec"] == 1800
+    o2.writes.clear()
+    res = _apply(o2)
+    assert res.returncode == 0 and o2.writes == [] and _changed(res) == 0
+
+
+# --- 보안 로그 알림 (#318) ------------------------------------------------------------------------------------------------
+SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, marker only its search carries)
+    "infra-ssh-bruteforce-success": ("P1 긴급", 15, 15, 0, "event_outcome IN ('failure', 'success')"),
+    "infra-account-change": ("P2 경고", 5, 5, 0, "type=ADD_USER"),
+    "infra-sudo-risky-command": ("P1 긴급", 5, 5, 0, "process_command_line"),
+    "infra-auditd-stopped": ("P1 긴급", 10, 10, 2, "type=DAEMON_START"),
+    "infra-account-lockout": ("P2 경고", 5, 5, 0, "account temporarily locked"),
+}
+
+
+def test_security_alerts_are_created_with_their_grades_windows_and_raw_log_links(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    for name, (sev, period, silence, pending, _marker) in SECURITY_ALERTS.items():
+        a = o2.store["alert"][name]
+        assert a["stream_name"] == "security_logs" and a["query_condition"]["type"] == "sql", name
+        assert a["context_attributes"]["severity"] == sev, name
+        trigger = a["trigger_condition"]
+        assert (trigger["period"], trigger["frequency"], trigger["silence"], a["pending_period_sec"]) == (period, 1, silence, pending * 60), name
+        decoded = _decode_raw_url(_raw_original(o2, a))[2]   # 모두 WHERE에서 원문 조회를 파생한다
+        assert decoded.startswith('SELECT * FROM "security_logs" WHERE ') and "count(" not in decoded, name
+
+
+def test_security_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_on_the_synthetic_records(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    records = [r for p, _, rs in o2.ingests if "/security_logs_alert_verify/" in p for r in rs]
+    searches = [sql for stream, sql in o2.searches if stream == "security_logs_alert_verify"]
+    for name, (*_, marker) in SECURITY_ALERTS.items():
+        (sql,) = [s for s in searches if marker in s]
+        spec = FIXTURES[name]
+        own = {c["host"] for c in spec["cases"]}
+        rows = _run_alert_on_sqlite(sql, records, "security_logs_alert_verify")
+        fired = {m.group(1) for row in rows if (m := re.fullmatch(r"(.+)-[0-9a-f]+", str(row["host_name"]))) and m.group(1) in own}
+        assert fired == {c["host"] for c in spec["cases"] if c["fires"]}, name
+        if name == "infra-account-change":   # 특권 그룹은 따로 표시하고 실행 계정은 auditd AUID에서 읽는다
+            kinds = {(re.fullmatch(r"(.+)-[0-9a-f]+", r["host_name"]).group(1), r["change_kind"], r["actor"]) for r in rows
+                     if re.fullmatch(r"(.+)-[0-9a-f]+", r["host_name"]).group(1) in own}
+            assert ("verify-acct-wheel", "특권 그룹 변경", "opsverify") in kinds and ("verify-acct-add", "계정·그룹 추가", "opsverify") in kinds
+        if name == "infra-sudo-risky-command":   # 통지 행에는 명령 원문 대신 종류 라벨만 싣는다
+            labels = {r["command_kind"] for r in rows}
+            assert labels <= {"SELinux 해제", "방화벽 규칙 초기화", "보안·로그 서비스 중지"} and "process_command_line" not in FIXTURES and \
+                "{command_kind}" in o2.store["alert"][name]["row_template"] and "{process_command_line}" not in o2.store["alert"][name]["row_template"]
+
+
+def test_security_fixtures_cover_every_new_alert_with_firing_and_quiet_cases():
+    for name in SECURITY_ALERTS:
+        assert {c["fires"] for c in FIXTURES[name]["cases"]} == {True, False}, name
+    assert any("usermod --help" in r.get("body", "") or "--help" in r.get("body", "") for c in FIXTURES["infra-account-change"]["cases"] for r in c["records"])
+    assert any("grantors=pam_faillock" in r.get("body", "") for c in FIXTURES["infra-account-lockout"]["cases"] for r in c["records"])
+
+
+def test_sudo_risky_command_list_builds_safe_like_conditions_and_rejects_unsafe_input():
+    groups = o2c.o2c_sudo_risky_groups([{"label": "SELinux 해제", "patterns": ["setenforce 0"]}], ["auditd"], "서비스 중지")
+    assert groups[-1] == {"label": "서비스 중지", "patterns": [v % "auditd" for v in o2c.SERVICE_STOP_VERBS]}
+    assert o2c.o2c_like_any(groups[:1], "process_command_line") == "(lower(process_command_line) LIKE '%setenforce 0%')"
+    assert o2c.o2c_like_label(groups[:1], "process_command_line").startswith("CASE WHEN (lower(process_command_line) LIKE '%setenforce 0%') THEN 'SELinux 해제'")
+    for bad in ([{"label": "x", "patterns": ["it's"]}], [{"label": "x", "patterns": ["a%b"]}], [{"label": "x", "patterns": ["UPPER"]}],
+                [{"label": "a'b", "patterns": ["x"]}], [{"label": "x", "patterns": []}]):
+        assert not o2c.o2c_valid_like_groups(bad), bad
+        with pytest.raises(ValueError):
+            o2c.o2c_like_any(bad, "process_command_line")
+    with pytest.raises(ValueError):
+        o2c.o2c_sudo_risky_groups([], ["auditd; drop"], "x")
+    assert o2c.o2c_valid_group_names(["wheel", "systemd-journald"]) and not o2c.o2c_valid_group_names(["Wheel"])
+
+
+@pytest.mark.parametrize("extra", [{"o2c_privileged_groups": []}, {"o2c_privileged_groups": ["wh'eel"]},
+                                   {"o2c_sudo_risky_commands": [{"label": "x", "patterns": ["a'b"]}]},
+                                   {"o2c_sudo_protected_services": ["Auditd"]}, {"o2c_ssh_bruteforce_min_failures": 0}])
+def test_invalid_security_alert_variables_fail_before_any_request(o2, extra):
+    res = _apply(o2, extra=extra)
+    assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+
+
+def test_every_new_alert_has_a_runbook_section_and_a_spec_mention():
+    runbook, spec = RUNBOOK.read_text(encoding="utf-8"), (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    for name in list(SECURITY_ALERTS) + ["infra-disk-fill-4h"]:
+        anchor = name.removeprefix("infra-")
+        assert f'<a id="{anchor}"></a>' in runbook and f"`{name}`" in runbook and f"`{name}`" in spec, name
+    assert "pending_period_sec" in spec and "pending_minutes" in spec
