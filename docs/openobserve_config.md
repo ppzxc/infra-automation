@@ -17,7 +17,7 @@
   | `event_reason` | 실패 사유: `failed password`, `invalid user`, `NOT in sudoers`, `authentication failure` |
   | `user_effective_name`, `process_command_line` | sudo 대상 사용자(`USER=`)와 실행 명령(`COMMAND=`) — sudo 성공은 알림 없이 이 필드로 감사 기록만 남김 |
 
-  입력 필드는 엣지(#91)가 만든 `process_executable_name`(= `sshd`/`sudo`)와 원문 `body`입니다. 엣지와 필드 계약이 바뀌면 같은 PR(또는 연속 PR)에서 함께 고칩니다.
+  입력 필드는 엣지(#91)가 만든 `process_executable_name`(= `sshd`·`sshd-session`(OpenSSH 9.8+)/`sudo`)와 원문 `body`입니다. 엣지와 필드 계약이 바뀌면 같은 PR(또는 연속 PR)에서 함께 고칩니다.
 - **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수 `security_semantics` → 함수 `fortigate_semantics`(둘 다 `after_flatten: true`) → `security_logs`.
 - **VRL ingest function `fortigate_semantics`** (`roles/openobserve_config/files/vrl/fortigate_semantics.vrl`, Spec #282 / Ticket-2): `security_logs`에서 `service_name = fortigate-syslog`인 레코드(포티게이트 방화벽 syslog, [런북](runbooks/fortigate-syslog.md))만 해석해 필드를 **추가**합니다. 원문 `body`와 기존 필드(`host_name`은 수집 서버, `severity`는 항상 0)는 바꾸지 않고, `type=` 키가 없는 줄과 다른 서비스(서버·스위치 포함) 레코드는 그대로 통과합니다. 소스 스트림당 파이프라인은 하나라 별도 파이프라인 없이 보안 로그 파이프라인에서 `security_semantics` 다음 함수로 잇습니다(서비스 검사는 각 함수 안에 있어 서로의 레코드를 건드리지 않습니다). 필드 이름은 OTel 관례를 따르고 OpenObserve가 점을 밑줄로 저장합니다.
 

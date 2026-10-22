@@ -72,6 +72,21 @@ def test_sshd_login_lines_become_user_address_port_and_outcome(tmp_path, line, e
     assert _added(rec, out) == expected
 
 
+@pytest.mark.parametrize("line, expected", [
+    ("Accepted publickey for alice from 203.0.113.5 port 52000 ssh2: ED25519 SHA256:abc",
+     {"user_name": "alice", "source_address": "203.0.113.5", "source_port": 52000,
+      "event_action": "ssh_login", "event_outcome": "success"}),
+    ("Failed password for bob from 203.0.113.9 port 40000 ssh2",
+     {"user_name": "bob", "source_address": "203.0.113.9", "source_port": 40000,
+      "event_action": "ssh_login", "event_outcome": "failure", "event_reason": "failed password"}),
+])
+def test_sshd_session_lines_of_openssh_9_8_are_interpreted_like_sshd(tmp_path, line, expected):
+    # OpenSSH 9.8+는 인증 기록을 sshd-session 프로세스 이름으로 남긴다(메시지는 sshd와 같다)
+    rec = _rec("sshd-session", "Oct 22 10:11:12 host1 sshd-session[1234]: " + line)
+    out = _apply(tmp_path, rec)
+    assert _added(rec, out) == expected
+
+
 @pytest.mark.parametrize("line", [
     "Invalid user oracle from 198.51.100.7 port 3333",
     "Invalid user guest from 198.51.100.7",
