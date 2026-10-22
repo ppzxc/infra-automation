@@ -76,6 +76,17 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **프로비저닝을 허용하는 호스트(기본 거부)**: Host Provisioning은 `provision_allowed` 그룹에 속한 호스트만 `target_hosts`로 받는다. 그룹이 없거나 비어 있으면(기본 상태) 어떤 호스트도 허용되지 않아 모든 프로비저닝이 접속 전에 실패한다. 그래서 `servers`에 새로 추가된 호스트는 자동으로 막힌다. 운영 절차는 확인 → 허용 → 실행 → 허용 해제다. (1) 대상 호스트가 프로비저닝 대상임을 확인한다. (2) Semaphore 인벤토리에서 `provision_excluded`에서 빼고 `provision_allowed`에 넣는다. (3) Host Provisioning을 `target_hosts`로 실행한다. (4) 끝나면 `provision_allowed`에서 빼고 다시 `provision_excluded`에 넣는다.
 
+**설치 상태 분류 그룹(정보용)**: 프로비저닝·로그·백업이 서버마다 어디까지 적용됐는지 인벤토리에 남겨, 적용이 덜 된 서버에 추가 작업이 나가는 일을 막는다. 이 그룹들은 어떤 플레이도 대상으로 쓰지 않는다. 서버에 직접 접속한 실측으로 나눈다(`NODE_ROLE` 계산은 이 그룹 이름을 건너뛴다).
+
+| 그룹 | 의미 |
+|---|---|
+| `setup_complete` | 프로비저닝·Host Agents(로그·백업)가 모두 확인됨. `provision_allowed`로 옮길 수 있는 후보 |
+| `setup_partial` | 일부만 적용됨(예: 프로비저닝 일부 누락, 에이전트 구버전·백업 없음). 보완 전에는 추가 작업 금지 |
+| `agents_only` | 프로비저닝 없이 Host Agents만 있음(CentOS 6·7 구형 서버). `provision_excluded`에 둔다 |
+| `setup_unverified` | 접속하거나 상태를 확인하지 못함, 또는 확인했지만 외부 통신이 안 되어 Host Agents를 적용하지 않음 |
+
+`provision_excluded`에는 `setup_complete`를 뺀 나머지를 둔다. Semaphore 자신은 완료돼도 `setup_complete`와 `provision_excluded`에 함께 둔다.
+
 **Host Audit에서 빼는 호스트**: 러너(Semaphore 서버)에서 접속할 수 없는 호스트 등은 `host_audit_excluded` 그룹에 넣는다. Host Audit — Monthly·On-demand가 이 그룹을 빼며(`host_audit_scope_pattern`), 보고서와 Asset Inventory에도 나오지 않는다. 다른 템플릿에는 영향이 없다.
 
 ```yaml
@@ -90,9 +101,8 @@ all:
         ns0266: {}
     host_agents_backup_only:   # otelcol 없이 백업만. 지금은 비어 있다.
       hosts: {}
-    host_audit_excluded:   # Host Audit 대상에서 뺀다(러너에서 접속 불가 등).
-      hosts:
-        ns0332: {}
+    host_audit_excluded:   # Host Audit 대상에서 뺀다(러너에서 접속 불가 등). 읽기 전용이라 기본은 비워 둔다.
+      hosts: {}
     firewall_unmanaged:   # HOST PROVISIONING이 방화벽만 건드리지 않는다.
       hosts:
         ns0325: {}
@@ -101,6 +111,14 @@ all:
         ns0266: {}
         ns0332: {}
     provision_allowed:   # Host Provisioning 허용 목록(기본 거부). 비어 있음이 기본. 확인된 대상만 제외에서 빼고 넣는다.
+      hosts: {}
+    setup_complete:   # 설치 상태 분류(정보용): 프로비저닝·로그·백업 모두 확인됨.
+      hosts:
+        ns0325: {}
+    setup_partial:   # 일부만 적용됨. 보완 전 추가 작업 금지.
+      hosts:
+        ns0332: {}
+    agents_only:   # 프로비저닝 없이 Host Agents만 있음.
       hosts: {}
     funa_cluster:   # FUNA Cluster 환경 파일 렌더링(funa_env).
       hosts:
