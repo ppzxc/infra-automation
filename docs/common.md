@@ -16,7 +16,7 @@
 - **표준 3계층 사용자 계정 및 SSH 접근 환경 (Accounts)**: 관리자(`admin`), 서비스 운영자(`operator`), 일반 사용자(`user`) 3계층 역할 모델 기반 계정 생성, 계층별 패스워드리스 `sudoers` 권한 부여 및 SSH 공개키 배포.
 - **시스템 전역 쉘 별칭 (Custom Shell Aliases)**: 모든 사용자가 대화형 셸에서 공통으로 사용할 수 있는 Docker, Compose, Firewalld 단축 명령어(`/etc/profile.d/99-aliases.sh`) 배포.
 - **노드 식별 및 시스템 환경변수 배포**: `NODE_NAME`(단축 관리번호), `NODE_HOSTNAME`(FQDN), `NODE_INTERNAL_HOSTNAME`, `NODE_WILDCARD_HOSTNAME`, `NODE_PRIMARY_IPV4`, `NODE_INTERFACE`, `NODE_GATEWAY`, `NODE_ENV`, `NODE_IDC`, `NODE_ROLE`, `NODE_ADMIN_USER`, `NODE_SSH_PORT` 등을 `/etc/profile.d/98-node-env.sh` 및 `/etc/environment`에 자동 주입.
-  - `NODE_ROLE`: `node_role` 명시값이 우선이고, 없으면 `group_names`에서 `all`과 운영 선택·제외 그룹(`host_agents_*`, `host_audit_*`)을 건너뛴 첫 역할 그룹(`servers`, `loadbalancers`, `overseer` 등), 역할 그룹이 없으면 `server`. 식은 `filter_plugins/node_env.py`의 `node_role_from_groups` 한 곳에 있다(#150). 선택 그룹을 더해도 `/etc/environment`가 흔들리지 않는다.
+  - `NODE_ROLE`: `node_role` 명시값이 우선이고, 없으면 `group_names`에서 `all`과 운영 선택·제외 그룹(`host_agents_*`, `host_audit_*`, `firewall_*`, `funa_cluster`, `provision_*`, `setup_*`, `agents_only`)을 건너뛴 첫 역할 그룹(`servers`, `loadbalancers`, `overseer` 등), 역할 그룹이 없으면 `server`. 식은 `filter_plugins/node_env.py`의 `node_role_from_groups` 한 곳에 있다(#150). 선택 그룹을 더해도 `/etc/environment`가 흔들리지 않는다.
 
 ---
 
