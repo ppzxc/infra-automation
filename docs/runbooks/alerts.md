@@ -163,6 +163,8 @@ docker logs --since 10m <컨테이너 이름> 2>&1 | grep -iE '"level":"(error|f
 
 **왜 중요한가**: 무차별 대입 공격의 전형적인 형태다. fail2ban이 동작하면 이 정도로 쌓이기 전에 차단돼야 한다.
 
+**재통지**: 공격이 이어지는 동안 15분마다 다시 온다(`o2c_ssh_fail_renotify_minutes`). 조회 구간(5분)과 같게 두었을 때는 7시간짜리 공격 하나에 하루 176통이 왔다(2026-10-23).
+
 **확인**
 ```bash
 sudo fail2ban-client status sshd
@@ -180,7 +182,7 @@ sudo grep "<출발지IP>" /var/log/secure | tail
 <a id="ssh-login-failures-per-host"></a>
 ## 🟠 한 서버에 SSH 로그인 실패 급증 (`infra-ssh-login-failures-per-host`)
 
-**조건**: 한 서버에서 5분 동안 SSH 로그인 실패 50회 이상(출발지 무관).
+**조건**: 한 서버에서 5분 동안 SSH 로그인 실패 50회 이상이고 출발지가 3곳 이상. 출발지 하나의 대입 공격은 출발지별 알림만 울린다(같은 사건을 두 번 알리지 않는다). 공격이 이어지면 15분마다 다시 알린다.
 
 **왜 중요한가**: 여러 출발지에서 오는 분산 공격이라 출발지별 알림과 fail2ban에 잡히지 않을 수 있다.
 

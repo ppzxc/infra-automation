@@ -31,12 +31,24 @@ infra-ssh-login-failures-per-source:
         - {repeat: 12, event_action: ssh_login, event_outcome: success, user_name: admin, source_address: 203.0.113.14}
 infra-ssh-login-failures-per-host:
   cases:
-    - name: 한 서버에 여러 출발지로 50회 실패
+    - name: 한 서버에 출발지 3곳에서 50회 실패(분산 공격)
       host: verify-ssh-host-burst
       fires: true
       records:
-        - {repeat: 25, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.20}
-        - {repeat: 25, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.21}
+        - {repeat: 20, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.20}
+        - {repeat: 20, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.21}
+        - {repeat: 10, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.23}
+    - name: 출발지 하나의 대입 공격은 출발지별 알림이 맡는다(2026-10-23 ns0272 사례)
+      host: verify-ssh-host-single
+      fires: false
+      records:
+        - {repeat: 60, event_action: ssh_login, event_outcome: failure, user_name: root, source_address: 203.0.113.24}
+    - name: 출발지 2곳은 분산 공격으로 보지 않는다
+      host: verify-ssh-host-two
+      fires: false
+      records:
+        - {repeat: 25, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.25}
+        - {repeat: 25, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.26}
     - name: 실패 49회는 임계 미만
       host: verify-ssh-host-below
       fires: false

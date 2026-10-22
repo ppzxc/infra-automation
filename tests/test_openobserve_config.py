@@ -365,6 +365,10 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert by["infra-ssh-login-failures-per-source"]["query_condition"]["sql"].count("HAVING count(*) >= 10") == 1
     assert by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"].count("HAVING count(*) >= 50") == 1
     assert by["infra-ssh-login-failures-per-source"]["trigger_condition"]["period"] == 5
+    # 공격이 이어지면 5분이 아니라 15분마다 다시 알린다(2026-10-23, 대입 공격 하나에 하루 176통)
+    for name in ("infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host"):
+        assert by[name]["trigger_condition"]["silence"] == 15, name
+    assert "count(DISTINCT source_address) >= 3" in by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"]
     assert "user_name = 'root'" in by["infra-root-login-success"]["query_condition"]["sql"]
     assert "infra-kernel-disk-errors" not in by
     oom, disk = by["infra-oom-kill"], by["infra-disk-fs-errors"]
@@ -2929,3 +2933,15 @@ def test_raid_alert_sql_reads_only_fields_every_record_of_its_kind_carries():
     for field in ("kind", "hw_state", "hw_name", "raw_state", "cache_status", "cache_reason", "backup_power_operation",
                   "status", "message"):
         assert f'\\"{field}\\":' in script or f'"{field}":' in script, field
+
+
+def test_ssh_per_host_alert_fires_only_on_distributed_attacks_when_it_runs_on_the_fixtures(o2):
+    """A single-source brute force is the per-source alert's job; the per-host alert must not repeat it."""
+    assert _apply(o2).returncode == 0
+    records = [r for p, _, rs in o2.ingests if "/security_logs_alert_verify/" in p for r in rs]
+    (sql,) = [s for stream, s in o2.searches if stream == "security_logs_alert_verify" and "count(DISTINCT source_address)" in s]
+    spec = FIXTURES["infra-ssh-login-failures-per-host"]
+    own = {c["host"] for c in spec["cases"]}
+    fired = {m.group(1) for row in _run_alert_on_sqlite(sql, records, "security_logs_alert_verify")
+             if (m := re.fullmatch(r"(.+)-[0-9a-f]+", str(row["host_name"]))) and m.group(1) in own}
+    assert fired == {c["host"] for c in spec["cases"] if c["fires"]} == {"verify-ssh-host-burst"}
