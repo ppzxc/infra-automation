@@ -2,11 +2,11 @@
 
 - Ticket: [#242](https://github.com/ppzxc/infra-automation/issues/242) (map [#239](https://github.com/ppzxc/infra-automation/issues/239))
 - Date: 2026-10-19
-- Versions checked: ns0332 reports `version: v1.0.4` (`GET /api/default/config`, commit `1e257e69…` = tag **v1.0.4**). Source links point at that tag. Latest release today is **v1.1.1** (2026-10-16). I diffed the files that matter here against v1.1.1, and they still behave the same way (details in §6). otelcol-contrib is pinned at 0.161.0 (`roles/monitoring/vars/main.yml`).
+- Versions checked: ns0331 reports `version: v1.0.4` (`GET /api/default/config`, commit `1e257e69…` = tag **v1.0.4**). Source links point at that tag. Latest release today is **v1.1.1** (2026-10-16). I diffed the files that matter here against v1.1.1, and they still behave the same way (details in §6). otelcol-contrib is pinned at 0.161.0 (`roles/monitoring/vars/main.yml`).
 - Method:
   1. Read the v1.0.4 source for the HTTP traces handler, the OTLP traces/metrics/logs converters, `flatten.rs`, the org settings, retention, the ingestion-route auth table, and the web "View Trace" action.
   2. Read the official docs through Context7 (`/websites/openobserve_ai`, `/open-telemetry/opentelemetry-collector-contrib`, `/caddyserver/website`).
-  3. Ran read-only GETs against ns0332 and against the previous instance, ns0270, which already holds Caddy and funa traces and metrics. The GETs covered stream lists, stream schemas, `GET /api/default/settings` and `GET /api/default/config`. No data was sent and no setting was changed.
+  3. Ran read-only GETs against ns0331 and against the previous instance, ns0270, which already holds Caddy and funa traces and metrics. The GETs covered stream lists, stream schemas, `GET /api/default/settings` and `GET /api/default/config`. No data was sent and no setting was changed.
 - Builds on: [host-agents-openobserve-rustfs-contract.md](host-agents-openobserve-rustfs-contract.md) (logs/metrics contract, auth, TLS, compression).
 
 ## TL;DR
@@ -17,9 +17,9 @@
 | Traces auth | Same as logs: `Authorization: Basic base64(<org>:<o2oi_ token>)`. `/{org}/v1/traces` (POST) is listed in the ingestion-route table, so the per-host org ingestion token is accepted. |
 | Traces stream selection | Same `stream-name` header as logs. **No header means the stream is called `default`**. The name goes through `format_stream_name` (non `[a-zA-Z0-9_:]` → `_`, lowercased). A dedicated `otlphttp/traces` exporter with `stream-name: <traces stream>` is needed. Reusing `otlphttp/metrics`, which sends no header, would land spans in `default`, and that is exactly what ns0270 shows. |
 | OTLP metric → stream | **One stream per metric name.** `stream = format_stream_name(metric.name)`: dots → `_`, lowercased, no unit or type suffix added. `stream-name` is ignored for metrics. A histogram `X` writes to `X_bucket` (with `le`), `X_count`, `X_sum`, and `X_min`/`X_max` when the data point carries them. The `X` stream itself holds only metadata (0 docs). The same metric from different services shares one stream and is separated by the `service_name` label. |
-| ECS `trace.id` / `span.id` | OpenObserve flattens **structured fields only**. Both a dotted key `trace.id` and a nested `{"trace":{"id":…}}` become `trace_id` (`format_key`: lowercase, non-alnum → `_`, nesting joined with `_`). **But our container receiver ships the JSON line as a string `body`, and OpenObserve does not parse a string body.** So `trace.id` doesn't become a column on ns0332 today (live `app_logs` has no trace field). |
-| Field the log→trace link needs | The log record must have a column whose name equals the **org setting `trace_id_field_name`** (default `trace_id`; ns0332 = `trace_id`, `span_id`). The UI shows "View Trace" only when `record[trace_id_field_name]` is present. That is one value per org, set under *Management → Organization Parameters* or `POST /api/{org}/settings`. Recommended: fill the native OTLP LogRecord TraceID/SpanID in otelcol. OpenObserve then writes them as hex `trace_id`/`span_id` regardless of the source field name, and the defaults match. |
-| Trace retention | Per stream: stream setting `data_retention` (days; `0` = use the global value), via the UI *Stream details → Data Retention* or `PUT /api/{org}/streams/{stream}/settings?type=traces`. Global: `ZO_COMPACT_DATA_RETENTION_DAYS`, which is **365 on ns0332**. The traces stream does not exist on ns0332 yet, so the per-stream value can only be set after the first span arrives (or by creating the settings ahead of time with a write). |
+| ECS `trace.id` / `span.id` | OpenObserve flattens **structured fields only**. Both a dotted key `trace.id` and a nested `{"trace":{"id":…}}` become `trace_id` (`format_key`: lowercase, non-alnum → `_`, nesting joined with `_`). **But our container receiver ships the JSON line as a string `body`, and OpenObserve does not parse a string body.** So `trace.id` doesn't become a column on ns0331 today (live `app_logs` has no trace field). |
+| Field the log→trace link needs | The log record must have a column whose name equals the **org setting `trace_id_field_name`** (default `trace_id`; ns0331 = `trace_id`, `span_id`). The UI shows "View Trace" only when `record[trace_id_field_name]` is present. That is one value per org, set under *Management → Organization Parameters* or `POST /api/{org}/settings`. Recommended: fill the native OTLP LogRecord TraceID/SpanID in otelcol. OpenObserve then writes them as hex `trace_id`/`span_id` regardless of the source field name, and the defaults match. |
+| Trace retention | Per stream: stream setting `data_retention` (days; `0` = use the global value), via the UI *Stream details → Data Retention* or `PUT /api/{org}/streams/{stream}/settings?type=traces`. Global: `ZO_COMPACT_DATA_RETENTION_DAYS`, which is **365 on ns0331**. The traces stream does not exist on ns0331 yet, so the per-stream value can only be set after the first span arrives (or by creating the settings ahead of time with a write). |
 
 ## 1. Traces ingestion
 
@@ -83,26 +83,26 @@ Notes:
 In `handle_logs_request` ([`core/logs/otlp.rs`][r-logs]):
 1. Resource attributes are copied with their raw keys. Then `severity`, `body = get_val(body)`, `dropped_attributes_count`, and **every LogRecord attribute under its raw key** (for example `trace.id`) are copied.
 2. **If the LogRecord TraceId/SpanId are valid (non-zero), they are written as `rec["trace_id"]` / `rec["span_id"]` in lowercase hex.** This happens after the attributes.
-3. `flatten::flatten_with_level(rec, flatten_level)` runs. The level is the per-stream `flatten_level`, otherwise `ZO_INGEST_FLATTEN_LEVEL`, which is **3 on ns0332**. Deeper objects are stored as a JSON string.
+3. `flatten::flatten_with_level(rec, flatten_level)` runs. The level is the per-stream `flatten_level`, otherwise `ZO_INGEST_FLATTEN_LEVEL`, which is **3 on ns0331**. Deeper objects are stored as a JSON string.
 
 `flatten`/`format_key` ([flatten.rs][r-flatten]):
 - Key chars are lowercased, and anything outside `[a-z0-9_]` becomes `_`. Nested keys are joined with `_`. Arrays are stored as JSON strings.
 - So **`trace.id` (dotted attribute) and `{"trace":{"id":…}}` (nested map) both become `trace_id`**, and `span.id` becomes `span_id`. ECS fields at depth 2 are within level 3.
 - **camelCase loses its word boundary:** `traceID` → `traceid`, `spanID` → `spanid`.
 - **Collisions are not rejected.** The docstring says flattening "will return an error if … keys colliding", but the code only does `flattened.insert(key, value)`, so the last write wins. If a record carries both an attribute `trace.id` and a native TraceId, both map to `trace_id`.
-- Live evidence of the separator on ns0332 `app_logs`: `attrs["com.docker.compose.project"]` → `attrs_com_docker_compose_project`, and journald `body._COMM` → `body__comm`.
+- Live evidence of the separator on ns0331 `app_logs`: `attrs["com.docker.compose.project"]` → `attrs_com_docker_compose_project`, and journald `body._COMM` → `body__comm`.
 
 ### 3.2 What our pipeline does today
 
 `filelog/containers` in `roles/monitoring/templates/otelcol-contrib.yaml.j2`:
 - It parses a JSON line only into the **temporary** `attributes._lvl` to lift the level into severity, then removes `_lvl`. `body` stays the original **string** (ADR-0008).
 - OpenObserve stores a string body as one `body` column and doesn't parse JSON out of it (`rec["body"] = get_val(body)`).
-- Result: an ECS line's `trace.id` reaches ns0332 only inside the `body` text. The live `app_logs` schema has no `trace_id`, `span_id` or `trace_*` column. **Today no log on ns0332 can link to a trace.**
+- Result: an ECS line's `trace.id` reaches ns0331 only inside the `body` text. The live `app_logs` schema has no `trace_id`, `span_id` or `trace_*` column. **Today no log on ns0331 can link to a trace.**
 
 ### 3.3 What the link requires
 
 **Server side.**
-- Org settings hold one `trace_id_field_name` and one `span_id_field_name`. Defaults are `trace_id` / `span_id` (`default_trace_id_field_name` in [common/meta/organization.rs][r-org]). ns0332 has the defaults (`GET /api/default/settings` → `"trace_id_field_name":"trace_id","span_id_field_name":"span_id"`).
+- Org settings hold one `trace_id_field_name` and one `span_id_field_name`. Defaults are `trace_id` / `span_id` (`default_trace_id_field_name` in [common/meta/organization.rs][r-org]). ns0331 has the defaults (`GET /api/default/settings` → `"trace_id_field_name":"trace_id","span_id_field_name":"span_id"`).
 - You can set them in the UI under *Management → Organization Parameters → Log details* ([correlation doc][d-correlation]) or with `POST /api/{org}/settings` ([router][r-router] line 762; [settings.rs][r-org-settings]).
 
 **UI side** (`useViewTraceAction.ts` @ v1.0.4, [link][r-viewtrace]):
@@ -110,7 +110,7 @@ In `handle_logs_request` ([`core/logs/otlp.rs`][r-logs]):
 showViewTraceBtn.value = !tracesMenuHidden && !serviceStreamsEnabled &&
   record?.[organizationSettings.trace_id_field_name];
 ```
-- `service_streams_enabled` is enterprise-only and `false` on ns0332 (`GET /api/default/config`), so the button depends only on that field being present in the log record.
+- `service_streams_enabled` is enterprise-only and `false` on ns0331 (`GET /api/default/config`), so the button depends only on that field being present in the log record.
 - The docs say the same: "confirm that in your log stream the trace ID and span ID are available in the `trace_id` and `span_id` respectively. If not, … configure … in the Organization parameter section" ([correlation doc][d-correlation]).
 - Spans always store `trace_id`/`span_id`. The mapping only names the column on the **log** side.
 
@@ -130,10 +130,10 @@ showViewTraceBtn.value = !tracesMenuHidden && !serviceStreamsEnabled &&
 ## 4. Trace stream retention
 
 - **Per stream:** `StreamSettings.data_retention` (days). `0` means unset, which falls back to the global value. Set it in the UI under *Streams → stream details → Data Retention in days* ([stream details doc][d-stream-details]) or with **`PUT /api/{org}/streams/{stream}/settings?type=traces`**. The v1.0.4 router only has `put(stream::update_settings)` on that path ([router][r-router] line 799). The API reference page shows `POST`, which doesn't match v1.0.4 ([stream settings API doc][d-stream-settings]).
-- **Global:** `ZO_COMPACT_DATA_RETENTION_DAYS` (default 3650, minimum 3) ([env vars doc][d-env]). **ns0332: `data_retention_days: 365`** (`GET /api/default/config`), so a traces stream without its own setting keeps 365 days.
+- **Global:** `ZO_COMPACT_DATA_RETENTION_DAYS` (default 3650, minimum 3) ([env vars doc][d-env]). **ns0331: `data_retention_days: 365`** (`GET /api/default/config`), so a traces stream without its own setting keeps 365 days.
 - **How the compactor applies it:** `generate_jobs()` uses `stream_settings.data_retention` when it is > 0, otherwise the global value ([compaction/retention.rs][r-retention] lines 87–97). This is already recorded in ADR-0006 (`docs/adr/0006-host-agents-otelcol-resticprofile.md` line 162). It covers trace streams too, because the loop runs over all stream types except enrichment tables and file lists.
 - `ZO_TRACES_FILE_RETENTION`/`ZO_TRACES_QUERY_RETENTION` (default `hourly`) are **partition granularity, not retention**.
-- **Where to manage it:** `roles/openobserve_config` currently manages templates, destinations, functions, pipelines and alerts, not stream settings. It is the natural home for a declarative `data_retention` on the traces stream. Because the stream appears only on first ingest (ns0332 has no traces stream today), the task has to run after the first span or tolerate a missing stream.
+- **Where to manage it:** `roles/openobserve_config` currently manages templates, destinations, functions, pipelines and alerts, not stream settings. It is the natural home for a declarative `data_retention` on the traces stream. Because the stream appears only on first ingest (ns0331 has no traces stream today), the task has to run after the first span or tolerate a missing stream.
 
 ## 5. Contract snippet (for the spec)
 
@@ -156,7 +156,7 @@ service:
 
 ## 6. Version notes
 
-- Everything above was read at **v1.0.4**, the version both ns0332 and ns0270 run.
+- Everything above was read at **v1.0.4**, the version both ns0331 and ns0270 run.
 - I diffed these v1.0.4 files against **v1.1.1**: `traces/mod.rs`, `api/search/traces/mod.rs`, `metrics/otlp.rs`, `logs/otlp.rs`, `flatten.rs`, `common/meta/organization.rs`, `useViewTraceAction.ts`. The behaviour described here is unchanged: `None => "default"`, the `service_` resource prefix, `format_stream_name(metric.name)`, the conditional `_sum`/`_min`/`_max`, `rec["trace_id"]` from the LogRecord, default `trace_id`/`span_id`, and the View Trace condition. The diffs are refactors (`Cow` key formatting, allocation changes) and new tests. An upgrade to v1.1.x doesn't change this contract.
 - `service_streams_enabled` (enterprise) hides "View Trace" in favour of the correlation view. That doesn't apply to our opensource build.
 
@@ -188,4 +188,4 @@ service:
 - OpenObserve docs: traces ingestion, log↔trace correlation, stream details, stream settings API, environment variables.
 - OpenTelemetry Collector contrib: stanza `trace_parser` operator.
 - Caddy docs: `tracing` directive (`traceID`/`spanID` in access logs).
-- Live read-only checks: ns0332 (`/api/default/config`, `/api/default/settings`, `/api/default/streams?type={logs,metrics,traces}`, `app_logs` schema) and ns0270 (`default` traces/logs schemas, metric stream list and schemas of `jvm_memory_used`, `http_server_request_duration_bucket`, `caddy_http_requests_total`).
+- Live read-only checks: ns0331 (`/api/default/config`, `/api/default/settings`, `/api/default/streams?type={logs,metrics,traces}`, `app_logs` schema) and ns0270 (`default` traces/logs schemas, metric stream list and schemas of `jvm_memory_used`, `http_server_request_duration_bucket`, `caddy_http_requests_total`).

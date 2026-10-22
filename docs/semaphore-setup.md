@@ -60,13 +60,13 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 | Inventory 종류 | **Static** (Semaphore UI에서 YAML 편집). `inventory/hosts.yml`은 `.gitignore` 대상이라 저장소 checkout에 없으므로 File 종류로는 쓸 수 없다. 형식은 `inventory/hosts.yml.example` 참고 |
 | Inventory 사용자 자격증명 | None |
 
-인벤토리에는 Inventory Hostname(관리번호, 예: `ns0332`)만 있다. 접속 IP와 포트는 OpenBao에서 동적으로 채운다. Host Agents 대상은 `servers` 그룹이다.
+인벤토리에는 Inventory Hostname(관리번호, 예: `ns0331`)만 있다. 접속 IP와 포트는 OpenBao에서 동적으로 채운다. Host Agents 대상은 `servers` 그룹이다.
 
 **Host Agents를 적용하지 않는 호스트**: Semaphore Static 인벤토리에서 `servers`에는 두되 `host_agents_excluded` 그룹에도 넣는다. Deploy·Config·Backup·Repo Maintenance가 모두 이 그룹을 뺀다. 템플릿의 Limit이나 `target_hosts`로 따로 빼지 않는다.
 
 **백업만 적용하는 호스트**: 로그를 다른 체계가 수집하는 호스트는 `servers`에 두고 `host_agents_backup_only` 그룹에도 넣는다(ADR-0006 §2.1). Deploy·Config·Backup이 이 호스트에는 otelcol 단계를 건너뛰고 restic·resticprofile만 적용하며, Repo Maintenance도 포함한다. OpenBao `hosts/<host>/agents`에 `o2_ingest_token`은 없어도 된다. 매일의 `job=backup` 결과는 OpenObserve로 가지 않는다. `host_agents_excluded`와 함께 넣지 않는다(제외가 우선한다).
 
-**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0332 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `agents/openobserve`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao `hosts/<host>/agents`의 `otel_app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `OpenObserve — Config`의 OpenBao 토큰이 `hosts/*/agents` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
+**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `agents/openobserve`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao `hosts/<host>/agents`의 `otel_app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `OpenObserve — Config`의 OpenBao 토큰이 `hosts/*/agents` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
 
 **방화벽을 건드리지 않는 호스트**: `servers`(또는 `loadbalancers`)에 두면서 `firewall_unmanaged` 그룹에도 넣는다. HOST PROVISIONING(`site.yml`)이 이 호스트의 방화벽(UFW·firewalld·iptables, CentOS 7 raw 경로 포함) 태스크를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo 정책은 그대로 적용한다. Host Audit 드리프트 검사는 같은 인벤토리로 `site.yml`을 check 실행하므로 따로 설정할 것이 없다. 프로비저닝 전에 `--check --diff`로 방화벽 태스크가 하나도 나오지 않는지 확인한다(#220).
 
@@ -109,7 +109,7 @@ all:
     provision_excluded:   # Host Provisioning 제외. 기본은 servers 전체. 확인된 대상만 빼서 provision_allowed로 옮긴다. provision_allowed보다 우선한다.
       hosts:
         ns0266: {}
-        ns0332: {}
+        ns0331: {}
     provision_allowed:   # Host Provisioning 허용 목록(기본 거부). 비어 있음이 기본. 확인된 대상만 제외에서 빼고 넣는다.
       hosts: {}
     setup_complete:   # 설치 상태 분류(정보용): 프로비저닝·로그·백업 모두 확인됨.
@@ -117,7 +117,7 @@ all:
         ns0325: {}
     setup_partial:   # 일부만 적용됨. 보완 전 추가 작업 금지.
       hosts:
-        ns0332: {}
+        ns0331: {}
     agents_only:   # 프로비저닝 없이 Host Agents만 있음.
       hosts: {}
     funa_cluster:   # FUNA Cluster 환경 파일 렌더링(funa_env).

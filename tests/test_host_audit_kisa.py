@@ -59,7 +59,7 @@ ALL_GOOD = ["U-%02d|GOOD|ok" % i for i in ALL_CODES]
 def test_parser_produces_all_five_verdicts():
     lines = ["U-01|GOOD|PermitRootLogin=no", "U-02|VULN|PASS_MAX_DAYS=99999", "U-06|NA|su not installed",
              "U-07|MANUAL|login-capable accounts: root", "U-03|VULN|deny=0"]
-    result = host_audit_kisa_result(ok_probe(lines), [exception("KISA-2026:U-03")], "ns0332", ["servers"], TODAY)
+    result = host_audit_kisa_result(ok_probe(lines), [exception("KISA-2026:U-03")], "ns0331", ["servers"], TODAY)
 
     v = verdicts(result)
     assert result["status"] == "ok" and result["edition"] == "KISA-2026"
@@ -98,7 +98,7 @@ def test_run_without_markers_or_unreachable_is_a_failed_check():
 @pytest.mark.parametrize("raw", ["VULN", "MANUAL"])
 def test_active_exception_marks_finding_approved(raw):
     lines = ["U-02|%s|x" % raw]
-    result = host_audit_kisa_result(ok_probe(lines), [exception()], "ns0332", ["servers"], TODAY)
+    result = host_audit_kisa_result(ok_probe(lines), [exception()], "ns0331", ["servers"], TODAY)
     item = next(it for it in result["results"] if it["code"] == "KISA-2026:U-02")
     assert item["verdict"] == EXCEPTION
     assert item["exception"]["state"] == "유효"
@@ -108,7 +108,7 @@ def test_active_exception_marks_finding_approved(raw):
 @pytest.mark.parametrize("raw", ["VULN", "MANUAL"])
 def test_expired_exception_reverts_to_vulnerable(raw):
     expired = exception(expires_on="2026-10-08")
-    result = host_audit_kisa_result(ok_probe(["U-02|%s|x" % raw]), [expired], "ns0332", [], TODAY)
+    result = host_audit_kisa_result(ok_probe(["U-02|%s|x" % raw]), [expired], "ns0331", [], TODAY)
     item = next(it for it in result["results"] if it["code"] == "KISA-2026:U-02")
     assert item["verdict"] == VULNERABLE
     assert item["exception"]["state"] == "만료"
@@ -136,7 +136,7 @@ def test_exception_scope_and_good_items():
     by_host = exception(hosts=["ns0001"])
     by_group = exception(groups=["loadbalancers"])
     lines = ["U-02|VULN|x", "U-01|GOOD|x"]
-    assert verdicts(host_audit_kisa_result(ok_probe(lines), [by_host], "ns0332", ["servers"], TODAY))[
+    assert verdicts(host_audit_kisa_result(ok_probe(lines), [by_host], "ns0331", ["servers"], TODAY))[
         "KISA-2026:U-02"] == VULNERABLE
     assert verdicts(host_audit_kisa_result(ok_probe(lines), [by_group], "lb01", ["loadbalancers"], TODAY))[
         "KISA-2026:U-02"] == EXCEPTION
@@ -229,13 +229,13 @@ def test_template_renders_section_appendix_and_register():
     register = [exception("KISA-2026:U-02"),
                 exception("KISA-2026:U-28", approver="", approved_on="", expires_on="")]
     lines = ["U-%02d|GOOD|ok-evidence-%02d" % (i, i) for i in ALL_CODES if i != 2] + ["U-02|VULN|max"]
-    model = _model([_record("ns0332", lines, register)], register)
+    model = _model([_record("ns0331", lines, register)], register)
     html = env.get_template("report.html.j2").render(host_audit_model=model)
 
     assert "4. Configuration Vulnerability" in html
     assert "KISA-2026:U-02" in html and EXCEPTION in html
     assert "ok-evidence-13" in html  # 양호 evidence lives in the appendix
-    assert "부록 1. ns0332" in html and "<h3 class=\"small\">Configuration Vulnerability" in html
+    assert "부록 1. ns0331" in html and "<h3 class=\"small\">Configuration Vulnerability" in html
     assert "KISA-2026:U-28" in html and "승인 대기" in html
     assert "http://" not in html and "https://" not in html
 
@@ -560,11 +560,11 @@ def test_u28_docker_segment_is_manual_and_the_register_exception_applies(tmp_pat
     defaults = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
     register = [dict(defaults["host_audit_kisa_exceptions"][0], approver="정보보호 책임자",
                      approved_on="2026-10-01", expires_on="2027-09-30")]
-    result = host_audit_kisa_result({"rc": 0, "stdout": stdout}, register, "ns0332", ["servers"], TODAY)
+    result = host_audit_kisa_result({"rc": 0, "stdout": stdout}, register, "ns0331", ["servers"], TODAY)
     assert verdicts(result)["KISA-2026:U-28"] == EXCEPTION
 
     pending = host_audit_kisa_result({"rc": 0, "stdout": stdout}, defaults["host_audit_kisa_exceptions"],
-                                     "ns0332", ["servers"], TODAY)
+                                     "ns0331", ["servers"], TODAY)
     item = next(it for it in pending["results"] if it["code"] == "KISA-2026:U-28")
     assert item["verdict"] == MANUAL and item["exception"]["state"] == "승인 대기"
 

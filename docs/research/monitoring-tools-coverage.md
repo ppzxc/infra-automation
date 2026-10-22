@@ -75,11 +75,11 @@
 | ns0217, ns0235, ns0237, ns0266, ns0272, ns0273, ns0287, ns0288, ns0290, ns0291, ns0292, ns0293, ns0294, ns0296, ns0297, ns0298, ns0299, ns0329, ns0334, ns0340 (20대) | 일반 | 없음 | 없음 | **없음** | 있음 (로그 기반 7종)* |
 | ns0270 | host_agents_backup_only | 없음 | 없음 | **없음** | 없음 (백업만, 로그 수집 안 함) |
 | ns0325, ns0327, ns0338 | host_agents_backup_only | 서비스 5종씩 | 없음 | **간접만** (app·caddy·keepalived가 함께 DOWN이면 추정 가능) | 없음 (백업만) |
-| ns0229, ns0246, ns0332 | host_agents_excluded | 없음 | 없음 | **없음** | 없음 (에이전트 미설치) |
+| ns0229, ns0246, ns0331 | host_agents_excluded | 없음 | 없음 | **없음** | 없음 (에이전트 미설치) |
 
 \* 로그 알림은 로그가 실제로 들어오는 동안에만 발화할 수 있습니다. [#161](https://github.com/ppzxc/infra-automation/issues/161)의 CentOS 6 9대처럼 수집이 조용히 멈춘 호스트는 이 열의 "있음"에도 불구하고 **현재 어느 도구에도 잡히지 않습니다.**
 
-주의: ns0332는 OpenObserve 자신입니다. ns0332가 죽으면 OpenObserve 알림 전체가 멈추는데, 이를 바깥에서 보는 감시도 현재 없습니다.
+주의: ns0331는 OpenObserve 자신입니다. ns0331가 죽으면 OpenObserve 알림 전체가 멈추는데, 이를 바깥에서 보는 감시도 현재 없습니다.
 
 ## OpenObserve 알림과의 겹침·공백
 
@@ -99,9 +99,9 @@ OpenObserve 기존 알림 7개(`roles/openobserve_config/defaults/main.yml`의 `
 | SSH 무차별 대입, root 로그인, sudo 실패 | 있음 (4종) | 없음 | 없음 | OpenObserve 단독, 겹침 없음 |
 | 커널·디스크 오류 로그 | 있음 | 없음 | 없음 | OpenObserve 단독 |
 | 로그 해석 실패율 | 있음 (2종) | 없음 | 없음 | OpenObserve 단독 |
-| OpenObserve(ns0332) 자체 생존 | 해당 없음 (자기 감시 불가) | 없음 | 없음 | **공백** |
+| OpenObserve(ns0331) 자체 생존 | 해당 없음 (자기 감시 불가) | 없음 | 없음 | **공백** |
 
-**겹침은 없습니다.** 세 도구가 보는 영역이 서로 닿지 않고, 공백은 map #162가 범위로 잡은 Silent Host·리소스 고갈·백업 실패/누락에 서버 다운과 ns0332 자체 생존이 더해진 형태입니다.
+**겹침은 없습니다.** 세 도구가 보는 영역이 서로 닿지 않고, 공백은 map #162가 범위로 잡은 Silent Host·리소스 고갈·백업 실패/누락에 서버 다운과 ns0331 자체 생존이 더해진 형태입니다.
 
 ## 확인 못 한 것
 

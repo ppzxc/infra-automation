@@ -284,11 +284,11 @@ def test_first_scheduled_run_says_so_on_the_cover():
 
 def test_report_model_and_template_carry_the_baseline_and_storage_path():
     jinja2 = __import__("jinja2")
-    records = [{"inventory_hostname": "ns0332", "status": "ok", "reason": "", "collected_at": "2026-11-01T00:00:01Z",
+    records = [{"inventory_hostname": "ns0331", "status": "ok", "reason": "", "collected_at": "2026-11-01T00:00:01Z",
                 "declared": {"fqdn": "", "ip": "", "environment": "prod", "groups": ["servers"]},
-                "identity": {"hostname": "ns0332", "fqdn": "ns0332.example", "ips": [], "account": "audit"},
+                "identity": {"hostname": "ns0331", "fqdn": "ns0331.example", "ips": [], "account": "audit"},
                 "os": {"id": "rocky", "version_id": "9.4", "name": "Rocky Linux 9.4", "kernel": "", "arch": ""}}]
-    meta = dict(RUN, generated_at="2026-11-01T00:05:00Z", targets=["ns0332"], timezone="Asia/Seoul",
+    meta = dict(RUN, generated_at="2026-11-01T00:05:00Z", targets=["ns0331"], timezone="Asia/Seoul",
                 archive="RustFS host-audit/2026-11/ha-20261101T000000Z/ (3년 보관)",
                 baseline_history={"state": "ok", "baseline": None, "pointers": []})
     model = host_audit_report_model(records, meta)

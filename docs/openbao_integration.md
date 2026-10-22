@@ -42,9 +42,9 @@ flowchart TD
 OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키를 배치합니다:
 
 ### (1) 호스트별 개별 접속 정보
-* **원칙**: 정적 인벤토리(Semaphore UI 및 `inventory/hosts.yml`)에는 관리번호(호스트명, 예: `ns0332`)만 전달되며, 실제 연결 대상 IP(`ansible_host`) 및 SSH 포트(`ansible_port`)는 OpenBao KV에서 동적으로 로딩하여 바인딩합니다.
+* **원칙**: 정적 인벤토리(Semaphore UI 및 `inventory/hosts.yml`)에는 관리번호(호스트명, 예: `ns0331`)만 전달되며, 실제 연결 대상 IP(`ansible_host`) 및 SSH 포트(`ansible_port`)는 OpenBao KV에서 동적으로 로딩하여 바인딩합니다.
 * **네임스페이스**: `infra/prod/host/` (Semaphore UI `VAULT_NAMESPACE` 주입)
-* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0266`, `secret/data/hosts/ns0332`)
+* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0266`, `secret/data/hosts/ns0331`)
 * **필드 (Key-Value)** (플랫 오브젝트, 호스트명 키 중첩, 또는 배열 포맷 지원):
   ```json
   {
@@ -56,9 +56,9 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   또는 `public_ip` (IDC 기본 호스트 메타데이터 포맷) / `ip` 필드 사용:
   ```json
   {
-    "hostname": "ns0332",
+    "hostname": "ns0331",
     "domain": "nanoit.kr",
-    "fqdn": "ns0332.nanoit.kr",
+    "fqdn": "ns0331.nanoit.kr",
     "public_ip": "39.116.31.40",
     "ssh_user": "ppzxc"
   }
@@ -82,7 +82,7 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   또는 호스트명 키 래핑 사용:
   ```json
   {
-    "ns0332": {
+    "ns0331": {
       "ip": "39.116.31.40",
       "port": 22
     }
@@ -338,6 +338,6 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
 ### (3) 특정 호스트만 지정하여 실행 (Semaphore Task Template)
 Semaphore UI 또는 CLI 실행 시 Extra Variable로 `target_hosts`를 지정하여 특정 단일 호스트 또는 그룹만 필터링하여 실행할 수 있습니다:
 ```bash
-ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0332"
+ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0331"
 ```
 

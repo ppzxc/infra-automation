@@ -2,8 +2,8 @@
 
 - Ticket: [#251](https://github.com/ppzxc/infra-automation/issues/251) (map [#239](https://github.com/ppzxc/infra-automation/issues/239)). Blocks [#252](https://github.com/ppzxc/infra-automation/issues/252).
 - Date: 2026-10-19
-- Versions: ns0332 runs **v1.0.4** (`GET /api/default/config` → commit `1e257e69ef0feb6029f3111d54697244a3f507db`, the commit tag `v1.0.4` points to). Compared with **v1.1.1** (commit `5ddbb78268041273e2b347eaf0dbef87cf671b5a`). Links below are permalinks to those commits.
-- Method: read the web UI source (`web/src`) along the full path, from the log row's View Trace button through the router push to the trace-details page. Also read the server handler that orders the stream list. Diffed every file on the path against v1.1.1. Ran read-only GETs against ns0332 (`/api/default/config`, `/api/default/settings`, `/api/default/streams?type=traces`). The OpenObserve docs (Context7 `/websites/openobserve_ai`, "Configure and view log and trace correlation") describe the button but not how the stream is chosen, so the source code is the authority here.
+- Versions: ns0331 runs **v1.0.4** (`GET /api/default/config` → commit `1e257e69ef0feb6029f3111d54697244a3f507db`, the commit tag `v1.0.4` points to). Compared with **v1.1.1** (commit `5ddbb78268041273e2b347eaf0dbef87cf671b5a`). Links below are permalinks to those commits.
+- Method: read the web UI source (`web/src`) along the full path, from the log row's View Trace button through the router push to the trace-details page. Also read the server handler that orders the stream list. Diffed every file on the path against v1.1.1. Ran read-only GETs against ns0331 (`/api/default/config`, `/api/default/settings`, `/api/default/streams?type=traces`). The OpenObserve docs (Context7 `/websites/openobserve_ai`, "Configure and view log and trace correlation") describe the button but not how the stream is chosen, so the source code is the authority here.
 - Builds on: [openobserve-otlp-traces-metrics-contract.md](https://github.com/ppzxc/infra-automation/blob/research/openobserve-otlp-traces-contract/docs/research/openobserve-otlp-traces-metrics-contract.md) (§3.3, when the button is shown).
 
 ## Answer
@@ -84,13 +84,13 @@ The **Traces** menu (not the View Trace link) picks its stream in `loadStreamLis
 
 1. `?stream=` in the URL
 2. the stream already selected in memory
-3. a localStorage value `oo_selected_stream_traces_<org>` ([`utils/streamPersist.ts`][sp]), read only when `auto_query_enabled` is on. It is **off** on ns0332.
+3. a localStorage value `oo_selected_stream_traces_<org>` ([`utils/streamPersist.ts`][sp]), read only when `auto_query_enabled` is on. It is **off** on ns0331.
 
 If none of these matches, no stream is selected. It does not fall back to the first stream. The View Trace link doesn't use this logic or that localStorage key.
 
 ### 1.6 Out of scope: the correlated-logs path
 
-`CorrelatedLogsTable.vue` (l.1224–1250) builds the same route from `selectedTraceStream`. That tab only shows when `service_streams_enabled` is on **and** the build is enterprise ([`DetailTable.vue`][dt] l.746–773). On ns0332, `service_streams_enabled` is `false` (and the View Trace button itself is hidden whenever it is true), so that path never runs here.
+`CorrelatedLogsTable.vue` (l.1224–1250) builds the same route from `selectedTraceStream`. That tab only shows when `service_streams_enabled` is on **and** the build is enterprise ([`DetailTable.vue`][dt] l.746–773). On ns0331, `service_streams_enabled` is `false` (and the View Trace button itself is hidden whenever it is true), so that path never runs here.
 
 ## 2. v1.1.1
 
@@ -102,7 +102,7 @@ If none of these matches, no stream is selected. It does not fall back to the fi
 
 **Upgrading from v1.0.4 to v1.1.1 does not change this behavior.**
 
-## 3. ns0332 today (read-only)
+## 3. ns0331 today (read-only)
 
 | Check | Value |
 |---|---|
@@ -113,7 +113,7 @@ If none of these matches, no stream is selected. It does not fall back to the fi
 | org settings `trace_id_field_name` / `span_id_field_name` | `trace_id` / `span_id` |
 | traces streams | **none** (`total: 0`) |
 
-The org has no traces stream yet, so the `tracesStreams.length` condition fails. **View Trace won't appear on ns0332, even on a log record with `trace_id`, until the first span lands in `app_traces`** and the user reloads the page.
+The org has no traces stream yet, so the `tracesStreams.length` condition fails. **View Trace won't appear on ns0331, even on a log record with `trace_id`, until the first span lands in `app_traces`** and the user reloads the page.
 
 ## 4. Risks and options
 

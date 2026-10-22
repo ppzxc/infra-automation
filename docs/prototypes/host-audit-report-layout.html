@@ -75,7 +75,7 @@ const HOSTS = [
     cfg:[{code:"KISA-2026:U-01",name:"root 계정 원격 접속 제한",res:"취약",st:"new"},{code:"KISA-2026:U-28",name:"접속 IP·포트 제한",res:"예외(승인)",st:"per",ex:"Docker 구간 · 만료 2027-03-31"},{code:"KISA-2026:U-xx",name:"패스워드 최소 길이",res:"양호",st:"res"}],
     vuln:{crit:0,high:3,med:11,low:9, top:[{cve:"CVE-2026-xxxx1",pkg:"openssl",sev:"high",fix:"3.2.2-6",st:"new"},{cve:"CVE-2025-xxxx2",pkg:"glibc",sev:"high",fix:"2.34-168",st:"per"},{cve:"CVE-2025-xxxx3",pkg:"sudo",sev:"high",fix:"1.9.5p2-12",st:"rec"}]},
     resolved:2 },
-  { id:"ns0332", fqdn:"ns0332.nanoit.kr", ip:"10.0.3.32", env:"production", os:"Rocky Linux 9.6", kernel:"5.14.0-570", eol:"2032-05-31", eolState:"ok",
+  { id:"ns0331", fqdn:"ns0331.nanoit.kr", ip:"10.0.3.32", env:"production", os:"Rocky Linux 9.6", kernel:"5.14.0-570", eol:"2032-05-31", eolState:"ok",
     hw:"16 vCPU · 64 GiB · / 44%", dmi:"Dell PowerEdge R750 · SN 9QM…", purpose:null, dept:null, owner:null, admin:null, grade:null,
     pkgs:{count:1043, key:"kernel 5.14.0-570 · openssl 3.2.2 · openssh 8.7p1 · glibc 2.34 · sudo 1.9.5 · docker 28.3", lastUpd:"2026-09-12"},
     ports:"22 sshd · 5432 postgres(127.0.0.1) · 9100 otelcol", agents:"otelcol 동작 · 백업 2026-10-05 02:47 성공",

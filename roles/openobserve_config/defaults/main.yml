@@ -178,7 +178,7 @@ o2c_resource_cfg:
   thresholds: "{{ o2c_kv.alert_resource_thresholds | default([], true) }}"
 
 # 로스터(Spec #184 / Ticket-4): 실행 시 인벤토리 그룹에서 만든다(OpenObserve — Config 템플릿은 servers 인벤토리를 읽는다).
-#   수집 로스터   = servers - host_agents_excluded - host_agents_backup_only (ns0266·ns0332 포함) — Silent Host·백업 누락
+#   수집 로스터   = servers - host_agents_excluded - host_agents_backup_only (ns0266·ns0331 포함) — Silent Host·백업 누락
 #   유지보수 로스터 = servers - host_agents_excluded — 유지보수 누락
 # 호스트 이름은 인벤토리 호스트명(관리번호)이며 수집기가 보내는 host_name과 같다. 편입·폐기 후 Config를 다시 실행하면 따라온다.
 o2c_today: "{{ now(utc=true).strftime('%Y-%m-%d') }}"
@@ -206,7 +206,7 @@ o2c_traces_retention_days: 30
 
 # OpenObserve가 수신하는 가장 오래된 이벤트(ZO_INGEST_ALLOWED_UPTO, 기본 5시간 — 공식 문서). 2026-10 수집기 중단 사고(#161)에서 5시간보다
 # 오래된 로그가 거부된 것으로도 확인됐다. 서버 값을 바꿨다면 Silent Host P1 문구와 이 값이 어긋나므로 함께 고친다.
-# 주의: 서버(ns0332) 실제 값은 미확인 — 운영 반영 때 ZO_INGEST_ALLOWED_UPTO를 확인하고 다르면 이 값을 맞춘다.
+# 주의: 서버(ns0331) 실제 값은 미확인 — 운영 반영 때 ZO_INGEST_ALLOWED_UPTO를 확인하고 다르면 이 값을 맞춘다.
 o2c_ingest_allowed_hours: 5
 
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.

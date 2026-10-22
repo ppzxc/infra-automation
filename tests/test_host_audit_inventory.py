@@ -123,8 +123,8 @@ __HOST_AUDIT_INVENTORY_END__
 """
 
 ROCKY9_IDENTITY = """__HOST_AUDIT_BEGIN__
-hostname=ns0332
-fqdn=ns0332.nanoit.kr
+hostname=ns0331
+fqdn=ns0331.nanoit.kr
 account=ppzxc
 kernel=5.14.0-570.el9.x86_64
 arch=x86_64
@@ -295,9 +295,9 @@ def test_probe_runs_on_raw_provisioning_path_os(image):
 
 
 def test_unassigned_declarations_are_shown_as_unassigned():
-    rec = record("ns0332", ROCKY9_IDENTITY, ROCKY9_INVENTORY, asset={"purpose": "웹 서비스"})
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY, asset={"purpose": "웹 서비스"})
     model = host_audit_report_model([rec], meta())
-    declared = {f["key"]: f for f in host(model, "ns0332")["declared"]}
+    declared = {f["key"]: f for f in host(model, "ns0331")["declared"]}
 
     assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "unassigned": False}
     for key in ("department", "owner_role", "admin_role", "security_grade"):
@@ -306,8 +306,8 @@ def test_unassigned_declarations_are_shown_as_unassigned():
 
 
 def test_privileged_users_outside_the_declared_allowlist_are_flagged():
-    model = host_audit_report_model([record("ns0332", ROCKY9_IDENTITY, ROCKY9_INVENTORY)], meta())
-    h = host(model, "ns0332")
+    model = host_audit_report_model([record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)], meta())
+    h = host(model, "ns0331")
 
     assert sorted(h["not_declared"]) == ["ci-runner", "deploy", "toor"]
     assert "선언 외" not in account(h, "ppzxc")["flags"]
@@ -316,8 +316,8 @@ def test_privileged_users_outside_the_declared_allowlist_are_flagged():
 
 
 def test_accounts_unused_for_90_days_are_flagged_except_audit_account_and_root():
-    model = host_audit_report_model([record("ns0332", ROCKY9_IDENTITY, ROCKY9_INVENTORY)], meta())
-    h = host(model, "ns0332")
+    model = host_audit_report_model([record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)], meta())
+    h = host(model, "ns0331")
 
     assert sorted(h["inactive"]) == ["ghost", "olduser"], "uid 0 accounts are left to KISA root-login checks"
     assert account(h, "olduser")["inactive"] == "old"
@@ -331,29 +331,29 @@ def test_accounts_unused_for_90_days_are_flagged_except_audit_account_and_root()
 
 def test_audit_account_is_excluded_even_when_never_logged_in():
     inventory = ROCKY9_INVENTORY.replace("recent_login=ppzxc\n", "")
-    model = host_audit_report_model([record("ns0332", ROCKY9_IDENTITY, inventory)], meta())
+    model = host_audit_report_model([record("ns0331", ROCKY9_IDENTITY, inventory)], meta())
 
-    assert "ppzxc" not in host(model, "ns0332")["inactive"]
+    assert "ppzxc" not in host(model, "ns0331")["inactive"]
 
 
 def test_missing_lastlog_makes_last_login_unavailable_instead_of_inactive():
     inventory = "\n".join(ln for ln in ROCKY9_INVENTORY.splitlines()
                           if not ln.startswith(("lastlog", "recent_login")))
-    model = host_audit_report_model([record("ns0332", ROCKY9_IDENTITY, inventory)], meta())
+    model = host_audit_report_model([record("ns0331", ROCKY9_IDENTITY, inventory)], meta())
 
-    assert host(model, "ns0332")["inactive"] == []
-    assert {"host": "ns0332", "item": "마지막 로그인", "label": "점검불가",
+    assert host(model, "ns0331")["inactive"] == []
+    assert {"host": "ns0331", "item": "마지막 로그인", "label": "점검불가",
             "reason": "lastlog 명령 없음 — 장기 미사용 판정 불가"} in model["unavailable"]
 
 
 def test_end_of_support_comes_from_the_static_table_and_raises_the_summary_band():
-    recs = [record("ns0332", ROCKY9_IDENTITY, ROCKY9_INVENTORY),
+    recs = [record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY),
             record("ns0101", CENTOS6_IDENTITY, CENTOS6_INVENTORY)]
     model = host_audit_report_model(recs, meta())
 
     assert host(model, "ns0101")["eol"] == {"key": "centos-6", "date": "2020-11-30", "status": "eos",
                                             "label": "지원 종료(EOS)"}
-    assert host(model, "ns0332")["eol"]["status"] == "supported"
+    assert host(model, "ns0331")["eol"]["status"] == "supported"
     assert model["asset_inventory"]["eos"] == [{"host": "ns0101", "os": "CentOS release 6.10 (Final)",
                                                 "date": "2020-11-30", "label": "지원 종료(EOS)"}]
     assert model["asset_inventory"]["eol_reviewed_on"] == "2026-10-08"
@@ -371,31 +371,31 @@ def test_end_of_life_soon_and_unknown_os():
 
 
 def test_full_package_list_stays_out_of_the_report_model():
-    rec = record("ns0332", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
     model = host_audit_report_model([rec], meta())
 
     assert "zz-rare-package" in json.dumps(rec), "the per-host JSON keeps the full list"
     assert "zz-rare-package" not in json.dumps(model, ensure_ascii=False)
-    assert host(model, "ns0332")["packages"]["count"] == 8
+    assert host(model, "ns0331")["packages"]["count"] == 8
 
 
 def test_inventory_collection_failure_is_reported_unavailable():
-    rec = record("ns0332", ROCKY9_IDENTITY, None)
+    rec = record("ns0331", ROCKY9_IDENTITY, None)
     rec["inventory"] = {"status": "probe_failed", "reason": "sudo: a password is required"}
     model = host_audit_report_model([rec], meta())
 
-    assert {"host": "ns0332", "item": "Asset Inventory 상세", "label": "점검불가(수집 실패)",
+    assert {"host": "ns0331", "item": "Asset Inventory 상세", "label": "점검불가(수집 실패)",
             "reason": "sudo: a password is required"} in model["unavailable"]
-    assert host(model, "ns0332")["collected"] is False
+    assert host(model, "ns0331")["collected"] is False
 
 
 def test_host_agents_state_and_exclusion():
     stopped = ROCKY9_INVENTORY.replace("agent_otelcol_active=active", "agent_otelcol_active=failed")
-    model = host_audit_report_model([record("ns0332", ROCKY9_IDENTITY, stopped),
+    model = host_audit_report_model([record("ns0331", ROCKY9_IDENTITY, stopped),
                                      record("ns0333", ROCKY9_IDENTITY, CENTOS6_INVENTORY,
                                             groups=("servers", "host_agents_excluded"))], meta())
 
-    assert host(model, "ns0332")["host_agents"] == "일부 이상"
+    assert host(model, "ns0331")["host_agents"] == "일부 이상"
     assert host(model, "ns0333")["host_agents"] == "제외(Host Agents Exclusion)"
 
 
@@ -425,12 +425,12 @@ def test_privileged_allowlist_from_declared_accounts():
 def test_report_renders_asset_inventory_and_appendix():
     jinja2 = __import__("jinja2")
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE / "templates")))
-    recs = [record("ns0332", ROCKY9_IDENTITY, ROCKY9_INVENTORY, asset={"purpose": "웹 서비스"}),
+    recs = [record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY, asset={"purpose": "웹 서비스"}),
             record("ns0101", CENTOS6_IDENTITY, CENTOS6_INVENTORY)]
     html = env.get_template("report.html.j2").render(host_audit_model=host_audit_report_model(recs, meta()))
 
     for text in ("2.1 식별·선언", "2.2 상태", "2.3 계정 발견", "선언 외", "장기 미사용", "미지정",
-                 "지원 종료(EOS) 운영 체제 1대", "부록 1. ns0101", "부록 2. ns0332", "PowerEdge R640",
+                 "지원 종료(EOS) 운영 체제 1대", "부록 1. ns0101", "부록 2. ns0331", "PowerEdge R640",
                  "openssh", "8.7p1-45.el9", "NOPASSWD", "자산 기준"):
         assert text in html, text
     assert "zz-rare-package" not in html

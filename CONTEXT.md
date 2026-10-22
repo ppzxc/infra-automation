@@ -17,7 +17,7 @@
 ## Language
 
 **Inventory Hostname**:
-The management number (e.g. `ns0332`) under which a host is listed in the inventory; it is the name Ansible, Semaphore and Boundary use to identify the host and the key for its host-specific variables. It is not the host's FQDN, which is only a value the host carries.
+The management number (e.g. `ns0331`) under which a host is listed in the inventory; it is the name Ansible, Semaphore and Boundary use to identify the host and the key for its host-specific variables. It is not the host's FQDN, which is only a value the host carries.
 _Avoid_: hostname, FQDN (when you mean the inventory key), server name
 
 **Raw Provisioning Path**:
