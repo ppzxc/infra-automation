@@ -235,6 +235,20 @@ o2c_traces_retention_days: 30
 # 주의: 서버(ns0331) 실제 값은 미확인 — 운영 반영 때 ZO_INGEST_ALLOWED_UPTO를 확인하고 다르면 이 값을 맞춘다.
 o2c_ingest_allowed_hours: 5
 
+# 알림 대상 행의 발생 시각(KST, Spec #339 / Ticket-1): 집계한 레코드의 처음·마지막 _timestamp를 `event_time` 컬럼 하나로 만든다.
+# 알림 SQL의 SELECT 목록 끝에 `, {{ o2c_event_time_sql }}`로 붙이고 행 템플릿 끝에 ` · {event_time}`을 더한다(WHERE·GROUP BY·HAVING은 건드리지 않는다).
+# 한 시각이면 `10-23 08:59:14`, 같은 날 범위면 `10-23 08:55:02~08:59:14`, 날짜가 넘어가면 양쪽에 날짜를 붙인다.
+# 시간대는 OpenObserve date_format의 세 번째 인자로 `+09:00`을 준다(시간대 이름은 쓰지 않는다). 집계(GROUP BY) 쿼리에서만 쓴다.
+o2c_event_time_format: "%m-%d %H:%M:%S"
+o2c_event_time_offset: "+09:00"
+o2c_event_time_first: "date_format(min(_timestamp), '{{ o2c_event_time_format }}', '{{ o2c_event_time_offset }}')"
+o2c_event_time_last: "date_format(max(_timestamp), '{{ o2c_event_time_format }}', '{{ o2c_event_time_offset }}')"
+o2c_event_time_sql: >-
+  CASE WHEN min(_timestamp) = max(_timestamp) THEN {{ o2c_event_time_first }}
+  WHEN date_format(min(_timestamp), '%m-%d', '{{ o2c_event_time_offset }}') = date_format(max(_timestamp), '%m-%d', '{{ o2c_event_time_offset }}')
+  THEN {{ o2c_event_time_first }} || '~' || date_format(max(_timestamp), '%H:%M:%S', '{{ o2c_event_time_offset }}')
+  ELSE {{ o2c_event_time_first }} || '~' || {{ o2c_event_time_last }} END AS event_time
+
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
 o2c_alerts:
@@ -246,11 +260,11 @@ o2c_alerts:
     why: "무차별 대입(brute-force) 공격의 전형적인 징후입니다. fail2ban이 막지 못하고 있을 수 있습니다."
     action: "① 출발지가 사내·작업자 IP인지 확인 ② 외부 IP면 방화벽 차단과 fail2ban 동작 확인 ③ 같은 IP의 로그인 성공 기록이 있으면 P1로 격상"
     runbook: "{{ o2c_runbook_base }}#ssh-login-failures-per-source"
-    row_template: '• {source_address} → {host_name}: 실패 {failures}회'
+    row_template: '• {source_address} → {host_name}: 실패 {failures}회 · {event_time}'
     description: "sshd 로그인 실패가 같은 source.address에서 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_source_threshold }}회 이상 (fail2ban이 막지 못하는 분산 공격 단서)"
     stream: security_logs
     sql: >-
-      SELECT source_address, host_name, count(*) AS failures FROM "security_logs"
+      SELECT source_address, host_name, count(*) AS failures, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
       GROUP BY source_address, host_name HAVING count(*) >= {{ o2c_ssh_fail_per_source_threshold }}
     period: "{{ o2c_ssh_fail_window_minutes }}"

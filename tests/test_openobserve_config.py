@@ -6,6 +6,7 @@ check mode writes nothing, and secrets never reach the output or the repository.
 """
 
 import base64
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -1740,10 +1741,22 @@ def test_switch_filters_validate_and_build_safe_sql():
                                                    {"name": "d", "enabled": True}])] == ["a", "d"]
 
 
+def _date_format(value, fmt, offset):
+    """sqlite stand-in for OpenObserve's ``date_format(<µs or s>, <strftime format>, '+HH:MM')`` (same contract, independent of the SQL under test)."""
+    if value is None:
+        return None
+    seconds = value / 1_000_000 if abs(value) >= 10**11 else value   # 10^11 s is year 5138, so a larger number is microseconds
+    sign = -1 if offset[0] == "-" else 1
+    hours, minutes = offset[1:].split(":")
+    tz = timezone(sign * timedelta(hours=int(hours), minutes=int(minutes)))
+    return datetime.fromtimestamp(seconds, tz).strftime(fmt)
+
+
 def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
     """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows."""
     db = sqlite3.connect(":memory:")
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
+    db.create_function("date_format", 3, _date_format)
     columns = sorted({k for r in records for k in r})
     db.execute('CREATE TABLE "%s" (%s)' % (stream, ", ".join(f'"{c}"' for c in columns)))
     for r in records:
@@ -2946,3 +2959,121 @@ def test_ssh_per_host_alert_fires_only_on_distributed_attacks_when_it_runs_on_th
     fired = {m.group(1) for row in _run_alert_on_sqlite(sql, records, "security_logs_alert_verify")
              if (m := re.fullmatch(r"(.+)-[0-9a-f]+", str(row["host_name"]))) and m.group(1) in own}
     assert fired == {c["host"] for c in spec["cases"] if c["fires"]} == {"verify-ssh-host-burst"}
+
+
+# ---- 알림 대상 행의 발생 시각(KST) — Spec #339 / Ticket-1 (#341) ----
+
+def _kst_us(text):
+    """'2026-10-23 08:55:02' (KST) -> µs since the epoch."""
+    return int(datetime.fromisoformat(text).replace(tzinfo=timezone(timedelta(hours=9))).timestamp()) * 1_000_000
+
+
+def test_sqlite_date_format_helper_follows_the_openobserve_contract():
+    us = 1_792_767_302_000_000   # 2026-10-23 14:55:02 UTC
+    assert _date_format(us, "%m-%d %H:%M:%S", "+09:00") == "10-23 23:55:02"
+    assert _date_format(us // 1_000_000, "%m-%d %H:%M:%S", "+09:00") == "10-23 23:55:02"   # seconds input
+    assert _date_format(_kst_us("2026-10-23 08:59:14"), "%m-%d %H:%M:%S", "+09:00") == "10-23 08:59:14"
+    assert _date_format(us, "%H:%M", "-05:30") == "09:25"
+    assert _date_format(None, "%H", "+09:00") is None
+
+
+def _row_lines(o2, name, records, stream):
+    """What an operator reads: the alert's row template filled with every row its SQL returns on the records."""
+    alert = o2.store["alert"][name]
+    rows = _run_alert_on_sqlite(alert["query_condition"]["sql"], records, stream)
+    return [re.sub(r"\{(\w+)\}", lambda m: str(row[m.group(1)]), alert["row_template"]) for row in rows]
+
+
+def _fail(ts, source="203.0.113.10", host="ns0272"):
+    return {"event_action": "ssh_login", "event_outcome": "failure", "user_name": "admin", "source_address": source,
+            "host_name": host, "_timestamp": _kst_us(ts)}
+
+
+def test_per_source_ssh_row_shows_one_time_for_one_event_and_first_to_last_for_a_range(o2):
+    assert _apply(o2).returncode == 0
+    name = "infra-ssh-login-failures-per-source"
+    one = [_fail("2026-10-23 08:59:14")] * 10
+    assert _row_lines(o2, name, one, "security_logs") == ["• 203.0.113.10 → ns0272: 실패 10회 · 10-23 08:59:14"]
+    two = [_fail("2026-10-23 08:55:02")] * 5 + [_fail("2026-10-23 08:59:14")] * 5
+    assert _row_lines(o2, name, two, "security_logs") == ["• 203.0.113.10 → ns0272: 실패 10회 · 10-23 08:55:02~08:59:14"]
+
+
+def test_event_time_range_across_midnight_keeps_both_dates(o2):
+    assert _apply(o2).returncode == 0
+    recs = [_fail("2026-10-23 23:58:00")] * 5 + [_fail("2026-10-24 00:02:30")] * 5
+    assert _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs") == [
+        "• 203.0.113.10 → ns0272: 실패 10회 · 10-23 23:58:00~10-24 00:02:30"]
+
+
+def test_event_time_does_not_change_which_sources_fire(o2):
+    assert _apply(o2).returncode == 0
+    recs = [_fail("2026-10-23 08:59:14", "203.0.113.11")] * 9 + [_fail("2026-10-23 08:59:14", "203.0.113.12")] * 10
+    assert [r.split(" ")[1] for r in _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")] == ["203.0.113.12"]
+    sql = _sql(o2, "infra-ssh-login-failures-per-source")
+    assert "WHERE event_action = 'ssh_login' AND event_outcome = 'failure'" in sql
+    assert "GROUP BY source_address, host_name HAVING count(*) >= 10" in sql
+
+
+def test_raw_log_link_survives_the_event_time_column(o2):
+    assert _apply(o2).returncode == 0
+    alert = o2.store["alert"]["infra-ssh-login-failures-per-source"]
+    assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
+    from filter_plugins.openobserve_config import o2c_raw_log_sql
+    assert o2c_raw_log_sql(alert["query_condition"]["sql"], "security_logs") == (
+        "SELECT * FROM \"security_logs\" WHERE event_action = 'ssh_login' AND event_outcome = 'failure' ORDER BY _timestamp DESC LIMIT 200")
+
+
+def _rendered_message(o2, name, row_values):
+    """The notification text with 20 rows filled the way OpenObserve does (every variable replaced)."""
+    alert = o2.store["alert"][name]
+    ctx = alert["context_attributes"]
+    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
+    rows = "\n".join(re.sub(r"\{(\w+)\}", lambda m: row_values[m.group(1)], alert["row_template"]) for _ in range(20))
+    values = dict(ctx, rows=rows, alert_count="20", alert_url="https://o2.example.test/web/short/0123456789abcdef?org_identifier=default",
+                  alert_trigger_time_str="2026-10-23T09:00:56", alert_name=name)
+    text = text.replace("{rows:20}", "{rows}")
+    return re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), m.group(0)), text)
+
+
+# 가장 긴 현실적 값: IPv4 출발지, 5분 구간 실패 4자리(9999), 자정을 넘는 시각 범위
+LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
+                      "failures": "9999", "event_time": "10-23 23:58:00~10-24 00:02:30", "sources": "999"}
+
+
+def test_every_alert_with_an_event_time_column_fits_the_2000_character_limit_with_20_longest_rows(o2):
+    assert _apply(o2).returncode == 0
+    with_time = [n for n, a in o2.store["alert"].items() if a["query_condition"]["type"] == "sql" and "event_time" in a["row_template"]]
+    assert "infra-ssh-login-failures-per-source" in with_time
+    for name in with_time:
+        fields = set(re.findall(r"\{(\w+)\}", o2.store["alert"][name]["row_template"]))
+        values = {f: LONGEST_ROW_VALUES.get(f, "x" * 60) for f in fields}
+        assert len(_rendered_message(o2, name, values)) <= 2000, name
+
+
+UNCHANGED_ROW_TEMPLATES = {   # PromQL, missing-type, usage and self-test alerts keep their row templates byte for byte (#339)
+    "infra-cpu-usage-p1": "• {host_name}: CPU {value}%", "infra-cpu-usage-p2": "• {host_name}: CPU {value}%",
+    "infra-caddy-5xx-error-rate": "• {host_name}: 5xx 비율 {value}%", "infra-caddy-4xx-error-rate": "• {host_name}: 4xx 비율 {value}%",
+    "infra-disk-fill-24h": "• {host_name} {mountpoint}: 약 {value}시간 뒤 가득 참",
+    "infra-disk-fill-4h": "• {host_name} {mountpoint}: 약 {value}시간 뒤 가득 참",
+    "infra-network-errors": "• {host_name} {device}({direction}): 오류 비율 {value}%",
+    "infra-cpu-load-saturation": "• {host_name}: 코어당 load {value}", "infra-cpu-iowait": "• {host_name}: iowait {value}%",
+    "infra-cpu-steal": "• {host_name}: steal {value}%", "infra-disk-io-saturation": "• {host_name} {device}: 큐 깊이 {value}",
+    "infra-disk-read-latency": "• {host_name} {device}: 읽기 지연 {value}ms",
+    "infra-disk-write-latency": "• {host_name} {device}: 쓰기 지연 {value}ms",
+    "infra-inode-fill-24h": "• {host_name} {mountpoint}: 약 {value}시간 뒤 inode 고갈",
+    "infra-conntrack-limit": "• {host_name}: conntrack 사용률 {value}%", "infra-swap-usage": "• {host_name} {device}: 스왑 사용률 {value}%",
+    "infra-memory-pressure": "• {host_name}: 주요 페이지 폴트 초당 {value}건",
+    "infra-disk-usage-p2": "• {host_name} {mountpoint}: 사용률 {usage_pct}%", "infra-disk-usage-p1": "• {host_name} {mountpoint}: 사용률 {usage_pct}%",
+    "infra-inode-usage-p2": "• {host_name} {mountpoint}: 사용률 {usage_pct}%", "infra-inode-usage-p1": "• {host_name} {mountpoint}: 사용률 {usage_pct}%",
+    "infra-memory-usage-p2": "• {host_name}: 사용률 {usage_pct}%", "infra-memory-usage-p1": "• {host_name}: 사용률 {usage_pct}%",
+    "infra-silent-host-p2": "• {host_name}", "infra-silent-host-p1": "• {host_name}", "infra-backup-missing": "• {host}",
+    "infra-maintenance-missing": "• {host}", "infra-host-status-silent": "• {host_name}", "infra-app-telemetry-silent": "• {host_name}",
+    "infra-switch-syslog-silent": "• {device_id}", "infra-fortigate-syslog-silent": "• {device_id}",
+    SELFTEST: "• {host_name}: 시험 레코드 {records}건 · 이스케이프 시험 값 {probe}",
+}
+
+
+def test_promql_missing_usage_and_selftest_row_templates_are_unchanged(o2):
+    assert _apply(o2, extra={"o2c_switch_uplinks": UPLINKS}).returncode == 0
+    for name, template in UNCHANGED_ROW_TEMPLATES.items():
+        assert o2.store["alert"][name]["row_template"] == template, name
