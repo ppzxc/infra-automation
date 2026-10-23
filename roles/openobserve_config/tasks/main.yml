@@ -173,6 +173,55 @@
     cacheable: false
   no_log: true
 
+# 서버 행 표시 이름(Spec #339 / Ticket-5): 알림 대상 행에 관리번호 옆 접속 주소를 `ns0272 (<주소>)`로 보인다. 주소는 OpenBao hosts/<host>에서
+# Config 실행 때 한 번 읽어 알림 SQL의 CASE 식에 고정한다(알림이 울릴 때는 OpenBao에 접속하지 않는다). 200·404 외로 답하면 짐작하지 않고 실패한다.
+# 응답 본문에 시크릿이 있으므로 no_log이고, 주소(ansible_host, 없으면 public_ip)만 O2C-007에서 골라 쓴다.
+- name: Assert an OpenBao token is available to read the host addresses
+  ansible.builtin.assert:
+    that:
+      - o2c_vault_token | length > 0
+    fail_msg: >-
+      수집 로스터 호스트의 접속 주소를 OpenBao에서 읽을 토큰이 없습니다(AppRole 로그인 실패이거나 VAULT_TOKEN이 비어 있음).
+      비어 있는 채로 진행하면 알림 대상 행의 주소가 조용히 사라지므로 실패합니다.
+    quiet: true
+  no_log: true
+  when:
+    - o2c_host_kv_fixture is not defined
+    - o2c_roster_collect | length > 0
+
+- name: "[O2C-006] Read the access address source of every collect-roster host from OpenBao (hosts/<host>)"
+  vars:
+    _vault_hosts_prefix_eff: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true)) | regex_replace('^secret/', '') }}"
+  o2c_http:
+    base_url: "{{ o2c_vault_addr }}"
+    headers: >-
+      {{ {'X-Vault-Token': o2c_vault_token} | combine({'X-Vault-Namespace': o2c_vault_ns} if (o2c_vault_ns | length > 0) else {}) }}
+    requests: >-
+      {{ o2c_roster_collect | o2c_host_items
+         | o2c_as_requests(path='/v1/' ~ o2c_vault_mount ~ '/data/' ~ _vault_hosts_prefix_eff ~ '{host}', label='{host}') }}
+    status_code: [200, 404]
+    timeout: 10
+    parallel: true
+    validate_certs: "{{ o2c_vault_validate_certs }}"
+  register: _o2c_host_kv_resp
+  changed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - o2c_host_kv_fixture is not defined
+    - o2c_vault_token | length > 0
+
+- name: "[O2C-007] Resolve the access address of each host (ansible_host, then public_ip) for the alert row display names"
+  vars:
+    _host_kv_by_host: >-
+      {{ o2c_host_kv_fixture if o2c_host_kv_fixture is defined
+         else dict(_o2c_host_kv_resp.results | default([]) | map(attribute='item.host')
+                   | zip(_o2c_host_kv_resp.results | default([]) | map(attribute='json.data.data', default={}))) }}
+  ansible.builtin.set_fact:
+    o2c_host_addresses: "{{ o2c_roster_collect | o2c_host_addresses(_host_kv_by_host) }}"   # 호스트 → 주소만 남긴다(KV 본문은 팩트로 두지 않는다)
+    cacheable: false
+  no_log: true
+
 - name: "[O2C-003] Derive the desired OpenObserve objects from the repository definitions"
   ansible.builtin.set_fact:
     o2c_desired_objects: >-

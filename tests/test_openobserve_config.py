@@ -262,9 +262,10 @@ def o2():
 
 def _apply(o2, *args, kv=None, extra=None, inventory="localhost,"):
     # 앱 텔레메트리 스위치는 OpenBao에서 읽고 토큰이 없으면 실패하므로, 기본은 "아무 호스트도 안 켬" 픽스처다(None이면 픽스처 없음).
-    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, "o2c_app_telemetry_kv_fixture": {}, **(extra or {})}
-    if extra["o2c_app_telemetry_kv_fixture"] is None:
-        del extra["o2c_app_telemetry_kv_fixture"]
+    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, "o2c_app_telemetry_kv_fixture": {}, "o2c_host_kv_fixture": {}, **(extra or {})}
+    for key in ("o2c_app_telemetry_kv_fixture", "o2c_host_kv_fixture"):
+        if extra[key] is None:
+            del extra[key]
     env = dict(os.environ, ANSIBLE_NOCOLOR="1")
     cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), "-e", f"o2_endpoint={o2.url}",
            "-e", json.dumps({"o2c_kv_fixture": kv or KV, **extra}), *args]
@@ -1198,7 +1199,7 @@ def test_backup_failure_and_integrity_failure_are_p2_event_alerts_on_backup_logs
         sql = a["query_condition"]["sql"]
         assert f"job = '{job}'" in sql and cond in sql and "GROUP BY host" in sql and "host_name" not in sql, name
         assert a["trigger_condition"]["silence"] == a["trigger_condition"]["period"] == 5
-        assert "{host}" in a["row_template"]
+        assert "{host_label}" in a["row_template"]
 
 
 def test_backup_and_maintenance_missing_are_daily_p2_state_alerts_over_their_rosters(o2, tmp_path):
@@ -3042,7 +3043,7 @@ def _rendered_message(o2, name, row_values):
 
 
 # 가장 긴 현실적 값: IPv4 출발지, 5분 구간 실패 4자리(9999), 자정을 넘는 시각 범위
-LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
+LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272", "host_label": "ns0272 (198.51.100.255)",
                       "failures": "9999", "event_time": "10-23 23:58:00~10-24 00:02:30", "sources": "999"}
 COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
                 "readings", "events", "detections", "downs", "flaps", "severity_code")
@@ -3226,3 +3227,143 @@ def test_device_name_and_source_display_do_not_change(o2):
     assert templates["infra-fortigate-admin-login-failures"] == "• {device}: 출발지 {source_address} 로그인 실패 {failures}회 · {event_time}"
     assert templates["infra-switch-config-change"].startswith("• {device}: 설정 변경 {changes}건 — {detail}")
     assert templates["infra-switch-syslog-silent"] == "• {device_id}" and templates["infra-fortigate-syslog-silent"] == "• {device_id}"
+
+
+# ---- 서버 행의 접속 주소 — Spec #339 / Ticket-5 (#345) ----
+
+HOST_KV = {"ns0001": {"ansible_host": "192.0.2.201", "public_ip": "192.0.2.101"},   # 둘 다 있으면 ansible_host
+           "ns0002": {"ssh_user": "ppzxc"},                                          # 주소가 없다
+           "ns0003": {"public_ip": "192.0.2.203"},                                  # public_ip만 있다
+           "ns0004": {"ansible_host": "192.0.2.204"}}
+ADDRESS_LABELS = {"ns0001": "ns0001 (192.0.2.201)", "ns0002": "ns0002", "ns0003": "ns0003 (192.0.2.203)", "ns0004": "ns0004 (192.0.2.204)"}
+SERVER_ADDRESS_ALERTS = {   # 서버 행을 쓰는 로그 SQL 알림(missing·장비 행·도달성 검사 대상 행 제외)
+    **{n: ("security_logs", *SECURITY_TIME_CASES[n]) for n in SECURITY_TIME_CASES},
+    **{n: SYSTEM_TIME_CASES[n] for n in SYSTEM_TIME_CASES if n != "infra-unreachable-host"},
+}
+
+
+def _addr_apply(o2, tmp_path, *args, host_kv=None):
+    return _apply(o2, *args, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_host_kv_fixture": HOST_KV if host_kv is None else host_kv})
+
+
+def _on_host(records, host):
+    return [dict(r, host_name=host, **({"host": host} if "host" in r else {})) for r in records]
+
+
+def test_host_address_picks_ansible_host_then_public_ip_and_skips_blank_or_unsafe_values():
+    from openobserve_config import o2c_host_addresses
+    kv = dict(HOST_KV, ns0005={"ansible_host": " ", "public_ip": "192.0.2.105"}, ns0006={"ansible_host": "x'; DROP TABLE y; --"},
+              ns0007={"ns0007": {"public_ip": "192.0.2.107"}}, ns0008={"only": {"ansible_host": "192.0.2.108"}}, ns0009=None)
+    roster = ["ns0001", "ns0002", "ns0003", "ns0004", "ns0005", "ns0006", "ns0007", "ns0008", "ns0009", "ns0010"]
+    assert o2c_host_addresses(roster, kv) == {"ns0001": "192.0.2.201", "ns0003": "192.0.2.203", "ns0004": "192.0.2.204",
+                                              "ns0005": "192.0.2.105", "ns0007": "192.0.2.107", "ns0008": "192.0.2.108"}
+
+
+def _label_of(expression, host):
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE t (host_name TEXT)")
+    db.execute("INSERT INTO t VALUES (?)", (host,))
+    return db.execute(f"SELECT {expression} FROM t").fetchone()[0]
+
+
+def test_host_label_expression_adds_the_address_for_known_hosts_and_keeps_the_bare_name_otherwise():
+    from openobserve_config import o2c_host_label
+    expression = o2c_host_label("host_name", {"ns0001": "192.0.2.201", "ns0003": "192.0.2.203"}).removesuffix(" AS host_label")
+    assert [_label_of(expression, h) for h in ("ns0001", "ns0002", "ns0003", "ns9999")] == ["ns0001 (192.0.2.201)", "ns0002", "ns0003 (192.0.2.203)", "ns9999"]
+    empty = o2c_host_label("host", {}).removesuffix(" AS host_label")
+    assert empty == "host" and o2c_host_label("host", {}).endswith(" AS host_label")
+
+
+def test_server_rows_show_the_address_next_to_the_management_number(o2, tmp_path):
+    res = _addr_apply(o2, tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    recs = [_fail("2026-10-23 08:59:14", host=h) for h in ("ns0001", "ns0002", "ns0003", "ns0004", "ns0999") for _ in range(10)]
+    rows = _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")
+    assert sorted(rows) == sorted(f"• 203.0.113.10 → {label}: 실패 10회 · 10-23 08:59:14" for label in
+                                  (*ADDRESS_LABELS.values(), "ns0999"))   # 로스터 밖 호스트는 관리번호만
+
+
+@pytest.mark.parametrize("name", sorted(SERVER_ADDRESS_ALERTS))
+def test_every_server_alert_row_shows_the_address_and_a_host_without_one_stays_bare(o2, tmp_path, name):
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    stream, fields, expected = SERVER_ADDRESS_ALERTS[name][:3]
+    base = [dict(f, _timestamp=_kst_us("2026-10-23 08:59:14")) for f in fields]
+    for host, label in (("ns0001", ADDRESS_LABELS["ns0001"]), ("ns0002", "ns0002"), ("ns0003", ADDRESS_LABELS["ns0003"])):
+        rows = _row_lines(o2, name, _on_host(base, host), stream)
+        assert rows and label in rows[0] and (host != "ns0002" or "ns0002 (" not in rows[0]), (name, host, rows)
+        assert all("ns0272" not in r for r in rows), (name, rows)
+
+
+def test_alerts_that_are_out_of_scope_keep_their_rows_and_sql(o2, tmp_path):
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    for name in ("infra-switch-config-change", "infra-fortigate-admin-login-failures", "infra-unreachable-host", "infra-backup-missing",
+                 "infra-host-status-silent", "infra-disk-usage-p1", "infra-silent-host-p1", "infra-cpu-usage-p1"):
+        alert = o2.store["alert"][name]
+        assert "host_label" not in alert["row_template"] and "host_label" not in str(alert["query_condition"]), name
+    assert o2.store["alert"]["infra-unreachable-host"]["row_template"] == "• {tcpcheck_endpoint} (검사: {host_name}) · {event_time}"
+
+
+def test_the_address_never_changes_who_fires_or_the_raw_log_link(o2, tmp_path):
+    from openobserve_config import o2c_raw_log_sql
+    assert _apply(o2).returncode == 0
+    plain = {n: (a["query_condition"]["sql"], a["context_attributes"]["raw_log_line"]) for n, a in o2.store["alert"].items() if a["query_condition"]["type"] == "sql"}
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    for name in SERVER_ADDRESS_ALERTS:
+        sql, link = o2.store["alert"][name]["query_condition"]["sql"], o2.store["alert"][name]["context_attributes"]["raw_log_line"]
+        stream = o2.store["alert"][name]["stream_name"]
+        assert link.startswith("\n▶ 로그 보기: http"), name
+        old_sql, old_link = plain[name]
+        assert link == old_link, name   # 원문 조회 SQL은 SELECT 목록을 버리므로 표시 이름 식과 무관하다
+        assert o2c_raw_log_sql(sql, stream) == o2c_raw_log_sql(old_sql, stream), name
+        for clause in ("WHERE", "GROUP BY", "HAVING"):
+            tail = lambda s: re.split(rf"\b{clause}\b", s, maxsplit=1)[-1] if clause in s else ""
+            assert tail(sql).split(" ORDER BY")[0] == tail(old_sql).split(" ORDER BY")[0] or clause != "WHERE", (name, clause)
+    fixture_fires = {"ns0001": 10, "ns0002": 9}
+    recs = [_fail("2026-10-23 08:59:14", host=h) for h, n in fixture_fires.items() for _ in range(n)]
+    assert len(_row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")) == 1   # 임계 10회는 그대로
+
+
+def test_an_address_change_updates_only_the_server_alerts_and_a_rerun_writes_nothing(o2, tmp_path):
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    o2.writes.clear()
+    assert _addr_apply(o2, tmp_path).returncode == 0 and o2.writes == []
+    moved = dict(HOST_KV, ns0004={"ansible_host": "192.0.2.244"})
+    assert _addr_apply(o2, tmp_path, host_kv=moved).returncode == 0
+    updated = {path.rsplit("/", 1)[-1] for method, path, _ in o2.writes if method == "PUT"}
+    in_scope = {o2.store["alert"][n]["alert_id"] for n in SERVER_ADDRESS_ALERTS} | {
+        a["alert_id"] for n, a in o2.store["alert"].items() if "host_label" in a["row_template"]}
+    assert updated == in_scope and len(o2.writes) == len(in_scope)
+
+
+def test_addresses_stay_out_of_the_output_and_the_repository_files(o2, tmp_path):
+    res = _addr_apply(o2, tmp_path)
+    assert res.returncode == 0
+    sql = o2.store["alert"]["infra-ssh-login-failures-per-source"]["query_condition"]["sql"]
+    assert "192.0.2.201" in sql and "192.0.2.101" not in sql   # 알림에는 고른 주소만 있다(ansible_host가 이긴 public_ip는 없다)
+    addresses = {v for kv in HOST_KV.values() for v in kv.values() if isinstance(v, str) and v[0].isdigit()}
+    files = [p for p in list(ROLE.rglob("*")) + list((ROOT_DIR / "docs").glob("*.md")) + list((ROOT_DIR / "playbooks").glob("openobserve*")) if p.is_file()]
+    for address in addresses:
+        assert address not in res.stdout + res.stderr, address
+        for path in files:
+            assert not re.search(rf"(?<![\d.]){re.escape(address)}(?![\d])", path.read_text(encoding="utf-8", errors="ignore")), (address, path.name)
+
+
+def test_the_host_address_lookup_is_read_only_no_log_and_fails_on_anything_but_200_and_404():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    t = next(t for t in tasks if t["name"].startswith("[O2C-006]"))
+    assert t["no_log"] is True and t["changed_when"] is False and t["check_mode"] is False
+    assert t["o2c_http"]["status_code"] == [200, 404] and "o2c_host_kv_fixture is not defined" in str(t["when"])
+    assert "/data/' ~ _vault_hosts_prefix_eff ~ '{host}'" in t["o2c_http"]["requests"].replace("\n", " ") or "{host}'" in t["o2c_http"]["requests"]
+    guard = next(t for t in tasks if "address" in t["name"].lower() and t.get("ansible.builtin.assert"))
+    assert guard["no_log"] is True and "o2c_host_kv_fixture is not defined" in str(guard["when"])
+
+
+def test_without_an_openbao_token_the_address_lookup_fails_instead_of_dropping_the_addresses(o2, tmp_path, monkeypatch):
+    for var in ("VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID"):
+        monkeypatch.delenv(var, raising=False)
+    res = _apply(o2, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_host_kv_fixture": None})
+    assert res.returncode != 0 and "OpenBao" in res.stdout and o2.writes == []
+
+
+def test_check_mode_reads_the_addresses_but_writes_nothing(o2, tmp_path):
+    assert _addr_apply(o2, tmp_path, "--check").returncode == 0 and o2.writes == []

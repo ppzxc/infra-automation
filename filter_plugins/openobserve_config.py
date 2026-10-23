@@ -506,6 +506,51 @@ def o2c_host_items(hosts):
     return [{'host': h} for h in hosts or []]
 
 
+_SAFE_HOST_NAME = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
+_SAFE_ADDRESS = re.compile(r'^[A-Za-z0-9._:-]{1,64}$')   # IPv4·IPv6·호스트 이름. 알림 SQL에 문자열로 들어가므로 따옴표·공백 등은 받지 않는다
+
+
+def _host_kv(name, raw):
+    """OpenBao ``hosts/<host>`` 본문을 평면 dict로 푼다(resolve_connection.yml과 같은 규칙: 호스트명 키 → 키가 하나뿐인 오브젝트 → 평면)."""
+    if not isinstance(raw, dict):
+        return {}
+    if isinstance(raw.get(name), dict):
+        return raw[name]
+    if len(raw) == 1 and isinstance(next(iter(raw.values())), dict):
+        return next(iter(raw.values()))
+    return raw
+
+
+def o2c_host_addresses(roster, kv_by_host):
+    """``{호스트: 접속 주소}`` — 도달성 검사 대상과 같은 규칙으로 고른다: KV ``ansible_host``, 없으면 ``public_ip``.
+
+    주소가 없거나 SQL에 안전하지 않은 값이면 그 호스트는 빠진다(알림에는 관리번호만 보인다). 짐작해서 채우지 않는다.
+    """
+    out = {}
+    for name in roster or []:
+        if not _SAFE_HOST_NAME.match(str(name)):
+            continue
+        kv = _host_kv(name, (kv_by_host or {}).get(name))
+        address = next((str(v).strip() for v in (kv.get('ansible_host'), kv.get('public_ip')) if v is not None and str(v).strip()), '')
+        if _SAFE_ADDRESS.match(address):
+            out[name] = address
+    return out
+
+
+def o2c_host_label(column, addresses):
+    """알림 SQL의 서버 행 표시 이름 컬럼: ``CASE <column> WHEN '<호스트>' THEN '<호스트> (<주소>)' … ELSE <column> END AS host_label``.
+
+    주소 표는 Config 실행 때 OpenBao에서 읽어 SQL에 고정한다(알림이 울릴 때는 OpenBao에 접속하지 않는다). 표가 비면 관리번호 그대로다.
+    """
+    if column not in ('host_name', 'host'):
+        raise ValueError('표시 이름 컬럼은 host_name 또는 host여야 합니다: %s' % column)
+    pairs = sorted((h, a) for h, a in (addresses or {}).items() if _SAFE_HOST_NAME.match(str(h)) and _SAFE_ADDRESS.match(str(a)))
+    if not pairs:
+        return '%s AS host_label' % column
+    whens = ' '.join("WHEN '%s' THEN '%s (%s)'" % (h, h, a) for h, a in pairs)
+    return 'CASE %s %s ELSE %s END AS host_label' % (column, whens, column)
+
+
 def _group(groups, name):
     return set((groups or {}).get(name) or [])
 
@@ -950,7 +995,7 @@ class FilterModule(object):
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
                 'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
                 'o2c_missing_sql': o2c_missing_sql, 'o2c_app_telemetry_roster': o2c_app_telemetry_roster,
-                'o2c_host_items': o2c_host_items,
+                'o2c_host_items': o2c_host_items, 'o2c_host_addresses': o2c_host_addresses, 'o2c_host_label': o2c_host_label,
                 'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
                 'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
                 'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts,
