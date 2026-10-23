@@ -30,7 +30,8 @@ ITEM_PATHS = {
 }
 ID_FIELD = {'pipeline': 'pipeline_id', 'alert': 'alert_id'}   # update by id; the others by name
 STREAM_CHANGED = 'stream changed'   # 삭제 후 재생성의 이유(알림의 스트림 이름·종류는 PUT으로 못 바꾼다)
-CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'action', 'runbook')
+CONTEXT_KEYS = ('severity', 'severity_icon', 'title', 'what', 'why', 'runbook')
+ACTION_SLOTS = 4   # 조치 항목 칸 수: 통지 본문이 {action_1}~{action_4}를 줄마다 하나씩 쓴다(정의의 조치는 최대 4항목)
 INJECT_ID = ('pipeline',)   # the pipeline body carries its own id on update; alerts take it from the path only
 MANAGED_PREFIX = 'infra-'   # 알림 이름 접두어. 서버에서 지우는 근거는 아니다: 삭제는 폐기 목록(o2c_retired_alerts)의 이름뿐이고, 접두어만 있는 알림은 건드리지 않고 알려 준다
 LINK_LABEL_LOG, LINK_LABEL_METRIC = '로그 보기', '상세 보기'   # 통지 본문의 ▶ {link_label}: {alert_url}
@@ -42,14 +43,18 @@ SECRET_KINDS = ('destination',)                               # url and headers 
 _CIRCLED = re.compile('[\u2460-\u2473]')   # ①~⑳
 
 
-def o2c_action_lines(text):
-    """``① a ② b`` -> ``"\\n1. a\\n2. b"``: 조치를 항목마다 한 줄로 나눈다(앞에 개행 — 템플릿은 ``■ 조치:{action}``).
+def o2c_action_items(text):
+    """``① a ② b`` -> ``{'action_1': '1. a', 'action_2': '2. b', 'action_3': '', 'action_4': ''}``: 조치를 항목마다 칸 하나로 나눈다.
 
-    ①이 없는 문장은 ``1.`` 한 줄이 된다. 빈 문자열은 그대로 비운다. 알림 정의는 한 줄(① … ② …)로 두고 렌더링 단계에서만 바꾼다.
+    OpenObserve는 치환하는 값 안의 개행을 ``\\n`` 두 글자로 이스케이프해 text/plain 본문에 그대로 보이므로 개행은 값이 아니라 템플릿 본문에 둔다
+    (``{action_1}`` ... ``{action_4}``를 줄마다 하나씩). 항목이 칸보다 적으면 남는 칸은 빈 문자열이다. ①이 없는 문장은 ``1.`` 한 줄이 된다.
+    알림 정의는 한 줄(① … ② …)로 두고 렌더링 단계에서만 바꾼다.
     """
     items = [i.strip() for i in _CIRCLED.split(str(text or ''))]
     items = [i for i in items if i]
-    return ''.join('\n%d. %s' % (n, item) for n, item in enumerate(items, 1))
+    if len(items) > ACTION_SLOTS:
+        raise ValueError('action has %d items, at most %d fit the notification template' % (len(items), ACTION_SLOTS))
+    return {'action_%d' % n: ('%d. %s' % (n, items[n - 1]) if n <= len(items) else '') for n in range(1, ACTION_SLOTS + 1)}
 
 
 _SQL_KEYWORDS = ('select', 'from', 'where', 'group', 'having', 'order', 'limit', 'union', 'intersect', 'except', 'join', 'with', 'offset')
@@ -227,12 +232,12 @@ def o2c_desired(spec):
             'pending_period_sec': int(alert.get('pending_minutes') or 0) * 60,
             # 알림 평가 시각대: 최상위 tz_offset(분 단위 UTC 오프셋, trigger_condition 안이 아님 — OpenObserve 테스트 데이터 AlertMultiRealTime.json 구조)
             'tz_offset': int(spec.get('tz_offset', 0)),
-            # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action}·{runbook}로 쓰는 알림별 변수,
+            # 행동 가능한 알림: 통지 템플릿이 {severity}·{title}·{what}·{why}·{action_1}~{action_4}·{runbook}로 쓰는 알림별 변수,
             # {rows}의 한 줄 모양(대상 호스트·출발지·사용자·건수). link_label은 {alert_url}의 라벨이다(로그 알림 "로그 보기", 메트릭 알림 "상세 보기").
-            'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, action=o2c_action_lines(alert['action']),
+            'context_attributes': dict({k: alert[k] for k in CONTEXT_KEYS}, **o2c_action_items(alert['action']),
                                        link_label=LINK_LABEL_METRIC if promql or raw_sql else LINK_LABEL_LOG,
                                        # 원문 링크는 단축 URL로 싣는다(긴 base64 쿼리 대신). 등록은 반영 단계 O2C-019가 한다
-                                       raw_log_line=('\n▶ %s: %s' % (LINK_LABEL_LOG, raw_short) if raw_short else '')),
+                                       raw_log_line=('▶ %s: %s' % (LINK_LABEL_LOG, raw_short) if raw_short else '')),
             'row_template': alert['row_template'], 'row_template_type': 'String',
         }}, **({'short_link': {'original': raw_url, 'short': raw_short}} if raw_short else {})))
     # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8): 스트림이 이미 있을 때만 맞춘다(없으면 o2c_plan이 건너뛴다)
@@ -989,7 +994,7 @@ def o2c_enabled_alerts(alerts):
 
 class FilterModule(object):
     def filters(self):
-        return {'o2c_action_lines': o2c_action_lines, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_missing_destinations': o2c_missing_destinations, 'o2c_unmanaged_alerts': o2c_unmanaged_alerts,
+        return {'o2c_action_items': o2c_action_items, 'o2c_desired': o2c_desired, 'o2c_plan': o2c_plan, 'o2c_missing_destinations': o2c_missing_destinations, 'o2c_unmanaged_alerts': o2c_unmanaged_alerts,
                 'o2c_valid_retired_alerts': o2c_valid_retired_alerts, 'o2c_retired_conflicts': o2c_retired_conflicts, 'o2c_plan_summary': o2c_plan_summary,
                 'o2c_alert_state': o2c_alert_state, 'o2c_raw_log_sql': o2c_raw_log_sql, 'o2c_raw_log_url': o2c_raw_log_url, 'o2c_short_url': o2c_short_url, 'o2c_short_url_requests': o2c_short_url_requests, 'o2c_short_url_mismatches': o2c_short_url_mismatches, 'o2c_as_requests': o2c_as_requests, 'o2c_verify_pending': o2c_verify_pending, 'o2c_resource_sql': o2c_resource_sql,
                 'o2c_read_requests': o2c_read_requests, 'o2c_verify_plan': o2c_verify_plan,

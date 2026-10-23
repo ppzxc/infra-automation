@@ -48,11 +48,11 @@ o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authori
 o2c_p1_destination: ""
 
 # 통지 본문: 사내 알림 플랫폼(Google Chat)의 text/plain 경로로 보내는 알림 텍스트 그대로다(JSON 래퍼 없음). 이 경로는 본문 길이 제한이 없다(실측: 5000자까지 도착).
-# 행동 가능한 알림(PagerDuty·Google SRE 원칙): 심각도·제목 → 현상 → 영향 → 대상(행) → 조치(항목마다 한 줄, o2c_action_lines가 ①②③을 줄로 나눈다) → 런북·대시보드 → 발생 구간.
-# {severity}·{title}·{what}·{why}·{action}·{runbook}·{link_label}은 알림별 context_attributes, {rows}는 알림별 row_template이다.
+# 행동 가능한 알림(PagerDuty·Google SRE 원칙): 심각도·제목 → 현상 → 영향 → 대상(행) → 조치(항목마다 한 줄, o2c_action_items가 ①②③을 {action_1}~{action_4} 칸으로 나눈다) → 런북·대시보드 → 발생 구간.
+# {severity}·{title}·{what}·{why}·{action_1}~{action_4}·{runbook}·{link_label}은 알림별 context_attributes, {rows}는 알림별 row_template이다.
 # {rows:30}은 행을 30개까지만 싣고(OpenObserve 템플릿 변수 `{rows:N}`) {alert_count}는 조건에 걸린 전체 행 수라 잘린 만큼은 건수로 알 수 있다.
 # {link_label}은 메트릭(PromQL) 알림과 원문 링크가 있는 로그 알림이 "상세 보기"(= {alert_url}, 알림 화면), 원문 링크가 없는 로그 알림이 "로그 보기"다.
-# {raw_log_line}은 원문 로그 링크를 만들 수 있는 로그 알림에서만 "\n▶ 로그 보기: <원문 URL>" 줄이고 나머지는 빈 문자열이다(o2c_desired가 채운다).
+# {raw_log_line}은 원문 로그 링크를 만들 수 있는 로그 알림에서만 "▶ 로그 보기: <원문 URL>" 줄이고 나머지는 빈 문자열이다(o2c_desired가 채운다).
 # 알림 SQL에서 WHERE만 남겨 파생하거나 알림 정의의 선택 필드 raw_sql로 직접 지정한다(o2c_raw_log_sql). {alert_url}은 컨텍스트 값 안에서 치환되지 않아 줄째 따로 둔다.
 # 시각 줄: {alert_trigger_time_str}(알림이 평가된 시각, 형식 %Y-%m-%dT%H:%M:%S)을 쓴다. 옛 {alert_start_time}/{alert_end_time}은 결과 행 _timestamp의
 # 최소/최대라 최종 SELECT에 _timestamp가 없는 알림(대부분)에서 값이 비거나 어긋난다. 근거: OpenObserve 문서 "Templates"의 변수 표(alert_trigger_time =
@@ -60,6 +60,8 @@ o2c_p1_destination: ""
 # 표기는 KST다. alert_trigger_time_str은 OpenObserve 프로세스의 로컬 시간대로 만들어진다(v1.0.4 alerts/alert.rs, chrono::Local). 알림 정의의 tz_offset은
 # 읽지 않는다. 그래서 ns0331의 OpenObserve 컨테이너에 호스트 /etc/localtime(Asia/Seoul)을 읽기 전용으로 마운트했다(2026-10-23). 이 마운트가 빠지면 UTC로 돌아간다.
 # 이 줄은 평가 시각이다. 사건 시각(로그가 생긴 시각)은 알림 SQL이 계산해야 하며 후속 작업이다.
+# 값 안의 개행은 OpenObserve가 `\n` 두 글자로 이스케이프해 평문에 그대로 보인다(#346 실측). 그래서 줄바꿈은 값이 아니라 이 본문에 두고, 조치는 칸({action_N})으로 나눈다.
+#   남는 칸·없는 원문 링크는 빈 줄이 된다. 단 {rows}의 행 사이 개행은 OpenObserve가 넣어 저장소에서 바꿀 수 없다.
 # 행 값({detail} 등 로그 원문)은 소스 custom.rs에서 JSON 이스케이프되는 경로(process_variable_replace → format_variable_value)로 치환되는 것으로 보이나 실서버 확인 전이다.
 o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
 o2c_template_body: |-
@@ -69,10 +71,15 @@ o2c_template_body: |-
   ■ 영향: {why}
   ■ 대상 {alert_count}건:
   {rows:30}
-  ■ 조치:{action}
+  ■ 조치:
+  {action_1}
+  {action_2}
+  {action_3}
+  {action_4}
 
   ▶ 런북: {runbook}
-  ▶ {link_label}: {alert_url}{raw_log_line}
+  ▶ {link_label}: {alert_url}
+  {raw_log_line}
   ⏱ 평가: {alert_trigger_time_str} KST
   📋 규칙: {alert_name}
 

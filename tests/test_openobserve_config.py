@@ -295,7 +295,7 @@ def test_template_body_is_the_plain_text_message_without_a_json_wrapper(o2):
     text = o2.store["template"]["infra-automation-plain"]["body"]
     assert not text.lstrip().startswith("{\"content\"") and '"type": "text"' not in text
     # 행동 가능한 알림: 심각도·제목·무슨 일·왜 중요·조치·런북·대상 행·대시보드 링크·발생 구간
-    for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action}", "{runbook}",
+    for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action_1}", "{runbook}",
                 "{rows:30}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
         assert var in text, var
     assert "\n" in text and "\\n" not in text   # 실제 줄바꿈
@@ -1015,7 +1015,7 @@ def test_selftest_notification_is_clearly_marked_as_a_test(o2):
     ctx = o2.store["alert"][SELFTEST]["context_attributes"]
     assert ctx["severity"] == "TEST"       # 통지 첫 줄이 "<아이콘> [TEST] <제목>"이 된다
     assert all(ctx[k].strip() and '"' not in ctx[k] and "\n" not in ctx[k] for k in ("title", "what", "why", "runbook"))
-    assert ctx["action"].startswith("\n1. ") and '"' not in ctx["action"]
+    assert ctx["action_1"].startswith("1. ") and '"' not in ctx["action_1"]
     assert "시험" in ctx["title"] and o2.store["alert"][SELFTEST]["row_template"].startswith("• ")
 
 
@@ -1102,7 +1102,7 @@ def test_silent_host_alerts_are_state_alerts_p2_and_p1_on_the_memory_heartbeat(o
         assert a["stream_type"] == "metrics" and a["stream_name"] == "system_memory_usage" and a["query_condition"]["type"] == "sql"
         assert a["trigger_condition"]["period"] == 180 and a["trigger_condition"]["frequency"] == 5
         assert "{host_name}" in a["row_template"]
-        assert "같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인" in a["context_attributes"]["action"]
+        assert "같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인" in a["context_attributes"]["action_1"] + a["context_attributes"]["action_2"] + a["context_attributes"]["action_3"]
     assert p2["context_attributes"]["severity"] == "P2 경고" and p2["trigger_condition"]["silence"] == 1440
     assert p1["context_attributes"]["severity"] == "P1 긴급" and p1["trigger_condition"]["silence"] == 60
     # P2는 15분 없음(3시간 미만), P1은 3시간 없음 — 같은 호스트에 동시에 오지 않는다
@@ -1113,7 +1113,7 @@ def test_silent_host_alerts_are_state_alerts_p2_and_p1_on_the_memory_heartbeat(o
 def test_silent_host_p1_warns_that_the_log_gap_is_not_recoverable_after_about_5_hours(o2, tmp_path):
     assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
     ctx = o2.store["alert"]["infra-silent-host-p1"]["context_attributes"]
-    text = ctx["what"] + ctx["why"] + ctx["action"]
+    text = ctx["what"] + ctx["why"] + "".join(ctx[f"action_{n}"] for n in range(1, 5))
     assert "약 5시간" in text and "OpenObserve로 복구되지 않음" in text
 
 
@@ -1224,7 +1224,7 @@ def test_backup_and_maintenance_missing_are_daily_p2_state_alerts_over_their_ros
 def test_backup_missing_action_starts_with_the_silent_host_check_and_runbook_anchors_exist(o2, tmp_path):
     assert _apply(o2, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
     ctx = o2.store["alert"]["infra-backup-missing"]["context_attributes"]
-    assert ctx["action"].startswith("\n1. 같은 호스트의 Silent Host 알림이 있는지 먼저 확인")
+    assert ctx["action_1"].startswith("1. 같은 호스트의 Silent Host 알림이 있는지 먼저 확인")
     runbook = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
     for name in BACKUP_ALERTS:
         anchor = o2.store["alert"][name]["context_attributes"]["runbook"].split("#")[1]
@@ -1876,7 +1876,7 @@ def test_firewall_alerts_are_created_on_security_logs_with_the_specified_grades_
         assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence), name
         assert a["destinations"] == ["infra-automation-plain"] and a["enabled"], name
         assert "fortigate-syslog" in a["query_condition"]["sql"], name
-        for key in ("what", "why", "action", "runbook"):
+        for key in ("what", "why", "action_1", "runbook"):
             assert a["context_attributes"][key].strip(), (name, key)
         assert a["context_attributes"]["runbook"].endswith("#" + name.removeprefix("infra-")), name
 
@@ -2150,51 +2150,62 @@ def _filters():
 
 
 @pytest.mark.parametrize("count", [2, 3, 4])
-def test_action_filter_splits_circled_numbers_into_numbered_lines(count):
+def test_action_filter_splits_circled_numbers_into_numbered_slots(count):
     marks = "①②③④"[:count]
     text = " ".join(f"{m} 항목{i}" for i, m in enumerate(marks, 1))
-    expected = "".join(f"\n{i}. 항목{i}" for i in range(1, count + 1))
-    assert _filters().o2c_action_lines(text) == expected
+    expected = {f"action_{i}": (f"{i}. 항목{i}" if i <= count else "") for i in range(1, 5)}
+    assert _filters().o2c_action_items(text) == expected
 
 
-def test_action_filter_turns_a_single_sentence_into_one_numbered_line():
-    assert _filters().o2c_action_lines("로그를 확인한다") == "\n1. 로그를 확인한다"
+def test_action_filter_turns_a_single_sentence_into_one_numbered_slot():
+    assert _filters().o2c_action_items("로그를 확인한다") == {"action_1": "1. 로그를 확인한다", "action_2": "", "action_3": "", "action_4": ""}
 
 
 def test_action_filter_keeps_an_empty_action_empty():
-    assert _filters().o2c_action_lines("") == "" and _filters().o2c_action_lines("   ") == ""
+    empty = {f"action_{i}": "" for i in range(1, 5)}
+    assert _filters().o2c_action_items("") == empty and _filters().o2c_action_items("   ") == empty
 
+
+def test_action_filter_rejects_more_items_than_the_template_has_slots():
+    with pytest.raises(ValueError):
+        _filters().o2c_action_items("① a ② b ③ c ④ d ⑤ e")
 
 
 def test_template_uses_the_new_labels_and_not_the_old_ones(o2):
     assert _apply(o2).returncode == 0
     text = o2.store["template"]["infra-automation-plain"]["body"]
-    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:30}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
+    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:30}", "■ 조치:\n{action_1}\n{action_2}\n{action_3}\n{action_4}\n", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
         assert label in text, label
     assert "무슨 일" not in text and "왜 중요" not in text
 
 
-def test_rendered_body_with_a_multiline_action_keeps_one_numbered_line_per_item(o2):
-    """본문이 JSON이 아니라 평문이라 개행이 있는 조치도 줄 그대로 들어간다."""
+def test_rendered_body_puts_one_numbered_item_per_line_and_keeps_newlines_out_of_values(o2):
+    """OpenObserve는 값 안의 개행을 `\\n` 두 글자로 이스케이프하므로 줄바꿈은 본문에만 있고 값에는 없다."""
     assert _apply(o2).returncode == 0
     tpl = o2.store["template"]["infra-automation-plain"]["body"]
-    action = _filters().o2c_action_lines("① 하나 ② 둘 ③ 셋")
-    assert "■ 조치:\n1. 하나\n2. 둘\n3. 셋\n\n▶ 런북" in tpl.replace("{action}", action)
+    items = _filters().o2c_action_items("① 하나 ② 둘 ③ 셋")
+    rendered = tpl
+    for key, value in items.items():
+        rendered = rendered.replace("{%s}" % key, value)
+    assert "■ 조치:\n1. 하나\n2. 둘\n3. 셋\n\n" in rendered
+    for name, alert in o2.store["alert"].items():
+        assert not any("\n" in str(v) for v in alert["context_attributes"].values()), name
 
 
-def test_every_alert_action_is_one_numbered_line_per_item_after_rendering(o2):
+def test_every_alert_action_is_one_numbered_slot_per_item_after_rendering(o2):
     assert _apply(o2).returncode == 0
     defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
     source = {a["name"]: a["action"] for a in defaults["o2c_alerts"]}
     assert len(o2.store["alert"]) >= 36 + len(PROMQL_ALERTS)
     for name, alert in o2.store["alert"].items():
-        action = alert["context_attributes"]["action"]
-        lines = action.split("\n")
-        assert lines[0] == "" and len(lines) >= 2, name
-        assert [ln.split(". ", 1)[0] for ln in lines[1:]] == [str(i) for i in range(1, len(lines))], name
-        assert not re.search("[①-⑳]", action) and all(ln.split(". ", 1)[1].strip() for ln in lines[1:]), name
+        ctx = alert["context_attributes"]
+        items = [ctx[f"action_{n}"] for n in range(1, 5)]
+        filled = [i for i in items if i]
+        assert items[:len(filled)] == filled and filled, name
+        assert [i.split(". ", 1)[0] for i in filled] == [str(n) for n in range(1, len(filled) + 1)], name
+        assert not re.search("[①-⑳]", "".join(items)) and all(i.split(". ", 1)[1].strip() for i in filled), name
         if name in source:
-            assert len(lines) - 1 == max(1, len(re.findall("[①-⑳]", source[name]))), name
+            assert len(filled) == max(1, len(re.findall("[①-⑳]", source[name]))), name
 
 
 def test_second_run_after_the_action_conversion_changes_nothing(o2):
@@ -2403,7 +2414,7 @@ def test_promql_alerts_are_created_as_promql_metrics_alerts_to_the_current_desti
                                           "frequency_type": "minutes", "silence": silence, "align_time": True}, name
         assert a["destinations"] == ["infra-automation-plain"] and a["row_template_type"] == "String" and a["enabled"] is True, name
         assert a["context_attributes"]["severity"] == sev and a["context_attributes"]["link_label"] == "상세 보기", name
-        assert a["context_attributes"]["action"].startswith("\n1. "), name
+        assert a["context_attributes"]["action_1"].startswith("1. "), name
 
 
 def test_log_alerts_keep_the_sql_condition_and_the_link_label(o2):
@@ -2624,7 +2635,7 @@ def _raw_line(alert):
 def _raw_url(alert):
     """통지 본문에 실린 원문 로그 링크(단축 URL)."""
     line = _raw_line(alert)
-    assert line.startswith("\n▶ 로그 보기: "), line
+    assert line.startswith("▶ 로그 보기: "), line
     return line.split(": ", 1)[1]
 
 
@@ -2701,7 +2712,7 @@ def test_log_alerts_with_a_derivable_where_carry_the_raw_log_link_and_the_others
 def test_template_places_the_raw_log_line_right_after_the_alert_url(o2):
     assert _apply(o2).returncode == 0
     text = o2.store["template"]["infra-automation-plain"]["body"]
-    assert "▶ {link_label}: {alert_url}{raw_log_line}\n" in text
+    assert "▶ {link_label}: {alert_url}\n{raw_log_line}\n" in text
 
 
 def test_without_a_web_url_no_alert_gets_a_raw_log_link_and_the_second_run_changes_nothing(o2):
@@ -3024,7 +3035,7 @@ def test_per_source_rows_come_out_with_the_most_failures_first_so_the_row_cap_ke
 def test_raw_log_link_survives_the_event_time_column(o2):
     assert _apply(o2).returncode == 0
     alert = o2.store["alert"]["infra-ssh-login-failures-per-source"]
-    assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
+    assert alert["context_attributes"]["raw_log_line"].startswith("▶ 로그 보기: http")
     from openobserve_config import o2c_raw_log_sql
     assert o2c_raw_log_sql(alert["query_condition"]["sql"], "security_logs") == (
         "SELECT * FROM \"security_logs\" WHERE event_action = 'ssh_login' AND event_outcome = 'failure' ORDER BY _timestamp DESC LIMIT 200")
@@ -3131,7 +3142,7 @@ def test_parse_error_alerts_keep_the_raw_log_link_and_show_the_time(o2):
         recs = [_ev("2026-10-23 08:55:02", log_parse_error=True)] * 60 + [_ev("2026-10-23 08:59:14", log_parse_error=False)] * 40
         rows = _row_lines(o2, name, recs, stream)
         assert rows and rows[0].endswith(" · 10-23 08:55:02~08:59:14"), name
-        assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
+        assert alert["context_attributes"]["raw_log_line"].startswith("▶ 로그 보기: http")
 
 
 # ---- 알림 대상 행의 발생 시각 — Ticket-3 (#343): system·app·backup·host_status·tcpcheck ----
@@ -3326,7 +3337,7 @@ def test_the_address_never_changes_who_fires_or_the_raw_log_link(o2, tmp_path):
     for name in SERVER_ADDRESS_ALERTS:
         sql, link = o2.store["alert"][name]["query_condition"]["sql"], o2.store["alert"][name]["context_attributes"]["raw_log_line"]
         stream = o2.store["alert"][name]["stream_name"]
-        assert link.startswith("\n▶ 로그 보기: http"), name
+        assert link.startswith("▶ 로그 보기: http"), name
         old_sql, old_link = plain[name]
         assert link == old_link, name   # 원문 조회 SQL은 SELECT 목록을 버리므로 표시 이름 식과 무관하다
         assert o2c_raw_log_sql(sql, stream) == o2c_raw_log_sql(old_sql, stream), name
