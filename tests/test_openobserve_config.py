@@ -3049,7 +3049,8 @@ LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
 COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
                 "readings", "events", "detections", "downs", "flaps", "severity_code")
 LONGEST_TEXT = {"user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
-                "container_name": "c" * 32, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
+                "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
+                "status": "timeout", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
 TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
 
 
@@ -3132,3 +3133,36 @@ def test_parse_error_alerts_keep_the_raw_log_link_and_show_the_time(o2):
         rows = _row_lines(o2, name, recs, stream)
         assert rows and rows[0].endswith(" · 10-23 08:55:02~08:59:14"), name
         assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
+
+
+# ---- 알림 대상 행의 발생 시각 — Ticket-3 (#343): system·app·backup·host_status·tcpcheck ----
+
+SYSTEM_TIME_CASES = {   # alert -> (stream, record fields, expected row without the time; "{n}" is the record count)
+    "infra-oom-kill": ("system_logs", [dict(body="Out of memory: Killed process 123 (java) total-vm:1kB")],
+                       "• ns0272: 종료된 프로세스 java ({n}건)"),
+    "infra-disk-fs-errors": ("system_logs", [dict(body="blk_update_request: I/O error, dev sda")], "• ns0272: 오류 패턴 {n}건"),
+    "infra-app-log-errors": ("app_logs", [dict(severity="error", container_name="api")], "• ns0272 / api: ERROR 이상 {n}건"),
+    "infra-backup-failure": ("backup_logs", [dict(job="backup", success=False, host="ns0272")], "• ns0272: 실패 {n}건"),
+    "infra-raid-collection-error": ("host_status_logs", [dict(kind="tool_status", status="error", message="m")] * 3,
+                                    "• ns0272: error {n}회 (m)"),
+    "infra-unreachable-host": ("tcpcheck_status", [dict(tcpcheck_endpoint="198.51.100.5:22", value=0)],
+                               "• 198.51.100.5:22 (검사: ns0272)"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(SYSTEM_TIME_CASES))
+def test_system_app_backup_raid_and_reachability_rows_show_one_time_or_first_to_last(o2, name):
+    assert _apply(o2).returncode == 0
+    stream, base, expected = SYSTEM_TIME_CASES[name]
+    k = len(base)
+    one = [_ev("2026-10-23 08:59:14", **f) for f in base]
+    assert _row_lines(o2, name, one, stream) == [expected.format(n=k) + " · 10-23 08:59:14"]
+    two = [_ev("2026-10-23 08:55:02", **f) for f in base] + [_ev("2026-10-23 08:59:14", **f) for f in base]
+    rows = _row_lines(o2, name, two, stream)
+    assert rows == [expected.format(n=2 * k) + " · 10-23 08:55:02~08:59:14"]
+
+
+def test_backup_and_raid_missing_and_usage_alerts_keep_their_rows(o2):
+    assert _apply(o2).returncode == 0
+    for name in ("infra-backup-missing", "infra-maintenance-missing", "infra-host-status-silent", "infra-disk-usage-p1"):
+        assert "event_time" not in o2.store["alert"][name]["row_template"], name

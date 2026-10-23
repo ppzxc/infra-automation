@@ -476,7 +476,7 @@ o2c_alerts:
     why: "서비스 프로세스가 죽었을 수 있고, 같은 원인이 반복되면 다른 서비스와 서버 전체로 번질 수 있습니다."
     action: "① 행의 종료된 프로세스가 서비스면 재기동 상태 확인 ② 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit) 점검 ③ 반복되면 메모리 증설·한도 조정 계획"
     runbook: "{{ o2c_runbook_base }}#oom-kill"
-    row_template: '• {host_name}: 종료된 프로세스 {killed_process} ({kills}건)'
+    row_template: '• {host_name}: 종료된 프로세스 {killed_process} ({kills}건) · {event_time}'
     description: "OOM kill (Killed process / Kill process / invoked oom-killer, 대소문자 무시) — cgroup·CentOS 6/7 형식 포함"
     stream: system_logs
     sql: >-
@@ -484,10 +484,11 @@ o2c_alerts:
       CASE WHEN lower(body) LIKE '%kill%process%'
       THEN regexp_replace(body, '^.*[Kk]ill(?:ed)? process [0-9]+ [(]([^)]*)[)].*$', '\1')
       ELSE 'oom-killer 호출' END AS killed_process,
-      count(*) AS kills FROM "system_logs"
+      count(*) AS kills, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE lower(body) LIKE '%killed process%' OR lower(body) LIKE '%out of memory: kill process%'
       OR lower(body) LIKE '%invoked oom-killer%'
       GROUP BY host_name, killed_process
+      ORDER BY kills DESC
     period: 5
     frequency: 1
     silence: 5
@@ -499,15 +500,16 @@ o2c_alerts:
     why: "디스크 고장이나 데이터 손상의 전조로, 데이터 손실로 이어질 수 있어 즉시 확인해야 합니다."
     action: "① 로그 보기에서 오류 원문과 장치 확인 ② 즉시 백업 상태 확인(restic snapshots) ③ 파일시스템이 읽기 전용이면 서비스 영향 판단 후 디스크 교체·fsck 일정"
     runbook: "{{ o2c_runbook_base }}#disk-fs-errors"
-    row_template: '• {host_name}: 오류 패턴 {matches}건'
+    row_template: '• {host_name}: 오류 패턴 {matches}건 · {event_time}'
     description: "디스크·파일시스템 오류 (I/O error, EXT4-fs error, XFS Corruption, blk_update_request, Buffer I/O error) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
     stream: system_logs
     sql: >-
-      SELECT host_name, count(*) AS matches FROM "system_logs"
+      SELECT host_name, count(*) AS matches, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE lower(body) LIKE '%i/o error%' OR lower(body) LIKE '%ext4-fs error%'
       OR (lower(body) LIKE '%xfs%' AND lower(body) LIKE '%corruption%')
       OR lower(body) LIKE '%blk_update_request%' OR lower(body) LIKE '%buffer i/o error%'
       GROUP BY host_name
+      ORDER BY matches DESC
     period: 5
     frequency: 1
     silence: 5
@@ -519,14 +521,15 @@ o2c_alerts:
     why: "비활성화되면 funa가 내려가도 FAULT 전환·VIP 페일오버·봇 알림이 나가지 않아 장애가 조용히 이어집니다. keepalived는 권한을 시작할 때만 검사하므로 이 줄은 재시작 직후에 한 번 남습니다."
     action: "① 노드에서 ls -ld /opt/services/vrrp/config 와 스크립트 소유·권한 확인(디렉터리 root:root 0755, 스크립트 root:root 0755) ② Semaphore Host Provisioning(funa_env)으로 권한 복구 ③ keepalived 컨테이너 재생성 후 시작 로그에 Unsafe permissions가 없는지 확인"
     runbook: "{{ o2c_runbook_base }}#keepalived-script-disabled"
-    row_template: '• {host_name}: 비활성화 로그 {matches}건'
+    row_template: '• {host_name}: 비활성화 로그 {matches}건 · {event_time}'
     description: "app_logs의 keepalived 컨테이너 로그에 'Unsafe permissions found for script' 또는 'Disabling track script' (keepalived는 레벨이 없어 문구로 잡는다)"
     stream: app_logs
     sql: >-
-      SELECT host_name, count(*) AS matches FROM "app_logs"
+      SELECT host_name, count(*) AS matches, {{ o2c_event_time_sql }} FROM "app_logs"
       WHERE container_name = 'vrrp-keepalived-1'
       AND (lower(body) LIKE '%unsafe permissions found for script%' OR lower(body) LIKE '%disabling track script%')
       GROUP BY host_name
+      ORDER BY matches DESC
     period: 5
     frequency: 1
     silence: 5
@@ -538,13 +541,14 @@ o2c_alerts:
     why: "앱 장애나 요청 실패, 의존 서비스(DB·큐·캐시) 연결 문제의 첫 신호일 수 있습니다. WARN은 알리지 않으므로 이 알림이 오면 서비스 영향이 시작됐을 수 있습니다."
     action: "① 행의 호스트·컨테이너 로그에서 ERROR 원문과 직전 줄 확인 ② 같은 시각의 다른 알림(VIP 전환, valkey, Silent Host)과 대조 ③ 서비스 영향이 있으면 해당 노드를 서비스에서 빼고 원인 조치"
     runbook: "{{ o2c_runbook_base }}#app-log-errors"
-    row_template: '• {host_name} / {container_name}: ERROR 이상 {errors}건'
+    row_template: '• {host_name} / {container_name}: ERROR 이상 {errors}건 · {event_time}'
     description: "app_logs의 severity가 error 이상(error·err·severe·fatal·critical·panic·dpanic, 대소문자 무시)인 줄 — 수집기가 JSON level·log.level·valkey 레벨 문자로 올린 값만 본다(키워드 추정 없음). WARN 이하와 레벨이 없는 줄은 알리지 않는다"
     stream: app_logs
     sql: >-
-      SELECT host_name, container_name, count(*) AS errors FROM "app_logs"
+      SELECT host_name, container_name, count(*) AS errors, {{ o2c_event_time_sql }} FROM "app_logs"
       WHERE lower(severity) IN ('error','err','severe','fatal','critical','panic','dpanic')
       GROUP BY host_name, container_name
+      ORDER BY errors DESC
     period: 5
     frequency: 1
     silence: 5
@@ -734,13 +738,14 @@ o2c_alerts:
     why: "서버나 네트워크가 내려갔을 가능성이 큽니다. 접속이 된다고 OS가 건강하다는 뜻은 아니며, 이 알림은 도달성만 봅니다(ADR-0010)."
     action: "① 서버 전원·콘솔·네트워크 경로 확인 ② 같은 호스트의 Silent Host 알림이 함께 오면 같은 사건이다 — 서버가 복구되면 수집기도 돌아온다 ③ 서버가 살아 있는데 이 알림만 오면 ns0266에서 해당 포트로의 경로(방화벽)와 SSH 포트 설정 확인"
     runbook: "{{ o2c_runbook_base }}#unreachable-host"
-    row_template: '• {tcpcheck_endpoint} (검사: {host_name})'
+    row_template: '• {tcpcheck_endpoint} (검사: {host_name}) · {event_time}'
     description: "tcpcheck.status가 5분 구간 최댓값 0 — 검사하는 쪽이 servers 전체의 SSH 포트를 60초마다 확인 (State Alert, 재통지 60분)"
     stream: tcpcheck_status
     stream_type: metrics
     sql: >-
-      SELECT host_name, tcpcheck_endpoint, max(value) AS status FROM "tcpcheck_status"
+      SELECT host_name, tcpcheck_endpoint, max(value) AS status, {{ o2c_event_time_sql }} FROM "tcpcheck_status"
       GROUP BY host_name, tcpcheck_endpoint HAVING max(value) = 0
+      ORDER BY host_name, tcpcheck_endpoint
     period: 5
     frequency: 1
     silence: 60
@@ -752,13 +757,14 @@ o2c_alerts:
     why: "다음 백업 전에 고치지 않으면 복구 지점이 늘어나지 않고, 반복되면 백업 누락 알림으로 이어집니다."
     action: "① 행의 호스트에서 /var/log/host-agents/backup.jsonl 마지막 줄의 error 확인 ② 저장소(RustFS) 접속·자격증명·디스크 여유 점검 ③ 원인을 고친 뒤 호스트에서 백업을 수동 실행해 성공 확인"
     runbook: "{{ o2c_runbook_base }}#backup-failure"
-    row_template: '• {host}: 실패 {failures}건'
+    row_template: '• {host}: 실패 {failures}건 · {event_time}'
     description: "백업 실패 (job=backup, success=false) — Event Alert, backup_logs의 호스트는 host 필드"
     stream: backup_logs
     sql: >-
-      SELECT host, count(*) AS failures FROM "backup_logs"
+      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }} FROM "backup_logs"
       WHERE job = 'backup' AND success = false
       GROUP BY host
+      ORDER BY failures DESC
     period: 5
     frequency: 1
     silence: 5
@@ -770,13 +776,14 @@ o2c_alerts:
     why: "저장소가 손상됐을 수 있습니다. 실패한 호스트는 prune이 차단되어 저장소가 계속 커집니다."
     action: "① Semaphore Repo Maintenance 실행 로그에서 해당 호스트의 check 오류 확인 ② restic check로 손상 범위 확인 ③ 손상이면 저장소 복구·재초기화와 백업 재실행 계획"
     runbook: "{{ o2c_runbook_base }}#integrity-check-failure"
-    row_template: '• {host}: 실패 {failures}건'
+    row_template: '• {host}: 실패 {failures}건 · {event_time}'
     description: "무결성 검사 실패 (job=maintenance, command=check, success=false) — Event Alert, 호스트는 host 필드"
     stream: backup_logs
     sql: >-
-      SELECT host, count(*) AS failures FROM "backup_logs"
+      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }} FROM "backup_logs"
       WHERE job = 'maintenance' AND command = 'check' AND success = false
       GROUP BY host
+      ORDER BY failures DESC
     period: 5
     frequency: 1
     silence: 5
@@ -828,15 +835,16 @@ o2c_alerts:
     why: "데이터 손실 위험은 없지만 쓰기가 디스크 속도로 떨어져 DB 커밋·로그 기록이 계속 느려집니다. 백업 전원(배터리)이 없거나 케이블이 빠진 하드웨어 문제라 저절로 풀리지 않습니다."
     action: "① 행의 원인(cache_reason) 확인: Cable Error는 배터리 케이블 재장착·교체, not attached는 배터리 모듈 장착 ② 서버에서 ssacli ctrl all show config detail로 Cache Status 재확인 ③ No-Battery Write Cache를 켜서 해결하지 않는다(정전 시 데이터 손실)"
     runbook: "{{ o2c_runbook_base }}#raid-write-cache-disabled"
-    row_template: '• {host_name} {hw_name}: {cache_status} ({cache_reason})'
+    row_template: '• {host_name} {hw_name}: {cache_status} ({cache_reason}) · {event_time}'
     description: "controller 레코드의 cache_status가 permanently_disabled·failed, 또는 배터리 충전 중이 아닌 temporarily_disabled인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(cache_status) AS cache_status, max(cache_reason) AS cache_reason, count(*) AS readings
+      SELECT host_name, hw_name, max(cache_status) AS cache_status, max(cache_reason) AS cache_reason, count(*) AS readings, {{ o2c_event_time_sql }}
       FROM "host_status_logs"
       WHERE kind = 'controller'
       AND (cache_status IN ('permanently_disabled', 'failed') OR (cache_status = 'temporarily_disabled' AND backup_power_operation <> 'charging'))
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -848,13 +856,14 @@ o2c_alerts:
     why: "컨트롤러 이상은 그 아래 모든 논리 드라이브의 I/O 오류나 정지로 이어질 수 있습니다."
     action: "① 서버에서 ssacli ctrl all show status와 dmesg의 hpsa 메시지 확인 ② iLO 이벤트 로그(IML) 확인 ③ 펌웨어 갱신·컨트롤러 교체를 HPE 지원과 계획"
     runbook: "{{ o2c_runbook_base }}#raid-controller-fault"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_name} {hw_name}: {raw_state} · {event_time}'
     description: "controller 레코드의 hw_state가 ok가 아닌 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }} FROM "host_status_logs"
       WHERE kind = 'controller' AND hw_state <> 'ok'
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -866,13 +875,14 @@ o2c_alerts:
     why: "이중화가 깨진 상태라 디스크 하나가 더 고장 나면 데이터를 잃습니다. 재구축이 진행 중이어도 끝날 때까지는 같은 위험입니다."
     action: "① 행의 raw_state와 진행률 확인 ② 서버에서 ssacli ctrl all show config로 고장 디스크 확인 ③ 고장 디스크 교체 후 재구축 완료까지 지켜보기 ④ 백업 최신 여부 확인"
     runbook: "{{ o2c_runbook_base }}#raid-logical-drive-degraded"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_name} {hw_name}: {raw_state} · {event_time}'
     description: "logical_drive 레코드의 hw_state가 degraded·failed인 판독이 15분에 2회 이상 (State Alert, 재통지 60분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }} FROM "host_status_logs"
       WHERE kind = 'logical_drive' AND hw_state IN ('degraded', 'failed')
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 60
@@ -884,13 +894,14 @@ o2c_alerts:
     why: "고장이면 이미 이중화가 줄었고, 고장 예측이면 곧 그렇게 됩니다. 교체 디스크를 미리 준비해야 합니다."
     action: "① 행의 슬롯과 상태 확인 ② 서버에서 ssacli ctrl all show config detail로 모델·용량 확인 ③ 같은 규격 디스크 확보 후 교체(핫 스왑) ④ 교체 뒤 논리 드라이브 재구축 완료 확인"
     runbook: "{{ o2c_runbook_base }}#raid-physical-drive-fault"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_name} {hw_name}: {raw_state} · {event_time}'
     description: "physical_drive 레코드의 hw_state가 failed·predicted_failure인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }} FROM "host_status_logs"
       WHERE kind = 'physical_drive' AND hw_state IN ('failed', 'predicted_failure')
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -902,13 +913,14 @@ o2c_alerts:
     why: "배터리가 고장 나면 컨트롤러가 쓰기 캐시를 끄고, 쓰기가 계속 느려집니다."
     action: "① 서버에서 ssacli ctrl all show detail로 Battery/Capacitor Status 확인 ② HPE Smart Storage Battery 교체 계획 ③ 교체 뒤 충전이 끝나 Cache Status가 OK로 돌아오는지 확인"
     runbook: "{{ o2c_runbook_base }}#raid-cache-battery-fault"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_name} {hw_name}: {raw_state} · {event_time}'
     description: "cache_battery 레코드의 hw_state가 failed인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }} FROM "host_status_logs"
       WHERE kind = 'cache_battery' AND hw_state = 'failed'
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -920,13 +932,14 @@ o2c_alerts:
     why: "수집이 실패하는 동안에는 디스크·캐시 고장 알림이 나가지 않습니다. 도구가 멈추는 것 자체가 컨트롤러 이상의 신호일 수도 있습니다."
     action: "① 행의 status와 message 확인 ② 서버에서 timeout 60 ssacli ctrl all show status를 직접 실행 ③ 재구축 같은 무거운 작업 중이면 끝날 때까지 지켜보고, 아니면 dmesg의 hpsa 메시지 확인"
     runbook: "{{ o2c_runbook_base }}#raid-collection-error"
-    row_template: '• {host_name}: {status} {failures}회 ({message})'
+    row_template: '• {host_name}: {status} {failures}회 ({message}) · {event_time}'
     description: "tool_status 레코드의 status가 timeout·error인 실행이 20분에 3회 이상 (State Alert, 재통지 1440분). no_tool·no_controller는 알리지 않는다"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, max(status) AS status, max(message) AS message, count(*) AS failures FROM "host_status_logs"
+      SELECT host_name, max(status) AS status, max(message) AS message, count(*) AS failures, {{ o2c_event_time_sql }} FROM "host_status_logs"
       WHERE kind = 'tool_status' AND status IN ('timeout', 'error')
       GROUP BY host_name HAVING count(*) >= 3
+      ORDER BY failures DESC
     period: 20
     frequency: 5
     silence: 1440
