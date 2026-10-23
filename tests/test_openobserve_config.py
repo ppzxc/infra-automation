@@ -1757,6 +1757,7 @@ def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
     db = sqlite3.connect(":memory:")
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
     db.create_function("date_format", 3, _date_format)
+    records = [dict({"_timestamp": 1_792_767_302_000_000}, **r) for r in records]   # OpenObserve stamps every record on ingest
     columns = sorted({k for r in records for k in r})
     db.execute('CREATE TABLE "%s" (%s)' % (stream, ", ".join(f'"{c}"' for c in columns)))
     for r in records:
@@ -3045,6 +3046,11 @@ def _rendered_message(o2, name, row_values):
 # 가장 긴 현실적 값: IPv4 출발지, 5분 구간 실패 4자리(9999), 자정을 넘는 시각 범위
 LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
                       "failures": "9999", "event_time": "10-23 23:58:00~10-24 00:02:30", "sources": "999"}
+COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
+                "readings", "events", "detections", "downs", "flaps", "severity_code")
+LONGEST_TEXT = {"user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
+                "container_name": "c" * 32, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
+TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
 
 
 def test_every_alert_with_an_event_time_column_fits_the_2000_character_limit_with_10_longest_rows(o2):
@@ -3053,7 +3059,7 @@ def test_every_alert_with_an_event_time_column_fits_the_2000_character_limit_wit
     assert "infra-ssh-login-failures-per-source" in with_time
     for name in with_time:
         fields = set(re.findall(r"\{(\w+)\}", o2.store["alert"][name]["row_template"]))
-        values = {f: LONGEST_ROW_VALUES.get(f, "x" * 60) for f in fields}
+        values = {f: LONGEST_ROW_VALUES.get(f, "999" if f in COUNT_FIELDS else LONGEST_TEXT.get(f, TEXT_VALUE)) for f in fields}
         assert len(_rendered_message(o2, name, values)) <= 2000, name
 
 
@@ -3084,3 +3090,45 @@ def test_promql_missing_usage_and_selftest_row_templates_are_unchanged(o2):
     assert _apply(o2, extra={"o2c_switch_uplinks": UPLINKS}).returncode == 0
     for name, template in UNCHANGED_ROW_TEMPLATES.items():
         assert o2.store["alert"][name]["row_template"] == template, name
+
+
+# ---- 알림 대상 행의 발생 시각 — Ticket-2 (#342): 나머지 security_logs 서버 알림 ----
+
+def _ev(ts, **fields):
+    return dict({"host_name": "ns0272", "_timestamp": _kst_us(ts)}, **fields)
+
+
+SECURITY_TIME_CASES = {   # alert -> (record fields, expected row without the time)
+    "infra-ssh-login-failures-per-host": (
+        [dict(event_action="ssh_login", event_outcome="failure", source_address=f"203.0.113.{n}") for n in (1, 2, 3)] * 17,
+        "• ns0272: 실패 51회 (출발지 3곳)"),
+    "infra-root-login-success": (
+        [dict(event_action="ssh_login", event_outcome="success", user_name="root", source_address="198.51.100.7")],
+        "• ns0272 ← 198.51.100.7 (1회)"),
+    "infra-sudo-escalation-failure": (
+        [dict(event_action="sudo", event_outcome="failure", user_name="alice")], "• ns0272 / 사용자 alice: 실패 1회"),
+    "infra-account-lockout": (
+        [dict(body="pam_faillock(sshd:auth): Account temporarily locked")], "• ns0272: 잠금 기록 1건"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(SECURITY_TIME_CASES))
+def test_security_server_alert_rows_show_one_time_for_one_instant_and_first_to_last_for_a_range(o2, name):
+    assert _apply(o2).returncode == 0
+    fields, expected = SECURITY_TIME_CASES[name]
+    n = len(fields)
+    one = [_ev("2026-10-23 08:59:14", **f) for f in fields]
+    assert _row_lines(o2, name, one, "security_logs") == [f"{expected} · 10-23 08:59:14"]
+    two = [_ev("2026-10-23 08:55:02", **f) for f in fields[: max(n // 2, 1)]] + [_ev("2026-10-23 08:59:14", **f) for f in fields[max(n // 2, 1):] or fields[:1]]
+    assert _row_lines(o2, name, two, "security_logs")[0].endswith(" · 10-23 08:55:02~08:59:14")
+
+
+def test_parse_error_alerts_keep_the_raw_log_link_and_show_the_time(o2):
+    assert _apply(o2).returncode == 0
+    for name, stream in (("infra-log-parse-errors-security-logs", "security_logs"), ("infra-log-parse-errors-system-logs", "system_logs")):
+        alert = o2.store["alert"][name]
+        assert alert["row_template"].endswith(" · {event_time}")
+        recs = [_ev("2026-10-23 08:55:02", log_parse_error=True)] * 60 + [_ev("2026-10-23 08:59:14", log_parse_error=False)] * 40
+        rows = _row_lines(o2, name, recs, stream)
+        assert rows and rows[0].endswith(" · 10-23 08:55:02~08:59:14"), name
+        assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
