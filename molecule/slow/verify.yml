@@ -1426,6 +1426,24 @@
           - _t['O2C-005'].no_log is true
         quiet: true
 
+    - name: "[VERIFY-O2C-006] Verify the host address read is a parallel read-only OpenBao GET batch over hosts/<host> that tolerates only 200 and 404"
+      ansible.builtin.assert:
+        that:
+          - _t['O2C-006'].o2c_http.parallel is true
+          - _t['O2C-006'].o2c_http.status_code == [200, 404]
+          - "'/agents' not in _t['O2C-006'].o2c_http.requests"
+          - _t['O2C-006'].check_mode is false and _t['O2C-006'].changed_when is false and _t['O2C-006'].no_log is true
+          - "'o2c_host_kv_fixture is not defined' in _t['O2C-006'].when"
+        quiet: true
+
+    - name: "[VERIFY-O2C-007] Verify only the host to address table is kept as a fact (no KV body, never cached)"
+      ansible.builtin.assert:
+        that:
+          - "'o2c_host_addresses(' in _t['O2C-007']['ansible.builtin.set_fact'].o2c_host_addresses"
+          - _t['O2C-007']['ansible.builtin.set_fact'].cacheable is false
+          - _t['O2C-007'].no_log is true
+        quiet: true
+
     - name: "[VERIFY-O2C-010] Verify the state read is one parallel GET batch over the shared path table and the auth fact is not cacheable"
       ansible.builtin.assert:
         that:

@@ -6,6 +6,7 @@ check mode writes nothing, and secrets never reach the output or the repository.
 """
 
 import base64
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -25,7 +26,8 @@ ROLE = ROOT_DIR / "roles" / "openobserve_config"
 PLAYBOOK = ROOT_DIR / "playbooks" / "openobserve_config.yml"
 
 WEBHOOK_URL = "https://hooks.example.internal/o2/SECRET-PATH-123"
-KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_webhook_url": WEBHOOK_URL,
+PLAIN_CT = "text/plain; charset=utf-8"
+KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_webhook_plain_url": WEBHOOK_URL,
       "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
@@ -260,9 +262,10 @@ def o2():
 
 def _apply(o2, *args, kv=None, extra=None, inventory="localhost,"):
     # 앱 텔레메트리 스위치는 OpenBao에서 읽고 토큰이 없으면 실패하므로, 기본은 "아무 호스트도 안 켬" 픽스처다(None이면 픽스처 없음).
-    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, "o2c_app_telemetry_kv_fixture": {}, **(extra or {})}
-    if extra["o2c_app_telemetry_kv_fixture"] is None:
-        del extra["o2c_app_telemetry_kv_fixture"]
+    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, "o2c_app_telemetry_kv_fixture": {}, "o2c_host_kv_fixture": {}, **(extra or {})}
+    for key in ("o2c_app_telemetry_kv_fixture", "o2c_host_kv_fixture"):
+        if extra[key] is None:
+            del extra[key]
     env = dict(os.environ, ANSIBLE_NOCOLOR="1")
     cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), "-e", f"o2_endpoint={o2.url}",
            "-e", json.dumps({"o2c_kv_fixture": kv or KV, **extra}), *args]
@@ -286,21 +289,27 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + len(PROMQL_ALERTS) + 1)
 
 
-def test_template_body_is_a_naver_works_text_message(o2):
-    """통지 본문은 네이버웍스 봇 형식 {"content": {"type": "text", "text": ...}} 이다."""
+def test_template_body_is_the_plain_text_message_without_a_json_wrapper(o2):
+    """통지 본문은 사내 알림 플랫폼(Google Chat)의 text/plain 경로로 가는 알림 텍스트 그대로다(JSON 래퍼 없음, 본문 길이 제한 없음)."""
     assert _apply(o2).returncode == 0
-    body = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])
-    assert body["content"]["type"] == "text"
+    text = o2.store["template"]["infra-automation-plain"]["body"]
+    assert not text.lstrip().startswith("{\"content\"") and '"type": "text"' not in text
     # 행동 가능한 알림: 심각도·제목·무슨 일·왜 중요·조치·런북·대상 행·대시보드 링크·발생 구간
     for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action}", "{runbook}",
-                "{rows:20}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
-        assert var in body["content"]["text"], var
-    assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
+                "{rows:30}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
+        assert var in text, var
+    assert "\n" in text and "\\n" not in text   # 실제 줄바꿈
     # 시각 줄은 알림 평가 시각({alert_trigger_time_str})이고 KST다(OpenObserve 컨테이너가 호스트 /etc/localtime을 쓴다), 규칙은 다음 줄.
     # 결과 행 _timestamp 기반 변수는 최종 SELECT에 _timestamp가 없으면 비어 쓰지 않는다
-    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
-    assert body["content"]["text"].endswith("\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}")
-    assert "alert_start_time" not in tpl and "alert_end_time" not in tpl and "(UTC)" not in tpl
+    assert text.endswith("\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}")
+    assert "alert_start_time" not in text and "alert_end_time" not in text and "(UTC)" not in text
+
+
+def test_the_legacy_json_destination_and_template_are_neither_defined_nor_deleted(o2):
+    """기존 JSON 웹훅(infra-automation-webhook)은 서버에 남기고 알림에서만 뺀다: 정의에도 없고 계획에 삭제도 없다."""
+    assert _apply(o2).returncode == 0
+    assert "infra-automation-webhook" not in o2.store["destination"] and "infra-automation-webhook" not in o2.store["template"]
+    assert not any("infra-automation-webhook" in json.dumps(a) for a in o2.store["alert"].values())
 
 
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
@@ -344,8 +353,8 @@ def test_severity_mapping_follows_impact(o2):
 def test_webhook_auth_header_name_comes_from_openbao(o2):
     kv = dict(KV, alert_webhook_auth_header="X-NANOIT-ACCESS")
     assert _apply(o2, kv=kv).returncode == 0
-    assert o2.store["destination"]["infra-automation-webhook"]["headers"] == {
-        "Content-Type": "application/json", "X-NANOIT-ACCESS": "WEBHOOK-TOKEN-abc"}
+    assert o2.store["destination"]["infra-automation-plain"]["headers"] == {
+        "Content-Type": PLAIN_CT, "X-NANOIT-ACCESS": "WEBHOOK-TOKEN-abc"}
 
 
 def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions(o2):
@@ -356,12 +365,12 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert pl["source"]["stream_name"] == "security_logs" and pl["enabled"] is True
     func_node = next(n["data"] for n in pl["nodes"] if n["data"]["node_type"] == "function")
     assert func_node["name"] == "security_semantics" and func_node["after_flatten"] is True
-    dest = o2.store["destination"]["infra-automation-webhook"]
+    dest = o2.store["destination"]["infra-automation-plain"]
     assert dest["url"] == WEBHOOK_URL and dest["type"] == "http"
-    assert dest["headers"] == {"Content-Type": "application/json", "Authorization": "WEBHOOK-TOKEN-abc"}
-    assert dest["template"] == "infra-automation-webhook"
+    assert dest["headers"] == {"Content-Type": PLAIN_CT, "Authorization": "WEBHOOK-TOKEN-abc"}
+    assert dest["template"] == "infra-automation-plain"
     by = o2.store["alert"]
-    assert all(a["destinations"] == ["infra-automation-webhook"] and a["enabled"] for a in by.values())
+    assert all(a["destinations"] == ["infra-automation-plain"] and a["enabled"] for a in by.values())
     assert SELFTEST in by
     assert by["infra-ssh-login-failures-per-source"]["query_condition"]["sql"].count("HAVING count(*) >= 10") == 1
     assert by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"].count("HAVING count(*) >= 50") == 1
@@ -426,7 +435,7 @@ def test_check_mode_reads_and_plans_but_writes_nothing(o2):
     res = _apply(o2, "--check")
     assert res.returncode == 0, res.stdout + res.stderr
     assert o2.writes == [] and o2.reads
-    for expected in ("create template infra-automation-webhook", "create function security_semantics",
+    for expected in ("create template infra-automation-plain", "create function security_semantics",
                      "create alert infra-root-login-success"):
         assert expected in res.stdout
 
@@ -531,7 +540,7 @@ def test_secrets_never_reach_the_output(o2):
                        "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}   # 설정 API 계정 + 검증 주입 토큰
 
 
-@pytest.mark.parametrize("missing", ["api_user", "api_password", "alert_webhook_url"])
+@pytest.mark.parametrize("missing", ["api_user", "api_password", "alert_webhook_plain_url"])
 def test_missing_inputs_fail_before_any_request(o2, missing):
     res = _apply(o2, kv={k: v for k, v in KV.items() if k != missing})
     assert res.returncode != 0 and o2.reads == [] and o2.writes == []
@@ -540,7 +549,7 @@ def test_missing_inputs_fail_before_any_request(o2, missing):
 def test_webhook_without_token_sends_no_auth_header(o2):
     res = _apply(o2, kv={k: v for k, v in KV.items() if k != "alert_webhook_token"})
     assert res.returncode == 0, res.stdout + res.stderr
-    assert o2.store["destination"]["infra-automation-webhook"]["headers"] == {"Content-Type": "application/json"}
+    assert o2.store["destination"]["infra-automation-plain"]["headers"] == {"Content-Type": PLAIN_CT}
 
 
 def test_every_api_task_is_no_log_and_writes_are_skipped_in_check_mode():
@@ -954,7 +963,7 @@ def _selftest_ingests(o2):
 def test_standing_selftest_alert_is_managed_on_a_verification_only_stream_and_is_idempotent(o2):
     assert _apply(o2).returncode == 0
     alert = o2.store["alert"][SELFTEST]
-    assert alert["stream_name"] == SELFTEST_STREAM and alert["destinations"] == ["infra-automation-webhook"]
+    assert alert["stream_name"] == SELFTEST_STREAM and alert["destinations"] == ["infra-automation-plain"]
     assert alert["enabled"] is True and alert["stream_type"] == "logs"
     # 운영 스트림을 보지 않으므로 운영 데이터로는 발화하지 않는다
     assert alert["stream_name"] not in ("security_logs", "system_logs")
@@ -990,7 +999,7 @@ def test_desired_alert_tz_offset_defaults_to_zero_without_the_spec_key():
 
 
 def test_selftest_record_and_row_template_carry_a_quote_and_backslash_probe(o2):
-    """행 값의 따옴표·역슬래시가 webhook JSON을 깨는지 통지에서 눈으로 확인할 수 있게 시험 레코드에 `a"b\\c`를 싣고 행 템플릿이 그것을 쓴다."""
+    """평문(text/plain) 통지에서 행 값의 따옴표·역슬래시가 `\\"`처럼 이스케이프되어 보이는지 눈으로 확인할 수 있게 시험 레코드에 `a"b\\c`를 싣고 행 템플릿이 그것을 쓴다."""
     assert _apply(o2).returncode == 0
     o2.ingests.clear()
     assert _apply(o2, extra={"o2c_verify_notify": True}).returncode == 0
@@ -1190,7 +1199,7 @@ def test_backup_failure_and_integrity_failure_are_p2_event_alerts_on_backup_logs
         sql = a["query_condition"]["sql"]
         assert f"job = '{job}'" in sql and cond in sql and "GROUP BY host" in sql and "host_name" not in sql, name
         assert a["trigger_condition"]["silence"] == a["trigger_condition"]["period"] == 5
-        assert "{host}" in a["row_template"]
+        assert "{host_label}" in a["row_template"]
 
 
 def test_backup_and_maintenance_missing_are_daily_p2_state_alerts_over_their_rosters(o2, tmp_path):
@@ -1461,7 +1470,7 @@ def test_app_telemetry_silent_follows_the_state_alert_rules(o2, tmp_path):
     assert "service_name = 'funa'" in sql and "HAVING count(*) < 1" in sql and "UNION ALL" in sql
     assert a["trigger_condition"]["period"] == 15 and a["trigger_condition"]["frequency"] == 5
     assert a["trigger_condition"]["silence"] == 1440 and a["context_attributes"]["severity"] == "P2 경고"
-    assert "{host_name}" in a["row_template"] and a["destinations"] == ["infra-automation-webhook"]
+    assert "{host_name}" in a["row_template"] and a["destinations"] == ["infra-automation-plain"]
     for banned in ("VALUES", "unnest", "JOIN"):
         assert banned.lower() not in sql.lower()
 
@@ -1582,7 +1591,7 @@ def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_
         assert a["stream_name"] == "system_logs" and a["stream_type"] == "logs", name
         assert a["context_attributes"]["severity"] == sev, name
         assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence), name
-        assert a["destinations"] == ["infra-automation-webhook"] and a["enabled"], name
+        assert a["destinations"] == ["infra-automation-plain"] and a["enabled"], name
         assert "switch-syslog" in a["query_condition"]["sql"], name
 
 
@@ -1740,10 +1749,23 @@ def test_switch_filters_validate_and_build_safe_sql():
                                                    {"name": "d", "enabled": True}])] == ["a", "d"]
 
 
+def _date_format(value, fmt, offset):
+    """sqlite stand-in for OpenObserve's ``date_format(<µs or s>, <strftime format>, '+HH:MM')`` (same contract, independent of the SQL under test)."""
+    if value is None:
+        return None
+    seconds = value / 1_000_000 if abs(value) >= 10**11 else value   # 10^11 s is year 5138, so a larger number is microseconds
+    sign = -1 if offset[0] == "-" else 1
+    hours, minutes = offset[1:].split(":")
+    tz = timezone(sign * timedelta(hours=int(hours), minutes=int(minutes)))
+    return datetime.fromtimestamp(seconds, tz).strftime(fmt)
+
+
 def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
     """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows."""
     db = sqlite3.connect(":memory:")
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
+    db.create_function("date_format", 3, _date_format)
+    records = [dict({"_timestamp": 1_792_767_302_000_000}, **r) for r in records]   # OpenObserve stamps every record on ingest
     columns = sorted({k for r in records for k in r})
     db.execute('CREATE TABLE "%s" (%s)' % (stream, ", ".join(f'"{c}"' for c in columns)))
     for r in records:
@@ -1852,7 +1874,7 @@ def test_firewall_alerts_are_created_on_security_logs_with_the_specified_grades_
         assert a["stream_name"] == "security_logs" and a["stream_type"] == "logs", name
         assert a["context_attributes"]["severity"] == sev, name
         assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence), name
-        assert a["destinations"] == ["infra-automation-webhook"] and a["enabled"], name
+        assert a["destinations"] == ["infra-automation-plain"] and a["enabled"], name
         assert "fortigate-syslog" in a["query_condition"]["sql"], name
         for key in ("what", "why", "action", "runbook"):
             assert a["context_attributes"][key].strip(), (name, key)
@@ -2146,20 +2168,18 @@ def test_action_filter_keeps_an_empty_action_empty():
 
 def test_template_uses_the_new_labels_and_not_the_old_ones(o2):
     assert _apply(o2).returncode == 0
-    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
-    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:20}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
+    text = o2.store["template"]["infra-automation-plain"]["body"]
+    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:30}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
         assert label in text, label
     assert "무슨 일" not in text and "왜 중요" not in text
 
 
-def test_rendered_body_with_a_multiline_action_is_valid_json(o2):
-    """OpenObserve는 context_attributes를 JSON 이스케이프해서 본문에 넣는다 — 개행이 있어도 본문 JSON이 깨지지 않는다."""
+def test_rendered_body_with_a_multiline_action_keeps_one_numbered_line_per_item(o2):
+    """본문이 JSON이 아니라 평문이라 개행이 있는 조치도 줄 그대로 들어간다."""
     assert _apply(o2).returncode == 0
-    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
+    tpl = o2.store["template"]["infra-automation-plain"]["body"]
     action = _filters().o2c_action_lines("① 하나 ② 둘 ③ 셋")
-    rendered = tpl.replace("{action}", json.dumps(action, ensure_ascii=False)[1:-1])
-    text = json.loads(rendered)["content"]["text"]
-    assert "■ 조치:\n1. 하나\n2. 둘\n3. 셋\n\n▶ 런북" in text
+    assert "■ 조치:\n1. 하나\n2. 둘\n3. 셋\n\n▶ 런북" in tpl.replace("{action}", action)
 
 
 def test_every_alert_action_is_one_numbered_line_per_item_after_rendering(o2):
@@ -2381,7 +2401,7 @@ def test_promql_alerts_are_created_as_promql_metrics_alerts_to_the_current_desti
         assert qc["promql_condition"] == {"column": "value", "operator": op, "value": value}, name
         assert a["trigger_condition"] == {"period": period, "operator": ">=", "threshold": 1, "frequency": freq,
                                           "frequency_type": "minutes", "silence": silence, "align_time": True}, name
-        assert a["destinations"] == ["infra-automation-webhook"] and a["row_template_type"] == "String" and a["enabled"] is True, name
+        assert a["destinations"] == ["infra-automation-plain"] and a["row_template_type"] == "String" and a["enabled"] is True, name
         assert a["context_attributes"]["severity"] == sev and a["context_attributes"]["link_label"] == "상세 보기", name
         assert a["context_attributes"]["action"].startswith("\n1. "), name
 
@@ -2476,11 +2496,11 @@ def test_p1_destination_routes_every_p1_alert_log_or_metric_and_nothing_else(o2)
     assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0
     for name, a in o2.store["alert"].items():
         p1 = a["context_attributes"]["severity"].startswith("P1")
-        assert a["destinations"] == [P1_DEST if p1 else "infra-automation-webhook"], name
+        assert a["destinations"] == [P1_DEST if p1 else "infra-automation-plain"], name
     assert o2.store["alert"]["infra-root-login-success"]["destinations"] == [P1_DEST]
     assert o2.store["alert"]["infra-disk-fill-4h"]["destinations"] == [P1_DEST]
-    assert o2.store["alert"]["infra-cpu-usage-p1"]["destinations"] == ["infra-automation-webhook"]   # #318에서 P2로 내렸다
-    assert o2.store["alert"][SELFTEST]["destinations"] == ["infra-automation-webhook"]
+    assert o2.store["alert"]["infra-cpu-usage-p1"]["destinations"] == ["infra-automation-plain"]   # #318에서 P2로 내렸다
+    assert o2.store["alert"][SELFTEST]["destinations"] == ["infra-automation-plain"]
     o2.writes.clear()
     assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0 and o2.writes == []
 
@@ -2512,17 +2532,10 @@ def test_missing_destinations_lists_names_known_neither_to_the_repository_nor_th
     assert o2c.o2c_missing_destinations(desired, {"destination": {"list": [{"name": "b"}]}}) == []
 
 
-def test_row_values_with_quotes_and_backslashes_must_be_escaped_to_keep_the_body_json(o2):
-    """OpenObserve가 {rows:20} 값을 이스케이프하는지는 실서버에서만 알 수 있다(배포 후 시험).
-    여기서는 (1) 이스케이프된 값은 본문이 유효 JSON이고 (2) 이스케이프 없는 따옴표는 본문을 깨뜨림을 확인하며, 그래서 PromQL 행 템플릿은 숫자 value와 레이블만 쓴다."""
+def test_promql_row_templates_use_only_numbers_and_safe_labels(o2):
+    """OpenObserve가 변수 값을 이스케이프해서 넣는지(평문 본문에 `\\"`로 보이는지)는 실서버에서만 알 수 있다(#346 시험).
+    그래서 PromQL 행 템플릿은 숫자 value와 따옴표·역슬래시 없는 레이블만 쓴다."""
     assert _apply(o2).returncode == 0
-    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
-    row = '• host"a \\ b: CPU 91%'
-    escaped = json.dumps(row, ensure_ascii=False)[1:-1]
-    text = json.loads(tpl.replace("{rows:20}", escaped))["content"]["text"]
-    assert row in text and "■ 대상 {alert_count}건:" in text
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(tpl.replace("{rows:20}", row))
     for a in PROMQL_DEFS:
         assert not re.search(r'["\\]', a["row_template"]), a["name"]
 
@@ -2687,7 +2700,7 @@ def test_log_alerts_with_a_derivable_where_carry_the_raw_log_link_and_the_others
 
 def test_template_places_the_raw_log_line_right_after_the_alert_url(o2):
     assert _apply(o2).returncode == 0
-    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
+    text = o2.store["template"]["infra-automation-plain"]["body"]
     assert "▶ {link_label}: {alert_url}{raw_log_line}\n" in text
 
 
@@ -2946,3 +2959,426 @@ def test_ssh_per_host_alert_fires_only_on_distributed_attacks_when_it_runs_on_th
     fired = {m.group(1) for row in _run_alert_on_sqlite(sql, records, "security_logs_alert_verify")
              if (m := re.fullmatch(r"(.+)-[0-9a-f]+", str(row["host_name"]))) and m.group(1) in own}
     assert fired == {c["host"] for c in spec["cases"] if c["fires"]} == {"verify-ssh-host-burst"}
+
+
+# ---- 알림 대상 행의 발생 시각(KST) — Spec #339 / Ticket-1 (#341) ----
+
+def _kst_us(text):
+    """'2026-10-23 08:55:02' (KST) -> µs since the epoch."""
+    return int(datetime.fromisoformat(text).replace(tzinfo=timezone(timedelta(hours=9))).timestamp()) * 1_000_000
+
+
+def test_sqlite_date_format_helper_follows_the_openobserve_contract():
+    us = 1_792_767_302_000_000   # 2026-10-23 14:55:02 UTC
+    assert _date_format(us, "%m-%d %H:%M:%S", "+09:00") == "10-23 23:55:02"
+    assert _date_format(us // 1_000_000, "%m-%d %H:%M:%S", "+09:00") == "10-23 23:55:02"   # seconds input
+    assert _date_format(_kst_us("2026-10-23 08:59:14"), "%m-%d %H:%M:%S", "+09:00") == "10-23 08:59:14"
+    assert _date_format(us, "%H:%M", "-05:30") == "09:25"
+    assert _date_format(None, "%H", "+09:00") is None
+
+
+def _row_lines(o2, name, records, stream):
+    """What an operator reads: the alert's row template filled with every row its SQL returns on the records."""
+    alert = o2.store["alert"][name]
+    rows = _run_alert_on_sqlite(alert["query_condition"]["sql"], records, stream)
+    return [re.sub(r"\{(\w+)\}", lambda m: str(row[m.group(1)]), alert["row_template"]) for row in rows]
+
+
+def _fail(ts, source="203.0.113.10", host="ns0272"):
+    return {"event_action": "ssh_login", "event_outcome": "failure", "user_name": "admin", "source_address": source,
+            "host_name": host, "_timestamp": _kst_us(ts)}
+
+
+def test_per_source_ssh_row_shows_one_time_for_one_event_and_first_to_last_for_a_range(o2):
+    assert _apply(o2).returncode == 0
+    name = "infra-ssh-login-failures-per-source"
+    one = [_fail("2026-10-23 08:59:14")] * 10
+    assert _row_lines(o2, name, one, "security_logs") == ["• 203.0.113.10 → ns0272: 실패 10회 · 10-23 08:59:14"]
+    two = [_fail("2026-10-23 08:55:02")] * 5 + [_fail("2026-10-23 08:59:14")] * 5
+    assert _row_lines(o2, name, two, "security_logs") == ["• 203.0.113.10 → ns0272: 실패 10회 · 10-23 08:55:02~08:59:14"]
+
+
+def test_event_time_range_across_midnight_keeps_both_dates(o2):
+    assert _apply(o2).returncode == 0
+    recs = [_fail("2026-10-23 23:58:00")] * 5 + [_fail("2026-10-24 00:02:30")] * 5
+    assert _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs") == [
+        "• 203.0.113.10 → ns0272: 실패 10회 · 10-23 23:58:00~10-24 00:02:30"]
+
+
+def test_event_time_does_not_change_which_sources_fire(o2):
+    assert _apply(o2).returncode == 0
+    recs = [_fail("2026-10-23 08:59:14", "203.0.113.11")] * 9 + [_fail("2026-10-23 08:59:14", "203.0.113.12")] * 10
+    assert [r.split(" ")[1] for r in _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")] == ["203.0.113.12"]
+    sql = _sql(o2, "infra-ssh-login-failures-per-source")
+    assert "WHERE event_action = 'ssh_login' AND event_outcome = 'failure'" in sql
+    assert "GROUP BY source_address, host_name HAVING count(*) >= 10" in sql
+
+
+def test_per_source_rows_come_out_with_the_most_failures_first_so_the_row_cap_keeps_the_worst(o2):
+    assert _apply(o2).returncode == 0
+    recs = [_fail("2026-10-23 08:59:14", "203.0.113.11")] * 11 + [_fail("2026-10-23 08:59:14", "203.0.113.12")] * 30
+    rows = _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")
+    assert [r.split(" ")[1] for r in rows] == ["203.0.113.12", "203.0.113.11"]
+
+
+def test_raw_log_link_survives_the_event_time_column(o2):
+    assert _apply(o2).returncode == 0
+    alert = o2.store["alert"]["infra-ssh-login-failures-per-source"]
+    assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
+    from openobserve_config import o2c_raw_log_sql
+    assert o2c_raw_log_sql(alert["query_condition"]["sql"], "security_logs") == (
+        "SELECT * FROM \"security_logs\" WHERE event_action = 'ssh_login' AND event_outcome = 'failure' ORDER BY _timestamp DESC LIMIT 200")
+
+
+def _rendered_message(o2, name, row_values):
+    """The notification text with 30 rows filled the way OpenObserve does (every variable replaced)."""
+    alert = o2.store["alert"][name]
+    ctx = alert["context_attributes"]
+    text = o2.store["template"]["infra-automation-plain"]["body"]
+    rows = "\n".join(re.sub(r"\{(\w+)\}", lambda m: row_values[m.group(1)], alert["row_template"]) for _ in range(30))
+    values = dict(ctx, rows=rows, alert_count="30", alert_url="https://o2.example.test/web/short/0123456789abcdef?org_identifier=default",
+                  alert_trigger_time_str="2026-10-23T09:00:56", alert_name=name)
+    text = text.replace("{rows:30}", "{rows}")
+    return re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), m.group(0)), text)
+
+
+# 가장 긴 현실적 값: IPv4 출발지, 5분 구간 실패 4자리(9999), 자정을 넘는 시각 범위
+LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272", "host_label": "ns0272 (198.51.100.255)",
+                      "failures": "9999", "event_time": "10-23 23:58:00~10-24 00:02:30", "sources": "999"}
+COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
+                "readings", "events", "detections", "downs", "flaps", "severity_code")
+LONGEST_TEXT = {"user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
+                "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
+                "status": "timeout", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
+TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
+
+
+def test_every_alert_with_an_event_time_column_fits_the_5000_character_limit_with_30_longest_rows(o2):
+    assert _apply(o2).returncode == 0
+    with_time = [n for n, a in o2.store["alert"].items() if a["query_condition"]["type"] == "sql" and "event_time" in a["row_template"]]
+    assert "infra-ssh-login-failures-per-source" in with_time
+    for name in with_time:
+        fields = set(re.findall(r"\{(\w+)\}", o2.store["alert"][name]["row_template"]))
+        values = {f: LONGEST_ROW_VALUES.get(f, "999" if f in COUNT_FIELDS else LONGEST_TEXT.get(f, TEXT_VALUE)) for f in fields}
+        assert len(_rendered_message(o2, name, values)) <= 5000, name
+
+
+UNCHANGED_ROW_TEMPLATES = {   # PromQL, missing-type, usage and self-test alerts keep their row templates byte for byte (#339)
+    "infra-cpu-usage-p1": "• {host_name}: CPU {value}%", "infra-cpu-usage-p2": "• {host_name}: CPU {value}%",
+    "infra-caddy-5xx-error-rate": "• {host_name}: 5xx 비율 {value}%", "infra-caddy-4xx-error-rate": "• {host_name}: 4xx 비율 {value}%",
+    "infra-disk-fill-24h": "• {host_name} {mountpoint}: 약 {value}시간 뒤 가득 참",
+    "infra-disk-fill-4h": "• {host_name} {mountpoint}: 약 {value}시간 뒤 가득 참",
+    "infra-network-errors": "• {host_name} {device}({direction}): 오류 비율 {value}%",
+    "infra-cpu-load-saturation": "• {host_name}: 코어당 load {value}", "infra-cpu-iowait": "• {host_name}: iowait {value}%",
+    "infra-cpu-steal": "• {host_name}: steal {value}%", "infra-disk-io-saturation": "• {host_name} {device}: 큐 깊이 {value}",
+    "infra-disk-read-latency": "• {host_name} {device}: 읽기 지연 {value}ms",
+    "infra-disk-write-latency": "• {host_name} {device}: 쓰기 지연 {value}ms",
+    "infra-inode-fill-24h": "• {host_name} {mountpoint}: 약 {value}시간 뒤 inode 고갈",
+    "infra-conntrack-limit": "• {host_name}: conntrack 사용률 {value}%", "infra-swap-usage": "• {host_name} {device}: 스왑 사용률 {value}%",
+    "infra-memory-pressure": "• {host_name}: 주요 페이지 폴트 초당 {value}건",
+    "infra-disk-usage-p2": "• {host_name} {mountpoint}: 사용률 {usage_pct}%", "infra-disk-usage-p1": "• {host_name} {mountpoint}: 사용률 {usage_pct}%",
+    "infra-inode-usage-p2": "• {host_name} {mountpoint}: 사용률 {usage_pct}%", "infra-inode-usage-p1": "• {host_name} {mountpoint}: 사용률 {usage_pct}%",
+    "infra-memory-usage-p2": "• {host_name}: 사용률 {usage_pct}%", "infra-memory-usage-p1": "• {host_name}: 사용률 {usage_pct}%",
+    "infra-silent-host-p2": "• {host_name}", "infra-silent-host-p1": "• {host_name}", "infra-backup-missing": "• {host}",
+    "infra-maintenance-missing": "• {host}", "infra-host-status-silent": "• {host_name}", "infra-app-telemetry-silent": "• {host_name}",
+    "infra-switch-syslog-silent": "• {device_id}", "infra-fortigate-syslog-silent": "• {device_id}",
+    SELFTEST: "• {host_name}: 시험 레코드 {records}건 · 이스케이프 시험 값 {probe}",
+}
+
+
+def test_promql_missing_usage_and_selftest_row_templates_are_unchanged(o2):
+    assert _apply(o2, extra={"o2c_switch_uplinks": UPLINKS}).returncode == 0
+    for name, template in UNCHANGED_ROW_TEMPLATES.items():
+        assert o2.store["alert"][name]["row_template"] == template, name
+
+
+# ---- 알림 대상 행의 발생 시각 — Ticket-2 (#342): 나머지 security_logs 서버 알림 ----
+
+def _ev(ts, **fields):
+    return dict({"host_name": "ns0272", "_timestamp": _kst_us(ts)}, **fields)
+
+
+SECURITY_TIME_CASES = {   # alert -> (record fields, expected row without the time)
+    "infra-ssh-login-failures-per-host": (
+        [dict(event_action="ssh_login", event_outcome="failure", source_address=f"203.0.113.{n}") for n in (1, 2, 3)] * 17,
+        "• ns0272: 실패 51회 (출발지 3곳)"),
+    "infra-root-login-success": (
+        [dict(event_action="ssh_login", event_outcome="success", user_name="root", source_address="198.51.100.7")],
+        "• ns0272 ← 198.51.100.7 (1회)"),
+    "infra-sudo-escalation-failure": (
+        [dict(event_action="sudo", event_outcome="failure", user_name="alice")], "• ns0272 / 사용자 alice: 실패 1회"),
+    "infra-account-lockout": (
+        [dict(body="pam_faillock(sshd:auth): Account temporarily locked")], "• ns0272: 잠금 기록 1건"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(SECURITY_TIME_CASES))
+def test_security_server_alert_rows_show_one_time_for_one_instant_and_first_to_last_for_a_range(o2, name):
+    assert _apply(o2).returncode == 0
+    fields, expected = SECURITY_TIME_CASES[name]
+    n = len(fields)
+    one = [_ev("2026-10-23 08:59:14", **f) for f in fields]
+    assert _row_lines(o2, name, one, "security_logs") == [f"{expected} · 10-23 08:59:14"]
+    two = [_ev("2026-10-23 08:55:02", **f) for f in fields[: max(n // 2, 1)]] + [_ev("2026-10-23 08:59:14", **f) for f in fields[max(n // 2, 1):] or fields[:1]]
+    assert _row_lines(o2, name, two, "security_logs")[0].endswith(" · 10-23 08:55:02~08:59:14")
+
+
+def test_parse_error_alerts_keep_the_raw_log_link_and_show_the_time(o2):
+    assert _apply(o2).returncode == 0
+    for name, stream in (("infra-log-parse-errors-security-logs", "security_logs"), ("infra-log-parse-errors-system-logs", "system_logs")):
+        alert = o2.store["alert"][name]
+        assert alert["row_template"].endswith(" · {event_time}")
+        recs = [_ev("2026-10-23 08:55:02", log_parse_error=True)] * 60 + [_ev("2026-10-23 08:59:14", log_parse_error=False)] * 40
+        rows = _row_lines(o2, name, recs, stream)
+        assert rows and rows[0].endswith(" · 10-23 08:55:02~08:59:14"), name
+        assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
+
+
+# ---- 알림 대상 행의 발생 시각 — Ticket-3 (#343): system·app·backup·host_status·tcpcheck ----
+
+SYSTEM_TIME_CASES = {   # alert -> (stream, record fields, expected row without the time; "{n}" is the record count)
+    "infra-oom-kill": ("system_logs", [dict(body="Out of memory: Killed process 123 (java) total-vm:1kB")],
+                       "• ns0272: 종료된 프로세스 java ({n}건)"),
+    "infra-disk-fs-errors": ("system_logs", [dict(body="blk_update_request: I/O error, dev sda")], "• ns0272: 오류 패턴 {n}건"),
+    "infra-app-log-errors": ("app_logs", [dict(severity="error", container_name="api")], "• ns0272 / api: ERROR 이상 {n}건"),
+    "infra-backup-failure": ("backup_logs", [dict(job="backup", success=False, host="ns0272")], "• ns0272: 실패 {n}건"),
+    "infra-raid-collection-error": ("host_status_logs", [dict(kind="tool_status", status="error", message="m")] * 3,
+                                    "• ns0272: error {n}회 (m)"),
+    "infra-unreachable-host": ("tcpcheck_status", [dict(tcpcheck_endpoint="198.51.100.5:22", value=0)],
+                               "• 198.51.100.5:22 (검사: ns0272)"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(SYSTEM_TIME_CASES))
+def test_system_app_backup_raid_and_reachability_rows_show_one_time_or_first_to_last(o2, name):
+    assert _apply(o2).returncode == 0
+    stream, base, expected = SYSTEM_TIME_CASES[name]
+    k = len(base)
+    one = [_ev("2026-10-23 08:59:14", **f) for f in base]
+    assert _row_lines(o2, name, one, stream) == [expected.format(n=k) + " · 10-23 08:59:14"]
+    two = [_ev("2026-10-23 08:55:02", **f) for f in base] + [_ev("2026-10-23 08:59:14", **f) for f in base]
+    rows = _row_lines(o2, name, two, stream)
+    assert rows == [expected.format(n=2 * k) + " · 10-23 08:55:02~08:59:14"]
+
+
+def test_backup_and_raid_missing_and_usage_alerts_keep_their_rows(o2):
+    assert _apply(o2).returncode == 0
+    for name in ("infra-backup-missing", "infra-maintenance-missing", "infra-host-status-silent", "infra-disk-usage-p1"):
+        assert "event_time" not in o2.store["alert"][name]["row_template"], name
+
+
+# ---- 알림 대상 행의 발생 시각 — Ticket-4 (#344): 스위치·FortiGate 장비 행 ----
+
+def _fixture_records(name, host_value="ns0272"):
+    """The records of the first firing fixture case with the fake host replaced by one device name (repeat expanded)."""
+    case = next(c for c in FIXTURES[name]["cases"] if c["fires"] and not c.get("watch_port"))
+    field = FIXTURES[name].get("host_field", "host_name")
+    out = []
+    for rec in case["records"]:
+        rec = dict(rec)
+        omit = rec.pop("omit_host_field", False)
+        rec.pop("ts", None)
+        if isinstance(rec.get("body"), str):
+            rec["body"] = rec["body"].replace("{host}", host_value)
+        if not omit:
+            rec[field] = host_value
+        out += [dict(rec) for _ in range(rec.pop("repeat", 1))] if "repeat" in rec else [rec]
+    return out
+
+
+DEVICE_TIME_ALERTS = {
+    "infra-switch-config-change": "system_logs", "infra-switch-login-failures": "system_logs",
+    "infra-switch-severity-critical": "system_logs", "infra-switch-mac-flap": "system_logs",
+    "infra-fortigate-admin-login-failures": "security_logs", "infra-fortigate-change-unapproved": "security_logs",
+    "infra-fortigate-change-approved": "security_logs", "infra-fortigate-ha-failover": "security_logs",
+    "infra-fortigate-critical-detection": "security_logs",
+}
+
+
+@pytest.mark.parametrize("name", sorted(DEVICE_TIME_ALERTS))
+def test_device_rows_show_one_time_or_first_to_last_and_keep_the_device_name(o2, name):
+    assert _apply(o2).returncode == 0
+    stream = DEVICE_TIME_ALERTS[name]
+    base = [dict({"device_name": "sw", "device_id": None} if stream == "system_logs" else {}, **r) for r in _fixture_records(name)]
+    base = base * 2 if len(base) == 1 else base
+    half = max(len(base) // 2, 1)
+    one = [dict(r, _timestamp=_kst_us("2026-10-23 08:59:14")) for r in base]
+    rows = _row_lines(o2, name, one, stream)
+    assert len(rows) >= 1 and all(r.endswith(" · 10-23 08:59:14") for r in rows), rows
+    two = [dict(r, _timestamp=_kst_us("2026-10-23 08:55:02" if i < half else "2026-10-23 08:59:14")) for i, r in enumerate(base)]
+    two[-1]["_timestamp"] = _kst_us("2026-10-23 08:59:14")
+    rows = _row_lines(o2, name, two, stream)
+    assert rows and all(r.startswith("• ns0272") for r in rows) and any(r.endswith(" · 10-23 08:55:02~08:59:14") for r in rows), rows
+
+
+def test_uplink_down_row_shows_the_time_and_the_verification_rebuild_keeps_the_column(o2):
+    assert _apply(o2, extra={"o2c_switch_uplinks": UPLINKS}).returncode == 0
+    body = "Oct 20 10:00:00 x ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/1, changed state to down"
+    rec = dict(service_name="switch-syslog", device_id="ns0250", device_name="sw", event_name="LINK-3-UPDOWN", log_syslog_severity_code=3, body=body)
+    rows = _row_lines(o2, "infra-switch-uplink-down", [dict(rec, _timestamp=_kst_us("2026-10-23 08:55:02")),
+                                                      dict(rec, _timestamp=_kst_us("2026-10-23 08:59:14"))], "system_logs")
+    assert rows == ["• ns0250 GigabitEthernet1/0/1: 링크 다운 2건 · 10-23 08:55:02~08:59:14"]
+    assert any("event_time" in sql and "downs" in sql for stream, sql in o2.searches)   # 검증 검색의 SQL도 같은 컬럼을 가진다
+
+
+def test_device_name_and_source_display_do_not_change(o2):
+    assert _apply(o2, extra={"o2c_switch_uplinks": UPLINKS}).returncode == 0
+    templates = {n: o2.store["alert"][n]["row_template"] for n in o2.store["alert"]}
+    assert templates["infra-fortigate-admin-login-failures"] == "• {device}: 출발지 {source_address} 로그인 실패 {failures}회 · {event_time}"
+    assert templates["infra-switch-config-change"].startswith("• {device}: 설정 변경 {changes}건 — {detail}")
+    assert templates["infra-switch-syslog-silent"] == "• {device_id}" and templates["infra-fortigate-syslog-silent"] == "• {device_id}"
+
+
+# ---- 서버 행의 접속 주소 — Spec #339 / Ticket-5 (#345) ----
+
+HOST_KV = {"ns0001": {"ansible_host": "192.0.2.201", "public_ip": "192.0.2.101"},   # 둘 다 있으면 ansible_host
+           "ns0002": {"ssh_user": "ppzxc"},                                          # 주소가 없다
+           "ns0003": {"public_ip": "192.0.2.203"},                                  # public_ip만 있다
+           "ns0004": {"ansible_host": "192.0.2.204"}}
+ADDRESS_LABELS = {"ns0001": "ns0001 (192.0.2.201)", "ns0002": "ns0002", "ns0003": "ns0003 (192.0.2.203)", "ns0004": "ns0004 (192.0.2.204)"}
+SERVER_ADDRESS_ALERTS = {   # 서버 행을 쓰는 로그 SQL 알림(missing·장비 행·도달성 검사 대상 행 제외)
+    **{n: ("security_logs", *SECURITY_TIME_CASES[n]) for n in SECURITY_TIME_CASES},
+    **{n: SYSTEM_TIME_CASES[n] for n in SYSTEM_TIME_CASES if n != "infra-unreachable-host"},
+}
+
+
+def _addr_apply(o2, tmp_path, *args, host_kv=None):
+    return _apply(o2, *args, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_host_kv_fixture": HOST_KV if host_kv is None else host_kv})
+
+
+def _on_host(records, host):
+    return [dict(r, host_name=host, **({"host": host} if "host" in r else {})) for r in records]
+
+
+def test_host_address_picks_ansible_host_then_public_ip_and_skips_blank_or_unsafe_values():
+    from openobserve_config import o2c_host_addresses
+    kv = dict(HOST_KV, ns0005={"ansible_host": " ", "public_ip": "192.0.2.105"}, ns0006={"ansible_host": "x'; DROP TABLE y; --"},
+              ns0007={"ns0007": {"public_ip": "192.0.2.107"}}, ns0008={"only": {"ansible_host": "192.0.2.108"}}, ns0009=None)
+    roster = ["ns0001", "ns0002", "ns0003", "ns0004", "ns0005", "ns0006", "ns0007", "ns0008", "ns0009", "ns0010"]
+    assert o2c_host_addresses(roster, kv) == {"ns0001": "192.0.2.201", "ns0003": "192.0.2.203", "ns0004": "192.0.2.204",
+                                              "ns0005": "192.0.2.105", "ns0007": "192.0.2.107", "ns0008": "192.0.2.108"}
+
+
+def test_host_address_follows_the_reachability_check_priority_ansible_host_public_ip_ip_host():
+    from host_agents import host_agents_tcpcheck_targets
+    from openobserve_config import o2c_host_addresses
+    kv = {"ns0001": {"ansible_host": "192.0.2.211", "public_ip": "192.0.2.212", "ip": "192.0.2.213", "host": "192.0.2.214"},
+          "ns0002": {"public_ip": "192.0.2.222", "ip": "192.0.2.223", "host": "192.0.2.224"},
+          "ns0003": {"ip": "192.0.2.233", "host": "192.0.2.234"},
+          "ns0004": {"host": "192.0.2.244"},
+          "ns0005": {"ansible_host": " ", "ip": "192.0.2.255"}}
+    roster = list(kv)
+    got = o2c_host_addresses(roster, kv)
+    assert got == {"ns0001": "192.0.2.211", "ns0002": "192.0.2.222", "ns0003": "192.0.2.233", "ns0004": "192.0.2.244", "ns0005": "192.0.2.255"}
+    # 도달성 검사가 실제로 접속하는 주소와 같다
+    assert [t.rsplit(":", 1)[0] for t in host_agents_tcpcheck_targets(roster, kv)] == [got[h] for h in roster]
+
+
+def _label_of(expression, host):
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE t (host_name TEXT)")
+    db.execute("INSERT INTO t VALUES (?)", (host,))
+    return db.execute(f"SELECT {expression} FROM t").fetchone()[0]
+
+
+def test_host_label_expression_adds_the_address_for_known_hosts_and_keeps_the_bare_name_otherwise():
+    from openobserve_config import o2c_host_label
+    expression = o2c_host_label("host_name", {"ns0001": "192.0.2.201", "ns0003": "192.0.2.203"}).removesuffix(" AS host_label")
+    assert [_label_of(expression, h) for h in ("ns0001", "ns0002", "ns0003", "ns9999")] == ["ns0001 (192.0.2.201)", "ns0002", "ns0003 (192.0.2.203)", "ns9999"]
+    empty = o2c_host_label("host", {}).removesuffix(" AS host_label")
+    assert empty == "host" and o2c_host_label("host", {}).endswith(" AS host_label")
+
+
+def test_server_rows_show_the_address_next_to_the_management_number(o2, tmp_path):
+    res = _addr_apply(o2, tmp_path)
+    assert res.returncode == 0, res.stdout + res.stderr
+    recs = [_fail("2026-10-23 08:59:14", host=h) for h in ("ns0001", "ns0002", "ns0003", "ns0004", "ns0999") for _ in range(10)]
+    rows = _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")
+    assert sorted(rows) == sorted(f"• 203.0.113.10 → {label}: 실패 10회 · 10-23 08:59:14" for label in
+                                  (*ADDRESS_LABELS.values(), "ns0999"))   # 로스터 밖 호스트는 관리번호만
+
+
+@pytest.mark.parametrize("name", sorted(SERVER_ADDRESS_ALERTS))
+def test_every_server_alert_row_shows_the_address_and_a_host_without_one_stays_bare(o2, tmp_path, name):
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    stream, fields, expected = SERVER_ADDRESS_ALERTS[name][:3]
+    base = [dict(f, _timestamp=_kst_us("2026-10-23 08:59:14")) for f in fields]
+    for host, label in (("ns0001", ADDRESS_LABELS["ns0001"]), ("ns0002", "ns0002"), ("ns0003", ADDRESS_LABELS["ns0003"])):
+        rows = _row_lines(o2, name, _on_host(base, host), stream)
+        assert rows and label in rows[0] and (host != "ns0002" or "ns0002 (" not in rows[0]), (name, host, rows)
+        assert all("ns0272" not in r for r in rows), (name, rows)
+
+
+def test_alerts_that_are_out_of_scope_keep_their_rows_and_sql(o2, tmp_path):
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    for name in ("infra-switch-config-change", "infra-fortigate-admin-login-failures", "infra-unreachable-host", "infra-backup-missing",
+                 "infra-host-status-silent", "infra-disk-usage-p1", "infra-silent-host-p1", "infra-cpu-usage-p1"):
+        alert = o2.store["alert"][name]
+        assert "host_label" not in alert["row_template"] and "host_label" not in str(alert["query_condition"]), name
+    assert o2.store["alert"]["infra-unreachable-host"]["row_template"] == "• {tcpcheck_endpoint} (검사: {host_name}) · {event_time}"
+
+
+def test_the_address_never_changes_who_fires_or_the_raw_log_link(o2, tmp_path):
+    from openobserve_config import o2c_raw_log_sql
+    assert _apply(o2).returncode == 0
+    plain = {n: (a["query_condition"]["sql"], a["context_attributes"]["raw_log_line"]) for n, a in o2.store["alert"].items() if a["query_condition"]["type"] == "sql"}
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    for name in SERVER_ADDRESS_ALERTS:
+        sql, link = o2.store["alert"][name]["query_condition"]["sql"], o2.store["alert"][name]["context_attributes"]["raw_log_line"]
+        stream = o2.store["alert"][name]["stream_name"]
+        assert link.startswith("\n▶ 로그 보기: http"), name
+        old_sql, old_link = plain[name]
+        assert link == old_link, name   # 원문 조회 SQL은 SELECT 목록을 버리므로 표시 이름 식과 무관하다
+        assert o2c_raw_log_sql(sql, stream) == o2c_raw_log_sql(old_sql, stream), name
+        for clause in ("WHERE", "GROUP BY", "HAVING"):
+            tail = lambda s: re.split(rf"\b{clause}\b", s, maxsplit=1)[-1] if clause in s else ""
+            assert tail(sql).split(" ORDER BY")[0] == tail(old_sql).split(" ORDER BY")[0] or clause != "WHERE", (name, clause)
+    fixture_fires = {"ns0001": 10, "ns0002": 9}
+    recs = [_fail("2026-10-23 08:59:14", host=h) for h, n in fixture_fires.items() for _ in range(n)]
+    assert len(_row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")) == 1   # 임계 10회는 그대로
+
+
+def test_an_address_change_updates_only_the_server_alerts_and_a_rerun_writes_nothing(o2, tmp_path):
+    assert _addr_apply(o2, tmp_path).returncode == 0
+    o2.writes.clear()
+    assert _addr_apply(o2, tmp_path).returncode == 0 and o2.writes == []
+    moved = dict(HOST_KV, ns0004={"ansible_host": "192.0.2.244"})
+    assert _addr_apply(o2, tmp_path, host_kv=moved).returncode == 0
+    updated = {path.rsplit("/", 1)[-1] for method, path, _ in o2.writes if method == "PUT"}
+    in_scope = {o2.store["alert"][n]["alert_id"] for n in SERVER_ADDRESS_ALERTS} | {
+        a["alert_id"] for n, a in o2.store["alert"].items() if "host_label" in a["row_template"]}
+    assert updated == in_scope and len(o2.writes) == len(in_scope)
+
+
+def test_addresses_stay_out_of_the_output_and_the_repository_files(o2, tmp_path):
+    res = _addr_apply(o2, tmp_path)
+    assert res.returncode == 0
+    sql = o2.store["alert"]["infra-ssh-login-failures-per-source"]["query_condition"]["sql"]
+    assert "192.0.2.201" in sql and "192.0.2.101" not in sql   # 알림에는 고른 주소만 있다(ansible_host가 이긴 public_ip는 없다)
+    addresses = {v for kv in HOST_KV.values() for v in kv.values() if isinstance(v, str) and v[0].isdigit()}
+    files = [p for p in list(ROLE.rglob("*")) + list((ROOT_DIR / "docs").glob("*.md")) + list((ROOT_DIR / "playbooks").glob("openobserve*")) if p.is_file()]
+    for address in addresses:
+        assert address not in res.stdout + res.stderr, address
+        for path in files:
+            assert not re.search(rf"(?<![\d.]){re.escape(address)}(?![\d])", path.read_text(encoding="utf-8", errors="ignore")), (address, path.name)
+
+
+def test_the_host_address_lookup_is_read_only_no_log_and_fails_on_anything_but_200_and_404():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    t = next(t for t in tasks if t["name"].startswith("[O2C-006]"))
+    assert t["no_log"] is True and t["changed_when"] is False and t["check_mode"] is False
+    assert t["o2c_http"]["status_code"] == [200, 404] and "o2c_host_kv_fixture is not defined" in str(t["when"])
+    assert "/data/' ~ _vault_hosts_prefix_eff ~ '{host}'" in t["o2c_http"]["requests"].replace("\n", " ") or "{host}'" in t["o2c_http"]["requests"]
+    guard = next(t for t in tasks if "address" in t["name"].lower() and t.get("ansible.builtin.assert"))
+    assert guard["no_log"] is True and "o2c_host_kv_fixture is not defined" in str(guard["when"])
+
+
+def test_without_an_openbao_token_the_address_lookup_fails_instead_of_dropping_the_addresses(o2, tmp_path, monkeypatch):
+    for var in ("VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID"):
+        monkeypatch.delenv(var, raising=False)
+    res = _apply(o2, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_host_kv_fixture": None})
+    assert res.returncode != 0 and "OpenBao" in res.stdout and o2.writes == []
+
+
+def test_check_mode_reads_the_addresses_but_writes_nothing(o2, tmp_path):
+    assert _addr_apply(o2, tmp_path, "--check").returncode == 0 and o2.writes == []

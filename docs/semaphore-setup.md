@@ -163,7 +163,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
 - **호스트별 선택 키 `hosts/<host>/agents`**: `otel_docker_metrics`(docker 메트릭), `otel_app_telemetry`(boolean, 컨테이너 앱 텔레메트리 OTLP HTTP 수신 — traces는 `app_traces` 스트림, metrics는 기존 경로. 기본 꺼짐, ADR-0012), `otel_container_logs`(docker 컨테이너 로그를 `app_logs`로 수집, 기본 꺼짐. 컨테이너가 compose에서 `json-file` 드라이버(`max-size`·`max-file`)와 `com.docker.compose.project`·`com.docker.compose.service` 라벨 전달 옵션(`logging.options.labels`)을 써야 한다. compose를 먼저 `json-file`로 전환한 뒤 Config를 실행한다: 이전 구현이 둔 rsyslog 규칙이 이때 제거되고 rsyslog가 재시작된다).
 - **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
-- **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_url`(네이버웍스 봇 text API). 알림 검증용 `controller_ingest_token`(합성 레코드 주입). 선택으로 `alert_webhook_token`·`alert_webhook_auth_header`(봇은 `X-NANOIT-ACCESS`).
+- **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_plain_url`(사내 알림 플랫폼 text/plain 경로). 알림 검증용 `controller_ingest_token`(합성 레코드 주입). 선택으로 `alert_webhook_token`·`alert_webhook_auth_header`(봇은 `X-NANOIT-ACCESS`).
 - **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 `host_audit_mail_to`로 덮어쓴다(값은 로그에 나오지 않는다). 템플릿 Survey에는 두지 않으므로 API 실행의 `environment`로 넘긴다(§5 실행 시 입력).
 
 ---

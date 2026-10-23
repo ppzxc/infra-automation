@@ -3,9 +3,9 @@
 # 연결 정보와 시크릿은 Git에 두지 않는다: OpenBao agents/openobserve 키
 #   o2_endpoint, o2_org(기본 default), o2_ca_file(선택)  — host_agents와 같은 키
 #   api_user, api_password        — OpenObserve 설정 API(알림·함수·파이프라인)를 쓸 수 있는 계정(수집 토큰과 다름)
-#   alert_webhook_url             — 통지 대상 webhook URL (네이버웍스 봇 text API)
+#   alert_webhook_plain_url       — 통지 대상 webhook URL (사내 알림 플랫폼(Google Chat)의 text/plain 경로, 본문 길이 제한 없음)
 #   alert_webhook_token           — (선택) webhook 인증 토큰. 헤더 이름은 alert_webhook_auth_header(기본 Authorization,
-#                                   네이버웍스 봇은 X-NANOIT-ACCESS)
+#                                   사내 알림 플랫폼은 X-NANOIT-ACCESS)
 #   normal_sources                — (선택) root 로그인 정상 출발지 목록 [{address: <IP>, kind: semaphore|office}, ...] (Spec #184 / Ticket-8).
 #                                   저장소에는 주소를 두지 않는다. kind(semaphore·office)는 구분용 표시일 뿐 판정은 같다:
 #                                   목록에 있는 출발지는 P1(외부 출발지)에서 빠지고 P2(알고 있는 출발지)로 간다.
@@ -38,17 +38,19 @@ o2c_switch_stream: system_logs
 # 방화벽(포티게이트) 로그 필드 추출(Spec #282 / Ticket-2): security_logs의 service_name=fortigate-syslog 레코드에만 필드를 더한다.
 # 소스 스트림당 파이프라인이 하나라 별도 파이프라인 없이 보안 로그 파이프라인(o2c_pipeline_name)에서 security_semantics 다음 함수로 잇는다.
 o2c_fortigate_function_name: fortigate_semantics
-o2c_template_name: infra-automation-webhook
-o2c_destination_name: infra-automation-webhook
+# 통지 경로는 text/plain 웹훅 하나다(#347). 옛 JSON 웹훅(infra-automation-webhook: 본문 text 2000자 제한)은 서버에 남아 있지만 이 역할이 정의하지도 지우지도 않고
+# 알림도 쓰지 않는다(삭제는 폐기 목록의 알림 이름뿐이다).
+o2c_template_name: infra-automation-plain
+o2c_destination_name: infra-automation-plain
 o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"
 # (선택) P1 알림만 보낼 별도 destination 이름. 비어 있으면(기본) 모든 알림이 o2c_destination_name으로 간다.
 # 이 destination(과 그 템플릿·웹훅)은 이 역할이 만들지 않는다: 서버에 미리 있어야 하고 없으면 O2C-012 계획이 쓰기 전에 실패한다.
 o2c_p1_destination: ""
 
-# 통지 본문: 네이버웍스 봇 text 메시지({"content": {"type": "text", "text": ...}}).
+# 통지 본문: 사내 알림 플랫폼(Google Chat)의 text/plain 경로로 보내는 알림 텍스트 그대로다(JSON 래퍼 없음). 이 경로는 본문 길이 제한이 없다(실측: 5000자까지 도착).
 # 행동 가능한 알림(PagerDuty·Google SRE 원칙): 심각도·제목 → 현상 → 영향 → 대상(행) → 조치(항목마다 한 줄, o2c_action_lines가 ①②③을 줄로 나눈다) → 런북·대시보드 → 발생 구간.
 # {severity}·{title}·{what}·{why}·{action}·{runbook}·{link_label}은 알림별 context_attributes, {rows}는 알림별 row_template이다.
-# {rows:20}은 행을 20개까지만 싣고(OpenObserve 템플릿 변수 `{rows:N}`) {alert_count}는 조건에 걸린 전체 행 수라 잘린 만큼은 건수로 알 수 있다.
+# {rows:30}은 행을 30개까지만 싣고(OpenObserve 템플릿 변수 `{rows:N}`) {alert_count}는 조건에 걸린 전체 행 수라 잘린 만큼은 건수로 알 수 있다.
 # {link_label}은 메트릭(PromQL) 알림과 원문 링크가 있는 로그 알림이 "상세 보기"(= {alert_url}, 알림 화면), 원문 링크가 없는 로그 알림이 "로그 보기"다.
 # {raw_log_line}은 원문 로그 링크를 만들 수 있는 로그 알림에서만 "\n▶ 로그 보기: <원문 URL>" 줄이고 나머지는 빈 문자열이다(o2c_desired가 채운다).
 # 알림 SQL에서 WHERE만 남겨 파생하거나 알림 정의의 선택 필드 raw_sql로 직접 지정한다(o2c_raw_log_sql). {alert_url}은 컨텍스트 값 안에서 치환되지 않아 줄째 따로 둔다.
@@ -60,7 +62,19 @@ o2c_p1_destination: ""
 # 이 줄은 평가 시각이다. 사건 시각(로그가 생긴 시각)은 알림 SQL이 계산해야 하며 후속 작업이다.
 # 행 값({detail} 등 로그 원문)은 소스 custom.rs에서 JSON 이스케이프되는 경로(process_variable_replace → format_variable_value)로 치환되는 것으로 보이나 실서버 확인 전이다.
 o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
-o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}"}}'
+o2c_template_body: |-
+  {severity_icon} [{severity}] {title}
+
+  ■ 현상: {what}
+  ■ 영향: {why}
+  ■ 대상 {alert_count}건:
+  {rows:30}
+  ■ 조치:{action}
+
+  ▶ 런북: {runbook}
+  ▶ {link_label}: {alert_url}{raw_log_line}
+  ⏱ 평가: {alert_trigger_time_str} KST
+  📋 규칙: {alert_name}
 
 # 임계값
 o2c_ssh_fail_per_source_threshold: 10
@@ -235,6 +249,28 @@ o2c_traces_retention_days: 30
 # 주의: 서버(ns0331) 실제 값은 미확인 — 운영 반영 때 ZO_INGEST_ALLOWED_UPTO를 확인하고 다르면 이 값을 맞춘다.
 o2c_ingest_allowed_hours: 5
 
+# 알림 대상 행의 발생 시각(KST, Spec #339 / Ticket-1): 집계한 레코드의 처음·마지막 _timestamp를 `event_time` 컬럼 하나로 만든다.
+# 알림 SQL의 SELECT 목록 끝에 `, {{ o2c_event_time_sql }}`로 붙이고 행 템플릿 끝에 ` · {event_time}`을 더한다(WHERE·GROUP BY·HAVING은 건드리지 않는다).
+# 한 시각이면 `10-23 08:59:14`, 같은 날 범위면 `10-23 08:55:02~08:59:14`, 날짜가 넘어가면 양쪽에 날짜를 붙인다.
+# 시간대는 OpenObserve date_format의 세 번째 인자로 `+09:00`을 준다(시간대 이름은 쓰지 않는다). 집계(GROUP BY) 쿼리에서만 쓴다.
+o2c_event_time_format: "%m-%d %H:%M:%S"
+o2c_event_time_offset: "+09:00"
+o2c_event_time_first: "date_format(min(_timestamp), '{{ o2c_event_time_format }}', '{{ o2c_event_time_offset }}')"
+o2c_event_time_last: "date_format(max(_timestamp), '{{ o2c_event_time_format }}', '{{ o2c_event_time_offset }}')"
+o2c_event_time_sql: >-
+  CASE WHEN min(_timestamp) = max(_timestamp) THEN {{ o2c_event_time_first }}
+  WHEN date_format(min(_timestamp), '%m-%d', '{{ o2c_event_time_offset }}') = date_format(max(_timestamp), '%m-%d', '{{ o2c_event_time_offset }}')
+  THEN {{ o2c_event_time_first }} || '~' || date_format(max(_timestamp), '%H:%M:%S', '{{ o2c_event_time_offset }}')
+  ELSE {{ o2c_event_time_first }} || '~' || {{ o2c_event_time_last }} END AS event_time
+
+# 알림 대상 서버 행의 표시 이름(Spec #339 / Ticket-5): `host_label` 컬럼이 관리번호 옆에 접속 주소를 붙인다(`ns0272 (<주소>)`).
+# 알림 SQL의 SELECT 목록 끝에 `, {{ o2c_host_label_sql }}`(서버 컬럼이 `host`인 알림은 `o2c_host_label_sql_for_host_column`)를 붙이고 행 템플릿은 `{host_label}`을 쓴다.
+# 주소 표(o2c_host_addresses)는 Config 실행 때 OpenBao hosts/<host>에서 읽어 만든다(O2C-006·O2C-007, ansible_host → public_ip). 주소가 없는 호스트는 관리번호만
+# 보인다. 값은 저장소에 두지 않는다. 기본 `{}`이면 모든 서버가 관리번호만 보인다. host_name 컬럼은 그대로 남아 검증·발화 조건에 영향이 없다.
+o2c_host_addresses: {}
+o2c_host_label_sql: "{{ 'host_name' | o2c_host_label(o2c_host_addresses) }}"
+o2c_host_label_sql_for_host_column: "{{ 'host' | o2c_host_label(o2c_host_addresses) }}"
+
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
 o2c_alerts:
@@ -246,13 +282,14 @@ o2c_alerts:
     why: "무차별 대입(brute-force) 공격의 전형적인 징후입니다. fail2ban이 막지 못하고 있을 수 있습니다."
     action: "① 출발지가 사내·작업자 IP인지 확인 ② 외부 IP면 방화벽 차단과 fail2ban 동작 확인 ③ 같은 IP의 로그인 성공 기록이 있으면 P1로 격상"
     runbook: "{{ o2c_runbook_base }}#ssh-login-failures-per-source"
-    row_template: '• {source_address} → {host_name}: 실패 {failures}회'
+    row_template: '• {source_address} → {host_label}: 실패 {failures}회 · {event_time}'
     description: "sshd 로그인 실패가 같은 source.address에서 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_source_threshold }}회 이상 (fail2ban이 막지 못하는 분산 공격 단서)"
     stream: security_logs
     sql: >-
-      SELECT source_address, host_name, count(*) AS failures FROM "security_logs"
+      SELECT source_address, host_name, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
       GROUP BY source_address, host_name HAVING count(*) >= {{ o2c_ssh_fail_per_source_threshold }}
+      ORDER BY failures DESC
     period: "{{ o2c_ssh_fail_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_ssh_fail_renotify_minutes }}"
@@ -264,13 +301,14 @@ o2c_alerts:
     why: "여러 출발지에서 분산 공격을 받고 있거나 자동화 작업이 잘못된 자격증명으로 반복 접속하는 상황입니다."
     action: "① 로그 보기로 출발지 분포 확인 ② 분산 공격이면 SSH 포트 노출 범위(방화벽) 축소 ③ 내부 자동화면 해당 작업의 자격증명 갱신"
     runbook: "{{ o2c_runbook_base }}#ssh-login-failures-per-host"
-    row_template: '• {host_name}: 실패 {failures}회 (출발지 {sources}곳)'
+    row_template: '• {host_label}: 실패 {failures}회 (출발지 {sources}곳) · {event_time}'
     description: "한 호스트에서 sshd 로그인 실패가 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_host_threshold }}회 이상이고 출발지가 {{ o2c_ssh_fail_per_host_min_sources }}곳 이상 (출발지 하나의 공격은 출발지별 알림이 맡는다)"
     stream: security_logs
     sql: >-
-      SELECT host_name, count(*) AS failures, count(DISTINCT source_address) AS sources FROM "security_logs"
+      SELECT host_name, count(*) AS failures, count(DISTINCT source_address) AS sources, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
       GROUP BY host_name HAVING count(*) >= {{ o2c_ssh_fail_per_host_threshold }} AND count(DISTINCT source_address) >= {{ o2c_ssh_fail_per_host_min_sources }}
+      ORDER BY failures DESC
     period: "{{ o2c_ssh_fail_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_ssh_fail_renotify_minutes }}"
@@ -282,13 +320,14 @@ o2c_alerts:
     why: "root 직접 접속은 정책상 금지 대상(PermitRootLogin)이며 접속자 식별이 불가능합니다. 외부 출발지라 침해 또는 설정 우회일 수 있습니다(ISMS 2.5 사용자 인증)."
     action: "① 출발지와 시각을 작업 일정·작업자와 대조 ② 확인되지 않으면 해당 서버 root 비밀번호 변경·세션 종료 후 보안 담당 보고 ③ 승인된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#root-login-success"
-    row_template: '• {host_name} ← {source_address} ({logins}회)'
+    row_template: '• {host_label} ← {source_address} ({logins}회) · {event_time}'
     description: "정상 출발지(OpenBao normal_sources)에도 사설 대역에도 없는 진짜 외부 출발지의 root SSH 로그인 성공 (1건부터 즉시) — PermitRootLogin 설정이 우회되었는지 확인"
     stream: security_logs
     sql: >-
-      SELECT host_name, source_address, count(*) AS logins FROM "security_logs"
+      SELECT host_name, source_address, count(*) AS logins, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root'{{ o2c_root_external_filter }}
       GROUP BY host_name, source_address
+      ORDER BY logins DESC
     period: 5
     frequency: 1
     silence: 5
@@ -298,15 +337,16 @@ o2c_alerts:
     title: "root 계정 원격 로그인 성공 (알고 있는 출발지)"
     what: "등록된 출발지(Semaphore·사무실) 또는 등록되지 않은 사설 대역 출발지에서 root 계정으로 SSH 로그인이 성공했습니다."
     why: "정책상 금지된 root 직접 접속이 일어났습니다. 등록된 출발지면 작업·배포일 가능성이 높고, 미등록 사설 출발지면 내부 이동(횡적 이동) 가능성을 확인해야 합니다."
-    action: "① 출발지가 등록된 곳이면 작업·배포 일정과 대조하고 일반 계정 + sudo로 전환하도록 안내 ② 미등록 사설 출발지면 그 장비의 소유자와 접속 경위를 확인 ③ 확인되지 않으면 root 비밀번호 변경·세션 종료 후 P1 절차(root 로그인 성공)로 격상"
+    action: "① 출발지가 등록된 곳이면 작업·배포 일정과 대조하고 일반 계정 + sudo로 전환하도록 안내 ② 미등록 사설 출발지면 그 장비의 소유자와 접속 경위를 확인 ③ 확인되지 않으면 root 비밀번호 변경·세션 종료 후 P1 절차로 격상"
     runbook: "{{ o2c_runbook_base }}#root-login-known"
-    row_template: '• {host_name} ← {source_address} ({logins}회)'
+    row_template: '• {host_label} ← {source_address} ({logins}회) · {event_time}'
     description: "등록 출발지(OpenBao normal_sources, kind 무관) 또는 미등록 사설 대역 출발지의 root SSH 로그인 성공 — P2 (Event Alert, 재통지 {{ o2c_root_known_silence_minutes }}분)"
     stream: security_logs
     sql: >-
-      SELECT host_name, source_address, count(*) AS logins FROM "security_logs"
+      SELECT host_name, source_address, count(*) AS logins, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome = 'success' AND user_name = 'root' AND {{ o2c_root_known_filter }}
       GROUP BY host_name, source_address
+      ORDER BY logins DESC
     period: 5
     frequency: 1
     silence: "{{ o2c_root_known_silence_minutes }}"
@@ -318,13 +358,14 @@ o2c_alerts:
     why: "계정 탈취 후 권한 상승을 시도하는 단계일 수 있습니다. 단순 비밀번호 오입력일 수도 있습니다."
     action: "① 해당 사용자에게 시도 여부 확인 ② 본인이 아니면 계정 잠금·비밀번호 변경 ③ 반복되면 접속 경로(출발지) 추적"
     runbook: "{{ o2c_runbook_base }}#sudo-escalation-failure"
-    row_template: '• {host_name} / 사용자 {user_name}: 실패 {failures}회'
+    row_template: '• {host_label} / 사용자 {user_name}: 실패 {failures}회 · {event_time}'
     description: "sudo/su 권한상승 실패(authentication failure, NOT in sudoers) — 성공은 알리지 않고 기록만 한다"
     stream: security_logs
     sql: >-
-      SELECT host_name, user_name, count(*) AS failures FROM "security_logs"
+      SELECT host_name, user_name, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE event_action IN ('sudo','su') AND event_outcome = 'failure'
       GROUP BY host_name, user_name
+      ORDER BY failures DESC
     period: 5
     frequency: 1
     silence: 5
@@ -337,17 +378,18 @@ o2c_alerts:
     why: "무차별 대입(brute-force)이 성공했을 수 있습니다. 계정이 탈취됐다면 공격자가 이미 서버 안에 있습니다(ISMS 2.5 사용자 인증)."
     action: "① 출발지가 사내·작업자 IP인지, 성공한 계정이 누구인지 로그 보기로 확인 ② 확인되지 않으면 그 계정 비밀번호 변경·세션 종료(pkill -u)·출발지 방화벽 차단 후 보안 담당 보고 ③ 성공 뒤 그 계정의 sudo·계정 변경 기록 점검"
     runbook: "{{ o2c_runbook_base }}#ssh-bruteforce-success"
-    row_template: '• {source_address} → {host_name}: 실패 {failures}회 뒤 성공 {successes}회'
+    row_template: '• {source_address} → {host_label}: 실패 {failures}회 뒤 성공 {successes}회 · {event_time}'
     description: "같은 source.address·같은 호스트에서 {{ o2c_ssh_bruteforce_window_minutes }}분 동안 sshd 로그인 실패 {{ o2c_ssh_bruteforce_min_failures }}회 이상이고 성공 1회 이상 (Event Alert, 재통지 {{ o2c_ssh_bruteforce_window_minutes }}분)"
     stream: security_logs
     sql: >-
       SELECT source_address, host_name,
       sum(CASE WHEN event_outcome = 'failure' THEN 1 ELSE 0 END) AS failures,
-      sum(CASE WHEN event_outcome = 'success' THEN 1 ELSE 0 END) AS successes FROM "security_logs"
+      sum(CASE WHEN event_outcome = 'success' THEN 1 ELSE 0 END) AS successes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome IN ('failure', 'success')
       GROUP BY source_address, host_name
       HAVING sum(CASE WHEN event_outcome = 'failure' THEN 1 ELSE 0 END) >= {{ o2c_ssh_bruteforce_min_failures }}
       AND sum(CASE WHEN event_outcome = 'success' THEN 1 ELSE 0 END) >= 1
+      ORDER BY failures DESC
     period: "{{ o2c_ssh_bruteforce_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_ssh_bruteforce_window_minutes }}"
@@ -359,7 +401,7 @@ o2c_alerts:
     why: "계정 추가와 특권 그룹 가입은 침입자가 발판을 남기는 전형적인 수법입니다. 운영 작업(Semaphore 프로비저닝)도 같은 기록을 남기므로 작업 이력과 대조해야 합니다(ISMS 2.5.1 사용자 계정 관리)."
     action: "① 행의 실행 계정과 시각을 Semaphore 작업 이력·작업 일정과 대조 ② 계획에 없던 변경이면 로그 보기로 대상 계정을 확인하고 계정 잠금(usermod -L)·그룹 탈퇴 후 보안 담당 보고 ③ 특권 그룹 변경은 getent group wheel sudo docker로 현재 구성원 확인"
     runbook: "{{ o2c_runbook_base }}#account-change"
-    row_template: '• {host_name}: {change_kind} {changes}건 (실행 계정 {actor})'
+    row_template: '• {host_label}: {change_kind} {changes}건 (실행 계정 {actor}) · {event_time}'
     description: "auditd 계정 관리 기록(ADD_USER·DEL_USER·ADD_GROUP·DEL_GROUP·USER_MGMT·GRP_MGMT·USER_CHAUTHTOK·GRP_CHAUTHTOK·CHUSER_ID·CHGRP_ID·ACCT_LOCK·ACCT_UNLOCK) — 특권 그룹({{ o2c_privileged_groups | join('·') }}) 변경은 따로 표시 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
@@ -369,12 +411,13 @@ o2c_alerts:
       WHEN body LIKE 'type=DEL_%' THEN '계정·그룹 삭제' WHEN body LIKE 'type=ADD_%' THEN '계정·그룹 추가'
       ELSE '계정·그룹 속성 변경' END AS change_kind,
       CASE WHEN body LIKE '%AUID="%' THEN regexp_replace(body, '^.*AUID="([^"]*)".*$', '\1') ELSE '알 수 없음' END AS actor,
-      count(*) AS changes FROM "security_logs"
+      count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE service_name = 'audit' AND (body LIKE 'type=ADD_USER %' OR body LIKE 'type=DEL_USER %' OR body LIKE 'type=ADD_GROUP %'
       OR body LIKE 'type=DEL_GROUP %' OR body LIKE 'type=USER_MGMT %' OR body LIKE 'type=GRP_MGMT %' OR body LIKE 'type=USER_CHAUTHTOK %'
       OR body LIKE 'type=GRP_CHAUTHTOK %' OR body LIKE 'type=CHUSER_ID %' OR body LIKE 'type=CHGRP_ID %' OR body LIKE 'type=ACCT_LOCK %'
       OR body LIKE 'type=ACCT_UNLOCK %')
       GROUP BY host_name, change_kind, actor
+      ORDER BY changes DESC
     period: 5
     frequency: 1
     silence: 5
@@ -386,14 +429,15 @@ o2c_alerts:
     why: "침입자가 흔적을 지우거나 방어를 끄는 단계에서 쓰는 명령입니다. 계획된 작업이 아니라면 침해가 진행 중일 수 있습니다(ISMS 2.9.4 로그 및 접속기록 관리)."
     action: "① 행의 사용자에게 작업 여부를 확인하고 작업 일정과 대조 ② 확인되지 않으면 그 계정 세션 종료·비밀번호 변경 후 보안 담당 보고, 꺼진 기능(SELinux·방화벽·auditd·rsyslog) 즉시 복구 ③ 계획된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#sudo-risky-command"
-    row_template: '• {host_name} / 사용자 {user_name}: {command_kind} {runs}건'
+    row_template: '• {host_label} / 사용자 {user_name}: {command_kind} {runs}건 · {event_time}'
     description: "sudo 성공 기록의 process.command_line(소문자)에 o2c_sudo_risky_commands·o2c_sudo_protected_services 문구가 있음 — 통지 행에는 명령 원문 대신 종류만 싣는다 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name, user_name, {{ o2c_sudo_risky_groups | o2c_like_label('process_command_line') }} AS command_kind,
-      count(*) AS runs FROM "security_logs"
+      count(*) AS runs, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE event_action = 'sudo' AND event_outcome = 'success' AND {{ o2c_sudo_risky_groups | o2c_like_any('process_command_line') }}
       GROUP BY host_name, user_name, command_kind
+      ORDER BY runs DESC
     period: 5
     frequency: 1
     silence: 5
@@ -408,18 +452,19 @@ o2c_alerts:
     why: "auditd가 멈추면 그 뒤의 명령 실행·계정 변경·설정 파일 접근 기록이 남지 않습니다. 침입자가 흔적을 남기지 않으려고 먼저 끄는 대상입니다(ISMS 2.9.4 로그 및 접속기록 관리)."
     action: "① 대상 서버에서 systemctl status auditd와 auditctl -s로 상태 확인 ② 멈춰 있으면 즉시 service auditd start, auditctl -e 1로 복구하고 직전 sudo·로그인 기록으로 누가 멈췄는지 확인 ③ 계획에 없던 중단이면 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#auditd-stopped"
-    row_template: '• {host_name}: auditd 종료·감사 끄기 기록 {stops}건'
+    row_template: '• {host_label}: auditd 종료·감사 끄기 기록 {stops}건 · {event_time}'
     description: "auditd 기록(security_logs, service_name=audit)에서 DAEMON_END·DAEMON_ABORT·audit_enabled=0의 마지막 시각이 DAEMON_START·audit_enabled=1의 마지막 시각보다 늦음, 2분 지속 — 재시작은 시작 기록이 곧 따라와 풀린다 (Event Alert, 재통지 10분)"
     stream: security_logs
     sql: >-
       SELECT host_name,
-      sum(CASE WHEN body LIKE 'type=DAEMON_END %' OR body LIKE 'type=DAEMON_ABORT %' OR body LIKE '% audit_enabled=0 %' THEN 1 ELSE 0 END) AS stops
+      sum(CASE WHEN body LIKE 'type=DAEMON_END %' OR body LIKE 'type=DAEMON_ABORT %' OR body LIKE '% audit_enabled=0 %' THEN 1 ELSE 0 END) AS stops, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }}
       FROM "security_logs"
       WHERE service_name = 'audit' AND (body LIKE 'type=DAEMON_END %' OR body LIKE 'type=DAEMON_ABORT %' OR body LIKE 'type=DAEMON_START %'
       OR (body LIKE 'type=CONFIG_CHANGE %' AND (body LIKE '% audit_enabled=0 %' OR body LIKE '% audit_enabled=1 %')))
       GROUP BY host_name
       HAVING max(CASE WHEN body LIKE 'type=DAEMON_END %' OR body LIKE 'type=DAEMON_ABORT %' OR body LIKE '% audit_enabled=0 %' THEN _timestamp ELSE 0 END)
       > max(CASE WHEN body LIKE 'type=DAEMON_START %' OR body LIKE '% audit_enabled=1 %' THEN _timestamp ELSE 0 END)
+      ORDER BY stops DESC
     period: 10
     frequency: 1
     silence: 10
@@ -432,15 +477,16 @@ o2c_alerts:
     why: "특정 계정을 노린 비밀번호 추측 공격이거나, 자격증명이 바뀐 자동화 작업이 반복 실패하는 상황입니다. 잠긴 동안 정상 사용자도 로그인하지 못합니다."
     action: "① 로그 보기로 잠긴 계정과 직전 실패 출발지 확인 ② 외부 출발지면 방화벽 차단, 내부 자동화면 자격증명 갱신 ③ 본인 확인 뒤 faillock --user <계정> --reset으로 잠금 해제"
     runbook: "{{ o2c_runbook_base }}#account-lockout"
-    row_template: '• {host_name}: 잠금 기록 {locks}건'
+    row_template: '• {host_label}: 잠금 기록 {locks}건 · {event_time}'
     description: "pam_faillock 'Consecutive login failures … account temporarily locked'(syslog), auditd RESP_ACCT_LOCK·ANOM_LOGIN_FAILURES(op=pam_faillock), pam_tally2 'tally N, deny M' — 실로그 표본에 잠금 기록이 없어 합성 문구로만 검증 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
-      SELECT host_name, count(*) AS locks FROM "security_logs"
+      SELECT host_name, count(*) AS locks, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE lower(body) LIKE '%account temporarily locked%' OR body LIKE 'type=RESP_ACCT_LOCK %'
       OR (body LIKE 'type=ANOM_LOGIN_FAILURES %' AND body LIKE '%op=pam_faillock%')
       OR (lower(body) LIKE '%pam_tally2(%' AND lower(body) LIKE '%, deny %')
       GROUP BY host_name
+      ORDER BY locks DESC
     period: 5
     frequency: 1
     silence: 5
@@ -452,7 +498,7 @@ o2c_alerts:
     why: "서비스 프로세스가 죽었을 수 있고, 같은 원인이 반복되면 다른 서비스와 서버 전체로 번질 수 있습니다."
     action: "① 행의 종료된 프로세스가 서비스면 재기동 상태 확인 ② 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit) 점검 ③ 반복되면 메모리 증설·한도 조정 계획"
     runbook: "{{ o2c_runbook_base }}#oom-kill"
-    row_template: '• {host_name}: 종료된 프로세스 {killed_process} ({kills}건)'
+    row_template: '• {host_label}: 종료된 프로세스 {killed_process} ({kills}건) · {event_time}'
     description: "OOM kill (Killed process / Kill process / invoked oom-killer, 대소문자 무시) — cgroup·CentOS 6/7 형식 포함"
     stream: system_logs
     sql: >-
@@ -460,10 +506,11 @@ o2c_alerts:
       CASE WHEN lower(body) LIKE '%kill%process%'
       THEN regexp_replace(body, '^.*[Kk]ill(?:ed)? process [0-9]+ [(]([^)]*)[)].*$', '\1')
       ELSE 'oom-killer 호출' END AS killed_process,
-      count(*) AS kills FROM "system_logs"
+      count(*) AS kills, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "system_logs"
       WHERE lower(body) LIKE '%killed process%' OR lower(body) LIKE '%out of memory: kill process%'
       OR lower(body) LIKE '%invoked oom-killer%'
       GROUP BY host_name, killed_process
+      ORDER BY kills DESC
     period: 5
     frequency: 1
     silence: 5
@@ -475,15 +522,16 @@ o2c_alerts:
     why: "디스크 고장이나 데이터 손상의 전조로, 데이터 손실로 이어질 수 있어 즉시 확인해야 합니다."
     action: "① 로그 보기에서 오류 원문과 장치 확인 ② 즉시 백업 상태 확인(restic snapshots) ③ 파일시스템이 읽기 전용이면 서비스 영향 판단 후 디스크 교체·fsck 일정"
     runbook: "{{ o2c_runbook_base }}#disk-fs-errors"
-    row_template: '• {host_name}: 오류 패턴 {matches}건'
+    row_template: '• {host_label}: 오류 패턴 {matches}건 · {event_time}'
     description: "디스크·파일시스템 오류 (I/O error, EXT4-fs error, XFS Corruption, blk_update_request, Buffer I/O error) — rsyslog 파일에는 severity가 없어 패턴으로 잡는다"
     stream: system_logs
     sql: >-
-      SELECT host_name, count(*) AS matches FROM "system_logs"
+      SELECT host_name, count(*) AS matches, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "system_logs"
       WHERE lower(body) LIKE '%i/o error%' OR lower(body) LIKE '%ext4-fs error%'
       OR (lower(body) LIKE '%xfs%' AND lower(body) LIKE '%corruption%')
       OR lower(body) LIKE '%blk_update_request%' OR lower(body) LIKE '%buffer i/o error%'
       GROUP BY host_name
+      ORDER BY matches DESC
     period: 5
     frequency: 1
     silence: 5
@@ -495,14 +543,15 @@ o2c_alerts:
     why: "비활성화되면 funa가 내려가도 FAULT 전환·VIP 페일오버·봇 알림이 나가지 않아 장애가 조용히 이어집니다. keepalived는 권한을 시작할 때만 검사하므로 이 줄은 재시작 직후에 한 번 남습니다."
     action: "① 노드에서 ls -ld /opt/services/vrrp/config 와 스크립트 소유·권한 확인(디렉터리 root:root 0755, 스크립트 root:root 0755) ② Semaphore Host Provisioning(funa_env)으로 권한 복구 ③ keepalived 컨테이너 재생성 후 시작 로그에 Unsafe permissions가 없는지 확인"
     runbook: "{{ o2c_runbook_base }}#keepalived-script-disabled"
-    row_template: '• {host_name}: 비활성화 로그 {matches}건'
+    row_template: '• {host_label}: 비활성화 로그 {matches}건 · {event_time}'
     description: "app_logs의 keepalived 컨테이너 로그에 'Unsafe permissions found for script' 또는 'Disabling track script' (keepalived는 레벨이 없어 문구로 잡는다)"
     stream: app_logs
     sql: >-
-      SELECT host_name, count(*) AS matches FROM "app_logs"
+      SELECT host_name, count(*) AS matches, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "app_logs"
       WHERE container_name = 'vrrp-keepalived-1'
       AND (lower(body) LIKE '%unsafe permissions found for script%' OR lower(body) LIKE '%disabling track script%')
       GROUP BY host_name
+      ORDER BY matches DESC
     period: 5
     frequency: 1
     silence: 5
@@ -514,13 +563,14 @@ o2c_alerts:
     why: "앱 장애나 요청 실패, 의존 서비스(DB·큐·캐시) 연결 문제의 첫 신호일 수 있습니다. WARN은 알리지 않으므로 이 알림이 오면 서비스 영향이 시작됐을 수 있습니다."
     action: "① 행의 호스트·컨테이너 로그에서 ERROR 원문과 직전 줄 확인 ② 같은 시각의 다른 알림(VIP 전환, valkey, Silent Host)과 대조 ③ 서비스 영향이 있으면 해당 노드를 서비스에서 빼고 원인 조치"
     runbook: "{{ o2c_runbook_base }}#app-log-errors"
-    row_template: '• {host_name} / {container_name}: ERROR 이상 {errors}건'
+    row_template: '• {host_label} / {container_name}: ERROR 이상 {errors}건 · {event_time}'
     description: "app_logs의 severity가 error 이상(error·err·severe·fatal·critical·panic·dpanic, 대소문자 무시)인 줄 — 수집기가 JSON level·log.level·valkey 레벨 문자로 올린 값만 본다(키워드 추정 없음). WARN 이하와 레벨이 없는 줄은 알리지 않는다"
     stream: app_logs
     sql: >-
-      SELECT host_name, container_name, count(*) AS errors FROM "app_logs"
+      SELECT host_name, container_name, count(*) AS errors, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "app_logs"
       WHERE lower(severity) IN ('error','err','severe','fatal','critical','panic','dpanic')
       GROUP BY host_name, container_name
+      ORDER BY errors DESC
     period: 5
     frequency: 1
     silence: 5
@@ -532,16 +582,17 @@ o2c_alerts:
     why: "해석되지 않은 보안 로그는 위 보안 알림(로그인 실패·root 로그인·sudo)에 잡히지 않아 탐지 공백이 생깁니다."
     action: "① 해당 서버의 sshd·sudo 로그 형식 변경(패키지 업데이트) 여부 확인 ② 수집기(otelcol) 설정과 VRL 함수 수정 필요성 검토 ③ 업무 시간에 처리"
     runbook: "{{ o2c_runbook_base }}#log-parse-errors"
-    row_template: '• {host_name}: {total}줄 중 {parse_errors}줄 해석 실패'
+    row_template: '• {host_label}: {total}줄 중 {parse_errors}줄 해석 실패 · {event_time}'
     description: "security_logs의 log.parse_error=true 비율이 {{ o2c_parse_error_percent }}% 이상 (수집기 포맷 계약 위반 의심)"
     stream: security_logs
     # HAVING으로만 거르는 집계라 WHERE에서 파생할 수 없다: 원문 링크는 해석 실패 줄을 직접 연다(o2c_raw_log_sql 대신 raw_sql)
     raw_sql: 'SELECT * FROM "security_logs" WHERE log_parse_error = true ORDER BY _timestamp DESC LIMIT 200'
     sql: >-
       SELECT host_name, count(*) AS total,
-      sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) AS parse_errors FROM "security_logs"
+      sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) AS parse_errors, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       GROUP BY host_name HAVING count(*) >= {{ o2c_parse_error_min_lines }}
       AND sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) * 100 >= {{ o2c_parse_error_percent }} * count(*)
+      ORDER BY parse_errors DESC
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
     silence: "{{ o2c_parse_error_window_minutes }}"
@@ -553,16 +604,17 @@ o2c_alerts:
     why: "해석되지 않은 시스템 로그는 커널·디스크 오류 알림에 잡히지 않을 수 있습니다."
     action: "① 해당 서버의 로그 형식 변경 여부 확인 ② 수집기(otelcol) 설정 점검 ③ 업무 시간에 처리"
     runbook: "{{ o2c_runbook_base }}#log-parse-errors"
-    row_template: '• {host_name}: {total}줄 중 {parse_errors}줄 해석 실패'
+    row_template: '• {host_label}: {total}줄 중 {parse_errors}줄 해석 실패 · {event_time}'
     description: "system_logs의 log.parse_error=true 비율이 {{ o2c_parse_error_percent }}% 이상 (수집기 포맷 계약 위반 의심)"
     stream: system_logs
     # HAVING으로만 거르는 집계라 WHERE에서 파생할 수 없다: 원문 링크는 해석 실패 줄을 직접 연다(o2c_raw_log_sql 대신 raw_sql)
     raw_sql: 'SELECT * FROM "system_logs" WHERE log_parse_error = true ORDER BY _timestamp DESC LIMIT 200'
     sql: >-
       SELECT host_name, count(*) AS total,
-      sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) AS parse_errors FROM "system_logs"
+      sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) AS parse_errors, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "system_logs"
       GROUP BY host_name HAVING count(*) >= {{ o2c_parse_error_min_lines }}
       AND sum(CASE WHEN log_parse_error = true THEN 1 ELSE 0 END) * 100 >= {{ o2c_parse_error_percent }} * count(*)
+      ORDER BY parse_errors DESC
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
     silence: "{{ o2c_parse_error_window_minutes }}"
@@ -708,13 +760,14 @@ o2c_alerts:
     why: "서버나 네트워크가 내려갔을 가능성이 큽니다. 접속이 된다고 OS가 건강하다는 뜻은 아니며, 이 알림은 도달성만 봅니다(ADR-0010)."
     action: "① 서버 전원·콘솔·네트워크 경로 확인 ② 같은 호스트의 Silent Host 알림이 함께 오면 같은 사건이다 — 서버가 복구되면 수집기도 돌아온다 ③ 서버가 살아 있는데 이 알림만 오면 ns0266에서 해당 포트로의 경로(방화벽)와 SSH 포트 설정 확인"
     runbook: "{{ o2c_runbook_base }}#unreachable-host"
-    row_template: '• {tcpcheck_endpoint} (검사: {host_name})'
+    row_template: '• {tcpcheck_endpoint} (검사: {host_name}) · {event_time}'
     description: "tcpcheck.status가 5분 구간 최댓값 0 — 검사하는 쪽이 servers 전체의 SSH 포트를 60초마다 확인 (State Alert, 재통지 60분)"
     stream: tcpcheck_status
     stream_type: metrics
     sql: >-
-      SELECT host_name, tcpcheck_endpoint, max(value) AS status FROM "tcpcheck_status"
+      SELECT host_name, tcpcheck_endpoint, max(value) AS status, {{ o2c_event_time_sql }} FROM "tcpcheck_status"
       GROUP BY host_name, tcpcheck_endpoint HAVING max(value) = 0
+      ORDER BY host_name, tcpcheck_endpoint
     period: 5
     frequency: 1
     silence: 60
@@ -726,13 +779,14 @@ o2c_alerts:
     why: "다음 백업 전에 고치지 않으면 복구 지점이 늘어나지 않고, 반복되면 백업 누락 알림으로 이어집니다."
     action: "① 행의 호스트에서 /var/log/host-agents/backup.jsonl 마지막 줄의 error 확인 ② 저장소(RustFS) 접속·자격증명·디스크 여유 점검 ③ 원인을 고친 뒤 호스트에서 백업을 수동 실행해 성공 확인"
     runbook: "{{ o2c_runbook_base }}#backup-failure"
-    row_template: '• {host}: 실패 {failures}건'
+    row_template: '• {host_label}: 실패 {failures}건 · {event_time}'
     description: "백업 실패 (job=backup, success=false) — Event Alert, backup_logs의 호스트는 host 필드"
     stream: backup_logs
     sql: >-
-      SELECT host, count(*) AS failures FROM "backup_logs"
+      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql_for_host_column }} FROM "backup_logs"
       WHERE job = 'backup' AND success = false
       GROUP BY host
+      ORDER BY failures DESC
     period: 5
     frequency: 1
     silence: 5
@@ -744,13 +798,14 @@ o2c_alerts:
     why: "저장소가 손상됐을 수 있습니다. 실패한 호스트는 prune이 차단되어 저장소가 계속 커집니다."
     action: "① Semaphore Repo Maintenance 실행 로그에서 해당 호스트의 check 오류 확인 ② restic check로 손상 범위 확인 ③ 손상이면 저장소 복구·재초기화와 백업 재실행 계획"
     runbook: "{{ o2c_runbook_base }}#integrity-check-failure"
-    row_template: '• {host}: 실패 {failures}건'
+    row_template: '• {host_label}: 실패 {failures}건 · {event_time}'
     description: "무결성 검사 실패 (job=maintenance, command=check, success=false) — Event Alert, 호스트는 host 필드"
     stream: backup_logs
     sql: >-
-      SELECT host, count(*) AS failures FROM "backup_logs"
+      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql_for_host_column }} FROM "backup_logs"
       WHERE job = 'maintenance' AND command = 'check' AND success = false
       GROUP BY host
+      ORDER BY failures DESC
     period: 5
     frequency: 1
     silence: 5
@@ -802,15 +857,16 @@ o2c_alerts:
     why: "데이터 손실 위험은 없지만 쓰기가 디스크 속도로 떨어져 DB 커밋·로그 기록이 계속 느려집니다. 백업 전원(배터리)이 없거나 케이블이 빠진 하드웨어 문제라 저절로 풀리지 않습니다."
     action: "① 행의 원인(cache_reason) 확인: Cable Error는 배터리 케이블 재장착·교체, not attached는 배터리 모듈 장착 ② 서버에서 ssacli ctrl all show config detail로 Cache Status 재확인 ③ No-Battery Write Cache를 켜서 해결하지 않는다(정전 시 데이터 손실)"
     runbook: "{{ o2c_runbook_base }}#raid-write-cache-disabled"
-    row_template: '• {host_name} {hw_name}: {cache_status} ({cache_reason})'
+    row_template: '• {host_label} {hw_name}: {cache_status} ({cache_reason}) · {event_time}'
     description: "controller 레코드의 cache_status가 permanently_disabled·failed, 또는 배터리 충전 중이 아닌 temporarily_disabled인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(cache_status) AS cache_status, max(cache_reason) AS cache_reason, count(*) AS readings
+      SELECT host_name, hw_name, max(cache_status) AS cache_status, max(cache_reason) AS cache_reason, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }}
       FROM "host_status_logs"
       WHERE kind = 'controller'
       AND (cache_status IN ('permanently_disabled', 'failed') OR (cache_status = 'temporarily_disabled' AND backup_power_operation <> 'charging'))
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -822,13 +878,14 @@ o2c_alerts:
     why: "컨트롤러 이상은 그 아래 모든 논리 드라이브의 I/O 오류나 정지로 이어질 수 있습니다."
     action: "① 서버에서 ssacli ctrl all show status와 dmesg의 hpsa 메시지 확인 ② iLO 이벤트 로그(IML) 확인 ③ 펌웨어 갱신·컨트롤러 교체를 HPE 지원과 계획"
     runbook: "{{ o2c_runbook_base }}#raid-controller-fault"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_label} {hw_name}: {raw_state} · {event_time}'
     description: "controller 레코드의 hw_state가 ok가 아닌 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "host_status_logs"
       WHERE kind = 'controller' AND hw_state <> 'ok'
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -840,13 +897,14 @@ o2c_alerts:
     why: "이중화가 깨진 상태라 디스크 하나가 더 고장 나면 데이터를 잃습니다. 재구축이 진행 중이어도 끝날 때까지는 같은 위험입니다."
     action: "① 행의 raw_state와 진행률 확인 ② 서버에서 ssacli ctrl all show config로 고장 디스크 확인 ③ 고장 디스크 교체 후 재구축 완료까지 지켜보기 ④ 백업 최신 여부 확인"
     runbook: "{{ o2c_runbook_base }}#raid-logical-drive-degraded"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_label} {hw_name}: {raw_state} · {event_time}'
     description: "logical_drive 레코드의 hw_state가 degraded·failed인 판독이 15분에 2회 이상 (State Alert, 재통지 60분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "host_status_logs"
       WHERE kind = 'logical_drive' AND hw_state IN ('degraded', 'failed')
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 60
@@ -858,13 +916,14 @@ o2c_alerts:
     why: "고장이면 이미 이중화가 줄었고, 고장 예측이면 곧 그렇게 됩니다. 교체 디스크를 미리 준비해야 합니다."
     action: "① 행의 슬롯과 상태 확인 ② 서버에서 ssacli ctrl all show config detail로 모델·용량 확인 ③ 같은 규격 디스크 확보 후 교체(핫 스왑) ④ 교체 뒤 논리 드라이브 재구축 완료 확인"
     runbook: "{{ o2c_runbook_base }}#raid-physical-drive-fault"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_label} {hw_name}: {raw_state} · {event_time}'
     description: "physical_drive 레코드의 hw_state가 failed·predicted_failure인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "host_status_logs"
       WHERE kind = 'physical_drive' AND hw_state IN ('failed', 'predicted_failure')
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -876,13 +935,14 @@ o2c_alerts:
     why: "배터리가 고장 나면 컨트롤러가 쓰기 캐시를 끄고, 쓰기가 계속 느려집니다."
     action: "① 서버에서 ssacli ctrl all show detail로 Battery/Capacitor Status 확인 ② HPE Smart Storage Battery 교체 계획 ③ 교체 뒤 충전이 끝나 Cache Status가 OK로 돌아오는지 확인"
     runbook: "{{ o2c_runbook_base }}#raid-cache-battery-fault"
-    row_template: '• {host_name} {hw_name}: {raw_state}'
+    row_template: '• {host_label} {hw_name}: {raw_state} · {event_time}'
     description: "cache_battery 레코드의 hw_state가 failed인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings FROM "host_status_logs"
+      SELECT host_name, hw_name, max(raw_state) AS raw_state, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "host_status_logs"
       WHERE kind = 'cache_battery' AND hw_state = 'failed'
       GROUP BY host_name, hw_name HAVING count(*) >= 2
+      ORDER BY readings DESC
     period: 15
     frequency: 5
     silence: 1440
@@ -894,13 +954,14 @@ o2c_alerts:
     why: "수집이 실패하는 동안에는 디스크·캐시 고장 알림이 나가지 않습니다. 도구가 멈추는 것 자체가 컨트롤러 이상의 신호일 수도 있습니다."
     action: "① 행의 status와 message 확인 ② 서버에서 timeout 60 ssacli ctrl all show status를 직접 실행 ③ 재구축 같은 무거운 작업 중이면 끝날 때까지 지켜보고, 아니면 dmesg의 hpsa 메시지 확인"
     runbook: "{{ o2c_runbook_base }}#raid-collection-error"
-    row_template: '• {host_name}: {status} {failures}회 ({message})'
+    row_template: '• {host_label}: {status} {failures}회 ({message}) · {event_time}'
     description: "tool_status 레코드의 status가 timeout·error인 실행이 20분에 3회 이상 (State Alert, 재통지 1440분). no_tool·no_controller는 알리지 않는다"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, max(status) AS status, max(message) AS message, count(*) AS failures FROM "host_status_logs"
+      SELECT host_name, max(status) AS status, max(message) AS message, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "host_status_logs"
       WHERE kind = 'tool_status' AND status IN ('timeout', 'error')
       GROUP BY host_name HAVING count(*) >= 3
+      ORDER BY failures DESC
     period: 20
     frequency: 5
     silence: 1440
@@ -950,14 +1011,15 @@ o2c_alerts:
     why: "승인되지 않은 설정 변경이면 네트워크 장애나 침해의 시작일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다."
     action: "① 대상의 변경 주체(사용자·접속 방식·주소)를 작업 일정과 대조 ② 승인된 작업이 아니면 장비 접속 차단과 설정 백업(Cisco Backup) 비교 ③ 승인된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#switch-config-change"
-    row_template: '• {device}: 설정 변경 {changes}건 — {detail}'
+    row_template: '• {device}: 설정 변경 {changes}건 — {detail} · {event_time}'
     description: "스위치 설정 변경 메시지({{ o2c_switch_config_change_events | join(', ') }}) 1건부터 (Event Alert) — 행에 장비와 원문의 변경 주체"
     stream: system_logs
     sql: >-
       SELECT coalesce(device_id, device_name) AS device,
-      regexp_replace(body, '^[^%]*%[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+: ', '') AS detail, count(*) AS changes FROM "system_logs"
+      regexp_replace(body, '^[^%]*%[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+: ', '') AS detail, count(*) AS changes, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_config_change_events | join("', '") }}'){{ o2c_switch_noise_filter }}
       GROUP BY device, detail
+      ORDER BY changes DESC
     period: 5
     frequency: 1
     silence: 5
@@ -969,13 +1031,14 @@ o2c_alerts:
     why: "스위치 관리 접속에 대한 무차별 대입 시도일 수 있습니다. 스위치는 모든 서버의 통신 경로입니다."
     action: "① 로그 보기에서 실패 줄의 사용자·출발지 확인 ② 외부·미확인 출발지면 해당 접속 경로(ACL·방화벽) 차단 ③ 작업자 오입력이면 계정 확인 후 기록"
     runbook: "{{ o2c_runbook_base }}#switch-login-failures"
-    row_template: '• {device}: 로그인 실패 {failures}회'
+    row_template: '• {device}: 로그인 실패 {failures}회 · {event_time}'
     description: "스위치 로그인 실패({{ o2c_switch_login_fail_events | join(', ') }})가 장비별로 {{ o2c_switch_login_fail_window_minutes }}분 동안 {{ o2c_switch_login_fail_threshold }}회 이상 (Event Alert)"
     stream: system_logs
     sql: >-
-      SELECT coalesce(device_id, device_name) AS device, count(*) AS failures FROM "system_logs"
+      SELECT coalesce(device_id, device_name) AS device, count(*) AS failures, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_login_fail_events | join("', '") }}'){{ o2c_switch_noise_filter }}
       GROUP BY device HAVING count(*) >= {{ o2c_switch_login_fail_threshold }}
+      ORDER BY failures DESC
     period: "{{ o2c_switch_login_fail_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_switch_login_fail_window_minutes }}"
@@ -987,13 +1050,14 @@ o2c_alerts:
     why: "스위치 하드웨어·전원·스택 같은 중대한 장애를 뜻합니다. 방치하면 그 스위치에 연결된 서버가 함께 끊길 수 있습니다."
     action: "① 행의 메시지 코드와 로그 보기의 원문 확인 ② 장비 콘솔·전원·스택·팬 상태 확인 ③ 하드웨어 문제면 이중화 경로로 서비스 전환 후 교체 일정 수립"
     runbook: "{{ o2c_runbook_base }}#switch-severity-critical"
-    row_template: '• {device}: {event_name} (심각도 {severity_code}) {events}건'
+    row_template: '• {device}: {event_name} (심각도 {severity_code}) {events}건 · {event_time}'
     description: "스위치 syslog 심각도 0~{{ o2c_switch_severity_max }}(Cisco 메시지 코드의 심각도)는 즉시 P1, 잡음 목록은 제외 (Event Alert)"
     stream: system_logs
     sql: >-
-      SELECT coalesce(device_id, device_name) AS device, event_name, min(log_syslog_severity_code) AS severity_code, count(*) AS events FROM "system_logs"
+      SELECT coalesce(device_id, device_name) AS device, event_name, min(log_syslog_severity_code) AS severity_code, count(*) AS events, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND log_syslog_severity_code <= {{ o2c_switch_severity_max }}{{ o2c_switch_noise_filter }}
       GROUP BY device, event_name
+      ORDER BY events DESC
     period: 5
     frequency: 1
     silence: 5
@@ -1006,12 +1070,13 @@ o2c_alerts:
     why: "스위치 사이나 사이트 밖으로 나가는 핵심 연결이 끊긴 것입니다. 이중화가 없으면 그 아래 서버가 모두 고립됩니다."
     action: "① 행의 장비·포트와 반대편 장비 상태 확인 ② 케이블·광모듈·반대편 포트의 shutdown 여부 확인 ③ 복구되지 않으면 우회 경로 확보와 회선 사업자 연락"
     runbook: "{{ o2c_runbook_base }}#switch-uplink-down"
-    row_template: '• {device} {port}: 링크 다운 {downs}건'
+    row_template: '• {device} {port}: 링크 다운 {downs}건 · {event_time}'
     description: "감시 목록의 (장비, 포트)에 대한 link down / line protocol down / administratively down 메시지 (Event Alert) — 목록이 비면 이 규칙은 만들지 않는다"
     stream: system_logs
     uplinks: "{{ o2c_switch_uplinks }}"
     noise_events: "{{ o2c_switch_noise_events }}"
-    sql: "{{ o2c_switch_uplinks | o2c_switch_uplink_sql(o2c_switch_noise_events) }}"
+    extra_columns: "{{ o2c_event_time_sql }}"   # 검증 계획이 감시 목록을 더해 SQL을 다시 만들 때도 같은 컬럼을 쓴다
+    sql: "{{ o2c_switch_uplinks | o2c_switch_uplink_sql(o2c_switch_noise_events, o2c_event_time_sql) }}"
     period: 5
     frequency: 1
     silence: 5
@@ -1023,13 +1088,14 @@ o2c_alerts:
     why: "L2 루프나 같은 MAC을 쓰는 장비의 이동·이중 연결 신호입니다. 방치하면 해당 VLAN 통신이 불안정해지고 브로드캐스트 폭풍으로 번질 수 있습니다."
     action: "① 로그 보기에서 플랩하는 MAC·VLAN·두 포트 확인 ② 두 포트 중 한쪽 끝 장비(서버 이중화 본딩·가상 스위치·루프 케이블)를 점검 ③ 의도한 이중 연결이면 본딩 모드를 확인하고 아니면 포트를 분리"
     runbook: "{{ o2c_runbook_base }}#switch-mac-flap"
-    row_template: '• {device}: MAC 플랩 {flaps}회'
+    row_template: '• {device}: MAC 플랩 {flaps}회 · {event_time}'
     description: "스위치 MAC 플랩({{ o2c_switch_macflap_events | join(', ') }})이 장비별로 {{ o2c_switch_macflap_window_minutes }}분 동안 {{ o2c_switch_macflap_threshold }}회 이상 (재통지 {{ o2c_switch_macflap_silence_minutes }}분)"
     stream: system_logs
     sql: >-
-      SELECT coalesce(device_id, device_name) AS device, count(*) AS flaps FROM "system_logs"
+      SELECT coalesce(device_id, device_name) AS device, count(*) AS flaps, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_macflap_events | join("', '") }}'){{ o2c_switch_noise_filter }}
       GROUP BY device HAVING count(*) >= {{ o2c_switch_macflap_threshold }}
+      ORDER BY flaps DESC
     period: "{{ o2c_switch_macflap_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_switch_macflap_silence_minutes }}"
@@ -1061,14 +1127,15 @@ o2c_alerts:
     why: "방화벽 관리 접속에 대한 무차별 대입 시도일 수 있습니다. 관리자 계정이 뚫리면 모든 통신 정책을 바꿀 수 있습니다(ISMS 2.5 사용자 인증)."
     action: "① 행의 출발지가 사내 작업자·Semaphore인지 확인 ② 외부·미확인 출발지면 관리 접속 허용 주소(trusted host)와 관리 인터페이스 노출 범위를 점검해 차단 ③ 작업자의 오입력이면 계정 확인 후 기록, 같은 출발지의 로그인 성공이 있으면 계정 변경 알림도 확인"
     runbook: "{{ o2c_runbook_base }}#fortigate-admin-login-failures"
-    row_template: '• {device}: 출발지 {source_address} 로그인 실패 {failures}회'
+    row_template: '• {device}: 출발지 {source_address} 로그인 실패 {failures}회 · {event_time}'
     description: "방화벽 관리자 로그인 실패(subtype=system, action=login, status=failed)가 장비·출발지별로 {{ o2c_fortigate_login_fail_window_minutes }}분 동안 {{ o2c_fortigate_login_fail_threshold }}회 이상 (Event Alert, 재통지 {{ o2c_fortigate_login_fail_silence_minutes }}분)"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_fortigate_device_sql }} AS device, source_address, count(*) AS failures FROM "security_logs"
+      SELECT {{ o2c_fortigate_device_sql }} AS device, source_address, count(*) AS failures, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'subtype' | o2c_fortigate_match(['system']) }}
       AND {{ 'action' | o2c_fortigate_match(['login']) }} AND {{ 'status' | o2c_fortigate_match(['failed']) }}
       GROUP BY device, source_address HAVING count(*) >= {{ o2c_fortigate_login_fail_threshold }}
+      ORDER BY failures DESC
     period: "{{ o2c_fortigate_login_fail_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_fortigate_login_fail_silence_minutes }}"
@@ -1080,17 +1147,18 @@ o2c_alerts:
     why: "승인되지 않은 정책·계정 변경은 통신 차단 해제나 백도어 계정 생성일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다(ISMS 2.9.1 변경관리)."
     action: "① 행의 관리자와 변경 대상(cfgpath)을 작업 요청·Semaphore 이력과 대조 ② 승인된 긴급 작업이 아니면 해당 관리자 계정 잠금과 직전 설정 백업(FortiGate Backup) 비교 후 되돌리기, 보안 담당 보고 ③ 승인된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-change-unapproved"
-    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin})'
+    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin}) · {event_time}'
     description: "방화벽 정책({{ o2c_fortigate_policy_cfgpaths | join(', ') }})·계정({{ o2c_fortigate_account_cfgpaths | join(', ') }}) 변경이 승인 시간 밖 (Event Alert) — 시각을 읽지 못한 줄도 포함"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
       CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
-      count(*) AS changes FROM "security_logs"
+      count(*) AS changes, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
       AND NOT ({{ o2c_fortigate_in_hours_sql }})
       GROUP BY device, cfgpath, admin
+      ORDER BY changes DESC
     period: 5
     frequency: 1
     silence: 5
@@ -1102,17 +1170,18 @@ o2c_alerts:
     why: "승인 시간 안의 변경은 대부분 정상 작업이지만 변경 관리 증적으로 매일 대조해야 합니다. 승인된 작업 목록에 없는 변경이면 계정 도용일 수 있습니다."
     action: "① 행의 관리자·변경 대상을 그날의 작업 요청과 대조 ② 대응 작업이 없는 변경은 승인 시간 밖 변경 절차(P1)로 격상 ③ 대조 결과를 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-change-approved"
-    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin})'
+    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin}) · {event_time}'
     description: "방화벽 정책({{ o2c_fortigate_policy_cfgpaths | join(', ') }})·계정({{ o2c_fortigate_account_cfgpaths | join(', ') }}) 변경이 승인 시간 안 — 하루 1번 P3 요약(period·silence 1440)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
       CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
-      count(*) AS changes FROM "security_logs"
+      count(*) AS changes, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
       AND ({{ o2c_fortigate_in_hours_sql }})
       GROUP BY device, cfgpath, admin
+      ORDER BY changes DESC
     period: 1440
     frequency: 1
     silence: 1440
@@ -1124,15 +1193,16 @@ o2c_alerts:
     why: "통신은 이어지더라도 이중화가 깨져 다음 장애에서 서비스가 끊길 수 있고, 전환이 반복되면 세션 끊김이 생깁니다."
     action: "① 행의 장비 이름으로 지금 주 장비가 어느 멤버인지 확인 ② 전환 직전 같은 장비의 인터페이스·전원·하트비트 로그 확인 ③ 한쪽 멤버가 복구되지 않으면 교체·점검 일정을 잡고, 계획된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-ha-failover"
-    row_template: '• {device}: {event} {events}건'
+    row_template: '• {device}: {event} {events}건 · {event_time}'
     description: "방화벽 HA 로그(subtype=ha, 정보성 동기화 로그 등 o2c_fortigate_ha_ignored_logids는 제외) 1건부터 (Event Alert, 재통지 {{ o2c_fortigate_ha_silence_minutes }}분) — 전환 반복 때 알림이 쏟아지지 않도록 재통지 간격을 길게 둔다"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% logdesc="%' THEN regexp_replace(body, '^.* logdesc="([^"]*)".*$', '\1') ELSE 'HA 이벤트' END AS event,
-      count(*) AS events FROM "security_logs"
+      count(*) AS events, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'subtype' | o2c_fortigate_match(['ha']) }}{{ o2c_fortigate_ha_ignored_logids | o2c_fortigate_exclude_logids }}
       GROUP BY device, event
+      ORDER BY events DESC
     period: 5
     frequency: 1
     silence: "{{ o2c_fortigate_ha_silence_minutes }}"
@@ -1144,18 +1214,19 @@ o2c_alerts:
     why: "알려진 취약점 공격이나 악성코드가 방화벽을 지나가려 했습니다. 차단됐더라도 공격 대상 시스템에 이미 닿았는지 확인해야 합니다."
     action: "① 행의 탐지 이름과 로그 보기의 출발지·목적지·조치(차단/통과) 확인 ② 통과(pass·monitor)였거나 내부 호스트가 출발지면 해당 호스트 격리와 점검 ③ 외부 출발지의 반복 공격이면 차단 정책 추가 검토, 결과를 사고 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-critical-detection"
-    row_template: '• {device}: {attack} {detections}건'
+    row_template: '• {device}: {attack} {detections}건 · {event_time}'
     description: "방화벽 UTM 탐지(type=utm) 중 severity가 {{ o2c_fortigate_detection_severities | join(', ') }} 인 것 1건부터 (Event Alert, 재통지 {{ o2c_fortigate_detection_silence_minutes }}분)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% attack="%' THEN regexp_replace(body, '^.* attack="([^"]*)".*$', '\1')
       WHEN body LIKE '% virus="%' THEN regexp_replace(body, '^.* virus="([^"]*)".*$', '\1') ELSE '-' END AS attack,
-      count(*) AS detections FROM "security_logs"
+      count(*) AS detections, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'type' | o2c_fortigate_match(['utm']) }}
       AND ({{ 'severity' | o2c_fortigate_match(o2c_fortigate_detection_severities) }}
       OR ({{ 'subtype' | o2c_fortigate_match(['virus']) }} AND {{ 'eventtype' | o2c_fortigate_match(['infected']) }}))
       GROUP BY device, attack
+      ORDER BY detections DESC
     period: 5
     frequency: 1
     silence: "{{ o2c_fortigate_detection_silence_minutes }}"

@@ -506,6 +506,55 @@ def o2c_host_items(hosts):
     return [{'host': h} for h in hosts or []]
 
 
+_SAFE_HOST_NAME = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
+_SAFE_ADDRESS = re.compile(r'^[A-Za-z0-9._:-]{1,64}$')   # IPv4·IPv6·호스트 이름. 알림 SQL에 문자열로 들어가므로 따옴표·공백 등은 받지 않는다
+
+
+def _host_kv(name, raw):
+    """OpenBao ``hosts/<host>`` 본문을 평면 dict로 푼다(resolve_connection.yml과 같은 규칙: 호스트명 키 → 키가 하나뿐인 오브젝트 → 평면)."""
+    if not isinstance(raw, dict):
+        return {}
+    if isinstance(raw.get(name), dict):
+        return raw[name]
+    if len(raw) == 1 and isinstance(next(iter(raw.values())), dict):
+        return next(iter(raw.values()))
+    return raw
+
+
+# host_agents.host_agents_tcpcheck_targets의 KV 주소 우선순위와 같아야 한다(tests가 두 쪽이 어긋나지 않는지 본다)
+KV_ADDRESS_KEYS = ('ansible_host', 'public_ip', 'ip', 'host')
+
+
+def o2c_host_addresses(roster, kv_by_host):
+    """``{호스트: 접속 주소}`` — 도달성 검사 대상(``host_agents_tcpcheck_targets``)과 같은 우선순위로 고른다: KV ``ansible_host`` → ``public_ip`` → ``ip`` → ``host``.
+
+    주소가 없거나 SQL에 안전하지 않은 값이면 그 호스트는 빠진다(알림에는 관리번호만 보인다). 짐작해서 채우지 않는다.
+    """
+    out = {}
+    for name in roster or []:
+        if not _SAFE_HOST_NAME.match(str(name)):
+            continue
+        kv = _host_kv(name, (kv_by_host or {}).get(name))
+        address = next((str(v).strip() for v in (kv.get(k) for k in KV_ADDRESS_KEYS) if v is not None and str(v).strip()), '')
+        if _SAFE_ADDRESS.match(address):
+            out[name] = address
+    return out
+
+
+def o2c_host_label(column, addresses):
+    """알림 SQL의 서버 행 표시 이름 컬럼: ``CASE <column> WHEN '<호스트>' THEN '<호스트> (<주소>)' … ELSE <column> END AS host_label``.
+
+    주소 표는 Config 실행 때 OpenBao에서 읽어 SQL에 고정한다(알림이 울릴 때는 OpenBao에 접속하지 않는다). 표가 비면 관리번호 그대로다.
+    """
+    if column not in ('host_name', 'host'):
+        raise ValueError('표시 이름 컬럼은 host_name 또는 host여야 합니다: %s' % column)
+    pairs = sorted((h, a) for h, a in (addresses or {}).items() if _SAFE_HOST_NAME.match(str(h)) and _SAFE_ADDRESS.match(str(a)))
+    if not pairs:
+        return '%s AS host_label' % column
+    whens = ' '.join("WHEN '%s' THEN '%s (%s)'" % (h, h, a) for h, a in pairs)
+    return 'CASE %s %s ELSE %s END AS host_label' % (column, whens, column)
+
+
 def _group(groups, name):
     return set((groups or {}).get(name) or [])
 
@@ -677,7 +726,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
             # 업링크 목록(장비, 포트)에 케이스의 가짜 장비를 `watch_port`로 더해 "목록에 있으면 발화, 없으면 발화하지 않음"을 검증한다
             watched = list(alert['uplinks'] or []) + [{'device': _host(c, run_id), 'port': c['watch_port']}
                                                       for c in spec['cases'] if c.get('watch_port') and _host(c, run_id) in hosts]
-            sql = o2c_switch_uplink_sql(watched, alert.get('noise_events'))
+            sql = o2c_switch_uplink_sql(watched, alert.get('noise_events'), alert.get('extra_columns', ''))
         period_us = int(alert.get('period', 0)) * 60 * 1000000   # 알림의 조회 구간만큼 거슬러 올라가 검색한다
         searches.append({
             'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
@@ -799,11 +848,11 @@ def o2c_switch_noise_filter(events):
     return (' AND event_name NOT IN (%s)' % ', '.join(_q(e) for e in events)) if events else ''
 
 
-def o2c_switch_uplink_sql(entries, noise_events=None):
+def o2c_switch_uplink_sql(entries, noise_events=None, extra_columns=''):
     """SQL of the uplink-down alert: a link/line-protocol message saying ``down`` (or ``administratively down``) for a listed (device, port).
 
     The port is matched in ``body`` (``Interface <name>, changed state to down``) so the query needs no port column. The trailing
-    comma keeps ``Gi1/0/1`` from matching ``Gi1/0/10``. An empty list yields a condition that can never be true.
+    comma keeps ``Gi1/0/1`` from matching ``Gi1/0/10``. ``extra_columns`` (e.g. the event time column) is appended to the SELECT list. An empty list yields a condition that can never be true.
     """
     pairs = []
     for e in entries or []:
@@ -811,9 +860,9 @@ def o2c_switch_uplink_sql(entries, noise_events=None):
         down, admin = ("lower(body) LIKE %s" % _q('%%interface %s, changed state to %s%%' % (name, tail)) for tail in ('down', 'administratively down'))
         pairs.append('(device_id = %s AND (%s OR %s))' % (_q(e['device']), down, admin))
     return ('SELECT coalesce(device_id, device_name) AS device, '
-            "regexp_replace(body, '^.*[Ii]nterface ([^ ,]+),.*$', '\\1') AS port, count(*) AS downs FROM \"system_logs\" "
-            "WHERE service_name = 'switch-syslog' AND event_name IN (%s)%s AND (%s) GROUP BY device, port") % (
-        ', '.join(_q(ev) for ev in UPLINK_EVENTS), o2c_switch_noise_filter(noise_events), ' OR '.join(pairs) if pairs else '1 = 0')
+            "regexp_replace(body, '^.*[Ii]nterface ([^ ,]+),.*$', '\\1') AS port, count(*) AS downs%s FROM \"system_logs\" "
+            "WHERE service_name = 'switch-syslog' AND event_name IN (%s)%s AND (%s) GROUP BY device, port ORDER BY downs DESC") % (
+        (', ' + extra_columns) if extra_columns else '', ', '.join(_q(ev) for ev in UPLINK_EVENTS), o2c_switch_noise_filter(noise_events), ' OR '.join(pairs) if pairs else '1 = 0')
 
 
 # --- 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3) ---------------------------------------------------------------------
@@ -950,7 +999,7 @@ class FilterModule(object):
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
                 'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
                 'o2c_missing_sql': o2c_missing_sql, 'o2c_app_telemetry_roster': o2c_app_telemetry_roster,
-                'o2c_host_items': o2c_host_items,
+                'o2c_host_items': o2c_host_items, 'o2c_host_addresses': o2c_host_addresses, 'o2c_host_label': o2c_host_label,
                 'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
                 'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
                 'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts,
