@@ -264,12 +264,12 @@ o2c_event_time_sql: >-
   ELSE {{ o2c_event_time_first }} || '~' || {{ o2c_event_time_last }} END AS event_time
 
 # 알림 대상 서버 행의 표시 이름(Spec #339 / Ticket-5): `host_label` 컬럼이 관리번호 옆에 접속 주소를 붙인다(`ns0272 (<주소>)`).
-# 알림 SQL의 SELECT 목록 끝에 `, {{ o2c_host_label_sql }}`(서버 컬럼이 `host`인 알림은 `o2c_host_label_sql_host`)를 붙이고 행 템플릿은 `{host_label}`을 쓴다.
+# 알림 SQL의 SELECT 목록 끝에 `, {{ o2c_host_label_sql }}`(서버 컬럼이 `host`인 알림은 `o2c_host_label_sql_for_host_column`)를 붙이고 행 템플릿은 `{host_label}`을 쓴다.
 # 주소 표(o2c_host_addresses)는 Config 실행 때 OpenBao hosts/<host>에서 읽어 만든다(O2C-006·O2C-007, ansible_host → public_ip). 주소가 없는 호스트는 관리번호만
 # 보인다. 값은 저장소에 두지 않는다. 기본 `{}`이면 모든 서버가 관리번호만 보인다. host_name 컬럼은 그대로 남아 검증·발화 조건에 영향이 없다.
 o2c_host_addresses: {}
 o2c_host_label_sql: "{{ 'host_name' | o2c_host_label(o2c_host_addresses) }}"
-o2c_host_label_sql_host: "{{ 'host' | o2c_host_label(o2c_host_addresses) }}"
+o2c_host_label_sql_for_host_column: "{{ 'host' | o2c_host_label(o2c_host_addresses) }}"
 
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
@@ -783,7 +783,7 @@ o2c_alerts:
     description: "백업 실패 (job=backup, success=false) — Event Alert, backup_logs의 호스트는 host 필드"
     stream: backup_logs
     sql: >-
-      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql_host }} FROM "backup_logs"
+      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql_for_host_column }} FROM "backup_logs"
       WHERE job = 'backup' AND success = false
       GROUP BY host
       ORDER BY failures DESC
@@ -802,7 +802,7 @@ o2c_alerts:
     description: "무결성 검사 실패 (job=maintenance, command=check, success=false) — Event Alert, 호스트는 host 필드"
     stream: backup_logs
     sql: >-
-      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql_host }} FROM "backup_logs"
+      SELECT host, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql_for_host_column }} FROM "backup_logs"
       WHERE job = 'maintenance' AND command = 'check' AND success = false
       GROUP BY host
       ORDER BY failures DESC

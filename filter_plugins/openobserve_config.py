@@ -521,8 +521,12 @@ def _host_kv(name, raw):
     return raw
 
 
+# host_agents.host_agents_tcpcheck_targets의 KV 주소 우선순위와 같아야 한다(tests가 두 쪽이 어긋나지 않는지 본다)
+KV_ADDRESS_KEYS = ('ansible_host', 'public_ip', 'ip', 'host')
+
+
 def o2c_host_addresses(roster, kv_by_host):
-    """``{호스트: 접속 주소}`` — 도달성 검사 대상과 같은 규칙으로 고른다: KV ``ansible_host``, 없으면 ``public_ip``.
+    """``{호스트: 접속 주소}`` — 도달성 검사 대상(``host_agents_tcpcheck_targets``)과 같은 우선순위로 고른다: KV ``ansible_host`` → ``public_ip`` → ``ip`` → ``host``.
 
     주소가 없거나 SQL에 안전하지 않은 값이면 그 호스트는 빠진다(알림에는 관리번호만 보인다). 짐작해서 채우지 않는다.
     """
@@ -531,7 +535,7 @@ def o2c_host_addresses(roster, kv_by_host):
         if not _SAFE_HOST_NAME.match(str(name)):
             continue
         kv = _host_kv(name, (kv_by_host or {}).get(name))
-        address = next((str(v).strip() for v in (kv.get('ansible_host'), kv.get('public_ip')) if v is not None and str(v).strip()), '')
+        address = next((str(v).strip() for v in (kv.get(k) for k in KV_ADDRESS_KEYS) if v is not None and str(v).strip()), '')
         if _SAFE_ADDRESS.match(address):
             out[name] = address
     return out

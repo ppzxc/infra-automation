@@ -999,7 +999,7 @@ def test_desired_alert_tz_offset_defaults_to_zero_without_the_spec_key():
 
 
 def test_selftest_record_and_row_template_carry_a_quote_and_backslash_probe(o2):
-    """행 값의 따옴표·역슬래시가 webhook JSON을 깨는지 통지에서 눈으로 확인할 수 있게 시험 레코드에 `a"b\\c`를 싣고 행 템플릿이 그것을 쓴다."""
+    """평문(text/plain) 통지에서 행 값의 따옴표·역슬래시가 `\\"`처럼 이스케이프되어 보이는지 눈으로 확인할 수 있게 시험 레코드에 `a"b\\c`를 싣고 행 템플릿이 그것을 쓴다."""
     assert _apply(o2).returncode == 0
     o2.ingests.clear()
     assert _apply(o2, extra={"o2c_verify_notify": True}).returncode == 0
@@ -3257,6 +3257,21 @@ def test_host_address_picks_ansible_host_then_public_ip_and_skips_blank_or_unsaf
     roster = ["ns0001", "ns0002", "ns0003", "ns0004", "ns0005", "ns0006", "ns0007", "ns0008", "ns0009", "ns0010"]
     assert o2c_host_addresses(roster, kv) == {"ns0001": "192.0.2.201", "ns0003": "192.0.2.203", "ns0004": "192.0.2.204",
                                               "ns0005": "192.0.2.105", "ns0007": "192.0.2.107", "ns0008": "192.0.2.108"}
+
+
+def test_host_address_follows_the_reachability_check_priority_ansible_host_public_ip_ip_host():
+    from host_agents import host_agents_tcpcheck_targets
+    from openobserve_config import o2c_host_addresses
+    kv = {"ns0001": {"ansible_host": "192.0.2.211", "public_ip": "192.0.2.212", "ip": "192.0.2.213", "host": "192.0.2.214"},
+          "ns0002": {"public_ip": "192.0.2.222", "ip": "192.0.2.223", "host": "192.0.2.224"},
+          "ns0003": {"ip": "192.0.2.233", "host": "192.0.2.234"},
+          "ns0004": {"host": "192.0.2.244"},
+          "ns0005": {"ansible_host": " ", "ip": "192.0.2.255"}}
+    roster = list(kv)
+    got = o2c_host_addresses(roster, kv)
+    assert got == {"ns0001": "192.0.2.211", "ns0002": "192.0.2.222", "ns0003": "192.0.2.233", "ns0004": "192.0.2.244", "ns0005": "192.0.2.255"}
+    # 도달성 검사가 실제로 접속하는 주소와 같다
+    assert [t.rsplit(":", 1)[0] for t in host_agents_tcpcheck_targets(roster, kv)] == [got[h] for h in roster]
 
 
 def _label_of(expression, host):
