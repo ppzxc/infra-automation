@@ -296,10 +296,11 @@ def test_template_body_is_a_naver_works_text_message(o2):
                 "{rows:20}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
         assert var in body["content"]["text"], var
     assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
-    # 시각 줄은 알림 평가 시각({alert_trigger_time_str})과 (UTC) 표기다(alert_trigger_time_str은 tz_offset을 따르지 않고 UTC 그대로). 결과 행 _timestamp 기반 변수는 최종 SELECT에 _timestamp가 없으면 비어 쓰지 않는다
+    # 시각 줄은 알림 평가 시각({alert_trigger_time_str})이고 KST다(OpenObserve 컨테이너가 호스트 /etc/localtime을 쓴다), 규칙은 다음 줄.
+    # 결과 행 _timestamp 기반 변수는 최종 SELECT에 _timestamp가 없으면 비어 쓰지 않는다
     tpl = o2.store["template"]["infra-automation-webhook"]["body"]
-    assert "⏱ 발생: {alert_trigger_time_str} (UTC) · 규칙 {alert_name}" in body["content"]["text"]
-    assert "alert_start_time" not in tpl and "alert_end_time" not in tpl and "(KST)" not in tpl
+    assert body["content"]["text"].endswith("\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}")
+    assert "alert_start_time" not in tpl and "alert_end_time" not in tpl and "(UTC)" not in tpl
 
 
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
@@ -2146,7 +2147,7 @@ def test_action_filter_keeps_an_empty_action_empty():
 def test_template_uses_the_new_labels_and_not_the_old_ones(o2):
     assert _apply(o2).returncode == 0
     text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
-    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:20}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 발생: "):
+    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:20}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
         assert label in text, label
     assert "무슨 일" not in text and "왜 중요" not in text
 

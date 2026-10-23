@@ -210,7 +210,8 @@
           ■ 조치: ① 변경 시각 전후 작업 요청·변경 기록과 대조 ② 승인된 작업이 아니면 장비 관리자 계정·접속 경로를 점검하고 직전 백업({{ fortigate_backup_previous_name }})과 비교해 되돌리기 ③ 승인된 작업이면 변경 기록에 남기기
 
           ▶ 런북: {{ fortigate_backup_alert_runbook }}
-          ⏱ 발생: {{ now(utc=true, fmt='%Y-%m-%d %H:%M:%S') }} (UTC) · 규칙 fortigate-config-change
+          ⏱ 발견: {{ '%Y-%m-%d %H:%M:%S' | strftime((now(utc=true).timestamp() | int) + 32400, utc=true) }} KST
+          📋 규칙: fortigate-config-change
       ansible.builtin.uri:
         url: "{{ fortigate_backup_alert_webhook_url }}"
         method: POST

@@ -55,10 +55,12 @@ o2c_p1_destination: ""
 # 시각 줄: {alert_trigger_time_str}(알림이 평가된 시각, 형식 %Y-%m-%dT%H:%M:%S)을 쓴다. 옛 {alert_start_time}/{alert_end_time}은 결과 행 _timestamp의
 # 최소/최대라 최종 SELECT에 _timestamp가 없는 알림(대부분)에서 값이 비거나 어긋난다. 근거: OpenObserve 문서 "Templates"의 변수 표(alert_trigger_time =
 # 평가 시각 µs, alert_trigger_time_str = 그 형식화 값)와 소스 src/core/src/alerts/notifications/context.rs의 NotificationContext.
-# 표기는 (UTC)다. 실서버 수신 결과 alert_trigger_time_str은 알림 정의의 tz_offset(540)을 따르지 않고 UTC 그대로였다(실제 UTC 13:31이 13:31로 옴). KST를 보장하는 변수는 확인하지 못해 추측으로 (KST)를 붙이지 않는다.
+# 표기는 KST다. alert_trigger_time_str은 OpenObserve 프로세스의 로컬 시간대로 만들어진다(v1.0.4 alerts/alert.rs, chrono::Local). 알림 정의의 tz_offset은
+# 읽지 않는다. 그래서 ns0331의 OpenObserve 컨테이너에 호스트 /etc/localtime(Asia/Seoul)을 읽기 전용으로 마운트했다(2026-10-23). 이 마운트가 빠지면 UTC로 돌아간다.
+# 이 줄은 평가 시각이다. 사건 시각(로그가 생긴 시각)은 알림 SQL이 계산해야 하며 후속 작업이다.
 # 행 값({detail} 등 로그 원문)은 소스 custom.rs에서 JSON 이스케이프되는 경로(process_variable_replace → format_variable_value)로 치환되는 것으로 보이나 실서버 확인 전이다.
 o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
-o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 발생: {alert_trigger_time_str} (UTC) · 규칙 {alert_name}"}}'
+o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}"}}'
 
 # 임계값
 o2c_ssh_fail_per_source_threshold: 10
