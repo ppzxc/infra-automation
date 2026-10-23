@@ -64,6 +64,10 @@ o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{seve
 o2c_ssh_fail_per_source_threshold: 10
 o2c_ssh_fail_per_host_threshold: 50
 o2c_ssh_fail_window_minutes: 5
+# 공격이 이어지는 동안의 재통지 간격(분). 조회 구간(5분)과 같게 두면 5분마다 울려 소음이 된다(2026-10-23, 한 출발지의 7시간 대입 공격에 하루 176통).
+o2c_ssh_fail_renotify_minutes: 15
+# 호스트별 알림은 출발지가 이 수 이상인 분산 공격만 잡는다. 출발지 하나의 공격은 출발지별 알림이 이미 알린다.
+o2c_ssh_fail_per_host_min_sources: 3
 o2c_parse_error_percent: 10
 o2c_parse_error_min_lines: 20
 o2c_parse_error_window_minutes: 30
@@ -249,25 +253,25 @@ o2c_alerts:
       GROUP BY source_address, host_name HAVING count(*) >= {{ o2c_ssh_fail_per_source_threshold }}
     period: "{{ o2c_ssh_fail_window_minutes }}"
     frequency: 1
-    silence: "{{ o2c_ssh_fail_window_minutes }}"
+    silence: "{{ o2c_ssh_fail_renotify_minutes }}"
   - name: infra-ssh-login-failures-per-host
     severity: "P2 경고"
     severity_icon: "🟠"
     title: "한 서버에 SSH 로그인 실패 급증"
-    what: "한 서버에서 {{ o2c_ssh_fail_window_minutes }}분 동안 SSH 로그인 실패가 {{ o2c_ssh_fail_per_host_threshold }}회 이상 발생했습니다."
+    what: "한 서버에서 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_host_min_sources }}곳 이상의 출발지에서 SSH 로그인 실패가 {{ o2c_ssh_fail_per_host_threshold }}회 이상 발생했습니다."
     why: "여러 출발지에서 분산 공격을 받고 있거나 자동화 작업이 잘못된 자격증명으로 반복 접속하는 상황입니다."
     action: "① 로그 보기로 출발지 분포 확인 ② 분산 공격이면 SSH 포트 노출 범위(방화벽) 축소 ③ 내부 자동화면 해당 작업의 자격증명 갱신"
     runbook: "{{ o2c_runbook_base }}#ssh-login-failures-per-host"
-    row_template: '• {host_name}: 실패 {failures}회'
-    description: "한 호스트에서 sshd 로그인 실패가 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_host_threshold }}회 이상"
+    row_template: '• {host_name}: 실패 {failures}회 (출발지 {sources}곳)'
+    description: "한 호스트에서 sshd 로그인 실패가 {{ o2c_ssh_fail_window_minutes }}분 동안 {{ o2c_ssh_fail_per_host_threshold }}회 이상이고 출발지가 {{ o2c_ssh_fail_per_host_min_sources }}곳 이상 (출발지 하나의 공격은 출발지별 알림이 맡는다)"
     stream: security_logs
     sql: >-
-      SELECT host_name, count(*) AS failures FROM "security_logs"
+      SELECT host_name, count(*) AS failures, count(DISTINCT source_address) AS sources FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
-      GROUP BY host_name HAVING count(*) >= {{ o2c_ssh_fail_per_host_threshold }}
+      GROUP BY host_name HAVING count(*) >= {{ o2c_ssh_fail_per_host_threshold }} AND count(DISTINCT source_address) >= {{ o2c_ssh_fail_per_host_min_sources }}
     period: "{{ o2c_ssh_fail_window_minutes }}"
     frequency: 1
-    silence: "{{ o2c_ssh_fail_window_minutes }}"
+    silence: "{{ o2c_ssh_fail_renotify_minutes }}"
   - name: infra-root-login-success
     severity: "P1 긴급"
     severity_icon: "🔴"
