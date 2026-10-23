@@ -61,7 +61,7 @@ o2c_p1_destination: ""
 # 읽지 않는다. 그래서 ns0331의 OpenObserve 컨테이너에 호스트 /etc/localtime(Asia/Seoul)을 읽기 전용으로 마운트했다(2026-10-23). 이 마운트가 빠지면 UTC로 돌아간다.
 # 이 줄은 평가 시각이다. 사건 시각(로그가 생긴 시각)은 알림 SQL이 계산해야 하며 후속 작업이다.
 # 값 안의 개행은 OpenObserve가 `\n` 두 글자로 이스케이프해 평문에 그대로 보인다(#346 실측). 그래서 줄바꿈은 값이 아니라 이 본문에 두고, 조치는 칸({action_N})으로 나눈다.
-#   남는 칸·없는 원문 링크는 빈 줄이 된다. 단 {rows}의 행 사이 개행은 OpenObserve가 넣어 저장소에서 바꿀 수 없다.
+#   남는 칸·없는 원문 링크는 빈 줄이 된다(조치 3항목 알림은 {action_4} 칸이 런북 앞의 빈 줄 하나가 되므로 본문에는 따로 빈 줄을 두지 않는다). 단 {rows}의 행 사이 개행은 OpenObserve가 넣어 저장소에서 바꿀 수 없다.
 # 행 값({detail} 등 로그 원문)은 소스 custom.rs에서 JSON 이스케이프되는 경로(process_variable_replace → format_variable_value)로 치환되는 것으로 보이나 실서버 확인 전이다.
 o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
 o2c_template_body: |-
@@ -76,7 +76,6 @@ o2c_template_body: |-
   {action_2}
   {action_3}
   {action_4}
-
   ▶ 런북: {runbook}
   ▶ {link_label}: {alert_url}
   {raw_log_line}
