@@ -79,7 +79,7 @@
           - o2c_endpoint is match('^https?://[^/]+(/.*[^/])?$')
           - (o2c_kv.api_user | default('')) | length > 0
           - (o2c_kv.api_password | default('')) | length > 0
-          - (o2c_kv.alert_webhook_url | default('')) is match('^https?://')
+          - (o2c_kv.alert_webhook_plain_url | default('')) is match('^https?://')
           # 정상 출발지는 SQL에 들어가므로 IP 문자와 알려진 종류만 허용한다
           - (o2c_normal_sources | selectattr('address', 'match', '^[0-9A-Fa-f.:]+$') | selectattr('kind', 'in', ['semaphore', 'office']) | list | length) == (o2c_normal_sources | length)
           # Silent Host 계획 정지 예외는 SQL에 들어가므로 호스트 이름 문자와 만료일(YYYY-MM-DD)이 필수다
@@ -113,7 +113,7 @@
           - (o2c_p1_destination | string) is match('^[A-Za-z0-9._-]*$')
           - (o2c_retired_alerts | o2c_retired_conflicts((o2c_alerts_active | map(attribute='name') | list) + [o2c_selftest_alert.name])) | length == 0
         fail_msg: >-
-          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
+          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_plain_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
           (스위치 syslog 알림 변수는 o2c_switch_*_events가 FACILITY-SEVERITY-MNEMONIC 코드 목록, o2c_switch_syslog_roster가 [ns0250, ...], o2c_switch_uplinks가 [{device: ns0250, port: Gi1/0/49}] 형식이어야 합니다)
           (방화벽 알림 변수는 o2c_fortigate_syslog_roster가 [ns0399, 장비 이름, ns0380+ns0381], o2c_fortigate_device_aliases가 {소문자 장비 이름: ns관리번호}, 승인 시간이 0~24 정수(시작 < 끝), o2c_fortigate_ha_ignored_logids가 숫자 문자열 목록 형식이어야 합니다)
           (보안 로그 알림 변수는 o2c_privileged_groups·o2c_sudo_protected_services가 소문자 이름 목록(특권 그룹은 1개 이상), o2c_sudo_risky_commands가 [{label: 따옴표 없는 글자, patterns: [소문자 문구]}], o2c_ssh_bruteforce_*가 양의 정수여야 합니다)
@@ -178,8 +178,8 @@
     o2c_desired_objects: >-
       {{ {'org': o2c_org, 'stream': o2c_stream, 'function_name': o2c_function_name, 'pipeline_name': o2c_pipeline_name,
           'template_name': o2c_template_name, 'template_body': o2c_template_body, 'destination_name': o2c_destination_name,
-          'webhook_url': o2c_kv.alert_webhook_url, 'web_url': o2c_web_url, 'p1_destination': o2c_p1_destination,
-          'webhook_headers': {'Content-Type': 'application/json'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
+          'webhook_url': o2c_kv.alert_webhook_plain_url, 'web_url': o2c_web_url, 'p1_destination': o2c_p1_destination,
+          'webhook_headers': {'Content-Type': 'text/plain; charset=utf-8'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
           'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
           'fortigate': {'function_name': o2c_fortigate_function_name, 'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/fortigate_semantics.vrl'),
                         'aliases': o2c_fortigate_device_aliases},
@@ -420,7 +420,7 @@
 
 # ------------------------------------------------------------------------------
 # 통지 경로 자가 시험 (Spec #184 / Ticket-2) — o2c_verify_notify=true일 때만, check 모드에서는 하지 않는다.
-# 상설 자가 시험 알림(infra-alert-selftest)이 보는 검증 전용 스트림에 레코드 1건을 넣어 네이버웍스 [TEST] 통지를 일으킨다.
+# 상설 자가 시험 알림(infra-alert-selftest)이 보는 검증 전용 스트림에 레코드 1건을 넣어 사내 알림 플랫폼 [TEST] 통지를 일으킨다.
 # ------------------------------------------------------------------------------
 - name: "[O2C-037] Inject one self-test record so the standing self-test alert notifies (only with o2c_verify_notify=true)"
   ansible.builtin.uri:

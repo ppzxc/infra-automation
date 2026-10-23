@@ -26,7 +26,8 @@ ROLE = ROOT_DIR / "roles" / "openobserve_config"
 PLAYBOOK = ROOT_DIR / "playbooks" / "openobserve_config.yml"
 
 WEBHOOK_URL = "https://hooks.example.internal/o2/SECRET-PATH-123"
-KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_webhook_url": WEBHOOK_URL,
+PLAIN_CT = "text/plain; charset=utf-8"
+KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_webhook_plain_url": WEBHOOK_URL,
       "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
@@ -287,21 +288,27 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + len(PROMQL_ALERTS) + 1)
 
 
-def test_template_body_is_a_naver_works_text_message(o2):
-    """통지 본문은 네이버웍스 봇 형식 {"content": {"type": "text", "text": ...}} 이다."""
+def test_template_body_is_the_plain_text_message_without_a_json_wrapper(o2):
+    """통지 본문은 사내 알림 플랫폼(Google Chat)의 text/plain 경로로 가는 알림 텍스트 그대로다(JSON 래퍼 없음, 본문 길이 제한 없음)."""
     assert _apply(o2).returncode == 0
-    body = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])
-    assert body["content"]["type"] == "text"
+    text = o2.store["template"]["infra-automation-plain"]["body"]
+    assert not text.lstrip().startswith("{\"content\"") and '"type": "text"' not in text
     # 행동 가능한 알림: 심각도·제목·무슨 일·왜 중요·조치·런북·대상 행·대시보드 링크·발생 구간
     for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action}", "{runbook}",
-                "{rows:10}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
-        assert var in body["content"]["text"], var
-    assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
+                "{rows:30}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
+        assert var in text, var
+    assert "\n" in text and "\\n" not in text   # 실제 줄바꿈
     # 시각 줄은 알림 평가 시각({alert_trigger_time_str})이고 KST다(OpenObserve 컨테이너가 호스트 /etc/localtime을 쓴다), 규칙은 다음 줄.
     # 결과 행 _timestamp 기반 변수는 최종 SELECT에 _timestamp가 없으면 비어 쓰지 않는다
-    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
-    assert body["content"]["text"].endswith("\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}")
-    assert "alert_start_time" not in tpl and "alert_end_time" not in tpl and "(UTC)" not in tpl
+    assert text.endswith("\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}")
+    assert "alert_start_time" not in text and "alert_end_time" not in text and "(UTC)" not in text
+
+
+def test_the_legacy_json_destination_and_template_are_neither_defined_nor_deleted(o2):
+    """기존 JSON 웹훅(infra-automation-webhook)은 서버에 남기고 알림에서만 뺀다: 정의에도 없고 계획에 삭제도 없다."""
+    assert _apply(o2).returncode == 0
+    assert "infra-automation-webhook" not in o2.store["destination"] and "infra-automation-webhook" not in o2.store["template"]
+    assert not any("infra-automation-webhook" in json.dumps(a) for a in o2.store["alert"].values())
 
 
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
@@ -345,8 +352,8 @@ def test_severity_mapping_follows_impact(o2):
 def test_webhook_auth_header_name_comes_from_openbao(o2):
     kv = dict(KV, alert_webhook_auth_header="X-NANOIT-ACCESS")
     assert _apply(o2, kv=kv).returncode == 0
-    assert o2.store["destination"]["infra-automation-webhook"]["headers"] == {
-        "Content-Type": "application/json", "X-NANOIT-ACCESS": "WEBHOOK-TOKEN-abc"}
+    assert o2.store["destination"]["infra-automation-plain"]["headers"] == {
+        "Content-Type": PLAIN_CT, "X-NANOIT-ACCESS": "WEBHOOK-TOKEN-abc"}
 
 
 def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions(o2):
@@ -357,12 +364,12 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert pl["source"]["stream_name"] == "security_logs" and pl["enabled"] is True
     func_node = next(n["data"] for n in pl["nodes"] if n["data"]["node_type"] == "function")
     assert func_node["name"] == "security_semantics" and func_node["after_flatten"] is True
-    dest = o2.store["destination"]["infra-automation-webhook"]
+    dest = o2.store["destination"]["infra-automation-plain"]
     assert dest["url"] == WEBHOOK_URL and dest["type"] == "http"
-    assert dest["headers"] == {"Content-Type": "application/json", "Authorization": "WEBHOOK-TOKEN-abc"}
-    assert dest["template"] == "infra-automation-webhook"
+    assert dest["headers"] == {"Content-Type": PLAIN_CT, "Authorization": "WEBHOOK-TOKEN-abc"}
+    assert dest["template"] == "infra-automation-plain"
     by = o2.store["alert"]
-    assert all(a["destinations"] == ["infra-automation-webhook"] and a["enabled"] for a in by.values())
+    assert all(a["destinations"] == ["infra-automation-plain"] and a["enabled"] for a in by.values())
     assert SELFTEST in by
     assert by["infra-ssh-login-failures-per-source"]["query_condition"]["sql"].count("HAVING count(*) >= 10") == 1
     assert by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"].count("HAVING count(*) >= 50") == 1
@@ -427,7 +434,7 @@ def test_check_mode_reads_and_plans_but_writes_nothing(o2):
     res = _apply(o2, "--check")
     assert res.returncode == 0, res.stdout + res.stderr
     assert o2.writes == [] and o2.reads
-    for expected in ("create template infra-automation-webhook", "create function security_semantics",
+    for expected in ("create template infra-automation-plain", "create function security_semantics",
                      "create alert infra-root-login-success"):
         assert expected in res.stdout
 
@@ -532,7 +539,7 @@ def test_secrets_never_reach_the_output(o2):
                        "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}   # 설정 API 계정 + 검증 주입 토큰
 
 
-@pytest.mark.parametrize("missing", ["api_user", "api_password", "alert_webhook_url"])
+@pytest.mark.parametrize("missing", ["api_user", "api_password", "alert_webhook_plain_url"])
 def test_missing_inputs_fail_before_any_request(o2, missing):
     res = _apply(o2, kv={k: v for k, v in KV.items() if k != missing})
     assert res.returncode != 0 and o2.reads == [] and o2.writes == []
@@ -541,7 +548,7 @@ def test_missing_inputs_fail_before_any_request(o2, missing):
 def test_webhook_without_token_sends_no_auth_header(o2):
     res = _apply(o2, kv={k: v for k, v in KV.items() if k != "alert_webhook_token"})
     assert res.returncode == 0, res.stdout + res.stderr
-    assert o2.store["destination"]["infra-automation-webhook"]["headers"] == {"Content-Type": "application/json"}
+    assert o2.store["destination"]["infra-automation-plain"]["headers"] == {"Content-Type": PLAIN_CT}
 
 
 def test_every_api_task_is_no_log_and_writes_are_skipped_in_check_mode():
@@ -955,7 +962,7 @@ def _selftest_ingests(o2):
 def test_standing_selftest_alert_is_managed_on_a_verification_only_stream_and_is_idempotent(o2):
     assert _apply(o2).returncode == 0
     alert = o2.store["alert"][SELFTEST]
-    assert alert["stream_name"] == SELFTEST_STREAM and alert["destinations"] == ["infra-automation-webhook"]
+    assert alert["stream_name"] == SELFTEST_STREAM and alert["destinations"] == ["infra-automation-plain"]
     assert alert["enabled"] is True and alert["stream_type"] == "logs"
     # 운영 스트림을 보지 않으므로 운영 데이터로는 발화하지 않는다
     assert alert["stream_name"] not in ("security_logs", "system_logs")
@@ -1462,7 +1469,7 @@ def test_app_telemetry_silent_follows_the_state_alert_rules(o2, tmp_path):
     assert "service_name = 'funa'" in sql and "HAVING count(*) < 1" in sql and "UNION ALL" in sql
     assert a["trigger_condition"]["period"] == 15 and a["trigger_condition"]["frequency"] == 5
     assert a["trigger_condition"]["silence"] == 1440 and a["context_attributes"]["severity"] == "P2 경고"
-    assert "{host_name}" in a["row_template"] and a["destinations"] == ["infra-automation-webhook"]
+    assert "{host_name}" in a["row_template"] and a["destinations"] == ["infra-automation-plain"]
     for banned in ("VALUES", "unnest", "JOIN"):
         assert banned.lower() not in sql.lower()
 
@@ -1583,7 +1590,7 @@ def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_
         assert a["stream_name"] == "system_logs" and a["stream_type"] == "logs", name
         assert a["context_attributes"]["severity"] == sev, name
         assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence), name
-        assert a["destinations"] == ["infra-automation-webhook"] and a["enabled"], name
+        assert a["destinations"] == ["infra-automation-plain"] and a["enabled"], name
         assert "switch-syslog" in a["query_condition"]["sql"], name
 
 
@@ -1866,7 +1873,7 @@ def test_firewall_alerts_are_created_on_security_logs_with_the_specified_grades_
         assert a["stream_name"] == "security_logs" and a["stream_type"] == "logs", name
         assert a["context_attributes"]["severity"] == sev, name
         assert (a["trigger_condition"]["period"], a["trigger_condition"]["silence"]) == (period, silence), name
-        assert a["destinations"] == ["infra-automation-webhook"] and a["enabled"], name
+        assert a["destinations"] == ["infra-automation-plain"] and a["enabled"], name
         assert "fortigate-syslog" in a["query_condition"]["sql"], name
         for key in ("what", "why", "action", "runbook"):
             assert a["context_attributes"][key].strip(), (name, key)
@@ -2160,20 +2167,18 @@ def test_action_filter_keeps_an_empty_action_empty():
 
 def test_template_uses_the_new_labels_and_not_the_old_ones(o2):
     assert _apply(o2).returncode == 0
-    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
-    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:10}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
+    text = o2.store["template"]["infra-automation-plain"]["body"]
+    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:30}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
         assert label in text, label
     assert "무슨 일" not in text and "왜 중요" not in text
 
 
-def test_rendered_body_with_a_multiline_action_is_valid_json(o2):
-    """OpenObserve는 context_attributes를 JSON 이스케이프해서 본문에 넣는다 — 개행이 있어도 본문 JSON이 깨지지 않는다."""
+def test_rendered_body_with_a_multiline_action_keeps_one_numbered_line_per_item(o2):
+    """본문이 JSON이 아니라 평문이라 개행이 있는 조치도 줄 그대로 들어간다."""
     assert _apply(o2).returncode == 0
-    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
+    tpl = o2.store["template"]["infra-automation-plain"]["body"]
     action = _filters().o2c_action_lines("① 하나 ② 둘 ③ 셋")
-    rendered = tpl.replace("{action}", json.dumps(action, ensure_ascii=False)[1:-1])
-    text = json.loads(rendered)["content"]["text"]
-    assert "■ 조치:\n1. 하나\n2. 둘\n3. 셋\n\n▶ 런북" in text
+    assert "■ 조치:\n1. 하나\n2. 둘\n3. 셋\n\n▶ 런북" in tpl.replace("{action}", action)
 
 
 def test_every_alert_action_is_one_numbered_line_per_item_after_rendering(o2):
@@ -2395,7 +2400,7 @@ def test_promql_alerts_are_created_as_promql_metrics_alerts_to_the_current_desti
         assert qc["promql_condition"] == {"column": "value", "operator": op, "value": value}, name
         assert a["trigger_condition"] == {"period": period, "operator": ">=", "threshold": 1, "frequency": freq,
                                           "frequency_type": "minutes", "silence": silence, "align_time": True}, name
-        assert a["destinations"] == ["infra-automation-webhook"] and a["row_template_type"] == "String" and a["enabled"] is True, name
+        assert a["destinations"] == ["infra-automation-plain"] and a["row_template_type"] == "String" and a["enabled"] is True, name
         assert a["context_attributes"]["severity"] == sev and a["context_attributes"]["link_label"] == "상세 보기", name
         assert a["context_attributes"]["action"].startswith("\n1. "), name
 
@@ -2490,11 +2495,11 @@ def test_p1_destination_routes_every_p1_alert_log_or_metric_and_nothing_else(o2)
     assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0
     for name, a in o2.store["alert"].items():
         p1 = a["context_attributes"]["severity"].startswith("P1")
-        assert a["destinations"] == [P1_DEST if p1 else "infra-automation-webhook"], name
+        assert a["destinations"] == [P1_DEST if p1 else "infra-automation-plain"], name
     assert o2.store["alert"]["infra-root-login-success"]["destinations"] == [P1_DEST]
     assert o2.store["alert"]["infra-disk-fill-4h"]["destinations"] == [P1_DEST]
-    assert o2.store["alert"]["infra-cpu-usage-p1"]["destinations"] == ["infra-automation-webhook"]   # #318에서 P2로 내렸다
-    assert o2.store["alert"][SELFTEST]["destinations"] == ["infra-automation-webhook"]
+    assert o2.store["alert"]["infra-cpu-usage-p1"]["destinations"] == ["infra-automation-plain"]   # #318에서 P2로 내렸다
+    assert o2.store["alert"][SELFTEST]["destinations"] == ["infra-automation-plain"]
     o2.writes.clear()
     assert _apply(o2, extra={"o2c_p1_destination": P1_DEST}).returncode == 0 and o2.writes == []
 
@@ -2526,17 +2531,10 @@ def test_missing_destinations_lists_names_known_neither_to_the_repository_nor_th
     assert o2c.o2c_missing_destinations(desired, {"destination": {"list": [{"name": "b"}]}}) == []
 
 
-def test_row_values_with_quotes_and_backslashes_must_be_escaped_to_keep_the_body_json(o2):
-    """OpenObserve가 {rows:10} 값을 이스케이프하는지는 실서버에서만 알 수 있다(배포 후 시험).
-    여기서는 (1) 이스케이프된 값은 본문이 유효 JSON이고 (2) 이스케이프 없는 따옴표는 본문을 깨뜨림을 확인하며, 그래서 PromQL 행 템플릿은 숫자 value와 레이블만 쓴다."""
+def test_promql_row_templates_use_only_numbers_and_safe_labels(o2):
+    """OpenObserve가 변수 값을 이스케이프해서 넣는지(평문 본문에 `\\"`로 보이는지)는 실서버에서만 알 수 있다(#346 시험).
+    그래서 PromQL 행 템플릿은 숫자 value와 따옴표·역슬래시 없는 레이블만 쓴다."""
     assert _apply(o2).returncode == 0
-    tpl = o2.store["template"]["infra-automation-webhook"]["body"]
-    row = '• host"a \\ b: CPU 91%'
-    escaped = json.dumps(row, ensure_ascii=False)[1:-1]
-    text = json.loads(tpl.replace("{rows:10}", escaped))["content"]["text"]
-    assert row in text and "■ 대상 {alert_count}건:" in text
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(tpl.replace("{rows:10}", row))
     for a in PROMQL_DEFS:
         assert not re.search(r'["\\]', a["row_template"]), a["name"]
 
@@ -2701,7 +2699,7 @@ def test_log_alerts_with_a_derivable_where_carry_the_raw_log_link_and_the_others
 
 def test_template_places_the_raw_log_line_right_after_the_alert_url(o2):
     assert _apply(o2).returncode == 0
-    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
+    text = o2.store["template"]["infra-automation-plain"]["body"]
     assert "▶ {link_label}: {alert_url}{raw_log_line}\n" in text
 
 
@@ -3015,7 +3013,7 @@ def test_event_time_does_not_change_which_sources_fire(o2):
     assert "GROUP BY source_address, host_name HAVING count(*) >= 10" in sql
 
 
-def test_per_source_rows_come_out_with_the_most_failures_first_so_the_10_row_cap_keeps_the_worst(o2):
+def test_per_source_rows_come_out_with_the_most_failures_first_so_the_row_cap_keeps_the_worst(o2):
     assert _apply(o2).returncode == 0
     recs = [_fail("2026-10-23 08:59:14", "203.0.113.11")] * 11 + [_fail("2026-10-23 08:59:14", "203.0.113.12")] * 30
     rows = _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")
@@ -3032,14 +3030,14 @@ def test_raw_log_link_survives_the_event_time_column(o2):
 
 
 def _rendered_message(o2, name, row_values):
-    """The notification text with 10 rows filled the way OpenObserve does (every variable replaced)."""
+    """The notification text with 30 rows filled the way OpenObserve does (every variable replaced)."""
     alert = o2.store["alert"][name]
     ctx = alert["context_attributes"]
-    text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
-    rows = "\n".join(re.sub(r"\{(\w+)\}", lambda m: row_values[m.group(1)], alert["row_template"]) for _ in range(10))
-    values = dict(ctx, rows=rows, alert_count="10", alert_url="https://o2.example.test/web/short/0123456789abcdef?org_identifier=default",
+    text = o2.store["template"]["infra-automation-plain"]["body"]
+    rows = "\n".join(re.sub(r"\{(\w+)\}", lambda m: row_values[m.group(1)], alert["row_template"]) for _ in range(30))
+    values = dict(ctx, rows=rows, alert_count="30", alert_url="https://o2.example.test/web/short/0123456789abcdef?org_identifier=default",
                   alert_trigger_time_str="2026-10-23T09:00:56", alert_name=name)
-    text = text.replace("{rows:10}", "{rows}")
+    text = text.replace("{rows:30}", "{rows}")
     return re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), m.group(0)), text)
 
 
@@ -3054,14 +3052,14 @@ LONGEST_TEXT = {"user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" 
 TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
 
 
-def test_every_alert_with_an_event_time_column_fits_the_2000_character_limit_with_10_longest_rows(o2):
+def test_every_alert_with_an_event_time_column_fits_the_5000_character_limit_with_30_longest_rows(o2):
     assert _apply(o2).returncode == 0
     with_time = [n for n, a in o2.store["alert"].items() if a["query_condition"]["type"] == "sql" and "event_time" in a["row_template"]]
     assert "infra-ssh-login-failures-per-source" in with_time
     for name in with_time:
         fields = set(re.findall(r"\{(\w+)\}", o2.store["alert"][name]["row_template"]))
         values = {f: LONGEST_ROW_VALUES.get(f, "999" if f in COUNT_FIELDS else LONGEST_TEXT.get(f, TEXT_VALUE)) for f in fields}
-        assert len(_rendered_message(o2, name, values)) <= 2000, name
+        assert len(_rendered_message(o2, name, values)) <= 5000, name
 
 
 UNCHANGED_ROW_TEMPLATES = {   # PromQL, missing-type, usage and self-test alerts keep their row templates byte for byte (#339)
