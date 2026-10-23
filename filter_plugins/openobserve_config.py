@@ -677,7 +677,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
             # 업링크 목록(장비, 포트)에 케이스의 가짜 장비를 `watch_port`로 더해 "목록에 있으면 발화, 없으면 발화하지 않음"을 검증한다
             watched = list(alert['uplinks'] or []) + [{'device': _host(c, run_id), 'port': c['watch_port']}
                                                       for c in spec['cases'] if c.get('watch_port') and _host(c, run_id) in hosts]
-            sql = o2c_switch_uplink_sql(watched, alert.get('noise_events'))
+            sql = o2c_switch_uplink_sql(watched, alert.get('noise_events'), alert.get('extra_columns', ''))
         period_us = int(alert.get('period', 0)) * 60 * 1000000   # 알림의 조회 구간만큼 거슬러 올라가 검색한다
         searches.append({
             'alert': name, 'stream': _verify_stream(stream, suffix), 'row_key': spec.get('row_key', DEFAULT_ROW_KEY),
@@ -799,11 +799,11 @@ def o2c_switch_noise_filter(events):
     return (' AND event_name NOT IN (%s)' % ', '.join(_q(e) for e in events)) if events else ''
 
 
-def o2c_switch_uplink_sql(entries, noise_events=None):
+def o2c_switch_uplink_sql(entries, noise_events=None, extra_columns=''):
     """SQL of the uplink-down alert: a link/line-protocol message saying ``down`` (or ``administratively down``) for a listed (device, port).
 
     The port is matched in ``body`` (``Interface <name>, changed state to down``) so the query needs no port column. The trailing
-    comma keeps ``Gi1/0/1`` from matching ``Gi1/0/10``. An empty list yields a condition that can never be true.
+    comma keeps ``Gi1/0/1`` from matching ``Gi1/0/10``. ``extra_columns`` (e.g. the event time column) is appended to the SELECT list. An empty list yields a condition that can never be true.
     """
     pairs = []
     for e in entries or []:
@@ -811,9 +811,9 @@ def o2c_switch_uplink_sql(entries, noise_events=None):
         down, admin = ("lower(body) LIKE %s" % _q('%%interface %s, changed state to %s%%' % (name, tail)) for tail in ('down', 'administratively down'))
         pairs.append('(device_id = %s AND (%s OR %s))' % (_q(e['device']), down, admin))
     return ('SELECT coalesce(device_id, device_name) AS device, '
-            "regexp_replace(body, '^.*[Ii]nterface ([^ ,]+),.*$', '\\1') AS port, count(*) AS downs FROM \"system_logs\" "
-            "WHERE service_name = 'switch-syslog' AND event_name IN (%s)%s AND (%s) GROUP BY device, port") % (
-        ', '.join(_q(ev) for ev in UPLINK_EVENTS), o2c_switch_noise_filter(noise_events), ' OR '.join(pairs) if pairs else '1 = 0')
+            "regexp_replace(body, '^.*[Ii]nterface ([^ ,]+),.*$', '\\1') AS port, count(*) AS downs%s FROM \"system_logs\" "
+            "WHERE service_name = 'switch-syslog' AND event_name IN (%s)%s AND (%s) GROUP BY device, port ORDER BY downs DESC") % (
+        (', ' + extra_columns) if extra_columns else '', ', '.join(_q(ev) for ev in UPLINK_EVENTS), o2c_switch_noise_filter(noise_events), ' OR '.join(pairs) if pairs else '1 = 0')
 
 
 # --- 방화벽(포티게이트) 알림 (Spec #282 / Ticket-3) ---------------------------------------------------------------------

@@ -989,14 +989,15 @@ o2c_alerts:
     why: "승인되지 않은 설정 변경이면 네트워크 장애나 침해의 시작일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다."
     action: "① 대상의 변경 주체(사용자·접속 방식·주소)를 작업 일정과 대조 ② 승인된 작업이 아니면 장비 접속 차단과 설정 백업(Cisco Backup) 비교 ③ 승인된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#switch-config-change"
-    row_template: '• {device}: 설정 변경 {changes}건 — {detail}'
+    row_template: '• {device}: 설정 변경 {changes}건 — {detail} · {event_time}'
     description: "스위치 설정 변경 메시지({{ o2c_switch_config_change_events | join(', ') }}) 1건부터 (Event Alert) — 행에 장비와 원문의 변경 주체"
     stream: system_logs
     sql: >-
       SELECT coalesce(device_id, device_name) AS device,
-      regexp_replace(body, '^[^%]*%[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+: ', '') AS detail, count(*) AS changes FROM "system_logs"
+      regexp_replace(body, '^[^%]*%[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+: ', '') AS detail, count(*) AS changes, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_config_change_events | join("', '") }}'){{ o2c_switch_noise_filter }}
       GROUP BY device, detail
+      ORDER BY changes DESC
     period: 5
     frequency: 1
     silence: 5
@@ -1008,13 +1009,14 @@ o2c_alerts:
     why: "스위치 관리 접속에 대한 무차별 대입 시도일 수 있습니다. 스위치는 모든 서버의 통신 경로입니다."
     action: "① 로그 보기에서 실패 줄의 사용자·출발지 확인 ② 외부·미확인 출발지면 해당 접속 경로(ACL·방화벽) 차단 ③ 작업자 오입력이면 계정 확인 후 기록"
     runbook: "{{ o2c_runbook_base }}#switch-login-failures"
-    row_template: '• {device}: 로그인 실패 {failures}회'
+    row_template: '• {device}: 로그인 실패 {failures}회 · {event_time}'
     description: "스위치 로그인 실패({{ o2c_switch_login_fail_events | join(', ') }})가 장비별로 {{ o2c_switch_login_fail_window_minutes }}분 동안 {{ o2c_switch_login_fail_threshold }}회 이상 (Event Alert)"
     stream: system_logs
     sql: >-
-      SELECT coalesce(device_id, device_name) AS device, count(*) AS failures FROM "system_logs"
+      SELECT coalesce(device_id, device_name) AS device, count(*) AS failures, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_login_fail_events | join("', '") }}'){{ o2c_switch_noise_filter }}
       GROUP BY device HAVING count(*) >= {{ o2c_switch_login_fail_threshold }}
+      ORDER BY failures DESC
     period: "{{ o2c_switch_login_fail_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_switch_login_fail_window_minutes }}"
@@ -1026,13 +1028,14 @@ o2c_alerts:
     why: "스위치 하드웨어·전원·스택 같은 중대한 장애를 뜻합니다. 방치하면 그 스위치에 연결된 서버가 함께 끊길 수 있습니다."
     action: "① 행의 메시지 코드와 로그 보기의 원문 확인 ② 장비 콘솔·전원·스택·팬 상태 확인 ③ 하드웨어 문제면 이중화 경로로 서비스 전환 후 교체 일정 수립"
     runbook: "{{ o2c_runbook_base }}#switch-severity-critical"
-    row_template: '• {device}: {event_name} (심각도 {severity_code}) {events}건'
+    row_template: '• {device}: {event_name} (심각도 {severity_code}) {events}건 · {event_time}'
     description: "스위치 syslog 심각도 0~{{ o2c_switch_severity_max }}(Cisco 메시지 코드의 심각도)는 즉시 P1, 잡음 목록은 제외 (Event Alert)"
     stream: system_logs
     sql: >-
-      SELECT coalesce(device_id, device_name) AS device, event_name, min(log_syslog_severity_code) AS severity_code, count(*) AS events FROM "system_logs"
+      SELECT coalesce(device_id, device_name) AS device, event_name, min(log_syslog_severity_code) AS severity_code, count(*) AS events, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND log_syslog_severity_code <= {{ o2c_switch_severity_max }}{{ o2c_switch_noise_filter }}
       GROUP BY device, event_name
+      ORDER BY events DESC
     period: 5
     frequency: 1
     silence: 5
@@ -1045,12 +1048,13 @@ o2c_alerts:
     why: "스위치 사이나 사이트 밖으로 나가는 핵심 연결이 끊긴 것입니다. 이중화가 없으면 그 아래 서버가 모두 고립됩니다."
     action: "① 행의 장비·포트와 반대편 장비 상태 확인 ② 케이블·광모듈·반대편 포트의 shutdown 여부 확인 ③ 복구되지 않으면 우회 경로 확보와 회선 사업자 연락"
     runbook: "{{ o2c_runbook_base }}#switch-uplink-down"
-    row_template: '• {device} {port}: 링크 다운 {downs}건'
+    row_template: '• {device} {port}: 링크 다운 {downs}건 · {event_time}'
     description: "감시 목록의 (장비, 포트)에 대한 link down / line protocol down / administratively down 메시지 (Event Alert) — 목록이 비면 이 규칙은 만들지 않는다"
     stream: system_logs
     uplinks: "{{ o2c_switch_uplinks }}"
     noise_events: "{{ o2c_switch_noise_events }}"
-    sql: "{{ o2c_switch_uplinks | o2c_switch_uplink_sql(o2c_switch_noise_events) }}"
+    extra_columns: "{{ o2c_event_time_sql }}"   # 검증 계획이 감시 목록을 더해 SQL을 다시 만들 때도 같은 컬럼을 쓴다
+    sql: "{{ o2c_switch_uplinks | o2c_switch_uplink_sql(o2c_switch_noise_events, o2c_event_time_sql) }}"
     period: 5
     frequency: 1
     silence: 5
@@ -1062,13 +1066,14 @@ o2c_alerts:
     why: "L2 루프나 같은 MAC을 쓰는 장비의 이동·이중 연결 신호입니다. 방치하면 해당 VLAN 통신이 불안정해지고 브로드캐스트 폭풍으로 번질 수 있습니다."
     action: "① 로그 보기에서 플랩하는 MAC·VLAN·두 포트 확인 ② 두 포트 중 한쪽 끝 장비(서버 이중화 본딩·가상 스위치·루프 케이블)를 점검 ③ 의도한 이중 연결이면 본딩 모드를 확인하고 아니면 포트를 분리"
     runbook: "{{ o2c_runbook_base }}#switch-mac-flap"
-    row_template: '• {device}: MAC 플랩 {flaps}회'
+    row_template: '• {device}: MAC 플랩 {flaps}회 · {event_time}'
     description: "스위치 MAC 플랩({{ o2c_switch_macflap_events | join(', ') }})이 장비별로 {{ o2c_switch_macflap_window_minutes }}분 동안 {{ o2c_switch_macflap_threshold }}회 이상 (재통지 {{ o2c_switch_macflap_silence_minutes }}분)"
     stream: system_logs
     sql: >-
-      SELECT coalesce(device_id, device_name) AS device, count(*) AS flaps FROM "system_logs"
+      SELECT coalesce(device_id, device_name) AS device, count(*) AS flaps, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_macflap_events | join("', '") }}'){{ o2c_switch_noise_filter }}
       GROUP BY device HAVING count(*) >= {{ o2c_switch_macflap_threshold }}
+      ORDER BY flaps DESC
     period: "{{ o2c_switch_macflap_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_switch_macflap_silence_minutes }}"
@@ -1100,14 +1105,15 @@ o2c_alerts:
     why: "방화벽 관리 접속에 대한 무차별 대입 시도일 수 있습니다. 관리자 계정이 뚫리면 모든 통신 정책을 바꿀 수 있습니다(ISMS 2.5 사용자 인증)."
     action: "① 행의 출발지가 사내 작업자·Semaphore인지 확인 ② 외부·미확인 출발지면 관리 접속 허용 주소(trusted host)와 관리 인터페이스 노출 범위를 점검해 차단 ③ 작업자의 오입력이면 계정 확인 후 기록, 같은 출발지의 로그인 성공이 있으면 계정 변경 알림도 확인"
     runbook: "{{ o2c_runbook_base }}#fortigate-admin-login-failures"
-    row_template: '• {device}: 출발지 {source_address} 로그인 실패 {failures}회'
+    row_template: '• {device}: 출발지 {source_address} 로그인 실패 {failures}회 · {event_time}'
     description: "방화벽 관리자 로그인 실패(subtype=system, action=login, status=failed)가 장비·출발지별로 {{ o2c_fortigate_login_fail_window_minutes }}분 동안 {{ o2c_fortigate_login_fail_threshold }}회 이상 (Event Alert, 재통지 {{ o2c_fortigate_login_fail_silence_minutes }}분)"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_fortigate_device_sql }} AS device, source_address, count(*) AS failures FROM "security_logs"
+      SELECT {{ o2c_fortigate_device_sql }} AS device, source_address, count(*) AS failures, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'subtype' | o2c_fortigate_match(['system']) }}
       AND {{ 'action' | o2c_fortigate_match(['login']) }} AND {{ 'status' | o2c_fortigate_match(['failed']) }}
       GROUP BY device, source_address HAVING count(*) >= {{ o2c_fortigate_login_fail_threshold }}
+      ORDER BY failures DESC
     period: "{{ o2c_fortigate_login_fail_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_fortigate_login_fail_silence_minutes }}"
@@ -1119,17 +1125,18 @@ o2c_alerts:
     why: "승인되지 않은 정책·계정 변경은 통신 차단 해제나 백도어 계정 생성일 수 있습니다. 변경 이력은 ISMS 변경 관리 증적입니다(ISMS 2.9.1 변경관리)."
     action: "① 행의 관리자와 변경 대상(cfgpath)을 작업 요청·Semaphore 이력과 대조 ② 승인된 긴급 작업이 아니면 해당 관리자 계정 잠금과 직전 설정 백업(FortiGate Backup) 비교 후 되돌리기, 보안 담당 보고 ③ 승인된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-change-unapproved"
-    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin})'
+    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin}) · {event_time}'
     description: "방화벽 정책({{ o2c_fortigate_policy_cfgpaths | join(', ') }})·계정({{ o2c_fortigate_account_cfgpaths | join(', ') }}) 변경이 승인 시간 밖 (Event Alert) — 시각을 읽지 못한 줄도 포함"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
       CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
-      count(*) AS changes FROM "security_logs"
+      count(*) AS changes, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
       AND NOT ({{ o2c_fortigate_in_hours_sql }})
       GROUP BY device, cfgpath, admin
+      ORDER BY changes DESC
     period: 5
     frequency: 1
     silence: 5
@@ -1141,17 +1148,18 @@ o2c_alerts:
     why: "승인 시간 안의 변경은 대부분 정상 작업이지만 변경 관리 증적으로 매일 대조해야 합니다. 승인된 작업 목록에 없는 변경이면 계정 도용일 수 있습니다."
     action: "① 행의 관리자·변경 대상을 그날의 작업 요청과 대조 ② 대응 작업이 없는 변경은 승인 시간 밖 변경 절차(P1)로 격상 ③ 대조 결과를 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-change-approved"
-    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin})'
+    row_template: '• {device}: {cfgpath} 변경 {changes}건 (관리자 {admin}) · {event_time}'
     description: "방화벽 정책({{ o2c_fortigate_policy_cfgpaths | join(', ') }})·계정({{ o2c_fortigate_account_cfgpaths | join(', ') }}) 변경이 승인 시간 안 — 하루 1번 P3 요약(period·silence 1440)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
       CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
-      count(*) AS changes FROM "security_logs"
+      count(*) AS changes, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
       AND ({{ o2c_fortigate_in_hours_sql }})
       GROUP BY device, cfgpath, admin
+      ORDER BY changes DESC
     period: 1440
     frequency: 1
     silence: 1440
@@ -1163,15 +1171,16 @@ o2c_alerts:
     why: "통신은 이어지더라도 이중화가 깨져 다음 장애에서 서비스가 끊길 수 있고, 전환이 반복되면 세션 끊김이 생깁니다."
     action: "① 행의 장비 이름으로 지금 주 장비가 어느 멤버인지 확인 ② 전환 직전 같은 장비의 인터페이스·전원·하트비트 로그 확인 ③ 한쪽 멤버가 복구되지 않으면 교체·점검 일정을 잡고, 계획된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-ha-failover"
-    row_template: '• {device}: {event} {events}건'
+    row_template: '• {device}: {event} {events}건 · {event_time}'
     description: "방화벽 HA 로그(subtype=ha, 정보성 동기화 로그 등 o2c_fortigate_ha_ignored_logids는 제외) 1건부터 (Event Alert, 재통지 {{ o2c_fortigate_ha_silence_minutes }}분) — 전환 반복 때 알림이 쏟아지지 않도록 재통지 간격을 길게 둔다"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% logdesc="%' THEN regexp_replace(body, '^.* logdesc="([^"]*)".*$', '\1') ELSE 'HA 이벤트' END AS event,
-      count(*) AS events FROM "security_logs"
+      count(*) AS events, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'subtype' | o2c_fortigate_match(['ha']) }}{{ o2c_fortigate_ha_ignored_logids | o2c_fortigate_exclude_logids }}
       GROUP BY device, event
+      ORDER BY events DESC
     period: 5
     frequency: 1
     silence: "{{ o2c_fortigate_ha_silence_minutes }}"
@@ -1183,18 +1192,19 @@ o2c_alerts:
     why: "알려진 취약점 공격이나 악성코드가 방화벽을 지나가려 했습니다. 차단됐더라도 공격 대상 시스템에 이미 닿았는지 확인해야 합니다."
     action: "① 행의 탐지 이름과 로그 보기의 출발지·목적지·조치(차단/통과) 확인 ② 통과(pass·monitor)였거나 내부 호스트가 출발지면 해당 호스트 격리와 점검 ③ 외부 출발지의 반복 공격이면 차단 정책 추가 검토, 결과를 사고 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#fortigate-critical-detection"
-    row_template: '• {device}: {attack} {detections}건'
+    row_template: '• {device}: {attack} {detections}건 · {event_time}'
     description: "방화벽 UTM 탐지(type=utm) 중 severity가 {{ o2c_fortigate_detection_severities | join(', ') }} 인 것 1건부터 (Event Alert, 재통지 {{ o2c_fortigate_detection_silence_minutes }}분)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
       CASE WHEN body LIKE '% attack="%' THEN regexp_replace(body, '^.* attack="([^"]*)".*$', '\1')
       WHEN body LIKE '% virus="%' THEN regexp_replace(body, '^.* virus="([^"]*)".*$', '\1') ELSE '-' END AS attack,
-      count(*) AS detections FROM "security_logs"
+      count(*) AS detections, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'type' | o2c_fortigate_match(['utm']) }}
       AND ({{ 'severity' | o2c_fortigate_match(o2c_fortigate_detection_severities) }}
       OR ({{ 'subtype' | o2c_fortigate_match(['virus']) }} AND {{ 'eventtype' | o2c_fortigate_match(['infected']) }}))
       GROUP BY device, attack
+      ORDER BY detections DESC
     period: 5
     frequency: 1
     silence: "{{ o2c_fortigate_detection_silence_minutes }}"

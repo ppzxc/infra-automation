@@ -3050,7 +3050,7 @@ COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "tot
                 "readings", "events", "detections", "downs", "flaps", "severity_code")
 LONGEST_TEXT = {"user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
-                "status": "timeout", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
+                "status": "timeout", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
 TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
 
 
@@ -3166,3 +3166,65 @@ def test_backup_and_raid_missing_and_usage_alerts_keep_their_rows(o2):
     assert _apply(o2).returncode == 0
     for name in ("infra-backup-missing", "infra-maintenance-missing", "infra-host-status-silent", "infra-disk-usage-p1"):
         assert "event_time" not in o2.store["alert"][name]["row_template"], name
+
+
+# ---- 알림 대상 행의 발생 시각 — Ticket-4 (#344): 스위치·FortiGate 장비 행 ----
+
+def _fixture_records(name, host_value="ns0272"):
+    """The records of the first firing fixture case with the fake host replaced by one device name (repeat expanded)."""
+    case = next(c for c in FIXTURES[name]["cases"] if c["fires"] and not c.get("watch_port"))
+    field = FIXTURES[name].get("host_field", "host_name")
+    out = []
+    for rec in case["records"]:
+        rec = dict(rec)
+        omit = rec.pop("omit_host_field", False)
+        rec.pop("ts", None)
+        if isinstance(rec.get("body"), str):
+            rec["body"] = rec["body"].replace("{host}", host_value)
+        if not omit:
+            rec[field] = host_value
+        out += [dict(rec) for _ in range(rec.pop("repeat", 1))] if "repeat" in rec else [rec]
+    return out
+
+
+DEVICE_TIME_ALERTS = {
+    "infra-switch-config-change": "system_logs", "infra-switch-login-failures": "system_logs",
+    "infra-switch-severity-critical": "system_logs", "infra-switch-mac-flap": "system_logs",
+    "infra-fortigate-admin-login-failures": "security_logs", "infra-fortigate-change-unapproved": "security_logs",
+    "infra-fortigate-change-approved": "security_logs", "infra-fortigate-ha-failover": "security_logs",
+    "infra-fortigate-critical-detection": "security_logs",
+}
+
+
+@pytest.mark.parametrize("name", sorted(DEVICE_TIME_ALERTS))
+def test_device_rows_show_one_time_or_first_to_last_and_keep_the_device_name(o2, name):
+    assert _apply(o2).returncode == 0
+    stream = DEVICE_TIME_ALERTS[name]
+    base = [dict({"device_name": "sw", "device_id": None} if stream == "system_logs" else {}, **r) for r in _fixture_records(name)]
+    base = base * 2 if len(base) == 1 else base
+    half = max(len(base) // 2, 1)
+    one = [dict(r, _timestamp=_kst_us("2026-10-23 08:59:14")) for r in base]
+    rows = _row_lines(o2, name, one, stream)
+    assert len(rows) >= 1 and all(r.endswith(" · 10-23 08:59:14") for r in rows), rows
+    two = [dict(r, _timestamp=_kst_us("2026-10-23 08:55:02" if i < half else "2026-10-23 08:59:14")) for i, r in enumerate(base)]
+    two[-1]["_timestamp"] = _kst_us("2026-10-23 08:59:14")
+    rows = _row_lines(o2, name, two, stream)
+    assert rows and all(r.startswith("• ns0272") for r in rows) and any(r.endswith(" · 10-23 08:55:02~08:59:14") for r in rows), rows
+
+
+def test_uplink_down_row_shows_the_time_and_the_verification_rebuild_keeps_the_column(o2):
+    assert _apply(o2, extra={"o2c_switch_uplinks": UPLINKS}).returncode == 0
+    body = "Oct 20 10:00:00 x ns0250-3750X: Oct 20 10:00:00.001 KST: %LINK-3-UPDOWN: Interface GigabitEthernet1/0/1, changed state to down"
+    rec = dict(service_name="switch-syslog", device_id="ns0250", device_name="sw", event_name="LINK-3-UPDOWN", log_syslog_severity_code=3, body=body)
+    rows = _row_lines(o2, "infra-switch-uplink-down", [dict(rec, _timestamp=_kst_us("2026-10-23 08:55:02")),
+                                                      dict(rec, _timestamp=_kst_us("2026-10-23 08:59:14"))], "system_logs")
+    assert rows == ["• ns0250 GigabitEthernet1/0/1: 링크 다운 2건 · 10-23 08:55:02~08:59:14"]
+    assert any("event_time" in sql and "downs" in sql for stream, sql in o2.searches)   # 검증 검색의 SQL도 같은 컬럼을 가진다
+
+
+def test_device_name_and_source_display_do_not_change(o2):
+    assert _apply(o2, extra={"o2c_switch_uplinks": UPLINKS}).returncode == 0
+    templates = {n: o2.store["alert"][n]["row_template"] for n in o2.store["alert"]}
+    assert templates["infra-fortigate-admin-login-failures"] == "• {device}: 출발지 {source_address} 로그인 실패 {failures}회 · {event_time}"
+    assert templates["infra-switch-config-change"].startswith("• {device}: 설정 변경 {changes}건 — {detail}")
+    assert templates["infra-switch-syslog-silent"] == "• {device_id}" and templates["infra-fortigate-syslog-silent"] == "• {device_id}"
