@@ -48,7 +48,7 @@ o2c_p1_destination: ""
 # 통지 본문: 네이버웍스 봇 text 메시지({"content": {"type": "text", "text": ...}}).
 # 행동 가능한 알림(PagerDuty·Google SRE 원칙): 심각도·제목 → 현상 → 영향 → 대상(행) → 조치(항목마다 한 줄, o2c_action_lines가 ①②③을 줄로 나눈다) → 런북·대시보드 → 발생 구간.
 # {severity}·{title}·{what}·{why}·{action}·{runbook}·{link_label}은 알림별 context_attributes, {rows}는 알림별 row_template이다.
-# {rows:20}은 행을 20개까지만 싣고(OpenObserve 템플릿 변수 `{rows:N}`) {alert_count}는 조건에 걸린 전체 행 수라 잘린 만큼은 건수로 알 수 있다.
+# {rows:10}은 행을 10개까지만 싣고(OpenObserve 템플릿 변수 `{rows:N}`) {alert_count}는 조건에 걸린 전체 행 수라 잘린 만큼은 건수로 알 수 있다.
 # {link_label}은 메트릭(PromQL) 알림과 원문 링크가 있는 로그 알림이 "상세 보기"(= {alert_url}, 알림 화면), 원문 링크가 없는 로그 알림이 "로그 보기"다.
 # {raw_log_line}은 원문 로그 링크를 만들 수 있는 로그 알림에서만 "\n▶ 로그 보기: <원문 URL>" 줄이고 나머지는 빈 문자열이다(o2c_desired가 채운다).
 # 알림 SQL에서 WHERE만 남겨 파생하거나 알림 정의의 선택 필드 raw_sql로 직접 지정한다(o2c_raw_log_sql). {alert_url}은 컨텍스트 값 안에서 치환되지 않아 줄째 따로 둔다.
@@ -60,7 +60,7 @@ o2c_p1_destination: ""
 # 이 줄은 평가 시각이다. 사건 시각(로그가 생긴 시각)은 알림 SQL이 계산해야 하며 후속 작업이다.
 # 행 값({detail} 등 로그 원문)은 소스 custom.rs에서 JSON 이스케이프되는 경로(process_variable_replace → format_variable_value)로 치환되는 것으로 보이나 실서버 확인 전이다.
 o2c_runbook_base: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md"
-o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:20}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}"}}'
+o2c_template_body: '{"content": {"type": "text", "text": "{severity_icon} [{severity}] {title}\n\n■ 현상: {what}\n■ 영향: {why}\n■ 대상 {alert_count}건:\n{rows:10}\n■ 조치:{action}\n\n▶ 런북: {runbook}\n▶ {link_label}: {alert_url}{raw_log_line}\n⏱ 평가: {alert_trigger_time_str} KST\n📋 규칙: {alert_name}"}}'
 
 # 임계값
 o2c_ssh_fail_per_source_threshold: 10
@@ -267,6 +267,7 @@ o2c_alerts:
       SELECT source_address, host_name, count(*) AS failures, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
       GROUP BY source_address, host_name HAVING count(*) >= {{ o2c_ssh_fail_per_source_threshold }}
+      ORDER BY failures DESC
     period: "{{ o2c_ssh_fail_window_minutes }}"
     frequency: 1
     silence: "{{ o2c_ssh_fail_renotify_minutes }}"

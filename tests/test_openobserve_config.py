@@ -294,7 +294,7 @@ def test_template_body_is_a_naver_works_text_message(o2):
     assert body["content"]["type"] == "text"
     # 행동 가능한 알림: 심각도·제목·무슨 일·왜 중요·조치·런북·대상 행·대시보드 링크·발생 구간
     for var in ("{severity_icon}", "{severity}", "{title}", "{what}", "{why}", "{action}", "{runbook}",
-                "{rows:20}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
+                "{rows:10}", "{alert_count}", "{link_label}", "{alert_url}", "{alert_trigger_time_str}", "{alert_name}"):
         assert var in body["content"]["text"], var
     assert "\n" in body["content"]["text"] and "\\n" not in body["content"]["text"]   # 실제 줄바꿈
     # 시각 줄은 알림 평가 시각({alert_trigger_time_str})이고 KST다(OpenObserve 컨테이너가 호스트 /etc/localtime을 쓴다), 규칙은 다음 줄.
@@ -2160,7 +2160,7 @@ def test_action_filter_keeps_an_empty_action_empty():
 def test_template_uses_the_new_labels_and_not_the_old_ones(o2):
     assert _apply(o2).returncode == 0
     text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
-    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:20}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
+    for label in ("■ 현상: {what}", "■ 영향: {why}", "■ 대상 {alert_count}건:\n{rows:10}", "■ 조치:{action}", "▶ 런북: ", "▶ {link_label}: {alert_url}", "⏱ 평가: ", "📋 규칙: {alert_name}"):
         assert label in text, label
     assert "무슨 일" not in text and "왜 중요" not in text
 
@@ -2526,16 +2526,16 @@ def test_missing_destinations_lists_names_known_neither_to_the_repository_nor_th
 
 
 def test_row_values_with_quotes_and_backslashes_must_be_escaped_to_keep_the_body_json(o2):
-    """OpenObserve가 {rows:20} 값을 이스케이프하는지는 실서버에서만 알 수 있다(배포 후 시험).
+    """OpenObserve가 {rows:10} 값을 이스케이프하는지는 실서버에서만 알 수 있다(배포 후 시험).
     여기서는 (1) 이스케이프된 값은 본문이 유효 JSON이고 (2) 이스케이프 없는 따옴표는 본문을 깨뜨림을 확인하며, 그래서 PromQL 행 템플릿은 숫자 value와 레이블만 쓴다."""
     assert _apply(o2).returncode == 0
     tpl = o2.store["template"]["infra-automation-webhook"]["body"]
     row = '• host"a \\ b: CPU 91%'
     escaped = json.dumps(row, ensure_ascii=False)[1:-1]
-    text = json.loads(tpl.replace("{rows:20}", escaped))["content"]["text"]
+    text = json.loads(tpl.replace("{rows:10}", escaped))["content"]["text"]
     assert row in text and "■ 대상 {alert_count}건:" in text
     with pytest.raises(json.JSONDecodeError):
-        json.loads(tpl.replace("{rows:20}", row))
+        json.loads(tpl.replace("{rows:10}", row))
     for a in PROMQL_DEFS:
         assert not re.search(r'["\\]', a["row_template"]), a["name"]
 
@@ -3014,24 +3014,31 @@ def test_event_time_does_not_change_which_sources_fire(o2):
     assert "GROUP BY source_address, host_name HAVING count(*) >= 10" in sql
 
 
+def test_per_source_rows_come_out_with_the_most_failures_first_so_the_10_row_cap_keeps_the_worst(o2):
+    assert _apply(o2).returncode == 0
+    recs = [_fail("2026-10-23 08:59:14", "203.0.113.11")] * 11 + [_fail("2026-10-23 08:59:14", "203.0.113.12")] * 30
+    rows = _row_lines(o2, "infra-ssh-login-failures-per-source", recs, "security_logs")
+    assert [r.split(" ")[1] for r in rows] == ["203.0.113.12", "203.0.113.11"]
+
+
 def test_raw_log_link_survives_the_event_time_column(o2):
     assert _apply(o2).returncode == 0
     alert = o2.store["alert"]["infra-ssh-login-failures-per-source"]
     assert alert["context_attributes"]["raw_log_line"].startswith("\n▶ 로그 보기: http")
-    from filter_plugins.openobserve_config import o2c_raw_log_sql
+    from openobserve_config import o2c_raw_log_sql
     assert o2c_raw_log_sql(alert["query_condition"]["sql"], "security_logs") == (
         "SELECT * FROM \"security_logs\" WHERE event_action = 'ssh_login' AND event_outcome = 'failure' ORDER BY _timestamp DESC LIMIT 200")
 
 
 def _rendered_message(o2, name, row_values):
-    """The notification text with 20 rows filled the way OpenObserve does (every variable replaced)."""
+    """The notification text with 10 rows filled the way OpenObserve does (every variable replaced)."""
     alert = o2.store["alert"][name]
     ctx = alert["context_attributes"]
     text = json.loads(o2.store["template"]["infra-automation-webhook"]["body"])["content"]["text"]
-    rows = "\n".join(re.sub(r"\{(\w+)\}", lambda m: row_values[m.group(1)], alert["row_template"]) for _ in range(20))
-    values = dict(ctx, rows=rows, alert_count="20", alert_url="https://o2.example.test/web/short/0123456789abcdef?org_identifier=default",
+    rows = "\n".join(re.sub(r"\{(\w+)\}", lambda m: row_values[m.group(1)], alert["row_template"]) for _ in range(10))
+    values = dict(ctx, rows=rows, alert_count="10", alert_url="https://o2.example.test/web/short/0123456789abcdef?org_identifier=default",
                   alert_trigger_time_str="2026-10-23T09:00:56", alert_name=name)
-    text = text.replace("{rows:20}", "{rows}")
+    text = text.replace("{rows:10}", "{rows}")
     return re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), m.group(0)), text)
 
 
@@ -3040,7 +3047,7 @@ LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
                       "failures": "9999", "event_time": "10-23 23:58:00~10-24 00:02:30", "sources": "999"}
 
 
-def test_every_alert_with_an_event_time_column_fits_the_2000_character_limit_with_20_longest_rows(o2):
+def test_every_alert_with_an_event_time_column_fits_the_2000_character_limit_with_10_longest_rows(o2):
     assert _apply(o2).returncode == 0
     with_time = [n for n, a in o2.store["alert"].items() if a["query_condition"]["type"] == "sql" and "event_time" in a["row_template"]]
     assert "infra-ssh-login-failures-per-source" in with_time
