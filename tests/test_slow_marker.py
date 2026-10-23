@@ -97,3 +97,8 @@ def test_module_level_alias_of_a_sibling_helper_is_followed(tmp_path):
     ''')
     assert "test_alias" in slow
     assert "test_other_alias" not in slow
+
+
+def test_this_file_stays_in_the_fast_set():
+    from pathlib import Path
+    assert not _slow_functions(str(Path(__file__)))

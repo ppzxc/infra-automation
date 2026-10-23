@@ -24,6 +24,8 @@ def _parse(path):
 
 def _sibling(path, module):
     """같은 디렉터리의 테스트 모듈 파일 경로(없으면 None)."""
+    if module == "conftest":  # 이 파일 자체는 분류 대상이 아니다(RUNNER 상수 때문에 모든 import한 테스트가 slow가 된다)
+        return None
     candidate = os.path.join(os.path.dirname(path), module + ".py")
     return candidate if os.path.exists(candidate) else None
 
