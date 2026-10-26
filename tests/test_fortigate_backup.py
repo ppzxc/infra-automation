@@ -502,6 +502,17 @@ def test_changes_report_names_only_and_ignore_comment_lines():
     assert got == ['config system admin > edit "admin" (변경: password)']
 
 
+def test_volatile_encrypted_keys_changing_between_exports_is_not_a_change():
+    f = _filters()["fortigate_config_changes"]
+    acme = 'config system acme\n    set store-passphrase ENC {}\nend\nconfig system ha\n    set password ENC {}\n    set priority 100\nend\n'
+    a, b = _cfg() + acme.format("AAAA", "BBBB"), _cfg() + acme.format("CCCC", "DDDD")
+    assert f(b, a, False) == []
+    # 같은 섹션의 다른 키 변경과 키의 추가·삭제는 여전히 변경이다
+    assert f(b.replace("priority 100", "priority 50"), a, False) == ["config system ha (변경: priority)"]
+    no_pw = _cfg() + acme.format("AAAA", "BBBB").replace("    set password ENC BBBB\n", "")
+    assert f(no_pw, a, False) == ["config system ha (변경: password)"]
+
+
 def test_previous_that_is_not_a_fortios_config_is_no_baseline():
     f = _filters()["fortigate_config_changes"]
     assert f(_cfg(), "x", False) == []
