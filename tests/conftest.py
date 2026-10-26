@@ -3,6 +3,10 @@
 1. 자동 slow 표시(#349): `ansible-playbook`을 실제로 실행하는 테스트는 손으로 marker를 달지 않아도 `slow`가 된다.
    모듈 소스를 AST로 읽어 "ansible-playbook" 문자열을 쓰는 함수를 찾고, 그 함수를 (헬퍼·fixture 호출로) 직접·간접
    참조하는 테스트를 표시한다. 커밋 hook은 `pytest -m "not slow"`만 돌린다.
+   단, **session 범위 fixture**(`@pytest.fixture(scope="session")`)를 거쳐서만 ansible을 실행하는 테스트는 표시하지 않는다.
+   그 fixture는 세션(xdist 워커)당 한 번만 실행되므로 hook 비용이 작고, 이를 slow로 전파하면 공유 렌더링 결과를 읽기만
+   하는 테스트까지 모두 hook에서 빠져 알림 정의 변경이 커밋 단계에서 검증되지 않는다. 테스트가 직접 실행하거나
+   function 범위 fixture가 실행하는 경로는 테스트마다 비용이 들므로 계속 slow다.
 2. CI 샤딩: TEST_SHARD="<번호>/<전체>"(예: "2/4")이면 그 몫의 테스트만 수집한다.
    nodeid의 crc32로 나누므로 xdist 워커마다 따로 수집해도 같은 결과가 나온다. `xdist_group`이 있으면 그룹 이름으로 나눠
    같은 그룹(같은 렌더링을 공유하는 테스트)이 한 샤드에 모인다. 환경 변수가 없으면 아무것도 하지 않는다.
@@ -21,6 +25,15 @@ RUNNER = "ansible-playbook"
 def _parse(path):
     with open(path, encoding="utf-8") as fh:
         return ast.parse(fh.read(), path)
+
+
+def _is_session_fixture(fn):
+    """`@pytest.fixture(scope="session")` 데코레이터가 붙은 함수인가."""
+    for deco in getattr(fn, "decorator_list", ()):
+        if isinstance(deco, ast.Call) and getattr(deco.func, "attr", getattr(deco.func, "id", None)) == "fixture":
+            if any(k.arg == "scope" and isinstance(k.value, ast.Constant) and k.value.value == "session" for k in deco.keywords):
+                return True
+    return False
 
 
 def _sibling(path, module):
@@ -58,6 +71,7 @@ def _slow_functions(path):
                 units.append((target.id, value, []))
             elif isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple) and len(target.elts) == len(value.elts):
                 units += [(t.id, v, []) for t, v in zip(target.elts, value.elts) if isinstance(t, ast.Name)]
+    session_fixtures = {fn.name for fn in funcs if _is_session_fixture(fn)}  # 세션당 한 번이라 slow 전파의 경계다
     direct, refs = set(), {}
     for unit_name, fn, args in units:
         names = set(args)  # fixture 이름은 인자로 들어온다
@@ -75,12 +89,12 @@ def _slow_functions(path):
         if external:
             direct.add(unit_name)
         refs[unit_name] = names
-    slow = set(direct)
+    slow = direct - session_fixtures
     changed = True
     while changed:
         changed = False
         for name, used in refs.items():
-            if name not in slow and used & slow:
+            if name not in slow and name not in session_fixtures and used & slow:
                 slow.add(name)
                 changed = True
     return frozenset(slow)

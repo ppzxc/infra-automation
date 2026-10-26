@@ -172,6 +172,6 @@ PromQL 알림이 연산자를 직접 지정해 기본값이 쓰이지 않아 효
 
 ## 알려진 한계
 
-- 새 렌더링 테스트도 `ansible-playbook`을 실행하는 helper(`render_desired`)를 쓰므로 `tests/conftest.py`의 자동 표시로 `slow`가 된다.
-  커밋 hook(`-m "not slow"`)에서 빠진다. 옛 통합 테스트도 `slow`였으므로 hook이 잃은 것은 없다.
-- CI 샤딩은 nodeid의 crc32로 나누므로 같은 `xdist_group`이 샤드에 흩어지면 샤드마다 한 번씩 렌더링한다.
+- 새 렌더링 테스트는 session 범위 fixture(`rendered`)로만 `ansible-playbook`을 실행하므로 `tests/conftest.py`가 `slow`로 표시하지 않는다.
+  커밋 hook(`-m "not slow"`)에 들어가며 렌더링은 워커당 한 번이다. 테스트가 `render_desired`·`_apply`를 직접 부르면 `slow`다.
+- CI 샤딩은 같은 `xdist_group`을 한 샤드에 모은다(ADR-0013). 샤드마다 렌더링을 되풀이하지 않는다.

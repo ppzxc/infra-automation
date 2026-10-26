@@ -33,8 +33,8 @@ date: 2026-10-26
 
 | 항목 | 전 | 후 | 출처 |
 |---|---|---|---|
-| 커밋 hook의 pytest | 약 11~12분 | 약 32초(956개 통과, 2개 skip, `-n 4`) | #348 문제 정의, 이 ADR 작성 시 `scripts/run-fast-tests.sh` 재실행(전 #349 측정은 약 34초) |
-| `slow`로 자동 분류된 테스트 | 해당 없음 | 571개(전체 1,530개 중, 이 ADR 작성 시점) | `pytest -m slow --collect-only` |
+| 커밋 hook의 pytest | 약 11~12분 | 약 32초(1,021개 통과, 2개 skip, `-n 4`; 렌더링 테스트 63개를 hook에 넣기 전 957개·약 31초) | #348 문제 정의, 렌더링 테스트를 fast로 옮긴 뒤 `scripts/run-fast-tests.sh` 재실행 |
+| `slow`로 자동 분류된 테스트 | 해당 없음 | 509개(전체 1,533개 중; session fixture 경계 적용 전 572개) | `pytest -m slow --collect-only` |
 | 전체 테스트 | `-n 4`로 약 19분 | 6분할 matrix에서 가장 느린 job 6분 36초(`spec` 39초) | #348, #352(PR #357) |
 | `test_openobserve_config.py` 전체 | 360개, 532초 | 300개, 448초 | #351 |
 | config + render 두 파일 합계 | 약 538초(532 + 6) | 439초(약 18%) | #351 |
@@ -47,7 +47,7 @@ date: 2026-10-26
 
 ## Consequences
 
-- 커밋은 약 30초 안에 끝나므로 우회할 이유가 줄지만, 커밋 단계에서는 `ansible-playbook`을 실행하는 동작(약 571개)이 검증되지 않는다. 그 회귀는 PR에서 잡힌다. **푸시 전에 확인하려면 `pytest tests/ -n 4 --dist loadgroup`을 직접 돌린다.**
+- 커밋은 약 30초 안에 끝나므로 우회할 이유가 줄지만, 커밋 단계에서는 `ansible-playbook`을 테스트마다 실행하는 동작(약 509개)이 검증되지 않는다. 그 회귀는 PR에서 잡힌다. **푸시 전에 확인하려면 `pytest tests/ -n 4 --dist loadgroup`을 직접 돌린다.**
 - 새 테스트가 `ansible-playbook`을 쓰면 자동으로 `slow`가 되어 커밋에서 빠진다. 커밋에서도 돌리고 싶으면 그 동작을 필터 함수 직접 테스트로 쓴다.
 - 알림 SQL·행 템플릿 같은 정의 검사를 추가할 때는 `_apply()` 통합 테스트가 아니라 `tests/test_openobserve_render.py`의 `desired` fixture를 쓴다. 통합 테스트는 실행해야만 알 수 있는 동작에만 쓴다.
 - 공개 저장소이므로 CI는 시크릿을 주입하지 않고 읽기 권한만 쓴다. Python·ansible-core·컬렉션 버전은 `requirements-test.txt`로 로컬과 맞춘다.
@@ -55,7 +55,7 @@ date: 2026-10-26
 
 ## Open items (미해결)
 
-- **렌더링 테스트는 커밋 hook에 들어가지 않는다.** `render_desired`가 `ansible-playbook`을 실행하므로 `tests/test_openobserve_render.py`의 65개 중 63개가 자동으로 `slow`다. 옛 통합 테스트도 `slow`였으므로 잃은 것은 없지만, 알림 정의를 고치고 커밋하는 가장 흔한 변경이 커밋 단계에서는 검증되지 않는다. 렌더링을 fast로 볼지는 자동 분류 규칙(#349)과 함께 따로 정해야 한다.
+- **(해소) 렌더링 테스트가 커밋 hook에 들어가지 않던 문제.** `tests/conftest.py`의 자동 `slow` 전파가 session 범위 fixture(`rendered`)에서 멈추도록 바꿨다. 렌더링은 워커당 한 번이라 hook 비용이 작다(약 31초 → 약 32초). 그래서 `tests/test_openobserve_render.py` 65개가 모두 `-m "not slow"`에 들어간다. 테스트가 `ansible-playbook`을 직접 실행하거나 function 범위 fixture가 실행하면 여전히 `slow`다(`tests/test_conftest_sharding.py`가 지킨다).
 - **(해소) CI 샤딩이 `xdist_group`을 쪼개던 문제.** 샤드를 nodeid의 crc32로만 나눠 같은 `xdist_group`이 여러 샤드에 흩어지고 샤드마다 렌더링했다. 지금은 `tests/conftest.py`가 `xdist_group`이 있으면 그룹 이름으로 샤드를 정해 같은 렌더링을 쓰는 테스트가 한 샤드에 모인다(`tests/test_conftest_sharding.py`가 지킨다).
 - **Molecule `VERIFY-O2C-008`·`VERIFY-O2C-009`는 추가하지 않았다.** `O2C-008`·`O2C-009`는 문서와 코드에는 있지만 `molecule/*/verify.yml` 검증이 없어 `scripts/validate-ansible-specs.py`가 `INTEGRATED`(검증 없음)로 분류한다. 동작은 pytest(`tests/test_openobserve_render.py`)만 검증한다.
 - **`pytest-timeout`이 없는 환경**에서는 `scripts/run-fast-tests.sh`가 시간 제한 없이 실행하고 안내 메시지만 낸다(`pytest-xdist`가 없으면 직렬 실행). `pip install -r requirements-test.txt`로 설치한다.

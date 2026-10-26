@@ -37,7 +37,7 @@ Ansible과 Semaphore UI는 저장소 루트(`cwd`)를 기준으로 동작하므�
 ## 5. 품질 검증 및 린팅 (CI & Pre-Commit)
 1. **Git Pre-Commit Hook 필수 준수 (커밋 전: 빠른 검사)**
    - 커밋 전 시크릿 유출 검사, 3-Way Spec 검증(`scripts/validate-ansible-specs.py`), **빠른 테스트**(`bash scripts/run-fast-tests.sh`, 즉 `pytest tests/ -m "not slow and not heavy_harness" -n 4 --dist loadgroup`, 약 30초)를 통과해야 합니다. hook 우회는 금지입니다.
-   - `ansible-playbook`을 실행하는 테스트는 `tests/conftest.py`가 `slow`로 자동 표시하므로 손으로 marker를 달지 않으며, 커밋 hook에서는 제외됩니다.
+   - `ansible-playbook`을 테스트마다 실행하는 테스트는 `tests/conftest.py`가 `slow`로 자동 표시하므로 손으로 marker를 달지 않으며, 커밋 hook에서는 제외됩니다. session 범위 fixture(공유 렌더링 `rendered`)로만 실행하는 테스트는 세션당 한 번이라 `slow`가 아닙니다.
 2. **푸시·PR에서 전체 검증**
    - 푸시(pre-push)는 Molecule Fast Scenario(`scripts/run-molecule.sh fast`, ADR-0007)를 돌립니다.
    - PR과 `main` push는 GitHub Actions(`.github/workflows/tests.yml`)가 `spec` job과 전체 `pytest tests/`(`slow` 포함, 6분할 matrix)를 돌립니다. 푸시 전에 전체를 확인하려면 `pytest tests/ -n 4 --dist loadgroup`을 직접 실행합니다.

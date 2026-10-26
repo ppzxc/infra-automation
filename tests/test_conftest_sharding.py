@@ -32,3 +32,50 @@ def test_same_xdist_group_stays_in_one_shard(tmp_path):
     (tmp_path / "test_sample.py").write_text(SAMPLE, encoding="utf-8")
     sizes = [len(_collected(tmp_path, shard)) for shard in (1, 2, 3)]
     assert sorted(sizes) == [0, 0, 12], sizes
+
+
+CLASSIFY_SAMPLE = '''
+import pytest
+
+def _run():
+    return ["ansible-playbook", "x.yml"]
+
+@pytest.fixture(scope="session")
+def shared():
+    return _run()
+
+@pytest.fixture
+def per_test():
+    return _run()
+
+def test_reads_session_fixture(shared):
+    assert shared
+
+def test_runs_directly():
+    _run()
+
+def test_uses_function_fixture(per_test):
+    assert per_test
+
+@pytest.fixture
+def per_test_on_shared(shared):
+    return shared
+
+def test_function_fixture_over_session_fixture(per_test_on_shared):
+    assert per_test_on_shared
+'''
+
+
+def _names(tmp_path, marker):
+    out = subprocess.run(
+        [sys.executable, "-I", "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "-p", "no:xdist",
+         "-c", os.devnull, "--rootdir", str(tmp_path), "-m", marker, str(tmp_path)],
+        cwd=tmp_path, capture_output=True, text=True, check=False).stdout
+    return {line.split("::")[1] for line in out.splitlines() if "::" in line}
+
+
+def test_auto_slow_ignores_session_fixture_but_not_direct_or_function_scope_runs(tmp_path):
+    shutil.copy(CONFTEST, tmp_path / "conftest.py")
+    (tmp_path / "test_sample.py").write_text(CLASSIFY_SAMPLE, encoding="utf-8")
+    assert _names(tmp_path, "slow") == {"test_runs_directly", "test_uses_function_fixture"}
+    assert _names(tmp_path, "not slow") == {"test_reads_session_fixture", "test_function_fixture_over_session_fixture"}
