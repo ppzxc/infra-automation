@@ -47,6 +47,7 @@
 - **스냅샷이 실패하면 백업 결과도 실패로 남는다**: `run-before` 실패는 resticprofile이 백업을 건너뛰고 `run-finally`에 `ERROR`를 주므로 `backup.jsonl`이 `success=false`로 남아 기존 `infra-backup-failure`·`infra-backup-missing` 알림에 걸린다(진짜 resticprofile로 시험).
 - systemd 샌드박스(`ProtectSystem=strict`)에서는 원본 디렉터리가 읽기 전용이라 WAL 모드 DB를 읽을 때 `-shm` 접근이 막힐 수 있어, 입력이 있을 때만 각 원본의 디렉터리를 `ReadWritePaths`에 더한다(`-` 접두사).
 - 입력이 있는 호스트에 `sqlite3` 명령이 없으면 Deploy가 백업 파일(자격증명·훅·프로파일)을 쓰기 전에 분명한 오류로 멈춘다(`BAK-028`, CentOS 6/7은 `BAK-218`; 바이너리 전달은 그보다 앞서 끝난다). 도구는 설치하지 않는다. 입력이 없는 호스트는 프로파일·유닛·파일이 바뀌지 않는다.
+- RHEL 계열에는 `/var/backups`가 없어 샌드박스(`ProtectSystem=strict`)가 그 경로를 읽기 전용으로 두므로 스크립트의 `mkdir`이 실패한다. 그래서 Deploy가 입력이 있는 호스트에 스냅샷 디렉터리(와 없는 부모)를 미리 만든다(`BAK-032`, CentOS 6/7 cron 경로는 샌드박스가 없어 스크립트의 `mkdir -p`로 충분하다).
 - 첫 사용처는 ns0331의 OpenObserve 메타 DB다(값은 OpenBao `hosts/ns0331/agents`에만 둔다).
 
 ---
@@ -85,6 +86,7 @@
 | `BAK-027` | `Deploy logrotate configuration for backup.jsonl` | `ansible.builtin.template` | All | Checksum 비교 (`/etc/logrotate.d/host-agents-backup`, 주간·8회·`create 0640`) |
 | `BAK-030` | `Switch restic install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-050`~`053`) |
 | `BAK-031` | `Switch resticprofile install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-050`~`053`) |
+| `BAK-032` | `Ensure the SQLite snapshot directory exists (0700; also creates /var/backups on hosts that lack it)` | `ansible.builtin.file` | All (modern) | 디렉터리 존재·소유·모드 (`/var/backups/host-agents-sqlite`, `0700`, 없는 부모 `/var/backups`는 함께 생성), 입력이 있을 때만 |
 | `BAK-040` | `Deploy backup systemd service` | `ansible.builtin.template` | Rocky 9/10, Ubuntu, Debian | Checksum 비교 (`ProtectSystem=strict`, 쓰기는 restic 캐시와 `backup_hook_write_paths`(기본 `/var/backups`)만) |
 | `BAK-041` | `Deploy backup systemd timer (Persistent=true)` | `ansible.builtin.template` | Rocky 9/10, Ubuntu, Debian | Checksum 비교 (`Persistent=true`) |
 | `BAK-042` | `Apply pending systemd reload before enabling the timer` | `ansible.builtin.meta` | Rocky 9/10, Ubuntu, Debian | `flush_handlers` (유닛 변경 시에만 `daemon-reload`) |

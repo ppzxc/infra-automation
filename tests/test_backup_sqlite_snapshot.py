@@ -340,6 +340,15 @@ def test_deploy_tasks_exist_for_both_paths_and_only_act_when_the_input_is_set():
         assert "backup_sqlite_snapshots" in str(task.get("when", "")), task["name"]
 
 
+def test_the_snapshot_directory_is_created_before_the_sandboxed_service_needs_it():
+    """RHEL has no /var/backups, so ProtectSystem=strict leaves it read-only and the script's mkdir fails on the first run (ns0331)."""
+    task = next(t for t in _flat_tasks("main.yml") if t.get("name", "").startswith("[BAK-032]"))
+    file_args = task["ansible.builtin.file"]
+    assert file_args["path"] == "{{ backup_sqlite_snapshot_dir }}" and file_args["state"] == "directory"
+    assert (file_args["owner"], file_args["group"], file_args["mode"]) == ("root", "root", "0700")
+    assert "backup_sqlite_snapshots" in str(task.get("when", ""))
+
+
 def _flat_tasks(filename):
     def flat(items):
         for t in items:
