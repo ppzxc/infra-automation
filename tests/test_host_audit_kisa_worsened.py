@@ -244,3 +244,58 @@ def test_every_alert_task_that_touches_the_webhook_hides_its_values():
     for task in _kisa_tasks().values():
         if "ansible.builtin.uri" in task or task["name"].startswith("[AUD-640]"):
             assert task.get("no_log") is True, task["name"]
+
+
+# --- 운영 경로: 실제 로더를 거친 기준선, 알림 webhook을 못 읽어도 보관은 막히지 않음 ---------------------------------------
+
+def test_a_baseline_that_went_through_the_real_loader_still_gives_the_same_worsened_items(tmp_path):
+    """AUD-505·508 split the Package ids into files; the KISA section must reach the comparison unchanged."""
+    import importlib.util
+
+    import ansible.module_utils
+    ansible.module_utils.__path__.append(str(ROLE_DIR / "module_utils"))
+    spec = importlib.util.spec_from_file_location("host_audit_baseline_load", ROLE_DIR / "library" / "host_audit_baseline_load.py")
+    loader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loader)
+    stored = _baseline(ns1=[1])
+    stored["sections"]["package_vulnerability"] = {"hosts": ["ns1"], "ids": {"ns1": ["CVE-1|openssl"]}}
+    src = tmp_path / "previous_findings.json"
+    src.write_text(json.dumps(stored))
+    document, _hosts, _ids = loader.load(str(src), str(tmp_path / "previous"))
+    model = _model(ns1=[_row(1), _row(2)])
+    assert _worsened(model, document) == _worsened(model, stored) == [("ns1", CODE % 2)]
+    assert host_audit_kisa_alert(model, RUN, {"state": "ok", "baseline": document})["send"] is True
+
+
+def _resolve_storage_target(tmp_path, statuses):
+    """Run AUD-502 alone on KV lookup results with the given status per path (host_audit, rustfs, openobserve)."""
+    tasks = list(_flat(yaml.safe_load((ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8"))))
+    resolve = next(t for t in tasks if t["name"].startswith("[AUD-502]"))
+    data = {"agents/host_audit": {"storage_access_key": "ak", "storage_secret_key": "sk"},
+            "agents/rustfs": {"rustfs_endpoint": "https://rustfs.example:9000"},
+            "agents/openobserve": {"alert_webhook_plain_url": "https://hooks.example/x", "alert_webhook_token": "tok"}}
+    results = [{"item": path, "status": statuses[path], "json": {"data": {"data": data[path] if statuses[path] == 200 else {}}}}
+               for path in data]
+    vars_ = {"_host_audit_storage_active": True, "host_audit_storage": {}, "host_audit_storage_bucket": "host-audit",
+             "host_audit_alert_webhook": {}, "_host_audit_storage_kv": {"results": results}}
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    out = tmp_path / "out.json"
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "vars": vars_,
+                                   "tasks": [dict(resolve), {"ansible.builtin.copy": {"dest": str(out), "content":
+                                            "{{ {'problem': _host_audit_storage_problem, 'alert': _host_audit_alert_target} | to_json }}"}}]}]))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                         cwd=ROOT_DIR, timeout=300, env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
+    assert res.returncode == 0, res.stdout + res.stderr
+    return json.loads(out.read_text())
+
+
+def test_not_being_allowed_to_read_the_alert_webhook_does_not_stop_the_archive_and_baseline(tmp_path):
+    """A 403 on agents/openobserve must cost only the notification, never the monthly archive and report mail."""
+    ok = _resolve_storage_target(tmp_path / "ok", {"agents/host_audit": 200, "agents/rustfs": 200, "agents/openobserve": 200})
+    assert ok["problem"] == "" and ok["alert"]["url"] == "https://hooks.example/x" and ok["alert"]["token"] == "tok"
+    denied = _resolve_storage_target(tmp_path / "denied", {"agents/host_audit": 200, "agents/rustfs": 200, "agents/openobserve": 403})
+    assert denied["problem"] == "" and denied["alert"]["url"] == ""
+    # a failure on the storage paths is still a storage problem
+    broken = _resolve_storage_target(tmp_path / "broken", {"agents/host_audit": 403, "agents/rustfs": 200, "agents/openobserve": 200})
+    assert "OpenBao 조회 실패" in broken["problem"]
