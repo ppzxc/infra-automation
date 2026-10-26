@@ -21,14 +21,13 @@ from pathlib import Path
 import pytest
 import yaml
 
+from o2c_render import KV, WEBHOOK_URL, fixture_args, render_desired
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROLE = ROOT_DIR / "roles" / "openobserve_config"
 PLAYBOOK = ROOT_DIR / "playbooks" / "openobserve_config.yml"
 
-WEBHOOK_URL = "https://hooks.example.internal/o2/SECRET-PATH-123"
 PLAIN_CT = "text/plain; charset=utf-8"
-KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz", "alert_webhook_plain_url": WEBHOOK_URL,
-      "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 EXPECTED_ALERTS = {
     "infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host", "infra-root-login-success",
     "infra-root-login-known", "infra-sudo-escalation-failure", "infra-oom-kill", "infra-disk-fs-errors",
@@ -262,13 +261,9 @@ def o2():
 
 def _apply(o2, *args, kv=None, extra=None, inventory="localhost,"):
     # 앱 텔레메트리 스위치는 OpenBao에서 읽고 토큰이 없으면 실패하므로, 기본은 "아무 호스트도 안 켬" 픽스처다(None이면 픽스처 없음).
-    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, "o2c_app_telemetry_kv_fixture": {}, "o2c_host_kv_fixture": {}, **(extra or {})}
-    for key in ("o2c_app_telemetry_kv_fixture", "o2c_host_kv_fixture"):
-        if extra[key] is None:
-            del extra[key]
+    extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, **(extra or {})}
     env = dict(os.environ, ANSIBLE_NOCOLOR="1")
-    cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), "-e", f"o2_endpoint={o2.url}",
-           "-e", json.dumps({"o2c_kv_fixture": kv or KV, **extra}), *args]
+    cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), *fixture_args(o2.url, kv=kv, extra=extra), *args]
     res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     return res
 
@@ -289,11 +284,13 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + len(PROMQL_ALERTS) + 1)
 
 
-def test_apply_sends_exactly_what_the_render_play_shows(o2, tmp_path):
+@pytest.mark.parametrize("extra", [{}, {"o2c_tz_offset": 480}], ids=["defaults", "tz_offset_overridden"])
+def test_apply_sends_exactly_what_the_render_play_shows(o2, tmp_path, extra):
     """다리(#351): 알림 정의 테스트는 렌더링 play의 결과(O2C-003)를 읽는다. 실제 반영(O2C-020)이 서버에 보낸 것과 같아야 그 테스트가 운영 동작을 대변한다."""
-    from o2c_render import render_desired
-    rendered = render_desired(tmp_path / "desired.json", kv=KV, endpoint=o2.url)   # 원문 링크에 endpoint가 들어가므로 같은 주소로 렌더링한다
-    assert _apply(o2).returncode == 0
+    rendered = render_desired(tmp_path / "desired.json", endpoint=o2.url, extra=extra)   # 원문 링크에 endpoint가 들어가므로 같은 주소로 렌더링한다
+    assert _apply(o2, extra=extra).returncode == 0
+    if extra:   # 기본이 아닌 입력이 정말 렌더링에 반영됐는지(아니면 이 변형은 기본과 같은 비교가 된다)
+        assert {o["body"]["tz_offset"] for o in rendered if o["kind"] == "alert"} == {480}
     drop = {"alert": "alert_id", "pipeline": "pipeline_id"}   # 서버가 붙이는 값
     for kind in ("alert", "template", "function", "pipeline"):
         want = {o["name"]: o["body"] for o in rendered if o["kind"] == kind}

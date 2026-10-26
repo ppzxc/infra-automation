@@ -30,12 +30,13 @@ pytestmark = pytest.mark.xdist_group("o2c-render")
 
 @pytest.fixture(scope="session")
 def rendered(tmp_path_factory):
-    """실제 렌더링 경로(role 태스크)로 만든 원하는 객체 목록."""
+    """실제 렌더링 경로(role 태스크)로 만든 원하는 객체 목록 `[{kind, name, body, ...}]`(원본). 아래 `rendered_alerts`(알림 body만 이름으로)와 `desired`(`FakeO2.store` 모양)는 이것에서 파생한다."""
     return render_desired(tmp_path_factory.mktemp("o2c-render") / "desired.json")
 
 
 @pytest.fixture(scope="session")
 def rendered_alerts(rendered):
+    """`rendered` 중 알림의 `{이름: body}`."""
     return {o["name"]: o["body"] for o in rendered if o["kind"] == "alert"}
 
 
@@ -55,6 +56,7 @@ class RenderedServer:
 
 @pytest.fixture(scope="session")
 def desired(rendered):
+    """`rendered`를 `FakeO2.store`처럼 읽게 하는 `RenderedServer`(옮긴 테스트가 `o2.store` 대신 읽는다)."""
     return RenderedServer(rendered)
 
 
