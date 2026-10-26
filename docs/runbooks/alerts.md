@@ -513,6 +513,38 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 2. 호스트의 `/etc/cron.d/host-agents-raid-status`와 `/var/log/host-agents/raid.jsonl` 마지막 줄을 본다.
 3. 신규 편입 호스트면 Host Agents Deploy가 실행됐는지 확인한다. 배포 순서상 Deploy 전에 Config가 먼저 반영되면 모든 호스트에서 이 알림이 난다.
 
+<a id="time-offset-exceeded"></a>
+## 🟠 서버 시계 오차 1초 초과 (`infra-time-offset-exceeded`)
+
+시각 동기 수집기(`kind=time_sync`, 5분 주기)가 잰 시스템 시각과 기준 시각의 차이(`offset_ms`, 밀리초, 느리면 음수)의 절댓값이 1000을 넘는 판독이 15분에 2회 이상이다. chronyc·ntpq가 오차를 주고, timedatectl만 있는 호스트는 오차를 모르므로(null) 이 알림 대상이 아니다.
+
+**왜 중요한가**: 로그 시각과 인증서·토큰 검증이 어긋나고, 서버 간 로그를 시간순으로 맞추는 조사가 틀어진다.
+
+**확인·대응**
+1. 행의 도구(`tool`)에 맞춰 서버에서 `chronyc tracking`(`System time`) 또는 `ntpq -pn`(`*` 줄의 offset, 밀리초)을 본다. `chronyc sources`로 시간원이 살아 있는지 본다.
+2. 시간원에 닿지 않으면 방화벽·DNS·라우팅을 확인한다.
+3. 급히 맞춰야 하면 운영 승인 뒤에 `chronyc makestep`을 쓴다. 시계가 뒤로 가면 애플리케이션·인증서 검증에 영향이 있을 수 있으니 영향을 확인한다. 수집기는 시각을 맞추지 않는다.
+
+<a id="time-unsynced"></a>
+## 🟠 서버 시계 동기 안 됨: 30분 넘게 이어짐 (`infra-time-unsynced`)
+
+최근 35분 안의 시각 동기 판독이 6회 이상이고 **모두** `sync_status=unsynced`다(중간에 동기된 판독이 하나라도 있으면 울리지 않는다). 도구가 있는데 데몬이 답하지 않는 경우도 `unsynced`이며, `message`에 이유가 나온다(`chronyd reports: Not synchronised`, `ntpq not answering`).
+
+**CentOS 6 호스트**: 2026-10-26 조사에서 CentOS 6 호스트는 모두 `ntpd`를 끄고 cron의 `rdate`로 하루 한 번(02:00) 시각을 맞추고 있었다. 이 호스트들은 항상 `ntpq not answering`으로 이 알림 대상이 된다. 선택지는 둘이다: (a) `ntpd`를 켜 상시 동기로 바꾼다(호스트 변경이라 별도 승인·작업이 필요하다), (b) 하루 한 번 맞추는 방식을 받아들이고 알림을 운영 결정으로 닫는다. 어느 쪽이든 결정과 날짜를 비공개 노트에 남긴다.
+
+**확인·대응**
+1. `message`를 본다. chrony는 시간원 접속(`chronyc sources`, 방화벽), ntpq는 `service ntpd status`를 확인한다.
+2. 동기를 되살린 뒤 다음 판독(5분 안)에 `synced`가 한 번이라도 나오면 알림 조건이 풀린다.
+
+<a id="time-sync-unavailable"></a>
+## 🟠 서버 시각 동기 상태를 알 수 없음 (`infra-time-sync-unavailable`)
+
+시각 동기 수집기가 `sync_status=no_tool`(chronyc·ntpq·timedatectl이 하나도 없음) 또는 `error`(도구 호출이 20초 안에 끝나지 않음)를 15분에 2회 이상 남겼다. 도구가 없으면 이 서버의 시계는 감시되지 않는다.
+
+**확인·대응**
+1. `no_tool`이면 그 호스트가 시각을 어떻게 맞추는지 확인한다. Host Agents는 시각 동기 도구를 설치하지 않는다(에이전트만 깔린 호스트는 호스트 변경 대상이 아니다).
+2. `error`면 서버 부하와 `chronyd`/`ntpd` 상태를 본다.
+
 ---
 
 ## 스위치 syslog 알림 (Spec #277)

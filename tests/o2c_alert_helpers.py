@@ -35,6 +35,7 @@ EXPECTED_ALERTS = {
     "infra-raid-write-cache-disabled", "infra-raid-controller-fault", "infra-raid-logical-drive-degraded",
     "infra-raid-physical-drive-fault", "infra-raid-cache-battery-fault", "infra-raid-collection-error",
     "infra-host-status-silent",   # RAID 상태(#335)
+    "infra-time-offset-exceeded", "infra-time-unsynced", "infra-time-sync-unavailable",   # 시각 동기(#336)
 }
 
 PROMQL_ALERTS = {
@@ -190,6 +191,12 @@ RAID_ALERTS = {   # alert -> a fragment only its search carries
     "infra-host-status-silent": "UNION ALL",
 }
 
+TIME_ALERTS = {   # alert -> (period, frequency, a fragment only its search carries)
+    "infra-time-offset-exceeded": (15, 5, "abs(offset_ms) > 1000"),
+    "infra-time-unsynced": (35, 5, "sync_status = 'unsynced'"),
+    "infra-time-sync-unavailable": (15, 5, "sync_status IN ('no_tool', 'error')"),
+}
+
 def _kst_us(text):
     """'2026-10-23 08:55:02' (KST) -> µs since the epoch."""
     return int(datetime.fromisoformat(text).replace(tzinfo=timezone(timedelta(hours=9))).timestamp()) * 1_000_000
@@ -219,11 +226,11 @@ LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
                       "failures": "9999", "event_time": "10-23 23:58:00~10-24 00:02:30", "sources": "999"}
 
 COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
-                "readings", "events", "detections", "downs", "flaps", "severity_code")
+                "readings", "events", "detections", "downs", "flaps", "severity_code", "offset_ms")
 
 LONGEST_TEXT = {"user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
-                "status": "timeout", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
+                "status": "timeout", "tool": "timedatectl", "sync_status": "unsynced", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
 
 TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
 
@@ -251,6 +258,12 @@ SYSTEM_TIME_CASES = {   # alert -> (stream, record fields, expected row without 
     "infra-backup-failure": ("backup_logs", [dict(job="backup", success=False, host="ns0272")], "• ns0272: 실패 {n}건"),
     "infra-raid-collection-error": ("host_status_logs", [dict(kind="tool_status", status="error", message="m")] * 3,
                                     "• ns0272: error {n}회 (m)"),
+    "infra-time-offset-exceeded": ("host_status_logs", [dict(kind="time_sync", tool="chronyc", sync_status="synced", offset_ms=-2350.0)] * 2,
+                                   "• ns0272: 시계 오차 최대 2350ms (chronyc, {n}회 판독)"),
+    "infra-time-unsynced": ("host_status_logs", [dict(kind="time_sync", tool="ntpq", sync_status="unsynced", message="ntpq not answering")] * 6,
+                            "• ns0272: 동기 안 됨 {n}회 연속 (ntpq not answering)"),
+    "infra-time-sync-unavailable": ("host_status_logs", [dict(kind="time_sync", tool="none", sync_status="no_tool", message="")] * 2,
+                                    "• ns0272: no_tool {n}회 (none)"),
     "infra-unreachable-host": ("tcpcheck_status", [dict(tcpcheck_endpoint="198.51.100.5:22", value=0)],
                                "• 198.51.100.5:22 (검사: ns0272)"),
 }

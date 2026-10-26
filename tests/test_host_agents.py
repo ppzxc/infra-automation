@@ -961,14 +961,17 @@ def test_config_backup_logs_pipeline_parses_json_and_keeps_the_raw_body(tmp_path
 def test_config_host_status_logs_pipeline_parses_json_and_names_the_service_per_file(tmp_path):
     cfg, _ = _render_config(tmp_path)
     rcv = cfg["receivers"]["filelog/host_status_logs"]
-    assert rcv["include"] == ["/var/log/host-agents/raid.jsonl"]
+    assert rcv["include"] == ["/var/log/host-agents/raid.jsonl", "/var/log/host-agents/time-sync.jsonl"]
     assert rcv["storage"] == "file_storage" and rcv["start_at"] == "end"
     assert rcv["attributes"]["log_type"] == "host_status_logs"
-    op, service = rcv["operators"]
+    op, *services = rcv["operators"]
     assert op["type"] == "json_parser" and op["parse_from"] == "body" and op["parse_to"] == "attributes"
     assert "preserve_to" not in op and op["timestamp"]["parse_from"] == "attributes.ts"
-    assert service == {"type": "add", "field": 'resource["service.name"]', "value": "raid",
-                       "if": 'attributes["log.file.path"] == "/var/log/host-agents/raid.jsonl"'}
+    assert services == [
+        {"type": "add", "field": 'resource["service.name"]', "value": "raid",
+         "if": 'attributes["log.file.path"] == "/var/log/host-agents/raid.jsonl"'},
+        {"type": "add", "field": 'resource["service.name"]', "value": "timesync",
+         "if": 'attributes["log.file.path"] == "/var/log/host-agents/time-sync.jsonl"'}]
     assert "filelog/host_status_logs" in cfg["service"]["pipelines"]["logs/in"]["receivers"]
     assert cfg["exporters"]["otlphttp/host_status_logs"]["headers"]["stream-name"] == "host_status_logs"
 

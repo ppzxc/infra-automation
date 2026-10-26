@@ -18,7 +18,7 @@ import yaml
 from o2c_render import KV, RENDER_LOG_ENV, ROOT_DIR, render_desired
 from o2c_alert_helpers import (
     COUNT_FIELDS, DEVICE_TIME_ALERTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS, FORTIGATE_FN, LONGEST_ROW_VALUES,
-    LONGEST_TEXT, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS, PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE,
+    LONGEST_TEXT, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS, PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
     RUNBOOK, SECURITY_ALERTS, SECURITY_TIME_CASES, SELFTEST, SWITCH_ALERTS, SWITCH_FN, SYSTEM_TIME_CASES,
     TEXT_VALUE, _branch_devices, _decode_raw_url, _ev, _fail, _filters, _fixture_records, _kst_us, _raw_line,
     _raw_original, _rendered_message, _row_lines, _run_alert_on_sqlite, _run_memory_alert_on_sqlite, _sql,
@@ -301,6 +301,53 @@ def test_raid_alerts_are_p2_with_a_two_reading_window_and_a_runbook_entry(desire
         trigger = desired.store["alert"][name]["trigger_condition"]
         assert (trigger["period"], trigger["frequency"]) == (15, 5), name
         assert "HAVING count(*) >= 2" in desired.store["alert"][name]["query_condition"]["sql"], name
+
+
+def test_time_sync_alerts_are_p2_on_host_status_logs_with_their_windows_and_a_runbook_entry(desired):
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    for name, (period, frequency, marker) in TIME_ALERTS.items():
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == "P2 경고", name
+        assert alert["stream_name"] == "host_status_logs", name
+        trigger = alert["trigger_condition"]
+        assert (trigger["period"], trigger["frequency"]) == (period, frequency), name
+        assert marker in alert["query_condition"]["sql"], name
+        assert "kind = 'time_sync'" in alert["query_condition"]["sql"], name
+        assert f"(`{name}`)" in runbook and f"`{name}`" in spec, name
+
+
+def _host_status_records(case):
+    """The records of one fixture case: every `ts` (seconds before now, one or a list) becomes one record of that case's host."""
+    base = 1_792_767_302_000_000
+    out = []
+    for rec in case["records"]:
+        rec = dict(rec)
+        stamps = rec.pop("ts", 0)
+        for stamp in (stamps if isinstance(stamps, list) else [stamps]):
+            out.append(dict(rec, host_name=case["host"], _timestamp=base + int(stamp) * 1_000_000))
+    return out
+
+
+def test_raid_and_time_sync_alerts_never_fire_on_each_others_records_when_they_run_on_every_case(desired):
+    """RAID and time sync share the host_status_logs stream: one family's records must never fire the other family's alerts."""
+    raid = [n for n in sorted(RAID_ALERTS) if n != "infra-host-status-silent"]   # the roster alert needs the inventory
+    time_sync = sorted(TIME_ALERTS)
+    cases = {n: FIXTURES[n]["cases"] for n in raid + time_sync}
+    records = [r for n in cases for case in cases[n] for r in _host_status_records(case)]
+    time_hosts = {c["host"] for n in time_sync for c in cases[n]}
+    for name in time_sync:      # a time alert fires on exactly its own firing cases, whatever RAID records sit in the stream
+        fired = {row["host_name"] for row in _run_alert_on_sqlite(_sql(desired, name), records, "host_status_logs")}
+        assert fired == {c["host"] for c in cases[name] if c["fires"]}, name
+    for name in raid:           # a RAID alert never fires on a time sync record
+        fired = {row["host_name"] for row in _run_alert_on_sqlite(_sql(desired, name), records, "host_status_logs")}
+        assert not fired & time_hosts, name
+
+
+def test_a_time_sync_record_does_not_count_for_the_raid_collector_silence_check(desired):
+    """infra-host-status-silent waits for the RAID collector's tool_status line; a time_sync line must not satisfy it."""
+    sql = _sql(desired, "infra-host-status-silent")
+    assert "kind = 'tool_status'" in sql and "time_sync" not in sql
 
 
 def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_windows(desired):

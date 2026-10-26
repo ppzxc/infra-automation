@@ -24,7 +24,7 @@ from o2c_render import KV, WEBHOOK_URL, fixture_args, render_desired
 from o2c_alert_helpers import (  # 렌더 테스트와 공유하는 상수·헬퍼(#348)
     DEFAULTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS,
     FORTIGATE_FN, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS,
-    PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE,
+    PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
     RUNBOOK, SECURITY_ALERTS, SECURITY_TIME_CASES, SELFTEST,
     SWITCH_ALERTS, SWITCH_FN, SYSTEM_TIME_CASES, _branch_devices,
     _date_format, _decode_raw_url, _fail, _kst_us,
@@ -2415,7 +2415,7 @@ def test_raid_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_o
     assert res.returncode == 0, res.stdout + res.stderr
     records = [r for p, _, rs in o2.ingests if "/host_status_logs_alert_verify/" in p for r in rs]
     searches = [sql for stream, sql in o2.searches if stream == "host_status_logs_alert_verify"]
-    assert len(searches) == len(RAID_ALERTS)
+    assert len(searches) == len(RAID_ALERTS) + len(TIME_ALERTS)       # 같은 스트림을 읽는 시각 동기 알림(#336)이 함께 검색된다
     for name, marker in RAID_ALERTS.items():
         found = [s for s in searches if marker.replace("\n", " ") in s.replace("\n", " ")]
         assert len(found) == 1, (name, found)
@@ -2431,6 +2431,13 @@ def test_raid_alert_sql_reads_only_fields_every_record_of_its_kind_carries():
     script = (ROOT_DIR / "roles" / "monitoring" / "files" / "host-agents-raid-status.sh").read_text(encoding="utf-8")
     for field in ("kind", "hw_state", "hw_name", "raw_state", "cache_status", "cache_reason", "backup_power_operation",
                   "status", "message"):
+        assert f'\\"{field}\\":' in script or f'"{field}":' in script, field
+
+
+def test_time_sync_alert_sql_reads_only_fields_every_record_carries():
+    """The time sync alerts read only fields the collector always emits (a column that never arrived makes OpenObserve reject the SQL)."""
+    script = (ROOT_DIR / "roles" / "monitoring" / "files" / "host-agents-time-sync.sh").read_text(encoding="utf-8")
+    for field in ("kind", "sync_status", "offset_ms", "tool", "message"):
         assert f'\\"{field}\\":' in script or f'"{field}":' in script, field
 
 

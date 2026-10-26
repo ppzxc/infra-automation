@@ -989,6 +989,70 @@ o2c_alerts:
     period: 30
     frequency: 10
     silence: 1440
+  # --- 시각 동기 알림 (Spec #322 / Ticket-14, #336) ---------------------------------------------------------------------
+  # 같은 host_status_logs 스트림에서 kind=time_sync 레코드만 읽는다(RAID 알림은 다른 kind만 읽는다). 모두 P2다.
+  # offset_ms는 시스템 시각 − 기준 시각(밀리초, 부호 있음)이라 절댓값으로 비교하고, 모르면(timedatectl) null이라 오차 알림 대상이 아니다.
+  - name: infra-time-offset-exceeded
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "서버 시계 오차 1초 초과"
+    what: "서버 시계가 기준 시각과 1초 넘게 차이 납니다(15분에 2회 연속 판독)."
+    why: "로그 시각과 인증서·토큰 검증이 어긋나고, 여러 서버의 로그를 시간순으로 맞춰 보는 장애·보안 조사가 틀어집니다."
+    action: "① 행의 도구(tool)에 맞춰 서버에서 chronyc tracking 또는 ntpq -pn으로 동기 상태와 시간원 확인 ② 시간원에 닿지 않으면 방화벽·DNS 확인 ③ 급히 맞춰야 하면 운영 승인 뒤 chronyc makestep (애플리케이션 영향 확인)"
+    runbook: "{{ o2c_runbook_base }}#time-offset-exceeded"
+    row_template: '• {host_label}: 시계 오차 최대 {offset_ms}ms ({tool}, {readings}회 판독) · {event_time}'
+    description: "kind=time_sync 레코드의 abs(offset_ms)가 1000 초과인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
+    stream: host_status_logs
+    sql: >-
+      SELECT host_name, max(tool) AS tool, CAST(max(abs(offset_ms)) AS BIGINT) AS offset_ms, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }}
+      FROM "host_status_logs"
+      WHERE kind = 'time_sync' AND abs(offset_ms) > 1000
+      GROUP BY host_name HAVING count(*) >= 2
+      ORDER BY offset_ms DESC
+    period: 15
+    frequency: 5
+    silence: 1440
+  - name: infra-time-unsynced
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "서버 시계 동기 안 됨: 30분 넘게 이어짐"
+    what: "서버 시계가 시간원과 동기되지 않은 상태가 30분 넘게 이어졌습니다(구간 안의 모든 판독이 unsynced)."
+    why: "동기가 끊긴 시계는 시간이 지날수록 어긋납니다. 오차 알림이 울리기 전에 원인을 먼저 알 수 있습니다."
+    action: "① 행의 message 확인: chronyd 미동기는 시간원 접속, ntpq not answering은 ntpd가 꺼진 것 ② 서버에서 chronyc sources 또는 service ntpd status 확인 ③ CentOS 6처럼 ntpd를 일부러 끄고 cron(rdate)으로 맞추는 호스트면 상시 동기를 켤지 이 알림을 받아들일지 운영에서 결정"
+    runbook: "{{ o2c_runbook_base }}#time-unsynced"
+    row_template: '• {host_label}: 동기 안 됨 {readings}회 연속 ({message}) · {event_time}'
+    description: "kind=time_sync 판독이 35분 안에 6회 이상이고 모두 sync_status=unsynced (State Alert, 재통지 1440분). 중간에 동기된 판독이 하나라도 있으면 울리지 않는다"
+    stream: host_status_logs
+    sql: >-
+      SELECT host_name, max(message) AS message, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }}
+      FROM "host_status_logs"
+      WHERE kind = 'time_sync'
+      GROUP BY host_name
+      HAVING count(*) >= 6 AND sum(CASE WHEN sync_status = 'unsynced' THEN 1 ELSE 0 END) = count(*)
+      ORDER BY readings DESC
+    period: 35
+    frequency: 5
+    silence: 1440
+  - name: infra-time-sync-unavailable
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "서버 시각 동기 상태를 알 수 없음"
+    what: "서버에 시각 동기 도구(chronyc·ntpq·timedatectl)가 없거나, 호출이 제한 시간 안에 끝나지 않는 일이 15분에 2회 연속 있었습니다."
+    why: "도구가 없으면 이 서버의 시계는 감시되지 않습니다. 시계가 어긋나도 오차·미동기 알림이 울리지 않습니다."
+    action: "① 행의 status 확인: no_tool은 도구 없음, error는 호출 시간 초과 ② no_tool이면 이 호스트의 시각 동기 방식을 확인(Host Agents는 도구를 설치하지 않는다) ③ error면 서버 부하와 데몬 상태 확인"
+    runbook: "{{ o2c_runbook_base }}#time-sync-unavailable"
+    row_template: '• {host_label}: {sync_status} {readings}회 ({tool}) · {event_time}'
+    description: "kind=time_sync 레코드의 sync_status가 no_tool·error인 판독이 15분에 2회 이상 (State Alert, 재통지 1440분)"
+    stream: host_status_logs
+    sql: >-
+      SELECT host_name, max(sync_status) AS sync_status, max(tool) AS tool, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }}
+      FROM "host_status_logs"
+      WHERE kind = 'time_sync' AND sync_status IN ('no_tool', 'error')
+      GROUP BY host_name HAVING count(*) >= 2
+      ORDER BY readings DESC
+    period: 15
+    frequency: 5
+    silence: 1440
   - name: infra-app-telemetry-silent
     severity: "P2 경고"
     severity_icon: "🟠"

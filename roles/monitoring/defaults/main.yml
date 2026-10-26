@@ -122,8 +122,10 @@ otel_backup_log_path: /var/log/host-agents/backup.jsonl
 # 호스트 상태 점검 jsonl (Spec #322 / Ticket-13, #335): 주기 실행되는 읽기 전용 점검 스크립트가 append하고
 # filelog/host_status_logs가 JSON으로 파싱해 host_status_logs 스트림으로 보낸다. 파일마다 service.name을 단다.
 otel_raid_status_log_path: /var/log/host-agents/raid.jsonl
+otel_time_sync_log_path: /var/log/host-agents/time-sync.jsonl
 otel_host_status_logs:
   - { path: "{{ otel_raid_status_log_path }}", service: raid }
+  - { path: "{{ otel_time_sync_log_path }}", service: timesync }
 
 # RAID 상태 수집기 (#335, docs/research/hardware-raid-metrics-industry-standard.md).
 # HP Smart Array 도구(ssacli → hpssacli → hpacucli)가 있으면 cron이 5분마다 `ctrl all show config detail`을 읽어
@@ -138,6 +140,19 @@ raid_status_interval_minutes: 5
 raid_status_timeout_seconds: 60
 # 하루 약 288회 실행 × 호스트당 수 KB. 매일 회전, 장기 보존은 OpenObserve 쪽이다.
 raid_status_logrotate_rotate: 3
+
+# 시각 동기 수집기 (Spec #322 / Ticket-14, #336).
+# 서버에 이미 있는 chronyc → ntpq → timedatectl 중 처음 답하는 도구를 5분마다 읽어 JSON 한 줄(kind=time_sync)을 남긴다.
+# 시각을 맞추지 않고 아무것도 설치하지 않는다(도구가 없으면 sync_status=no_tool). false면 cron을 지워 수집을 멈춘다.
+enable_time_sync: true
+time_sync_script_path: /usr/local/sbin/host-agents-time-sync
+time_sync_cron_path: /etc/cron.d/host-agents-time-sync
+time_sync_logrotate_path: /etc/logrotate.d/host-agents-time-sync
+time_sync_interval_minutes: 5
+# 도구 호출 1회의 제한 시간(초). 주기(5분) 안에 끝나는 값으로 둔다.
+time_sync_timeout_seconds: 20
+# 하루 약 288줄 × 호스트당 약 300바이트. 매일 회전, 장기 보존은 OpenObserve 쪽이다.
+time_sync_logrotate_rotate: 3
 
 # 로그 exporter 1개당 영속 큐 크기(bytes, 5개 스트림 합계 ≈ 320MiB). 초과 시 filelog가 역압을 받고 원본 파일이 버퍼가 된다.
 otel_log_queue_bytes: 67108864

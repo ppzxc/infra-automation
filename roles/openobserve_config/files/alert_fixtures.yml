@@ -807,6 +807,91 @@ infra-host-status-silent:
       records:
         - {ts: -300, kind: tool_status, status: no_tool, message: ""}
 
+# --- 시각 동기 알림 (Spec #322 / Ticket-14, #336) --- 레코드는 host-agents-time-sync가 남기는 JSON 줄의 모양이다(kind=time_sync).
+# 수집은 5분마다라 "2회 연속"은 ts [-300, 0], "30분 지속"은 [-1500, ..., 0](6회)이다. offset_ms를 모르면(timedatectl, 동기 안 됨) 필드를 뺀다(null).
+infra-time-offset-exceeded:
+  cases:
+    - name: chrony 호스트가 2.35초 느림(음수 오차)
+      host: verify-time-offset-chrony
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: chronyc, sync_status: synced, synced: true, offset_ms: -2350.0}
+    - name: ntpd 호스트가 1.5초 빠름(밀리초 단위 그대로)
+      host: verify-time-offset-ntpq
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: ntpq, sync_status: synced, synced: true, offset_ms: 1500.25}
+    - name: 정상 호스트(0.03ms)
+      host: verify-time-offset-ok
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: chronyc, sync_status: synced, synced: true, offset_ms: 0.026}
+    - name: 정확히 1초 이하(900ms)는 울리지 않는다
+      host: verify-time-offset-below
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: chronyc, sync_status: synced, synced: true, offset_ms: -900.0}
+    - name: 판독 1회만으로는 울리지 않는다
+      host: verify-time-offset-once
+      fires: false
+      records:
+        - {ts: 0, kind: time_sync, tool: chronyc, sync_status: synced, synced: true, offset_ms: 3000.0}
+    - name: 오차를 모르는 호스트(timedatectl)는 오차 알림 대상이 아니다
+      host: verify-time-offset-unknown
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: timedatectl, sync_status: synced, synced: true}
+infra-time-unsynced:
+  cases:
+    - name: 동기 안 된 판독이 30분(6회) 이어짐
+      host: verify-time-unsynced-30m
+      fires: true
+      records:
+        - {ts: [-1500, -1200, -900, -600, -300, 0], kind: time_sync, tool: chronyc, sync_status: unsynced, synced: false, message: "chronyd reports: Not synchronised"}
+    - name: CentOS 6 모양(ntpd가 꺼져 데몬이 답하지 않음)
+      host: verify-time-unsynced-el6
+      fires: true
+      records:
+        - {ts: [-1500, -1200, -900, -600, -300, 0], kind: time_sync, tool: ntpq, sync_status: unsynced, synced: false, message: "ntpq not answering (daemon not running?)"}
+    - name: 판독 3회(15분)만 동기 안 됨은 울리지 않는다
+      host: verify-time-unsynced-15m
+      fires: false
+      records:
+        - {ts: [-300, -600, 0], kind: time_sync, tool: chronyc, sync_status: unsynced, synced: false, message: "chronyd reports: Not synchronised"}
+    - name: 중간에 동기된 판독이 하나 있으면 지속이 아니다
+      host: verify-time-unsynced-recovered
+      fires: false
+      records:
+        - {ts: [-1500, -1200, -600, -300, 0], kind: time_sync, tool: chronyc, sync_status: unsynced, synced: false, message: "chronyd reports: Not synchronised"}
+        - {ts: -900, kind: time_sync, tool: chronyc, sync_status: synced, synced: true, offset_ms: 0.5}
+    - name: 동기 정상이 이어짐
+      host: verify-time-unsynced-ok
+      fires: false
+      records:
+        - {ts: [-1500, -1200, -900, -600, -300, 0], kind: time_sync, tool: chronyc, sync_status: synced, synced: true, offset_ms: 0.5}
+infra-time-sync-unavailable:
+  cases:
+    - name: 시각 동기 도구가 없는 호스트
+      host: verify-time-none
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: none, sync_status: no_tool, message: ""}
+    - name: 도구 호출이 시간 초과로 끝나는 호스트
+      host: verify-time-error
+      fires: true
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: chronyc, sync_status: error, message: "no answer within 20s"}
+    - name: 도구 없음 판독 1회만으로는 울리지 않는다
+      host: verify-time-none-once
+      fires: false
+      records:
+        - {ts: 0, kind: time_sync, tool: none, sync_status: no_tool, message: ""}
+    - name: 정상 호스트
+      host: verify-time-available-ok
+      fires: false
+      records:
+        - {ts: [-300, 0], kind: time_sync, tool: chronyc, sync_status: synced, synced: true, offset_ms: 0.1}
+
 # --- 스위치 syslog 알림 (Spec #277) --- 레코드는 switch_syslog_semantics VRL 처리 후의 모양이다(service_name, device_name/device_id, event_name,
 # log_syslog_severity_code). 장비 식별자 device_id가 케이스 호스트다(host_field). 송신 주소는 문서용 대역만 쓴다.
 # 장비별 집계의 분리는 "장비마다 임계 미만" 케이스가 함께 있으면서 모두 발화하지 않는 것으로 확인한다(합치면 임계를 넘는다).
