@@ -95,6 +95,16 @@
         {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path }} -n {{ backup_profile_name }} unlock;
         {{ host_agents_bin_dir }}/resticprofile -f yaml -c {{ backup_profile_path }} -n {{ backup_profile_name }} backup
 
+  # SQLite 스냅샷(#323): 입력이 있는 호스트에서만. sqlite3가 없으면 백업 파일(자격증명·훅·프로파일)을 쓰기 전에 분명한 오류로 멈춘다(스냅샷 단계가 매일 실패하는 것을 막는다).
+  - name: "[BAK-028] Fail before the backup files are written when sqlite3 is missing on a host that uses backup_sqlite_snapshots (read-only probe)"
+    ansible.builtin.shell: |
+      command -v sqlite3 >/dev/null 2>&1 || { echo "{{ inventory_hostname }}: backup_sqlite_snapshots가 설정됐지만 sqlite3 명령이 없습니다 (SQLite 스냅샷에 필요 — sqlite3 패키지를 설치하거나 입력을 비우세요)" >&2; exit 1; }
+    changed_when: false
+    check_mode: false
+    when:
+      - host_agents_os_path == 'modern'
+      - host_agents_inputs.backup_sqlite_snapshots | default([]) | length > 0
+
   - name: "Deploy backup files (modern path)"
     when: host_agents_os_path == 'modern'
     block:
@@ -160,14 +170,6 @@
           owner: root
           group: root
           mode: '0644'
-
-      # SQLite 스냅샷(#323): 입력이 있는 호스트에서만. sqlite3가 없으면 설정을 바꾸기 전에 분명한 오류로 멈춘다(스냅샷 단계가 매일 실패하는 것을 막는다).
-      - name: "[BAK-028] Fail before any change when sqlite3 is missing on a host that uses backup_sqlite_snapshots (read-only probe)"
-        ansible.builtin.shell: |
-          command -v sqlite3 >/dev/null 2>&1 || { echo "{{ inventory_hostname }}: backup_sqlite_snapshots가 설정됐지만 sqlite3 명령이 없습니다 (SQLite 스냅샷에 필요 — sqlite3 패키지를 설치하거나 입력을 비우세요)" >&2; exit 1; }
-        changed_when: false
-        check_mode: false
-        when: host_agents_inputs.backup_sqlite_snapshots | default([]) | length > 0
 
       - name: "[BAK-029] Deploy the SQLite snapshot script (POSIX sh, run-before hook)"
         ansible.builtin.copy:

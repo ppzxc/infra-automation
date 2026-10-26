@@ -322,6 +322,16 @@ def test_a_good_snapshot_is_part_of_the_backup_and_a_failed_one_makes_the_backup
 
 # --- 배포: 스크립트 배포와 sqlite3 확인 (입력이 있는 호스트에서만) --------------------------------------------------
 
+def test_the_sqlite3_check_runs_before_the_backup_files_are_written():
+    """A missing sqlite3 must stop the host before the credentials, hook, logrotate and profile are written (BAK-020~027)."""
+    names = [t.get("name", "") for t in _flat_tasks("main.yml")]
+    check = next(i for i, n in enumerate(names) if n.startswith("[BAK-028]"))
+    for spec in ("[BAK-020]", "[BAK-022]", "[BAK-025]", "[BAK-026]", "[BAK-024]"):
+        assert check < next(i for i, n in enumerate(names) if n.startswith(spec)), spec
+    legacy = [t.get("name", "") for t in _flat_tasks("legacy.yml")]
+    assert next(i for i, n in enumerate(legacy) if n.startswith("[BAK-218]")) < next(i for i, n in enumerate(legacy) if n.startswith("[BAK-203]"))
+
+
 def test_deploy_tasks_exist_for_both_paths_and_only_act_when_the_input_is_set():
     modern = [t for t in _flat_tasks("main.yml") if t.get("name", "").startswith(("[BAK-028]", "[BAK-029]"))]
     legacy = [t for t in _flat_tasks("legacy.yml") if t.get("name", "").startswith(("[BAK-218]", "[BAK-219]"))]
@@ -356,7 +366,7 @@ def _assert_sqlite_task(tmp_path, snapshots, with_sqlite3):
     tmp_path.mkdir(parents=True, exist_ok=True)
     task = dict(_task("[BAK-028]"))
     task.pop("tags", None)
-    return _run(tmp_path, [task], _vars(host_agents_inputs={"backup_sqlite_snapshots": snapshots}, inventory_hostname="ns0331"),
+    return _run(tmp_path, [task], _vars(host_agents_inputs={"backup_sqlite_snapshots": snapshots}, inventory_hostname="ns0331", host_agents_os_path="modern"),
                 extra_env={"PATH": _toolbin(tmp_path, with_sqlite3)})
 
 

@@ -46,7 +46,7 @@
 - 스크립트는 오래된 sqlite3가 점 명령 실패에도 0을 반환할 수 있어 종료 코드만 믿지 않는다: 원본 존재 확인 → 임시 파일에 `.backup` → 비어 있지 않은지 → `PRAGMA quick_check` = `ok` → rename. 하나라도 실패하면 0이 아닌 코드로 끝난다.
 - **스냅샷이 실패하면 백업 결과도 실패로 남는다**: `run-before` 실패는 resticprofile이 백업을 건너뛰고 `run-finally`에 `ERROR`를 주므로 `backup.jsonl`이 `success=false`로 남아 기존 `infra-backup-failure`·`infra-backup-missing` 알림에 걸린다(진짜 resticprofile로 시험).
 - systemd 샌드박스(`ProtectSystem=strict`)에서는 원본 디렉터리가 읽기 전용이라 WAL 모드 DB를 읽을 때 `-shm` 접근이 막힐 수 있어, 입력이 있을 때만 각 원본의 디렉터리를 `ReadWritePaths`에 더한다(`-` 접두사).
-- 입력이 있는 호스트에 `sqlite3` 명령이 없으면 Deploy가 설정을 바꾸기 전에 분명한 오류로 멈춘다(`BAK-028`, CentOS 6/7은 `BAK-218`). 도구는 설치하지 않는다. 입력이 없는 호스트는 프로파일·유닛·파일이 바뀌지 않는다.
+- 입력이 있는 호스트에 `sqlite3` 명령이 없으면 Deploy가 백업 파일(자격증명·훅·프로파일)을 쓰기 전에 분명한 오류로 멈춘다(`BAK-028`, CentOS 6/7은 `BAK-218`; 바이너리 전달은 그보다 앞서 끝난다). 도구는 설치하지 않는다. 입력이 없는 호스트는 프로파일·유닛·파일이 바뀌지 않는다.
 - 첫 사용처는 ns0331의 OpenObserve 메타 DB다(값은 OpenBao `hosts/ns0331/agents`에만 둔다).
 
 ---
@@ -80,7 +80,7 @@
 | `BAK-024` | `Deploy resticprofile profile (validated with resticprofile show)` | `ansible.builtin.template` | All | Checksum 비교; 새 바이너리의 `resticprofile show`가 통과해야 교체 (시크릿 미포함, `backup.host` = Inventory Hostname) |
 | `BAK-025` | `Ensure backup result directories exist (log 0755, state 0755)` | `ansible.builtin.file` | All | 디렉터리 존재 시 `ok` (`/var/log/host-agents`, `/var/lib/host-agents`) |
 | `BAK-026` | `Deploy the backup result hook (POSIX sh, one JSON line per run)` | `ansible.builtin.copy` | All | Checksum 비교 (`0755`, POSIX 도구만 — jq 없음) |
-| `BAK-028` | `Fail before any change when sqlite3 is missing on a host that uses backup_sqlite_snapshots (read-only probe)` | `ansible.builtin.shell` | All (modern) | 읽기 전용 확인 (`command -v sqlite3`), `backup_sqlite_snapshots`가 있을 때만, 없으면 설정을 바꾸기 전에 분명한 오류로 실패 |
+| `BAK-028` | `Fail before the backup files are written when sqlite3 is missing on a host that uses backup_sqlite_snapshots (read-only probe)` | `ansible.builtin.shell` | All (modern) | 읽기 전용 확인 (`command -v sqlite3`), `backup_sqlite_snapshots`가 있을 때만, 없으면 백업 파일을 쓰기 전에 분명한 오류로 실패 |
 | `BAK-029` | `Deploy the SQLite snapshot script (POSIX sh, run-before hook)` | `ansible.builtin.copy` | All (modern) | Checksum 비교 (`/usr/local/sbin/host-agents-sqlite-snapshot`, `0755`), 입력이 있을 때만 |
 | `BAK-027` | `Deploy logrotate configuration for backup.jsonl` | `ansible.builtin.template` | All | Checksum 비교 (`/etc/logrotate.d/host-agents-backup`, 주간·8회·`create 0640`) |
 | `BAK-030` | `Switch restic install symlink to the delivered version` | `ansible.builtin.include_tasks` | All | 설정 검증 후 symlink 교체 (`MON-050`~`053`) |
@@ -133,7 +133,7 @@
 | `BAK-215` | `Probe whether the restic repository exists (raw, read-only, restic cat config)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `changed_when: false`, `check_mode: false`, `LC_ALL=C`, `no_log`, Deploy 한정 |
 | `BAK-216` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | legacy_el6, legacy_el7 | 읽기 전용 (BAK-051과 같은 rc/메시지 판정) |
 | `BAK-217` | `Initialize the restic repository when it does not exist (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 프로브 결과 조건 (저장소가 없을 때만 `init`), `no_log` |
-| `BAK-218` | `Fail before any change when sqlite3 is missing on a host that uses backup_sqlite_snapshots (raw, read-only probe)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 읽기 전용 확인 (`command -v sqlite3`), 입력이 있을 때만 |
+| `BAK-218` | `Fail before the backup files are written when sqlite3 is missing on a host that uses backup_sqlite_snapshots (raw, read-only probe)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 읽기 전용 확인 (`command -v sqlite3`), 입력이 있을 때만 |
 | `BAK-219` | `Deploy the SQLite snapshot script (raw, POSIX sh, run-before hook)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | sentinel (modern BAK-029와 같은 스크립트, `raw_upload.yml`), 입력이 있을 때만 |
 
 ## 6. 백업 관측성 및 알림 계약 (ADR-0006 §2.6)
