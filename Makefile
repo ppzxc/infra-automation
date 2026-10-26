@@ -12,7 +12,7 @@ help:
 	@echo "  make check                      - Dry-run simulation (--check --diff)"
 	@echo "  make spec-check                 - Validate 3-way consistency (Docs <-> Code <-> Tests)"
 	@echo "  make lint                       - Run ansible-lint and spec validation"
-	@echo "  make test                       - Run all fast verification tests (Spec + Unit + Scripts)"
+	@echo "  make test                       - Run Spec + ALL pytest (incl. slow, full) + Scripts; the commit hook runs only scripts/run-fast-tests.sh"
 	@echo "  make test-unit                  - Run Pytest contract & structure tests"
 	@echo "  make test-fast                  - Molecule Fast Scenario (pre-push tier: Rocky 9, +Rocky 8 if security/common changed)"
 	@echo "  make test-slow                  - Molecule Slow Scenario (docker_engine + monitoring, all OS)"
