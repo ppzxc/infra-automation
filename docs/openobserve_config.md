@@ -212,6 +212,8 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-019` | `Fail when a registered short URL differs from the one put in the notification body` | `ansible.builtin.assert` | Controller | 등록 응답의 `short_url`이 계획에서 계산한 값(md5 가운데 16자)과 다르거나 등록이 실패하면 실패 (check 모드 제외) |
 | `O2C-020` | `Apply the planned changes to OpenObserve (POST create / PUT update / DELETE retired alerts / recreate alerts whose stream changed)` | `o2c_http` | Controller | 계획된 차이만 전송 — 폐기 목록(`o2c_retired_alerts`)에 있는 알림만 DELETE, 스트림이 바뀐 알림만 같은 계획에서 DELETE 뒤 POST(재생성), 그 밖의 알림(관리 밖 `infra-` 포함)은 건드리지 않음 (`changed_when: true`, check 모드 제외, `no_log`) |
 
+`molecule/*/verify.yml`은 두지 않는다. 이 역할은 컨트롤러(localhost)에서 OpenObserve REST API만 호출하고 대상 호스트에 상태를 만들지 않아 컨테이너 수렴 검증의 이득이 없다. 3-Way 추적성의 검증 쪽은 pytest다: [tests/test_openobserve_config.py](../tests/test_openobserve_config.py)는 로컬 HTTP 서버로 OpenObserve를 모사해 역할을 실제 실행하고(멱등성·순서·check 모드·실패 경로), 렌더링 전용 태스크 `O2C-008`·`O2C-009`와 알림 정의는 [tests/test_openobserve_render.py](../tests/test_openobserve_render.py)가 `o2c_render_dump`로 만든 렌더링 결과를 읽어 검증한다(`test_render_never_dumps_the_webhook_destination` 등). 렌더링 결과가 실제 반영(`O2C-020`)이 보내는 것과 같다는 것은 `test_apply_sends_exactly_what_the_render_play_shows`가 지킨다.
+
 ### 원문 로그 링크 (#282, `O2C-003`)
 
 로그 알림(`stream_type=logs`)의 `▶ 로그 보기`는 알림 화면이 아니라 **알림 조건으로 원문 로그를 바로 여는 URL**이다. `{alert_url}`은 집계 SQL(GROUP BY·HAVING)과 알림 구간(수 분)으로 열려 원문 줄이 보이지 않기 때문이다.
