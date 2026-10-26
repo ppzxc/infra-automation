@@ -35,9 +35,14 @@ Ansible과 Semaphore UI는 저장소 루트(`cwd`)를 기준으로 동작하므�
    - **예외: 시크릿 env 파일은 `mode: '0640'` `root:dockermgmt`입니다.** compose는 `env_file:`을 *실행한 사용자* 권한으로 읽는데 실행 주체가 `docker` 그룹의 개인 운영자 계정이고, `docker` 그룹은 root와 같은 권한이라 이 그룹에게 읽기를 막아도 실질적인 보호가 늘지 않습니다. 막는 대상은 `dockermgmt`가 아닌 계정입니다. 예외는 소비자별로 나눈 시크릿 env 파일(예: `funa_env`의 `proxy.secrets.env`, `vrrp.secrets.env`)에만 적용합니다(근거: ADR-0002 개정, #222).
 
 ## 5. 품질 검증 및 린팅 (CI & Pre-Commit)
-1. **Git Pre-Commit Hook 필수 준수**
-   - 커밋 전 시크릿 유출 검사, 3-Way Spec 검증(`scripts/validate-ansible-specs.py`), 단위 테스트(`pytest tests/`)를 통과해야 합니다.
-2. **3-Way 명세 추적성 유지**
+1. **Git Pre-Commit Hook 필수 준수 (커밋 전: 빠른 검사)**
+   - 커밋 전 시크릿 유출 검사, 3-Way Spec 검증(`scripts/validate-ansible-specs.py`), **빠른 테스트**(`bash scripts/run-fast-tests.sh`, 즉 `pytest tests/ -m "not slow and not heavy_harness" -n 4 --dist loadgroup`, 약 30초)를 통과해야 합니다. hook 우회는 금지입니다.
+   - `ansible-playbook`을 테스트마다 실행하는 테스트는 `tests/conftest.py`가 `slow`로 자동 표시하므로 손으로 marker를 달지 않으며, 커밋 hook에서는 제외됩니다. session 범위 fixture(공유 렌더링 `rendered`)로만 실행하는 테스트는 세션당 한 번이라 `slow`가 아닙니다.
+2. **푸시·PR에서 전체 검증**
+   - 푸시(pre-push)는 Molecule Fast Scenario(`scripts/run-molecule.sh fast`, ADR-0007)를 돌립니다.
+   - PR과 `main` push는 GitHub Actions(`.github/workflows/tests.yml`)가 `spec` job과 전체 `pytest tests/`(`slow` 포함, 6분할 matrix)를 돌립니다. 푸시 전에 전체를 확인하려면 `pytest tests/ -n 4 --dist loadgroup`을 직접 실행합니다.
+   - 두 층 테스트 정책(통합 소수·필터 직접 다수)과 전환 기간 규칙은 ADR-0013을 따릅니다. 정의만 읽는 검사는 `_apply()` 통합 테스트가 아니라 공유 렌더링 테스트(`tests/test_openobserve_render.py`)에 씁니다.
+3. **3-Way 명세 추적성 유지**
    - 신규 태스크나 역할 변경 시 `docs/*.md` 스펙 테이블과 `roles/*/tasks/main.yml`의 `[SPEC-ID]`, `molecule/*/verify.yml` 검증 테스트를 항상 1:1로 일치시킵니다.
 
 ## Agent skills

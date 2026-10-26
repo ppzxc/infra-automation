@@ -91,9 +91,10 @@ fi
 # ------------------------------------------------------------------------------
 # 3. Unit & Structure Tests
 # ------------------------------------------------------------------------------
-echo -n "[3/3] Running Structure & Unit Tests (pytest)... "
+echo -n "[3/3] Running fast Structure & Unit Tests (pytest -m not slow)... "
 if command -v pytest >/dev/null 2>&1 && [ -d "tests" ]; then
-    if ! pytest tests/ -q > /tmp/pytest-run.log 2>&1; then
+    # 빠른 테스트만 돌린다(lefthook.yml과 같은 scripts/run-fast-tests.sh). slow 테스트는 PR의 CI가 돈다.
+    if ! bash scripts/run-fast-tests.sh > /tmp/pytest-run.log 2>&1; then
         echo -e "${RED}FAIL${NC}"
         cat /tmp/pytest-run.log
         echo -e "\n${RED}Commit rejected: Unit tests failed.${NC}"

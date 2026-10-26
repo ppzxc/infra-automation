@@ -53,7 +53,7 @@
 
 테스트는 [tests/test_fortigate_backup.py](../tests/test_fortigate_backup.py)다. 구조·3-Way 추적성은 정적으로, 동작(대상별 저장·응답 멤버 파일명·장애 전환 시 멤버 변경·`0600`, 상태·설정 응답이 비정상이거나 비면 저장 안 함과 실패, 보관 일수 정리, 토큰 비노출, 설정 변경 알림·첫 백업·멤버 전환·비밀 비노출)은 장비를 로컬 HTTP 서버(장비와 알림 수신기)로 모사해 역할을 실제 실행해 검증한다. 장비에는 닿지 않는다.
 
-`molecule/*/verify.yml`은 두지 않는다. 역할이 컨트롤러(localhost)에서 REST API만 호출하고 대상 호스트에 상태를 만들지 않아 컨테이너 수렴 검증의 이득이 없고, `cisco_backup`과 같이 로컬 HTTP 서버로 장비를 모사한 pytest 실행 시험이 같은 seam에서 동작을 검증한다(3-Way 추적성의 검증 쪽은 이 pytest다).
+`molecule/*/verify.yml`은 두지 않는다. 역할이 컨트롤러(localhost)에서 REST API만 호출하고 대상 호스트에 상태를 만들지 않아 컨테이너 수렴 검증의 이득이 없고, `cisco_backup`과 같이 로컬 HTTP 서버로 장비를 모사한 pytest 실행 시험이 같은 방식으로 동작을 검증한다(3-Way 추적성의 검증 쪽은 이 pytest다).
 
 ---
 

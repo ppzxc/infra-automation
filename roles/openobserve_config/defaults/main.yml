@@ -1639,3 +1639,6 @@ o2c_selftest_alert:
   period: 5
   frequency: 1
   silence: 5
+
+# 파일 경로를 주면 O2C-003까지 렌더링한 비밀 아닌 원하는 객체를 그 경로에 JSON으로 덤프하고 OpenObserve를 읽기 전에 정상 종료한다(테스트 전용, Spec #348). 비어 있으면(기본) 아무 일도 하지 않는다.
+o2c_render_dump: ""
