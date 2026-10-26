@@ -1420,3 +1420,144 @@ infra-account-lockout:
       fires: false
       records:
         - {service_name: sudo, body: 'Oct 19 09:16:10 {host} sudo[2919962]:   alice : (command continued) kisa_emit U-03 VULN "no pam_faillock/pam_tally2/pam_tally in auth stack" deny=3'}
+
+# --- 남은 보안 로그 알림 (Spec #322 / Ticket-8, #330) --- 알림 SQL이 읽는 필드는 기존 보안 알림과 같다(service_name, body, event_action …).
+# auditd 감시 키 줄(type=SYSCALL … key="identity")은 -w 감시 규칙이 만든 SYSCALL 기록의 형식이다(실제 호스트의 규칙 목록으로 키를 확인했고,
+# 감시 키가 붙은 기록은 아직 보존 기간 안에 없어 줄 모양은 같은 호스트의 exec_log SYSCALL 줄(위 계정 변경 픽스처)과 auditd 형식을 따랐다).
+infra-audit-watch-change:
+  cases:
+    - name: 편집기로 /etc/passwd를 직접 고침(계정 도구가 아니라 #318이 못 보는 변경)
+      host: verify-watch-identity-vim
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985278.101:5001): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=2 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm="vim" exe="/usr/bin/vim" subj=kernel key="identity" AUID="opsverify" UID="root"'}
+    - name: visudo로 sudoers를 고침
+      host: verify-watch-sudoers
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985290.202:5002): arch=c000003e syscall=82 success=yes exit=0 a0=7ffc1 a1=55d0 items=4 ppid=4000 pid=4200 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="visudo" exe="/usr/sbin/visudo" subj=kernel key="sudo_config" AUID="opsverify" UID="root"'}
+    - name: sshd_config 변경(프로비저닝 포함 — 작업 이력과 대조)
+      host: verify-watch-sshd
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985300.303:5003): arch=c000003e syscall=82 success=yes exit=0 a0=7ffc2 a1=55d1 items=4 ppid=4000 pid=4300 auid=1002 uid=0 gid=0 euid=0 tty=(none) ses=313 comm="python3" exe="/usr/bin/python3.9" subj=kernel key="sshd_config" AUID="opsverify" UID="root"'}
+    - name: useradd가 /etc/passwd를 바꾼 기록은 계정 변경 알림(#318)이 이미 알린다
+      host: verify-watch-useradd
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=ADD_USER msg=audit(1792985310.404:5004): pid=4400 uid=0 auid=1002 ses=313 subj=kernel msg=''op=add-user acct="svcverify" exe="/usr/sbin/useradd" hostname=? addr=? terminal=? res=success'' UID="root" AUID="opsverify"'}
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985310.405:5005): arch=c000003e syscall=257 success=yes exit=5 a0=ffffff9c items=2 ppid=4000 pid=4400 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="useradd" exe="/usr/sbin/useradd" subj=kernel key="identity" AUID="opsverify" UID="root"'}
+    - name: passwd 명령의 비밀번호 변경도 #318이 알린다
+      host: verify-watch-passwd
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=USER_CHAUTHTOK msg=audit(1792985320.505:5006): pid=4500 uid=0 auid=1002 ses=313 subj=kernel msg=''op=PAM:chauthtok grantors=pam_unix acct="opsverify" exe="/usr/bin/passwd" hostname=? addr=? terminal=pts/0 res=success'' UID="root" AUID="opsverify"'}
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985320.506:5007): arch=c000003e syscall=82 success=yes exit=0 items=4 ppid=4000 pid=4500 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="passwd" exe="/usr/bin/passwd" subj=kernel key="identity" AUID="opsverify" UID="root"'}
+    - name: 감시 키가 아닌 실행 기록(exec_log)은 대상이 아니다
+      host: verify-watch-exec
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792655949.866:4856533): arch=c000003e syscall=59 success=yes exit=0 comm="usermod" exe="/usr/sbin/usermod" key="exec_log" AUID="opsverify" UID="root"'}
+    - name: sudo 로그 파일 감시 키(sudo_logs)는 sudo를 쓸 때마다 남으므로 대상이 아니다
+      host: verify-watch-sudo-log
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985330.606:5008): arch=c000003e syscall=1 success=yes exit=120 items=0 ppid=4000 pid=4600 auid=1002 uid=0 comm="sudo" exe="/usr/bin/sudo" subj=kernel key="sudo_logs" AUID="opsverify" UID="root"'}
+    - name: 다른 서비스 줄에 감시 키 문구가 있어도 세지 않는다
+      host: verify-watch-other-service
+      fires: false
+      records:
+        - {service_name: sshd, body: 'Oct 26 10:00:00 {host} note: type=SYSCALL comm="vim" key="identity"'}
+infra-ssh-login-unregistered-source:
+  cases:
+    - name: 일반 계정이 등록되지 않은 공인 출발지에서 로그인 성공
+      host: verify-unreg-public
+      fires: true
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: deploy, source_address: 198.51.100.7}
+    - name: 일반 계정이 등록되지 않은 사설 출발지에서 로그인 성공
+      host: verify-unreg-private
+      fires: true
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: deploy, source_address: 10.0.0.8}
+    - name: 등록 출발지(사무실)의 일반 계정 로그인은 알리지 않는다
+      host: verify-unreg-registered
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: deploy, source_address: "@office"}
+    - name: root 로그인은 root 알림이 맡는다
+      host: verify-unreg-root
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: root, source_address: 198.51.100.8}
+    - name: 로그인 실패는 대상이 아니다
+      host: verify-unreg-failure
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: failure, user_name: deploy, source_address: 198.51.100.9}
+infra-root-crontab-change:
+  cases:
+    - name: crontab -e로 root crontab을 저장(REPLACE)
+      host: verify-cron-replace
+      fires: true
+      records:
+        - {service_name: cron, body: '(root) REPLACE (root)'}
+    - name: crontab -r로 root crontab을 삭제(DELETE), 헤더가 본문에 남은 줄 모양
+      host: verify-cron-delete
+      fires: true
+      records:
+        - {service_name: cron, body: 'Oct 26 10:00:00 {host} crontab[2938568]: (root) DELETE (root)'}
+    - name: 다른 계정의 crontab 변경은 대상이 아니다
+      host: verify-cron-other-user
+      fires: false
+      records:
+        - {service_name: cron, body: '(alice) REPLACE (alice)'}
+    - name: 목록 조회(LIST)는 변경이 아니다(실제 호스트의 줄 모양)
+      host: verify-cron-list
+      fires: false
+      records:
+        - {service_name: cron, body: 'Oct 19 09:36:45 {host} crontab[2938568]: (root) LIST (root)'}
+    - name: 편집 시작(BEGIN EDIT)만으로는 변경이 아니다
+      host: verify-cron-begin-edit
+      fires: false
+      records:
+        - {service_name: cron, body: '(root) BEGIN EDIT (root)'}
+    - name: 예약 작업 실행(CMD)은 변경이 아니다
+      host: verify-cron-cmd
+      fires: false
+      records:
+        - {service_name: cron, body: '(root) CMD (run-parts /etc/cron.hourly)'}
+infra-fortigate-admin-login-new-source:
+  row_key: device
+  host_field: device_id
+  cases:
+    - name: 등록되지 않은 출발지에서 관리자 로그인 성공
+      host: verify-fw-newsrc-unregistered
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.60, body: 'date=2026-10-26 time=10:00:00 devname="{host}" devid="FGT000000000000" logid="0100032001" type="event" subtype="system" level="information" logdesc="Admin login successful" srcip=203.0.113.60 user="admin" ui="https(203.0.113.60)" action="login" status="success" msg="Administrator admin logged in successfully from https(203.0.113.60)"'}
+    - name: 출발지를 모르는(필드 없음) 관리자 로그인 성공도 알린다
+      host: verify-fw-newsrc-nosource
+      fires: true
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, body: 'date=2026-10-26 time=10:00:00 devname="{host}" type="event" subtype="system" logdesc="Admin login successful" user="admin" action="login" status="success"'}
+    - name: 등록 출발지(사무실)의 관리자 로그인 성공은 알리지 않는다
+      host: verify-fw-newsrc-registered
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, source_address: "@office", body: 'date=2026-10-26 time=10:00:00 devname="{host}" type="event" subtype="system" logdesc="Admin login successful" user="admin" ui="https(@office)" action="login" status="success"'}
+    - name: 로그인 실패는 이 알림 대상이 아니다(실패 알림이 맡는다)
+      host: verify-fw-newsrc-failed
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.61, body: 'date=2026-10-26 time=10:00:00 devname="{host}" type="event" subtype="system" logdesc="Admin login failed" user="admin" ui="https(203.0.113.61)" action="login" status="failed"'}
+    - name: VPN 사용자 로그인은 관리자 로그인이 아니다
+      host: verify-fw-newsrc-vpn
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: fortigate-syslog, source_address: 203.0.113.62, body: 'date=2026-10-26 time=10:00:00 devname="{host}" type="event" subtype="vpn" logdesc="SSL VPN login successful" user="alice" action="tunnel-up" status="success" remip=203.0.113.62'}
+    - name: 다른 서비스의 같은 문구는 세지 않는다
+      host: verify-fw-newsrc-other-service
+      fires: false
+      records:
+        - {omit_host_field: true, service_name: sshd, source_address: 203.0.113.63, body: 'date=2026-10-26 time=10:00:00 devname="{host}" type="event" subtype="system" user="admin" action="login" status="success"'}

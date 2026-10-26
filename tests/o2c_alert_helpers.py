@@ -36,6 +36,8 @@ EXPECTED_ALERTS = {
     "infra-raid-physical-drive-fault", "infra-raid-cache-battery-fault", "infra-raid-collection-error",
     "infra-host-status-silent",   # RAID 상태(#335)
     "infra-time-offset-exceeded", "infra-time-unsynced", "infra-time-sync-unavailable",   # 시각 동기(#336)
+    "infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
+    "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
 }
 
 PROMQL_ALERTS = {
@@ -137,6 +139,7 @@ FORTIGATE_ALERTS = {   # name -> (severity, period minutes, silence minutes)
     "infra-fortigate-ha-failover": ("P2 경고", 5, 30),
     "infra-fortigate-critical-detection": ("P1 긴급", 5, 60),
     "infra-fortigate-syslog-silent": ("P2 경고", 120, 1440),
+    "infra-fortigate-admin-login-new-source": ("P2 경고", 5, 60),   # #330
 }
 
 DEFAULTS = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
@@ -179,6 +182,8 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-sudo-risky-command": ("P1 긴급", 5, 5, 0, "process_command_line"),
     "infra-auditd-stopped": ("P1 긴급", 10, 10, 2, "type=DAEMON_START"),
     "infra-account-lockout": ("P2 경고", 5, 5, 0, "account temporarily locked"),
+    "infra-audit-watch-change": ("P2 경고", 5, 5, 0, 'key="identity"'),                              # 남은 보안 로그 알림(#330)
+    "infra-ssh-login-unregistered-source": ("P2 경고", 5, 60, 0, "user_name <> 'root'"),
 }
 
 RAID_ALERTS = {   # alert -> a fragment only its search carries
