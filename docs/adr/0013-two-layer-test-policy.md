@@ -56,7 +56,7 @@ date: 2026-10-26
 ## Open items (미해결)
 
 - **렌더링 테스트는 커밋 hook에 들어가지 않는다.** `render_desired`가 `ansible-playbook`을 실행하므로 `tests/test_openobserve_render.py`의 65개 중 63개가 자동으로 `slow`다. 옛 통합 테스트도 `slow`였으므로 잃은 것은 없지만, 알림 정의를 고치고 커밋하는 가장 흔한 변경이 커밋 단계에서는 검증되지 않는다. 렌더링을 fast로 볼지는 자동 분류 규칙(#349)과 함께 따로 정해야 한다.
-- **CI 샤딩이 `xdist_group`을 쪼갠다.** 샤드는 nodeid의 crc32로 나누므로 같은 `xdist_group`의 테스트가 여러 샤드에 흩어지고, 샤드마다 한 번씩 렌더링해서 최대 6회 렌더링한다. 정확성에는 영향이 없고 시간만 더 쓴다.
+- **(해소) CI 샤딩이 `xdist_group`을 쪼개던 문제.** 샤드를 nodeid의 crc32로만 나눠 같은 `xdist_group`이 여러 샤드에 흩어지고 샤드마다 렌더링했다. 지금은 `tests/conftest.py`가 `xdist_group`이 있으면 그룹 이름으로 샤드를 정해 같은 렌더링을 쓰는 테스트가 한 샤드에 모인다(`tests/test_conftest_sharding.py`가 지킨다).
 - **Molecule `VERIFY-O2C-008`·`VERIFY-O2C-009`는 추가하지 않았다.** `O2C-008`·`O2C-009`는 문서와 코드에는 있지만 `molecule/*/verify.yml` 검증이 없어 `scripts/validate-ansible-specs.py`가 `INTEGRATED`(검증 없음)로 분류한다. 동작은 pytest(`tests/test_openobserve_render.py`)만 검증한다.
 - **`pytest-timeout`이 없는 환경**에서는 `scripts/run-fast-tests.sh`가 시간 제한 없이 실행하고 안내 메시지만 낸다(`pytest-xdist`가 없으면 직렬 실행). `pip install -r requirements-test.txt`로 설치한다.
 

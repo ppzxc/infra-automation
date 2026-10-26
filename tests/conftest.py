@@ -4,7 +4,8 @@
    모듈 소스를 AST로 읽어 "ansible-playbook" 문자열을 쓰는 함수를 찾고, 그 함수를 (헬퍼·fixture 호출로) 직접·간접
    참조하는 테스트를 표시한다. 커밋 hook은 `pytest -m "not slow"`만 돌린다.
 2. CI 샤딩: TEST_SHARD="<번호>/<전체>"(예: "2/4")이면 그 몫의 테스트만 수집한다.
-   nodeid의 crc32로 나누므로 xdist 워커마다 따로 수집해도 같은 결과가 나온다. 환경 변수가 없으면 아무것도 하지 않는다.
+   nodeid의 crc32로 나누므로 xdist 워커마다 따로 수집해도 같은 결과가 나온다. `xdist_group`이 있으면 그룹 이름으로 나눠
+   같은 그룹(같은 렌더링을 공유하는 테스트)이 한 샤드에 모인다. 환경 변수가 없으면 아무것도 하지 않는다.
 """
 import ast
 import os
@@ -96,6 +97,12 @@ def _mark_slow(items):
             item.add_marker(pytest.mark.slow)
 
 
+def _shard_key(item):
+    group = item.get_closest_marker("xdist_group")
+    name = group.args[0] if group and group.args else group.kwargs.get("name") if group else None
+    return f"group:{name}" if name else item.nodeid
+
+
 def pytest_collection_modifyitems(config, items):
     _mark_slow(items)
     spec = os.environ.get("TEST_SHARD")
@@ -104,6 +111,6 @@ def pytest_collection_modifyitems(config, items):
     index, total = (int(part) for part in spec.split("/"))
     if not 1 <= index <= total:
         raise SystemExit(f"TEST_SHARD={spec!r}: 번호는 1 이상 전체 이하여야 한다")
-    keep = [item for item in items if zlib.crc32(item.nodeid.encode()) % total == index - 1]
+    keep = [item for item in items if zlib.crc32(_shard_key(item).encode()) % total == index - 1]
     config.hook.pytest_deselected(items=[item for item in items if item not in keep])
     items[:] = keep
