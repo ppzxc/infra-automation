@@ -19,11 +19,11 @@ KV = {"api_user": "cfg@example.com", "api_password": "API-PASSWORD-xyz",
       "alert_webhook_token": "WEBHOOK-TOKEN-abc", "controller_ingest_token": "INGEST-TOKEN-qrs"}
 
 
-def render_desired(dump_path, *, kv=None, extra=None):
+def render_desired(dump_path, *, kv=None, extra=None, endpoint="http://127.0.0.1:9"):
     """role을 O2C-003까지 돌려 비밀이 아닌 원하는 객체 목록(`[{kind, name, body, ...}]`)을 돌려준다."""
     extra = {"o2c_app_telemetry_kv_fixture": {}, "o2c_host_kv_fixture": {}, "o2c_kv_fixture": kv or KV,
              "o2c_render_dump": str(dump_path), **(extra or {})}
-    cmd = ["ansible-playbook", "-i", "localhost,", str(PLAYBOOK), "-e", "o2_endpoint=http://127.0.0.1:9",
+    cmd = ["ansible-playbook", "-i", "localhost,", str(PLAYBOOK), "-e", f"o2_endpoint={endpoint}",
            "-e", json.dumps(extra)]
     res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300,
                          env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
