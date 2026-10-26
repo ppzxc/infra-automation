@@ -46,6 +46,14 @@
   when: enable_backup | bool
   tags: [agents_config, backup]
   block:
+  # SQLite 스냅샷(#323): modern BAK-028·029와 같다. 입력이 있는 호스트에서만, sqlite3가 없으면 백업 파일을 쓰기 전에 멈춘다.
+  - name: "[BAK-218] Fail before the backup files are written when sqlite3 is missing on a host that uses backup_sqlite_snapshots (raw, read-only probe)"
+    ansible.builtin.raw: >-
+      command -v sqlite3 >/dev/null 2>&1 || { echo "{{ inventory_hostname }}: backup_sqlite_snapshots가 설정됐지만 sqlite3 명령이 없습니다 (SQLite 스냅샷에 필요 — sqlite3 패키지를 설치하거나 입력을 비우세요)" >&2; exit 1; }
+    changed_when: false
+    check_mode: false
+    when: host_agents_inputs.backup_sqlite_snapshots | default([]) | length > 0
+
   - name: "[BAK-203] Ensure restic and result directories exist (raw)"
     ansible.builtin.raw: "{{ item.path | raw_dir_cmd(host_agents_owner, host_agents_group, item.mode) }}"
     loop:
@@ -95,6 +103,16 @@
       _raw_owner: "{{ host_agents_owner }}"
       _raw_group: "{{ host_agents_group }}"
       _raw_mode: '0644'
+
+  - name: "[BAK-219] Deploy the SQLite snapshot script (raw, POSIX sh, run-before hook)"
+    ansible.builtin.import_tasks: "{{ role_path }}/../monitoring/tasks/raw_upload.yml"
+    vars:
+      _raw_dest: "{{ backup_sqlite_snapshot_script_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.file', role_path ~ '/files/host-agents-sqlite-snapshot.sh', rstrip=false) }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0755'
+    when: host_agents_inputs.backup_sqlite_snapshots | default([]) | length > 0
 
   # 새 resticprofile 바이너리로 렌더링본을 검증한 뒤에만 설정이 교체된다(modern BAK-024와 같은 검증 명령).
   - name: "[BAK-208] Deploy resticprofile profile (raw, validated with resticprofile show)"

@@ -68,11 +68,12 @@
   | `otel_app_telemetry` | 아니오 | boolean. 컨테이너 앱 텔레메트리(Business Telemetry, ADR-0012) 수신 opt-in(기본 꺼짐). 아래 §3-3 "컨테이너 앱 텔레메트리" |
   | `host_agents_environment` | 예(호스트별) | `production` \| `staging` \| `development` \| `test`. 인벤토리 변수가 우선이고 없으면 이 KV 키. **그룹 기본값 없음** — 누락·허용 밖 값은 변경 전 실패(`MON-037`) |
   | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
+  | `backup_sqlite_snapshots` | 아니오 | SQLite 파일 절대 경로 목록(안전한 글자만, `..` 불가). 있으면 백업 직전 online backup 스냅샷을 만들어 백업한다(`docs/backup.md` §3-1, #323). 없으면 동작이 바뀌지 않는다 |
 
 - **실패 조건 (변경 전, check 모드 포함)**: 필수 키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 KV 키를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
 - **공유 시크릿**: `agents/openobserve`, `agents/rustfs`가 없거나 값이 비어 있으면 실패합니다(조회는 호스트마다 수행, TLS 검증은 `host_agents_vault_validate_certs`).
 - **제외 판정**: `otel_exclude_logs`는 경로 정규화 후 동일/glob/상위 디렉터리가 `security_logs` 경로를 덮으면 실패합니다(`/var/log/audit`, `/var/log/secure*` 포함).
-- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `otel_container_logs`, `otel_app_telemetry`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
+- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `otel_container_logs`, `otel_app_telemetry`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `backup_sqlite_snapshots`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
 - **테스트 seam**: `host_agents_kv_fixture`(`{host, openobserve, rustfs}`)가 정의되면 OpenBao를 조회하지 않습니다(molecule 공용 `group_vars`가 `_is_already_provisioned: true`와 함께 제공).
 
 ---
@@ -180,6 +181,17 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 - **로그 회전**: `/etc/logrotate.d/host-agents-raid-status`가 매일 회전, 3개 보관(`create 0640 root root`). otelcol은 modern에서 `CAP_DAC_READ_SEARCH`, legacy에서 root로 읽는다.
 - **알림**: `docs/openobserve_config.md`의 RAID 상태 알림 7개(`infra-raid-*`, `infra-host-status-silent`)와 런북 `docs/runbooks/alerts.md#raid-write-cache-disabled` 이하.
 - **롤아웃 순서**: Host Agents Deploy(카나리: CentOS 6·CentOS 7·Rocky 9 각 1대) → OpenObserve에 `host_status_logs` 레코드와 컬럼 도착 확인 → 전체 Deploy → `OpenObserve — Config`(plan 결과를 읽은 뒤 적용). Config를 먼저 적용하면 알림 SQL이 아직 없는 컬럼을 읽고, 무소식 알림이 모든 호스트에서 난다.
+
+## 3-7. 시각 동기 수집기 (`time_sync.yml`, `MON-250~254`, `MON-260~263`, Spec #322 / Ticket-14, #336)
+
+- **무엇**: 서버에 이미 있는 시각 동기 도구(`chronyc tracking` → `ntpq -pn` → `timedatectl` 순서로 처음 *답하는* 것)의 출력을 cron이 5분마다 읽어 `/var/log/host-agents/time-sync.jsonl`에 JSON 한 줄(`kind=time_sync`, `family=timesync`)을 append한다. 필드는 항상 같다: `tool`, `sync_status`(`synced`·`unsynced`·`no_tool`·`error`), `synced`(true/false/null), `offset_ms`(시스템 시각 − 기준 시각, 밀리초·부호 있음·모르면 null), `stratum`, `message`.
+- **읽기 전용·설치 없음**: 시각을 맞추거나 서비스를 건드리지 않고 아무것도 설치하지 않는다. 도구가 하나도 없으면 `sync_status=no_tool` 한 줄만 남긴다(알림 대상, 아래 알림 참고). 에이전트만 깔린 호스트에도 배포한다(#322 결정: 읽기 전용 수집은 Host Agents의 일부).
+- **상태 판정**: chronyc는 `Leap status`가 `Not synchronised`면 `unsynced`, 아니면 `System time`(fast/slow)으로 오차를 낸다. ntpq는 `*`(선택된 피어) 줄의 offset(ms)을 쓰고 선택된 피어가 없으면 `unsynced`다. timedatectl은 동기 여부만 알려 주므로 `offset_ms`는 null이다. 도구는 있는데 데몬이 답하지 않으면(chronyc 종료 코드 ≠ 0, ntpq에 머리줄 없음) 다음 도구로 넘어가고, 끝까지 답이 없으면 `no_tool`이 아니라 `unsynced`(message에 "not answering")다. 도구 호출이 제한 시간(기본 20초)을 넘기면 `error`다. 도구는 로캘에 따라 라벨이 바뀌므로 스크립트가 `LC_ALL=C`로 고정한다.
+- **CentOS 6 사실(2026-10-26 조사)**: 조사한 CentOS 6 호스트는 모두 `ntpd`를 끄고 cron의 `rdate`로 하루 한 번(02:00) 맞춘다. 그래서 이 호스트들은 `unsynced`(message `ntpq not answering`)로 남고 시각 동기 미동기 알림 대상이 된다. 상시 동기(ntpd 기동)를 쓸지, 이 알림을 받아들일지는 운영 결정이다(런북 `docs/runbooks/alerts.md#time-unsynced`).
+- **안전장치·이식성**: POSIX sh와 POSIX awk만 쓴다(CentOS 6 gawk 3.1.7에서 실제 호스트로 확인). 도구 호출마다 `timeout`(CentOS 6 coreutils 8.4는 `-k` 없음)을 건다. 어떤 경우에도 종료 코드는 0이다.
+- **스케줄·경로**: 모든 OS에서 `/etc/cron.d/host-agents-time-sync` 하나(5분 주기), logrotate는 매일·3개 보관. otelcol `filelog/host_status_logs`가 RAID 결과와 같은 수신기에서 파일별 `service.name=timesync`를 달아 `host_status_logs` 스트림으로 보낸다. `enable_time_sync: false`면 modern 경로는 cron을 지운다(`MON-254`).
+- **알림**: `docs/openobserve_config.md`의 시각 동기 알림 3개(`infra-time-offset-exceeded`, `infra-time-unsynced`, `infra-time-sync-unavailable`)와 런북 `docs/runbooks/alerts.md#time-offset-exceeded` 이하.
+- **롤아웃 순서**: Host Agents Deploy(카나리) → OpenObserve에 `kind=time_sync` 레코드와 `sync_status`·`offset_ms` 컬럼 도착 확인 → 전체 Deploy → `OpenObserve — Config`(plan 결과를 읽은 뒤 적용). Config를 먼저 적용하면 알림 SQL이 아직 없는 컬럼을 읽는다.
 
 ---
 
@@ -294,3 +306,12 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-241` | `Deploy the RAID status collector script (raw, POSIX sh, read-only)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |
 | `MON-242` | `Deploy logrotate configuration for raid.jsonl (raw)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |
 | `MON-243` | `Deploy the RAID status cron.d schedule (raw)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |
+| `MON-250` | `Ensure the Host Agents result directory exists (0755)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` (`/var/log/host-agents`, root `0755`, `MON-230`과 같은 속성) |
+| `MON-251` | `Deploy the time sync collector script (POSIX sh, read-only)` | `ansible.builtin.copy` | modern | Checksum 비교 (`/usr/local/sbin/host-agents-time-sync`, `0755`) |
+| `MON-252` | `Deploy logrotate configuration for time-sync.jsonl` | `ansible.builtin.template` | modern | Checksum 비교 (`0644`) |
+| `MON-253` | `Deploy the time sync cron.d schedule` | `ansible.builtin.template` | modern | Checksum 비교 (`/etc/cron.d/host-agents-time-sync`, 5분 주기, root, `0644`) |
+| `MON-254` | `Remove the time sync cron.d schedule when the collector is disabled` | `ansible.builtin.file` | modern | `enable_time_sync: false`일 때만, 파일 부존재 시 `ok` |
+| `MON-260` | `Ensure the Host Agents result directory exists (raw, 0755)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `raw_dir_cmd` sentinel (`0755`) |
+| `MON-261` | `Deploy the time sync collector script (raw, POSIX sh, read-only)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |
+| `MON-262` | `Deploy logrotate configuration for time-sync.jsonl (raw)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |
+| `MON-263` | `Deploy the time sync cron.d schedule (raw)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | ADR-0005 sentinel(`raw_upload.yml`) |

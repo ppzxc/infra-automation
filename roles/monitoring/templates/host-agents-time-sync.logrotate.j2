@@ -1,0 +1,10 @@
+# Ansible managed — 시각 동기 jsonl 회전 (#336). otelcol filelog는 fingerprint로 회전을 따라간다.
+{{ otel_time_sync_log_path }} {
+    daily
+    rotate {{ time_sync_logrotate_rotate | int }}
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 root root
+}

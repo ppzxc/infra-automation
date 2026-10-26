@@ -1,0 +1,7 @@
+               Local time: Mon 2026-10-26 12:26:29 KST
+           Universal time: Mon 2026-10-26 03:26:29 UTC
+                 RTC time: Mon 2026-10-26 03:26:29
+                Time zone: Asia/Seoul (KST, +0900)
+System clock synchronized: yes
+              NTP service: active
+          RTC in local TZ: no

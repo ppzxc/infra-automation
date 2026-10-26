@@ -308,6 +308,43 @@ sudo grep -E "faillock|pam_tally2" /var/log/secure | tail
 
 ---
 
+<a id="audit-watch-change"></a>
+## 🟠 계정·sudoers·sshd 설정 파일이 직접 변경됨 (`infra-audit-watch-change`)
+
+**조건**: auditd 감시 키 SYSCALL 기록(`key="identity"`: 계정 파일, `key="sudo_config"`: sudoers, `key="sshd_config"`: sshd 설정)이 5분 안에 1건 이상(재통지 5분). 계정 관리 도구(`useradd`·`usermod`·`passwd` 등, `o2c_audit_account_tools`)가 계정 파일을 바꾼 기록은 같은 변경이 이미 계정 변경 알림(`infra-account-change`)으로 가므로 제외한다. 그래서 한 변경에 알림이 두 번 오지 않는다. `sudo_logs`(sudo를 쓸 때마다 남음)와 `exec_log` 키는 대상이 아니다.
+
+**왜 중요한가**: 편집기·쉘로 `/etc/passwd`·`sudoers`·`sshd_config`를 직접 고치면 계정 변경 알림에 잡히지 않는다. 침입자가 계정·권한·접속 정책을 몰래 바꾸는 전형적인 방법이다. 프로비저닝(Semaphore)도 같은 기록을 남긴다.
+
+**확인**: 행의 실행 도구와 시각을 작업 이력과 대조한다. 로그 보기에서 같은 시각의 `AUID`(실제 로그인 계정)와 `type=PATH` 기록(파일 이름)을 본다.
+```bash
+sudo ausearch -k identity -ts today -i
+sudo ausearch -k sshd_config -ts today -i
+```
+
+**대응**: 계획에 없던 변경이면 파일을 백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다. 감시 규칙이 없는 호스트(프로비저닝 대상이 아닌 호스트)에서는 이 알림이 울리지 않는다.
+
+<a id="ssh-login-unregistered-source"></a>
+## 🟠 일반 계정이 등록되지 않은 출발지에서 SSH 로그인 성공 (`infra-ssh-login-unregistered-source`)
+
+**조건**: root가 아닌 계정의 SSH 로그인 성공이 정상 출발지 목록(OpenBao `agents/openobserve`의 `normal_sources`, kind 무관)에 없는 출발지에서 5분 안에 1건 이상(재통지 `o2c_unregistered_login_silence_minutes`, 기본 60분). 목록이 비어 있으면 모든 출발지가 미등록이라 모든 로그인이 대상이 되므로, 목록을 먼저 채운다. root 로그인은 root 알림이 맡는다.
+
+**왜 중요한가**: 탈취된 계정은 처음 보는 출발지에서 로그인한다. 출발지를 등록하지 않은 정상 접속도 같은 모양이다.
+
+**확인**: 행의 계정과 출발지가 본인·작업자·자동화인지 확인한다. 로그 보기에서 같은 출발지의 직전 실패 기록(무차별 대입 뒤 성공인지)을 본다.
+
+**대응**: 정상 접속이면 출발지를 `normal_sources`에 등록하고 `OpenObserve — Config`를 다시 실행한다. 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 뒤 보안 담당에게 보고한다. 등록은 값이 IP라 저장소가 아니라 OpenBao에만 둔다.
+
+<a id="root-crontab-change"></a>
+## 🟠 root crontab 변경 (`infra-root-crontab-change`)
+
+**조건**: cron 로그의 crontab 명령 기록 `(root) REPLACE (root)`(저장) 또는 `(root) DELETE (root)`(삭제)가 5분 안에 1건 이상(재통지 5분). 목록 조회(`LIST`)·편집 시작(`BEGIN EDIT`)·예약 작업 실행(`CMD`)과 다른 계정의 crontab은 대상이 아니다.
+
+**한계**: `crontab` 명령으로 바꾼 것만 로그에 남는다. `/var/spool/cron/root`를 직접 고치면 이 로그에 없다(필요한 수집은 `docs/openobserve_config.md`의 "잡을 수 없는 신호").
+
+**왜 중요한가**: root crontab은 root 권한으로 주기 실행되는 작업이라 침입자가 지속성을 심는 자리다.
+
+**확인·대응**: 행의 시각을 작업 이력과 대조한다. 계획에 없던 변경이면 서버에서 `sudo crontab -l -u root`로 내용을 백업본(`/var/spool/cron`)과 비교해 수상한 작업을 제거하고 보안 담당에게 보고한다.
+
 <a id="log-parse-errors"></a>
 ## 🟡 로그 해석 실패율 상승 (`infra-log-parse-errors-security-logs`, `infra-log-parse-errors-system-logs`)
 
@@ -513,6 +550,38 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 2. 호스트의 `/etc/cron.d/host-agents-raid-status`와 `/var/log/host-agents/raid.jsonl` 마지막 줄을 본다.
 3. 신규 편입 호스트면 Host Agents Deploy가 실행됐는지 확인한다. 배포 순서상 Deploy 전에 Config가 먼저 반영되면 모든 호스트에서 이 알림이 난다.
 
+<a id="time-offset-exceeded"></a>
+## 🟠 서버 시계 오차 1초 초과 (`infra-time-offset-exceeded`)
+
+시각 동기 수집기(`kind=time_sync`, 5분 주기)가 잰 시스템 시각과 기준 시각의 차이(`offset_ms`, 밀리초, 느리면 음수)의 절댓값이 1000을 넘는 판독이 15분에 2회 이상이다. chronyc·ntpq가 오차를 주고, timedatectl만 있는 호스트는 오차를 모르므로(null) 이 알림 대상이 아니다.
+
+**왜 중요한가**: 로그 시각과 인증서·토큰 검증이 어긋나고, 서버 간 로그를 시간순으로 맞추는 조사가 틀어진다.
+
+**확인·대응**
+1. 행의 도구(`tool`)에 맞춰 서버에서 `chronyc tracking`(`System time`) 또는 `ntpq -pn`(`*` 줄의 offset, 밀리초)을 본다. `chronyc sources`로 시간원이 살아 있는지 본다.
+2. 시간원에 닿지 않으면 방화벽·DNS·라우팅을 확인한다.
+3. 급히 맞춰야 하면 운영 승인 뒤에 `chronyc makestep`을 쓴다. 시계가 뒤로 가면 애플리케이션·인증서 검증에 영향이 있을 수 있으니 영향을 확인한다. 수집기는 시각을 맞추지 않는다.
+
+<a id="time-unsynced"></a>
+## 🟠 서버 시계 동기 안 됨: 30분 넘게 이어짐 (`infra-time-unsynced`)
+
+최근 35분 안의 시각 동기 판독이 6회 이상이고 **모두** `sync_status=unsynced`다(중간에 동기된 판독이 하나라도 있으면 울리지 않는다). 도구가 있는데 데몬이 답하지 않는 경우도 `unsynced`이며, `message`에 이유가 나온다(`chronyd reports: Not synchronised`, `ntpq not answering`).
+
+**CentOS 6 호스트**: 2026-10-26 조사에서 CentOS 6 호스트는 모두 `ntpd`를 끄고 cron의 `rdate`로 하루 한 번(02:00) 시각을 맞추고 있었다. 이 호스트들은 항상 `ntpq not answering`으로 이 알림 대상이 된다. 선택지는 둘이다: (a) `ntpd`를 켜 상시 동기로 바꾼다(호스트 변경이라 별도 승인·작업이 필요하다), (b) 하루 한 번 맞추는 방식을 받아들이고 알림을 운영 결정으로 닫는다. 어느 쪽이든 결정과 날짜를 비공개 노트에 남긴다.
+
+**확인·대응**
+1. `message`를 본다. chrony는 시간원 접속(`chronyc sources`, 방화벽), ntpq는 `service ntpd status`를 확인한다.
+2. 동기를 되살린 뒤 다음 판독(5분 안)에 `synced`가 한 번이라도 나오면 알림 조건이 풀린다.
+
+<a id="time-sync-unavailable"></a>
+## 🟠 서버 시각 동기 상태를 알 수 없음 (`infra-time-sync-unavailable`)
+
+시각 동기 수집기가 `sync_status=no_tool`(chronyc·ntpq·timedatectl이 하나도 없음) 또는 `error`(도구 호출이 20초 안에 끝나지 않음)를 15분에 2회 이상 남겼다. 도구가 없으면 이 서버의 시계는 감시되지 않는다.
+
+**확인·대응**
+1. `no_tool`이면 그 호스트가 시각을 어떻게 맞추는지 확인한다. Host Agents는 시각 동기 도구를 설치하지 않는다(에이전트만 깔린 호스트는 호스트 변경 대상이 아니다).
+2. `error`면 서버 부하와 `chronyd`/`ntpd` 상태를 본다.
+
 ---
 
 ## 스위치 syslog 알림 (Spec #277)
@@ -651,6 +720,17 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 **확인**: 행의 출발지가 사내 작업자·Semaphore인지 본다. 로그 보기에서 실패한 계정과 접속 방식(`ui`: GUI/ssh)을 읽는다. 같은 출발지의 로그인 성공이 이어졌는지 본다.
 
 **대응**: 외부·미확인 출발지면 관리 접속 허용 주소(trusted host)와 관리 인터페이스 노출 범위를 점검해 막는다. 성공이 이어졌으면 계정 변경 알림(아래)과 함께 보고 계정을 잠근다. 작업자의 오입력이면 기록만 남긴다.
+
+<a id="fortigate-admin-login-new-source"></a>
+### 🟠 방화벽 관리자 로그인 성공: 등록되지 않은 출발지 (`infra-fortigate-admin-login-new-source`)
+
+**조건**: `subtype=system`, `action=login`, `status=success`인 줄의 출발지가 정상 출발지 목록(OpenBao `normal_sources`, kind 무관)에 없거나 출발지를 알 수 없을 때 5분 안에 1건 이상(재통지 `o2c_fortigate_new_source_silence_minutes`, 기본 60분). 목록이 비어 있으면 모든 관리자 로그인이 대상이다. 합성 입력으로만 검증한 한계는 이 장의 다른 방화벽 알림과 같다(실장비 줄 모양은 위 5절 한계 참고).
+
+**왜 중요한가**: 방화벽 관리자 계정이 뚫리면 모든 통신 정책을 바꿀 수 있다. 처음 보는 출발지의 관리자 로그인은 사람이 확인해야 한다.
+
+**확인**: 행의 출발지가 사내 작업자·Semaphore인지 본다. 로그 보기에서 계정과 접속 방식(`ui`)을 읽고, 같은 출발지의 직전 로그인 실패(실패 알림)가 있었는지 본다.
+
+**대응**: 정상이면 출발지를 `normal_sources`에 등록하고 `OpenObserve — Config`를 다시 실행한다. 확인되지 않으면 관리자 비밀번호 변경과 관리 접속 허용 주소(trusted host) 점검 뒤 보안 담당에게 보고한다.
 
 <a id="fortigate-change-unapproved"></a>
 ### 🔴 방화벽 정책·계정 변경, 승인 시간 밖 (`infra-fortigate-change-unapproved`)

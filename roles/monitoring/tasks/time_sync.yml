@@ -1,0 +1,90 @@
+---
+# ==============================================================================
+# 시각 동기 수집기 (Spec #322 / Ticket-14, #336)
+# ==============================================================================
+# 읽기 전용 점검 스크립트라 Host Agents의 일부로 보고 에이전트만 깔린 호스트에도 배포한다(#322 결정 Q5).
+# 시각 동기 도구(chronyc·ntpq·timedatectl)는 설치하지 않는다. 없으면 스크립트가 sync_status=no_tool 한 줄만 남긴다.
+# RAID 수집기(raid_status.yml)와 같은 방식이다: 모든 OS에서 cron.d 5분 주기, 결과는 /var/log/host-agents의 jsonl이고
+# otelcol이 filelog/host_status_logs로 읽는다.
+
+- name: "Deploy the time sync collector"
+  when:
+    - host_agents_os_path == 'modern'
+    - enable_time_sync | bool
+  block:
+  - name: "[MON-250] Ensure the Host Agents result directory exists (0755)"
+    ansible.builtin.file:
+      path: "{{ otel_time_sync_log_path | dirname }}"
+      state: directory
+      owner: root
+      group: root
+      mode: '0755'
+
+  - name: "[MON-251] Deploy the time sync collector script (POSIX sh, read-only)"
+    ansible.builtin.copy:
+      src: host-agents-time-sync.sh
+      dest: "{{ time_sync_script_path }}"
+      owner: root
+      group: root
+      mode: '0755'
+
+  - name: "[MON-252] Deploy logrotate configuration for time-sync.jsonl"
+    ansible.builtin.template:
+      src: host-agents-time-sync.logrotate.j2
+      dest: "{{ time_sync_logrotate_path }}"
+      owner: root
+      group: root
+      mode: '0644'
+
+  - name: "[MON-253] Deploy the time sync cron.d schedule"
+    ansible.builtin.template:
+      src: host-agents-time-sync.cron.j2
+      dest: "{{ time_sync_cron_path }}"
+      owner: root
+      group: root
+      mode: '0644'
+
+- name: "[MON-254] Remove the time sync cron.d schedule when the collector is disabled"
+  ansible.builtin.file:
+    path: "{{ time_sync_cron_path }}"
+    state: absent
+  when:
+    - host_agents_os_path == 'modern'
+    - not enable_time_sync | bool
+
+- name: "Deploy the time sync collector on CentOS 6/7 (raw)"
+  when:
+    - host_agents_is_legacy | bool
+    - enable_time_sync | bool
+  block:
+  - name: "[MON-260] Ensure the Host Agents result directory exists (raw, 0755)"
+    ansible.builtin.raw: "{{ (otel_time_sync_log_path | dirname) | raw_dir_cmd(host_agents_owner, host_agents_group, '0755') }}"
+    register: _legacy_time_sync_dir
+    changed_when: _legacy_time_sync_dir.stdout | default('') | raw_changed
+
+  - name: "[MON-261] Deploy the time sync collector script (raw, POSIX sh, read-only)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ time_sync_script_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.file', role_path ~ '/files/host-agents-time-sync.sh', rstrip=false) }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0755'
+
+  - name: "[MON-262] Deploy logrotate configuration for time-sync.jsonl (raw)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ time_sync_logrotate_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/host-agents-time-sync.logrotate.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0644'
+
+  - name: "[MON-263] Deploy the time sync cron.d schedule (raw)"
+    ansible.builtin.import_tasks: raw_upload.yml
+    vars:
+      _raw_dest: "{{ time_sync_cron_path }}"
+      _raw_content: "{{ lookup('ansible.builtin.template', role_path ~ '/templates/host-agents-time-sync.cron.j2') }}"
+      _raw_owner: "{{ host_agents_owner }}"
+      _raw_group: "{{ host_agents_group }}"
+      _raw_mode: '0644'

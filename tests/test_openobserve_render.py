@@ -18,7 +18,7 @@ import yaml
 from o2c_render import KV, RENDER_LOG_ENV, ROOT_DIR, render_desired
 from o2c_alert_helpers import (
     COUNT_FIELDS, DEVICE_TIME_ALERTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS, FORTIGATE_FN, LONGEST_ROW_VALUES,
-    LONGEST_TEXT, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS, PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE,
+    LONGEST_TEXT, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS, PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
     RUNBOOK, SECURITY_ALERTS, SECURITY_TIME_CASES, SELFTEST, SWITCH_ALERTS, SWITCH_FN, SYSTEM_TIME_CASES,
     TEXT_VALUE, _branch_devices, _decode_raw_url, _ev, _fail, _filters, _fixture_records, _kst_us, _raw_line,
     _raw_original, _rendered_message, _row_lines, _run_alert_on_sqlite, _run_memory_alert_on_sqlite, _sql,
@@ -301,6 +301,137 @@ def test_raid_alerts_are_p2_with_a_two_reading_window_and_a_runbook_entry(desire
         trigger = desired.store["alert"][name]["trigger_condition"]
         assert (trigger["period"], trigger["frequency"]) == (15, 5), name
         assert "HAVING count(*) >= 2" in desired.store["alert"][name]["query_condition"]["sql"], name
+
+
+def test_time_sync_alerts_are_p2_on_host_status_logs_with_their_windows_and_a_runbook_entry(desired):
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    for name, (period, frequency, marker) in TIME_ALERTS.items():
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == "P2 경고", name
+        assert alert["stream_name"] == "host_status_logs", name
+        trigger = alert["trigger_condition"]
+        assert (trigger["period"], trigger["frequency"]) == (period, frequency), name
+        assert marker in alert["query_condition"]["sql"], name
+        assert "kind = 'time_sync'" in alert["query_condition"]["sql"], name
+        assert f"(`{name}`)" in runbook and f"`{name}`" in spec, name
+
+
+def _host_status_records(case):
+    """The records of one fixture case: every `ts` (seconds before now, one or a list) becomes one record of that case's host."""
+    base = 1_792_767_302_000_000
+    out = []
+    for rec in case["records"]:
+        rec = dict(rec)
+        stamps = rec.pop("ts", 0)
+        for stamp in (stamps if isinstance(stamps, list) else [stamps]):
+            out.append(dict(rec, host_name=case["host"], _timestamp=base + int(stamp) * 1_000_000))
+    return out
+
+
+def test_raid_and_time_sync_alerts_never_fire_on_each_others_records_when_they_run_on_every_case(desired):
+    """RAID and time sync share the host_status_logs stream: one family's records must never fire the other family's alerts."""
+    raid = [n for n in sorted(RAID_ALERTS) if n != "infra-host-status-silent"]   # the roster alert needs the inventory
+    time_sync = sorted(TIME_ALERTS)
+    cases = {n: FIXTURES[n]["cases"] for n in raid + time_sync}
+    records = [r for n in cases for case in cases[n] for r in _host_status_records(case)]
+    time_hosts = {c["host"] for n in time_sync for c in cases[n]}
+    for name in time_sync:      # a time alert fires on exactly its own firing cases, whatever RAID records sit in the stream
+        fired = {row["host_name"] for row in _run_alert_on_sqlite(_sql(desired, name), records, "host_status_logs")}
+        assert fired == {c["host"] for c in cases[name] if c["fires"]}, name
+    for name in raid:           # a RAID alert never fires on a time sync record
+        fired = {row["host_name"] for row in _run_alert_on_sqlite(_sql(desired, name), records, "host_status_logs")}
+        assert not fired & time_hosts, name
+
+
+def test_a_time_sync_record_does_not_count_for_the_raid_collector_silence_check(desired):
+    """infra-host-status-silent waits for the RAID collector's tool_status line; a time_sync line must not satisfy it."""
+    sql = _sql(desired, "infra-host-status-silent")
+    assert "kind = 'tool_status'" in sql and "time_sync" not in sql
+
+
+# --- 남은 보안 로그 알림 (Spec #322 / Ticket-8, #330) ---------------------------------------------------------------------------
+REMAINING_SECURITY_ALERTS = ("infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
+                             "infra-fortigate-admin-login-new-source")
+
+
+def _case_records(name, case):
+    """The records of one fixture case the way the verification step ingests them (fake host, repeat expanded, placeholder sources skipped)."""
+    spec = FIXTURES[name]
+    out = []
+    for rec in case["records"]:
+        rec = dict(rec)
+        if str(rec.get("source_address", "")).startswith("@"):
+            return None                       # a registered source only exists with OpenBao normal_sources: the integration test covers it
+        omit = rec.pop("omit_host_field", False)
+        rec.pop("ts", None)
+        if isinstance(rec.get("body"), str):
+            rec["body"] = rec["body"].replace("{host}", case["host"])
+        if not omit:
+            rec[spec.get("host_field", "host_name")] = case["host"]
+        out += [dict(rec) for _ in range(rec.pop("repeat", 1))]
+    return out
+
+
+@pytest.mark.parametrize("name", REMAINING_SECURITY_ALERTS)
+def test_remaining_security_alert_fixtures_fire_as_expected_when_the_rendered_sql_runs(desired, name):
+    alert = desired.store["alert"][name]
+    spec = FIXTURES[name]
+    cases = [(c, _case_records(name, c)) for c in spec["cases"]]
+    cases = [(c, recs) for c, recs in cases if recs is not None]
+    assert {c["fires"] for c, _ in cases} == {True, False}, name
+    records = [r for _, recs in cases for r in recs]
+    rows = _run_alert_on_sqlite(alert["query_condition"]["sql"], records, alert["stream_name"])
+    fired = {row[spec.get("row_key", "host_name")] for row in rows}
+    assert fired == {c["host"] for c, _ in cases if c["fires"]}, name
+
+
+def test_a_watched_file_change_made_by_an_account_tool_alerts_once_not_twice(desired):
+    """useradd changes /etc/passwd (a watch-key SYSCALL) and also writes ADD_USER: only the existing account-change alert may fire."""
+    watch, change = ("infra-audit-watch-change", "infra-account-change")
+    cases = {c["host"]: c for c in FIXTURES[watch]["cases"]}
+    for host in ("verify-watch-useradd", "verify-watch-passwd"):
+        records = _case_records(watch, cases[host])
+        watch_rows = _run_alert_on_sqlite(_sql(desired, watch), records, "security_logs")
+        change_rows = _run_alert_on_sqlite(_sql(desired, change), records, "security_logs")
+        assert watch_rows == [] and len(change_rows) == 1, host
+    editor = _case_records(watch, cases["verify-watch-identity-vim"])
+    assert len(_run_alert_on_sqlite(_sql(desired, watch), editor, "security_logs")) == 1
+    assert _run_alert_on_sqlite(_sql(desired, change), editor, "security_logs") == []        # a hand edit leaves no ADD_USER record
+
+
+def test_the_audit_watch_alert_covers_the_account_sudoers_and_sshd_keys_but_not_the_noisy_sudo_log_or_exec_keys(desired):
+    sql = _sql(desired, "infra-audit-watch-change")
+    for key in ("identity", "sudo_config", "sshd_config"):
+        assert f'key="{key}"' in sql, key
+    for key in ("sudo_logs", "exec_log"):
+        assert f'key="{key}"' not in sql, key
+
+
+def test_root_crontab_alert_reads_the_cron_log_not_the_audit_stream(desired):
+    alert = desired.store["alert"]["infra-root-crontab-change"]
+    assert alert["stream_name"] == "system_logs" and alert["context_attributes"]["severity"] == "P2 경고"
+    trigger = alert["trigger_condition"]
+    assert (trigger["period"], trigger["frequency"], trigger["silence"]) == (5, 1, 5)
+    sql = alert["query_condition"]["sql"]
+    assert "(root) REPLACE (root)" in sql and "(root) DELETE (root)" in sql and "LIST" not in sql
+
+
+def test_the_unregistered_login_alerts_have_no_registered_condition_without_normal_sources(desired):
+    """With an empty normal_sources list every source is unregistered (same rule as the root login alerts)."""
+    for name in ("infra-ssh-login-unregistered-source", "infra-fortigate-admin-login-new-source"):
+        assert "NOT IN" not in _sql(desired, name), name
+
+
+def test_every_remaining_security_alert_has_a_runbook_entry_and_a_spec_mention_and_the_missing_collection_is_recorded(desired):
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    for name in REMAINING_SECURITY_ALERTS:
+        anchor = name.removeprefix("infra-")
+        assert f'<a id="{anchor}"></a>' in runbook and f"(`{name}`)" in runbook and f"`{name}`" in spec, name
+    # 잡을 수 없는 신호와 그 신호에 필요한 수집(#330)
+    for token in ("authorized_keys", "SSL VPN", "필요한 수집", "ssh_keys"):
+        assert token in spec, token
 
 
 def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_windows(desired):

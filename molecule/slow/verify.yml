@@ -607,6 +607,48 @@
           changed_when: false
           failed_when: _verify_raid_run.rc != 0 or _verify_raid_run.stdout | trim != '1'
 
+        - name: "[VERIFY-MON-250] Check the time sync collector files"
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop:
+            - /var/log/host-agents
+            - /usr/local/sbin/host-agents-time-sync
+            - /etc/logrotate.d/host-agents-time-sync
+            - /etc/cron.d/host-agents-time-sync
+          register: _verify_time_sync_files
+
+        - name: "[VERIFY-MON-251] Verify the time sync collector script, logrotate and cron are root-owned with the documented modes"
+          ansible.builtin.assert:
+            that:
+              - _verify_time_sync_files.results | map(attribute='stat.exists') | list == [true, true, true, true]
+              - _verify_time_sync_files.results | map(attribute='stat.pw_name') | unique | list == ['root']
+              - (_verify_time_sync_files.results | map(attribute='stat.mode') | list) == ['0755', '0755', '0644', '0644']
+
+        - name: "[VERIFY-MON-252] Read the time sync logrotate and cron files"
+          ansible.builtin.slurp:
+            src: "{{ item }}"
+          loop:
+            - /etc/logrotate.d/host-agents-time-sync
+            - /etc/cron.d/host-agents-time-sync
+          register: _verify_time_sync_cfg
+
+        - name: "[VERIFY-MON-253] Verify the cron runs the collector every 5 minutes as root and logrotate recreates time-sync.jsonl"
+          ansible.builtin.assert:
+            that:
+              - "'/var/log/host-agents/time-sync.jsonl {' in (_verify_time_sync_cfg.results[0].content | b64decode)"
+              - "'create 0640 root root' in (_verify_time_sync_cfg.results[0].content | b64decode)"
+              - "'*/5 * * * * root ' in (_verify_time_sync_cfg.results[1].content | b64decode)"
+              - "'/usr/local/sbin/host-agents-time-sync' in (_verify_time_sync_cfg.results[1].content | b64decode)"
+
+        - name: "[VERIFY-MON-251] Run the collector once and verify it leaves exactly one time_sync line"
+          ansible.builtin.shell: |
+            set -e
+            TIME_SYNC_LOG=/tmp/verify-time-sync.jsonl /usr/local/sbin/host-agents-time-sync
+            grep -c '"kind":"time_sync","family":"timesync"' /tmp/verify-time-sync.jsonl
+          register: _verify_time_sync_run
+          changed_when: false
+          failed_when: _verify_time_sync_run.rc != 0 or _verify_time_sync_run.stdout | trim != '1'
+
         - name: "[VERIFY-MON-005] Verify otelcol-contrib service unit or init script"
           ansible.builtin.assert:
             that:
@@ -797,6 +839,20 @@
             grep -q '^/var/log/host-agents/backup.jsonl {' /etc/logrotate.d/host-agents-backup &&
             (! command -v logrotate >/dev/null || logrotate -d /etc/logrotate.d/host-agents-backup >/dev/null 2>&1)
           changed_when: false
+
+        # 이 시나리오의 호스트 입력에는 backup_sqlite_snapshots가 없다: 입력이 없는 호스트는 아무것도 달라지지 않아야 한다(#323).
+        # 입력이 있을 때의 스냅샷·실패 기록은 pytest(tests/test_backup_sqlite_snapshot.py)가 진짜 resticprofile로 확인한다.
+        - name: "[VERIFY-BAK-028] Verify a host without backup_sqlite_snapshots gets no snapshot step in the profile"
+          ansible.builtin.shell: >-
+            ! grep -q 'host-agents-sqlite-snapshot' /etc/restic/profiles.yaml &&
+            ! grep -q 'host-agents-sqlite' /etc/restic/profiles.yaml
+          changed_when: false
+
+        - name: "[VERIFY-BAK-029] Verify a host without backup_sqlite_snapshots gets no snapshot script"
+          ansible.builtin.stat:
+            path: /usr/local/sbin/host-agents-sqlite-snapshot
+          register: _verify_bak_snapshot_script
+          failed_when: _verify_bak_snapshot_script.stat.exists
 
         - name: "[VERIFY-BAK-060] Verify the profile wires the hooks and status-file"
           ansible.builtin.shell: >-

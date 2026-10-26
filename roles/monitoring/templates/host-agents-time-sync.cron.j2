@@ -1,0 +1,4 @@
+# Ansible managed — 시각 동기 수집기 (#336). 읽기 전용이며 결과는 {{ otel_time_sync_log_path }}에 남는다.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/{{ time_sync_interval_minutes | int }} * * * * root TIME_SYNC_LOG={{ otel_time_sync_log_path }} TIME_SYNC_TIMEOUT={{ time_sync_timeout_seconds | int }} {{ time_sync_script_path }} >/dev/null 2>&1

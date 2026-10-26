@@ -1,0 +1,13 @@
+Reference ID    : C0000201 (192.0.2.1)
+Stratum         : 3
+Ref time (UTC)  : Mon Oct 26 03:13:00 2026
+System time     : 0.000035050 seconds slow of NTP time
+Last offset     : -0.000131517 seconds
+RMS offset      : 0.000065141 seconds
+Frequency       : 2.269 ppm fast
+Residual freq   : -0.000 ppm
+Skew            : 0.005 ppm
+Root delay      : 0.006055390 seconds
+Root dispersion : 0.001038871 seconds
+Update interval : 1032.4 seconds
+Leap status     : Normal

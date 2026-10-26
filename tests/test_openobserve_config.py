@@ -24,7 +24,7 @@ from o2c_render import KV, WEBHOOK_URL, fixture_args, render_desired
 from o2c_alert_helpers import (  # 렌더 테스트와 공유하는 상수·헬퍼(#348)
     DEFAULTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS,
     FORTIGATE_FN, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS,
-    PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE,
+    PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
     RUNBOOK, SECURITY_ALERTS, SECURITY_TIME_CASES, SELFTEST,
     SWITCH_ALERTS, SWITCH_FN, SYSTEM_TIME_CASES, _branch_devices,
     _date_format, _decode_raw_url, _fail, _kst_us,
@@ -736,12 +736,13 @@ def test_ssh_failure_alerts_ignore_the_normal_source_list(o2):
         assert not any(ip in _sql(o2, name) for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP)), name
 
 
-def test_changing_the_source_list_updates_only_the_root_alerts(o2):
+def test_changing_the_source_list_updates_only_the_alerts_that_read_it(o2):
     assert _apply(o2, kv=KV_SOURCES).returncode == 0
     o2.writes.clear()
     moved = dict(KV, normal_sources=[{"address": "192.0.2.99", "kind": "office"}])
     assert _apply(o2, kv=moved).returncode == 0
-    ids = {o2.store["alert"][n]["alert_id"] for n in ("infra-root-login-success", "infra-root-login-known")}
+    ids = {o2.store["alert"][n]["alert_id"] for n in ("infra-root-login-success", "infra-root-login-known",
+                                                      "infra-ssh-login-unregistered-source", "infra-fortigate-admin-login-new-source")}   # 뒤 둘은 #330
     assert {p.rsplit("/", 1)[1] for _, p, _ in o2.writes} == ids and all(m == "PUT" for m, _, _ in o2.writes)
 
 
@@ -2392,10 +2393,31 @@ def test_sudo_risky_command_list_builds_safe_like_conditions_and_rejects_unsafe_
 
 @pytest.mark.parametrize("extra", [{"o2c_privileged_groups": []}, {"o2c_privileged_groups": ["wh'eel"]},
                                    {"o2c_sudo_risky_commands": [{"label": "x", "patterns": ["a'b"]}]},
-                                   {"o2c_sudo_protected_services": ["Auditd"]}, {"o2c_ssh_bruteforce_min_failures": 0}])
+                                   {"o2c_sudo_protected_services": ["Auditd"]}, {"o2c_ssh_bruteforce_min_failures": 0},
+                                   {"o2c_audit_account_tools": ["Useradd"]}, {"o2c_audit_account_tools": ["a'b"]},
+                                   {"o2c_unregistered_login_silence_minutes": "1h"}, {"o2c_fortigate_new_source_silence_minutes": "x"}])
 def test_invalid_security_alert_variables_fail_before_any_request(o2, extra):
     res = _apply(o2, extra=extra)
     assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+
+
+def test_unregistered_source_alerts_skip_every_registered_source_and_alert_on_the_rest(o2):
+    """With normal_sources set, a registered office login is quiet and an unknown source (public or private) alerts (#330)."""
+    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    ssh = _sql(o2, "infra-ssh-login-unregistered-source")
+    fw = _sql(o2, "infra-fortigate-admin-login-new-source")
+    for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP):
+        assert f"'{ip}'" in ssh and f"'{ip}'" in fw
+    assert "source_address NOT IN" in ssh and "source_address NOT IN" in fw
+    rows = [("registered", OFFICE_IP, "deploy"), ("semaphore", SEMAPHORE_IP, "deploy"), ("public", "198.51.100.7", "deploy"),
+            ("private", "10.0.0.8", "deploy"), ("root", "198.51.100.8", "root")]
+    records = [_login(h, src, user=user) for h, src, user in rows]
+    fired = {r["host_name"] for r in _run_alert_on_sqlite(ssh.replace('"security_logs"', '"t"'), records, "t")}
+    assert fired == {"public", "private"}
+    fw_records = [{"service_name": "fortigate-syslog", "source_address": src, "body": f'devname="{h}" type="event" subtype="system" user="admin" action="login" status="success"'}
+                  for h, src in (("registered", OFFICE_IP), ("unknown", "198.51.100.9"))]
+    fired = {r["device"] for r in _run_alert_on_sqlite(fw.replace('"security_logs"', '"t"'), fw_records, "t")}
+    assert fired == {"unknown"}
 
 
 def test_every_new_alert_has_a_runbook_section_and_a_spec_mention():
@@ -2415,7 +2437,7 @@ def test_raid_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_o
     assert res.returncode == 0, res.stdout + res.stderr
     records = [r for p, _, rs in o2.ingests if "/host_status_logs_alert_verify/" in p for r in rs]
     searches = [sql for stream, sql in o2.searches if stream == "host_status_logs_alert_verify"]
-    assert len(searches) == len(RAID_ALERTS)
+    assert len(searches) == len(RAID_ALERTS) + len(TIME_ALERTS)       # 같은 스트림을 읽는 시각 동기 알림(#336)이 함께 검색된다
     for name, marker in RAID_ALERTS.items():
         found = [s for s in searches if marker.replace("\n", " ") in s.replace("\n", " ")]
         assert len(found) == 1, (name, found)
@@ -2431,6 +2453,13 @@ def test_raid_alert_sql_reads_only_fields_every_record_of_its_kind_carries():
     script = (ROOT_DIR / "roles" / "monitoring" / "files" / "host-agents-raid-status.sh").read_text(encoding="utf-8")
     for field in ("kind", "hw_state", "hw_name", "raw_state", "cache_status", "cache_reason", "backup_power_operation",
                   "status", "message"):
+        assert f'\\"{field}\\":' in script or f'"{field}":' in script, field
+
+
+def test_time_sync_alert_sql_reads_only_fields_every_record_carries():
+    """The time sync alerts read only fields the collector always emits (a column that never arrived makes OpenObserve reject the SQL)."""
+    script = (ROOT_DIR / "roles" / "monitoring" / "files" / "host-agents-time-sync.sh").read_text(encoding="utf-8")
+    for field in ("kind", "sync_status", "offset_ms", "tool", "message"):
         assert f'\\"{field}\\":' in script or f'"{field}":' in script, field
 
 

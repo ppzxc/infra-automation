@@ -1,0 +1,17 @@
+---
+# ==============================================================================
+# Host Audit — KISA 월간 악화 알림 판정 (러너 localhost 전용, Spec #322 / Ticket-9, #331)
+# ==============================================================================
+# 악화된 항목이 있는데 알림이 전달되지 않았으면(webhook 없음·전송 거부·연결 실패) 실행을 실패로 끝내 조용히 지나가지 않게 한다.
+# 보관 판정(AUD-516)과 메일 판정(AUD-610)이 모두 끝난 뒤 마지막에 판정한다: 알림 실패가 다른 판정을 가리지 않는다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-642] Fail the run when a KISA worsening notification could not be delivered"
+  ansible.builtin.assert:
+    that:
+      - not (_host_audit_kisa_alert_plan.send | bool) or ((_host_audit_alert_target | default({})).url | default('') is match('^https?://'))
+      - not (_host_audit_kisa_alert_plan.send | bool) or ((_host_audit_kisa_alert_post.status | default(-1)) in [200, 201, 202, 204])
+    fail_msg: >-
+      Host Audit KISA 악화 알림을 보내지 못했습니다(악화 항목 {{ _host_audit_kisa_alert_plan.count | default(0) }}건).
+      webhook 주소가 없거나(OpenBao agents/openobserve의 alert_webhook_plain_url) 전송이 거부됐습니다
+      (응답 {{ _host_audit_kisa_alert_post.status | default('없음') }}). 보고서와 보관은 끝났으니 webhook을 고친 뒤 담당자에게 직접 알리세요.
+    quiet: true

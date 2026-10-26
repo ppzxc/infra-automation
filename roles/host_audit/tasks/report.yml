@@ -117,11 +117,17 @@
     - name: Mail the report
       ansible.builtin.include_tasks: mail.yml
 
+    - name: Notify KISA items that got worse since the Audit Baseline
+      ansible.builtin.include_tasks: kisa_alert.yml
+
     - name: Judge keeping the originals
       ansible.builtin.include_tasks: storage_result.yml
 
     - name: Judge the report mail
       ansible.builtin.include_tasks: mail_result.yml
+
+    - name: Judge the KISA worsening notification
+      ansible.builtin.include_tasks: kisa_alert_result.yml
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml

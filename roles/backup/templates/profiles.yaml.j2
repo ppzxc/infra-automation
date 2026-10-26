@@ -28,6 +28,9 @@ global:
     retry-lock: 30m
     run-before:
       - {{ (backup_event_script_path ~ ' start') | to_json }}
+{% if host_agents_inputs.backup_sqlite_snapshots | default([]) | length > 0 %}
+      - {{ ([backup_sqlite_snapshot_script_path, backup_sqlite_snapshot_dir] + host_agents_inputs.backup_sqlite_snapshots) | map('quote') | join(' ') | to_json }}
+{% endif %}
 {% for hook in host_agents_inputs.backup_pre_hooks %}
       - {{ hook | to_json }}
 {% endfor %}
