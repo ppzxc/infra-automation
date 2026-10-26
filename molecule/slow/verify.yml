@@ -854,6 +854,12 @@
           register: _verify_bak_snapshot_script
           failed_when: _verify_bak_snapshot_script.stat.exists
 
+        - name: "[VERIFY-BAK-032] Verify a host without backup_sqlite_snapshots gets no snapshot directory"
+          ansible.builtin.stat:
+            path: /var/backups/host-agents-sqlite
+          register: _verify_bak_snapshot_dir
+          failed_when: _verify_bak_snapshot_dir.stat.exists
+
         - name: "[VERIFY-BAK-060] Verify the profile wires the hooks and status-file"
           ansible.builtin.shell: >-
             grep -q 'status-file: "/var/lib/host-agents/restic-status.json"' /etc/restic/profiles.yaml &&

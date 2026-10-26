@@ -180,6 +180,17 @@
           mode: '0755'
         when: host_agents_inputs.backup_sqlite_snapshots | default([]) | length > 0
 
+      # /var/backups는 Debian 계열에만 있다. RHEL 계열에는 없어서 서비스 샌드박스(ProtectSystem=strict, `-/var/backups`는 없으면 건너뜀)가 읽기 전용이 되고
+      # 스크립트의 mkdir이 실패한다(ns0331 첫 백업). 입력이 있는 호스트에서만 스냅샷 디렉터리(와 없는 부모)를 미리 만든다.
+      - name: "[BAK-032] Ensure the SQLite snapshot directory exists (0700; also creates /var/backups on hosts that lack it)"
+        ansible.builtin.file:
+          path: "{{ backup_sqlite_snapshot_dir }}"
+          state: directory
+          owner: root
+          group: root
+          mode: '0700'
+        when: host_agents_inputs.backup_sqlite_snapshots | default([]) | length > 0
+
       # 새 resticprofile 바이너리로 렌더링본을 검증한 뒤에만 설정이 교체된다(실패 시 기존 설정 불변).
       - name: "[BAK-024] Deploy resticprofile profile (validated with resticprofile show)"
         ansible.builtin.template:
