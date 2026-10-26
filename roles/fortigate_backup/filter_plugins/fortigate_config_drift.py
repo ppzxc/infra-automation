@@ -8,6 +8,9 @@ _TS_RE = re.compile(r"_(\d{8}T\d{6})\.conf$")
 _SET_WORDS = ("set", "unset", "append", "select", "unselect")
 # 멤버가 달라진 비교에서는 멤버 고유 설정을 변경으로 보지 않는다.
 _MEMBER_SPECIFIC = {("config system global", "hostname"), ("config system ha", "priority")}
+# 내보낼 때마다 암호문이 새로 만들어지는 키(실측: 같은 설정을 연달아 받아도 값이 다르다).
+# 값 차이는 변경으로 보지 않고, 키가 생기거나 사라진 경우만 변경으로 본다.
+_VOLATILE = {("config system acme", "store-passphrase"), ("config system ha", "password")}
 
 
 def _clean(text):
@@ -67,7 +70,9 @@ def fortigate_config_changes(current, previous, member_changed=False):
         section = path[0] if path else ""
         keys = {
             k for k in set(c) | set(p)
-            if c.get(k) != p.get(k) and not (member_changed and (section, k) in _MEMBER_SPECIFIC)
+            if c.get(k) != p.get(k)
+            and not (member_changed and (section, k) in _MEMBER_SPECIFIC)
+            and not ((section, k) in _VOLATILE and k in c and k in p)
         }
         if keys:
             found.setdefault(_label(path), set()).update(keys)
