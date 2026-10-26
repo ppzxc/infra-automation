@@ -674,3 +674,37 @@ def test_security_alerts_are_created_with_their_grades_windows_and_raw_log_links
         assert (trigger["period"], trigger["frequency"], trigger["silence"], a["pending_period_sec"]) == (period, 1, silence, pending * 60), name
         decoded = _decode_raw_url(_raw_original(desired, a))[2]   # 모두 WHERE에서 원문 조회를 파생한다
         assert decoded.startswith('SELECT * FROM "security_logs" WHERE ') and "count(" not in decoded, name
+
+
+# --- infra-oom-kill 자기 증식 루프(알림 서버가 알림 본문·쿼리 계획을 로그로 남기면 같은 알림에 다시 걸림) ---
+
+OOM_QUERY_PLAN_LOG = ("Oct 26 15:32:36 ns0217 bot-java[2513767]:              FilterExec: (lower(body@1) LIKE %killed process% OR "
+                      "lower(body@1) LIKE %out of memory: kill process% OR lower(body@1) LIKE %invoked oom-killer%) AND _timestamp@0 >= 1792995720000000")
+OOM_PREVIOUS_ALERT_LOG = ("Oct 26 16:59:05 ns0217 bot-java[2513767]: textToAll text=🟠 [P2 경고] OOM kill로 프로세스 강제 종료 "
+                          "• ns0217 (39.116.31.229): 종료된 프로세스 " + OOM_QUERY_PLAN_LOG)
+
+
+@pytest.mark.parametrize("body", [OOM_QUERY_PLAN_LOG, OOM_PREVIOUS_ALERT_LOG, OOM_QUERY_PLAN_LOG * 200])
+@pytest.mark.parametrize("source", ["bot-java", "dockerd"])
+def test_oom_kill_alert_ignores_logs_that_merely_quote_its_own_pattern(desired, body, source):
+    """알림 서버(bot-java)·dockerd가 쿼리 계획이나 이전 알림 본문을 로그로 남겨도 OOM kill 알림이 다시 발화하지 않는다(커널 출처만 본다)."""
+    rows = _run_alert_on_sqlite(_sql(desired, "infra-oom-kill"),
+                                [dict(host_name="ns0217", process_executable_name=source, body=body)], "system_logs")
+    assert rows == []
+
+
+def test_oom_kill_row_value_stays_short_even_when_the_pattern_does_not_extract_a_name(desired):
+    """커널 줄이라도 프로세스 이름을 못 뽑으면 원문 전체가 아니라 짧은 대체값이 행에 실린다(Google Chat 본문 50,000자 제한)."""
+    body = "ns0217 kernel: Out of memory: Killed process 77 total-vm:1kB " + "x" * 60000
+    rows = _run_alert_on_sqlite(_sql(desired, "infra-oom-kill"),
+                                [dict(host_name="ns0217", process_executable_name="kernel", body=body)], "system_logs")
+    assert [r["killed_process"] for r in rows] == ["알 수 없음"]
+
+
+def test_oom_kill_alert_still_fires_for_the_kernel_lines_seen_in_production(desired):
+    """운영에서 실제로 본 커널 OOM 줄(2026-10-12 ns0266)은 계속 발화하고 프로세스 이름이 행에 실린다."""
+    lines = ["Oct 12 20:57:34 ns0266 kernel: Memory cgroup out of memory: Killed process 1663741 (ansible-playboo) total-vm:1264452kB, anon-rss:828164kB",
+             "Oct 12 20:31:36 ns0266 kernel: semaphore invoked oom-killer: gfp_mask=0x100cca(GFP_HIGHUSER_MOVABLE), order=0, oom_score_adj=0"]
+    rows = _run_alert_on_sqlite(_sql(desired, "infra-oom-kill"),
+                                [dict(host_name="ns0266", process_executable_name="kernel", body=b) for b in lines], "system_logs")
+    assert sorted(r["killed_process"] for r in rows) == ["ansible-playboo", "oom-killer 호출"]

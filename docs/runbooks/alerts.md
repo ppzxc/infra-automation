@@ -70,7 +70,7 @@ last -i root | head
 <a id="oom-kill"></a>
 ## 🟠 OOM kill로 프로세스 강제 종료 (`infra-oom-kill`)
 
-**조건**: `system_logs`에 `Killed process`, `Out of memory: Kill process`, `invoked oom-killer`가 대소문자와 상관없이 5분 안에 1건 이상. 컨테이너 cgroup OOM(`Memory cgroup out of memory: Killed process`)과 CentOS 6/7 형식을 포함한다. 같은 상태는 조회 구간(5분)마다 다시 통지된다(Event Alert).
+**조건**: `system_logs`의 커널 출처(`process_executable_name = kernel`) 줄에 `Killed process`, `Out of memory: Kill process`, `invoked oom-killer`가 대소문자와 상관없이 5분 안에 1건 이상. 다른 프로세스(알림 서버·dockerd 등)가 이 문구를 로그로 인용한 줄은 보지 않는다. 컨테이너 cgroup OOM(`Memory cgroup out of memory: Killed process`)과 CentOS 6/7 형식을 포함한다. 같은 상태는 조회 구간(5분)마다 다시 통지된다(Event Alert).
 
 **왜 중요한가**: 서비스 프로세스가 강제 종료됐다는 뜻이다. 반복되면 다른 서비스와 서버 전체로 번진다.
 
