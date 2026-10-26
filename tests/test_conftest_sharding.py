@@ -70,6 +70,7 @@ def _names(tmp_path, marker):
     out = subprocess.run(
         [sys.executable, "-I", "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "-p", "no:xdist",
          "-c", os.devnull, "--rootdir", str(tmp_path), "-m", marker, str(tmp_path)],
+        env={k: v for k, v in os.environ.items() if k != "TEST_SHARD"},  # CI 샤드 값이 자식 수집을 비우지 않게 한다
         cwd=tmp_path, capture_output=True, text=True, check=False).stdout
     return {line.split("::")[1] for line in out.splitlines() if "::" in line}
 
