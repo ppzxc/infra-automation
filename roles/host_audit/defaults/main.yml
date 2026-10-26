@@ -91,6 +91,16 @@ host_audit_storage_ca_file: ""
 
 # S3 요청 하나의 최대 시간(초).
 host_audit_storage_timeout: 60
+# --- KISA 월간 악화 알림 (Spec #322 / Ticket-9, #331) -----------------------------------------------
+# 정기 실행에서 지난 정기 점검(Audit Baseline)에 취약이 아니던 KISA 항목이 이번에 취약이면 사내 알림 webhook(text/plain)으로 한 번 알린다.
+# 비교는 항목 단위이고 지난 결과가 없는 호스트는 알리지 않는다. 수시 실행·check 모드는 알리지 않는다. false면 알리지 않는다.
+host_audit_kisa_alert_enabled: true
+
+# webhook을 직접 지정할 때만 쓴다(OpenBao 값 대신). 토큰을 Git에 넣지 말고 Extra variables로 준다.
+#   {"url": "https://...", "header": "Authorization", "token": "..."}
+# 비워 두면 OpenBao agents/openobserve의 alert_webhook_plain_url·alert_webhook_auth_header·alert_webhook_token을 쓴다(OpenObserve 알림과 같은 대상).
+host_audit_alert_webhook: {}
+host_audit_alert_validate_certs: true
 # --- Configuration Drift (#124) ---------------------------------------------------------------
 # 러너가 site.yml과 host_agents.yml(--tags agents_config)을 --check --diff로 하위 실행해, Git 선언과
 # 다른(바뀔) 태스크를 호스트별 SPEC-ID 행으로 싣는다. false면 하위 실행을 건너뛴다.

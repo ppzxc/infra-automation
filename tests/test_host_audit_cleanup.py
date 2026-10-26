@@ -67,6 +67,9 @@ def _vars(root, out, *, storage=True, uploads=(200,), problem="", mail_sent=None
         "_host_audit_mail_plan": {"send": send, "reason": "" if send else "off"},
         "host_audit_mail_outcome": {"sent": bool(mail_sent), "error": "smtp down", "skipped_reason": "off"},
         "host_audit_mail_doc": {"run_id": RUN_ID, "report": {"archive": "b/k"}},
+        # KISA 월간 악화 알림(#331): 이 시험은 악화 항목이 없는 달이다(알림 태스크는 아무것도 보내지 않고 통과한다)
+        "host_audit_model": {},
+        "host_audit_kisa_alert_enabled": True, "host_audit_alert_validate_certs": True, "_host_audit_alert_target": {},
     }
 
 

@@ -92,6 +92,8 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_scope_pattern` | `servers:loadbalancers:overseer:!host_audit_excluded` | 점검 대상 그룹 |
 | `host_audit_timezone` | `Asia/Seoul` | 보고서 시각 표기 |
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
+| `host_audit_kisa_alert_enabled` | `true` | 정기 실행의 KISA 월간 악화 알림(§15, #331). false면 알리지 않음 |
+| `host_audit_alert_webhook` · `host_audit_alert_validate_certs` | `{}` · `true` | 알림 webhook 직접 지정(`{url, header, token}`, Extra variables) · TLS 검증. 비우면 OpenBao `agents/openobserve` 값 |
 
 ## 6. 태스크 매트릭스 (Task Matrix)
 
@@ -527,7 +529,7 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 | `agents/host_audit` | `storage_endpoint` | | 비우면 `agents/rustfs.rustfs_endpoint` |
 | `agents/host_audit` | `storage_region` | | 기본 `us-east-1` |
 
-로그인은 Host Agents와 같은 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`) 또는 `VAULT_TOKEN`이다. AppRole 정책에 `agents/host_audit`, `agents/rustfs` 읽기가 있어야 한다. 시험할 때는 Extra variables `host_audit_storage`(endpoint·bucket·access_key·secret_key·region)로 OpenBao를 건너뛸 수 있고, 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다.
+로그인은 Host Agents와 같은 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`) 또는 `VAULT_TOKEN`이다. AppRole 정책에 `agents/host_audit`, `agents/rustfs`, `agents/openobserve`(KISA 악화 알림 webhook, §15) 읽기가 있어야 한다. 시험할 때는 Extra variables `host_audit_storage`(endpoint·bucket·access_key·secret_key·region)로 OpenBao를 건너뛸 수 있고, 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -563,7 +565,7 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `AUD-500` | `Log in to OpenBao with AppRole for the Host Audit storage key` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
-| `AUD-501` | `Fetch the Host Audit storage KV from OpenBao (agents/host_audit, agents/rustfs)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
+| `AUD-501` | `Fetch the Host Audit storage KV from OpenBao (agents/host_audit, agents/rustfs, agents/openobserve alert webhook)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
 | `AUD-502` | `Resolve the Host Audit storage target and dedicated key` | `ansible.builtin.set_fact` | 러너 | 누락 항목은 이름만, `no_log` |
 | `AUD-503` | `List the Audit Baseline pointers of scheduled runs` | `ansible.builtin.uri` (S3 ListObjectsV2) | 러너 | 읽기 전용, `no_log` |
 | `AUD-504` | `Get the pointers of scheduled runs within the 12-month window` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
@@ -761,3 +763,23 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - pytest `tests/test_host_audit_mail.py`: 수신자 정규화(목록·구분 문자열·중복·형식 오류는 건수만), 오류 문구의 주소 가림, 수신자별 발송 결과 판정(일부 실패·`failed_when` 재작성 대비), ASCII 첨부명, 실제 보고서 모델에서 만든 요약(주소 없음), 본문 템플릿(표·인라인만, `<style>`·이미지·SVG 없음, 50KB 미만, 이스케이프), 재발송 위치(KST 월 경계·형식 검사), 태스크 순서(보관 → 메일 → 보관 판정 → 메일 판정)와 `no_log`.
 - 수동 E2E(2026-10-08, 러너 로컬): mailpit(STARTTLS 필수, 자체 서명 인증서, 수신자 허용 규칙) + RustFS + OpenBao dev(namespace `infra/prod/host`)로 실제 report 단계를 돌렸다 — 수신자 3명에게 1통씩 도착, 첨부 SHA-256 = 버킷 `report.html` SHA-256, 재발송 첨부도 같은 해시, 업로드 실패 시 메일 0통·실행 실패, 메일 실패(닫힌 포트·전원 거부·일부 거부) 시 원본 유지·실행 실패, 수신자 없음 시 키 이름만 표시하고 실패, OpenBao `mail_to`(`;` 구분 문자열) 조회. 모든 경우 실행 로그에서 주소 0건. mailpit HTML 검사(caniemail 기준) 본문 지원율 95.5% — 미지원은 classic Outlook의 `max-width`(표 `width="640"` 속성으로 대체)뿐.
 - 운영 확인(운영자, #105 이후): 실제 relay 발송, Gmail·Outlook(웹·classic) 표시, `.html` 첨부 차단 여부.
+
+## 15. KISA 월간 악화 알림 (Spec #322 / Ticket-9, #331)
+
+월간(정기) Host Audit의 Configuration Vulnerability(KISA) 결과에서 **지난 정기 점검(Audit Baseline)에 취약이 아니던 항목이 이번에 취약이면** 사내 알림 webhook으로 알린다. 보고서의 신규·지속 표시는 그대로이고, 이 알림은 악화만 따로 골라 운영자가 보고서를 열기 전에 알게 한다.
+
+- **항목 단위 비교**: 실패 개수가 아니라 (호스트, `KISA-2026:U-NN`) 단위다. 지난달 U-01이 실패했고 이번 달 U-02가 실패하면 실패는 하나씩으로 같지만 U-02는 악화로 알린다(`host_audit_kisa_worsened`, `filter_plugins/host_audit_baseline.py`). 취약만 센다: 점검불가(수동)·예외(승인)·해당없음·양호는 대상이 아니다. 지난달에도 취약이던 항목은 알리지 않는다.
+- **지난 결과가 없는 호스트는 알리지 않는다**: 이번에 처음 점검한 호스트(Audit Baseline이 그 호스트를 점검하지 않음)와 Audit Baseline 자체가 없는 첫 정기 실행은 비교 대상이 없어 알리지 않는다. Audit Baseline 조회가 실패한 실행도 알리지 않는다(비교하지 않음).
+- **한계**: 지난달 예외(승인)였던 항목이 예외 만료로 이번에 취약이 된 경우는 Audit Baseline 색인(`findings.json`)이 취약과 예외를 구분해 담지 않아 지속으로 보이고 이 알림에 잡히지 않는다. 보고서의 예외 만료 표시를 본다.
+- **언제 보내나**: 정기 실행(`host_audit_run_kind=scheduled`)만 보낸다. 수시 실행은 Audit Baseline이 되지 않으므로 알리지 않고, check 모드도 보내지 않는다(`AUD-640`). 보관·메일 뒤에 한 번 보낸다.
+- **본문**: 악화된 항목 목록(`• <호스트>: KISA-2026:U-NN <항목 이름>`)과 비교한 두 실행 ID, 조치 안내가 text/plain으로 들어간다. 플랫폼 한도(5000자)에 맞춰 자르고 남은 건수를 `… 외 N건`으로 적는다. 주소·시크릿은 없다.
+- **webhook 입력**: Extra variables `host_audit_alert_webhook`(`{url, header, token}`)이 있으면 그것을, 없으면 OpenBao `agents/openobserve`의 `alert_webhook_plain_url`·`alert_webhook_auth_header`(기본 `Authorization`)·`alert_webhook_token`을 쓴다(`AUD-501`·`AUD-502`가 보관 입력과 함께 읽음 — OpenObserve 알림과 같은 대상). 값은 모든 태스크에서 `no_log`이고 보고서·로그에 남지 않는다. AppRole 정책에 `agents/openobserve` 읽기가 필요하다.
+- **전달 실패는 실행 실패로 드러난다**: 악화 항목이 있는데 webhook이 없거나 전송이 거부되면(`AUD-642`) 보관·메일 판정이 모두 끝난 뒤 마지막에 실행을 실패로 끝낸다(보고서와 보관은 이미 끝남). 알림 실패가 다른 판정을 가리지 않는다.
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-640` | `Decide whether this run notifies KISA worsening` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 판정 (`host_audit_kisa_alert`: 정기 실행·악화 항목 있음·check 모드 아님), `no_log` |
+| `AUD-641` | `Send the KISA worsening notification to the alert webhook` | `ansible.builtin.uri` | 러너 | 악화 항목이 있을 때만 text/plain POST, `no_log`, 전송 결과는 실패시키지 않고 AUD-642가 판정 |
+| `AUD-642` | `Fail the run when a KISA worsening notification could not be delivered` | `ansible.builtin.assert` | 러너 | 읽기 전용 (webhook 없음·응답이 2xx가 아님이면 실패, 다른 판정 뒤에 마지막으로) |
+
+검증: pytest `tests/test_host_audit_kisa_worsened.py` — 개수가 같아도 항목이 바뀌면 악화로 잡히는 것, 지난 결과가 없는 호스트·첫 실행·취약이 아닌 판정은 잡히지 않는 것, 통지 본문의 항목 목록·길이 한도, 로컬 HTTP 서버로 받은 실제 요청(text/plain, 인증 헤더, 본문), 수시 실행·check 모드·비활성에서 보내지 않는 것, 전달 실패 시 실행 실패, 판정이 다른 판정 뒤에 오는 배선.

@@ -245,6 +245,31 @@ def _kisa_findings(model):
     return {'hosts': sorted(appendix), 'findings': findings}
 
 
+def host_audit_kisa_worsened(model, baseline):
+    """KISA items that were not a finding in the Audit Baseline and are 취약 now (Spec #322 / Ticket-9, #331).
+
+    The comparison is per item, not per count: U-01 failing last month and U-02 failing this month is one worse item
+    although both months have one failure. Only 취약 counts (점검불가(수동), 예외(승인), 해당없음, 양호 do not), and only
+    hosts the baseline inspected (a host without last month's result is not alerted). Without a baseline: nothing.
+    Returns ``[{'host', 'id', 'label'}]`` sorted by host and item.
+    """
+    if not baseline:
+        return []
+    base = ((baseline.get('sections') or {}).get(SECTION_KISA)) or {}
+    base_hosts = set(base.get('hosts') or [])
+    base_ids = base.get('ids') or {}
+    appendix = (model.get(SECTION_KISA) or {}).get('appendix') or {}
+    out = []
+    for host in sorted(appendix):
+        if host not in base_hosts:
+            continue
+        known = set(base_ids.get(host) or [])
+        for row in sorted(appendix[host], key=lambda r: r.get('code', '')):
+            if row.get('verdict') == VULNERABLE and row['code'] not in known:
+                out.append({'host': host, 'id': row['code'], 'label': '%s %s' % (row['code'], row.get('title', ''))})
+    return out
+
+
 def _package_findings(model, package_results):
     section = model.get(SECTION_PACKAGE) or {}
     if not section or section.get('status') not in (None, 'ok'):
@@ -593,6 +618,54 @@ def host_audit_baseline_section(model, history=None, meta=None):
     return model
 
 
+ALERT_TEXT_LIMIT = 4800  # the platform accepts 5000 characters; keep a margin for the header and footer
+
+
+def host_audit_kisa_alert(model, run, history):
+    """The month's KISA worsening notification: ``{'send', 'reason', 'count', 'hosts', 'text'}`` (Spec #322 / Ticket-9, #331).
+
+    ``history``: the Audit Baseline lookup (``{'state': 'ok' | 'failed' | 'disabled', 'baseline': previous findings document}``).
+    Only a scheduled (monthly) run notifies: on-demand runs are not an Audit Baseline, so repeating the alert on each of them
+    would only be noise. Nothing is compared (and nothing sent) when the lookup did not succeed or there is no baseline yet.
+    The text lists every worsened item, cut to the platform limit with a count of what was left out. It carries no address or secret.
+    """
+    history = history or {}
+    baseline = history.get('baseline') if history.get('state') == 'ok' else None
+    items = host_audit_kisa_worsened(model or {}, baseline)
+    run = run or {}
+    plan = {'send': False, 'reason': '', 'count': len(items), 'hosts': len({i['host'] for i in items}), 'text': ''}
+    if run.get('run_kind') != 'scheduled':
+        plan['reason'] = '정기 실행이 아님 — 알리지 않음'
+    elif not items:
+        plan['reason'] = '악화된 항목 없음'
+    else:
+        plan['send'] = True
+    if not plan['send']:
+        return plan
+    head = ['🟠 [P2 경고] Host Audit KISA 악화: 지난달 통과한 항목이 이번 달 실패',
+            '',
+            '■ 현상: 지난 정기 점검(%s)에서 취약이 아니던 KISA 항목 %d건이 이번 점검(%s)에서 취약으로 나왔습니다(호스트 %d대).'
+            % (baseline.get('run_id') or '-', plan['count'], run.get('run_id', '-'), plan['hosts']),
+            '■ 영향: 지난달 이후 새로 생긴 설정 약점입니다. 의도하지 않은 변경이면 보안 수준이 떨어진 것입니다.',
+            '■ 악화된 항목 %d건:' % plan['count']]
+    tail = ['■ 조치:',
+            '① 월간 Host Audit 보고서(메일)의 Configuration Vulnerability에서 항목별 근거 확인',
+            '② 의도한 변경이면 KISA 예외 등록, 아니면 설정을 되돌리고 다음 점검에서 해소 확인',
+            '③ 같은 호스트의 설정 변경 알림·작업 이력과 대조',
+            '📋 규칙: host-audit-kisa-worsened']
+    lines, used = [], len('\n'.join(head + tail)) + 40
+    for item in items:
+        row = '• %s: %s' % (item['host'], item['label'])
+        if used + len(row) + 1 > ALERT_TEXT_LIMIT:
+            break
+        lines.append(row)
+        used += len(row) + 1
+    if len(lines) < len(items):
+        lines.append('• … 외 %d건 (전체는 보고서와 findings.json에 있음)' % (len(items) - len(lines)))
+    plan['text'] = '\n'.join(head + lines + tail)
+    return plan
+
+
 def host_audit_baseline_pick(pointers, run):
     """The pointer of the Audit Baseline: latest scheduled run that started before this run."""
     started = _parse_utc((run or {}).get('started_at')) or datetime.now(timezone.utc)
@@ -624,4 +697,5 @@ class FilterModule(object):
             'host_audit_pointer_keys': host_audit_pointer_keys,
             'host_audit_baseline_pick': host_audit_baseline_pick,
             'host_audit_json_loads': host_audit_json_loads,
+            'host_audit_kisa_alert': host_audit_kisa_alert,
         }
