@@ -53,4 +53,4 @@ jobs:
           ansible-galaxy collection list 2>/dev/null | grep -E "^(ansible\.posix|community\.(general|docker|hashi_vault)|cisco\.ios) "
       - name: 시크릿 파일이 없는지 확인
         run: test ! -e .env
-      - run: pytest tests/ -n 4 --timeout=900 --durations=15 -p no:cacheprovider
+      - run: pytest tests/ -n 4 --dist loadgroup --timeout=900 --durations=15 -p no:cacheprovider

@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 args=(tests/ -m "not slow and not heavy_harness" -q --durations=10 -p no:cacheprovider)
 if python3 -c "import xdist" 2>/dev/null; then
-  args+=(-n 4)
+  args+=(-n 4 --dist loadgroup)
 else
   echo "[i] pytest-xdist 없음 — 직렬 실행. 'pip install -r requirements-test.txt'로 설치하세요."
 fi
