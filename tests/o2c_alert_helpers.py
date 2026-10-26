@@ -256,7 +256,7 @@ SECURITY_TIME_CASES = {   # alert -> (record fields, expected row without the ti
 }
 
 SYSTEM_TIME_CASES = {   # alert -> (stream, record fields, expected row without the time; "{n}" is the record count)
-    "infra-oom-kill": ("system_logs", [dict(body="Out of memory: Killed process 123 (java) total-vm:1kB")],
+    "infra-oom-kill": ("system_logs", [dict(process_executable_name="kernel", body="Out of memory: Killed process 123 (java) total-vm:1kB")],
                        "• ns0272: 종료된 프로세스 java ({n}건)"),
     "infra-disk-fs-errors": ("system_logs", [dict(body="blk_update_request: I/O error, dev sda")], "• ns0272: 오류 패턴 {n}건"),
     "infra-app-log-errors": ("app_logs", [dict(severity="error", container_name="api")], "• ns0272 / api: ERROR 이상 {n}건"),

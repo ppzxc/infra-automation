@@ -147,32 +147,42 @@ infra-oom-kill:
       host: verify-oom-upper
       fires: true
       records:
-        - {body: "kernel: Out of memory: Killed process 4242 (java) total-vm:8123456kB, anon-rss:6543210kB"}
+        - {process_executable_name: kernel, body: "kernel: Out of memory: Killed process 4242 (java) total-vm:8123456kB, anon-rss:6543210kB"}
     - name: 컨테이너 cgroup OOM kill (소문자 out of memory) — 실제로 놓친 사례
       host: verify-oom-cgroup
       fires: true
       records:
-        - {body: "kernel: Memory cgroup out of memory: Killed process 31337 (python3) total-vm:2048000kB, anon-rss:1900000kB"}
+        - {process_executable_name: kernel, body: "kernel: Memory cgroup out of memory: Killed process 31337 (python3) total-vm:2048000kB, anon-rss:1900000kB"}
     - name: CentOS 6/7 Out of memory 형식 (Kill process)
       host: verify-oom-el6
       fires: true
       records:
-        - {body: "kernel: Out of memory: Kill process 1234 (httpd) score 912 or sacrifice child"}
+        - {process_executable_name: kernel, body: "kernel: Out of memory: Kill process 1234 (httpd) score 912 or sacrifice child"}
     - name: invoked oom-killer 줄
       host: verify-oom-invoked
       fires: true
       records:
-        - {body: "kernel: java invoked oom-killer: gfp_mask=0x201da, order=0, oom_score_adj=0"}
+        - {process_executable_name: kernel, body: "kernel: java invoked oom-killer: gfp_mask=0x201da, order=0, oom_score_adj=0"}
     - name: 디스크 오류는 OOM 알림이 아니다
       host: verify-oom-disk-error
       fires: false
       records:
-        - {body: "kernel: blk_update_request: I/O error, dev sda, sector 123456"}
+        - {process_executable_name: kernel, body: "kernel: blk_update_request: I/O error, dev sda, sector 123456"}
     - name: 평범한 시스템 로그
       host: verify-oom-benign
       fires: false
       records:
         - {body: "systemd[1]: Started Session 4021 of user deploy."}
+    - name: 알림 서버가 쿼리 계획을 로그로 남긴 줄 (자기 인용 루프, 2026-10-26)
+      host: verify-oom-quoted-plan
+      fires: false
+      records:
+        - {process_executable_name: bot-java, body: "Oct 26 15:32:36 ns0217 bot-java[2513767]: FilterExec: (lower(body@1) LIKE %killed process% OR lower(body@1) LIKE %invoked oom-killer%)"}
+    - name: dockerd가 OpenObserve 쿼리 로그를 인용한 줄 (자기 인용 루프, 2026-10-26)
+      host: verify-oom-quoted-docker
+      fires: false
+      records:
+        - {process_executable_name: dockerd, body: "Oct 26 15:27:36 ns0331 dockerd[2092]: level=error msg=\"Error writing log message\" message=\"lower(body) LIKE '%killed process%'\""}
 infra-disk-fs-errors:
   cases:
     - name: 디스크 I/O error
