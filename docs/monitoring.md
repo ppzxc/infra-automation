@@ -68,11 +68,12 @@
   | `otel_app_telemetry` | 아니오 | boolean. 컨테이너 앱 텔레메트리(Business Telemetry, ADR-0012) 수신 opt-in(기본 꺼짐). 아래 §3-3 "컨테이너 앱 텔레메트리" |
   | `host_agents_environment` | 예(호스트별) | `production` \| `staging` \| `development` \| `test`. 인벤토리 변수가 우선이고 없으면 이 KV 키. **그룹 기본값 없음** — 누락·허용 밖 값은 변경 전 실패(`MON-037`) |
   | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
+  | `backup_sqlite_snapshots` | 아니오 | SQLite 파일 절대 경로 목록(안전한 글자만, `..` 불가). 있으면 백업 직전 online backup 스냅샷을 만들어 백업한다(`docs/backup.md` §3-1, #323). 없으면 동작이 바뀌지 않는다 |
 
 - **실패 조건 (변경 전, check 모드 포함)**: 필수 키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 KV 키를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
 - **공유 시크릿**: `agents/openobserve`, `agents/rustfs`가 없거나 값이 비어 있으면 실패합니다(조회는 호스트마다 수행, TLS 검증은 `host_agents_vault_validate_certs`).
 - **제외 판정**: `otel_exclude_logs`는 경로 정규화 후 동일/glob/상위 디렉터리가 `security_logs` 경로를 덮으면 실패합니다(`/var/log/audit`, `/var/log/secure*` 포함).
-- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `otel_container_logs`, `otel_app_telemetry`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
+- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `otel_container_logs`, `otel_app_telemetry`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `backup_sqlite_snapshots`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
 - **테스트 seam**: `host_agents_kv_fixture`(`{host, openobserve, rustfs}`)가 정의되면 OpenBao를 조회하지 않습니다(molecule 공용 `group_vars`가 `_is_already_provisioned: true`와 함께 제공).
 
 ---

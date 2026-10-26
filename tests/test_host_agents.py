@@ -333,6 +333,7 @@ def test_absent_overrides_mean_git_standard_only():
         {"path": "/var/log/cron*", "stream": "system_logs", "service": "cron"}]
     assert res["backup_paths"] == MANDATORY
     assert (res["otel_docker_metrics"], res["backup_exclude_paths"], res["backup_pre_hooks"]) == (False, [], [])
+    assert res["backup_sqlite_snapshots"] == []
     assert res["otel_container_logs"] is False
     assert res["otel_app_telemetry"] is False
 

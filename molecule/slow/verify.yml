@@ -840,6 +840,20 @@
             (! command -v logrotate >/dev/null || logrotate -d /etc/logrotate.d/host-agents-backup >/dev/null 2>&1)
           changed_when: false
 
+        # 이 시나리오의 호스트 입력에는 backup_sqlite_snapshots가 없다: 입력이 없는 호스트는 아무것도 달라지지 않아야 한다(#323).
+        # 입력이 있을 때의 스냅샷·실패 기록은 pytest(tests/test_backup_sqlite_snapshot.py)가 진짜 resticprofile로 확인한다.
+        - name: "[VERIFY-BAK-028] Verify a host without backup_sqlite_snapshots gets no snapshot step in the profile"
+          ansible.builtin.shell: >-
+            ! grep -q 'host-agents-sqlite-snapshot' /etc/restic/profiles.yaml &&
+            ! grep -q 'host-agents-sqlite' /etc/restic/profiles.yaml
+          changed_when: false
+
+        - name: "[VERIFY-BAK-029] Verify a host without backup_sqlite_snapshots gets no snapshot script"
+          ansible.builtin.stat:
+            path: /usr/local/sbin/host-agents-sqlite-snapshot
+          register: _verify_bak_snapshot_script
+          failed_when: _verify_bak_snapshot_script.stat.exists
+
         - name: "[VERIFY-BAK-060] Verify the profile wires the hooks and status-file"
           ansible.builtin.shell: >-
             grep -q 'status-file: "/var/lib/host-agents/restic-status.json"' /etc/restic/profiles.yaml &&

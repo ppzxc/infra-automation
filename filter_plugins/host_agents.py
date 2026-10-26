@@ -314,6 +314,22 @@ def _string_list(value, key, errors):
     return [i.strip() for i in items if isinstance(i, str) and i.strip()]
 
 
+# SQLite 스냅샷 대상: sqlite3 `.backup '<경로>'`와 셸 명령줄에 그대로 실려도 안전한 글자만 허용한다.
+_SQLITE_PATH = re.compile(r'^/[A-Za-z0-9._/@+:%-]+$')
+
+
+def _sqlite_snapshot_paths(value, errors, kv_path):
+    items = _string_list(value, 'backup_sqlite_snapshots', errors)
+    out = []
+    for path in items:
+        parts = path.split('/')
+        if not _SQLITE_PATH.match(path) or '..' in parts or path.endswith('/') or '//' in path:
+            errors.append("backup_sqlite_snapshots: 안전한 절대 경로(영문·숫자·._/@+:%%- 만, '..' 없음, 파일)여야 합니다: %s (OpenBao %s)" % (path, kv_path))
+        else:
+            out.append(path)
+    return out
+
+
 def _dedupe(items):
     seen, out = set(), []
     for item in items:
@@ -357,6 +373,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     extra_paths = _string_list(kv.get('backup_extra_paths'), 'backup_extra_paths', errors)
     exclude_paths = _string_list(kv.get('backup_exclude_paths'), 'backup_exclude_paths', errors)
     pre_hooks = _string_list(kv.get('backup_pre_hooks'), 'backup_pre_hooks', errors)
+    sqlite_snapshots = _sqlite_snapshot_paths(kv.get('backup_sqlite_snapshots'), errors, kv_path)
     docker_metrics = _as_bool(kv.get('otel_docker_metrics'), 'otel_docker_metrics', errors)
     container_logs = _as_bool(kv.get('otel_container_logs'), 'otel_container_logs', errors)
     app_telemetry = _as_bool(kv.get('otel_app_telemetry'), 'otel_app_telemetry', errors)
@@ -419,6 +436,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
         'backup_paths': _dedupe(list(mandatory_backup_paths or []) + extra_paths),
         'backup_exclude_paths': _dedupe(exclude_paths),
         'backup_pre_hooks': pre_hooks,
+        'backup_sqlite_snapshots': _dedupe(sqlite_snapshots),
     }
 
 

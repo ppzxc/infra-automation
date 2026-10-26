@@ -267,6 +267,7 @@
 | | `otel_app_telemetry` | | boolean. 컨테이너 앱 텔레메트리(OTLP HTTP 수신, traces → `app_traces`, metrics) 수신 |
 | | `otel_container_logs` | | docker 컨테이너 로그 수집(`app_logs`). 컨테이너는 compose에서 `json-file` 드라이버(`max-size`·`max-file` 필수)와 `logging.options.labels`(`com.docker.compose.project`, `com.docker.compose.service`, 선택 `com.docker.compose.container-number`·`org.opencontainers.image.version`)를 써야 `service.name`이 `<프로젝트>-<서비스>`가 되고, 선택 라벨이 있으면 `container.name`·`service.version`도 붙는다 |
 | | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | | 백업 경로 추가·제외, 사전 훅 |
+| | `backup_sqlite_snapshots` | | 백업 직전 SQLite 스냅샷을 뜰 파일 경로 목록(`docs/backup.md` §3-1) |
 | `agents/openobserve` | `o2_endpoint`, `o2_org`, `o2_ca_file`, `controller_ingest_token` | endpoint·token 필수 | 전송 대상과 등록 이벤트 |
 | `agents/rustfs` | `rustfs_endpoint`, `rustfs_region`, `rustfs_ca_file` | endpoint 필수 | 백업 대상 |
 
