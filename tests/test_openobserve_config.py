@@ -6,7 +6,6 @@ check mode writes nothing, and secrets never reach the output or the repository.
 """
 
 import base64
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
