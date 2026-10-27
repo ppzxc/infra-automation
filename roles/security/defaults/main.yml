@@ -25,6 +25,13 @@ ssh_hardening_directives:
 # SSH 허용 출발지 IP 목록 (정의 시 지정된 IP/서브넷에 한해서만 ssh_port 허용, 비어있을 경우 0.0.0.0/0 개방)
 ssh_allowed_source_ips: []
 
+# sshd Match Address 방식 SSH 출발지 제한 (#371). 방화벽과 무관하게 sshd가 허용 밖 출발지의 로그인을 거부한다.
+# 값(IP/CIDR)은 공개 저장소에 두지 않고 Semaphore Environment/인벤토리 변수로 받는다. 비어 있으면 제한하지 않고,
+# 이미 적용된 블록은 제거한다(롤백). ssh_allowed_source_ips(방화벽 규칙)와는 별개다.
+ssh_source_restriction_allowed_sources: []
+# 적용 중 접속한 출발지(Ansible 쪽)가 허용 목록에서 막히면 블록을 되돌리고 실패시키는 가드가 쓰는 주소. 비면 가드를 건너뛴다.
+ssh_source_restriction_guard_addr: "{{ (ansible_env.SSH_CONNECTION | default('')).split(' ')[0] }}"
+
 # 정리할 구버전/오래된 방화벽 소스 IP 목록 (미정의 시 ssh_allowed_source_ips 사용)
 firewall_stale_source_ips: []
 
