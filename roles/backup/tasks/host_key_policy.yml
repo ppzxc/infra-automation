@@ -1,0 +1,27 @@
+---
+# ==============================================================================
+# 호스트 백업 키 정책 가드 (Spec #364 / Ticket-6, #373)
+# ==============================================================================
+# 저장소의 정책 JSON(files/host-key-policy.json)이 "쓰기 + 잠금 해제용 삭제"만 허용하는지 컨트롤러에서 읽기 전용으로 확인한다.
+# include_role(tasks_from: host_key_policy)로 호출하며(Molecule slow verify), 정책 JSON을 넓히면 여기서 막힌다.
+# 정책은 RustFS 서비스 계정에 운영자가 적용한다(docs/runbooks/backup-host-key-scope.md). 이 태스크는 서버에 접속하지 않는다.
+- name: "[BAK-220] Assert the host key policy allows deletes under locks/ only"
+  vars:
+    _policy: "{{ lookup('ansible.builtin.file', backup_host_key_policy_file) | from_json }}"
+    _stmts: "{{ _policy.Statement }}"
+    _unlock: "{{ _stmts | selectattr('Sid', 'equalto', backup_host_key_unlock_sid) | list }}"
+    _others: "{{ _stmts | rejectattr('Sid', 'equalto', backup_host_key_unlock_sid) | list }}"
+  ansible.builtin.assert:
+    that:
+      - _stmts | map(attribute='Effect') | unique | list == ['Allow']
+      - _stmts | map(attribute='Action') | flatten | select('search', '[*]') | list | length == 0
+      - _others | map(attribute='Action') | flatten | select('search', 'Delete') | list | length == 0
+      - _unlock | length == 1
+      - _unlock | map(attribute='Action') | flatten | unique | list == ['s3:DeleteObject']
+      - _unlock | map(attribute='Resource') | flatten | reject('search', '^arn:aws:s3:::[$][{]BUCKET[}]/locks/[*]$') | list | length == 0
+    fail_msg: "host key policy must allow s3:DeleteObject only on <bucket>/locks/* and no wildcard or other delete action"
+    quiet: true
+  delegate_to: localhost
+  run_once: true
+  check_mode: false
+  changed_when: false
