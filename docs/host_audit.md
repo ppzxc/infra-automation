@@ -820,7 +820,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `EXP-DET-4` | detection-recovery | `det_auditd` | 적재된 감사 규칙에 identity, auth_config, sudo_config, sshd_config 키가 있다 |
 | `EXP-DET-5` | detection-recovery | `det_auditd` | 적재된 규칙이 있고 전체 execve 추적 규칙이 없다 |
 | `EXP-DET-6` | detection-recovery | `det_audit_secret` | 적재된 규칙에 secret_access 키가 있다 |
-| `EXP-DET-7` | detection-recovery | `det_log_agent` | 중앙 수집 에이전트 서비스(`true`는 기본 이름)가 active다 |
+| `EXP-DET-7` | detection-recovery | `det_log_agent` | 중앙 수집 에이전트 서비스(`true`는 기본 이름 `otelcol`, 서비스 이름이 다르면 그 이름을 값으로 선언한다. 예: `otelcol-contrib`)가 active다 |
 | `EXP-BAK-1` | backup-host-key-scope | (러너, 선언 없음) | `host-key-policy.json`에 와일드카드 동작이 없고 삭제가 `locks/*` 하나뿐이다 |
 | `EXP-BAK-2` | backup-host-key-scope | (러너) | 수집기 스냅샷의 모든 호스트 서비스 계정 정책이 `host-key-policy.json`과 같은 모양이다 |
 | `EXP-BAK-3` | backup-host-key-scope | (러너) | 수집기 스냅샷의 모든 호스트 서비스 계정 정책 리소스가 버킷 하나뿐이다 |
