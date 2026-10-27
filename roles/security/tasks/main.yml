@@ -984,6 +984,19 @@
   tags: molecule-idempotence-notest
 
 # 7. Auditd configuration
+# 없는 경로에 watch를 걸면 규칙 적재가 실패하므로 실제로 있는 경로만 규칙에 싣는다(#372).
+- name: "[SEC-055] Check which audit_watch_paths exist"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ audit_watch_paths | default([]) }}"
+  register: security_audit_watch_stat
+  when: not (_raw_path_effective | default(false) | bool)
+
+- name: "[SEC-056] Keep only existing audit watch paths"
+  ansible.builtin.set_fact:
+    _audit_watch_paths_effective: "{{ security_audit_watch_stat.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
+  when: not (_raw_path_effective | default(false) | bool)
+
 - name: "[SEC-012] Deploy Auditd security audit rules"
   ansible.builtin.template:
     src: audit.rules.j2
@@ -1034,7 +1047,37 @@
   notify: Restart fail2ban
   failed_when: false
 
-# Hosts in the inventory group `firewall_unmanaged` keep their firewall as is:
+# 10. journald 영구 저장 (#372): 재부팅 뒤에도 이전 부팅의 시스템 로그가 조회되게 한다.
+# CentOS 6/7 raw 경로와 systemd가 아닌 호스트는 대상이 아니다. 보존 한도는 common의 journald_max_use/journald_max_retention.
+- name: "[SEC-053] Create persistent journal directory and journald drop-in directory"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /var/log/journal, mode: '2755' }
+    - { path: /etc/systemd/journald.conf.d, mode: '0755' }
+  when:
+    - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
+  failed_when: false
+
+- name: "[SEC-054] Deploy journald persistent storage drop-in"
+  ansible.builtin.template:
+    src: journald-persistent.conf.j2
+    dest: /etc/systemd/journald.conf.d/50-persistent.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
+  notify: Restart systemd-journald
+  failed_when: false
+
+#Hosts in the inventory group `firewall_unmanaged` keep their firewall as is:
 # every firewall task below is skipped; sshd/SELinux/fail2ban/auditd/sudo still apply.
 - name: "[SEC-052] Apply custom firewall ingress rules unless the host is in firewall_unmanaged"
   when: security_firewall_managed | bool

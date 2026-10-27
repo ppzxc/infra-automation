@@ -30,6 +30,7 @@
 * [포티게이트 방화벽 로그 수신 런북](runbooks/fortigate-syslog.md) - 방화벽 syslog → `security_logs`(`fortigate-syslog`) 경로, 장비 쪽 로그 거름 기준, HA 멤버 구성, 점검·편입 절차(#283)
 * [HP Smart Array 관리 도구(ssacli) 설치·점검 런북](runbooks/hp-raid-tool.md) - RAID 상태 수집기가 쓰는 도구의 설치 절차·버전·설치 기록(#334, #335)
 * [월간 로그 점검 런북](runbooks/monthly-log-review.md) - 월 1회 로그 점검 절차(쿼리), 기록 양식, 아직 도착하지 않은 로그 종류의 관찰 목록. 실제 기록은 비공개 노트(#322, #333)
+* [탐지 복구 적용 런북](runbooks/detection-recovery.md) - 방화벽 비관리 서버의 fail2ban(banaction)·auditd 규칙 축소·journald 영구 저장·중앙 수집 적용·검증·롤백 절차(#372)
 * [서버 시각 동기 현황 조사 (2026-10-26)](research/time-sync-host-survey-2026-10-26.md) - CentOS 6은 ntpd 없이 하루 한 번 rdate, CentOS 7·Rocky 9은 chrony 동기. 수집기·`infra-time-unsynced`에 미치는 영향과 열린 결정(#336)
 * [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일
 * [Host Audit 태스크 명세](host_audit.md) - 실행 흐름, 호스트별 JSON 구조(schema_version 1), 변수, AUD-xxx 태스크 매트릭스

@@ -103,11 +103,17 @@
 | `SEC-050` | `Build firewalld rule plan (CentOS 7, raw)` | `ansible.builtin.set_fact` | CentOS 7 (`_raw_path_effective`) | 팩트 설정 전용 (`raw_firewalld_plan`, 제거 규칙 우선 정렬) |
 | `SEC-051` | `Apply firewall configuration tasks unless the host is in firewall_unmanaged` | `block` (`when: security_firewall_managed`) | All | 인벤토리 그룹 `firewall_unmanaged` 소속이면 UFW·firewalld·iptables·CentOS 6/7 raw 방화벽 태스크 전체를 건너뜀(`skipping`) |
 | `SEC-052` | `Apply custom firewall ingress rules unless the host is in firewall_unmanaged` | `block` (`when: security_firewall_managed`) | All | 소스 IP 제한 인그레스 규칙(UFW·firewalld·iptables·raw iptables)도 같은 그룹이면 건너뜀 |
+| `SEC-053` | `Create persistent journal directory and journald drop-in directory` | `ansible.builtin.file` | systemd 호스트 (`_raw_path_effective=false`) | 디렉터리·모드(`/var/log/journal` `2755`, `journald.conf.d` `0755`) 일치 시 `ok` |
+| `SEC-054` | `Deploy journald persistent storage drop-in` | `ansible.builtin.template` | systemd 호스트 (`_raw_path_effective=false`) | Checksum 비교 (`journald-persistent.conf.j2`, `Storage=persistent`), 변경 시 `Restart systemd-journald` |
+| `SEC-055` | `Check which audit_watch_paths exist` | `ansible.builtin.stat` | All (`_raw_path_effective=false`) | 조회 전용 (없는 시크릿 경로는 감사 규칙 적재를 실패시키므로 먼저 거른다) |
+| `SEC-056` | `Keep only existing audit watch paths` | `ansible.builtin.set_fact` | All (`_raw_path_effective=false`) | 팩트 설정 전용 (`_audit_watch_paths_effective`) |
 
 > **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 `/etc/redhat-release` 자동 판별(`_raw_path_effective`, 인벤토리 `raw_provisioning_path`로 명시하면 그 값이 우선)에 따라 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고 (CentOS 7은 `SEC-011` 대신 `SEC-041`이 실행되고, CentOS 6는 `SEC-008`/`SEC-021` 대신 `SEC-037`~`SEC-040` iptables probe+mutate 쌍이 추가로 실행되며, CentOS 7은 firewalld 모듈/`firewall-cmd` 폴백 태스크(`SEC-005`~`SEC-007`, `SEC-016`/`SEC-017`/`SEC-020` 등) 대신 `SEC-042`~`SEC-050` firewalld probe+mutate 쌍(런타임 drift 감지 포함)이 실행된다(제거 규칙을 먼저 적용해 존 충돌을 피하고, 변경은 `permanent`에만 쓰고 raw `Reload firewalld` 핸들러로 반영). 룰 영속화(`service iptables save`)는 기존 모듈 경로와 같이 수행하지 않는다), `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
 > **방화벽 관리 제외 (`firewall_unmanaged`, #220)**: Semaphore 인벤토리에서 `servers`에 두면서 그룹 `firewall_unmanaged`에도 넣은 호스트는 `SEC-051`/`SEC-052` 게이트가 방화벽 태스크(UFW·firewalld·iptables, CentOS 7 raw 경로 포함)를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo 정책은 그대로 적용한다. 기본값 `security_firewall_managed`는 그룹 소속에서 파생한다(Semaphore 인벤토리는 static이라 group_vars를 쓰지 않음). Host Audit 드리프트는 같은 인벤토리로 `site.yml`을 check 실행하므로 같은 규칙을 따른다. docker daemon이 관리하는 체인(`docker_iptables`)은 이 그룹과 무관하다. 프로비저닝 전에 `--check --diff`로 방화벽 태스크가 하나도 나오지 않는지 확인한다.
 
-
-
-
+> **탐지 복구 (#372, Spec #364)**: 두 서버(방화벽 비관리 그룹)에서 방화벽을 건드리지 않고 탐지·감사·로그 보존만 적용한다.
+> - **auditd**: `SEC-012`/`SEC-035` 규칙은 전체 `execve` 추적을 없애고 인증(`identity`, `auth_config`)·권한(`sudo_config`)·sshd 설정·컨테이너 설정(`container_config`, 기본 `/etc/docker/`, 호스트별 추가는 `audit_container_config_paths`)·시크릿 파일 접근(`secret_access`, `audit_watch_paths`)만 기록한다. 시크릿 경로 값은 저장소에 두지 않고 Semaphore Environment/인벤토리 변수로 받으며 `SEC-055`/`SEC-056`이 없는 경로를 걸러 규칙 적재 실패를 막는다. 규칙 잠금(`-e 2`)은 재부팅이 필요해 쓰지 않는다.
+> - **fail2ban**: `SEC-015`/`SEC-032` jail은 `fail2ban_banaction`을 받는다. 기본값은 `firewall_unmanaged` 소속이면 `dummy`(방화벽 체인·규칙을 만들지 않음), 아니면 빈 값(배포판 기본). `dummy`에서는 탐지와 로그(`Ban` 기록)만 남고 네트워크 차단은 하지 않는다. 차단이 필요하면 sshd 접근 제어(#371)나 상위 방화벽으로 막는다.
+> - **journald**: `SEC-053`/`SEC-054`가 `Storage=persistent`를 켜 재부팅 뒤에도 이전 부팅의 시스템 로그가 남는다. 용량·보존 한도는 `common`의 `COMMON-017`(`journald_max_use`, `journald_max_retention`)이 정한다. CentOS 6/7 raw 경로는 대상이 아니다.
+> - **중앙 수집·적용 절차**: [docs/runbooks/detection-recovery.md](runbooks/detection-recovery.md).

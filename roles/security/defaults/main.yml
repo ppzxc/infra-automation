@@ -91,6 +91,18 @@ sudo_log_file: "/var/log/sudo.log"
 fail2ban_bantime: "1h"
 fail2ban_findtime: "10m"
 fail2ban_maxretry: 5
+# 차단 동작(banaction). 방화벽 비관리 호스트는 'dummy'(아무 방화벽도 건드리지 않음)로 탐지·로그만 남긴다.
+# 빈 문자열이면 배포판 기본 동작을 쓴다(방화벽 관리 호스트).
+fail2ban_banaction: "{{ '' if security_firewall_managed | bool else 'dummy' }}"
+
+# Auditd (#372): 전체 execve 추적 대신 인증·권한·시크릿·컨테이너 설정 이벤트만 기록한다.
+# 시크릿 파일 경로는 호스트마다 달라 값은 저장소에 두지 않고 Semaphore Environment/인벤토리 변수로 받는다.
+audit_watch_paths: []
+audit_container_config_paths:
+  - /etc/docker/
+
+# journald 영구 저장(#372): 재부팅 뒤에도 이전 부팅의 시스템 로그가 남게 한다. 보존 한도는 common의 journald_max_use/journald_max_retention.
+journald_storage: persistent
 
 
 
