@@ -7,3 +7,8 @@ maxretry = {{ fail2ban_maxretry | default(5) }}
 findtime = {{ fail2ban_findtime | default('10m') }}
 bantime = {{ fail2ban_bantime | default('1h') }}
 ignoreip = 127.0.0.1/8 ::1 {{ admin_allowed_subnets | default([]) | join(' ') }}
+{% if (fail2ban_banaction | default('')) | length > 0 %}
+# 방화벽 비관리 호스트: 차단 동작이 방화벽 체인을 건드리지 않게 한다(탐지·로그만).
+banaction = {{ fail2ban_banaction }}
+banaction_allports = {{ fail2ban_banaction }}
+{% endif %}

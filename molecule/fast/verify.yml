@@ -30,12 +30,16 @@
               '/etc/systemd/journald.conf.d/99-retention.conf', '/etc/profile.d/99-aliases.sh',
               '/etc/profile.d/98-node-env.sh', '/etc/environment', chrony_path,
               '/etc/sudoers.d/99-security-policy', audit_rules_path, '/etc/fail2ban/jail.d/sshd.local',
+              '/var/log/journal', '/etc/systemd/journald.conf.d', '/etc/systemd/journald.conf.d/50-persistent.conf',
               '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json'] }}
       read:
         - /etc/ssh/sshd_config
         - /home/infra-legacy/.ssh/authorized_keys
         - /var/tmp/fw-unmanaged-before.txt
         - /var/tmp/fw-unmanaged-after.txt
+        - "{{ audit_rules_path }}"
+        - /etc/fail2ban/jail.d/sshd.local
+        - /etc/systemd/journald.conf.d/50-persistent.conf
       group: "{{ present_accounts }}"
       passwd: "{{ present_accounts + ['infra-removed'] }}"
       cmd:
@@ -190,9 +194,14 @@
           when: ansible_os_family == "RedHat"
 
         - name: "[VERIFY-SEC-012] Verify auditd rules configuration file"
-          ansible.builtin.debug:
-            msg: "{{ f.stat[audit_rules_path] }}"
-            verbosity: 1
+          ansible.builtin.assert:
+            that:
+              - f.stat[audit_rules_path].exists
+              - f.stat[audit_rules_path].mode == '0600'
+              - "'-k identity' in f.read[audit_rules_path]"
+              - "'-k container_config' in f.read[audit_rules_path]"
+              - "'execve' not in (f.read[audit_rules_path] | regex_replace('(?m)^#.*$', ''))"
+            fail_msg: "auditd rules file is missing, or still traces every execve."
           when: ansible_os_family == "RedHat"
 
         - name: "[VERIFY-SEC-013] Verify auditd service status"
@@ -206,10 +215,16 @@
               - f.stat['/etc/sudoers.d/99-security-policy'].mode == '0440'
             fail_msg: "Sudo security policy /etc/sudoers.d/99-security-policy is missing."
 
+        # converge의 두 번째 플레이가 호스트를 firewall_unmanaged에 넣고 security를 다시 적용하므로 jail은 방화벽을 건드리지 않는 banaction(dummy)이어야 한다.
+        # fail2ban 패키지가 없는 이미지에서는 파일이 만들어지지 않으므로 그때는 건너뛴다(SEC-015는 failed_when: false).
         - name: "[VERIFY-SEC-015] Verify fail2ban ssh jail configuration file"
-          ansible.builtin.debug:
-            msg: "{{ f.stat['/etc/fail2ban/jail.d/sshd.local'] }}"
-            verbosity: 1
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/fail2ban/jail.d/sshd.local'].mode == '0644'
+              - "'banaction = dummy' in f.read['/etc/fail2ban/jail.d/sshd.local']"
+              - "'banaction_allports = dummy' in f.read['/etc/fail2ban/jail.d/sshd.local']"
+            fail_msg: "fail2ban jail is missing or its banaction can touch the firewall."
+          when: f.stat['/etc/fail2ban/jail.d/sshd.local'].exists
 
         - name: "[VERIFY-SEC-016] Verify DMZ zone configuration readiness"
           ansible.builtin.debug:
@@ -225,6 +240,37 @@
 
         # converge의 두 번째 플레이가 firewall_unmanaged 그룹에 넣은 상태에서 방화벽 입력(허용 포트)을 바꿔
         # security 역할을 다시 적용하고 방화벽 설정 파일 스냅샷을 앞뒤로 남긴다.
+        - name: "[VERIFY-SEC-053] Verify persistent journal directory and drop-in directory"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/var/log/journal'].exists
+              - f.stat['/var/log/journal'].mode == '2755'
+              - f.stat['/etc/systemd/journald.conf.d'].exists
+            fail_msg: "/var/log/journal (2755) or /etc/systemd/journald.conf.d is missing."
+          when: ansible_service_mgr == "systemd"
+
+        - name: "[VERIFY-SEC-054] Verify journald persistent storage drop-in"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/systemd/journald.conf.d/50-persistent.conf'].mode == '0644'
+              - "'Storage=persistent' in f.read['/etc/systemd/journald.conf.d/50-persistent.conf']"
+            fail_msg: "journald is not configured for persistent storage."
+          when: ansible_service_mgr == "systemd"
+
+        - name: "[VERIFY-SEC-055] Verify existing audit watch paths are watched as secret_access"
+          ansible.builtin.assert:
+            that:
+              - "'-w /etc/hostname -p rwa -k secret_access' in f.read[audit_rules_path]"
+            fail_msg: "an existing audit_watch_paths entry is not in the audit rules."
+          when: ansible_os_family == "RedHat"
+
+        - name: "[VERIFY-SEC-056] Verify missing audit watch paths are left out of the audit rules"
+          ansible.builtin.assert:
+            that:
+              - "'/nonexistent/molecule-secret.env' not in f.read[audit_rules_path]"
+            fail_msg: "a missing audit_watch_paths entry was written to the audit rules."
+          when: ansible_os_family == "RedHat"
+
         - name: "[VERIFY-SEC-051] Verify firewall config is untouched for a firewall_unmanaged host"
           ansible.builtin.assert:
             that:

@@ -34,6 +34,10 @@ enable_vault_ssh_ca: false
 enable_boundary: false
 firewall_allowed_tcp_ports:
   - 22
+# #372: 있는 경로(/etc/hostname)만 감사 규칙에 실리고 없는 경로는 걸러지는지 본다([VERIFY-SEC-055]/[VERIFY-SEC-056]).
+audit_watch_paths:
+  - /etc/hostname
+  - /nonexistent/molecule-secret.env
 # roles/security/defaults/main.yml ships ssh_password_authentication:
 # "yes" as a safe, opt-in default (docs/security.md's "PasswordAuthentication
 # no" hardening is applied "사전 검증 후", i.e. per-host once key auth is
