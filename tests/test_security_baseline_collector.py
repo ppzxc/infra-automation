@@ -98,3 +98,34 @@ def test_remote_mode_is_deterministic_and_non_secret(tmp_path):
     assert a.stdout == b.stdout
     assert "should-not-appear" not in a.stdout
     assert "proxy.secrets.env" in a.stdout
+
+
+def test_remote_aborts_when_sudo_unavailable(tmp_path):
+    if os.geteuid() == 0:
+        return
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    sudo = bindir / "sudo"
+    sudo.write_text("#!/bin/sh\nexit 1\n")
+    sudo.chmod(0o755)
+    r = _run(["--remote"], {"PATH": f"{bindir}:{os.environ['PATH']}"})
+    assert r.returncode != 0
+    assert "sudo" in r.stderr
+
+
+def test_secret_guard_is_case_insensitive(tmp_path):
+    bad = tmp_path / "bad.txt"
+    bad.write_text("password=hunter2\n")
+    assert _run(["--check-no-secrets", str(bad)]).returncode != 0
+
+
+def test_failure_label_names_real_command_not_sudo(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name, body in (("sudo", 'shift\nexec "$@"'), ("firewall-cmd", "exit 7")):
+        p = bindir / name
+        p.write_text(f"#!/bin/sh\n{body}\n")
+        p.chmod(0o755)
+    r = _run(["--remote"], {"PATH": f"{bindir}:{os.environ['PATH']}", "BASELINE_FIND_ROOTS": str(tmp_path)})
+    assert "(unavailable: firewall-cmd --get-active-zones exit=7)" in r.stdout
+    assert "(unavailable: sudo" not in r.stdout

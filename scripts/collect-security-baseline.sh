@@ -9,6 +9,11 @@
 # 결과는 저장소 밖 비공개 경로(기본 ~/.local/share/infra-automation/sec-review-20261026/
 # baseline/<label>/<시각>/snapshot.txt)에만 저장한다. 저장소 안 경로는 거부한다.
 # 서버에서는 --remote 모드로 같은 파일이 stdin으로 실행된다.
+#
+# 환경변수:
+#   BASELINE_SSH_OPTS    ssh에 덧붙일 옵션 (예: "-i <공개키> -o IdentitiesOnly=yes")
+#   BASELINE_FIND_ROOTS  시크릿 후보 파일을 찾을 서버 쪽 경로 (기본 /opt /etc/restic ...)
+#   INFRA_PRIVATE_DIR    결과 저장 기준 경로
 set -u
 set -o pipefail
 
@@ -17,12 +22,26 @@ SECRET_PATTERN='BEGIN [A-Z ]*PRIVATE KEY|[A-Za-z_]*(SECRET|PASSWORD|PASSWD|TOKEN
 # --- 서버 쪽: 정규화된(시각·카운터·PID 제거) 텍스트를 stdout으로 낸다 ---------------
 remote_main() {
   local sudo=""
-  if [ "$(id -u)" != "0" ]; then sudo="sudo -n"; fi
+  if [ "$(id -u)" != "0" ]; then
+    sudo="sudo -n"
+    # 권한 없이 돌면 모든 구간이 '(unavailable)'로 같아져 빈 diff가 거짓 통과가 된다.
+    if ! sudo -n true 2>/dev/null; then
+      echo "sudo -n 불가: 수집을 중단합니다." >&2
+      return 1
+    fi
+  fi
   local roots="${BASELINE_FIND_ROOTS:-/opt /etc/restic /etc/ssh /etc/audit /root /home}"
 
   section() { printf '\n## %s\n' "$1"; }
-  # 명령이 없거나 실패해도 같은 문구를 내 diff가 흔들리지 않게 한다.
-  run() { "$@" 2>&1 || echo "(unavailable: $1 exit=$?)"; }
+  # 출력은 그대로 싣고, 실패하면 sudo를 뺀 실제 명령 이름과 종료코드를 덧붙인다.
+  # systemctl is-active/is-enabled의 비정상 종료는 상태값이므로 표시하지 않는다.
+  run() {
+    local rc name="$*"
+    "$@" 2>&1; rc=$?
+    name="${name#sudo -n }"
+    case "$name" in "systemctl is-"*) return 0 ;; esac
+    [ "$rc" -eq 0 ] || echo "(unavailable: ${name} exit=${rc})"
+  }
 
   section host
   run hostname
@@ -90,7 +109,7 @@ check_out_dir() {
 }
 
 check_no_secrets() {
-  if grep -Eq "$SECRET_PATTERN" "$1"; then
+  if grep -Eiq "$SECRET_PATTERN" "$1"; then
     echo "거부: 수집 결과에 시크릿으로 보이는 패턴이 있습니다(내용은 출력하지 않음)." >&2
     return 1
   fi
@@ -102,7 +121,9 @@ collect() {
   ts="$(date +%Y%m%dT%H%M%S)"
   out="$base/$label/$ts"
   umask 077
-  mkdir -p "$out"
+  mkdir -p "$base/$label"
+  # 같은 초의 다른 실행을 덮어쓰지 않도록 -p 없이 만든다.
+  mkdir "$out" || return 1
   local sshargs=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
   [ -n "$port" ] && sshargs+=(-p "$port")
   # shellcheck disable=SC2206
@@ -111,8 +132,8 @@ collect() {
     echo "수집 실패: $out/stderr.txt 확인" >&2
     return 1
   fi
-  if ! check_no_secrets "$out/snapshot.txt"; then
-    rm -f "$out/snapshot.txt"
+  if ! check_no_secrets "$out/snapshot.txt" || ! check_no_secrets "$out/stderr.txt"; then
+    rm -f "$out/snapshot.txt" "$out/stderr.txt"
     return 1
   fi
   echo "$out/snapshot.txt"
@@ -122,7 +143,7 @@ main() {
   local label="" dest="" port="" base="${INFRA_PRIVATE_DIR:-$HOME/.local/share/infra-automation/sec-review-20261026}/baseline"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --remote) remote_main; return 0 ;;
+      --remote) remote_main; return $? ;;
       --check-out-dir) check_out_dir "$2"; return $? ;;
       --check-no-secrets) check_no_secrets "$2"; return $? ;;
       --label) label="$2"; shift 2 ;;
