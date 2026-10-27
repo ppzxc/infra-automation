@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_inventory import inventory_section  # noqa: E402
 from host_audit_kisa import host_audit_kisa_section, run_date as kisa_run_date  # noqa: E402
+from host_audit_regression import host_audit_regression_section  # noqa: E402
 from host_audit_baseline import host_audit_baseline_section  # noqa: E402
 
 try:
@@ -278,6 +279,8 @@ def host_audit_report_model(records, meta):
     # Configuration Vulnerability (KISA-2026, #121): exception expiry is judged on the run date.
     model = host_audit_kisa_section(model, records, meta.get('kisa_exceptions') or [],
                                     kisa_run_date(meta.get('started_at'), tz_name))
+    # Security Regression (#377): spec #364 expectations; its failed items are findings for the Audit Baseline below.
+    model = host_audit_regression_section(model, records, meta.get('regression_backup'))
     # Audit Baseline (#125) runs last: it marks the findings every section above produced.
     return host_audit_baseline_section(model, meta.get('baseline_history'), dict(meta, timezone=tz_name))
 

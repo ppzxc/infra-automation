@@ -146,7 +146,7 @@ scripts/collect-receiver-sources.sh --label <호스트> --ssh <user@host>
 
 ## 8. Host Audit 연계
 
-#377이 퇴행 점검 항목으로 아래 기대치를 읽도록 넘긴다. 점검 결과는 항목 ID와 통과 여부만 담고 출발지·문자열 값은 담지 않는다. 이 티켓은 Host Audit 코드를 수정하지 않는다.
+#377이 퇴행 점검 항목 `EXP-RECV-1`~`EXP-RECV-3`으로 아래 기대치를 읽는다([Host Audit 명세 16절](../host_audit.md)). 점검 결과는 항목 ID와 통과 여부만 담고 출발지·문자열 값은 담지 않는다. 이 티켓은 Host Audit 코드를 수정하지 않는다.
 
 - 로그 수신: 허용 출발지 필터가 켜져 있는가(수신 설정에 필터 정의가 있고 보관 경로에 연결돼 있는가)
 - 트랩 수신: 인증 지시어가 있고 기본 허용이 꺼져 있는가, 기본 문자열(`default-string`)이 없는가

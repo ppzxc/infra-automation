@@ -58,6 +58,6 @@ BASELINE_SSHD_MATCH_ADDRS="<허용 출발지> <거부 시험 출발지>" \
 
 ## 6. 사후 점검과 Host Audit 연계
 
-- Host Audit(#377)이 점검할 항목은 `sshd -T -C`로 평가한 허용·비허용 출발지 결과, `sshd_config`의 Match 블록 유무, 허용 목록이 비어 있지 않은 서버 목록이다. 점검 항목 정의는 #377에서 한다(이 런북은 점검해야 할 사실만 적는다).
+- Host Audit(#377)이 점검할 항목은 `sshd -T -C`로 평가한 허용·비허용 출발지 결과, `sshd_config`의 Match 블록 유무, 허용 목록이 비어 있지 않은 서버 목록이다. 점검 항목 정의는 #377에서 했다: `EXP-SSH-1`~`EXP-SSH-4`([Host Audit 명세 16절](../host_audit.md), 적용은 [Host Audit 퇴행 점검 런북](host-audit-regression.md)).
 - 허용 목록이 바뀌면(사무실·자동화 서버 변경) 비공개 경로의 목록과 변수를 함께 고치고 이 런북의 2~4절을 다시 거친다.
 - 이 변경은 방화벽 체인을 만들거나 지우지 않으며 `ssh_allowed_source_ips`·방화벽 규칙의 값도 읽지 않는다.

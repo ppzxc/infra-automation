@@ -480,3 +480,160 @@
           - package_record.packages | length > 50
           - package_record.packages[0].keys() | sort == ['arch', 'epoch', 'modularitylabel', 'name', 'release', 'src_epoch', 'src_name', 'src_release', 'src_version', 'version']
         fail_msg: "Unexpected Host Audit package record: {{ package_record | dict2items | rejectattr('key', 'equalto', 'packages') | items2dict }}"
+
+# ==============================================================================
+# 5. Host Audit - Security Regression: 의도적 퇴행이 실패로 보고되는지 (Spec #364 / Ticket-10, #377)
+# ==============================================================================
+# 수렴된 보안 설정(sshd 출발지 제한 블록, journald 영구 저장)과 시험용 시크릿 파일에서 먼저 모든 선언 항목이 통과하는지 본 뒤,
+# 일부러 퇴행시켜(블록 제거, Storage=volatile, 파일 권한 0644) 같은 항목이 실패로 나오는지 본다. 마지막에 원복하고 다시 통과를 본다.
+# 컨테이너에서는 fail2ban·auditd 적재·서비스 판정과 컨테이너 게시 포트를 재현할 수 없어 이 시나리오에서 선언하지 않는다
+# (프로브 단위 시험 tests/test_host_audit_regression_probe.py가 가짜 루트·가짜 조회 명령으로 본다).
+# 원복은 always에서 하고, 이 play는 파일 끝이라 앞선 VERIFY-SEC·VERIFY-AUD-010 판정에 영향이 없다.
+- name: Verify Host Audit Security Regression reports intentional regressions
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    host_audit_regression_expect:
+      ssh_restricted: true
+      ssh_allowed_addrs: ["192.0.2.10"]
+      det_journald: true
+      sec_roots: ["/opt/ha-regression"]
+      sec_files: ["/opt/ha-regression/root-only.key"]
+    host_audit_record:
+      status: ok
+    snapshot_script: "find /etc /usr/sbin -xdev -type f -printf '%p|%m|%s|%T@\\n' 2>/dev/null | LC_ALL=C sort | sha256sum"
+
+  tasks:
+    - name: Plant a fixture secret file with the standard mode
+      ansible.builtin.file:
+        path: /opt/ha-regression
+        state: directory
+        mode: '0755'
+
+    - name: Create the fixture key file
+      ansible.builtin.copy:
+        content: "fixture\n"
+        dest: /opt/ha-regression/root-only.key
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Snapshot managed files before the probe
+      ansible.builtin.raw: "sh -c {{ snapshot_script | quote }}"
+      register: reg_before
+      changed_when: false
+
+    - name: Run the Security Regression probe on the converged host
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: regression
+
+    - name: Keep the healthy verdicts
+      ansible.builtin.set_fact:
+        reg_healthy: "{{ host_audit_record.security_regression }}"
+
+    - name: Snapshot managed files after the probe
+      ansible.builtin.raw: "sh -c {{ snapshot_script | quote }}"
+      register: reg_after
+      changed_when: false
+
+    - name: "[VERIFY-AUD-700] Verify the probe is read-only and every declared item passes on the converged host"
+      vars:
+        _v: "{{ reg_healthy.results | items2dict(key_name='code', value_name='verdict') }}"
+      ansible.builtin.assert:
+        that:
+          - reg_before.stdout == reg_after.stdout
+          - reg_healthy.status == 'ok'
+          - _v['EXP-SSH-1'] == '통과'
+          - _v['EXP-SSH-2'] == '통과'
+          - _v['EXP-SSH-3'] == '통과'
+          - _v['EXP-SSH-4'] == '통과'
+          - _v['EXP-DET-1'] == '통과'
+          - _v['EXP-SEC-1'] == '통과'
+          - _v['EXP-SEC-2'] == '통과'
+          - _v['EXP-MGMT-1'] == '해당없음'
+          - _v['EXP-DET-2'] == '해당없음'
+        fail_msg: "Healthy host did not pass: {{ reg_healthy }} read-only={{ reg_before.stdout == reg_after.stdout }}"
+
+    - name: Regress the host on purpose and check that the same items fail
+      block:
+        - name: Keep copies of the files the regression touches
+          ansible.builtin.copy:
+            src: "{{ item }}"
+            dest: "/var/tmp/ha-regression-{{ item | basename }}.orig"
+            remote_src: true
+            mode: '0600'
+          loop:
+            - /etc/ssh/sshd_config
+            - /etc/systemd/journald.conf.d/50-persistent.conf
+
+        - name: Remove the sshd source restriction block
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(?s)# BEGIN ANSIBLE MANAGED sshd source restriction.*?# END ANSIBLE MANAGED sshd source restriction[^\n]*\n'
+            replace: ''
+
+        - name: Make journald volatile
+          ansible.builtin.copy:
+            content: "[Journal]\nStorage=volatile\n"
+            dest: /etc/systemd/journald.conf.d/50-persistent.conf
+            mode: '0644'
+
+        - name: Open the fixture key file
+          ansible.builtin.file:
+            path: /opt/ha-regression/root-only.key
+            mode: '0644'
+
+        - name: Run the Security Regression probe on the regressed host
+          ansible.builtin.include_role:
+            name: host_audit
+            tasks_from: regression
+
+        - name: Keep the regressed verdicts
+          ansible.builtin.set_fact:
+            reg_bad: "{{ host_audit_record.security_regression }}"
+
+        - name: "[VERIFY-AUD-701] Verify intentional regressions are reported as failures"
+          vars:
+            _v: "{{ reg_bad.results | items2dict(key_name='code', value_name='verdict') }}"
+          ansible.builtin.assert:
+            that:
+              - _v['EXP-SSH-1'] == '실패'
+              - _v['EXP-SSH-2'] == '실패'
+              - _v['EXP-SSH-4'] == '실패'
+              - _v['EXP-DET-1'] == '실패'
+              - _v['EXP-SEC-1'] == '실패'
+              - _v['EXP-SEC-2'] == '실패'
+              - reg_bad | to_json is not search('[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+')
+            fail_msg: "Regression was not reported: {{ reg_bad }}"
+      always:
+        - name: Restore the files
+          ansible.builtin.copy:
+            src: "/var/tmp/ha-regression-{{ item | basename }}.orig"
+            dest: "{{ item }}"
+            remote_src: true
+            mode: preserve
+          loop:
+            - /etc/ssh/sshd_config
+            - /etc/systemd/journald.conf.d/50-persistent.conf
+
+        - name: Restore the fixture key file mode
+          ansible.builtin.file:
+            path: /opt/ha-regression/root-only.key
+            mode: '0600'
+
+    - name: Run the Security Regression probe after the restore
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: regression
+
+    - name: "[VERIFY-AUD-702] Verify the declared items pass again after the restore"
+      vars:
+        _v: "{{ host_audit_record.security_regression.results | items2dict(key_name='code', value_name='verdict') }}"
+      ansible.builtin.assert:
+        that:
+          - _v['EXP-SSH-1'] == '통과'
+          - _v['EXP-DET-1'] == '통과'
+          - _v['EXP-SEC-2'] == '통과'
+        fail_msg: "Restore did not bring the items back: {{ host_audit_record.security_regression }}"

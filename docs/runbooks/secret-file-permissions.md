@@ -95,4 +95,4 @@ docker compose config --quiet; echo "exit=$?"
 3. 부정 시험: `0640 root:dockermgmt` 파일을 `dockermgmt` 그룹이 아닌 일반 계정으로 읽으려 하면 거부돼야 한다(시험 계정은 비공개 경로에 지정, 값은 출력하지 않고 종료 코드만 본다).
 4. 3절의 `docker compose config --quiet` 종료 코드가 항목별로 0이어야 한다.
 5. 이슈에는 통과 여부만 적는다(스냅샷·diff·소비자 목록 원본은 올리지 않는다).
-6. Host Audit 점검 항목 추가는 #377에서 이 런북의 기준(시크릿 파일 권한, 평문 후보 경로)을 이어받는다.
+6. Host Audit 퇴행 점검은 이 런북의 시크릿 파일 권한 기준을 `EXP-SEC-1`~`EXP-SEC-3`으로 이어받는다([Host Audit 명세 16절](../host_audit.md)). 평문 후보 경로 점검은 #374 선행 때문에 이번 항목에 넣지 않았다.
