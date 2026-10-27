@@ -18,6 +18,10 @@
 set -u
 set -o pipefail
 
+# 결과 기본 저장 기준 경로(저장소 밖). INFRA_PRIVATE_DIR로 바꾼다.
+DEFAULT_PRIVATE_DIR="$HOME/.local/share/infra-automation/sec-review-20261026"
+# 설정 파일 안 평문 자격 후보. ${VAR} 참조와 빈 값은 제외한다. 파일명만 출력하고 줄은 출력하지 않는다.
+PLAINTEXT_CRED_PATTERN='(password|passwd|secret|token|api_?key)[A-Za-z_]*["'"'"']?[ ]*[=:][ ]*["'"'"']?[^$ "'"'"'{#][^ ]*'
 SECRET_PATTERN='BEGIN [A-Z ]*PRIVATE KEY|[A-Za-z_]*(SECRET|PASSWORD|PASSWD|TOKEN|API_?KEY)[A-Za-z_]*[=:] *[^ ]'
 
 # --- 서버 쪽: 정규화된(시각·카운터·PID 제거) 텍스트를 stdout으로 낸다 ---------------
@@ -44,6 +48,14 @@ remote_main() {
     [ "$rc" -eq 0 ] || echo "(unavailable: ${name} exit=${rc})"
   }
 
+  # grep -l이 일치 없음(1)으로 끝나는 것은 실패가 아니다.
+  run_ok1() {
+    local rc name="$*"
+    "$@" 2>&1; rc=$?
+    name="${name#sudo -n }"
+    [ "$rc" -le 1 ] || echo "(unavailable: ${name} exit=${rc})"
+  }
+
   section host
   run hostname
   section listen
@@ -63,7 +75,8 @@ remote_main() {
   run $sudo sshd -T | sort
   section sshd-match-blocks
   # sshd -T는 Match 블록을 평가하지 않으므로 선언 줄과, 지정한 출발지별 달라지는 설정을 따로 본다.
-  run $sudo grep -rnEi '^[[:space:]]*Match[[:space:]]' /etc/ssh/sshd_config /etc/ssh/sshd_config.d
+  # shellcheck disable=SC2086
+  run_ok1 $sudo grep -rnEi '^[[:space:]]*Match[[:space:]]' /etc/ssh/sshd_config /etc/ssh/sshd_config.d
   local base_cfg addr
   base_cfg="$($sudo sshd -T 2>/dev/null | sort)"
   for addr in ${BASELINE_SSHD_MATCH_ADDRS:-}; do
@@ -101,6 +114,14 @@ remote_main() {
       -o -name '*token*' -o -name '*.key' -o -name '*.pem' -o -name 'id_*' \
       -o -name 'ssh_host_*_key' -o -name '.bash_history' -o -name 'authorized_keys' \) \
     -printf '%m %u:%g %p\n' | sort
+  section plaintext-credential-files
+  # 줄 내용은 출력하지 않는다(grep -l: 파일 경로만). 환경변수 참조(${VAR})·빈 값은 제외한다.
+  # shellcheck disable=SC2086
+  run_ok1 $sudo find $roots -xdev -maxdepth 5 \
+    \( -name data -o -name volumes -o -name logs -o -name node_modules -o -name .git -o -path /etc/fail2ban \) -prune -o \
+    -type f -size -1024k \( -name 'docker-compose*' -o -name 'compose*.y*ml' -o -name '*.conf' -o -name '*.ini' \
+      -o -name '*.yml' -o -name '*.yaml' -o -name '*.cfg' -o -name '*.properties' \) \
+    -exec grep -lEi "$PLAINTEXT_CRED_PATTERN" {} + | sort
   section container-images
   run $sudo docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' | sort
   section docker-daemon
@@ -125,8 +146,11 @@ check_no_secrets() {
   fi
 }
 
+# 옵션은 OPT 연관 배열(label, dest, port, base)로 받는다.
+declare -A OPT=()
+
 collect() {
-  local label="$1" dest="$2" port="$3" base="$4" ts out
+  local label="${OPT[label]}" dest="${OPT[dest]}" port="${OPT[port]:-}" base="${OPT[base]}" ts out
   check_out_dir "$base" || return 1
   ts="$(date +%Y%m%dT%H%M%S)"
   out="$base/$label/$ts"
@@ -138,7 +162,12 @@ collect() {
   [ -n "$port" ] && sshargs+=(-p "$port")
   # shellcheck disable=SC2206
   [ -n "${BASELINE_SSH_OPTS:-}" ] && sshargs+=($BASELINE_SSH_OPTS)
-  if ! ssh "${sshargs[@]}" "$dest" 'bash -s -- --remote' < "$0" > "$out/snapshot.txt" 2> "$out/stderr.txt"; then
+  # 서버 쪽 수집 설정(Match 평가 출발지·사용자)을 환경변수로 넘긴다.
+  local remote_env
+  remote_env="$(printf 'BASELINE_SSHD_MATCH_ADDRS=%q BASELINE_SSHD_MATCH_USER=%q' \
+    "${BASELINE_SSHD_MATCH_ADDRS:-}" "${BASELINE_SSHD_MATCH_USER:-}")"
+  # shellcheck disable=SC2029  # 클라이언트 쪽 확장이 의도다(%q로 이스케이프함)
+  if ! ssh "${sshargs[@]}" "$dest" "env $remote_env bash -s -- --remote" < "$0" > "$out/snapshot.txt" 2> "$out/stderr.txt"; then
     echo "수집 실패: $out/stderr.txt 확인" >&2
     return 1
   fi
@@ -150,22 +179,22 @@ collect() {
 }
 
 main() {
-  local label="" dest="" port="" base="${INFRA_PRIVATE_DIR:-$HOME/.local/share/infra-automation/sec-review-20261026}/baseline"
+  OPT=([base]="${INFRA_PRIVATE_DIR:-$DEFAULT_PRIVATE_DIR}/baseline")
   while [ $# -gt 0 ]; do
     case "$1" in
       --remote) remote_main; return $? ;;
-      --label) label="$2"; shift 2 ;;
-      --ssh) dest="$2"; shift 2 ;;
-      --port) port="$2"; shift 2 ;;
-      --out) base="$2"; shift 2 ;;
+      --label) OPT[label]="$2"; shift 2 ;;
+      --ssh) OPT[dest]="$2"; shift 2 ;;
+      --port) OPT[port]="$2"; shift 2 ;;
+      --out) OPT[base]="$2"; shift 2 ;;
       *) echo "알 수 없는 인자: $1" >&2; return 2 ;;
     esac
   done
-  if [ -z "$label" ] || [ -z "$dest" ]; then
+  if [ -z "${OPT[label]:-}" ] || [ -z "${OPT[dest]:-}" ]; then
     echo "사용법: $0 --label <호스트> --ssh <user@host> [--port N] [--out DIR]" >&2
     return 2
   fi
-  collect "$label" "$dest" "$port" "$base"
+  collect
 }
 
 # source하면 함수만 불러온다(테스트용). 직접 실행하거나 ssh stdin(bash -s)이면 main을 돈다.

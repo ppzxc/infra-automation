@@ -149,3 +149,18 @@ def test_sshd_match_blocks_section_present(tmp_path):
                             "BASELINE_SSHD_MATCH_ADDRS": "192.0.2.1"})
     assert "## sshd-match-blocks" in r.stdout
     assert "# addr=192.0.2.1" in r.stdout
+
+
+def test_plaintext_credential_files_listed_by_path_only(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    sudo = bindir / "sudo"
+    sudo.write_text('#!/bin/sh\nshift\nexec "$@"\n')
+    sudo.chmod(0o755)
+    (tmp_path / "bad.yml").write_text("db:\n  password: hunter2value\n")
+    (tmp_path / "ok.yml").write_text("db:\n  password: ${DB_PASSWORD}\n")
+    r = _run(["--remote"], {"PATH": f"{bindir}:{os.environ['PATH']}", "BASELINE_FIND_ROOTS": str(tmp_path)})
+    sect = r.stdout.split("## plaintext-credential-files")[1].split("\n## ")[0]
+    assert "bad.yml" in sect
+    assert "ok.yml" not in sect
+    assert "hunter2value" not in r.stdout
