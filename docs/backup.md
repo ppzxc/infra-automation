@@ -7,7 +7,7 @@
 ## 1. 개요 및 구현 기능 (What)
 
 - **바이너리 배포**: 컨트롤러가 다운로드·SHA256 검증한 `restic`/`resticprofile`을 버전 디렉터리(`/opt/host-agents/<agent>/<version>/`)에 배치하고 `/usr/local/bin` symlink로 활성화 (ADR-0006 §2.8).
-- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(삭제는 `locks/*`만)와 비밀번호 (§2.5). 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
+- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
 - **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
@@ -137,6 +137,11 @@
 | `BAK-217` | `Initialize the restic repository when it does not exist (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 프로브 결과 조건 (저장소가 없을 때만 `init`), `no_log` |
 | `BAK-218` | `Fail before the backup files are written when sqlite3 is missing on a host that uses backup_sqlite_snapshots (raw, read-only probe)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 읽기 전용 확인 (`command -v sqlite3`), 입력이 있을 때만 |
 | `BAK-219` | `Deploy the SQLite snapshot script (raw, POSIX sh, run-before hook)` | `ansible.builtin.import_tasks` | legacy_el6, legacy_el7 | sentinel (modern BAK-029와 같은 스크립트, `raw_upload.yml`), 입력이 있을 때만 |
+| `BAK-220` | `Assert the host key policy allows deletes under locks/ only` | `ansible.builtin.assert` | Controller | 읽기 전용 (`check_mode: false`, `run_once`; 저장소 정책 JSON `files/host-key-policy.json`만 읽음, 서버 접속 없음). `include_role(tasks_from: host_key_policy)`로 Molecule slow `VERIFY-BAK-220`이 호출 |
+
+> 예약 번호: `BAK-221`·`BAK-222`는 의도적으로 건너뛴 예약 번호이며 태스크가 없다(재사용하지 않는다).
+
+**호스트 키 정책 (#373)**: 호스트 서비스 계정은 `roles/backup/files/host-key-policy.json`의 정책(버킷 목록, 객체 Get/Put·멀티파트 중단, `locks/*`에 한정한 `s3:DeleteObject`)만 가진다. 이 파일이 문서·정책·검증의 단일 출처이며 `BAK-220`(`tasks/host_key_policy.yml`, Molecule slow `VERIFY-BAK-220`)과 `tests/test_backup_host_key_policy.py`가 삭제 허용 범위를 지킨다. `forget`/`prune`은 중앙 유지보수 키만 한다(§7). `PutObject`로 덮어쓰기는 가능하다는 한계와 카나리 적용·확대·롤백은 [런북](runbooks/backup-host-key-scope.md)을 따른다.
 
 ## 6. 백업 관측성 및 알림 계약 (ADR-0006 §2.6)
 

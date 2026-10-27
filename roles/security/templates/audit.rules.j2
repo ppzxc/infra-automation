@@ -1,5 +1,6 @@
-# Overseer Auditd Security Rules
-# Monitors critical identity and system configuration files
+# Overseer Auditd Security Rules (#372)
+# 의미 있는 이벤트만 기록한다: 인증·권한·시크릿·컨테이너 설정.
+# 전체 execve 추적은 소음이라 넣지 않는다(명령 실행 전수 기록 금지).
 
 # First rule - delete all previous rules
 -D
@@ -16,8 +17,10 @@
 -w /etc/group -p wa -k identity
 -w /etc/gshadow -p wa -k identity
 -w /etc/security/opasswd -p wa -k identity
+-w /etc/pam.d/ -p wa -k auth_config
+-w /etc/login.defs -p wa -k auth_config
 
-# 2. Sudoers configuration & logs
+# 2. Privilege: sudoers configuration & logs
 -w /etc/sudoers -p wa -k sudo_config
 -w /etc/sudoers.d/ -p wa -k sudo_config
 -w {{ sudo_log_file | default('/var/log/sudo.log') }} -p wa -k sudo_logs
@@ -26,5 +29,12 @@
 -w /etc/ssh/sshd_config -p wa -k sshd_config
 -w /etc/ssh/sshd_config.d/ -p wa -k sshd_config
 
-# 4. System and Kernel execution tracking
--a always,exit -F arch=b64 -S execve -k exec_log
+# 4. Container configuration changes (docker daemon; 호스트별 compose 위치는 audit_container_config_paths)
+{% for p in (audit_container_config_paths | default(['/etc/docker/'])) %}
+-w {{ p }} -p wa -k container_config
+{% endfor %}
+
+# 5. Secret files: read/write/attribute access (호스트별 경로는 audit_watch_paths, 값은 저장소에 두지 않는다)
+{% for p in (_audit_watch_paths_effective | default(audit_watch_paths | default([]))) %}
+-w {{ p }} -p rwa -k secret_access
+{% endfor %}

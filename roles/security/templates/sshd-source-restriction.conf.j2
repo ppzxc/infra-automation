@@ -1,0 +1,6 @@
+# 허용 출발지 밖에서 온 SSH 로그인은 모든 계정에 대해 거부한다(#371). 방화벽과 무관한 sshd 설정이다.
+# 허용 목록 값은 저장소에 두지 않는다(ssh_source_restriction_allowed_sources, Semaphore Environment/인벤토리 변수).
+# 루프백은 항상 허용한다(호스트 안에서의 점검용).
+Match Address *,!127.0.0.1,!::1{% for src in (ssh_source_restriction_allowed_sources | default([])) %},!{{ src }}{% endfor %}
+
+    DenyUsers *

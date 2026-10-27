@@ -83,6 +83,10 @@ backup_retention_daily: 7
 backup_retention_weekly: 4
 backup_retention_monthly: 12
 backup_maintenance_retry_lock: 30m
+# 호스트 백업 키 정책(쓰기 + 잠금 해제용 삭제) — 서버에는 운영자가 적용하고 저장소는 기대 정책을 이 파일로 고정한다(#373).
+# 후속(#374, 호스트별 격리 점검)도 같은 파일을 읽는다. ${BUCKET}은 호스트 버킷 이름으로 바꿔 적용한다.
+backup_host_key_policy_file: "{{ role_path }}/files/host-key-policy.json"
+backup_host_key_unlock_sid: HostKeyUnlockLocks
 # 월간 check --read-data-subset=10%: auto(매월 첫째 일요일) | always | never (수동 실행에서 강제/생략)
 backup_maintenance_read_subset: auto
 backup_maintenance_timezone: Asia/Seoul   # 스케줄(일요일 05:00)이 기준으로 삼는 달력 시간대

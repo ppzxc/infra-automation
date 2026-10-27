@@ -94,6 +94,10 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
 | `host_audit_kisa_alert_enabled` | `true` | 정기 실행의 KISA 월간 악화 알림(§15, #331). false면 알리지 않음 |
 | `host_audit_alert_webhook` · `host_audit_alert_validate_certs` | `{}` · `true` | 알림 webhook 직접 지정(`{url, header, token}`, Extra variables) · TLS 검증. 비우면 OpenBao `agents/openobserve` 값 |
+| `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
+| `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
+| `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |
+| `host_audit_backup_policy_file` · `host_audit_backup_policy_prefix` | `roles/backup/files/host-key-policy.json` · `backup-prod-` | 기대 정책 · 호스트 서비스 계정 이름 접두어 |
 
 ## 6. 태스크 매트릭스 (Task Matrix)
 
@@ -783,3 +787,77 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `AUD-642` | `Fail the run when a KISA worsening notification could not be delivered` | `ansible.builtin.assert` | 러너 | 읽기 전용 (webhook 없음·응답이 2xx가 아님이면 실패, 다른 판정 뒤에 마지막으로) |
 
 검증: pytest `tests/test_host_audit_kisa_worsened.py` — 개수가 같아도 항목이 바뀌면 악화로 잡히는 것, 지난 결과가 없는 호스트·첫 실행·취약이 아닌 판정은 잡히지 않는 것, 통지 본문의 항목 목록·길이 한도, 로컬 HTTP 서버로 받은 실제 요청(text/plain, 인증 헤더, 본문), 수시 실행·check 모드·비활성에서 보내지 않는 것, 전달 실패 시 실행 실패, 판정이 다른 판정 뒤에 오는 배선.
+
+## 16. Security Regression (Spec #364 / Ticket-10, #377)
+
+정기 점검이 스펙 #364의 기대치(관리 웹 접점 루프백 바인드, 수신 접점·원격 접속 출발지 제한, 탐지 동작과 로그 보존, 백업 정책의 삭제 불가, 시크릿 파일 권한)를 계속 확인하고, 퇴행하면 알린다. 점검은 읽기 전용이다(ADR-0009 §1). 결과는 **항목 ID와 판정(통과·실패·해당없음·점검불가)뿐**이고 주소·포트·경로·시크릿 값은 호스트 기록, 보고서, 알림 어디에도 들어가지 않는다. 기대치의 출처는 `docs/runbooks/`의 각 런북(mgmt-web-loopback-bind, receiver-source-restriction, ssh-source-restriction, detection-recovery, backup-host-key-scope, secret-file-permissions)이고 점검 절차와 기준선 연계는 [docs/runbooks/host-audit-regression.md](runbooks/host-audit-regression.md)에 있다.
+
+### 16.1 대상 선언과 판정
+
+- **선언 기반**: 이 기대치는 강화한 핵심 서버에만 해당한다. 호스트별 선언 `host_audit_regression_expect`(§5)가 비어 있으면 그 호스트는 이 섹션 대상이 아니고 어떤 항목도 실패하지 않는다. 선언의 값(포트, 설정 파일 경로, 허용 출발지)은 공개 저장소에 두지 않고 Semaphore 인벤토리·Environment로 준다(Semaphore 인벤토리는 static이라 저장소 `group_vars`는 적용되지 않는다).
+- **판정 4종**: 통과 · 실패 · 해당없음(선언하지 않은 항목) · 점검불가(선언했는데 조회 도구가 없거나 답이 없음). **점검불가는 통과로 세지 않는다.** 점검불가는 보고서에 따로 표시되고 합계에 남는다.
+- **퇴행 알림**: 실패 항목은 Audit Baseline의 발견(`security_regression` 섹션)이라 신규·지속·재발·해소가 표시된다. 지난 정기 점검에 실패가 아니던 항목이 이번에 실패하면 기존 KISA 악화 알림(§15, `AUD-640`~`AUD-642`)이 같은 본문에 항목 ID로 함께 알린다(같은 webhook, 정기 실행만, 호스트별 비교 기준 없으면 알리지 않음). 새 알림 경로를 만들지 않았고 전달 실패 판정(`AUD-642`)도 그대로다.
+
+### 16.2 점검 항목과 합격 기준
+
+선언 키는 `host_audit_regression_expect`의 키다.
+
+| 항목 | 기대치 출처 | 선언 키 | 합격 기준 |
+|---|---|---|---|
+| `EXP-MGMT-1` | mgmt-web-loopback-bind | `mgmt_web_ports` | 선언한 관리 웹 접점이 루프백 밖 주소에 열려 있지 않다(소켓과 컨테이너 게시 포트 모두) |
+| `EXP-MGMT-2` | mgmt-web-loopback-bind | `mgmt_wildcard_allowed` | 모든 주소에서 청취하는 접점이 허용 목록(프록시 경로 등 설계된 예외) 안에 있다 |
+| `EXP-MGMT-3` | mgmt-web-loopback-bind | `mgmt_removed_ports`, `mgmt_removed_names` | 제거 목록의 포트·컨테이너·서비스가 없다 |
+| `EXP-RECV-1` | receiver-source-restriction 8절 | `recv_syslog_conf` | 로그 수신 설정에 출발지 필터 정의가 있고 `log` 경로에 연결돼 있다 |
+| `EXP-RECV-2` | receiver-source-restriction 8절 | `recv_trap_conf` | 트랩 인증 지시어가 있고 `disableAuthorization`이 켜져 있지 않다 |
+| `EXP-RECV-3` | receiver-source-restriction 8절 | `recv_trap_conf` | 인증 지시어에 흔한 기본 문자열이 없다 |
+| `EXP-SSH-1` | ssh-source-restriction 6절 | `ssh_restricted` | `sshd_config`에 관리형 Match 블록과 `DenyUsers *`가 있다 |
+| `EXP-SSH-2` | ssh-source-restriction 6절 | `ssh_restricted`, `ssh_denied_addr` | `sshd -T -C`로 평가한 허용 밖 출발지(기본 문서용 주소)가 거부된다 |
+| `EXP-SSH-3` | ssh-source-restriction 6절 | `ssh_restricted`, `ssh_allowed_addrs` | 루프백과 선언한 허용 출발지가 거부되지 않는다 |
+| `EXP-SSH-4` | ssh-source-restriction 6절 | `ssh_restricted` | 허용 목록이 비어 있지 않다(Match 블록에 루프백 외 제외 항목이 있다) |
+| `EXP-DET-1` | detection-recovery | `det_journald` | journald가 영구 저장이고 영구 저널 디렉터리가 있다 |
+| `EXP-DET-2` | detection-recovery | `det_fail2ban` | fail2ban sshd jail이 동작한다 |
+| `EXP-DET-3` | detection-recovery | `det_fail2ban_no_firewall` | sshd jail 동작이 `dummy`뿐이다(방화벽 비관리 호스트) |
+| `EXP-DET-4` | detection-recovery | `det_auditd` | 적재된 감사 규칙에 identity, auth_config, sudo_config, sshd_config 키가 있다 |
+| `EXP-DET-5` | detection-recovery | `det_auditd` | 적재된 규칙이 있고 전체 execve 추적 규칙이 없다 |
+| `EXP-DET-6` | detection-recovery | `det_audit_secret` | 적재된 규칙에 secret_access 키가 있다 |
+| `EXP-DET-7` | detection-recovery | `det_log_agent` | 중앙 수집 에이전트 서비스(`true`는 기본 이름)가 active다 |
+| `EXP-BAK-1` | backup-host-key-scope | (러너, 선언 없음) | `host-key-policy.json`에 와일드카드 동작이 없고 삭제가 `locks/*` 하나뿐이다 |
+| `EXP-BAK-2` | backup-host-key-scope | (러너) | 수집기 스냅샷의 모든 호스트 서비스 계정 정책이 `host-key-policy.json`과 같은 모양이다 |
+| `EXP-BAK-3` | backup-host-key-scope | (러너) | 수집기 스냅샷의 모든 호스트 서비스 계정 정책 리소스가 버킷 하나뿐이다 |
+| `EXP-SEC-1` | secret-file-permissions | `sec_roots` | 선언한 경로의 시크릿 후보 파일 중 그룹·기타 쓰기 또는 기타 권한이 열린 것이 없다 |
+| `EXP-SEC-2` | secret-file-permissions | `sec_files` | 선언한 파일이 모두 있고 0600 이하 root 소유다 |
+| `EXP-SEC-3` | secret-file-permissions | `sec_env_files` | 선언한 시크릿 env 파일이 모두 있고 0640 이하 `root:dockermgmt`다(AGENTS.md 4절 예외) |
+
+- 노드 otelcol OTLP 수신기의 모든 주소 바인드는 설계된 예외(ADR-0012)이므로 `mgmt_wildcard_allowed`에 그 포트를 적는다. 관리 웹이 아니라서 `EXP-MGMT-1`의 대상도 아니다.
+- **서버에서 정책을 직접 읽지 않는다**: Host Audit 전용 키는 IAM 정책을 읽을 수 없고 유지보수 키는 쓰지 않는다(`AUD-500`, 최소 권한). `EXP-BAK-2`·`EXP-BAK-3`은 운영자가 읽기 전용 수집기(`scripts/collect-rustfs-policy.py`)로 만든 스냅샷 파일을 `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT`(러너 경로)로 주면 판정하고, 주지 않으면 점검불가다. 항목 판정을 켜는 변수는 `host_audit_regression_backup_enabled`다.
+- 이 섹션에 넣지 않은 것: 평문 인증 정보 정리와 서버 밖 사본(#374 선행), 패치 재부팅(#376), 이미지 버전 목록, `docker compose config --quiet`(운영자 계정의 compose 컨텍스트가 필요해 읽기 전용 원격 점검이 아님).
+
+### 16.3 호스트별 JSON 추가 필드
+
+`security_regression`은 선언이 있는 호스트의 기록에만 추가된다(`schema_version` 유지: 기존 필드 의미는 그대로이고 선택 필드이며 `config_vulnerability`도 같은 방식이다).
+
+```json
+"security_regression": {
+  "status": "ok",
+  "reason": "",
+  "results": [{"code": "EXP-SSH-1", "verdict": "통과"}]
+}
+```
+
+`status`는 `ok` 또는 `probe_failed`(표식 없음, 접속 실패)다. 수집에 실패한 호스트는 보고서의 점검불가 목록에 오르고 비교 대상이 아니다.
+
+### 16.4 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-700` | `Probe Security Regression expectations (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true`, 선언이 있을 때만 실행. 출력은 항목 ID와 PASS/FAIL/UNK뿐 |
+| `AUD-701` | `Add Security Regression verdicts to the per-host audit record` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 (`host_audit_regression_result` 필터) |
+| `AUD-710` | `Judge the backup host key policy items on the runner` | `ansible.builtin.set_fact` | 러너 (`delegate_to: localhost`) | 읽기 전용 (저장소 정책 JSON과 선택 스냅샷 파일을 읽어 `host_audit_regression_backup`이 판정, 켜진 실행에서만) |
+
+예약 번호: `AUD-702`~`AUD-709`는 의도적으로 건너뛴 예약 번호이며 태스크가 없다(재사용·추측 금지). `AUD-710`은 백업 정책 판정이라 일부러 700번대와 구분했다.
+
+검증:
+- pytest `tests/test_host_audit_regression_probe.py` — 프로브를 가짜 루트와 가짜 조회 명령(`ss`, `docker`, `sshd`, `fail2ban-client`, `auditctl`, `systemctl`)으로 실행해 정상 상태에서 선언한 모든 항목이 통과하고, 항목별로 의도적으로 퇴행시킨 상태(바인드 개방, 제거 포트 복귀, 필터·인증 제거, 기본 문자열, Match 블록 제거·빈 허용 목록·허용 출발지 차단, journald 휘발성, 방화벽 동작, 감사 키 누락·execve 추적, 에이전트 중지, 권한 확대·그룹 오류·파일 누락)에서 해당 항목이 실패로 나오는지, 조회 도구가 답하지 못하면 점검불가인지, 출력에 값이 없는지, 호스트에 아무것도 쓰지 않는지 본다.
+- pytest `tests/test_host_audit_regression.py` — 판정(선언 안 한 항목은 해당없음, 말하지 않은 선언 항목은 점검불가), 쉘 메타문자 차단, 백업 정책 판정(수집기 출력 형식 사용: 정상, 삭제 범위 확대, 다른 버킷, 정책 없음, 스냅샷 없음), 보고서 섹션과 Audit Baseline 발견, 항목 단위 악화 비교와 알림 본문(주소·시크릿 없음).
+- **molecule Fast Scenario** `VERIFY-AUD-700`(수렴된 호스트에서 선언 항목이 모두 통과하고 프로브가 호스트를 바꾸지 않는다), `VERIFY-AUD-701`(sshd 제한 블록 제거, journald 휘발성, 시크릿 파일 권한 확대를 일부러 만들면 해당 항목이 실패로 보고된다), `VERIFY-AUD-700`이 원복 뒤 다시 통과하는지도 본다(같은 판정 재확인). 컨테이너에서는 fail2ban·감사 규칙 적재·게시 포트를 재현하지 않아 이 항목들은 pytest가 본다.
+- `AUD-710`(백업 정책 판정)은 러너에서 저장소 JSON만 읽으므로 molecule 검증이 없고(`INTEGRATED`), pytest `tests/test_host_audit_regression.py`가 판정을 검증한다.

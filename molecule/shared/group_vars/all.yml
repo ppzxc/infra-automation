@@ -34,6 +34,10 @@ enable_vault_ssh_ca: false
 enable_boundary: false
 firewall_allowed_tcp_ports:
   - 22
+# #372: 있는 경로(/etc/hostname)만 감사 규칙에 실리고 없는 경로는 걸러지는지 본다([VERIFY-SEC-055]/[VERIFY-SEC-056]).
+audit_watch_paths:
+  - /etc/hostname
+  - /nonexistent/molecule-secret.env
 # roles/security/defaults/main.yml ships ssh_password_authentication:
 # "yes" as a safe, opt-in default (docs/security.md's "PasswordAuthentication
 # no" hardening is applied "사전 검증 후", i.e. per-host once key auth is
@@ -115,3 +119,11 @@ host_agents_kv_fixture:
   rustfs:
     maintenance_access_key: "molecule-fixture-maintenance-access"
     maintenance_secret_key: "molecule-fixture-maintenance-secret"
+
+# #371: sshd 출발지 제한 시험용 가짜 허용 목록(문서용 주소, RFC 5737). 컨테이너에는 SSH_CONNECTION이 없어 가드는 건너뛴다.
+ssh_source_restriction_allowed_sources:
+  - "192.0.2.0/24"
+
+# fail2ban jail의 banaction을 처음부터 dummy로 고정한다. 첫 converge(방화벽 관리)와 둘째 converge(firewall_unmanaged)가
+# 같은 jail 파일을 만들어야 idempotence가 깨지지 않는다([VERIFY-SEC-015]). 관리 호스트의 빈 banaction은 pytest 렌더링이 본다.
+fail2ban_banaction: dummy

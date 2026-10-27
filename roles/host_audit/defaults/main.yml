@@ -155,3 +155,14 @@ host_audit_resend_month: ""
 # 러너 출력 상위 경로 아래에서 이 일수가 지난 실행 디렉터리는 다음 실행 초기에 지운다(#157).
 # 정상 종료한 실행은 끝에서 정책대로 지우므로(cleanup.yml) 이 값은 중간에 죽은 실행의 찌꺼기를 위한 것이다.
 host_audit_output_retention_days: 7
+
+# --- Security Regression (Spec #364 / Ticket-10, #377) ---------------------------------------
+# 스펙 #364 기대치의 퇴행 점검. 호스트별 선언 host_audit_regression_expect가 비어 있으면 그 호스트는 대상이 아니다.
+# 선언 값(포트·경로·허용 출발지)은 공개 저장소에 두지 않고 Semaphore 인벤토리·Environment로 준다(docs/host_audit.md §16).
+host_audit_regression_enabled: true
+host_audit_regression_expect: {}
+# 백업 호스트 키 정책 항목(EXP-BAK-*, 러너 쪽). true일 때만 판정한다. 스냅샷은 scripts/collect-rustfs-policy.py의 출력 파일(러너 경로).
+host_audit_regression_backup_enabled: false
+host_audit_backup_policy_file: "{{ role_path }}/../backup/files/host-key-policy.json"
+host_audit_rustfs_policy_snapshot_file: "{{ lookup('ansible.builtin.env', 'HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT') | default('', true) }}"
+host_audit_backup_policy_prefix: "backup-prod-"

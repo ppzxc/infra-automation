@@ -1,0 +1,32 @@
+---
+# ==============================================================================
+# Host Audit - Security Regression 수집 (Spec #364 / Ticket-10, #377)
+# ==============================================================================
+# 스펙 #364의 기대치(관리 웹 접점 루프백, 수신·SSH 출발지 제한, 탐지·로그 보존, 시크릿 파일 권한)를 읽기 전용 raw 프로브 하나로
+# 확인한다. 어떤 기대치를 점검할지는 호스트별 선언 host_audit_regression_expect(비공개 인벤토리·Extra variables)가 정하고,
+# 비어 있으면 이 호스트는 이 섹션 대상이 아니다. 프로브 출력은 항목 ID와 PASS/FAIL/UNK뿐이다(주소·포트·경로·값 없음).
+# 프로브는 ss·docker ps·sshd -T -C·fail2ban-client status/get·auditctl -l·systemctl is-active·stat·find만 쓴다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-700] Probe Security Regression expectations (raw, read-only)"
+  ansible.builtin.raw: >-
+    {% for k, v in (host_audit_regression_expect | host_audit_regression_env).items() %}{{ k }}={{ v | quote }} {% endfor %}sh -c {{ lookup('ansible.builtin.file', 'regression_probe.sh') | quote }}
+  register: _host_audit_regression_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  ignore_unreachable: true
+  when:
+    - host_audit_regression_enabled | bool
+    - host_audit_regression_expect | length > 0
+    - host_audit_record.status == 'ok'
+
+- name: "[AUD-701] Add Security Regression verdicts to the per-host audit record"
+  ansible.builtin.set_fact:
+    host_audit_record: >-
+      {{ host_audit_record | combine({'security_regression':
+           _host_audit_regression_probe | host_audit_regression_result(host_audit_regression_expect, inventory_hostname)}) }}
+  when:
+    - host_audit_regression_enabled | bool
+    - host_audit_regression_expect | length > 0
+    - host_audit_record.status == 'ok'

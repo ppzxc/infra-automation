@@ -20,6 +20,17 @@
         mode: "0755"
       when: ansible_os_family == "Debian"
 
+    # security 역할은 auditd 패키지를 설치하지 않고 운영 호스트에는 이미 있다. 테스트 이미지에는 없어 규칙 디렉터리만 미리 만들어
+    # [SEC-012] 규칙 배포와 [VERIFY-SEC-012]/[VERIFY-SEC-055]/[VERIFY-SEC-056]의 내용 검증이 컨테이너에서도 실제로 돌게 한다.
+    - name: "[PREPARE-006] Ensure the audit rules directory exists (RedHat family)"
+      ansible.builtin.file:
+        path: /etc/audit/rules.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      when: ansible_os_family == "RedHat"
+
     # Simulates a host that already went through a prior converge where
     # "infra-removed" was a present admin account (COMMON-013/COMMON-014
     # created the user and its NOPASSWD sudoers drop-in). The shared group_vars

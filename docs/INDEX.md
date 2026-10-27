@@ -30,9 +30,16 @@
 * [포티게이트 방화벽 로그 수신 런북](runbooks/fortigate-syslog.md) - 방화벽 syslog → `security_logs`(`fortigate-syslog`) 경로, 장비 쪽 로그 거름 기준, HA 멤버 구성, 점검·편입 절차(#283)
 * [HP Smart Array 관리 도구(ssacli) 설치·점검 런북](runbooks/hp-raid-tool.md) - RAID 상태 수집기가 쓰는 도구의 설치 절차·버전·설치 기록(#334, #335)
 * [월간 로그 점검 런북](runbooks/monthly-log-review.md) - 월 1회 로그 점검 절차(쿼리), 기록 양식, 아직 도착하지 않은 로그 종류의 관찰 목록. 실제 기록은 비공개 노트(#322, #333)
+* [백업 호스트 키 삭제 권한 축소 런북](runbooks/backup-host-key-scope.md) - 호스트 키 정책(쓰기+잠금 해제 삭제), 카나리→전체 확대, 호스트별 격리 확인, 롤백, 중앙 유지보수 확인(#373)
+* [SSH 출발지 제한 런북](runbooks/ssh-source-restriction.md) - sshd Match Address 방식 허용 출발지 제한, 기존 ssh_allowed_source_ips와의 관계, 별도 세션·임시→영구·재부팅 확인·롤백 절차(#371)
+* [탐지 복구 적용 런북](runbooks/detection-recovery.md) - 방화벽 비관리 서버의 fail2ban(banaction)·auditd 규칙 축소·journald 영구 저장·중앙 수집 적용·검증·롤백 절차(#372)
 * [서버 시각 동기 현황 조사 (2026-10-26)](research/time-sync-host-survey-2026-10-26.md) - CentOS 6은 ntpd 없이 하루 한 번 rdate, CentOS 7·Rocky 9은 chrony 동기. 수집기·`infra-time-unsynced`에 미치는 영향과 열린 결정(#336)
 * [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일
 * [Host Audit 태스크 명세](host_audit.md) - 실행 흐름, 호스트별 JSON 구조(schema_version 1), 변수, AUD-xxx 태스크 매트릭스
 * [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 (CIS 감사 파일럿은 ADR-0009로 대체·제거)
 * [Compose 프로젝트·서비스 이름 규칙 ADR-0011](adr/0011-compose-project-and-service-naming.md) - 수동 관리 docker compose의 `name:` 명시, 구성요소 서비스명, `<프로젝트>-<서비스>` 식별자 (FUNA Cluster 편입)
 * [컨테이너 앱 텔레메트리 수집 경로 ADR-0012](adr/0012-container-app-telemetry-via-host-otelcol.md) - 노드 otelcol OTLP HTTP 수신기(`0.0.0.0`, host-gateway), `otel_app_telemetry` 스위치, `app_traces` 스트림
+* [로그·트랩 수신 접점 출발지 제한 런북](runbooks/receiver-source-restriction.md) - 방화벽 체인 변경 없이 syslog·트랩 수신기를 애플리케이션 수준에서 제한, 실현성 보고 양식·수신기 관측 출발지 수집(`scripts/collect-receiver-sources.sh`)·롤백·부정 시험(#370)
+* [시크릿 파일 권한 정렬 런북](runbooks/secret-file-permissions.md) - 소비자별 권한 분류(env_file 0640 root:dockermgmt / bind mount / root 전용 0600), `compose config --quiet` 판정, 평문·이력·잔재 정리, 이미지 고정 버전 목록(#375)
+* [관리용 웹 접점 루프백 바인드 런북](runbooks/mgmt-web-loopback-bind.md) - 관리 웹 접점 루프백 바인드, 승인 항목별 체크리스트·롤백·부정 시험, Host Audit 기대치 (#369)
+* [Host Audit 퇴행 점검 적용 런북](runbooks/host-audit-regression.md) - 스펙 #364 기대치(EXP-*) 퇴행 점검의 선언·적용 전후 스냅샷·롤백·알림 절차, 합격 기준은 host_audit.md 16절 (#377)

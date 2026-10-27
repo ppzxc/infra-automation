@@ -984,6 +984,19 @@
   tags: molecule-idempotence-notest
 
 # 7. Auditd configuration
+# 없는 경로에 watch를 걸면 규칙 적재가 실패하므로 실제로 있는 경로만 규칙에 싣는다(#372).
+- name: "[SEC-055] Check which audit_watch_paths exist"
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ audit_watch_paths | default([]) }}"
+  register: security_audit_watch_stat
+  when: not (_raw_path_effective | default(false) | bool)
+
+- name: "[SEC-056] Keep only existing audit watch paths"
+  ansible.builtin.set_fact:
+    _audit_watch_paths_effective: "{{ security_audit_watch_stat.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
+  when: not (_raw_path_effective | default(false) | bool)
+
 - name: "[SEC-012] Deploy Auditd security audit rules"
   ansible.builtin.template:
     src: audit.rules.j2
@@ -991,21 +1004,29 @@
     owner: root
     group: root
     mode: '0600'
+  register: security_audit_rules_result
   when:
     - ansible_os_family == "RedHat"
     - not (_raw_path_effective | default(false) | bool)
   notify: Restart auditd
-  failed_when: false
+  # audit 패키지가 없어 규칙 디렉터리가 없는 호스트만 건너뛴다(이 역할은 auditd를 설치하지 않는다). 그 밖의 실패는 그대로 드러낸다.
+  failed_when:
+    - security_audit_rules_result is failed
+    - "'does not exist' not in (security_audit_rules_result.msg | default(''))"
 
 - name: "[SEC-013] Ensure Auditd service is running and enabled"
   ansible.builtin.service:
     name: auditd
     state: started
     enabled: true
+  register: security_auditd_service_result
   when:
     - ansible_os_family == "RedHat"
     - not (_raw_path_effective | default(false) | bool)
-  failed_when: false
+  # auditd 서비스가 없는 호스트(패키지 미설치)만 건너뛴다. 그 밖의 실패는 그대로 드러낸다.
+  failed_when:
+    - security_auditd_service_result is failed
+    - "'Could not find the requested service' not in (security_auditd_service_result.msg | default(''))"
 
 # 8. Sudo Policy & Log segregation
 - name: "[SEC-014] Configure Sudo timestamp timeout and log file"
@@ -1033,6 +1054,88 @@
     - not (_raw_path_effective | default(false) | bool)
   notify: Restart fail2ban
   failed_when: false
+
+# 10. journald 영구 저장 (#372): 재부팅 뒤에도 이전 부팅의 시스템 로그가 조회되게 한다.
+# CentOS 6/7 raw 경로와 systemd가 아닌 호스트는 대상이 아니다. 보존 한도는 common의 journald_max_use/journald_max_retention.
+- name: "[SEC-053] Create persistent journal directory and journald drop-in directory"
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /var/log/journal, mode: '2755' }
+    - { path: /etc/systemd/journald.conf.d, mode: '0755' }
+  when:
+    - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
+
+- name: "[SEC-054] Deploy journald persistent storage drop-in"
+  ansible.builtin.template:
+    src: journald-persistent.conf.j2
+    dest: /etc/systemd/journald.conf.d/50-persistent.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
+  notify: Restart systemd-journald
+
+# 11. sshd 출발지 제한 (#371): Match Address 블록으로 허용 밖 출발지의 로그인을 거부한다.
+# 방화벽 태스크가 아니므로 firewall_unmanaged 호스트에서도 같게 동작한다. CentOS 6/7 raw 경로는 대상이 아니다.
+# 허용 목록이 비면 블록을 제거한다(롤백). 가드가 실패하면 블록을 되돌리고 중단해 스스로 잠기지 않게 한다.
+- name: "[SEC-070] Validate the sshd source restriction list"
+  ansible.builtin.assert:
+    that:
+      - ssh_source_restriction_allowed_sources is sequence
+      - ssh_source_restriction_allowed_sources is not string
+      - >-
+        ssh_source_restriction_allowed_sources
+        | reject('match', '^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$') | list | length == 0
+    fail_msg: "ssh_source_restriction_allowed_sources must be a list of IP or CIDR entries."
+    quiet: true
+  when: not (_raw_path_effective | default(false) | bool)
+
+- name: Apply the sshd source restriction with a lockout guard
+  when: not (_raw_path_effective | default(false) | bool)
+  block:
+    - name: "[SEC-071] Apply the sshd Match Address source restriction block"
+      ansible.builtin.blockinfile:
+        path: /etc/ssh/sshd_config
+        marker: "# {mark} ANSIBLE MANAGED sshd source restriction (#371)"
+        block: "{{ lookup('ansible.builtin.template', 'sshd-source-restriction.conf.j2') }}"
+        state: "{{ 'present' if (ssh_source_restriction_allowed_sources | length > 0) else 'absent' }}"
+        validate: '/usr/sbin/sshd -t -f %s'
+      notify: Restart sshd
+
+    - name: "[SEC-072] Verify the connecting source is still allowed by sshd -T -C"
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/sshd
+          - -T
+          - -C
+          - "addr={{ ssh_source_restriction_guard_addr }},user=root,host=guard"
+      register: ssh_source_guard
+      changed_when: false
+      failed_when: "'denyusers *' in (ssh_source_guard.stdout_lines | map('trim') | map('lower') | list)"
+      when:
+        - ssh_source_restriction_allowed_sources | length > 0
+        - ssh_source_restriction_guard_addr | length > 0
+  rescue:
+    - name: "[SEC-073] Remove the sshd source restriction block after a failed guard"
+      ansible.builtin.blockinfile:
+        path: /etc/ssh/sshd_config
+        marker: "# {mark} ANSIBLE MANAGED sshd source restriction (#371)"
+        state: absent
+        validate: '/usr/sbin/sshd -t -f %s'
+
+    - name: "[SEC-074] Abort because the sshd source restriction would lock out this connection"
+      ansible.builtin.fail:
+        msg: >-
+          The sshd source restriction was rolled back: the connecting source is not allowed (or sshd rejected the config).
+          Fix ssh_source_restriction_allowed_sources and apply again.
 
 # Hosts in the inventory group `firewall_unmanaged` keep their firewall as is:
 # every firewall task below is skipped; sshd/SELinux/fail2ban/auditd/sudo still apply.

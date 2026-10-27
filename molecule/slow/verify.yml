@@ -55,6 +55,15 @@
         f: "{{ collected.stdout | from_json }}"
 
     # ==========================================================================
+    # backup 검증 (#373): 호스트 키 정책은 삭제를 locks/* 하나로만 허용한다(RustFS 없이 정책 JSON을 읽는 정적 검증)
+    # ==========================================================================
+    - name: "[VERIFY-BAK-220] Verify the host key policy file keeps s3:DeleteObject under locks/ only (runs BAK-220)"
+      ansible.builtin.include_role:
+        name: backup
+        tasks_from: host_key_policy
+      when: "'backup' in molecule_roles"
+
+    # ==========================================================================
     # funa_env 검증 (#222): 그룹 소속 호스트만 파일을 받는다
     # ==========================================================================
     - name: Verify the funa_env role

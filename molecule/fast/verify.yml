@@ -30,18 +30,24 @@
               '/etc/systemd/journald.conf.d/99-retention.conf', '/etc/profile.d/99-aliases.sh',
               '/etc/profile.d/98-node-env.sh', '/etc/environment', chrony_path,
               '/etc/sudoers.d/99-security-policy', audit_rules_path, '/etc/fail2ban/jail.d/sshd.local',
+              '/var/log/journal', '/etc/systemd/journald.conf.d', '/etc/systemd/journald.conf.d/50-persistent.conf',
               '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json'] }}
       read:
         - /etc/ssh/sshd_config
         - /home/infra-legacy/.ssh/authorized_keys
         - /var/tmp/fw-unmanaged-before.txt
         - /var/tmp/fw-unmanaged-after.txt
+        - "{{ audit_rules_path }}"
+        - /etc/fail2ban/jail.d/sshd.local
+        - /etc/systemd/journald.conf.d/50-persistent.conf
       group: "{{ present_accounts }}"
       passwd: "{{ present_accounts + ['infra-removed'] }}"
       cmd:
         sysctl: [sysctl, vm.swappiness, fs.protected_hardlinks, fs.protected_symlinks, kernel.randomize_va_space]
         timedatectl: [timedatectl, status]
         getenforce: [getenforce]
+        sshd_denied_source: [/usr/sbin/sshd, -T, -C, 'addr=198.51.100.1,user=root,host=probe']
+        sshd_allowed_source: [/usr/sbin/sshd, -T, -C, 'addr=192.0.2.10,user=root,host=probe']
 
   tasks:
     - name: Collect every verification fact in one remote execution
@@ -189,11 +195,20 @@
             verbosity: 1
           when: ansible_os_family == "RedHat"
 
+        # 이 역할은 audit 패키지를 설치하지 않는다. 테스트 이미지에 audit이 없으면 규칙 디렉터리가 없어 SEC-012가 건너뛰므로
+        # 파일이 있을 때만 검증한다(SEC-015와 같은 방식). 규칙 내용은 pytest 렌더링(tests/test_security_render.py)이 항상 본다.
         - name: "[VERIFY-SEC-012] Verify auditd rules configuration file"
-          ansible.builtin.debug:
-            msg: "{{ f.stat[audit_rules_path] }}"
-            verbosity: 1
-          when: ansible_os_family == "RedHat"
+          ansible.builtin.assert:
+            that:
+              - f.stat[audit_rules_path].exists
+              - f.stat[audit_rules_path].mode == '0600'
+              - "'-k identity' in f.read[audit_rules_path]"
+              - "'-k container_config' in f.read[audit_rules_path]"
+              - "'execve' not in (f.read[audit_rules_path] | regex_replace('(?m)^#.*$', ''))"
+            fail_msg: "auditd rules file is missing, or still traces every execve."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
 
         - name: "[VERIFY-SEC-013] Verify auditd service status"
           ansible.builtin.debug:
@@ -206,10 +221,16 @@
               - f.stat['/etc/sudoers.d/99-security-policy'].mode == '0440'
             fail_msg: "Sudo security policy /etc/sudoers.d/99-security-policy is missing."
 
+        # converge의 두 번째 플레이가 호스트를 firewall_unmanaged에 넣고 security를 다시 적용하므로 jail은 방화벽을 건드리지 않는 banaction(dummy)이어야 한다.
+        # fail2ban 패키지가 없는 이미지에서는 파일이 만들어지지 않으므로 그때는 건너뛴다(SEC-015는 failed_when: false).
         - name: "[VERIFY-SEC-015] Verify fail2ban ssh jail configuration file"
-          ansible.builtin.debug:
-            msg: "{{ f.stat['/etc/fail2ban/jail.d/sshd.local'] }}"
-            verbosity: 1
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/fail2ban/jail.d/sshd.local'].mode == '0644'
+              - "'banaction = dummy' in f.read['/etc/fail2ban/jail.d/sshd.local']"
+              - "'banaction_allports = dummy' in f.read['/etc/fail2ban/jail.d/sshd.local']"
+            fail_msg: "fail2ban jail is missing or its banaction can touch the firewall."
+          when: f.stat['/etc/fail2ban/jail.d/sshd.local'].exists
 
         - name: "[VERIFY-SEC-016] Verify DMZ zone configuration readiness"
           ansible.builtin.debug:
@@ -225,6 +246,64 @@
 
         # converge의 두 번째 플레이가 firewall_unmanaged 그룹에 넣은 상태에서 방화벽 입력(허용 포트)을 바꿔
         # security 역할을 다시 적용하고 방화벽 설정 파일 스냅샷을 앞뒤로 남긴다.
+        - name: "[VERIFY-SEC-053] Verify persistent journal directory and drop-in directory"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/var/log/journal'].exists
+              - f.stat['/var/log/journal'].mode == '2755'
+              - f.stat['/etc/systemd/journald.conf.d'].exists
+            fail_msg: "/var/log/journal (2755) or /etc/systemd/journald.conf.d is missing."
+          when: ansible_service_mgr == "systemd"
+
+        - name: "[VERIFY-SEC-054] Verify journald persistent storage drop-in"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/systemd/journald.conf.d/50-persistent.conf'].mode == '0644'
+              - "'Storage=persistent' in f.read['/etc/systemd/journald.conf.d/50-persistent.conf']"
+            fail_msg: "journald is not configured for persistent storage."
+          when: ansible_service_mgr == "systemd"
+
+        - name: "[VERIFY-SEC-055] Verify existing audit watch paths are watched as secret_access"
+          ansible.builtin.assert:
+            that:
+              - "'-w /etc/hostname -p rwa -k secret_access' in f.read[audit_rules_path]"
+            fail_msg: "an existing audit_watch_paths entry is not in the audit rules."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
+        - name: "[VERIFY-SEC-056] Verify missing audit watch paths are left out of the audit rules"
+          ansible.builtin.assert:
+            that:
+              - "'/nonexistent/molecule-secret.env' not in f.read[audit_rules_path]"
+            fail_msg: "a missing audit_watch_paths entry was written to the audit rules."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
+        - name: "[VERIFY-SEC-070] Verify the allowed source list is accepted (sshd -t passed during converge)"
+          ansible.builtin.assert:
+            that:
+              - "'Match Address *,!127.0.0.1,!::1,!192.0.2.0/24' in f.read['/etc/ssh/sshd_config']"
+            fail_msg: "sshd source restriction block is missing from sshd_config."
+
+        - name: "[VERIFY-SEC-071] Verify the sshd source restriction block is written once and does not change firewall configuration"
+          ansible.builtin.assert:
+            that:
+              - f.read['/etc/ssh/sshd_config'].count('BEGIN ANSIBLE MANAGED sshd source restriction') == 1
+              - f.read['/etc/ssh/sshd_config'].count('END ANSIBLE MANAGED sshd source restriction') == 1
+              - "'192.0.2.0/24' not in f.read['/var/tmp/fw-unmanaged-after.txt']"
+            fail_msg: "sshd source restriction block is duplicated, missing its markers, or leaked into firewall configuration."
+
+        - name: "[VERIFY-SEC-072] Verify sshd denies a source outside the list and allows one inside"
+          ansible.builtin.assert:
+            that:
+              - f.cmd.sshd_denied_source.rc == 0
+              - "'denyusers *' in f.cmd.sshd_denied_source.stdout | lower"
+              - f.cmd.sshd_allowed_source.rc == 0
+              - "'denyusers *' not in f.cmd.sshd_allowed_source.stdout | lower"
+            fail_msg: "sshd -T -C does not evaluate the source restriction as expected."
+
         - name: "[VERIFY-SEC-051] Verify firewall config is untouched for a firewall_unmanaged host"
           ansible.builtin.assert:
             that:
@@ -398,3 +477,160 @@
           - package_record.packages | length > 50
           - package_record.packages[0].keys() | sort == ['arch', 'epoch', 'modularitylabel', 'name', 'release', 'src_epoch', 'src_name', 'src_release', 'src_version', 'version']
         fail_msg: "Unexpected Host Audit package record: {{ package_record | dict2items | rejectattr('key', 'equalto', 'packages') | items2dict }}"
+
+# ==============================================================================
+# 5. Host Audit - Security Regression: 의도적 퇴행이 실패로 보고되는지 (Spec #364 / Ticket-10, #377)
+# ==============================================================================
+# 수렴된 보안 설정(sshd 출발지 제한 블록, journald 영구 저장)과 시험용 시크릿 파일에서 먼저 모든 선언 항목이 통과하는지 본 뒤,
+# 일부러 퇴행시켜(블록 제거, Storage=volatile, 파일 권한 0644) 같은 항목이 실패로 나오는지 본다. 마지막에 원복하고 다시 통과를 본다.
+# 컨테이너에서는 fail2ban·auditd 적재·서비스 판정과 컨테이너 게시 포트를 재현할 수 없어 이 시나리오에서 선언하지 않는다
+# (프로브 단위 시험 tests/test_host_audit_regression_probe.py가 가짜 루트·가짜 조회 명령으로 본다).
+# 원복은 always에서 하고, 이 play는 파일 끝이라 앞선 VERIFY-SEC·VERIFY-AUD-010 판정에 영향이 없다.
+- name: Verify Host Audit Security Regression reports intentional regressions
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    host_audit_regression_expect:
+      ssh_restricted: true
+      ssh_allowed_addrs: ["192.0.2.10"]
+      det_journald: true
+      sec_roots: ["/opt/ha-regression"]
+      sec_files: ["/opt/ha-regression/root-only.key"]
+    host_audit_record:
+      status: ok
+    snapshot_script: "find /etc /usr/sbin -xdev -type f -printf '%p|%m|%s|%T@\\n' 2>/dev/null | LC_ALL=C sort | sha256sum"
+
+  tasks:
+    - name: Plant a fixture secret file with the standard mode
+      ansible.builtin.file:
+        path: /opt/ha-regression
+        state: directory
+        mode: '0755'
+
+    - name: Create the fixture key file
+      ansible.builtin.copy:
+        content: "fixture\n"
+        dest: /opt/ha-regression/root-only.key
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Snapshot managed files before the probe
+      ansible.builtin.raw: "sh -c {{ snapshot_script | quote }}"
+      register: reg_before
+      changed_when: false
+
+    - name: Run the Security Regression probe on the converged host
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: regression
+
+    - name: Keep the healthy verdicts
+      ansible.builtin.set_fact:
+        reg_healthy: "{{ host_audit_record.security_regression }}"
+
+    - name: Snapshot managed files after the probe
+      ansible.builtin.raw: "sh -c {{ snapshot_script | quote }}"
+      register: reg_after
+      changed_when: false
+
+    - name: "[VERIFY-AUD-700] Verify the probe is read-only and every declared item passes on the converged host"
+      vars:
+        _v: "{{ reg_healthy.results | items2dict(key_name='code', value_name='verdict') }}"
+      ansible.builtin.assert:
+        that:
+          - reg_before.stdout == reg_after.stdout
+          - reg_healthy.status == 'ok'
+          - _v['EXP-SSH-1'] == '통과'
+          - _v['EXP-SSH-2'] == '통과'
+          - _v['EXP-SSH-3'] == '통과'
+          - _v['EXP-SSH-4'] == '통과'
+          - _v['EXP-DET-1'] == '통과'
+          - _v['EXP-SEC-1'] == '통과'
+          - _v['EXP-SEC-2'] == '통과'
+          - _v['EXP-MGMT-1'] == '해당없음'
+          - _v['EXP-DET-2'] == '해당없음'
+        fail_msg: "Healthy host did not pass: {{ reg_healthy }} read-only={{ reg_before.stdout == reg_after.stdout }}"
+
+    - name: Regress the host on purpose and check that the same items fail
+      block:
+        - name: Keep copies of the files the regression touches
+          ansible.builtin.copy:
+            src: "{{ item }}"
+            dest: "/var/tmp/ha-regression-{{ item | basename }}.orig"
+            remote_src: true
+            mode: '0600'
+          loop:
+            - /etc/ssh/sshd_config
+            - /etc/systemd/journald.conf.d/50-persistent.conf
+
+        - name: Remove the sshd source restriction block
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(?s)# BEGIN ANSIBLE MANAGED sshd source restriction.*?# END ANSIBLE MANAGED sshd source restriction[^\n]*\n'
+            replace: ''
+
+        - name: Make journald volatile
+          ansible.builtin.copy:
+            content: "[Journal]\nStorage=volatile\n"
+            dest: /etc/systemd/journald.conf.d/50-persistent.conf
+            mode: '0644'
+
+        - name: Open the fixture key file
+          ansible.builtin.file:
+            path: /opt/ha-regression/root-only.key
+            mode: '0644'
+
+        - name: Run the Security Regression probe on the regressed host
+          ansible.builtin.include_role:
+            name: host_audit
+            tasks_from: regression
+
+        - name: Keep the regressed verdicts
+          ansible.builtin.set_fact:
+            reg_bad: "{{ host_audit_record.security_regression }}"
+
+        - name: "[VERIFY-AUD-701] Verify intentional regressions are reported as failures"
+          vars:
+            _v: "{{ reg_bad.results | items2dict(key_name='code', value_name='verdict') }}"
+          ansible.builtin.assert:
+            that:
+              - _v['EXP-SSH-1'] == '실패'
+              - _v['EXP-SSH-2'] == '실패'
+              - _v['EXP-SSH-4'] == '실패'
+              - _v['EXP-DET-1'] == '실패'
+              - _v['EXP-SEC-1'] == '실패'
+              - _v['EXP-SEC-2'] == '실패'
+              - reg_bad | to_json is not search('[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+')
+            fail_msg: "Regression was not reported: {{ reg_bad }}"
+      always:
+        - name: Restore the files
+          ansible.builtin.copy:
+            src: "/var/tmp/ha-regression-{{ item | basename }}.orig"
+            dest: "{{ item }}"
+            remote_src: true
+            mode: preserve
+          loop:
+            - /etc/ssh/sshd_config
+            - /etc/systemd/journald.conf.d/50-persistent.conf
+
+        - name: Restore the fixture key file mode
+          ansible.builtin.file:
+            path: /opt/ha-regression/root-only.key
+            mode: '0600'
+
+    - name: Run the Security Regression probe after the restore
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: regression
+
+    - name: "[VERIFY-AUD-700] Verify the declared items pass again after the restore"
+      vars:
+        _v: "{{ host_audit_record.security_regression.results | items2dict(key_name='code', value_name='verdict') }}"
+      ansible.builtin.assert:
+        that:
+          - _v['EXP-SSH-1'] == '통과'
+          - _v['EXP-DET-1'] == '통과'
+          - _v['EXP-SEC-2'] == '통과'
+        fail_msg: "Restore did not bring the items back: {{ host_audit_record.security_regression }}"

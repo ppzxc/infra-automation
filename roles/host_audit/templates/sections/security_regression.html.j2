@@ -1,0 +1,38 @@
+{#- Security Regression 섹션 (Spec #364 / Ticket-10, #377).
+    host_audit_model.security_regression을 그리기만 한다. 판정·집계는 filter_plugins/host_audit_regression.py.
+    항목 ID와 판정만 싣는다(주소·포트·경로·값 없음). -#}
+{%- set sr = host_audit_model.security_regression -%}
+<style>
+  .sr-ok { color:var(--ok); } .sr-fail { color:var(--crit); font-weight:600; }
+</style>
+  <h2 class="pb">보안 퇴행 점검 <span class="small mute">Security Regression · 스펙 #364 기대치</span></h2>
+  <p class="small mute">관리 웹 접점·수신 접점·원격 접속 제한·탐지와 로그 보존·백업 정책·시크릿 파일 권한이 계속 유지되는지 읽기 전용으로 확인한 결과입니다. 점검불가는 통과로 세지 않습니다.</p>
+  <table>
+    <thead><tr>{% for v in sr.verdicts %}<th class="nowrap">{{ v | e }}</th>{% endfor %}</tr></thead>
+    <tbody><tr>{% for n in sr.totals %}<td class="{{ sr.verdict_classes[loop.index0] if n else 'na' }}">{{ n }}</td>{% endfor %}</tr></tbody>
+  </table>
+{% if sr.failed_total %}
+  <div class="note keep"><b>실패 {{ sr.failed_total }}건</b> — 아래 표의 실패 항목은 스펙 #364 조치가 퇴행한 것입니다. 조치는 docs/runbooks/host-audit-regression.md를 따릅니다.</div>
+{% endif %}
+{% for h in sr.hosts %}
+  <h3>{{ h.host | e }} {% if h.failed %}<span class="tag crit">실패 {{ h.failed }}</span>{% endif %}</h3>
+  <table>
+    <thead><tr><th>항목</th><th>구분</th><th>판단 기준</th><th>판정</th></tr></thead>
+    <tbody>
+{% for r in h.rows if r.verdict != '해당없음' %}
+      <tr><td><span class="nowrap">{{ r.code | e }}</span> {{ r.title | e }}</td><td class="small">{{ r.area | e }}</td><td class="small">{{ r.criteria | e }}</td><td><span class="tag {{ r.verdict_class }}">{{ r.verdict | e }}</span></td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% endfor %}
+{% if sr.backup %}
+  <h3>백업 정책 (러너 판정)</h3>
+  <table>
+    <thead><tr><th>항목</th><th>판단 기준</th><th>판정</th></tr></thead>
+    <tbody>
+{% for r in sr.backup %}
+      <tr><td><span class="nowrap">{{ r.code | e }}</span> {{ r.title | e }}</td><td class="small">{{ r.criteria | e }}</td><td><span class="tag {{ r.verdict_class }}">{{ r.verdict | e }}</span></td></tr>
+{% endfor %}
+    </tbody>
+  </table>
+{% endif %}

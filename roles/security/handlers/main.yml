@@ -81,3 +81,12 @@
   changed_when: true
   failed_when: security_raw_restart_auditd.rc | default(0) != 0
   when: _raw_path_effective | default(false) | bool
+
+# journald 드롭인(Storage=persistent)은 재시작해야 적용된다. systemd 호스트에서만 알림이 오므로(SEC-053/054의 when) 실패를 삼키지 않는다.
+- name: Restart systemd-journald
+  ansible.builtin.service:
+    name: systemd-journald
+    state: restarted
+  when:
+    - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
