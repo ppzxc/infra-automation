@@ -13,4 +13,5 @@ diff <이전>/snapshot.txt <이후>/snapshot.txt   # 같은 상태면 비어 있
 - 시각·PID·패킷 카운터는 수집 단계에서 제거한다. 수집 결과에 시크릿 패턴이 보이면 결과를 폐기하고 실패한다.
 - 환경변수: `BASELINE_SSH_OPTS`(ssh 옵션, 예: `-i <공개키> -o IdentitiesOnly=yes`로 키 한 개만 제시), `BASELINE_FIND_ROOTS`(서버 쪽 탐색 경로), `INFRA_PRIVATE_DIR`(저장 기준 경로), `BASELINE_SSHD_MATCH_ADDRS`(공백 구분 출발지 IP, 각 출발지에서 기본값과 달라지는 sshd 설정을 `sshd -T -C`로 평가)와 `BASELINE_SSHD_MATCH_USER`(기본 root). 출발지 IP는 공개 저장소에 적지 말고 실행 때만 넘긴다.
 - sudo가 필요한 명령이 있어 원격 계정은 `sudo -n`이 되어야 한다. 불가하면 수집을 중단한다(빈 diff 거짓 통과 방지). `sshd -T`는 Match 블록을 평가하지 않으므로 `sshd-match-blocks` 구간이 선언 줄과 출발지별 차이를 따로 싣는다.
-- 백업 저장소 서비스 계정 정책은 RustFS 관리 자격이 필요해 이 스크립트가 아닌 별도 승인 절차로 수집한다.
+- 백업 저장소(RustFS) 사용자·그룹·서비스 계정·정책은 별도 수집기로 본다:
+  `scripts/collect-rustfs-policy.py --label ns0331 --env-file <저장소 루트 .env>`. 관리 API의 GET만 쓰고, OpenBao `agents/rustfs`의 유지보수 키로 서명한다. 접근키는 해시 앞 12자로만 기록하고 비밀키는 쓰지 않는다. 결과는 같은 비공개 경로의 `rustfs-policy.txt`(0600)이며 정렬돼 있어 diff할 수 있다.
