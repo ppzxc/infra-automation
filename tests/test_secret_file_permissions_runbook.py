@@ -9,6 +9,7 @@ import re
 import stat
 import subprocess
 from pathlib import Path
+from runbook_helpers import runbook_section
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "secret-file-permissions.md"
@@ -21,9 +22,7 @@ def _text():
 
 
 def _section(title):
-    match = re.search(rf"^## {re.escape(title)}.*?(?=^## |\Z)", _text(), re.S | re.M)
-    assert match, f"'## {title}' 절이 없다"
-    return match.group(0)
+    return runbook_section(RUNBOOK, title)
 
 
 def test_the_consumer_list_template_and_the_three_classes_are_defined():

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from runbook_helpers import runbook_section
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 POLICY = ROOT_DIR / "roles" / "backup" / "files" / "host-key-policy.json"
@@ -147,9 +148,7 @@ def _runbook():
 
 
 def _section(title):
-    match = re.search(rf"^## [0-9]+\. {re.escape(title)}.*?(?=^## |\Z)", _runbook(), re.S | re.M)
-    assert match, f"'{title}' 절이 없다"
-    return match.group(0)
+    return runbook_section(RUNBOOK, title, numbered=True)
 
 
 def test_the_runbook_covers_canary_rollout_isolation_rollback_and_central_maintenance():

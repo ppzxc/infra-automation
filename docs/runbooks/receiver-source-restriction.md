@@ -150,7 +150,7 @@ scripts/collect-receiver-sources.sh --label <호스트> --ssh <user@host>
 
 - 로그 수신: 허용 출발지 필터가 켜져 있는가(수신 설정에 필터 정의가 있고 보관 경로에 연결돼 있는가)
 - 트랩 수신: 인증 지시어가 있고 기본 허용이 꺼져 있는가, 기본 문자열(`default-string`)이 없는가
-- Host Agents 편입이 선행돼야 Host Audit이 두 서버를 점검한다(편입 여부는 #372 런북 전제).
+- 한쪽 서버는 Host Agents 편입이 보류돼 있어 Host Audit 점검 범위 밖일 수 있다(탐지 복구 런북 전제 3). 범위 밖인 동안은 이 절의 기대치를 수동 절차와 전후 스냅샷 diff로 확인한다.
 
 ## 9. 알려진 한계
 

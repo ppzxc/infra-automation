@@ -1004,21 +1004,29 @@
     owner: root
     group: root
     mode: '0600'
+  register: security_audit_rules_result
   when:
     - ansible_os_family == "RedHat"
     - not (_raw_path_effective | default(false) | bool)
   notify: Restart auditd
-  failed_when: false
+  # audit 패키지가 없어 규칙 디렉터리가 없는 호스트만 건너뛴다(이 역할은 auditd를 설치하지 않는다). 그 밖의 실패는 그대로 드러낸다.
+  failed_when:
+    - security_audit_rules_result is failed
+    - "'does not exist' not in (security_audit_rules_result.msg | default(''))"
 
 - name: "[SEC-013] Ensure Auditd service is running and enabled"
   ansible.builtin.service:
     name: auditd
     state: started
     enabled: true
+  register: security_auditd_service_result
   when:
     - ansible_os_family == "RedHat"
     - not (_raw_path_effective | default(false) | bool)
-  failed_when: false
+  # auditd 서비스가 없는 호스트(패키지 미설치)만 건너뛴다. 그 밖의 실패는 그대로 드러낸다.
+  failed_when:
+    - security_auditd_service_result is failed
+    - "'Could not find the requested service' not in (security_auditd_service_result.msg | default(''))"
 
 # 8. Sudo Policy & Log segregation
 - name: "[SEC-014] Configure Sudo timestamp timeout and log file"
@@ -1062,7 +1070,6 @@
   when:
     - not (_raw_path_effective | default(false) | bool)
     - ansible_service_mgr == "systemd"
-  failed_when: false
 
 - name: "[SEC-054] Deploy journald persistent storage drop-in"
   ansible.builtin.template:
@@ -1075,7 +1082,6 @@
     - not (_raw_path_effective | default(false) | bool)
     - ansible_service_mgr == "systemd"
   notify: Restart systemd-journald
-  failed_when: false
 
 # 11. sshd 출발지 제한 (#371): Match Address 블록으로 허용 밖 출발지의 로그인을 거부한다.
 # 방화벽 태스크가 아니므로 firewall_unmanaged 호스트에서도 같게 동작한다. CentOS 6/7 raw 경로는 대상이 아니다.
@@ -1113,7 +1119,7 @@
           - "addr={{ ssh_source_restriction_guard_addr }},user=root,host=guard"
       register: ssh_source_guard
       changed_when: false
-      failed_when: "'denyusers *' in (ssh_source_guard.stdout | lower).split('\n')"
+      failed_when: "'denyusers *' in (ssh_source_guard.stdout_lines | map('trim') | map('lower') | list)"
       when:
         - ssh_source_restriction_allowed_sources | length > 0
         - ssh_source_restriction_guard_addr | length > 0
@@ -1131,7 +1137,7 @@
           The sshd source restriction was rolled back: the connecting source is not allowed (or sshd rejected the config).
           Fix ssh_source_restriction_allowed_sources and apply again.
 
-#Hosts in the inventory group `firewall_unmanaged` keep their firewall as is:
+# Hosts in the inventory group `firewall_unmanaged` keep their firewall as is:
 # every firewall task below is skipped; sshd/SELinux/fail2ban/auditd/sudo still apply.
 - name: "[SEC-052] Apply custom firewall ingress rules unless the host is in firewall_unmanaged"
   when: security_firewall_managed | bool

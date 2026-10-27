@@ -99,6 +99,7 @@ def test_accepts_output_dir_outside_git_repo(tmp_path):
 
 def test_secret_guard_rejects_assignment(tmp_path):
     bad = tmp_path / "bad.txt"
+    # 더미 값이다(실제 시크릿 아님): 가드가 "이름=값" 모양을 거르는지만 본다.
     bad.write_text("community_token=abc123\n")
     assert _call("check_no_secrets", str(bad)).returncode != 0
 

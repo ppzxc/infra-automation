@@ -56,14 +56,14 @@
 | `SEC-003` | `Allow incoming TCP ports via UFW (Debian)` | `community.general.ufw` | Debian, Ubuntu | 룰 기등록 시 `ok` |
 | `SEC-004` | `Enable UFW with default deny incoming (Debian)` | `community.general.ufw` | Debian, Ubuntu | UFW 활성화 상태면 `ok` |
 | `SEC-005` | `Ensure firewalld is installed and running (RHEL/Rocky 7+)` | `ansible.builtin.package` | RHEL 7+, Rocky | 패키지 기설치 시 `ok` |
-| `SEC-006` | `Ensure firewalld service is started and enabled (RHEL/Rocky 7+)` | `ansible.builtin.service` | RHEL 7+, Rocky | 서비스 기동 상태면 `ok` |
+| `SEC-006` | `Ensure firewalld service is started and enabled (RHEL/Rocky 7+)` | `ansible.builtin.service` | RHEL 7+, Rocky | 서비스 기동 상태면 `ok`. 서비스가 없는(audit 미설치) 호스트만 건너뛰고 그 밖의 실패는 드러낸다 |
 | `SEC-007` | `Allow incoming TCP ports via firewalld (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | 포트 기등록 시 `ok` |
 | `SEC-008` | `Allow incoming TCP ports via iptables (CentOS 6)` | `ansible.builtin.iptables` | CentOS 6 (`_raw_path_effective=false`) | iptables 체인 룰 확인 후 적용 |
 | `SEC-009` | `Install fail2ban package if available` | `ansible.builtin.package` | All (`_raw_path_effective=false`) | 패키지 기설치 시 `ok`, `failed_when: false` |
 | `SEC-010` | `Ensure fail2ban is running and enabled (if installed)` | `ansible.builtin.service` | All (`_raw_path_effective=false`) | 서비스 기동 상태면 `ok`, `failed_when: false` |
 | `SEC-011` | `Configure SELinux in permissive mode (RHEL/Rocky 7+)` | `ansible.posix.selinux` | RHEL 7+, Rocky | SELinux 상태가 permissive면 `ok` |
-| `SEC-012` | `Deploy Auditd security audit rules` | `ansible.builtin.template` | RHEL / Rocky (`_raw_path_effective=false`) | Checksum 비교 (`audit.rules.j2`) |
-| `SEC-013` | `Ensure Auditd service is running and enabled` | `ansible.builtin.service` | RHEL / Rocky (`_raw_path_effective=false`) | 서비스 기동 상태면 `ok` |
+| `SEC-012` | `Deploy Auditd security audit rules` | `ansible.builtin.template` | RHEL / Rocky (`_raw_path_effective=false`) | Checksum 비교 (`audit.rules.j2`). 규칙 디렉터리가 없는(audit 미설치) 호스트만 건너뛰고 그 밖의 실패는 드러낸다 |
+| `SEC-013` | `Ensure Auditd service is running and enabled` | `ansible.builtin.service` | RHEL / Rocky (`_raw_path_effective=false`) | 서비스 기동 상태면 `ok`. 서비스가 없는(audit 미설치) 호스트만 건너뛰고 그 밖의 실패는 드러낸다 |
 | `SEC-014` | `Configure Sudo timestamp timeout and log file` | `ansible.builtin.copy` | All (`_raw_path_effective=false`) | Checksum 비교 (`validate: visudo`) |
 | `SEC-015` | `Deploy Fail2ban SSH jail configuration` | `ansible.builtin.template` | All (`_raw_path_effective=false`) | Checksum 비교 (`fail2ban-sshd.local.j2`) |
 | `SEC-016` | `Configure dmz zone for monitoring sources (RHEL/Rocky 7+)` | `ansible.posix.firewalld` | RHEL 7+, Rocky | DMZ 서브넷 기등록 시 `ok` |
@@ -110,8 +110,8 @@
 | `SEC-070` | `Validate the sshd source restriction list` | `ansible.builtin.assert` | All (`_raw_path_effective=false`) | 검사 전용 (`ssh_source_restriction_allowed_sources`가 IP/CIDR 목록인지) |
 | `SEC-071` | `Apply the sshd Match Address source restriction block` | `ansible.builtin.blockinfile` | All (`_raw_path_effective=false`) | 마커 블록 일치 시 `ok` (`sshd -t` 검증, 변경 시 `Restart sshd`, 목록이 비면 블록 제거) |
 | `SEC-072` | `Verify the connecting source is still allowed by sshd -T -C` | `ansible.builtin.command` | All (`_raw_path_effective=false`) | 조회 전용 (`changed_when: false`, 접속 중인 출발지가 막히면 실패) |
-| `SEC-073` | `Remove the sshd source restriction block after a failed guard` | `ansible.builtin.blockinfile` | All (`_raw_path_effective=false`) | rescue 전용 (가드 실패 시 블록 제거, 이미 없으면 `ok`) |
-| `SEC-074` | `Abort because the sshd source restriction would lock out this connection` | `ansible.builtin.fail` | All (`_raw_path_effective=false`) | rescue 전용 (롤백 뒤 중단) |
+| `SEC-073` | `Remove the sshd source restriction block after a failed guard` | `ansible.builtin.blockinfile` | All (`_raw_path_effective=false`) | rescue 전용 (가드 실패 시 블록 제거, 이미 없으면 `ok`). Molecule은 컨테이너에 `SSH_CONNECTION`이 없어 가드를 건너뛰므로 pytest `tests/test_security_ssh_source.py`가 구조를 검증한다(`INTEGRATED`) |
+| `SEC-074` | `Abort because the sshd source restriction would lock out this connection` | `ansible.builtin.fail` | All (`_raw_path_effective=false`) | rescue 전용 (롤백 뒤 중단). 검증은 `SEC-073`과 같다(pytest) |
 
 > **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 `/etc/redhat-release` 자동 판별(`_raw_path_effective`, 인벤토리 `raw_provisioning_path`로 명시하면 그 값이 우선)에 따라 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고 (CentOS 7은 `SEC-011` 대신 `SEC-041`이 실행되고, CentOS 6는 `SEC-008`/`SEC-021` 대신 `SEC-037`~`SEC-040` iptables probe+mutate 쌍이 추가로 실행되며, CentOS 7은 firewalld 모듈/`firewall-cmd` 폴백 태스크(`SEC-005`~`SEC-007`, `SEC-016`/`SEC-017`/`SEC-020` 등) 대신 `SEC-042`~`SEC-050` firewalld probe+mutate 쌍(런타임 drift 감지 포함)이 실행된다(제거 규칙을 먼저 적용해 존 충돌을 피하고, 변경은 `permanent`에만 쓰고 raw `Reload firewalld` 핸들러로 반영). 룰 영속화(`service iptables save`)는 기존 모듈 경로와 같이 수행하지 않는다), `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
@@ -119,7 +119,7 @@
 
 > **탐지 복구 (#372, Spec #364)**: 두 서버(방화벽 비관리 그룹)에서 방화벽을 건드리지 않고 탐지·감사·로그 보존만 적용한다.
 > - **auditd**: `SEC-012`/`SEC-035` 규칙은 전체 `execve` 추적을 없애고 인증(`identity`, `auth_config`)·권한(`sudo_config`)·sshd 설정·컨테이너 설정(`container_config`, 기본 `/etc/docker/`, 호스트별 추가는 `audit_container_config_paths`)·시크릿 파일 접근(`secret_access`, `audit_watch_paths`)만 기록한다. 시크릿 경로 값은 저장소에 두지 않고 Semaphore Environment/인벤토리 변수로 받으며 `SEC-055`/`SEC-056`이 없는 경로를 걸러 규칙 적재 실패를 막는다. 규칙 잠금(`-e 2`)은 재부팅이 필요해 쓰지 않는다.
-> - **fail2ban**: `SEC-015`/`SEC-032` jail은 `fail2ban_banaction`을 받는다. 기본값은 `firewall_unmanaged` 소속이면 `dummy`(방화벽 체인·규칙을 만들지 않음), 아니면 빈 값(배포판 기본). `dummy`에서는 탐지와 로그(`Ban` 기록)만 남고 네트워크 차단은 하지 않는다. 차단이 필요하면 sshd 접근 제어(#371)나 상위 방화벽으로 막는다.
+> - **fail2ban**: `SEC-015`/`SEC-032` jail은 `fail2ban_banaction`을 받는다. 기본값은 `firewall_unmanaged` 소속이면 `dummy`(방화벽 체인·규칙을 만들지 않음), 아니면 빈 값(배포판 기본). `dummy`에서는 탐지와 로그(`Ban` 기록)만 남고 네트워크 차단은 하지 않는다. 실제 차단은 sshd 출발지 제한(#371)이 맡고, 허용 출발지 안에서 오는 대입 시도는 탐지만 되고 차단되지 않는다(필요하면 후속으로 `MaxAuthTries` 같은 애플리케이션 수준 제한). 절차와 한계는 `docs/runbooks/detection-recovery.md`.
 > - **journald**: `SEC-053`/`SEC-054`가 `Storage=persistent`를 켜 재부팅 뒤에도 이전 부팅의 시스템 로그가 남는다. 용량·보존 한도는 `common`의 `COMMON-017`(`journald_max_use`, `journald_max_retention`)이 정한다. CentOS 6/7 raw 경로는 대상이 아니다.
 > - **중앙 수집·적용 절차**: [docs/runbooks/detection-recovery.md](runbooks/detection-recovery.md).
 
