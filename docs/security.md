@@ -107,6 +107,11 @@
 | `SEC-054` | `Deploy journald persistent storage drop-in` | `ansible.builtin.template` | systemd 호스트 (`_raw_path_effective=false`) | Checksum 비교 (`journald-persistent.conf.j2`, `Storage=persistent`), 변경 시 `Restart systemd-journald` |
 | `SEC-055` | `Check which audit_watch_paths exist` | `ansible.builtin.stat` | All (`_raw_path_effective=false`) | 조회 전용 (없는 시크릿 경로는 감사 규칙 적재를 실패시키므로 먼저 거른다) |
 | `SEC-056` | `Keep only existing audit watch paths` | `ansible.builtin.set_fact` | All (`_raw_path_effective=false`) | 팩트 설정 전용 (`_audit_watch_paths_effective`) |
+| `SEC-070` | `Validate the sshd source restriction list` | `ansible.builtin.assert` | All (`_raw_path_effective=false`) | 검사 전용 (`ssh_source_restriction_allowed_sources`가 IP/CIDR 목록인지) |
+| `SEC-071` | `Apply the sshd Match Address source restriction block` | `ansible.builtin.blockinfile` | All (`_raw_path_effective=false`) | 마커 블록 일치 시 `ok` (`sshd -t` 검증, 변경 시 `Restart sshd`, 목록이 비면 블록 제거) |
+| `SEC-072` | `Verify the connecting source is still allowed by sshd -T -C` | `ansible.builtin.command` | All (`_raw_path_effective=false`) | 조회 전용 (`changed_when: false`, 접속 중인 출발지가 막히면 실패) |
+| `SEC-073` | `Remove the sshd source restriction block after a failed guard` | `ansible.builtin.blockinfile` | All (`_raw_path_effective=false`) | rescue 전용 (가드 실패 시 블록 제거, 이미 없으면 `ok`) |
+| `SEC-074` | `Abort because the sshd source restriction would lock out this connection` | `ansible.builtin.fail` | All (`_raw_path_effective=false`) | rescue 전용 (롤백 뒤 중단) |
 
 > **Raw Provisioning Path (ADR-0005)**: CentOS 6/7 호스트는 `/etc/redhat-release` 자동 판별(`_raw_path_effective`, 인벤토리 `raw_provisioning_path`로 명시하면 그 값이 우선)에 따라 `SEC-001`/`SEC-001-DROPIN` 대신 `SEC-022`~`SEC-025`가, `SEC-009`/`SEC-010`/`SEC-012`/`SEC-013`/`SEC-014`/`SEC-015` 대신 `SEC-026`~`SEC-036`이 실행되고 (CentOS 7은 `SEC-011` 대신 `SEC-041`이 실행되고, CentOS 6는 `SEC-008`/`SEC-021` 대신 `SEC-037`~`SEC-040` iptables probe+mutate 쌍이 추가로 실행되며, CentOS 7은 firewalld 모듈/`firewall-cmd` 폴백 태스크(`SEC-005`~`SEC-007`, `SEC-016`/`SEC-017`/`SEC-020` 등) 대신 `SEC-042`~`SEC-050` firewalld probe+mutate 쌍(런타임 drift 감지 포함)이 실행된다(제거 규칙을 먼저 적용해 존 충돌을 피하고, 변경은 `permanent`에만 쓰고 raw `Reload firewalld` 핸들러로 반영). 룰 영속화(`service iptables save`)는 기존 모듈 경로와 같이 수행하지 않는다), `site.yml`은 `setup` 대신 raw로 OS 팩트를 확보한다. 헬퍼: `filter_plugins/raw_provisioning.py`. `--check`에서는 스킵된다.
 
@@ -117,3 +122,5 @@
 > - **fail2ban**: `SEC-015`/`SEC-032` jail은 `fail2ban_banaction`을 받는다. 기본값은 `firewall_unmanaged` 소속이면 `dummy`(방화벽 체인·규칙을 만들지 않음), 아니면 빈 값(배포판 기본). `dummy`에서는 탐지와 로그(`Ban` 기록)만 남고 네트워크 차단은 하지 않는다. 차단이 필요하면 sshd 접근 제어(#371)나 상위 방화벽으로 막는다.
 > - **journald**: `SEC-053`/`SEC-054`가 `Storage=persistent`를 켜 재부팅 뒤에도 이전 부팅의 시스템 로그가 남는다. 용량·보존 한도는 `common`의 `COMMON-017`(`journald_max_use`, `journald_max_retention`)이 정한다. CentOS 6/7 raw 경로는 대상이 아니다.
 > - **중앙 수집·적용 절차**: [docs/runbooks/detection-recovery.md](runbooks/detection-recovery.md).
+
+> **sshd 출발지 제한 (#371, Spec #364)**: 방화벽 체인을 건드리지 않고 sshd `Match Address` 블록(`DenyUsers *`)으로 허용 출발지 밖의 로그인을 거부한다(`SEC-070`~`SEC-074`). 허용 목록은 변수 `ssh_source_restriction_allowed_sources`(IP/CIDR 목록, 기본 빈 목록 = 제한 없음)로 받고 값은 저장소에 두지 않는다. 루프백은 항상 허용한다. 기존 `ssh_allowed_source_ips`는 방화벽 규칙(`SEC-019` 등)용이라 `firewall_unmanaged` 호스트에는 적용되지 않으며, 이 변수는 그것을 대체하지 않고 방화벽 밖 수단으로 따로 둔다(두 변수를 함께 정의해도 서로 읽지 않는다). `SEC-072` 가드는 Ansible이 접속한 출발지(`SSH_CONNECTION`)가 `sshd -T -C`로 막히면 `SEC-073`이 블록을 되돌리고 `SEC-074`가 중단해 스스로 잠기지 않게 한다. CentOS 6/7 raw 경로는 대상이 아니다. 적용 절차(별도 세션, 임시→영구, 롤백): [docs/runbooks/ssh-source-restriction.md](runbooks/ssh-source-restriction.md).

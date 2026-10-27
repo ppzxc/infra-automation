@@ -119,3 +119,7 @@ host_agents_kv_fixture:
   rustfs:
     maintenance_access_key: "molecule-fixture-maintenance-access"
     maintenance_secret_key: "molecule-fixture-maintenance-secret"
+
+# #371: sshd 출발지 제한 시험용 가짜 허용 목록(문서용 주소, RFC 5737). 컨테이너에는 SSH_CONNECTION이 없어 가드는 건너뛴다.
+ssh_source_restriction_allowed_sources:
+  - "192.0.2.0/24"

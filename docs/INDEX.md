@@ -31,6 +31,7 @@
 * [HP Smart Array 관리 도구(ssacli) 설치·점검 런북](runbooks/hp-raid-tool.md) - RAID 상태 수집기가 쓰는 도구의 설치 절차·버전·설치 기록(#334, #335)
 * [월간 로그 점검 런북](runbooks/monthly-log-review.md) - 월 1회 로그 점검 절차(쿼리), 기록 양식, 아직 도착하지 않은 로그 종류의 관찰 목록. 실제 기록은 비공개 노트(#322, #333)
 * [백업 호스트 키 삭제 권한 축소 런북](runbooks/backup-host-key-scope.md) - 호스트 키 정책(쓰기+잠금 해제 삭제), 카나리→전체 확대, 호스트별 격리 확인, 롤백, 중앙 유지보수 확인(#373)
+* [SSH 출발지 제한 런북](runbooks/ssh-source-restriction.md) - sshd Match Address 방식 허용 출발지 제한, 기존 ssh_allowed_source_ips와의 관계, 별도 세션·임시→영구·재부팅 확인·롤백 절차(#371)
 * [탐지 복구 적용 런북](runbooks/detection-recovery.md) - 방화벽 비관리 서버의 fail2ban(banaction)·auditd 규칙 축소·journald 영구 저장·중앙 수집 적용·검증·롤백 절차(#372)
 * [서버 시각 동기 현황 조사 (2026-10-26)](research/time-sync-host-survey-2026-10-26.md) - CentOS 6은 ntpd 없이 하루 한 번 rdate, CentOS 7·Rocky 9은 chrony 동기. 수집기·`infra-time-unsynced`에 미치는 영향과 열린 결정(#336)
 * [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일

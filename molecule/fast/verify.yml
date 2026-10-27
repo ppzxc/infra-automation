@@ -46,6 +46,8 @@
         sysctl: [sysctl, vm.swappiness, fs.protected_hardlinks, fs.protected_symlinks, kernel.randomize_va_space]
         timedatectl: [timedatectl, status]
         getenforce: [getenforce]
+        sshd_denied_source: [/usr/sbin/sshd, -T, -C, 'addr=198.51.100.1,user=root,host=probe']
+        sshd_allowed_source: [/usr/sbin/sshd, -T, -C, 'addr=192.0.2.10,user=root,host=probe']
 
   tasks:
     - name: Collect every verification fact in one remote execution
@@ -270,6 +272,40 @@
               - "'/nonexistent/molecule-secret.env' not in f.read[audit_rules_path]"
             fail_msg: "a missing audit_watch_paths entry was written to the audit rules."
           when: ansible_os_family == "RedHat"
+
+        - name: "[VERIFY-SEC-070] Verify the allowed source list is accepted (sshd -t passed during converge)"
+          ansible.builtin.assert:
+            that:
+              - "'Match Address *,!127.0.0.1,!::1,!192.0.2.0/24' in f.read['/etc/ssh/sshd_config']"
+            fail_msg: "sshd source restriction block is missing from sshd_config."
+
+        - name: "[VERIFY-SEC-071] Verify the sshd source restriction block is written once"
+          ansible.builtin.assert:
+            that:
+              - f.read['/etc/ssh/sshd_config'].count('BEGIN ANSIBLE MANAGED sshd source restriction') == 1
+              - f.read['/etc/ssh/sshd_config'].count('END ANSIBLE MANAGED sshd source restriction') == 1
+            fail_msg: "sshd source restriction block is duplicated or missing its markers."
+
+        - name: "[VERIFY-SEC-072] Verify sshd denies a source outside the list and allows one inside"
+          ansible.builtin.assert:
+            that:
+              - f.cmd.sshd_denied_source.rc == 0
+              - "'denyusers *' in f.cmd.sshd_denied_source.stdout | lower"
+              - f.cmd.sshd_allowed_source.rc == 0
+              - "'denyusers *' not in f.cmd.sshd_allowed_source.stdout | lower"
+            fail_msg: "sshd -T -C does not evaluate the source restriction as expected."
+
+        - name: "[VERIFY-SEC-073] Verify the source restriction does not change firewall configuration"
+          ansible.builtin.assert:
+            that:
+              - "'192.0.2.0/24' not in f.read['/var/tmp/fw-unmanaged-after.txt']"
+            fail_msg: "the sshd source list leaked into firewall configuration."
+
+        - name: "[VERIFY-SEC-074] Verify the guard fails closed only when the controller would be locked out"
+          ansible.builtin.assert:
+            that:
+              - "'denyusers *' in f.cmd.sshd_denied_source.stdout | lower"
+            fail_msg: "a source outside the list is not denied, so the guard condition cannot trigger."
 
         - name: "[VERIFY-SEC-051] Verify firewall config is untouched for a firewall_unmanaged host"
           ansible.builtin.assert:
