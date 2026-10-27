@@ -105,6 +105,8 @@ collect() {
   mkdir -p "$out"
   local sshargs=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
   [ -n "$port" ] && sshargs+=(-p "$port")
+  # shellcheck disable=SC2206
+  [ -n "${BASELINE_SSH_OPTS:-}" ] && sshargs+=($BASELINE_SSH_OPTS)
   if ! ssh "${sshargs[@]}" "$dest" 'bash -s -- --remote' < "$0" > "$out/snapshot.txt" 2> "$out/stderr.txt"; then
     echo "수집 실패: $out/stderr.txt 확인" >&2
     return 1
