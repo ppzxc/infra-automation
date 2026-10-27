@@ -36,3 +36,4 @@
 * [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 (CIS 감사 파일럿은 ADR-0009로 대체·제거)
 * [Compose 프로젝트·서비스 이름 규칙 ADR-0011](adr/0011-compose-project-and-service-naming.md) - 수동 관리 docker compose의 `name:` 명시, 구성요소 서비스명, `<프로젝트>-<서비스>` 식별자 (FUNA Cluster 편입)
 * [컨테이너 앱 텔레메트리 수집 경로 ADR-0012](adr/0012-container-app-telemetry-via-host-otelcol.md) - 노드 otelcol OTLP HTTP 수신기(`0.0.0.0`, host-gateway), `otel_app_telemetry` 스위치, `app_traces` 스트림
+* [로그·트랩 수신 접점 출발지 제한 런북](runbooks/receiver-source-restriction.md) - 방화벽 체인 변경 없이 syslog·트랩 수신기를 애플리케이션 수준에서 제한, 실현성 보고 양식·수신기 관측 출발지 수집(`scripts/collect-receiver-sources.sh`)·롤백·부정 시험(#370)
