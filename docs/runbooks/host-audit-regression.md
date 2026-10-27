@@ -4,7 +4,7 @@
 
 ## 1. 전제
 
-- 대상 서버가 Host Audit 점검 범위에 있어야 한다(`host_audit_excluded` 그룹에 없어야 한다). Host Agents 편입은 한쪽 서버에서 보류돼 있다(탐지 복구 런북 전제 3). 범위 밖이면 이 점검은 그 서버를 보지 못하므로 그동안은 수동 절차와 전후 스냅샷 diff로 확인한다.
+- 대상 서버가 Host Audit 점검 범위에 있어야 한다(`host_audit_excluded` 그룹에 없어야 한다). 이미 편입되어 수집기가 동작하는 서버가 있다(탐지 복구 런북 전제 3). 도달은 읽기 전용 조회로 확인한다. 편입되지 않아 범위 밖인 서버는 이 점검이 보지 못하므로 수동 절차와 전후 스냅샷 diff로 확인한다.
 - 선행 티켓의 조치가 적용돼 있어야 해당 항목이 통과한다. 적용 전에는 해당 선언 키를 넣지 않는다(넣으면 실패로 나오는 것이 정상이다). 기대치별 출처: [관리 웹 접점](mgmt-web-loopback-bind.md), [수신 접점](receiver-source-restriction.md), [SSH 출발지](ssh-source-restriction.md), [탐지 복구](detection-recovery.md), [백업 호스트 키](backup-host-key-scope.md), [시크릿 파일 권한](secret-file-permissions.md).
 - 이 점검은 호스트를 바꾸지 않는다. 원격에서 하는 일은 소켓·컨테이너 게시 목록 조회, `sshd -T -C`, `fail2ban-client status`·`get`, `auditctl -l`, `systemctl is-active`, 파일 권한 조회, 설정 파일 읽기뿐이다. 시크릿 파일의 내용은 읽지 않는다.
 

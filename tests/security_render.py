@@ -26,6 +26,7 @@ TEMPLATE_FILES = {
 # 케이스 이름 -> 변수. 가짜 경로만 쓴다(실서버 값 아님).
 CASES = {
     "default": {},
+    # 명시 옵션으로만 dummy를 쓴다(기본값은 빈 값)
     "unmanaged_firewall": {"fail2ban_banaction": "dummy"},
     "managed_firewall": {"fail2ban_banaction": ""},
     "secret_paths": {

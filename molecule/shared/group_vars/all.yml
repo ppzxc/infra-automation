@@ -124,6 +124,6 @@ host_agents_kv_fixture:
 ssh_source_restriction_allowed_sources:
   - "192.0.2.0/24"
 
-# fail2ban jail의 banaction을 처음부터 dummy로 고정한다. 첫 converge(방화벽 관리)와 둘째 converge(firewall_unmanaged)가
+# fail2ban jail의 banaction을 명시 옵션으로 dummy에 고정한다(역할 기본값은 빈 값). 첫 converge(방화벽 관리)와 둘째 converge(firewall_unmanaged)가
 # 같은 jail 파일을 만들어야 idempotence가 깨지지 않는다([VERIFY-SEC-015]). 관리 호스트의 빈 banaction은 pytest 렌더링이 본다.
 fail2ban_banaction: dummy

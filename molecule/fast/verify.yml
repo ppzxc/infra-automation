@@ -30,7 +30,7 @@
               '/etc/systemd/journald.conf.d/99-retention.conf', '/etc/profile.d/99-aliases.sh',
               '/etc/profile.d/98-node-env.sh', '/etc/environment', chrony_path,
               '/etc/sudoers.d/99-security-policy', audit_rules_path, '/etc/fail2ban/jail.d/sshd.local',
-              '/var/log/journal', '/etc/systemd/journald.conf.d', '/etc/systemd/journald.conf.d/50-persistent.conf',
+              '/var/log/journal', '/etc/audit/auditd.conf', '/etc/systemd/journald.conf.d', '/etc/systemd/journald.conf.d/50-persistent.conf',
               '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json'] }}
       read:
         - /etc/ssh/sshd_config
@@ -40,7 +40,8 @@
         - "{{ audit_rules_path }}"
         - /etc/fail2ban/jail.d/sshd.local
         - /etc/systemd/journald.conf.d/50-persistent.conf
-      group: "{{ present_accounts }}"
+        - /etc/audit/auditd.conf
+      group: "{{ present_accounts + ['systemd-journal'] }}"
       passwd: "{{ present_accounts + ['infra-removed'] }}"
       cmd:
         sysctl: [sysctl, vm.swappiness, fs.protected_hardlinks, fs.protected_symlinks, kernel.randomize_va_space]
@@ -214,6 +215,17 @@
           ansible.builtin.debug:
             msg: "auditd verification complete."
 
+        - name: "[VERIFY-SEC-081] Verify auditd log rotation limits"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/audit/auditd.conf'].mode == '0640'
+              - "'max_log_file = 50' in f.read['/etc/audit/auditd.conf']"
+              - "'num_logs = 10' in f.read['/etc/audit/auditd.conf']"
+            fail_msg: "auditd.conf is missing the rotation limits (max_log_file, num_logs)."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat['/etc/audit/auditd.conf'].exists
+
         - name: "[VERIFY-SEC-014] Verify sudoers timestamp and log configuration"
           ansible.builtin.assert:
             that:
@@ -221,7 +233,7 @@
               - f.stat['/etc/sudoers.d/99-security-policy'].mode == '0440'
             fail_msg: "Sudo security policy /etc/sudoers.d/99-security-policy is missing."
 
-        # converge의 두 번째 플레이가 호스트를 firewall_unmanaged에 넣고 security를 다시 적용하므로 jail은 방화벽을 건드리지 않는 banaction(dummy)이어야 한다.
+        # Molecule 변수(shared/group_vars)가 dummy를 명시하므로 jail은 방화벽을 건드리지 않는 banaction(dummy)이어야 한다. 역할 기본값은 빈 값(배포판 기본)이다.
         # fail2ban 패키지가 없는 이미지에서는 파일이 만들어지지 않으므로 그때는 건너뛴다(SEC-015는 failed_when: false).
         - name: "[VERIFY-SEC-015] Verify fail2ban ssh jail configuration file"
           ansible.builtin.assert:
@@ -251,8 +263,17 @@
             that:
               - f.stat['/var/log/journal'].exists
               - f.stat['/var/log/journal'].mode == '2755'
+              - f.stat['/var/log/journal'].group == ('systemd-journal' if f.group['systemd-journal'] else 'root')
               - f.stat['/etc/systemd/journald.conf.d'].exists
             fail_msg: "/var/log/journal (2755) or /etc/systemd/journald.conf.d is missing."
+          when: ansible_service_mgr == "systemd"
+
+        - name: "[VERIFY-SEC-080] Verify the systemd-journal group lookup left the journal directory group consistent"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/var/log/journal'].exists
+              - f.group['systemd-journal'] | bool == (f.stat['/var/log/journal'].group == 'systemd-journal')
+            fail_msg: "/var/log/journal group does not follow the systemd-journal group presence."
           when: ansible_service_mgr == "systemd"
 
         - name: "[VERIFY-SEC-054] Verify journald persistent storage drop-in"
