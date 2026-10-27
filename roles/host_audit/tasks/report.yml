@@ -20,6 +20,9 @@
   ansible.builtin.include_tasks: drift.yml
   when: host_audit_drift_enabled | bool
 
+- name: Judge the backup host key policy items of Security Regression
+  ansible.builtin.include_tasks: regression_backup.yml
+
 - name: Look up the Host Audit storage and the Audit Baseline
   ansible.builtin.include_tasks: storage_lookup.yml
 
@@ -51,6 +54,7 @@
       baseline_history: "{{ host_audit_baseline_history }}"
       package_findings_dir: "{{ host_audit_run.output_dir }}/package_findings"
       configuration_drift: "{{ host_audit_drift_section | default({}) }}"
+      regression_backup: "{{ host_audit_regression_backup_items | default([]) }}"
 
 - name: "[AUD-022] Save the run metadata on the runner"
   ansible.builtin.copy:

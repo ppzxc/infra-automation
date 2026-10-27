@@ -1,0 +1,22 @@
+---
+# ==============================================================================
+# Host Audit - Security Regression 백업 정책 항목 (러너 localhost 전용, Spec #364 / Ticket-10, #377)
+# ==============================================================================
+# 저장소의 호스트 키 정책(roles/backup/files/host-key-policy.json)과 읽기 전용 수집기(scripts/collect-rustfs-policy.py)가 만든
+# 스냅샷 파일을 비교한다. Host Audit 전용 키는 IAM 정책을 읽을 수 없고 유지보수 키는 쓰지 않으므로(ADR-0009, AUD-500) 서버를 직접
+# 조회하지 않는다. 스냅샷 경로를 주지 않으면 BAK-2/3은 점검불가다. host_audit_regression_backup_enabled가 true일 때만 실행한다.
+# ------------------------------------------------------------------------------
+- name: "[AUD-710] Judge the backup host key policy items on the runner"
+  ansible.builtin.set_fact:
+    host_audit_regression_backup_items: >-
+      {{ (lookup('ansible.builtin.file', host_audit_backup_policy_file, errors='ignore') | default('', true))
+         | host_audit_regression_backup(
+             (lookup('ansible.builtin.file', host_audit_rustfs_policy_snapshot_file, errors='ignore') | default('', true))
+               if host_audit_rustfs_policy_snapshot_file | length > 0 else '',
+             host_audit_backup_policy_prefix) }}
+  delegate_to: localhost
+  run_once: true
+  check_mode: false
+  when:
+    - host_audit_regression_enabled | bool
+    - host_audit_regression_backup_enabled | bool

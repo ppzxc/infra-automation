@@ -42,3 +42,4 @@
 * [로그·트랩 수신 접점 출발지 제한 런북](runbooks/receiver-source-restriction.md) - 방화벽 체인 변경 없이 syslog·트랩 수신기를 애플리케이션 수준에서 제한, 실현성 보고 양식·수신기 관측 출발지 수집(`scripts/collect-receiver-sources.sh`)·롤백·부정 시험(#370)
 * [시크릿 파일 권한 정렬 런북](runbooks/secret-file-permissions.md) - 소비자별 권한 분류(env_file 0640 root:dockermgmt / bind mount / root 전용 0600), `compose config --quiet` 판정, 평문·이력·잔재 정리, 이미지 고정 버전 목록(#375)
 * [관리용 웹 접점 루프백 바인드 런북](runbooks/mgmt-web-loopback-bind.md) - 관리 웹 접점 루프백 바인드, 승인 항목별 체크리스트·롤백·부정 시험, Host Audit 기대치 (#369)
+* [Host Audit 퇴행 점검 적용 런북](runbooks/host-audit-regression.md) - 스펙 #364 기대치(EXP-*) 퇴행 점검의 선언·적용 전후 스냅샷·롤백·알림 절차, 합격 기준은 host_audit.md 16절 (#377)

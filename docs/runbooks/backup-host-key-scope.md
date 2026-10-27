@@ -80,4 +80,4 @@
 
 ## 9. Host Audit 연계
 
-[#377](https://github.com/ppzxc/infra-automation/issues/377)이 백업 저장소 정책 점검을 Host Audit 항목으로 추가한다. 점검 기대치는 이 문서가 아니라 `roles/backup/files/host-key-policy.json`이다(삭제 허용은 `locks/*`뿐, 와일드카드 동작 없음).
+[#377](https://github.com/ppzxc/infra-automation/issues/377)이 백업 저장소 정책 점검을 Host Audit 항목 `EXP-BAK-1`~`EXP-BAK-3`으로 추가했다([Host Audit 명세 16절](../host_audit.md)). 점검 기대치는 이 문서가 아니라 `roles/backup/files/host-key-policy.json`이다(삭제 허용은 `locks/*`뿐, 와일드카드 동작 없음).

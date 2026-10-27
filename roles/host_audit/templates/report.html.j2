@@ -91,6 +91,8 @@
 
 {% include 'sections/package_vulnerability.html.j2' %}
 
+{% if m.security_regression is defined %}{% include 'sections/security_regression.html.j2' %}{% endif %}
+
 {% if m.baseline is defined %}{% include 'sections/audit_baseline.html.j2' %}{% endif %}
 
 {% include 'sections/appendix.html.j2' %}

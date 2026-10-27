@@ -46,6 +46,7 @@ except ImportError:  # pragma: no cover - Python < 3.9 runner
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_files import host_audit_host_file  # noqa: E402
 from host_audit_kisa import EXCEPTION, ITEMS as KISA_ITEMS, VULNERABLE  # noqa: E402
+from host_audit_regression import ITEMS as REGRESSION_ITEMS  # noqa: E402
 
 DOC_SCHEMA_VERSION = 1
 POINTER_PREFIX = 'baseline/'
@@ -66,11 +67,13 @@ STATUS_CLASSES = {NEW: 'crit', RECUR: 'crit', PERSIST: 'warn', RESOLVED: 'ok', U
 SECTION_ASSET = 'asset_inventory'
 SECTION_KISA = 'config_vulnerability'
 SECTION_PACKAGE = 'package_vulnerability'
+SECTION_REGRESSION = 'security_regression'
 SECTION_TITLES = {
     SECTION_ASSET: 'Asset Inventory',
     SECTION_KISA: 'Configuration Vulnerability',
     SECTION_PACKAGE: 'Package Vulnerability',
     'configuration_drift': 'Configuration Drift',
+    SECTION_REGRESSION: 'Security Regression',
 }
 ASSET_KINDS = {'account': '계정', 'port': 'listening 포트', 'privileged': '특수권한자'}
 # KISA verdicts that count as a finding. 점검불가(수동) is not one: it is the same every run.
@@ -270,6 +273,25 @@ def host_audit_kisa_worsened(model, baseline):
     return out
 
 
+def host_audit_regression_worsened(model, baseline):
+    """Security Regression items that failed now and were not a finding in the Audit Baseline (#377).
+
+    Same rule as ``host_audit_kisa_worsened``: per item, only hosts the baseline inspected, nothing without a baseline.
+    Returns ``[{'host', 'id', 'label'}]`` sorted by host and item.
+    """
+    if not baseline:
+        return []
+    base = ((baseline.get('sections') or {}).get(SECTION_REGRESSION)) or {}
+    base_hosts = set(base.get('hosts') or [])
+    base_ids = base.get('ids') or {}
+    findings = ((model.get(SECTION_REGRESSION) or {}).get('baseline_findings') or {}).get('findings') or []
+    out = []
+    for f in sorted(findings, key=lambda f: (f['host'], f['id'])):
+        if f['host'] in base_hosts and f['id'] not in set(base_ids.get(f['host']) or []):
+            out.append({'host': f['host'], 'id': f['id'], 'label': f['label']})
+    return out
+
+
 def _package_findings(model, package_results):
     section = model.get(SECTION_PACKAGE) or {}
     if not section or section.get('status') not in (None, 'ok'):
@@ -379,6 +401,8 @@ def _compact(index):
 def _label(section, fid):
     if section == SECTION_KISA:
         return '%s %s' % (fid, (KISA_ITEMS.get(fid.split(':', 1)[-1]) or {}).get('title', ''))
+    if section == SECTION_REGRESSION:
+        return '%s %s' % (fid, (REGRESSION_ITEMS.get(fid) or {}).get('title', ''))
     if section == SECTION_PACKAGE:
         return fid.replace('|', ' ')
     if section == SECTION_ASSET:
@@ -631,7 +655,9 @@ def host_audit_kisa_alert(model, run, history):
     """
     history = history or {}
     baseline = history.get('baseline') if history.get('state') == 'ok' else None
-    items = host_audit_kisa_worsened(model or {}, baseline)
+    kisa_items = host_audit_kisa_worsened(model or {}, baseline)
+    regression_items = host_audit_regression_worsened(model or {}, baseline)
+    items = kisa_items + regression_items
     run = run or {}
     plan = {'send': False, 'reason': '', 'count': len(items), 'hosts': len({i['host'] for i in items}), 'text': ''}
     if run.get('run_kind') != 'scheduled':
@@ -644,15 +670,21 @@ def host_audit_kisa_alert(model, run, history):
         return plan
     head = ['🟠 [P2 경고] Host Audit KISA 악화: 지난달 통과한 항목이 이번 달 실패',
             '',
-            '■ 현상: 지난 정기 점검(%s)에서 취약이 아니던 KISA 항목 %d건이 이번 점검(%s)에서 취약으로 나왔습니다(호스트 %d대).'
-            % (baseline.get('run_id') or '-', plan['count'], run.get('run_id', '-'), plan['hosts']),
+            (('■ 현상: 지난 정기 점검(%s)에서 취약이 아니던 KISA 항목 %d건이 이번 점검(%s)에서 취약으로 나왔습니다(호스트 %d대).'
+              % (baseline.get('run_id') or '-', plan['count'], run.get('run_id', '-'), plan['hosts']))
+             if not regression_items else
+             ('■ 현상: 지난 정기 점검(%s)에서 문제가 없던 항목 %d건(KISA %d건, 보안 퇴행 점검 %d건)이 이번 점검(%s)에서 취약·실패로 나왔습니다(호스트 %d대).'
+              % (baseline.get('run_id') or '-', plan['count'], len(kisa_items), len(regression_items),
+                 run.get('run_id', '-'), plan['hosts']))),
             '■ 영향: 지난달 이후 새로 생긴 설정 약점입니다. 의도하지 않은 변경이면 보안 수준이 떨어진 것입니다.',
             '■ 악화된 항목 %d건:' % plan['count']]
     tail = ['■ 조치:',
             '① 월간 Host Audit 보고서(메일)의 Configuration Vulnerability에서 항목별 근거 확인',
             '② 의도한 변경이면 KISA 예외 등록, 아니면 설정을 되돌리고 다음 점검에서 해소 확인',
-            '③ 같은 호스트의 설정 변경 알림·작업 이력과 대조',
-            '📋 규칙: host-audit-kisa-worsened']
+            '③ 같은 호스트의 설정 변경 알림·작업 이력과 대조']
+    if regression_items:
+        tail += ['④ 보안 퇴행 점검 항목(EXP-*)은 보고서의 Security Regression 절과 docs/runbooks/host-audit-regression.md로 확인']
+    tail += ['📋 규칙: host-audit-kisa-worsened']
     lines, used = [], len('\n'.join(head + tail)) + 40
     for item in items:
         row = '• %s: %s' % (item['host'], item['label'])
@@ -698,4 +730,5 @@ class FilterModule(object):
             'host_audit_baseline_pick': host_audit_baseline_pick,
             'host_audit_json_loads': host_audit_json_loads,
             'host_audit_kisa_alert': host_audit_kisa_alert,
+            'host_audit_regression_worsened': host_audit_regression_worsened,
         }

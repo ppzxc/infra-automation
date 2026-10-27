@@ -64,7 +64,7 @@ SELECT host_name, count(*) AS records FROM "security_logs" GROUP BY host_name
 
 ## 6. Host Audit 연계
 
-적용 뒤 Host Audit 드리프트 점검이 같은 인벤토리로 `security` 역할을 check 실행해 변경 없음(`ok`)을 확인한다. 드리프트가 보이면 이 런북의 설정이 바뀐 것이므로 원인을 확인하고 비공개 노트에 기록한다. 감사 규칙·journald 설정을 Host Audit 항목으로 추가하는 것은 #377에서 다룬다.
+적용 뒤 Host Audit 드리프트 점검이 같은 인벤토리로 `security` 역할을 check 실행해 변경 없음(`ok`)을 확인한다. 드리프트가 보이면 이 런북의 설정이 바뀐 것이므로 원인을 확인하고 비공개 노트에 기록한다. fail2ban·감사 규칙·journald·수집 에이전트는 Host Audit 퇴행 점검 항목 `EXP-DET-1`~`EXP-DET-7`이 계속 확인한다([Host Audit 명세 16절](../host_audit.md), [적용 런북](host-audit-regression.md)).
 
 ## 7. 기록
 
