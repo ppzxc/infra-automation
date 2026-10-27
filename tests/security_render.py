@@ -2,10 +2,11 @@
 
 실제 `ansible.builtin.template` 모듈로 렌더링한다(trim_blocks 같은 ansible 기본값이 그대로 적용된다).
 케이스(`CASES`)마다 변수를 다르게 줘서 한 번의 `ansible-playbook` 실행으로 모두 만든다.
-#371(sshd 접근 제어)도 이 helper에 템플릿·케이스를 추가해 같은 session fixture를 재사용한다.
+#371(sshd 접근 제어)도 같은 템플릿·케이스 표를 쓰고, `shared_render()`로 프로세스당 한 번만 렌더링한다(ADR-0013).
 """
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -19,6 +20,7 @@ TEMPLATE_FILES = {
     "audit": "audit.rules.j2",
     "fail2ban": "fail2ban-sshd.local.j2",
     "journald": "journald-persistent.conf.j2",
+    "sshd_source": "sshd-source-restriction.conf.j2",
 }
 
 # 케이스 이름 -> 변수. 가짜 경로만 쓴다(실서버 값 아님).
@@ -30,14 +32,16 @@ CASES = {
         "audit_watch_paths": ["/srv/example/app.secrets.env", "/srv/example/other.key"],
         "audit_container_config_paths": ["/etc/docker/", "/srv/example/compose/"],
     },
+    # #371: 가짜 문서용 주소(RFC 5737, RFC 3849)만 쓴다.
+    "ssh_source_two": {"ssh_source_restriction_allowed_sources": ["192.0.2.0/24", "198.51.100.7/32"]},
+    "ssh_source_v6": {"ssh_source_restriction_allowed_sources": ["2001:db8::/32"]},
 }
 
 
-def render_security(workdir, *, extra_templates=None, extra_cases=None):
-    """모든 케이스를 렌더링해 `{케이스: {출력이름: 텍스트}}`를 돌려준다. `extra_*`는 다른 티켓이 케이스·템플릿을 덧붙일 때 쓴다."""
+def render_security(workdir):
+    """모든 케이스를 렌더링해 `{케이스: {출력이름: 텍스트}}`를 돌려준다."""
     workdir = Path(workdir)
-    templates = {**TEMPLATE_FILES, **(extra_templates or {})}
-    cases = {**CASES, **(extra_cases or {})}
+    templates, cases = TEMPLATE_FILES, CASES
     tasks = []
     for case, variables in cases.items():
         for out, src in templates.items():
@@ -58,6 +62,37 @@ def render_security(workdir, *, extra_templates=None, extra_cases=None):
     return {case: {out: (workdir / f"{case}.{out}").read_text(encoding="utf-8") for out in templates} for case in cases}
 
 
+_SHARED = {}
+
+
+def shared_render():
+    """프로세스(xdist 워커)당 한 번만 렌더링하고 결과를 공유한다. 여러 테스트 모듈이 같은 결과를 읽는다."""
+    if "result" not in _SHARED:
+        _SHARED["result"] = render_security(Path(tempfile.mkdtemp(prefix="security-render-")))
+    return _SHARED["result"]
+
+
 def rule_lines(text):
     """주석·빈 줄을 뺀 감사 규칙 줄."""
     return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
+
+
+def flat_tasks(tasks):
+    """block/rescue/always 안까지 펼친 태스크."""
+    for t in tasks:
+        yield t
+        for key in ("block", "rescue", "always"):
+            if key in t:
+                yield from flat_tasks(t[key])
+
+
+def security_tasks():
+    """security 역할 tasks/main.yml의 태스크(블록 안 포함)."""
+    return list(flat_tasks(yaml.safe_load((ROOT_DIR / "roles" / "security" / "tasks" / "main.yml").read_text(encoding="utf-8"))))
+
+
+def security_task(spec_id):
+    """`[SPEC-ID]`로 시작하는 태스크 하나."""
+    found = [t for t in security_tasks() if t.get("name", "").startswith(f"[{spec_id}]")]
+    assert len(found) == 1, spec_id
+    return found[0]

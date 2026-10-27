@@ -1,6 +1,6 @@
 """sshd 출발지 제한(Match Address) 테스트 (Spec #364 / Ticket-4, #371).
 
-렌더링은 #372의 공유 helper(`tests/security_render.py`)에 템플릿·케이스를 덧붙여 같은 session fixture 방식으로 한 번만 한다.
+렌더링은 #372의 공유 helper(`tests/security_render.py`)의 `shared_render()`로 프로세스당 한 번만 한다(템플릿·케이스는 그 표에 있다).
 태스크 구조와 런북은 파일을 읽어 검사한다(ansible-playbook을 테스트마다 돌리지 않으므로 slow가 아니다).
 방화벽 체인은 건드리지 않는다는 것(`firewall_unmanaged`에서도 같은 동작)도 구조로 확인한다.
 """
@@ -10,41 +10,20 @@ from pathlib import Path
 import pytest
 import yaml
 
-from security_render import ROOT_DIR, render_security
+from security_render import ROOT_DIR, shared_render
+from security_render import flat_tasks as _flat
+from security_render import security_task as _task
+from runbook_helpers import runbook_section
 
 pytestmark = pytest.mark.xdist_group("security-render")
 
 ROLE = ROOT_DIR / "roles" / "security"
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "ssh-source-restriction.md"
-EXTRA_TEMPLATES = {"sshd_source": "sshd-source-restriction.conf.j2"}
-# 가짜 문서용 주소(RFC 5737)만 쓴다.
-EXTRA_CASES = {
-    "ssh_source_two": {"ssh_source_restriction_allowed_sources": ["192.0.2.0/24", "198.51.100.7/32"]},
-    "ssh_source_v6": {"ssh_source_restriction_allowed_sources": ["2001:db8::/32"]},
-}
 
 
 @pytest.fixture(scope="session")
-def ssh_rendered(tmp_path_factory):
-    return render_security(tmp_path_factory.mktemp("ssh-source-render"), extra_templates=EXTRA_TEMPLATES, extra_cases=EXTRA_CASES)
-
-
-def _flat(tasks):
-    for t in tasks:
-        yield t
-        for key in ("block", "rescue", "always"):
-            if key in t:
-                yield from _flat(t[key])
-
-
-def _tasks():
-    return list(_flat(yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))))
-
-
-def _task(spec_id):
-    found = [t for t in _tasks() if t.get("name", "").startswith(f"[{spec_id}]")]
-    assert len(found) == 1, spec_id
-    return found[0]
+def ssh_rendered():
+    return shared_render()
 
 
 def _defaults():
@@ -132,9 +111,7 @@ def _text():
 
 
 def _section(title):
-    m = re.search(rf"^## {re.escape(title)}.*?(?=^## |\Z)", _text(), re.S | re.M)
-    assert m, f"'## {title}' 절이 없다"
-    return m.group(0)
+    return runbook_section(RUNBOOK, title)
 
 
 def test_runbook_explains_the_relation_to_ssh_allowed_source_ips():

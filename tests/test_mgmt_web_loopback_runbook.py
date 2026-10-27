@@ -6,6 +6,7 @@ compose 원본이 저장소에 없어 변경은 서버에서 운영자 승인 �
 """
 import re
 from pathlib import Path
+from runbook_helpers import runbook_section
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "mgmt-web-loopback-bind.md"
@@ -17,9 +18,7 @@ def _text():
 
 
 def _section(title):
-    match = re.search(rf"^## {re.escape(title)}.*?(?=^## |\Z)", _text(), re.S | re.M)
-    assert match, f"'## {title}' 절이 없다"
-    return match.group(0)
+    return runbook_section(RUNBOOK, title)
 
 
 def _commands():

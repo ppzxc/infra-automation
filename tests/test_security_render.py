@@ -9,7 +9,8 @@ import pytest
 import yaml
 from jinja2 import Environment
 
-from security_render import ROOT_DIR, render_security, rule_lines
+from security_render import ROOT_DIR, rule_lines, shared_render
+from security_render import security_task as _task
 
 pytestmark = pytest.mark.xdist_group("security-render")
 
@@ -17,24 +18,9 @@ ROLE = ROOT_DIR / "roles" / "security"
 
 
 @pytest.fixture(scope="session")
-def security_rendered(tmp_path_factory):
-    """`{케이스: {audit|fail2ban|journald: 렌더링 텍스트}}`."""
-    return render_security(tmp_path_factory.mktemp("security-render"))
-
-
-def _tasks(tasks=None):
-    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8")) if tasks is None else tasks
-    for t in tasks:
-        if "block" in t:
-            yield from _tasks(t["block"])
-        else:
-            yield t
-
-
-def _task(spec_id):
-    found = [t for t in _tasks() if t["name"].startswith(f"[{spec_id}]")]
-    assert len(found) == 1, spec_id
-    return found[0]
+def security_rendered():
+    """`{케이스: {audit|fail2ban|journald|sshd_source: 렌더링 텍스트}}`."""
+    return shared_render()
 
 
 # --- auditd 규칙 -------------------------------------------------------------------------------
@@ -146,3 +132,20 @@ def test_audit_watch_paths_are_filtered_by_existence():
 
 def test_render_runs_once_per_session(security_rendered):
     assert set(security_rendered) >= {"default", "unmanaged_firewall", "managed_firewall", "secret_paths"}
+
+
+def test_journald_tasks_and_handler_do_not_swallow_failures():
+    for spec_id in ("SEC-053", "SEC-054"):
+        assert "failed_when" not in _task(spec_id), spec_id
+    handlers = yaml.safe_load((ROLE / "handlers" / "main.yml").read_text(encoding="utf-8"))
+    restart = next(h for h in handlers if h["name"] == "Restart systemd-journald")
+    assert "failed_when" not in restart
+    assert any("ansible_service_mgr" in w for w in restart["when"])
+
+
+def test_auditd_tasks_only_tolerate_a_missing_audit_package():
+    # failed_when: false는 모든 오류를 가린다. 패키지가 없는 경우만 건너뛰고 그 밖의 실패는 드러내야 한다.
+    for spec_id, marker in (("SEC-012", "does not exist"), ("SEC-013", "Could not find the requested service")):
+        failed_when = _task(spec_id)["failed_when"]
+        assert failed_when is not False, spec_id
+        assert marker in yaml.safe_dump(failed_when), spec_id

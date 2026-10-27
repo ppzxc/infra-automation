@@ -854,7 +854,10 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `AUD-701` | `Add Security Regression verdicts to the per-host audit record` | `ansible.builtin.set_fact` | 러너 | 읽기 전용 (`host_audit_regression_result` 필터) |
 | `AUD-710` | `Judge the backup host key policy items on the runner` | `ansible.builtin.set_fact` | 러너 (`delegate_to: localhost`) | 읽기 전용 (저장소 정책 JSON과 선택 스냅샷 파일을 읽어 `host_audit_regression_backup`이 판정, 켜진 실행에서만) |
 
+예약 번호: `AUD-702`~`AUD-709`는 의도적으로 건너뛴 예약 번호이며 태스크가 없다(재사용·추측 금지). `AUD-710`은 백업 정책 판정이라 일부러 700번대와 구분했다.
+
 검증:
 - pytest `tests/test_host_audit_regression_probe.py` — 프로브를 가짜 루트와 가짜 조회 명령(`ss`, `docker`, `sshd`, `fail2ban-client`, `auditctl`, `systemctl`)으로 실행해 정상 상태에서 선언한 모든 항목이 통과하고, 항목별로 의도적으로 퇴행시킨 상태(바인드 개방, 제거 포트 복귀, 필터·인증 제거, 기본 문자열, Match 블록 제거·빈 허용 목록·허용 출발지 차단, journald 휘발성, 방화벽 동작, 감사 키 누락·execve 추적, 에이전트 중지, 권한 확대·그룹 오류·파일 누락)에서 해당 항목이 실패로 나오는지, 조회 도구가 답하지 못하면 점검불가인지, 출력에 값이 없는지, 호스트에 아무것도 쓰지 않는지 본다.
 - pytest `tests/test_host_audit_regression.py` — 판정(선언 안 한 항목은 해당없음, 말하지 않은 선언 항목은 점검불가), 쉘 메타문자 차단, 백업 정책 판정(수집기 출력 형식 사용: 정상, 삭제 범위 확대, 다른 버킷, 정책 없음, 스냅샷 없음), 보고서 섹션과 Audit Baseline 발견, 항목 단위 악화 비교와 알림 본문(주소·시크릿 없음).
-- **molecule Fast Scenario** `VERIFY-AUD-700`(수렴된 호스트에서 선언 항목이 모두 통과하고 프로브가 호스트를 바꾸지 않는다), `VERIFY-AUD-701`(sshd 제한 블록 제거, journald 휘발성, 시크릿 파일 권한 확대를 일부러 만들면 해당 항목이 실패로 보고된다), `VERIFY-AUD-702`(원복 뒤 다시 통과). 컨테이너에서는 fail2ban·감사 규칙 적재·게시 포트를 재현하지 않아 이 항목들은 pytest가 본다.
+- **molecule Fast Scenario** `VERIFY-AUD-700`(수렴된 호스트에서 선언 항목이 모두 통과하고 프로브가 호스트를 바꾸지 않는다), `VERIFY-AUD-701`(sshd 제한 블록 제거, journald 휘발성, 시크릿 파일 권한 확대를 일부러 만들면 해당 항목이 실패로 보고된다), `VERIFY-AUD-700`이 원복 뒤 다시 통과하는지도 본다(같은 판정 재확인). 컨테이너에서는 fail2ban·감사 규칙 적재·게시 포트를 재현하지 않아 이 항목들은 pytest가 본다.
+- `AUD-710`(백업 정책 판정)은 러너에서 저장소 JSON만 읽으므로 molecule 검증이 없고(`INTEGRATED`), pytest `tests/test_host_audit_regression.py`가 판정을 검증한다.

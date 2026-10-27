@@ -3,7 +3,7 @@
 # 서버 상태를 바꾸지 않는다. 인증 문자열은 값을 출력하지 않고 길이와 해시 앞 12자로만 남긴다.
 #
 # 사용법 (운영자 PC에서):
-#   scripts/collect-receiver-sources.sh --label ns0266 --ssh user@host [--port N]
+#   scripts/collect-receiver-sources.sh --label <label> --ssh user@host [--port N]
 #   diff <이전>/receiver-sources.txt <이후>/receiver-sources.txt
 #
 # 결과는 저장소 밖 비공개 경로(기본 ~/.local/share/infra-automation/sec-review-20261026/

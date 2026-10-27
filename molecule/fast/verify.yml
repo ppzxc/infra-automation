@@ -195,6 +195,8 @@
             verbosity: 1
           when: ansible_os_family == "RedHat"
 
+        # 이 역할은 audit 패키지를 설치하지 않는다. 테스트 이미지에 audit이 없으면 규칙 디렉터리가 없어 SEC-012가 건너뛰므로
+        # 파일이 있을 때만 검증한다(SEC-015와 같은 방식). 규칙 내용은 pytest 렌더링(tests/test_security_render.py)이 항상 본다.
         - name: "[VERIFY-SEC-012] Verify auditd rules configuration file"
           ansible.builtin.assert:
             that:
@@ -204,7 +206,9 @@
               - "'-k container_config' in f.read[audit_rules_path]"
               - "'execve' not in (f.read[audit_rules_path] | regex_replace('(?m)^#.*$', ''))"
             fail_msg: "auditd rules file is missing, or still traces every execve."
-          when: ansible_os_family == "RedHat"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
 
         - name: "[VERIFY-SEC-013] Verify auditd service status"
           ansible.builtin.debug:
@@ -264,14 +268,18 @@
             that:
               - "'-w /etc/hostname -p rwa -k secret_access' in f.read[audit_rules_path]"
             fail_msg: "an existing audit_watch_paths entry is not in the audit rules."
-          when: ansible_os_family == "RedHat"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
 
         - name: "[VERIFY-SEC-056] Verify missing audit watch paths are left out of the audit rules"
           ansible.builtin.assert:
             that:
               - "'/nonexistent/molecule-secret.env' not in f.read[audit_rules_path]"
             fail_msg: "a missing audit_watch_paths entry was written to the audit rules."
-          when: ansible_os_family == "RedHat"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
 
         - name: "[VERIFY-SEC-070] Verify the allowed source list is accepted (sshd -t passed during converge)"
           ansible.builtin.assert:
@@ -279,12 +287,13 @@
               - "'Match Address *,!127.0.0.1,!::1,!192.0.2.0/24' in f.read['/etc/ssh/sshd_config']"
             fail_msg: "sshd source restriction block is missing from sshd_config."
 
-        - name: "[VERIFY-SEC-071] Verify the sshd source restriction block is written once"
+        - name: "[VERIFY-SEC-071] Verify the sshd source restriction block is written once and does not change firewall configuration"
           ansible.builtin.assert:
             that:
               - f.read['/etc/ssh/sshd_config'].count('BEGIN ANSIBLE MANAGED sshd source restriction') == 1
               - f.read['/etc/ssh/sshd_config'].count('END ANSIBLE MANAGED sshd source restriction') == 1
-            fail_msg: "sshd source restriction block is duplicated or missing its markers."
+              - "'192.0.2.0/24' not in f.read['/var/tmp/fw-unmanaged-after.txt']"
+            fail_msg: "sshd source restriction block is duplicated, missing its markers, or leaked into firewall configuration."
 
         - name: "[VERIFY-SEC-072] Verify sshd denies a source outside the list and allows one inside"
           ansible.builtin.assert:
@@ -294,18 +303,6 @@
               - f.cmd.sshd_allowed_source.rc == 0
               - "'denyusers *' not in f.cmd.sshd_allowed_source.stdout | lower"
             fail_msg: "sshd -T -C does not evaluate the source restriction as expected."
-
-        - name: "[VERIFY-SEC-073] Verify the source restriction does not change firewall configuration"
-          ansible.builtin.assert:
-            that:
-              - "'192.0.2.0/24' not in f.read['/var/tmp/fw-unmanaged-after.txt']"
-            fail_msg: "the sshd source list leaked into firewall configuration."
-
-        - name: "[VERIFY-SEC-074] Verify the guard fails closed only when the controller would be locked out"
-          ansible.builtin.assert:
-            that:
-              - "'denyusers *' in f.cmd.sshd_denied_source.stdout | lower"
-            fail_msg: "a source outside the list is not denied, so the guard condition cannot trigger."
 
         - name: "[VERIFY-SEC-051] Verify firewall config is untouched for a firewall_unmanaged host"
           ansible.builtin.assert:
@@ -628,7 +625,7 @@
         name: host_audit
         tasks_from: regression
 
-    - name: "[VERIFY-AUD-702] Verify the declared items pass again after the restore"
+    - name: "[VERIFY-AUD-700] Verify the declared items pass again after the restore"
       vars:
         _v: "{{ host_audit_record.security_regression.results | items2dict(key_name='code', value_name='verdict') }}"
       ansible.builtin.assert:
