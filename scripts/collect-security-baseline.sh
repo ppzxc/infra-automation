@@ -14,6 +14,7 @@
 #   BASELINE_SSH_OPTS    ssh에 덧붙일 옵션 (예: "-i <공개키> -o IdentitiesOnly=yes")
 #   BASELINE_FIND_ROOTS  시크릿 후보 파일을 찾을 서버 쪽 경로 (기본 /opt /etc/restic ...)
 #   INFRA_PRIVATE_DIR    결과 저장 기준 경로
+#   BASELINE_SSHD_MATCH_ADDRS  Match 블록 평가에 쓸 출발지 IP 목록(공백 구분), BASELINE_SSHD_MATCH_USER 사용자(기본 root)
 set -u
 set -o pipefail
 
@@ -30,7 +31,7 @@ remote_main() {
       return 1
     fi
   fi
-  local roots="${BASELINE_FIND_ROOTS:-/opt /etc/restic /etc/ssh /etc/audit /root /home}"
+  local roots="${BASELINE_FIND_ROOTS:-/opt /srv /etc/restic /etc/ssh /etc/audit /etc/docker /etc/fail2ban /etc/sudoers.d /root /home}"
 
   section() { printf '\n## %s\n' "$1"; }
   # 출력은 그대로 싣고, 실패하면 sudo를 뺀 실제 명령 이름과 종료코드를 덧붙인다.
@@ -47,10 +48,10 @@ remote_main() {
   run hostname
   section listen
   # PID·fd는 재시작마다 달라지므로 제거한다.
-  { $sudo ss -H -tulnp 2>&1 || echo "(unavailable: ss)"; } \
+  run $sudo ss -H -tulnp \
     | sed -E 's/pid=[0-9]+,?//g; s/fd=[0-9]+//g; s/,\)/)/g; s/[[:space:]]+/ /g' | sort
   section published-containers
-  { $sudo docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' 2>&1 || echo "(unavailable: docker ps)"; } | sort
+  run $sudo docker ps --format '{{.Names}} {{.Image}} {{.Ports}}' | sort
   section firewalld
   run $sudo firewall-cmd --get-active-zones
   run $sudo firewall-cmd --list-all-zones
@@ -59,7 +60,17 @@ remote_main() {
   section iptables-docker-user
   run $sudo iptables -S DOCKER-USER
   section sshd-effective
-  { $sudo sshd -T 2>&1 || echo "(unavailable: sshd -T)"; } | sort
+  run $sudo sshd -T | sort
+  section sshd-match-blocks
+  # sshd -T는 Match 블록을 평가하지 않으므로 선언 줄과, 지정한 출발지별 달라지는 설정을 따로 본다.
+  run $sudo grep -rnEi '^[[:space:]]*Match[[:space:]]' /etc/ssh/sshd_config /etc/ssh/sshd_config.d
+  local base_cfg addr
+  base_cfg="$($sudo sshd -T 2>/dev/null | sort)"
+  for addr in ${BASELINE_SSHD_MATCH_ADDRS:-}; do
+    echo "# addr=${addr}에서 기본값과 달라지는 줄"
+    comm -13 <(printf '%s\n' "$base_cfg") \
+      <($sudo sshd -T -C "user=${BASELINE_SSHD_MATCH_USER:-root},host=baseline,addr=${addr}" 2>&1 | sort)
+  done
   section fail2ban
   run $sudo systemctl is-active fail2ban
   run $sudo systemctl is-enabled fail2ban
@@ -68,15 +79,15 @@ remote_main() {
   run $sudo systemctl is-active auditd
   run $sudo systemctl is-enabled auditd
   # 상태 출력의 backlog·lost 같은 카운터는 변동 필드라 enabled·failure·한도만 남긴다.
-  { $sudo auditctl -s 2>&1 || echo "(unavailable: auditctl -s)"; } \
+  run $sudo auditctl -s \
     | grep -E '^(enabled|failure|backlog_limit|rate_limit|loginuid_immutable)|unavailable' | sort
   section audit-rules-loaded
-  { $sudo auditctl -l 2>&1 || echo "(unavailable: auditctl -l)"; } | sort
+  run $sudo auditctl -l | sort
   section audit-rules-files
   run $sudo find /etc/audit/rules.d -maxdepth 1 -type f -printf '%m %u:%g %p\n'
   section auditd-conf
-  { $sudo grep -E '^(max_log_file|max_log_file_action|num_logs|space_left|space_left_action|log_file|write_logs)[[:space:]]*=' \
-      /etc/audit/auditd.conf 2>&1 || echo "(unavailable: auditd.conf)"; } | sort
+  run $sudo grep -E '^(max_log_file|max_log_file_action|num_logs|space_left|space_left_action|log_file|write_logs)[[:space:]]*=' \
+    /etc/audit/auditd.conf | sort
   section system-log-storage
   run $sudo systemd-analyze cat-config systemd/journald.conf
   run $sudo find /var/log/journal /var/log/audit -maxdepth 0 -printf '%m %u:%g %p\n'
@@ -84,15 +95,14 @@ remote_main() {
   section secret-file-metadata
   # 내용은 열지 않는다. 이름 규칙에 맞는 파일의 권한·소유자·경로만 본다.
   # shellcheck disable=SC2086
-  { $sudo find $roots -xdev -maxdepth 5 \
-      \( -name data -o -name volumes -o -name logs -o -name node_modules -o -name .git \) -prune -o \
-      -type f \( -name '.env' -o -name '*.env' -o -name '*secret*' -o -name '*password*' \
-        -o -name '*token*' -o -name '*.key' -o -name '*.pem' -o -name 'id_*' \
-        -o -name 'ssh_host_*_key' -o -name '.bash_history' -o -name 'authorized_keys' \) \
-      -printf '%m %u:%g %p\n' 2>&1 || echo "(unavailable: find)"; } | sort
+  run $sudo find $roots -xdev -maxdepth 5 \
+    \( -name data -o -name volumes -o -name logs -o -name node_modules -o -name .git \) -prune -o \
+    -type f \( -name '.env' -o -name '*.env' -o -name '*secret*' -o -name '*password*' \
+      -o -name '*token*' -o -name '*.key' -o -name '*.pem' -o -name 'id_*' \
+      -o -name 'ssh_host_*_key' -o -name '.bash_history' -o -name 'authorized_keys' \) \
+    -printf '%m %u:%g %p\n' | sort
   section container-images
-  { $sudo docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' 2>&1 \
-      || echo "(unavailable: docker images)"; } | sort
+  run $sudo docker images --format '{{.Repository}}:{{.Tag}} {{.ID}} {{.CreatedAt}}' | sort
   section docker-daemon
   run $sudo find /etc/docker -maxdepth 1 -name daemon.json -printf '%m %u:%g %p\n'
 }
@@ -144,8 +154,6 @@ main() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --remote) remote_main; return $? ;;
-      --check-out-dir) check_out_dir "$2"; return $? ;;
-      --check-no-secrets) check_no_secrets "$2"; return $? ;;
       --label) label="$2"; shift 2 ;;
       --ssh) dest="$2"; shift 2 ;;
       --port) port="$2"; shift 2 ;;
@@ -160,4 +168,5 @@ main() {
   collect "$label" "$dest" "$port" "$base"
 }
 
-main "$@"
+# source하면 함수만 불러온다(테스트용). 직접 실행하거나 ssh stdin(bash -s)이면 main을 돈다.
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then main "$@"; fi

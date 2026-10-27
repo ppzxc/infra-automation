@@ -52,29 +52,36 @@ def _run(args, env_extra=None):
     )
 
 
+def _call(fn, arg):
+    # 스크립트를 source해 함수만 호출한다.
+    return subprocess.run(
+        ["bash", "-c", f'source "{SCRIPT}"; {fn} "$1"', "_", arg], capture_output=True, text=True
+    )
+
+
 def test_refuses_output_dir_inside_git_repo(tmp_path):
-    r = _run(["--check-out-dir", str(REPO / "baseline-out")])
+    r = _call("check_out_dir", str(REPO / "baseline-out"))
     assert r.returncode != 0
     assert "저장소" in r.stderr
 
 
 def test_accepts_output_dir_outside_git_repo(tmp_path):
-    r = _run(["--check-out-dir", str(tmp_path / "out")])
+    r = _call("check_out_dir", str(tmp_path / "out"))
     assert r.returncode == 0, r.stderr
 
 
 def test_secret_guard_rejects_private_key_and_assignments(tmp_path):
     bad = tmp_path / "bad.txt"
     bad.write_text("## x\n-----BEGIN OPENSSH PRIVATE KEY-----\n")
-    assert _run(["--check-no-secrets", str(bad)]).returncode != 0
+    assert _call("check_no_secrets", str(bad)).returncode != 0
     bad.write_text("## x\nS3_SECRET_KEY=abcdef123\n")
-    assert _run(["--check-no-secrets", str(bad)]).returncode != 0
+    assert _call("check_no_secrets", str(bad)).returncode != 0
 
 
 def test_secret_guard_accepts_metadata_only(tmp_path):
     ok = tmp_path / "ok.txt"
     ok.write_text("## secret-files\n640 root:dockermgmt /opt/services/x/proxy.secrets.env\n")
-    assert _run(["--check-no-secrets", str(ok)]).returncode == 0
+    assert _call("check_no_secrets", str(ok)).returncode == 0
 
 
 def test_remote_mode_is_deterministic_and_non_secret(tmp_path):
@@ -116,7 +123,7 @@ def test_remote_aborts_when_sudo_unavailable(tmp_path):
 def test_secret_guard_is_case_insensitive(tmp_path):
     bad = tmp_path / "bad.txt"
     bad.write_text("password=hunter2\n")
-    assert _run(["--check-no-secrets", str(bad)]).returncode != 0
+    assert _call("check_no_secrets", str(bad)).returncode != 0
 
 
 def test_failure_label_names_real_command_not_sudo(tmp_path):
@@ -129,3 +136,16 @@ def test_failure_label_names_real_command_not_sudo(tmp_path):
     r = _run(["--remote"], {"PATH": f"{bindir}:{os.environ['PATH']}", "BASELINE_FIND_ROOTS": str(tmp_path)})
     assert "(unavailable: firewall-cmd --get-active-zones exit=7)" in r.stdout
     assert "(unavailable: sudo" not in r.stdout
+
+
+def test_sshd_match_blocks_section_present(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for name, body in (("sudo", 'shift\nexec "$@"'), ("sshd", "echo permitrootlogin no")):
+        p = bindir / name
+        p.write_text(f"#!/bin/sh\n{body}\n")
+        p.chmod(0o755)
+    r = _run(["--remote"], {"PATH": f"{bindir}:{os.environ['PATH']}", "BASELINE_FIND_ROOTS": str(tmp_path),
+                            "BASELINE_SSHD_MATCH_ADDRS": "192.0.2.1"})
+    assert "## sshd-match-blocks" in r.stdout
+    assert "# addr=192.0.2.1" in r.stdout
