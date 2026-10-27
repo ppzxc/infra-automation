@@ -119,11 +119,11 @@
 
 ### 2.5 restic 저장소 구성·스케줄·권한
 
-- **레이아웃 (2026-10-02 개정)**: 호스트(액세스 키)마다 전용 버킷 `backup-prod-<호스트명>`(`hosts/<host>/agents`의 `rustfs_bucket`으로 재정의 가능)과 그 **버킷 루트**의 repo(`s3:<endpoint>/<bucket>`). 호스트 간 dedup 포기(설정 위주 데이터). 호스트 키 정책은 버킷 단위(`locks/*`만 Delete), 중앙 유지보수 키는 `backup-prod-*` 전체 버킷. 버킷 이름의 밑줄 허용 여부는 서버 측 확인 항목.
+- **레이아웃 (2026-10-02 개정)**: 호스트(액세스 키)마다 전용 버킷 `backup-prod-<호스트명>`(`hosts/<host>/agents`의 `rustfs_bucket`으로 재정의 가능)과 그 **버킷 루트**의 repo(`s3:<endpoint>/<bucket>`). 호스트 간 dedup 포기(설정 위주 데이터). 호스트 키 정책은 버킷 단위(`<bucket>/locks/*`만 Delete, 정책 JSON은 `roles/backup/files/host-key-policy.json`), 중앙 유지보수 키는 `backup-prod-*` 전체 버킷. 버킷 이름의 밑줄 허용 여부는 서버 측 확인 항목.
 - **키 분리(삭제 권한 완화)**:
-  - **호스트 키(백업 전용)**: `<host>/*`에 Get/Put/List, Delete는 `<host>/locks/*`만 → 유출돼도 스냅샷·데이터 삭제 불가. restic `backup`이 삭제하는 것은 lock뿐이며 데이터 삭제는 `forget`/`prune`에서만 발생합니다.
+  - **호스트 키(백업 전용)**: 호스트 버킷에 Get/Put/List(멀티파트 중단 포함), Delete는 `<bucket>/locks/*`만(정책 `roles/backup/files/host-key-policy.json`, 적용 절차 [런북](../runbooks/backup-host-key-scope.md)) → 유출돼도 스냅샷·데이터 삭제 불가. restic `backup`이 삭제하는 것은 lock뿐이며 데이터 삭제는 `forget`/`prune`에서만 발생합니다.
   - **유지보수 키(중앙)**: Repo Maintenance 템플릿이 컨트롤러에서 `check`/`forget`/`prune` 실행, 호스트별 repo 비밀번호는 OpenBao에서 조회.
-  - RustFS는 서비스 계정별 IAM session policy(`s3:prefix` 조건 포함, 만료 설정 가능)를 지원합니다(admin API `AddServiceAccount`, [rustfs/rustfs `crates/madmin/src/user.rs`](https://github.com/rustfs/rustfs/blob/main/crates/madmin/src/user.rs)). **구현 전 확인**: `s3:DeleteObject`를 `locks/*` 리소스로 한정하는 정책이 실제로 강제되는지.
+  - RustFS는 서비스 계정별 IAM session policy(`s3:prefix` 조건 포함, 만료 설정 가능)를 지원합니다(admin API `AddServiceAccount`, [rustfs/rustfs `crates/madmin/src/user.rs`](https://github.com/rustfs/rustfs/blob/main/crates/madmin/src/user.rs)). **구현 전 확인**: `s3:DeleteObject`를 `locks/*` 리소스로 한정하는 정책이 실제로 강제되는지 — 카나리 호스트에서 임시 객체 삭제 거부와 `locks/` 삭제 허용으로 확인한다(#373 런북; 2026-10-26 점검 시점에는 호스트 계정 정책이 버킷 전체 허용이어서 문서와 달랐다).
 - **유지보수 일정**: 매주 일요일 05:00 `check` → 성공 시 `forget --prune`; 매월 첫째 일요일 `check --read-data-subset=10%` 추가. 실패는 Semaphore 실패 이력 + `backup_logs` 이벤트.
 - **스케줄 방식**: resticprofile 내장 `schedule`은 사용하지 않고 Ansible이 cron 파일 / systemd unit+timer를 직접 템플릿(check/diff 가능, 멱등). resticprofile systemd 스케줄러는 `systemd-analyze calendar`(systemd 236+)·`enable --now`(220+)가 필요해 CentOS 7(219)에서 생성이 실패하고, v0.30.0+의 `systemctl` JSON 출력 의존으로 Rocky 8(239)에서 status/unschedule이 깨집니다([resticprofile #516](https://github.com/creativeprojects/resticprofile/issues/516)).
 
