@@ -64,6 +64,14 @@
   failed_when: false
   when: not (_raw_path_effective | default(false) | bool)
 
+# auditd.conf의 로테이션 값은 HUP(reload)로 읽는다. 시스템 서비스는 restart를 거부하므로 reload만 쓴다.
+- name: Reload auditd
+  ansible.builtin.service:
+    name: auditd
+    state: reloaded
+  failed_when: false
+  when: not (_raw_path_effective | default(false) | bool)
+
 # Raw Provisioning Path (ADR-0005): `service` works on SysV (CentOS 6) and
 # systemd (CentOS 7; auditd only accepts restarts through the service wrapper).
 - name: Restart fail2ban (raw)

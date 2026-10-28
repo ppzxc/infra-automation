@@ -9,7 +9,7 @@ import pytest
 import yaml
 from jinja2 import Environment
 
-from security_render import ROOT_DIR, rule_lines, shared_render
+from security_render import ROOT_DIR, rule_lines, security_tasks, shared_render
 from security_render import security_task as _task
 
 pytestmark = pytest.mark.xdist_group("security-render")
@@ -69,7 +69,7 @@ def test_fail2ban_jail_keeps_sshd_defaults(security_rendered):
     assert "maxretry = 5" in text and "findtime = 10m" in text and "bantime = 1h" in text
 
 
-def test_fail2ban_banaction_is_not_firewall_for_unmanaged_hosts(security_rendered):
+def test_fail2ban_banaction_dummy_is_an_explicit_opt_in(security_rendered):
     text = security_rendered["unmanaged_firewall"]["fail2ban"]
     assert "banaction = dummy" in text and "banaction_allports = dummy" in text
     for word in ("iptables", "firewalld", "nftables", "ufw"):
@@ -80,13 +80,11 @@ def test_fail2ban_banaction_is_left_to_the_distro_for_managed_hosts(security_ren
     assert "banaction" not in security_rendered["managed_firewall"]["fail2ban"]
 
 
-def test_fail2ban_banaction_default_derives_from_firewall_group():
+def test_fail2ban_banaction_default_keeps_the_distro_behaviour_for_every_host():
+    # 이미 방화벽 연동 방식으로 차단 중인 호스트의 방어를 낮추지 않도록, 방화벽 그룹과 무관하게 기본은 빈 값(배포판 기본)이다.
+    # dummy는 운영자가 변수로 명시할 때만 쓴다(unmanaged_firewall 케이스).
     defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
-    env = Environment()
-    env.filters["bool"] = bool
-    expr = env.compile_expression(defaults["fail2ban_banaction"].strip("{} "))
-    assert expr(security_firewall_managed=False) == "dummy"
-    assert expr(security_firewall_managed=True) == ""
+    assert defaults["fail2ban_banaction"] == ""
 
 
 # --- journald 영구 저장 ------------------------------------------------------------------------
@@ -149,3 +147,48 @@ def test_auditd_tasks_only_tolerate_a_missing_audit_package():
         failed_when = _task(spec_id)["failed_when"]
         assert failed_when is not False, spec_id
         assert marker in yaml.safe_dump(failed_when), spec_id
+
+
+# --- journal 디렉터리 그룹 (A1) ----------------------------------------------------------------
+
+def test_journal_directory_group_follows_the_system_default_when_the_group_exists():
+    # 시스템 기본(부팅 tmpfiles)은 root:systemd-journal이다. 그룹이 없는 환경은 root로 둔다(없는 그룹을 지정하면 실패한다).
+    probe = _task("SEC-080")
+    assert "ansible.builtin.getent" in probe and probe["ansible.builtin.getent"]["key"] == "systemd-journal"
+    assert probe["failed_when"] is False
+    group = _task("SEC-053")["ansible.builtin.file"]["group"]
+    expr = Environment().compile_expression(group.strip("{} "))
+    assert expr(item={"path": "/var/log/journal"}, getent_group={"systemd-journal": ["x", "1", ""]}) == "systemd-journal"
+    assert expr(item={"path": "/var/log/journal"}, getent_group={}) == "root"
+    assert expr(item={"path": "/etc/systemd/journald.conf.d"}, getent_group={"systemd-journal": ["x", "1", ""]}) == "root"
+
+
+def test_journal_group_probe_runs_before_the_directory_task():
+    names = [t["name"] for t in security_tasks()]
+    assert names.index(next(n for n in names if n.startswith("[SEC-080]"))) < names.index(next(n for n in names if n.startswith("[SEC-053]")))
+
+
+# --- auditd 로그 로테이션 (A5) -----------------------------------------------------------------
+
+def test_auditd_rotation_defaults_and_task():
+    defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert defaults["audit_max_log_file"] == 50 and defaults["audit_num_logs"] == 10
+    task = _task("SEC-081")
+    lineinfile = task["ansible.builtin.lineinfile"]
+    assert lineinfile["path"] == "/etc/audit/auditd.conf" and lineinfile["mode"] == "0640"
+    env = Environment()
+    rendered = {}
+    for i in task["loop"]:
+        item = {"key": i["key"], "value": env.from_string(i["value"]).render(**defaults)}
+        rendered[i["key"]] = env.from_string(lineinfile["line"]).render(item=item)
+    assert rendered == {"max_log_file": "max_log_file = 50", "num_logs": "num_logs = 10"}
+    assert task["notify"] == "Reload auditd"
+    handlers = yaml.safe_load((ROLE / "handlers" / "main.yml").read_text(encoding="utf-8"))
+    reload_handler = next(h for h in handlers if h["name"] == "Reload auditd")
+    assert reload_handler["ansible.builtin.service"]["state"] == "reloaded"
+
+
+def test_auditd_rotation_is_redhat_non_raw_and_tolerates_only_a_missing_package():
+    task = _task("SEC-081")
+    assert any("_raw_path_effective" in w for w in task["when"]) and any("RedHat" in w for w in task["when"])
+    assert any("does not exist" in w or "Destination" in w for w in task["failed_when"])

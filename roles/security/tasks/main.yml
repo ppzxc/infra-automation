@@ -1028,6 +1028,28 @@
     - security_auditd_service_result is failed
     - "'Could not find the requested service' not in (security_auditd_service_result.msg | default(''))"
 
+# auditd 로그 로테이션(#364 후속): 파일 크기(MB)와 보관 개수로 상한을 둔다. auditd는 서비스 재시작을 거부하므로 reload(HUP)로 반영한다.
+# audit 패키지가 없어 auditd.conf가 없는 호스트만 건너뛴다.
+- name: "[SEC-081] Set auditd log rotation limits (max_log_file, num_logs)"
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^\s*{{ item.key }}\s*='
+    line: "{{ item.key }} = {{ item.value }}"
+    owner: root
+    group: root
+    mode: '0640'
+  loop:
+    - { key: max_log_file, value: "{{ audit_max_log_file }}" }
+    - { key: num_logs, value: "{{ audit_num_logs }}" }
+  register: security_auditd_rotation_result
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+  notify: Reload auditd
+  failed_when:
+    - security_auditd_rotation_result is failed
+    - "'does not exist' not in (security_auditd_rotation_result.msg | default(''))"
+
 # 8. Sudo Policy & Log segregation
 - name: "[SEC-014] Configure Sudo timestamp timeout and log file"
   ansible.builtin.copy:
@@ -1057,12 +1079,23 @@
 
 # 10. journald 영구 저장 (#372): 재부팅 뒤에도 이전 부팅의 시스템 로그가 조회되게 한다.
 # CentOS 6/7 raw 경로와 systemd가 아닌 호스트는 대상이 아니다. 보존 한도는 common의 journald_max_use/journald_max_retention.
+# /var/log/journal의 시스템 기본(부팅 시 tmpfiles)은 root:systemd-journal이다. 그 그룹이 있을 때만 맞추고, 없는 환경은 root로 둔다.
+- name: "[SEC-080] Look up the systemd-journal group"
+  ansible.builtin.getent:
+    database: group
+    key: systemd-journal
+  failed_when: false
+  changed_when: false
+  when:
+    - not (_raw_path_effective | default(false) | bool)
+    - ansible_service_mgr == "systemd"
+
 - name: "[SEC-053] Create persistent journal directory and journald drop-in directory"
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
     owner: root
-    group: root
+    group: "{{ 'systemd-journal' if (item.path == '/var/log/journal' and 'systemd-journal' in (getent_group | default({}))) else 'root' }}"
     mode: "{{ item.mode }}"
   loop:
     - { path: /var/log/journal, mode: '2755' }
