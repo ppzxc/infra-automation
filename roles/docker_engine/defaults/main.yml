@@ -2,6 +2,9 @@
 docker_log_driver: "json-file"
 docker_log_max_size: "50m"
 docker_log_max_file: "3"
+# json-file 드라이버가 로그 줄에 싣는 컨테이너 라벨(쉼표 구분). otelcol filelog/containers가 이 라벨로 service.name과 container.name을 만든다(MON-068).
+# 데몬 설정은 새로 만든 컨테이너에만 적용되므로 기존 컨테이너는 재생성해야 반영된다. 빈 문자열이면 labels 키를 넣지 않는다.
+docker_log_labels: "com.docker.compose.project,com.docker.compose.service,com.docker.compose.container-number,org.opencontainers.image.version"
 docker_live_restore: true
 docker_metrics_enabled: true
 docker_metrics_address: "127.0.0.1:9323"

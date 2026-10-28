@@ -241,3 +241,40 @@ def test_docker_ce_repo_architecture_and_cache_refresh_invariants():
     )
 
 
+
+
+def _render_daemon_json(**overrides):
+    """roles/docker_engine 기본값으로 daemon.json.j2를 렌더링한 JSON을 돌려준다."""
+    import json
+    import jinja2
+
+    defaults = yaml.safe_load((ROOT_DIR / "roles" / "docker_engine" / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROOT_DIR / "roles" / "docker_engine" / "templates")))
+    # Ansible의 bool 필터와 같은 의미만 흉내 낸다(기본값은 이미 불리언이다).
+    env.filters["bool"] = lambda v: v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes")
+    text = env.get_template("daemon.json.j2").render(**{**defaults, **overrides})
+    return json.loads(text)
+
+
+def test_daemon_json_passes_compose_labels_to_json_file_logs():
+    """
+    컨테이너 이름(container.name)은 compose 라벨이 json-file 로그 줄에 실려야 otelcol이 만든다.
+    데몬 log-opts.labels에 이름이 없으면 라벨이 로그에 실리지 않아 service.name이 'container'로만 나온다.
+    """
+    opts = _render_daemon_json()["log-opts"]
+    labels = opts["labels"].split(",")
+    for required in (
+        "com.docker.compose.project",
+        "com.docker.compose.service",
+        "com.docker.compose.container-number",
+    ):
+        assert required in labels, f"daemon.json log-opts.labels에 {required} 필요"
+    # 기존 로테이션 옵션은 그대로 유지된다(디스크 고갈 방지).
+    assert opts["max-size"] and opts["max-file"]
+    # log-opts 값은 문자열이어야 한다(Docker 문서).
+    assert all(isinstance(v, str) for v in opts.values())
+
+
+def test_daemon_json_omits_labels_when_empty():
+    """docker_log_labels를 비우면 labels 키를 아예 넣지 않는다(빈 문자열을 데몬에 넘기지 않는다)."""
+    assert "labels" not in _render_daemon_json(docker_log_labels="")["log-opts"]

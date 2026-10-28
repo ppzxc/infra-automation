@@ -2,7 +2,8 @@
   "log-driver": "{{ docker_log_driver }}",
   "log-opts": {
     "max-size": "{{ docker_log_max_size }}",
-    "max-file": "{{ docker_log_max_file }}"
+    "max-file": "{{ docker_log_max_file }}"{% if docker_log_labels | length > 0 %},
+    "labels": "{{ docker_log_labels }}"{% endif %}
   },
   "live-restore": {{ docker_live_restore | bool | lower }},
   "userland-proxy": {{ docker_userland_proxy | bool | lower }},
