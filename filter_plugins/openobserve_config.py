@@ -589,22 +589,39 @@ def o2c_without_exceptions(roster, exceptions, today):
     return [h for h in roster if h not in stopped]
 
 
-def _absence_branch(host, stream, level):
-    head = 'SELECT \'%s\' AS host_name, count(*) AS n FROM "%s" WHERE host_name = \'%s\' HAVING ' % (host, stream, host)
+def _absence_branch(host, stream, level, cond=None, recent_us=SILENT_RECENT_US):
+    where = "host_name = '%s'" % host if not cond else "host_name = '%s' AND %s" % (host, cond)
+    head = 'SELECT \'%s\' AS host_name, count(*) AS n FROM "%s" WHERE %s HAVING ' % (host, stream, where)
     if level == 'p1':   # 조회 구간(3시간) 전체에 없음
         return head + 'count(*) < 1'
-    # p2: 조회 구간에는 있었지만(P1 대상 아님) 최근 15분은 없음
+    # p2: 조회 구간에는 있었지만(P1 대상 아님) 최근 구간(기본 15분)은 없음
     return head + ('count(*) >= 1 AND sum(CASE WHEN _timestamp >= to_unixtime(now()) * 1000000 - %d THEN 1 ELSE 0 END) < 1'
-                   % SILENT_RECENT_US)
+                   % recent_us)
 
 
-def o2c_absence_sql(hosts, stream, level):
-    """One row per roster host that has no data. An empty roster yields a branch that can never return a row."""
+def o2c_absence_sql(hosts, stream, level, cond=None, recent_minutes=None):
+    """One row per roster host that has no data. An empty roster yields a branch that can never return a row.
+
+    ``cond``: extra condition on the same stream (e.g. ``service_name = 'auth'`` to watch one source of a shared stream). Default none.
+    ``recent_minutes``: the P2 "recently silent" window in minutes (default 15, the Silent Host heartbeat). Defaults keep the SQL unchanged.
+    """
     if level not in ('p1', 'p2'):
         raise ValueError('알 수 없는 등급: %s' % level)
+    if cond is not None and (not isinstance(cond, str) or ';' in cond or '--' in cond):
+        raise ValueError('SQL에 넣을 수 없는 조건: %r' % (cond,))
+    if recent_minutes is None:
+        recent_us = SILENT_RECENT_US
+    else:
+        try:
+            minutes = int(recent_minutes)   # Ansible이 렌더링한 "60" 같은 숫자 문자열도 받는다
+        except (TypeError, ValueError):
+            minutes = 0
+        if isinstance(recent_minutes, bool) or minutes <= 0:
+            raise ValueError('최근 구간(분)은 양의 정수여야 합니다: %r' % (recent_minutes,))
+        recent_us = minutes * 60 * 1000000
     if not hosts:
-        return 'SELECT \'none\' AS host_name, count(*) AS n FROM "%s" HAVING count(*) < 0' % stream
-    return ' UNION ALL '.join(_absence_branch(h, stream, level) for h in hosts)
+        return 'SELECT \'none\' AS host_name, count(*) AS n FROM "%s"%s HAVING count(*) < 0' % (stream, ' WHERE %s' % cond if cond else '')
+    return ' UNION ALL '.join(_absence_branch(h, stream, level, cond, recent_us) for h in hosts)
 
 
 def o2c_missing_sql(hosts, stream, field, cond, body_match=False, field_column=True):
@@ -726,7 +743,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                                  missing.get('field_column', True))
         if absence:
             roster = list((rosters or {}).get(absence['roster']) or []) + sorted(h for h, exp in hosts.items() if not exp['off_roster'])
-            sql = o2c_absence_sql(roster, stream, absence['level'])
+            sql = o2c_absence_sql(roster, stream, absence['level'], absence.get('cond'), absence.get('recent_minutes'))
         if alert.get('uplinks') is not None:
             # 업링크 목록(장비, 포트)에 케이스의 가짜 장비를 `watch_port`로 더해 "목록에 있으면 발화, 없으면 발화하지 않음"을 검증한다
             watched = list(alert['uplinks'] or []) + [{'device': _host(c, run_id), 'port': c['watch_port']}

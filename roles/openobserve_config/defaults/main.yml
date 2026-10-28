@@ -103,6 +103,9 @@ o2c_disk_latency_min_iops: 5
 # fail2ban 기본(10분 5회 차단)을 넘긴 실패 뒤의 성공이다. 출발지별 실패 급증 알림(P2)의 임계와 같게 둔다.
 o2c_ssh_bruteforce_min_failures: 10
 o2c_ssh_bruteforce_window_minutes: 15
+# 인증 로그(auth) 수집 중단 감지(#390): 수집 로스터 호스트의 service_name='auth'(/var/log/secure·auth.log)가 이 분 동안 없으면 P2, 조회 구간(3시간) 전체에 없으면 P1.
+# 정상 공백은 관리 서버의 주기 점검 덕에 최근 5일 기준 3분 이하라 60분이면 오탐 없이 여유가 있다. 사고(rsyslog 정지)는 몇 시간 이상 끊긴다.
+o2c_auth_silent_p2_minutes: 60
 # 계정·그룹 변경 알림에서 따로 표시하는 특권 그룹(이 그룹의 가입·탈퇴 줄은 "특권 그룹 변경"으로 묶인다). docker는 root와 같은 권한이다.
 o2c_privileged_groups: [wheel, sudo, docker, root]
 # 위험 명령 sudo 실행: sudo 명령 줄(소문자)에 들어 있으면 P1인 문구. 라벨은 통지 행에 실린다(명령 원문은 비밀값이 섞일 수 있어 싣지 않는다).
@@ -857,6 +860,41 @@ o2c_alerts:
     stream_type: metrics
     absence: {level: p1, roster: silent}
     sql: "{{ o2c_roster_silent | o2c_absence_sql('system_memory_usage', 'p1') }}"
+    period: 180
+    frequency: 5
+    silence: 60
+  - name: infra-auth-silent-p2
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "인증 로그 수집 중단: auth 로그가 {{ o2c_auth_silent_p2_minutes }}분 넘게 끊김"
+    what: "수집 로스터의 호스트에서 인증 로그(service_name=auth, /var/log/secure·auth.log)가 {{ o2c_auth_silent_p2_minutes }}분 넘게 들어오지 않습니다(3시간 미만). 같은 호스트의 메트릭·audit 로그는 계속 들어올 수 있습니다."
+    why: "rsyslog가 journal을 읽지 못해 /var/log/secure가 갱신되지 않는 상황일 수 있습니다(journald 재시작·flush 뒤 발생한 적이 있음). 이때 SSH 실패·root 로그인·sudo 알림이 울리지 못합니다. 한 통지에 여러 호스트가 함께 나오면 개별 rsyslog 정지가 아니라 관리 서버의 주기 SSH 점검 중단일 수 있습니다. 방치하면 3시간 뒤 P1이 되고, 약 {{ o2c_ingest_allowed_hours }}시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않습니다."
+    action: "① 여러 호스트가 동시에 나오면 관리 서버(Semaphore 쪽)의 SSH 점검과 수집 경로부터 확인 ② 한 호스트면 /var/log/secure의 수정 시각과 rsyslog 서비스·로그(`journal files changed` 반복 여부) 확인 ③ 멈췄으면 런북의 복구 절차(imjournal 상태 파일 백업·삭제 뒤 재시작) ④ 며칠 이상 계획 정지하는 호스트면 OpenBao silent_host_exceptions에 만료일과 함께 등록"
+    runbook: "{{ o2c_runbook_base }}#auth-silent"
+    row_template: '• {host_name}'
+    description: "수집 로스터 호스트의 security_logs service_name=auth가 {{ o2c_auth_silent_p2_minutes }}분 없음, 3시간 미만 (State Alert, 재통지 1440분) — UNION ALL 로스터 가지 방식"
+    stream: security_logs
+    # 없다는 사실을 알리는 알림이라 WHERE의 원문(있는 줄)은 대상이 아니다: 원문 링크를 만들지 않는다
+    raw_link: false
+    absence: {level: p2, roster: silent, cond: "service_name = 'auth'", recent_minutes: "{{ o2c_auth_silent_p2_minutes }}"}
+    sql: "{{ o2c_roster_silent | o2c_absence_sql('security_logs', 'p2', \"service_name = 'auth'\", o2c_auth_silent_p2_minutes) }}"
+    period: 180
+    frequency: 5
+    silence: 1440
+  - name: infra-auth-silent-p1
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "인증 로그 수집 중단: auth 로그가 3시간 넘게 끊김"
+    what: "수집 로스터의 호스트에서 인증 로그(service_name=auth, /var/log/secure·auth.log)가 3시간 넘게 들어오지 않습니다."
+    why: "그동안 SSH 로그인 실패·root 로그인·sudo 알림이 울릴 수 없었고, 약 {{ o2c_ingest_allowed_hours }}시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않아 ISMS 로그 증거가 중앙에서 영구히 빠집니다(호스트 journal에는 남아 있습니다). 한 통지에 여러 호스트가 함께 나오면 관리 서버의 주기 SSH 점검 중단일 수 있습니다."
+    action: "① 여러 호스트가 동시에 나오면 관리 서버(Semaphore 쪽)의 SSH 점검과 수집 경로부터 확인 ② 한 호스트면 /var/log/secure의 수정 시각과 rsyslog 서비스·로그 확인, 런북의 복구 절차 수행 ③ 복구 뒤 끊긴 구간에 의심스러운 로그인 성공이 없는지 호스트 journal(journalctl -u sshd)로 점검하고, 5시간 한도를 넘겼다면 호스트 원본 로그를 보존"
+    runbook: "{{ o2c_runbook_base }}#auth-silent"
+    row_template: '• {host_name}'
+    description: "수집 로스터 호스트의 security_logs service_name=auth가 3시간 없음 (State Alert, 재통지 60분) — UNION ALL 로스터 가지 방식"
+    stream: security_logs
+    raw_link: false
+    absence: {level: p1, roster: silent, cond: "service_name = 'auth'"}
+    sql: "{{ o2c_roster_silent | o2c_absence_sql('security_logs', 'p1', \"service_name = 'auth'\") }}"
     period: 180
     frequency: 5
     silence: 60

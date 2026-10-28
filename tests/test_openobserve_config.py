@@ -985,6 +985,7 @@ def test_changing_the_inventory_changes_the_roster_sql_and_a_rerun_with_the_same
     assert _apply(o2, inventory=inv).returncode == 0
     updated = {p for m, p, _ in o2.writes if m == "PUT"}
     ids = {n: o2.store["alert"][n]["alert_id"] for n in ("infra-silent-host-p2", "infra-silent-host-p1",
+                                                         "infra-auth-silent-p2", "infra-auth-silent-p1",
                                                          "infra-backup-missing", "infra-maintenance-missing",
                                                          "infra-host-status-silent")}
     assert updated == {f"/api/v2/default/alerts/{i}" for i in ids.values()}

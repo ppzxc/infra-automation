@@ -24,6 +24,7 @@ EXPECTED_ALERTS = {
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
     "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
+    "infra-auth-silent-p2", "infra-auth-silent-p1",   # 인증 로그 수집 중단(#390)
     "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
     "infra-app-log-errors", "infra-app-telemetry-silent", "infra-keepalived-script-disabled",
     "infra-switch-config-change", "infra-switch-login-failures", "infra-switch-severity-critical",

@@ -398,6 +398,32 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 
 ---
 
+<a id="auth-silent"></a>
+## 🟠/🔴 인증 로그 수집 중단 — auth 로그 끊김 (`infra-auth-silent-p2`, `infra-auth-silent-p1`)
+
+수집 로스터 호스트(Silent Host와 같은 로스터, 계획된 중지 예외 제외)에서 `security_logs`의 `service_name=auth`(`/var/log/secure`·`auth.log`)가 60분 넘게 들어오지 않으면 P2(3시간 미만), 3시간 넘게 없으면 P1이다. 같은 호스트의 메트릭과 `audit`·`sudo` 로그는 계속 들어올 수 있다. 그래서 Silent Host 알림과 `security_logs` 스트림 전체로는 이 상황을 잡지 못한다.
+
+**왜 중요한가**: `auth`가 끊기면 SSH 로그인 실패·root 로그인·무차별 대입 후 성공·sudo 알림이 울릴 수 없다. OpenObserve는 약 5시간보다 오래된 로그를 받지 않으므로, 이 시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않는다(호스트 journal에는 남아 있다).
+
+**확인**
+1. **한 통지에 여러 호스트가 함께 나오면** 개별 rsyslog 정지가 아니라 관리 서버(Semaphore 쪽)의 주기 SSH 점검이 멈췄거나 수집 경로가 끊긴 것일 수 있다. 정상 호스트의 `auth`가 분당 1건씩 흐르는 주된 원천이 그 점검이기 때문이다. 관리 서버와 수집 경로부터 확인한다.
+2. 한 호스트면 호스트에서 `ls -l /var/log/secure`(CentOS 계열) 또는 `/var/log/auth.log`(Debian 계열)의 수정 시각을 본다. 오래됐다면 `journalctl -u sshd -n 5`로 journal에는 새 줄이 있는지 확인한다.
+3. journal에는 새 줄이 있는데 파일이 멈췄으면 `journalctl -u rsyslog --since -1h`에서 `imjournal: journal files changed, reloading...`이 반복되는지 본다.
+
+**원인(알려진 사례)**: journald를 재시작하거나 `journalctl --flush`를 하면 journal 파일이 바뀌어, rsyslog(imjournal)와 fail2ban(journal 백엔드)이 이전 위치를 못 찾고 읽기를 멈출 수 있다. 서비스는 `active`로 남고 CPU만 헛돈다. 운영 서버에서 journald를 재시작·flush한 뒤에는 `/var/log/secure`가 계속 갱신되는지 확인한다.
+
+**대응**
+1. `/etc/rsyslog.conf`와 `/var/lib/rsyslog/imjournal.state`를 백업한다.
+2. `/etc/rsyslog.conf`의 `module(load="imjournal" …)`에 `IgnorePreviousMessages="on"`을 추가하고 `rsyslogd -N1`로 검증한다. 이 옵션은 상태 파일이 없을 때만 효과가 있고, 끊긴 구간을 다시 읽지 않아 한꺼번에 쏟아지는 로그와 알림 폭주를 막는다.
+3. `systemctl stop rsyslog` → `imjournal.state` 삭제 → `systemctl start rsyslog`.
+4. `logger -p authpriv.info <시험 문구>`를 실행해 `/var/log/secure`에 나타나는지, 몇 분 뒤 `security_logs`에 행이 들어오는지 확인한다.
+5. 같은 사고로 fail2ban의 sshd jail도 멈췄을 수 있다. `fail2ban-client status sshd`의 `Total failed`가 늘지 않으면 `systemctl restart fail2ban`을 한다(재시작하면 카운터가 0으로 초기화된다).
+6. P1이면 끊긴 구간(`journalctl -u sshd --since … --until …`)에 신뢰 출발지가 아닌 로그인 성공(`Accepted`)이 없는지 점검하고, 5시간 한도를 넘겼다면 호스트 원본 로그를 보존한다.
+
+며칠 이상 계획 정지하는 호스트면 OpenBao `silent_host_exceptions`에 만료일과 함께 등록한다.
+
+---
+
 <a id="app-telemetry-silent"></a>
 ## 🟠 앱 텔레메트리 무소식 — funa JVM 메트릭 끊김 (`infra-app-telemetry-silent`)
 
