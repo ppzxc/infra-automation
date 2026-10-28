@@ -708,3 +708,73 @@ def test_oom_kill_alert_still_fires_for_the_kernel_lines_seen_in_production(desi
     rows = _run_alert_on_sqlite(_sql(desired, "infra-oom-kill"),
                                 [dict(host_name="ns0266", process_executable_name="kernel", body=b) for b in lines], "system_logs")
     assert sorted(r["killed_process"] for r in rows) == ["ansible-playboo", "oom-killer 호출"]
+
+
+# --- 행 값 길이 상한 가드(Spec #367): 알림 서버는 본문이 50,000자를 넘으면 통지를 통째로 버린다 ---
+
+BODY_LIMIT = 50000
+RAW_COLUMN_CALL = re.compile(r"\b(?:regexp_replace|(?:max|min)\(\s*(?:message|body|detail)\s*\))|\bbody\s+AS\b|\bmessage\s+AS\b|\bdetail\s+AS\b", re.I)
+
+
+def _unbounded_raw_values(sql):
+    """SELECT에 길이 상한(`substr(..., 1, N)`) 없이 실리는 로그 원문 표현식. 정수로 바꾸는 CAST는 원문이 행에 실리지 않으므로 뺀다."""
+    found = []
+    for m in RAW_COLUMN_CALL.finditer(sql):
+        before = sql[:m.start()].rstrip()
+        if before.endswith("substr(") or before.upper().endswith("CAST("):
+            continue
+        if re.match(r"\b(body|message|detail)\s+AS\b", m.group(0), re.I):
+            found.append(m.group(0))   # 원문 컬럼을 그대로 별칭만 붙여 싣는 경우
+        elif m.group(0).lower().startswith("regexp_replace") or m.group(0).lower().startswith(("max", "min")):
+            found.append(sql[m.start():m.start() + 60])
+    return found
+
+
+def test_no_sql_alert_puts_raw_log_text_in_a_row_without_a_length_cap(desired):
+    """행 값에 로그 원문(regexp_replace 결과, max(message) 등)이 substr 상한 없이 실리는 알림이 없다. 미매치 시 원문 전체가 되어 본문이 폭주한다(#365)."""
+    offenders = {n: _unbounded_raw_values(_sql(desired, n)) for n, a in desired.store["alert"].items() if a["query_condition"]["type"] == "sql"}
+    assert {n: v for n, v in offenders.items() if v} == {}
+
+
+def test_the_guard_flags_an_uncapped_raw_value_and_accepts_a_capped_one():
+    assert _unbounded_raw_values("SELECT regexp_replace(body, 'a', 'b') AS x FROM s")
+    assert _unbounded_raw_values("SELECT max(message) AS message FROM s")
+    assert not _unbounded_raw_values("SELECT substr(regexp_replace(body, 'a', 'b'), 1, 40) AS x, substr(max(message), 1, 100) AS message FROM s")
+    assert not _unbounded_raw_values("SELECT CAST(regexp_replace(body, 'a', 'b') AS INT) AS h FROM s")
+
+
+def _longest_value_per_sql(sql):
+    """SQL의 substr 상한 중 가장 큰 값. 상한이 없으면 0."""
+    return max([int(n) for n in re.findall(r"substr\([^;]*?,\s*1,\s*(\d+)\)", sql)] or [0])
+
+
+def test_every_sql_alert_message_with_30_rows_of_capped_values_stays_under_the_notification_body_limit(desired):
+    """행의 텍스트 필드가 SQL 상한만큼 길어도 `{rows:30}` 본문이 50,000자를 넘지 않는다(상한 없는 필드는 TEXT_VALUE)."""
+    checked = 0
+    for name, alert in desired.store["alert"].items():
+        if alert["query_condition"]["type"] != "sql":
+            continue
+        cap = _longest_value_per_sql(_sql(desired, name))
+        fields = set(re.findall(r"\{(\w+)\}", alert["row_template"]))
+        values = {f: LONGEST_ROW_VALUES.get(f, "999" if f in COUNT_FIELDS else "가" * cap if cap else LONGEST_TEXT.get(f, TEXT_VALUE)) for f in fields}
+        assert len(_rendered_message(desired, name, values)) <= BODY_LIMIT, name
+        checked += 1
+    assert checked >= 30
+
+
+def test_raid_time_and_switch_alert_rows_cut_a_huge_raw_message(desired):
+    """RAID 수집 실패·시각 미동기·스위치 설정 변경 알림은 원문이 6만 자여도 행 값이 상한(100·100·200자)을 넘지 않는다."""
+    huge = "x" * 60000
+    raid = _run_alert_on_sqlite(_sql(desired, "infra-raid-collection-error"),
+                                [dict(host_name="ns0272", _timestamp=_kst_us("2026-10-23 08:5%d:02" % i), kind="tool_status", status="timeout", message=huge)
+                                 for i in range(3)], "host_status_logs")
+    assert [len(r["message"]) for r in raid] == [100]
+    time_ = _run_alert_on_sqlite(_sql(desired, "infra-time-unsynced"),
+                                 [dict(host_name="ns0272", _timestamp=_kst_us("2026-10-23 08:%02d:02" % i), kind="time_sync", sync_status="unsynced", message=huge)
+                                  for i in range(6)], "host_status_logs")
+    assert [len(r["message"]) for r in time_] == [100]
+    event = sorted(re.findall(r"'([^']+)'", re.search(r"event_name IN \(([^)]*)\)", _sql(desired, "infra-switch-config-change")).group(1)))[0]
+    sw = _run_alert_on_sqlite(_sql(desired, "infra-switch-config-change"),
+                              [dict(host_name="ns0272", device_id=None, device_name="sw1", service_name="switch-syslog", event_name=event,
+                                    body="%SYS-5-CONFIG_I: " + huge)], "system_logs")
+    assert [len(r["detail"]) for r in sw] == [200]
