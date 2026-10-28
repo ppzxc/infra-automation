@@ -87,7 +87,7 @@
     | `infra-fortigate-change-approved` | P3, 요약 | 같은 변경이 승인 시간 안 — 하루 1번(period·silence 1440) |
     | `infra-fortigate-ha-failover` | P2, Event | `subtype=ha` 1건부터(정보성 동기화 로그 등 `o2c_fortigate_ha_ignored_logids` 기본 `["0108037903"]`는 제외, 빈 목록이면 전부), 재통지 30분(전환 반복 방지) |
     | `infra-fortigate-critical-detection` | P1, Event | `type=utm` 중 `severity`가 `o2c_fortigate_detection_severities`(기본 `critical`), 재통지 60분 |
-    | `infra-fortigate-syslog-silent` | P2, State | `o2c_fortigate_syslog_roster`(명시 목록, 관리번호 또는 `devname` 그대로의 이름, 대소문자 무관)의 장비별 `fortigate-syslog`가 `o2c_fortigate_silent_minutes`(기본 120분, 스위치 24시간보다 짧음) 없음, 재통지 1440분 |
+    | `infra-fortigate-syslog-silent` | P2, State | `o2c_fortigate_syslog_roster`(명시 목록, 관리번호 또는 `devname` 그대로의 이름, 대소문자 무관)의 장비별 `fortigate-syslog`가 `o2c_fortigate_silent_minutes`(기본 30분, 스위치 24시간보다 짧음) 없음, 재통지 1440분 |
 
     - **SQL은 방화벽 컬럼을 참조하지 않는다**: `security_logs`에는 첫 방화벽 줄이 들어오기 전까지 `device_id` 같은 컬럼이 없어, 참조하면 알림 평가가 매번 오류가 나고 `O2C-036`이 Config 실행을 막는다(장비는 아직 전송 전). 그래서 `service_name`과 원문 `body`의 `key=value`(`o2c_fortigate_match`: 따옴표 있는 값·없는 값 모두), 장비 이름은 `devname`에서 읽는다. 로그인 실패 행의 출발지만 기존 `source_address` 컬럼(sshd 알림이 이미 쓴다)을 쓴다. #285 필드 추출과 독립이다.
     - **승인 시간 안/밖**: 변경 로그 원문의 `time=HH:MM:SS`(장비 시계)에서 시를 읽는다(`CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(... AS INT) ELSE -1 END`). 시작 포함·끝 미포함이며 시각이 없는 줄은 -1이라 승인 시간 밖이다. 같은 줄이 두 알림에 동시에 걸리지 않는다. 요일은 구분하지 않으며 장비 시간대가 운영 시간대(KST)여야 한다. 수신 시각(`_timestamp`)이 아니라 장비 시각을 쓰는 이유는 승인 시간이 장비에서 작업한 시각의 문제이고, 검증 레코드가 실행 시각과 무관하게 결정적이기 때문이다.

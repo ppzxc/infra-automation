@@ -179,8 +179,8 @@ o2c_fortigate_syslog_roster: []
 # 표에 없는 이름은 `ns`+숫자 추출을 쓴다. 공개 저장소라 실제 이름은 여기 쓰지 않고 Semaphore Environment/Extra variables로 넣는다.
 # 예: {example_branch_fw: ns0000}. 값이 바뀌면 다음 Config 실행에서 fortigate_semantics 함수가 갱신된다.
 o2c_fortigate_device_aliases: {}
-# 방화벽은 로그가 계속 나오므로 기준 시간은 스위치(o2c_switch_silent_hours, 24시간)보다 짧다. 전송 로그를 정책별로 줄인 장비가 오탐을 내면 관찰 뒤 늘린다.
-o2c_fortigate_silent_minutes: 120
+# 방화벽은 로그가 계속 나오므로 기준 시간은 스위치(o2c_switch_silent_hours, 24시간)보다 짧다. 실측으로 가장 조용한 사무실 장비도 분당 약 100건, IDC 쌍은 분당 약 1,500건이 나온다(2026-10-28). TCP 연결이 점유·단절돼 장비가 로그를 쌓다 버리기 전에 알리려고 120분에서 30분으로 줄였다. 전송 로그를 정책별로 줄인 장비가 오탐을 내면 관찰 뒤 늘린다.
+o2c_fortigate_silent_minutes: 30
 # 장비 이름은 원문의 devname(소문자, 도메인 제외). 시각은 원문의 time=(장비 시계)에서 시를 읽고 못 읽으면 -1이다.
 o2c_fortigate_device_sql: >-
   CASE WHEN body LIKE '% devname=%' THEN lower(substr(regexp_replace(body, '^.* devname="?([^" .]*).*$', '\1'), 1, 40)) ELSE 'unknown' END
