@@ -39,8 +39,8 @@ Ansible과 Semaphore UI는 저장소 루트(`cwd`)를 기준으로 동작하므�
    - 커밋 전 시크릿 유출 검사, 3-Way Spec 검증(`scripts/validate-ansible-specs.py`), **빠른 테스트**(`bash scripts/run-fast-tests.sh`, 즉 `pytest tests/ -m "not slow and not heavy_harness" -n 4 --dist loadgroup`, 약 30초)를 통과해야 합니다. hook 우회는 금지입니다.
    - `ansible-playbook`을 테스트마다 실행하는 테스트는 `tests/conftest.py`가 `slow`로 자동 표시하므로 손으로 marker를 달지 않으며, 커밋 hook에서는 제외됩니다. session 범위 fixture(공유 렌더링 `rendered`)로만 실행하는 테스트는 세션당 한 번이라 `slow`가 아닙니다.
 2. **푸시·PR에서 전체 검증**
-   - 푸시(pre-push)는 Molecule Fast Scenario(`scripts/run-molecule.sh fast`, ADR-0007)를 돌립니다.
-   - PR과 `main` push는 GitHub Actions(`.github/workflows/tests.yml`)가 `spec` job과 전체 `pytest tests/`(`slow` 포함, 6분할 matrix)를 돌립니다. 푸시 전에 전체를 확인하려면 `pytest tests/ -n 4 --dist loadgroup`을 직접 실행합니다.
+   - 푸시에는 훅이 없습니다(2026-10-28 개정). Molecule Fast Scenario(`scripts/run-molecule.sh fast`, ADR-0007)는 PR의 GitHub Actions `molecule` 잡이 돌립니다. 푸시 전에 직접 확인하려면 `make test-fast`입니다.
+   - PR과 `main` push는 GitHub Actions(`.github/workflows/tests.yml`)가 `spec` job, 전체 `pytest tests/`(`slow` 포함, 6분할 matrix), `molecule` job(Fast Scenario)을 돌립니다. 푸시 전에 전체를 확인하려면 `pytest tests/ -n 4 --dist loadgroup`을 직접 실행합니다.
    - 두 층 테스트 정책(통합 소수·필터 직접 다수)과 전환 기간 규칙은 ADR-0013을 따릅니다. 정의만 읽는 검사는 `_apply()` 통합 테스트가 아니라 공유 렌더링 테스트(`tests/test_openobserve_render.py`)에 씁니다.
 3. **3-Way 명세 추적성 유지**
    - 신규 태스크나 역할 변경 시 `docs/*.md` 스펙 테이블과 `roles/*/tasks/main.yml`의 `[SPEC-ID]`, `molecule/*/verify.yml` 검증 테스트를 항상 1:1로 일치시킵니다.

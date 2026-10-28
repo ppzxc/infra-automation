@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Molecule runner (pre-push hook + make test-* targets)
+# Molecule runner (CI molecule job + make test-* targets)
 # ==============================================================================
-#   run-molecule.sh fast            pre-push tier: Representative Platform (Rocky 9); all three
+#   run-molecule.sh fast            CI tier (formerly pre-push): Representative Platform (Rocky 9); all three
 #                                   platforms in ONE run when roles/security or roles/common changed
 #   run-molecule.sh slow            docker_engine + monitoring on every platform
 #   run-molecule.sh full            fast + slow on every platform

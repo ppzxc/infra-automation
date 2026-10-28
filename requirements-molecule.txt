@@ -1,0 +1,5 @@
+# Molecule Fast Scenario(CI의 molecule 잡, make test-fast) 의존성. requirements-test.txt와 함께 설치한다.
+# 로컬(2026-10 기준)과 같은 버전으로 고정한다.
+molecule==26.8.0
+molecule-plugins[docker]==26.7.15
+docker==7.2.0

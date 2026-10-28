@@ -4,14 +4,10 @@
 # Pipeline Architecture:
 #   1. pre-commit (~1min): Gitleaks secret scan + Spec Validator + fast Pytest (-m "not slow").
 #      ansible-playbook을 실행하는 slow 테스트는 tests/conftest.py가 자동 표시하고 PR의 GitHub Actions가 돈다.
-#   2. pre-push   (Integration, Fast Scenario -- see ADR-0007): common + security +
-#      access_security on Rocky 9 (Rocky 8 added when roles/security or
-#      roles/common changed), idempotence included. docker_engine/monitoring
-#      (Slow Scenario) and Ubuntu run only via `make test-slow` / `make test-full`.
+#   2. pre-push: 없다(2026-10-28 개정). Molecule Fast Scenario(ADR-0007)는 PR의 GitHub Actions `molecule` 잡이 돌린다.
+#      훅이 6~7분 걸려 푸시 중 연결이 끊기는 문제가 있었다. 푸시 전에 직접 확인하려면 `make test-fast`.
+#      docker_engine/monitoring(Slow Scenario)과 Ubuntu는 `make test-slow` / `make test-full`로만 돈다.
 #      CentOS 6/7 and CentOS Stream 10 are not in the matrix (ADR-0005).
-#      scripts/run-molecule.sh skips pushes that touch no molecule-relevant
-#      path, fails fast on an unresponsive Docker daemon, and serializes runs
-#      across worktrees.
 # ==============================================================================
 
 pre-commit:
@@ -39,10 +35,3 @@ pre-commit:
       tags: test unit quality
       # 빠른 테스트만(-m "not slow", -n 4, --durations=10). 플러그인 가드는 스크립트 안에 있다.
       run: bash scripts/run-fast-tests.sh
-
-pre-push:
-  parallel: false
-  commands:
-    molecule:
-      tags: integration test container
-      run: bash scripts/run-molecule.sh fast

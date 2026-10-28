@@ -24,6 +24,7 @@
 - molecule 전에 `ansible-playbook --syntax-check`와 `ansible-lint`(설치된 경우)를 먼저 실행한다.
 - `scripts/validate-ansible-specs.py`와 pytest는 `molecule/*/verify.yml` 합집합을 읽는다. 분할 전후 VERIFIED/INTEGRATED 분류가 동일함을 diff로 확인했다.
 - 진입점: `make test-fast`, `test-slow`, `test-full`, `test-role ROLE=…`, `test-images`. CI는 이번 범위에서 도입하지 않았다.
+  - (2026-10-28 개정) Fast Scenario를 pre-push에서 GitHub Actions `molecule` 잡으로 옮겼다. 훅이 6~7분 걸려 푸시 중 SSH 연결이 끊겨 푸시가 SIGPIPE로 실패했고(WSL2 환경에서 실측 약 390~420초), 같은 검증을 CI가 병합 전에 보장하면 로컬 게이트가 이중이 된다. `scripts/run-molecule.sh`는 molecule과 무관한 PR을 건너뛰는 규칙을 그대로 쓰고 `main` push는 `MOLECULE_FORCE=1`로 항상 돌린다. Slow Scenario와 Full Matrix는 계속 수동이다. 푸시 전 확인은 `make test-fast`.
   - (2026-10-26 개정) Molecule은 여전히 CI에 없다. 다만 pytest·스펙 검증은 GitHub Actions(`.github/workflows/tests.yml`)가 PR에서 돌린다(ADR-0013).
 
 ## Consequences
