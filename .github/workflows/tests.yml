@@ -77,4 +77,14 @@ jobs:
       - run: pip install -r requirements-test.txt -r requirements-molecule.txt
       - name: 시크릿 파일이 없는지 확인
         run: test ! -e .env
+      - name: "[진단 임시] 러너·컨테이너 사용자와 sudo"
+        continue-on-error: true
+        run: |
+          id; docker --version; ansible --version | head -1; env | grep -E "^(ANSIBLE|MOLECULE)" || true
+          bash scripts/build-test-images.sh rockylinux9
+          docker run -d --name diag --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw infra-test-rockylinux9:local
+          sleep 3
+          docker exec diag sh -c 'id; sudo -n true && echo "root sudo ok" || echo "root sudo FAIL"; tail -3 /etc/passwd; ls -ld /etc/shadow /etc/sudoers'
+          docker exec -u "$(id -u)" diag sh -c 'id; sudo -n true 2>&1 | head -3' || true
+          docker rm -f diag
       - run: bash scripts/run-molecule.sh fast
