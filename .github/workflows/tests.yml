@@ -77,17 +77,19 @@ jobs:
       - run: pip install -r requirements-test.txt -r requirements-molecule.txt
       - name: 시크릿 파일이 없는지 확인
         run: test ! -e .env
-      - name: "[진단 임시] 컨테이너 부팅 타이밍과 sudo"
+      - name: "[진단 임시] shadow lastchg 가설"
         continue-on-error: true
         run: |
           bash scripts/build-test-images.sh rockylinux9
           docker run -d --name diag --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw infra-test-rockylinux9:local
-          for t in 1 3 6 10 20 40; do
-            sleep "$t"
-            st=$(docker exec diag systemctl is-system-running 2>&1 | head -1)
-            s=$(docker exec diag sh -c 'sudo -n true 2>&1 | head -1; echo rc=$?' | tr '\n' ' ')
-            echo "t+${t}s systemd=[$st] sudo=[$s] faillock=[$(docker exec diag sh -c 'ls -ld /run/faillock 2>&1' | cut -c1-60)]"
-          done
-          docker exec diag sh -c 'getenforce 2>&1; ls -l /etc/shadow; grep -E "^(account|auth)" /etc/pam.d/sudo; sed -n 1,12p /etc/pam.d/system-auth' 2>&1 | cut -c1-120
+          sleep 5
+          t() { echo "[$1] sudo: $(docker exec diag sh -c 'sudo -n true 2>&1 | head -1; echo rc=$?' | tr '\n' ' ')"; }
+          docker exec diag sh -c 'grep "^root" /etc/shadow | cut -d: -f1,3-9; ls -l /etc/shadow /usr/bin/sudo /usr/sbin/unix_chkpwd; mount | grep -E " / | /etc" | cut -c1-120; id root; getent shadow root | cut -d: -f1,3-5'
+          t "A 기본"
+          docker exec diag sh -c 'chage -d 2026-10-01 root; grep "^root" /etc/shadow | cut -d: -f1,3-9'
+          t "B lastchg 설정 후"
+          docker exec diag sh -c 'sed -i "s/^root:[^:]*:[0-9]*:/root::20000:/" /etc/shadow; grep "^root" /etc/shadow | cut -d: -f1,3-9'
+          t "C lastchg=20000"
+          docker exec diag sh -c 'sudo -n -v 2>&1 | head -2; sudo -n id 2>&1 | head -2'
           docker rm -f diag
       - run: bash scripts/run-molecule.sh fast
