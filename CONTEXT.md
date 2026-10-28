@@ -101,7 +101,7 @@ An alert on a condition that persists until someone fixes it (a disk nearly full
 _Avoid_: threshold alert, metric alert (a log-based alert can be a State Alert too)
 
 **Fast Scenario**:
-The molecule scenario run at pre-push. Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
+The molecule scenario run by the CI `molecule` job (formerly at pre-push). Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
 _Avoid_: default scenario, quick test, smoke test
 
 **Slow Scenario**:
@@ -113,7 +113,7 @@ Every scenario on every supported platform (Rocky 8, Rocky 9, Ubuntu 22.04). The
 _Avoid_: full test, all-OS run
 
 **Representative Platform**:
-The platform (Rocky 9) that the Fast Scenario runs on at pre-push unless a change warrants the wider run, standing in for the Full Matrix.
+The platform (Rocky 9) that the Fast Scenario runs on in CI unless a change warrants the wider run, standing in for the Full Matrix.
 _Avoid_: primary OS, default platform
 
 **Base Layer**:

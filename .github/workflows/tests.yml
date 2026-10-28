@@ -54,3 +54,27 @@ jobs:
       - name: 시크릿 파일이 없는지 확인
         run: test ! -e .env
       - run: pytest tests/ -n 4 --dist loadgroup --timeout=900 --durations=15 -p no:cacheprovider
+
+  # Molecule Fast Scenario(ADR-0007): 예전에는 로컬 pre-push가 돌렸고, 훅이 6~7분 걸려 연결이 끊기는 문제로 CI로 옮겼다(2026-10-28 개정).
+  # run-molecule.sh가 molecule과 무관한 PR은 건너뛴다(origin/main과의 변경 경로 비교). main push는 항상 돌린다.
+  molecule:
+    name: molecule (fast)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MOLECULE_FORCE: ${{ github.event_name == 'push' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements-test.txt
+            requirements-molecule.txt
+      - run: pip install -r requirements-test.txt -r requirements-molecule.txt
+      - name: 시크릿 파일이 없는지 확인
+        run: test ! -e .env
+      - run: bash scripts/run-molecule.sh fast
