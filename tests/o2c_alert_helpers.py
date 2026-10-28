@@ -138,7 +138,7 @@ FORTIGATE_ALERTS = {   # name -> (severity, period minutes, silence minutes)
     "infra-fortigate-change-approved": ("P3 주의", 1440, 1440),
     "infra-fortigate-ha-failover": ("P2 경고", 5, 30),
     "infra-fortigate-critical-detection": ("P1 긴급", 5, 60),
-    "infra-fortigate-syslog-silent": ("P2 경고", 120, 1440),
+    "infra-fortigate-syslog-silent": ("P2 경고", 30, 1440),
     "infra-fortigate-admin-login-new-source": ("P2 경고", 5, 60),   # #330
 }
 

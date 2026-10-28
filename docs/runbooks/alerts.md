@@ -698,7 +698,7 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 | `infra-fortigate-change-approved` | 🟡 P3 | 정책·계정 변경이 승인 시간 안, 하루 1번 요약 | 하루 |
 | `infra-fortigate-ha-failover` | 🟠 P2 | HA 로그(`subtype=ha`) 1건부터 | 30분 |
 | `infra-fortigate-critical-detection` | 🔴 P1 | UTM 탐지(`type=utm`) 중 `severity=critical` 또는 바이러스 감염(`subtype=virus`·`eventtype=infected`) 1건부터 | 60분 |
-| `infra-fortigate-syslog-silent` | 🟠 P2 | 감시 목록의 방화벽이 120분 넘게 로그 없음 | 하루 |
+| `infra-fortigate-syslog-silent` | 🟠 P2 | 감시 목록의 방화벽이 30분 넘게 로그 없음 | 하루 |
 
 **중복 알림 방지**: 모든 알림이 재통지 간격(silence)을 가진다. 같은 공격·같은 HA 전환 반복은 위 간격마다 한 번만 알리고, 변경 알림은 조회 구간(5분)과 같아 같은 줄을 두 번 알리지 않는다. 승인 시간 안의 변경은 하루 1번 요약으로만 가므로 정상 작업이 P1을 만들지 않는다.
 
@@ -708,7 +708,7 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 - `o2c_fortigate_syslog_roster`(수신 중단 감시 장비): **기본값은 비어 있다.** 전송을 시작하기 전 장비(`ns0380`, `ns0381`, `ns0399`)를 넣으면 허위 알림이 계속 오기 때문이다. 장비가 로그를 보내기 시작하고 `security_logs`에 도착하는 것을 확인한 **뒤에** 관리번호를 더한다(사무실 `ns0399`가 먼저). IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤에는 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶어 한 항목으로 쓴다(어느 한 멤버라도 보내면 수신 중). **hostname을 관리번호로 바꾸지 못한 장비는 관리번호가 아닌 원래 이름(`devname` 그대로, 대소문자 무관)으로도 목록에 넣을 수 있다**(예: `Example_Branch_FW`). 이 장비의 `device_id`(관리번호)를 채우려면 `o2c_fortigate_device_aliases`에 `{example_branch_fw: ns0000}`처럼 소문자 정규화한 이름 → 관리번호를 넣는다(표에 없으면 `ns`+숫자 추출). 공개 저장소라 실제 이름과 값은 저장소에 쓰지 않고 Semaphore `OpenObserve — Config` 템플릿의 Environment(Extra variables)로 넣는다. 목록에 없는 장비는 로그가 없어도 알리지 않는다. 목록이 비면 규칙은 있지만 행을 돌려주지 않는다.
 - `o2c_fortigate_approved_start_hour`, `o2c_fortigate_approved_end_hour`(승인 시간, 기본 9, 18, 끝 미포함): 변경 로그 원문의 `time=`(장비 시계)을 읽는다. **장비 시간대가 운영 시간대(KST)여야 한다.** 시각이 없는 줄은 승인 시간 밖으로 본다. 요일은 구분하지 않는다.
 - `o2c_fortigate_policy_cfgpaths`, `o2c_fortigate_account_cfgpaths`(변경을 알릴 `cfgpath`): 기본은 정책(`firewall.policy`, `firewall.policy6`, `firewall.proxy-policy`)과 계정(`system.admin`, `system.accprofile`, `system.api-user`, `user.local`, `user.group`)이다.
-- `o2c_fortigate_detection_severities`(기본 `critical`), `o2c_fortigate_login_fail_threshold`(기본 5), `o2c_fortigate_silent_minutes`(기본 120, 스위치 24시간보다 짧다. 방화벽은 로그가 계속 나오므로), 재통지 간격 `o2c_fortigate_*_silence_minutes`.
+- `o2c_fortigate_detection_severities`(기본 `critical`), `o2c_fortigate_login_fail_threshold`(기본 5), `o2c_fortigate_silent_minutes`(기본 30, 스위치 24시간보다 짧다. 방화벽은 로그가 계속 나오므로), 재통지 간격 `o2c_fortigate_*_silence_minutes`.
 
 <a id="fortigate-admin-login-failures"></a>
 ### 🟠 방화벽 관리자 로그인 연속 실패 (`infra-fortigate-admin-login-failures`)
@@ -777,7 +777,7 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 <a id="fortigate-syslog-silent"></a>
 ### 🟠 방화벽 syslog 수신 중단 (`infra-fortigate-syslog-silent`)
 
-**조건**: `o2c_fortigate_syslog_roster`의 방화벽이 120분(`o2c_fortigate_silent_minutes`) 넘게 `fortigate-syslog` 로그를 보내지 않음(State Alert, 하루 1번 재통지). 목록이 기본값(빈 목록)이면 어떤 장비도 보지 않는다. 장비 이름은 원문의 `devname`으로 찾는다.
+**조건**: `o2c_fortigate_syslog_roster`의 방화벽이 30분(`o2c_fortigate_silent_minutes`) 넘게 `fortigate-syslog` 로그를 보내지 않음(State Alert, 하루 1번 재통지). 목록이 기본값(빈 목록)이면 어떤 장비도 보지 않는다. 장비 이름은 원문의 `devname`으로 찾는다.
 
 **왜 중요한가**: 전송 설정이나 수신 경로가 끊기면 그동안의 관리자 접속·정책 변경 이력이 중앙에 남지 않는다(ISMS 로그 1년 보관의 공백).
 
