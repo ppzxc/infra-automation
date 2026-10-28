@@ -584,6 +584,63 @@ infra-silent-host-p1:
       records:
         - {ts: [0, 60, 120], state: used, value: 1}
 
+# --- 인증 로그 수집 중단 (Spec #390) --- security_logs에서 service_name=auth만 센다. P2의 최근 구간은 60분(ts > -3600), 조회 구간은 3시간이다.
+# 핵심 케이스: auth는 끊겼는데 audit 같은 다른 소스는 계속 들어오는 호스트(rsyslog 정지 사고)도 발화해야 한다.
+infra-auth-silent-p2:
+  cases:
+    - name: auth 로그가 60분 넘게 끊겼지만 3시간 미만이면 P2
+      host: verify-authsilent-p2-gap
+      fires: true
+      records:
+        - {ts: [-5400, -5340], service_name: auth}
+    - name: auth만 끊기고 audit 로그는 계속 오는 호스트도 P2 (rsyslog 정지)
+      host: verify-authsilent-p2-auditonly
+      fires: true
+      records:
+        - {ts: [-5400], service_name: auth}
+        - {ts: [-60, 0], service_name: audit}
+    - name: auth 로그가 최근 60분 안에 오면 발화하지 않는다
+      host: verify-authsilent-p2-alive
+      fires: false
+      records:
+        - {ts: [-5400, 0], service_name: auth}
+    - name: 3시간 넘게 끊겼으면 P1이라 P2에 중복 통지하지 않는다
+      host: verify-authsilent-p2-long
+      fires: false
+      records:
+        - {ts: [-12000], service_name: auth}
+    - name: auth가 한 번도 없는 호스트는 P1 몫이다
+      host: verify-authsilent-p2-never
+      fires: false
+      records: []
+infra-auth-silent-p1:
+  cases:
+    - name: auth 로그가 3시간 넘게 없으면 P1 (마지막 3시간 25분 전)
+      host: verify-authsilent-p1-long
+      fires: true
+      records:
+        - {ts: [-12000], service_name: auth}
+    - name: auth가 한 번도 없는 호스트도 P1
+      host: verify-authsilent-p1-never
+      fires: true
+      records: []
+    - name: audit 로그만 오고 auth가 3시간 넘게 없는 호스트도 P1
+      host: verify-authsilent-p1-auditonly
+      fires: true
+      records:
+        - {ts: [-12000], service_name: auth}
+        - {ts: [-60, 0], service_name: audit}
+    - name: 60분만 끊긴 호스트는 P2라 P1에 통지하지 않는다
+      host: verify-authsilent-p1-gap
+      fires: false
+      records:
+        - {ts: [-5400, -5340], service_name: auth}
+    - name: auth 로그가 계속 오는 호스트는 발화하지 않는다
+      host: verify-authsilent-p1-alive
+      fires: false
+      records:
+        - {ts: [0, 60, 120], service_name: auth}
+
 # --- 앱 텔레메트리 무소식 (Spec #253 / Ticket-8) --- jvm_memory_used는 모든 JVM이 공유하므로 service_name=funa인 레코드만 센다. 조회 구간은 15분이다.
 infra-app-telemetry-silent:
   cases:

@@ -778,3 +778,27 @@ def test_raid_time_and_switch_alert_rows_cut_a_huge_raw_message(desired):
                               [dict(host_name="ns0272", device_id=None, device_name="sw1", service_name="switch-syslog", event_name=event,
                                     body="%SYS-5-CONFIG_I: " + huge)], "system_logs")
     assert [len(r["detail"]) for r in sw] == [200]
+
+
+# --- 인증 로그 수집 중단 (Spec #390) ---
+def test_auth_silent_alerts_are_state_alerts_on_security_logs_with_the_silent_host_timing(desired):
+    for name in ("infra-auth-silent-p2", "infra-auth-silent-p1"):
+        alert = desired.store["alert"][name]
+        assert alert["stream_name"] == "security_logs", name
+        assert alert["trigger_condition"]["period"] == 180 and alert["trigger_condition"]["frequency"] == 5, name
+    assert desired.store["alert"]["infra-auth-silent-p2"]["trigger_condition"]["silence"] == 1440
+    assert desired.store["alert"]["infra-auth-silent-p1"]["trigger_condition"]["silence"] == 60
+
+
+def test_auth_silent_alerts_watch_only_the_auth_source_for_every_roster_host(tmp_path):
+    roster = ["ns9001", "ns9002"]
+    rendered = render_desired(tmp_path / "desired.json", extra={"o2c_roster_silent": roster, "o2c_auth_silent_p2_minutes": 45})
+    alerts = {o["name"]: o["body"] for o in rendered if o.get("kind") == "alert"}
+    p2 = alerts["infra-auth-silent-p2"]["query_condition"]["sql"]
+    p1 = alerts["infra-auth-silent-p1"]["query_condition"]["sql"]
+    for sql in (p2, p1):
+        assert sql.count(" UNION ALL ") == len(roster) - 1
+        for host in roster:
+            assert "FROM \"security_logs\" WHERE host_name = '%s' AND service_name = 'auth' HAVING" % host in sql
+    assert "- 2700000000 THEN 1" in p2 and "count(*) >= 1" in p2   # 변수로 바꾼 최근 구간(45분)이 SQL에 들어간다. 3시간 전체 없음은 P1 몫
+    assert "HAVING count(*) < 1" in p1 and "THEN 1" not in p1
