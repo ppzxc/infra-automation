@@ -19,6 +19,7 @@
 | OS | 버전 | 출처(HPE MCP 저장소) | 비고 |
 |---|---|---|---|
 | Rocky 9 | `ssacli-6.60-8.0` | `https://downloads.linux.hpe.com/SDR/repo/mcp/rocky/9/x86_64/current/` | 릴리스 노트에 지원 컨트롤러 목록이 없지만 P440ar(Gen9)에서 동작 확인 |
+| Rocky 10 | `ssacli-6.60-8.0` | `https://downloads.linux.hpe.com/SDR/repo/mcp/rocky/10/x86_64/current/` | Rocky 9 경로의 RPM과 SHA256이 같다(같은 바이너리). Rocky 10의 암호 정책이 HPE 키의 하위 키를 거부해 호스트의 `rpm -K`는 "간소화 서명 확인"만 낸다. 서명은 Rocky 9 호스트에서 임시 키링(`rpm --dbpath <임시> --import`)으로 검증하고, Rocky 10 호스트는 같은 SHA256일 때만 `rpm -i --nosignature`로 설치한다 |
 | CentOS 7 | `ssacli-3.30-14.0` | `https://downloads.linux.hpe.com/SDR/repo/mcp/centos/7/x86_64/11.21/` | 같은 기종 CentOS 7 호스트들이 이미 쓰는 버전. 최신은 5.10-44.0 |
 | CentOS 6 | (설치 사례 없음) | — | 기존 호스트는 `hpssacli` 2.x가 이미 있다 |
 
@@ -36,3 +37,4 @@
 |---|---|---|---|
 | 2026-10-22 | ns0266·ns0325·ns0327·ns0338 (Rocky 9) | 6.60-8.0 | 정상. ns0325 캐시 영구 비활성(배터리 없음), ns0338 캐시 일시 비활성(케이블 오류) |
 | 2026-10-22 | ns0334 (CentOS 7, DB) | 3.30-14.0 | 정상. 캐시 일시 비활성(케이블 오류) |
+| 2026-10-28 | ns0331 (Rocky 10.2, 백업 저장소) | 6.60-8.0 | 정상. RAID 1+0, 1TB SATA 6개 모두 OK. 캐시 영구 비활성(백업 전원 없음) |
