@@ -11,6 +11,7 @@
 - **최신 Docker 엔진 & 플러그인 설치**: `docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-compose-plugin`, `docker-buildx-plugin`.
 - **운영 하드닝된 `daemon.json` 배포**:
   - `log-driver`: `json-file` (max-size: 50m, max-file: 3)으로 컨테이너 로그 디스크 고갈 방지.
+  - `labels`(`docker_log_labels`): compose 라벨(`project`·`service`·`container-number`·OCI `version`)을 json-file 로그 줄에 싣는다. otelcol이 이 라벨로 `service.name`과 `container.name`을 만든다(`MON-068`). 데몬 설정은 새로 만든 컨테이너에만 적용되므로 기존 컨테이너는 재생성해야 반영되고, `Restart docker` 핸들러는 `live-restore`가 켜져 있으면 컨테이너를 유지한다. 빈 문자열이면 `labels` 키를 넣지 않는다.
   - `live-restore`: `true`로 데몬 재시작 시 컨테이너 무중단 실행 보장.
   - `metrics-addr`: `127.0.0.1:9323`으로 Docker 자체 메트릭을 Prometheus 포맷으로 로컬 노출(OTEL Collector 스크랩 연동).
 - **ADR-0002 계정 및 FHS 디렉토리 권한 표준 준수**:
