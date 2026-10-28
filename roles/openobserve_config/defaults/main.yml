@@ -183,7 +183,7 @@ o2c_fortigate_device_aliases: {}
 o2c_fortigate_silent_minutes: 120
 # 장비 이름은 원문의 devname(소문자, 도메인 제외). 시각은 원문의 time=(장비 시계)에서 시를 읽고 못 읽으면 -1이다.
 o2c_fortigate_device_sql: >-
-  CASE WHEN body LIKE '% devname=%' THEN lower(regexp_replace(body, '^.* devname="?([^" .]*).*$', '\1')) ELSE 'unknown' END
+  CASE WHEN body LIKE '% devname=%' THEN lower(substr(regexp_replace(body, '^.* devname="?([^" .]*).*$', '\1'), 1, 40)) ELSE 'unknown' END
 o2c_fortigate_hour_sql: >-
   CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(regexp_replace(body, '^.* time=([0-9][0-9]):.*$', '\1') AS INT) ELSE -1 END
 o2c_fortigate_in_hours_sql: "{{ o2c_fortigate_hour_sql }} >= {{ o2c_fortigate_approved_start_hour }} AND {{ o2c_fortigate_hour_sql }} < {{ o2c_fortigate_approved_end_hour }}"
@@ -429,7 +429,7 @@ o2c_alerts:
       WHEN body LIKE 'type=USER_CHAUTHTOK %' OR body LIKE 'type=GRP_CHAUTHTOK %' THEN '비밀번호 변경'
       WHEN body LIKE 'type=DEL_%' THEN '계정·그룹 삭제' WHEN body LIKE 'type=ADD_%' THEN '계정·그룹 추가'
       ELSE '계정·그룹 속성 변경' END AS change_kind,
-      CASE WHEN body LIKE '%AUID="%' THEN regexp_replace(body, '^.*AUID="([^"]*)".*$', '\1') ELSE '알 수 없음' END AS actor,
+      CASE WHEN body LIKE '%AUID="%' THEN substr(regexp_replace(body, '^.*AUID="([^"]*)".*$', '\1'), 1, 40) ELSE '알 수 없음' END AS actor,
       count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE service_name = 'audit' AND (body LIKE 'type=ADD_USER %' OR body LIKE 'type=DEL_USER %' OR body LIKE 'type=ADD_GROUP %'
       OR body LIKE 'type=DEL_GROUP %' OR body LIKE 'type=USER_MGMT %' OR body LIKE 'type=GRP_MGMT %' OR body LIKE 'type=USER_CHAUTHTOK %'
@@ -526,7 +526,7 @@ o2c_alerts:
     sql: >-
       SELECT host_name,
       CASE WHEN body LIKE '% key="sudo_config"%' THEN 'sudoers' WHEN body LIKE '% key="sshd_config"%' THEN 'sshd 설정' ELSE '계정 파일' END AS watched,
-      CASE WHEN body LIKE '% comm="%' THEN regexp_replace(body, '^.* comm="([^"]*)".*$', '\1') ELSE '알 수 없음' END AS tool,
+      CASE WHEN body LIKE '% comm="%' THEN substr(regexp_replace(body, '^.* comm="([^"]*)".*$', '\1'), 1, 40) ELSE '알 수 없음' END AS tool,
       count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE service_name = 'audit' AND body LIKE 'type=SYSCALL %'
       AND (body LIKE '% key="identity"%' OR body LIKE '% key="sudo_config"%' OR body LIKE '% key="sshd_config"%')
@@ -1067,7 +1067,7 @@ o2c_alerts:
     description: "tool_status 레코드의 status가 timeout·error인 실행이 20분에 3회 이상 (State Alert, 재통지 1440분). no_tool·no_controller는 알리지 않는다"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, max(status) AS status, max(message) AS message, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "host_status_logs"
+      SELECT host_name, max(status) AS status, substr(max(message), 1, 100) AS message, count(*) AS failures, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "host_status_logs"
       WHERE kind = 'tool_status' AND status IN ('timeout', 'error')
       GROUP BY host_name HAVING count(*) >= 3
       ORDER BY failures DESC
@@ -1127,7 +1127,7 @@ o2c_alerts:
     description: "kind=time_sync 판독이 35분 안에 6회 이상이고 모두 sync_status=unsynced (State Alert, 재통지 1440분). 중간에 동기된 판독이 하나라도 있으면 울리지 않는다"
     stream: host_status_logs
     sql: >-
-      SELECT host_name, max(message) AS message, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }}
+      SELECT host_name, substr(max(message), 1, 100) AS message, count(*) AS readings, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }}
       FROM "host_status_logs"
       WHERE kind = 'time_sync'
       GROUP BY host_name
@@ -1189,7 +1189,7 @@ o2c_alerts:
     stream: system_logs
     sql: >-
       SELECT coalesce(device_id, device_name) AS device,
-      regexp_replace(body, '^[^%]*%[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+: ', '') AS detail, count(*) AS changes, {{ o2c_event_time_sql }} FROM "system_logs"
+      substr(regexp_replace(body, '^[^%]*%[A-Za-z0-9_]+-[0-7]-[A-Za-z0-9_]+: ', ''), 1, 200) AS detail, count(*) AS changes, {{ o2c_event_time_sql }} FROM "system_logs"
       WHERE service_name = 'switch-syslog' AND event_name IN ('{{ o2c_switch_config_change_events | join("', '") }}'){{ o2c_switch_noise_filter }}
       GROUP BY device, detail
       ORDER BY changes DESC
@@ -1325,8 +1325,8 @@ o2c_alerts:
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
-      CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
-      CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
+      CASE WHEN body LIKE '% cfgpath="%' THEN substr(regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1'), 1, 100) ELSE '-' END AS cfgpath,
+      CASE WHEN body LIKE '% user="%' THEN substr(regexp_replace(body, '^.* user="([^"]*)".*$', '\1'), 1, 64) ELSE '-' END AS admin,
       count(*) AS changes, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
       AND NOT ({{ o2c_fortigate_in_hours_sql }})
@@ -1348,8 +1348,8 @@ o2c_alerts:
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
-      CASE WHEN body LIKE '% cfgpath="%' THEN regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1') ELSE '-' END AS cfgpath,
-      CASE WHEN body LIKE '% user="%' THEN regexp_replace(body, '^.* user="([^"]*)".*$', '\1') ELSE '-' END AS admin,
+      CASE WHEN body LIKE '% cfgpath="%' THEN substr(regexp_replace(body, '^.* cfgpath="([^"]*)".*$', '\1'), 1, 100) ELSE '-' END AS cfgpath,
+      CASE WHEN body LIKE '% user="%' THEN substr(regexp_replace(body, '^.* user="([^"]*)".*$', '\1'), 1, 64) ELSE '-' END AS admin,
       count(*) AS changes, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'cfgpath' | o2c_fortigate_match(o2c_fortigate_policy_cfgpaths + o2c_fortigate_account_cfgpaths) }}
       AND ({{ o2c_fortigate_in_hours_sql }})
@@ -1371,7 +1371,7 @@ o2c_alerts:
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
-      CASE WHEN body LIKE '% logdesc="%' THEN regexp_replace(body, '^.* logdesc="([^"]*)".*$', '\1') ELSE 'HA 이벤트' END AS event,
+      CASE WHEN body LIKE '% logdesc="%' THEN substr(regexp_replace(body, '^.* logdesc="([^"]*)".*$', '\1'), 1, 100) ELSE 'HA 이벤트' END AS event,
       count(*) AS events, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'subtype' | o2c_fortigate_match(['ha']) }}{{ o2c_fortigate_ha_ignored_logids | o2c_fortigate_exclude_logids }}
       GROUP BY device, event
@@ -1392,8 +1392,8 @@ o2c_alerts:
     stream: security_logs
     sql: >-
       SELECT {{ o2c_fortigate_device_sql }} AS device,
-      CASE WHEN body LIKE '% attack="%' THEN regexp_replace(body, '^.* attack="([^"]*)".*$', '\1')
-      WHEN body LIKE '% virus="%' THEN regexp_replace(body, '^.* virus="([^"]*)".*$', '\1') ELSE '-' END AS attack,
+      CASE WHEN body LIKE '% attack="%' THEN substr(regexp_replace(body, '^.* attack="([^"]*)".*$', '\1'), 1, 100)
+      WHEN body LIKE '% virus="%' THEN substr(regexp_replace(body, '^.* virus="([^"]*)".*$', '\1'), 1, 100) ELSE '-' END AS attack,
       count(*) AS detections, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'fortigate-syslog' AND {{ 'type' | o2c_fortigate_match(['utm']) }}
       AND ({{ 'severity' | o2c_fortigate_match(o2c_fortigate_detection_severities) }}
