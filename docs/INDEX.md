@@ -44,3 +44,4 @@
 * [시크릿 파일 권한 정렬 런북](runbooks/secret-file-permissions.md) - 소비자별 권한 분류(env_file 0640 root:dockermgmt / bind mount / root 전용 0600), `compose config --quiet` 판정, 평문·이력·잔재 정리, 이미지 고정 버전 목록(#375)
 * [관리용 웹 접점 루프백 바인드 런북](runbooks/mgmt-web-loopback-bind.md) - 관리 웹 접점 루프백 바인드, 승인 항목별 체크리스트·롤백·부정 시험, Host Audit 기대치 (#369)
 * [Host Audit 퇴행 점검 적용 런북](runbooks/host-audit-regression.md) - 스펙 #364 기대치(EXP-*) 퇴행 점검의 선언·적용 전후 스냅샷·롤백·알림 절차, 합격 기준은 host_audit.md 16절 (#377)
+* [Uptime Kuma 이전 절차와 모니터 운영 규칙 런북](runbooks/kuma-migration.md) - 내장 MariaDB 이전(정상 종료·소유권 보존), 이전 뒤 모니터 실패 원인 세 곳, 사설망 감시 push 전환(interval은 주기의 1.5배 이상), 모니터 이름·심각도·알림 제목 규칙 (#394)
