@@ -1114,7 +1114,11 @@
   when:
     - not (_raw_path_effective | default(false) | bool)
     - ansible_service_mgr == "systemd"
-  notify: Restart systemd-journald
+  notify:
+    - Restart systemd-journald
+    - Restart rsyslog after journald
+    - Restart fail2ban after journald
+    - Verify rsyslog still writes the auth log after journald restart
 
 # 11. sshd 출발지 제한 (#371): Match Address 블록으로 허용 밖 출발지의 로그인을 거부한다.
 # 방화벽 태스크가 아니므로 firewall_unmanaged 호스트에서도 같게 동작한다. CentOS 6/7 raw 경로는 대상이 아니다.
