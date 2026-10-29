@@ -45,3 +45,5 @@
 * [관리용 웹 접점 루프백 바인드 런북](runbooks/mgmt-web-loopback-bind.md) - 관리 웹 접점 루프백 바인드, 승인 항목별 체크리스트·롤백·부정 시험, Host Audit 기대치 (#369)
 * [Host Audit 퇴행 점검 적용 런북](runbooks/host-audit-regression.md) - 스펙 #364 기대치(EXP-*) 퇴행 점검의 선언·적용 전후 스냅샷·롤백·알림 절차, 합격 기준은 host_audit.md 16절 (#377)
 * [Uptime Kuma 이전 절차와 모니터 운영 규칙 런북](runbooks/kuma-migration.md) - 내장 MariaDB 이전(정상 종료·소유권 보존), 이전 뒤 모니터 실패 원인 세 곳, 사설망 감시 push 전환(interval은 주기의 1.5배 이상), 모니터 이름·심각도·알림 제목 규칙 (#394)
+* [레거시 호스트 `bk` 계정 접속 전환 런북](runbooks/bk-account-access.md) - `agents_only` 호스트의 Host Agents 접속을 root 직접 접속에서 `bk` 로그인 + sudo 승격으로 바꾸는 절차(`bootstrap_user`, `/etc/sudoers.d/bk`), 카나리→확대, 확인·롤백, root 접속은 막지 않는 범위
+* [Uptime Kuma 모니터 태그 규칙 런북](runbooks/uptime-kuma-tag-convention.md) - 태그 키 6종과 심각도 태그(P1~P3, 이름 자체가 심각도)·값 규칙, IP는 설명에 쓰는 이유, UI 권장과 DB 직접 수정 시 Kuma 재시작(Prometheus 라벨 집합) 주의
