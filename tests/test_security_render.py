@@ -102,7 +102,7 @@ def test_journald_tasks_are_systemd_only_and_notify_a_handler():
     for spec_id in ("SEC-053", "SEC-054"):
         whens = _task(spec_id)["when"]
         assert any("ansible_service_mgr" in w for w in whens) and any("_raw_path_effective" in w for w in whens), spec_id
-    assert _task("SEC-054")["notify"] == "Restart systemd-journald"
+    assert _task("SEC-054")["notify"][0] == "Restart systemd-journald"  # 뒤따르는 재시작·확인 핸들러는 test_security_journald_handlers.py(#391)
     handlers = yaml.safe_load((ROLE / "handlers" / "main.yml").read_text(encoding="utf-8"))
     assert "Restart systemd-journald" in {h["name"] for h in handlers}
 
