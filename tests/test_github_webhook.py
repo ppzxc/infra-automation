@@ -466,3 +466,21 @@ def test_wants_link_is_removed_when_the_feature_is_turned_off_and_an_off_host_is
 def test_main_yml_runs_the_wants_tasks_in_the_service_block():
     text = (base.ROLE / "tasks" / "main.yml").read_text()
     assert "docker_wants.yml" in text
+
+
+def test_check_mode_on_a_new_host_without_the_unit_file_reports_changed_instead_of_failing(tmp_path, monkeypatch):
+    calls = _wants_env(tmp_path, monkeypatch)
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()                                   # MON-005 writes nothing in check mode: the unit file does not exist yet
+    play = _wants_play(tmp_path, unit_dir, True)
+    assert _run_wants(play, check=True) > 0
+    assert list(unit_dir.iterdir()) == [] and _reloads(calls) == 0
+
+
+def test_real_run_still_requires_the_unit_file_to_exist(tmp_path, monkeypatch):
+    _wants_env(tmp_path, monkeypatch)
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(_wants_play(tmp_path, unit_dir, True))],
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT, timeout=120)
+    assert res.returncode != 0 and not (unit_dir / "docker.service.wants" / "otelcol-contrib.service").exists()

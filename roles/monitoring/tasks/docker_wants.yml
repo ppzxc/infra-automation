@@ -23,6 +23,9 @@
     src: "{{ (otelcol_systemd_unit_dir ~ '/otelcol-contrib.service') if _wants_on | bool else omit }}"
     dest: "{{ otelcol_systemd_unit_dir }}/docker.service.wants/otelcol-contrib.service"
     state: "{{ 'link' if _wants_on | bool else 'absent' }}"
+    # check 모드의 새 호스트는 MON-005가 유닛 파일을 쓰지 않아 src가 아직 없다. check에서만 허용해 실패 없이 changed로 보고하고,
+    # 실제 실행에서는 force 없이 src(유닛 파일)가 있어야 한다(없으면 실패 — 끊어진 링크를 만들지 않는다).
+    force: "{{ ansible_check_mode | bool }}"
   register: _otelcol_docker_wants
   when:
     - enable_otelcol | default(true) | bool

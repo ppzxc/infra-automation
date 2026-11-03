@@ -261,7 +261,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-069` | `Read the docker network gateway for the GitHub webhook bind address (read-only)` | `ansible.builtin.command` | modern | 읽기 전용(`docker network inspect`), `check_mode: false`, `no_log`, 웹훅을 켠 호스트만 |
 | `MON-070` | `Assert the docker network gateway equals the GitHub webhook bind address` | `ansible.builtin.assert` | modern | 읽기 전용 (게이트웨이가 바인딩 주소와 다르면 check 모드에서도 실패), 웹훅을 켠 호스트만 |
 | `MON-071` | `Ensure the docker.service.wants directory exists (GitHub webhook receiver on)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` (`0755`), 웹훅을 켠 호스트·systemd만 |
-| `MON-072` | `Align the docker.service.wants link of the otelcol unit with the GitHub webhook switch` | `ansible.builtin.file` | modern | 켠 호스트는 `state=link`, 끈 호스트는 `absent`(이미 없으면 `ok`라 끈 호스트 동작 불변), check 모드에서 변경 없음 |
+| `MON-072` | `Align the docker.service.wants link of the otelcol unit with the GitHub webhook switch` | `ansible.builtin.file` | modern | 켠 호스트는 `state=link`, 끈 호스트는 `absent`(이미 없으면 `ok`라 끈 호스트 동작 불변), check 모드에서 변경 없음(유닛 파일이 아직 없는 새 호스트도 `force`로 실패 없이 `changed` 보고, 실제 실행은 유닛 파일이 있어야 함) |
 | `MON-073` | `Reload systemd units when the docker.service.wants link changed` | `ansible.builtin.systemd` | modern | 링크가 바뀐 때만 실행 (`daemon_reload`) |
 | `MON-100` | `Probe remote hash and mode of the target file (raw, read-only)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `changed_when: false`, `check_mode: false` (ADR-0005 sentinel 입력) |
 | `MON-101` | `Read the remote file for the check-mode diff (raw, read-only, never for secrets)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | 읽기 전용, `check_mode: false`, check 모드·비시크릿 파일에서만 실행 |
