@@ -1,6 +1,6 @@
 # GitHub Webhook Watch Role Task Specification
 
-`github_webhook_watch` 역할은 Semaphore 정기 작업(컨트롤러 전용)으로 GitHub 조직 웹훅의 존재·활성·구독 이벤트를 의도값과 비교하고, 최근 실패한 전달을 재전송하며, 결과를 하트비트 레코드로 OpenObserve에 남긴다. 설계 배경은 Spec [#399](https://github.com/ppzxc/infra-automation/issues/399), 구현 티켓은 #404(Ticket-5)다. 공개 저장소라 조직명·URL·주소·토큰은 적지 않는다(값은 OpenBao에만 둔다).
+`github_webhook_watch` 역할은 Semaphore 정기 작업(컨트롤러 전용)으로 GitHub 조직 웹훅의 존재·활성·구독 이벤트를 의도값과 비교하고, 최근 실패한 전달을 재전송하며, 결과를 하트비트 레코드로 OpenObserve에 남긴다. 수집 범위·공백, 출발지 대역 갱신, 서버 적용 절차는 [GitHub 조직 감사 웹훅 런북](runbooks/github-audit-webhook.md)을 본다. 설계 배경은 Spec [#399](https://github.com/ppzxc/infra-automation/issues/399), 구현 티켓은 #404(Ticket-5)다. 공개 저장소라 조직명·URL·주소·토큰은 적지 않는다(값은 OpenBao에만 둔다).
 
 ---
 
