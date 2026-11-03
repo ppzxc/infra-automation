@@ -106,6 +106,8 @@ SWITCH_FN = "switch_syslog_semantics"
 
 FORTIGATE_FN = "fortigate_semantics"
 
+GITHUB_FN = "github_audit_semantics"
+
 def _branch_devices(sql):
     return set(re.findall(r"SELECT '([^']+)' AS device_id", sql))
 
