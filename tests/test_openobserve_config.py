@@ -57,7 +57,7 @@ def _same_roster_alert(name, stored, sql):
 
 def _case_host(rec):
     """The (fake) host of a synthetic record: backup_logs use host, switch syslog uses device_id, the others host_name."""
-    return rec.get("host_name") or rec.get("host") or rec.get("device_id") or (rec.get("service_name") if str(rec.get("service_name")).startswith("verify-") else None) or re.search(r'(?: |devname="?)(verify-\S+?)(?:-3560X:|"| )', rec["body"]).group(1)   # 변환 전 레코드는 원문에서
+    return rec.get("host_name") or rec.get("host") or rec.get("device_id") or (rec.get("github_delivery_id") if str(rec.get("github_delivery_id")).startswith("verify-") else None) or (rec.get("service_name") if str(rec.get("service_name")).startswith("verify-") else None) or re.search(r'(?: |devname="?)(verify-\S+?)(?:-3560X:|"| )', rec["body"]).group(1)   # 변환 전 레코드는 원문에서
 
 
 class FakeO2:

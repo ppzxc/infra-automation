@@ -899,3 +899,130 @@ def test_github_webhook_check_error_alert_names_every_documented_error_code_in_i
         assert code in section, code
     silent = text.split('<a id="github-webhook-watch-silent"></a>')[1].split("\n---\n")[0]
     assert "오류 코드가 있어도 하트비트는 남" in silent   # 오류 하트비트로는 침묵 알림이 울리지 않는다
+
+
+# --- GitHub 조직 관리 변경 알림 (Spec #399 / Ticket-4) --- 등급은 스펙 제안값(사용자 확정 대기)이다.
+GHA_ALERTS = {   # name -> (severity, 알림이 잡아야 할 (event, action) 조합)
+    "infra-github-audit-hook-deleted": ("P1 긴급", {("meta", "deleted")}),
+    "infra-github-audit-repo-public": ("P1 긴급", {("repository", "publicized"), ("public", None)}),
+    "infra-github-audit-repo-org-deleted": ("P1 긴급", {("repository", "deleted"), ("organization", "deleted")}),
+    "infra-github-audit-protection-removed": ("P2 경고", {("branch_protection_rule", "deleted")}),
+    "infra-github-audit-ruleset-deleted": ("P2 경고", {("repository_ruleset", "deleted")}),
+    "infra-github-audit-deploy-key-created": ("P2 경고", {("deploy_key", "created")}),
+    "infra-github-audit-membership-change": ("P3 주의", {
+        ("member", "added"), ("member", "edited"), ("member", "removed"), ("membership", "added"), ("membership", "removed"),
+        ("organization", "member_added"), ("organization", "member_invited"), ("organization", "member_removed"),
+        ("team", "created"), ("team", "deleted"), ("team", "added_to_repository"), ("team", "removed_from_repository")}),
+}
+
+
+def _gha_rec(event, action, **extra):
+    # 저장소는 레코드마다 달라 서로 묶이지 않는다. 열은 항상 있다(스트림 스키마에는 다른 이벤트가 만든 열이 이미 있다)
+    rec = dict(service_name="github-audit", github_event=event, github_action=action, github_org="example-org", github_repo="o/%s-%s" % (event, action),
+               github_actor="alice", github_actor_ghost=False, github_target="bob", github_target_type="user", github_team="platform",
+               github_delivery_id="d-%s-%s" % (event, action), github_hook_id="1", _timestamp=1_792_767_302_000_000)
+    rec.update(extra)
+    return rec
+
+
+def test_github_audit_alerts_keep_the_prefix_severity_runbook_link_and_timing(desired, rendered):
+    for name, (sev, _) in GHA_ALERTS.items():
+        assert name.startswith("infra-") and not name.startswith("infra-github-webhook-"), name   # 전달 점검 알림(Ticket-6)과 이름이 겹치지 않는다
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == sev, name
+        assert alert["context_attributes"]["runbook"].endswith("#" + name.removeprefix("infra-")), name
+        assert alert["stream_name"] == "security_logs", name
+        tc = alert["trigger_condition"]
+        assert (tc["period"], tc["frequency"], tc["silence"]) == (5, 1, 5), name   # 이벤트 알림: 5분 구간에 한 번
+    names = [o["name"] for o in rendered if o["kind"] == "alert"]
+    assert len(names) == len(set(names)) and set(GHA_ALERTS) <= set(names)
+
+
+def test_github_audit_runbook_sections_exist_and_mark_the_severity_as_proposed():
+    text = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
+    for name in GHA_ALERTS:
+        assert '<a id="%s"></a>' % name.removeprefix("infra-") in text and "`%s`" % name in text, name
+    assert "제안값, 사용자 확정 대기" in text
+
+
+@pytest.mark.parametrize("name", sorted(GHA_ALERTS))
+def test_github_audit_alert_fires_only_for_its_own_event_action_pairs(desired, name):
+    own = GHA_ALERTS[name][1]
+    every = set().union(*(v[1] for v in GHA_ALERTS.values())) | {("meta", "created"), ("repository", "created"), ("deploy_key", "deleted"),
+                                                                  ("branch_protection_rule", "created"), ("repository_ruleset", "edited"),
+                                                                  ("member", "invited"), ("org_block", "blocked"), ("ping", None)}
+    recs = [_gha_rec(e, a) for e, a in sorted(every, key=str)]
+    recs.append(_gha_rec("meta", "deleted", service_name="other-service", github_delivery_id="d-other"))   # 다른 서비스는 보지 않는다
+    rows = _run_alert_on_sqlite(_sql(desired, name), recs, stream="security_logs")
+    assert {r["github_delivery_id"] for r in rows} == {"d-%s-%s" % (e, a) for e, a in own}, name
+
+
+@pytest.mark.parametrize("name", sorted(GHA_ALERTS))
+def test_github_audit_rows_name_actor_target_and_repository(desired, name):
+    event, action = sorted(GHA_ALERTS[name][1], key=str)[0]
+    rows = _run_alert_on_sqlite(_sql(desired, name), [_gha_rec(event, action, github_target="the-target", github_team="the-team")], stream="security_logs")
+    assert len(rows) == 1, name
+    line = re.sub(r"\{(\w+)\}", lambda m: str(rows[0][m.group(1)]), desired.store["alert"][name]["row_template"])
+    for token in ("alice", "the-target", "o/%s-%s" % (event, action)):
+        assert token in line, (name, token, line)
+    if "{kind}" in desired.store["alert"][name]["row_template"]:   # 같은 알림이 여러 이벤트를 잡으면 행의 이벤트.액션으로 구분한다
+        assert "%s.%s" % (event, action) in line
+
+
+def test_github_audit_row_marks_a_ghost_actor_and_keeps_rows_without_target_or_repository(desired):
+    sql = _sql(desired, "infra-github-audit-hook-deleted")
+    ghost = _run_alert_on_sqlite(sql, [_gha_rec("meta", "deleted", github_actor="ghost", github_actor_ghost=True)], stream="security_logs")
+    assert "ghost" in ghost[0]["actor"] and "불명" in ghost[0]["actor"]
+    nosender = _run_alert_on_sqlite(sql, [_gha_rec("meta", "deleted", github_actor=None, github_actor_ghost=True)], stream="security_logs")
+    assert "불명" in nosender[0]["actor"]
+    real = _run_alert_on_sqlite(sql, [_gha_rec("meta", "deleted", github_actor_ghost="false")], stream="security_logs")
+    assert real[0]["actor"] == "alice"
+    bare = _gha_rec("organization", "deleted", github_target=None, github_repo=None)
+    row = _run_alert_on_sqlite(_sql(desired, "infra-github-audit-repo-org-deleted"), [bare], stream="security_logs")[0]
+    assert row["target"] and row["repo"]   # 대상·저장소가 없어도 행에 자리표시가 나온다
+
+
+@pytest.mark.parametrize("name", sorted(GHA_ALERTS))
+def test_github_audit_alert_handles_a_sparse_record_whose_missing_values_are_empty_strings(desired, name):
+    """The VRL always sets all 11 fields (empty string when the payload has no value), so a stream made of one sparse record has every column."""
+    event, action = sorted(GHA_ALERTS[name][1], key=str)[0]
+    sparse = {"service_name": "github-audit", "github_event": event, "github_action": action or "", "github_delivery_id": "d-sparse", "github_hook_id": "",
+              "github_actor": "", "github_actor_ghost": True, "github_org": "", "github_repo": "", "github_target": "", "github_target_type": "", "github_team": "",
+              "_timestamp": 1_792_767_302_000_000}
+    rows = _run_alert_on_sqlite(_sql(desired, name), [sparse], stream="security_logs")
+    assert len(rows) == 1, name
+    row = rows[0]
+    assert "불명" in row["actor"] and row["repo"] == "-" and row["target"] == "(대상 불명)", row   # 빈 문자열도 자리표시로 바뀐다
+    if "team" in row:
+        assert row["team"] == "-"
+
+
+def test_github_audit_membership_row_shows_the_team_for_team_membership(desired):
+    row = _run_alert_on_sqlite(_sql(desired, "infra-github-audit-membership-change"),
+                               [_gha_rec("membership", "added", github_team="platform")], stream="security_logs")[0]
+    assert "platform" in row["team"]
+
+
+def test_github_audit_publicized_and_public_for_one_change_make_one_row(desired):
+    recs = [_gha_rec("repository", "publicized", github_delivery_id="d-1", github_repo="example-org/same"),
+            _gha_rec("public", None, github_delivery_id="d-2", github_repo="example-org/same")]
+    rows = _run_alert_on_sqlite(_sql(desired, "infra-github-audit-repo-public"), recs, stream="security_logs")
+    assert len(rows) == 1 and int(rows[0]["events"]) == 2   # 같은 저장소·행위자의 두 전달은 한 행
+
+
+def test_github_audit_messages_fit_the_limit_in_the_worst_case_and_carry_the_required_sections(desired):
+    values = {"actor": "u" * 39, "target": "t" * 30, "repo": "r" * 40, "kind": "team.removed_from_repository", "team": "t" * 20,   # SQL이 자르는 상한
+              "events": "9999", "event_time": LONGEST_ROW_VALUES["event_time"], "github_delivery_id": "d" * 36}
+    realistic = dict(LONGEST_TEXT, events="999", event_time=LONGEST_ROW_VALUES["event_time"])
+    for name in GHA_ALERTS:
+        assert len(_rendered_message(desired, name, values)) <= BODY_LIMIT, name        # SQL 상한 값으로 30행이어도 플랫폼 한도(50,000자) 안
+        assert len(_rendered_message(desired, name, realistic)) <= 5000, name           # 현실적인 최대 값으로는 실측한 5,000자 안(기존 알림과 같은 기준)
+        ctx = desired.store["alert"][name]["context_attributes"]
+        for key in ("what", "why", "action_1", "runbook"):
+            assert ctx[key], (name, key)
+
+
+def test_github_audit_alerts_do_not_touch_the_existing_alert_sets(desired):
+    assert not (set(GHA_ALERTS) & set(GWW_ALERTS))
+    for name in GWW_ALERTS:
+        assert name in desired.store["alert"]
