@@ -1,0 +1,36 @@
+---
+# ==============================================================================
+# otelcol-contrib가 `systemctl start docker`에 같이 올라오도록 docker.service.wants 링크를 맞춘다(Spec #399).
+# [Install]의 WantedBy는 `systemctl enable`이 실제로 실행돼야 링크를 만드는데, 이미 multi-user.target으로 enabled인 기존 호스트에서는
+# service 모듈의 enabled: true가 no-op이라 링크가 생기지 않는다(반대로 기능을 꺼도 옛 링크가 남는다). 그래서 링크를 태스크가 직접 멱등하게 맞춘다:
+# 웹훅을 켠 호스트(modern)는 링크를 두고, 끈 호스트는 링크를 없앤다(이미 없으면 변경 없음 — 끈 호스트의 동작은 그대로다).
+# ==============================================================================
+- name: "[MON-071] Ensure the docker.service.wants directory exists (GitHub webhook receiver on)"
+  ansible.builtin.file:
+    path: "{{ otelcol_systemd_unit_dir }}/docker.service.wants"
+    state: directory
+    mode: '0755'
+  when:
+    - host_agents_inputs.otel_github_webhook | default(false) | bool
+    - host_agents_os_path | default('modern') == 'modern'
+    - enable_otelcol | default(true) | bool
+    - ansible_service_mgr == "systemd"
+
+- name: "[MON-072] Align the docker.service.wants link of the otelcol unit with the GitHub webhook switch"
+  vars:
+    _wants_on: "{{ (host_agents_inputs.otel_github_webhook | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' }}"
+  ansible.builtin.file:
+    src: "{{ (otelcol_systemd_unit_dir ~ '/otelcol-contrib.service') if _wants_on | bool else omit }}"
+    dest: "{{ otelcol_systemd_unit_dir }}/docker.service.wants/otelcol-contrib.service"
+    state: "{{ 'link' if _wants_on | bool else 'absent' }}"
+  register: _otelcol_docker_wants
+  when:
+    - enable_otelcol | default(true) | bool
+    - ansible_service_mgr == "systemd"
+
+- name: "[MON-073] Reload systemd units when the docker.service.wants link changed"
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - _otelcol_docker_wants is changed
+  changed_when: true

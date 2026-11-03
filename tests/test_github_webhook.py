@@ -213,9 +213,9 @@ def test_unit_starts_after_docker_and_restarts_on_failure_only_where_the_receive
     after = re.search(r"^After=(.*)$", on, re.M).group(1).split()
     assert "docker.service" in after and "network.target" in after
     # docker stop/restart reach the collector (PartOf: a bridge recreation rebinds the socket) and docker start brings it back up
-    # (docker.service.wants via [Install]): after `systemctl stop docker` + `start docker` collection must not stay down
+    # (docker.service.wants link made by the docker_wants.yml tasks, not by [Install]: `enable` is a no-op on an already enabled unit)
     assert re.search(r"^PartOf=docker.service$", on, re.M)
-    assert "docker.service" in re.search(r"^WantedBy=(.*)$", on, re.M).group(1).split()
+    assert re.search(r"^WantedBy=multi-user.target$", on, re.M)
     assert re.search(r"^Restart=(always|on-failure)$", on, re.M)
     (tmp_path / "off").mkdir()
     off = _unit(tmp_path / "off", False)
@@ -387,3 +387,82 @@ def test_docs_describe_the_docker_restart_coupling_and_the_gateway_recheck_proce
     text = (ROOT / "docs" / "monitoring.md").read_text(encoding="utf-8")
     assert "PartOf=docker.service" in text and "게이트웨이 변경 뒤 재확인" in text
     assert "docker.service.wants" in text and "stop" in text and "start docker" in text
+
+
+# ---- docker.service.wants link: made by tasks (enable would be a no-op on an already enabled unit) --------------------
+
+def _wants_play(tmp_path, unit_dir, enabled):
+    vars_ = yaml.safe_load((base.ROLE / "defaults" / "main.yml").read_text())
+    vars_.update(yaml.safe_load((base.ROLE / "vars" / "main.yml").read_text()))
+    vars_.update({"otelcol_systemd_unit_dir": str(unit_dir), "ansible_service_mgr": "systemd", "enable_otelcol": True,
+                  "host_agents_os_path": "modern", "host_agents_inputs": {"otel_github_webhook": enabled}})
+    (tmp_path / "wants-vars.yml").write_text(yaml.safe_dump(vars_))
+    play = tmp_path / "wants.yml"
+    play.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+                                     "vars_files": [str(tmp_path / "wants-vars.yml")],
+                                     "tasks": [{"ansible.builtin.import_tasks": str(base.ROLE / "tasks" / "docker_wants.yml")}]}]))
+    return play
+
+
+def _wants_env(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "fakesysbin"
+    bin_dir.mkdir(exist_ok=True)
+    calls = tmp_path / "systemctl-calls.log"
+    script = bin_dir / "systemctl"
+    script.write_text(f'#!/bin/sh\necho "$@" >> {calls}\nexit 0\n')
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    return calls
+
+
+def _run_wants(play, check=False):
+    cmd = ["ansible-playbook", "-i", "localhost,", str(play)] + (["--check"] if check else [])
+    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    return int(re.search(r"changed=(\d+)", res.stdout).group(1))
+
+
+def _reloads(calls):
+    return calls.read_text().count("daemon-reload") if calls.exists() else 0
+
+
+def test_wants_link_is_created_idempotently_and_reloads_systemd_only_when_it_changes(tmp_path, monkeypatch):
+    calls = _wants_env(tmp_path, monkeypatch)
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    (unit_dir / "otelcol-contrib.service").write_text("[Unit]\n")
+    play = _wants_play(tmp_path, unit_dir, True)
+    link = unit_dir / "docker.service.wants" / "otelcol-contrib.service"
+    assert _run_wants(play, check=True) > 0 and not link.exists() and _reloads(calls) == 0      # check mode changes nothing
+    assert _run_wants(play) > 0
+    assert link.is_symlink() and Path(os.readlink(link)) == unit_dir / "otelcol-contrib.service"
+    assert _reloads(calls) == 1
+    assert _run_wants(play) == 0 and _reloads(calls) == 1                                        # second run: nothing changes
+
+
+def test_wants_link_is_removed_when_the_feature_is_turned_off_and_an_off_host_is_untouched(tmp_path, monkeypatch):
+    calls = _wants_env(tmp_path, monkeypatch)
+    unit_dir = tmp_path / "units"
+    unit_dir.mkdir()
+    (unit_dir / "otelcol-contrib.service").write_text("[Unit]\n")
+    on, off = _wants_play(tmp_path, unit_dir, True), None
+    _run_wants(on)
+    off_dir = tmp_path / "off"
+    off_dir.mkdir()
+    off = _wants_play(off_dir, unit_dir, False)
+    link = unit_dir / "docker.service.wants" / "otelcol-contrib.service"
+    assert _run_wants(off, check=True) > 0 and link.is_symlink()                                 # check mode keeps the link
+    reloads = _reloads(calls)
+    assert _run_wants(off) > 0 and not link.exists() and _reloads(calls) == reloads + 1
+    assert _run_wants(off) == 0 and _reloads(calls) == reloads + 1
+    fresh = tmp_path / "fresh-units"
+    fresh.mkdir()
+    fresh_dir = tmp_path / "fresh"
+    fresh_dir.mkdir()
+    assert _run_wants(_wants_play(fresh_dir, fresh, False)) == 0
+    assert list(fresh.iterdir()) == [] and _reloads(calls) == reloads + 1                        # nothing created, no reload
+
+
+def test_main_yml_runs_the_wants_tasks_in_the_service_block():
+    text = (base.ROLE / "tasks" / "main.yml").read_text()
+    assert "docker_wants.yml" in text

@@ -240,6 +240,9 @@
       - otelcol_unit_created is changed
     changed_when: true
 
+  - name: "Align the docker.service.wants link of the otelcol unit (GitHub webhook receiver)"
+    ansible.builtin.import_tasks: docker_wants.yml
+
   - name: "[MON-005-SYSV] Create SysVinit service script for otelcol-contrib"
     ansible.builtin.template:
       src: otelcol-contrib.init.j2

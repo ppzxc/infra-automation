@@ -6,7 +6,7 @@ Description=OpenTelemetry Collector Contrib
 After=network.target docker.service
 Wants=docker.service
 # PartOf: 도커 stop/restart가 수집기에 전파된다(브리지 재생성 때 수신 소켓이 낡은 인터페이스에 묶인 채 남지 않도록 재시작해 다시 바인딩).
-# PartOf는 start를 전파하지 않고 Restart=always도 요청된 정지 뒤엔 되살리지 않으므로, [Install]의 WantedBy=docker.service(docker.service.wants)가
+# PartOf는 start를 전파하지 않고 Restart=always도 요청된 정지 뒤엔 되살리지 않으므로, docker.service.wants 링크(docker_wants.yml 태스크가 만든다. [Install]의 enable은 이미 enabled인 호스트에서 no-op이라 쓰지 않는다)가
 # `systemctl start docker`에 수집기를 같이 올려 stop→start 뒤에도 수집이 이어지게 한다.
 PartOf=docker.service
 {% else %}
@@ -37,4 +37,4 @@ AmbientCapabilities=CAP_DAC_READ_SEARCH
 {% endif %}
 
 [Install]
-WantedBy=multi-user.target{% if (host_agents_inputs.otel_github_webhook | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %} docker.service{% endif %}
+WantedBy=multi-user.target
