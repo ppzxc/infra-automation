@@ -48,16 +48,16 @@ def _same_roster_alert(name, stored, sql):
         pairs = lambda q: re.sub(r"AND \(\(device_id = .*\)\) GROUP BY", "AND (<pairs>) GROUP BY", q)   # noqa: E731
         return pairs(stored) == pairs(sql) != stored
     def is_roster(q):
-        return any(f"AS {col}, count(*) AS n FROM" in q for col in ("host_name", "host", "device_id"))
+        return any(f"AS {col}, count(*) AS n FROM" in q for col in ("host_name", "host", "device_id", "service_name"))
     def shape(q):   # the roster hosts differ; the extra condition of each branch (e.g. job = 'backup' AND success = true) must match
-        conds = (re.search(r"WHERE (?:(?:host|host_name|device_id) = '[^']*'(?: AND )?|\((?:(?:host|host_name|device_id) = '[^']*' OR )*(?:lower\(body\) LIKE '[^']*'(?: OR )?)*\) AND )?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
+        conds = (re.search(r"WHERE (?:(?:(?:host|host_name|device_id) = '[^']*'|service_name = '(?:verify-|github-webhook)[^']*')(?: AND )?|\((?:(?:(?:host|host_name|device_id) = '[^']*'|service_name = '(?:verify-|github-webhook)[^']*') OR )*(?:lower\(body\) LIKE '[^']*'(?: OR )?)*\) AND )?(.*?) HAVING", b) for b in q.split(" UNION ALL "))
         return {m.group(1) if m else "" for m in conds}
     return is_roster(stored) and is_roster(sql) and name.endswith("-p2") == ("count(*) >= 1" in sql) and shape(stored) == shape(sql)
 
 
 def _case_host(rec):
     """The (fake) host of a synthetic record: backup_logs use host, switch syslog uses device_id, the others host_name."""
-    return rec.get("host_name") or rec.get("host") or rec.get("device_id") or re.search(r'(?: |devname="?)(verify-\S+?)(?:-3560X:|"| )', rec["body"]).group(1)   # 변환 전 레코드는 원문에서
+    return rec.get("host_name") or rec.get("host") or rec.get("device_id") or (rec.get("service_name") if str(rec.get("service_name")).startswith("verify-") else None) or re.search(r'(?: |devname="?)(verify-\S+?)(?:-3560X:|"| )', rec["body"]).group(1)   # 변환 전 레코드는 원문에서
 
 
 class FakeO2:
