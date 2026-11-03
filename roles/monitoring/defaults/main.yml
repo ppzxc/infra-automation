@@ -116,6 +116,15 @@ otel_trace_decision_wait: 15s
 otel_trace_num_traces: 20000
 otel_trace_non_sampled_cache_size: 20000
 
+# GitHub 조직 웹훅 수신기(hosts/<host>/agents의 otel_github_webhook: true, Spec #399): 켠 호스트만 수신기를 렌더링한다.
+# 주소·포트·경로·시크릿·도커 네트워크 이름은 저장소에 기본값이 없고 OpenBao hosts/<host>/agents(github_webhook_*)로만 주입한다.
+# 제한 시간은 GitHub의 10초 응답 제한 안에서 수신기 기본 500ms보다 크게 둔다. 본문 상한을 넘으면 거부된다.
+otel_github_webhook_read_timeout: 5s
+otel_github_webhook_write_timeout: 5s
+otel_github_webhook_max_request_size: 1048576
+otel_github_webhook_header_regex: "^(?i:X-GitHub-(Event|Delivery|Hook-ID))$"
+otel_service_github_audit: github-audit
+
 # 백업 결과 jsonl (backup 역할의 backup_log_path와 같은 값을 유지한다)
 otel_backup_log_path: /var/log/host-agents/backup.jsonl
 

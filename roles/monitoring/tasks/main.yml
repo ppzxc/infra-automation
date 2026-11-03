@@ -161,6 +161,35 @@
     notify: Restart rsyslog
     when: enable_otelcol | default(true) | bool
 
+  # GitHub 웹훅 수신기(Spec #399): 컨테이너 네트워크는 외부 관리형(서브넷 자동 할당)이라 게이트웨이 주소가 바뀔 수 있다.
+  # 바인딩 설정과 다르면 수신기가 조용히 끊기므로 변경 전에 실패시킨다(check 모드 포함). 출력에 주소가 있으므로 no_log이다.
+  - name: "[MON-069] Read the docker network gateway for the GitHub webhook bind address (read-only)"
+    ansible.builtin.command:
+      argv:
+        - docker
+        - network
+        - inspect
+        - --format
+        - "{% raw %}{{(index .IPAM.Config 0).Gateway}}{% endraw %}"
+        - "{{ host_agents_github_webhook.network }}"
+    register: _github_webhook_gateway
+    changed_when: false
+    failed_when: false
+    check_mode: false
+    no_log: true
+    when: host_agents_inputs.otel_github_webhook | default(false) | bool
+
+  - name: "[MON-070] Assert the docker network gateway equals the GitHub webhook bind address"
+    ansible.builtin.assert:
+      that:
+        - _github_webhook_gateway.rc | default(1) == 0
+        - (_github_webhook_gateway.stdout | default('') | host_agents_github_webhook_gateway_errors(host_agents_github_webhook.address)) | length == 0
+      fail_msg: >-
+        {{ inventory_hostname }}: 도커 네트워크 게이트웨이를 확인하지 못했거나 github_webhook_address와 다릅니다 —
+        변경 없이 중단합니다(check 모드 포함). 주소 값은 출력하지 않습니다.
+      quiet: true
+    when: host_agents_inputs.otel_github_webhook | default(false) | bool
+
   - name: "[MON-004] Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)"
     block:
       - name: "[MON-004-DIR] Ensure OpenTelemetry configuration directory exists"
@@ -197,7 +226,8 @@
           owner: root
           group: "{{ otelcol_group }}"
           mode: '0640'
-          validate: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib validate --config=%s"
+          # 웹훅을 켠 호스트는 검증 때만 자리표시 값을 환경에 준다(실제 값은 secrets.env에만 있다). 비어 있는 입력은 위 입력 검증이 먼저 막는다.
+          validate: "{{ 'env GITHUB_WEBHOOK_ENDPOINT=127.0.0.1:1 GITHUB_WEBHOOK_PATH=/validate-only GITHUB_WEBHOOK_SECRET=validate-only ' if (host_agents_inputs.otel_github_webhook | default(false) | bool) else '' }}{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib validate --config=%s"
         notify: Restart otelcol-contrib
 
     when: enable_otelcol | default(true) | bool
