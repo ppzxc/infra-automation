@@ -982,6 +982,21 @@ def test_github_audit_row_marks_a_ghost_actor_and_keeps_rows_without_target_or_r
     assert row["target"] and row["repo"]   # 대상·저장소가 없어도 행에 자리표시가 나온다
 
 
+@pytest.mark.parametrize("name", sorted(GHA_ALERTS))
+def test_github_audit_alert_handles_a_sparse_record_whose_missing_values_are_empty_strings(desired, name):
+    """The VRL always sets all 11 fields (empty string when the payload has no value), so a stream made of one sparse record has every column."""
+    event, action = sorted(GHA_ALERTS[name][1], key=str)[0]
+    sparse = {"service_name": "github-audit", "github_event": event, "github_action": action or "", "github_delivery_id": "d-sparse", "github_hook_id": "",
+              "github_actor": "", "github_actor_ghost": True, "github_org": "", "github_repo": "", "github_target": "", "github_target_type": "", "github_team": "",
+              "_timestamp": 1_792_767_302_000_000}
+    rows = _run_alert_on_sqlite(_sql(desired, name), [sparse], stream="security_logs")
+    assert len(rows) == 1, name
+    row = rows[0]
+    assert "불명" in row["actor"] and row["repo"] == "-" and row["target"] == "(대상 불명)", row   # 빈 문자열도 자리표시로 바뀐다
+    if "team" in row:
+        assert row["team"] == "-"
+
+
 def test_github_audit_membership_row_shows_the_team_for_team_membership(desired):
     row = _run_alert_on_sqlite(_sql(desired, "infra-github-audit-membership-change"),
                                [_gha_rec("membership", "added", github_team="platform")], stream="security_logs")[0]

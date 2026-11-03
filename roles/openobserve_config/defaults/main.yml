@@ -295,10 +295,11 @@ o2c_event_time_sql: >-
 # GitHub 조직 관리 변경 알림 행의 공통 열(Spec #399 / Ticket-4): 행위자·대상·저장소·조직과 전달 ID(재전송·원문 조회의 키).
 # 필드는 github_audit_semantics가 만든다(docs/openobserve_config.md의 필드 표). 행위자를 알 수 없으면(ghost 자리표시 계정 또는 sender 없음) `ghost(행위자 불명)`으로 구분해 보인다.
 # 불리언은 엔진마다 비교가 달라 문자열로 읽는다. 대상·저장소가 없어도 행이 빠지지 않게 자리표시를 넣고 길이를 자른다. GROUP BY에는 이 열이 읽는 원본 필드를 넣는다.
-o2c_gha_actor_sql: "CASE WHEN github_actor IS NULL OR lower(CAST(github_actor_ghost AS VARCHAR)) IN ('true', '1') THEN 'ghost(행위자 불명)' ELSE substr(github_actor, 1, 39) END AS actor"
+o2c_gha_actor_sql: "CASE WHEN coalesce(github_actor, '') = '' OR lower(CAST(github_actor_ghost AS VARCHAR)) IN ('true', '1') THEN 'ghost(행위자 불명)' ELSE substr(github_actor, 1, 39) END AS actor"
+# 필드는 알려진 이벤트마다 항상 존재하고 값이 없으면 빈 문자열이다(VRL이 11개를 모두 설정, #402 후속). NULL과 빈 문자열을 모두 자리표시로 바꾼다.
 o2c_gha_columns: >-
-  {{ o2c_gha_actor_sql }}, substr(coalesce(github_target, github_org, '(대상 불명)'), 1, 30) AS target,
-  substr(coalesce(github_repo, '-'), 1, 40) AS repo, max(github_delivery_id) AS github_delivery_id, count(*) AS events
+  {{ o2c_gha_actor_sql }}, substr(coalesce(nullif(github_target, ''), nullif(github_org, ''), '(대상 불명)'), 1, 30) AS target,
+  substr(coalesce(nullif(github_repo, ''), '-'), 1, 40) AS repo, max(github_delivery_id) AS github_delivery_id, count(*) AS events
 o2c_gha_group: "github_actor, github_actor_ghost, github_target, github_repo, github_org"
 
 # 알림 대상 서버 행의 표시 이름(Spec #339 / Ticket-5): `host_label` 컬럼이 관리번호 옆에 접속 주소를 붙인다(`ns0272 (<주소>)`).
@@ -1323,7 +1324,7 @@ o2c_alerts:
     description: "github-audit의 github_event=meta, github_action=deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(github_action, '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'github-audit' AND github_event = 'meta' AND github_action = 'deleted'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
@@ -1361,7 +1362,7 @@ o2c_alerts:
     description: "github-audit의 repository.deleted 또는 organization.deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기) — 저장소 삭제는 조직 웹훅만 받는다"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(github_action, '-') AS kind FROM "security_logs"
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind FROM "security_logs"
       WHERE service_name = 'github-audit' AND github_action = 'deleted' AND github_event IN ('repository', 'organization')
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
@@ -1380,7 +1381,7 @@ o2c_alerts:
     description: "github-audit의 branch_protection_rule.deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(github_action, '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'github-audit' AND github_event = 'branch_protection_rule' AND github_action = 'deleted'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
@@ -1399,7 +1400,7 @@ o2c_alerts:
     description: "github-audit의 repository_ruleset.deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(github_action, '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'github-audit' AND github_event = 'repository_ruleset' AND github_action = 'deleted'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
@@ -1418,7 +1419,7 @@ o2c_alerts:
     description: "github-audit의 deploy_key.created (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(github_action, '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
       WHERE service_name = 'github-audit' AND github_event = 'deploy_key' AND github_action = 'created'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
@@ -1437,7 +1438,7 @@ o2c_alerts:
     description: "github-audit의 member(added·edited·removed), membership(added·removed), organization(member_added·member_invited·member_removed), team(created·deleted·added_to_repository·removed_from_repository) (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
     stream: security_logs
     sql: >-
-      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(github_action, '-') AS kind, substr(coalesce(github_team, '-'), 1, 20) AS team FROM "security_logs"
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, substr(coalesce(nullif(github_team, ''), '-'), 1, 20) AS team FROM "security_logs"
       WHERE service_name = 'github-audit' AND (
       (github_event = 'member' AND github_action IN ('added', 'edited', 'removed'))
       OR (github_event = 'membership' AND github_action IN ('added', 'removed'))

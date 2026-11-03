@@ -86,14 +86,27 @@ CASES = {
 def test_every_confirmed_event_gets_event_action_actor_org_repository_and_target(tmp_path, event):
     payload, action, repo, target, target_type = CASES[event]
     rec = _fields(payload, event, action)
-    expected = dict(COMMON, github_event=event, github_target=target, github_target_type=target_type)
-    if action:
-        expected["github_action"] = action
-    if repo:
-        expected["github_repo"] = repo
-    if event == "membership":
-        expected["github_team"] = "justice-league"
+    expected = dict(COMMON, github_event=event, github_target=target, github_target_type=target_type,
+                    github_action=action or "", github_repo=repo or "", github_team="justice-league" if event == "membership" else "")
     assert _added(rec, _apply(tmp_path, rec)) == expected
+
+
+FIELDS = ["github_event", "github_action", "github_delivery_id", "github_hook_id", "github_actor", "github_actor_ghost", "github_org",
+          "github_repo", "github_target", "github_target_type", "github_team"]
+
+
+@pytest.mark.parametrize("event", sorted(CASES))
+def test_every_known_event_has_all_eleven_fields_with_empty_strings_for_missing_values(tmp_path, event):
+    """Follow-up of #402: an alert SQL reads these columns, and OpenObserve fails on a column the stream schema does not have yet,
+    so whichever known event arrives first must create every column (a missing value is an empty string, ghost stays a boolean)."""
+    sparse = _rec(event, {"action": "created"})   # no sender, organization, repository, target, delivery or hook
+    for k in ("header_x_github_delivery", "header_x_github_hook_id"):
+        del sparse[k]
+    out = _apply(tmp_path, sparse)
+    assert all(f in out for f in FIELDS), [f for f in FIELDS if f not in out]
+    assert out["github_event"] == event and out["github_actor_ghost"] is True
+    assert all(out[f] == "" for f in FIELDS if f not in ("github_event", "github_actor_ghost", "github_action")), out
+    assert out["github_action"] == "created"
 
 
 def test_the_event_list_is_the_thirteen_confirmed_events():
@@ -140,7 +153,7 @@ def test_an_unknown_actor_is_marked_ghost(tmp_path, sender):
         payload["sender"] = sender
     out = _apply(tmp_path, _rec("repository", payload))
     assert out["github_actor_ghost"] is True and out["github_event"] == "repository"
-    assert out.get("github_actor", "ghost") == "ghost"
+    assert out["github_actor"] in ("", "ghost")
 
 
 def test_a_known_actor_is_not_ghost(tmp_path):
@@ -150,7 +163,7 @@ def test_a_known_actor_is_not_ghost(tmp_path):
 
 def test_unreadable_target_structure_still_yields_the_common_fields(tmp_path):
     out = _apply(tmp_path, _fields({"member": "not-an-object"}, "member", "added"))
-    assert out["github_event"] == "member" and "github_target" not in out and out["github_org"] == "example-org"
+    assert out["github_event"] == "member" and out["github_target"] == "" and out["github_target_type"] == "" and out["github_org"] == "example-org"
 
 
 @pytest.mark.parametrize("rec", [
