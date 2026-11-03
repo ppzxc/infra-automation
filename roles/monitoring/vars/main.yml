@@ -117,3 +117,10 @@ host_agents_install_root: /opt/host-agents
 
 # 로그 스트림 (라우팅 테이블·exporter·파이프라인이 공유)
 host_agents_log_streams: [security_logs, system_logs, app_logs, backup_logs, host_status_logs]
+
+# GitHub 조직 웹훅 수신기(Spec #399)의 환경변수 이름과 설정 검증 때 쓰는 자리표시 값. 이름의 유일한 정의다
+# (설정 템플릿의 ${env:…} 참조, secrets.env.j2, 설정 검증 태스크가 모두 이 변수를 쓴다). 실제 값은 secrets.env에만 있다.
+otel_github_webhook_env:
+  endpoint: {name: GITHUB_WEBHOOK_ENDPOINT, validate_value: "127.0.0.1:1"}
+  path: {name: GITHUB_WEBHOOK_PATH, validate_value: /validate-only}
+  secret: {name: GITHUB_WEBHOOK_SECRET, validate_value: validate-only}

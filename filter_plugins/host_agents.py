@@ -342,7 +342,7 @@ def _dedupe(items):
 
 def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory_backup_paths,
                                kv_path='hosts/<host>/agents', shared=None, service_map=None,
-                               otel_enabled=True):
+                               otel_enabled=True, os_path=None):
     """Validate the per-host agents KV and merge it with the Git standard.
 
     Returns ``{'errors': [...], ...merged inputs...}``; the merged part never
@@ -353,6 +353,8 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     Every log entry carries the ``service`` (OTel ``service.name``) it is reported under: the
     ``service_map`` entry for a standard path, the ``service`` key of an ``otel_extra_logs`` item,
     otherwise the stream name without ``_logs``.
+
+    ``os_path`` (the probed path) lets the opt-in webhook receiver fail on a legacy host instead of being silently ignored.
 
     With ``otel_enabled`` false (Host Agents Backup Only) the otelcol-only keys are not required.
     """
@@ -381,6 +383,8 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     github_webhook = _as_bool(kv.get('otel_github_webhook'), 'otel_github_webhook', errors)
     if github_webhook:
         errors.extend(_github_webhook_errors(kv))
+        if os_path not in (None, 'modern'):
+            errors.append("otel_github_webhook: modern 경로 호스트에서만 지원합니다(현재 %s, CentOS 6/7 제외)" % os_path)
 
     for path in exclude_logs:
         if any(_covers(path, sec) for sec in security):
@@ -451,9 +455,9 @@ GITHUB_WEBHOOK_FIELDS = ('address', 'port', 'path', 'secret', 'network')
 
 
 def host_agents_github_webhook(host_kv):
-    """The webhook receiver values (private; call from a ``no_log`` task). Blank or absent values become ``''``."""
+    """The webhook receiver values (private; call from a ``no_log`` task). Blank or absent values become ``''``; others are kept verbatim (the validation rejects stray whitespace)."""
     kv = host_kv if isinstance(host_kv, dict) else {}
-    return {f: ('' if _is_blank(kv.get('github_webhook_' + f)) else str(kv['github_webhook_' + f]).strip())
+    return {f: ('' if _is_blank(kv.get('github_webhook_' + f)) else str(kv['github_webhook_' + f]))
             for f in GITHUB_WEBHOOK_FIELDS}
 
 
@@ -468,10 +472,15 @@ def _github_webhook_errors(kv):
                 raise ValueError
         except ValueError:
             errors.append("github_webhook_address: 컨테이너 브리지 전용 IPv4 주소여야 합니다(모든 인터페이스·루프백 불가)")
-    if values['port'] and not (values['port'].isdigit() and 1 <= int(values['port']) <= 65535):
-        errors.append("github_webhook_port: 1~65535 정수여야 합니다")
-    if values['path'] and not (values['path'].startswith('/') and re.match(r'^/[A-Za-z0-9._~/-]+$', values['path'])):
-        errors.append("github_webhook_path: '/'로 시작하는 URL 경로 문자(영문·숫자·._~/-)만 허용됩니다")
+    if values['port'] and not (re.fullmatch('[0-9]{1,5}', values['port']) and 1 <= int(values['port']) <= 65535):
+        errors.append("github_webhook_port: 1~65535 정수(ASCII 숫자)여야 합니다")
+    if values['path']:
+        segments = values['path'].split('/')[1:]
+        if not (re.fullmatch(r'/[A-Za-z0-9._~/-]+', values['path']) and all(seg and seg not in ('.', '..') for seg in segments)):
+            errors.append("github_webhook_path: '/'로 시작하고 비어 있지 않은 세그먼트(영문·숫자·._~-)로만 이루어져야 합니다"
+                          "('/' 단독, 빈·'.'·'..' 세그먼트, 끝 슬래시 불가)")
+    if values['secret'] and not re.fullmatch('[\x20-\x7e]+', values['secret']):
+        errors.append("github_webhook_secret: 인쇄 가능한 ASCII(공백 포함)만 허용됩니다(제어문자·비ASCII 불가, EnvironmentFile 이스케이프 한계)")
     return errors
 
 

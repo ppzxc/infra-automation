@@ -5,6 +5,8 @@ Description=OpenTelemetry Collector Contrib
 # 도커가 늦거나 재시작해도 Restart=always가 바인딩 실패를 다시 시도한다.
 After=network.target docker.service
 Wants=docker.service
+# 도커 재시작·브리지 재생성 때 수신 소켓이 낡은 인터페이스에 묶인 채 남지 않도록 도커 재시작에 같이 재시작한다(도커 정지 때는 같이 정지).
+PartOf=docker.service
 {% else %}
 After=network.target
 {% endif %}

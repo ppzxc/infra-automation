@@ -9,6 +9,7 @@ Only fake values and GitHub's official test vector are used: secret ``It's a Sec
 import hashlib
 import hmac
 import json
+import os
 import re
 import subprocess
 import sys
@@ -52,12 +53,15 @@ def _render(tmp_path, enabled=True, **over):
 
 
 def _read_env(path):
-    """systemd EnvironmentFile subset: KEY=value, or KEY="json-quoted"."""
+    """systemd EnvironmentFile rules: KEY=value, or KEY="..." where only backslash, double quote, backtick and dollar are escapes."""
     out = {}
     for line in path.read_text().splitlines():
         if "=" in line and not line.startswith("#"):
             key, value = line.split("=", 1)
-            out[key] = json.loads(value) if value.startswith('"') else value
+            if value.startswith('"'):
+                assert value.endswith('"') and len(value) >= 2
+                value = re.sub(r'\\([\\"`$])', r"\1", value[1:-1])
+            out[key] = value
     return out
 
 
@@ -207,6 +211,7 @@ def test_unit_starts_after_docker_and_restarts_on_failure_only_where_the_receive
     on = _unit(tmp_path, True)
     after = re.search(r"^After=(.*)$", on, re.M).group(1).split()
     assert "docker.service" in after and "network.target" in after
+    assert re.search(r"^PartOf=docker.service$", on, re.M)         # a docker restart (bridge recreated) restarts the receiver too
     assert re.search(r"^Restart=(always|on-failure)$", on, re.M)
     (tmp_path / "off").mkdir()
     assert "docker" not in _unit(tmp_path / "off", False)
@@ -263,3 +268,116 @@ def test_repository_defaults_hold_no_value_for_the_bind_address_port_path_or_sec
     text = "\n".join((base.ROLE / d / "main.yml").read_text() for d in ("defaults", "vars"))
     for key in ("address", "port", "path", "secret", "network"):
         assert not re.search(rf"^\s*\S*github_webhook_{key}\s*:", text, re.M)
+
+
+# ---- review fixes ------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("secret", ['quote"and\\backslash', "dollar$and`tick", SECRET, "p@ss word!~"])
+def test_secrets_with_systemd_special_characters_survive_the_env_file_and_still_verify(tmp_path, secret):
+    binary = h.binary(VERSION)
+    cfg, env = _render(tmp_path, host_agents_github_webhook=dict(FAKE, secret=secret))
+    assert env["GITHUB_WEBHOOK_SECRET"] == secret
+    harness = h.OtlpHarness(tmp_path, cfg, receiver="webhook_event/github", env=env)
+    harness.env["GITHUB_WEBHOOK_ENDPOINT"] = f"127.0.0.1:{harness.port}"
+    with harness.running(binary) as col:
+        assert col.post(PATH, PAYLOAD, dict(HEADERS, **{"X-Hub-Signature-256": _sign(PAYLOAD, secret)})) == 200
+
+
+@pytest.mark.parametrize("secret", ["line\nbreak", "tab\there", "café", "sep arator", "nul\x00", "del\x7f"])
+def test_secret_outside_printable_ascii_is_rejected_without_echoing_it(secret):
+    errors = _resolve(**_kv(github_webhook_secret=secret))["errors"]
+    assert len(errors) == 1 and "github_webhook_secret" in errors[0] and secret not in errors[0]
+
+
+@pytest.mark.parametrize("port", ["٣٤", "123456", "0", "65536", "-1", "1 2", ""])
+def test_port_must_be_ascii_digits_within_1_to_65535(port):
+    assert len(_resolve(**_kv(github_webhook_port=port))["errors"]) == 1
+
+
+@pytest.mark.parametrize("path", ["/", "//", "/a//b", "/a/../b", "/..", "/a/./b", "/a/", "/a b", "/a\n"])
+def test_path_rejects_root_empty_dot_and_dotdot_segments(path):
+    assert len(_resolve(**_kv(github_webhook_path=path))["errors"]) == 1
+
+
+def test_path_with_ordinary_segments_is_accepted():
+    assert _resolve(**_kv(github_webhook_path="/hooks/abc-123_x.y/z"))["errors"] == []
+
+
+@pytest.mark.parametrize("os_path, ok", [("modern", True), ("legacy_el6", False), ("legacy_el7", False)])
+def test_enabling_the_webhook_on_a_legacy_host_fails_input_validation(os_path, ok):
+    required = {"o2_ingest_token": "t", "rustfs_access_key": "a", "rustfs_secret_key": "s", "restic_password": "p"}
+    res = host_agents_resolve_inputs(dict(required, **_kv()), [], [], [], "hosts/h/agents", os_path=os_path)
+    assert (res["errors"] == []) is ok
+    off = host_agents_resolve_inputs(dict(required), [], [], [], "hosts/h/agents", os_path=os_path)
+    assert off["errors"] == []                                   # off hosts are never affected
+
+
+def test_the_env_variable_names_are_defined_once_in_a_role_variable():
+    for rel in ("tasks/main.yml", "tasks/agents_input.yml", "templates/otelcol-contrib.yaml.j2",
+                "templates/secrets.env.j2", "templates/otelcol-contrib.service.j2"):
+        assert "GITHUB_WEBHOOK_" not in (base.ROLE / rel).read_text(), rel
+    names = yaml.safe_load((base.ROLE / "vars" / "main.yml").read_text())["otel_github_webhook_env"]
+    assert {v["name"] for v in names.values()} == {"GITHUB_WEBHOOK_ENDPOINT", "GITHUB_WEBHOOK_PATH", "GITHUB_WEBHOOK_SECRET"}
+
+
+def test_renamed_env_variables_flow_through_config_and_secrets_file(tmp_path):
+    env_vars = yaml.safe_load((base.ROLE / "vars" / "main.yml").read_text())["otel_github_webhook_env"]
+    renamed = {k: dict(v, name=v["name"].replace("GITHUB_WEBHOOK", "GH_HOOK")) for k, v in env_vars.items()}
+    cfg, env = _render(tmp_path, otel_github_webhook_env=renamed)
+    assert cfg["receivers"]["webhook_event/github"]["endpoint"] == "${env:GH_HOOK_ENDPOINT}"
+    assert {"GH_HOOK_ENDPOINT", "GH_HOOK_PATH", "GH_HOOK_SECRET"} <= set(env) and not any(k.startswith("GITHUB") for k in env)
+
+
+# ---- the gateway assertion runs in the input-validation step, before any change (real tasks, fake docker) ---------------
+
+def _fake_docker(tmp_path, monkeypatch, gateway, rc=0):
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    log = tmp_path / "docker-calls.log"
+    script = bin_dir / "docker"
+    script.write_text(f'#!/bin/sh\necho "$@" >> {log}\n[ {rc} -eq 0 ] && echo "{gateway}"\nexit {rc}\n')
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    return log
+
+
+def _run_gateway_play(tmp_path, kv, os_path="modern"):
+    marker = tmp_path / "later-change-ran"
+    fixture = {"host": kv, "openobserve": base.SHARED_O2, "rustfs": base.SHARED_RUSTFS}
+    later = [{"name": "stands for the binary delivery and the rule removal", "ansible.builtin.file":
+              {"path": str(marker), "state": "touch", "mode": "0600"}, "check_mode": False}]
+    res, _ = base._run_input_tasks(tmp_path, ["good"], "http://127.0.0.1:1", extra_tasks=later,
+                                   extra_vars={"host_agents_kv_fixture": fixture, "host_agents_os_path": os_path})
+    return res, marker
+
+
+def _host_kv(**over):
+    return dict(base.REQUIRED, **_kv(**over))
+
+
+def test_matching_gateway_lets_the_play_continue(tmp_path, monkeypatch):
+    log = _fake_docker(tmp_path, monkeypatch, BRIDGE_ADDRESS)
+    res, marker = _run_gateway_play(tmp_path, _host_kv())
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert marker.exists()
+    call = log.read_text().split()
+    assert call[:2] == ["network", "inspect"] and call[-1] == "net-dummy"
+
+
+@pytest.mark.parametrize("case", ["other-gateway", "docker-fails"])
+def test_gateway_mismatch_or_docker_failure_stops_the_host_before_any_later_change(tmp_path, monkeypatch, case):
+    _fake_docker(tmp_path, monkeypatch, "192.0.2.78" if case == "other-gateway" else "", rc=0 if case == "other-gateway" else 1)
+    res, marker = _run_gateway_play(tmp_path, _host_kv())
+    assert res.returncode != 0 and not marker.exists()
+    assert "게이트웨이" in res.stdout + res.stderr and BRIDGE_ADDRESS not in res.stdout + res.stderr
+
+
+def test_docker_is_not_called_when_the_webhook_is_off(tmp_path, monkeypatch):
+    log = _fake_docker(tmp_path, monkeypatch, "192.0.2.78")
+    res, marker = _run_gateway_play(tmp_path, dict(base.REQUIRED))
+    assert res.returncode == 0 and marker.exists() and not log.exists()
+
+
+def test_docs_describe_the_docker_restart_coupling_and_the_gateway_recheck_procedure():
+    text = (ROOT / "docs" / "monitoring.md").read_text(encoding="utf-8")
+    assert "PartOf=docker.service" in text and "게이트웨이 변경 뒤 재확인" in text

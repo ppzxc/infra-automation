@@ -459,15 +459,15 @@ receivers:
   # GitHub 조직 웹훅(Spec #399): 컨테이너 브리지 전용 주소에만 바인드한다(값은 환경변수). hmac_signature가 원본 본문 바이트의 HMAC-SHA256을 검증하고,
   # 틀리거나 없거나 sha1 레거시 헤더만 있으면 401이며 기록되지 않는다. 시크릿이 비면 설정 검증이 실패한다. 제한 시간은 GitHub 응답 제한(10초) 안에서 기본 500ms보다 크게 둔다.
   webhook_event/github:
-    endpoint: ${env:GITHUB_WEBHOOK_ENDPOINT}
-    path: ${env:GITHUB_WEBHOOK_PATH}
+    endpoint: ${env:{{ otel_github_webhook_env.endpoint.name }}}
+    path: ${env:{{ otel_github_webhook_env.path.name }}}
     read_timeout: {{ otel_github_webhook_read_timeout }}
     write_timeout: {{ otel_github_webhook_write_timeout }}
     max_request_size: {{ otel_github_webhook_max_request_size }}
     # 이벤트 이름·전달 ID·훅 ID 헤더만 속성으로 보존한다(서명 헤더는 남기지 않는다).
     header_attribute_regex: {{ otel_github_webhook_header_regex | to_json }}
     hmac_signature:
-      secret: ${env:GITHUB_WEBHOOK_SECRET}
+      secret: ${env:{{ otel_github_webhook_env.secret.name }}}
       header: X-Hub-Signature-256
       prefix: "sha256="
 {% endif %}
