@@ -1224,8 +1224,8 @@ o2c_alerts:
     severity_icon: "🔴"
     title: "GitHub 웹훅 전달 점검 중단: 하트비트가 {{ o2c_gww_silent_hours }}시간 넘게 없음"
     what: "GitHub 웹훅 전달 점검 작업의 하트비트(service_name=github-webhook-watch, record_type=heartbeat)가 {{ o2c_gww_silent_hours }}시간 넘게 들어오지 않습니다. 점검 주기는 6시간이라 두 번 이상 연달아 빠진 것입니다."
-    why: "점검 작업이 멈췄거나 하트비트 수집이 끊겼습니다. 그동안 웹훅 삭제·비활성·이벤트 변경과 실패한 전달의 재전송이 확인되지 않고, GitHub은 실패한 전달을 자동으로 재전송하지 않으며 재전송 가능 기간은 3일입니다."
-    action: "① Semaphore의 GitHub Webhook Watch 최근 실행 결과와 스케줄 확인 ② 실패했다면 오류 코드(자격 만료·API 연결)에 따라 OpenBao의 토큰·OpenObserve 수집 계정을 점검 ③ 복구 뒤 작업을 수동 실행해 하트비트를 확인하고 재전송 가능 기간(3일) 안의 실패를 재전송"
+    why: "점검 작업이 돌지 않았거나(예약 중지·Semaphore 장애) 하트비트 전송·수집이 끊겼습니다. 자격 만료 같은 점검 오류는 오류 하트비트가 남아 이 알림이 아니라 점검 오류 알림이 맡습니다. 그동안 웹훅 삭제·비활성·이벤트 변경과 실패한 전달의 재전송이 확인되지 않고, GitHub은 실패한 전달을 자동으로 재전송하지 않으며 재전송 가능 기간은 3일입니다."
+    action: "① Semaphore의 GitHub Webhook Watch 최근 실행 결과와 스케줄 확인 ② 작업이 실패했다면 로그의 오류를 보고(오류 코드가 있어도 하트비트는 남으므로 이 알림은 작업이 아예 돌지 않았거나 하트비트 전송이 끊겼을 때 울린다) OpenBao 입력·OpenObserve 수집 계정을 점검 ③ 복구 뒤 작업을 수동 실행해 하트비트를 확인하고 재전송 가능 기간(3일) 안의 실패를 재전송"
     runbook: "{{ o2c_runbook_base }}#github-webhook-watch-silent"
     row_template: '• {service_name}'
     description: "전달 점검 하트비트(security_logs, record_type=heartbeat)가 {{ o2c_gww_silent_hours }}시간 없음 (State Alert, 재통지 360분) — 점검 주기 6시간의 두 배에 1시간 여유"
@@ -1264,14 +1264,35 @@ o2c_alerts:
     why: "수신기가 받지 못한 웹훅 이벤트가 남아 있어 그 구간의 조직 변경이 중앙 로그에 빠졌을 수 있습니다. 기간을 넘긴 실패는 재전송할 수 없고, 조회가 누락되면 일부 실패를 보지 못한 상태입니다."
     action: "① 행의 건수와 조회 누락 여부 확인 ② 수신기(수신 서비스·프록시)가 그 시간대에 내려가 있었는지 확인하고 복구 ③ 기간을 넘긴 실패는 조직 감사 로그 내보내기로 해당 구간을 보완 ④ 조회 누락이면 점검 작업의 조회 페이지 한도와 실패 전달 규모를 확인"
     runbook: "{{ o2c_runbook_base }}#github-webhook-redelivery-failed"
-    row_template: '• 재전송 실패 {failed_count}건 · 기간 초과 {expired_count}건 · 조회 누락 {deliveries_truncated} · {event_time}'
+    row_template: '• 재전송 실패 {failed_count}건 · 기간 초과 {expired_count}건 · 조회 누락 {truncated}(1=예) · {event_time}'
     description: "전달 점검 하트비트의 failed_count>0 또는 expired_count>0 또는 deliveries_truncated=true (Event Alert, 재통지 60분) — 하트비트는 6시간마다 한 건"
     stream: security_logs
     sql: >-
-      SELECT service_name, max(failed_count) AS failed_count, max(expired_count) AS expired_count, max(deliveries_truncated) AS deliveries_truncated, {{ o2c_event_time_sql }} FROM "security_logs"
-      WHERE record_type = 'heartbeat' AND (failed_count > 0 OR expired_count > 0 OR deliveries_truncated = true)
+      SELECT service_name, max(failed_count) AS failed_count, max(expired_count) AS expired_count,
+      max(CASE WHEN lower(CAST(deliveries_truncated AS VARCHAR)) IN ('true', '1') THEN 1 ELSE 0 END) AS truncated, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE record_type = 'heartbeat' AND (failed_count > 0 OR expired_count > 0 OR lower(CAST(deliveries_truncated AS VARCHAR)) IN ('true', '1'))
       GROUP BY service_name
       ORDER BY failed_count DESC
+    period: 15
+    frequency: 5
+    silence: 60
+
+  - name: infra-github-webhook-check-error
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "GitHub 웹훅 전달 점검 실패: 자격 만료·API 연결 오류"
+    what: "전달 점검 작업의 하트비트가 점검 오류(result=error)를 보고했습니다. 행의 오류 코드는 credential_missing·api_http_<상태 코드>·api_unreachable·api_unexpected_response 중 하나입니다."
+    why: "점검이 GitHub 조직 웹훅을 확인하지 못해 웹훅 삭제·변경과 실패 전달 재전송이 멈춘 상태입니다. 하트비트는 계속 들어오므로 침묵 알림은 울리지 않습니다. 토큰 만료가 가장 흔한 원인입니다."
+    action: "① 행의 오류 코드 확인(런북에 코드별 조치) ② 401·403·credential_missing이면 OpenBao의 토큰 만료·권한(조직 Webhooks) 점검과 교체 ③ api_unreachable이면 컨트롤러의 외부 연결 확인 ④ 복구 뒤 작업을 수동 실행해 하트비트 result=ok 확인"
+    runbook: "{{ o2c_runbook_base }}#github-webhook-check-error"
+    row_template: '• 점검 오류 {error} · {event_time}'
+    description: "전달 점검 하트비트의 result=error (Event Alert, 재통지 60분) — 하트비트는 6시간마다 한 건, 오류 코드는 error 필드"
+    stream: security_logs
+    sql: >-
+      SELECT service_name, error, count(*) AS checks, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE record_type = 'heartbeat' AND result = 'error'
+      GROUP BY service_name, error
+      ORDER BY checks DESC
     period: 15
     frequency: 5
     silence: 60

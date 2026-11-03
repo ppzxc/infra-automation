@@ -735,6 +735,25 @@ infra-github-webhook-redelivery-failed:
       fires: false
       records:
         - {record_type: heartbeat, hook_status: ok, failed_count: 0, expired_count: 0, deliveries_truncated: false, redelivered_count: 3}
+infra-github-webhook-check-error:
+  row_key: service_name
+  host_field: service_name
+  cases:
+    - name: 자격이 만료되어 점검이 실패했다(오류 하트비트)
+      host: verify-gww-error-401
+      fires: true
+      records:
+        - {record_type: heartbeat, result: error, error: api_http_401, hook_status: unknown}
+    - name: 자격이 없다
+      host: verify-gww-error-cred
+      fires: true
+      records:
+        - {record_type: heartbeat, result: error, error: credential_missing, hook_status: unknown}
+    - name: 점검이 정상이다
+      host: verify-gww-error-ok
+      fires: false
+      records:
+        - {record_type: heartbeat, result: ok, error: "", hook_status: ok}
 # --- 서버 도달성 (Spec #184 / Ticket-6, ADR-0010) --- tcpcheck.status는 60초마다 1(접속 성공)/0(실패). 검사하는 쪽은 host_name, 대상은 tcpcheck_endpoint.
 infra-unreachable-host:
   cases:
