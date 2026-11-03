@@ -82,3 +82,43 @@ def test_no_real_hosts_addresses_ports_paths_or_org_names_in_the_runbook_or_edit
         assert not re.search(r"(?<![\w.])(port|포트)\s*[=:]?\s*\d{2,5}\b", text, re.I), path
         assert not re.search(r"https?://(?!docs\.github\.com|github\.com/ppzxc/infra-automation)", text), path
         assert not re.search(r"ppzxc(?!/infra-automation)", text), path
+
+
+def _row(step):
+    m = re.search(rf"^\| {step} .*$", _section("서버 적용 절차") + _section("롤백"), re.M)
+    assert m, step
+    return m.group(0)
+
+
+def test_docker_restart_checks_are_a_separate_approved_step_with_impact_and_rollback():
+    s3b = _row("S-3b")
+    for needle in ("유지보수 창", "별도 승인", "overseer", "재생성", "입구", "전 컨테이너", "start docker", "R-3b"):
+        assert needle in s3b, needle
+    assert "systemctl stop docker" not in _row("S-3") and "R-3b" in _section("롤백")
+    verify = _section("서버 적용 뒤 검증")
+    assert "S-3b" in verify
+
+
+def test_webhook_secret_handling_and_signature_test_source_are_documented():
+    s = _section("서버 적용 절차")
+    for needle in ("생성 위치", "셸 기록", "클립보드", "폐기", "올바른 서명", "브리지 주소", "ping"):
+        assert needle in s, needle
+    assert "해시" not in s
+
+
+def test_alert_apply_step_runs_plan_only_first_and_compares_server_alerts():
+    s6, r6 = _row("S-6"), _row("R-6")
+    assert "o2c_plan_only" in s6 and "폐기 목록" in s6 and "infra-" in s6
+    assert "폐기 목록" in r6
+
+
+def test_s5_inputs_include_heartbeat_destination_and_alert_check_is_after_s6():
+    s5 = _row("S-5")
+    for key in ("o2_endpoint", "o2_org", "o2_ingest_user", "o2_ingest_password"):
+        assert key in s5, key
+    assert "하트비트 레코드로만" in s5
+
+
+def test_bind_mount_inode_sentence_states_its_precondition():
+    s = _section("출발지 대역 갱신")
+    assert "옛 inode로 갈라진" in s
