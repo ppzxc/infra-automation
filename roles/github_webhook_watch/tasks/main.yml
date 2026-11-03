@@ -1,0 +1,148 @@
+---
+# ==============================================================================
+# GitHub 조직 웹훅 전달 점검 (Spec #399 / Ticket-5) — 컨트롤러 전용
+# 순서: 입력 검증 → (OpenBao 값 조회) → 점검 모듈(웹훅 비교 + 실패 전달 재전송) → 하트비트 기록 → 오류면 실행 실패.
+# API 실패·자격 없음도 먼저 하트비트에 오류 코드를 남기고 마지막에 실패 처리한다.
+# 자격·URL을 다루는 태스크는 모두 no_log다. check 모드: 재전송과 하트비트 기록 없이 비교·계획만 한다.
+# ==============================================================================
+
+- name: "[GWW-001] Assert the check interval is shorter than the redelivery window"
+  ansible.builtin.assert:
+    that:
+      - (gww_check_interval_hours | string) is match('^[1-9][0-9]*$')
+      - (gww_redelivery_window_hours | string) is match('^[1-9][0-9]*$')
+      - (gww_check_interval_hours | int) < (gww_redelivery_window_hours | int)
+    fail_msg: >-
+      [GWW-INTERVAL] 점검 주기(gww_check_interval_hours)는 재전송 가능 기간(gww_redelivery_window_hours)보다 짧아야 한다.
+      기간을 넘기면 실패한 전달을 재전송하지 못하고 잃는다.
+
+- name: "[GWW-002] Log in to OpenBao with AppRole when no Vault token is given"
+  ansible.builtin.uri:
+    url: "{{ gww_vault_addr }}/v1/auth/approle/login"
+    method: POST
+    headers: "{{ {'X-Vault-Namespace': gww_openbao_namespace} if (gww_openbao_namespace | length > 0) else {} }}"
+    body_format: json
+    body:
+      role_id: "{{ gww_vault_role_id }}"
+      secret_id: "{{ gww_vault_secret_id }}"
+    status_code: [-1, 200, 400, 401, 403, 404, 500]
+    timeout: 10
+    validate_certs: "{{ gww_vault_validate_certs }}"
+  register: gww_approle_login
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  no_log: true
+  when:
+    - gww_vault_token | length == 0
+    - gww_vault_role_id | length > 0
+    - gww_vault_secret_id | length > 0
+
+- name: "[GWW-003] Fetch the webhook check inputs from OpenBao KV when OpenBao access is given"
+  vars:
+    _gww_vault_token: "{{ gww_vault_token if (gww_vault_token | length > 0) else (gww_approle_login.json.auth.client_token | default('')) }}"
+  ansible.builtin.uri:
+    url: "{{ gww_vault_addr }}/v1/{{ gww_openbao_mount }}/data/{{ gww_openbao_path }}"
+    method: GET
+    headers: "{{ {'X-Vault-Token': _gww_vault_token} | combine({'X-Vault-Namespace': gww_openbao_namespace} if (gww_openbao_namespace | length > 0) else {}) }}"
+    status_code: [-1, 200, 403, 404]
+    timeout: 10
+    validate_certs: "{{ gww_vault_validate_certs }}"
+  register: gww_kv_response
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  no_log: true
+  when:
+    - (gww_vault_token | length > 0) or ((gww_approle_login.json.auth.client_token | default('')) | length > 0)
+
+- name: "[GWW-004] Keep the OpenBao KV values as a fact that never reaches the fact cache"
+  ansible.builtin.set_fact:
+    gww_kv: "{{ gww_kv_response.json.data.data | default({}) }}"
+    cacheable: false
+  no_log: true
+  when: gww_kv_response.json is defined
+
+- name: "[GWW-005] Assert the heartbeat destination inputs exist before calling GitHub"
+  ansible.builtin.assert:
+    that:
+      - gww_o2_endpoint is match('^https?://[^/]+(/.*[^/])?$')
+      - gww_o2_user | length > 0
+      - gww_o2_password | length > 0
+      - gww_o2_org is match('^[A-Za-z0-9_-]+$')
+    fail_msg: >-
+      [GWW-INPUT] 하트비트를 남길 OpenObserve 연결 값(endpoint, 수집 계정)이 없다(값은 로그에 남기지 않는다).
+      OpenBao agents/github-webhook-watch 또는 -e gww_o2_*로 주입한다. 하트비트를 남길 수 없으면 점검하지 않는다.
+  no_log: true
+
+- name: "[GWW-006] Compare the organization webhook and redeliver recently failed deliveries"
+  gww_check:
+    api_url: "{{ gww_github_api_url }}"
+    org: "{{ gww_github_org }}"
+    token: "{{ gww_github_token }}"
+    hook_url: "{{ gww_hook_url }}"
+    expected_events: "{{ gww_expected_events }}"
+    window_hours: "{{ gww_redelivery_window_hours | int }}"
+    interval_hours: "{{ gww_check_interval_hours | int }}"
+    validate_certs: "{{ gww_validate_certs }}"
+  register: gww_check_result
+  delegate_to: localhost
+  no_log: true
+
+- name: "[GWW-007] Build the heartbeat record (codes and counts only, no credentials or URLs)"
+  vars:
+    _r: "{{ gww_check_result.result }}"
+    _result: "{{ 'error' if (_r.error | length > 0) else 'ok' }}"
+  ansible.builtin.set_fact:
+    gww_heartbeat:
+      service_name: "{{ gww_heartbeat_service }}"
+      log_type: security_logs
+      record_type: heartbeat
+      checked_at: "{{ _r.checked_at }}"
+      result: "{{ _result }}"
+      error: "{{ _r.error }}"
+      hook_status: "{{ _r.hook_status }}"
+      hook_problems: "{{ _r.hook_problems | join(',') }}"
+      redelivered_count: "{{ _r.redelivered_count | int }}"
+      failed_count: "{{ _r.failed_count | int }}"
+      expired_count: "{{ _r.expired_count | int }}"
+      interval_hours: "{{ gww_check_interval_hours | int }}"
+      body: "github-webhook-watch heartbeat result={{ _result }} hook_status={{ _r.hook_status }} redelivered={{ _r.redelivered_count }} failed={{ _r.failed_count }}"
+    cacheable: false
+  no_log: true
+
+- name: "[GWW-008] Send the heartbeat record to OpenObserve"
+  ansible.builtin.uri:
+    url: "{{ gww_o2_endpoint }}/api/{{ gww_o2_org }}/{{ gww_heartbeat_stream }}/_json"
+    method: POST
+    url_username: "{{ gww_o2_user }}"
+    url_password: "{{ gww_o2_password }}"
+    force_basic_auth: true
+    body_format: json
+    body: "{{ [gww_heartbeat | combine({'redelivered_count': gww_heartbeat.redelivered_count | int, 'failed_count': gww_heartbeat.failed_count | int, 'expired_count': gww_heartbeat.expired_count | int, 'interval_hours': gww_heartbeat.interval_hours | int})] }}"
+    status_code: [200]
+    timeout: 15
+    validate_certs: "{{ gww_o2_validate_certs }}"
+  retries: 2
+  delay: 3
+  register: gww_heartbeat_sent
+  until: gww_heartbeat_sent.status | default(-1) == 200
+  delegate_to: localhost
+  no_log: true
+  when: not ansible_check_mode
+
+- name: "[GWW-009] Report the check result (status and counts only)"
+  ansible.builtin.debug:
+    msg: >-
+      [GWW-RESULT] 확인 시각 {{ gww_heartbeat.checked_at }}, 결과 {{ gww_heartbeat.result }}{{ (' (' ~ gww_heartbeat.error ~ ')') if gww_heartbeat.error | length > 0 else '' }},
+      훅 상태 {{ gww_heartbeat.hook_status }}{{ (' [' ~ gww_heartbeat.hook_problems ~ ']') if gww_heartbeat.hook_problems | length > 0 else '' }},
+      재전송 {{ gww_heartbeat.redelivered_count }}건{{ (', 재전송 예정 ' ~ gww_check_result.result.would_redeliver_count ~ '건') if ansible_check_mode else '' }},
+      실패 {{ gww_heartbeat.failed_count }}건, 기간 만료 {{ gww_heartbeat.expired_count }}건{{ ' (check 모드: 재전송과 하트비트 기록 없음)' if ansible_check_mode else '' }}
+
+- name: "[GWW-010] Fail the run when the GitHub API failed or the credential is missing"
+  ansible.builtin.assert:
+    that:
+      - gww_heartbeat.error | length == 0
+    fail_msg: >-
+      [GWW-API] 웹훅 점검이 실패했다(오류 코드 {{ gww_heartbeat.error }}). 하트비트에 오류를 남겼다.
+      자격(OpenBao agents/github-webhook-watch의 github_token)의 만료·권한(조직 Webhooks)·조직 이름과 API 가용성을 확인한다.

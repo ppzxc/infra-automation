@@ -1,0 +1,57 @@
+---
+# ==============================================================================
+# GitHub 조직 웹훅 전달 점검 역할 기본값 (docs/github_webhook_watch.md, Spec #399 / Ticket-5)
+# 공개 저장소이므로 자격·URL·조직명은 두지 않는다. 값은 OpenBao KV `agents/github-webhook-watch`
+# (키: github_token, github_org, hook_url, o2_endpoint, o2_org, o2_ingest_user, o2_ingest_password,
+#  선택: github_api_url, expected_events)에서 읽고, Extra variables(-e gww_...)가 우선한다.
+# ==============================================================================
+
+# 점검 주기(시간)와 재전송 가능 기간(시간). 재전송 가능 기간은 GitHub 공식 문서의 "최근 3일"이다(Ticket-1).
+# 주기는 기간보다 훨씬 짧아야 한다(GWW-001이 주기 < 기간을 검사한다). Semaphore 예약은 `0 */6 * * *`.
+gww_check_interval_hours: 6
+gww_redelivery_window_hours: 72
+
+# OpenBao 조회 (다른 컨트롤러 역할과 같은 환경변수 계층)
+gww_openbao_path: agents/github-webhook-watch
+gww_openbao_mount: "{{ lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT'), true) | default('secret', true) }}"
+gww_openbao_namespace: "{{ (lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE'), true) | default('infra/prod/host', true)) | regex_replace('/+$', '') }}"
+gww_vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}"
+gww_vault_token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+gww_vault_role_id: "{{ lookup('ansible.builtin.env', 'VAULT_ROLE_ID') }}"
+gww_vault_secret_id: "{{ lookup('ansible.builtin.env', 'VAULT_SECRET_ID') }}"
+gww_vault_validate_certs: false
+gww_kv: {}
+
+# GitHub 조직 웹훅 API. 토큰은 조직 권한 Webhooks(read, 재전송은 write)만 가진 만료일 있는 값이다.
+gww_github_api_url: "{{ gww_kv.github_api_url | default('https://api.github.com', true) }}"
+gww_github_token: "{{ gww_kv.github_token | default('', true) }}"
+gww_github_org: "{{ gww_kv.github_org | default('', true) }}"
+# 의도한 웹훅의 수신 URL(웹훅 설정의 config.url). 이 값으로 훅을 찾는다. 값은 OpenBao에만 둔다.
+gww_hook_url: "{{ gww_kv.hook_url | default('', true) }}"
+gww_validate_certs: true
+
+# 의도한 구독 이벤트(Ticket-1 확정 목록). 최종 목록은 사용자가 확정하며 KV `expected_events`나 -e로 바꾼다.
+gww_expected_events: "{{ gww_kv.expected_events | default(gww_default_events, true) }}"
+gww_default_events:
+  - meta
+  - organization
+  - member
+  - membership
+  - org_block
+  - branch_protection_rule
+  - deploy_key
+  - custom_property
+  - repository
+  - public
+  - team
+  - repository_ruleset
+  - personal_access_token_request
+
+# 하트비트를 남길 OpenObserve 연결. 스트림은 보안 로그다(service_name=github-webhook-watch).
+gww_o2_endpoint: "{{ gww_kv.o2_endpoint | default('', true) }}"
+gww_o2_org: "{{ gww_kv.o2_org | default('default', true) }}"
+gww_o2_user: "{{ gww_kv.o2_ingest_user | default('', true) }}"
+gww_o2_password: "{{ gww_kv.o2_ingest_password | default('', true) }}"
+gww_o2_validate_certs: "{{ gww_o2_endpoint is match('^https://') }}"
+gww_heartbeat_stream: security_logs
+gww_heartbeat_service: github-webhook-watch
