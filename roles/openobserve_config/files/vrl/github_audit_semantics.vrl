@@ -1,0 +1,133 @@
+# OpenObserve VRL ingest function: github_audit_semantics (ADR-0008, Spec #399 / Ticket-3)
+#
+# Runs on the security_logs stream (real-time pipeline, after flatten, after security_semantics and fortigate_semantics) but only
+# touches records whose service name is `github-audit` (GitHub organization webhook deliveries received by otelcol, Ticket-2).
+# Every other record, a body that is not a JSON object, a record without the event header and an event that is not in the list
+# below is returned unchanged. The original `body` and every existing field are never modified; fields are only ADDED.
+#
+# Inputs (collector contract, docs/monitoring.md section 3-3): the header attributes `header.X-Github-Event`, `header.X-Github-Delivery`,
+# `header.X-Github-Hook-Id` (strings; OpenObserve stores them flattened as header_x_github_event ..., the unlowered and the dotted
+# spellings are accepted too) and `body` (the webhook JSON text).
+#
+# Fields (snake_case, the input contract of the alerts; table in docs/openobserve_config.md):
+#   github_event          X-GitHub-Event header (one of the 13 confirmed events)
+#   github_action         payload `action`; absent when the payload has none (`public`)
+#   github_delivery_id    X-GitHub-Delivery header
+#   github_hook_id        X-GitHub-Hook-ID header
+#   github_actor          payload `sender.login`; absent when the payload has no sender
+#   github_actor_ghost    true when the actor is unknown (sender is the `ghost` placeholder or missing), else false
+#   github_org            payload `organization.login`
+#   github_repo           payload `repository.full_name`
+#   github_target         what the event is about (member / team / key / rule ...), per event, see `paths` below
+#   github_target_type    user | team | repository | ruleset | hook | branch_rule | deploy_key | custom_property
+#   github_team           membership only: the team the member was added to / removed from
+#
+# Target structures that docs.github.com does not spell out (e.g. member.login) are read defensively: an unreadable target leaves
+# github_target out and keeps every other field. Keep this file free of secrets and of real names.
+
+service = string(.service_name) ?? string(get!(., ["service.name"])) ?? ""
+body = string(.body) ?? ""
+
+if service == "github-audit" {
+    # header values: the collector turns the one-element array into a string; an array is still read as its first element
+    # `get` of a missing key is null (not an error), so each spelling is tried only while the value is still null
+    event = null
+    delivery = null
+    hook = null
+    for_each(["header_x_github_", "header_X_Github_", "header.X-Github-"]) -> |_index, stem| {
+        sep = if starts_with(string!(stem), "header.") { "-" } else { "_" }
+        if is_null(event) {
+            event = get(., [string!(stem) + "event"]) ?? null
+        }
+        if is_null(delivery) {
+            delivery = get(., [string!(stem) + "delivery"]) ?? null
+        }
+        if is_null(hook) {
+            hook = get(., [string!(stem) + "hook" + sep + "id"]) ?? null
+        }
+    }
+    if is_array(event) {
+        event = event[0]
+    }
+    if is_array(delivery) {
+        delivery = delivery[0]
+    }
+    if is_array(hook) {
+        hook = hook[0]
+    }
+    event = string(event) ?? ""
+
+    # event -> [target type, candidate payload paths in order]
+    paths = {
+        "repository": ["repository", [["repository", "full_name"]]],
+        "public": ["repository", [["repository", "full_name"]]],
+        "team": ["team", [["team", "slug"], ["team", "name"]]],
+        "repository_ruleset": ["ruleset", [["repository_ruleset", "name"]]],
+        "personal_access_token_request": ["user", [["personal_access_token_request", "owner", "login"]]],
+        "meta": ["hook", [["hook_id"], ["hook", "id"]]],
+        "organization": ["user", [["membership", "user", "login"], ["invitation", "login"], ["user", "login"]]],
+        "member": ["user", [["member", "login"]]],
+        "membership": ["user", [["member", "login"]]],
+        "org_block": ["user", [["blocked_user", "login"]]],
+        "branch_protection_rule": ["branch_rule", [["rule", "name"]]],
+        "deploy_key": ["deploy_key", [["key", "title"]]],
+        "custom_property": ["custom_property", [["definition", "property_name"]]],
+    }
+    spec = get(paths, [event]) ?? null
+
+    payload, err = parse_json(body)
+    if spec != null && err == null && is_object(payload) {
+        .github_event = event
+        if !is_null(delivery) {
+            .github_delivery_id = to_string(delivery)
+        }
+        if !is_null(hook) {
+            .github_hook_id = to_string(hook)
+        }
+
+        action = string(get(payload, ["action"]) ?? null) ?? ""
+        if action != "" {
+            .github_action = action
+        }
+
+        actor = string(get(payload, ["sender", "login"]) ?? null) ?? ""
+        if actor != "" {
+            .github_actor = actor
+        }
+        # the ghost placeholder (deleted or unidentifiable account) and a payload without a sender both mean "the actor is not known"
+        .github_actor_ghost = actor == "" || actor == "ghost"
+
+        org = string(get(payload, ["organization", "login"]) ?? null) ?? ""
+        if org != "" {
+            .github_org = org
+        }
+        repo = string(get(payload, ["repository", "full_name"]) ?? null) ?? ""
+        if repo != "" {
+            .github_repo = repo
+        }
+
+        target = ""
+        candidates = array(spec[1]) ?? []
+        for_each(candidates) -> |_index, path| {
+            if target == "" {
+                value = get(payload, array!(path)) ?? null
+                if is_string(value) {
+                    target = string!(value)
+                } else if is_integer(value) {
+                    target = to_string!(value)
+                }
+            }
+        }
+        if target != "" {
+            .github_target = target
+            .github_target_type = spec[0]
+        }
+
+        if event == "membership" {
+            team = string(get(payload, ["team", "slug"]) ?? null) ?? string(get(payload, ["team", "name"]) ?? null) ?? ""
+            if team != "" {
+                .github_team = team
+            }
+        }
+    }
+}

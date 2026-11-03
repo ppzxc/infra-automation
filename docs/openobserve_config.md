@@ -18,7 +18,7 @@
   | `user_effective_name`, `process_command_line` | sudo 대상 사용자(`USER=`)와 실행 명령(`COMMAND=`) — sudo 성공은 알림 없이 이 필드로 감사 기록만 남김 |
 
   입력 필드는 엣지(#91)가 만든 `process_executable_name`(= `sshd`·`sshd-session`(OpenSSH 9.8+)/`sudo`)와 원문 `body`입니다. 엣지와 필드 계약이 바뀌면 같은 PR(또는 연속 PR)에서 함께 고칩니다.
-- **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수 `security_semantics` → 함수 `fortigate_semantics`(둘 다 `after_flatten: true`) → `security_logs`.
+- **파이프라인** `security_semantics`: `security_logs` 실시간 소스 → 함수 `security_semantics` → 함수 `fortigate_semantics` → 함수 `github_audit_semantics`(셋 다 `after_flatten: true`) → `security_logs`.
 - **VRL ingest function `fortigate_semantics`** (`roles/openobserve_config/files/vrl/fortigate_semantics.vrl`, Spec #282 / Ticket-2): `security_logs`에서 `service_name = fortigate-syslog`인 레코드(포티게이트 방화벽 syslog, [런북](runbooks/fortigate-syslog.md))만 해석해 필드를 **추가**합니다. 원문 `body`와 기존 필드(`host_name`은 수집 서버, `severity`는 항상 0)는 바꾸지 않고, `type=` 키가 없는 줄과 다른 서비스(서버·스위치 포함) 레코드는 그대로 통과합니다. 소스 스트림당 파이프라인은 하나라 별도 파이프라인 없이 보안 로그 파이프라인에서 `security_semantics` 다음 함수로 잇습니다(서비스 검사는 각 함수 안에 있어 서로의 레코드를 건드리지 않습니다). 필드 이름은 OTel 관례를 따르고 OpenObserve가 점을 밑줄로 저장합니다.
 
   | 필드 | 원문 키 | 의미 |
@@ -32,6 +32,24 @@
   | `fortigate_policy_id` | `policyid` | 정책 식별자(정수, 0은 암묵적 거부 정책) |
 
   입력은 FortiOS 기본 `key=value` 형식(`[<PRI>][syslog 헤더] date=… devname="…" type="…" …`)이며 값은 맨몸이거나 큰따옴표로 감싼다(따옴표 안의 공백과 `key=` 꼴 텍스트는 한 값으로 읽는다). 장비 시각은 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)를 바꾸지 않는다. **장비 이름 별칭(`o2c_fortigate_device_aliases`)**: 계정 권한 문제로 hostname을 관리번호로 바꾸지 못한 장비는 기존 이름을 그대로 `devname`에 싣는다. 이런 장비의 `device_id`를 채우려고 `{소문자 정규화한 devname: 관리번호}` 별칭표(기본 `{}`)를 둔다(예: `{example_branch_fw: ns0000}`). 키는 `device_name`과 같은 값(소문자, 도메인 제외)이고 값은 `ns` + 숫자여야 하며, `O2C-002`가 요청 전에 형식을 검증한다. 표는 `o2c_desired`가 함수 소스의 `device_aliases = {}` 줄에 JSON 객체로 써 넣으므로 값이 바뀌면 다음 `OpenObserve — Config` 실행에서 함수가 갱신된다. `device_name`은 별칭과 상관없이 정규화한 `devname` 그대로다. 공개 저장소라 실제 이름과 별칭 값은 저장소에 쓰지 않고 Semaphore Environment(Extra variables)로 주입한다. **실로그 샘플로 검증됨(검증 범위: 관리자 로그인 성공/실패, 정책·로그 설정 변경(GUI·jsconsole·ha_daemon), 로컬·포워드 트래픽(정책 0 포함), IPsec 터널 통계, UTM(ips·virus·dlp·anomaly), HA 인터페이스 실패, FSSO, 엔드포인트. 검증되지 않은 종류: HA 전환(상태 변경) 실제 줄, SSL VPN 사용자 로그인/로그아웃·로그인 실패 줄, 실제 장비가 만든 웹필터·앱제어 줄, IPv6 주소).** 실제 줄을 가짜 값으로 치환한 `tests/fixtures/fortigate_real_lines.tsv`로 테스트한다. 실측으로 VPN 터널 통계의 `user`(상대 장비 주소)는 `user_name`으로 만들지 않도록 고쳤다.
+- **VRL ingest function `github_audit_semantics`** (`roles/openobserve_config/files/vrl/github_audit_semantics.vrl`, Spec #399 / Ticket-3): `security_logs`에서 `service_name = github-audit`(또는 `service.name`)인 레코드(GitHub 조직 웹훅 전달, [수집 설정](monitoring.md) §3-3)만 해석해 필드를 **추가**합니다(ADR-0008: 원문 `body`와 기존 필드는 바꾸지 않음). 본문이 JSON 객체가 아니거나, 이벤트 헤더가 없거나, 아래 13개 밖의 이벤트(`ping` 포함)이거나, 다른 서비스 레코드는 그대로 통과합니다. 보안 로그 파이프라인에서 `fortigate_semantics` 다음 마지막 함수로 잇고(기존 두 함수는 `github-audit` 레코드를 건드리지 않음, 서비스 검사는 함수 안), 기존 함수의 동작은 바뀌지 않습니다. **입력:** 수집기가 고정한 헤더 속성 `header.X-Github-Event`·`header.X-Github-Delivery`·`header.X-Github-Hook-Id`(OpenObserve에는 `header_x_github_event` 등으로 저장되며 대소문자 보존·점 표기도 받는다)와 원문 `body`(웹훅 JSON). **이벤트(13):** `repository`, `public`, `team`, `repository_ruleset`, `personal_access_token_request`, `meta`, `organization`, `member`, `membership`, `org_block`, `branch_protection_rule`, `deploy_key`, `custom_property`. 이 필드 표가 Ticket-4 알림의 입력 계약이다(이름은 snake_case로 고정).
+
+  | 필드 | 원문 | 의미 |
+  |---|---|---|
+  | `github_event` | 헤더 `X-GitHub-Event` | 이벤트 이름(위 13개). 같은 `deleted`도 이 값으로 구분 |
+  | `github_action` | `action` | 액션(`created`·`deleted`·`member_added` 등). `public`처럼 액션이 없으면 필드 없음 |
+  | `github_delivery_id` | 헤더 `X-GitHub-Delivery` | 전달 GUID(재전송·재조회의 키) |
+  | `github_hook_id` | 헤더 `X-GitHub-Hook-ID` | 웹훅 ID(문자열) |
+  | `github_actor` | `sender.login` | 행위자. `sender`가 없으면 필드 없음 |
+  | `github_actor_ghost` | `sender.login` | 불리언. 행위자를 알 수 없으면(`ghost` 자리표시 계정 또는 `sender` 없음) `true`, 확인되면 `false`. 항상 있다 |
+  | `github_org` | `organization.login` | 조직 |
+  | `github_repo` | `repository.full_name` | 저장소(`조직/이름`). 저장소 활동이 아니면 필드 없음 |
+  | `github_target` | 이벤트별(아래) | 이벤트의 대상. 구조를 못 읽으면 필드 없음(나머지 필드는 유지) |
+  | `github_target_type` | 이벤트별 | `user`·`team`·`repository`·`ruleset`·`hook`·`branch_rule`·`deploy_key`·`custom_property` |
+  | `github_team` | `team.slug`(없으면 `team.name`) | `membership` 이벤트만: 멤버가 추가·제거된 팀 |
+
+  대상 필드 위치: `repository`·`public`→`repository.full_name`, `team`→`team.slug`(없으면 `name`), `repository_ruleset`→`repository_ruleset.name`, `personal_access_token_request`→`…owner.login`, `meta`→`hook_id`(없으면 `hook.id`), `organization`→`membership.user.login`·`invitation.login`·`user.login` 순, `member`·`membership`→`member.login`, `org_block`→`blocked_user.login`, `branch_protection_rule`→`rule.name`, `deploy_key`→`key.title`, `custom_property`→`definition.property_name`. 공식 문서가 내부 구조를 명시하지 않은 항목(`member.login` 등)은 방어적으로 읽으며 실제 수신 샘플로 확인이 필요하다(미확인). 검증: `tests/test_github_audit_vrl.py`(vrl CLI, 가짜 조직·사용자만 사용).
+
 - **VRL ingest function `switch_syslog_semantics`** (`roles/openobserve_config/files/vrl/switch_syslog_semantics.vrl`, Spec #277): `system_logs`에서 `service_name = switch-syslog`인 레코드(스위치 syslog, #276)만 해석해 장비와 Cisco 메시지 필드를 **추가**합니다. 원문 `body`와 기존 필드(`host_name`은 수집 서버, `severity`는 항상 0)는 바꾸지 않고, `%FACILITY-SEVERITY-MNEMONIC:` 형식이 아닌 줄과 다른 서비스(서버 로그)는 그대로 통과합니다. 이 서비스 검사는 파이프라인 조건 노드가 아니라 함수 안에 있습니다(조건 노드에서 걸러진 레코드가 출력 노드에 닿지 않아 서버 로그가 사라지는 위험을 피하고, VRL 테스트로 검증하기 위해서).
 
   | 필드 | 의미 |
@@ -202,7 +220,7 @@ GET으로 현재 상태와 비교해 **차이가 있는 객체만** POST(생성)
 | `O2C-000` | `Log in to OpenBao with AppRole for the OpenObserve configuration KV` | `ansible.builtin.uri` | Controller | 읽기 전용 (토큰 발급만, `changed_when: false`, `check_mode: false`, `no_log`. `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 없으면 건너뛰고 `VAULT_TOKEN`을 쓴다) |
 | `O2C-001` | `Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)` | `ansible.builtin.uri` | Controller | 읽기 전용 (GET, `check_mode: false`, `no_log`) |
 | `O2C-002` | `Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)` | `ansible.builtin.assert` | Controller | 읽기 전용 (필수 입력이 없으면 요청 전에 실패, `no_log`. `o2c_p1_destination` 형식(비우거나 destination 이름 문자), 스위치 syslog 알림 목록(메시지 코드·수신 중단 장비·업링크 포트)과 방화벽 목록·장비 이름 별칭표(`o2c_fortigate_device_aliases`), 보안 로그 알림 목록(특권 그룹·위험 명령·보호 서비스)과 무차별 대입 임계(#318)는 SQL·VRL에 들어가므로 형식도 여기서 검증) |
-| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 알림별 원문 로그 링크(`o2c_raw_log_sql`·`o2c_raw_log_url`, `o2c_web_url`)도 여기서 만든다 · 템플릿·대상·함수 3개(`security_semantics`, `fortigate_semantics`(별칭표를 소스에 주입), `switch_syslog_semantics`)·파이프라인 2개(보안 로그 파이프라인은 함수 둘을 잇는다)·알림. `enabled`가 거짓인 알림(업링크 목록이 빈 규칙)은 `o2c_alerts_active`에서 빠진다) |
+| `O2C-003` | `Derive the desired OpenObserve objects from the repository definitions` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`o2c_desired`: 알림별 원문 로그 링크(`o2c_raw_log_sql`·`o2c_raw_log_url`, `o2c_web_url`)도 여기서 만든다 · 템플릿·대상·함수 4개(`security_semantics`, `fortigate_semantics`(별칭표를 소스에 주입), `github_audit_semantics`, `switch_syslog_semantics`)·파이프라인 2개(보안 로그 파이프라인은 함수 셋을 잇는다)·알림. `enabled`가 거짓인 알림(업링크 목록이 빈 규칙)은 `o2c_alerts_active`에서 빠진다) |
 | `O2C-008` | `Dump the rendered non-secret desired objects for tests when o2c_render_dump is set` | `ansible.builtin.copy` | Controller | 로컬 파일 쓰기 (`o2c_render_dump`가 비어 있지 않을 때만, `mode: '0600'`, `no_log`). `O2C-003`이 도출한 객체 중 시크릿이 아닌 것(destination 제외)을 JSON으로 덤프 — 테스트가 알림 정의를 공유하려는 용도 |
 | `O2C-009` | `End the play after the render dump when o2c_render_dump is set (before any OpenObserve read)` | `ansible.builtin.meta` | Controller | 읽기 전용 (`o2c_render_dump`가 비어 있지 않으면 OpenObserve를 읽기 전에 정상 종료, 실패 아님) |
 | `O2C-004` | `Read the otel_app_telemetry switch of every collect-roster host from OpenBao (hosts/<host>/agents)` | `o2c_http` | Controller | 읽기 전용 (수집 로스터 호스트마다 병렬 GET, 200·404만 허용하고 그 밖은 실패, `changed_when: false`, `check_mode: false`, `no_log`. 테스트 픽스처 `o2c_app_telemetry_kv_fixture`가 있거나 토큰이 없으면 건너뛰되, 읽을 호스트가 있는데 토큰이 없으면 이 태스크 앞의 assert가 실행을 실패시켜 로스터가 조용히 비지 않게 한다) |

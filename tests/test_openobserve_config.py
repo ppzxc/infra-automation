@@ -23,7 +23,7 @@ import yaml
 from o2c_render import KV, WEBHOOK_URL, fixture_args, render_desired
 from o2c_alert_helpers import (  # 렌더 테스트와 공유하는 상수·헬퍼(#348)
     DEFAULTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS,
-    FORTIGATE_FN, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS,
+    FORTIGATE_FN, GITHUB_FN, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS,
     PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
     RUNBOOK, SECURITY_ALERTS, SECURITY_TIME_CASES, SELFTEST,
     SWITCH_ALERTS, SWITCH_FN, SYSTEM_TIME_CASES, _branch_devices,
@@ -238,11 +238,11 @@ def test_first_run_creates_template_destination_function_pipeline_and_every_aler
     assert res.returncode == 0, res.stdout + res.stderr
     assert all(m == "POST" for m, _, _ in o2.writes)
     paths = [p for _, p, _ in o2.writes]
-    assert paths[:7] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
-                         "/api/default/functions", "/api/default/functions", "/api/default/pipelines",
-                         "/api/default/pipelines"]   # 함수 3개(보안·스위치·방화벽), 파이프라인 2개(보안 로그는 함수 둘을 잇는다)
+    assert paths[:8] == ["/api/default/alerts/templates", "/api/default/alerts/destinations", "/api/default/functions",
+                         "/api/default/functions", "/api/default/functions", "/api/default/functions", "/api/default/pipelines",
+                         "/api/default/pipelines"]   # 함수 4개(보안·방화벽·GitHub 감사·스위치), 파이프라인 2개(보안 로그는 함수 셋을 잇는다)
     assert set(o2.store["alert"]) == EXPECTED_ALERTS | set(PROMQL_ALERTS) | {SELFTEST}
-    assert paths[7:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + len(PROMQL_ALERTS) + 1)
+    assert paths[8:] == ["/api/v2/default/alerts"] * (len(EXPECTED_ALERTS) + len(PROMQL_ALERTS) + 1)
 
 
 @pytest.mark.parametrize("extra", [{}, {"o2c_tz_offset": 480}], ids=["defaults", "tz_offset_overridden"])
@@ -1404,7 +1404,18 @@ def test_a_security_pipeline_deployed_before_the_firewall_function_is_extended_b
     assert _apply(o2).returncode == 0
     ((method, path, body),) = o2.writes
     assert (method, path) == ("PUT", "/api/default/pipelines")
-    assert [n["data"]["name"] for n in body["nodes"] if n["data"]["node_type"] == "function"] == ["security_semantics", FORTIGATE_FN]
+    assert [n["data"]["name"] for n in body["nodes"] if n["data"]["node_type"] == "function"] == ["security_semantics", FORTIGATE_FN, GITHUB_FN]
+
+
+def test_a_security_pipeline_deployed_before_the_github_audit_function_is_extended_by_a_single_update(o2):
+    assert _apply(o2).returncode == 0
+    pl = o2.store["pipeline"]["security_semantics"]
+    pl["nodes"] = [n for n in pl["nodes"] if n["data"].get("name") != GITHUB_FN]   # the two-function shape before Spec #399
+    o2.writes.clear()
+    assert _apply(o2).returncode == 0
+    ((method, path, body),) = o2.writes
+    assert (method, path) == ("PUT", "/api/default/pipelines")
+    assert [n["data"]["name"] for n in body["nodes"] if n["data"]["node_type"] == "function"] == ["security_semantics", FORTIGATE_FN, GITHUB_FN]
 
 
 def test_firewall_function_drift_is_repaired_by_a_single_update(o2):

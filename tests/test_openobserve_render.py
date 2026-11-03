@@ -17,7 +17,7 @@ import yaml
 
 from o2c_render import KV, RENDER_LOG_ENV, ROOT_DIR, render_desired
 from o2c_alert_helpers import (
-    COUNT_FIELDS, DEVICE_TIME_ALERTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS, FORTIGATE_FN, LONGEST_ROW_VALUES,
+    COUNT_FIELDS, DEVICE_TIME_ALERTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS, FORTIGATE_FN, GITHUB_FN, LONGEST_ROW_VALUES,
     LONGEST_TEXT, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS, PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
     RUNBOOK, SECURITY_ALERTS, SECURITY_TIME_CASES, SELFTEST, SWITCH_ALERTS, SWITCH_FN, SYSTEM_TIME_CASES,
     TEXT_VALUE, _branch_devices, _decode_raw_url, _ev, _fail, _filters, _fixture_records, _kst_us, _raw_line,
@@ -445,7 +445,7 @@ def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_
 
 
 def test_switch_function_and_pipeline_are_added_beside_the_security_ones_and_the_security_pipeline_is_untouched(desired):
-    assert set(desired.store["function"]) == {"security_semantics", SWITCH_FN, FORTIGATE_FN}
+    assert set(desired.store["function"]) == {"security_semantics", SWITCH_FN, FORTIGATE_FN, GITHUB_FN}
     fn = desired.store["function"][SWITCH_FN]
     assert fn["function"] == (ROLE / "files" / "vrl" / "switch_syslog_semantics.vrl").read_text().strip() and fn["params"] == "row"
     pl = desired.store["pipeline"][SWITCH_FN]
@@ -465,14 +465,23 @@ def test_firewall_function_runs_in_the_security_pipeline_right_after_the_securit
     pl = desired.store["pipeline"]["security_semantics"]
     assert pl["source"]["stream_name"] == "security_logs" and pl["enabled"] is True
     functions = [n for n in pl["nodes"] if n["data"]["node_type"] == "function"]
-    assert [(n["data"]["name"], n["data"]["after_flatten"]) for n in functions] == [("security_semantics", True), (FORTIGATE_FN, True)]
-    # input -> security_semantics -> fortigate_semantics -> output, and no condition node (the service check lives in the function)
+    assert [(n["data"]["name"], n["data"]["after_flatten"]) for n in functions] == [("security_semantics", True), (FORTIGATE_FN, True), (GITHUB_FN, True)]
+    # input -> security_semantics -> fortigate_semantics -> github_audit_semantics -> output, and no condition node (the service check lives in the function)
     edges = {(e["source"], e["target"]) for e in pl["edges"]}
     ids = {n["data"].get("name") or n["io_type"]: n["id"] for n in pl["nodes"]}
     assert edges == {(next(n["id"] for n in pl["nodes"] if n["io_type"] == "input"), ids["security_semantics"]),
                      (ids["security_semantics"], ids[FORTIGATE_FN]),
-                     (ids[FORTIGATE_FN], next(n["id"] for n in pl["nodes"] if n["io_type"] == "output"))}
+                     (ids[FORTIGATE_FN], ids[GITHUB_FN]),
+                     (ids[GITHUB_FN], next(n["id"] for n in pl["nodes"] if n["io_type"] == "output"))}
     assert not [n for n in pl["nodes"] if n["data"]["node_type"] == "condition"]
+
+
+def test_github_audit_function_is_chained_last_and_the_existing_function_sources_are_unchanged(desired):
+    """Spec #399 / Ticket-3: github_audit_semantics follows the existing functions in the security pipeline; the others keep their source."""
+    fn = desired.store["function"][GITHUB_FN]
+    assert fn["function"] == (ROLE / "files" / "vrl" / "github_audit_semantics.vrl").read_text().strip() and fn["params"] == "row"
+    assert desired.store["function"]["security_semantics"]["function"] == (ROLE / "files" / "vrl" / "security_semantics.vrl").read_text().strip()
+    assert "github" not in desired.store["function"][FORTIGATE_FN]["function"]
 
 
 def test_default_noise_list_holds_the_arp_resolution_failure_and_every_alert_excludes_it(desired):
