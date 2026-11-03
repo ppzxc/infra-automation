@@ -802,3 +802,91 @@ def test_auth_silent_alerts_watch_only_the_auth_source_for_every_roster_host(tmp
             assert "FROM \"security_logs\" WHERE host_name = '%s' AND service_name = 'auth' HAVING" % host in sql
     assert "- 2700000000 THEN 1" in p2 and "count(*) >= 1" in p2   # 변수로 바꾼 최근 구간(45분)이 SQL에 들어간다. 3시간 전체 없음은 P1 몫
     assert "HAVING count(*) < 1" in p1 and "THEN 1" not in p1
+
+
+# --- GitHub 웹훅 전달 점검 (Spec #399 / Ticket-6) ---
+GWW_ALERTS = {   # name -> (severity, period minutes, frequency, silence)
+    "infra-github-webhook-watch-silent": ("P1 긴급", 13 * 60, 60, 360),
+    "infra-github-webhook-hook-state": ("P2 경고", 15, 5, 60),
+    "infra-github-webhook-redelivery-failed": ("P2 경고", 15, 5, 60),
+    "infra-github-webhook-check-error": ("P2 경고", 15, 5, 60),
+}
+
+
+def test_github_webhook_alerts_keep_the_prefix_severity_runbook_link_and_timing(desired, rendered):
+    for name, (sev, period, freq, silence) in GWW_ALERTS.items():
+        assert name.startswith("infra-"), name
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == sev, name
+        assert alert["context_attributes"]["runbook"].endswith("#" + name.removeprefix("infra-")), name
+        assert alert["stream_name"] == "security_logs", name
+        tc = alert["trigger_condition"]
+        assert (tc["period"], tc["frequency"], tc["silence"]) == (period, freq, silence), name
+    names = [o["name"] for o in rendered if o["kind"] == "alert"]
+    assert len(names) == len(set(names)) and set(GWW_ALERTS) <= set(names)   # 기존 알림 이름과 겹치지 않는다
+
+
+def test_github_webhook_runbook_sections_exist_for_every_alert():
+    text = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
+    for name in GWW_ALERTS:
+        assert '<a id="%s"></a>' % name.removeprefix("infra-") in text and "`%s`" % name in text, name
+
+
+def test_github_webhook_silence_threshold_covers_two_check_intervals_but_stays_inside_the_redelivery_window(desired):
+    defaults = yaml.safe_load((ROOT_DIR / "roles" / "github_webhook_watch" / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    period_min = desired.store["alert"]["infra-github-webhook-watch-silent"]["trigger_condition"]["period"]
+    assert period_min > 2 * int(defaults["gww_check_interval_hours"]) * 60   # 한 번 빠진 실행에는 울리지 않는다
+    assert period_min < int(defaults["gww_redelivery_window_hours"]) * 60 / 2   # 재전송 가능 기간(3일)에 비해 충분히 일찍 알린다
+
+
+def test_github_webhook_silent_alert_watches_only_the_heartbeat_record(desired):
+    assert _sql(desired, "infra-github-webhook-watch-silent") == (
+        "SELECT 'github-webhook-watch' AS service_name, count(*) AS n FROM \"security_logs\" "
+        "WHERE service_name = 'github-webhook-watch' AND record_type = 'heartbeat' HAVING count(*) < 1")
+
+
+HEARTBEAT = dict(service_name="github-webhook-watch", record_type="heartbeat", result="ok", error="", hook_status="ok", hook_problems="",
+                 failed_count=0, expired_count=0, deliveries_truncated=False)
+
+
+@pytest.mark.parametrize("name, change, fires", [
+    ("infra-github-webhook-hook-state", dict(hook_status="missing", hook_problems="hook_missing"), True),
+    ("infra-github-webhook-hook-state", dict(hook_status="inactive"), True),
+    ("infra-github-webhook-hook-state", dict(hook_status="events_mismatch"), True),
+    ("infra-github-webhook-hook-state", dict(hook_status="ok"), False),
+    ("infra-github-webhook-redelivery-failed", dict(failed_count=1), True),
+    ("infra-github-webhook-redelivery-failed", dict(expired_count=2), True),
+    ("infra-github-webhook-redelivery-failed", dict(deliveries_truncated=True), True),
+    ("infra-github-webhook-redelivery-failed", dict(), False),
+    ("infra-github-webhook-redelivery-failed", dict(deliveries_truncated="true"), True),   # 불리언이 문자열로 들어와도 판정이 같다
+    ("infra-github-webhook-redelivery-failed", dict(deliveries_truncated="false"), False),
+    ("infra-github-webhook-check-error", dict(result="error", error="credential_missing"), True),
+    ("infra-github-webhook-check-error", dict(result="error", error="api_http_401", hook_status="unknown"), True),
+    ("infra-github-webhook-check-error", dict(result="ok", error=""), False),
+])
+def test_github_webhook_event_alerts_fire_on_the_documented_heartbeat_fields(desired, name, change, fires):
+    rows = _run_alert_on_sqlite(_sql(desired, name), [dict(HEARTBEAT, **change)], stream="security_logs")
+    assert bool(rows) is fires
+
+
+def test_github_webhook_rows_fit_the_message_limit_in_the_worst_case(desired):
+    values = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "event_time": LONGEST_ROW_VALUES["event_time"],
+              "failed_count": "9999", "expired_count": "9999", "truncated": "1", "error": "api_unexpected_response", "service_name": "github-webhook-watch"}
+    for name in GWW_ALERTS:
+        assert len(_rendered_message(desired, name, values)) <= BODY_LIMIT, name
+
+
+def test_github_webhook_truncated_flag_is_read_without_a_boolean_aggregate_or_comparison(desired):
+    sql = _sql(desired, "infra-github-webhook-redelivery-failed")
+    assert "max(deliveries_truncated)" not in sql and "deliveries_truncated = true" not in sql   # 엔진마다 불리언 max·비교가 다르다
+    rows = _run_alert_on_sqlite(sql, [dict(HEARTBEAT, deliveries_truncated=True)], stream="security_logs")
+    assert rows[0]["truncated"] == 1
+
+
+def test_github_webhook_check_error_alert_names_every_documented_error_code_in_its_runbook():
+    text = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
+    section = text.split('<a id="github-webhook-check-error"></a>')[1].split("\n---\n")[0]
+    for code in ("credential_missing", "api_unreachable", "api_http_401", "api_http_403", "api_unexpected_response"):
+        assert code in section, code
+    silent = text.split('<a id="github-webhook-watch-silent"></a>')[1].split("\n---\n")[0]
+    assert "오류 코드가 있어도 하트비트는 남" in silent   # 오류 하트비트로는 침묵 알림이 울리지 않는다

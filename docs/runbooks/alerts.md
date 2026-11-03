@@ -424,6 +424,78 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 
 ---
 
+<a id="github-webhook-watch-silent"></a>
+## 🔴 GitHub 웹훅 전달 점검 중단 — 하트비트 없음 (`infra-github-webhook-watch-silent`)
+
+**조건**: `security_logs`에서 `service_name=github-webhook-watch`, `record_type=heartbeat` 레코드가 13시간 넘게 없다(State Alert, P1, 60분마다 평가·360분마다 재통지). 웹훅 이벤트는 드물어 이벤트 침묵으로는 판정할 수 없어 전달 점검 작업([github_webhook_watch.md](../github_webhook_watch.md))의 하트비트를 본다.
+
+**13시간인 이유**: 점검 주기가 6시간이라 정상 공백은 6시간을 넘지 않는다. 두 번 연달아 빠진 12시간에 1시간 여유를 더했다. 한 번 늦거나 빠진 실행(Semaphore 재시도, 일시 장애)에는 울리지 않고, 실패한 전달의 재전송 가능 기간(3일)보다 충분히 일찍 알린다. 점검 주기를 바꾸면 `o2c_gww_silent_hours`(주기의 2배+1)도 맞춘다.
+
+**오류 코드가 있어도 하트비트는 남는다**: 자격 만료 같은 점검 오류는 `result=error` 하트비트를 남기고 실행만 실패시키므로 이 침묵 알림은 울리지 않는다(`infra-github-webhook-check-error` 참고).
+
+**왜 중요한가**: 점검이 멈추면 웹훅 삭제·비활성·구독 변경과 수신 장애 중 놓친 전달의 재전송이 모두 멈춘다. GitHub은 실패한 전달을 자동 재전송하지 않고 재전송 가능 기간은 3일이다.
+
+**확인·대응**
+1. Semaphore의 GitHub Webhook Watch 템플릿에서 최근 실행과 예약(6시간마다)을 확인한다. 예약이 꺼져 있으면 켠다.
+2. 실행이 실패했다면 로그의 `[GWW-...]` 안내를 본다. 자격 만료·API 오류는 오류 코드가 담긴 하트비트가 남으므로 이 알림이 아니라 `infra-github-webhook-check-error`가 맡는다. 이 알림이 울리는 경우는 예약이 꺼졌거나 Semaphore·컨트롤러가 멈췄거나, OpenObserve 연결 입력이 없어 하트비트를 남기기 전에 실패한 경우다.
+3. 실행은 성공인데 알림이 왔다면 하트비트 수집(OpenObserve 수집 계정·연결)이 끊긴 것이다. 작업 실행 로그의 하트비트 전송 단계(GWW-008)를 확인한다.
+4. 복구 뒤 작업을 수동 실행해 하트비트가 들어오는지 확인한다. 중단 동안의 실패 전달은 이 실행이 재전송 가능 기간(3일) 안에서 처리한다. 3일을 넘겼으면 `infra-github-webhook-redelivery-failed` 절차(감사 로그 내보내기)로 보완한다.
+
+---
+
+<a id="github-webhook-check-error"></a>
+## 🟠 GitHub 웹훅 전달 점검 오류 — 자격 만료·API 오류 (`infra-github-webhook-check-error`)
+
+**조건**: 하트비트의 `result=error`다(Event Alert, P2, 6시간마다 한 건이라 오류가 이어지면 6시간마다 다시 온다). 통지 행에 오류 코드(`error`)가 나온다. 작업 실행도 실패로 표시되지만 하트비트는 남으므로 침묵·훅 상태·재전송 실패 알림은 울리지 않는다.
+
+**왜 중요한가**: 점검이 GitHub을 확인하지 못해 웹훅 삭제·변경 감시와 실패 전달 재전송이 멈춘다. 토큰 만료가 가장 흔하며, 방치하면 재전송 가능 기간(3일)이 지나 실패 전달을 복구할 수 없게 된다.
+
+**오류 코드별 조치**
+- `credential_missing`: OpenBao `agents/github-webhook-watch`의 `github_token`·`github_org`가 비었다. 값을 채운다.
+- `api_http_401`: 토큰이 만료·폐기됐다. 새 세분화 토큰(조직 Webhooks 권한, 만료일 있음)을 발급해 OpenBao에 교체한다.
+- `api_http_403`: 권한 부족이거나 요청 한도 초과다. 토큰의 조직 Webhooks 권한(읽기·재전송은 쓰기)과 조직의 토큰 승인 정책을 확인한다.
+- `api_http_404`: 조직 이름이나 훅 경로가 틀렸다. `github_org`를 확인한다.
+- `api_http_3xx`: 리다이렉트는 따라가지 않는다(토큰 보호). API 주소 설정(`github_api_url`)을 확인한다.
+- `api_unreachable`: 컨트롤러에서 GitHub API에 연결되지 않는다. 컨트롤러의 외부 연결·프록시·DNS를 확인한다.
+- `api_unexpected_response`: 응답 형태가 예상과 다르다. GitHub 장애·API 변경이거나 중간 장치가 응답을 바꾼 것이니 실행 로그로 확인하고, 반복되면 점검 작업을 점검한다.
+
+**복구 확인**: 조치 뒤 작업을 수동 실행해 다음 하트비트가 `result=ok`인지 본다. 오류가 길었다면 이 구간의 변경은 조직 감사 로그 내보내기로 보완한다.
+
+---
+
+<a id="github-webhook-hook-state"></a>
+## 🟠 GitHub 조직 웹훅 이상 — 없음·비활성·이벤트 불일치 (`infra-github-webhook-hook-state`)
+
+**조건**: 전달 점검 하트비트의 `hook_status`가 `missing`(훅 없음), `inactive`(비활성), `events_mismatch`(구독 이벤트가 의도와 다름) 중 하나다(Event Alert, P2). 하트비트가 6시간마다 한 건이라 상태가 이어지면 6시간마다 다시 온다. `unknown`(API 호출 실패)은 이 알림이 아니라 작업 실행 실패로 드러난다.
+
+**왜 중요한가**: 훅이 없거나 꺼졌거나 구독이 줄면 조직 변경 이벤트가 수신기로 오지 않는다. 변경 감사 증적이 조용히 빠지며, 권한 있는 사용자가 감시를 끄려는 변조일 수도 있다.
+
+**확인·대응**
+1. 통지 행의 상태와 `hook_problems`(문제 목록)를 본다.
+2. GitHub 조직 설정의 웹훅 화면에서 수신 URL·활성 여부·구독 이벤트를 의도한 값(점검 작업 입력의 수신 URL, 확정한 13개 이벤트)과 대조한다.
+3. 조직 감사 로그(웹 UI)의 웹훅 변경 이력으로 변경한 사람과 시각을 확인하고 작업 일정과 대조한다.
+4. 승인되지 않은 변경이면 웹훅을 의도한 값으로 되돌리고 해당 계정·토큰을 점검한다. `missing`인데 수신 URL을 바꾼 것이면 OpenBao `agents/github-webhook-watch`의 `hook_url`을 새 값으로 고친다. 구독 이벤트를 의도적으로 바꿨다면 `expected_events`도 함께 바꾼다.
+5. 복구 뒤 작업을 수동 실행해 다음 하트비트의 `hook_status`가 `ok`인지 확인한다. 훅이 삭제되어 있던 동안의 이벤트는 GitHub이 전달하지 않았으므로 조직 감사 로그 내보내기로 해당 구간을 보완한다.
+
+---
+
+<a id="github-webhook-redelivery-failed"></a>
+## 🟠 GitHub 웹훅 재전송 실패·복구 불가 전달 (`infra-github-webhook-redelivery-failed`)
+
+**조건**: 하트비트에서 `failed_count`>0(재전송 요청 실패 또는 재전송 뒤 재실패), `expired_count`>0(재전송 가능 기간 3일을 막 넘긴 실패), `deliveries_truncated=true`(전달 조회가 최대 페이지에 닿아 일부를 보지 못함) 중 하나라도 맞는다(Event Alert, P2).
+
+**왜 중요한가**: 수신기가 받지 못한 웹훅 이벤트가 남아 그 구간의 조직 변경이 중앙 로그에 빠졌을 수 있다. 기간을 넘긴 실패는 재전송할 수 없고, 조회가 잘렸다면 일부 실패를 아직 보지 못한 상태다.
+
+**확인·대응**
+1. 통지 행의 세 값을 구분한다.
+   - `재전송 실패`: 수신기가 재전송에도 응답하지 못했다. 수신 서비스·프록시·허용 목록(GitHub 웹훅 출발지 대역 변경 포함)을 확인해 복구하면 다음 점검(6시간 안)이 다시 재전송한다. 3일 안에 복구하지 못하면 아래 기간 초과로 넘어간다.
+   - `기간 초과`: 재전송이 불가능하다. 장애 시간대를 수신기 로그로 특정하고 조직 감사 로그(웹 UI, 최근 180일)를 내보내 그 구간의 변경을 확인한다.
+   - `조회 누락`: 실패한 전달이 많아 최대 페이지에 닿았다. 수신기 장애 규모를 확인하고 복구 뒤 작업을 다시 실행한다(필요하면 `gww_max_pages`를 늘린다).
+2. 수신기가 그 시간대에 내려가 있었는지(Silent Host·무소식 알림, 수신 서비스 재시작 이력) 확인한다.
+3. 복구 뒤 작업을 수동 실행해 다음 하트비트의 `failed_count`·`expired_count`가 0인지 본다. 기간 초과는 한 번만 세므로 다음 실행에서 사라지지만, 보완 조사는 이 알림 시점에 해야 한다.
+
+---
+
 <a id="app-telemetry-silent"></a>
 ## 🟠 앱 텔레메트리 무소식 — funa JVM 메트릭 끊김 (`infra-app-telemetry-silent`)
 

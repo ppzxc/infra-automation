@@ -25,6 +25,7 @@ EXPECTED_ALERTS = {
     "infra-memory-usage-p2", "infra-memory-usage-p1",
     "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
     "infra-auth-silent-p2", "infra-auth-silent-p1",   # 인증 로그 수집 중단(#390)
+    "infra-github-webhook-watch-silent", "infra-github-webhook-hook-state", "infra-github-webhook-redelivery-failed", "infra-github-webhook-check-error",   # 웹훅 전달 점검(#405)
     "infra-backup-failure", "infra-integrity-check-failure", "infra-backup-missing", "infra-maintenance-missing",
     "infra-app-log-errors", "infra-app-telemetry-silent", "infra-keepalived-script-disabled",
     "infra-switch-config-change", "infra-switch-login-failures", "infra-switch-severity-critical",
@@ -232,9 +233,10 @@ LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
                       "failures": "9999", "event_time": "10-23 23:58:00~10-24 00:02:30", "sources": "999"}
 
 COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
-                "readings", "events", "detections", "downs", "flaps", "severity_code", "offset_ms")
+                "readings", "events", "detections", "downs", "flaps", "severity_code", "offset_ms", "failed_count", "expired_count")
 
-LONGEST_TEXT = {"user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
+LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
+                "user_name": "u" * 32, "actor": "u" * 32, "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
                 "status": "timeout", "tool": "timedatectl", "sync_status": "unsynced", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
 
