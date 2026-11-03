@@ -33,6 +33,13 @@ options:
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """리다이렉트를 따라가지 않는다: Authorization 헤더가 다른 출처로 넘어가지 않게 한다."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
 class _ApiError(Exception):
     def __init__(self, code):
         super().__init__(code)
@@ -50,7 +57,8 @@ def _request(method, url, params, body=None):
         "User-Agent": "infra-automation-webhook-watch",
     })
     try:
-        with urllib.request.urlopen(req, timeout=params["timeout"], context=ctx) as resp:  # noqa: S310
+        opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=ctx))
+        with opener.open(req, timeout=params["timeout"]) as resp:  # noqa: S310
             raw = resp.read().decode("utf-8", "replace")
             status, link = resp.status, resp.headers.get("Link", "")
     except urllib.error.HTTPError as exc:
@@ -169,7 +177,7 @@ def check(params):
                     result["redelivered_count"] += 1
                 else:
                     result["failed_count"] += 1
-                    if status in (401, 403) and not result["error"]:
+                    if not result["error"]:
                         result["error"] = "api_http_%d" % status
     except _ApiError as exc:
         result["error"] = exc.code

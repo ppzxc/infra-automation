@@ -56,6 +56,8 @@ class _Fake:
         self.redeliver_status = 202
         self.o2_status = 200
         self.raw_hooks = None       # 예상 밖 응답 형태 모사
+        self.redirect_to = None     # 설정하면 hooks 요청을 다른 서버로 리다이렉트
+        self.auth_seen = []         # 수신한 Authorization 헤더
         self.next_host = None       # Link next URL의 호스트를 바꿔 다른 출처 모사
         self.requests = []          # (method, path)
         self.redelivered = []       # delivery ids
@@ -80,7 +82,10 @@ class _Fake:
 
             def do_GET(self):
                 outer.requests.append(("GET", self.path))
+                outer.auth_seen.append(self.headers.get("Authorization"))
                 u = urlparse(self.path)
+                if outer.redirect_to:
+                    return self._send(302, "", {"Location": outer.redirect_to + self.path})
                 if not self._authed():
                     return self._send(401, {"message": "Bad credentials"})
                 if outer.mode == "api_500":
@@ -220,7 +225,25 @@ def test_redelivery_http_failure_counts_as_failed(gww, fake):
     fake.deliveries = [_delivery(1, "g1", 2, 500), _delivery(2, "g2", 2, 500)]
     fake.redeliver_status = 422
     r = gww.check(_params(fake))
-    assert r["redelivered_count"] == 0 and r["failed_count"] == 2 and r["error"] == ""
+    assert r["redelivered_count"] == 0 and r["failed_count"] == 2
+
+
+@pytest.mark.parametrize("status", [404, 422, 500, 502])
+def test_redelivery_api_error_sets_error_code(gww, fake, status):
+    fake.deliveries = [_delivery(1, "g1", 2, 500)]
+    fake.redeliver_status = status
+    assert gww.check(_params(fake))["error"] == f"api_http_{status}"
+
+
+def test_redirect_is_not_followed_and_token_not_forwarded(gww, fake):
+    other = _Fake()
+    try:
+        fake.redirect_to = other.url
+        r = gww.check(_params(fake))
+        assert r["error"] == "api_http_302"
+        assert other.requests == [] and other.auth_seen == []
+    finally:
+        other.close()
 
 
 def test_check_mode_never_redelivers(gww, fake):
@@ -473,6 +496,14 @@ def test_truncated_listing_is_in_heartbeat(ansible_env, fake):
     res = _run(ansible_env, fake, extra={"gww_max_pages": 1})
     assert res.returncode == 0, res.stdout + res.stderr
     assert fake.heartbeats[0]["deliveries_truncated"] is True
+
+
+def test_redelivery_5xx_fails_run_and_heartbeat_records_error(ansible_env, fake):
+    fake.deliveries = [_delivery(1, "g1", 2, 500)]
+    fake.redeliver_status = 500
+    res = _run(ansible_env, fake)
+    assert res.returncode != 0
+    assert fake.heartbeats[0]["result"] == "error" and fake.heartbeats[0]["error"] == "api_http_500"
 
 
 def test_unexpected_response_fails_run_and_heartbeat_records_error(ansible_env, fake):

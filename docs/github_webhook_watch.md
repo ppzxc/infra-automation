@@ -16,14 +16,14 @@
   |---|---|
   | `checked_at` | 확인 시각(UTC, `YYYY-MM-DDTHH:MM:SSZ`) |
   | `result` | `ok` 또는 `error` |
-  | `error` | 비면 정상. `credential_missing`, `api_unreachable`, `api_http_<상태 코드>`, `api_unexpected_response`(응답 형태가 예상과 다름) 중 하나(고정 코드만, 자격·URL 없음) |
+  | `error` | 비면 정상. `credential_missing`, `api_unreachable`, `api_http_<상태 코드>`(조회뿐 아니라 재전송 요청의 실패 응답 포함, 리다이렉트는 따라가지 않아 `api_http_3xx`), `api_unexpected_response`(응답 형태가 예상과 다름) 중 하나(고정 코드만, 자격·URL 없음) |
   | `hook_status` | `ok` / `missing` / `inactive` / `events_mismatch` / `unknown` |
   | `hook_problems` | 문제 목록(쉼표 구분) |
   | `redelivered_count` | 이번 실행에서 재전송한 건수 |
   | `failed_count` | 복구되지 않은 실패 건수(재전송 요청 실패, 재전송 뒤 재실패) |
   | `expired_count` | 재전송 가능 기간을 넘긴 실패 건수 |
   | `deliveries_truncated` | 전달 조회가 최대 페이지(`gww_max_pages`, 기본 10)에 도달했거나 다른 출처의 다음 페이지 링크를 따라가지 않아 일부 전달을 보지 못했으면 `true`(이 경우 재전송·집계가 일부 빠졌을 수 있다) |
-| `interval_hours` | 점검 주기(침묵 알림 임계 계산용) |
+  | `interval_hours` | 점검 주기(침묵 알림 임계 계산용) |
 
 - **오류 표면화**: GitHub API가 실패하거나(상태 코드 오류, 연결 불가) 자격이 없으면 먼저 `result=error`와 오류 코드를 하트비트에 남기고, 마지막 태스크(GWW-010)가 실행을 실패시킨다. 하트비트를 남길 OpenObserve 연결이 없거나 수집이 실패하면 실행이 실패한다.
 - **check 모드**: 재전송하지 않고(`would_redeliver_count`만 계산해 출력) 하트비트도 쓰지 않는다. 읽기 요청만 보낸다.
