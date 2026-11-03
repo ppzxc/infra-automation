@@ -498,7 +498,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 
 ## GitHub 조직 관리 변경 알림 (Spec #399 / Ticket-4)
 
-조직 웹훅이 보낸 감사 이벤트(`service_name=github-audit`, 필드 표는 [openobserve_config.md](../openobserve_config.md))에서 위험한 관리 변경을 알린다. 아래 7개 알림의 등급(P1·P2·P3)은 **제안값, 사용자 확정 대기**다. 확정이 다르면 알림 정의의 `severity`만 바꾼다. 전달 점검 알림(`infra-github-webhook-*`)은 수신 경로의 상태를, 이 알림들은 조직에서 일어난 변경을 본다. 둘은 대상이 겹치지 않는다.
+조직 웹훅이 보낸 감사 이벤트(`service_name=github-audit`, 필드 표는 [openobserve_config.md](../openobserve_config.md))에서 위험한 관리 변경을 알린다. 아래 7개 알림의 등급(P1·P2·P3)은 **2026-11-03 사용자가 확정**했다. 바꾸려면 알림 정의의 `severity`만 바꾼다. 전달 점검 알림(`infra-github-webhook-*`)은 수신 경로의 상태를, 이 알림들은 조직에서 일어난 변경을 본다. 둘은 대상이 겹치지 않는다.
 
 **공통 읽는 법**: 행은 `행위자 → 대상 · 저장소 · 이벤트.액션` 순이다. 행위자가 `ghost(행위자 불명)`이면 GitHub이 사용자를 확인하지 못한 것(`ghost` 자리표시 계정 또는 `sender` 없음)이라 이름으로 대조할 수 없다. 이때는 조직 감사 로그(웹 UI, 최근 180일)로 실제 행위자를 확인한다. 행의 전달 ID(`github_delivery_id`)로 OpenObserve에서 원문 전달을 찾는다. 수신이 끊긴 구간의 변경은 이 알림이 오지 않으므로 `infra-github-webhook-*` 알림과 감사 로그 내보내기로 보완한다. 5분 구간에 한 번 울린다. 같은 저장소·행위자·대상은 한 행으로 묶이고 건수가 센다.
 
@@ -507,7 +507,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="github-audit-hook-deleted"></a>
 ## 🔴 GitHub 조직 웹훅 삭제 (`infra-github-audit-hook-deleted`)
 
-**조건**: `github_event=meta`, `github_action=deleted`(Event Alert, P1 제안값). 행의 대상은 삭제된 웹훅 ID다.
+**조건**: `github_event=meta`, `github_action=deleted`(Event Alert, P1 확정). 행의 대상은 삭제된 웹훅 ID다.
 
 **왜 중요한가**: 이 웹훅이 변경 감사 증적의 수신 경로다. 삭제되면 이후 조직 변경이 중앙 로그에 남지 않으므로 감시를 끄려는 변조일 수 있다.
 
@@ -521,7 +521,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="github-audit-repo-public"></a>
 ## 🔴 GitHub 저장소 공개 전환 (`infra-github-audit-repo-public`)
 
-**조건**: `repository` 이벤트의 `publicized` 또는 `public` 이벤트(Event Alert, P1 제안값). 같은 전환에서 두 이벤트가 함께 와도 한 행으로 묶인다.
+**조건**: `repository` 이벤트의 `publicized` 또는 `public` 이벤트(Event Alert, P1 확정). 같은 전환에서 두 이벤트가 함께 와도 한 행으로 묶인다.
 
 **왜 중요한가**: 소스·이슈·이력이 인터넷에 노출된다. 저장소에 든 비밀값은 이미 유출된 것으로 봐야 하고 복사본은 되돌릴 수 없다.
 
@@ -535,7 +535,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="github-audit-repo-org-deleted"></a>
 ## 🔴 GitHub 저장소 또는 조직 삭제 (`infra-github-audit-repo-org-deleted`)
 
-**조건**: `repository` 이벤트의 `deleted` 또는 `organization` 이벤트의 `deleted`(Event Alert, P1 제안값). 저장소 삭제는 조직 웹훅만 받는다. 조직이 삭제되면 웹훅도 함께 사라지므로 이 알림이 마지막 신호일 수 있다. 판단 근거: 소스 손실은 되돌리기 어려워 P2가 아니라 P1로 제안했다.
+**조건**: `repository` 이벤트의 `deleted` 또는 `organization` 이벤트의 `deleted`(Event Alert, P1 확정). 저장소 삭제는 조직 웹훅만 받는다. 조직이 삭제되면 웹훅도 함께 사라지므로 이 알림이 마지막 신호일 수 있다. 판단 근거: 소스 손실은 되돌리기 어려워 P2가 아니라 P1로 확정했다.
 
 **왜 중요한가**: 소스·이슈·이력의 손실이다. 삭제 복구는 기간 제한이 있다.
 
@@ -549,7 +549,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="github-audit-protection-removed"></a>
 ## 🟠 GitHub 브랜치 보호 규칙 삭제 (`infra-github-audit-protection-removed`)
 
-**조건**: `branch_protection_rule` 이벤트의 `deleted`(Event Alert, P2 제안값). 행의 대상은 규칙 이름이다.
+**조건**: `branch_protection_rule` 이벤트의 `deleted`(Event Alert, P2 확정). 행의 대상은 규칙 이름이다.
 
 **왜 중요한가**: 강제 푸시 금지·리뷰 필수 같은 보호가 풀려 검토 없이 코드를 바꿀 수 있다. 공급망 변조의 사전 단계일 수 있다.
 
@@ -563,7 +563,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="github-audit-ruleset-deleted"></a>
 ## 🟠 GitHub 저장소 룰셋 삭제 (`infra-github-audit-ruleset-deleted`)
 
-**조건**: `repository_ruleset` 이벤트의 `deleted`(Event Alert, P2 제안값). 행의 대상은 룰셋 이름이다.
+**조건**: `repository_ruleset` 이벤트의 `deleted`(Event Alert, P2 확정). 행의 대상은 룰셋 이름이다.
 
 **왜 중요한가**: 룰셋이 강제하던 브랜치·태그 보호와 병합 조건이 사라져 검토 없는 변경이 가능하다.
 
@@ -574,7 +574,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="github-audit-deploy-key-created"></a>
 ## 🟠 GitHub deploy key 생성 (`infra-github-audit-deploy-key-created`)
 
-**조건**: `deploy_key` 이벤트의 `created`(Event Alert, P2 제안값). 행의 대상은 키 제목이다.
+**조건**: `deploy_key` 이벤트의 `created`(Event Alert, P2 확정). 행의 대상은 키 제목이다.
 
 **왜 중요한가**: deploy key는 사람 계정 없이 저장소에 접근하는 열쇠라 침입자가 지속 접근을 심는 자리다. 쓰기 권한이 있으면 코드를 바꿀 수 있다.
 
@@ -588,7 +588,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="github-audit-membership-change"></a>
 ## 🟡 GitHub 멤버·팀·collaborator 변경 (`infra-github-audit-membership-change`)
 
-**조건**: `member`(added·edited·removed: collaborator), `membership`(added·removed: 팀 멤버십), `organization`(member_added·member_invited·member_removed), `team`(created·deleted·added_to_repository·removed_from_repository)(Event Alert, P3 제안값). 행의 이벤트 이름과 팀으로 구분한다.
+**조건**: `member`(added·edited·removed: collaborator), `membership`(added·removed: 팀 멤버십), `organization`(member_added·member_invited·member_removed), `team`(created·deleted·added_to_repository·removed_from_repository)(Event Alert, P3 확정). 행의 이벤트 이름과 팀으로 구분한다.
 
 **왜 중요한가**: 접근 권한이 늘거나 줄었다. 대부분 정상 운영이지만 승인되지 않은 계정 추가나 권한 상승은 침해의 신호이고, 퇴사자 제거가 빠지면 접근이 남는다.
 

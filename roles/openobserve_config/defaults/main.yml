@@ -1310,7 +1310,7 @@ o2c_alerts:
     silence: 60
 
   # --- GitHub 조직 관리 변경 (Spec #399 / Ticket-4) --- 조직 웹훅이 보낸 감사 이벤트(service_name='github-audit', 필드는 github_audit_semantics)만 읽는다.
-  # 등급(P1·P2·P3)은 스펙 제안값이며 사용자 확정을 기다린다(확정이 다르면 severity만 바꾼다). 전달 점검 알림(infra-github-webhook-*)과 이름·대상이 겹치지 않는다:
+  # 등급(P1·P2·P3)은 2026-11-03 사용자가 확정했다(바꾸려면 severity만 바꾼다). 전달 점검 알림(infra-github-webhook-*)과 이름·대상이 겹치지 않는다:
   # 그쪽은 수신 경로의 상태, 이쪽은 조직에서 일어난 변경이다. 같은 `deleted`도 github_event로 구분한다. 행은 행위자 → 대상 · 저장소 · 이벤트.deleted 순이다.
   - name: infra-github-audit-hook-deleted
     severity: "P1 긴급"
@@ -1321,7 +1321,7 @@ o2c_alerts:
     action: "① 행의 행위자·시각을 작업 일정과 대조(행위자가 ghost(행위자 불명)이면 조직 감사 로그로 확인) ② 승인되지 않은 변경이면 웹훅을 복구하고 해당 계정·토큰 점검 ③ 삭제된 구간의 변경은 조직 감사 로그 내보내기로 보완"
     runbook: "{{ o2c_runbook_base }}#github-audit-hook-deleted"
     row_template: '• {actor} → 웹훅 {target} · {repo} · {event_time}'
-    description: "github-audit의 github_event=meta, github_action=deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
+    description: "github-audit의 github_event=meta, github_action=deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
@@ -1340,7 +1340,7 @@ o2c_alerts:
     action: "① 행의 저장소·행위자가 승인된 공개인지 확인 ② 승인되지 않았으면 즉시 비공개로 되돌리고 보안 담당 보고 ③ 공개된 동안 노출된 비밀값(토큰·키·접속 정보)을 교체"
     runbook: "{{ o2c_runbook_base }}#github-audit-repo-public"
     row_template: '• {actor} → {target} · {repo} · 공개 전환(public) · {event_time}'
-    description: "github-audit의 repository.publicized 또는 public 이벤트 (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
+    description: "github-audit의 repository.publicized 또는 public 이벤트 (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_gha_columns }}, {{ o2c_event_time_sql }} FROM "security_logs"
@@ -1359,7 +1359,7 @@ o2c_alerts:
     action: "① 행의 저장소·행위자가 승인된 삭제인지 작업 일정과 대조 ② 승인되지 않았으면 GitHub의 삭제 복구 기능(저장소는 삭제 직후 일정 기간 복원 가능)을 즉시 시도하고 보안 담당 보고 ③ 해당 계정·토큰을 점검하고 로컬 복제본·백업을 확보"
     runbook: "{{ o2c_runbook_base }}#github-audit-repo-org-deleted"
     row_template: '• {actor} → {target} · {repo} · {kind}'
-    description: "github-audit의 repository.deleted 또는 organization.deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기) — 저장소 삭제는 조직 웹훅만 받는다"
+    description: "github-audit의 repository.deleted 또는 organization.deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03) — 저장소 삭제는 조직 웹훅만 받는다"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind FROM "security_logs"
@@ -1378,7 +1378,7 @@ o2c_alerts:
     action: "① 행의 저장소·행위자가 작업 일정과 맞는지 확인 ② 승인되지 않았으면 규칙을 복구하고 그 사이의 커밋을 점검 ③ 행위자의 계정·토큰 점검"
     runbook: "{{ o2c_runbook_base }}#github-audit-protection-removed"
     row_template: '• {actor} → 규칙 {target} · {repo} · {event_time}'
-    description: "github-audit의 branch_protection_rule.deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
+    description: "github-audit의 branch_protection_rule.deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
@@ -1397,7 +1397,7 @@ o2c_alerts:
     action: "① 행의 룰셋·저장소·행위자가 작업 일정과 맞는지 확인 ② 승인되지 않았으면 룰셋을 복구하고 그 사이의 변경을 점검 ③ 행위자의 계정·토큰 점검"
     runbook: "{{ o2c_runbook_base }}#github-audit-ruleset-deleted"
     row_template: '• {actor} → 룰셋 {target} · {repo} · {event_time}'
-    description: "github-audit의 repository_ruleset.deleted (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
+    description: "github-audit의 repository_ruleset.deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
@@ -1416,7 +1416,7 @@ o2c_alerts:
     action: "① 행의 키 제목·저장소·행위자가 승인된 배포 작업인지 확인 ② 승인되지 않았으면 키를 삭제하고 그 키로 일어난 접근을 점검 ③ 승인된 키면 읽기 전용인지 확인"
     runbook: "{{ o2c_runbook_base }}#github-audit-deploy-key-created"
     row_template: '• {actor} → 키 {target} · {repo} · {event_time}'
-    description: "github-audit의 deploy_key.created (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
+    description: "github-audit의 deploy_key.created (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
@@ -1435,7 +1435,7 @@ o2c_alerts:
     action: "① 행의 행위자·대상·저장소·팀을 인사·작업 요청과 대조 ② 승인되지 않은 추가·권한 상승이면 되돌리고 행위자 계정 점검 ③ 승인된 변경이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#github-audit-membership-change"
     row_template: '• {actor} → {target} · {team} · {repo} · {kind}'
-    description: "github-audit의 member(added·edited·removed), membership(added·removed), organization(member_added·member_invited·member_removed), team(created·deleted·added_to_repository·removed_from_repository) (Event Alert, 재통지 5분, 등급은 제안값·사용자 확정 대기)"
+    description: "github-audit의 member(added·edited·removed), membership(added·removed), organization(member_added·member_invited·member_removed), team(created·deleted·added_to_repository·removed_from_repository) (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
     stream: security_logs
     sql: >-
       SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, substr(coalesce(nullif(github_team, ''), '-'), 1, 20) AS team FROM "security_logs"

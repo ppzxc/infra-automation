@@ -901,7 +901,7 @@ def test_github_webhook_check_error_alert_names_every_documented_error_code_in_i
     assert "오류 코드가 있어도 하트비트는 남" in silent   # 오류 하트비트로는 침묵 알림이 울리지 않는다
 
 
-# --- GitHub 조직 관리 변경 알림 (Spec #399 / Ticket-4) --- 등급은 스펙 제안값(사용자 확정 대기)이다.
+# --- GitHub 조직 관리 변경 알림 (Spec #399 / Ticket-4) --- 등급은 2026-11-03 사용자가 확정했다.
 GHA_ALERTS = {   # name -> (severity, 알림이 잡아야 할 (event, action) 조합)
     "infra-github-audit-hook-deleted": ("P1 긴급", {("meta", "deleted")}),
     "infra-github-audit-repo-public": ("P1 긴급", {("repository", "publicized"), ("public", None)}),
@@ -938,11 +938,11 @@ def test_github_audit_alerts_keep_the_prefix_severity_runbook_link_and_timing(de
     assert len(names) == len(set(names)) and set(GHA_ALERTS) <= set(names)
 
 
-def test_github_audit_runbook_sections_exist_and_mark_the_severity_as_proposed():
+def test_github_audit_runbook_sections_exist_and_mark_the_severity_as_confirmed():
     text = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
     for name in GHA_ALERTS:
         assert '<a id="%s"></a>' % name.removeprefix("infra-") in text and "`%s`" % name in text, name
-    assert "제안값, 사용자 확정 대기" in text
+    assert "사용자 확정 대기" not in text and "2026-11-03 사용자가 확정" in text
 
 
 @pytest.mark.parametrize("name", sorted(GHA_ALERTS))
