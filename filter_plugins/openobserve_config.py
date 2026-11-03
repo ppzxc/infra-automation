@@ -197,6 +197,10 @@ def o2c_desired(spec):
         fortigate = dict(spec['fortigate'], vrl=o2c_fortigate_vrl(spec['fortigate']['vrl'], spec['fortigate'].get('aliases')))
         chained.append(fortigate)
         semantics[0]['then'] = [spec['fortigate']['function_name']]
+    # GitHub 조직 감사 웹훅(Spec #399 / Ticket-3)도 같은 이유로 보안 로그 파이프라인의 마지막 함수로 잇는다(service_name=github-audit 검사는 함수 안).
+    if spec.get('github_audit'):
+        chained.append(spec['github_audit'])
+        semantics[0].setdefault('then', []).append(spec['github_audit']['function_name'])
     out += [{'kind': 'function', 'name': sem['function_name'],
              'body': {'name': sem['function_name'], 'function': sem['vrl'].strip(), 'params': 'row', 'transType': 0}}
             for sem in semantics[:1] + chained + semantics[1:]]

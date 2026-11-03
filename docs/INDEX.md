@@ -16,6 +16,7 @@
 8. [FortiGate Backup (`fortigate_backup`)](fortigate_backup.md) - FortiGate IDC 클러스터·사무실 장비별 설정 백업(접속 대상 단위, 응답 멤버를 파일명에), 파일명 `<장비>_<멤버>_<시각>`, 90일 보관, 원격 보관·암호화 결정 (#284), 직전 백업 대비 설정 변경 감지·알림 (#286)
 9. [OpenObserve Config (`openobserve_config`)](openobserve_config.md) - 컨트롤러 전용. OpenObserve VRL ingest function(sshd/sudo 해석)·파이프라인·통지 webhook·알림 규칙(서버·스위치·방화벽 로그 알림, 방화벽은 #287, 대응 절차는 [알림 런북](runbooks/alerts.md))을 코드로 관리하고 API로 반영 (ADR-0008)
 10. [FUNA Env (`funa_env`)](funa_env.md) - FUNA Cluster 환경 값을 OpenBao에서 읽어 `/etc/funa-cluster/`의 비시크릿 파일과 소비자별 시크릿 파일(0640 root:dockermgmt)로 렌더링 (#222)
+11. [GitHub Webhook Watch (`github_webhook_watch`)](github_webhook_watch.md) - 컨트롤러 전용. GitHub 조직 웹훅의 존재·활성·구독 이벤트를 의도값과 비교하고 최근 실패한 전달을 재전송하며 하트비트 레코드를 OpenObserve에 남김, Semaphore 템플릿 등록 방법 (Spec #399 / Ticket-5, #404)
 
 ---
 
@@ -47,3 +48,4 @@
 * [Uptime Kuma 이전 절차와 모니터 운영 규칙 런북](runbooks/kuma-migration.md) - 내장 MariaDB 이전(정상 종료·소유권 보존), 이전 뒤 모니터 실패 원인 세 곳, 사설망 감시 push 전환(interval은 주기의 1.5배 이상), 모니터 이름·심각도·알림 제목 규칙 (#394)
 * [레거시 호스트 `bk` 계정 접속 전환 런북](runbooks/bk-account-access.md) - `agents_only` 호스트의 Host Agents 접속을 root 직접 접속에서 `bk` 로그인 + sudo 승격으로 바꾸는 절차(`bootstrap_user`, `/etc/sudoers.d/bk`), 카나리→확대, 확인·롤백, root 접속은 막지 않는 범위
 * [Uptime Kuma 모니터 태그 규칙 런북](runbooks/uptime-kuma-tag-convention.md) - 태그 키 6종과 심각도 태그(P1~P3, 이름 자체가 심각도)·값 규칙, IP는 설명에 쓰는 이유, UI 권장과 DB 직접 수정 시 Kuma 재시작(Prometheus 라벨 집합) 주의
+* [GitHub 조직 감사 웹훅 런북](runbooks/github-audit-webhook.md) - 웹훅이 받는 이벤트와 받지 못하는 공백(로그인·2FA·토큰 사용·Actions·시크릿), 월간 웹 UI 내보내기 보완, 출발지 대역(`/meta` hooks) 갱신, 서버 적용 단계(S-1~S-6)·스냅샷 diff·롤백 (Spec #399 / Ticket-7, #406)

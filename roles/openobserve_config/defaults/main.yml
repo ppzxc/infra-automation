@@ -38,6 +38,8 @@ o2c_switch_stream: system_logs
 # 방화벽(포티게이트) 로그 필드 추출(Spec #282 / Ticket-2): security_logs의 service_name=fortigate-syslog 레코드에만 필드를 더한다.
 # 소스 스트림당 파이프라인이 하나라 별도 파이프라인 없이 보안 로그 파이프라인(o2c_pipeline_name)에서 security_semantics 다음 함수로 잇는다.
 o2c_fortigate_function_name: fortigate_semantics
+# GitHub 조직 감사 웹훅 필드 추출(Spec #399 / Ticket-3): security_logs의 service_name=github-audit 레코드에만 필드를 더한다. 보안 로그 파이프라인의 마지막 함수다.
+o2c_github_audit_function_name: github_audit_semantics
 # 통지 경로는 text/plain 웹훅 하나다(#347). 옛 JSON 웹훅(infra-automation-webhook: 본문 text 2000자 제한)은 서버에 남아 있지만 이 역할이 정의하지도 지우지도 않고
 # 알림도 쓰지 않는다(삭제는 폐기 목록의 알림 이름뿐이다).
 o2c_template_name: infra-automation-plain
@@ -106,6 +108,10 @@ o2c_ssh_bruteforce_window_minutes: 15
 # 인증 로그(auth) 수집 중단 감지(#390): 수집 로스터 호스트의 service_name='auth'(/var/log/secure·auth.log)가 이 분 동안 없으면 P2, 조회 구간(3시간) 전체에 없으면 P1.
 # 정상 공백은 관리 서버의 주기 점검 덕에 최근 5일 기준 3분 이하라 60분이면 오탐 없이 여유가 있다. 사고(rsyslog 정지)는 몇 시간 이상 끊긴다.
 o2c_auth_silent_p2_minutes: 60
+# GitHub 웹훅 전달 점검 하트비트 침묵(#405): 점검 주기(gww_check_interval_hours=6)의 두 배(12시간, 두 번 연속 누락)에 1시간 여유를 더한 13시간.
+# 한 번 늦거나 빠진 실행(Semaphore 재시도·일시 장애)에는 울리지 않고, 재전송 가능 기간(3일)에 비해 충분히 일찍 알린다. 점검 주기를 바꾸면 함께 맞춘다.
+o2c_gww_silent_hours: 13
+o2c_gww_roster: [github-webhook-watch]
 # 계정·그룹 변경 알림에서 따로 표시하는 특권 그룹(이 그룹의 가입·탈퇴 줄은 "특권 그룹 변경"으로 묶인다). docker는 root와 같은 권한이다.
 o2c_privileged_groups: [wheel, sudo, docker, root]
 # 위험 명령 sudo 실행: sudo 명령 줄(소문자)에 들어 있으면 P1인 문구. 라벨은 통지 행에 실린다(명령 원문은 비밀값이 섞일 수 있어 싣지 않는다).
@@ -260,6 +266,7 @@ o2c_rosters:
   app: "{{ o2c_roster_app }}"
   switch: "{{ o2c_switch_syslog_roster }}"
   fortigate: "{{ o2c_fortigate_syslog_roster }}"
+  gww: "{{ o2c_gww_roster }}"
 
 # 트레이스 스트림 보존 기간(Spec #253 / Ticket-8, ADR-0012): 스트림이 이미 있을 때만 맞춘다(없으면 건너뜀 — 첫 span이 들어와야 생긴다).
 # 운영 규칙: org당 트레이스 스트림은 o2c_traces_stream 하나만 둔다(View Trace가 이름순 첫 트레이스 스트림을 기본으로 고르므로, #251).
@@ -284,6 +291,16 @@ o2c_event_time_sql: >-
   WHEN date_format(min(_timestamp), '%m-%d', '{{ o2c_event_time_offset }}') = date_format(max(_timestamp), '%m-%d', '{{ o2c_event_time_offset }}')
   THEN {{ o2c_event_time_first }} || '~' || date_format(max(_timestamp), '%H:%M:%S', '{{ o2c_event_time_offset }}')
   ELSE {{ o2c_event_time_first }} || '~' || {{ o2c_event_time_last }} END AS event_time
+
+# GitHub 조직 관리 변경 알림 행의 공통 열(Spec #399 / Ticket-4): 행위자·대상·저장소·조직과 전달 ID(재전송·원문 조회의 키).
+# 필드는 github_audit_semantics가 만든다(docs/openobserve_config.md의 필드 표). 행위자를 알 수 없으면(ghost 자리표시 계정 또는 sender 없음) `ghost(행위자 불명)`으로 구분해 보인다.
+# 불리언은 엔진마다 비교가 달라 문자열로 읽는다. 대상·저장소가 없어도 행이 빠지지 않게 자리표시를 넣고 길이를 자른다. GROUP BY에는 이 열이 읽는 원본 필드를 넣는다.
+o2c_gha_actor_sql: "CASE WHEN coalesce(github_actor, '') = '' OR lower(CAST(github_actor_ghost AS VARCHAR)) IN ('true', '1') THEN 'ghost(행위자 불명)' ELSE substr(github_actor, 1, 39) END AS actor"
+# 필드는 알려진 이벤트마다 항상 존재하고 값이 없으면 빈 문자열이다(VRL이 11개를 모두 설정, #402 후속). NULL과 빈 문자열을 모두 자리표시로 바꾼다.
+o2c_gha_columns: >-
+  {{ o2c_gha_actor_sql }}, substr(coalesce(nullif(github_target, ''), nullif(github_org, ''), '(대상 불명)'), 1, 30) AS target,
+  substr(coalesce(nullif(github_repo, ''), '-'), 1, 40) AS repo, max(github_delivery_id) AS github_delivery_id, count(*) AS events
+o2c_gha_group: "github_actor, github_actor_ghost, github_target, github_repo, github_org"
 
 # 알림 대상 서버 행의 표시 이름(Spec #339 / Ticket-5): `host_label` 컬럼이 관리번호 옆에 접속 주소를 붙인다(`ns0272 (<주소>)`).
 # 알림 SQL의 SELECT 목록 끝에 `, {{ o2c_host_label_sql }}`(서버 컬럼이 `host`인 알림은 `o2c_host_label_sql_for_host_column`)를 붙이고 행 템플릿은 `{host_label}`을 쓴다.
@@ -1211,6 +1228,227 @@ o2c_alerts:
     period: 15
     frequency: 5
     silence: 1440
+
+  # --- GitHub 웹훅 전달 점검 (Spec #399 / Ticket-6) --- 전달 점검 작업(github_webhook_watch)이 6시간마다 security_logs에 남기는 하트비트(record_type='heartbeat')만 읽는다.
+  # 웹훅 이벤트 자체는 드물어 침묵 판정에 쓸 수 없으므로 하트비트가 판정 대상이다. 필드 계약은 docs/github_webhook_watch.md §1.
+  - name: infra-github-webhook-watch-silent
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "GitHub 웹훅 전달 점검 중단: 하트비트가 {{ o2c_gww_silent_hours }}시간 넘게 없음"
+    what: "GitHub 웹훅 전달 점검 작업의 하트비트(service_name=github-webhook-watch, record_type=heartbeat)가 {{ o2c_gww_silent_hours }}시간 넘게 들어오지 않습니다. 점검 주기는 6시간이라 두 번 이상 연달아 빠진 것입니다."
+    why: "점검 작업이 돌지 않았거나(예약 중지·Semaphore 장애) 하트비트 전송·수집이 끊겼습니다. 자격 만료 같은 점검 오류는 오류 하트비트가 남아 이 알림이 아니라 점검 오류 알림이 맡습니다. 그동안 웹훅 삭제·비활성·이벤트 변경과 실패한 전달의 재전송이 확인되지 않고, GitHub은 실패한 전달을 자동으로 재전송하지 않으며 재전송 가능 기간은 3일입니다."
+    action: "① Semaphore의 GitHub Webhook Watch 최근 실행 결과와 스케줄 확인 ② 작업이 실패했다면 로그의 오류를 보고(오류 코드가 있어도 하트비트는 남으므로 이 알림은 작업이 아예 돌지 않았거나 하트비트 전송이 끊겼을 때 울린다) OpenBao 입력·OpenObserve 수집 계정을 점검 ③ 복구 뒤 작업을 수동 실행해 하트비트를 확인하고 재전송 가능 기간(3일) 안의 실패를 재전송"
+    runbook: "{{ o2c_runbook_base }}#github-webhook-watch-silent"
+    row_template: '• {service_name}'
+    description: "전달 점검 하트비트(security_logs, record_type=heartbeat)가 {{ o2c_gww_silent_hours }}시간 없음 (State Alert, 재통지 360분) — 점검 주기 6시간의 두 배에 1시간 여유"
+    stream: security_logs
+    # 없다는 사실을 알리는 알림이라 WHERE의 원문(있는 줄)은 대상이 아니다: 원문 링크를 만들지 않는다
+    raw_link: false
+    missing: {roster: gww, field: service_name, cond: "record_type = 'heartbeat'"}
+    sql: "{{ o2c_gww_roster | o2c_missing_sql('security_logs', 'service_name', \"record_type = 'heartbeat'\") }}"
+    period: "{{ o2c_gww_silent_hours * 60 }}"
+    frequency: 60
+    silence: 360
+  - name: infra-github-webhook-hook-state
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "GitHub 조직 웹훅 이상: 없음·비활성·구독 이벤트 불일치"
+    what: "전달 점검 작업의 하트비트가 조직 웹훅의 상태 이상(hook_status가 missing·inactive·events_mismatch)을 보고했습니다."
+    why: "웹훅이 삭제·비활성화되었거나 구독 이벤트가 줄었으면 조직 설정 변경 이벤트가 수신기로 오지 않아 변경 감사 증적이 빠집니다. 권한 있는 사용자가 감시를 끄려는 변조일 수도 있습니다."
+    action: "① 행의 상태(없음 missing / 비활성 inactive / 이벤트 불일치 events_mismatch)와 문제 목록 확인 ② GitHub 조직의 웹훅 설정을 의도한 값과 대조하고 설정 변경 이력으로 변경한 사람을 확인 ③ 승인된 변경이 아니면 웹훅을 복구하고, 승인된 변경이면 의도값(수신 URL·구독 이벤트)을 점검 작업 입력에 반영"
+    runbook: "{{ o2c_runbook_base }}#github-webhook-hook-state"
+    row_template: '• {hook_status}: {hook_problems} · {event_time}'
+    description: "전달 점검 하트비트의 hook_status가 missing·inactive·events_mismatch (Event Alert, 재통지 60분) — 하트비트는 6시간마다 한 건"
+    stream: security_logs
+    sql: >-
+      SELECT service_name, hook_status, hook_problems, count(*) AS checks, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE record_type = 'heartbeat' AND hook_status IN ('missing', 'inactive', 'events_mismatch')
+      GROUP BY service_name, hook_status, hook_problems
+      ORDER BY checks DESC
+    period: 15
+    frequency: 5
+    silence: 60
+  - name: infra-github-webhook-redelivery-failed
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "GitHub 웹훅 재전송 실패 또는 복구 불가 전달 발생"
+    what: "전달 점검 작업의 하트비트가 복구되지 않은 실패 전달(재전송 요청 실패·재전송 뒤 재실패, failed_count), 재전송 가능 기간(3일)을 넘긴 실패(expired_count), 또는 전달 조회 누락(deliveries_truncated)을 보고했습니다."
+    why: "수신기가 받지 못한 웹훅 이벤트가 남아 있어 그 구간의 조직 변경이 중앙 로그에 빠졌을 수 있습니다. 기간을 넘긴 실패는 재전송할 수 없고, 조회가 누락되면 일부 실패를 보지 못한 상태입니다."
+    action: "① 행의 건수와 조회 누락 여부 확인 ② 수신기(수신 서비스·프록시)가 그 시간대에 내려가 있었는지 확인하고 복구 ③ 기간을 넘긴 실패는 조직 감사 로그 내보내기로 해당 구간을 보완 ④ 조회 누락이면 점검 작업의 조회 페이지 한도와 실패 전달 규모를 확인"
+    runbook: "{{ o2c_runbook_base }}#github-webhook-redelivery-failed"
+    row_template: '• 재전송 실패 {failed_count}건 · 기간 초과 {expired_count}건 · 조회 누락 {truncated}(1=예) · {event_time}'
+    description: "전달 점검 하트비트의 failed_count>0 또는 expired_count>0 또는 deliveries_truncated=true (Event Alert, 재통지 60분) — 하트비트는 6시간마다 한 건"
+    stream: security_logs
+    sql: >-
+      SELECT service_name, max(failed_count) AS failed_count, max(expired_count) AS expired_count,
+      max(CASE WHEN lower(CAST(deliveries_truncated AS VARCHAR)) IN ('true', '1') THEN 1 ELSE 0 END) AS truncated, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE record_type = 'heartbeat' AND (failed_count > 0 OR expired_count > 0 OR lower(CAST(deliveries_truncated AS VARCHAR)) IN ('true', '1'))
+      GROUP BY service_name
+      ORDER BY failed_count DESC
+    period: 15
+    frequency: 5
+    silence: 60
+
+  - name: infra-github-webhook-check-error
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "GitHub 웹훅 전달 점검 실패: 자격 만료·API 연결 오류"
+    what: "전달 점검 작업의 하트비트가 점검 오류(result=error)를 보고했습니다. 행의 오류 코드는 credential_missing·api_http_<상태 코드>·api_unreachable·api_unexpected_response 중 하나입니다."
+    why: "점검이 GitHub 조직 웹훅을 확인하지 못해 웹훅 삭제·변경과 실패 전달 재전송이 멈춘 상태입니다. 하트비트는 계속 들어오므로 침묵 알림은 울리지 않습니다. 토큰 만료가 가장 흔한 원인입니다."
+    action: "① 행의 오류 코드 확인(런북에 코드별 조치) ② 401·403·credential_missing이면 OpenBao의 토큰 만료·권한(조직 Webhooks) 점검과 교체 ③ api_unreachable이면 컨트롤러의 외부 연결 확인 ④ 복구 뒤 작업을 수동 실행해 하트비트 result=ok 확인"
+    runbook: "{{ o2c_runbook_base }}#github-webhook-check-error"
+    row_template: '• 점검 오류 {error} · {event_time}'
+    description: "전달 점검 하트비트의 result=error (Event Alert, 재통지 60분) — 하트비트는 6시간마다 한 건, 오류 코드는 error 필드"
+    stream: security_logs
+    sql: >-
+      SELECT service_name, error, count(*) AS checks, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE record_type = 'heartbeat' AND result = 'error'
+      GROUP BY service_name, error
+      ORDER BY checks DESC
+    period: 15
+    frequency: 5
+    silence: 60
+
+  # --- GitHub 조직 관리 변경 (Spec #399 / Ticket-4) --- 조직 웹훅이 보낸 감사 이벤트(service_name='github-audit', 필드는 github_audit_semantics)만 읽는다.
+  # 등급(P1·P2·P3)은 2026-11-03 사용자가 확정했다(바꾸려면 severity만 바꾼다). 전달 점검 알림(infra-github-webhook-*)과 이름·대상이 겹치지 않는다:
+  # 그쪽은 수신 경로의 상태, 이쪽은 조직에서 일어난 변경이다. 같은 `deleted`도 github_event로 구분한다. 행은 행위자 → 대상 · 저장소 · 이벤트.deleted 순이다.
+  - name: infra-github-audit-hook-deleted
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "GitHub 조직 웹훅 삭제"
+    what: "GitHub 조직에서 웹훅이 삭제됐습니다(meta 이벤트의 deleted). 행의 대상은 삭제된 웹훅 ID입니다."
+    why: "이 웹훅이 조직 변경 감사 증적의 수신 경로라 삭제되면 이후 변경이 중앙 로그에 남지 않습니다. 감시를 끄려는 변조일 수 있어 가장 먼저 확인해야 합니다."
+    action: "① 행의 행위자·시각을 작업 일정과 대조(행위자가 ghost(행위자 불명)이면 조직 감사 로그로 확인) ② 승인되지 않은 변경이면 웹훅을 복구하고 해당 계정·토큰 점검 ③ 삭제된 구간의 변경은 조직 감사 로그 내보내기로 보완"
+    runbook: "{{ o2c_runbook_base }}#github-audit-hook-deleted"
+    row_template: '• {actor} → 웹훅 {target} · {repo} · {event_time}'
+    description: "github-audit의 github_event=meta, github_action=deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE service_name = 'github-audit' AND github_event = 'meta' AND github_action = 'deleted'
+      GROUP BY {{ o2c_gha_group }}, github_event, github_action
+      ORDER BY events DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-github-audit-repo-public
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "GitHub 저장소 공개 전환"
+    what: "GitHub 저장소가 비공개에서 공개로 바뀌었습니다(repository 이벤트의 publicized, 또는 public 이벤트). 같은 전환의 두 전달은 한 행으로 묶입니다."
+    why: "소스 코드·이슈·이력이 인터넷에 노출됩니다. 이 저장소에 든 비밀값은 이미 유출된 것으로 봐야 하고, 공개 뒤에는 복사본을 되돌릴 수 없습니다."
+    action: "① 행의 저장소·행위자가 승인된 공개인지 확인 ② 승인되지 않았으면 즉시 비공개로 되돌리고 보안 담당 보고 ③ 공개된 동안 노출된 비밀값(토큰·키·접속 정보)을 교체"
+    runbook: "{{ o2c_runbook_base }}#github-audit-repo-public"
+    row_template: '• {actor} → {target} · {repo} · 공개 전환(public) · {event_time}'
+    description: "github-audit의 repository.publicized 또는 public 이벤트 (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_gha_columns }}, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE service_name = 'github-audit' AND ((github_event = 'repository' AND github_action = 'publicized') OR github_event = 'public')
+      GROUP BY {{ o2c_gha_group }}
+      ORDER BY events DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-github-audit-repo-org-deleted
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "GitHub 저장소 또는 조직 삭제"
+    what: "GitHub 저장소가 삭제됐거나(repository 이벤트의 deleted) 조직이 삭제됐습니다(organization 이벤트의 deleted). 행의 이벤트 이름으로 구분합니다."
+    why: "소스·이슈·이력의 손실입니다. 복구 가능한 기간은 짧고 조직 삭제는 감사 수신도 함께 끊습니다. 저장소·조직 삭제는 정상 정리일 때도 되돌리기 어려워 P1로 제안합니다."
+    action: "① 행의 저장소·행위자가 승인된 삭제인지 작업 일정과 대조 ② 승인되지 않았으면 GitHub의 삭제 복구 기능(저장소는 삭제 직후 일정 기간 복원 가능)을 즉시 시도하고 보안 담당 보고 ③ 해당 계정·토큰을 점검하고 로컬 복제본·백업을 확보"
+    runbook: "{{ o2c_runbook_base }}#github-audit-repo-org-deleted"
+    row_template: '• {actor} → {target} · {repo} · {kind}'
+    description: "github-audit의 repository.deleted 또는 organization.deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03) — 저장소 삭제는 조직 웹훅만 받는다"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind FROM "security_logs"
+      WHERE service_name = 'github-audit' AND github_action = 'deleted' AND github_event IN ('repository', 'organization')
+      GROUP BY {{ o2c_gha_group }}, github_event, github_action
+      ORDER BY events DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-github-audit-protection-removed
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "GitHub 브랜치 보호 규칙 삭제"
+    what: "저장소의 브랜치 보호 규칙이 삭제됐습니다(branch_protection_rule 이벤트의 deleted). 행의 대상은 규칙 이름입니다."
+    why: "강제 푸시 금지·리뷰 필수 같은 보호가 풀려 검토 없이 코드가 바뀔 수 있습니다. 공급망 변조의 사전 단계일 수 있습니다."
+    action: "① 행의 저장소·행위자가 작업 일정과 맞는지 확인 ② 승인되지 않았으면 규칙을 복구하고 그 사이의 커밋을 점검 ③ 행위자의 계정·토큰 점검"
+    runbook: "{{ o2c_runbook_base }}#github-audit-protection-removed"
+    row_template: '• {actor} → 규칙 {target} · {repo} · {event_time}'
+    description: "github-audit의 branch_protection_rule.deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE service_name = 'github-audit' AND github_event = 'branch_protection_rule' AND github_action = 'deleted'
+      GROUP BY {{ o2c_gha_group }}, github_event, github_action
+      ORDER BY events DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-github-audit-ruleset-deleted
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "GitHub 저장소 룰셋 삭제"
+    what: "저장소 또는 조직의 룰셋이 삭제됐습니다(repository_ruleset 이벤트의 deleted). 행의 대상은 룰셋 이름입니다."
+    why: "룰셋이 강제하던 브랜치·태그 보호와 병합 조건이 사라져 검토 없는 변경이 가능해집니다."
+    action: "① 행의 룰셋·저장소·행위자가 작업 일정과 맞는지 확인 ② 승인되지 않았으면 룰셋을 복구하고 그 사이의 변경을 점검 ③ 행위자의 계정·토큰 점검"
+    runbook: "{{ o2c_runbook_base }}#github-audit-ruleset-deleted"
+    row_template: '• {actor} → 룰셋 {target} · {repo} · {event_time}'
+    description: "github-audit의 repository_ruleset.deleted (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE service_name = 'github-audit' AND github_event = 'repository_ruleset' AND github_action = 'deleted'
+      GROUP BY {{ o2c_gha_group }}, github_event, github_action
+      ORDER BY events DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-github-audit-deploy-key-created
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "GitHub deploy key 생성"
+    what: "저장소에 deploy key가 추가됐습니다(deploy_key 이벤트의 created). 행의 대상은 키 제목입니다."
+    why: "deploy key는 사람 계정 없이 저장소에 접근하는 열쇠라 침입자가 지속 접근을 심는 자리입니다. 쓰기 권한 키면 코드를 바꿀 수 있습니다."
+    action: "① 행의 키 제목·저장소·행위자가 승인된 배포 작업인지 확인 ② 승인되지 않았으면 키를 삭제하고 그 키로 일어난 접근을 점검 ③ 승인된 키면 읽기 전용인지 확인"
+    runbook: "{{ o2c_runbook_base }}#github-audit-deploy-key-created"
+    row_template: '• {actor} → 키 {target} · {repo} · {event_time}'
+    description: "github-audit의 deploy_key.created (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, {{ o2c_event_time_sql }} FROM "security_logs"
+      WHERE service_name = 'github-audit' AND github_event = 'deploy_key' AND github_action = 'created'
+      GROUP BY {{ o2c_gha_group }}, github_event, github_action
+      ORDER BY events DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-github-audit-membership-change
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "GitHub 멤버·팀·collaborator 변경"
+    what: "조직 멤버(organization의 member_added·member_invited·member_removed), 팀(team 생성·삭제·저장소 연결 변경), 팀 멤버십(membership), 저장소 collaborator(member의 added·edited·removed)가 바뀌었습니다. 행의 이벤트 이름과 팀으로 구분합니다."
+    why: "접근 권한이 늘거나 줄었습니다. 대부분 정상 운영이지만 승인되지 않은 계정 추가나 권한 상승은 침해의 신호이고, 퇴사자 제거가 빠지면 접근이 남습니다."
+    action: "① 행의 행위자·대상·저장소·팀을 인사·작업 요청과 대조 ② 승인되지 않은 추가·권한 상승이면 되돌리고 행위자 계정 점검 ③ 승인된 변경이면 작업 기록에 남기기"
+    runbook: "{{ o2c_runbook_base }}#github-audit-membership-change"
+    row_template: '• {actor} → {target} · {team} · {repo} · {kind}'
+    description: "github-audit의 member(added·edited·removed), membership(added·removed), organization(member_added·member_invited·member_removed), team(created·deleted·added_to_repository·removed_from_repository) (Event Alert, 재통지 5분, 등급 확정 2026-11-03)"
+    stream: security_logs
+    sql: >-
+      SELECT {{ o2c_gha_columns }}, github_event || '.' || coalesce(nullif(github_action, ''), '-') AS kind, substr(coalesce(nullif(github_team, ''), '-'), 1, 20) AS team FROM "security_logs"
+      WHERE service_name = 'github-audit' AND (
+      (github_event = 'member' AND github_action IN ('added', 'edited', 'removed'))
+      OR (github_event = 'membership' AND github_action IN ('added', 'removed'))
+      OR (github_event = 'organization' AND github_action IN ('member_added', 'member_invited', 'member_removed'))
+      OR (github_event = 'team' AND github_action IN ('created', 'deleted', 'added_to_repository', 'removed_from_repository')))
+      GROUP BY {{ o2c_gha_group }}, github_event, github_action, github_team
+      ORDER BY events DESC
+    period: 5
+    frequency: 1
+    silence: 5
 
   # --- 스위치 syslog (Spec #277) --- 모두 system_logs의 service_name='switch-syslog'. 장비는 coalesce(device_id, device_name)(관리번호, 없으면 정규화된 이름)로 집계한다.
   # SQL은 파싱된 모든 줄이 갖는 필드와 body만 참조한다(일부 메시지에만 생기는 필드는 body에서 뽑는다 — 없는 컬럼은 알림을 unknown field 오류로 만든다).

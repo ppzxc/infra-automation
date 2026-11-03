@@ -1,6 +1,17 @@
 [Unit]
 Description=OpenTelemetry Collector Contrib
+{% if (host_agents_inputs.otel_github_webhook | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
+# GitHub 웹훅 수신기(Spec #399)는 도커 브리지 주소에 바인드한다. 브리지보다 먼저 뜨면 바인딩 실패로 수집기 전체(모든 로그 수집)가 멈추므로 도커 뒤에 시작한다.
+# 도커가 늦거나 재시작해도 Restart=always가 바인딩 실패를 다시 시도한다.
+After=network.target docker.service
+Wants=docker.service
+# PartOf: 도커 stop/restart가 수집기에 전파된다(브리지 재생성 때 수신 소켓이 낡은 인터페이스에 묶인 채 남지 않도록 재시작해 다시 바인딩).
+# PartOf는 start를 전파하지 않고 Restart=always도 요청된 정지 뒤엔 되살리지 않으므로, docker.service.wants 링크(docker_wants.yml 태스크가 만든다. [Install]의 enable은 이미 enabled인 호스트에서 no-op이라 쓰지 않는다)가
+# `systemctl start docker`에 수집기를 같이 올려 stop→start 뒤에도 수집이 이어지게 한다.
+PartOf=docker.service
+{% else %}
 After=network.target
+{% endif %}
 
 [Service]
 {% if otelcol_run_as_root | default(false) | bool %}

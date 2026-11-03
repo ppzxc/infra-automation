@@ -1,0 +1,21 @@
+---
+# ==============================================================================
+# GitHub 조직 웹훅 전달 점검 (Spec #399 / Ticket-5) — 컨트롤러 전용
+# ==============================================================================
+# 조직 웹훅의 존재·활성·구독 이벤트를 의도값과 비교하고, 최근 실패한 전달을 재전송하며,
+# 결과를 하트비트 레코드로 OpenObserve에 남긴다. 호스트에는 접속하지 않는다.
+# 자격과 URL은 OpenBao agents/github-webhook-watch에서 읽는다 — Git에 두지 않는다.
+#
+# Semaphore 템플릿: GitHub Webhook Watch (localhost 실행, 6시간마다 `0 */6 * * *`; docs/github_webhook_watch.md)
+# 실행 예시:
+#   ansible-playbook -i inventory/hosts.yml playbooks/github_webhook_watch.yml --check
+#   ansible-playbook -i inventory/hosts.yml playbooks/github_webhook_watch.yml
+# ==============================================================================
+- name: Check the GitHub organization webhook and redeliver failed deliveries
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - role: github_webhook_watch
+      tags: [github, webhook, monitoring]

@@ -17,7 +17,7 @@ import yaml
 
 from o2c_render import KV, RENDER_LOG_ENV, ROOT_DIR, render_desired
 from o2c_alert_helpers import (
-    COUNT_FIELDS, DEVICE_TIME_ALERTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS, FORTIGATE_FN, LONGEST_ROW_VALUES,
+    COUNT_FIELDS, DEVICE_TIME_ALERTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS, FORTIGATE_FN, GITHUB_FN, LONGEST_ROW_VALUES,
     LONGEST_TEXT, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS, PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
     RUNBOOK, SECURITY_ALERTS, SECURITY_TIME_CASES, SELFTEST, SWITCH_ALERTS, SWITCH_FN, SYSTEM_TIME_CASES,
     TEXT_VALUE, _branch_devices, _decode_raw_url, _ev, _fail, _filters, _fixture_records, _kst_us, _raw_line,
@@ -445,7 +445,7 @@ def test_switch_alerts_are_created_on_system_logs_with_the_specified_grades_and_
 
 
 def test_switch_function_and_pipeline_are_added_beside_the_security_ones_and_the_security_pipeline_is_untouched(desired):
-    assert set(desired.store["function"]) == {"security_semantics", SWITCH_FN, FORTIGATE_FN}
+    assert set(desired.store["function"]) == {"security_semantics", SWITCH_FN, FORTIGATE_FN, GITHUB_FN}
     fn = desired.store["function"][SWITCH_FN]
     assert fn["function"] == (ROLE / "files" / "vrl" / "switch_syslog_semantics.vrl").read_text().strip() and fn["params"] == "row"
     pl = desired.store["pipeline"][SWITCH_FN]
@@ -465,14 +465,23 @@ def test_firewall_function_runs_in_the_security_pipeline_right_after_the_securit
     pl = desired.store["pipeline"]["security_semantics"]
     assert pl["source"]["stream_name"] == "security_logs" and pl["enabled"] is True
     functions = [n for n in pl["nodes"] if n["data"]["node_type"] == "function"]
-    assert [(n["data"]["name"], n["data"]["after_flatten"]) for n in functions] == [("security_semantics", True), (FORTIGATE_FN, True)]
-    # input -> security_semantics -> fortigate_semantics -> output, and no condition node (the service check lives in the function)
+    assert [(n["data"]["name"], n["data"]["after_flatten"]) for n in functions] == [("security_semantics", True), (FORTIGATE_FN, True), (GITHUB_FN, True)]
+    # input -> security_semantics -> fortigate_semantics -> github_audit_semantics -> output, and no condition node (the service check lives in the function)
     edges = {(e["source"], e["target"]) for e in pl["edges"]}
     ids = {n["data"].get("name") or n["io_type"]: n["id"] for n in pl["nodes"]}
     assert edges == {(next(n["id"] for n in pl["nodes"] if n["io_type"] == "input"), ids["security_semantics"]),
                      (ids["security_semantics"], ids[FORTIGATE_FN]),
-                     (ids[FORTIGATE_FN], next(n["id"] for n in pl["nodes"] if n["io_type"] == "output"))}
+                     (ids[FORTIGATE_FN], ids[GITHUB_FN]),
+                     (ids[GITHUB_FN], next(n["id"] for n in pl["nodes"] if n["io_type"] == "output"))}
     assert not [n for n in pl["nodes"] if n["data"]["node_type"] == "condition"]
+
+
+def test_github_audit_function_is_chained_last_and_the_existing_function_sources_are_unchanged(desired):
+    """Spec #399 / Ticket-3: github_audit_semantics follows the existing functions in the security pipeline; the others keep their source."""
+    fn = desired.store["function"][GITHUB_FN]
+    assert fn["function"] == (ROLE / "files" / "vrl" / "github_audit_semantics.vrl").read_text().strip() and fn["params"] == "row"
+    assert desired.store["function"]["security_semantics"]["function"] == (ROLE / "files" / "vrl" / "security_semantics.vrl").read_text().strip()
+    assert "github" not in desired.store["function"][FORTIGATE_FN]["function"]
 
 
 def test_default_noise_list_holds_the_arp_resolution_failure_and_every_alert_excludes_it(desired):
@@ -802,3 +811,218 @@ def test_auth_silent_alerts_watch_only_the_auth_source_for_every_roster_host(tmp
             assert "FROM \"security_logs\" WHERE host_name = '%s' AND service_name = 'auth' HAVING" % host in sql
     assert "- 2700000000 THEN 1" in p2 and "count(*) >= 1" in p2   # 변수로 바꾼 최근 구간(45분)이 SQL에 들어간다. 3시간 전체 없음은 P1 몫
     assert "HAVING count(*) < 1" in p1 and "THEN 1" not in p1
+
+
+# --- GitHub 웹훅 전달 점검 (Spec #399 / Ticket-6) ---
+GWW_ALERTS = {   # name -> (severity, period minutes, frequency, silence)
+    "infra-github-webhook-watch-silent": ("P1 긴급", 13 * 60, 60, 360),
+    "infra-github-webhook-hook-state": ("P2 경고", 15, 5, 60),
+    "infra-github-webhook-redelivery-failed": ("P2 경고", 15, 5, 60),
+    "infra-github-webhook-check-error": ("P2 경고", 15, 5, 60),
+}
+
+
+def test_github_webhook_alerts_keep_the_prefix_severity_runbook_link_and_timing(desired, rendered):
+    for name, (sev, period, freq, silence) in GWW_ALERTS.items():
+        assert name.startswith("infra-"), name
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == sev, name
+        assert alert["context_attributes"]["runbook"].endswith("#" + name.removeprefix("infra-")), name
+        assert alert["stream_name"] == "security_logs", name
+        tc = alert["trigger_condition"]
+        assert (tc["period"], tc["frequency"], tc["silence"]) == (period, freq, silence), name
+    names = [o["name"] for o in rendered if o["kind"] == "alert"]
+    assert len(names) == len(set(names)) and set(GWW_ALERTS) <= set(names)   # 기존 알림 이름과 겹치지 않는다
+
+
+def test_github_webhook_runbook_sections_exist_for_every_alert():
+    text = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
+    for name in GWW_ALERTS:
+        assert '<a id="%s"></a>' % name.removeprefix("infra-") in text and "`%s`" % name in text, name
+
+
+def test_github_webhook_silence_threshold_covers_two_check_intervals_but_stays_inside_the_redelivery_window(desired):
+    defaults = yaml.safe_load((ROOT_DIR / "roles" / "github_webhook_watch" / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    period_min = desired.store["alert"]["infra-github-webhook-watch-silent"]["trigger_condition"]["period"]
+    assert period_min > 2 * int(defaults["gww_check_interval_hours"]) * 60   # 한 번 빠진 실행에는 울리지 않는다
+    assert period_min < int(defaults["gww_redelivery_window_hours"]) * 60 / 2   # 재전송 가능 기간(3일)에 비해 충분히 일찍 알린다
+
+
+def test_github_webhook_silent_alert_watches_only_the_heartbeat_record(desired):
+    assert _sql(desired, "infra-github-webhook-watch-silent") == (
+        "SELECT 'github-webhook-watch' AS service_name, count(*) AS n FROM \"security_logs\" "
+        "WHERE service_name = 'github-webhook-watch' AND record_type = 'heartbeat' HAVING count(*) < 1")
+
+
+HEARTBEAT = dict(service_name="github-webhook-watch", record_type="heartbeat", result="ok", error="", hook_status="ok", hook_problems="",
+                 failed_count=0, expired_count=0, deliveries_truncated=False)
+
+
+@pytest.mark.parametrize("name, change, fires", [
+    ("infra-github-webhook-hook-state", dict(hook_status="missing", hook_problems="hook_missing"), True),
+    ("infra-github-webhook-hook-state", dict(hook_status="inactive"), True),
+    ("infra-github-webhook-hook-state", dict(hook_status="events_mismatch"), True),
+    ("infra-github-webhook-hook-state", dict(hook_status="ok"), False),
+    ("infra-github-webhook-redelivery-failed", dict(failed_count=1), True),
+    ("infra-github-webhook-redelivery-failed", dict(expired_count=2), True),
+    ("infra-github-webhook-redelivery-failed", dict(deliveries_truncated=True), True),
+    ("infra-github-webhook-redelivery-failed", dict(), False),
+    ("infra-github-webhook-redelivery-failed", dict(deliveries_truncated="true"), True),   # 불리언이 문자열로 들어와도 판정이 같다
+    ("infra-github-webhook-redelivery-failed", dict(deliveries_truncated="false"), False),
+    ("infra-github-webhook-check-error", dict(result="error", error="credential_missing"), True),
+    ("infra-github-webhook-check-error", dict(result="error", error="api_http_401", hook_status="unknown"), True),
+    ("infra-github-webhook-check-error", dict(result="ok", error=""), False),
+])
+def test_github_webhook_event_alerts_fire_on_the_documented_heartbeat_fields(desired, name, change, fires):
+    rows = _run_alert_on_sqlite(_sql(desired, name), [dict(HEARTBEAT, **change)], stream="security_logs")
+    assert bool(rows) is fires
+
+
+def test_github_webhook_rows_fit_the_message_limit_in_the_worst_case(desired):
+    values = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "event_time": LONGEST_ROW_VALUES["event_time"],
+              "failed_count": "9999", "expired_count": "9999", "truncated": "1", "error": "api_unexpected_response", "service_name": "github-webhook-watch"}
+    for name in GWW_ALERTS:
+        assert len(_rendered_message(desired, name, values)) <= BODY_LIMIT, name
+
+
+def test_github_webhook_truncated_flag_is_read_without_a_boolean_aggregate_or_comparison(desired):
+    sql = _sql(desired, "infra-github-webhook-redelivery-failed")
+    assert "max(deliveries_truncated)" not in sql and "deliveries_truncated = true" not in sql   # 엔진마다 불리언 max·비교가 다르다
+    rows = _run_alert_on_sqlite(sql, [dict(HEARTBEAT, deliveries_truncated=True)], stream="security_logs")
+    assert rows[0]["truncated"] == 1
+
+
+def test_github_webhook_check_error_alert_names_every_documented_error_code_in_its_runbook():
+    text = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
+    section = text.split('<a id="github-webhook-check-error"></a>')[1].split("\n---\n")[0]
+    for code in ("credential_missing", "api_unreachable", "api_http_401", "api_http_403", "api_unexpected_response"):
+        assert code in section, code
+    silent = text.split('<a id="github-webhook-watch-silent"></a>')[1].split("\n---\n")[0]
+    assert "오류 코드가 있어도 하트비트는 남" in silent   # 오류 하트비트로는 침묵 알림이 울리지 않는다
+
+
+# --- GitHub 조직 관리 변경 알림 (Spec #399 / Ticket-4) --- 등급은 2026-11-03 사용자가 확정했다.
+GHA_ALERTS = {   # name -> (severity, 알림이 잡아야 할 (event, action) 조합)
+    "infra-github-audit-hook-deleted": ("P1 긴급", {("meta", "deleted")}),
+    "infra-github-audit-repo-public": ("P1 긴급", {("repository", "publicized"), ("public", None)}),
+    "infra-github-audit-repo-org-deleted": ("P1 긴급", {("repository", "deleted"), ("organization", "deleted")}),
+    "infra-github-audit-protection-removed": ("P2 경고", {("branch_protection_rule", "deleted")}),
+    "infra-github-audit-ruleset-deleted": ("P2 경고", {("repository_ruleset", "deleted")}),
+    "infra-github-audit-deploy-key-created": ("P2 경고", {("deploy_key", "created")}),
+    "infra-github-audit-membership-change": ("P3 주의", {
+        ("member", "added"), ("member", "edited"), ("member", "removed"), ("membership", "added"), ("membership", "removed"),
+        ("organization", "member_added"), ("organization", "member_invited"), ("organization", "member_removed"),
+        ("team", "created"), ("team", "deleted"), ("team", "added_to_repository"), ("team", "removed_from_repository")}),
+}
+
+
+def _gha_rec(event, action, **extra):
+    # 저장소는 레코드마다 달라 서로 묶이지 않는다. 열은 항상 있다(스트림 스키마에는 다른 이벤트가 만든 열이 이미 있다)
+    rec = dict(service_name="github-audit", github_event=event, github_action=action, github_org="example-org", github_repo="o/%s-%s" % (event, action),
+               github_actor="alice", github_actor_ghost=False, github_target="bob", github_target_type="user", github_team="platform",
+               github_delivery_id="d-%s-%s" % (event, action), github_hook_id="1", _timestamp=1_792_767_302_000_000)
+    rec.update(extra)
+    return rec
+
+
+def test_github_audit_alerts_keep_the_prefix_severity_runbook_link_and_timing(desired, rendered):
+    for name, (sev, _) in GHA_ALERTS.items():
+        assert name.startswith("infra-") and not name.startswith("infra-github-webhook-"), name   # 전달 점검 알림(Ticket-6)과 이름이 겹치지 않는다
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == sev, name
+        assert alert["context_attributes"]["runbook"].endswith("#" + name.removeprefix("infra-")), name
+        assert alert["stream_name"] == "security_logs", name
+        tc = alert["trigger_condition"]
+        assert (tc["period"], tc["frequency"], tc["silence"]) == (5, 1, 5), name   # 이벤트 알림: 5분 구간에 한 번
+    names = [o["name"] for o in rendered if o["kind"] == "alert"]
+    assert len(names) == len(set(names)) and set(GHA_ALERTS) <= set(names)
+
+
+def test_github_audit_runbook_sections_exist_and_mark_the_severity_as_confirmed():
+    text = (ROOT_DIR / "docs" / "runbooks" / "alerts.md").read_text(encoding="utf-8")
+    for name in GHA_ALERTS:
+        assert '<a id="%s"></a>' % name.removeprefix("infra-") in text and "`%s`" % name in text, name
+    assert "사용자 확정 대기" not in text and "2026-11-03 사용자가 확정" in text
+
+
+@pytest.mark.parametrize("name", sorted(GHA_ALERTS))
+def test_github_audit_alert_fires_only_for_its_own_event_action_pairs(desired, name):
+    own = GHA_ALERTS[name][1]
+    every = set().union(*(v[1] for v in GHA_ALERTS.values())) | {("meta", "created"), ("repository", "created"), ("deploy_key", "deleted"),
+                                                                  ("branch_protection_rule", "created"), ("repository_ruleset", "edited"),
+                                                                  ("member", "invited"), ("org_block", "blocked"), ("ping", None)}
+    recs = [_gha_rec(e, a) for e, a in sorted(every, key=str)]
+    recs.append(_gha_rec("meta", "deleted", service_name="other-service", github_delivery_id="d-other"))   # 다른 서비스는 보지 않는다
+    rows = _run_alert_on_sqlite(_sql(desired, name), recs, stream="security_logs")
+    assert {r["github_delivery_id"] for r in rows} == {"d-%s-%s" % (e, a) for e, a in own}, name
+
+
+@pytest.mark.parametrize("name", sorted(GHA_ALERTS))
+def test_github_audit_rows_name_actor_target_and_repository(desired, name):
+    event, action = sorted(GHA_ALERTS[name][1], key=str)[0]
+    rows = _run_alert_on_sqlite(_sql(desired, name), [_gha_rec(event, action, github_target="the-target", github_team="the-team")], stream="security_logs")
+    assert len(rows) == 1, name
+    line = re.sub(r"\{(\w+)\}", lambda m: str(rows[0][m.group(1)]), desired.store["alert"][name]["row_template"])
+    for token in ("alice", "the-target", "o/%s-%s" % (event, action)):
+        assert token in line, (name, token, line)
+    if "{kind}" in desired.store["alert"][name]["row_template"]:   # 같은 알림이 여러 이벤트를 잡으면 행의 이벤트.액션으로 구분한다
+        assert "%s.%s" % (event, action) in line
+
+
+def test_github_audit_row_marks_a_ghost_actor_and_keeps_rows_without_target_or_repository(desired):
+    sql = _sql(desired, "infra-github-audit-hook-deleted")
+    ghost = _run_alert_on_sqlite(sql, [_gha_rec("meta", "deleted", github_actor="ghost", github_actor_ghost=True)], stream="security_logs")
+    assert "ghost" in ghost[0]["actor"] and "불명" in ghost[0]["actor"]
+    nosender = _run_alert_on_sqlite(sql, [_gha_rec("meta", "deleted", github_actor=None, github_actor_ghost=True)], stream="security_logs")
+    assert "불명" in nosender[0]["actor"]
+    real = _run_alert_on_sqlite(sql, [_gha_rec("meta", "deleted", github_actor_ghost="false")], stream="security_logs")
+    assert real[0]["actor"] == "alice"
+    bare = _gha_rec("organization", "deleted", github_target=None, github_repo=None)
+    row = _run_alert_on_sqlite(_sql(desired, "infra-github-audit-repo-org-deleted"), [bare], stream="security_logs")[0]
+    assert row["target"] and row["repo"]   # 대상·저장소가 없어도 행에 자리표시가 나온다
+
+
+@pytest.mark.parametrize("name", sorted(GHA_ALERTS))
+def test_github_audit_alert_handles_a_sparse_record_whose_missing_values_are_empty_strings(desired, name):
+    """The VRL always sets all 11 fields (empty string when the payload has no value), so a stream made of one sparse record has every column."""
+    event, action = sorted(GHA_ALERTS[name][1], key=str)[0]
+    sparse = {"service_name": "github-audit", "github_event": event, "github_action": action or "", "github_delivery_id": "d-sparse", "github_hook_id": "",
+              "github_actor": "", "github_actor_ghost": True, "github_org": "", "github_repo": "", "github_target": "", "github_target_type": "", "github_team": "",
+              "_timestamp": 1_792_767_302_000_000}
+    rows = _run_alert_on_sqlite(_sql(desired, name), [sparse], stream="security_logs")
+    assert len(rows) == 1, name
+    row = rows[0]
+    assert "불명" in row["actor"] and row["repo"] == "-" and row["target"] == "(대상 불명)", row   # 빈 문자열도 자리표시로 바뀐다
+    if "team" in row:
+        assert row["team"] == "-"
+
+
+def test_github_audit_membership_row_shows_the_team_for_team_membership(desired):
+    row = _run_alert_on_sqlite(_sql(desired, "infra-github-audit-membership-change"),
+                               [_gha_rec("membership", "added", github_team="platform")], stream="security_logs")[0]
+    assert "platform" in row["team"]
+
+
+def test_github_audit_publicized_and_public_for_one_change_make_one_row(desired):
+    recs = [_gha_rec("repository", "publicized", github_delivery_id="d-1", github_repo="example-org/same"),
+            _gha_rec("public", None, github_delivery_id="d-2", github_repo="example-org/same")]
+    rows = _run_alert_on_sqlite(_sql(desired, "infra-github-audit-repo-public"), recs, stream="security_logs")
+    assert len(rows) == 1 and int(rows[0]["events"]) == 2   # 같은 저장소·행위자의 두 전달은 한 행
+
+
+def test_github_audit_messages_fit_the_limit_in_the_worst_case_and_carry_the_required_sections(desired):
+    values = {"actor": "u" * 39, "target": "t" * 30, "repo": "r" * 40, "kind": "team.removed_from_repository", "team": "t" * 20,   # SQL이 자르는 상한
+              "events": "9999", "event_time": LONGEST_ROW_VALUES["event_time"], "github_delivery_id": "d" * 36}
+    realistic = dict(LONGEST_TEXT, events="999", event_time=LONGEST_ROW_VALUES["event_time"])
+    for name in GHA_ALERTS:
+        assert len(_rendered_message(desired, name, values)) <= BODY_LIMIT, name        # SQL 상한 값으로 30행이어도 플랫폼 한도(50,000자) 안
+        assert len(_rendered_message(desired, name, realistic)) <= 5000, name           # 현실적인 최대 값으로는 실측한 5,000자 안(기존 알림과 같은 기준)
+        ctx = desired.store["alert"][name]["context_attributes"]
+        for key in ("what", "why", "action_1", "runbook"):
+            assert ctx[key], (name, key)
+
+
+def test_github_audit_alerts_do_not_touch_the_existing_alert_sets(desired):
+    assert not (set(GHA_ALERTS) & set(GWW_ALERTS))
+    for name in GWW_ALERTS:
+        assert name in desired.store["alert"]

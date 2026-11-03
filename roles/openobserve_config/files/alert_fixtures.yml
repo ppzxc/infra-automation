@@ -658,6 +658,102 @@ infra-app-telemetry-silent:
       fires: false
       records:
         - {ts: [-60, 0], service_name: funa, value: 1}
+# --- GitHub 웹훅 전달 점검 (Spec #399 / Ticket-6) --- 하트비트 레코드(record_type=heartbeat)만 본다. 침묵은 조회 구간 13시간이고, 케이스 호스트는 service_name 자리에 들어간다.
+infra-github-webhook-watch-silent:
+  row_key: service_name
+  host_field: service_name
+  cases:
+    - name: 하트비트가 한 번도 없다
+      host: verify-gww-silent-never
+      fires: true
+      records: []
+    - name: 하트비트가 아닌 레코드만 오면 침묵이다
+      host: verify-gww-silent-other
+      fires: true
+      records:
+        - {ts: -600, record_type: other}
+    - name: 최근 하트비트가 있다
+      host: verify-gww-silent-fresh
+      fires: false
+      records:
+        - {ts: -600, record_type: heartbeat, result: ok, hook_status: ok}
+    - name: 4시간 전 하트비트도 구간(13시간) 안이라 침묵이 아니다
+      host: verify-gww-silent-hours
+      fires: false
+      records:
+        - {ts: -14400, record_type: heartbeat, result: ok, hook_status: ok}
+infra-github-webhook-hook-state:
+  row_key: service_name
+  host_field: service_name
+  cases:
+    - name: 훅이 없다
+      host: verify-gww-hook-missing
+      fires: true
+      records:
+        - {record_type: heartbeat, hook_status: missing, hook_problems: hook_missing, failed_count: 0, expired_count: 0, deliveries_truncated: false}
+    - name: 훅이 비활성이다
+      host: verify-gww-hook-inactive
+      fires: true
+      records:
+        - {record_type: heartbeat, hook_status: inactive, hook_problems: hook_inactive, failed_count: 0, expired_count: 0, deliveries_truncated: false}
+    - name: 구독 이벤트가 의도와 다르다
+      host: verify-gww-hook-mismatch
+      fires: true
+      records:
+        - {record_type: heartbeat, hook_status: events_mismatch, hook_problems: events_mismatch, failed_count: 0, expired_count: 0, deliveries_truncated: false}
+    - name: 훅이 정상이다
+      host: verify-gww-hook-ok
+      fires: false
+      records:
+        - {record_type: heartbeat, hook_status: ok, hook_problems: "", failed_count: 0, expired_count: 0, deliveries_truncated: false}
+    - name: 상태를 알 수 없는 경우(API 오류)는 실행 실패가 맡는다
+      host: verify-gww-hook-unknown
+      fires: false
+      records:
+        - {record_type: heartbeat, hook_status: unknown, hook_problems: "", failed_count: 0, expired_count: 0, deliveries_truncated: false}
+infra-github-webhook-redelivery-failed:
+  row_key: service_name
+  host_field: service_name
+  cases:
+    - name: 재전송 실패가 있다
+      host: verify-gww-redeliver-failed
+      fires: true
+      records:
+        - {record_type: heartbeat, hook_status: ok, failed_count: 2, expired_count: 0, deliveries_truncated: false}
+    - name: 재전송 가능 기간을 넘긴 실패가 있다
+      host: verify-gww-redeliver-expired
+      fires: true
+      records:
+        - {record_type: heartbeat, hook_status: ok, failed_count: 0, expired_count: 1, deliveries_truncated: false}
+    - name: 전달 조회가 잘렸다
+      host: verify-gww-redeliver-truncated
+      fires: true
+      records:
+        - {record_type: heartbeat, hook_status: ok, failed_count: 0, expired_count: 0, deliveries_truncated: true}
+    - name: 재전송에 성공했고 실패가 없다
+      host: verify-gww-redeliver-clean
+      fires: false
+      records:
+        - {record_type: heartbeat, hook_status: ok, failed_count: 0, expired_count: 0, deliveries_truncated: false, redelivered_count: 3}
+infra-github-webhook-check-error:
+  row_key: service_name
+  host_field: service_name
+  cases:
+    - name: 자격이 만료되어 점검이 실패했다(오류 하트비트)
+      host: verify-gww-error-401
+      fires: true
+      records:
+        - {record_type: heartbeat, result: error, error: api_http_401, hook_status: unknown}
+    - name: 자격이 없다
+      host: verify-gww-error-cred
+      fires: true
+      records:
+        - {record_type: heartbeat, result: error, error: credential_missing, hook_status: unknown}
+    - name: 점검이 정상이다
+      host: verify-gww-error-ok
+      fires: false
+      records:
+        - {record_type: heartbeat, result: ok, error: "", hook_status: ok}
 # --- 서버 도달성 (Spec #184 / Ticket-6, ADR-0010) --- tcpcheck.status는 60초마다 1(접속 성공)/0(실패). 검사하는 쪽은 host_name, 대상은 tcpcheck_endpoint.
 infra-unreachable-host:
   cases:
@@ -1628,3 +1724,142 @@ infra-fortigate-admin-login-new-source:
       fires: false
       records:
         - {omit_host_field: true, service_name: sshd, source_address: 203.0.113.63, body: 'date=2026-10-26 time=10:00:00 devname="{host}" type="event" subtype="system" user="admin" action="login" status="success"'}
+# --- GitHub 조직 관리 변경 (Spec #399 / Ticket-4) --- 호스트 자리에는 전달 ID(행의 github_delivery_id)가 들어간다. 케이스마다 저장소가 달라 서로 묶이지 않는다.
+infra-github-audit-hook-deleted:
+  row_key: github_delivery_id
+  host_field: github_delivery_id
+  cases:
+    - name: 웹훅이 삭제됐다
+      host: verify-gha-hook-deleted
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: meta, github_action: deleted, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: "1"}
+    - name: 웹훅 생성은 이 알림이 아니다
+      host: verify-gha-hook-created
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: meta, github_action: created, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: "1"}
+    - name: 다른 서비스의 같은 필드는 보지 않는다
+      host: verify-gha-hook-other
+      fires: false
+      records:
+        - {service_name: other-service, github_event: meta, github_action: deleted, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: "1"}
+infra-github-audit-repo-public:
+  row_key: github_delivery_id
+  host_field: github_delivery_id
+  cases:
+    - name: 저장소가 공개로 바뀌었다(repository.publicized)
+      host: verify-gha-public-repo
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: repository, github_action: publicized, github_org: example-org, github_repo: example-org/pub-a, github_actor: alice, github_actor_ghost: false, github_target: example-org/pub-a}
+    - name: public 이벤트도 같다(액션 없음)
+      host: verify-gha-public-event
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: public, github_org: example-org, github_repo: example-org/pub-b, github_actor: alice, github_actor_ghost: false, github_target: example-org/pub-b}
+    - name: 비공개로 바뀐 것은 아니다
+      host: verify-gha-public-private
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: repository, github_action: privatized, github_org: example-org, github_repo: example-org/pub-c, github_actor: alice, github_actor_ghost: false, github_target: example-org/pub-c}
+infra-github-audit-repo-org-deleted:
+  row_key: github_delivery_id
+  host_field: github_delivery_id
+  cases:
+    - name: 저장소가 삭제됐다
+      host: verify-gha-del-repo
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: repository, github_action: deleted, github_org: example-org, github_repo: example-org/del-a, github_actor: alice, github_actor_ghost: false, github_target: example-org/del-a}
+    - name: 조직이 삭제됐다
+      host: verify-gha-del-org
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: organization, github_action: deleted, github_org: example-org, github_actor: alice, github_actor_ghost: false}
+    - name: 저장소 생성은 아니다
+      host: verify-gha-del-created
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: repository, github_action: created, github_org: example-org, github_repo: example-org/del-b, github_actor: alice, github_actor_ghost: false, github_target: example-org/del-b}
+    - name: 팀 삭제는 이 알림이 아니다
+      host: verify-gha-del-team
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: team, github_action: deleted, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: platform}
+infra-github-audit-protection-removed:
+  row_key: github_delivery_id
+  host_field: github_delivery_id
+  cases:
+    - name: 보호 규칙이 삭제됐다
+      host: verify-gha-prot-deleted
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: branch_protection_rule, github_action: deleted, github_org: example-org, github_repo: example-org/prot-a, github_actor: alice, github_actor_ghost: false, github_target: main}
+    - name: 보호 규칙 생성은 아니다
+      host: verify-gha-prot-created
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: branch_protection_rule, github_action: created, github_org: example-org, github_repo: example-org/prot-b, github_actor: alice, github_actor_ghost: false, github_target: main}
+infra-github-audit-ruleset-deleted:
+  row_key: github_delivery_id
+  host_field: github_delivery_id
+  cases:
+    - name: 룰셋이 삭제됐다
+      host: verify-gha-rs-deleted
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: repository_ruleset, github_action: deleted, github_org: example-org, github_repo: example-org/rs-a, github_actor: alice, github_actor_ghost: false, github_target: protect-main}
+    - name: 룰셋 수정은 아니다
+      host: verify-gha-rs-edited
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: repository_ruleset, github_action: edited, github_org: example-org, github_repo: example-org/rs-b, github_actor: alice, github_actor_ghost: false, github_target: protect-main}
+infra-github-audit-deploy-key-created:
+  row_key: github_delivery_id
+  host_field: github_delivery_id
+  cases:
+    - name: deploy key가 생성됐다
+      host: verify-gha-key-created
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: deploy_key, github_action: created, github_org: example-org, github_repo: example-org/key-a, github_actor: alice, github_actor_ghost: false, github_target: ci-key}
+    - name: deploy key 삭제는 이 알림이 아니다
+      host: verify-gha-key-deleted
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: deploy_key, github_action: deleted, github_org: example-org, github_repo: example-org/key-b, github_actor: alice, github_actor_ghost: false, github_target: ci-key}
+infra-github-audit-membership-change:
+  row_key: github_delivery_id
+  host_field: github_delivery_id
+  cases:
+    - name: collaborator가 추가됐다
+      host: verify-gha-mem-collab
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: member, github_action: added, github_org: example-org, github_repo: example-org/mem-a, github_actor: alice, github_actor_ghost: false, github_target: bob}
+    - name: 팀 멤버가 추가됐다
+      host: verify-gha-mem-team
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: membership, github_action: added, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: bob, github_team: platform}
+    - name: 조직 멤버가 제거됐다(행위자 불명)
+      host: verify-gha-mem-org-removed
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: organization, github_action: member_removed, github_org: example-org, github_actor: ghost, github_actor_ghost: true, github_target: bob}
+    - name: 팀이 생성됐다
+      host: verify-gha-mem-team-created
+      fires: true
+      records:
+        - {service_name: github-audit, github_event: team, github_action: created, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: platform}
+    - name: 조직 이름 변경은 아니다
+      host: verify-gha-mem-renamed
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: organization, github_action: renamed, github_org: example-org, github_actor: alice, github_actor_ghost: false}
+    - name: 차단(org_block)은 이 알림이 아니다
+      host: verify-gha-mem-block
+      fires: false
+      records:
+        - {service_name: github-audit, github_event: org_block, github_action: blocked, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: bob}

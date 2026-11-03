@@ -197,7 +197,8 @@
           owner: root
           group: "{{ otelcol_group }}"
           mode: '0640'
-          validate: "{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib validate --config=%s"
+          # 웹훅을 켠 호스트는 검증 때만 자리표시 값을 환경에 준다(실제 값은 secrets.env에만 있다). 비어 있는 입력은 위 입력 검증이 먼저 막는다.
+          validate: "{% if host_agents_inputs.otel_github_webhook | default(false) | bool %}env {% for v in otel_github_webhook_env.values() %}{{ v.name }}={{ v.validate_value }} {% endfor %}{% endif %}{{ host_agents_install_root }}/otelcol-contrib/{{ host_agents_versions['default'].otelcol_contrib }}/otelcol-contrib validate --config=%s"
         notify: Restart otelcol-contrib
 
     when: enable_otelcol | default(true) | bool
@@ -238,6 +239,9 @@
       - ansible_service_mgr == "systemd"
       - otelcol_unit_created is changed
     changed_when: true
+
+  - name: "Align the docker.service.wants link of the otelcol unit (GitHub webhook receiver)"
+    ansible.builtin.import_tasks: docker_wants.yml
 
   - name: "[MON-005-SYSV] Create SysVinit service script for otelcol-contrib"
     ansible.builtin.template:

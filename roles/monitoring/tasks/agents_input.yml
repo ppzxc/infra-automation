@@ -69,7 +69,8 @@
            otel_system_logs, otel_security_log_paths, host_agents_backup_mandatory_paths,
            'hosts/' ~ inventory_hostname ~ '/agents',
            {'openobserve': _host_agents_kv.openobserve | default({}), 'rustfs': _host_agents_kv.rustfs | default({})},
-           otel_log_services, enable_otelcol | default(true) | bool) }}
+           otel_log_services, enable_otelcol | default(true) | bool,
+           host_agents_os_path | default(none)) }}
 
 - name: "[MON-034] Assert agents inputs are valid before any change"
   ansible.builtin.assert:
@@ -105,5 +106,39 @@
   ansible.builtin.set_fact:
     host_agents_secrets: "{{ _host_agents_kv.host | host_agents_secrets }}"
     host_agents_host_overrides: "{{ {'rustfs_bucket': ((_host_agents_kv.host | default({})).rustfs_bucket | default('')) | string | trim} }}"
+    host_agents_github_webhook: "{{ _host_agents_kv.host | host_agents_github_webhook }}"
     host_agents_shared_secrets: "{{ {'openobserve': _host_agents_kv.openobserve, 'rustfs': _host_agents_kv.rustfs} }}"
   no_log: true
+
+# GitHub 웹훅 수신기(Spec #399): 컨테이너 네트워크는 외부 관리형(서브넷 자동 할당)이라 게이트웨이 주소가 바뀔 수 있다.
+# 바인딩 설정과 다르면 수신기가 조용히 끊기므로, 바이너리 전달·규칙 삭제·핸들러 큐잉 등 어떤 변경보다 먼저 이 입력 검증 단계에서 실패시킨다(check 모드 포함). 출력에 주소가 있으므로 no_log이다.
+- name: "[MON-069] Read the docker network gateway for the GitHub webhook bind address (read-only)"
+  ansible.builtin.command:
+    argv:
+      - docker
+      - network
+      - inspect
+      - --format
+      - "{% raw %}{{(index .IPAM.Config 0).Gateway}}{% endraw %}"
+      - "{{ host_agents_github_webhook.network }}"
+  register: _github_webhook_gateway
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: true
+  when:
+    - host_agents_inputs.otel_github_webhook | default(false) | bool
+    - host_agents_os_path | default('modern') == 'modern'
+
+- name: "[MON-070] Assert the docker network gateway equals the GitHub webhook bind address"
+  ansible.builtin.assert:
+    that:
+      - _github_webhook_gateway.rc | default(1) == 0
+      - (_github_webhook_gateway.stdout | default('') | host_agents_github_webhook_gateway_errors(host_agents_github_webhook.address)) | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }}: 도커 네트워크 게이트웨이를 확인하지 못했거나 github_webhook_address와 다릅니다 —
+      변경 없이 중단합니다(check 모드 포함). 주소 값은 출력하지 않습니다.
+    quiet: true
+  when:
+    - host_agents_inputs.otel_github_webhook | default(false) | bool
+    - host_agents_os_path | default('modern') == 'modern'

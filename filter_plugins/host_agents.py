@@ -11,6 +11,7 @@ Two concerns live here so they can be tested without a target host:
 """
 
 import fnmatch
+import ipaddress
 import json
 import re
 
@@ -341,7 +342,7 @@ def _dedupe(items):
 
 def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory_backup_paths,
                                kv_path='hosts/<host>/agents', shared=None, service_map=None,
-                               otel_enabled=True):
+                               otel_enabled=True, os_path=None):
     """Validate the per-host agents KV and merge it with the Git standard.
 
     Returns ``{'errors': [...], ...merged inputs...}``; the merged part never
@@ -352,6 +353,8 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     Every log entry carries the ``service`` (OTel ``service.name``) it is reported under: the
     ``service_map`` entry for a standard path, the ``service`` key of an ``otel_extra_logs`` item,
     otherwise the stream name without ``_logs``.
+
+    ``os_path`` (the probed path) lets the opt-in webhook receiver fail on a legacy host instead of being silently ignored.
 
     With ``otel_enabled`` false (Host Agents Backup Only) the otelcol-only keys are not required.
     """
@@ -377,6 +380,11 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     docker_metrics = _as_bool(kv.get('otel_docker_metrics'), 'otel_docker_metrics', errors)
     container_logs = _as_bool(kv.get('otel_container_logs'), 'otel_container_logs', errors)
     app_telemetry = _as_bool(kv.get('otel_app_telemetry'), 'otel_app_telemetry', errors)
+    github_webhook = _as_bool(kv.get('otel_github_webhook'), 'otel_github_webhook', errors)
+    if github_webhook:
+        errors.extend(_github_webhook_errors(kv))
+        if os_path not in (None, 'modern'):
+            errors.append("otel_github_webhook: modern 경로 호스트에서만 지원합니다(현재 %s, CentOS 6/7 제외)" % os_path)
 
     for path in exclude_logs:
         if any(_covers(path, sec) for sec in security):
@@ -433,11 +441,55 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
         'otel_docker_metrics': docker_metrics,
         'otel_container_logs': container_logs,
         'otel_app_telemetry': app_telemetry,
+        'otel_github_webhook': github_webhook,
         'backup_paths': _dedupe(list(mandatory_backup_paths or []) + extra_paths),
         'backup_exclude_paths': _dedupe(exclude_paths),
         'backup_pre_hooks': pre_hooks,
         'backup_sqlite_snapshots': _dedupe(sqlite_snapshots),
     }
+
+
+# GitHub 조직 웹훅 수신기(Spec #399): 주소·포트·경로·시크릿·네트워크 이름은 저장소에 기본값이 없고 OpenBao hosts/<host>/agents의
+# 아래 키로만 들어온다. 켰는데 하나라도 비면 배포가 실패한다(오류 메시지에는 키 이름만 쓰고 값은 쓰지 않는다).
+GITHUB_WEBHOOK_FIELDS = ('address', 'port', 'path', 'secret', 'network')
+
+
+def host_agents_github_webhook(host_kv):
+    """The webhook receiver values (private; call from a ``no_log`` task). Blank or absent values become ``''``; others are kept verbatim (the validation rejects stray whitespace)."""
+    kv = host_kv if isinstance(host_kv, dict) else {}
+    return {f: ('' if _is_blank(kv.get('github_webhook_' + f)) else str(kv['github_webhook_' + f]))
+            for f in GITHUB_WEBHOOK_FIELDS}
+
+
+def _github_webhook_errors(kv):
+    values = host_agents_github_webhook(kv)
+    errors = ["필수 키 누락: github_webhook_%s (otel_github_webhook가 켜져 있음)" % f
+              for f in GITHUB_WEBHOOK_FIELDS if not values[f]]
+    if values['address']:
+        try:
+            addr = ipaddress.IPv4Address(values['address'])
+            if addr.is_unspecified or addr.is_loopback:
+                raise ValueError
+        except ValueError:
+            errors.append("github_webhook_address: 컨테이너 브리지 전용 IPv4 주소여야 합니다(모든 인터페이스·루프백 불가)")
+    if values['port'] and not (re.fullmatch('[0-9]{1,5}', values['port']) and 1 <= int(values['port']) <= 65535):
+        errors.append("github_webhook_port: 1~65535 정수(ASCII 숫자)여야 합니다")
+    if values['path']:
+        segments = values['path'].split('/')[1:]
+        if not (re.fullmatch(r'/[A-Za-z0-9._~/-]+', values['path']) and all(seg and seg not in ('.', '..') for seg in segments)):
+            errors.append("github_webhook_path: '/'로 시작하고 비어 있지 않은 세그먼트(영문·숫자·._~-)로만 이루어져야 합니다"
+                          "('/' 단독, 빈·'.'·'..' 세그먼트, 끝 슬래시 불가)")
+    if values['secret'] and not re.fullmatch('[\x20-\x7e]+', values['secret']):
+        errors.append("github_webhook_secret: 인쇄 가능한 ASCII(공백 포함)만 허용됩니다(제어문자·비ASCII 불가, EnvironmentFile 이스케이프 한계)")
+    return errors
+
+
+def host_agents_github_webhook_gateway_errors(inspect_stdout, address):
+    """Errors when the docker network gateway (``docker network inspect`` output) differs from the bind address."""
+    gateway = (inspect_stdout or '').strip()
+    if gateway != str(address or '').strip() or not gateway:
+        return ["도커 네트워크 게이트웨이가 github_webhook_address와 다릅니다(바인딩 설정과 불일치 — 배포 중단)"]
+    return []
 
 
 def host_agents_shared_errors(shared, name):
@@ -514,6 +566,8 @@ class FilterModule(object):
             'host_agents_resolve_inputs': host_agents_resolve_inputs,
             'host_agents_resource_attributes': host_agents_resource_attributes,
             'host_agents_secrets': host_agents_secrets,
+            'host_agents_github_webhook': host_agents_github_webhook,
+            'host_agents_github_webhook_gateway_errors': host_agents_github_webhook_gateway_errors,
             'host_agents_shared_errors': host_agents_shared_errors,
             'host_agents_tcpcheck_targets': host_agents_tcpcheck_targets,
             'host_agents_warn': host_agents_warn,

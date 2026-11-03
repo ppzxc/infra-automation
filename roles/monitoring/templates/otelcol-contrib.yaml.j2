@@ -189,6 +189,8 @@
 {% set container_logs = (host_agents_inputs.otel_container_logs | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
 {% set legacy = (host_agents_os_path | default('modern')) == 'legacy_el6' %}
 {% set app_telemetry = host_agents_inputs.otel_app_telemetry | default(false) | bool %}
+{# GitHub 조직 웹훅 수신기(Spec #399): 켠 호스트의 modern 경로에서만 렌더링한다. 주소·포트·경로·시크릿은 secrets.env(0600)의 환경변수로만 들어온다. #}
+{% set github_webhook = (host_agents_inputs.otel_github_webhook | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
 extensions:
   file_storage:
     directory: {{ otelcol_storage_dir }}
@@ -453,6 +455,22 @@ receivers:
       http:
         endpoint: "{{ otel_otlp_bind }}:{{ otel_otlp_http_port }}"
 {% endif %}
+{% if github_webhook %}
+  # GitHub 조직 웹훅(Spec #399): 컨테이너 브리지 전용 주소에만 바인드한다(값은 환경변수). hmac_signature가 원본 본문 바이트의 HMAC-SHA256을 검증하고,
+  # 틀리거나 없거나 sha1 레거시 헤더만 있으면 401이며 기록되지 않는다. 시크릿이 비면 설정 검증이 실패한다. 제한 시간은 GitHub 응답 제한(10초) 안에서 기본 500ms보다 크게 둔다.
+  webhook_event/github:
+    endpoint: ${env:{{ otel_github_webhook_env.endpoint.name }}}
+    path: ${env:{{ otel_github_webhook_env.path.name }}}
+    read_timeout: {{ otel_github_webhook_read_timeout }}
+    write_timeout: {{ otel_github_webhook_write_timeout }}
+    max_request_size: {{ otel_github_webhook_max_request_size }}
+    # 이벤트 이름·전달 ID·훅 ID 헤더만 속성으로 보존한다(서명 헤더는 남기지 않는다).
+    header_attribute_regex: {{ otel_github_webhook_header_regex | to_json }}
+    hmac_signature:
+      secret: ${env:{{ otel_github_webhook_env.secret.name }}}
+      header: X-Hub-Signature-256
+      prefix: "sha256="
+{% endif %}
 
 processors:
   memory_limiter:
@@ -549,6 +567,24 @@ processors:
       - key: service.name
         value: {{ otel_service_docker | to_json }}
         action: upsert
+{% if github_webhook %}
+  # 웹훅 레코드를 기존 보안 로그 라우팅에 합류시킨다(새 스트림 없음). 헤더 속성 이름 계약은 docs/monitoring.md: header.X-Github-Event, header.X-Github-Delivery, header.X-Github-Hook-Id.
+  resource/github_audit:
+    attributes:
+      - key: service.name
+        value: {{ otel_service_github_audit | to_json }}
+        action: upsert
+  transform/github_audit:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["log_type"], "security_logs")
+          # 수신기는 헤더 값을 배열로 저장한다. 계약 필드를 문자열로 고정한다(값이 하나뿐인 배열의 첫 원소).
+{% for name in ['Event', 'Delivery', 'Hook-Id'] %}
+          - set(attributes["header.X-Github-{{ name }}"], attributes["header.X-Github-{{ name }}"][0]) where IsList(attributes["header.X-Github-{{ name }}"])
+{% endfor %}
+{% endif %}
 
 connectors:
   routing/logs:
@@ -629,6 +665,12 @@ service:
       receivers: [docker_stats]
       processors: [memory_limiter, resource/host, resource/docker, batch]
       exporters: [otlphttp/metrics]
+{% endif %}
+{% if github_webhook %}
+    logs/github_audit:
+      receivers: [webhook_event/github]
+      processors: [memory_limiter, resource/host, resource/github_audit, transform/github_audit]
+      exporters: [routing/logs]
 {% endif %}
 {% if app_telemetry %}
     # OTLP 로그는 어떤 파이프라인에도 넣지 않는다(컨테이너 로그와 중복되므로 수신기 단계에서 버려진다).

@@ -21,6 +21,7 @@ then send synthetic OTLP/HTTP JSON and read back what each (former) exporter wou
 
 import contextlib
 import copy
+import http.client
 import json
 import os
 import socket
@@ -160,8 +161,8 @@ def rewrite_for_harness(cfg, out_dir, port, receiver="otlp"):
     }
     if "connectors" in cfg:
         harness["connectors"] = cfg["connectors"]
-    http = harness["receivers"][receiver]["protocols"]["http"]
-    http["endpoint"] = f"127.0.0.1:{port}"
+    if "protocols" in harness["receivers"][receiver]:      # OTLP: the port is in the config; other receivers take it from env
+        harness["receivers"][receiver]["protocols"]["http"]["endpoint"] = f"127.0.0.1:{port}"
     # memory_limiter percentages need cgroup/mount info that some dev hosts (WSL) cannot provide
     if "memory_limiter" in harness["processors"]:
         harness["processors"]["memory_limiter"] = {"check_interval": "1s", "limit_mib": 400, "spike_limit_mib": 100}
@@ -184,6 +185,22 @@ class Collector:
         except urllib.error.HTTPError as err:
             return err.code
 
+    CONNECTION_REFUSED_BY_PEER = 0           # post() result when the receiver cut the connection (reset/EOF) before answering
+
+    def post(self, path, body, headers=None):
+        """POST raw bytes to a non-OTLP receiver (webhook); return the HTTP status (errors included).
+
+        A receiver may reject an oversized body by closing the connection before it reads the rest; that is a rejection
+        too and is returned as ``CONNECTION_REFUSED_BY_PEER`` instead of raising."""
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=body, headers=headers or {}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status
+        except urllib.error.HTTPError as err:
+            return err.code
+        except (urllib.error.URLError, ConnectionError, http.client.RemoteDisconnected):
+            return self.CONNECTION_REFUSED_BY_PEER
+
     def wait_for(self, exporter, signal, count, timeout=30, settle=1.5):
         """Block until `count` items reached the exporter, then `settle` more to catch surplus items."""
         deadline = time.time() + timeout
@@ -200,7 +217,8 @@ class Collector:
 
 
 class OtlpHarness:
-    def __init__(self, tmp_path, cfg, receiver="otlp"):
+    def __init__(self, tmp_path, cfg, receiver="otlp", env=None):
+        self.env = dict(env or {})                      # extra environment of the collector process (webhook: secrets.env values)
         self.port = _free_port()
         self.out_dir = Path(tmp_path) / "harness-out"
         self.out_dir.mkdir()
@@ -211,7 +229,7 @@ class OtlpHarness:
     @contextlib.contextmanager
     def running(self, bin_path):
         proc = subprocess.Popen([bin_path, f"--config={self.path}"], stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE, text=True)
+                                stderr=subprocess.PIPE, text=True, env=dict(os.environ, **self.env))
         try:
             deadline = time.time() + 30
             while time.time() < deadline:
