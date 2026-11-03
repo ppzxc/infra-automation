@@ -122,3 +122,15 @@ def test_s5_inputs_include_heartbeat_destination_and_alert_check_is_after_s6():
 def test_bind_mount_inode_sentence_states_its_precondition():
     s = _section("출발지 대역 갱신")
     assert "옛 inode로 갈라진" in s
+
+
+def test_signature_tests_run_before_the_secret_file_is_discarded():
+    s4 = _row("S-4")
+    assert "폐기 전 서명 시험" in s4 and "S-1~S-3b" in s4 and "S-3b" in s4
+    text = RUNBOOK.read_text(encoding="utf-8")
+    discard = re.search(r"\*\*폐기\*\*:.*", text).group(0)
+    assert "서명 시험" in discard and "통과" in discard
+    verify = _section("서버 적용 뒤 검증")
+    item5 = re.search(r"^5\. .*$", verify, re.M).group(0)
+    assert "S-4" in item5 and "이미" in item5
+    assert "S-3b" in _row("S-4").split("|")[3]      # 승인 전 확인 칸에 S-3b 완료가 필수
