@@ -126,7 +126,8 @@ def test_oversized_body_and_wrong_path_are_rejected_and_never_recorded(tmp_path)
     limit = cfg["receivers"]["webhook_event/github"]["max_request_size"]
     big = b"x" * (limit + 1)
     with harness.running(binary) as col:
-        assert col.post(PATH, big, dict(HEADERS, **{"X-Hub-Signature-256": _sign(big)})) >= 400
+        status = col.post(PATH, big, dict(HEADERS, **{"X-Hub-Signature-256": _sign(big)}))
+        assert status == col.CONNECTION_REFUSED_BY_PEER or status >= 400      # a 4xx, or the receiver cut the connection first
         assert col.post(PATH + "-other", PAYLOAD, HEADERS) == 404
         col.settle()
     assert _records(harness) == []
@@ -211,10 +212,14 @@ def test_unit_starts_after_docker_and_restarts_on_failure_only_where_the_receive
     on = _unit(tmp_path, True)
     after = re.search(r"^After=(.*)$", on, re.M).group(1).split()
     assert "docker.service" in after and "network.target" in after
-    assert re.search(r"^PartOf=docker.service$", on, re.M)         # a docker restart (bridge recreated) restarts the receiver too
+    # docker stop/restart reach the collector (PartOf: a bridge recreation rebinds the socket) and docker start brings it back up
+    # (docker.service.wants via [Install]): after `systemctl stop docker` + `start docker` collection must not stay down
+    assert re.search(r"^PartOf=docker.service$", on, re.M)
+    assert "docker.service" in re.search(r"^WantedBy=(.*)$", on, re.M).group(1).split()
     assert re.search(r"^Restart=(always|on-failure)$", on, re.M)
     (tmp_path / "off").mkdir()
-    assert "docker" not in _unit(tmp_path / "off", False)
+    off = _unit(tmp_path / "off", False)
+    assert "docker" not in off and re.search(r"^WantedBy=multi-user.target$", off, re.M)
 
 
 # ---- deploy-time input checks (filters; no binary needed) -----------------------------------------------------------
@@ -381,3 +386,4 @@ def test_docker_is_not_called_when_the_webhook_is_off(tmp_path, monkeypatch):
 def test_docs_describe_the_docker_restart_coupling_and_the_gateway_recheck_procedure():
     text = (ROOT / "docs" / "monitoring.md").read_text(encoding="utf-8")
     assert "PartOf=docker.service" in text and "게이트웨이 변경 뒤 재확인" in text
+    assert "docker.service.wants" in text and "stop" in text and "start docker" in text

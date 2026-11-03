@@ -21,6 +21,7 @@ then send synthetic OTLP/HTTP JSON and read back what each (former) exporter wou
 
 import contextlib
 import copy
+import http.client
 import json
 import os
 import socket
@@ -184,14 +185,21 @@ class Collector:
         except urllib.error.HTTPError as err:
             return err.code
 
+    CONNECTION_REFUSED_BY_PEER = 0           # post() result when the receiver cut the connection (reset/EOF) before answering
+
     def post(self, path, body, headers=None):
-        """POST raw bytes to a non-OTLP receiver (webhook); return the HTTP status (errors included)."""
+        """POST raw bytes to a non-OTLP receiver (webhook); return the HTTP status (errors included).
+
+        A receiver may reject an oversized body by closing the connection before it reads the rest; that is a rejection
+        too and is returned as ``CONNECTION_REFUSED_BY_PEER`` instead of raising."""
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=body, headers=headers or {}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return resp.status
         except urllib.error.HTTPError as err:
             return err.code
+        except (urllib.error.URLError, ConnectionError, http.client.RemoteDisconnected):
+            return self.CONNECTION_REFUSED_BY_PEER
 
     def wait_for(self, exporter, signal, count, timeout=30, settle=1.5):
         """Block until `count` items reached the exporter, then `settle` more to catch surplus items."""
