@@ -70,10 +70,12 @@
       - gww_o2_user | length > 0
       - gww_o2_password | length > 0
       - gww_o2_org is match('^[A-Za-z0-9_-]+$')
+      - gww_github_org | length > 0
+      - gww_hook_url | length > 0
     fail_msg: >-
-      [GWW-INPUT] 하트비트를 남길 OpenObserve 연결 값(endpoint, 수집 계정)이 없다(값은 로그에 남기지 않는다).
-      OpenBao agents/github-webhook-watch 또는 -e gww_o2_*로 주입한다. 하트비트를 남길 수 없으면 점검하지 않는다.
-  no_log: true
+      [GWW-INPUT] 점검 입력이 비었거나 형식이 틀리다: 하트비트를 남길 OpenObserve 연결 값(endpoint, 수집 계정)
+      또는 GitHub 조직 이름(github_org)·수신 URL(hook_url). 값은 로그에 남기지 않는다.
+      OpenBao agents/github-webhook-watch 또는 -e gww_*로 주입한다. 하트비트를 남길 수 없거나 훅을 찾을 기준이 없으면 점검하지 않는다.
 
 - name: "[GWW-006] Compare the organization webhook and redeliver recently failed deliveries"
   gww_check:
@@ -84,6 +86,7 @@
     expected_events: "{{ gww_expected_events }}"
     window_hours: "{{ gww_redelivery_window_hours | int }}"
     interval_hours: "{{ gww_check_interval_hours | int }}"
+    max_pages: "{{ gww_max_pages | int }}"
     validate_certs: "{{ gww_validate_certs }}"
   register: gww_check_result
   delegate_to: localhost
@@ -106,6 +109,7 @@
       redelivered_count: "{{ _r.redelivered_count | int }}"
       failed_count: "{{ _r.failed_count | int }}"
       expired_count: "{{ _r.expired_count | int }}"
+      deliveries_truncated: "{{ _r.deliveries_truncated | bool }}"
       interval_hours: "{{ gww_check_interval_hours | int }}"
       body: "github-webhook-watch heartbeat result={{ _result }} hook_status={{ _r.hook_status }} redelivered={{ _r.redelivered_count }} failed={{ _r.failed_count }}"
     cacheable: false
@@ -119,7 +123,7 @@
     url_password: "{{ gww_o2_password }}"
     force_basic_auth: true
     body_format: json
-    body: "{{ [gww_heartbeat | combine({'redelivered_count': gww_heartbeat.redelivered_count | int, 'failed_count': gww_heartbeat.failed_count | int, 'expired_count': gww_heartbeat.expired_count | int, 'interval_hours': gww_heartbeat.interval_hours | int})] }}"
+    body: "{{ [gww_heartbeat | combine({'redelivered_count': gww_heartbeat.redelivered_count | int, 'failed_count': gww_heartbeat.failed_count | int, 'expired_count': gww_heartbeat.expired_count | int, 'deliveries_truncated': gww_heartbeat.deliveries_truncated | bool, 'interval_hours': gww_heartbeat.interval_hours | int})] }}"
     status_code: [200]
     timeout: 15
     validate_certs: "{{ gww_o2_validate_certs }}"

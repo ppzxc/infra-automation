@@ -52,11 +52,15 @@ def _request(method, url, params, body=None):
     try:
         with urllib.request.urlopen(req, timeout=params["timeout"], context=ctx) as resp:  # noqa: S310
             raw = resp.read().decode("utf-8", "replace")
-            return resp.status, (json.loads(raw) if raw.strip() else None), resp.headers.get("Link", "")
+            status, link = resp.status, resp.headers.get("Link", "")
     except urllib.error.HTTPError as exc:
         return exc.code, None, ""
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, OSError):
         raise _ApiError("api_unreachable")
+    try:
+        return status, (json.loads(raw) if raw.strip() else None), link
+    except ValueError:
+        raise _ApiError("api_unexpected_response")
 
 
 def _get(url, params):
@@ -85,18 +89,28 @@ def _hook_status(hook, expected):
 def _deliveries(base, params, cutoff):
     """최신순 전달 목록을 cutoff보다 오래된 항목이 나올 때까지 모은다."""
     url = "%s?per_page=100" % base
+    origin = _origin(base)
     out = []
     for _ in range(params["max_pages"]):
         page, link = _get(url, params)
+        if page is not None and not isinstance(page, list):
+            raise ValueError("deliveries")
         out.extend(page or [])
         times = [_parse_time(d.get("delivered_at")) for d in (page or [])]
         if not page or any(t is not None and t < cutoff for t in times):
-            break
+            return out, False
         m = _NEXT.search(link or "")
         if not m:
-            break
+            return out, False
         url = m.group(1)
-    return out
+        if _origin(url) != origin:
+            return out, True  # 토큰을 다른 출처로 보내지 않는다: 더 있지만 따라가지 않았다
+    return out, True  # max_pages에 도달했는데 다음 페이지가 남았다
+
+
+def _origin(url):
+    u = urllib.parse.urlsplit(url)
+    return (u.scheme, u.netloc)
 
 
 def _is_failure(delivery):
@@ -106,7 +120,7 @@ def _is_failure(delivery):
 
 def check(params):
     result = {"error": "", "hook_found": False, "hook_status": "unknown", "hook_problems": [],
-              "redelivered_count": 0, "would_redeliver_count": 0, "failed_count": 0, "expired_count": 0,
+              "redelivered_count": 0, "would_redeliver_count": 0, "failed_count": 0, "expired_count": 0, "deliveries_truncated": False,
               "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     if not params.get("token"):
         result["error"] = "credential_missing"
@@ -115,6 +129,8 @@ def check(params):
     org = urllib.parse.quote(params["org"], safe="")
     try:
         hooks, _ = _get("%s/orgs/%s/hooks?per_page=100" % (api, org), params)
+        if hooks is not None and not isinstance(hooks, list):
+            raise ValueError("hooks")
         hook = next((h for h in (hooks or []) if (h.get("config") or {}).get("url") == params["hook_url"]), None)
         if hook is None:
             result["hook_status"] = "missing"
@@ -129,7 +145,8 @@ def check(params):
         lookback = window - timedelta(hours=params["interval_hours"])
         hook_base = "%s/orgs/%s/hooks/%s" % (api, org, int(hook["id"]))
         by_guid = {}
-        for d in _deliveries(hook_base + "/deliveries", params, lookback):
+        found, result["deliveries_truncated"] = _deliveries(hook_base + "/deliveries", params, lookback)
+        for d in found:
             by_guid.setdefault(d.get("guid"), []).append(d)
 
         for guid, attempts in by_guid.items():
@@ -156,6 +173,8 @@ def check(params):
                         result["error"] = "api_http_%d" % status
     except _ApiError as exc:
         result["error"] = exc.code
+    except (KeyError, ValueError, TypeError, AttributeError):
+        result["error"] = "api_unexpected_response"  # 예상 밖 응답 형태: 고정 코드만 남긴다
     return result
 
 

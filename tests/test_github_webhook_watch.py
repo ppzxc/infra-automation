@@ -55,6 +55,8 @@ class _Fake:
         self.mode = "ok"            # ok | api_500 | hooks_403
         self.redeliver_status = 202
         self.o2_status = 200
+        self.raw_hooks = None       # 예상 밖 응답 형태 모사
+        self.next_host = None       # Link next URL의 호스트를 바꿔 다른 출처 모사
         self.requests = []          # (method, path)
         self.redelivered = []       # delivery ids
         self.heartbeats = []        # 수신한 레코드
@@ -86,7 +88,7 @@ class _Fake:
                 if outer.mode == "hooks_403":
                     return self._send(403, {"message": "forbidden"})
                 if u.path == f"/orgs/{ORG}/hooks":
-                    return self._send(200, outer.hooks)
+                    return self._send(200, outer.hooks if outer.raw_hooks is None else outer.raw_hooks)
                 m = re.match(rf"^/orgs/{ORG}/hooks/(\d+)/deliveries$", u.path)
                 if m:
                     q = parse_qs(u.query)
@@ -94,7 +96,7 @@ class _Fake:
                     chunk = outer.deliveries[start:start + outer.page_size]
                     headers = {}
                     if start + outer.page_size < len(outer.deliveries):
-                        nxt = f"http://{self.headers['Host']}{u.path}?per_page=100&cursor={start + outer.page_size}"
+                        nxt = f"http://{outer.next_host or self.headers['Host']}{u.path}?per_page=100&cursor={start + outer.page_size}"
                         headers["Link"] = f'<{nxt}>; rel="next"'
                     return self._send(200, chunk, headers)
                 self._send(404, {"message": "Not Found"})
@@ -235,6 +237,42 @@ def test_follows_delivery_pages(gww, fake):
     assert r["redelivered_count"] == 5
 
 
+def test_truncated_delivery_listing_is_signalled(gww, fake):
+    fake.page_size = 2
+    fake.deliveries = [_delivery(i, f"g{i}", 1 + i, 500) for i in range(1, 8)]
+    r = gww.check(_params(fake, max_pages=2))
+    assert r["deliveries_truncated"] is True and r["redelivered_count"] == 4
+
+
+def test_complete_delivery_listing_is_not_truncated(gww, fake):
+    fake.page_size = 2
+    fake.deliveries = [_delivery(i, f"g{i}", 1 + i, 500) for i in range(1, 6)]
+    assert gww.check(_params(fake))["deliveries_truncated"] is False
+
+
+def test_does_not_follow_next_link_to_another_origin(gww, fake):
+    fake.page_size = 2
+    fake.next_host = "127.0.0.1:1"  # 다른 출처(포트)면 토큰을 보내지 않는다
+    fake.deliveries = [_delivery(i, f"g{i}", 1 + i, 500) for i in range(1, 6)]
+    r = gww.check(_params(fake))
+    assert r["redelivered_count"] == 2 and r["deliveries_truncated"] is True and r["error"] == ""
+
+
+# --------------------------------------------------------------------------
+# 예상 밖 응답 형태
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("raw", [{"message": "oops"}, [{"id": "x"}], ["str"], "text"])
+def test_unexpected_response_shape_is_reported_as_error(gww, fake, raw):
+    fake.raw_hooks = raw if raw != [{"id": "x"}] else [{"id": "x", "active": True, "events": EVENTS, "config": {"url": HOOK_URL}}]
+    r = gww.check(_params(fake))
+    assert r["error"] == "api_unexpected_response"
+
+
+def test_unexpected_delivery_shape_is_reported_as_error(gww, fake):
+    fake.deliveries = [{"guid": "g1", "delivered_at": _iso(1), "status_code": 500}]  # id 없음
+    assert gww.check(_params(fake))["error"] == "api_unexpected_response"
+
+
 # --------------------------------------------------------------------------
 # API 실패·자격 없음 (AC4)
 # --------------------------------------------------------------------------
@@ -308,8 +346,17 @@ def test_defaults_hold_no_credentials_or_real_urls():
 def test_credential_and_url_tasks_are_no_log():
     for tid, t in _tasks_by_id().items():
         blob = json.dumps(t)
+        if tid == "GWW-005":
+            continue  # 값을 출력하지 않는 assert(조건식 문자열만 나온다): 안내 메시지가 보여야 해서 no_log를 쓰지 않는다
         if any(s in blob for s in ("gww_github_token", "gww_o2_password", "gww_kv", "vault_token", "role_id", "secret_id", "gww_hook_url")):
             assert t.get("no_log") is True, tid
+
+
+def test_input_assert_is_not_no_log_so_guidance_is_visible():
+    t = _tasks_by_id()["GWW-005"]
+    assert not t.get("no_log")
+    assert "[GWW-INPUT]" in t["ansible.builtin.assert"]["fail_msg"]
+    assert "gww_github_org" in json.dumps(t) and "gww_hook_url" in json.dumps(t)
 
 
 def test_spec_ids_match_docs_one_to_one():
@@ -403,6 +450,36 @@ def test_missing_credential_fails_run_and_heartbeat_records_error(ansible_env, f
     assert res.returncode != 0
     assert fake.heartbeats[0]["error"] == "credential_missing"
     assert fake.requests == [("POST", "/api/default/security_logs/_json")]
+
+
+def test_input_assert_message_is_visible_when_input_missing(ansible_env, fake):
+    res = _run(ansible_env, fake, extra={"gww_o2_user": ""})
+    out = res.stdout + res.stderr
+    assert res.returncode != 0 and "[GWW-INPUT]" in out and fake.requests == []
+    for secret in (TOKEN, O2_PASSWORD, HOOK_URL, "fake-secret-path"):
+        assert secret not in out
+
+
+@pytest.mark.parametrize("key", ["gww_github_org", "gww_hook_url"])
+def test_empty_org_or_hook_url_fails_input_validation(ansible_env, fake, key):
+    res = _run(ansible_env, fake, extra={key: ""})
+    assert res.returncode != 0 and "[GWW-INPUT]" in res.stdout + res.stderr
+    assert fake.requests == [] and fake.heartbeats == []
+
+
+def test_truncated_listing_is_in_heartbeat(ansible_env, fake):
+    fake.page_size = 1
+    fake.deliveries = [_delivery(i, f"g{i}", 1, 200) for i in range(1, 4)]
+    res = _run(ansible_env, fake, extra={"gww_max_pages": 1})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert fake.heartbeats[0]["deliveries_truncated"] is True
+
+
+def test_unexpected_response_fails_run_and_heartbeat_records_error(ansible_env, fake):
+    fake.raw_hooks = {"message": "oops"}
+    res = _run(ansible_env, fake)
+    assert res.returncode != 0
+    assert fake.heartbeats[0]["result"] == "error" and fake.heartbeats[0]["error"] == "api_unexpected_response"
 
 
 def test_heartbeat_ingest_failure_fails_run(ansible_env, fake):

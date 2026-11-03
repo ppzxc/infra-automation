@@ -8,7 +8,7 @@
 
 - **왜 필요한가**: GitHub은 실패한 웹훅 전달을 자동으로 재전송하지 않는다. 수신기가 내려가 있던 동안의 이벤트는 이 작업이 재전송해야만 복구된다. 훅이 삭제되거나 꺼지거나 구독 이벤트가 줄어드는 변조도 이 작업이 발견한다.
 - **훅 비교**: 조직 웹훅 목록(`GET /orgs/{org}/hooks`)에서 수신 URL(`config.url`)이 의도값(`hook_url`)과 같은 훅을 찾는다. 결과 `hook_status`는 `ok`, `missing`(훅 없음), `inactive`(비활성), `events_mismatch`(구독 이벤트가 의도와 다름, 순서 무관) 중 하나이고 여러 문제가 겹치면 `hook_problems`에 모두 담긴다. API 호출 자체가 실패하면 `unknown`이다. 훅 상태 문제는 실행을 실패시키지 않고 하트비트에 상태로 남긴다(알림은 Ticket-6).
-- **재전송**: 전달 목록(`GET .../deliveries`, 커서 페이지)에서 **재전송 가능 기간 안(기본 72시간 = 3일)** 의 실패한 전달만 `POST .../deliveries/{id}/attempts`로 재전송한다. 실패는 상태 코드가 200~399가 아닌 전달(시간 초과 0 포함)이다. 같은 전달(guid)에 성공 시도가 있으면 이미 복구된 것이고, 재전송 시도(`redelivery`)가 이미 있으면 다시 보내지 않는다. 재전송했는데 다시 실패한 전달은 `failed_count`로 센다.
+- **재전송**: 전달 목록(`GET .../deliveries`, 커서 페이지, 다음 페이지 링크는 API 주소와 같은 출처일 때만 따라간다)에서 **재전송 가능 기간 안(기본 72시간 = 3일)** 의 실패한 전달만 `POST .../deliveries/{id}/attempts`로 재전송한다. 실패는 상태 코드가 200~399가 아닌 전달(시간 초과 0 포함)이다. 같은 전달(guid)에 성공 시도가 있으면 이미 복구된 것이고, 재전송 시도(`redelivery`)가 이미 있으면 다시 보내지 않는다. 재전송했는데 다시 실패한 전달은 `failed_count`로 센다.
 - **재전송 가능 기간과 점검 주기**: 공식 문서는 최근 3일의 전달만 재전송할 수 있다고 한다(Ticket-1). 점검 주기는 6시간(`gww_check_interval_hours`)이고 GWW-001이 주기 < 기간을 검사해 어기면 GitHub을 호출하기 전에 실패한다. 기간을 막 넘긴 실패(기간 ~ 기간+주기)는 `expired_count`로 한 번 센다.
 - **하트비트 레코드**: 매 실행마다 보안 로그 스트림에 `service_name=github-webhook-watch`, `record_type=heartbeat` 레코드 한 건을 남긴다. 필드 계약(Ticket-6 알림의 입력):
 
@@ -16,13 +16,14 @@
   |---|---|
   | `checked_at` | 확인 시각(UTC, `YYYY-MM-DDTHH:MM:SSZ`) |
   | `result` | `ok` 또는 `error` |
-  | `error` | 비면 정상. `credential_missing`, `api_unreachable`, `api_http_<상태 코드>` 중 하나(고정 코드만, 자격·URL 없음) |
+  | `error` | 비면 정상. `credential_missing`, `api_unreachable`, `api_http_<상태 코드>`, `api_unexpected_response`(응답 형태가 예상과 다름) 중 하나(고정 코드만, 자격·URL 없음) |
   | `hook_status` | `ok` / `missing` / `inactive` / `events_mismatch` / `unknown` |
   | `hook_problems` | 문제 목록(쉼표 구분) |
   | `redelivered_count` | 이번 실행에서 재전송한 건수 |
   | `failed_count` | 복구되지 않은 실패 건수(재전송 요청 실패, 재전송 뒤 재실패) |
   | `expired_count` | 재전송 가능 기간을 넘긴 실패 건수 |
-  | `interval_hours` | 점검 주기(침묵 알림 임계 계산용) |
+  | `deliveries_truncated` | 전달 조회가 최대 페이지(`gww_max_pages`, 기본 10)에 도달했거나 다른 출처의 다음 페이지 링크를 따라가지 않아 일부 전달을 보지 못했으면 `true`(이 경우 재전송·집계가 일부 빠졌을 수 있다) |
+| `interval_hours` | 점검 주기(침묵 알림 임계 계산용) |
 
 - **오류 표면화**: GitHub API가 실패하거나(상태 코드 오류, 연결 불가) 자격이 없으면 먼저 `result=error`와 오류 코드를 하트비트에 남기고, 마지막 태스크(GWW-010)가 실행을 실패시킨다. 하트비트를 남길 OpenObserve 연결이 없거나 수집이 실패하면 실행이 실패한다.
 - **check 모드**: 재전송하지 않고(`would_redeliver_count`만 계산해 출력) 하트비트도 쓰지 않는다. 읽기 요청만 보낸다.
@@ -53,7 +54,7 @@ KV `agents/github-webhook-watch`(호스트 네임스페이스, 다른 컨트롤�
 | `GWW-002` | `Log in to OpenBao with AppRole when no Vault token is given` | `ansible.builtin.uri` | Controller / Localhost | POST `auth/approle/login`, `no_log`, check 모드에서도 실행, Vault 토큰이 없고 AppRole 자격이 있을 때만 |
 | `GWW-003` | `Fetch the webhook check inputs from OpenBao KV when OpenBao access is given` | `ansible.builtin.uri` | Controller / Localhost | GET, `no_log`, OpenBao 인증이 있을 때만 |
 | `GWW-004` | `Keep the OpenBao KV values as a fact that never reaches the fact cache` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수, `no_log`, `cacheable: false` |
-| `GWW-005` | `Assert the heartbeat destination inputs exist before calling GitHub` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, `no_log` (하트비트를 남길 수 없으면 점검 전에 실패) |
+| `GWW-005` | `Assert the heartbeat destination inputs exist before calling GitHub` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, 값을 출력하지 않아 `no_log` 없이 `[GWW-INPUT]` 안내를 보인다 (OpenObserve 연결·조직 이름·수신 URL이 비면 점검 전에 실패) |
 | `GWW-006` | `Compare the organization webhook and redeliver recently failed deliveries` | `gww_check` | Controller / Localhost | 훅 비교는 읽기 전용, 재전송은 같은 전달을 다시 보내지 않아 멱등, check 모드는 재전송 없음, `no_log` |
 | `GWW-007` | `Build the heartbeat record (codes and counts only, no credentials or URLs)` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수, `no_log`, `cacheable: false` |
 | `GWW-008` | `Send the heartbeat record to OpenObserve` | `ansible.builtin.uri` | Controller / Localhost | POST `_json`, `no_log`, 재시도 2회, check 모드에서는 건너뜀 |
