@@ -982,6 +982,23 @@ def o2c_valid_like_groups(groups):
         and all(isinstance(p, str) and _LIKE_PATTERN_RE.match(p) for p in g['patterns']) for g in groups)
 
 
+# 제외 실행 파일(#431): 절대 경로만. 알림 SQL의 `exe="<경로>"` LIKE 조건에 들어가므로 따옴표·공백·`%`와, LIKE에서 아무 글자 하나와 맞는 `_`는 받지 않는다
+# (`_`를 받으면 `/usr/bin/a_b`를 제외한 것이 `/usr/bin/aXb`까지 제외해 같은 이름의 다른 실행 파일이 알림을 피한다).
+_EXE_PATH_RE = _re.compile(r'^/[A-Za-z0-9.+/-]+$')
+
+
+def o2c_valid_exe_paths(paths):
+    """True when ``paths`` is a list of safe absolute executable paths (an empty list is valid: nothing is excluded)."""
+    return isinstance(paths, (list, tuple)) and all(isinstance(p, str) and _EXE_PATH_RE.match(p) for p in paths)
+
+
+def o2c_exe_exclusion(paths):
+    """`` AND body NOT LIKE '% exe="<path>"%'`` for each path ('' when the list is empty): the whole path must match, so a lookalike name still counts."""
+    if not o2c_valid_exe_paths(paths or []):
+        raise ValueError('제외 실행 파일 경로 형식이 올바르지 않다')
+    return ''.join(" AND body NOT LIKE '%% exe=\"%s\"%%'" % p for p in paths or [])
+
+
 def o2c_valid_group_names(names):
     """True when every item is a Unix group or service name (lower case letters, digits, ``_``, ``-``)."""
     return isinstance(names, (list, tuple)) and all(isinstance(n, str) and _GROUP_NAME_RE.match(n) for n in names)
@@ -1177,6 +1194,7 @@ class FilterModule(object):
                 'o2c_fortigate_vrl': o2c_fortigate_vrl, 'o2c_valid_fortigate_roster': o2c_valid_fortigate_roster,
                 'o2c_fortigate_match': o2c_fortigate_match,
                 'o2c_valid_like_groups': o2c_valid_like_groups, 'o2c_valid_group_names': o2c_valid_group_names,
+                'o2c_valid_exe_paths': o2c_valid_exe_paths, 'o2c_exe_exclusion': o2c_exe_exclusion,
                 'o2c_sudo_risky_groups': o2c_sudo_risky_groups, 'o2c_like_any': o2c_like_any, 'o2c_like_label': o2c_like_label,
                 'o2c_valid_exe_patterns': o2c_valid_exe_patterns, 'o2c_valid_login_names': o2c_valid_login_names, 'o2c_audit_provisioning_cond': o2c_audit_provisioning_cond,
                 'o2c_audit_watch_sql': o2c_audit_watch_sql, 'o2c_audit_provisioning_sql': o2c_audit_provisioning_sql}

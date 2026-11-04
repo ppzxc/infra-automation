@@ -857,6 +857,194 @@ def test_sshd_signal_alerts_have_runbook_and_spec_entries_with_the_measured_basi
         assert token in spec, token
 
 
+# --- /var/log 삭제·커널 모듈 syscall 규칙 알림 (Spec #433 / Ticket-5, #431) ----------------------------------------------------
+VAR_LOG, KERNEL_MODULE = "infra-var-log-delete", "infra-kernel-module"
+
+# 규칙(roles/security/templates/audit.rules.j2)이 만드는 SYSCALL 기록의 모양: 같은 호스트의 기존 audit 줄(exec_log·감시 키 SYSCALL)과 auditd 형식을 따랐다.
+# key는 SYSCALL 줄에만 붙고 경로는 뒤따르는 PATH 줄(type=PATH ... name="/var/log/x")에 있다. 알림은 SYSCALL 줄만 읽는다.
+_SYSCALL_NAMES = {263: "unlinkat", 257: "openat", 313: "finit_module", 175: "init_module", 176: "delete_module"}
+# 줄 모양은 실로그(2026-11-04 security_logs의 audit SYSCALL 줄 하루치, 7대 호스트, 읽기 전용 조회)에서 확인했다: 키 바로 뒤에 \x1d(GS) 구분자가 오고 그 뒤에 auditd가 해석해
+# 붙인 `ARCH=… SYSCALL=<이름> AUID="…" UID="…"`가 온다. 로그인 없는 줄은 `auid=4294967295`와 `AUID="unset"`이다.
+_SYSCALL_BODY = ('type=SYSCALL msg=audit(1793000000.123:7001): arch=c000003e syscall=%d success=%s exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 '
+                 'ppid=4000 pid=4900 auid=%s uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm="%s" exe="%s" '
+                 'subj=kernel key="%s"\x1dARCH=x86_64 SYSCALL=%s AUID="%s" UID="root"')
+
+
+def _sys_row(key, exe, comm, auid="1002", syscall=263, success="yes", host="ns0272", user="opsverify", service="audit"):
+    return {"host_name": host, "service_name": service,
+            "body": _SYSCALL_BODY % (syscall, success, auid, comm, exe, key, _SYSCALL_NAMES[syscall], "unset" if auid == "4294967295" else user)}
+
+
+def _var_log_rows(desired, *records):
+    return _run_alert_on_sqlite(_sql(desired, VAR_LOG), list(records), "security_logs")
+
+
+def _module_rows(desired, *records):
+    return _run_alert_on_sqlite(_sql(desired, KERNEL_MODULE), list(records), "security_logs")
+
+
+def test_the_syscall_rule_alerts_are_security_log_event_alerts_in_the_expected_list_with_runbook_entries(desired):
+    for name, severity in ((VAR_LOG, "P1 긴급"), (KERNEL_MODULE, "P2 경고")):
+        alert = desired.store["alert"][name]
+        assert alert["stream_name"] == "security_logs" and alert["context_attributes"]["severity"] == severity, name
+        assert name in EXPECTED_ALERTS, name
+        trigger = alert["trigger_condition"]
+        assert (trigger["period"], trigger["frequency"], trigger["silence"]) == (5, 1, 5), name
+        assert alert["context_attributes"]["runbook"].endswith("alerts.md#" + name.removeprefix("infra-")), name
+
+
+def test_a_login_user_deleting_a_log_file_fires_the_p1_alert(desired):
+    rows = _var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/rm", "rm"))
+    assert [(r["host_name"], r["changes"]) for r in rows] == [("ns0272", 1)]
+
+
+def test_a_truncation_by_a_login_user_fires_too(desired):
+    """`> /var/log/secure` 같은 자르기는 openat(O_TRUNC)로 남고 같은 키를 쓴다."""
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/bash", "bash", syscall=257))) == 1
+
+
+def test_a_record_without_a_login_uid_never_fires_the_log_delete_alert_even_if_the_rule_let_it_through(desired):
+    """logrotate·서비스는 auid가 비어(4294967295) 규칙이 거르지만, 알림도 같은 조건을 한 번 더 확인한다."""
+    assert _var_log_rows(desired, *[_sys_row("var_log_delete", "/usr/sbin/logrotate", "logrotate", auid="4294967295") for _ in range(50)]) == []
+    assert _var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/rm", "rm", auid="4294967295")) == []
+
+
+def test_an_excluded_executable_does_not_fire_but_a_lookalike_does(desired):
+    assert _var_log_rows(desired, _sys_row("var_log_delete", "/usr/sbin/logrotate", "logrotate")) == []        # 로그인 사용자가 손으로 돌린 logrotate
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/tmp/logrotate", "logrotate"))) == 1          # 이름만 같고 경로가 다르면 제외가 아니다
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/usr/sbin/logrotate-evil", "logrotate-evil"))) == 1
+
+
+def _var_log_sql(rendered):
+    return next(o["body"]["query_condition"]["sql"] for o in rendered if o["kind"] == "alert" and o["name"] == VAR_LOG)
+
+
+def test_the_excluded_executable_list_is_a_role_variable_with_a_safe_path_check(tmp_path):
+    assert DEFAULTS["o2c_var_log_excluded_exes"] == ["/usr/sbin/logrotate"]
+    rendered = render_desired(tmp_path / "desired.json", extra={"o2c_var_log_excluded_exes": ["/usr/bin/cleanup-tool", "/usr/local/sbin/rotate"]})
+    sql = _var_log_sql(rendered)
+    assert _run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/bin/cleanup-tool", "cleanup-tool")], "security_logs") == []
+    assert _run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/local/sbin/rotate", "rotate")], "security_logs") == []
+    assert len(_run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/sbin/logrotate", "logrotate")], "security_logs")) == 1   # 기본 목록을 덮었다
+    empty = render_desired(tmp_path / "empty.json", extra={"o2c_var_log_excluded_exes": []})
+    sql = _var_log_sql(empty)
+    assert len(_run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/sbin/logrotate", "logrotate")], "security_logs")) == 1   # 비면 제외 없음
+    o2c = _filters()
+    assert o2c.o2c_valid_exe_paths(["/usr/sbin/logrotate", "/opt/x-1.0/bin/yz"]) and o2c.o2c_valid_exe_paths([])
+    for bad in ("logrotate", "/usr/bin/a_b", "/usr/bin/a b", "/usr/bin/a'b", '/usr/bin/a"b', "/usr/bin/%", "/usr/bin/a;b", ""):
+        assert not o2c.o2c_valid_exe_paths([bad]), bad
+
+
+def test_failed_attempts_other_keys_other_streams_and_non_syscall_lines_do_not_fire_the_log_delete_alert(desired):
+    for row in (_sys_row("var_log_delete", "/usr/bin/rm", "rm", success="no"),                       # 권한 거부 — 지워지지 않았다
+                _sys_row("delete", "/usr/bin/rm", "rm"),                                                # 증적 전용 키(#435)는 알림 대상이 아니다
+                _sys_row("var_log_delete", "/usr/bin/rm", "rm", service="sshd"),
+                _sys_row("kernel_module", "/usr/sbin/modprobe", "modprobe", syscall=313),
+                {"host_name": "ns0272", "service_name": "audit", "body": 'type=PATH msg=audit(1793000000.123:7001): item=1 name="/var/log/secure" nametype=DELETE key="var_log_delete"'}):
+        assert _var_log_rows(desired, row) == [], row
+
+
+def test_log_delete_rows_group_by_host_actor_and_tool_and_name_them(desired):
+    records = [_sys_row("var_log_delete", "/usr/bin/rm", "rm") for _ in range(3)] + [_sys_row("var_log_delete", "/usr/bin/bash", "bash", syscall=257, host="ns0001", user="alice")]
+    rows = _var_log_rows(desired, *records)
+    assert sorted((r["host_name"], r["actor"], r["tool"], r["changes"]) for r in rows) == [("ns0001", "alice", "bash", 1), ("ns0272", "opsverify", "rm", 3)]
+    lines = _row_lines(desired, VAR_LOG, records[:3], "security_logs")
+    assert len(lines) == 1 and lines[0].startswith("• ns0272: opsverify의 rm 3건") and " · " in lines[0]
+
+
+def test_a_kernel_module_load_or_unload_by_a_login_user_fires_the_p2_alert(desired):
+    for syscall, comm, exe, action in ((313, "modprobe", "/usr/sbin/modprobe", "적재"), (175, "insmod", "/usr/sbin/insmod", "적재"), (176, "rmmod", "/usr/sbin/rmmod", "제거")):
+        rows = _module_rows(desired, _sys_row("kernel_module", exe, comm, syscall=syscall))
+        assert [(r["host_name"], r["tool"], r["action"], r["changes"]) for r in rows] == [("ns0272", comm, action, 1)], comm
+
+
+def test_a_kernel_module_row_without_the_enriched_syscall_name_still_fires_and_says_load_or_unload(desired):
+    """EL6·7 auditd는 해석 필드(SYSCALL=)를 안 붙일 수 있다. 그때는 적재인지 제거인지 몰라 둘을 함께 적는다."""
+    row = _sys_row("kernel_module", "/usr/sbin/modprobe", "modprobe", syscall=313)
+    row["body"] = row["body"].split("\x1d")[0]
+    assert [(r["tool"], r["action"]) for r in _module_rows(desired, row)] == [("modprobe", "적재·제거")]
+
+
+def test_kernel_module_records_without_a_login_uid_failures_or_another_key_do_not_fire(desired):
+    for row in (_sys_row("kernel_module", "/usr/sbin/modprobe", "modprobe", syscall=313, auid="4294967295"),
+                _sys_row("kernel_module", "/usr/sbin/modprobe", "modprobe", syscall=313, success="no"),
+                _sys_row("var_log_delete", "/usr/bin/rm", "rm"),
+                _sys_row("kernel_module", "/usr/sbin/modprobe", "modprobe", syscall=313, service="sshd")):
+        assert _module_rows(desired, row) == [], row
+
+
+def test_kernel_module_rows_name_the_server_actor_and_tool(desired):
+    lines = _row_lines(desired, KERNEL_MODULE, [_sys_row("kernel_module", "/usr/sbin/insmod", "insmod", syscall=175, host="ns0003", user="alice")], "security_logs")
+    assert len(lines) == 1 and lines[0].startswith("• ns0003: alice의 insmod 커널 모듈 적재 1건") and " · " in lines[0]
+
+
+@pytest.mark.parametrize("name", (VAR_LOG, KERNEL_MODULE))
+def test_syscall_alert_fixtures_fire_as_expected_when_the_rendered_sql_runs_on_them(desired, name):
+    """검증 단계가 쓰는 합성 행(fixtures)이 로그인 사용자 → 울림, auid 없음·제외 실행 파일·다른 키 → 안 울림 그대로 판정된다."""
+    spec = FIXTURES[name]
+    assert {c["fires"] for c in spec["cases"]} == {True, False}
+    records = [r for c in spec["cases"] for r in _case_records(name, c)]
+    fired = {row["host_name"] for row in _run_alert_on_sqlite(_sql(desired, name), records, "security_logs")}
+    assert fired == {c["host"] for c in spec["cases"] if c["fires"]}
+
+
+def _without_enriched_fields(row):
+    """EL6·7 auditd 형식: 해석 필드(`\\x1d` 뒤의 ARCH=·SYSCALL=·AUID=)가 없는 줄."""
+    return dict(row, body=row["body"].split("\x1d")[0])
+
+
+def test_without_the_enriched_auid_name_the_actor_falls_back_to_the_raw_auid_number(desired):
+    """AUID="이름" 해석 필드가 없는 형식에서도 작업자 자리에 `auid <번호>`가 나온다(알 수 없음이 아니다). 알림은 그대로 울린다."""
+    row = _without_enriched_fields(_sys_row("var_log_delete", "/usr/bin/rm", "rm", auid="1002"))
+    assert "AUID=" not in row["body"] and " auid=1002 " in row["body"]
+    assert [(r["actor"], r["tool"]) for r in _var_log_rows(desired, row)] == [("auid 1002", "rm")]
+    lines = _row_lines(desired, VAR_LOG, [row], "security_logs")
+    assert len(lines) == 1 and lines[0].startswith("• ns0272: auid 1002의 rm 1건")
+    mod = _without_enriched_fields(_sys_row("kernel_module", "/usr/sbin/insmod", "insmod", auid="1002", syscall=175))
+    assert [(r["actor"], r["tool"]) for r in _module_rows(desired, mod)] == [("auid 1002", "insmod")]
+    # 해석 이름이 있으면 이름이 우선이다
+    assert [r["actor"] for r in _var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/rm", "rm"))] == ["opsverify"]
+
+
+def test_the_default_exclusion_and_the_runbook_say_a_login_users_own_logrotate_run_is_not_alerted(desired):
+    """제외 실행 파일은 exe 경로만 본다: 로그인 사용자가 `logrotate -f 내_설정`으로 로그를 지워도 알리지 않는다. 그 위험과 기본값 근거가 문서·변수 주석에 있어야 한다."""
+    assert _var_log_rows(desired, _sys_row("var_log_delete", "/usr/sbin/logrotate", "logrotate")) == []
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    comment = (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
+    for doc in (runbook, spec, comment):
+        assert "logrotate -f" in doc
+    assert "기본 제외" in spec and "근거" in spec
+
+
+def test_the_record_format_paragraph_agrees_with_the_actor_fallback():
+    """"기록 형식의 근거" 단락은 작업자 칸 대체(`auid <번호>`)와 모순되면 안 된다: 해석 필드가 없을 때 작업자를 `알 수 없음`이라 쓰면 안 된다."""
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    para = next(ln for ln in spec.splitlines() if "기록 형식의 근거(2026-11-04" in ln)
+    assert "작업자는 `auid <번호>`" in para and "작업자는 `알 수 없음`" not in para and "`적재·제거`" in para
+
+
+def test_the_documents_state_the_syscall_rule_limits_found_in_review():
+    sec = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    assert "sudo_logs 적재 여부" in sec                      # 카나리(#436) 확인 항목
+    assert "auditctl -R" in sec and "sudo_logs" in sec and "6. 뒤" in sec   # 순서 트레이드오프
+    for doc in (sec, runbook):                                 # EL6 init 스크립트 데몬이 auid를 물려받는 오탐
+        assert "init 스크립트" in doc and "auid를 물려" in doc
+    assert "#436" in sec and "ftruncate" in sec
+
+
+def test_the_syscall_alerts_have_runbook_and_spec_entries_with_the_rule_basis():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    sec = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    for name in (VAR_LOG, KERNEL_MODULE):
+        anchor = name.removeprefix("infra-")
+        assert f'<a id="{anchor}"></a>' in runbook and f"(`{name}`)" in runbook and f"`{name}`" in spec, name
+    for token in ("var_log_delete", "kernel_module", "O_TRUNC", "카나리 실험", "미실시", "o2c_var_log_excluded_exes", "auditctl -l"):
+        assert token in spec + sec + runbook, token
+
+
 # --- infra-oom-kill 자기 증식 루프(알림 서버가 알림 본문·쿼리 계획을 로그로 남기면 같은 알림에 다시 걸림) ---
 
 OOM_QUERY_PLAN_LOG = ("Oct 26 15:32:36 ns0217 bot-java[2513767]:              FilterExec: (lower(body@1) LIKE %killed process% OR "

@@ -44,6 +44,7 @@ EXPECTED_ALERTS = {
     "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
     "infra-ssh-login-failures-slow", "infra-ssh-password-spray",   # 인증 실패 알림 보강(Spec #433 / Ticket-1, #427)
     "infra-sshd-fatal-error", "infra-ssh-login-new-user",   # sshd 치명 오류·낯선 사용자 SSH 성공(#428)
+    "infra-var-log-delete", "infra-kernel-module",   # /var/log 삭제·커널 모듈 syscall 규칙 알림(#431)
     "infra-security-service-stopped",   # 보안 서비스 중지(Spec #433 / Ticket-3, #429)
     "infra-audit-auth-config-change", "infra-audit-container-config-change", "infra-audit-secret-access",   # Audit Watch Key 3개(Spec #419)
     "infra-audit-watch-provisioning",   # 정상 변경 후보(P3, #419)
@@ -209,6 +210,8 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-audit-container-config-change": ("P2 경고", 5, 5, 0, "'container_config' AS watch_key"),
     "infra-audit-secret-access": ("P2 경고", 5, 5, 0, "'secret_access' AS watch_key"),
     "infra-audit-watch-provisioning": ("P3 주의", 5, 5, 0, "regexp_replace(s.body, '^.* key="),
+    "infra-var-log-delete": ("P1 긴급", 5, 5, 0, 'key="var_log_delete"'),   # syscall 규칙 알림(#431)
+    "infra-kernel-module": ("P2 경고", 5, 5, 0, 'key="kernel_module"'),
 }
 
 RAID_ALERTS = {   # alert -> a fragment only its search carries
@@ -261,6 +264,7 @@ COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "tot
 LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
                 "user_name": "u" * 32, "actor": "u" * 32, "target": "t" * 14, "repo": "o" * 8 + "/" + "r" * 15, "kind": "organization.member_added", "team": "t" * 14,   # GitHub 감사 알림(#403): SQL이 대상 30자·저장소 40자·팀 20자로 자른다
                 "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
+                "action": "적재·제거",   # /var/log·커널 모듈 알림(#431)의 동작: 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
                 "status": "timeout", "tool": "timedatectl", "sync_status": "unsynced", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
 

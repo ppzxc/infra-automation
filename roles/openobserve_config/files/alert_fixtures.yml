@@ -1804,6 +1804,64 @@ infra-ssh-login-unregistered-source:
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: failure, user_name: deploy, source_address: 198.51.100.9}
+# /var/log 삭제·자르기와 커널 모듈(#431): 줄은 규칙(roles/security/templates/audit.rules.j2 6.)이 만드는 SYSCALL 기록 모양이다. 실로그(audit SYSCALL 줄, 2026-11-04 하루치 읽기 전용 조회)에서
+# 확인한 형식을 따랐다: 키 바로 뒤에 \x1d(GS) 구분자와 auditd가 해석해 붙인 `ARCH=… SYSCALL=<이름> AUID="…"`가 오고, 로그인 없는 줄은 auid=4294967295·AUID="unset"이다
+# (arch=c000003e는 x86_64, syscall 263=unlinkat·257=openat·313=finit_module·176=delete_module). 이 두 키의 실기록은 규칙이 적재되기 전이라 아직 없다.
+# 경로는 SYSCALL 줄이 아니라 뒤따르는 PATH 줄에 있고 PATH 줄에는 key가 없다(실로그의 PATH 줄로 확인).
+infra-var-log-delete:
+  cases:
+    - name: 로그인 사용자가 rm으로 로그 파일을 지움
+      host: verify-varlog-rm
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.101:7001): arch=c000003e syscall=263 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"rm\" exe=\"/usr/bin/rm\" subj=kernel key=\"var_log_delete\"\u001dARCH=x86_64 SYSCALL=unlinkat AUID=\"opsverify\" UID=\"root\""}
+    - name: 로그인 사용자의 `> /var/log/secure` 자르기(openat O_TRUNC)
+      host: verify-varlog-trunc
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.102:7002): arch=c000003e syscall=257 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"bash\" exe=\"/usr/bin/bash\" subj=kernel key=\"var_log_delete\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\""}
+    - name: 로그인 사용자 없음(auid 4294967295, logrotate 회전)은 규칙도 알림도 거른다
+      host: verify-varlog-logrotate
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.103:7003): arch=c000003e syscall=263 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"logrotate\" exe=\"/usr/sbin/logrotate\" subj=kernel key=\"var_log_delete\"\u001dARCH=x86_64 SYSCALL=unlinkat AUID=\"unset\" UID=\"root\""}
+    - name: 제외 실행 파일(손으로 돌린 logrotate)은 울리지 않는다
+      host: verify-varlog-excluded
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.104:7004): arch=c000003e syscall=263 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"logrotate\" exe=\"/usr/sbin/logrotate\" subj=kernel key=\"var_log_delete\"\u001dARCH=x86_64 SYSCALL=unlinkat AUID=\"opsverify\" UID=\"root\""}
+    - name: 실패한 시도(권한 거부)는 지워진 것이 아니다
+      host: verify-varlog-denied
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.105:7005): arch=c000003e syscall=263 success=no exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"rm\" exe=\"/usr/bin/rm\" subj=kernel key=\"var_log_delete\"\u001dARCH=x86_64 SYSCALL=unlinkat AUID=\"opsverify\" UID=\"root\""}
+    - name: 증적 전용 키(delete)는 알림 대상이 아니다
+      host: verify-varlog-evidence
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.106:7006): arch=c000003e syscall=263 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"rm\" exe=\"/usr/bin/rm\" subj=kernel key=\"delete\"\u001dARCH=x86_64 SYSCALL=unlinkat AUID=\"opsverify\" UID=\"root\""}
+infra-kernel-module:
+  cases:
+    - name: 로그인 사용자의 modprobe(finit_module) 적재
+      host: verify-module-load
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.107:7007): arch=c000003e syscall=313 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"modprobe\" exe=\"/usr/sbin/modprobe\" subj=kernel key=\"kernel_module\"\u001dARCH=x86_64 SYSCALL=finit_module AUID=\"opsverify\" UID=\"root\""}
+    - name: 로그인 사용자의 rmmod(delete_module) 제거
+      host: verify-module-unload
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.108:7008): arch=c000003e syscall=176 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"rmmod\" exe=\"/usr/sbin/rmmod\" subj=kernel key=\"kernel_module\"\u001dARCH=x86_64 SYSCALL=delete_module AUID=\"opsverify\" UID=\"root\""}
+    - name: 로그인 사용자 없음(auid 4294967295)의 적재는 거른다
+      host: verify-module-service
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.109:7009): arch=c000003e syscall=313 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"systemd-udevd\" exe=\"/usr/lib/systemd/systemd-udevd\" subj=kernel key=\"kernel_module\"\u001dARCH=x86_64 SYSCALL=finit_module AUID=\"unset\" UID=\"root\""}
+    - name: 다른 키(var_log_delete) 기록은 대상이 아니다
+      host: verify-module-other-key
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1793000000.110:7010): arch=c000003e syscall=263 success=yes exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"rm\" exe=\"/usr/bin/rm\" subj=kernel key=\"var_log_delete\"\u001dARCH=x86_64 SYSCALL=unlinkat AUID=\"opsverify\" UID=\"root\""}
 # sshd 치명 오류(#428): 치명 문구는 울리고 스캐너 문구와 다른 프로세스의 같은 문구는 울리지 않는다.
 infra-sshd-fatal-error:
   cases:

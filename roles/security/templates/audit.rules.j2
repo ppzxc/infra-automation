@@ -1,7 +1,19 @@
 # Overseer Auditd Security Rules (#372)
 # 의미 있는 이벤트만 기록한다: 인증·권한·시크릿·컨테이너 설정.
 # 전체 execve 추적은 소음이라 넣지 않는다(명령 실행 전수 기록 금지).
+# syscall 규칙(아래 6.)은 로그인 사용자의 흔적 지우기·커널 모듈 조작만 기록하고, 모든 syscall 규칙은 login_user_syscall_rule 매크로로만 만든다.
 
+{#
+  CIS 형태 syscall 규칙 한 묶음(b64·b32 둘 다): 로그인 사용자(auid>=UID_MIN, auid가 unset이 아님)만 기록한다. logrotate·서비스는 auid가 비어 빠진다.
+  - unset 표기: audit.rules(7)에서 `unset`과 4294967295는 같은 뜻이다. EL6·7 auditd(2.4·2.8)에서 `unset` 별칭 지원을 확인하지 못해 숫자로 쓴다(audit_auid_unset으로 바꿀 수 있다).
+  - extra: 이 묶음에만 붙는 필터 전체(`-F ...` 형태, 경로·인자 조건).
+  새 syscall 규칙은 이 매크로를 한 줄 더 부르면 된다. 키는 알림이 읽는 이름이라 감시 키·증적 키와 겹치지 않게 짓는다.
+#}
+{% macro login_user_syscall_rule(syscalls, key, extra='') %}
+{% for arch in ['b64', 'b32'] %}
+-a always,exit -F arch={{ arch }} -S {{ syscalls }}{{ (' ' ~ extra) if extra else '' }} -F auid>={{ audit_login_uid_min | default(1000) }} -F auid!={{ audit_auid_unset | default('4294967295') }} -k {{ key }}
+{% endfor %}
+{% endmacro %}
 # First rule - delete all previous rules
 -D
 
@@ -23,7 +35,7 @@
 # 2. Privilege: sudoers configuration & logs
 -w /etc/sudoers -p wa -k sudo_config
 -w /etc/sudoers.d/ -p wa -k sudo_config
--w {{ sudo_log_file | default('/var/log/sudo.log') }} -p wa -k sudo_logs
+# (sudo 로그 파일 감시 sudo_logs는 규칙 순서 때문에 6. 뒤에 있다: 아래 "규칙 순서" 참고)
 
 # 3. SSH daemon configuration
 -w /etc/ssh/sshd_config -p wa -k sshd_config
@@ -38,3 +50,23 @@
 {% for p in (_audit_watch_paths_effective | default(audit_watch_paths | default([]))) %}
 -w {{ p }} -p rwa -k secret_access
 {% endfor %}
+
+# 6. Syscall 규칙 (#431): 로그인 사용자만. 규칙 없이는 잡히지 않는 파일 삭제·커널 모듈 적재를 알림이 읽는다(키 → 알림은 docs/security.md).
+# 6-1. /var/log 아래 삭제·이름 바꾸기·자르기 (key var_log_delete → infra-var-log-delete P1)
+#   dir=는 하위 전체를 보는 경로 필터다(삭제·이름 바꾸기는 부모 디렉터리가 /var/log 하위일 때 걸린다).
+#   자르기는 truncate·ftruncate·creat(항상 자름) 그리고 O_TRUNC(0x200)를 켠 열기다: `> /var/log/secure`·`: > file`이 이 경우다.
+#   open은 flags가 a1, openat은 a2이므로 규칙을 나눈다. openat2는 flags가 구조체 안이라 거를 수 없다(알려진 한계, docs/security.md).
+{{ login_user_syscall_rule('unlink,unlinkat,rename,renameat,truncate,ftruncate,creat', 'var_log_delete', '-F dir=/var/log') -}}
+{{ login_user_syscall_rule('open', 'var_log_delete', '-F dir=/var/log -F a1&0x200') -}}
+{{ login_user_syscall_rule('openat', 'var_log_delete', '-F dir=/var/log -F a2&0x200') -}}
+# 6-2. 커널 모듈 적재·제거 (key kernel_module → infra-kernel-module P2)
+#   finit_module(파일 기술자로 적재, kmod 기본 경로)은 커널 3.8에서 생겼다. EL6 커널(2.6.32)에는 없어 auditctl이 이름을 몰라 규칙이 실패하므로 EL6에서만 뺀다.
+{% set kernel_module_syscalls = 'init_module,delete_module' if (ansible_os_family | default('')) == 'RedHat' and (ansible_distribution_major_version | default('') | string) == '6' else 'init_module,finit_module,delete_module' %}
+{{ login_user_syscall_rule(kernel_module_syscalls, 'kernel_module') -}}
+
+# 7. 규칙 순서 (중요) — 커널은 첫 번째로 맞는 규칙의 키 하나만 기록한다(audit.rules(7): first match wins).
+#   /var/log 아래 파일을 다루는 감시·규칙은 반드시 6-1(var_log_delete) 뒤에 둔다. 앞에 두면 로그인 사용자가 그 파일을 지울 때 앞 규칙의 키로만 남아
+#   P1 알림(infra-var-log-delete)이 울리지 않는다. 이 이유로 sudo 로그 파일 감시(sudo_logs)를 여기에 둔다: sudo 자신의 기록은 덧붙이기(O_APPEND, O_TRUNC 없음)라
+#   6-1에 걸리지 않고 아래 감시로 내려와 기존대로 sudo_logs로 남는다. 새 감시 키·증적 전용 규칙(CIS 특권 명령·파일 삭제·로그인 기록 등)은 이 줄 아래에 더한다.
+#   1~5 감시를 위에 두는 것도 이유가 있다: 6의 syscall 줄이 오래된 auditctl에서 거부돼도 그 앞의 감시는 이미 올라가 있다.
+-w {{ sudo_log_file | default('/var/log/sudo.log') }} -p wa -k sudo_logs
