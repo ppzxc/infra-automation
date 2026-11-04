@@ -1151,6 +1151,31 @@
     - not (_raw_path_effective | default(false) | bool)
     - (security_audit_tools_probe.rc | default(1)) == 0
 
+# 적재를 건너뛴 것이 조용히 ok로 끝나지 않게 경고를 남긴다(실패시키지 않는다: 커널 audit을 쓸 수 없는 호스트가 규칙이 바뀔 때마다 프로비저닝 실패가
+# 되기 때문이다). 경고는 debug라 --check(Drift 하위 실행)에서도 출력된다. 메시지에는 경로를 싣지 않는다.
+- name: "[SEC-084] Warn that the changed audit rules were not loaded (audit tools or kernel audit unavailable)"
+  ansible.builtin.debug:
+    msg: >-
+      감사 규칙 파일이 바뀌었지만 audit 도구가 없거나 커널 audit을 조회할 수 없어(auditctl -s 실패) 규칙이 적재되지 않았다.
+      커널 audit을 조회할 수 있게 된 뒤 첫 실행에서 SEC-083이 낡은 적재 상태를 감지해 적재한다.
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+    - security_audit_rules_result is changed
+    - (security_audit_tools_probe.rc | default(1)) != 0
+
+# `auditctl -s`는 되는데 `auditctl -l`만 실패하는 호스트가 영구히 ok로 보이지 않게 한다: 적재 상태를 알 수 없음으로 표시한다(실패·changed 아님).
+- name: "[SEC-085] Warn that the loaded audit rules could not be read (state unknown)"
+  ansible.builtin.debug:
+    msg: >-
+      auditctl -l이 실패해 적재된 감사 규칙을 읽지 못했다(rc {{ security_audit_loaded_probe.rc | default('?') }}). 적재 상태를 알 수 없음이라
+      drift로 보지 않고 재적재하지 않았다. 이 호스트에서 auditctl -l을 직접 확인해야 한다.
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+    - (security_audit_tools_probe.rc | default(1)) == 0
+    - security_audit_loaded_probe.rc | default(0) != 0
+
 # auditd 로그 로테이션(#364 후속): 파일 크기(MB)와 보관 개수로 상한을 둔다. auditd는 서비스 재시작을 거부하므로 reload(HUP)로 반영한다.
 # audit 패키지가 없어 auditd.conf가 없는 호스트만 건너뛴다.
 - name: "[SEC-081] Set auditd log rotation limits (max_log_file, num_logs)"

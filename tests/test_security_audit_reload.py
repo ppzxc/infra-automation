@@ -83,7 +83,7 @@ def _handlers():
 
 def _tasks():
     tasks = list(flat_tasks(yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))))
-    return [t for t in tasks if t.get("name", "").startswith(("[SEC-082]", "[SEC-083]"))]
+    return [t for t in tasks if t.get("name", "").startswith(("[SEC-082]", "[SEC-083]", "[SEC-084]", "[SEC-085]"))]
 
 
 def _recap(output):
@@ -234,6 +234,36 @@ def test_a_load_that_cannot_be_read_back_is_still_a_failure(apply_run):
     assert apply_run["recap"]["readbackfails"]["failed"] > 0, apply_run["out"]
 
 
+def _warnings(out):
+    """호스트 -> 그 호스트의 debug 메시지 목록(기본 콜백 출력 `ok: [host] => {"msg": "..."}`)."""
+    found = {}
+    for host, msg in re.findall(r'^ok: \[(\w+)\] => \{\s*"msg": "([^"]*)"', out, re.M):
+        found.setdefault(host, []).append(msg)
+    return found
+
+
+def test_a_changed_rules_file_on_a_host_that_cannot_load_it_leaves_a_visible_warning_not_a_failure(apply_run, check_run):
+    # 규칙 파일은 바뀌었는데 SEC-082가 적재 단계를 건너뛰면 조용히 ok로 끝나지 않는다. 실패시키면 커널 audit을 못 쓰는 호스트가 규칙이 바뀔 때마다
+    # 프로비저닝 실패가 되므로 경고(debug)만 남긴다.
+    for run in (apply_run, check_run):
+        msgs = _warnings(run["out"]).get("nokernelnewfile", [])
+        assert any("적재되지 않았" in m and "SEC-083" in m for m in msgs), (msgs, run["out"])
+        assert run["recap"]["nokernelnewfile"]["failed"] == 0
+        # 파일이 그대로인 호스트·적재할 수 있는 호스트·도구 없는 호스트에는 이 경고가 없다.
+        for host in ("nokernel", "clean", "stale", "noaudit", "listfails"):
+            assert not any("적재되지 않았" in m for m in _warnings(run["out"]).get(host, [])), host
+
+
+def test_an_unreadable_loaded_state_is_shown_as_unknown_on_every_run_not_failed(apply_run, check_run):
+    # `-s`는 되는데 `-l`만 계속 실패하는 호스트가 영구히 ok로 보이면 안 된다: 알 수 없음 경고를 남긴다(실패·changed 아님).
+    for run in (apply_run, check_run):
+        msgs = _warnings(run["out"]).get("listfails", [])
+        assert any("알 수 없음" in m for m in msgs), (msgs, run["out"])
+        assert run["recap"]["listfails"]["failed"] == 0 and run["recap"]["listfails"]["changed"] == 0
+        for host in ("clean", "stale", "extrafile", "nokernel", "noaudit"):
+            assert not any("알 수 없음" in m for m in _warnings(run["out"]).get(host, [])), host
+
+
 # --- 정의만 읽는 검사(ADR-0013): 옛 결함이 되돌아오지 않게 한다 -------------------------------
 
 def test_auditd_load_handlers_do_not_restart_the_service_or_swallow_failures():
@@ -292,4 +322,7 @@ def test_the_spec_states_the_syscall_comparison_scope_and_its_limits():
 
 def test_the_spec_states_that_a_kernel_that_cannot_be_queried_skips_loading_and_that_raw_filters_evidence_paths():
     assert "auditctl -s" in SPEC and "SEC-094" in SPEC and "SEC-095" in SPEC
+    assert "SEC-084" in SPEC and "SEC-085" in SPEC and "첫 실행에서 `SEC-083`이 감지" in SPEC
+    runbook = (ROOT_DIR / "docs" / "runbooks" / "detection-recovery.md").read_text(encoding="utf-8")
+    assert "SEC-084" in runbook and "SEC-085" in runbook and "적재 상태를 알 수 없음" in runbook
     assert "raw 경로(`SEC-035`)에는 이 거르기가 없고" not in SPEC
