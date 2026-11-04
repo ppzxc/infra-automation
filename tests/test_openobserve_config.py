@@ -2455,7 +2455,11 @@ def test_sudo_risky_command_list_builds_safe_like_conditions_and_rejects_unsafe_
                                    {"o2c_security_stop_services": []}, {"o2c_security_stop_services": ["fail2ban", "auditd"]},   # 중지 알림(#429): 비었거나 auditd가 있거나
                                    {"o2c_security_stop_services": ["Fail2ban"]}, {"o2c_security_stop_grace_minutes": 0},
                                    {"o2c_security_stop_window_minutes": "1h"}, {"o2c_security_stop_grace_minutes": 60, "o2c_security_stop_window_minutes": 60},
-                                   {"o2c_security_stop_renotify_minutes": 0}, {"o2c_security_stop_renotify_minutes": 20}])
+                                   {"o2c_security_stop_renotify_minutes": 0}, {"o2c_security_stop_renotify_minutes": 20},
+                                   {"o2c_security_stop_frequency_minutes": 0}, {"o2c_security_stop_frequency_minutes": "5m"},
+                                   {"o2c_security_stop_frequency_minutes": 11},   # 평가 주기는 재통지 간격 이하(24시간 구간이라 기본 5분)
+                                   # 검증 단계가 기다리는 최대 시간(retries x delay)이 낯선 사용자 알림의 평가 구간(분)을 넘으면 합성 로그인이 창 밖으로 밀려 검증이 틀어진다
+                                   {"o2c_verify_retries": 120, "o2c_verify_delay": 5}, {"o2c_verify_retries": 6, "o2c_verify_delay": 100}])
 def test_invalid_security_alert_variables_fail_before_any_request(o2, extra):
     res = _apply(o2, extra=extra)
     assert res.returncode != 0 and o2.reads == [] and o2.writes == []

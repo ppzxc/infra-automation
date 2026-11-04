@@ -120,6 +120,10 @@
           - (o2c_security_stop_window_minutes | int) > (o2c_security_stop_grace_minutes | int)
           - (o2c_security_stop_renotify_minutes | string) is match('^[1-9][0-9]*$')
           - (o2c_security_stop_renotify_minutes | int) < (o2c_security_stop_grace_minutes | int)
+          - (o2c_security_stop_frequency_minutes | string) is match('^[1-9][0-9]*$')   # 24시간 구간이라 매분 돌리지 않는다(스캔 비용). 재통지 간격 이하여야 평가 사이가 비지 않는다
+          - (o2c_security_stop_frequency_minutes | int) <= (o2c_security_stop_renotify_minutes | int)
+          # 검증 단계는 최대 retries x delay초 기다린다. 낯선 사용자 알림은 첫 성공이 평가 구간(분) 안이어야 발화하므로(합성 로그인은 수집 시각으로 찍힌다) 그 대기가 구간을 넘으면 검증이 틀어진다
+          - (o2c_verify_retries | int) * (o2c_verify_delay | int) < (o2c_ssh_new_user_window_minutes | int) * 60
           # root 로그인 P2 재통지 간격은 알림 정의(silence)에 들어간다
           - (o2c_root_known_silence_minutes | string) is match('^[0-9]+$')
           # 남은 보안 로그 알림(#330): 계정 도구 이름은 SQL의 comm 조건에 들어가고, 재통지 간격은 알림 정의에 들어간다

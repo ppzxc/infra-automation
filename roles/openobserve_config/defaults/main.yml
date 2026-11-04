@@ -223,13 +223,23 @@ o2c_ssh_new_user_frequency_minutes: 5
 # 알림 대상에서 빠졌었는데, "중지가 grace 동안 이어질 때만" 판정하므로 그 오탐이 없어져 다시 넣는다.
 # unit 필드 형식은 같은 실로그(최근 30일 중 SERVICE_STOP·START)로 확인했다: `msg='unit=<이름> comm="systemd" …'` 모양이고 이름에 `.service` 접미가 없으며(0건)
 # 이름 바로 뒤에 항상 공백이 온다. 그래서 SQL은 `unit=<이름> `(뒤 공백 포함)으로 찾아 `fail2ban-extra` 같은 접두 일치를 막는다.
+# 통지 지속 정책(최종 리뷰, 사용자 이야기 13 "다시 켜지면 알림이 멈추기를"): 중지가 이어지는 동안 알림은 재통지 간격마다 다시 울리고, 조회 구간(window)이 지나면 그 중지 기록이
+# 구간 밖으로 밀려 조용해진다. 구간이 1시간이던 때는 서비스가 계속 멈춰 있어도 40분 뒤(유예 20분 뒤부터 구간 끝까지) 알림이 멎어 복구 신호와 구별되지 않았다. 그래서 구간을
+# 24시간(1440분)으로 늘렸다. 정책: 한 번의 중지는 유예가 찬 뒤부터 24시간 동안 10분마다 통지하고(최대 (1440 - 20) / 10 = 142회), 그 뒤에는 멎는다 — 하루 동안 복구하지
+# 않은 P1은 알림이 아니라 사람이 이어받는 사건이다. 멎은 것은 복구가 아니다: 복구는 서비스가 다시 켜진 시작 기록(SERVICE_START)이고, 조용해지면 systemctl status로 확인한다.
+# 통지 횟수를 줄이려면 재통지(renotify)를 유예 미만 안에서 늘린다. 구간을 24시간보다 더 늘리면 통지가 그만큼 더 길게 반복된다(상한이 구간에 비례).
+# 구간이 길어도 오탐은 늘지 않는다: HAVING이 (호스트, unit)별 마지막 중지가 마지막 시작보다 늦을 때만 행을 내므로 시작이 따라온 중지는 구간 안에 몇 번 있어도 조용하다.
+# 늘어나는 것은 시작 기록이 수집되지 않은 경우(수집기 중단, 영구 종료·전원 끈 호스트)뿐이고 그때 구간 동안 울린다 — 런북에서 호스트 전원·수집 상태를 먼저 본다.
+# 스캔 비용(2026-11-04, audit 로그 읽기 전용 조회): 구간 24시간의 평가 한 번은 `security_logs` 약 1,720만 건을 훑고 응답 약 3.4초였다(7일 조회는 약 1억 1,600만 건·약 21.7초).
+# 그래서 평가는 1분이 아니라 frequency(기본 5분)마다 돌린다(첫 통지는 유예 + 평가 주기, 곧 중지 뒤 20~25분). 구간·평가 주기를 더 늘릴 때는 이 비용을 다시 잰다. 30일 실로그에는 시작이 따라오지 않은 중지가 0건이었다.
 # window는 grace보다 길어야 한다(중지가 조회 구간 밖으로 밀리기 전에 grace가 차야 하고, 행이 나오는 구간은 window - grace다). renotify는 재통지 간격(알림 silence)이고
-# grace보다 짧아야 한다: silence는 알림 단위라 먼저 울린 행이 있는 동안 늦게 멈춘 호스트의 통지가 최대 renotify분 늦어지므로 짧게 둔다. 세 값 모두 양의 정수다.
+# grace보다 짧아야 한다: silence는 알림 단위라 먼저 울린 행이 있는 동안 늦게 멈춘 호스트의 통지가 최대 renotify분 늦어지므로 짧게 둔다. frequency는 renotify 이하다. 네 값 모두 양의 정수다.
 # 호스트 재부팅이 20분을 넘기면(대용량 재라벨링 등) 오탐이 나므로 그런 호스트가 있으면 grace를 Semaphore Environment(-e)로 늘린다.
 o2c_security_stop_services: [fail2ban, firewalld, rsyslog]
 o2c_security_stop_grace_minutes: 20
-o2c_security_stop_window_minutes: 60
+o2c_security_stop_window_minutes: 1440
 o2c_security_stop_renotify_minutes: 10
+o2c_security_stop_frequency_minutes: 5
 
 # 스위치 syslog 알림(Spec #277). 값은 모두 역할 기본 변수이며 Semaphore Environment(-e)로 덮어쓴다 — 저장소에는 IP·포트·계정을 두지 않는다.
 # 메시지 코드는 Cisco가 찍는 그대로 `%`를 뺀 형태(FACILITY-SEVERITY-MNEMONIC)다. 형식은 O2C-002에서 검증한다(SQL에 들어간다).
@@ -665,7 +675,7 @@ o2c_alerts:
     action: "① 대상 서버에서 systemctl status <서비스>로 상태 확인 ② 멈춰 있으면 systemctl start <서비스>로 복구하고 직전 로그인·sudo 기록으로 누가 멈췄는지 확인 ③ 계획에 없던 중단이면 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#security-service-stopped"
     row_template: '• {host_label}: {unit} 중지 · {event_time}'
-    description: "감사 로그(security_logs, service_name=audit)의 SERVICE_STOP·SERVICE_START(res=success)에서 (호스트, unit({{ o2c_security_stop_services | join('·') }}))별 마지막 중지가 마지막 시작보다 늦고 {{ o2c_security_stop_grace_minutes }}분보다 오래됨 — 유예는 SQL이 행마다 판정(알림 pending 0)해 순차 재부팅에서 서로 가리지 않고, 재시작·재부팅은 시작 기록이 곧 따라와 풀린다. auditd는 infra-auditd-stopped가 맡는다 (State Alert, 조회 {{ o2c_security_stop_window_minutes }}분, 재통지 {{ o2c_security_stop_renotify_minutes }}분)"
+    description: "감사 로그(security_logs, service_name=audit)의 SERVICE_STOP·SERVICE_START(res=success)에서 (호스트, unit({{ o2c_security_stop_services | join('·') }}))별 마지막 중지가 마지막 시작보다 늦고 {{ o2c_security_stop_grace_minutes }}분보다 오래됨 — 유예는 SQL이 행마다 판정(알림 pending 0)해 순차 재부팅에서 서로 가리지 않고, 재시작·재부팅은 시작 기록이 곧 따라와 풀린다. auditd는 infra-auditd-stopped가 맡는다 (State Alert, 조회 {{ o2c_security_stop_window_minutes }}분, {{ o2c_security_stop_frequency_minutes }}분마다 평가, 재통지 {{ o2c_security_stop_renotify_minutes }}분 — 중지가 이어지면 조회 구간이 끝날 때까지 통지하고 그 뒤 멎는다)"
     stream: security_logs
     sql: >-
       SELECT host_name,
@@ -681,7 +691,7 @@ o2c_alerts:
       AND max(CASE WHEN body LIKE 'type=SERVICE_STOP %' THEN _timestamp ELSE 0 END) <= to_unixtime(now()) * 1000000 - {{ (o2c_security_stop_grace_minutes | int) * 60000000 }}
       ORDER BY host_name
     period: "{{ o2c_security_stop_window_minutes }}"
-    frequency: 1
+    frequency: "{{ o2c_security_stop_frequency_minutes }}"
     silence: "{{ o2c_security_stop_renotify_minutes }}"
     pending_minutes: 0
   - name: infra-account-lockout

@@ -170,6 +170,32 @@ kisa_cap_norm() {
   }' | sort -u
 }
 
+# 파일에 getcap을 돌린다(U-23 file capability). SUID/SGID 탐색과 같은 마운트 집합·-xdev·시간 제한이다. 컨테이너 이미지 레이어
+# (/var/lib/docker/overlay2 등)는 호스트 파일이 아니라 이미지 내용이라 걸으면 같은 이미지가 늘 검토 항목으로 쏟아진다. 그래서
+# KISA_CAP_EXCLUDE(줄 단위 경로, 글롭 가능)와 일치하는 디렉터리는 들어가지 않는다(-prune). 비어 있으면 전부 탐색한다.
+# 이 제외는 capability 목록에만 걸리고 SUID/SGID 판정에는 걸리지 않는다.
+kisa_getcap_find() {
+  _kcf_roots=$(kisa_local_mounts)
+  _kcf_ifs=$IFS
+  IFS='
+'
+  set -f
+  set --
+  for _kcf_p in ${KISA_CAP_EXCLUDE:-}; do
+    [ -n "$_kcf_p" ] || continue
+    if [ "$#" -gt 0 ]; then set -- "$@" -o -path "$R$_kcf_p"; else set -- -path "$R$_kcf_p"; fi
+  done
+  set +f
+  IFS=$_kcf_ifs
+  if [ "$#" -gt 0 ]; then
+    # shellcheck disable=SC2086
+    kisa_find $_kcf_roots -xdev \( "$@" \) -prune -o -type f -exec getcap {} +
+  else
+    # shellcheck disable=SC2086
+    kisa_find $_kcf_roots -xdev -type f -exec getcap {} +
+  fi
+}
+
 # getcap을 쓸 수 있는가. 없거나(127) 실행할 수 없으면(126) 거짓이다.
 kisa_getcap_ok() {
   command -v getcap >/dev/null 2>&1 || return 1

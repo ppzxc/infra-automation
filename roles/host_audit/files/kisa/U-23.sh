@@ -3,7 +3,7 @@
 # 표준 바이너리가 늘 있으므로 "있으면 취약"으로 자동 판정하지 않고 목록을 증적으로 낸다(수동).
 # file capability(#432): SUID 밖의 권한 상승 통로라서 같은 증적 줄에 목록을 덧붙인다. 판정은 SUID/SGID만으로
 # 정해지며 capability는 판정을 바꾸지 않는다. 배포판 기본(KISA_CAP_DEFAULTS, 역할 변수
-# host_audit_kisa_capability_defaults) 밖의 항목만 검토 대상이다. getcap을 쓸 수 없으면 점검불가로 이름만 남긴다.
+# host_audit_kisa_capability_defaults) 밖의 항목만 검토 대상이다. 컨테이너 저장소 경로(KISA_CAP_EXCLUDE)는 걷지 않는다(kisa_getcap_find). getcap을 쓸 수 없으면 점검불가로 이름만 남긴다.
 (
   # shellcheck disable=SC2046
   list=$(kisa_find $(kisa_local_mounts) -xdev -type f \( -perm -4000 -o -perm -2000 \) -print)
@@ -12,8 +12,7 @@
   if ! kisa_getcap_ok; then
     cap="file capability: 점검불가(getcap not found or not executable)"
   else
-    # shellcheck disable=SC2046
-    capraw=$(kisa_find $(kisa_local_mounts) -xdev -type f -exec getcap {} +)
+    capraw=$(kisa_getcap_find)
     caprc=$?
     if [ "$caprc" -eq 124 ]; then
       cap="file capability: 점검불가(timed out after ${KISA_FIND_TIMEOUT:-120}s)"
