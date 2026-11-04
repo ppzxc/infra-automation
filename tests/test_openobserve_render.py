@@ -933,7 +933,10 @@ def test_github_audit_alerts_keep_the_prefix_severity_runbook_link_and_timing(de
         assert alert["context_attributes"]["runbook"].endswith("#" + name.removeprefix("infra-")), name
         assert alert["stream_name"] == "security_logs", name
         tc = alert["trigger_condition"]
-        assert (tc["period"], tc["frequency"], tc["silence"]) == (5, 1, 5), name   # 이벤트 알림: 5분 구간에 한 번
+        assert (tc["period"], tc["frequency"], tc["silence"]) == (7, 1, 5), name   # 이벤트 알림: 7분 구간, 발화 뒤 5분 무음
+        # 무음이 끝난 뒤 첫 평가는 발화 시각 + 무음 + 평가 간격(+ 지연) 뒤다. 조회 구간이 이보다 짧으면 발화 직후의 이벤트가 영영 구간 밖에 남는다
+        # (2026-11-04 서버 적용: 구간 5 = 무음 5라서 team.deleted·membership.removed가 알림에서 빠졌다). 누락보다 한 건 중복이 낫다.
+        assert tc["period"] >= tc["silence"] + tc["frequency"] + 1, name
     names = [o["name"] for o in rendered if o["kind"] == "alert"]
     assert len(names) == len(set(names)) and set(GHA_ALERTS) <= set(names)
 

@@ -1328,7 +1328,7 @@ o2c_alerts:
       WHERE service_name = 'github-audit' AND github_event = 'meta' AND github_action = 'deleted'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
-    period: 5
+    period: 7
     frequency: 1
     silence: 5
   - name: infra-github-audit-repo-public
@@ -1347,7 +1347,7 @@ o2c_alerts:
       WHERE service_name = 'github-audit' AND ((github_event = 'repository' AND github_action = 'publicized') OR github_event = 'public')
       GROUP BY {{ o2c_gha_group }}
       ORDER BY events DESC
-    period: 5
+    period: 7
     frequency: 1
     silence: 5
   - name: infra-github-audit-repo-org-deleted
@@ -1366,7 +1366,7 @@ o2c_alerts:
       WHERE service_name = 'github-audit' AND github_action = 'deleted' AND github_event IN ('repository', 'organization')
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
-    period: 5
+    period: 7
     frequency: 1
     silence: 5
   - name: infra-github-audit-protection-removed
@@ -1385,7 +1385,7 @@ o2c_alerts:
       WHERE service_name = 'github-audit' AND github_event = 'branch_protection_rule' AND github_action = 'deleted'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
-    period: 5
+    period: 7
     frequency: 1
     silence: 5
   - name: infra-github-audit-ruleset-deleted
@@ -1404,7 +1404,7 @@ o2c_alerts:
       WHERE service_name = 'github-audit' AND github_event = 'repository_ruleset' AND github_action = 'deleted'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
-    period: 5
+    period: 7
     frequency: 1
     silence: 5
   - name: infra-github-audit-deploy-key-created
@@ -1423,7 +1423,7 @@ o2c_alerts:
       WHERE service_name = 'github-audit' AND github_event = 'deploy_key' AND github_action = 'created'
       GROUP BY {{ o2c_gha_group }}, github_event, github_action
       ORDER BY events DESC
-    period: 5
+    period: 7
     frequency: 1
     silence: 5
   - name: infra-github-audit-membership-change
@@ -1446,7 +1446,7 @@ o2c_alerts:
       OR (github_event = 'team' AND github_action IN ('created', 'deleted', 'added_to_repository', 'removed_from_repository')))
       GROUP BY {{ o2c_gha_group }}, github_event, github_action, github_team
       ORDER BY events DESC
-    period: 5
+    period: 7
     frequency: 1
     silence: 5
 
