@@ -1045,6 +1045,80 @@ def test_the_syscall_alerts_have_runbook_and_spec_entries_with_the_rule_basis():
         assert token in spec + sec + runbook, token
 
 
+# --- Evidence-Only Watch Key는 어떤 알림도 울리지 않는다 (Spec #433 / Ticket-8, #435) ---------------------------------------------------
+EVIDENCE_ONLY_KEYS = ("evidence_privileged_exec", "evidence_file_delete", "evidence_login_records", "evidence_time_change", "evidence_mount")
+_SYSCALL_NAMES.update({59: "execve", 87: "unlink", 82: "rename", 165: "mount", 164: "settimeofday", 227: "clock_settime"})
+_EVIDENCE_ROWS = [   # 규칙(roles/security/templates/audit.rules.j2 7.)이 만드는 기록: 정상 작업에서도 늘 생기는 것들(sudo·rm·mount·시간 동기·로그인 기록 쓰기)
+    ("evidence_privileged_exec", "/usr/bin/sudo", "sudo", 59), ("evidence_privileged_exec", "/usr/bin/su", "su", 59),
+    ("evidence_privileged_exec", "/usr/bin/passwd", "passwd", 59),
+    ("evidence_file_delete", "/usr/bin/rm", "rm", 87), ("evidence_file_delete", "/usr/bin/mv", "mv", 82),
+    ("evidence_login_records", "/usr/sbin/sshd", "sshd", 257), ("evidence_login_records", "/usr/bin/last", "last", 257),
+    ("evidence_time_change", "/usr/bin/date", "date", 227), ("evidence_time_change", "/usr/sbin/chronyd", "chronyd", 164),
+    ("evidence_mount", "/usr/bin/mount", "mount", 165),
+]
+
+
+def _evidence_records(now_us):
+    rows = []
+    for key, exe, comm, syscall in _EVIDENCE_ROWS:
+        for auid in ("1002", "4294967295"):          # 로그인 사용자와 로그인 없는 서비스(로그인 기록 파일은 sshd 같은 서비스도 쓴다)
+            for success in ("yes", "no"):
+                for _ in range(3):                    # 같은 행이 여러 번(알림 임계를 넘길 만큼) 들어와도 울리지 않는다
+                    rows.append(dict(_sys_row(key, exe, comm, auid=auid, syscall=syscall, success=success), _timestamp=now_us - 30_000_000))
+    return rows
+
+
+def _run_alert_tolerating_absent_columns(sql, records, now_us):
+    """이 기록들에 없는 컬럼(`event_outcome` 등)은 비어 있는 것으로 본다: 한 줄씩 채우며 다시 돌린다(OpenObserve도 그 컬럼이 없으면 이 행은 조건에 걸리지 않는다)."""
+    import sqlite3
+    absent = {}
+    for _ in range(60):
+        try:
+            return _run_alert_on_sqlite(sql, [dict(absent, **r) for r in records], "security_logs", now_us=now_us)
+        except sqlite3.OperationalError as exc:
+            column = re.search(r"no such column: (\w+)", str(exc))
+            if not column:
+                raise
+            absent[column.group(1)] = None
+    raise AssertionError("too many absent columns")
+
+
+def _security_log_alerts(desired):
+    return {name: alert for name, alert in desired.store["alert"].items()
+            if alert.get("stream_name") == "security_logs" and alert["query_condition"].get("type") == "sql"}
+
+
+def test_no_alert_reads_an_evidence_only_watch_key_in_its_definition_or_in_any_key_list(desired):
+    """알림 정의(SQL)와 역할 기본값의 알림 변수·목록 어디에도 이 키가 없다. 나중에 알림을 붙이는 것은 새 결정이다(CONTEXT.md)."""
+    for name, alert in desired.store["alert"].items():
+        assert "evidence_" not in yaml.safe_dump(alert), name
+    assert "evidence_" not in yaml.safe_dump(DEFAULTS)       # 주석이 아니라 값만 본다(o2c_audit_* 키 목록 포함)
+    assert not {k for k in EVIDENCE_ONLY_KEYS if any(f'key="{k}"' in a["query_condition"].get("sql", "") for a in desired.store["alert"].values())}
+
+
+def test_records_under_every_evidence_only_watch_key_fire_no_alert_while_a_var_log_delete_record_still_does(desired):
+    import time
+    now_us = int(time.time() * 1_000_000)
+    alerts = _security_log_alerts(desired)
+    assert {VAR_LOG, KERNEL_MODULE, "infra-audit-watch-change", "infra-sudo-escalation-failure", "infra-account-change"} <= set(alerts)   # 비어 있는 검사가 아니다
+    records = _evidence_records(now_us)
+    assert {k for k, *_ in _EVIDENCE_ROWS} == set(EVIDENCE_ONLY_KEYS)
+    unrelated = [{"host_name": "ns0272", "service_name": "sshd", "body": "Server listening on 0.0.0.0 port 22.", "_timestamp": now_us - 30_000_000}]
+    # 기록이 없어서 울리는 알림(침묵 감시 등)은 이 기록과 무관하다: 관계없는 한 줄만 있을 때와 같은 결과여야 한다.
+    changed = {name for name, alert in alerts.items()
+               if _run_alert_tolerating_absent_columns(alert["query_condition"]["sql"], records, now_us)
+               != _run_alert_tolerating_absent_columns(alert["query_condition"]["sql"], unrelated, now_us)}
+    assert changed == set(), sorted(changed)
+    control = dict(_sys_row("var_log_delete", "/usr/bin/rm", "rm"), _timestamp=now_us - 30_000_000)      # 같은 harness가 알림 키 기록은 울린다(대조)
+    assert len(_run_alert_tolerating_absent_columns(alerts[VAR_LOG]["query_condition"]["sql"], records + [control], now_us)) == 1
+
+
+def test_the_evidence_only_keys_are_documented_as_having_no_alert_in_the_alert_spec():
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    assert "Evidence-Only Watch Key" in spec and all(f"`{k}`" in spec for k in EVIDENCE_ONLY_KEYS)
+    assert "알림 없음, 증적 전용" in spec
+
+
 # --- infra-oom-kill 자기 증식 루프(알림 서버가 알림 본문·쿼리 계획을 로그로 남기면 같은 알림에 다시 걸림) ---
 
 OOM_QUERY_PLAN_LOG = ("Oct 26 15:32:36 ns0217 bot-java[2513767]:              FilterExec: (lower(body@1) LIKE %killed process% OR "
