@@ -1238,3 +1238,166 @@ def test_escalation_rows_are_per_user_as_before_without_a_folded_more_users_suff
     rows = _row_lines(desired, ESCALATION, recs, "security_logs")
     assert len(rows) == 3 and not any("외 " in r for r in rows)
     assert "more_users" not in _sql(desired, ESCALATION)
+
+
+# --- 보안 서비스 중지 State Alert와 기존 목록 보정 (Spec #433 / Ticket-3, #429) ---------------------------------------------------
+STOPPED = "infra-security-service-stopped"
+UNIT_BODY = ("type=%s msg=audit(1792627441.382:46621): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel "
+             "msg='unit=%s comm=\"systemd\" exe=\"/usr/lib/systemd/systemd\" hostname=? addr=? terminal=? res=%s'")
+
+
+def _unit_event(kind, unit, at, host="ns0272", res="success"):
+    """감사 로그의 SERVICE_STOP·SERVICE_START 한 줄(실로그 형식). `at`은 기준 시각(2026-10-23 09:00:00 KST)에서의 초."""
+    return {"service_name": "audit", "host_name": host, "_timestamp": _kst_us("2026-10-23 09:00:00") + at * 1_000_000,
+            "body": UNIT_BODY % (kind, unit, res)}
+
+
+def _stopped_rows(desired, *events, now=1500):
+    """알림 SQL을 합성 행에 돌린다. `now`는 기준 시각(0초)에서 평가 시각까지의 초(기본 25분 — 0초의 중지는 유예를 넘긴 상태)."""
+    return _run_alert_on_sqlite(_sql(desired, STOPPED), list(events), stream="security_logs",
+                                now_us=_kst_us("2026-10-23 09:00:00") + now * 1_000_000)
+
+
+@pytest.mark.parametrize("unit", ["fail2ban", "firewalld", "rsyslog"])
+def test_a_stop_with_no_start_after_it_alerts_for_each_security_service(desired, unit):
+    rows = _stopped_rows(desired, _unit_event("SERVICE_STOP", unit, 0))
+    assert [(r["host_name"], r["unit"]) for r in rows] == [("ns0272", unit)]
+
+
+def test_a_stop_followed_by_a_start_does_not_alert_and_the_restart_ordering_is_judged_per_unit(desired):
+    restart = [_unit_event("SERVICE_STOP", "fail2ban", 0), _unit_event("SERVICE_START", "fail2ban", 2)]
+    assert _stopped_rows(desired, *restart) == []
+    reboot = [_unit_event("SERVICE_STOP", "rsyslog", 0), _unit_event("SERVICE_START", "rsyslog", 840)]   # 실로그의 재부팅: 약 14분 뒤 시작
+    assert _stopped_rows(desired, *reboot) == []
+    # 다른 unit의 시작은 이 unit의 중지를 풀지 않는다
+    rows = _stopped_rows(desired, _unit_event("SERVICE_STOP", "fail2ban", 0), _unit_event("SERVICE_START", "firewalld", 5))
+    assert [r["unit"] for r in rows] == ["fail2ban"]
+    # 다른 호스트의 시작도 풀지 않는다
+    rows = _stopped_rows(desired, _unit_event("SERVICE_STOP", "fail2ban", 0), _unit_event("SERVICE_START", "fail2ban", 5, host="ns0273"))
+    assert [(r["host_name"], r["unit"]) for r in rows] == [("ns0272", "fail2ban")]
+    # 시작이 먼저이고 중지가 나중이면(다시 멈춤) 울린다
+    rows = _stopped_rows(desired, _unit_event("SERVICE_START", "fail2ban", 0), _unit_event("SERVICE_STOP", "fail2ban", 30))
+    assert [r["unit"] for r in rows] == ["fail2ban"]
+
+
+def test_a_stop_alerts_only_once_it_is_older_than_the_grace(desired):
+    """유예(20분)는 행마다 SQL이 판정한다: 중지가 유예보다 오래돼야 행이 나온다."""
+    stop = _unit_event("SERVICE_STOP", "fail2ban", 0)
+    assert _stopped_rows(desired, stop, now=60) == [] and _stopped_rows(desired, stop, now=1199) == []
+    assert [r["unit"] for r in _stopped_rows(desired, stop, now=1200)] == ["fail2ban"]
+
+
+def test_hosts_rebooted_one_after_another_do_not_alert_for_the_one_that_just_stopped(desired):
+    """A는 14분 만에 시작됐고 B는 방금(5분 전) 멈췄다 — 쿼리 전체가 아니라 행마다 유예를 판정하므로 B는 아직 울리지 않는다."""
+    a = [_unit_event("SERVICE_STOP", "rsyslog", 0, host="ns0001"), _unit_event("SERVICE_START", "rsyslog", 840, host="ns0001")]
+    b = [_unit_event("SERVICE_STOP", "rsyslog", 1200, host="ns0002")]     # 평가(1500초) 5분 전에 멈춤
+    assert _stopped_rows(desired, *a, *b, now=1500) == []
+    rows = _stopped_rows(desired, *a, *b, now=1200 + 1260)               # B가 21분째 멈춰 있음
+    assert [(r["host_name"], r["unit"]) for r in rows] == [("ns0002", "rsyslog")]
+
+
+def test_simultaneous_stops_alert_together_and_a_late_one_is_judged_by_its_own_grace(desired):
+    both = [_unit_event("SERVICE_STOP", "fail2ban", 0, host="ns0001"), _unit_event("SERVICE_STOP", "firewalld", 0, host="ns0002")]
+    assert _stopped_rows(desired, *both, now=600) == []
+    assert sorted((r["host_name"], r["unit"]) for r in _stopped_rows(desired, *both, now=1500)) == [("ns0001", "fail2ban"), ("ns0002", "firewalld")]
+    # 먼저 멈춘 A가 이미 울린 뒤에 멈춘 B도 자기 유예가 차면 같은 쿼리에서 행으로 나온다(재통지 간격 동안 막히는 시간은 짧게 둔다)
+    late = [_unit_event("SERVICE_STOP", "fail2ban", 0, host="ns0001"), _unit_event("SERVICE_STOP", "fail2ban", 600, host="ns0002")]
+    assert [r["host_name"] for r in _stopped_rows(desired, *late, now=1500)] == ["ns0001"]
+    assert sorted(r["host_name"] for r in _stopped_rows(desired, *late, now=1800)) == ["ns0001", "ns0002"]
+
+
+def test_the_row_shows_the_last_stop_time_not_the_range_of_earlier_stop_start_pairs(desired):
+    events = [_unit_event("SERVICE_STOP", "fail2ban", 0), _unit_event("SERVICE_START", "fail2ban", 2),
+              _unit_event("SERVICE_STOP", "fail2ban", 1800)]                       # 09:30:00에 다시 멈춤
+    alert = desired.store["alert"][STOPPED]
+    rows = _stopped_rows(desired, *events, now=3600)
+    lines = [re.sub(r"\{(\w+)\}", lambda m: str(row[m.group(1)]), alert["row_template"]) for row in rows]
+    assert lines == ["• ns0272: fail2ban 중지 · 10-23 09:30:00"]
+
+
+def test_other_units_auditd_and_failed_records_do_not_alert(desired):
+    for unit in ("sshd", "auditd", "backup-audit-daily", "fail2ban-extra", "systemd-journald"):
+        assert _stopped_rows(desired, _unit_event("SERVICE_STOP", unit, 0)) == [], unit
+    assert _stopped_rows(desired, _unit_event("SERVICE_STOP", "rsyslog", 0, res="failed")) == []   # 멈추지 못한 기록은 중지가 아니다
+    # 시작에 실패한 기록은 시작이 아니다: 중지 뒤 시작 실패면 여전히 멈춰 있다
+    rows = _stopped_rows(desired, _unit_event("SERVICE_STOP", "rsyslog", 0), _unit_event("SERVICE_START", "rsyslog", 1, res="failed"))
+    assert [r["unit"] for r in rows] == ["rsyslog"]
+
+
+def test_the_target_services_are_a_role_default_and_never_include_auditd(desired):
+    defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert defaults["o2c_security_stop_services"] == ["fail2ban", "firewalld", "rsyslog"]
+    assert "auditd" not in defaults["o2c_security_stop_services"] and "auditd" not in _sql(desired, STOPPED)
+
+
+def test_the_grace_covers_the_longest_logged_reboot_gap_and_is_judged_per_row_not_by_pending(desired):
+    """N은 실로그 재부팅 중지→시작 최장 약 14분보다 길다. 유예는 SQL이 행마다 판정하므로 알림 pending은 0이고, 조회 구간은 유예보다 길다."""
+    a = desired.store["alert"][STOPPED]
+    defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    grace = defaults["o2c_security_stop_grace_minutes"]
+    assert grace > 14 and a["pending_period_sec"] == 0 and a["trigger_condition"]["period"] > grace
+    assert a["trigger_condition"]["silence"] == defaults["o2c_security_stop_renotify_minutes"] < grace
+    assert a["context_attributes"]["severity"] == "P1 긴급"
+
+
+def test_the_grace_variable_reaches_the_sql(tmp_path):
+    rendered = render_desired(tmp_path / "desired.json", extra={"o2c_security_stop_grace_minutes": 30, "o2c_security_stop_window_minutes": 90})
+    sql = next(o["body"]["query_condition"]["sql"] for o in rendered if o["kind"] == "alert" and o["name"] == STOPPED)
+    stop = _unit_event("SERVICE_STOP", "fail2ban", 0)
+    now = lambda seconds: _kst_us("2026-10-23 09:00:00") + seconds * 1_000_000
+    assert _run_alert_on_sqlite(sql, [stop], "security_logs", now_us=now(1799)) == []
+    assert len(_run_alert_on_sqlite(sql, [stop], "security_logs", now_us=now(1800))) == 1
+
+
+def test_the_grace_rationale_scope_and_everyday_false_positives_are_written_down(desired):
+    text = (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
+    comment = text.split("o2c_security_stop_services:")[0].rsplit("\n\n", 1)[-1]
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for token in ("14분", "rsyslog", "재부팅"):
+        assert token in comment and token in spec, token
+    # 대상 범위가 sudo 보호 목록보다 좁은 의도(systemd-journald·otelcol-contrib)를 명세·런북에 적는다
+    for token in ("systemd-journald", "otelcol-contrib"):
+        assert token in spec and token in runbook, token
+    # sudo 위험 명령의 일상 오탐 가능성: 변수 주석(위험 명령 목록 위)과 런북
+    risky_comment = text.split("o2c_sudo_risky_commands:")[0].rsplit("\n\n", 1)[-1]
+    for token in ("chattr +a", "journalctl --vacuum", "journalctl --rotate"):
+        assert token in risky_comment and token in runbook, token
+    # 실로그에서 확인한 unit 필드 형식(.service 접미 없음, 이름 뒤 공백)을 주석에 남긴다
+    assert ".service" in comment and "공백" in comment
+
+
+def test_sudo_that_clears_logs_flips_immutable_bits_or_stops_fail2ban_alerts_but_history_clear_no_longer_does(desired):
+    sql = _sql(desired, "infra-sudo-risky-command")
+
+    def fires(cmd):
+        rec = dict(event_action="sudo", event_outcome="success", user_name="alice", process_command_line=cmd, host_name="ns0272")
+        return bool(_run_alert_on_sqlite(sql, [rec], stream="security_logs"))
+
+    for cmd in ("/usr/bin/journalctl --vacuum-time=1d", "/usr/bin/journalctl --rotate", "/usr/bin/chattr -i /var/log/secure",
+                "/usr/bin/chattr +a /var/log/secure", "/bin/systemctl stop fail2ban", "/bin/systemctl disable --now fail2ban"):
+        assert fires(cmd), cmd
+    for cmd in ("history -c", "/bin/systemctl restart fail2ban", "/usr/bin/journalctl -u fail2ban --since today", "/usr/bin/lsattr /var/log"):
+        assert not fires(cmd), cmd
+
+
+@pytest.mark.parametrize("group", ["disk", "shadow", "wheel"])
+def test_adding_a_user_to_disk_or_shadow_is_shown_as_a_privileged_group_change(desired, group):
+    body = ("type=USER_MGMT msg=audit(1792628133.696:49104): pid=2510319 uid=0 auid=1002 ses=313 subj=kernel msg='op=add-user-to-group "
+            f"grp=\"{group}\" acct=\"opsverify\" exe=\"/usr/sbin/usermod\" hostname=? addr=? terminal=? res=success' UID=\"root\" AUID=\"opsverify\"")
+    rows = _run_alert_on_sqlite(_sql(desired, "infra-account-change"), [dict(service_name="audit", host_name="ns0272", body=body)], stream="security_logs")
+    assert [r["change_kind"] for r in rows] == ["특권 그룹 변경"]
+
+
+def test_a_group_that_is_not_privileged_stays_a_plain_attribute_change(desired):
+    body = ("type=USER_MGMT msg=audit(1792628133.696:49104): pid=2510319 uid=0 auid=1002 ses=313 subj=kernel msg='op=add-user-to-group "
+            "grp=\"video\" acct=\"opsverify\" exe=\"/usr/sbin/usermod\" hostname=? addr=? terminal=? res=success' UID=\"root\" AUID=\"opsverify\"")
+    rows = _run_alert_on_sqlite(_sql(desired, "infra-account-change"), [dict(service_name="audit", host_name="ns0272", body=body)], stream="security_logs")
+    assert [r["change_kind"] for r in rows] == ["계정·그룹 속성 변경"]
+
+
+def test_the_defaults_list_the_new_privileged_groups_and_protected_service_and_drop_history_clear():
+    defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert {"disk", "shadow"} <= set(defaults["o2c_privileged_groups"]) and "fail2ban" in defaults["o2c_sudo_protected_services"]
+    patterns = [p for c in defaults["o2c_sudo_risky_commands"] for p in c["patterns"]]
+    assert "history -c" not in patterns and {"journalctl --vacuum", "journalctl --rotate", "chattr"} <= set(patterns)
