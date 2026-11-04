@@ -27,6 +27,8 @@ def security_rendered():
 
 def test_audit_rules_do_not_trace_every_execve(security_rendered):
     for case, out in security_rendered.items():
+        if "audit" not in out:  # 감시 키 계산만 보는 케이스(CASE_OUTPUTS)
+            continue
         lines = rule_lines(out["audit"])  # 주석은 제외
         # execve는 자격 전환(-C uid!=euid, gid!=egid)이 있는 증적 규칙만 건다(아래 절). 필터 없는 execve 규칙은 전수 추적이다.
         assert all(_rule(ln)["compares"] for ln in lines if ln.startswith("-a ") and "execve" in ln), case

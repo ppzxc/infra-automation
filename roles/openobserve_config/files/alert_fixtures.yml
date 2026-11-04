@@ -1777,6 +1777,32 @@ infra-audit-watch-change:
       fires: false
       records:
         - {service_name: sshd, body: 'Oct 26 10:00:00 {host} note: type=SYSCALL comm="vim" key="identity"'}
+    # --- 파일 감시 키 4개(Spec #433 / Ticket-4, #430): 줄 모양은 위 감시 키 기록과 같다(실제 호스트에 아직 이 규칙이 없어 합성 행이다) ---
+    - name: auditd 설정(/etc/audit/) 변경 — 로그를 끄거나 돌리는 은폐 시도
+      host: verify-watch-audit-config
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985340.707:5009): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4700 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="vim" exe="/usr/bin/vim" subj=kernel key="audit_config" AUID="opsverify" UID="root"'}
+    - name: syslog 설정(/etc/rsyslog.d/) 변경
+      host: verify-watch-syslog-config
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985350.808:5010): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4800 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="vim" exe="/usr/bin/vim" subj=kernel key="syslog_config" AUID="opsverify" UID="root"'}
+    - name: authorized_keys에 새 키를 기록 — 백도어 키 심기
+      host: verify-watch-ssh-keys
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985360.909:5011): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="bash" exe="/usr/bin/bash" subj=kernel key="ssh_keys" AUID="opsverify" UID="root"'}
+    - name: 방화벽 영구 설정(/etc/firewalld/) 변경 — firewalld 데몬이 쓰면 로그인 계정(auid)이 비어 있다
+      host: verify-watch-firewall-config
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985370.010:5012): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=1 pid=5000 auid=4294967295 uid=0 gid=0 euid=0 tty=(none) ses=4294967295 comm="firewalld" exe="/usr/bin/python3.9" subj=kernel key="firewall_config" AUID="unset" UID="root"'}
+    - name: Ansible 경로(터미널 없음, 로그인 사용자)의 authorized_keys 변경은 P2가 아니라 정상 변경 후보(P3)로 간다(#419의 서명)
+      host: verify-watch-ssh-keys-ansible
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985380.111:5013): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=5100 pid=5101 auid=1002 uid=0 gid=0 euid=0 tty=(none) ses=313 comm="python3" exe="/usr/bin/python3.9" subj=kernel key="ssh_keys" AUID="opsverify" UID="root"'}
 infra-ssh-login-unregistered-source:
   cases:
     - name: 일반 계정이 등록되지 않은 공인 출발지에서 로그인 성공
@@ -2315,6 +2341,21 @@ infra-audit-watch-provisioning:
         - {service_name: audit, body: "type=PATH msg=audit(1792985278.023:8023): item=0 name=\"/etc/pam.d/system-auth\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
         - {service_name: audit, body: "type=PATH msg=audit(1792985278.023:8023): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
         - {service_name: audit, body: "type=CWD msg=audit(1792985278.023:8023): cwd=\"/home/opsverify\""}
+    - name: 터미널 없이 authorized_keys를 갱신함(#430의 새 키)
+      host: verify-prov-ssh-keys
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985278.025:8025): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 tty=(none) ses=313 comm="python3" exe="/usr/bin/python3.9" subj=kernel key="ssh_keys" AUID="opsverify" UID="root"'}
+    - name: 터미널 없이 방화벽 영구 설정을 갱신함(#430의 새 키)
+      host: verify-prov-firewall
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985278.026:8026): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 tty=(none) ses=313 comm="python3" exe="/usr/bin/python3.9" subj=kernel key="firewall_config" AUID="opsverify" UID="root"'}
+    - name: firewalld 데몬이 쓴 방화벽 설정(auid unset)은 서명이 아니라 P2가 맡는다
+      host: verify-prov-firewall-daemon
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985278.027:8027): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=1 pid=5000 auid=4294967295 uid=0 gid=0 euid=0 tty=(none) ses=4294967295 comm="firewalld" exe="/usr/bin/python3.9" subj=kernel key="firewall_config" AUID="unset" UID="root"'}
     - name: 감시 키가 아닌 기록은 대상이 아니다
       host: verify-prov-other-key
       fires: false

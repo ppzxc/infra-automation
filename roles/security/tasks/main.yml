@@ -150,6 +150,29 @@
       failed_when: false
       when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
 
+    # Audit Watch Key 4개(#430)의 없는 경로 거르기. 없는 경로에 watch를 걸면 규칙 적재가 실패하므로 있는 경로만 규칙에 싣는다.
+    # authorized_keys의 홈은 /home/<이름>이 아니라 getent passwd가 알려준 값이다. raw 태스크는 --check에서 건너뛴다(ADR-0005).
+    - name: "[SEC-092] Probe which audit watch key paths exist (raw, read-only)"
+      ansible.builtin.raw: >-
+        {{ (audit_watch_key_paths | dict2items | rejectattr('key', 'equalto', 'ssh_keys') | map(attribute='value') | flatten)
+           | raw_ssh_key_exists_cmd((['root'] + audit_ssh_key_accounts) | unique) }}
+      register: security_audit_watch_key_raw
+      changed_when: false
+      failed_when: false
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
+    - name: "[SEC-093] Keep only existing audit watch key paths (raw)"
+      ansible.builtin.set_fact:
+        _audit_watch_key_paths_effective: >-
+          {%- set found = security_audit_watch_key_raw.stdout | default('') | raw_exists_found -%}
+          {%- set r = [] -%}
+          {%- for key, paths in audit_watch_key_paths.items() if key != 'ssh_keys' -%}
+          {%- for p in paths if p in found -%}{%- set _ = r.append({'key': key, 'path': p}) -%}{%- endfor -%}
+          {%- endfor -%}
+          {%- for p in found if p.endswith('/.ssh/authorized_keys') -%}{%- set _ = r.append({'key': 'ssh_keys', 'path': p}) -%}{%- endfor -%}
+          {{ r | to_json }}
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
     - name: "[SEC-035] Deploy Auditd security audit rules via write-temp/validate/move (raw)"
       ansible.builtin.raw: >-
         {{ sec012_raw_content | raw_push_cmd(sec012_raw_dest, 'root', 'root', '0600', 'true') }}
@@ -996,6 +1019,31 @@
   ansible.builtin.set_fact:
     _audit_watch_paths_effective: "{{ security_audit_watch_stat.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
   when: not (_raw_path_effective | default(false) | bool)
+
+# Audit Watch Key 4개(#430): 후보 경로(audit_watch_key_paths) 중 실제로 있는 것만 규칙에 싣는다. `~계정`은 stat이 그 계정의 홈으로 바꾼다
+# (계정이 없으면 exists=false라 건너뛴다). 규칙 파일을 배포하는 조건(SEC-012)과 같은 호스트에서만 돈다.
+- name: "[SEC-090] Check which audit watch key paths exist"
+  ansible.builtin.stat:
+    path: "{{ item.1 }}"
+  loop: "{{ audit_watch_key_paths | dict2items | subelements('value') }}"
+  loop_control:
+    label: "{{ item.0.key }}: {{ item.1 }}"
+  register: security_audit_watch_key_stat
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+
+- name: "[SEC-091] Keep only existing audit watch key paths"
+  ansible.builtin.set_fact:
+    _audit_watch_key_paths_effective: >-
+      {%- set r = [] -%}
+      {%- for res in security_audit_watch_key_stat.results | default([]) if res.stat.exists | default(false) -%}
+      {%- set _ = r.append({'key': res.item.0.key, 'path': res.stat.path | default(res.item.1)}) -%}
+      {%- endfor -%}
+      {{ r | to_json }}
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
 
 # Evidence-Only Watch Key 감시 경로(#435, 이야기 26): 없는 경로의 `-w`가 규칙 적재를 깨지 않게 있는 것만 템플릿에 넘긴다(SEC-055·SEC-056과 같은 방식).
 - name: "[SEC-100] Check which audit_evidence_watch_paths exist"

@@ -109,6 +109,31 @@ audit_watch_paths: []
 audit_container_config_paths:
   - /etc/docker/
 
+# Audit Watch Key 4개(Spec #433 / Ticket-4, #430): 감시 키 이름은 감시 대상의 의미를 담는다. 정의는 CONTEXT.md의 Audit Watch Key.
+# 후보 경로이며 규칙에는 SEC-090/SEC-091이 실제로 있는 경로만 싣는다(없는 경로에 watch를 걸면 규칙 적재가 실패한다).
+audit_config_watch_paths:        # auditd 설정(감사 규칙 파일 포함): 로그를 끄거나 돌리는 은폐 시도
+  - /etc/audit/
+audit_syslog_watch_paths:        # syslog 설정
+  - /etc/rsyslog.conf
+  - /etc/rsyslog.d/
+audit_firewall_watch_paths:      # 방화벽 영구 설정만. `--permanent` 없이 바꾼 런타임 규칙은 잡지 못한다(받아들인 한계)
+  - /etc/firewalld/
+# authorized_keys를 감시할 계정(root는 늘 포함하므로 적지 않는다). 계정 이름만 적고 홈은 시스템(passwd)에서 찾는다.
+# 기본값은 프로비저닝이 공개키를 배포하는 계정이다(common 역할의 accounts 중 키가 있고 absent가 아닌 계정). root는 접속이 막혀 키가 없는 호스트가
+# 많아, 기본이 root뿐이면 이 감시 키가 사실상 아무것도 감시하지 않기 때문이다(Semaphore 인벤토리가 static이라 호스트마다 따로 적게 하지 않는다).
+# 명시하면 그 값이 기본을 대신한다. 빈 목록이어도 root만 감시하고 규칙은 깨지지 않는다.
+# (`keys`는 dict의 메서드 이름이라 `selectattr('keys', 'sequence')`로 진짜 키 목록만 고른다. state가 없는 계정은 present로 본다.)
+audit_ssh_key_accounts: >-
+  {{ ((accounts | default([]) | selectattr('name', 'defined') | selectattr('keys', 'sequence') | selectattr('keys') | selectattr('state', 'undefined') | map(attribute='name') | list)
+  + (accounts | default([]) | selectattr('name', 'defined') | selectattr('keys', 'sequence') | selectattr('keys') | selectattr('state', 'defined') | rejectattr('state', 'eq', 'absent') | map(attribute='name') | list)) | sort }}
+
+# 감시 키 -> 후보 경로. `~계정`은 stat 모듈(SEC-090)과 raw 탐지(SEC-092)가 그 계정의 홈으로 바꾼다.
+audit_watch_key_paths:
+  audit_config: "{{ audit_config_watch_paths }}"
+  syslog_config: "{{ audit_syslog_watch_paths }}"
+  ssh_keys: "{{ (['root'] + audit_ssh_key_accounts) | unique | map('regex_replace', '^(.*)$', '~\\1/.ssh/authorized_keys') | list }}"
+  firewall_config: "{{ audit_firewall_watch_paths }}"
+
 # syscall 규칙(#431)은 로그인 사용자만 기록한다: auid >= audit_login_uid_min 이고 auid가 unset(4294967295, 로그인 없이 시작한 서비스·logrotate)이 아닌 것.
 # unset은 audit.rules(7)에서 `unset`과 같은 뜻이지만 EL6·7 auditd에서 별칭 지원을 확인하지 못해 숫자로 둔다. 템플릿이 같은 값을 | default로도 갖는다(렌더링 테스트가 역할 기본값 없이 렌더링한다).
 audit_login_uid_min: 1000

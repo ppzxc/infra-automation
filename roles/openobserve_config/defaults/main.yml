@@ -353,6 +353,16 @@ o2c_fortigate_new_source_silence_minutes: 60
 # 계정 변경 알림(infra-account-change)이 이미 알리므로, 같은 변경이 두 번 알림으로 가지 않게 감시 키 알림에서는 제외한다.
 # 편집기·쉘 직접 수정처럼 계정 변경 기록을 남기지 않는 변경만 감시 키 알림이 맡는다.
 o2c_audit_account_tools: [useradd, usermod, userdel, groupadd, groupmod, groupdel, passwd, chpasswd, chage, gpasswd, newusers, chsh, chfn]
+# auditd 감시 키 알림이 읽는 Audit Watch Key와 행에 보일 이름(Spec #433 / Ticket-4, #430). 감사 규칙(roles/security의 audit_watch_key_paths와 audit.rules.j2)이 만드는
+# 키 이름과 같아야 한다(테스트가 두 목록을 대조한다). 키를 더하면 알림 SQL·런북·명세 표를 함께 고친다.
+o2c_audit_watch_keys:
+  identity: 계정 파일
+  sudo_config: sudoers
+  sshd_config: sshd 설정
+  audit_config: auditd 설정
+  syslog_config: rsyslog 설정
+  ssh_keys: SSH 인가 키(authorized_keys)
+  firewall_config: 방화벽 영구 설정
 
 # Audit Watch Key 알림 3개(Spec #419): auth_config(PAM·로그인 정책)·container_config(컨테이너 런타임 설정)·secret_access(지정 비밀 파일 접근).
 # 기존 감시 키 알림(infra-audit-watch-change)에 키를 더하지 않고 별도 알림으로 나눈 이유는 docs/openobserve_config.md에 있다. 목록은 모두 SQL에 들어가므로
@@ -378,7 +388,7 @@ o2c_audit_secret_metadata_syscalls: [getxattr, lgetxattr, fgetxattr, listxattr, 
 # 프로비저닝 접속 계정을 이 목록(OpenBao `alert_audit_provisioning_accounts`)에 채워 서명을 좁히는 것을 권한다. 절차는 docs/openobserve_config.md. 값은 저장소에 두지 않는다.
 o2c_audit_provisioning_accounts: "{{ o2c_kv.alert_audit_provisioning_accounts | default([], true) }}"
 # P3 알림이 보는 감시 키. 같은 구분을 쓰는 알림(#430)은 자기 키를 여기에 더하고 자기 P2 SQL에 `AND NOT {{ o2c_audit_provisioning_filter }}`를 붙인다.
-o2c_audit_provisioning_keys: [auth_config, container_config, secret_access]
+o2c_audit_provisioning_keys: [auth_config, container_config, secret_access, audit_config, syslog_config, ssh_keys, firewall_config]
 # 재통지 간격(분)과 임계: P2 알림 3개는 한 (호스트, 사용자, 실행 파일, 경로) 행의 사건이 임계 이상일 때 울리고, 간격은 Event Alert 원칙대로 조회 구간(5분)과 같다.
 # 간격은 알림 전체에 적용된다(행별이 아니다): P3 간격을 길게 잡으면 그 시간 동안 다른 서명 행도 통지되지 않으므로 기본은 조회 구간과 같게 5분이다.
 o2c_audit_watch_silence_minutes: 5
@@ -866,22 +876,26 @@ o2c_alerts:
   - name: infra-audit-watch-change
     severity: "P2 경고"
     severity_icon: "🟠"
-    title: "계정·sudoers·sshd 설정 파일이 직접 변경됨 (auditd 감시)"
-    what: "auditd가 감시하는 계정 파일(passwd·shadow·group), sudoers, sshd 설정이 계정 관리 도구가 아닌 프로그램으로 변경되었습니다."
-    why: "계정 도구(useradd 등)를 거치지 않은 직접 수정은 계정 변경 알림에 잡히지 않습니다. 침입자가 계정·권한·sshd 접속 정책을 몰래 바꾸는 전형적인 방법입니다. 프로비저닝(Semaphore)도 같은 기록을 남기므로 작업 이력과 대조해야 합니다."
+    title: "계정·sudoers·sshd·로그 설정·SSH 키·방화벽 설정 파일이 직접 변경됨 (auditd 감시)"
+    what: "auditd가 감시하는 계정 파일(passwd·shadow·group), sudoers, sshd 설정, auditd·rsyslog 설정, authorized_keys, 방화벽 영구 설정이 계정 관리 도구가 아닌 프로그램으로 변경되었습니다."
+    why: "계정 도구(useradd 등)를 거치지 않은 직접 수정은 계정 변경 알림에 잡히지 않습니다. 침입자가 계정·권한·sshd 접속 정책을 바꾸거나, 로그를 끄고(auditd·rsyslog 설정), 백도어 키를 심고(authorized_keys), 방화벽을 여는 전형적인 방법입니다. 프로비저닝(Semaphore)도 같은 기록을 남기므로 작업 이력과 대조해야 합니다. 터미널 없이 로그인 사용자가 한 변경(Ansible 정상 변경 후보)은 이 알림이 아니라 infra-audit-watch-provisioning(P3)으로 갑니다."
     action: "① 행의 실행 도구와 시각을 Semaphore 작업 이력·작업 일정과 대조 ② 계획에 없던 변경이면 로그 보기로 AUID(실제 로그인 계정)를 확인하고 해당 파일을 백업본과 비교 ③ 침해가 의심되면 계정 잠금·세션 종료 후 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#audit-watch-change"
     row_template: '• {host_label}: {watched} 변경 {changes}건 (실행 도구 {tool}) · {event_time}'
-    description: "auditd 감시 키 SYSCALL 기록(key=identity·sudo_config·sshd_config) — 계정 관리 도구({{ o2c_audit_account_tools | join('·') }})가 계정 파일을 바꾼 기록은 계정 변경 알림이 알리므로 제외 (Event Alert, 재통지 5분)"
+    description: "auditd 감시 키 SYSCALL 기록(key={{ o2c_audit_watch_keys | list | join('·') }}) — 계정 관리 도구({{ o2c_audit_account_tools | join('·') }})가 계정 파일을 바꾼 기록은 계정 변경 알림이 알리므로 제외. 정상 변경 키({{ o2c_audit_provisioning_keys | select('in', o2c_audit_watch_keys) | join('·') }})는 정상 변경 서명(o2c_audit_provisioning_filter)에 맞는 기록을 뺀다: 제외가 아니라 P3 알림(infra-audit-watch-provisioning)이 본다 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name,
-      CASE WHEN body LIKE '% key="sudo_config"%' THEN 'sudoers' WHEN body LIKE '% key="sshd_config"%' THEN 'sshd 설정' ELSE '계정 파일' END AS watched,
+      CASE {% for k, label in o2c_audit_watch_keys.items() %}WHEN body LIKE '% key="{{ k }}"%' THEN '{{ label }}' {% endfor %}ELSE '알 수 없음' END AS watched,
       CASE WHEN body LIKE '% comm="%' THEN substr(regexp_replace(body, '^.* comm="([^"]*)".*$', '\1'), 1, 40) ELSE '알 수 없음' END AS tool,
       count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE service_name = 'audit' AND body LIKE 'type=SYSCALL %'
-      AND (body LIKE '% key="identity"%' OR body LIKE '% key="sudo_config"%' OR body LIKE '% key="sshd_config"%')
+      AND ({% for k in o2c_audit_watch_keys %}{{ ' OR ' if not loop.first else '' }}body LIKE '% key="{{ k }}"%'{% endfor %})
       AND NOT (body LIKE '% key="identity"%' AND ({% for t in o2c_audit_account_tools %}{{ ' OR ' if not loop.first else '' }}body LIKE '% comm="{{ t }}"%'{% endfor %}))
+      {%- set _prov_keys = o2c_audit_provisioning_keys | select('in', o2c_audit_watch_keys) | list %}
+      {%- if _prov_keys %}
+      AND NOT (({% for k in _prov_keys %}{{ ' OR ' if not loop.first else '' }}body LIKE '% key="{{ k }}"%'{% endfor %}) AND {{ o2c_audit_provisioning_filter }})
+      {%- endif %}
       GROUP BY host_name, watched, tool
       ORDER BY changes DESC
     period: 5
@@ -940,7 +954,7 @@ o2c_alerts:
     severity: "P3 주의"
     severity_icon: "🟡"
     title: "정상 변경 후보: 터미널 없는 로그인 사용자의 감시 파일 변경"
-    what: "감시 파일(PAM·컨테이너 설정·비밀 파일)을 터미널 없이 로그인 사용자 권한으로 변경했습니다."
+    what: "감시 파일(PAM·컨테이너 설정·비밀 파일·auditd·rsyslog 설정·authorized_keys·방화벽 영구 설정)을 터미널 없이 로그인 사용자 권한으로 변경했습니다."
     why: "Ansible 정상 변경은 감사 행으로 식별할 수 없어 제외하지 않고 등급만 낮췄습니다. 작업 이력에 없으면 침해일 수 있습니다."
     action: "① 행의 사용자·시각을 Semaphore 작업 이력과 대조 ② 이력에 없으면 로그 보기에서 AUID·경로·도구 확인 ③ 침해 의심 시 계정 잠금·세션 종료 후 보고"
     runbook: "{{ o2c_runbook_base }}#audit-watch-provisioning"

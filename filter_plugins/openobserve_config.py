@@ -1041,7 +1041,8 @@ _AUDIT_EVID = r"'^type=%s msg=audit\(([0-9.]+:[0-9]+)\).*$'"
 _AUDIT_UNKNOWN_PATH = '(경로 불명)'
 _AUDIT_UNKNOWN = '알 수 없음'
 _AUDIT_ACTOR_LEN, _AUDIT_TOOL_LEN, _AUDIT_PATH_LEN = 16, 14, 40
-_AUDIT_LABELS = (('auth_config', '인증설정'), ('container_config', '컨테이너'), ('secret_access', '비밀파일'))   # P3 행의 키 표시. 모르는 키는 앞 8자
+_AUDIT_LABELS = (('auth_config', '인증설정'), ('container_config', '컨테이너'), ('secret_access', '비밀파일'),
+                 ('audit_config', 'auditd설정'), ('syslog_config', 'syslog설정'), ('ssh_keys', 'SSH키'), ('firewall_config', '방화벽'))   # P3 행의 키 표시. 모르는 키는 앞 8자
 
 
 def o2c_valid_exe_patterns(patterns):

@@ -32,6 +32,7 @@
               '/etc/sudoers.d/99-security-policy', audit_rules_path, '/etc/fail2ban/jail.d/sshd.local',
               '/var/log/journal', '/etc/audit/auditd.conf', '/etc/systemd/journald.conf.d', '/etc/systemd/journald.conf.d/50-persistent.conf',
               '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json',
+              '/etc/audit/', '/etc/rsyslog.conf', '/etc/rsyslog.d/', '/etc/firewalld/', '/root/.ssh/authorized_keys',
               '/var/log/wtmp', '/var/log/btmp', '/var/run/utmp', '/var/log/lastlog', '/etc/localtime'] }}
       read:
         - /etc/ssh/sshd_config
@@ -272,7 +273,10 @@
             that:
               - f.cmd.audit_loaded.rc == 127 or ('identity' in f.cmd.audit_loaded.stdout and 'container_config' in f.cmd.audit_loaded.stdout)
               - "'execve' not in f.cmd.audit_loaded.stdout"
-            fail_msg: "auditctl -l does not show the declared rules, or still shows an execve rule: {{ f.cmd.audit_loaded.stdout }}"
+              # 파일 감시 키(#430): `auditctl -l` 표기(끝 `/`, -F 형식)가 버전마다 달라 줄 전체가 아니라 키 이름만 본다. 적재할 수 없는 호스트(rc != 0)는 건너뛴다.
+              - "f.cmd.audit_loaded.rc != 0 or (('audit_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/audit/'].exists)"
+              - "f.cmd.audit_loaded.rc != 0 or (('firewall_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/firewalld/'].exists)"
+            fail_msg: "auditctl -l does not show the declared rules (or the file watch keys of the existing paths), or still shows an execve rule: {{ f.cmd.audit_loaded.stdout }}"
           when: ansible_os_family == "RedHat"
 
         - name: "[VERIFY-SEC-014] Verify sudoers timestamp and log configuration"
@@ -351,6 +355,22 @@
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
 
+        # Audit Watch Key 4개(#430): 감시 키 줄은 후보 경로가 실제로 있을 때만 있고(없는 경로는 SEC-090/091이 거른다), 있으면 -p wa다.
+        # 컨테이너는 규칙을 적재할 수 없어 파일 내용을 본다. 적재 목록(`auditctl -l`)은 적재가 되는 호스트(rc 0, 규칙 있음)에서만 같은 줄을 확인한다.
+        - name: "[VERIFY-SEC-090] Verify audit watch keys are rendered exactly for the paths that exist"
+          ansible.builtin.assert:
+            that:
+              - "('-w /etc/audit/ -p wa -k audit_config' in f.read[audit_rules_path]) == f.stat['/etc/audit/'].exists"
+              - "('-w /etc/rsyslog.conf -p wa -k syslog_config' in f.read[audit_rules_path]) == f.stat['/etc/rsyslog.conf'].exists"
+              - "('-w /etc/rsyslog.d/ -p wa -k syslog_config' in f.read[audit_rules_path]) == f.stat['/etc/rsyslog.d/'].exists"
+              - "('-w /etc/firewalld/ -p wa -k firewall_config' in f.read[audit_rules_path]) == f.stat['/etc/firewalld/'].exists"
+              - "('-w /root/.ssh/authorized_keys -p wa -k ssh_keys' in f.read[audit_rules_path]) == f.stat['/root/.ssh/authorized_keys'].exists"
+              - "'/nonexistent/molecule-firewalld/' not in f.read[audit_rules_path]"
+            fail_msg: "an audit watch key line does not match whether its path exists (a missing path must be left out)."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
         # Evidence-Only Watch Key 감시 경로(#435, 이야기 26): 경로가 있으면 규칙에 있고, 없으면 규칙에 없다(없는 `-w`가 적재를 깨지 않게 SEC-100·SEC-101이 거른다).
         # 테스트 이미지에 경로가 있는지는 이미지마다 달라, 존재 여부를 수집해 그 값과 맞는지를 본다.
         - name: "[VERIFY-SEC-100] Verify each evidence watch path is in the audit rules exactly when it exists"
@@ -369,6 +389,18 @@
           when:
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
+
+        # 프로비저닝이 키를 배포한 계정(accounts[].keys)의 authorized_keys도 감시 키 줄이 있어야 한다(audit_ssh_key_accounts의 기본값).
+        - name: "[VERIFY-SEC-091] Verify the accounts that get public keys are watched as ssh_keys at the home the system resolved"
+          ansible.builtin.assert:
+            that:
+              - "('-w /home/' ~ item ~ '/.ssh/authorized_keys -p wa -k ssh_keys') in f.read[audit_rules_path]"
+            fail_msg: "the authorized_keys of a provisioned account is not watched (-k ssh_keys)."
+          loop: "{{ keyed_accounts }}"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+            - f.stat['/home/' ~ item ~ '/.ssh/authorized_keys'].exists
 
         - name: "[VERIFY-SEC-101] Verify no evidence watch rule points outside the declared evidence paths"
           ansible.builtin.assert:

@@ -456,19 +456,27 @@ modinfo <모듈>                                  # 출처·서명(signer)
 ---
 
 <a id="audit-watch-change"></a>
-## 🟠 계정·sudoers·sshd 설정 파일이 직접 변경됨 (`infra-audit-watch-change`)
+## 🟠 계정·sudoers·sshd·로그 설정·SSH 키·방화벽 설정 파일이 직접 변경됨 (`infra-audit-watch-change`)
 
-**조건**: auditd 감시 키 SYSCALL 기록(`key="identity"`: 계정 파일, `key="sudo_config"`: sudoers, `key="sshd_config"`: sshd 설정)이 5분 안에 1건 이상(재통지 5분). 계정 관리 도구(`useradd`·`usermod`·`passwd` 등, `o2c_audit_account_tools`)가 계정 파일을 바꾼 기록은 같은 변경이 이미 계정 변경 알림(`infra-account-change`)으로 가므로 제외한다. 그래서 한 변경에 알림이 두 번 오지 않는다. `sudo_logs`(sudo를 쓸 때마다 남음)와 `exec_log` 키는 대상이 아니다.
+**조건**: auditd 감시 키 SYSCALL 기록이 5분 안에 1건 이상(재통지 5분). 읽는 키는 `key="identity"`(계정 파일)·`"sudo_config"`(sudoers)·`"sshd_config"`(sshd 설정)·`"audit_config"`(auditd 설정)·`"syslog_config"`(rsyslog 설정)·`"ssh_keys"`(`authorized_keys`)·`"firewall_config"`(방화벽 영구 설정)다(`o2c_audit_watch_keys`). 계정 관리 도구(`useradd`·`usermod`·`passwd` 등, `o2c_audit_account_tools`)가 계정 파일을 바꾼 기록은 같은 변경이 이미 계정 변경 알림(`infra-account-change`)으로 가므로 제외한다. 그래서 한 변경에 알림이 두 번 오지 않는다. `sudo_logs`(sudo를 쓸 때마다 남음)와 `exec_log` 키는 대상이 아니다.
 
-**왜 중요한가**: 편집기·쉘로 `/etc/passwd`·`sudoers`·`sshd_config`를 직접 고치면 계정 변경 알림에 잡히지 않는다. 침입자가 계정·권한·접속 정책을 몰래 바꾸는 전형적인 방법이다. 프로비저닝(Semaphore)도 같은 기록을 남긴다.
+**왜 중요한가**: 편집기·쉘로 `/etc/passwd`·`sudoers`·`sshd_config`를 직접 고치면 계정 변경 알림에 잡히지 않는다. 침입자가 계정·권한·접속 정책을 몰래 바꾸는 전형적인 방법이다. `/etc/audit/`·`/etc/rsyslog.d/` 변경은 로그를 끄거나 돌려 흔적을 지우려는 시도일 수 있고, `authorized_keys` 변경은 백도어 키 심기, `/etc/firewalld/` 변경은 무단 개방일 수 있다. 프로비저닝(Semaphore)도 같은 기록을 남긴다.
+
+**정상 변경 구분(#419의 방식)**: 새 키(`audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`)의 기록 중 터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것은 Ansible 프로비저닝일 가능성이 있어 이 알림이 아니라 정상 변경 후보 알림([`infra-audit-watch-provisioning`](#audit-watch-provisioning), P3)으로 간다. 사라지는 것이 아니다. 서명은 신원 증명이 아니라 모양이므로 P3에서 작업 이력과 대조한다. 이 알림(P2)에 남는 새 키 기록은 사람이 터미널에서 한 변경이거나 로그인 없이 쓴 변경이다(예: `firewall-cmd --permanent` 변경은 firewalld 데몬이 파일을 써 AUID가 비어 있다). `identity`·`sudo_config`·`sshd_config`는 정상 변경 키가 아니라 서명이 있어도 이 알림에 온다.
+
+**소음 가능성(적용 직후 확인 필요)**: 서명이 아닌 정상 작업도 이 키들을 건드린다. ① 감사 패키지 업데이트(`dnf`·`yum`)가 `/etc/audit/`를 바꾸면 서명이 아니므로 P2가 울린다. `o2c_audit_provisioning_accounts`를 채워 서명을 좁히면 더 늘 수 있다. ② 최초 적용 때 프로비저닝이 규칙 파일을 바꾸면 #424 핸들러(`augenrules --load`)가 `/etc/audit/audit.rules`를 다시 만들어 `audit_config`가 울리고, 새로 감시가 걸리는 경로가 처음 쓰일 때 키마다 한 번씩 울릴 수 있다(서명이면 P3). 실제 빈도는 카나리 ④(키별 하루 증가량)로 확인해 임계·제외를 정한다(`docs/security.md`, 티켓 #436).
 
 **확인**: 행의 실행 도구와 시각을 작업 이력과 대조한다. 로그 보기에서 같은 시각의 `AUID`(실제 로그인 계정)와 `type=PATH` 기록(파일 이름)을 본다.
 ```bash
 sudo ausearch -k identity -ts today -i
 sudo ausearch -k sshd_config -ts today -i
+sudo ausearch -k ssh_keys -ts today -i          # authorized_keys: type=PATH의 name으로 어느 계정의 파일인지 확인
+sudo ausearch -k audit_config -ts today -i
+sudo ausearch -k syslog_config -ts today -i
+sudo ausearch -k firewall_config -ts today -i
 ```
 
-**대응**: 계획에 없던 변경이면 파일을 백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다. 감시 규칙이 없는 호스트(프로비저닝 대상이 아닌 호스트)에서는 이 알림이 울리지 않는다.
+**대응**: 계획에 없던 변경이면 파일을 백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. `ssh_keys`는 의심 키를 지우고 그 계정의 로그인 기록(`last`, 인증 로그)을 본다. `audit_config`·`syslog_config`는 변경 직후 로그 수집이 끊기지 않았는지 인증 로그 수집 중단·auditd 중지 알림도 함께 본다. 승인된 작업이면 작업 기록에 남긴다. 감시 규칙이 없는 호스트(프로비저닝 대상이 아닌 호스트)에서는 이 알림이 울리지 않는다. 새로 생긴 `authorized_keys`(그 계정에 파일이 없었던 경우)는 다음 프로비저닝 때까지 감시되지 않는다(한계, `docs/security.md`).
 
 <a id="audit-auth-config-change"></a>
 ## 🟠 PAM·로그인 정책 파일이 변경됨 (`infra-audit-auth-config-change`)
@@ -523,7 +531,7 @@ sudo ausearch -k secret_access -ts today -i
 
 > **기본 설정의 한계**: 이 알림은 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없는 로그인 사용자 전부를 받는다. 같은 키로 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 이 P3로만 오므로 무시하지 않는다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(권고 절차는 명세 참조).
 
-**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
+**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
 
 **왜 이 알림이 있는가**: Ansible 프로비저닝·배포가 만드는 정상 변경은 감사 행으로 식별할 수 없다(프로세스 제목이 인터프리터뿐이고, 래퍼 문자열 `BECOME-SUCCESS`는 감사 행이 아니라 sudo 로그에만 있다). 같은 방식으로 도는 다른 명령과 구분되지 않아 제외하지 않고 등급만 낮춰 따로 알린다. 그래서 P2 알림은 `AND NOT <서명>`, 이 알림은 `AND <서명>`이라 한 변경에 알림이 하나만 온다.
 

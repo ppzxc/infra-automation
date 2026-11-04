@@ -1,5 +1,5 @@
 # Overseer Auditd Security Rules (#372)
-# 의미 있는 이벤트만 기록한다: 인증·권한·시크릿·컨테이너 설정.
+# 의미 있는 이벤트만 기록한다: 인증·권한·시크릿·컨테이너 설정, 로그 은폐(auditd·syslog 설정)·SSH 키·방화벽 영구 설정(#430).
 # 전체 execve 추적은 소음이라 넣지 않는다(명령 실행 전수 기록 금지).
 # syscall 규칙(아래 6.)은 로그인 사용자의 흔적 지우기·커널 모듈 조작만 기록하고, 모든 syscall 규칙은 login_user_syscall_rule 매크로로만 만든다.
 
@@ -50,6 +50,14 @@
 {% for p in (_audit_watch_paths_effective | default(audit_watch_paths | default([]))) %}
 -w {{ p }} -p rwa -k secret_access
 {% endfor %}
+
+# 5-1. Audit Watch Keys (#430): 로그 은폐(auditd·syslog 설정)·백도어 키(authorized_keys)·방화벽 영구 설정. 변경(w)과 속성(a)만 본다(읽기는 sshd가 늘 한다).
+# 실제로 있는 경로만 싣는다(SEC-090/SEC-091, CentOS 6/7은 SEC-092/SEC-093). 탐지가 건너뛰어진 호스트는 이 구역이 비어 규칙 적재가 깨지지 않는다.
+{% set _awk = _audit_watch_key_paths_effective | default([]) %}
+{% for e in (_awk if _awk is not string else (_awk | from_json)) %}
+-w {{ e.path }} -p wa -k {{ e.key }}
+{% endfor %}
+# (이 키들의 경로는 /var/log 밖이라 7.의 규칙 순서 제약을 받지 않는다. /var/log 아래를 보는 감시 키를 더한다면 6-1 뒤에 둔다.)
 
 # 6. Syscall 규칙 (#431): 로그인 사용자만. 규칙 없이는 잡히지 않는 파일 삭제·커널 모듈 적재를 알림이 읽는다(키 → 알림은 docs/security.md).
 # 6-1. /var/log 아래 삭제·이름 바꾸기·자르기 (key var_log_delete → infra-var-log-delete P1)

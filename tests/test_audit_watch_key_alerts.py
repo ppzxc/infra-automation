@@ -304,15 +304,23 @@ def test_renotify_interval_and_threshold_are_role_variables_not_hardcoded(tuned)
     assert len(_run_alert_on_sqlite(_sql(tuned, SECRET), twice, "security_logs")) == 1 and _run_alert_on_sqlite(_sql(tuned, SECRET), once, "security_logs") == []
 
 
-def test_a_key_appended_to_the_provisioning_list_reaches_the_low_grade_alert_and_its_log_link_with_no_other_change(tuned):
-    """#430의 계약: 키를 `o2c_audit_provisioning_keys`에 더하기만 하면 P3 SQL·로그 링크가 그 키를 본다(P2는 자기 알림에 `AND NOT 서명`을 붙인다)."""
-    make = lambda: event("ssh_keys", exe="/usr/bin/python3.12", comm="python3", tty="(none)", path="/root/.ssh/authorized_keys")  # noqa: E731
-    ev = make() + make()                                    # tuned는 임계 2: 서로 다른 사건 둘
-    (row,) = _run_alert_on_sqlite(_sql(tuned, PROVISIONING), ev, "security_logs")
-    assert row["watch_key"] == "ssh_keys"          # 모르는 키는 앞 8자 그대로 보인다
-    assert 'key="ssh_keys"' in _raw_query(tuned, PROVISIONING)
-    interactive = event("ssh_keys", exe="/usr/bin/vim", path="/root/.ssh/authorized_keys")
-    assert _run_alert_on_sqlite(_sql(tuned, PROVISIONING), interactive, "security_logs") == []   # 서명이 아니면 P3가 아니다(#430의 P2가 맡는다)
+def test_a_key_appended_to_the_provisioning_list_reaches_the_low_grade_alert_and_its_log_link_with_no_other_change(tmp_path_factory):
+    """계약: 키를 `o2c_audit_provisioning_keys`에 더하기만 하면 P3 SQL·로그 링크가 그 키를 본다. 라벨이 없는 키는 앞 8자 그대로 보인다.
+    (`ssh_keys`는 #430이 라벨과 함께 기본 목록에 넣었으므로 아직 아무 알림도 쓰지 않는 가짜 키로 본다.)"""
+    rendered = render_desired(tmp_path_factory.mktemp("o2c-audit-newkey") / "desired.json", extra={
+        "o2c_audit_watch_min_events": 2, "o2c_audit_provisioning_keys": ["auth_config", "container_config", "secret_access", "future_key_name"]})
+
+    class Server:
+        store = {"alert": {o["name"]: o["body"] for o in rendered if o["kind"] == "alert"}}
+        shorts = {o["short_link"]["short"].split("/web/short/")[1].split("?")[0]: o["short_link"]["original"] for o in rendered if o.get("short_link")}
+
+    make = lambda: event("future_key_name", exe="/usr/bin/python3.12", comm="python3", tty="(none)", path="/root/x")  # noqa: E731
+    ev = make() + make()                                    # 임계 2: 서로 다른 사건 둘
+    (row,) = _run_alert_on_sqlite(_sql(Server, PROVISIONING), ev, "security_logs")
+    assert row["watch_key"] == "future_k"
+    assert 'key="future_key_name"' in _raw_query(Server, PROVISIONING)
+    interactive = event("future_key_name", exe="/usr/bin/vim", path="/root/x")
+    assert _run_alert_on_sqlite(_sql(Server, PROVISIONING), interactive, "security_logs") == []   # 서명이 아니면 P3가 아니다
 
 
 # --- 코드리뷰 반영(#419) -----------------------------------------------------------------------------------------------------
@@ -490,3 +498,85 @@ def test_the_role_defaults_document_the_new_variables_in_the_spec_variable_table
                 "o2c_audit_secret_metadata_syscalls", "o2c_audit_provisioning_accounts", "o2c_audit_provisioning_keys",
                 "o2c_audit_provisioning_silence_minutes", "o2c_audit_watch_silence_minutes", "o2c_audit_watch_min_events"):
         assert var in names, var
+
+
+# --- 10. 파일 감시 키 4개(Spec #433 / Ticket-4, #430): 기존 감시 키 변경 알림(P2)에 키를 더하고 정상 변경은 #419의 방식으로 P3로 보낸다 ---------------
+# 새 키는 `o2c_audit_provisioning_keys`에 들어 있어 P2 SQL이 서명 행을 빼고 P3가 그 행을 본다. 기존 키(identity·sudo_config·sshd_config)는 이 목록에 없어 그대로다.
+FILE_KEYS = {"audit_config": ("auditd 설정", "auditd설정", "/etc/audit/auditd.conf"),
+             "syslog_config": ("rsyslog 설정", "syslog설정", "/etc/rsyslog.d/50-default.conf"),
+             "ssh_keys": ("SSH 인가 키(authorized_keys)", "SSH키", "/home/alice/.ssh/authorized_keys"),
+             "firewall_config": ("방화벽 영구 설정", "방화벽", "/etc/firewalld/zones/public.xml")}
+
+
+@pytest.mark.parametrize("key", FILE_KEYS)
+def test_a_new_file_watch_key_record_alerts_the_existing_watch_change_alert_only(desired, key):
+    _, _, path = FILE_KEYS[key]
+    ev = event(key, exe="/usr/bin/vim", path=path)
+    assert firing_alerts(desired, ev, among=NEW_ALERTS + (OLD_WATCH,)) == {OLD_WATCH}
+    (row,) = fired(desired, OLD_WATCH, ev)
+    assert row["watched"] == FILE_KEYS[key][0] and row["tool"] == "vim"
+
+
+@pytest.mark.parametrize("key", FILE_KEYS)
+def test_an_ansible_path_record_of_a_new_key_is_split_out_to_the_low_grade_alert(desired, key):
+    """AC: Ansible 경로 기록 → 정상 변경으로 구분. 서명(터미널 없음 + 로그인 사용자)이 있으면 P2에서 빠지고 P3(#419)가 본다. 사라지지 않는다."""
+    _, label, path = FILE_KEYS[key]
+    ev = event(key, exe="/usr/bin/python3.9", comm="python3", tty="(none)", path=path)
+    assert firing_alerts(desired, ev, among=NEW_ALERTS + (OLD_WATCH,)) == {PROVISIONING}
+    (row,) = fired(desired, PROVISIONING, ev)
+    assert (row["watch_key"], row["login_user"], row["program"]) == (label, "opsverify", "python3.9")
+
+
+def test_a_new_key_record_from_a_service_without_a_login_stays_in_the_high_grade_alert(desired):
+    """firewalld 데몬이 파일을 쓰면 로그인 계정(auid)이 비어 서명이 아니다 → P2에 남는다(사람을 알 수 없어도 알린다)."""
+    ev = event("firewall_config", exe="/usr/bin/python3.9", comm="firewalld", tty="(none)", auid="unset", auid_num=4294967295, path="/etc/firewalld/zones/public.xml")
+    assert firing_alerts(desired, ev, among=NEW_ALERTS + (OLD_WATCH,)) == {OLD_WATCH}
+
+
+def test_existing_watch_keys_keep_alerting_even_with_the_signature(desired):
+    """회귀: identity·sudo_config·sshd_config는 정상 변경 키 목록에 없어 P2에 그대로 남는다(감시 키 변경 알림의 기존 동작)."""
+    for key in ("identity", "sudo_config", "sshd_config"):
+        ev = event(key, exe="/usr/bin/python3.9", comm="python3", tty="(none)", path="/etc/ssh/sshd_config")
+        assert firing_alerts(desired, ev, among=NEW_ALERTS + (OLD_WATCH,)) == {OLD_WATCH}, key
+
+
+def test_the_signature_filter_is_attached_only_to_the_keys_of_the_provisioning_list(desired):
+    sql = _sql(desired, OLD_WATCH)
+    assert "tty=(none)" in sql                                    # 서명 조각(o2c_audit_provisioning_filter)이 붙는다
+    # 서명 조각은 정상 변경 키(목록 ∩ 이 알림의 키)에만 걸린다: 조각 앞의 키 조건에 identity·sudo_config·sshd_config가 없다
+    clause = sql.split("tty=(none)")[0].rsplit("AND NOT", 1)[1]
+    for key in FILE_KEYS:
+        assert f'key="{key}"' in clause, key
+    for key in ("identity", "sudo_config", "sshd_config"):
+        assert f'key="{key}"' not in clause, key
+
+
+def test_shrinking_the_provisioning_list_keeps_a_new_keys_signature_row_in_the_watch_change_alert(reduced):
+    ev = event("ssh_keys", exe="/usr/bin/python3.9", comm="python3", tty="(none)", path="/home/alice/.ssh/authorized_keys")
+    assert firing_alerts(reduced, ev, among=NEW_ALERTS + (OLD_WATCH,)) == {OLD_WATCH}      # 목록 밖 키의 서명 행은 P2에서 숨지 않는다
+
+
+def test_the_watch_change_alert_reads_exactly_the_keys_of_the_alert_key_map_and_the_security_role():
+    import yaml
+    security = set(yaml.safe_load((ROOT_DIR / "roles" / "security" / "defaults" / "main.yml").read_text(encoding="utf-8"))["audit_watch_key_paths"])
+    assert security <= set(DEFAULTS["o2c_audit_watch_keys"]) and set(FILE_KEYS) <= security          # 집합 포함: 다른 티켓이 키를 더해도 깨지지 않는다
+    assert set(FILE_KEYS) <= set(DEFAULTS["o2c_audit_provisioning_keys"])
+    assert not {"identity", "sudo_config", "sshd_config"} & set(DEFAULTS["o2c_audit_provisioning_keys"])
+
+
+def test_the_old_become_marker_column_is_gone_the_distinction_is_the_419_signature(desired):
+    alert = desired.store["alert"][OLD_WATCH]
+    assert "{provisioning}" not in alert["row_template"] and "UNION ALL" not in _sql(desired, OLD_WATCH) and "BECOME-SUCCESS" not in _sql(desired, OLD_WATCH)
+
+
+def test_the_watch_change_alert_text_names_the_new_targets_and_points_to_the_provisioning_alert(desired):
+    alert = desired.store["alert"][OLD_WATCH]
+    text = " ".join(str(v) for v in alert["context_attributes"].values())
+    for word in ("auditd", "rsyslog", "authorized_keys", "방화벽", "infra-audit-watch-provisioning"):
+        assert word in text, word
+
+
+def test_the_account_tool_exclusion_still_applies_only_to_the_account_files(desired):
+    rows = [*event("identity", exe="/usr/sbin/useradd", path="/etc/passwd", host="verify-tool-identity"),
+            *event("ssh_keys", exe="/usr/sbin/useradd", path="/home/a/.ssh/authorized_keys", host="verify-tool-ssh-keys")]
+    assert [r["host_name"] for r in _run_alert_on_sqlite(_sql(desired, OLD_WATCH), rows, "security_logs")] == ["verify-tool-ssh-keys"]
