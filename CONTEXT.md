@@ -100,6 +100,14 @@ _Avoid_: instant alert, log alert
 An alert on a condition that persists until someone fixes it (a disk nearly full, a Silent Host, a missing backup). It keeps firing while the condition holds, so it is re-notified at an interval set by its severity rather than every evaluation. Its going quiet is the only sign of recovery.
 _Avoid_: threshold alert, metric alert (a log-based alert can be a State Alert too)
 
+**Audit Watch Key**:
+The name an audit rule attaches to every record it produces, saying what was being watched (identity files, sudo configuration, secret files) rather than which file or system call fired. Alerts and investigations select records by this name, so one meaning can cover many paths and the paths can change without the alert changing. It only exists on hosts whose audit rules are provisioned.
+_Avoid_: audit key, audit tag, audit rule (the rule is what produces records; the key is what they are called)
+
+**Evidence-Only Watch Key**:
+An Audit Watch Key that deliberately has no alert. Its records arise during ordinary work (privileged commands, file deletions, mounts), so alerting on them would only add noise, yet they are kept for after-the-fact investigation and as evidence that the control exists. Making one alert later is a new decision, not a fix.
+_Avoid_: unused key, silent key
+
 **Fast Scenario**:
 The molecule scenario run by the CI `molecule` job (formerly at pre-push). Exercises the roles that need no external network (`common`, `security`, `access_security`) on the Representative Platform, including the idempotence check; widens to every platform in one run when `roles/security` or `roles/common` changed. `common` is always applied first as the Base Layer; the other roles can be selected individually.
 _Avoid_: default scenario, quick test, smoke test
