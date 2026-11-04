@@ -39,6 +39,8 @@ CASES = {
         "audit_watch_paths": ["/srv/example/app.secrets.env", "/srv/example/other.key"],
         "audit_container_config_paths": ["/etc/docker/", "/srv/example/compose/"],
     },
+    # #431: EL6 커널(2.6.32)에는 finit_module이 없어 auditctl이 이름을 몰라 규칙 전체가 실패한다
+    "el6": {"ansible_os_family": "RedHat", "ansible_distribution_major_version": "6"},
     # #371: 가짜 문서용 주소(RFC 5737, RFC 3849)만 쓴다.
     "ssh_source_two": {"ssh_source_restriction_allowed_sources": ["192.0.2.0/24", "198.51.100.7/32"]},
     "ssh_source_v6": {"ssh_source_restriction_allowed_sources": ["2001:db8::/32"]},
@@ -71,15 +73,15 @@ CASES = {
 
 
 # 케이스가 실제로 보는 출력만 렌더링한다(렌더링은 태스크당 약 0.6초라, 모든 케이스에 모든 템플릿을 만들면 세션마다 느려진다).
-# 여기 없는 케이스는 TEMPLATE_FILES 전체를 렌더링하고 DEFAULTS_TEMPLATE_FILES는 렌더링하지 않는다.
+# 모든 케이스는 audit를 포함한다(다른 티켓의 테스트가 모든 케이스의 audit 출력을 순회한다). 여기 없는 케이스는 TEMPLATE_FILES 전체를 렌더링하고 DEFAULTS_TEMPLATE_FILES는 렌더링하지 않는다.
 CASE_OUTPUTS = {
     "watch_keys": ("audit",),
     "watch_keys_none_exist": ("audit",),
     "watch_keys_as_json": ("audit",),
-    "ssh_accounts_empty": ("watch_key_paths",),
-    "ssh_accounts_two": ("watch_key_paths",),
-    "ssh_accounts_duplicate_root": ("watch_key_paths",),
-    "ssh_accounts_from_provisioned_accounts": ("watch_key_paths",),
+    "ssh_accounts_empty": ("audit", "watch_key_paths"),
+    "ssh_accounts_two": ("audit", "watch_key_paths"),
+    "ssh_accounts_duplicate_root": ("audit", "watch_key_paths"),
+    "ssh_accounts_from_provisioned_accounts": ("audit", "watch_key_paths"),
     "default": ("audit", "fail2ban", "journald", "sshd_source", "watch_key_paths"),
 }
 

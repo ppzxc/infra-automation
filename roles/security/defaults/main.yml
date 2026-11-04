@@ -134,6 +134,11 @@ audit_watch_key_paths:
   ssh_keys: "{{ (['root'] + audit_ssh_key_accounts) | unique | map('regex_replace', '^(.*)$', '~\\1/.ssh/authorized_keys') | list }}"
   firewall_config: "{{ audit_firewall_watch_paths }}"
 
+# syscall 규칙(#431)은 로그인 사용자만 기록한다: auid >= audit_login_uid_min 이고 auid가 unset(4294967295, 로그인 없이 시작한 서비스·logrotate)이 아닌 것.
+# unset은 audit.rules(7)에서 `unset`과 같은 뜻이지만 EL6·7 auditd에서 별칭 지원을 확인하지 못해 숫자로 둔다. 템플릿이 같은 값을 | default로도 갖는다(렌더링 테스트가 역할 기본값 없이 렌더링한다).
+audit_login_uid_min: 1000
+audit_auid_unset: "4294967295"
+
 # auditd 로그 로테이션: 파일 하나의 최대 크기(MB)와 보관 개수. 합계가 감사 로그 디스크 상한이다.
 audit_max_log_file: 50
 audit_num_logs: 10

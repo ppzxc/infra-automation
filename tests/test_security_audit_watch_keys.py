@@ -99,7 +99,7 @@ def test_the_default_account_list_is_the_accounts_that_provisioning_gives_public
 
 def test_the_watch_key_candidates_name_exactly_the_four_keys_and_their_paths(security_rendered):
     paths = json.loads(security_rendered["default"]["watch_key_paths"])
-    assert set(paths) == set(WATCH_KEYS)
+    assert set(WATCH_KEYS) <= set(paths)      # 집합 포함: 다른 티켓(증적 전용 키 등)이 키를 더해도 깨지지 않는다
     assert paths["audit_config"] == ["/etc/audit/"]
     assert paths["syslog_config"] == ["/etc/rsyslog.conf", "/etc/rsyslog.d/"]
     assert paths["firewall_config"] == ["/etc/firewalld/"]
@@ -234,9 +234,20 @@ def test_the_new_tasks_have_the_same_gates_as_the_rules_deployment_they_feed():
     assert {b["name"][:9] for b in block["block"]} >= {"[SEC-092]", "[SEC-093]", "[SEC-035]"}
 
 
-def test_only_the_provisioning_entry_points_run_the_security_role():
+def test_only_the_provisioning_entry_points_run_the_security_role_and_the_docs_say_what_that_guarantees():
     """감사 규칙은 security 역할만 배포한다. 에이전트만 설치하는 playbook(host_agents*)·점검 playbook(host_audit*)은 이 역할을 쓰지 않는다.
-    agents_only 호스트는 provision_excluded 그룹이라 Semaphore의 Host Provisioning(provision_hosts.yml) 사전 검증이 접속 전에 거부한다."""
+    그러나 CLI 전용 maintenance.yml·site.yml은 servers 전체에 security를 돌린다(기존 동작). 에이전트만 설치된 호스트(agents_only)에 안 들어간다는 보장은
+    Semaphore Host Provisioning(provision_hosts.yml)이 provision_excluded를 접속 전에 거부하는 경로에서만 성립하고, CLI는 -l로 대상을 좁혀야 한다."""
     users = sorted(p.name for p in (ROOT_DIR / "playbooks").glob("*.yml") if "role: security" in p.read_text(encoding="utf-8"))
     assert users == ["maintenance.yml", "site.yml"], users
+    maintenance = (ROOT_DIR / "playbooks" / "maintenance.yml").read_text(encoding="utf-8")
+    assert "hosts: servers" in maintenance and "provision_excluded" not in maintenance      # CLI 진입점은 대상을 스스로 거르지 않는다
     assert "provision_excluded" in (ROOT_DIR / "playbooks" / "provision_hosts.yml").read_text(encoding="utf-8")
+    doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    assert "Semaphore의 Host Provisioning(`provision_hosts.yml`)" in doc and "`maintenance.yml`·`site.yml`은 `servers` 전체에 `security`를 돌리므로" in doc
+    assert "`-l`/`target_hosts`로 대상을 좁혀야 한다" in doc
+
+
+def test_the_experiment_the_issue_asks_for_is_recorded_as_not_done_and_handed_to_the_apply_ticket():
+    doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    assert "카나리 실험 미실시, 확인 필요" in doc and "수용 기준" in doc and "미충족" in doc and "#436" in doc

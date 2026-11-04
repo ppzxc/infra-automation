@@ -419,6 +419,42 @@ sudo ausearch -m ADD_USER,USER_START -ts today -i   # 계정 생성·세션 시�
 
 ---
 
+<a id="var-log-delete"></a>
+## 🔴 로그인 사용자가 /var/log 아래 파일을 지우거나 자름 (`infra-var-log-delete`)
+
+**조건**: auditd 키 `var_log_delete` SYSCALL 기록(로그인 사용자의 `/var/log` 하위 삭제·이름 변경·자르기, 성공한 것만)이 5분 안에 1건 이상(재통지 5분). 규칙은 `auid>=1000`이고 `auid`가 비어 있지 않은 사용자만 기록하므로 logrotate·서비스의 회전은 대상이 아니다. 알림도 `auid=4294967295` 줄을 한 번 더 빼고, 제외 실행 파일(`o2c_var_log_excluded_exes`, 기본 `/usr/sbin/logrotate`: 로그인 사용자가 손으로 돌린 logrotate)이 낸 기록도 뺀다. 행은 호스트·작업자(AUID, 해석 이름이 없으면 `auid <번호>`)·실행 도구별이다. 프로비저닝(Ansible)과 호스트 에이전트의 수집 스크립트(`>>`로 덧붙이기만 함, `/var/log/host-agents`)는 이 알림을 울리지 않는다. 저장소의 태스크 중 `/var/log` 아래 파일을 이름 바꿔 넣거나 지우는 것은 없다(디렉터리 생성·권한 변경뿐이다). 그런 태스크를 새로 더하면 로그인 사용자(SSH 접속 계정)의 작업으로 기록돼 이 알림이 울리므로 함께 확인한다. **오탐 가능성(한계)**: EL6에서 로그인한 사용자가 init 스크립트로 띄운 데몬은 그 사용자의 auid를 물려받아, 데몬이 `/var/log`를 `O_TRUNC`로 열면 로그인 사용자의 작업으로 기록돼 울릴 수 있다. 행의 작업자는 사람인데 도구가 데몬이면 이 경우를 의심하고, 반복되면 그 실행 파일을 `o2c_var_log_excluded_exes`에 더한다(#436에서 점검한다).
+
+**왜 중요한가**: 로그 파일을 지우거나 비우는 것은 침입 흔적을 없애는 전형적인 방법이다. 사고 조사와 증적에 필요한 기록이 사라질 수 있다. 정상 정리 작업(수동 정리, 디스크 확보)도 같은 기록을 남기므로 작업자와 대조해야 한다. **한계**: `renameat2`(최신 `mv`가 쓰는 이름 바꾸기)와 `openat2`로 여는 자르기는 규칙이 걸러 내지 못한다(`docs/security.md`). 규칙이 적재되지 않은 호스트(RHEL 계열 적재 버그 #424가 고쳐지기 전, 프로비저닝 대상이 아닌 호스트)에서는 기록이 없어 알림이 조용하다. 조용한 것이 정상은 아니므로 규칙 적재는 `auditctl -l`로 따로 확인한다.
+
+**확인**: 행의 실행 도구와 작업자를 작업 일정·Semaphore 작업 이력과 대조한다. 대상 파일 이름은 SYSCALL 줄이 아니라 같은 이벤트의 `type=PATH` 줄에 있다.
+```bash
+sudo ausearch -k var_log_delete -ts today -i    # SYSCALL(누가·무엇으로)과 PATH(어떤 파일)를 함께 본다
+sudo auditctl -l | grep var_log_delete           # 규칙이 적재돼 있는지
+```
+지운 로그는 OpenObserve에 이미 수집된 사본(`security_logs`·`system_logs`)과 비교한다.
+
+**대응**: 계획에 없던 작업이면 해당 계정·세션을 막고 보안 담당에게 보고한다. 지워진 구간은 OpenObserve 사본으로 복원해 조사한다. 정상 정리 작업이 반복해서 울리면 그 실행 파일 경로를 `o2c_var_log_excluded_exes`에 더하고(`_`·공백이 든 경로는 받지 않는다) `OpenObserve — Config`를 다시 실행한다. 실행 파일 하나를 제외하면 그 도구가 지우는 로그는 알림에서 빠지므로 범용 도구(`rm`·`bash`)는 제외하지 않는다. **제외의 위험**: 제외는 경로만 보므로 로그인 사용자가 `logrotate -f /tmp/내_설정.conf`로 자기 설정을 돌려 로그를 지워도 알림이 울리지 않는다. 기본 제외(`/usr/sbin/logrotate`)는 사람이 손으로 돌린 logrotate의 소음만 덜어 주고(auid 없는 시스템 logrotate는 이미 거른다) 이 우회를 열어 두므로, 1주 관찰(#436) 뒤 비우는 것을 검토한다.
+
+---
+
+<a id="kernel-module"></a>
+## 🟠 로그인 사용자가 커널 모듈을 적재하거나 제거함 (`infra-kernel-module`)
+
+**조건**: auditd 키 `kernel_module` SYSCALL 기록(로그인 사용자의 `init_module`·`finit_module`·`delete_module` 호출, 성공한 것만)이 5분 안에 1건 이상(재통지 5분). `auid`가 비어 있는 부팅·하드웨어 인식 때의 자동 적재는 대상이 아니다. 행의 동작은 `제거`(`delete_module`)·`적재`(`init_module`·`finit_module`)이고, 로그에 해석 필드(`SYSCALL=`)가 없으면 `적재·제거`로 나온다.
+
+**왜 중요한가**: 루트킷은 커널 모듈로 적재되어 프로세스·파일·연결을 숨긴다. 평소 운영에서 로그인 사용자가 모듈을 직접 넣고 빼는 일은 드물다. 드라이버 설치·네트워크 도구 작업은 같은 기록을 남기므로 작업자와 대조해야 한다. 규칙이 적재되지 않은 호스트에서는 기록이 없어 알림이 조용하다.
+
+**확인**:
+```bash
+sudo ausearch -k kernel_module -ts today -i    # 적재(init/finit)인지 제거(delete)인지, 누가
+lsmod | head -20
+modinfo <모듈>                                  # 출처·서명(signer)
+```
+
+**대응**: 계획에 없던 적재거나 출처 불명 모듈이면 호스트를 네트워크에서 격리하고 보안 담당에게 보고한다. 모듈은 재부팅하면 사라지지만 지속 적재(`/etc/modules-load.d`)와 `modprobe` 설정 변경도 확인한다.
+
+---
+
 <a id="audit-watch-change"></a>
 ## 🟠 계정·sudoers·sshd·로그 설정·SSH 키·방화벽 설정 파일이 직접 변경됨 (`infra-audit-watch-change`)
 
@@ -426,7 +462,9 @@ sudo ausearch -m ADD_USER,USER_START -ts today -i   # 계정 생성·세션 시�
 
 **왜 중요한가**: 편집기·쉘로 `/etc/passwd`·`sudoers`·`sshd_config`를 직접 고치면 계정 변경 알림에 잡히지 않는다. 침입자가 계정·권한·접속 정책을 몰래 바꾸는 전형적인 방법이다. `/etc/audit/`·`/etc/rsyslog.d/` 변경은 로그를 끄거나 돌려 흔적을 지우려는 시도일 수 있고, `authorized_keys` 변경은 백도어 키 심기, `/etc/firewalld/` 변경은 무단 개방일 수 있다. 프로비저닝(Semaphore)도 같은 기록을 남긴다.
 
-**행 끝의 프로비저닝 표기**: 행 끝에 `프로비저닝 기록 있음` 또는 `프로비저닝 기록 없음`이 붙는다. 같은 호스트의 인증 로그에 Ansible의 become(sudo) 표지(`BECOME-SUCCESS-`)가 알림 구간 안에 있었는지를 뜻한다. 정상 변경이라는 판정이 아니다: 표지는 호스트와 시각대 단위라 프로비저닝이 도는 중에 한 다른 사람의 변경도 같은 표기가 붙는다. `있음`이면 그 시각의 Semaphore 작업 이력에서 해당 파일이 바뀌는 작업이었는지 먼저 대조한다. `없음`이면 프로비저닝이 아닌 변경이라 계획된 작업 일정과 대조한다(수집 지연으로 표지가 늦게 도착해 `없음`으로 나갈 수도 있으니, 작업 이력은 `없음`일 때도 한 번 본다). `firewall-cmd --permanent` 변경은 firewalld 데몬이 파일을 쓰므로 AUID가 비어 있다. 사람은 같은 시각의 sudo 기록으로 찾는다.
+**정상 변경 구분(#419의 방식)**: 새 키(`audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`)의 기록 중 터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것은 Ansible 프로비저닝일 가능성이 있어 이 알림이 아니라 정상 변경 후보 알림([`infra-audit-watch-provisioning`](#audit-watch-provisioning), P3)으로 간다. 사라지는 것이 아니다. 서명은 신원 증명이 아니라 모양이므로 P3에서 작업 이력과 대조한다. 이 알림(P2)에 남는 새 키 기록은 사람이 터미널에서 한 변경이거나 로그인 없이 쓴 변경이다(예: `firewall-cmd --permanent` 변경은 firewalld 데몬이 파일을 써 AUID가 비어 있다). `identity`·`sudo_config`·`sshd_config`는 정상 변경 키가 아니라 서명이 있어도 이 알림에 온다.
+
+**소음 가능성(적용 직후 확인 필요)**: 서명이 아닌 정상 작업도 이 키들을 건드린다. ① 감사 패키지 업데이트(`dnf`·`yum`)가 `/etc/audit/`를 바꾸면 서명이 아니므로 P2가 울린다. `o2c_audit_provisioning_accounts`를 채워 서명을 좁히면 더 늘 수 있다. ② 최초 적용 때 프로비저닝이 규칙 파일을 바꾸면 #424 핸들러(`augenrules --load`)가 `/etc/audit/audit.rules`를 다시 만들어 `audit_config`가 울리고, 새로 감시가 걸리는 경로가 처음 쓰일 때 키마다 한 번씩 울릴 수 있다(서명이면 P3). 실제 빈도는 카나리 ④(키별 하루 증가량)로 확인해 임계·제외를 정한다(`docs/security.md`, 티켓 #436).
 
 **확인**: 행의 실행 도구와 시각을 작업 이력과 대조한다. 로그 보기에서 같은 시각의 `AUID`(실제 로그인 계정)와 `type=PATH` 기록(파일 이름)을 본다.
 ```bash
@@ -439,6 +477,70 @@ sudo ausearch -k firewall_config -ts today -i
 ```
 
 **대응**: 계획에 없던 변경이면 파일을 백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. `ssh_keys`는 의심 키를 지우고 그 계정의 로그인 기록(`last`, 인증 로그)을 본다. `audit_config`·`syslog_config`는 변경 직후 로그 수집이 끊기지 않았는지 인증 로그 수집 중단·auditd 중지 알림도 함께 본다. 승인된 작업이면 작업 기록에 남긴다. 감시 규칙이 없는 호스트(프로비저닝 대상이 아닌 호스트)에서는 이 알림이 울리지 않는다. 새로 생긴 `authorized_keys`(그 계정에 파일이 없었던 경우)는 다음 프로비저닝 때까지 감시되지 않는다(한계, `docs/security.md`).
+
+<a id="audit-auth-config-change"></a>
+## 🟠 PAM·로그인 정책 파일이 변경됨 (`infra-audit-auth-config-change`)
+
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+
+**조건**: auditd 감시 키 `auth_config`(`/etc/pam.d/`, `/etc/login.defs`)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 패키지 관리자(`rpm`·`dnf`·`yum`·`dpkg`·`apt`, `o2c_audit_package_managers`)와 계정 관리 도구(`o2c_audit_account_tools`)가 만든 변경은 뺀다. 터미널 없이 로그인 사용자 권한으로 한 변경(프로비저닝·배포 후보)은 아래 정상 변경 후보 알림(P3)이 맡는다. 그래서 한 변경에 알림이 두 번 오지 않는다. 행은 호스트·사용자(AUID)·실행 파일·대상 경로·건수·발생 시각이다.
+
+**왜 중요한가**: PAM 설정을 바꾸면 비밀번호 검사를 끄거나 백도어 모듈을 끼워 넣어 인증을 우회할 수 있다(업계 탐지 목록의 PAM 모듈 생성·로그인 정책 변경). 침입자가 인증을 몰래 약하게 만드는 전형적인 방법이다.
+
+**확인**: 행의 사용자·실행 도구와 시각을 작업 이력과 대조한다. 로그 보기에서 같은 시각의 `type=PATH`(파일 이름)·`type=CWD`·`AUID`를 본다.
+```bash
+sudo ausearch -k auth_config -ts today -i
+```
+
+**대응**: 계획에 없던 변경이면 파일을 패키지 기본값·백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다. **한계**: 패키지 스크립틀릿이 띄운 자식 프로세스(`authselect` 등)는 이름으로 가릴 수 없어 패치 때 울릴 수 있다(작업 이력과 대조해 닫는다). 이 키의 기록은 2026-11-04 7일 실로그에 0건이라 패키지 관리자 제외는 합성 행으로만 검증했다.
+
+<a id="audit-container-config-change"></a>
+## 🟠 컨테이너 런타임 설정이 변경됨 (`infra-audit-container-config-change`)
+
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+
+**조건**: auditd 감시 키 `container_config`(docker 데몬 설정 `/etc/docker/`와 호스트별 compose 위치)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 터미널 없이 로그인 사용자 권한으로 한 변경은 정상 변경 후보 알림(P3)이 맡는다.
+
+**왜 중요한가**: 격리 설정(사용자 네임스페이스·소켓·특권·호스트 경로 마운트)을 바꾸면 컨테이너에서 호스트로 탈출할 길이 열린다. 서비스를 고치는 정상 작업도 같은 기록을 남기므로 작업 이력과 대조해야 한다.
+
+**확인**: 행의 실행 도구·사용자·시각을 작업 이력과 대조하고, 대상 경로의 파일을 저장소 정의와 비교한다(특권·마운트가 늘었는지).
+```bash
+sudo ausearch -k container_config -ts today -i
+```
+
+**대응**: 계획에 없던 변경이면 되돌리고 해당 컨테이너를 멈춘 뒤 보안 담당에게 보고한다. 승인된 수동 작업이면 작업 기록과 저장소 정의에 반영한다.
+
+<a id="audit-secret-access"></a>
+## 🟠 지정한 비밀 파일이 열리거나 바뀜 (`infra-audit-secret-access`)
+
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+
+**조건**: auditd 감시 키 `secret_access`(호스트별 지정 비밀 파일, 읽기·쓰기·속성 변경 감시)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 다음은 뺀다. ① 파일을 열지 않고 속성만 보는 syscall(`getxattr`·`listxattr`·`readlink` 등, `o2c_audit_secret_metadata_syscalls`) ② 로그인 사용자 없이(`auid unset`) 도는 서비스 프로세스(`o2c_audit_secret_service_exes`, 기본 백업 에이전트) — 같은 바이너리를 사람이 손으로 돌리면 울린다 ③ 정상 소비자(`o2c_audit_secret_operator_exes`, 기본 compose 플러그인) ④ 제외 사용자(`o2c_audit_secret_excluded_users`, 기본 비어 있음) ⑤ 터미널 없이 로그인 사용자 권한으로 한 접근(정상 변경 후보 알림(P3)이 맡는다). 감시 대상이 없는 호스트(`audit_watch_paths` 비어 있음)에는 이 키의 기록이 없어 아무 것도 하지 않는다.
+
+**왜 중요한가**: 사람이 시크릿 파일을 열어 보거나 복사하면 자격 증명이 유출된 것일 수 있다(업계 탐지 목록의 민감 파일 열람·자격 파일 접근). 운영자의 정상 점검도 같은 모양이라 사람이 확인해야 한다.
+
+**확인**: 행의 사용자·실행 도구·시각을 작업 이력과 대조하고, 같은 시각의 SSH 로그인(출발지)을 본다.
+```bash
+sudo ausearch -k secret_access -ts today -i
+```
+
+**대응**: 계획에 없던 접근이면 해당 시크릿을 교체(OpenBao 갱신 후 재배포)하고 세션을 끊은 뒤 보안 담당에게 보고한다. 정상 소비자가 반복해서 울리면 알림을 끄지 말고 제외 목록 변수를 고치는 PR을 낸다. **한계**: compose 플러그인은 제외라 `docker compose config`로 값을 출력하는 접근은 이 알림으로 알 수 없다.
+
+<a id="audit-watch-provisioning"></a>
+## 🟡 정상 변경 후보: 터미널 없는 로그인 사용자의 감시 파일 변경 (`infra-audit-watch-provisioning`)
+
+> **기본 설정의 한계**: 이 알림은 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없는 로그인 사용자 전부를 받는다. 같은 키로 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 이 P3로만 오므로 무시하지 않는다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(권고 절차는 명세 참조).
+
+**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
+
+**왜 이 알림이 있는가**: Ansible 프로비저닝·배포가 만드는 정상 변경은 감사 행으로 식별할 수 없다(프로세스 제목이 인터프리터뿐이고, 래퍼 문자열 `BECOME-SUCCESS`는 감사 행이 아니라 sudo 로그에만 있다). 같은 방식으로 도는 다른 명령과 구분되지 않아 제외하지 않고 등급만 낮춰 따로 알린다. 그래서 P2 알림은 `AND NOT <서명>`, 이 알림은 `AND <서명>`이라 한 변경에 알림이 하나만 온다.
+
+**확인**: 행의 사용자·시각을 Semaphore 작업 이력과 대조한다. 이력과 맞으면 정상이다. 이력에 없으면 해당 키의 P2 알림 절차(`auth_config`는 `audit-auth-config-change` 등)로 AUID·경로·실행 도구를 확인한다.
+```bash
+sudo ausearch -k secret_access -ts today -i
+```
+
+**대응**: 이력에 없으면 침해로 보고 계정 잠금·세션 종료 후 보안 담당에게 보고한다. 프로비저닝 계정이 정해져 있으면 계정 목록 변수를 설정해 서명을 좁힌다. **한계**: 같은 로그인 키로 터미널 없이(`ssh host 'sudo …'`) 명령을 실행한 공격자도 이 알림으로만 온다(P2가 아니다). 그래서 이 알림은 무시하지 말고 작업 이력과 대조해야 한다.
 
 <a id="ssh-login-unregistered-source"></a>
 ## 🟠 일반 계정이 등록되지 않은 출발지에서 SSH 로그인 성공 (`infra-ssh-login-unregistered-source`)
