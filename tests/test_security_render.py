@@ -433,3 +433,25 @@ def test_evidence_only_keys_are_documented_with_no_alert_and_a_decision_basis_an
         assert key in verify, key                                                     # Molecule verify.yml이 같은 키를 본다
     for token in ("uid!=euid", "perm=x", "setuid 파일 목록", "미실시", "#436", "키별 증가량", "ausearch"):
         assert token in sec, token
+
+
+def test_evidence_watches_come_before_the_evidence_syscall_rules_so_a_file_delete_does_not_take_over_their_keys(security_rendered):
+    """첫 매치만 기록된다(audit.rules(7)). 경로 필터 없는 `evidence_file_delete`가 앞에 있으면 `/etc/localtime`·`/var/run/utmp`를 지우거나 바꾼 기록이
+    시간 변경·로그인 기록 키를 잃는다. 감시가 앞이면 그 키로 남고, 오래된 auditctl이 syscall 줄을 거부해도 감시는 이미 올라가 있다."""
+    for case, out in security_rendered.items():
+        lines = rule_lines(out["audit"])
+        watches = [i for i, ln in enumerate(lines) if ln.startswith("-w ") and " -k evidence_" in ln]
+        syscalls = [i for i, ln in enumerate(lines) if ln.startswith("-a ") and " -k evidence_" in ln]
+        assert syscalls and (not watches or max(watches) < min(syscalls)), case
+
+
+def test_audit_rules_are_deployed_only_by_the_security_role_and_the_host_agents_playbooks_do_not_include_it():
+    """에이전트만 설치된 호스트는 Host Agents 플레이북으로만 다뤄지고(ADR-0006) 감사 규칙(audit.rules.j2)은 security 역할만 배포한다."""
+    for name in ("host_agents.yml", "host_agents_maintenance.yml"):
+        plays = yaml.safe_load((ROOT_DIR / "playbooks" / name).read_text(encoding="utf-8"))
+        roles = {r["role"] if isinstance(r, dict) else r for play in plays for r in play.get("roles", [])}
+        assert "security" not in roles and "access_security" not in roles, name
+        assert "audit.rules" not in (ROOT_DIR / "playbooks" / name).read_text(encoding="utf-8"), name
+    users = [p for sub in ("tasks", "handlers", "templates") for p in (ROOT_DIR / "roles").glob(f"*/{sub}/**/*")     # 배포 코드만(defaults의 주석 언급은 제외)
+             if p.is_file() and "audit.rules.j2" in p.read_text(encoding="utf-8", errors="ignore")]
+    assert users and all(p.is_relative_to(ROLE) for p in users), users
