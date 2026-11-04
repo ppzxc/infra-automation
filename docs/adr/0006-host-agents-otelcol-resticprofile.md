@@ -65,7 +65,7 @@
 ### 2.3 otelcol 수집 표준 (ISMS)
 
 - **수신기**: 모든 OS에서 `filelog`; journald는 rsyslog가 없는 호스트(예: 최소 설치 Debian 12+)에서만 추가. 로컬 OTLP 수신기는 **기본 비활성**이며 `otel_app_telemetry: true`인 호스트만 HTTP로 연다(ADR-0012).
-- **표준 로그**: `/var/log/messages`, `syslog`, `secure`, `auth.log`, `sudo.log`, `audit/audit.log`, `cron*`, `fail2ban.log`, `dnf.log`, `yum.log`, `dpkg.log`, `firewalld`, `boot.log`, `kern.log`. `wtmp`/`btmp`/`lastlog`(바이너리)는 수집하지 않으며, 접속·인증 증적은 auditd `USER_LOGIN`/`USER_AUTH` + secure/auth.log로 충족합니다.
+- **표준 로그**: `/var/log/messages`, `syslog`, `secure`, `auth.log`, `sudo.log`, `audit/audit.log`, `cron*`, `fail2ban.log`, `dnf.log`, `yum.log`, `dpkg.log`, `firewalld`, `boot.log`, `kern.log`. `wtmp`/`btmp`/`lastlog`(바이너리)는 수집하지 않으며, 접속·인증 증적은 auditd `USER_LOGIN`/`USER_AUTH` + secure/auth.log로 충족합니다(실호스트 대조: `docs/research/wtmp-btmp-vs-audit-secure-2026-11-04.md`).
 - **체크포인트 필수**: `file_storage` 확장(`/var/lib/otelcol/storage`)에 filelog 오프셋 저장 — 재시작/설정 재적용 시 누락 없음. 최초 설치는 `start_at: end`(과거 로그 백필 없음).
 - **스트림** (OpenObserve에서 스트림별 보존):
 
