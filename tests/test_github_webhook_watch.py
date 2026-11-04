@@ -37,7 +37,8 @@ def _load_module():
 
 
 def _iso(hours_ago):
-    return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # GitHub의 delivered_at은 밀리초를 포함한다(예: 2026-11-04T02:22:21.692Z). 초 단위만 쓰면 실제 서버에서만 재전송이 안 되는 결함을 놓친다(2026-11-04 서버 적용).
+    return (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _delivery(did, guid, hours_ago, status_code=200, redelivery=False):
@@ -539,3 +540,9 @@ def test_credentials_and_urls_never_printed(ansible_env, fake):
         for secret in (TOKEN, O2_PASSWORD, HOOK_URL, "fake-secret-path"):
             assert secret not in blob
         assert fake.url not in blob
+
+
+@pytest.mark.parametrize("text", ["2026-11-04T02:22:21.692Z", "2026-11-04T02:22:21Z"])
+def test_parse_time_accepts_github_timestamps_with_and_without_milliseconds(gww, text):
+    parsed = gww._parse_time(text)
+    assert parsed is not None and (parsed.year, parsed.month, parsed.day, parsed.hour, parsed.minute, parsed.second) == (2026, 11, 4, 2, 22, 21)
