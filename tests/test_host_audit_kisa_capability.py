@@ -15,7 +15,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_host_audit_kisa import ROLE_DIR, _script, _status, _stub_bin, _write  # noqa: E402
+from test_host_audit_kisa import KISA_DIR, ROLE_DIR, _script, _status, _stub_bin, _write  # noqa: E402
 
 DEFAULTS = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
 DISTRO_PING = "usr/bin/ping"
@@ -307,3 +307,44 @@ def test_the_exclusion_defaults_name_docker_containerd_podman_and_the_kisa_task_
     tasks = yaml.safe_load((ROLE_DIR / "tasks" / "kisa.yml").read_text(encoding="utf-8"))
     script = tasks[0]["vars"]["_host_audit_kisa_script"]
     assert "KISA_CAP_EXCLUDE=" in script and "host_audit_kisa_capability_exclude_paths" in script
+
+
+# ---------------------------------------------------------------- a walk that starts inside an excluded path (re-review)
+
+
+def _u23_with_mounts(tmp_path, mounts, exclude, caps):
+    """U-23 alone on the real filesystem (no KISA_ROOT) with kisa_local_mounts stubbed to hand back ``mounts`` as the walk's start points.
+
+    A host whose container storage is a mount of its own (e.g. /var/lib/docker/overlay2) makes that mount a top-level start point,
+    which sits *inside* the excluded path, so `-path <excluded>` alone never matches it.
+    """
+    lib = (KISA_DIR / "_lib.sh").read_text(encoding="utf-8").rstrip("\n")
+    stub = "kisa_local_mounts() {\n" + "".join("  printf '%%s\\n' '%s'\n" % m for m in mounts) + "}\n"
+    script = "\n".join([lib, stub, (KISA_DIR / "U-23.sh").read_text(encoding="utf-8"), (KISA_DIR / "_end.sh").read_text(encoding="utf-8")])
+    bindir = _stub_bin(tmp_path / "fake", commands=_getcap_stub(caps))
+    env = {"PATH": str(bindir) + ":/usr/bin:/bin", "KISA_CAP_EXCLUDE": "\n".join(exclude), "KISA_CAP_DEFAULTS": ""}
+    out = subprocess.run(["sh", "-s"], input=script, capture_output=True, text=True, env=env, timeout=120)
+    assert out.returncode == 0, out.stderr
+    return _status(out.stdout)["U-23"]
+
+
+def test_a_mount_inside_an_excluded_path_is_not_walked_when_it_is_the_walk_start(tmp_path):
+    docker = tmp_path / "var" / "lib" / "docker"
+    layer = docker / "overlay2"
+    other = tmp_path / "opt"
+    _write(layer / "0a1b" / "diff", "app", "bin", 0o755)
+    _write(other / "app", "tool", "bin", 0o755)
+    caps = {str(layer / "0a1b" / "diff" / "app").lstrip("/"): "cap_dac_override=ep",
+            str(other / "app" / "tool").lstrip("/"): "cap_chown=ep"}
+    _, evidence = _u23_with_mounts(tmp_path, [str(other), str(layer)], [str(docker)], caps)
+
+    assert "file capability review (1)" in evidence and "/app/tool cap_chown" in evidence
+    assert "overlay2" not in evidence
+
+
+def test_the_excluded_path_itself_as_a_start_point_is_skipped_too(tmp_path):
+    docker = tmp_path / "var" / "lib" / "docker"
+    _write(docker / "x", "app", "bin", 0o755)
+    _, evidence = _u23_with_mounts(tmp_path, [str(docker)], [str(docker)], {str(docker / "x" / "app").lstrip("/"): "cap_chown=ep"})
+
+    assert "file capability: none" in evidence

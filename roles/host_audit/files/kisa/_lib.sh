@@ -172,7 +172,8 @@ kisa_cap_norm() {
 
 # 파일에 getcap을 돌린다(U-23 file capability). SUID/SGID 탐색과 같은 마운트 집합·-xdev·시간 제한이다. 컨테이너 이미지 레이어
 # (/var/lib/docker/overlay2 등)는 호스트 파일이 아니라 이미지 내용이라 걸으면 같은 이미지가 늘 검토 항목으로 쏟아진다. 그래서
-# KISA_CAP_EXCLUDE(줄 단위 경로, 글롭 가능)와 일치하는 디렉터리는 들어가지 않는다(-prune). 비어 있으면 전부 탐색한다.
+# KISA_CAP_EXCLUDE(줄 단위 경로, 글롭 가능)와 일치하는 디렉터리는 들어가지 않는다(-prune). 항목마다 경로와 그 아래(경로/*)를 둘 다 걸어, 탐색 시작점(마운트)이
+# 제외 경로 안쪽(예: /var/lib/docker/overlay2가 별도 마운트)이어도 그 시작점째 건너뛴다. 비어 있으면 전부 탐색한다.
 # 이 제외는 capability 목록에만 걸리고 SUID/SGID 판정에는 걸리지 않는다.
 kisa_getcap_find() {
   _kcf_roots=$(kisa_local_mounts)
@@ -183,7 +184,8 @@ kisa_getcap_find() {
   set --
   for _kcf_p in ${KISA_CAP_EXCLUDE:-}; do
     [ -n "$_kcf_p" ] || continue
-    if [ "$#" -gt 0 ]; then set -- "$@" -o -path "$R$_kcf_p"; else set -- -path "$R$_kcf_p"; fi
+    [ "$#" -gt 0 ] && set -- "$@" -o
+    set -- "$@" -path "$R$_kcf_p" -o -path "$R$_kcf_p/*"
   done
   set +f
   IFS=$_kcf_ifs
