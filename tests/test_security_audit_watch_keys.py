@@ -91,6 +91,12 @@ def test_the_watch_key_candidates_add_the_designated_accounts_once(security_rend
     assert paths["ssh_keys"] == ["~root/.ssh/authorized_keys", "~alice/.ssh/authorized_keys"]
 
 
+def test_the_default_account_list_is_the_accounts_that_provisioning_gives_public_keys(security_rendered):
+    """root는 접속이 막혀 키가 없는 호스트가 많아, 기본이 root뿐이면 감시 키가 사실상 비어 있다. 키를 배포받는 계정이 기본이다."""
+    paths = json.loads(security_rendered["ssh_accounts_from_provisioned_accounts"]["watch_key_paths"])
+    assert paths["ssh_keys"] == ["~root/.ssh/authorized_keys", "~alice/.ssh/authorized_keys", "~erin/.ssh/authorized_keys"]
+
+
 def test_the_watch_key_candidates_name_exactly_the_four_keys_and_their_paths(security_rendered):
     paths = json.loads(security_rendered["default"]["watch_key_paths"])
     assert set(paths) == set(WATCH_KEYS)

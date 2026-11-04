@@ -51,8 +51,6 @@
         audit_loaded: [auditctl, -l]
         sshd_denied_source: [/usr/sbin/sshd, -T, -C, 'addr=198.51.100.1,user=root,host=probe']
         sshd_allowed_source: [/usr/sbin/sshd, -T, -C, 'addr=192.0.2.10,user=root,host=probe']
-        # 컨테이너에는 감사 서브시스템이 없어 규칙을 적재할 수 없다(rc != 0). 적재할 수 있는 호스트에서만 [VERIFY-SEC-082]가 적재 목록을 본다.
-        auditctl_list: [auditctl, -l]
 
   tasks:
     - name: Collect every verification fact in one remote execution
@@ -339,17 +337,30 @@
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
 
-        - name: "[VERIFY-SEC-090] Verify audit watch keys are loaded when the host can load audit rules (auditctl -l)"
+        # 프로비저닝이 키를 배포한 계정(accounts[].keys)의 authorized_keys도 감시 키 줄이 있어야 한다(audit_ssh_key_accounts의 기본값).
+        - name: "[VERIFY-SEC-090] Verify the accounts that get public keys are watched as ssh_keys"
           ansible.builtin.assert:
             that:
-              - "('-w /etc/audit/ -p wa -k audit_config' in f.cmd.auditctl_list.stdout) == f.stat['/etc/audit/'].exists"
-              - "('-w /etc/firewalld/ -p wa -k firewall_config' in f.cmd.auditctl_list.stdout) == f.stat['/etc/firewalld/'].exists"
-            fail_msg: "auditctl -l does not list the audit watch keys the rules file declares."
+              - "('-w /home/' ~ item ~ '/.ssh/authorized_keys -p wa -k ssh_keys') in f.read[audit_rules_path]"
+            fail_msg: "the authorized_keys of a provisioned account is not watched (-k ssh_keys)."
+          loop: "{{ keyed_accounts }}"
           when:
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
-            - f.cmd.auditctl_list.rc == 0
-            - "'-k identity' in f.cmd.auditctl_list.stdout"
+            - f.stat['/home/' ~ item ~ '/.ssh/authorized_keys'].exists
+
+        # `auditctl -l`의 표기(경로 끝 `/`, -F 형식)는 감사 패키지 버전마다 달라 줄 전체가 아니라 키 이름만 본다(#424와 같은 방식). 컨테이너는 적재할 수 없어(rc != 0) 건너뛴다.
+        - name: "[VERIFY-SEC-090] Verify the loaded audit rules carry the watch keys of the existing paths (auditctl -l)"
+          ansible.builtin.assert:
+            that:
+              - "('audit_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/audit/'].exists"
+              - "('firewall_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/firewalld/'].exists"
+            fail_msg: "auditctl -l does not list the audit watch keys the rules file declares: {{ f.cmd.audit_loaded.stdout }}"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+            - f.cmd.audit_loaded.rc == 0
+            - "'identity' in f.cmd.audit_loaded.stdout"
 
         - name: "[VERIFY-SEC-091] Verify missing audit watch key paths are left out of the audit rules"
           ansible.builtin.assert:

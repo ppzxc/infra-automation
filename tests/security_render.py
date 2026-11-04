@@ -59,6 +59,14 @@ CASES = {
     "ssh_accounts_empty": {"audit_ssh_key_accounts": []},
     "ssh_accounts_two": {"audit_ssh_key_accounts": ["alice", "bob"]},
     "ssh_accounts_duplicate_root": {"audit_ssh_key_accounts": ["root", "alice", "alice"]},
+    # 기본값: 프로비저닝이 공개키를 배포하는 계정(키가 있고 absent가 아닌 accounts). bob은 키가 비었고 carol은 absent, dave는 키 항목이 없다.
+    "ssh_accounts_from_provisioned_accounts": {"accounts": [
+        {"name": "alice", "keys": ["ssh-ed25519 AAAA alice@example.test"]},
+        {"name": "bob", "keys": []},
+        {"name": "carol", "state": "absent", "keys": ["ssh-ed25519 AAAA carol@example.test"]},
+        {"name": "dave"},
+        {"name": "erin", "state": "present", "keys": ["ssh-ed25519 AAAA erin@example.test"]},
+    ]},
 }
 
 
@@ -71,6 +79,7 @@ CASE_OUTPUTS = {
     "ssh_accounts_empty": ("watch_key_paths",),
     "ssh_accounts_two": ("watch_key_paths",),
     "ssh_accounts_duplicate_root": ("watch_key_paths",),
+    "ssh_accounts_from_provisioned_accounts": ("watch_key_paths",),
     "default": ("audit", "fail2ban", "journald", "sshd_source", "watch_key_paths"),
 }
 
