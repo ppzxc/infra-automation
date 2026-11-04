@@ -1161,9 +1161,10 @@ def _su_audit(ts, host="ns0272", uid=1000, target="root", result="failed", exe="
             "event_action": None, "event_outcome": None, "event_reason": None, "user_name": None, "user_effective_name": None}
 
 
-def _su_secure(ts, host="ns0272", user="alice", target="root"):
+def _su_secure(ts, host="ns0272", user="alice", target="root", uid=1000):
+    body = ("su: pam_unix(su:auth): authentication failure; logname=%s uid=%d euid=0 tty=/dev/pts/0 ruser=%s rhost=  user=%s" % (user, uid, user, target))
     return {"event_action": "su", "event_outcome": "failure", "event_reason": "authentication failure", "user_name": user,
-            "user_effective_name": target, "host_name": host, "_timestamp": _kst_us(ts), "service_name": "auth", "body": None}
+            "user_effective_name": target, "host_name": host, "_timestamp": _kst_us(ts), "service_name": "auth", "body": body}
 
 
 def test_a_su_refused_by_pam_wheel_leaves_only_an_audit_record_and_the_escalation_alert_fires(desired):
@@ -1189,7 +1190,7 @@ def test_su_audit_records_from_the_older_su_path_count_and_sudo_failures_still_c
     recs = [_su_audit("2026-10-23 08:59:14", exe="/bin/su"),
             {"event_action": "sudo", "event_outcome": "failure", "user_name": "bob", "host_name": "ns0272", "body": None, "_timestamp": _kst_us("2026-10-23 08:59:20")}]
     rows = _row_lines(desired, ESCALATION, recs, "security_logs")
-    assert rows == ["• ns0272 / 사용자 bob: 실패 2회 · 10-23 08:59:14~08:59:20"]
+    assert sorted(rows) == ["• ns0272 / 사용자 bob: 실패 1회 · 10-23 08:59:20", "• ns0272 / 사용자 uid 1000: 실패 1회 · 10-23 08:59:14"]
 
 
 @pytest.mark.parametrize("name", (SLOW, SPRAY, ESCALATION))
@@ -1220,6 +1221,20 @@ def test_a_su_audit_record_of_an_enriched_audit_log_shows_the_name_not_the_uid(d
     assert _row_lines(desired, ESCALATION, [named], "security_logs") == ["• ns0272 / 사용자 carol: 실패 1회 · 10-23 08:59:14"]
 
 
-def test_the_escalation_row_says_when_more_than_one_user_was_folded_into_the_host_row(desired):
-    recs = [_su_secure("2026-10-23 08:59:14", user="alice"), _su_secure("2026-10-23 08:59:30", user="bob"), _su_secure("2026-10-23 08:59:40", user="carol")]
-    assert _row_lines(desired, ESCALATION, recs, "security_logs") == ["• ns0272 / 사용자 carol 외 2명: 실패 3회 · 10-23 08:59:14~08:59:40"]
+def test_each_user_keeps_his_own_escalation_row_and_one_users_secure_su_does_not_cancel_anothers_audit_only_su(desired):
+    """secure 행은 사용자별이다. 한 사용자의 secure su 실패 3건이 다른 사용자의 audit 전용 su 실패 3건을 상쇄하지 않아 합이 6이다."""
+    recs = ([_su_secure("2026-10-23 08:59:%02d" % n, user="alice", uid=1000) for n in (1, 2, 3)]
+            + [_su_audit("2026-10-23 08:59:%02d" % n, uid=1001) for n in (4, 5, 6)])
+    rows = _row_lines(desired, ESCALATION, recs, "security_logs")
+    assert sorted(rows) == ["• ns0272 / 사용자 alice: 실패 3회 · 10-23 08:59:01~08:59:03", "• ns0272 / 사용자 uid 1001: 실패 3회 · 10-23 08:59:04~08:59:06"]
+    both = recs + [_su_audit("2026-10-23 08:59:%02d" % n, uid=1000) for n in (1, 2, 3)]   # alice의 secure 3건과 같은 시도의 audit 3건: 더하지 않는다
+    assert len(_row_lines(desired, ESCALATION, both, "security_logs")) == 2
+    assert sorted(r.split(": 실패 ")[1][:2] for r in _row_lines(desired, ESCALATION, both, "security_logs")) == ["3회", "3회"]
+
+
+def test_escalation_rows_are_per_user_as_before_without_a_folded_more_users_suffix(desired):
+    recs = [_su_secure("2026-10-23 08:59:14", user="alice", uid=1000), _su_secure("2026-10-23 08:59:30", user="bob", uid=1001),
+            _su_secure("2026-10-23 08:59:40", user="carol", uid=1002)]
+    rows = _row_lines(desired, ESCALATION, recs, "security_logs")
+    assert len(rows) == 3 and not any("외 " in r for r in rows)
+    assert "more_users" not in _sql(desired, ESCALATION)

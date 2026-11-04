@@ -121,6 +121,12 @@ o2c_ssh_attempt_where: "event_action = 'ssh_login' AND (event_outcome = 'failure
 # 권한 상승 실패 알림은 secure 줄 수와 이 기록 수 중 큰 쪽을 su 실패로 센다(겹치는 만큼을 한 번만 센다).
 o2c_audit_su_failure_sql: >-
   (body LIKE 'type=USER_AUTH %' AND (body LIKE '% exe="/usr/bin/su" %' OR body LIKE '% exe="/bin/su" %') AND body LIKE '% res=failed%')
+# 권한 상승 실패 행의 묶음 키(사용자 단위): secure의 su 줄과 audit의 su 기록은 둘 다 실행한 사람의 uid(secure는 `logname=이름 uid=번호`, audit는 `uid=번호`)를
+# 갖고 있어 `uid <번호>`로 맞춘다. 같은 사람의 같은 시도가 두 기록에 있으면 한 묶음에서 max로 한 번만 세고, 사람이 다르면 묶음이 달라 서로 상쇄하지 않는다.
+# sudo 줄과 uid가 없는 줄은 사용자 이름으로 묶는다(이전과 같다).
+o2c_su_actor_key_sql: >-
+  (CASE WHEN {{ o2c_audit_su_failure_sql }} OR (event_action = 'su' AND body LIKE '% uid=%')
+  THEN 'uid ' || substr(regexp_replace(body, '^.* uid=([0-9]+) .*$', '\1'), 1, 20) ELSE user_name END)
 # audit 기록의 su 실행 사용자: EL8 이상의 enrich 기록은 끝에 `AUID="이름"`이 붙으므로 그 이름을, EL6·7은 auid 숫자만 있어 `uid <번호>`를 쓴다(SQL로 uid를 이름으로 바꿀 수 없다).
 o2c_audit_su_actor_sql: >-
   (CASE WHEN body LIKE '%AUID="%' THEN substr(regexp_replace(body, '^.*AUID="([^"]*)".*$', '\1'), 1, 32)
@@ -468,19 +474,18 @@ o2c_alerts:
     why: "계정 탈취 후 권한 상승을 시도하는 단계일 수 있습니다. 단순 비밀번호 오입력일 수도 있습니다."
     action: "① 해당 사용자에게 시도 여부 확인 ② 본인이 아니면 계정 잠금·비밀번호 변경 ③ 반복되면 접속 경로(출발지) 추적"
     runbook: "{{ o2c_runbook_base }}#sudo-escalation-failure"
-    row_template: '• {host_label} / 사용자 {user_name}{more_users}: 실패 {failures}회 · {event_time}'
-    description: "sudo/su 권한상승 실패(authentication failure, NOT in sudoers)와 audit의 su 인증 실패(USER_AUTH, exe=su, res=failed — pam_wheel 거부는 secure에 줄이 없다) — 성공은 알리지 않고 기록만 한다. 같은 su 실패가 secure와 audit에 함께 있으면 한 번만 센다(호스트별 한 행: 사용자 칸은 secure의 이름이 있으면 그 이름, audit뿐이면 audit의 AUID 이름 또는 uid이고, 사용자가 둘 이상이면 ` 외 N명`을 붙인다)"
+    row_template: '• {host_label} / 사용자 {user_name}: 실패 {failures}회 · {event_time}'
+    description: "sudo/su 권한상승 실패(authentication failure, NOT in sudoers)와 audit의 su 인증 실패(USER_AUTH, exe=su, res=failed — pam_wheel 거부는 secure에 줄이 없다) — 성공은 알리지 않고 기록만 한다. 같은 su 실패가 secure와 audit에 함께 있으면 한 번만 센다(호스트·사용자별 한 행: 사용자 칸은 secure의 이름이 있으면 그 이름, audit뿐이면 audit의 AUID 이름 또는 uid)"
     stream: security_logs
     sql: >-
       SELECT host_name,
       coalesce(max(user_name), max(CASE WHEN {{ o2c_audit_su_failure_sql }} THEN {{ o2c_audit_su_actor_sql }} END)) AS user_name,
-      CASE WHEN count(DISTINCT user_name) > 1 THEN ' 외 ' || CAST(count(DISTINCT user_name) - 1 AS VARCHAR) || '명' ELSE '' END AS more_users,
       (sum(CASE WHEN event_action = 'sudo' THEN 1 ELSE 0 END)
       + CASE WHEN sum(CASE WHEN event_action = 'su' THEN 1 ELSE 0 END) >= sum(CASE WHEN {{ o2c_audit_su_failure_sql }} THEN 1 ELSE 0 END)
       THEN sum(CASE WHEN event_action = 'su' THEN 1 ELSE 0 END) ELSE sum(CASE WHEN {{ o2c_audit_su_failure_sql }} THEN 1 ELSE 0 END) END) AS failures,
       {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE (event_action IN ('sudo','su') AND event_outcome = 'failure') OR {{ o2c_audit_su_failure_sql }}
-      GROUP BY host_name
+      GROUP BY host_name, {{ o2c_su_actor_key_sql }}
       ORDER BY failures DESC
     period: 5
     frequency: 1

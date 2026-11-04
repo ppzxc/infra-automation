@@ -232,7 +232,7 @@ infra-sudo-escalation-failure:
       host: verify-su-both-records
       fires: true
       records:
-        - {event_action: su, event_outcome: failure, user_name: alice}
+        - {event_action: su, event_outcome: failure, user_name: alice, body: 'su: pam_unix(su:auth): authentication failure; logname=alice uid=1000 euid=0 tty=/dev/pts/0 ruser=alice rhost=  user=root'}
         - {service_name: audit, body: 'type=USER_AUTH msg=audit(1793697289.294:6510865): pid=3815 uid=1000 auid=1000 ses=96232 msg=''op=PAM:authentication grantors=pam_unix acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/0 res=failed'''}
     - name: audit의 su 성공은 기록만 한다
       host: verify-su-audit-success

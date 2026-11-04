@@ -242,7 +242,7 @@ sudo grep "<출발지IP>" /var/log/secure | grep -E "Failed password|Invalid use
 <a id="sudo-escalation-failure"></a>
 ## 🟠 sudo/su 권한 상승 실패 (`infra-sudo-escalation-failure`)
 
-**조건**: sudo/su 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. 성공은 알리지 않고 기록만 한다. `pam_wheel`이 거부한 `su`는 secure에 줄이 없고 audit(`type=USER_AUTH`, `exe="/usr/bin/su"`, `res=failed`)에만 남으므로 이 기록도 센다. 같은 `su` 실패가 secure와 audit에 함께 남으면 한 번만 센다(호스트별 한 행. 사용자 칸은 secure의 이름이 있으면 그 이름이고, audit뿐이면 audit의 `AUID` 이름 또는 `uid <번호>`다. 한 호스트에 사용자가 둘 이상이면 ` 외 N명`이 붙으니 `▶ 로그 보기`로 전체 사용자를 확인한다).
+**조건**: sudo/su 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. 성공은 알리지 않고 기록만 한다. `pam_wheel`이 거부한 `su`는 secure에 줄이 없고 audit(`type=USER_AUTH`, `exe="/usr/bin/su"`, `res=failed`)에만 남으므로 이 기록도 센다. 같은 `su` 실패가 secure와 audit에 함께 남으면 한 번만 센다(둘 다 실행한 사람의 uid를 갖고 있어 사람 단위로 맞추며, 다른 사람의 기록끼리는 상쇄하지 않는다). 행은 호스트·사용자별이다. 사용자 칸은 secure의 이름이 있으면 그 이름이고, audit뿐이면 audit의 `AUID` 이름 또는 `uid <번호>`다(`getent passwd <번호>`로 확인). 한 사람의 sudo 실패와 su 실패는 두 행으로 나올 수 있다.
 
 **왜 중요한가**: 탈취한 일반 계정으로 권한 상승을 시도하는 단계일 수 있다. 단순 비밀번호 오입력도 같은 기록을 남긴다.
 

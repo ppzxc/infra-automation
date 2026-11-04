@@ -240,8 +240,7 @@ LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
 COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
                 "readings", "events", "detections", "downs", "flaps", "severity_code", "offset_ms", "failed_count", "expired_count")
 
-LONGEST_TEXT = {"more_users": " 외 999명",   # 권한 상승 실패 행에서 한 호스트에 묶인 다른 사용자 수(SQL이 만드는 고정 문구)
-                "hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
+LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
                 "user_name": "u" * 32, "actor": "u" * 32, "target": "t" * 14, "repo": "o" * 8 + "/" + "r" * 15, "kind": "organization.member_added", "team": "t" * 14,   # GitHub 감사 알림(#403): SQL이 대상 30자·저장소 40자·팀 20자로 자른다
                 "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
