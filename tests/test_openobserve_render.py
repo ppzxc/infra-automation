@@ -1017,6 +1017,13 @@ def test_the_default_exclusion_and_the_runbook_say_a_login_users_own_logrotate_r
     assert "기본 제외" in spec and "근거" in spec
 
 
+def test_the_record_format_paragraph_agrees_with_the_actor_fallback():
+    """"기록 형식의 근거" 단락은 작업자 칸 대체(`auid <번호>`)와 모순되면 안 된다: 해석 필드가 없을 때 작업자를 `알 수 없음`이라 쓰면 안 된다."""
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    para = next(ln for ln in spec.splitlines() if "기록 형식의 근거(2026-11-04" in ln)
+    assert "작업자는 `auid <번호>`" in para and "작업자는 `알 수 없음`" not in para and "`적재·제거`" in para
+
+
 def test_the_documents_state_the_syscall_rule_limits_found_in_review():
     sec = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
     runbook = RUNBOOK.read_text(encoding="utf-8")
