@@ -1326,9 +1326,10 @@ def test_the_five_minute_ssh_alerts_are_unchanged(desired):
     assert _row_lines(desired, PER_SOURCE, probes, "security_logs") == []   # 5분 알림은 probe 줄을 세지 않는다(계수 방식 그대로)
 
 
-def _su_audit(ts, host="ns0272", uid=1000, target="root", result="failed", exe="/usr/bin/su"):
+def _su_audit(ts, host="ns0272", uid=1000, target="root", result="failed", exe="/usr/bin/su", auid=None):
+    auid = uid if auid is None else auid
     body = ("type=USER_AUTH msg=audit(1793697289.294:6510864): pid=3814 uid=%d auid=%d ses=96232 msg='op=PAM:authentication grantors=? "
-            'acct="%s" exe="%s" hostname=? addr=? terminal=pts/0 res=%s\'') % (uid, uid, target, exe, result)
+            'acct="%s" exe="%s" hostname=? addr=? terminal=pts/0 res=%s\'') % (uid, auid, target, exe, result)
     return {"service_name": "audit", "body": body, "host_name": host, "_timestamp": _kst_us(ts),
             "event_action": None, "event_outcome": None, "event_reason": None, "user_name": None, "user_effective_name": None}
 
@@ -1573,3 +1574,32 @@ def test_the_defaults_list_the_new_privileged_groups_and_protected_service_and_d
     assert {"disk", "shadow"} <= set(defaults["o2c_privileged_groups"]) and "fail2ban" in defaults["o2c_sudo_protected_services"]
     patterns = [p for c in defaults["o2c_sudo_risky_commands"] for p in c["patterns"]]
     assert "history -c" not in patterns and {"journalctl --vacuum", "journalctl --rotate", "chattr"} <= set(patterns)
+
+
+def _su_audit_named(ts, uid, auid, name):
+    rec = _su_audit(ts, uid=uid, auid=auid)
+    return dict(rec, body=rec["body"] + '\x1dUID="root" AUID="%s"' % name)
+
+
+def test_when_the_su_runner_uid_is_zero_people_are_told_apart_by_logname_and_auid_not_lumped_into_uid_0(desired):
+    """`sudo su -` 뒤의 su는 secure·audit 모두 uid가 0이다. 그때는 secure의 logname, audit의 auid(또는 AUID 이름)로 사람을 가른다."""
+    recs = ([_su_secure("2026-10-23 08:59:%02d" % n, user="alice", uid=0) for n in (1, 2, 3)]
+            + [_su_audit("2026-10-23 08:59:%02d" % n, uid=0, auid=1001) for n in (4, 5, 6)])
+    rows = _row_lines(desired, ESCALATION, recs, "security_logs")
+    assert sorted(rows) == ["• ns0272 / 사용자 alice: 실패 3회 · 10-23 08:59:01~08:59:03", "• ns0272 / 사용자 auid 1001: 실패 3회 · 10-23 08:59:04~08:59:06"]
+
+
+def test_uid_zero_secure_and_enriched_audit_of_the_same_person_count_once_and_two_people_stay_two_rows(desired):
+    same = ([_su_secure("2026-10-23 08:59:%02d" % n, user="alice", uid=0) for n in (1, 2, 3)]
+            + [_su_audit_named("2026-10-23 08:59:%02d" % n, 0, 1000, "alice") for n in (1, 2, 3)])
+    assert _row_lines(desired, ESCALATION, same, "security_logs") == ["• ns0272 / 사용자 alice: 실패 3회 · 10-23 08:59:01~08:59:03"]
+    two = [_su_secure("2026-10-23 08:59:01", user="alice", uid=0), _su_secure("2026-10-23 08:59:02", user="alice", uid=0), _su_secure("2026-10-23 08:59:03", user="bob", uid=0)]
+    assert sorted(r.split(" · ")[0] for r in _row_lines(desired, ESCALATION, two, "security_logs")) == ["• ns0272 / 사용자 alice: 실패 2회", "• ns0272 / 사용자 bob: 실패 1회"]
+
+
+def test_a_su_line_whose_uid_cannot_be_read_falls_back_to_the_user_name_or_unknown_never_to_the_log_text(desired):
+    odd_secure = dict(_su_secure("2026-10-23 08:59:01", user="alice"), body="su: pam_unix(su:auth): authentication failure; uid= euid=0 ruser=alice")
+    odd_audit = dict(_su_audit("2026-10-23 08:59:02"), body='type=USER_AUTH msg=audit(1.1:2): msg=\'op=PAM:authentication acct="root" exe="/usr/bin/su" res=failed\'')
+    rows = _row_lines(desired, ESCALATION, [odd_secure, odd_audit], "security_logs")
+    assert sorted(r.split(" · ")[0] for r in rows) == ["• ns0272 / 사용자 alice: 실패 1회", "• ns0272 / 사용자 unknown: 실패 1회"]
+    assert not any("type=USER_AUTH" in r or "pam_unix" in r for r in rows)

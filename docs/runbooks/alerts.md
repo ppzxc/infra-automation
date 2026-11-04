@@ -242,7 +242,7 @@ sudo grep "<출발지IP>" /var/log/secure | grep -E "Failed password|Invalid use
 <a id="sudo-escalation-failure"></a>
 ## 🟠 sudo/su 권한 상승 실패 (`infra-sudo-escalation-failure`)
 
-**조건**: sudo/su 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. 성공은 알리지 않고 기록만 한다. `pam_wheel`이 거부한 `su`는 secure에 줄이 없고 audit(`type=USER_AUTH`, `exe="/usr/bin/su"`, `res=failed`)에만 남으므로 이 기록도 센다. 같은 `su` 실패가 secure와 audit에 함께 남으면 한 번만 센다(둘 다 실행한 사람의 uid를 갖고 있어 사람 단위로 맞추며, 다른 사람의 기록끼리는 상쇄하지 않는다). 행은 호스트·사용자별이다. 사용자 칸은 secure의 이름이 있으면 그 이름이고, audit뿐이면 audit의 `AUID` 이름 또는 `uid <번호>`다(`getent passwd <번호>`로 확인). 한 사람의 sudo 실패와 su 실패는 두 행으로 나올 수 있다.
+**조건**: sudo/su 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. 성공은 알리지 않고 기록만 한다. `pam_wheel`이 거부한 `su`는 secure에 줄이 없고 audit(`type=USER_AUTH`, `exe="/usr/bin/su"`, `res=failed`)에만 남으므로 이 기록도 센다. 같은 `su` 실패가 secure와 audit에 함께 남으면 한 번만 센다(둘 다 실행한 사람의 uid를 갖고 있어 사람 단위로 맞추며, 다른 사람의 기록끼리는 상쇄하지 않는다). 행은 호스트·사용자별이다. 사용자 칸은 secure의 이름이 있으면 그 이름이고, audit뿐이면 audit의 `AUID` 이름 또는 `uid <번호>`다(`getent passwd <번호>`로 확인). 한 사람의 sudo 실패와 su 실패는 두 행으로 나올 수 있다. `sudo su -` 뒤의 su처럼 실행자 uid가 0이면 secure는 `logname` 이름, audit는 `AUID` 이름으로 사람을 가르고, 이름이 없는 오래된 audit 기록(EL6·7)은 `auid <번호>` 행으로 따로 나와 같은 시도가 두 행일 수 있다. 이때는 `ausearch -m USER_AUTH -x /usr/bin/su --success no -ts today`의 AUID로 실제 사람을 확인한다.
 
 **왜 중요한가**: 탈취한 일반 계정으로 권한 상승을 시도하는 단계일 수 있다. 단순 비밀번호 오입력도 같은 기록을 남긴다.
 
