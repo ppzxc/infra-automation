@@ -988,6 +988,45 @@ def test_syscall_alert_fixtures_fire_as_expected_when_the_rendered_sql_runs_on_t
     assert fired == {c["host"] for c in spec["cases"] if c["fires"]}
 
 
+def _without_enriched_fields(row):
+    """EL6·7 auditd 형식: 해석 필드(`\\x1d` 뒤의 ARCH=·SYSCALL=·AUID=)가 없는 줄."""
+    return dict(row, body=row["body"].split("\x1d")[0])
+
+
+def test_without_the_enriched_auid_name_the_actor_falls_back_to_the_raw_auid_number(desired):
+    """AUID="이름" 해석 필드가 없는 형식에서도 작업자 자리에 `auid <번호>`가 나온다(알 수 없음이 아니다). 알림은 그대로 울린다."""
+    row = _without_enriched_fields(_sys_row("var_log_delete", "/usr/bin/rm", "rm", auid="1002"))
+    assert "AUID=" not in row["body"] and " auid=1002 " in row["body"]
+    assert [(r["actor"], r["tool"]) for r in _var_log_rows(desired, row)] == [("auid 1002", "rm")]
+    lines = _row_lines(desired, VAR_LOG, [row], "security_logs")
+    assert len(lines) == 1 and lines[0].startswith("• ns0272: auid 1002의 rm 1건")
+    mod = _without_enriched_fields(_sys_row("kernel_module", "/usr/sbin/insmod", "insmod", auid="1002", syscall=175))
+    assert [(r["actor"], r["tool"]) for r in _module_rows(desired, mod)] == [("auid 1002", "insmod")]
+    # 해석 이름이 있으면 이름이 우선이다
+    assert [r["actor"] for r in _var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/rm", "rm"))] == ["opsverify"]
+
+
+def test_the_default_exclusion_and_the_runbook_say_a_login_users_own_logrotate_run_is_not_alerted(desired):
+    """제외 실행 파일은 exe 경로만 본다: 로그인 사용자가 `logrotate -f 내_설정`으로 로그를 지워도 알리지 않는다. 그 위험과 기본값 근거가 문서·변수 주석에 있어야 한다."""
+    assert _var_log_rows(desired, _sys_row("var_log_delete", "/usr/sbin/logrotate", "logrotate")) == []
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    comment = (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
+    for doc in (runbook, spec, comment):
+        assert "logrotate -f" in doc
+    assert "기본 제외" in spec and "근거" in spec
+
+
+def test_the_documents_state_the_syscall_rule_limits_found_in_review():
+    sec = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    assert "sudo_logs 적재 여부" in sec                      # 카나리(#436) 확인 항목
+    assert "auditctl -R" in sec and "sudo_logs" in sec and "6. 뒤" in sec   # 순서 트레이드오프
+    for doc in (sec, runbook):                                 # EL6 init 스크립트 데몬이 auid를 물려받는 오탐
+        assert "init 스크립트" in doc and "auid를 물려" in doc
+    assert "#436" in sec and "ftruncate" in sec
+
+
 def test_the_syscall_alerts_have_runbook_and_spec_entries_with_the_rule_basis():
     runbook = RUNBOOK.read_text(encoding="utf-8")
     spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
