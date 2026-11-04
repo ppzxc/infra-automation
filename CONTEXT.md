@@ -76,6 +76,10 @@ _Avoid_: previous run (when an on-demand run could be meant), last audit, snapsh
 The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
 _Avoid_: log category, stream tag
 
+**Audit Watch Key**:
+The label the kernel audit system attaches to every record of a change it was told to watch (`identity`, `sudo_config`, `sshd_config`, `auth_config`, `secret_access`, …). Records are collected per key into `security_logs`, but whether a key raises an alert is decided per key: some keys are evidence only. Unrelated to Host Audit and Audit Baseline, which are the periodic read-only inspection.
+_Avoid_: audit key (ambiguous with Host Audit), watch rule (the rule is how a key is produced, not the key), 감시 키
+
 **Envelope Parsing**:
 Lifting the fields that a log source's fixed format defines (event time, emitting program, pid, severity where the format carries one) out of a log line into structured fields, at the collector, without touching the original line. The original line stays the record's body and is the evidence; parsed fields sit beside it. Interpreting what a message *means* (who logged in, from which address, OCSF normalisation) is not Envelope Parsing and is done centrally in OpenObserve.
 _Avoid_: log parsing (when meaning only this edge layer), normalisation, structuring
