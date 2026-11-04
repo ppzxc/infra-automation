@@ -73,11 +73,16 @@ host_audit_kisa_exceptions:
     expires_on: ""
 
 # file capability 배포판 기본 목록 (#432, KISA-2026:U-23 옆의 증적). 항목은 "<경로> <capability 이름>" 한 줄이다.
-# getcap -r 결과 중 이 목록과 경로·capability 이름이 같은 파일은 '기본'이고, 그 밖의 파일만 '검토'로 표시된다.
-# 플래그(=ep, +p)와 옛 libcap의 ' = ' 표기는 비교하지 않는다(배포판마다 다르다). 호스트에서 더 안 쓰는 항목이
-# 있어도 목록에 남겨 둔다: 없는 파일은 getcap에 나오지 않으므로 비교에 영향이 없다.
+# getcap 결과 중 이 목록과 경로·capability 이름 집합이 같은 파일은 '기본'이고, 그 밖의 파일만 '검토'로 표시된다.
+# - capability 이름은 쉼표로 잇고 순서는 상관없다(cap_net_admin,cap_net_raw 와 cap_net_raw,cap_net_admin 은 같다).
+# - 배포판마다 같은 경로의 capability 조합이 다를 수 있으면 같은 경로 줄을 여러 개 둔다(아래 ping).
+# - 플래그(=ep, +p)와 옛 libcap의 ' = ' 표기는 비교하지 않는다. 경로에 공백이 있어도 되지만 " cap_"은 안 된다.
+# - 호스트에 없는 파일의 항목은 getcap에 나오지 않으므로 목록에 남아 있어도 영향이 없다.
+# 한계: 이 목록은 배포판 패키지 지식으로 적었고 실제 호스트에서 실측하지 않았다. 처음 돌린 보고서에서 기본인데도
+# '검토'로 나온 항목은 호스트에서 확인한 뒤 여기에 줄을 더한다.
 host_audit_kisa_capability_defaults:
   - "/usr/bin/ping cap_net_raw"
+  - "/usr/bin/ping cap_net_admin,cap_net_raw"
   - "/bin/ping cap_net_raw"
   - "/usr/bin/ping6 cap_net_raw"
   - "/usr/bin/arping cap_net_raw"

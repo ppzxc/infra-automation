@@ -21,20 +21,23 @@ DEFAULTS = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encodin
 DISTRO_PING = "usr/bin/ping"
 
 
-def _getcap_stub(caps):
-    """A getcap that, like the real one, prints a line only for the files it is given that have caps."""
-    cases = "".join("    */%s) printf '%%s %s\\n' \"$f\" ;;\n" % (rel, spec) for rel, spec in caps.items())
+def _getcap_stub(caps, sep=" "):
+    """A getcap that, like the real one, prints a line only for the files it is given that have caps.
+
+    ``sep`` is what sits between path and capabilities: " " for current libcap, " = " for CentOS 6/7.
+    """
+    cases = "".join("    *\"/%s\") printf '%%s%s%s\\n' \"$f\" ;;\n" % (rel, sep, spec) for rel, spec in caps.items())
     return {"getcap": 'for f in "$@"; do\n  case "$f" in\n%s  esac\ndone\nexit 0' % cases}
 
 
-def _host(tmp_path, caps=None, suid=(), getcap="stub"):
+def _host(tmp_path, caps=None, suid=(), getcap="stub", sep=" "):
     """A fake root with the capability files in place; returns (root, commands for the stub dir)."""
     root = tmp_path / "root"
     for rel in list((caps or {}).keys()) + ["usr/bin/true"]:
         _write(root, rel, "bin", 0o755)
     for rel in suid:
         _write(root, rel, "bin", 0o4755)
-    commands = _getcap_stub(caps or {}) if getcap == "stub" else {}
+    commands = _getcap_stub(caps or {}, sep) if getcap == "stub" else {}
     if getcap == "broken":  # present on PATH but cannot be executed (missing library, wrong binary)
         commands = {"getcap": "exit 127"}
     return root, commands
@@ -173,3 +176,50 @@ def test_capability_check_is_read_only_and_bounded():
     assert "-exec getcap" in text and text.count("kisa_find") >= 2  # same 120 s limit and -xdev as SUID/SGID
     assert "getcap -" not in text.replace("-exec getcap {}", "")  # no write/set flags, never setcap
     assert "setcap" not in text
+
+
+# ---------------------------------------------------------------- set comparison, several allowed sets
+
+
+@pytest.mark.parametrize("printed", ["cap_net_admin,cap_net_raw", "cap_net_raw,cap_net_admin"])
+def test_capability_names_are_compared_as_a_set_whatever_their_order(tmp_path, printed):
+    root, commands = _host(tmp_path, {"usr/bin/tool": printed + "=ep"})
+    _, evidence = _u23(root, commands, ["/usr/bin/tool cap_net_admin,cap_net_raw"])
+
+    assert "default only" in evidence and "review" not in evidence
+
+
+def test_default_list_may_name_several_allowed_sets_for_one_path(tmp_path):
+    """RHEL 8+ ping may carry cap_net_admin,cap_net_raw while other releases carry cap_net_raw alone."""
+    allowed = ["/usr/bin/tool cap_net_raw", "/usr/bin/tool cap_net_admin,cap_net_raw"]
+    for printed in ("cap_net_raw=p", "cap_net_raw,cap_net_admin=p"):
+        root, commands = _host(tmp_path / printed.split("=")[0].replace(",", "_"), {"usr/bin/tool": printed})
+        _, evidence = _u23(root, commands, allowed)
+        assert "default only" in evidence, evidence
+
+
+def test_a_different_capability_set_on_a_default_path_is_still_reviewed(tmp_path):
+    root, commands = _host(tmp_path, {"usr/bin/tool": "cap_net_raw,cap_sys_admin=ep"})
+    _, evidence = _u23(root, commands, ["/usr/bin/tool cap_net_raw", "/usr/bin/tool cap_net_admin,cap_net_raw"])
+
+    assert "file capability review (1)" in evidence and "cap_sys_admin" in evidence
+
+
+def test_role_defaults_allow_both_ping_capability_sets_of_the_distro_releases():
+    entries = role_defaults()
+    assert "/usr/bin/ping cap_net_raw" in entries
+    assert "/usr/bin/ping cap_net_admin,cap_net_raw" in entries
+
+
+# ---------------------------------------------------------------- paths with spaces
+
+
+@pytest.mark.parametrize("sep,spec", [(" ", "cap_chown=ep"), (" = ", "cap_chown+ep")])
+def test_path_with_spaces_is_kept_whole_in_both_libcap_formats(tmp_path, sep, spec):
+    root, commands = _host(tmp_path, {"opt/my app/tool": spec}, sep=sep)
+    _, evidence = _u23(root, commands, role_defaults())
+
+    assert "file capability review (1): /opt/my app/tool cap_chown" in evidence
+
+    _, evidence = _u23(root, commands, ["/opt/my app/tool cap_chown"])
+    assert "default only" in evidence

@@ -141,14 +141,32 @@ kisa_find() {
   fi
 }
 
-# getcap 출력(표준입력)을 "<경로> <capability 이름>" 줄로 정규화한다. 옛 libcap(CentOS 6/7)은
-# `경로 = cap_net_raw+ep`, 현재 libcap은 `경로 cap_net_raw=ep`로 낸다. 플래그(=ep, +p)는 버린다.
+# getcap 출력(표준입력)과 기본 목록을 "<경로> <capability 이름>" 줄로 정규화한다. 옛 libcap(CentOS 6/7)은
+# `경로 = cap_net_raw+ep`, 현재 libcap은 `경로 cap_net_raw=ep`로 낸다. 플래그(=ep, +p)는 버리고,
+# capability 이름은 쉼표·공백으로 갈라 정렬·중복 제거한 집합으로 만든다(순서가 달라도 같은 줄이 된다).
+# 경로는 첫 " cap_" 앞까지로 보므로 공백이 있어도 통째로 남는다(경로에 " cap_"이 들어 있으면 못 가른다).
 kisa_cap_norm() {
-  sed -e 's/ = / /' | awk 'NF >= 2 {
-    s = $2
-    for (i = 3; i <= NF; i++) s = s "," $i
-    gsub(/[=+-][eipEIP]*/, "", s)
-    print $1 " " s
+  awk '{
+    i = index($0, " cap_")
+    if (i == 0) next
+    path = substr($0, 1, i - 1)
+    sub(/ =$/, "", path)
+    spec = substr($0, i + 1)
+    gsub(/[ \t]+/, ",", spec)
+    gsub(/[=+-][eipEIP]*/, "", spec)
+    n = split(spec, a, ",")
+    m = 0
+    for (j = 1; j <= n; j++) {
+      if (a[j] == "") continue
+      for (k = 1; k <= m && b[k] != a[j]; k++) ;
+      if (k <= m) continue
+      for (k = m; k >= 1 && b[k] > a[j]; k--) b[k + 1] = b[k]
+      b[k + 1] = a[j]
+      m++
+    }
+    out = b[1]
+    for (j = 2; j <= m; j++) out = out "," b[j]
+    print path " " out
   }' | sort -u
 }
 

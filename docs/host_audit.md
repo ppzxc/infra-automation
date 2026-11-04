@@ -387,7 +387,10 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 - **읽기 전용**: 커널 모듈을 올릴 수 있는 방화벽 조회(`nft`, 레거시 `iptables`)는 해당 모듈이 이미 올라와 있을 때만 한다. sendmail 버전은 실행하지 않고 `sendmail.cf`의 `DZ` 줄로 읽는다. rpm은 조회하지 않는다.
 - **file capability (#432, Spec #433)**: U-23의 증적 줄 끝에 file capability가 붙은 파일을 덧붙인다(SUID 밖의 권한 상승 통로). 읽기 전용이고 알림은 없다. 판정(양호·점검불가(수동))은 SUID/SGID만으로 정해지며 capability는 판정을 바꾸지 않는다.
   - 수집: 로컬 디스크 파일시스템(SUID 탐색과 같은 마운트 집합, `-xdev`)의 파일에 `getcap`을 돌린다(`find -xdev -type f -exec getcap {} +`). `getcap -r`은 마운트 경계를 넘어 `/proc`·네트워크 파일시스템까지 걸으므로 쓰지 않는다. 시간 제한(120초)과 목록 길이 제한(최대 40개)은 SUID/SGID 탐색과 같다.
-  - 구분: 역할 변수 `host_audit_kisa_capability_defaults`(`"<경로> <capability 이름>"`)와 경로·capability 이름이 같으면 배포판 기본이고, 그 밖의 항목만 `file capability review (N): ...`로 검토 대상이 된다. 플래그(`=ep`, `+p`)와 옛 libcap(CentOS 6/7)의 `경로 = cap+ep` 표기는 비교하지 않는다.
+  - 구분: 역할 변수 `host_audit_kisa_capability_defaults`(`"<경로> <capability 이름>"`)와 경로·capability 이름 집합이 같으면 배포판 기본이고, 그 밖의 항목만 `file capability review (N): ...`로 검토 대상이 된다. 이름은 순서·중복과 무관한 집합으로 비교한다(`cap_net_admin,cap_net_raw` = `cap_net_raw,cap_net_admin`). 배포판마다 같은 경로의 조합이 다를 수 있으면 같은 경로 줄을 여러 개 둔다(기본값의 ping은 `cap_net_raw`와 `cap_net_admin,cap_net_raw` 두 줄). 플래그(`=ep`, `+p`)와 옛 libcap(CentOS 6/7)의 `경로 = cap+ep` 표기는 비교하지 않는다.
+  - 한계: 기본 목록은 배포판 패키지 지식으로 적었고 실제 호스트에서 실측하지 않았다. 첫 보고서에서 기본인데 '검토'로 나온 항목은 호스트에서 확인해 목록에 줄을 더한다.
+  - 한계: 경로는 출력에서 첫 ` cap_` 앞까지로 읽으므로 공백이 있는 경로도 통째로 보존한다. 경로 자체에 ` cap_`이 들어 있으면(사실상 없음) 경로와 capability를 가르지 못한다.
+  - 소요 시간: U-23은 SUID/SGID 탐색과 `getcap` 탐색을 각각 최대 120초까지, 합쳐 최대 240초 돈다. 점검 태스크(AUD-200)에는 별도 태스크 제한이 없고 `ansible.cfg`의 `timeout = 30`은 SSH 연결 제한이라 실행 시간에 걸리지 않는다. 같은 120초 `find`를 쓰는 U-15·U-17·U-25·U-26(각 1회)과 합쳐 호스트당 최악 6회 × 120초 = 12분이다. 저장소에는 이를 끊는 제한이 없다(Semaphore 쪽 실행 제한은 저장소 밖 설정이라 확인하지 못했다). 각 탐색이 시간을 넘으면 그 항목만 점검불가로 남는다.
   - 증적 문구: `file capability: none`(없음), `file capability: default only (N)`(기본만), `file capability review (N): ...; default: M`(기본 밖 있음), `file capability: 점검불가(...)`(`getcap`이 없거나 실행할 수 없음, 시간 초과).
 - **비밀값**: SNMP community는 길이·문자 종류만 판정하고 값은 증적에 싣지 않는다.
 

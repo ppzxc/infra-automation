@@ -19,8 +19,9 @@
       cap="file capability: 점검불가(timed out after ${KISA_FIND_TIMEOUT:-120}s)"
     else
       all=$(printf '%s\n' "$capraw" | sed "s|^$R||" | kisa_cap_norm)
-      review=$(printf '%s\n' "$all" | KISA_CAP_DEFAULTS="${KISA_CAP_DEFAULTS:-}" awk '
-        BEGIN { n = split(ENVIRON["KISA_CAP_DEFAULTS"], d, "\n"); for (i = 1; i <= n; i++) known[d[i]] = 1 }
+      defaults=$(printf '%s\n' "${KISA_CAP_DEFAULTS:-}" | kisa_cap_norm)
+      review=$(printf '%s\n' "$all" | KISA_CAP_NORM_DEFAULTS="$defaults" awk '
+        BEGIN { n = split(ENVIRON["KISA_CAP_NORM_DEFAULTS"], d, "\n"); for (i = 1; i <= n; i++) known[d[i]] = 1 }
         NF && !($0 in known)')
       total=$(printf '%s\n' "$all" | grep -c .)
       nreview=$(printf '%s\n' "$review" | grep -c .)
