@@ -1039,6 +1039,8 @@ def _audit_check(cfg):
     for name in ('secret_service_exes', 'secret_operator_exes'):
         if not o2c_valid_exe_patterns(cfg.get(name, [])):
             raise ValueError('Audit Watch Key 알림 변수 %s 의 형식이 올바르지 않다' % name)
+    if not re.match(r'^[1-9][0-9]*$', str(cfg.get('min_events', 1))):
+        raise ValueError('Audit Watch Key 알림 변수 min_events 는 양의 정수여야 한다')
     keys = cfg.get('provisioning_keys', [])
     if not keys or not all(isinstance(k, str) and _AUDIT_KEY_RE.match(k) for k in keys):
         raise ValueError('Audit Watch Key 알림 변수 provisioning_keys 의 형식이 올바르지 않다(1개 이상, 소문자·숫자·_)')
@@ -1104,7 +1106,8 @@ def _audit_sql(watched, where, cfg, event_time, host_label):
              "CASE WHEN length(full_path) > %d THEN '…' || substr(full_path, length(full_path) - %d) ELSE full_path END AS file_path FROM (%s)"
              ) % (_AUDIT_PATH_LEN, _AUDIT_PATH_LEN - 2, joined)
     return ("SELECT host_name, watch_key, login_user, program, file_path, count(DISTINCT evid) AS events, %s, %s FROM (%s) "
-            "GROUP BY host_name, watch_key, login_user, program, file_path ORDER BY events DESC") % (event_time, host_label, inner)
+            "GROUP BY host_name, watch_key, login_user, program, file_path HAVING count(DISTINCT evid) >= %d ORDER BY events DESC"
+            ) % (event_time, host_label, inner, cfg.get('min_events', 1))
 
 
 def o2c_audit_watch_sql(key, cfg, event_time, host_label):

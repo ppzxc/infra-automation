@@ -33,6 +33,21 @@ def desired(tmp_path_factory):
     class Server:
         store = {"alert": {o["name"]: o["body"] for o in rendered if o["kind"] == "alert"},
                  "template": {o["name"]: o["body"] for o in rendered if o["kind"] == "template"}}
+        shorts = {o["short_link"]["short"].split("/web/short/")[1].split("?")[0]: o["short_link"]["original"] for o in rendered if o.get("short_link")}
+
+    return Server
+
+
+@pytest.fixture(scope="session")
+def tuned(tmp_path_factory):
+    """조정 변수를 모두 바꾼 렌더링: 재통지 간격·임계·P3 간격·정상 변경 키 목록(#430처럼 키를 더한 경우)."""
+    rendered = render_desired(tmp_path_factory.mktemp("o2c-audit-tuned") / "desired.json", extra={
+        "o2c_audit_watch_silence_minutes": 10, "o2c_audit_watch_min_events": 2, "o2c_audit_provisioning_silence_minutes": 30,
+        "o2c_audit_provisioning_keys": ["auth_config", "container_config", "secret_access", "ssh_keys"]})
+
+    class Server:
+        store = {"alert": {o["name"]: o["body"] for o in rendered if o["kind"] == "alert"}}
+        shorts = {o["short_link"]["short"].split("/web/short/")[1].split("?")[0]: o["short_link"]["original"] for o in rendered if o.get("short_link")}
 
     return Server
 
@@ -83,7 +98,7 @@ def firing_alerts(desired, *events, among=NEW_ALERTS):
 
 # --- 1. 등록: 알림 정의·등급·재통지 -------------------------------------------------------------------------------------
 @pytest.mark.parametrize("name, severity, silence", [(AUTH, "P2 경고", 5), (CONTAINER, "P2 경고", 5), (SECRET, "P2 경고", 5),
-                                                      (PROVISIONING, "P3 주의", 60)])
+                                                      (PROVISIONING, "P3 주의", 5)])
 def test_the_new_audit_watch_alerts_are_security_log_event_alerts_with_a_grade_a_silence_and_a_runbook_entry(desired, name, severity, silence):
     alert = desired.store["alert"][name]
     assert name in EXPECTED_ALERTS and alert["stream_name"] == "security_logs" and alert["query_condition"]["type"] == "sql"
@@ -98,14 +113,20 @@ def test_the_new_audit_watch_alerts_are_security_log_event_alerts_with_a_grade_a
 
 
 def test_every_new_alert_keeps_a_raw_log_link_to_the_audit_lines_of_its_keys(desired):
-    """SQL이 서브쿼리·조인이라 WHERE에서 파생할 수 없어 `raw_sql`을 직접 둔다."""
-    raw = {a["name"]: a for a in DEFAULTS["o2c_alerts"]}
+    """SQL이 서브쿼리·조인이라 WHERE에서 파생할 수 없어 `raw_sql`을 직접 둔다. 링크가 가리키는 조회를 렌더링 결과에서 읽는다."""
     for name in NEW_ALERTS:
-        assert desired.store["alert"][name]["context_attributes"]["raw_log_line"].startswith("▶ 로그 보기: "), name
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["raw_log_line"].startswith("▶ 로그 보기: "), name
     for name in P2_ALERTS:
-        assert f'key="{KEY_OF[name]}"' in raw[name]["raw_sql"], name
+        assert f'key="{KEY_OF[name]}"' in _raw_query(desired, name), name
     for key in KEY_OF.values():
-        assert f'key="{key}"' in raw[PROVISIONING]["raw_sql"]
+        assert f'key="{key}"' in _raw_query(desired, PROVISIONING)
+
+
+def _raw_query(server, name):
+    from o2c_alert_helpers import _decode_raw_url
+    original = server.shorts[re.search(r"/web/short/([0-9a-f]{16})", server.store["alert"][name]["context_attributes"]["raw_log_line"]).group(1)]
+    return _decode_raw_url(original)[2]
 
 
 # --- 2. 침해 패턴은 울리고, 자기 키의 알림 하나만 울린다 ------------------------------------------------------------------
@@ -202,7 +223,8 @@ def test_metadata_only_syscalls_on_a_secret_file_are_not_an_open(desired, syscal
 def test_exclusion_lists_are_role_default_variables_not_hardcoded_in_the_sql(desired):
     for var in ("o2c_audit_package_managers", "o2c_audit_secret_service_exes", "o2c_audit_secret_operator_exes",
                 "o2c_audit_secret_excluded_users", "o2c_audit_secret_metadata_syscalls", "o2c_audit_provisioning_accounts",
-                "o2c_audit_provisioning_keys", "o2c_audit_provisioning_silence_minutes"):
+                "o2c_audit_provisioning_keys", "o2c_audit_provisioning_silence_minutes", "o2c_audit_watch_silence_minutes",
+                "o2c_audit_watch_min_events"):
         assert var in DEFAULTS, var
     assert DEFAULTS["o2c_audit_secret_excluded_users"] == [] and "restic" in " ".join(DEFAULTS["o2c_audit_secret_service_exes"])
     assert {"rpm", "dnf", "yum", "dpkg", "apt"} <= set(DEFAULTS["o2c_audit_package_managers"])
@@ -257,8 +279,29 @@ def test_with_no_account_list_the_signature_is_any_non_interactive_login_and_the
 def test_the_signature_is_one_sql_fragment_a_sibling_alert_can_reuse(desired):
     """#430(`infra-audit-watch-change`에 키를 더하는 티켓)이 같은 구분을 그대로 쓰도록, 조건은 이름 있는 변수 하나이고 키 목록도 변수다."""
     assert "tty=(none)" in DEFAULTS["o2c_audit_provisioning_filter"] or "o2c_audit_provisioning_cond" in DEFAULTS["o2c_audit_provisioning_filter"]
-    assert DEFAULTS["o2c_audit_provisioning_keys"] == ["auth_config", "container_config", "secret_access"]
-    assert DEFAULTS["o2c_audit_provisioning_silence_minutes"] == 60
+    assert {"auth_config", "container_config", "secret_access"} <= set(DEFAULTS["o2c_audit_provisioning_keys"])   # #430이 키를 더해도 깨지지 않는다
+    assert DEFAULTS["o2c_audit_provisioning_silence_minutes"] == 5 and DEFAULTS["o2c_audit_watch_silence_minutes"] == 5
+    assert DEFAULTS["o2c_audit_watch_min_events"] == 1
+
+
+def test_renotify_interval_and_threshold_are_role_variables_not_hardcoded(tuned):
+    for name in P2_ALERTS:
+        assert tuned.store["alert"][name]["trigger_condition"]["silence"] == 10, name
+    assert tuned.store["alert"][PROVISIONING]["trigger_condition"]["silence"] == 30
+    twice = event("secret_access", exe="/usr/bin/cat", path="/srv/x") + event("secret_access", exe="/usr/bin/cat", path="/srv/x")
+    once = event("secret_access", exe="/usr/bin/cat", path="/srv/x")
+    assert len(_run_alert_on_sqlite(_sql(tuned, SECRET), twice, "security_logs")) == 1 and _run_alert_on_sqlite(_sql(tuned, SECRET), once, "security_logs") == []
+
+
+def test_a_key_appended_to_the_provisioning_list_reaches_the_low_grade_alert_and_its_log_link_with_no_other_change(tuned):
+    """#430의 계약: 키를 `o2c_audit_provisioning_keys`에 더하기만 하면 P3 SQL·로그 링크가 그 키를 본다(P2는 자기 알림에 `AND NOT 서명`을 붙인다)."""
+    make = lambda: event("ssh_keys", exe="/usr/bin/python3.12", comm="python3", tty="(none)", path="/root/.ssh/authorized_keys")  # noqa: E731
+    ev = make() + make()                                    # tuned는 임계 2: 서로 다른 사건 둘
+    (row,) = _run_alert_on_sqlite(_sql(tuned, PROVISIONING), ev, "security_logs")
+    assert row["watch_key"] == "ssh_keys"          # 모르는 키는 앞 8자 그대로 보인다
+    assert 'key="ssh_keys"' in _raw_query(tuned, PROVISIONING)
+    interactive = event("ssh_keys", exe="/usr/bin/vim", path="/root/.ssh/authorized_keys")
+    assert _run_alert_on_sqlite(_sql(tuned, PROVISIONING), interactive, "security_logs") == []   # 서명이 아니면 P3가 아니다(#430의 P2가 맡는다)
 
 
 # --- 5. 중복 방지: 기존 알림과 같은 변경으로 둘이 울리지 않는다 --------------------------------------------------------------------
@@ -356,5 +399,5 @@ def test_the_role_defaults_document_the_new_variables_in_the_spec_variable_table
     names = {m for line in table for m in re.findall(r"`(o2c_[a-z0-9_]+)`", line.split("|")[1])}
     for var in ("o2c_audit_package_managers", "o2c_audit_secret_service_exes", "o2c_audit_secret_operator_exes", "o2c_audit_secret_excluded_users",
                 "o2c_audit_secret_metadata_syscalls", "o2c_audit_provisioning_accounts", "o2c_audit_provisioning_keys",
-                "o2c_audit_provisioning_silence_minutes"):
+                "o2c_audit_provisioning_silence_minutes", "o2c_audit_watch_silence_minutes", "o2c_audit_watch_min_events"):
         assert var in names, var

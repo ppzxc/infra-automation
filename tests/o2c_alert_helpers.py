@@ -208,7 +208,7 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-audit-auth-config-change": ("P2 경고", 5, 5, 0, "'auth_config' AS watch_key"),   # Audit Watch Key(#419): 마커는 자기 알림에만 있는 리터럴 열
     "infra-audit-container-config-change": ("P2 경고", 5, 5, 0, "'container_config' AS watch_key"),
     "infra-audit-secret-access": ("P2 경고", 5, 5, 0, "'secret_access' AS watch_key"),
-    "infra-audit-watch-provisioning": ("P3 주의", 5, 60, 0, "regexp_replace(s.body, '^.* key="),
+    "infra-audit-watch-provisioning": ("P3 주의", 5, 5, 0, "regexp_replace(s.body, '^.* key="),
 }
 
 RAID_ALERTS = {   # alert -> a fragment only its search carries

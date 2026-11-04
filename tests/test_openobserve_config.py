@@ -2456,7 +2456,7 @@ def test_sudo_risky_command_list_builds_safe_like_conditions_and_rejects_unsafe_
                                    {"o2c_audit_secret_metadata_syscalls": ["get xattr"]}, {"o2c_audit_provisioning_accounts": ["Deploy"]},
                                    {"o2c_audit_secret_service_exes": ["opt/restic"]}, {"o2c_audit_secret_service_exes": ["/opt/x'; --"]},
                                    {"o2c_audit_secret_operator_exes": ["/opt/x y"]}, {"o2c_audit_provisioning_keys": []},
-                                   {"o2c_audit_provisioning_keys": ["Auth_Config"]}, {"o2c_audit_provisioning_silence_minutes": "1h"},
+                                   {"o2c_audit_provisioning_keys": ["Auth_Config"]}, {"o2c_audit_provisioning_silence_minutes": "1h"}, {"o2c_audit_watch_silence_minutes": "5m"}, {"o2c_audit_watch_min_events": 0},
                                    {"o2c_unregistered_login_silence_minutes": "1h"}, {"o2c_fortigate_new_source_silence_minutes": "x"},
                                    {"o2c_security_stop_services": []}, {"o2c_security_stop_services": ["fail2ban", "auditd"]},   # 중지 알림(#429): 비었거나 auditd가 있거나
                                    {"o2c_security_stop_services": ["Fail2ban"]}, {"o2c_security_stop_grace_minutes": 0},
