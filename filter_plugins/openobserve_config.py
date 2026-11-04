@@ -703,6 +703,7 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
     """Requests of the verification step: ``{ingest: [{stream, path, records}], searches: [...]}``.
 
     Every alert needs fixtures (a firing and a non-firing case at least); a missing one is a configuration error.
+    ``{host}`` in a record's ``body`` or ``user_name`` becomes the case's fake host (with the run ID), so synthetic users never repeat across runs.
     A record's ``source_address`` may be ``@<kind>`` (e.g. ``@semaphore``): it resolves to the first normal source of that
     kind in ``sources`` (OpenBao, never committed). A case with an unresolvable placeholder is skipped.
     An alert with ``absence: {level, roster}`` gets its SQL rebuilt from ``rosters[roster]`` plus the fake host of every case,
@@ -735,8 +736,9 @@ def o2c_verify_plan(alerts, fixtures, org, suffix, run_id, start_us, window_us=3
                 rec = dict(rec)
                 # omit_host_field: 변환 전 레코드(호스트 필드 없이 원문만 있음)를 흉내 낸다. 원문의 {host}가 가짜 호스트로 바뀐다
                 host_fields = {} if rec.pop('omit_host_field', False) else {spec.get('host_field', DEFAULT_ROW_KEY): host}
-                if isinstance(rec.get('body'), str):
-                    rec['body'] = rec['body'].replace('{host}', host)
+                for key in ('body', 'user_name'):   # user_name: 호스트를 구분하지 않는 알림(낯선 사용자)이 이전 실행의 합성 로그인과 겹치지 않게 한다(#428)
+                    if isinstance(rec.get(key), str):
+                        rec[key] = rec[key].replace('{host}', host)
                 repeat = rec.pop('repeat', 1)
                 rec_stream = rec.pop('stream', stream)   # 한 알림이 여러 스트림을 보면 레코드마다 대상 스트림을 지정한다
                 ts = rec.pop('ts', None)   # 합성 스크레이프 시각(시작 기준 초) — 메트릭은 _timestamp별로 묶어 판정한다
@@ -964,8 +966,8 @@ def o2c_fortigate_exclude_logids(logids):
 
 # --- 보안 로그 알림의 문구 목록 (#318) ---------------------------------------------------------------------------------
 # 위험 명령 sudo 알림은 sudo 명령 줄(process_command_line, 소문자)에 목록의 문구가 들어 있는지 LIKE로 본다. 목록은 역할 변수이고
-# SQL에 들어가므로 문구는 소문자·숫자·공백·`.`·`_`·`/`·`=`·`-`만, 라벨은 따옴표·역슬래시·%가 없는 글자만 허용한다(O2C-002에서 검증).
-_LIKE_PATTERN_RE = _re.compile(r'^[a-z0-9 ._/=-]+$')
+# SQL에 들어가므로 문구는 소문자·숫자·공백·`.`·`_`·`/`·`=`·`:`·`-`만, 라벨은 따옴표·역슬래시·%가 없는 글자만 허용한다(O2C-002에서 검증).
+_LIKE_PATTERN_RE = _re.compile(r'^[a-z0-9 ._/=:-]+$')
 _LIKE_LABEL_RE = _re.compile(r'^[^\'"\\%\n]+$')
 _GROUP_NAME_RE = _re.compile(r'^[a-z_][a-z0-9_-]*$')
 SERVICE_STOP_VERBS = ('systemctl stop %s', 'systemctl disable %s', 'systemctl disable --now %s', 'systemctl mask %s',

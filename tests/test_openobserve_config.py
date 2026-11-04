@@ -2388,6 +2388,42 @@ def test_security_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_ru
                 "{command_kind}" in o2.store["alert"][name]["row_template"] and "{process_command_line}" not in o2.store["alert"][name]["row_template"]
 
 
+SSHD_SIGNAL_ALERTS = ("infra-sshd-fatal-error", "infra-ssh-login-new-user")   # 검증 단계가 검색으로 보내는 알림(#428). 이름으로 정의를 읽는다
+
+
+def _ingested_security_records(o2):
+    """Records the verification step ingested into the security verify stream, stamped with the ingest time when they carry none (OpenObserve does the same)."""
+    import time
+    now_us = int(time.time() * 1_000_000)
+    return [dict({"_timestamp": now_us}, **r) for p, _, rs in o2.ingests if "/security_logs_alert_verify/" in p for r in rs]
+
+
+def test_sshd_signal_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_on_the_synthetic_records(o2):
+    res = _apply(o2)
+    assert res.returncode == 0, res.stdout + res.stderr
+    records = _ingested_security_records(o2)
+    searches = [sql for stream, sql in o2.searches if stream == "security_logs_alert_verify"]
+    for name in SSHD_SIGNAL_ALERTS:
+        sql = _sql(o2, name).replace('"security_logs"', '"security_logs_alert_verify"')   # 검증 스트림으로 바뀐 알림 SQL
+        assert searches.count(sql) == 1, name   # 검증 단계가 정확히 이 SQL을 한 번 검색한다(SQL 모양에 기대지 않는다)
+        spec = FIXTURES[name]
+        own = {c["host"] for c in spec["cases"]}
+        rows = _run_alert_on_sqlite(sql, records, "security_logs_alert_verify")
+        fired = {m.group(1) for row in rows if (m := re.fullmatch(r"(.+)-[0-9a-f]+", str(row["host_name"]))) and m.group(1) in own}
+        assert fired == {c["host"] for c in spec["cases"] if c["fires"]}, name
+
+
+def test_verification_users_are_unique_per_run_so_a_second_run_does_not_see_the_first_runs_logins():
+    """검증 스트림은 실행 사이에 비워지지 않는다. 낯선 사용자 알림은 호스트를 구분하지 않으므로 사용자 이름에도 실행 ID가 붙어야 한다."""
+    alert = {"name": "infra-ssh-login-new-user", "stream": "security_logs", "sql": 'SELECT host_name FROM "security_logs"', "period": 7210}
+    users = []
+    for run_id in ("1000", "2000"):
+        plan = o2c.o2c_verify_plan([alert], {alert["name"]: FIXTURES[alert["name"]]}, "default", "_v", run_id, 0)
+        users.append({r["user_name"] for rec in plan["ingest"] for r in rec["records"]})
+    assert users[0] and not users[0] & users[1]
+    assert all("{host}" not in u and u.endswith(("-1000", "-2000")) for u in users[0] | users[1])
+
+
 def test_security_fixtures_cover_every_new_alert_with_firing_and_quiet_cases():
     for name in SECURITY_ALERTS:
         assert {c["fires"] for c in FIXTURES[name]["cases"]} == {True, False}, name
