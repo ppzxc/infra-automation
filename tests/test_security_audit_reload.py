@@ -24,10 +24,15 @@ from security_render import ROOT_DIR, flat_tasks, shared_render
 pytestmark = pytest.mark.xdist_group("security-audit-reload")
 
 ROLE = ROOT_DIR / "roles" / "security"
+# FAKE_AUDITCTL: ok(기본) | listfail(`-s`는 되지만 `-l`이 실패) | nokernel(`-s`·`-l` 모두 실패: 커널 audit 없음·컨테이너)
 AUDITCTL = """#!/bin/sh
 PATH=/usr/bin:/bin
 echo "auditctl $*" >> "$FAKE_STATE/calls"
-[ "$1" = "-l" ] || exit 2
+case "$1" in
+  -s) [ "$FAKE_AUDITCTL" = nokernel ] && { echo "Error - audit support not in kernel" >&2; exit 1; }; echo "enabled 1"; exit 0 ;;
+  -l) case "$FAKE_AUDITCTL" in listfail|nokernel) echo "Error - audit support not in kernel" >&2; exit 1 ;; esac ;;
+  *) exit 2 ;;
+esac
 [ -s "$FAKE_STATE/loaded" ] && cat "$FAKE_STATE/loaded" || echo "No rules"
 """
 # 규칙 줄(-w/-a)만 상태 파일로 복사한다. FAKE_AUGEN=fail이면 실패, noop이면 성공이라 하면서 아무것도 적재하지 않는다.
@@ -57,7 +62,18 @@ SCENARIOS = {
     "extrafile": ("declared+extra", "ok", True, True),
     # 다른 파일이 있는데 적재 상태에는 그 규칙이 없다: 합쳐서 다시 적재하면 맞는다.
     "extrastale": ("declared", "ok", True, True),
+    # 도구는 있는데 커널 audit을 조회할 수 없는 호스트(커널 audit 비활성·컨테이너): 적재 단계를 건너뛰고 역할은 실패하지 않는다.
+    "nokernel": ("", "ok", True, False),
+    # 규칙 파일이 바뀌어 핸들러가 불려도 조회할 수 없는 호스트는 적재를 시도하지 않는다.
+    "nokernelnewfile": ("", "ok", True, False),
+    # `auditctl -s`는 되는데 `-l`만 실패: 상태를 알 수 없으므로 drift로 보지 않고(재적재 안 함) 역할도 실패시키지 않는다.
+    "listfails": ("", "ok", True, False),
+    # 파일이 바뀌어 적재했는데(augenrules 종료 코드 0) 그 뒤 `-l`을 읽지 못한다: 적재 결과를 확인할 수 없으니 실패로 드러낸다.
+    "readbackfails": ("", "ok", True, False),
 }
+# 시나리오별 가짜 auditctl 동작과, 이미 배포된 규칙 파일이 낡았는가(스탠드인 SEC-012가 바꿔 핸들러를 부른다)
+AUDITCTL_MODE = {"nokernel": "nokernel", "nokernelnewfile": "nokernel", "listfails": "listfail", "readbackfails": "listfail"}
+OLD_FILE = {"nokernelnewfile", "readbackfails"}
 
 
 def _handlers():
@@ -67,7 +83,7 @@ def _handlers():
 
 def _tasks():
     tasks = list(flat_tasks(yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))))
-    return [t for t in tasks if t.get("name", "").startswith(("[SEC-082]", "[SEC-083]"))]
+    return [t for t in tasks if t.get("name", "").startswith(("[SEC-082]", "[SEC-083]", "[SEC-084]", "[SEC-085]"))]
 
 
 def _recap(output):
@@ -87,7 +103,8 @@ def _run(workdir, check):
         (host_dir / "bin" / "cat").symlink_to(shutil.which("cat"))  # 조회 스크립트가 쓴다. PATH를 가짜 bin 하나로 한정하므로 직접 둔다.
         (host_dir / "state").mkdir()
         (host_dir / "rules.d").mkdir()
-        (host_dir / "rules.d" / "overseer.rules").write_text(declared, encoding="utf-8")  # 이미 배포된 파일(스탠드인 SEC-012가 바꾸지 않는다)
+        # 이미 배포된 파일(스탠드인 SEC-012가 바꾸지 않는다). OLD_FILE 시나리오만 낡은 파일이라 스탠드인이 바꾸고 핸들러를 부른다.
+        (host_dir / "rules.d" / "overseer.rules").write_text("-w /etc/passwd -p wa -k identity\n" if name in OLD_FILE else declared, encoding="utf-8")
         (host_dir / "rules.d" / "overseer.rules").chmod(0o600)
         (host_dir / "rules.d" / "10-base.rules").write_text("-D\n-b 8192\n-f 1\n", encoding="utf-8")  # 배포판 기본 파일
         if extra:
@@ -100,7 +117,7 @@ def _run(workdir, check):
                 (host_dir / "bin" / cmd).chmod(0o755)
         inventory["all"]["hosts"][name] = {
             "ansible_connection": "local", "ansible_python_interpreter": sys.executable,
-            "fake_dir": str(host_dir), "fake_augen": augen,
+            "fake_dir": str(host_dir), "fake_augen": augen, "fake_auditctl": AUDITCTL_MODE.get(name, "ok"),
         }
     (workdir / "inventory.yml").write_text(yaml.safe_dump(inventory), encoding="utf-8")
     (workdir / "templates").mkdir()
@@ -113,7 +130,8 @@ def _run(workdir, check):
         "vars_files": [str(ROLE / "vars" / "main.yml")],
         # PATH를 가짜 bin 하나로 한정해 `noaudit` 호스트에는 auditctl이 정말 없게 한다.
         "environment": {"PATH": "{{ fake_dir }}/bin:/nonexistent", "FAKE_STATE": "{{ fake_dir }}/state",
-                        "FAKE_RULESD": "{{ fake_dir }}/rules.d", "FAKE_AUGEN": "{{ fake_augen }}"},
+                        "FAKE_RULESD": "{{ fake_dir }}/rules.d", "FAKE_AUGEN": "{{ fake_augen }}",
+                        "FAKE_AUDITCTL": "{{ fake_auditctl }}"},
         "tasks": [
             # [SEC-012] 스탠드인: 같은 템플릿을 같은 방식으로 배포하고 바뀌면 같은 핸들러를 부른다.
             {"name": "stand-in SEC-012", "ansible.builtin.template": {"src": "audit.rules.j2", "dest": "{{ fake_dir }}/rules.d/overseer.rules", "mode": "0600"},
@@ -194,6 +212,58 @@ def test_check_mode_reports_load_drift_without_changing_anything(check_run):
     assert check_run["recap"]["noaudit"]["changed"] == 0
 
 
+def test_a_host_whose_kernel_audit_cannot_be_queried_is_skipped_not_failed(apply_run, check_run):
+    # 도구는 있는데 `auditctl -l`이 실패하는 호스트(커널 audit 비활성·컨테이너)에서 role 전체가 실패하면 안 된다. 적재 단계를 건너뛴다.
+    for run in (apply_run, check_run):
+        for host in ("nokernel", "nokernelnewfile"):
+            assert run["recap"][host]["failed"] == 0, (host, run["out"])
+            assert not any(c.startswith("augenrules") for c in run["calls"][host]), host
+        assert run["recap"]["nokernel"]["changed"] == 0
+
+
+def test_a_failing_auditctl_list_is_unknown_not_drift_and_not_a_failure(apply_run, check_run):
+    for run in (apply_run, check_run):
+        assert run["recap"]["listfails"]["failed"] == 0, run["out"]
+        assert run["recap"]["listfails"]["changed"] == 0
+        assert not any(c.startswith("augenrules") for c in run["calls"]["listfails"])
+
+
+def test_a_load_that_cannot_be_read_back_is_still_a_failure(apply_run):
+    # 이 역할이 규칙 파일을 바꿔 적재했는데 확인할 수 없으면 조용히 성공으로 끝나지 않는다(#424 수용 기준: 적재 결과가 드러난다).
+    assert "augenrules --load" in apply_run["calls"]["readbackfails"]
+    assert apply_run["recap"]["readbackfails"]["failed"] > 0, apply_run["out"]
+
+
+def _warnings(out):
+    """호스트 -> 그 호스트의 debug 메시지 목록(기본 콜백 출력 `ok: [host] => {"msg": "..."}`)."""
+    found = {}
+    for host, msg in re.findall(r'^ok: \[(\w+)\] => \{\s*"msg": "([^"]*)"', out, re.M):
+        found.setdefault(host, []).append(msg)
+    return found
+
+
+def test_a_changed_rules_file_on_a_host_that_cannot_load_it_leaves_a_visible_warning_not_a_failure(apply_run, check_run):
+    # 규칙 파일은 바뀌었는데 SEC-082가 적재 단계를 건너뛰면 조용히 ok로 끝나지 않는다. 실패시키면 커널 audit을 못 쓰는 호스트가 규칙이 바뀔 때마다
+    # 프로비저닝 실패가 되므로 경고(debug)만 남긴다.
+    for run in (apply_run, check_run):
+        msgs = _warnings(run["out"]).get("nokernelnewfile", [])
+        assert any("적재되지 않았" in m and "SEC-083" in m for m in msgs), (msgs, run["out"])
+        assert run["recap"]["nokernelnewfile"]["failed"] == 0
+        # 파일이 그대로인 호스트·적재할 수 있는 호스트·도구 없는 호스트에는 이 경고가 없다.
+        for host in ("nokernel", "clean", "stale", "noaudit", "listfails"):
+            assert not any("적재되지 않았" in m for m in _warnings(run["out"]).get(host, [])), host
+
+
+def test_an_unreadable_loaded_state_is_shown_as_unknown_on_every_run_not_failed(apply_run, check_run):
+    # `-s`는 되는데 `-l`만 계속 실패하는 호스트가 영구히 ok로 보이면 안 된다: 알 수 없음 경고를 남긴다(실패·changed 아님).
+    for run in (apply_run, check_run):
+        msgs = _warnings(run["out"]).get("listfails", [])
+        assert any("알 수 없음" in m for m in msgs), (msgs, run["out"])
+        assert run["recap"]["listfails"]["failed"] == 0 and run["recap"]["listfails"]["changed"] == 0
+        for host in ("clean", "stale", "extrafile", "nokernel", "noaudit"):
+            assert not any("알 수 없음" in m for m in _warnings(run["out"]).get(host, [])), host
+
+
 # --- 정의만 읽는 검사(ADR-0013): 옛 결함이 되돌아오지 않게 한다 -------------------------------
 
 def test_auditd_load_handlers_do_not_restart_the_service_or_swallow_failures():
@@ -212,8 +282,9 @@ def test_auditd_load_handlers_do_not_restart_the_service_or_swallow_failures():
 def test_loaded_rules_probe_is_read_only_and_feeds_the_load_handler():
     probe = next(t for t in _tasks() if t["name"].startswith("[SEC-083]"))
     assert "read-only" in probe["name"] and probe["check_mode"] is False
-    assert probe["notify"] == "Restart auditd" and "failed_when" not in probe
-    assert "audit_rules_probe_drift" in probe["changed_when"]
+    assert probe["notify"] == "Restart auditd" and probe["failed_when"] is False   # 조회 실패는 알 수 없음(실패도 drift도 아님)
+    assert "rc" in " ".join(probe["changed_when"])
+    assert "audit_rules_probe_drift" in " ".join(probe["changed_when"])
     tools = next(t for t in _tasks() if t["name"].startswith("[SEC-082]"))
     assert "read-only" in tools["name"] and tools["check_mode"] is False and tools["failed_when"] is False
 
@@ -230,3 +301,28 @@ def test_other_rules_d_files_are_loaded_together_with_ours(apply_run):
     assert apply_run["recap"]["extrastale"]["failed"] == 0, apply_run["out"]
     assert "augenrules --load" in apply_run["calls"]["extrastale"]
     assert "hosts_change" in apply_run["loaded"]["extrastale"] and "-k identity" in apply_run["loaded"]["extrastale"]
+
+
+# --- 명세가 근거와 한계를 정직하게 적는다(라운드 2 리뷰) ----------------------------------------------
+
+SPEC = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+
+
+def test_the_spec_cites_why_augenrules_load_reloads_an_up_to_date_merged_file_and_what_was_not_measured():
+    assert "No change" in SPEC and "try_load" in SPEC                      # augenrules 소스: 변경 없음 분기에서도 적재한다
+    assert "파일 최신·커널 낡음" in SPEC and "#436" in SPEC.split("파일 최신·커널 낡음", 1)[1][:400]   # 호스트 패키지 버전에서의 확인은 #436
+
+
+def test_the_spec_states_the_syscall_comparison_scope_and_its_limits():
+    section = SPEC.split("**비교 기준(근사)**", 1)[1].split("\n", 1)[0]
+    assert "arch" in section and "syscall" in section and "한쪽 방향" in section
+    assert "-C" in section and "필터" in section                              # 필터만 다른 줄은 못 잡는 한계
+    assert "시스템 호출 목록·arch는 비교하지 않는다" not in section
+
+
+def test_the_spec_states_that_a_kernel_that_cannot_be_queried_skips_loading_and_that_raw_filters_evidence_paths():
+    assert "auditctl -s" in SPEC and "SEC-094" in SPEC and "SEC-095" in SPEC
+    assert "SEC-084" in SPEC and "SEC-085" in SPEC and "첫 실행에서 `SEC-083`이 감지" in SPEC
+    runbook = (ROOT_DIR / "docs" / "runbooks" / "detection-recovery.md").read_text(encoding="utf-8")
+    assert "SEC-084" in runbook and "SEC-085" in runbook and "적재 상태를 알 수 없음" in runbook
+    assert "raw 경로(`SEC-035`)에는 이 거르기가 없고" not in SPEC

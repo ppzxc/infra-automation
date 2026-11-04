@@ -3,6 +3,7 @@
 규칙 렌더링은 세션당 한 번인 공유 렌더링(`tests/security_render.py`)을 읽는다(`ansible-playbook`을 테스트마다 돌리지 않으므로 `slow`가 아니다).
 없는 경로 거르기(SEC-090~SEC-093)는 태스크 구조와, 태스크가 쓰는 식·셸 명령을 가짜 입력으로 돌려 본다.
 """
+import ast
 import json
 import os
 import subprocess
@@ -16,7 +17,7 @@ from jinja2 import Environment
 from security_render import ROOT_DIR, rule_lines, security_task, security_tasks, shared_render
 
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
-from raw_provisioning import raw_exists_found, raw_ssh_key_exists_cmd  # noqa: E402
+from raw_provisioning import raw_exists_cmd, raw_exists_found, raw_ssh_key_exists_cmd  # noqa: E402
 
 pytestmark = pytest.mark.xdist_group("security-render")
 
@@ -130,6 +131,7 @@ def _env():
     env = Environment()
     env.filters["to_json"] = json.dumps
     env.filters["raw_exists_found"] = raw_exists_found
+    env.filters["raw_exists_cmd"] = raw_exists_cmd
     return env
 
 
@@ -221,6 +223,51 @@ def test_the_raw_fact_keeps_each_found_path_under_its_key():
     assert {(e["key"], e["path"]) for e in got} == {
         ("audit_config", "/etc/audit/"), ("syslog_config", "/etc/rsyslog.d/"),
         ("ssh_keys", "/home/alice/.ssh/authorized_keys"), ("ssh_keys", "/root/.ssh/authorized_keys")}
+
+
+# --- 증적 감시 경로 거르기: CentOS 6/7 raw 경로(SEC-094·SEC-095, 라운드 2 리뷰) ---------------------------------
+# raw 경로에 이 거르기가 없으면 템플릿에 하드코딩된 기본 다섯 경로가 있는지 없는지 보지 않고 `-w`로 나간다. 없는 경로의 `-w`는 규칙 적재를 깰 수 있다.
+
+EVIDENCE_DEFAULTS = [{"path": "/var/log/wtmp", "key": "evidence_login_records"}, {"path": "/var/run/utmp", "key": "evidence_login_records"},
+                     {"path": "/etc/localtime", "key": "evidence_time_change"}]
+
+
+def test_the_raw_evidence_filter_runs_in_the_raw_block_before_the_rules_are_deployed():
+    probe, fact = security_task("SEC-094"), security_task("SEC-095")
+    assert "ansible.builtin.raw" in probe and probe["changed_when"] is False and probe["failed_when"] is False
+    assert "ansible.builtin.set_fact" in fact and "_audit_evidence_watch_paths_effective" in fact["ansible.builtin.set_fact"]
+    assert _order("SEC-094") < _order("SEC-095") < _order("SEC-035")
+    raw = yaml.safe_load((ROOT_DIR / "roles" / "security" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    block = next(t for t in raw if t.get("block") and any(str(b.get("name", "")).startswith("[SEC-094]") for b in t["block"]))
+    assert "_raw_path_effective" in str(block["when"])
+    assert probe["when"] == security_task("SEC-092")["when"] and fact["when"] == probe["when"]   # auditd가 설치된 호스트에서만(SEC-035와 같은 조건)
+
+
+def test_the_raw_evidence_probe_command_lists_the_existing_candidate_paths(tmp_path):
+    existing = tmp_path / "wtmp"
+    existing.write_text("x", encoding="utf-8")
+    missing = tmp_path / "btmp"
+    cmd = _env().from_string(security_task("SEC-094")["ansible.builtin.raw"]).render(
+        audit_evidence_watch_paths=[{"path": str(existing), "key": "evidence_login_records"}, {"path": str(missing), "key": "evidence_login_records"}])
+    res = _run(cmd)
+    assert res.returncode == 0, res.stderr
+    assert raw_exists_found(res.stdout) == [str(existing)]
+
+
+def test_the_raw_evidence_fact_keeps_only_the_paths_the_probe_found_with_their_keys():
+    expr = security_task("SEC-095")["ansible.builtin.set_fact"]["_audit_evidence_watch_paths_effective"]
+    out = _env().from_string(expr).render(
+        security_audit_evidence_raw={"stdout": "__RAW_EXISTS__ /var/log/wtmp\r\n__RAW_EXISTS__ /etc/localtime\n"}, audit_evidence_watch_paths=EVIDENCE_DEFAULTS)
+    # Ansible는 목록 모양의 식 결과를 목록으로 되돌린다(SEC-101과 같은 방식). 템플릿이 문자열이 아닌 목록을 읽는다.
+    assert ast.literal_eval(out) == [EVIDENCE_DEFAULTS[0], EVIDENCE_DEFAULTS[2]]
+    none = _env().from_string(expr).render(security_audit_evidence_raw={"stdout": ""}, audit_evidence_watch_paths=EVIDENCE_DEFAULTS)
+    assert ast.literal_eval(none) == []
+
+
+def test_a_raw_host_with_no_evidence_paths_renders_no_evidence_watch(security_rendered):
+    # 팩트가 빈 목록이면(탐지 결과 하나도 없음) 5경로가 그대로 나가지 않는다. 템플릿은 비어 있는 팩트를 기본 목록으로 되돌리지 않아야 한다.
+    lines = rule_lines(security_rendered["evidence_paths_all_missing"]["audit"])
+    assert not any(ln.startswith("-w ") and "evidence_" in ln for ln in lines)
 
 
 # --- 에이전트만 설치된 호스트에는 영향이 없다 ---------------------------------------------------------

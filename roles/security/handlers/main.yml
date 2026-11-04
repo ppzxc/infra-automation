@@ -61,7 +61,9 @@
 # systemd의 auditd 유닛은 RefuseManualStop=yes라 서비스 모듈의 restart를 거부하고, 옛 핸들러는 그 실패를 failed_when: false로 가려
 # 규칙 파일이 바뀌어도 재부팅 전까지 적재되지 않았다. `augenrules --load`는 /etc/audit/rules.d/*.rules를 합쳐 재시작 없이 적재하고,
 # 실패(종료 코드)는 플레이를 실패시킨다. 종료 코드만 믿지 않도록 바로 아래 두 핸들러가 적재 결과를 다시 읽어 확인한다.
-# audit 도구가 없는 호스트(SEC-082)는 건너뛴다. 방식의 근거는 docs/security.md의 탐지 복구 절.
+# audit 도구가 없거나 커널 audit을 조회할 수 없는 호스트(SEC-082)는 건너뛴다. 방식의 근거는 docs/security.md의 탐지 복구 절.
+# `--load`는 합친 파일이 이미 최신이어도 적재한다: augenrules(8)은 "load old or newly built rules into the kernel"이라 하고, 소스(init.d/augenrules.in)는
+# "No change" 분기에서도 try_load(auditctl -R)를 부른다(Context7, 2026-11-05). 그래서 `auditctl -R`을 따로 더하지 않는다. 호스트 패키지 버전 확인은 #436.
 - name: Restart auditd
   ansible.builtin.command: augenrules --load
   register: security_auditd_load_result

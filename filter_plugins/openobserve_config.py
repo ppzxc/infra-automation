@@ -1154,6 +1154,7 @@ def o2c_audit_watch_sql(key, cfg, event_time, host_label):
     """P2 alert SQL for one watch key: the key's rows that do NOT carry the provisioning signature."""
     if not _AUDIT_KEY_RE.match(key):
         raise ValueError('감시 키 이름 형식이 올바르지 않다')
+    _audit_check(cfg)   # provisioning_keys를 읽기 전에 검증한다(없으면 KeyError가 아니라 읽을 수 있는 ValueError)
     where = _audit_key_cond(key, cfg)
     if key in cfg['provisioning_keys']:   # 서명 행을 P3가 보는 키만 P2에서 뺀다. 목록 밖 키의 서명 행을 빼면 어느 알림도 못 본다
         where += ' AND NOT %s' % o2c_audit_provisioning_cond(cfg)

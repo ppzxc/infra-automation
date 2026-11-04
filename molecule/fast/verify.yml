@@ -261,11 +261,14 @@
         # 테스트 이미지에는 audit 패키지가 없다(컨테이너는 커널 감사 규칙도 적재할 수 없다). collect_facts가 auditctl을 못 찾으면 rc 127이고,
         # 그 호스트는 SEC-082가 적재 단계를 건너뛴다. 도구가 있는 호스트에서만 적재 결과가 선언과 맞는지 본다.
         # 적재·실패·낡은 규칙 재적재의 동작은 pytest tests/test_security_audit_reload.py가 가짜 auditctl/augenrules로 본다.
-        - name: "[VERIFY-SEC-082] Verify the audit tools are either absent (skipped) or answer auditctl -l"
+        # 한계: SEC-082·SEC-083·핸들러의 건너뜀(skipped)은 Converge 플레이의 register(`security_audit_tools_probe`)라 별도 Verify 플레이에서 단언할 수 없다.
+        # 컨테이너 이미지에는 audit이 없어(rc 127) 도구 있음 + 커널 조회 불가 호스트를 재현할 수도 없다. 그 동작(건너뜀, SEC-084·SEC-085 경고, 적재 실패는 플레이 실패)은
+        # tests/test_security_audit_reload.py가 가짜 auditctl/augenrules로 검증한다. 이 단언은 조회 프로브가 정수 rc를 돌려줬는지만 본다(도구 없음 127, 조회 가능 0, 조회 불가 != 0).
+        - name: "[VERIFY-SEC-082] Verify the audit tools are absent (skipped), answer auditctl -l, or the kernel audit is not queryable (skipped)"
           ansible.builtin.assert:
             that:
-              - f.cmd.audit_loaded.rc in [0, 127]
-            fail_msg: "auditctl -l failed on a host that has the audit tools: {{ f.cmd.audit_loaded.stdout }}"
+              - f.cmd.audit_loaded.rc is integer
+            fail_msg: "the audit rules probe did not run: {{ f.cmd.audit_loaded }}"
           when: ansible_os_family == "RedHat"
 
         - name: "[VERIFY-SEC-083] Verify the loaded audit rules match the declared keys when the audit tools exist"

@@ -80,6 +80,86 @@ def test_syscall_rules_are_compared_by_key():
     assert audit_rules_drift("No rules", declared) == ["적재 안 됨: 키 mounts"]
 
 
+# --- 같은 키의 일부 줄만 거부된 경우 (#424 라운드 2 리뷰) -----------------------------------------------
+# 키 이름만 보면 var_log_delete 줄 일부(b32 변형, open·openat의 O_TRUNC 줄)가 거부돼도 같은 키의 다른 줄이 있어 drift로 안 잡혔다.
+# 키별로 (arch, syscall 이름)이 적재돼 있는지 본다. `auditctl -l`은 줄 하나의 syscall을 쉼표로 합쳐 찍고 `-F auid>=1000` 같은 필드를 다르게 찍을 수
+# 있어 줄 단위·필드 단위 비교는 하지 않는다(오탐으로 매 실행 재적재·실패가 반복되는 것을 막는다).
+
+VLD_DECLARED = (
+    "-a always,exit -F arch=b64 -S unlink,unlinkat,rename,renameat,truncate,ftruncate,creat -F dir=/var/log -F auid>=1000 -F auid!=4294967295 -k var_log_delete\n"
+    "-a always,exit -F arch=b32 -S unlink,unlinkat,rename,renameat,truncate,ftruncate,creat -F dir=/var/log -F auid>=1000 -F auid!=4294967295 -k var_log_delete\n"
+    "-a always,exit -F arch=b64 -S open -F dir=/var/log -F a1&0x200 -F auid>=1000 -F auid!=4294967295 -k var_log_delete\n"
+    "-a always,exit -F arch=b32 -S open -F dir=/var/log -F a1&0x200 -F auid>=1000 -F auid!=4294967295 -k var_log_delete\n"
+    "-a always,exit -F arch=b64 -S openat -F dir=/var/log -F a2&0x200 -F auid>=1000 -F auid!=4294967295 -k var_log_delete\n"
+    "-a always,exit -F arch=b32 -S openat -F dir=/var/log -F a2&0x200 -F auid>=1000 -F auid!=4294967295 -k var_log_delete\n"
+)
+# auditctl -l이 찍는 모양: 필드 표기가 다르고(auid!=-1) syscall은 번호 순서로 찍힌다. 정상이라 drift가 아니어야 한다.
+VLD_LOADED = (
+    "-a always,exit -F arch=b64 -S rename,creat,unlink,truncate,ftruncate,unlinkat,renameat -F dir=/var/log -F auid>=1000 -F auid!=-1 -F key=var_log_delete\n"
+    "-a always,exit -F arch=b32 -S rename,creat,unlink,truncate,ftruncate,unlinkat,renameat -F dir=/var/log -F auid>=1000 -F auid!=-1 -F key=var_log_delete\n"
+    "-a always,exit -F arch=b64 -S open -F dir=/var/log -F a1&0x200 -F auid>=1000 -F auid!=-1 -F key=var_log_delete\n"
+    "-a always,exit -F arch=b32 -S open -F dir=/var/log -F a1&0x200 -F auid>=1000 -F auid!=-1 -F key=var_log_delete\n"
+    "-a always,exit -F arch=b64 -S openat -F dir=/var/log -F a2&0x200 -F auid>=1000 -F auid!=-1 -F key=var_log_delete\n"
+    "-a always,exit -F arch=b32 -S openat -F dir=/var/log -F a2&0x200 -F auid>=1000 -F auid!=-1 -F key=var_log_delete\n"
+)
+
+
+def test_a_normally_loaded_syscall_rule_set_is_no_drift_even_when_auditctl_prints_it_differently():
+    assert audit_rules_drift(VLD_LOADED, VLD_DECLARED) == []
+    assert audit_rules_drift(VLD_DECLARED, VLD_DECLARED) == []
+
+
+def test_a_rejected_openat_line_of_the_same_key_is_drift():
+    loaded = "".join(ln + "\n" for ln in VLD_LOADED.splitlines() if "-S openat" not in ln)
+    drift = audit_rules_drift(loaded, VLD_DECLARED)
+    assert drift == ["적재 안 됨: 키 var_log_delete의 b64 syscall openat", "적재 안 됨: 키 var_log_delete의 b32 syscall openat"]
+
+
+def test_a_missing_b32_variant_of_the_same_key_is_drift():
+    loaded = "".join(ln + "\n" for ln in VLD_LOADED.splitlines() if "arch=b32" not in ln)
+    drift = audit_rules_drift(loaded, VLD_DECLARED)
+    assert len(drift) == 1 and drift[0].startswith("적재 안 됨: 키 var_log_delete의 b32 syscall unlink,") and drift[0].endswith(",open,openat")
+
+
+def test_a_missing_syscall_name_inside_a_merged_line_is_drift():
+    loaded = VLD_LOADED.replace("rename,creat,unlink,truncate,ftruncate,unlinkat,renameat", "rename,creat,unlink,truncate,ftruncate,unlinkat", 1)
+    assert audit_rules_drift(loaded, VLD_DECLARED) == ["적재 안 됨: 키 var_log_delete의 b64 syscall renameat"]
+
+
+def test_a_key_that_is_not_loaded_at_all_is_still_one_missing_key_not_a_list_of_syscalls():
+    assert audit_rules_drift("No rules", VLD_DECLARED) == ["적재 안 됨: 키 var_log_delete"]
+
+
+def test_extra_loaded_syscalls_or_arches_are_not_reported_as_drift():
+    # 한쪽 방향(선언 -> 적재)만 본다: 적재가 더 많이 찍히는 표기 차이로 오탐이 나지 않게 한다.
+    declared = "-a always,exit -F arch=b64 -S mount -k mounts\n"
+    loaded = "-a always,exit -F arch=b64 -S mount,umount2 -F key=mounts\n-a always,exit -F arch=b32 -S mount -F key=mounts\n"
+    assert audit_rules_drift(loaded, declared) == []
+
+
+def test_a_loaded_line_without_an_arch_field_counts_for_both_arches():
+    declared = "-a always,exit -F arch=b64 -S mount -k mounts\n-a always,exit -F arch=b32 -S mount -k mounts\n"
+    assert audit_rules_drift("-a always,exit -S mount -F key=mounts\n", declared) == []
+
+
+def test_two_declared_lines_with_the_same_syscall_and_key_need_only_one_loaded_line():
+    # -C uid!=euid / -C gid!=egid 같은 필터만 다른 줄은 구분하지 않는다(필터 표기가 auditctl -l에서 확인되지 않았다, 근사).
+    declared = "-a always,exit -F arch=b64 -S execve -C uid!=euid -k evidence_privileged_exec\n-a always,exit -F arch=b64 -S execve -C gid!=egid -k evidence_privileged_exec\n"
+    assert audit_rules_drift("-a always,exit -F arch=b64 -S execve -C 1!=2 -F key=evidence_privileged_exec\n", declared) == []
+
+
+def test_syscall_rule_with_a_dir_filter_is_not_read_as_a_watch():
+    declared = "-a always,exit -F arch=b64 -S unlink -F dir=/var/log -k var_log_delete\n"
+    loaded = "-a always,exit -F arch=b64 -S unlink -F dir=/var/log -F perm=rwxa -F key=var_log_delete\n"
+    assert audit_rules_drift(loaded, declared) == []
+
+
+def test_summary_names_the_key_and_arch_but_no_paths_for_a_partial_load():
+    loaded = "".join(ln + "\n" for ln in VLD_LOADED.splitlines() if "-S openat" not in ln)
+    summary = audit_rules_drift_summary(loaded, VLD_DECLARED)
+    assert "var_log_delete" in summary and "/var/log" not in summary and "적재 안 됨 2건" in summary
+
+
 def test_registered_as_a_jinja_filter():
     assert FilterModule().filters()["audit_rules_drift"] is audit_rules_drift
     assert FilterModule().filters()["audit_rules_probe_drift"] is audit_rules_probe_drift
