@@ -16,6 +16,7 @@
 | wazuh/wazuh | 태그 `v4.14.9` | `bed556db3f4f535cb3a585f3d9e7f35a6acf0f58` |
 
 - Wazuh `main`(`bbd1cea999dd661483c3e5f51345385caa853319`)에는 `ruleset/rules/`가 없다. 그래서 최신 릴리스 태그 `v4.14.9`의 `ruleset/rules/0095-sshd_rules.xml`, `0020-syslog_rules.xml`, `0015-ossec_rules.xml`, `0085-pam_rules.xml`, `0280-attack_rules.xml`, `0290-firewalld_rules.xml`, `0365-auditd_rules.xml`을 읽었다.
+- Wazuh `frequency`·`timeframe` 뜻은 wazuh/wazuh-documentation 브랜치 `4.14`(`ea471550a31d883cfa669407fdaf30f99c08ad5d`)의 `source/user-manual/ruleset/ruleset-xml-syntax/rules.rst`를 따랐다. `frequency`는 "경보 전에 규칙이 일치해야 하는 횟수", `timeframe`은 초 단위 구간이다. 이 문서는 `timeframe`의 기본값을 적지 않는다. 또 `global_frequency`가 없으면 같은 에이전트(호스트)의 이벤트만 센다. 아래 Wazuh 행의 "N초에 M회"는 이 정의대로 읽은 것이다.
 - 우리 쪽 맥락: `docs/openobserve_config.md`, `roles/security/templates/audit.rules.j2`, `roles/openobserve_config/defaults/main.yml`, `roles/openobserve_config/files/vrl/security_semantics.vrl`. `docs/research/security-log-alert-industry-baseline.md`는 이 시점에 저장소에 없었다.
 
 ### 등급 표기
@@ -33,10 +34,11 @@
 - **부분**: 일부 경로만 잡히거나(예: sudo로 실행한 명령만), 원문 파싱이 더 필요하다.
 - **아니오**: 필요한 이벤트가 수집되지 않는다.
 
-## 판정을 좌우하는 두 가지 사실
+## 판정을 좌우하는 세 가지 사실
 
-1. **명령 실행(execve) 기록이 없다.** `audit.rules.j2`에 있던 `-a always,exit -F arch=b64 -S execve -k exec_log`는 #364/#372 커밋(`87cad21`, 2026-10-27)에서 소음 때문에 일부러 뺐다. 그래서 Elastic·Sigma·Splunk의 `process_creation`/EXECVE 규칙은 그대로 옮길 수 없다. 대신 쓸 수 있는 길은 sudo 줄의 `COMMAND=`(VRL `process_command_line`)뿐이다. root 셸이나 `sudo -i` 안에서 친 명령은 보이지 않는다. 그 전에 프로비저닝한 호스트에 옛 규칙이 남아 `exec_log` 기록이 아직 들어오는지는 **미확인**이다(알림 픽스처에는 실제 `exec_log` 줄이 있다).
+1. **명령 실행(execve) 기록이 없다.** `audit.rules.j2`에 있던 `-a always,exit -F arch=b64 -S execve -k exec_log`는 #364/#372 커밋(`87cad21`, 2026-10-27)에서 소음 때문에 일부러 뺐다. 그래서 Elastic·Sigma·Splunk의 `process_creation`/EXECVE 규칙은 그대로 옮길 수 없다. 이번에 읽은 Elastic·Sigma·Splunk 규칙 45개 중 19개가 이런 규칙이다(Sigma 9, Elastic 8, Splunk 2). 로그 은폐, 방화벽 규칙 변경, 특권 그룹 쪽에 몰려 있다. 엔드포인트 파일 이벤트를 쓰는 Elastic 규칙 4개(`authorized_keys` 2개, 로그 파일 삭제, SSH 백도어 로그)도 같은 이유로 옮길 수 없다. Wazuh 규칙은 모두 로그 원문이나 auditd 기록 유형을 본다. 대신 쓸 수 있는 길은 sudo 줄의 `COMMAND=`(VRL `process_command_line`)뿐이다. root 셸이나 `sudo -i` 안에서 친 명령은 보이지 않는다. 그 전에 프로비저닝한 호스트에 옛 규칙이 남아 `exec_log` 기록이 아직 들어오는지는 **미확인**이다(알림 픽스처에는 실제 `exec_log` 줄이 있다).
 2. **감시 규칙 없이 auditd가 스스로 남기는 기록은 들어온다.** `SERVICE_STOP`(systemd 서비스 중지), `CONFIG_CHANGE`(감사 규칙·설정 변경, `audit_enabled=`), `DAEMON_END`/`DAEMON_ABORT`, `ADD_USER`·`USER_MGMT` 같은 계정 관리 기록이 그렇다. 기존 알림 `infra-auditd-stopped`·`infra-account-change`가 이미 이 기록을 읽는다.
+3. **감시 규칙은 프로비저닝 대상 호스트에만 들어간다.** `audit.rules.j2`는 `security` 역할이 프로비저닝 대상에만 배포한다. 에이전트만 설치한 호스트는 바꾸지 않는다는 운영 원칙이 있다. 그래서 "감시 규칙을 더하면 된다"는 판정(auditd 설정, syslog 설정, `authorized_keys`, 로그 삭제 syscall 규칙)은 프로비저닝 대상 호스트에서만 성립한다. 기존 키 `identity`·`sudo_config`·`sshd_config`도 마찬가지다. 반대로 `secure`/`auth.log` 원문으로 하는 탐지(스프레이, sshd 치명 오류, 낯선 사용자·IP)는 로그를 보내는 모든 호스트에 적용된다. 에이전트만 설치한 호스트에서 auditd가 돌고 그 기록이 수집되는지는 **미확인**이다. 그래서 1·2번의 기록 유형 탐지가 그 호스트들에도 적용되는지도 미확인이다.
 
 `new_terms`(Elastic)는 ML이 아니다. "지난 5일 동안 처음 보는 값"을 찾는 규칙이라 긴 조회 구간의 SQL로 흉내 낼 수 있다. 이 저장소는 이미 조회 구간 11520분(8일) 알림을 쓴다.
 
@@ -125,7 +127,7 @@
 | Wazuh 5763 / 5720 / 40111 | 인증 실패(5760: `Failed password` 등)가 같은 출발지에서 / 5716 실패 같은 출발지 / `authentication_failed` 그룹 같은 출발지 | 120초 8회 / `frequency="8"`(timeframe 속성 없음, 기본값 **미확인**) / 160초 12회 | 10 / 10 / 10 | — | **예** |
 
 주의:
-- 우리 VRL은 `Invalid user X from …` 줄에 `user_name`·`event_reason='invalid user'`를 넣지만 **`event_outcome`은 넣지 않는다**(같은 시도의 `Failed password for invalid user` 줄과 이중으로 세지 않으려고). 비밀번호 인증을 끈 sshd는 `Failed password` 줄 없이 `Invalid user` 줄과 `Connection closed by invalid user … [preauth]` 줄만 남길 수 있다. 그런 호스트에서는 `event_outcome='failure'`만 세면 스프레이를 놓친다. 우리 호스트의 sshd 인증 설정 분포는 **미확인**이다. 스프레이 SQL은 `event_reason='invalid user'` 줄도 세는 쪽으로 두는 것이 안전하다(같은 시도의 이중 계수는 서로 다른 계정 수에는 영향이 없다).
+- 우리 VRL은 `Invalid user X from …` 줄에 `user_name`·`event_reason='invalid user'`를 넣지만 **`event_outcome`은 넣지 않는다**(같은 시도의 `Failed password for invalid user` 줄과 이중으로 세지 않으려고). 비밀번호 인증을 끈 sshd는 `Failed password` 줄 없이 `Invalid user` 줄과 `Connection closed by invalid user … [preauth]` 줄만 남길 수 있다. 그런 호스트에서는 `event_outcome='failure'`만 세면 스프레이를 놓친다. 우리 호스트의 sshd 인증 설정 분포는 **미확인**이다. 스프레이 SQL은 `event_reason='invalid user'` 줄도 세는 쪽으로 두는 것이 안전하다. 같은 시도를 두 번 세도 서로 다른 계정 수는 그대로다. 하지만 `count(*) >= 30`은 부풀려진다. 실패 수는 (`user_name`, `source_port`) 조합을 중복 없이 세는 것을 제안한다(**미검증**).
 - 기존 `infra-ssh-login-failures-per-source`(출발지별 5분 10회)는 계정 수와 무관하게 이미 울린다. 스프레이 규칙의 가치는 새 탐지라기보다 "여러 계정"이라는 성격을 알려 주는 데 있다.
 
 ### 참고: 무차별 대입 뒤 성공
@@ -183,14 +185,14 @@
 
 | 탐지 | 업계 대표 조건 | 우리 데이터 | 이미 있는 알림 |
 |---|---|---|---|
-| auditd 설정 변경 | PATH `/etc/audit/*` (Sigma high) | 아니오(감시 규칙 필요) | — |
+| auditd 설정 변경 | PATH `/etc/audit/*` (Sigma high) | 아니오(감시 규칙 필요, 프로비저닝 대상만) | — |
 | 감사 규칙 삭제·auditd 중지 | `auditctl -D`, 서비스 중지, `DAEMON_END` | 예/부분(`CONFIG_CHANGE`, `-D` 재적재 오탐) | `infra-auditd-stopped` |
-| syslog 설정 변경 | PATH `rsyslog.conf` 등 (Sigma high) | 아니오(감시 규칙 필요) | — |
+| syslog 설정 변경 | PATH `rsyslog.conf` 등 (Sigma high) | 아니오(감시 규칙 필요, 프로비저닝 대상만) | — |
 | syslog 중지 | 중지 명령 + rsyslog (Elastic medium) | 부분(sudo, `SERVICE_STOP`) | `infra-sudo-risky-command` |
-| 로그 파일 삭제 | 파일 삭제 이벤트 (Elastic medium) | 아니오(syscall 규칙 필요, `-w`는 불가) | `infra-auth-silent-*`(간접) |
+| 로그 파일 삭제 | 파일 삭제 이벤트 (Elastic medium) | 아니오(syscall 규칙 필요, `-w`는 불가, 프로비저닝 대상만) | `infra-auth-silent-*`(간접) |
 | `journalctl --vacuum` | 실행 인자 (Elastic medium, Sigma high) | 부분(sudo만, 패턴 없음) | — |
 | 셸 히스토리 지우기 | 환경 변수·셸 명령 (Elastic high/medium) | 아니오(`history -c` 패턴은 걸리지 않음) | — |
-| `authorized_keys` 변경·삭제 | 파일 변경 + new_terms (Elastic medium/low) | 아니오(감시 규칙 필요, 이미 문서화) | — |
+| `authorized_keys` 변경·삭제 | 파일 변경 + new_terms (Elastic medium/low) | 아니오(감시 규칙 필요, 프로비저닝 대상만, 이미 문서화) | — |
 | 특권 그룹 추가 | `usermod`·`gpasswd` + 그룹 목록 (Elastic low, Sigma medium/high) | 예 | `infra-account-change` |
 | 비밀번호 스프레이 | 5분, 계정 > 10, 실패 ≥ 30, 출발지별 (Elastic low) | 예(`Invalid user` 줄도 세야 함) | 출발지별 실패 알림이 간접 포함 |
 | 공개키 첫 사용 | new_terms 키 지문 5일 (Elastic low) | 부분(지문 파싱 필요) | — |
@@ -201,8 +203,8 @@
 
 핵심:
 
-1. 업계 규칙의 절반 이상은 **프로세스 실행 기록**을 전제로 한다. 우리는 execve 기록을 일부러 껐으므로 이 규칙들은 sudo `COMMAND=` 경로로만 부분 대체된다. root 셸 안의 행위는 보이지 않는다.
-2. 감시 규칙만 더하면 바로 쓸 수 있는 것: auditd 설정(`/etc/audit/`), syslog 설정(`/etc/rsyslog.conf`, `/etc/rsyslog.d/`), `authorized_keys`. 세 가지 모두 기존 `infra-audit-watch-change`의 키 목록에 더하는 방식으로 이어진다.
+1. 로그 은폐, 방화벽 규칙 변경, 특권 그룹 쪽 규칙은 대부분 **프로세스 실행 기록**을 전제로 한다(Elastic·Sigma·Splunk 45개 중 19개). 우리는 execve 기록을 일부러 껐으므로 이 규칙들은 sudo `COMMAND=` 경로로만 부분 대체된다. root 셸 안의 행위는 보이지 않는다.
+2. 감시 규칙을 더하면 쓸 수 있는 것: auditd 설정(`/etc/audit/`), syslog 설정(`/etc/rsyslog.conf`, `/etc/rsyslog.d/`), `authorized_keys`. 세 가지 모두 기존 `infra-audit-watch-change`의 키 목록에 더하는 방식으로 이어진다. 단 **프로비저닝 대상 호스트에서만** 그렇다(에이전트만 설치한 호스트는 바꾸지 않는다).
 3. 로그 파일 삭제는 파일 감시(`-w`)로는 안 되고 syscall 규칙이 필요하다.
 4. 지금 데이터로 바로 만들 수 있는 새 알림: 비밀번호 스프레이, sshd 치명 오류, 방화벽 서비스 중지(`SERVICE_STOP`), 낯선 사용자·IP 성공(5일 첫 등장).
 5. 업계 등급은 대부분 low~medium(Elastic 21~47, Splunk Anomaly)이다. high는 셸 히스토리 환경 변수, 무차별 대입 뒤 성공(Elastic 73)과 Sigma의 설정 변경·로그 지우기 규칙이다. **제안:** 무차별 대입 뒤 성공과 로그 은폐는 P1, 설정 변경·방화벽 중지·sshd 치명 오류·스프레이는 P2, 낯선 사용자·IP·첫 공개키는 P3. 이 등급은 업계 값이 아니라 우리 제안이다.
@@ -216,7 +218,8 @@
 - sshd 치명 오류 키워드의 우리 7일 빈도
 - rsyslog 종료 줄과 `stopping firewalld` 같은 문구가 어느 스트림에 어떤 모양으로 들어오는지
 - `NETFILTER_CFG` 기록 수집 여부
-- Wazuh `timeframe` 기본값과 `if_fts` 키 필드
+- Wazuh `timeframe` 기본값(5720처럼 생략된 경우)과 `if_fts` 키 필드
+- 에이전트만 설치한 호스트에서 auditd가 돌고 수집되는지
 - 5일 조회 SQL의 OpenObserve 스캔 비용
 - Splunk `linux_auditd_add_user_account_type`의 RBA 점수
 
