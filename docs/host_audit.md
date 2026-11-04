@@ -385,6 +385,10 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 - **서비스 사용 여부**: 프로세스 이름(`ps -e -o comm=`), systemd unit active(`systemctl is-active`), (x)inetd 항목(`/etc/xinetd.d/NAME`의 `disable = yes` 아님, `inetd.conf`의 주석 아닌 줄), 필요한 경우 TCP listening(`ss`·`netstat`) 중 하나라도 있으면 사용 중으로 본다. 서비스를 쓰지 않아 기준이 성립하지 않는 항목은 해당없음이다.
 - **파일 탐색**: U-15·U-23·U-25는 루트(/)와 로컬 디스크 파일시스템(ext2/3/4·xfs·btrfs) 마운트를 `find -xdev`로 뒤진다(가상·네트워크 파일시스템 제외). 각 탐색은 120초 제한이며, 넘으면 점검불가(수동)다.
 - **읽기 전용**: 커널 모듈을 올릴 수 있는 방화벽 조회(`nft`, 레거시 `iptables`)는 해당 모듈이 이미 올라와 있을 때만 한다. sendmail 버전은 실행하지 않고 `sendmail.cf`의 `DZ` 줄로 읽는다. rpm은 조회하지 않는다.
+- **file capability (#432, Spec #433)**: U-23의 증적 줄 끝에 file capability가 붙은 파일을 덧붙인다(SUID 밖의 권한 상승 통로). 읽기 전용이고 알림은 없다. 판정(양호·점검불가(수동))은 SUID/SGID만으로 정해지며 capability는 판정을 바꾸지 않는다.
+  - 수집: 로컬 디스크 파일시스템(SUID 탐색과 같은 마운트 집합, `-xdev`)의 파일에 `getcap`을 돌린다(`find -xdev -type f -exec getcap {} +`). `getcap -r`은 마운트 경계를 넘어 `/proc`·네트워크 파일시스템까지 걸으므로 쓰지 않는다. 시간 제한(120초)과 목록 길이 제한(최대 40개)은 SUID/SGID 탐색과 같다.
+  - 구분: 역할 변수 `host_audit_kisa_capability_defaults`(`"<경로> <capability 이름>"`)와 경로·capability 이름이 같으면 배포판 기본이고, 그 밖의 항목만 `file capability review (N): ...`로 검토 대상이 된다. 플래그(`=ep`, `+p`)와 옛 libcap(CentOS 6/7)의 `경로 = cap+ep` 표기는 비교하지 않는다.
+  - 증적 문구: `file capability: none`(없음), `file capability: default only (N)`(기본만), `file capability review (N): ...; default: M`(기본 밖 있음), `file capability: 점검불가(...)`(`getcap`이 없거나 실행할 수 없음, 시간 초과).
 - **비밀값**: SNMP community는 길이·문자 종류만 판정하고 값은 증적에 싣지 않는다.
 
 | 코드 | 항목 (중요도) | 자동 판정 방법 | CIS 참조 |
@@ -398,7 +402,7 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 | `KISA-2026:U-20` | /etc/(x)inetd.conf 파일 소유자 및 권한 설정 (상) | root, 600 이하. 둘 다 없으면 해당없음 | - |
 | `KISA-2026:U-21` | /etc/(r)syslog.conf 파일 소유자 및 권한 설정 (상) | root·bin·sys, 640 이하. 둘 다 없으면 해당없음 | - |
 | `KISA-2026:U-22` | /etc/services 파일 소유자 및 권한 설정 (상) | root·bin·sys, 644 이하 | - |
-| `KISA-2026:U-23` | SUID, SGID, Sticky bit 설정 파일 점검 (상) | 점검불가(수동) — SUID/SGID 파일 목록(최대 40개)을 증적으로. 없으면 양호 | 7.1.13 |
+| `KISA-2026:U-23` | SUID, SGID, Sticky bit 설정 파일 점검 (상) | 점검불가(수동) — SUID/SGID 파일 목록(최대 40개)을 증적으로. 없으면 양호. 같은 증적 줄에 file capability 목록이 덧붙으며 판정은 바꾸지 않는다(아래 file capability) | 7.1.13 |
 | `KISA-2026:U-24` | 사용자, 시스템 환경변수 파일 소유자 및 권한 설정 (상) | 로그인 계정 홈의 `.profile`·`.bashrc` 등이 root 또는 해당 계정 소유, 그룹·기타 쓰기 없음 | 7.2.10 |
 | `KISA-2026:U-25` | world writable 파일 점검 (상) | 없으면 양호, 있으면 점검불가(수동) — 목록(최대 30개)을 증적으로 | 7.1.11 |
 | `KISA-2026:U-26` | /dev에 존재하지 않는 device 파일 점검 (상) | `/dev` 아래 일반 파일 없음(`/dev/shm`·`/dev/mqueue`·`/dev/hugepages` 제외) | - |
@@ -471,7 +475,7 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | `AUD-200` | `Run KISA-2026 Unix checks (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true`, root 승격 |
 | `AUD-201` | `Add KISA-2026 verdicts to the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_kisa_result` 필터 |
 
-검증: pytest `tests/test_host_audit_kisa.py`(판정 5종, 예외 유효·만료·승인 대기·범위, 보고서 섹션·부록, 가짜 루트에서의 스크립트 판정과 해시 미노출, #122: U-01~U-67 카탈로그·스크립트 1:1, 프로비저닝된 서버·취약 서버 가짜 루트의 항목별 판정, postfix 메일 항목, U-28 Docker 구간과 예외 레지스터, SNMP community 비노출, dash·`bash --posix`·bash 결과 일치). 프로세스·unit·listening 포트는 `ps`·`systemctl`·`ss` 스텁으로 고정해 pytest가 실행 머신에 좌우되지 않는다. molecule Fast `VERIFY-AUD-200`·`VERIFY-AUD-201`(점검 실행·판정 기록). 읽기 전용은 `VERIFY-AUD-010` 스냅샷 사이에서 함께 확인된다.
+검증: pytest `tests/test_host_audit_kisa_capability.py`(#432: file capability 세 경우 — 기본만 있음·기본 밖 항목 있음·`getcap` 없음/실행 불가, SUID 판정 불변, 옛·현재 libcap 표기, 길이 제한, 역할 변수 주입)와 `tests/test_host_audit_kisa.py`(판정 5종, 예외 유효·만료·승인 대기·범위, 보고서 섹션·부록, 가짜 루트에서의 스크립트 판정과 해시 미노출, #122: U-01~U-67 카탈로그·스크립트 1:1, 프로비저닝된 서버·취약 서버 가짜 루트의 항목별 판정, postfix 메일 항목, U-28 Docker 구간과 예외 레지스터, SNMP community 비노출, dash·`bash --posix`·bash 결과 일치). 프로세스·unit·listening 포트는 `ps`·`systemctl`·`ss` 스텁으로 고정해 pytest가 실행 머신에 좌우되지 않는다. molecule Fast `VERIFY-AUD-200`·`VERIFY-AUD-201`(점검 실행·판정 기록). 읽기 전용은 `VERIFY-AUD-010` 스냅샷 사이에서 함께 확인된다.
 
 ## 11. 보관과 Audit Baseline (#125)
 

@@ -141,6 +141,24 @@ kisa_find() {
   fi
 }
 
+# getcap 출력(표준입력)을 "<경로> <capability 이름>" 줄로 정규화한다. 옛 libcap(CentOS 6/7)은
+# `경로 = cap_net_raw+ep`, 현재 libcap은 `경로 cap_net_raw=ep`로 낸다. 플래그(=ep, +p)는 버린다.
+kisa_cap_norm() {
+  sed -e 's/ = / /' | awk 'NF >= 2 {
+    s = $2
+    for (i = 3; i <= NF; i++) s = s "," $i
+    gsub(/[=+-][eipEIP]*/, "", s)
+    print $1 " " s
+  }' | sort -u
+}
+
+# getcap을 쓸 수 있는가. 없거나(127) 실행할 수 없으면(126) 거짓이다.
+kisa_getcap_ok() {
+  command -v getcap >/dev/null 2>&1 || return 1
+  getcap /dev/null >/dev/null 2>&1
+  [ "$?" -lt 126 ]
+}
+
 # 로그인 가능한 계정의 "이름:홈" 목록 (sync·shutdown·halt 같은 관례적 특수 셸 계정 제외).
 kisa_login_homes() {
   [ -r "$R/etc/passwd" ] || return 0

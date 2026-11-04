@@ -121,7 +121,7 @@ ITEMS.update({
     'U-22': _item('/etc/services 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
                   '/etc/services 소유자 root(bin, sys), 권한 644 이하인 경우 양호'),
     'U-23': _item('SUID, SGID, Sticky bit 설정 파일 점검', '상', CATEGORY_FILE,
-                  '주요 실행 파일에 불필요한 SUID/SGID가 없는 경우 양호 (목록으로 수동 판정)', '7.1.13'),
+                  '주요 실행 파일에 불필요한 SUID/SGID가 없는 경우 양호 (목록으로 수동 판정, file capability 목록은 증적에 덧붙임)', '7.1.13'),
     'U-24': _item('사용자, 시스템 환경변수 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
                   '환경변수 파일 소유자가 root 또는 해당 계정이고 root·소유자 외 쓰기 권한이 없는 경우 양호', '7.2.10'),
     'U-25': _item('world writable 파일 점검', '상', CATEGORY_FILE,
