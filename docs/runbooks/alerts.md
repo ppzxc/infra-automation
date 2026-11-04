@@ -344,7 +344,7 @@ sudo auditctl -s        # enabled 1이어야 한다
 <a id="security-service-stopped"></a>
 ## 🔴 보안 서비스(fail2ban·firewalld·rsyslog) 중지가 이어짐 (`infra-security-service-stopped`)
 
-**조건**: 감사 로그(`security_logs`, `service_name=audit`)의 `SERVICE_STOP`·`SERVICE_START`(`res=success`)에서 호스트·unit(`o2c_security_stop_services`: fail2ban·firewalld·rsyslog)별로 마지막 중지가 마지막 시작보다 늦고, 그 중지가 20분(`o2c_security_stop_grace_minutes`)보다 오래된 행(조회 60분 `o2c_security_stop_window_minutes`, 재통지 10분 `o2c_security_stop_renotify_minutes`). 서비스가 다시 켜지면 시작 기록이 따라와 그 행이 사라진다. 행의 시각은 마지막 중지 시각이다(앞선 중지·시작 쌍은 섞지 않는다). `auditd`는 위 `infra-auditd-stopped`가 맡으므로 대상이 아니다.
+**조건**: 감사 로그(`security_logs`, `service_name=audit`)의 `SERVICE_STOP`·`SERVICE_START`(`res=success`)에서 호스트·unit(`o2c_security_stop_services`: fail2ban·firewalld·rsyslog)별로 마지막 중지가 마지막 시작보다 늦고, 그 중지가 20분(`o2c_security_stop_grace_minutes`)보다 오래된 행(조회 24시간 `o2c_security_stop_window_minutes`, 5분마다 평가 `o2c_security_stop_frequency_minutes`, 재통지 10분 `o2c_security_stop_renotify_minutes`). 서비스가 다시 켜지면 시작 기록이 따라와 그 행이 사라진다. 행의 시각은 마지막 중지 시각이다(앞선 중지·시작 쌍은 섞지 않는다). `auditd`는 위 `infra-auditd-stopped`가 맡으므로 대상이 아니다.
 
 **대상이 sudo 보호 목록보다 좁은 이유**: 이 알림은 실로그로 재기동 간격을 확인한 세 서비스만 본다. `systemd-journald`는 재기동 간격을 실측하지 않았고, `otelcol-contrib`는 수집기 자신이라 멈추면 자기 중지 기록을 보내지 못해 이 방식으로 판정할 수 없다. 두 서비스를 sudo로 멈추는 명령은 계속 위 위험 명령 알림(`o2c_sudo_protected_services`)이 잡는다.
 
@@ -352,7 +352,9 @@ sudo auditctl -s        # enabled 1이어야 한다
 
 **유예는 행마다 판정한다**: 알림의 `pending`(쿼리 전체가 20분 동안 비지 않아야 울림)을 쓰지 않고 SQL이 행마다 "마지막 중지가 20분보다 오래됨"을 본다. `pending`이면 호스트를 순차로 재부팅할 때 다른 호스트의 중지가 겹쳐 방금 멈춘 호스트까지 울리고, 이미 울리는 행이 다른 호스트의 진짜 중지를 가린다. 알림 `silence`(재통지)는 알림 단위라 먼저 울린 행이 있는 동안 늦게 멈춘 호스트의 첫 통지가 최대 10분 늦어질 수 있어 재통지 간격을 짧게 뒀다.
 
-**한계**: 조회 구간(60분) 안에 중지 기록이 있어야 한다. 중지가 60분을 넘게 이어지면 중지 기록이 구간 밖으로 밀려 알림이 멈추므로(행이 나오는 구간은 유예 20분 뒤부터 40분), 멈춘 알림을 복구 신호로 단정하지 말고 `systemctl status`로 확인한다. 재부팅 때 수집기가 먼저 멈춰 `SERVICE_STOP`이 늦게 들어오는 경우(위 auditd 실측)는 시작 기록과 함께 들어와 울리지 않는다.
+**통지 지속 정책**: 한 번의 중지는 유예 20분이 찬 뒤부터 24시간 동안 10분마다 다시 울리고(기본값 기준 최대 142회), 그 뒤에는 중지 기록이 조회 구간(24시간) 밖으로 밀려 멎는다. 하루가 지나도 복구하지 않은 중지는 알림이 아니라 사람이 이어받는 사건으로 본다. 첫 통지는 유예 20분과 평가 주기(5분)를 더해 중지 뒤 20~25분 안에 온다. **알림이 멎은 것은 복구가 아니다**: 서비스가 다시 켜진 시작 기록(`SERVICE_START`)이 복구이고, 알림이 조용해졌다면 시작 기록이 있었는지 `systemctl status`와 `ausearch`(아래 확인)로 직접 확인한다. 통지가 너무 잦으면 `o2c_security_stop_renotify_minutes`를 유예 미만 안에서 늘린다.
+
+**호스트가 꺼져 있을 때**: 시작 기록은 서비스가 다시 켜져야 생긴다. 전원을 끄거나 폐기한 호스트, 수집기가 멈춰 시작 기록이 안 들어오는 호스트도 같은 모양으로 24시간까지 울린다. 먼저 호스트가 켜져 있는지, 로그가 들어오는지 확인한다. 재부팅 때 수집기가 먼저 멈춰 `SERVICE_STOP`이 늦게 들어오는 경우(위 auditd 실측)는 시작 기록과 함께 들어와 울리지 않는다.
 
 **왜 중요한가**: fail2ban이 멈추면 대입 공격 차단이, firewalld가 멈추면 방화벽 규칙 적용이, rsyslog가 멈추면 로그 수집이 끊긴다. root 셸에서 멈춘 경우는 sudo 위험 명령 알림이 잡지 못한다.
 
@@ -405,7 +407,7 @@ ssh -V   # OpenSSH 버전(알려진 취약 버전인지)
 
 **조건**: SSH 로그인 성공의 `user_name` 중 첫 성공이 최근 `o2c_ssh_new_user_window_minutes`(기본 10)분 안이고 그 앞 `o2c_ssh_new_user_lookback_days`(기본 5)일 동안 성공 기록이 없는 것. 평가는 `o2c_ssh_new_user_frequency_minutes`(기본 5)분마다이고 조회 구간은 5일 + 평가 구간(7,210분)이다. 호스트는 구분하지 않는다: 어느 서버에서든 5일 안에 성공한 적이 있으면 아는 사용자다. 한 번 울린 사용자는 이후 5일 동안 다시 울리지 않는다. 행은 사용자·서버·출발지별이다.
 
-**왜 중요한가**: 새 계정이나 탈취된 계정의 첫 사용일 수 있다. 새 담당자·배포용 계정의 정상 첫 로그인도 같은 모양이라 사람이 확인해야 한다. 5일 넘게 쉬었다가 돌아온 사용자도 다시 울린다. **한계**: 재통지 간격은 알림 전체에 적용된다. 다른 사용자가 울린 직후(재통지 10분 안) 처음 로그인한 사용자는 통지가 빠질 수 있다. 의심되면 `security_logs`에서 최근 SSH 로그인 성공의 `user_name` 목록을 직접 비교한다.
+**왜 중요한가**: 새 계정이나 탈취된 계정의 첫 사용일 수 있다. 새 담당자·배포용 계정의 정상 첫 로그인도 같은 모양이라 사람이 확인해야 한다. 5일 넘게 쉬었다가 돌아온 사용자도 다시 울린다. **한계: 5일 넘게 쉬었다 돌아오는 계정은 매번 울린다**: 월간·주간 작업 계정처럼 로그인 간격이 5일을 넘는 계정은 그 로그인마다 "처음 보는 사용자"로 P3가 울린다(정상이면 조치 없이 닫는다). 잦은 정상 계정이 있으면 `o2c_ssh_new_user_lookback_days`를 늘리되 조회 비용이 늘어난다. **한계**: 재통지 간격은 알림 전체에 적용된다. 다른 사용자가 울린 직후(재통지 10분 안) 처음 로그인한 사용자는 통지가 빠질 수 있다. 의심되면 `security_logs`에서 최근 SSH 로그인 성공의 `user_name` 목록을 직접 비교한다.
 
 **확인**: 행의 사용자와 출발지가 본인·작업자·자동화인지 확인한다. 새 계정이면 같은 시기의 계정·그룹 변경 알림(`infra-account-change`)이나 프로비저닝 이력과 대조한다. 로그 보기는 최근 SSH 로그인 성공 줄을 열고, 사용자 이름으로 걸러 본다.
 ```bash

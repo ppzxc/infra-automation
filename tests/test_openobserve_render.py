@@ -680,7 +680,7 @@ def test_security_alerts_are_created_with_their_grades_windows_and_raw_log_links
         assert a["stream_name"] == "security_logs" and a["query_condition"]["type"] == "sql", name
         assert a["context_attributes"]["severity"] == sev, name
         trigger = a["trigger_condition"]
-        assert (trigger["period"], trigger["frequency"], trigger["silence"], a["pending_period_sec"]) == (period, 1, silence, pending * 60), name
+        assert (trigger["period"], trigger["frequency"], trigger["silence"], a["pending_period_sec"]) == (period, 5 if name == "infra-security-service-stopped" else 1, silence, pending * 60), name   # 중지 알림은 24시간 구간이라 5분마다
         decoded = _decode_raw_url(_raw_original(desired, a))[2]   # 모두 WHERE에서 원문 조회를 파생한다
         assert decoded.startswith('SELECT * FROM "security_logs" WHERE ') and "count(" not in decoded, name
 
@@ -1520,6 +1520,64 @@ def test_the_grace_variable_reaches_the_sql(tmp_path):
     now = lambda seconds: _kst_us("2026-10-23 09:00:00") + seconds * 1_000_000
     assert _run_alert_on_sqlite(sql, [stop], "security_logs", now_us=now(1799)) == []
     assert len(_run_alert_on_sqlite(sql, [stop], "security_logs", now_us=now(1800))) == 1
+
+
+def _role_defaults():
+    return yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+
+
+def test_the_window_keeps_a_long_outage_alerting_for_a_day_so_silence_is_not_mistaken_for_recovery(desired):
+    """조회 구간이 1시간이던 때는 40분 뒤 알림이 조용해져 복구 신호와 구별되지 않았다(사용자 이야기 13). 기본 구간은 24시간이다."""
+    defaults = _role_defaults()
+    window = defaults["o2c_security_stop_window_minutes"]
+    assert window == 1440 and desired.store["alert"][STOPPED]["trigger_condition"]["period"] == window
+    stop = _unit_event("SERVICE_STOP", "fail2ban", 0)
+    for hours in (2, 12, 23):   # 중지 기록이 구간 안에 있는 한 SQL은 계속 행을 낸다
+        assert [r["unit"] for r in _stopped_rows(desired, stop, now=hours * 3600)] == ["fail2ban"], hours
+
+
+def test_a_longer_window_adds_no_false_positive_for_stops_that_were_followed_by_a_start(desired):
+    """HAVING이 마지막 중지 > 마지막 시작으로 판정하므로 구간이 길어져도 시작이 따라온 중지는 행이 되지 않는다."""
+    pairs = []
+    for unit in ("fail2ban", "firewalld", "rsyslog"):
+        for at in (0, 7200, 36000):   # 하루 동안 흩어진 재시작·재부팅 쌍(0초·14분 간격)
+            pairs += [_unit_event("SERVICE_STOP", unit, at), _unit_event("SERVICE_START", unit, at + (2 if at != 7200 else 840))]
+    assert _stopped_rows(desired, *pairs, now=23 * 3600) == []
+    # 오래전 중지가 있어도 나중 시작이 있으면 조용하다. 시작이 오래됐어도 그 뒤 중지가 없으면 마찬가지다
+    assert _stopped_rows(desired, _unit_event("SERVICE_STOP", "rsyslog", 0), _unit_event("SERVICE_START", "rsyslog", 60), now=23 * 3600) == []
+
+
+def test_the_evaluation_frequency_is_a_role_default_not_every_minute_because_the_window_is_a_day(desired):
+    """24시간 구간의 평가 한 번은 audit·인증 로그 수천만 건을 훑는다(스캔 비용은 명세). 5분마다 돌리고 재통지 간격 이하로만 둘 수 있다."""
+    defaults = _role_defaults()
+    assert defaults["o2c_security_stop_frequency_minutes"] == 5
+    trigger = desired.store["alert"][STOPPED]["trigger_condition"]
+    assert trigger["frequency"] == 5 and trigger["frequency"] <= trigger["silence"]
+
+
+def test_the_persistence_policy_scan_cost_and_the_quiet_after_a_day_are_written_down(desired):
+    text = (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
+    comment = text.split("o2c_security_stop_services:")[0].rsplit("\n\n", 1)[-1]
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for where, doc in (("comment", comment), ("spec", spec), ("runbook", runbook)):
+        for token in ("지속 정책", "24시간", "142"):   # 142 = (1440 - 20) / 10: 한 번의 중지가 낼 수 있는 통지 상한
+            assert token in doc, (where, token)
+    for token in ("스캔 비용", "3.4초", "복구가 아니다"):
+        assert token in spec, token
+    assert "복구가 아니다" in runbook and "systemctl status" in runbook
+
+
+def test_the_new_user_alert_documents_that_long_gap_accounts_alert_every_time_and_the_verify_wait_fits_its_window():
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    for where, doc in (("spec", spec), ("runbook", runbook)):
+        for token in ("5일 넘게 쉬었다", "월간·주간"):
+            assert token in doc, (where, token)
+    assert "o2c_verify_retries" in spec and "o2c_verify_delay" in spec
+    defaults = _role_defaults()
+    # 합성 로그인의 나이(검증이 기다리는 최대 시간)는 알림의 평가 구간 안에 있다
+    assert defaults["o2c_verify_retries"] * defaults["o2c_verify_delay"] < defaults["o2c_ssh_new_user_window_minutes"] * 60
 
 
 def test_the_grace_rationale_scope_and_everyday_false_positives_are_written_down(desired):

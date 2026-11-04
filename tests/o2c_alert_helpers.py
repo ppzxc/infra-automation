@@ -202,7 +202,7 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-account-lockout": ("P2 경고", 5, 5, 0, "account temporarily locked"),
     "infra-audit-watch-change": ("P2 경고", 5, 5, 0, 'key="identity"'),                              # 남은 보안 로그 알림(#330)
     "infra-ssh-login-unregistered-source": ("P2 경고", 5, 60, 0, "user_name <> 'root'"),
-    "infra-security-service-stopped": ("P1 긴급", 60, 10, 0, "type=SERVICE_STOP"),   # 보안 서비스 중지(#429): 유예는 행 단위로 SQL이 판정하므로 pending 0
+    "infra-security-service-stopped": ("P1 긴급", 1440, 10, 0, "type=SERVICE_STOP"),   # 보안 서비스 중지(#429): 유예는 행 단위로 SQL이 판정하므로 pending 0. 조회 24시간(통지 지속 정책)
 }
 
 RAID_ALERTS = {   # alert -> a fragment only its search carries

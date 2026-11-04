@@ -15,7 +15,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_host_audit_kisa import ROLE_DIR, _script, _status, _stub_bin, _write  # noqa: E402
+from test_host_audit_kisa import KISA_DIR, ROLE_DIR, _script, _status, _stub_bin, _write  # noqa: E402
 
 DEFAULTS = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
 DISTRO_PING = "usr/bin/ping"
@@ -43,7 +43,7 @@ def _host(tmp_path, caps=None, suid=(), getcap="stub", sep=" "):
     return root, commands
 
 
-def _u23(root, commands, defaults=None, hide_getcap=False):
+def _u23(root, commands, defaults=None, hide_getcap=False, exclude=None):
     bindir = _stub_bin(root, commands=commands)
     path = str(bindir) + ":/usr/bin:/bin"
     if hide_getcap:
@@ -59,6 +59,8 @@ def _u23(root, commands, defaults=None, hide_getcap=False):
     env = {"KISA_ROOT": str(root), "PATH": path}
     if defaults is not None:
         env["KISA_CAP_DEFAULTS"] = "\n".join(defaults)
+    if exclude is not None:
+        env["KISA_CAP_EXCLUDE"] = "\n".join(exclude)
     out = subprocess.run(["sh", "-s"], input=_script(), capture_output=True, text=True, env=env, timeout=120)
     assert out.returncode == 0, out.stderr
     return _status(out.stdout)["U-23"]
@@ -66,6 +68,10 @@ def _u23(root, commands, defaults=None, hide_getcap=False):
 
 def role_defaults():
     return DEFAULTS["host_audit_kisa_capability_defaults"]
+
+
+def role_exclude():
+    return DEFAULTS["host_audit_kisa_capability_exclude_paths"]
 
 
 # ---------------------------------------------------------------- the three cases of the ticket
@@ -185,8 +191,12 @@ def test_kisa_task_injects_the_role_variable_into_the_script():
 
 
 def test_capability_check_is_read_only_and_bounded():
-    text = (ROLE_DIR / "files" / "kisa" / "U-23.sh").read_text(encoding="utf-8")
-    assert "-exec getcap" in text and text.count("kisa_find") >= 2  # same 120 s limit and -xdev as SUID/SGID
+    u23 = (ROLE_DIR / "files" / "kisa" / "U-23.sh").read_text(encoding="utf-8")
+    lib = (ROLE_DIR / "files" / "kisa" / "_lib.sh").read_text(encoding="utf-8")
+    func = lib.split("kisa_getcap_find() {", 1)[1].split("\n}\n", 1)[0]   # the walk lives in one helper, called from U-23
+    assert "kisa_getcap_find" in u23
+    text = u23 + func
+    assert "-exec getcap" in func and func.count("kisa_find") >= 2 and "-xdev" in func  # same 120 s limit and -xdev as SUID/SGID
     assert "getcap -" not in text.replace("-exec getcap {}", "")  # no write/set flags, never setcap
     assert "setcap" not in text
 
@@ -236,3 +246,105 @@ def test_path_with_spaces_is_kept_whole_in_both_libcap_formats(tmp_path, sep, sp
 
     _, evidence = _u23(root, commands, ["/opt/my app/tool cap_chown"])
     assert "default only" in evidence
+
+
+# ---------------------------------------------------------------- container storage is not walked (Spec #433 final review)
+
+CONTAINER_LAYER_CAPS = {
+    "var/lib/docker/overlay2/0a1b/diff/usr/bin/ping": "cap_net_raw=ep",
+    "var/lib/docker/overlay2/0a1b/diff/usr/bin/app": "cap_dac_override=ep",
+    "var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1/fs/bin/x": "cap_chown=ep",
+    "var/lib/containers/storage/overlay/ab/diff/usr/bin/y": "cap_chown=ep",
+    "home/alice/.local/share/containers/storage/overlay/cd/diff/usr/bin/z": "cap_chown=ep",
+}
+
+
+def test_container_image_layers_are_not_walked_so_their_capabilities_are_noise_no_more(tmp_path):
+    """overlay2 등 컨테이너 레이어는 호스트 파일이 아니라 이미지 내용이다. 걸으면 같은 이미지가 늘 검토 항목으로 쏟아진다."""
+    root, commands = _host(tmp_path, dict(CONTAINER_LAYER_CAPS, **{"opt/app/tool": "cap_dac_override=ep"}))
+    verdict, evidence = _u23(root, commands, role_defaults(), exclude=role_exclude())
+
+    assert verdict == "GOOD"
+    assert "file capability review (1)" in evidence and "/opt/app/tool cap_dac_override" in evidence
+    assert "overlay" not in evidence and "snapshots" not in evidence and "default: 0" in evidence
+
+
+def test_a_host_with_capabilities_only_inside_container_layers_reports_none(tmp_path):
+    root, commands = _host(tmp_path, CONTAINER_LAYER_CAPS)
+    _, evidence = _u23(root, commands, role_defaults(), exclude=role_exclude())
+
+    assert "file capability: none" in evidence
+
+
+def test_without_the_exclusion_list_the_layers_would_be_reported(tmp_path):
+    """제외가 빈 목록이면 이전 동작(전부 탐색)이다 — 목록이 변수로 조정된다는 뜻이다."""
+    root, commands = _host(tmp_path, CONTAINER_LAYER_CAPS)
+    _, evidence = _u23(root, commands, role_defaults(), exclude=[])
+
+    assert "file capability review (5)" in evidence
+
+
+def test_the_exclusion_only_touches_the_capability_list_not_the_suid_verdict(tmp_path):
+    root, commands = _host(tmp_path, {}, suid=["var/lib/docker/overlay2/0a1b/diff/usr/bin/su"])
+    verdict, evidence = _u23(root, commands, role_defaults(), exclude=role_exclude())
+
+    assert verdict == "MANUAL" and "SUID/SGID files (1)" in evidence
+
+
+def test_a_similar_looking_path_outside_the_container_storage_is_still_checked(tmp_path):
+    root, commands = _host(tmp_path, {"opt/var/lib/docker-tools/x": "cap_chown=ep", "var/lib/dockerfiles/y": "cap_chown=ep"})
+    _, evidence = _u23(root, commands, role_defaults(), exclude=role_exclude())
+
+    assert "file capability review (2)" in evidence
+
+
+def test_the_exclusion_defaults_name_docker_containerd_podman_and_the_kisa_task_passes_them_in():
+    entries = role_exclude()
+    for path in ("/var/lib/docker", "/var/lib/containerd", "/var/lib/containers"):
+        assert path in entries
+    assert any(e.endswith("/.local/share/containers") for e in entries)   # rootless podman
+    assert all(e.startswith("/") and "\n" not in e for e in entries)
+    tasks = yaml.safe_load((ROLE_DIR / "tasks" / "kisa.yml").read_text(encoding="utf-8"))
+    script = tasks[0]["vars"]["_host_audit_kisa_script"]
+    assert "KISA_CAP_EXCLUDE=" in script and "host_audit_kisa_capability_exclude_paths" in script
+
+
+# ---------------------------------------------------------------- a walk that starts inside an excluded path (re-review)
+
+
+def _u23_with_mounts(tmp_path, mounts, exclude, caps):
+    """U-23 alone on the real filesystem (no KISA_ROOT) with kisa_local_mounts stubbed to hand back ``mounts`` as the walk's start points.
+
+    A host whose container storage is a mount of its own (e.g. /var/lib/docker/overlay2) makes that mount a top-level start point,
+    which sits *inside* the excluded path, so `-path <excluded>` alone never matches it.
+    """
+    lib = (KISA_DIR / "_lib.sh").read_text(encoding="utf-8").rstrip("\n")
+    stub = "kisa_local_mounts() {\n" + "".join("  printf '%%s\\n' '%s'\n" % m for m in mounts) + "}\n"
+    script = "\n".join([lib, stub, (KISA_DIR / "U-23.sh").read_text(encoding="utf-8"), (KISA_DIR / "_end.sh").read_text(encoding="utf-8")])
+    bindir = _stub_bin(tmp_path / "fake", commands=_getcap_stub(caps))
+    env = {"PATH": str(bindir) + ":/usr/bin:/bin", "KISA_CAP_EXCLUDE": "\n".join(exclude), "KISA_CAP_DEFAULTS": ""}
+    out = subprocess.run(["sh", "-s"], input=script, capture_output=True, text=True, env=env, timeout=120)
+    assert out.returncode == 0, out.stderr
+    return _status(out.stdout)["U-23"]
+
+
+def test_a_mount_inside_an_excluded_path_is_not_walked_when_it_is_the_walk_start(tmp_path):
+    docker = tmp_path / "var" / "lib" / "docker"
+    layer = docker / "overlay2"
+    other = tmp_path / "opt"
+    _write(layer / "0a1b" / "diff", "app", "bin", 0o755)
+    _write(other / "app", "tool", "bin", 0o755)
+    caps = {str(layer / "0a1b" / "diff" / "app").lstrip("/"): "cap_dac_override=ep",
+            str(other / "app" / "tool").lstrip("/"): "cap_chown=ep"}
+    _, evidence = _u23_with_mounts(tmp_path, [str(other), str(layer)], [str(docker)], caps)
+
+    assert "file capability review (1)" in evidence and "/app/tool cap_chown" in evidence
+    assert "overlay2" not in evidence
+
+
+def test_the_excluded_path_itself_as_a_start_point_is_skipped_too(tmp_path):
+    docker = tmp_path / "var" / "lib" / "docker"
+    _write(docker / "x", "app", "bin", 0o755)
+    _, evidence = _u23_with_mounts(tmp_path, [str(docker)], [str(docker)], {str(docker / "x" / "app").lstrip("/"): "cap_chown=ep"})
+
+    assert "file capability: none" in evidence

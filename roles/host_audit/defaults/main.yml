@@ -196,3 +196,16 @@ host_audit_regression_backup_enabled: false
 host_audit_backup_policy_file: "{{ role_path }}/../backup/files/host-key-policy.json"
 host_audit_rustfs_policy_snapshot_file: "{{ lookup('ansible.builtin.env', 'HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT') | default('', true) }}"
 host_audit_backup_policy_prefix: "backup-prod-"
+
+# file capability 탐색에서 들어가지 않을 경로 (#432 최종 리뷰, Spec #433). 컨테이너 이미지 레이어(/var/lib/docker/overlay2 등)는
+# 호스트 파일이 아니라 이미지 내용이라, 걸으면 같은 이미지가 호스트마다 검토 항목으로 쏟아져 노이즈가 된다.
+# - 항목은 `find -path` 글롭이다(앞은 `/`로 시작). 이 경로 아래는 통째로 건너뛴다(-prune).
+# - docker(/var/lib/docker), containerd(/var/lib/containerd), podman·buildah(/var/lib/containers)와 rootless podman(홈 아래 .local/share/containers).
+# - capability 목록에만 걸린다. SUID/SGID 판정(U-23 양호·수동)은 이 경로도 그대로 걷는다 — 판정의 의미를 바꾸지 않는다.
+# 한계: 컨테이너 안의 capability는 호스트에서 보지 않는다(이미지 점검은 이 점검 범위 밖). 비우면 전부 탐색한다.
+host_audit_kisa_capability_exclude_paths:
+  - "/var/lib/docker"
+  - "/var/lib/containerd"
+  - "/var/lib/containers"
+  - "/home/*/.local/share/containers"
+  - "/root/.local/share/containers"
