@@ -42,6 +42,7 @@ EXPECTED_ALERTS = {
     "infra-time-offset-exceeded", "infra-time-unsynced", "infra-time-sync-unavailable",   # 시각 동기(#336)
     "infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
     "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
+    "infra-ssh-login-failures-slow", "infra-ssh-password-spray",   # 인증 실패 알림 보강(Spec #433 / Ticket-1, #427)
     "infra-sshd-fatal-error", "infra-ssh-login-new-user",   # sshd 치명 오류·낯선 사용자 SSH 성공(#428)
     "infra-security-service-stopped",   # 보안 서비스 중지(Spec #433 / Ticket-3, #429)
 }
@@ -270,7 +271,7 @@ SECURITY_TIME_CASES = {   # alert -> (record fields, expected row without the ti
         [dict(event_action="ssh_login", event_outcome="success", user_name="root", source_address="198.51.100.7")],
         "• ns0272 ← 198.51.100.7 (1회)"),
     "infra-sudo-escalation-failure": (
-        [dict(event_action="sudo", event_outcome="failure", user_name="alice")], "• ns0272 / 사용자 alice: 실패 1회"),
+        [dict(event_action="sudo", event_outcome="failure", user_name="alice", body=None)], "• ns0272 / 사용자 alice: 실패 1회"),
     "infra-account-lockout": (
         [dict(body="pam_faillock(sshd:auth): Account temporarily locked")], "• ns0272: 잠금 기록 1건"),
 }

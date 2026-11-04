@@ -1203,6 +1203,216 @@ def test_github_audit_alerts_do_not_touch_the_existing_alert_sets(desired):
         assert name in desired.store["alert"]
 
 
+# --- 인증 실패 알림 보강: 느린 대입·스프레이·Invalid user·su 거부 (Spec #433 / Ticket-1, #427) ---
+SLOW, SPRAY, ESCALATION, PER_SOURCE = ("infra-ssh-login-failures-slow", "infra-ssh-password-spray",
+                                       "infra-sudo-escalation-failure", "infra-ssh-login-failures-per-source")
+MINUTE_US = 60 * 1_000_000
+
+
+def _ssh(ts, user="admin", source="203.0.113.10", kind="failed", port=None, host="ns0272"):
+    """sshd 한 줄이 수집 함수를 거친 모양. failed=존재하는 계정의 Failed password, invalid_failed=없는 계정의 Failed password,
+    probe=`Invalid user` 줄(event_outcome 없음). 옛 OpenSSH의 probe 줄은 포트가 없다."""
+    reason, outcome = {"failed": ("failed password", "failure"), "invalid_failed": ("invalid user", "failure"),
+                       "probe": ("invalid user", None), "success": (None, "success")}[kind]
+    return {"event_action": "ssh_login", "event_outcome": outcome, "event_reason": reason, "user_name": user, "source_address": source,
+            "source_port": port, "host_name": host, "_timestamp": _kst_us(ts) if isinstance(ts, str) else ts}
+
+
+def _window(desired, name, records, end):
+    """알림이 `end` 시각에 평가될 때 읽는 구간(period분)의 레코드."""
+    period = desired.store["alert"][name]["trigger_condition"]["period"]
+    end_us = end if isinstance(end, int) else _kst_us(end)
+    return [r for r in records if end_us - period * MINUTE_US < r["_timestamp"] <= end_us]
+
+
+def _in_window(desired, name, records, end, stream="security_logs"):
+    """알림이 `end` 시각에 평가될 때 읽는 구간의 레코드만으로 SQL을 돌려 통지 행을 돌려준다."""
+    window = _window(desired, name, records, end)
+    return _row_lines(desired, name, window, stream) if window else []
+
+
+def test_a_slow_brute_force_of_six_failures_every_five_minutes_fires_the_hour_alert_but_never_the_five_minute_one(desired):
+    start = _kst_us("2026-10-23 08:00:00")
+    recs = [_ssh(start + burst * 5 * MINUTE_US + i * 10_000_000) for burst in range(12) for i in range(6)]   # 5분마다 1분 안에 6회, 1시간
+    assert [at for at in range(0, 66) if _in_window(desired, PER_SOURCE, recs, start + at * MINUTE_US)] == []   # 어느 시각에도 5분 알림은 울리지 않는다
+    assert _in_window(desired, SLOW, recs, "2026-10-23 08:58:00") == ["• 203.0.113.10 → ns0272: 실패 72회 · 10-23 08:00:00~08:55:50"]
+    assert _in_window(desired, SLOW, recs, "2026-10-23 08:12:00")        # 한 시간이 다 차기 전에도 10회를 넘기는 순간 울린다
+
+
+@pytest.mark.parametrize("failures, fires", [(9, False), (10, True)])
+def test_the_hour_alert_fires_from_ten_failures_of_one_source_on_one_host(desired, failures, fires):
+    recs = [_ssh(f"2026-10-23 08:{n:02d}:00") for n in range(failures)]
+    assert bool(_in_window(desired, SLOW, recs, "2026-10-23 08:59:00")) is fires
+
+
+def test_the_hour_alert_keeps_hosts_and_sources_apart(desired):
+    recs = ([_ssh(f"2026-10-23 08:{n:02d}:00", host="ns0272") for n in range(6)] + [_ssh(f"2026-10-23 08:{n:02d}:30", host="ns0273") for n in range(6)]
+            + [_ssh(f"2026-10-23 08:{n:02d}:40", source="203.0.113.11") for n in range(6)])
+    assert _in_window(desired, SLOW, recs, "2026-10-23 08:59:00") == []
+
+
+def test_one_invalid_user_attempt_written_as_two_lines_counts_once_with_or_without_a_port_on_the_probe_line(desired):
+    pairs = [(_ssh(f"2026-10-23 08:{n:02d}:00", user=f"u{n}", kind="probe", port=40000 + n if n % 2 else None),
+              _ssh(f"2026-10-23 08:{n:02d}:07", user=f"u{n}", kind="invalid_failed", port=40000 + n)) for n in range(5)]   # 7초 뒤의 Failed password(실로그에서 본 간격)
+    recs = [r for pair in pairs for r in pair]
+    assert _in_window(desired, SLOW, recs, "2026-10-23 08:59:00") == []                       # 한 쌍 5번 = 5회, 줄 수 10이 아니다
+    recs += [_ssh(f"2026-10-23 08:{n:02d}:30", user="alice") for n in range(5)]
+    assert _in_window(desired, SLOW, recs, "2026-10-23 08:59:00") == ["• 203.0.113.10 → ns0272: 실패 10회 · 10-23 08:00:00~08:04:30"]
+
+
+def test_an_invalid_user_that_hangs_up_before_a_password_is_a_failure_and_so_is_a_password_line_without_its_probe(desired):
+    probes = [_ssh(f"2026-10-23 08:{n:02d}:00", user=f"u{n}", kind="probe") for n in range(10)]
+    assert len(_in_window(desired, SLOW, probes, "2026-10-23 08:59:00")) == 1
+    only_failed = [_ssh(f"2026-10-23 08:{n:02d}:00", user=f"u{n}", kind="invalid_failed", port=40000 + n) for n in range(10)]
+    assert len(_in_window(desired, SLOW, only_failed, "2026-10-23 08:59:00")) == 1
+
+
+def test_a_login_success_is_not_a_failure_in_either_new_alert(desired):
+    recs = [_ssh(f"2026-10-23 08:{n:02d}:00", user=f"u{n}", kind="success") for n in range(40)]
+    assert _in_window(desired, SLOW, recs, "2026-10-23 08:59:00") == [] and _in_window(desired, SPRAY, recs, "2026-10-23 08:59:00") == []
+
+
+@pytest.mark.parametrize("accounts, failures_each, fires", [(11, 3, True), (3, 14, False), (10, 3, False), (11, 2, False)])
+def test_the_spray_alert_needs_more_than_ten_accounts_and_at_least_thirty_failures(desired, accounts, failures_each, fires):
+    recs = [_ssh(f"2026-10-23 08:5{5 + n % 4}:{(n * 5) % 60:02d}", user=f"user{n}") for n in range(accounts) for _ in range(failures_each)]
+    assert bool(_in_window(desired, SPRAY, recs, "2026-10-23 08:59:00")) is fires, (accounts, failures_each)
+
+
+def test_the_spray_alert_counts_every_account_once_even_when_it_is_probed_and_fails(desired):
+    recs = [r for n in range(11) for r in (_ssh(f"2026-10-23 08:55:{n:02d}", user=f"user{n}", kind="probe"),
+                                           _ssh(f"2026-10-23 08:55:{n:02d}", user=f"user{n}", kind="invalid_failed", port=50000 + n))]
+    recs += [_ssh("2026-10-23 08:56:00", user="user0") for _ in range(8)]
+    assert _in_window(desired, SPRAY, recs, "2026-10-23 08:59:00") == []                       # 시도 11 + 8 = 19회
+    recs += [_ssh("2026-10-23 08:56:30", user="user1") for _ in range(11)]
+    assert _in_window(desired, SPRAY, recs, "2026-10-23 08:59:00") == ["• 203.0.113.10 → ns0272: 계정 11개 · 실패 30회 · 10-23 08:55:00~08:56:30"]
+
+
+def test_the_spray_window_is_five_minutes(desired):
+    recs = [_ssh(f"2026-10-23 08:{n * 2:02d}:00", user=f"user{n}") for n in range(12) for _ in range(3)]   # 24분에 걸친 36회
+    assert _in_window(desired, SPRAY, recs, "2026-10-23 09:00:00") == []
+
+
+def test_the_new_alerts_are_p2_event_alerts_with_variable_windows_thresholds_and_renotify(desired):
+    for name, period, silence in ((SLOW, 60, 60), (SPRAY, 5, 15)):
+        alert = desired.store["alert"][name]
+        assert alert["context_attributes"]["severity"] == "P2 경고" and alert["stream_name"] == "security_logs", name
+        assert (alert["trigger_condition"]["period"], alert["trigger_condition"]["frequency"], alert["trigger_condition"]["silence"]) == (period, 1, silence), name
+        assert alert["context_attributes"]["raw_log_line"].startswith("▶ 로그 보기: http"), name   # WHERE만으로 원문 조회를 만든다
+    defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert {k: defaults[k] for k in ("o2c_ssh_slow_window_minutes", "o2c_ssh_slow_min_failures", "o2c_ssh_slow_renotify_minutes",
+                                     "o2c_ssh_spray_window_minutes", "o2c_ssh_spray_min_failures", "o2c_ssh_spray_accounts_over",
+                                     "o2c_ssh_spray_renotify_minutes")} == {
+        "o2c_ssh_slow_window_minutes": 60, "o2c_ssh_slow_min_failures": 10, "o2c_ssh_slow_renotify_minutes": 60,
+        "o2c_ssh_spray_window_minutes": 5, "o2c_ssh_spray_min_failures": 30, "o2c_ssh_spray_accounts_over": 10, "o2c_ssh_spray_renotify_minutes": 15}
+
+
+def test_the_new_ssh_alert_variables_reach_the_rendered_definitions(tmp_path):
+    rendered = render_desired(tmp_path / "desired.json", extra={
+        "o2c_ssh_slow_window_minutes": 120, "o2c_ssh_slow_min_failures": 7, "o2c_ssh_slow_renotify_minutes": 90,
+        "o2c_ssh_spray_window_minutes": 10, "o2c_ssh_spray_min_failures": 44, "o2c_ssh_spray_accounts_over": 12, "o2c_ssh_spray_renotify_minutes": 25})
+    alerts = {o["name"]: o["body"] for o in rendered if o.get("kind") == "alert"}
+    slow, spray = alerts[SLOW], alerts[SPRAY]
+    assert (slow["trigger_condition"]["period"], slow["trigger_condition"]["silence"]) == (120, 90) and ">= 7" in slow["query_condition"]["sql"]
+    assert (spray["trigger_condition"]["period"], spray["trigger_condition"]["silence"]) == (10, 25)
+    assert ">= 44" in spray["query_condition"]["sql"] and "> 12" in spray["query_condition"]["sql"]
+
+
+def test_the_five_minute_ssh_alerts_are_unchanged(desired):
+    per_source = desired.store["alert"][PER_SOURCE]
+    assert (per_source["trigger_condition"]["period"], per_source["trigger_condition"]["silence"]) == (5, 15)
+    assert _sql(desired, PER_SOURCE).count("event_outcome = 'failure'") == 1 and "invalid user" not in _sql(desired, PER_SOURCE)
+    assert "invalid user" not in _sql(desired, "infra-ssh-login-failures-per-host")
+    probes = [_ssh(f"2026-10-23 08:5{n}:00", user=f"u{n}", kind="probe") for n in range(10)]
+    assert _row_lines(desired, PER_SOURCE, probes, "security_logs") == []   # 5분 알림은 probe 줄을 세지 않는다(계수 방식 그대로)
+
+
+def _su_audit(ts, host="ns0272", uid=1000, target="root", result="failed", exe="/usr/bin/su", auid=None):
+    auid = uid if auid is None else auid
+    body = ("type=USER_AUTH msg=audit(1793697289.294:6510864): pid=3814 uid=%d auid=%d ses=96232 msg='op=PAM:authentication grantors=? "
+            'acct="%s" exe="%s" hostname=? addr=? terminal=pts/0 res=%s\'') % (uid, auid, target, exe, result)
+    return {"service_name": "audit", "body": body, "host_name": host, "_timestamp": _kst_us(ts),
+            "event_action": None, "event_outcome": None, "event_reason": None, "user_name": None, "user_effective_name": None}
+
+
+def _su_secure(ts, host="ns0272", user="alice", target="root", uid=1000):
+    body = ("su: pam_unix(su:auth): authentication failure; logname=%s uid=%d euid=0 tty=/dev/pts/0 ruser=%s rhost=  user=%s" % (user, uid, user, target))
+    return {"event_action": "su", "event_outcome": "failure", "event_reason": "authentication failure", "user_name": user,
+            "user_effective_name": target, "host_name": host, "_timestamp": _kst_us(ts), "service_name": "auth", "body": body}
+
+
+def test_a_su_refused_by_pam_wheel_leaves_only_an_audit_record_and_the_escalation_alert_fires(desired):
+    rows = _row_lines(desired, ESCALATION, [_su_audit("2026-10-23 08:59:14")], "security_logs")
+    assert rows == ["• ns0272 / 사용자 uid 1000: 실패 1회 · 10-23 08:59:14"]
+
+
+def test_the_same_su_failure_in_secure_and_audit_is_notified_once(desired):
+    rows = _row_lines(desired, ESCALATION, [_su_secure("2026-10-23 08:59:14"), _su_audit("2026-10-23 08:59:14")], "security_logs")
+    assert rows == ["• ns0272 / 사용자 alice: 실패 1회 · 10-23 08:59:14"]
+    three = [r for s in ("08:59:03", "08:59:10", "08:59:16") for r in (_su_secure("2026-10-23 " + s), _su_audit("2026-10-23 " + s))]
+    assert _row_lines(desired, ESCALATION, three, "security_logs") == ["• ns0272 / 사용자 alice: 실패 3회 · 10-23 08:59:03~08:59:16"]
+
+
+def test_a_su_audit_success_or_another_programs_audit_failure_does_not_fire_the_escalation_alert(desired):
+    sudo_body = "type=USER_AUTH msg=audit(1.1:2): msg='op=PAM:authentication acct=\"root\" exe=\"/usr/bin/sudo\" res=failed'"
+    quiet = [_su_audit("2026-10-23 08:59:14", result="success"), _su_audit("2026-10-23 08:59:15", exe="/usr/sbin/sshd"),
+             dict(_su_audit("2026-10-23 08:59:16"), body=sudo_body)]
+    assert _row_lines(desired, ESCALATION, quiet, "security_logs") == []
+
+
+def test_su_audit_records_from_the_older_su_path_count_and_sudo_failures_still_count_with_them(desired):
+    recs = [_su_audit("2026-10-23 08:59:14", exe="/bin/su"),
+            {"event_action": "sudo", "event_outcome": "failure", "user_name": "bob", "host_name": "ns0272", "body": None, "_timestamp": _kst_us("2026-10-23 08:59:20")}]
+    rows = _row_lines(desired, ESCALATION, recs, "security_logs")
+    assert sorted(rows) == ["• ns0272 / 사용자 bob: 실패 1회 · 10-23 08:59:20", "• ns0272 / 사용자 uid 1000: 실패 1회 · 10-23 08:59:14"]
+
+
+@pytest.mark.parametrize("name", (SLOW, SPRAY, ESCALATION))
+def test_auth_failure_alert_fixtures_fire_as_expected_when_the_rendered_sql_runs(desired, name):
+    """서버 검증 단계(O2C-034)가 쓰는 합성 케이스를 로컬에서도 같은 SQL로 돌려, 발화해야 할 가짜 호스트만 나오는지 본다."""
+    alert = desired.store["alert"][name]
+    spec = FIXTURES[name]
+    cases = [(c, _case_records(name, c)) for c in spec["cases"]]
+    assert {c["fires"] for c, _ in cases} == {True, False}, name
+    rows = _run_alert_on_sqlite(alert["query_condition"]["sql"], [r for _, recs in cases for r in recs], alert["stream_name"])
+    assert {row["host_name"] for row in rows} == {c["host"] for c, _ in cases if c["fires"]}, name
+    assert len(rows) == len({row["host_name"] for row in rows}), name   # 한 호스트에 한 행(같은 su가 두 기록에 있어도 중복 통지 없음)
+
+
+def test_the_auth_failure_alerts_are_registered_in_the_spec_table_the_runbook_and_the_expected_list():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    for name in (SLOW, SPRAY):
+        assert name in EXPECTED_ALERTS, name
+        assert f'<a id="{name.removeprefix("infra-")}"></a>' in runbook and f"(`{name}`)" in runbook, name
+        assert f"| `{name}` |" in spec, name
+    assert "고유 키" in spec and "(user_name, source_port)" in spec and "포트 없는" in spec     # 고유 키를 바꾼 근거(실로그 7일)가 명세에 있다
+    assert "audit" in spec.split("| `infra-sudo-escalation-failure` |", 1)[1].split("\n", 1)[0] and "pam_wheel" in runbook
+
+
+def test_a_su_audit_record_of_an_enriched_audit_log_shows_the_name_not_the_uid(desired):
+    named = dict(_su_audit("2026-10-23 08:59:14"), body=_su_audit("2026-10-23 08:59:14")["body"] + '\x1dUID="carol" AUID="carol"')
+    assert _row_lines(desired, ESCALATION, [named], "security_logs") == ["• ns0272 / 사용자 carol: 실패 1회 · 10-23 08:59:14"]
+
+
+def test_each_user_keeps_his_own_escalation_row_and_one_users_secure_su_does_not_cancel_anothers_audit_only_su(desired):
+    """secure 행은 사용자별이다. 한 사용자의 secure su 실패 3건이 다른 사용자의 audit 전용 su 실패 3건을 상쇄하지 않아 합이 6이다."""
+    recs = ([_su_secure("2026-10-23 08:59:%02d" % n, user="alice", uid=1000) for n in (1, 2, 3)]
+            + [_su_audit("2026-10-23 08:59:%02d" % n, uid=1001) for n in (4, 5, 6)])
+    rows = _row_lines(desired, ESCALATION, recs, "security_logs")
+    assert sorted(rows) == ["• ns0272 / 사용자 alice: 실패 3회 · 10-23 08:59:01~08:59:03", "• ns0272 / 사용자 uid 1001: 실패 3회 · 10-23 08:59:04~08:59:06"]
+    both = recs + [_su_audit("2026-10-23 08:59:%02d" % n, uid=1000) for n in (1, 2, 3)]   # alice의 secure 3건과 같은 시도의 audit 3건: 더하지 않는다
+    assert len(_row_lines(desired, ESCALATION, both, "security_logs")) == 2
+    assert sorted(r.split(": 실패 ")[1][:2] for r in _row_lines(desired, ESCALATION, both, "security_logs")) == ["3회", "3회"]
+
+
+def test_escalation_rows_are_per_user_as_before_without_a_folded_more_users_suffix(desired):
+    recs = [_su_secure("2026-10-23 08:59:14", user="alice", uid=1000), _su_secure("2026-10-23 08:59:30", user="bob", uid=1001),
+            _su_secure("2026-10-23 08:59:40", user="carol", uid=1002)]
+    rows = _row_lines(desired, ESCALATION, recs, "security_logs")
+    assert len(rows) == 3 and not any("외 " in r for r in rows)
+    assert "more_users" not in _sql(desired, ESCALATION)
+
+
 # --- 보안 서비스 중지 State Alert와 기존 목록 보정 (Spec #433 / Ticket-3, #429) ---------------------------------------------------
 STOPPED = "infra-security-service-stopped"
 UNIT_BODY = ("type=%s msg=audit(1792627441.382:46621): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel "
@@ -1364,3 +1574,32 @@ def test_the_defaults_list_the_new_privileged_groups_and_protected_service_and_d
     assert {"disk", "shadow"} <= set(defaults["o2c_privileged_groups"]) and "fail2ban" in defaults["o2c_sudo_protected_services"]
     patterns = [p for c in defaults["o2c_sudo_risky_commands"] for p in c["patterns"]]
     assert "history -c" not in patterns and {"journalctl --vacuum", "journalctl --rotate", "chattr"} <= set(patterns)
+
+
+def _su_audit_named(ts, uid, auid, name):
+    rec = _su_audit(ts, uid=uid, auid=auid)
+    return dict(rec, body=rec["body"] + '\x1dUID="root" AUID="%s"' % name)
+
+
+def test_when_the_su_runner_uid_is_zero_people_are_told_apart_by_logname_and_auid_not_lumped_into_uid_0(desired):
+    """`sudo su -` 뒤의 su는 secure·audit 모두 uid가 0이다. 그때는 secure의 logname, audit의 auid(또는 AUID 이름)로 사람을 가른다."""
+    recs = ([_su_secure("2026-10-23 08:59:%02d" % n, user="alice", uid=0) for n in (1, 2, 3)]
+            + [_su_audit("2026-10-23 08:59:%02d" % n, uid=0, auid=1001) for n in (4, 5, 6)])
+    rows = _row_lines(desired, ESCALATION, recs, "security_logs")
+    assert sorted(rows) == ["• ns0272 / 사용자 alice: 실패 3회 · 10-23 08:59:01~08:59:03", "• ns0272 / 사용자 auid 1001: 실패 3회 · 10-23 08:59:04~08:59:06"]
+
+
+def test_uid_zero_secure_and_enriched_audit_of_the_same_person_count_once_and_two_people_stay_two_rows(desired):
+    same = ([_su_secure("2026-10-23 08:59:%02d" % n, user="alice", uid=0) for n in (1, 2, 3)]
+            + [_su_audit_named("2026-10-23 08:59:%02d" % n, 0, 1000, "alice") for n in (1, 2, 3)])
+    assert _row_lines(desired, ESCALATION, same, "security_logs") == ["• ns0272 / 사용자 alice: 실패 3회 · 10-23 08:59:01~08:59:03"]
+    two = [_su_secure("2026-10-23 08:59:01", user="alice", uid=0), _su_secure("2026-10-23 08:59:02", user="alice", uid=0), _su_secure("2026-10-23 08:59:03", user="bob", uid=0)]
+    assert sorted(r.split(" · ")[0] for r in _row_lines(desired, ESCALATION, two, "security_logs")) == ["• ns0272 / 사용자 alice: 실패 2회", "• ns0272 / 사용자 bob: 실패 1회"]
+
+
+def test_a_su_line_whose_uid_cannot_be_read_falls_back_to_the_user_name_or_unknown_never_to_the_log_text(desired):
+    odd_secure = dict(_su_secure("2026-10-23 08:59:01", user="alice"), body="su: pam_unix(su:auth): authentication failure; uid= euid=0 ruser=alice")
+    odd_audit = dict(_su_audit("2026-10-23 08:59:02"), body='type=USER_AUTH msg=audit(1.1:2): msg=\'op=PAM:authentication acct="root" exe="/usr/bin/su" res=failed\'')
+    rows = _row_lines(desired, ESCALATION, [odd_secure, odd_audit], "security_logs")
+    assert sorted(r.split(" · ")[0] for r in rows) == ["• ns0272 / 사용자 alice: 실패 1회", "• ns0272 / 사용자 unknown: 실패 1회"]
+    assert not any("type=USER_AUTH" in r or "pam_unix" in r for r in rows)

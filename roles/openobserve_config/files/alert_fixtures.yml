@@ -55,6 +55,88 @@ infra-ssh-login-failures-per-host:
       fires: false
       records:
         - {repeat: 49, event_action: ssh_login, event_outcome: failure, user_name: admin, source_address: 203.0.113.22}
+infra-ssh-login-failures-slow:
+  cases:
+    - name: 같은 출발지에서 비밀번호 실패 10회(느린 대입의 누적)
+      host: verify-ssh-slow-burst
+      fires: true
+      records:
+        - {repeat: 10, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: admin, source_address: 203.0.113.60, source_port: 40001}
+    - name: 실패 9회는 임계 미만
+      host: verify-ssh-slow-below
+      fires: false
+      records:
+        - {repeat: 9, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: admin, source_address: 203.0.113.61, source_port: 40002}
+    - name: 없는 계정의 Invalid user+Failed password 한 쌍은 1회로 센다(5쌍+실패 4회 = 9회)
+      host: verify-ssh-slow-pairs
+      fires: false
+      records:
+        - {repeat: 5, event_action: ssh_login, event_reason: invalid user, user_name: ghost, source_address: 203.0.113.62}
+        - {repeat: 5, event_action: ssh_login, event_outcome: failure, event_reason: invalid user, user_name: ghost, source_address: 203.0.113.62, source_port: 40003}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: admin, source_address: 203.0.113.62, source_port: 40004}
+    - name: 비밀번호를 내기 전에 끊긴 없는 계정의 Invalid user 줄 10개도 실패 10회다
+      host: verify-ssh-slow-probes
+      fires: true
+      records:
+        - {repeat: 10, event_action: ssh_login, event_reason: invalid user, user_name: ghost, source_address: 203.0.113.63}
+    - name: 로그인 성공은 실패로 세지 않는다
+      host: verify-ssh-slow-success
+      fires: false
+      records:
+        - {repeat: 12, event_action: ssh_login, event_outcome: success, user_name: admin, source_address: 203.0.113.64, source_port: 40005}
+infra-ssh-password-spray:
+  cases:
+    - name: 5분 안에 계정 11개로 33회 실패
+      host: verify-ssh-spray-burst
+      fires: true
+      records:
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user01, source_address: 203.0.113.70, source_port: 41001}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user02, source_address: 203.0.113.70, source_port: 41002}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user03, source_address: 203.0.113.70, source_port: 41003}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user04, source_address: 203.0.113.70, source_port: 41004}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user05, source_address: 203.0.113.70, source_port: 41005}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user06, source_address: 203.0.113.70, source_port: 41006}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user07, source_address: 203.0.113.70, source_port: 41007}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user08, source_address: 203.0.113.70, source_port: 41008}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user09, source_address: 203.0.113.70, source_port: 41009}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user10, source_address: 203.0.113.70, source_port: 41010}
+        - {repeat: 3, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: user11, source_address: 203.0.113.70, source_port: 41011}
+    - name: 계정 3개로 40회 실패는 단일 계정 대입이라 스프레이가 아니다
+      host: verify-ssh-spray-few-accounts
+      fires: false
+      records:
+        - {repeat: 14, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: admin, source_address: 203.0.113.71, source_port: 41101}
+        - {repeat: 13, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: root, source_address: 203.0.113.71, source_port: 41102}
+        - {repeat: 13, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: oracle, source_address: 203.0.113.71, source_port: 41103}
+    - name: 계정이 정확히 10개면 초과가 아니다
+      host: verify-ssh-spray-ten-accounts
+      fires: false
+      records:
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a01, source_address: 203.0.113.72, source_port: 41201}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a02, source_address: 203.0.113.72, source_port: 41202}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a03, source_address: 203.0.113.72, source_port: 41203}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a04, source_address: 203.0.113.72, source_port: 41204}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a05, source_address: 203.0.113.72, source_port: 41205}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a06, source_address: 203.0.113.72, source_port: 41206}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a07, source_address: 203.0.113.72, source_port: 41207}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a08, source_address: 203.0.113.72, source_port: 41208}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a09, source_address: 203.0.113.72, source_port: 41209}
+        - {repeat: 4, event_action: ssh_login, event_outcome: failure, event_reason: failed password, user_name: a10, source_address: 203.0.113.72, source_port: 41210}
+    - name: 없는 계정 11개를 비밀번호 없이 찔러 보기(Invalid user 줄만 33개)
+      host: verify-ssh-spray-probes
+      fires: true
+      records:
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p01, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p02, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p03, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p04, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p05, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p06, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p07, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p08, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p09, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p10, source_address: 203.0.113.73}
+        - {repeat: 3, event_action: ssh_login, event_reason: invalid user, user_name: p11, source_address: 203.0.113.73}
 infra-root-login-success:
   cases:
     - name: 공인 미등록 출발지 root SSH 로그인 성공
@@ -142,6 +224,22 @@ infra-sudo-escalation-failure:
       fires: false
       records:
         - {event_action: su, event_outcome: success, user_name: alice}
+    - name: pam_wheel이 거부한 su는 audit 기록만 있어도 울린다
+      host: verify-su-wheel-denied
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=USER_AUTH msg=audit(1793697289.294:6510864): pid=3814 uid=1000 auid=1000 ses=96232 msg=''op=PAM:authentication grantors=? acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/0 res=failed'''}
+    - name: 같은 su 실패가 secure와 audit에 함께 있어도 한 행(한 번)만 나온다
+      host: verify-su-both-records
+      fires: true
+      records:
+        - {event_action: su, event_outcome: failure, user_name: alice, body: 'su: pam_unix(su:auth): authentication failure; logname=alice uid=1000 euid=0 tty=/dev/pts/0 ruser=alice rhost=  user=root'}
+        - {service_name: audit, body: 'type=USER_AUTH msg=audit(1793697289.294:6510865): pid=3815 uid=1000 auid=1000 ses=96232 msg=''op=PAM:authentication grantors=pam_unix acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/0 res=failed'''}
+    - name: audit의 su 성공은 기록만 한다
+      host: verify-su-audit-success
+      fires: false
+      records:
+        - {service_name: audit, body: 'type=USER_AUTH msg=audit(1793697289.294:6510866): pid=3816 uid=1000 auid=1000 ses=96232 msg=''op=PAM:authentication grantors=pam_unix acct="root" exe="/usr/bin/su" hostname=? addr=? terminal=pts/0 res=success'''}
 infra-oom-kill:
   cases:
     - name: OOM kill (대문자 Out of memory)
