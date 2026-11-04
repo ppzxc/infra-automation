@@ -8,7 +8,6 @@ import importlib.util
 import re
 import sqlite3
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 
 import yaml
@@ -44,6 +43,7 @@ EXPECTED_ALERTS = {
     "infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
     "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
     "infra-sshd-fatal-error", "infra-ssh-login-new-user",   # sshd 치명 오류·낯선 사용자 SSH 성공(#428)
+    "infra-security-service-stopped",   # 보안 서비스 중지(Spec #433 / Ticket-3, #429)
 }
 
 PROMQL_ALERTS = {
@@ -126,18 +126,20 @@ def _date_format(value, fmt, offset):
     tz = timezone(sign * timedelta(hours=int(hours), minutes=int(minutes)))
     return datetime.fromtimestamp(seconds, tz).strftime(fmt)
 
-def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
+def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify", now_us=None):
     """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows.
 
-    주의: `_timestamp`가 없는 레코드는 고정 시각(2026-10-23)으로 적재된다. 이 시각은 `now()`(실제 현재 시각)와 멀어 `now()`를 쓰는 SQL
-    (낯선 사용자 알림 등)에서는 "오래된 기록"이 된다. 그런 SQL은 레코드마다 `_timestamp`를 현재 시각 기준으로 직접 넣는다
-    (OpenObserve가 수집 시각을 찍는 것과 같다).
+    ``now_us``: what ``now()`` means for SQL that reads the clock (``to_unixtime(now())``); default is the real current time.
+
+    주의: `_timestamp`가 없는 레코드는 고정 시각(2026-10-23)으로 적재된다. 이 시각은 `now()`와 멀어 `now()`를 쓰는 SQL(낯선 사용자 알림 등)에서는
+    "오래된 기록"이 된다. 그런 SQL은 레코드마다 `_timestamp`를 `now_us` 기준으로 직접 넣는다(OpenObserve가 수집 시각을 찍는 것과 같다).
     """
     db = sqlite3.connect(":memory:")
+    now_seconds = (now_us / 1_000_000) if now_us is not None else datetime.now(timezone.utc).timestamp()
+    db.create_function("now", 0, lambda: now_seconds)
+    db.create_function("to_unixtime", 1, lambda value: value)
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
     db.create_function("date_format", 3, _date_format)
-    db.create_function("now", 0, time.time)   # OpenObserve의 now()/to_unixtime(): 초 단위 현재 시각(to_unixtime은 그대로 돌려준다)
-    db.create_function("to_unixtime", 1, lambda value: value)
     records = [dict({"_timestamp": 1_792_767_302_000_000}, **r) for r in records]   # OpenObserve stamps every record on ingest
     columns = sorted({k for r in records for k in r})
     db.execute('CREATE TABLE "%s" (%s)' % (stream, ", ".join(f'"{c}"' for c in columns)))
@@ -199,6 +201,7 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-account-lockout": ("P2 경고", 5, 5, 0, "account temporarily locked"),
     "infra-audit-watch-change": ("P2 경고", 5, 5, 0, 'key="identity"'),                              # 남은 보안 로그 알림(#330)
     "infra-ssh-login-unregistered-source": ("P2 경고", 5, 60, 0, "user_name <> 'root'"),
+    "infra-security-service-stopped": ("P1 긴급", 60, 10, 0, "type=SERVICE_STOP"),   # 보안 서비스 중지(#429): 유예는 행 단위로 SQL이 판정하므로 pending 0
 }
 
 RAID_ALERTS = {   # alert -> a fragment only its search carries
