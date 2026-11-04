@@ -113,19 +113,44 @@ o2c_auth_silent_p2_minutes: 60
 o2c_gww_silent_hours: 13
 o2c_gww_roster: [github-webhook-watch]
 # 계정·그룹 변경 알림에서 따로 표시하는 특권 그룹(이 그룹의 가입·탈퇴 줄은 "특권 그룹 변경"으로 묶인다). docker는 root와 같은 권한이다.
-o2c_privileged_groups: [wheel, sudo, docker, root]
+# disk는 블록 장치를 직접 읽고 쓰고(root 파일 시스템 읽기) shadow는 비밀번호 해시를 읽으므로 우회 권한 부여 통로다(Spec #433 / Ticket-3).
+o2c_privileged_groups: [wheel, sudo, docker, root, disk, shadow]
 # 위험 명령 sudo 실행: sudo 명령 줄(소문자)에 들어 있으면 P1인 문구. 라벨은 통지 행에 실린다(명령 원문은 비밀값이 섞일 수 있어 싣지 않는다).
 # 문구는 붙어 있는 그대로 찾는다(`systemctl%stop%`처럼 띄우면 긴 sh -c 스크립트 안의 무관한 단어에 걸린다).
+# 일상 오탐 가능성(Spec #433 / Ticket-3): `chattr`은 이슈·스펙대로 옵션 구분 없이 건다(`chattr -i`가 울려야 하고 `chattr +a`·`chattr +i`로 로그 파일을 잠그는
+# 정상 하드닝 작업도 같이 울린다). `journalctl --vacuum`·`journalctl --rotate`도 용량 정리·점검 같은 정상 작업이 같은 명령을 쓴다. P1이지만 사람이 직접 친
+# 명령만 잡히고(Ansible become 작업은 안 보임) 평소 0건에 가까워, 울리면 작업 일정과 대조해 정상 작업이면 닫는다. 오탐이 잦으면 문구를 좁혀 덮어쓴다.
 o2c_sudo_risky_commands:
   - {label: SELinux 해제, patterns: [setenforce 0, setenforce permissive]}
   - {label: 방화벽 규칙 초기화, patterns: [iptables -f, iptables --flush, ip6tables -f, ip6tables --flush, nft flush ruleset, firewall-cmd --panic-on]}
   - {label: 감사 규칙 끄기·삭제, patterns: [auditctl -e 0, auditctl -d]}
   - {label: 계정 삭제, patterns: ['userdel ']}
-  - {label: 명령 기록 삭제, patterns: [history -c]}
-  - {label: 불변 속성 해제, patterns: [chattr -i]}
+  # `history -c`는 셸 내장 명령이라 sudo 기록에 남지 않아 걸린 적이 없다(Spec #433 / Ticket-3에서 뺌). 로그 지우기는 journalctl 정리·회전이 sudo로 남는다.
+  - {label: 저널 로그 삭제·회전, patterns: [journalctl --vacuum, journalctl --rotate]}
+  - {label: 불변 속성 조작, patterns: [chattr]}
 # 이 서비스를 멈추거나(stop·kill) 끄는(disable·mask) sudo 명령도 위험 명령이다("보안·로그 서비스 중지"). restart는 세지 않는다.
-o2c_sudo_protected_services: [auditd, rsyslog, systemd-journald, firewalld, otelcol-contrib]
+o2c_sudo_protected_services: [auditd, rsyslog, systemd-journald, firewalld, otelcol-contrib, fail2ban]
 o2c_sudo_risky_groups: "{{ o2c_sudo_risky_commands | o2c_sudo_risky_groups(o2c_sudo_protected_services, '보안·로그 서비스 중지') }}"
+
+# 보안 서비스 중지 State Alert(infra-security-service-stopped, Spec #433 / Ticket-3, #429): 감사 로그 SERVICE_STOP·SERVICE_START의 (호스트, unit)별 마지막 시각을 비교해
+# 마지막 중지가 시작보다 늦고 그 중지가 grace(분)보다 오래됐으면 그 행이 P1이다. 유예는 알림 pending(쿼리 전체가 grace 동안 비지 않아야 함)이 아니라 SQL이 행마다
+# 판정한다: pending이면 호스트를 순차로 재부팅할 때 다른 호스트의 중지가 겹쳐 방금 멈춘 호스트까지 울리고, 이미 울리는 행이 다른 호스트의 진짜 중지를 가린다.
+# auditd는 기존 알림(infra-auditd-stopped)이 DAEMON_END 기록으로 맡으므로 넣지 않는다. 대상은 sudo 보호 목록(o2c_sudo_protected_services)보다 일부러 좁다:
+# 이 알림은 실로그로 재기동 간격을 확인한 세 서비스만 본다. systemd-journald는 재기동 간격을 실측하지 않았고, otelcol-contrib는 수집기 자신이라 멈추면 자기 중지
+# 기록을 보내지 못해 이 방식으로 판정할 수 없다. 두 서비스를 sudo로 멈추는 명령은 계속 위험 명령 알림(sudo 보호 목록)이 잡는다.
+# grace는 실로그(보존 기간 안 audit SERVICE_STOP·START 33건, 2026-11-04 조회)에서 재기동 간격으로 정했다. 프로비저닝·서비스 재시작은 중지와 시작이 0~2초 간격이고,
+# 재부팅은 중지→시작이 가장 길 때 14분(SELinux 재라벨링이 붙은 재부팅: 15:59:40 중지 → 16:13:36~42 시작)이었다. 20분은 그 14분에 여유를 둔 값이라
+# 재부팅 중 시작을 기다리는 동안에는 울리지 않는다. rsyslog는 이 재부팅 오탐(재부팅 때 수집기가 살아 있는 동안 SERVICE_STOP이 먼저 들어옴) 때문에
+# 알림 대상에서 빠졌었는데, "중지가 grace 동안 이어질 때만" 판정하므로 그 오탐이 없어져 다시 넣는다.
+# unit 필드 형식은 같은 실로그(최근 30일 중 SERVICE_STOP·START)로 확인했다: `msg='unit=<이름> comm="systemd" …'` 모양이고 이름에 `.service` 접미가 없으며(0건)
+# 이름 바로 뒤에 항상 공백이 온다. 그래서 SQL은 `unit=<이름> `(뒤 공백 포함)으로 찾아 `fail2ban-extra` 같은 접두 일치를 막는다.
+# window는 grace보다 길어야 한다(중지가 조회 구간 밖으로 밀리기 전에 grace가 차야 하고, 행이 나오는 구간은 window - grace다). renotify는 재통지 간격(알림 silence)이고
+# grace보다 짧아야 한다: silence는 알림 단위라 먼저 울린 행이 있는 동안 늦게 멈춘 호스트의 통지가 최대 renotify분 늦어지므로 짧게 둔다. 세 값 모두 양의 정수다.
+# 호스트 재부팅이 20분을 넘기면(대용량 재라벨링 등) 오탐이 나므로 그런 호스트가 있으면 grace를 Semaphore Environment(-e)로 늘린다.
+o2c_security_stop_services: [fail2ban, firewalld, rsyslog]
+o2c_security_stop_grace_minutes: 20
+o2c_security_stop_window_minutes: 60
+o2c_security_stop_renotify_minutes: 10
 
 # 스위치 syslog 알림(Spec #277). 값은 모두 역할 기본 변수이며 Semaphore Environment(-e)로 덮어쓴다 — 저장소에는 IP·포트·계정을 두지 않는다.
 # 메시지 코드는 Cisco가 찍는 그대로 `%`를 뺀 형태(FACILITY-SEVERITY-MNEMONIC)다. 형식은 O2C-002에서 검증한다(SQL에 들어간다).
@@ -436,7 +461,7 @@ o2c_alerts:
     severity: "P2 경고"
     severity_icon: "🟠"
     title: "계정·그룹 변경 (특권 그룹 포함)"
-    what: "서버에서 계정·그룹이 추가·삭제·변경되거나 비밀번호가 바뀌었습니다. 행의 종류가 특권 그룹 변경이면 wheel·sudo·docker·root 그룹의 구성원이 바뀐 것입니다."
+    what: "서버에서 계정·그룹이 추가·삭제·변경되거나 비밀번호가 바뀌었습니다. 행의 종류가 특권 그룹 변경이면 {{ o2c_privileged_groups | join('·') }} 그룹의 구성원이 바뀐 것입니다."
     why: "계정 추가와 특권 그룹 가입은 침입자가 발판을 남기는 전형적인 수법입니다. 운영 작업(Semaphore 프로비저닝)도 같은 기록을 남기므로 작업 이력과 대조해야 합니다(ISMS 2.5.1 사용자 계정 관리)."
     action: "① 행의 실행 계정과 시각을 Semaphore 작업 이력·작업 일정과 대조 ② 계획에 없던 변경이면 로그 보기로 대상 계정을 확인하고 계정 잠금(usermod -L)·그룹 탈퇴 후 보안 담당 보고 ③ 특권 그룹 변경은 getent group wheel sudo docker로 현재 구성원 확인"
     runbook: "{{ o2c_runbook_base }}#account-change"
@@ -464,7 +489,7 @@ o2c_alerts:
     severity: "P1 긴급"
     severity_icon: "🔴"
     title: "sudo로 위험 명령 실행 (보안 기능 해제·기록 삭제)"
-    what: "sudo로 보안 기능을 끄거나 기록을 지우는 명령(SELinux 해제, 방화벽 규칙 초기화, 감사·로그 서비스 중지, 계정 삭제, 명령 기록 삭제, 불변 속성 해제)이 실행됐습니다."
+    what: "sudo로 보안 기능을 끄거나 기록을 지우는 명령(SELinux 해제, 방화벽 규칙 초기화, 감사·로그 서비스 중지, 계정 삭제, 저널 로그 삭제·회전, 불변 속성 조작)이 실행됐습니다."
     why: "침입자가 흔적을 지우거나 방어를 끄는 단계에서 쓰는 명령입니다. 계획된 작업이 아니라면 침해가 진행 중일 수 있습니다(ISMS 2.9.4 로그 및 접속기록 관리)."
     action: "① 행의 사용자에게 작업 여부를 확인하고 작업 일정과 대조 ② 확인되지 않으면 그 계정 세션 종료·비밀번호 변경 후 보안 담당 보고, 꺼진 기능(SELinux·방화벽·auditd·rsyslog) 즉시 복구 ③ 계획된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#sudo-risky-command"
@@ -482,7 +507,7 @@ o2c_alerts:
     silence: 5
   # auditd만 본다: 정상 종료 순서에서 수집기(otelcol-contrib)가 auditd보다 먼저 멈춰, 재부팅 때의 DAEMON_END는 부팅 뒤 늦게 들어와
   # 조회 구간(이벤트 시각 기준) 밖에 놓인다(실측: ns0338 재부팅). rsyslog·journald의 SERVICE_STOP은 재부팅 중 수집기가 살아 있는 동안 들어와
-  # 오탐이 나므로 이 알림에서 뺐다 — 그 서비스를 sudo로 멈추는 명령은 infra-sudo-risky-command가 잡는다.
+  # 오탐이 나므로(2분 대기) 이 알림에서 뺐다 — sudo로 멈추는 명령은 infra-sudo-risky-command가, 멈춘 채 이어지는 fail2ban·firewalld·rsyslog는 infra-security-service-stopped(20분 대기)가 잡는다.
   - name: infra-auditd-stopped
     severity: "P1 긴급"
     severity_icon: "🔴"
@@ -508,6 +533,34 @@ o2c_alerts:
     frequency: 1
     silence: 10
     pending_minutes: 2
+  - name: infra-security-service-stopped
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "보안 서비스({{ o2c_security_stop_services | join('·') }}) 중지가 이어짐"
+    what: "{{ o2c_security_stop_services | join('·') }} 중 하나가 멈췄고 {{ o2c_security_stop_grace_minutes }}분이 지나도 다시 시작되지 않았습니다(재시작·재부팅처럼 곧 다시 켜지는 중지는 알리지 않습니다)."
+    why: "fail2ban이 멈추면 대입 공격 차단이, firewalld가 멈추면 방화벽 규칙 적용이, rsyslog가 멈추면 로그 수집이 끊깁니다. 침입자가 방어를 끄고 흔적을 줄이려고 먼저 멈추는 대상이며, root 셸에서 멈춘 경우는 sudo 위험 명령 알림이 잡지 못합니다(ISMS 2.9.4 로그 및 접속기록 관리)."
+    action: "① 대상 서버에서 systemctl status <서비스>로 상태 확인 ② 멈춰 있으면 systemctl start <서비스>로 복구하고 직전 로그인·sudo 기록으로 누가 멈췄는지 확인 ③ 계획에 없던 중단이면 보안 담당 보고"
+    runbook: "{{ o2c_runbook_base }}#security-service-stopped"
+    row_template: '• {host_label}: {unit} 중지 · {event_time}'
+    description: "감사 로그(security_logs, service_name=audit)의 SERVICE_STOP·SERVICE_START(res=success)에서 (호스트, unit({{ o2c_security_stop_services | join('·') }}))별 마지막 중지가 마지막 시작보다 늦고 {{ o2c_security_stop_grace_minutes }}분보다 오래됨 — 유예는 SQL이 행마다 판정(알림 pending 0)해 순차 재부팅에서 서로 가리지 않고, 재시작·재부팅은 시작 기록이 곧 따라와 풀린다. auditd는 infra-auditd-stopped가 맡는다 (State Alert, 조회 {{ o2c_security_stop_window_minutes }}분, 재통지 {{ o2c_security_stop_renotify_minutes }}분)"
+    stream: security_logs
+    sql: >-
+      SELECT host_name,
+      CASE {% for u in o2c_security_stop_services %}WHEN body LIKE '%unit={{ u }} %' THEN '{{ u }}' {% endfor %}END AS unit,
+      date_format(max(CASE WHEN body LIKE 'type=SERVICE_STOP %' THEN _timestamp END), '{{ o2c_event_time_format }}', '{{ o2c_event_time_offset }}') AS event_time,
+      {{ o2c_host_label_sql }}
+      FROM "security_logs"
+      WHERE service_name = 'audit' AND (body LIKE 'type=SERVICE_STOP %' OR body LIKE 'type=SERVICE_START %') AND body LIKE '% res=success%'
+      AND ({% for u in o2c_security_stop_services %}{{ ' OR ' if not loop.first else '' }}body LIKE '%unit={{ u }} %'{% endfor %})
+      GROUP BY host_name, unit
+      HAVING max(CASE WHEN body LIKE 'type=SERVICE_STOP %' THEN _timestamp ELSE 0 END)
+      > max(CASE WHEN body LIKE 'type=SERVICE_START %' THEN _timestamp ELSE 0 END)
+      AND max(CASE WHEN body LIKE 'type=SERVICE_STOP %' THEN _timestamp ELSE 0 END) <= to_unixtime(now()) * 1000000 - {{ (o2c_security_stop_grace_minutes | int) * 60000000 }}
+      ORDER BY host_name
+    period: "{{ o2c_security_stop_window_minutes }}"
+    frequency: 1
+    silence: "{{ o2c_security_stop_renotify_minutes }}"
+    pending_minutes: 0
   - name: infra-account-lockout
     severity: "P2 경고"
     severity_icon: "🟠"

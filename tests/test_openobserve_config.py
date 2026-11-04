@@ -2414,7 +2414,11 @@ def test_sudo_risky_command_list_builds_safe_like_conditions_and_rejects_unsafe_
                                    {"o2c_sudo_risky_commands": [{"label": "x", "patterns": ["a'b"]}]},
                                    {"o2c_sudo_protected_services": ["Auditd"]}, {"o2c_ssh_bruteforce_min_failures": 0},
                                    {"o2c_audit_account_tools": ["Useradd"]}, {"o2c_audit_account_tools": ["a'b"]},
-                                   {"o2c_unregistered_login_silence_minutes": "1h"}, {"o2c_fortigate_new_source_silence_minutes": "x"}])
+                                   {"o2c_unregistered_login_silence_minutes": "1h"}, {"o2c_fortigate_new_source_silence_minutes": "x"},
+                                   {"o2c_security_stop_services": []}, {"o2c_security_stop_services": ["fail2ban", "auditd"]},   # 중지 알림(#429): 비었거나 auditd가 있거나
+                                   {"o2c_security_stop_services": ["Fail2ban"]}, {"o2c_security_stop_grace_minutes": 0},
+                                   {"o2c_security_stop_window_minutes": "1h"}, {"o2c_security_stop_grace_minutes": 60, "o2c_security_stop_window_minutes": 60},
+                                   {"o2c_security_stop_renotify_minutes": 0}, {"o2c_security_stop_renotify_minutes": 20}])
 def test_invalid_security_alert_variables_fail_before_any_request(o2, extra):
     res = _apply(o2, extra=extra)
     assert res.returncode != 0 and o2.reads == [] and o2.writes == []
