@@ -31,7 +31,8 @@
               '/etc/profile.d/98-node-env.sh', '/etc/environment', chrony_path,
               '/etc/sudoers.d/99-security-policy', audit_rules_path, '/etc/fail2ban/jail.d/sshd.local',
               '/var/log/journal', '/etc/audit/auditd.conf', '/etc/systemd/journald.conf.d', '/etc/systemd/journald.conf.d/50-persistent.conf',
-              '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json'] }}
+              '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json',
+              '/var/log/wtmp', '/var/log/btmp', '/var/run/utmp', '/var/log/lastlog', '/etc/localtime'] }}
       read:
         - /etc/ssh/sshd_config
         - /home/infra-legacy/.ssh/authorized_keys
@@ -211,8 +212,16 @@
               - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b32 .*-k var_log_delete$') | length >= 1"
               - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b64 -S .*-F auid>=1000 -F auid!=(unset|4294967295) -k kernel_module$') | length == 1"
               - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b32 -S .*-F auid>=1000 -F auid!=(unset|4294967295) -k kernel_module$') | length == 1"
-              - "'execve' not in (f.read[audit_rules_path] | regex_replace('(?m)^#.*$', ''))"
-            fail_msg: "auditd rules file is missing, or still traces every execve."
+              # 전수 execve 추적 금지: execve 규칙은 증적 전용 키(evidence_privileged_exec)의 자격 전환 필터(-C)가 붙은 것만이다
+              - "f.read[audit_rules_path] | regex_replace('(?m)^#.*$', '') | regex_findall('(?m)^.*-S execve.*$') | reject('search', ' -C (uid!=euid|gid!=egid) ') | list | length == 0"
+              # Evidence-Only Watch Key(#435): 알림 없이 증적으로만 남는 syscall 규칙 넷(b64·b32, 로그인 사용자만)과 감시 키(로그인 기록·시간)
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b64 -S execve -C (uid!=euid|gid!=egid) -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_privileged_exec$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b32 -S execve -C (uid!=euid|gid!=egid) -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_privileged_exec$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_file_delete$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S adjtimex,settimeofday -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_time_change$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S clock_settime -F a0=0x0 -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_time_change$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S mount -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_mount$') | length == 2"
+            fail_msg: "auditd rules file is missing, still traces every execve, or lacks the evidence-only syscall rules (evidence_privileged_exec, evidence_file_delete, evidence_time_change, evidence_mount)."
           when:
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
@@ -224,7 +233,11 @@
             that:
               - "'var_log_delete' in f.cmd.audit_loaded.stdout"
               - "'kernel_module' in f.cmd.audit_loaded.stdout"
-            fail_msg: "auditctl -l shows this role's rules but not the syscall rules (var_log_delete, kernel_module): rules are not loaded (see #424 on RHEL)."
+              - "'evidence_privileged_exec' in f.cmd.audit_loaded.stdout"
+              - "'evidence_file_delete' in f.cmd.audit_loaded.stdout"
+              - "'evidence_time_change' in f.cmd.audit_loaded.stdout"
+              - "'evidence_mount' in f.cmd.audit_loaded.stdout"
+            fail_msg: "auditctl -l shows this role's rules but not the syscall rules (var_log_delete, kernel_module, evidence_*): rules are not loaded (see #424 on RHEL)."
           when:
             - f.cmd.audit_loaded.rc == 0
             - "'identity' in f.cmd.audit_loaded.stdout"
@@ -334,6 +347,34 @@
             that:
               - "'/nonexistent/molecule-secret.env' not in f.read[audit_rules_path]"
             fail_msg: "a missing audit_watch_paths entry was written to the audit rules."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
+        # Evidence-Only Watch Key 감시 경로(#435, 이야기 26): 경로가 있으면 규칙에 있고, 없으면 규칙에 없다(없는 `-w`가 적재를 깨지 않게 SEC-100·SEC-101이 거른다).
+        # 테스트 이미지에 경로가 있는지는 이미지마다 달라, 존재 여부를 수집해 그 값과 맞는지를 본다.
+        - name: "[VERIFY-SEC-100] Verify each evidence watch path is in the audit rules exactly when it exists"
+          ansible.builtin.assert:
+            that:
+              - "(('-w ' ~ item.path ~ ' -p wa -k ' ~ item.key ~ '\n') in f.read[audit_rules_path]) == (f.stat[item.path].exists | bool)"
+            fail_msg: "evidence watch path {{ item.path }}: present in the audit rules does not match whether it exists on the host."
+          loop:
+            - {path: /var/log/wtmp, key: evidence_login_records}
+            - {path: /var/log/btmp, key: evidence_login_records}
+            - {path: /var/run/utmp, key: evidence_login_records}
+            - {path: /var/log/lastlog, key: evidence_login_records}
+            - {path: /etc/localtime, key: evidence_time_change}
+          loop_control:
+            label: "{{ item.key }}"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
+        - name: "[VERIFY-SEC-101] Verify no evidence watch rule points outside the declared evidence paths"
+          ansible.builtin.assert:
+            that:
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-w (\\S+) -p wa -k evidence_\\w+$') | difference(['/var/log/wtmp', '/var/log/btmp', '/var/run/utmp', '/var/log/lastlog', '/etc/localtime']) | length == 0"
+            fail_msg: "an evidence watch rule points outside audit_evidence_watch_paths."
           when:
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists

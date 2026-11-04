@@ -70,3 +70,29 @@
 #   6-1에 걸리지 않고 아래 감시로 내려와 기존대로 sudo_logs로 남는다. 새 감시 키·증적 전용 규칙(CIS 특권 명령·파일 삭제·로그인 기록 등)은 이 줄 아래에 더한다.
 #   1~5 감시를 위에 두는 것도 이유가 있다: 6의 syscall 줄이 오래된 auditctl에서 거부돼도 그 앞의 감시는 이미 올라가 있다.
 -w {{ sudo_log_file | default('/var/log/sudo.log') }} -p wa -k sudo_logs
+
+# 8. Evidence-Only Watch Key (#435, Spec #433 / Ticket-8): 알림 없이 사후 조사와 증적으로만 남는 기록. 키는 모두 `evidence_` 접두어이고 어떤 알림도 읽지 않는다(CONTEXT.md).
+#   정상 작업에서도 늘 생기는 기록(sudo·rm·mount·시간 동기·로그인 기록 쓰기)이라 알림을 붙이면 소음뿐이다. 알림을 붙이는 것은 새 결정이다.
+#   로그인 사용자만 기록한다(login_user_syscall_rule). 규칙 순서: 6.의 알림 키 규칙과 위 sudo_logs 감시 뒤에 둬야 /var/log 삭제가 알림 키로 남는다(7. 참고).
+#   이 절 안에서는 감시(8-1)가 syscall 규칙보다 앞이다: 첫 매치만 기록되므로 경로 필터 없는 파일 삭제 규칙(8-3)이 앞에 있으면 /etc/localtime·utmp를 지우거나 바꾼 기록이
+#   evidence_file_delete로만 남아 시간 변경·로그인 기록 키를 잃는다. 또 syscall 줄이 오래된 auditctl에서 거부돼도 그 앞의 감시는 이미 올라가 있다(-C 문법이 가장 위험하다).
+# 8-1. 감시 경로: 로그인 기록 파일(wtmp·btmp·utmp·lastlog)과 /etc/localtime. `-w`는 없는 경로에서 규칙 적재를 실패시킬 수 있어 역할이 먼저 존재를 확인하고(SEC-100·SEC-101)
+#   있는 경로만 `_audit_evidence_watch_paths_effective`로 넘긴다. 기본 목록은 roles/security/defaults/main.yml의 audit_evidence_watch_paths와 같다(테스트가 같음을 지킨다).
+{% for e in (_audit_evidence_watch_paths_effective | default(audit_evidence_watch_paths | default([
+  {'path': '/var/log/wtmp', 'key': 'evidence_login_records'},
+  {'path': '/var/log/btmp', 'key': 'evidence_login_records'},
+  {'path': '/var/run/utmp', 'key': 'evidence_login_records'},
+  {'path': '/var/log/lastlog', 'key': 'evidence_login_records'},
+  {'path': '/etc/localtime', 'key': 'evidence_time_change'}]))) %}
+-w {{ e.path }} -p wa -k {{ e.key }}
+{% endfor %}
+# 8-2. 특권 명령 실행: setuid·setgid 전환이 일어난 execve만(전수 execve 추적이 아니다). setuid 파일 목록(perm=x) 대신 자격 전환 필터를 쓴 근거는 docs/security.md.
+{{ login_user_syscall_rule('execve', 'evidence_privileged_exec', '-C uid!=euid') -}}
+{{ login_user_syscall_rule('execve', 'evidence_privileged_exec', '-C gid!=egid') -}}
+# 8-3. 로그인 사용자의 파일 삭제·이름 바꾸기(CIS). 경로 필터는 없다: /var/log 아래는 6-1(var_log_delete)이 먼저 맞아 그 키로만 남는다(첫 매치만 기록).
+{{ login_user_syscall_rule('unlink,unlinkat,rename,renameat', 'evidence_file_delete') -}}
+# 8-4. 시간 변경(CIS): adjtimex·settimeofday와 시스템 시계(CLOCK_REALTIME, a0=0)를 바꾸는 clock_settime. 32비트 전용 stime은 x86_64에 없어 매크로(b64·b32 같은 목록)로는 넣지 못했다(docs/security.md 한계).
+{{ login_user_syscall_rule('adjtimex,settimeofday', 'evidence_time_change') -}}
+{{ login_user_syscall_rule('clock_settime', 'evidence_time_change', '-F a0=0x0') -}}
+# 8-5. mount
+{{ login_user_syscall_rule('mount', 'evidence_mount') -}}

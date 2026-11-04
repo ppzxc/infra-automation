@@ -997,6 +997,21 @@
     _audit_watch_paths_effective: "{{ security_audit_watch_stat.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
   when: not (_raw_path_effective | default(false) | bool)
 
+# Evidence-Only Watch Key 감시 경로(#435, 이야기 26): 없는 경로의 `-w`가 규칙 적재를 깨지 않게 있는 것만 템플릿에 넘긴다(SEC-055·SEC-056과 같은 방식).
+- name: "[SEC-100] Check which audit_evidence_watch_paths exist"
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ audit_evidence_watch_paths | default([]) }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: security_audit_evidence_stat
+  when: not (_raw_path_effective | default(false) | bool)
+
+- name: "[SEC-101] Keep only existing evidence watch paths"
+  ansible.builtin.set_fact:
+    _audit_evidence_watch_paths_effective: "{{ security_audit_evidence_stat.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
+  when: not (_raw_path_effective | default(false) | bool)
+
 - name: "[SEC-012] Deploy Auditd security audit rules"
   ansible.builtin.template:
     src: audit.rules.j2
