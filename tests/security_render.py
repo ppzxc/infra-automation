@@ -41,6 +41,11 @@ CASES = {
     },
     # #431: EL6 커널(2.6.32)에는 finit_module이 없어 auditctl이 이름을 몰라 규칙 전체가 실패한다
     "el6": {"ansible_os_family": "RedHat", "ansible_distribution_major_version": "6"},
+    # #435 리뷰: 사용자 지정 시크릿 감시가 /var/log 아래인 한계(감시 1~5절이 syscall 6절보다 앞이라 첫 매치 키가 secret_access)
+    "secret_path_under_var_log": {"audit_watch_paths": ["/var/log/example/app.secret"]},
+    # #435: 증적 전용 감시 경로 중 일부만 있는 호스트·하나도 없는 호스트(SEC-101이 존재하는 것만 넘긴다)
+    "evidence_paths_partly_missing": {"_audit_evidence_watch_paths_effective": [{"path": "/var/log/wtmp", "key": "evidence_login_records"}]},
+    "evidence_paths_all_missing": {"_audit_evidence_watch_paths_effective": []},
     # #371: 가짜 문서용 주소(RFC 5737, RFC 3849)만 쓴다.
     "ssh_source_two": {"ssh_source_restriction_allowed_sources": ["192.0.2.0/24", "198.51.100.7/32"]},
     "ssh_source_v6": {"ssh_source_restriction_allowed_sources": ["2001:db8::/32"]},
