@@ -2388,10 +2388,7 @@ def test_security_alert_sql_fires_on_the_fixture_cases_and_only_those_when_it_ru
                 "{command_kind}" in o2.store["alert"][name]["row_template"] and "{process_command_line}" not in o2.store["alert"][name]["row_template"]
 
 
-SSHD_SIGNAL_MARKERS = {   # 검증 단계가 보내는 검색(검증 스트림으로 바뀐 SQL)을 고르는 표지(#428)
-    "infra-sshd-fatal-error": "process_executable_name IN ('sshd', 'sshd-session')",
-    "infra-ssh-login-new-user": "user_name IN (SELECT user_name",
-}
+SSHD_SIGNAL_ALERTS = ("infra-sshd-fatal-error", "infra-ssh-login-new-user")   # 검증 단계가 검색으로 보내는 알림(#428). 이름으로 정의를 읽는다
 
 
 def _ingested_security_records(o2):
@@ -2406,8 +2403,9 @@ def test_sshd_signal_sql_fires_on_the_fixture_cases_and_only_those_when_it_runs_
     assert res.returncode == 0, res.stdout + res.stderr
     records = _ingested_security_records(o2)
     searches = [sql for stream, sql in o2.searches if stream == "security_logs_alert_verify"]
-    for name, marker in SSHD_SIGNAL_MARKERS.items():
-        (sql,) = [s for s in searches if marker in s]
+    for name in SSHD_SIGNAL_ALERTS:
+        sql = _sql(o2, name).replace('"security_logs"', '"security_logs_alert_verify"')   # 검증 스트림으로 바뀐 알림 SQL
+        assert searches.count(sql) == 1, name   # 검증 단계가 정확히 이 SQL을 한 번 검색한다(SQL 모양에 기대지 않는다)
         spec = FIXTURES[name]
         own = {c["host"] for c in spec["cases"]}
         rows = _run_alert_on_sqlite(sql, records, "security_logs_alert_verify")

@@ -757,6 +757,7 @@ def test_a_like_phrase_may_contain_a_colon_but_still_nothing_that_breaks_the_sql
 
 def test_the_fatal_threshold_and_keyword_lists_are_role_defaults_with_the_documented_values():
     assert DEFAULTS["o2c_sshd_fatal_threshold"] == 1
+    assert DEFAULTS["o2c_sshd_processes"] == ["sshd", "sshd-session"]   # sshd-auth(OpenSSH 10+)는 7일 실로그에 0건이라 기본에 넣지 않았다
     kept = {p for g in DEFAULTS["o2c_sshd_fatal_keywords"] for p in g["patterns"]}
     assert kept == {k.lower() for k in INDUSTRY_SSHD_FATAL}
     dropped = {p for g in DEFAULTS["o2c_sshd_scanner_noise"] for p in g["patterns"]}
@@ -825,13 +826,14 @@ def test_new_user_window_frequency_and_lookback_are_role_defaults_and_set_the_al
 def test_sshd_signal_values_override_from_the_role_variables(tmp_path):
     rendered = render_desired(tmp_path / "desired.json", extra={
         "o2c_sshd_fatal_threshold": 3, "o2c_ssh_new_user_lookback_days": 2, "o2c_ssh_new_user_window_minutes": 20,
-        "o2c_ssh_new_user_frequency_minutes": 10, "o2c_sshd_scanner_noise": []})
+        "o2c_ssh_new_user_frequency_minutes": 10, "o2c_sshd_scanner_noise": [], "o2c_sshd_processes": ["sshd", "sshd-session", "sshd-auth"]})
     alerts = {o["name"]: o["body"] for o in rendered if o.get("kind") == "alert"}
     two = [_sshd_line("error: incorrect signature") for _ in range(2)]
     assert _run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], two, "security_logs") == []
     assert len(_run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], two + two[:1], "security_logs")) == 1
     overlap = [_sshd_line("error: error in libcrypto; Did not receive identification string from 203.0.113.9")] * 3
     assert len(_run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], overlap, "security_logs")) == 1   # 소음 목록이 비면 제외 조건도 없다
+    assert len(_run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], [_sshd_line("error: error in libcrypto", "sshd-auth")] * 3, "security_logs")) == 1   # 프로세스 목록 변수
     trigger = alerts[SSH_NEW_USER]["trigger_condition"]
     assert (trigger["period"], trigger["frequency"], trigger["silence"]) == (2 * DAY + 20, 10, 20)
     sql = alerts[SSH_NEW_USER]["query_condition"]["sql"]

@@ -127,7 +127,12 @@ def _date_format(value, fmt, offset):
     return datetime.fromtimestamp(seconds, tz).strftime(fmt)
 
 def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
-    """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows."""
+    """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows.
+
+    주의: `_timestamp`가 없는 레코드는 고정 시각(2026-10-23)으로 적재된다. 이 시각은 `now()`(실제 현재 시각)와 멀어 `now()`를 쓰는 SQL
+    (낯선 사용자 알림 등)에서는 "오래된 기록"이 된다. 그런 SQL은 레코드마다 `_timestamp`를 현재 시각 기준으로 직접 넣는다
+    (OpenObserve가 수집 시각을 찍는 것과 같다).
+    """
     db = sqlite3.connect(":memory:")
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
     db.create_function("date_format", 3, _date_format)

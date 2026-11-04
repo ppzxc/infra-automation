@@ -131,6 +131,9 @@ o2c_sudo_risky_groups: "{{ o2c_sudo_risky_commands | o2c_sudo_risky_groups(o2c_s
 # Wazuh 5707(`fatal: buffer_get_string: bad string`)·5714(`crc32 compensation attack`)와 겹친다. 소문자 문구는 줄 안에서 부분 일치한다(대소문자 무시).
 # 임계는 호스트당 5분 구간의 줄 수다. 7일 실로그에서 이 문구는 한 건도 없었다(docs/openobserve_config.md).
 o2c_sshd_fatal_threshold: 1
+# 읽는 프로세스: OpenSSH 9.8+는 인증·세션 기록을 sshd-session이 남긴다. OpenSSH 10+의 사전 인증 프로세스 sshd-auth는 7일 실로그에 줄이 한 건도 없어
+# 기본에 넣지 않았다(2026-11-04 확인). 그 버전이 늘면 이 목록에 더한다.
+o2c_sshd_processes: [sshd, sshd-session]
 o2c_sshd_fatal_keywords:
   - {label: 키·서명 오류, patterns: [unexpected internal error, unknown or unsupported key type, invalid certificate signing key, invalid elliptic curve value, incorrect signature, error in libcrypto, unexpected bytes remain after decoding]}
   - {label: 프로토콜 공격 시도, patterns: ['fatal: buffer_get_string: bad string', 'local: crc32 compensation attack', bad client public dh value]}
@@ -562,7 +565,7 @@ o2c_alerts:
     stream: security_logs
     sql: >-
       SELECT host_name, count(*) AS errors, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
-      WHERE process_executable_name IN ('sshd', 'sshd-session') AND {{ o2c_sshd_fatal_keywords | o2c_like_any('body') }}
+      WHERE process_executable_name IN ({{ "'" ~ (o2c_sshd_processes | join("', '")) ~ "'" }}) AND {{ o2c_sshd_fatal_keywords | o2c_like_any('body') }}
       {{ ('AND NOT ' ~ (o2c_sshd_scanner_noise | o2c_like_any('body'))) if o2c_sshd_scanner_noise | length > 0 else '' }}
       GROUP BY host_name HAVING count(*) >= {{ o2c_sshd_fatal_threshold }}
       ORDER BY errors DESC
