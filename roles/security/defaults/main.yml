@@ -125,3 +125,6 @@ journald_storage: persistent
 # CentOS 6/7 raw 경로 포함)를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo는 그대로 적용한다.
 # Semaphore 인벤토리는 static이라 group_vars를 쓸 수 없어 그룹 소속에서 파생한다(enable_otelcol과 같은 방식).
 security_firewall_managed: "{{ 'firewall_unmanaged' not in group_names }}"
+
+# augenrules가 합쳐 적재하는 규칙 디렉터리(#424). 조회 스크립트(vars/main.yml)가 이 역할의 overseer.rules 밖 파일도 읽는 데 쓴다. 시험용으로만 바꾼다.
+security_audit_rules_dir: /etc/audit/rules.d

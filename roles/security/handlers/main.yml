@@ -72,7 +72,9 @@
 
 # --check에서는 위 핸들러(command)가 실행되지 않으므로 확인도 하지 않는다(확인하면 적재하지 않은 호스트가 실패한다).
 - name: Read the loaded audit rules after loading (read-only)
-  ansible.builtin.command: auditctl -l
+  ansible.builtin.shell: "{{ security_audit_loaded_probe_cmd }}"
+  args:
+    executable: /bin/sh
   listen: Restart auditd
   register: security_audit_reloaded_probe
   changed_when: false
@@ -84,8 +86,8 @@
 - name: Fail when the loaded audit rules still differ from the declared rules
   ansible.builtin.assert:
     that:
-      - (security_audit_reloaded_probe.stdout | default('') | audit_rules_drift(audit_rules_declared)) | length == 0
-    fail_msg: "감사 규칙을 적재했지만 커널의 규칙이 배포한 파일과 다르다(재부팅이 필요할 수 있다, 예: 규칙 잠금 -e 2): {{ security_audit_reloaded_probe.stdout | default('') | audit_rules_drift(audit_rules_declared) | join('; ') }}"
+      - (security_audit_reloaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared)) | length == 0
+    fail_msg: "감사 규칙을 적재했지만 커널의 규칙이 배포한 파일과 다르다(재부팅이 필요할 수 있다, 예: 규칙 잠금 -e 2): {{ security_audit_reloaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared) | join('; ') }}"
     quiet: true
   listen: Restart auditd
   vars:

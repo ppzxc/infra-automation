@@ -9,7 +9,13 @@
   - 그 밖의 규칙(syscall 등)은 키만 본다. 시스템 호출 목록·arch는 `auditctl -l`이 정규화해 찍어 문자열 비교가 오탐을 내기 쉽다.
   - 제어 줄(`-D`, `-b`, `-f`, `-e`, `-r`, `--backlog_wait_time` 등), 주석, 빈 줄, `No rules`는 규칙이 아니다.
   - 같은 규칙의 중복과 줄 순서는 무시한다.
+
+`augenrules --load`는 `/etc/audit/rules.d/*.rules`를 모두 합쳐 적재한다(augenrules(8): "merges all component audit rules files"). 그래서 이 역할이 만든
+`overseer.rules` 밖의 `.rules` 파일(하드닝 프로파일, 손으로 둔 파일)의 규칙도 정상 적재 결과에 들어간다. `audit_rules_probe_drift`는 조회 출력의
+`MARKER` 뒤에 그 파일들의 내용을 받아 선언에 합친다. 안 그러면 그런 호스트는 매 실행 drift로 보이고 적재·확인 실패가 반복된다.
 """
+
+MARKER = "__OVERSEER_OTHER_RULES__"
 
 _CONTROL = {"-D", "-b", "-f", "-e", "-r", "-i", "-c"}
 
@@ -75,6 +81,12 @@ def audit_rules_drift(loaded, declared):
     return missing + extra
 
 
+def audit_rules_probe_drift(output, declared):
+    """`auditctl -l` 출력 + MARKER 줄 + 다른 rules.d 파일 내용(조회 스크립트의 출력)을 선언과 비교한다. MARKER가 없으면 앞의 비교와 같다."""
+    loaded, _, other = str(output or "").partition(MARKER)
+    return audit_rules_drift(loaded, str(declared or "") + "\n" + other)
+
+
 class FilterModule(object):
     def filters(self):
-        return {"audit_rules_drift": audit_rules_drift}
+        return {"audit_rules_drift": audit_rules_drift, "audit_rules_probe_drift": audit_rules_probe_drift}

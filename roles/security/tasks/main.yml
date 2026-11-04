@@ -1048,14 +1048,17 @@
 # 파일이 이미 최신이어도 적재된 규칙이 낡았을 수 있다(#372 이전 규칙이 재부팅 전까지 남은 호스트). 그래서 파일 변경이 아니라
 # '적재된 규칙 != 배포할 규칙'을 changed로 보고 같은 핸들러를 부른다. 이 태스크 자체는 불일치로 실패하지 않는다(--check의 Drift 판정이
 # 막히지 않게). --check에서는 changed 태스크로 Configuration Drift 표에 나오고, 적재는 핸들러가 적용 실행에서만 한다.
-# 비교는 디스크 파일이 아니라 렌더링한 템플릿과 한다: --check에서도 선언 상태와 비교하기 위해서다.
+# 비교는 디스크 파일이 아니라 렌더링한 템플릿과 한다: --check에서도 선언 상태와 비교하기 위해서다. augenrules는 rules.d의 모든 .rules를 합쳐 적재하므로
+# 이 역할 밖 파일의 규칙도 선언으로 본다(조회 스크립트 vars/main.yml이 함께 읽는다).
 # 감사 규칙 비교 기준(근사)은 filter_plugins/audit_rules.py 머리말.
 - name: "[SEC-083] Compare the loaded audit rules with the declared rules (read-only)"
-  ansible.builtin.command: auditctl -l
+  ansible.builtin.shell: "{{ security_audit_loaded_probe_cmd }}"
+  args:
+    executable: /bin/sh
   vars:
     audit_rules_declared: "{{ lookup('ansible.builtin.template', 'audit.rules.j2') }}"
   register: security_audit_loaded_probe
-  changed_when: (security_audit_loaded_probe.stdout | default('') | audit_rules_drift(audit_rules_declared)) | length > 0
+  changed_when: (security_audit_loaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared)) | length > 0
   check_mode: false
   notify: Restart auditd
   when:

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
-from audit_rules import FilterModule, audit_rules_drift  # noqa: E402
+from audit_rules import FilterModule, audit_rules_drift, audit_rules_probe_drift  # noqa: E402
 
 DECLARED = """# Overseer Auditd Security Rules
 -D
@@ -82,3 +82,28 @@ def test_syscall_rules_are_compared_by_key():
 
 def test_registered_as_a_jinja_filter():
     assert FilterModule().filters()["audit_rules_drift"] is audit_rules_drift
+    assert FilterModule().filters()["audit_rules_probe_drift"] is audit_rules_probe_drift
+
+
+# --- 다른 rules.d 파일 (augenrules는 rules.d/*.rules를 모두 합쳐 적재한다) -------------------------
+
+OTHER = "-D\n-b 8192\n-w /etc/hosts -p wa -k hosts_change\n-a always,exit -F arch=b64 -S mount -k mounts\n"
+
+
+def test_rules_from_other_rules_d_files_count_as_declared():
+    probe = LOADED_W + "-w /etc/hosts -p wa -k hosts_change\n-a always,exit -F arch=b64 -S mount -F key=mounts\n" + "__OVERSEER_OTHER_RULES__\n" + OTHER
+    assert audit_rules_probe_drift(probe, DECLARED) == []
+
+
+def test_probe_output_still_reports_missing_and_stale_rules():
+    probe = "-a always,exit -F arch=b64 -S execve -F key=exec_log\n__OVERSEER_OTHER_RULES__\n" + OTHER
+    drift = audit_rules_probe_drift(probe, DECLARED)
+    assert "적재 안 됨: watch /etc/hosts 권한 wa 키 hosts_change" in drift
+    assert "선언에 없는 규칙이 적재됨: 키 exec_log" in drift
+    assert len([d for d in drift if d.startswith("적재 안 됨")]) == 6
+
+
+def test_probe_output_without_other_files_behaves_like_the_plain_comparison():
+    assert audit_rules_probe_drift(LOADED_W + "__OVERSEER_OTHER_RULES__\n", DECLARED) == []
+    assert audit_rules_probe_drift(LOADED_W, DECLARED) == []
+    assert audit_rules_probe_drift("No rules\n__OVERSEER_OTHER_RULES__\n", DECLARED) == audit_rules_drift("", DECLARED)

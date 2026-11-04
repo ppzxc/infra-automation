@@ -10,6 +10,7 @@ systemd의 auditd 유닛은 `RefuseManualStop=yes`라 `service ... state=restart
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,18 +38,25 @@ case "$FAKE_AUGEN" in
   fail) echo "Error sending add rule data request (Rule exists)" >&2; exit 1 ;;
   noop) exit 0 ;;
 esac
-grep -E '^-(w|a) ' "$FAKE_RULES" > "$FAKE_STATE/loaded"
+cat "$FAKE_RULESD"/*.rules | grep -E '^-(w|a) ' > "$FAKE_STATE/loaded"
 """
+# 이 역할 밖의 rules.d 파일(하드닝 프로파일 등). augenrules는 이것도 합쳐 적재한다.
+EXTRA = "-D\n-b 8192\n-w /etc/hosts -p wa -k hosts_change\n-a always,exit -F arch=b64 -S mount -k mounts\n"
+EXTRA_LOADED = "-w /etc/hosts -p wa -k hosts_change\n-a always,exit -F arch=b64 -S mount -F key=mounts\n"
 STALE = "-w /etc/passwd -p wa -k identity\n-a always,exit -F arch=b64 -S execve -F key=exec_log\n-a always,exit -F arch=b32 -S execve -F key=exec_log\n"
 
-# 호스트(시나리오) -> (적재 상태 `auditctl -l`로 읽히는 것, augenrules 동작, auditctl이 설치돼 있는가)
+# 호스트(시나리오) -> (적재 상태 `auditctl -l`로 읽히는 것, augenrules 동작, auditctl이 설치돼 있는가, 다른 rules.d 파일이 있는가)
 SCENARIOS = {
-    "clean": ("declared", "ok", True),
-    "stale": (STALE, "ok", True),
-    "norules": ("", "ok", True),
-    "loadfails": (STALE, "fail", True),
-    "silentnoop": (STALE, "noop", True),
-    "noaudit": ("", "ok", False),
+    "clean": ("declared", "ok", True, False),
+    "stale": (STALE, "ok", True, False),
+    "norules": ("", "ok", True, False),
+    "loadfails": (STALE, "fail", True, False),
+    "silentnoop": (STALE, "noop", True, False),
+    "noaudit": ("", "ok", False, False),
+    # 다른 rules.d 파일이 있고 이미 합쳐서 적재된 정상 상태: drift가 아니다(매 실행 재적재·실패하면 안 된다).
+    "extrafile": ("declared+extra", "ok", True, True),
+    # 다른 파일이 있는데 적재 상태에는 그 규칙이 없다: 합쳐서 다시 적재하면 맞는다.
+    "extrastale": ("declared", "ok", True, True),
 }
 
 
@@ -73,13 +81,19 @@ def _recap(output):
 def _run(workdir, check):
     declared = shared_render()["default"]["audit"]
     inventory = {"all": {"hosts": {}}}
-    for name, (loaded, augen, installed) in SCENARIOS.items():
+    for name, (loaded, augen, installed, extra) in SCENARIOS.items():
         host_dir = workdir / name
         (host_dir / "bin").mkdir(parents=True)
+        (host_dir / "bin" / "cat").symlink_to(shutil.which("cat"))  # 조회 스크립트가 쓴다. PATH를 가짜 bin 하나로 한정하므로 직접 둔다.
         (host_dir / "state").mkdir()
-        (host_dir / "rules").write_text(declared, encoding="utf-8")  # 이미 배포된 파일(스탠드인 SEC-012가 바꾸지 않는다)
-        (host_dir / "rules").chmod(0o600)
-        (host_dir / "state" / "loaded").write_text(declared if loaded == "declared" else loaded, encoding="utf-8")
+        (host_dir / "rules.d").mkdir()
+        (host_dir / "rules.d" / "overseer.rules").write_text(declared, encoding="utf-8")  # 이미 배포된 파일(스탠드인 SEC-012가 바꾸지 않는다)
+        (host_dir / "rules.d" / "overseer.rules").chmod(0o600)
+        (host_dir / "rules.d" / "10-base.rules").write_text("-D\n-b 8192\n-f 1\n", encoding="utf-8")  # 배포판 기본 파일
+        if extra:
+            (host_dir / "rules.d" / "50-extra.rules").write_text(EXTRA, encoding="utf-8")
+        loaded_text = {"declared": declared, "declared+extra": declared + EXTRA_LOADED}.get(loaded, loaded)
+        (host_dir / "state" / "loaded").write_text(loaded_text, encoding="utf-8")
         if installed:
             for cmd, body in (("auditctl", AUDITCTL), ("augenrules", AUGENRULES)):
                 (host_dir / "bin" / cmd).write_text(body)
@@ -93,13 +107,14 @@ def _run(workdir, check):
     (workdir / "templates" / "audit.rules.j2").symlink_to(ROLE / "templates" / "audit.rules.j2")
     play = [{
         "hosts": "all", "gather_facts": False, "become": False,
-        "vars": {"ansible_os_family": "RedHat", "_raw_path_effective": False},
+        "vars": {"ansible_os_family": "RedHat", "_raw_path_effective": False, "security_audit_rules_dir": "{{ fake_dir }}/rules.d"},
+        "vars_files": [str(ROLE / "vars" / "main.yml")],
         # PATH를 가짜 bin 하나로 한정해 `noaudit` 호스트에는 auditctl이 정말 없게 한다.
         "environment": {"PATH": "{{ fake_dir }}/bin:/nonexistent", "FAKE_STATE": "{{ fake_dir }}/state",
-                        "FAKE_RULES": "{{ fake_dir }}/rules", "FAKE_AUGEN": "{{ fake_augen }}"},
+                        "FAKE_RULESD": "{{ fake_dir }}/rules.d", "FAKE_AUGEN": "{{ fake_augen }}"},
         "tasks": [
             # [SEC-012] 스탠드인: 같은 템플릿을 같은 방식으로 배포하고 바뀌면 같은 핸들러를 부른다.
-            {"name": "stand-in SEC-012", "ansible.builtin.template": {"src": "audit.rules.j2", "dest": "{{ fake_dir }}/rules", "mode": "0600"},
+            {"name": "stand-in SEC-012", "ansible.builtin.template": {"src": "audit.rules.j2", "dest": "{{ fake_dir }}/rules.d/overseer.rules", "mode": "0600"},
              "register": "security_audit_rules_result", "notify": "Restart auditd"},
             *_tasks(),
         ],
@@ -193,6 +208,20 @@ def test_loaded_rules_probe_is_read_only_and_feeds_the_load_handler():
     probe = next(t for t in _tasks() if t["name"].startswith("[SEC-083]"))
     assert "read-only" in probe["name"] and probe["check_mode"] is False
     assert probe["notify"] == "Restart auditd" and "failed_when" not in probe
-    assert "audit_rules_drift" in probe["changed_when"]
+    assert "audit_rules_probe_drift" in probe["changed_when"]
     tools = next(t for t in _tasks() if t["name"].startswith("[SEC-082]"))
     assert "read-only" in tools["name"] and tools["check_mode"] is False and tools["failed_when"] is False
+
+
+def test_rules_from_other_rules_d_files_are_not_drift(apply_run, check_run):
+    # augenrules는 rules.d/*.rules를 모두 합쳐 적재한다. 이 역할 밖 파일의 규칙이 적재돼 있어도 정상이다.
+    for run in (apply_run, check_run):
+        assert run["recap"]["extrafile"]["failed"] == 0, run["out"]
+        assert run["recap"]["extrafile"]["changed"] == 0
+        assert "augenrules --load" not in run["calls"]["extrafile"]
+
+
+def test_other_rules_d_files_are_loaded_together_with_ours(apply_run):
+    assert apply_run["recap"]["extrastale"]["failed"] == 0, apply_run["out"]
+    assert "augenrules --load" in apply_run["calls"]["extrastale"]
+    assert "hosts_change" in apply_run["loaded"]["extrastale"] and "-k identity" in apply_run["loaded"]["extrastale"]

@@ -47,6 +47,7 @@
         sysctl: [sysctl, vm.swappiness, fs.protected_hardlinks, fs.protected_symlinks, kernel.randomize_va_space]
         timedatectl: [timedatectl, status]
         getenforce: [getenforce]
+        audit_loaded: [auditctl, -l]
         sshd_denied_source: [/usr/sbin/sshd, -T, -C, 'addr=198.51.100.1,user=root,host=probe']
         sshd_allowed_source: [/usr/sbin/sshd, -T, -C, 'addr=192.0.2.10,user=root,host=probe']
 
@@ -226,23 +227,22 @@
             - ansible_os_family == "RedHat"
             - f.stat['/etc/audit/auditd.conf'].exists
 
-        # 테스트 이미지에는 audit 패키지가 없다(컨테이너는 커널 감사 규칙도 적재할 수 없다). SEC-082가 그 호스트를 건너뛰어 수렴이
-        # 실패하지 않았음은 이 시점에 도달한 것으로 확인된다. 도구가 있는 호스트에서만 적재 결과가 선언과 맞는지 본다.
+        # 테스트 이미지에는 audit 패키지가 없다(컨테이너는 커널 감사 규칙도 적재할 수 없다). collect_facts가 auditctl을 못 찾으면 rc 127이고,
+        # 그 호스트는 SEC-082가 적재 단계를 건너뛴다. 도구가 있는 호스트에서만 적재 결과가 선언과 맞는지 본다.
         # 적재·실패·낡은 규칙 재적재의 동작은 pytest tests/test_security_audit_reload.py가 가짜 auditctl/augenrules로 본다.
-        - name: "[VERIFY-SEC-082] Read the loaded audit rules when the audit tools exist (read-only)"
-          ansible.builtin.shell: "command -v auditctl >/dev/null 2>&1 && command -v augenrules >/dev/null 2>&1 && auditctl -l || echo NO_AUDIT_TOOLS"
-          args:
-            executable: /bin/sh
-          register: verify_loaded_audit_rules
-          changed_when: false
-          when: ansible_os_family == "RedHat"
-
-        - name: "[VERIFY-SEC-083] Verify the loaded audit rules match the declared keys"
+        - name: "[VERIFY-SEC-082] Verify the audit tools are either absent (skipped) or answer auditctl -l"
           ansible.builtin.assert:
             that:
-              - "'NO_AUDIT_TOOLS' in verify_loaded_audit_rules.stdout or ('identity' in verify_loaded_audit_rules.stdout and 'container_config' in verify_loaded_audit_rules.stdout)"
-              - "'execve' not in verify_loaded_audit_rules.stdout"
-            fail_msg: "auditctl -l does not show the declared rules, or still shows an execve rule: {{ verify_loaded_audit_rules.stdout }}"
+              - f.cmd.audit_loaded.rc in [0, 127]
+            fail_msg: "auditctl -l failed on a host that has the audit tools: {{ f.cmd.audit_loaded.stdout }}"
+          when: ansible_os_family == "RedHat"
+
+        - name: "[VERIFY-SEC-083] Verify the loaded audit rules match the declared keys when the audit tools exist"
+          ansible.builtin.assert:
+            that:
+              - f.cmd.audit_loaded.rc == 127 or ('identity' in f.cmd.audit_loaded.stdout and 'container_config' in f.cmd.audit_loaded.stdout)
+              - "'execve' not in f.cmd.audit_loaded.stdout"
+            fail_msg: "auditctl -l does not show the declared rules, or still shows an execve rule: {{ f.cmd.audit_loaded.stdout }}"
           when: ansible_os_family == "RedHat"
 
         - name: "[VERIFY-SEC-014] Verify sudoers timestamp and log configuration"

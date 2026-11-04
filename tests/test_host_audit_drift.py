@@ -303,3 +303,21 @@ def test_baseline_compare_marks_drift_rows():
     assert out["status"]["configuration_drift|hosta|site:FIX-001"] == "지속"
     assert out["status"]["configuration_drift|hosta|site:FIX-003"] == "신규"
     assert out["resolved"] == ["configuration_drift|hosta|site:SEC-999"]
+
+
+def test_loaded_audit_rules_drift_becomes_a_row_without_the_command_output():
+    # #424 SEC-083: `auditctl -l`을 --check에서도 실행하는 조회 전용 command 태스크. diff가 없고 stdout에 감시 경로(시크릿 파일 경로)가 있다.
+    secret_stdout = "-w /srv/example/app.secrets.env -p rwa -k secret_access\n-a always,exit -F arch=b64 -S execve -F key=exec_log\n"
+    probe = {"action": "ansible.builtin.shell", "changed": True, "rc": 0, "stdout": secret_stdout,
+             "stdout_lines": secret_stdout.splitlines(), "cmd": "auditctl -l"}
+    clean = dict(probe, changed=False)
+    doc = {"plays": [{"play": {"name": "Fixture play"}, "tasks": [
+        {"task": {"name": "security : [SEC-083] Compare the loaded audit rules with the declared rules (read-only)"},
+         "hosts": {"hosta": probe, "hostb": clean}}]}], "stats": {}}
+    parsed = host_audit_drift_parse(json.dumps(doc), ["hosta", "hostb"], PLAYS)
+    assert parsed["hosts"]["hosta"]["status"] == "ok"
+    assert [r["spec_id"] for r in parsed["hosts"]["hosta"]["rows"]] == ["SEC-083"]
+    assert parsed["hosts"]["hosta"]["rows"][0]["task"] == "Compare the loaded audit rules with the declared rules (read-only)"
+    assert parsed["hosts"]["hostb"]["rows"] == []
+    rows_text = json.dumps(parsed["hosts"]["hosta"]["rows"])
+    assert "secret" not in rows_text and "exec_log" not in rows_text
