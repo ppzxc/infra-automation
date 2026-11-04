@@ -79,8 +79,9 @@ def _get(url, params):
 
 
 def _parse_time(text):
+    # GitHub의 delivered_at은 밀리초를 포함한다(2026-11-04T02:22:21.692Z). 초 단위 형식만 읽으면 None이 되어 실패한 전달이 조용히 건너뛰어진다.
     try:
-        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return datetime.strptime(re.sub(r"\.\d+Z$", "Z", text), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
 
