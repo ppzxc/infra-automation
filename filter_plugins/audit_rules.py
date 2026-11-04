@@ -52,6 +52,7 @@ def _signature(line):
             i += 1
     if path is None:
         return ("key", key)
+    perms = perms or "rwxa"  # `-p` 없는 watch는 모든 권한이다(auditctl -l도 -p rwxa로 찍는다)
     canonical = "".join(c for c in "rwxa" if c in perms) + "".join(sorted(set(perms) - set("rwxa")))
     return ("watch", path.rstrip("/") or "/", canonical, key)
 
@@ -73,12 +74,21 @@ def _describe(sig):
     return text + (" 키 %s" % key if key else "")
 
 
-def audit_rules_drift(loaded, declared):
-    """적재된 규칙(`auditctl -l` 출력)과 선언한 규칙 파일 본문의 차이. 같으면 빈 목록."""
+def _diff(loaded, declared):
     loaded_sigs, declared_sigs = _signatures(loaded), _signatures(declared)
-    missing = ["적재 안 됨: %s" % _describe(s) for s in declared_sigs if s not in loaded_sigs]
-    extra = ["선언에 없는 규칙이 적재됨: %s" % _describe(s) for s in loaded_sigs if s not in declared_sigs]
-    return missing + extra
+    return ([s for s in declared_sigs if s not in loaded_sigs], [s for s in loaded_sigs if s not in declared_sigs])
+
+
+def audit_rules_drift(loaded, declared):
+    """적재된 규칙(`auditctl -l` 출력)과 선언한 규칙 파일 본문의 차이. 같으면 빈 목록. 경로가 들어 있으므로 실행 로그에 직접 싣지 않는다."""
+    missing, extra = _diff(loaded, declared)
+    return (["적재 안 됨: %s" % _describe(s) for s in missing]
+            + ["선언에 없는 규칙이 적재됨: %s" % _describe(s) for s in extra])
+
+
+def _keys(sigs):
+    names = sorted({s[1] if s[0] == "key" else s[3] for s in sigs})
+    return ", ".join(n or "(키 없음)" for n in names)
 
 
 def audit_rules_probe_drift(output, declared):
@@ -87,6 +97,19 @@ def audit_rules_probe_drift(output, declared):
     return audit_rules_drift(loaded, str(declared or "") + "\n" + other)
 
 
+def audit_rules_drift_summary(output, declared):
+    """`audit_rules_probe_drift`의 차이를 건수와 키 이름으로만 줄인 한 줄(경로 없음, 시크릿 감시 경로가 실행 로그에 남지 않게). 같으면 빈 문자열."""
+    loaded, _, other = str(output or "").partition(MARKER)
+    missing, extra = _diff(loaded, str(declared or "") + "\n" + other)
+    parts = []
+    if missing:
+        parts.append("적재 안 됨 %d건(키: %s)" % (len(missing), _keys(missing)))
+    if extra:
+        parts.append("선언에 없는 규칙 %d건(키: %s)" % (len(extra), _keys(extra)))
+    return ", ".join(parts)
+
+
 class FilterModule(object):
     def filters(self):
-        return {"audit_rules_drift": audit_rules_drift, "audit_rules_probe_drift": audit_rules_probe_drift}
+        return {"audit_rules_drift": audit_rules_drift, "audit_rules_probe_drift": audit_rules_probe_drift,
+                "audit_rules_drift_summary": audit_rules_drift_summary}

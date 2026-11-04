@@ -79,7 +79,7 @@ def _recap(output):
 
 
 def _run(workdir, check):
-    declared = shared_render()["default"]["audit"]
+    declared = shared_render()["secret_paths"]["audit"]  # 시크릿 감시 경로(가짜)가 들어 있는 규칙
     inventory = {"all": {"hosts": {}}}
     for name, (loaded, augen, installed, extra) in SCENARIOS.items():
         host_dir = workdir / name
@@ -107,7 +107,9 @@ def _run(workdir, check):
     (workdir / "templates" / "audit.rules.j2").symlink_to(ROLE / "templates" / "audit.rules.j2")
     play = [{
         "hosts": "all", "gather_facts": False, "become": False,
-        "vars": {"ansible_os_family": "RedHat", "_raw_path_effective": False, "security_audit_rules_dir": "{{ fake_dir }}/rules.d"},
+        "vars": {"ansible_os_family": "RedHat", "_raw_path_effective": False, "security_audit_rules_dir": "{{ fake_dir }}/rules.d",
+                 "audit_watch_paths": ["/srv/example/app.secrets.env", "/srv/example/other.key"],
+                 "audit_container_config_paths": ["/etc/docker/", "/srv/example/compose/"]},
         "vars_files": [str(ROLE / "vars" / "main.yml")],
         # PATH를 가짜 bin 하나로 한정해 `noaudit` 호스트에는 auditctl이 정말 없게 한다.
         "environment": {"PATH": "{{ fake_dir }}/bin:/nonexistent", "FAKE_STATE": "{{ fake_dir }}/state",
@@ -170,6 +172,9 @@ def test_a_load_that_exits_zero_but_leaves_rules_stale_fails_the_play(apply_run)
     # augenrules의 종료 코드만 믿지 않는다: 적재 뒤 auditctl -l을 다시 읽어 확인한다.
     assert apply_run["recap"]["silentnoop"]["failed"] > 0, apply_run["out"]
     assert "exec_log" in apply_run["out"]
+    # 실행 로그(Semaphore)에는 시크릿 감시 경로가 남지 않는다: 건수와 키 이름만 나온다.
+    assert "적재 안 됨" in apply_run["out"] and "건(키:" in apply_run["out"]
+    assert "/srv/example" not in apply_run["out"] and "secrets.env" not in apply_run["out"]
 
 
 def test_hosts_without_the_audit_package_are_skipped_silently(apply_run):

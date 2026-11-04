@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
-from audit_rules import FilterModule, audit_rules_drift, audit_rules_probe_drift  # noqa: E402
+from audit_rules import FilterModule, audit_rules_drift, audit_rules_drift_summary, audit_rules_probe_drift  # noqa: E402
 
 DECLARED = """# Overseer Auditd Security Rules
 -D
@@ -83,6 +83,7 @@ def test_syscall_rules_are_compared_by_key():
 def test_registered_as_a_jinja_filter():
     assert FilterModule().filters()["audit_rules_drift"] is audit_rules_drift
     assert FilterModule().filters()["audit_rules_probe_drift"] is audit_rules_probe_drift
+    assert FilterModule().filters()["audit_rules_drift_summary"] is audit_rules_drift_summary
 
 
 # --- 다른 rules.d 파일 (augenrules는 rules.d/*.rules를 모두 합쳐 적재한다) -------------------------
@@ -107,3 +108,30 @@ def test_probe_output_without_other_files_behaves_like_the_plain_comparison():
     assert audit_rules_probe_drift(LOADED_W + "__OVERSEER_OTHER_RULES__\n", DECLARED) == []
     assert audit_rules_probe_drift(LOADED_W, DECLARED) == []
     assert audit_rules_probe_drift("No rules\n__OVERSEER_OTHER_RULES__\n", DECLARED) == audit_rules_drift("", DECLARED)
+
+
+# --- 권한 생략 watch (#424 리뷰) ----------------------------------------------------------------
+
+def test_watch_without_p_equals_rwxa():
+    # `-p` 없는 watch는 모든 권한(rwxa)이고 `auditctl -l`은 `-p rwxa`로 찍는다.
+    assert audit_rules_drift("-w /x -p rwxa -k k", "-w /x -k k") == []
+    assert audit_rules_drift("-w /x -k k", "-w /x -p rwxa -k k") == []
+    assert audit_rules_drift("-a always,exit -F path=/x -F perm=rwxa -F key=k", "-w /x -k k") == []
+    assert audit_rules_drift("-w /x -p wa -k k", "-w /x -k k") != []
+
+
+# --- 로그에 남는 요약은 경로를 담지 않는다 ------------------------------------------------------
+
+def test_summary_has_counts_and_key_names_but_no_paths():
+    declared = DECLARED + "-w /srv/example/other.key -p rwa -k secret_access\n"
+    probe = "-a always,exit -F arch=b64 -S execve -F key=exec_log\n__OVERSEER_OTHER_RULES__\n"
+    summary = audit_rules_drift_summary(probe, declared)
+    assert "적재 안 됨 5건" in summary and "선언에 없는 규칙 1건" in summary
+    for key in ("identity", "auth_config", "sudo_config", "secret_access", "exec_log"):
+        assert key in summary
+    for secret in ("/srv/example", "/etc/passwd", "other.key", "app.secrets.env"):
+        assert secret not in summary
+
+
+def test_summary_is_empty_when_there_is_no_drift():
+    assert audit_rules_drift_summary(LOADED_W + "__OVERSEER_OTHER_RULES__\n", DECLARED) == ""

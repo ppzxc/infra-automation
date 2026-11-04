@@ -87,8 +87,9 @@
   ansible.builtin.assert:
     that:
       - (security_audit_reloaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared)) | length == 0
-    fail_msg: "감사 규칙을 적재했지만 커널의 규칙이 배포한 파일과 다르다(재부팅이 필요할 수 있다, 예: 규칙 잠금 -e 2): {{ security_audit_reloaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared) | join('; ') }}"
+    fail_msg: "감사 규칙을 적재했지만 커널의 규칙이 배포한 파일과 다르다(재부팅이 필요할 수 있다, 예: 규칙 잠금 -e 2): {{ security_audit_reloaded_probe.stdout | default('') | audit_rules_drift_summary(audit_rules_declared) }}"
     quiet: true
+  # 메시지에는 건수와 키 이름만 싣는다(watch 경로에 시크릿 파일 경로가 있어 Semaphore 실행 로그에 남기지 않는다). 경로가 담긴 목록은 audit_rules_probe_drift.
   listen: Restart auditd
   vars:
     audit_rules_declared: "{{ lookup('ansible.builtin.template', 'audit.rules.j2') }}"
