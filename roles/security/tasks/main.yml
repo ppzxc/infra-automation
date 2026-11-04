@@ -1008,7 +1008,7 @@
   when:
     - ansible_os_family == "RedHat"
     - not (_raw_path_effective | default(false) | bool)
-  notify: Restart auditd
+  notify: Restart auditd  # 이름은 그대로지만 재시작이 아니라 `augenrules --load`다(handlers/main.yml)
   # audit 패키지가 없어 규칙 디렉터리가 없는 호스트만 건너뛴다(이 역할은 auditd를 설치하지 않는다). 그 밖의 실패는 그대로 드러낸다.
   failed_when:
     - security_audit_rules_result is failed
@@ -1027,6 +1027,41 @@
   failed_when:
     - security_auditd_service_result is failed
     - "'Could not find the requested service' not in (security_auditd_service_result.msg | default(''))"
+
+# 규칙 적재(#424). systemd의 auditd 유닛은 RefuseManualStop=yes라 서비스 재시작을 거부한다. 그래서 규칙 파일을 바꿔도 커널의 적재 규칙은
+# 그대로였고 옛 핸들러가 그 실패를 failed_when: false로 가렸다. 이제 핸들러 `Restart auditd`가 `augenrules --load`로 재시작 없이 적재하고,
+# 적재 실패는 플레이 실패로 드러낸다(핸들러는 이 역할이 만든 규칙 파일이 바뀔 때, 또는 아래 SEC-083이 drift를 찾을 때 실행된다).
+# audit 패키지가 없는 호스트(auditctl 없음)만 건너뛴다. 이 역할은 auditd를 설치하지 않는다.
+- name: "[SEC-082] Check whether the audit tools are installed (read-only)"
+  ansible.builtin.shell: command -v auditctl && command -v augenrules
+  args:
+    executable: /bin/sh
+  register: security_audit_tools_probe
+  changed_when: false
+  failed_when: false
+  # 조회 전용이라 --check에서도 실행해야 SEC-083이 check 모드에서 적재 drift를 판정한다.
+  check_mode: false
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+
+# 파일이 이미 최신이어도 적재된 규칙이 낡았을 수 있다(#372 이전 규칙이 재부팅 전까지 남은 호스트). 그래서 파일 변경이 아니라
+# '적재된 규칙 != 배포할 규칙'을 changed로 보고 같은 핸들러를 부른다. 이 태스크 자체는 불일치로 실패하지 않는다(--check의 Drift 판정이
+# 막히지 않게). --check에서는 changed 태스크로 Configuration Drift 표에 나오고, 적재는 핸들러가 적용 실행에서만 한다.
+# 비교는 디스크 파일이 아니라 렌더링한 템플릿과 한다: --check에서도 선언 상태와 비교하기 위해서다.
+# 감사 규칙 비교 기준(근사)은 filter_plugins/audit_rules.py 머리말.
+- name: "[SEC-083] Compare the loaded audit rules with the declared rules (read-only)"
+  ansible.builtin.command: auditctl -l
+  vars:
+    audit_rules_declared: "{{ lookup('ansible.builtin.template', 'audit.rules.j2') }}"
+  register: security_audit_loaded_probe
+  changed_when: (security_audit_loaded_probe.stdout | default('') | audit_rules_drift(audit_rules_declared)) | length > 0
+  check_mode: false
+  notify: Restart auditd
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+    - (security_audit_tools_probe.rc | default(1)) == 0
 
 # auditd 로그 로테이션(#364 후속): 파일 크기(MB)와 보관 개수로 상한을 둔다. auditd는 서비스 재시작을 거부하므로 reload(HUP)로 반영한다.
 # audit 패키지가 없어 auditd.conf가 없는 호스트만 건너뛴다.

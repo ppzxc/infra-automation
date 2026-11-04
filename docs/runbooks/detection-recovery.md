@@ -77,6 +77,9 @@ SELECT host_name, count(*) AS records FROM "security_logs" GROUP BY host_name
 ## 8. 서버 적용에서 알게 된 점
 
 - **감사 규칙 적재**: 규칙 파일을 바꾼 뒤에는 `augenrules --load`로 적재한다(`augenrules --check`는 변경 여부만 본다). 서비스 재시작은 systemd가 거부하므로 `service auditd reload`(HUP)나 `augenrules --load`를 쓴다.
+- **감사 규칙 적재 자동화 (#424)**: 위 수동 적재는 이제 `security` 역할이 한다. 규칙 파일이 바뀌거나 적재된 규칙이 파일과 다르면(`SEC-083`) `Restart auditd` 핸들러가 `augenrules --load`를 실행하고, 적재 뒤 `auditctl -l`을 다시 읽어 선언과 비교한다. 실패하면 플레이가 실패한다. 규칙 파일 자체가 #372 이전 버전인 호스트는 **고친 역할로 다시 프로비저닝**하면 파일 갱신과 적재가 함께 된다(핸들러 수정만으로는 파일이 안 바뀐다).
+  - 적용 전에 호스트별 `auditctl -l` 규칙 수와 `audit.log` 하루 증가량을 기록하고, 적용 뒤(`exec_log` 규칙이 빠진 뒤) 같은 값을 다시 기록해 전후를 비교한다(수집량이 크게 줄어드는 것이 예상 결과다). 값은 비공개 경로에만 둔다.
+  - 서버 적용은 프로비저닝 대상(`setup_complete`·`setup_partial`)에만, 사용자 승인 뒤에 한다.
 - **로그 디렉터리 소유**: `/var/log/journal`의 시스템 기본은 `root:systemd-journal`(부팅 시 `systemd-tmpfiles`가 맞춘다). 손으로 만든 디렉터리가 다르면 `systemd-tmpfiles --create --prefix /var/log/journal`로 기본에 맞춘다.
 - **fail2ban 설정이 서비스 시작 뒤에 생성된 경우**: jail 파일이 데몬 시작 뒤에 만들어지면 로드되지 않은 채 남는다. `fail2ban-client -t`로 검사한 뒤 `fail2ban-client reload`를 하고 `fail2ban-client status`에 jail이 보이는지 확인한다.
 - **`ausearch -ts`가 0건일 때**: 기록이 없다는 뜻이 아닐 수 있다(시각 해석·로그 순환). 감사 로그 원본 파일에서 해당 키(`-k`)가 찍혔는지 직접 확인한 뒤 판정한다.

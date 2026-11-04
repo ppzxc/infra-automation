@@ -1,0 +1,80 @@
+"""감사 규칙 적재 상태 비교 (#424).
+
+`auditctl -l`(커널에 적재된 규칙)과 규칙 파일 본문(`audit.rules.j2`로 렌더링한 선언)을 같은 모양으로 줄여 비교한다.
+`security` 역할의 `SEC-083`이 이 필터로 적재 drift를 판정하고, 핸들러가 적재 뒤 같은 필터로 결과를 확인한다.
+
+비교 기준(근사다. 완전한 문자열 일치가 아니다):
+  - watch 규칙은 (경로, 권한 문자 집합, 키)로 본다. `-w`/`-p`/`-k` 표기와 `-F path=`/`-F dir=`/`-F perm=`/`-F key=` 표기를
+    같게 보고, 디렉터리 끝 `/`는 무시한다(`auditctl -l`이 찍는 방식이 감사 패키지 버전마다 다를 수 있어서다).
+  - 그 밖의 규칙(syscall 등)은 키만 본다. 시스템 호출 목록·arch는 `auditctl -l`이 정규화해 찍어 문자열 비교가 오탐을 내기 쉽다.
+  - 제어 줄(`-D`, `-b`, `-f`, `-e`, `-r`, `--backlog_wait_time` 등), 주석, 빈 줄, `No rules`는 규칙이 아니다.
+  - 같은 규칙의 중복과 줄 순서는 무시한다.
+"""
+
+_CONTROL = {"-D", "-b", "-f", "-e", "-r", "-i", "-c"}
+
+
+def _signature(line):
+    """규칙 한 줄을 ('watch', 경로, 권한, 키) 또는 ('key', 키)로 줄인다. 규칙이 아니면 None."""
+    line = line.strip()
+    if not line or line.startswith("#") or line.lower().startswith("no rules"):
+        return None
+    tokens = line.split()
+    if tokens[0] in _CONTROL or tokens[0].startswith("--"):
+        return None
+    path, perms, key = None, "", ""
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if tok == "-w":
+            path, i = nxt, i + 2
+        elif tok == "-p":
+            perms, i = nxt, i + 2
+        elif tok == "-k":
+            key, i = nxt, i + 2
+        elif tok == "-F" and "=" in nxt:
+            name, _, value = nxt.partition("=")
+            if name in ("path", "dir"):
+                path = value
+            elif name == "perm":
+                perms = value
+            elif name == "key":
+                key = value
+            i += 2
+        else:
+            i += 1
+    if path is None:
+        return ("key", key)
+    canonical = "".join(c for c in "rwxa" if c in perms) + "".join(sorted(set(perms) - set("rwxa")))
+    return ("watch", path.rstrip("/") or "/", canonical, key)
+
+
+def _signatures(text):
+    found = {}
+    for line in str(text or "").splitlines():
+        sig = _signature(line)
+        if sig is not None:
+            found[sig] = None  # 순서를 지키는 집합
+    return list(found)
+
+
+def _describe(sig):
+    if sig[0] == "key":
+        return "키 %s" % sig[1] if sig[1] else "키 없는 규칙"
+    _, path, perms, key = sig
+    text = "watch %s 권한 %s" % (path, perms)
+    return text + (" 키 %s" % key if key else "")
+
+
+def audit_rules_drift(loaded, declared):
+    """적재된 규칙(`auditctl -l` 출력)과 선언한 규칙 파일 본문의 차이. 같으면 빈 목록."""
+    loaded_sigs, declared_sigs = _signatures(loaded), _signatures(declared)
+    missing = ["적재 안 됨: %s" % _describe(s) for s in declared_sigs if s not in loaded_sigs]
+    extra = ["선언에 없는 규칙이 적재됨: %s" % _describe(s) for s in loaded_sigs if s not in declared_sigs]
+    return missing + extra
+
+
+class FilterModule(object):
+    def filters(self):
+        return {"audit_rules_drift": audit_rules_drift}
