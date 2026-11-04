@@ -179,6 +179,53 @@ sudo grep "<출발지IP>" /var/log/secure | tail
 
 ---
 
+<a id="ssh-login-failures-slow"></a>
+## 🟠 한 출발지의 느린 SSH 대입 — 장기 누적 (`infra-ssh-login-failures-slow`)
+
+**조건**: 같은 `source_address`가 같은 서버에서 1시간 동안 SSH 로그인 **시도 실패** 10회 이상(Event Alert, 재통지 60분. 창·임계·재통지는 `o2c_ssh_slow_window_minutes`·`o2c_ssh_slow_min_failures`·`o2c_ssh_slow_renotify_minutes`). 5분에 몇 번씩만 오래 시도하는 대입을 잡는다. 5분 창 알림(`infra-ssh-login-failures-per-source`)과 함께 울릴 수 있다. 창이 다른 신호다.
+
+**센 방식**: `Failed password` 줄에 더해 없는 계정의 `Invalid user` 줄도 실패로 센다(비밀번호를 내기 전에 끊긴 시도). 한 시도가 두 줄로 남아도 한 번만 센다. 근거는 [openobserve_config.md](../openobserve_config.md)의 "SSH 실패 계수" 항목에 있다.
+
+**왜 중요한가**: 5분 창을 피해 오래 이어지는 무차별 대입이다. 30일 실측에서 이런 사건이 한 번 있었고 잡은 것은 fail2ban뿐이었다. fail2ban이 없는 서버(에이전트만 설치된 호스트)에서는 이 알림이 유일한 단서다.
+
+**확인**
+```bash
+sudo grep "<출발지IP>" /var/log/secure | grep -E "Failed password|Invalid user" | tail -50
+sudo fail2ban-client status sshd   # 있는 서버만
+```
+- 시도한 계정이 실제 존재하는 계정(`getent passwd <계정>`)인지, 한두 계정만 반복하는지 본다.
+
+**대응**
+- 사내·작업자 IP면 해당 자동화의 자격증명을 확인한다.
+- 외부 IP면 방화벽에서 차단하고(fail2ban이 없는 서버는 수동), 같은 출발지의 다른 서버 시도가 없는지 로그 보기로 확인한다.
+
+**격상**: 같은 출발지에서 로그인 **성공** 기록이 있으면 P1(`infra-ssh-bruteforce-success`)로 다룬다.
+
+---
+
+<a id="ssh-password-spray"></a>
+## 🟠 한 출발지의 비밀번호 스프레이 — 여러 계정 시도 (`infra-ssh-password-spray`)
+
+**조건**: 같은 `source_address`가 같은 서버에서 5분 동안 서로 다른 계정 10개를 넘게, 시도 실패 30회 이상(Event Alert, 재통지 15분. `o2c_ssh_spray_window_minutes`·`o2c_ssh_spray_min_failures`·`o2c_ssh_spray_accounts_over`·`o2c_ssh_spray_renotify_minutes`). 계정 수는 "초과"다(10개는 울리지 않는다). 계정 3개로 40회 시도하는 단일 계정 대입은 이 알림이 아니라 5분 창 알림이 본다.
+
+**센 방식**: 느린 SSH 대입 알림과 같다. `Invalid user` 줄도 실패로 세고 한 시도는 한 번만 센다. 계정 수는 시도한 서로 다른 `user_name`이다.
+
+**왜 중요한가**: 계정 목록을 돌려 가며 시도하는 공격이다. 계정마다 횟수가 적어 계정 잠금과 fail2ban의 기본 임계를 피한다. 없는 계정(`Invalid user`)이 대부분이면 이름 사전 공격이고, 실제 계정이 섞였으면 그 계정이 노출된 것이다.
+
+**확인**
+```bash
+sudo grep "<출발지IP>" /var/log/secure | grep -E "Failed password|Invalid user" | tail -100
+```
+- 실제 계정이 섞였는지(`getent passwd`), 그 계정에 성공 기록(`Accepted`)이 있는지 본다.
+
+**대응**
+- 외부 IP면 방화벽에서 차단한다. 사내 IP면 해당 장비 소유자에게 계정 목록 시도 경위를 확인한다.
+- 실제 계정이 포함됐으면 그 계정의 비밀번호 강도와 최근 로그인을 점검한다.
+
+**격상**: 같은 출발지에서 로그인 **성공** 기록이 있으면 P1로 다룬다.
+
+---
+
 <a id="ssh-login-failures-per-host"></a>
 ## 🟠 한 서버에 SSH 로그인 실패 급증 (`infra-ssh-login-failures-per-host`)
 
@@ -195,13 +242,14 @@ sudo grep "<출발지IP>" /var/log/secure | tail
 <a id="sudo-escalation-failure"></a>
 ## 🟠 sudo/su 권한 상승 실패 (`infra-sudo-escalation-failure`)
 
-**조건**: sudo/su 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. 성공은 알리지 않고 기록만 한다.
+**조건**: sudo/su 인증 실패 또는 `NOT in sudoers` 기록이 5분 안에 1건 이상. 성공은 알리지 않고 기록만 한다. `pam_wheel`이 거부한 `su`는 secure에 줄이 없고 audit(`type=USER_AUTH`, `exe="/usr/bin/su"`, `res=failed`)에만 남으므로 이 기록도 센다. 같은 `su` 실패가 secure와 audit에 함께 남으면 한 번만 센다(호스트별 한 행. 사용자 칸은 secure의 이름이 있으면 그 이름이고, audit뿐이면 audit의 `AUID` 이름 또는 `uid <번호>`다. 한 호스트에 사용자가 둘 이상이면 ` 외 N명`이 붙으니 `▶ 로그 보기`로 전체 사용자를 확인한다).
 
 **왜 중요한가**: 탈취한 일반 계정으로 권한 상승을 시도하는 단계일 수 있다. 단순 비밀번호 오입력도 같은 기록을 남긴다.
 
 **확인**
 ```bash
 sudo grep -E "(sudo|su)(\[[0-9]+\])?: .*(authentication failure|NOT in sudoers|FAILED SU)" /var/log/secure | tail
+sudo ausearch -m USER_AUTH -x /usr/bin/su --success no -ts today | tail -30   # secure에 줄이 없는 su(pam_wheel 거부) 확인. 사용자가 uid로 나오면 getent passwd <uid>
 last -i <사용자> | head
 ```
 

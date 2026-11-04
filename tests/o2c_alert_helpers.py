@@ -42,6 +42,7 @@ EXPECTED_ALERTS = {
     "infra-time-offset-exceeded", "infra-time-unsynced", "infra-time-sync-unavailable",   # 시각 동기(#336)
     "infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
     "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
+    "infra-ssh-login-failures-slow", "infra-ssh-password-spray",   # 인증 실패 알림 보강(Spec #433 / Ticket-1, #427)
 }
 
 PROMQL_ALERTS = {
@@ -239,7 +240,8 @@ LONGEST_ROW_VALUES = {"source_address": "198.51.100.255", "host_name": "ns0272",
 COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "total", "parse_errors", "kills", "matches", "errors",
                 "readings", "events", "detections", "downs", "flaps", "severity_code", "offset_ms", "failed_count", "expired_count")
 
-LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
+LONGEST_TEXT = {"more_users": " 외 999명",   # 권한 상승 실패 행에서 한 호스트에 묶인 다른 사용자 수(SQL이 만드는 고정 문구)
+                "hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
                 "user_name": "u" * 32, "actor": "u" * 32, "target": "t" * 14, "repo": "o" * 8 + "/" + "r" * 15, "kind": "organization.member_added", "team": "t" * 14,   # GitHub 감사 알림(#403): SQL이 대상 30자·저장소 40자·팀 20자로 자른다
                 "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
@@ -258,7 +260,7 @@ SECURITY_TIME_CASES = {   # alert -> (record fields, expected row without the ti
         [dict(event_action="ssh_login", event_outcome="success", user_name="root", source_address="198.51.100.7")],
         "• ns0272 ← 198.51.100.7 (1회)"),
     "infra-sudo-escalation-failure": (
-        [dict(event_action="sudo", event_outcome="failure", user_name="alice")], "• ns0272 / 사용자 alice: 실패 1회"),
+        [dict(event_action="sudo", event_outcome="failure", user_name="alice", body=None)], "• ns0272 / 사용자 alice: 실패 1회"),
     "infra-account-lockout": (
         [dict(body="pam_faillock(sshd:auth): Account temporarily locked")], "• ns0272: 잠금 기록 1건"),
 }
