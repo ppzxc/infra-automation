@@ -42,7 +42,7 @@ CASES = {
     # #371: 가짜 문서용 주소(RFC 5737, RFC 3849)만 쓴다.
     "ssh_source_two": {"ssh_source_restriction_allowed_sources": ["192.0.2.0/24", "198.51.100.7/32"]},
     "ssh_source_v6": {"ssh_source_restriction_allowed_sources": ["2001:db8::/32"]},
-    # #430: SEC-082/083이 실제로 있는 경로만 걸러 만든 목록(팩트 `_audit_watch_key_paths_effective`)이 규칙으로 렌더링되는지 본다. 가짜 경로만 쓴다.
+    # #430: SEC-090/091이 실제로 있는 경로만 걸러 만든 목록(팩트 `_audit_watch_key_paths_effective`)이 규칙으로 렌더링되는지 본다. 가짜 경로만 쓴다.
     "watch_keys": {"_audit_watch_key_paths_effective": [
         {"key": "audit_config", "path": "/etc/audit/"},
         {"key": "syslog_config", "path": "/etc/rsyslog.conf"},

@@ -1,7 +1,7 @@
 """security 역할의 파일 감시 키 4개(auditd 설정·syslog 설정·authorized_keys·방화벽 영구 설정) 테스트(Spec #433 / Ticket-4, #430).
 
 규칙 렌더링은 세션당 한 번인 공유 렌더링(`tests/security_render.py`)을 읽는다(`ansible-playbook`을 테스트마다 돌리지 않으므로 `slow`가 아니다).
-없는 경로 거르기(SEC-082~SEC-085)는 태스크 구조와, 태스크가 쓰는 식·셸 명령을 가짜 입력으로 돌려 본다.
+없는 경로 거르기(SEC-090~SEC-093)는 태스크 구조와, 태스크가 쓰는 식·셸 명령을 가짜 입력으로 돌려 본다.
 """
 import json
 import os
@@ -99,7 +99,7 @@ def test_the_watch_key_candidates_name_exactly_the_four_keys_and_their_paths(sec
     assert paths["firewall_config"] == ["/etc/firewalld/"]
 
 
-# --- 없는 경로 거르기: 모듈 경로(SEC-082·SEC-083) ----------------------------------------------------
+# --- 없는 경로 거르기: 모듈 경로(SEC-090·SEC-091) ----------------------------------------------------
 
 def _order(spec_id):
     names = [t["name"] for t in security_tasks()]
@@ -107,12 +107,12 @@ def _order(spec_id):
 
 
 def test_the_existence_filter_runs_before_the_rules_are_deployed():
-    assert _order("SEC-082") < _order("SEC-083") < _order("SEC-012")
-    assert _order("SEC-084") < _order("SEC-085") < _order("SEC-035")
+    assert _order("SEC-090") < _order("SEC-091") < _order("SEC-012")
+    assert _order("SEC-092") < _order("SEC-093") < _order("SEC-035")
 
 
 def test_the_module_probe_stats_every_candidate_path_and_is_read_only():
-    task = security_task("SEC-082")
+    task = security_task("SEC-090")
     assert task["ansible.builtin.stat"]["path"] == "{{ item.1 }}"
     assert "audit_watch_key_paths" in yaml.safe_dump(task["loop"]) and "subelements" in yaml.safe_dump(task["loop"])
     assert task["register"] == "security_audit_watch_key_stat"
@@ -135,7 +135,7 @@ def _stat_result(key, path, exists, real_path=None):
 
 
 def _filter_module_fact(results):
-    expr = security_task("SEC-083")["ansible.builtin.set_fact"]["_audit_watch_key_paths_effective"]
+    expr = security_task("SEC-091")["ansible.builtin.set_fact"]["_audit_watch_key_paths_effective"]
     return json.loads(_env().from_string(expr).render(security_audit_watch_key_stat={"results": results}))
 
 
@@ -159,17 +159,17 @@ def test_the_module_filter_leaves_an_empty_list_when_nothing_exists():
     assert _filter_module_fact([]) == []
 
 
-# --- 없는 경로 거르기: CentOS 6/7 raw 경로(SEC-084·SEC-085) -------------------------------------------
+# --- 없는 경로 거르기: CentOS 6/7 raw 경로(SEC-092·SEC-093) -------------------------------------------
 
 def test_the_raw_probe_is_read_only_and_runs_only_on_the_raw_path():
-    probe = security_task("SEC-084")
+    probe = security_task("SEC-092")
     assert "ansible.builtin.raw" in probe and probe["changed_when"] is False and probe["failed_when"] is False
     assert probe["register"] == "security_audit_watch_key_raw"
-    set_fact = security_task("SEC-085")
+    set_fact = security_task("SEC-093")
     assert "ansible.builtin.set_fact" in set_fact and "_audit_watch_key_paths_effective" in set_fact["ansible.builtin.set_fact"]
     # 두 태스크는 raw 경로 블록 안에 있어 모듈 경로 호스트에서는 실행되지 않는다(블록의 when).
     block = next(t for t in yaml.safe_load((ROOT_DIR / "roles" / "security" / "tasks" / "main.yml").read_text(encoding="utf-8"))
-                 if t.get("block") and any(str(b.get("name", "")).startswith("[SEC-084]") for b in t["block"]))
+                 if t.get("block") and any(str(b.get("name", "")).startswith("[SEC-092]") for b in t["block"]))
     assert "_raw_path_effective" in str(block["when"])
 
 
@@ -206,7 +206,7 @@ def test_the_raw_probe_survives_an_account_name_with_shell_metacharacters(tmp_pa
 
 
 def test_the_raw_fact_keeps_each_found_path_under_its_key():
-    expr = security_task("SEC-085")["ansible.builtin.set_fact"]["_audit_watch_key_paths_effective"]
+    expr = security_task("SEC-093")["ansible.builtin.set_fact"]["_audit_watch_key_paths_effective"]
     stdout = "__RAW_EXISTS__ /etc/audit/\n__RAW_EXISTS__ /etc/rsyslog.d/\n__RAW_EXISTS__ /home/alice/.ssh/authorized_keys\n__RAW_EXISTS__ /root/.ssh/authorized_keys\r\n"
     fixed = {"audit_config": ["/etc/audit/"], "syslog_config": ["/etc/rsyslog.conf", "/etc/rsyslog.d/"], "firewall_config": ["/etc/firewalld/"]}
     out = _env().from_string(expr).render(
@@ -221,11 +221,11 @@ def test_the_raw_fact_keeps_each_found_path_under_its_key():
 
 def test_the_new_tasks_have_the_same_gates_as_the_rules_deployment_they_feed():
     """새 태스크는 감사 규칙 배포(SEC-012/SEC-035)와 같은 조건에서만 돌고, 규칙 배포는 이 변경으로 대상이 넓어지지 않는다."""
-    assert security_task("SEC-082")["when"] == security_task("SEC-012")["when"]
-    assert security_task("SEC-083")["when"] == security_task("SEC-012")["when"]
+    assert security_task("SEC-090")["when"] == security_task("SEC-012")["when"]
+    assert security_task("SEC-091")["when"] == security_task("SEC-012")["when"]
     raw = yaml.safe_load((ROOT_DIR / "roles" / "security" / "tasks" / "main.yml").read_text(encoding="utf-8"))
     block = next(t for t in raw if t.get("block") and any(str(b.get("name", "")).startswith("[SEC-035]") for b in t["block"]))
-    assert {b["name"][:9] for b in block["block"]} >= {"[SEC-084]", "[SEC-085]", "[SEC-035]"}
+    assert {b["name"][:9] for b in block["block"]} >= {"[SEC-092]", "[SEC-093]", "[SEC-035]"}
 
 
 def test_only_the_provisioning_entry_points_run_the_security_role():

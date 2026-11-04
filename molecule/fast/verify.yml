@@ -324,9 +324,9 @@
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
 
-        # Audit Watch Key 4개(#430): 감시 키 줄은 후보 경로가 실제로 있을 때만 있고(없는 경로는 SEC-082/083이 거른다), 있으면 -p wa다.
+        # Audit Watch Key 4개(#430): 감시 키 줄은 후보 경로가 실제로 있을 때만 있고(없는 경로는 SEC-090/091이 거른다), 있으면 -p wa다.
         # 컨테이너는 규칙을 적재할 수 없어 파일 내용을 본다. 적재 목록(`auditctl -l`)은 적재가 되는 호스트(rc 0, 규칙 있음)에서만 같은 줄을 확인한다.
-        - name: "[VERIFY-SEC-082] Verify audit watch keys are rendered exactly for the paths that exist"
+        - name: "[VERIFY-SEC-090] Verify audit watch keys are rendered exactly for the paths that exist"
           ansible.builtin.assert:
             that:
               - "('-w /etc/audit/ -p wa -k audit_config' in f.read[audit_rules_path]) == f.stat['/etc/audit/'].exists"
@@ -339,7 +339,7 @@
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
 
-        - name: "[VERIFY-SEC-082] Verify audit watch keys are loaded when the host can load audit rules (auditctl -l)"
+        - name: "[VERIFY-SEC-090] Verify audit watch keys are loaded when the host can load audit rules (auditctl -l)"
           ansible.builtin.assert:
             that:
               - "('-w /etc/audit/ -p wa -k audit_config' in f.cmd.auditctl_list.stdout) == f.stat['/etc/audit/'].exists"
@@ -351,7 +351,7 @@
             - f.cmd.auditctl_list.rc == 0
             - "'-k identity' in f.cmd.auditctl_list.stdout"
 
-        - name: "[VERIFY-SEC-083] Verify missing audit watch key paths are left out of the audit rules"
+        - name: "[VERIFY-SEC-091] Verify missing audit watch key paths are left out of the audit rules"
           ansible.builtin.assert:
             that:
               - "'/nonexistent/molecule-firewalld/' not in f.read[audit_rules_path]"

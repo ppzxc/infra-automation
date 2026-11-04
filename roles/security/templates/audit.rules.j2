@@ -40,7 +40,7 @@
 {% endfor %}
 
 # 6. Audit Watch Keys (#430): 로그 은폐(auditd·syslog 설정)·백도어 키(authorized_keys)·방화벽 영구 설정. 변경(w)과 속성(a)만 본다(읽기는 sshd가 늘 한다).
-# 실제로 있는 경로만 싣는다(SEC-082/SEC-083, CentOS 6/7은 SEC-084/SEC-085). 탐지가 건너뛰어진 호스트는 이 구역이 비어 규칙 적재가 깨지지 않는다.
+# 실제로 있는 경로만 싣는다(SEC-090/SEC-091, CentOS 6/7은 SEC-092/SEC-093). 탐지가 건너뛰어진 호스트는 이 구역이 비어 규칙 적재가 깨지지 않는다.
 {% set _awk = _audit_watch_key_paths_effective | default([]) %}
 {% for e in (_awk if _awk is not string else (_awk | from_json)) %}
 -w {{ e.path }} -p wa -k {{ e.key }}

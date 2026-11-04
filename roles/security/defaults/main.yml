@@ -110,7 +110,7 @@ audit_container_config_paths:
   - /etc/docker/
 
 # Audit Watch Key 4개(Spec #433 / Ticket-4, #430): 감시 키 이름은 감시 대상의 의미를 담는다. 정의는 CONTEXT.md의 Audit Watch Key.
-# 후보 경로이며 규칙에는 SEC-082/SEC-083이 실제로 있는 경로만 싣는다(없는 경로에 watch를 걸면 규칙 적재가 실패한다).
+# 후보 경로이며 규칙에는 SEC-090/SEC-091이 실제로 있는 경로만 싣는다(없는 경로에 watch를 걸면 규칙 적재가 실패한다).
 audit_config_watch_paths:        # auditd 설정(감사 규칙 파일 포함): 로그를 끄거나 돌리는 은폐 시도
   - /etc/audit/
 audit_syslog_watch_paths:        # syslog 설정
@@ -121,7 +121,7 @@ audit_firewall_watch_paths:      # 방화벽 영구 설정만. `--permanent` 없
 # authorized_keys를 감시할 계정(root는 늘 포함하므로 적지 않는다). 계정 이름만 적고 홈은 시스템(passwd)에서 찾는다.
 # 목록이 비어 있어도 root만 감시하고 규칙은 깨지지 않는다. 값은 호스트마다 다르므로 인벤토리·Semaphore Environment로 받는다.
 audit_ssh_key_accounts: []
-# 감시 키 -> 후보 경로. `~계정`은 stat 모듈(SEC-082)과 raw 탐지(SEC-084)가 그 계정의 홈으로 바꾼다.
+# 감시 키 -> 후보 경로. `~계정`은 stat 모듈(SEC-090)과 raw 탐지(SEC-092)가 그 계정의 홈으로 바꾼다.
 audit_watch_key_paths:
   audit_config: "{{ audit_config_watch_paths }}"
   syslog_config: "{{ audit_syslog_watch_paths }}"
