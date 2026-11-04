@@ -472,6 +472,7 @@
           - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-01') | first).evidence is search('PermitRootLogin')
           - record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-16') | map(attribute='verdict') | first == '양호'
           - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-23') | first).evidence is search('/su')
+          - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-23') | first).evidence is search('file capability')
         fail_msg: "Unexpected KISA-2026 verdicts: {{ record.config_vulnerability.results }}"
 
 # ------------------------------------------------------------------------------
