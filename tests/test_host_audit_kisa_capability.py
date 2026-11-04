@@ -161,7 +161,20 @@ def test_role_defaults_cover_the_well_known_distro_capabilities():
     entries = role_defaults()
     assert isinstance(entries, list) and entries
     assert "/usr/bin/ping cap_net_raw" in entries
-    assert all(len(e.split()) == 2 for e in entries)  # "<path> <capability names>"
+    assert all(_splits_into_path_and_names(e) for e in entries), entries
+
+
+def _splits_into_path_and_names(entry):
+    """The check's own rule: the path runs up to the one " cap_", names are a comma-joined set (no spaces)."""
+    path, sep, names = entry.partition(" cap_")
+    return bool(sep) and path.startswith("/") and " cap_" not in names and " " not in names.strip()
+
+
+def test_default_entry_format_rule_accepts_paths_with_spaces_and_rejects_malformed_entries():
+    assert _splits_into_path_and_names("/opt/my app/tool cap_chown,cap_kill")
+    assert not _splits_into_path_and_names("/usr/bin/ping")  # no capability names
+    assert not _splits_into_path_and_names("/usr/bin/ping cap_net_raw cap_net_admin")  # names must be comma-joined
+    assert not _splits_into_path_and_names("/a cap_x /b cap_y")  # two entries on one line
 
 
 def test_kisa_task_injects_the_role_variable_into_the_script():
