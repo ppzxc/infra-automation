@@ -1562,35 +1562,47 @@ infra-security-service-stopped:
       host: verify-svcstop-fail2ban
       fires: true
       records:
-        - {ts: 0, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46621): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=fail2ban comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1500, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46621): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=fail2ban comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
     - name: firewalld 중지 뒤 시작 기록 없음
       host: verify-svcstop-firewalld
       fires: true
       records:
-        - {ts: 0, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46622): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=firewalld comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1500, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46622): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=firewalld comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
     - name: rsyslog 중지 뒤 시작 기록 없음
       host: verify-svcstop-rsyslog
       fires: true
       records:
-        - {ts: 0, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46623): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1500, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46623): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
     - name: 재시작(중지 2초 뒤 시작)은 알리지 않는다
       host: verify-svcstop-restart
       fires: false
       records:
-        - {ts: 0, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46624): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=fail2ban comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
-        - {ts: 2, service_name: audit, body: 'type=SERVICE_START msg=audit(1792627443.411:46630): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=fail2ban comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1500, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46624): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=fail2ban comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1498, service_name: audit, body: 'type=SERVICE_START msg=audit(1792627443.411:46630): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=fail2ban comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
     - name: 재부팅(중지 14분 뒤 시작)은 시작 기록이 따라와 알리지 않는다
       host: verify-svcstop-reboot
       fires: false
       records:
-        - {ts: 0, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46625): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
-        - {ts: 840, service_name: audit, body: 'type=SERVICE_START msg=audit(1792628281.411:580): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1500, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46625): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -660, service_name: audit, body: 'type=SERVICE_START msg=audit(1792628281.411:580): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
     - name: 다른 unit(sshd·auditd)의 중지는 이 알림이 아니다
       host: verify-svcstop-other
       fires: false
       records:
-        - {ts: 0, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46626): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=sshd comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
-        - {ts: 1, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627442.382:46627): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=auditd comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1500, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46626): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=sshd comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1499, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627442.382:46627): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=auditd comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+    - name: 방금(5분 전) 멈춘 서비스는 유예가 차기 전이라 알리지 않는다(순차 재부팅에서 다른 호스트의 시작을 기다리는 경우)
+      host: verify-svcstop-just-stopped
+      fires: false
+      records:
+        - {ts: -300, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46628): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=rsyslog comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+    - name: 이전 중지·시작 쌍 뒤에 다시 멈추고 25분이 지남
+      host: verify-svcstop-stopped-again
+      fires: true
+      records:
+        - {ts: -3000, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792627441.382:46629): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=firewalld comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -2998, service_name: audit, body: 'type=SERVICE_START msg=audit(1792627443.411:46631): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=firewalld comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
+        - {ts: -1500, service_name: audit, body: 'type=SERVICE_STOP msg=audit(1792629000.382:46640): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg=''unit=firewalld comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? terminal=? res=success'''}
 infra-account-lockout:
   cases:
     - name: pam_faillock 잠금(syslog)

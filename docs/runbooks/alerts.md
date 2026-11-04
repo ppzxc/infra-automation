@@ -256,6 +256,8 @@ getent group wheel sudo docker
 
 **조건**: 성공한 sudo 기록의 명령 줄(`process_command_line`, 소문자)에 위험 명령 문구가 붙은 그대로 들어 있음(재통지 5분). 문구는 역할 변수 `o2c_sudo_risky_commands`(SELinux 해제 `setenforce 0`, 방화벽 규칙 초기화 `iptables -F`·`nft flush ruleset`·`firewall-cmd --panic-on`, 감사 규칙 끄기·삭제 `auditctl -e 0`·`auditctl -D`, 계정 삭제 `userdel`, 저널 로그 삭제·회전 `journalctl --vacuum`·`journalctl --rotate`, 불변 속성 조작 `chattr`)와 `o2c_sudo_protected_services`(auditd·rsyslog·systemd-journald·firewalld·otelcol-contrib·fail2ban)를 `systemctl stop|disable|mask|kill`, `service … stop`하는 명령이다. `restart`는 세지 않는다. 통지 행에는 명령 원문 대신 종류만 싣는다(명령 줄에 비밀값이 섞인 사례가 있다).
 
+**일상 오탐 가능성**: `chattr`은 옵션 구분 없이 걸어(`chattr -i`가 울려야 해서) 로그 파일을 `chattr +a`·`chattr +i`로 잠그는 정상 하드닝 작업도 울린다. `journalctl --vacuum`·`--rotate`도 용량 정리·점검 같은 정상 작업이 같은 명령을 쓴다. 울리면 작업 일정과 대조해 정상 작업이면 닫는다. 오탐이 잦으면 `o2c_sudo_risky_commands`의 문구를 좁혀 덮어쓴다.
+
 **왜 중요한가**: 흔적을 지우거나 방어를 끄는 단계에서 쓰는 명령이다. 계획된 작업이 아니면 침해가 진행 중일 수 있다.
 
 **확인**
@@ -294,11 +296,15 @@ sudo auditctl -s        # enabled 1이어야 한다
 <a id="security-service-stopped"></a>
 ## 🔴 보안 서비스(fail2ban·firewalld·rsyslog) 중지가 이어짐 (`infra-security-service-stopped`)
 
-**조건**: 감사 로그(`security_logs`, `service_name=audit`)의 `SERVICE_STOP`·`SERVICE_START`(`res=success`)에서 unit(`o2c_security_stop_services`: fail2ban·firewalld·rsyslog)별로 중지의 마지막 시각이 시작의 마지막 시각보다 늦은 상태가 20분(`o2c_security_stop_grace_minutes`, `pending_minutes`) 이어짐(조회 60분 `o2c_security_stop_window_minutes`, 재통지 60분). 서비스가 다시 켜지면 시작 기록이 따라와 알림이 멈춘다. `auditd`는 위 `infra-auditd-stopped`가 맡으므로 대상이 아니다.
+**조건**: 감사 로그(`security_logs`, `service_name=audit`)의 `SERVICE_STOP`·`SERVICE_START`(`res=success`)에서 호스트·unit(`o2c_security_stop_services`: fail2ban·firewalld·rsyslog)별로 마지막 중지가 마지막 시작보다 늦고, 그 중지가 20분(`o2c_security_stop_grace_minutes`)보다 오래된 행(조회 60분 `o2c_security_stop_window_minutes`, 재통지 10분 `o2c_security_stop_renotify_minutes`). 서비스가 다시 켜지면 시작 기록이 따라와 그 행이 사라진다. 행의 시각은 마지막 중지 시각이다(앞선 중지·시작 쌍은 섞지 않는다). `auditd`는 위 `infra-auditd-stopped`가 맡으므로 대상이 아니다.
 
-**왜 20분인가**: 실로그(`security_logs` 보존 기간, 2026-11-04 조회)의 SERVICE_STOP·START 33건에서 프로비저닝·서비스 재시작은 중지와 시작이 0~2초 간격이었고, 재부팅은 가장 길 때 14분(SELinux 재라벨링이 붙은 재부팅, 15:59:40 중지 → 16:13:36~42 시작)이었다. 20분은 그 14분에 여유를 둔 값이라 재부팅을 기다리는 동안에는 울리지 않는다. **`rsyslog`를 다시 넣은 이유**: 재부팅 중 수집기가 살아 있는 동안 `SERVICE_STOP`이 먼저 들어와 2분 대기의 `infra-auditd-stopped` 방식으로는 재부팅마다 오탐이 나 빠졌던 것인데, 이 알림은 "중지가 20분 이어질 때만" 판정하므로 그 오탐이 없다. 재부팅이 20분을 넘는 호스트가 있으면 `o2c_security_stop_grace_minutes`를 늘린다(조회 구간보다 작아야 한다).
+**대상이 sudo 보호 목록보다 좁은 이유**: 이 알림은 실로그로 재기동 간격을 확인한 세 서비스만 본다. `systemd-journald`는 재기동 간격을 실측하지 않았고, `otelcol-contrib`는 수집기 자신이라 멈추면 자기 중지 기록을 보내지 못해 이 방식으로 판정할 수 없다. 두 서비스를 sudo로 멈추는 명령은 계속 위 위험 명령 알림(`o2c_sudo_protected_services`)이 잡는다.
 
-**한계**: 조회 구간(60분) 안에 중지 기록이 있어야 한다. 중지가 60분을 넘게 이어지면 중지 기록이 구간 밖으로 밀려 알림이 멈추므로, 멈춘 알림을 복구 신호로 단정하지 말고 `systemctl status`로 확인한다. 재부팅 때 수집기가 먼저 멈춰 `SERVICE_STOP`이 늦게 들어오는 경우(위 auditd 실측)는 시작 기록과 함께 들어와 울리지 않는다.
+**왜 20분인가**: 실로그(`security_logs` 보존 기간 30일, 2026-11-04 조회)의 SERVICE_STOP·START 33건에서 프로비저닝·서비스 재시작은 중지와 시작이 0~2초 간격이었고, 재부팅은 가장 길 때 14분(SELinux 재라벨링이 붙은 재부팅, 15:59:40 중지 → 16:13:36~42 시작)이었다. 20분은 그 14분에 여유를 둔 값이라 재부팅을 기다리는 동안에는 울리지 않는다. **`rsyslog`를 다시 넣은 이유**: 재부팅 중 수집기가 살아 있는 동안 `SERVICE_STOP`이 먼저 들어와 2분 대기의 `infra-auditd-stopped` 방식으로는 재부팅마다 오탐이 나 빠졌던 것인데, 이 알림은 "중지가 20분 이어질 때만" 판정하므로 그 오탐이 없다. 재부팅이 20분을 넘는 호스트가 있으면 `o2c_security_stop_grace_minutes`를 늘린다(조회 구간보다 작아야 한다).
+
+**유예는 행마다 판정한다**: 알림의 `pending`(쿼리 전체가 20분 동안 비지 않아야 울림)을 쓰지 않고 SQL이 행마다 "마지막 중지가 20분보다 오래됨"을 본다. `pending`이면 호스트를 순차로 재부팅할 때 다른 호스트의 중지가 겹쳐 방금 멈춘 호스트까지 울리고, 이미 울리는 행이 다른 호스트의 진짜 중지를 가린다. 알림 `silence`(재통지)는 알림 단위라 먼저 울린 행이 있는 동안 늦게 멈춘 호스트의 첫 통지가 최대 10분 늦어질 수 있어 재통지 간격을 짧게 뒀다.
+
+**한계**: 조회 구간(60분) 안에 중지 기록이 있어야 한다. 중지가 60분을 넘게 이어지면 중지 기록이 구간 밖으로 밀려 알림이 멈추므로(행이 나오는 구간은 유예 20분 뒤부터 40분), 멈춘 알림을 복구 신호로 단정하지 말고 `systemctl status`로 확인한다. 재부팅 때 수집기가 먼저 멈춰 `SERVICE_STOP`이 늦게 들어오는 경우(위 auditd 실측)는 시작 기록과 함께 들어와 울리지 않는다.
 
 **왜 중요한가**: fail2ban이 멈추면 대입 공격 차단이, firewalld가 멈추면 방화벽 규칙 적용이, rsyslog가 멈추면 로그 수집이 끊긴다. root 셸에서 멈춘 경우는 sudo 위험 명령 알림이 잡지 못한다.
 

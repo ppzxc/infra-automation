@@ -125,9 +125,15 @@ def _date_format(value, fmt, offset):
     tz = timezone(sign * timedelta(hours=int(hours), minutes=int(minutes)))
     return datetime.fromtimestamp(seconds, tz).strftime(fmt)
 
-def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
-    """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows."""
+def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify", now_us=None):
+    """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows.
+
+    ``now_us``: what ``now()`` means for SQL that reads the clock (``to_unixtime(now())``); default is the real current time.
+    """
     db = sqlite3.connect(":memory:")
+    now_seconds = (now_us / 1_000_000) if now_us is not None else datetime.now(timezone.utc).timestamp()
+    db.create_function("now", 0, lambda: now_seconds)
+    db.create_function("to_unixtime", 1, lambda value: value)
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
     db.create_function("date_format", 3, _date_format)
     records = [dict({"_timestamp": 1_792_767_302_000_000}, **r) for r in records]   # OpenObserve stamps every record on ingest
@@ -191,7 +197,7 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-account-lockout": ("P2 경고", 5, 5, 0, "account temporarily locked"),
     "infra-audit-watch-change": ("P2 경고", 5, 5, 0, 'key="identity"'),                              # 남은 보안 로그 알림(#330)
     "infra-ssh-login-unregistered-source": ("P2 경고", 5, 60, 0, "user_name <> 'root'"),
-    "infra-security-service-stopped": ("P1 긴급", 60, 60, 20, "type=SERVICE_STOP"),   # 보안 서비스 중지(#429)
+    "infra-security-service-stopped": ("P1 긴급", 60, 10, 0, "type=SERVICE_STOP"),   # 보안 서비스 중지(#429): 유예는 행 단위로 SQL이 판정하므로 pending 0
 }
 
 RAID_ALERTS = {   # alert -> a fragment only its search carries
@@ -263,9 +269,6 @@ SECURITY_TIME_CASES = {   # alert -> (record fields, expected row without the ti
         [dict(event_action="sudo", event_outcome="failure", user_name="alice")], "• ns0272 / 사용자 alice: 실패 1회"),
     "infra-account-lockout": (
         [dict(body="pam_faillock(sshd:auth): Account temporarily locked")], "• ns0272: 잠금 기록 1건"),
-    "infra-security-service-stopped": (   # 보안 서비스 중지(#429)
-        [dict(service_name="audit", body="type=SERVICE_STOP msg=audit(1792627441.382:46621): msg='unit=fail2ban comm=\"systemd\" res=success'")],
-        "• ns0272: fail2ban 중지"),
 }
 
 SYSTEM_TIME_CASES = {   # alert -> (stream, record fields, expected row without the time; "{n}" is the record count)

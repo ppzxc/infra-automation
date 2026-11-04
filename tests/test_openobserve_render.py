@@ -1043,8 +1043,10 @@ def _unit_event(kind, unit, at, host="ns0272", res="success"):
             "body": UNIT_BODY % (kind, unit, res)}
 
 
-def _stopped_rows(desired, *events):
-    return _run_alert_on_sqlite(_sql(desired, STOPPED), list(events), stream="security_logs")
+def _stopped_rows(desired, *events, now=1500):
+    """알림 SQL을 합성 행에 돌린다. `now`는 기준 시각(0초)에서 평가 시각까지의 초(기본 25분 — 0초의 중지는 유예를 넘긴 상태)."""
+    return _run_alert_on_sqlite(_sql(desired, STOPPED), list(events), stream="security_logs",
+                                now_us=_kst_us("2026-10-23 09:00:00") + now * 1_000_000)
 
 
 @pytest.mark.parametrize("unit", ["fail2ban", "firewalld", "rsyslog"])
@@ -1069,6 +1071,41 @@ def test_a_stop_followed_by_a_start_does_not_alert_and_the_restart_ordering_is_j
     assert [r["unit"] for r in rows] == ["fail2ban"]
 
 
+def test_a_stop_alerts_only_once_it_is_older_than_the_grace(desired):
+    """유예(20분)는 행마다 SQL이 판정한다: 중지가 유예보다 오래돼야 행이 나온다."""
+    stop = _unit_event("SERVICE_STOP", "fail2ban", 0)
+    assert _stopped_rows(desired, stop, now=60) == [] and _stopped_rows(desired, stop, now=1199) == []
+    assert [r["unit"] for r in _stopped_rows(desired, stop, now=1200)] == ["fail2ban"]
+
+
+def test_hosts_rebooted_one_after_another_do_not_alert_for_the_one_that_just_stopped(desired):
+    """A는 14분 만에 시작됐고 B는 방금(5분 전) 멈췄다 — 쿼리 전체가 아니라 행마다 유예를 판정하므로 B는 아직 울리지 않는다."""
+    a = [_unit_event("SERVICE_STOP", "rsyslog", 0, host="ns0001"), _unit_event("SERVICE_START", "rsyslog", 840, host="ns0001")]
+    b = [_unit_event("SERVICE_STOP", "rsyslog", 1200, host="ns0002")]     # 평가(1500초) 5분 전에 멈춤
+    assert _stopped_rows(desired, *a, *b, now=1500) == []
+    rows = _stopped_rows(desired, *a, *b, now=1200 + 1260)               # B가 21분째 멈춰 있음
+    assert [(r["host_name"], r["unit"]) for r in rows] == [("ns0002", "rsyslog")]
+
+
+def test_simultaneous_stops_alert_together_and_a_late_one_is_judged_by_its_own_grace(desired):
+    both = [_unit_event("SERVICE_STOP", "fail2ban", 0, host="ns0001"), _unit_event("SERVICE_STOP", "firewalld", 0, host="ns0002")]
+    assert _stopped_rows(desired, *both, now=600) == []
+    assert sorted((r["host_name"], r["unit"]) for r in _stopped_rows(desired, *both, now=1500)) == [("ns0001", "fail2ban"), ("ns0002", "firewalld")]
+    # 먼저 멈춘 A가 이미 울린 뒤에 멈춘 B도 자기 유예가 차면 같은 쿼리에서 행으로 나온다(재통지 간격 동안 막히는 시간은 짧게 둔다)
+    late = [_unit_event("SERVICE_STOP", "fail2ban", 0, host="ns0001"), _unit_event("SERVICE_STOP", "fail2ban", 600, host="ns0002")]
+    assert [r["host_name"] for r in _stopped_rows(desired, *late, now=1500)] == ["ns0001"]
+    assert sorted(r["host_name"] for r in _stopped_rows(desired, *late, now=1800)) == ["ns0001", "ns0002"]
+
+
+def test_the_row_shows_the_last_stop_time_not_the_range_of_earlier_stop_start_pairs(desired):
+    events = [_unit_event("SERVICE_STOP", "fail2ban", 0), _unit_event("SERVICE_START", "fail2ban", 2),
+              _unit_event("SERVICE_STOP", "fail2ban", 1800)]                       # 09:30:00에 다시 멈춤
+    alert = desired.store["alert"][STOPPED]
+    rows = _stopped_rows(desired, *events, now=3600)
+    lines = [re.sub(r"\{(\w+)\}", lambda m: str(row[m.group(1)]), alert["row_template"]) for row in rows]
+    assert lines == ["• ns0272: fail2ban 중지 · 10-23 09:30:00"]
+
+
 def test_other_units_auditd_and_failed_records_do_not_alert(desired):
     for unit in ("sshd", "auditd", "backup-audit-daily", "fail2ban-extra", "systemd-journald"):
         assert _stopped_rows(desired, _unit_event("SERVICE_STOP", unit, 0)) == [], unit
@@ -1084,21 +1121,41 @@ def test_the_target_services_are_a_role_default_and_never_include_auditd(desired
     assert "auditd" not in defaults["o2c_security_stop_services"] and "auditd" not in _sql(desired, STOPPED)
 
 
-def test_the_grace_covers_the_longest_logged_reboot_gap_and_the_window_outlasts_it(desired):
-    """N(대기)은 실로그에서 재부팅 중지→시작이 가장 길었던 약 14분(840초)보다 길고, 조회 구간은 대기보다 길어야 발화한 뒤에도 중지가 보인다."""
+def test_the_grace_covers_the_longest_logged_reboot_gap_and_is_judged_per_row_not_by_pending(desired):
+    """N은 실로그 재부팅 중지→시작 최장 약 14분보다 길다. 유예는 SQL이 행마다 판정하므로 알림 pending은 0이고, 조회 구간은 유예보다 길다."""
     a = desired.store["alert"][STOPPED]
-    grace_minutes = a["pending_period_sec"] // 60
-    assert grace_minutes > 14 and a["trigger_condition"]["period"] > grace_minutes and a["context_attributes"]["severity"] == "P1 긴급"
     defaults = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
-    assert grace_minutes == defaults["o2c_security_stop_grace_minutes"]
+    grace = defaults["o2c_security_stop_grace_minutes"]
+    assert grace > 14 and a["pending_period_sec"] == 0 and a["trigger_condition"]["period"] > grace
+    assert a["trigger_condition"]["silence"] == defaults["o2c_security_stop_renotify_minutes"] < grace
+    assert a["context_attributes"]["severity"] == "P1 긴급"
 
 
-def test_the_grace_rationale_and_the_rsyslog_reinstatement_are_written_in_the_spec_and_next_to_the_variable(desired):
+def test_the_grace_variable_reaches_the_sql(tmp_path):
+    rendered = render_desired(tmp_path / "desired.json", extra={"o2c_security_stop_grace_minutes": 30, "o2c_security_stop_window_minutes": 90})
+    sql = next(o["body"]["query_condition"]["sql"] for o in rendered if o["kind"] == "alert" and o["name"] == STOPPED)
+    stop = _unit_event("SERVICE_STOP", "fail2ban", 0)
+    now = lambda seconds: _kst_us("2026-10-23 09:00:00") + seconds * 1_000_000
+    assert _run_alert_on_sqlite(sql, [stop], "security_logs", now_us=now(1799)) == []
+    assert len(_run_alert_on_sqlite(sql, [stop], "security_logs", now_us=now(1800))) == 1
+
+
+def test_the_grace_rationale_scope_and_everyday_false_positives_are_written_down(desired):
     text = (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
     comment = text.split("o2c_security_stop_services:")[0].rsplit("\n\n", 1)[-1]
     spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    runbook = RUNBOOK.read_text(encoding="utf-8")
     for token in ("14분", "rsyslog", "재부팅"):
         assert token in comment and token in spec, token
+    # 대상 범위가 sudo 보호 목록보다 좁은 의도(systemd-journald·otelcol-contrib)를 명세·런북에 적는다
+    for token in ("systemd-journald", "otelcol-contrib"):
+        assert token in spec and token in runbook, token
+    # sudo 위험 명령의 일상 오탐 가능성: 변수 주석(위험 명령 목록 위)과 런북
+    risky_comment = text.split("o2c_sudo_risky_commands:")[0].rsplit("\n\n", 1)[-1]
+    for token in ("chattr +a", "journalctl --vacuum", "journalctl --rotate"):
+        assert token in risky_comment and token in runbook, token
+    # 실로그에서 확인한 unit 필드 형식(.service 접미 없음, 이름 뒤 공백)을 주석에 남긴다
+    assert ".service" in comment and "공백" in comment
 
 
 def test_sudo_that_clears_logs_flips_immutable_bits_or_stops_fail2ban_alerts_but_history_clear_no_longer_does(desired):
