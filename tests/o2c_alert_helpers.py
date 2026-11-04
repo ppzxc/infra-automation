@@ -259,6 +259,9 @@ LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactiv
                 "status": "timeout", "tool": "timedatectl", "sync_status": "unsynced", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
 
 TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
+# 감시 키 변경 알림(#430)의 열은 알림이 정한 고정 이름이다: 구분 표기는 두 라벨 중 긴 것, 대상 이름은 감시 키 표시 이름 중 가장 긴 것.
+LONGEST_TEXT.update(provisioning=max(DEFAULTS["o2c_audit_provisioning_label"], DEFAULTS["o2c_audit_no_provisioning_label"], key=len),
+                    watched=max(DEFAULTS["o2c_audit_watch_keys"].values(), key=len))
 
 def _ev(ts, **fields):
     return dict({"host_name": "ns0272", "_timestamp": _kst_us(ts)}, **fields)

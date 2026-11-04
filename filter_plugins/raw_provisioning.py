@@ -256,6 +256,25 @@ def raw_exists_results(stdout, paths):
     return [{'item': p, 'stat': {'exists': p in found}} for p in paths]
 
 
+def raw_exists_found(stdout):
+    """The paths a ``raw_exists_cmd``-style probe printed (``__RAW_EXISTS__ <path>`` lines), CR-tolerant."""
+    return [ln.split(None, 1)[1].strip() for ln in (stdout or '').splitlines()
+            if ln.startswith(EXISTS_MARKER + ' ') and len(ln.split(None, 1)) == 2]
+
+
+def raw_ssh_key_exists_cmd(paths, accounts):
+    """``raw_exists_cmd`` for ``paths`` plus every account's existing ``~/.ssh/authorized_keys`` (read-only).
+
+    The home directory comes from ``getent passwd`` (not ``/home/<name>``). Accounts the system does not know are skipped.
+    Names are shell-quoted, so a hostile name cannot run anything.
+    """
+    lines = [raw_exists_cmd(paths).rsplit('; true', 1)[0]]
+    for account in accounts:
+        lines.append('h=$(getent passwd %s | cut -d: -f6); [ -n "$h" ] && [ -e "$h/.ssh/authorized_keys" ] && echo "%s $h/.ssh/authorized_keys"'
+                     % (shlex.quote(account), EXISTS_MARKER))
+    return '; '.join(lines) + '; true'
+
+
 def raw_group_cmd(name, gid=None):
     """Create the group (or fix its gid) only when needed; echo the marker if it did."""
     n = shlex.quote(name)
@@ -784,6 +803,8 @@ class FilterModule(object):
             'raw_switch_binary_cmd': raw_switch_binary_cmd,
             'raw_exists_cmd': raw_exists_cmd,
             'raw_exists_results': raw_exists_results,
+            'raw_exists_found': raw_exists_found,
+            'raw_ssh_key_exists_cmd': raw_ssh_key_exists_cmd,
             'raw_rm_cmd': raw_rm_cmd,
             'raw_yum_cmd': raw_yum_cmd,
             'raw_sysctl_live_cmd': raw_sysctl_live_cmd,

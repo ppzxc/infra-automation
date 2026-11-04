@@ -408,6 +408,100 @@ def test_the_audit_watch_alert_covers_the_account_sudoers_and_sshd_keys_but_not_
         assert f'key="{key}"' not in sql, key
 
 
+# --- 파일 감시 키 4개와 정상 변경 구분 (Spec #433 / Ticket-4, #430) ---------------------------------------------------------------
+WATCH_ALERT = "infra-audit-watch-change"
+NEW_WATCH_KEYS = ("audit_config", "syslog_config", "ssh_keys", "firewall_config")
+
+
+def _watch_rows(desired, records):
+    return _run_alert_on_sqlite(_sql(desired, WATCH_ALERT), records, "security_logs")
+
+
+def _watch_syscall(host, key, comm="vim", tty="pts0", auid="AUID=\"opsverify\""):
+    return {"service_name": "audit", "host_name": host,
+            "body": f'type=SYSCALL msg=audit(1792985278.101:5001): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 '
+                    f'tty={tty} ses=313 comm="{comm}" exe="/usr/bin/{comm}" subj=kernel key="{key}" {auid} UID="root"'}
+
+
+def _ansible_become(host):
+    """Ansible의 become(sudo)이 auth 로그에 남기는 줄: 파이프라이닝이면 명령이 `/bin/sh -c 'echo BECOME-SUCCESS-<무작위> ; /usr/bin/python3'`다."""
+    return {"service_name": "auth", "host_name": host, "event_action": "sudo", "event_outcome": "success",
+            "body": f"Nov  4 12:56:50 {host} sudo[2943981]:   deploy : PWD=/home/deploy ; USER=root ; "
+                    "COMMAND=/bin/sh -c 'echo BECOME-SUCCESS-tincfrejonveczuwsxapiifxpcrliomi ; /usr/bin/python3'"}
+
+
+@pytest.mark.parametrize("key", NEW_WATCH_KEYS)
+def test_the_audit_watch_alert_covers_each_new_watch_key(desired, key):
+    assert f'key="{key}"' in _sql(desired, WATCH_ALERT)
+    rows = _watch_rows(desired, [_watch_syscall("verify-new-key", key)])
+    assert [r["host_name"] for r in rows] == ["verify-new-key"]
+
+
+def test_the_alert_key_list_names_every_watch_key_the_security_role_renders():
+    """감사 규칙(보안 역할)이 만드는 감시 키와 알림이 읽는 키 목록은 같은 이름이다."""
+    security_keys = set(yaml.safe_load((ROOT_DIR / "roles" / "security" / "defaults" / "main.yml").read_text(encoding="utf-8"))["audit_watch_key_paths"])
+    alert_keys = set(yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))["o2c_audit_watch_keys"])
+    assert security_keys <= alert_keys and set(NEW_WATCH_KEYS) == security_keys
+
+
+def test_a_new_ssh_key_alerts_and_is_labelled_as_not_provisioning_when_no_ansible_become_ran(desired):
+    rows = _watch_rows(desired, [_watch_syscall("verify-keys-manual", "ssh_keys", comm="vim")])
+    assert len(rows) == 1 and rows[0]["watched"] == "SSH 인가 키(authorized_keys)" and rows[0]["tool"] == "vim"
+    assert "없음" in rows[0]["provisioning"]
+
+
+def test_a_change_made_while_ansible_provisioned_the_host_still_alerts_but_is_labelled_as_provisioning(desired):
+    """정상 변경을 제외하지 않고 구분 표기만 한다: 프로비저닝이 도는 중에 침입자가 한 변경도 가려서는 안 된다."""
+    records = [_watch_syscall("verify-keys-ansible", "ssh_keys", comm="python3", tty="(none)"), _ansible_become("verify-keys-ansible")]
+    rows = _watch_rows(desired, records)
+    assert len(rows) == 1 and rows[0]["host_name"] == "verify-keys-ansible"
+    assert "있음" in rows[0]["provisioning"]
+
+
+def test_the_provisioning_label_is_per_host_so_another_hosts_ansible_run_does_not_label_the_change(desired):
+    records = [_watch_syscall("verify-keys-a", "firewall_config", comm="python3", tty="(none)"), _ansible_become("verify-other-host"),
+               _watch_syscall("verify-keys-b", "audit_config"), _ansible_become("verify-keys-b")]
+    labels = {r["host_name"]: r["provisioning"] for r in _watch_rows(desired, records)}
+    assert set(labels) == {"verify-keys-a", "verify-keys-b"}
+    assert "없음" in labels["verify-keys-a"] and "있음" in labels["verify-keys-b"]
+
+
+def test_an_ansible_become_record_alone_does_not_alert(desired):
+    assert _watch_rows(desired, [_ansible_become("verify-become-only")]) == []
+
+
+def test_a_plain_sudo_record_does_not_label_a_change_as_provisioning(desired):
+    plain = dict(_ansible_become("verify-keys-plain"), body="Nov  4 12:56:50 verify-keys-plain sudo[1]:   deploy : PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/vim /etc/hosts")
+    rows = _watch_rows(desired, [_watch_syscall("verify-keys-plain", "syslog_config"), plain])
+    assert len(rows) == 1 and "없음" in rows[0]["provisioning"]
+
+
+def test_a_change_with_no_host_name_is_not_dropped_by_the_label_split(desired):
+    record = _watch_syscall(None, "ssh_keys")
+    assert len(_watch_rows(desired, [record])) == 1
+
+
+def test_every_watch_row_carries_exactly_one_label_even_when_a_host_has_both_kinds_of_changes(desired):
+    records = [_watch_syscall("verify-mixed", "ssh_keys"), _watch_syscall("verify-mixed", "audit_config", comm="python3"), _ansible_become("verify-mixed")]
+    rows = _watch_rows(desired, records)
+    assert len(rows) == 2 and all("있음" in r["provisioning"] for r in rows)
+
+
+def test_the_provisioning_label_is_in_the_row_template_and_the_text_names_the_new_targets(desired):
+    alert = desired.store["alert"][WATCH_ALERT]
+    assert "{provisioning}" in alert["row_template"]
+    text = " ".join(str(v) for v in alert["context_attributes"].values())
+    for word in ("auditd", "rsyslog", "authorized_keys", "방화벽"):
+        assert word in text, word
+
+
+def test_the_account_tool_exclusion_still_applies_only_to_the_account_files(desired):
+    """계정 도구 제외는 identity 키에만 건다. 새 키에서 도구 이름이 같다고 가리지 않는다."""
+    rows = _watch_rows(desired, [_watch_syscall("verify-tool-identity", "identity", comm="useradd"),
+                                 _watch_syscall("verify-tool-ssh-keys", "ssh_keys", comm="useradd")])
+    assert [r["host_name"] for r in rows] == ["verify-tool-ssh-keys"]
+
+
 def test_root_crontab_alert_reads_the_cron_log_not_the_audit_stream(desired):
     alert = desired.store["alert"]["infra-root-crontab-change"]
     assert alert["stream_name"] == "system_logs" and alert["context_attributes"]["severity"] == "P2 경고"

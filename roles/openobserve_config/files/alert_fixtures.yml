@@ -1777,6 +1777,38 @@ infra-audit-watch-change:
       fires: false
       records:
         - {service_name: sshd, body: 'Oct 26 10:00:00 {host} note: type=SYSCALL comm="vim" key="identity"'}
+    # --- 파일 감시 키 4개(Spec #433 / Ticket-4, #430): 줄 모양은 위 감시 키 기록과 같다(실제 호스트에 아직 이 규칙이 없어 합성 행이다) ---
+    - name: auditd 설정(/etc/audit/) 변경 — 로그를 끄거나 돌리는 은폐 시도
+      host: verify-watch-audit-config
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985340.707:5009): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4700 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="vim" exe="/usr/bin/vim" subj=kernel key="audit_config" AUID="opsverify" UID="root"'}
+    - name: syslog 설정(/etc/rsyslog.d/) 변경
+      host: verify-watch-syslog-config
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985350.808:5010): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4800 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="vim" exe="/usr/bin/vim" subj=kernel key="syslog_config" AUID="opsverify" UID="root"'}
+    - name: authorized_keys에 새 키를 기록 — 백도어 키 심기
+      host: verify-watch-ssh-keys
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985360.909:5011): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=4000 pid=4900 auid=1002 uid=0 gid=0 euid=0 tty=pts0 ses=313 comm="bash" exe="/usr/bin/bash" subj=kernel key="ssh_keys" AUID="opsverify" UID="root"'}
+    - name: 방화벽 영구 설정(/etc/firewalld/) 변경 — firewalld 데몬이 쓰면 로그인 계정(auid)이 비어 있다
+      host: verify-watch-firewall-config
+      fires: true
+      records:
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985370.010:5012): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=1 pid=5000 auid=4294967295 uid=0 gid=0 euid=0 tty=(none) ses=4294967295 comm="firewalld" exe="/usr/bin/python3.9" subj=kernel key="firewall_config" AUID="unset" UID="root"'}
+    - name: Ansible가 도는 중의 authorized_keys 변경 — 제외하지 않고 알린다(행에 프로비저닝 sudo 기록 있음이 붙는다)
+      host: verify-watch-ssh-keys-ansible
+      fires: true
+      records:
+        - {service_name: auth, event_action: sudo, event_outcome: success, body: "Oct 26 10:01:00 {host} sudo[5100]:   deploy : PWD=/home/deploy ; USER=root ; COMMAND=/bin/sh -c 'echo BECOME-SUCCESS-abcdefghijklmnopqrstuvwxyzabcdef ; /usr/bin/python3'"}
+        - {service_name: audit, body: 'type=SYSCALL msg=audit(1792985380.111:5013): arch=c000003e syscall=257 success=yes exit=3 items=2 ppid=5100 pid=5101 auid=1002 uid=0 gid=0 euid=0 tty=(none) ses=313 comm="python3" exe="/usr/bin/python3.9" subj=kernel key="ssh_keys" AUID="opsverify" UID="root"'}
+    - name: Ansible become 기록만 있고 감시 키 변경이 없으면 알리지 않는다
+      host: verify-watch-ansible-only
+      fires: false
+      records:
+        - {service_name: auth, event_action: sudo, event_outcome: success, body: "Oct 26 10:02:00 {host} sudo[5200]:   deploy : PWD=/home/deploy ; USER=root ; COMMAND=/bin/sh -c 'echo BECOME-SUCCESS-abcdefghijklmnopqrstuvwxyzabcdef ; /usr/bin/python3'"}
 infra-ssh-login-unregistered-source:
   cases:
     - name: 일반 계정이 등록되지 않은 공인 출발지에서 로그인 성공

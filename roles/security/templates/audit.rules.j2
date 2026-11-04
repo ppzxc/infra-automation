@@ -1,5 +1,5 @@
 # Overseer Auditd Security Rules (#372)
-# 의미 있는 이벤트만 기록한다: 인증·권한·시크릿·컨테이너 설정.
+# 의미 있는 이벤트만 기록한다: 인증·권한·시크릿·컨테이너 설정, 로그 은폐(auditd·syslog 설정)·SSH 키·방화벽 영구 설정(#430).
 # 전체 execve 추적은 소음이라 넣지 않는다(명령 실행 전수 기록 금지).
 
 # First rule - delete all previous rules
@@ -37,4 +37,11 @@
 # 5. Secret files: read/write/attribute access (호스트별 경로는 audit_watch_paths, 값은 저장소에 두지 않는다)
 {% for p in (_audit_watch_paths_effective | default(audit_watch_paths | default([]))) %}
 -w {{ p }} -p rwa -k secret_access
+{% endfor %}
+
+# 6. Audit Watch Keys (#430): 로그 은폐(auditd·syslog 설정)·백도어 키(authorized_keys)·방화벽 영구 설정. 변경(w)과 속성(a)만 본다(읽기는 sshd가 늘 한다).
+# 실제로 있는 경로만 싣는다(SEC-082/SEC-083, CentOS 6/7은 SEC-084/SEC-085). 탐지가 건너뛰어진 호스트는 이 구역이 비어 규칙 적재가 깨지지 않는다.
+{% set _awk = _audit_watch_key_paths_effective | default([]) %}
+{% for e in (_awk if _awk is not string else (_awk | from_json)) %}
+-w {{ e.path }} -p wa -k {{ e.key }}
 {% endfor %}

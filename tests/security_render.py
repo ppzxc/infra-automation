@@ -23,6 +23,12 @@ TEMPLATE_FILES = {
     "sshd_source": "sshd-source-restriction.conf.j2",
 }
 
+# 역할 기본값(defaults/main.yml)만으로 계산되는 값을 렌더링하는 시험 전용 템플릿(출력 이름 -> 파일). 별도 play가 역할 기본값을 vars_files로 읽어
+# 케이스 변수가 그 위에 얹히게 한다(위 TEMPLATE_FILES에는 기본값을 읽히지 않는다: 템플릿의 `default()` 동작을 그대로 보려는 것이다).
+DEFAULTS_TEMPLATE_FILES = {
+    "watch_key_paths": ROOT_DIR / "tests" / "fixtures" / "audit_watch_key_paths.j2",
+}
+
 # 케이스 이름 -> 변수. 가짜 경로만 쓴다(실서버 값 아님).
 CASES = {
     "default": {},
@@ -36,7 +42,41 @@ CASES = {
     # #371: 가짜 문서용 주소(RFC 5737, RFC 3849)만 쓴다.
     "ssh_source_two": {"ssh_source_restriction_allowed_sources": ["192.0.2.0/24", "198.51.100.7/32"]},
     "ssh_source_v6": {"ssh_source_restriction_allowed_sources": ["2001:db8::/32"]},
+    # #430: SEC-082/083이 실제로 있는 경로만 걸러 만든 목록(팩트 `_audit_watch_key_paths_effective`)이 규칙으로 렌더링되는지 본다. 가짜 경로만 쓴다.
+    "watch_keys": {"_audit_watch_key_paths_effective": [
+        {"key": "audit_config", "path": "/etc/audit/"},
+        {"key": "syslog_config", "path": "/etc/rsyslog.conf"},
+        {"key": "syslog_config", "path": "/etc/rsyslog.d/"},
+        {"key": "ssh_keys", "path": "/root/.ssh/authorized_keys"},
+        {"key": "ssh_keys", "path": "/home/alice/.ssh/authorized_keys"},
+        {"key": "firewall_config", "path": "/etc/firewalld/"},
+    ]},
+    # set_fact가 만든 값은 JSON 문자열로 들어오기도 한다(Ansible이 목록으로 바꾸지 않는 경우). 템플릿은 두 형태를 모두 읽는다.
+    "watch_keys_as_json": {"_audit_watch_key_paths_effective": '[{"key": "audit_config", "path": "/etc/audit/"}, {"key": "ssh_keys", "path": "/root/.ssh/authorized_keys"}]'},
+    # 아무 경로도 남지 않은 호스트(firewalld·rsyslog.d 없음 등): 규칙이 깨지지 않고 감시 키만 빠진다.
+    "watch_keys_none_exist": {"_audit_watch_key_paths_effective": []},
+    # 계정 목록: 비어 있어도 root 하나는 늘 후보가 된다. 지정하면 그 계정이 더해진다.
+    "ssh_accounts_empty": {"audit_ssh_key_accounts": []},
+    "ssh_accounts_two": {"audit_ssh_key_accounts": ["alice", "bob"]},
+    "ssh_accounts_duplicate_root": {"audit_ssh_key_accounts": ["root", "alice", "alice"]},
 }
+
+
+# 케이스가 실제로 보는 출력만 렌더링한다(렌더링은 태스크당 약 0.6초라, 모든 케이스에 모든 템플릿을 만들면 세션마다 느려진다).
+# 여기 없는 케이스는 TEMPLATE_FILES 전체를 렌더링하고 DEFAULTS_TEMPLATE_FILES는 렌더링하지 않는다.
+CASE_OUTPUTS = {
+    "watch_keys": ("audit",),
+    "watch_keys_none_exist": ("audit",),
+    "watch_keys_as_json": ("audit",),
+    "ssh_accounts_empty": ("watch_key_paths",),
+    "ssh_accounts_two": ("watch_key_paths",),
+    "ssh_accounts_duplicate_root": ("watch_key_paths",),
+    "default": ("audit", "fail2ban", "journald", "sshd_source", "watch_key_paths"),
+}
+
+
+def _outputs(case):
+    return CASE_OUTPUTS.get(case, tuple(TEMPLATE_FILES))
 
 
 def render_security(workdir):
@@ -46,12 +86,26 @@ def render_security(workdir):
     tasks = []
     for case, variables in cases.items():
         for out, src in templates.items():
+            if out not in _outputs(case):
+                continue
             tasks.append({
                 "name": f"render {case} {out}",
                 "ansible.builtin.template": {"src": str(TEMPLATES / src), "dest": str(workdir / f"{case}.{out}"), "mode": "0600"},
                 "vars": variables,
             })
-    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": tasks}]
+    defaults_tasks = []
+    for case, variables in cases.items():
+        for out, src in DEFAULTS_TEMPLATE_FILES.items():
+            if out not in _outputs(case):
+                continue
+            defaults_tasks.append({
+                "name": f"render {case} {out}",
+                "ansible.builtin.template": {"src": str(src), "dest": str(workdir / f"{case}.{out}"), "mode": "0600"},
+                "vars": variables,
+            })
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": tasks},
+            {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+             "vars_files": [str(ROOT_DIR / "roles" / "security" / "defaults" / "main.yml")], "tasks": defaults_tasks}]
     playbook = workdir / "render.yml"
     playbook.write_text(yaml.safe_dump(play), encoding="utf-8")
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(playbook)], capture_output=True, text=True,
@@ -60,7 +114,8 @@ def render_security(workdir):
     if os.environ.get(RENDER_LOG_ENV):
         with open(os.environ[RENDER_LOG_ENV], "a", encoding="utf-8") as fh:
             fh.write(f"{os.getpid()}\n")
-    return {case: {out: (workdir / f"{case}.{out}").read_text(encoding="utf-8") for out in templates} for case in cases}
+    return {case: {out: (workdir / f"{case}.{out}").read_text(encoding="utf-8") for out in [*templates, *DEFAULTS_TEMPLATE_FILES] if out in _outputs(case)}
+            for case in cases}
 
 
 _SHARED = {}

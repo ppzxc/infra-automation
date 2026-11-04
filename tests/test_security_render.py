@@ -27,6 +27,8 @@ def security_rendered():
 
 def test_audit_rules_do_not_trace_every_execve(security_rendered):
     for case, out in security_rendered.items():
+        if "audit" not in out:  # 감시 키 계산만 보는 케이스(CASE_OUTPUTS)
+            continue
         lines = rule_lines(out["audit"])  # 주석은 제외
         assert not any("execve" in ln for ln in lines), case
         assert not any(ln.startswith("-a ") for ln in lines), case  # syscall 규칙 전수 추적 없음
@@ -192,3 +194,4 @@ def test_auditd_rotation_is_redhat_non_raw_and_tolerates_only_a_missing_package(
     task = _task("SEC-081")
     assert any("_raw_path_effective" in w for w in task["when"]) and any("RedHat" in w for w in task["when"])
     assert any("does not exist" in w or "Destination" in w for w in task["failed_when"])
+

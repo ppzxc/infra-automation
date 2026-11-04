@@ -420,19 +420,25 @@ sudo ausearch -m ADD_USER,USER_START -ts today -i   # 계정 생성·세션 시�
 ---
 
 <a id="audit-watch-change"></a>
-## 🟠 계정·sudoers·sshd 설정 파일이 직접 변경됨 (`infra-audit-watch-change`)
+## 🟠 계정·sudoers·sshd·로그 설정·SSH 키·방화벽 설정 파일이 직접 변경됨 (`infra-audit-watch-change`)
 
-**조건**: auditd 감시 키 SYSCALL 기록(`key="identity"`: 계정 파일, `key="sudo_config"`: sudoers, `key="sshd_config"`: sshd 설정)이 5분 안에 1건 이상(재통지 5분). 계정 관리 도구(`useradd`·`usermod`·`passwd` 등, `o2c_audit_account_tools`)가 계정 파일을 바꾼 기록은 같은 변경이 이미 계정 변경 알림(`infra-account-change`)으로 가므로 제외한다. 그래서 한 변경에 알림이 두 번 오지 않는다. `sudo_logs`(sudo를 쓸 때마다 남음)와 `exec_log` 키는 대상이 아니다.
+**조건**: auditd 감시 키 SYSCALL 기록이 5분 안에 1건 이상(재통지 5분). 읽는 키는 `key="identity"`(계정 파일)·`"sudo_config"`(sudoers)·`"sshd_config"`(sshd 설정)·`"audit_config"`(auditd 설정)·`"syslog_config"`(rsyslog 설정)·`"ssh_keys"`(`authorized_keys`)·`"firewall_config"`(방화벽 영구 설정)다(`o2c_audit_watch_keys`). 계정 관리 도구(`useradd`·`usermod`·`passwd` 등, `o2c_audit_account_tools`)가 계정 파일을 바꾼 기록은 같은 변경이 이미 계정 변경 알림(`infra-account-change`)으로 가므로 제외한다. 그래서 한 변경에 알림이 두 번 오지 않는다. `sudo_logs`(sudo를 쓸 때마다 남음)와 `exec_log` 키는 대상이 아니다.
 
-**왜 중요한가**: 편집기·쉘로 `/etc/passwd`·`sudoers`·`sshd_config`를 직접 고치면 계정 변경 알림에 잡히지 않는다. 침입자가 계정·권한·접속 정책을 몰래 바꾸는 전형적인 방법이다. 프로비저닝(Semaphore)도 같은 기록을 남긴다.
+**왜 중요한가**: 편집기·쉘로 `/etc/passwd`·`sudoers`·`sshd_config`를 직접 고치면 계정 변경 알림에 잡히지 않는다. 침입자가 계정·권한·접속 정책을 몰래 바꾸는 전형적인 방법이다. `/etc/audit/`·`/etc/rsyslog.d/` 변경은 로그를 끄거나 돌려 흔적을 지우려는 시도일 수 있고, `authorized_keys` 변경은 백도어 키 심기, `/etc/firewalld/` 변경은 무단 개방일 수 있다. 프로비저닝(Semaphore)도 같은 기록을 남긴다.
+
+**행 끝의 프로비저닝 표기**: 행 끝에 `프로비저닝 기록 있음` 또는 `프로비저닝 기록 없음`이 붙는다. 같은 호스트의 인증 로그에 Ansible의 become(sudo) 표지(`BECOME-SUCCESS-`)가 알림 구간 안에 있었는지를 뜻한다. 정상 변경이라는 판정이 아니다: 표지는 호스트와 시각대 단위라 프로비저닝이 도는 중에 한 다른 사람의 변경도 같은 표기가 붙는다. `있음`이면 그 시각의 Semaphore 작업 이력에서 해당 파일이 바뀌는 작업이었는지 먼저 대조한다. `없음`이면 프로비저닝이 아닌 변경이라 계획된 작업 일정과 대조한다(수집 지연으로 표지가 늦게 도착해 `없음`으로 나갈 수도 있으니, 작업 이력은 `없음`일 때도 한 번 본다). `firewall-cmd --permanent` 변경은 firewalld 데몬이 파일을 쓰므로 AUID가 비어 있다. 사람은 같은 시각의 sudo 기록으로 찾는다.
 
 **확인**: 행의 실행 도구와 시각을 작업 이력과 대조한다. 로그 보기에서 같은 시각의 `AUID`(실제 로그인 계정)와 `type=PATH` 기록(파일 이름)을 본다.
 ```bash
 sudo ausearch -k identity -ts today -i
 sudo ausearch -k sshd_config -ts today -i
+sudo ausearch -k ssh_keys -ts today -i          # authorized_keys: type=PATH의 name으로 어느 계정의 파일인지 확인
+sudo ausearch -k audit_config -ts today -i
+sudo ausearch -k syslog_config -ts today -i
+sudo ausearch -k firewall_config -ts today -i
 ```
 
-**대응**: 계획에 없던 변경이면 파일을 백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다. 감시 규칙이 없는 호스트(프로비저닝 대상이 아닌 호스트)에서는 이 알림이 울리지 않는다.
+**대응**: 계획에 없던 변경이면 파일을 백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. `ssh_keys`는 의심 키를 지우고 그 계정의 로그인 기록(`last`, 인증 로그)을 본다. `audit_config`·`syslog_config`는 변경 직후 로그 수집이 끊기지 않았는지 인증 로그 수집 중단·auditd 중지 알림도 함께 본다. 승인된 작업이면 작업 기록에 남긴다. 감시 규칙이 없는 호스트(프로비저닝 대상이 아닌 호스트)에서는 이 알림이 울리지 않는다. 새로 생긴 `authorized_keys`(그 계정에 파일이 없었던 경우)는 다음 프로비저닝 때까지 감시되지 않는다(한계, `docs/security.md`).
 
 <a id="ssh-login-unregistered-source"></a>
 ## 🟠 일반 계정이 등록되지 않은 출발지에서 SSH 로그인 성공 (`infra-ssh-login-unregistered-source`)
