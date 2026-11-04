@@ -1,0 +1,14 @@
+---
+# 내부 고정 상수(외부 변경 금지).
+
+# 적재된 감사 규칙을 읽는 조회 전용 스크립트(SEC-083과 `Restart auditd` 뒤 확인 핸들러가 같이 쓴다, #424).
+# `augenrules --load`는 rules.d/*.rules를 모두 합쳐 적재하므로, 이 역할이 만든 overseer.rules 밖의 .rules 파일 내용도 구분선 뒤에 함께 출력한다.
+# 필터 audit_rules_probe_drift가 그것을 선언에 합쳐 비교한다(구분선 문자열은 filter_plugins/audit_rules.py의 MARKER와 같아야 한다).
+# auditctl -l이 실패하면(set -e) 태스크가 실패한다. 아무것도 쓰지 않는다.
+security_audit_loaded_probe_cmd: |
+  set -e
+  auditctl -l
+  echo __OVERSEER_OTHER_RULES__
+  for f in {{ security_audit_rules_dir }}/*.rules; do
+    if [ -f "$f" ] && [ "$f" != "{{ security_audit_rules_dir }}/overseer.rules" ]; then cat "$f"; fi
+  done

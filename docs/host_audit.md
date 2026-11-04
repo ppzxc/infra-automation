@@ -614,6 +614,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
   - 하위 실행이 통째로 실패하면(시간 초과 `host_audit_drift_timeout`, JSON 해석 불가) 그 하위 실행 부분만 점검불가로 표시하고 Host Audit 실행은 계속된다.
 - **보고서**: 3장 Configuration Drift — 하위 실행별 결과, Drift 항목 표(호스트·SPEC-ID·태스크·요약·**판단(수기)** 칸), 제외 목록. 판단 칸에는 조치(선언대로 복원) / 선언 수정 / 승인된 변경 중 하나를 적는다(ISMS 2.9.1 변경관리 증적). 호스트별 부록에 Drift 건수와 점검불가 이유가 나온다.
 - **Audit Baseline(§11)**: 섹션 모델의 `baseline_findings`로 참여한다. 항목 식별자는 `<하위 실행>:<SPEC-ID>`(SPEC-ID가 없으면 `<하위 실행>:task:<태스크 이름>`)이다. 계획된 하위 실행이 모두 그 호스트를 판정한 경우에만 '점검한 호스트'로 넣어, 하위 실행 실패·시간 초과·호스트 점검불가가 직전 Drift를 '해소'로 바꾸지 않게 한다(그 경우 '확인 불가'). 노이즈로 제외한 행은 발견이 아니다.
+- **감사 규칙 적재 drift (#424)**: `security` 역할의 `SEC-083`은 `auditctl -l`과 렌더링한 규칙을 비교하는 조회 전용 태스크(`check_mode: false`)다. 커널에 적재된 규칙이 선언과 다르면 `--check`에서도 `changed`로 나와 이 표의 행이 된다(규칙 파일은 같고 적재만 낡은 호스트, 예: `exec_log` 잔존·적재 0개). 적재 자체는 적용 실행의 `Restart auditd` 핸들러가 한다. audit 도구가 없는 호스트와 Raw Provisioning Path 호스트는 행이 나오지 않는다(후자는 점검불가). 비교 기준은 `docs/security.md`의 '비교 기준(근사)'.
 - **check 모드 노이즈**: 수렴된 호스트에서도 `--check`에서 매번 `changed`로 나오는 태스크는 Drift가 아니다. 고치는 것이 원칙이고, 고칠 수 없을 때만 `host_audit_drift_ignore`에 `spec_id`(또는 SPEC-ID 없는 태스크의 `task` 이름)와 `reason`을 올린다. 일치하는 행은 Drift 표에서 빠지고 '제외(check 모드 노이즈)' 표에 사유·호스트 수로 남는다.
 
 - **노이즈 점검 결과(molecule Fast, Rocky 8·9·Ubuntu 22.04, 2026-10-08)**: 수렴(converge) 직후 같은 역할(common·security·access_security)을 `--check --diff`로 다시 돌려 남는 `changed`를 찾았다. 노이즈로 제외할 태스크는 없었고, 아래는 고쳤다.
