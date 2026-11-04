@@ -117,6 +117,14 @@
           # 남은 보안 로그 알림(#330): 계정 도구 이름은 SQL의 comm 조건에 들어가고, 재통지 간격은 알림 정의에 들어간다
           - o2c_audit_account_tools | o2c_valid_group_names
           - (o2c_unregistered_login_silence_minutes | string) is match('^[0-9]+$')
+          # sshd 치명 오류·낯선 사용자 SSH 성공(#428): 문구는 SQL에 들어가고(치명 문구는 1개 이상), 임계·창·주기는 양의 정수다. 평가 주기가 평가 구간보다 길면 구간 사이가 비므로 막는다
+          - (o2c_sshd_fatal_keywords | length) > 0 and (o2c_sshd_fatal_keywords | o2c_valid_like_groups)
+          - o2c_sshd_scanner_noise | o2c_valid_like_groups
+          - (o2c_sshd_processes | length) > 0 and (o2c_sshd_processes | o2c_valid_group_names)
+          - (o2c_sshd_fatal_threshold | string) is match('^[1-9][0-9]*$')
+          - (o2c_ssh_new_user_lookback_days | string) is match('^[1-9][0-9]*$')
+          - (o2c_ssh_new_user_window_minutes | string) is match('^[1-9][0-9]*$')
+          - (o2c_ssh_new_user_frequency_minutes | string) is match('^[1-9][0-9]*$') and (o2c_ssh_new_user_frequency_minutes | int) <= (o2c_ssh_new_user_window_minutes | int)
           - (o2c_fortigate_new_source_silence_minutes | string) is match('^[0-9]+$')
           # 삭제는 폐기 목록에 있는 알림 이름뿐이다: 형식·중복을 요청 전에 검증하고, 현행 알림 정의와 겹치면 실패시킨다(현행 알림 삭제 방지)
           - o2c_retired_alerts | o2c_valid_retired_alerts
@@ -128,6 +136,7 @@
           (스위치 syslog 알림 변수는 o2c_switch_*_events가 FACILITY-SEVERITY-MNEMONIC 코드 목록, o2c_switch_syslog_roster가 [ns0250, ...], o2c_switch_uplinks가 [{device: ns0250, port: Gi1/0/49}] 형식이어야 합니다)
           (방화벽 알림 변수는 o2c_fortigate_syslog_roster가 [ns0399, 장비 이름, ns0380+ns0381], o2c_fortigate_device_aliases가 {소문자 장비 이름: ns관리번호}, 승인 시간이 0~24 정수(시작 < 끝), o2c_fortigate_ha_ignored_logids가 숫자 문자열 목록 형식이어야 합니다)
           (보안 로그 알림 변수는 o2c_privileged_groups·o2c_sudo_protected_services가 소문자 이름 목록(특권 그룹은 1개 이상), o2c_sudo_risky_commands가 [{label: 따옴표 없는 글자, patterns: [소문자 문구]}], o2c_ssh_bruteforce_*가 양의 정수, o2c_security_stop_services가 auditd 없는 소문자 이름 목록이고 o2c_security_stop_grace_minutes·o2c_security_stop_window_minutes가 조회 구간 > 유예인 양의 정수이고 o2c_security_stop_renotify_minutes는 유예보다 짧은 양의 정수, o2c_audit_account_tools가 소문자 이름 목록, o2c_*_silence_minutes가 정수여야 합니다)
+          (sshd 치명 오류·낯선 사용자 알림 변수는 o2c_sshd_fatal_keywords(1개 이상)·o2c_sshd_scanner_noise가 {label, patterns} 소문자 문구 목록, o2c_sshd_processes가 소문자 프로세스 이름 목록(1개 이상), o2c_sshd_fatal_threshold·o2c_ssh_new_user_lookback_days·_window_minutes·_frequency_minutes가 양의 정수이고 평가 주기가 평가 구간 이하여야 합니다)
           (o2c_p1_destination은 비워 두거나 destination 이름(영문·숫자·._-)이어야 합니다)
           (폐기 목록 o2c_retired_alerts는 ^infra-[a-z0-9-]+$ 형식의 중복 없는 이름 목록이어야 하고 현행 알림 정의의 이름을 담으면 안 됩니다)
           (OpenBao 인증은 Semaphore Environment의 VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN). 값은 출력하지 않습니다.

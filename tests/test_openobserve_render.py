@@ -685,6 +685,178 @@ def test_security_alerts_are_created_with_their_grades_windows_and_raw_log_links
         assert decoded.startswith('SELECT * FROM "security_logs" WHERE ') and "count(" not in decoded, name
 
 
+# --- sshd 치명 오류와 낯선 사용자 SSH 성공 (Spec #433 / Ticket-2, #428) ---------------------------------------------------------
+from o2c_alert_helpers import DEFAULTS   # noqa: E402  (이 절이 쓰는 역할 기본 변수 원본)
+
+SSHD_FATAL, SSH_NEW_USER = "infra-sshd-fatal-error", "infra-ssh-login-new-user"
+
+# 기대값은 정의 변수가 아니라 업계 규칙(Sigma lnx_sshd_susp_ssh에서 스캐너 소음을 뺀 10개, Wazuh 5707·5714와 겹침)에서 옮긴 글자다.
+INDUSTRY_SSHD_FATAL = ("unexpected internal error", "unknown or unsupported key type", "invalid certificate signing key",
+                       "invalid elliptic curve value", "incorrect signature", "error in libcrypto", "unexpected bytes remain after decoding",
+                       "fatal: buffer_get_string: bad string", "Local: crc32 compensation attack", "bad client public DH value")
+# 인터넷 스캐너·점검이 늘 만드는 줄(7일 실로그에서 이 중 하나가 호스트 24대에서 분당 1건씩 나왔다)
+SCANNER_NOISE = ("Corrupted MAC on input.", "Bad protocol version identification 'GET / HTTP/1.1' from 203.0.113.9 port 4444",
+                 "Did not receive identification string from 203.0.113.9 port 4444")
+
+
+def _sshd_line(text, process="sshd", host="ns0272"):
+    return {"host_name": host, "process_executable_name": process, "service_name": "auth", "body": text}
+
+
+def _fatal_rows(desired, *records):
+    return _run_alert_on_sqlite(_sql(desired, SSHD_FATAL), list(records), "security_logs")
+
+
+def test_sshd_signal_alerts_are_security_log_event_alerts_with_a_grade_and_a_runbook_entry(desired):
+    for name, severity in ((SSHD_FATAL, "P2 경고"), (SSH_NEW_USER, "P3 주의")):
+        alert = desired.store["alert"][name]
+        assert alert["stream_name"] == "security_logs" and alert["context_attributes"]["severity"] == severity, name
+        assert name in EXPECTED_ALERTS, name
+        anchor = name.removeprefix("infra-")
+        assert alert["context_attributes"]["runbook"].endswith("alerts.md#" + anchor), name
+    assert (desired.store["alert"][SSHD_FATAL]["trigger_condition"]["period"],
+            desired.store["alert"][SSHD_FATAL]["trigger_condition"]["silence"]) == (5, 5)
+
+
+@pytest.mark.parametrize("process", ["sshd", "sshd-session"])
+@pytest.mark.parametrize("keyword", INDUSTRY_SSHD_FATAL)
+def test_a_fatal_sshd_keyword_fires_for_both_sshd_processes(desired, keyword, process):
+    rows = _fatal_rows(desired, _sshd_line(f"error: {keyword} [preauth]", process))
+    assert [r["host_name"] for r in rows] == ["ns0272"]
+    assert _fatal_rows(desired, _sshd_line(f"error: {keyword.upper()}", process))   # 대소문자를 가리지 않는다
+
+
+@pytest.mark.parametrize("noise", SCANNER_NOISE)
+def test_scanner_noise_never_fires_the_fatal_alert_even_in_bulk(desired, noise):
+    assert _fatal_rows(desired, *[_sshd_line(noise, host=f"ns{n:04d}") for n in range(200)]) == []
+
+
+def test_a_scanner_phrase_inside_a_fatal_line_is_still_noise(desired):
+    """스캐너 목록은 치명 문구보다 먼저다(운영자가 겹치는 문구를 넣어도 소음이 울리지 않는다)."""
+    assert _fatal_rows(desired, _sshd_line("fatal: buffer_get_string: bad string; Did not receive identification string from 203.0.113.9")) == []
+
+
+@pytest.mark.parametrize("process", ["sudo", "bot-java", "dockerd", "sshd-keygen", ""])
+def test_the_same_phrase_from_another_process_does_not_fire(desired, process):
+    assert _fatal_rows(desired, _sshd_line("error: error in libcrypto", process)) == []
+
+
+def test_fatal_rows_group_per_host_and_show_the_count(desired):
+    rows = _fatal_rows(desired, _sshd_line("error: incorrect signature", host="ns0001"), _sshd_line("error: error in libcrypto", host="ns0001"),
+                       _sshd_line("fatal: buffer_get_string: bad string", host="ns0001"), _sshd_line("error: error in libcrypto", host="ns0002"))
+    assert sorted((r["host_name"], r["errors"]) for r in rows) == [("ns0001", 3), ("ns0002", 1)]
+    lines = _row_lines(desired, SSHD_FATAL, [_sshd_line("error: error in libcrypto", host="ns0002")] * 2, "security_logs")
+    assert len(lines) == 1 and lines[0].startswith("• ns0002: ") and " 2건 · " in lines[0]
+
+
+def test_a_like_phrase_may_contain_a_colon_but_still_nothing_that_breaks_the_sql():
+    o2c = _filters()
+    assert o2c.o2c_valid_like_groups([{"label": "x", "patterns": ["fatal: buffer_get_string: bad string"]}])
+    assert not o2c.o2c_valid_like_groups([{"label": "x", "patterns": ["a'; drop"]}])
+
+
+def test_the_fatal_threshold_and_keyword_lists_are_role_defaults_with_the_documented_values():
+    assert DEFAULTS["o2c_sshd_fatal_threshold"] == 1
+    assert DEFAULTS["o2c_sshd_processes"] == ["sshd", "sshd-session"]   # sshd-auth(OpenSSH 10+)는 7일 실로그에 0건이라 기본에 넣지 않았다
+    kept = {p for g in DEFAULTS["o2c_sshd_fatal_keywords"] for p in g["patterns"]}
+    assert kept == {k.lower() for k in INDUSTRY_SSHD_FATAL}
+    dropped = {p for g in DEFAULTS["o2c_sshd_scanner_noise"] for p in g["patterns"]}
+    assert dropped == {"corrupted mac on input", "bad protocol version identification", "did not receive identification string"}
+    assert not kept & dropped
+
+
+def _now_us():
+    import time
+    return int(time.time() * 1_000_000)
+
+
+def _ssh_success(user, ago_minutes, host="ns0272", source="203.0.113.5"):
+    return {"event_action": "ssh_login", "event_outcome": "success", "user_name": user, "host_name": host, "source_address": source,
+            "_timestamp": _now_us() - int(ago_minutes * 60 * 1_000_000)}
+
+
+DAY = 24 * 60
+
+
+def _new_user_rows(desired, *records):
+    return _run_alert_on_sqlite(_sql(desired, SSH_NEW_USER), list(records), "security_logs")
+
+
+def test_a_user_first_seen_in_the_evaluation_window_fires(desired):
+    rows = _new_user_rows(desired, _ssh_success("newbie", 1))
+    assert [(r["user_name"], r["host_name"]) for r in rows] == [("newbie", "ns0272")]
+
+
+def test_a_user_who_succeeded_within_the_last_five_days_does_not_fire(desired):
+    for ago in (30, 3 * DAY, 4 * DAY + 23 * 60):
+        assert _new_user_rows(desired, _ssh_success("alice", ago), _ssh_success("alice", 1)) == [], ago
+
+
+def test_the_earlier_success_may_be_on_another_host_because_hosts_are_not_told_apart(desired):
+    assert _new_user_rows(desired, _ssh_success("alice", 2 * DAY, host="ns0001"), _ssh_success("alice", 1, host="ns0002")) == []
+
+
+def test_only_successful_ssh_logins_count_as_seen_or_new(desired):
+    failed = dict(_ssh_success("mallory", 2 * DAY), event_outcome="failure")
+    assert [r["user_name"] for r in _new_user_rows(desired, failed, _ssh_success("mallory", 1))] == ["mallory"]   # 실패는 본 것이 아니다
+    assert _new_user_rows(desired, dict(_ssh_success("mallory", 1), event_outcome="failure")) == []
+    assert _new_user_rows(desired, dict(_ssh_success("mallory", 1), event_action="sudo")) == []
+
+
+def test_a_user_first_seen_before_the_evaluation_window_is_left_to_the_earlier_evaluation(desired):
+    """창 밖에서 처음 본 사용자는 이미 울렸거나 울린 뒤라 다시 울리지 않는다(이 알림이 한 번만 울리는 이유)."""
+    assert _new_user_rows(desired, _ssh_success("carol", 3 * 60)) == []
+
+
+def test_new_user_rows_name_the_user_the_server_and_the_source(desired):
+    lines = _row_lines(desired, SSH_NEW_USER, [_ssh_success("newbie", 1, host="ns0003", source="198.51.100.7")], "security_logs")
+    assert len(lines) == 1 and lines[0].startswith("• ns0003: newbie ← 198.51.100.7 (1회)")
+
+
+def test_new_user_window_frequency_and_lookback_are_role_defaults_and_set_the_alert_timing(desired):
+    d = DEFAULTS
+    assert d["o2c_ssh_new_user_lookback_days"] == 5
+    trigger = desired.store["alert"][SSH_NEW_USER]["trigger_condition"]
+    assert trigger["period"] == 5 * DAY + int(d["o2c_ssh_new_user_window_minutes"])   # 조회 구간 = 5일 + 평가 구간
+    assert trigger["frequency"] == int(d["o2c_ssh_new_user_frequency_minutes"])
+    assert trigger["silence"] == int(d["o2c_ssh_new_user_window_minutes"])
+    assert int(d["o2c_ssh_new_user_frequency_minutes"]) <= int(d["o2c_ssh_new_user_window_minutes"])   # 평가 사이에 틈이 없다
+
+
+def test_sshd_signal_values_override_from_the_role_variables(tmp_path):
+    rendered = render_desired(tmp_path / "desired.json", extra={
+        "o2c_sshd_fatal_threshold": 3, "o2c_ssh_new_user_lookback_days": 2, "o2c_ssh_new_user_window_minutes": 20,
+        "o2c_ssh_new_user_frequency_minutes": 10, "o2c_sshd_scanner_noise": [], "o2c_sshd_processes": ["sshd", "sshd-session", "sshd-auth"]})
+    alerts = {o["name"]: o["body"] for o in rendered if o.get("kind") == "alert"}
+    two = [_sshd_line("error: incorrect signature") for _ in range(2)]
+    assert _run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], two, "security_logs") == []
+    assert len(_run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], two + two[:1], "security_logs")) == 1
+    overlap = [_sshd_line("error: error in libcrypto; Did not receive identification string from 203.0.113.9")] * 3
+    assert len(_run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], overlap, "security_logs")) == 1   # 소음 목록이 비면 제외 조건도 없다
+    assert len(_run_alert_on_sqlite(alerts[SSHD_FATAL]["query_condition"]["sql"], [_sshd_line("error: error in libcrypto", "sshd-auth")] * 3, "security_logs")) == 1   # 프로세스 목록 변수
+    trigger = alerts[SSH_NEW_USER]["trigger_condition"]
+    assert (trigger["period"], trigger["frequency"], trigger["silence"]) == (2 * DAY + 20, 10, 20)
+    sql = alerts[SSH_NEW_USER]["query_condition"]["sql"]
+    assert [r["user_name"] for r in _run_alert_on_sqlite(sql, [_ssh_success("x", 15)], "security_logs")] == ["x"]   # 창 20분
+    assert _run_alert_on_sqlite(sql, [_ssh_success("x", 25)], "security_logs") == []
+
+
+def test_sshd_signal_fixtures_exist_for_the_verification_step():
+    for name in (SSHD_FATAL, SSH_NEW_USER):
+        cases = FIXTURES[name]["cases"]
+        assert {c["fires"] for c in cases} == {True, False}, name
+
+
+def test_sshd_signal_alerts_have_runbook_and_spec_entries_with_the_measured_basis():
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    for name in (SSHD_FATAL, SSH_NEW_USER):
+        anchor = name.removeprefix("infra-")
+        assert f'<a id="{anchor}"></a>' in runbook and f"(`{name}`)" in runbook and f"`{name}`" in spec, name
+    for token in ("lnx_sshd_susp_ssh", "5707", "5714", "Did not receive identification string", "7일", "스캔 비용"):
+        assert token in spec, token
+
+
 # --- infra-oom-kill 자기 증식 루프(알림 서버가 알림 본문·쿼리 계획을 로그로 남기면 같은 알림에 다시 걸림) ---
 
 OOM_QUERY_PLAN_LOG = ("Oct 26 15:32:36 ns0217 bot-java[2513767]:              FilterExec: (lower(body@1) LIKE %killed process% OR "

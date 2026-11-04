@@ -42,6 +42,7 @@ EXPECTED_ALERTS = {
     "infra-time-offset-exceeded", "infra-time-unsynced", "infra-time-sync-unavailable",   # 시각 동기(#336)
     "infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
     "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
+    "infra-sshd-fatal-error", "infra-ssh-login-new-user",   # sshd 치명 오류·낯선 사용자 SSH 성공(#428)
     "infra-security-service-stopped",   # 보안 서비스 중지(Spec #433 / Ticket-3, #429)
 }
 
@@ -129,6 +130,9 @@ def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify", now_us
     """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows.
 
     ``now_us``: what ``now()`` means for SQL that reads the clock (``to_unixtime(now())``); default is the real current time.
+
+    주의: `_timestamp`가 없는 레코드는 고정 시각(2026-10-23)으로 적재된다. 이 시각은 `now()`와 멀어 `now()`를 쓰는 SQL(낯선 사용자 알림 등)에서는
+    "오래된 기록"이 된다. 그런 SQL은 레코드마다 `_timestamp`를 `now_us` 기준으로 직접 넣는다(OpenObserve가 수집 시각을 찍는 것과 같다).
     """
     db = sqlite3.connect(":memory:")
     now_seconds = (now_us / 1_000_000) if now_us is not None else datetime.now(timezone.utc).timestamp()

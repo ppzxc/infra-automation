@@ -335,6 +335,40 @@ sudo grep -E "faillock|pam_tally2" /var/log/secure | tail
 
 ---
 
+<a id="sshd-fatal-error"></a>
+## 🟠 sshd 치명 오류 (프로토콜·암호 공격 시도) (`infra-sshd-fatal-error`)
+
+**조건**: `sshd`·`sshd-session`(OpenSSH 9.8 이상은 인증·세션 기록을 `sshd-session`이 남긴다) 줄에 치명 문구가 5분 안에 호스트당 1건 이상(`o2c_sshd_fatal_threshold`, 재통지 5분). 문구(`o2c_sshd_fatal_keywords`)는 Sigma `lnx_sshd_susp_ssh`에서 스캐너 소음을 뺀 10개로 Wazuh 5707·5714와 겹친다: `unexpected internal error`, `unknown or unsupported key type`, `invalid certificate signing key`, `invalid elliptic curve value`, `incorrect signature`, `error in libcrypto`, `unexpected bytes remain after decoding`, `fatal: buffer_get_string: bad string`, `Local: crc32 compensation attack`, `bad client public DH value`. 뺀 문구(`o2c_sshd_scanner_noise`)는 `Corrupted MAC on input`, `Bad protocol version identification`, `Did not receive identification string`이다. 이 중 `Did not receive identification string`은 서버 도달성 점검(`tcp_check` 수신기, 60초 주기)이 SSH 포트에 접속만 하고 끊어 호스트마다 분당 1건씩 남는 줄이다. 다른 프로세스가 같은 문구를 남겨도(알림 서버가 쿼리 계획을 로그로 남기는 경우 등) 대상이 아니다. 읽는 프로세스는 `o2c_sshd_processes`(기본 `sshd`·`sshd-session`)이고 OpenSSH 10+의 `sshd-auth`는 7일 실로그에 0건이라 넣지 않았다(줄이 보이면 변수에 더한다). **한계**: 문구는 줄 전체에서 부분 일치하므로 공격자가 존재하지 않는 사용자 이름을 치명 문구와 같게 보내면(`Invalid user error in libcrypto from …`) 오탐이 날 수 있다. 행의 원문이 로그인 시도 줄이면 그 모양을 `o2c_sshd_scanner_noise`에 더한다.
+
+**왜 중요한가**: 평소에는 0건에 가까운 오류다(7일 실로그에서 한 건도 없었다). sshd의 취약점을 노린 입력이나 비정상 클라이언트의 접속 시도일 수 있다.
+
+**확인**: 로그 보기에서 오류 문구와 같은 시각의 출발지(`Connection from`·`from <IP> port`)를 본다.
+```bash
+sudo journalctl -u sshd --since "30 min ago" | grep -iE "libcrypto|buffer_get_string|crc32|incorrect signature|unsupported key type"
+ssh -V   # OpenSSH 버전(알려진 취약 버전인지)
+```
+
+**대응**: 출발지가 외부면 방화벽에서 막고 sshd 패키지의 보안 업데이트 여부를 확인한다. 같은 시각의 로그인 성공 기록이 있으면 그 계정을 점검한다. 문구를 늘리거나 줄이려면 `o2c_sshd_fatal_keywords`·`o2c_sshd_scanner_noise`를 바꾸고(근거는 `docs/openobserve_config.md`) `OpenObserve — Config`를 다시 실행한다. 스캐너 문구가 새로 늘어 울리면 `o2c_sshd_scanner_noise`에 더한다.
+
+---
+
+<a id="ssh-login-new-user"></a>
+## 🟡 처음 보는 사용자로 SSH 로그인 성공 (`infra-ssh-login-new-user`)
+
+**조건**: SSH 로그인 성공의 `user_name` 중 첫 성공이 최근 `o2c_ssh_new_user_window_minutes`(기본 10)분 안이고 그 앞 `o2c_ssh_new_user_lookback_days`(기본 5)일 동안 성공 기록이 없는 것. 평가는 `o2c_ssh_new_user_frequency_minutes`(기본 5)분마다이고 조회 구간은 5일 + 평가 구간(7,210분)이다. 호스트는 구분하지 않는다: 어느 서버에서든 5일 안에 성공한 적이 있으면 아는 사용자다. 한 번 울린 사용자는 이후 5일 동안 다시 울리지 않는다. 행은 사용자·서버·출발지별이다.
+
+**왜 중요한가**: 새 계정이나 탈취된 계정의 첫 사용일 수 있다. 새 담당자·배포용 계정의 정상 첫 로그인도 같은 모양이라 사람이 확인해야 한다. 5일 넘게 쉬었다가 돌아온 사용자도 다시 울린다. **한계**: 재통지 간격은 알림 전체에 적용된다. 다른 사용자가 울린 직후(재통지 10분 안) 처음 로그인한 사용자는 통지가 빠질 수 있다. 의심되면 `security_logs`에서 최근 SSH 로그인 성공의 `user_name` 목록을 직접 비교한다.
+
+**확인**: 행의 사용자와 출발지가 본인·작업자·자동화인지 확인한다. 새 계정이면 같은 시기의 계정·그룹 변경 알림(`infra-account-change`)이나 프로비저닝 이력과 대조한다. 로그 보기는 최근 SSH 로그인 성공 줄을 열고, 사용자 이름으로 걸러 본다.
+```bash
+sudo lastlog -u <계정>
+sudo ausearch -m ADD_USER,USER_START -ts today -i   # 계정 생성·세션 시작 기록
+```
+
+**대응**: 정상 로그인이면 조치가 없다(5일 동안 다시 울리지 않는다). 확인되지 않으면 계정 잠금(`usermod -L`)·비밀번호 변경·세션 종료 뒤 보안 담당에게 보고한다. 이 알림은 허용 목록이 아니라 최근 이력으로 판단하므로 `normal_sources` 등록은 필요 없다.
+
+---
+
 <a id="audit-watch-change"></a>
 ## 🟠 계정·sudoers·sshd 설정 파일이 직접 변경됨 (`infra-audit-watch-change`)
 
