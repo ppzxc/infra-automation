@@ -434,6 +434,62 @@ sudo ausearch -k sshd_config -ts today -i
 
 **대응**: 계획에 없던 변경이면 파일을 백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다. 감시 규칙이 없는 호스트(프로비저닝 대상이 아닌 호스트)에서는 이 알림이 울리지 않는다.
 
+<a id="audit-auth-config-change"></a>
+## 🟠 PAM·로그인 정책 파일이 변경됨 (`infra-audit-auth-config-change`)
+
+**조건**: auditd 감시 키 `auth_config`(`/etc/pam.d/`, `/etc/login.defs`)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 5분). 패키지 관리자(`rpm`·`dnf`·`yum`·`dpkg`·`apt`, `o2c_audit_package_managers`)와 계정 관리 도구(`o2c_audit_account_tools`)가 만든 변경은 뺀다. 터미널 없이 로그인 사용자 권한으로 한 변경(프로비저닝·배포 후보)은 아래 정상 변경 후보 알림(P3)이 맡는다. 그래서 한 변경에 알림이 두 번 오지 않는다. 행은 호스트·사용자(AUID)·실행 파일·대상 경로·건수·발생 시각이다.
+
+**왜 중요한가**: PAM 설정을 바꾸면 비밀번호 검사를 끄거나 백도어 모듈을 끼워 넣어 인증을 우회할 수 있다(업계 탐지 목록의 PAM 모듈 생성·로그인 정책 변경). 침입자가 인증을 몰래 약하게 만드는 전형적인 방법이다.
+
+**확인**: 행의 사용자·실행 도구와 시각을 작업 이력과 대조한다. 로그 보기에서 같은 시각의 `type=PATH`(파일 이름)·`type=CWD`·`AUID`를 본다.
+```bash
+sudo ausearch -k auth_config -ts today -i
+```
+
+**대응**: 계획에 없던 변경이면 파일을 패키지 기본값·백업본과 비교해 되돌리고, 해당 계정·세션을 막은 뒤 보안 담당에게 보고한다. 승인된 작업이면 작업 기록에 남긴다. **한계**: 패키지 스크립틀릿이 띄운 자식 프로세스(`authselect` 등)는 이름으로 가릴 수 없어 패치 때 울릴 수 있다(작업 이력과 대조해 닫는다). 이 키의 기록은 2026-11-04 7일 실로그에 0건이라 패키지 관리자 제외는 합성 행으로만 검증했다.
+
+<a id="audit-container-config-change"></a>
+## 🟠 컨테이너 런타임 설정이 변경됨 (`infra-audit-container-config-change`)
+
+**조건**: auditd 감시 키 `container_config`(docker 데몬 설정 `/etc/docker/`와 호스트별 compose 위치)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 5분). 터미널 없이 로그인 사용자 권한으로 한 변경은 정상 변경 후보 알림(P3)이 맡는다.
+
+**왜 중요한가**: 격리 설정(사용자 네임스페이스·소켓·특권·호스트 경로 마운트)을 바꾸면 컨테이너에서 호스트로 탈출할 길이 열린다. 서비스를 고치는 정상 작업도 같은 기록을 남기므로 작업 이력과 대조해야 한다.
+
+**확인**: 행의 실행 도구·사용자·시각을 작업 이력과 대조하고, 대상 경로의 파일을 저장소 정의와 비교한다(특권·마운트가 늘었는지).
+```bash
+sudo ausearch -k container_config -ts today -i
+```
+
+**대응**: 계획에 없던 변경이면 되돌리고 해당 컨테이너를 멈춘 뒤 보안 담당에게 보고한다. 승인된 수동 작업이면 작업 기록과 저장소 정의에 반영한다.
+
+<a id="audit-secret-access"></a>
+## 🟠 지정한 비밀 파일이 열리거나 바뀜 (`infra-audit-secret-access`)
+
+**조건**: auditd 감시 키 `secret_access`(호스트별 지정 비밀 파일, 읽기·쓰기·속성 변경 감시)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 5분). 다음은 뺀다. ① 파일을 열지 않고 속성만 보는 syscall(`getxattr`·`listxattr`·`readlink` 등, `o2c_audit_secret_metadata_syscalls`) ② 로그인 사용자 없이(`auid unset`) 도는 서비스 프로세스(`o2c_audit_secret_service_exes`, 기본 백업 에이전트) — 같은 바이너리를 사람이 손으로 돌리면 울린다 ③ 정상 소비자(`o2c_audit_secret_operator_exes`, 기본 compose 플러그인) ④ 제외 사용자(`o2c_audit_secret_excluded_users`, 기본 비어 있음) ⑤ 터미널 없이 로그인 사용자 권한으로 한 접근(정상 변경 후보 알림(P3)이 맡는다). 감시 대상이 없는 호스트(`audit_watch_paths` 비어 있음)에는 이 키의 기록이 없어 아무 것도 하지 않는다.
+
+**왜 중요한가**: 사람이 시크릿 파일을 열어 보거나 복사하면 자격 증명이 유출된 것일 수 있다(업계 탐지 목록의 민감 파일 열람·자격 파일 접근). 운영자의 정상 점검도 같은 모양이라 사람이 확인해야 한다.
+
+**확인**: 행의 사용자·실행 도구·시각을 작업 이력과 대조하고, 같은 시각의 SSH 로그인(출발지)을 본다.
+```bash
+sudo ausearch -k secret_access -ts today -i
+```
+
+**대응**: 계획에 없던 접근이면 해당 시크릿을 교체(OpenBao 갱신 후 재배포)하고 세션을 끊은 뒤 보안 담당에게 보고한다. 정상 소비자가 반복해서 울리면 알림을 끄지 말고 제외 목록 변수를 고치는 PR을 낸다. **한계**: compose 플러그인은 제외라 `docker compose config`로 값을 출력하는 접근은 이 알림으로 알 수 없다.
+
+<a id="audit-watch-provisioning"></a>
+## 🟡 정상 변경 후보: 터미널 없는 로그인 사용자의 감시 파일 변경 (`infra-audit-watch-provisioning`)
+
+**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 60분). `o2c_audit_provisioning_accounts`(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
+
+**왜 이 알림이 있는가**: Ansible 프로비저닝·배포가 만드는 정상 변경은 감사 행으로 식별할 수 없다(프로세스 제목이 인터프리터뿐이고, 래퍼 문자열 `BECOME-SUCCESS`는 감사 행이 아니라 sudo 로그에만 있다). 같은 방식으로 도는 다른 명령과 구분되지 않아 제외하지 않고 등급만 낮춰 따로 알린다. 그래서 P2 알림은 `AND NOT <서명>`, 이 알림은 `AND <서명>`이라 한 변경에 알림이 하나만 온다.
+
+**확인**: 행의 사용자·시각을 Semaphore 작업 이력과 대조한다. 이력과 맞으면 정상이다. 이력에 없으면 해당 키의 P2 알림 절차(`auth_config`는 `audit-auth-config-change` 등)로 AUID·경로·실행 도구를 확인한다.
+```bash
+sudo ausearch -k secret_access -ts today -i
+```
+
+**대응**: 이력에 없으면 침해로 보고 계정 잠금·세션 종료 후 보안 담당에게 보고한다. 프로비저닝 계정이 정해져 있으면 계정 목록 변수를 설정해 서명을 좁힌다. **한계**: 같은 로그인 키로 터미널 없이(`ssh host 'sudo …'`) 명령을 실행한 공격자도 이 알림으로만 온다(P2가 아니다). 그래서 이 알림은 무시하지 말고 작업 이력과 대조해야 한다.
+
 <a id="ssh-login-unregistered-source"></a>
 ## 🟠 일반 계정이 등록되지 않은 출발지에서 SSH 로그인 성공 (`infra-ssh-login-unregistered-source`)
 

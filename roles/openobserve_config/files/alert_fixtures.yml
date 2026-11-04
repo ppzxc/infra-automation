@@ -2061,3 +2061,207 @@ infra-github-audit-membership-change:
       fires: false
       records:
         - {service_name: github-audit, github_event: org_block, github_action: blocked, github_org: example-org, github_actor: alice, github_actor_ghost: false, github_target: bob}
+
+# --- Audit Watch Key 알림 (Spec #419) ---
+# 줄 모양은 실제 audit 줄을 따른다: SYSCALL 행에는 파일 경로가 없고 같은 시리얼의 type=PATH 행에 있으며, 해석된 필드는 \x1d로 이어 붙는다(key="x"\x1dARCH=…).
+# 호스트·경로·계정은 모두 가짜다. 한 사건은 SYSCALL 행과 PATH·CWD 행 묶음이다(합성 행은 같은 시리얼을 공유).
+infra-audit-auth-config-change:
+  cases:
+    - name: 편집기로 PAM 파일을 직접 고침
+      host: verify-auth-vim
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.001:8001): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"vim\" exe=\"/usr/bin/vim\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.001:8001): item=0 name=\"/etc/pam.d/system-auth\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.001:8001): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.001:8001): cwd=\"/home/opsverify\""}
+    - name: 로그인 정책 파일(login.defs)을 sed로 고침
+      host: verify-auth-sed
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.002:8002): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"sed\" exe=\"/usr/bin/sed\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=rename AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.002:8002): item=0 name=\"/etc/login.defs\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.002:8002): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.002:8002): cwd=\"/home/opsverify\""}
+    - name: 패키지 관리자(rpm)가 PAM 파일을 바꾼 기록은 알리지 않는다
+      host: verify-auth-rpm
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.003:8003): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"rpm\" exe=\"/usr/bin/rpm\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"unset\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.003:8003): item=0 name=\"/etc/pam.d/system-auth\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.003:8003): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.003:8003): cwd=\"/home/unset\""}
+    - name: 계정 관리 도구(passwd)가 건드린 기록은 계정 변경 알림이 맡는다
+      host: verify-auth-passwd
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.004:8004): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"passwd\" exe=\"/usr/bin/passwd\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.004:8004): item=0 name=\"/etc/pam.d/passwd\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.004:8004): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.004:8004): cwd=\"/home/opsverify\""}
+    - name: 터미널 없이 로그인 사용자가 한 변경(프로비저닝 후보)은 P3 알림이 맡는다
+      host: verify-auth-provisioning
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.005:8005): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"python3\" exe=\"/usr/bin/python3.12\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.005:8005): item=0 name=\"/etc/pam.d/sshd\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.005:8005): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.005:8005): cwd=\"/home/opsverify\""}
+    - name: 다른 감시 키(identity)는 대상이 아니다
+      host: verify-auth-other-key
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.006:8006): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"vim\" exe=\"/usr/bin/vim\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"identity\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.006:8006): item=0 name=\"/etc/passwd\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.006:8006): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.006:8006): cwd=\"/home/opsverify\""}
+infra-audit-container-config-change:
+  cases:
+    - name: 편집기로 docker 데몬 설정을 고침
+      host: verify-container-vim
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.007:8007): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"vim\" exe=\"/usr/bin/vim\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"container_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.007:8007): item=0 name=\"/etc/docker/daemon.json\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.007:8007): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.007:8007): cwd=\"/home/opsverify\""}
+    - name: sed로 compose 정의를 고침(파일 생성 PATH 행)
+      host: verify-container-sed
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.008:8008): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"sed\" exe=\"/usr/bin/sed\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"container_config\"\u001dARCH=x86_64 SYSCALL=rename AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.008:8008): item=0 name=\"/srv/example/compose.yml\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.008:8008): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.008:8008): cwd=\"/home/opsverify\""}
+    - name: 터미널 없이 로그인 사용자가 한 변경(프로비저닝 후보)은 P3 알림이 맡는다
+      host: verify-container-provisioning
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.009:8009): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"python3\" exe=\"/usr/bin/python3.12\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"container_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.009:8009): item=0 name=\"/etc/docker/daemon.json\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.009:8009): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.009:8009): cwd=\"/home/opsverify\""}
+    - name: 다른 감시 키(sshd_config)는 대상이 아니다
+      host: verify-container-other-key
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.010:8010): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"vim\" exe=\"/usr/bin/vim\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"sshd_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.010:8010): item=0 name=\"/etc/ssh/sshd_config\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.010:8010): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.010:8010): cwd=\"/home/opsverify\""}
+infra-audit-secret-access:
+  cases:
+    - name: 운영자가 cat으로 비밀 파일을 읽음
+      host: verify-secret-cat
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.011:8011): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"cat\" exe=\"/usr/bin/cat\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.011:8011): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.011:8011): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.011:8011): cwd=\"/home/opsverify\""}
+    - name: 운영자가 백업 에이전트 바이너리를 손으로 돌림(로그인 사용자 있음)
+      host: verify-secret-restic-by-hand
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.012:8012): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts1 ses=313 comm=\"restic\" exe=\"/opt/host-agents/restic/0.19.1/restic\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.012:8012): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.012:8012): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.012:8012): cwd=\"/home/opsverify\""}
+    - name: 백업 서비스(로그인 사용자 없음)가 읽음
+      host: verify-secret-restic-service
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.013:8013): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"restic\" exe=\"/opt/host-agents/restic/0.19.1/restic\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"unset\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.013:8013): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.013:8013): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.013:8013): cwd=\"/home/unset\""}
+    - name: compose 플러그인이 env 파일을 읽음(정상 소비자)
+      host: verify-secret-compose
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.014:8014): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=1001 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"docker-compose\" exe=\"/usr/libexec/docker/cli-plugins/docker-compose\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.014:8014): item=0 name=\"/srv/example/.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.014:8014): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.014:8014): cwd=\"/home/opsverify\""}
+    - name: ls의 속성 조회(getxattr)는 열람이 아니다
+      host: verify-secret-ls
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.015:8015): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"ls\" exe=\"/usr/bin/ls\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=getxattr AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.015:8015): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.015:8015): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.015:8015): cwd=\"/home/opsverify\""}
+    - name: 터미널 없이 로그인 사용자가 한 접근(프로비저닝 후보)은 P3 알림이 맡는다
+      host: verify-secret-provisioning
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.016:8016): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"python3\" exe=\"/usr/bin/python3.12\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.016:8016): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.016:8016): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.016:8016): cwd=\"/home/opsverify\""}
+    - name: 다른 서비스(sshd) 줄은 감시 키 문구가 있어도 세지 않는다
+      host: verify-secret-other-service
+      fires: false
+      records:
+        - {service_name: sshd, body: "type=SYSCALL msg=audit(1792985278.017:8017): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"cat\" exe=\"/usr/bin/cat\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: sshd, body: "type=PATH msg=audit(1792985278.017:8017): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: sshd, body: "type=PATH msg=audit(1792985278.017:8017): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: sshd, body: "type=CWD msg=audit(1792985278.017:8017): cwd=\"/home/opsverify\""}
+infra-audit-watch-provisioning:
+  cases:
+    - name: Ansible 모듈처럼 python3가 터미널 없이 비밀 파일을 읽음
+      host: verify-prov-secret
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.018:8018): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"python3\" exe=\"/usr/bin/python3.12\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.018:8018): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.018:8018): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.018:8018): cwd=\"/home/opsverify\""}
+    - name: 터미널 없이 PAM 파일을 갱신함
+      host: verify-prov-auth
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.019:8019): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"python3\" exe=\"/usr/bin/python3.12\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.019:8019): item=0 name=\"/etc/pam.d/sshd\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.019:8019): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.019:8019): cwd=\"/home/opsverify\""}
+    - name: 터미널 없이 컨테이너 설정을 갱신함
+      host: verify-prov-container
+      fires: true
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.020:8020): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"python3\" exe=\"/usr/bin/python3.12\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"container_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.020:8020): item=0 name=\"/etc/docker/daemon.json\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.020:8020): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.020:8020): cwd=\"/home/opsverify\""}
+    - name: 터미널이 있는 운영자 편집은 P2 알림이 맡는다
+      host: verify-prov-interactive
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.021:8021): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm=\"vim\" exe=\"/usr/bin/vim\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.021:8021): item=0 name=\"/etc/pam.d/system-auth\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.021:8021): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.021:8021): cwd=\"/home/opsverify\""}
+    - name: 로그인 사용자 없는 서비스(auid unset)는 서명이 아니다
+      host: verify-prov-no-login
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.022:8022): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"cat\" exe=\"/usr/bin/cat\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"secret_access\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"unset\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.022:8022): item=0 name=\"/srv/example/app.secrets.env\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.022:8022): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.022:8022): cwd=\"/home/unset\""}
+    - name: 패키지 관리자는 터미널이 없어도 알리지 않는다
+      host: verify-prov-rpm
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.023:8023): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"rpm\" exe=\"/usr/bin/rpm\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"auth_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.023:8023): item=0 name=\"/etc/pam.d/system-auth\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.023:8023): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.023:8023): cwd=\"/home/opsverify\""}
+    - name: 감시 키가 아닌 기록은 대상이 아니다
+      host: verify-prov-other-key
+      fires: false
+      records:
+        - {service_name: audit, body: "type=SYSCALL msg=audit(1792985278.024:8024): arch=c000003e syscall=257 success=yes exit=3 a0=ffffff9c a1=55d0c8e0 a2=241 a3=1b6 items=1 ppid=4000 pid=4100 auid=1002 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=313 comm=\"python3\" exe=\"/usr/bin/python3.12\" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key=\"sshd_config\"\u001dARCH=x86_64 SYSCALL=openat AUID=\"opsverify\" UID=\"root\" GID=\"root\" EUID=\"root\" SUID=\"root\" FSUID=\"root\" EGID=\"root\" SGID=\"root\" FSGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.024:8024): item=0 name=\"/etc/ssh/sshd_config\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=PATH msg=audit(1792985278.024:8024): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
+        - {service_name: audit, body: "type=CWD msg=audit(1792985278.024:8024): cwd=\"/home/opsverify\""}
