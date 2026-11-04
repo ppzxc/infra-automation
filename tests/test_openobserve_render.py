@@ -1048,7 +1048,7 @@ def test_the_syscall_alerts_have_runbook_and_spec_entries_with_the_rule_basis():
 # --- Evidence-Only Watch Key는 어떤 알림도 울리지 않는다 (Spec #433 / Ticket-8, #435) ---------------------------------------------------
 EVIDENCE_ONLY_KEYS = ("evidence_privileged_exec", "evidence_file_delete", "evidence_login_records", "evidence_time_change", "evidence_mount")
 _SYSCALL_NAMES.update({59: "execve", 87: "unlink", 82: "rename", 165: "mount", 164: "settimeofday", 227: "clock_settime"})
-_EVIDENCE_ROWS = [   # 규칙(roles/security/templates/audit.rules.j2 7.)이 만드는 기록: 정상 작업에서도 늘 생기는 것들(sudo·rm·mount·시간 동기·로그인 기록 쓰기)
+_EVIDENCE_ROWS = [   # 규칙(roles/security/templates/audit.rules.j2 8.)이 만드는 기록: 정상 작업에서도 늘 생기는 것들(sudo·rm·mount·시간 동기·로그인 기록 쓰기)
     ("evidence_privileged_exec", "/usr/bin/sudo", "sudo", 59), ("evidence_privileged_exec", "/usr/bin/su", "su", 59),
     ("evidence_privileged_exec", "/usr/bin/passwd", "passwd", 59),
     ("evidence_file_delete", "/usr/bin/rm", "rm", 87), ("evidence_file_delete", "/usr/bin/mv", "mv", 82),

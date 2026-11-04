@@ -175,6 +175,8 @@ def test_var_log_syscall_rules_come_before_every_other_rule_that_matches_a_file_
     로그인 사용자가 sudo.log를 지우거나 자른 기록이 `sudo_logs` 키로만 남아 P1 알림이 울리지 않는다(`sudo_logs`는 알림 대상이 아니다).
     그래서 /var/log 경로를 다루는 다른 규칙은 모두 var_log_delete 규칙 뒤에 있어야 한다. 증적 전용 규칙(#435)도 마찬가지다."""
     for case, out in security_rendered.items():
+        if case == "secret_path_under_var_log":      # 알려진 한계(아래 전용 테스트): 사용자 지정 시크릿 감시는 1~5절이라 앞에 온다
+            continue
         lines = rule_lines(out["audit"])
         first = next(i for i, ln in enumerate(lines) if ln.endswith("-k var_log_delete"))
         others = [i for i, ln in enumerate(lines) if "/var/log" in ln and not ln.endswith("-k var_log_delete")]
@@ -443,6 +445,15 @@ def test_evidence_watches_come_before_the_evidence_syscall_rules_so_a_file_delet
         watches = [i for i, ln in enumerate(lines) if ln.startswith("-w ") and " -k evidence_" in ln]
         syscalls = [i for i, ln in enumerate(lines) if ln.startswith("-a ") and " -k evidence_" in ln]
         assert syscalls and (not watches or max(watches) < min(syscalls)), case
+
+
+def test_known_limit_a_custom_audit_watch_path_under_var_log_comes_before_var_log_delete_and_takes_its_key(security_rendered):
+    """한계 고정(#435 리뷰): 사용자 지정 `audit_watch_paths`(1~5절)는 syscall 규칙(6절)보다 앞이라, `/var/log` 아래 경로를 넣으면 로그인 사용자가
+    그 파일을 지울 때 첫 매치 키가 `secret_access`가 되어 `var_log_delete` P1이 울리지 않는다. 이 순서를 바꾸면 이 테스트와 docs/security.md의 한계 줄을 함께 고친다."""
+    lines = rule_lines(security_rendered["secret_path_under_var_log"]["audit"])
+    watch = next(i for i, ln in enumerate(lines) if ln == "-w /var/log/example/app.secret -p rwa -k secret_access")
+    assert watch < next(i for i, ln in enumerate(lines) if ln.endswith("-k var_log_delete"))
+    assert "첫 매치" in (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8").split("audit_watch_paths`가 `/var/log` 아래", 1)[1][:400]
 
 
 def test_audit_rules_are_deployed_only_by_the_security_role_and_the_host_agents_playbooks_do_not_include_it():
