@@ -862,14 +862,17 @@ VAR_LOG, KERNEL_MODULE = "infra-var-log-delete", "infra-kernel-module"
 
 # 규칙(roles/security/templates/audit.rules.j2)이 만드는 SYSCALL 기록의 모양: 같은 호스트의 기존 audit 줄(exec_log·감시 키 SYSCALL)과 auditd 형식을 따랐다.
 # key는 SYSCALL 줄에만 붙고 경로는 뒤따르는 PATH 줄(type=PATH ... name="/var/log/x")에 있다. 알림은 SYSCALL 줄만 읽는다.
+_SYSCALL_NAMES = {263: "unlinkat", 257: "openat", 313: "finit_module", 175: "init_module", 176: "delete_module"}
+# 줄 모양은 실로그(2026-11-04 security_logs의 audit SYSCALL 줄 하루치, 7대 호스트, 읽기 전용 조회)에서 확인했다: 키 바로 뒤에 \x1d(GS) 구분자가 오고 그 뒤에 auditd가 해석해
+# 붙인 `ARCH=… SYSCALL=<이름> AUID="…" UID="…"`가 온다. 로그인 없는 줄은 `auid=4294967295`와 `AUID="unset"`이다.
 _SYSCALL_BODY = ('type=SYSCALL msg=audit(1793000000.123:7001): arch=c000003e syscall=%d success=%s exit=0 a0=ffffff9c a1=55d2 a2=0 a3=0 items=2 '
                  'ppid=4000 pid=4900 auid=%s uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=pts0 ses=313 comm="%s" exe="%s" '
-                 'subj=kernel key="%s" AUID="%s" UID="root"')
+                 'subj=kernel key="%s"\x1dARCH=x86_64 SYSCALL=%s AUID="%s" UID="root"')
 
 
 def _sys_row(key, exe, comm, auid="1002", syscall=263, success="yes", host="ns0272", user="opsverify", service="audit"):
     return {"host_name": host, "service_name": service,
-            "body": _SYSCALL_BODY % (syscall, success, auid, comm, exe, key, "unset" if auid == "4294967295" else user)}
+            "body": _SYSCALL_BODY % (syscall, success, auid, comm, exe, key, _SYSCALL_NAMES[syscall], "unset" if auid == "4294967295" else user)}
 
 
 def _var_log_rows(desired, *records):
@@ -950,9 +953,16 @@ def test_log_delete_rows_group_by_host_actor_and_tool_and_name_them(desired):
 
 
 def test_a_kernel_module_load_or_unload_by_a_login_user_fires_the_p2_alert(desired):
-    for syscall, comm, exe in ((313, "modprobe", "/usr/sbin/modprobe"), (175, "insmod", "/usr/sbin/insmod"), (176, "rmmod", "/usr/sbin/rmmod")):
+    for syscall, comm, exe, action in ((313, "modprobe", "/usr/sbin/modprobe", "적재"), (175, "insmod", "/usr/sbin/insmod", "적재"), (176, "rmmod", "/usr/sbin/rmmod", "제거")):
         rows = _module_rows(desired, _sys_row("kernel_module", exe, comm, syscall=syscall))
-        assert [(r["host_name"], r["tool"], r["changes"]) for r in rows] == [("ns0272", comm, 1)], comm
+        assert [(r["host_name"], r["tool"], r["action"], r["changes"]) for r in rows] == [("ns0272", comm, action, 1)], comm
+
+
+def test_a_kernel_module_row_without_the_enriched_syscall_name_still_fires_and_says_load_or_unload(desired):
+    """EL6·7 auditd는 해석 필드(SYSCALL=)를 안 붙일 수 있다. 그때는 적재인지 제거인지 몰라 둘을 함께 적는다."""
+    row = _sys_row("kernel_module", "/usr/sbin/modprobe", "modprobe", syscall=313)
+    row["body"] = row["body"].split("\x1d")[0]
+    assert [(r["tool"], r["action"]) for r in _module_rows(desired, row)] == [("modprobe", "적재·제거")]
 
 
 def test_kernel_module_records_without_a_login_uid_failures_or_another_key_do_not_fire(desired):
@@ -965,7 +975,7 @@ def test_kernel_module_records_without_a_login_uid_failures_or_another_key_do_no
 
 def test_kernel_module_rows_name_the_server_actor_and_tool(desired):
     lines = _row_lines(desired, KERNEL_MODULE, [_sys_row("kernel_module", "/usr/sbin/insmod", "insmod", syscall=175, host="ns0003", user="alice")], "security_logs")
-    assert len(lines) == 1 and lines[0].startswith("• ns0003: alice의 insmod 1건") and " · " in lines[0]
+    assert len(lines) == 1 and lines[0].startswith("• ns0003: alice의 insmod 커널 모듈 적재 1건") and " · " in lines[0]
 
 
 @pytest.mark.parametrize("name", (VAR_LOG, KERNEL_MODULE))

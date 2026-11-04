@@ -30,7 +30,7 @@ def test_audit_rules_do_not_trace_every_execve(security_rendered):
         lines = rule_lines(out["audit"])  # 주석은 제외
         assert not any("execve" in ln for ln in lines), case
         # syscall 규칙은 로그인 사용자의 /var/log 삭제·커널 모듈만이다(아래 절). 그 밖의 syscall을 전수로 추적하지 않는다.
-        assert {_rule(ln)["key"] for ln in lines if ln.startswith("-a ")} <= {"var_log_delete", "kernel_module"}, case
+        assert {_rule(ln)["key"] for ln in lines if ln.startswith("-a ")} <= set(ALERT_SYSCALL_KEYS), case
 
 
 def test_audit_rules_keep_meaningful_events(security_rendered):
@@ -63,6 +63,9 @@ def test_audit_rules_do_not_lock_the_rule_set(security_rendered):
 
 
 # --- syscall 규칙: /var/log 삭제·자르기와 커널 모듈 (Spec #433 / Ticket-5, #431) -------------------------------------------
+
+ALERT_SYSCALL_KEYS = ("var_log_delete", "kernel_module")   # 알림이 읽는 syscall 규칙 키. 증적 전용 규칙(#435)은 이 목록에 넣지 않는다
+
 
 def _rule(line):
     """`-a always,exit -F arch=b64 -S a,b -F x=y -k key` -> {arch, syscalls, fields, key}."""
@@ -142,21 +145,34 @@ def test_the_o_trunc_open_rules_only_match_opens_with_the_truncate_flag(security
 
 
 def test_the_syscall_rules_are_independent_of_host_variables_and_never_log_everything(security_rendered):
-    default = {k: _syscall_rules(security_rendered["default"]["audit"], k) for k in ("var_log_delete", "kernel_module")}
+    default = {k: _syscall_rules(security_rendered["default"]["audit"], k) for k in ALERT_SYSCALL_KEYS}
     for case, out in security_rendered.items():
         syscall_lines = [ln for ln in rule_lines(out["audit"]) if ln.startswith("-a ")]
         assert _syscall_rules(out["audit"], "var_log_delete") == default["var_log_delete"], case
         if case != "el6":                             # EL6만 finit_module이 빠진다(위 테스트)
             assert _syscall_rules(out["audit"], "kernel_module") == default["kernel_module"], case
-        for ln in syscall_lines:                      # 모든 syscall 규칙은 로그인 사용자 필터와 키를 갖는다(사용자 구분 없는 전수 기록 금지)
-            assert _is_login_user_only(_rule(ln)) and _rule(ln)["key"], ln
+        for ln in syscall_lines:                      # 알림 키 규칙은 로그인 사용자 필터를 갖는다(사용자 구분 없는 전수 기록 금지). 증적 규칙의 필터는 그 티켓이 정한다
+            if _rule(ln)["key"] in ALERT_SYSCALL_KEYS:
+                assert _is_login_user_only(_rule(ln)), ln
 
 
 def test_syscall_rule_keys_are_distinct_from_the_watch_keys_so_alerts_and_evidence_can_tell_them_apart(security_rendered):
     lines = rule_lines(security_rendered["default"]["audit"])
     watch_keys = {ln.split(" -k ")[1] for ln in lines if ln.startswith("-w ")}
     syscall_keys = {_rule(ln)["key"] for ln in lines if ln.startswith("-a ")}
-    assert syscall_keys == {"var_log_delete", "kernel_module"} and not syscall_keys & watch_keys
+    assert syscall_keys == set(ALERT_SYSCALL_KEYS) and not syscall_keys & watch_keys
+
+
+def test_var_log_syscall_rules_come_before_every_other_rule_that_matches_a_file_under_var_log(security_rendered):
+    """커널은 첫 번째로 맞는 규칙의 키만 기록한다(audit.rules(7), first match wins). `-w /var/log/sudo.log` 감시가 var_log_delete보다 앞이면
+    로그인 사용자가 sudo.log를 지우거나 자른 기록이 `sudo_logs` 키로만 남아 P1 알림이 울리지 않는다(`sudo_logs`는 알림 대상이 아니다).
+    그래서 /var/log 경로를 다루는 다른 규칙은 모두 var_log_delete 규칙 뒤에 있어야 한다. 증적 전용 규칙(#435)도 마찬가지다."""
+    for case, out in security_rendered.items():
+        lines = rule_lines(out["audit"])
+        first = next(i for i, ln in enumerate(lines) if ln.endswith("-k var_log_delete"))
+        others = [i for i, ln in enumerate(lines) if "/var/log" in ln and not ln.endswith("-k var_log_delete")]
+        assert others and all(i > first for i in others), case          # sudo.log 감시는 남아 있되 뒤에 있다
+        assert any(lines[i].endswith("-k sudo_logs") for i in others), case
 
 
 def test_syscall_rules_come_after_the_reset_and_the_failure_mode_and_never_lock(security_rendered):

@@ -798,17 +798,18 @@ o2c_alerts:
     why: "루트킷은 커널 모듈로 적재되어 프로세스·파일·연결을 숨깁니다. 평소 운영에서 로그인 사용자가 모듈을 직접 넣고 빼는 일은 드뭅니다(부팅·하드웨어 인식 때의 자동 적재는 로그인 사용자가 아니라 해당하지 않습니다). 드라이버 설치·네트워크 도구 작업은 같은 기록을 남기므로 작업자와 대조해야 합니다."
     action: "① 행의 실행 도구와 작업자(AUID)를 작업 일정과 대조 ② 계획에 없던 적재면 서버에서 `sudo ausearch -k kernel_module -i`로 시각·호출을 보고 `lsmod`와 `modinfo <모듈>`로 모듈 출처와 서명을 확인 ③ 출처 불명이면 격리(네트워크 차단)하고 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#kernel-module"
-    row_template: '• {host_label}: {actor}의 {tool} {changes}건 · {event_time}'
+    row_template: '• {host_label}: {actor}의 {tool} 커널 모듈 {action} {changes}건 · {event_time}'
     description: "auditd 키 kernel_module SYSCALL 기록(로그인 사용자의 커널 모듈 적재·제거, 성공한 것만). auid 4294967295(로그인 없음)는 뺀다 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name,
       CASE WHEN body LIKE '% AUID="%' THEN substr(regexp_replace(body, '^.* AUID="([^"]*)".*$', '\1'), 1, 32) ELSE '알 수 없음' END AS actor,
       CASE WHEN body LIKE '% comm="%' THEN substr(regexp_replace(body, '^.* comm="([^"]*)".*$', '\1'), 1, 40) ELSE '알 수 없음' END AS tool,
+      CASE WHEN body LIKE '% SYSCALL=delete_module%' THEN '제거' WHEN body LIKE '% SYSCALL=init_module%' OR body LIKE '% SYSCALL=finit_module%' THEN '적재' ELSE '적재·제거' END AS action,
       count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE service_name = 'audit' AND body LIKE 'type=SYSCALL %' AND body LIKE '% key="kernel_module"%' AND body LIKE '% success=yes %'
       AND body NOT LIKE '% auid=4294967295 %'
-      GROUP BY host_name, actor, tool
+      GROUP BY host_name, actor, tool, action
       ORDER BY changes DESC
     period: 5
     frequency: 1

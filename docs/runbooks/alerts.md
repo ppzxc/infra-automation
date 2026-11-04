@@ -422,7 +422,7 @@ sudo ausearch -m ADD_USER,USER_START -ts today -i   # 계정 생성·세션 시�
 <a id="var-log-delete"></a>
 ## 🔴 로그인 사용자가 /var/log 아래 파일을 지우거나 자름 (`infra-var-log-delete`)
 
-**조건**: auditd 키 `var_log_delete` SYSCALL 기록(로그인 사용자의 `/var/log` 하위 삭제·이름 변경·자르기, 성공한 것만)이 5분 안에 1건 이상(재통지 5분). 규칙은 `auid>=1000`이고 `auid`가 비어 있지 않은 사용자만 기록하므로 logrotate·서비스의 회전은 대상이 아니다. 알림도 `auid=4294967295` 줄을 한 번 더 빼고, 제외 실행 파일(`o2c_var_log_excluded_exes`, 기본 `/usr/sbin/logrotate`: 로그인 사용자가 손으로 돌린 logrotate)이 낸 기록도 뺀다. 행은 호스트·작업자(AUID)·실행 도구별이다.
+**조건**: auditd 키 `var_log_delete` SYSCALL 기록(로그인 사용자의 `/var/log` 하위 삭제·이름 변경·자르기, 성공한 것만)이 5분 안에 1건 이상(재통지 5분). 규칙은 `auid>=1000`이고 `auid`가 비어 있지 않은 사용자만 기록하므로 logrotate·서비스의 회전은 대상이 아니다. 알림도 `auid=4294967295` 줄을 한 번 더 빼고, 제외 실행 파일(`o2c_var_log_excluded_exes`, 기본 `/usr/sbin/logrotate`: 로그인 사용자가 손으로 돌린 logrotate)이 낸 기록도 뺀다. 행은 호스트·작업자(AUID)·실행 도구별이다. 프로비저닝(Ansible)과 호스트 에이전트의 수집 스크립트(`>>`로 덧붙이기만 함, `/var/log/host-agents`)는 이 알림을 울리지 않는다. 저장소의 태스크 중 `/var/log` 아래 파일을 이름 바꿔 넣거나 지우는 것은 없다(디렉터리 생성·권한 변경뿐이다). 그런 태스크를 새로 더하면 로그인 사용자(SSH 접속 계정)의 작업으로 기록돼 이 알림이 울리므로 함께 확인한다.
 
 **왜 중요한가**: 로그 파일을 지우거나 비우는 것은 침입 흔적을 없애는 전형적인 방법이다. 사고 조사와 증적에 필요한 기록이 사라질 수 있다. 정상 정리 작업(수동 정리, 디스크 확보)도 같은 기록을 남기므로 작업자와 대조해야 한다. **한계**: `renameat2`(최신 `mv`가 쓰는 이름 바꾸기)와 `openat2`로 여는 자르기는 규칙이 걸러 내지 못한다(`docs/security.md`). 규칙이 적재되지 않은 호스트(RHEL 계열 적재 버그 #424가 고쳐지기 전, 프로비저닝 대상이 아닌 호스트)에서는 기록이 없어 알림이 조용하다. 조용한 것이 정상은 아니므로 규칙 적재는 `auditctl -l`로 따로 확인한다.
 
@@ -440,7 +440,7 @@ sudo auditctl -l | grep var_log_delete           # 규칙이 적재돼 있는지
 <a id="kernel-module"></a>
 ## 🟠 로그인 사용자가 커널 모듈을 적재하거나 제거함 (`infra-kernel-module`)
 
-**조건**: auditd 키 `kernel_module` SYSCALL 기록(로그인 사용자의 `init_module`·`finit_module`·`delete_module` 호출, 성공한 것만)이 5분 안에 1건 이상(재통지 5분). `auid`가 비어 있는 부팅·하드웨어 인식 때의 자동 적재는 대상이 아니다.
+**조건**: auditd 키 `kernel_module` SYSCALL 기록(로그인 사용자의 `init_module`·`finit_module`·`delete_module` 호출, 성공한 것만)이 5분 안에 1건 이상(재통지 5분). `auid`가 비어 있는 부팅·하드웨어 인식 때의 자동 적재는 대상이 아니다. 행의 동작은 `제거`(`delete_module`)·`적재`(`init_module`·`finit_module`)이고, 로그에 해석 필드(`SYSCALL=`)가 없으면 `적재·제거`로 나온다.
 
 **왜 중요한가**: 루트킷은 커널 모듈로 적재되어 프로세스·파일·연결을 숨긴다. 평소 운영에서 로그인 사용자가 모듈을 직접 넣고 빼는 일은 드물다. 드라이버 설치·네트워크 도구 작업은 같은 기록을 남기므로 작업자와 대조해야 한다. 규칙이 적재되지 않은 호스트에서는 기록이 없어 알림이 조용하다.
 

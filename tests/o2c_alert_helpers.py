@@ -258,6 +258,7 @@ COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "tot
 LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
                 "user_name": "u" * 32, "actor": "u" * 32, "target": "t" * 14, "repo": "o" * 8 + "/" + "r" * 15, "kind": "organization.member_added", "team": "t" * 14,   # GitHub 감사 알림(#403): SQL이 대상 30자·저장소 40자·팀 20자로 자른다
                 "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
+                "action": "적재·제거",   # /var/log·커널 모듈 알림(#431)의 동작: 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
                 "status": "timeout", "tool": "timedatectl", "sync_status": "unsynced", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
 

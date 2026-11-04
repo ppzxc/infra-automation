@@ -35,7 +35,7 @@
 # 2. Privilege: sudoers configuration & logs
 -w /etc/sudoers -p wa -k sudo_config
 -w /etc/sudoers.d/ -p wa -k sudo_config
--w {{ sudo_log_file | default('/var/log/sudo.log') }} -p wa -k sudo_logs
+# (sudo 로그 파일 감시 sudo_logs는 규칙 순서 때문에 6. 뒤에 있다: 아래 "규칙 순서" 참고)
 
 # 3. SSH daemon configuration
 -w /etc/ssh/sshd_config -p wa -k sshd_config
@@ -63,3 +63,10 @@
 #   finit_module(파일 기술자로 적재, kmod 기본 경로)은 커널 3.8에서 생겼다. EL6 커널(2.6.32)에는 없어 auditctl이 이름을 몰라 규칙이 실패하므로 EL6에서만 뺀다.
 {% set kernel_module_syscalls = 'init_module,delete_module' if (ansible_os_family | default('')) == 'RedHat' and (ansible_distribution_major_version | default('') | string) == '6' else 'init_module,finit_module,delete_module' %}
 {{ login_user_syscall_rule(kernel_module_syscalls, 'kernel_module') -}}
+
+# 7. 규칙 순서 (중요) — 커널은 첫 번째로 맞는 규칙의 키 하나만 기록한다(audit.rules(7): first match wins).
+#   /var/log 아래 파일을 다루는 감시·규칙은 반드시 6-1(var_log_delete) 뒤에 둔다. 앞에 두면 로그인 사용자가 그 파일을 지울 때 앞 규칙의 키로만 남아
+#   P1 알림(infra-var-log-delete)이 울리지 않는다. 이 이유로 sudo 로그 파일 감시(sudo_logs)를 여기에 둔다: sudo 자신의 기록은 덧붙이기(O_APPEND, O_TRUNC 없음)라
+#   6-1에 걸리지 않고 아래 감시로 내려와 기존대로 sudo_logs로 남는다. 새 감시 키·증적 전용 규칙(CIS 특권 명령·파일 삭제·로그인 기록 등)은 이 줄 아래에 더한다.
+#   1~5 감시를 위에 두는 것도 이유가 있다: 6의 syscall 줄이 오래된 auditctl에서 거부돼도 그 앞의 감시는 이미 올라가 있다.
+-w {{ sudo_log_file | default('/var/log/sudo.log') }} -p wa -k sudo_logs
