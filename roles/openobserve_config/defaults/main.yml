@@ -127,6 +127,25 @@ o2c_sudo_risky_commands:
 o2c_sudo_protected_services: [auditd, rsyslog, systemd-journald, firewalld, otelcol-contrib]
 o2c_sudo_risky_groups: "{{ o2c_sudo_risky_commands | o2c_sudo_risky_groups(o2c_sudo_protected_services, '보안·로그 서비스 중지') }}"
 
+# sshd 치명 오류(Spec #433 / Ticket-2, #428): sshd·sshd-session 줄에 이 문구가 있으면 P2. 문구는 Sigma lnx_sshd_susp_ssh의 키워드에서 스캐너 소음을 뺀 것이고
+# Wazuh 5707(`fatal: buffer_get_string: bad string`)·5714(`crc32 compensation attack`)와 겹친다. 소문자 문구는 줄 안에서 부분 일치한다(대소문자 무시).
+# 임계는 호스트당 5분 구간의 줄 수다. 7일 실로그에서 이 문구는 한 건도 없었다(docs/openobserve_config.md).
+o2c_sshd_fatal_threshold: 1
+o2c_sshd_fatal_keywords:
+  - {label: 키·서명 오류, patterns: [unexpected internal error, unknown or unsupported key type, invalid certificate signing key, invalid elliptic curve value, incorrect signature, error in libcrypto, unexpected bytes remain after decoding]}
+  - {label: 프로토콜 공격 시도, patterns: ['fatal: buffer_get_string: bad string', 'local: crc32 compensation attack', bad client public dh value]}
+# 뺀 문구(스캐너·점검 소음): 알림에서 제외한다. 치명 문구와 겹치는 줄도 소음이다. `did not receive identification string`은 7일 동안 호스트 24대에서 분당 1건씩
+# 나왔다(서버 도달성 점검 tcp_check가 60초마다 SSH 포트에 접속만 하고 끊음) 하루 약 3만 4천 건이었다. 나머지 둘은 업계(Wazuh 5701·5748, 등급 6~8)도 낮게 두는 스캐너 줄이다.
+o2c_sshd_scanner_noise:
+  - {label: 스캐너 소음, patterns: [corrupted mac on input, bad protocol version identification, did not receive identification string]}
+# 낯선 사용자의 SSH 성공: 평가 구간(window) 안에 처음 성공한 사용자 중 그 앞 lookback_days일 동안 성공 기록이 없는 사용자. 호스트는 구분하지 않는다(어느 서버에서든 본 적 있으면 아는 사용자).
+# 조회 구간(period)은 lookback_days일 + window분이고 평가는 frequency분마다다. frequency가 window보다 길면 평가 사이에 틈이 생기므로 같거나 짧게 둔다.
+# 한 번 울린 사용자는 이후 lookback_days일 동안 아는 사용자라 다시 울리지 않는다(window 안에서 되풀이되는 통지는 재통지 간격 silence = window로 막는다).
+# 스캔 비용: 5일 조회가 event_action·event_outcome 조건만으로 약 2초에 끝난다(2026-11-04 실측, docs/openobserve_config.md).
+o2c_ssh_new_user_lookback_days: 5
+o2c_ssh_new_user_window_minutes: 10
+o2c_ssh_new_user_frequency_minutes: 5
+
 # 스위치 syslog 알림(Spec #277). 값은 모두 역할 기본 변수이며 Semaphore Environment(-e)로 덮어쓴다 — 저장소에는 IP·포트·계정을 두지 않는다.
 # 메시지 코드는 Cisco가 찍는 그대로 `%`를 뺀 형태(FACILITY-SEVERITY-MNEMONIC)다. 형식은 O2C-002에서 검증한다(SQL에 들어간다).
 # 잡음 억제: 이 코드의 줄은 스위치 알림에서 빠진다(검색은 그대로 된다). ARP 해소 실패(ADJ-3-RESOLVE_REQ)는 최근 샘플의 75%를 차지한 반복 메시지다.
@@ -529,6 +548,50 @@ o2c_alerts:
     period: 5
     frequency: 1
     silence: 5
+  # --- sshd 치명 오류·낯선 사용자 SSH 성공 (Spec #433 / Ticket-2, #428) --- 실로그 7일 빈도와 5일 조회 스캔 비용은 docs/openobserve_config.md에 적었다.
+  - name: infra-sshd-fatal-error
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "sshd 치명 오류 (프로토콜·암호 공격 시도)"
+    what: "sshd가 프로토콜·암호 처리 오류(키 교환·서명 검증 실패, 잘못된 DH 값, 비정상 패킷 등)를 {{ o2c_sshd_fatal_threshold }}건 이상 기록했습니다. 인터넷 스캐너가 늘 만드는 줄(비정상 MAC·프로토콜 버전·인사말 없음)은 뺐습니다."
+    why: "sshd의 취약점을 노린 공격이나 비정상 클라이언트의 접속 시도일 수 있습니다. 평소에는 0건에 가까운 오류라 한 건도 조치 대상입니다."
+    action: "① 로그 보기로 오류 문구와 출발지를 확인 ② 출발지가 외부면 방화벽 차단과 sshd 패키지 보안 업데이트 여부 확인 ③ 같은 시각의 로그인 성공 기록이 있으면 계정 점검"
+    runbook: "{{ o2c_runbook_base }}#sshd-fatal-error"
+    row_template: '• {host_label}: sshd 치명 오류 {errors}건 · {event_time}'
+    description: "sshd·sshd-session 줄에 Sigma lnx_sshd_susp_ssh·Wazuh 5707·5714 문구(o2c_sshd_fatal_keywords)가 {{ o2c_sshd_fatal_threshold }}건 이상, 스캐너 소음 문구(o2c_sshd_scanner_noise)는 제외 (Event Alert, 재통지 5분)"
+    stream: security_logs
+    sql: >-
+      SELECT host_name, count(*) AS errors, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
+      WHERE process_executable_name IN ('sshd', 'sshd-session') AND {{ o2c_sshd_fatal_keywords | o2c_like_any('body') }}
+      {{ ('AND NOT ' ~ (o2c_sshd_scanner_noise | o2c_like_any('body'))) if o2c_sshd_scanner_noise | length > 0 else '' }}
+      GROUP BY host_name HAVING count(*) >= {{ o2c_sshd_fatal_threshold }}
+      ORDER BY errors DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-ssh-login-new-user
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "처음 보는 사용자로 SSH 로그인 성공"
+    what: "지난 {{ o2c_ssh_new_user_lookback_days }}일 동안 SSH 로그인 성공 기록이 없던 사용자가 {{ o2c_ssh_new_user_window_minutes }}분 안에 SSH 로그인에 성공했습니다(서버는 가리지 않고 어느 서버에서든 본 적 있으면 아는 사용자입니다)."
+    why: "새 계정이나 탈취된 계정의 첫 사용일 수 있습니다. 새 담당자·배포용 계정의 정상 첫 로그인도 같은 모양이라 사람이 확인해야 합니다. 한 번 울린 사용자는 {{ o2c_ssh_new_user_lookback_days }}일 동안 다시 울리지 않습니다."
+    action: "① 행의 사용자와 출발지가 본인·작업자·자동화인지 확인 ② 새 계정이면 계정 생성 기록(계정·그룹 변경 알림)과 대조 ③ 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 후 보안 담당 보고"
+    runbook: "{{ o2c_runbook_base }}#ssh-login-new-user"
+    row_template: '• {host_label}: {user_name} ← {source_address} ({logins}회) · {event_time}'
+    description: "SSH 로그인 성공 중 첫 성공이 최근 {{ o2c_ssh_new_user_window_minutes }}분 안이고 그 앞 {{ o2c_ssh_new_user_lookback_days }}일 동안 같은 user_name의 성공이 없음, 호스트 구분 없음 (Event Alert, {{ o2c_ssh_new_user_frequency_minutes }}분마다 평가, 재통지 {{ o2c_ssh_new_user_window_minutes }}분)"
+    stream: security_logs
+    # 서브쿼리로 거르는 알림이라 WHERE에서 파생할 수 없다: 원문 링크는 최근 SSH 로그인 성공 줄을 연다
+    raw_sql: 'SELECT * FROM "security_logs" WHERE event_action = ''ssh_login'' AND event_outcome = ''success'' ORDER BY _timestamp DESC LIMIT 200'
+    sql: >-
+      SELECT host_name, user_name, source_address, count(*) AS logins, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
+      WHERE event_action = 'ssh_login' AND event_outcome = 'success'
+      AND user_name IN (SELECT user_name FROM "security_logs" WHERE event_action = 'ssh_login' AND event_outcome = 'success'
+      GROUP BY user_name HAVING min(_timestamp) >= to_unixtime(now()) * 1000000 - {{ (o2c_ssh_new_user_window_minutes | int) * 60000000 }})
+      GROUP BY host_name, user_name, source_address
+      ORDER BY logins DESC
+    period: "{{ (o2c_ssh_new_user_lookback_days | int) * 1440 + (o2c_ssh_new_user_window_minutes | int) }}"
+    frequency: "{{ o2c_ssh_new_user_frequency_minutes }}"
+    silence: "{{ o2c_ssh_new_user_window_minutes }}"
   # --- 남은 보안 로그 알림 (Spec #322 / Ticket-8, #330) ---------------------------------------------------------------
   # 이미 수집되는 로그로 잡을 수 있는 신호만 알림으로 만들었다. 잡을 수 없는 신호(authorized_keys 변경, SSL VPN 실패 급증)와 그 신호에
   # 필요한 수집은 docs/openobserve_config.md에 기록한다.

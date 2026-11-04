@@ -2,6 +2,7 @@
 # 알림 검증 단계(Spec #184 / Ticket-1)용 합성 레코드. 알림 이름 → 케이스 목록.
 # - 레코드는 VRL(security_semantics) 처리 후의 모양이다(검증 스트림에는 파이프라인이 없다).
 # - host는 케이스마다 유일해야 한다. 실행 시 host_name으로 주입되고 실행 ID가 붙어 케이스를 구분한다.
+#   (본문 `body`와 `user_name`의 `{host}`는 가짜 호스트 이름으로 바뀐다. 호스트를 구분하지 않는 알림은 `user_name: '{host}'`로 사용자도 케이스·실행마다 유일하게 둔다.)
 # - fires: 이 케이스의 호스트가 알림 SQL 결과에 나와야 하면 true, 나오면 안 되면 false.
 # - known_failure: (선택) 알려진 결함 표시. 있으면 기대와 달라도 작업을 막지 않고 경고만 한다. 현재 사용 중인 케이스 없음.
 # - repeat: 같은 레코드를 N번 넣는다. row_key: 결과 행에서 호스트를 읽는 컬럼(기본 host_name).
@@ -1658,6 +1659,58 @@ infra-ssh-login-unregistered-source:
       fires: false
       records:
         - {event_action: ssh_login, event_outcome: failure, user_name: deploy, source_address: 198.51.100.9}
+# sshd 치명 오류(#428): 치명 문구는 울리고 스캐너 문구와 다른 프로세스의 같은 문구는 울리지 않는다.
+infra-sshd-fatal-error:
+  cases:
+    - name: sshd의 치명 문구(Wazuh 5707)
+      host: verify-sshd-fatal-sshd
+      fires: true
+      records:
+        - {process_executable_name: sshd, service_name: auth, body: 'Oct 26 10:00:00 {host} sshd[4242]: fatal: buffer_get_string: bad string'}
+    - name: sshd-session(OpenSSH 9.8+)의 치명 문구(Sigma)
+      host: verify-sshd-fatal-session
+      fires: true
+      records:
+        - {process_executable_name: sshd-session, service_name: auth, body: 'Oct 26 10:00:00 {host} sshd-session[4243]: error: error in libcrypto [preauth]'}
+    - name: 스캐너 소음 3종은 아무리 많아도 울리지 않는다
+      host: verify-sshd-fatal-scanner
+      fires: false
+      records:
+        - {repeat: 20, process_executable_name: sshd, service_name: auth, body: 'Oct 26 10:00:00 {host} sshd[4244]: Corrupted MAC on input.'}
+        - {repeat: 20, process_executable_name: sshd, service_name: auth, body: "Oct 26 10:00:00 {host} sshd[4245]: Bad protocol version identification 'GET / HTTP/1.1' from 203.0.113.9 port 4444"}
+        - {repeat: 20, process_executable_name: sshd, service_name: auth, body: 'Oct 26 10:00:00 {host} sshd[4246]: Did not receive identification string from 203.0.113.9 port 4444'}
+    - name: 다른 프로세스가 같은 문구를 남겨도 울리지 않는다(알림 서버가 쿼리 계획을 로그로 남기는 경우)
+      host: verify-sshd-fatal-other
+      fires: false
+      records:
+        - {process_executable_name: bot-java, service_name: app, body: 'Oct 26 10:00:00 {host} bot-java[1]: error in libcrypto fatal: buffer_get_string: bad string'}
+# 낯선 사용자의 SSH 성공(#428): 알림이 호스트를 구분하지 않고 사용자 이름으로 본 적이 있는지 판정하므로, 합성 사용자 이름은 케이스·실행마다 유일해야 한다.
+# 검증 스트림은 실행 사이에 비워지지 않아 `user_name: '{host}'`(가짜 호스트 이름 = 케이스 호스트 + 실행 ID)로 둔다.
+# 이전 성공 기록은 수집기 지연 한도(5시간) 안에서만 넣을 수 있어 1시간 전(ts -3600)으로 둔다. 5일 전 경계는 단위 테스트가 본다.
+infra-ssh-login-new-user:
+  cases:
+    - name: 이전 성공 기록이 없는 사용자의 첫 로그인
+      host: verify-newuser-first
+      fires: true
+      records:
+        - {event_action: ssh_login, event_outcome: success, user_name: '{host}', source_address: 203.0.113.31}
+    - name: 이전에 성공한 적 있는 사용자는 울리지 않는다
+      host: verify-newuser-seen
+      fires: false
+      records:
+        - {ts: -3600, event_action: ssh_login, event_outcome: success, user_name: '{host}', source_address: 203.0.113.32}
+        - {event_action: ssh_login, event_outcome: success, user_name: '{host}', source_address: 203.0.113.32}
+    - name: 이전에는 실패만 있었던 사용자는 본 적 없는 사용자와 같다
+      host: verify-newuser-failed-before
+      fires: true
+      records:
+        - {ts: -3600, event_action: ssh_login, event_outcome: failure, user_name: '{host}', source_address: 203.0.113.33}
+        - {event_action: ssh_login, event_outcome: success, user_name: '{host}', source_address: 203.0.113.33}
+    - name: 로그인 실패만 있는 사용자는 대상이 아니다
+      host: verify-newuser-failure-only
+      fires: false
+      records:
+        - {event_action: ssh_login, event_outcome: failure, user_name: '{host}', source_address: 203.0.113.34}
 infra-root-crontab-change:
   cases:
     - name: crontab -e로 root crontab을 저장(REPLACE)

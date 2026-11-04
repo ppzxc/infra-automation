@@ -8,6 +8,7 @@ import importlib.util
 import re
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 import yaml
@@ -42,6 +43,7 @@ EXPECTED_ALERTS = {
     "infra-time-offset-exceeded", "infra-time-unsynced", "infra-time-sync-unavailable",   # 시각 동기(#336)
     "infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
     "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
+    "infra-sshd-fatal-error", "infra-ssh-login-new-user",   # sshd 치명 오류·낯선 사용자 SSH 성공(#428)
 }
 
 PROMQL_ALERTS = {
@@ -129,6 +131,8 @@ def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
     db = sqlite3.connect(":memory:")
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
     db.create_function("date_format", 3, _date_format)
+    db.create_function("now", 0, time.time)   # OpenObserve의 now()/to_unixtime(): 초 단위 현재 시각(to_unixtime은 그대로 돌려준다)
+    db.create_function("to_unixtime", 1, lambda value: value)
     records = [dict({"_timestamp": 1_792_767_302_000_000}, **r) for r in records]   # OpenObserve stamps every record on ingest
     columns = sorted({k for r in records for k in r})
     db.execute('CREATE TABLE "%s" (%s)' % (stream, ", ".join(f'"{c}"' for c in columns)))
