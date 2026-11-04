@@ -211,6 +211,15 @@ o2c_ssh_new_user_lookback_days: 5
 o2c_ssh_new_user_window_minutes: 10
 o2c_ssh_new_user_frequency_minutes: 5
 
+# /var/log 삭제·자르기 알림(infra-var-log-delete, Spec #433 / Ticket-5, #431): 로그인 사용자의 기록만 대상이다(규칙이 auid>=1000·auid!=unset으로 걸러 logrotate·서비스는 기록에 없고,
+# 알림도 auid 4294967295 줄을 한 번 더 뺀다). 아래 실행 파일(절대 경로, 전체 일치)이 낸 기록은 뺀다. 로그인 사용자가 손으로 돌리는 logrotate가 기본이다.
+# 규칙 적재 뒤 1주 동안 키별 증가량과 이 알림이 울리는 실행 파일을 보고(Ticket-9, #436) 정상 작업이면 이 목록에 더한다. `_`·공백·따옴표·`%`가 든 경로는 받지 않는다.
+# 위험: 제외는 실행 파일 경로(exe)만 본다. 로그인 사용자가 `logrotate -f /tmp/내_설정.conf`로 로그를 지워도 exe가 /usr/sbin/logrotate라 이 알림이 울리지 않는다.
+# 기본 제외 근거(재평가): auid가 없는 시스템 logrotate(cron·timer)는 규칙과 알림이 이미 거르므로 기본 제외는 "사람이 손으로 돌린 logrotate"만 덜어 준다.
+# 그 소음은 드물고 위 우회가 더 큰 구멍이라 비우는 쪽이 안전하나, 사람이 돌린 logrotate의 알림 피로가 실측으로 확인되기 전까지 기본값은 유지한다. 1주 관찰(#436) 뒤 비울지 정한다.
+o2c_var_log_excluded_exes:
+  - /usr/sbin/logrotate
+
 # 보안 서비스 중지 State Alert(infra-security-service-stopped, Spec #433 / Ticket-3, #429): 감사 로그 SERVICE_STOP·SERVICE_START의 (호스트, unit)별 마지막 시각을 비교해
 # 마지막 중지가 시작보다 늦고 그 중지가 grace(분)보다 오래됐으면 그 행이 P1이다. 유예는 알림 pending(쿼리 전체가 grace 동안 비지 않아야 함)이 아니라 SQL이 행마다
 # 판정한다: pending이면 호스트를 순차로 재부팅할 때 다른 호스트의 중지가 겹쳐 방금 멈춘 호스트까지 울리고, 이미 울리는 행이 다른 호스트의 진짜 중지를 가린다.
@@ -759,6 +768,55 @@ o2c_alerts:
     period: "{{ (o2c_ssh_new_user_lookback_days | int) * 1440 + (o2c_ssh_new_user_window_minutes | int) }}"
     frequency: "{{ o2c_ssh_new_user_frequency_minutes }}"
     silence: "{{ o2c_ssh_new_user_window_minutes }}"
+  # --- /var/log 삭제·자르기, 커널 모듈 적재·제거 (Spec #433 / Ticket-5, #431) --- 규칙: roles/security/templates/audit.rules.j2 6.(키 var_log_delete·kernel_module).
+  # 규칙은 RHEL 계열 적재 버그(#424)가 고쳐진 호스트에서만 기록을 만든다. 기록이 없으면 이 알림은 조용하다(정상과 구별되지 않으므로 규칙 적재는 `auditctl -l`로 따로 확인한다).
+  - name: infra-var-log-delete
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "로그인 사용자가 /var/log 아래 파일을 지우거나 자름"
+    what: "로그인한 사용자(auid 1000 이상)가 /var/log 아래 파일을 삭제·이름 변경·자르기(truncate, `>` 리다이렉트)했습니다. logrotate·서비스의 회전은 로그인 사용자가 아니라 해당하지 않습니다."
+    why: "로그 파일을 지우거나 비우는 것은 침입 흔적을 없애는 전형적인 방법입니다. 사고 조사와 증적에 필요한 기록이 사라질 수 있어 한 건도 조치 대상입니다. 정상 정리 작업도 같은 기록을 남기므로 작업자와 대조해야 합니다."
+    action: "① 행의 실행 도구와 작업자(AUID)를 작업 일정·Semaphore 작업 이력과 대조 ② 계획에 없던 작업이면 서버에서 `sudo ausearch -k var_log_delete -i`로 대상 파일(PATH 기록)을 확인하고 그 로그의 백업·원격 수집본(OpenObserve)과 비교 ③ 침해가 의심되면 계정 잠금·세션 종료 후 보안 담당 보고"
+    runbook: "{{ o2c_runbook_base }}#var-log-delete"
+    row_template: '• {host_label}: {actor}의 {tool} {changes}건 · {event_time}'
+    description: "auditd 키 var_log_delete SYSCALL 기록(로그인 사용자의 /var/log 하위 삭제·이름 변경·자르기, 성공한 것만). auid 4294967295(로그인 없음)와 제외 실행 파일(o2c_var_log_excluded_exes)은 뺀다 (Event Alert, 재통지 5분)"
+    stream: security_logs
+    sql: >-
+      SELECT host_name,
+      CASE WHEN body LIKE '% AUID="%' THEN substr(regexp_replace(body, '^.* AUID="([^"]*)".*$', '\1'), 1, 32) WHEN body LIKE '% auid=%' THEN 'auid ' || substr(regexp_replace(body, '^.* auid=([0-9]+) .*$', '\1'), 1, 20) ELSE '알 수 없음' END AS actor,
+      CASE WHEN body LIKE '% comm="%' THEN substr(regexp_replace(body, '^.* comm="([^"]*)".*$', '\1'), 1, 40) ELSE '알 수 없음' END AS tool,
+      count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
+      WHERE service_name = 'audit' AND body LIKE 'type=SYSCALL %' AND body LIKE '% key="var_log_delete"%' AND body LIKE '% success=yes %'
+      AND body NOT LIKE '% auid=4294967295 %'{{ o2c_var_log_excluded_exes | o2c_exe_exclusion }}
+      GROUP BY host_name, actor, tool
+      ORDER BY changes DESC
+    period: 5
+    frequency: 1
+    silence: 5
+  - name: infra-kernel-module
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "로그인 사용자가 커널 모듈을 적재하거나 제거함"
+    what: "로그인한 사용자(auid 1000 이상)가 커널 모듈을 적재(init_module·finit_module)하거나 제거(delete_module)했습니다."
+    why: "루트킷은 커널 모듈로 적재되어 프로세스·파일·연결을 숨깁니다. 평소 운영에서 로그인 사용자가 모듈을 직접 넣고 빼는 일은 드뭅니다(부팅·하드웨어 인식 때의 자동 적재는 로그인 사용자가 아니라 해당하지 않습니다). 드라이버 설치·네트워크 도구 작업은 같은 기록을 남기므로 작업자와 대조해야 합니다."
+    action: "① 행의 실행 도구와 작업자(AUID)를 작업 일정과 대조 ② 계획에 없던 적재면 서버에서 `sudo ausearch -k kernel_module -i`로 시각·호출을 보고 `lsmod`와 `modinfo <모듈>`로 모듈 출처와 서명을 확인 ③ 출처 불명이면 격리(네트워크 차단)하고 보안 담당 보고"
+    runbook: "{{ o2c_runbook_base }}#kernel-module"
+    row_template: '• {host_label}: {actor}의 {tool} 커널 모듈 {action} {changes}건 · {event_time}'
+    description: "auditd 키 kernel_module SYSCALL 기록(로그인 사용자의 커널 모듈 적재·제거, 성공한 것만). auid 4294967295(로그인 없음)는 뺀다 (Event Alert, 재통지 5분)"
+    stream: security_logs
+    sql: >-
+      SELECT host_name,
+      CASE WHEN body LIKE '% AUID="%' THEN substr(regexp_replace(body, '^.* AUID="([^"]*)".*$', '\1'), 1, 32) WHEN body LIKE '% auid=%' THEN 'auid ' || substr(regexp_replace(body, '^.* auid=([0-9]+) .*$', '\1'), 1, 20) ELSE '알 수 없음' END AS actor,
+      CASE WHEN body LIKE '% comm="%' THEN substr(regexp_replace(body, '^.* comm="([^"]*)".*$', '\1'), 1, 40) ELSE '알 수 없음' END AS tool,
+      CASE WHEN body LIKE '% SYSCALL=delete_module%' THEN '제거' WHEN body LIKE '% SYSCALL=init_module%' OR body LIKE '% SYSCALL=finit_module%' THEN '적재' ELSE '적재·제거' END AS action,
+      count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
+      WHERE service_name = 'audit' AND body LIKE 'type=SYSCALL %' AND body LIKE '% key="kernel_module"%' AND body LIKE '% success=yes %'
+      AND body NOT LIKE '% auid=4294967295 %'
+      GROUP BY host_name, actor, tool, action
+      ORDER BY changes DESC
+    period: 5
+    frequency: 1
+    silence: 5
   # --- 남은 보안 로그 알림 (Spec #322 / Ticket-8, #330) ---------------------------------------------------------------
   # 이미 수집되는 로그로 잡을 수 있는 신호만 알림으로 만들었다. 잡을 수 없는 신호(authorized_keys 변경, SSL VPN 실패 급증)와 그 신호에
   # 필요한 수집은 docs/openobserve_config.md에 기록한다.

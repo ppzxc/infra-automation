@@ -29,7 +29,8 @@ def test_audit_rules_do_not_trace_every_execve(security_rendered):
     for case, out in security_rendered.items():
         lines = rule_lines(out["audit"])  # 주석은 제외
         assert not any("execve" in ln for ln in lines), case
-        assert not any(ln.startswith("-a ") for ln in lines), case  # syscall 규칙 전수 추적 없음
+        # syscall 규칙은 로그인 사용자의 /var/log 삭제·커널 모듈만이다(아래 절). 그 밖의 syscall을 전수로 추적하지 않는다.
+        assert {_rule(ln)["key"] for ln in lines if ln.startswith("-a ")} <= set(ALERT_SYSCALL_KEYS), case
 
 
 def test_audit_rules_keep_meaningful_events(security_rendered):
@@ -42,7 +43,7 @@ def test_audit_rules_keep_meaningful_events(security_rendered):
 
 
 def test_audit_rules_are_small(security_rendered):
-    assert len(rule_lines(security_rendered["default"]["audit"])) < 30
+    assert len(rule_lines(security_rendered["default"]["audit"])) < 50
 
 
 def test_audit_rules_have_no_secret_watch_without_configured_paths(security_rendered):
@@ -59,6 +60,126 @@ def test_audit_rules_watch_configured_secret_and_container_paths(security_render
 def test_audit_rules_do_not_lock_the_rule_set(security_rendered):
     # -e 2(잠금)는 규칙 변경에 재부팅이 필요해 쓰지 않는다.
     assert not any(ln.startswith("-e ") for ln in rule_lines(security_rendered["default"]["audit"]))
+
+
+# --- syscall 규칙: /var/log 삭제·자르기와 커널 모듈 (Spec #433 / Ticket-5, #431) -------------------------------------------
+
+ALERT_SYSCALL_KEYS = ("var_log_delete", "kernel_module")   # 알림이 읽는 syscall 규칙 키. 증적 전용 규칙(#435)은 이 목록에 넣지 않는다
+
+
+def _rule(line):
+    """`-a always,exit -F arch=b64 -S a,b -F x=y -k key` -> {arch, syscalls, fields, key}."""
+    tokens = line.split()
+    assert tokens[:2] == ["-a", "always,exit"], line
+    out = {"arch": None, "syscalls": set(), "fields": [], "key": None}
+    it = iter(tokens[2:])
+    for flag in it:
+        value = next(it)
+        if flag == "-S":
+            out["syscalls"] |= set(value.split(","))
+        elif flag == "-F" and value.startswith("arch="):
+            out["arch"] = value.removeprefix("arch=")
+        elif flag == "-F":
+            out["fields"].append(value)
+        elif flag == "-k":
+            out["key"] = value
+        else:
+            raise AssertionError(line)
+    return out
+
+
+def _syscall_rules(text, key):
+    return [_rule(ln) for ln in rule_lines(text) if ln.startswith("-a ") and f" -k {key}" in ln]
+
+
+AUID_UNSET_FORMS = ("auid!=unset", "auid!=4294967295")   # audit.rules(7): 둘은 같은 뜻이다(EL6·7 auditd는 숫자만 안전)
+
+
+def _is_login_user_only(rule):
+    return "auid>=1000" in rule["fields"] and any(f in rule["fields"] for f in AUID_UNSET_FORMS)
+
+
+def _syscalls_by_arch(rules):
+    out = {}
+    for r in rules:
+        out.setdefault(r["arch"], set()).update(r["syscalls"])
+    return out
+
+
+def test_kernel_module_rules_catch_load_and_unload_by_login_users_on_both_arches(security_rendered):
+    for case, out in security_rendered.items():
+        rules = _syscall_rules(out["audit"], "kernel_module")
+        assert rules, case
+        assert all(_is_login_user_only(r) for r in rules), case
+        expected = {"init_module", "delete_module"} | (set() if case == "el6" else {"finit_module"})
+        assert _syscalls_by_arch(rules) == {"b64": expected, "b32": expected}, case
+
+
+def test_el6_rules_leave_out_finit_module_because_the_el6_kernel_has_no_such_syscall_and_auditctl_would_reject_the_whole_rule(security_rendered):
+    for case, out in security_rendered.items():
+        assert any("finit_module" in ln for ln in rule_lines(out["audit"])) == (case != "el6"), case
+
+
+def test_var_log_rules_catch_delete_rename_truncate_and_o_trunc_opens_under_var_log_for_login_users_on_both_arches(security_rendered):
+    for case, out in security_rendered.items():
+        rules = _syscall_rules(out["audit"], "var_log_delete")
+        assert rules and all(_is_login_user_only(r) for r in rules), case
+        assert all("dir=/var/log" in r["fields"] for r in rules), case          # 경로 필터는 디렉터리 하위 전체
+        by_arch = _syscalls_by_arch(rules)
+        for arch in ("b64", "b32"):
+            assert {"unlink", "unlinkat", "rename", "renameat", "truncate", "ftruncate", "creat", "open", "openat"} <= by_arch[arch], arch
+        assert set(by_arch) == {"b64", "b32"}, case
+
+
+def test_the_o_trunc_open_rules_only_match_opens_with_the_truncate_flag(security_rendered):
+    """`open`은 flags가 두 번째 인자(a1), `openat`은 세 번째(a2)다. O_TRUNC = 0x200이고, 이 비트 없는 열기(읽기·덧붙이기)는 걸리지 않는다."""
+    rules = _syscall_rules(security_rendered["default"]["audit"], "var_log_delete")
+    for arch in ("b64", "b32"):
+        opens = [r for r in rules if r["arch"] == arch and r["syscalls"] & {"open", "openat"}]
+        assert opens, arch
+        for r in opens:
+            assert not (r["syscalls"] & {"unlink", "unlinkat", "rename", "renameat", "truncate", "ftruncate", "creat"}), r
+        flag_field = {"open": "a1&0x200", "openat": "a2&0x200"}
+        assert {tuple(sorted(r["syscalls"])): [f for f in r["fields"] if f[:1] == "a" and f[2:3] == "&"] for r in opens} == \
+            {("open",): [flag_field["open"]], ("openat",): [flag_field["openat"]]}, arch
+
+
+def test_the_syscall_rules_are_independent_of_host_variables_and_never_log_everything(security_rendered):
+    default = {k: _syscall_rules(security_rendered["default"]["audit"], k) for k in ALERT_SYSCALL_KEYS}
+    for case, out in security_rendered.items():
+        syscall_lines = [ln for ln in rule_lines(out["audit"]) if ln.startswith("-a ")]
+        assert _syscall_rules(out["audit"], "var_log_delete") == default["var_log_delete"], case
+        if case != "el6":                             # EL6만 finit_module이 빠진다(위 테스트)
+            assert _syscall_rules(out["audit"], "kernel_module") == default["kernel_module"], case
+        for ln in syscall_lines:                      # 알림 키 규칙은 로그인 사용자 필터를 갖는다(사용자 구분 없는 전수 기록 금지). 증적 규칙의 필터는 그 티켓이 정한다
+            if _rule(ln)["key"] in ALERT_SYSCALL_KEYS:
+                assert _is_login_user_only(_rule(ln)), ln
+
+
+def test_syscall_rule_keys_are_distinct_from_the_watch_keys_so_alerts_and_evidence_can_tell_them_apart(security_rendered):
+    lines = rule_lines(security_rendered["default"]["audit"])
+    watch_keys = {ln.split(" -k ")[1] for ln in lines if ln.startswith("-w ")}
+    syscall_keys = {_rule(ln)["key"] for ln in lines if ln.startswith("-a ")}
+    assert syscall_keys == set(ALERT_SYSCALL_KEYS) and not syscall_keys & watch_keys
+
+
+def test_var_log_syscall_rules_come_before_every_other_rule_that_matches_a_file_under_var_log(security_rendered):
+    """커널은 첫 번째로 맞는 규칙의 키만 기록한다(audit.rules(7), first match wins). `-w /var/log/sudo.log` 감시가 var_log_delete보다 앞이면
+    로그인 사용자가 sudo.log를 지우거나 자른 기록이 `sudo_logs` 키로만 남아 P1 알림이 울리지 않는다(`sudo_logs`는 알림 대상이 아니다).
+    그래서 /var/log 경로를 다루는 다른 규칙은 모두 var_log_delete 규칙 뒤에 있어야 한다. 증적 전용 규칙(#435)도 마찬가지다."""
+    for case, out in security_rendered.items():
+        lines = rule_lines(out["audit"])
+        first = next(i for i, ln in enumerate(lines) if ln.endswith("-k var_log_delete"))
+        others = [i for i, ln in enumerate(lines) if "/var/log" in ln and not ln.endswith("-k var_log_delete")]
+        assert others and all(i > first for i in others), case          # sudo.log 감시는 남아 있되 뒤에 있다
+        assert any(lines[i].endswith("-k sudo_logs") for i in others), case
+
+
+def test_syscall_rules_come_after_the_reset_and_the_failure_mode_and_never_lock(security_rendered):
+    lines = rule_lines(security_rendered["default"]["audit"])
+    assert lines[0] == "-D"
+    first_syscall = next(i for i, ln in enumerate(lines) if ln.startswith("-a "))
+    assert all(ln.startswith(("-b ", "-f ")) for ln in lines[1:3]) and first_syscall > 2
 
 
 # --- fail2ban banaction ------------------------------------------------------------------------

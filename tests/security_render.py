@@ -33,6 +33,8 @@ CASES = {
         "audit_watch_paths": ["/srv/example/app.secrets.env", "/srv/example/other.key"],
         "audit_container_config_paths": ["/etc/docker/", "/srv/example/compose/"],
     },
+    # #431: EL6 커널(2.6.32)에는 finit_module이 없어 auditctl이 이름을 몰라 규칙 전체가 실패한다
+    "el6": {"ansible_os_family": "RedHat", "ansible_distribution_major_version": "6"},
     # #371: 가짜 문서용 주소(RFC 5737, RFC 3849)만 쓴다.
     "ssh_source_two": {"ssh_source_restriction_allowed_sources": ["192.0.2.0/24", "198.51.100.7/32"]},
     "ssh_source_v6": {"ssh_source_restriction_allowed_sources": ["2001:db8::/32"]},
