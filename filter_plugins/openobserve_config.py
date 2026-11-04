@@ -1030,6 +1030,145 @@ def o2c_like_label(groups, column):
     return 'CASE %s ELSE \'기타\' END' % whens
 
 
+# --- Audit Watch Key 알림 (Spec #419) ----------------------------------------------------------------------------------------
+# `auth_config`·`container_config`·`secret_access` 키의 SYSCALL 행이 알림 대상이다. SYSCALL 행에는 파일 경로가 없고(같은 시리얼의
+# `type=PATH` 행에 있다) 그래서 SQL은 PATH 행과 LEFT JOIN한다: 경로 행이 빠져도(수집 지연·누락) 알림은 사라지지 않고 경로만 불명이 된다.
+# 정상 변경(프로비저닝) 구분은 `o2c_audit_provisioning_cond` 한 조각이고, P2 알림은 `AND NOT <조각>`, P3 알림은 `AND <조각>`으로 쓴다.
+_AUDIT_KEY_RE = re.compile(r'^[a-z][a-z0-9_]*$')
+_AUDIT_EXE_RE = re.compile(r'^/[A-Za-z0-9._/%-]+$')
+_AUDIT_UNSET_AUID = "body LIKE '% auid=4294967295 %'"
+_AUDIT_EVID = r"'^type=%s msg=audit\(([0-9.]+:[0-9]+)\).*$'"
+_AUDIT_UNKNOWN_PATH = '(경로 불명)'
+_AUDIT_UNKNOWN = '알 수 없음'
+_AUDIT_ACTOR_LEN, _AUDIT_TOOL_LEN, _AUDIT_PATH_LEN = 16, 14, 40
+_AUDIT_LABELS = (('auth_config', '인증설정'), ('container_config', '컨테이너'), ('secret_access', '비밀파일'))   # P3 행의 키 표시. 모르는 키는 앞 8자
+
+
+def o2c_valid_exe_patterns(patterns):
+    """True when every item is an absolute executable path (optionally with ``%`` LIKE wildcards) made of safe characters."""
+    return isinstance(patterns, (list, tuple)) and all(isinstance(p, str) and _AUDIT_EXE_RE.match(p) for p in patterns)
+
+
+_LOGIN_NAME_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9._-]{0,31}\$?$')
+
+
+def o2c_valid_login_names(names):
+    """True when every item is a login name as auditd records it (AUID): letters (either case), digits, ``.``, ``_``, ``-``, optional trailing ``$``, at most 32."""
+    return isinstance(names, (list, tuple)) and all(isinstance(n, str) and _LOGIN_NAME_RE.match(n) for n in names)
+
+
+def _like(pattern):
+    """``body LIKE '<pattern>' ESCAPE '\\'`` with ``_`` literal (it would match any one character); ``%`` stays the wildcard the pattern asks for."""
+    return "body LIKE '%s' ESCAPE '\\'" % pattern.replace('_', '\\_')
+
+
+def _audit_min_events(cfg):
+    value = cfg.get('min_events', 1)
+    if isinstance(value, bool) or not re.match(r'^[1-9][0-9]*$', str(value)):
+        raise ValueError('Audit Watch Key 알림 변수 min_events 는 양의 정수여야 한다')
+    return int(value)
+
+
+def _audit_check(cfg):
+    for name in ('package_managers', 'account_tools', 'secret_metadata_syscalls'):
+        if not o2c_valid_group_names(cfg.get(name, [])):
+            raise ValueError('Audit Watch Key 알림 변수 %s 의 형식이 올바르지 않다' % name)
+    for name in ('secret_excluded_users', 'provisioning_accounts'):
+        if not o2c_valid_login_names(cfg.get(name, [])):
+            raise ValueError('Audit Watch Key 알림 변수 %s 의 형식이 올바르지 않다' % name)
+    for name in ('secret_service_exes', 'secret_operator_exes'):
+        if not o2c_valid_exe_patterns(cfg.get(name, [])):
+            raise ValueError('Audit Watch Key 알림 변수 %s 의 형식이 올바르지 않다' % name)
+    _audit_min_events(cfg)
+    keys = cfg.get('provisioning_keys', [])
+    if not keys or not all(isinstance(k, str) and _AUDIT_KEY_RE.match(k) for k in keys):
+        raise ValueError('Audit Watch Key 알림 변수 provisioning_keys 의 형식이 올바르지 않다(1개 이상, 소문자·숫자·_)')
+
+
+def _any(conds):
+    return '(%s)' % ' OR '.join(conds)
+
+
+def o2c_audit_provisioning_cond(cfg):
+    """SQL condition (on a SYSCALL row's ``body``) for "a non-interactive change by a login user" - the only trace Ansible's become path leaves.
+
+    Ansible runs each module through ``sudo`` with no terminal (``tty=(none)``) while the audit login id (``auid``) stays the connecting
+    account. Nothing in an audit row names Ansible itself (with pipelining the process title is just the interpreter), so this is a
+    signature, not an identity: it cannot be told apart from another non-interactive command by the same login. Rows that match are
+    therefore NOT dropped; the P2 alerts leave them to the P3 provisioning alert. ``provisioning_accounts`` narrows the signature to those logins.
+    """
+    _audit_check(cfg)
+    cond = "body LIKE '%% tty=(none) %%' AND NOT %s" % _AUDIT_UNSET_AUID
+    accounts = cfg.get('provisioning_accounts') or []
+    if accounts:
+        cond += ' AND ' + _any([_like('%% AUID="%s"%%' % a) for a in accounts])
+    return '(%s)' % cond
+
+
+def _audit_key_cond(key, cfg):
+    """The key's own condition: the key itself minus what another alert or a known service already covers."""
+    cond = _like('%% key="%s"%%' % key)
+    skip = []
+    if key == 'auth_config':   # 패키지 관리자·계정 관리 도구가 만든 변경은 패키지·계정 변경 기록이 맡는다(comm은 15자로 잘린다)
+        skip += [_like('%% comm="%s"%%' % t) for t in list(cfg.get('package_managers') or []) + list(cfg.get('account_tools') or [])]
+    elif key == 'secret_access':
+        skip += [_like('%% SYSCALL=%s %%' % c) for c in cfg.get('secret_metadata_syscalls') or []]   # 파일을 열지 않는 속성 조회(ls·stat)
+        skip += ['(%s AND %s)' % (_like('%% exe="%s"%%' % e), _AUDIT_UNSET_AUID) for e in cfg.get('secret_service_exes') or []]   # 로그인 없는 서비스
+        skip += [_like('%% exe="%s"%%' % e) for e in cfg.get('secret_operator_exes') or []]
+        skip += [_like('%% AUID="%s"%%' % u) for u in cfg.get('secret_excluded_users') or []]
+    return '(%s AND NOT %s)' % (cond, _any(skip)) if skip else '(%s)' % cond
+
+
+def _audit_sql(watched, where, cfg, event_time, host_label):
+    """The alert SQL: SYSCALL rows (``where``) LEFT JOIN the PATH and CWD rows of the same event; one row per host, user, executable, path (and key).
+
+    The path comes from the event's PATH row (a relative name is joined to the CWD row's directory). Text columns are cut to what 30 rows need to
+    stay under the 5000 character notification limit: user 16, executable (base name) 14, path 40 (the tail is kept: the file name matters more
+    than the directory), key label 8.
+    """
+    _audit_check(cfg)
+    syscall = ("SELECT host_name, _timestamp, body, substr(regexp_replace(body, %s, '\\1'), 1, 40) AS evid FROM \"security_logs\" "
+               "WHERE service_name = 'audit' AND body LIKE 'type=SYSCALL %%' AND %s") % (_AUDIT_EVID % 'SYSCALL', where)
+    names = ("SELECT host_name, substr(regexp_replace(body, %s, '\\1'), 1, 40) AS evid, substr(regexp_replace(body, '^.* name=\"([^\"]*)\".*$', '\\1'), 1, 200) AS name "
+             "FROM \"security_logs\" WHERE service_name = 'audit' AND body LIKE 'type=PATH %%' AND body LIKE '%% name=\"%%' "
+             "AND body NOT LIKE '%% nametype=PARENT%%'") % (_AUDIT_EVID % 'PATH')
+    cwds = ("SELECT host_name, substr(regexp_replace(body, %s, '\\1'), 1, 40) AS evid, substr(regexp_replace(body, '^.* cwd=\"([^\"]*)\".*$', '\\1'), 1, 200) AS cwd "
+            "FROM \"security_logs\" WHERE service_name = 'audit' AND body LIKE 'type=CWD %%' AND body LIKE '%% cwd=\"%%'") % (_AUDIT_EVID % 'CWD')
+    joined = ("SELECT s.host_name AS host_name, s._timestamp AS _timestamp, s.evid AS evid, %s AS watch_key, "
+              "CASE WHEN s.body LIKE '%% AUID=\"%%' THEN substr(regexp_replace(s.body, '^.* AUID=\"([^\"]*)\".*$', '\\1'), 1, %d) ELSE '%s' END AS login_user, "
+              "CASE WHEN s.body LIKE '%% exe=\"/%%' THEN substr(regexp_replace(s.body, '^.* exe=\"[^\"]*/([^\"/]*)\".*$', '\\1'), 1, %d) ELSE '%s' END AS program, "
+              "CASE WHEN p.name IS NULL THEN '%s' WHEN p.name LIKE '/%%' OR c.cwd IS NULL THEN p.name ELSE c.cwd || '/' || p.name END AS full_path "
+              "FROM (%s) s LEFT JOIN (%s) p ON s.host_name = p.host_name AND s.evid = p.evid "
+              "LEFT JOIN (%s) c ON s.host_name = c.host_name AND s.evid = c.evid"
+              ) % (watched, _AUDIT_ACTOR_LEN, _AUDIT_UNKNOWN, _AUDIT_TOOL_LEN, _AUDIT_UNKNOWN, _AUDIT_UNKNOWN_PATH, syscall, names, cwds)
+    inner = ("SELECT host_name, _timestamp, evid, watch_key, login_user, program, "
+             "CASE WHEN length(full_path) > %d THEN '…' || substr(full_path, length(full_path) - %d) ELSE full_path END AS file_path FROM (%s)"
+             ) % (_AUDIT_PATH_LEN, _AUDIT_PATH_LEN - 2, joined)
+    return ("SELECT host_name, watch_key, login_user, program, file_path, count(DISTINCT evid) AS events, %s, %s FROM (%s) "
+            "GROUP BY host_name, watch_key, login_user, program, file_path HAVING count(DISTINCT evid) >= %d ORDER BY events DESC"
+            ) % (event_time, host_label, inner, _audit_min_events(cfg))
+
+
+def o2c_audit_watch_sql(key, cfg, event_time, host_label):
+    """P2 alert SQL for one watch key: the key's rows that do NOT carry the provisioning signature."""
+    if not _AUDIT_KEY_RE.match(key):
+        raise ValueError('감시 키 이름 형식이 올바르지 않다')
+    where = _audit_key_cond(key, cfg)
+    if key in cfg['provisioning_keys']:   # 서명 행을 P3가 보는 키만 P2에서 뺀다. 목록 밖 키의 서명 행을 빼면 어느 알림도 못 본다
+        where += ' AND NOT %s' % o2c_audit_provisioning_cond(cfg)
+    return _audit_sql("'%s'" % key, where, cfg, event_time, host_label)
+
+
+def o2c_audit_provisioning_sql(cfg, event_time, host_label):
+    """P3 alert SQL: the rows of every key in ``provisioning_keys`` that DO carry the provisioning signature (shown, not dropped)."""
+    _audit_check(cfg)
+    keys = cfg['provisioning_keys']
+    where = '%s AND %s' % (_any([_audit_key_cond(k, cfg) for k in keys]), o2c_audit_provisioning_cond(cfg))
+    watched = 'CASE %s ELSE substr(regexp_replace(s.body, \'^.* key="([^"]*)".*$\', \'\\1\'), 1, 8) END' % ' '.join(
+        "WHEN %s THEN '%s'" % (_like('%% key="%s"%%' % kv[0]).replace('body LIKE', 's.body LIKE', 1), kv[1]) for kv in _AUDIT_LABELS)
+    return _audit_sql(watched, where, cfg, event_time, host_label)
+
+
 def o2c_enabled_alerts(alerts):
     """The alerts that are created: an alert whose ``enabled`` renders false (e.g. the uplink alert with an empty port list) is left out."""
     return [a for a in alerts or [] if str(a.get('enabled', True)).strip().lower() not in ('false', '0', '')]
@@ -1056,4 +1195,6 @@ class FilterModule(object):
                 'o2c_fortigate_match': o2c_fortigate_match,
                 'o2c_valid_like_groups': o2c_valid_like_groups, 'o2c_valid_group_names': o2c_valid_group_names,
                 'o2c_valid_exe_paths': o2c_valid_exe_paths, 'o2c_exe_exclusion': o2c_exe_exclusion,
-                'o2c_sudo_risky_groups': o2c_sudo_risky_groups, 'o2c_like_any': o2c_like_any, 'o2c_like_label': o2c_like_label}
+                'o2c_sudo_risky_groups': o2c_sudo_risky_groups, 'o2c_like_any': o2c_like_any, 'o2c_like_label': o2c_like_label,
+                'o2c_valid_exe_patterns': o2c_valid_exe_patterns, 'o2c_valid_login_names': o2c_valid_login_names, 'o2c_audit_provisioning_cond': o2c_audit_provisioning_cond,
+                'o2c_audit_watch_sql': o2c_audit_watch_sql, 'o2c_audit_provisioning_sql': o2c_audit_provisioning_sql}

@@ -46,6 +46,8 @@ EXPECTED_ALERTS = {
     "infra-sshd-fatal-error", "infra-ssh-login-new-user",   # sshd 치명 오류·낯선 사용자 SSH 성공(#428)
     "infra-var-log-delete", "infra-kernel-module",   # /var/log 삭제·커널 모듈 syscall 규칙 알림(#431)
     "infra-security-service-stopped",   # 보안 서비스 중지(Spec #433 / Ticket-3, #429)
+    "infra-audit-auth-config-change", "infra-audit-container-config-change", "infra-audit-secret-access",   # Audit Watch Key 3개(Spec #419)
+    "infra-audit-watch-provisioning",   # 정상 변경 후보(P3, #419)
 }
 
 PROMQL_ALERTS = {
@@ -204,6 +206,10 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-audit-watch-change": ("P2 경고", 5, 5, 0, 'key="identity"'),                              # 남은 보안 로그 알림(#330)
     "infra-ssh-login-unregistered-source": ("P2 경고", 5, 60, 0, "user_name <> 'root'"),
     "infra-security-service-stopped": ("P1 긴급", 1440, 10, 0, "type=SERVICE_STOP"),   # 보안 서비스 중지(#429): 유예는 행 단위로 SQL이 판정하므로 pending 0. 조회 24시간(통지 지속 정책)
+    "infra-audit-auth-config-change": ("P2 경고", 5, 5, 0, "'auth_config' AS watch_key"),   # Audit Watch Key(#419): 마커는 자기 알림에만 있는 리터럴 열
+    "infra-audit-container-config-change": ("P2 경고", 5, 5, 0, "'container_config' AS watch_key"),
+    "infra-audit-secret-access": ("P2 경고", 5, 5, 0, "'secret_access' AS watch_key"),
+    "infra-audit-watch-provisioning": ("P3 주의", 5, 5, 0, "regexp_replace(s.body, '^.* key="),
     "infra-var-log-delete": ("P1 긴급", 5, 5, 0, 'key="var_log_delete"'),   # syscall 규칙 알림(#431)
     "infra-kernel-module": ("P2 경고", 5, 5, 0, 'key="kernel_module"'),
 }
@@ -261,6 +267,8 @@ LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactiv
                 "action": "적재·제거",   # /var/log·커널 모듈 알림(#431)의 동작: 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
                 "status": "timeout", "tool": "timedatectl", "sync_status": "unsynced", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
+
+LONGEST_TEXT.update({"login_user": "u" * 16, "program": "p" * 14, "file_path": "…" + "f" * 39, "watch_key": "컨테이너"})   # Audit Watch Key 알림(#419): SQL이 자르는 길이
 
 TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
 
