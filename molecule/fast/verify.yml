@@ -46,7 +46,6 @@
       cmd:
         sysctl: [sysctl, vm.swappiness, fs.protected_hardlinks, fs.protected_symlinks, kernel.randomize_va_space]
         timedatectl: [timedatectl, status]
-        auditctl_list: [auditctl, -l]
         getenforce: [getenforce]
         audit_loaded: [auditctl, -l]
         sshd_denied_source: [/usr/sbin/sshd, -T, -C, 'addr=198.51.100.1,user=root,host=probe']
@@ -218,17 +217,17 @@
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
 
-        # 적재 확인(#431): auditctl -l이 이 역할의 규칙(-k identity)을 보여 줄 때만 새 syscall 규칙 키가 적재돼 있어야 한다. 컨테이너처럼 auditctl이
-        # 규칙을 못 읽는 환경(rc != 0)이나 아직 규칙이 안 올라온 환경은 건너뛴다. RHEL 계열은 규칙 적재 버그(#424)가 고쳐져야 이 검사가 의미를 갖는다.
+        # 적재 확인(#431): auditctl -l이 이 역할의 규칙(키 identity)을 보여 줄 때만 새 syscall 규칙 키가 적재돼 있어야 한다. 컨테이너처럼 auditctl이
+        # 규칙을 못 읽는 환경(rc != 0, auditctl -l은 syscall 규칙 키를 -F key=로도 찍으므로 키 이름만 본다)이나 아직 규칙이 안 올라온 환경은 건너뛴다. RHEL 계열의 적재 결함(#424)은 SEC-082·SEC-083과 핸들러가 고치며, 이 검사는 그 뒤에 새 키가 실제로 올라왔는지를 본다.
         - name: "[VERIFY-SEC-012] Verify the syscall audit rules are loaded (auditctl -l)"
           ansible.builtin.assert:
             that:
-              - "'-k var_log_delete' in f.cmd.auditctl_list.stdout"
-              - "'-k kernel_module' in f.cmd.auditctl_list.stdout"
+              - "'var_log_delete' in f.cmd.audit_loaded.stdout"
+              - "'kernel_module' in f.cmd.audit_loaded.stdout"
             fail_msg: "auditctl -l shows this role's rules but not the syscall rules (var_log_delete, kernel_module): rules are not loaded (see #424 on RHEL)."
           when:
-            - f.cmd.auditctl_list.rc == 0
-            - "'-k identity' in f.cmd.auditctl_list.stdout"
+            - f.cmd.audit_loaded.rc == 0
+            - "'identity' in f.cmd.audit_loaded.stdout"
 
         - name: "[VERIFY-SEC-013] Verify auditd service status"
           ansible.builtin.debug:
