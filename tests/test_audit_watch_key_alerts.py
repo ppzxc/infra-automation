@@ -580,3 +580,19 @@ def test_the_account_tool_exclusion_still_applies_only_to_the_account_files(desi
     rows = [*event("identity", exe="/usr/sbin/useradd", path="/etc/passwd", host="verify-tool-identity"),
             *event("ssh_keys", exe="/usr/sbin/useradd", path="/home/a/.ssh/authorized_keys", host="verify-tool-ssh-keys")]
     assert [r["host_name"] for r in _run_alert_on_sqlite(_sql(desired, OLD_WATCH), rows, "security_logs")] == ["verify-tool-ssh-keys"]
+
+
+def test_a_watch_alert_without_the_provisioning_key_list_is_refused_with_a_readable_message():
+    """검증(`_audit_check`)보다 먼저 `cfg['provisioning_keys']`를 읽으면 KeyError가 나 변수 이름을 알 수 없다(라운드 2 리뷰)."""
+    import openobserve_config as o2c
+    for cfg in ({}, {"min_events": 1}, {"provisioning_keys": []}):
+        with pytest.raises(ValueError, match="provisioning_keys"):
+            o2c.o2c_audit_watch_sql("auth_config", cfg, "1", "1")
+    with pytest.raises(ValueError, match="형식"):
+        o2c.o2c_audit_watch_sql("auth_config", {"provisioning_keys": ["Bad Key"]}, "1", "1")
+
+
+def test_the_spec_states_the_path_and_cwd_subqueries_are_not_narrowed_and_why():
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    section = spec.split("**대상 경로는 PATH 행에서 읽는다**", 1)[1].split("\n", 1)[0]
+    assert "PATH 행에는 키가 없" in section and "조회 구간" in section and "evid" in section and "미실시" in section

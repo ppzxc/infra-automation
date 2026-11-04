@@ -173,6 +173,20 @@
           {{ r | to_json }}
       when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
 
+    # Evidence-Only Watch Key 감시 경로(#435) 거르기, 모듈 경로의 SEC-100·SEC-101과 같은 일. 이것이 없으면 템플릿의 기본 목록(wtmp·btmp·utmp·lastlog·localtime)이
+    # 있는지 보지 않고 `-w`로 나가 없는 경로가 규칙 적재를 깰 수 있다. raw 태스크는 --check에서 건너뛴다(ADR-0005).
+    - name: "[SEC-094] Probe which audit_evidence_watch_paths exist (raw, read-only)"
+      ansible.builtin.raw: "{{ audit_evidence_watch_paths | default([]) | map(attribute='path') | list | raw_exists_cmd }}"
+      register: security_audit_evidence_raw
+      changed_when: false
+      failed_when: false
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
+    - name: "[SEC-095] Keep only existing evidence watch paths (raw)"
+      ansible.builtin.set_fact:
+        _audit_evidence_watch_paths_effective: "{{ audit_evidence_watch_paths | default([]) | selectattr('path', 'in', security_audit_evidence_raw.stdout | default('') | raw_exists_found) | list }}"
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
     - name: "[SEC-035] Deploy Auditd security audit rules via write-temp/validate/move (raw)"
       ansible.builtin.raw: >-
         {{ sec012_raw_content | raw_push_cmd(sec012_raw_dest, 'root', 'root', '0600', 'true') }}
@@ -1094,9 +1108,12 @@
 # 규칙 적재(#424). systemd의 auditd 유닛은 RefuseManualStop=yes라 서비스 재시작을 거부한다. 그래서 규칙 파일을 바꿔도 커널의 적재 규칙은
 # 그대로였고 옛 핸들러가 그 실패를 failed_when: false로 가렸다. 이제 핸들러 `Restart auditd`가 `augenrules --load`로 재시작 없이 적재하고,
 # 적재 실패는 플레이 실패로 드러낸다(핸들러는 이 역할이 만든 규칙 파일이 바뀔 때, 또는 아래 SEC-083이 drift를 찾을 때 실행된다).
-# audit 패키지가 없는 호스트(auditctl 없음)만 건너뛴다. 이 역할은 auditd를 설치하지 않는다.
-- name: "[SEC-082] Check whether the audit tools are installed (read-only)"
-  ansible.builtin.shell: command -v auditctl && command -v augenrules
+# audit 패키지가 없는 호스트(auditctl 없음)와, 도구는 있어도 커널 audit을 조회할 수 없는 호스트(`auditctl -s` 실패: 커널 audit 비활성·컨테이너)는
+# 적재 단계를 건너뛴다. 이 역할은 auditd를 설치하지 않는다. 조회할 수 없는 호스트에서 `auditctl -l` 실패가 SEC-083·적재 뒤 확인으로 번져
+# 역할 전체를 실패시키는 것을 막는 사전 확인이다. 조회가 되는 호스트에서 `augenrules --load`가 실패하면 그것은 그대로 플레이 실패다(#424).
+# 한계: `auditctl -s`가 일시적으로 실패한 호스트는 그 실행에서 조용히 건너뛴다(다음 실행이 다시 확인한다).
+- name: "[SEC-082] Check whether the audit tools are installed and the kernel audit answers (read-only)"
+  ansible.builtin.shell: command -v auditctl && command -v augenrules && auditctl -s >/dev/null 2>&1
   args:
     executable: /bin/sh
   register: security_audit_tools_probe
@@ -1121,7 +1138,12 @@
   vars:
     audit_rules_declared: "{{ lookup('ansible.builtin.template', 'audit.rules.j2') }}"
   register: security_audit_loaded_probe
-  changed_when: (security_audit_loaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared)) | length > 0
+  # `auditctl -l`이 실패하면(rc != 0) 적재 상태를 알 수 없다: drift로 보지 않고(재적재하지 않고) 실패로도 만들지 않는다. SEC-082가 `auditctl -s`로 조회 가능한
+  # 호스트만 통과시키므로 여기서의 실패는 드물고, 이 실행에서만 건너뛴다. 규칙 파일이 바뀌어 적재한 경우의 확인 실패는 핸들러가 실패로 드러낸다.
+  failed_when: false
+  changed_when:
+    - security_audit_loaded_probe.rc | default(1) == 0
+    - (security_audit_loaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared)) | length > 0
   check_mode: false
   notify: Restart auditd
   when:
