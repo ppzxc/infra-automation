@@ -326,7 +326,6 @@ def test_auditd_rotation_is_redhat_non_raw_and_tolerates_only_a_missing_package(
     assert any("does not exist" in w or "Destination" in w for w in task["failed_when"])
 
 
-
 # --- Evidence-Only Watch Key: 알림 없이 증적으로만 남는 규칙 (Spec #433 / Ticket-8, #435) -------------------------------------------
 # 규칙·키 설계는 docs/security.md의 "Evidence-Only Watch Key" 표. 키 이름은 `evidence_` 접두어라 이름만 보고 알림이 없는 키임을 안다(CONTEXT.md).
 

@@ -273,7 +273,10 @@
             that:
               - f.cmd.audit_loaded.rc == 127 or ('identity' in f.cmd.audit_loaded.stdout and 'container_config' in f.cmd.audit_loaded.stdout)
               - "'execve' not in f.cmd.audit_loaded.stdout"
-            fail_msg: "auditctl -l does not show the declared rules, or still shows an execve rule: {{ f.cmd.audit_loaded.stdout }}"
+              # 파일 감시 키(#430): `auditctl -l` 표기(끝 `/`, -F 형식)가 버전마다 달라 줄 전체가 아니라 키 이름만 본다. 적재할 수 없는 호스트(rc != 0)는 건너뛴다.
+              - "f.cmd.audit_loaded.rc != 0 or (('audit_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/audit/'].exists)"
+              - "f.cmd.audit_loaded.rc != 0 or (('firewall_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/firewalld/'].exists)"
+            fail_msg: "auditctl -l does not show the declared rules (or the file watch keys of the existing paths), or still shows an execve rule: {{ f.cmd.audit_loaded.stdout }}"
           when: ansible_os_family == "RedHat"
 
         - name: "[VERIFY-SEC-014] Verify sudoers timestamp and log configuration"
@@ -362,7 +365,8 @@
               - "('-w /etc/rsyslog.d/ -p wa -k syslog_config' in f.read[audit_rules_path]) == f.stat['/etc/rsyslog.d/'].exists"
               - "('-w /etc/firewalld/ -p wa -k firewall_config' in f.read[audit_rules_path]) == f.stat['/etc/firewalld/'].exists"
               - "('-w /root/.ssh/authorized_keys -p wa -k ssh_keys' in f.read[audit_rules_path]) == f.stat['/root/.ssh/authorized_keys'].exists"
-            fail_msg: "an audit watch key line does not match whether its path exists."
+              - "'/nonexistent/molecule-firewalld/' not in f.read[audit_rules_path]"
+            fail_msg: "an audit watch key line does not match whether its path exists (a missing path must be left out)."
           when:
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
@@ -387,7 +391,7 @@
             - f.stat[audit_rules_path].exists
 
         # 프로비저닝이 키를 배포한 계정(accounts[].keys)의 authorized_keys도 감시 키 줄이 있어야 한다(audit_ssh_key_accounts의 기본값).
-        - name: "[VERIFY-SEC-090] Verify the accounts that get public keys are watched as ssh_keys"
+        - name: "[VERIFY-SEC-091] Verify the accounts that get public keys are watched as ssh_keys at the home the system resolved"
           ansible.builtin.assert:
             that:
               - "('-w /home/' ~ item ~ '/.ssh/authorized_keys -p wa -k ssh_keys') in f.read[audit_rules_path]"
@@ -397,28 +401,6 @@
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
             - f.stat['/home/' ~ item ~ '/.ssh/authorized_keys'].exists
-
-        # `auditctl -l`의 표기(경로 끝 `/`, -F 형식)는 감사 패키지 버전마다 달라 줄 전체가 아니라 키 이름만 본다(#424와 같은 방식). 컨테이너는 적재할 수 없어(rc != 0) 건너뛴다.
-        - name: "[VERIFY-SEC-090] Verify the loaded audit rules carry the watch keys of the existing paths (auditctl -l)"
-          ansible.builtin.assert:
-            that:
-              - "('audit_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/audit/'].exists"
-              - "('firewall_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/firewalld/'].exists"
-            fail_msg: "auditctl -l does not list the audit watch keys the rules file declares: {{ f.cmd.audit_loaded.stdout }}"
-          when:
-            - ansible_os_family == "RedHat"
-            - f.stat[audit_rules_path].exists
-            - f.cmd.audit_loaded.rc == 0
-            - "'identity' in f.cmd.audit_loaded.stdout"
-
-        - name: "[VERIFY-SEC-091] Verify missing audit watch key paths are left out of the audit rules"
-          ansible.builtin.assert:
-            that:
-              - "'/nonexistent/molecule-firewalld/' not in f.read[audit_rules_path]"
-            fail_msg: "a missing audit watch key path was written to the audit rules."
-          when:
-            - ansible_os_family == "RedHat"
-            - f.stat[audit_rules_path].exists
 
         - name: "[VERIFY-SEC-101] Verify no evidence watch rule points outside the declared evidence paths"
           ansible.builtin.assert:

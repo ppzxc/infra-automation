@@ -251,3 +251,11 @@ def test_only_the_provisioning_entry_points_run_the_security_role_and_the_docs_s
 def test_the_experiment_the_issue_asks_for_is_recorded_as_not_done_and_handed_to_the_apply_ticket():
     doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
     assert "카나리 실험 미실시, 확인 필요" in doc and "수용 기준" in doc and "미충족" in doc and "#436" in doc
+
+
+def test_the_docs_name_the_template_section_of_the_file_watch_keys_by_its_real_number():
+    """문서가 가리키는 규칙 파일의 구역 번호는 템플릿 절 번호와 같다(템플릿에 절이 더해져 번호가 밀려도 문서가 틀린 채 남지 않게)."""
+    template = (ROOT_DIR / "roles" / "security" / "templates" / "audit.rules.j2").read_text(encoding="utf-8")
+    doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    assert "# 5-1. Audit Watch Keys" in template and "5-1절(6절 Syscall 앞)" in doc and "6번 구역" not in doc
+    assert template.index("# 5-1. Audit Watch Keys") < template.index("# 6. Syscall")

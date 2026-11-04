@@ -38,7 +38,7 @@ firewall_allowed_tcp_ports:
 audit_watch_paths:
   - /etc/hostname
   - /nonexistent/molecule-secret.env
-# #430: 있는 감시 키 경로만 규칙에 실리고 없는 경로는 걸러지는지 본다([VERIFY-SEC-090]/[VERIFY-SEC-091]). firewalld가 없는 이미지에서도 /etc/firewalld/는 걸러진다.
+# #430: 있는 감시 키 경로만 규칙에 실리고 없는 경로는 걸러지는지 본다([VERIFY-SEC-090]). firewalld가 없는 이미지에서도 /etc/firewalld/는 걸러진다.
 audit_firewall_watch_paths:
   - /etc/firewalld/
   - /nonexistent/molecule-firewalld/
