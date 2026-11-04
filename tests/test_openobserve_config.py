@@ -173,6 +173,7 @@ class FakeO2:
                         rec["alert_id"] = uuid.uuid4().hex
                     if kind == "pipeline":
                         rec["pipeline_id"] = uuid.uuid4().hex
+                        rec["version"] = 1   # 실제 서버: 파이프라인은 version을 갖는다
                     items[body["name"]] = rec
                 else:
                     if kind == "pipeline":
@@ -181,7 +182,12 @@ class FakeO2:
                             return self._send(405, {})
                         key = body["pipeline_id"]
                     name = next(n for n, v in items.items() if key in (n, v.get("alert_id"), v.get("pipeline_id")))
+                    if kind == "pipeline" and body.get("version") != items[name].get("version"):
+                        # 실제 서버: 본문 version이 서버 현재 version과 다르면 낙관적 잠금으로 거부한다(2026-11-04 서버 적용에서 실측)
+                        return self._send(409, {"code": 409, "message": "Pipeline with ID %s modified by someone else. Please refresh." % key})
                     items[name] = dict(items[name], **body)
+                    if kind == "pipeline":
+                        items[name]["version"] = body["version"] + 1
                 self._send(200, {"code": 200})
 
             def do_POST(self):  # noqa: N802
@@ -252,10 +258,10 @@ def test_apply_sends_exactly_what_the_render_play_shows(o2, tmp_path, extra):
     assert _apply(o2, extra=extra).returncode == 0
     if extra:   # 기본이 아닌 입력이 정말 렌더링에 반영됐는지(아니면 이 변형은 기본과 같은 비교가 된다)
         assert {o["body"]["tz_offset"] for o in rendered if o["kind"] == "alert"} == {480}
-    drop = {"alert": "alert_id", "pipeline": "pipeline_id"}   # 서버가 붙이는 값
+    drop = {"alert": {"alert_id"}, "pipeline": {"pipeline_id", "version"}}   # 서버가 붙이는 값
     for kind in ("alert", "template", "function", "pipeline"):
         want = {o["name"]: o["body"] for o in rendered if o["kind"] == kind}
-        got = {n: {k: v for k, v in b.items() if k != drop.get(kind)} for n, b in o2.store[kind].items()}
+        got = {n: {k: v for k, v in b.items() if k not in drop.get(kind, ())} for n, b in o2.store[kind].items()}
         assert got == want, kind
     shorts = {o["short_link"]["short"].split("/web/short/")[1].split("?")[0]: o["short_link"]["original"] for o in rendered if o.get("short_link")}
     assert shorts == o2.shorts   # 원문 로그 링크도 같다
@@ -349,6 +355,7 @@ def test_pipeline_drift_is_repaired_with_its_id(o2):
     assert _apply(o2).returncode == 0
     ((method, path, body),) = o2.writes
     assert (method, path) == ("PUT", "/api/default/pipelines") and body["pipeline_id"] == pid and body["enabled"] is True
+    assert body["version"] == 1   # 서버 현재 version을 실어 보낸다(version이 없거나 다르면 서버가 409로 거부한다)
 
 
 def test_check_mode_reads_and_plans_but_writes_nothing(o2):

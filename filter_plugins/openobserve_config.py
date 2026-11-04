@@ -336,6 +336,9 @@ def o2c_plan(desired, existing, org, retired=()):
             key = cur.get(ID_FIELD[kind]) if kind in ID_FIELD else want['name']
             if kind in INJECT_ID:
                 body = dict(body, **{ID_FIELD[kind]: key})
+                if cur.get('version') is not None:
+                    # 서버는 본문 version이 현재 version과 다르면 409(modified by someone else)로 거부한다(낙관적 잠금). 서버가 준 값을 그대로 싣는다
+                    body['version'] = cur['version']
             plan.append(_action(kind, want, 'update', 'PUT', ITEM_PATHS[kind].format(org=org, key=key), body))
     # 삭제는 명시적 폐기 목록에 있는 알림뿐이다. 접두어(infra-)만 보고 지우면 다른 곳에서 만든 알림까지 지운다(사고)
     retired = set(retired or ()) - {a['name'] for a in plan if a['op'] == 'recreate'}
