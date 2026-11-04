@@ -53,6 +53,17 @@ def tuned(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def reduced(tmp_path_factory):
+    """정상 변경 키 목록을 줄인 렌더링(`o2c_audit_provisioning_keys: [auth_config]`) — 목록 밖 키의 서명 행이 숨으면 안 된다."""
+    rendered = render_desired(tmp_path_factory.mktemp("o2c-audit-reduced") / "desired.json", extra={"o2c_audit_provisioning_keys": ["auth_config"]})
+
+    class Server:
+        store = {"alert": {o["name"]: o["body"] for o in rendered if o["kind"] == "alert"}}
+
+    return Server
+
+
+@pytest.fixture(scope="session")
 def narrowed(tmp_path_factory):
     """정상 변경 구분을 지정 계정으로 좁힌 렌더링(`o2c_audit_provisioning_accounts`를 Environment로 준 것과 같다)."""
     rendered = render_desired(tmp_path_factory.mktemp("o2c-audit-narrow") / "desired.json",
@@ -302,6 +313,84 @@ def test_a_key_appended_to_the_provisioning_list_reaches_the_low_grade_alert_and
     assert 'key="ssh_keys"' in _raw_query(tuned, PROVISIONING)
     interactive = event("ssh_keys", exe="/usr/bin/vim", path="/root/.ssh/authorized_keys")
     assert _run_alert_on_sqlite(_sql(tuned, PROVISIONING), interactive, "security_logs") == []   # 서명이 아니면 P3가 아니다(#430의 P2가 맡는다)
+
+
+# --- 코드리뷰 반영(#419) -----------------------------------------------------------------------------------------------------
+def _cfg(**over):
+    base = dict(package_managers=["rpm"], account_tools=["useradd"], secret_metadata_syscalls=[], secret_service_exes=[], secret_operator_exes=[],
+                secret_excluded_users=[], provisioning_accounts=[], provisioning_keys=["auth_config", "container_config", "secret_access"], min_events=1)
+    return dict(base, **over)
+
+
+def test_shrinking_the_provisioning_key_list_never_hides_a_signature_row(reduced):
+    """목록 밖 키(secret_access)의 서명 행은 P3가 안 보므로 P2에 남아야 한다. 목록 안 키(auth_config)는 P3로 간다."""
+    secret = event("secret_access", exe="/usr/bin/python3.12", comm="python3", tty="(none)", path="/srv/x")
+    auth = event("auth_config", exe="/usr/bin/python3.12", comm="python3", tty="(none)", path="/etc/pam.d/sshd")
+    assert firing_alerts(reduced, secret) == {SECRET}
+    assert firing_alerts(reduced, auth) == {PROVISIONING}
+
+
+def test_a_numeric_string_threshold_is_accepted_and_a_bad_one_is_refused():
+    import openobserve_config as o2c
+    sql = o2c.o2c_audit_watch_sql("auth_config", _cfg(min_events="3"), "1 AS event_time", "host_name AS host_label")
+    assert "HAVING count(DISTINCT evid) >= 3" in sql
+    for bad in ("0", "x", "", None, 1.5):
+        with pytest.raises(ValueError):
+            o2c.o2c_audit_watch_sql("auth_config", _cfg(min_events=bad), "1", "1")
+
+
+def test_login_names_accept_dots_and_capitals_but_never_a_quote():
+    import openobserve_config as o2c
+    assert o2c.o2c_valid_login_names(["Deploy.Svc", "a_b-c", "svc$", "bk"]) and o2c.o2c_valid_login_names([])
+    for bad in ([""], ["a'b"], ["a b"], ["a%b"], ["x" * 33], [1], "deploy"):
+        assert not o2c.o2c_valid_login_names(bad), bad
+
+
+def test_a_dotted_capitalised_login_works_in_the_account_list_and_dot_is_not_a_wildcard():
+    import openobserve_config as o2c
+    sql = o2c.o2c_audit_provisioning_sql(_cfg(provisioning_accounts=["Deploy.Svc"]), "min(_timestamp) AS event_time", "host_name AS host_label")
+    mk = lambda who: event("auth_config", exe="/usr/bin/python3.12", comm="python3", tty="(none)", auid=who)  # noqa: E731
+    run = lambda ev: _run_alert_on_sqlite(sql, ev, "security_logs")  # noqa: E731
+    assert len(run(mk("Deploy.Svc"))) == 1 and run(mk("DeployXSvc")) == []
+
+
+def test_underscore_in_a_like_value_is_not_a_one_character_wildcard():
+    import openobserve_config as o2c
+    sql = o2c.o2c_audit_provisioning_sql(_cfg(provisioning_accounts=["svc_a"]), "min(_timestamp) AS event_time", "host_name AS host_label")
+    mk = lambda who, key: event(key, exe="/usr/bin/python3.12", comm="python3", tty="(none)", auid=who)  # noqa: E731
+    run = lambda ev: _run_alert_on_sqlite(sql, ev, "security_logs")  # noqa: E731
+    assert len(run(mk("svc_a", "auth_config"))) == 1
+    assert run(mk("svcXa", "auth_config")) == [] and run(mk("svc_a", "authXconfig")) == []
+
+
+def test_underscore_in_a_key_does_not_match_other_characters(desired):
+    assert firing_alerts(desired, event("authXconfig", exe="/usr/bin/vim")) == set()
+
+
+@pytest.mark.parametrize("anchor", ["audit-auth-config-change", "audit-container-config-change", "audit-secret-access", "audit-watch-provisioning"])
+def test_each_runbook_entry_opens_with_the_broad_signature_limit_and_the_account_list_advice(anchor):
+    runbook = RUNBOOK.read_text(encoding="utf-8")
+    section = runbook.split(f'<a id="{anchor}"></a>', 1)[1].split("<a id=", 1)[0]
+    head = section.split("**조건**", 1)[0]
+    assert "o2c_audit_provisioning_accounts" in head and "ssh host 'sudo" in head and "P3" in head, anchor
+
+
+def test_the_spec_and_the_variable_comment_state_the_limit_and_the_recommended_procedure():
+    spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
+    assert "권고 절차" in spec and "alert_audit_provisioning_accounts" in spec
+    defaults = (ROOT_DIR / "roles" / "openobserve_config" / "defaults" / "main.yml").read_text(encoding="utf-8")
+    comment = defaults.split("o2c_audit_provisioning_accounts:", 1)[0].rsplit("o2c_audit_secret_metadata_syscalls", 1)[1]
+    assert "한계" in comment and "채워" in comment
+
+
+def test_descriptions_of_the_pre_existing_alerts_are_untouched_and_the_secret_one_uses_the_variable():
+    alerts = {a["name"]: a for a in DEFAULTS["o2c_alerts"]}
+    for name in ("infra-account-change", "infra-sudo-risky-command", "infra-account-lockout", "infra-sshd-fatal-error", OLD_WATCH):
+        assert "o2c_audit_watch_silence_minutes" not in alerts[name]["description"], name
+    assert "재통지 5분" in alerts[OLD_WATCH]["description"]          # 이 알림의 silence는 5로 고정이다
+    for name in P2_ALERTS:
+        d = alerts[name]["description"]
+        assert "o2c_audit_watch_silence_minutes" in d and "재통지 5분" not in d, name
 
 
 # --- 5. 중복 방지: 기존 알림과 같은 변경으로 둘이 울리지 않는다 --------------------------------------------------------------------

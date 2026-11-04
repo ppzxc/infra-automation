@@ -2453,7 +2453,7 @@ def test_sudo_risky_command_list_builds_safe_like_conditions_and_rejects_unsafe_
                                    {"o2c_audit_account_tools": ["Useradd"]}, {"o2c_audit_account_tools": ["a'b"]},
                                    # Audit Watch Key 알림(#419): 이름·경로 형식, 정상 변경 서명 키는 1개 이상
                                    {"o2c_audit_package_managers": ["RPM"]}, {"o2c_audit_secret_excluded_users": ["a'b"]},
-                                   {"o2c_audit_secret_metadata_syscalls": ["get xattr"]}, {"o2c_audit_provisioning_accounts": ["Deploy"]},
+                                   {"o2c_audit_secret_metadata_syscalls": ["get xattr"]}, {"o2c_audit_provisioning_accounts": ["a'b"]}, {"o2c_audit_secret_excluded_users": ["x y"]},
                                    {"o2c_audit_secret_service_exes": ["opt/restic"]}, {"o2c_audit_secret_service_exes": ["/opt/x'; --"]},
                                    {"o2c_audit_secret_operator_exes": ["/opt/x y"]}, {"o2c_audit_provisioning_keys": []},
                                    {"o2c_audit_provisioning_keys": ["Auth_Config"]}, {"o2c_audit_provisioning_silence_minutes": "1h"}, {"o2c_audit_watch_silence_minutes": "5m"}, {"o2c_audit_watch_min_events": 0},

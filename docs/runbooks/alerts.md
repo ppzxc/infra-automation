@@ -437,6 +437,8 @@ sudo ausearch -k sshd_config -ts today -i
 <a id="audit-auth-config-change"></a>
 ## 🟠 PAM·로그인 정책 파일이 변경됨 (`infra-audit-auth-config-change`)
 
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+
 **조건**: auditd 감시 키 `auth_config`(`/etc/pam.d/`, `/etc/login.defs`)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 패키지 관리자(`rpm`·`dnf`·`yum`·`dpkg`·`apt`, `o2c_audit_package_managers`)와 계정 관리 도구(`o2c_audit_account_tools`)가 만든 변경은 뺀다. 터미널 없이 로그인 사용자 권한으로 한 변경(프로비저닝·배포 후보)은 아래 정상 변경 후보 알림(P3)이 맡는다. 그래서 한 변경에 알림이 두 번 오지 않는다. 행은 호스트·사용자(AUID)·실행 파일·대상 경로·건수·발생 시각이다.
 
 **왜 중요한가**: PAM 설정을 바꾸면 비밀번호 검사를 끄거나 백도어 모듈을 끼워 넣어 인증을 우회할 수 있다(업계 탐지 목록의 PAM 모듈 생성·로그인 정책 변경). 침입자가 인증을 몰래 약하게 만드는 전형적인 방법이다.
@@ -450,6 +452,8 @@ sudo ausearch -k auth_config -ts today -i
 
 <a id="audit-container-config-change"></a>
 ## 🟠 컨테이너 런타임 설정이 변경됨 (`infra-audit-container-config-change`)
+
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
 
 **조건**: auditd 감시 키 `container_config`(docker 데몬 설정 `/etc/docker/`와 호스트별 compose 위치)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 터미널 없이 로그인 사용자 권한으로 한 변경은 정상 변경 후보 알림(P3)이 맡는다.
 
@@ -465,6 +469,8 @@ sudo ausearch -k container_config -ts today -i
 <a id="audit-secret-access"></a>
 ## 🟠 지정한 비밀 파일이 열리거나 바뀜 (`infra-audit-secret-access`)
 
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+
 **조건**: auditd 감시 키 `secret_access`(호스트별 지정 비밀 파일, 읽기·쓰기·속성 변경 감시)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 다음은 뺀다. ① 파일을 열지 않고 속성만 보는 syscall(`getxattr`·`listxattr`·`readlink` 등, `o2c_audit_secret_metadata_syscalls`) ② 로그인 사용자 없이(`auid unset`) 도는 서비스 프로세스(`o2c_audit_secret_service_exes`, 기본 백업 에이전트) — 같은 바이너리를 사람이 손으로 돌리면 울린다 ③ 정상 소비자(`o2c_audit_secret_operator_exes`, 기본 compose 플러그인) ④ 제외 사용자(`o2c_audit_secret_excluded_users`, 기본 비어 있음) ⑤ 터미널 없이 로그인 사용자 권한으로 한 접근(정상 변경 후보 알림(P3)이 맡는다). 감시 대상이 없는 호스트(`audit_watch_paths` 비어 있음)에는 이 키의 기록이 없어 아무 것도 하지 않는다.
 
 **왜 중요한가**: 사람이 시크릿 파일을 열어 보거나 복사하면 자격 증명이 유출된 것일 수 있다(업계 탐지 목록의 민감 파일 열람·자격 파일 접근). 운영자의 정상 점검도 같은 모양이라 사람이 확인해야 한다.
@@ -478,6 +484,8 @@ sudo ausearch -k secret_access -ts today -i
 
 <a id="audit-watch-provisioning"></a>
 ## 🟡 정상 변경 후보: 터미널 없는 로그인 사용자의 감시 파일 변경 (`infra-audit-watch-provisioning`)
+
+> **기본 설정의 한계**: 이 알림은 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없는 로그인 사용자 전부를 받는다. 같은 키로 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 이 P3로만 오므로 무시하지 않는다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(권고 절차는 명세 참조).
 
 **조건**: 감시 키 `auth_config`·`container_config`·`secret_access`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
 

@@ -365,6 +365,8 @@ o2c_audit_secret_metadata_syscalls: [getxattr, lgetxattr, fgetxattr, listxattr, 
 # 감사 행이 아니라 sudo 로그에만 있고 세션 단위) "터미널 없이(tty=(none)) 로그인 사용자(auid 설정)가 한 변경"이라는 서명으로 갈라 제외하지 않고 등급을 낮춘다:
 # P2 알림은 `AND NOT <서명>`, P3 알림(infra-audit-watch-provisioning)은 `AND <서명>`. 계정 목록을 주면 서명이 그 로그인(AUID)으로 좁아진다(OpenBao agents/openobserve의
 # `alert_audit_provisioning_accounts`, 기본 비어 있음 = 터미널 없는 로그인 사용자 전부).
+# 한계(기본 설정): 계정 목록이 비어 있으면 서명이 넓어 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 P3로만 온다.
+# 프로비저닝 접속 계정을 이 목록(OpenBao `alert_audit_provisioning_accounts`)에 채워 서명을 좁히는 것을 권한다. 절차는 docs/openobserve_config.md. 값은 저장소에 두지 않는다.
 o2c_audit_provisioning_accounts: "{{ o2c_kv.alert_audit_provisioning_accounts | default([], true) }}"
 # P3 알림이 보는 감시 키. 같은 구분을 쓰는 알림(#430)은 자기 키를 여기에 더하고 자기 P2 SQL에 `AND NOT {{ o2c_audit_provisioning_filter }}`를 붙인다.
 o2c_audit_provisioning_keys: [auth_config, container_config, secret_access]
@@ -640,7 +642,7 @@ o2c_alerts:
     action: "① 행의 실행 계정과 시각을 Semaphore 작업 이력·작업 일정과 대조 ② 계획에 없던 변경이면 로그 보기로 대상 계정을 확인하고 계정 잠금(usermod -L)·그룹 탈퇴 후 보안 담당 보고 ③ 특권 그룹 변경은 getent group wheel sudo docker로 현재 구성원 확인"
     runbook: "{{ o2c_runbook_base }}#account-change"
     row_template: '• {host_label}: {change_kind} {changes}건 (실행 계정 {actor}) · {event_time}'
-    description: "auditd 계정 관리 기록(ADD_USER·DEL_USER·ADD_GROUP·DEL_GROUP·USER_MGMT·GRP_MGMT·USER_CHAUTHTOK·GRP_CHAUTHTOK·CHUSER_ID·CHGRP_ID·ACCT_LOCK·ACCT_UNLOCK) — 특권 그룹({{ o2c_privileged_groups | join('·') }}) 변경은 따로 표시 (Event Alert, 재통지 {{ o2c_audit_watch_silence_minutes }}분, 행당 사건 {{ o2c_audit_watch_min_events }}건 이상)"
+    description: "auditd 계정 관리 기록(ADD_USER·DEL_USER·ADD_GROUP·DEL_GROUP·USER_MGMT·GRP_MGMT·USER_CHAUTHTOK·GRP_CHAUTHTOK·CHUSER_ID·CHGRP_ID·ACCT_LOCK·ACCT_UNLOCK) — 특권 그룹({{ o2c_privileged_groups | join('·') }}) 변경은 따로 표시 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name,
@@ -668,7 +670,7 @@ o2c_alerts:
     action: "① 행의 사용자에게 작업 여부를 확인하고 작업 일정과 대조 ② 확인되지 않으면 그 계정 세션 종료·비밀번호 변경 후 보안 담당 보고, 꺼진 기능(SELinux·방화벽·auditd·rsyslog) 즉시 복구 ③ 계획된 작업이면 작업 기록에 남기기"
     runbook: "{{ o2c_runbook_base }}#sudo-risky-command"
     row_template: '• {host_label} / 사용자 {user_name}: {command_kind} {runs}건 · {event_time}'
-    description: "sudo 성공 기록의 process.command_line(소문자)에 o2c_sudo_risky_commands·o2c_sudo_protected_services 문구가 있음 — 통지 행에는 명령 원문 대신 종류만 싣는다 (Event Alert, 재통지 {{ o2c_audit_watch_silence_minutes }}분, 행당 사건 {{ o2c_audit_watch_min_events }}건 이상)"
+    description: "sudo 성공 기록의 process.command_line(소문자)에 o2c_sudo_risky_commands·o2c_sudo_protected_services 문구가 있음 — 통지 행에는 명령 원문 대신 종류만 싣는다 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name, user_name, {{ o2c_sudo_risky_groups | o2c_like_label('process_command_line') }} AS command_kind,
@@ -744,7 +746,7 @@ o2c_alerts:
     action: "① 로그 보기로 잠긴 계정과 직전 실패 출발지 확인 ② 외부 출발지면 방화벽 차단, 내부 자동화면 자격증명 갱신 ③ 본인 확인 뒤 faillock --user <계정> --reset으로 잠금 해제"
     runbook: "{{ o2c_runbook_base }}#account-lockout"
     row_template: '• {host_label}: 잠금 기록 {locks}건 · {event_time}'
-    description: "pam_faillock 'Consecutive login failures … account temporarily locked'(syslog), auditd RESP_ACCT_LOCK·ANOM_LOGIN_FAILURES(op=pam_faillock), pam_tally2 'tally N, deny M' — 실로그 표본에 잠금 기록이 없어 합성 문구로만 검증 (Event Alert, 재통지 {{ o2c_audit_watch_silence_minutes }}분, 행당 사건 {{ o2c_audit_watch_min_events }}건 이상)"
+    description: "pam_faillock 'Consecutive login failures … account temporarily locked'(syslog), auditd RESP_ACCT_LOCK·ANOM_LOGIN_FAILURES(op=pam_faillock), pam_tally2 'tally N, deny M' — 실로그 표본에 잠금 기록이 없어 합성 문구로만 검증 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name, count(*) AS locks, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
@@ -766,7 +768,7 @@ o2c_alerts:
     action: "① 로그 보기로 오류 문구와 출발지를 확인 ② 출발지가 외부면 방화벽 차단과 sshd 패키지 보안 업데이트 여부 확인 ③ 같은 시각의 로그인 성공 기록이 있으면 계정 점검"
     runbook: "{{ o2c_runbook_base }}#sshd-fatal-error"
     row_template: '• {host_label}: sshd 치명 오류 {errors}건 · {event_time}'
-    description: "sshd·sshd-session 줄에 Sigma lnx_sshd_susp_ssh·Wazuh 5707·5714 문구(o2c_sshd_fatal_keywords)가 {{ o2c_sshd_fatal_threshold }}건 이상, 스캐너 소음 문구(o2c_sshd_scanner_noise)는 제외 (Event Alert, 재통지 {{ o2c_audit_watch_silence_minutes }}분, 행당 사건 {{ o2c_audit_watch_min_events }}건 이상)"
+    description: "sshd·sshd-session 줄에 Sigma lnx_sshd_susp_ssh·Wazuh 5707·5714 문구(o2c_sshd_fatal_keywords)가 {{ o2c_sshd_fatal_threshold }}건 이상, 스캐너 소음 문구(o2c_sshd_scanner_noise)는 제외 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name, count(*) AS errors, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
@@ -812,7 +814,7 @@ o2c_alerts:
     action: "① 행의 실행 도구와 시각을 Semaphore 작업 이력·작업 일정과 대조 ② 계획에 없던 변경이면 로그 보기로 AUID(실제 로그인 계정)를 확인하고 해당 파일을 백업본과 비교 ③ 침해가 의심되면 계정 잠금·세션 종료 후 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#audit-watch-change"
     row_template: '• {host_label}: {watched} 변경 {changes}건 (실행 도구 {tool}) · {event_time}'
-    description: "auditd 감시 키 SYSCALL 기록(key=identity·sudo_config·sshd_config) — 계정 관리 도구({{ o2c_audit_account_tools | join('·') }})가 계정 파일을 바꾼 기록은 계정 변경 알림이 알리므로 제외 (Event Alert, 재통지 {{ o2c_audit_watch_silence_minutes }}분, 행당 사건 {{ o2c_audit_watch_min_events }}건 이상)"
+    description: "auditd 감시 키 SYSCALL 기록(key=identity·sudo_config·sshd_config) — 계정 관리 도구({{ o2c_audit_account_tools | join('·') }})가 계정 파일을 바꾼 기록은 계정 변경 알림이 알리므로 제외 (Event Alert, 재통지 5분)"
     stream: security_logs
     sql: >-
       SELECT host_name,
@@ -869,7 +871,7 @@ o2c_alerts:
     action: "① 행의 사용자·도구·시각을 작업 이력과 대조 ② 계획에 없으면 로그 보기로 AUID·경로 확인, SSH 로그인 알림과 시각 대조 ③ 유출 의심 시 시크릿 교체·세션 종료 후 보고"
     runbook: "{{ o2c_runbook_base }}#audit-secret-access"
     row_template: '• {host_label}: {login_user}({program})가 {file_path} 접근 {events}건 · {event_time}'
-    description: "auditd 감시 키 secret_access(지정 비밀 파일 접근) SYSCALL 기록 — 속성만 읽는 syscall, 서비스 프로세스(auid unset), 정상 소비자(compose), 제외 사용자, 정상 변경 서명에 맞는 기록은 제외 (Event Alert, 재통지 5분). 감시 대상이 없는 호스트에는 기록이 없어 아무 것도 하지 않는다"
+    description: "auditd 감시 키 secret_access(지정 비밀 파일 접근) SYSCALL 기록 — 속성만 읽는 syscall, 서비스 프로세스(auid unset), 정상 소비자(compose), 제외 사용자, 정상 변경 서명에 맞는 기록은 제외 (Event Alert, 재통지 {{ o2c_audit_watch_silence_minutes }}분, 행당 사건 {{ o2c_audit_watch_min_events }}건 이상). 감시 대상이 없는 호스트에는 기록이 없어 아무 것도 하지 않는다"
     stream: security_logs
     raw_sql: 'SELECT * FROM "security_logs" WHERE service_name = ''audit'' AND body LIKE ''type=SYSCALL %'' AND body LIKE ''% key="secret_access"%'' ORDER BY _timestamp DESC LIMIT 200'
     sql: "{{ 'secret_access' | o2c_audit_watch_sql(o2c_audit_watch_cfg, o2c_event_time_sql, o2c_host_label_sql) }}"

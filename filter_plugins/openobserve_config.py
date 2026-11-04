@@ -1032,15 +1032,37 @@ def o2c_valid_exe_patterns(patterns):
     return isinstance(patterns, (list, tuple)) and all(isinstance(p, str) and _AUDIT_EXE_RE.match(p) for p in patterns)
 
 
+_LOGIN_NAME_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9._-]{0,31}\$?$')
+
+
+def o2c_valid_login_names(names):
+    """True when every item is a login name as auditd records it (AUID): letters (either case), digits, ``.``, ``_``, ``-``, optional trailing ``$``, at most 32."""
+    return isinstance(names, (list, tuple)) and all(isinstance(n, str) and _LOGIN_NAME_RE.match(n) for n in names)
+
+
+def _like(pattern):
+    """``body LIKE '<pattern>' ESCAPE '\\'`` with ``_`` literal (it would match any one character); ``%`` stays the wildcard the pattern asks for."""
+    return "body LIKE '%s' ESCAPE '\\'" % pattern.replace('_', '\\_')
+
+
+def _audit_min_events(cfg):
+    value = cfg.get('min_events', 1)
+    if isinstance(value, bool) or not re.match(r'^[1-9][0-9]*$', str(value)):
+        raise ValueError('Audit Watch Key 알림 변수 min_events 는 양의 정수여야 한다')
+    return int(value)
+
+
 def _audit_check(cfg):
-    for name in ('package_managers', 'account_tools', 'secret_metadata_syscalls', 'secret_excluded_users', 'provisioning_accounts'):
+    for name in ('package_managers', 'account_tools', 'secret_metadata_syscalls'):
         if not o2c_valid_group_names(cfg.get(name, [])):
+            raise ValueError('Audit Watch Key 알림 변수 %s 의 형식이 올바르지 않다' % name)
+    for name in ('secret_excluded_users', 'provisioning_accounts'):
+        if not o2c_valid_login_names(cfg.get(name, [])):
             raise ValueError('Audit Watch Key 알림 변수 %s 의 형식이 올바르지 않다' % name)
     for name in ('secret_service_exes', 'secret_operator_exes'):
         if not o2c_valid_exe_patterns(cfg.get(name, [])):
             raise ValueError('Audit Watch Key 알림 변수 %s 의 형식이 올바르지 않다' % name)
-    if not re.match(r'^[1-9][0-9]*$', str(cfg.get('min_events', 1))):
-        raise ValueError('Audit Watch Key 알림 변수 min_events 는 양의 정수여야 한다')
+    _audit_min_events(cfg)
     keys = cfg.get('provisioning_keys', [])
     if not keys or not all(isinstance(k, str) and _AUDIT_KEY_RE.match(k) for k in keys):
         raise ValueError('Audit Watch Key 알림 변수 provisioning_keys 의 형식이 올바르지 않다(1개 이상, 소문자·숫자·_)')
@@ -1062,21 +1084,21 @@ def o2c_audit_provisioning_cond(cfg):
     cond = "body LIKE '%% tty=(none) %%' AND NOT %s" % _AUDIT_UNSET_AUID
     accounts = cfg.get('provisioning_accounts') or []
     if accounts:
-        cond += ' AND ' + _any(["body LIKE '%% AUID=\"%s\"%%'" % a for a in accounts])
+        cond += ' AND ' + _any([_like('%% AUID="%s"%%' % a) for a in accounts])
     return '(%s)' % cond
 
 
 def _audit_key_cond(key, cfg):
     """The key's own condition: the key itself minus what another alert or a known service already covers."""
-    cond = "body LIKE '%% key=\"%s\"%%'" % key
+    cond = _like('%% key="%s"%%' % key)
     skip = []
     if key == 'auth_config':   # 패키지 관리자·계정 관리 도구가 만든 변경은 패키지·계정 변경 기록이 맡는다(comm은 15자로 잘린다)
-        skip += ["body LIKE '%% comm=\"%s\"%%'" % t for t in list(cfg.get('package_managers') or []) + list(cfg.get('account_tools') or [])]
+        skip += [_like('%% comm="%s"%%' % t) for t in list(cfg.get('package_managers') or []) + list(cfg.get('account_tools') or [])]
     elif key == 'secret_access':
-        skip += ["body LIKE '%% SYSCALL=%s %%'" % c for c in cfg.get('secret_metadata_syscalls') or []]   # 파일을 열지 않는 속성 조회(ls·stat)
-        skip += ["(body LIKE '%% exe=\"%s\"%%' AND %s)" % (e, _AUDIT_UNSET_AUID) for e in cfg.get('secret_service_exes') or []]   # 로그인 없는 서비스
-        skip += ["body LIKE '%% exe=\"%s\"%%'" % e for e in cfg.get('secret_operator_exes') or []]
-        skip += ["body LIKE '%% AUID=\"%s\"%%'" % u for u in cfg.get('secret_excluded_users') or []]
+        skip += [_like('%% SYSCALL=%s %%' % c) for c in cfg.get('secret_metadata_syscalls') or []]   # 파일을 열지 않는 속성 조회(ls·stat)
+        skip += ['(%s AND %s)' % (_like('%% exe="%s"%%' % e), _AUDIT_UNSET_AUID) for e in cfg.get('secret_service_exes') or []]   # 로그인 없는 서비스
+        skip += [_like('%% exe="%s"%%' % e) for e in cfg.get('secret_operator_exes') or []]
+        skip += [_like('%% AUID="%s"%%' % u) for u in cfg.get('secret_excluded_users') or []]
     return '(%s AND NOT %s)' % (cond, _any(skip)) if skip else '(%s)' % cond
 
 
@@ -1107,14 +1129,16 @@ def _audit_sql(watched, where, cfg, event_time, host_label):
              ) % (_AUDIT_PATH_LEN, _AUDIT_PATH_LEN - 2, joined)
     return ("SELECT host_name, watch_key, login_user, program, file_path, count(DISTINCT evid) AS events, %s, %s FROM (%s) "
             "GROUP BY host_name, watch_key, login_user, program, file_path HAVING count(DISTINCT evid) >= %d ORDER BY events DESC"
-            ) % (event_time, host_label, inner, cfg.get('min_events', 1))
+            ) % (event_time, host_label, inner, _audit_min_events(cfg))
 
 
 def o2c_audit_watch_sql(key, cfg, event_time, host_label):
     """P2 alert SQL for one watch key: the key's rows that do NOT carry the provisioning signature."""
     if not _AUDIT_KEY_RE.match(key):
         raise ValueError('감시 키 이름 형식이 올바르지 않다')
-    where = '%s AND NOT %s' % (_audit_key_cond(key, cfg), o2c_audit_provisioning_cond(cfg))
+    where = _audit_key_cond(key, cfg)
+    if key in cfg['provisioning_keys']:   # 서명 행을 P3가 보는 키만 P2에서 뺀다. 목록 밖 키의 서명 행을 빼면 어느 알림도 못 본다
+        where += ' AND NOT %s' % o2c_audit_provisioning_cond(cfg)
     return _audit_sql("'%s'" % key, where, cfg, event_time, host_label)
 
 
@@ -1124,7 +1148,7 @@ def o2c_audit_provisioning_sql(cfg, event_time, host_label):
     keys = cfg['provisioning_keys']
     where = '%s AND %s' % (_any([_audit_key_cond(k, cfg) for k in keys]), o2c_audit_provisioning_cond(cfg))
     watched = 'CASE %s ELSE substr(regexp_replace(s.body, \'^.* key="([^"]*)".*$\', \'\\1\'), 1, 8) END' % ' '.join(
-        "WHEN s.body LIKE '%% key=\"%s\"%%' THEN '%s'" % kv for kv in _AUDIT_LABELS)
+        "WHEN %s THEN '%s'" % (_like('%% key="%s"%%' % kv[0]).replace('body LIKE', 's.body LIKE', 1), kv[1]) for kv in _AUDIT_LABELS)
     return _audit_sql(watched, where, cfg, event_time, host_label)
 
 
@@ -1154,5 +1178,5 @@ class FilterModule(object):
                 'o2c_fortigate_match': o2c_fortigate_match,
                 'o2c_valid_like_groups': o2c_valid_like_groups, 'o2c_valid_group_names': o2c_valid_group_names,
                 'o2c_sudo_risky_groups': o2c_sudo_risky_groups, 'o2c_like_any': o2c_like_any, 'o2c_like_label': o2c_like_label,
-                'o2c_valid_exe_patterns': o2c_valid_exe_patterns, 'o2c_audit_provisioning_cond': o2c_audit_provisioning_cond,
+                'o2c_valid_exe_patterns': o2c_valid_exe_patterns, 'o2c_valid_login_names': o2c_valid_login_names, 'o2c_audit_provisioning_cond': o2c_audit_provisioning_cond,
                 'o2c_audit_watch_sql': o2c_audit_watch_sql, 'o2c_audit_provisioning_sql': o2c_audit_provisioning_sql}
