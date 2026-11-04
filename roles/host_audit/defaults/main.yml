@@ -72,6 +72,36 @@ host_audit_kisa_exceptions:
     approved_on: ""
     expires_on: ""
 
+# file capability 배포판 기본 목록 (#432, KISA-2026:U-23 옆의 증적). 항목은 "<경로> <capability 이름>" 한 줄이다.
+# getcap 결과 중 이 목록과 경로·capability 이름 집합이 같은 파일은 '기본'이고, 그 밖의 파일만 '검토'로 표시된다.
+# - capability 이름은 쉼표로 잇고 순서는 상관없다(cap_net_admin,cap_net_raw 와 cap_net_raw,cap_net_admin 은 같다).
+# - 배포판마다 같은 경로의 capability 조합이 다를 수 있으면 같은 경로 줄을 여러 개 둔다(아래 ping).
+# - 플래그(=ep, +p)와 옛 libcap의 ' = ' 표기는 비교하지 않는다. 경로에 공백이 있어도 되지만 " cap_"은 안 된다.
+# - 호스트에 없는 파일의 항목은 getcap에 나오지 않으므로 목록에 남아 있어도 영향이 없다.
+# 한계: 이 목록은 배포판 패키지 지식으로 적었고 실제 호스트에서 실측하지 않았다. 처음 돌린 보고서에서 기본인데도
+# '검토'로 나온 항목은 호스트에서 확인한 뒤 여기에 줄을 더한다.
+host_audit_kisa_capability_defaults:
+  - "/usr/bin/ping cap_net_raw"
+  - "/usr/bin/ping cap_net_admin,cap_net_raw"
+  - "/bin/ping cap_net_raw"
+  - "/usr/bin/ping6 cap_net_raw"
+  - "/usr/bin/arping cap_net_raw"
+  - "/usr/sbin/arping cap_net_raw"
+  - "/usr/sbin/clockdiff cap_net_raw"
+  - "/usr/bin/clockdiff cap_net_raw"
+  - "/usr/bin/tracepath cap_net_raw"
+  - "/usr/bin/traceroute6.iputils cap_net_raw"
+  - "/usr/bin/mtr-packet cap_net_raw"
+  - "/usr/sbin/mtr-packet cap_net_raw"
+  - "/usr/bin/newuidmap cap_setuid"
+  - "/usr/bin/newgidmap cap_setgid"
+  - "/usr/sbin/newuidmap cap_setuid"
+  - "/usr/sbin/newgidmap cap_setgid"
+  - "/usr/bin/gnome-keyring-daemon cap_ipc_lock"
+  - "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-ptp-helper cap_net_bind_service,cap_net_admin,cap_sys_nice"
+  - "/usr/lib64/gstreamer-1.0/gst-ptp-helper cap_net_bind_service,cap_net_admin,cap_sys_nice"
+  - "/usr/libexec/gstreamer-1.0/gst-ptp-helper cap_net_bind_service,cap_net_admin,cap_sys_nice"
+
 # --- 보관과 Audit Baseline (#125, ADR-0009 §5) -----------------------------------------------------
 # 실행마다 보고서·호스트별 JSON·실행 메타를 RustFS Host Audit 전용 버킷의 <YYYY-MM>/<run_id>/에 올리고,
 # 직전 정기 실행(Audit Baseline)과 비교해 발견을 신규·지속·재발·해소로 표시한다.
