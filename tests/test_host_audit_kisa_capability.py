@@ -348,3 +348,28 @@ def test_the_excluded_path_itself_as_a_start_point_is_skipped_too(tmp_path):
     _, evidence = _u23_with_mounts(tmp_path, [str(docker)], [str(docker)], {str(docker / "x" / "app").lstrip("/"): "cap_chown=ep"})
 
     assert "file capability: none" in evidence
+
+
+# ---------------------------------------------------------------- the task's own rendering (실호스트에서 목록이 한 줄로 뭉친 버그)
+
+
+def test_the_kisa_task_hands_each_list_entry_to_the_shell_on_its_own_line():
+    """Ansible leaves ``join('\\n')`` as the two characters backslash+n, so the lists reached the host as one
+    garbage line: nothing was excluded and no default matched. Render the real task expression with Ansible's
+    templating, run the assignments in sh, and count the lines."""
+    from ansible.parsing.dataloader import DataLoader
+    from ansible.template import Templar, trust_as_template
+
+    tasks = yaml.safe_load((ROLE_DIR / "tasks" / "kisa.yml").read_text(encoding="utf-8"))
+    task_vars = tasks[0]["vars"]
+    variables = {
+        "host_audit_kisa_capability_defaults": DEFAULTS["host_audit_kisa_capability_defaults"],
+        "host_audit_kisa_capability_exclude_paths": DEFAULTS["host_audit_kisa_capability_exclude_paths"],
+        "_host_audit_kisa_files": [],
+    }
+    templar = Templar(loader=DataLoader(), variables={**variables, **{k: v for k, v in task_vars.items() if k != "_host_audit_kisa_script"}})
+    rendered = templar.template(trust_as_template(task_vars["_host_audit_kisa_script"].split("{% for")[0]))
+    probe = rendered + '\nprintf "%s" "$KISA_CAP_EXCLUDE" | wc -l; printf "%s" "$KISA_CAP_DEFAULTS" | wc -l\n'
+    out = subprocess.run(["sh", "-c", probe], capture_output=True, text=True, check=True).stdout.split()
+    assert int(out[0]) == len(variables["host_audit_kisa_capability_exclude_paths"]) - 1
+    assert int(out[1]) == len(variables["host_audit_kisa_capability_defaults"]) - 1
