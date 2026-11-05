@@ -915,12 +915,19 @@ def test_an_excluded_executable_does_not_fire_but_a_lookalike_does(desired):
     assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/usr/sbin/logrotate-evil", "logrotate-evil"))) == 1
 
 
+def test_the_sudo_log_append_is_excluded_by_default_but_a_write_open_by_truncate_fires(desired):
+    """쓰기 열기까지 기록하면서(#441) sudo가 sudo.log에 덧붙이는 열기가 명령마다 남는다. sudo 프로세스만 빼고, `truncate -s0`(O_TRUNC 없이 쓰기로 열기)는 알린다."""
+    assert _var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/sudo", "sudo", syscall=257)) == []
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/truncate", "truncate", syscall=257))) == 1
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/tmp/sudo", "sudo", syscall=257))) == 1      # 이름만 같고 경로가 다르면 제외가 아니다
+
+
 def _var_log_sql(rendered):
     return next(o["body"]["query_condition"]["sql"] for o in rendered if o["kind"] == "alert" and o["name"] == VAR_LOG)
 
 
 def test_the_excluded_executable_list_is_a_role_variable_with_a_safe_path_check(tmp_path):
-    assert DEFAULTS["o2c_var_log_excluded_exes"] == ["/usr/sbin/logrotate"]
+    assert DEFAULTS["o2c_var_log_excluded_exes"] == ["/usr/bin/sudo", "/usr/sbin/logrotate"]
     rendered = render_desired(tmp_path / "desired.json", extra={"o2c_var_log_excluded_exes": ["/usr/bin/cleanup-tool", "/usr/local/sbin/rotate"]})
     sql = _var_log_sql(rendered)
     assert _run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/bin/cleanup-tool", "cleanup-tool")], "security_logs") == []

@@ -138,17 +138,21 @@ def test_var_log_rules_catch_delete_rename_truncate_and_o_trunc_opens_under_var_
         assert set(by_arch) == {"b64", "b32"}, case
 
 
-def test_the_o_trunc_open_rules_only_match_opens_with_the_truncate_flag(security_rendered):
-    """`open`은 flags가 두 번째 인자(a1), `openat`은 세 번째(a2)다. O_TRUNC = 0x200이고, 이 비트 없는 열기(읽기·덧붙이기)는 걸리지 않는다."""
+def test_the_open_rules_match_the_truncate_flag_and_any_write_open_so_truncate_s0_and_ftruncate_leave_a_record(security_rendered):
+    """`open`은 flags가 두 번째 인자(a1), `openat`은 세 번째(a2)다. `&`는 마스크 중 하나라도 켜져 있으면 참이다.
+    O_TRUNC(0x200)는 `> file`을 잡고, 쓰기 열기(O_WRONLY 0x1 | O_RDWR 0x2 = 0x3)는 `truncate -s0`(O_TRUNC 없이 열고 ftruncate)과
+    파일 기술자만 받는 ftruncate를 잡는다(#441). 읽기 열기(O_RDONLY)는 어느 쪽에도 걸리지 않는다."""
     rules = _syscall_rules(security_rendered["default"]["audit"], "var_log_delete")
     for arch in ("b64", "b32"):
         opens = [r for r in rules if r["arch"] == arch and r["syscalls"] & {"open", "openat"}]
         assert opens, arch
         for r in opens:
             assert not (r["syscalls"] & {"unlink", "unlinkat", "rename", "renameat", "truncate", "ftruncate", "creat"}), r
-        flag_field = {"open": "a1&0x200", "openat": "a2&0x200"}
-        assert {tuple(sorted(r["syscalls"])): [f for f in r["fields"] if f[:1] == "a" and f[2:3] == "&"] for r in opens} == \
-            {("open",): [flag_field["open"]], ("openat",): [flag_field["openat"]]}, arch
+        got = {(tuple(sorted(r["syscalls"])), tuple(f for f in r["fields"] if f[:1] == "a" and f[2:3] == "&")) for r in opens}
+        assert got == {
+            (("open",), ("a1&0x200",)), (("openat",), ("a2&0x200",)),
+            (("open",), ("a1&0x3",)), (("openat",), ("a2&0x3",)),
+        }, arch
 
 
 def test_the_syscall_rules_are_independent_of_host_variables_and_never_log_everything(security_rendered):
