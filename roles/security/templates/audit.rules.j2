@@ -67,6 +67,11 @@
 {{ login_user_syscall_rule('unlink,unlinkat,rename,renameat,truncate,ftruncate,creat', 'var_log_delete', '-F dir=/var/log') -}}
 {{ login_user_syscall_rule('open', 'var_log_delete', '-F dir=/var/log -F a1&0x200') -}}
 {{ login_user_syscall_rule('openat', 'var_log_delete', '-F dir=/var/log -F a2&0x200') -}}
+#   쓰기 열기(O_WRONLY 0x1 | O_RDWR 0x2): `&`는 마스크 중 하나라도 켜져 있으면 참이라 0x3 한 규칙이 둘 다 잡는다(#441). `truncate -s0 <파일>`은 O_TRUNC 없이
+#   쓰기로 연 뒤 ftruncate하고, ftruncate는 경로 없이 파일 기술자만 받아 위 dir= 필터에 걸리지 않는다. 그래서 열기 단계에서 잡는다. 읽기 열기(O_RDONLY)는 걸리지 않는다.
+#   로그인 사용자의 정상 쓰기(sudo가 sudo.log에 덧붙이기, 패키지 관리자 로그, 편집기)도 기록되므로 알림은 제외 실행 파일 목록(o2c_var_log_excluded_exes)으로 조절한다.
+{{ login_user_syscall_rule('open', 'var_log_delete', '-F dir=/var/log -F a1&0x3') -}}
+{{ login_user_syscall_rule('openat', 'var_log_delete', '-F dir=/var/log -F a2&0x3') -}}
 # 6-2. 커널 모듈 적재·제거 (key kernel_module → infra-kernel-module P2)
 #   finit_module(파일 기술자로 적재, kmod 기본 경로)은 커널 3.8에서 생겼다. EL6 커널(2.6.32)에는 없어 auditctl이 이름을 몰라 규칙이 실패하므로 EL6에서만 뺀다.
 {% set kernel_module_syscalls = 'init_module,delete_module' if (ansible_os_family | default('')) == 'RedHat' and (ansible_distribution_major_version | default('') | string) == '6' else 'init_module,finit_module,delete_module' %}
