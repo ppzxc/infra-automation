@@ -42,6 +42,12 @@ EXPECTED_ALERTS = {
     "infra-time-offset-exceeded", "infra-time-unsynced", "infra-time-sync-unavailable",   # 시각 동기(#336)
     "infra-audit-watch-change", "infra-ssh-login-unregistered-source", "infra-root-crontab-change",
     "infra-fortigate-admin-login-new-source",   # 남은 보안 로그 알림(#330)
+    "infra-ssh-login-failures-slow", "infra-ssh-password-spray",   # 인증 실패 알림 보강(Spec #433 / Ticket-1, #427)
+    "infra-sshd-fatal-error", "infra-ssh-login-new-user",   # sshd 치명 오류·낯선 사용자 SSH 성공(#428)
+    "infra-var-log-delete", "infra-kernel-module",   # /var/log 삭제·커널 모듈 syscall 규칙 알림(#431)
+    "infra-security-service-stopped",   # 보안 서비스 중지(Spec #433 / Ticket-3, #429)
+    "infra-audit-auth-config-change", "infra-audit-container-config-change", "infra-audit-secret-access",   # Audit Watch Key 3개(Spec #419)
+    "infra-audit-watch-provisioning",   # 정상 변경 후보(P3, #419)
 }
 
 PROMQL_ALERTS = {
@@ -124,9 +130,18 @@ def _date_format(value, fmt, offset):
     tz = timezone(sign * timedelta(hours=int(hours), minutes=int(minutes)))
     return datetime.fromtimestamp(seconds, tz).strftime(fmt)
 
-def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify"):
-    """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows."""
+def _run_alert_on_sqlite(sql, records, stream="system_logs_alert_verify", now_us=None):
+    """Run a verification search on the injected synthetic records (portable SQL subset + regexp_replace) and return the rows.
+
+    ``now_us``: what ``now()`` means for SQL that reads the clock (``to_unixtime(now())``); default is the real current time.
+
+    주의: `_timestamp`가 없는 레코드는 고정 시각(2026-10-23)으로 적재된다. 이 시각은 `now()`와 멀어 `now()`를 쓰는 SQL(낯선 사용자 알림 등)에서는
+    "오래된 기록"이 된다. 그런 SQL은 레코드마다 `_timestamp`를 `now_us` 기준으로 직접 넣는다(OpenObserve가 수집 시각을 찍는 것과 같다).
+    """
     db = sqlite3.connect(":memory:")
+    now_seconds = (now_us / 1_000_000) if now_us is not None else datetime.now(timezone.utc).timestamp()
+    db.create_function("now", 0, lambda: now_seconds)
+    db.create_function("to_unixtime", 1, lambda value: value)
     db.create_function("regexp_replace", 3, lambda text, pattern, repl: re.sub(pattern, repl, text) if text is not None else None)
     db.create_function("date_format", 3, _date_format)
     records = [dict({"_timestamp": 1_792_767_302_000_000}, **r) for r in records]   # OpenObserve stamps every record on ingest
@@ -190,6 +205,13 @@ SECURITY_ALERTS = {   # name -> (severity, period, silence, pending minutes, mar
     "infra-account-lockout": ("P2 경고", 5, 5, 0, "account temporarily locked"),
     "infra-audit-watch-change": ("P2 경고", 5, 5, 0, 'key="identity"'),                              # 남은 보안 로그 알림(#330)
     "infra-ssh-login-unregistered-source": ("P2 경고", 5, 60, 0, "user_name <> 'root'"),
+    "infra-security-service-stopped": ("P1 긴급", 1440, 10, 0, "type=SERVICE_STOP"),   # 보안 서비스 중지(#429): 유예는 행 단위로 SQL이 판정하므로 pending 0. 조회 24시간(통지 지속 정책)
+    "infra-audit-auth-config-change": ("P2 경고", 5, 5, 0, "'auth_config' AS watch_key"),   # Audit Watch Key(#419): 마커는 자기 알림에만 있는 리터럴 열
+    "infra-audit-container-config-change": ("P2 경고", 5, 5, 0, "'container_config' AS watch_key"),
+    "infra-audit-secret-access": ("P2 경고", 5, 5, 0, "'secret_access' AS watch_key"),
+    "infra-audit-watch-provisioning": ("P3 주의", 5, 5, 0, "regexp_replace(s.body, '^.* key="),
+    "infra-var-log-delete": ("P1 긴급", 5, 5, 0, 'key="var_log_delete"'),   # syscall 규칙 알림(#431)
+    "infra-kernel-module": ("P2 경고", 5, 5, 0, 'key="kernel_module"'),
 }
 
 RAID_ALERTS = {   # alert -> a fragment only its search carries
@@ -242,8 +264,11 @@ COUNT_FIELDS = ("logins", "successes", "changes", "runs", "stops", "locks", "tot
 LONGEST_TEXT = {"hook_status": "events_mismatch", "hook_problems": "hook_inactive,events_mismatch", "deliveries_truncated": "false", "truncated": "1", "error": "api_unexpected_response",   # 웹훅 점검 하트비트의 고정 코드
                 "user_name": "u" * 32, "actor": "u" * 32, "target": "t" * 14, "repo": "o" * 8 + "/" + "r" * 15, "kind": "organization.member_added", "team": "t" * 14,   # GitHub 감사 알림(#403): SQL이 대상 30자·저장소 40자·팀 20자로 자른다
                 "command_kind": "가" * 14, "change_kind": "가" * 9,   # 계정 이름 32자(리눅스 한계), 알림이 정한 짧은 라벨
+                "action": "적재·제거",   # /var/log·커널 모듈 알림(#431)의 동작: 알림이 정한 짧은 라벨
                 "container_name": "c" * 32, "cache_status": "permanently_disabled", "cache_reason": "r" * 30, "raw_state": "Predictive Failure",
                 "status": "timeout", "tool": "timedatectl", "sync_status": "unsynced", "tcpcheck_endpoint": "198.51.100.255:65535", "killed_process": "p" * 15, "cfgpath": "firewall.policy.sub", "admin": "a" * 32, "attack": "a" * 40, "event": "e" * 35, "hw_name": "h" * 24, "device": "ns0380+ns0381", "port": "GigabitEthernet1/0/48"}
+
+LONGEST_TEXT.update({"login_user": "u" * 16, "program": "p" * 14, "file_path": "…" + "f" * 39, "watch_key": "컨테이너"})   # Audit Watch Key 알림(#419): SQL이 자르는 길이
 
 TEXT_VALUE = "x" * 40   # 그 밖의 자유 문장 필드(명령·경로·이벤트 이름 등)의 현실적으로 긴 값
 
@@ -258,7 +283,7 @@ SECURITY_TIME_CASES = {   # alert -> (record fields, expected row without the ti
         [dict(event_action="ssh_login", event_outcome="success", user_name="root", source_address="198.51.100.7")],
         "• ns0272 ← 198.51.100.7 (1회)"),
     "infra-sudo-escalation-failure": (
-        [dict(event_action="sudo", event_outcome="failure", user_name="alice")], "• ns0272 / 사용자 alice: 실패 1회"),
+        [dict(event_action="sudo", event_outcome="failure", user_name="alice", body=None)], "• ns0272 / 사용자 alice: 실패 1회"),
     "infra-account-lockout": (
         [dict(body="pam_faillock(sshd:auth): Account temporarily locked")], "• ns0272: 잠금 기록 1건"),
 }

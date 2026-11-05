@@ -77,6 +77,15 @@ SELECT host_name, count(*) AS records FROM "security_logs" GROUP BY host_name
 ## 8. 서버 적용에서 알게 된 점
 
 - **감사 규칙 적재**: 규칙 파일을 바꾼 뒤에는 `augenrules --load`로 적재한다(`augenrules --check`는 변경 여부만 본다). 서비스 재시작은 systemd가 거부하므로 `service auditd reload`(HUP)나 `augenrules --load`를 쓴다.
+- **감사 규칙 적재 자동화 (#424)**: 위 수동 적재는 이제 `security` 역할이 한다. 규칙 파일이 바뀌거나 적재된 규칙이 파일과 다르면(`SEC-083`) `Restart auditd` 핸들러가 `augenrules --load`를 실행하고, 적재 뒤 `auditctl -l`을 다시 읽어 선언과 비교한다. 실패하면 플레이가 실패한다. 규칙 파일 자체가 #372 이전 버전인 호스트는 **고친 역할로 다시 프로비저닝**하면 파일 갱신과 적재가 함께 된다(핸들러 수정만으로는 파일이 안 바뀐다).
+  - 적용 전에 호스트별 `auditctl -l` 규칙 수와 `audit.log` 하루 증가량을 기록하고, 적용 뒤(`exec_log` 규칙이 빠진 뒤) 같은 값을 다시 기록해 전후를 비교한다(수집량이 크게 줄어드는 것이 예상 결과다). 값은 비공개 경로에만 둔다.
+  - 서버 적용은 프로비저닝 대상(`setup_complete`·`setup_partial`)에만, 사용자 승인 뒤에 한다.
+  - **적재가 일어나지 않았다는 경고**: 커널 audit을 조회할 수 없는 호스트(`auditctl -s` 실패: 커널 audit 비활성·컨테이너)나 audit 도구가 없는 호스트는 규칙 파일이 바뀌어도 규칙이 적재되지 않는다. 실패시키면 이런 호스트가 규칙이 바뀔 때마다 프로비저닝 실패가 되므로 플레이는 실패하지 않고 `SEC-084` 경고("규칙이 적재되지 않았다")만 남는다. 커널 audit을 조회할 수 있게 된 뒤 첫 실행에서 `SEC-083`이 낡은 적재 상태를 감지해 적재한다. `auditctl -s`는 되는데 `auditctl -l`만 실패하는 호스트는 매 실행 `SEC-085` 경고("적재 상태를 알 수 없음")가 나오므로 그 호스트에서 `auditctl -l`을 직접 확인한다(실패도 changed도 아니라 경고를 놓치면 영구히 ok로 보인다). Drift 하위 실행(`--check`)에서도 두 경고가 출력된다.
+  - 한계(미실측): 규칙 잠금(`-e 2`) 상태의 동작은 실측하지 않았고, 적재 실패 메시지는 건수와 키 이름만 보여 준다(시크릿 경로를 로그에 남기지 않으려고). 어긋난 경로는 호스트에서 `auditctl -l`로 확인한다. Molecule은 컨테이너에 audit이 없어 적재 결과를 검증하지 못하므로(pytest의 가짜 명령 시험이 대신 본다), 첫 실서버 적용 때 `auditctl -l`을 직접 확인한다.
+- **Evidence-Only Watch Key 적용 뒤 키별 증가량 확인 (#435, 이야기 28, 실행은 #436 몫이며 미실시)**: 감사 규칙 8.의 증적 키 다섯 개(`evidence_privileged_exec`·`evidence_file_delete`·`evidence_login_records`·`evidence_time_change`·`evidence_mount`)는 알림 없이 쌓이므로 양이 추정(#414: 합계 호스트당 하루 수 MB 이하)을 넘는지 적용 1주 뒤 본다.
+  - 적용 전에 카나리 호스트의 `audit.log` 하루 증가량과 키별 기록 수를 기록한다. 적용 1주 뒤 같은 방법으로 다시 센다. 키별 기록 수: `sudo ausearch -k <키> --start <시각> --raw | grep -c '^type=SYSCALL'`(로그인 기록 감시는 `type=PATH`), 전체 요약: `sudo aureport --key --summary --start <시각>`. 값은 비공개 경로에만 둔다.
+  - 판단: 합계가 추정을 넘는 호스트가 있으면 가장 큰 묶음부터 다시 판단한다. 로그인 사용자의 `sudo` 아래 작업(패키지 갱신·프로비저닝)이 `evidence_file_delete`·`evidence_privileged_exec`를 키울 수 있다. 절대 수치의 근거는 [security.md](../security.md)의 Evidence-Only Watch Key 항목.
+  - 함께 확인할 것(미실시): `auditctl -R`로 `-C uid!=euid`·`-F a0=0x0` 문법이 올라오는지, 없는 경로의 `-w` 동작, `auditctl -l`이 `/etc/localtime`·`/var/run/utmp`를 선언과 같은 경로로 보여 주는지(`SEC-083` drift 오탐), EL6 auditctl의 `-C` 지원.
 - **로그 디렉터리 소유**: `/var/log/journal`의 시스템 기본은 `root:systemd-journal`(부팅 시 `systemd-tmpfiles`가 맞춘다). 손으로 만든 디렉터리가 다르면 `systemd-tmpfiles --create --prefix /var/log/journal`로 기본에 맞춘다.
 - **fail2ban 설정이 서비스 시작 뒤에 생성된 경우**: jail 파일이 데몬 시작 뒤에 만들어지면 로드되지 않은 채 남는다. `fail2ban-client -t`로 검사한 뒤 `fail2ban-client reload`를 하고 `fail2ban-client status`에 jail이 보이는지 확인한다.
 - **`ausearch -ts`가 0건일 때**: 기록이 없다는 뜻이 아닐 수 있다(시각 해석·로그 순환). 감사 로그 원본 파일에서 해당 키(`-k`)가 찍혔는지 직접 확인한 뒤 판정한다.

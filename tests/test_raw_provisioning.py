@@ -626,7 +626,7 @@ def test_security_raw_tasks_gate_module_tasks_and_restart_through_raw_handlers()
     for name in ("Restart fail2ban", "Restart auditd"):
         module = next(h for h in handlers if h["name"] == name)
         assert "_raw_path_effective" in str(module["when"])
-        rawh = next(h for h in handlers if h.get("listen") == name)
+        rawh = next(h for h in handlers if h.get("listen") == name and "ansible.builtin.raw" in h)  # auditd는 검증 핸들러(#424)도 listen한다
         assert "ansible.builtin.raw" in rawh
         assert "failed_when: false" not in str(rawh) and rawh["failed_when"] is not False
 

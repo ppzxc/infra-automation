@@ -141,6 +141,70 @@ kisa_find() {
   fi
 }
 
+# getcap 출력(표준입력)과 기본 목록을 "<경로> <capability 이름>" 줄로 정규화한다. 옛 libcap(CentOS 6/7)은
+# `경로 = cap_net_raw+ep`, 현재 libcap은 `경로 cap_net_raw=ep`로 낸다. 플래그(=ep, +p)는 버리고,
+# capability 이름은 쉼표·공백으로 갈라 정렬·중복 제거한 집합으로 만든다(순서가 달라도 같은 줄이 된다).
+# 경로는 첫 " cap_" 앞까지로 보므로 공백이 있어도 통째로 남는다(경로에 " cap_"이 들어 있으면 못 가른다).
+kisa_cap_norm() {
+  awk '{
+    i = index($0, " cap_")
+    if (i == 0) next
+    path = substr($0, 1, i - 1)
+    sub(/ =$/, "", path)
+    spec = substr($0, i + 1)
+    gsub(/[ \t]+/, ",", spec)
+    gsub(/[=+-][eipEIP]*/, "", spec)
+    n = split(spec, a, ",")
+    m = 0
+    for (j = 1; j <= n; j++) {
+      if (a[j] == "") continue
+      for (k = 1; k <= m && b[k] != a[j]; k++) ;
+      if (k <= m) continue
+      for (k = m; k >= 1 && b[k] > a[j]; k--) b[k + 1] = b[k]
+      b[k + 1] = a[j]
+      m++
+    }
+    out = b[1]
+    for (j = 2; j <= m; j++) out = out "," b[j]
+    print path " " out
+  }' | sort -u
+}
+
+# 파일에 getcap을 돌린다(U-23 file capability). SUID/SGID 탐색과 같은 마운트 집합·-xdev·시간 제한이다. 컨테이너 이미지 레이어
+# (/var/lib/docker/overlay2 등)는 호스트 파일이 아니라 이미지 내용이라 걸으면 같은 이미지가 늘 검토 항목으로 쏟아진다. 그래서
+# KISA_CAP_EXCLUDE(줄 단위 경로, 글롭 가능)와 일치하는 디렉터리는 들어가지 않는다(-prune). 항목마다 경로와 그 아래(경로/*)를 둘 다 걸어, 탐색 시작점(마운트)이
+# 제외 경로 안쪽(예: /var/lib/docker/overlay2가 별도 마운트)이어도 그 시작점째 건너뛴다. 비어 있으면 전부 탐색한다.
+# 이 제외는 capability 목록에만 걸리고 SUID/SGID 판정에는 걸리지 않는다.
+kisa_getcap_find() {
+  _kcf_roots=$(kisa_local_mounts)
+  _kcf_ifs=$IFS
+  IFS='
+'
+  set -f
+  set --
+  for _kcf_p in ${KISA_CAP_EXCLUDE:-}; do
+    [ -n "$_kcf_p" ] || continue
+    [ "$#" -gt 0 ] && set -- "$@" -o
+    set -- "$@" -path "$R$_kcf_p" -o -path "$R$_kcf_p/*"
+  done
+  set +f
+  IFS=$_kcf_ifs
+  if [ "$#" -gt 0 ]; then
+    # shellcheck disable=SC2086
+    kisa_find $_kcf_roots -xdev \( "$@" \) -prune -o -type f -exec getcap {} +
+  else
+    # shellcheck disable=SC2086
+    kisa_find $_kcf_roots -xdev -type f -exec getcap {} +
+  fi
+}
+
+# getcap을 쓸 수 있는가. 없거나(127) 실행할 수 없으면(126) 거짓이다.
+kisa_getcap_ok() {
+  command -v getcap >/dev/null 2>&1 || return 1
+  getcap /dev/null >/dev/null 2>&1
+  [ "$?" -lt 126 ]
+}
+
 # 로그인 가능한 계정의 "이름:홈" 목록 (sync·shutdown·halt 같은 관례적 특수 셸 계정 제외).
 kisa_login_homes() {
   [ -r "$R/etc/passwd" ] || return 0

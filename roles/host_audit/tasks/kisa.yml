@@ -15,7 +15,10 @@
     _host_audit_kisa_files: "{{ ['kisa/_lib.sh'] + (query('ansible.builtin.fileglob', role_path ~ '/files/kisa/U-*.sh') | sort) + ['kisa/_end.sh'] }}"
     # 줄 전체 주석은 빼고 보낸다(#122): 스크립트가 raw 명령 한 줄(인자)로 가므로 sudo·SSH 인용이
     # 겹쳐도 리눅스 단일 인자 상한(MAX_ARG_STRLEN 128KiB)보다 충분히 작게 유지한다.
+    # U-23의 file capability 배포판 기본 목록(#432)과 탐색 제외 경로는 역할 변수로 받아 스크립트 맨 앞의 셸 변수로 싣는다.
     _host_audit_kisa_script: |
+      KISA_CAP_DEFAULTS={{ host_audit_kisa_capability_defaults | join('\n') | quote }}
+      KISA_CAP_EXCLUDE={{ host_audit_kisa_capability_exclude_paths | join('\n') | quote }}
       {% for f in _host_audit_kisa_files %}{{ lookup('ansible.builtin.file', f) | regex_replace('(?m)^[ \t]*#.*\n', '') }}
       {% endfor %}
   register: _host_audit_kisa_probe

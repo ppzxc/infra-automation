@@ -31,7 +31,9 @@
               '/etc/profile.d/98-node-env.sh', '/etc/environment', chrony_path,
               '/etc/sudoers.d/99-security-policy', audit_rules_path, '/etc/fail2ban/jail.d/sshd.local',
               '/var/log/journal', '/etc/audit/auditd.conf', '/etc/systemd/journald.conf.d', '/etc/systemd/journald.conf.d/50-persistent.conf',
-              '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json'] }}
+              '/etc/ssh/trusted-user-ca-keys.pem', '/etc/boundary/node-metadata.json',
+              '/etc/audit/', '/etc/rsyslog.conf', '/etc/rsyslog.d/', '/etc/firewalld/', '/root/.ssh/authorized_keys',
+              '/var/log/wtmp', '/var/log/btmp', '/var/run/utmp', '/var/log/lastlog', '/etc/localtime'] }}
       read:
         - /etc/ssh/sshd_config
         - /home/infra-legacy/.ssh/authorized_keys
@@ -47,6 +49,7 @@
         sysctl: [sysctl, vm.swappiness, fs.protected_hardlinks, fs.protected_symlinks, kernel.randomize_va_space]
         timedatectl: [timedatectl, status]
         getenforce: [getenforce]
+        audit_loaded: [auditctl, -l]
         sshd_denied_source: [/usr/sbin/sshd, -T, -C, 'addr=198.51.100.1,user=root,host=probe']
         sshd_allowed_source: [/usr/sbin/sshd, -T, -C, 'addr=192.0.2.10,user=root,host=probe']
 
@@ -205,11 +208,40 @@
               - f.stat[audit_rules_path].mode == '0600'
               - "'-k identity' in f.read[audit_rules_path]"
               - "'-k container_config' in f.read[audit_rules_path]"
-              - "'execve' not in (f.read[audit_rules_path] | regex_replace('(?m)^#.*$', ''))"
-            fail_msg: "auditd rules file is missing, or still traces every execve."
+              # syscall 규칙(#431): 두 키 모두 b64·b32로, 로그인 사용자만(auid>=1000, auid unset 제외) 파일에 있다
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b64 .*-k var_log_delete$') | length >= 1"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b32 .*-k var_log_delete$') | length >= 1"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b64 -S .*-F auid>=1000 -F auid!=(unset|4294967295) -k kernel_module$') | length == 1"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b32 -S .*-F auid>=1000 -F auid!=(unset|4294967295) -k kernel_module$') | length == 1"
+              # 전수 execve 추적 금지: execve 규칙은 증적 전용 키(evidence_privileged_exec)의 자격 전환 필터(-C)가 붙은 것만이다
+              - "f.read[audit_rules_path] | regex_replace('(?m)^#.*$', '') | regex_findall('(?m)^.*-S execve.*$') | reject('search', ' -C (uid!=euid|gid!=egid) ') | list | length == 0"
+              # Evidence-Only Watch Key(#435): 알림 없이 증적으로만 남는 syscall 규칙 넷(b64·b32, 로그인 사용자만)과 감시 키(로그인 기록·시간)
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b64 -S execve -C (uid!=euid|gid!=egid) -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_privileged_exec$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b32 -S execve -C (uid!=euid|gid!=egid) -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_privileged_exec$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_file_delete$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S adjtimex,settimeofday -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_time_change$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S clock_settime -F a0=0x0 -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_time_change$') | length == 2"
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-a always,exit -F arch=b(64|32) -S mount -F auid>=1000 -F auid!=(unset|4294967295) -k evidence_mount$') | length == 2"
+            fail_msg: "auditd rules file is missing, still traces every execve, or lacks the evidence-only syscall rules (evidence_privileged_exec, evidence_file_delete, evidence_time_change, evidence_mount)."
           when:
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
+
+        # 적재 확인(#431): auditctl -l이 이 역할의 규칙(키 identity)을 보여 줄 때만 새 syscall 규칙 키가 적재돼 있어야 한다. 컨테이너처럼 auditctl이
+        # 규칙을 못 읽는 환경(rc != 0, auditctl -l은 syscall 규칙 키를 -F key=로도 찍으므로 키 이름만 본다)이나 아직 규칙이 안 올라온 환경은 건너뛴다. RHEL 계열의 적재 결함(#424)은 SEC-082·SEC-083과 핸들러가 고치며, 이 검사는 그 뒤에 새 키가 실제로 올라왔는지를 본다.
+        - name: "[VERIFY-SEC-012] Verify the syscall audit rules are loaded (auditctl -l)"
+          ansible.builtin.assert:
+            that:
+              - "'var_log_delete' in f.cmd.audit_loaded.stdout"
+              - "'kernel_module' in f.cmd.audit_loaded.stdout"
+              - "'evidence_privileged_exec' in f.cmd.audit_loaded.stdout"
+              - "'evidence_file_delete' in f.cmd.audit_loaded.stdout"
+              - "'evidence_time_change' in f.cmd.audit_loaded.stdout"
+              - "'evidence_mount' in f.cmd.audit_loaded.stdout"
+            fail_msg: "auditctl -l shows this role's rules but not the syscall rules (var_log_delete, kernel_module, evidence_*): rules are not loaded (see #424 on RHEL)."
+          when:
+            - f.cmd.audit_loaded.rc == 0
+            - "'identity' in f.cmd.audit_loaded.stdout"
 
         - name: "[VERIFY-SEC-013] Verify auditd service status"
           ansible.builtin.debug:
@@ -225,6 +257,30 @@
           when:
             - ansible_os_family == "RedHat"
             - f.stat['/etc/audit/auditd.conf'].exists
+
+        # 테스트 이미지에는 audit 패키지가 없다(컨테이너는 커널 감사 규칙도 적재할 수 없다). collect_facts가 auditctl을 못 찾으면 rc 127이고,
+        # 그 호스트는 SEC-082가 적재 단계를 건너뛴다. 도구가 있는 호스트에서만 적재 결과가 선언과 맞는지 본다.
+        # 적재·실패·낡은 규칙 재적재의 동작은 pytest tests/test_security_audit_reload.py가 가짜 auditctl/augenrules로 본다.
+        # 한계: SEC-082·SEC-083·핸들러의 건너뜀(skipped)은 Converge 플레이의 register(`security_audit_tools_probe`)라 별도 Verify 플레이에서 단언할 수 없다.
+        # 컨테이너 이미지에는 audit이 없어(rc 127) 도구 있음 + 커널 조회 불가 호스트를 재현할 수도 없다. 그 동작(건너뜀, SEC-084·SEC-085 경고, 적재 실패는 플레이 실패)은
+        # tests/test_security_audit_reload.py가 가짜 auditctl/augenrules로 검증한다. 이 단언은 조회 프로브가 정수 rc를 돌려줬는지만 본다(도구 없음 127, 조회 가능 0, 조회 불가 != 0).
+        - name: "[VERIFY-SEC-082] Verify the audit tools are absent (skipped), answer auditctl -l, or the kernel audit is not queryable (skipped)"
+          ansible.builtin.assert:
+            that:
+              - f.cmd.audit_loaded.rc is integer
+            fail_msg: "the audit rules probe did not run: {{ f.cmd.audit_loaded }}"
+          when: ansible_os_family == "RedHat"
+
+        - name: "[VERIFY-SEC-083] Verify the loaded audit rules match the declared keys when the audit tools exist"
+          ansible.builtin.assert:
+            that:
+              - f.cmd.audit_loaded.rc == 127 or ('identity' in f.cmd.audit_loaded.stdout and 'container_config' in f.cmd.audit_loaded.stdout)
+              - "'execve' not in f.cmd.audit_loaded.stdout"
+              # 파일 감시 키(#430): `auditctl -l` 표기(끝 `/`, -F 형식)가 버전마다 달라 줄 전체가 아니라 키 이름만 본다. 적재할 수 없는 호스트(rc != 0)는 건너뛴다.
+              - "f.cmd.audit_loaded.rc != 0 or (('audit_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/audit/'].exists)"
+              - "f.cmd.audit_loaded.rc != 0 or (('firewall_config' in f.cmd.audit_loaded.stdout) == f.stat['/etc/firewalld/'].exists)"
+            fail_msg: "auditctl -l does not show the declared rules (or the file watch keys of the existing paths), or still shows an execve rule: {{ f.cmd.audit_loaded.stdout }}"
+          when: ansible_os_family == "RedHat"
 
         - name: "[VERIFY-SEC-014] Verify sudoers timestamp and log configuration"
           ansible.builtin.assert:
@@ -298,6 +354,62 @@
             that:
               - "'/nonexistent/molecule-secret.env' not in f.read[audit_rules_path]"
             fail_msg: "a missing audit_watch_paths entry was written to the audit rules."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
+        # Audit Watch Key 4개(#430): 감시 키 줄은 후보 경로가 실제로 있을 때만 있고(없는 경로는 SEC-090/091이 거른다), 있으면 -p wa다.
+        # 컨테이너는 규칙을 적재할 수 없어 파일 내용을 본다. 적재 목록(`auditctl -l`)은 적재가 되는 호스트(rc 0, 규칙 있음)에서만 같은 줄을 확인한다.
+        - name: "[VERIFY-SEC-090] Verify audit watch keys are rendered exactly for the paths that exist"
+          ansible.builtin.assert:
+            that:
+              - "('-w /etc/audit/ -p wa -k audit_config' in f.read[audit_rules_path]) == f.stat['/etc/audit/'].exists"
+              - "('-w /etc/rsyslog.conf -p wa -k syslog_config' in f.read[audit_rules_path]) == f.stat['/etc/rsyslog.conf'].exists"
+              - "('-w /etc/rsyslog.d/ -p wa -k syslog_config' in f.read[audit_rules_path]) == f.stat['/etc/rsyslog.d/'].exists"
+              - "('-w /etc/firewalld/ -p wa -k firewall_config' in f.read[audit_rules_path]) == f.stat['/etc/firewalld/'].exists"
+              - "('-w /root/.ssh/authorized_keys -p wa -k ssh_keys' in f.read[audit_rules_path]) == f.stat['/root/.ssh/authorized_keys'].exists"
+              - "'/nonexistent/molecule-firewalld/' not in f.read[audit_rules_path]"
+            fail_msg: "an audit watch key line does not match whether its path exists (a missing path must be left out)."
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
+        # Evidence-Only Watch Key 감시 경로(#435, 이야기 26): 경로가 있으면 규칙에 있고, 없으면 규칙에 없다(없는 `-w`가 적재를 깨지 않게 SEC-100·SEC-101이 거른다).
+        # 테스트 이미지에 경로가 있는지는 이미지마다 달라, 존재 여부를 수집해 그 값과 맞는지를 본다.
+        - name: "[VERIFY-SEC-100] Verify each evidence watch path is in the audit rules exactly when it exists"
+          ansible.builtin.assert:
+            that:
+              - "(('-w ' ~ item.path ~ ' -p wa -k ' ~ item.key ~ '\n') in f.read[audit_rules_path]) == (f.stat[item.path].exists | bool)"
+            fail_msg: "evidence watch path {{ item.path }}: present in the audit rules does not match whether it exists on the host."
+          loop:
+            - {path: /var/log/wtmp, key: evidence_login_records}
+            - {path: /var/log/btmp, key: evidence_login_records}
+            - {path: /var/run/utmp, key: evidence_login_records}
+            - {path: /var/log/lastlog, key: evidence_login_records}
+            - {path: /etc/localtime, key: evidence_time_change}
+          loop_control:
+            label: "{{ item.key }}"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+
+        # 프로비저닝이 키를 배포한 계정(accounts[].keys)의 authorized_keys도 감시 키 줄이 있어야 한다(audit_ssh_key_accounts의 기본값).
+        - name: "[VERIFY-SEC-091] Verify the accounts that get public keys are watched as ssh_keys at the home the system resolved"
+          ansible.builtin.assert:
+            that:
+              - "('-w /home/' ~ item ~ '/.ssh/authorized_keys -p wa -k ssh_keys') in f.read[audit_rules_path]"
+            fail_msg: "the authorized_keys of a provisioned account is not watched (-k ssh_keys)."
+          loop: "{{ keyed_accounts }}"
+          when:
+            - ansible_os_family == "RedHat"
+            - f.stat[audit_rules_path].exists
+            - f.stat['/home/' ~ item ~ '/.ssh/authorized_keys'].exists
+
+        - name: "[VERIFY-SEC-101] Verify no evidence watch rule points outside the declared evidence paths"
+          ansible.builtin.assert:
+            that:
+              - "f.read[audit_rules_path] | regex_findall('(?m)^-w (\\S+) -p wa -k evidence_\\w+$') | difference(['/var/log/wtmp', '/var/log/btmp', '/var/run/utmp', '/var/log/lastlog', '/etc/localtime']) | length == 0"
+            fail_msg: "an evidence watch rule points outside audit_evidence_watch_paths."
           when:
             - ansible_os_family == "RedHat"
             - f.stat[audit_rules_path].exists
@@ -472,6 +584,7 @@
           - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-01') | first).evidence is search('PermitRootLogin')
           - record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-16') | map(attribute='verdict') | first == '양호'
           - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-23') | first).evidence is search('/su')
+          - (record.config_vulnerability.results | selectattr('code', 'equalto', 'KISA-2026:U-23') | first).evidence is search('file capability')
         fail_msg: "Unexpected KISA-2026 verdicts: {{ record.config_vulnerability.results }}"
 
 # ------------------------------------------------------------------------------

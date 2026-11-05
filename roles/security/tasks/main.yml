@@ -150,6 +150,43 @@
       failed_when: false
       when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
 
+    # Audit Watch Key 4개(#430)의 없는 경로 거르기. 없는 경로에 watch를 걸면 규칙 적재가 실패하므로 있는 경로만 규칙에 싣는다.
+    # authorized_keys의 홈은 /home/<이름>이 아니라 getent passwd가 알려준 값이다. raw 태스크는 --check에서 건너뛴다(ADR-0005).
+    - name: "[SEC-092] Probe which audit watch key paths exist (raw, read-only)"
+      ansible.builtin.raw: >-
+        {{ (audit_watch_key_paths | dict2items | rejectattr('key', 'equalto', 'ssh_keys') | map(attribute='value') | flatten)
+           | raw_ssh_key_exists_cmd((['root'] + audit_ssh_key_accounts) | unique) }}
+      register: security_audit_watch_key_raw
+      changed_when: false
+      failed_when: false
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
+    - name: "[SEC-093] Keep only existing audit watch key paths (raw)"
+      ansible.builtin.set_fact:
+        _audit_watch_key_paths_effective: >-
+          {%- set found = security_audit_watch_key_raw.stdout | default('') | raw_exists_found -%}
+          {%- set r = [] -%}
+          {%- for key, paths in audit_watch_key_paths.items() if key != 'ssh_keys' -%}
+          {%- for p in paths if p in found -%}{%- set _ = r.append({'key': key, 'path': p}) -%}{%- endfor -%}
+          {%- endfor -%}
+          {%- for p in found if p.endswith('/.ssh/authorized_keys') -%}{%- set _ = r.append({'key': 'ssh_keys', 'path': p}) -%}{%- endfor -%}
+          {{ r | to_json }}
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
+    # Evidence-Only Watch Key 감시 경로(#435) 거르기, 모듈 경로의 SEC-100·SEC-101과 같은 일. 이것이 없으면 템플릿의 기본 목록(wtmp·btmp·utmp·lastlog·localtime)이
+    # 있는지 보지 않고 `-w`로 나가 없는 경로가 규칙 적재를 깰 수 있다. raw 태스크는 --check에서 건너뛴다(ADR-0005).
+    - name: "[SEC-094] Probe which audit_evidence_watch_paths exist (raw, read-only)"
+      ansible.builtin.raw: "{{ audit_evidence_watch_paths | default([]) | map(attribute='path') | list | raw_exists_cmd }}"
+      register: security_audit_evidence_raw
+      changed_when: false
+      failed_when: false
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
+    - name: "[SEC-095] Keep only existing evidence watch paths (raw)"
+      ansible.builtin.set_fact:
+        _audit_evidence_watch_paths_effective: "{{ audit_evidence_watch_paths | default([]) | selectattr('path', 'in', security_audit_evidence_raw.stdout | default('') | raw_exists_found) | list }}"
+      when: "'__RAW_RC__ 0' in (sec012_raw_installed.stdout | default(''))"
+
     - name: "[SEC-035] Deploy Auditd security audit rules via write-temp/validate/move (raw)"
       ansible.builtin.raw: >-
         {{ sec012_raw_content | raw_push_cmd(sec012_raw_dest, 'root', 'root', '0600', 'true') }}
@@ -997,6 +1034,46 @@
     _audit_watch_paths_effective: "{{ security_audit_watch_stat.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
   when: not (_raw_path_effective | default(false) | bool)
 
+# Audit Watch Key 4개(#430): 후보 경로(audit_watch_key_paths) 중 실제로 있는 것만 규칙에 싣는다. `~계정`은 stat이 그 계정의 홈으로 바꾼다
+# (계정이 없으면 exists=false라 건너뛴다). 규칙 파일을 배포하는 조건(SEC-012)과 같은 호스트에서만 돈다.
+- name: "[SEC-090] Check which audit watch key paths exist"
+  ansible.builtin.stat:
+    path: "{{ item.1 }}"
+  loop: "{{ audit_watch_key_paths | dict2items | subelements('value') }}"
+  loop_control:
+    label: "{{ item.0.key }}: {{ item.1 }}"
+  register: security_audit_watch_key_stat
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+
+- name: "[SEC-091] Keep only existing audit watch key paths"
+  ansible.builtin.set_fact:
+    _audit_watch_key_paths_effective: >-
+      {%- set r = [] -%}
+      {%- for res in security_audit_watch_key_stat.results | default([]) if res.stat.exists | default(false) -%}
+      {%- set _ = r.append({'key': res.item.0.key, 'path': res.stat.path | default(res.item.1)}) -%}
+      {%- endfor -%}
+      {{ r | to_json }}
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+
+# Evidence-Only Watch Key 감시 경로(#435, 이야기 26): 없는 경로의 `-w`가 규칙 적재를 깨지 않게 있는 것만 템플릿에 넘긴다(SEC-055·SEC-056과 같은 방식).
+- name: "[SEC-100] Check which audit_evidence_watch_paths exist"
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ audit_evidence_watch_paths | default([]) }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: security_audit_evidence_stat
+  when: not (_raw_path_effective | default(false) | bool)
+
+- name: "[SEC-101] Keep only existing evidence watch paths"
+  ansible.builtin.set_fact:
+    _audit_evidence_watch_paths_effective: "{{ security_audit_evidence_stat.results | default([]) | selectattr('stat.exists', 'defined') | selectattr('stat.exists') | map(attribute='item') | list }}"
+  when: not (_raw_path_effective | default(false) | bool)
+
 - name: "[SEC-012] Deploy Auditd security audit rules"
   ansible.builtin.template:
     src: audit.rules.j2
@@ -1008,7 +1085,7 @@
   when:
     - ansible_os_family == "RedHat"
     - not (_raw_path_effective | default(false) | bool)
-  notify: Restart auditd
+  notify: Restart auditd  # 이름은 그대로지만 재시작이 아니라 `augenrules --load`다(handlers/main.yml)
   # audit 패키지가 없어 규칙 디렉터리가 없는 호스트만 건너뛴다(이 역할은 auditd를 설치하지 않는다). 그 밖의 실패는 그대로 드러낸다.
   failed_when:
     - security_audit_rules_result is failed
@@ -1027,6 +1104,77 @@
   failed_when:
     - security_auditd_service_result is failed
     - "'Could not find the requested service' not in (security_auditd_service_result.msg | default(''))"
+
+# 규칙 적재(#424). systemd의 auditd 유닛은 RefuseManualStop=yes라 서비스 재시작을 거부한다. 그래서 규칙 파일을 바꿔도 커널의 적재 규칙은
+# 그대로였고 옛 핸들러가 그 실패를 failed_when: false로 가렸다. 이제 핸들러 `Restart auditd`가 `augenrules --load`로 재시작 없이 적재하고,
+# 적재 실패는 플레이 실패로 드러낸다(핸들러는 이 역할이 만든 규칙 파일이 바뀔 때, 또는 아래 SEC-083이 drift를 찾을 때 실행된다).
+# audit 패키지가 없는 호스트(auditctl 없음)와, 도구는 있어도 커널 audit을 조회할 수 없는 호스트(`auditctl -s` 실패: 커널 audit 비활성·컨테이너)는
+# 적재 단계를 건너뛴다. 이 역할은 auditd를 설치하지 않는다. 조회할 수 없는 호스트에서 `auditctl -l` 실패가 SEC-083·적재 뒤 확인으로 번져
+# 역할 전체를 실패시키는 것을 막는 사전 확인이다. 조회가 되는 호스트에서 `augenrules --load`가 실패하면 그것은 그대로 플레이 실패다(#424).
+# 한계: `auditctl -s`가 일시적으로 실패한 호스트는 그 실행에서 조용히 건너뛴다(다음 실행이 다시 확인한다).
+- name: "[SEC-082] Check whether the audit tools are installed and the kernel audit answers (read-only)"
+  ansible.builtin.shell: command -v auditctl && command -v augenrules && auditctl -s >/dev/null 2>&1
+  args:
+    executable: /bin/sh
+  register: security_audit_tools_probe
+  changed_when: false
+  failed_when: false
+  # 조회 전용이라 --check에서도 실행해야 SEC-083이 check 모드에서 적재 drift를 판정한다.
+  check_mode: false
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+
+# 파일이 이미 최신이어도 적재된 규칙이 낡았을 수 있다(#372 이전 규칙이 재부팅 전까지 남은 호스트). 그래서 파일 변경이 아니라
+# '적재된 규칙 != 배포할 규칙'을 changed로 보고 같은 핸들러를 부른다. 이 태스크 자체는 불일치로 실패하지 않는다(--check의 Drift 판정이
+# 막히지 않게). --check에서는 changed 태스크로 Configuration Drift 표에 나오고, 적재는 핸들러가 적용 실행에서만 한다.
+# 비교는 디스크 파일이 아니라 렌더링한 템플릿과 한다: --check에서도 선언 상태와 비교하기 위해서다. augenrules는 rules.d의 모든 .rules를 합쳐 적재하므로
+# 이 역할 밖 파일의 규칙도 선언으로 본다(조회 스크립트 vars/main.yml이 함께 읽는다).
+# 감사 규칙 비교 기준(근사)은 filter_plugins/audit_rules.py 머리말.
+- name: "[SEC-083] Compare the loaded audit rules with the declared rules (read-only)"
+  ansible.builtin.shell: "{{ security_audit_loaded_probe_cmd }}"
+  args:
+    executable: /bin/sh
+  vars:
+    audit_rules_declared: "{{ lookup('ansible.builtin.template', 'audit.rules.j2') }}"
+  register: security_audit_loaded_probe
+  # `auditctl -l`이 실패하면(rc != 0) 적재 상태를 알 수 없다: drift로 보지 않고(재적재하지 않고) 실패로도 만들지 않는다. SEC-082가 `auditctl -s`로 조회 가능한
+  # 호스트만 통과시키므로 여기서의 실패는 드물고, 이 실행에서만 건너뛴다. 규칙 파일이 바뀌어 적재한 경우의 확인 실패는 핸들러가 실패로 드러낸다.
+  failed_when: false
+  changed_when:
+    - security_audit_loaded_probe.rc | default(1) == 0
+    - (security_audit_loaded_probe.stdout | default('') | audit_rules_probe_drift(audit_rules_declared)) | length > 0
+  check_mode: false
+  notify: Restart auditd
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+    - (security_audit_tools_probe.rc | default(1)) == 0
+
+# 적재를 건너뛴 것이 조용히 ok로 끝나지 않게 경고를 남긴다(실패시키지 않는다: 커널 audit을 쓸 수 없는 호스트가 규칙이 바뀔 때마다 프로비저닝 실패가
+# 되기 때문이다). 경고는 debug라 --check(Drift 하위 실행)에서도 출력된다. 메시지에는 경로를 싣지 않는다.
+- name: "[SEC-084] Warn that the changed audit rules were not loaded (audit tools or kernel audit unavailable)"
+  ansible.builtin.debug:
+    msg: >-
+      감사 규칙 파일이 바뀌었지만 audit 도구가 없거나 커널 audit을 조회할 수 없어(auditctl -s 실패) 규칙이 적재되지 않았다.
+      커널 audit을 조회할 수 있게 된 뒤 첫 실행에서 SEC-083이 낡은 적재 상태를 감지해 적재한다.
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+    - security_audit_rules_result is changed
+    - (security_audit_tools_probe.rc | default(1)) != 0
+
+# `auditctl -s`는 되는데 `auditctl -l`만 실패하는 호스트가 영구히 ok로 보이지 않게 한다: 적재 상태를 알 수 없음으로 표시한다(실패·changed 아님).
+- name: "[SEC-085] Warn that the loaded audit rules could not be read (state unknown)"
+  ansible.builtin.debug:
+    msg: >-
+      auditctl -l이 실패해 적재된 감사 규칙을 읽지 못했다(rc {{ security_audit_loaded_probe.rc | default('?') }}). 적재 상태를 알 수 없음이라
+      drift로 보지 않고 재적재하지 않았다. 이 호스트에서 auditctl -l을 직접 확인해야 한다.
+  when:
+    - ansible_os_family == "RedHat"
+    - not (_raw_path_effective | default(false) | bool)
+    - (security_audit_tools_probe.rc | default(1)) == 0
+    - security_audit_loaded_probe.rc | default(0) != 0
 
 # auditd 로그 로테이션(#364 후속): 파일 크기(MB)와 보관 개수로 상한을 둔다. auditd는 서비스 재시작을 거부하므로 reload(HUP)로 반영한다.
 # audit 패키지가 없어 auditd.conf가 없는 호스트만 건너뛴다.

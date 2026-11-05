@@ -1,0 +1,308 @@
+"""security 역할의 파일 감시 키 4개(auditd 설정·syslog 설정·authorized_keys·방화벽 영구 설정) 테스트(Spec #433 / Ticket-4, #430).
+
+규칙 렌더링은 세션당 한 번인 공유 렌더링(`tests/security_render.py`)을 읽는다(`ansible-playbook`을 테스트마다 돌리지 않으므로 `slow`가 아니다).
+없는 경로 거르기(SEC-090~SEC-093)는 태스크 구조와, 태스크가 쓰는 식·셸 명령을 가짜 입력으로 돌려 본다.
+"""
+import ast
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+from jinja2 import Environment
+
+from security_render import ROOT_DIR, rule_lines, security_task, security_tasks, shared_render
+
+sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
+from raw_provisioning import raw_exists_cmd, raw_exists_found, raw_ssh_key_exists_cmd  # noqa: E402
+
+pytestmark = pytest.mark.xdist_group("security-render")
+
+WATCH_KEYS = ("audit_config", "syslog_config", "ssh_keys", "firewall_config")
+
+
+@pytest.fixture(scope="session")
+def security_rendered():
+    return shared_render()
+
+
+# --- 규칙 렌더링 ----------------------------------------------------------------------------------
+
+def test_audit_rules_watch_the_four_audit_watch_keys_for_the_existing_paths(security_rendered):
+    lines = rule_lines(security_rendered["watch_keys"]["audit"])
+    for expected in ("-w /etc/audit/ -p wa -k audit_config",
+                     "-w /etc/rsyslog.conf -p wa -k syslog_config", "-w /etc/rsyslog.d/ -p wa -k syslog_config",
+                     "-w /root/.ssh/authorized_keys -p wa -k ssh_keys", "-w /home/alice/.ssh/authorized_keys -p wa -k ssh_keys",
+                     "-w /etc/firewalld/ -p wa -k firewall_config"):
+        assert expected in lines, expected
+
+
+def test_a_json_string_fact_renders_the_same_lines_as_a_list(security_rendered):
+    """set_fact의 결과는 Ansible 버전에 따라 JSON 문자열로 남는다. 템플릿은 두 형태를 같게 읽는다."""
+    lines = rule_lines(security_rendered["watch_keys_as_json"]["audit"])
+    assert "-w /etc/audit/ -p wa -k audit_config" in lines and "-w /root/.ssh/authorized_keys -p wa -k ssh_keys" in lines
+
+
+def test_audit_watch_keys_are_absent_until_the_existence_probe_has_run(security_rendered):
+    """팩트가 없으면(탐지 태스크가 건너뛴 경우)·남은 경로가 없으면 감시 키 줄을 만들지 않는다. 없는 경로에 watch를 걸면 규칙 적재가 실패하기 때문이다."""
+    for case in ("default", "watch_keys_none_exist"):
+        text = security_rendered[case]["audit"]
+        for key in WATCH_KEYS:
+            assert f"-k {key}" not in text, (case, key)
+
+
+def test_audit_rules_have_no_malformed_watch_line_in_any_case(security_rendered):
+    for case, out in security_rendered.items():
+        for line in rule_lines(out.get("audit", "")):
+            if line.startswith("-w "):
+                path = line.split()[1]
+                assert path.startswith("/") and "~" not in path, (case, line)
+            assert line != "-w  -p wa -k", case
+
+
+def test_audit_watch_keys_are_write_and_attribute_watches_without_read(security_rendered):
+    """읽기(r)까지 감시하면 sshd가 authorized_keys를 읽을 때마다 기록된다. 변경(w)과 속성(a)만 본다."""
+    lines = [ln for ln in rule_lines(security_rendered["watch_keys"]["audit"]) if any(f"-k {k}" in ln for k in WATCH_KEYS)]
+    assert len(lines) == 6
+    assert all(" -p wa " in ln for ln in lines), lines
+
+
+def test_the_four_keys_leave_the_existing_watch_keys_untouched(security_rendered):
+    lines = rule_lines(security_rendered["watch_keys"]["audit"])
+    for expected in ("-w /etc/shadow -p wa -k identity", "-w /etc/pam.d/ -p wa -k auth_config",
+                     "-w /etc/ssh/sshd_config -p wa -k sshd_config", "-w /etc/docker/ -p wa -k container_config"):
+        assert expected in lines, expected
+
+
+# --- 후보 경로(역할 기본 변수) -----------------------------------------------------------------------
+
+def test_the_watch_key_candidates_always_include_root_even_with_an_empty_account_list(security_rendered):
+    for case in ("ssh_accounts_empty", "default"):
+        paths = json.loads(security_rendered[case]["watch_key_paths"])
+        assert paths["ssh_keys"] == ["~root/.ssh/authorized_keys"], case
+
+
+def test_the_watch_key_candidates_add_the_designated_accounts_once(security_rendered):
+    paths = json.loads(security_rendered["ssh_accounts_two"]["watch_key_paths"])
+    assert paths["ssh_keys"] == ["~root/.ssh/authorized_keys", "~alice/.ssh/authorized_keys", "~bob/.ssh/authorized_keys"]
+    paths = json.loads(security_rendered["ssh_accounts_duplicate_root"]["watch_key_paths"])
+    assert paths["ssh_keys"] == ["~root/.ssh/authorized_keys", "~alice/.ssh/authorized_keys"]
+
+
+def test_the_default_account_list_is_the_accounts_that_provisioning_gives_public_keys(security_rendered):
+    """root는 접속이 막혀 키가 없는 호스트가 많아, 기본이 root뿐이면 감시 키가 사실상 비어 있다. 키를 배포받는 계정이 기본이다."""
+    paths = json.loads(security_rendered["ssh_accounts_from_provisioned_accounts"]["watch_key_paths"])
+    assert paths["ssh_keys"] == ["~root/.ssh/authorized_keys", "~alice/.ssh/authorized_keys", "~erin/.ssh/authorized_keys"]
+
+
+def test_the_watch_key_candidates_name_exactly_the_four_keys_and_their_paths(security_rendered):
+    paths = json.loads(security_rendered["default"]["watch_key_paths"])
+    assert set(WATCH_KEYS) <= set(paths)      # 집합 포함: 다른 티켓(증적 전용 키 등)이 키를 더해도 깨지지 않는다
+    assert paths["audit_config"] == ["/etc/audit/"]
+    assert paths["syslog_config"] == ["/etc/rsyslog.conf", "/etc/rsyslog.d/"]
+    assert paths["firewall_config"] == ["/etc/firewalld/"]
+
+
+# --- 없는 경로 거르기: 모듈 경로(SEC-090·SEC-091) ----------------------------------------------------
+
+def _order(spec_id):
+    names = [t["name"] for t in security_tasks()]
+    return names.index(next(n for n in names if n.startswith(f"[{spec_id}]")))
+
+
+def test_the_existence_filter_runs_before_the_rules_are_deployed():
+    assert _order("SEC-090") < _order("SEC-091") < _order("SEC-012")
+    assert _order("SEC-092") < _order("SEC-093") < _order("SEC-035")
+
+
+def test_the_module_probe_stats_every_candidate_path_and_is_read_only():
+    task = security_task("SEC-090")
+    assert task["ansible.builtin.stat"]["path"] == "{{ item.1 }}"
+    assert "audit_watch_key_paths" in yaml.safe_dump(task["loop"]) and "subelements" in yaml.safe_dump(task["loop"])
+    assert task["register"] == "security_audit_watch_key_stat"
+    assert any("_raw_path_effective" in w for w in task["when"] if isinstance(w, str)) or "_raw_path_effective" in str(task["when"])
+
+
+def _env():
+    """태스크의 식을 Ansible 밖에서 돌리는 Jinja 환경(Ansible 필터 중 식이 쓰는 것만 더한다)."""
+    env = Environment()
+    env.filters["to_json"] = json.dumps
+    env.filters["raw_exists_found"] = raw_exists_found
+    env.filters["raw_exists_cmd"] = raw_exists_cmd
+    return env
+
+
+def _stat_result(key, path, exists, real_path=None):
+    stat = {"exists": exists}
+    if exists:
+        stat["path"] = real_path or path
+    return {"item": [{"key": key, "value": [path]}, path], "stat": stat}
+
+
+def _filter_module_fact(results):
+    expr = security_task("SEC-091")["ansible.builtin.set_fact"]["_audit_watch_key_paths_effective"]
+    return json.loads(_env().from_string(expr).render(security_audit_watch_key_stat={"results": results}))
+
+
+def test_the_module_filter_keeps_only_existing_paths_with_the_home_the_system_resolved():
+    fact = _filter_module_fact([
+        _stat_result("audit_config", "/etc/audit/", True),
+        _stat_result("firewall_config", "/etc/firewalld/", False),
+        _stat_result("ssh_keys", "~root/.ssh/authorized_keys", True, "/root/.ssh/authorized_keys"),
+        _stat_result("ssh_keys", "~alice/.ssh/authorized_keys", True, "/srv/home/alice/.ssh/authorized_keys"),
+        _stat_result("ssh_keys", "~ghost/.ssh/authorized_keys", False),
+    ])
+    assert fact == [
+        {"key": "audit_config", "path": "/etc/audit/"},
+        {"key": "ssh_keys", "path": "/root/.ssh/authorized_keys"},
+        {"key": "ssh_keys", "path": "/srv/home/alice/.ssh/authorized_keys"},
+    ]
+
+
+def test_the_module_filter_leaves_an_empty_list_when_nothing_exists():
+    assert _filter_module_fact([_stat_result("firewall_config", "/etc/firewalld/", False)]) == []
+    assert _filter_module_fact([]) == []
+
+
+# --- 없는 경로 거르기: CentOS 6/7 raw 경로(SEC-092·SEC-093) -------------------------------------------
+
+def test_the_raw_probe_is_read_only_and_runs_only_on_the_raw_path():
+    probe = security_task("SEC-092")
+    assert "ansible.builtin.raw" in probe and probe["changed_when"] is False and probe["failed_when"] is False
+    assert probe["register"] == "security_audit_watch_key_raw"
+    set_fact = security_task("SEC-093")
+    assert "ansible.builtin.set_fact" in set_fact and "_audit_watch_key_paths_effective" in set_fact["ansible.builtin.set_fact"]
+    # 두 태스크는 raw 경로 블록 안에 있어 모듈 경로 호스트에서는 실행되지 않는다(블록의 when).
+    block = next(t for t in yaml.safe_load((ROOT_DIR / "roles" / "security" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+                 if t.get("block") and any(str(b.get("name", "")).startswith("[SEC-092]") for b in t["block"]))
+    assert "_raw_path_effective" in str(block["when"])
+
+
+def _run(cmd, env_path=None):
+    env = dict(os.environ)
+    if env_path:
+        env["PATH"] = env_path + os.pathsep + env["PATH"]
+    return subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=30)
+
+
+def test_the_raw_probe_finds_fixed_paths_and_each_accounts_home_from_the_system(tmp_path):
+    fixed = tmp_path / "audit"
+    fixed.mkdir()
+    missing = tmp_path / "firewalld"
+    home = tmp_path / "srv-home" / "alice"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "authorized_keys").write_text("x\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # 가짜 getent: alice만 있고 그 홈은 시스템이 정한 경로(/home 밖)다.
+    (bin_dir / "getent").write_text(f'#!/bin/sh\n[ "$2" = alice ] && echo "alice:x:1000:1000::{home}:/bin/bash"\nexit 0\n', encoding="utf-8")
+    (bin_dir / "getent").chmod(0o755)
+    cmd = raw_ssh_key_exists_cmd([str(fixed), str(missing)], ["root", "alice", "ghost"])
+    res = _run(cmd, str(bin_dir))
+    assert res.returncode == 0, res.stderr
+    assert sorted(raw_exists_found(res.stdout)) == sorted([str(fixed), str(home / ".ssh" / "authorized_keys")])
+
+
+def test_the_raw_probe_survives_an_account_name_with_shell_metacharacters(tmp_path):
+    marker = tmp_path / "pwned"
+    cmd = raw_ssh_key_exists_cmd([], [f"x; touch {marker}"])
+    res = _run(cmd)
+    assert res.returncode == 0 and not marker.exists()
+
+
+def test_the_raw_fact_keeps_each_found_path_under_its_key():
+    expr = security_task("SEC-093")["ansible.builtin.set_fact"]["_audit_watch_key_paths_effective"]
+    stdout = "__RAW_EXISTS__ /etc/audit/\n__RAW_EXISTS__ /etc/rsyslog.d/\n__RAW_EXISTS__ /home/alice/.ssh/authorized_keys\n__RAW_EXISTS__ /root/.ssh/authorized_keys\r\n"
+    fixed = {"audit_config": ["/etc/audit/"], "syslog_config": ["/etc/rsyslog.conf", "/etc/rsyslog.d/"], "firewall_config": ["/etc/firewalld/"]}
+    out = _env().from_string(expr).render(
+        security_audit_watch_key_raw={"stdout": stdout}, audit_watch_key_paths=dict(fixed, ssh_keys=["~root/.ssh/authorized_keys"]))
+    got = json.loads(out)
+    assert {(e["key"], e["path"]) for e in got} == {
+        ("audit_config", "/etc/audit/"), ("syslog_config", "/etc/rsyslog.d/"),
+        ("ssh_keys", "/home/alice/.ssh/authorized_keys"), ("ssh_keys", "/root/.ssh/authorized_keys")}
+
+
+# --- 증적 감시 경로 거르기: CentOS 6/7 raw 경로(SEC-094·SEC-095, 라운드 2 리뷰) ---------------------------------
+# raw 경로에 이 거르기가 없으면 템플릿에 하드코딩된 기본 다섯 경로가 있는지 없는지 보지 않고 `-w`로 나간다. 없는 경로의 `-w`는 규칙 적재를 깰 수 있다.
+
+EVIDENCE_DEFAULTS = [{"path": "/var/log/wtmp", "key": "evidence_login_records"}, {"path": "/var/run/utmp", "key": "evidence_login_records"},
+                     {"path": "/etc/localtime", "key": "evidence_time_change"}]
+
+
+def test_the_raw_evidence_filter_runs_in_the_raw_block_before_the_rules_are_deployed():
+    probe, fact = security_task("SEC-094"), security_task("SEC-095")
+    assert "ansible.builtin.raw" in probe and probe["changed_when"] is False and probe["failed_when"] is False
+    assert "ansible.builtin.set_fact" in fact and "_audit_evidence_watch_paths_effective" in fact["ansible.builtin.set_fact"]
+    assert _order("SEC-094") < _order("SEC-095") < _order("SEC-035")
+    raw = yaml.safe_load((ROOT_DIR / "roles" / "security" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    block = next(t for t in raw if t.get("block") and any(str(b.get("name", "")).startswith("[SEC-094]") for b in t["block"]))
+    assert "_raw_path_effective" in str(block["when"])
+    assert probe["when"] == security_task("SEC-092")["when"] and fact["when"] == probe["when"]   # auditd가 설치된 호스트에서만(SEC-035와 같은 조건)
+
+
+def test_the_raw_evidence_probe_command_lists_the_existing_candidate_paths(tmp_path):
+    existing = tmp_path / "wtmp"
+    existing.write_text("x", encoding="utf-8")
+    missing = tmp_path / "btmp"
+    cmd = _env().from_string(security_task("SEC-094")["ansible.builtin.raw"]).render(
+        audit_evidence_watch_paths=[{"path": str(existing), "key": "evidence_login_records"}, {"path": str(missing), "key": "evidence_login_records"}])
+    res = _run(cmd)
+    assert res.returncode == 0, res.stderr
+    assert raw_exists_found(res.stdout) == [str(existing)]
+
+
+def test_the_raw_evidence_fact_keeps_only_the_paths_the_probe_found_with_their_keys():
+    expr = security_task("SEC-095")["ansible.builtin.set_fact"]["_audit_evidence_watch_paths_effective"]
+    out = _env().from_string(expr).render(
+        security_audit_evidence_raw={"stdout": "__RAW_EXISTS__ /var/log/wtmp\r\n__RAW_EXISTS__ /etc/localtime\n"}, audit_evidence_watch_paths=EVIDENCE_DEFAULTS)
+    # Ansible는 목록 모양의 식 결과를 목록으로 되돌린다(SEC-101과 같은 방식). 템플릿이 문자열이 아닌 목록을 읽는다.
+    assert ast.literal_eval(out) == [EVIDENCE_DEFAULTS[0], EVIDENCE_DEFAULTS[2]]
+    none = _env().from_string(expr).render(security_audit_evidence_raw={"stdout": ""}, audit_evidence_watch_paths=EVIDENCE_DEFAULTS)
+    assert ast.literal_eval(none) == []
+
+
+def test_a_raw_host_with_no_evidence_paths_renders_no_evidence_watch(security_rendered):
+    # 팩트가 빈 목록이면(탐지 결과 하나도 없음) 5경로가 그대로 나가지 않는다. 템플릿은 비어 있는 팩트를 기본 목록으로 되돌리지 않아야 한다.
+    lines = rule_lines(security_rendered["evidence_paths_all_missing"]["audit"])
+    assert not any(ln.startswith("-w ") and "evidence_" in ln for ln in lines)
+
+
+# --- 에이전트만 설치된 호스트에는 영향이 없다 ---------------------------------------------------------
+
+def test_the_new_tasks_have_the_same_gates_as_the_rules_deployment_they_feed():
+    """새 태스크는 감사 규칙 배포(SEC-012/SEC-035)와 같은 조건에서만 돌고, 규칙 배포는 이 변경으로 대상이 넓어지지 않는다."""
+    assert security_task("SEC-090")["when"] == security_task("SEC-012")["when"]
+    assert security_task("SEC-091")["when"] == security_task("SEC-012")["when"]
+    raw = yaml.safe_load((ROOT_DIR / "roles" / "security" / "tasks" / "main.yml").read_text(encoding="utf-8"))
+    block = next(t for t in raw if t.get("block") and any(str(b.get("name", "")).startswith("[SEC-035]") for b in t["block"]))
+    assert {b["name"][:9] for b in block["block"]} >= {"[SEC-092]", "[SEC-093]", "[SEC-035]"}
+
+
+def test_only_the_provisioning_entry_points_run_the_security_role_and_the_docs_say_what_that_guarantees():
+    """감사 규칙은 security 역할만 배포한다. 에이전트만 설치하는 playbook(host_agents*)·점검 playbook(host_audit*)은 이 역할을 쓰지 않는다.
+    그러나 CLI 전용 maintenance.yml·site.yml은 servers 전체에 security를 돌린다(기존 동작). 에이전트만 설치된 호스트(agents_only)에 안 들어간다는 보장은
+    Semaphore Host Provisioning(provision_hosts.yml)이 provision_excluded를 접속 전에 거부하는 경로에서만 성립하고, CLI는 -l로 대상을 좁혀야 한다."""
+    users = sorted(p.name for p in (ROOT_DIR / "playbooks").glob("*.yml") if "role: security" in p.read_text(encoding="utf-8"))
+    assert users == ["maintenance.yml", "site.yml"], users
+    maintenance = (ROOT_DIR / "playbooks" / "maintenance.yml").read_text(encoding="utf-8")
+    assert "hosts: servers" in maintenance and "provision_excluded" not in maintenance      # CLI 진입점은 대상을 스스로 거르지 않는다
+    assert "provision_excluded" in (ROOT_DIR / "playbooks" / "provision_hosts.yml").read_text(encoding="utf-8")
+    doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    assert "Semaphore의 Host Provisioning(`provision_hosts.yml`)" in doc and "`maintenance.yml`·`site.yml`은 `servers` 전체에 `security`를 돌리므로" in doc
+    assert "`-l`/`target_hosts`로 대상을 좁혀야 한다" in doc
+
+
+def test_the_experiment_the_issue_asks_for_is_recorded_as_not_done_and_handed_to_the_apply_ticket():
+    doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    assert "카나리 실험 미실시, 확인 필요" in doc and "수용 기준" in doc and "미충족" in doc and "#436" in doc
+
+
+def test_the_docs_name_the_template_section_of_the_file_watch_keys_by_its_real_number():
+    """문서가 가리키는 규칙 파일의 구역 번호는 템플릿 절 번호와 같다(템플릿에 절이 더해져 번호가 밀려도 문서가 틀린 채 남지 않게)."""
+    template = (ROOT_DIR / "roles" / "security" / "templates" / "audit.rules.j2").read_text(encoding="utf-8")
+    doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
+    assert "# 5-1. Audit Watch Keys" in template and "5-1절(6절 Syscall 앞)" in doc and "6번 구역" not in doc
+    assert template.index("# 5-1. Audit Watch Keys") < template.index("# 6. Syscall")
