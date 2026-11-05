@@ -295,9 +295,12 @@ def test_only_the_provisioning_entry_points_run_the_security_role_and_the_docs_s
     assert "`-l`/`target_hosts`로 대상을 좁혀야 한다" in doc
 
 
-def test_the_experiment_the_issue_asks_for_is_recorded_as_not_done_and_handed_to_the_apply_ticket():
+def test_the_authorized_keys_experiment_result_and_what_is_still_open_are_recorded():
+    """실험은 카나리 한 대에서 했고(결과가 명세에 있다), 하지 못한 것(없는 경로 -w, 디렉터리 잡음·증가량)만 #436에 남는다."""
     doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
-    assert "카나리 실험 미실시, 확인 필요" in doc and "수용 기준" in doc and "미충족" in doc and "#436" in doc
+    assert "카나리 한 대 실측(2026-11-05)" in doc and "수용 기준" in doc and "#436" in doc
+    assert "미충족이다" not in doc
+    assert 'key="ssh_keys"' in doc and "③(없는 파일에 `-w`를 걸 때 적재 실패 여부)" in doc
 
 
 def test_the_docs_name_the_template_section_of_the_file_watch_keys_by_its_real_number():
