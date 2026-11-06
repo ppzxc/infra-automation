@@ -922,12 +922,43 @@ def test_the_sudo_log_append_is_excluded_by_default_but_a_write_open_by_truncate
     assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/tmp/sudo", "sudo", syscall=257))) == 1      # 이름만 같고 경로가 다르면 제외가 아니다
 
 
+def test_the_sshd_login_process_write_open_does_not_fire_the_log_delete_alert(desired):
+    """로그인마다 sshd가 lastlog·wtmp를 쓰기로 열어(#441) 정상 로그인이 P1이 됐다(#446). 두 sshd 실행 파일은 기본 제외다."""
+    for exe, comm in (("/usr/libexec/openssh/sshd-session", "sshd-session"), ("/usr/sbin/sshd", "sshd")):
+        assert _var_log_rows(desired, _sys_row("var_log_delete", exe, comm, syscall=257)) == [], exe
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/tmp/sshd-session", "sshd-session", syscall=257))) == 1   # 이름만 같고 경로가 다르면 제외가 아니다
+
+
+def test_the_package_manager_is_excluded_only_when_both_exe_and_comm_match(desired):
+    """dnf의 실행 파일은 python3.9라 경로만으로 빼면 파이썬으로 로그를 지우는 것도 가린다(#446). 실행 파일과 comm이 함께 맞을 때만 뺀다."""
+    assert _var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/python3.9", "dnf", syscall=257)) == []
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/python3.9", "python3", syscall=257))) == 1
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/truncate", "dnf", syscall=257))) == 1
+    assert len(_var_log_rows(desired, _sys_row("var_log_delete", "/usr/bin/rm", "rm"))) == 1
+
+
+def test_the_excluded_tool_pairs_are_a_role_variable_with_a_safe_format_check(tmp_path):
+    assert DEFAULTS["o2c_var_log_excluded_exe_comm_pairs"] == [{"exe": "/usr/bin/python3.9", "comm": "dnf"}]
+    rendered = render_desired(tmp_path / "desired.json", extra={"o2c_var_log_excluded_exe_comm_pairs": [{"exe": "/usr/bin/python3.6", "comm": "yum"}]})
+    sql = _var_log_sql(rendered)
+    assert _run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/bin/python3.6", "yum", syscall=257)], "security_logs") == []
+    assert len(_run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/bin/python3.9", "dnf", syscall=257)], "security_logs")) == 1   # 기본을 덮었다
+    empty = render_desired(tmp_path / "empty.json", extra={"o2c_var_log_excluded_exe_comm_pairs": []})
+    assert len(_run_alert_on_sqlite(_var_log_sql(empty), [_sys_row("var_log_delete", "/usr/bin/python3.9", "dnf", syscall=257)], "security_logs")) == 1
+    o2c = _filters()
+    assert o2c.o2c_valid_exe_comm_pairs([{"exe": "/usr/bin/python3.9", "comm": "dnf"}]) and o2c.o2c_valid_exe_comm_pairs([])
+    for bad in ({"exe": "python", "comm": "dnf"}, {"exe": "/usr/bin/a_b", "comm": "dnf"}, {"exe": "/usr/bin/x", "comm": ""},
+                {"exe": "/usr/bin/x", "comm": "a b"}, {"exe": "/usr/bin/x", "comm": "a'b"}, {"exe": "/usr/bin/x", "comm": "a" * 16},
+                {"exe": "/usr/bin/x"}, {"comm": "dnf"}, "dnf", {"exe": "/usr/bin/x", "comm": "dnf\n"}, {"exe": "/usr/bin/x\n", "comm": "dnf"}):
+        assert not o2c.o2c_valid_exe_comm_pairs([bad]), bad
+
+
 def _var_log_sql(rendered):
     return next(o["body"]["query_condition"]["sql"] for o in rendered if o["kind"] == "alert" and o["name"] == VAR_LOG)
 
 
 def test_the_excluded_executable_list_is_a_role_variable_with_a_safe_path_check(tmp_path):
-    assert DEFAULTS["o2c_var_log_excluded_exes"] == ["/usr/bin/sudo", "/usr/sbin/logrotate"]
+    assert DEFAULTS["o2c_var_log_excluded_exes"] == ["/usr/bin/sudo", "/usr/sbin/logrotate", "/usr/libexec/openssh/sshd-session", "/usr/sbin/sshd"]
     rendered = render_desired(tmp_path / "desired.json", extra={"o2c_var_log_excluded_exes": ["/usr/bin/cleanup-tool", "/usr/local/sbin/rotate"]})
     sql = _var_log_sql(rendered)
     assert _run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/bin/cleanup-tool", "cleanup-tool")], "security_logs") == []
@@ -938,7 +969,7 @@ def test_the_excluded_executable_list_is_a_role_variable_with_a_safe_path_check(
     assert len(_run_alert_on_sqlite(sql, [_sys_row("var_log_delete", "/usr/sbin/logrotate", "logrotate")], "security_logs")) == 1   # 비면 제외 없음
     o2c = _filters()
     assert o2c.o2c_valid_exe_paths(["/usr/sbin/logrotate", "/opt/x-1.0/bin/yz"]) and o2c.o2c_valid_exe_paths([])
-    for bad in ("logrotate", "/usr/bin/a_b", "/usr/bin/a b", "/usr/bin/a'b", '/usr/bin/a"b', "/usr/bin/%", "/usr/bin/a;b", ""):
+    for bad in ("logrotate", "/usr/bin/a_b", "/usr/bin/a b", "/usr/bin/a'b", '/usr/bin/a"b', "/usr/bin/%", "/usr/bin/a;b", "", "/usr/bin/x\n"):
         assert not o2c.o2c_valid_exe_paths([bad]), bad
 
 
