@@ -176,10 +176,14 @@
         owner: "{{ funa_env_owner }}"
         group: "{{ funa_env_owner_group }}"
         mode: '0644'
+      register: _funa_env_ensure_unit
 
+    # 체크 모드에서는 유닛 파일이 아직 만들어지지 않아 systemd 모듈이 서비스를 찾지 못해 실패한다. 그때는 건너뛴다.
     - name: "[FUNA-016] Enable the keepalived start-after-boot unit"
       ansible.builtin.systemd:
         name: funa-vrrp-ensure.service
         enabled: true
         daemon_reload: true
-      when: funa_env_systemd_manage | bool
+      when:
+        - funa_env_systemd_manage | bool
+        - not ((ansible_check_mode | default(false)) and _funa_env_ensure_unit is changed)
