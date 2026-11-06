@@ -64,5 +64,15 @@ Semaphore Static 인벤토리에서 FUNA Cluster 호스트를 `servers`에 두�
 | `FUNA-012` | `Keep the keepalived config directory root-only (script security)` | `ansible.builtin.file` | All | `0755 root:root` 일치 시 `ok`. 디렉터리가 없으면 건너뛴다(만들지 않는다) |
 | `FUNA-013` | `Find the keepalived scripts and config files` | `ansible.builtin.find` | All | 조회 전용(`check_mode: false`), `*.sh`·`*.conf`만 |
 | `FUNA-014` | `Keep the keepalived scripts and config files root-owned and not writable` | `ansible.builtin.file` | All | 스크립트 `0755`, 설정 `0644`, `root:root` 일치 시 `ok` |
+| `FUNA-015` | `Deploy the unit that starts the keepalived container after boot` | `ansible.builtin.template` | All | 내용·권한 비교 (`funa-vrrp-ensure.service.j2`, `0644 root:root`). `docker.service` 뒤에 한 번 실행하고, 컨테이너가 있는데 안 떠 있을 때만 `docker start`(없거나 떠 있으면 아무것도 하지 않는다) |
+| `FUNA-016` | `Enable the keepalived start-after-boot unit` | `ansible.builtin.systemd` | All | `enabled: true`(`daemon_reload`). 서비스를 지금 시작하지 않는다. `funa_env_systemd_manage: false`이면 건너뜀(테스트용) |
 
-> 이 역할은 OpenBao 조회 외에 `shell`/`command`를 쓰지 않는다. 값이 바뀌면 파일만 갱신하며 서비스를 재기동하지 않는다. compose는 다음 `up`에서 새 값을 읽는다.
+> 이 역할은 OpenBao 조회 외에 `shell`/`command`를 쓰지 않는다(`FUNA-015`의 유닛 안 `ExecStart`는 부팅 때 systemd가 실행하는 것이고 이 역할의 태스크가 아니다). 값이 바뀌면 파일만 갱신하며 서비스를 재기동하지 않는다. compose는 다음 `up`에서 새 값을 읽는다.
+
+### 재부팅 뒤 keepalived 기동 보장 (#443)
+
+FUNA 노드를 재부팅하면 `network_mode: host`인 keepalived 컨테이너가 `Exited (255)`로 남고 자동으로 올라오지 않았다(2026-11-06, 3대 모두). `restart` 정책은 원인이 아니었다(같은 `unless-stopped`인 caddy·funa-api는 올라왔다). dockerd가 `live-restore`로 시작하면서 이 컨테이너를 다시 띄우지 않았고, 부팅 로그에 기동 시도 자체가 없었다.
+
+- `funa-vrrp-ensure.service`(`FUNA-015`·`FUNA-016`)는 `docker.service` 뒤에 한 번 실행한다. 컨테이너(`funa_env_vrrp_container`, 기본 `vrrp-keepalived-1`)가 없으면 넘어가고, 있는데 안 떠 있을 때만 `docker start`한다.
+- 이 유닛은 재부팅 직후의 기동만 보장한다. 컨테이너가 나중에 죽는 것은 막지 않는다(Kuma push 모니터가 잡는다).
+- 확인: 재부팅 뒤 `docker ps`에 `vrrp-keepalived-1`이 `Up`이고 VIP가 자기 노드에 돌아와 있어야 한다.

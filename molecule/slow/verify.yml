@@ -29,6 +29,7 @@
         - /etc/funa-cluster/proxy.secrets.env
         - /etc/funa-cluster/vrrp.secrets.env
         - /etc/profile.d/funa-cluster.sh
+        - /etc/systemd/system/funa-vrrp-ensure.service
         - /opt/services/vrrp/config
         - /opt/services/vrrp/config/check.sh
         - /opt/services/vrrp/config/notify.sh
@@ -172,6 +173,19 @@
               - f.stat['/opt/services/vrrp/config/keepalived.conf'].mode == '0644'
               - f.stat['/opt/services/vrrp/config/check.sh'].owner == 'root'
               - f.stat['/opt/services/vrrp/config/check.sh'].group == 'root'
+          when: "'funa_cluster' in group_names"
+
+        # 015~016: 재부팅 뒤 keepalived 컨테이너 기동 보장 유닛(#443). 컨테이너는 만들지도 시작하지도 않는다.
+        - name: "[VERIFY-FUNA-015] Verify the start-after-boot unit exists only for funa_cluster hosts (0644 root:root)"
+          ansible.builtin.assert:
+            that:
+              - f.stat['/etc/systemd/system/funa-vrrp-ensure.service'].exists == ('funa_cluster' in group_names)
+              - "('funa_cluster' not in group_names) or f.stat['/etc/systemd/system/funa-vrrp-ensure.service'].mode == '0644'"
+              - "('funa_cluster' not in group_names) or f.stat['/etc/systemd/system/funa-vrrp-ensure.service'].owner == 'root'"
+
+        - name: "[VERIFY-FUNA-016] Verify the start-after-boot unit is enabled"
+          ansible.builtin.command: systemctl is-enabled funa-vrrp-ensure.service
+          changed_when: false
           when: "'funa_cluster' in group_names"
 
     # ==========================================================================

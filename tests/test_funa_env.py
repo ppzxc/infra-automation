@@ -79,6 +79,8 @@ def run(tmp_path, addr, hosts=("n1",), groups=("funa_cluster",), check=False, ex
     dest = tmp_path / "etc"
     prof = tmp_path / "profile.d"
     prof.mkdir(exist_ok=True)
+    units = tmp_path / "systemd"
+    units.mkdir(exist_ok=True)
     (tmp_path / "play.yml").write_text(yaml.safe_dump([{
         "hosts": "all", "gather_facts": False, "become": False, "roles": ["funa_env"]}]))
     inv = {"all": {
@@ -86,7 +88,8 @@ def run(tmp_path, addr, hosts=("n1",), groups=("funa_cluster",), check=False, ex
         "vars": {"ansible_connection": "local", "ansible_python_interpreter": "/usr/bin/python3", "vault_addr": addr,
                  "funa_env_dir": str(dest / "funa-cluster"), "funa_env_profile_dir": str(prof),
                  "funa_env_owner": getpass.getuser(),
-                 "funa_env_owner_group": USER_GROUP, "funa_env_group": USER_GROUP},
+                 "funa_env_owner_group": USER_GROUP, "funa_env_group": USER_GROUP,
+                 "funa_env_systemd_dir": str(units), "funa_env_systemd_manage": False},
         "children": {g: {"hosts": {h: {} for h in hosts if h == "n1"}} for g in groups},
     }}
     for k, v in (extra or {}).items():
@@ -271,3 +274,84 @@ def test_site_runs_funa_env_after_docker_engine():
     play = yaml.safe_load((ROOT_DIR / "playbooks" / "site.yml").read_text(encoding="utf-8"))[1]
     roles = [r["role"] for r in play["roles"]]
     assert roles.index("funa_env") == roles.index("docker_engine") + 1
+
+
+# --- keepalived 컨테이너 부팅 뒤 기동 보장(#443) -----------------------------------------------------------------
+UNIT = "funa-vrrp-ensure.service"
+
+
+def _unit_exec_start(unit_path):
+    lines = [ln for ln in unit_path.read_text().splitlines() if ln.startswith("ExecStart=")]
+    assert len(lines) == 1, lines
+    return lines[0].removeprefix("ExecStart=")
+
+
+def test_ensure_unit_runs_once_after_docker_and_is_root_owned(tmp_path, openbao):
+    res, _, _ = run(tmp_path, openbao)
+    assert res.returncode == 0, res.stdout + res.stderr
+    unit = tmp_path / "systemd" / UNIT
+    text = unit.read_text()
+    assert "After=docker.service" in text and "Requires=docker.service" in text
+    assert "Type=oneshot" in text and "WantedBy=multi-user.target" in text
+    assert "vrrp-keepalived-1" in text
+    assert _mode(unit) == 0o644
+
+
+def test_ensure_unit_is_idempotent(tmp_path, openbao):
+    run(tmp_path, openbao)
+    res, _, _ = run(tmp_path, openbao)
+    assert re.search(r"n1\s*:.*changed=0", res.stdout), res.stdout
+
+
+def test_ensure_unit_container_name_is_a_variable(tmp_path, openbao):
+    run(tmp_path, openbao, extra={"funa_env_vrrp_container": "other-name-1"})
+    assert "other-name-1" in (tmp_path / "systemd" / UNIT).read_text()
+
+
+def test_ensure_unit_of_a_host_outside_the_group_is_not_created(tmp_path, openbao):
+    res, _, _ = run(tmp_path, openbao, groups=())
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert not (tmp_path / "systemd" / UNIT).exists()
+
+
+def _fake_docker(tmp_path, state):
+    """state: absent | stopped | running. docker 호출을 calls.log에 남기는 가짜 docker."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    log = tmp_path / "calls.log"
+    log.write_text("")
+    (bin_dir / "docker").write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+case "$1" in
+  inspect)
+    [ "{state}" = absent ] && exit 1
+    case "$*" in *State.Running*) [ "{state}" = running ] && echo true || echo false;; esac
+    exit 0;;
+  start) exit 0;;
+esac
+exit 0
+""")
+    (bin_dir / "docker").chmod(0o755)
+    return bin_dir, log
+
+
+@pytest.mark.parametrize("state,starts", [("stopped", True), ("running", False), ("absent", False)])
+def test_ensure_unit_starts_only_a_stopped_existing_container(tmp_path, openbao, state, starts):
+    run(tmp_path, openbao)
+    cmd = _unit_exec_start(tmp_path / "systemd" / UNIT)
+    bin_dir, log = _fake_docker(tmp_path, state)
+    res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30,
+                         env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"})
+    assert res.returncode == 0, res.stdout + res.stderr
+    started = any(ln.startswith("start ") for ln in log.read_text().splitlines())
+    assert started is starts, log.read_text()
+
+
+def test_ensure_unit_tasks_are_in_the_spec_and_the_molecule_verify():
+    tasks = (ROLE / "tasks" / "main.yml").read_text(encoding="utf-8")
+    docs = (ROOT_DIR / "docs" / "funa_env.md").read_text(encoding="utf-8")
+    verify = (ROOT_DIR / "molecule" / "slow" / "verify.yml").read_text(encoding="utf-8")
+    for tid in ("FUNA-015", "FUNA-016"):
+        assert f"[{tid}]" in tasks, tid
+        assert f"`{tid}`" in docs, tid
+        assert f"[VERIFY-{tid}]" in verify, tid

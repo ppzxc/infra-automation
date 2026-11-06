@@ -167,3 +167,19 @@
       loop_control:
         label: "{{ item.path | basename }}"
       when: _funa_env_vrrp_files.files is defined
+
+    # 재부팅 뒤 keepalived 컨테이너가 안 올라오는 문제(#443). 유닛은 파일만 두고 컨테이너는 건드리지 않는다.
+    - name: "[FUNA-015] Deploy the unit that starts the keepalived container after boot"
+      ansible.builtin.template:
+        src: funa-vrrp-ensure.service.j2
+        dest: "{{ funa_env_systemd_dir }}/funa-vrrp-ensure.service"
+        owner: "{{ funa_env_owner }}"
+        group: "{{ funa_env_owner_group }}"
+        mode: '0644'
+
+    - name: "[FUNA-016] Enable the keepalived start-after-boot unit"
+      ansible.builtin.systemd:
+        name: funa-vrrp-ensure.service
+        enabled: true
+        daemon_reload: true
+      when: funa_env_systemd_manage | bool
