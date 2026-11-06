@@ -48,6 +48,7 @@ EXPECTED_ALERTS = {
     "infra-security-service-stopped",   # 보안 서비스 중지(Spec #433 / Ticket-3, #429)
     "infra-audit-auth-config-change", "infra-audit-container-config-change", "infra-audit-secret-access",   # Audit Watch Key 3개(Spec #419)
     "infra-audit-watch-provisioning",   # 정상 변경 후보(P3, #419)
+    "infra-appsec-daily-report",   # 보안 제품 로그 일일 보고(#450)
 }
 
 PROMQL_ALERTS = {

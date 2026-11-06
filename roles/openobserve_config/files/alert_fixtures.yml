@@ -2364,3 +2364,74 @@ infra-audit-watch-provisioning:
         - {service_name: audit, body: "type=PATH msg=audit(1792985278.024:8024): item=0 name=\"/etc/ssh/sshd_config\" inode=1075628341 dev=fd:00 mode=0100600 ouid=0 ogid=0 rdev=00:00 obj=system_u:object_r:etc_t:s0 nametype=NORMAL cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0\u001dOUID=\"root\" OGID=\"root\""}
         - {service_name: audit, body: "type=PATH msg=audit(1792985278.024:8024): item=1 name=\"/srv/example/\" inode=1075628300 dev=fd:00 mode=040755 ouid=0 ogid=0 nametype=PARENT\u001dOUID=\"root\" OGID=\"root\""}
         - {service_name: audit, body: "type=CWD msg=audit(1792985278.024:8024): cwd=\"/home/opsverify\""}
+# 보안 제품 로그 일일 보고(#450). 레코드는 app_logs의 모양(service_name·body)이다. 값은 모두 가짜다.
+infra-appsec-daily-report:
+  cases:
+    - name: rastracker 프로세스 pid = 0은 보고한다
+      host: verify-appsec-pid
+      fires: true
+      records:
+        - {service_name: chakramax-rastracker, body: "11-06 01:00:00:000 [0x1]: process maxsvr pid = 0"}
+    - name: 프로세스가 살아 있으면(pid = 1234) 보고하지 않는다
+      host: verify-appsec-pid-ok
+      fires: false
+      records:
+        - {service_name: chakramax-rastracker, body: "11-06 01:00:00:000 [0x1]: process maxsvr pid = 1234"}
+    - name: 일일 백업 Failure는 보고한다
+      host: verify-appsec-backup
+      fires: true
+      records:
+        - {service_name: chakramax-maxbackup, body: "daily backup Failure: no space"}
+    - name: 백업 성공 줄은 보고하지 않는다
+      host: verify-appsec-backup-ok
+      fires: false
+      records:
+        - {service_name: chakramax-maxbackup, body: "daily backup finished successfully"}
+    - name: PCAP packets[0]은 보고한다
+      host: verify-appsec-pcap
+      fires: true
+      records:
+        - {service_name: chakramax-cgw-sf, body: "11-06 10:00:00:000 [0x1]: PCAP packets[0] NS1"}
+    - name: PCAP 패킷이 있으면(packets[12]) 보고하지 않는다
+      host: verify-appsec-pcap-ok
+      fires: false
+      records:
+        - {service_name: chakramax-cgw-sf, body: "11-06 10:00:00:000 [0x1]: PCAP packets[12] NS1"}
+    - name: Maxsvr Master 값이 하루 안에 바뀌면 보고한다
+      host: verify-appsec-ha
+      fires: true
+      records:
+        - {service_name: chakramax-chad, body: "11-06 10:00:00:000 [0x1]: Echo from: 2, Maxsvr Master: 2, Chad Master: -10"}
+        - {service_name: chakramax-chad, body: "11-06 11:00:00:000 [0x1]: Echo from: 1, Maxsvr Master: 1, Chad Master: -10"}
+    - name: Master 값이 그대로면 보고하지 않는다
+      host: verify-appsec-ha-ok
+      fires: false
+      records:
+        - {repeat: 5, service_name: chakramax-chad, body: "11-06 10:00:00:000 [0x1]: Echo from: 2, Maxsvr Master: 2, Chad Master: -10"}
+    - name: 비정상 종료 문구는 보고한다
+      host: verify-appsec-exit
+      fires: true
+      records:
+        - {service_name: chakramax-run, body: "Segmentation fault (core dumped)"}
+    - name: 평범한 기동 출력은 보고하지 않는다
+      host: verify-appsec-exit-ok
+      fires: false
+      records:
+        - {service_name: chakramax-run, body: "service started"}
+    - name: 관리 서버 기동 배너는 보고한다
+      host: verify-appsec-start
+      fires: true
+      records:
+        - {service_name: chakramax-maxsvr, body: "1106 090000.000 [crit:  main: main.cpp: 10:1] ****************** Chakra Max Server Start ****************"}
+    - name: 알려진 반복 문구 밖의 ERROR 줄은 보고한다
+      host: verify-appsec-unknown
+      fires: true
+      records:
+        - {service_name: chakramax-cgw-gw, body: "11-06 10:00:00:000 [0x1]: [ERROR] license check failed"}
+    - name: 알려진 반복 문구(pool sessions·SSL_read)와 WARN 줄은 보고하지 않는다
+      host: verify-appsec-noise
+      fires: false
+      records:
+        - {repeat: 5, service_name: chakramax-maxsvr, body: "1106 160133.801 [erro:ReleaseSessio:SessionManage:  109:17477] pool sessions : 1, using sessions : 1"}
+        - {service_name: chakramax-maxsvr, body: "1106 160133.801 [erro:Recv:RecvSend.cpp: 1:1] SSL_read() returns 0. SSLError 1:error:1::Broken pipe."}
+        - {service_name: chakramax-cgw-gw, body: "11-06 10:00:00:000 [0x1]: [WARN] ssh_gw, extention packet error"}
