@@ -41,7 +41,7 @@ def _signals(rows):
 
 def test_trigger_is_a_daily_cron_over_the_last_24_hours(default):
     trig = default["trigger_condition"]
-    assert trig["frequency_type"] == "cron" and trig["cron"] == "0 17 * * *"
+    assert trig["frequency_type"] == "cron" and trig["cron"] == "0 0 17 * * *"
     assert trig["period"] == 1440 and default["tz_offset"] == 540
 
 
@@ -105,6 +105,7 @@ def test_roster_host_with_all_services_logging_is_not_reported(with_roster):
     assert _rows(with_roster, records) == []
 
 
-def test_bad_cron_is_rejected(tmp_path):
+@pytest.mark.parametrize("bad", ["every day", "0 17 * * *"])   # 5필드는 서버가 400으로 거절한다
+def test_bad_cron_is_rejected(tmp_path, bad):
     with pytest.raises(Exception):
-        render_desired(tmp_path / "desired.json", extra={"o2c_appsec_report_cron": "every day"})
+        render_desired(tmp_path / "desired.json", extra={"o2c_appsec_report_cron": bad})

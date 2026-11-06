@@ -222,9 +222,9 @@ def o2c_desired(spec):
         trigger = {'period': alert['period'], 'operator': '>=', 'threshold': alert.get('threshold', 1),
                    'frequency': alert['frequency'], 'frequency_type': 'minutes', 'silence': alert['silence']}
         if alert.get('cron'):
-            # 고정 시각 평가(일일 보고 등): cron 식(5필드)으로 돌린다. 시각대는 알림 최상위 tz_offset을 따른다.
-            if not re.match(r'^[0-9*/,-]+( [0-9*/,-]+){4}$', str(alert['cron'])):
-                raise ValueError('알림 %s 의 cron은 5필드(분 시 일 월 요일) 형식이어야 합니다: %r' % (alert['name'], alert['cron']))
+            # 고정 시각 평가(일일 보고 등): cron 식(6필드: 초 분 시 일 월 요일)으로 돌린다. 서버(v1.0.4)는 5필드를 400으로 거절한다(실측). 시각대는 알림 최상위 tz_offset을 따른다.
+            if not re.match(r'^[0-9*/,-]+( [0-9*/,-]+){5}$', str(alert['cron'])):
+                raise ValueError('알림 %s 의 cron은 6필드(초 분 시 일 월 요일) 형식이어야 합니다: %r' % (alert['name'], alert['cron']))
             trigger.update({'frequency_type': 'cron', 'cron': str(alert['cron'])})
         if promql:
             trigger['align_time'] = True   # 평가 시각을 frequency 경계에 맞춘다(PromQL은 시각이 어긋나면 구간 창이 달라진다)
