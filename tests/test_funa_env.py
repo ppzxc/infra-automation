@@ -354,4 +354,4 @@ def test_check_mode_skips_enabling_a_unit_that_does_not_exist_yet(tmp_path, open
     res, _, _ = run(tmp_path, openbao, check=True, extra={"funa_env_systemd_manage": True})
     assert res.returncode == 0, res.stdout + res.stderr
     assert not (tmp_path / "systemd" / UNIT).exists()
-    assert re.search(r"FUNA-016.*\n(.*\n)*?skipping: \[n1\]", res.stdout), res.stdout
+    assert re.search(r"TASK \[funa_env : \[FUNA-016\][^\n]*\n(?:[^\n]*\n){0,2}?skipping: \[n1\]", res.stdout), res.stdout
