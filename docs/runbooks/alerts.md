@@ -1172,6 +1172,30 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 
 **확인·대응**: 행의 관리자·변경 대상을 그날의 작업 요청과 대조해 결과를 작업 기록에 남긴다. 대응 작업이 없는 변경이면 승인 시간 밖 변경 절차(P1)로 격상한다.
 
+<a id="appsec-daily-report"></a>
+### 🟡 보안 제품 로그 일일 보고 (`infra-appsec-daily-report`)
+
+**조건**: 매일 17:00(KST)에 지난 24시간의 `app_logs` 보안 제품 로그(`service_name`이 `o2c_appsec_service_prefix`로 시작하는 줄)를 한 번 요약한다. 아래 신호가 하나라도 있는 날만 보내고, 하나도 없으면 보내지 않는다.
+
+| 신호 | 기준 |
+|---|---|
+| 프로세스 중단 | 스케줄러 로그에 `pid = 0` |
+| 일일 백업 실패 | 백업 로그에 `Failure` |
+| DB 감시 중단 | 스니핑 로그에 `PCAP packets[0]` |
+| HA Master 전환 | 이중화 데몬 로그의 `Maxsvr Master:` 값이 하루 안에 2종류 이상 |
+| 비정상 종료 흔적 | 서비스 기동·종료 출력에 `o2c_appsec_exit_patterns` 문구 |
+| 관리 서버 기동 기록 | 관리 서버 로그에 기동 배너(`o2c_appsec_restart_phrase`) |
+| 목록 밖 오류 줄 | `[ERROR]`·`[erro:`·`[crit:` 줄 중 알려진 반복 문구(`o2c_appsec_known_noise`)가 아닌 것 |
+| 로그 공백 | 로스터(`o2c_appsec_hosts`) 호스트의 상시 서비스(`o2c_appsec_silent_services`)가 24시간 로그를 남기지 않음 |
+
+**왜 즉시 알림이 아닌가**: 로그 줄에 연도·시간대가 없고 레벨 표기가 일정하지 않다. 평상시에도 `WARN`(확장 패킷 오류), 클라이언트 연결 끊김(`SSL_read`·`pool sessions`)이 매일 쌓여 키워드만으로는 구분이 안 된다. 그래서 반복 문구를 제외한 대략적인 일일 요약으로 둔다. 긴급 장애의 즉시 감지는 이 알림이 맡지 않는다.
+
+**한계**: 로그 공백은 로스터가 설정된 호스트만 본다(로스터가 비면 검사하지 않는다). 수집기 자체가 멈춰 로그가 하나도 안 오는 경우는 Silent Host 알림이 먼저 잡는다. `WARN` 줄은 보고하지 않는다.
+
+**확인**: 행의 신호와 대표 줄을 보고 `▶ 로그 보기`에서 같은 시각의 앞뒤 줄을 읽는다. 프로세스 중단·백업 실패·DB 감시 중단은 호스트에서 서비스 상태와 해당 로그를 직접 확인한다.
+
+**대응**: 프로세스 중단·백업 실패·DB 감시 중단은 당일 복구하고 작업 기록에 남긴다. 매일 반복되는 정상 문구가 "목록 밖 오류"로 올라오면 `o2c_appsec_known_noise`에 더하는 PR을 낸다(알림을 끄지 않는다).
+
 <a id="fortigate-ha-failover"></a>
 ### 🟠 방화벽 HA 전환·이상 (`infra-fortigate-ha-failover`)
 

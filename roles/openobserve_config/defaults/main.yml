@@ -500,6 +500,31 @@ o2c_host_label_sql_for_host_column: "{{ 'host' | o2c_host_label(o2c_host_address
 
 # 알림 규칙. SQL이 행을 돌려주면 발화한다(threshold 1행) — 집계 조건은 HAVING에 둔다.
 # 구 레코드(새 필드 없음)는 null이라 조건에서 자연히 빠진다.
+# 보안 제품 로그 일일 보고(infra-appsec-daily-report): app_logs의 service_name이 <접두어><서비스>인 줄을 하루 1번 요약한다. 신호가 없는 날은 보내지 않는다.
+# 로그 줄에는 연도·시간대가 없고 레벨 표기가 일정하지 않아 즉시 알림이 아니라 대략적인 일일 보고로 둔다(실측: 평상시에도 WARN·연결 끊김 줄이 매일 쌓인다).
+o2c_appsec_service_prefix: "chakramax-"
+# 로그가 하루 동안 없으면 알리는 호스트 로스터. 저장소에는 호스트를 두지 않고 Semaphore Environment(Extra variables)로 준다. 비면 공백 검사를 하지 않는다.
+o2c_appsec_hosts: []
+# 하루 종일 로그를 남겨야 하는 서비스(접두어 뒤 이름). 하루에 한두 번만 쓰는 서비스는 넣지 않는다.
+o2c_appsec_silent_services: [cgw-gw, cgw-sf, maxsvr, chad]
+o2c_appsec_restart_phrase: "Chakra Max Server Start"
+o2c_appsec_exit_patterns: [segmentation, core dumped, killed, abnormal]
+# 알려진 반복 문구(소문자, 부분 일치). 평상시 계속 나오는 연결 끊김·기동 배너·함수 진입 줄이라 "목록 밖 오류"에서 뺀다. 새 노이즈는 여기에 더한다.
+o2c_appsec_known_noise:
+  - pool sessions
+  - ssl_read()
+  - ssl_accept(
+  - this socket has error
+  - failed to recv packet
+  - failed to receive realtime packet
+  - already exists
+  - 'enter:'
+  - 'leave:'
+  - '***'
+  - sessionip=
+# 보고 시각(cron 5필드, 알림 최상위 tz_offset 기준 KST). 조회 구간은 24시간이다.
+o2c_appsec_report_cron: "0 17 * * *"
+
 o2c_alerts:
   - name: infra-ssh-login-failures-per-source
     severity: "P2 경고"
@@ -2457,6 +2482,61 @@ o2c_alerts:
     frequency: 5
     silence: 60
     pending_minutes: 15
+  - name: infra-appsec-daily-report
+    severity: "P3 주의"
+    severity_icon: "🟡"
+    title: "보안 제품 로그 일일 보고 (이상 신호가 있는 날만)"
+    what: "지난 24시간 동안 보안 제품 로그에서 프로세스 중단·백업 실패·DB 감시 중단·HA 전환·비정상 종료·기동 기록·로그 공백 또는 알려진 반복 문구 밖의 오류 줄이 있었습니다. 하루에 한 번 요약해 알립니다."
+    why: "로그 줄에 연도·시간대가 없고 평상시에도 경고·연결 끊김 줄이 쌓여 즉시 알림으로 두지 않았습니다. 이 보고에 오른 신호는 감시·통제 기능이 멈췄거나 낯선 오류가 생겼다는 뜻일 수 있습니다."
+    action: "① 행의 신호와 대표 줄을 확인하고 로그 보기로 같은 시각의 앞뒤 줄을 읽기 ② 프로세스 중단·백업 실패·DB 감시 중단은 호스트에서 서비스 상태를 확인하고 당일 복구 ③ 매일 반복되는 정상 문구면 알려진 반복 문구 목록에 더하는 PR 내기"
+    runbook: "{{ o2c_runbook_base }}#appsec-daily-report"
+    row_template: '• {host_name}: {signal} {events}건 · {sample}'
+    description: "app_logs의 {{ o2c_appsec_service_prefix }}* 서비스 로그 하루 요약 — cron {{ o2c_appsec_report_cron }}에 1번, 신호가 하나도 없으면 보내지 않음 (period 1440). 알려진 반복 문구는 목록(o2c_appsec_known_noise)으로 제외"
+    stream: app_logs
+    cron: "{{ o2c_appsec_report_cron }}"
+    sql: >-
+      SELECT host_name, signal, events, sample FROM (
+      SELECT host_name, 'rastracker 프로세스 중단(pid = 0)' AS signal, count(*) AS events, substr(max(body), 1, 100) AS sample FROM "app_logs"
+      WHERE service_name = '{{ o2c_appsec_service_prefix }}rastracker' AND body LIKE '%pid = 0%' GROUP BY host_name
+      UNION ALL
+      SELECT host_name, '일일 백업 실패' AS signal, count(*) AS events, substr(max(body), 1, 100) AS sample FROM "app_logs"
+      WHERE service_name = '{{ o2c_appsec_service_prefix }}maxbackup' AND lower(body) LIKE '%failure%' GROUP BY host_name
+      UNION ALL
+      SELECT host_name, 'DB 감시 중단(PCAP packets[0])' AS signal, count(*) AS events, substr(max(body), 1, 100) AS sample FROM "app_logs"
+      WHERE service_name = '{{ o2c_appsec_service_prefix }}cgw-sf' AND body LIKE '%PCAP packets[0]%' GROUP BY host_name
+      UNION ALL
+      SELECT host_name, 'HA Master 전환' AS signal, count(DISTINCT substr(regexp_replace(body, '^.*Maxsvr Master: (-?[0-9]+).*$', '\1'), 1, 8)) AS events,
+      'Maxsvr Master 값이 하루 안에 바뀜(값 종류 수)' AS sample FROM "app_logs"
+      WHERE service_name = '{{ o2c_appsec_service_prefix }}chad' AND body LIKE '%Maxsvr Master:%' GROUP BY host_name
+      HAVING count(DISTINCT substr(regexp_replace(body, '^.*Maxsvr Master: (-?[0-9]+).*$', '\1'), 1, 8)) > 1
+      UNION ALL
+      SELECT host_name, '비정상 종료 흔적' AS signal, count(*) AS events, substr(max(body), 1, 100) AS sample FROM "app_logs"
+      WHERE service_name = '{{ o2c_appsec_service_prefix }}run' AND ({% for p in o2c_appsec_exit_patterns %}{{ ' OR ' if not loop.first else '' }}lower(body) LIKE '%{{ p | lower }}%'{% endfor %}) GROUP BY host_name
+      UNION ALL
+      SELECT host_name, '관리 서버 기동 기록' AS signal, count(*) AS events, substr(max(body), 1, 100) AS sample FROM "app_logs"
+      WHERE service_name = '{{ o2c_appsec_service_prefix }}maxsvr' AND body LIKE '%{{ o2c_appsec_restart_phrase }}%' GROUP BY host_name
+      UNION ALL
+      SELECT host_name, '목록 밖 오류 줄: ' || service_name AS signal, count(*) AS events, substr(max(body), 1, 100) AS sample FROM "app_logs"
+      WHERE service_name LIKE '{{ o2c_appsec_service_prefix }}%' AND (body LIKE '%[ERROR]%' OR body LIKE '%[erro:%' OR body LIKE '%[crit:%')
+      {%- for n in o2c_appsec_known_noise %}
+      AND lower(body) NOT LIKE '%{{ n | lower }}%'
+      {%- endfor %}
+      GROUP BY host_name, service_name
+      {%- if o2c_appsec_hosts | length > 0 %}
+      UNION ALL
+      SELECT host_name, '로그 공백: ' || svc AS signal, 0 AS events, '24시간 동안 로그 없음' AS sample FROM (
+      SELECT host_name, service_name AS svc, count(*) AS n FROM "app_logs"
+      WHERE service_name IN ({% for sv in o2c_appsec_silent_services %}{{ ', ' if not loop.first else '' }}'{{ o2c_appsec_service_prefix }}{{ sv }}'{% endfor %})
+      AND host_name IN ({% for h in o2c_appsec_hosts %}{{ ', ' if not loop.first else '' }}'{{ h }}'{% endfor %}) GROUP BY host_name, service_name
+      {%- for h in o2c_appsec_hosts %}{% for sv in o2c_appsec_silent_services %}
+      UNION ALL SELECT '{{ h }}' AS host_name, '{{ o2c_appsec_service_prefix }}{{ sv }}' AS svc, 0 AS n
+      {%- endfor %}{% endfor %}
+      ) r GROUP BY host_name, svc HAVING sum(n) = 0
+      {%- endif %}
+      ) t ORDER BY events DESC
+    period: 1440
+    frequency: 1440
+    silence: 60
 
 # 실제로 만드는 알림: `enabled`가 거짓인 알림(업링크 목록이 빈 업링크 다운 규칙)은 만들지 않는다. 서버에 이미 있으면 계획이 지운다.
 o2c_alerts_active: "{{ o2c_alerts | o2c_enabled_alerts }}"
