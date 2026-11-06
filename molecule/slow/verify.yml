@@ -182,6 +182,7 @@
               - f.stat['/etc/systemd/system/funa-vrrp-ensure.service'].exists == ('funa_cluster' in group_names)
               - "('funa_cluster' not in group_names) or f.stat['/etc/systemd/system/funa-vrrp-ensure.service'].mode == '0644'"
               - "('funa_cluster' not in group_names) or f.stat['/etc/systemd/system/funa-vrrp-ensure.service'].owner == 'root'"
+              - "('funa_cluster' not in group_names) or f.stat['/etc/systemd/system/funa-vrrp-ensure.service'].group == 'root'"
 
         - name: "[VERIFY-FUNA-016] Verify the start-after-boot unit is enabled"
           ansible.builtin.command: systemctl is-enabled funa-vrrp-ensure.service

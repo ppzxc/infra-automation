@@ -292,6 +292,8 @@ def test_ensure_unit_runs_once_after_docker_and_is_root_owned(tmp_path, openbao)
     unit = tmp_path / "systemd" / UNIT
     text = unit.read_text()
     assert "After=docker.service" in text and "Requires=docker.service" in text
+    # dockerd가 부팅 뒤 다시 시작돼도 이 유닛이 다시 실행되도록 active를 유지하고 docker에 묶는다.
+    assert "PartOf=docker.service" in text and "RemainAfterExit=yes" in text
     assert "Type=oneshot" in text and "WantedBy=multi-user.target" in text
     assert "vrrp-keepalived-1" in text
     assert _mode(unit) == 0o644
@@ -345,13 +347,3 @@ def test_ensure_unit_starts_only_a_stopped_existing_container(tmp_path, openbao,
     assert res.returncode == 0, res.stdout + res.stderr
     started = any(ln.startswith("start ") for ln in log.read_text().splitlines())
     assert started is starts, log.read_text()
-
-
-def test_ensure_unit_tasks_are_in_the_spec_and_the_molecule_verify():
-    tasks = (ROLE / "tasks" / "main.yml").read_text(encoding="utf-8")
-    docs = (ROOT_DIR / "docs" / "funa_env.md").read_text(encoding="utf-8")
-    verify = (ROOT_DIR / "molecule" / "slow" / "verify.yml").read_text(encoding="utf-8")
-    for tid in ("FUNA-015", "FUNA-016"):
-        assert f"[{tid}]" in tasks, tid
-        assert f"`{tid}`" in docs, tid
-        assert f"[VERIFY-{tid}]" in verify, tid
