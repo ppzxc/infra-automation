@@ -999,6 +999,23 @@ def o2c_exe_exclusion(paths):
     return ''.join(" AND body NOT LIKE '%% exe=\"%s\"%%'" % p for p in paths or [])
 
 
+_COMM_RE = _re.compile(r'^[A-Za-z0-9.+-]{1,15}$')   # 커널 comm은 최대 15자
+
+
+def o2c_valid_exe_comm_pairs(pairs):
+    """True when ``pairs`` is a list of ``{exe, comm}`` dicts with a safe absolute path and a safe process name (an empty list is valid)."""
+    return isinstance(pairs, (list, tuple)) and all(
+        isinstance(p, dict) and set(p) == {'exe', 'comm'} and isinstance(p['exe'], str) and _EXE_PATH_RE.match(p['exe'])
+        and isinstance(p['comm'], str) and _COMM_RE.match(p['comm']) for p in pairs)
+
+
+def o2c_exe_comm_exclusion(pairs):
+    """`` AND NOT (body LIKE '% comm="<comm>" %' AND body LIKE '% exe="<path>"%')`` for each pair ('' when empty): both must match, so python3 with another comm still counts."""
+    if not o2c_valid_exe_comm_pairs(pairs or []):
+        raise ValueError('제외 도구(exe·comm) 형식이 올바르지 않다')
+    return ''.join(" AND NOT (body LIKE '%% comm=\"%s\" %%' AND body LIKE '%% exe=\"%s\"%%')" % (p['comm'], p['exe']) for p in pairs or [])
+
+
 def o2c_valid_group_names(names):
     """True when every item is a Unix group or service name (lower case letters, digits, ``_``, ``-``)."""
     return isinstance(names, (list, tuple)) and all(isinstance(n, str) and _GROUP_NAME_RE.match(n) for n in names)
@@ -1197,6 +1214,7 @@ class FilterModule(object):
                 'o2c_fortigate_match': o2c_fortigate_match,
                 'o2c_valid_like_groups': o2c_valid_like_groups, 'o2c_valid_group_names': o2c_valid_group_names,
                 'o2c_valid_exe_paths': o2c_valid_exe_paths, 'o2c_exe_exclusion': o2c_exe_exclusion,
+                'o2c_valid_exe_comm_pairs': o2c_valid_exe_comm_pairs, 'o2c_exe_comm_exclusion': o2c_exe_comm_exclusion,
                 'o2c_sudo_risky_groups': o2c_sudo_risky_groups, 'o2c_like_any': o2c_like_any, 'o2c_like_label': o2c_like_label,
                 'o2c_valid_exe_patterns': o2c_valid_exe_patterns, 'o2c_valid_login_names': o2c_valid_login_names, 'o2c_audit_provisioning_cond': o2c_audit_provisioning_cond,
                 'o2c_audit_watch_sql': o2c_audit_watch_sql, 'o2c_audit_provisioning_sql': o2c_audit_provisioning_sql}

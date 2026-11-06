@@ -222,6 +222,15 @@ o2c_ssh_new_user_frequency_minutes: 5
 o2c_var_log_excluded_exes:
   - /usr/bin/sudo
   - /usr/sbin/logrotate
+  # sshd(#446): 로그인마다 로그인 처리 프로세스가 lastlog·wtmp를 쓰기로 열어 정상 로그인이 P1이 됐다. 실행 파일 경로가 sshd 자신이라 범용 도구를 가리지 않는다.
+  - /usr/libexec/openssh/sshd-session
+  - /usr/sbin/sshd
+
+# 실행 파일과 comm이 함께 맞아야 빠지는 도구(#446). dnf·yum은 python 실행 파일이라 경로만으로 빼면 파이썬으로 지운 로그까지 가려서 comm을 같이 본다.
+# 위험: comm은 실행 파일 이름이라 로그인 사용자가 `dnf`라는 이름의 스크립트(shebang python3.9)를 만들어 돌리면 같은 모양이 되어 빠진다. 경로만 보는 제외보다 좁지만 우회는 열려 있다.
+# `_`·공백·따옴표·`%`가 든 경로와 comm(영숫자·`.`·`+`·`-`, 15자 이하)이 아닌 값은 O2C-002가 막는다. 비워도 된다.
+o2c_var_log_excluded_tools:
+  - { exe: /usr/bin/python3.9, comm: dnf }
 
 # 보안 서비스 중지 State Alert(infra-security-service-stopped, Spec #433 / Ticket-3, #429): 감사 로그 SERVICE_STOP·SERVICE_START의 (호스트, unit)별 마지막 시각을 비교해
 # 마지막 중지가 시작보다 늦고 그 중지가 grace(분)보다 오래됐으면 그 행이 P1이다. 유예는 알림 pending(쿼리 전체가 grace 동안 비지 않아야 함)이 아니라 SQL이 행마다
@@ -843,7 +852,7 @@ o2c_alerts:
       CASE WHEN body LIKE '% comm="%' THEN substr(regexp_replace(body, '^.* comm="([^"]*)".*$', '\1'), 1, 40) ELSE '알 수 없음' END AS tool,
       count(*) AS changes, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "security_logs"
       WHERE service_name = 'audit' AND body LIKE 'type=SYSCALL %' AND body LIKE '% key="var_log_delete"%' AND body LIKE '% success=yes %'
-      AND body NOT LIKE '% auid=4294967295 %'{{ o2c_var_log_excluded_exes | o2c_exe_exclusion }}
+      AND body NOT LIKE '% auid=4294967295 %'{{ o2c_var_log_excluded_exes | o2c_exe_exclusion }}{{ o2c_var_log_excluded_tools | o2c_exe_comm_exclusion }}
       GROUP BY host_name, actor, tool
       ORDER BY changes DESC
     period: 5
