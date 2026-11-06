@@ -1,0 +1,16 @@
+# Ansible 관리({{ ansible_managed | default('funa_env') }}) — 직접 고치지 않는다. 근거: infra-automation#443
+[Unit]
+Description=Start the FUNA keepalived container if Docker did not restore it after boot
+After=docker.service
+Requires=docker.service
+# docker가 부팅 뒤 다시 시작되면 이 유닛도 다시 실행해 그 사이 죽은 컨테이너를 되살린다(RemainAfterExit로 active를 유지해야 전파된다).
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 컨테이너가 없으면 넘어가고, 있는데 안 떠 있을 때만 시작한다(이미 떠 있으면 아무것도 하지 않는다).
+ExecStart=/bin/sh -c 'docker inspect {{ funa_env_vrrp_container }} >/dev/null 2>&1 || exit 0; [ "$(docker inspect -f "{% raw %}{{.State.Running}}{% endraw %}" {{ funa_env_vrrp_container }})" = true ] || docker start {{ funa_env_vrrp_container }}'
+
+[Install]
+WantedBy=multi-user.target
