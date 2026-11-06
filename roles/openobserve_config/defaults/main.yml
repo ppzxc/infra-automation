@@ -2522,17 +2522,11 @@ o2c_alerts:
       AND lower(body) NOT LIKE '%{{ n | lower }}%'
       {%- endfor %}
       GROUP BY host_name, service_name
-      {%- if o2c_appsec_hosts | length > 0 %}
-      UNION ALL
-      SELECT host_name, '로그 공백: ' || svc AS signal, 0 AS events, '24시간 동안 로그 없음' AS sample FROM (
-      SELECT host_name, service_name AS svc, count(*) AS n FROM "app_logs"
-      WHERE service_name IN ({% for sv in o2c_appsec_silent_services %}{{ ', ' if not loop.first else '' }}'{{ o2c_appsec_service_prefix }}{{ sv }}'{% endfor %})
-      AND host_name IN ({% for h in o2c_appsec_hosts %}{{ ', ' if not loop.first else '' }}'{{ h }}'{% endfor %}) GROUP BY host_name, service_name
       {%- for h in o2c_appsec_hosts %}{% for sv in o2c_appsec_silent_services %}
-      UNION ALL SELECT '{{ h }}' AS host_name, '{{ o2c_appsec_service_prefix }}{{ sv }}' AS svc, 0 AS n
+      UNION ALL
+      SELECT '{{ h }}' AS host_name, '로그 공백: {{ o2c_appsec_service_prefix }}{{ sv }}' AS signal, count(*) AS events, '24시간 동안 로그 없음' AS sample FROM "app_logs"
+      WHERE host_name = '{{ h }}' AND service_name = '{{ o2c_appsec_service_prefix }}{{ sv }}' HAVING count(*) < 1
       {%- endfor %}{% endfor %}
-      ) r GROUP BY host_name, svc HAVING sum(n) = 0
-      {%- endif %}
       ) t ORDER BY events DESC
     period: 1440
     frequency: 1440
