@@ -522,8 +522,8 @@ o2c_appsec_known_noise:
   - 'leave:'
   - '***'
   - sessionip=
-# 보고 시각(cron 5필드, 알림 최상위 tz_offset 기준 KST). 조회 구간은 24시간이다.
-o2c_appsec_report_cron: "0 17 * * *"
+# 보고 시각(cron 6필드 초 분 시 일 월 요일, 서버가 5필드는 거절한다. 알림 최상위 tz_offset 기준 KST). 조회 구간은 24시간이다.
+o2c_appsec_report_cron: "0 0 17 * * *"
 
 o2c_alerts:
   - name: infra-ssh-login-failures-per-source
