@@ -793,6 +793,16 @@ def test_extra_logs_carry_a_service_name_defaulting_to_the_stream():
     assert extra == {"/opt/app/*.log": "app", "/srv/x.log": "x-svc", "/srv/y.log": "security"}
 
 
+def test_home_log_dirs_expose_only_the_directories_of_logs_under_home():
+    """otelcol은 ProtectHome 아래서 돈다. /home 아래 수집 경로는 그 디렉터리만 읽기 전용으로 노출한다."""
+    res = _resolve(otel_extra_logs=[
+        {"path": "/home/chakramax/log/maxsvr.log", "service": "a"}, {"path": "/home/chakramax/log/run_*.out", "service": "b"},
+        "/opt/app/*.log", "/home/x.log", "/home/u/../etc/*.log"])
+    assert res["errors"] == []
+    assert res["otel_home_log_dirs"] == ["/home/chakramax/log"]
+    assert _resolve()["otel_home_log_dirs"] == []
+
+
 def test_switch_and_fortigate_syslog_paths_never_overlap_and_route_to_their_own_streams():
     """Spec #282: switch syslog stays on system_logs, firewall syslog goes to security_logs/fortigate-syslog.
 

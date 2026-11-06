@@ -29,7 +29,12 @@ RestartSec=5
 LimitNOFILE=65535
 NoNewPrivileges=true
 ProtectSystem=full
+{% if host_agents_inputs.otel_home_log_dirs | default([]) | length > 0 %}
+ProtectHome=tmpfs
+BindReadOnlyPaths={{ host_agents_inputs.otel_home_log_dirs | join(' ') }}
+{% else %}
 ProtectHome=true
+{% endif %}
 PrivateTmp=true
 {% if not (otelcol_run_as_root | default(false) | bool) %}
 CapabilityBoundingSet=CAP_DAC_READ_SEARCH

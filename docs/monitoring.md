@@ -128,6 +128,7 @@ SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(Cen
 
 - **경로**: OS 프로브가 `legacy_el7`로 분류한 호스트는 AnsiballZ 모듈(python3)을 쓰지 않고 `tasks/legacy.yml`(monitoring, backup 각각, CentOS 6과 공용)을 raw 경로로 실행합니다. 같은 템플릿을 컨트롤러에서 렌더링(`lookup('template')`)해 ADR-0005 헬퍼(write-temp → validate → mv, sentinel)로 올리므로 설정·프로파일·cron 내용은 modern과 동일합니다(바이트 단위 테스트). CentOS 6은 §3-5를 따릅니다.
 - **바이너리**: 컨트롤러가 pinned tarball을 검증·캐시한 뒤 `scp`로 업로드하고, 원격 `sha256sum`을 *추출 바이너리의* Git 고정 해시와 비교합니다(`MON-104/105`). 버전 디렉터리에서 스모크 테스트(`MON-211`: otelcol `--version`, restic·resticprofile `version`)를 통과해야만 설정 검증과 symlink 교체로 넘어갑니다. 실패하면 그 호스트만 실패하고 기존 symlink(직전 버전)가 유지됩니다.
+- **`/home` 아래 수집 경로**: `otel_extra_logs` 경로가 `/home/` 아래면 modern 유닛이 `ProtectHome=tmpfs`와 `BindReadOnlyPaths=<그 디렉터리>`로 해당 디렉터리만 읽기 전용으로 노출한다(전체 `/home`은 열지 않는다). 글롭 앞의 디렉터리를 쓰며 legacy 유닛에는 적용하지 않는다.
 - **컬렉터 유닛**: root 실행 + `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome`, `PrivateTmp`(CentOS 7의 systemd 219가 지원하는 항목만). 유닛 변경 시에만 `daemon-reload`, 이후 `is-enabled`/`is-active` sentinel로 `enable`/`start`(`enable --now` 미사용).
 - **백업**: `/etc/cron.d/host-agents-backup`, repo 프로브/`init`은 raw, `backup.jsonl` 증적·logrotate·훅은 modern과 동일합니다. 태그 분리(`agents_install`/`agents_config`)와 Deploy 한정(init, 등록 이벤트)도 동일합니다.
 - **check 모드**: 읽기 전용 프로브만 실행되고 변경 raw 태스크는 건너뜁니다. 비시크릿 파일은 컨트롤러 렌더링본과 원격의 diff를, 시크릿 파일은 변경 예정 여부만 출력합니다.
