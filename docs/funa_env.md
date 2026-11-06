@@ -74,7 +74,7 @@ Semaphore Static 인벤토리에서 FUNA Cluster 호스트를 `servers`에 두�
 FUNA 노드를 재부팅하면 `network_mode: host`인 keepalived 컨테이너가 `Exited (255)`로 남고 자동으로 올라오지 않았다(2026-11-06, 3대 모두). `restart` 정책은 원인이 아니었다(같은 `unless-stopped`인 caddy·funa-api는 올라왔다). dockerd가 `live-restore`로 시작하면서 이 컨테이너를 다시 띄우지 않았고, 부팅 로그에 기동 시도 자체가 없었다.
 
 - `funa-vrrp-ensure.service`(`FUNA-015`·`FUNA-016`)는 `docker.service` 뒤에 한 번 실행한다. 컨테이너(`funa_env_vrrp_container`, 기본 `vrrp-keepalived-1`)가 없으면 넘어가고, 있는데 안 떠 있을 때만 `docker start`한다.
-- `PartOf=docker.service`와 `RemainAfterExit=yes`라서 dockerd가 부팅 뒤에 다시 시작되면 이 유닛도 다시 실행된다(그 사이 죽은 컨테이너를 되살린다).
-- 운영자가 일부러 멈춰 둔 keepalived도 **재부팅 때는 시작된다**(`unless-stopped`와 다르다). 재부팅 뒤에도 멈춰 두려면 이 유닛을 비활성화한다.
+- `PartOf=docker.service`와 `RemainAfterExit=yes`라서 `systemctl restart docker`로 dockerd가 다시 시작되면 이 유닛도 다시 실행된다(그 사이 죽은 컨테이너를 되살린다). `stop`과 `start`를 따로 하면 이 유닛은 정지된 채 남는다.
+- 운영자가 일부러 멈춰 둔 keepalived도 **재부팅과 `systemctl restart docker`(패키지 업그레이드 포함) 때 시작된다**(`unless-stopped`와 다르다). 점검하려고 멈춰 둔 채 dockerd를 재시작하면 되살아나므로 유의하고, 계속 멈춰 두려면 이 유닛을 비활성화한다.
 - 이 유닛은 부팅과 dockerd 재시작 때만 동작한다. 컨테이너가 나중에 따로 죽는 것은 막지 않는다. 감시는 호스트에 이미 있는 root cron이 맡는다(컨테이너가 `Running`일 때만 Kuma push 모니터에 신호를 보내므로 멈추면 push가 끊겨 알림이 난다). 이 cron은 이 저장소가 배포하지 않는다.
 - 확인: 재부팅 뒤 `docker ps`에 `vrrp-keepalived-1`이 `Up`이고 VIP가 자기 노드에 돌아와 있어야 한다.
