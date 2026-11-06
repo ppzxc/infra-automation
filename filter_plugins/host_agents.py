@@ -438,6 +438,7 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
     return {
         'errors': errors,
         'otel_logs': logs,
+        'otel_home_log_dirs': _home_log_dirs(logs),
         'otel_docker_metrics': docker_metrics,
         'otel_container_logs': container_logs,
         'otel_app_telemetry': app_telemetry,
@@ -447,6 +448,24 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
         'backup_pre_hooks': pre_hooks,
         'backup_sqlite_snapshots': _dedupe(sqlite_snapshots),
     }
+
+
+def _home_log_dirs(logs):
+    """수집 경로 중 /home 아래에 있는 것의 디렉터리 목록.
+
+    otelcol 유닛이 ProtectHome 아래서 도니 /home은 보이지 않는다. 이 디렉터리만 읽기 전용으로 노출한다(전체 /home은 열지 않는다).
+    글롭 문자가 나오기 직전의 디렉터리를 쓴다.
+    """
+    dirs = []
+    for entry in logs:
+        path = entry['path']
+        if not path.startswith('/home/') or '..' in path.split('/'):
+            continue
+        static = re.split(r'[*?]', path, maxsplit=1)[0]
+        directory = static.rsplit('/', 1)[0] if '/' in static else ''
+        if directory.count('/') >= 2:
+            dirs.append(directory)
+    return _dedupe(sorted(dirs))
 
 
 # GitHub 조직 웹훅 수신기(Spec #399): 주소·포트·경로·시크릿·네트워크 이름은 저장소에 기본값이 없고 OpenBao hosts/<host>/agents의
