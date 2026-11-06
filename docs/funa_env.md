@@ -65,7 +65,7 @@ Semaphore Static 인벤토리에서 FUNA Cluster 호스트를 `servers`에 두�
 | `FUNA-013` | `Find the keepalived scripts and config files` | `ansible.builtin.find` | All | 조회 전용(`check_mode: false`), `*.sh`·`*.conf`만 |
 | `FUNA-014` | `Keep the keepalived scripts and config files root-owned and not writable` | `ansible.builtin.file` | All | 스크립트 `0755`, 설정 `0644`, `root:root` 일치 시 `ok` |
 | `FUNA-015` | `Deploy the unit that starts the keepalived container after boot` | `ansible.builtin.template` | All | 내용·권한 비교 (`funa-vrrp-ensure.service.j2`, `0644 root:root`). `docker.service` 뒤에 한 번 실행하고, 컨테이너가 있는데 안 떠 있을 때만 `docker start`(없거나 떠 있으면 아무것도 하지 않는다) |
-| `FUNA-016` | `Enable the keepalived start-after-boot unit` | `ansible.builtin.systemd` | All | `enabled: true`(`daemon_reload`). 서비스를 지금 시작하지 않는다. `funa_env_systemd_manage: false`이면 건너뜀(테스트용) |
+| `FUNA-016` | `Enable the keepalived start-after-boot unit` | `ansible.builtin.systemd` | All | `enabled: true`(`daemon_reload`). 서비스를 지금 시작하지 않는다. `funa_env_systemd_manage: false`이면 건너뜀(테스트용). 체크 모드에서 유닛 파일이 아직 없으면(`FUNA-015`가 `changed`) 건너뜀(systemd가 서비스를 찾지 못해 실패하기 때문) |
 
 > 이 역할은 OpenBao 조회 외에 `shell`/`command`를 쓰지 않는다(`FUNA-015`의 유닛 안 `ExecStart`는 부팅 때 systemd가 실행하는 것이고 이 역할의 태스크가 아니다). 값이 바뀌면 파일만 갱신하며 서비스를 재기동하지 않는다. compose는 다음 `up`에서 새 값을 읽는다.
 

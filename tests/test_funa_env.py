@@ -347,3 +347,11 @@ def test_ensure_unit_starts_only_a_stopped_existing_container(tmp_path, openbao,
     assert res.returncode == 0, res.stdout + res.stderr
     started = any(ln.startswith("start ") for ln in log.read_text().splitlines())
     assert started is starts, log.read_text()
+
+
+def test_check_mode_skips_enabling_a_unit_that_does_not_exist_yet(tmp_path, openbao):
+    # 체크 모드에서는 유닛 파일이 아직 없어 systemd 모듈이 "서비스를 찾을 수 없음"으로 실패한다(#443, 서버 체크 실행에서 발견).
+    res, _, _ = run(tmp_path, openbao, check=True, extra={"funa_env_systemd_manage": True})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert not (tmp_path / "systemd" / UNIT).exists()
+    assert re.search(r"FUNA-016.*\n(.*\n)*?skipping: \[n1\]", res.stdout), res.stdout
