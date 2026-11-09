@@ -24,7 +24,7 @@ EXPECTED_ALERTS = {
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
     "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
-    "infra-auth-silent-p2", "infra-auth-silent-p1",   # 인증 로그 수집 중단(#390)
+    "infra-auth-silent-p1",   # 인증 로그 수집 중단(#390, #455)
     "infra-github-webhook-watch-silent", "infra-github-webhook-hook-state", "infra-github-webhook-redelivery-failed", "infra-github-webhook-check-error",   # 웹훅 전달 점검(#405)
     "infra-github-audit-hook-deleted", "infra-github-audit-repo-public", "infra-github-audit-repo-org-deleted", "infra-github-audit-protection-removed",
     "infra-github-audit-ruleset-deleted", "infra-github-audit-deploy-key-created", "infra-github-audit-membership-change",   # 조직 관리 변경(#403)

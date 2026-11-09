@@ -618,11 +618,13 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 ---
 
 <a id="auth-silent"></a>
-## 🟠/🔴 인증 로그 수집 중단 — auth 로그 끊김 (`infra-auth-silent-p2`, `infra-auth-silent-p1`)
+## 🔴 인증 로그 수집 중단 — auth 로그 끊김 (`infra-auth-silent-p1`)
 
-수집 로스터 호스트(Silent Host와 같은 로스터, 계획된 중지 예외 제외)에서 `security_logs`의 `service_name=auth`(`/var/log/secure`·`auth.log`)가 60분 넘게 들어오지 않으면 P2(3시간 미만), 3시간 넘게 없으면 P1이다. 같은 호스트의 메트릭과 `audit`·`sudo` 로그는 계속 들어올 수 있다. 그래서 Silent Host 알림과 `security_logs` 스트림 전체로는 이 상황을 잡지 못한다.
+수집 로스터 호스트(Silent Host와 같은 로스터, 계획된 중지 예외 제외)에서 `security_logs`의 `service_name=auth`(`/var/log/secure`·`auth.log`)가 7일(168시간, `o2c_auth_silent_hours`) 넘게 하나도 들어오지 않으면 P1이다. 같은 호스트의 메트릭과 `audit`·`sudo` 로그는 계속 들어올 수 있다. 그래서 Silent Host 알림과 `security_logs` 스트림 전체로는 이 상황을 잡지 못한다.
 
-**왜 중요한가**: `auth`가 끊기면 SSH 로그인 실패·root 로그인·무차별 대입 후 성공·sudo 알림이 울릴 수 없다. OpenObserve는 약 5시간보다 오래된 로그를 받지 않으므로, 이 시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않는다(호스트 journal에는 남아 있다).
+**기준이 7일인 이유**: `auth` 줄은 SSH 로그인이 있을 때만 생긴다. 관리 서버의 주기 점검을 받는 호스트는 공백이 분 단위지만, 점검이 닿지 않는 로그인 드문 호스트는 정상 공백이 며칠이다(실측 최대 약 65시간). 호스트 구분 없이 공통으로 길게 잡았다(#455). 이전의 60분 P2(`infra-auth-silent-p2`)는 OpenObserve가 5시간보다 오래된 로그를 받지 않아 합성 검증을 만들 수 없어 폐기했다.
+
+**왜 중요한가**: `auth`가 끊기면 SSH 로그인 실패·root 로그인·무차별 대입 후 성공·sudo 알림이 울릴 수 없다. OpenObserve는 약 5시간보다 오래된 로그를 받지 않으므로 이 알림이 울릴 때 끊긴 구간은 중앙으로 복구되지 않는다(호스트 journal에는 남아 있다). 그래서 호스트 원본 로그를 보존하고 journal로 확인한다.
 
 **확인**
 1. **한 통지에 여러 호스트가 함께 나오면** 개별 rsyslog 정지가 아니라 관리 서버(Semaphore 쪽)의 주기 SSH 점검이 멈췄거나 수집 경로가 끊긴 것일 수 있다. 정상 호스트의 `auth`가 분당 1건씩 흐르는 주된 원천이 그 점검이기 때문이다. 관리 서버와 수집 경로부터 확인한다.
@@ -637,7 +639,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 3. `systemctl stop rsyslog` → `imjournal.state` 삭제 → `systemctl start rsyslog`.
 4. `logger -p authpriv.info <시험 문구>`를 실행해 `/var/log/secure`에 나타나는지, 몇 분 뒤 `security_logs`에 행이 들어오는지 확인한다.
 5. 같은 사고로 fail2ban의 sshd jail도 멈췄을 수 있다. `fail2ban-client status sshd`의 `Total failed`가 늘지 않으면 `systemctl restart fail2ban`을 한다(재시작하면 카운터가 0으로 초기화된다).
-6. P1이면 끊긴 구간(`journalctl -u sshd --since … --until …`)에 신뢰 출발지가 아닌 로그인 성공(`Accepted`)이 없는지 점검하고, 5시간 한도를 넘겼다면 호스트 원본 로그를 보존한다.
+6. 끊긴 구간(`journalctl -u sshd --since … --until …`)에 신뢰 출발지가 아닌 로그인 성공(`Accepted`)이 없는지 점검하고 호스트 원본 로그를 보존한다.
 
 며칠 이상 계획 정지하는 호스트면 OpenBao `silent_host_exceptions`에 만료일과 함께 등록한다.
 
