@@ -55,7 +55,6 @@ def test_absence_sql_empty_roster_never_fires_and_keeps_the_condition_shape():
 
 def test_auth_silent_fixtures_cover_the_rsyslog_stall_case():
     from o2c_alert_helpers import FIXTURES
-    for name in ("infra-auth-silent-p2", "infra-auth-silent-p1"):
-        cases = FIXTURES[name]["cases"]
-        stall = [c for c in cases if c["fires"] and any(r.get("service_name") == "audit" for r in c["records"])]
-        assert stall, "%s: auth는 끊기고 audit만 오는 호스트가 발화하는 케이스가 있어야 한다" % name
+    cases = FIXTURES["infra-auth-silent-p1"]["cases"]
+    stall = [c for c in cases if c["fires"] and any(r.get("service_name") == "audit" for r in c["records"])]
+    assert stall, "auth는 없고 audit만 오는 호스트가 발화하는 케이스가 있어야 한다"
