@@ -85,6 +85,11 @@ if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     emit_status timeout "$tool" "$version" "$rc" "no answer within ${TIMEOUT}s" >> "$LOG" 2>/dev/null
     exit 0
 fi
+# ssacli는 컨트롤러가 없을 때 "Error: No controllers detected."를 0이 아닌 종료 코드로 끝내므로 rc 검사보다 먼저 가른다.
+if grep -q 'No controllers detected' "$tmp_out"; then
+    emit_status no_controller "$tool" "$version" "$rc" "$msg" >> "$LOG" 2>/dev/null
+    exit 0
+fi
 if [ "$rc" -ne 0 ]; then
     emit_status error "$tool" "$version" "$rc" "$msg" >> "$LOG" 2>/dev/null
     exit 0
