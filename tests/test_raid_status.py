@@ -199,6 +199,9 @@ def test_tool_errors_and_missing_controllers_are_reported_not_raised(tmp_path):
     assert [(r["status"], r["exit_code"]) for r in err] == [("error", 3)] and "bad" in err[0]["message"]
     none = _run(tmp_path / "b", body="#!/bin/sh\n[ \"$1\" = version ] && exit 0\necho\necho 'Error: No controllers detected.'\n")
     assert [r["status"] for r in none] == ["no_controller"]
+    # 실제 ssacli(ns0438)는 같은 문구를 0이 아닌 종료 코드로 끝낸다. error가 아니라 no_controller여야 한다.
+    none_rc = _run(tmp_path / "c", body="#!/bin/sh\n[ \"$1\" = version ] && exit 0\necho\necho 'Error: No controllers detected. Possible causes:'\nexit 1\n")
+    assert [(r["status"], r["exit_code"]) for r in none_rc] == [("no_controller", 1)]
 
 
 def test_a_hung_tool_is_cut_off_by_the_timeout(tmp_path):
