@@ -186,7 +186,7 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
 * **2차 시도 (부트스트랩 폴백)**: 관리자 SSH 연결 실패 시 신규 호스트로 판단, OpenBao `users/<bootstrap_user>`에서 패스워드/키를 취득하여 `ansible_user=bootstrap_user`로 자동 폴백 접속 후 프로비저닝을 수행합니다. 프로비저닝이 완료되면 `root` 원격 접속은 차단되고 등록된 관리자 계정만 유지됩니다.
 
 ### (4) Cisco 스위치별 접속 정보 및 자격증명
-* **경로**: `secret/data/switches/<inventory_hostname>` (예: `secret/data/switches/ns0000`, `secret/data/switches/ns0278`)
+* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0000`, `secret/data/hosts/ns0278`)
 * **변수 해석 우선순위**: OpenBao KV v2 최우선 ➔ 인벤토리/로컬 변수 폴백 ➔ 시스템 기본값
 * **필드 (Key-Value) - SSH 스위치**:
   ```json
@@ -260,7 +260,7 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
   {
     "VAULT_ADDR": "https://openbao.internal:8200",
     "VAULT_NAMESPACE": "root",
-    "OPENBAO_CISCO_PREFIX": "switches/",
+    "OPENBAO_CISCO_PREFIX": "hosts/",
     "VAULT_SKIP_VERIFY": "false"
   }
   ```
@@ -268,7 +268,7 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
   ```json
   {
     "cisco_backup_dir": "/opt/backups/cisco",
-    "openbao_cisco_prefix": "switches/"
+    "openbao_cisco_prefix": "hosts/"
   }
   ```
 * **Secrets (보안 변수 - AppRole 인증 시)**:
