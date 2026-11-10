@@ -15,7 +15,7 @@
     - "{{ playbook_dir }}/../inventory/group_vars/cisco_switches.yml"
 
   vars:
-    cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('switches/', true) }}"
+    cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('hosts/', true) }}"
 
   pre_tasks:
     - name: Run OpenBao direct diagnostic probe from controller

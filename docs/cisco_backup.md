@@ -60,10 +60,10 @@
      - `vault_role_id` / `VAULT_ROLE_ID`: Semaphore Secrets 또는 Environment에 등록된 AppRole Role ID
      - `vault_secret_id` / `VAULT_SECRET_ID`: Semaphore Secrets 또는 Environment에 등록된 AppRole Secret ID
      - `VAULT_MOUNT`: (선택) KV v2 마운트 지점 (기본값: `secret`)
-     - `openbao_cisco_prefix` / `OPENBAO_CISCO_PREFIX`: (선택) 스위치 키 접두사 (기본값: `switches/`)
-2. **OpenBao KV v2 메타데이터 규격 (`secret/data/switches/<inventory_hostname>`)**:
+     - `openbao_cisco_prefix` / `OPENBAO_CISCO_PREFIX`: (선택) 스위치 키 접두사 (기본값: `hosts/`. 2026-11-10까지는 `switches/`였고 스위치 접속 키를 `hosts/<ns>`로 복사해 옮겼다)
+2. **OpenBao KV v2 메타데이터 규격 (`secret/data/hosts/<inventory_hostname>`)**:
    - 정적 인벤토리(`inventory/hosts.yml` 또는 Semaphore Static Inventory)에는 스위치 관리번호(예: `ns0278`, `ns0065`)만 전달됩니다.
-   - 각 스위치는 KV 경로 `switches/<inventory_hostname>`에 다음 키-값 필드를 보유해야 하며, 플랫 딕셔너리, 호스트명 키 중첩(`{ "ns0278": { ... } }`), 또는 배열 포맷(`[ { ... } ]`) 모두 자동으로 언래핑되어 해석됩니다:
+   - 각 스위치는 KV 경로 `hosts/<inventory_hostname>`(서버와 같은 경로라 `description`·`host_type`·`isms_*` 같은 다른 키가 같이 있어도 읽는 키만 쓴다)에 다음 키-값 필드를 보유해야 하며, 플랫 딕셔너리, 호스트명 키 중첩(`{ "ns0278": { ... } }`), 또는 배열 포맷(`[ { ... } ]`) 모두 자동으로 언래핑되어 해석됩니다:
      - `ansible_host` (또는 `ip`): (필수) 스위치 관리 IP 주소 (예: `211.210.44.182`)
      - `ansible_user` (또는 `user`, `username`): (필수) 접속 계정명 (예: `admin`, `ansible-backup`)
      - `ansible_password` (또는 `password`): (선택) 접속 비밀번호
@@ -73,7 +73,7 @@
      - `bastion_host`: (선택) Bastion 점프 호스트 IP / 관리번호 (동일하게 OpenBao에서 접속 정보 자동 조회)
      - `fqdn`: (선택) 정규 호스트명
 3. **호스트 변수 결정 및 폴백(Fallback) 우선순위**:
-   - 1순위: OpenBao KV v2 (`switches/<inventory_hostname>`) 시크릿 메타데이터
+   - 1순위: OpenBao KV v2 (`hosts/<inventory_hostname>`) 시크릿 메타데이터
    - 2순위: 인벤토리(`hosts.yml`)에 명시적으로 정의된 `ansible_host`, `ansible_user`
    - 3순위 (실패): OpenBao 및 `hosts.yml` 둘 다 유효한 IP/계정이 없을 경우 단축 호스트명(`inventory_hostname`)으로 임의 fallback하지 않고 `Verify OpenBao switch metadata is resolved` 태스크에서 즉시 실패(`[OPENBAO-MISSING]`) 처리.
 4. **Cron Schedule 설정**:
