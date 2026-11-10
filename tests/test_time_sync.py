@@ -125,6 +125,61 @@ def test_a_host_without_any_time_tool_leaves_a_no_tool_line(tmp_path):
     assert (rec["tool"], rec["sync_status"], rec["synced"], rec["offset_ms"]) == ("none", "no_tool", None, None)
 
 
+# --- rdate (ntpd 없이 cron으로 하루 한 번 맞추는 CentOS 6) -----------------------------------------------------
+
+RDATE_CRON = "17 * * * * root run-parts /etc/cron.hourly\n#* * * * * root /usr/bin/rdate -s old.example\n" \
+             "00 02 * * * root /usr/bin/rdate -s time.bora.net && /sbin/clock -w\n"
+# rdate_p_el6.txt가 찍힌 시각(KST 13:44:24)을 UTC 기준으로 풀기 위해 TZ=UTC로 고정한다
+REMOTE_EPOCH = 1794318264  # 2026-11-10 13:44:24 UTC
+
+
+def _run_rdate(tmp_path, cron_text, local_epoch, tools=None, extra=None):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cron = tmp_path / "crontab"
+    cron.write_text(cron_text)
+    tools = {"rdate": (_fixture("rdate_p_el6.txt"), 0), **(tools or {})}
+    bindir = _fake_tools(tmp_path, tools)
+    log = tmp_path / "time-sync.jsonl"
+    env = {"PATH": "/usr/bin:/bin", "TZ": "UTC", "TIME_SYNC_PATH": str(bindir), "TIME_SYNC_LOG": str(log),
+           "TIME_SYNC_CRON_FILES": str(cron), "TIME_SYNC_NOW": str(local_epoch),
+           "TIME_SYNC_TOOLS": " ".join(n for n in ("chronyc", "ntpq", "timedatectl", "rdate") if n in tools),
+           **(extra or {})}
+    assert subprocess.run(["/bin/sh", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60).returncode == 0
+    (rec,) = [json.loads(line) for line in log.read_text().splitlines()]
+    return rec
+
+
+def test_rdate_cron_host_without_ntpd_reports_the_offset_from_a_print_only_query(tmp_path):
+    rec = _run_rdate(tmp_path, RDATE_CRON, REMOTE_EPOCH - 1,
+                     {"ntpq": (_fixture("ntpq_el6_daemon_down.txt"), 0)})
+    assert FIELDS <= set(rec)
+    assert (rec["tool"], rec["sync_status"], rec["synced"], rec["offset_ms"]) == ("rdate", "synced", True, -1000)
+    assert "time.bora.net" in rec["message"] and rec["stratum"] is None     # 주석 처리된 옛 줄이 아니라 살아 있는 줄의 서버
+
+
+def test_rdate_offset_is_positive_when_the_local_clock_is_ahead(tmp_path):
+    assert _run_rdate(tmp_path, RDATE_CRON, REMOTE_EPOCH + 90)["offset_ms"] == 90000
+
+
+def test_rdate_is_not_used_when_the_host_cron_does_not_use_it(tmp_path):
+    """rdate 명령이 있어도 cron이 쓰지 않으면 후보가 아니다 — 도구 없음으로 센다."""
+    rec = _run_rdate(tmp_path, "17 * * * * root run-parts /etc/cron.hourly\n#00 02 * * * root rdate -s x.example\n",
+                     REMOTE_EPOCH)
+    assert (rec["tool"], rec["sync_status"]) == ("none", "no_tool")
+
+
+def test_a_working_chronyc_wins_over_rdate(tmp_path):
+    rec = _run_rdate(tmp_path, RDATE_CRON, REMOTE_EPOCH,
+                     {"chronyc": (_fixture("chronyc_tracking_rocky9_synced.txt"), 0)})
+    assert rec["tool"] == "chronyc"
+
+
+def test_a_failing_rdate_query_leaves_the_host_unsynced(tmp_path):
+    rec = _run_rdate(tmp_path, RDATE_CRON, REMOTE_EPOCH, {"rdate": ("rdate: couldn't connect\n", 1),
+                                                          "ntpq": (_fixture("ntpq_el6_daemon_down.txt"), 0)})
+    assert (rec["sync_status"], rec["synced"], rec["offset_ms"]) == ("unsynced", False, None)
+
+
 def test_the_collector_never_depends_on_the_host_locale(tmp_path):
     """timedatectl prints Korean labels on a ko_KR host; the script must force the C locale."""
     text = SCRIPT.read_text(encoding="utf-8")
@@ -133,8 +188,11 @@ def test_the_collector_never_depends_on_the_host_locale(tmp_path):
 
 def test_the_collector_is_read_only_and_installs_nothing():
     text = SCRIPT.read_text(encoding="utf-8")
-    for forbidden in ("ntpdate", "rdate", "chronyc makestep", "timedatectl set", "yum ", "dnf ", "apt"):
+    for forbidden in ("ntpdate", "chronyc makestep", "timedatectl set", "yum ", "dnf ", "apt", "rdate -s", "rdate -u"):
         assert forbidden not in text, forbidden
+    # rdate는 조회 전용 -p로만 부른다(-s는 시계를 바꾼다)
+    calls = [ln.strip() for ln in text.splitlines() if "run rdate" in ln]
+    assert calls and all(ln.startswith('run rdate -p "$server"') for ln in calls), calls
 
 
 def test_a_hung_tool_is_cut_off_by_the_timeout_and_reported_as_error(tmp_path):

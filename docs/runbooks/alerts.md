@@ -989,7 +989,7 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 
 최근 35분 안의 시각 동기 판독이 6회 이상이고 **모두** `sync_status=unsynced`다(중간에 동기된 판독이 하나라도 있으면 울리지 않는다). 도구가 있는데 데몬이 답하지 않는 경우도 `unsynced`이며, `message`에 이유가 나온다(`chronyd reports: Not synchronised`, `ntpq not answering`).
 
-**CentOS 6 호스트**: 2026-10-26 조사에서 CentOS 6 호스트는 모두 `ntpd`를 끄고 cron의 `rdate`로 하루 한 번(02:00) 시각을 맞추고 있었다. 이 호스트들은 항상 `ntpq not answering`으로 이 알림 대상이 된다. 선택지는 둘이다: (a) `ntpd`를 켜 상시 동기로 바꾼다(호스트 변경이라 별도 승인·작업이 필요하다), (b) 하루 한 번 맞추는 방식을 받아들이고 알림을 운영 결정으로 닫는다. 어느 쪽이든 결정과 날짜를 비공개 노트에 남긴다.
+**CentOS 6 호스트**: 2026-10-26 조사에서 CentOS 6 호스트는 모두 `ntpd`를 끄고 cron의 `rdate`로 하루 한 번(02:00) 시각을 맞추고 있었다. 수집기에 `rdate -p` 조회가 추가된 뒤로(2026-11-10) 이 호스트들은 `tool=rdate`, `sync_status=synced`와 초 단위 `offset_ms`를 남기므로 이 알림 대상이 아니다. `message`가 계속 `ntpq not answering`이면 cron에 `rdate` 줄이 없거나 `rdate -p time.…` 조회가 실패하는 것이다(서버 37번 포트 접속 확인). 정말 상시 동기가 필요하면 선택지는 둘이다: (a) `ntpd`를 켜 상시 동기로 바꾼다(호스트 변경이라 별도 승인·작업이 필요하다), (b) 하루 한 번 맞추는 방식을 받아들이고 알림을 운영 결정으로 닫는다. 어느 쪽이든 결정과 날짜를 비공개 노트에 남긴다.
 
 **확인·대응**
 1. `message`를 본다. chrony는 시간원 접속(`chronyc sources`, 방화벽), ntpq는 `service ntpd status`를 확인한다.

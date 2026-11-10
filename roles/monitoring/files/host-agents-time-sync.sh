@@ -3,6 +3,8 @@
 #
 # cron이 5분마다 root로 실행한다. 읽기 전용이다: 서버에 이미 있는 chronyc → ntpq → timedatectl 중 처음으로 답하는 도구의
 # 출력만 읽고, 시각을 맞추거나 서비스를 건드리지 않으며 아무것도 설치하지 않는다.
+# 네 번째 도구 rdate는 그 호스트의 cron이 이미 `rdate`로 시각을 맞추는 경우에만 쓴다(ntpd 없이 하루 한 번 맞추는 CentOS 6).
+# 이때도 `rdate -p`(조회만, 시계를 바꾸지 않음)로 cron에 적힌 그 서버의 시각을 읽어 편차를 낸다. 정밀도는 1초다.
 # 결과는 JSON 한 줄(kind=time_sync)을 time-sync.jsonl에 append하고, otelcol(filelog/host_status_logs)이 읽는다.
 #
 #   sync_status: synced | unsynced | no_tool | error
@@ -21,7 +23,9 @@ export PATH
 
 LOG="${TIME_SYNC_LOG:-/var/log/host-agents/time-sync.jsonl}"
 TIMEOUT="${TIME_SYNC_TIMEOUT:-20}"
-TOOLS="${TIME_SYNC_TOOLS:-chronyc ntpq timedatectl}"
+TOOLS="${TIME_SYNC_TOOLS:-chronyc ntpq timedatectl rdate}"
+# rdate 방식 판별에 읽는 cron 파일(시험용으로 바꿀 수 있다). 따옴표 없이 펼쳐 글롭을 허용한다.
+CRON_FILES="${TIME_SYNC_CRON_FILES:-/etc/crontab /etc/cron.d/* /var/spool/cron/*}"
 
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 run_id="t-$(date +%s)-$$"
@@ -117,14 +121,44 @@ probe_timedatectl() {
     esac
 }
 
+# rdate: cron이 rdate로 맞추는 호스트에서만 쓴다. cron에 적힌 서버를 `rdate -p`로 조회해 시스템 시각과 비교한다(시계는 바꾸지 않는다).
+# rdate는 초 단위로만 답하므로 offset_ms는 1000의 배수다(알림 기준 abs(offset_ms) > 1000과 맞물려 1초 이내 오차는 울리지 않는다).
+rdate_server() {
+    # shellcheck disable=SC2086 # CRON_FILES는 의도적으로 단어 분리·글롭한다
+    cat $CRON_FILES 2>/dev/null | grep -v '^[ 	]*#' |
+        sed -n 's/.*rdate[ 	][ 	]*\(-[a-z][a-z]*[ 	][ 	]*\)*\([A-Za-z0-9][A-Za-z0-9.-]*\).*/\2/p' | head -n 1
+}
+
+probe_rdate() {
+    server=$(rdate_server)
+    [ -n "$server" ] || return
+    run rdate -p "$server" > "$tmp_out" 2>&1
+    rc=$?
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then timed_out=1; return; fi
+    [ "$rc" -eq 0 ] || return
+    # 출력: "rdate: [서버]<탭>Tue Nov 10 13:44:24 2026" — 대괄호 뒤가 로컬 시각이다.
+    remote=$(sed -n 's/^rdate: \[[^]]*\][ 	]*\(.*[0-9]\)[ 	]*$/\1/p' "$tmp_out" | head -n 1)
+    [ -n "$remote" ] || return
+    remote_epoch=$(date -d "$remote" +%s 2>/dev/null)
+    case "$remote_epoch" in ''|*[!0-9]*) return ;; esac
+    local_epoch=${TIME_SYNC_NOW:-$(date +%s)}
+    answered=1
+    r_synced=true
+    r_offset=$(( (local_epoch - remote_epoch) * 1000 ))
+    r_message="rdate -p $server (1s resolution)"
+}
+
 first_found=
 for t in $TOOLS; do
     command -v "$t" >/dev/null 2>&1 || continue
+    # rdate는 이 호스트의 cron이 rdate로 시각을 맞출 때만 후보다(아니면 "도구 없음"으로 센다).
+    [ "$t" != rdate ] || [ -n "$(rdate_server)" ] || continue
     [ -n "$first_found" ] || first_found=$t
     case "$t" in
         chronyc) probe_chronyc ;;
         ntpq) probe_ntpq ;;
         timedatectl) probe_timedatectl ;;
+        rdate) probe_rdate ;;
     esac
     if [ -n "$answered" ]; then
         if [ "$r_synced" = true ]; then status=synced; else status=unsynced; fi
