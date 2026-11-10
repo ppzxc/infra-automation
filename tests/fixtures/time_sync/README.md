@@ -6,6 +6,8 @@
 - `chronyc_tracking_el7_synced.txt`, `timedatectl_el7_synced.txt` — CentOS 7.9, chrony 3.4
 - `ntpq_el6_daemon_down.txt` — CentOS 6.9, ntp 4.2.6p5, ntpd가 꺼진 상태(`ntpq: read: Connection refused`, `ntpstat` 종료 코드 2). 조사한 CentOS 6 호스트는 모두 ntpd를 끄고 cron의 `rdate`로 하루 한 번 맞춘다.
 
+- `rdate_p_el6.txt` — CentOS 6.9(rdate-1.4-16.el6) ns0272에서 2026-11-10에 `rdate -p time.bora.net`으로 받은 실제 출력(서버 시각 13:44:23, 응답 13:44:24). 시계는 바뀌지 않았다. cron은 `/etc/crontab`에 `00 02 * * * root /usr/bin/rdate -s time.bora.net && /sbin/clock -w`.
+
 운영 서버에서 받지 못해 도구 문서의 출력 형식대로 만든 것(실제 캡처가 아님):
 
 - `chronyc_tracking_rocky9_offset_2s.txt` — 실제 출력에서 `System time` 줄만 2.35초로 바꿈
