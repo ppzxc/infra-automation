@@ -33,7 +33,7 @@
   delegate_to: localhost
   become: false
   changed_when: false
-  no_log: true
+  no_log: "{{ cisco_backup_no_log }}"
   when: connection_type | default('ssh') == 'ssh'
 
 # 2. Telnet 직접 수집 (cisco_direct_telnet 장비: ns0341, ns0065)
@@ -57,7 +57,7 @@
   delegate_to: localhost
   become: false
   changed_when: false
-  no_log: true
+  no_log: "{{ cisco_backup_no_log }}"
   when: connection_type | default('ssh') == 'telnet'
 
 # 3. Bastion 경유 Jump SSH 수집 (cisco_jump_switches 장비: ns0279, ns0281, ns0282)
@@ -85,7 +85,7 @@
   delegate_to: localhost
   become: false
   changed_when: false
-  no_log: true
+  no_log: "{{ cisco_backup_no_log }}"
   when: connection_type | default('ssh') == 'jump_ssh'
 
 - name: Set unified collected configuration fact

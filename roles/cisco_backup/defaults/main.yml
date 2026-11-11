@@ -14,3 +14,7 @@ cisco_backup_filename_format: "{{ inventory_hostname }}_{{ lookup('pipe', 'date 
 
 # 백업 명령 타임아웃 (초)
 cisco_backup_timeout: 60
+
+# Hide collector output because it contains the device running configuration.
+# Override per host only for controlled diagnostics.
+cisco_backup_no_log: true

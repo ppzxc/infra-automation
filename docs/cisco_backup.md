@@ -38,6 +38,10 @@
 | `CISCO-006` | `Collect running configuration via Telnet` | `ansible.builtin.command` | Controller / Localhost | Telnet 소켓 세션 통해 설정 수집 |
 | `CISCO-007` | `Collect running configuration via Bastion jump session` | `ansible.builtin.command` | Controller / Localhost | Bastion 대화형 쉘 점프 통해 설정 수집 |
 
+### 수집 로그 제어
+
+`cisco_backup_no_log`는 SSH/Telnet/Jump SSH 수집 태스크의 Ansible 출력을 숨길지 제어한다. 기본값은 `true`이며, 인벤토리의 `host_vars/<호스트>.yml`에서 진단이 필요한 장비만 `false`로 덮어쓸 수 있다. `false`로 실행하면 오류 원인을 확인할 수 있지만 `show running-config` 결과도 Semaphore 로그에 노출되므로, 접근을 제한하고 진단 후 즉시 기본값으로 되돌린다.
+
 ---
 
 ## 4. 플레이북 실행 및 Semaphore UI 연동
