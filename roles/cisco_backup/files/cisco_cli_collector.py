@@ -105,6 +105,35 @@ def extract_clean_config(raw_output: str) -> str:
 
 
 _CONFIG_END_RE = re.compile(rb"(?:^|\n)end\r*\n")
+_CISCO_PROMPT_RE = re.compile(rb"(?:^|[\r\n])[^\r\n]{1,128}[>#]\s*$")
+
+
+def wait_for_cisco_login(pty_send, pty_recv, proc, passwords, timeout=30):
+    """Answer SSH prompts and wait until an IOS EXEC prompt is actually ready."""
+    pass_idx = 0
+    buf = b""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        chunk = pty_recv(min(0.3, max(0, deadline - time.time())))
+        if chunk:
+            buf += chunk
+            lower = buf.lower()
+            if _CISCO_PROMPT_RE.search(buf):
+                return
+            if b"yes/no" in lower:
+                pty_send(b"yes\n")
+                buf = b""
+            elif b"permission denied" in lower:
+                raise RuntimeError("SSH authentication failed (permission denied)")
+            elif b"password:" in lower or b"password :" in lower:
+                if pass_idx >= len(passwords):
+                    raise RuntimeError("SSH authentication failed (password prompt repeated)")
+                pty_send(passwords[pass_idx].encode() + b"\n")
+                pass_idx += 1
+                buf = b""
+        if proc.poll() is not None:
+            raise RuntimeError(f"SSH process exited unexpectedly with code {proc.returncode}")
+    raise RuntimeError("Timed out waiting for Cisco prompt after SSH authentication")
 
 
 def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 30) -> str:
@@ -225,29 +254,7 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
     try:
         # If target_pass is specified, we expect password prompt for bastion first, then target switch
         passwords_to_send = [password, target_pass] if target_pass else [password]
-        pass_idx = 0
-        buf = b""
-        login_start = time.time()
-
-        while time.time() - login_start < 20.0 and pass_idx < len(passwords_to_send):
-            chunk = pty_recv(0.3)
-            if chunk:
-                buf += chunk
-                lower = buf.lower()
-                if b"yes/no" in lower:
-                    pty_send(b"yes\n")
-                    buf = b""
-                elif b"permission denied" in lower:
-                    err_msg = buf.decode(errors="ignore").strip()
-                    raise RuntimeError(f"SSH authentication failed (permission denied): {err_msg}")
-                elif b"password:" in lower or b"password :" in lower:
-                    current_pwd = passwords_to_send[pass_idx]
-                    pty_send(current_pwd.encode() + b"\n")
-                    pass_idx += 1
-                    buf = b""
-            if proc.poll() is not None:
-                err_msg = buf.decode(errors="ignore").strip()
-                raise RuntimeError(f"SSH process exited unexpectedly with code {proc.returncode}: {err_msg}")
+        wait_for_cisco_login(pty_send, pty_recv, proc, passwords_to_send)
 
         effective_enable = enable_pass or (target_pass if target_pass else password)
         return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout)

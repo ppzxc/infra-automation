@@ -8,6 +8,43 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "roles" / "cisco_backup" / "files"))
 import cisco_cli_collector
 
+
+def test_openssh_direct_login_waits_for_ios_prompt_after_password():
+    chunks = iter([b"(ansible-backup@switch) Password:", b"ns0304-2960#"])
+    sent = []
+
+    class RunningProcess:
+        returncode = None
+        def poll(self):
+            return None
+
+    cisco_cli_collector.wait_for_cisco_login(
+        lambda data: sent.append(data),
+        lambda _timeout: next(chunks, b""),
+        RunningProcess(),
+        ["test-password"],
+        timeout=1,
+    )
+
+    assert sent == [b"test-password\n"]
+
+
+def test_openssh_direct_login_fails_if_password_prompt_repeats():
+    class RunningProcess:
+        returncode = None
+        def poll(self):
+            return None
+
+    chunks = iter([b"Password:", b"Password:"])
+    with pytest.raises(RuntimeError, match="password prompt repeated"):
+        cisco_cli_collector.wait_for_cisco_login(
+            lambda _data: None,
+            lambda _timeout: next(chunks, b""),
+            RunningProcess(),
+            ["test-password"],
+            timeout=1,
+        )
+
 def test_jump_ssh_interactive_openssh_simulation(tmp_path):
     """Simulate bastion jump using interactive OpenSSH/PTY execution to ensure smooth prompt transition."""
     mock_bastion = tmp_path / "mock_bastion.py"
