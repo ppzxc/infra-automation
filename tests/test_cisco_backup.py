@@ -20,6 +20,16 @@ def test_cisco_backup_role_structure():
     assert (role_dir / "tasks" / "main.yml").exists(), "roles/cisco_backup/tasks/main.yml missing"
     assert (role_dir / "defaults" / "main.yml").exists(), "roles/cisco_backup/defaults/main.yml missing"
 
+def test_cisco_backup_collector_no_log_is_inventory_configurable():
+    defaults = yaml.safe_load((ROOT_DIR / "roles/cisco_backup" / "defaults" / "main.yml").read_text())
+    tasks = yaml.safe_load((ROOT_DIR / "roles/cisco_backup" / "tasks" / "main.yml").read_text())
+    collector_tasks = [task for task in tasks if task.get("register") in {
+        "cisco_config_direct_output", "cisco_config_telnet_output", "cisco_config_jump_output"
+    }]
+    assert defaults["cisco_backup_no_log"] is True
+    assert len(collector_tasks) == 3
+    assert all(task["no_log"] == "{{ cisco_backup_no_log }}" for task in collector_tasks)
+
 def test_cisco_backup_playbook_structure():
     """Verify playbooks/backup_cisco.yml exists and defines correct hosts, pre_tasks, and role"""
     playbook_file = ROOT_DIR / "playbooks" / "backup_cisco.yml"
