@@ -58,6 +58,7 @@ def test_inventory_cisco_switches_example():
         inv_data = yaml.safe_load(f)
     children = inv_data["all"].get("children", {})
     assert "cisco_switches" in children, "cisco_switches group missing from hosts.yml.example"
+    assert "cisco_snmp_targets" in children, "cisco_snmp_targets group missing from hosts.yml.example"
 
     cisco_vars_file = ROOT_DIR / "inventory" / "group_vars" / "cisco_switches.yml"
     assert cisco_vars_file.exists(), "group_vars/cisco_switches.yml is missing"

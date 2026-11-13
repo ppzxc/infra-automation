@@ -116,6 +116,21 @@
     - **SQL은 방화벽 컬럼을 참조하지 않는다**: `security_logs`에는 첫 방화벽 줄이 들어오기 전까지 `device_id` 같은 컬럼이 없어, 참조하면 알림 평가가 매번 오류가 나고 `O2C-036`이 Config 실행을 막는다(장비는 아직 전송 전). 그래서 `service_name`과 원문 `body`의 `key=value`(`o2c_fortigate_match`: 따옴표 있는 값·없는 값 모두), 장비 이름은 `devname`에서 읽는다. 로그인 실패 행의 출발지만 기존 `source_address` 컬럼(sshd 알림이 이미 쓴다)을 쓴다. #285 필드 추출과 독립이다.
     - **승인 시간 안/밖**: 변경 로그 원문의 `time=HH:MM:SS`(장비 시계)에서 시를 읽는다(`CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(... AS INT) ELSE -1 END`). 시작 포함·끝 미포함이며 시각이 없는 줄은 -1이라 승인 시간 밖이다. 같은 줄이 두 알림에 동시에 걸리지 않는다. 요일은 구분하지 않으며 장비 시간대가 운영 시간대(KST)여야 한다. 수신 시각(`_timestamp`)이 아니라 장비 시각을 쓰는 이유는 승인 시간이 장비에서 작업한 시각의 문제이고, 검증 레코드가 실행 시각과 무관하게 결정적이기 때문이다.
     - **수신 중단 감시 목록은 기본이 비어 있다(opt in)**: 전송을 시작하기 전 장비를 목록에 두면 허위 알림이 계속 온다. 장비가 로그를 보내기 시작한 것을 확인한 뒤 관리번호를 더한다(사무실 먼저). 목록이 비면 규칙은 있지만 절대 행을 돌려주지 않는 가지 하나만 남고(앱 텔레메트리 무소식과 같은 방식), 목록에 없는 장비는 로그가 없어도 알리지 않는다. IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶으면 어느 한 멤버라도 보낼 때 수신 중으로 센다. 레코드가 `device_id`로 일치하거나 원문의 `devname`이 그 이름이면 수신으로 센다(파이프라인 반영 전 레코드 포함).
+
+  - **스위치 SNMP 메트릭 알림 7개**: Telegraf Catalyst 설정이 60초마다 보내는 IF-MIB 상태·오류, CISCO-PROCESS-MIB CPU, CISCO-MEMORY-POOL-MIB 메모리 스트림을 사용한다. `infra-switch-snmp-unreachable`는 명시한 `cisco_snmp_targets` 그룹의 장비별 성공 uptime 표본이 3분 없으면 P1이다. Semaphore 인벤토리의 관리번호는 소문자로 두고, 현재 Telegraf가 보내는 대문자 `device_id`와 비교할 때 SQL은 대소문자를 무시한다. Telegraf에 설정했고 실제 장애 감시가 필요한 장비를 등록한다. 표본이 없으면 P1을 받을 수 있으므로 수집 대상이 아니거나 폐기된 장비는 넣지 않는다. 상세 조사와 1차 자료는 [Cisco 스위치 장애 알림 기준](research/cisco-switch-alert-baseline.md)에 있다.
+
+    | 이름 | 등급 | 조건 |
+    |---|---|---|
+    | `infra-switch-snmp-unreachable` | P1 | 인벤토리 스위치별 성공 uptime 표본 3분 없음 |
+    | `infra-switch-interface-down` | P1 | `ifAlias`가 `Core:`/`Transit:`인 물리 Ethernet·Port-channel 중 admin up, oper not-up 상태 2분 지속. 알림 행은 실제 IF-MIB oper enum 값을 표시 |
+    | `infra-switch-interface-flapping` | P2 | 같은 Watched Port의 oper 상태가 10분에 3회 이상 변화 |
+    | `infra-switch-cpu-high` | P2 | 5분 CPU 평균 ≥90% 10분 지속 |
+    | `infra-switch-memory-pool-high` | P2 | Processor pool 사용률 ≥90% 10분 지속 |
+    | `infra-switch-interface-in-errors` | P2 | Watched Port inErrors가 5분에 30건 이상 증가, 10분 지속 |
+    | `infra-switch-interface-out-errors` | P2 | Watched Port outErrors가 5분에 30건 이상 증가, 10분 지속 |
+
+    포트 범위는 기존 Telegraf Watched Port와 같이 `Core:`·`Transit:` alias에 opt-in한다. 포트 트래픽/패킷 카운터는 계속 수집하지 않으므로 오류 임계는 비율이 아닌 30건/5분 시작값이며 2주 운영 데이터로 조정한다. Trap은 사용하지 않고 폴링 상태로 알린다. [런북](runbooks/alerts.md#스위치snmp-메트릭-알림).
+
     - **검증 단계**: 알림은 변환 전 모양(원문만 있는 레코드, `omit_host_field`)의 합성 레코드로 검증하고, 단위 테스트는 추가로 실로그 샘플(`tests/fixtures/fortigate_real_lines.tsv`)에 같은 SQL을 실행한다. 승인 시간 경계(9시 정각은 안, 18시 정각은 밖), 시각 없는 줄, 목록 밖 `cfgpath`, 다른 서비스의 같은 문구, 목록에 없는 장비(`off_roster`)가 발화하지 않는 케이스를 포함한다.
 
   - **Silent Host 2개 정의 (Spec #184 / Ticket-4, `stream_type: metrics`)**: `infra-silent-host-p2`(수집 로스터 호스트의 `system_memory_usage`가 15분 없음, 3시간 미만 — P2, 재통지 1440분)와 `infra-silent-host-p1`(3시간 없음 — P1, 재통지 60분). 둘 다 조회 구간 180분이며, P2 SQL은 "구간에는 있었지만 최근 15분은 없음"만 잡아 같은 호스트에 P1과 동시에 오지 않는다. SQL은 로스터 호스트마다 `SELECT '<호스트>' AS host_name, count(*) … HAVING count(*) < 1` 가지를 `UNION ALL`로 이은 형태다(인라인 `VALUES`/`unnest` JOIN은 이 버전에서 틀린 결과를 내므로 쓰지 않는다). P1 문구는 "약 5시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않음"을 안내한다 — OpenObserve `ZO_INGEST_ALLOWED_UPTO` 기본값 5시간(공식 문서)이며 `o2c_ingest_allowed_hours`로 표현하고 서버 값을 바꾸면 함께 고친다. **5시간은 공식 문서 기본값일 뿐 ns0331 서버의 실제 값은 확인하지 못했다 — 운영 반영 때 ns0331의 `ZO_INGEST_ALLOWED_UPTO`를 확인하고 다르면 `o2c_ingest_allowed_hours`를 맞춘다.** 로스터는 실행 시 인벤토리 그룹에서 만든다(아래 "로스터와 계획 정지 예외").

@@ -245,8 +245,42 @@ def test_promql_alerts_round_the_value_so_notifications_carry_no_decimals(desire
         assert desired.store["alert"][name]["query_condition"]["promql"] == "round(%s)" % q.replace("{{ o2c_disk_latency_min_iops }}", "5"), name
 
 
+def test_switch_metric_alerts_use_watched_interfaces_and_sustained_failure_conditions(desired):
+    silent = desired.store["alert"]["infra-switch-snmp-unreachable"]
+    assert silent["stream_type"] == "metrics" and silent["stream_name"] == "network_device_uptime_ticks"
+    assert "device_id IS NOT NULL" in silent["query_condition"]["sql"]
+    assert silent["trigger_condition"]["period"] == 3
+
+    down = desired.store["alert"]["infra-switch-interface-down"]
+    query = down["query_condition"]["promql"]
+    assert "ifAdminStatus" not in query  # metric name carries the field name
+    assert "network_device_interface_admin_status" in query and "== 1" in query
+    assert "network_device_interface_oper_status" in query and "!= 1" in query
+    assert "if_alias=~'^(Core:|Transit:).*'" in query and "if_type=~'^(6|53)$'" in query
+    assert "on(device_id,index)" in query and down["pending_period_sec"] == 120
+    assert "* 0 + 1" not in query
+    assert down["query_condition"]["promql_condition"]["value"] == 2
+
+    flapping = desired.store["alert"]["infra-switch-interface-flapping"]["query_condition"]["promql"]
+    assert "changes(network_device_interface_oper_status" in flapping and "[10m]" in flapping
+    assert "if_alias=~'^(Core:|Transit:).*'" in flapping
+
+    cpu = desired.store["alert"]["infra-switch-cpu-high"]
+    assert "cpu_window='5m'" in cpu["query_condition"]["promql"] and cpu["pending_period_sec"] == 600
+    memory = desired.store["alert"]["infra-switch-memory-pool-high"]
+    assert "pool_name='Processor'" in memory["query_condition"]["promql"]
+    assert memory["query_condition"]["promql"] and memory["stream_name"] == "network_device_memory_pool_used_bytes"
+    assert memory["query_condition"]["promql"] and "network_device_memory_pool_free_bytes" in memory["query_condition"]["promql"]
+    errors = desired.store["alert"]["infra-switch-interface-in-errors"]
+    assert "increase(network_device_interface_in_errors" in errors["query_condition"]["promql"]
+    assert errors["query_condition"]["promql_condition"]["value"] == 30
+    out_errors = desired.store["alert"]["infra-switch-interface-out-errors"]
+    assert "increase(network_device_interface_out_errors" in out_errors["query_condition"]["promql"]
+    assert out_errors["query_condition"]["promql_condition"]["value"] == 30
+
+
 def test_existing_log_alerts_stay_logs(desired):
-    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS) - {"infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host", "infra-app-telemetry-silent"}:
+    for name in EXPECTED_ALERTS - set(RESOURCE_ALERTS) - {"infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host", "infra-switch-snmp-unreachable", "infra-app-telemetry-silent"}:
         assert desired.store["alert"][name]["stream_type"] == "logs", name
 
 

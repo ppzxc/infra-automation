@@ -840,6 +840,24 @@ infra-unreachable-host:
       fires: false
       records:
         - {ts: [-240, -180, -120, -60, 0], tcpcheck_endpoint: "192.0.2.52:22", value: 1}
+infra-switch-snmp-unreachable:
+  row_key: device_id
+  host_field: device_id
+  cases:
+    - name: 인벤토리 스위치에서 최근 3분 표본 없음
+      host: verify-switch-snmp-silent
+      fires: true
+      records: []
+    - name: 최근 성공 표본이 있는 스위치
+      host: verify-switch-snmp-active
+      fires: false
+      records:
+        - {uptime_ticks: 123456}
+    - name: 인벤토리 밖 장비는 감시하지 않음
+      host: verify-switch-snmp-off-roster
+      fires: false
+      off_roster: true
+      records: []
 # --- 백업 알림 (Spec #184 / Ticket-5) --- backup_logs는 호스트가 host 필드다(host_field). 부재형은 케이스 호스트가 (가짜) 로스터에 들어간다.
 # ts는 검증 실행 시작 기준 초(음수 = 과거). 백업 누락 창은 26시간, 유지보수 누락 창은 8일이다.
 infra-backup-failure:

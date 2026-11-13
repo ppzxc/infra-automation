@@ -1006,6 +1006,47 @@ Host Agents의 RAID 상태 수집기(`/usr/local/sbin/host-agents-raid-status`, 
 
 ---
 
+## 스위치 SNMP 메트릭 알림
+
+Telegraf가 60초마다 Catalyst IF-MIB·CISCO-PROCESS-MIB·CISCO-MEMORY-POOL-MIB를 폴링해 OpenObserve metrics 스트림으로 보낸다. 포트 상태 경보는 SNMP Trap이 아닌 폴링 상태를 사용한다. 감시 범위는 `ifAlias`가 `Core:` 또는 `Transit:`으로 시작하고 `ifType`이 물리 Ethernet(6) 또는 Port-channel(53)인 포트다. Port-channel과 멤버 포트를 둘 다 Watched Port로 표시하면 같은 장애가 두 행으로 나타날 수 있다.
+
+**확인 순서**: 알림 행의 스위치·포트·alias를 확인하고 양쪽 장비에서 `show interfaces <port>`, `show interfaces counters errors`, `show logging`을 본다. 광 링크는 양 끝 SFP의 광 세기·DOM과 케이블도 확인한다. `ifAdminStatus=down` 포트는 계획된 shutdown으로 간주해 링크 장애를 알리지 않는다.
+
+<a id="switch-snmp-unreachable"></a>
+### 🔴 스위치 SNMP 응답 없음 (`infra-switch-snmp-unreachable`)
+
+Inventory의 `cisco_snmp_targets` 그룹에 등록된 장비에서 `network_device_uptime_ticks` 성공 표본이 3분 연속 없으면 P1이다. Telegraf에 대상이 설정됐고 실제 감시가 필요한 장비를 등록한다. 표본이 없더라도 의도한 poll 대상이면 등록해 장애 경보를 받는다. 행의 관리번호로 Telegraf 로그, SNMPv3 자격 증명, 장비 관리 주소와 네트워크 경로를 점검한다. 수집기가 여러 장비에서 동시에 실패하면 개별 스위치가 아니라 Telegraf/OpenObserve 경로 장애일 수 있다.
+
+<a id="switch-interface-down"></a>
+### 🔴 핵심 스위치 포트 링크 다운 (`infra-switch-interface-down`)
+
+Watched Port에서 관리 상태가 up인데 동작 상태가 up이 아닌 상태가 2분 이어지면 P1 알림이다. 행의 oper 값은 IF-MIB enum이다(2=down, 7=lowerLayerDown 등). 확인 뒤 반대편 링크, 광모듈·케이블, 양 끝 포트의 오류·속도 협상을 확인하고 필요하면 우회 경로를 확보한다. Poll 간격이 60초라 감지에는 보통 최대 한 주기 지연이 있다.
+
+<a id="switch-interface-flapping"></a>
+### 🟠 핵심 스위치 포트 링크 플랩 (`infra-switch-interface-flapping`)
+
+Watched Port의 `ifOperStatus`가 10분에 3회 이상 바뀌면 P2 알림이다. 양쪽 장비의 링크 로그·오류 카운터·광신호를 비교한다. 반복되면 해당 포트를 우회하고 케이블·광모듈·포트를 교체한다.
+
+<a id="switch-cpu-high"></a>
+### 🟠 스위치 CPU 포화 (`infra-switch-cpu-high`)
+
+`cpmCPUTotal5minRev` 90% 이상이 10분 지속되면 P2다. IOS CPU 상위 프로세스, 브로드캐스트·멀티캐스트 폭주, 설정 변경 및 수집 부하를 확인한다. 90%는 전 모델의 하드웨어 한계가 아니라 운영 시작 임계값이다.
+
+<a id="switch-memory-pool-high"></a>
+### 🟠 스위치 Processor 메모리 풀 압박 (`infra-switch-memory-pool-high`)
+
+Processor 풀의 사용률(used/(used+free)) 90% 이상이 10분 지속되면 P2다. 메모리 풀과 IOS 프로세스 추세를 확인한다. 원인 확인 전에 스위치를 재기동하지 않는다.
+
+<a id="switch-interface-in-errors"></a>
+### 🟠 스위치 핵심 포트 수신 오류 카운터 증가 (`infra-switch-interface-in-errors`)
+
+Watched Port의 inErrors가 5분에 30건 이상 증가하는 상태가 10분 지속되면 P2다. 이 임계는 패킷 카운터 없이 운용하기 위한 시작값이며, 운영 데이터 2주를 보고 조정한다. 양쪽 장비의 CRC/input errors와 광신호를 비교한다.
+
+<a id="switch-interface-out-errors"></a>
+### 🟠 스위치 핵심 포트 송신 오류 카운터 증가 (`infra-switch-interface-out-errors`)
+
+Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 지속되면 P2다. 임계는 2주 운영 데이터를 보고 조정한다. 양쪽 장비에서 output errors와 광신호를 비교한다.
+
 ## 스위치 syslog 알림 (Spec #277)
 
 스위치 syslog는 수신 서버(#276)를 거쳐 `system_logs`에 `service_name=switch-syslog`로 들어오고, `switch_syslog_semantics` 함수가 로그 한 줄에 장비와 Cisco 메시지 필드를 붙인다. `host_name`은 스위치가 아니라 로그를 받는 서버이고 `severity`는 항상 0이므로, 스위치로 거를 때는 아래 필드를 쓴다. 원문 `body`는 바뀌지 않는다.
@@ -1284,7 +1325,7 @@ docker stats --no-stream   # Docker 사용 호스트
 
 ## 메트릭(PromQL) 알림
 
-`metrics` 스트림을 PromQL로 평가하는 알림 17개다(Spec #282, #318에서 업계 기준으로 정비). 통지에는 `▶ 상세 보기` 링크가 나오고, `■ 대상`의 값은 PromQL 결과의 `value`(정수로 반올림)다. 모두 호스트 수집기(OTel hostmetrics·Caddy)의 메트릭이며 호스트 이름은 `host_name` 레이블이다. 알림 정의는 `o2c_alerts`의 `promql` 항목이고 합성 레코드 검증(O2C-030~034)은 적용하지 않는다(평가 오류는 O2C-036이 본다). 모두 State Alert이며 재통지는 P1 60분, 그 밖은 정의의 `silence`(60분 또는 1440분)다.
+PromQL 알림은 `metrics` 스트림을 평가한다. 통지에는 `▶ 상세 보기` 링크가 나오고, `■ 대상`의 값은 PromQL 결과의 `value`(정수로 반올림)다. 호스트 수집기 메트릭은 `host_name`, 스위치 메트릭은 `device_id`·인터페이스 라벨을 쓴다. 알림 정의는 `o2c_alerts`의 `promql` 항목이고 합성 레코드 검증(O2C-030~034)은 적용하지 않는다(평가 오류는 O2C-036이 본다). 재통지 간격은 알림 정의의 `silence`다.
 
 **평가 방식(#318)**: OpenObserve는 평가 한 번에 조회 구간(period) 안의 **한 점만** 조건을 넘어도 일치로 본다. 그래서 조회 구간을 늘리면 오히려 더 잘 울린다. "N분 지속"은 알림의 대기(`pending_minutes` → `pending_period_sec`)로 만들고, 조회 구간은 평가 주기와 같게(5분/5분) 둔다. 기준은 node-mixin 규칙의 `for`(15분~1시간)다. 근거와 전수 비교는 [조사 문서](../research/alert-conditions-industry-baseline.md)에 있다.
 

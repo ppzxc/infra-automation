@@ -282,6 +282,8 @@ o2c_switch_macflap_silence_minutes: 60
 # 업링크 포트 다운: 감시할 (장비 관리번호, 포트) 목록. 비어 있으면(기본) 알림 규칙을 만들지 않는다 — 링크 다운은 심각도 3이라 목록 없이 알리면
 # 미사용 포트 다운이 전부 알림이 된다. 포트는 약어(Gi1/0/49)나 전체 이름(GigabitEthernet1/0/49) 어느 쪽이든 쓴다. 예: [{device: ns0250, port: Gi1/0/49}]
 o2c_switch_uplinks: []
+# SNMP 메트릭 수집을 확인한 스위치만 도달성 감시에 등록한다. 미등록 장비는 Telegraf 전환·초기 수집 전이라도 오탐을 내지 않는다.
+o2c_switch_snmp_roster: "{{ groups.get('cisco_snmp_targets', []) }}"
 # 수신 중단 감시 대상 스위치(관리번호). 명시한 장비만 본다 — 아직 전송을 설정하지 않은 장비가 허위 알림을 만들지 않는다.
 # 기본값은 스펙을 쓸 때 전송이 확인된 장비다(미확인: 목록의 장비가 기준 시간 동안 아무것도 보내지 않으면 발화한다). 전송을 설정한 장비는 여기에 더한다.
 o2c_switch_syslog_roster: [ns0250, ns0347]
@@ -454,6 +456,7 @@ o2c_rosters:
   silent: "{{ o2c_roster_silent }}"
   app: "{{ o2c_roster_app }}"
   switch: "{{ o2c_switch_syslog_roster }}"
+  switch_snmp: "{{ o2c_switch_snmp_roster }}"
   fortigate: "{{ o2c_fortigate_syslog_roster }}"
   gww: "{{ o2c_gww_roster }}"
 
@@ -2129,7 +2132,7 @@ o2c_alerts:
     frequency: 10
     silence: 1440
 
-  # --- PromQL 알림 17개 (#282 복원, #318 업계 기준 정비, metrics 스트림) ---
+  # --- PromQL 알림 (metrics 스트림) ---
   # `promql`이 있으면 query_condition.type=promql이다. 값 비교는 promql_operator(기본 >=)·promql_value(결과의 value 열)이고,
   # trigger는 threshold 1행 이상 + align_time이다. 합성 레코드 검증(O2C-030~034) 대상이 아니고 평가 오류는 O2C-036이 본다.
   # OpenObserve PromQL 평가 방식(docs/research/alert-conditions-industry-baseline.md §2): 평가 한 번은 조회 구간(period) 안의 한 점만 넘어도 일치다.
@@ -2141,6 +2144,143 @@ o2c_alerts:
   # 장치 필터 ^(sd…|nvme…|vd…|xvd…|dm-…|md…)$는 파티션(sda3 등) 중복을 뺀다. LVM 호스트는 물리 장치(sda)와 dm-0이 따로 잡힐 수 있다.
   # CPU 사용률은 idle·iowait·steal을 뺀 값이다(node-mixin NodeCPUHighUsage, kubernetes-mixin). iowait·steal은 아래 별도 알림이 본다.
   # 이름은 그대로 두고 등급만 내렸다(#318): -p1은 P2, -p2는 P3. 이름을 바꾸면 폐기 + 생성이 필요해진다.
+  - name: infra-switch-snmp-unreachable
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "스위치 SNMP 응답 없음"
+    what: "인벤토리의 스위치에서 최근 3분 동안 성공한 SNMP uptime 표본이 없습니다."
+    why: "장비 전원·관리망·SNMP 자격 증명 또는 Telegraf 수집 경로에 문제가 있을 수 있습니다."
+    action: "① 같은 시각의 Telegraf 로그에서 해당 장비 SNMP timeout과 OpenObserve 수집 상태 확인 ② 스위치 전원·관리 IP 경로·SNMPv3 사용자/키 확인 ③ 장비는 응답하지만 Telegraf만 수집하지 못하면 설정과 polling 컨테이너 복구"
+    runbook: "{{ o2c_runbook_base }}#switch-snmp-unreachable"
+    row_template: '• {device_id}: SNMP 성공 표본 3분간 없음'
+    description: "Cisco SNMP 감시 인벤토리에서 network_device_uptime_ticks 성공 표본이 3분 없음 (SQL State Alert, P1; 재통지 60분)"
+    stream: network_device_uptime_ticks
+    stream_type: metrics
+    missing: {roster: switch_snmp, field: device_id, cond: "device_id IS NOT NULL"}
+    # Semaphore inventory keeps management IDs lowercase; Telegraf currently emits DEVICE_ID in uppercase.
+    sql: "{{ o2c_switch_snmp_roster | o2c_missing_sql('network_device_uptime_ticks', 'device_id', 'device_id IS NOT NULL', case_insensitive=True) }}"
+    period: 3
+    frequency: 1
+    silence: 60
+  - name: infra-switch-interface-down
+    severity: "P1 긴급"
+    severity_icon: "🔴"
+    title: "스위치 핵심 포트 링크 다운"
+    what: "Core 또는 Transit으로 표시된 물리 포트나 Port-channel의 관리 상태는 up인데 동작 상태가 up이 아닙니다. 2분 연속일 때 알립니다."
+    why: "스위치 간 또는 IDC 외부로 향하는 핵심 링크가 끊겨 다수 장비의 통신이 영향을 받을 수 있습니다."
+    action: "① 행의 스위치·포트와 반대편 장비 상태 확인 ② 인터페이스 오류·광모듈·케이블·반대편 포트 확인 ③ 장애가 지속되면 우회 경로를 확보하고 회선 담당자에게 연락"
+    runbook: "{{ o2c_runbook_base }}#switch-interface-down"
+    row_template: '• {device_id} {if_name}({if_alias}): oper 상태 {value}'
+    description: "물리 Ethernet 또는 Port-channel 중 Core:/Transit: alias가 있고 ifAdminStatus=up인데 ifOperStatus!=up인 상태가 2분 지속 (SNMP IF-MIB, P1; 재통지 60분)"
+    stream: network_device_interface_oper_status
+    stream_type: metrics
+    promql: >-
+      ((network_device_interface_oper_status{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'} != 1)
+      and on(device_id,index) (network_device_interface_admin_status{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'} == 1))
+    promql_operator: ">="
+    promql_value: 2
+    period: 1
+    frequency: 1
+    silence: 60
+    pending_minutes: 2
+  - name: infra-switch-interface-flapping
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 핵심 포트 링크 플랩"
+    what: "Core 또는 Transit 포트의 동작 상태가 최근 10분 동안 3회 이상 바뀌었습니다."
+    why: "케이블·광모듈·협상·반대편 장비 문제로 연결이 반복해서 끊길 수 있습니다."
+    action: "① 양쪽 장비의 인터페이스 로그와 오류 카운터 비교 ② 광모듈·케이블·속도/duplex 협상 상태 점검 ③ 반복되면 포트를 우회하거나 부품 교체"
+    runbook: "{{ o2c_runbook_base }}#switch-interface-flapping"
+    row_template: '• {device_id} {if_name}({if_alias}): 상태 변경 {value}회/10분'
+    description: "Core:/Transit:로 지정된 물리 Ethernet·Port-channel의 IF-MIB ifOperStatus가 10분 동안 3회 이상 변경(changes, P2; 재통지 60분)"
+    stream: network_device_interface_oper_status
+    stream_type: metrics
+    promql: "changes(network_device_interface_oper_status{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'}[10m])"
+    promql_operator: ">="
+    promql_value: 3
+    period: 5
+    frequency: 5
+    silence: 60
+  - name: infra-switch-cpu-high
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 CPU 사용률 높음"
+    what: "스위치 CPU 5분 평균이 90% 이상인 상태가 10분 지속됐습니다."
+    why: "제어 평면 처리 지연과 관리·라우팅 기능 저하가 생길 수 있습니다."
+    action: "① CPU 상위 프로세스와 직전 설정 변경 확인 ② 브로드캐스트·멀티캐스트 폭주와 SNMP polling 부하 확인 ③ 반복되면 원인 트래픽을 줄이고 IOS 버전·장비 용량 검토"
+    runbook: "{{ o2c_runbook_base }}#switch-cpu-high"
+    row_template: '• {device_id} CPU {value}% (표본 {index})'
+    description: "CISCO-PROCESS-MIB cpmCPUTotal5minRev가 90% 이상으로 10분 지속 (P2; 재통지 60분)"
+    stream: network_device_cpu_utilization_percent
+    stream_type: metrics
+    promql: "network_device_cpu_utilization_percent{cpu_window='5m'}"
+    promql_operator: ">="
+    promql_value: 90
+    period: 5
+    frequency: 5
+    silence: 60
+    pending_minutes: 10
+  - name: infra-switch-memory-pool-high
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 Processor 메모리 사용률 높음"
+    what: "Processor 메모리 풀 사용률이 90% 이상인 상태가 10분 지속됐습니다."
+    why: "여유 메모리가 부족해지면 프로세스 할당 실패와 제어 기능 불안정으로 이어질 수 있습니다."
+    action: "① Processor 풀의 used/free 추세와 IOS 프로세스 확인 ② 메모리 누수·설정 변경·라우팅 테이블 급증 여부 점검 ③ 계속 증가하면 장비 재기동은 변경 승인 후 진행하고 모델 용량 검토"
+    runbook: "{{ o2c_runbook_base }}#switch-memory-pool-high"
+    row_template: '• {device_id} {pool_name} 메모리 {value}%'
+    description: "CISCO-MEMORY-POOL-MIB Processor 풀의 used/(used+free)가 90% 이상으로 10분 지속 (P2; 재통지 60분)"
+    stream: network_device_memory_pool_used_bytes
+    stream_type: metrics
+    promql: >-
+      (network_device_memory_pool_used_bytes{pool_name='Processor'}
+      / on(device_id,index,pool_name) (network_device_memory_pool_used_bytes{pool_name='Processor'}
+      + network_device_memory_pool_free_bytes{pool_name='Processor'})) * 100
+    extra_streams: [network_device_memory_pool_free_bytes]
+    promql_operator: ">="
+    promql_value: 90
+    period: 5
+    frequency: 5
+    silence: 60
+    pending_minutes: 10
+  - name: infra-switch-interface-in-errors
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 핵심 포트 수신 오류 증가"
+    what: "Core 또는 Transit 포트에서 5분 동안 수신 오류 카운터가 30건 이상 증가했습니다."
+    why: "물리 계층 문제나 포트·광모듈·속도 협상 문제로 프레임이 손상되고 있을 수 있습니다."
+    action: "① 행의 포트 방향과 카운터 증가를 확인 ② 양쪽 장비의 CRC·input/output error와 광신호 수치 비교 ③ 케이블·광모듈·포트를 교체하거나 속도 협상 설정 확인"
+    runbook: "{{ o2c_runbook_base }}#switch-interface-in-errors"
+    row_template: '• {device_id} {if_name}({if_alias}): 수신 오류 증가 {value}건/5분'
+    description: "Core:/Transit: 포트의 IF-MIB ifInErrors Counter32가 5분에 30건 이상 증가. 패킷 카운터 없이 절대 증가량 사용 (P2; 재통지 60분)"
+    stream: network_device_interface_in_errors
+    stream_type: metrics
+    promql: "increase(network_device_interface_in_errors{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'}[5m])"
+    promql_operator: ">="
+    promql_value: 30
+    period: 5
+    frequency: 5
+    silence: 60
+    pending_minutes: 10
+  - name: infra-switch-interface-out-errors
+    severity: "P2 경고"
+    severity_icon: "🟠"
+    title: "스위치 핵심 포트 송신 오류 증가"
+    what: "Core 또는 Transit 포트에서 5분 동안 송신 오류 카운터가 30건 이상 증가했습니다."
+    why: "물리 계층 문제나 포트·광모듈·속도 협상 문제로 프레임이 손상되고 있을 수 있습니다."
+    action: "① 행의 포트와 송신 오류 카운터 증가 확인 ② 양쪽 장비의 CRC·input/output error와 광신호 수치 비교 ③ 케이블·광모듈·포트를 교체하거나 속도 협상 설정 확인"
+    runbook: "{{ o2c_runbook_base }}#switch-interface-out-errors"
+    row_template: '• {device_id} {if_name}({if_alias}): 송신 오류 증가 {value}건/5분'
+    description: "Core:/Transit: 포트의 IF-MIB ifOutErrors Counter32가 5분에 30건 이상 증가. 패킷 카운터 없이 절대 증가량 사용 (P2; 재통지 60분)"
+    stream: network_device_interface_out_errors
+    stream_type: metrics
+    promql: "increase(network_device_interface_out_errors{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'}[5m])"
+    promql_operator: ">="
+    promql_value: 30
+    period: 5
+    frequency: 5
+    silence: 60
+    pending_minutes: 10
   - name: infra-cpu-usage-p1
     severity: "P2 경고"
     severity_icon: "🟠"

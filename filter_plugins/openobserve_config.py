@@ -636,7 +636,7 @@ def o2c_absence_sql(hosts, stream, level, cond=None, recent_minutes=None):
     return ' UNION ALL '.join(_absence_branch(h, stream, level, cond, recent_us) for h in hosts)
 
 
-def o2c_missing_sql(hosts, stream, field, cond, body_match=False, field_column=True):
+def o2c_missing_sql(hosts, stream, field, cond, body_match=False, field_column=True, case_insensitive=False):
     """One row per roster host without a record matching ``cond`` (e.g. no successful backup) in the alert window.
 
     ``field`` is the stream's host column (``host`` for backup_logs, ``host_name`` elsewhere). Same UNION ALL branch shape as
@@ -661,7 +661,8 @@ def o2c_missing_sql(hosts, stream, field, cond, body_match=False, field_column=T
     def who(h):
         # `a+b`는 HA 멤버 쌍이다: 어느 한쪽이라도 보내면 수신 중이다(대기 멤버는 평소 조용하고 장애 전환 뒤에는 반대가 된다)
         members = h.split('+')
-        conds = ["%s = '%s'" % (field, m) for m in members] if field_column else []
+        conds = [("lower(%s) = '%s'" % (field, m.lower()) if case_insensitive else "%s = '%s'" % (field, m))
+                 for m in members] if field_column else []
         if body_match:
             for m in members:
                 # True: 스위치 syslog 머리말(`... ns0250-3750X:`)에서 `' <호스트>'`. 문자열: 그 키의 값(`devname="ns0399"`, 따옴표 없는 `devname=ns0399`도)

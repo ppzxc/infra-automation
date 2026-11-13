@@ -23,7 +23,7 @@ EXPECTED_ALERTS = {
     "infra-log-parse-errors-security-logs", "infra-log-parse-errors-system-logs",
     "infra-disk-usage-p2", "infra-disk-usage-p1", "infra-inode-usage-p2", "infra-inode-usage-p1",
     "infra-memory-usage-p2", "infra-memory-usage-p1",
-    "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host",
+    "infra-silent-host-p2", "infra-silent-host-p1", "infra-unreachable-host", "infra-switch-snmp-unreachable",
     "infra-auth-silent-p1",   # 인증 로그 수집 중단(#390, #455)
     "infra-github-webhook-watch-silent", "infra-github-webhook-hook-state", "infra-github-webhook-redelivery-failed", "infra-github-webhook-check-error",   # 웹훅 전달 점검(#405)
     "infra-github-audit-hook-deleted", "infra-github-audit-repo-public", "infra-github-audit-repo-org-deleted", "infra-github-audit-protection-removed",
@@ -52,6 +52,12 @@ EXPECTED_ALERTS = {
 }
 
 PROMQL_ALERTS = {
+    "infra-switch-interface-down": ("P1 긴급", 1, 1, 60, ">=", 2, "network_device_interface_oper_status", 2),
+    "infra-switch-interface-flapping": ("P2 경고", 5, 5, 60, ">=", 3, "network_device_interface_oper_status", 0),
+    "infra-switch-cpu-high": ("P2 경고", 5, 5, 60, ">=", 90, "network_device_cpu_utilization_percent", 10),
+    "infra-switch-memory-pool-high": ("P2 경고", 5, 5, 60, ">=", 90, "network_device_memory_pool_used_bytes", 10),
+    "infra-switch-interface-in-errors": ("P2 경고", 5, 5, 60, ">=", 30, "network_device_interface_in_errors", 10),
+    "infra-switch-interface-out-errors": ("P2 경고", 5, 5, 60, ">=", 30, "network_device_interface_out_errors", 10),
     "infra-cpu-usage-p1": ("P2 경고", 5, 5, 60, ">=", 90, "system_cpu_utilization", 15),
     "infra-cpu-usage-p2": ("P3 주의", 5, 5, 1440, ">=", 0, "system_cpu_utilization", 15),
     "infra-caddy-5xx-error-rate": ("P1 긴급", 10, 5, 60, ">=", 5, "caddy_http_request_duration_seconds_count", 0),
@@ -84,7 +90,7 @@ SELFTEST = "infra-alert-selftest"   # 통지 경로 자가 시험 알림(Spec #1
 
 RUNBOOK = ROOT_DIR / "docs" / "runbooks" / "alerts.md"
 
-PROMQL_ROW_FIELDS = {"value", "host_name", "device", "mountpoint", "direction"}   # PromQL 행 템플릿이 쓸 수 있는 값(숫자 value와 안전한 레이블)
+PROMQL_ROW_FIELDS = {"value", "host_name", "device", "mountpoint", "direction", "device_id", "if_name", "if_alias", "index", "pool_name"}   # PromQL 행 템플릿이 쓸 수 있는 값(숫자 value와 안전한 레이블)
 
 FIXTURES = yaml.safe_load((ROLE / "files" / "alert_fixtures.yml").read_text(encoding="utf-8"))
 

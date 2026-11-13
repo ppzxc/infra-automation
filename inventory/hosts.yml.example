@@ -86,6 +86,11 @@ all:
           # 경유지(Bastion) 스위치를 경유해야 하는 경우 SSH ProxyJump 지정 예시:
           # ansible_ssh_common_args: '-o ProxyJump=admin@192.168.1.1:22'
 
+    # SNMP 도달성 경보 대상만 별도로 등록한다. Telegraf에 대상을 설정했고 정상 응답 또는 장애 감시가 필요한 운영 장비인지 확인한 뒤 추가한다.
+    # 표본이 없는 장비도 의도된 감시 대상이면 등록한다(즉시 P1 가능). 수집 대상이 아니거나 폐기된 장비는 넣지 않는다.
+    cisco_snmp_targets:
+      hosts: {}
+
     # 4. FortiGate 방화벽 그룹 (설정 백업, docs/fortigate_backup.md). 호스트 = 접속 대상(IDC HA 클러스터 1, 사무실 1).
     #    HA 관리 인터페이스가 없어 IDC 쌍은 클러스터(현재 active) 주소 하나로 접속한다. 호스트명은 관리번호(파일명의 <장비>).
     #    실제 응답 멤버는 접속 후 조회한다. 아래 주소는 문서용 예시다.
