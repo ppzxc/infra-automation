@@ -297,7 +297,9 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert dest["headers"] == {"Content-Type": PLAIN_CT, "Authorization": "WEBHOOK-TOKEN-abc"}
     assert dest["template"] == "infra-automation-plain"
     by = o2.store["alert"]
-    assert all(a["destinations"] == ["infra-automation-plain"] and a["enabled"] for a in by.values())
+    assert all(a["destinations"] == ["infra-automation-plain"] for a in by.values())
+    assert by["infra-switch-snmp-unreachable"]["enabled"] is False
+    assert all(a["enabled"] for name, a in by.items() if name != "infra-switch-snmp-unreachable")
     assert SELFTEST in by
     assert by["infra-ssh-login-failures-per-source"]["query_condition"]["sql"].count("HAVING count(*) >= 10") == 1
     assert by["infra-ssh-login-failures-per-host"]["query_condition"]["sql"].count("HAVING count(*) >= 50") == 1
@@ -1398,7 +1400,7 @@ def test_memory_alert_keeps_thresholds_severity_and_silence_and_openbao_override
 
 
 # --- 스위치 syslog 필드 추출과 로그 알림 (Spec #277) ----------------------------------------------------------------------
-from openobserve_config import (o2c_enabled_alerts, o2c_switch_noise_filter, o2c_switch_uplink_sql,  # noqa: E402
+from openobserve_config import (o2c_managed_alerts, o2c_switch_noise_filter, o2c_switch_uplink_sql,  # noqa: E402
                                 o2c_valid_switch_events, o2c_valid_switch_roster, o2c_valid_switch_uplinks)
 
 
@@ -1514,8 +1516,27 @@ def test_switch_filters_validate_and_build_safe_sql():
     sql = o2c_switch_uplink_sql([{"device": "ns0250", "port": "Gi1/0/4"}, {"device": "ns0250", "port": "Te1/1/1"}])
     assert "interface gigabitethernet1/0/4, changed state to down" in sql and "interface tengigabitethernet1/1/1, changed state to" in sql
     assert o2c_switch_uplink_sql([]).count("1 = 0") == 1   # 빈 목록은 어떤 줄도 잡지 않는다
-    assert [a["name"] for a in o2c_enabled_alerts([{"name": "a"}, {"name": "b", "enabled": False}, {"name": "c", "enabled": "False"},
-                                                   {"name": "d", "enabled": True}])] == ["a", "d"]
+
+
+def test_disabled_alerts_are_managed_only_when_explicitly_requested():
+    assert [a["name"] for a in o2c_managed_alerts([{"name": "a"}, {"name": "b", "enabled": False}, {"name": "c", "enabled": "False"},
+                                                   {"name": "d", "enabled": True}, {"name": "e", "enabled": False, "manage_disabled": True}])] == ["a", "d", "e"]
+
+
+def test_config_reasserts_disabled_state_for_managed_alerts(o2):
+    assert _apply(o2).returncode == 0
+    target = "infra-switch-snmp-unreachable"
+    assert o2.store["alert"][target]["enabled"] is False
+    o2.store["alert"][target]["enabled"] = True   # simulate someone re-enabling it in the UI
+    o2.writes.clear()
+
+    res = _apply(o2)
+
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert len(o2.writes) == 1
+    method, path, body = o2.writes[0]
+    assert method == "PUT" and path == f"/api/v2/default/alerts/{o2.store['alert'][target]['alert_id']}"
+    assert body["enabled"] is False and o2.store["alert"][target]["enabled"] is False
 
 
 

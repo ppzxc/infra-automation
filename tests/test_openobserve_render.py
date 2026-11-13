@@ -247,6 +247,7 @@ def test_promql_alerts_round_the_value_so_notifications_carry_no_decimals(desire
 
 def test_switch_metric_alerts_use_watched_interfaces_and_sustained_failure_conditions(desired):
     silent = desired.store["alert"]["infra-switch-snmp-unreachable"]
+    assert silent["enabled"] is False
     assert silent["stream_type"] == "metrics" and silent["stream_name"] == "network_device_uptime_ticks"
     assert "device_id IS NOT NULL" in silent["query_condition"]["sql"]
     assert silent["trigger_condition"]["period"] == 3

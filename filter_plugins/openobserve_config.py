@@ -235,7 +235,7 @@ def o2c_desired(spec):
             'name': alert['name'], 'stream_type': alert.get('stream_type', 'logs'), 'stream_name': alert['stream'], 'is_real_time': False,
             'query_condition': query, 'trigger_condition': trigger,
             'destinations': [p1_dest if str(alert.get('severity', '')).startswith('P1') else dest],
-            'enabled': True, 'description': alert['description'],
+            'enabled': _o2c_is_enabled(alert), 'description': alert['description'],
             # 지속 조건(#318): 첫 일치 뒤 이 초만큼 조건이 이어져야 발화한다(Prometheus `for:`). 알림 최상위 필드이고 서버 기본값은 0(즉시 발화)이다.
             # 0도 항상 보낸다: 빼면 60분 → 0으로 줄인 정의가 부분집합 비교에서 같게 보여 서버에 옛 값이 남는다.
             'pending_period_sec': int(alert.get('pending_minutes') or 0) * 60,
@@ -1198,9 +1198,13 @@ def o2c_audit_provisioning_sql(cfg, event_time, host_label):
     return _audit_sql(watched, where, cfg, event_time, host_label)
 
 
-def o2c_enabled_alerts(alerts):
-    """The alerts that are created: an alert whose ``enabled`` renders false (e.g. the uplink alert with an empty port list) is left out."""
-    return [a for a in alerts or [] if str(a.get('enabled', True)).strip().lower() not in ('false', '0', '')]
+def _o2c_is_enabled(alert):
+    return str(alert.get('enabled', True)).strip().lower() not in ('false', '0', '')
+
+
+def o2c_managed_alerts(alerts):
+    """Keep enabled alerts and explicitly managed disabled alerts; omit optional disabled rules."""
+    return [a for a in alerts or [] if _o2c_is_enabled(a) or a.get('manage_disabled') is True]
 
 
 class FilterModule(object):
@@ -1218,7 +1222,7 @@ class FilterModule(object):
                 'o2c_host_items': o2c_host_items, 'o2c_host_addresses': o2c_host_addresses, 'o2c_host_label': o2c_host_label,
                 'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
                 'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
-                'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_enabled_alerts': o2c_enabled_alerts,
+                'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_managed_alerts': o2c_managed_alerts,
                 'o2c_valid_fortigate_values': o2c_valid_fortigate_values, 'o2c_valid_fortigate_aliases': o2c_valid_fortigate_aliases,
                 'o2c_fortigate_vrl': o2c_fortigate_vrl, 'o2c_valid_fortigate_roster': o2c_valid_fortigate_roster,
                 'o2c_fortigate_match': o2c_fortigate_match,

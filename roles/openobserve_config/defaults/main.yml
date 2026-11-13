@@ -2148,6 +2148,9 @@ o2c_alerts:
   # CPU 사용률은 idle·iowait·steal을 뺀 값이다(node-mixin NodeCPUHighUsage, kubernetes-mixin). iowait·steal은 아래 별도 알림이 본다.
   # 이름은 그대로 두고 등급만 내렸다(#318): -p1은 P2, -p2는 P3. 이름을 바꾸면 폐기 + 생성이 필요해진다.
   - name: infra-switch-snmp-unreachable
+    # 운영 요청(2026-11-14): 서버에서만 꺼둔 상태를 저장소에서도 관리한다.
+    enabled: false
+    manage_disabled: true
     severity: "P1 긴급"
     severity_icon: "🔴"
     title: "스위치 SNMP 응답 없음"
@@ -2658,8 +2661,9 @@ o2c_alerts:
     frequency: 1440
     silence: 60
 
-# 실제로 만드는 알림: `enabled`가 거짓인 알림(업링크 목록이 빈 업링크 다운 규칙)은 만들지 않는다. 서버에 이미 있으면 계획이 지운다.
-o2c_alerts_active: "{{ o2c_alerts | o2c_enabled_alerts }}"
+# 관리 대상 알림: `enabled`가 거짓이어도 `manage_disabled: true`면 OpenObserve에서 비활성 상태를 관리한다.
+# 업링크 목록이 비어 규칙이 필요 없는 알림은 enabled=false만 두고 제외한다.
+o2c_alerts_managed: "{{ o2c_alerts | o2c_managed_alerts }}"
 
 # 서버에서 지우는 알림은 이 목록(알림 이름)에 있는 것뿐이다. 접두어(infra-)만 보고 지우지 않는다 — 다른 곳에서 직접 만든 알림까지 지워지는 사고가 있었다.
 # 알림을 정의에서 빼거나 이름을 바꿀 때는 옛 이름을 여기에 더한다(서버에 있을 때만 지우고, 없으면 아무 일도 없다).
