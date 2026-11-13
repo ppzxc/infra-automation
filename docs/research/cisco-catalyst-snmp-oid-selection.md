@@ -97,16 +97,17 @@ OpenTelemetry 출력은 일반 Telegraf measurement를 `measurement_field` 메�
 | `cisco_device_info_physical_class` | Gauge: ENTITY-MIB class enum; `physical_name`, `model_name`, `serial_number`, physical index 라벨. 문자열이 비어 있는 모델/serial 태그는 검색 키로 쓰지 않음 |
 | `cisco_device_legacy_cpu_1min_percent`, `cisco_device_legacy_cpu_5min_percent` | 각 Rev leaf가 없는 장비에 대응하는 legacy 설정만 선택. `cpu_oid_set=legacy` 라벨 |
 | `cisco_watched_port_interface_legacy_if_in_octets`, `cisco_watched_port_interface_legacy_if_out_octets` | 각 HC 방향 leaf가 없는 경우에만 대응 Counter32 설정 선택. `counter_width=32` 라벨 |
+| `cisco_watched_port_interface_legacy_if_high_speed_mbps` | Counter32 fallback에서 60초 rate 계산 가능 여부를 판별하는 Gauge: Mbps |
 
 SNMP 장비 poll 성공은 매 60초 수신되는 `sys_uptime_ticks` stream의 존재로 판단한다. timeout일 때 0 값을 보내지 않으며, OpenObserve 알림은 각 장비의 마지막 성공 sample이 2분 이상 오래된 경우 발화하도록 만든다. Telegraf 내부 `gather_errors`는 collector 장애 분석에 보조로 쓰고 장비 성공 marker를 대신하지 않는다.
 
-Counter는 Telegraf에서 rate로 변환하지 않고 원시값을 보낸다. 쿼리에서 연속 샘플과 실제 elapsed time으로 delta/rate를 계산한다. 새 값이 작아졌을 때 sysUpTime이 함께 작아지면 장비 재부팅/카운터 reset으로 판단하고 해당 구간은 버린 뒤 기준값을 다시 잡는다. uptime reset 없이 Counter32가 감소하면 modulo `2^32`, Counter64가 감소하면 modulo `2^64` wrap으로 계산한다. 결측 구간을 60초로 가정하거나 reset을 0 traffic으로 처리하지 않는다. 첫 샘플과 reset 직후 샘플은 rate 대신 baseline으로 취급한다.
+Counter는 Telegraf에서 rate로 변환하지 않고 원시값을 보낸다. 쿼리에서 연속 샘플과 실제 elapsed time으로 delta/rate를 계산한다. 새 값이 작아졌을 때 sysUpTime이 함께 작아지면 장비 재부팅/카운터 reset으로 판단하고 해당 구간은 버린 뒤 기준값을 다시 잡는다. uptime reset 없이 Counter32가 감소하면 modulo `2^32`, Counter64가 감소하면 modulo `2^64` wrap으로 계산한다. Counter32의 modulo 계산은 샘플 사이에 wrap이 없거나 wrap 횟수를 별도로 알 때만 정확하다. 60초 간격에서 약 573 Mbps는 Counter32 한 바퀴 용량에 해당하고, wrap이 시작값에 따라 감지되지 않을 수 있으므로 fallback Counter32 rate는 `ifHighSpeed <= 500 Mbps`일 때만 계산한다. 그보다 빠른 Watched Port는 Counter32 원시값은 보존하되 rate·이용률 알림에는 쓰지 않는다. 더 빠른 링크의 rate가 꼭 필요하면 wrap 주기보다 짧은 polling(10 Gbps 링크는 3.4초 미만)을 별도 설계한다. 결측 구간을 60초로 가정하거나 reset을 0 traffic으로 처리하지 않는다. 첫 샘플과 reset 직후 샘플은 rate 대신 baseline으로 취급한다.
 
 ## Fallback 정책
 
 1. CPU: 1분 Rev `.1.3.6.1.4.1.9.9.109.1.1.1.1.8`와 5분 Rev `.1.3.6.1.4.1.9.9.109.1.1.1.1.9`를 각각 검증한다. 한 leaf가 미지원이면 해당 primary input만 빼고 1분용 `cisco-catalyst-snmp-cpu-1min-legacy.conf` (`.3`) 또는 5분용 `cisco-catalyst-snmp-cpu-5min-legacy.conf` (`.4`)만 추가한다. 다른 주기와 uptime/interface/memory 입력은 계속 둔다. 이번 활성 Catalyst에서는 두 Rev 모두 확인돼 fallback은 꺼 둔다.
 2. Memory: `ciscoMemoryPoolName/Used/Free`를 기본으로 한다. 이번 네 모델에서는 3개 컬럼 모두 지원됐다. 미지원 모델은 지원을 먼저 walk로 확인한다. HOST-RESOURCES-MIB는 네 모델에서 미응답이라 대체로 쓰지 않는다. 다른 Cisco memory MIB는 의미와 pool 기준을 확인한 후에만 추가한다.
-3. Watched Port traffic: ifHC Counter64 방향별 leaf를 따로 검증한다. `ifHCInOctets`가 없으면 수신 primary input만 빼고 `cisco-catalyst-snmp-counter32-in.conf`의 `ifInOctets` `.1.3.6.1.2.1.2.2.1.10`을 사용한다. `ifHCOutOctets`가 없으면 송신 primary input만 빼고 `cisco-catalyst-snmp-counter32-out.conf`의 `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16`을 사용한다. 둘 다 Counter32 modulo `2^32`로 계산하며 나머지 방향과 `ifHighSpeed`는 primary로 유지한다. CPU fallback과 독립적으로 선택한다.
+3. Watched Port traffic: ifHC Counter64 방향별 leaf를 따로 검증한다. `ifHCInOctets`가 없으면 수신 primary input만 빼고 `cisco-catalyst-snmp-counter32-in.conf`의 `ifInOctets` `.1.3.6.1.2.1.2.2.1.10`을 사용한다. `ifHCOutOctets`가 없으면 송신 primary input만 빼고 `cisco-catalyst-snmp-counter32-out.conf`의 `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16`을 사용한다. 각 fallback은 Counter32 modulo `2^32`를 적용하며 fallback 설정도 `ifHighSpeed`를 함께 내보낸다. 60초 polling에서 500 Mbps 초과 링크는 wrap 횟수를 결정할 수 없으므로 rate를 계산하지 않는다. 다른 방향, CPU fallback과 독립적으로 선택한다.
 4. Temperature/FRU: 실제 응답한 3750X/3850만 선택 설정을 포함한다. 2960에서 해당 컬럼이 없을 때 임의 vendor OID로 대체하지 않고 하드웨어 환경 메트릭을 비운다.
 5. SNMP 미응답: 0으로 대체하지 않는다. 마지막 성공 uptime sample의 부재를 poll 장애로 알린다.
 6. 2960XR: 장비가 online이 되면 위 P0 핵심 컬럼부터 짧은 개별 walk를 수행하고 이 표를 갱신한다. 확인 전에는 2960G/S 결과를 XR 지원 근거로 간주하지 않는다.
