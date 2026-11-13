@@ -39,14 +39,14 @@ CPU Rev 컬럼은 네 활성 모델 모두 응답했다. 2960G/2960S/3750X에서
 | 메모리 pool 식별 | CISCO-MEMORY-POOL-MIB::ciscoMemoryPoolName | `.1.3.6.1.4.1.9.9.48.1.1.1.2` | `pool_name` tag, pool suffix/index와 함께 사용 |
 | 메모리 사용량 | CISCO-MEMORY-POOL-MIB::ciscoMemoryPoolUsed | `.1.3.6.1.4.1.9.9.48.1.1.1.5` | `pool_used_bytes`, Gauge32 bytes |
 | 메모리 여유 | CISCO-MEMORY-POOL-MIB::ciscoMemoryPoolFree | `.1.3.6.1.4.1.9.9.48.1.1.1.6` | `pool_free_bytes`, Gauge32 bytes |
-| 인터페이스 index / type | IF-MIB::ifIndex / ifType | `.1.3.6.1.2.1.2.2.1.1` / `.1.3.6.1.2.1.2.2.1.3` | `if_index` tag와 `if_type` 값 |
+| 인터페이스 index / type | IF-MIB::ifIndex / ifType | `.1.3.6.1.2.1.2.2.1.1` / `.1.3.6.1.2.1.2.2.1.3` | 테이블 행 suffix가 ifIndex이므로 Telegraf `index` tag로 보존, `if_type`은 분류 라벨 |
 | 인터페이스 이름·설명 | IF-MIB::ifName / ifAlias | `.1.3.6.1.2.1.31.1.1.1.1` / `.1.3.6.1.2.1.31.1.1.1.18` | `if_name`, `if_alias` tags |
 | 인터페이스 admin·oper | IF-MIB::ifAdminStatus / ifOperStatus | `.1.3.6.1.2.1.2.2.1.7` / `.1.3.6.1.2.1.2.2.1.8` | `if_admin_status`, `if_oper_status` enum 정수 |
 | 인터페이스 마지막 변화 | IF-MIB::ifLastChange | `.1.3.6.1.2.1.2.2.1.9` | `if_last_change_ticks`, TimeTicks |
 | 수신 discard·error | IF-MIB::ifInDiscards / ifInErrors | `.1.3.6.1.2.1.2.2.1.13` / `.1.3.6.1.2.1.2.2.1.14` | Counter32 원시값 |
 | 송신 discard·error | IF-MIB::ifOutDiscards / ifOutErrors | `.1.3.6.1.2.1.2.2.1.19` / `.1.3.6.1.2.1.2.2.1.20` | Counter32 원시값 |
 
-테이블 설정은 Telegraf의 `inputs.snmp.table`에 OID를 지정하지 않고 수집할 컬럼만 개별 열거한다. 이 방식은 Telegraf가 테이블의 모든 열을 기본 수집하는 동작을 피한다.
+테이블 설정은 Telegraf의 `inputs.snmp.table`에 OID를 지정하지 않고 수집할 컬럼만 개별 열거한다. 이 방식은 Telegraf가 테이블의 모든 열을 기본 수집하는 동작을 피한다. `index` tag에는 각 컬럼 OID의 행 suffix가 들어가며 인터페이스 테이블에서는 ifIndex 그 자체다. 이를 별도 IF-MIB get으로 중복 수집하지 않는다.
 
 ## P1 / P2 OID
 
@@ -69,6 +69,7 @@ P1 링크에 중복된 Core alias가 붙은 Port-channel과 그 멤버가 함께
 
 - 공통 P0, uplink, 일일 정적 정보: [`configs/telegraf/cisco-catalyst-snmp.conf`](../../configs/telegraf/cisco-catalyst-snmp.conf)
 - 지원이 확인된 3750X/3850의 선택 하드웨어 센서: [`configs/telegraf/cisco-catalyst-hardware-snmp.conf`](../../configs/telegraf/cisco-catalyst-hardware-snmp.conf)
+- Rev CPU 또는 HC Counter64가 실제로 지원되지 않는 모델에만 선택하는 구성: [`configs/telegraf/cisco-catalyst-snmp-legacy-fallback.conf`](../../configs/telegraf/cisco-catalyst-snmp-legacy-fallback.conf)
 - 설정은 장비 한 대마다 재사용한다. 배포 쪽에서 `SNMP_AGENT`와 `DEVICE_ID`만 장비별로 렌더링하고, SHA/AES 자격 증명은 `switch_snmp` Docker secret store에서 읽는다. 공유 Telegraf 설정의 `outputs.opentelemetry`는 기존 OpenObserve endpoint/auth를 사용한다.
 - P0/traffic 인터페이스 테이블은 필요한 컬럼만 요청한다. MAC, ARP, VLAN, 전체 패킷 상세 카운터, trap, 사용처가 없는 센서 테이블은 설정하지 않는다.
 
@@ -79,14 +80,16 @@ OpenTelemetry 출력은 일반 Telegraf measurement를 `measurement_field` 메�
 | `cisco_device_sys_uptime_ticks` | Gauge: 1/100초 uptime; `device_id`, `source` |
 | `cisco_device_cpu_1min_percent`, `cisco_device_cpu_5min_percent` | Gauge: percent; `device_id`, `source`, CPU row index |
 | `cisco_memory_pool_used_bytes`, `cisco_memory_pool_free_bytes` | Gauge: bytes; `device_id`, `pool_name`, pool index |
-| `cisco_device_if_admin_status`, `cisco_device_if_oper_status` | Gauge: IF-MIB enum 정수; `device_id`, `if_index`, `if_name`, `if_alias`, `if_type` |
+| `cisco_device_if_admin_status`, `cisco_device_if_oper_status` | Gauge: IF-MIB enum 정수; `device_id`, `index`(ifIndex), `if_name`, `if_alias`, `if_type` 라벨 |
 | `cisco_device_if_last_change_ticks` | Gauge: TimeTicks; 동일 인터페이스 라벨 |
 | `cisco_device_if_in_errors`, `cisco_device_if_out_errors`, `cisco_device_if_in_discards`, `cisco_device_if_out_discards` | 원시 Counter32; 동일 인터페이스 라벨 |
-| `cisco_uplink_interface_if_hc_in_octets`, `cisco_uplink_interface_if_hc_out_octets` | 원시 Counter64 bytes; `Core:`/`Transit:` alias 인터페이스만, `if_type` 포함 |
+| `cisco_uplink_interface_if_hc_in_octets`, `cisco_uplink_interface_if_hc_out_octets` | 원시 Counter64 bytes; `Core:`/`Transit:` alias 인터페이스만, `if_type` 라벨 포함 |
 | `cisco_sensor_sensor_value_raw` | Gauge 원시값; `sensor_type`, `sensor_scale`, `sensor_precision`, `sensor_status`, `physical_name`, physical index. 스케일을 적용한 값만 온도/전력 단위로 해석 |
 | `cisco_sensor_fru_power_oper_status`, `cisco_sensor_fan_tray_oper_status` | 상태 enum 정수; `physical_name`, `physical_class`, physical index |
 | `cisco_device_info_inventory_poll_success` | Gauge marker; 함께 붙은 `sys_name`, `sys_object_id`, `sys_descr` 라벨로 일일 모델 정보 식별 |
 | `cisco_device_info_physical_class` | Gauge: ENTITY-MIB class enum; `physical_name`, `model_name`, `serial_number`, physical index 라벨. 문자열이 비어 있는 모델/serial 태그는 검색 키로 쓰지 않음 |
+| `cisco_device_legacy_cpu_1min_percent`, `cisco_device_legacy_cpu_5min_percent` | Legacy CPU OID를 선택한 장비만 생성. `cpu_oid_set=legacy` 라벨 |
+| `cisco_uplink_interface_legacy_if_in_octets`, `cisco_uplink_interface_legacy_if_out_octets` | Legacy Counter32 fallback을 선택한 장비만 생성. `counter_width=32` 라벨 |
 
 SNMP 장비 poll 성공은 매 60초 수신되는 `sys_uptime_ticks` stream의 존재로 판단한다. timeout일 때 0 값을 보내지 않으며, OpenObserve 알림은 각 장비의 마지막 성공 sample이 2분 이상 오래된 경우 발화하도록 만든다. Telegraf 내부 `gather_errors`는 collector 장애 분석에 보조로 쓰고 장비 성공 marker를 대신하지 않는다.
 
@@ -94,9 +97,9 @@ Counter는 Telegraf에서 rate로 변환하지 않고 원시값을 보낸다. �
 
 ## Fallback 정책
 
-1. CPU: Rev 1/5-minute OID를 우선한다. 장비에서 해당 leaf가 `noSuchObject`/`noSuchInstance`일 때만 legacy `cpmCPUTotal1min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.3`와 `cpmCPUTotal5min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.4`로 대체한다. 이번 활성 Catalyst에서는 Rev가 전부 확인돼 fallback은 꺼 둔다.
+1. CPU: Rev 1/5-minute OID를 우선한다. 장비에서 해당 leaf가 `noSuchObject`/`noSuchInstance`일 때만 `cisco-catalyst-snmp-legacy-fallback.conf`의 legacy `cpmCPUTotal1min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.3`와 `cpmCPUTotal5min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.4`를 사용한다. 이번 활성 Catalyst에서는 Rev가 전부 확인돼 fallback은 꺼 둔다.
 2. Memory: `ciscoMemoryPoolName/Used/Free`를 기본으로 한다. 이번 네 모델에서는 3개 컬럼 모두 지원됐다. 미지원 모델은 지원을 먼저 walk로 확인한다. HOST-RESOURCES-MIB는 네 모델에서 미응답이라 대체로 쓰지 않는다. 다른 Cisco memory MIB는 의미와 pool 기준을 확인한 후에만 추가한다.
-3. Interface traffic: ifHC Counter64가 정상 응답한 현재 4종은 이를 쓴다. 미지원 leaf일 때만 IF-MIB `ifInOctets` `.1.3.6.1.2.1.2.2.1.10` / `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16` Counter32로 전환하고 modulo `2^32` 처리를 적용한다. HC와 32-bit 카운터를 같은 rate 시계열에 동시에 합치지 않는다.
+3. Interface traffic: ifHC Counter64가 정상 응답한 현재 4종은 이를 쓴다. 미지원 leaf일 때만 `cisco-catalyst-snmp-legacy-fallback.conf`의 IF-MIB `ifInOctets` `.1.3.6.1.2.1.2.2.1.10` / `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16` Counter32를 사용하고 modulo `2^32` 처리를 적용한다. Primary와 fallback 입력을 같은 장비에 동시에 로드하지 않는다.
 4. Temperature/FRU: 실제 응답한 3750X/3850만 선택 설정을 포함한다. 2960에서 해당 컬럼이 없을 때 임의 vendor OID로 대체하지 않고 하드웨어 환경 메트릭을 비운다.
 5. SNMP 미응답: 0으로 대체하지 않는다. 마지막 성공 uptime sample의 부재를 poll 장애로 알린다.
 6. 2960XR: 장비가 online이 되면 위 P0 핵심 컬럼부터 짧은 개별 walk를 수행하고 이 표를 갱신한다. 확인 전에는 2960G/S 결과를 XR 지원 근거로 간주하지 않는다.
