@@ -117,7 +117,7 @@
     - **승인 시간 안/밖**: 변경 로그 원문의 `time=HH:MM:SS`(장비 시계)에서 시를 읽는다(`CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(... AS INT) ELSE -1 END`). 시작 포함·끝 미포함이며 시각이 없는 줄은 -1이라 승인 시간 밖이다. 같은 줄이 두 알림에 동시에 걸리지 않는다. 요일은 구분하지 않으며 장비 시간대가 운영 시간대(KST)여야 한다. 수신 시각(`_timestamp`)이 아니라 장비 시각을 쓰는 이유는 승인 시간이 장비에서 작업한 시각의 문제이고, 검증 레코드가 실행 시각과 무관하게 결정적이기 때문이다.
     - **수신 중단 감시 목록은 기본이 비어 있다(opt in)**: 전송을 시작하기 전 장비를 목록에 두면 허위 알림이 계속 온다. 장비가 로그를 보내기 시작한 것을 확인한 뒤 관리번호를 더한다(사무실 먼저). 목록이 비면 규칙은 있지만 절대 행을 돌려주지 않는 가지 하나만 남고(앱 텔레메트리 무소식과 같은 방식), 목록에 없는 장비는 로그가 없어도 알리지 않는다. IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶으면 어느 한 멤버라도 보낼 때 수신 중으로 센다. 레코드가 `device_id`로 일치하거나 원문의 `devname`이 그 이름이면 수신으로 센다(파이프라인 반영 전 레코드 포함).
 
-  - **스위치 SNMP 메트릭 알림 7개**: Telegraf Catalyst 설정이 60초마다 보내는 IF-MIB 상태·오류, CISCO-PROCESS-MIB CPU, CISCO-MEMORY-POOL-MIB 메모리 스트림을 사용한다. `infra-switch-snmp-unreachable`는 명시한 `cisco_snmp_targets` 그룹의 장비별 성공 uptime 표본이 3분 없으면 P1이다. SNMP 수집 설정과 OpenObserve 샘플을 확인한 장비만 이 그룹에 넣는다. 미지원·미전환 모델은 넣지 않는다. 상세 조사와 1차 자료는 [Cisco 스위치 장애 알림 기준](research/cisco-switch-alert-baseline.md)에 있다.
+  - **스위치 SNMP 메트릭 알림 7개**: Telegraf Catalyst 설정이 60초마다 보내는 IF-MIB 상태·오류, CISCO-PROCESS-MIB CPU, CISCO-MEMORY-POOL-MIB 메모리 스트림을 사용한다. `infra-switch-snmp-unreachable`는 명시한 `cisco_snmp_targets` 그룹의 장비별 성공 uptime 표본이 3분 없으면 P1이다. Semaphore 인벤토리의 관리번호는 소문자로 두고, 현재 Telegraf가 보내는 대문자 `device_id`와 비교할 때 SQL은 대소문자를 무시한다. SNMP 수집 설정과 OpenObserve 샘플을 확인한 장비만 이 그룹에 넣는다. 미지원·미전환 모델은 넣지 않는다. 상세 조사와 1차 자료는 [Cisco 스위치 장애 알림 기준](research/cisco-switch-alert-baseline.md)에 있다.
 
     | 이름 | 등급 | 조건 |
     |---|---|---|

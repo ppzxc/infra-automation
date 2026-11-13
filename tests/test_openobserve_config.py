@@ -1586,6 +1586,11 @@ def test_firewall_roster_accepts_a_member_pair_written_with_plus_and_counts_any_
     assert [r["device_id"] for r in _run_alert_on_sqlite(table_sql, quiet, "t")] == ["ns0380+ns0381"]
 
 
+def test_missing_sql_can_match_management_ids_case_insensitively():
+    sql = o2c_missing_sql(["ns0250"], "network_device_uptime_ticks", "device_id", "device_id IS NOT NULL", case_insensitive=True)
+    assert "lower(device_id) = 'ns0250'" in sql
+
+
 def test_approved_hours_split_changes_into_unapproved_p1_and_approved_p3_and_every_value_is_a_role_variable(o2):
     assert _apply(o2).returncode == 0
     out, inside = _sql(o2, "infra-fortigate-change-unapproved"), _sql(o2, "infra-fortigate-change-approved")

@@ -2157,7 +2157,8 @@ o2c_alerts:
     stream: network_device_uptime_ticks
     stream_type: metrics
     missing: {roster: switch_snmp, field: device_id, cond: "device_id IS NOT NULL"}
-    sql: "{{ o2c_switch_snmp_roster | o2c_missing_sql('network_device_uptime_ticks', 'device_id', 'device_id IS NOT NULL') }}"
+    # Semaphore inventory keeps management IDs lowercase; Telegraf currently emits DEVICE_ID in uppercase.
+    sql: "{{ o2c_switch_snmp_roster | o2c_missing_sql('network_device_uptime_ticks', 'device_id', 'device_id IS NOT NULL', case_insensitive=True) }}"
     period: 3
     frequency: 1
     silence: 60
