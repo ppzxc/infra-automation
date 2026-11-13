@@ -134,9 +134,9 @@ docker logs vrrp-keepalived-1 2>&1 | grep -iE "unsafe permissions|disabling trac
 <a id="app-log-errors"></a>
 ## 🟠 컨테이너 로그에 ERROR 이상 기록 (`infra-app-log-errors`)
 
-**조건**: `app_logs`에서 수집기가 올린 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄이 호스트·컨테이너별로 5분 안에 1건 이상(Event Alert).
+**조건**: `app_logs`에서 수집기가 올린 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄이 호스트·컨테이너별로 5분 안에 1건 이상(Event Alert). 단, Caddy 컨테이너에서 `failed to set read deadline`과 `use of closed network connection`이 함께 기록된 연결 정리 오류는 제외한다. 실제 upstream 502 등 다른 ERROR는 계속 알린다.
 
-**레벨이 올라오는 형식**: JSON 한 줄 로그의 `level` 또는 `log.level`(앱·Caddy), valkey 텍스트 로그의 레벨 문자. keepalived처럼 레벨이 없는 로그와 JSON이 아닌 줄(스택 트레이스 이어지는 줄 등)은 알림 대상이 아니다(키워드로 추정하지 않는다). WARN은 알리지 않고 검색용으로만 남는다.
+**레벨이 올라오는 형식**: JSON 한 줄 로그의 `level` 또는 `log.level`(앱·Caddy), valkey 텍스트 로그의 레벨 문자. keepalived처럼 레벨이 없는 로그와 JSON이 아닌 줄(스택 트레이스 이어지는 줄 등)은 알림 대상이 아니다(키워드로 추정하지 않는다). WARN은 알리지 않고 검색용으로만 남는다. Caddy의 취소된 연결 정리 오류는 ERROR로 파싱되더라도 사용자 요청 실패와 구분해 제외한다.
 
 **왜 중요한가**: 앱 장애, 요청 실패, DB·큐·캐시 연결 문제의 첫 신호일 수 있다.
 
@@ -1014,6 +1014,8 @@ Telegraf가 60초마다 Catalyst IF-MIB·CISCO-PROCESS-MIB·CISCO-MEMORY-POOL-MI
 
 <a id="switch-snmp-unreachable"></a>
 ### 🔴 스위치 SNMP 응답 없음 (`infra-switch-snmp-unreachable`)
+
+**현재 상태**: 운영 요청으로 비활성화되어 있다. 저장소도 `enabled: false`로 관리하므로 Config 동기화가 다시 켜지지 않게 유지한다.
 
 Inventory의 `cisco_snmp_targets` 그룹에 등록된 장비에서 `network_device_uptime_ticks` 성공 표본이 3분 연속 없으면 P1이다. Telegraf에 대상이 설정됐고 실제 감시가 필요한 장비를 등록한다. 표본이 없더라도 의도한 poll 대상이면 등록해 장애 경보를 받는다. 행의 관리번호로 Telegraf 로그, SNMPv3 자격 증명, 장비 관리 주소와 네트워크 경로를 점검한다. 수집기가 여러 장비에서 동시에 실패하면 개별 스위치가 아니라 Telegraf/OpenObserve 경로 장애일 수 있다.
 
