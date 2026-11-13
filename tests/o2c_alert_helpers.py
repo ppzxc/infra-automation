@@ -299,7 +299,7 @@ SYSTEM_TIME_CASES = {   # alert -> (stream, record fields, expected row without 
     "infra-oom-kill": ("system_logs", [dict(process_executable_name="kernel", body="Out of memory: Killed process 123 (java) total-vm:1kB")],
                        "• ns0272: 종료된 프로세스 java ({n}건)"),
     "infra-disk-fs-errors": ("system_logs", [dict(body="blk_update_request: I/O error, dev sda")], "• ns0272: 오류 패턴 {n}건"),
-    "infra-app-log-errors": ("app_logs", [dict(severity="error", container_name="api")], "• ns0272 / api: ERROR 이상 {n}건"),
+    "infra-app-log-errors": ("app_logs", [dict(severity="error", container_name="api", body=None)], "• ns0272 / api: ERROR 이상 {n}건"),
     "infra-backup-failure": ("backup_logs", [dict(job="backup", success=False, host="ns0272")], "• ns0272: 실패 {n}건"),
     "infra-raid-collection-error": ("host_status_logs", [dict(kind="tool_status", status="error", message="m")] * 3,
                                     "• ns0272: error {n}회 (m)"),

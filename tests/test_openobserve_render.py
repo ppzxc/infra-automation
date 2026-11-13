@@ -304,9 +304,27 @@ def test_app_log_error_alert_is_a_p2_event_alert_on_error_or_worse_per_host_and_
     assert "lower(severity) IN (" in sql and "GROUP BY host_name, container_name" in sql
     for level in ("'error'", "'fatal'", "'critical'", "'panic'", "'dpanic'"):
         assert level in sql, level
-    assert "'warn'" not in sql and "'info'" not in sql and "body" not in sql      # 키워드가 아니라 파싱된 레벨만 본다
+    assert "'warn'" not in sql and "'info'" not in sql      # 키워드가 아니라 파싱된 레벨만 본다
+    assert "lower(coalesce(container_name, '')) LIKE '%caddy%'" in sql
+    assert "lower(coalesce(body, '')) LIKE '%failed to set read deadline%'" in sql
+    assert "lower(coalesce(body, '')) LIKE '%use of closed network connection%'" in sql
+    assert "AND NOT (" in sql    # Caddy의 취소된 연결 정리 오류만 빼고 upstream ERROR는 계속 알린다
     assert alert["trigger_condition"]["period"] == 5 and alert["trigger_condition"]["silence"] == 5
     assert alert["context_attributes"]["severity"] == "P2 경고"
+
+
+def test_app_log_error_alert_excludes_only_caddy_closed_connection_cleanup_errors(desired):
+    name = "infra-app-log-errors"
+    caddy_noise = _ev("2026-10-23 08:59:14", severity="error", container_name="ingress-caddy-1",
+                      body='{"msg":"failed to set read deadline","error":"use of closed network connection"}')
+    assert _row_lines(desired, name, [caddy_noise], "app_logs") == []
+
+    non_caddy = dict(caddy_noise, container_name="api")
+    assert _row_lines(desired, name, [non_caddy], "app_logs") == ["• ns0272 / api: ERROR 이상 1건 · 10-23 08:59:14"]
+
+    upstream_failure = dict(caddy_noise, body='{"msg":"dial tcp: lookup semaphore: no such host"}')
+    assert _row_lines(desired, name, [upstream_failure], "app_logs") == [
+        "• ns0272 / ingress-caddy-1: ERROR 이상 1건 · 10-23 08:59:14"]
 
 
 def test_memory_alert_sql_uses_available_and_limit_streams_not_usage_states(desired):

@@ -1147,11 +1147,14 @@ o2c_alerts:
     action: "① 행의 호스트·컨테이너 로그에서 ERROR 원문과 직전 줄 확인 ② 같은 시각의 다른 알림(VIP 전환, valkey, Silent Host)과 대조 ③ 서비스 영향이 있으면 해당 노드를 서비스에서 빼고 원인 조치"
     runbook: "{{ o2c_runbook_base }}#app-log-errors"
     row_template: '• {host_label} / {container_name}: ERROR 이상 {errors}건 · {event_time}'
-    description: "app_logs의 severity가 error 이상(error·err·severe·fatal·critical·panic·dpanic, 대소문자 무시)인 줄 — 수집기가 JSON level·log.level·valkey 레벨 문자로 올린 값만 본다(키워드 추정 없음). WARN 이하와 레벨이 없는 줄은 알리지 않는다"
+    description: "app_logs의 severity가 error 이상(error·err·severe·fatal·critical·panic·dpanic, 대소문자 무시)인 줄 — 수집기가 JSON level·log.level·valkey 레벨 문자로 올린 값만 본다(키워드 추정 없음). WARN 이하와 레벨이 없는 줄, Caddy의 취소된 연결 정리 오류(failed to set read deadline + use of closed network connection)는 알리지 않는다"
     stream: app_logs
     sql: >-
       SELECT host_name, container_name, count(*) AS errors, {{ o2c_event_time_sql }}, {{ o2c_host_label_sql }} FROM "app_logs"
       WHERE lower(severity) IN ('error','err','severe','fatal','critical','panic','dpanic')
+      AND NOT (lower(coalesce(container_name, '')) LIKE '%caddy%'
+        AND lower(coalesce(body, '')) LIKE '%failed to set read deadline%'
+        AND lower(coalesce(body, '')) LIKE '%use of closed network connection%')
       GROUP BY host_name, container_name
       ORDER BY errors DESC
     period: 5

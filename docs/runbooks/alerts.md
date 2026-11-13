@@ -134,9 +134,9 @@ docker logs vrrp-keepalived-1 2>&1 | grep -iE "unsafe permissions|disabling trac
 <a id="app-log-errors"></a>
 ## 🟠 컨테이너 로그에 ERROR 이상 기록 (`infra-app-log-errors`)
 
-**조건**: `app_logs`에서 수집기가 올린 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄이 호스트·컨테이너별로 5분 안에 1건 이상(Event Alert).
+**조건**: `app_logs`에서 수집기가 올린 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄이 호스트·컨테이너별로 5분 안에 1건 이상(Event Alert). 단, Caddy 컨테이너에서 `failed to set read deadline`과 `use of closed network connection`이 함께 기록된 연결 정리 오류는 제외한다. 실제 upstream 502 등 다른 ERROR는 계속 알린다.
 
-**레벨이 올라오는 형식**: JSON 한 줄 로그의 `level` 또는 `log.level`(앱·Caddy), valkey 텍스트 로그의 레벨 문자. keepalived처럼 레벨이 없는 로그와 JSON이 아닌 줄(스택 트레이스 이어지는 줄 등)은 알림 대상이 아니다(키워드로 추정하지 않는다). WARN은 알리지 않고 검색용으로만 남는다.
+**레벨이 올라오는 형식**: JSON 한 줄 로그의 `level` 또는 `log.level`(앱·Caddy), valkey 텍스트 로그의 레벨 문자. keepalived처럼 레벨이 없는 로그와 JSON이 아닌 줄(스택 트레이스 이어지는 줄 등)은 알림 대상이 아니다(키워드로 추정하지 않는다). WARN은 알리지 않고 검색용으로만 남는다. Caddy의 취소된 연결 정리 오류는 ERROR로 파싱되더라도 사용자 요청 실패와 구분해 제외한다.
 
 **왜 중요한가**: 앱 장애, 요청 실패, DB·큐·캐시 연결 문제의 첫 신호일 수 있다.
 
