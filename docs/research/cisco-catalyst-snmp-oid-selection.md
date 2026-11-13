@@ -69,12 +69,15 @@ P1 링크에 중복된 Core alias가 붙은 Port-channel과 그 멤버가 함께
 
 ## Telegraf 설정과 OpenObserve 스키마
 
-- 공통 P0, uplink, 일일 정적 정보: [`configs/telegraf/cisco-catalyst-snmp.conf`](../../configs/telegraf/cisco-catalyst-snmp.conf)
+- 공통 P0, Watched Port 트래픽, 일일 정적 정보: [`configs/telegraf/cisco-catalyst-snmp.conf`](../../configs/telegraf/cisco-catalyst-snmp.conf)
 - 지원이 확인된 3750X/3850의 선택 하드웨어 센서: [`configs/telegraf/cisco-catalyst-hardware-snmp.conf`](../../configs/telegraf/cisco-catalyst-hardware-snmp.conf)
-- Rev CPU fallback: [`configs/telegraf/cisco-catalyst-snmp-cpu-legacy.conf`](../../configs/telegraf/cisco-catalyst-snmp-cpu-legacy.conf)
-- HC Counter64 fallback: [`configs/telegraf/cisco-catalyst-snmp-counter32.conf`](../../configs/telegraf/cisco-catalyst-snmp-counter32.conf)
+- CPU 1분 fallback: [`configs/telegraf/cisco-catalyst-snmp-cpu-1min-legacy.conf`](../../configs/telegraf/cisco-catalyst-snmp-cpu-1min-legacy.conf)
+- CPU 5분 fallback: [`configs/telegraf/cisco-catalyst-snmp-cpu-5min-legacy.conf`](../../configs/telegraf/cisco-catalyst-snmp-cpu-5min-legacy.conf)
+- Watched Port 수신 HC fallback: [`configs/telegraf/cisco-catalyst-snmp-counter32-in.conf`](../../configs/telegraf/cisco-catalyst-snmp-counter32-in.conf)
+- Watched Port 송신 HC fallback: [`configs/telegraf/cisco-catalyst-snmp-counter32-out.conf`](../../configs/telegraf/cisco-catalyst-snmp-counter32-out.conf)
 - 설정은 장비 한 대마다 재사용한다. 배포 쪽에서 `SNMP_AGENT`와 `DEVICE_ID`만 장비별로 렌더링하고, SHA/AES 자격 증명은 `switch_snmp` Docker secret store에서 읽는다. 공유 Telegraf 설정의 `outputs.opentelemetry`는 기존 OpenObserve endpoint/auth를 사용한다.
 - P0/traffic 인터페이스 테이블은 필요한 컬럼만 요청한다. MAC, ARP, VLAN, 전체 패킷 상세 카운터, trap, 사용처가 없는 센서 테이블은 설정하지 않는다.
+- 스위치 syslog는 기존 OTel Collector 경로에서 `system_logs`로 계속 들어온다. 이 Telegraf 설정에는 syslog 수신기를 중복 추가하지 않으며 SNMP trap도 설정하지 않는다.
 
 OpenTelemetry 출력은 일반 Telegraf measurement를 `measurement_field` 메트릭명으로 보낸다. OpenObserve는 메트릭명별 stream을 만들고 대소문자를 소문자로 정규화한다. 리소스·태그는 라벨로 저장된다. 대표 이름과 값 계약:
 
@@ -86,13 +89,14 @@ OpenTelemetry 출력은 일반 Telegraf measurement를 `measurement_field` 메�
 | `cisco_device_if_admin_status`, `cisco_device_if_oper_status` | Gauge: IF-MIB enum 정수; `device_id`, `index`(ifIndex), `if_name`, `if_alias`, `if_type` 라벨 |
 | `cisco_device_if_last_change_ticks` | Gauge: TimeTicks; 동일 인터페이스 라벨 |
 | `cisco_device_if_in_errors`, `cisco_device_if_out_errors`, `cisco_device_if_in_discards`, `cisco_device_if_out_discards` | 원시 Counter32; 동일 인터페이스 라벨 |
-| `cisco_uplink_interface_if_hc_in_octets`, `cisco_uplink_interface_if_hc_out_octets` | 원시 Counter64 bytes; `Core:`/`Transit:` alias 인터페이스만, `if_type` 라벨 포함 |
+| `cisco_watched_port_interface_if_hc_in_octets`, `cisco_watched_port_interface_if_hc_out_octets` | 원시 Counter64 bytes; `Core:`/`Transit:` alias Watched Port만, `if_type` 라벨 포함 |
+| `cisco_watched_port_interface_if_high_speed_mbps` | Gauge: Mbps; Watched Port만 |
 | `cisco_sensor_sensor_value_raw` | Gauge 원시값; `sensor_type`, `sensor_scale`, `sensor_precision`, `sensor_status`, `physical_name`, physical index. 스케일을 적용한 값만 온도/전력 단위로 해석 |
 | `cisco_sensor_fru_power_oper_status`, `cisco_sensor_fan_tray_oper_status` | 상태 enum 정수; `physical_name`, `physical_class`, physical index |
 | `cisco_device_info_inventory_poll_success` | Gauge marker; 함께 붙은 `sys_name`, `sys_object_id`, `sys_descr` 라벨로 일일 모델 정보 식별 |
 | `cisco_device_info_physical_class` | Gauge: ENTITY-MIB class enum; `physical_name`, `model_name`, `serial_number`, physical index 라벨. 문자열이 비어 있는 모델/serial 태그는 검색 키로 쓰지 않음 |
-| `cisco_device_legacy_cpu_1min_percent`, `cisco_device_legacy_cpu_5min_percent` | Legacy CPU OID를 선택한 장비만 생성. `cpu_oid_set=legacy` 라벨 |
-| `cisco_uplink_interface_legacy_if_in_octets`, `cisco_uplink_interface_legacy_if_out_octets` | Legacy Counter32 fallback을 선택한 장비만 생성. `counter_width=32` 라벨 |
+| `cisco_device_legacy_cpu_1min_percent`, `cisco_device_legacy_cpu_5min_percent` | 각 Rev leaf가 없는 장비에 대응하는 legacy 설정만 선택. `cpu_oid_set=legacy` 라벨 |
+| `cisco_watched_port_interface_legacy_if_in_octets`, `cisco_watched_port_interface_legacy_if_out_octets` | 각 HC 방향 leaf가 없는 경우에만 대응 Counter32 설정 선택. `counter_width=32` 라벨 |
 
 SNMP 장비 poll 성공은 매 60초 수신되는 `sys_uptime_ticks` stream의 존재로 판단한다. timeout일 때 0 값을 보내지 않으며, OpenObserve 알림은 각 장비의 마지막 성공 sample이 2분 이상 오래된 경우 발화하도록 만든다. Telegraf 내부 `gather_errors`는 collector 장애 분석에 보조로 쓰고 장비 성공 marker를 대신하지 않는다.
 
@@ -100,9 +104,9 @@ Counter는 Telegraf에서 rate로 변환하지 않고 원시값을 보낸다. �
 
 ## Fallback 정책
 
-1. CPU: Rev 1/5-minute OID를 우선한다. 장비에서 두 Rev leaf가 모두 `noSuchObject`/`noSuchInstance`일 때만 `cisco-catalyst-snmp-cpu-legacy.conf`의 legacy `cpmCPUTotal1min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.3`와 `cpmCPUTotal5min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.4`를 사용한다. Telegraf primary CPU input만 빼고 fallback input을 넣으며 uptime/interface/memory 입력은 계속 둔다. 이번 활성 Catalyst에서는 Rev가 전부 확인돼 fallback은 꺼 둔다.
+1. CPU: 1분 Rev `.1.3.6.1.4.1.9.9.109.1.1.1.1.8`와 5분 Rev `.1.3.6.1.4.1.9.9.109.1.1.1.1.9`를 각각 검증한다. 한 leaf가 미지원이면 해당 primary input만 빼고 1분용 `cisco-catalyst-snmp-cpu-1min-legacy.conf` (`.3`) 또는 5분용 `cisco-catalyst-snmp-cpu-5min-legacy.conf` (`.4`)만 추가한다. 다른 주기와 uptime/interface/memory 입력은 계속 둔다. 이번 활성 Catalyst에서는 두 Rev 모두 확인돼 fallback은 꺼 둔다.
 2. Memory: `ciscoMemoryPoolName/Used/Free`를 기본으로 한다. 이번 네 모델에서는 3개 컬럼 모두 지원됐다. 미지원 모델은 지원을 먼저 walk로 확인한다. HOST-RESOURCES-MIB는 네 모델에서 미응답이라 대체로 쓰지 않는다. 다른 Cisco memory MIB는 의미와 pool 기준을 확인한 후에만 추가한다.
-3. Interface traffic: ifHC Counter64가 정상 응답한 현재 4종은 이를 쓴다. 수신·송신 두 HC leaf가 모두 미지원일 때만 `cisco-catalyst-snmp-counter32.conf`의 IF-MIB `ifInOctets` `.1.3.6.1.2.1.2.2.1.10` / `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16` Counter32를 사용하고 modulo `2^32` 처리를 적용한다. 해당 장비의 primary uplink HC input만 빼고 Counter32 input을 넣는다. CPU fallback과 독립적으로 선택한다.
+3. Watched Port traffic: ifHC Counter64 방향별 leaf를 따로 검증한다. `ifHCInOctets`가 없으면 수신 primary input만 빼고 `cisco-catalyst-snmp-counter32-in.conf`의 `ifInOctets` `.1.3.6.1.2.1.2.2.1.10`을 사용한다. `ifHCOutOctets`가 없으면 송신 primary input만 빼고 `cisco-catalyst-snmp-counter32-out.conf`의 `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16`을 사용한다. 둘 다 Counter32 modulo `2^32`로 계산하며 나머지 방향과 `ifHighSpeed`는 primary로 유지한다. CPU fallback과 독립적으로 선택한다.
 4. Temperature/FRU: 실제 응답한 3750X/3850만 선택 설정을 포함한다. 2960에서 해당 컬럼이 없을 때 임의 vendor OID로 대체하지 않고 하드웨어 환경 메트릭을 비운다.
 5. SNMP 미응답: 0으로 대체하지 않는다. 마지막 성공 uptime sample의 부재를 poll 장애로 알린다.
 6. 2960XR: 장비가 online이 되면 위 P0 핵심 컬럼부터 짧은 개별 walk를 수행하고 이 표를 갱신한다. 확인 전에는 2960G/S 결과를 XR 지원 근거로 간주하지 않는다.
