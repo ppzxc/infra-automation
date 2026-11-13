@@ -87,7 +87,7 @@
           # 스위치 syslog 알림의 목록도 SQL에 들어간다(Spec #277): 메시지 코드는 FACILITY-SEVERITY(0~7)-MNEMONIC, 장비는 관리번호(ns+숫자), 포트는 인터페이스 이름 문자만
           - (o2c_switch_noise_events + o2c_switch_config_change_events + o2c_switch_login_fail_events + o2c_switch_macflap_events) | o2c_valid_switch_events
           - o2c_switch_syslog_roster | o2c_valid_switch_roster
-          # SNMP 무응답 알림은 Telegraf 수집 표본을 확인한 cisco_snmp_targets만 대상으로 한다.
+          # SNMP 무응답 알림은 Telegraf에 설정했고 실제 감시가 필요한 cisco_snmp_targets만 대상으로 한다.
           - o2c_switch_snmp_roster | o2c_valid_switch_roster
           - o2c_switch_uplinks | o2c_valid_switch_uplinks
           # 방화벽 알림의 목록·승인 시간도 SQL에 들어간다(Spec #282 / Ticket-3): 장비는 관리번호 또는 HA 쌍(ns0380+ns0381), 경로·심각도는 key=value 문자만, 시는 0~24 정수(시작 < 끝)

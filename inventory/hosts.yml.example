@@ -86,8 +86,8 @@ all:
           # 경유지(Bastion) 스위치를 경유해야 하는 경우 SSH ProxyJump 지정 예시:
           # ansible_ssh_common_args: '-o ProxyJump=admin@192.168.1.1:22'
 
-    # SNMP 도달성 경보 대상만 별도로 등록한다. Telegraf SNMP 설정을 배포하고 OpenObserve에서 샘플을 확인한 뒤 추가한다.
-    # SNMP를 지원하지 않거나 아직 전환하지 않은 장비(예: 미검증·오프라인 모델)는 여기에 넣지 않는다.
+    # SNMP 도달성 경보 대상만 별도로 등록한다. Telegraf에 대상을 설정했고 정상 응답 또는 장애 감시가 필요한 운영 장비인지 확인한 뒤 추가한다.
+    # 표본이 없는 장비도 의도된 감시 대상이면 등록한다(즉시 P1 가능). 수집 대상이 아니거나 폐기된 장비는 넣지 않는다.
     cisco_snmp_targets:
       hosts: {}
 
