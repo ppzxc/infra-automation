@@ -24,6 +24,8 @@ CPU Rev 컬럼은 네 활성 모델 모두 응답했다. 2960G/2960S/3750X에서
 
 `ifHCInOctets`와 `ifHCOutOctets`는 네 활성 모델 모두 Counter64로 응답했다. `ifAdminStatus`, `ifOperStatus`, `ifLastChange`, 양방향 error/discard, ifName, ifAlias도 네 모델에서 응답했다. Core/Transit로 표시된 행 중에는 물리 포트와 Port-channel이 함께 있고, Port-channel 멤버에는 같은 설명이 반복되어 있다. 2960XR는 장비가 내려가 있어 모든 항목이 미검증이다.
 
+대체 경로도 네 활성 모델에서 확인했다. legacy CPU 1분/5분 컬럼은 Gauge32, `ifInOctets`/`ifOutOctets`는 Counter32로 응답했다. `ifHighSpeed`도 네 모델에서 응답했다. 따라서 이 fallback OID들은 구성 파일에서 바로 선택할 수 있지만, primary OID와 함께 사용하지 않는다.
+
 `sysName`, `sysObjectID`, `entPhysicalName`, `entPhysicalClass`, `entPhysicalModelName`, `entPhysicalSerialNum`도 네 활성 장비에서 응답했다. 3750X의 일부 entity 행은 model/serial 문자열이 비어 있으므로 실제 chassis 행의 non-empty 값만 정적 인벤토리로 사용한다. serial 값 자체는 이 문서에 남기지 않는다.
 
 ## P0 수집 OID
@@ -69,7 +71,8 @@ P1 링크에 중복된 Core alias가 붙은 Port-channel과 그 멤버가 함께
 
 - 공통 P0, uplink, 일일 정적 정보: [`configs/telegraf/cisco-catalyst-snmp.conf`](../../configs/telegraf/cisco-catalyst-snmp.conf)
 - 지원이 확인된 3750X/3850의 선택 하드웨어 센서: [`configs/telegraf/cisco-catalyst-hardware-snmp.conf`](../../configs/telegraf/cisco-catalyst-hardware-snmp.conf)
-- Rev CPU 또는 HC Counter64가 실제로 지원되지 않는 모델에만 선택하는 구성: [`configs/telegraf/cisco-catalyst-snmp-legacy-fallback.conf`](../../configs/telegraf/cisco-catalyst-snmp-legacy-fallback.conf)
+- Rev CPU fallback: [`configs/telegraf/cisco-catalyst-snmp-cpu-legacy.conf`](../../configs/telegraf/cisco-catalyst-snmp-cpu-legacy.conf)
+- HC Counter64 fallback: [`configs/telegraf/cisco-catalyst-snmp-counter32.conf`](../../configs/telegraf/cisco-catalyst-snmp-counter32.conf)
 - 설정은 장비 한 대마다 재사용한다. 배포 쪽에서 `SNMP_AGENT`와 `DEVICE_ID`만 장비별로 렌더링하고, SHA/AES 자격 증명은 `switch_snmp` Docker secret store에서 읽는다. 공유 Telegraf 설정의 `outputs.opentelemetry`는 기존 OpenObserve endpoint/auth를 사용한다.
 - P0/traffic 인터페이스 테이블은 필요한 컬럼만 요청한다. MAC, ARP, VLAN, 전체 패킷 상세 카운터, trap, 사용처가 없는 센서 테이블은 설정하지 않는다.
 
@@ -97,9 +100,9 @@ Counter는 Telegraf에서 rate로 변환하지 않고 원시값을 보낸다. �
 
 ## Fallback 정책
 
-1. CPU: Rev 1/5-minute OID를 우선한다. 장비에서 해당 leaf가 `noSuchObject`/`noSuchInstance`일 때만 `cisco-catalyst-snmp-legacy-fallback.conf`의 legacy `cpmCPUTotal1min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.3`와 `cpmCPUTotal5min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.4`를 사용한다. 이번 활성 Catalyst에서는 Rev가 전부 확인돼 fallback은 꺼 둔다.
+1. CPU: Rev 1/5-minute OID를 우선한다. 장비에서 두 Rev leaf가 모두 `noSuchObject`/`noSuchInstance`일 때만 `cisco-catalyst-snmp-cpu-legacy.conf`의 legacy `cpmCPUTotal1min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.3`와 `cpmCPUTotal5min` `.1.3.6.1.4.1.9.9.109.1.1.1.1.4`를 사용한다. Telegraf primary CPU input만 빼고 fallback input을 넣으며 uptime/interface/memory 입력은 계속 둔다. 이번 활성 Catalyst에서는 Rev가 전부 확인돼 fallback은 꺼 둔다.
 2. Memory: `ciscoMemoryPoolName/Used/Free`를 기본으로 한다. 이번 네 모델에서는 3개 컬럼 모두 지원됐다. 미지원 모델은 지원을 먼저 walk로 확인한다. HOST-RESOURCES-MIB는 네 모델에서 미응답이라 대체로 쓰지 않는다. 다른 Cisco memory MIB는 의미와 pool 기준을 확인한 후에만 추가한다.
-3. Interface traffic: ifHC Counter64가 정상 응답한 현재 4종은 이를 쓴다. 미지원 leaf일 때만 `cisco-catalyst-snmp-legacy-fallback.conf`의 IF-MIB `ifInOctets` `.1.3.6.1.2.1.2.2.1.10` / `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16` Counter32를 사용하고 modulo `2^32` 처리를 적용한다. Primary와 fallback 입력을 같은 장비에 동시에 로드하지 않는다.
+3. Interface traffic: ifHC Counter64가 정상 응답한 현재 4종은 이를 쓴다. 수신·송신 두 HC leaf가 모두 미지원일 때만 `cisco-catalyst-snmp-counter32.conf`의 IF-MIB `ifInOctets` `.1.3.6.1.2.1.2.2.1.10` / `ifOutOctets` `.1.3.6.1.2.1.2.2.1.16` Counter32를 사용하고 modulo `2^32` 처리를 적용한다. 해당 장비의 primary uplink HC input만 빼고 Counter32 input을 넣는다. CPU fallback과 독립적으로 선택한다.
 4. Temperature/FRU: 실제 응답한 3750X/3850만 선택 설정을 포함한다. 2960에서 해당 컬럼이 없을 때 임의 vendor OID로 대체하지 않고 하드웨어 환경 메트릭을 비운다.
 5. SNMP 미응답: 0으로 대체하지 않는다. 마지막 성공 uptime sample의 부재를 poll 장애로 알린다.
 6. 2960XR: 장비가 online이 되면 위 P0 핵심 컬럼부터 짧은 개별 walk를 수행하고 이 표를 갱신한다. 확인 전에는 2960G/S 결과를 XR 지원 근거로 간주하지 않는다.
