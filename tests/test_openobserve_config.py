@@ -36,10 +36,11 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 PLAYBOOK = ROOT_DIR / "playbooks" / "openobserve_config.yml"
 
 PLAIN_CT = "text/plain; charset=utf-8"
-# PromQL 알림 17개(#282 복원, #318 정비): name -> (severity, period, frequency, silence, operator, value, stream, pending minutes)
+# PromQL 알림: name -> (severity, period, frequency, silence, operator, value, stream, pending minutes)
 UPLINK_ALERT = "infra-switch-uplink-down"   # 업링크 목록(o2c_switch_uplinks)이 비어 있으면 만들어지지 않는다
 UPLINKS = [{"device": "ns0250", "port": "Gi1/0/1"}]
 SELFTEST_STREAM = "alert_selftest_alert_verify"
+PROMQL_SAMPLE = next(a for a in PROMQL_DEFS if a["name"] == "infra-cpu-usage-p1")
 
 
 def _same_roster_alert(name, stored, sql):
@@ -535,6 +536,7 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
     assert streams == {"security_logs_alert_verify", "system_logs_alert_verify", "system_filesystem_usage_alert_verify",
                        "system_filesystem_inodes_usage_alert_verify", "system_linux_memory_available_alert_verify", "system_memory_usage_alert_verify",   # Silent Host 하트비트
                        "system_memory_limit_alert_verify", "tcpcheck_status_alert_verify",
+                       "network_device_uptime_ticks_alert_verify",
                        "backup_logs_alert_verify", "app_logs_alert_verify", "jvm_memory_used_alert_verify",
                        "host_status_logs_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
     assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
@@ -868,7 +870,7 @@ def test_tz_offset_is_a_variable_and_a_changed_value_updates_every_alert_once(o2
 
 
 def test_desired_alert_tz_offset_defaults_to_zero_without_the_spec_key():
-    alert = dict(PROMQL_DEFS[0], action="① a ② b")
+    alert = dict(PROMQL_SAMPLE, action="① a ② b")
     assert _alert_bodies(_desired_spec([alert]))[alert["name"]]["tz_offset"] == 0
     assert _alert_bodies(dict(_desired_spec([alert]), tz_offset=540))[alert["name"]]["tz_offset"] == 540
 
@@ -1924,10 +1926,10 @@ def _balanced(text):
     return not stack and not in_quote
 
 
-def test_promql_definitions_are_the_seventeen_alerts_with_unique_infra_names():
+def test_promql_definitions_have_unique_infra_names():
     names = [a["name"] for a in DEFAULTS["o2c_alerts"]]
     assert len(names) == len(set(names))
-    assert {a["name"] for a in PROMQL_DEFS} == set(PROMQL_ALERTS) and len(PROMQL_DEFS) == 17
+    assert {a["name"] for a in PROMQL_DEFS} == set(PROMQL_ALERTS) and len(PROMQL_DEFS) == 23
     assert all(re.fullmatch(r"infra-[a-z0-9-]+", n) for n in PROMQL_ALERTS)
 
 
@@ -2084,13 +2086,13 @@ def _alert_bodies(spec):
 
 
 def test_a_promql_alert_must_be_on_a_metrics_stream():
-    alert = dict(PROMQL_DEFS[0], stream_type="logs", action="① a ② b")
+    alert = dict(PROMQL_SAMPLE, stream_type="logs", action="① a ② b")
     with pytest.raises(ValueError, match="metrics"):
         o2c.o2c_desired(_desired_spec([alert]))
 
 
 def test_promql_body_is_built_and_compared_as_a_subset_of_what_the_server_returns():
-    want = next(d for d in o2c.o2c_desired(_desired_spec([dict(PROMQL_DEFS[0], action="① a ② b")])) if d["kind"] == "alert")
+    want = next(d for d in o2c.o2c_desired(_desired_spec([dict(PROMQL_SAMPLE, action="① a ② b")])) if d["kind"] == "alert")
     stored = dict(want["body"], alert_id="a1", owner="x", updated_at=1, query_condition=dict(want["body"]["query_condition"], sql=""))
     existing = {"alert": [stored], "destination": [{"name": "dest-a"}]}
     assert o2c.o2c_plan([want], existing, "default") == []
@@ -2099,14 +2101,14 @@ def test_promql_body_is_built_and_compared_as_a_subset_of_what_the_server_return
 
 
 def test_verify_plan_skips_promql_alerts_even_without_fixtures():
-    plan = o2c.o2c_verify_plan([PROMQL_DEFS[0]], {}, "default", "_v", "1", 0)
+    plan = o2c.o2c_verify_plan([PROMQL_SAMPLE], {}, "default", "_v", "1", 0)
     assert plan == {"ingest": [], "searches": []}
 
 
 @pytest.mark.parametrize("dest, sev, expected", [("", "P1 긴급", "dest-a"), ("ops-p1", "P1 긴급", "ops-p1"),
                                                   ("ops-p1", "P2 경고", "dest-a"), ("ops-p1", "P3 주의", "dest-a")])
 def test_p1_destination_applies_to_p1_alerts_only_and_defaults_to_the_current_destination(dest, sev, expected):
-    alert = dict(PROMQL_DEFS[0], severity=sev, action="① a ② b")
+    alert = dict(PROMQL_SAMPLE, severity=sev, action="① a ② b")
     assert _alert_bodies(_desired_spec([alert], dest))[alert["name"]]["destinations"] == [expected]
 
 
@@ -2322,7 +2324,7 @@ def test_a_short_url_hash_collision_stops_before_any_alert_write(o2):
 
 # --- 지속 조건 pending_period_sec (#318): 알림 최상위 필드, 0도 항상 보내고 계획 비교에 들어간다 --------------------------------
 def _one_alert_want(**extra):
-    alert = dict(PROMQL_DEFS[0], action="① a ② b", **extra)
+    alert = dict(PROMQL_SAMPLE, action="① a ② b", **extra)
     return next(d for d in o2c.o2c_desired(_desired_spec([alert])) if d["kind"] == "alert")
 
 
@@ -2330,7 +2332,7 @@ def test_pending_minutes_become_top_level_pending_period_sec_and_zero_is_always_
     want = _one_alert_want()
     assert want["body"]["pending_period_sec"] == 15 * 60 and "pending_period_sec" not in want["body"]["trigger_condition"]
     assert _one_alert_want(pending_minutes="30")["body"]["pending_period_sec"] == 1800   # 템플릿 렌더링 값(문자열)도 정수로
-    no_pending = dict(PROMQL_DEFS[0], action="① a ② b")
+    no_pending = dict(PROMQL_SAMPLE, action="① a ② b")
     no_pending.pop("pending_minutes", None)
     body = next(d for d in o2c.o2c_desired(_desired_spec([no_pending])) if d["kind"] == "alert")["body"]
     assert body["pending_period_sec"] == 0   # 빼면 60 → 0으로 줄인 정의가 부분집합 비교에서 같게 보여 서버에 옛 값이 남는다
