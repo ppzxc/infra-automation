@@ -22,6 +22,8 @@ from host_audit_kisa import CATEGORIES, ITEMS  # noqa: E402
 
 CODES = ["U-%02d" % i for i in range(1, 68)]
 REQUIRED = ("title", "severity", "category", "criteria")
+BASE_EXTRA = ("cis",)
+REMEDIATION = ("check", "purpose", "threat", "guide_page", "remediation", "remediation_impact", "remediation_effort")
 
 
 def _catalog():
@@ -36,8 +38,8 @@ def test_catalog_yaml_holds_all_67_items_with_required_fields():
             assert meta.get(field), (code, field)
         assert meta["severity"] in ("상", "중", "하"), code
         assert meta["category"] in CATEGORIES, code
-        assert set(meta) == set(REQUIRED) | {"cis"}, code
-        assert all(isinstance(meta[k], str) for k in meta), code
+        assert set(meta) == set(REQUIRED) | set(BASE_EXTRA) | set(REMEDIATION), code
+        assert all(isinstance(meta[k], str) for k in (*REQUIRED, "cis", "check", "purpose", "threat")), code
         assert meta["criteria"] == meta["criteria"].strip(), code
 
 
@@ -77,7 +79,8 @@ def test_loader_accepts_a_field_overridden_over_a_yaml_merge(tmp_path):
 
 def test_migrated_items_keep_their_known_values():
     """Known-good literals from the pre-migration filter pin the content independently of the loader."""
-    assert ITEMS["U-01"] == {
+    u01 = ITEMS["U-01"]
+    assert {k: u01[k] for k in (*REQUIRED, "cis")} == {
         "title": "root 계정 원격 접속 제한", "severity": "상", "category": "계정 관리",
         "criteria": "원격터미널 서비스를 사용하지 않거나, 사용 시 root 직접 접속을 차단한 경우 양호", "cis": "5.1.20"}
     assert (ITEMS["U-23"]["severity"], ITEMS["U-23"]["category"], ITEMS["U-23"]["cis"]) == ("상", "파일 및 디렉토리 관리", "7.1.13")
@@ -92,7 +95,10 @@ def _write(tmp_path, text):
     return str(path)
 
 
-ONE_ITEM = "U-01:\n  title: t\n  severity: 상\n  category: 계정 관리\n  criteria: c\n  cis: ''\n"
+ONE_ITEM = (
+    "U-01:\n  title: t\n  severity: 상\n  category: 계정 관리\n  criteria: c\n  cis: ''\n"
+    "  check: k\n  purpose: p\n  threat: h\n  guide_page: 12\n  remediation:\n    summary: s\n"
+    "  remediation_impact:\n    level: 1\n    reason: r\n  remediation_effort:\n    level: 2\n    reason: r\n")
 
 
 def test_loader_reads_the_given_catalog_file(tmp_path):

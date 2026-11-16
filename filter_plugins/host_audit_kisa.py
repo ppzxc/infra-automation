@@ -56,7 +56,7 @@ CATEGORY_LOG = '로그 관리'
 CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH, CATEGORY_LOG]
 
 # KISA-2026 Unix items U-01~U-67. The item list lives only in host_audit_kisa_items.yml next to this
-# module (title/severity/category/criteria/cis) and is never edited here.
+# module (base fields ITEM_FIELDS plus the remediation fields REMEDIATION_FIELDS) and is never edited here.
 #
 # The catalog is read at import time on purpose (Spec #488 / Ticket-1, #489: "the filter only reads the YAML
 # when imported"). A broken or missing catalog must fail loudly at that point with the cause named in the
@@ -64,6 +64,12 @@ CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH,
 # each process parses the file once however often it is called.
 CODE_PATTERN = re.compile(r'^U-\d\d$')
 ITEM_FIELDS = ('title', 'severity', 'category', 'criteria', 'cis')
+# Text fields added by Spec #488 / Ticket-2 (#490), plus the nested remediation, remediation_impact,
+# remediation_effort mappings and the guide_page number validated in _validate_remediation.
+TEXT_FIELDS = ('check', 'purpose', 'threat')
+REMEDIATION_FIELDS = TEXT_FIELDS + ('guide_page', 'remediation', 'remediation_impact', 'remediation_effort')
+STEP_FAMILIES = ('rhel', 'debian')
+LEVELS = (1, 2, 3)
 CATALOG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'host_audit_kisa_items.yml')
 
 
@@ -85,8 +91,59 @@ class _UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-def _freeze(items):
-    return MappingProxyType({code: MappingProxyType(dict(meta)) for code, meta in items.items()})
+def _deep_freeze(value):
+    """Read-only view of nested mappings; lists become tuples, scalars pass through."""
+    if isinstance(value, dict):
+        return MappingProxyType({k: _deep_freeze(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return tuple(_deep_freeze(v) for v in value)
+    return value
+
+
+SUMMARY_MAX = 300  # the body table prints remediation.summary on one line; longer notes belong in steps/reason
+
+
+def _invalid_text(value, block=False):
+    """True when ``value`` is not acceptable catalog text: not a string, blank, multi-line, or with surrounding
+    whitespace (it would show as a stray gap or break in report cells).
+
+    ``block`` is for YAML ``|`` blocks (steps), which always end with a newline: only leading space is refused.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return True
+    if not block and '\n' in value:  # report and xlsx cells are single-line text (only steps blocks span lines)
+        return True
+    return value != value.lstrip() if block else value != value.strip()
+
+
+def _validate_remediation(code, meta, path):
+    """Check the remediation fields of one item; bool is rejected on purpose (True == 1 in Python)."""
+    def fail(field, why):
+        raise RuntimeError('KISA item %s field %s %s in %s' % (code, field, why, path))
+
+    for field in REMEDIATION_FIELDS:
+        if field not in meta:
+            fail(field, 'is missing')
+    for field in TEXT_FIELDS:
+        if _invalid_text(meta[field]):
+            fail(field, 'must be non-blank text without surrounding whitespace')
+    page = meta['guide_page']
+    if type(page) is not int or page < 1:
+        fail('guide_page', 'must be a positive integer')
+    rem = meta['remediation']
+    if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _invalid_text(rem.get('summary')):
+        fail('remediation', 'must be a mapping of summary (trimmed text) and optional steps')
+    if len(rem['summary']) > SUMMARY_MAX:  # (a newline is already refused by _invalid_text above)
+        fail('remediation.summary', 'must be one line of at most %d characters' % SUMMARY_MAX)
+    steps = rem.get('steps')
+    if steps is not None and (not isinstance(steps, dict) or not steps or set(steps) - set(STEP_FAMILIES)
+                              or any(_invalid_text(v, block=True) for v in steps.values())):
+        fail('remediation.steps', 'must map rhel/debian to non-blank text')
+    for field in ('remediation_impact', 'remediation_effort'):
+        part = meta[field]
+        if (not isinstance(part, dict) or set(part) != {'level', 'reason'} or type(part['level']) is not int
+                or part['level'] not in LEVELS or _invalid_text(part['reason'])):
+            fail(field, 'must be {level: 1..3, reason: text}')
 
 
 def _validate(items, path):
@@ -103,10 +160,11 @@ def _validate(items, path):
             if not isinstance(meta[field], str):
                 raise RuntimeError('KISA item %s field %s must be a string (quote it) in %s' % (code, field, path))
         for field in ('title', 'criteria'):
-            if not meta[field].strip() or meta[field] != meta[field].strip():
+            if _invalid_text(meta[field]):
                 raise RuntimeError('KISA item %s field %s is blank or has surrounding whitespace in %s'
                                    % (code, field, path))
-        extra = sorted(set(meta) - set(ITEM_FIELDS))
+        _validate_remediation(code, meta, path)
+        extra = sorted(set(meta) - set(ITEM_FIELDS) - set(REMEDIATION_FIELDS))
         if extra:
             raise RuntimeError('KISA item %s has unknown field %s in %s' % (code, ', '.join(map(str, extra)), path))
         if meta['severity'] not in SEVERITY_ORDER:
@@ -123,7 +181,7 @@ def _parse_catalog(path):
     except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (path, exc)) from exc
     _validate(items, path)
-    return _freeze(items)
+    return _deep_freeze(items)
 
 
 def _load_items(path=None):
@@ -140,6 +198,61 @@ def _require_all_items(items):
 
 
 ITEMS = _require_all_items(_load_items())
+
+# Values derived from the guide severity (Spec #488 / #479). They are never stored in the catalog, so they
+# cannot drift from it, and they are the same for every host and every verdict.
+URGENCY_BY_PRIORITY = {1: '단기', 2: '중기', 3: '장기'}
+REMEDIATION_SOURCE = ('조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 '
+                      '바탕으로 요약함')
+
+
+def risk_level(severity):
+    """Risk of the finding itself, from the guide severity: 상 3, 중 2, 하 1."""
+    return len(SEVERITY_ORDER) - SEVERITY_ORDER[severity]
+
+
+def priority_of(severity):
+    """Priority 1 (most urgent) to 3, from the guide severity: 상 1, 중 2, 하 3."""
+    return SEVERITY_ORDER[severity] + 1
+
+
+def urgency_of(severity):
+    """Urgency label of the priority: 단기, 중기, 장기 (no deadline is defined)."""
+    return URGENCY_BY_PRIORITY[priority_of(severity)]
+
+
+def remediation_view(code):
+    """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values.
+
+    ``risk`` and ``urgency`` are not shown in the body table; the Remediation Plan xlsx (a later Spec #488 ticket)
+    has columns for them and reads them from this one view, so they are computed and tested here once.
+    """
+    meta = ITEMS.get(code.split(':', 1)[-1])
+    if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
+        return {'remediation_summary': '', 'impact_level': None, 'effort_level': None, 'risk': None, 'priority': None,
+                'urgency': None}
+    return {
+        'remediation_summary': meta['remediation']['summary'],
+        'impact_level': meta['remediation_impact']['level'],
+        'effort_level': meta['remediation_effort']['level'],
+        'risk': risk_level(meta['severity']),
+        'priority': priority_of(meta['severity']),
+        'urgency': urgency_of(meta['severity']),
+    }
+
+
+def order_findings(findings):
+    """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
+    low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable.
+
+    Each finding carries its own ``priority``, ``impact_level`` and ``effort_level`` (from ``remediation_view``,
+    merged when the section builds it); blank values (a code the catalog lacks) sort last."""
+    def key(finding):
+        return (finding['priority'] or 9, finding['impact_level'] or 9, finding['effort_level'] or 9,
+                VERDICTS.index(finding['verdict']), finding['code'])
+
+    return sorted(findings, key=key)
+
 
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'
@@ -285,8 +398,10 @@ def host_audit_kisa_result(probe, register, inventory_hostname, groups, today):
 
 
 def _item_meta(code):
+    """Base columns of an item (what summary rows and the per-host appendix may show)."""
     short = code.split(':', 1)[-1]
-    meta = dict(ITEMS.get(short, {'title': short, 'severity': '', 'category': '', 'criteria': '', 'cis': ''}))
+    known = ITEMS.get(short, {})
+    meta = {field: known.get(field, short if field == 'title' else '') for field in ITEM_FIELDS}
     meta['code'] = code
     return meta
 
@@ -372,9 +487,9 @@ def host_audit_kisa_section(model, records, register=None, today=None):
     findings = []
     for (code, verdict), hosts in groups.items():
         meta = _item_meta(code)
-        findings.append(dict(meta, verdict=verdict, verdict_class=VERDICT_CLASSES[verdict],
-                             hosts=hosts, host_count=len(hosts)))
-    findings.sort(key=lambda f: (VERDICTS.index(f['verdict']), SEVERITY_ORDER.get(f['severity'], 9), f['code']))
+        findings.append(dict(meta, **remediation_view(code), verdict=verdict,
+                             verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
+    findings = order_findings(findings)
 
     summary = [dict(_item_meta(code), counts=[counts[code][v] for v in VERDICTS]) for code in codes]
     implemented = sorted(ITEMS)
@@ -395,6 +510,7 @@ def host_audit_kisa_section(model, records, register=None, today=None):
         'totals': [totals[v] for v in VERDICTS],
         'summary': summary,
         'findings': findings,
+        'remediation_source': REMEDIATION_SOURCE,
         'appendix': appendix,
         'register': _register_rows(register, applied, today),
         'run_date': today,

@@ -350,8 +350,8 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 ## 10. Configuration Vulnerability (KISA-2026, #121)
 
 - **기준**: KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」 Unix 서버 항목. 항목 코드는 판을 붙여 `KISA-2026:U-NN`으로 적는다(2021판과 번호가 다르다). CIS RHEL 9 Benchmark v2.0.0 규칙 번호는 참조 열로만 둔다. 근거: `docs/research/host-audit-configuration-vulnerability-baseline.md`(#102, `research/host-audit-configuration-vulnerability-baseline` 브랜치).
-- **구현 범위**: Unix U-01~U-67 전 항목. 계정 관리 U-01~U-13(#121), 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67(#122). 자동 판정할 수 없는 항목은 점검불가(수동)로 두고 판단에 쓸 목록을 증적으로 남긴다(§10.1·§10.4).
-- **항목 목록의 원본은 YAML**: U-01~U-67의 `title`·`severity`·`category`·`criteria`·`cis`는 `filter_plugins/host_audit_kisa_items.yml` 한 파일이 유일한 원본이다(Spec #488). `host_audit_kisa.py`는 import 시 이 파일을 읽기만 한다. §10.1·§10.4 표의 항목명·중요도·CIS 열은 이 YAML과 겹치므로 표를 고치지 말고 YAML을 고친다. 표의 '자동 판정 방법' 열은 다음 티켓에서 YAML `check`로 옮긴다.
+- **구현 범위**: Unix U-01~U-67 전 항목. 계정 관리 U-01~U-13(#121), 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67(#122). 자동 판정할 수 없는 항목은 점검불가(수동)로 두고 판단에 쓸 목록을 증적으로 남긴다(항목별 방법은 YAML `check`, 공통 규칙은 §10.4).
+- **항목 목록의 원본은 YAML**: U-01~U-67의 항목 메타데이터는 `filter_plugins/host_audit_kisa_items.yml` 한 파일이 유일한 원본이다(Spec #488). `title`·`severity`·`category`·`criteria`·`cis`에 우리 probe가 보는 것을 한 줄로 쓴 `check`, 가이드를 우리 말로 요약한 `purpose`·`threat`·`remediation`, 조치 영향도·조치 난이도, 가이드 쪽 번호 `guide_page`가 붙는다(필드는 §10.5). `host_audit_kisa.py`는 import 시 이 파일을 읽기만 한다. 항목 표는 문서에 두지 않으니 항목 내용은 YAML을 고친다.
 - **실행**: `roles/host_audit/files/kisa/`의 `_lib.sh` + `U-NN.sh`(이름순) + `_end.sh`를 이어 붙여 `ansible.builtin.raw`로 `sh -s`에 넣는다. 호스트에 파일을 남기지 않고 Python이 필요 없어 CentOS 6 ~ Rocky 10, Ubuntu에서 같은 경로로 돈다. `/etc/shadow`와 `sshd -T`를 읽어야 해서 이 태스크만 root로 승격한다. 식별 수집(`AUD-010`)에 실패한 호스트는 건너뛴다.
 - **출력 규약**: 표식(`__HOST_AUDIT_KISA_BEGIN__`/`__HOST_AUDIT_KISA_END__`) 사이에 항목마다 `U-NN|<GOOD·VULN·NA·MANUAL>|증적` 한 줄. 증적은 설정 값·계정 이름·개수만 담고 비밀번호 해시 같은 비밀값은 싣지 않는다. 스크립트는 `KISA_ROOT`로 점검할 루트를 바꿀 수 있어 pytest가 가짜 `/etc`로 판정을 검증한다.
 - **판정 5종**: 양호 · 취약 · 예외(승인) · 해당없음 · 점검불가(수동). 스크립트가 결과를 내지 않은 항목은 양호로 두지 않고 점검불가(수동)로 둔다. 판정과 예외 적용은 `filter_plugins/host_audit_kisa.py`의 `host_audit_kisa_result`가 한다.
@@ -367,27 +367,11 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
   양호·해당없음은 예외가 있어도 바뀌지 않는다. 첫 항목은 Docker 구간의 `KISA-2026:U-28`(접속 IP 및 포트 제한)이며 승인 전이라 '승인 대기'다. U-28은 Docker가 도는 호스트(`dockerd` 실행 또는 `docker0`)를 점검불가(수동)로 내므로, 승인자·승인일·만료일을 채우면 그 호스트들이 예외(승인)가 된다. 레지스터는 항목 코드 단위라, Docker 호스트에 방화벽 제한이 전혀 없어 취약으로 나온 경우에도 같은 예외가 적용된다는 점에 유의한다(증적에 `docker=yes`와 "no IP/port restriction"이 함께 남는다).
 - **보고서**: "4. Configuration Vulnerability" 섹션에 항목별 판정 건수, 양호 외 항목(취약·점검불가(수동)·예외(승인), 항목·판정별로 호스트 묶음), 예외 레지스터를 싣는다. 양호 항목과 증적은 호스트별 부록(`sections/appendix_config_vulnerability.html.j2`)에 싣는다. 섹션 모델은 `host_audit_report_model`이 `host_audit_kisa_section`을 불러 `config_vulnerability` 키로 넣고, 예외 레지스터는 실행 메타의 `kisa_exceptions`로 넘어간다. 점검이 돌지 못한 호스트는 요약의 점검불가 표에 'Configuration Vulnerability'로 나온다.
 
-### 10.1 구현 항목 (계정 관리)
+### 10.1 항목 목록 (YAML)
 
-| 코드 | 항목 (중요도) | 자동 판정 방법 | CIS 참조 |
-|---|---|---|---|
-| `KISA-2026:U-01` | root 계정 원격 접속 제한 (상) | `sshd -T`(실패 시 `sshd_config`)의 `PermitRootLogin`이 `no`이고 telnet(23/tcp) listening이 없으면 양호 | 5.1.20 |
-| `KISA-2026:U-02` | 비밀번호 관리정책 설정 (상) | `PASS_MAX_DAYS` ≤ 90, `PASS_MIN_DAYS` ≥ 1, 문자 종류 3종+8자 또는 2종+10자(pwquality·PAM 인자) | 5.3.3.2.2, 5.3.3.2.3, 5.4.1.1, 5.4.1.2 |
-| `KISA-2026:U-03` | 계정 잠금 임계값 설정 (상) | auth 스택 pam_faillock·pam_tally2·pam_tally의 `deny`(없으면 faillock.conf, 기본 3)가 1~10 | 5.3.3.1.1 |
-| `KISA-2026:U-04` | 비밀번호 파일 보호 (상) | `/etc/passwd` 비밀번호 필드가 모두 `x`(잠금 표시 허용)이고 `/etc/shadow` 존재 | 7.2.1 |
-| `KISA-2026:U-05` | root 이외의 UID가 '0' 금지 (상) | UID 0 계정이 root뿐 | 5.4.2.1 |
-| `KISA-2026:U-06` | 사용자 계정 su 기능 제한 (상) | `/etc/pam.d/su`의 pam_wheel.so, 또는 su가 root 외 그룹 소유·other 실행 불가. su 없으면 해당없음 | 5.2.7 |
-| `KISA-2026:U-07` | 불필요한 계정 제거 (하) | 점검불가(수동) — 로그인 가능 계정 목록을 증적으로 | - |
-| `KISA-2026:U-08` | 관리자 그룹에 최소한의 계정 포함 (중) | 점검불가(수동) — GID 0 그룹·기본 그룹 GID 0 계정·wheel/sudo/admin 구성원을 증적으로 | 5.4.2.2, 5.4.2.3 |
-| `KISA-2026:U-09` | 계정이 존재하지 않는 GID 금지 (하) | 모든 계정의 기본 GID가 `/etc/group`에 있음 | 7.2.3 |
-| `KISA-2026:U-10` | 동일한 UID 금지 (중) | 중복 UID 없음 | 7.2.4 |
-| `KISA-2026:U-11` | 사용자 shell 점검 (하) | 가이드가 나열한 시스템 계정(daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher)의 셸이 nologin/false | 5.4.2.7 |
-| `KISA-2026:U-12` | 세션 종료 시간 설정 (하) | 전역 sh 프로필의 `TMOUT`이 1~600초(여러 곳이면 가장 큰 값) | 5.4.3.2 |
-| `KISA-2026:U-13` | 안전한 비밀번호 암호화 알고리즘 사용 (중) | `/etc/shadow`에 MD5·Blowfish·DES 해시가 없고 `ENCRYPT_METHOD`·pam_unix 설정이 약한 알고리즘이 아님 | 5.3.3.4.3, 5.4.1.4 |
+항목 목록(코드, 항목명, 중요도, 분류, 판단 기준, CIS 참조, 점검방법)은 `filter_plugins/host_audit_kisa_items.yml`이다. 문서의 항목 표를 지웠으므로 두 곳이 어긋나지 않는다. 항목명·중요도·판단 기준(`criteria`)은 2026판 가이드 PDF 원문과 대조해 원문 문장을 따랐고(그래서 U-09는 "불필요한 그룹이 제거된 경우", U-63은 "권한이 640"이며 우리 probe는 기본 GID 누락과 640 이하를 본다 — 이 차이는 `check`에 있고 본문 표는 `criteria`만 싣는다), 항목마다 `guide_page`(가이드 인쇄 쪽)로 원문을 찾을 수 있다. 처음에는 `9u4a/kisa-infra-audit`(MIT)가 인용한 설명을 따랐으나 #490에서 원문과 대조해 바로잡았다(U-05 따옴표, U-09·U-26·U-63의 판단 기준 등). 판정 스크립트는 가이드를 참고해 새로 작성했다(코드 차용 없음).
 
-항목명·중요도·판단 기준 문장은 `9u4a/kisa-infra-audit`(MIT, 2026판 기준)가 가이드에서 인용한 항목 설명을 따랐고, 873쪽 PDF 원문과 직접 대조하지는 않았다. 판정 스크립트는 그 설명을 참고해 새로 작성했다(코드 차용 없음). §10.4도 같다.
-
-### 10.4 구현 항목 (파일 및 디렉토리·서비스·패치·로그 관리, #122)
+### 10.4 파일 및 디렉토리·서비스·패치·로그 관리 항목의 공통 규칙 (#122)
 
 공통 규칙:
 - **서비스 사용 여부**: 프로세스 이름(`ps -e -o comm=`), systemd unit active(`systemctl is-active`), (x)inetd 항목(`/etc/xinetd.d/NAME`의 `disable = yes` 아님, `inetd.conf`의 주석 아닌 줄), 필요한 경우 TCP listening(`ss`·`netstat`) 중 하나라도 있으면 사용 중으로 본다. 서비스를 쓰지 않아 기준이 성립하지 않는 항목은 해당없음이다.
@@ -403,62 +387,6 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
   - 증적 문구: `file capability: none`(없음), `file capability: default only (N)`(기본만), `file capability review (N): ...; default: M`(기본 밖 있음), `file capability: 점검불가(...)`(`getcap`이 없거나 실행할 수 없음, 시간 초과).
 - **비밀값**: SNMP community는 길이·문자 종류만 판정하고 값은 증적에 싣지 않는다.
 
-| 코드 | 항목 (중요도) | 자동 판정 방법 | CIS 참조 |
-|---|---|---|---|
-| `KISA-2026:U-14` | root 홈, 패스 디렉터리 권한 및 패스 설정 (상) | 전역 프로필·`/etc/environment`·root 시작 파일의 `PATH=` 값에 `.` 또는 빈 항목이 맨 뒤가 아닌 위치에 없음 | - |
-| `KISA-2026:U-15` | 파일 및 디렉터리 소유자 설정 (상) | `-nouser`·`-nogroup` 파일 없음 | 7.1.12 |
-| `KISA-2026:U-16` | /etc/passwd 파일 소유자 및 권한 설정 (상) | root, 644 이하 | 7.1.1 |
-| `KISA-2026:U-17` | 시스템 시작 스크립트 권한 설정 (상) | `/etc/rc.d/init.d`·`/etc/init.d`·`/etc/systemd/system` 일반 파일이 root 소유, 그룹·기타 쓰기 없음(755 이하). 파일이 없으면 해당없음 | - |
-| `KISA-2026:U-18` | /etc/shadow 파일 소유자 및 권한 설정 (상) | root, 400 이하 | 7.1.5 |
-| `KISA-2026:U-19` | /etc/hosts 파일 소유자 및 권한 설정 (상) | root, 644 이하 | - |
-| `KISA-2026:U-20` | /etc/(x)inetd.conf 파일 소유자 및 권한 설정 (상) | root, 600 이하. 둘 다 없으면 해당없음 | - |
-| `KISA-2026:U-21` | /etc/(r)syslog.conf 파일 소유자 및 권한 설정 (상) | root·bin·sys, 640 이하. 둘 다 없으면 해당없음 | - |
-| `KISA-2026:U-22` | /etc/services 파일 소유자 및 권한 설정 (상) | root·bin·sys, 644 이하 | - |
-| `KISA-2026:U-23` | SUID, SGID, Sticky bit 설정 파일 점검 (상) | 점검불가(수동) — SUID/SGID 파일 목록(최대 40개)을 증적으로. 없으면 양호. 같은 증적 줄에 file capability 목록이 덧붙으며 판정은 바꾸지 않는다(아래 file capability) | 7.1.13 |
-| `KISA-2026:U-24` | 사용자, 시스템 환경변수 파일 소유자 및 권한 설정 (상) | 로그인 계정 홈의 `.profile`·`.bashrc` 등이 root 또는 해당 계정 소유, 그룹·기타 쓰기 없음 | 7.2.10 |
-| `KISA-2026:U-25` | world writable 파일 점검 (상) | 없으면 양호, 있으면 점검불가(수동) — 목록(최대 30개)을 증적으로 | 7.1.11 |
-| `KISA-2026:U-26` | /dev에 존재하지 않는 device 파일 점검 (상) | `/dev` 아래 일반 파일 없음(`/dev/shm`·`/dev/mqueue`·`/dev/hugepages` 제외) | - |
-| `KISA-2026:U-27` | $HOME/.rhosts, hosts.equiv 사용 금지 (상) | 파일이 없거나, 있으면 root/해당 계정 소유·600 이하·`+` 없음 | - |
-| `KISA-2026:U-28` | 접속 IP 및 포트 제한 (상) | firewalld 기본 zone target이 ACCEPT 아님, ufw active, nftables input drop 정책·`saddr` 규칙, 레거시 iptables INPUT DROP·`-s` 규칙, `hosts.deny` `ALL: ALL` 중 하나. Docker 호스트는 점검불가(수동) | 4.1.2 |
-| `KISA-2026:U-29` | hosts.lpd 파일 소유자 및 권한 설정 (하) | 없거나, root·600 이하 | - |
-| `KISA-2026:U-30` | UMASK 설정 관리 (중) | 전역 프로필·`login.defs`의 모든 umask 값이 022 비트를 포함. 지정이 없으면 취약 | 5.4.3.3 |
-| `KISA-2026:U-31` | 홈디렉토리 소유자 및 권한 설정 (중) | 로그인 계정 홈이 해당 계정 소유, 기타 쓰기 없음 | 7.2.9 |
-| `KISA-2026:U-32` | 홈 디렉토리로 지정한 디렉토리의 존재 관리 (중) | 로그인 계정의 홈 디렉터리가 모두 존재 | 7.2.9 |
-| `KISA-2026:U-33` | 숨겨진 파일 및 디렉토리 검색 및 제거 (하) | 점검불가(수동) — 로그인 홈·`/tmp`·`/var/tmp`·`/dev`의 숨김 항목 중 통상 항목(`.ssh`, `.bashrc` 등) 외 목록. 없으면 양호 | - |
-| `KISA-2026:U-34` | Finger 서비스 비활성화 (상) | finger 서비스·79/tcp 없음 | - |
-| `KISA-2026:U-35` | 공유 서비스에 대한 익명 접근 제한 설정 (상) | vsftpd `anonymous_enable=YES`, proftpd `<Anonymous>`, exports `no_root_squash`·`anonuid=0`, Samba `guest ok = yes`가 없음 | - |
-| `KISA-2026:U-36` | r 계열 서비스 비활성화 (상) | rlogin·rsh·rexec 서비스·512~514/tcp 없음 | - |
-| `KISA-2026:U-37` | crontab 설정파일 권한 설정 미흡 (상) | `/usr/bin/crontab`·`/usr/bin/at` 750 이하, `/etc/crontab`·`cron.allow/deny`·`at.allow/deny` root·640 이하. 모두 없으면 해당없음 | 2.4.1.2~2.4.1.8, 2.4.2.1 |
-| `KISA-2026:U-38` | DoS 공격에 취약한 서비스 비활성화 (상) | echo·discard·daytime·chargen (x)inetd 항목·7/9/13/19 tcp 없음 | - |
-| `KISA-2026:U-39` | 불필요한 NFS 서비스 비활성화 (상) | NFS 서버(nfsd·nfs-server) 없음. 필요하면 예외 레지스터 | - |
-| `KISA-2026:U-40` | NFS 접근 통제 (상) | 모든 export가 허용 호스트 지정(`*`·호스트 없음 아님), `/etc/exports` root·644 이하. NFS 서버 없으면 해당없음 | - |
-| `KISA-2026:U-41` | 불필요한 automountd 제거 (상) | automount(autofs) 없음 | - |
-| `KISA-2026:U-42` | 불필요한 RPC 서비스 비활성화 (상) | 가이드 목록(rpc.cmsd, rpc.ttdbserverd, sadmind, rusersd, walld, sprayd, rstatd, rpc.nisd, rexd, rpc.pcnfsd, rpc.statd, rpc.ypupdated, rpc.rquotad, kcms_server, cachefsd) 없음 | - |
-| `KISA-2026:U-43` | NIS, NIS+ 점검 (상) | ypserv·ypbind·ypxfrd·yppasswdd 없음 | - |
-| `KISA-2026:U-44` | tftp, talk 서비스 비활성화 (상) | tftp·talk·ntalk 없음 | - |
-| `KISA-2026:U-45` | 메일 서비스 버전 점검 (상) | 점검불가(수동) — 사용 중인 MTA와 버전(postfix `mail_version`, sendmail.cf `DZ`, `exim -bV`). 알려진 취약 버전은 Package Vulnerability. MTA 없으면 해당없음 | - |
-| `KISA-2026:U-46` | 일반 사용자의 메일 서비스 실행 방지 (상) | sendmail `PrivacyOptions`에 `restrictqrun`, postfix `postsuper`·exim `exiqgrep`에 기타 실행 권한 없음 | - |
-| `KISA-2026:U-47` | 스팸 메일 릴레이 제한 (상) | postfix relay·recipient restrictions에 `reject_`/`defer_unauth_destination`, sendmail `promiscuous_relay` 없음. exim은 점검불가(수동) | - |
-| `KISA-2026:U-48` | expn, vrfy 명령어 제한 (중) | postfix `disable_vrfy_command = yes`, sendmail `noexpn`+`novrfy` 또는 `goaway`. exim은 점검불가(수동) | - |
-| `KISA-2026:U-49` | DNS 보안 버전 패치 (상) | 점검불가(수동) — `named -v`. named 없으면 해당없음 | - |
-| `KISA-2026:U-50` | DNS ZoneTransfer 설정 (상) | named 설정(+include 1단계)에 `allow-transfer`가 있고 `any`가 아님 | - |
-| `KISA-2026:U-51` | DNS 서비스의 취약한 동적 업데이트 설정 금지 (중) | `allow-update`가 없거나 `any`가 아님 | - |
-| `KISA-2026:U-52` | Telnet 서비스 비활성화 (중) | telnet 서비스·`telnet.socket`·23/tcp 없음 | - |
-| `KISA-2026:U-53` | FTP 서비스 정보 노출 제한 (하) | vsftpd `ftpd_banner` 지정, proftpd `ServerIdent` 제한. pure-ftpd는 점검불가(수동). FTP 없으면 해당없음 | - |
-| `KISA-2026:U-54` | 암호화되지 않는 FTP 서비스 비활성화 (중) | FTP 데몬·21/tcp 없음, 또는 vsftpd `ssl_enable=YES`이고 SSL 강제를 끄지 않음 | - |
-| `KISA-2026:U-55` | FTP 계정 shell 제한 (중) | `ftp` 계정 셸이 nologin/false. 계정 없으면 해당없음 | - |
-| `KISA-2026:U-56` | FTP 서비스 접근 제어 설정 (하) | TCP Wrapper에 FTP 데몬(또는 ALL) 항목, proftpd `<Limit LOGIN>`. FTP 없으면 해당없음 | - |
-| `KISA-2026:U-57` | Ftpusers 파일 설정 (중) | `ftpusers`·vsftpd `user_list`에 root, proftpd `RootLogin on` 아님. FTP 없으면 해당없음 | - |
-| `KISA-2026:U-58` | 불필요한 SNMP 서비스 구동 점검 (중) | snmpd 없음. 필요하면 예외 레지스터 | - |
-| `KISA-2026:U-59` | 안전한 SNMP 버전 사용 (상) | snmpd.conf에 v1/v2c(`rocommunity`·`rwcommunity`·`com2sec`) 없음. snmpd 없으면 해당없음 | - |
-| `KISA-2026:U-60` | SNMP Community String 복잡성 설정 (중) | 모든 community가 public·private 아니고 영문+숫자 10자 이상 또는 영문+숫자+특수 8자 이상(값 비노출). v3 전용은 점검불가(수동) | - |
-| `KISA-2026:U-61` | SNMP Access Control 설정 (상) | community 항목마다 source가 default가 아님. v3 전용은 점검불가(수동) | - |
-| `KISA-2026:U-62` | 로그인 시 경고 메시지 설정 (하) | `/etc/motd` 또는 `/etc/issue`에 OS 이름·escape 외 문구가 있고, sshd `Banner` 지정, telnet 사용 시 `/etc/issue.net` | 1.7.1~1.7.3, 5.1.5 |
-| `KISA-2026:U-63` | sudo 명령어 접근 관리 (중) | `/etc/sudoers` root·640 이하. 없으면 해당없음 | - |
-| `KISA-2026:U-64` | 주기적 보안 패치 및 벤더 권고사항 적용 (상) | 점검불가(수동) — OS·커널을 증적으로. 미적용 보안 패치는 같은 보고서의 Package Vulnerability가 판정 | - |
-| `KISA-2026:U-65` | NTP 및 시각 동기화 설정 (중) | chronyd·ntpd가 돌고 `server`/`pool` 지정, 또는 systemd-timesyncd active | 2.3.1 |
-| `KISA-2026:U-66` | 정책에 따른 시스템 로깅 설정 (중) | rsyslogd·syslog-ng·syslogd가 돌고 auth/authpriv 규칙이 있음(로그 정책은 ADR-0006 Host Agents) | - |
-| `KISA-2026:U-67` | 로그 디렉터리 소유자 및 권한 설정 (중) | `/var/log` 바로 아래 파일이 root 소유·644 이하 | 6.2.4.1 |
 
 OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `rockylinux:8`, `rockylinux:9`, `ubuntu:22.04`, `debian:13` 컨테이너에서 돌려 67개 항목 모두 판정(양호·취약·해당없음·점검불가(수동))이 나오는 것을 확인했다. Rocky 10은 로컬 이미지가 없어 컨테이너로 돌리지 않았다(같은 POSIX sh·coreutils 경로).
 
@@ -488,6 +416,21 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | `AUD-201` | `Add KISA-2026 verdicts to the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_kisa_result` 필터 |
 
 검증: pytest `tests/test_host_audit_kisa_capability.py`(#432: file capability 세 경우 — 기본만 있음·기본 밖 항목 있음·`getcap` 없음/실행 불가, SUID 판정 불변, 옛·현재 libcap 표기, 길이 제한, 역할 변수 주입)와 `tests/test_host_audit_kisa.py`(판정 5종, 예외 유효·만료·승인 대기·범위, 보고서 섹션·부록, 가짜 루트에서의 스크립트 판정과 해시 미노출, #122: U-01~U-67 카탈로그·스크립트 1:1, 프로비저닝된 서버·취약 서버 가짜 루트의 항목별 판정, postfix 메일 항목, U-28 Docker 구간과 예외 레지스터, SNMP community 비노출, dash·`bash --posix`·bash 결과 일치). 프로세스·unit·listening 포트는 `ps`·`systemctl`·`ss` 스텁으로 고정해 pytest가 실행 머신에 좌우되지 않는다. molecule Fast `VERIFY-AUD-200`·`VERIFY-AUD-201`(점검 실행·판정 기록). 읽기 전용은 `VERIFY-AUD-010` 스냅샷 사이에서 함께 확인된다.
+
+### 10.5 조치방법과 조치 영향도 (Spec #488 / Ticket-2, #490)
+
+보고서 본문의 "양호 외 항목" 표가 항목마다 무엇을 어떻게 고치는지, 고치면 서비스가 얼마나 흔들리는지를 보여 준다. 이 단계에서 호스트는 여전히 바꾸지 않고(읽기 전용), 조치도 이행 추적도 하지 않는다.
+
+- **YAML 필드(항목마다 필수)**: `check`(우리 probe가 보는 것 한 줄), `remediation.summary`(OS 공통 조치 요약, 한 줄 300자 이하, 앞뒤 공백 없음 — 본문 표가 한 줄로 싣는다), `remediation.steps.rhel`·`steps.debian`(계열에 따라 명령·파일이 실제로 다른 항목만, 키는 이 둘뿐), `remediation_impact`·`remediation_effort`(`level` 1~3과 `reason`), `guide_page`, `purpose`·`threat`(각 1~2문장). 가이드 원문은 옮기지 않고 우리 말로 요약하며 설정값·경로 같은 사실만 그대로 둔다. `tests/test_host_audit_kisa_remediation.py`가 67개 전부의 필드와 level 범위, steps 키, 인프라 상세(주소·관리번호·메일)가 없음을 검사한다.
+- **조치 영향도(Remediation Impact)**: 조치가 호스트에서 돌고 있는 서비스를 흔드는 정도. 1은 가이드가 영향 없음으로 본 경우(설정·권한 변경 위주이며, 서비스 재기동이 따르는 항목도 있어 구체적인 부수 작업은 항목의 reason을 따른다), 2는 재기동·재로그인이나 특정 연동이 조건부로 영향받는 경우, 3은 접속 불가·서비스 중단·로그인 불능 가능성이 있는 경우다. 가이드 "조치 시 영향"이 "영향 없음"류(정형문 50개와 조건부 U-05·U-50)인 52개는 1이고, 가이드가 개별로 서술한 15개(U-02, 03, 04, 06, 10, 12, 19, 23, 28, 41, 45, 49, 56, 57, 66)만 그 문장을 근거로 2 또는 3이다. 판정 위험(중요도)과 별개다.
+- **조치 난이도(Remediation Effort)**: 고치기 어려운 정도. 1은 설정 한 곳이나 명령 한두 개, 2는 여러 파일이나 대상 목록을 하나씩 처리하거나 재기동이 따르는 경우, 3은 패키지 교체·정책 수립·협의·판단이 필요한 대량 검토다. 조치 방법·사례를 근거로 67개 모두 매긴다.
+- **값의 근거와 확정**: level과 reason은 2026판 가이드 PDF와 조치 방법을 근거로 쓴 값이며 확정은 PR 검토로 한다(바꿀 때는 reason도 함께 검토한다). 영향도 1인 52개는 가이드 서술에 따라 1로 고정하고, 실제 우려가 있으면(예: U-37 일반 사용자 실행 차단, U-64 서비스 영향 파악) reason에 적어 두며 올릴지는 PR에서 정한다. 이 고정 때문에 reason에 우려가 적힌 1이 정렬에서는 위로 올 수 있다. 개별 서술 15개에는 U-04도 들어 있어 Linux만 보면 영향이 없어도 가이드의 HP-UX 서술을 근거로 2다. 영향도 2·3 항목과 난이도 분포는 PR 본문 표로 보여 준 뒤 사용자가 확정한다.
+- **조치 문구와 probe의 범위**: `remediation`은 가이드의 조치 방법이고 `check`는 우리 probe가 보는 범위라 둘이 완전히 겹치지는 않는다(예: 가이드는 xinetd.d·systemd 설정 파일까지 다루고 U-20 probe는 두 파일만 판정한다). 조치 뒤 판정은 다음 실행에서 probe가 확인한다. 알려진 차이: U-57의 vsftpd 조치 문구는 `userlist_deny=yes`일 때만 user_list가 차단 목록이라고 적지만 probe는 `userlist_deny`를 보지 않는다(probe 쪽 보강은 이 티켓 범위 밖이다).
+- **파생 값(저장하지 않음)**: 위험도 = 가이드 중요도(상 3, 중 2, 하 1), 우선순위 = 상 1, 중 2, 하 3, 시급성 = 우선순위 1 단기, 2 중기, 3 장기(기한은 정하지 않는다). 판정·호스트와 무관하게 항목마다 같은 값이다. `host_audit_kisa.py`의 `risk_level`·`priority_of`·`urgency_of`·`remediation_view`가 계산한다.
+- **본문 표**: "양호 외 항목" 표에 중요도 옆 `조치 영향도` 열(숫자)과 판단 기준 칸 아래 `조치: <remediation.summary>` 한 줄이 붙는다. 호스트별 부록(`appendix_config_vulnerability`)에는 조치 데이터를 싣지 않는다(부록 행은 기본 열만 쓴다). 표 아래에 조치 영향도 설명이 실리고, 가이드 출처 문장("조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 바탕으로 요약함")은 양호 외 항목이 없어도 보고서 맨 끝(검토 및 결재 뒤)에 한 번 실린다.
+- **정렬**: 본문 표는 우선순위(1이 먼저) → 조치 영향도(낮은 것 먼저) → 조치 난이도(쉬운 것 먼저) → 판정(취약 → 점검불가(수동) → 예외(승인)) → 항목 코드 순이다. 앞의 세 키가 우선순위 규칙이고, 세 키가 같은 행끼리(다른 항목 포함)는 판정, 그다음 항목 코드가 순서를 정한다. 이전의 판정 우선 정렬은 이 규칙으로 바뀌었다(Spec #488 결정: 표 정렬은 우선순위 규칙을 따르며 판정은 정렬 키가 아니라 열로 보인다. 그래서 예외(승인) 행이 같은 우선순위의 취약 행보다 위에 올 수 있다). 정렬은 `order_findings`가 한다.
+- **호스트별 JSON 불변**: 조치 데이터는 보고서 모델을 만들 때 YAML에서 붙인다. `config_vulnerability`의 `edition`·`status`·`reason`·`results[].{code,result,verdict,evidence,exception}`와 레코드 `schema_version` 2는 바뀌지 않는다(Audit Baseline 비교 호환).
+- **범위**: 항목 단위 `부록 N+1. 조치 안내`와 호스트별 Remediation Plan xlsx는 Spec #488의 다른 티켓이며 이 절은 다루지 않는다. HTML의 조치 요약·조치 영향도는 필터·템플릿 변경이라 SPEC-ID가 없다.
 
 ## 11. 보관과 Audit Baseline (#125)
 
