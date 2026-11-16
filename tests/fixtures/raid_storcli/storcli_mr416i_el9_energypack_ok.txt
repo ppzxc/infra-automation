@@ -1,0 +1,17 @@
+CLI Version = 007.3604.0000.0000 Dec 22, 2025
+Operating system = Linux 5.14.0-362.8.1.el9_3.x86_64
+Controller = 0
+Status = Success
+Description = None
+
+
+Energy Pack Status :
+==================
+
+-----------------
+Property Value   
+-----------------
+State    Optimal 
+-----------------
+
+
