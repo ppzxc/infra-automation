@@ -296,6 +296,13 @@ DECLARED_MAX_LEN = 500
 INVALID_SHOWN_LEN = 20
 
 
+try:
+    from ansible.utils.unsafe_proxy import wrap_var as _unsafe
+except ImportError:  # pragma: no cover - plain Python without ansible
+    def _unsafe(value):
+        return value
+
+
 def _cap(text, limit):
     return text if len(text) <= limit else text[:limit - 1] + '…'
 
@@ -310,8 +317,9 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
     longer than 500 characters ends with '…' (far above a description with its trailing ``[그룹자산명]``;
     the cap only keeps a pasted blob out of the record). Anything that is not a string (dict, list, bool, number) is not text: the value is
     empty and the key is listed in ``malformed`` so the report shows '잘못된 값' instead of '미지정'.
-    No template escaping: ansible-core 2.19+ never templates data that came from a lookup or a filter
-    (untrusted by default); ``tests/test_host_audit_inventory.py`` proves it with a real run.
+    No template escaping: the strings are marked unsafe (needed before ansible-core 2.19; from 2.19 data
+    from a lookup or a filter is untrusted by default); ``tests/test_host_audit_inventory.py`` proves
+    with a real run that template text stays text.
     """
     host_kv = host_kv if isinstance(host_kv, dict) and lookup_ok else {}
     decl = {}
@@ -321,7 +329,8 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
         if value is not None and not isinstance(value, str):
             malformed.append(key)
             value = ''
-        decl[key] = _cap(value.strip(), DECLARED_MAX_LEN) if isinstance(value, str) else ''
+        # KV text is data, never a template: ansible-core < 2.19 needs the explicit unsafe mark (2.19+ is a no-op).
+        decl[key] = _unsafe(_cap(value.strip(), DECLARED_MAX_LEN)) if isinstance(value, str) else ''
     decl['lookup'] = 'ok' if lookup_ok else 'failed'
     if malformed:
         decl['malformed'] = malformed
