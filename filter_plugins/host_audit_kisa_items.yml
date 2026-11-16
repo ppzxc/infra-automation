@@ -12,22 +12,22 @@ U-02:
   title: 비밀번호 관리정책 설정
   severity: 상
   category: 계정 관리
-  criteria: 비밀번호 관리 정책(복잡성·최소 길이·최대/최소 사용기간)이 설정된 경우 양호
+  criteria: 비밀번호 관리 정책이 설정된 경우 양호
   cis: 5.3.3.2.2, 5.3.3.2.3, 5.4.1.1, 5.4.1.2
 U-03:
   title: 계정 잠금 임계값 설정
   severity: 상
   category: 계정 관리
-  criteria: 계정 잠금 임계값이 10회 이하로 설정된 경우 양호
+  criteria: 계정 잠금 임계값이 10회 이하의 값으로 설정된 경우 양호
   cis: 5.3.3.1.1
 U-04:
   title: 비밀번호 파일 보호
   severity: 상
   category: 계정 관리
-  criteria: 쉐도우 비밀번호를 사용하거나 비밀번호를 암호화하여 저장하는 경우 양호
+  criteria: 쉐도우 비밀번호를 사용하거나, 비밀번호를 암호화하여 저장하는 경우 양호
   cis: 7.2.1
 U-05:
-  title: root 이외의 UID가 '0' 금지
+  title: root 이외의 UID가 ‘0’ 금지
   severity: 상
   category: 계정 관리
   criteria: root 계정과 동일한 UID를 갖는 계정이 존재하지 않는 경우 양호
@@ -42,19 +42,19 @@ U-07:
   title: 불필요한 계정 제거
   severity: 하
   category: 계정 관리
-  criteria: 불필요한 계정이 존재하지 않는 경우 양호 (로그인 가능 계정 목록으로 수동 판정)
+  criteria: 불필요한 계정이 존재하지 않는 경우 양호
   cis: ''
 U-08:
   title: 관리자 그룹에 최소한의 계정 포함
   severity: 중
   category: 계정 관리
-  criteria: 관리자 그룹(root, GID 0)에 불필요한 계정이 없는 경우 양호 (구성원 목록으로 수동 판정)
+  criteria: 관리자 그룹에 불필요한 계정이 등록되어 있지 않은 경우 양호
   cis: 5.4.2.2, 5.4.2.3
 U-09:
   title: 계정이 존재하지 않는 GID 금지
   severity: 하
   category: 계정 관리
-  criteria: 계정의 기본 GID가 모두 /etc/group에 존재하는 경우 양호
+  criteria: 시스템 관리나 운용에 불필요한 그룹이 제거된 경우 양호
   cis: 7.2.3
 U-10:
   title: 동일한 UID 금지
@@ -66,7 +66,7 @@ U-11:
   title: 사용자 shell 점검
   severity: 하
   category: 계정 관리
-  criteria: 로그인이 불필요한 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호
+  criteria: 로그인이 필요하지 않은 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호
   cis: 5.4.2.7
 U-12:
   title: 세션 종료 시간 설정
@@ -78,103 +78,103 @@ U-13:
   title: 안전한 비밀번호 암호화 알고리즘 사용
   severity: 중
   category: 계정 관리
-  criteria: SHA-2 이상(SHA-256, SHA-512, yescrypt)의 안전한 알고리즘을 사용하는 경우 양호
+  criteria: SHA-2 이상의 안전한 비밀번호 암호화 알고리즘을 사용하는 경우 양호
   cis: 5.3.3.4.3, 5.4.1.4
 U-14:
   title: root 홈, 패스 디렉터리 권한 및 패스 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: PATH 환경변수에 "."이 맨 앞이나 중간에 포함되지 않은 경우 양호 (전역·root 프로필)
+  criteria: PATH 환경변수에 “.” 이 맨 앞이나 중간에 포함되지 않은 경우 양호
   cis: ''
 U-15:
   title: 파일 및 디렉터리 소유자 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: 소유자가 존재하지 않는 파일 및 디렉터리가 없는 경우 양호 (로컬 디스크 파일시스템)
+  criteria: 소유자가 존재하지 않는 파일 및 디렉터리가 존재하지 않는 경우 양호
   cis: 7.1.12
 U-16:
   title: /etc/passwd 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: /etc/passwd 소유자 root, 권한 644 이하인 경우 양호
+  criteria: /etc/passwd 파일의 소유자가 root이고, 권한이 644 이하인 경우 양호
   cis: 7.1.1
 U-17:
   title: 시스템 시작 스크립트 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: 시작 스크립트 소유자가 root이고 일반 사용자 쓰기 권한이 없는 경우 양호 (init.d, /etc/systemd/system)
+  criteria: 시스템 시작 스크립트 파일의 소유자가 root이고, 일반 사용자의 쓰기 권한이 제거된 경우 양호
   cis: ''
 U-18:
   title: /etc/shadow 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: /etc/shadow 소유자 root, 권한 400 이하인 경우 양호
+  criteria: /etc/shadow 파일의 소유자가 root이고, 권한이 400 이하인 경우 양호
   cis: 7.1.5
 U-19:
   title: /etc/hosts 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: /etc/hosts 소유자 root, 권한 644 이하인 경우 양호
+  criteria: /etc/hosts 파일의 소유자가 root이고, 권한이 644 이하인 경우 양호
   cis: ''
 U-20:
   title: /etc/(x)inetd.conf 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: /etc/(x)inetd.conf 소유자 root, 권한 600 이하인 경우 양호 (없으면 해당없음)
+  criteria: /etc/(x)inetd.conf 파일의 소유자가 root이고, 권한이 600 이하인 경우 양호
   cis: ''
 U-21:
   title: /etc/(r)syslog.conf 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: /etc/(r)syslog.conf 소유자 root(bin, sys), 권한 640 이하인 경우 양호
+  criteria: /etc/(r)syslog.conf 파일의 소유자가 root(또는 bin, sys)이고, 권한이 640 이하인 경우 양호
   cis: ''
 U-22:
   title: /etc/services 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: /etc/services 소유자 root(bin, sys), 권한 644 이하인 경우 양호
+  criteria: /etc/services 파일의 소유자가 root(또는 bin, sys)이고, 권한이 644 이하인 경우 양호
   cis: ''
 U-23:
   title: SUID, SGID, Sticky bit 설정 파일 점검
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: 주요 실행 파일에 불필요한 SUID/SGID가 없는 경우 양호 (목록으로 수동 판정, file capability 목록은 증적에 덧붙임)
+  criteria: 주요 실행 파일의 권한에 SUID와 SGID에 대한 설정이 부여되어 있지 않은 경우 양호
   cis: 7.1.13
 U-24:
   title: 사용자, 시스템 환경변수 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: 환경변수 파일 소유자가 root 또는 해당 계정이고 root·소유자 외 쓰기 권한이 없는 경우 양호
+  criteria: 홈 디렉터리 환경변수 파일 소유자가 root 또는 해당 계정으로 지정되어 있고, 홈 디렉터리 환경변수 파일에 root 계정과 소유자만 쓰기 권한이 부여된 경우 양호
   cis: 7.2.10
 U-25:
   title: world writable 파일 점검
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: world writable 파일이 없거나 설정 이유를 인지하고 있는 경우 양호 (있으면 목록으로 수동 판정)
+  criteria: world writable 파일이 존재하지 않거나, 존재 시 설정 이유를 인지하고 있는 경우 양호
   cis: 7.1.11
 U-26:
   title: /dev에 존재하지 않는 device 파일 점검
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: /dev에 major·minor 번호가 없는 device 파일이 없는 경우 양호
+  criteria: /dev 디렉터리에 대한 파일 점검 후 존재하지 않는 device 파일을 제거한 경우 양호
   cis: ''
 U-27:
   title: $HOME/.rhosts, hosts.equiv 사용 금지
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: r-command 미사용, 또는 사용 시 소유자 root/해당 계정·권한 600 이하·"+" 설정 없음인 경우 양호
+  criteria: rlogin, rsh, rexec 서비스를 사용하지 않거나, 사용 시 /etc/hosts.equiv·$HOME/.rhosts의 소유자가 root 또는 해당 계정이고 권한이 600 이하이며 "+" 설정이 없는 경우 양호
   cis: ''
 U-28:
   title: 접속 IP 및 포트 제한
   severity: 상
   category: 파일 및 디렉토리 관리
-  criteria: 접속을 허용할 특정 호스트에 대한 IP 주소 및 포트 제한을 설정한 경우 양호 (Docker 구간은 수동)
+  criteria: 접속을 허용할 특정 호스트에 대한 IP주소 및 포트 제한을 설정한 경우 양호
   cis: 4.1.2
 U-29:
   title: hosts.lpd 파일 소유자 및 권한 설정
   severity: 하
   category: 파일 및 디렉토리 관리
-  criteria: hosts.lpd 파일이 없거나, 소유자 root·권한 600 이하인 경우 양호
+  criteria: /etc/hosts.lpd 파일이 존재하지 않거나, 불가피하게 사용 시 /etc/hosts.lpd 파일의 소유자가 root이고, 권한이 600 이하인 경우 양호
   cis: ''
 U-30:
   title: UMASK 설정 관리
@@ -186,19 +186,19 @@ U-31:
   title: 홈디렉토리 소유자 및 권한 설정
   severity: 중
   category: 파일 및 디렉토리 관리
-  criteria: 홈 디렉터리 소유자가 해당 계정이고 타 사용자 쓰기 권한이 없는 경우 양호
+  criteria: 홈 디렉토리 소유자가 해당 계정이고, 타 사용자 쓰기 권한이 제거된 경우 양호
   cis: 7.2.9
 U-32:
   title: 홈 디렉토리로 지정한 디렉토리의 존재 관리
   severity: 중
   category: 파일 및 디렉토리 관리
-  criteria: 홈 디렉터리가 존재하지 않는 계정이 발견되지 않는 경우 양호
+  criteria: 홈 디렉토리가 존재하지 않는 계정이 발견되지 않는 경우 양호
   cis: 7.2.9
 U-33:
   title: 숨겨진 파일 및 디렉토리 검색 및 제거
   severity: 하
   category: 파일 및 디렉토리 관리
-  criteria: 의심스러운 숨겨진 파일 및 디렉터리를 제거한 경우 양호 (목록으로 수동 판정)
+  criteria: 불필요하거나 의심스러운 숨겨진 파일 및 디렉토리를 제거한 경우 양호
   cis: ''
 U-34:
   title: Finger 서비스 비활성화
@@ -210,25 +210,25 @@ U-35:
   title: 공유 서비스에 대한 익명 접근 제한 설정
   severity: 상
   category: 서비스 관리
-  criteria: 공유 서비스(FTP·NFS·Samba)를 쓰지 않거나 익명 접근을 제한한 경우 양호
+  criteria: 공유 서비스에 대해 익명 접근을 제한한 경우 양호
   cis: ''
 U-36:
   title: r 계열 서비스 비활성화
   severity: 상
   category: 서비스 관리
-  criteria: r 계열(rlogin, rsh, rexec) 서비스가 비활성화된 경우 양호
+  criteria: 불필요한 r 계열 서비스가 비활성화된 경우 양호
   cis: ''
 U-37:
   title: crontab 설정파일 권한 설정 미흡
   severity: 상
   category: 서비스 관리
-  criteria: crontab·at 명령 권한 750 이하, cron·at 관련 파일 소유자 root·권한 640 이하인 경우 양호
+  criteria: crontab 및 at 명령어에 일반 사용자 실행 권한이 제거되어 있으며, cron 및 at 관련 파일 권한이 640 이하인 경우 양호
   cis: 2.4.1.2~2.4.1.8, 2.4.2.1
 U-38:
   title: DoS 공격에 취약한 서비스 비활성화
   severity: 상
   category: 서비스 관리
-  criteria: echo, discard, daytime, chargen 서비스가 비활성화된 경우 양호
+  criteria: DoS 공격에 취약한 서비스가 비활성화된 경우 양호
   cis: ''
 U-39:
   title: 불필요한 NFS 서비스 비활성화
@@ -240,25 +240,25 @@ U-40:
   title: NFS 접근 통제
   severity: 상
   category: 서비스 관리
-  criteria: NFS 공유에 접근 통제가 설정되어 있고 설정 파일 권한이 644 이하인 경우 양호 (NFS 미사용 시 해당없음)
+  criteria: 접근 통제가 설정되어 있으며 NFS 설정 파일 접근 권한이 644 이하인 경우 양호
   cis: ''
 U-41:
   title: 불필요한 automountd 제거
   severity: 상
   category: 서비스 관리
-  criteria: automountd(autofs) 서비스가 비활성화된 경우 양호
+  criteria: automountd 서비스가 비활성화된 경우 양호
   cis: ''
 U-42:
   title: 불필요한 RPC 서비스 비활성화
   severity: 상
   category: 서비스 관리
-  criteria: 가이드가 열거한 불필요한 RPC 서비스가 비활성화된 경우 양호
+  criteria: 불필요한 RPC 서비스가 비활성화된 경우 양호
   cis: ''
 U-43:
   title: NIS, NIS+ 점검
   severity: 상
   category: 서비스 관리
-  criteria: NIS 서비스가 비활성화되어 있거나 불가피 시 NIS+를 사용하는 경우 양호
+  criteria: NIS 서비스가 비활성화되어 있거나, 불가피하게 사용 시 NIS+ 서비스를 사용하는 경우 양호
   cis: ''
 U-44:
   title: tftp, talk 서비스 비활성화
@@ -270,55 +270,55 @@ U-45:
   title: 메일 서비스 버전 점검
   severity: 상
   category: 서비스 관리
-  criteria: 메일 서비스 버전이 최신인 경우 양호 (버전으로 수동 판정, 미사용 시 해당없음)
+  criteria: 메일 서비스 버전이 최신 버전인 경우 양호
   cis: ''
 U-46:
   title: 일반 사용자의 메일 서비스 실행 방지
   severity: 상
   category: 서비스 관리
-  criteria: 일반 사용자의 메일 큐 조작(q 옵션) 실행을 막은 경우 양호 (미사용 시 해당없음)
+  criteria: 일반 사용자의 메일 서비스 실행 방지가 설정된 경우 양호
   cis: ''
 U-47:
   title: 스팸 메일 릴레이 제한
   severity: 상
   category: 서비스 관리
-  criteria: 메일 릴레이 제한이 설정된 경우 양호 (미사용 시 해당없음)
+  criteria: 릴레이 제한이 설정된 경우 양호
   cis: ''
 U-48:
   title: expn, vrfy 명령어 제한
   severity: 중
   category: 서비스 관리
-  criteria: noexpn, novrfy(또는 동등) 설정이 적용된 경우 양호 (미사용 시 해당없음)
+  criteria: noexpn, novrfy 옵션이 설정된 경우 양호
   cis: ''
 U-49:
   title: DNS 보안 버전 패치
   severity: 상
   category: 서비스 관리
-  criteria: DNS 서비스를 주기적으로 패치 관리하는 경우 양호 (버전으로 수동 판정, 미사용 시 해당없음)
+  criteria: 주기적으로 패치를 관리하는 경우 양호
   cis: ''
 U-50:
   title: DNS ZoneTransfer 설정
   severity: 상
   category: 서비스 관리
-  criteria: Zone Transfer를 허가된 사용자에게만 허용한 경우 양호 (미사용 시 해당없음)
+  criteria: Zone Transfer를 허가된 사용자에게만 허용한 경우 양호
   cis: ''
 U-51:
   title: DNS 서비스의 취약한 동적 업데이트 설정 금지
   severity: 중
   category: 서비스 관리
-  criteria: 동적 업데이트를 쓰지 않거나 접근 통제를 적용한 경우 양호 (미사용 시 해당없음)
+  criteria: DNS 서비스의 동적 업데이트 기능이 비활성화되었거나, 활성화 시 적절한 접근통제를 수행하고 있는 경우 양호
   cis: ''
 U-52:
   title: Telnet 서비스 비활성화
   severity: 중
   category: 서비스 관리
-  criteria: Telnet 서비스를 사용하지 않는 경우 양호
+  criteria: 원격 접속 시 Telnet 프로토콜을 비활성화하고 있는 경우 양호
   cis: ''
 U-53:
   title: FTP 서비스 정보 노출 제한
   severity: 하
   category: 서비스 관리
-  criteria: FTP 접속 배너에 노출되는 정보가 없는 경우 양호 (미사용 시 해당없음)
+  criteria: FTP 접속 배너에 노출되는 정보가 없는 경우 양호
   cis: ''
 U-54:
   title: 암호화되지 않는 FTP 서비스 비활성화
@@ -330,19 +330,19 @@ U-55:
   title: FTP 계정 shell 제한
   severity: 중
   category: 서비스 관리
-  criteria: ftp 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호 (계정 없으면 해당없음)
+  criteria: FTP 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호
   cis: ''
 U-56:
   title: FTP 서비스 접근 제어 설정
   severity: 하
   category: 서비스 관리
-  criteria: 특정 IP·호스트만 FTP에 접속하도록 접근 제어를 설정한 경우 양호 (미사용 시 해당없음)
+  criteria: 특정 IP주소 또는 호스트에서만 FTP 서버에 접속할 수 있도록 접근 제어 설정을 적용한 경우 양호
   cis: ''
 U-57:
   title: Ftpusers 파일 설정
   severity: 중
   category: 서비스 관리
-  criteria: root 계정의 FTP 접속을 차단한 경우 양호 (미사용 시 해당없음)
+  criteria: root 계정 접속을 차단한 경우 양호
   cis: ''
 U-58:
   title: 불필요한 SNMP 서비스 구동 점검
@@ -354,37 +354,37 @@ U-59:
   title: 안전한 SNMP 버전 사용
   severity: 상
   category: 서비스 관리
-  criteria: SNMP v3 이상을 사용하는 경우 양호 (미사용 시 해당없음)
+  criteria: SNMP 서비스를 v3 이상으로 사용하는 경우 양호
   cis: ''
 U-60:
   title: SNMP Community String 복잡성 설정
   severity: 중
   category: 서비스 관리
-  criteria: public·private가 아니고 영문+숫자 10자 이상 또는 영문+숫자+특수문자 8자 이상인 경우 양호
+  criteria: SNMP Community String이 기본값 "public", "private"이 아닌 영문자·숫자 포함 10자리 이상 또는 영문자·숫자·특수문자 포함 8자리 이상인 경우 양호
   cis: ''
 U-61:
   title: SNMP Access Control 설정
   severity: 상
   category: 서비스 관리
-  criteria: SNMP 접근 허용 대상을 제한한 경우 양호 (미사용 시 해당없음)
+  criteria: SNMP 서비스에 접근 제어 설정이 되어 있는 경우 양호
   cis: ''
 U-62:
   title: 로그인 시 경고 메시지 설정
   severity: 하
   category: 서비스 관리
-  criteria: 서버 및 사용 중인 원격 서비스에 로그온 경고 메시지가 설정된 경우 양호
+  criteria: 서버 및 Telnet, FTP, SMTP, DNS 서비스에 로그온 시 경고 메시지가 설정된 경우 양호
   cis: 1.7.1~1.7.3, 5.1.5
 U-63:
   title: sudo 명령어 접근 관리
   severity: 중
   category: 서비스 관리
-  criteria: /etc/sudoers 소유자 root, 권한 640 이하인 경우 양호 (없으면 해당없음)
+  criteria: /etc/sudoers 파일 소유자가 root이고, 파일 권한이 640인 경우 양호
   cis: ''
 U-64:
   title: 주기적 보안 패치 및 벤더 권고사항 적용
   severity: 상
   category: 패치 관리
-  criteria: 패치 적용 정책을 수립하여 주기적으로 관리하는 경우 양호 (수동, 미적용 패치는 Package Vulnerability)
+  criteria: 패치 적용 정책을 수립하여 주기적으로 패치 관리를 하고 있으며, 패치 관련 내용을 확인하고 적용하였을 경우 양호
   cis: ''
 U-65:
   title: NTP 및 시각 동기화 설정
@@ -396,11 +396,11 @@ U-66:
   title: 정책에 따른 시스템 로깅 설정
   severity: 중
   category: 로그 관리
-  criteria: 로그 기록 정책에 따라 로그를 남기는 경우 양호 (syslog 데몬 동작·인증 로그 규칙)
+  criteria: 로그 기록 정책이 보안 정책에 따라 설정되어 수립되어 있으며, 로그를 남기고 있는 경우 양호
   cis: ''
 U-67:
   title: 로그 디렉터리 소유자 및 권한 설정
   severity: 중
   category: 로그 관리
-  criteria: 로그 디렉터리 내 로그 파일의 소유자가 root이고 권한이 644 이하인 경우 양호
+  criteria: 디렉터리 내 로그 파일의 소유자가 root이고, 권한이 644 이하인 경우 양호
   cis: 6.2.4.1
