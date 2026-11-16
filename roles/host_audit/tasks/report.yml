@@ -127,6 +127,14 @@
           {{ _host_audit_xlsx_write.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
              | map(attribute='item') | list }}
 
+    # 호스트별 xlsx 전부를 zip 하나로 묶는다. 메일의 두 번째 첨부이자 보고서와 함께 보관되는 파일이다(xlsx/ 아래, 보관은
+    # AUD-512~514가 한다). 같은 xlsx면 같은 바이트다(표준 라이브러리 writer). 쓰기에 실패한 호스트의 xlsx는 빠지고, 그 실패는
+    # 맨 끝 판정이 실행을 실패로 끝낸다. zip을 못 만들면 요약에 넣을 해시가 없으므로 여기서 멈춘다(정리가 디렉터리를 남긴다).
+    - name: "[AUD-026] Pack every Remediation Plan xlsx into one zip"
+      host_audit_zip_write:
+        src_dir: "{{ host_audit_run.output_dir }}/xlsx"
+        dest: "{{ host_audit_run.output_dir }}/xlsx/{{ host_audit_run.run_id | host_audit_remediation_zip_name }}"
+
     - name: "[AUD-611] Compute the SHA-256 of the report to attach"
       ansible.builtin.stat:
         path: "{{ host_audit_run.output_dir }}/report.html"
@@ -134,7 +142,14 @@
         get_mime: false
       register: _host_audit_report_stat
 
-    # 메일 요약은 실행과 함께 보관해 재발송(resend.yml)이 같은 본문·같은 첨부를 다시 보내게 한다. 주소는 넣지 않는다.
+    - name: "[AUD-615] Compute the SHA-256 of the xlsx zip to attach"
+      ansible.builtin.stat:
+        path: "{{ host_audit_run.output_dir }}/xlsx/{{ host_audit_run.run_id | host_audit_remediation_zip_name }}"
+        checksum_algorithm: sha256
+        get_mime: false
+      register: _host_audit_xlsx_zip_stat
+
+    # 메일 요약은 실행과 함께 보관해 재발송(resend.yml)이 같은 본문·같은 첨부(보고서·xlsx zip)를 다시 보내게 한다. 주소는 넣지 않는다.
     - name: "[AUD-612] Build the mail summary of this run"
       ansible.builtin.set_fact:
         host_audit_mail_doc: >-
@@ -144,7 +159,14 @@
                'file_name': host_audit_run.run_id | host_audit_mail_attachment_name,
                'archive': ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/'
                            ~ _host_audit_storage_prefix ~ 'report.html (3년 보관)') if _host_audit_storage_active | bool
-                          else ('러너 ' ~ host_audit_run.output_dir ~ '/report.html (보관 안 함)')}) }}
+                          else ('러너 ' ~ host_audit_run.output_dir ~ '/report.html (보관 안 함)')},
+               {'sha256': _host_audit_xlsx_zip_stat.stat.checksum,
+                'size': _host_audit_xlsx_zip_stat.stat.size,
+                'file_name': host_audit_run.run_id | host_audit_remediation_zip_name,
+                'archive': ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/'
+                            ~ _host_audit_storage_prefix ~ 'xlsx/' ~ (host_audit_run.run_id | host_audit_remediation_zip_name) ~ ' (3년 보관)')
+                           if _host_audit_storage_active | bool
+                           else ('러너 ' ~ host_audit_run.output_dir ~ '/xlsx/' ~ (host_audit_run.run_id | host_audit_remediation_zip_name) ~ ' (보관 안 함)')}) }}
 
     - name: "[AUD-613] Save the mail summary on the runner"
       ansible.builtin.copy:
@@ -166,6 +188,7 @@
              or ((_host_audit_storage_active | bool) and (_host_audit_storage_problem | default('보관 비활성') | length == 0)
                  and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0) }}
         _host_audit_mail_report_path: "{{ host_audit_run.output_dir }}/report.html"
+        _host_audit_mail_xlsx_path: "{{ host_audit_run.output_dir }}/xlsx/{{ host_audit_run.run_id | host_audit_remediation_zip_name }}"
 
     - name: Mail the report
       ansible.builtin.include_tasks: mail.yml

@@ -57,10 +57,22 @@ def _model(**meta_overrides):
     return host_audit_report_model([_record("ns0001"), _record("ns0002", "unreachable")], meta)
 
 
-def _summary(model=None):
-    return host_audit_mail_summary(model or _model(), {
+ZIP_SHA = "c" * 64
+ZIP_NAME = "host-audit-ha-20261031T220000Z-xlsx.zip"
+
+
+def _xlsx_zip(**override):
+    zip_info = {"sha256": ZIP_SHA.upper(), "size": 4321, "file_name": ZIP_NAME,
+                "archive": "RustFS host-audit/2026-11/ha-20261031T220000Z/xlsx/" + ZIP_NAME + " (3년 보관)"}
+    zip_info.update(override)
+    return zip_info
+
+
+def _summary(model=None, xlsx_zip=None):
+    args = [model or _model(), {
         "sha256": SHA.upper(), "size": 1234, "file_name": host_audit_mail_attachment_name("ha-20261031T220000Z"),
-        "archive": "RustFS host-audit/2026-11/ha-20261031T220000Z/report.html (3년 보관)"})
+        "archive": "RustFS host-audit/2026-11/ha-20261031T220000Z/report.html (3년 보관)"}]
+    return host_audit_mail_summary(*args, **({"xlsx_zip": xlsx_zip} if xlsx_zip is not None else {}))
 
 
 def _render(doc):
@@ -178,6 +190,23 @@ def test_body_is_tables_and_inline_styles_only_and_shows_hash_and_archive():
     assert len(html.encode("utf-8")) < 50 * 1024  # Gmail clips long bodies; the summary stays small
 
 
+def test_summary_carries_the_xlsx_zip_sha256_lowercased_and_the_body_shows_it():
+    doc = _summary(xlsx_zip=_xlsx_zip())
+    assert doc["xlsx_zip"] == {"file_name": ZIP_NAME, "sha256": ZIP_SHA, "size": 4321,
+                               "archive": "RustFS host-audit/2026-11/ha-20261031T220000Z/xlsx/" + ZIP_NAME + " (3년 보관)"}
+    assert doc["report"]["sha256"] == SHA  # the report hash stays where it was
+    html = _render(doc)
+    assert ZIP_SHA in html and ZIP_NAME in html and SHA in html
+    assert len(html.encode("utf-8")) < 50 * 1024
+    assert "@" not in json.dumps(doc, ensure_ascii=False)
+
+
+def test_summary_without_an_xlsx_zip_has_no_zip_line():
+    doc = _summary()
+    assert "xlsx_zip" not in doc
+    assert ZIP_NAME not in _render(doc)
+
+
 def test_body_escapes_model_text():
     doc = _summary()
     doc["lines"].append({"section": "<b>x</b>", "text": "<script>alert(1)</script>", "level": "crit"})
@@ -199,6 +228,17 @@ def test_resend_prefix_uses_the_report_time_zone_month_of_the_default_run_id():
 def test_resend_prefix_rejects_unsafe_or_unlocatable_ids(run_id, month):
     with pytest.raises(Exception):
         host_audit_mail_resend_prefix(run_id, month)
+
+
+def test_resend_keeps_the_archived_zip_record_and_points_it_at_the_archive():
+    kept = _summary(xlsx_zip=_xlsx_zip())
+    doc = host_audit_mail_resend_summary(kept, kept["run_id"], "RustFS host-audit/2026-11/x/report.html", SHA,
+                                         xlsx_archive="RustFS host-audit/2026-11/x/xlsx/" + ZIP_NAME)
+    assert doc["xlsx_zip"]["sha256"] == ZIP_SHA and doc["xlsx_zip"]["file_name"] == ZIP_NAME
+    assert doc["xlsx_zip"]["archive"] == "RustFS host-audit/2026-11/x/xlsx/" + ZIP_NAME
+    assert kept["xlsx_zip"]["archive"].startswith("RustFS host-audit/2026-11/ha-")  # the kept summary is not mutated
+    old = host_audit_mail_resend_summary(_summary(), "ha-1", "RustFS b/x/report.html", SHA)
+    assert "xlsx_zip" not in old  # a run kept before the zip existed resends the report only
 
 
 def test_resend_keeps_the_archived_summary_and_marks_it():
@@ -253,7 +293,7 @@ def test_every_task_touching_addresses_is_no_log():
     assert "_host_audit_mail_rcpt" not in json.dumps(shown) and "mail_to" not in json.dumps(shown)
 
 
-def test_send_uses_the_relay_defaults_and_attaches_one_ascii_html():
+def test_send_uses_the_relay_defaults_and_attaches_the_ascii_report_and_the_xlsx_zip():
     defaults = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
     assert defaults["host_audit_mail_host"] == "smtp-relay.gmail.com"
     assert defaults["host_audit_mail_port"] == 587
@@ -262,7 +302,8 @@ def test_send_uses_the_relay_defaults_and_attaches_one_ascii_html():
     assert "host_audit_mail_cc" not in defaults
     send = next(t for t in _flatten(_tasks("mail.yml")) if "community.general.mail" in t)
     args = send["community.general.mail"]
-    assert args["subtype"] == "html" and len(args["attach"]) == 1
+    # the attachments are the report and, when the summary records one, the xlsx zip (integration: test_host_audit_xlsx_zip_report.py)
+    assert args["subtype"] == "html" and "_host_audit_mail_attachments" in args["attach"]
     assert "username" not in args and "password" not in args  # relay with IP authentication
     # one SMTP transaction per recipient: a partial refusal would make the module warn() the
     # refused address, and warnings are printed even under no_log; recipients do not see each other

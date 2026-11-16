@@ -9,6 +9,7 @@ Entry points:
   host_audit_remediation_plan       (filter) model, host -> {'sheet', 'headers', 'widths', 'rows', 'footer'}
   host_audit_remediation_plans      (filter) model -> the plan of every host with its file name (AUD-025)
   host_audit_remediation_file_name  (filter) run id, host -> ``host-audit-<run_id>-<inventory_hostname>.xlsx``
+  host_audit_remediation_zip_name   (filter) run id -> ``host-audit-<run_id>-xlsx.zip``
 """
 
 import hashlib
@@ -33,6 +34,7 @@ NO_RESULT = '점검 결과 없음(점검불가)'
 PLAN_FAILED = '이행계획서 생성 실패'
 UNKNOWN_ITEM = '(카탈로그에 없는 항목)'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
+ZIP_NAME = 'host-audit-%s-xlsx.zip'
 MAX_NAME_PART = 80  # characters of the run id and of the host name kept in the file name
 BASELINE_PREFIXED = (NEW, PERSIST, RECUR)  # the only Audit Baseline states the remark shows (not 첫 실행 or others)
 
@@ -163,20 +165,25 @@ def host_audit_remediation_plans(model):
     return plans
 
 
+def _name_part(value):
+    """A file name part: anything outside [A-Za-z0-9._-] becomes '_' and a short hash of the original keeps the name unique."""
+    value = str(value)
+    clean = re.sub(r'[^A-Za-z0-9._-]', '_', value)
+    if len(clean) > MAX_NAME_PART:  # a file name must stay under the 255-byte limit
+        clean = clean[:MAX_NAME_PART - 8]
+        value = value + ' '  # forces the hash suffix below even when nothing was replaced
+    # Names that differ only in replaced characters must not share a file (the last write would win).
+    return clean if clean == value else '%s-%s' % (clean, hashlib.sha256(value.encode('utf-8', 'replace')).hexdigest()[:8])
+
+
 def host_audit_remediation_file_name(run_id, host):
-    """ASCII file name of a host's xlsx; anything outside [A-Za-z0-9._-] in a part becomes '_' and a short hash of the original keeps the name unique."""
-    safe = re.compile(r'[^A-Za-z0-9._-]')
+    """ASCII file name of a host's xlsx (``_name_part`` rule for both parts)."""
+    return FILE_NAME % (_name_part(run_id), _name_part(host))
 
-    def part(value):
-        value = str(value)
-        clean = safe.sub('_', value)
-        if len(clean) > MAX_NAME_PART:  # a file name must stay under the 255-byte limit
-            clean = clean[:MAX_NAME_PART - 8]
-            value = value + ' '  # forces the hash suffix below even when nothing was replaced
-        # Names that differ only in replaced characters must not share a file (the last write would win).
-        return clean if clean == value else '%s-%s' % (clean, hashlib.sha256(value.encode('utf-8', 'replace')).hexdigest()[:8])
 
-    return FILE_NAME % (part(run_id), part(host))
+def host_audit_remediation_zip_name(run_id):
+    """ASCII file name of the zip of every host's xlsx: ``host-audit-<run_id>-xlsx.zip`` (AUD-026)."""
+    return ZIP_NAME % _name_part(run_id)
 
 
 def host_audit_remediation_plan_map(model):
@@ -191,4 +198,5 @@ class FilterModule(object):
             'host_audit_remediation_plans': host_audit_remediation_plans,
             'host_audit_remediation_plan_map': host_audit_remediation_plan_map,
             'host_audit_remediation_file_name': host_audit_remediation_file_name,
+            'host_audit_remediation_zip_name': host_audit_remediation_zip_name,
         }

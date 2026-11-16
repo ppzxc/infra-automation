@@ -199,6 +199,7 @@ def test_upload_maps_the_xlsx_content_type():
     upload = _task("storage_upload.yml", "AUD-514")
     assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in upload["vars"]["_content_type"]
     assert ".xlsx" in upload["vars"]["_content_type"]
+    assert "'.zip': 'application/zip'" in upload["vars"]["_content_type"]  # the xlsx zip of the mail attachment (AUD-026)
 
 
 def test_the_writer_is_inside_the_cleanup_block_before_the_upload():
