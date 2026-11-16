@@ -41,6 +41,35 @@ def test_catalog_yaml_holds_all_67_items_with_required_fields():
         assert meta["criteria"] == meta["criteria"].strip(), code
 
 
+def test_migrated_catalog_keeps_the_pre_migration_shape():
+    """Literals taken from the hard-coded dict this YAML replaced: severity of every item, category ranges, CIS count."""
+    assert "".join({"상": "H", "중": "M", "하": "L"}[ITEMS[c]["severity"]] for c in CODES) == (
+        "HHHHHHLMLMLLMHHHHHHHHHHHHHHHLMMMLHHHHHHHHHHHHHHMHHMMLMMLMMHMHLMHMMM")
+    ranges = [(1, 13, CATEGORIES[0]), (14, 33, CATEGORIES[1]), (34, 63, CATEGORIES[2]), (64, 64, CATEGORIES[3]),
+              (65, 67, CATEGORIES[4])]
+    for lo, hi, category in ranges:
+        assert {ITEMS["U-%02d" % i]["category"] for i in range(lo, hi + 1)} == {category}, category
+    assert sum(1 for c in CODES if ITEMS[c]["cis"]) == 26
+
+
+def test_loader_rejects_blank_title_or_criteria(tmp_path):
+    with pytest.raises(RuntimeError, match=r"U-01.*title"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM.replace("title: t", "title: ' '")))
+    with pytest.raises(RuntimeError, match=r"U-01.*criteria"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM.replace("criteria: c", "criteria: ''")))
+
+
+def test_default_catalog_must_hold_every_item(tmp_path):
+    with pytest.raises(RuntimeError, match="U-02"):
+        kisa._require_all_items(kisa._load_items(_write(tmp_path, ONE_ITEM.replace("U-01", "U-03"))))
+    assert kisa._require_all_items(kisa.ITEMS) is kisa.ITEMS
+
+
+def test_loader_accepts_a_field_overridden_over_a_yaml_merge(tmp_path):
+    text = ONE_ITEM.replace("U-01:\n  title: t\n", "U-01:\n  <<: {title: base}\n  title: t\n")
+    assert kisa._load_items(_write(tmp_path, text))["U-01"]["title"] == "t"
+
+
 def test_migrated_items_keep_their_known_values():
     """Known-good literals from the pre-migration filter pin the content independently of the loader."""
     assert ITEMS["U-01"] == {

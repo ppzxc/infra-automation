@@ -71,13 +71,17 @@ class _UniqueKeyLoader(yaml.SafeLoader):
     """SafeLoader that refuses a mapping key written twice (safe_load would silently keep the last one)."""
 
     def construct_mapping(self, node, deep=False):
-        self.flatten_mapping(node)  # resolve YAML merge keys first so merged keys are checked too
+        # Check the keys written in this mapping before merge flattening: an explicit key may legitimately
+        # override a merged one. (construct_object memoizes, so the parent does not rebuild the key nodes.)
         seen = set()
         for key_node, _ in node.value:
+            if key_node.tag == 'tag:yaml.org,2002:merge':
+                continue
             key = self.construct_object(key_node, deep=True)
             if key in seen:
                 raise yaml.YAMLError('duplicate key %r (line %d)' % (key, key_node.start_mark.line + 1))
             seen.add(key)
+        self.flatten_mapping(node)
         return super().construct_mapping(node, deep)
 
 
@@ -98,6 +102,9 @@ def _validate(items, path):
                 raise RuntimeError('KISA item %s lacks field %s in %s' % (code, field, path))
             if not isinstance(meta[field], str):
                 raise RuntimeError('KISA item %s field %s must be a string (quote it) in %s' % (code, field, path))
+        for field in ('title', 'criteria'):
+            if not meta[field].strip():
+                raise RuntimeError('KISA item %s field %s is blank in %s' % (code, field, path))
         extra = sorted(set(meta) - set(ITEM_FIELDS))
         if extra:
             raise RuntimeError('KISA item %s has unknown field %s in %s' % (code, ', '.join(map(str, extra)), path))
@@ -123,7 +130,15 @@ def _load_items(path=None):
     return _parse_catalog(os.path.realpath(path or CATALOG_PATH))
 
 
-ITEMS = _load_items()
+def _require_all_items(items):
+    """The shipped catalog must hold every KISA-2026 Unix item, U-01..U-67 (the check scripts are U-NN.sh)."""
+    missing = sorted(set('U-%02d' % i for i in range(1, 68)) - set(items))
+    if missing:
+        raise RuntimeError('KISA item catalog %s lacks %s' % (CATALOG_PATH, ', '.join(missing)))
+    return items
+
+
+ITEMS = _require_all_items(_load_items())
 
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'
