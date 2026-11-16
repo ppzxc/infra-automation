@@ -53,8 +53,12 @@ A read-only, periodic inspection of managed hosts and produces one consolidated 
 _Avoid_: audit (when meaning only the CIS audit), scan, compliance check
 
 **Asset Inventory**:
-The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. Part of it is collected from the host; the rest — purpose, owning department, owner and administrator (by role, never by name) and security grade — cannot be, so it is declared per host in Git, and a host with none declared is shown as unassigned. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product. Covers only the hosts Host Audit inspects, not network devices.
+The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. Part of it is collected from the host; the rest — purpose, owning department, owner and administrator (by role, never by name) and asset importance — cannot be, so it is copied per host into OpenBao from the ISMS asset ledger, which stays the source. A host with a value missing is shown as unassigned there; a host whose values could not be read is shown as lookup-failed, never as unassigned. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product. Covers only the hosts Host Audit inspects, not network devices.
 _Avoid_: CMDB, operational info, server list
+
+**Asset Importance**:
+How much a host matters to the business, as the ISMS asset ledger rates it — H, M or L, written as the ledger writes it. A rating of the host, not of a finding: how dangerous a Configuration Vulnerability is belongs to the item's severity from the KISA guide (상/중/하), never to Asset Importance.
+_Avoid_: security grade, 보안등급, 중요도 (unqualified)
 
 **Configuration Vulnerability**:
 A host setting that falls short of the KISA technical vulnerability checklist for Unix servers, 2026 edition — e.g. remote root login allowed, weak password policy. Each finding is named with its edition (`KISA-2026:U-13`), because the editions reuse item numbers for different checks; CIS Benchmark is cited only as a cross-reference, not checked separately.
