@@ -145,6 +145,13 @@
       register: _host_audit_xlsx_write
       ignore_errors: true
 
+    # 실패한 호스트를 한 번만 모아 두고 맨 끝 판정과 정리(cleanup.yml)가 같이 쓴다.
+    - name: Collect the hosts whose Remediation Plan xlsx could not be written
+      ansible.builtin.set_fact:
+        _host_audit_xlsx_failed_hosts: >-
+          {{ _host_audit_xlsx_write.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
+             | map(attribute='item') | list }}
+
     - name: Keep the originals in the Host Audit bucket
       ansible.builtin.include_tasks: storage_upload.yml
 
@@ -178,12 +185,8 @@
     # AUD-025의 실패를 모아 맨 끝에서 실행을 실패로 끝낸다. 호스트 이름만 밝힌다(오류 메시지는 모듈 출력에 이미 있다).
     - name: Fail the run when a Remediation Plan xlsx could not be written
       ansible.builtin.assert:
-        that: _failed_hosts | length == 0
-        fail_msg: "Remediation Plan xlsx를 쓰지 못한 호스트: {{ _failed_hosts | join(', ') }} (실행 디렉터리는 남김)"
-      vars:
-        _failed_hosts: >-
-          {{ _host_audit_xlsx_write.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
-             | map(attribute='item') | list }}
+        that: _host_audit_xlsx_failed_hosts | default([]) | length == 0
+        fail_msg: "Remediation Plan xlsx를 쓰지 못한 호스트: {{ _host_audit_xlsx_failed_hosts | default([]) | join(', ') }} (실행 디렉터리는 남김)"
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml

@@ -157,7 +157,7 @@ def test_a_failed_write_does_not_stop_the_run_until_the_final_judgement(tmp_path
     for failed, ok in (([{"failed": True, "item": "h2"}, {"item": "h1"}], False), ([{"item": "h1"}], True)):
         pb = tmp_path / ("j%d.yml" % len(failed))
         pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False,
-                                       "vars": {"_host_audit_xlsx_write": {"results": failed}}, "tasks": [judge]}],
+                                       "vars": {"_host_audit_xlsx_failed_hosts": [r["item"] for r in failed if r.get("failed")]}, "tasks": [judge]}],
                                      allow_unicode=True))
         res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
                              stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
