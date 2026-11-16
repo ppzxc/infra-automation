@@ -429,6 +429,15 @@ def _register_rows(register, applied, today):
     return rows
 
 
+def _build_findings(groups):
+    """Findings (one per item and verdict) in the body table order, from ``{(code, verdict): [host rows]}``."""
+    findings = []
+    for (code, verdict), hosts in groups.items():
+        findings.append(dict(_item_meta(code), **remediation_view(code), verdict=verdict,
+                             verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
+    return order_findings(findings)
+
+
 def host_audit_kisa_section(model, records, register=None, today=None):
     """Return a copy of the report model with the Configuration Vulnerability section.
 
@@ -484,12 +493,7 @@ def host_audit_kisa_section(model, records, register=None, today=None):
                              evidence=it['evidence'], note=note))
         appendix[host] = rows
 
-    findings = []
-    for (code, verdict), hosts in groups.items():
-        meta = _item_meta(code)
-        findings.append(dict(meta, **remediation_view(code), verdict=verdict,
-                             verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
-    findings = order_findings(findings)
+    findings = _build_findings(groups)
 
     summary = [dict(_item_meta(code), counts=[counts[code][v] for v in VERDICTS]) for code in codes]
     implemented = sorted(ITEMS)
