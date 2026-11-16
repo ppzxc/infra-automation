@@ -267,11 +267,12 @@ def test_editions_with_the_same_short_code_stay_separate_blocks():
     assert [b["code"] for b in blocks] == ["KISA-2026:U-01", "OTHER-2025:U-01"]
 
 
-def test_another_editions_item_does_not_borrow_this_catalogs_text():
+def test_block_resolves_the_catalog_like_the_body_table_does():
     import host_audit_kisa as kisa
-    own, other = kisa._build_remediation_guide([_stray("KISA-2026:U-01"), _stray("OTHER-2025:U-01")])
-    assert own["purpose"] == ITEMS["U-01"]["purpose"]
-    assert other["purpose"] == "" and other["steps"] == [] and other["guide_page"] is None
+    # the body table strips the edition and uses the catalog entry, so the appendix block must agree with it
+    for code in ("KISA-2026:U-01", "U-01", "OTHER-2025:U-01"):
+        block = kisa._build_remediation_guide([_stray(code)])[0]
+        assert block["purpose"] == ITEMS["U-01"]["purpose"] and block["code"] == code
 
 
 def test_run_where_no_host_was_checked_does_not_claim_a_clean_result(env, model):

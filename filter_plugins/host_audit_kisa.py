@@ -456,8 +456,7 @@ def _build_remediation_guide(findings):
         code = finding['code']  # the full code, as the body table shows it (also keeps editions apart)
         block = blocks.get(code)
         if block is None:
-            edition, _, short = code.rpartition(':')
-            meta = ITEMS.get(short) if edition == EDITION else None  # another edition's U-01 is not this catalog's
+            meta = ITEMS.get(code.split(':', 1)[-1])  # the same lookup as _item_meta/remediation_view (body table)
             block = {'code': code, 'title': finding['title'], 'severity': finding['severity'],
                      'purpose': '', 'threat': '', 'criteria': finding['criteria'], 'check': '', 'summary': '',
                      'steps': [], 'impact': None, 'effort': None, 'guide_page': None, 'verdict_hosts': []}
@@ -467,7 +466,7 @@ def _build_remediation_guide(findings):
                     title=meta['title'], severity=meta['severity'], purpose=meta['purpose'], threat=meta['threat'],
                     criteria=meta['criteria'], check=meta['check'], summary=meta['remediation']['summary'],
                     steps=[{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
-                           if key in steps],
+                           if steps.get(key, '').strip()],
                     impact=dict(meta['remediation_impact']), effort=dict(meta['remediation_effort']),
                     guide_page=meta['guide_page'])
             blocks[code] = block
