@@ -104,6 +104,9 @@
     <tr><th>검토자</th><td></td><td></td><td></td><td></td></tr>
     <tr><th>정보보호 책임자</th><td></td><td></td><td></td><td></td></tr>
   </table>
+{% if m.config_vulnerability is defined %}
+  <p class="small mute">{{ m.config_vulnerability.remediation_source | e }}.</p>
+{% endif %}
 
 </div>
 </body>

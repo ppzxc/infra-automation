@@ -100,12 +100,16 @@ def _deep_freeze(value):
     return value
 
 
-def _freeze(items):
-    return _deep_freeze(items)
+SUMMARY_MAX = 300  # the body table prints remediation.summary on one line; longer notes belong in steps/reason
 
 
 def _blank(value):
     return not isinstance(value, str) or not value.strip()
+
+
+def _untrimmed(value):
+    """Blank text, or text with surrounding whitespace (it would show as a stray gap in report cells)."""
+    return _blank(value) or value != value.strip()
 
 
 def _validate_remediation(code, meta, path):
@@ -123,16 +127,18 @@ def _validate_remediation(code, meta, path):
     if type(page) is not int or page < 1:
         fail('guide_page', 'must be a positive integer')
     rem = meta['remediation']
-    if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _blank(rem.get('summary')):
-        fail('remediation', 'must be a mapping of summary (text) and optional steps')
+    if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _untrimmed(rem.get('summary')):
+        fail('remediation', 'must be a mapping of summary (trimmed text) and optional steps')
+    if len(rem['summary']) > SUMMARY_MAX or '\n' in rem['summary']:
+        fail('remediation.summary', 'must be one line of at most %d characters' % SUMMARY_MAX)
     steps = rem.get('steps')
     if steps is not None and (not isinstance(steps, dict) or not steps or set(steps) - set(STEP_FAMILIES)
-                              or any(_blank(v) for v in steps.values())):
+                              or any(_blank(v) or v != v.lstrip() for v in steps.values())):
         fail('remediation.steps', 'must map rhel/debian to non-blank text')
     for field in ('remediation_impact', 'remediation_effort'):
         part = meta[field]
         if (not isinstance(part, dict) or set(part) != {'level', 'reason'} or type(part['level']) is not int
-                or part['level'] not in LEVELS or _blank(part['reason'])):
+                or part['level'] not in LEVELS or _untrimmed(part['reason'])):
             fail(field, 'must be {level: 1..3, reason: text}')
 
 
@@ -171,7 +177,7 @@ def _parse_catalog(path):
     except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (path, exc)) from exc
     _validate(items, path)
-    return _freeze(items)
+    return _deep_freeze(items)
 
 
 def _load_items(path=None):
@@ -215,7 +221,10 @@ def urgency_of(severity):
 
 def remediation_view(code, items=None):
     """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values."""
-    meta = (items or ITEMS)[code.split(':', 1)[-1]]
+    meta = (items or ITEMS).get(code.split(':', 1)[-1])
+    if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
+        return {'remediation_summary': '', 'impact_level': '', 'effort_level': '', 'risk': '', 'priority': '',
+                'urgency': ''}
     return {
         'remediation_summary': meta['remediation']['summary'],
         'impact_level': meta['remediation_impact']['level'],

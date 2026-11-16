@@ -34,13 +34,14 @@ U-02:
   threat: 비밀번호 정책이 없으면 무차별·사전 대입 공격으로 비밀번호가 노출될 수 있다.
   guide_page: 15
   remediation:
-    summary: /etc/login.defs에 PASS_MAX_DAYS 90, PASS_MIN_DAYS 1을 넣고, /etc/security/pwquality.conf에 minlen = 8과 dcredit, ucredit, lcredit, ocredit = -1을 설정한다. 이전 비밀번호는 pwhistory(remember)로 기억시키며 root에도 적용하려면 enforce_for_root를 쓴다. 가이드 안에서 기억 개수가 4(Linux 사례)와 10(Solaris 권고표)으로 어긋나는데, Linux 사례의 4 이상을 따른다. 우리 probe는 3종류 8자 이상 또는 2종류 10자 이상을 본다.
+    summary: /etc/login.defs에 PASS_MAX_DAYS 90, PASS_MIN_DAYS 1을, /etc/security/pwquality.conf에 minlen = 8과 dcredit, ucredit, lcredit, ocredit = -1을 설정하고, pwhistory(remember 4 이상)로 이전 비밀번호를 기억시킨다. root에도 적용하려면 enforce_for_root를 쓴다.
     steps:
       rhel: |
         /etc/login.defs: PASS_MAX_DAYS 90, PASS_MIN_DAYS 1
         /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
         /etc/security/pwhistory.conf: remember=4, enforce_for_root
         /etc/pam.d/system-auth: pam_pwquality.so, pam_pwhistory.so를 pam_unix.so 위에 둔다
+        가이드 안에서 기억 개수가 4(Linux 사례)와 10(Solaris 권고표)으로 어긋나며 여기서는 4 이상을 따른다
       debian: |
         /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
         /etc/pam.d/common-password: pam_pwquality.so, pam_pwhistory.so를 pam_unix.so 위에 둔다
@@ -179,13 +180,13 @@ U-09:
   threat: 불필요한 그룹 소유 파일을 통해 권한이 남용되거나 의도치 않게 부여되고 감사와 관리가 어려워진다.
   guide_page: 33
   remediation:
-    summary: /etc/group, /etc/gshadow에서 계정이 없거나 불필요한 그룹을 관리자와 검토한 뒤 groupdel <그룹>으로 제거한다. 제거 전 그 그룹 소유 파일이 있는지, 나중에 쓰려고 미리 만든 그룹인지 확인한다.
+    summary: /etc/passwd의 기본 GID가 /etc/group에 없는 계정은 그룹을 만들거나 GID를 고친다. 계정이 없는 불필요한 그룹은 소유 파일과 용도를 관리자와 확인한 뒤 groupdel <그룹>으로 제거한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
   remediation_effort:
     level: 2
-    reason: 그룹 목록을 파악하고 소유 파일을 확인하며 그룹마다 제거 여부를 판단해야 한다.
+    reason: 기본 GID가 없는 계정과 불필요한 그룹을 하나씩 파악하고 소유 파일을 확인해 처리를 판단해야 한다.
 U-10:
   title: 동일한 UID 금지
   severity: 중
@@ -296,7 +297,7 @@ U-15:
   threat: 주인 없는 파일의 UID와 같은 UID로 계정을 바꾸면 그 계정이 파일을 가져 모든 작업을 할 수 있다.
   guide_page: 40
   remediation:
-    summary: find / ( -nouser -o -nogroup ) -xdev -ls 2>/dev/null로 대상을 찾아 불필요하면 삭제하고, 쓰는 파일이면 chown, chgrp로 소유자와 그룹을 지정한다.
+    summary: find / \( -nouser -o -nogroup \) -xdev -ls 2>/dev/null로 대상을 찾아 불필요하면 삭제하고, 쓰는 파일이면 chown, chgrp로 소유자와 그룹을 지정한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -440,7 +441,7 @@ U-23:
   threat: 부적절한 특수 권한이 붙은 파일을 이용해 root 권한을 획득하는 권한 상승이 가능하다.
   guide_page: 50
   remediation:
-    summary: find / -user root -type f ( -perm -04000 -o -perm -02000 ) -xdev 로 SUID/SGID 파일을 찾아 불필요한 것은 chmod -s 로 권한을 빼거나 파일을 제거한다. 꼭 필요한 파일은 chgrp 로 특정 그룹을 지정하고 chmod 4750 으로 해당 그룹만 쓰게 제한한다.
+    summary: find / -user root -type f \( -perm -04000 -o -perm -02000 \) -xdev 로 SUID/SGID 파일을 찾아 불필요한 것은 chmod -s 로 권한을 빼거나 파일을 제거한다. 꼭 필요한 파일은 chgrp 로 특정 그룹을 지정하고 chmod 4750 으로 해당 그룹만 쓰게 제한한다.
   remediation_impact:
     level: 2
     reason: 특수 권한을 제거하면 OS와 응용프로그램이 정상 동작하는지 확인이 필요하다고 가이드가 서술한다.
@@ -494,7 +495,7 @@ U-26:
   threat: 공격자가 rootkit 설정 파일을 관리자가 쉽게 못 찾도록 /dev 안에 장치 파일처럼 위장해 둘 수 있다.
   guide_page: 53
   remediation:
-    summary: find /dev -type f -exec ls -l {} ; 로 /dev 아래 일반 파일(major, minor number가 없는 파일)을 찾아 rm 으로 제거한다. mqueue와 shm은 시스템이 주기적으로 만들고 지우므로 예외다.
+    summary: find /dev -type f -exec ls -l {} \; 로 /dev 아래 일반 파일(major, minor number가 없는 파일)을 찾아 rm 으로 제거한다. mqueue와 shm은 시스템이 주기적으로 만들고 지우므로 예외다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -665,7 +666,7 @@ U-35:
   threat: 익명 접근을 허용하면 비인가자가 자료를 훔치거나 변조하고 악성 코드를 올릴 수 있다.
   guide_page: 70
   remediation:
-    summary: vsftpd는 vsftpd.conf(RHEL은 /etc/vsftpd/, Debian은 /etc/)에서 anonymous_enable=NO로 바꾸고, proftpd는 설정의 Anonymous 블록을 주석 처리한다. NFS는 /etc/exports의 anonuid/anongid 옵션을 지운 뒤 exportfs -ra를 실행하고, Samba는 smb.conf의 guest ok를 no로 바꾼 뒤 smbcontrol all reload-config를 실행한다. 기본 FTP는 ftp, anonymous 계정을 userdel로 지운다.
+    summary: vsftpd는 vsftpd.conf(RHEL은 /etc/vsftpd/, Debian은 /etc/)에서 anonymous_enable=NO, proftpd는 Anonymous 블록 주석 처리. NFS는 /etc/exports에서 no_root_squash와 anonuid=0을 지우고 anonuid/anongid를 정리한 뒤 exportfs -ra, Samba는 smb.conf의 guest ok를 no로 하고 설정을 다시 읽힌다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -881,7 +882,7 @@ U-47:
   threat: 릴레이를 제한하지 않으면 스팸 메일 서버로 악용되거나 DoS 공격을 받을 수 있다.
   guide_page: 113
   remediation:
-    summary: 메일 서비스를 안 쓰면 중지하고 비활성화한다. postfix는 /etc/postfix/main.cf의 mynetworks를 허용 네트워크로 한정하고 postfix reload를 실행한다. sendmail은 sendmail.mc에서 promiscuous_relay를 지우고 m4로 sendmail.cf를 재생성한 뒤 /etc/mail/access를 정리하며, exim은 /etc/exim/exim.conf 또는 /etc/exim4/exim4.conf의 relay_from_hosts를 허용 네트워크로 제한한다.
+    summary: postfix는 /etc/postfix/main.cf의 mynetworks를 허용 네트워크로 한정하고 postfix reload, sendmail은 sendmail.mc에서 promiscuous_relay를 지우고 sendmail.cf를 재생성해 /etc/mail/access를 정리, exim은 relay_from_hosts를 허용 네트워크로 제한한다(exim.conf 또는 exim4.conf). 메일 서비스를 안 쓰면 중지한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1237,7 +1238,7 @@ U-66:
   threat: 로깅이 설정되지 않으면 사고 원인 규명이 어렵고 법적 대응에 쓸 증거로도 부족하다.
   guide_page: 166
   remediation:
-    summary: 로그 기록 정책을 세우고 /etc/rsyslog.conf(또는 /etc/rsyslog.d/ 아래 파일)에 정책대로 규칙을 둔 뒤 systemctl restart rsyslog로 적용한다. 가이드 예시는 *.info;mail.none;authpriv.none;cron.none은 /var/log/messages, authpriv.*는 /var/log/secure 또는 auth.log, mail.*과 cron.*은 각 로그 파일, *.emerg는 전체 사용자 대상이다.
+    summary: '로그 기록 정책을 세우고 /etc/rsyslog.conf(또는 /etc/rsyslog.d/ 아래 파일)에 정책대로 규칙을 둔 뒤 systemctl restart rsyslog로 적용한다. 예: *.info는 /var/log/messages, authpriv.*는 /var/log/secure 또는 auth.log, mail.*과 cron.*은 각 로그 파일, *.emerg는 전체 사용자 대상.'
   remediation_impact:
     level: 2
     reason: 가이드가 제시한 로그를 모두 켜면 시스템 성능과 저장 용량에 부담이 생길 수 있어 운영 환경에 맞게 적용해야 한다.

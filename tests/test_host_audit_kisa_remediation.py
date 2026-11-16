@@ -49,7 +49,7 @@ def test_every_item_has_the_remediation_fields():
             assert type(level) is int and level in (1, 2, 3), (code, field)
             assert isinstance(meta[field]["reason"], str) and meta[field]["reason"].strip(), (code, field)
         page = meta["guide_page"]
-        assert type(page) is int and 7 <= page <= 171, code  # Unix section of the 2026 guide
+        assert type(page) is int and 7 <= page <= 171, code  # Unix server chapter of the 2026 guide
 
 
 def test_steps_only_use_rhel_and_debian_keys_with_text():
@@ -61,7 +61,9 @@ def test_steps_only_use_rhel_and_debian_keys_with_text():
         stepped += 1
         assert steps and set(steps) <= {"rhel", "debian"}, code
         assert all(isinstance(v, str) and v.strip() for v in steps.values()), code
-    assert stepped >= 5  # the five items the guide splits into Redhat/Debian cases
+    split = {"U-02", "U-03", "U-13", "U-60", "U-61"}  # the guide gives these separate Redhat/Debian cases
+    assert split <= {c for c, m in _catalog().items() if m["remediation"].get("steps")}
+    assert stepped >= len(split)
 
 
 def test_remediation_impact_follows_the_guide_split():
@@ -71,6 +73,13 @@ def test_remediation_impact_follows_the_guide_split():
     assert all(levels[c] in (2, 3) for c in INDIVIDUALLY_DESCRIBED)
     assert sum(1 for lv in levels.values() if lv == 1) == 52
     assert {1, 2, 3} <= {ITEMS[c]["remediation_effort"]["level"] for c in CODES}  # effort uses the whole scale
+
+
+def test_find_commands_in_summaries_keep_their_shell_escapes():
+    """A summary is pasted into a shell: find's parentheses and -exec terminator must stay escaped."""
+    assert r"\( -nouser -o -nogroup \)" in ITEMS["U-15"]["remediation"]["summary"]
+    assert r"\( -perm -04000 -o -perm -02000 \)" in ITEMS["U-23"]["remediation"]["summary"]
+    assert r"-exec ls -l {} \;" in ITEMS["U-26"]["remediation"]["summary"]
 
 
 def test_catalog_text_has_no_infrastructure_details():
@@ -126,6 +135,11 @@ def test_loader_accepts_a_complete_item(tmp_path):
     ("remediation", {"summary": "s", "steps": {"suse": "x"}}, "steps"),
     ("remediation", {"summary": "s", "steps": {"rhel": ""}}, "steps"),
     ("remediation", {"summary": "s", "extra": 1}, "remediation"),
+    ("remediation", {"summary": " s"}, "remediation"),
+    ("remediation", {"summary": "s\n"}, "remediation"),
+    ("remediation", {"summary": "한" * 301}, "summary"),
+    ("remediation", {"summary": "s", "steps": {"rhel": "\nx"}}, "steps"),
+    ("remediation_impact", {"level": 1, "reason": "r "}, "remediation_impact"),
     ("remediation_impact", {"level": 4, "reason": "r"}, "remediation_impact"),
     ("remediation_impact", {"level": 0, "reason": "r"}, "remediation_impact"),
     ("remediation_impact", {"level": True, "reason": "r"}, "remediation_impact"),
@@ -168,7 +182,7 @@ def test_findings_sort_by_priority_then_impact_then_effort():
     assert ordered == ["U-04", "U-03", "U-02", "U-05", "U-01"]
 
 
-def test_findings_with_the_same_levels_keep_verdict_then_code_order ():
+def test_findings_with_the_same_levels_keep_verdict_then_code_order():
     items = {"U-01": _fake("U-01", "상", 1, 1), "U-02": _fake("U-02", "상", 1, 1)}
     findings = [{"code": "KISA-2026:U-02", "verdict": "취약"}, {"code": "KISA-2026:U-01", "verdict": "예외(승인)"},
                 {"code": "KISA-2026:U-01", "verdict": "취약"}]
@@ -242,9 +256,26 @@ def test_body_table_shows_impact_column_and_remediation_line(html, model):
     assert cells[3].strip() == str(u01["remediation_impact"]["level"])
 
 
-def test_report_states_the_guide_source_sentence(html):
-    assert SOURCE_SENTENCE in html
+def test_report_states_the_guide_source_sentence_at_the_bottom(html):
     assert html.count(SOURCE_SENTENCE) == 1
+    assert html.index(SOURCE_SENTENCE) > html.index("검토 및 결재")
+
+
+def test_source_sentence_is_stated_even_without_findings():
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+    lines = ["U-%02d|GOOD|ok" % i for i in range(1, 68)]
+    meta = {"run_id": "ha-1", "started_at": "2026-10-08T22:00:05Z", "generated_at": "2026-10-08T22:01:00Z",
+            "targets": ["ns0001"], "kisa_exceptions": []}
+    page = env.get_template("report.html.j2").render(
+        host_audit_model=host_audit_report_model([_record("ns0001", lines)], meta))
+    assert "양호 외 항목 없음" in page and SOURCE_SENTENCE in page
+
+
+def test_unknown_item_code_gets_empty_remediation_instead_of_failing():
+    view = kisa.remediation_view("KISA-2026:U-99")
+    assert view["remediation_summary"] == "" and view["priority"] == ""
+    assert kisa.remediation_view("KISA-2026:U-01")["priority"] == 1
 
 
 def test_per_host_appendix_html_has_no_remediation_text(html):
