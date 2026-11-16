@@ -31,6 +31,7 @@ WIDTHS = [14, 12, 14, 32, 40, 40, 60, 8, 24, 8, 8, 8, 8, 24, 48]
 NO_FINDINGS = '양호 외 항목 없음'
 NO_RESULT = '점검 결과 없음(점검불가)'
 PLAN_FAILED = '이행계획서 생성 실패'
+UNKNOWN_ITEM = '(카탈로그에 없는 항목)'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
 BASELINE_PREFIXED = (NEW, PERSIST, RECUR)  # the only Audit Baseline states the remark shows (not 첫 실행 or others)
 
@@ -51,8 +52,19 @@ def _admin_role(model, host):
         if entry.get('host') == host:
             for field in entry.get('declared') or []:
                 if field.get('key') == 'admin_role':
+                    if field.get('state') == 'unassigned' and not _inspected(model, host):
+                        # A host that was not reached has no declaration to read (its record is empty or missing):
+                        # that is no data, not "nobody assigned".
+                        return LOOKUP_FAILED
                     return field.get('value') or UNASSIGNED
     return LOOKUP_FAILED  # the Asset Inventory has no entry for the host: no data, not "nobody assigned"
+
+
+def _inspected(model, host):
+    for row in model.get('inventory') or []:
+        if row.get('host') == host:
+            return bool(row.get('inspected'))
+    return False
 
 
 def _family(model, host):
@@ -117,7 +129,8 @@ def host_audit_remediation_plan(model, host):
         entry = finding['entry']
         values = {
             '그룹': finding['category'], '자산명': host, '담당자': admin,
-            '통제내용': '%s %s' % (finding['code'].split(':', 1)[-1], finding['title']),
+            '통제내용': ('%s %s' % (finding['code'].split(':', 1)[-1], finding['title'])) if _item(finding)
+            else '%s %s' % (finding['code'].split(':', 1)[-1], UNKNOWN_ITEM),
             '취약점현황': _status(finding, entry), '점검방법': _item(finding).get('check', ''),
             '조치방법': _steps(finding, family),
             '위험도': _number(finding['risk']), '이행과제': '', '시급성': finding['urgency'] or '',

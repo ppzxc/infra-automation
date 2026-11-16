@@ -129,6 +129,20 @@ def test_a_host_the_asset_inventory_does_not_know_is_lookup_failed_not_unassigne
     assert host_audit_remediation_plan(model, "h1")["rows"][0][COL["담당자"]] == "조회 실패"
 
 
+def test_a_host_that_was_never_reached_is_lookup_failed_not_unassigned():
+    model = host_audit_report_model([], {"run_id": "ha-1", "targets": ["ns1"], "started_at": "2026-10-08T22:00:05Z"})
+    plan = host_audit_remediation_plan(model, "ns1")
+    assert plan["rows"][0][COL["담당자"]] == "조회 실패"
+    assert plan["rows"][0][COL["통제내용"]] == NO_RESULT
+
+
+def test_an_item_the_catalog_lacks_is_named_as_such():
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"})]))
+    model["config_vulnerability"]["findings"][0]["code"] = "KISA-2026:U-99"
+    row = host_audit_remediation_plan(model, "h1")["rows"][0]
+    assert row[COL["통제내용"]] == "U-99 (카탈로그에 없는 항목)"
+
+
 def test_one_odd_host_does_not_stop_the_plans_of_the_others():
     model = copy.deepcopy(_model([_record("h1", {1: "VULN"}), _record("h2", {1: "VULN"})]))
     model["config_vulnerability"]["findings"][0]["hosts"][0].pop("evidence")  # h1's entry is broken
