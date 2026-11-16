@@ -28,7 +28,8 @@ LOOKUP_FAILED = '조회 실패'
 INVALID = '잘못된 값'
 IMPORTANCE_LEVELS = ('H', 'M', 'L')
 # 표시 상태 -> 태그 색. 조회 실패는 인프라 문제(값을 알 수 없음)라 지원 종료·선언 외 같은 발견(crit)과 구분해
-# 회색으로 두고, 잘못된 값만 고칠 데이터 오류로 crit이다. 메일 요약 등급(WARN)과 같은 무게다.
+# 회색, 잘못된 값은 사람이 고칠 사본 오류라 빨강이다. 메일 요약은 세 상태 모두 호스트 수를 WARN으로 센다
+# (색은 보고서 안에서 눈에 띄게 하는 용도이고 메일 등급을 따로 정한다).
 DECLARED_TAGS = {'unassigned': 'na', 'lookup_failed': 'na', 'invalid': 'crit'}
 NOT_DECLARED = '선언 외'
 INACTIVE = '장기 미사용'
