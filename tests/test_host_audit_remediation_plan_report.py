@@ -166,6 +166,29 @@ def test_a_failed_write_does_not_stop_the_run_until_the_final_judgement(tmp_path
             assert "h2" in res.stdout
 
 
+def test_the_failed_hosts_of_a_real_failing_write_loop_are_collected(tmp_path):
+    """Runs the real loop: the run directory does not exist, so the writer cannot create xlsx/ (one level only)."""
+    model_file = tmp_path / "model.json"
+    model_file.write_text(json.dumps(_model(), ensure_ascii=False))
+    load = {"ansible.builtin.set_fact": {"host_audit_model": "{{ lookup('ansible.builtin.file', '%s') | from_json }}"
+                                         % model_file}}
+    pb = tmp_path / "f.yml"
+    pb.write_text(yaml.safe_dump([{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars": {"host_audit_run": {"run_id": "ha-1", "run_kind": "scheduled", "output_dir": str(tmp_path / "missing")}},
+        "tasks": [load, _plan_task(), _task("report.yml", "AUD-025"),
+                  _named("Collect the hosts whose Remediation Plan xlsx could not be written"),
+                  {"ansible.builtin.debug": {"var": "_host_audit_xlsx_failed_hosts"}}],
+    }], allow_unicode=True))
+    env = dict(os.environ, ANSIBLE_LIBRARY=str(ROOT_DIR / "roles" / "host_audit" / "library"),
+               ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins"), ANSIBLE_STDOUT_CALLBACK="ansible.posix.json")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    assert res.returncode == 0, res.stdout[-2000:]
+    tasks = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
+    assert tasks[-1]["hosts"]["localhost"]["_host_audit_xlsx_failed_hosts"] == ["h1", "h2"]
+
+
 def test_the_xlsx_is_written_for_an_on_demand_run_too(tmp_path):
     out = tmp_path / "run"
     out.mkdir()
