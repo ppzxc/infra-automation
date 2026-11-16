@@ -479,7 +479,10 @@ def host_audit_kisa_section(model, records, register=None, today=None):
                     applied[it['code']] = applied.get(it['code'], 0) + 1
             if verdict not in (GOOD, NOT_APPLICABLE):
                 key = (it['code'], verdict)
-                groups.setdefault(key, []).append({'host': host, 'evidence': it['evidence'], 'note': note})
+                # ``exception`` is the register entry view the report already draws in its register table; the
+                # Remediation Plan remark reads it from here (no second path from the register).
+                groups.setdefault(key, []).append({'host': host, 'evidence': it['evidence'], 'note': note,
+                                                   'exception': exc})
             rows.append(dict(_item_meta(it['code']), verdict=verdict, verdict_class=VERDICT_CLASSES[verdict],
                              evidence=it['evidence'], note=note))
         appendix[host] = rows
