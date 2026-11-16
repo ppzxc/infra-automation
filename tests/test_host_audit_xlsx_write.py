@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from module_runner import MODULE_UTILS, run_module_file
+
 # CI installs requirements-test.txt, so a missing openpyxl there must fail instead of silently skipping the round trip.
 if os.environ.get("CI"):
     import openpyxl
@@ -22,10 +24,6 @@ else:
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODULE = ROOT_DIR / "roles" / "host_audit" / "library" / "host_audit_xlsx_write.py"
-MODULE_UTILS = ROOT_DIR / "roles" / "host_audit" / "module_utils"
-# What ANSIBLE_MODULE_UTILS does for a run: the role's module_utils/ joins ansible.module_utils.
-_LAUNCH = ("import runpy, sys, ansible.module_utils as m; m.__path__.append(sys.argv[1]); "
-           "sys.argv = [sys.argv[2], sys.argv[3]]; runpy.run_path(sys.argv[0], run_name='__main__')")
 
 HEADERS = ["그룹", "자산명", "위험도", "비고"]
 ROWS = [["계정 관리", "h1", 3, "첫째 줄\n둘째 줄"], ["파일 관리", "h1", 1, "<b>&amp; \x07 text</b>"]]
@@ -41,11 +39,7 @@ def _args(dest):
 def _run(args):
     """Run the module as Ansible does: a python file with a JSON args file."""
     path = args.pop("_args_file")
-    module_args = dict(args)
-    Path(path).write_text(json.dumps({"ANSIBLE_MODULE_ARGS": module_args}))
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
-    res = subprocess.run([sys.executable, "-c", _LAUNCH, str(MODULE_UTILS), str(MODULE), str(path)], capture_output=True, text=True, env=env)
-    return json.loads(res.stdout)
+    return run_module_file(MODULE, args, path)
 
 
 def _write(tmp_path, name="a.xlsx", **override):
