@@ -176,6 +176,21 @@ def _to_local(iso_utc, tz_name):
     return '%s (%s)' % (local.strftime('%Y-%m-%d %H:%M'), local.tzname())
 
 
+# os-release ID -> package/command family of the remediation steps (keys of STEP_FAMILIES in host_audit_kisa).
+# Exact IDs only: ID_LIKE is not in the per-host record and its schema_version 2 stays as it is, so a derivative
+# distribution is an unknown family ('') and gets the summary every family shares (docs/host_audit.md section 17).
+# This table is separate from the Trivy family on purpose (that one picks a vulnerability feed, this one picks
+# command text); test_os_families_are_the_step_families_of_the_catalog guards the values.
+OS_FAMILIES = {
+    'rhel': 'rhel', 'rhel-family': 'rhel', 'centos': 'rhel', 'rocky': 'rhel', 'almalinux': 'rhel', 'ol': 'rhel',
+    'fedora': 'rhel', 'amzn': 'rhel', 'debian': 'debian', 'ubuntu': 'debian',
+}
+
+
+def _os_family(os_id):
+    return OS_FAMILIES.get(str(os_id or '').strip().lower(), '')
+
+
 def _inventory_row(record):
     declared = record.get('declared') or {}
     identity = record.get('identity') or {}
@@ -193,6 +208,7 @@ def _inventory_row(record):
         'environment': declared.get('environment') or UNASSIGNED,
         'environment_unassigned': not declared.get('environment'),
         'os': os_info.get('name') or '-',
+        'os_family': _os_family(os_info.get('id')),
         'kernel_arch': kernel_arch or '-',
         'status': status,
         'status_label': STATUS_LABELS.get(status, STATUS_LABELS[STATUS_NO_RECORD]),

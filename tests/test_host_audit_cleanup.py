@@ -34,6 +34,9 @@ def _tail_block():
             inc = t.get("ansible.builtin.include_tasks")
             if inc in ("storage_upload.yml", "mail.yml"):
                 continue  # network and mail tasks: their results are given as variables
+            if t.get("name") in ("Build the Remediation Plan of every host", "[AUD-025] Write the Remediation Plan xlsx of every host") \
+                    or "Remediation Plan could not" in t.get("name", "") or t.get("name", "").startswith("Collect the hosts"):
+                continue  # xlsx writing needs the report model; it has its own test
             out.append({"block": _load(inc)} if inc else t)
         return out
 
@@ -82,6 +85,29 @@ def _run(tmp_path, variables, check=False):
     cmd = ["ansible-playbook", "-i", "localhost,", str(pb)] + (["--check"] if check else [])
     return subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
                           cwd=ROOT_DIR, timeout=300, env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
+
+
+def _run_xlsx_failed(tmp_path, storage):
+    root, out = _run_dir(tmp_path)
+    variables = dict(_vars(root, out, storage=storage, uploads=(200,) if storage else (), mail_sent=True),
+                     _host_audit_xlsx_failed_hosts=["h2"])
+    return _run(tmp_path, variables), out
+
+
+@pytest.mark.parametrize("storage", [True, False])
+def test_an_xlsx_write_failure_keeps_this_run_and_ends_it_failed_after_the_mail(tmp_path, storage):
+    res, out = _run_xlsx_failed(tmp_path, storage)
+    assert res.returncode != 0 and "h2" in res.stdout
+    assert (out / "report.html").exists()
+    assert "xlsx 쓰기 실패" in res.stdout and "남김" in res.stdout
+
+
+def test_both_failures_are_named_in_the_kept_reason(tmp_path):
+    root, out = _run_dir(tmp_path)
+    variables = dict(_vars(root, out, uploads=(200, 500), mail_sent=False), _host_audit_xlsx_failed_hosts=["h2"])
+    res = _run(tmp_path, variables)
+    assert res.returncode != 0 and "xlsx 쓰기 실패와 원본 보관 미완료" in res.stdout
+    assert (out / "report.html").exists()
 
 
 # ---- this run's directory: the policy table ---------------------------------

@@ -549,10 +549,11 @@ U-28:
     summary: 방화벽(firewalld, ufw, iptables, nftables)으로 허용 IP와 포트를 등록한다. 방화벽이 꺼져 있으면 관리 접속 허용 규칙을 먼저 넣고 켠다. TCP Wrapper는 hosts.allow에 허용 IP를 먼저 넣은 뒤 hosts.deny에 ALL:ALL을 쓰며, RHEL 8 이상에서는 libwrap이 없어 적용되지 않는다.
     steps:
       rhel: |
+        systemd와 firewalld가 없는 CentOS 6은 firewall-cmd·systemctl 줄을 건너뛰고 iptables 줄만 따른다
         firewall-cmd --list-all 로 현재 설정과 기본 zone target 확인(ACCEPT면 안 됨)
         target이 ACCEPT면: firewall-cmd --permanent --zone=<zone> --set-target=default 후 firewall-cmd --reload
         허용 규칙 추가: firewall-cmd --permanent --add-rich-rule (source address, port protocol, port, accept) 후 --reload
-        firewalld가 꺼져 있으면 관리 접속 포트를 firewall-offline-cmd 로 먼저 허용한 뒤 systemctl enable --now firewalld (접속이 끊길 수 있음)
+        firewalld가 꺼져 있으면 관리 접속 포트를 firewall-offline-cmd 로 먼저 허용한 뒤 systemctl enable --now firewalld (접속이 끊길 수 있음. systemd와 firewalld가 없는 CentOS 6은 이 줄 대신 아래 iptables 줄을 따른다)
         firewalld가 없는 CentOS 6/7(iptables): 관리 접속 허용 규칙과 lo, ESTABLISHED,RELATED 허용 규칙을 먼저 넣고 INPUT 기본 정책을 DROP으로 한 뒤 service iptables save
         RHEL 8 이상은 TCP Wrapper(hosts.deny)가 적용되지 않으므로 firewalld나 nftables 규칙으로 제한한다
       debian: |
@@ -1145,7 +1146,7 @@ U-60:
     steps:
       rhel: |
         /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄(com2sec notConfigUser <수집 서버 대역> <새 값>)에서 community 값을 변경(source를 default로 두면 U-61이 취약)
-        systemctl restart snmpd
+        systemctl restart snmpd (systemd가 없는 CentOS 6은 service snmpd restart)
       debian: |
         /etc/snmp/snmpd.conf의 rocommunity, rwcommunity, rocommunity6, rwcommunity6 줄에서 지시어는 그대로 두고 community 문자열만 새 값으로 바꾸며 source는 수집 서버 대역으로 지정한다(기존 -V <view> 옵션은 유지하고, source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
@@ -1170,7 +1171,7 @@ U-61:
     steps:
       rhel: |
         /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄에서 source를 default·0.0.0.0/0 대신 허용 네트워크 주소로 지정
-        systemctl restart snmpd
+        systemctl restart snmpd (systemd가 없는 CentOS 6은 service snmpd restart)
       debian: |
         /etc/snmp/snmpd.conf의 rocommunity·rwcommunity와 rocommunity6·rwcommunity6 줄은 rocommunity <community> <source> 형태이므로 세 번째 자리의 default를 허용 네트워크 주소로 교체한다(추가가 아니라 교체)
         systemctl restart snmpd

@@ -36,6 +36,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 <run_id>/                 # 예: ha-20261008T220005Z (UTC 시작 시각)
 ├── hosts/<Inventory Hostname>.json   # 호스트별 원본 기록 (§4)
 ├── run.json                          # 실행 메타 (run_id, run_kind, started_at, target_hosts, output_dir, timezone, targets)
+├── xlsx/host-audit-<run_id>-<Inventory Hostname>.xlsx   # 호스트별 Remediation Plan (§17)
 └── report.html                       # A4 인쇄용 보고서
 ```
 
@@ -120,6 +121,8 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-022` | `Save the run metadata on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 | `AUD-023` | `Render the A4 report HTML` | `ansible.builtin.template` | 러너 | 실행별 파일 `0600` |
 | `AUD-024` | `Show where the report was written` | `ansible.builtin.debug` | 러너 | 읽기 전용 |
+
+호스트별 Remediation Plan xlsx를 쓰는 `AUD-025`는 §17.1에 있다.
 
 ## 7. Asset Inventory (#120)
 
@@ -431,7 +434,7 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 - **정렬**: 본문 표는 우선순위(1이 먼저) → 조치 영향도(낮은 것 먼저) → 조치 난이도(쉬운 것 먼저) → 판정(취약 → 점검불가(수동) → 예외(승인)) → 항목 코드 순이다. 앞의 세 키가 우선순위 규칙이고, 세 키가 같은 행끼리(다른 항목 포함)는 판정, 그다음 항목 코드가 순서를 정한다. 이전의 판정 우선 정렬은 이 규칙으로 바뀌었다(Spec #488 결정: 표 정렬은 우선순위 규칙을 따르며 판정은 정렬 키가 아니라 열로 보인다. 그래서 예외(승인) 행이 같은 우선순위의 취약 행보다 위에 올 수 있다). 정렬은 `order_findings`가 한다.
 - **호스트별 JSON 불변**: 조치 데이터는 보고서 모델을 만들 때 YAML에서 붙인다. `config_vulnerability`의 `edition`·`status`·`reason`·`results[].{code,result,verdict,evidence,exception}`와 레코드 `schema_version` 2는 바뀌지 않는다(Audit Baseline 비교 호환).
 - **조치 안내 부록(`부록 N+1. 조치 안내`, Spec #488 / Ticket-3, #491)**: 호스트별 부록 뒤, 검토 및 결재 앞에 항목 단위 부록이 붙는다. N은 호스트별 부록 수이므로 번호는 그 뒤로 이어진다. 대상은 본문 "양호 외 항목" 표와 같은 항목 집합이고 같은 순서(`order_findings`)다. 한 항목은 판정이 달라도 한 블록이다. 블록(`<section class="rg-block">`)은 머리에 판정별 호스트 목록(`취약: … · 점검불가(수동): … · 예외(승인): …`, 호스트가 없는 판정은 뺀다), 이어서 점검 목적·보안 위협·판단 기준·점검방법(`check`)·조치방법·조치 영향도와 조치 난이도(단계와 이유)·`가이드 p.<guide_page>`를 싣는다. 조치방법은 `summary`와 그 항목에 있는 계열별 `steps` 전부이며 계열 이름(RHEL 계열·Debian 계열)을 붙이고 호스트의 계열로 고르지 않는다(계열이 섞인 호스트 목록을 한 블록으로 처리하기 위해서다. 호스트 계열에 맞춘 단계는 Remediation Plan xlsx가 고른다). steps의 줄바꿈은 `white-space: pre-wrap`으로 살린다. 호스트별 증적은 다시 싣지 않는다. 블록은 `break-inside: avoid`라 쪽 중간에서 잘리지 않고 쪽수 상한은 없다(블록 하나가 한 쪽보다 길면 브라우저가 어쩔 수 없이 나눈다. 호스트 목록이 아주 길어지는 경우도 같다. 스펙이 쪽수 상한을 두지 않기로 했으므로 호스트 목록 상한이나 접기는 두지 않는다. 블록은 항목 전체 코드(`KISA-2026:U-NN`)로 구분하고 카탈로그 조회는 본문 표(`_item_meta`·`remediation_view`)와 같은 규칙이라 다른 판 접두어의 코드도 같은 항목 번호의 카탈로그 문구를 쓰며(알려진 한계, 저장 기록의 판은 항상 `KISA-2026`이다), 카탈로그에 없는 코드도 본문 표와 같은 집합이 되도록 가진 열만으로 블록을 만든다). 양호 외 항목이 없는 실행에서는 부록 제목 아래에 `조치 안내 대상 없음`을 표시해 부록이 빠진 것과 대상이 없는 것을 구분한다. 데이터는 보고서 모델의 `config_vulnerability.remediation_guide`(항목 YAML에서 붙인 값뿐)이고 템플릿은 `sections/remediation_guide.html.j2`다. 검증은 공유 렌더링 테스트 `tests/test_host_audit_remediation_guide.py`(부록 위치·번호, 본문 표와 같은 순서, 판정이 섞인 항목의 호스트 목록, steps 있는 항목·없는 항목, 대상 없음, 이스케이프, `break-inside`)다.
-- **범위**: 호스트별 Remediation Plan xlsx는 Spec #488의 다른 티켓이며 이 절은 다루지 않는다. HTML의 조치 요약·조치 영향도·조치 안내 부록은 필터·템플릿 변경이라 SPEC-ID가 없다.
+- **범위**: 호스트별 Remediation Plan xlsx는 §17이다. HTML의 조치 요약·조치 영향도·조치 안내 부록은 필터·템플릿 변경이라 SPEC-ID가 없다.
 
 ## 11. 보관과 Audit Baseline (#125)
 
@@ -447,6 +450,7 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | `<YYYY-MM>/<run_id>/findings.json` | 섹션별 발견 색인 `{section: {hosts, ids: {host: [id]}}}`, `resolved`, `baseline_run_id` | 모든 실행 |
 | `<YYYY-MM>/<run_id>/trivy_version.json` | 판정 당시 Trivy 버전·취약점 DB 메타데이터 `{trivy_version, db_version, db_updated_at, db_downloaded_at, db_next_update, db_status, db_refreshed, source}` (#159) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/sbom/<host>.cdx.json` | Trivy 입력 SBOM(CycloneDX), 압축 없이 그대로. 다시 판정하는 입력이다(아래 재판정) (#159) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/xlsx/host-audit-<run_id>-<host>.xlsx` | 호스트별 Remediation Plan(§17). 파일마다 `AUD-513` SHA-256, Content-Type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`(`AUD-514`) (#494) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록(`packages/`), `package_vulnerability.json`, `pointer.json`. `trivy/`와 `package_findings/`는 올리지 않음(§9) | 모든 실행 |
 | `baseline/<run_id>.json` | 포인터 `{run_id, run_kind, started_at, findings_key, resolved}` | **정기 실행만**, 모든 업로드 성공 후 |
 
@@ -539,9 +543,9 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 | `AUD-506` | `Decide the Audit Baseline state of this run` | `ansible.builtin.set_fact` | 러너 | `ok`·`failed`·`disabled` |
 | `AUD-510` | `Save the findings index of this run on the runner` | `host_audit_findings_write` (role `library/` 커스텀 모듈) | 러너 | 실행별 파일 `0600`. 다른 섹션은 모델의 document 그대로, Package 발견 id는 `package_findings/<호스트>.json`에서 호스트 하나씩 읽어 쓴다(#155) |
 | `AUD-511` | `Save the Audit Baseline pointer of a scheduled run on the runner` | `ansible.builtin.copy` | 러너 | 정기 실행만, `0600` |
-| `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용 |
-| `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
-| `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log` |
+| `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용. 실행 디렉터리를 재귀로 찾으므로 `xlsx/`의 호스트별 xlsx(AUD-025)도 대상이다 |
+| `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용. xlsx도 파일별로 구한다 |
+| `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log`. Content-Type은 `.html` text/html, `.xlsx` OOXML 스프레드시트, 나머지 application/json. xlsx는 `<YYYY-MM>/<run_id>/xlsx/`에 올라간다 |
 | `AUD-515` | `Upload the Audit Baseline pointer of a scheduled run` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 정기 실행·전체 업로드 성공 시만, `no_log` |
 | `AUD-516` | `Fail the run when the Audit Baseline lookup or keeping the originals failed` | `ansible.builtin.assert` | 러너 | 파일 이름·상태만 표시 |
 
@@ -698,13 +702,14 @@ AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·�
 
 | 상황 | 동작 |
 |---|---|
-| 보관 성공 | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
+| Remediation Plan xlsx 쓰기 실패(보관 여부·메일 결과와 무관) | 남긴다. 맨 끝 판정(`Fail the run when a Remediation Plan xlsx could not be written`)이 호스트 이름과 함께 실행을 실패로 끝내고 `AUD-632`가 이유를 보여 준다(§17). 아래 행들보다 먼저 판정한다. |
+| 보관 성공(xlsx 쓰기 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
 | 보관 꺼짐(`host_audit_storage_enabled=false`), 메일 발송 성공 | 지운다. |
 | 보관 꺼짐, 메일 실패 또는 미발송 | 남긴다. 러너 사본이 유일하다. |
 | 보관 실패(업로드 실패, 보관 입력 누락) | 남긴다. AUD-516 메시지가 이 디렉터리를 가리킨다. |
 | check 모드 | 지우지 않는다. |
 
-"보관 성공"은 AUD-516이 통과하는 조건과 같다: 보관 입력 이상 없음, 업로드 전부 200, 정기 실행은 포인터 업로드 200, Audit Baseline 조회가 `failed`가 아님. Audit Baseline 조회만 실패한 실행은 AUD-516이 실패로 끝내고 메시지가 러너 디렉터리를 가리키므로 남긴다. 판정에 쓸 값이 없으면(앞 단계가 일찍 끝남) 남긴다. 남긴 경우 실행 로그에 경로와 이유를 보여 준다(`AUD-632`).
+"보관 성공"은 AUD-516이 통과하는 조건과 같다: 보관 입력 이상 없음, 업로드 전부 200, 정기 실행은 포인터 업로드 200, Audit Baseline 조회가 `failed`가 아님. Audit Baseline 조회만 실패한 실행은 AUD-516이 실패로 끝내고 메시지가 러너 디렉터리를 가리키므로 남긴다. 판정에 쓸 값이 없으면(앞 단계가 일찍 끝남) 남긴다. 남긴 경우 실행 로그에 경로와 이유를 보여 준다(`AUD-632`). 이유는 보관 단계 실패뿐 아니라 그 앞 단계(AUD-025 Remediation Plan 생성·쓰기)의 실패도 가리킨다.
 
 **경로 검증**: `output_dir`이 정확히 `<host_audit_output_root>/<run_id>`(출력 상위 경로 바로 아래 한 단계)이고, `run_id`가 `[A-Za-z0-9][A-Za-z0-9._-]*`이며 `resend-`로 시작하지 않을 때만 지운다. 하나라도 어긋나면 지우지 않고 이유를 보여 준다.
 
@@ -820,3 +825,34 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - pytest `tests/test_host_audit_regression.py` — 판정(선언 안 한 항목은 해당없음, 말하지 않은 선언 항목은 점검불가), 쉘 메타문자 차단, 백업 정책 판정(수집기 출력 형식 사용: 정상, 삭제 범위 확대, 다른 버킷, 정책 없음, 스냅샷 없음), 보고서 섹션과 Audit Baseline 발견, 항목 단위 악화 비교와 알림 본문(주소·시크릿 없음).
 - **molecule Fast Scenario** `VERIFY-AUD-700`(수렴된 호스트에서 선언 항목이 모두 통과하고 프로브가 호스트를 바꾸지 않는다), `VERIFY-AUD-701`(sshd 제한 블록 제거, journald 휘발성, 시크릿 파일 권한 확대를 일부러 만들면 해당 항목이 실패로 보고된다), `VERIFY-AUD-700`이 원복 뒤 다시 통과하는지도 본다(같은 판정 재확인). 컨테이너에서는 fail2ban·감사 규칙 적재·게시 포트를 재현하지 않아 이 항목들은 pytest가 본다.
 - `AUD-710`(백업 정책 판정)은 러너에서 저장소 JSON만 읽으므로 molecule 검증이 없고(`INTEGRATED`), pytest `tests/test_host_audit_regression.py`가 판정을 검증한다.
+
+## 17. Remediation Plan (Spec #488 / Ticket-6, #494)
+
+호스트마다 SolidStep 이행계획서 열 구성의 xlsx 1개를 만든다(CONTEXT.md Remediation Plan). 보고서와 함께 보관하며 정기·수시 실행 모두 만든다. 조치는 하지 않고 이행도 추적하지 않는다: 사람이 채운 파일을 다시 읽는 길은 없고, 이행 여부는 다음 정기 실행의 판정(Audit Baseline의 해소)이 증명한다. 압축(zip)·메일 첨부·재발송은 Ticket-7(#495)이다.
+
+- **파일**: 실행 디렉터리 `xlsx/host-audit-<run_id>-<inventory_hostname>.xlsx`(ASCII, `[A-Za-z0-9._-]` 밖의 글자는 `_`이고, 바뀐 이름과 80자를 넘어 잘린 이름에는 원래 이름의 SHA-256 앞 8자를 붙여 서로 다른 호스트가 같은 파일명을 쓰지 않게 한다). 시트 1개(`이행계획서`), 보관은 `<YYYY-MM>/<run_id>/xlsx/`(§11.1).
+- **행 범위**: 그 호스트에서 양호 외로 판정된 항목(취약·점검불가(수동)·예외(승인))이 한 행씩이다. 양호·해당없음은 넣지 않는다. 양호 외 항목이 없으면 `양호 외 항목 없음` 한 줄(통제내용 칸)만 있는 파일이다. KISA 점검 결과 자체가 없는 호스트(수집 실패·미점검)는 양호로 보이지 않도록 `점검 결과 없음(점검불가)` 한 줄이다.
+- **열(순서대로)**: 그룹(`category`) · 자산명(Inventory Hostname) · 담당자 · 통제내용(`U-xx 항목명`) · 취약점현황(`<판정>: <evidence>`, 메모가 있으면 다음 줄에 HTML 부록과 같은 note) · 점검방법(`check`) · 조치방법 · 위험도(3/2/1) · 이행과제 · 시급성(단기·중기·장기) · 영향도(조치 영향도) · 환경성(조치 난이도) · 우선순위(1~3) · 이행 결과 · 비고. 위험도·시급성·우선순위는 §10.5의 파생 규칙이고, 영향도·환경성은 항목 YAML의 level이다. 이행과제·이행 결과는 사람이 채우므로 비워 둔다.
+- **조치방법**: 호스트 OS 계열(steps는 계열(rhel·debian)별로만 두고 버전 차이는 문장 안에 적는다는 스펙 결정에 따라, CentOS 6처럼 systemd가 없는 호스트에도 같은 rhel 단계를 쓰므로 `systemctl`이 들어간 rhel steps에는 service 대안을 적어 둔다. `os-release` ID로 rhel·debian, 보고서 모델 `inventory[].os_family`)의 `steps`. 그 계열의 steps가 없거나 계열을 알 수 없으면 `remediation.summary`다. 계열은 `os-release` ID의 정확한 일치(rhel·centos·rocky·almalinux·ol·fedora·amzn은 rhel, debian·ubuntu는 debian)로만 정한다. `ID_LIKE`는 호스트별 JSON(`schema_version` 2)에 없고 그 스키마를 바꾸지 않으므로 파생 배포판은 계열을 알 수 없는 호스트로 보고 공통 요약을 받는다(틀린 계열의 명령을 싣는 것보다 낫다).
+- **담당자**: Asset Inventory의 관리자(직책)를 보고서가 보이는 그대로 싣는다. 값이 없으면 `미지정`, 조회가 실패했으면 `조회 실패`(Asset Inventory 표와 같은 말), Asset Inventory에 그 호스트 항목이나 관리자 칸이 없거나 호스트에 닿지 못해(수집 실패·기록 없음) 선언 값을 읽을 수 없었으면 역시 `조회 실패`(자료 없음을 '배정 안 됨'으로 꾸미지 않는다)이고, 값이 문자열이 아니면 그 표가 보이는 `잘못된 값 …`이다. 담당자를 따로 해석하거나 다른 곳에서 채우지 않으므로 셀 출처 규칙이 그대로 지켜진다(#492 검토에서 정함).
+- **비고**: 앞에 Audit Baseline 상태(`[신규]`·`[지속]`·`[재발]` 셋만, 다른 상태는 붙이지 않는다)가 붙고, 점검불가(수동) 행과 Audit Baseline이 없거나 조회되지 않은 실행(첫 실행 포함)에는 붙지 않는다. 그 뒤에 예외 레지스터 상태가 온다: 예외(승인)은 `예외(승인) — 사유: … / 위험: … / 보완: … / 승인: <직책> <승인일> / 만료: <만료일>`(날짜가 없거나 형식이 틀리면 레지스터 표처럼 `-`), 만료로 취약이 된 행은 `예외 만료(<만료일>)`, 승인 대기는 `예외 승인 대기`. 예외 값은 보고서 모델의 해당 호스트 발견(`findings[].hosts[].exception`, 레지스터 표와 같은 값)에서 읽는다. 이 필드는 보고서 모델 안에만 있다(Audit Baseline 문서와 보관 파일은 `appendix`와 id 색인만 쓰고 `findings`를 직렬화하지 않는다).
+- **취약점현황과 비고의 겹침**: 취약점현황은 HTML 부록과 같은 증적·메모(같은 말을 보여 주는 요구)이고 비고는 이행계획서 양식의 상태 열이다. 둘 다 호스트 발견 항목에서 나온 값이라 어긋나지 않는다. 활성 예외로 점검불가(수동)이 예외(승인)이 된 행은 Audit Baseline의 발견(예외 포함)이므로 `[신규]`·`[지속]` 앞머리가 붙는다(판정이 점검불가(수동)인 행에만 붙이지 않는다).
+- **정렬**: 우선순위 → 영향도(낮은 것 먼저) → 환경성(쉬운 것 먼저) → 판정(취약 → 점검불가(수동) → 예외(승인)) → 항목 코드(§10.5 `order_findings` 그대로).
+- **하단**: KISA 출처 문장과 `실행 ID: <run_id>`가 표 아래 빈 줄 하나 뒤에 온다.
+- **셀 출처 규칙**: 모든 셀 문자열은 보고서 모델이나 항목 YAML에 이미 있는 값이거나 위 고정 문구(열 이름, `양호 외 항목 없음`, 비고 문구의 연결어)다. xlsx 전용 비공개 값 필터는 두지 않는다. `host_audit_remediation_plan`은 모델과 카탈로그만 읽고 파일·lookup을 쓰지 않는다. 담당자는 직책이라 개인정보도 없다.
+- **판정 순서와 남는 디렉터리**: 맨 끝의 xlsx 쓰기 판정은 보관·메일·알림 판정 뒤에 있어, 앞 판정이 먼저 실패하면 그 메시지가 앞선다(실패한 호스트는 로그의 `ignoring` 줄에 남는다). xlsx 쓰기 실패 한 건이 실행 디렉터리를 남기는 비용(러너 디스크)은 증적 보존을 우선한 결정이며, 남은 디렉터리는 오래된 실행 정리(§14.2)가 보존 일수 뒤에 지운다.
+- **한 줄 파일의 자리**: `양호 외 항목 없음`과 `점검 결과 없음(점검불가)`는 통제내용 칸에 한 줄로 들어가고 위험도·우선순위 칸은 비어 있어 발견 행과 섞여도 구분된다. 한 호스트의 기록이 이상해 계획을 못 만들면 그 호스트만 `이행계획서 생성 실패 (<예외 종류: 메시지>)` 한 줄 파일(담당자는 아는 값 그대로)이 되고 다른 호스트는 계속된다. 로그에는 호스트와 예외 종류만 남기는 태스크가 있고(메시지는 레코드 값을 인용할 수 있어 `xlsx` 한 줄 파일에만 둔다), 모든 호스트가 실패했으면(필터·카탈로그 자체의 오류) 빈 증적을 보관하지 않도록 실행을 멈춘다(일부만 실패했을 때는 실패시키지 않는다: 계획 생성은 호스트별 격리, 파일 쓰기는 증적 보존을 위해 중단이라는 구분이다).
+- **카탈로그에 없는 코드**: 저장된 기록에 카탈로그에 없는 항목 코드가 있으면 통제내용은 `U-99 (카탈로그에 없는 항목)`이고 위험도·시급성·영향도·환경성·우선순위·점검방법·조치방법 셀은 빈 칸이다(None을 셀에 넣지 않는다). 쓰기 모듈도 문자열·정수가 아닌 값은 문자열로, None은 빈 셀로 쓰고, 짝 없는 서로게이트 같은 XML에 못 쓰는 글자는 뺀다.
+- **쓰기 실패와 실행 흐름**: xlsx를 쓰지 못해도(`ignore_errors`) 보관·메일·KISA 악화 알림·Audit Baseline 포인터는 계속한다(그것들은 xlsx에 기대지 않는다). 실패는 보관·메일 판정처럼 맨 끝(`Fail the run when a Remediation Plan xlsx could not be written`, 호스트 이름만 밝힘)에서 실행을 실패로 끝내고, 정리는 그 실행의 디렉터리를 남긴다(`AUD-630`은 보관 여부와 무관하게 xlsx 쓰기 실패를 '남긴다'로 판정하고 `AUD-632`가 이유를 보여 준다). 보관을 끈 실행은 xlsx가 러너에만 있는데 메일에는 아직 붙지 않으므로(첨부와 zip은 Ticket-7·#495가 더한다) 이 전환 기간에는 정리가 메일 성공 뒤 디렉터리를 지우면 xlsx도 사라진다. #495가 zip을 첨부하면 해소된다.
+- **실패 처리**: `AUD-025`의 `rows`는 모듈의 `no_log` 인자다(호스트 증적과 예외 사유가 러너의 syslog·journal 호출 기록에 남지 않게 한다). `no_log`는 모듈 결과 안의 같은 값까지 가려 `row 2 has ********`처럼 원인을 못 읽게 하므로, 모듈이 가림 대상을 24자 이상 값(증적 같은 자유 문장)으로 좁혀 행 번호·경로·호스트 이름은 보이게 한다. 오류 메시지는 행 번호와 개수만 적는다. 호스트마다 모듈을 한 번씩 부르는 것은 실패한 호스트를 라벨로 남기기 위해서다. 만들기에 실패하면 실행을 멈춘다. xlsx도 이번 실행의 증적이라 빠진 채 보관·메일로 넘어가지 않으며, 실패 원인이 될 입력(None 셀, 형식이 다른 셀, 인코딩 불가 글자)은 위처럼 모듈이 흡수한다. 쓰다 실패해도 `xlsx/`에 임시 파일을 남기지 않고, 프로세스가 죽어 남더라도 임시 파일 이름이 점(`.`)으로 시작해 `AUD-512`(숨김 파일을 찾지 않음)가 목록에 올리지 않는다(`mkstemp`로 만들고 `fsync` 뒤 `replace`). 정수 셀은 2^53을 넘으면 문자열로 쓴다(Excel은 숫자를 double로 저장). 쓰기 오류(디스크 가득 등)는 `dest`를 밝힌 실패 메시지로 낸다. 셀이 xlsx 한도(32,767자, Excel처럼 UTF-16 단위로 센다)보다 길면 잘라 `…`를 붙이고 모듈이 경고를 낸다. 시트 이름(31자 이하, 금지 문자·가장자리 작은따옴표)과 열 너비(1~255, 머리글보다 많으면 오류)는 모듈이 검증한다. 길이 한도는 줄바꿈 정규화와 XML에 못 쓰는 글자를 뺀 뒤의 길이로 판단하고 경고도 같은 기준이다. check 모드는 파일이 이미 같은 바이트면 `changed`가 아니다. 호스트마다 필터를 다섯 번 부르지 않도록(호스트·발견 탐색은 호스트 수에 비례해 다시 돌지만 수십 대 규모에서는 무시할 만하다) `host_audit_remediation_plans`가 모든 호스트의 계획을 한 번에 만든다.
+- **같은 입력이면 같은 바이트**: 쓰기 모듈이 zip 항목 시각을 1980-01-01로 고정하고 항목 순서를 고정하며 압축하지 않는다(`ZIP_STORED`: deflate 결과는 zlib 빌드에 따라 달라 러너 이미지가 바뀌면 같은 입력이 다른 바이트가 되기 때문이다). 보관 해시로 동일성을 확인한다. 러너 이미지에는 스프레드시트 라이브러리를 더하지 않는다(표준 라이브러리 `zipfile`). 모듈은 시트 1개, 문자열·정수, 머리글 굵게·열 너비·줄바꿈·틀 고정만 쓴다. 호스트별 JSON(`schema_version` 2)은 바뀌지 않는다.
+
+### 17.1 태스크 매트릭스
+
+`AUD-025` 앞의 `Build the Remediation Plan of every host`(계획을 한 번에 만드는 `set_fact`)와 `Name the hosts whose Remediation Plan could not be built`(생성 실패 호스트를 로그에 남기는 `debug`), `Stop when …`(전 호스트 생성 실패 시 중단)과 맨 끝의 `Collect the hosts whose Remediation Plan xlsx could not be written`(실패 호스트를 한 번만 모아 판정과 정리가 같이 씀)와 `Fail the run when a Remediation Plan xlsx could not be written`(쓰기 실패 판정)은 AUD-025의 준비·보고·판정 보조 태스크라 별도 SPEC-ID를 두지 않는다(`AUD-026`은 Ticket-7의 zip이 쓴다). 동작은 위 실패 처리 항목과 `tests/test_host_audit_remediation_plan_report.py`가 고정한다.
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-025` | `Write the Remediation Plan xlsx of every host` | `host_audit_xlsx_write` (role `library/` 커스텀 모듈) | 러너 | 같은 입력이면 같은 바이트, 이미 같은 파일이면 `changed` 없음. 파일 `0600`, `xlsx/`는 만들 때 `0700`. 보고서 모델 뒤, 보관(AUD-512~514) 앞. 보관·메일·정리를 묶은 block 안의 첫 태스크다. 실패는 모아 맨 끝 판정에서 실행을 실패로 끝낸다(위 '쓰기 실패와 실행 흐름'). 계획은 `host_audit_remediation_plan_map`(각 계획의 `host`를 키로 한 dict, 안에서 `host_audit_remediation_plans`를 부른다)으로 set_fact에 한 번 만들고(`no_log`가 아니다: 필터 예외의 원인이 가려지지 않게 하고, 성공 때의 fact는 `-v`에서만 찍히며 `report.html`과 같은 내용) 반복문은 호스트 이름만 돈다(반복문 item은 실패 결과에 그대로 찍히므로) |
+
+검증: pytest `tests/test_host_audit_remediation_plan.py`(행 범위, 한 줄 파일, 계열별 steps와 summary 대체, 담당자, 비고 세 문구와 Baseline 앞머리 규칙, 빈칸 열, 정렬, 셀 출처), `tests/test_host_audit_xlsx_write.py`(openpyxl로 다시 열어 값·머리글 서식·너비·줄바꿈·틀 고정, 같은 바이트), `tests/test_host_audit_remediation_plan_report.py`(`report.yml`의 AUD-025와 보관 목록, Content-Type). 보고서 단계는 molecule 대상이 아니라 `[VERIFY-…]`는 없고(`INTEGRATED`, AUD-710과 같음) 위 pytest가 검증한다. 모듈 인자 템플릿에서 호스트 증적의 `{{ }}`가 평가되지 않는지도 `tests/test_host_audit_remediation_plan_report.py`가 본다.

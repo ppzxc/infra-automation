@@ -254,6 +254,7 @@ def order_findings(findings):
     return sorted(findings, key=key)
 
 
+BLANK = '-'  # what the register table (and the Remediation Plan remark) shows for an absent value
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'
 REGISTER_EXPIRED = '만료'
@@ -418,9 +419,9 @@ def _register_rows(register, applied, today):
             'reason': entry.get('reason', ''),
             'risk': entry.get('risk', ''),
             'mitigation': entry.get('mitigation', ''),
-            'approver': entry.get('approver') or '-',
-            'approved_on': _date(entry.get('approved_on')) or '-',
-            'expires_on': _date(entry.get('expires_on')) or '-',
+            'approver': entry.get('approver') or BLANK,
+            'approved_on': _date(entry.get('approved_on')) or BLANK,
+            'expires_on': _date(entry.get('expires_on')) or BLANK,
             'state': state,
             'state_class': {REGISTER_ACTIVE: 'ok', REGISTER_EXPIRED: 'crit',
                             REGISTER_PENDING: 'warn', REGISTER_INVALID: 'crit'}[state],
@@ -527,7 +528,10 @@ def host_audit_kisa_section(model, records, register=None, today=None):
                     applied[it['code']] = applied.get(it['code'], 0) + 1
             if verdict not in (GOOD, NOT_APPLICABLE):
                 key = (it['code'], verdict)
-                groups.setdefault(key, []).append({'host': host, 'evidence': it['evidence'], 'note': note})
+                # ``exception`` is the register entry view the report already draws in its register table; the
+                # Remediation Plan remark reads it from here (no second path from the register).
+                groups.setdefault(key, []).append({'host': host, 'evidence': it['evidence'], 'note': note,
+                                                   'exception': dict(exc) if exc else None})
             rows.append(dict(_item_meta(it['code']), verdict=verdict, verdict_class=VERDICT_CLASSES[verdict],
                              evidence=it['evidence'], note=note))
         appendix[host] = rows

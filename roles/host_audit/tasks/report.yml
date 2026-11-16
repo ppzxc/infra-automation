@@ -103,6 +103,55 @@
 # 디렉터리를 정책대로 정리한다(cleanup.yml, #157).
 - name: Keep the originals, mail the report, judge both, and clean up the run directory
   block:
+    # 호스트마다 Remediation Plan xlsx 1개(양호 외 항목이 없는 호스트도 "양호 외 항목 없음" 한 줄 파일). 행은 보고서 모델과
+    # 항목 카탈로그에서만 만든다(필터 host_audit_remediation_plans, docs/host_audit.md §17). 실행 디렉터리 xlsx/ 아래에 쓰면
+    # 보관(AUD-512~514)이 <YYYY-MM>/<run_id>/xlsx/로 올린다. 정기·수시 실행 모두 만든다.
+    # 쓰기에 실패해도 보관·메일·KISA 악화 알림·Audit Baseline 포인터는 계속한다(그것들은 xlsx에 기대지 않는다). 실패는
+    # 보관·메일 판정처럼 맨 끝에서 실행을 실패로 끝내고(Judge ... xlsx), 그때 정리가 디렉터리를 남긴다(cleanup.yml).
+    # 계획(행에 호스트 증적과 예외 사유가 있다)은 한 번만 만들어 set_fact에 두고, 반복문은 호스트 이름만 돈다:
+    # 반복문의 item은 실패 결과에 그대로 찍히기 때문이다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이
+    # 보여야 하고(no_log면 가려진다), 성공 때의 fact는 -v에서만 찍히며 내용은 report.html과 같다.
+    - name: Build the Remediation Plan of every host
+      ansible.builtin.set_fact:
+        _host_audit_remediation_plans: "{{ host_audit_model | host_audit_remediation_plan_map }}"
+
+    # 계획을 못 만든 호스트는 그 호스트만 한 줄 파일이 되고 실행은 계속된다. 로그에 호스트와 원인을 남긴다.
+    - name: Name the hosts whose Remediation Plan could not be built
+      ansible.builtin.debug:
+        msg: "Remediation Plan 생성 실패 {{ item.key }}: {{ item.value.error.split(':')[0] }} (메시지는 xlsx의 한 줄 파일에 있다)"
+      loop: "{{ _host_audit_remediation_plans | dict2items | selectattr('value.error', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    # 모든 호스트가 실패했다면 필터나 카탈로그 자체가 깨진 것이라 빈 증적을 보관하지 않고 멈춘다.
+    - name: Stop when the Remediation Plan could not be built for any host
+      ansible.builtin.assert:
+        that: _host_audit_remediation_plans | dict2items | selectattr('value.error', 'defined') | list | length
+              < _host_audit_remediation_plans | length
+        fail_msg: "모든 호스트의 Remediation Plan 생성이 실패했다(필터·카탈로그 오류, 위 로그 참고)"
+      when: _host_audit_remediation_plans | length > 0
+
+    - name: "[AUD-025] Write the Remediation Plan xlsx of every host"
+      vars:
+        _plan: "{{ _host_audit_remediation_plans[item] }}"
+      host_audit_xlsx_write:
+        dest: "{{ host_audit_run.output_dir }}/xlsx/{{ _plan.file_name }}"
+        sheet: "{{ _plan.sheet }}"
+        headers: "{{ _plan.headers }}"
+        rows: "{{ _plan.rows }}"
+        footer: "{{ _plan.footer }}"
+        widths: "{{ _plan.widths }}"
+      loop: "{{ host_audit_model.hosts }}"
+      register: _host_audit_xlsx_write
+      ignore_errors: true
+
+    # 실패한 호스트를 한 번만 모아 두고 맨 끝 판정과 정리(cleanup.yml)가 같이 쓴다.
+    - name: Collect the hosts whose Remediation Plan xlsx could not be written
+      ansible.builtin.set_fact:
+        _host_audit_xlsx_failed_hosts: >-
+          {{ _host_audit_xlsx_write.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
+             | map(attribute='item') | list }}
+
     - name: Keep the originals in the Host Audit bucket
       ansible.builtin.include_tasks: storage_upload.yml
 
@@ -132,6 +181,12 @@
 
     - name: Judge the KISA worsening notification
       ansible.builtin.include_tasks: kisa_alert_result.yml
+
+    # AUD-025의 실패를 모아 맨 끝에서 실행을 실패로 끝낸다. 호스트 이름만 밝힌다(오류 메시지는 모듈 출력에 이미 있다).
+    - name: Fail the run when a Remediation Plan xlsx could not be written
+      ansible.builtin.assert:
+        that: _host_audit_xlsx_failed_hosts | default([]) | length == 0
+        fail_msg: "Remediation Plan xlsx를 쓰지 못한 호스트: {{ _host_audit_xlsx_failed_hosts | default([]) | join(', ') }} (실행 디렉터리는 남김)"
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml
