@@ -420,6 +420,17 @@ def test_aud_101_task_reads_the_five_keys_and_never_evaluates_template_text_from
     assert "PWNED-X" not in json.dumps(asset) and "s3cret-pw" not in json.dumps(asset)
 
 
+def test_aud_101_task_treats_a_200_without_usable_data_as_lookup_failed(tmp_path):
+    asset = _aud101_record(tmp_path, {}, 200)
+    assert asset["lookup"] == "failed"
+
+
+def test_runner_ansible_core_does_not_template_untrusted_data():
+    pins = (ROOT_DIR / "requirements-test.txt").read_text(encoding="utf-8")
+    version = re.search(r"^ansible-core==(\d+)\.(\d+)", pins, re.M)
+    assert version and (int(version.group(1)), int(version.group(2))) >= (2, 19)
+
+
 def test_aud_101_task_marks_a_non_200_host_kv_response_as_lookup_failed(tmp_path):
     for status in (404, 403, -1):
         sub = tmp_path / str(status)
