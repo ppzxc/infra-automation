@@ -120,7 +120,7 @@
     # 계획을 못 만든 호스트는 그 호스트만 한 줄 파일이 되고 실행은 계속된다. 로그에 호스트와 원인을 남긴다.
     - name: Name the hosts whose Remediation Plan could not be built
       ansible.builtin.debug:
-        msg: "Remediation Plan 생성 실패 {{ item.key }}: {{ item.value.error }}"
+        msg: "Remediation Plan 생성 실패 {{ item.key }}: {{ item.value.error.split(':')[0] }} (메시지는 xlsx의 한 줄 파일에 있다)"
       loop: "{{ _host_audit_remediation_plans | dict2items | selectattr('value.error', 'defined') | list }}"
       loop_control:
         label: "{{ item.key }}"

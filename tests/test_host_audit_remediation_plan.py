@@ -293,6 +293,7 @@ def test_file_name_is_ascii_and_safe():
     assert host_audit_remediation_file_name("ha-1", "../a b/한") == "host-audit-ha-1-.._a_b__-%s.xlsx" % suffix
     assert host_audit_remediation_file_name("r", "ns1 ") != host_audit_remediation_file_name("r", "ns1_")
     assert "/" not in host_audit_remediation_file_name("r", "a/b")
+    assert host_audit_remediation_file_name("r", "a\ud800").startswith("host-audit-r-a_-")  # a lone surrogate cannot break it
 
 
 def test_os_families_are_the_step_families_of_the_catalog():

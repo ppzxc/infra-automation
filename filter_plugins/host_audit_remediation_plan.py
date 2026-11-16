@@ -157,7 +157,7 @@ def host_audit_remediation_file_name(run_id, host):
         value = str(value)
         clean = safe.sub('_', value)
         # Names that differ only in replaced characters must not share a file (the last write would win).
-        return clean if clean == value else '%s-%s' % (clean, hashlib.sha256(value.encode('utf-8')).hexdigest()[:8])
+        return clean if clean == value else '%s-%s' % (clean, hashlib.sha256(value.encode('utf-8', 'replace')).hexdigest()[:8])
 
     return FILE_NAME % (part(run_id), part(host))
 
