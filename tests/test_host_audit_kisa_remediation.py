@@ -168,7 +168,7 @@ def test_derived_values_are_not_stored_in_the_catalog():
 
 def _fake(code, severity, impact, effort):
     return {"title": code, "severity": severity, "category": "계정 관리", "criteria": "c", "cis": "",
-            "remediation_impact": {"level": impact, "reason": "r"}, "remediation_effort": {"level": effort, "reason": "r"}}
+            "remediation": {"summary": "s"}, "remediation_impact": {"level": impact, "reason": "r"}, "remediation_effort": {"level": effort, "reason": "r"}}
 
 
 def test_findings_sort_by_priority_then_impact_then_effort():
@@ -293,3 +293,23 @@ def test_per_host_config_vulnerability_json_shape_is_unchanged():
     part = _record("ns0001", ["U-01|VULN|x"])["config_vulnerability"]
     assert set(part) == {"edition", "status", "reason", "results"}
     assert set(part["results"][0]) == {"code", "result", "verdict", "evidence", "exception"}
+
+
+def test_finding_of_an_unknown_code_renders_without_an_empty_remediation_line(model):
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+    cv = dict(model["config_vulnerability"])
+    stray = dict(cv["findings"][0], code="KISA-2026:U-99", **kisa.remediation_view("KISA-2026:U-99"))
+    page = env.get_template("report.html.j2").render(
+        host_audit_model=dict(model, config_vulnerability=dict(cv, findings=cv["findings"] + [stray])))
+    row = page[page.index("KISA-2026:U-99"):]
+    row = row[:row.index("</tr>")]
+    assert "조치: " not in row and '<td class="impact">-</td>' in row
+
+
+def test_report_without_the_source_key_has_no_stray_sentence_line(model):
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+    cv = {k: v for k, v in model["config_vulnerability"].items() if k != "remediation_source"}
+    page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
+    assert '<p class="small mute">.</p>' not in page and SOURCE_SENTENCE not in page

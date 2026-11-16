@@ -121,7 +121,7 @@ def _validate_remediation(code, meta, path):
         if field not in meta:
             fail(field, 'is missing')
     for field in TEXT_FIELDS:
-        if _blank(meta[field]) or meta[field] != meta[field].strip():
+        if _untrimmed(meta[field]):
             fail(field, 'must be non-blank text without surrounding whitespace')
     page = meta['guide_page']
     if type(page) is not int or page < 1:
@@ -238,15 +238,10 @@ def remediation_view(code, items=None):
 def order_findings(findings, items=None):
     """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
     low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable."""
-    items = items or ITEMS
-
     def key(finding):
-        short = finding['code'].split(':', 1)[-1]
-        meta = items.get(short)
-        if meta is None:
-            return (9, 9, 9, VERDICTS.index(finding['verdict']), finding['code'])
-        return (priority_of(meta['severity']), meta['remediation_impact']['level'],
-                meta['remediation_effort']['level'], VERDICTS.index(finding['verdict']), finding['code'])
+        view = remediation_view(finding['code'], items)  # unknown codes sort last
+        return (view['priority'] or 9, view['impact_level'] or 9, view['effort_level'] or 9,
+                VERDICTS.index(finding['verdict']), finding['code'])
 
     return sorted(findings, key=key)
 
