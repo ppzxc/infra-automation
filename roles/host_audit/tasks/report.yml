@@ -176,7 +176,7 @@
       vars:
         _hosts: "{{ _host_audit_xlsx_failed_hosts | default([]) }}"
         _stale: >-
-          {{ (_host_audit_xlsx_present.failed | default(false) | bool)
+          {{ (_host_audit_xlsx_present.failed | default(false) | bool) or (_host_audit_xlsx_stale.failed | default(false) | bool)
              or (_host_audit_xlsx_stale.results | default([]) | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0) }}
       ansible.builtin.set_fact:
         _host_audit_xlsx_problem:
@@ -198,10 +198,6 @@
         state: absent
       when: not (_host_audit_xlsx_pack | bool)
 
-    - name: Reset the xlsx zip failure mark
-      ansible.builtin.set_fact:
-        _host_audit_xlsx_zip_failed: false
-
     - name: "[AUD-026] Pack every Remediation Plan xlsx into one zip"
       host_audit_zip_write:
         src_dir: "{{ host_audit_run.output_dir }}/xlsx"
@@ -213,11 +209,10 @@
         - not ansible_check_mode  # check 모드의 xlsx 쓰기는 파일을 만들지 않으므로 묶을 것이 없다
         - _host_audit_xlsx_pack | bool
 
-    # 별도 표지(_host_audit_xlsx_zip_failed)를 두는 이유: 바로 아래 '묶기 실패 때 zip 지우기'가 읽는다. 소비자 셋(맨 끝 판정,
-    # 그 메시지, 정리 cleanup.yml)은 _host_audit_xlsx_problem 하나만 읽는다.
+    # 소비자 셋(맨 끝 판정, 그 메시지, 정리 cleanup.yml)은 _host_audit_xlsx_problem 하나만 읽는다. 묶기 실패 자체는 모듈
+    # 결과(_host_audit_xlsx_zip_write.failed)가 이미 담고 있어 별도 표지를 두지 않는다.
     - name: Remember that the xlsx zip could not be written
       ansible.builtin.set_fact:
-        _host_audit_xlsx_zip_failed: true
         _host_audit_xlsx_problem: "{{ _host_audit_xlsx_problem | combine({'failed': true, 'targets': _host_audit_xlsx_problem.targets + ['xlsx zip'], 'what': (_host_audit_xlsx_problem.what if _host_audit_xlsx_problem.failed else 'xlsx zip 쓰기')}) }}"
       when: _host_audit_xlsx_zip_write.failed | default(false)
 
@@ -226,7 +221,7 @@
       ansible.builtin.file:
         path: "{{ _host_audit_xlsx_zip_path }}"
         state: absent
-      when: _host_audit_xlsx_zip_failed | bool
+      when: _host_audit_xlsx_zip_write.failed | default(false)
 
     - name: "[AUD-611] Compute the SHA-256 of the report to attach"
       ansible.builtin.stat:
@@ -299,7 +294,7 @@
     - name: Fail the run when a Remediation Plan xlsx could not be written
       ansible.builtin.assert:
         that: not (_host_audit_xlsx_problem.failed | bool)
-        fail_msg: "Remediation Plan xlsx(또는 xlsx zip)를 쓰지 못한 대상: {{ _host_audit_xlsx_problem.targets | join(', ') }} (실행 디렉터리는 남김)"
+        fail_msg: "Remediation Plan xlsx 쓰기·묶기·이전 시도 파일 정리에 실패한 대상: {{ _host_audit_xlsx_problem.targets | join(', ') }} (실행 디렉터리는 남김)"
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml

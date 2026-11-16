@@ -73,4 +73,3 @@ def write_atomic(dest, data, create_parent=False):
             pass
         raise
     return True
-
