@@ -192,6 +192,15 @@ def test_the_cut_warning_counts_after_normalization(tmp_path):
     assert len(cell) == 32764
 
 
+def test_the_cell_limit_counts_utf16_units_like_excel(tmp_path):
+    dest = tmp_path / "e.xlsx"
+    text = "\U0001F600" * 20000  # 20,000 characters, 40,000 UTF-16 units
+    out = _run(dict(_args(dest), rows=[["a", "b", 1, text]], _args_file=tmp_path / "e.json"))
+    assert "were cut" in json.dumps(out["warnings"])
+    cell = openpyxl.load_workbook(dest).active["D2"].value
+    assert cell.endswith("…") and len(cell.encode("utf-16-le")) // 2 <= 32767
+
+
 def test_the_writer_uses_only_the_standard_library():
     spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
     source = MODULE.read_text(encoding="utf-8")

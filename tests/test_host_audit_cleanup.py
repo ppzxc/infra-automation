@@ -34,6 +34,8 @@ def _tail_block():
             inc = t.get("ansible.builtin.include_tasks")
             if inc in ("storage_upload.yml", "mail.yml"):
                 continue  # network and mail tasks: their results are given as variables
+            if "Remediation Plan" in t.get("name", ""):
+                continue  # xlsx writing needs the report model; it has its own test
             out.append({"block": _load(inc)} if inc else t)
         return out
 

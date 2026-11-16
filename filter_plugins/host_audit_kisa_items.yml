@@ -549,6 +549,7 @@ U-28:
     summary: 방화벽(firewalld, ufw, iptables, nftables)으로 허용 IP와 포트를 등록한다. 방화벽이 꺼져 있으면 관리 접속 허용 규칙을 먼저 넣고 켠다. TCP Wrapper는 hosts.allow에 허용 IP를 먼저 넣은 뒤 hosts.deny에 ALL:ALL을 쓰며, RHEL 8 이상에서는 libwrap이 없어 적용되지 않는다.
     steps:
       rhel: |
+        systemd와 firewalld가 없는 CentOS 6은 firewall-cmd·systemctl 줄을 건너뛰고 iptables 줄만 따른다
         firewall-cmd --list-all 로 현재 설정과 기본 zone target 확인(ACCEPT면 안 됨)
         target이 ACCEPT면: firewall-cmd --permanent --zone=<zone> --set-target=default 후 firewall-cmd --reload
         허용 규칙 추가: firewall-cmd --permanent --add-rich-rule (source address, port protocol, port, accept) 후 --reload

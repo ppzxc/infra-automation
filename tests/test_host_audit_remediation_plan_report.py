@@ -32,8 +32,18 @@ def _tasks(name):
     return yaml.safe_load((TASKS / name).read_text(encoding="utf-8"))
 
 
+def _flat(tasks):
+    for task in tasks:
+        yield task
+        yield from _flat(task.get("block", []))
+
+
 def _task(file, spec_id):
-    return next(t for t in _tasks(file) if "[%s]" % spec_id in t.get("name", ""))
+    return next(t for t in _flat(_tasks(file)) if "[%s]" % spec_id in t.get("name", ""))
+
+
+def _plan_task():
+    return next(t for t in _flat(_tasks("report.yml")) if t.get("name") == "Build the Remediation Plan of every host")
 
 
 def _record(host, vulnerable):
@@ -58,7 +68,7 @@ def _run(tmp_path, out, model, run_kind="scheduled"):
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
         "vars": {"host_audit_run": {"run_id": "ha-1", "run_kind": run_kind, "output_dir": str(out)},
                  "_host_audit_storage_active": True, "_host_audit_storage_problem": ""},
-        "tasks": [load, _task("report.yml", "AUD-025")] + keep + [{"ansible.builtin.debug": {
+        "tasks": [load, _plan_task(), _task("report.yml", "AUD-025")] + keep + [{"ansible.builtin.debug": {
             "msg": "{{ _host_audit_keep_stats.results | map(attribute='stat', default={}) | list }}"}}],
     }], allow_unicode=True))
     env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
@@ -120,8 +130,17 @@ def test_upload_maps_the_xlsx_content_type():
     assert ".xlsx" in upload["vars"]["_content_type"]
 
 
-def test_the_writer_runs_before_the_checksums_and_upload_in_report_order():
-    names = [t.get("name", "") for t in _tasks("report.yml")]
-    first = next(i for i, n in enumerate(names) if "[AUD-025]" in n)
-    assert names.index(next(n for n in names if "[AUD-024]" in n)) < first
-    assert first < names.index(next(n for n in names if "[AUD-611]" in n))
+def test_the_writer_is_inside_the_cleanup_block_before_the_upload():
+    """A failing AUD-025 must still reach the always: cleanup (it says why the directory is kept)."""
+    block = next(t for t in _tasks("report.yml") if "always" in t)
+    names = [t.get("name", "") for t in block["block"]]
+    write = next(i for i, n in enumerate(names) if "[AUD-025]" in n)
+    assert write < names.index("Keep the originals in the Host Audit bucket")
+    assert "[AUD-025]" not in " ".join(t.get("name", "") for t in _tasks("report.yml") if "block" not in t)
+
+
+def test_a_failing_item_does_not_echo_the_rows(tmp_path):
+    """The loop only carries host names; the plan (host evidence) is in a no_log set_fact."""
+    write = _task("report.yml", "AUD-025")
+    assert write["loop"] == "{{ host_audit_model.hosts }}"
+    assert _plan_task()["no_log"] is True

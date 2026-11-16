@@ -89,6 +89,22 @@ _ILLEGAL = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]') 
 STYLE_HEADER, STYLE_BODY, STYLE_FOOTER = 1, 2, 3
 
 
+def _units(value):
+    """Length as Excel counts it: UTF-16 code units (a character outside the BMP is two)."""
+    return len(value.encode('utf-16-le', 'surrogatepass')) // 2
+
+
+def _cut(value):
+    """The longest prefix that fits with the ellipsis, never splitting a character."""
+    kept, used = [], 1  # the ellipsis
+    for char in value:
+        used += 2 if ord(char) > 0xFFFF else 1
+        if used > MAX_CELL:
+            break
+        kept.append(char)
+    return u''.join(kept) + u'…'
+
+
 def _normalize(value):
     """Cell text as it is written, before the length limit: CRLF as LF, XML-illegal characters dropped."""
     return _ILLEGAL.sub(u'', value.replace(u'\r\n', u'\n').replace(u'\r', u'\n'))
@@ -96,8 +112,8 @@ def _normalize(value):
 
 def _text(value):
     value = _normalize(value)
-    if len(value) > MAX_CELL:
-        value = value[:MAX_CELL - 1] + u'…'
+    if _units(value) > MAX_CELL:
+        value = _cut(value)
     return value.replace(u'&', u'&amp;').replace(u'<', u'&lt;').replace(u'>', u'&gt;')
 
 
@@ -203,7 +219,7 @@ def _workbook(sheet):
 def truncated_cells(headers, rows, footer):
     """Number of text cells longer than an xlsx cell holds (they are cut with an ellipsis; the module warns)."""
     cells = list(headers) + [c for row in rows for c in row] + list(footer)
-    return sum(1 for c in cells if isinstance(c, str) and len(_normalize(c)) > MAX_CELL)
+    return sum(1 for c in cells if isinstance(c, str) and _units(_normalize(c)) > MAX_CELL)
 
 
 def build_xlsx(sheet, headers, rows, footer, widths):
@@ -255,7 +271,7 @@ def _write(dest, data):
         return False
     directory = os.path.dirname(dest) or '.'
     if not os.path.isdir(directory):
-        os.makedirs(directory, 0o700)
+        os.makedirs(directory, 0o700, exist_ok=True)  # one missing level is the role's case (xlsx/ under the run dir)
         os.chmod(directory, 0o700)
     # mkstemp: exclusive create with an unpredictable name (no symlink to follow), mode 0600. The name starts with a
     # dot, so AUD-512 (ansible.builtin.find without hidden files) never lists a leftover of a killed run.
