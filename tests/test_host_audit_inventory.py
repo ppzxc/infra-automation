@@ -338,6 +338,9 @@ def test_declaration_defuses_jinja_delimiters_caps_length_and_drops_non_text_val
                                          "isms_owner_role": False, "isms_admin_role": ["x"]}, True)
 
     assert "{{" not in decl["purpose"] and "{%" not in decl["purpose"] and "{#" not in decl["purpose"]
+    for tricky in ("{{{ x }}}", "{{{%", "{{{{ x", "{%{# y"):
+        out = host_audit_asset_declaration({"description": tricky}, True)["purpose"]
+        assert not re.search(r"\{[{%#]", out), (tricky, out)
     assert len(decl["purpose"]) <= 130
     assert decl["owner_role"] == "" and decl["admin_role"] == ""
 

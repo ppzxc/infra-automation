@@ -139,8 +139,8 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 **판정 규칙**
 
 - **선언 값 출처**: ISMS 자산대장의 사본인 OpenBao `hosts/<Inventory Hostname>`다. `resolve_connection`이 접속 해석 때 이미 읽은 호스트 KV dict에서 다섯 키만 고르고(같은 dict에 접속 정보가 있어 통째로 기록·보고서에 넘기지 않는다) OpenBao를 다시 조회하지 않는다. 키는 용도=`description`(끝의 `[그룹자산명]`도 그대로 표시), `isms_department`(관리 부서), `isms_owner_role`(책임자 직책), `isms_admin_role`(관리자 직책), `isms_asset_importance`(자산중요도, H/M/L)다.
-- **조회 실패**: `hosts/<host>` 조회가 200이 아니면 다섯 칸 모두 '조회 실패'로 표시한다. 값이 정말 없는 것('미지정')과 구분하며 메일 요약도 '선언 미지정 호스트'와 '선언 조회 실패 호스트'를 따로 센다.
-- **미지정**: 조회는 됐는데 다섯 키 중 빈 값. 자산대장에 없는 서버와 `isms_target=false` 서버도 별도 상태 없이 '미지정'이다.
+- **조회 실패**: `hosts/<host>` 조회가 200이 아니면(404 포함: `hosts/<host>` 항목이 없는 서버도 같다) 다섯 칸 모두 '조회 실패'로 표시한다. 값이 정말 없는 것('미지정')과 구분하며 메일 요약도 '선언 미지정 호스트'와 '선언 조회 실패 호스트'를 따로 센다.
+- **미지정**: 조회는 됐는데 다섯 키 중 빈 값. `hosts/<host>`가 200으로 답했지만 키가 없는 서버와 `isms_target=false` 서버도 별도 상태 없이 '미지정'이다.
 - **잘못된 값**: 자산중요도가 H/M/L이 아니면 `잘못된 값 (<원래 값>)`으로 표시한다.
 - **선언 외**: 특수권한자(uid 0, wheel·sudo·admin 그룹 구성원, sudoers 규칙 대상) 중 허용 목록에 없는 계정. 허용 목록은 `accounts`의 sudo 권한 계정(`sudo: true`, 또는 `sudo` 미지정 + `tier: admin`, `state: absent` 제외), `openbao_ssh_allowed_principals`, `host_audit_privileged_extra`, 그리고 root다. sudoers의 `User_Alias` 등 별칭은 펼치지 않는다.
 - **장기 미사용**: 로그인 가능한 셸을 가진 계정 중 `lastlog -t 90`에 없는 계정(기록 없음 포함). 점검 계정과 uid 0 계정은 제외하고 표지에 명시한다. uid 0의 직접 로그인은 Configuration Vulnerability(KISA-2026) 항목이 다룬다. lastlog가 없으면 '마지막 로그인 점검불가'로 표시하고 장기 미사용 판정을 하지 않는다.

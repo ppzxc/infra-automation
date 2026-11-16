@@ -297,8 +297,8 @@ def _declared_text(value):
     result loses Ansible's unsafe marking) and the length is capped."""
     if value is None or isinstance(value, (dict, list, bool)):
         return ''
-    text = str(value).strip()[:DECLARED_MAX_LEN]
-    return text.replace('{{', '{ {').replace('{%', '{ %').replace('{#', '{ #')
+    text = str(value).strip()[:DECLARED_MAX_LEN].strip()
+    return re.sub(r'\{(?=[{%#])', '{ ', text)
 
 
 def host_audit_asset_declaration(host_kv, lookup_ok=True):
