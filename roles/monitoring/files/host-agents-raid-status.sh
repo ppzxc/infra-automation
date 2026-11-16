@@ -4,6 +4,7 @@
 #
 # cron이 5분마다 root로 실행한다. 읽기 전용이다: `ctrl all show config detail` 한 번만 부르고,
 # 설정을 바꾸는 명령은 쓰지 않으며 도구를 설치하지 않는다(없으면 tool_status=no_tool만 남긴다).
+# Broadcom/HPE MegaRAID(storcli64)는 `/c0 show all` 한 번만 부른다(family=megaraid, Spec #383).
 # 결과는 정규화한 JSON 줄로 raid.jsonl에 append하고, otelcol(filelog/host_status_logs)이 읽는다.
 #
 #   레코드 종류(kind): controller, logical_drive, physical_drive, cache_battery, tool_status
@@ -18,7 +19,8 @@ export PATH
 LOG="${RAID_STATUS_LOG:-/var/log/host-agents/raid.jsonl}"
 LOCK="${RAID_STATUS_LOCK:-/var/lib/host-agents/raid-status.lock}"
 TIMEOUT="${RAID_STATUS_TIMEOUT:-60}"
-TOOLS="${RAID_STATUS_TOOLS:-ssacli hpssacli hpacucli}"
+TOOLS="${RAID_STATUS_TOOLS:-ssacli hpssacli hpacucli storcli64 storcli}"
+FAMILY=smartarray
 
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 start=$(date +%s)
@@ -34,8 +36,8 @@ emit_status() {
     now=$(date +%s)
     dur=$((now - start))
     [ "$dur" -ge 0 ] || dur=0
-    printf '{"ts":"%s","schema":1,"run_id":"%s","kind":"tool_status","family":"smartarray","tool":"%s","tool_version":"%s","status":"%s","exit_code":%s,"duration_s":%s,"message":"%s"}\n' \
-        "$ts" "$run_id" "$(json_str "$2")" "$(json_str "$3")" "$1" "$4" "$dur" "$(json_str "$5")"
+    printf '{"ts":"%s","schema":1,"run_id":"%s","kind":"tool_status","family":"%s","tool":"%s","tool_version":"%s","status":"%s","exit_code":%s,"duration_s":%s,"message":"%s"}\n' \
+        "$ts" "$run_id" "$FAMILY" "$(json_str "$2")" "$(json_str "$3")" "$1" "$4" "$dur" "$(json_str "$5")"
 }
 
 # 실행 겹침 방지: 스크립트 전체를 잠금 하나로 감싼다. 잠금을 못 잡으면 locked 한 줄만 남긴다.
@@ -75,6 +77,139 @@ run() {
     # shellcheck disable=SC2086 # TIMEOUT_CMD는 의도적으로 단어 분리한다
     nice -n 19 $TIMEOUT_CMD "$@"
 }
+
+# --- MegaRAID(storcli) 경로 -------------------------------------------------------
+# 같은 레코드 모양(controller/logical_drive/physical_drive/cache_battery/tool_status)으로 정규화한다. 컨트롤러 0번만 본다.
+case "$tool" in
+storcli*)
+    FAMILY=megaraid
+    run "$tool" /c0 show all > "$tmp_out" 2>&1
+    rc=$?
+    version=$(sed -n 's/^CLI Version = *//p' "$tmp_out" | head -n 1)
+    msg=$(grep -v '^[[:space:]]*$' "$tmp_out" | head -n 1)
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+        emit_status timeout "$tool" "$version" "$rc" "no answer within ${TIMEOUT}s" >> "$LOG" 2>/dev/null
+        exit 0
+    fi
+    if grep -q -i 'No Controller found' "$tmp_out"; then
+        emit_status no_controller "$tool" "$version" "$rc" "$msg" >> "$LOG" 2>/dev/null
+        exit 0
+    fi
+    if [ "$rc" -ne 0 ] || ! grep -q '^Controller Status = ' "$tmp_out"; then
+        emit_status error "$tool" "$version" "$rc" "$msg" >> "$LOG" 2>/dev/null
+        exit 0
+    fi
+    awk -v ts="$ts" -v run_id="$run_id" -v tool="$tool" '
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function esc(s) { gsub(/[\001-\037\177]/, " ", s); gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+function q(s) { return "\"" esc(s) "\"" }
+function num(s) { s = trim(s); if (s ~ /^-?[0-9]+(\.[0-9]+)?$/) return s + 0; return "null" }
+function head(kind, hw_type, id, parent, name) {
+    return "{\"ts\":" q(ts) ",\"schema\":1,\"run_id\":" q(run_id) ",\"kind\":" q(kind) ",\"family\":\"megaraid\",\"tool\":" q(tool) \
+           ",\"hw_type\":" q(hw_type) ",\"hw_id\":" q(id) ",\"hw_parent\":" q(parent) ",\"hw_name\":" q(name)
+}
+function tail(state, raw_state, op, raw) {
+    return ",\"hw_state\":" q(state) ",\"raw_state\":" q(raw_state) ",\"operation\":" q(op) ",\"progress_pct\":null,\"raw\":" q(raw) "}"
+}
+function sget(sec, k) { return ((sec "|" k) in V) ? V[sec "|" k] : "" }
+function aget(k) { return (("*|" k) in V) ? V["*|" k] : "" }
+function ld_state(s) { if (s == "Optl") return "ok"; if (s == "Dgrd" || s == "Pdgd") return "degraded"; if (s == "OfLn") return "failed"; return "unknown" }
+function pd_state(s) {
+    if (s == "Onln" || s == "GHS" || s == "DHS" || s == "UGood" || s == "JBOD" || s == "Rbld" || s == "Cpybck") return "ok"
+    if (s == "Offln" || s == "UBad" || s == "Failed" || s == "Missing") return "failed"
+    return "unknown"
+}
+function pd_role(st, dg) {
+    if (st == "GHS" || st == "DHS") return "spare"
+    if (st == "UGood") return "unassigned"
+    if (st == "JBOD") return "jbod"
+    if (dg ~ /^[0-9]+$/) return "data"
+    return "unknown"
+}
+
+BEGIN { sec = ""; nld = 0; npd = 0 }
+{
+    sub(/\r$/, "")
+    t = trim($0)
+    if (t ~ /^[A-Za-z][A-Za-z\/ ]* :$/) { sec = trim(substr(t, 1, length(t) - 2)); next }
+    if (t ~ /^[A-Za-z][^=]* = /) {
+        p = index(t, " = ")
+        k = trim(substr(t, 1, p - 1)); v = trim(substr(t, p + 3))
+        if (!((sec "|" k) in V)) V[sec "|" k] = v
+        if (!(("*|" k) in V)) V["*|" k] = v
+        next
+    }
+    if ($0 ~ /^[0-9]+\/[0-9]+ +[A-Za-z0-9]+ +/) {
+        nld++
+        split($1, a, "/"); LDN[nld] = a[2]; LDDG[nld] = a[1]; LDT[nld] = $2; LDS[nld] = $3; LDC[nld] = $6; LDSZ[nld] = $9 " " $10
+        next
+    }
+    if ($0 ~ /^[0-9]+:[0-9]+ +[0-9]+ +/) {
+        npd++
+        PDSLOT[npd] = $1; PDDID[npd] = $2; PDS[npd] = $3; PDDG[npd] = $4; PDSZ[npd] = $5 " " $6; PDI[npd] = $7; PDM[npd] = $8
+        m = ""
+        for (i = 12; i <= NF - 2; i++) m = m (m == "" ? "" : " ") $i
+        PDMODEL[npd] = m
+        next
+    }
+}
+END {
+    cid = "mr:c" aget("Controller")
+    if (cid == "mr:c") cid = "mr:c0"
+    cs = aget("Controller Status")
+    chs = (cs == "Optimal") ? "ok" : ((cs ~ /Degraded|Needs Attention/) ? "degraded" : ((cs == "") ? "unknown" : "failed"))
+    memmb = aget("On Board Memory Size"); sub(/MB$/, "", memmb)
+    present = (memmb + 0 > 0) ? "true" : "false"
+    ep = sget("HwCfg", "Energy Pack"); eps = sget("Status", "Energy Pack Status")
+    if (present == "false") cst = "none"
+    else if (ep == "Present") cst = (eps == "0") ? "ok" : "unknown"
+    else cst = "not_configured"
+    bp = (ep == "Present") ? "capacitor" : "none"
+    bstate = (bp == "none") ? "none" : ((eps == "0") ? "ok" : "degraded")
+    model = aget("Model")
+    raw = "{" q("Controller Status") ":" q(cs) "," q("Energy Pack") ":" q(ep) "," q("Energy Pack Status") ":" q(eps) "," q("Memory Uncorrectable Errors") ":" q(aget("Memory Uncorrectable Errors")) "}"
+    line = head("controller", "disk_controller", cid, "", "MegaRAID " model " in Slot " aget("PCI Slot Number"))
+    line = line ",\"hw_model\":" q(model) ",\"hw_firmware_version\":" q(aget("Firmware Version")) ",\"hw_driver_version\":" q(aget("Driver Version"))
+    line = line ",\"temperature_c\":" num(aget("ROC temperature(Degree Celsius)")) ",\"cache_temperature_c\":null"
+    line = line ",\"cache_present\":" present ",\"cache_status\":" q(cst) ",\"cache_reason\":\"\",\"cache_size_gb\":" (present == "true" ? num(memmb / 1024) : "null")
+    line = line ",\"write_cache_without_battery\":false"
+    line = line ",\"backup_power\":" q(bp) ",\"backup_power_state\":" q(bstate) ",\"backup_power_operation\":\"none\""
+    print line tail(chs, cs, "none", raw)
+    if (bp != "none") {
+        line = head("cache_battery", "battery", cid "/battery", cid, "MegaRAID cache backup power (CacheVault)")
+        line = line ",\"backup_power\":" q(bp) ",\"present\":true,\"count\":1"
+        print line tail(bstate, "Energy Pack Status " eps, "none", "{" q("Energy Pack") ":" q(ep) "," q("Energy Pack Status") ":" q(eps) "}")
+    }
+    for (i = 1; i <= nld; i++) {
+        cfg = (LDC[i] ~ /WB/) ? "wb" : ((LDC[i] ~ /WT/) ? "wt" : "unknown")
+        eff = (cst == "failed" || cst == "none") ? "wt" : cfg
+        lvl = LDT[i]
+        line = head("logical_drive", "logical_disk", cid "/ld" LDN[i], cid, "virtualdrive " LDN[i])
+        line = line ",\"array\":" q("DG " LDDG[i]) ",\"raid_level\":" q(lvl) ",\"size\":" q(LDSZ[i])
+        line = line ",\"write_cache_configured\":" q(cfg) ",\"write_cache_effective\":" q(eff) ",\"os_device\":\"\",\"unrecoverable_media_errors\":\"\""
+        print line tail(ld_state(LDS[i]), LDS[i], "none", "{" q("State") ":" q(LDS[i]) "," q("Cache") ":" q(LDC[i]) "}")
+    }
+    for (i = 1; i <= npd; i++) {
+        role = pd_role(PDS[i], PDDG[i])
+        line = head("physical_drive", "physical_disk", cid "/pd" PDSLOT[i], cid, "physicaldrive " PDSLOT[i])
+        line = line ",\"slot\":" q(PDSLOT[i]) ",\"array\":" q(PDDG[i] ~ /^[0-9]+$/ ? "DG " PDDG[i] : "") ",\"hw_model\":" q(PDMODEL[i]) ",\"hw_firmware_version\":\"\""
+        line = line ",\"interface\":" q(PDI[i]) ",\"media\":" q(tolower(PDM[i])) ",\"size\":" q(PDSZ[i])
+        line = line ",\"temperature_c\":null,\"max_temperature_c\":null,\"predictive_failure\":false,\"drive_role\":" q(role) ",\"hot_spare\":" (role == "spare" ? "true" : "false")
+        line = line ",\"last_failure_reason\":\"\""
+        print line tail(pd_state(PDS[i]), PDS[i], (PDS[i] == "Rbld") ? "rebuild" : "none", "{" q("State") ":" q(PDS[i]) "," q("DG") ":" q(PDDG[i]) "}")
+    }
+}
+' "$tmp_out" > "$tmp_rec" 2>/dev/null
+    arc=$?
+    if [ "$arc" -ne 0 ]; then
+        emit_status error "$tool" "$version" "$arc" "parser failed" >> "$LOG" 2>/dev/null
+        exit 0
+    fi
+    emit_status ok "$tool" "$version" 0 "" >> "$tmp_rec"
+    cat "$tmp_rec" >> "$LOG" 2>/dev/null
+    exit 0
+    ;;
+esac
 
 version=$(run "$tool" version 2>/dev/null | sed -n 's/^.*CLI Version: *//p' | head -n 1)
 run "$tool" ctrl all show config detail > "$tmp_out" 2>&1
