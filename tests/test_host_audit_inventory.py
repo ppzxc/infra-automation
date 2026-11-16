@@ -403,6 +403,8 @@ def test_mail_summary_counts_unassigned_and_lookup_failed_hosts_separately():
     failed_model, _ = _decl_model(HOST_KV, lookup_ok=False)
     line = summary(failed_model)
     assert "선언 미지정 호스트 0" in line["text"] and "선언 조회 실패 호스트 1" in line["text"]
+    invalid_model, _ = _decl_model(dict(HOST_KV, isms_asset_importance="높음"))
+    assert "자산중요도 잘못된 값 호스트 1" in summary(invalid_model)["text"]
     unassigned_model, _ = _decl_model({})
     assert "선언 미지정 호스트 1" in summary(unassigned_model)["text"]
     assert "선언 조회 실패 호스트 0" in summary(unassigned_model)["text"]
@@ -418,6 +420,7 @@ def test_report_renders_asset_importance_and_lookup_failed_but_not_the_old_secur
     html = env.get_template("report.html.j2").render(
         host_audit_model=host_audit_report_model([ok_rec, bad_rec], meta()))
 
+    assert "선언 조회 실패 호스트 1" in html
     assert "자산중요도" in html and "조회 실패" in html and "OpenBao" in html
     assert "보안등급" not in html
 

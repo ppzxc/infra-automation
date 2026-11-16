@@ -578,6 +578,7 @@ def inventory_section(records, meta):
             'not_declared': sum(len(h.get('not_declared', [])) for h in hosts),
             'inactive': sum(len(h.get('inactive', [])) for h in hosts),
             'unassigned_hosts': sum(1 for h in hosts if any(f['unassigned'] for f in h['declared'])),
+            'invalid_hosts': sum(1 for h in hosts if any(f['state'] == 'invalid' for f in h['declared'])),
             'lookup_failed_hosts': sum(1 for h in hosts if any(f['state'] == 'lookup_failed' for f in h['declared'])),
             'eos': len(eos),
         },
