@@ -16,7 +16,7 @@
   <p class="small mute">이번 실행에서 양호 외 판정(취약·점검불가(수동)·예외(승인))이 나온 항목마다 한 블록이며 본문 「양호 외 항목」 표와 같은 순서다. 호스트별 증적은 호스트별 부록을 본다.</p>
 {% for b in rg %}
   <section class="rg-block" data-code="{{ b.code | e }}">
-    <h3><span class="nowrap">{{ b.code | e }}</span> {{ b.title | e }} <span class="small mute">중요도 {{ b.severity | e }} · 가이드 p.{{ b.guide_page }}</span></h3>
+    <h3><span class="nowrap">{{ b.code | e }}</span> {{ b.title | e }} <span class="small mute">중요도 {{ b.severity | e }}{% if b.guide_page is not none %} · 가이드 p.{{ b.guide_page | e }}{% endif %}</span></h3>
     <div class="rg-hosts">{% for v in b.verdict_hosts %}<span class="tag {{ v.verdict_class }}">{{ v.verdict | e }}</span>: {{ v.hosts | map('e') | join(', ') }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
     <dl>
       <dt>점검 목적</dt><dd>{{ b.purpose | e }}</dd>
@@ -27,8 +27,8 @@
 {%- for st in b.steps %}
         <div><b>{{ st.family | e }}</b></div><div class="rg-steps">{{ st.text | e }}</div>
 {%- endfor %}</dd>
-      <dt>조치 영향도</dt><dd>{{ b.impact.level }} — {{ b.impact.reason | e }}</dd>
-      <dt>조치 난이도</dt><dd>{{ b.effort.level }} — {{ b.effort.reason | e }}</dd>
+      <dt>조치 영향도</dt><dd>{% if b.impact %}{{ b.impact.level | e }} — {{ b.impact.reason | e }}{% else %}-{% endif %}</dd>
+      <dt>조치 난이도</dt><dd>{% if b.effort %}{{ b.effort.level | e }} — {{ b.effort.reason | e }}{% else %}-{% endif %}</dd>
     </dl>
   </section>
 {% endfor %}

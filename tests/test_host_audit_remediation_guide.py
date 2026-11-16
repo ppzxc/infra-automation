@@ -209,3 +209,32 @@ def test_report_without_the_config_vulnerability_section_has_no_guide_appendix(e
     bare = {k: v for k, v in model.items() if k != "config_vulnerability"}
     page = env.get_template("report.html.j2").render(host_audit_model=bare)
     assert "조치 안내" not in page
+
+
+def test_finding_of_a_code_the_catalog_lacks_still_gets_a_block(env, model):
+    cv = dict(model["config_vulnerability"])
+    stray = dict(cv["findings"][0], code="KISA-2026:U-99", title="U-99 unknown", hosts=[{"host": "ns0009"}])
+    findings = cv["findings"] + [stray]
+    import host_audit_kisa as kisa
+    cv["remediation_guide"] = kisa._build_remediation_guide(findings)
+    page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
+    block = _blocks(page)["U-99"]
+    assert "ns0009" in block and "가이드 p." not in block and "None" not in block
+    assert "조치 안내 대상 없음" not in page
+
+
+def test_only_unknown_code_findings_do_not_show_the_no_targets_notice():
+    import host_audit_kisa as kisa
+    stray = {"code": "KISA-2026:U-99", "title": "t", "severity": "상", "criteria": "c", "verdict": "취약",
+             "verdict_class": "crit", "hosts": [{"host": "ns0009"}]}
+    assert [b["code"] for b in kisa._build_remediation_guide([stray])] == ["U-99"]
+
+
+def test_verdicts_of_one_item_stay_in_one_block_even_when_not_adjacent():
+    import host_audit_kisa as kisa
+    def f(code, verdict, host):
+        return {"code": "KISA-2026:" + code, "title": code, "severity": "상", "criteria": "", "verdict": verdict,
+                "verdict_class": "x", "hosts": [{"host": host}]}
+    blocks = kisa._build_remediation_guide([f("U-01", "취약", "a"), f("U-02", "취약", "b"), f("U-01", "예외(승인)", "c")])
+    assert [b["code"] for b in blocks] == ["U-01", "U-02"]
+    assert [v["verdict"] for v in blocks[0]["verdict_hosts"]] == ["취약", "예외(승인)"]

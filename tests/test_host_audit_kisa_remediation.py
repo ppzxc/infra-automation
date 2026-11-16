@@ -295,7 +295,7 @@ def test_unknown_item_code_gets_empty_remediation_instead_of_failing():
 
 
 def test_per_host_appendix_html_has_no_remediation_text(html):
-    appendix = html[html.index("부록 1. ns0001"):html.index("부록 2. 조치 안내")]  # the item-level guide has its own tests
+    appendix = html[html.index("부록 1. ns0001"):html.index("조치 안내</h2>")]  # the item-level guide has its own tests
     for code in ("U-01", "U-02", "U-28"):
         assert ITEMS[code]["remediation"]["summary"] not in appendix
     assert "조치: " not in appendix
