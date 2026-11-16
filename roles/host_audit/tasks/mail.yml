@@ -126,6 +126,7 @@
       loop: "{{ _host_audit_mail_attachments }}"
       loop_control:
         label: "{{ item.name }}"
+      register: _host_audit_mail_copied
 
     - name: "[AUD-606] Send the summary, the A4 report and the xlsx zip (community.general.mail)"
       community.general.mail:
@@ -140,7 +141,7 @@
         body: "{{ lookup('ansible.builtin.template', 'mail_body.html.j2') }}"
         subtype: html
         charset: utf-8
-        attach: "{{ _host_audit_mail_attachments | map(attribute='name') | map('regex_replace', '^', _host_audit_mail_tmp.path ~ '/') | list }}"
+        attach: "{{ _host_audit_mail_copied.results | map(attribute='dest') | list }}"
         headers: >-
           {{ ['X-Host-Audit-Run-Id=' ~ host_audit_mail_doc.run_id,
               'X-Host-Audit-Report-SHA256=' ~ host_audit_mail_doc.report.sha256]

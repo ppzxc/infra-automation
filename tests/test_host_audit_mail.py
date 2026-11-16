@@ -303,7 +303,7 @@ def test_send_uses_the_relay_defaults_and_attaches_the_ascii_report_and_the_xlsx
     send = next(t for t in _flatten(_tasks("mail.yml")) if "community.general.mail" in t)
     args = send["community.general.mail"]
     # the attachments are the report and, when the summary records one, the xlsx zip (integration: test_host_audit_xlsx_zip_report.py)
-    assert args["subtype"] == "html" and "_host_audit_mail_attachments" in args["attach"]
+    assert args["subtype"] == "html" and "_host_audit_mail_copied" in args["attach"]
     assert "username" not in args and "password" not in args  # relay with IP authentication
     # one SMTP transaction per recipient: a partial refusal would make the module warn() the
     # refused address, and warnings are printed even under no_log; recipients do not see each other

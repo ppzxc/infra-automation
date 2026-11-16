@@ -35,7 +35,7 @@ def _tail_block():
             if inc in ("storage_upload.yml", "mail.yml"):
                 continue  # network and mail tasks: their results are given as variables
             if t.get("name") in ("Build the Remediation Plan of every host", "[AUD-025] Write the Remediation Plan xlsx of every host") \
-                    or "Remediation Plan could not" in t.get("name", "") or t.get("name", "").startswith("Collect the hosts") \
+                    or "Remediation Plan could not" in t.get("name", "") or t.get("name", "").startswith(("Collect the hosts", "Count a failed xlsx zip")) \
                     or any("[%s]" % i in t.get("name", "") for i in ("AUD-026", "AUD-611", "AUD-612", "AUD-613", "AUD-615")):
                 continue  # xlsx writing, the zip and the mail summary need the report model; they have their own test
             out.append({"block": _load(inc)} if inc else t)
@@ -59,6 +59,7 @@ def _vars(root, out, *, storage=True, uploads=(200,), problem="", mail_sent=None
     return {
         "host_audit_output_root": str(root),
         "host_audit_run": {"run_id": run_id, "run_kind": run_kind, "output_dir": output_dir or str(out)},
+        "_host_audit_xlsx_zip_path": str(out / "xlsx" / "z.zip"),  # a role variable (AUD-614 hands it to the mail)
         "host_audit_storage_enabled": storage,
         "_host_audit_storage_active": storage,
         "_host_audit_storage_problem": problem,

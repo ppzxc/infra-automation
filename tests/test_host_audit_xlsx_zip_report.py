@@ -84,6 +84,14 @@ def _ansible(tmp_path, play, extra_vars=None, name="pb"):
                           env=env)
 
 
+def _text(res):
+    """Everything the json callback printed, with non-ASCII kept readable (the callback escapes it)."""
+    try:
+        return json.dumps(json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0], ensure_ascii=False)
+    except ValueError:
+        return res.stdout + res.stderr
+
+
 # ------------------------------------------------------------------------------
 # Throw-away servers
 # ------------------------------------------------------------------------------
@@ -174,14 +182,22 @@ def _mail_vars(smtp):
 # ------------------------------------------------------------------------------
 # Report stage: xlsx -> zip -> hash in the summary -> kept
 # ------------------------------------------------------------------------------
-def _report_stage(tmp_path, out):
+def _role_vars():
+    """The role's own zip name/path/archive variables (vars/main.yml), so the test plays the real definitions."""
+    role_vars = yaml.safe_load((ROOT_DIR / "roles" / "host_audit" / "vars" / "main.yml").read_text(encoding="utf-8"))
+    return {k: v for k, v in role_vars.items() if k.startswith("_host_audit_xlsx_zip_")}
+
+
+def _report_stage(tmp_path, out, model=None, break_xlsx=False):
     out.mkdir(parents=True, exist_ok=True)
+    if break_xlsx:  # xlsx/ is read-only: no writer can create a file in it, so every xlsx write fails
+        (out / "xlsx").mkdir(mode=0o500)
     model_file = tmp_path / "model.json"
-    model_file.write_text(json.dumps(_model(), ensure_ascii=False))
+    model_file.write_text(json.dumps(model or _model(), ensure_ascii=False))
     (out / "report.html").write_text("<html>report</html>")
     names = ("Build the Remediation Plan of every host", "[AUD-025]",
-             "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]", "[AUD-615]",
-             "[AUD-611]", "[AUD-612]", "[AUD-613]")
+             "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]",
+             "Count a failed xlsx zip", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in names)]
     assert len(tasks) == len(names), [t.get("name") for t in tasks]
@@ -190,11 +206,11 @@ def _report_stage(tmp_path, out):
                                          % model_file}}
     show = {"ansible.builtin.debug": {"msg": "{{ _host_audit_keep_stats.results | map(attribute='stat', default={}) | list }}"}}
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
-            "vars": {"host_audit_run": {"run_id": RUN_ID, "run_kind": "scheduled", "output_dir": str(out),
-                                        "timezone": "Asia/Seoul"},
-                     "_host_audit_storage_active": True, "_host_audit_storage_problem": "",
-                     "_host_audit_storage_prefix": PREFIX, "_host_audit_storage_target": {"bucket": BUCKET},
-                     "host_audit_storage_bucket": BUCKET},
+            "vars": dict(_role_vars(), host_audit_run={"run_id": RUN_ID, "run_kind": "scheduled", "output_dir": str(out),
+                                                       "timezone": "Asia/Seoul"},
+                         _host_audit_storage_active=True, _host_audit_storage_problem="",
+                         _host_audit_storage_prefix=PREFIX, _host_audit_storage_target={"bucket": BUCKET},
+                         host_audit_storage_bucket=BUCKET),
             "tasks": [load] + tasks + [show]}
     res = _ansible(tmp_path, play)
     assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-2000:]
@@ -219,6 +235,29 @@ def test_the_zip_is_built_deterministically_hashed_into_the_summary_and_kept(tmp
     assert summary["report"]["sha256"] == hashlib.sha256(b"<html>report</html>").hexdigest()
     # the same input gives the same bytes: a second run of the whole stage changes nothing
     assert _report_stage(tmp_path / "again", tmp_path / "again" / "run")["xlsx/" + ZIP_NAME] == digest
+
+
+def test_a_run_without_hosts_builds_no_zip_and_still_goes_on(tmp_path):
+    out = tmp_path / "run"
+    meta = {"run_id": RUN_ID, "started_at": "2026-10-31T22:00:05Z", "generated_at": "2026-10-31T22:01:00Z",
+            "run_kind": "scheduled", "targets": [], "timezone": "Asia/Seoul", "kisa_exceptions": []}
+    stats = _report_stage(tmp_path, out, host_audit_report_model([], meta))
+    assert "xlsx/" + ZIP_NAME not in stats and not (out / "xlsx").exists()
+    assert "xlsx_zip" not in json.loads((out / "mail_summary.json").read_text())
+
+
+def test_when_an_xlsx_could_not_be_written_no_incomplete_zip_is_hashed_mailed_or_kept(tmp_path):
+    """A zip of some hosts must not pass for the whole deliverable; the final judgement names the failure (AUD-025)."""
+    if os.geteuid() == 0:
+        pytest.skip("root can write into a read-only directory")
+    out = tmp_path / "run"
+    try:
+        stats = _report_stage(tmp_path, out, break_xlsx=True)
+    finally:
+        (out / "xlsx").chmod(0o700)  # let pytest remove the directory
+    assert not [k for k in stats if k.endswith(".zip")]
+    summary = json.loads((out / "mail_summary.json").read_text())
+    assert "xlsx_zip" not in summary and summary["report"]["sha256"]  # the report mail still goes out
 
 
 def test_the_zip_exists_before_the_mail_and_before_the_cleanup_so_a_storage_off_run_loses_nothing():
@@ -284,11 +323,13 @@ REPORT = b"<html>report</html>"
 ZIP = b"PK-archived-zip"
 
 
-def _resend(tmp_path, smtp, bucket, summary_zip=ZIP, served_zip=ZIP):
+def _resend(tmp_path, smtp, bucket, summary_zip=ZIP, served_zip=ZIP, summary_doc=None, no_summary=False):
     """Serve a kept run and run the real resend.yml; ``summary_zip`` is the zip the summary recorded, ``served_zip``
     the zip the bucket returns now (None: missing)."""
     bucket[BUCKET + "/" + PREFIX + "report.html"] = REPORT
-    bucket[BUCKET + "/" + PREFIX + "mail_summary.json"] = json.dumps(_summary_doc(REPORT, summary_zip)).encode()
+    if not no_summary:
+        bucket[BUCKET + "/" + PREFIX + "mail_summary.json"] = json.dumps(
+            summary_doc or _summary_doc(REPORT, summary_zip)).encode()
     if served_zip is not None:
         bucket[BUCKET + "/" + PREFIX + "xlsx/" + ZIP_NAME] = served_zip
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
@@ -310,14 +351,38 @@ def test_resend_sends_both_when_the_archived_zip_matches_the_recorded_hash(tmp_p
 
 
 def test_resend_stops_without_sending_when_the_zip_hash_differs(tmp_path, smtp, bucket):
-    res = _resend(tmp_path, smtp, bucket, served_zip=b"PK-tampered")
+    res = _resend(tmp_path, smtp, bucket, served_zip=b"PK-tampered")  # AUD-633
     assert res.returncode != 0 and smtp.messages == []
-    assert "xlsx" in res.stdout and "SHA-256" in res.stdout
+    assert "받은 xlsx zip의 SHA-256" in _text(res)
 
 
 def test_resend_stops_without_sending_when_the_recorded_zip_is_missing_from_the_bucket(tmp_path, smtp, bucket):
-    res = _resend(tmp_path, smtp, bucket, served_zip=None)
+    res = _resend(tmp_path, smtp, bucket, served_zip=None)  # AUD-629 gets a 404, AUD-633 stops
     assert res.returncode != 0 and smtp.messages == []
+    assert "보관된 xlsx zip을 받지 못함" in _text(res)
+
+
+def test_resend_stops_on_a_malformed_zip_record_of_the_archived_summary(tmp_path, smtp, bucket):
+    doc = _summary_doc(REPORT, ZIP)
+    doc["xlsx_zip"] = "not-an-object"
+    res = _resend(tmp_path, smtp, bucket, summary_doc=doc)
+    assert res.returncode != 0 and smtp.messages == []
+    assert "형식이 맞지 않음" in _text(res)
+
+
+def test_resend_stops_when_the_recorded_zip_name_is_not_the_one_the_run_id_gives(tmp_path, smtp, bucket):
+    doc = _summary_doc(REPORT, ZIP)
+    doc["xlsx_zip"]["file_name"] = "../evil.zip"
+    res = _resend(tmp_path, smtp, bucket, summary_doc=doc)
+    assert res.returncode != 0 and smtp.messages == []
+    assert "실행 ID에서 정한 이름" in _text(res)
+
+
+def test_resend_without_a_kept_summary_sends_the_report_alone_and_says_the_zip_was_not_resent(tmp_path, smtp, bucket):
+    res = _resend(tmp_path, smtp, bucket, no_summary=True)
+    assert res.returncode == 0, res.stdout[-3000:]
+    assert list(_attachments(smtp.messages[0])[0]) == ["host-audit-%s.html" % RUN_ID]
+    assert "zip은 보내지 않고 보고서만" in _text(res)
 
 
 def test_resend_of_a_run_kept_before_the_zip_existed_sends_the_report_alone(tmp_path, smtp, bucket):

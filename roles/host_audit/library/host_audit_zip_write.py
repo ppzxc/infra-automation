@@ -68,7 +68,11 @@ def _members(src_dir):
 
 
 def build_zip(src_dir, names):
-    """The zip bytes of the named files of src_dir."""
+    """The zip bytes of the named files of src_dir.
+
+    Each plan is a few KB to a few hundred KB (tens of hosts), so the whole zip is built in memory and the report stage
+    hashes it a second time (AUD-615 for the summary, AUD-513 for the upload): simpler than streaming at this size.
+    """
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:
         for name in names:

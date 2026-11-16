@@ -109,9 +109,11 @@
 # 요약이 xlsx zip을 기록한 실행만 zip을 받는다. 받을 이름은 요약의 값이 아니라 실행 ID에서 정한 이름이다(요약은 버킷에서
 # 받은 값이라 경로 문자를 믿지 않는다). 기록이 있는데 받지 못하거나 이름·해시가 다르면 AUD-633이 보내지 않고 멈춘다.
 - name: Read the xlsx zip record of the archived summary
+  vars:
+    _raw: "{{ ((_host_audit_resend_summary.content | default('')) | host_audit_json_loads).xlsx_zip | default({}, true) }}"
   ansible.builtin.set_fact:
     _host_audit_resend_zip_record: >-
-      {{ ((_host_audit_resend_summary.content | default('')) | host_audit_json_loads).xlsx_zip | default({}, true) }}
+      {{ _raw if _raw is mapping else ({'invalid': true} if _raw else {}) }}
   when: (_host_audit_resend_summary.status | default(-1)) == 200
 
 - name: "[AUD-629] Get the archived xlsx zip"
@@ -140,18 +142,28 @@
   register: _host_audit_resend_zip_stat
   when: (_host_audit_resend_zip.status | default(-1)) == 200
 
+# 요약 자체가 없으면(404) 기록된 해시가 없어 zip을 검증할 수 없다. 검증 못 한 파일을 보내지 않고, 그 사실을 남긴다.
+- name: Say that the xlsx zip is not resent without its recorded hash
+  ansible.builtin.debug:
+    msg: "보관된 요약이 없어 xlsx zip의 기록된 해시를 알 수 없음 — zip은 보내지 않고 보고서만 다시 보낸다({{ _host_audit_resend_prefix }}xlsx/{{ _host_audit_resend_zip_name }}가 보관돼 있을 수 있다)"
+  when: (_host_audit_resend_summary.status | default(-1)) == 404
+
 - name: "[AUD-633] Assert the archived xlsx zip exists and matches its recorded SHA-256"
   vars:
     _record: "{{ _host_audit_resend_zip_record | default({}) }}"
     _status: "{{ _host_audit_resend_zip.status | default(-1) }}"
+    _has: "{{ _record | length > 0 }}"
   ansible.builtin.assert:
     that:
-      - _record | length == 0 or _status | int == 200
-      - _record | length == 0 or _record.file_name | default('') == _host_audit_resend_zip_name
-      - _record | length == 0 or _record.sha256 | default('') == _host_audit_resend_zip_stat.stat.checksum
+      - not (_record.invalid | default(false) | bool)
+      - not (_has | bool) or _status | int == 200
+      - not (_has | bool) or _record.file_name | default('') == _host_audit_resend_zip_name
+      - not (_has | bool) or _record.sha256 | default('') == _host_audit_resend_zip_stat.stat.checksum
     fail_msg: >-
-      재발송 중단 — {{ ('보관된 xlsx zip을 받지 못함(' ~ _host_audit_resend_prefix ~ 'xlsx/' ~ _host_audit_resend_zip_name
-                         ~ ', status=' ~ _status ~ ')')
+      재발송 중단 — {{ '보관된 요약의 xlsx zip 기록 형식이 맞지 않음(객체가 아님)'
+                        if _record.invalid | default(false) | bool
+                        else ('보관된 xlsx zip을 받지 못함(' ~ _host_audit_resend_prefix ~ 'xlsx/' ~ _host_audit_resend_zip_name
+                              ~ ', status=' ~ _status ~ ')')
                         if _status | int != 200
                         else ('보관된 요약의 xlsx zip 이름(' ~ (_record.file_name | default('')) ~ ')이 실행 ID에서 정한 이름('
                               ~ _host_audit_resend_zip_name ~ ')과 다름')

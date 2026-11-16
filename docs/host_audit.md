@@ -696,6 +696,8 @@ report.yml
 | `AUD-627` | `Prepare the resend summary and attachments` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
 | `AUD-628` | `Remove the downloaded report and xlsx zip from the runner` | `ansible.builtin.file` | 러너 | `state: absent`(재발송 실행 디렉터리 통째로) |
 
+재발송의 `Read the xlsx zip record of the archived summary`(요약에서 zip 기록을 읽는 `set_fact`), `Compute the SHA-256 of the downloaded xlsx zip`(받은 zip의 `stat`), `Say that the xlsx zip is not resent without its recorded hash`(요약이 없을 때 알리는 `debug`)는 AUD-629·633의 보조 태스크라 SPEC-ID를 두지 않는다(스펙이 재발송 zip에 정한 번호는 둘뿐이다). 메일 첨부 경로는 AUD-605의 `copy` 결과(`dest`)를 AUD-606이 그대로 쓴다.
+
 ## 14. 러너 디렉터리 정리 (#157)
 
 러너의 `<host_audit_output_root>/<run_id>`는 실행당 약 3.6GB다. 두 곳에서 정리한다.
@@ -858,7 +860,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `AUD-025` | `Write the Remediation Plan xlsx of every host` | `host_audit_xlsx_write` (role `library/` 커스텀 모듈) | 러너 | 같은 입력이면 같은 바이트, 이미 같은 파일이면 `changed` 없음. 파일 `0600`, `xlsx/`는 만들 때 `0700`. 보고서 모델 뒤, 보관(AUD-512~514) 앞. 보관·메일·정리를 묶은 block 안의 첫 태스크다. 실패는 모아 맨 끝 판정에서 실행을 실패로 끝낸다(위 '쓰기 실패와 실행 흐름'). 계획은 `host_audit_remediation_plan_map`(각 계획의 `host`를 키로 한 dict, 안에서 `host_audit_remediation_plans`를 부른다)으로 set_fact에 한 번 만들고(`no_log`가 아니다: 필터 예외의 원인이 가려지지 않게 하고, 성공 때의 fact는 `-v`에서만 찍히며 `report.html`과 같은 내용) 반복문은 호스트 이름만 돈다(반복문 item은 실패 결과에 그대로 찍히므로) |
-| `AUD-026` | `Pack every Remediation Plan xlsx into one zip` | `host_audit_zip_write` (role `library/` 커스텀 모듈) | 러너 | `xlsx/`의 숨김 아닌 `*.xlsx`를 이름순으로 `host-audit-<run_id>-xlsx.zip`(같은 디렉터리)에 압축 없이(`ZIP_STORED`) 고정 시각으로 묶는다: 같은 xlsx면 같은 바이트, 이미 같은 파일(모드 `0600`)이면 `changed` 없음. AUD-025와 보관(AUD-512~514) 사이, 메일 요약(AUD-612) 앞 |
+| `AUD-026` | `Pack every Remediation Plan xlsx into one zip` | `host_audit_zip_write` (role `library/` 커스텀 모듈) | 러너 | `xlsx/`의 숨김 아닌 `*.xlsx`를 이름순으로 `host-audit-<run_id>-xlsx.zip`(같은 디렉터리)에 압축 없이(`ZIP_STORED`) 고정 시각으로 묶는다: 같은 xlsx면 같은 바이트, 이미 같은 파일(모드 `0600`)이면 `changed` 없음. AUD-025와 보관(AUD-512~514) 사이, 메일 요약(AUD-612) 앞. xlsx 쓰기 실패가 있거나 호스트가 없으면 건너뛰고, 묶기 실패는 `ignore_errors`로 받아 맨 끝 판정에 모은다(17.2) |
 
 검증: pytest `tests/test_host_audit_remediation_plan.py`(행 범위, 한 줄 파일, 계열별 steps와 summary 대체, 담당자, 비고 세 문구와 Baseline 앞머리 규칙, 빈칸 열, 정렬, 셀 출처), `tests/test_host_audit_xlsx_write.py`(openpyxl로 다시 열어 값·머리글 서식·너비·줄바꿈·틀 고정, 같은 바이트), `tests/test_host_audit_remediation_plan_report.py`(`report.yml`의 AUD-025와 보관 목록, Content-Type). 보고서 단계는 molecule 대상이 아니라 `[VERIFY-…]`는 없고(`INTEGRATED`, AUD-710과 같음) 위 pytest가 검증한다. 모듈 인자 템플릿에서 호스트 증적의 `{{ }}`가 평가되지 않는지도 `tests/test_host_audit_remediation_plan_report.py`가 본다.
 
@@ -866,10 +868,10 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 
 호스트별 xlsx는 24대 규모에서 파일이 많으므로 전부 zip 하나로 묶어 메일에 붙인다. 별도 xlsx를 메일에 따로 붙이지 않는다.
 
-- **묶기(`AUD-026`)**: `host_audit_zip_write`(표준 라이브러리 `zipfile`, 러너 이미지 변경 없음)가 `xlsx/`의 숨김 아닌 `*.xlsx`를 이름순으로 압축 없이 고정 시각(1980-01-01)으로 묶어 `xlsx/host-audit-<run_id>-xlsx.zip`(파일명은 `host_audit_remediation_zip_name`, xlsx와 같은 ASCII 규칙)에 쓴다. 같은 xlsx면 같은 바이트이므로 보관 해시로 동일성을 확인한다. xlsx 쓰기에 실패한 호스트의 파일은 빠지고 그 실패는 맨 끝 판정이 실행을 실패로 끝낸다. zip 자체를 못 만들면(디렉터리 없음 등) 요약에 넣을 해시가 없으므로 그 자리에서 실행이 멈추고 정리가 디렉터리를 남긴다.
-- **해시와 요약(`AUD-615`·`AUD-612`)**: zip의 SHA-256을 구해 메일 요약 `mail_summary.json`의 `xlsx_zip`(`file_name`·`sha256`·`size`·`archive`)에 싣는다. 보고서 해시(`report`)와 별개다. 본문과 머리글 `X-Host-Audit-Xlsx-Zip-SHA256`에도 실린다. 요약이 이 키를 갖지 않는 옛 실행은 zip 줄이 없다.
+- **묶기(`AUD-026`)**: `host_audit_zip_write`(표준 라이브러리 `zipfile`, 러너 이미지 변경 없음)가 `xlsx/`의 숨김 아닌 `*.xlsx`를 이름순으로 압축 없이 고정 시각(1980-01-01)으로 묶어 `xlsx/host-audit-<run_id>-xlsx.zip`(파일명은 `host_audit_remediation_zip_name`, xlsx와 같은 ASCII 규칙)에 쓴다. 같은 xlsx면 같은 바이트이므로 보관 해시로 동일성을 확인한다. xlsx 쓰기에 실패한 호스트가 하나라도 있으면 zip을 만들지 않는다(일부만 든 zip이 해시까지 붙어 완성본처럼 메일로 가고 3년 보관되는 것을 막는다). 그 실행의 메일은 보고서만 싣고(요약에 `xlsx_zip`이 없다) 실패는 맨 끝 판정이 호스트 이름과 함께 실행을 실패로 끝낸다. 호스트가 하나도 없으면 묶을 것이 없어 건너뛴다. 묶기 자체의 실패(디스크 등)는 `ignore_errors`로 받아 `(xlsx zip)`을 xlsx 실패 목록에 더하고(`Count a failed xlsx zip with the failed Remediation Plan files`) 같은 맨 끝 판정과 정리(디렉터리를 남김)가 처리한다. 보조 첨부 때문에 보관·메일이 막히지 않는다는 AUD-025의 원칙과 같다. 이름·경로·보관 위치는 role 변수(`_host_audit_xlsx_zip_name`·`_path`·`_archive`, `vars/main.yml`) 한 곳에서 정한다. zip은 통째로 메모리에 만들고 해시를 두 번(AUD-615, AUD-513) 구한다: 파일이 수 KB~수백 KB(수십 호스트)라 스트리밍보다 단순한 쪽을 택했다.
+- **해시와 요약(`AUD-615`·`AUD-612`)**: zip의 SHA-256을 구해 메일 요약 `mail_summary.json`의 `xlsx_zip`(`file_name`·`sha256`·`size`·`archive`)에 싣는다. 보고서 해시(`report`)와 별개다. 본문과 머리글 `X-Host-Audit-Xlsx-Zip-SHA256`에도 실린다. 요약이 이 키를 갖지 않는 옛 실행은 zip 줄이 없다. 해시나 파일명이 빈 기록은 검증할 수 없으므로 요약에 싣지 않는다.
 - **보관**: zip도 `<YYYY-MM>/<run_id>/xlsx/`로 올라가며(`AUD-512`~`514`, Content-Type `application/zip`) 파일별 SHA-256이 남는다. xlsx 자체도 그대로 보관된다.
 - **첨부(`AUD-605`·`AUD-606`)**: 보고서에 이어 zip이 두 번째 첨부다. 메일 요약(AUD-612) 단계를 xlsx·zip 쓰기 뒤로 옮겨(구조 변경) 요약이 zip 해시를 알고, 정리(cleanup)는 메일 판정 뒤에 돌므로 보관을 끈 실행에서도 xlsx는 지워지기 전에 메일에 실린다.
-- **재발송(`AUD-629`·`AUD-633`)**: §13.4. 해시가 다르거나 zip을 받지 못하면 보고서도 보내지 않는다.
+- **재발송(`AUD-629`·`AUD-633`)**: §13.4. 해시가 다르거나 zip을 받지 못하거나 요약의 zip 기록 형식·이름이 맞지 않으면 보고서도 보내지 않는다. 요약 자체가 없으면(404) 기록된 해시를 몰라 검증할 수 없으므로 zip은 보내지 않고 보고서만 보내며 그 사실을 로그에 남긴다.
 - **운영 확인(미실시)**: Gmail이 zip 안의 xlsx를 막지 않는지는 첫 실제 실행의 메일 수신으로 확인한다(#495 인수 조건, 운영자 몫).
 - **번호**: 스펙이 정한 재발송 대조 번호 `AUD-630`은 정리 판정(§14)이 먼저 쓰고 있어 `AUD-633`으로 둔다(3-Way 검증은 중복 ID를 허용하지 않는다).

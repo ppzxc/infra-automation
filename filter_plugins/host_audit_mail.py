@@ -241,7 +241,7 @@ def host_audit_mail_summary(model, report, xlsx_zip=None):
             'archive': report.get('archive') or cover.get('archive', ''),
         },
     }
-    if xlsx_zip:
+    if xlsx_zip and xlsx_zip.get('sha256') and xlsx_zip.get('file_name'):  # a record without a hash could never be checked
         doc['xlsx_zip'] = {
             'file_name': xlsx_zip.get('file_name', ''),
             'sha256': (xlsx_zip.get('sha256') or '').lower(),
