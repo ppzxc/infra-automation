@@ -19,7 +19,7 @@ U-01:
   threat: root는 모든 기능을 바꿀 수 있어서, 원격에서 무차별·사전 대입으로 root를 뚫으면 시스템이 장악되거나 root 계정을 쓸 수 없게 된다.
   guide_page: 12
   remediation:
-    summary: /etc/ssh/sshd_config에 PermitRootLogin no를 설정하고 sshd를 재적용한다. telnet(23/tcp)은 쓰지 않는다(켜 둔 채로는 이 항목이 양호가 되지 않으며 U-52도 함께 본다).
+    summary: /etc/ssh/sshd_config에 PermitRootLogin no를 설정하되 sshd_config.d/*.conf에 같은 키가 있으면 그 파일도 no로 맞춘다(먼저 읽힌 값이 적용되므로 sshd -T로 확인). sshd -t로 문법을 검사한 뒤 reload한다. telnet(23/tcp)은 쓰지 않는다(U-52도 함께 본다).
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -70,12 +70,12 @@ U-03:
     steps:
       rhel: |
         RHEL 8 이상: authselect enable-feature with-faillock, /etc/security/faillock.conf에 deny = 10, unlock_time = 120
-        구형(CentOS 6/7): /etc/pam.d/system-auth, password-auth의 auth 줄에 pam_faillock.so(또는 pam_tally2.so) deny=10 unlock_time=120
-        PAM 모듈 경로가 실제로 있는지 먼저 확인한다
+        구형(CentOS 6/7): /etc/pam.d/system-auth, password-auth에서 pam_unix.so 앞에 pam_faillock.so preauth deny=10 unlock_time=120, 뒤에 authfail 줄, account 영역에 pam_faillock.so를 둔다(CentOS 6는 pam_tally2.so)
+        적용 전에 root 세션을 하나 열어 두고 PAM 모듈 경로가 실제로 있는지 확인한다
       debian: |
-        /etc/pam.d/common-auth에 pam_faillock.so(또는 pam_tally2.so) deny=10 unlock_time=120
-        pam_faillock은 /etc/pam.d/common-account에도 모듈 줄을 추가한다
-        PAM 모듈 경로가 실제로 있는지 먼저 확인한다
+        /etc/pam.d/common-auth에서 pam_unix.so 앞에 auth required pam_faillock.so preauth, 뒤에 auth [default=die] pam_faillock.so authfail, 그 아래 auth sufficient pam_faillock.so authsucc를 두고, /etc/security/faillock.conf에 deny = 10, unlock_time = 120을 쓴다
+        common-account에는 account required pam_faillock.so를 추가한다
+        pam_tally2는 Debian 12와 RHEL 8 이상에 없다. 적용 전에 root 세션을 하나 열어 두고 PAM 모듈 경로가 실제로 있는지 확인한다
   remediation_impact:
     level: 3
     reason: 모듈 경로가 틀리거나 PAM 순서를 어기면 모든 계정의 로그인이 안 되는 장애가 생길 수 있다고 가이드가 경고한다.
@@ -444,7 +444,7 @@ U-23:
   threat: 부적절한 특수 권한이 붙은 파일을 이용해 root 권한을 획득하는 권한 상승이 가능하다.
   guide_page: 50
   remediation:
-    summary: 로컬 디스크 마운트 지점마다(/, /home 등) find <마운트> -xdev -type f \( -perm -04000 -o -perm -02000 \) 로 SUID/SGID 파일을 찾아 불필요한 것은 chmod -s 로 권한을 빼거나 파일을 제거한다. 꼭 필요한 파일은 chgrp 로 특정 그룹을 지정하고 chmod 4750 으로 해당 그룹만 쓰게 제한한다.
+    summary: 로컬 디스크 마운트 지점마다(/, /home 등) find <마운트> -xdev -type f \( -perm -04000 -o -perm -02000 \) 로 SUID/SGID 파일을 찾아 불필요한 것은 chmod -s 로 권한을 빼거나 파일을 제거한다. 꼭 필요한 파일은 chgrp 로 그룹을 지정하고 SUID는 chmod 4750, SGID는 chmod 2750 으로 해당 그룹만 쓰게 제한한다.
   remediation_impact:
     level: 2
     reason: 특수 권한을 제거하면 OS와 응용프로그램이 정상 동작하는지 확인이 필요하다고 가이드가 서술한다.
@@ -1013,7 +1013,7 @@ U-54:
   threat: 평문 FTP는 스니핑으로 계정과 중요 정보가 유출될 위험이 있다.
   guide_page: 131
   remediation:
-    summary: 평문 FTP 데몬(vsftpd, proftpd 등)을 stop/disable하고 inetd(/etc/inetd.conf의 ftp 줄 주석)·xinetd(/etc/xinetd.d/ftp의 disable = yes)로 도는 경우 설정을 끈 뒤 재시작한다. 꼭 필요하면 SFTP 등 암호화 방식을 쓰고, vsftpd라면 ssl_enable=YES로 SSL 사용을 강제한다.
+    summary: 평문 FTP 데몬(vsftpd, proftpd 등)을 stop/disable하고 inetd·xinetd로 도는 경우 설정을 끈 뒤 재시작한다. 꼭 필요하면 SFTP 등 암호화 방식을 쓰고, vsftpd는 인증서(rsa_cert_file)를 먼저 준비한 뒤 ssl_enable=YES를 켜며 force_local_logins_ssl, force_local_data_ssl을 NO로 두지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1049,7 +1049,7 @@ U-56:
   threat: 접근 제한이 없으면 인증 없이 비인가자가 디렉터리·파일에 접근해 중요 파일을 변조하거나 유출할 수 있다.
   guide_page: 135
   remediation:
-    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 허용 IP·호스트만 접속하도록 TCP Wrapper(/etc/hosts.allow, /etc/hosts.deny)나 proftpd의 <Limit LOGIN> 블록으로 제한하고, 가이드의 ftpusers 또는 vsftpd user_list 파일은 소유자 root, 권한 640으로 두고 차단·허용 사용자를 등록한다.
+    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 허용 IP·호스트만 접속하도록 TCP Wrapper(hosts.allow, hosts.deny; RHEL 8 이상은 libwrap이 없어 방화벽으로)나 proftpd의 <Limit LOGIN> 블록으로 제한하고, ftpusers 또는 vsftpd user_list 파일은 소유자 root, 권한 640으로 둔다.
   remediation_impact:
     level: 2
     reason: 지정한 IP나 호스트에서만 FTP 접속이 가능해져 그 밖의 접속은 막힌다.
