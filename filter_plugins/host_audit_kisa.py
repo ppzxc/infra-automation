@@ -85,8 +85,17 @@ class _UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
+def _deep_freeze(value):
+    """Read-only view of nested mappings; lists become tuples, scalars pass through."""
+    if isinstance(value, dict):
+        return MappingProxyType({k: _deep_freeze(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return tuple(_deep_freeze(v) for v in value)
+    return value
+
+
 def _freeze(items):
-    return MappingProxyType({code: MappingProxyType(dict(meta)) for code, meta in items.items()})
+    return _deep_freeze(items)
 
 
 def _validate(items, path):
@@ -285,8 +294,10 @@ def host_audit_kisa_result(probe, register, inventory_hostname, groups, today):
 
 
 def _item_meta(code):
+    """Base columns of an item (what summary rows and the per-host appendix may show)."""
     short = code.split(':', 1)[-1]
-    meta = dict(ITEMS.get(short, {'title': short, 'severity': '', 'category': '', 'criteria': '', 'cis': ''}))
+    known = ITEMS.get(short, {})
+    meta = {field: known.get(field, short if field == 'title' else '') for field in ITEM_FIELDS}
     meta['code'] = code
     return meta
 
