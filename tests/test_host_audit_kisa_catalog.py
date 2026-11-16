@@ -59,6 +59,11 @@ def test_loader_rejects_blank_title_or_criteria(tmp_path):
         kisa._load_items(_write(tmp_path, ONE_ITEM.replace("criteria: c", "criteria: ''")))
 
 
+def test_loader_rejects_surrounding_whitespace(tmp_path):
+    with pytest.raises(RuntimeError, match=r"U-01.*criteria"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM.replace("criteria: c", 'criteria: "c\\n"')))
+
+
 def test_default_catalog_must_hold_every_item(tmp_path):
     with pytest.raises(RuntimeError, match="U-02"):
         kisa._require_all_items(kisa._load_items(_write(tmp_path, ONE_ITEM.replace("U-01", "U-03"))))

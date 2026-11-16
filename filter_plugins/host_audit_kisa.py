@@ -103,8 +103,9 @@ def _validate(items, path):
             if not isinstance(meta[field], str):
                 raise RuntimeError('KISA item %s field %s must be a string (quote it) in %s' % (code, field, path))
         for field in ('title', 'criteria'):
-            if not meta[field].strip():
-                raise RuntimeError('KISA item %s field %s is blank in %s' % (code, field, path))
+            if not meta[field].strip() or meta[field] != meta[field].strip():
+                raise RuntimeError('KISA item %s field %s is blank or has surrounding whitespace in %s'
+                                   % (code, field, path))
         extra = sorted(set(meta) - set(ITEM_FIELDS))
         if extra:
             raise RuntimeError('KISA item %s has unknown field %s in %s' % (code, ', '.join(map(str, extra)), path))
