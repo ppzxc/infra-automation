@@ -337,6 +337,16 @@ def test_a_summary_that_names_a_zip_but_gets_no_zip_path_sends_nothing(tmp_path,
     assert smtp.messages == []
 
 
+def test_a_missing_attachment_file_is_a_mail_problem_not_an_aborted_play(tmp_path, smtp):
+    """The mail tasks record the problem so the later judgements (AUD-516, AUD-610, KISA alert) still run."""
+    report = tmp_path / "report.html"
+    report.write_bytes(b"<html>report</html>")
+    res = _send_play(tmp_path, smtp, _summary_doc(report.read_bytes(), b"PK-zip"), report, tmp_path / "gone.zip")
+    assert res.returncode == 0, res.stdout[-3000:]  # mail.yml itself does not fail the run
+    assert smtp.messages == []
+    assert "첨부할 파일이 없음" in _text(res)
+
+
 def test_a_summary_without_a_zip_still_sends_the_report_alone(tmp_path, smtp):
     report = tmp_path / "report.html"
     report.write_bytes(b"<html>report</html>")
