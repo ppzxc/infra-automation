@@ -110,10 +110,13 @@ def _normalize(value):
     return _ILLEGAL.sub(u'', value.replace(u'\r\n', u'\n').replace(u'\r', u'\n'))
 
 
-def _text(value):
+def _text(value, cut=None):
+    """Escaped cell text. ``cut`` (a one-item list) counts the values that had to be cut to fit a cell."""
     value = _normalize(value)
     if _units(value) > MAX_CELL:
         value = _cut(value)
+        if cut is not None:
+            cut[0] += 1
     return value.replace(u'&', u'&amp;').replace(u'<', u'&lt;').replace(u'>', u'&gt;')
 
 
@@ -135,7 +138,7 @@ def _coerce(value):
     return value
 
 
-def _cell(row, col, value, style):
+def _cell(row, col, value, style, cut):
     ref = u'%s%d' % (_column(col), row)
     value = _coerce(value)
     if isinstance(value, str):
@@ -146,10 +149,10 @@ def _cell(row, col, value, style):
         return u'<c r="%s" s="%d"><v>%d</v></c>' % (ref, style, value)
     if value == u'':
         return u'<c r="%s" s="%d"/>' % (ref, style)
-    return u'<c r="%s" s="%d" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>' % (ref, style, _text(value))
+    return u'<c r="%s" s="%d" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>' % (ref, style, _text(value, cut))
 
 
-def _sheet_xml(headers, rows, footer, widths):
+def _sheet_xml(headers, rows, footer, widths, cut):
     cols = u''.join(u'<col min="%d" max="%d" width="%d" customWidth="1"/>' % (i + 1, i + 1, w)
                     for i, w in enumerate(widths))
     lines = [(1, [(c, h, STYLE_HEADER) for c, h in enumerate(headers)])]
@@ -158,7 +161,7 @@ def _sheet_xml(headers, rows, footer, widths):
     start = len(rows) + 3  # one blank row between the table and the footer
     for offset, line in enumerate(footer):
         lines.append((start + offset, [(0, line, STYLE_FOOTER)]))
-    body = u''.join(u'<row r="%d">%s</row>' % (n, u''.join(_cell(n, c, v, s) for c, v, s in cells))
+    body = u''.join(u'<row r="%d">%s</row>' % (n, u''.join(_cell(n, c, v, s, cut) for c, v, s in cells))
                     for n, cells in lines)
     return (u'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             u'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
@@ -227,16 +230,13 @@ def _workbook(sheet):
             u'<sheets><sheet name="%s" sheetId="1" r:id="rId1"/></sheets></workbook>' % name)
 
 
-def truncated_cells(headers, rows, footer):
-    """Number of text cells longer than an xlsx cell holds (they are cut with an ellipsis; the module warns)."""
-    cells = list(headers) + [c for row in rows for c in row] + list(footer)
-    # A value that is neither text nor an integer is written as its text (see _cell), so it is cut the same way.
-    texts = [c for c in (_coerce(cell) for cell in cells) if isinstance(c, str)]
-    return sum(1 for c in texts if _units(_normalize(c)) > MAX_CELL)
-
-
 def build_xlsx(sheet, headers, rows, footer, widths):
-    """The bytes of the workbook. Raises ValueError for a row that does not fit the header or an unsupported cell."""
+    """``(bytes of the workbook, number of cells cut to fit)``.
+
+    Text longer than an xlsx cell holds is cut with an ellipsis (the module warns); the count comes from the same pass
+    that writes the cells, so it cannot disagree with what was written. Raises ValueError for a row that does not fit
+    the header or an unsupported cell.
+    """
     headers = list(headers)
     if not headers:
         raise ValueError('headers must not be empty')
@@ -251,13 +251,14 @@ def build_xlsx(sheet, headers, rows, footer, widths):
     if len(widths) > len(headers):
         raise ValueError('%d column widths for %d headers' % (len(widths), len(headers)))
     widths = [int(w) for w in widths] + [DEFAULT_WIDTH] * (len(headers) - len(widths))
+    cut = [0]
     parts = [
         (u'[Content_Types].xml', _CONTENT_TYPES),
         (u'_rels/.rels', _ROOT_RELS),
         (u'xl/workbook.xml', _workbook(sheet)),
         (u'xl/_rels/workbook.xml.rels', _WORKBOOK_RELS),
         (u'xl/styles.xml', _STYLES),
-        (u'xl/worksheets/sheet1.xml', _sheet_xml(headers, rows, footer, widths[:len(headers)])),
+        (u'xl/worksheets/sheet1.xml', _sheet_xml(headers, rows, footer, widths[:len(headers)], cut)),
     ]
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:
@@ -267,7 +268,7 @@ def build_xlsx(sheet, headers, rows, footer, widths):
             info.external_attr = 0o600 << 16
             info.create_system = 3  # fixed (unix), not the platform the module happens to run on
             archive.writestr(info, xml.encode('utf-8'))
-    return buffer.getvalue()
+    return buffer.getvalue(), cut[0]
 
 
 def main():
@@ -290,10 +291,9 @@ def main():
     module.no_log_values = set(v for v in module.no_log_values if len(v) >= MIN_MASKED)
     p = module.params
     try:
-        data = build_xlsx(p['sheet'], p['headers'], p['rows'], p['footer'], p['widths'])
+        data, cut = build_xlsx(p['sheet'], p['headers'], p['rows'], p['footer'], p['widths'])
     except ValueError as exc:
         module.fail_json(msg=str(exc))
-    cut = truncated_cells(p['headers'], p['rows'], p['footer'])
     if cut:
         module.warn('%d cell(s) longer than %d characters were cut' % (cut, MAX_CELL))
     try:
