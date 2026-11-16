@@ -302,10 +302,9 @@ def test_unassigned_declarations_are_shown_as_unassigned():
     model = host_audit_report_model([rec], meta())
     declared = {f["key"]: f for f in host(model, "ns0331")["declared"]}
 
-    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "state": "ok", "tag": "",
-                                   "unassigned": False}
+    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "state": "ok", "tag": ""}
     for key in ("department", "owner_role", "admin_role", "asset_importance"):
-        assert declared[key]["value"] == "미지정" and declared[key]["unassigned"] is True
+        assert declared[key]["value"] == "미지정" and declared[key]["state"] == "unassigned"
     assert declared["asset_importance"]["label"] == "자산중요도"
     assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 1
 
@@ -342,6 +341,7 @@ def test_declaration_keeps_the_ledger_text_unchanged_caps_only_blobs_and_drops_n
     assert decl["purpose"] == long_but_real and decl["purpose"].endswith("[그룹자산A]")
     assert decl["department"] == "{{ x }}", "evidence is stored as the ledger copy has it"
     assert decl["owner_role"] == "" and decl["admin_role"] == ""
+    assert decl["malformed"] == ["owner_role", "admin_role"]
     blob = host_audit_asset_declaration({"description": "x" * 5000}, True)["purpose"]
     assert len(blob) == 500 and blob.endswith("…")
 
@@ -355,6 +355,24 @@ def test_tag_colors_separate_unknown_values_from_data_errors():
     assert {f["tag"] for f in failed.values()} == {"na"} and {f["tag"] for f in unassigned.values()} == {"na"}
     assert invalid["asset_importance"]["tag"] == "crit" and invalid["purpose"]["tag"] == ""
     assert {f["tag"] for f in ok.values()} == {""}
+
+
+def test_non_text_values_and_old_security_grade_records_show_as_invalid_not_unassigned():
+    _m, declared = _decl_model(dict(HOST_KV, isms_owner_role=["x"], isms_department=True))
+    assert declared["owner_role"]["state"] == "invalid" and declared["department"]["state"] == "invalid"
+    assert declared["purpose"]["state"] == "ok"
+
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    rec["declared"]["asset"].pop("asset_importance")
+    rec["declared"]["asset"]["security_grade"] = "2등급"
+    old = {f["key"]: f for f in host(host_audit_report_model([rec], meta()), "ns0331")["declared"]}
+    assert old["asset_importance"]["value"] == "잘못된 값 (2등급)"
+
+
+def test_resolve_connection_still_sets_the_variables_host_audit_reads():
+    text = (ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml").read_text(encoding="utf-8")
+    assert "register: _openbao_host_kv_resp\n" in text
+    assert "_effective_host_resp:" in text and "_host_kv_dict:" in text
 
 
 def test_invalid_importance_echoes_at_most_twenty_characters_of_the_original():

@@ -296,18 +296,8 @@ DECLARED_MAX_LEN = 500
 INVALID_SHOWN_LEN = 20
 
 
-def _declared_text(value):
-    """Scalar KV value as display text, stored exactly as the ledger copy has it (evidence).
-
-    Text only: dict, list and bool values are not declarations and count as empty. The cap (500, far above a
-    description with its trailing ``[그룹자산명]``) only keeps a pasted blob out of the record and ends with
-    '…' when it cuts. No template escaping: ansible-core 2.19+ never templates data that came from a lookup
-    or a filter (untrusted by default); ``tests/test_host_audit_inventory.py`` proves it with a real run.
-    """
-    if value is None or isinstance(value, (dict, list, bool)):
-        return ''
-    text = str(value).strip()
-    return text if len(text) <= DECLARED_MAX_LEN else text[:DECLARED_MAX_LEN - 1].rstrip() + '…'
+def _cap(text, limit):
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
 
 
 def host_audit_asset_declaration(host_kv, lookup_ok=True):
@@ -315,13 +305,26 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
 
     Picks exactly five keys (never hands the whole dict on: it also holds connection values).
     ``lookup_ok`` false (``hosts/<host>`` did not answer 200) -> every value empty and ``lookup: failed``.
+
+    Values are kept as the ledger copy has them (evidence): only surrounding blanks are cut and a value
+    longer than 500 characters ends with '…' (far above a description with its trailing ``[그룹자산명]``;
+    the cap only keeps a pasted blob out of the record). A dict, list or bool is not text: the value is
+    empty and the key is listed in ``malformed`` so the report shows '잘못된 값' instead of '미지정'.
+    No template escaping: ansible-core 2.19+ never templates data that came from a lookup or a filter
+    (untrusted by default); ``tests/test_host_audit_inventory.py`` proves it with a real run.
     """
     host_kv = host_kv if isinstance(host_kv, dict) and lookup_ok else {}
     decl = {}
+    malformed = []
     for kv_key, key in DECLARATION_KEYS:
         value = host_kv.get(kv_key)
-        decl[key] = _declared_text(value)
+        if isinstance(value, (dict, list, bool)):
+            malformed.append(key)
+            value = ''
+        decl[key] = _cap(str(value).strip(), DECLARED_MAX_LEN) if value is not None else ''
     decl['lookup'] = 'ok' if lookup_ok else 'failed'
+    if malformed:
+        decl['malformed'] = malformed
     return decl
 
 
@@ -418,26 +421,26 @@ def _fmt_uptime(seconds):
     return '%d일 %d시간' % (days, rest // 3600)
 
 
-def _short(value):
-    return value if len(value) <= INVALID_SHOWN_LEN else value[:INVALID_SHOWN_LEN - 1].rstrip() + '…'
-
-
 def _declared(record):
     asset = ((record.get('declared') or {}).get('asset') or {})
     failed = asset.get('lookup') == 'failed'
     fields = []
     for key, label in DECLARED_FIELDS:
         value = str(asset.get(key) or '').strip()
+        if key == 'asset_importance' and not value:
+            # 이 변경 전에 저장한 기록(security_grade)도 값을 잃지 않고 '잘못된 값'으로 보인다.
+            value = str(asset.get('security_grade') or '').strip()
         if failed:
             state, shown = 'lookup_failed', LOOKUP_FAILED
+        elif key in (asset.get('malformed') or []):
+            state, shown = 'invalid', '%s (값이 문자열이 아님)' % INVALID
         elif not value:
             state, shown = 'unassigned', UNASSIGNED
         elif key == 'asset_importance' and value not in IMPORTANCE_LEVELS:
-            state, shown = 'invalid', '%s (%s)' % (INVALID, _short(value))
+            state, shown = 'invalid', '%s (%s)' % (INVALID, _cap(value, INVALID_SHOWN_LEN))
         else:
             state, shown = 'ok', value
-        fields.append({'key': key, 'label': label, 'value': shown, 'state': state, 'tag': DECLARED_TAGS.get(state, ''),
-                       'unassigned': state == 'unassigned'})
+        fields.append({'key': key, 'label': label, 'value': shown, 'state': state, 'tag': DECLARED_TAGS.get(state, '')})
     return fields, [str(n) for n in (asset.get('privileged_allowlist') or [])]
 
 
@@ -602,7 +605,7 @@ def inventory_section(records, meta):
         'counts': {
             'not_declared': sum(len(h.get('not_declared', [])) for h in hosts),
             'inactive': sum(len(h.get('inactive', [])) for h in hosts),
-            'unassigned_hosts': sum(1 for h in hosts if any(f['unassigned'] for f in h['declared'])),
+            'unassigned_hosts': sum(1 for h in hosts if any(f['state'] == 'unassigned' for f in h['declared'])),
             'invalid_hosts': sum(1 for h in hosts if any(f['state'] == 'invalid' for f in h['declared'])),
             'lookup_failed_hosts': sum(1 for h in hosts if any(f['state'] == 'lookup_failed' for f in h['declared'])),
             'eos': len(eos),
