@@ -429,6 +429,54 @@ def _register_rows(register, applied, today):
     return rows
 
 
+def _build_findings(groups):
+    """Findings (one per item and verdict) in the body table order, from ``{(code, verdict): [host rows]}``."""
+    findings = []
+    for (code, verdict), hosts in groups.items():
+        findings.append(dict(_item_meta(code), **remediation_view(code), verdict=verdict,
+                             verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
+    return order_findings(findings)
+
+
+FAMILY_LABELS = (('rhel', 'RHEL 계열'), ('debian', 'Debian 계열'))
+
+
+def _build_remediation_guide(findings):
+    """Item-level blocks of the remediation appendix: the same items in the same order as the body table.
+
+    ``findings`` is already in body table order, one entry per (item, verdict). Blocks are keyed by the full item code and
+    placed where the item first appears, so the block order is the body table's item order even when the verdicts
+    of one item are not adjacent (equal priority and levels sort by verdict before code). Each block lists the
+    hosts per verdict (no evidence) and every family of ``steps`` (not filtered by a host's family). A code the
+    catalog lacks (a stored record can carry one) still gets a block, with the finding's own columns and empty
+    catalog text, so the block set always equals the body table's item set.
+    Catalog entries are validated at load (_validate_remediation), so their keys are indexed directly here, as in
+    remediation_view.
+    """
+    blocks = {}
+    for finding in findings:
+        code = finding['code']  # the full code, as the body table shows it (also keeps editions apart)
+        block = blocks.get(code)
+        if block is None:
+            meta = ITEMS.get(code.split(':', 1)[-1])  # the same lookup as _item_meta/remediation_view (body table)
+            block = {'code': code, 'title': finding['title'], 'severity': finding['severity'],
+                     'purpose': '', 'threat': '', 'criteria': finding['criteria'], 'check': '', 'summary': '',
+                     'steps': [], 'impact': None, 'effort': None, 'guide_page': None, 'verdict_hosts': []}
+            if meta is not None:
+                steps = meta['remediation'].get('steps') or {}
+                block.update(
+                    title=meta['title'], severity=meta['severity'], purpose=meta['purpose'], threat=meta['threat'],
+                    criteria=meta['criteria'], check=meta['check'], summary=meta['remediation']['summary'],
+                    steps=[{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
+                           if (steps.get(key) or '').strip()],
+                    impact=dict(meta['remediation_impact']), effort=dict(meta['remediation_effort']),
+                    guide_page=meta['guide_page'])
+            blocks[code] = block
+        block['verdict_hosts'].append({'verdict': finding['verdict'], 'verdict_class': finding['verdict_class'],
+                                       'hosts': [h['host'] for h in finding['hosts']]})
+    return list(blocks.values())
+
+
 def host_audit_kisa_section(model, records, register=None, today=None):
     """Return a copy of the report model with the Configuration Vulnerability section.
 
@@ -484,12 +532,7 @@ def host_audit_kisa_section(model, records, register=None, today=None):
                              evidence=it['evidence'], note=note))
         appendix[host] = rows
 
-    findings = []
-    for (code, verdict), hosts in groups.items():
-        meta = _item_meta(code)
-        findings.append(dict(meta, **remediation_view(code), verdict=verdict,
-                             verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
-    findings = order_findings(findings)
+    findings = _build_findings(groups)
 
     summary = [dict(_item_meta(code), counts=[counts[code][v] for v in VERDICTS]) for code in codes]
     implemented = sorted(ITEMS)
@@ -510,6 +553,7 @@ def host_audit_kisa_section(model, records, register=None, today=None):
         'totals': [totals[v] for v in VERDICTS],
         'summary': summary,
         'findings': findings,
+        'remediation_guide': _build_remediation_guide(findings),
         'remediation_source': REMEDIATION_SOURCE,
         'appendix': appendix,
         'register': _register_rows(register, applied, today),
