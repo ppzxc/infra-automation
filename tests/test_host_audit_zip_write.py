@@ -71,6 +71,23 @@ def test_an_existing_zip_in_the_directory_is_never_packed_into_itself(tmp_path):
         assert z.namelist() == ["a.xlsx", "b.xlsx"]
 
 
+def test_named_files_are_packed_and_others_never(tmp_path):
+    d = _dir(tmp_path)
+    dest = d / "host-audit-ha-1-xlsx.zip"
+    out = _run(tmp_path, {"src_dir": str(d), "dest": str(dest), "names": ["b.xlsx"]})
+    assert not out.get("failed")
+    with zipfile.ZipFile(dest) as z:
+        assert z.namelist() == ["b.xlsx"]  # a.xlsx is on disk but was not named (a stale file of an earlier run)
+
+
+def test_a_named_file_that_is_missing_or_not_a_plain_name_fails(tmp_path):
+    d = _dir(tmp_path)
+    for bad in ("nope.xlsx", "../a.xlsx"):
+        out = _run(tmp_path, {"src_dir": str(d), "dest": str(d / "z.zip"), "names": [bad]})
+        assert out["failed"] is True and bad in out["msg"]
+    assert not (d / "z.zip").exists()
+
+
 def test_check_mode_writes_nothing(tmp_path):
     d = _dir(tmp_path)
     dest = d / "host-audit-ha-1-xlsx.zip"

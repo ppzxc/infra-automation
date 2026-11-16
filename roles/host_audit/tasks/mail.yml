@@ -90,6 +90,8 @@
     _problems: >-
       {{ (['OpenBao agents/host_audit 조회 실패 또는 자격증명 없음(VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN, 정책에 agents/host_audit 경로)'] if _lookup_failed else [])
          + (['메일 수신자 없음 — OpenBao agents/host_audit.mail_to 또는 Extra variables host_audit_mail_to에 넣는다'] if _to.addresses | length == 0 else [])
+         + (['요약에 xlsx zip이 있는데 첨부할 경로가 없음(본문과 첨부가 어긋남)'] if (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip
+                                                                    and (_host_audit_mail_xlsx_path | default('')) | length == 0) else [])
          + (['수신자(mail_to) 주소 형식 오류 ' ~ _to.invalid ~ '건'] if _to.invalid > 0 else [])
          + (['발신자 없음 또는 형식 오류 — agents/host_audit.mail_from 또는 host_audit_mail_from(주소 1개)'] if (_from.addresses | length != 1 or _from.invalid > 0) else []) }}
   ansible.builtin.set_fact:

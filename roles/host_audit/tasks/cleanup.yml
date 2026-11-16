@@ -31,7 +31,7 @@
          and (host_audit_baseline_history.state | default('failed')) != 'failed'
          and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0
          and not (_pointer_failed | bool) }}
-    _xlsx_failed: "{{ _host_audit_xlsx_failed_hosts | default([]) | length > 0 }}"
+    _xlsx_failed: "{{ (_host_audit_xlsx_failed_hosts | default([]) | length > 0) or (_host_audit_xlsx_zip_failed | default(false)) }}"
     _mail_sent: >-
       {{ (_host_audit_mail_plan.send | default(false) | bool) and (host_audit_mail_outcome.sent | default(false) | bool) }}
     _reason: >-

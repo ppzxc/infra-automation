@@ -110,7 +110,9 @@
 # 받은 값이라 경로 문자를 믿지 않는다). 기록이 있는데 받지 못하거나 이름·해시가 다르면 AUD-633이 보내지 않고 멈춘다.
 - name: Read the xlsx zip record of the archived summary
   vars:
-    _raw: "{{ ((_host_audit_resend_summary.content | default('')) | host_audit_json_loads).xlsx_zip | default({}, true) }}"
+    _doc: "{{ (_host_audit_resend_summary.content | default('')) | host_audit_json_loads }}"
+    # 요약을 믿는 기준은 host_audit_mail_resend_summary와 같다(schema_version이 있는 요약만). 어긋나면 받은 zip이 첨부되지 않는다.
+    _raw: "{{ _doc.xlsx_zip | default({}, true) if (_doc.schema_version | default(0)) else {} }}"
   ansible.builtin.set_fact:
     _host_audit_resend_zip_record: >-
       {{ _raw if _raw is mapping else ({'invalid': true} if _raw else {}) }}

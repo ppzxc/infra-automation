@@ -136,15 +136,16 @@
       host_audit_zip_write:
         src_dir: "{{ host_audit_run.output_dir }}/xlsx"
         dest: "{{ _host_audit_xlsx_zip_path }}"
+        names: "{{ _host_audit_remediation_plans.values() | map(attribute='file_name') | list }}"
       register: _host_audit_xlsx_zip_write
       ignore_errors: true
       when:
         - host_audit_model.hosts | length > 0
         - _host_audit_xlsx_failed_hosts | default([]) | length == 0
 
-    - name: Count a failed xlsx zip with the failed Remediation Plan files
+    - name: Remember that the xlsx zip could not be written
       ansible.builtin.set_fact:
-        _host_audit_xlsx_failed_hosts: "{{ _host_audit_xlsx_failed_hosts | default([]) + ['(xlsx zip)'] }}"
+        _host_audit_xlsx_zip_failed: true
       when: _host_audit_xlsx_zip_write.failed | default(false)
 
     - name: "[AUD-611] Compute the SHA-256 of the report to attach"
@@ -217,8 +218,8 @@
     # AUD-025의 실패를 모아 맨 끝에서 실행을 실패로 끝낸다. 호스트 이름만 밝힌다(오류 메시지는 모듈 출력에 이미 있다).
     - name: Fail the run when a Remediation Plan xlsx could not be written
       ansible.builtin.assert:
-        that: _host_audit_xlsx_failed_hosts | default([]) | length == 0
-        fail_msg: "Remediation Plan xlsx(또는 xlsx zip)를 쓰지 못한 대상: {{ _host_audit_xlsx_failed_hosts | default([]) | join(', ') }} (실행 디렉터리는 남김)"
+        that: _host_audit_xlsx_failed_hosts | default([]) | length == 0 and not (_host_audit_xlsx_zip_failed | default(false))
+        fail_msg: "Remediation Plan xlsx(또는 xlsx zip)를 쓰지 못한 대상: {{ (_host_audit_xlsx_failed_hosts | default([]) + (['xlsx zip'] if _host_audit_xlsx_zip_failed | default(false) else [])) | join(', ') }} (실행 디렉터리는 남김)"
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml

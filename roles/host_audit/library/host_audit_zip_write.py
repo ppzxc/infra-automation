@@ -30,6 +30,12 @@ options:
     description: Path of the zip. Its directory must exist (normally C(src_dir) itself).
     type: path
     required: true
+  names:
+    description:
+      - Exact file names (inside C(src_dir)) to pack, sorted by name. When given, files that are not listed are never packed
+        (a rerun of the same run id must not pull in an earlier run's xlsx) and a listed file that is missing is an error.
+    type: list
+    elements: str
 author:
   - infra-automation
 '''
@@ -114,14 +120,18 @@ def _write(dest, data):
 
 def main():
     module = AnsibleModule(
-        argument_spec=dict(src_dir=dict(type='path', required=True), dest=dict(type='path', required=True)),
+        argument_spec=dict(src_dir=dict(type='path', required=True), dest=dict(type='path', required=True),
+                           names=dict(type='list', elements='str')),
         supports_check_mode=True,
     )
     src_dir, dest = module.params['src_dir'], module.params['dest']
     if not os.path.isdir(src_dir):
         module.fail_json(msg='source directory %s does not exist' % src_dir)
     try:
-        names = _members(src_dir)
+        names = sorted(set(module.params['names'])) if module.params['names'] is not None else _members(src_dir)
+        missing = [n for n in names if os.path.basename(n) != n or not os.path.isfile(os.path.join(src_dir, n))]
+        if missing:
+            module.fail_json(msg='files to pack are missing from %s: %s' % (src_dir, ', '.join(missing)))
         data = build_zip(src_dir, names)
         changed = not _same(dest, data)
         if changed and not module.check_mode:

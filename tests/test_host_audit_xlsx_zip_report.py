@@ -197,7 +197,7 @@ def _report_stage(tmp_path, out, model=None, break_xlsx=False):
     (out / "report.html").write_text("<html>report</html>")
     names = ("Build the Remediation Plan of every host", "[AUD-025]",
              "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]",
-             "Count a failed xlsx zip", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
+             "Remember that the xlsx zip", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in names)]
     assert len(tasks) == len(names), [t.get("name") for t in tasks]
@@ -235,6 +235,15 @@ def test_the_zip_is_built_deterministically_hashed_into_the_summary_and_kept(tmp
     assert summary["report"]["sha256"] == hashlib.sha256(b"<html>report</html>").hexdigest()
     # the same input gives the same bytes: a second run of the whole stage changes nothing
     assert _report_stage(tmp_path / "again", tmp_path / "again" / "run")["xlsx/" + ZIP_NAME] == digest
+
+
+def test_a_stale_xlsx_of_an_earlier_run_with_the_same_id_is_not_packed(tmp_path):
+    out = tmp_path / "run"
+    (out / "xlsx").mkdir(parents=True)
+    (out / "xlsx" / ("host-audit-%s-gone.xlsx" % RUN_ID)).write_bytes(b"stale plan of a host not audited now")
+    _report_stage(tmp_path, out)
+    with zipfile.ZipFile(out / "xlsx" / ZIP_NAME) as z:
+        assert z.namelist() == ["host-audit-%s-h1.xlsx" % RUN_ID, "host-audit-%s-h2.xlsx" % RUN_ID]
 
 
 def test_a_run_without_hosts_builds_no_zip_and_still_goes_on(tmp_path):
@@ -306,6 +315,14 @@ def test_the_mail_has_the_report_and_the_xlsx_zip_and_the_body_shows_the_zip_has
     assert files == {"host-audit-%s.html" % RUN_ID: b"<html>report</html>", ZIP_NAME: zip_bytes}
     body = msg.get_body(preferencelist=("html",)).get_content()
     assert hashlib.sha256(zip_bytes).hexdigest() in body and hashlib.sha256(b"<html>report</html>").hexdigest() in body
+
+
+def test_a_summary_that_names_a_zip_but_gets_no_zip_path_sends_nothing(tmp_path, smtp):
+    """The body would announce an attachment the mail does not carry."""
+    report = tmp_path / "report.html"
+    report.write_bytes(b"<html>report</html>")
+    _send_play(tmp_path, smtp, _summary_doc(report.read_bytes(), b"PK-zip-bytes"), report, None)
+    assert smtp.messages == []
 
 
 def test_a_summary_without_a_zip_still_sends_the_report_alone(tmp_path, smtp):
