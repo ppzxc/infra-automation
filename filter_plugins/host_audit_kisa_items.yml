@@ -1145,7 +1145,7 @@ U-60:
     steps:
       rhel: |
         /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄(com2sec notConfigUser <수집 서버 대역> <새 값>)에서 community 값을 변경(source를 default로 두면 U-61이 취약)
-        systemctl restart snmpd
+        systemctl restart snmpd (systemd가 없는 CentOS 6은 service snmpd restart)
       debian: |
         /etc/snmp/snmpd.conf의 rocommunity, rwcommunity, rocommunity6, rwcommunity6 줄에서 지시어는 그대로 두고 community 문자열만 새 값으로 바꾸며 source는 수집 서버 대역으로 지정한다(기존 -V <view> 옵션은 유지하고, source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
@@ -1170,7 +1170,7 @@ U-61:
     steps:
       rhel: |
         /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄에서 source를 default·0.0.0.0/0 대신 허용 네트워크 주소로 지정
-        systemctl restart snmpd
+        systemctl restart snmpd (systemd가 없는 CentOS 6은 service snmpd restart)
       debian: |
         /etc/snmp/snmpd.conf의 rocommunity·rwcommunity와 rocommunity6·rwcommunity6 줄은 rocommunity <community> <source> 형태이므로 세 번째 자리의 default를 허용 네트워크 주소로 교체한다(추가가 아니라 교체)
         systemctl restart snmpd

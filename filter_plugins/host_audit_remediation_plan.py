@@ -21,7 +21,7 @@ from host_audit_kisa import (  # noqa: E402
     EXCEPTION, ITEMS, MANUAL, REGISTER_ACTIVE, REGISTER_EXPIRED, REGISTER_PENDING, REMEDIATION_SOURCE,
     order_findings)
 from host_audit_baseline import NEW, PERSIST, RECUR  # noqa: E402
-from host_audit_inventory import UNASSIGNED  # noqa: E402  (the label the Asset Inventory table shows)
+from host_audit_inventory import UNASSIGNED, _unsafe  # noqa: E402  (the Asset Inventory label; the unsafe mark)
 
 SHEET = '이행계획서'
 # SolidStep 이행계획서 column order. 구현내용 is three columns.
@@ -31,12 +31,6 @@ WIDTHS = [14, 12, 14, 32, 40, 40, 60, 8, 24, 8, 8, 8, 8, 24, 48]
 NO_FINDINGS = '양호 외 항목 없음'
 NO_RESULT = '점검 결과 없음(점검불가)'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
-try:
-    from ansible.utils.unsafe_proxy import wrap_var as _unsafe
-except ImportError:  # pragma: no cover - plain Python without ansible
-    def _unsafe(value):
-        return value
-
 BASELINE_PREFIXED = (NEW, PERSIST, RECUR)  # the only Audit Baseline states the remark shows (not 첫 실행 or others)
 BLANK_DATE = '-'  # what the register table shows for a date that is absent or malformed
 

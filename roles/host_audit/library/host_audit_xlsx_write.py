@@ -74,6 +74,7 @@ dest:
 import io
 import os
 import re
+import tempfile
 import zipfile
 
 from ansible.module_utils.basic import AnsibleModule
@@ -213,10 +214,10 @@ def build_xlsx(sheet, headers, rows, footer, widths):
         (u'xl/worksheets/sheet1.xml', _sheet_xml(headers, rows, footer, widths[:len(headers)])),
     ]
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:
         for name, xml in parts:
             info = zipfile.ZipInfo(name, FIXED_TIME)
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED  # not deflate: its bytes depend on the zlib build
             info.external_attr = 0o600 << 16
             info.create_system = 3  # fixed (unix), not the platform the module happens to run on
             archive.writestr(info, xml.encode('utf-8'))
@@ -240,9 +241,10 @@ def _write(dest, data):
     if not os.path.isdir(directory):
         os.makedirs(directory, 0o700)
         os.chmod(directory, 0o700)
-    tmp = '%s.%d.tmp' % (dest, os.getpid())
+    # mkstemp: exclusive create with an unpredictable name (no symlink to follow), mode 0600. AUD-513 skips *.tmp
+    # in case a killed run leaves one behind.
+    fd, tmp = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=directory)
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, 'wb') as handle:
             handle.write(data)
         os.replace(tmp, dest)
@@ -262,8 +264,10 @@ def main():
             dest=dict(type='path', required=True),
             sheet=dict(type='str', default='Sheet1'),
             headers=dict(type='list', elements='str', required=True),
-            # rows carry host evidence: keep them out of the invocation output but leave the error message visible.
-            rows=dict(type='list', elements='list', default=[], no_log=True),
+            # Not no_log: Ansible would mask every cell value inside the module's own output (the failure message
+            # and dest too). The cells are what report.html shows (the KISA checks never print secrets); errors
+            # name only a row number and a count.
+            rows=dict(type='list', elements='list', default=[]),
             footer=dict(type='list', elements='str', default=[]),
             widths=dict(type='list', elements='int', default=[]),
         ),

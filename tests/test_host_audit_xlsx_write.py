@@ -98,6 +98,7 @@ def test_rows_must_fit_the_header(tmp_path):
     dest = tmp_path / "bad.xlsx"
     out = _run(dict(_args(dest), rows=[["only one"]], _args_file=tmp_path / "b.json"))
     assert out.get("failed") is True and not dest.exists()
+    assert out["msg"] == "row 2 has 1 cells, the header has 4"  # readable: no value of the rows is masked
 
 
 def test_other_cell_types_are_written_as_text_and_none_as_an_empty_cell(tmp_path):
