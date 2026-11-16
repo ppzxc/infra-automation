@@ -78,6 +78,7 @@ def _run(tmp_path, out, model, run_kind="scheduled"):
     }], allow_unicode=True))
     env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
                ANSIBLE_LIBRARY=str(ROOT_DIR / "roles" / "host_audit" / "library"),
+               ANSIBLE_MODULE_UTILS=str(ROOT_DIR / "roles" / "host_audit" / "module_utils"),
                ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins"))
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
@@ -147,6 +148,10 @@ def test_the_run_stops_when_every_plan_failed_but_not_when_one_did(tmp_path):
         assert (res.returncode == 0) is ok, res.stdout[-1500:]
 
 
+def _problem(hosts):
+    return {"failed": bool(hosts), "targets": hosts, "what": "Remediation Plan xlsx"}
+
+
 def test_a_failed_write_does_not_stop_the_run_until_the_final_judgement(tmp_path):
     write = _task("report.yml", "AUD-025")
     assert write["ignore_errors"] is True and write["register"] == "_host_audit_xlsx_write"
@@ -157,7 +162,7 @@ def test_a_failed_write_does_not_stop_the_run_until_the_final_judgement(tmp_path
     for failed, ok in (([{"failed": True, "item": "h2"}, {"item": "h1"}], False), ([{"item": "h1"}], True)):
         pb = tmp_path / ("j%d.yml" % len(failed))
         pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False,
-                                       "vars": {"_host_audit_xlsx_failed_hosts": [r["item"] for r in failed if r.get("failed")]}, "tasks": [judge]}],
+                                       "vars": {"_host_audit_xlsx_problem": _problem([r["item"] for r in failed if r.get("failed")])}, "tasks": [judge]}],
                                      allow_unicode=True))
         res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
                              stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
@@ -181,6 +186,7 @@ def test_the_failed_hosts_of_a_real_failing_write_loop_are_collected(tmp_path):
                   {"ansible.builtin.debug": {"var": "_host_audit_xlsx_failed_hosts"}}],
     }], allow_unicode=True))
     env = dict(os.environ, ANSIBLE_LIBRARY=str(ROOT_DIR / "roles" / "host_audit" / "library"),
+               ANSIBLE_MODULE_UTILS=str(ROOT_DIR / "roles" / "host_audit" / "module_utils"),
                ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins"), ANSIBLE_STDOUT_CALLBACK="ansible.posix.json")
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
