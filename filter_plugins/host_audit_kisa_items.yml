@@ -516,7 +516,7 @@ U-27:
   threat: r-command에 보안 설정이 없으면 원격 공격자가 관리자 권한으로 임의 명령을 실행하거나 파일 권한을 악용해 무단 사용을 등록할 수 있다.
   guide_page: 54
   remediation:
-    summary: /etc/hosts.equiv 와 각 $HOME/.rhosts 를 chown 으로 root 또는 해당 계정 소유로, chmod 600 으로 권한을 맞춘다. 파일 안에 + 설정이 있으면 제거하고 허용할 호스트와 계정만 등록한다. r-command를 안 쓰면 파일이 없는 것이 양호다.
+    summary: /etc/hosts.equiv 와 각 $HOME/.rhosts 를 chown 으로 root 또는 해당 계정 소유로, chmod 600 으로 권한을 맞춘다(이미 600보다 엄격하면 그대로 둔다). 파일 안에 + 설정이 있으면 제거하고 허용할 호스트와 계정만 등록한다. r-command를 안 쓰면 파일이 없는 것이 양호다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1049,7 +1049,7 @@ U-56:
   threat: 접근 제한이 없으면 인증 없이 비인가자가 디렉터리·파일에 접근해 중요 파일을 변조하거나 유출할 수 있다.
   guide_page: 135
   remediation:
-    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 허용 IP·호스트만 접속하도록 TCP Wrapper(hosts.allow, hosts.deny; RHEL 8 이상은 libwrap이 없어 방화벽으로)나 proftpd의 <Limit LOGIN> 블록으로 제한하고, ftpusers 또는 vsftpd user_list 파일은 소유자 root, 권한 640으로 둔다.
+    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 허용 IP·호스트만 접속하도록 TCP Wrapper(hosts.allow, hosts.deny; RHEL 8 이상은 libwrap이 없어 방화벽으로)나 proftpd의 <Limit LOGIN> 블록으로 제한하고, ftpusers 또는 vsftpd user_list 파일은 소유자 root, 권한 640 이하로 둔다.
   remediation_impact:
     level: 2
     reason: 지정한 IP나 호스트에서만 FTP 접속이 가능해져 그 밖의 접속은 막힌다.

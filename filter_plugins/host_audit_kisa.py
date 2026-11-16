@@ -56,7 +56,7 @@ CATEGORY_LOG = '로그 관리'
 CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH, CATEGORY_LOG]
 
 # KISA-2026 Unix items U-01~U-67. The item list lives only in host_audit_kisa_items.yml next to this
-# module (title/severity/category/criteria/cis) and is never edited here.
+# module (base fields ITEM_FIELDS plus the remediation fields REMEDIATION_FIELDS) and is never edited here.
 #
 # The catalog is read at import time on purpose (Spec #488 / Ticket-1, #489: "the filter only reads the YAML
 # when imported"). A broken or missing catalog must fail loudly at that point with the cause named in the
@@ -133,7 +133,7 @@ def _validate_remediation(code, meta, path):
     rem = meta['remediation']
     if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _invalid_text(rem.get('summary')):
         fail('remediation', 'must be a mapping of summary (trimmed text) and optional steps')
-    if len(rem['summary']) > SUMMARY_MAX or '\n' in rem['summary']:
+    if len(rem['summary']) > SUMMARY_MAX:  # (a newline is already refused by _invalid_text above)
         fail('remediation.summary', 'must be one line of at most %d characters' % SUMMARY_MAX)
     steps = rem.get('steps')
     if steps is not None and (not isinstance(steps, dict) or not steps or set(steps) - set(STEP_FAMILIES)
