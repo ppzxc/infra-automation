@@ -1067,7 +1067,7 @@ U-57:
   threat: root가 FTP로 접속하면 평문 전송 중 스니핑으로 관리자 계정 정보가 유출될 수 있다.
   guide_page: 139
   remediation:
-    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/ftpusers(또는 /etc/ftpd/ftpusers, vsftpd는 ftpusers·user_list)에서 root 줄의 주석(#)을 풀어 차단하고, proftpd에서 UseFtpUsers가 off면 proftpd.conf에 RootLogin off를 두고 재시작한다. vsftpd user_list는 userlist_deny=yes일 때만 차단이 적용된다.
+    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/ftpusers(또는 /etc/ftpd/ftpusers, vsftpd는 ftpusers·user_list)에서 root 줄의 주석(#)을 풀고, root 줄이 없으면 추가한다. proftpd에서 UseFtpUsers가 off면 proftpd.conf에 RootLogin off를 두고 재시작한다. vsftpd user_list는 userlist_deny=yes일 때만 차단이 적용된다.
   remediation_impact:
     level: 2
     reason: 애플리케이션이 root로 직접 FTP 접속하는 경우가 있는지 확인해야 한다.
@@ -1225,7 +1225,7 @@ U-65:
   threat: 시스템 간 시각이 어긋나면 보안 사고나 장애 때 로그의 신뢰도를 확보하기 어렵다.
   guide_page: 164
   remediation:
-    summary: chrony(RHEL 8부터 기본) 또는 ntp 서비스를 켜고 설정 파일(/etc/chrony.conf 또는 /etc/ntp.conf)에 server(또는 pool)로 NTP 서버를 지정한 뒤 서비스를 재시작한다. chronyc sources나 ntpq -pn으로 동기화를 확인하며, systemd-timesyncd가 active인 구성도 인정한다.
+    summary: chrony 또는 ntp 서비스를 켜고 설정 파일(/etc/chrony.conf 또는 /etc/ntp.conf)에 server(또는 pool)로 NTP 서버를 지정한 뒤 서비스를 재시작한다. chronyc sources나 ntpq -pn으로 동기화를 확인하며, systemd-timesyncd가 active인 구성도 인정한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.

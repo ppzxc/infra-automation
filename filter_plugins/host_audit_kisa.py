@@ -198,8 +198,6 @@ ITEMS = _require_all_items(_load_items())
 
 # Values derived from the guide severity (Spec #488 / #479). They are never stored in the catalog, so they
 # cannot drift from it, and they are the same for every host and every verdict.
-RISK_BY_SEVERITY = {'상': 3, '중': 2, '하': 1}
-PRIORITY_BY_SEVERITY = {'상': 1, '중': 2, '하': 3}
 URGENCY_BY_PRIORITY = {1: '단기', 2: '중기', 3: '장기'}
 REMEDIATION_SOURCE = ('조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 '
                       '바탕으로 요약함')
@@ -207,12 +205,12 @@ REMEDIATION_SOURCE = ('조치방법은 KISA 「2026 주요정보통신기반시�
 
 def risk_level(severity):
     """Risk of the finding itself, from the guide severity: 상 3, 중 2, 하 1."""
-    return RISK_BY_SEVERITY[severity]
+    return len(SEVERITY_ORDER) - SEVERITY_ORDER[severity]
 
 
 def priority_of(severity):
     """Priority 1 (most urgent) to 3, from the guide severity: 상 1, 중 2, 하 3."""
-    return PRIORITY_BY_SEVERITY[severity]
+    return SEVERITY_ORDER[severity] + 1
 
 
 def urgency_of(severity):

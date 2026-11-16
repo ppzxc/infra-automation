@@ -215,21 +215,28 @@ def model():
 
 
 @pytest.fixture(scope="module")
-def html(model):
+def env():
     jinja2 = pytest.importorskip("jinja2")
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+    return jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+
+
+@pytest.fixture(scope="module")
+def html(model, env):
     return env.get_template("report.html.j2").render(host_audit_model=model)
 
 
 def test_findings_carry_remediation_and_derived_values_in_priority_order(model):
     findings = model["config_vulnerability"]["findings"]
-    assert [f["code"][-4:] for f in findings] == ["U-01", "U-02", "U-28", "U-12"]  # 상 impact1, 상 impact2, 상 impact3, 하
-    u01 = findings[0]
+    assert sorted(f["code"][-4:] for f in findings) == ["U-01", "U-02", "U-12", "U-28"]
+    keys = [(f["priority"], f["impact_level"], f["effort_level"]) for f in findings]
+    assert keys == sorted(keys)  # levels are drafts the PR may change; the order must follow them
+    by_code = {f["code"][-4:]: f for f in findings}  # pick items by code, not by position
+    u01 = by_code["U-01"]
     assert u01["remediation_summary"] == ITEMS["U-01"]["remediation"]["summary"]
     assert (u01["risk"], u01["priority"], u01["urgency"]) == (3, 1, "단기")
     assert u01["impact_level"] == ITEMS["U-01"]["remediation_impact"]["level"]
     assert u01["effort_level"] == ITEMS["U-01"]["remediation_effort"]["level"]
-    u12 = findings[-1]
+    u12 = by_code["U-12"]
     assert (u12["risk"], u12["priority"], u12["urgency"]) == (1, 3, "장기")
 
 
@@ -253,10 +260,11 @@ def test_body_table_shows_impact_column_and_remediation_line(html, model):
     u01 = ITEMS["U-01"]
     assert "조치: " + u01["remediation"]["summary"] in table
     assert 'class="impact"' in table
-    first_row = table.split("<tr>")[2]  # first data row is the highest priority finding
-    assert "KISA-2026:U-01" in first_row
+    first = model["config_vulnerability"]["findings"][0]  # the highest priority finding is the first data row
+    first_row = table.split("<tr>")[2]
+    assert first["code"] in first_row
     cells = re.findall(r"<td[^>]*>(.*?)</td>", first_row, re.S)
-    assert cells[3].strip() == str(u01["remediation_impact"]["level"])
+    assert cells[3].strip() == str(first["impact_level"])
 
 
 def test_report_states_the_guide_source_sentence_at_the_bottom(html):
@@ -264,9 +272,7 @@ def test_report_states_the_guide_source_sentence_at_the_bottom(html):
     assert html.index(SOURCE_SENTENCE) > html.index("검토 및 결재")
 
 
-def test_source_sentence_is_stated_even_without_findings():
-    jinja2 = pytest.importorskip("jinja2")
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+def test_source_sentence_is_stated_even_without_findings(env):
     lines = ["U-%02d|GOOD|ok" % i for i in range(1, 68)]
     meta = {"run_id": "ha-1", "started_at": "2026-10-08T22:00:05Z", "generated_at": "2026-10-08T22:01:00Z",
             "targets": ["ns0001"], "kisa_exceptions": []}
@@ -298,9 +304,7 @@ def test_per_host_config_vulnerability_json_shape_is_unchanged():
     assert set(part["results"][0]) == {"code", "result", "verdict", "evidence", "exception"}
 
 
-def test_finding_of_an_unknown_code_renders_without_an_empty_remediation_line(model):
-    jinja2 = pytest.importorskip("jinja2")
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+def test_finding_of_an_unknown_code_renders_without_an_empty_remediation_line(model, env):
     cv = dict(model["config_vulnerability"])
     stray = dict(cv["findings"][0], code="KISA-2026:U-99", **kisa.remediation_view("KISA-2026:U-99"))
     page = env.get_template("report.html.j2").render(
@@ -310,9 +314,7 @@ def test_finding_of_an_unknown_code_renders_without_an_empty_remediation_line(mo
     assert "조치: " not in row and '<td class="impact">-</td>' in row
 
 
-def test_report_without_the_source_key_has_no_stray_sentence_line(model):
-    jinja2 = pytest.importorskip("jinja2")
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
+def test_report_without_the_source_key_has_no_stray_sentence_line(model, env):
     cv = {k: v for k, v in model["config_vulnerability"].items() if k != "remediation_source"}
     page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
     assert '<p class="small mute">.</p>' not in page and SOURCE_SENTENCE not in page
