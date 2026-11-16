@@ -7,6 +7,14 @@ _host_audit_storage_active: "{{ (host_audit_storage_enabled | bool) and not ansi
 # 이번 실행의 버킷 내 위치 <YYYY-MM>/<run_id>/ (월은 보고서 시간대 기준 실행 시작 월).
 _host_audit_storage_prefix: "{{ host_audit_run | host_audit_storage_prefix(host_audit_run.timezone) }}"
 
+# 호스트별 Remediation Plan xlsx를 묶은 zip (#495). 이름·경로·보관 위치를 한 곳에서 정한다(AUD-026·615·612·614가 같이 쓴다).
+_host_audit_xlsx_zip_name: "{{ host_audit_run.run_id | host_audit_remediation_zip_name }}"
+_host_audit_xlsx_zip_path: "{{ host_audit_run.output_dir }}/xlsx/{{ _host_audit_xlsx_zip_name }}"
+_host_audit_xlsx_zip_archive: >-
+  {{ ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/' ~ _host_audit_storage_prefix
+      ~ 'xlsx/' ~ _host_audit_xlsx_zip_name ~ ' (3년 보관)') if _host_audit_storage_active | bool
+     else ('러너 ' ~ _host_audit_xlsx_zip_path ~ ' (보관 안 함)') }}
+
 # 메일 발송 (#126). Extra variables로 수신자(host_audit_mail_to)와 발신자(host_audit_mail_from)를
 # 모두 주면 OpenBao agents/host_audit을 조회하지 않는다.
 _host_audit_mail_needs_kv: >-

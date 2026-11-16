@@ -49,9 +49,14 @@
         <b>첨부</b> {{ s.report.file_name | e }} — A4 인쇄용 전체 보고서. 브라우저(Chrome·Edge)로 열어 인쇄합니다.<br>
         <b>SHA-256</b> <span style="font-family:Consolas,'Courier New',monospace;word-break:break-all;">{{ s.report.sha256 | e }}</span><br>
         <b>원본 보관</b> {{ s.report.archive | e }}
+{% if s.xlsx_zip is defined and s.xlsx_zip %}
+        <br><b>첨부</b> {{ s.xlsx_zip.file_name | e }} — 호스트별 Remediation Plan(xlsx)을 묶은 파일. 이행계획서 양식이며, 조치 이행은 이 시스템이 추적하지 않습니다.<br>
+        <b>xlsx zip SHA-256</b> <span style="font-family:Consolas,'Courier New',monospace;word-break:break-all;">{{ s.xlsx_zip.sha256 | e }}</span><br>
+        <b>xlsx zip 보관</b> {{ s.xlsx_zip.archive | e }}
+{% endif %}
       </td></tr>
     </table>
-    <div style="padding-top:10px;font-size:11px;color:#667085;{{ font }}">이 메일은 Host Audit(읽기 전용 정기 점검)이 자동으로 보냈습니다. 첨부의 SHA-256이 보관 원본과 같은지 확인할 수 있습니다.</div>
+    <div style="padding-top:10px;font-size:11px;color:#667085;{{ font }}">이 메일은 Host Audit(읽기 전용 정기 점검)이 자동으로 보냈습니다. 첨부의 SHA-256(보고서·xlsx zip)이 보관 원본과 같은지 확인할 수 있습니다.</div>
   </td></tr>
 </table>
 </td></tr>

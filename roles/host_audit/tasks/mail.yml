@@ -4,13 +4,15 @@
 # ==============================================================================
 # 보관이 끝난 보고서를 Google Workspace SMTP relay(smtp-relay.gmail.com:587, STARTTLS 필수,
 # IP 인증 — 자격증명 없음)로 보낸다. 본문은 inline CSS 요약(이미지·SVG 없음) + 첨부 SHA-256 +
-# 보관 경로, 첨부는 ASCII 파일명의 자체 완결 .html 1개다.
+# 보관 경로, 첨부는 ASCII 파일명의 자체 완결 .html 1개와 호스트별 Remediation Plan xlsx를 묶은 zip 1개다
+# (요약에 xlsx_zip이 없는 옛 실행의 재발송은 .html만).
 # 수신자·발신자는 OpenBao agents/host_audit(mail_to·mail_from)에서 읽고 Extra variables
 # (host_audit_mail_to·host_audit_mail_from)로 덮어쓴다. 주소는 개인정보라 이 파일의 모든 관련
 # 태스크가 no_log이고, 보고서·JSON·실행 메타·로그에 남지 않는다. 수신자마다 따로 보낸다(AUD-606):
 # 한 번에 여러 명에게 보내면 일부 거부 시 모듈 경고가 no_log를 무시하고 주소를 찍고, 수신자끼리
 # 서로의 주소를 보게 된다.
 # 입력(호출자가 정함): host_audit_mail_doc(요약), _host_audit_mail_report_path(첨부할 보고서),
+#   _host_audit_mail_xlsx_path(첨부할 xlsx zip, 비우면 보고서만),
 #   _host_audit_archive_ok(보관 성공 여부 — false면 보내지 않음).
 # 이 파일은 실행을 실패로 끝내지 않는다. 판정은 mail_result.yml(AUD-610)이 보관 판정 뒤에 한다.
 # ------------------------------------------------------------------------------
@@ -88,6 +90,11 @@
     _problems: >-
       {{ (['OpenBao agents/host_audit 조회 실패 또는 자격증명 없음(VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN, 정책에 agents/host_audit 경로)'] if _lookup_failed else [])
          + (['메일 수신자 없음 — OpenBao agents/host_audit.mail_to 또는 Extra variables host_audit_mail_to에 넣는다'] if _to.addresses | length == 0 else [])
+         + (['요약에 xlsx zip이 있는데 첨부할 경로가 없음(본문과 첨부가 어긋남)'] if (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip
+                                                                    and (_host_audit_mail_xlsx_path | default('')) | length == 0) else [])
+         + (['첨부할 파일이 없음(보고서 또는 xlsx zip)'] if (not (_host_audit_mail_report_path is file)
+                                                  or ((host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip)
+                                                      and not ((_host_audit_mail_xlsx_path | default('')) is file))) else [])
          + (['수신자(mail_to) 주소 형식 오류 ' ~ _to.invalid ~ '건'] if _to.invalid > 0 else [])
          + (['발신자 없음 또는 형식 오류 — agents/host_audit.mail_from 또는 host_audit_mail_from(주소 1개)'] if (_from.addresses | length != 1 or _from.invalid > 0) else []) }}
   ansible.builtin.set_fact:
@@ -102,6 +109,13 @@
   when:
     - _host_audit_mail_plan.send | bool
     - _host_audit_mail_problem | length == 0
+  vars:
+    # 첨부는 보고서 1개 + (요약에 xlsx_zip이 있고 호출자가 경로를 준) xlsx zip 1개. 이름은 요약의 ASCII 이름이다.
+    _host_audit_mail_attachments: >-
+      {{ [{'src': _host_audit_mail_report_path, 'name': host_audit_mail_doc.report.file_name}]
+         + ([{'src': _host_audit_mail_xlsx_path, 'name': host_audit_mail_doc.xlsx_zip.file_name}]
+            if (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip
+                and (_host_audit_mail_xlsx_path | default('')) | length > 0) else []) }}
   block:
     - name: "[AUD-604] Create a private temporary directory for the attachment"
       ansible.builtin.tempfile:
@@ -109,13 +123,17 @@
         prefix: host-audit-mail.
       register: _host_audit_mail_tmp
 
-    - name: "[AUD-605] Copy the report under its ASCII attachment name"
+    - name: "[AUD-605] Copy the report and the xlsx zip under their ASCII attachment names"
       ansible.builtin.copy:
-        src: "{{ _host_audit_mail_report_path }}"
-        dest: "{{ _host_audit_mail_tmp.path }}/{{ host_audit_mail_doc.report.file_name }}"
+        src: "{{ item.src }}"
+        dest: "{{ _host_audit_mail_tmp.path }}/{{ item.name }}"
         mode: '0600'
+      loop: "{{ _host_audit_mail_attachments }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _host_audit_mail_copied
 
-    - name: "[AUD-606] Send the summary and the A4 report (community.general.mail)"
+    - name: "[AUD-606] Send the summary, the A4 report and the xlsx zip (community.general.mail)"
       community.general.mail:
         host: "{{ host_audit_mail_host }}"
         port: "{{ host_audit_mail_port | int }}"
@@ -128,11 +146,11 @@
         body: "{{ lookup('ansible.builtin.template', 'mail_body.html.j2') }}"
         subtype: html
         charset: utf-8
-        attach:
-          - "{{ _host_audit_mail_tmp.path }}/{{ host_audit_mail_doc.report.file_name }}"
-        headers:
-          - "X-Host-Audit-Run-Id={{ host_audit_mail_doc.run_id }}"
-          - "X-Host-Audit-Report-SHA256={{ host_audit_mail_doc.report.sha256 }}"
+        attach: "{{ _host_audit_mail_copied.results | map(attribute='dest') | list }}"
+        headers: >-
+          {{ ['X-Host-Audit-Run-Id=' ~ host_audit_mail_doc.run_id,
+              'X-Host-Audit-Report-SHA256=' ~ host_audit_mail_doc.report.sha256]
+             + (['X-Host-Audit-Xlsx-Zip-SHA256=' ~ host_audit_mail_doc.xlsx_zip.sha256] if _host_audit_mail_attachments | length > 1 else []) }}
       loop: "{{ _host_audit_mail_rcpt.to }}"
       loop_control:
         index_var: _host_audit_mail_idx
@@ -171,6 +189,8 @@
   ansible.builtin.debug:
     msg: >-
       {{ ('메일 보냄 — 수신 ' ~ host_audit_mail_outcome.recipients ~ '명, 첨부 ' ~ host_audit_mail_doc.report.file_name
-          ~ ', SHA-256 ' ~ host_audit_mail_doc.report.sha256) if host_audit_mail_outcome.sent | bool
+          ~ ', SHA-256 ' ~ host_audit_mail_doc.report.sha256
+          ~ (', xlsx zip ' ~ host_audit_mail_doc.xlsx_zip.file_name ~ ', SHA-256 ' ~ host_audit_mail_doc.xlsx_zip.sha256
+             if host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip else '')) if host_audit_mail_outcome.sent | bool
          else ('메일 안 보냄 — ' ~ host_audit_mail_outcome.skipped_reason) if not (_host_audit_mail_plan.send | bool)
          else ('메일 실패 — ' ~ host_audit_mail_outcome.error) }}

@@ -385,3 +385,11 @@ def test_every_string_cell_is_made_of_values_the_model_or_the_catalog_already_ha
 def test_the_filter_reads_nothing_beyond_the_model_and_the_catalog():
     source = inspect.getsource(plan_module)
     assert "open(" not in source and "lookup(" not in source and "environ" not in source
+
+
+def test_zip_name_is_ascii_and_follows_the_xlsx_naming_rule():
+    from host_audit_remediation_plan import host_audit_remediation_zip_name
+    assert host_audit_remediation_zip_name("ha-20261031T220000Z") == "host-audit-ha-20261031T220000Z-xlsx.zip"
+    odd = host_audit_remediation_zip_name("월간 점검/1")
+    assert odd.isascii() and odd.endswith("-xlsx.zip") and "/" not in odd and " " not in odd
+    assert odd != host_audit_remediation_zip_name("월간 점검/2")
