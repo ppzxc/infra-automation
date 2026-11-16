@@ -1,10 +1,12 @@
 {#- 항목 단위 부록 `부록 N+1. 조치 안내` (Spec #488 / Ticket-3, #491). 호스트별 부록 뒤, 검토 및 결재 앞.
     host_audit_model.config_vulnerability.remediation_guide를 그리기만 한다(본문 표와 같은 항목·같은 순서).
     계열별 steps는 호스트 계열로 고르지 않고 있는 것을 전부 싣는다. 호스트별 증적은 싣지 않는다. -#}
-{%- set rg = m.config_vulnerability.remediation_guide | default([]) -%}
+{%- set rg = m.config_vulnerability.remediation_guide | default(none) -%}
   <h2 class="pb rg-head">부록 {{ m.hosts | length + 1 }}. 조치 안내</h2>
 {#- 번호 N은 호스트별 부록 수다. appendix.html.j2가 m.hosts를 빠짐없이 돌므로 같은 값이다. -#}
-{% if rg %}
+{% if rg is none %}
+  <div class="note keep">조치 안내를 만들지 못했다 — 보고서 모델에 조치 안내 데이터가 없다.</div>
+{% elif rg %}
   <p class="small mute rg-head">이번 실행에서 양호 외 판정(취약·점검불가(수동)·예외(승인))이 나온 항목마다 한 블록이며 본문 「양호 외 항목」 표와 같은 순서다. 호스트별 증적은 호스트별 부록을 본다.</p>
 {% for b in rg %}
   <section class="rg-block" data-code="{{ b.code | e }}">

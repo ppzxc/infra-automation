@@ -288,6 +288,13 @@ def test_block_resolves_the_catalog_like_the_body_table_does():
         assert block["purpose"] == ITEMS["U-01"]["purpose"] and block["code"] == code
 
 
+def test_model_without_guide_data_does_not_claim_there_are_no_targets(env, model):
+    cv = {k: v for k, v in model["config_vulnerability"].items() if k != "remediation_guide"}
+    page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
+    block = page[page.index("조치 안내</h2>"):page.index("검토 및 결재</h2>")]
+    assert "조치 안내 대상 없음" not in block and "만들지 못했다" in block
+
+
 def test_run_where_no_host_was_checked_does_not_claim_a_clean_result(env, model):
     cv = dict(model["config_vulnerability"], findings=[], remediation_guide=[], hosts_checked=0)
     page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
