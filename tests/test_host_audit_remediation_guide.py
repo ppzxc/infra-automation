@@ -265,3 +265,19 @@ def test_editions_with_the_same_short_code_stay_separate_blocks():
     import host_audit_kisa as kisa
     blocks = kisa._build_remediation_guide([_stray("KISA-2026:U-01"), _stray("OTHER-2025:U-01")])
     assert [b["code"] for b in blocks] == ["KISA-2026:U-01", "OTHER-2025:U-01"]
+
+
+def test_unknown_code_heading_has_no_dangling_severity_label(env, model):
+    import host_audit_kisa as kisa
+    stray = dict(_stray("KISA-2026:U-99"), severity="")
+    cv = dict(model["config_vulnerability"], remediation_guide=kisa._build_remediation_guide([stray]))
+    page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
+    assert "중요도" not in _visible(_blocks(page)["U-99"])
+
+
+def test_steps_are_shown_even_when_the_summary_is_empty(env, model):
+    cv = dict(model["config_vulnerability"])
+    block = dict(cv["remediation_guide"][0], summary="", steps=[{"family": "RHEL 계열", "text": "step-text-x"}])
+    page = env.get_template("report.html.j2").render(
+        host_audit_model=dict(model, config_vulnerability=dict(cv, remediation_guide=[block])))
+    assert "step-text-x" in page and "조치방법" in page
