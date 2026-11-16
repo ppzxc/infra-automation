@@ -85,6 +85,56 @@ def test_loader_parses_each_catalog_only_once(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
+def test_default_path_and_explicit_catalog_path_share_one_parse():
+    assert kisa._load_items() is kisa._load_items(kisa.CATALOG_PATH) is kisa.ITEMS
+
+
+def test_loader_wraps_undecodable_and_unhashable_catalogs(tmp_path):
+    bad_bytes = tmp_path / "bytes.yml"
+    bad_bytes.write_bytes(b"U-01: \xff\xfe\n")
+    with pytest.raises(RuntimeError, match="bytes.yml"):
+        kisa._load_items(str(bad_bytes))
+    with pytest.raises(RuntimeError, match="cannot be loaded"):
+        kisa._load_items(_write(tmp_path, "? [a]\n: 1\n"))
+
+
+def test_loader_names_the_offending_item_and_field(tmp_path):
+    with pytest.raises(RuntimeError, match=r"U-01.*cis"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM.replace("cis: ''", "cis: 7.2")))
+    with pytest.raises(RuntimeError, match=r"U-01.*severity"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM.replace("상", "높음")))
+    with pytest.raises(RuntimeError, match=r"U-01.*category"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM.replace("계정 관리", "기타")))
+
+
+def test_loader_rejects_malformed_codes_and_unknown_fields(tmp_path):
+    with pytest.raises(RuntimeError, match="u-01"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM.replace("U-01", "u-01")))
+    with pytest.raises(RuntimeError, match=r"U-01.*serverity"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM + "  serverity: 상\n"))
+
+
+def test_catalog_is_read_only():
+    with pytest.raises(TypeError):
+        ITEMS["U-01"]["severity"] = "하"
+    with pytest.raises(TypeError):
+        ITEMS["U-99"] = {}
+
+
+def test_catalog_is_found_through_a_symlinked_filter_copy(tmp_path):
+    """A filter symlinked into another directory still resolves the catalog next to the real file."""
+    link = tmp_path / "host_audit_kisa.py"
+    link.symlink_to(FILTER_DIR / "host_audit_kisa.py")
+    res = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import importlib.util as u, sys; sys.path.insert(0, %r);"
+         "s = u.spec_from_file_location('linked_kisa', %r); m = u.module_from_spec(s); s.loader.exec_module(m);"
+         "print(len(m.ITEMS))" % (str(FILTER_DIR), str(link))],
+        capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "67"
+
+
 @pytest.mark.skipif(shutil.which("ansible-playbook") is None, reason="ansible-playbook not installed")
 def test_runner_finds_catalog_next_to_filter(tmp_path):
     """ansible-playbook configured with only the filter dir still resolves every item."""

@@ -19,6 +19,8 @@ Entry points:
 
 import functools
 import os
+import re
+from types import MappingProxyType
 from datetime import datetime, timezone
 
 import yaml
@@ -60,6 +62,7 @@ CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH,
 # when imported"). A broken or missing catalog must fail loudly at that point with the cause named in the
 # RuntimeError, instead of surfacing later as a missing item inside a report. _load_items caches per path, so
 # each process parses the file once however often it is called.
+CODE_PATTERN = re.compile(r'^U-\d\d$')
 ITEM_FIELDS = ('title', 'severity', 'category', 'criteria', 'cis')
 CATALOG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'host_audit_kisa_items.yml')
 
@@ -68,6 +71,7 @@ class _UniqueKeyLoader(yaml.SafeLoader):
     """SafeLoader that refuses a mapping key written twice (safe_load would silently keep the last one)."""
 
     def construct_mapping(self, node, deep=False):
+        self.flatten_mapping(node)  # resolve YAML merge keys first so merged keys are checked too
         seen = set()
         for key_node, _ in node.value:
             key = self.construct_object(key_node, deep=True)
@@ -77,23 +81,46 @@ class _UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-@functools.lru_cache(maxsize=None)
-def _load_items(path=CATALOG_PATH):
-    try:
-        with open(path, encoding='utf-8') as fh:
-            items = yaml.load(fh, Loader=_UniqueKeyLoader)  # noqa: S506 - SafeLoader subclass
-    except (OSError, yaml.YAMLError) as exc:
-        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (path, exc)) from exc
+def _freeze(items):
+    return MappingProxyType({code: MappingProxyType(dict(meta)) for code, meta in items.items()})
+
+
+def _validate(items, path):
     if not isinstance(items, dict) or not items:
         raise RuntimeError('KISA item catalog %s is empty or not a mapping' % path)
     for code, meta in items.items():
-        missing = [k for k in ITEM_FIELDS if not isinstance(meta, dict) or k not in meta]
-        if missing:
-            raise RuntimeError('KISA item %s lacks fields %s in %s' % (code, ', '.join(missing), path))
-        if not all(isinstance(meta[k], str) for k in ITEM_FIELDS) or meta['severity'] not in SEVERITY_ORDER \
-                or meta['category'] not in CATEGORIES:
-            raise RuntimeError('KISA item %s has a wrong type, severity or category in %s' % (code, path))
-    return items
+        if not isinstance(code, str) or not CODE_PATTERN.match(code):
+            raise RuntimeError('KISA item code %r is not U-NN in %s' % (code, path))
+        if not isinstance(meta, dict):
+            raise RuntimeError('KISA item %s is not a mapping in %s' % (code, path))
+        for field in ITEM_FIELDS:
+            if field not in meta:
+                raise RuntimeError('KISA item %s lacks field %s in %s' % (code, field, path))
+            if not isinstance(meta[field], str):
+                raise RuntimeError('KISA item %s field %s must be a string (quote it) in %s' % (code, field, path))
+        extra = sorted(set(meta) - set(ITEM_FIELDS))
+        if extra:
+            raise RuntimeError('KISA item %s has unknown field %s in %s' % (code, ', '.join(map(str, extra)), path))
+        if meta['severity'] not in SEVERITY_ORDER:
+            raise RuntimeError('KISA item %s field severity %r is not 상/중/하 in %s' % (code, meta['severity'], path))
+        if meta['category'] not in CATEGORIES:
+            raise RuntimeError('KISA item %s field category %r is unknown in %s' % (code, meta['category'], path))
+
+
+@functools.lru_cache(maxsize=None)
+def _parse_catalog(path):
+    try:
+        with open(path, encoding='utf-8') as fh:
+            items = yaml.load(fh, Loader=_UniqueKeyLoader)  # noqa: S506 - SafeLoader subclass
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (path, exc)) from exc
+    _validate(items, path)
+    return _freeze(items)
+
+
+def _load_items(path=None):
+    """Read-only item catalog of ``path`` (default: the YAML next to this module), parsed once per path."""
+    return _parse_catalog(os.path.realpath(path or CATALOG_PATH))
 
 
 ITEMS = _load_items()
