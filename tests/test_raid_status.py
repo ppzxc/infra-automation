@@ -276,3 +276,80 @@ def test_collector_tasks_cover_both_paths_and_the_disable_switch():
     assert "host_agents_is_legacy" in text and "host_agents_os_path == 'modern'" in text
     main = (MON / "tasks" / "main.yml").read_text(encoding="utf-8")
     assert "import_tasks: raid_status.yml" in main
+
+
+# --- MegaRAID(storcli64) 경로 (#383) ---------------------------------------------------------------------------
+# 픽스처는 2026-11-16 ns0438(HPE MR416i-o Gen11)에서 `storcli64 /c0 show all`을 읽기 전용으로 받은 실제 출력이다
+# (시리얼·SAS 주소·장치 시각은 지움). 열화·고장 출력은 구한 적이 없어 이 출력을 고쳐서 만든다.
+
+STORCLI_FIXTURE = ROOT_DIR / "tests" / "fixtures" / "raid_storcli" / "storcli_mr416i_el9_ok.txt"
+
+
+def _run_storcli(tmp_path, text):
+    body = "#!/bin/sh\ncat \"$FAKE_FIXTURE\"\n"
+    return _run(tmp_path, text, tool="storcli64", body=body, env={"RAID_STATUS_TOOLS": "storcli64 storcli"})
+
+
+def test_storcli_fixture_becomes_megaraid_records(tmp_path):
+    recs = _run_storcli(tmp_path, STORCLI_FIXTURE.read_text())
+    (status,) = _by_kind(recs, "tool_status")
+    assert status["status"] == "ok" and status["family"] == "megaraid" and status["tool"] == "storcli64"
+    assert recs[-1] is status and {r["family"] for r in recs} == {"megaraid"}
+    (ctrl,) = _by_kind(recs, "controller")
+    assert ctrl["hw_state"] == "ok" and ctrl["raw_state"] == "Optimal" and ctrl["hw_model"] == "HPE MR416i-o Gen11"
+    assert ctrl["cache_status"] == "ok" and ctrl["backup_power"] == "capacitor" and ctrl["backup_power_state"] == "ok"
+    assert ctrl["temperature_c"] == 88 and ctrl["cache_present"] is True
+    (bat,) = _by_kind(recs, "cache_battery")
+    assert bat["hw_state"] == "ok"
+    lds = _by_kind(recs, "logical_drive")
+    assert [(r["hw_id"], r["raid_level"], r["hw_state"], r["write_cache_effective"]) for r in lds] == [
+        ("mr:c0/ld238", "RAID1", "ok", "wb"), ("mr:c0/ld239", "RAID1", "ok", "wb")]
+    pds = _by_kind(recs, "physical_drive")
+    assert len(pds) == 4 and all(r["hw_state"] == "ok" and r["drive_role"] == "data" and r["media"] == "hdd" for r in pds)
+    for r in recs:
+        if r["kind"] != "tool_status":
+            assert COMMON <= set(r), r["kind"]
+            assert isinstance(json.loads(r["raw"]), dict)
+
+
+def test_storcli_fixture_has_no_identifiers():
+    text = STORCLI_FIXTURE.read_text()
+    assert "PZDVH" not in text and "500062b2" not in text and "NXF7SP" not in text
+
+
+@pytest.mark.parametrize("old, new, kind, field, expected", [
+    ("Controller Status = Optimal", "Controller Status = Degraded", "controller", "hw_state", "degraded"),
+    ("Controller Status = Optimal", "Controller Status = Failed", "controller", "hw_state", "failed"),
+    ("Energy Pack Status = 0", "Energy Pack Status = 4", "controller", "cache_status", "unknown"),
+    ("Energy Pack Status = 0", "Energy Pack Status = 4", "cache_battery", "hw_state", "degraded"),
+])
+def test_storcli_controller_faults(tmp_path, old, new, kind, field, expected):
+    text = STORCLI_FIXTURE.read_text()
+    assert old in text
+    recs = _run_storcli(tmp_path, text.replace(old, new, 1))
+    assert _by_kind(recs, kind)[0][field] == expected
+
+
+def test_storcli_degraded_vd_and_failed_pd(tmp_path):
+    text = STORCLI_FIXTURE.read_text()
+    text = re.sub(r"^(0/239 RAID1 )Optl", r"\1Dgrd", text, flags=re.M)
+    text = re.sub(r"^(250:4 +2 )Onln", r"\1Offln", text, flags=re.M)
+    recs = _run_storcli(tmp_path, text)
+    ld = {r["hw_id"]: r for r in _by_kind(recs, "logical_drive")}
+    assert ld["mr:c0/ld239"]["hw_state"] == "degraded" and ld["mr:c0/ld238"]["hw_state"] == "ok"
+    pd = {r["slot"]: r for r in _by_kind(recs, "physical_drive")}
+    assert pd["250:4"]["hw_state"] == "failed" and pd["250:3"]["hw_state"] == "ok"
+
+
+def test_storcli_write_through_vd(tmp_path):
+    text = re.sub(r"^(0/239 RAID1 Optl +RW +Yes +)NRWBD", r"\1NRWTD", STORCLI_FIXTURE.read_text(), flags=re.M)
+    recs = _run_storcli(tmp_path, text)
+    ld = {r["hw_id"]: r for r in _by_kind(recs, "logical_drive")}
+    assert ld["mr:c0/ld239"]["write_cache_configured"] == "wt" and ld["mr:c0/ld238"]["write_cache_configured"] == "wb"
+
+
+def test_storcli_no_controller_and_error(tmp_path):
+    recs = _run_storcli(tmp_path / "a", "Status = Failure\nDescription = No Controller found\n")
+    assert [r["status"] for r in recs] == ["no_controller"] and recs[0]["family"] == "megaraid"
+    recs = _run_storcli(tmp_path / "b", "garbage\n")
+    assert [r["status"] for r in recs] == ["error"]

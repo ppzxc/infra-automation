@@ -1,0 +1,495 @@
+Generating detailed summary of the adapter, it may take a while to complete.
+CLI Version = <IP> Dec 22, 2025
+Operating system = Linux 5.14.0-362.8.1.el9_3.x86_64
+Controller = 0
+Status = Success
+Description = None
+Basics :
+======
+Controller = 0
+Model = HPE MR416i-o Gen11
+Serial Number = REDACTED
+PCI Slot Number = 14
+Current Controller Date/Time = 01/01/2026, 00:00:00
+Current System Date/time = 01/01/2026, 00:00:00
+SAS Address = 0000000000000000
+PCI Address = 00:6e:00:00
+Mfg Date = 04/28/26
+Rework Date = 00/00/00
+Revision No = 12010
+Version :
+=======
+Firmware Package Build = 52.36.3-6584
+Firmware Version = 5.360.03-4267
+PSOC FW Version = 0x0003
+PSOC Hardware Version = 0x0009
+PSOC Part Number = 25931-3
+NVDATA Version = 5.3600.16-0880
+CBB Version = <IP>
+Bios Version = <IP>_0x07240100
+HII Version = <IP>
+HIIA Version = <IP>
+Driver Name = megaraid_sas
+Driver Version = <IP>-rc1
+Bus :
+===
+Vendor Id = 0x1000
+Device Id = 0x10E2
+SubVendor Id = 0x1590
+SubDevice Id = 0x328
+Host Interface = PCI-E
+Device Interface = SAS-12G
+Bus Number = 110
+Device Number = 0
+Function Number = 0
+Domain ID = 0
+Pending Images in Flash :
+=======================
+Image name = No pending images
+Status :
+======
+Controller Status = Optimal
+Memory Correctable Errors = 0
+Memory Uncorrectable Errors = 0
+ECC Bucket Count = 0
+Any Offline VD Cache Preserved = No
+Energy Pack Status = 0
+PD Firmware Download in progress = No
+Support Drive Firmware Download = Yes
+Lock Key Assigned = No
+Failed to get lock key on bootup = No
+Lock key has not been backed up = No
+Bios was not detected during boot = No
+Controller must be rebooted to complete security operation = No
+A rollback operation is in progress = No
+At least one PFK exists in NVRAM = No
+SSC Policy is WB = No
+Controller has booted into safe mode = No
+Controller shutdown required = No
+Controller has booted into certificate provision mode = No
+Current Personality = RAID-Mode 
+Supported Adapter Operations :
+============================
+Rebuild Rate = Yes
+CC Rate = Yes
+BGI Rate  = Yes
+Transformation Rate = Yes
+Patrol Read Rate = Yes
+Alarm Control = No
+Cluster Support = No
+Energy Pack = Yes
+Spanning = Yes
+Dedicated Spare = Yes
+Revertible Spares = Yes
+Foreign Config Import = Yes
+Self Diagnostic = Yes
+Allow Mixed Redundancy on Array = No
+Global Spares = Yes
+Deny SCSI Passthrough = No
+Deny SMP Passthrough = No
+Deny STP Passthrough = No
+Support more than 8 Phys = Yes
+FW and Event Time in GMT = No
+Support Enhanced Foreign Import = Yes
+Support Enclosure Enumeration = Yes
+Support Allowed Operations = Yes
+Abort CC on Error = Yes
+Support Multipath = Yes
+Support Odd & Even Drive count in RAID1E = No
+Support Security = Yes
+Support Config Page Model = Yes
+Support the OCE without adding drives = Yes
+Support EKM = Yes
+Snapshot Enabled = No
+Support PFK = Yes
+Support PI = No
+Support Ld BBM Info = No
+Support Shield State = Yes
+Block SSD Write Disk Cache Change = No
+Support Suspend Resume BG ops = Yes
+Support Emergency Spares = No
+Support Set Link Speed = Yes
+Support Boot Time PFK Change = No
+Support JBOD = No
+Disable Online PFK Change = Yes
+Support Perf Tuning = Yes
+Support SSD PatrolRead = Yes
+Real Time Scheduler = Yes
+Support Reset Now = Yes
+Support Emulated Drives = Yes
+Headless Mode = Yes
+Dedicated Spares Limited = No
+Point In Time Progress = Yes
+Extended LD = Yes
+Support Uneven span  = No
+Support Maintenance Mode = No
+Support Diagnostic results = Yes
+Support Ext Enclosure = Yes
+Support Sesmonitoring = Yes
+Support SecurityonJBOD = Yes
+Support ForceFlash = Yes
+Support DisableImmediateIO = Yes
+Support LargeIOSupport = No
+Support DrvActivityLEDSetting = Yes
+Support FlushWriteVerify = Yes
+Support CPLDUpdate = No
+Support ForceTo512e = Yes
+Support discardCacheDuringLDDelete = No
+Support JBOD Write cache = No
+Support Large QD Support = No
+Support Ctrl Info Extended = Yes
+Support IButton less = Yes
+Support AES Encryption Algorithm = No
+Support Encrypted MFC = Yes
+Support Snapdump = Yes
+Support Force Personality Change = No
+Support Dual Fw Image = No
+Support PSOC Update = Yes
+Support Secure Boot = Yes
+Support Debug Queue = No
+Support Least Latency Mode = No
+Support OnDemand Snapdump = Yes
+Support Clear Snapdump = Yes
+Support FW Triggered Snapdump = Yes
+Support PHY current speed = Yes
+Support Lane current speed = Yes
+Support NVMe Width = Yes
+Support Lane DeviceType = Yes
+Support Extended Drive performance Monitoring = Yes
+Support NVMe Repair = Yes
+Support Platform Security = Yes
+Support None Mode Params = Yes
+Support Extended Controller Property = Yes
+Support Smart Poll Interval for DirectAttached = Yes
+Support Write Journal Pinning = Yes
+Support SMP Passthru with Port Number = Yes
+Support SnapDump Preboot Trace Buffer Toggle = No
+Support Parity Read Cache Bypass = Yes
+Support NVMe Init Error Device ConnectorIndex = Yes
+Support VolatileKey = Yes
+Support PSOC Part Information = Yes
+Support Slow array threshold calculation = Yes
+Support PCIe Reference Clock override = Yes
+Support Target ID Reuse = Yes
+Support PCIe PERST override = Yes
+Support Drive FW Download Mask = Yes
+Support Drive FW Download Mode-5 = Yes
+Support Drive FW Download Mode-7 = Yes
+Support Drive FW Download Mode-E = Yes
+Supported Drive FW Download Chunk Size = 32 KB
+Support Start of day PL log capture = Yes
+Support Drive Unrecovered Medium Error Count = Yes
+Support Report Delay OCR Range = Yes
+Support Phy State Control = Yes
+Support Drive Makers Authority = Yes
+Support Inactivity Print = Yes
+Support NVMe Thermal Poll = Yes
+Support Disabling Auto Select Boot Drive = Yes
+Support Factory Repurpose = Yes
+Enterprise Key management :
+=========================
+Capability = Supported
+Boot Agent = Not Available
+Configured = No
+Supported Drive Operations :
+==========================
+Force Online = Yes
+Force Offline = Yes
+Force Rebuild = Yes
+Deny Force Failed = No
+Deny Force Good/Bad = No
+Deny Missing Replace = No
+Deny Clear = No
+Deny Locate = No
+Support Power State = No
+Set Power State For Cfg = No
+Support T10 Power State = No
+Support Temperature = Yes
+NCQ = Yes
+Support Max Rate SATA = No
+Support Degraded Media = No
+Support Parallel FW Update = Yes
+Support Drive Crypto Erase = Yes
+Support SSD Wear Gauge = Yes
+Support Sanitize = No
+Support Extended Sanitize = Yes
+Support Physical Link Speed = Yes
+Support Write Buffer 16 = Yes
+Supported VD Operations :
+=======================
+Read Policy = Yes
+Write Policy = Yes
+IO Policy = No
+Access Policy = Yes
+Disk Cache Policy = Yes
+Transformation = Yes
+Deny Locate = No
+Deny CC = No
+Allow Ctrl Encryption = No
+Enable LDBBM = No
+Support FastPath = Yes
+Performance Metrics = Yes
+Power Savings = No
+Support Powersave Max With Cache = No
+Support Breakmirror = No
+Support SSC WriteBack = No
+Support SSC Association = No
+Support VD Hide = Yes
+Support VD Cachebypass = Yes
+Support VD discardCacheDuringLDDelete = No
+Support VD Scsi Unmap = Yes
+Support LD Rebuild errorcounter = Yes
+Advanced Software Option :
+========================
+-----------------------------------------
+Adv S/W Opt         Time Remaining  Mode 
+-----------------------------------------
+MegaRAID FastPath   Unlimited       -    
+MegaRAID SafeStore  Unlimited       -    
+MegaRAID RAID6      Unlimited       -    
+MegaRAID RAID5      Unlimited       -    
+-----------------------------------------
+Safe ID = REDACTED
+HwCfg :
+=====
+ChipRevision =  A0
+BatteryFRU = N/A
+Front End Port Count = 0
+Backend Port Count = 16
+Energy Pack = Present
+Alarm = Absent
+Serial Debugger = Present
+NVRAM Size = 128KB
+Flash Size = 16MB
+On Board Memory Size = 8192MB
+CacheVault Flash Size = 21.650 GB
+TPM = Absent
+Upgrade Key = Absent
+On Board Expander = Absent
+Temperature Sensor for ROC = Present
+Temperature Sensor for Controller = Absent
+Upgradable CPLD = Absent
+Upgradable PSOC = Present
+Current Size of CacheCade (GB) = 0
+Current Size of FW Cache (MB) = 6678
+ROC temperature(Degree Celsius) = 88
+Policies :
+========
+Policies Table :
+==============
+------------------------------------------------
+Policy                          Current Default 
+------------------------------------------------
+Predictive Fail Poll Interval   60 sec          
+Interrupt Throttle Active Count 16              
+Interrupt Throttle Completion   50 us           
+Rebuild Rate                    30 %    30%     
+PR Rate                         30 %    30%     
+BGI Rate                        30 %    30%     
+Check Consistency Rate          30 %    30%     
+Transformation Rate             30 %    30%     
+Cache Flush Interval            4s              
+------------------------------------------------
+Flush Time(Default) = 4s
+Drive Coercion Mode = none
+Auto Rebuild = On
+Battery Warning = On
+ECC Bucket Size = 15
+ECC Bucket Leak Rate (hrs) = 24
+Restore Spare on Insertion = Off
+Expose Enclosure Devices = On
+Maintain Drive Fail History = Off
+Reorder Host Requests = On
+Auto detect BackPlane = SGPIO/i2c SEP
+Security Key Assigned = Off
+Disable Online Controller Reset = Off
+Use drive activity for locate = Off
+Inactivity Print = Off
+Boot :
+====
+BIOS Enumerate VDs = 1
+Stop BIOS on Error = Off
+Delay during POST = 0
+Spin Down Mode = None
+Enable Ctrl-R = No
+Enable Web BIOS = No
+Enable PreBoot CLI = No
+Enable BIOS = Yes
+Max Drives to Spinup at One Time = 2
+Maximum number of direct attached drives to spin up in 1 min = 60
+Delay Among Spinup Groups (sec) = 2
+Allow Boot with Preserved Cache = Off
+High Availability :
+=================
+Topology Type = None
+Cluster Permitted = No
+Cluster Active = No
+Defaults :
+========
+Phy Polarity = 0
+Phy PolaritySplit = 0
+Strip Size = 256 KB
+Write Policy = WB
+Read Policy = No Read Ahead
+Cache When BBU Bad = Off
+Cached IO = Off
+VD PowerSave Policy = Controller Defined
+Default spin down time (mins) = 30
+Coercion Mode = None
+ZCR Config = Unknown
+Max Chained Enclosures = 16
+Direct Drive Mapping = No
+Restore Spare on Insertion = No
+Expose Enclosure Devices = Yes
+Maintain Drive Fail History = No
+Zero Based Enclosure Enumeration = No
+Disable Puncturing = No
+EnableLDBBM = No
+DisableHII = No
+Un-Certified Hard Disk Drives = Allow
+SMART Mode = Mode 6
+Enable LED Header = No
+LED Show Drive Activity = No
+Dirty LED Shows Drive Activity = No
+EnableCrashDump = No
+Disable Online Controller Reset = No
+Treat Single span R1E as R10 = Yes
+Power Saving option = Disabled
+Serial Log In Flash = Yes
+Auto Enhanced Import = Yes
+BreakMirror RAID Support = No
+Disable Join Mirror = Yes
+Enable Shield State = Yes
+Time taken to detect CME = 60 sec
+Capabilities :
+============
+Supported Drives = SAS, SATA, NVMe
+RAID Level Supported = RAID0, RAID1, RAID5, RAID6, RAID10(2 or more drives per span), RAID50, RAID60
+Enable JBOD = No
+Mix in Enclosure = Allowed
+Mix of SAS/SATA of HDD type in VD = Not Allowed
+Mix of SAS/SATA of SSD type in VD = Not Allowed
+Mix of SSD/HDD in VD = Not Allowed
+SAS Disable = No
+Max Arms Per VD = 32
+Max Spans Per VD = 8
+Max Arrays = 240
+Max VD per array = 64
+Max Number of VDs = 240
+Max Parallel Commands = 5101
+Max SGE Count = 60
+Max Data Transfer Size = 2048 sectors
+Max Strips PerIO = 42
+Max Configurable CacheCade Size(GB) = 0
+Max Transportable DGs = 0
+Enable Snapdump = Yes
+Enable SCSI Unmap = Yes
+Read cache bypass enabled for Parity RAID LDs = Yes
+FDE Drive Mix Support = No
+Min Strip Size = 64 KB
+Max Strip Size = 1.000 MB
+Scheduled Tasks :
+===============
+Consistency Check Reoccurrence = 168 hrs
+Next Consistency check launch = 11/21/2026, 03:00:00
+Patrol Read Reoccurrence = 168 hrs
+Next Patrol Read launch = 11/21/2026, 03:00:00
+Battery learn Reoccurrence = NA
+Next Battery Learn = NA
+OEMID = HPE
+Secure Boot :
+===========
+Secure Boot Enabled = Yes
+Controller in Soft Secure Mode = No
+Controller in Hard Secure Mode = Yes
+Key Update Pending = No
+Remaining Secure Boot Key Slots = 6
+Security Protocol properties :
+============================
+Security Protocol = SPDM-1.00.00
+Slot Group count = 1
+Slot count = 8
+Number of Measurement Algorithm Records = 1
+Measurement Algorithms :
+======================
+---------------------------------
+ID Specification Algorithm       
+---------------------------------
+ 0 DMTF          TPM_ALG_SHA_384 
+---------------------------------
+Number of Certificate algorithm records = 1
+Certificate Algorithms :
+======================
+---------------------------------------------------------
+SlotGroup No Base Algorithm              Hash Algorithm  
+---------------------------------------------------------
+           0 TPM_ALG_ECDSA_ECC_NIST_P384 TPM_ALG_SHA_384 
+---------------------------------------------------------
+Arrays = 2
+TOPOLOGY :
+========
+------------------------------------------------------------------------------
+DG Arr Row EID:Slot DID Type  State BT        Size PDC  PI SED DS3  FSpace TR 
+------------------------------------------------------------------------------
+ 0 -   -   -        -   RAID1 Optl  N    3.637 TiB dflt N  N   none N      N  
+ 0 0   -   -        -   RAID1 Optl  N    3.637 TiB dflt N  N   none N      N  
+ 0 0   0   250:3    3   DRIVE Onln  N      4.00 TB dflt N  N   none -      N  
+ 0 0   1   250:4    2   DRIVE Onln  N      4.00 TB dflt N  N   none -      N  
+ 1 -   -   -        -   RAID1 Optl  N  931.000 GiB dflt N  N   none N      N  
+ 1 0   -   -        -   RAID1 Optl  N  931.000 GiB dflt N  N   none N      N  
+ 1 0   0   250:1    0   DRIVE Onln  N      1.00 TB dflt N  N   none -      N  
+ 1 0   1   250:2    1   DRIVE Onln  N      1.00 TB dflt N  N   none -      N  
+------------------------------------------------------------------------------
+DG=Array|VD=Logical Drive|Slot=Drive Bay No|Span=Span Index|Row=Row Index|EID=Enclosure Device ID
+DID=Device ID|Type=Physical Drive or RAID Type|Onln=Online|Rbld=Rebuild|Optl=Optimal|Dgrd=Degraded
+Pdgd=Partially degraded|Offln=Offline|BT=Background Task Active
+PDC=Drive Cache|PI=Data Integrity Info|SED=Self Encrypting Drive|Frgn=Foreign
+DS3=Dimmer Switch 3|dflt=Default|Msng=Missing|FSpace=Free Space Present
+TR=Transport Ready
+Virtual Drives = 2
+VD LIST :
+=======
+----------------------------------------------------------------
+DG/VD TYPE  State Access Consist Cache Cac sCC        Size Name 
+----------------------------------------------------------------
+1/238 RAID1 Optl  RW     Yes     NRWBD -   ON  931.000 GiB      
+0/239 RAID1 Optl  RW     Yes     NRWBD -   ON    3.637 TiB      
+----------------------------------------------------------------
+DG=Arrays|VD=Virtual Drive/Logical Drive|Rec=Recovery
+Cac=CacheCade|OfLn=OffLine|Pdgd=Partially Degraded|Dgrd=Degraded
+Optl=Optimal|dflt=Default|RO=Read Only|RW=Read Write|HD=Hidden|TRANS=TransportReady
+B=Blocked|Consist=Consistent|R=Read Ahead Always|NR=No Read Ahead|WB=WriteBack
+AWB=Always WriteBack|WT=WriteThrough|C=Cached IO|D=Direct IO|sCC=Scheduled
+Check Consistency
+Physical Drives = 4
+PD LIST :
+=======
+------------------------------------------------------------------------
+EID:Slt DID State DG    Size Intf Med SED PI SeSz Model         Sp Type 
+------------------------------------------------------------------------
+250:1     0 Onln   1 1.00 TB SATA HDD N   N  512B MB001000GYKAQ U  -    
+250:2     1 Onln   1 1.00 TB SATA HDD N   N  512B MB001000GYKAQ U  -    
+250:3     3 Onln   0 4.00 TB SATA HDD N   N  512B MB004000GYDPD U  -    
+250:4     2 Onln   0 4.00 TB SATA HDD N   N  512B MB004000GYDPD U  -    
+------------------------------------------------------------------------
+EID=Enclosure Device ID|Slt=Drive Bay No|DID=Device ID|DG=Arrays
+DHS=Dedicated Spare Drive|UGood=Unconfigured Good|GHS=Global Spare Drive
+UBad=Unconfigured Bad|Sntze=Sanitize|Onln=Online|Offln=Offline|Intf=Interface
+Med=Media Type|SED=Self Encryptive Drive|PI=Data Integrity Info
+SeSz=Sector Size|Sp=Spun|U=Up|D=Down|T=Transition|F=Foreign
+UGUnsp=UGood Unsupported|UGShld=UGood shielded|HSPShld=Spare shielded
+CFShld=Configured shielded|Cpybck=CopyBack|CBShld=Copyback Shielded
+UBUnsp=UBad Unsupported|Rbld=Rebuild
+Enclosures = 3
+Enclosure LIST :
+==============
+----------------------------------------------
+EID State Slots PD PS Fans TSs Alms SIM Port# 
+----------------------------------------------
+250 OK        4  4  0    0   0    0   0 1I    
+251 OK        4  0  0    0   0    0   0 2I    
+252 OK        4  0  0    0   0    0   0 2I    
+----------------------------------------------
+Slot=Bay Count | SlotBP=Bays On Port | EID=Enclosure Device ID
+PD=Drive Count | PS=Power Supply Count| SIM=SIM Count
+TSs=Temperature Sensor Count |  Alms=Alarm Count | ProdID=Product ID
