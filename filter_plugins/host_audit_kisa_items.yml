@@ -360,7 +360,12 @@ U-18:
   threat: shadow에 담긴 비밀번호 해시가 노출되면 크래킹으로 비밀번호를 탈취당할 수 있다.
   guide_page: 44
   remediation:
-    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다. Debian 계열 기본값 root:shadow 640은 400을 넘으며, 400으로 낮추면 shadow 그룹 권한으로 도는 인증 보조 프로그램이 읽지 못할 수 있다.
+    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다. Debian 계열은 기본값 root:shadow 640이라 steps의 주의를 먼저 읽는다.
+    steps:
+      rhel: |
+        chown root /etc/shadow, chmod 400 /etc/shadow (기본값이 000이면 그대로 둔다)
+      debian: |
+        기본값 root:shadow 640은 400을 넘어 이 항목이 취약으로 나온다. 400으로 낮추면 unix_chkpwd처럼 shadow 그룹으로 도는 인증 보조 프로그램이 읽지 못해 비root 인증이 실패할 수 있으니 영향을 확인한 뒤 낮추거나, 640을 유지하려면 예외 레지스터에 올린다
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술하나, Debian 계열에서 640을 400으로 낮추면 비root 인증 보조 프로그램이 shadow를 읽지 못할 수 있다.
@@ -540,7 +545,7 @@ U-28:
   threat: IP와 포트 제한이 없으면 Telnet, FTP 같은 취약 서비스를 통한 불법 접근과 침해사고가 발생할 수 있다.
   guide_page: 56
   remediation:
-    summary: 방화벽(firewalld, ufw, iptables, nftables)으로 허용 IP와 포트를 등록한다. 방화벽이 꺼져 있으면 관리 접속 허용 규칙을 먼저 넣고 켠다. TCP Wrapper(/etc/hosts.deny에 ALL:ALL, /etc/hosts.allow에 허용 IP)는 RHEL 8 이상에서 libwrap이 없어 적용되지 않는다.
+    summary: 방화벽(firewalld, ufw, iptables, nftables)으로 허용 IP와 포트를 등록한다. 방화벽이 꺼져 있으면 관리 접속 허용 규칙을 먼저 넣고 켠다. TCP Wrapper는 hosts.allow에 허용 IP를 먼저 넣은 뒤 hosts.deny에 ALL:ALL을 쓰며, RHEL 8 이상에서는 libwrap이 없어 적용되지 않는다.
     steps:
       rhel: |
         firewall-cmd --list-all 로 현재 설정과 기본 zone target 확인(ACCEPT면 안 됨)
@@ -716,7 +721,7 @@ U-37:
   threat: 일반 사용자가 cron, at을 쓰면 고의나 실수로 불법 예약 작업을 실행해 시스템에 피해를 줄 수 있다.
   guide_page: 80
   remediation:
-    summary: /usr/bin/crontab과 /usr/bin/at을 chmod 750 이하로 한다(RHEL의 SUID, Debian의 SGID 비트도 함께 사라지며 소유자는 바꾸지 않는다). /etc/crontab, cron.allow/deny, at.allow/deny는 root 소유에 640 이하로 맞춘다. 사용자별 cron·at 작업 파일의 소유자는 바꾸지 않는다.
+    summary: /usr/bin/crontab과 /usr/bin/at을 chmod 750 이하로 한다(걸려 있던 SUID·SGID 비트도 함께 사라지며 소유자는 바꾸지 않는다). /etc/crontab, cron.allow/deny, at.allow/deny는 root 소유에 640 이하로 맞춘다. 사용자별 cron·at 작업 파일의 소유자는 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드는 영향 없음으로 서술해 1로 두지만, 조치하면 일반 사용자의 crontab·at 실행이 막히므로 이를 쓰는 계정이 없는지 먼저 확인한다.
@@ -1117,7 +1122,7 @@ U-59:
   threat: v1·v2는 요청·응답이 평문이라 스니핑 위험이 있고, v3는 HMAC 기반 인증과 암호화를 제공한다.
   guide_page: 143
   remediation:
-    summary: SNMP를 쓰지 않으면 snmpd를 중지·비활성화한다. 쓴다면 net-snmp-create-v3-user로 v3 사용자를 만들고(또는 snmpd.conf에 createUser 추가) rouser 권한을 준 뒤, /etc/snmp/snmpd.conf에서 rocommunity·rwcommunity·com2sec 같은 v1/v2c 설정을 제거하고 snmpd를 재시작한다. snmpwalk -v3로 동작을 확인한다.
+    summary: SNMP를 쓰지 않으면 snmpd를 중지·비활성화한다. 쓴다면 snmpd를 멈춘 뒤 net-snmp-create-v3-user로 v3 사용자를 만들고(또는 snmpd.conf에 createUser 추가) rouser 권한을 준 뒤, /etc/snmp/snmpd.conf에서 rocommunity·rwcommunity·com2sec 같은 v1/v2c 설정을 제거하고 snmpd를 시작한다. snmpwalk -v3로 확인한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1141,7 +1146,7 @@ U-60:
         /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄(com2sec notConfigUser <수집 서버 대역> <새 값>)에서 community 값을 변경(source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
       debian: |
-        /etc/snmp/snmpd.conf에 있는 rocommunity, rwcommunity와 IPv6용 rocommunity6, rwcommunity6 줄을 모두 rocommunity <새 값> <수집 서버 대역> 형태로 바꾼다(기존 -V <view> 뒤쪽 옵션은 그대로 둔다. rwcommunity를 새로 만들지 않고, source를 default로 두면 U-61이 취약)
+        /etc/snmp/snmpd.conf의 rocommunity, rwcommunity, rocommunity6, rwcommunity6 줄에서 지시어는 그대로 두고 community 문자열만 새 값으로 바꾸며 source는 수집 서버 대역으로 지정한다(기존 -V <view> 옵션은 유지하고, source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
   remediation_impact:
     level: 1
