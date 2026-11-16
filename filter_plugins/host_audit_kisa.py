@@ -58,8 +58,14 @@ CATALOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'host_au
 
 
 def _load_items():
-    with open(CATALOG_PATH, encoding='utf-8') as fh:
-        return yaml.safe_load(fh)
+    try:
+        with open(CATALOG_PATH, encoding='utf-8') as fh:
+            items = yaml.safe_load(fh)
+    except (OSError, yaml.YAMLError) as exc:
+        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (CATALOG_PATH, exc))
+    if not isinstance(items, dict) or not items:
+        raise RuntimeError('KISA item catalog %s is empty or not a mapping' % CATALOG_PATH)
+    return items
 
 
 ITEMS = _load_items()

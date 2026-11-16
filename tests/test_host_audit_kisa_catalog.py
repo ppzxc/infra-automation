@@ -17,7 +17,7 @@ FILTER_DIR = ROOT_DIR / "filter_plugins"
 CATALOG = FILTER_DIR / "host_audit_kisa_items.yml"
 sys.path.insert(0, str(FILTER_DIR))
 
-from host_audit_kisa import ITEMS  # noqa: E402
+from host_audit_kisa import CATEGORIES, ITEMS  # noqa: E402
 
 CODES = ["U-%02d" % i for i in range(1, 68)]
 REQUIRED = ("title", "severity", "category", "criteria")
@@ -34,6 +34,9 @@ def test_catalog_yaml_holds_all_67_items_with_required_fields():
         for field in REQUIRED:
             assert meta.get(field), (code, field)
         assert meta["severity"] in ("상", "중", "하"), code
+        assert meta["category"] in CATEGORIES, code
+        assert isinstance(meta.get("cis"), str), code
+        assert meta["criteria"] == meta["criteria"].strip(), code
 
 
 def test_filter_items_are_exactly_the_yaml_catalog():
@@ -53,7 +56,7 @@ def test_runner_finds_catalog_next_to_filter(tmp_path):
     play.write_text(yaml.safe_dump([{
         "hosts": "localhost", "gather_facts": False,
         "tasks": [{"ansible.builtin.debug": {
-            "msg": "{{ (probe | host_audit_kisa_result([], 'h', [], '2026-10-09'))['results'] | length }}"}}],
+            "msg": "ITEMS={{ (probe | host_audit_kisa_result([], 'h', [], '2026-10-09'))['results'] | length }}"}}],
         "vars": {"probe": probe},
     }]))
     res = subprocess.run(
@@ -62,4 +65,4 @@ def test_runner_finds_catalog_next_to_filter(tmp_path):
         env={**os.environ, "ANSIBLE_NOCOLOR": "1", "ANSIBLE_FILTER_PLUGINS": str(FILTER_DIR),
              "ANSIBLE_LOCALHOST_WARNING": "False"})
     assert res.returncode == 0, res.stdout + res.stderr
-    assert re.search(r'"msg": "?67"?\s', res.stdout), res.stdout
+    assert "ITEMS=67" in res.stdout, res.stdout
