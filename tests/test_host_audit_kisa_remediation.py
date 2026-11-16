@@ -143,6 +143,10 @@ def test_loader_accepts_a_complete_item(tmp_path):
     ("remediation", {"summary": "s\n"}, "remediation"),
     ("remediation", {"summary": "한" * 301}, "summary"),
     ("remediation", {"summary": "s", "steps": {"rhel": "\nx"}}, "steps"),
+    ("check", "a\nb", "check"),
+    ("purpose", "a\nb", "purpose"),
+    ("threat", "a\nb", "threat"),
+    ("remediation_effort", {"level": 1, "reason": "a\nb"}, "remediation_effort"),
     ("remediation_impact", {"level": 1, "reason": "r "}, "remediation_impact"),
     ("remediation_impact", {"level": 4, "reason": "r"}, "remediation_impact"),
     ("remediation_impact", {"level": 0, "reason": "r"}, "remediation_impact"),
@@ -313,6 +317,11 @@ def test_finding_of_an_unknown_code_renders_without_an_empty_remediation_line(mo
     row = page[page.index("KISA-2026:U-99"):]
     row = row[:row.index("</tr>")]
     assert "조치: " not in row and '<td class="impact">-</td>' in row
+    bare = {k: v for k, v in stray.items() if k not in ("impact_level", "effort_level")}  # a model from before #490
+    page = env.get_template("report.html.j2").render(
+        host_audit_model=dict(model, config_vulnerability=dict(cv, findings=cv["findings"] + [bare])))
+    row = page[page.index("KISA-2026:U-99"):]
+    assert '<td class="impact">-</td>' in row[:row.index("</tr>")]
 
 
 def test_report_without_the_source_key_has_no_stray_sentence_line(model, env):

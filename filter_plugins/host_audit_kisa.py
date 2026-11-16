@@ -110,6 +110,8 @@ def _untrimmed(value, block=False):
     """
     if not isinstance(value, str) or not value.strip():
         return True
+    if not block and '\n' in value:  # report and xlsx cells are single-line text (only steps blocks span lines)
+        return True
     return value != value.lstrip() if block else value != value.strip()
 
 
