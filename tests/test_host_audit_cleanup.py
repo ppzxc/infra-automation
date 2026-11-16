@@ -101,14 +101,14 @@ def test_an_xlsx_write_failure_keeps_this_run_and_ends_it_failed_after_the_mail(
     res, out = _run_xlsx_failed(tmp_path, storage)
     assert res.returncode != 0 and "h2" in res.stdout
     assert (out / "report.html").exists()
-    assert "xlsx 쓰기 실패" in res.stdout and "남김" in res.stdout
+    assert "xlsx 산출물 실패(h2)" in res.stdout and "남김" in res.stdout
 
 
 def test_both_failures_are_named_in_the_kept_reason(tmp_path):
     root, out = _run_dir(tmp_path)
     variables = dict(_vars(root, out, uploads=(200, 500), mail_sent=False), _host_audit_xlsx_failed_hosts=["h2"])
     res = _run(tmp_path, variables)
-    assert res.returncode != 0 and "xlsx 쓰기 실패와 원본 보관 미완료" in res.stdout
+    assert res.returncode != 0 and "xlsx 산출물 실패(h2)와 원본 보관 미완료" in res.stdout
     assert (out / "report.html").exists()
 
 
