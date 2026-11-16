@@ -70,7 +70,7 @@ U-03:
     steps:
       rhel: |
         RHEL 8 이상: authselect enable-feature with-faillock, /etc/security/faillock.conf에 deny = 10, unlock_time = 120
-        CentOS 7: /etc/pam.d/system-auth, password-auth에서 pam_unix.so 앞에 auth required pam_faillock.so preauth deny=10 unlock_time=120, 뒤에 auth [default=die] pam_faillock.so authfail deny=10 unlock_time=120, account 영역에 account required pam_faillock.so (pam_faillock이 없는 7.x 초기 버전은 pam_tally2.so)
+        CentOS 7: /etc/pam.d/system-auth, password-auth에서 pam_unix.so 앞에 auth required pam_faillock.so preauth deny=10 unlock_time=120, 뒤에 auth [default=die] pam_faillock.so authfail deny=10 unlock_time=120, account 영역에 account required pam_faillock.so
         CentOS 6: auth required pam_tally2.so deny=10 unlock_time=120 한 줄과 account required pam_tally2.so (preauth·authfail 형식이 없다)
         적용 전에 root 세션을 하나 열어 두고 PAM 모듈 경로가 실제로 있는지 확인한다
       debian: |
