@@ -225,7 +225,10 @@ def _workbook(sheet):
 def truncated_cells(headers, rows, footer):
     """Number of text cells longer than an xlsx cell holds (they are cut with an ellipsis; the module warns)."""
     cells = list(headers) + [c for row in rows for c in row] + list(footer)
-    return sum(1 for c in cells if isinstance(c, str) and _units(_normalize(c)) > MAX_CELL)
+    # A value that is neither text nor an integer is written as its text (see _cell), so it is cut the same way.
+    texts = [c if isinstance(c, str) else str(c) for c in cells
+             if c is not None and (isinstance(c, str) or isinstance(c, bool) or not isinstance(c, int))]
+    return sum(1 for c in texts if _units(_normalize(c)) > MAX_CELL)
 
 
 def build_xlsx(sheet, headers, rows, footer, widths):

@@ -286,6 +286,13 @@ def test_plans_of_every_host_come_with_their_file_names():
     assert plans[0]["rows"] == host_audit_remediation_plan(model, "h1")["rows"]
 
 
+def test_the_plan_map_is_keyed_by_each_plans_own_host():
+    from host_audit_remediation_plan import host_audit_remediation_plan_map
+    model = _model([_record("h1", {1: "VULN"}), _record("h2", {})])
+    plans = host_audit_remediation_plan_map(model)
+    assert sorted(plans) == ["h1", "h2"] and all(p["host"] == h for h, p in plans.items())
+
+
 def test_file_name_is_ascii_and_safe():
     assert host_audit_remediation_file_name("ha-1", "ns0331") == "host-audit-ha-1-ns0331.xlsx"
     import hashlib

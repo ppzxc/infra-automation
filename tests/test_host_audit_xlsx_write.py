@@ -231,6 +231,12 @@ def test_text_of_only_illegal_characters_is_an_empty_cell(tmp_path):
         assert b'<c r="A2" s="2"/>' in zf.read("xl/worksheets/sheet1.xml")
 
 
+def test_a_long_coerced_value_is_warned_about_too(tmp_path):
+    dest = tmp_path / "co.xlsx"
+    out = _run(dict(_args(dest), rows=[["a", "b", 1, ["x" * 40000]]], _args_file=tmp_path / "co.json"))
+    assert "were cut" in json.dumps(out["warnings"])
+
+
 def test_the_writer_uses_only_the_standard_library():
     spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
     source = MODULE.read_text(encoding="utf-8")

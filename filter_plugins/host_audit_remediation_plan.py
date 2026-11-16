@@ -162,10 +162,16 @@ def host_audit_remediation_file_name(run_id, host):
     return FILE_NAME % (part(run_id), part(host))
 
 
+def host_audit_remediation_plan_map(model):
+    """``{host: plan}`` of every host (the plans filter keyed by each plan's own ``host``)."""
+    return dict((plan['host'], plan) for plan in host_audit_remediation_plans(model))
+
+
 class FilterModule(object):
     def filters(self):
         return {
             'host_audit_remediation_plan': host_audit_remediation_plan,
             'host_audit_remediation_plans': host_audit_remediation_plans,
+            'host_audit_remediation_plan_map': host_audit_remediation_plan_map,
             'host_audit_remediation_file_name': host_audit_remediation_file_name,
         }
