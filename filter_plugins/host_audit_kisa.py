@@ -466,7 +466,7 @@ def _build_remediation_guide(findings):
                     title=meta['title'], severity=meta['severity'], purpose=meta['purpose'], threat=meta['threat'],
                     criteria=meta['criteria'], check=meta['check'], summary=meta['remediation']['summary'],
                     steps=[{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
-                           if steps.get(key, '').strip()],
+                           if (steps.get(key) or '').strip()],
                     impact=dict(meta['remediation_impact']), effort=dict(meta['remediation_effort']),
                     guide_page=meta['guide_page'])
             blocks[code] = block

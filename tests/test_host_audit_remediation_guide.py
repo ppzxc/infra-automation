@@ -184,6 +184,19 @@ def test_block_with_family_steps_shows_every_family_with_its_name(html):
             assert " ".join(line.split()) in text
 
 
+def test_heading_and_intro_keep_with_the_first_block(html):
+    assert re.search(r"\.rg-head\s*\{[^}]*break-after:\s*avoid", _head(html))
+    assert re.search(r'<h2 class="pb rg-head">부록 4\. 조치 안내', html)
+
+
+def test_a_family_without_text_is_dropped_from_the_steps(monkeypatch):
+    import host_audit_kisa as kisa
+    item = {k: v for k, v in ITEMS["U-02"].items()}
+    item["remediation"] = {"summary": "s", "steps": {"rhel": None, "debian": "  "}}
+    monkeypatch.setattr(kisa, "ITEMS", {**ITEMS, "U-02": item})
+    assert kisa._build_remediation_guide([_stray("KISA-2026:U-02")])[0]["steps"] == []
+
+
 def test_steps_keep_their_line_breaks(html):
     assert re.search(r"\.rg-steps\s*\{[^}]*white-space:\s*pre-wrap", _head(html))
     assert 'class="rg-steps"' in _blocks(html)["U-02"]
