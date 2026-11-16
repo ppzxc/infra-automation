@@ -137,7 +137,7 @@ def main():
         if changed and not module.check_mode:
             _write(dest, data)
     except (IOError, OSError) as exc:
-        module.fail_json(msg='cannot write %s: %s' % (dest, exc.strerror or exc))
+        module.fail_json(msg='cannot pack or write %s (%s): %s' % (dest, exc.filename or 'n/a', exc.strerror or exc))
     module.exit_json(changed=changed, dest=dest, files=names)
 
 

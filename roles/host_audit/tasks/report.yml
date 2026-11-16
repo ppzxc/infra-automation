@@ -132,6 +132,13 @@
     # 완성본처럼 해시를 붙여 보내고 3년 보관하지 않도록 묶지 않는다(메일은 보고서만, 실패는 맨 끝 판정이 호스트 이름과 함께
     # 실행을 실패로 끝낸다). 호스트가 하나도 없으면 묶을 것이 없다. 묶기 자체의 실패도 xlsx 쓰기 실패처럼 모아 맨 끝에서
     # 판정한다 — 보조 첨부 때문에 보관·메일이 막히지 않는다(AUD-025와 같은 원칙).
+    # 같은 실행 ID로 다시 돌린 실행이 이전 시도의 zip을 남겼으면, 이번에 묶지 못한 경우 그 옛 zip이 해시·첨부·보관에
+    # 오르지 않도록 먼저 지운다.
+    - name: Remove a leftover xlsx zip of an earlier attempt
+      ansible.builtin.file:
+        path: "{{ _host_audit_xlsx_zip_path }}"
+        state: absent
+
     - name: "[AUD-026] Pack every Remediation Plan xlsx into one zip"
       host_audit_zip_write:
         src_dir: "{{ host_audit_run.output_dir }}/xlsx"

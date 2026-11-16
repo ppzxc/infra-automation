@@ -263,7 +263,8 @@ def host_audit_mail_resend_summary(summary, run_id, archive, sha256, size=0, xls
         out['resent'] = True
         out['report'] = dict(summary.get('report') or {})
         out['report']['archive'] = archive
-        if isinstance(summary.get('xlsx_zip'), dict):
+        out.pop('xlsx_zip', None)  # kept only when it is a usable record
+        if isinstance(summary.get('xlsx_zip'), dict) and summary['xlsx_zip']:  # an empty record is no record (resend.yml agrees)
             out['xlsx_zip'] = dict(summary['xlsx_zip'], archive=xlsx_archive or summary['xlsx_zip'].get('archive', ''))
         return out
     return {

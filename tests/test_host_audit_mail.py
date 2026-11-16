@@ -237,6 +237,8 @@ def test_resend_keeps_the_archived_zip_record_and_points_it_at_the_archive():
     assert doc["xlsx_zip"]["sha256"] == ZIP_SHA and doc["xlsx_zip"]["file_name"] == ZIP_NAME
     assert doc["xlsx_zip"]["archive"] == "RustFS host-audit/2026-11/x/xlsx/" + ZIP_NAME
     assert kept["xlsx_zip"]["archive"].startswith("RustFS host-audit/2026-11/ha-")  # the kept summary is not mutated
+    empty = dict(kept, xlsx_zip={})
+    assert "xlsx_zip" not in host_audit_mail_resend_summary(empty, kept["run_id"], "RustFS b/x/report.html", SHA)
     old = host_audit_mail_resend_summary(_summary(), "ha-1", "RustFS b/x/report.html", SHA)
     assert "xlsx_zip" not in old  # a run kept before the zip existed resends the report only
 

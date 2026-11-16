@@ -197,7 +197,7 @@ def _report_stage(tmp_path, out, model=None, break_xlsx=False):
     (out / "report.html").write_text("<html>report</html>")
     names = ("Build the Remediation Plan of every host", "[AUD-025]",
              "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]",
-             "Remember that the xlsx zip", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
+             "Remove a leftover xlsx zip", "Remember that the xlsx zip", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in names)]
     assert len(tasks) == len(names), [t.get("name") for t in tasks]
@@ -244,6 +244,18 @@ def test_a_stale_xlsx_of_an_earlier_run_with_the_same_id_is_not_packed(tmp_path)
     _report_stage(tmp_path, out)
     with zipfile.ZipFile(out / "xlsx" / ZIP_NAME) as z:
         assert z.namelist() == ["host-audit-%s-h1.xlsx" % RUN_ID, "host-audit-%s-h2.xlsx" % RUN_ID]
+
+
+def test_a_stale_zip_of_an_earlier_attempt_is_not_hashed_mailed_or_kept_when_this_attempt_builds_none(tmp_path):
+    out = tmp_path / "run"
+    (out / "xlsx").mkdir(parents=True)
+    (out / "xlsx" / ZIP_NAME).write_bytes(b"PK-old-attempt")
+    # a run without hosts builds no zip (AUD-026 is skipped), so only the removal can keep the old file out
+    meta = {"run_id": RUN_ID, "started_at": "2026-10-31T22:00:05Z", "generated_at": "2026-10-31T22:01:00Z",
+            "run_kind": "scheduled", "targets": [], "timezone": "Asia/Seoul", "kisa_exceptions": []}
+    stats = _report_stage(tmp_path, out, host_audit_report_model([], meta))
+    assert "xlsx/" + ZIP_NAME not in stats and not (out / "xlsx" / ZIP_NAME).exists()
+    assert "xlsx_zip" not in json.loads((out / "mail_summary.json").read_text())
 
 
 def test_a_run_without_hosts_builds_no_zip_and_still_goes_on(tmp_path):
