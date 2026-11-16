@@ -85,6 +85,8 @@ storcli*)
     FAMILY=megaraid
     run "$tool" /c0 show all > "$tmp_out" 2>&1
     rc=$?
+    # Energy Pack(CacheVault) 상태는 `/c0 show energypack`의 State가 정답이다. 실패해도 무시한다(숫자 상태로 대신한다).
+    [ "$rc" -eq 0 ] && run "$tool" /c0 show energypack >> "$tmp_out" 2>&1
     version=$(sed -n 's/^CLI Version = *//p' "$tmp_out" | head -n 1)
     msg=$(grep -v '^[[:space:]]*$' "$tmp_out" | head -n 1)
     if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
@@ -137,11 +139,12 @@ function pd_role(st, dg) {
     return "unknown"
 }
 
-BEGIN { sec = ""; nld = 0; npd = 0 }
+BEGIN { sec = ""; nld = 0; npd = 0; EPSTATE = "" }
 {
     sub(/\r$/, "")
     t = trim($0)
     if (t ~ /^[A-Za-z][A-Za-z\/ ]* :$/) { sec = trim(substr(t, 1, length(t) - 2)); next }
+    if (sec == "Energy Pack Status" && t ~ /^State +/) { EPSTATE = trim(substr(t, 6)); next }
     if (t ~ /^[A-Za-z][^=]* = /) {
         p = index(t, " = ")
         k = trim(substr(t, 1, p - 1)); v = trim(substr(t, p + 3))
@@ -171,11 +174,15 @@ END {
     memmb = aget("On Board Memory Size"); sub(/MB$/, "", memmb)
     present = (memmb + 0 > 0) ? "true" : "false"
     ep = sget("HwCfg", "Energy Pack"); eps = sget("Status", "Energy Pack Status")
+    # State(energypack 출력)가 있으면 그것을 쓴다. 없으면 숫자 상태(0만 확실히 정상)로 대신한다.
+    epst = EPSTATE
+    if (epst != "") { epl = tolower(epst); epk = (epl == "optimal") ? "ok" : ((epl ~ /fail|missing|bad|not present/) ? "failed" : "degraded") }
+    else epk = (eps == "0") ? "ok" : "degraded"
     if (present == "false") cst = "none"
-    else if (ep == "Present") cst = (eps == "0") ? "ok" : "unknown"
+    else if (ep == "Present") cst = (epk == "ok") ? "ok" : ((epk == "failed") ? "failed" : "unknown")
     else cst = "not_configured"
     bp = (ep == "Present") ? "capacitor" : "none"
-    bstate = (bp == "none") ? "none" : ((eps == "0") ? "ok" : "degraded")
+    bstate = (bp == "none") ? "none" : epk
     model = aget("Model")
     raw = "{" q("Controller Status") ":" q(cs) "," q("Energy Pack") ":" q(ep) "," q("Energy Pack Status") ":" q(eps) "," q("Memory Uncorrectable Errors") ":" q(aget("Memory Uncorrectable Errors")) "}"
     line = head("controller", "disk_controller", cid, "", "MegaRAID " model " in Slot " aget("PCI Slot Number"))
@@ -188,7 +195,7 @@ END {
     if (bp != "none") {
         line = head("cache_battery", "battery", cid "/battery", cid, "MegaRAID cache backup power (CacheVault)")
         line = line ",\"backup_power\":" q(bp) ",\"present\":true,\"count\":1"
-        print line tail(bstate, "Energy Pack Status " eps, "none", "{" q("Energy Pack") ":" q(ep) "," q("Energy Pack Status") ":" q(eps) "}")
+        print line tail(bstate, (epst != "" ? epst : "Energy Pack Status " eps), "none", "{" q("Energy Pack") ":" q(ep) "," q("Energy Pack Status") ":" q(eps) "," q("State") ":" q(epst) "}")
     }
     for (i = 1; i <= nld; i++) {
         cfg = (LDC[i] ~ /WB/) ? "wb" : ((LDC[i] ~ /WT/) ? "wt" : "unknown")

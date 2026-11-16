@@ -285,8 +285,15 @@ def test_collector_tasks_cover_both_paths_and_the_disable_switch():
 STORCLI_FIXTURE = ROOT_DIR / "tests" / "fixtures" / "raid_storcli" / "storcli_mr416i_el9_ok.txt"
 
 
-def _run_storcli(tmp_path, text):
-    body = "#!/bin/sh\ncat \"$FAKE_FIXTURE\"\n"
+STORCLI_EP_FIXTURE = ROOT_DIR / "tests" / "fixtures" / "raid_storcli" / "storcli_mr416i_el9_energypack_ok.txt"
+
+
+def _run_storcli(tmp_path, text, energypack=None):
+    """`/c0 show all`은 text를, `/c0 show energypack`은 energypack(없으면 지원 안 함 오류)을 돌려주는 가짜 storcli64."""
+    ep = tmp_path / "ep.txt"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    ep.write_text(energypack if energypack is not None else "Status = Failure\nDescription = Unsupported Command\n")
+    body = ("#!/bin/sh\ncase \"$3\" in\n  energypack) cat \"" + str(ep) + "\";;\n  *) cat \"$FAKE_FIXTURE\";;\nesac\n")
     return _run(tmp_path, text, tool="storcli64", body=body, env={"RAID_STATUS_TOOLS": "storcli64 storcli"})
 
 
@@ -381,3 +388,25 @@ def test_storcli_without_megaraid_falls_back_to_ssacli(tmp_path):
 def test_default_tool_order_tries_megaraid_before_smartarray():
     text = SCRIPT.read_text()
     assert 'RAID_STATUS_TOOLS:-storcli64 storcli ssacli hpssacli hpacucli' in text
+
+
+@pytest.mark.parametrize("state, hw_state, cache_status", [
+    ("Optimal", "ok", "ok"),
+    ("Failed", "failed", "failed"),
+    ("Degraded", "degraded", "unknown"),
+])
+def test_storcli_energy_pack_state_drives_cache_backup(tmp_path, state, hw_state, cache_status):
+    ep = STORCLI_EP_FIXTURE.read_text().replace("Optimal", state)
+    # 숫자 상태가 0이어도 energypack State가 우선한다
+    recs = _run_storcli(tmp_path, STORCLI_FIXTURE.read_text(), energypack=ep)
+    (ctrl,) = _by_kind(recs, "controller")
+    (bat,) = _by_kind(recs, "cache_battery")
+    assert bat["hw_state"] == hw_state and bat["raw_state"] == state
+    assert ctrl["cache_status"] == cache_status and ctrl["backup_power_state"] == hw_state
+
+
+def test_storcli_energy_pack_state_optimal_overrides_nonzero_number(tmp_path):
+    text = STORCLI_FIXTURE.read_text().replace("Energy Pack Status = 0", "Energy Pack Status = 44", 1)
+    recs = _run_storcli(tmp_path, text, energypack=STORCLI_EP_FIXTURE.read_text())
+    assert _by_kind(recs, "cache_battery")[0]["hw_state"] == "ok"
+    assert _by_kind(recs, "controller")[0]["cache_status"] == "ok"
