@@ -73,9 +73,8 @@ U-03:
         구형(CentOS 6/7): /etc/pam.d/system-auth, password-auth에서 pam_unix.so 앞에 pam_faillock.so preauth deny=10 unlock_time=120, 뒤에 authfail 줄, account 영역에 pam_faillock.so를 둔다(CentOS 6는 pam_tally2.so)
         적용 전에 root 세션을 하나 열어 두고 PAM 모듈 경로가 실제로 있는지 확인한다
       debian: |
-        Debian 12·Ubuntu 24.04 이상(PAM 1.5 이상): /etc/security/faillock.conf에 deny = 10, unlock_time = 120
-        Debian 11·Ubuntu 22.04(PAM 1.4): faillock.conf가 읽히지 않으므로 아래 모듈 줄에 deny=10 unlock_time=120 인자를 직접 쓴다
-        모듈 줄: common-auth에서 pam_unix.so 앞에 auth required pam_faillock.so preauth, 뒤에 auth [default=die] pam_faillock.so authfail, 그 아래 auth sufficient pam_faillock.so authsucc. common-account에는 account required pam_faillock.so
+        모듈 줄(모든 버전): common-auth에서 pam_unix.so 앞에 auth required pam_faillock.so preauth, 뒤에 auth [default=die] pam_faillock.so authfail, 그 아래 auth sufficient pam_faillock.so authsucc. common-account에는 account required pam_faillock.so
+        값: Debian 12·Ubuntu 24.04 이상(PAM 1.5 이상)은 /etc/security/faillock.conf에 deny = 10, unlock_time = 120. Debian 11·Ubuntu 22.04(PAM 1.4)는 faillock.conf가 읽히지 않으므로 위 모듈 줄에 deny=10 unlock_time=120 인자를 직접 쓴다
         /etc/pam.d/common-*를 직접 고치면 pam-auth-update가 덮어쓸 수 있으니 /usr/share/pam-configs 프로필로 등록한다. pam_tally2는 Debian 12 이상에 없다
         적용 전에 root 세션을 하나 열어 두고 PAM 모듈 경로가 실제로 있는지 확인한다
   remediation_impact:
@@ -203,7 +202,7 @@ U-10:
   threat: UID가 중복되면 시스템이 같은 사용자로 보아 불필요한 권한이 부여되고 로그로 사용자를 구분할 수 없다.
   guide_page: 34
   remediation:
-    summary: /etc/passwd에서 중복 UID 계정을 찾아 usermod -u <새 UID> <계정>으로 중복되지 않는 UID로 바꾼다. usermod는 홈 디렉터리 밖 파일의 소유자를 바꾸지 않으므로 find / -xdev -uid <옛 UID> 로 찾아 chown 한다.
+    summary: /etc/passwd에서 중복 UID 계정을 찾아 usermod -u <새 UID> <계정>으로 중복되지 않는 UID로 바꾼다. usermod는 홈 디렉터리 밖 파일을 옮기지 않으므로 find / -xdev -uid <옛 UID> 결과에서 바꾼 계정의 파일만 가려 chown 한다.
   remediation_impact:
     level: 2
     reason: 운영 목적으로 같은 UID를 부여했다면 해당 계정이 쓰는 파일과 디렉터리에 권한이 사라져도 서비스에 영향이 없는지 확인해야 한다.
@@ -1138,10 +1137,10 @@ U-60:
     summary: SNMP를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/snmp/snmpd.conf의 community를 public·private이 아닌 영문+숫자 10자 이상 또는 영문+숫자+특수문자 8자 이상으로 바꾸고 snmpd를 재시작한다. SNMP v3만 쓰면 비밀번호 복잡도를 사람이 확인한다(probe는 점검불가(수동)).
     steps:
       rhel: |
-        /etc/snmp/snmpd.conf의 com2sec 줄(com2sec notConfigUser <수집 서버 대역> <새 값>)에서 community 값을 변경(source를 default로 두면 U-61이 취약)
+        /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄(com2sec notConfigUser <수집 서버 대역> <새 값>)에서 community 값을 변경(source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
       debian: |
-        /etc/snmp/snmpd.conf에 이미 있는 rocommunity(또는 rwcommunity) 줄만 rocommunity <새 값> <수집 서버 대역> 형태로 바꾼다(rwcommunity를 새로 만들지 않고, source를 default로 두면 U-61이 취약)
+        /etc/snmp/snmpd.conf에 있는 rocommunity, rwcommunity와 IPv6용 rocommunity6, rwcommunity6 줄을 모두 rocommunity <새 값> <수집 서버 대역> 형태로 바꾼다(rwcommunity를 새로 만들지 않고, source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
   remediation_impact:
     level: 1
@@ -1163,10 +1162,10 @@ U-61:
     summary: /etc/snmp/snmpd.conf의 community마다 허용할 네트워크 주소를 source로 지정해(default와 0.0.0.0/0 금지) 접근 대상을 제한하고 snmpd를 재시작한다. SNMP를 쓰지 않으면 중지·비활성화한다.
     steps:
       rhel: |
-        /etc/snmp/snmpd.conf의 com2sec 줄에서 source를 default·0.0.0.0/0 대신 허용 네트워크 주소로 지정
+        /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄에서 source를 default·0.0.0.0/0 대신 허용 네트워크 주소로 지정
         systemctl restart snmpd
       debian: |
-        /etc/snmp/snmpd.conf의 rocommunity·rwcommunity 뒤에 허용 네트워크 주소를 추가
+        /etc/snmp/snmpd.conf의 rocommunity·rwcommunity와 rocommunity6·rwcommunity6 줄은 rocommunity <community> <source> 형태이므로 세 번째 자리의 default를 허용 네트워크 주소로 교체한다(추가가 아니라 교체)
         systemctl restart snmpd
   remediation_impact:
     level: 1
