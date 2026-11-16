@@ -21,7 +21,7 @@ from host_audit_regression import (  # noqa: E402
 POLICY = (ROOT_DIR / "roles" / "backup" / "files" / "host-key-policy.json").read_text(encoding="utf-8")
 EXPECT_ALL = {
     "mgmt_web_ports": [3000], "mgmt_wildcard_allowed": [22, 443], "mgmt_removed_ports": [9000],
-    "recv_syslog_conf": ["/etc/a.conf"], "recv_trap_conf": ["/etc/b.conf"], "ssh_restricted": True,
+    "recv_syslog_conf": ["/etc/a.conf"], "ssh_restricted": True,
     "det_journald": True, "det_fail2ban": True, "det_fail2ban_no_firewall": True, "det_auditd": True,
     "det_audit_secret": True, "det_log_agent": True, "sec_roots": ["/opt"], "sec_files": ["/opt/k"],
     "sec_env_files": ["/opt/e.env"],

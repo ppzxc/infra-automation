@@ -283,15 +283,16 @@ def test_the_new_tasks_have_the_same_gates_as_the_rules_deployment_they_feed():
 
 def test_only_the_provisioning_entry_points_run_the_security_role_and_the_docs_say_what_that_guarantees():
     """감사 규칙은 security 역할만 배포한다. 에이전트만 설치하는 playbook(host_agents*)·점검 playbook(host_audit*)은 이 역할을 쓰지 않는다.
-    그러나 CLI 전용 maintenance.yml·site.yml은 servers 전체에 security를 돌린다(기존 동작). 에이전트만 설치된 호스트(agents_only)에 안 들어간다는 보장은
+    그러나 CLI 전용 site.yml은 servers 전체에 security를 돌린다(기존 동작; maintenance.yml은 #437에서 폐기). 에이전트만 설치된 호스트(agents_only)에 안 들어간다는 보장은
     Semaphore Host Provisioning(provision_hosts.yml)이 provision_excluded를 접속 전에 거부하는 경로에서만 성립하고, CLI는 -l로 대상을 좁혀야 한다."""
     users = sorted(p.name for p in (ROOT_DIR / "playbooks").glob("*.yml") if "role: security" in p.read_text(encoding="utf-8"))
-    assert users == ["maintenance.yml", "site.yml"], users
-    maintenance = (ROOT_DIR / "playbooks" / "maintenance.yml").read_text(encoding="utf-8")
-    assert "hosts: servers" in maintenance and "provision_excluded" not in maintenance      # CLI 진입점은 대상을 스스로 거르지 않는다
+    assert users == ["site.yml"], users
+    site = (ROOT_DIR / "playbooks" / "site.yml").read_text(encoding="utf-8")
+    assert "servers:loadbalancers" in site and "provision_excluded" not in site      # CLI 진입점은 대상을 스스로 거르지 않는다
+    assert not (ROOT_DIR / "playbooks" / "maintenance.yml").exists()
     assert "provision_excluded" in (ROOT_DIR / "playbooks" / "provision_hosts.yml").read_text(encoding="utf-8")
     doc = (ROOT_DIR / "docs" / "security.md").read_text(encoding="utf-8")
-    assert "Semaphore의 Host Provisioning(`provision_hosts.yml`)" in doc and "`maintenance.yml`·`site.yml`은 `servers` 전체에 `security`를 돌리므로" in doc
+    assert "Semaphore의 Host Provisioning(`provision_hosts.yml`)" in doc and "`site.yml`은 `servers` 전체에 `security`를 돌리므로" in doc
     assert "`-l`/`target_hosts`로 대상을 좁혀야 한다" in doc
 
 

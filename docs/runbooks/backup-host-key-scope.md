@@ -82,3 +82,12 @@
 ## 9. Host Audit 연계
 
 [#377](https://github.com/ppzxc/infra-automation/issues/377)이 백업 저장소 정책 점검을 Host Audit 항목 `EXP-BAK-1`~`EXP-BAK-3`으로 추가했다([Host Audit 명세 16절](../host_audit.md)). 점검 기대치는 이 문서가 아니라 `roles/backup/files/host-key-policy.json`이다(삭제 허용은 `locks/*`뿐, 와일드카드 동작 없음).
+
+## 10. 정기 점검: 정책 스냅샷 `diff` (월 1회)
+
+2026-11-16 결정(#383): 자동화(BAK 그룹의 스냅샷 자동 갱신·러너 배치)는 설계 비용이 커서 보류하고, 월 1회 Host Audit를 돌리는 때에 수집기를 수동 실행해 `diff`한다.
+
+1. `scripts/collect-rustfs-policy.py --label <백업 저장소 라벨> --env-file <저장소 루트 .env>`로 스냅샷을 만들어 비공개 경로에 둔다(2절과 같은 명령).
+2. 지난달 스냅샷과 `diff`한다. 바뀐 줄이 없어야 하고, 있으면 승인된 변경인지 확인한다(새 호스트 편입 때 `backup-prod-*` 서비스 계정이 늘어나는 것은 정상).
+3. 모든 `backup-prod-*` 서비스 계정의 정책 모양이 `roles/backup/files/host-key-policy.json`과 같은지 6절 3항과 같이 확인한다.
+4. 이슈나 보고서에는 통과 여부만 적고, 스냅샷 내용은 비공개 경로에만 둔다.

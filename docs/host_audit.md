@@ -816,9 +816,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `EXP-MGMT-1` | mgmt-web-loopback-bind | `mgmt_web_ports` | 선언한 관리 웹 접점이 루프백 밖 주소에 열려 있지 않다(소켓과 컨테이너 게시 포트 모두) |
 | `EXP-MGMT-2` | mgmt-web-loopback-bind | `mgmt_wildcard_allowed` | 모든 주소에서 청취하는 접점이 허용 목록(프록시 경로 등 설계된 예외) 안에 있다 |
 | `EXP-MGMT-3` | mgmt-web-loopback-bind | `mgmt_removed_ports`, `mgmt_removed_names` | 제거 목록의 포트·컨테이너·서비스가 없다 |
-| `EXP-RECV-1` | receiver-source-restriction 8절 | `recv_syslog_conf` | 로그 수신 설정에 출발지 필터 정의가 있고 `log` 경로에 연결돼 있다 |
-| `EXP-RECV-2` | receiver-source-restriction 8절 | `recv_trap_conf` | 트랩 인증 지시어가 있고 `disableAuthorization`이 켜져 있지 않다 |
-| `EXP-RECV-3` | receiver-source-restriction 8절 | `recv_trap_conf` | 인증 지시어에 흔한 기본 문자열이 없다 |
+| `EXP-RECV-1` | receiver-source-restriction 8절 | `recv_syslog_conf` | 로그 수신 설정(Telegraf)의 `[[inputs.socket_listener]]`에 비어 있지 않은 `allowed_sources` 허용 목록이 있다. 트랩 수신기(옛 `EXP-RECV-2`·`EXP-RECV-3`)는 LibreNMS 폐기로 없다(2026-11-16) |
 | `EXP-SSH-1` | ssh-source-restriction 6절 | `ssh_restricted` | `sshd_config`에 관리형 Match 블록과 `DenyUsers *`가 있다 |
 | `EXP-SSH-2` | ssh-source-restriction 6절 | `ssh_restricted`, `ssh_denied_addr` | `sshd -T -C`로 평가한 허용 밖 출발지(기본 문서용 주소)가 거부된다 |
 | `EXP-SSH-3` | ssh-source-restriction 6절 | `ssh_restricted`, `ssh_allowed_addrs` | 루프백과 선언한 허용 출발지가 거부되지 않는다 |

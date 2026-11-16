@@ -7,7 +7,7 @@
 # raw_provisioning_path를 직접 읽는 유일한 곳이며, 역할의 게이트/핸들러는
 # 결과 fact(_raw_path_effective)만 읽는다.
 # 판별 후 raw 경로가 아닌 호스트는 표준 setup으로 fact를 수집한다.
-# import_tasks로 site.yml/maintenance.yml의 pre_tasks에서 포함된다(플레이 인덱스 불변).
+# import_tasks로 site.yml의 pre_tasks에서 포함된다(플레이 인덱스 불변).
 # 판별 프로브는 읽기 전용이므로 --check에서도 실행된다(ADR-0005 §2.4 예외).
 # ------------------------------------------------------------------------------
 # 파일 없음/인식 불가(Rocky, Ubuntu 등)는 실패가 아니라 "raw 아님"이다.

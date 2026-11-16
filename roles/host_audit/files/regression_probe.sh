@@ -68,30 +68,17 @@ if [ -n "${HA_MGMT_WEB_PORTS}${HA_MGMT_WILDCARD_ALLOWED}${HA_MGMT_REMOVED_PORTS}
   fi
 fi
 
-# --- 로그·트랩 수신 접점 (receiver-source-restriction) -------------------------------------
+# --- 로그 수신 접점 (receiver-source-restriction, #467 이후 Telegraf socket_listener) ----------
+# 트랩 수신기(snmptrapd)는 LibreNMS와 함께 폐기되어 EXP-RECV-2/3은 없다(2026-11-16).
 if [ -n "$HA_RECV_SYSLOG_CONF" ]; then
   bad=0
   for f in $HA_RECV_SYSLOG_CONF; do
     c="$R$f"
     if [ -r "$c" ] \
-      && grep -Eq '^[[:space:]]*filter[[:space:]]+[A-Za-z0-9_.-]+[[:space:]]*\{' "$c" \
-      && grep -Eq '(netmask6?|host)[[:space:]]*\(' "$c" \
-      && grep -Eq 'filter[[:space:]]*\([A-Za-z0-9_.-]+\)' "$c"; then :; else bad=1; fi
+      && grep -Eq '^[[:space:]]*\[\[inputs\.socket_listener\]\]' "$c" \
+      && grep -Eq '^[[:space:]]*allowed_sources[[:space:]]*=[[:space:]]*\[[[:space:]]*"[^"]+"' "$c"; then :; else bad=1; fi
   done
   [ "$bad" -eq 0 ] && emit EXP-RECV-1 PASS || emit EXP-RECV-1 FAIL
-fi
-if [ -n "$HA_RECV_TRAP_CONF" ]; then
-  noauth=0
-  deflt=0
-  for f in $HA_RECV_TRAP_CONF; do
-    c="$R$f"
-    if [ ! -r "$c" ]; then noauth=1; deflt=1; continue; fi
-    grep -Eqi '^[[:space:]]*(authCommunity|authUser|authGroup)[[:space:]]' "$c" || noauth=1
-    grep -Eqi '^[[:space:]]*disableAuthorization[[:space:]]+(yes|true|1)' "$c" && noauth=1
-    awk 'tolower($1) == "authcommunity" { v = tolower($3); gsub(/["'"'"']/, "", v); if (v == "public" || v == "private" || v == "community") f = 1 } END { exit !f }' "$c" && deflt=1
-  done
-  [ "$noauth" -eq 0 ] && emit EXP-RECV-2 PASS || emit EXP-RECV-2 FAIL
-  [ "$deflt" -eq 0 ] && emit EXP-RECV-3 PASS || emit EXP-RECV-3 FAIL
 fi
 
 # --- 원격 접속(SSH) 출발지 제한 (ssh-source-restriction) -----------------------------------
