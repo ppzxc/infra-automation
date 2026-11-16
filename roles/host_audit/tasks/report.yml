@@ -135,25 +135,45 @@
     # 파일) 보관(AUD-512)이 xlsx/를 통째로 올리므로 이번 실행의 증적으로 오른다. 이번 시도가 쓴 파일(실패하지 않은 호스트의
     # 계획 파일명)만 남기고 나머지 *.xlsx는 지운다. zip은 확장자가 달라 대상이 아니고(위·아래 zip 단계가 따로 다룬다), 숨김
     # 임시 파일은 find가 보지 않는다.
+    # 쓰기·묶기 실패를 하나의 사실로 모은다: 소비자(맨 끝 판정, 그 메시지, 정리 cleanup.yml)가 같은 값을 읽는다. 아래 태스크가
+    # 중간에 실패해도 정리가 호스트 쓰기 실패를 알도록 호스트 쓰기 결과가 나온 바로 뒤에 먼저 정하고, 묶기가 실패하면
+    # 'Remember that the xlsx zip could not be written'이 같은 사실에 zip을 더한다. what은 이유 문구에 쓰는 이름이다.
+    - name: Summarize the Remediation Plan xlsx problem of this run
+      vars:
+        _hosts: "{{ _host_audit_xlsx_failed_hosts | default([]) }}"
+      ansible.builtin.set_fact:
+        _host_audit_xlsx_problem:
+          failed: "{{ _hosts | length > 0 }}"
+          targets: "{{ _hosts }}"
+          what: "{{ 'Remediation Plan xlsx' if _hosts | length > 0 else 'xlsx zip' }}"
+
+    - name: Check whether the xlsx directory exists
+      ansible.builtin.stat:
+        path: "{{ host_audit_run.output_dir }}/xlsx"
+        get_checksum: false
+        get_mime: false
+      register: _host_audit_xlsx_dir
+
     - name: Find the xlsx files that this attempt did not write
       ansible.builtin.find:
         paths: "{{ host_audit_run.output_dir }}/xlsx"
         patterns: '*.xlsx'
         file_type: file
       register: _host_audit_xlsx_present
-      when: not ansible_check_mode
+      when:
+        - not ansible_check_mode
+        - _host_audit_xlsx_dir.stat.isdir | default(false)
 
     - name: Remove the xlsx files that this attempt did not write
       vars:
         _written: >-
           {{ host_audit_model.hosts | difference(_host_audit_xlsx_failed_hosts)
              | map('extract', _host_audit_remediation_plans) | map(attribute='file_name') | list }}
+        _present: "{{ _host_audit_xlsx_present.files | default([]) | map(attribute='path') | map('basename') | list }}"
       ansible.builtin.file:
-        path: "{{ item.path }}"
+        path: "{{ host_audit_run.output_dir }}/xlsx/{{ item }}"
         state: absent
-      loop: "{{ _host_audit_xlsx_present.files | default([]) | rejectattr('path', 'match', '.*/(' ~ (_written | map('regex_escape') | join('|')) ~ ')$') | list }}"
-      loop_control:
-        label: "{{ item.path | basename }}"
+      loop: "{{ _present | difference(_written) }}"
       when: not ansible_check_mode
 
     # 호스트별 xlsx 전부를 zip 하나로 묶는다. 메일의 두 번째 첨부이자 보고서와 함께 보관되는 파일이다(xlsx/ 아래, 보관은
@@ -190,6 +210,7 @@
     - name: Remember that the xlsx zip could not be written
       ansible.builtin.set_fact:
         _host_audit_xlsx_zip_failed: true
+        _host_audit_xlsx_problem: "{{ _host_audit_xlsx_problem | combine({'failed': true, 'targets': _host_audit_xlsx_problem.targets + ['xlsx zip']}) }}"
       when: _host_audit_xlsx_zip_write.failed | default(false)
 
     # 묶기가 실패했으면 이전 시도의 zip이 남아 있어도 해시·첨부·보관에 오르지 않게 지운다.
@@ -198,18 +219,6 @@
         path: "{{ _host_audit_xlsx_zip_path }}"
         state: absent
       when: _host_audit_xlsx_zip_failed | bool
-
-    # 쓰기·묶기 실패를 하나의 사실로 모은다: 소비자(맨 끝 판정, 그 메시지, 정리 cleanup.yml)가 같은 값을 읽는다.
-    # what은 이유 문구에 쓰는 이름이다(호스트 쓰기 실패가 있으면 그쪽, 아니면 zip).
-    - name: Summarize the Remediation Plan xlsx problem of this run
-      vars:
-        _hosts: "{{ _host_audit_xlsx_failed_hosts | default([]) }}"
-        _zip: "{{ _host_audit_xlsx_zip_failed | default(false) | bool }}"
-      ansible.builtin.set_fact:
-        _host_audit_xlsx_problem:
-          failed: "{{ (_hosts | length > 0) or _zip }}"
-          targets: "{{ _hosts + (['xlsx zip'] if _zip else []) }}"
-          what: "{{ 'Remediation Plan xlsx' if _hosts | length > 0 else 'xlsx zip' }}"
 
     - name: "[AUD-611] Compute the SHA-256 of the report to attach"
       ansible.builtin.stat:

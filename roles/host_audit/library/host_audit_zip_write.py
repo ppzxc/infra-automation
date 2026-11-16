@@ -107,9 +107,7 @@ def main():
         if missing:
             module.fail_json(msg='files to pack are missing from %s: %s' % (src_dir, ', '.join(missing)))
         data = build_zip(src_dir, names)
-        changed = not same_file(dest, data)
-        if changed and not module.check_mode:
-            write_atomic(dest, data)
+        changed = (not same_file(dest, data)) if module.check_mode else write_atomic(dest, data)
     except (IOError, OSError) as exc:
         module.fail_json(msg='cannot pack or write %s (%s): %s' % (dest, exc.filename or 'n/a', exc.strerror or exc))
     module.exit_json(changed=changed, dest=dest, files=names)

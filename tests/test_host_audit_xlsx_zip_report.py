@@ -198,7 +198,7 @@ def _report_stage(tmp_path, out, model=None, break_xlsx=False):
     (out / "report.html").write_text("<html>report</html>")
     names = ("Build the Remediation Plan of every host", "[AUD-025]",
              "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]",
-             "Remove a leftover xlsx zip", "Reset the xlsx zip failure mark", "Remember that the xlsx zip", "Remove the xlsx zip when packing", "Summarize the Remediation Plan xlsx", "Find the xlsx files that this attempt did not write", "Remove the xlsx files that this attempt did not write", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
+             "Remove a leftover xlsx zip", "Reset the xlsx zip failure mark", "Remember that the xlsx zip", "Remove the xlsx zip when packing", "Summarize the Remediation Plan xlsx", "Check whether the xlsx directory exists", "Find the xlsx files that this attempt did not write", "Remove the xlsx files that this attempt did not write", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in names)]
     assert len(tasks) == len(names), [t.get("name") for t in tasks]
@@ -444,8 +444,8 @@ def test_an_old_xlsx_of_a_host_whose_write_failed_this_attempt_is_removed_too(tm
     (out / "xlsx" / ZIP_NAME).write_bytes(b"not an xlsx")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in
-                                     ("Collect the hosts whose Remediation Plan xlsx", "xlsx files that this attempt did not write"))]
-    assert len(tasks) == 3
+                                     ("Collect the hosts whose Remediation Plan xlsx", "Check whether the xlsx directory", "xlsx files that this attempt did not write"))]
+    assert len(tasks) == 4
     plans = {h: {"file_name": "host-audit-%s-%s.xlsx" % (RUN_ID, h)} for h in ("h1", "h2")}
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
             "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"hosts": ["h1", "h2"]},
