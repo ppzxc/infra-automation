@@ -44,7 +44,7 @@ U-02:
         /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
         이전 비밀번호 기억: RHEL 9는 /etc/security/pwhistory.conf에 remember=4, enforce_for_root, 그 아래 버전은 pam_pwhistory.so의 remember=4 인자
         PAM 반영: RHEL 8 이상은 /etc/pam.d/system-auth를 직접 고치지 말고 authselect 사용자 정의 프로필이나 with-pwhistory 기능으로 한다(직접 수정은 authselect 적용 때 덮어써진다). CentOS 6/7은 system-auth에서 pam_pwquality.so(pam_cracklib.so), pam_pwhistory.so를 pam_unix.so 위에 둔다
-        가이드 안에서 기억 개수가 4(Linux 사례)와 10(Solaris 권고표)으로 어긋나며 여기서는 4 이상을 따른다
+        가이드 안에서 기억 개수가 4(Linux 사례)와 10(다른 OS 권고표)으로 어긋나며 여기서는 4 이상을 따른다
       debian: |
         /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
         /etc/pam.d/common-password: pam_pwquality.so, pam_pwhistory.so를 pam_unix.so 위에 둔다
@@ -480,7 +480,7 @@ U-25:
   threat: 시스템 파일 등이 모든 사용자에게 쓰기 가능하면 비인가자가 임의로 수정·삭제할 수 있다.
   guide_page: 52
   remediation:
-    summary: find / -type f -perm -2 로 world writable 파일을 찾고, 필요한 파일은 chmod o-w 로 타 사용자 쓰기를 제거하고 불필요한 파일은 rm 으로 지운다. 설정 이유를 알고 있는 파일만 남긴다.
+    summary: 로컬 디스크 마운트 지점마다(/, /home 등) find <마운트> -xdev -type f -perm -2 로 world writable 파일을 찾고, 필요한 파일은 chmod o-w 로 타 사용자 쓰기를 제거하고 불필요한 파일은 rm 으로 지운다. 설정 이유를 알고 있는 파일만 남긴다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -689,7 +689,7 @@ U-36:
   threat: r 계열 서비스가 켜져 있으면 인증 절차 없이 원격 터미널 접속과 명령 실행이 가능하다.
   guide_page: 77
   remediation:
-    summary: NET Backup이나 클러스터링 등 특별한 용도가 없으면 shell(514), login(513), exec(512) 서비스를 중지한다. xinetd는 /etc/xinetd.d/ 해당 파일의 disable을 yes로 바꾸고 xinetd를 재시작하며, systemd는 해당 서비스를 systemctl stop 후 disable한다. 사용 여부는 /etc/hosts.equiv와 $HOME/.rhosts로 확인한다.
+    summary: 백업·클러스터링 같은 특별한 용도가 없으면 shell(514), login(513), exec(512) 서비스를 중지한다. xinetd는 /etc/xinetd.d/ 해당 파일의 disable을 yes로 바꾸고 xinetd를 재시작하며, systemd는 해당 서비스를 systemctl stop 후 disable한다. 사용 여부는 /etc/hosts.equiv와 $HOME/.rhosts로 확인한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1261,7 +1261,7 @@ U-67:
   threat: 로그 접근 통제가 미흡하면 비인가자가 로그에서 정보를 얻거나 로그 자체를 변조할 수 있다.
   guide_page: 171
   remediation:
-    summary: /var/log 바로 아래 로그 파일 중 소유자가 root가 아니거나 권한이 644를 넘는 것을 찾아 chown root, chmod 644 이하로 바꾼다(AIX는 /var/adm, HP-UX는 /var/adm/syslog).
+    summary: /var/log 바로 아래 로그 파일 중 소유자가 root가 아니거나 권한이 644를 넘는 것을 찾아 chown root, chmod 644 이하로 바꾼다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.

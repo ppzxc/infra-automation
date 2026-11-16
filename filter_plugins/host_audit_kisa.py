@@ -103,16 +103,12 @@ def _deep_freeze(value):
 SUMMARY_MAX = 300  # the body table prints remediation.summary on one line; longer notes belong in steps/reason
 
 
-def _blank(value):
-    return not isinstance(value, str) or not value.strip()
-
-
 def _untrimmed(value, block=False):
     """Blank text, or text with surrounding whitespace (it would show as a stray gap in report cells).
 
     ``block`` is for YAML ``|`` blocks (steps), which always end with a newline: only leading space is refused.
     """
-    if _blank(value):
+    if not isinstance(value, str) or not value.strip():
         return True
     return value != value.lstrip() if block else value != value.strip()
 
@@ -161,7 +157,7 @@ def _validate(items, path):
             if not isinstance(meta[field], str):
                 raise RuntimeError('KISA item %s field %s must be a string (quote it) in %s' % (code, field, path))
         for field in ('title', 'criteria'):
-            if not meta[field].strip() or meta[field] != meta[field].strip():
+            if _untrimmed(meta[field]):
                 raise RuntimeError('KISA item %s field %s is blank or has surrounding whitespace in %s'
                                    % (code, field, path))
         _validate_remediation(code, meta, path)
@@ -246,7 +242,10 @@ def remediation_view(code, items=None):
 
 def order_findings(findings, items=None):
     """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
-    low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable."""
+    low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable.
+
+    The values are read from the catalog, not from fields a finding may carry, so a stale or partial finding
+    cannot change the order; the lookup is at most 67 dict reads per report. ``items`` lets tests inject a catalog."""
     def key(finding):
         view = remediation_view(finding['code'], items)  # unknown codes (blank values) sort last
         return (view['priority'] or 9, view['impact_level'] or 9, view['effort_level'] or 9,

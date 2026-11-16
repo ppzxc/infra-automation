@@ -24,6 +24,8 @@ TODAY = "2026-10-09"
 SOURCE_SENTENCE = ("조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 "
                    "바탕으로 요약함")
 
+GUIDE_UNIX_PAGES = (7, 171)  # printed pages of the Unix server chapter in the 2026 guide (pages == PDF pages)
+
 # Items whose "조치 시 영향" the 2026 guide describes individually instead of "영향 없음" (U-05 and U-50 are
 # conditional "영향 없음" and stay 1). Counted from the guide, independent of the catalog.
 INDIVIDUALLY_DESCRIBED = {"U-02", "U-03", "U-04", "U-06", "U-10", "U-12", "U-19", "U-23", "U-28", "U-41", "U-45",
@@ -50,7 +52,7 @@ def test_every_item_has_the_remediation_fields():
             assert type(level) is int and level in (1, 2, 3), (code, field)
             assert isinstance(meta[field]["reason"], str) and meta[field]["reason"].strip(), (code, field)
         page = meta["guide_page"]
-        assert type(page) is int and 7 <= page <= 171, code  # Unix server chapter of the 2026 guide
+        assert type(page) is int and GUIDE_UNIX_PAGES[0] <= page <= GUIDE_UNIX_PAGES[1], code
 
 
 def test_steps_only_use_rhel_and_debian_keys_with_text():
@@ -70,7 +72,7 @@ def test_steps_only_use_rhel_and_debian_keys_with_text():
 def test_remediation_impact_follows_the_guide_split():
     """52 items the guide calls no-impact are level 1; the 15 individually described are level 2 or 3."""
     levels = {c: ITEMS[c]["remediation_impact"]["level"] for c in CODES}
-    assert {c for c, lv in levels.items() if lv != 1} == {c for c in INDIVIDUALLY_DESCRIBED if levels[c] != 1}
+    assert {c for c, lv in levels.items() if lv != 1} <= INDIVIDUALLY_DESCRIBED  # nothing else rises above 1
     assert all(levels[c] in (2, 3) for c in INDIVIDUALLY_DESCRIBED)
     assert sum(1 for lv in levels.values() if lv == 1) == 52
     assert {1, 2, 3} <= {ITEMS[c]["remediation_effort"]["level"] for c in CODES}  # effort uses the whole scale
