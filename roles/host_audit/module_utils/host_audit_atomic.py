@@ -66,7 +66,7 @@ def write_atomic(dest, data, create_parent=False):
         os.replace(tmp, dest)
         _sync_directory(directory)
     except BaseException:
-        # A leftover .tmp in xlsx/ would be found and kept by AUD-512.
+        # A leftover .tmp would sit in the run directory; keep it from being kept by AUD-512 or listed next to the real files.
         try:
             os.remove(tmp)
         except OSError:

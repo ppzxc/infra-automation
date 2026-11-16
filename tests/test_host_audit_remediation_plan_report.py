@@ -149,7 +149,7 @@ def test_the_run_stops_when_every_plan_failed_but_not_when_one_did(tmp_path):
 
 
 def _problem(hosts):
-    return {"failed": bool(hosts), "targets": hosts, "what": "Remediation Plan xlsx"}
+    return {"failed": bool(hosts), "targets": hosts}
 
 
 def test_a_failed_write_does_not_stop_the_run_until_the_final_judgement(tmp_path):

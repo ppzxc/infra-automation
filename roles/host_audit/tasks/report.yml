@@ -175,9 +175,7 @@
     - name: Summarize the Remediation Plan xlsx problem of this run
       vars:
         _hosts: "{{ _host_audit_xlsx_failed_hosts | default([]) }}"
-        _stale: >-
-          {{ (_host_audit_xlsx_present.failed | default(false) | bool) or (_host_audit_xlsx_stale.failed | default(false) | bool)
-             or (_host_audit_xlsx_stale.results | default([]) | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0) }}
+        _stale: "{{ (_host_audit_xlsx_present.failed | default(false) | bool) or (_host_audit_xlsx_stale.failed | default(false) | bool) }}"
       ansible.builtin.set_fact:
         _host_audit_xlsx_problem:
           failed: "{{ (_hosts | length > 0) or _stale }}"

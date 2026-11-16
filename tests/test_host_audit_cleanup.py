@@ -35,13 +35,17 @@ def _tail_block():
             if inc in ("storage_upload.yml", "mail.yml"):
                 continue  # network and mail tasks: their results are given as variables
             if t.get("name") in ("Build the Remediation Plan of every host", "[AUD-025] Write the Remediation Plan xlsx of every host") \
-                    or "Remediation Plan could not" in t.get("name", "") or t.get("name", "").startswith(("Collect the hosts", "Remember that the xlsx zip", "Remove a leftover xlsx zip", "Remove the xlsx zip when", "Check whether the xlsx directory", "Find the xlsx files", "Remove the xlsx files")) \
+                    or "Remediation Plan could not" in t.get("name", "") or t.get("name", "").startswith(("Collect the hosts", "Remember that the xlsx zip", "Remove a leftover xlsx zip", "Remove the xlsx zip when", "Summarize the Remediation Plan xlsx", "Check whether the xlsx directory", "Find the xlsx files", "Remove the xlsx files")) \
                     or any("[%s]" % i in t.get("name", "") for i in ("AUD-026", "AUD-611", "AUD-612", "AUD-613", "AUD-615")):
                 continue  # xlsx writing, the zip and the mail summary need the report model; they have their own test
             out.append({"block": _load(inc)} if inc else t)
         return out
 
     return {"block": inline(block["block"]), "always": inline(block["always"])}
+
+
+# The fact report.yml derives (Summarize the Remediation Plan xlsx problem of this run) when host h2's write failed.
+_XLSX_PROBLEM = {"failed": True, "targets": ["h2"]}
 
 
 def _run_dir(tmp_path):
@@ -59,6 +63,7 @@ def _vars(root, out, *, storage=True, uploads=(200,), problem="", mail_sent=None
     return {
         "host_audit_output_root": str(root),
         "host_audit_run": {"run_id": run_id, "run_kind": run_kind, "output_dir": output_dir or str(out)},
+        "_host_audit_xlsx_problem": {"failed": False, "targets": []},  # no xlsx problem unless a test sets one
         "_host_audit_xlsx_zip_path": str(out / "xlsx" / "z.zip"),  # a role variable (AUD-614 hands it to the mail)
         "host_audit_storage_enabled": storage,
         "_host_audit_storage_active": storage,
@@ -92,7 +97,7 @@ def _run(tmp_path, variables, check=False):
 def _run_xlsx_failed(tmp_path, storage):
     root, out = _run_dir(tmp_path)
     variables = dict(_vars(root, out, storage=storage, uploads=(200,) if storage else (), mail_sent=True),
-                     _host_audit_xlsx_failed_hosts=["h2"])
+                     _host_audit_xlsx_problem=_XLSX_PROBLEM)
     return _run(tmp_path, variables), out
 
 
@@ -106,7 +111,7 @@ def test_an_xlsx_write_failure_keeps_this_run_and_ends_it_failed_after_the_mail(
 
 def test_both_failures_are_named_in_the_kept_reason(tmp_path):
     root, out = _run_dir(tmp_path)
-    variables = dict(_vars(root, out, uploads=(200, 500), mail_sent=False), _host_audit_xlsx_failed_hosts=["h2"])
+    variables = dict(_vars(root, out, uploads=(200, 500), mail_sent=False), _host_audit_xlsx_problem=_XLSX_PROBLEM)
     res = _run(tmp_path, variables)
     assert res.returncode != 0 and "xlsx 산출물 실패(h2)와 원본 보관 미완료" in res.stdout
     assert (out / "report.html").exists()
