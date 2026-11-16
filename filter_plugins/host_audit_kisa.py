@@ -254,7 +254,7 @@ def order_findings(findings):
     return sorted(findings, key=key)
 
 
-BLANK_DATE = '-'  # what the register table (and the Remediation Plan remark) shows for an absent value
+BLANK = '-'  # what the register table (and the Remediation Plan remark) shows for an absent value
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'
 REGISTER_EXPIRED = '만료'
@@ -419,9 +419,9 @@ def _register_rows(register, applied, today):
             'reason': entry.get('reason', ''),
             'risk': entry.get('risk', ''),
             'mitigation': entry.get('mitigation', ''),
-            'approver': entry.get('approver') or BLANK_DATE,
-            'approved_on': _date(entry.get('approved_on')) or BLANK_DATE,
-            'expires_on': _date(entry.get('expires_on')) or BLANK_DATE,
+            'approver': entry.get('approver') or BLANK,
+            'approved_on': _date(entry.get('approved_on')) or BLANK,
+            'expires_on': _date(entry.get('expires_on')) or BLANK,
             'state': state,
             'state_class': {REGISTER_ACTIVE: 'ok', REGISTER_EXPIRED: 'crit',
                             REGISTER_PENDING: 'warn', REGISTER_INVALID: 'crit'}[state],

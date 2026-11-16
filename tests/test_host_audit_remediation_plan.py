@@ -123,6 +123,20 @@ def test_owner_cell_is_the_asset_inventory_administrator_role_as_shown():
     assert clean["rows"][0][COL["담당자"]] == "미지정"
 
 
+def test_a_host_the_asset_inventory_does_not_know_is_lookup_failed_not_unassigned():
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"})]))
+    model["asset_inventory"]["hosts"] = []
+    assert host_audit_remediation_plan(model, "h1")["rows"][0][COL["담당자"]] == "조회 실패"
+
+
+def test_one_odd_host_does_not_stop_the_plans_of_the_others():
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"}), _record("h2", {1: "VULN"})]))
+    model["config_vulnerability"]["findings"][0]["hosts"][0].pop("evidence")  # h1's entry is broken
+    plans = {p["host"]: p for p in host_audit_remediation_plans(model)}
+    assert plans["h1"]["rows"][0][COL["통제내용"]] == "이행계획서 생성 실패 (KeyError)"
+    assert plans["h2"]["rows"][0][COL["통제내용"]].startswith("U-01 ")
+
+
 def test_columns_carry_catalog_and_derived_values():
     plan = host_audit_remediation_plan(_model([_record("h1", {1: "VULN", 12: "MANUAL"})]), "h1")
     u01 = _rows(plan, "U-01")[0]

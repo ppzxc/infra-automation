@@ -18,10 +18,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_kisa import (  # noqa: E402
-    BLANK_DATE, EXCEPTION, ITEMS, MANUAL, REGISTER_ACTIVE, REGISTER_EXPIRED, REGISTER_PENDING, REMEDIATION_SOURCE,
+    BLANK, EXCEPTION, ITEMS, MANUAL, REGISTER_ACTIVE, REGISTER_EXPIRED, REGISTER_PENDING, REMEDIATION_SOURCE,
     order_findings)
 from host_audit_baseline import NEW, PERSIST, RECUR  # noqa: E402
-from host_audit_inventory import UNASSIGNED, _unsafe  # noqa: E402  (the Asset Inventory label; the unsafe mark)
+from host_audit_inventory import LOOKUP_FAILED, UNASSIGNED, _unsafe  # noqa: E402  (the Asset Inventory label; the unsafe mark)
 
 SHEET = '이행계획서'
 # SolidStep 이행계획서 column order. 구현내용 is three columns.
@@ -30,6 +30,7 @@ HEADERS = ['그룹', '자산명', '담당자', '통제내용', '취약점현황'
 WIDTHS = [14, 12, 14, 32, 40, 40, 60, 8, 24, 8, 8, 8, 8, 24, 48]
 NO_FINDINGS = '양호 외 항목 없음'
 NO_RESULT = '점검 결과 없음(점검불가)'
+PLAN_FAILED = '이행계획서 생성 실패'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
 BASELINE_PREFIXED = (NEW, PERSIST, RECUR)  # the only Audit Baseline states the remark shows (not 첫 실행 or others)
 
@@ -51,7 +52,7 @@ def _admin_role(model, host):
             for field in entry.get('declared') or []:
                 if field.get('key') == 'admin_role':
                     return field.get('value') or UNASSIGNED
-    return UNASSIGNED
+    return LOOKUP_FAILED  # the Asset Inventory has no entry for the host: no data, not "nobody assigned"
 
 
 def _family(model, host):
@@ -69,10 +70,10 @@ def _remark(verdict, entry):
     text = ''
     if verdict == EXCEPTION and exc.get('state') == REGISTER_ACTIVE:
         text = '예외(승인) — 사유: %s / 위험: %s / 보완: %s / 승인: %s %s / 만료: %s' % (
-            exc['reason'], exc['risk'], exc['mitigation'], exc['approver'], exc['approved_on'] or BLANK_DATE,
-            exc['expires_on'] or BLANK_DATE)
+            exc['reason'], exc['risk'], exc['mitigation'], exc['approver'], exc['approved_on'] or BLANK,
+            exc['expires_on'] or BLANK)
     elif exc.get('state') == REGISTER_EXPIRED:
-        text = '예외 만료(%s)' % (exc['expires_on'] or BLANK_DATE)
+        text = '예외 만료(%s)' % (exc['expires_on'] or BLANK)
     elif exc.get('state') == REGISTER_PENDING:
         text = '예외 승인 대기'
     return (prefix + text).strip()
@@ -131,8 +132,15 @@ def host_audit_remediation_plans(model):
     """The plan of every host of the run (one evaluation for AUD-025), each with its ``host`` and ``file_name``."""
     model = model or {}
     run_id = (model.get('cover') or {}).get('run_id', '')
-    return [dict(host_audit_remediation_plan(model, host), host=host,
-                 file_name=host_audit_remediation_file_name(run_id, host)) for host in model.get('hosts') or []]
+    plans = []
+    for host in model.get('hosts') or []:
+        try:
+            plan = host_audit_remediation_plan(model, host)
+        except Exception as exc:  # one odd record must not stop the evidence of every other host
+            row = ['', host, LOOKUP_FAILED, '%s (%s)' % (PLAN_FAILED, type(exc).__name__)] + [''] * (len(HEADERS) - 4)
+            plan = _plan([row], host, run_id, LOOKUP_FAILED)
+        plans.append(dict(plan, host=host, file_name=host_audit_remediation_file_name(run_id, host)))
+    return plans
 
 
 def host_audit_remediation_file_name(run_id, host):

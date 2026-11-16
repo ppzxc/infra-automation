@@ -140,7 +140,8 @@ def test_the_writer_is_inside_the_cleanup_block_before_the_upload():
 
 
 def test_a_failing_item_does_not_echo_the_rows(tmp_path):
-    """The loop only carries host names; the plan (host evidence) is in a no_log set_fact."""
+    """The loop only carries host names, so a failing item prints no rows; the plan is built once in a set_fact
+    (deliberately not no_log, so a filter error stays readable)."""
     write = _task("report.yml", "AUD-025")
     assert write["loop"] == "{{ host_audit_model.hosts }}"
     assert "no_log" not in _plan_task()  # a filter error must stay readable

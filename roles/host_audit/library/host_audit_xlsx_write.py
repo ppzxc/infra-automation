@@ -270,6 +270,20 @@ def _same(dest, data):
         return False
 
 
+def _sync_directory(directory):
+    """Make the rename durable (best effort: not every platform can open a directory)."""
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _write(dest, data):
     """Write atomically with mode 0600; returns True when the file changed."""
     if _same(dest, data):
@@ -287,6 +301,7 @@ def _write(dest, data):
             handle.flush()
             os.fsync(handle.fileno())  # the renamed file must not be empty after a crash
         os.replace(tmp, dest)
+        _sync_directory(directory)
     except BaseException:
         # A leftover .tmp in xlsx/ would be found and kept by AUD-512.
         try:
