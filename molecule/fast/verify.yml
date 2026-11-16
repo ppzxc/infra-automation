@@ -546,6 +546,7 @@
     - name: "[VERIFY-AUD-100] Verify the Asset Inventory part of the per-host record"
       ansible.builtin.assert:
         that:
+          - record.declared.asset.lookup in ['ok', 'failed']
           - record.declared.asset.keys() | sort == ['admin_role', 'asset_importance', 'department', 'lookup', 'owner_role', 'privileged_allowlist', 'purpose']
           - record.inventory.status == 'ok'
           - record.inventory.keys() | sort == ['accounts', 'hardware', 'host_agents', 'operation', 'packages', 'ports', 'reason', 'status']
