@@ -297,7 +297,7 @@ INVALID_SHOWN_LEN = 20
 
 
 def _cap(text, limit):
-    return text if len(text) <= limit else text[:limit - 1].rstrip() + '…'
+    return text if len(text) <= limit else text[:limit - 1] + '…'
 
 
 def host_audit_asset_declaration(host_kv, lookup_ok=True):

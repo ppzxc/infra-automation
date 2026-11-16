@@ -145,8 +145,9 @@ def host_audit_mail_summary(model, report):
     ai = model.get('asset_inventory') or {}
     counts = ai.get('counts') or {}
     if counts:
-        # 모든 호스트의 선언 조회가 실패하면(OpenBao 장애·토큰 만료) 자산 선언 증적이 통째로 비므로 치명으로 올린다.
-        all_lookups_failed = bool(counts.get('lookup_failed_hosts')) and counts['lookup_failed_hosts'] == len(ai.get('hosts') or [])
+        # 2대 이상 모두의 선언 조회가 실패하면(OpenBao 장애·토큰 만료) 자산 선언 증적이 통째로 비므로 치명으로 올린다.
+        # 1대만 점검한 실행(--limit)의 항목 없음(404)을 장애로 오판하지 않으려는 하한이다.
+        all_lookups_failed = bool(counts.get('lookup_failed_hosts')) and counts['lookup_failed_hosts'] == len(ai.get('hosts') or []) >= 2
         lines.append(_line('Asset Inventory', '지원 종료(EOS) OS %d대 · 선언 외 특수권한자 %d · 장기 미사용 계정 %d · 선언 미지정 호스트 %d · 선언 조회 실패 호스트 %d · 선언 잘못된 값 호스트 %d' % (
             counts.get('eos', 0), counts.get('not_declared', 0), counts.get('inactive', 0),
             counts.get('unassigned_hosts', 0), counts.get('lookup_failed_hosts', 0),
