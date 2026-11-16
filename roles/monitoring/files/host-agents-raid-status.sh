@@ -13,13 +13,13 @@
 # POSIX sh + POSIX awk만 쓴다(CentOS 6 gawk 3.1, Ubuntu mawk). jq·python 없음.
 export LC_ALL=C
 # RAID_STATUS_PATH는 시험용(가짜 도구 디렉터리를 앞에 둔다). 운영 cron은 쓰지 않는다.
-PATH="${RAID_STATUS_PATH:+$RAID_STATUS_PATH:}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+PATH="${RAID_STATUS_PATH:+$RAID_STATUS_PATH:}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/MegaRAID/storcli"
 export PATH
 
 LOG="${RAID_STATUS_LOG:-/var/log/host-agents/raid.jsonl}"
 LOCK="${RAID_STATUS_LOCK:-/var/lib/host-agents/raid-status.lock}"
 TIMEOUT="${RAID_STATUS_TIMEOUT:-60}"
-TOOLS="${RAID_STATUS_TOOLS:-ssacli hpssacli hpacucli storcli64 storcli}"
+TOOLS="${RAID_STATUS_TOOLS:-storcli64 storcli ssacli hpssacli hpacucli}"
 FAMILY=smartarray
 
 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -92,6 +92,16 @@ storcli*)
         exit 0
     fi
     if grep -q -i 'No Controller found' "$tmp_out"; then
+        # storcli는 있으나 MegaRAID가 없는 호스트(예: Smart Array에 storcli도 깔린 경우)는 HP 도구로 한 번 더 시도한다(#383).
+        others=
+        for t in $TOOLS; do
+            case "$t" in storcli*) ;; *) command -v "$t" >/dev/null 2>&1 && others="$others $t" ;; esac
+        done
+        if [ -n "$others" ] && [ -z "$RAID_STATUS_FALLBACK" ]; then
+            rm -f "$tmp_out" "$tmp_rec"
+            exec 9>&-
+            RAID_STATUS_FALLBACK=1 RAID_STATUS_TOOLS="$others" exec /bin/sh "$0"
+        fi
         emit_status no_controller "$tool" "$version" "$rc" "$msg" >> "$LOG" 2>/dev/null
         exit 0
     fi

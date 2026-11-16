@@ -353,3 +353,31 @@ def test_storcli_no_controller_and_error(tmp_path):
     assert [r["status"] for r in recs] == ["no_controller"] and recs[0]["family"] == "megaraid"
     recs = _run_storcli(tmp_path / "b", "garbage\n")
     assert [r["status"] for r in recs] == ["error"]
+
+
+def test_storcli_without_megaraid_falls_back_to_ssacli(tmp_path):
+    """storcli도 깔렸지만 MegaRAID가 없는 Smart Array 호스트는 HP 도구로 한 번 더 시도한다."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "storcli64").write_text("#!/bin/sh\necho 'Status = Failure'\necho 'Description = No Controller found'\nexit 0\n")
+    (bindir / "ssacli").write_text(
+        "#!/bin/sh\ncase \"$1\" in\n  version) printf '\\n   SSACLI Version: 9.99.0.0\\n';;\n  ctrl) cat \"$FAKE_FIXTURE\";;\nesac\n")
+    for f in bindir.iterdir():
+        f.chmod(0o755)
+    fx = tmp_path / "fixture.txt"
+    fx.write_text(_fixture("ssacli660_el9_ok.txt"))
+    log = tmp_path / "raid.jsonl"
+    env = {"PATH": "/usr/bin:/bin", "RAID_STATUS_PATH": str(bindir), "RAID_STATUS_LOG": str(log),
+           "RAID_STATUS_LOCK": str(tmp_path / "raid.lock"), "FAKE_FIXTURE": str(fx),
+           "RAID_STATUS_TOOLS": "storcli64 ssacli"}
+    res = subprocess.run(["/bin/sh", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, res.stderr
+    recs = [json.loads(line) for line in log.read_text().splitlines()]
+    (status,) = _by_kind(recs, "tool_status")
+    assert status["status"] == "ok" and status["tool"] == "ssacli" and status["family"] == "smartarray"
+    assert len(_by_kind(recs, "controller")) == 1
+
+
+def test_default_tool_order_tries_megaraid_before_smartarray():
+    text = SCRIPT.read_text()
+    assert 'RAID_STATUS_TOOLS:-storcli64 storcli ssacli hpssacli hpacucli' in text
