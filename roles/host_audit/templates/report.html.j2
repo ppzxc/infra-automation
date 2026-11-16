@@ -41,6 +41,15 @@
   .pv-bars { width:100%; height:auto; font-size:7px; } .pv-l, .pv-n { fill:var(--ink); }
   .sev-CRITICAL { fill:#b42318; } .sev-HIGH { fill:#d9480f; } .sev-MEDIUM { fill:#b08800; } .sev-LOW { fill:#5b6470; } .sev-UNKNOWN { fill:#9aa0a6; }
   .sevt-CRITICAL { color:#b42318; } .sevt-HIGH { color:#d9480f; }
+  /* 조치 안내 부록 (sections/remediation_guide.html.j2) */
+  .rg-head { break-after: avoid; }
+  .rg-block { break-inside: avoid; border:1px solid var(--line); padding:2mm 3mm; margin:3mm 0; }
+  .rg-block h3 { margin:0 0 1.5mm; }
+  .rg-hosts { font-size:8.5pt; margin:0 0 1.5mm; }
+  .rg-block dl { margin:0; font-size:8.5pt; }
+  .rg-block dt { color:var(--mute); font-size:8pt; margin-top:1.2mm; }
+  .rg-block dd { margin:0; }
+  .rg-steps { white-space: pre-wrap; margin:.5mm 0 0 3mm; font-size:8pt; }
 </style>
 </head>
 <body>
@@ -96,6 +105,8 @@
 {% if m.baseline is defined %}{% include 'sections/audit_baseline.html.j2' %}{% endif %}
 
 {% include 'sections/appendix.html.j2' %}
+
+{% if m.config_vulnerability is defined %}{% include 'sections/remediation_guide.html.j2' %}{% endif %}
 
   <h2 class="pb keep">검토 및 결재</h2>
   <p class="small mute">발견사항별 조치 의견(조치 / 예외 승인 / 선언 수정)과 검토 결과를 기재한다. 결재된 본 문서가 ISMS 2.11.2 검토 증적이다.</p>
