@@ -134,6 +134,19 @@ def test_a_host_whose_plan_cannot_be_built_gets_a_one_line_file_and_the_run_goes
     assert ws["D2"].value.startswith("이행계획서 생성 실패 (KeyError")
 
 
+def test_the_run_stops_when_every_plan_failed_but_not_when_one_did(tmp_path):
+    assert_task = _named("Stop when the Remediation Plan could not be built for any host")
+    for failing, ok in ((2, False), (1, True)):
+        facts = {"h%d" % i: ({"error": "KeyError: x"} if i < failing else {"rows": []}) for i in range(2)}
+        pb = tmp_path / ("a%d.yml" % failing)
+        pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False,
+                                       "vars": {"_host_audit_remediation_plans": facts}, "tasks": [assert_task]}],
+                                     allow_unicode=True))
+        res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+        assert (res.returncode == 0) is ok, res.stdout[-1500:]
+
+
 def test_the_xlsx_is_written_for_an_on_demand_run_too(tmp_path):
     out = tmp_path / "run"
     out.mkdir()

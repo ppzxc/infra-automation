@@ -125,6 +125,14 @@
       loop_control:
         label: "{{ item.key }}"
 
+    # 모든 호스트가 실패했다면 필터나 카탈로그 자체가 깨진 것이라 빈 증적을 보관하지 않고 멈춘다.
+    - name: Stop when the Remediation Plan could not be built for any host
+      ansible.builtin.assert:
+        that: _host_audit_remediation_plans | dict2items | selectattr('value.error', 'defined') | list | length
+              < _host_audit_remediation_plans | length
+        fail_msg: "모든 호스트의 Remediation Plan 생성이 실패했다(필터·카탈로그 오류, 위 로그 참고)"
+      when: _host_audit_remediation_plans | length > 0
+
     - name: "[AUD-025] Write the Remediation Plan xlsx of every host"
       vars:
         _plan: "{{ _host_audit_remediation_plans[item] }}"

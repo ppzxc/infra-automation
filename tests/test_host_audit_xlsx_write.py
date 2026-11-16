@@ -223,6 +223,14 @@ def test_the_workbook_declares_a_book_view_for_the_sheet_view(tmp_path):
         assert b"<bookViews><workbookView/></bookViews>" in zf.read("xl/workbook.xml")
 
 
+def test_text_of_only_illegal_characters_is_an_empty_cell(tmp_path):
+    dest = tmp_path / "z.xlsx"
+    out = _run(dict(_args(dest), rows=[["\x00\x07", "b", 1, "d"]], _args_file=tmp_path / "z.json"))
+    assert not out.get("failed")
+    with zipfile.ZipFile(dest) as zf:
+        assert b'<c r="A2" s="2"/>' in zf.read("xl/worksheets/sheet1.xml")
+
+
 def test_the_writer_uses_only_the_standard_library():
     spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
     source = MODULE.read_text(encoding="utf-8")

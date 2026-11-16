@@ -133,6 +133,8 @@ def _cell(row, col, value, style):
         value = u''
     elif isinstance(value, bool) or not isinstance(value, (int, str)):
         value = str(value)  # a float or another type is written as its text rather than failing the whole run
+    if isinstance(value, str):
+        value = _normalize(value)  # first, so text made only of illegal characters is the same blank as ''
     if isinstance(value, int) and abs(value) > MAX_EXACT_INT:
         value = str(value)  # Excel keeps numbers as doubles: beyond 2**53 a number would silently change
     if isinstance(value, int):
