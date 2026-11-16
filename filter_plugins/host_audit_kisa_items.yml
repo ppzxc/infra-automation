@@ -219,7 +219,7 @@ U-11:
   threat: 로그인 불필요 계정에 쉘이 있으면 비인가자가 그 기본 계정으로 시스템에 접근할 수 있다.
   guide_page: 35
   remediation:
-    summary: daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher 계정의 쉘을 usermod -s /sbin/nologin(또는 /bin/false) <계정>으로 바꾼다.
+    summary: daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher 계정의 쉘을 usermod -s "$(command -v nologin)" <계정>(또는 /bin/false)으로 바꾼다. nologin 경로는 RHEL이 /sbin/nologin, Debian이 /usr/sbin/nologin이다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -707,7 +707,7 @@ U-37:
   threat: 일반 사용자가 cron, at을 쓰면 고의나 실수로 불법 예약 작업을 실행해 시스템에 피해를 줄 수 있다.
   guide_page: 80
   remediation:
-    summary: /usr/bin/crontab과 /usr/bin/at의 소유자를 root, 권한을 750 이하로 하고 SUID를 제거한다. /etc/crontab, cron.allow/deny, at.allow/deny는 root 소유에 640 이하로 맞춘다. 사용자별 cron·at 작업 파일은 소유자가 곧 실행 계정이라 소유자를 바꾸지 않는다.
+    summary: /usr/bin/crontab과 /usr/bin/at의 권한을 750 이하로 하고 SUID를 제거한다(소유자는 바꾸지 않는다). /etc/crontab, cron.allow/deny, at.allow/deny는 root 소유에 640 이하로 맞춘다. 사용자별 cron·at 작업 파일은 소유자가 곧 실행 계정이라 소유자를 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드는 영향 없음으로 서술해 1로 두지만, 조치하면 일반 사용자의 crontab·at 실행이 막히므로 이를 쓰는 계정이 없는지 먼저 확인한다.
@@ -1031,7 +1031,7 @@ U-55:
   threat: FTP 계정에 쉘이 부여되면 비인가자가 그 계정으로 시스템에 접근할 수 있다.
   guide_page: 134
   remediation:
-    summary: FTP 서비스를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/passwd의 ftp 계정 쉘을 /bin/false 또는 /sbin/nologin으로 바꾼다(usermod -s /sbin/nologin ftp).
+    summary: FTP 서비스를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/passwd의 ftp 계정 쉘을 nologin 또는 /bin/false로 바꾼다(usermod -s "$(command -v nologin)" ftp, 경로는 RHEL /sbin/nologin, Debian /usr/sbin/nologin).
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1127,7 +1127,7 @@ U-60:
         /etc/snmp/snmpd.conf의 com2sec 줄(com2sec notConfigUser <수집 서버 대역> <새 값>)에서 community 값을 변경(source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
       debian: |
-        /etc/snmp/snmpd.conf의 rocommunity <새 값> <수집 서버 대역>, rwcommunity <새 값> <수집 서버 대역> 로 변경(source를 default로 두면 U-61이 취약)
+        /etc/snmp/snmpd.conf에 이미 있는 rocommunity(또는 rwcommunity) 줄만 rocommunity <새 값> <수집 서버 대역> 형태로 바꾼다(rwcommunity를 새로 만들지 않고, source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
   remediation_impact:
     level: 1
@@ -1225,7 +1225,7 @@ U-65:
   threat: 시스템 간 시각이 어긋나면 보안 사고나 장애 때 로그의 신뢰도를 확보하기 어렵다.
   guide_page: 164
   remediation:
-    summary: chrony 또는 ntp 서비스를 켜고 설정 파일(/etc/chrony.conf 또는 /etc/ntp.conf)에 server(또는 pool)로 NTP 서버를 지정한 뒤 서비스를 재시작한다. chronyc sources나 ntpq -pn으로 동기화를 확인하며, systemd-timesyncd가 active인 구성도 인정한다.
+    summary: chrony 또는 ntp 서비스를 켜고 설정 파일(/etc/chrony.conf, Debian은 /etc/chrony/chrony.conf, 또는 /etc/ntp.conf)에 server(또는 pool)로 NTP 서버를 지정한 뒤 서비스를 재시작한다. chronyc sources나 ntpq -pn으로 동기화를 확인하며, systemd-timesyncd가 active인 구성도 인정한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1261,7 +1261,7 @@ U-67:
   threat: 로그 접근 통제가 미흡하면 비인가자가 로그에서 정보를 얻거나 로그 자체를 변조할 수 있다.
   guide_page: 171
   remediation:
-    summary: '/var/log 바로 아래 로그 파일 중 소유자가 root가 아니거나 권한이 644를 넘는 것을 찾아 chown root, chmod 644 이하로 바꾼다. 서비스 계정이 쓰는 로그(예: rsyslog)는 chown으로 막히지 않게, 그 서비스의 설정이나 logrotate create 줄에서 소유자를 정한다.'
+    summary: '/var/log 바로 아래 로그 파일 중 소유자가 root가 아니거나 권한이 644를 넘는 것을 찾아 chown root, chmod 644 이하로 바꾼다. 서비스 계정이 쓰는 로그(예: Debian의 syslog 소유 파일)는 root로 바꾸면 기록이 막힐 수 있으니 바꾸지 말고 예외 레지스터에 올린다.'
   remediation_impact:
     level: 1
     reason: 가이드는 영향 없음으로 서술하지만, 서비스 계정이 쓰는 로그의 소유자를 root로 바꾸면 그 서비스가 기록하지 못할 수 있다.
