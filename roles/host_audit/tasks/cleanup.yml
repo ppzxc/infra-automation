@@ -33,7 +33,7 @@
          and not (_pointer_failed | bool) }}
     _xlsx: "{{ _host_audit_xlsx_problem | default({'failed': false, 'what': ''}) }}"
     _xlsx_why: >-
-      {{ _xlsx.what ~ ' 쓰기 실패' ~ ('와 원본 보관 미완료 - 두 실패 메시지가'
+      {{ _xlsx.what ~ ' 실패' ~ ('와 원본 보관 미완료 - 두 실패 메시지가'
                                  if not (_kept_in_bucket | bool) and (host_audit_storage_enabled | bool)
                                  else ' - 실패 메시지가') ~ ' 이 디렉터리를 가리킴' }}
     _mail_sent: >-

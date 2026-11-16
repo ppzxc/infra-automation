@@ -18,4 +18,7 @@ def run_module_file(module, module_args, args_file):
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
     res = subprocess.run([sys.executable, "-c", _LAUNCH, str(MODULE_UTILS), str(module), str(args_file)],
                          capture_output=True, text=True, env=env)
-    return json.loads(res.stdout)
+    try:
+        return json.loads(res.stdout)
+    except ValueError:
+        raise AssertionError("module printed no JSON (rc=%s)\nstdout: %s\nstderr: %s" % (res.returncode, res.stdout, res.stderr))

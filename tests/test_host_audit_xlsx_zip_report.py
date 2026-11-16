@@ -444,8 +444,9 @@ def test_an_old_xlsx_of_a_host_whose_write_failed_this_attempt_is_removed_too(tm
     (out / "xlsx" / ZIP_NAME).write_bytes(b"not an xlsx")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in
-                                     ("Collect the hosts whose Remediation Plan xlsx", "Check whether the xlsx directory", "xlsx files that this attempt did not write"))]
-    assert len(tasks) == 4
+                                     ("Collect the hosts whose Remediation Plan xlsx", "Check whether the xlsx directory", "xlsx files that this attempt did not write",
+                                      "Summarize the Remediation Plan xlsx"))]
+    assert len(tasks) == 5
     plans = {h: {"file_name": "host-audit-%s-%s.xlsx" % (RUN_ID, h)} for h in ("h1", "h2")}
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
             "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"hosts": ["h1", "h2"]},
@@ -455,3 +456,28 @@ def test_an_old_xlsx_of_a_host_whose_write_failed_this_attempt_is_removed_too(tm
     res = _ansible(tmp_path, play)
     assert res.returncode == 0, res.stdout[-2000:]
     assert sorted(p.name for p in (out / "xlsx").iterdir()) == ["host-audit-%s-h1.xlsx" % RUN_ID, ZIP_NAME]
+
+
+def test_a_stale_xlsx_that_cannot_be_removed_does_not_stop_the_stage_but_ends_the_run_failed(tmp_path):
+    """The block goes on (keep and mail are not hostage to a stale file); the xlsx problem fact carries the failure."""
+    if os.geteuid() == 0:
+        pytest.skip("root can remove files from a read-only directory")
+    out = tmp_path / "run"
+    (out / "xlsx").mkdir(parents=True)
+    (out / "xlsx" / ("host-audit-%s-gone.xlsx" % RUN_ID)).write_bytes(b"stale")
+    (out / "xlsx").chmod(0o500)
+    block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
+    tasks = [t for t in block if any(n in t.get("name", "") for n in
+                                     ("Check whether the xlsx directory", "xlsx files that this attempt did not write",
+                                      "Summarize the Remediation Plan xlsx"))]
+    show = {"ansible.builtin.debug": {"var": "_host_audit_xlsx_problem"}}
+    play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+            "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"hosts": []},
+                     "_host_audit_remediation_plans": {}, "_host_audit_xlsx_failed_hosts": []},
+            "tasks": tasks + [show]}
+    try:
+        res = _ansible(tmp_path, play)
+    finally:
+        (out / "xlsx").chmod(0o700)
+    assert res.returncode == 0, res.stdout[-2000:]
+    assert "이전 시도 xlsx 삭제" in _text(res) and '"failed": true' in _text(res)
