@@ -60,6 +60,14 @@ _Avoid_: CMDB, operational info, server list
 A host setting that falls short of the KISA technical vulnerability checklist for Unix servers, 2026 edition — e.g. remote root login allowed, weak password policy. Each finding is named with its edition (`KISA-2026:U-13`), because the editions reuse item numbers for different checks; CIS Benchmark is cited only as a cross-reference, not checked separately.
 _Avoid_: vulnerability (unqualified), misconfiguration
 
+**Remediation Impact**:
+How much fixing a Configuration Vulnerability disturbs the service running on the host — a restart, dropped sessions, a client that stops connecting. Set once per checklist item, the same for every host; how dangerous the finding itself is belongs to the item's severity from the KISA guide (상/중/하), not to Remediation Impact.
+_Avoid_: impact, 영향도 (unqualified)
+
+**Remediation Effort**:
+How hard a Configuration Vulnerability is to fix — one setting changed versus a package replaced, a structure rebuilt or another team consulted. Set once per checklist item, the same for every host. The "환경성" column of the implementation plan.
+_Avoid_: difficulty, 환경성 (outside the plan's column name)
+
 **Package Vulnerability**:
 An installed package version that is affected by a known CVE or vendor security advisory.
 _Avoid_: vulnerability (unqualified), CVE (when meaning the finding on a host)
