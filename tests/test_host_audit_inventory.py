@@ -8,6 +8,7 @@ Python), inside ``centos:6``/``centos:7`` containers when those images are
 already present locally (ADR-0006 Seam 3 legacy pattern: no CentOS VM in CI).
 """
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,9 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
 from host_audit import host_audit_host_record, host_audit_report_model  # noqa: E402
 from host_audit_inventory import (  # noqa: E402
-    host_audit_inventory_record, host_audit_privileged_allowlist, inventory_section)
+    host_audit_asset_declaration, host_audit_inventory_record, host_audit_privileged_allowlist,
+    inventory_section)
+from host_audit_mail import host_audit_mail_summary  # noqa: E402
 
 ROLE = ROOT_DIR / "roles" / "host_audit"
 PROBE = ROLE / "files" / "inventory_probe.sh"
@@ -299,10 +302,147 @@ def test_unassigned_declarations_are_shown_as_unassigned():
     model = host_audit_report_model([rec], meta())
     declared = {f["key"]: f for f in host(model, "ns0331")["declared"]}
 
-    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "unassigned": False}
+    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "state": "ok",
+                                   "unassigned": False}
     for key in ("department", "owner_role", "admin_role", "asset_importance"):
         assert declared[key]["value"] == "미지정" and declared[key]["unassigned"] is True
+    assert declared["asset_importance"]["label"] == "자산중요도"
     assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 1
+
+
+# ------------------------------------------------- 선언 값은 OpenBao hosts/<host>에서 읽는다 (#492)
+
+HOST_KV = {
+    "description": "웹 서비스 [그룹자산A]", "isms_department": "인프라팀", "isms_owner_role": "인프라팀장",
+    "isms_admin_role": "시스템 관리자", "isms_asset_importance": "H",
+    "ssh_private_key": "-----BEGIN PRIVATE KEY-----zzz", "password": "s3cret-pw", "public_ip": "203.0.113.7",
+    "admin_users": ["opuser"], "ansible_port": 2222, "isms_target": True,
+}
+
+
+def test_declaration_reads_exactly_the_five_keys_from_the_host_kv():
+    decl = host_audit_asset_declaration(HOST_KV, True)
+
+    assert decl == {"purpose": "웹 서비스 [그룹자산A]", "department": "인프라팀", "owner_role": "인프라팀장",
+                    "admin_role": "시스템 관리자", "asset_importance": "H", "lookup": "ok"}
+
+
+def test_declaration_never_carries_connection_values():
+    text = json.dumps(host_audit_asset_declaration(HOST_KV, True), ensure_ascii=False)
+    for secret in ("PRIVATE KEY", "s3cret-pw", "203.0.113.7", "opuser", "2222"):
+        assert secret not in text
+
+
+def test_declaration_with_failed_lookup_ignores_whatever_the_dict_holds():
+    decl = host_audit_asset_declaration(HOST_KV, False)
+    assert decl["lookup"] == "failed" and decl["purpose"] == "" and decl["asset_importance"] == ""
+    assert host_audit_asset_declaration(None, True)["lookup"] == "ok"
+
+
+def _decl_model(kv, lookup_ok=True):
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    rec["declared"]["asset"].update(host_audit_asset_declaration(kv, lookup_ok))
+    model = host_audit_report_model([rec], meta())
+    return model, {f["key"]: f for f in host(model, "ns0331")["declared"]}
+
+
+def test_report_shows_the_five_declared_values_from_the_host_kv():
+    model, declared = _decl_model(HOST_KV)
+
+    assert [f["value"] for f in declared.values()] == ["웹 서비스 [그룹자산A]", "인프라팀", "인프라팀장",
+                                                       "시스템 관리자", "H"]
+    assert all(f["state"] == "ok" for f in declared.values())
+    assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 0
+    assert model["asset_inventory"]["counts"]["lookup_failed_hosts"] == 0
+
+
+def test_failed_lookup_shows_all_five_cells_as_lookup_failed_and_is_not_counted_as_unassigned():
+    model, declared = _decl_model(HOST_KV, lookup_ok=False)
+
+    assert [f["value"] for f in declared.values()] == ["조회 실패"] * 5
+    assert {f["state"] for f in declared.values()} == {"lookup_failed"}
+    counts = model["asset_inventory"]["counts"]
+    assert counts["lookup_failed_hosts"] == 1 and counts["unassigned_hosts"] == 0
+
+
+def test_empty_keys_are_unassigned_even_for_isms_target_false_hosts():
+    kv = {"description": "", "isms_target": False, "isms_asset_importance": "L"}
+    model, declared = _decl_model(kv)
+
+    assert declared["purpose"]["value"] == "미지정" and declared["department"]["state"] == "unassigned"
+    assert declared["asset_importance"]["value"] == "L"
+    assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 1
+
+
+def test_asset_importance_outside_h_m_l_is_shown_as_invalid_with_the_original_value():
+    for raw, shown in (("높음", "잘못된 값 (높음)"), ("h", "잘못된 값 (h)"), ("3", "잘못된 값 (3)")):
+        _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance=raw))
+        assert declared["asset_importance"]["value"] == shown
+        assert declared["asset_importance"]["state"] == "invalid"
+    _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance=" M "))
+    assert declared["asset_importance"]["value"] == "M"
+
+
+def test_nothing_but_the_five_keys_reaches_the_record_the_report_model_or_the_mail_summary():
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    rec["declared"]["asset"].update(host_audit_asset_declaration(HOST_KV, True))
+    model = host_audit_report_model([rec], meta())
+    summary = host_audit_mail_summary(model, {"sha256": "AB" * 32, "size": 1, "file_name": "r.html", "archive": "-"})
+
+    for doc in (rec, model, summary):
+        text = json.dumps(doc, ensure_ascii=False, default=str)
+        for secret in ("PRIVATE KEY", "s3cret-pw", "203.0.113.7", "opuser", "isms_target"):
+            assert secret not in text
+
+
+def test_mail_summary_counts_unassigned_and_lookup_failed_hosts_separately():
+    def summary(model):
+        doc = host_audit_mail_summary(model, {"sha256": "AB" * 32, "size": 1, "file_name": "r.html", "archive": "-"})
+        return next(line for line in doc["lines"] if line["section"] == "Asset Inventory")
+
+    failed_model, _ = _decl_model(HOST_KV, lookup_ok=False)
+    line = summary(failed_model)
+    assert "선언 미지정 호스트 0" in line["text"] and "선언 조회 실패 호스트 1" in line["text"]
+    unassigned_model, _ = _decl_model({})
+    assert "선언 미지정 호스트 1" in summary(unassigned_model)["text"]
+    assert "선언 조회 실패 호스트 0" in summary(unassigned_model)["text"]
+
+
+def test_report_renders_asset_importance_and_lookup_failed_but_not_the_old_security_grade_label():
+    jinja2 = __import__("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE / "templates")))
+    ok_rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    ok_rec["declared"]["asset"].update(host_audit_asset_declaration(HOST_KV, True))
+    bad_rec = record("ns0101", CENTOS6_IDENTITY, CENTOS6_INVENTORY)
+    bad_rec["declared"]["asset"].update(host_audit_asset_declaration({}, False))
+    html = env.get_template("report.html.j2").render(
+        host_audit_model=host_audit_report_model([ok_rec, bad_rec], meta()))
+
+    assert "자산중요도" in html and "조회 실패" in html and "OpenBao" in html
+    assert "보안등급" not in html
+
+
+def test_removed_asset_variable_is_gone_from_the_repository():
+    offenders = []
+    for path in ROOT_DIR.rglob("*"):
+        if not path.is_file() or any(part.startswith(".") for part in path.relative_to(ROOT_DIR).parts) or path.suffix in (".pyc", ".png", ".gz", ".zip"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if re.search(r"host_audit_" r"asset(?!_declaration)", text):
+            offenders.append(str(path.relative_to(ROOT_DIR)))
+    assert offenders == []
+
+
+def test_inventory_record_task_reads_the_host_kv_without_querying_openbao_again():
+    tasks = yaml.safe_load((ROLE / "tasks" / "inventory.yml").read_text(encoding="utf-8"))
+    record_task = next(t for t in tasks if t["name"].startswith("[AUD-101]"))
+    text = json.dumps(record_task)
+
+    assert "host_audit_asset_declaration" in text and "_host_kv_dict" in text
+    assert "ansible.builtin.uri" not in json.dumps(tasks)
 
 
 def test_privileged_users_outside_the_declared_allowlist_are_flagged():

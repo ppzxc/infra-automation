@@ -4,7 +4,7 @@ Two pure steps, mirroring the rest of Host Audit:
   host_audit_inventory_record  registered inventory probe -> ``inventory`` part of the per-host record
   inventory_section            per-host records + run metadata -> the Asset Inventory part of the report model
 
-Every judgement the report shows for Asset Inventory — '미지정' declarations,
+Every judgement the report shows for Asset Inventory — '미지정'/'조회 실패'/'잘못된 값' declarations,
 '선언 외' privileged users, '장기 미사용' accounts, OS end-of-life status — is
 made in ``inventory_section``; the template only draws it. The full package
 list stays in the per-host JSON and never reaches the report model.
@@ -24,6 +24,9 @@ INVENTORY_END = '__HOST_AUDIT_INVENTORY_END__'
 INACTIVE_DAYS = 90
 EOL_SOON_DAYS = 180
 UNASSIGNED = '미지정'
+LOOKUP_FAILED = '조회 실패'
+INVALID = '잘못된 값'
+IMPORTANCE_LEVELS = ('H', 'M', 'L')
 NOT_DECLARED = '선언 외'
 INACTIVE = '장기 미사용'
 
@@ -32,7 +35,7 @@ DECLARED_FIELDS = [
     ('department', '관리 부서'),
     ('owner_role', '책임자(직책)'),
     ('admin_role', '관리자(직책)'),
-    ('asset_importance', '보안등급'),
+    ('asset_importance', '자산중요도'),
 ]
 LIST_KEYS = ('disk', 'pkg', 'listen_tcp', 'listen_udp', 'netstat', 'passwd', 'shadow', 'group',
              'sudoers', 'lastlog', 'recent_login', 'agent_bin', 'timesync_tool')
@@ -276,6 +279,31 @@ def _host_agents(v):
     }
 
 
+# OpenBao hosts/<Inventory Hostname> 키 -> 기록 키. 같은 dict에 접속 정보가 있어 이 다섯 키만 고른다.
+DECLARATION_KEYS = [
+    ('description', 'purpose'),
+    ('isms_department', 'department'),
+    ('isms_owner_role', 'owner_role'),
+    ('isms_admin_role', 'admin_role'),
+    ('isms_asset_importance', 'asset_importance'),
+]
+
+
+def host_audit_asset_declaration(host_kv, lookup_ok=True):
+    """Asset Inventory declared values from the host KV that ``resolve_connection`` already read.
+
+    Picks exactly five keys (never hands the whole dict on: it also holds connection values).
+    ``lookup_ok`` false (``hosts/<host>`` did not answer 200) -> every value empty and ``lookup: failed``.
+    """
+    host_kv = host_kv if isinstance(host_kv, dict) and lookup_ok else {}
+    decl = {}
+    for kv_key, key in DECLARATION_KEYS:
+        value = host_kv.get(kv_key)
+        decl[key] = '' if value is None or isinstance(value, (dict, list)) else str(value).strip()
+    decl['lookup'] = 'ok' if lookup_ok else 'failed'
+    return decl
+
+
 def host_audit_inventory_record(probe):
     """Turn the registered inventory probe into the ``inventory`` part of the per-host record."""
     probe = probe or {}
@@ -371,10 +399,20 @@ def _fmt_uptime(seconds):
 
 def _declared(record):
     asset = ((record.get('declared') or {}).get('asset') or {})
+    failed = asset.get('lookup') == 'failed'
     fields = []
     for key, label in DECLARED_FIELDS:
         value = str(asset.get(key) or '').strip()
-        fields.append({'key': key, 'label': label, 'value': value or UNASSIGNED, 'unassigned': not value})
+        if failed:
+            state, shown = 'lookup_failed', LOOKUP_FAILED
+        elif not value:
+            state, shown = 'unassigned', UNASSIGNED
+        elif key == 'asset_importance' and value not in IMPORTANCE_LEVELS:
+            state, shown = 'invalid', '%s (%s)' % (INVALID, value)
+        else:
+            state, shown = 'ok', value
+        fields.append({'key': key, 'label': label, 'value': shown, 'state': state,
+                       'unassigned': state == 'unassigned'})
     return fields, [str(n) for n in (asset.get('privileged_allowlist') or [])]
 
 
@@ -540,6 +578,7 @@ def inventory_section(records, meta):
             'not_declared': sum(len(h.get('not_declared', [])) for h in hosts),
             'inactive': sum(len(h.get('inactive', [])) for h in hosts),
             'unassigned_hosts': sum(1 for h in hosts if any(f['unassigned'] for f in h['declared'])),
+            'lookup_failed_hosts': sum(1 for h in hosts if any(f['state'] == 'lookup_failed' for f in h['declared'])),
             'eos': len(eos),
         },
     }
@@ -566,6 +605,7 @@ def host_audit_privileged_allowlist(accounts, principals=None, extra=None):
 class FilterModule(object):
     def filters(self):
         return {
+            'host_audit_asset_declaration': host_audit_asset_declaration,
             'host_audit_inventory_record': host_audit_inventory_record,
             'host_audit_privileged_allowlist': host_audit_privileged_allowlist,
         }

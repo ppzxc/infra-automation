@@ -113,7 +113,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-010` | `Probe host identity and OS (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-011` | `Build the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_host_record` 필터 |
 | `AUD-100` | `Probe Asset Inventory (raw, read-only)` | `ansible.builtin.raw` (`become: true`) | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
-| `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record` 필터 |
+| `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record`·`host_audit_asset_declaration` 필터. 선언 값은 `resolve_connection`이 이미 읽은 호스트 KV(`_host_kv_dict`)에서 다섯 키만 고른다(OpenBao 재조회 없음) |
 | `AUD-012` | `Save the per-host record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
 | `AUD-020` | `Find the per-host records of this run` | `ansible.builtin.find` | 러너 | 읽기 전용 |
 | `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터. Package 발견은 넘기지 않고 `package_findings_dir`(파일 디렉터리)만 넘긴다(#155) |
@@ -138,28 +138,30 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 
 **판정 규칙**
 
-- **미지정**: `host_audit_asset`의 용도·관리 부서·책임자(직책)·관리자(직책)·보안등급 중 빈 값.
+- **선언 값 출처**: ISMS 자산대장의 사본인 OpenBao `hosts/<Inventory Hostname>`다. `resolve_connection`이 접속 해석 때 이미 읽은 호스트 KV dict에서 다섯 키만 고르고(같은 dict에 접속 정보가 있어 통째로 기록·보고서에 넘기지 않는다) OpenBao를 다시 조회하지 않는다. 키는 용도=`description`(끝의 `[그룹자산명]`도 그대로 표시), `isms_department`(관리 부서), `isms_owner_role`(책임자 직책), `isms_admin_role`(관리자 직책), `isms_asset_importance`(자산중요도, H/M/L)다.
+- **조회 실패**: `hosts/<host>` 조회가 200이 아니면 다섯 칸 모두 '조회 실패'로 표시한다. 값이 정말 없는 것('미지정')과 구분하며 메일 요약도 '선언 미지정 호스트'와 '선언 조회 실패 호스트'를 따로 센다.
+- **미지정**: 조회는 됐는데 다섯 키 중 빈 값. 자산대장에 없는 서버와 `isms_target=false` 서버도 별도 상태 없이 '미지정'이다.
+- **잘못된 값**: 자산중요도가 H/M/L이 아니면 `잘못된 값 (<원래 값>)`으로 표시한다.
 - **선언 외**: 특수권한자(uid 0, wheel·sudo·admin 그룹 구성원, sudoers 규칙 대상) 중 허용 목록에 없는 계정. 허용 목록은 `accounts`의 sudo 권한 계정(`sudo: true`, 또는 `sudo` 미지정 + `tier: admin`, `state: absent` 제외), `openbao_ssh_allowed_principals`, `host_audit_privileged_extra`, 그리고 root다. sudoers의 `User_Alias` 등 별칭은 펼치지 않는다.
 - **장기 미사용**: 로그인 가능한 셸을 가진 계정 중 `lastlog -t 90`에 없는 계정(기록 없음 포함). 점검 계정과 uid 0 계정은 제외하고 표지에 명시한다. uid 0의 직접 로그인은 Configuration Vulnerability(KISA-2026) 항목이 다룬다. lastlog가 없으면 '마지막 로그인 점검불가'로 표시하고 장기 미사용 판정을 하지 않는다.
 - **EOL**: `roles/host_audit/vars/main.yml`의 `host_audit_eol_table`(기준일 `reviewed_on`, 무상 표준 지원 종료일). 실행 시작일 기준 지난 날짜면 지원 종료(EOS), 180일 이내면 EOL 임박, 표에 없으면 확인 불가.
 - **점검불가**: Asset Inventory 수집이 실패하면 '점검불가(수집 실패)', /etc/shadow를 읽지 못하면 '계정 잠금 상태 점검불가'.
 
-**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값에는 사람 이름이 아니라 직책을 적는다.
+**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값에는 사람 이름이 아니라 직책을 적는다. 호스트 KV의 다섯 키 외 값(접속 정보)은 기록·보고서·메일에 넘어가지 않는다.
 
 **읽기 전용**: 스크립트는 sudo로 돌지만 rpm 조회만은 `nobody`로 낮춰 실행한다(`setpriv`, 없으면 `su`). root로 `rpm -qa`를 돌리면 rpm이 DB를 쓰기 모드로 열어 EL9의 `rpmdb.sqlite-shm` 수정 시각(EL6/7은 Berkeley DB 환경 파일)이 바뀌기 때문이다. molecule `VERIFY-AUD-010`과 pytest의 `centos:6`/`centos:7` 컨테이너 시험이 관리 영역의 메타데이터까지 같은지 확인한다.
 
-**선언 예시** (`inventory/host_vars/<Inventory Hostname>.yml`)
+**선언 예시** (OpenBao `hosts/<Inventory Hostname>`의 키. 사람 이름이 아니라 직책을 적는다)
 
 ```yaml
-host_audit_asset:
-  purpose: "웹 서비스"
-  department: "인프라팀"
-  owner_role: "인프라팀장"
-  admin_role: "시스템 관리자"
-  asset_importance: "M"
+description: "웹 서비스 [그룹자산명]"
+isms_department: "인프라팀"
+isms_owner_role: "인프라팀장"
+isms_admin_role: "시스템 관리자"
+isms_asset_importance: "M"
 ```
 
-**호스트별 JSON 추가 필드 (schema_version 2)**: `declared.asset`(위 5개 + `privileged_allowlist`)과 `inventory`가 붙는다. 식별이 실패한 호스트는 `inventory: null`.
+**호스트별 JSON 추가 필드 (schema_version 2)**: `declared.asset`(위 5개 + `lookup`(`ok`/`failed`) + `privileged_allowlist`)과 `inventory`가 붙는다. 식별이 실패한 호스트는 `inventory: null`.
 
 ```json
 "inventory": {
@@ -184,7 +186,6 @@ host_audit_asset:
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `host_audit_asset` | `{}` | 선언 값 (위 예시) |
 | `host_audit_privileged_extra` | `[]` | 특수권한 허용 목록에 더할 이름 |
 
 ## 8. 검증
@@ -195,7 +196,7 @@ host_audit_asset:
   - 템플릿의 인쇄 CSS와 외부 리소스 부재
 - **pytest** `tests/test_host_audit_inventory.py`는 Asset Inventory를 검증한다.
   - 수집 결과 해석: 8개 영역, 특수권한 근거, 비밀번호 해시 미포함, CentOS 6 출력(netstat, epoch 없는 rpm)
-  - 보고서 모델: 미지정·선언 외·90일 장기 미사용(점검 계정·uid 0 제외)·EOS/임박/미확인·전체 패키지 목록 미포함·수집 실패 점검불가
+  - 보고서 모델: 미지정·조회 실패·잘못된 값(호스트 KV에서 다섯 키만 읽음, 접속 정보 미포함)·선언 외·90일 장기 미사용(점검 계정·uid 0 제외)·EOS/임박/미확인·전체 패키지 목록 미포함·수집 실패 점검불가
   - 수집 스크립트를 이 머신과 `centos:6`·`centos:7` 컨테이너(이미지가 로컬에 있을 때)에서 실제로 실행
 - **molecule Fast Scenario** `molecule/fast/verify.yml`:
   - `VERIFY-AUD-010`: 수집(식별 + Asset Inventory) 전후 관리 영역의 체크섬·메타데이터가 같은지 확인한다.

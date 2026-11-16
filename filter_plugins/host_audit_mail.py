@@ -145,11 +145,12 @@ def host_audit_mail_summary(model, report):
     ai = model.get('asset_inventory') or {}
     counts = ai.get('counts') or {}
     if counts:
-        lines.append(_line('Asset Inventory', '지원 종료(EOS) OS %d대 · 선언 외 특수권한자 %d · 장기 미사용 계정 %d · 선언 미지정 호스트 %d' % (
+        lines.append(_line('Asset Inventory', '지원 종료(EOS) OS %d대 · 선언 외 특수권한자 %d · 장기 미사용 계정 %d · 선언 미지정 호스트 %d · 선언 조회 실패 호스트 %d' % (
             counts.get('eos', 0), counts.get('not_declared', 0), counts.get('inactive', 0),
-            counts.get('unassigned_hosts', 0)),
+            counts.get('unassigned_hosts', 0), counts.get('lookup_failed_hosts', 0)),
             LEVEL_CRIT if counts.get('eos') or counts.get('not_declared') else
-            (LEVEL_WARN if counts.get('inactive') or counts.get('unassigned_hosts') else LEVEL_OK)))
+            (LEVEL_WARN if counts.get('inactive') or counts.get('unassigned_hosts')
+             or counts.get('lookup_failed_hosts') else LEVEL_OK)))
 
     cv = model.get('config_vulnerability') or {}
     if cv.get('verdicts'):
