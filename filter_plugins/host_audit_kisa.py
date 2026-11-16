@@ -54,6 +54,7 @@ CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH,
 
 # KISA-2026 Unix items U-01~U-67. The item list lives only in host_audit_kisa_items.yml next to this
 # module (title/severity/category/criteria/cis); it is read once at import, never edited here.
+ITEM_FIELDS = ('title', 'severity', 'category', 'criteria', 'cis')
 CATALOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'host_audit_kisa_items.yml')
 
 
@@ -62,9 +63,13 @@ def _load_items():
         with open(CATALOG_PATH, encoding='utf-8') as fh:
             items = yaml.safe_load(fh)
     except (OSError, yaml.YAMLError) as exc:
-        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (CATALOG_PATH, exc))
+        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (CATALOG_PATH, exc)) from exc
     if not isinstance(items, dict) or not items:
         raise RuntimeError('KISA item catalog %s is empty or not a mapping' % CATALOG_PATH)
+    for code, meta in items.items():
+        missing = [k for k in ITEM_FIELDS if not isinstance(meta, dict) or k not in meta]
+        if missing:
+            raise RuntimeError('KISA item %s lacks fields %s in %s' % (code, ', '.join(missing), CATALOG_PATH))
     return items
 
 

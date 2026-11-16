@@ -35,12 +35,33 @@ def test_catalog_yaml_holds_all_67_items_with_required_fields():
             assert meta.get(field), (code, field)
         assert meta["severity"] in ("상", "중", "하"), code
         assert meta["category"] in CATEGORIES, code
-        assert isinstance(meta.get("cis"), str), code
+        assert set(meta) == set(REQUIRED) | {"cis"}, code
+        assert all(isinstance(meta[k], str) for k in meta), code
         assert meta["criteria"] == meta["criteria"].strip(), code
 
 
-def test_filter_items_are_exactly_the_yaml_catalog():
-    assert ITEMS == _catalog()
+def test_catalog_has_no_duplicate_keys():
+    class Strict(yaml.SafeLoader):
+        pass
+
+    def construct(loader, node):
+        keys = [loader.construct_object(k) for k, _ in node.value]
+        assert len(keys) == len(set(keys)), [k for k in keys if keys.count(k) > 1]
+        return loader.construct_mapping(node)
+
+    Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct)
+    yaml.load(CATALOG.read_text(encoding="utf-8"), Loader=Strict)
+
+
+def test_migrated_items_keep_their_known_values():
+    """Known-good literals from the pre-migration filter pin the content independently of the loader."""
+    assert ITEMS["U-01"] == {
+        "title": "root 계정 원격 접속 제한", "severity": "상", "category": "계정 관리",
+        "criteria": "원격터미널 서비스를 사용하지 않거나, 사용 시 root 직접 접속을 차단한 경우 양호", "cis": "5.1.20"}
+    assert (ITEMS["U-23"]["severity"], ITEMS["U-23"]["category"], ITEMS["U-23"]["cis"]) == ("상", "파일 및 디렉토리 관리", "7.1.13")
+    assert (ITEMS["U-64"]["severity"], ITEMS["U-64"]["category"]) == ("상", "패치 관리")
+    assert (ITEMS["U-67"]["title"], ITEMS["U-67"]["cis"]) == ("로그 디렉터리 소유자 및 권한 설정", "6.2.4.1")
+    assert ITEMS["U-07"]["cis"] == ""
 
 
 def test_filter_module_keeps_no_item_literals():
