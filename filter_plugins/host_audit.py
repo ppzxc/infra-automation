@@ -176,7 +176,9 @@ def _to_local(iso_utc, tz_name):
     return '%s (%s)' % (local.strftime('%Y-%m-%d %H:%M'), local.tzname())
 
 
-# os-release ID -> package/command family of the remediation steps (rhel or debian). Unknown -> '' (summary only).
+# os-release ID -> package/command family of the remediation steps (keys of STEP_FAMILIES in host_audit_kisa).
+# Exact IDs only: ID_LIKE is not in the per-host record and its schema_version 2 stays as it is, so a derivative
+# distribution is an unknown family ('') and gets the summary every family shares (docs/host_audit.md section 17).
 OS_FAMILIES = {
     'rhel': 'rhel', 'rhel-family': 'rhel', 'centos': 'rhel', 'rocky': 'rhel', 'almalinux': 'rhel', 'ol': 'rhel',
     'fedora': 'rhel', 'amzn': 'rhel', 'debian': 'debian', 'ubuntu': 'debian',

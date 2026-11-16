@@ -136,6 +136,20 @@ def test_a_failed_write_leaves_no_temp_file_in_the_directory(tmp_path):
     assert list(dest.parent.iterdir()) == []
 
 
+def test_a_file_with_the_right_bytes_but_a_wrong_mode_is_fixed_and_reported_changed(tmp_path):
+    dest, _ = _write(tmp_path, "m.xlsx")
+    dest.chmod(0o644)
+    out = _run(dict(_args(dest), _args_file=tmp_path / "m1.json"))
+    assert out["changed"] is True and stat.S_IMODE(dest.stat().st_mode) == 0o600
+
+
+def test_invalid_sheet_names_and_empty_headers_are_refused(tmp_path):
+    for bad in ({"sheet": "x" * 32}, {"sheet": "a/b"}, {"headers": [], "rows": []}):
+        dest = tmp_path / "bad.xlsx"
+        out = _run(dict(_args(dest), _args_file=tmp_path / "v.json", **bad))
+        assert out.get("failed") is True and not dest.exists(), bad
+
+
 def test_the_writer_uses_only_the_standard_library():
     spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
     source = MODULE.read_text(encoding="utf-8")

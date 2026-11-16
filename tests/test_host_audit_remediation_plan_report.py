@@ -49,11 +49,16 @@ def _run(tmp_path, out, model, run_kind="scheduled"):
     ids = ("AUD-512", "AUD-513")
     keep = [t for t in _tasks("storage_upload.yml") if any("[%s]" % i in t["name"] for i in ids)]
     pb = tmp_path / "pb.yml"
+    model_file = tmp_path / "model.json"
+    model_file.write_text(json.dumps(model, ensure_ascii=False))
+    # like report.yml: the model is data read from a file, never a trusted playbook variable
+    load = {"ansible.builtin.set_fact": {"host_audit_model": "{{ lookup('ansible.builtin.file', '%s') | from_json }}"
+                                         % model_file}}
     pb.write_text(yaml.safe_dump([{
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
         "vars": {"host_audit_run": {"run_id": "ha-1", "run_kind": run_kind, "output_dir": str(out)},
-                 "host_audit_model": model, "_host_audit_storage_active": True, "_host_audit_storage_problem": ""},
-        "tasks": [_task("report.yml", "AUD-025")] + keep + [{"ansible.builtin.debug": {
+                 "_host_audit_storage_active": True, "_host_audit_storage_problem": ""},
+        "tasks": [load, _task("report.yml", "AUD-025")] + keep + [{"ansible.builtin.debug": {
             "msg": "{{ _host_audit_keep_stats.results | map(attribute='stat', default={}) | list }}"}}],
     }], allow_unicode=True))
     env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
@@ -86,6 +91,18 @@ def test_one_xlsx_per_host_is_written_and_is_in_the_keep_list(tmp_path):
     assert h1.max_row > 3 and h1["B2"].value == "h1"
     h2 = openpyxl.load_workbook(out / "xlsx/host-audit-ha-1-h2.xlsx").active
     assert h2["D2"].value == "양호 외 항목 없음"
+
+
+def test_template_text_in_host_evidence_stays_text_through_the_module_arguments(tmp_path):
+    out = tmp_path / "run"
+    out.mkdir()
+    model = _model()
+    evidence = "{{ lookup('pipe', 'echo pwned') }} {% if x %}"
+    model["config_vulnerability"]["findings"][0]["hosts"][0]["evidence"] = evidence
+    _run(tmp_path, out, model)
+    ws = openpyxl.load_workbook(out / "xlsx/host-audit-ha-1-h1.xlsx").active
+    texts = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, str)]
+    assert any(evidence in t for t in texts)
 
 
 def test_the_xlsx_is_written_for_an_on_demand_run_too(tmp_path):

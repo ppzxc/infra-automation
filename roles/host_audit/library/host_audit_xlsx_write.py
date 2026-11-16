@@ -196,6 +196,10 @@ def _workbook(sheet):
 def build_xlsx(sheet, headers, rows, footer, widths):
     """The bytes of the workbook. Raises ValueError for a row that does not fit the header or an unsupported cell."""
     headers = list(headers)
+    if not headers:
+        raise ValueError('headers must not be empty')
+    if not sheet or len(sheet) > 31 or re.search(r'[\[\]:*?/\\]', sheet):
+        raise ValueError('sheet name must be 1 to 31 characters without [ ] : * ? / \\')
     for number, row in enumerate(rows, 2):
         if len(row) != len(headers):
             raise ValueError('row %d has %d cells, the header has %d' % (number, len(row), len(headers)))
@@ -220,9 +224,10 @@ def build_xlsx(sheet, headers, rows, footer, widths):
 
 
 def _same(dest, data):
+    """True when dest already holds exactly these bytes with mode 0600 (anything else is a change)."""
     try:
         with open(dest, 'rb') as handle:
-            return handle.read() == data
+            return handle.read() == data and (os.stat(dest).st_mode & 0o777) == 0o600
     except (IOError, OSError):
         return False
 
@@ -230,7 +235,6 @@ def _same(dest, data):
 def _write(dest, data):
     """Write atomically with mode 0600; returns True when the file changed."""
     if _same(dest, data):
-        os.chmod(dest, 0o600)
         return False
     directory = os.path.dirname(dest) or '.'
     if not os.path.isdir(directory):
@@ -258,7 +262,8 @@ def main():
             dest=dict(type='path', required=True),
             sheet=dict(type='str', default='Sheet1'),
             headers=dict(type='list', elements='str', required=True),
-            rows=dict(type='list', elements='list', default=[]),
+            # rows carry host evidence: keep them out of the invocation output but leave the error message visible.
+            rows=dict(type='list', elements='list', default=[], no_log=True),
             footer=dict(type='list', elements='str', default=[]),
             widths=dict(type='list', elements='int', default=[]),
         ),

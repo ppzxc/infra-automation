@@ -77,8 +77,8 @@
 # 호스트마다 Remediation Plan xlsx 1개(양호 외 항목이 없는 호스트도 "양호 외 항목 없음" 한 줄 파일). 행은 보고서 모델과
 # 항목 카탈로그에서만 만든다(필터 host_audit_remediation_plan, docs/host_audit.md §17). 실행 디렉터리 xlsx/ 아래에 쓰면
 # 보관(AUD-512~514)이 <YYYY-MM>/<run_id>/xlsx/로 올린다. 정기·수시 실행 모두 만든다.
-# 계획은 필터가 한 번에 모두 만든다(호스트마다 다섯 번 다시 계산하지 않음). 행에는 호스트 증적과 예외 사유가 있어 no_log다
-# (AUD-514와 같음). 만들기에 실패하면 실행을 멈춘다: xlsx도 이번 실행의 증적이라 빠진 채로 보관·메일을 진행하지 않는다.
+# 계획은 필터가 한 번에 모두 만든다(호스트마다 다섯 번 다시 계산하지 않음). 행에는 호스트 증적과 예외 사유가 있어 모듈이 rows를
+# no_log 인자로 받는다(호출 기록에서 가리되 실패 메시지는 보인다). 만들기에 실패하면 실행을 멈춘다: xlsx도 이번 실행의 증적이라 빠진 채로 보관·메일을 진행하지 않는다.
 - name: "[AUD-025] Write the Remediation Plan xlsx of every host"
   host_audit_xlsx_write:
     dest: "{{ host_audit_run.output_dir }}/xlsx/{{ item.file_name }}"
@@ -90,7 +90,6 @@
   loop: "{{ host_audit_model | host_audit_remediation_plans }}"
   loop_control:
     label: "{{ item.host }}"
-  no_log: true
 
 - name: "[AUD-611] Compute the SHA-256 of the report to attach"
   ansible.builtin.stat:

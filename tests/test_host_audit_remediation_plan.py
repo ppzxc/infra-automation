@@ -254,8 +254,17 @@ def test_plans_of_every_host_come_with_their_file_names():
 
 def test_file_name_is_ascii_and_safe():
     assert host_audit_remediation_file_name("ha-1", "ns0331") == "host-audit-ha-1-ns0331.xlsx"
-    assert host_audit_remediation_file_name("ha-1", "../a b/한") == "host-audit-ha-1-.._a_b__.xlsx"
+    import hashlib
+    suffix = hashlib.sha256("../a b/한".encode()).hexdigest()[:8]
+    assert host_audit_remediation_file_name("ha-1", "../a b/한") == "host-audit-ha-1-.._a_b__-%s.xlsx" % suffix
+    assert host_audit_remediation_file_name("r", "ns1 ") != host_audit_remediation_file_name("r", "ns1_")
     assert "/" not in host_audit_remediation_file_name("r", "a/b")
+
+
+def test_os_families_are_the_step_families_of_the_catalog():
+    from host_audit import OS_FAMILIES
+    from host_audit_kisa import STEP_FAMILIES
+    assert set(OS_FAMILIES.values()) <= set(STEP_FAMILIES)
 
 
 def test_the_report_model_names_the_os_family():

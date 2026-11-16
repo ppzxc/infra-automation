@@ -11,6 +11,7 @@ Entry points:
   host_audit_remediation_file_name  (filter) run id, host -> ``host-audit-<run_id>-<inventory_hostname>.xlsx``
 """
 
+import hashlib
 import os
 import re
 import sys
@@ -20,6 +21,7 @@ from host_audit_kisa import (  # noqa: E402
     EXCEPTION, ITEMS, MANUAL, REGISTER_ACTIVE, REGISTER_EXPIRED, REGISTER_PENDING, REMEDIATION_SOURCE,
     order_findings)
 from host_audit_baseline import NEW, PERSIST, RECUR  # noqa: E402
+from host_audit_inventory import UNASSIGNED  # noqa: E402  (the label the Asset Inventory table shows)
 
 SHEET = '이행계획서'
 # SolidStep 이행계획서 column order. 구현내용 is three columns.
@@ -28,8 +30,13 @@ HEADERS = ['그룹', '자산명', '담당자', '통제내용', '취약점현황'
 WIDTHS = [14, 12, 14, 32, 40, 40, 60, 8, 24, 8, 8, 8, 8, 24, 48]
 NO_FINDINGS = '양호 외 항목 없음'
 NO_RESULT = '점검 결과 없음(점검불가)'
-UNASSIGNED = '미지정'  # the Asset Inventory label when the host has no declared value (same as the report)
 FILE_NAME = 'host-audit-%s-%s.xlsx'
+try:
+    from ansible.utils.unsafe_proxy import wrap_var as _unsafe
+except ImportError:  # pragma: no cover - plain Python without ansible
+    def _unsafe(value):
+        return value
+
 BASELINE_PREFIXED = (NEW, PERSIST, RECUR)  # the only Audit Baseline states the remark shows (not 첫 실행 or others)
 BLANK_DATE = '-'  # what the register table shows for a date that is absent or malformed
 
@@ -92,8 +99,10 @@ def _status(finding, entry):
 def _plan(rows, host, run_id, admin):
     if not rows:
         rows = [['', host, admin, NO_FINDINGS] + [''] * (len(HEADERS) - 4)]
-    return {'sheet': SHEET, 'headers': list(HEADERS), 'widths': list(WIDTHS), 'rows': rows,
-            'footer': [REMEDIATION_SOURCE, '실행 ID: %s' % run_id]}
+    # Cells hold host evidence and register text. They go to the writer module as task arguments, which Ansible
+    # templates, so the rows are marked unsafe: '{{ ... }}' in a cell stays text (needed before ansible-core 2.19).
+    return {'sheet': SHEET, 'headers': list(HEADERS), 'widths': list(WIDTHS), 'rows': _unsafe(rows),
+            'footer': _unsafe([REMEDIATION_SOURCE, '실행 ID: %s' % run_id])}
 
 
 def host_audit_remediation_plan(model, host):
@@ -134,9 +143,16 @@ def host_audit_remediation_plans(model):
 
 
 def host_audit_remediation_file_name(run_id, host):
-    """ASCII file name of a host's xlsx; anything outside [A-Za-z0-9._-] in the parts becomes '_'."""
+    """ASCII file name of a host's xlsx; anything outside [A-Za-z0-9._-] in a part becomes '_' and a short hash of the original keeps the name unique."""
     safe = re.compile(r'[^A-Za-z0-9._-]')
-    return FILE_NAME % (safe.sub('_', str(run_id)), safe.sub('_', str(host)))
+
+    def part(value):
+        value = str(value)
+        clean = safe.sub('_', value)
+        # Names that differ only in replaced characters must not share a file (the last write would win).
+        return clean if clean == value else '%s-%s' % (clean, hashlib.sha256(value.encode('utf-8')).hexdigest()[:8])
+
+    return FILE_NAME % (part(run_id), part(host))
 
 
 class FilterModule(object):
