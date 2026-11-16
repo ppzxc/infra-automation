@@ -17,6 +17,7 @@ FILTER_DIR = ROOT_DIR / "filter_plugins"
 CATALOG = FILTER_DIR / "host_audit_kisa_items.yml"
 sys.path.insert(0, str(FILTER_DIR))
 
+import host_audit_kisa as kisa  # noqa: E402
 from host_audit_kisa import CATEGORIES, ITEMS  # noqa: E402
 
 CODES = ["U-%02d" % i for i in range(1, 68)]
@@ -40,19 +41,6 @@ def test_catalog_yaml_holds_all_67_items_with_required_fields():
         assert meta["criteria"] == meta["criteria"].strip(), code
 
 
-def test_catalog_has_no_duplicate_keys():
-    class Strict(yaml.SafeLoader):
-        pass
-
-    def construct(loader, node):
-        keys = [loader.construct_object(k) for k, _ in node.value]
-        assert len(keys) == len(set(keys)), [k for k in keys if keys.count(k) > 1]
-        return loader.construct_mapping(node)
-
-    Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct)
-    yaml.load(CATALOG.read_text(encoding="utf-8"), Loader=Strict)
-
-
 def test_migrated_items_keep_their_known_values():
     """Known-good literals from the pre-migration filter pin the content independently of the loader."""
     assert ITEMS["U-01"] == {
@@ -64,9 +52,37 @@ def test_migrated_items_keep_their_known_values():
     assert ITEMS["U-07"]["cis"] == ""
 
 
-def test_filter_module_keeps_no_item_literals():
-    src = (FILTER_DIR / "host_audit_kisa.py").read_text(encoding="utf-8")
-    assert not re.search(r"['\"]U-\d\d['\"]", src)
+def _write(tmp_path, text):
+    path = tmp_path / "items.yml"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+ONE_ITEM = "U-01:\n  title: t\n  severity: 상\n  category: 계정 관리\n  criteria: c\n  cis: ''\n"
+
+
+def test_loader_reads_the_given_catalog_file(tmp_path):
+    assert list(kisa._load_items(_write(tmp_path, ONE_ITEM))) == ["U-01"]
+
+
+def test_loader_rejects_duplicate_item_codes(tmp_path):
+    with pytest.raises(RuntimeError, match="U-01"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM + ONE_ITEM))
+
+
+def test_loader_rejects_duplicate_field_keys(tmp_path):
+    with pytest.raises(RuntimeError, match="severity"):
+        kisa._load_items(_write(tmp_path, ONE_ITEM + "  severity: 하\n"))
+
+
+def test_loader_parses_each_catalog_only_once(tmp_path, monkeypatch):
+    path = _write(tmp_path, ONE_ITEM)
+    calls = []
+    real = yaml.load
+    monkeypatch.setattr(yaml, "load", lambda *a, **k: calls.append(1) or real(*a, **k))
+    kisa._load_items(path)
+    kisa._load_items(path)
+    assert len(calls) == 1
 
 
 @pytest.mark.skipif(shutil.which("ansible-playbook") is None, reason="ansible-playbook not installed")

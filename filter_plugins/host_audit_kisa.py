@@ -17,6 +17,7 @@ Entry points:
                            ``host_audit_report_model``, the single report builder
 """
 
+import functools
 import os
 from datetime import datetime, timezone
 
@@ -53,26 +54,45 @@ CATEGORY_LOG = '로그 관리'
 CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH, CATEGORY_LOG]
 
 # KISA-2026 Unix items U-01~U-67. The item list lives only in host_audit_kisa_items.yml next to this
-# module (title/severity/category/criteria/cis); it is read once at import, never edited here.
+# module (title/severity/category/criteria/cis) and is never edited here.
+#
+# The catalog is read at import time on purpose (Spec #488 / Ticket-1, #489: "the filter only reads the YAML
+# when imported"). A broken or missing catalog must fail loudly at that point with the cause named in the
+# RuntimeError, instead of surfacing later as a missing item inside a report. _load_items caches per path, so
+# each process parses the file once however often it is called.
 ITEM_FIELDS = ('title', 'severity', 'category', 'criteria', 'cis')
 CATALOG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'host_audit_kisa_items.yml')
 
 
-def _load_items():
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader that refuses a mapping key written twice (safe_load would silently keep the last one)."""
+
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=True)
+            if key in seen:
+                raise yaml.YAMLError('duplicate key %r (line %d)' % (key, key_node.start_mark.line + 1))
+            seen.add(key)
+        return super().construct_mapping(node, deep)
+
+
+@functools.lru_cache(maxsize=None)
+def _load_items(path=CATALOG_PATH):
     try:
-        with open(CATALOG_PATH, encoding='utf-8') as fh:
-            items = yaml.safe_load(fh)
+        with open(path, encoding='utf-8') as fh:
+            items = yaml.load(fh, Loader=_UniqueKeyLoader)  # noqa: S506 - SafeLoader subclass
     except (OSError, yaml.YAMLError) as exc:
-        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (CATALOG_PATH, exc)) from exc
+        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (path, exc)) from exc
     if not isinstance(items, dict) or not items:
-        raise RuntimeError('KISA item catalog %s is empty or not a mapping' % CATALOG_PATH)
+        raise RuntimeError('KISA item catalog %s is empty or not a mapping' % path)
     for code, meta in items.items():
         missing = [k for k in ITEM_FIELDS if not isinstance(meta, dict) or k not in meta]
         if missing:
-            raise RuntimeError('KISA item %s lacks fields %s in %s' % (code, ', '.join(missing), CATALOG_PATH))
+            raise RuntimeError('KISA item %s lacks fields %s in %s' % (code, ', '.join(missing), path))
         if not all(isinstance(meta[k], str) for k in ITEM_FIELDS) or meta['severity'] not in SEVERITY_ORDER \
                 or meta['category'] not in CATEGORIES:
-            raise RuntimeError('KISA item %s has a wrong type, severity or category in %s' % (code, CATALOG_PATH))
+            raise RuntimeError('KISA item %s has a wrong type, severity or category in %s' % (code, path))
     return items
 
 
