@@ -79,7 +79,7 @@ def _blocks(html):
     start = html.index("조치 안내</h2>")
     end = html.index("검토 및 결재</h2>")
     parts = re.split(r'(?=<section class="rg-block)', html[start:end])[1:]
-    return {re.search(r'data-code="(U-\d+)"', p).group(1): p for p in parts}
+    return {re.search(r'data-code="[^"]*?(U-\d+)"', p).group(1): p for p in parts}
 
 
 def _visible(fragment):
@@ -208,7 +208,7 @@ def test_run_without_findings_says_there_are_no_targets(env):
 def test_report_without_the_config_vulnerability_section_has_no_guide_appendix(env, model):
     bare = {k: v for k, v in model.items() if k != "config_vulnerability"}
     page = env.get_template("report.html.j2").render(host_audit_model=bare)
-    assert "조치 안내" not in page
+    assert "조치 안내</h2>" not in page
 
 
 def test_finding_of_a_code_the_catalog_lacks_still_gets_a_block(env, model):
@@ -227,7 +227,7 @@ def test_only_unknown_code_findings_do_not_show_the_no_targets_notice():
     import host_audit_kisa as kisa
     stray = {"code": "KISA-2026:U-99", "title": "t", "severity": "상", "criteria": "c", "verdict": "취약",
              "verdict_class": "crit", "hosts": [{"host": "ns0009"}]}
-    assert [b["code"] for b in kisa._build_remediation_guide([stray])] == ["U-99"]
+    assert [b["code"] for b in kisa._build_remediation_guide([stray])] == ["KISA-2026:U-99"]
 
 
 def test_verdicts_of_one_item_stay_in_one_block_even_when_not_adjacent():
@@ -236,5 +236,32 @@ def test_verdicts_of_one_item_stay_in_one_block_even_when_not_adjacent():
         return {"code": "KISA-2026:" + code, "title": code, "severity": "상", "criteria": "", "verdict": verdict,
                 "verdict_class": "x", "hosts": [{"host": host}]}
     blocks = kisa._build_remediation_guide([f("U-01", "취약", "a"), f("U-02", "취약", "b"), f("U-01", "예외(승인)", "c")])
-    assert [b["code"] for b in blocks] == ["U-01", "U-02"]
+    assert [b["code"] for b in blocks] == ["KISA-2026:U-01", "KISA-2026:U-02"]
     assert [v["verdict"] for v in blocks[0]["verdict_hosts"]] == ["취약", "예외(승인)"]
+
+
+def test_block_heading_shows_the_same_full_code_as_the_body_table(html):
+    body = html[:html.index("조치 안내</h2>")]
+    for code, block in _blocks(html).items():
+        assert "KISA-2026:" + code in _visible(block) and "KISA-2026:" + code in body
+
+
+def _stray(code):
+    return {"code": code, "title": "t", "severity": "상", "criteria": "c", "verdict": "취약",
+            "verdict_class": "crit", "hosts": [{"host": "ns0009"}]}
+
+
+def test_unknown_code_block_leaves_out_labels_without_text(env, model):
+    import host_audit_kisa as kisa
+    cv = dict(model["config_vulnerability"], remediation_guide=kisa._build_remediation_guide([_stray("KISA-2026:U-99")]))
+    page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
+    text = _visible(_blocks(page)["U-99"])
+    for label in ("점검 목적", "보안 위협", "점검방법", "조치방법"):
+        assert label not in text
+    assert "판단 기준" in text and "조치 영향도 -" in text
+
+
+def test_editions_with_the_same_short_code_stay_separate_blocks():
+    import host_audit_kisa as kisa
+    blocks = kisa._build_remediation_guide([_stray("KISA-2026:U-01"), _stray("OTHER-2025:U-01")])
+    assert [b["code"] for b in blocks] == ["KISA-2026:U-01", "OTHER-2025:U-01"]

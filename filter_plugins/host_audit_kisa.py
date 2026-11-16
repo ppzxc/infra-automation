@@ -444,7 +444,7 @@ FAMILY_LABELS = (('rhel', 'RHEL 계열'), ('debian', 'Debian 계열'))
 def _build_remediation_guide(findings):
     """Item-level blocks of the remediation appendix: the same items in the same order as the body table.
 
-    ``findings`` is already in body table order, one entry per (item, verdict). Blocks are keyed by item and
+    ``findings`` is already in body table order, one entry per (item, verdict). Blocks are keyed by the full item code and
     placed where the item first appears, so the block order is the body table's item order even when the verdicts
     of one item are not adjacent (equal priority and levels sort by verdict before code). Each block lists the
     hosts per verdict (no evidence) and every family of ``steps`` (not filtered by a host's family). A code the
@@ -453,18 +453,18 @@ def _build_remediation_guide(findings):
     """
     blocks = {}
     for finding in findings:
-        short = finding['code'].split(':', 1)[-1]
-        block = blocks.get(short)
+        code = finding['code']  # the full code, as the body table shows it (also keeps editions apart)
+        block = blocks.get(code)
         if block is None:
-            meta = ITEMS.get(short)
+            meta = ITEMS.get(code.split(':', 1)[-1])
             if meta is None:
-                block = {'code': short, 'title': finding['title'], 'severity': finding['severity'],
+                block = {'code': code, 'title': finding['title'], 'severity': finding['severity'],
                          'purpose': '', 'threat': '', 'criteria': finding['criteria'], 'check': '', 'summary': '',
                          'steps': [], 'impact': None, 'effort': None, 'guide_page': None, 'verdict_hosts': []}
             else:
                 steps = meta['remediation'].get('steps') or {}
                 block = {
-                    'code': short, 'title': meta['title'], 'severity': meta['severity'],
+                    'code': code, 'title': meta['title'], 'severity': meta['severity'],
                     'purpose': meta['purpose'], 'threat': meta['threat'], 'criteria': meta['criteria'],
                     'check': meta['check'], 'summary': meta['remediation']['summary'],
                     'steps': [{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
@@ -472,7 +472,7 @@ def _build_remediation_guide(findings):
                     'impact': dict(meta['remediation_impact']), 'effort': dict(meta['remediation_effort']),
                     'guide_page': meta['guide_page'], 'verdict_hosts': [],
                 }
-            blocks[short] = block
+            blocks[code] = block
         block['verdict_hosts'].append({'verdict': finding['verdict'], 'verdict_class': finding['verdict_class'],
                                        'hosts': [h['host'] for h in finding['hosts']]})
     return list(blocks.values())
