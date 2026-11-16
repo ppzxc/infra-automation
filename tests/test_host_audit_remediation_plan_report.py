@@ -147,6 +147,25 @@ def test_the_run_stops_when_every_plan_failed_but_not_when_one_did(tmp_path):
         assert (res.returncode == 0) is ok, res.stdout[-1500:]
 
 
+def test_a_failed_write_does_not_stop_the_run_until_the_final_judgement(tmp_path):
+    write = _task("report.yml", "AUD-025")
+    assert write["ignore_errors"] is True and write["register"] == "_host_audit_xlsx_write"
+    judge = _named("Fail the run when a Remediation Plan xlsx could not be written")
+    block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
+    names = [t.get("name", "") for t in block]
+    assert names.index(judge["name"]) > names.index("Judge the report mail")  # after keeping and mailing
+    for failed, ok in (([{"failed": True, "item": "h2"}, {"item": "h1"}], False), ([{"item": "h1"}], True)):
+        pb = tmp_path / ("j%d.yml" % len(failed))
+        pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False,
+                                       "vars": {"_host_audit_xlsx_write": {"results": failed}}, "tasks": [judge]}],
+                                     allow_unicode=True))
+        res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                             stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+        assert (res.returncode == 0) is ok, res.stdout[-1500:]
+        if not ok:
+            assert "h2" in res.stdout
+
+
 def test_the_xlsx_is_written_for_an_on_demand_run_too(tmp_path):
     out = tmp_path / "run"
     out.mkdir()

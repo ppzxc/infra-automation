@@ -29,7 +29,8 @@
          and (_host_audit_storage_problem | default('x')) | length == 0
          and (host_audit_baseline_history.state | default('failed')) != 'failed'
          and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0
-         and not (_pointer_failed | bool) }}
+         and not (_pointer_failed | bool)
+         and _host_audit_xlsx_write.results | default([]) | selectattr('failed', 'defined') | selectattr('failed') | list | length == 0 }}
     _mail_sent: >-
       {{ (_host_audit_mail_plan.send | default(false) | bool) and (host_audit_mail_outcome.sent | default(false) | bool) }}
     _reason: >-
@@ -38,7 +39,7 @@
          else ({'remove': true, 'reason': '원본이 버킷에 보관됨'} if _kept_in_bucket | bool
          else ({'remove': true, 'reason': '보관 꺼짐, 메일 발송 성공'} if (not (host_audit_storage_enabled | bool)) and (_mail_sent | bool)
          else ({'remove': false, 'reason': '보관 꺼짐, 메일 실패 또는 미발송 - 러너 사본이 유일함'} if not (host_audit_storage_enabled | bool)
-         else {'remove': false, 'reason': '원본 보관이 끝나지 않음 - 보관 실패 또는 그 앞 단계(Remediation Plan 생성·쓰기 등)의 실패 메시지가 이 디렉터리를 가리킴'})))) }}
+         else {'remove': false, 'reason': '원본 보관이 끝나지 않음 - 보관 실패 또는 Remediation Plan xlsx 쓰기 실패 메시지가 이 디렉터리를 가리킴'})))) }}
   ansible.builtin.set_fact:
     _host_audit_cleanup:
       remove: "{{ _reason.remove }}"

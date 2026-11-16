@@ -295,7 +295,9 @@ def _write(dest, data):
         return False
     directory = os.path.dirname(dest) or '.'
     if not os.path.isdir(directory):
-        os.makedirs(directory, 0o700, exist_ok=True)  # one missing level is the role's case (xlsx/ under the run dir)
+        # One level only (xlsx/ under the run directory): a missing parent is an error, never a directory created
+        # with a mode the role did not choose.
+        os.mkdir(directory, 0o700)
         os.chmod(directory, 0o700)
     # mkstemp: exclusive create with an unpredictable name (no symlink to follow), mode 0600. The name starts with a
     # dot, so AUD-512 (ansible.builtin.find without hidden files) never lists a leftover of a killed run.

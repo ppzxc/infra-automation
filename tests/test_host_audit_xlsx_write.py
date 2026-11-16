@@ -201,6 +201,12 @@ def test_the_cell_limit_counts_utf16_units_like_excel(tmp_path):
     assert cell.endswith("…") and len(cell.encode("utf-16-le")) // 2 <= 32767
 
 
+def test_a_missing_parent_directory_is_an_error_not_a_created_tree(tmp_path):
+    dest = tmp_path / "gone" / "xlsx" / "a.xlsx"
+    out = _run(dict(_args(dest), _args_file=tmp_path / "p.json"))
+    assert out["failed"] is True and not (tmp_path / "gone").exists()
+
+
 def test_a_write_error_names_the_destination(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("x")

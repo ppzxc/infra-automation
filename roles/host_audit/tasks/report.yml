@@ -106,8 +106,8 @@
     # 호스트마다 Remediation Plan xlsx 1개(양호 외 항목이 없는 호스트도 "양호 외 항목 없음" 한 줄 파일). 행은 보고서 모델과
     # 항목 카탈로그에서만 만든다(필터 host_audit_remediation_plans, docs/host_audit.md §17). 실행 디렉터리 xlsx/ 아래에 쓰면
     # 보관(AUD-512~514)이 <YYYY-MM>/<run_id>/xlsx/로 올린다. 정기·수시 실행 모두 만든다.
-    # 만들기에 실패하면 실행을 멈춘다(xlsx도 이번 실행의 증적이라 빠진 채로 보관·메일로 넘어가지 않는다). 이 block 안에 두어
-    # 실패해도 always의 정리가 돌고 AUD-632가 디렉터리를 남기는 이유를 말한다.
+    # 쓰기에 실패해도 보관·메일·KISA 악화 알림·Audit Baseline 포인터는 계속한다(그것들은 xlsx에 기대지 않는다). 실패는
+    # 보관·메일 판정처럼 맨 끝에서 실행을 실패로 끝내고(Judge ... xlsx), 그때 정리가 디렉터리를 남긴다(cleanup.yml).
     # 계획(행에 호스트 증적과 예외 사유가 있다)은 한 번만 만들어 set_fact에 두고, 반복문은 호스트 이름만 돈다:
     # 반복문의 item은 실패 결과에 그대로 찍히기 때문이다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이
     # 보여야 하고(no_log면 가려진다), 성공 때의 fact는 -v에서만 찍히며 내용은 report.html과 같다.
@@ -142,6 +142,8 @@
         footer: "{{ _plan.footer }}"
         widths: "{{ _plan.widths }}"
       loop: "{{ host_audit_model.hosts }}"
+      register: _host_audit_xlsx_write
+      ignore_errors: true
 
     - name: Keep the originals in the Host Audit bucket
       ansible.builtin.include_tasks: storage_upload.yml
@@ -172,6 +174,16 @@
 
     - name: Judge the KISA worsening notification
       ansible.builtin.include_tasks: kisa_alert_result.yml
+
+    # AUD-025의 실패를 모아 맨 끝에서 실행을 실패로 끝낸다. 호스트 이름만 밝힌다(오류 메시지는 모듈 출력에 이미 있다).
+    - name: Fail the run when a Remediation Plan xlsx could not be written
+      ansible.builtin.assert:
+        that: _failed_hosts | length == 0
+        fail_msg: "Remediation Plan xlsx를 쓰지 못한 호스트: {{ _failed_hosts | join(', ') }} (실행 디렉터리는 남김)"
+      vars:
+        _failed_hosts: >-
+          {{ _host_audit_xlsx_write.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
+             | map(attribute='item') | list }}
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml
