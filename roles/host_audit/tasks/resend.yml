@@ -138,7 +138,9 @@
       register: _host_audit_resend_zip
       changed_when: false
       no_log: true
-      when: _host_audit_resend_zip_record | default({}) | length > 0
+      when:
+        - _host_audit_resend_zip_record | default({}) | length > 0
+        - not (_host_audit_resend_zip_record.invalid | default(false) | bool)
 
     - name: Compute the SHA-256 of the downloaded xlsx zip
       ansible.builtin.stat:

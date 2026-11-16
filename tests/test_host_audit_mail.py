@@ -246,6 +246,8 @@ def test_resend_keeps_the_archived_zip_record_and_points_it_at_the_archive():
 def test_resend_keeps_the_archived_summary_and_marks_it():
     kept = _summary()
     doc = host_audit_mail_resend_summary(kept, kept["run_id"], "RustFS host-audit/2026-11/x/report.html", SHA)
+    tampered = host_audit_mail_resend_summary(dict(kept, report=dict(kept["report"], file_name="../x")), kept["run_id"], "a", SHA)
+    assert tampered["report"]["file_name"] == "host-audit-ha-20261031T220000Z.html"  # never a path from the bucket
     assert doc["subject"] == "[재발송] " + kept["subject"]
     assert doc["resent"] is True and doc["report"]["sha256"] == SHA and doc["lines"] == kept["lines"]
     assert "(재발송)" in _render(doc)
