@@ -17,13 +17,15 @@ import yaml
 ROOT_DIR = Path(__file__).resolve().parent.parent
 TASKS = ROOT_DIR / "roles" / "host_audit" / "tasks"
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
-sys.path.insert(0, str(ROOT_DIR / "tests"))
 
 from host_audit import host_audit_report_model  # noqa: E402
 from host_audit_kisa import host_audit_kisa_result  # noqa: E402
 
 pytestmark = pytest.mark.skipif(not shutil.which("ansible-playbook"), reason="ansible-playbook not installed")
-openpyxl = pytest.importorskip("openpyxl")
+if os.environ.get("CI"):
+    import openpyxl
+else:
+    openpyxl = pytest.importorskip("openpyxl")
 
 
 def _tasks(name):

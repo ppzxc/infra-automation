@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pytest
 
-openpyxl = pytest.importorskip("openpyxl")
+# CI installs requirements-test.txt, so a missing openpyxl there must fail instead of silently skipping the round trip.
+if os.environ.get("CI"):
+    import openpyxl
+else:
+    openpyxl = pytest.importorskip("openpyxl")
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODULE = ROOT_DIR / "roles" / "host_audit" / "library" / "host_audit_xlsx_write.py"
@@ -33,7 +37,8 @@ def _args(dest):
 def _run(args):
     """Run the module as Ansible does: a python file with a JSON args file."""
     path = args.pop("_args_file")
-    Path(path).write_text(json.dumps({"ANSIBLE_MODULE_ARGS": args}))
+    module_args = dict(args)
+    Path(path).write_text(json.dumps({"ANSIBLE_MODULE_ARGS": module_args}))
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
     res = subprocess.run([sys.executable, str(MODULE), str(path)], capture_output=True, text=True, env=env)
     return json.loads(res.stdout)
@@ -95,10 +100,40 @@ def test_rows_must_fit_the_header(tmp_path):
     assert out.get("failed") is True and not dest.exists()
 
 
-def test_unsupported_cell_types_are_refused(tmp_path):
-    dest = tmp_path / "bad.xlsx"
-    out = _run(dict(_args(dest), rows=[["a", "b", 1.5, "d"]], _args_file=tmp_path / "b.json"))
-    assert out.get("failed") is True and not dest.exists()
+def test_other_cell_types_are_written_as_text_and_none_as_an_empty_cell(tmp_path):
+    dest = tmp_path / "t.xlsx"
+    out = _run(dict(_args(dest), rows=[["a", None, 1.5, "\ud800 lone"]], _args_file=tmp_path / "t.json"))
+    assert not out.get("failed"), out
+    ws = openpyxl.load_workbook(dest).active
+    assert [c.value for c in ws[2]] == ["a", None, "1.5", " lone"]
+
+
+def test_check_mode_reports_changed_only_when_the_bytes_differ(tmp_path):
+    first, _ = _write(tmp_path, "c.xlsx")
+    same = _run(dict(_args(first), _args_file=tmp_path / "c1.json", _ansible_check_mode=True))
+    assert same["changed"] is False
+    other = _run(dict(_args(first), footer=["x"], _args_file=tmp_path / "c2.json", _ansible_check_mode=True))
+    assert other["changed"] is True
+
+
+def test_a_failed_write_leaves_no_temp_file_in_the_directory(tmp_path):
+    spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    dest = tmp_path / "x" / "f.xlsx"
+    dest.parent.mkdir()
+    real = os.replace
+
+    def boom(*_a):
+        raise OSError("disk full")
+
+    os.replace = boom
+    try:
+        with pytest.raises(OSError):
+            mod._write(str(dest), b"data")
+    finally:
+        os.replace = real
+    assert list(dest.parent.iterdir()) == []
 
 
 def test_the_writer_uses_only_the_standard_library():

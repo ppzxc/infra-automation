@@ -15,7 +15,8 @@ import host_audit_remediation_plan as plan_module  # noqa: E402
 from host_audit import host_audit_report_model  # noqa: E402
 from host_audit_kisa import ITEMS, REMEDIATION_SOURCE, host_audit_kisa_result  # noqa: E402
 from host_audit_remediation_plan import (  # noqa: E402
-    HEADERS, NO_FINDINGS, NO_RESULT, host_audit_remediation_file_name, host_audit_remediation_plan)
+    HEADERS, NO_FINDINGS, NO_RESULT, host_audit_remediation_file_name, host_audit_remediation_plan,
+    host_audit_remediation_plans)
 
 TODAY = "2026-10-09"
 ALL = list(range(1, 68))
@@ -214,6 +215,41 @@ def test_first_run_without_a_baseline_has_no_prefix():
 def test_footer_has_the_source_sentence_and_run_id():
     plan = host_audit_remediation_plan(_model([_record("h1", {1: "VULN"})]), "h1")
     assert plan["footer"] == [REMEDIATION_SOURCE, "실행 ID: ha-1"]
+
+
+def test_an_unknown_catalog_code_gives_blank_level_cells_not_none():
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"})]))
+    finding = model["config_vulnerability"]["findings"][0]
+    finding.update(code="KISA-2026:U-99", risk=None, priority=None, urgency=None, impact_level=None,
+                   effort_level=None, remediation_summary="")
+    row = host_audit_remediation_plan(model, "h1")["rows"][0]
+    assert all(cell is not None for cell in row)
+    assert [row[COL[k]] for k in ("위험도", "시급성", "영향도", "환경성", "우선순위", "점검방법")] == [""] * 6
+
+
+def test_only_the_three_baseline_states_prefix_the_remark():
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"})]))
+    host = model["config_vulnerability"]["findings"][0]["hosts"][0]
+    for state in ("확인 불가", "삭제", "해소", "첫 실행"):
+        host["baseline"] = {"status": state, "class": "na"}
+        assert host_audit_remediation_plan(model, "h1")["rows"][0][COL["비고"]] == "", state
+
+
+def test_a_missing_exception_date_is_shown_as_a_dash_like_the_register_table():
+    reg = [_exception("U-01", approved_on="not-a-date")]  # pending: no valid approval date
+    assert _remarks({1: "VULN"}, reg)["U-01"] == "예외 승인 대기"
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"}, register=[_exception("U-01")])], [_exception("U-01")]))
+    exc = model["config_vulnerability"]["findings"][0]["hosts"][0]["exception"]
+    exc["approved_on"] = ""
+    assert "승인: R-approver - / 만료" in host_audit_remediation_plan(model, "h1")["rows"][0][COL["비고"]]
+
+
+def test_plans_of_every_host_come_with_their_file_names():
+    model = _model([_record("h1", {1: "VULN"}), _record("h2", {})])
+    plans = host_audit_remediation_plans(model)
+    assert [(p["host"], p["file_name"]) for p in plans] == [
+        ("h1", "host-audit-ha-1-h1.xlsx"), ("h2", "host-audit-ha-1-h2.xlsx")]
+    assert plans[0]["rows"] == host_audit_remediation_plan(model, "h1")["rows"]
 
 
 def test_file_name_is_ascii_and_safe():

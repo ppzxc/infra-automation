@@ -81,7 +81,7 @@ from ansible.module_utils.basic import AnsibleModule
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest time a zip member can carry
 DEFAULT_WIDTH = 16
 MAX_CELL = 32767  # characters an xlsx cell can hold
-_ILLEGAL = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]')
+_ILLEGAL = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')  # incl. lone surrogates (not encodable)
 
 # cellXfs: 0 plain, 1 header (bold, wrap, top), 2 body (wrap, top), 3 footer (top, no wrap)
 STYLE_HEADER, STYLE_BODY, STYLE_FOOTER = 1, 2, 3
@@ -105,8 +105,10 @@ def _column(index):
 
 def _cell(row, col, value, style):
     ref = u'%s%d' % (_column(col), row)
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        raise ValueError('cell %s is neither text nor an integer: %r' % (ref, value))
+    if value is None:
+        value = u''
+    elif isinstance(value, bool) or not isinstance(value, (int, str)):
+        value = str(value)  # a float or another type is written as its text rather than failing the whole run
     if isinstance(value, int):
         return u'<c r="%s" s="%d"><v>%d</v></c>' % (ref, style, value)
     if value == u'':
@@ -217,24 +219,36 @@ def build_xlsx(sheet, headers, rows, footer, widths):
     return buffer.getvalue()
 
 
-def _write(dest, data):
-    """Write atomically with mode 0600; returns True when the file changed."""
+def _same(dest, data):
     try:
         with open(dest, 'rb') as handle:
-            if handle.read() == data:
-                os.chmod(dest, 0o600)
-                return False
+            return handle.read() == data
     except (IOError, OSError):
-        pass
+        return False
+
+
+def _write(dest, data):
+    """Write atomically with mode 0600; returns True when the file changed."""
+    if _same(dest, data):
+        os.chmod(dest, 0o600)
+        return False
     directory = os.path.dirname(dest) or '.'
     if not os.path.isdir(directory):
         os.makedirs(directory, 0o700)
         os.chmod(directory, 0o700)
     tmp = '%s.%d.tmp' % (dest, os.getpid())
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, 'wb') as handle:
-        handle.write(data)
-    os.replace(tmp, dest)
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(data)
+        os.replace(tmp, dest)
+    except BaseException:
+        # A leftover .tmp in xlsx/ would be found and kept by AUD-512.
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return True
 
 
@@ -255,9 +269,7 @@ def main():
         data = build_xlsx(p['sheet'], p['headers'], p['rows'], p['footer'], p['widths'])
     except ValueError as exc:
         module.fail_json(msg=str(exc))
-    changed = True
-    if not module.check_mode:
-        changed = _write(p['dest'], data)
+    changed = (not _same(p['dest'], data)) if module.check_mode else _write(p['dest'], data)
     module.exit_json(changed=changed, dest=p['dest'])
 
 
