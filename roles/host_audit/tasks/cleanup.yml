@@ -31,7 +31,7 @@
          and (host_audit_baseline_history.state | default('failed')) != 'failed'
          and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0
          and not (_pointer_failed | bool) }}
-    _xlsx: "{{ _host_audit_xlsx_problem | default({'failed': false, 'targets': []}) }}"
+    _xlsx: "{{ _host_audit_xlsx_problem | default({'failed': true, 'targets': ['xlsx 판정 전에 멈춤']}) }}"
     _xlsx_why: >-
       {{ 'xlsx 산출물 실패(' ~ (_xlsx.targets | join(', ')) ~ ')' ~ ('와 원본 보관 미완료 - 두 실패 메시지가'
                                  if not (_kept_in_bucket | bool) and (host_audit_storage_enabled | bool)

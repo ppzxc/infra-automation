@@ -143,6 +143,7 @@
         get_checksum: false
         get_mime: false
       register: _host_audit_xlsx_dir
+      failed_when: false  # unreadable counts as absent here; the find below is the one that reports
 
     - name: Find the xlsx files that this attempt did not write
       ansible.builtin.find:
