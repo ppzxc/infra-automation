@@ -27,6 +27,9 @@ UNASSIGNED = '미지정'
 LOOKUP_FAILED = '조회 실패'
 INVALID = '잘못된 값'
 IMPORTANCE_LEVELS = ('H', 'M', 'L')
+# 표시 상태 -> 태그 색. 조회 실패는 인프라 문제(값을 알 수 없음)라 지원 종료·선언 외 같은 발견(crit)과 구분해
+# 회색으로 두고, 잘못된 값만 고칠 데이터 오류로 crit이다. 메일 요약 등급(WARN)과 같은 무게다.
+DECLARED_TAGS = {'unassigned': 'na', 'lookup_failed': 'na', 'invalid': 'crit'}
 NOT_DECLARED = '선언 외'
 INACTIVE = '장기 미사용'
 
@@ -289,16 +292,22 @@ DECLARATION_KEYS = [
 ]
 
 
-DECLARED_MAX_LEN = 120
+DECLARED_MAX_LEN = 500
+INVALID_SHOWN_LEN = 20
 
 
 def _declared_text(value):
-    """Scalar KV value as display text. KV text is not trusted: Jinja delimiters are broken up (the filter
-    result loses Ansible's unsafe marking) and the length is capped."""
+    """Scalar KV value as display text, stored exactly as the ledger copy has it (evidence).
+
+    Text only: dict, list and bool values are not declarations and count as empty. The cap (500, far above a
+    description with its trailing ``[그룹자산명]``) only keeps a pasted blob out of the record and ends with
+    '…' when it cuts. No template escaping: ansible-core 2.19+ never templates data that came from a lookup
+    or a filter (untrusted by default); ``tests/test_host_audit_inventory.py`` proves it with a real run.
+    """
     if value is None or isinstance(value, (dict, list, bool)):
         return ''
-    text = re.sub(r'\{(?=[{%#])', '{ ', str(value).strip())
-    return text[:DECLARED_MAX_LEN].strip()
+    text = str(value).strip()
+    return text if len(text) <= DECLARED_MAX_LEN else text[:DECLARED_MAX_LEN - 1].rstrip() + '…'
 
 
 def host_audit_asset_declaration(host_kv, lookup_ok=True):
@@ -409,6 +418,10 @@ def _fmt_uptime(seconds):
     return '%d일 %d시간' % (days, rest // 3600)
 
 
+def _short(value):
+    return value if len(value) <= INVALID_SHOWN_LEN else value[:INVALID_SHOWN_LEN - 1].rstrip() + '…'
+
+
 def _declared(record):
     asset = ((record.get('declared') or {}).get('asset') or {})
     failed = asset.get('lookup') == 'failed'
@@ -420,10 +433,10 @@ def _declared(record):
         elif not value:
             state, shown = 'unassigned', UNASSIGNED
         elif key == 'asset_importance' and value not in IMPORTANCE_LEVELS:
-            state, shown = 'invalid', '%s (%s)' % (INVALID, value)
+            state, shown = 'invalid', '%s (%s)' % (INVALID, _short(value))
         else:
             state, shown = 'ok', value
-        fields.append({'key': key, 'label': label, 'value': shown, 'state': state,
+        fields.append({'key': key, 'label': label, 'value': shown, 'state': state, 'tag': DECLARED_TAGS.get(state, ''),
                        'unassigned': state == 'unassigned'})
     return fields, [str(n) for n in (asset.get('privileged_allowlist') or [])]
 

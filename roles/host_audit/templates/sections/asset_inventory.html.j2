@@ -14,7 +14,7 @@
         <td class="small">{{ h.fqdn | e }}<br>{{ h.ips | e }}</td>
         <td>{% if h.environment_unassigned %}<span class="tag na">{{ h.environment | e }}</span>{% else %}{{ h.environment | e }}{% endif %}</td>
 {% for f in a.declared %}
-        <td class="small">{% if f.state != 'ok' %}<span class="tag {{ 'na' if f.unassigned else 'crit' }}">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</td>
+        <td class="small">{% if f.state != 'ok' %}<span class="tag {{ f.tag }}">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</td>
 {% endfor %}
         <td><span class="tag {{ 'ok' if h.inspected else 'na' }}">{{ h.status_label | e }}</span></td>
       </tr>

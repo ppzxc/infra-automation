@@ -302,7 +302,7 @@ def test_unassigned_declarations_are_shown_as_unassigned():
     model = host_audit_report_model([rec], meta())
     declared = {f["key"]: f for f in host(model, "ns0331")["declared"]}
 
-    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "state": "ok",
+    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "state": "ok", "tag": "",
                                    "unassigned": False}
     for key in ("department", "owner_role", "admin_role", "asset_importance"):
         assert declared[key]["value"] == "미지정" and declared[key]["unassigned"] is True
@@ -333,17 +333,81 @@ def test_declaration_never_carries_connection_values():
         assert secret not in text
 
 
-def test_declaration_defuses_jinja_delimiters_caps_length_and_drops_non_text_values():
-    decl = host_audit_asset_declaration({"description": "{{ lookup('env','HOME') }} {% x %} {# c #}" + "a" * 500,
-                                         "isms_owner_role": False, "isms_admin_role": ["x"]}, True)
+def test_declaration_keeps_the_ledger_text_unchanged_caps_only_blobs_and_drops_non_text_values():
+    group_tail = "웹 서비스 [그룹자산A]"
+    long_but_real = "가" * 200 + " " + group_tail
+    decl = host_audit_asset_declaration({"description": long_but_real, "isms_owner_role": False,
+                                         "isms_admin_role": ["x"], "isms_department": "{{ x }}"}, True)
 
-    assert "{{" not in decl["purpose"] and "{%" not in decl["purpose"] and "{#" not in decl["purpose"]
-    for tricky in ("{{{ x }}}", "{{{%", "{{{{ x", "{%{# y"):
-        out = host_audit_asset_declaration({"description": tricky}, True)["purpose"]
-        assert not re.search(r"\{[{%#]", out), (tricky, out)
-    assert len(decl["purpose"]) <= 120
-    assert len(host_audit_asset_declaration({"description": "{" * 300}, True)["purpose"]) <= 120
+    assert decl["purpose"] == long_but_real and decl["purpose"].endswith("[그룹자산A]")
+    assert decl["department"] == "{{ x }}", "evidence is stored as the ledger copy has it"
     assert decl["owner_role"] == "" and decl["admin_role"] == ""
+    blob = host_audit_asset_declaration({"description": "x" * 5000}, True)["purpose"]
+    assert len(blob) == 500 and blob.endswith("…")
+
+
+def test_tag_colors_separate_unknown_values_from_data_errors():
+    _m, failed = _decl_model(HOST_KV, lookup_ok=False)
+    _m, unassigned = _decl_model({})
+    _m, invalid = _decl_model(dict(HOST_KV, isms_asset_importance="높음"))
+    _m, ok = _decl_model(HOST_KV)
+
+    assert {f["tag"] for f in failed.values()} == {"na"} and {f["tag"] for f in unassigned.values()} == {"na"}
+    assert invalid["asset_importance"]["tag"] == "crit" and invalid["purpose"]["tag"] == ""
+    assert {f["tag"] for f in ok.values()} == {""}
+
+
+def test_invalid_importance_echoes_at_most_twenty_characters_of_the_original():
+    _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance="가" * 80))
+    shown = declared["asset_importance"]["value"]
+
+    assert shown.startswith("잘못된 값 (") and shown.endswith("…)") and len(shown) <= len("잘못된 값 ()") + 20
+
+
+def _aud101_record(tmp_path, kv, status):
+    """Run the real [AUD-101] task with ansible-playbook. The KV text arrives as parsed JSON data (like the
+    OpenBao response), not as trusted playbook text, so any template syntax in it must stay plain text."""
+    tasks = yaml.safe_load((ROLE / "tasks" / "inventory.yml").read_text(encoding="utf-8"))
+    task = next(t for t in tasks if t["name"].startswith("[AUD-101]"))
+    task["no_log"] = False
+    (tmp_path / "kv.json").write_text(json.dumps({"kv": kv, "resp": {"status": status}}), encoding="utf-8")
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
+        {"ansible.builtin.set_fact": {
+            "_loaded": "{{ lookup('ansible.builtin.file', '%s') | from_json }}" % (tmp_path / "kv.json")}},
+        {"ansible.builtin.set_fact": {"_host_kv_dict": "{{ _loaded.kv }}",
+                                      "_effective_host_resp": "{{ _loaded.resp }}",
+                                      "host_audit_record": {"status": "unreachable"},
+                                      "_host_audit_inventory_probe": {"unreachable": True, "msg": "x"},
+                                      "host_audit_privileged_extra": []}},
+        task,
+        {"ansible.builtin.copy": {"content": "{{ host_audit_record | to_json }}",
+                                  "dest": str(tmp_path / "record.json"), "mode": "0600"}},
+    ]}]
+    (tmp_path / "play.yml").write_text(yaml.safe_dump(play, allow_unicode=True), encoding="utf-8")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "play.yml")], capture_output=True,
+                         text=True, stdin=subprocess.DEVNULL, cwd=tmp_path, timeout=300,
+                         env=dict(__import__("os").environ, ANSIBLE_NOCOLOR="1", ANSIBLE_BECOME="false",
+                                  ANSIBLE_CONFIG=str(ROOT_DIR / "ansible.cfg"),
+                                  ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins")))
+    assert res.returncode == 0, res.stdout + res.stderr
+    return json.loads((tmp_path / "record.json").read_text(encoding="utf-8"))["declared"]["asset"]
+
+
+def test_aud_101_task_reads_the_five_keys_and_never_evaluates_template_text_from_the_kv(tmp_path):
+    hostile = "{{ lookup('pipe', 'echo PWNED-' ~ 'X') }} [그룹자산A]"
+    asset = _aud101_record(tmp_path, dict(HOST_KV, description=hostile), 200)
+
+    assert asset["lookup"] == "ok" and asset["purpose"] == hostile
+    assert asset["asset_importance"] == "H" and asset["privileged_allowlist"] == []
+    assert "PWNED-X" not in json.dumps(asset) and "s3cret-pw" not in json.dumps(asset)
+
+
+def test_aud_101_task_marks_a_non_200_host_kv_response_as_lookup_failed(tmp_path):
+    for status in (404, 403, -1):
+        sub = tmp_path / str(status)
+        sub.mkdir()
+        asset = _aud101_record(sub, HOST_KV, status)
+        assert asset["lookup"] == "failed" and asset["purpose"] == ""
 
 
 def test_declaration_with_failed_lookup_ignores_whatever_the_dict_holds():

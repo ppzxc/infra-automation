@@ -141,7 +141,13 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 - **선언 값 출처**: ISMS 자산대장의 사본인 OpenBao `hosts/<Inventory Hostname>`다. `resolve_connection`이 접속 해석 때 이미 읽은 호스트 KV dict에서 다섯 키만 고르고(같은 dict에 접속 정보가 있어 통째로 기록·보고서에 넘기지 않는다) OpenBao를 다시 조회하지 않는다. 키는 용도=`description`(끝의 `[그룹자산명]`도 그대로 표시), `isms_department`(관리 부서), `isms_owner_role`(책임자 직책), `isms_admin_role`(관리자 직책), `isms_asset_importance`(자산중요도, H/M/L)다.
 - **조회 실패**: `hosts/<host>` 조회가 200이 아니면(404 포함: `hosts/<host>` 항목이 없는 서버도 같다) 다섯 칸 모두 '조회 실패'로 표시한다. 값이 정말 없는 것('미지정')과 구분하며 메일 요약도 '선언 미지정 호스트'와 '선언 조회 실패 호스트'를 따로 센다.
 - **미지정**: 조회는 됐는데 다섯 키 중 빈 값. `hosts/<host>`가 200으로 답했지만 키가 없는 서버와 `isms_target=false` 서버도 별도 상태 없이 '미지정'이다.
-- **잘못된 값**: 자산중요도가 H/M/L이 아니면 `잘못된 값 (<원래 값>)`으로 표시한다.
+- **잘못된 값**: 자산중요도가 H/M/L이 아니면 `잘못된 값 (<원래 값>)`으로 표시한다(원래 값은 20자까지, 넘으면 `…`). 비교는 대문자 H/M/L 정확 일치다(자산대장 표기 그대로라는 용어 정의를 따른다. 소문자·다른 표기는 사본 오류로 보고 고치게 한다).
+- **선언 값 처리 결정**
+  - 저장 값은 자산대장 사본 그대로다(증적). 앞뒤 공백만 자르고 값 하나는 500자에서 `…`로 끝낸다. 용도 끝의 `[그룹자산명]`은 실제 길이에서 잘리지 않는다. 문자열이 아닌 값(dict·list·bool)은 선언이 아니므로 빈 값('미지정')으로 본다.
+  - 호스트 KV 텍스트에 `{{ }}` 같은 템플릿 문법이 있어도 평가되지 않는다. OpenBao 응답에서 온 데이터는 신뢰하지 않는 값이라 ansible-core 2.19+가 템플릿으로 해석하지 않으며, `tests/test_host_audit_inventory.py`가 실제 `[AUD-101]` 태스크를 `ansible-playbook`으로 돌려 확인한다. 그래서 값을 고쳐 저장하지 않는다. 태스크는 입력에 호스트 KV 전체(접속 정보)가 있어 `no_log`다.
+  - 404를 포함해 200이 아닌 응답은 모두 '조회 실패'다(티켓 #492의 기준). 원인(403·404·타임아웃)은 기록하지 않는다. 호스트 KV를 읽는 곳이 `resolve_connection` 하나라 같은 판정을 거기서 받아 쓰고, 그 변수(`_effective_host_resp`, `_host_kv_dict`)가 없으면 조회 실패다.
+  - 태그 색: '미지정'·'조회 실패'는 회색, '잘못된 값'만 빨강이다. 조회 실패는 값을 알 수 없다는 뜻이지 발견이 아니므로 지원 종료·선언 외(빨강)와 구분하고, 메일 요약도 경고(WARN)로만 다룬다. 세 상태 호스트 수(`미지정`·`조회 실패`·`잘못된 값`)는 각각 따로 세므로 한 호스트가 둘 이상에 들어갈 수 있다.
+  - 호스트별 JSON `schema_version`은 2로 둔다. `declared.asset`은 `security_grade`가 `asset_importance`로 바뀌고 `lookup`이 더해졌다. 이 필드는 Audit Baseline 비교에 쓰이지 않고 보고서 모델을 만들 때 실행 안에서 읽힌다. Git 호스트 변수에 남은 옛 선언은 더 이상 읽지 않는다.
 - **선언 외**: 특수권한자(uid 0, wheel·sudo·admin 그룹 구성원, sudoers 규칙 대상) 중 허용 목록에 없는 계정. 허용 목록은 `accounts`의 sudo 권한 계정(`sudo: true`, 또는 `sudo` 미지정 + `tier: admin`, `state: absent` 제외), `openbao_ssh_allowed_principals`, `host_audit_privileged_extra`, 그리고 root다. sudoers의 `User_Alias` 등 별칭은 펼치지 않는다.
 - **장기 미사용**: 로그인 가능한 셸을 가진 계정 중 `lastlog -t 90`에 없는 계정(기록 없음 포함). 점검 계정과 uid 0 계정은 제외하고 표지에 명시한다. uid 0의 직접 로그인은 Configuration Vulnerability(KISA-2026) 항목이 다룬다. lastlog가 없으면 '마지막 로그인 점검불가'로 표시하고 장기 미사용 판정을 하지 않는다.
 - **EOL**: `roles/host_audit/vars/main.yml`의 `host_audit_eol_table`(기준일 `reviewed_on`, 무상 표준 지원 종료일). 실행 시작일 기준 지난 날짜면 지원 종료(EOS), 180일 이내면 EOL 임박, 표에 없으면 확인 불가.

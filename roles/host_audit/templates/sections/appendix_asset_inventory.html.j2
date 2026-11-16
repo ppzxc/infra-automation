@@ -5,7 +5,7 @@
   <div class="kv keep">
     <div>식별</div><div>{{ h.fqdn | e }} · {{ h.ips | e }} · 환경 {{ h.environment | e }}</div>
 {% for f in a.declared %}
-    <div>{{ f.label | e }}</div><div>{% if f.state != 'ok' %}<span class="tag {{ 'na' if f.unassigned else 'crit' }}">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</div>
+    <div>{{ f.label | e }}</div><div>{% if f.state != 'ok' %}<span class="tag {{ f.tag }}">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</div>
 {% endfor %}
     <div>운영 체제</div><div>{{ h.os | e }} · {{ h.kernel_arch | e }}{% if a.eol %} · <span class="tag {{ 'crit' if a.eol.status in ['eos', 'soon'] else ('ok' if a.eol.status == 'supported' else 'na') }}">{{ a.eol.label | e }}</span> {{ a.eol.date | e }}{% endif %}</div>
 {% if a.collected %}
