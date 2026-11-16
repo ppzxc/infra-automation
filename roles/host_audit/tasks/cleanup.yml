@@ -31,9 +31,11 @@
          and (host_audit_baseline_history.state | default('failed')) != 'failed'
          and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0
          and not (_pointer_failed | bool) }}
-    _xlsx: "{{ _host_audit_xlsx_problem | default({'failed': true, 'targets': ['xlsx 판정 전에 멈춤']}) }}"
+    _xlsx_known: "{{ _host_audit_xlsx_problem is defined }}"
+    _xlsx: "{{ _host_audit_xlsx_problem | default({'failed': true, 'targets': []}) }}"
     _xlsx_why: >-
-      {{ 'xlsx 산출물 실패(' ~ (_xlsx.targets | join(', ')) ~ ')' ~ ('와 원본 보관 미완료 - 두 실패 메시지가'
+      {{ '앞 단계에서 멈춰 xlsx 판정이 없음 - 실행 실패 메시지가 이 디렉터리를 가리킴' if not (_xlsx_known | bool)
+         else 'xlsx 산출물 실패(' ~ (_xlsx.targets | join(', ')) ~ ')' ~ ('와 원본 보관 미완료 - 두 실패 메시지가'
                                  if not (_kept_in_bucket | bool) and (host_audit_storage_enabled | bool)
                                  else ' - 실패 메시지가') ~ ' 이 디렉터리를 가리킴' }}
     _mail_sent: >-

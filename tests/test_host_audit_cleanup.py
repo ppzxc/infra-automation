@@ -109,6 +109,15 @@ def test_an_xlsx_write_failure_keeps_this_run_and_ends_it_failed_after_the_mail(
     assert "xlsx 산출물 실패(h2)" in res.stdout and "남김" in res.stdout
 
 
+def test_a_missing_xlsx_verdict_keeps_this_run_even_when_the_bucket_has_the_originals(tmp_path):
+    """An early stop before the xlsx summary leans to keeping the directory (no value is not 'no failure')."""
+    root, out = _run_dir(tmp_path)
+    variables = _vars(root, out, mail_sent=True)
+    del variables["_host_audit_xlsx_problem"]
+    res = _run(tmp_path, variables)
+    assert out.exists() and "앞 단계에서 멈춰 xlsx 판정이 없음" in res.stdout
+
+
 def test_both_failures_are_named_in_the_kept_reason(tmp_path):
     root, out = _run_dir(tmp_path)
     variables = dict(_vars(root, out, uploads=(200, 500), mail_sent=False), _host_audit_xlsx_problem=_XLSX_PROBLEM)

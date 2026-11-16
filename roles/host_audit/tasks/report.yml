@@ -154,7 +154,7 @@
       ignore_errors: true
       when:
         - not ansible_check_mode
-        - _host_audit_xlsx_dir.stat.isdir | default(false)
+        - _host_audit_xlsx_dir.stat.exists | default(true)  # skipped only when stat positively says absent
 
     - name: Remove the xlsx files that this attempt did not write
       vars:
