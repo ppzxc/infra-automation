@@ -81,6 +81,7 @@ from ansible.module_utils.basic import AnsibleModule
 
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest time a zip member can carry
 DEFAULT_WIDTH = 16
+MIN_MASKED = 24  # characters; shorter cell values are not masked in the module's own result
 MAX_CELL = 32767  # characters an xlsx cell can hold
 _ILLEGAL = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')  # incl. lone surrogates (not encodable)
 
@@ -88,8 +89,13 @@ _ILLEGAL = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]') 
 STYLE_HEADER, STYLE_BODY, STYLE_FOOTER = 1, 2, 3
 
 
+def _normalize(value):
+    """Cell text as it is written, before the length limit: CRLF as LF, XML-illegal characters dropped."""
+    return _ILLEGAL.sub(u'', value.replace(u'\r\n', u'\n').replace(u'\r', u'\n'))
+
+
 def _text(value):
-    value = _ILLEGAL.sub(u'', value.replace(u'\r\n', u'\n').replace(u'\r', u'\n'))
+    value = _normalize(value)
     if len(value) > MAX_CELL:
         value = value[:MAX_CELL - 1] + u'…'
     return value.replace(u'&', u'&amp;').replace(u'<', u'&lt;').replace(u'>', u'&gt;')
@@ -197,7 +203,7 @@ def _workbook(sheet):
 def truncated_cells(headers, rows, footer):
     """Number of text cells longer than an xlsx cell holds (they are cut with an ellipsis; the module warns)."""
     cells = list(headers) + [c for row in rows for c in row] + list(footer)
-    return sum(1 for c in cells if isinstance(c, str) and len(c) > MAX_CELL)
+    return sum(1 for c in cells if isinstance(c, str) and len(_normalize(c)) > MAX_CELL)
 
 
 def build_xlsx(sheet, headers, rows, footer, widths):
@@ -212,6 +218,8 @@ def build_xlsx(sheet, headers, rows, footer, widths):
     for number, row in enumerate(rows, 2):
         if len(row) != len(headers):
             raise ValueError('row %d has %d cells, the header has %d' % (number, len(row), len(headers)))
+    if len(widths) > len(headers):
+        raise ValueError('%d column widths for %d headers' % (len(widths), len(headers)))
     widths = [int(w) for w in widths] + [DEFAULT_WIDTH] * (len(headers) - len(widths))
     parts = [
         (u'[Content_Types].xml', _CONTENT_TYPES),
@@ -274,15 +282,18 @@ def main():
             dest=dict(type='path', required=True),
             sheet=dict(type='str', default='Sheet1'),
             headers=dict(type='list', elements='str', required=True),
-            # Not no_log: Ansible would mask every cell value inside the module's own output (the failure message
-            # and dest too). The cells are what report.html shows (the KISA checks never print secrets); errors
-            # name only a row number and a count.
-            rows=dict(type='list', elements='list', default=[]),
+            # no_log keeps the cells (host evidence, register text) out of the syslog/journal invocation record.
+            # Its masking of the module's own output is narrowed below so errors and dest stay readable.
+            rows=dict(type='list', elements='list', default=[], no_log=True),
             footer=dict(type='list', elements='str', default=[]),
             widths=dict(type='list', elements='int', default=[]),
         ),
         supports_check_mode=True,
     )
+    # The invocation is logged (masked) by now. Ansible would also blank every occurrence of every cell value in the
+    # result, so a short cell such as '1' or a host name would hide the row number, the path and the file name.
+    # Only long values (free text such as evidence) stay masked in the output.
+    module.no_log_values = set(v for v in module.no_log_values if len(v) >= MIN_MASKED)
     p = module.params
     try:
         data = build_xlsx(p['sheet'], p['headers'], p['rows'], p['footer'], p['widths'])

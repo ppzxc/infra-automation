@@ -160,6 +160,38 @@ def test_a_cell_over_the_xlsx_limit_is_cut_and_warned(tmp_path):
     assert len(cell) == 32767 and cell.endswith("…")
 
 
+def test_error_messages_and_paths_are_not_masked_by_short_cell_values(tmp_path):
+    """rows is a no_log argument; masking is narrowed so a host-name-sized cell does not blank the message."""
+    dest = tmp_path / "xlsx" / "host-audit-r-1.xlsx"
+    rows = [["1", "1", 1, "2"], ["host-audit", "2", 3, "xlsx"], ["a"]]
+    out = _run(dict(_args(dest), rows=rows, _args_file=tmp_path / "n.json"))
+    assert out["failed"] is True and out["msg"] == "row 4 has 1 cells, the header has 4"
+    ok = _run(dict(_args(dest), rows=rows[:2], _args_file=tmp_path / "n2.json"))
+    assert ok["dest"] == str(dest) and ok["size"] > 0
+
+
+def test_long_free_text_stays_masked_in_the_result(tmp_path):
+    secret = "an evidence line that is long enough to stay masked"
+    dest = tmp_path / "xlsx" / "w.xlsx"
+    out = _run(dict(_args(dest), rows=[["a", "b", 1, secret], ["a"]], _args_file=tmp_path / "s.json"))
+    assert out["failed"] is True and secret not in json.dumps(out)
+
+
+def test_more_widths_than_headers_is_refused(tmp_path):
+    dest = tmp_path / "w.xlsx"
+    out = _run(dict(_args(dest), widths=[1, 2, 3, 4, 5], _args_file=tmp_path / "w.json"))
+    assert out.get("failed") is True and not dest.exists()
+
+
+def test_the_cut_warning_counts_after_normalization(tmp_path):
+    dest = tmp_path / "n.xlsx"
+    short = "x" * 32760 + "\r\n" * 4  # 32,768 raw, 32,764 after normalization: not cut
+    out = _run(dict(_args(dest), rows=[["a", "b", 1, short]], _args_file=tmp_path / "n.json"))
+    assert "warnings" not in out
+    cell = openpyxl.load_workbook(dest).active["D2"].value
+    assert len(cell) == 32764
+
+
 def test_the_writer_uses_only_the_standard_library():
     spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
     source = MODULE.read_text(encoding="utf-8")
