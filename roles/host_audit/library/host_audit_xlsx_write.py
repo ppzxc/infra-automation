@@ -264,7 +264,7 @@ def build_xlsx(sheet, headers, rows, footer, widths):
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:
         for name, xml in parts:
             info = zipfile.ZipInfo(name, FIXED_TIME)
-            info.compress_type = zipfile.ZIP_STORED  # not deflate: its bytes depend on the zlib build
+            info.compress_type = zipfile.ZIP_STORED  # not deflate: its bytes depend on the zlib implementation/build, even at a pinned level (docs 17.2)
             info.external_attr = 0o600 << 16
             info.create_system = 3  # fixed (unix), not the platform the module happens to run on
             archive.writestr(info, xml.encode('utf-8'))

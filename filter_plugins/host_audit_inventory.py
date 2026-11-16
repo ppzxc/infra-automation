@@ -446,6 +446,8 @@ def _declared(record):
         elif not value:
             state, shown = 'unassigned', UNASSIGNED
         elif key == 'asset_importance' and value not in IMPORTANCE_LEVELS:
+            # Exact, case-sensitive: the value is shown as the ledger writes it (spec #488), so 'h' is a copy error to fix.
+            # The cell names only the original value; the allowed H/M/L are in the glossary and docs, not repeated per cell.
             state, shown = 'invalid', '%s (%s)' % (INVALID, _cap(value, INVALID_SHOWN_LEN))
         else:
             state, shown = 'ok', value
