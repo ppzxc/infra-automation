@@ -55,7 +55,7 @@ CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH,
 # KISA-2026 Unix items U-01~U-67. The item list lives only in host_audit_kisa_items.yml next to this
 # module (title/severity/category/criteria/cis); it is read once at import, never edited here.
 ITEM_FIELDS = ('title', 'severity', 'category', 'criteria', 'cis')
-CATALOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'host_audit_kisa_items.yml')
+CATALOG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'host_audit_kisa_items.yml')
 
 
 def _load_items():
@@ -70,6 +70,9 @@ def _load_items():
         missing = [k for k in ITEM_FIELDS if not isinstance(meta, dict) or k not in meta]
         if missing:
             raise RuntimeError('KISA item %s lacks fields %s in %s' % (code, ', '.join(missing), CATALOG_PATH))
+        if not all(isinstance(meta[k], str) for k in ITEM_FIELDS) or meta['severity'] not in SEVERITY_ORDER \
+                or meta['category'] not in CATEGORIES:
+            raise RuntimeError('KISA item %s has a wrong type, severity or category in %s' % (code, CATALOG_PATH))
     return items
 
 
