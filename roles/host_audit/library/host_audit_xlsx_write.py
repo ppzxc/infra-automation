@@ -127,12 +127,18 @@ def _column(index):
     return name
 
 
+def _coerce(value):
+    """None is an empty cell; a bool, float or other type is written as its text rather than failing the run."""
+    if value is None:
+        return u''
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return str(value)
+    return value
+
+
 def _cell(row, col, value, style):
     ref = u'%s%d' % (_column(col), row)
-    if value is None:
-        value = u''
-    elif isinstance(value, bool) or not isinstance(value, (int, str)):
-        value = str(value)  # a float or another type is written as its text rather than failing the whole run
+    value = _coerce(value)
     if isinstance(value, str):
         value = _normalize(value)  # first, so text made only of illegal characters is the same blank as ''
     if isinstance(value, int) and abs(value) > MAX_EXACT_INT:
@@ -226,8 +232,7 @@ def truncated_cells(headers, rows, footer):
     """Number of text cells longer than an xlsx cell holds (they are cut with an ellipsis; the module warns)."""
     cells = list(headers) + [c for row in rows for c in row] + list(footer)
     # A value that is neither text nor an integer is written as its text (see _cell), so it is cut the same way.
-    texts = [c if isinstance(c, str) else str(c) for c in cells
-             if c is not None and (isinstance(c, str) or isinstance(c, bool) or not isinstance(c, int))]
+    texts = [c for c in (_coerce(cell) for cell in cells) if isinstance(c, str)]
     return sum(1 for c in texts if _units(_normalize(c)) > MAX_CELL)
 
 
