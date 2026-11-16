@@ -308,7 +308,7 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
 
     Values are kept as the ledger copy has them (evidence): only surrounding blanks are cut and a value
     longer than 500 characters ends with '…' (far above a description with its trailing ``[그룹자산명]``;
-    the cap only keeps a pasted blob out of the record). A dict, list or bool is not text: the value is
+    the cap only keeps a pasted blob out of the record). Anything that is not a string (dict, list, bool, number) is not text: the value is
     empty and the key is listed in ``malformed`` so the report shows '잘못된 값' instead of '미지정'.
     No template escaping: ansible-core 2.19+ never templates data that came from a lookup or a filter
     (untrusted by default); ``tests/test_host_audit_inventory.py`` proves it with a real run.
@@ -318,10 +318,10 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
     malformed = []
     for kv_key, key in DECLARATION_KEYS:
         value = host_kv.get(kv_key)
-        if isinstance(value, (dict, list, bool)):
+        if value is not None and not isinstance(value, str):
             malformed.append(key)
             value = ''
-        decl[key] = _cap(str(value).strip(), DECLARED_MAX_LEN) if value is not None else ''
+        decl[key] = _cap(value.strip(), DECLARED_MAX_LEN) if isinstance(value, str) else ''
     decl['lookup'] = 'ok' if lookup_ok else 'failed'
     if malformed:
         decl['malformed'] = malformed
@@ -427,8 +427,8 @@ def _declared(record):
     fields = []
     for key, label in DECLARED_FIELDS:
         value = str(asset.get(key) or '').strip()
-        if key == 'asset_importance' and not value:
-            # 이 변경 전에 저장한 기록(security_grade)도 값을 잃지 않고 '잘못된 값'으로 보인다.
+        if key == 'asset_importance' and 'lookup' not in asset:
+            # 이 변경 전에 저장한 기록(lookup 키 없음)의 security_grade도 값을 잃지 않고 '잘못된 값'으로 보인다.
             value = str(asset.get('security_grade') or '').strip()
         if failed:
             state, shown = 'lookup_failed', LOOKUP_FAILED

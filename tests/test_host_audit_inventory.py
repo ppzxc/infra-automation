@@ -358,9 +358,9 @@ def test_tag_colors_separate_unknown_values_from_data_errors():
 
 
 def test_non_text_values_and_old_security_grade_records_show_as_invalid_not_unassigned():
-    _m, declared = _decl_model(dict(HOST_KV, isms_owner_role=["x"], isms_department=True))
+    _m, declared = _decl_model(dict(HOST_KV, isms_owner_role=["x"], isms_department=True, isms_admin_role=123))
     assert declared["owner_role"]["state"] == "invalid" and declared["department"]["state"] == "invalid"
-    assert declared["purpose"]["state"] == "ok"
+    assert declared["admin_role"]["state"] == "invalid" and declared["purpose"]["state"] == "ok"
 
     rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
     rec["declared"]["asset"].pop("asset_importance")
@@ -498,8 +498,9 @@ def test_mail_summary_counts_unassigned_and_lookup_failed_hosts_separately():
     failed_model, _ = _decl_model(HOST_KV, lookup_ok=False)
     line = summary(failed_model)
     assert "선언 미지정 호스트 0" in line["text"] and "선언 조회 실패 호스트 1" in line["text"]
+    assert line["level"] == "crit", "every host failed: the declaration evidence is missing as a whole"
     invalid_model, _ = _decl_model(dict(HOST_KV, isms_asset_importance="높음"))
-    assert "자산중요도 잘못된 값 호스트 1" in summary(invalid_model)["text"]
+    assert "선언 잘못된 값 호스트 1" in summary(invalid_model)["text"]
     unassigned_model, _ = _decl_model({})
     assert "선언 미지정 호스트 1" in summary(unassigned_model)["text"]
     assert "선언 조회 실패 호스트 0" in summary(unassigned_model)["text"]
