@@ -145,10 +145,19 @@ def test_a_file_with_the_right_bytes_but_a_wrong_mode_is_fixed_and_reported_chan
 
 
 def test_invalid_sheet_names_and_empty_headers_are_refused(tmp_path):
-    for bad in ({"sheet": "x" * 32}, {"sheet": "a/b"}, {"headers": [], "rows": []}):
+    for bad in ({"sheet": "x" * 32}, {"sheet": "a/b"}, {"sheet": "'a"}, {"widths": [300, 1, 1, 1]},
+                {"headers": [], "rows": []}):
         dest = tmp_path / "bad.xlsx"
         out = _run(dict(_args(dest), _args_file=tmp_path / "v.json", **bad))
         assert out.get("failed") is True and not dest.exists(), bad
+
+
+def test_a_cell_over_the_xlsx_limit_is_cut_and_warned(tmp_path):
+    dest = tmp_path / "long.xlsx"
+    out = _run(dict(_args(dest), rows=[["a", "b", 1, "x" * 40000]], _args_file=tmp_path / "l.json"))
+    assert not out.get("failed") and "were cut" in json.dumps(out["warnings"])
+    cell = openpyxl.load_workbook(dest).active["D2"].value
+    assert len(cell) == 32767 and cell.endswith("…")
 
 
 def test_the_writer_uses_only_the_standard_library():

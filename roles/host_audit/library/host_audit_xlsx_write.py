@@ -194,13 +194,21 @@ def _workbook(sheet):
             u'<sheets><sheet name="%s" sheetId="1" r:id="rId1"/></sheets></workbook>' % name)
 
 
+def truncated_cells(headers, rows, footer):
+    """Number of text cells longer than an xlsx cell holds (they are cut with an ellipsis; the module warns)."""
+    cells = list(headers) + [c for row in rows for c in row] + list(footer)
+    return sum(1 for c in cells if isinstance(c, str) and len(c) > MAX_CELL)
+
+
 def build_xlsx(sheet, headers, rows, footer, widths):
     """The bytes of the workbook. Raises ValueError for a row that does not fit the header or an unsupported cell."""
     headers = list(headers)
     if not headers:
         raise ValueError('headers must not be empty')
-    if not sheet or len(sheet) > 31 or re.search(r'[\[\]:*?/\\]', sheet):
-        raise ValueError('sheet name must be 1 to 31 characters without [ ] : * ? / \\')
+    if not sheet or len(sheet) > 31 or re.search(r'[\[\]:*?/\\]', sheet) or sheet[0] == "'" or sheet[-1] == "'":
+        raise ValueError("sheet name must be 1 to 31 characters without [ ] : * ? / \\ and no edge apostrophe")
+    if any(int(w) < 1 or int(w) > 255 for w in widths):
+        raise ValueError('column widths must be 1 to 255')
     for number, row in enumerate(rows, 2):
         if len(row) != len(headers):
             raise ValueError('row %d has %d cells, the header has %d' % (number, len(row), len(headers)))
@@ -241,12 +249,14 @@ def _write(dest, data):
     if not os.path.isdir(directory):
         os.makedirs(directory, 0o700)
         os.chmod(directory, 0o700)
-    # mkstemp: exclusive create with an unpredictable name (no symlink to follow), mode 0600. AUD-513 skips *.tmp
-    # in case a killed run leaves one behind.
+    # mkstemp: exclusive create with an unpredictable name (no symlink to follow), mode 0600. The name starts with a
+    # dot, so AUD-512 (ansible.builtin.find without hidden files) never lists a leftover of a killed run.
     fd, tmp = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=directory)
     try:
         with os.fdopen(fd, 'wb') as handle:
             handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())  # the renamed file must not be empty after a crash
         os.replace(tmp, dest)
     except BaseException:
         # A leftover .tmp in xlsx/ would be found and kept by AUD-512.
@@ -278,6 +288,9 @@ def main():
         data = build_xlsx(p['sheet'], p['headers'], p['rows'], p['footer'], p['widths'])
     except ValueError as exc:
         module.fail_json(msg=str(exc))
+    cut = truncated_cells(p['headers'], p['rows'], p['footer'])
+    if cut:
+        module.warn('%d cell(s) longer than %d characters were cut' % (cut, MAX_CELL))
     changed = (not _same(p['dest'], data)) if module.check_mode else _write(p['dest'], data)
     module.exit_json(changed=changed, dest=p['dest'])
 

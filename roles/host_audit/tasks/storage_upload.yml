@@ -46,8 +46,7 @@
     get_mime: false
   loop: >-
     {{ _host_audit_keep_files.files | default([]) | map(attribute='path')
-       | reject('match', '^' ~ (host_audit_run.output_dir | regex_escape) ~ '/(trivy|package_findings)/')
-       | reject('match', '.*\\.tmp$') | sort }}
+       | reject('match', '^' ~ (host_audit_run.output_dir | regex_escape) ~ '/(trivy|package_findings)/') | sort }}
   register: _host_audit_keep_stats
 
 - name: "[AUD-514] Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)"

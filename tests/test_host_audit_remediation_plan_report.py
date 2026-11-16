@@ -84,7 +84,7 @@ def test_one_xlsx_per_host_is_written_and_is_in_the_keep_list(tmp_path):
     (out / "xlsx").mkdir()
     (out / "xlsx" / ".leftover.tmp").write_bytes(b"partial")
     stats = _run(tmp_path, out, _model())
-    assert not [rel for rel in stats if rel.endswith(".tmp")]  # a killed writer's temp file is never kept
+    assert not [rel for rel in stats if rel.endswith(".tmp")]  # a killed writer's (hidden) temp file is never listed
     names = {"xlsx/host-audit-ha-1-h1.xlsx", "xlsx/host-audit-ha-1-h2.xlsx"}
     assert names <= set(stats)
     for rel in names:
