@@ -133,8 +133,19 @@ def test_one_odd_host_does_not_stop_the_plans_of_the_others():
     model = copy.deepcopy(_model([_record("h1", {1: "VULN"}), _record("h2", {1: "VULN"})]))
     model["config_vulnerability"]["findings"][0]["hosts"][0].pop("evidence")  # h1's entry is broken
     plans = {p["host"]: p for p in host_audit_remediation_plans(model)}
-    assert plans["h1"]["rows"][0][COL["통제내용"]] == "이행계획서 생성 실패 (KeyError)"
+    assert plans["h1"]["rows"][0][COL["통제내용"]] == "이행계획서 생성 실패 (KeyError: 'evidence')"
+    assert plans["h1"]["error"] == "KeyError: 'evidence'" and "error" not in plans["h2"]
+    assert plans["h1"]["rows"][0][COL["담당자"]] == "관리자-직책"  # the owner is still the known role
     assert plans["h2"]["rows"][0][COL["통제내용"]].startswith("U-01 ")
+
+
+def test_a_register_view_with_missing_keys_only_blanks_the_remark():
+    reg = [_exception("U-01")]
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"}, register=reg)], reg))
+    exc = model["config_vulnerability"]["findings"][0]["hosts"][0]["exception"]
+    exc.pop("reason")
+    exc.pop("approver")
+    assert "사유: - / 위험: R-risk" in host_audit_remediation_plan(model, "h1")["rows"][0][COL["비고"]]
 
 
 def test_columns_carry_catalog_and_derived_values():

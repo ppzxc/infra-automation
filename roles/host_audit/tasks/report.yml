@@ -112,9 +112,18 @@
     # 반복문의 item은 실패 결과에 그대로 찍히기 때문이다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이
     # 보여야 하고(no_log면 가려진다), 성공 때의 fact는 -v에서만 찍히며 내용은 report.html과 같다.
     - name: Build the Remediation Plan of every host
+      vars:
+        _plans: "{{ host_audit_model | host_audit_remediation_plans }}"
       ansible.builtin.set_fact:
-        _host_audit_remediation_plans: >-
-          {{ dict(host_audit_model.hosts | zip(host_audit_model | host_audit_remediation_plans)) }}
+        _host_audit_remediation_plans: "{{ dict(_plans | map(attribute='host') | zip(_plans)) }}"
+
+    # 계획을 못 만든 호스트는 그 호스트만 한 줄 파일이 되고 실행은 계속된다. 로그에 호스트와 원인을 남긴다.
+    - name: Name the hosts whose Remediation Plan could not be built
+      ansible.builtin.debug:
+        msg: "Remediation Plan 생성 실패 {{ item.key }}: {{ item.value.error }}"
+      loop: "{{ _host_audit_remediation_plans | dict2items | selectattr('value.error', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
 
     - name: "[AUD-025] Write the Remediation Plan xlsx of every host"
       vars:

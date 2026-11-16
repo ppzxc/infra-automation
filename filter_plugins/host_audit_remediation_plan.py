@@ -70,10 +70,10 @@ def _remark(verdict, entry):
     text = ''
     if verdict == EXCEPTION and exc.get('state') == REGISTER_ACTIVE:
         text = '예외(승인) — 사유: %s / 위험: %s / 보완: %s / 승인: %s %s / 만료: %s' % (
-            exc['reason'], exc['risk'], exc['mitigation'], exc['approver'], exc['approved_on'] or BLANK,
-            exc['expires_on'] or BLANK)
+            exc.get('reason') or BLANK, exc.get('risk') or BLANK, exc.get('mitigation') or BLANK,
+            exc.get('approver') or BLANK, exc.get('approved_on') or BLANK, exc.get('expires_on') or BLANK)
     elif exc.get('state') == REGISTER_EXPIRED:
-        text = '예외 만료(%s)' % (exc['expires_on'] or BLANK)
+        text = '예외 만료(%s)' % (exc.get('expires_on') or BLANK)
     elif exc.get('state') == REGISTER_PENDING:
         text = '예외 승인 대기'
     return (prefix + text).strip()
@@ -137,8 +137,9 @@ def host_audit_remediation_plans(model):
         try:
             plan = host_audit_remediation_plan(model, host)
         except Exception as exc:  # one odd record must not stop the evidence of every other host
-            row = ['', host, LOOKUP_FAILED, '%s (%s)' % (PLAN_FAILED, type(exc).__name__)] + [''] * (len(HEADERS) - 4)
-            plan = _plan([row], host, run_id, LOOKUP_FAILED)
+            error = '%s: %s' % (type(exc).__name__, str(exc)[:200])
+            row = ['', host, _admin_role(model, host), '%s (%s)' % (PLAN_FAILED, error)] + [''] * (len(HEADERS) - 4)
+            plan = dict(_plan([row], host, run_id, ''), error=error)
         plans.append(dict(plan, host=host, file_name=host_audit_remediation_file_name(run_id, host)))
     return plans
 

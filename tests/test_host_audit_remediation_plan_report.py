@@ -42,6 +42,10 @@ def _task(file, spec_id):
     return next(t for t in _flat(_tasks(file)) if "[%s]" % spec_id in t.get("name", ""))
 
 
+def _named(name):
+    return next(t for t in _flat(_tasks("report.yml")) if t.get("name") == name)
+
+
 def _plan_task():
     return next(t for t in _flat(_tasks("report.yml")) if t.get("name") == "Build the Remediation Plan of every host")
 
@@ -68,7 +72,8 @@ def _run(tmp_path, out, model, run_kind="scheduled"):
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
         "vars": {"host_audit_run": {"run_id": "ha-1", "run_kind": run_kind, "output_dir": str(out)},
                  "_host_audit_storage_active": True, "_host_audit_storage_problem": ""},
-        "tasks": [load, _plan_task(), _task("report.yml", "AUD-025")] + keep + [{"ansible.builtin.debug": {
+        "tasks": [load, _plan_task(), _named("Name the hosts whose Remediation Plan could not be built"),
+                  _task("report.yml", "AUD-025")] + keep + [{"ansible.builtin.debug": {
             "msg": "{{ _host_audit_keep_stats.results | map(attribute='stat', default={}) | list }}"}}],
     }], allow_unicode=True))
     env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
@@ -116,6 +121,17 @@ def test_template_text_in_host_evidence_stays_text_through_the_module_arguments(
     ws = openpyxl.load_workbook(out / "xlsx/host-audit-ha-1-h1.xlsx").active
     texts = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, str)]
     assert any(evidence in t for t in texts)
+
+
+def test_a_host_whose_plan_cannot_be_built_gets_a_one_line_file_and_the_run_goes_on(tmp_path):
+    out = tmp_path / "run"
+    out.mkdir()
+    model = _model()
+    model["config_vulnerability"]["findings"][0]["hosts"][0].pop("evidence")  # h1's entry is broken
+    stats = _run(tmp_path, out, model)
+    assert {"xlsx/host-audit-ha-1-h1.xlsx", "xlsx/host-audit-ha-1-h2.xlsx"} <= set(stats)
+    ws = openpyxl.load_workbook(out / "xlsx/host-audit-ha-1-h1.xlsx").active
+    assert ws["D2"].value.startswith("이행계획서 생성 실패 (KeyError")
 
 
 def test_the_xlsx_is_written_for_an_on_demand_run_too(tmp_path):
