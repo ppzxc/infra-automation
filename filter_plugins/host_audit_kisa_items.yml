@@ -553,14 +553,14 @@ U-28:
         target이 ACCEPT면: firewall-cmd --permanent --zone=<zone> --set-target=default 후 firewall-cmd --reload
         허용 규칙 추가: firewall-cmd --permanent --add-rich-rule (source address, port protocol, port, accept) 후 --reload
         firewalld가 꺼져 있으면 관리 접속 포트를 firewall-offline-cmd 로 먼저 허용한 뒤 systemctl enable --now firewalld (접속이 끊길 수 있음)
-        firewalld가 없는 CentOS 6/7(iptables): 관리 접속 허용 규칙을 먼저 넣고 INPUT 기본 정책을 DROP으로 한 뒤 service iptables save
+        firewalld가 없는 CentOS 6/7(iptables): 관리 접속 허용 규칙과 lo, ESTABLISHED,RELATED 허용 규칙을 먼저 넣고 INPUT 기본 정책을 DROP으로 한 뒤 service iptables save
         RHEL 8 이상은 TCP Wrapper(hosts.deny)가 적용되지 않으므로 firewalld나 nftables 규칙으로 제한한다
       debian: |
         ufw가 없으면 apt install ufw (Debian 12는 기본 설치가 아니며 nftables나 iptables-persistent를 쓸 수도 있다)
         ufw status numbered 로 현재 설정 확인
         ufw default deny incoming 과 허용 규칙(관리 접속 포함): ufw allow from <IP> to any port <포트>
         규칙을 만든 뒤 ufw enable (비활성 상태면 켜야 점검에 통과하며, 관리 접속 규칙이 없으면 접속이 끊김)
-        iptables를 쓰면 관리 접속 허용 규칙을 먼저 넣고 INPUT 기본 정책을 DROP으로 한 뒤, 재부팅 후에도 남도록 netfilter-persistent save (iptables-save > /etc/iptables/rules.v4)
+        iptables를 쓰면 관리 접속 허용 규칙과 lo, ESTABLISHED,RELATED 허용 규칙을 먼저 넣고 INPUT 기본 정책을 DROP으로 한 뒤, 재부팅 후에도 남도록 netfilter-persistent save (iptables-save > /etc/iptables/rules.v4)
   remediation_impact:
     level: 3
     reason: 허용하지 않은 IP는 서비스를 쓸 수 없게 되므로 규칙을 잘못 적용하면 원격 접속이 끊길 수 있다.
