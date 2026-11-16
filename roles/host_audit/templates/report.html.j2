@@ -97,6 +97,8 @@
 
 {% include 'sections/appendix.html.j2' %}
 
+{% if m.config_vulnerability is defined %}{% include 'sections/remediation_guide.html.j2' %}{% endif %}
+
   <h2 class="pb keep">검토 및 결재</h2>
   <p class="small mute">발견사항별 조치 의견(조치 / 예외 승인 / 선언 수정)과 검토 결과를 기재한다. 결재된 본 문서가 ISMS 2.11.2 검토 증적이다.</p>
   <table class="sign keep">

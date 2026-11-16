@@ -438,6 +438,39 @@ def _build_findings(groups):
     return order_findings(findings)
 
 
+FAMILY_LABELS = (('rhel', 'RHEL 계열'), ('debian', 'Debian 계열'))
+
+
+def _build_remediation_guide(findings):
+    """Item-level blocks of the remediation appendix: the same items in the same order as the body table.
+
+    ``findings`` is already in body table order, one entry per (item, verdict); the verdicts of one item share
+    its priority and levels, so they sit next to each other. Each block lists the hosts per verdict (no evidence)
+    and every family of ``steps`` (not filtered by a host's family). An unknown code yields no block.
+    """
+    blocks = {}
+    for finding in findings:
+        short = finding['code'].split(':', 1)[-1]
+        meta = ITEMS.get(short)
+        if meta is None:
+            continue
+        block = blocks.get(short)
+        if block is None:
+            steps = meta['remediation'].get('steps') or {}
+            block = blocks[short] = {
+                'code': short, 'title': meta['title'], 'severity': meta['severity'],
+                'purpose': meta['purpose'], 'threat': meta['threat'], 'criteria': meta['criteria'],
+                'check': meta['check'], 'summary': meta['remediation']['summary'],
+                'steps': [{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
+                          if key in steps],
+                'impact': dict(meta['remediation_impact']), 'effort': dict(meta['remediation_effort']),
+                'guide_page': meta['guide_page'], 'verdict_hosts': [],
+            }
+        block['verdict_hosts'].append({'verdict': finding['verdict'], 'verdict_class': finding['verdict_class'],
+                                       'hosts': [h['host'] for h in finding['hosts']]})
+    return list(blocks.values())
+
+
 def host_audit_kisa_section(model, records, register=None, today=None):
     """Return a copy of the report model with the Configuration Vulnerability section.
 
@@ -514,6 +547,7 @@ def host_audit_kisa_section(model, records, register=None, today=None):
         'totals': [totals[v] for v in VERDICTS],
         'summary': summary,
         'findings': findings,
+        'remediation_guide': _build_remediation_guide(findings),
         'remediation_source': REMEDIATION_SOURCE,
         'appendix': appendix,
         'register': _register_rows(register, applied, today),

@@ -1,0 +1,37 @@
+{#- 항목 단위 부록 `부록 N+1. 조치 안내` (Spec #488 / Ticket-3, #491). 호스트별 부록 뒤, 검토 및 결재 앞.
+    host_audit_model.config_vulnerability.remediation_guide를 그리기만 한다(본문 표와 같은 항목·같은 순서).
+    계열별 steps는 호스트 계열로 고르지 않고 있는 것을 전부 싣는다. 호스트별 증적은 싣지 않는다. -#}
+{%- set rg = m.config_vulnerability.remediation_guide | default([]) -%}
+<style>
+  .rg-block { break-inside: avoid; border:1px solid var(--line); padding:2mm 3mm; margin:3mm 0; }
+  .rg-block h3 { margin:0 0 1.5mm; }
+  .rg-hosts { font-size:8.5pt; margin:0 0 1.5mm; }
+  .rg-block dl { margin:0; font-size:8.5pt; }
+  .rg-block dt { color:var(--mute); font-size:8pt; margin-top:1.2mm; }
+  .rg-block dd { margin:0; }
+  .rg-steps { white-space: pre-wrap; margin:.5mm 0 0 3mm; font-size:8pt; }
+</style>
+  <h2 class="pb">부록 {{ m.hosts | length + 1 }}. 조치 안내</h2>
+{% if rg %}
+  <p class="small mute">이번 실행에서 양호 외 판정(취약·점검불가(수동)·예외(승인))이 나온 항목마다 한 블록이며 본문 「양호 외 항목」 표와 같은 순서다. 호스트별 증적은 호스트별 부록을 본다.</p>
+{% for b in rg %}
+  <section class="rg-block" data-code="{{ b.code | e }}">
+    <h3><span class="nowrap">{{ b.code | e }}</span> {{ b.title | e }} <span class="small mute">중요도 {{ b.severity | e }} · 가이드 p.{{ b.guide_page }}</span></h3>
+    <div class="rg-hosts">{% for v in b.verdict_hosts %}<span class="tag {{ v.verdict_class }}">{{ v.verdict | e }}</span>: {{ v.hosts | map('e') | join(', ') }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    <dl>
+      <dt>점검 목적</dt><dd>{{ b.purpose | e }}</dd>
+      <dt>보안 위협</dt><dd>{{ b.threat | e }}</dd>
+      <dt>판단 기준</dt><dd>{{ b.criteria | e }}</dd>
+      <dt>점검방법</dt><dd>{{ b.check | e }}</dd>
+      <dt>조치방법</dt><dd>{{ b.summary | e }}
+{%- for st in b.steps %}
+        <div><b>{{ st.family | e }}</b></div><div class="rg-steps">{{ st.text | e }}</div>
+{%- endfor %}</dd>
+      <dt>조치 영향도</dt><dd>{{ b.impact.level }} — {{ b.impact.reason | e }}</dd>
+      <dt>조치 난이도</dt><dd>{{ b.effort.level }} — {{ b.effort.reason | e }}</dd>
+    </dl>
+  </section>
+{% endfor %}
+{% else %}
+  <div class="note keep">조치 안내 대상 없음 — 이번 실행에서 양호 외 판정이 나온 항목이 없다.</div>
+{% endif %}
