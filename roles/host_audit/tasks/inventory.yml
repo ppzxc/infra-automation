@@ -27,6 +27,7 @@
            'inventory': (_host_audit_inventory_probe | host_audit_inventory_record)
                         if host_audit_record.status == 'ok' else None
          }, recursive=true) }}
+  no_log: true  # 템플릿 입력에 호스트 KV 전체(접속 정보)가 있어 오류 출력에 싣지 않는다
   vars:
     # resolve_connection이 이미 읽은 hosts/<host> KV(_host_kv_dict)에서 다섯 키만 고른다(OpenBao 재조회 없음).
     # hosts/<host> 응답이 200이 아니면 조회 실패. dict를 통째로 넘기지 않는다(같은 dict에 접속 정보가 있음).

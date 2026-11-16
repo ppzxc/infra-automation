@@ -439,16 +439,18 @@ def test_report_renders_asset_importance_and_lookup_failed_but_not_the_old_secur
 
 
 def test_removed_asset_variable_is_gone_from_the_repository():
+    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT_DIR, capture_output=True, text=True, check=True)
     offenders = []
-    for path in ROOT_DIR.rglob("*"):
-        if not path.is_file() or any(part.startswith(".") for part in path.relative_to(ROOT_DIR).parts) or path.suffix in (".pyc", ".png", ".gz", ".zip"):
+    for name in tracked.stdout.splitlines():
+        path = ROOT_DIR / name
+        if not path.is_file():
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
         if re.search(r"host_audit_" r"asset(?!_declaration)", text):
-            offenders.append(str(path.relative_to(ROOT_DIR)))
+            offenders.append(name)
     assert offenders == []
 
 
