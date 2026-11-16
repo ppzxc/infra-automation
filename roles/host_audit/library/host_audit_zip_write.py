@@ -86,7 +86,7 @@ def build_zip(src_dir, names):
                 data = handle.read()
             info = zipfile.ZipInfo(name, FIXED_TIME)
             info.compress_type = zipfile.ZIP_STORED
-            info.external_attr = 0o600 << 16
+            info.external_attr = (0o100000 | 0o600) << 16  # regular file, rw-------
             info.create_system = 3  # fixed (unix), not the platform the module happens to run on
             archive.writestr(info, data)
     return buffer.getvalue()

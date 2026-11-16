@@ -197,7 +197,7 @@ def _report_stage(tmp_path, out, model=None, break_xlsx=False):
     (out / "report.html").write_text("<html>report</html>")
     names = ("Build the Remediation Plan of every host", "[AUD-025]",
              "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]",
-             "Remove a leftover xlsx zip", "Remember that the xlsx zip", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
+             "Remove a leftover xlsx zip", "Reset the xlsx zip failure mark", "Remember that the xlsx zip", "Remove the xlsx zip when packing", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in names)]
     assert len(tasks) == len(names), [t.get("name") for t in tasks]

@@ -134,10 +134,16 @@
     # 판정한다 — 보조 첨부 때문에 보관·메일이 막히지 않는다(AUD-025와 같은 원칙).
     # 같은 실행 ID로 다시 돌린 실행이 이전 시도의 zip을 남겼으면, 이번에 묶지 못한 경우 그 옛 zip이 해시·첨부·보관에
     # 오르지 않도록 먼저 지운다.
+    # 묶는 경우에는 모듈이 같은 바이트면 그대로 두고(멱등) 아니면 원자적으로 바꾼다. 묶지 않는 경우(호스트 없음·xlsx 실패)에만 지운다.
     - name: Remove a leftover xlsx zip of an earlier attempt
       ansible.builtin.file:
         path: "{{ _host_audit_xlsx_zip_path }}"
         state: absent
+      when: (host_audit_model.hosts | length == 0) or (_host_audit_xlsx_failed_hosts | default([]) | length > 0)
+
+    - name: Reset the xlsx zip failure mark
+      ansible.builtin.set_fact:
+        _host_audit_xlsx_zip_failed: false
 
     - name: "[AUD-026] Pack every Remediation Plan xlsx into one zip"
       host_audit_zip_write:
@@ -154,6 +160,13 @@
       ansible.builtin.set_fact:
         _host_audit_xlsx_zip_failed: true
       when: _host_audit_xlsx_zip_write.failed | default(false)
+
+    # 묶기가 실패했으면 이전 시도의 zip이 남아 있어도 해시·첨부·보관에 오르지 않게 지운다.
+    - name: Remove the xlsx zip when packing it failed
+      ansible.builtin.file:
+        path: "{{ _host_audit_xlsx_zip_path }}"
+        state: absent
+      when: _host_audit_xlsx_zip_failed | bool
 
     - name: "[AUD-611] Compute the SHA-256 of the report to attach"
       ansible.builtin.stat:
