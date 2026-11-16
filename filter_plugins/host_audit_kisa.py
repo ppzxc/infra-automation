@@ -450,6 +450,8 @@ def _build_remediation_guide(findings):
     hosts per verdict (no evidence) and every family of ``steps`` (not filtered by a host's family). A code the
     catalog lacks (a stored record can carry one) still gets a block, with the finding's own columns and empty
     catalog text, so the block set always equals the body table's item set.
+    Catalog entries are validated at load (_validate_remediation), so their keys are indexed directly here, as in
+    remediation_view.
     """
     blocks = {}
     for finding in findings:
