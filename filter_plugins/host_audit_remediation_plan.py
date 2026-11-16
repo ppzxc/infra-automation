@@ -138,8 +138,13 @@ def host_audit_remediation_plans(model):
             plan = host_audit_remediation_plan(model, host)
         except Exception as exc:  # one odd record must not stop the evidence of every other host
             error = '%s: %s' % (type(exc).__name__, str(exc)[:200])
-            row = ['', host, _admin_role(model, host), '%s (%s)' % (PLAN_FAILED, error)] + [''] * (len(HEADERS) - 4)
-            plan = dict(_plan([row], host, run_id, ''), error=error)
+            try:
+                admin = _admin_role(model, host)
+            except Exception:  # the lookup itself may be what broke
+                admin = LOOKUP_FAILED
+            row = ['', host, admin, '%s (%s)' % (PLAN_FAILED, error)] + [''] * (len(HEADERS) - 4)
+            # error is exception text that can echo record data: marked unsafe like the cells (it is templated later)
+            plan = dict(_plan([row], host, run_id, ''), error=_unsafe(error))
         plans.append(dict(plan, host=host, file_name=host_audit_remediation_file_name(run_id, host)))
     return plans
 

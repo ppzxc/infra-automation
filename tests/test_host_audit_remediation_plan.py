@@ -139,6 +139,15 @@ def test_one_odd_host_does_not_stop_the_plans_of_the_others():
     assert plans["h2"]["rows"][0][COL["통제내용"]].startswith("U-01 ")
 
 
+def test_a_broken_asset_inventory_entry_still_gives_every_host_a_plan():
+    model = copy.deepcopy(_model([_record("h1", {1: "VULN"}), _record("h2", {1: "VULN"})]))
+    model["asset_inventory"]["hosts"].insert(0, "not a dict")  # breaks the owner lookup for every host
+    plans = {p["host"]: p for p in host_audit_remediation_plans(model)}
+    assert set(plans) == {"h1", "h2"}
+    assert plans["h1"]["rows"][0][COL["담당자"]] == "조회 실패"
+    assert plans["h1"]["rows"][0][COL["통제내용"]].startswith("이행계획서 생성 실패 (AttributeError")
+
+
 def test_a_register_view_with_missing_keys_only_blanks_the_remark():
     reg = [_exception("U-01")]
     model = copy.deepcopy(_model([_record("h1", {1: "VULN"}, register=reg)], reg))
