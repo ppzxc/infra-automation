@@ -343,7 +343,7 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 ## 10. Configuration Vulnerability (KISA-2026, #121)
 
 - **기준**: KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」 Unix 서버 항목. 항목 코드는 판을 붙여 `KISA-2026:U-NN`으로 적는다(2021판과 번호가 다르다). CIS RHEL 9 Benchmark v2.0.0 규칙 번호는 참조 열로만 둔다. 근거: `docs/research/host-audit-configuration-vulnerability-baseline.md`(#102, `research/host-audit-configuration-vulnerability-baseline` 브랜치).
-- **구현 범위**: Unix U-01~U-67 전 항목. 계정 관리 U-01~U-13(#121), 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67(#122). 자동 판정할 수 없는 항목은 점검불가(수동)로 두고 판단에 쓸 목록을 증적으로 남긴다(항목별 방법은 YAML `check`, §10.1·§10.4).
+- **구현 범위**: Unix U-01~U-67 전 항목. 계정 관리 U-01~U-13(#121), 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67(#122). 자동 판정할 수 없는 항목은 점검불가(수동)로 두고 판단에 쓸 목록을 증적으로 남긴다(항목별 방법은 YAML `check`, 공통 규칙은 §10.4).
 - **항목 목록의 원본은 YAML**: U-01~U-67의 항목 메타데이터는 `filter_plugins/host_audit_kisa_items.yml` 한 파일이 유일한 원본이다(Spec #488). `title`·`severity`·`category`·`criteria`·`cis`에 우리 probe가 보는 것을 한 줄로 쓴 `check`, 가이드를 우리 말로 요약한 `purpose`·`threat`·`remediation`, 조치 영향도·조치 난이도, 가이드 쪽 번호 `guide_page`가 붙는다(필드는 §10.5). `host_audit_kisa.py`는 import 시 이 파일을 읽기만 한다. 항목 표는 문서에 두지 않으니 항목 내용은 YAML을 고친다.
 - **실행**: `roles/host_audit/files/kisa/`의 `_lib.sh` + `U-NN.sh`(이름순) + `_end.sh`를 이어 붙여 `ansible.builtin.raw`로 `sh -s`에 넣는다. 호스트에 파일을 남기지 않고 Python이 필요 없어 CentOS 6 ~ Rocky 10, Ubuntu에서 같은 경로로 돈다. `/etc/shadow`와 `sshd -T`를 읽어야 해서 이 태스크만 root로 승격한다. 식별 수집(`AUD-010`)에 실패한 호스트는 건너뛴다.
 - **출력 규약**: 표식(`__HOST_AUDIT_KISA_BEGIN__`/`__HOST_AUDIT_KISA_END__`) 사이에 항목마다 `U-NN|<GOOD·VULN·NA·MANUAL>|증적` 한 줄. 증적은 설정 값·계정 이름·개수만 담고 비밀번호 해시 같은 비밀값은 싣지 않는다. 스크립트는 `KISA_ROOT`로 점검할 루트를 바꿀 수 있어 pytest가 가짜 `/etc`로 판정을 검증한다.
@@ -380,7 +380,6 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
   - 증적 문구: `file capability: none`(없음), `file capability: default only (N)`(기본만), `file capability review (N): ...; default: M`(기본 밖 있음), `file capability: 점검불가(...)`(`getcap`이 없거나 실행할 수 없음, 시간 초과).
 - **비밀값**: SNMP community는 길이·문자 종류만 판정하고 값은 증적에 싣지 않는다.
 
-U-14~U-67의 항목 목록과 점검방법도 YAML이다(§10.1).
 
 OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `rockylinux:8`, `rockylinux:9`, `ubuntu:22.04`, `debian:13` 컨테이너에서 돌려 67개 항목 모두 판정(양호·취약·해당없음·점검불가(수동))이 나오는 것을 확인했다. Rocky 10은 로컬 이미지가 없어 컨테이너로 돌리지 않았다(같은 POSIX sh·coreutils 경로).
 
@@ -418,11 +417,11 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 - **YAML 필드(항목마다 필수)**: `check`(우리 probe가 보는 것 한 줄), `remediation.summary`(OS 공통 조치 요약, 한 줄 300자 이하, 앞뒤 공백 없음 — 본문 표가 한 줄로 싣는다), `remediation.steps.rhel`·`steps.debian`(계열에 따라 명령·파일이 실제로 다른 항목만, 키는 이 둘뿐), `remediation_impact`·`remediation_effort`(`level` 1~3과 `reason`), `guide_page`, `purpose`·`threat`(각 1~2문장). 가이드 원문은 옮기지 않고 우리 말로 요약하며 설정값·경로 같은 사실만 그대로 둔다. `tests/test_host_audit_kisa_remediation.py`가 67개 전부의 필드와 level 범위, steps 키, 인프라 상세(주소·관리번호·메일)가 없음을 검사한다.
 - **조치 영향도(Remediation Impact)**: 조치가 호스트에서 돌고 있는 서비스를 흔드는 정도. 1은 설정·권한 변경만으로 끝나 재기동·접속 끊김이 없는 경우, 2는 재기동·재로그인이나 특정 연동이 조건부로 영향받는 경우, 3은 접속 불가·서비스 중단·로그인 불능 가능성이 있는 경우다. 가이드 "조치 시 영향"이 "영향 없음"류(정형문 50개와 조건부 U-05·U-50)인 52개는 1이고, 가이드가 개별로 서술한 15개(U-02, 03, 04, 06, 10, 12, 19, 23, 28, 41, 45, 49, 56, 57, 66)만 그 문장을 근거로 2 또는 3이다. 판정 위험(중요도)과 별개다.
 - **조치 난이도(Remediation Effort)**: 고치기 어려운 정도. 1은 설정 한 곳이나 명령 한두 개, 2는 여러 파일이나 대상 목록을 하나씩 처리하거나 재기동이 따르는 경우, 3은 패키지 교체·정책 수립·협의·판단이 필요한 대량 검토다. 조치 방법·사례를 근거로 67개 모두 매긴다.
-- **초안과 확정**: level과 reason은 에이전트가 2026판 가이드 PDF에서 쓴 초안이다. 영향도 1인 52개는 가이드 서술에 따라 1로 고정하고, 실제 우려가 있으면(예: U-37 일반 사용자 실행 차단, U-64 서비스 영향 파악) reason에 적어 두며 올릴지는 PR에서 정한다. 영향도 2·3 항목과 난이도 분포는 PR 본문 표로 보여 준 뒤 사용자가 확정한다.
+- **초안과 확정**: level과 reason은 에이전트가 2026판 가이드 PDF에서 쓴 초안이다. 영향도 1인 52개는 가이드 서술에 따라 1로 고정하고, 실제 우려가 있으면(예: U-37 일반 사용자 실행 차단, U-64 서비스 영향 파악) reason에 적어 두며 올릴지는 PR에서 정한다. 이 고정 때문에 reason에 우려가 적힌 1이 정렬에서는 위로 올 수 있다. 개별 서술 15개에는 U-04도 들어 있어 Linux만 보면 영향이 없어도 가이드의 HP-UX 서술을 근거로 2다. 영향도 2·3 항목과 난이도 분포는 PR 본문 표로 보여 준 뒤 사용자가 확정한다.
 - **조치 문구와 probe의 범위**: `remediation`은 가이드의 조치 방법이고 `check`는 우리 probe가 보는 범위라 둘이 완전히 겹치지는 않는다(예: 가이드는 xinetd.d·systemd 설정 파일까지 다루고 U-20 probe는 두 파일만 판정한다). 조치 뒤 판정은 다음 실행에서 probe가 확인한다. 알려진 차이: U-57의 vsftpd 조치 문구는 `userlist_deny=yes`일 때만 user_list가 차단 목록이라고 적지만 probe는 `userlist_deny`를 보지 않는다(probe 쪽 보강은 이 티켓 범위 밖이다).
 - **파생 값(저장하지 않음)**: 위험도 = 가이드 중요도(상 3, 중 2, 하 1), 우선순위 = 상 1, 중 2, 하 3, 시급성 = 우선순위 1 단기, 2 중기, 3 장기(기한은 정하지 않는다). 판정·호스트와 무관하게 항목마다 같은 값이다. `host_audit_kisa.py`의 `risk_level`·`priority_of`·`urgency_of`·`remediation_view`가 계산한다.
 - **본문 표**: "양호 외 항목" 표에 중요도 옆 `조치 영향도` 열(숫자)과 판단 기준 칸 아래 `조치: <remediation.summary>` 한 줄이 붙는다. 호스트별 부록(`appendix_config_vulnerability`)에는 조치 데이터를 싣지 않는다(부록 행은 기본 열만 쓴다). 표 아래에 조치 영향도 설명이 실리고, 가이드 출처 문장("조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 바탕으로 요약함")은 양호 외 항목이 없어도 보고서 맨 끝(검토 및 결재 뒤)에 한 번 실린다.
-- **정렬**: 본문 표는 우선순위(1이 먼저) → 조치 영향도(낮은 것 먼저) → 조치 난이도(쉬운 것 먼저) → 판정(취약 → 점검불가(수동) → 예외(승인)) → 항목 코드 순이다. 앞의 세 키가 우선순위 규칙이고, 같은 항목이 판정별로 둘 이상 나올 때만 판정과 코드가 순서를 정한다. 이전의 판정 우선 정렬은 이 규칙으로 바뀌었다. 정렬은 `order_findings`가 한다.
+- **정렬**: 본문 표는 우선순위(1이 먼저) → 조치 영향도(낮은 것 먼저) → 조치 난이도(쉬운 것 먼저) → 판정(취약 → 점검불가(수동) → 예외(승인)) → 항목 코드 순이다. 앞의 세 키가 우선순위 규칙이고, 같은 항목이 판정별로 둘 이상 나올 때만 판정과 코드가 순서를 정한다. 이전의 판정 우선 정렬은 이 규칙으로 바뀌었다(Spec #488 결정: 표 정렬은 우선순위 규칙을 따르며 판정은 정렬 키가 아니라 열로 보인다. 그래서 예외(승인) 행이 같은 우선순위의 취약 행보다 위에 올 수 있다). 정렬은 `order_findings`가 한다.
 - **호스트별 JSON 불변**: 조치 데이터는 보고서 모델을 만들 때 YAML에서 붙인다. `config_vulnerability`의 `edition`·`status`·`reason`·`results[].{code,result,verdict,evidence,exception}`와 레코드 `schema_version` 2는 바뀌지 않는다(Audit Baseline 비교 호환).
 - **범위**: 항목 단위 `부록 N+1. 조치 안내`와 호스트별 Remediation Plan xlsx는 Spec #488의 다른 티켓이며 이 절은 다루지 않는다. HTML의 조치 요약·조치 영향도는 필터·템플릿 변경이라 SPEC-ID가 없다.
 

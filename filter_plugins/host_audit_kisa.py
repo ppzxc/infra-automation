@@ -221,7 +221,7 @@ def urgency_of(severity):
 
 def remediation_view(code, items=None):
     """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values."""
-    meta = (items or ITEMS).get(code.split(':', 1)[-1])
+    meta = (ITEMS if items is None else items).get(code.split(':', 1)[-1])
     if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
         return {'remediation_summary': '', 'impact_level': '', 'effort_level': '', 'risk': '', 'priority': '',
                 'urgency': ''}
@@ -239,7 +239,9 @@ def order_findings(findings, items=None):
     """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
     low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable."""
     def key(finding):
-        view = remediation_view(finding['code'], items)  # unknown codes sort last
+        # A finding built by the section already carries the three values; look them up only when it does not.
+        view = finding if {'priority', 'impact_level', 'effort_level'} <= set(finding) else remediation_view(
+            finding['code'], items)  # unknown codes (blank values) sort last
         return (view['priority'] or 9, view['impact_level'] or 9, view['effort_level'] or 9,
                 VERDICTS.index(finding['verdict']), finding['code'])
 

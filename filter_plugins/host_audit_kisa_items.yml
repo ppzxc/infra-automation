@@ -41,8 +41,8 @@ U-02:
       rhel: |
         /etc/login.defs: PASS_MAX_DAYS 90, PASS_MIN_DAYS 1
         /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
-        /etc/security/pwhistory.conf: remember=4, enforce_for_root
-        /etc/pam.d/system-auth: pam_pwquality.so, pam_pwhistory.so를 pam_unix.so 위에 둔다
+        이전 비밀번호 기억: RHEL 9는 /etc/security/pwhistory.conf에 remember=4, enforce_for_root, 그 아래 버전은 pam_pwhistory.so의 remember=4 인자
+        PAM 반영: RHEL 8 이상은 /etc/pam.d/system-auth를 직접 고치지 말고 authselect 사용자 정의 프로필이나 with-pwhistory 기능으로 한다(직접 수정은 authselect 적용 때 덮어써진다). CentOS 6/7은 system-auth에서 pam_pwquality.so(pam_cracklib.so), pam_pwhistory.so를 pam_unix.so 위에 둔다
         가이드 안에서 기억 개수가 4(Linux 사례)와 10(Solaris 권고표)으로 어긋나며 여기서는 4 이상을 따른다
       debian: |
         /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
@@ -258,7 +258,7 @@ U-13:
     steps:
       rhel: |
         /etc/login.defs: ENCRYPT_METHOD SHA512
-        /etc/pam.d/system-auth: pam_unix.so에 sha512 옵션
+        pam_unix.so에 sha512 옵션: RHEL 8 이상은 authselect 사용자 정의 프로필로 반영하고(system-auth 직접 수정은 덮어써짐), CentOS 6/7은 /etc/pam.d/system-auth를 고친다
         약한 해시 계정은 passwd로 비밀번호 재설정
       debian: |
         /etc/login.defs: ENCRYPT_METHOD SHA512(또는 yescrypt도 허용)
@@ -814,7 +814,7 @@ U-43:
   threat: NIS가 켜져 있으면 비인가자가 다른 시스템의 root 권한까지 탈취할 수 있다.
   guide_page: 99
   remediation:
-    summary: ypserv, ypbind, ypxfrd, rpc.yppasswdd, rpc.ypupdated를 systemctl stop 후 disable한다. RHEL 8부터는 NIS(yp) 패키지가 제거되어 있다.
+    summary: ypserv, ypbind, ypxfrd, rpc.yppasswdd, rpc.ypupdated를 systemctl stop 후 disable한다. NIS가 꼭 필요하면 NIS+를 쓴다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -832,7 +832,7 @@ U-44:
   threat: 쓰지 않거나 취약점이 알려진 서비스를 두면 공격 시도 대상이 되고, tftp는 인증 절차도 없다.
   guide_page: 102
   remediation:
-    summary: tftp, talk, ntalk를 끈다. inetd는 /etc/inetd.conf 해당 줄을 주석 처리하고, xinetd는 disable = yes로 바꿔 재시작하며, systemd는 systemctl stop 후 disable한다. talk 패키지는 RHEL 7부터 제거되었다.
+    summary: tftp, talk, ntalk를 끈다. inetd는 /etc/inetd.conf 해당 줄을 주석 처리하고, xinetd는 disable = yes로 바꿔 재시작하며, systemd는 systemctl stop 후 disable한다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.

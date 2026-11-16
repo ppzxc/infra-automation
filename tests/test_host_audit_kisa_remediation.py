@@ -38,6 +38,7 @@ def _catalog():
 
 
 def test_every_item_has_the_remediation_fields():
+    """Ticket AC: asserted on the shipped YAML itself, not only through the import-time loader checks."""
     data = _catalog()
     assert sorted(data) == CODES
     for code, meta in data.items():
