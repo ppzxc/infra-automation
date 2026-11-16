@@ -267,6 +267,20 @@ def test_editions_with_the_same_short_code_stay_separate_blocks():
     assert [b["code"] for b in blocks] == ["KISA-2026:U-01", "OTHER-2025:U-01"]
 
 
+def test_another_editions_item_does_not_borrow_this_catalogs_text():
+    import host_audit_kisa as kisa
+    own, other = kisa._build_remediation_guide([_stray("KISA-2026:U-01"), _stray("OTHER-2025:U-01")])
+    assert own["purpose"] == ITEMS["U-01"]["purpose"]
+    assert other["purpose"] == "" and other["steps"] == [] and other["guide_page"] is None
+
+
+def test_run_where_no_host_was_checked_does_not_claim_a_clean_result(env, model):
+    cv = dict(model["config_vulnerability"], findings=[], remediation_guide=[], hosts_checked=0)
+    page = env.get_template("report.html.j2").render(host_audit_model=dict(model, config_vulnerability=cv))
+    block = page[page.index("조치 안내</h2>"):page.index("검토 및 결재</h2>")]
+    assert "조치 안내 대상 없음" not in block and "만들지 못했다" in block
+
+
 def test_unknown_code_heading_has_no_dangling_severity_label(env, model):
     import host_audit_kisa as kisa
     stray = dict(_stray("KISA-2026:U-99"), severity="")

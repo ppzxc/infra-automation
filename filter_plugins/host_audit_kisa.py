@@ -456,22 +456,20 @@ def _build_remediation_guide(findings):
         code = finding['code']  # the full code, as the body table shows it (also keeps editions apart)
         block = blocks.get(code)
         if block is None:
-            meta = ITEMS.get(code.split(':', 1)[-1])
-            if meta is None:
-                block = {'code': code, 'title': finding['title'], 'severity': finding['severity'],
-                         'purpose': '', 'threat': '', 'criteria': finding['criteria'], 'check': '', 'summary': '',
-                         'steps': [], 'impact': None, 'effort': None, 'guide_page': None, 'verdict_hosts': []}
-            else:
+            edition, _, short = code.rpartition(':')
+            meta = ITEMS.get(short) if edition == EDITION else None  # another edition's U-01 is not this catalog's
+            block = {'code': code, 'title': finding['title'], 'severity': finding['severity'],
+                     'purpose': '', 'threat': '', 'criteria': finding['criteria'], 'check': '', 'summary': '',
+                     'steps': [], 'impact': None, 'effort': None, 'guide_page': None, 'verdict_hosts': []}
+            if meta is not None:
                 steps = meta['remediation'].get('steps') or {}
-                block = {
-                    'code': code, 'title': meta['title'], 'severity': meta['severity'],
-                    'purpose': meta['purpose'], 'threat': meta['threat'], 'criteria': meta['criteria'],
-                    'check': meta['check'], 'summary': meta['remediation']['summary'],
-                    'steps': [{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
-                              if key in steps],
-                    'impact': dict(meta['remediation_impact']), 'effort': dict(meta['remediation_effort']),
-                    'guide_page': meta['guide_page'], 'verdict_hosts': [],
-                }
+                block.update(
+                    title=meta['title'], severity=meta['severity'], purpose=meta['purpose'], threat=meta['threat'],
+                    criteria=meta['criteria'], check=meta['check'], summary=meta['remediation']['summary'],
+                    steps=[{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
+                           if key in steps],
+                    impact=dict(meta['remediation_impact']), effort=dict(meta['remediation_effort']),
+                    guide_page=meta['guide_page'])
             blocks[code] = block
         block['verdict_hosts'].append({'verdict': finding['verdict'], 'verdict_class': finding['verdict_class'],
                                        'hosts': [h['host'] for h in finding['hosts']]})

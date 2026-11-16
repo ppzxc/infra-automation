@@ -8,7 +8,7 @@
   <p class="small mute">이번 실행에서 양호 외 판정(취약·점검불가(수동)·예외(승인))이 나온 항목마다 한 블록이며 본문 「양호 외 항목」 표와 같은 순서다. 호스트별 증적은 호스트별 부록을 본다.</p>
 {% for b in rg %}
   <section class="rg-block" data-code="{{ b.code | e }}">
-    <h3><span class="nowrap">{{ b.code | e }}</span> {{ b.title | e }} <span class="small mute">{% if b.severity %}중요도 {{ b.severity | e }}{% endif %}{% if b.guide_page is not none %}{% if b.severity %} · {% endif %}가이드 p.{{ b.guide_page | e }}{% endif %}</span></h3>
+    <h3><span class="nowrap">{{ b.code | e }}</span> {{ b.title | e }} {% if b.severity or b.guide_page is not none %}<span class="small mute">{% if b.severity %}중요도 {{ b.severity | e }}{% endif %}{% if b.guide_page is not none %}{% if b.severity %} · {% endif %}가이드 p.{{ b.guide_page | e }}{% endif %}</span>{% endif %}</h3>
     <div class="rg-hosts">{% for v in b.verdict_hosts %}<span class="tag {{ v.verdict_class }}">{{ v.verdict | e }}</span>: {{ v.hosts | map('e') | join(', ') }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
     <dl>
 {% if b.purpose %}      <dt>점검 목적</dt><dd>{{ b.purpose | e }}</dd>
@@ -29,6 +29,8 @@
     </dl>
   </section>
 {% endfor %}
-{% else %}
+{% elif m.config_vulnerability.hosts_checked %}
   <div class="note keep">조치 안내 대상 없음 — 이번 실행에서 양호 외 판정이 나온 항목이 없다.</div>
+{% else %}
+  <div class="note keep">조치 안내를 만들지 못했다 — 이번 실행에서 점검을 마친 호스트가 없다.</div>
 {% endif %}
