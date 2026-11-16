@@ -314,6 +314,8 @@ def test_file_name_is_ascii_and_safe():
     assert host_audit_remediation_file_name("ha-1", "../a b/한") == "host-audit-ha-1-.._a_b__-%s.xlsx" % suffix
     assert host_audit_remediation_file_name("r", "ns1 ") != host_audit_remediation_file_name("r", "ns1_")
     assert "/" not in host_audit_remediation_file_name("r", "a/b")
+    long_name = host_audit_remediation_file_name("r", "h" * 300)
+    assert len(long_name) < 200 and long_name != host_audit_remediation_file_name("r", "h" * 301)
     assert host_audit_remediation_file_name("r", "a\ud800").startswith("host-audit-r-a_-")  # a lone surrogate cannot break it
 
 

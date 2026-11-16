@@ -33,6 +33,7 @@ NO_RESULT = '점검 결과 없음(점검불가)'
 PLAN_FAILED = '이행계획서 생성 실패'
 UNKNOWN_ITEM = '(카탈로그에 없는 항목)'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
+MAX_NAME_PART = 80  # characters of the run id and of the host name kept in the file name
 BASELINE_PREFIXED = (NEW, PERSIST, RECUR)  # the only Audit Baseline states the remark shows (not 첫 실행 or others)
 
 
@@ -169,6 +170,9 @@ def host_audit_remediation_file_name(run_id, host):
     def part(value):
         value = str(value)
         clean = safe.sub('_', value)
+        if len(clean) > MAX_NAME_PART:  # a file name must stay under the 255-byte limit
+            clean = clean[:MAX_NAME_PART - 8]
+            value = value + ' '  # forces the hash suffix below even when nothing was replaced
         # Names that differ only in replaced characters must not share a file (the last write would win).
         return clean if clean == value else '%s-%s' % (clean, hashlib.sha256(value.encode('utf-8', 'replace')).hexdigest()[:8])
 
