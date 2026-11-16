@@ -22,6 +22,10 @@ else:
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODULE = ROOT_DIR / "roles" / "host_audit" / "library" / "host_audit_xlsx_write.py"
+MODULE_UTILS = ROOT_DIR / "roles" / "host_audit" / "module_utils"
+# What ANSIBLE_MODULE_UTILS does for a run: the role's module_utils/ joins ansible.module_utils.
+_LAUNCH = ("import runpy, sys, ansible.module_utils as m; m.__path__.append(sys.argv[1]); "
+           "sys.argv = [sys.argv[2], sys.argv[3]]; runpy.run_path(sys.argv[0], run_name='__main__')")
 
 HEADERS = ["그룹", "자산명", "위험도", "비고"]
 ROWS = [["계정 관리", "h1", 3, "첫째 줄\n둘째 줄"], ["파일 관리", "h1", 1, "<b>&amp; \x07 text</b>"]]
@@ -40,7 +44,7 @@ def _run(args):
     module_args = dict(args)
     Path(path).write_text(json.dumps({"ANSIBLE_MODULE_ARGS": module_args}))
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
-    res = subprocess.run([sys.executable, str(MODULE), str(path)], capture_output=True, text=True, env=env)
+    res = subprocess.run([sys.executable, "-c", _LAUNCH, str(MODULE_UTILS), str(MODULE), str(path)], capture_output=True, text=True, env=env)
     return json.loads(res.stdout)
 
 
@@ -118,7 +122,7 @@ def test_check_mode_reports_changed_only_when_the_bytes_differ(tmp_path):
 
 
 def test_a_failed_write_leaves_no_temp_file_in_the_directory(tmp_path):
-    spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
+    spec = importlib.util.spec_from_file_location("host_audit_atomic", MODULE_UTILS / "host_audit_atomic.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     dest = tmp_path / "x" / "f.xlsx"
@@ -131,7 +135,7 @@ def test_a_failed_write_leaves_no_temp_file_in_the_directory(tmp_path):
     os.replace = boom
     try:
         with pytest.raises(OSError):
-            mod._write(str(dest), b"data")
+            mod.write_atomic(str(dest), b"data")
     finally:
         os.replace = real
     assert list(dest.parent.iterdir()) == []

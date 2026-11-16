@@ -60,10 +60,10 @@ files:
 
 import io
 import os
-import tempfile
 import zipfile
 
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.host_audit_atomic import same_file, write_atomic
 
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest time a zip member can carry
 
@@ -92,32 +92,6 @@ def build_zip(src_dir, names):
     return buffer.getvalue()
 
 
-def _same(dest, data):
-    try:
-        with open(dest, 'rb') as handle:
-            return handle.read() == data and (os.stat(dest).st_mode & 0o777) == 0o600
-    except (IOError, OSError):
-        return False
-
-
-def _write(dest, data):
-    """Write atomically with mode 0600 (mkstemp: unpredictable hidden name, so a leftover is never listed or kept)."""
-    directory = os.path.dirname(dest) or '.'
-    fd, tmp = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=directory)
-    try:
-        with os.fdopen(fd, 'wb') as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, dest)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
-
-
 def main():
     module = AnsibleModule(
         argument_spec=dict(src_dir=dict(type='path', required=True), dest=dict(type='path', required=True),
@@ -133,9 +107,9 @@ def main():
         if missing:
             module.fail_json(msg='files to pack are missing from %s: %s' % (src_dir, ', '.join(missing)))
         data = build_zip(src_dir, names)
-        changed = not _same(dest, data)
+        changed = not same_file(dest, data)
         if changed and not module.check_mode:
-            _write(dest, data)
+            write_atomic(dest, data)
     except (IOError, OSError) as exc:
         module.fail_json(msg='cannot pack or write %s (%s): %s' % (dest, exc.filename or 'n/a', exc.strerror or exc))
     module.exit_json(changed=changed, dest=dest, files=names)

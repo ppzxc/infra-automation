@@ -72,12 +72,11 @@ dest:
 '''
 
 import io
-import os
 import re
-import tempfile
 import zipfile
 
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.host_audit_atomic import same_file, write_atomic
 
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest time a zip member can carry
 DEFAULT_WIDTH = 16
@@ -271,59 +270,6 @@ def build_xlsx(sheet, headers, rows, footer, widths):
     return buffer.getvalue()
 
 
-def _same(dest, data):
-    """True when dest already holds exactly these bytes with mode 0600 (anything else is a change)."""
-    try:
-        with open(dest, 'rb') as handle:
-            return handle.read() == data and (os.stat(dest).st_mode & 0o777) == 0o600
-    except (IOError, OSError):
-        return False
-
-
-def _sync_directory(directory):
-    """Make the rename durable (best effort: not every platform can open a directory)."""
-    try:
-        fd = os.open(directory, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
-def _write(dest, data):
-    """Write atomically with mode 0600; returns True when the file changed."""
-    if _same(dest, data):
-        return False
-    directory = os.path.dirname(dest) or '.'
-    if not os.path.isdir(directory):
-        # One level only (xlsx/ under the run directory): a missing parent is an error, never a directory created
-        # with a mode the role did not choose.
-        os.mkdir(directory, 0o700)
-        os.chmod(directory, 0o700)
-    # mkstemp: exclusive create with an unpredictable name (no symlink to follow), mode 0600. The name starts with a
-    # dot, so AUD-512 (ansible.builtin.find without hidden files) never lists a leftover of a killed run.
-    fd, tmp = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=directory)
-    try:
-        with os.fdopen(fd, 'wb') as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())  # the renamed file must not be empty after a crash
-        os.replace(tmp, dest)
-        _sync_directory(directory)
-    except BaseException:
-        # A leftover .tmp in xlsx/ would be found and kept by AUD-512.
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
-    return True
-
-
 def main():
     module = AnsibleModule(
         argument_spec=dict(
@@ -351,7 +297,7 @@ def main():
     if cut:
         module.warn('%d cell(s) longer than %d characters were cut' % (cut, MAX_CELL))
     try:
-        changed = (not _same(p['dest'], data)) if module.check_mode else _write(p['dest'], data)
+        changed = (not same_file(p['dest'], data)) if module.check_mode else write_atomic(p['dest'], data, create_parent=True)
     except (IOError, OSError) as exc:
         module.fail_json(msg='cannot write %s: %s' % (p['dest'], exc.strerror or exc))
     module.exit_json(changed=changed, dest=p['dest'])

@@ -12,6 +12,10 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODULE = ROOT_DIR / "roles" / "host_audit" / "library" / "host_audit_zip_write.py"
+MODULE_UTILS = ROOT_DIR / "roles" / "host_audit" / "module_utils"
+# What ANSIBLE_MODULE_UTILS does for a run: the role's module_utils/ joins ansible.module_utils.
+_LAUNCH = ("import runpy, sys, ansible.module_utils as m; m.__path__.append(sys.argv[1]); "
+           "sys.argv = [sys.argv[2], sys.argv[3]]; runpy.run_path(sys.argv[0], run_name='__main__')")
 
 
 def _run(tmp_path, args, check_mode=False):
@@ -21,7 +25,7 @@ def _run(tmp_path, args, check_mode=False):
         module_args["_ansible_check_mode"] = True
     path.write_text(json.dumps({"ANSIBLE_MODULE_ARGS": module_args}))
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
-    res = subprocess.run([sys.executable, str(MODULE), str(path)], capture_output=True, text=True, env=env)
+    res = subprocess.run([sys.executable, "-c", _LAUNCH, str(MODULE_UTILS), str(MODULE), str(path)], capture_output=True, text=True, env=env)
     return json.loads(res.stdout)
 
 
