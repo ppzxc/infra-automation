@@ -226,8 +226,8 @@ def remediation_view(code, items=None):
     """
     meta = (ITEMS if items is None else items).get(code.split(':', 1)[-1])
     if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
-        return {'remediation_summary': '', 'impact_level': '', 'effort_level': '', 'risk': '', 'priority': '',
-                'urgency': ''}
+        return {'remediation_summary': '', 'impact_level': None, 'effort_level': None, 'risk': None, 'priority': None,
+                'urgency': None}
     return {
         'remediation_summary': meta['remediation']['summary'],
         'impact_level': meta['remediation_impact']['level'],

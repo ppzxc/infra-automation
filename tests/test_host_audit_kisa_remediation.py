@@ -89,6 +89,7 @@ def test_catalog_text_has_no_infrastructure_details():
     """Public repo: no addresses, host management numbers, or e-mail in the catalog text."""
     text = (FILTER_DIR / "host_audit_kisa_items.yml").read_text(encoding="utf-8")
     text = re.sub(r"(?m)^  cis: .*$", "", text)  # CIS rule numbers (5.3.3.2.2) look like dotted quads
+    text = text.replace("0.0.0.0", "")  # the unspecified address (a "from anywhere" source) is not a host address
     assert not re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text)
     assert not re.search(r"\bns\d{4}\b", text)
     assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", text)
@@ -229,7 +230,7 @@ def test_findings_carry_remediation_and_derived_values_in_priority_order(model):
     findings = model["config_vulnerability"]["findings"]
     assert sorted(f["code"][-4:] for f in findings) == ["U-01", "U-02", "U-12", "U-28"]
     keys = [(f["priority"], f["impact_level"], f["effort_level"]) for f in findings]
-    assert keys == sorted(keys)  # levels are drafts the PR may change; the order must follow them
+    assert keys == sorted(keys)  # the order must follow whatever the levels are
     by_code = {f["code"][-4:]: f for f in findings}  # pick items by code, not by position
     u01 = by_code["U-01"]
     assert u01["remediation_summary"] == ITEMS["U-01"]["remediation"]["summary"]
@@ -283,7 +284,7 @@ def test_source_sentence_is_stated_even_without_findings(env):
 
 def test_unknown_item_code_gets_empty_remediation_instead_of_failing():
     view = kisa.remediation_view("KISA-2026:U-99")
-    assert view["remediation_summary"] == "" and view["priority"] == ""
+    assert view["remediation_summary"] == "" and view["priority"] is None and view["impact_level"] is None
     assert kisa.remediation_view("KISA-2026:U-01")["priority"] == 1
 
 
