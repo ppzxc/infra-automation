@@ -111,7 +111,7 @@ U-05:
   threat: UID 0 계정은 root와 같은 모든 작업이 가능하고, 감사 추적에서 root와 구분되지 않는다.
   guide_page: 27
   remediation:
-    summary: UID가 0인 root 외 계정을 찾아 usermod -u로 중복되지 않는 다른 UID로 바꾸거나 불필요하면 삭제한다. 사용 중인 계정이라 명령이 안 되면 /etc/passwd를 직접 수정한다.
+    summary: UID가 0인 root 외 계정을 찾아 usermod -u로 중복되지 않는 다른 UID로 바꾸거나 불필요하면 삭제한다. 사용 중인 계정이라 명령이 안 되면 그 계정의 프로세스를 끝내고 vipw로 /etc/passwd를 수정한다.
   remediation_impact:
     level: 1
     reason: 가이드가 해당 계정에 관리자 권한이 필요하지 않으면 영향 없음으로 서술한다.
@@ -354,10 +354,10 @@ U-18:
   threat: shadow에 담긴 비밀번호 해시가 노출되면 크래킹으로 비밀번호를 탈취당할 수 있다.
   guide_page: 44
   remediation:
-    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다.
+    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다. Debian 계열 기본값 root:shadow 640은 400을 넘으며, 400으로 낮추면 shadow 그룹 권한으로 도는 인증 보조 프로그램이 읽지 못할 수 있다.
   remediation_impact:
     level: 1
-    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술하나, Debian 계열에서 640을 400으로 낮추면 비root 인증 보조 프로그램이 shadow를 읽지 못할 수 있다.
   remediation_effort:
     level: 1
     reason: chown과 chmod 명령 두 줄로 끝난다.
@@ -545,7 +545,7 @@ U-28:
         ufw status numbered 로 현재 설정 확인
         ufw default deny incoming 과 허용 규칙(관리 접속 포함): ufw allow from <IP> to any port <포트>
         규칙을 만든 뒤 ufw enable (비활성 상태면 켜야 점검에 통과하며, 관리 접속 규칙이 없으면 접속이 끊김)
-        iptables를 쓰면 iptables -A INPUT ... -j ACCEPT 후 iptables-save
+        iptables를 쓰면 관리 접속 허용 규칙을 먼저 넣고 INPUT 기본 정책을 DROP으로 한 뒤, 재부팅 후에도 남도록 netfilter-persistent save (iptables-save > /etc/iptables/rules.v4)
   remediation_impact:
     level: 3
     reason: 허용하지 않은 IP는 서비스를 쓸 수 없게 되므로 규칙을 잘못 적용하면 원격 접속이 끊길 수 있다.
@@ -1261,10 +1261,10 @@ U-67:
   threat: 로그 접근 통제가 미흡하면 비인가자가 로그에서 정보를 얻거나 로그 자체를 변조할 수 있다.
   guide_page: 171
   remediation:
-    summary: /var/log 바로 아래 로그 파일 중 소유자가 root가 아니거나 권한이 644를 넘는 것을 찾아 chown root, chmod 644 이하로 바꾼다.
+    summary: '/var/log 바로 아래 로그 파일 중 소유자가 root가 아니거나 권한이 644를 넘는 것을 찾아 chown root, chmod 644 이하로 바꾼다. 서비스 계정이 쓰는 로그(예: rsyslog)는 chown으로 막히지 않게, 그 서비스의 설정이나 logrotate create 줄에서 소유자를 정한다.'
   remediation_impact:
     level: 1
-    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+    reason: 가이드는 영향 없음으로 서술하지만, 서비스 계정이 쓰는 로그의 소유자를 root로 바꾸면 그 서비스가 기록하지 못할 수 있다.
   remediation_effort:
     level: 2
     reason: 대상 로그 파일 목록을 파악해 하나씩 소유자와 권한을 바꿔야 한다.

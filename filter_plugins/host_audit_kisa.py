@@ -103,8 +103,9 @@ def _deep_freeze(value):
 SUMMARY_MAX = 300  # the body table prints remediation.summary on one line; longer notes belong in steps/reason
 
 
-def _untrimmed(value, block=False):
-    """Blank text, or text with surrounding whitespace (it would show as a stray gap in report cells).
+def _invalid_text(value, block=False):
+    """True when ``value`` is not acceptable catalog text: not a string, blank, multi-line, or with surrounding
+    whitespace (it would show as a stray gap or break in report cells).
 
     ``block`` is for YAML ``|`` blocks (steps), which always end with a newline: only leading space is refused.
     """
@@ -124,24 +125,24 @@ def _validate_remediation(code, meta, path):
         if field not in meta:
             fail(field, 'is missing')
     for field in TEXT_FIELDS:
-        if _untrimmed(meta[field]):
+        if _invalid_text(meta[field]):
             fail(field, 'must be non-blank text without surrounding whitespace')
     page = meta['guide_page']
     if type(page) is not int or page < 1:
         fail('guide_page', 'must be a positive integer')
     rem = meta['remediation']
-    if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _untrimmed(rem.get('summary')):
+    if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _invalid_text(rem.get('summary')):
         fail('remediation', 'must be a mapping of summary (trimmed text) and optional steps')
     if len(rem['summary']) > SUMMARY_MAX or '\n' in rem['summary']:
         fail('remediation.summary', 'must be one line of at most %d characters' % SUMMARY_MAX)
     steps = rem.get('steps')
     if steps is not None and (not isinstance(steps, dict) or not steps or set(steps) - set(STEP_FAMILIES)
-                              or any(_untrimmed(v, block=True) for v in steps.values())):
+                              or any(_invalid_text(v, block=True) for v in steps.values())):
         fail('remediation.steps', 'must map rhel/debian to non-blank text')
     for field in ('remediation_impact', 'remediation_effort'):
         part = meta[field]
         if (not isinstance(part, dict) or set(part) != {'level', 'reason'} or type(part['level']) is not int
-                or part['level'] not in LEVELS or _untrimmed(part['reason'])):
+                or part['level'] not in LEVELS or _invalid_text(part['reason'])):
             fail(field, 'must be {level: 1..3, reason: text}')
 
 
@@ -159,7 +160,7 @@ def _validate(items, path):
             if not isinstance(meta[field], str):
                 raise RuntimeError('KISA item %s field %s must be a string (quote it) in %s' % (code, field, path))
         for field in ('title', 'criteria'):
-            if _untrimmed(meta[field]):
+            if _invalid_text(meta[field]):
                 raise RuntimeError('KISA item %s field %s is blank or has surrounding whitespace in %s'
                                    % (code, field, path))
         _validate_remediation(code, meta, path)
