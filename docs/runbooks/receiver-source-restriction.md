@@ -146,10 +146,9 @@ scripts/collect-receiver-sources.sh --label <호스트> --ssh <user@host>
 
 ## 8. Host Audit 연계
 
-#377이 퇴행 점검 항목 `EXP-RECV-1`~`EXP-RECV-3`으로 아래 기대치를 읽는다([Host Audit 명세 16절](../host_audit.md)). 점검 결과는 항목 ID와 통과 여부만 담고 출발지·문자열 값은 담지 않는다. 이 티켓은 Host Audit 코드를 수정하지 않는다.
+#377이 퇴행 점검 항목 `EXP-RECV-1`로 아래 기대치를 읽는다(2026-11-16: 수신기가 Telegraf로 바뀌고 트랩 수신기가 폐기되어 옛 `EXP-RECV-2`·`EXP-RECV-3`은 없다)([Host Audit 명세 16절](../host_audit.md)). 점검 결과는 항목 ID와 통과 여부만 담고 출발지·문자열 값은 담지 않는다. 이 티켓은 Host Audit 코드를 수정하지 않는다.
 
-- 로그 수신: 허용 출발지 필터가 켜져 있는가(수신 설정에 필터 정의가 있고 보관 경로에 연결돼 있는가)
-- 트랩 수신: 인증 지시어가 있고 기본 허용이 꺼져 있는가, 기본 문자열(`default-string`)이 없는가
+- 로그 수신: 허용 출발지 필터가 켜져 있는가(Telegraf `socket_listener`에 비어 있지 않은 `allowed_sources`가 있는가)
 - 이미 Host Agents에 편입되어 수집기가 동작하는 서버가 있다(탐지 복구 런북 전제 3). 그 서버의 도달은 읽기 전용 조회로 확인한다. 편입되지 않은 서버는 Host Audit 점검 범위 밖이므로 이 절의 기대치를 수동 절차와 전후 스냅샷 diff로 확인한다.
 
 ## 9. 알려진 한계

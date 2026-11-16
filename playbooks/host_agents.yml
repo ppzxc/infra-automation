@@ -2,7 +2,7 @@
 # ==============================================================================
 # Host Agents 전용 플레이북 (ADR-0006) — otelcol-contrib 수집 에이전트 + restic/resticprofile 백업 에이전트
 # ==============================================================================
-# Host Agents를 다루는 유일한 진입점이다. monitoring은 site.yml/maintenance.yml에서 제거되었다.
+# Host Agents를 다루는 유일한 진입점이다. monitoring은 site.yml에서 제거되었다.
 #
 # Semaphore 템플릿:
 #   Host Agents — Deploy All : 태그 없음 (설치 + 설정 전체)

@@ -134,7 +134,7 @@ def test_shared_connection_plays_accept_connection_hosts_override():
         assert hosts == "{{ connection_hosts | default(target_hosts | default('servers:loadbalancers')) }}"
 
 
-@pytest.mark.parametrize("playbook", ["site.yml", "maintenance.yml"])
+@pytest.mark.parametrize("playbook", ["site.yml"])
 def test_monitoring_is_not_applied_by_site_or_maintenance(playbook):
     for play in _plays(playbook):
         assert "monitoring" not in _role_names(play)

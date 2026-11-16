@@ -22,10 +22,10 @@ Match Address *,!127.0.0.1,!::1,!192.0.2.0/24
     DenyUsers *
 # END ANSIBLE MANAGED sshd source restriction (#371)
 """
-SYSLOG_CONF = """filter f_known { netmask("192.0.2.0/24"); };
-log { source(s_net); filter(f_known); destination(d_files); };
+SYSLOG_CONF = """[[inputs.socket_listener]]
+  service_address = "udp://:6514"
+  allowed_sources = ["192.0.2.7", "192.0.2.8"]
 """
-TRAP_CONF = "authCommunity log,execute,net secret-1 192.0.2.7\n"
 AUDIT_RULES = (
     "-w /etc/passwd -p wa -k identity\n-w /etc/pam.d/ -p wa -k auth_config\n"
     "-w /etc/sudoers -p wa -k sudo_config\n-w /etc/ssh/sshd_config -p wa -k sshd_config\n"
@@ -53,8 +53,6 @@ def _env_files(root, sshd_config=SSHD_CONFIG):
     (root / "var/log/journal").mkdir(parents=True)
     (root / "etc/syslog").mkdir(parents=True)
     (root / "etc/syslog/user.conf").write_text(SYSLOG_CONF)
-    (root / "etc/snmp").mkdir(parents=True)
-    (root / "etc/snmp/snmptrapd.conf").write_text(TRAP_CONF)
     (root / "opt/app").mkdir(parents=True)
     secret = root / "opt/app/root-only.key"
     secret.write_text("x")
@@ -85,7 +83,6 @@ EXPECT = {
     "HA_MGMT_REMOVED_PORTS": "9000",
     "HA_MGMT_REMOVED_NAMES": "old-admin",
     "HA_RECV_SYSLOG_CONF": "/etc/syslog/user.conf",
-    "HA_RECV_TRAP_CONF": "/etc/snmp/snmptrapd.conf",
     "HA_SSH": "1",
     "HA_SSH_ALLOWED_ADDRS": "192.0.2.10",
     "HA_DET_JOURNALD": "1",
@@ -118,7 +115,7 @@ def _run(tmp_path, env_extra=None, **shim_kwargs):
     return dict(line.split("|") for line in body.split() if "|" in line)
 
 
-ALL_IDS = ["EXP-MGMT-1", "EXP-MGMT-2", "EXP-MGMT-3", "EXP-RECV-1", "EXP-RECV-2", "EXP-RECV-3",
+ALL_IDS = ["EXP-MGMT-1", "EXP-MGMT-2", "EXP-MGMT-3", "EXP-RECV-1",
            "EXP-SSH-1", "EXP-SSH-2", "EXP-SSH-3", "EXP-SSH-4",
            "EXP-DET-1", "EXP-DET-2", "EXP-DET-3", "EXP-DET-4", "EXP-DET-5", "EXP-DET-6", "EXP-DET-7",
            "EXP-SEC-1", "EXP-SEC-2", "EXP-SEC-3"]
@@ -185,18 +182,15 @@ def test_docker_published_all_addresses_fails_mgmt(tmp_path):
 def test_receiver_regressions_fail(tmp_path):
     root = tmp_path / "root"
     _env_files(root)
-    (root / "etc/syslog/user.conf").write_text("destination d { file(\"/x\"); };\n")  # 필터 없음
-    (root / "etc/snmp/snmptrapd.conf").write_text("disableAuthorization yes\n")  # 인증 없음, 기본 허용
-    result = _run(tmp_path)
-    assert result["EXP-RECV-1"] == "FAIL" and result["EXP-RECV-2"] == "FAIL"
+    (root / "etc/syslog/user.conf").write_text('[[inputs.socket_listener]]\n  service_address = "udp://:6514"\n')  # 허용 목록 없음
+    assert _run(tmp_path)["EXP-RECV-1"] == "FAIL"
 
 
-def test_trap_default_string_fails(tmp_path):
+def test_receiver_with_empty_allowlist_fails(tmp_path):
     root = tmp_path / "root"
     _env_files(root)
-    (root / "etc/snmp/snmptrapd.conf").write_text("authCommunity log,execute,net public 192.0.2.7\n")
-    result = _run(tmp_path)
-    assert result["EXP-RECV-2"] == "PASS" and result["EXP-RECV-3"] == "FAIL"
+    (root / "etc/syslog/user.conf").write_text('[[inputs.socket_listener]]\n  allowed_sources = []\n')
+    assert _run(tmp_path)["EXP-RECV-1"] == "FAIL"
 
 
 def test_ssh_block_removed_fails_block_and_allow_list_items(tmp_path):

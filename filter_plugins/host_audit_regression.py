@@ -39,11 +39,7 @@ _item('EXP-MGMT-2', '관리 웹 접점', '모든 주소 청취는 허용 목록(
 _item('EXP-MGMT-3', '관리 웹 접점', '제거한 관리 인터페이스가 다시 올라오지 않음',
       '제거 목록의 게시 포트·컨테이너·서비스가 없다', ['mgmt_removed_ports', 'mgmt_removed_names'])
 _item('EXP-RECV-1', '수신 접점', '로그 수신 출발지 필터가 켜져 있음',
-      '수신 설정에 출발지 필터 정의가 있고 log 경로에 연결돼 있다', ['recv_syslog_conf'])
-_item('EXP-RECV-2', '수신 접점', '트랩 수신 인증이 켜져 있고 기본 허용이 꺼져 있음',
-      '인증 지시어가 있고 disableAuthorization이 켜져 있지 않다', ['recv_trap_conf'])
-_item('EXP-RECV-3', '수신 접점', '트랩 기본 인증 문자열이 없음',
-      '인증 지시어에 흔한 기본 문자열(default-string)이 없다', ['recv_trap_conf'])
+      '수신 설정(Telegraf)의 socket_listener에 비어 있지 않은 allowed_sources 허용 목록이 있다', ['recv_syslog_conf'])
 _item('EXP-SSH-1', '원격 접속', 'sshd 출발지 제한 블록이 있음',
       'sshd_config에 관리형 Match Address 블록과 DenyUsers *가 있다', ['ssh_restricted'])
 _item('EXP-SSH-2', '원격 접속', '허용 목록 밖 출발지는 거부',
@@ -83,7 +79,7 @@ _item('EXP-SEC-3', '시크릿 파일', '선언한 시크릿 env 파일은 0640 r
 ENV_KEYS = {
     'mgmt_web_ports': 'HA_MGMT_WEB_PORTS', 'mgmt_wildcard_allowed': 'HA_MGMT_WILDCARD_ALLOWED',
     'mgmt_removed_ports': 'HA_MGMT_REMOVED_PORTS', 'mgmt_removed_names': 'HA_MGMT_REMOVED_NAMES',
-    'recv_syslog_conf': 'HA_RECV_SYSLOG_CONF', 'recv_trap_conf': 'HA_RECV_TRAP_CONF',
+    'recv_syslog_conf': 'HA_RECV_SYSLOG_CONF',
     'ssh_allowed_addrs': 'HA_SSH_ALLOWED_ADDRS', 'ssh_denied_addr': 'HA_SSH_DENIED_ADDR',
     'sec_roots': 'HA_SEC_ROOTS', 'sec_files': 'HA_SEC_FILES', 'sec_env_files': 'HA_SEC_ENV_FILES',
     'det_log_agent': 'HA_DET_AGENT',

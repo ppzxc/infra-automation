@@ -1061,7 +1061,7 @@ def test_detect_file_gathers_facts_only_off_raw_path():
     assert setup["when"] == "not (_raw_path_effective | bool)"
 
 
-@pytest.mark.parametrize("playbook", ["site.yml", "maintenance.yml"])
+@pytest.mark.parametrize("playbook", ["site.yml"])
 def test_target_plays_import_detection_with_always_tag(playbook):
     import yaml
     plays = yaml.safe_load((ROOT_DIR / "playbooks" / playbook).read_text())

@@ -12,7 +12,7 @@
 
 - 로그/메트릭은 OTLP로 **OpenObserve**(커뮤니티판 v1.0.4, 백엔드 저장소 S3)에, 백업은 S3 API로 **RustFS**(1.0.0, OpenObserve와 동일 서버)에 적재합니다.
 - 수집·백업 대상은 **ISMS**(ISMS-P 아님) 인증기준 2.9.3 백업 및 복구관리, 2.9.4 로그 및 접속기록 관리를 충족해야 합니다. ISMS는 시스템 로그 보존기간·백업 주기에 숫자를 정하지 않고 "조직이 정의한 기준을 실제로 이행하는지"를 심사합니다. 1~2년 보존·월 1회 점검은 개인정보처리시스템 접속기록(안전성 확보조치 기준 제8조)에만 해당합니다.
-- 기존 `roles/monitoring`은 otelcol-contrib 0.108.0을 설치하지만 (a) `creates:` 가드로 업그레이드가 불가능하고, (b) gRPC exporter에 `organization` 헤더가 없어 OpenObserve가 전량 거부하며, (c) `site.yml`·`maintenance.yml`에서 서로 다른 경로로 실행됩니다. restic 코드는 없습니다.
+- 기존 `roles/monitoring`은 otelcol-contrib 0.108.0을 설치하지만 (a) `creates:` 가드로 업그레이드가 불가능하고, (b) gRPC exporter에 `organization` 헤더가 없어 OpenObserve가 전량 거부하며, (c) `site.yml`·`maintenance.yml`(#437에서 폐기)에서 서로 다른 경로로 실행됩니다. restic 코드는 없습니다.
 - CentOS 6/7은 AnsiballZ가 동작하지 않으므로(ADR-0005) Raw Provisioning Path를 확장해야 합니다. (`common`/`security`의 raw 경로는 구현 완료, #28. Host Agents용 확장만 미구현.)
 
 ---
@@ -21,7 +21,7 @@
 
 ### 2.1 실행 구조 및 Semaphore 모델
 
-- **단일 진입점**: `playbooks/host_agents.yml`만 Host Agents를 다룹니다. `monitoring`은 `site.yml`·`maintenance.yml`에서 제거하고, `site.yml`의 Play 1 / Cleanup play는 `playbooks/common/resolve_connection.yml` / `cleanup_connection.yml` import로 대체합니다(현재 동일 내용 복제 상태).
+- **단일 진입점**: `playbooks/host_agents.yml`만 Host Agents를 다룹니다. `monitoring`은 `site.yml`·`maintenance.yml`(#437에서 폐기)에서 제거하고, `site.yml`의 Play 1 / Cleanup play는 `playbooks/common/resolve_connection.yml` / `cleanup_connection.yml` import로 대체합니다(현재 동일 내용 복제 상태).
 - **3단 구조**: `import_playbook: common/resolve_connection.yml` → 에이전트 play(`monitoring` + `backup`) → `import_playbook: common/cleanup_connection.yml`. 두 import는 반드시 `tags: [always]` — 없으면 태그 실행 시 자격증명 해석과 **임시 개인키 정리**가 스킵됩니다(현재 `site.yml --tags monitoring`에 존재하는 결함).
 - **태그 / Semaphore 템플릿**:
 
