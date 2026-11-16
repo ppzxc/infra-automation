@@ -64,6 +64,12 @@ CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH,
 # each process parses the file once however often it is called.
 CODE_PATTERN = re.compile(r'^U-\d\d$')
 ITEM_FIELDS = ('title', 'severity', 'category', 'criteria', 'cis')
+# Text fields added by Spec #488 / Ticket-2 (#490), plus the nested remediation, remediation_impact,
+# remediation_effort mappings and the guide_page number validated in _validate_remediation.
+TEXT_FIELDS = ('check', 'purpose', 'threat')
+REMEDIATION_FIELDS = TEXT_FIELDS + ('guide_page', 'remediation', 'remediation_impact', 'remediation_effort')
+STEP_FAMILIES = ('rhel', 'debian')
+LEVELS = (1, 2, 3)
 CATALOG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'host_audit_kisa_items.yml')
 
 
@@ -98,6 +104,38 @@ def _freeze(items):
     return _deep_freeze(items)
 
 
+def _blank(value):
+    return not isinstance(value, str) or not value.strip()
+
+
+def _validate_remediation(code, meta, path):
+    """Check the remediation fields of one item; bool is rejected on purpose (True == 1 in Python)."""
+    def fail(field, why):
+        raise RuntimeError('KISA item %s field %s %s in %s' % (code, field, why, path))
+
+    for field in REMEDIATION_FIELDS:
+        if field not in meta:
+            fail(field, 'is missing')
+    for field in TEXT_FIELDS:
+        if _blank(meta[field]) or meta[field] != meta[field].strip():
+            fail(field, 'must be non-blank text without surrounding whitespace')
+    page = meta['guide_page']
+    if type(page) is not int or page < 1:
+        fail('guide_page', 'must be a positive integer')
+    rem = meta['remediation']
+    if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _blank(rem.get('summary')):
+        fail('remediation', 'must be a mapping of summary (text) and optional steps')
+    steps = rem.get('steps')
+    if steps is not None and (not isinstance(steps, dict) or not steps or set(steps) - set(STEP_FAMILIES)
+                              or any(_blank(v) for v in steps.values())):
+        fail('remediation.steps', 'must map rhel/debian to non-blank text')
+    for field in ('remediation_impact', 'remediation_effort'):
+        part = meta[field]
+        if (not isinstance(part, dict) or set(part) != {'level', 'reason'} or type(part['level']) is not int
+                or part['level'] not in LEVELS or _blank(part['reason'])):
+            fail(field, 'must be {level: 1..3, reason: text}')
+
+
 def _validate(items, path):
     if not isinstance(items, dict) or not items:
         raise RuntimeError('KISA item catalog %s is empty or not a mapping' % path)
@@ -115,7 +153,8 @@ def _validate(items, path):
             if not meta[field].strip() or meta[field] != meta[field].strip():
                 raise RuntimeError('KISA item %s field %s is blank or has surrounding whitespace in %s'
                                    % (code, field, path))
-        extra = sorted(set(meta) - set(ITEM_FIELDS))
+        _validate_remediation(code, meta, path)
+        extra = sorted(set(meta) - set(ITEM_FIELDS) - set(REMEDIATION_FIELDS))
         if extra:
             raise RuntimeError('KISA item %s has unknown field %s in %s' % (code, ', '.join(map(str, extra)), path))
         if meta['severity'] not in SEVERITY_ORDER:
@@ -149,6 +188,58 @@ def _require_all_items(items):
 
 
 ITEMS = _require_all_items(_load_items())
+
+# Values derived from the guide severity (Spec #488 / #479). They are never stored in the catalog, so they
+# cannot drift from it, and they are the same for every host and every verdict.
+RISK_BY_SEVERITY = {'상': 3, '중': 2, '하': 1}
+PRIORITY_BY_SEVERITY = {'상': 1, '중': 2, '하': 3}
+URGENCY_BY_PRIORITY = {1: '단기', 2: '중기', 3: '장기'}
+REMEDIATION_SOURCE = ('조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 '
+                      '바탕으로 요약함')
+
+
+def risk_level(severity):
+    """Risk of the finding itself, from the guide severity: 상 3, 중 2, 하 1."""
+    return RISK_BY_SEVERITY[severity]
+
+
+def priority_of(severity):
+    """Priority 1 (most urgent) to 3, from the guide severity: 상 1, 중 2, 하 3."""
+    return PRIORITY_BY_SEVERITY[severity]
+
+
+def urgency_of(severity):
+    """Urgency label of the priority: 단기, 중기, 장기 (no deadline is defined)."""
+    return URGENCY_BY_PRIORITY[priority_of(severity)]
+
+
+def remediation_view(code, items=None):
+    """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values."""
+    meta = (items or ITEMS)[code.split(':', 1)[-1]]
+    return {
+        'remediation_summary': meta['remediation']['summary'],
+        'impact_level': meta['remediation_impact']['level'],
+        'effort_level': meta['remediation_effort']['level'],
+        'risk': risk_level(meta['severity']),
+        'priority': priority_of(meta['severity']),
+        'urgency': urgency_of(meta['severity']),
+    }
+
+
+def order_findings(findings, items=None):
+    """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
+    low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable."""
+    items = items or ITEMS
+
+    def key(finding):
+        short = finding['code'].split(':', 1)[-1]
+        meta = items.get(short)
+        if meta is None:
+            return (9, 9, 9, VERDICTS.index(finding['verdict']), finding['code'])
+        return (priority_of(meta['severity']), meta['remediation_impact']['level'],
+                meta['remediation_effort']['level'], VERDICTS.index(finding['verdict']), finding['code'])
+
+    return sorted(findings, key=key)
 
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'
@@ -383,9 +474,9 @@ def host_audit_kisa_section(model, records, register=None, today=None):
     findings = []
     for (code, verdict), hosts in groups.items():
         meta = _item_meta(code)
-        findings.append(dict(meta, verdict=verdict, verdict_class=VERDICT_CLASSES[verdict],
-                             hosts=hosts, host_count=len(hosts)))
-    findings.sort(key=lambda f: (VERDICTS.index(f['verdict']), SEVERITY_ORDER.get(f['severity'], 9), f['code']))
+        findings.append(dict(meta, **remediation_view(code), verdict=verdict,
+                             verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
+    findings = order_findings(findings)
 
     summary = [dict(_item_meta(code), counts=[counts[code][v] for v in VERDICTS]) for code in codes]
     implemented = sorted(ITEMS)
@@ -406,6 +497,7 @@ def host_audit_kisa_section(model, records, register=None, today=None):
         'totals': [totals[v] for v in VERDICTS],
         'summary': summary,
         'findings': findings,
+        'remediation_source': REMEDIATION_SOURCE,
         'appendix': appendix,
         'register': _register_rows(register, applied, today),
         'run_date': today,

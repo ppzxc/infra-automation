@@ -198,14 +198,17 @@ def test_section_shows_findings_other_than_good_and_appendix_has_everything():
     assert sum(cv["totals"]) == 2 * len(ITEMS)
 
 
-def test_section_orders_findings_by_verdict_then_severity():
+def test_section_orders_findings_by_priority_then_remediation_levels():
     lines = ["U-12|VULN|x", "U-01|VULN|x", "U-07|MANUAL|x", "U-03|VULN|x"]
     cv = _model([_record("h", lines, [exception("KISA-2026:U-03")])], [exception("KISA-2026:U-03")])[
         "config_vulnerability"]
-    order = [(f["verdict"], f["code"]) for f in cv["findings"]]
-    assert order[0] == (VULNERABLE, "KISA-2026:U-01")  # 상
-    assert order[1] == (VULNERABLE, "KISA-2026:U-12")  # 하
-    assert order.index((EXCEPTION, "KISA-2026:U-03")) > order.index((MANUAL, "KISA-2026:U-07"))
+    findings = cv["findings"]
+    keys = [(f["priority"], f["impact_level"], f["effort_level"]) for f in findings]
+    assert keys == sorted(keys)
+    assert findings[0]["severity"] == "상" and findings[-1]["severity"] == "하"
+    # the verdict is no longer the major sort key: an approved exception of a 상 item stays above a 하 item
+    order = [(f["verdict"], f["code"]) for f in findings]
+    assert order.index((EXCEPTION, "KISA-2026:U-03")) < order.index((MANUAL, "KISA-2026:U-07"))
     reg = cv["register"][0]
     assert reg["state"] == "유효" and reg["applied"] == 1
 

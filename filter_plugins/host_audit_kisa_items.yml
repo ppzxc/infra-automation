@@ -1,406 +1,1264 @@
 # KISA-2026 Unix 서버 취약점 점검 항목(U-01~U-67) 카탈로그 (ADR-0009, Spec #488).
 # 항목 목록의 유일한 원본이다. filter_plugins/host_audit_kisa.py가 import 시 읽기만 한다.
-# title/severity/criteria는 2026판 가이드의 항목 설명을 따르고, cis는 CIS Red Hat Enterprise Linux 9
-# Benchmark v2.0.0 규칙 번호(참조 열)이다.
+# title/severity/criteria는 2026판 가이드의 항목 설명을 따르고(원문 대조), cis는 CIS Red Hat Enterprise Linux 9
+# Benchmark v2.0.0 규칙 번호(참조 열)이다. check는 우리 probe가 실제로 보는 것이다.
+# purpose/threat/remediation은 가이드를 우리 말로 요약한 것이고(guide_page = 가이드 인쇄 쪽), steps는 계열(rhel,
+# debian)에 따라 실제로 다른 항목에만 둔다. remediation_impact(조치 영향도)·remediation_effort(조치 난이도)의
+# level은 1~3, reason은 그 근거이며 초안이다(PR에서 확정). 위험도·우선순위·시급성은 severity에서 계산하므로 저장하지 않는다.
 U-01:
   title: root 계정 원격 접속 제한
   severity: 상
   category: 계정 관리
   criteria: 원격터미널 서비스를 사용하지 않거나, 사용 시 root 직접 접속을 차단한 경우 양호
   cis: 5.1.20
+  check: sshd -T(실패 시 sshd_config)의 PermitRootLogin이 no이고 telnet(23/tcp) listening이 없으면 양호
+  purpose: 외부 비인가자가 root 계정으로 원격 접속을 시도하지 못하게 막아 관리자 계정 탈취로 인한 시스템 장악을 예방한다.
+  threat: root는 모든 기능을 바꿀 수 있어서, 원격에서 무차별·사전 대입으로 root를 뚫으면 시스템이 장악되거나 root 계정을 쓸 수 없게 된다.
+  guide_page: 12
+  remediation:
+    summary: /etc/ssh/sshd_config에 PermitRootLogin no를 설정하고 sshd를 재적용한다. telnet(23/tcp)은 쓰지 않거나, 쓴다면 pam_securetty와 /etc/securetty에서 pts 항목을 제거한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: sshd_config의 PermitRootLogin 한 줄을 바꾸면 끝난다.
 U-02:
   title: 비밀번호 관리정책 설정
   severity: 상
   category: 계정 관리
   criteria: 비밀번호 관리 정책이 설정된 경우 양호
   cis: 5.3.3.2.2, 5.3.3.2.3, 5.4.1.1, 5.4.1.2
+  check: PASS_MAX_DAYS ≤ 90, PASS_MIN_DAYS ≥ 1, 문자 종류 3종+8자 또는 2종+10자(pwquality·PAM 인자)
+  purpose: 비밀번호 복잡성, 길이, 변경 주기, 재사용 제한을 정책으로 강제해 계정 보안을 높인다.
+  threat: 비밀번호 정책이 없으면 무차별·사전 대입 공격으로 비밀번호가 노출될 수 있다.
+  guide_page: 15
+  remediation:
+    summary: /etc/login.defs에 PASS_MAX_DAYS 90, PASS_MIN_DAYS 1을 넣고, /etc/security/pwquality.conf에 minlen = 8과 dcredit, ucredit, lcredit, ocredit = -1을 설정한다. 이전 비밀번호는 pwhistory(remember)로 기억시키며 root에도 적용하려면 enforce_for_root를 쓴다. 가이드 안에서 기억 개수가 4(Linux 사례)와 10(Solaris 권고표)으로 어긋나는데, Linux 사례의 4 이상을 따른다. 우리 probe는 3종류 8자 이상 또는 2종류 10자 이상을 본다.
+    steps:
+      rhel: |
+        /etc/login.defs: PASS_MAX_DAYS 90, PASS_MIN_DAYS 1
+        /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
+        /etc/security/pwhistory.conf: remember=4, enforce_for_root
+        /etc/pam.d/system-auth: pam_pwquality.so, pam_pwhistory.so를 pam_unix.so 위에 둔다
+      debian: |
+        /etc/security/pwquality.conf: minlen = 8, dcredit/ucredit/lcredit/ocredit = -1, enforce_for_root
+        /etc/pam.d/common-password: pam_pwquality.so, pam_pwhistory.so를 pam_unix.so 위에 둔다
+        /etc/login.defs: PASS_MAX_DAYS 90, PASS_MIN_DAYS 1
+  remediation_impact:
+    level: 2
+    reason: 비밀번호 변경 시 Web, WAS, DB 연동 구간에 문제가 생길 수 있어 영향을 고려하고 적용해야 한다고 가이드가 서술한다.
+  remediation_effort:
+    level: 2
+    reason: login.defs, pwquality, pwhistory, PAM 파일 등 여러 파일을 순서에 맞게 고쳐야 한다.
 U-03:
   title: 계정 잠금 임계값 설정
   severity: 상
   category: 계정 관리
   criteria: 계정 잠금 임계값이 10회 이하의 값으로 설정된 경우 양호
   cis: 5.3.3.1.1
+  check: auth 스택 pam_faillock·pam_tally2·pam_tally의 deny(없으면 faillock.conf, 기본 3)가 1~10
+  purpose: 로그인 실패가 일정 횟수를 넘으면 계정을 잠가 무차별 대입 공격을 무력화한다.
+  threat: 잠금 임계값이 없으면 공격자가 비밀번호가 맞을 때까지 계속 시도할 수 있어 비밀번호가 유출될 위험이 있다.
+  guide_page: 21
+  remediation:
+    summary: PAM의 pam_faillock(구형은 pam_tally2)으로 로그인 실패 deny를 10 이하로 설정하고 unlock_time은 120초 정도로 둔다. RHEL 8 이상은 authselect의 with-faillock을 켜고 /etc/security/faillock.conf에 deny = 10, unlock_time = 120을 쓴다.
+    steps:
+      rhel: |
+        RHEL 8 이상: authselect enable-feature with-faillock, /etc/security/faillock.conf에 deny = 10, unlock_time = 120
+        구형(CentOS 6/7): /etc/pam.d/system-auth, password-auth의 auth 줄에 pam_faillock.so(또는 pam_tally2.so) deny=10 unlock_time=120
+        PAM 모듈 경로가 실제로 있는지 먼저 확인한다
+      debian: |
+        /etc/pam.d/common-auth에 pam_faillock.so(또는 pam_tally2.so) deny=10 unlock_time=120
+        pam_faillock은 /etc/pam.d/common-account에도 모듈 줄을 추가한다
+        PAM 모듈 경로가 실제로 있는지 먼저 확인한다
+  remediation_impact:
+    level: 3
+    reason: 모듈 경로가 틀리거나 PAM 순서를 어기면 모든 계정의 로그인이 안 되는 장애가 생길 수 있다고 가이드가 경고한다.
+  remediation_effort:
+    level: 2
+    reason: 배포판과 버전별로 PAM 또는 authselect 설정을 맞춰 여러 파일을 순서대로 고쳐야 한다.
 U-04:
   title: 비밀번호 파일 보호
   severity: 상
   category: 계정 관리
   criteria: 쉐도우 비밀번호를 사용하거나, 비밀번호를 암호화하여 저장하는 경우 양호
   cis: 7.2.1
+  check: /etc/passwd 비밀번호 필드가 모두 x(잠금 표시 허용)이고 /etc/shadow 존재
+  purpose: 계정 비밀번호가 /etc/passwd에 평문이 아니라 암호화되어 별도 파일에 저장되는지 확인한다.
+  threat: 비밀번호 파일이 유출될 때 평문 비밀번호가 그대로 노출될 위험이 있다.
+  guide_page: 25
+  remediation:
+    summary: /etc/passwd의 두 번째 필드가 모두 x인지 확인하고, 아니면 pwconv 명령으로 쉐도우 비밀번호를 적용해 /etc/shadow에 저장되게 한다.
+  remediation_impact:
+    level: 2
+    reason: Linux는 영향이 없으나 가이드가 HP-UX Trusted Mode 전환 시 서비스 문제 가능성을 개별 서술하므로 조건부로 본다.
+  remediation_effort:
+    level: 1
+    reason: pwconv 명령 하나로 적용된다.
 U-05:
   title: root 이외의 UID가 ‘0’ 금지
   severity: 상
   category: 계정 관리
   criteria: root 계정과 동일한 UID를 갖는 계정이 존재하지 않는 경우 양호
   cis: 5.4.2.1
+  check: UID 0 계정이 root뿐
+  purpose: root(UID 0)와 같은 UID를 가진 다른 계정이 없는지 점검해 root 권한이 보호되게 한다.
+  threat: UID 0 계정은 root와 같은 모든 작업이 가능하고, 감사 추적에서 root와 구분되지 않는다.
+  guide_page: 27
+  remediation:
+    summary: UID가 0인 root 외 계정을 찾아 usermod -u로 중복되지 않는 다른 UID로 바꾸거나 불필요하면 삭제한다. 사용 중인 계정이라 명령이 안 되면 /etc/passwd를 직접 수정한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 해당 계정에 관리자 권한이 필요하지 않으면 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 해당 계정을 찾아 계정별로 UID 변경이나 삭제를 판단해 처리해야 한다.
 U-06:
   title: 사용자 계정 su 기능 제한
   severity: 상
   category: 계정 관리
   criteria: su 명령어를 특정 그룹에 속한 사용자만 사용하도록 제한된 경우 양호
   cis: 5.2.7
+  check: /etc/pam.d/su의 pam_wheel.so, 또는 su가 root 외 그룹 소유·other 실행 불가. su 없으면 해당없음
+  purpose: su 명령을 특정 그룹 구성원만 쓰게 제한해 일반 사용자의 무분별한 계정 전환을 막는다.
+  threat: 아무나 su를 쓰면 다른 사용자 파일을 바꾸거나 root 권한을 얻으려는 시도가 가능하다.
+  guide_page: 29
+  remediation:
+    summary: wheel 그룹을 만들고 su 허용 계정만 넣은 뒤 /etc/pam.d/su에 auth required pam_wheel.so use_uid를 켠다. PAM을 쓰지 않으면 chgrp wheel /usr/bin/su, chmod 4750 /usr/bin/su로 제한한다. 일반 계정 없이 root만 쓰는 호스트는 제한이 필요 없다.
+  remediation_impact:
+    level: 2
+    reason: 그룹에 추가한 계정은 모든 세션을 종료하고 다시 로그인해야 su를 쓸 수 있다.
+  remediation_effort:
+    level: 2
+    reason: 그룹 생성, 허용 계정 등록, PAM 또는 su 권한 변경을 함께 해야 한다.
 U-07:
   title: 불필요한 계정 제거
   severity: 하
   category: 계정 관리
   criteria: 불필요한 계정이 존재하지 않는 경우 양호
   cis: ''
+  check: 점검불가(수동) — 로그인 가능 계정 목록을 증적으로
+  purpose: 퇴직·휴직 등으로 쓰지 않는 불필요한 계정이 시스템에 남아 있지 않은지 점검한다.
+  threat: 사용하지 않는 계정은 관리가 소홀해 공격자의 목표가 되어 탈취될 수 있다.
+  guide_page: 31
+  remediation:
+    summary: /etc/passwd와 last 기록으로 사용하지 않는 계정을 확인해 userdel 명령으로 제거한다. 주석 처리로는 계정이 막히지 않으므로 반드시 삭제하고, 기본 계정은 업무 영향을 먼저 파악한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 3
+    reason: 어떤 계정이 불필요한지는 담당자 확인이 필요한 판단 작업이라 혼자 바로 끝내기 어렵다.
 U-08:
   title: 관리자 그룹에 최소한의 계정 포함
   severity: 중
   category: 계정 관리
   criteria: 관리자 그룹에 불필요한 계정이 등록되어 있지 않은 경우 양호
   cis: 5.4.2.2, 5.4.2.3
+  check: 점검불가(수동) — GID 0 그룹·기본 그룹 GID 0 계정·wheel/sudo/admin 구성원을 증적으로
+  purpose: 관리자(root) 그룹에 꼭 필요한 계정만 있게 해 권한 남용을 막는다.
+  threat: 관리자 그룹 계정이 유출되면 시스템 운영 파일 접근, 계정정보 유출, 설정 변조가 가능하다.
+  guide_page: 32
+  remediation:
+    summary: /etc/group에서 root 그룹 구성원을 확인해 불필요한 계정을 gpasswd -d <사용자> root로 제거한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 그룹 구성원을 확인해 불필요한 계정을 판단하고 하나씩 제거한다.
 U-09:
   title: 계정이 존재하지 않는 GID 금지
   severity: 하
   category: 계정 관리
   criteria: 시스템 관리나 운용에 불필요한 그룹이 제거된 경우 양호
   cis: 7.2.3
+  check: 모든 계정의 기본 GID가 /etc/group에 있음
+  purpose: 소속 계정이 없거나 불필요한 그룹이 /etc/group에 남아 있지 않은지 점검한다.
+  threat: 불필요한 그룹 소유 파일을 통해 권한이 남용되거나 의도치 않게 부여되고 감사와 관리가 어려워진다.
+  guide_page: 33
+  remediation:
+    summary: /etc/group, /etc/gshadow에서 계정이 없거나 불필요한 그룹을 관리자와 검토한 뒤 groupdel <그룹>으로 제거한다. 제거 전 그 그룹 소유 파일이 있는지, 나중에 쓰려고 미리 만든 그룹인지 확인한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 그룹 목록을 파악하고 소유 파일을 확인하며 그룹마다 제거 여부를 판단해야 한다.
 U-10:
   title: 동일한 UID 금지
   severity: 중
   category: 계정 관리
   criteria: 동일한 UID로 설정된 사용자 계정이 존재하지 않는 경우 양호
   cis: 7.2.4
+  check: 중복 UID 없음
+  purpose: 같은 UID를 쓰는 계정이 없게 해 파일 접근 예방과 감사 추적을 명확히 한다.
+  threat: UID가 중복되면 시스템이 같은 사용자로 보아 불필요한 권한이 부여되고 로그로 사용자를 구분할 수 없다.
+  guide_page: 34
+  remediation:
+    summary: /etc/passwd에서 중복 UID 계정을 찾아 usermod -u <새 UID> <계정>으로 중복되지 않는 UID로 바꾼다.
+  remediation_impact:
+    level: 2
+    reason: 운영 목적으로 같은 UID를 부여했다면 해당 계정이 쓰는 파일과 디렉터리에 권한이 사라져도 서비스에 영향이 없는지 확인해야 한다.
+  remediation_effort:
+    level: 2
+    reason: 중복 UID 계정마다 새 UID를 정해 바꾸고 소유 파일을 점검해야 한다.
 U-11:
   title: 사용자 shell 점검
   severity: 하
   category: 계정 관리
   criteria: 로그인이 필요하지 않은 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호
   cis: 5.4.2.7
+  check: 가이드가 나열한 시스템 계정(daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher)의 셸이 nologin/false
+  purpose: 로그인이 필요 없는 시스템 계정에 쉘이 부여되지 않게 한다.
+  threat: 로그인 불필요 계정에 쉘이 있으면 비인가자가 그 기본 계정으로 시스템에 접근할 수 있다.
+  guide_page: 35
+  remediation:
+    summary: daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher 계정의 쉘을 usermod -s /sbin/nologin(또는 /bin/false) <계정>으로 바꾼다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 가이드가 나열한 계정을 확인해 해당하는 계정마다 쉘을 바꿔야 한다.
 U-12:
   title: 세션 종료 시간 설정
   severity: 하
   category: 계정 관리
   criteria: Session Timeout이 600초(10분) 이하로 설정된 경우 양호
   cis: 5.4.3.2
+  check: 전역 sh 프로필의 TMOUT이 1~600초(여러 곳이면 가장 큰 값)
+  purpose: 사용자가 접속한 채 방치되지 않도록 일정 시간 입력이 없으면 세션을 끊는다.
+  threat: Session timeout이 없으면 방치된 세션으로 비인가자가 접근해 내부 정보를 볼 수 있다.
+  guide_page: 36
+  remediation:
+    summary: /etc/profile에 TMOUT=600과 export TMOUT를 설정해 600초 이하로 맞춘다. csh 계열은 /etc/csh.cshrc 또는 /etc/csh.login에 set autologout=10을 쓴다.
+  remediation_impact:
+    level: 2
+    reason: 모니터링 용도의 세션은 타임아웃으로 끊겨 모니터링이 안 될 수 있어 예외 처리가 필요하다.
+  remediation_effort:
+    level: 1
+    reason: /etc/profile 한 곳에 TMOUT 값을 넣으면 된다.
 U-13:
   title: 안전한 비밀번호 암호화 알고리즘 사용
   severity: 중
   category: 계정 관리
   criteria: SHA-2 이상의 안전한 비밀번호 암호화 알고리즘을 사용하는 경우 양호
   cis: 5.3.3.4.3, 5.4.1.4
+  check: /etc/shadow에 MD5·Blowfish·DES 해시가 없고 ENCRYPT_METHOD·pam_unix 설정이 약한 알고리즘이 아님
+  purpose: 비밀번호를 SHA-2 이상의 안전한 알고리즘으로 암호화해 저장하게 한다.
+  threat: 약한 알고리즘(MD5 등)은 노출된 해시가 복호화 공격으로 비밀번호를 알아내는 데 쓰일 수 있다.
+  guide_page: 37
+  remediation:
+    summary: /etc/login.defs의 ENCRYPT_METHOD를 SHA512(또는 SHA256)로 설정하고 PAM의 pam_unix.so에도 같은 알고리즘 옵션을 둔다. 설정을 바꿔도 passwd로 재설정해야 새 알고리즘이 적용되므로 약한 해시를 쓰는 계정의 비밀번호를 다시 설정해야 한다.
+    steps:
+      rhel: |
+        /etc/login.defs: ENCRYPT_METHOD SHA512
+        /etc/pam.d/system-auth: pam_unix.so에 sha512 옵션
+        약한 해시 계정은 passwd로 비밀번호 재설정
+      debian: |
+        /etc/login.defs: ENCRYPT_METHOD SHA512(또는 yescrypt도 허용)
+        /etc/pam.d/common-password: pam_unix.so에 sha512 옵션
+        약한 해시 계정은 passwd로 비밀번호 재설정
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: login.defs와 PAM을 고치고 약한 해시를 쓰는 계정의 비밀번호를 하나씩 재설정해야 한다.
 U-14:
   title: root 홈, 패스 디렉터리 권한 및 패스 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: PATH 환경변수에 “.” 이 맨 앞이나 중간에 포함되지 않은 경우 양호
   cis: ''
+  check: 전역 프로필·/etc/environment·root 시작 파일의 PATH= 값에 . 또는 빈 항목이 맨 뒤가 아닌 위치에 없음
+  purpose: root의 PATH에 현재 디렉터리(.)가 앞이나 중간에 있지 않게 한다.
+  threat: PATH에서 "."이 정상 명령어 경로보다 앞서면 현재 디렉터리에 심어 둔 변조 명령이 관리자 명령 대신 실행될 수 있다.
+  guide_page: 39
+  remediation:
+    summary: /etc/profile과 root 및 일반 사용자의 환경설정 파일(.profile, .bashrc, .bash_profile 등)에서 PATH의 "."이나 빈 항목을 삭제하거나 맨 뒤로 옮긴다. echo $PATH로 결과를 확인한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 전역 프로필과 계정별 시작 파일 여러 곳을 순서대로 검색해 고쳐야 한다.
 U-15:
   title: 파일 및 디렉터리 소유자 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: 소유자가 존재하지 않는 파일 및 디렉터리가 존재하지 않는 경우 양호
   cis: 7.1.12
+  check: -nouser·-nogroup 파일 없음 (로컬 디스크 파일시스템만 탐색)
+  purpose: 소유자나 그룹이 없는 파일과 디렉터리가 남아 있지 않게 한다.
+  threat: 주인 없는 파일의 UID와 같은 UID로 계정을 바꾸면 그 계정이 파일을 가져 모든 작업을 할 수 있다.
+  guide_page: 40
+  remediation:
+    summary: find / ( -nouser -o -nogroup ) -xdev -ls 2>/dev/null로 대상을 찾아 불필요하면 삭제하고, 쓰는 파일이면 chown, chgrp로 소유자와 그룹을 지정한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 찾은 파일마다 삭제 또는 소유자 지정을 판단해 하나씩 처리해야 한다.
 U-16:
   title: /etc/passwd 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: /etc/passwd 파일의 소유자가 root이고, 권한이 644 이하인 경우 양호
   cis: 7.1.1
+  check: root, 644 이하
+  purpose: /etc/passwd를 관리자만 바꿀 수 있게 소유자와 권한을 제한한다.
+  threat: 비인가자가 /etc/passwd를 변조해 쉘을 바꾸거나 계정을 추가·삭제해 root를 포함한 권한을 얻을 수 있다.
+  guide_page: 41
+  remediation:
+    summary: chown root /etc/passwd와 chmod 644 /etc/passwd로 소유자를 root, 권한을 644 이하로 맞춘다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: chown과 chmod 명령 두 개로 끝난다.
 U-17:
   title: 시스템 시작 스크립트 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: 시스템 시작 스크립트 파일의 소유자가 root이고, 일반 사용자의 쓰기 권한이 제거된 경우 양호
   cis: ''
+  check: /etc/rc.d/init.d·/etc/init.d·/etc/systemd/system 일반 파일이 root 소유, 그룹·기타 쓰기 없음(755 이하). 파일이 없으면 해당없음
+  purpose: 시스템 시작 스크립트의 소유자와 쓰기 권한을 제한해 임의 변조를 막는다.
+  threat: 시작 스크립트 권한이 약하면 비인가자가 내용을 바꿔 시스템 침입에 악용할 수 있다.
+  guide_page: 42
+  remediation:
+    summary: /etc/rc.d, /etc/init.d, /etc/systemd/system 아래 시작 스크립트(링크는 readlink -f로 실제 파일)의 소유자를 chown root로, 일반 사용자 쓰기를 chmod o-w(그룹 쓰기도 제거)로 막는다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 여러 디렉터리의 대상 파일을 찾아 하나씩 소유자와 권한을 고쳐야 한다.
 U-18:
   title: /etc/shadow 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: /etc/shadow 파일의 소유자가 root이고, 권한이 400 이하인 경우 양호
   cis: 7.1.5
+  check: root, 400 이하
+  purpose: /etc/shadow 파일을 관리자만 제어하게 해 비인가자의 임의 변조를 막는다.
+  threat: shadow에 담긴 비밀번호 해시가 노출되면 크래킹으로 비밀번호를 탈취당할 수 있다.
+  guide_page: 44
+  remediation:
+    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: chown과 chmod 명령 두 줄로 끝난다.
 U-19:
   title: /etc/hosts 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: /etc/hosts 파일의 소유자가 root이고, 권한이 644 이하인 경우 양호
   cis: ''
+  check: root, 644 이하
+  purpose: /etc/hosts 파일을 관리자만 제어하게 해 임의 변조를 막는다.
+  threat: 비인가자가 hosts에 악의적 매핑을 등록하면 정상 DNS를 우회해 악성 사이트로 유도하는 파밍에 악용된다.
+  guide_page: 45
+  remediation:
+    summary: chown root /etc/hosts 와 chmod 644 /etc/hosts 로 소유자를 root, 권한을 644 이하로 맞춘다.
+  remediation_impact:
+    level: 2
+    reason: hosts에 시스템 정보가 설정돼 있으면 이 파일을 참조하는 서비스가 영향받을 수 있다고 가이드가 서술한다.
+  remediation_effort:
+    level: 1
+    reason: chown과 chmod 명령 두 줄로 끝난다.
 U-20:
   title: /etc/(x)inetd.conf 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: /etc/(x)inetd.conf 파일의 소유자가 root이고, 권한이 600 이하인 경우 양호
   cis: ''
+  check: root, 600 이하. 둘 다 없으면 해당없음
+  purpose: (x)inetd 설정 파일을 관리자만 제어하게 해 임의 변조를 막는다.
+  threat: 소유자 외 쓰기가 가능하면 일반 사용자가 등록된 서비스를 변조하거나 악성 서비스를 등록할 수 있다.
+  guide_page: 46
+  remediation:
+    summary: /etc/inetd.conf, /etc/xinetd.conf, /etc/xinetd.d/ 아래 파일, /etc/systemd/system.conf 등 해당하는 파일의 소유자를 root, 권한을 600 이하로 chown/chmod 한다. 해당 파일이 없으면 조치할 것이 없다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 가이드가 inetd, xinetd, systemd별로 여러 파일과 디렉터리를 나눠 처리하게 한다.
 U-21:
   title: /etc/(r)syslog.conf 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: /etc/(r)syslog.conf 파일의 소유자가 root(또는 bin, sys)이고, 권한이 640 이하인 경우 양호
   cis: ''
+  check: root·bin·sys, 640 이하. 둘 다 없으면 해당없음
+  purpose: (r)syslog 설정 파일의 권한을 점검해 비인가자의 변조를 막는다.
+  threat: 설정이 노출·변조되면 로그 저장 위치가 드러나고, 로그를 끄거나 과다 기록시켜 시스템 과부하를 유발할 수 있다.
+  guide_page: 48
+  remediation:
+    summary: chown root /etc/syslog.conf 또는 /etc/rsyslog.conf 로 소유자를 root(또는 bin, sys)로, chmod 640 으로 권한을 640 이하로 맞춘다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: chown과 chmod 한 쌍으로 끝난다.
 U-22:
   title: /etc/services 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: /etc/services 파일의 소유자가 root(또는 bin, sys)이고, 권한이 644 이하인 경우 양호
   cis: ''
+  check: root·bin·sys, 644 이하
+  purpose: /etc/services 파일을 관리자만 제어하게 해 임의 변조를 막는다.
+  threat: 접근 권한이 부적절하면 포트 번호를 바꿔 정상 서비스를 막거나 허용되지 않은 포트로 악성 서비스를 실행할 수 있다.
+  guide_page: 49
+  remediation:
+    summary: chown root /etc/services 와 chmod 644 /etc/services 로 소유자를 root(또는 bin, sys), 권한을 644 이하로 맞춘다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: chown과 chmod 명령 두 줄로 끝난다.
 U-23:
   title: SUID, SGID, Sticky bit 설정 파일 점검
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: 주요 실행 파일의 권한에 SUID와 SGID에 대한 설정이 부여되어 있지 않은 경우 양호
   cis: 7.1.13
+  check: 점검불가(수동) — SUID/SGID 파일 목록(최대 40개)을 증적으로. 없으면 양호. 같은 증적 줄에 file capability 목록이 덧붙으며 판정은 바꾸지 않는다
+  purpose: 불필요하거나 악의적인 파일의 SUID, SGID, Sticky bit 설정을 찾아 제거한다.
+  threat: 부적절한 특수 권한이 붙은 파일을 이용해 root 권한을 획득하는 권한 상승이 가능하다.
+  guide_page: 50
+  remediation:
+    summary: find / -user root -type f ( -perm -04000 -o -perm -02000 ) -xdev 로 SUID/SGID 파일을 찾아 불필요한 것은 chmod -s 로 권한을 빼거나 파일을 제거한다. 꼭 필요한 파일은 chgrp 로 특정 그룹을 지정하고 chmod 4750 으로 해당 그룹만 쓰게 제한한다.
+  remediation_impact:
+    level: 2
+    reason: 특수 권한을 제거하면 OS와 응용프로그램이 정상 동작하는지 확인이 필요하다고 가이드가 서술한다.
+  remediation_effort:
+    level: 3
+    reason: 찾은 파일 목록마다 필요 여부를 사람이 판단해 하나씩 처리해야 한다.
 U-24:
   title: 사용자, 시스템 환경변수 파일 소유자 및 권한 설정
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: 홈 디렉터리 환경변수 파일 소유자가 root 또는 해당 계정으로 지정되어 있고, 홈 디렉터리 환경변수 파일에 root 계정과 소유자만 쓰기 권한이 부여된 경우 양호
   cis: 7.2.10
+  check: 로그인 계정 홈의 .profile·.bashrc 등이 root 또는 해당 계정 소유, 그룹·기타 쓰기 없음
+  purpose: 홈 디렉터리 환경변수 파일의 소유자와 쓰기 권한을 제한해 비인가자의 변조를 막는다.
+  threat: 환경변수 파일이 변조되면 해당 사용자의 서비스 이용이 제한될 수 있다.
+  guide_page: 51
+  remediation:
+    summary: .profile, .bashrc, .bash_profile, .cshrc 등 홈 디렉터리 환경변수 파일을 ls -l 로 확인하고, chown 으로 root 또는 해당 계정 소유로 바꾸고 chmod o-w 로 타 사용자 쓰기를 제거한다(그룹 쓰기도 없어야 한다).
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 계정별 홈의 여러 환경변수 파일을 확인해 대상을 하나씩 처리해야 한다.
 U-25:
   title: world writable 파일 점검
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: world writable 파일이 존재하지 않거나, 존재 시 설정 이유를 인지하고 있는 경우 양호
   cis: 7.1.11
+  check: 없으면 양호, 있으면 점검불가(수동) — 목록(최대 30개)을 증적으로
+  purpose: 불필요한 world writable 파일을 찾아 제거하거나 권한을 낮춘다.
+  threat: 시스템 파일 등이 모든 사용자에게 쓰기 가능하면 비인가자가 임의로 수정·삭제할 수 있다.
+  guide_page: 52
+  remediation:
+    summary: find / -type f -perm -2 로 world writable 파일을 찾고, 필요한 파일은 chmod o-w 로 타 사용자 쓰기를 제거하고 불필요한 파일은 rm 으로 지운다. 설정 이유를 알고 있는 파일만 남긴다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 검색된 파일 목록의 용도를 파악해 하나씩 처리해야 한다.
 U-26:
   title: /dev에 존재하지 않는 device 파일 점검
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: /dev 디렉터리에 대한 파일 점검 후 존재하지 않는 device 파일을 제거한 경우 양호
   cis: ''
+  check: /dev 아래 일반 파일 없음(/dev/shm·/dev/mqueue·/dev/hugepages 제외)
+  purpose: /dev에 실제 장치가 아닌 일반 파일이 숨어 있는지 점검해 제거한다.
+  threat: 공격자가 rootkit 설정 파일을 관리자가 쉽게 못 찾도록 /dev 안에 장치 파일처럼 위장해 둘 수 있다.
+  guide_page: 53
+  remediation:
+    summary: find /dev -type f -exec ls -l {} ; 로 /dev 아래 일반 파일(major, minor number가 없는 파일)을 찾아 rm 으로 제거한다. mqueue와 shm은 시스템이 주기적으로 만들고 지우므로 예외다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 찾은 파일이 위장 파일인지 확인한 뒤 하나씩 지워야 한다.
 U-27:
   title: $HOME/.rhosts, hosts.equiv 사용 금지
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: rlogin, rsh, rexec 서비스를 사용하지 않거나, 사용 시 /etc/hosts.equiv·$HOME/.rhosts의 소유자가 root 또는 해당 계정이고 권한이 600 이하이며 "+" 설정이 없는 경우 양호
   cis: ''
+  check: 파일이 없거나, 있으면 root/해당 계정 소유·600 이하·+ 없음
+  purpose: r-command 인증 파일(/etc/hosts.equiv, $HOME/.rhosts)의 소유자·권한·설정을 점검해 인증 없는 원격 접속을 막는다.
+  threat: r-command에 보안 설정이 없으면 원격 공격자가 관리자 권한으로 임의 명령을 실행하거나 파일 권한을 악용해 무단 사용을 등록할 수 있다.
+  guide_page: 54
+  remediation:
+    summary: /etc/hosts.equiv 와 각 $HOME/.rhosts 를 chown 으로 root 또는 해당 계정 소유로, chmod 600 으로 권한을 맞춘다. 파일 안에 + 설정이 있으면 제거하고 허용할 호스트와 계정만 등록한다. r-command를 안 쓰면 파일이 없는 것이 양호다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 시스템 파일과 사용자별 홈의 .rhosts를 찾아 권한과 + 설정을 각각 고쳐야 한다.
 U-28:
   title: 접속 IP 및 포트 제한
   severity: 상
   category: 파일 및 디렉토리 관리
   criteria: 접속을 허용할 특정 호스트에 대한 IP주소 및 포트 제한을 설정한 경우 양호
   cis: 4.1.2
+  check: 'firewalld 기본 zone target이 ACCEPT 아님, ufw active, nftables input drop 정책·saddr 규칙, 레거시 iptables INPUT DROP·-s 규칙, hosts.deny ALL: ALL 중 하나. Docker 호스트는 점검불가(수동)'
+  purpose: 접속을 허용할 호스트의 IP와 포트를 제한해 허용된 호스트만 서비스를 쓰게 한다.
+  threat: IP와 포트 제한이 없으면 Telnet, FTP 같은 취약 서비스를 통한 불법 접근과 침해사고가 발생할 수 있다.
+  guide_page: 56
+  remediation:
+    summary: '방화벽(firewalld, ufw, iptables, nftables)이나 TCP Wrapper로 허용 IP와 포트를 등록한다. TCP Wrapper는 /etc/hosts.deny 에 ALL:ALL 을 넣고 /etc/hosts.allow 에 서비스와 허용 IP(예 sshd : 허용IP)를 적으며, 두 파일이 없으면 모든 접근이 허용된다.'
+    steps:
+      rhel: |
+        firewalld: firewall-cmd --list-all 로 현재 설정 확인
+        허용 규칙 추가: firewall-cmd --permanent --add-rich-rule (source address, port protocol, port, accept)
+        firewall-cmd --reload 로 적용
+      debian: |
+        ufw: ufw status numbered 로 현재 설정 확인
+        허용 규칙 추가: ufw allow from <IP> to any port <포트>
+        ufw reload 로 적용 (iptables를 쓰면 iptables -A INPUT ... -j ACCEPT 후 iptables-save)
+  remediation_impact:
+    level: 3
+    reason: 허용하지 않은 IP는 서비스를 쓸 수 없게 되므로 규칙을 잘못 적용하면 원격 접속이 끊길 수 있다.
+  remediation_effort:
+    level: 3
+    reason: 허용 호스트와 서비스 정책을 설계해야 하는 방화벽 정책 수립 작업이다.
 U-29:
   title: hosts.lpd 파일 소유자 및 권한 설정
   severity: 하
   category: 파일 및 디렉토리 관리
   criteria: /etc/hosts.lpd 파일이 존재하지 않거나, 불가피하게 사용 시 /etc/hosts.lpd 파일의 소유자가 root이고, 권한이 600 이하인 경우 양호
   cis: ''
+  check: 없거나, root·600 이하
+  purpose: /etc/hosts.lpd 파일을 제거하거나 소유자와 권한을 관리해 변조를 막는다.
+  threat: 권한이 부적절하면 비인가자가 파일을 수정해 허가된 사용자의 서비스를 방해하거나 호스트 정보를 얻을 수 있다.
+  guide_page: 61
+  remediation:
+    summary: /etc/hosts.lpd 가 있으면 제거하고, 불가피하게 쓰면 chown root 와 chmod 600 으로 소유자를 root, 권한을 600 이하로 맞춘다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: 파일 하나를 지우거나 chown과 chmod 한 쌍으로 끝난다.
 U-30:
   title: UMASK 설정 관리
   severity: 중
   category: 파일 및 디렉토리 관리
   criteria: UMASK 값이 022 이상으로 설정된 경우 양호
   cis: 5.4.3.3
+  check: 전역 프로필·login.defs의 모든 umask 값이 022 비트를 포함. 지정이 없으면 취약
+  purpose: 시스템 UMASK를 022 이상으로 설정해 새 파일에 과도한 권한이 부여되지 않게 한다.
+  threat: UMASK가 잘못 설정되면 새 파일과 디렉터리에 과한 권한이 붙어 무단 접근과 데이터 유출 위험이 생긴다.
+  guide_page: 62
+  remediation:
+    summary: /etc/profile 에 umask 022 와 export umask 를 설정하고 /etc/login.defs 에 UMASK 022 를 설정한다. FTP를 쓰면 vsftpd.conf의 local_umask=022, proftpd.conf의 Umask 022 도 맞춘다. 이미 로그인한 세션은 재로그인 후 적용된다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: /etc/profile과 /etc/login.defs 등 여러 파일의 설정을 각각 확인해 고쳐야 한다.
 U-31:
   title: 홈디렉토리 소유자 및 권한 설정
   severity: 중
   category: 파일 및 디렉토리 관리
   criteria: 홈 디렉토리 소유자가 해당 계정이고, 타 사용자 쓰기 권한이 제거된 경우 양호
   cis: 7.2.9
+  check: 로그인 계정 홈이 해당 계정 소유, 기타 쓰기 없음
+  purpose: 사용자 홈 디렉터리를 소유자만 수정할 수 있게 제한한다.
+  threat: 홈 디렉터리 안 설정 파일이 변조되면 정상적인 서비스 이용이 제한될 수 있다.
+  guide_page: 65
+  remediation:
+    summary: /etc/passwd 에서 각 계정의 홈 디렉터리를 확인하고(별도로 만든 사용자 디렉터리도 포함), ls -ald 로 점검한 뒤 chown 으로 해당 계정을 소유자로 바꾸고 chmod o-w 로 타 사용자 쓰기를 제거한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 계정별 홈 디렉터리 목록을 파악해 하나씩 소유자와 권한을 고쳐야 한다.
 U-32:
   title: 홈 디렉토리로 지정한 디렉토리의 존재 관리
   severity: 중
   category: 파일 및 디렉토리 관리
   criteria: 홈 디렉토리가 존재하지 않는 계정이 발견되지 않는 경우 양호
   cis: 7.2.9
+  check: 로그인 계정의 홈 디렉터리가 모두 존재
+  purpose: 계정에 지정된 홈 디렉터리가 실제로 존재하는지 점검한다.
+  threat: 홈 디렉터리가 없으면 로그인 시 루트 디렉터리(/)가 홈으로 할당돼 불필요한 접근이 가능해진다.
+  guide_page: 66
+  remediation:
+    summary: /etc/passwd 에서 홈 디렉터리가 없는 계정을 찾아, 불필요한 계정은 userdel 로 삭제하고 쓰는 계정은 홈 디렉터리를 만들거나 /etc/passwd 의 홈 경로를 올바르게 고친다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 홈이 없는 계정을 찾아 삭제할지 홈을 만들지 계정별로 판단해 처리해야 한다.
 U-33:
   title: 숨겨진 파일 및 디렉토리 검색 및 제거
   severity: 하
   category: 파일 및 디렉토리 관리
   criteria: 불필요하거나 의심스러운 숨겨진 파일 및 디렉토리를 제거한 경우 양호
   cis: ''
+  check: 점검불가(수동) — 로그인 홈·/tmp·/var/tmp·/dev의 숨김 항목 중 통상 항목(.ssh, .bashrc 등) 외 목록. 없으면 양호
+  purpose: 숨겨진 파일과 디렉터리 중 의심스러운 것을 찾아 제거한다.
+  threat: 숨김 항목을 방치하면 비인가자가 만든 악성 파일이나 백도어를 탐지하지 못할 수 있다.
+  guide_page: 67
+  remediation:
+    summary: ls -al 과 find / -type f -name '.*', find / -type d -name '.*' 로 숨김 항목을 찾아 불필요하거나 의심스러운 것을 rm, rm -r 로 제거한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 3
+    reason: 시스템 전체에서 나온 많은 숨김 항목을 사람이 정상 여부로 가려내야 한다.
 U-34:
   title: Finger 서비스 비활성화
   severity: 상
   category: 서비스 관리
   criteria: Finger 서비스가 비활성화된 경우 양호
   cis: ''
+  check: finger 서비스·79/tcp 없음
+  purpose: Finger 서비스를 꺼 사용자 정보가 외부에 조회되는 것을 막는다.
+  threat: Finger가 켜져 있으면 비인가자가 등록 사용자 정보를 조회한 뒤 비밀번호 공격으로 계정을 탈취할 수 있다.
+  guide_page: 68
+  remediation:
+    summary: inetd를 쓰면 /etc/inetd.conf 의 finger 항목을 주석 처리하고 inetd를 재시작하며, xinetd를 쓰면 /etc/xinetd.d/finger 의 disable 을 yes 로 바꾸고 systemctl restart xinetd 로 재시작한다. 79/tcp가 열려 있지 않아야 한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: 설정 한 곳을 고치고 슈퍼데몬을 재시작하면 끝난다.
 U-35:
   title: 공유 서비스에 대한 익명 접근 제한 설정
   severity: 상
   category: 서비스 관리
   criteria: 공유 서비스에 대해 익명 접근을 제한한 경우 양호
   cis: ''
+  check: vsftpd anonymous_enable=YES, proftpd <Anonymous>, exports no_root_squash·anonuid=0, Samba guest ok = yes가 없음
+  purpose: 공유 서비스(FTP, NFS, Samba)가 익명 접근을 막고 있는지 확인해 중요 정보 노출을 막는다.
+  threat: 익명 접근을 허용하면 비인가자가 자료를 훔치거나 변조하고 악성 코드를 올릴 수 있다.
+  guide_page: 70
+  remediation:
+    summary: vsftpd는 vsftpd.conf(RHEL은 /etc/vsftpd/, Debian은 /etc/)에서 anonymous_enable=NO로 바꾸고, proftpd는 설정의 Anonymous 블록을 주석 처리한다. NFS는 /etc/exports의 anonuid/anongid 옵션을 지운 뒤 exportfs -ra를 실행하고, Samba는 smb.conf의 guest ok를 no로 바꾼 뒤 smbcontrol all reload-config를 실행한다. 기본 FTP는 ftp, anonymous 계정을 userdel로 지운다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: FTP, NFS, Samba 등 쓰는 서비스마다 설정 파일을 따로 고치고 재적용해야 한다.
 U-36:
   title: r 계열 서비스 비활성화
   severity: 상
   category: 서비스 관리
   criteria: 불필요한 r 계열 서비스가 비활성화된 경우 양호
   cis: ''
+  check: rlogin·rsh·rexec 서비스·512~514/tcp 없음
+  purpose: 인증 없이 원격 접속을 허용하는 r 계열 서비스(rlogin, rsh, rexec)가 꺼져 있는지 확인한다.
+  threat: r 계열 서비스가 켜져 있으면 인증 절차 없이 원격 터미널 접속과 명령 실행이 가능하다.
+  guide_page: 77
+  remediation:
+    summary: NET Backup이나 클러스터링 등 특별한 용도가 없으면 shell(514), login(513), exec(512) 서비스를 중지한다. xinetd는 /etc/xinetd.d/ 해당 파일의 disable을 yes로 바꾸고 xinetd를 재시작하며, systemd는 해당 서비스를 systemctl stop 후 disable한다. 사용 여부는 /etc/hosts.equiv와 $HOME/.rhosts로 확인한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 사용 여부를 확인한 뒤 inetd, xinetd, systemd 중 해당하는 곳에서 서비스를 하나씩 끄고 재기동한다.
 U-37:
   title: crontab 설정파일 권한 설정 미흡
   severity: 상
   category: 서비스 관리
   criteria: crontab 및 at 명령어에 일반 사용자 실행 권한이 제거되어 있으며, cron 및 at 관련 파일 권한이 640 이하인 경우 양호
   cis: 2.4.1.2~2.4.1.8, 2.4.2.1
+  check: /usr/bin/crontab·/usr/bin/at 750 이하, /etc/crontab·cron.allow/deny·at.allow/deny root·640 이하. 모두 없으면 해당없음
+  purpose: crontab과 at 관련 명령과 파일의 권한을 점검해 관리자만 예약 작업을 쓰게 한다.
+  threat: 일반 사용자가 cron, at을 쓰면 고의나 실수로 불법 예약 작업을 실행해 시스템에 피해를 줄 수 있다.
+  guide_page: 80
+  remediation:
+    summary: /usr/bin/crontab과 /usr/bin/at의 소유자를 root, 권한을 750 이하로 하고 SUID를 제거한다. cron 작업 목록 파일(/var/spool/cron/ 아래), /etc/crontab, cron.allow/deny, at.allow/deny, at 작업 목록 파일은 root 소유에 640 이하로 맞춘다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 명령 파일과 여러 cron, at 관련 파일을 찾아 소유자와 권한을 하나씩 바꿔야 한다.
 U-38:
   title: DoS 공격에 취약한 서비스 비활성화
   severity: 상
   category: 서비스 관리
   criteria: DoS 공격에 취약한 서비스가 비활성화된 경우 양호
   cis: ''
+  check: echo·discard·daytime·chargen (x)inetd 항목·7/9/13/19 tcp 없음
+  purpose: echo, discard, daytime, chargen, ntp, dns, snmp처럼 DoS에 취약한 서비스가 꺼져 있는지 확인한다.
+  threat: 이런 서비스가 켜져 있으면 시스템 정보가 새어 나가거나 DoS 공격 대상이 될 수 있다.
+  guide_page: 83
+  remediation:
+    summary: echo, discard, daytime, chargen 등 쓰지 않는 서비스를 끈다. inetd는 /etc/inetd.conf 해당 줄을 주석 처리하고, xinetd는 disable = yes로 바꿔 재시작하며, systemd는 systemctl stop 후 disable한다. 필요하지 않은 ntp, dns, snmp도 같은 방식으로 끈다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 서비스 종류가 여러 개라 활성 목록을 확인해 하나씩 끄고 재기동해야 한다.
 U-39:
   title: 불필요한 NFS 서비스 비활성화
   severity: 상
   category: 서비스 관리
   criteria: 불필요한 NFS 서비스 관련 데몬이 비활성화된 경우 양호
   cis: ''
+  check: NFS 서버(nfsd·nfs-server) 없음. 필요하면 예외 레지스터
+  purpose: 쓰지 않는 NFS 서비스가 켜져 있지 않은지 확인한다.
+  threat: NFS가 적절한 보안 설정 없이 디스크를 공유하면 불필요한 파일 공유로 자료가 유출될 수 있다.
+  guide_page: 86
+  remediation:
+    summary: NFS를 쓰지 않으면 systemctl list-units로 nfs 관련 서비스를 찾아 systemctl stop 후 disable한다. 먼저 로컬에 마운트된 디렉터리와 공유 디렉터리를 정리하면 중지할 수 있다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: 쓰지 않는 NFS 서비스를 systemctl로 끄면 끝난다.
 U-40:
   title: NFS 접근 통제
   severity: 상
   category: 서비스 관리
   criteria: 접근 통제가 설정되어 있으며 NFS 설정 파일 접근 권한이 644 이하인 경우 양호
   cis: ''
+  check: 모든 export가 허용 호스트 지정(*·호스트 없음 아님), /etc/exports root·644 이하. NFS 서버 없으면 해당없음
+  purpose: NFS를 쓸 때 접근 통제와 설정 파일 권한이 적절한지 확인한다.
+  threat: 접근 통제가 없으면 비인가자가 원격으로 마운트해 중요 파일을 변조하거나 유출할 수 있다.
+  guide_page: 89
+  remediation:
+    summary: NFS를 안 쓰면 서비스를 중지하고 비활성화한다. 꼭 써야 하면 /etc/exports의 소유자를 root, 권한을 644 이하로 하고, 공유 디렉터리마다 허용 호스트를 지정하고 root_squash 등을 둔 뒤 exportfs -ra로 적용한다. NFS v2, v3는 평문이라 v4를 권고한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 공유 디렉터리별로 허용 호스트와 옵션을 정리하고 파일 권한을 고친 뒤 재적용해야 한다.
 U-41:
   title: 불필요한 automountd 제거
   severity: 상
   category: 서비스 관리
   criteria: automountd 서비스가 비활성화된 경우 양호
   cis: ''
+  check: automount(autofs) 없음
+  purpose: 불필요한 automountd(autofs) 데몬이 꺼져 있는지 확인한다.
+  threat: 로컬 공격자가 automountd에 RPC를 보내 마운트 옵션을 바꾸고 root 권한을 얻거나 임의 명령을 실행할 수 있다.
+  guide_page: 93
+  remediation:
+    summary: automount 또는 autofs 서비스를 systemctl stop 후 disable한다. 끄기 전에 /etc/auto.*, /etc/auto_* 파일로 NFS나 Samba에서 쓰는지 확인한다.
+  remediation_impact:
+    level: 2
+    reason: NFS나 Samba에서 쓰고 있으면 영향이 있고 CD-ROM 자동 마운트도 되지 않으므로 사용 여부 확인이 필요하다고 가이드가 밝힌다.
+  remediation_effort:
+    level: 1
+    reason: 사용 여부 확인 뒤 autofs 서비스를 stop, disable하면 끝난다.
 U-42:
   title: 불필요한 RPC 서비스 비활성화
   severity: 상
   category: 서비스 관리
   criteria: 불필요한 RPC 서비스가 비활성화된 경우 양호
   cis: ''
+  check: 가이드 목록(rpc.cmsd, rpc.ttdbserverd, sadmind, rusersd, walld, sprayd, rstatd, rpc.nisd, rexd, rpc.pcnfsd, rpc.statd, rpc.ypupdated, rpc.rquotad, kcms_server, cachefsd) 없음
+  purpose: 취약점이 많은 불필요한 RPC 서비스가 꺼져 있는지 확인한다.
+  threat: RPC 서비스의 취약점으로 비인가자가 root 권한을 얻거나 각종 공격을 시도할 수 있다.
+  guide_page: 96
+  remediation:
+    summary: rpc.cmsd, rpc.ttdbserverd, rusersd, rstatd, rpc.statd, rpc.rquotad 등 불필요한 RPC 서비스를 끈다. inetd는 /etc/inetd.conf 해당 줄을 주석 처리하고, xinetd는 disable = yes로 바꿔 재시작하며, systemd는 systemctl stop 후 disable한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 대상 RPC 서비스가 여러 개라 목록을 파악해 하나씩 끄고 재기동해야 한다.
 U-43:
   title: NIS, NIS+ 점검
   severity: 상
   category: 서비스 관리
   criteria: NIS 서비스가 비활성화되어 있거나, 불가피하게 사용 시 NIS+ 서비스를 사용하는 경우 양호
   cis: ''
+  check: ypserv·ypbind·ypxfrd·yppasswdd 없음
+  purpose: 안전하지 않은 NIS 서비스가 꺼져 있는지 확인한다.
+  threat: NIS가 켜져 있으면 비인가자가 다른 시스템의 root 권한까지 탈취할 수 있다.
+  guide_page: 99
+  remediation:
+    summary: ypserv, ypbind, ypxfrd, rpc.yppasswdd, rpc.ypupdated를 systemctl stop 후 disable한다. RHEL 8부터는 NIS(yp) 패키지가 제거되어 있다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: NIS 관련 서비스를 stop, disable하면 끝난다.
 U-44:
   title: tftp, talk 서비스 비활성화
   severity: 상
   category: 서비스 관리
   criteria: tftp, talk, ntalk 서비스가 비활성화된 경우 양호
   cis: ''
+  check: tftp·talk·ntalk 없음
+  purpose: tftp, talk, ntalk 서비스가 꺼져 있는지 확인한다.
+  threat: 쓰지 않거나 취약점이 알려진 서비스를 두면 공격 시도 대상이 되고, tftp는 인증 절차도 없다.
+  guide_page: 102
+  remediation:
+    summary: tftp, talk, ntalk를 끈다. inetd는 /etc/inetd.conf 해당 줄을 주석 처리하고, xinetd는 disable = yes로 바꿔 재시작하며, systemd는 systemctl stop 후 disable한다. talk 패키지는 RHEL 7부터 제거되었다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: tftp, talk, ntalk를 설정 한 곳에서 끄거나 서비스를 stop, disable하면 끝난다.
 U-45:
   title: 메일 서비스 버전 점검
   severity: 상
   category: 서비스 관리
   criteria: 메일 서비스 버전이 최신 버전인 경우 양호
   cis: ''
+  check: 점검불가(수동) — 사용 중인 MTA와 버전(postfix mail_version, sendmail.cf DZ, exim -bV). 알려진 취약 버전은 Package Vulnerability. MTA 없으면 해당없음
+  purpose: 쓰는 메일 서비스(sendmail, postfix, exim)가 취약하지 않은 최신 버전인지 확인한다.
+  threat: 취약한 메일 서비스 버전은 버퍼 오버플로우로 시스템 권한을 빼앗기거나 주요 정보가 노출될 수 있다.
+  guide_page: 105
+  remediation:
+    summary: 메일 서비스를 안 쓰면 stop 후 disable한다. 쓰면 sendmail -d0 -bt, postconf mail_version, exim -bV로 버전을 확인하고 패치 관리 정책을 세워 주기적으로 보안 패치를 적용한다.
+  remediation_impact:
+    level: 2
+    reason: 패치 적용이 시스템과 서비스에 주는 영향을 충분히 고려해야 한다고 가이드가 밝힌다.
+  remediation_effort:
+    level: 3
+    reason: 버전 확인 뒤 패치 관리 정책을 세워 주기적으로 패치를 적용해야 해 한 번에 끝나지 않는다.
 U-46:
   title: 일반 사용자의 메일 서비스 실행 방지
   severity: 상
   category: 서비스 관리
   criteria: 일반 사용자의 메일 서비스 실행 방지가 설정된 경우 양호
   cis: ''
+  check: sendmail PrivacyOptions에 restrictqrun, postfix postsuper·exim exiqgrep에 기타 실행 권한 없음 (메일 서비스를 쓰지 않으면 해당없음)
+  purpose: 일반 사용자가 메일 큐 조작 옵션(q 옵션)을 쓰지 못하게 막았는지 확인한다.
+  threat: 일반 사용자가 메일 큐와 서비스 설정을 보거나 큐를 지워 SMTP 서버에 오류를 일으킬 수 있다.
+  guide_page: 111
+  remediation:
+    summary: 메일 서비스를 안 쓰면 중지하고 비활성화한다. sendmail은 /etc/mail/sendmail.cf의 PrivacyOptions에 restrictqrun을 추가하고 재시작하며, postfix는 chmod o-x /usr/sbin/postsuper, exim은 chmod o-x /usr/sbin/exiqgrep으로 기타 사용자 실행 권한을 뺀다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: 쓰는 MTA 하나의 설정 한 줄이나 chmod 한 번이면 된다.
 U-47:
   title: 스팸 메일 릴레이 제한
   severity: 상
   category: 서비스 관리
   criteria: 릴레이 제한이 설정된 경우 양호
   cis: ''
+  check: postfix relay·recipient restrictions에 reject_/defer_unauth_destination, sendmail promiscuous_relay 없음. exim은 점검불가(수동) (메일 서비스를 쓰지 않으면 해당없음)
+  purpose: SMTP 서버가 외부 릴레이를 막고 있는지 확인한다.
+  threat: 릴레이를 제한하지 않으면 스팸 메일 서버로 악용되거나 DoS 공격을 받을 수 있다.
+  guide_page: 113
+  remediation:
+    summary: 메일 서비스를 안 쓰면 중지하고 비활성화한다. postfix는 /etc/postfix/main.cf의 mynetworks를 허용 네트워크로 한정하고 postfix reload를 실행한다. sendmail은 sendmail.mc에서 promiscuous_relay를 지우고 m4로 sendmail.cf를 재생성한 뒤 /etc/mail/access를 정리하며, exim은 /etc/exim/exim.conf 또는 /etc/exim4/exim4.conf의 relay_from_hosts를 허용 네트워크로 제한한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: MTA별로 설정을 고치고 sendmail은 cf 재생성과 access DB 갱신까지 거쳐 재기동해야 한다.
 U-48:
   title: expn, vrfy 명령어 제한
   severity: 중
   category: 서비스 관리
   criteria: noexpn, novrfy 옵션이 설정된 경우 양호
   cis: ''
+  check: postfix disable_vrfy_command = yes, sendmail noexpn+novrfy 또는 goaway. exim은 점검불가(수동) (메일 서비스를 쓰지 않으면 해당없음)
+  purpose: SMTP의 expn, vrfy 명령을 막았는지 확인한다.
+  threat: expn, vrfy로 특정 계정의 존재 여부를 알아내고 사용자 정보를 외부로 빼낼 수 있다.
+  guide_page: 116
+  remediation:
+    summary: 메일 서비스를 안 쓰면 중지하고 비활성화한다. sendmail은 /etc/mail/sendmail.cf의 PrivacyOptions에 noexpn, novrfy(또는 goaway)를 넣고 재시작하며, postfix는 /etc/postfix/main.cf에서 disable_vrfy_command = yes로 바꾸고 postfix reload를 실행한다. exim은 acl_smtp_vrfy, acl_smtp_expn의 accept 줄을 제거한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: 쓰는 MTA 하나의 설정 한 줄을 바꾸고 적용하면 된다.
 U-49:
   title: DNS 보안 버전 패치
   severity: 상
   category: 서비스 관리
   criteria: 주기적으로 패치를 관리하는 경우 양호
   cis: ''
+  check: 점검불가(수동) — named -v. named 없으면 해당없음
+  purpose: DNS 서비스(BIND)가 취약점이 없는 버전이고 주기적으로 패치되는지 확인한다.
+  threat: 취약한 BIND 버전은 DoS, 버퍼 오버플로우, DNS 서버 원격 침입 위험이 있다.
+  guide_page: 118
+  remediation:
+    summary: DNS를 안 쓰면 named를 stop, disable한다. 쓰면 named -v로 버전을 확인하고, ISC 사이트와 BIND 9 취약점 표를 보며 최신 보안 패치를 주기적으로 적용하는 정책을 세운다.
+  remediation_impact:
+    level: 2
+    reason: 패치 적용이 시스템과 서비스에 주는 영향을 충분히 고려해야 한다고 가이드가 밝힌다.
+  remediation_effort:
+    level: 3
+    reason: 서비스 영향을 파악해 주기적 패치 정책을 세우고 적용해야 해 한 번에 끝나지 않는다.
 U-50:
   title: DNS ZoneTransfer 설정
   severity: 상
   category: 서비스 관리
   criteria: Zone Transfer를 허가된 사용자에게만 허용한 경우 양호
   cis: ''
+  check: named 설정(+include 1단계)에 allow-transfer가 있고 any가 아님 (named가 없으면 해당없음)
+  purpose: DNS Zone Transfer를 허가된 보조 네임서버에만 허용하는지 확인한다.
+  threat: Zone Transfer를 모두에게 열면 호스트와 시스템 정보 같은 중요 정보가 유출될 수 있다.
+  guide_page: 121
+  remediation:
+    summary: 'DNS를 안 쓰면 중지하고 비활성화한다. 쓰면 named.conf(Debian 계열은 /etc/bind/named.conf.options)의 allow-transfer에 허용할 IP만 적고(예: allow-transfer { 허용IP; };) any는 쓰지 않으며, 구형 named.boot는 xfrnets를 고친다. 그 뒤 DNS를 재시작하고 include로 참조하는 파일도 확인한다.'
+  remediation_impact:
+    level: 1
+    reason: 허용 대상을 제대로 등록하면 영향이 없다고 가이드가 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 허용할 보조 서버 목록을 파악해 설정(include 파일 포함)에 반영하고 재시작해야 한다.
 U-51:
   title: DNS 서비스의 취약한 동적 업데이트 설정 금지
   severity: 중
   category: 서비스 관리
   criteria: DNS 서비스의 동적 업데이트 기능이 비활성화되었거나, 활성화 시 적절한 접근통제를 수행하고 있는 경우 양호
   cis: ''
+  check: allow-update가 없거나 any가 아님 (named가 없으면 해당없음)
+  purpose: DNS 동적 업데이트가 꺼져 있거나 접근통제가 되어 있는지 확인한다.
+  threat: 동적 업데이트가 열려 있으면 악의적 사용자가 신뢰할 수 없는 데이터를 넣을 수 있다.
+  guide_page: 122
+  remediation:
+    summary: DNS를 안 쓰면 중지하고 비활성화한다. 동적 업데이트가 필요 없으면 named.conf(Debian 계열은 /etc/bind/named.conf.options)에서 allow-update { none; };으로 바꾸고, 필요하면 허용 IP만 적은 뒤(any 금지) DNS를 재시작한다. include 파일도 확인한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: allow-update 설정 한 곳을 바꾸고 DNS를 재시작하면 된다.
 U-52:
   title: Telnet 서비스 비활성화
   severity: 중
   category: 서비스 관리
   criteria: 원격 접속 시 Telnet 프로토콜을 비활성화하고 있는 경우 양호
   cis: ''
+  check: telnet 서비스·telnet.socket·23/tcp 없음
+  purpose: 평문으로 계정·정보가 오가는 Telnet 프로토콜이 원격 접속에 쓰이지 않게 막는다.
+  threat: Telnet은 데이터를 암호화하지 않아 스니핑으로 계정과 중요 정보가 유출될 수 있다.
+  guide_page: 124
+  remediation:
+    summary: telnet 서비스를 중지·비활성화하고 SSH로 대체한다. systemd면 telnet.socket을 stop/disable하고, inetd(/etc/inetd.conf)나 xinetd(/etc/xinetd.d/telnet의 disable = yes)면 설정을 끈 뒤 해당 서비스를 재시작하며, sshd가 떠 있는지 확인한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: telnet.socket을 끄거나 xinetd 설정 한 줄을 바꾸면 끝난다.
 U-53:
   title: FTP 서비스 정보 노출 제한
   severity: 하
   category: 서비스 관리
   criteria: FTP 접속 배너에 노출되는 정보가 없는 경우 양호
   cis: ''
+  check: vsftpd ftpd_banner 지정, proftpd ServerIdent 제한. pure-ftpd는 점검불가(수동). FTP 없으면 해당없음
+  purpose: FTP 접속 배너로 서비스 이름·버전 같은 불필요한 정보가 노출되지 않게 한다.
+  threat: 배너 정보를 수집한 비인가자가 해당 버전의 취약점을 노린 공격에 이용할 수 있다.
+  guide_page: 127
+  remediation:
+    summary: FTP를 쓰지 않으면 서비스를 중지·비활성화한다. 쓴다면 vsftpd는 vsftpd.conf(/etc/vsftpd.conf 또는 /etc/vsftpd/vsftpd.conf)에 ftpd_banner를 버전 없는 문구로 지정하고, proftpd는 proftpd.conf의 ServerIdent를 off 또는 사용자 문구로 바꾼 뒤 서비스를 재시작한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 사용 중인 FTP 데몬을 파악해 해당 설정 파일을 고치고 서비스를 재시작해야 한다.
 U-54:
   title: 암호화되지 않는 FTP 서비스 비활성화
   severity: 중
   category: 서비스 관리
   criteria: 암호화되지 않은 FTP 서비스가 비활성화된 경우 양호
   cis: ''
+  check: FTP 데몬·21/tcp 없음, 또는 vsftpd ssl_enable=YES이고 SSL 강제를 끄지 않음
+  purpose: 암호화되지 않는 FTP 서비스를 끄고 암호화 전송 수단만 쓰게 한다.
+  threat: 평문 FTP는 스니핑으로 계정과 중요 정보가 유출될 위험이 있다.
+  guide_page: 131
+  remediation:
+    summary: 평문 FTP 데몬(vsftpd, proftpd 등)을 stop/disable하고 inetd(/etc/inetd.conf의 ftp 줄 주석)·xinetd(/etc/xinetd.d/ftp의 disable = yes)로 도는 경우 설정을 끈 뒤 재시작한다. 꼭 필요하면 SFTP 등 암호화 방식을 쓰고, vsftpd라면 ssl_enable=YES로 SSL 사용을 강제한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: FTP 서비스를 중지·비활성화하는 명령 한두 개로 끝난다.
 U-55:
   title: FTP 계정 shell 제한
   severity: 중
   category: 서비스 관리
   criteria: FTP 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호
   cis: ''
+  check: ftp 계정 셸이 nologin/false. 계정 없으면 해당없음
+  purpose: FTP 기본 계정으로 쉘을 통한 시스템 접근이 불가능하게 한다.
+  threat: FTP 계정에 쉘이 부여되면 비인가자가 그 계정으로 시스템에 접근할 수 있다.
+  guide_page: 134
+  remediation:
+    summary: FTP 서비스를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/passwd의 ftp 계정 쉘을 /bin/false 또는 /sbin/nologin으로 바꾼다(usermod -s /sbin/nologin ftp).
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: usermod 명령 한 줄로 ftp 계정의 쉘을 바꾸면 된다.
 U-56:
   title: FTP 서비스 접근 제어 설정
   severity: 하
   category: 서비스 관리
   criteria: 특정 IP주소 또는 호스트에서만 FTP 서버에 접속할 수 있도록 접근 제어 설정을 적용한 경우 양호
   cis: ''
+  check: TCP Wrapper에 FTP 데몬(또는 ALL) 항목, proftpd <Limit LOGIN>. FTP 없으면 해당없음
+  purpose: 허가된 IP·호스트만 FTP 서버에 접속하도록 접근을 통제한다.
+  threat: 접근 제한이 없으면 인증 없이 비인가자가 디렉터리·파일에 접근해 중요 파일을 변조하거나 유출할 수 있다.
+  guide_page: 135
+  remediation:
+    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 허용 IP·호스트만 접속하도록 TCP Wrapper(/etc/hosts.allow, /etc/hosts.deny)나 proftpd의 <Limit LOGIN> 블록으로 제한하고, 가이드의 ftpusers 또는 vsftpd user_list 파일은 소유자 root, 권한 640으로 두고 차단·허용 사용자를 등록한다.
+  remediation_impact:
+    level: 2
+    reason: 지정한 IP나 호스트에서만 FTP 접속이 가능해져 그 밖의 접속은 막힌다.
+  remediation_effort:
+    level: 2
+    reason: 허용 대상을 파악해 여러 파일의 접근 설정과 권한을 함께 손봐야 한다.
 U-57:
   title: Ftpusers 파일 설정
   severity: 중
   category: 서비스 관리
   criteria: root 계정 접속을 차단한 경우 양호
   cis: ''
+  check: ftpusers·vsftpd user_list에 root, proftpd RootLogin on 아님. FTP 없으면 해당없음
+  purpose: root 계정이 FTP로 직접 접속하지 못하게 한다.
+  threat: root가 FTP로 접속하면 평문 전송 중 스니핑으로 관리자 계정 정보가 유출될 수 있다.
+  guide_page: 139
+  remediation:
+    summary: FTP를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/ftpusers(또는 /etc/ftpd/ftpusers, vsftpd는 ftpusers·user_list)에서 root 줄의 주석(#)을 풀어 차단하고, proftpd에서 UseFtpUsers가 off면 proftpd.conf에 RootLogin off를 두고 재시작한다. vsftpd user_list는 userlist_deny=yes일 때만 차단이 적용된다.
+  remediation_impact:
+    level: 2
+    reason: 애플리케이션이 root로 직접 FTP 접속하는 경우가 있는지 확인해야 한다.
+  remediation_effort:
+    level: 2
+    reason: 사용 중인 FTP 데몬에 따라 ftpusers·user_list·proftpd.conf 중 해당 파일을 확인해 고쳐야 한다.
 U-58:
   title: 불필요한 SNMP 서비스 구동 점검
   severity: 중
   category: 서비스 관리
   criteria: SNMP 서비스를 사용하지 않는 경우 양호
   cis: ''
+  check: snmpd 없음. 필요하면 예외 레지스터
+  purpose: 불필요한 SNMP 서비스를 꺼서 필요 이상의 정보가 노출되지 않게 한다.
+  threat: SNMP가 켜져 있으면 비인가자가 시스템 정보를 빼가거나 설정을 변경할 수 있다.
+  guide_page: 141
+  remediation:
+    summary: SNMP를 쓰지 않으면 snmpd를 stop/disable한다(systemctl stop snmpd, systemctl disable snmpd). 불가피하게 쓰는 경우는 기본 community 변경 등 보안 조치를 하고 예외로 등록한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: snmpd를 중지·비활성화하는 명령 두 줄이면 된다.
 U-59:
   title: 안전한 SNMP 버전 사용
   severity: 상
   category: 서비스 관리
   criteria: SNMP 서비스를 v3 이상으로 사용하는 경우 양호
   cis: ''
+  check: snmpd.conf에 v1/v2c(rocommunity·rwcommunity·com2sec) 없음. snmpd 없으면 해당없음
+  purpose: SNMP를 v3 이상으로 써서 전송 데이터를 보호한다.
+  threat: v1·v2는 요청·응답이 평문이라 스니핑 위험이 있고, v3는 HMAC 기반 인증과 암호화를 제공한다.
+  guide_page: 143
+  remediation:
+    summary: SNMP를 쓰지 않으면 snmpd를 중지·비활성화한다. 쓴다면 net-snmp-create-v3-user로 v3 사용자를 만들고(또는 snmpd.conf에 createUser 추가) rouser 권한을 준 뒤, /etc/snmp/snmpd.conf에서 rocommunity·rwcommunity·com2sec 같은 v1/v2c 설정을 제거하고 snmpd를 재시작한다. snmpwalk -v3로 동작을 확인한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 3
+    reason: v3 사용자 생성과 설정 변경에 더해 수집 서버 등 SNMP 클라이언트도 v3로 맞춰야 해서 연동 대상과 협의가 필요하다.
 U-60:
   title: SNMP Community String 복잡성 설정
   severity: 중
   category: 서비스 관리
   criteria: SNMP Community String이 기본값 "public", "private"이 아닌 영문자·숫자 포함 10자리 이상 또는 영문자·숫자·특수문자 포함 8자리 이상인 경우 양호
   cis: ''
+  check: 모든 community가 public·private 아니고 영문+숫자 10자 이상 또는 영문+숫자+특수 8자 이상(값 비노출). v3 전용은 점검불가(수동)
+  purpose: SNMP Community String을 추측하기 어려운 값으로 설정한다.
+  threat: 복잡성이 낮은 Community String은 추측 공격으로 뚫려 설정 열람·수정, 정보 수집, 관리자 권한 획득으로 이어질 수 있다.
+  guide_page: 145
+  remediation:
+    summary: SNMP를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/snmp/snmpd.conf의 community를 public·private이 아닌 영문+숫자 10자 이상 또는 영문+숫자+특수문자 8자 이상으로 바꾸고 snmpd를 재시작한다. SNMP v3를 쓰고 비밀번호가 복잡도를 만족하면 양호이다.
+    steps:
+      rhel: |
+        /etc/snmp/snmpd.conf의 com2sec 줄(com2sec notConfigUser default <새 값>)에서 community 값을 변경
+        systemctl restart snmpd
+      debian: |
+        /etc/snmp/snmpd.conf의 rocommunity <새 값> default, rwcommunity <새 값> default 로 변경
+        systemctl restart snmpd
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 설정 파일을 고치고 서비스를 재시작해야 하며 기존 수집 서버 쪽 community도 함께 바꿔야 한다.
 U-61:
   title: SNMP Access Control 설정
   severity: 상
   category: 서비스 관리
   criteria: SNMP 서비스에 접근 제어 설정이 되어 있는 경우 양호
   cis: ''
+  check: community 항목마다 source가 default가 아님. v3 전용은 점검불가(수동) (SNMP를 쓰지 않으면 해당없음)
+  purpose: SNMP 접근을 허용된 네트워크로만 제한한다.
+  threat: 접근 제어가 없으면 비인가자의 접근, 네트워크 정보 유출, 설정 변경, DoS 공격 위험이 있다.
+  guide_page: 148
+  remediation:
+    summary: SNMP를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/snmp/snmpd.conf의 community마다 허용할 네트워크 주소를 source로 지정해(default 금지) 접근 대상을 제한하고 snmpd를 재시작한다.
+    steps:
+      rhel: |
+        /etc/snmp/snmpd.conf의 com2sec 줄에서 source를 default 대신 허용 네트워크 주소로 지정
+        systemctl restart snmpd
+      debian: |
+        /etc/snmp/snmpd.conf의 rocommunity·rwcommunity 뒤에 허용 네트워크 주소를 추가
+        systemctl restart snmpd
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 정상 수집 서버의 주소를 파악해 community별로 지정하고 서비스를 재시작해야 한다.
 U-62:
   title: 로그인 시 경고 메시지 설정
   severity: 하
   category: 서비스 관리
   criteria: 서버 및 Telnet, FTP, SMTP, DNS 서비스에 로그온 시 경고 메시지가 설정된 경우 양호
   cis: 1.7.1~1.7.3, 5.1.5
+  check: /etc/motd 또는 /etc/issue에 OS 이름·escape 외 문구가 있고, sshd Banner 지정, telnet 사용 시 /etc/issue.net
+  purpose: 서버·서비스 로그온 시 불필요한 정보를 막고 불법 사용에 대한 경고 메시지를 보이게 한다.
+  threat: 경고 메시지가 없으면 기본 배너로 OS·서비스 버전이 노출돼 취약점 공격에 이용될 수 있다.
+  guide_page: 150
+  remediation:
+    summary: /etc/motd와 /etc/issue에 경고 문구를 넣고(OS 이름·버전 대신), sshd_config에 Banner /etc/issue.net(경고 파일 경로)을 지정해 sshd를 재시작한다. telnet을 쓰면 /etc/issue.net도 고치며, 쓰는 메일·FTP·DNS 서비스는 smtpd_banner, ftpd_banner, named의 version 등 배너 항목을 바꾸고 재시작한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 서버와 서비스별로 여러 파일의 배너 설정을 바꾸고 해당 서비스를 재시작해야 한다.
 U-63:
   title: sudo 명령어 접근 관리
   severity: 중
   category: 서비스 관리
   criteria: /etc/sudoers 파일 소유자가 root이고, 파일 권한이 640인 경우 양호
   cis: ''
+  check: /etc/sudoers root·640 이하. 없으면 해당없음
+  purpose: /etc/sudoers 파일 권한을 적절히 제한해 sudo 권한 오용을 막는다.
+  threat: sudo 접근이 통제되지 않으면 비인가자가 root 권한으로 허가되지 않은 명령을 실행해 악성 코드 실행·데이터 유출을 시도할 수 있다.
+  guide_page: 159
+  remediation:
+    summary: /etc/sudoers 소유자를 root로, 권한을 640 이하로 바꾼다(chown root /etc/sudoers, chmod 640 /etc/sudoers).
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 1
+    reason: chown과 chmod 한 줄씩이면 끝난다.
 U-64:
   title: 주기적 보안 패치 및 벤더 권고사항 적용
   severity: 상
   category: 패치 관리
   criteria: 패치 적용 정책을 수립하여 주기적으로 패치 관리를 하고 있으며, 패치 관련 내용을 확인하고 적용하였을 경우 양호
   cis: ''
+  check: 점검불가(수동) — OS·커널을 증적으로. 미적용 보안 패치는 같은 보고서의 Package Vulnerability가 판정
+  purpose: 주기적인 패치 적용으로 시스템 안정성과 보안성을 확보한다.
+  threat: 최신 보안 패치가 없으면 이미 알려진 취약점을 통한 침해사고 위험이 있다.
+  guide_page: 160
+  remediation:
+    summary: 패치 적용 정책을 세워 주기적으로 적용한다. hostnamectl로 OS·커널 버전을 확인해 EOL이 아닌 OS 버전을 쓰고, 최신 보안 패치가 반영된 커널로 업데이트한다. 적용 전에 서비스 영향을 OS 관리자와 서비스 개발자가 함께 파악한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 영향 없음으로 서술하나, 조치 방법 칸은 패치가 서비스에 미치는 영향을 파악하라고 요구한다.
+  remediation_effort:
+    level: 3
+    reason: 패치 정책 수립, EOL OS·커널 업그레이드, 서비스 영향 검토가 필요해 한 사람이 바로 끝낼 수 없다.
 U-65:
   title: NTP 및 시각 동기화 설정
   severity: 중
   category: 로그 관리
   criteria: NTP 및 시각 동기화 설정이 기준에 따라 적용된 경우 양호
   cis: 2.3.1
+  check: chronyd·ntpd가 돌고 server/pool 지정, 또는 systemd-timesyncd active
+  purpose: 승인된 NTP 서비스와 시각을 동기화해 인증·감사 로그의 시각 신뢰도를 확보한다.
+  threat: 시스템 간 시각이 어긋나면 보안 사고나 장애 때 로그의 신뢰도를 확보하기 어렵다.
+  guide_page: 164
+  remediation:
+    summary: chrony(RHEL 8부터 기본) 또는 ntp 서비스를 켜고 설정 파일(/etc/chrony.conf 또는 /etc/ntp.conf)에 server(또는 pool)로 NTP 서버를 지정한 뒤 서비스를 재시작한다. chronyc sources나 ntpq -pn으로 동기화를 확인하며, systemd-timesyncd가 active인 구성도 인정한다.
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 시각 동기화 서비스를 확인해 설정 파일에 서버를 추가하고 재시작하는 여러 단계가 따른다.
 U-66:
   title: 정책에 따른 시스템 로깅 설정
   severity: 중
   category: 로그 관리
   criteria: 로그 기록 정책이 보안 정책에 따라 설정되어 수립되어 있으며, 로그를 남기고 있는 경우 양호
   cis: ''
+  check: rsyslogd·syslog-ng·syslogd가 돌고 auth/authpriv 규칙이 있음(로그 정책은 ADR-0006 Host Agents)
+  purpose: 내부 정책에 따라 필요한 시스템 로그가 기록되게 한다.
+  threat: 로깅이 설정되지 않으면 사고 원인 규명이 어렵고 법적 대응에 쓸 증거로도 부족하다.
+  guide_page: 166
+  remediation:
+    summary: 로그 기록 정책을 세우고 /etc/rsyslog.conf(또는 /etc/rsyslog.d/ 아래 파일)에 정책대로 규칙을 둔 뒤 systemctl restart rsyslog로 적용한다. 가이드 예시는 *.info;mail.none;authpriv.none;cron.none은 /var/log/messages, authpriv.*는 /var/log/secure 또는 auth.log, mail.*과 cron.*은 각 로그 파일, *.emerg는 전체 사용자 대상이다.
+  remediation_impact:
+    level: 2
+    reason: 가이드가 제시한 로그를 모두 켜면 시스템 성능과 저장 용량에 부담이 생길 수 있어 운영 환경에 맞게 적용해야 한다.
+  remediation_effort:
+    level: 3
+    reason: 로그 기록 정책을 먼저 수립하고 그에 맞게 설계해야 한다.
 U-67:
   title: 로그 디렉터리 소유자 및 권한 설정
   severity: 중
   category: 로그 관리
   criteria: 디렉터리 내 로그 파일의 소유자가 root이고, 권한이 644 이하인 경우 양호
   cis: 6.2.4.1
+  check: /var/log 바로 아래 파일이 root 소유·644 이하
+  purpose: 로그 파일을 root만 제어하게 해 비인가자의 훼손·변조를 막는다.
+  threat: 로그 접근 통제가 미흡하면 비인가자가 로그에서 정보를 얻거나 로그 자체를 변조할 수 있다.
+  guide_page: 171
+  remediation:
+    summary: /var/log 바로 아래 로그 파일 중 소유자가 root가 아니거나 권한이 644를 넘는 것을 찾아 chown root, chmod 644 이하로 바꾼다(AIX는 /var/adm, HP-UX는 /var/adm/syslog).
+  remediation_impact:
+    level: 1
+    reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
+  remediation_effort:
+    level: 2
+    reason: 대상 로그 파일 목록을 파악해 하나씩 소유자와 권한을 바꿔야 한다.
