@@ -3,7 +3,7 @@
 {%- set ai = m.asset_inventory -%}
   <h2 class="pb">2. Asset Inventory <span class="small mute">ISMS 1.2.1</span></h2>
 
-  <p class="small mute">2.1 식별·선언 — 용도·관리 부서·책임자·관리자·보안등급은 Git(host_audit_asset)에 선언한 값이다.</p>
+  <p class="small mute">2.1 식별·선언 — 용도·관리 부서·책임자·관리자·자산중요도는 ISMS 자산대장 사본(OpenBao hosts/&lt;호스트&gt;)에서 읽은 값이다. 조회가 안 되면 '조회 실패', 비어 있으면 '미지정'.</p>
   <table>
     <thead><tr><th>호스트</th><th>FQDN · IP</th><th>환경</th>{% for label in ai.declared_labels %}<th>{{ label | e }}</th>{% endfor %}<th>상태</th></tr></thead>
     <tbody>
@@ -14,7 +14,7 @@
         <td class="small">{{ h.fqdn | e }}<br>{{ h.ips | e }}</td>
         <td>{% if h.environment_unassigned %}<span class="tag na">{{ h.environment | e }}</span>{% else %}{{ h.environment | e }}{% endif %}</td>
 {% for f in a.declared %}
-        <td class="small">{% if f.unassigned %}<span class="tag na">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</td>
+        <td class="small">{% if f.state != 'ok' %}<span class="tag {{ f.tag }}">{{ f.value | e }}</span>{% else %}{{ f.value | e }}{% endif %}</td>
 {% endfor %}
         <td><span class="tag {{ 'ok' if h.inspected else 'na' }}">{{ h.status_label | e }}</span></td>
       </tr>

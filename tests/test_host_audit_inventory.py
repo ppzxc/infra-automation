@@ -8,6 +8,7 @@ Python), inside ``centos:6``/``centos:7`` containers when those images are
 already present locally (ADR-0006 Seam 3 legacy pattern: no CentOS VM in CI).
 """
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,9 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
 from host_audit import host_audit_host_record, host_audit_report_model  # noqa: E402
 from host_audit_inventory import (  # noqa: E402
-    host_audit_inventory_record, host_audit_privileged_allowlist, inventory_section)
+    host_audit_asset_declaration, host_audit_inventory_record, host_audit_privileged_allowlist,
+    inventory_section)
+from host_audit_mail import host_audit_mail_summary  # noqa: E402
 
 ROLE = ROOT_DIR / "roles" / "host_audit"
 PROBE = ROLE / "files" / "inventory_probe.sh"
@@ -155,7 +158,7 @@ def record(host, identity, inventory, asset=None, groups=("servers",)):
     rec = host_audit_host_record(ok(identity), host, {"fqdn": "", "ip": "", "environment": "production",
                                                       "groups": list(groups)}, COLLECTED_AT)
     rec["declared"]["asset"] = dict({"purpose": "", "department": "", "owner_role": "", "admin_role": "",
-                                     "security_grade": "", "privileged_allowlist": ["ppzxc"]}, **(asset or {}))
+                                     "asset_importance": "", "privileged_allowlist": ["ppzxc"]}, **(asset or {}))
     rec["inventory"] = host_audit_inventory_record(ok(inventory)) if inventory is not None else None
     return rec
 
@@ -299,10 +302,253 @@ def test_unassigned_declarations_are_shown_as_unassigned():
     model = host_audit_report_model([rec], meta())
     declared = {f["key"]: f for f in host(model, "ns0331")["declared"]}
 
-    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "unassigned": False}
-    for key in ("department", "owner_role", "admin_role", "security_grade"):
-        assert declared[key]["value"] == "미지정" and declared[key]["unassigned"] is True
+    assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "state": "ok", "tag": ""}
+    for key in ("department", "owner_role", "admin_role", "asset_importance"):
+        assert declared[key]["value"] == "미지정" and declared[key]["state"] == "unassigned"
+    assert declared["asset_importance"]["label"] == "자산중요도"
     assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 1
+
+
+# ------------------------------------------------- 선언 값은 OpenBao hosts/<host>에서 읽는다 (#492)
+
+HOST_KV = {
+    "description": "웹 서비스 [그룹자산A]", "isms_department": "인프라팀", "isms_owner_role": "인프라팀장",
+    "isms_admin_role": "시스템 관리자", "isms_asset_importance": "H",
+    "ssh_private_key": "-----BEGIN PRIVATE KEY-----zzz", "password": "s3cret-pw", "public_ip": "203.0.113.7",
+    "admin_users": ["opuser"], "ansible_port": 2222, "isms_target": True,
+}
+
+
+def test_declaration_reads_exactly_the_five_keys_from_the_host_kv():
+    decl = host_audit_asset_declaration(HOST_KV, True)
+
+    assert decl == {"purpose": "웹 서비스 [그룹자산A]", "department": "인프라팀", "owner_role": "인프라팀장",
+                    "admin_role": "시스템 관리자", "asset_importance": "H", "lookup": "ok"}
+
+
+def test_declaration_never_carries_connection_values():
+    text = json.dumps(host_audit_asset_declaration(HOST_KV, True), ensure_ascii=False)
+    for secret in ("PRIVATE KEY", "s3cret-pw", "203.0.113.7", "opuser", "2222"):
+        assert secret not in text
+
+
+def test_declaration_keeps_the_ledger_text_unchanged_caps_only_blobs_and_drops_non_text_values():
+    group_tail = "웹 서비스 [그룹자산A]"
+    long_but_real = "가" * 200 + " " + group_tail
+    decl = host_audit_asset_declaration({"description": long_but_real, "isms_owner_role": False,
+                                         "isms_admin_role": ["x"], "isms_department": "{{ x }}"}, True)
+
+    assert decl["purpose"] == long_but_real and decl["purpose"].endswith("[그룹자산A]")
+    assert decl["department"] == "{{ x }}", "evidence is stored as the ledger copy has it"
+    assert decl["owner_role"] == "" and decl["admin_role"] == ""
+    assert decl["malformed"] == ["owner_role", "admin_role"]
+    blob = host_audit_asset_declaration({"description": "x" * 5000}, True)["purpose"]
+    assert len(blob) == 500 and blob.endswith("…")
+
+
+def test_tag_colors_separate_unknown_values_from_data_errors():
+    _m, failed = _decl_model(HOST_KV, lookup_ok=False)
+    _m, unassigned = _decl_model({})
+    _m, invalid = _decl_model(dict(HOST_KV, isms_asset_importance="높음"))
+    _m, ok = _decl_model(HOST_KV)
+
+    assert {f["tag"] for f in failed.values()} == {"na"} and {f["tag"] for f in unassigned.values()} == {"na"}
+    assert invalid["asset_importance"]["tag"] == "crit" and invalid["purpose"]["tag"] == ""
+    assert {f["tag"] for f in ok.values()} == {""}
+
+
+def test_non_text_values_and_old_security_grade_records_show_as_invalid_not_unassigned():
+    _m, declared = _decl_model(dict(HOST_KV, isms_owner_role=["x"], isms_department=True, isms_admin_role=123))
+    assert declared["owner_role"]["state"] == "invalid" and declared["department"]["state"] == "invalid"
+    assert declared["admin_role"]["state"] == "invalid" and declared["purpose"]["state"] == "ok"
+
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    rec["declared"]["asset"].pop("asset_importance")
+    rec["declared"]["asset"]["security_grade"] = "2등급"
+    old = {f["key"]: f for f in host(host_audit_report_model([rec], meta()), "ns0331")["declared"]}
+    assert old["asset_importance"]["value"] == "잘못된 값 (2등급)"
+
+
+def test_resolve_connection_still_sets_the_variables_host_audit_reads():
+    text = (ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml").read_text(encoding="utf-8")
+    assert "register: _openbao_host_kv_resp\n" in text
+    assert "_effective_host_resp:" in text and "_host_kv_dict:" in text
+
+
+def test_invalid_importance_echoes_at_most_twenty_characters_of_the_original():
+    _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance="가" * 80))
+    shown = declared["asset_importance"]["value"]
+
+    assert shown.startswith("잘못된 값 (") and shown.endswith("…)") and len(shown) <= len("잘못된 값 ()") + 20
+
+
+def _aud101_record(tmp_path, kv, status):
+    """Run the real [AUD-101] task with ansible-playbook. The KV text arrives as parsed JSON data (like the
+    OpenBao response), not as trusted playbook text, so any template syntax in it must stay plain text."""
+    tasks = yaml.safe_load((ROLE / "tasks" / "inventory.yml").read_text(encoding="utf-8"))
+    task = next(t for t in tasks if t["name"].startswith("[AUD-101]"))
+    task["no_log"] = False
+    (tmp_path / "kv.json").write_text(json.dumps({"kv": kv, "resp": {"status": status}}), encoding="utf-8")
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
+        {"ansible.builtin.set_fact": {
+            "_loaded": "{{ lookup('ansible.builtin.file', '%s') | from_json }}" % (tmp_path / "kv.json")}},
+        {"ansible.builtin.set_fact": {"_host_kv_dict": "{{ _loaded.kv }}",
+                                      "_effective_host_resp": "{{ _loaded.resp }}",
+                                      "host_audit_record": {"status": "unreachable"},
+                                      "_host_audit_inventory_probe": {"unreachable": True, "msg": "x"},
+                                      "host_audit_privileged_extra": []}},
+        task,
+        {"ansible.builtin.copy": {"content": "{{ host_audit_record | to_json }}",
+                                  "dest": str(tmp_path / "record.json"), "mode": "0600"}},
+    ]}]
+    (tmp_path / "play.yml").write_text(yaml.safe_dump(play, allow_unicode=True), encoding="utf-8")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "play.yml")], capture_output=True,
+                         text=True, stdin=subprocess.DEVNULL, cwd=tmp_path, timeout=300,
+                         env=dict(__import__("os").environ, ANSIBLE_NOCOLOR="1", ANSIBLE_BECOME="false",
+                                  ANSIBLE_CONFIG=str(ROOT_DIR / "ansible.cfg"),
+                                  ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins")))
+    assert res.returncode == 0, res.stdout + res.stderr
+    return json.loads((tmp_path / "record.json").read_text(encoding="utf-8"))["declared"]["asset"]
+
+
+def test_aud_101_task_reads_the_five_keys_and_never_evaluates_template_text_from_the_kv(tmp_path):
+    hostile = "{{ lookup('pipe', 'echo PWNED-' ~ 'X') }} [그룹자산A]"
+    asset = _aud101_record(tmp_path, dict(HOST_KV, description=hostile), 200)
+
+    assert asset["lookup"] == "ok" and asset["purpose"] == hostile
+    assert asset["asset_importance"] == "H" and asset["privileged_allowlist"] == []
+    assert "PWNED-X" not in json.dumps(asset) and "s3cret-pw" not in json.dumps(asset)
+
+
+def test_aud_101_task_treats_a_200_without_usable_data_as_lookup_failed(tmp_path):
+    asset = _aud101_record(tmp_path, {}, 200)
+    assert asset["lookup"] == "failed"
+
+
+def test_aud_101_task_marks_a_non_200_host_kv_response_as_lookup_failed(tmp_path):
+    for status in (404, 403, -1):
+        sub = tmp_path / str(status)
+        sub.mkdir()
+        asset = _aud101_record(sub, HOST_KV, status)
+        assert asset["lookup"] == "failed" and asset["purpose"] == ""
+
+
+def test_declaration_with_failed_lookup_ignores_whatever_the_dict_holds():
+    decl = host_audit_asset_declaration(HOST_KV, False)
+    assert decl["lookup"] == "failed" and decl["purpose"] == "" and decl["asset_importance"] == ""
+    assert host_audit_asset_declaration(None, True)["lookup"] == "ok"
+
+
+def _decl_model(kv, lookup_ok=True):
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    rec["declared"]["asset"].update(host_audit_asset_declaration(kv, lookup_ok))
+    model = host_audit_report_model([rec], meta())
+    return model, {f["key"]: f for f in host(model, "ns0331")["declared"]}
+
+
+def test_report_shows_the_five_declared_values_from_the_host_kv():
+    model, declared = _decl_model(HOST_KV)
+
+    assert [f["value"] for f in declared.values()] == ["웹 서비스 [그룹자산A]", "인프라팀", "인프라팀장",
+                                                       "시스템 관리자", "H"]
+    assert all(f["state"] == "ok" for f in declared.values())
+    assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 0
+    assert model["asset_inventory"]["counts"]["lookup_failed_hosts"] == 0
+
+
+def test_failed_lookup_shows_all_five_cells_as_lookup_failed_and_is_not_counted_as_unassigned():
+    model, declared = _decl_model(HOST_KV, lookup_ok=False)
+
+    assert [f["value"] for f in declared.values()] == ["조회 실패"] * 5
+    assert {f["state"] for f in declared.values()} == {"lookup_failed"}
+    counts = model["asset_inventory"]["counts"]
+    assert counts["lookup_failed_hosts"] == 1 and counts["unassigned_hosts"] == 0
+
+
+def test_empty_keys_are_unassigned_even_for_isms_target_false_hosts():
+    kv = {"description": "", "isms_target": False, "isms_asset_importance": "L"}
+    model, declared = _decl_model(kv)
+
+    assert declared["purpose"]["value"] == "미지정" and declared["department"]["state"] == "unassigned"
+    assert declared["asset_importance"]["value"] == "L"
+    assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 1
+
+
+def test_asset_importance_outside_h_m_l_is_shown_as_invalid_with_the_original_value():
+    for raw, shown in (("높음", "잘못된 값 (높음)"), ("h", "잘못된 값 (h)"), ("3", "잘못된 값 (3)")):
+        _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance=raw))
+        assert declared["asset_importance"]["value"] == shown
+        assert declared["asset_importance"]["state"] == "invalid"
+    _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance=" M "))
+    assert declared["asset_importance"]["value"] == "M"
+
+
+def test_nothing_but_the_five_keys_reaches_the_record_the_report_model_or_the_mail_summary():
+    rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    rec["declared"]["asset"].update(host_audit_asset_declaration(HOST_KV, True))
+    model = host_audit_report_model([rec], meta())
+    summary = host_audit_mail_summary(model, {"sha256": "AB" * 32, "size": 1, "file_name": "r.html", "archive": "-"})
+
+    for doc in (rec, model, summary):
+        text = json.dumps(doc, ensure_ascii=False, default=str)
+        for secret in ("PRIVATE KEY", "s3cret-pw", "203.0.113.7", "opuser", "isms_target"):
+            assert secret not in text
+
+
+def test_mail_summary_counts_unassigned_and_lookup_failed_hosts_separately():
+    def summary(model):
+        doc = host_audit_mail_summary(model, {"sha256": "AB" * 32, "size": 1, "file_name": "r.html", "archive": "-"})
+        return next(line for line in doc["lines"] if line["section"] == "Asset Inventory")
+
+    failed_model, _ = _decl_model(HOST_KV, lookup_ok=False)
+    line = summary(failed_model)
+    assert "선언 미지정 호스트 0" in line["text"] and "선언 조회 실패 호스트 1" in line["text"]
+    assert line["level"] in ("warn", "crit")
+    invalid_model, _ = _decl_model(dict(HOST_KV, isms_asset_importance="높음"))
+    assert "선언 잘못된 값 호스트 1" in summary(invalid_model)["text"]
+    unassigned_model, _ = _decl_model({})
+    assert "선언 미지정 호스트 1" in summary(unassigned_model)["text"]
+    assert "선언 조회 실패 호스트 0" in summary(unassigned_model)["text"]
+
+
+def test_report_renders_asset_importance_and_lookup_failed_but_not_the_old_security_grade_label():
+    jinja2 = __import__("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE / "templates")))
+    ok_rec = record("ns0331", ROCKY9_IDENTITY, ROCKY9_INVENTORY)
+    ok_rec["declared"]["asset"].update(host_audit_asset_declaration(HOST_KV, True))
+    bad_rec = record("ns0101", CENTOS6_IDENTITY, CENTOS6_INVENTORY)
+    bad_rec["declared"]["asset"].update(host_audit_asset_declaration({}, False))
+    html = env.get_template("report.html.j2").render(
+        host_audit_model=host_audit_report_model([ok_rec, bad_rec], meta()))
+
+    assert "선언 조회 실패 호스트 1" in html
+    assert "자산중요도" in html and "조회 실패" in html and "OpenBao" in html
+    assert "보안등급" not in html
+
+
+def test_removed_asset_variable_is_gone_from_the_repository():
+    tracked = subprocess.run(["git", "ls-files"], cwd=ROOT_DIR, capture_output=True, text=True, check=True)
+    offenders = []
+    for name in tracked.stdout.splitlines():
+        path = ROOT_DIR / name
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if re.search(r"host_audit_" r"asset(?!_declaration)", text):
+            offenders.append(name)
+    assert offenders == []
+
+
+def test_inventory_record_task_reads_the_host_kv_without_querying_openbao_again():
+    tasks = yaml.safe_load((ROLE / "tasks" / "inventory.yml").read_text(encoding="utf-8"))
+    record_task = next(t for t in tasks if t["name"].startswith("[AUD-101]"))
+    text = json.dumps(record_task)
+
+    assert "host_audit_asset_declaration" in text and "_host_kv_dict" in text
+    assert "ansible.builtin.uri" not in json.dumps(tasks)
 
 
 def test_privileged_users_outside_the_declared_allowlist_are_flagged():
