@@ -221,13 +221,13 @@ def urgency_of(severity):
     return URGENCY_BY_PRIORITY[priority_of(severity)]
 
 
-def remediation_view(code, items=None):
+def remediation_view(code):
     """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values.
 
     ``risk`` and ``urgency`` are not shown in the body table; the Remediation Plan xlsx (a later Spec #488 ticket)
     has columns for them and reads them from this one view, so they are computed and tested here once.
     """
-    meta = (ITEMS if items is None else items).get(code.split(':', 1)[-1])
+    meta = ITEMS.get(code.split(':', 1)[-1])
     if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
         return {'remediation_summary': '', 'impact_level': None, 'effort_level': None, 'risk': None, 'priority': None,
                 'urgency': None}
@@ -241,18 +241,18 @@ def remediation_view(code, items=None):
     }
 
 
-def order_findings(findings, items=None):
+def order_findings(findings):
     """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
     low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable.
 
-    The values are read from the catalog, not from fields a finding may carry, so a stale or partial finding
-    cannot change the order; the lookup is at most 67 dict reads per report. ``items`` lets tests inject a catalog."""
+    Each finding carries its own ``priority``, ``impact_level`` and ``effort_level`` (from ``remediation_view``,
+    merged when the section builds it); blank values (a code the catalog lacks) sort last."""
     def key(finding):
-        view = remediation_view(finding['code'], items)  # unknown codes (blank values) sort last
-        return (view['priority'] or 9, view['impact_level'] or 9, view['effort_level'] or 9,
+        return (finding['priority'] or 9, finding['impact_level'] or 9, finding['effort_level'] or 9,
                 VERDICTS.index(finding['verdict']), finding['code'])
 
     return sorted(findings, key=key)
+
 
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'

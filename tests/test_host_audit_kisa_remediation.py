@@ -174,28 +174,30 @@ def test_derived_values_are_not_stored_in_the_catalog():
     assert all(not ({"risk", "priority", "urgency"} & set(meta)) for meta in ITEMS.values())
 
 
-def _fake(code, severity, impact, effort):
-    return {"title": code, "severity": severity, "category": "계정 관리", "criteria": "c", "cis": "",
-            "remediation": {"summary": "s"}, "remediation_impact": {"level": impact, "reason": "r"}, "remediation_effort": {"level": effort, "reason": "r"}}
+def _finding(code, severity, impact, effort, verdict="취약"):
+    return {"code": "KISA-2026:" + code, "verdict": verdict, "priority": kisa.priority_of(severity),
+            "impact_level": impact, "effort_level": effort}
 
 
 def test_findings_sort_by_priority_then_impact_then_effort():
-    items = {"U-01": _fake("U-01", "하", 1, 1),   # priority 3
-             "U-02": _fake("U-02", "상", 3, 1),   # priority 1, impact 3
-             "U-03": _fake("U-03", "상", 1, 3),   # priority 1, impact 1, effort 3
-             "U-04": _fake("U-04", "상", 1, 1),   # priority 1, impact 1, effort 1
-             "U-05": _fake("U-05", "중", 1, 1)}   # priority 2
-    findings = [{"code": "KISA-2026:" + c, "verdict": "취약"} for c in ("U-01", "U-02", "U-03", "U-04", "U-05")]
-    ordered = [f["code"][-4:] for f in kisa.order_findings(findings, items)]
-    assert ordered == ["U-04", "U-03", "U-02", "U-05", "U-01"]
+    findings = [_finding("U-01", "하", 1, 1),   # priority 3
+                _finding("U-02", "상", 3, 1),   # priority 1, impact 3
+                _finding("U-03", "상", 1, 3),   # priority 1, impact 1, effort 3
+                _finding("U-04", "상", 1, 1),   # priority 1, impact 1, effort 1
+                _finding("U-05", "중", 1, 1)]   # priority 2
+    assert [f["code"][-4:] for f in kisa.order_findings(findings)] == ["U-04", "U-03", "U-02", "U-05", "U-01"]
 
 
 def test_findings_with_the_same_levels_keep_verdict_then_code_order():
-    items = {"U-01": _fake("U-01", "상", 1, 1), "U-02": _fake("U-02", "상", 1, 1)}
-    findings = [{"code": "KISA-2026:U-02", "verdict": "취약"}, {"code": "KISA-2026:U-01", "verdict": "예외(승인)"},
-                {"code": "KISA-2026:U-01", "verdict": "취약"}]
-    ordered = [(f["code"][-4:], f["verdict"]) for f in kisa.order_findings(findings, items)]
+    findings = [_finding("U-02", "상", 1, 1), _finding("U-01", "상", 1, 1, "예외(승인)"), _finding("U-01", "상", 1, 1)]
+    ordered = [(f["code"][-4:], f["verdict"]) for f in kisa.order_findings(findings)]
     assert ordered == [("U-01", "취약"), ("U-02", "취약"), ("U-01", "예외(승인)")]
+
+
+def test_findings_of_an_unknown_code_sort_last():
+    findings = [dict(_finding("U-99", "상", 1, 1), priority=None, impact_level=None, effort_level=None),
+                _finding("U-01", "하", 3, 3)]
+    assert [f["code"][-4:] for f in kisa.order_findings(findings)] == ["U-01", "U-99"]
 
 
 # ---------------------------------------------------------------- report model, table and appendix

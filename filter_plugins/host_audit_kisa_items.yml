@@ -70,7 +70,8 @@ U-03:
     steps:
       rhel: |
         RHEL 8 이상: authselect enable-feature with-faillock, /etc/security/faillock.conf에 deny = 10, unlock_time = 120
-        구형(CentOS 6/7): /etc/pam.d/system-auth, password-auth에서 pam_unix.so 앞에 pam_faillock.so preauth deny=10 unlock_time=120, 뒤에 authfail 줄, account 영역에 pam_faillock.so를 둔다(CentOS 6는 pam_tally2.so)
+        CentOS 7: /etc/pam.d/system-auth, password-auth에서 pam_unix.so 앞에 auth required pam_faillock.so preauth deny=10 unlock_time=120, 뒤에 auth [default=die] pam_faillock.so authfail deny=10 unlock_time=120, account 영역에 account required pam_faillock.so (pam_faillock이 없는 7.x 초기 버전은 pam_tally2.so)
+        CentOS 6: auth required pam_tally2.so deny=10 unlock_time=120 한 줄과 account required pam_tally2.so (preauth·authfail 형식이 없다)
         적용 전에 root 세션을 하나 열어 두고 PAM 모듈 경로가 실제로 있는지 확인한다
       debian: |
         모듈 줄(모든 버전): common-auth에서 pam_unix.so 앞에 auth required pam_faillock.so preauth, 뒤에 auth [default=die] pam_faillock.so authfail, 그 아래 auth sufficient pam_faillock.so authsucc. common-account에는 account required pam_faillock.so
@@ -220,7 +221,7 @@ U-11:
   threat: 로그인 불필요 계정에 쉘이 있으면 비인가자가 그 기본 계정으로 시스템에 접근할 수 있다.
   guide_page: 35
   remediation:
-    summary: daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher 계정의 쉘을 nologin(또는 /bin/false)으로 usermod -s <쉘 절대 경로> <계정> 명령으로 바꾼다. nologin 경로는 계열마다 다르다(steps).
+    summary: daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher 계정의 쉘을 usermod -s <nologin 절대 경로> <계정>(또는 /bin/false)으로 바꾼다. nologin은 RHEL이 /sbin/nologin, Debian이 /usr/sbin/nologin이다.
     steps:
       rhel: |
         usermod -s /sbin/nologin <계정>
@@ -360,7 +361,7 @@ U-18:
   threat: shadow에 담긴 비밀번호 해시가 노출되면 크래킹으로 비밀번호를 탈취당할 수 있다.
   guide_page: 44
   remediation:
-    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다. Debian 계열은 기본값 root:shadow 640이라 steps의 주의를 먼저 읽는다.
+    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다. Debian 계열은 기본값 root:shadow 640이며, 400으로 낮추면 비root 인증이 실패할 수 있으니 영향을 확인한 뒤 적용한다.
     steps:
       rhel: |
         chown root /etc/shadow, chmod 400 /etc/shadow (기본값이 000이면 그대로 둔다)
@@ -1045,7 +1046,7 @@ U-55:
   threat: FTP 계정에 쉘이 부여되면 비인가자가 그 계정으로 시스템에 접근할 수 있다.
   guide_page: 134
   remediation:
-    summary: FTP 서비스를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/passwd의 ftp 계정 쉘을 nologin 또는 /bin/false로 usermod -s <쉘 절대 경로> ftp 명령으로 바꾼다. nologin 경로는 계열마다 다르다(steps).
+    summary: FTP 서비스를 쓰지 않으면 중지·비활성화한다. 쓴다면 /etc/passwd의 ftp 계정 쉘을 nologin 또는 /bin/false로 usermod -s <쉘 절대 경로> ftp 명령으로 바꾼다. nologin은 RHEL이 /sbin/nologin, Debian이 /usr/sbin/nologin이다.
     steps:
       rhel: |
         usermod -s /sbin/nologin ftp
