@@ -108,13 +108,13 @@
     # 보관(AUD-512~514)이 <YYYY-MM>/<run_id>/xlsx/로 올린다. 정기·수시 실행 모두 만든다.
     # 만들기에 실패하면 실행을 멈춘다(xlsx도 이번 실행의 증적이라 빠진 채로 보관·메일로 넘어가지 않는다). 이 block 안에 두어
     # 실패해도 always의 정리가 돌고 AUD-632가 디렉터리를 남기는 이유를 말한다.
-    # 계획(행에 호스트 증적과 예외 사유가 있다)은 한 번만 만들어 no_log set_fact에 두고, 반복문은 호스트 이름만 돈다:
-    # 반복문의 item은 실패 결과에 그대로 찍히기 때문이다.
+    # 계획(행에 호스트 증적과 예외 사유가 있다)은 한 번만 만들어 set_fact에 두고, 반복문은 호스트 이름만 돈다:
+    # 반복문의 item은 실패 결과에 그대로 찍히기 때문이다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이
+    # 보여야 하고(no_log면 가려진다), 성공 때의 fact는 -v에서만 찍히며 내용은 report.html과 같다.
     - name: Build the Remediation Plan of every host
       ansible.builtin.set_fact:
         _host_audit_remediation_plans: >-
           {{ dict(host_audit_model.hosts | zip(host_audit_model | host_audit_remediation_plans)) }}
-      no_log: true
 
     - name: "[AUD-025] Write the Remediation Plan xlsx of every host"
       vars:

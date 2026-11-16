@@ -143,4 +143,4 @@ def test_a_failing_item_does_not_echo_the_rows(tmp_path):
     """The loop only carries host names; the plan (host evidence) is in a no_log set_fact."""
     write = _task("report.yml", "AUD-025")
     assert write["loop"] == "{{ host_audit_model.hosts }}"
-    assert _plan_task()["no_log"] is True
+    assert "no_log" not in _plan_task()  # a filter error must stay readable

@@ -201,6 +201,28 @@ def test_the_cell_limit_counts_utf16_units_like_excel(tmp_path):
     assert cell.endswith("…") and len(cell.encode("utf-16-le")) // 2 <= 32767
 
 
+def test_a_write_error_names_the_destination(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    out = _run(dict(_args(blocker / "sub" / "a.xlsx"), _args_file=tmp_path / "o.json"))
+    assert out["failed"] is True and "cannot write" in out["msg"] and "a.xlsx" in out["msg"]
+
+
+def test_huge_integers_become_text_and_the_sheet_name_is_measured_in_utf16(tmp_path):
+    dest = tmp_path / "i.xlsx"
+    out = _run(dict(_args(dest), rows=[["a", "b", 2 ** 70, "d"]], _args_file=tmp_path / "i.json"))
+    assert not out.get("failed")
+    assert openpyxl.load_workbook(dest).active["C2"].value == str(2 ** 70)
+    bad = _run(dict(_args(tmp_path / "s.xlsx"), sheet="\U0001F600" * 16, _args_file=tmp_path / "s.json"))
+    assert bad["failed"] is True
+
+
+def test_the_workbook_declares_a_book_view_for_the_sheet_view(tmp_path):
+    dest, _ = _write(tmp_path, "b.xlsx")
+    with zipfile.ZipFile(dest) as zf:
+        assert b"<bookViews><workbookView/></bookViews>" in zf.read("xl/workbook.xml")
+
+
 def test_the_writer_uses_only_the_standard_library():
     spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
     source = MODULE.read_text(encoding="utf-8")

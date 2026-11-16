@@ -81,6 +81,7 @@ from ansible.module_utils.basic import AnsibleModule
 
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest time a zip member can carry
 DEFAULT_WIDTH = 16
+MAX_EXACT_INT = 2 ** 53
 MIN_MASKED = 24  # characters; shorter cell values are not masked in the module's own result
 MAX_CELL = 32767  # characters an xlsx cell can hold
 _ILLEGAL = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')  # incl. lone surrogates (not encodable)
@@ -132,6 +133,8 @@ def _cell(row, col, value, style):
         value = u''
     elif isinstance(value, bool) or not isinstance(value, (int, str)):
         value = str(value)  # a float or another type is written as its text rather than failing the whole run
+    if isinstance(value, int) and abs(value) > MAX_EXACT_INT:
+        value = str(value)  # Excel keeps numbers as doubles: beyond 2**53 a number would silently change
     if isinstance(value, int):
         return u'<c r="%s" s="%d"><v>%d</v></c>' % (ref, style, value)
     if value == u'':
@@ -213,6 +216,7 @@ def _workbook(sheet):
     return (u'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             u'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             u'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            u'<bookViews><workbookView/></bookViews>'
             u'<sheets><sheet name="%s" sheetId="1" r:id="rId1"/></sheets></workbook>' % name)
 
 
@@ -227,7 +231,8 @@ def build_xlsx(sheet, headers, rows, footer, widths):
     headers = list(headers)
     if not headers:
         raise ValueError('headers must not be empty')
-    if not sheet or len(sheet) > 31 or re.search(r'[\[\]:*?/\\]', sheet) or sheet[0] == "'" or sheet[-1] == "'":
+    sheet = _normalize(sheet)  # validate the name that is written
+    if not sheet or _units(sheet) > 31 or re.search(r'[\[\]:*?/\\]', sheet) or sheet[0] == "'" or sheet[-1] == "'":
         raise ValueError("sheet name must be 1 to 31 characters without [ ] : * ? / \\ and no edge apostrophe")
     if any(int(w) < 1 or int(w) > 255 for w in widths):
         raise ValueError('column widths must be 1 to 255')
@@ -318,7 +323,10 @@ def main():
     cut = truncated_cells(p['headers'], p['rows'], p['footer'])
     if cut:
         module.warn('%d cell(s) longer than %d characters were cut' % (cut, MAX_CELL))
-    changed = (not _same(p['dest'], data)) if module.check_mode else _write(p['dest'], data)
+    try:
+        changed = (not _same(p['dest'], data)) if module.check_mode else _write(p['dest'], data)
+    except (IOError, OSError) as exc:
+        module.fail_json(msg='cannot write %s: %s' % (p['dest'], exc.strerror or exc))
     module.exit_json(changed=changed, dest=p['dest'])
 
 
