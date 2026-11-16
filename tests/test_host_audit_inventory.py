@@ -333,6 +333,15 @@ def test_declaration_never_carries_connection_values():
         assert secret not in text
 
 
+def test_declaration_defuses_jinja_delimiters_caps_length_and_drops_non_text_values():
+    decl = host_audit_asset_declaration({"description": "{{ lookup('env','HOME') }} {% x %} {# c #}" + "a" * 500,
+                                         "isms_owner_role": False, "isms_admin_role": ["x"]}, True)
+
+    assert "{{" not in decl["purpose"] and "{%" not in decl["purpose"] and "{#" not in decl["purpose"]
+    assert len(decl["purpose"]) <= 130
+    assert decl["owner_role"] == "" and decl["admin_role"] == ""
+
+
 def test_declaration_with_failed_lookup_ignores_whatever_the_dict_holds():
     decl = host_audit_asset_declaration(HOST_KV, False)
     assert decl["lookup"] == "failed" and decl["purpose"] == "" and decl["asset_importance"] == ""

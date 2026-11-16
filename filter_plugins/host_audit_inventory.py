@@ -289,6 +289,18 @@ DECLARATION_KEYS = [
 ]
 
 
+DECLARED_MAX_LEN = 120
+
+
+def _declared_text(value):
+    """Scalar KV value as display text. KV text is not trusted: Jinja delimiters are broken up (the filter
+    result loses Ansible's unsafe marking) and the length is capped."""
+    if value is None or isinstance(value, (dict, list, bool)):
+        return ''
+    text = str(value).strip()[:DECLARED_MAX_LEN]
+    return text.replace('{{', '{ {').replace('{%', '{ %').replace('{#', '{ #')
+
+
 def host_audit_asset_declaration(host_kv, lookup_ok=True):
     """Asset Inventory declared values from the host KV that ``resolve_connection`` already read.
 
@@ -299,7 +311,7 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
     decl = {}
     for kv_key, key in DECLARATION_KEYS:
         value = host_kv.get(kv_key)
-        decl[key] = '' if value is None or isinstance(value, (dict, list)) else str(value).strip()
+        decl[key] = _declared_text(value)
     decl['lookup'] = 'ok' if lookup_ok else 'failed'
     return decl
 
