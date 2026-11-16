@@ -155,7 +155,7 @@ def record(host, identity, inventory, asset=None, groups=("servers",)):
     rec = host_audit_host_record(ok(identity), host, {"fqdn": "", "ip": "", "environment": "production",
                                                       "groups": list(groups)}, COLLECTED_AT)
     rec["declared"]["asset"] = dict({"purpose": "", "department": "", "owner_role": "", "admin_role": "",
-                                     "security_grade": "", "privileged_allowlist": ["ppzxc"]}, **(asset or {}))
+                                     "asset_importance": "", "privileged_allowlist": ["ppzxc"]}, **(asset or {}))
     rec["inventory"] = host_audit_inventory_record(ok(inventory)) if inventory is not None else None
     return rec
 
@@ -300,7 +300,7 @@ def test_unassigned_declarations_are_shown_as_unassigned():
     declared = {f["key"]: f for f in host(model, "ns0331")["declared"]}
 
     assert declared["purpose"] == {"key": "purpose", "label": "용도", "value": "웹 서비스", "unassigned": False}
-    for key in ("department", "owner_role", "admin_role", "security_grade"):
+    for key in ("department", "owner_role", "admin_role", "asset_importance"):
         assert declared[key]["value"] == "미지정" and declared[key]["unassigned"] is True
     assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 1
 

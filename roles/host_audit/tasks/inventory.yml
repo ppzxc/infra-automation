@@ -32,7 +32,7 @@
       department: "{{ host_audit_asset.department | default('') }}"
       owner_role: "{{ host_audit_asset.owner_role | default('') }}"
       admin_role: "{{ host_audit_asset.admin_role | default('') }}"
-      security_grade: "{{ host_audit_asset.security_grade | default('') }}"
+      asset_importance: "{{ host_audit_asset.asset_importance | default('') }}"
       privileged_allowlist: >-
         {{ accounts | default([]) | host_audit_privileged_allowlist(
              openbao_ssh_allowed_principals | default([]), host_audit_privileged_extra) }}

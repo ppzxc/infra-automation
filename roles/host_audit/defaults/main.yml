@@ -23,7 +23,7 @@ host_audit_timezone: Asia/Seoul
 #     department: "인프라팀"          # 관리 부서
 #     owner_role: "인프라팀장"        # 책임자(직책)
 #     admin_role: "시스템 관리자"     # 관리자(직책)
-#     security_grade: "2등급"         # 보안등급
+#     asset_importance: "M"        # 보안등급
 host_audit_asset: {}
 
 # 특수권한(uid 0, wheel·sudo·admin 그룹, sudoers 규칙) 선언 허용 목록에 더할 이름.

@@ -156,7 +156,7 @@ host_audit_asset:
   department: "인프라팀"
   owner_role: "인프라팀장"
   admin_role: "시스템 관리자"
-  security_grade: "2등급"
+  asset_importance: "M"
 ```
 
 **호스트별 JSON 추가 필드 (schema_version 2)**: `declared.asset`(위 5개 + `privileged_allowlist`)과 `inventory`가 붙는다. 식별이 실패한 호스트는 `inventory: null`.

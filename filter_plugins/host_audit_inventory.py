@@ -32,7 +32,7 @@ DECLARED_FIELDS = [
     ('department', '관리 부서'),
     ('owner_role', '책임자(직책)'),
     ('admin_role', '관리자(직책)'),
-    ('security_grade', '보안등급'),
+    ('asset_importance', '보안등급'),
 ]
 LIST_KEYS = ('disk', 'pkg', 'listen_tcp', 'listen_udp', 'netstat', 'passwd', 'shadow', 'group',
              'sudoers', 'lastlog', 'recent_login', 'agent_bin', 'timesync_tool')
