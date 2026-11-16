@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from module_runner import MODULE_UTILS, run_module_file
+
 # CI installs requirements-test.txt, so a missing openpyxl there must fail instead of silently skipping the round trip.
 if os.environ.get("CI"):
     import openpyxl
@@ -37,11 +39,7 @@ def _args(dest):
 def _run(args):
     """Run the module as Ansible does: a python file with a JSON args file."""
     path = args.pop("_args_file")
-    module_args = dict(args)
-    Path(path).write_text(json.dumps({"ANSIBLE_MODULE_ARGS": module_args}))
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
-    res = subprocess.run([sys.executable, str(MODULE), str(path)], capture_output=True, text=True, env=env)
-    return json.loads(res.stdout)
+    return run_module_file(MODULE, args, path)
 
 
 def _write(tmp_path, name="a.xlsx", **override):
@@ -118,7 +116,7 @@ def test_check_mode_reports_changed_only_when_the_bytes_differ(tmp_path):
 
 
 def test_a_failed_write_leaves_no_temp_file_in_the_directory(tmp_path):
-    spec = importlib.util.spec_from_file_location("host_audit_xlsx_write", MODULE)
+    spec = importlib.util.spec_from_file_location("host_audit_atomic", MODULE_UTILS / "host_audit_atomic.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     dest = tmp_path / "x" / "f.xlsx"
@@ -131,7 +129,7 @@ def test_a_failed_write_leaves_no_temp_file_in_the_directory(tmp_path):
     os.replace = boom
     try:
         with pytest.raises(OSError):
-            mod._write(str(dest), b"data")
+            mod.write_atomic(str(dest), b"data")
     finally:
         os.replace = real
     assert list(dest.parent.iterdir()) == []

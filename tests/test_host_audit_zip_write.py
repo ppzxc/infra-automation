@@ -2,27 +2,22 @@
 
 The zip the module wrote is reopened with zipfile: members, order, fixed times, mode, same input -> same bytes.
 """
-import json
 import os
 import stat
-import subprocess
-import sys
 import zipfile
 from pathlib import Path
+
+from module_runner import run_module_file
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODULE = ROOT_DIR / "roles" / "host_audit" / "library" / "host_audit_zip_write.py"
 
 
 def _run(tmp_path, args, check_mode=False):
-    path = tmp_path / "args.json"
     module_args = dict(args)
     if check_mode:
         module_args["_ansible_check_mode"] = True
-    path.write_text(json.dumps({"ANSIBLE_MODULE_ARGS": module_args}))
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
-    res = subprocess.run([sys.executable, str(MODULE), str(path)], capture_output=True, text=True, env=env)
-    return json.loads(res.stdout)
+    return run_module_file(MODULE, module_args, tmp_path / "args.json")
 
 
 def _dir(tmp_path):

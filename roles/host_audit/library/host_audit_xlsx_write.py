@@ -72,12 +72,11 @@ dest:
 '''
 
 import io
-import os
 import re
-import tempfile
 import zipfile
 
 from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.host_audit_atomic import same_file, write_atomic
 
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)  # the earliest time a zip member can carry
 DEFAULT_WIDTH = 16
@@ -111,10 +110,13 @@ def _normalize(value):
     return _ILLEGAL.sub(u'', value.replace(u'\r\n', u'\n').replace(u'\r', u'\n'))
 
 
-def _text(value):
+def _text(value, cut=None):
+    """Escaped cell text. ``cut`` (a one-item list) counts the values that had to be cut to fit a cell."""
     value = _normalize(value)
     if _units(value) > MAX_CELL:
         value = _cut(value)
+        if cut is not None:
+            cut[0] += 1
     return value.replace(u'&', u'&amp;').replace(u'<', u'&lt;').replace(u'>', u'&gt;')
 
 
@@ -136,7 +138,7 @@ def _coerce(value):
     return value
 
 
-def _cell(row, col, value, style):
+def _cell(row, col, value, style, cut):
     ref = u'%s%d' % (_column(col), row)
     value = _coerce(value)
     if isinstance(value, str):
@@ -147,10 +149,10 @@ def _cell(row, col, value, style):
         return u'<c r="%s" s="%d"><v>%d</v></c>' % (ref, style, value)
     if value == u'':
         return u'<c r="%s" s="%d"/>' % (ref, style)
-    return u'<c r="%s" s="%d" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>' % (ref, style, _text(value))
+    return u'<c r="%s" s="%d" t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>' % (ref, style, _text(value, cut))
 
 
-def _sheet_xml(headers, rows, footer, widths):
+def _sheet_xml(headers, rows, footer, widths, cut):
     cols = u''.join(u'<col min="%d" max="%d" width="%d" customWidth="1"/>' % (i + 1, i + 1, w)
                     for i, w in enumerate(widths))
     lines = [(1, [(c, h, STYLE_HEADER) for c, h in enumerate(headers)])]
@@ -159,7 +161,7 @@ def _sheet_xml(headers, rows, footer, widths):
     start = len(rows) + 3  # one blank row between the table and the footer
     for offset, line in enumerate(footer):
         lines.append((start + offset, [(0, line, STYLE_FOOTER)]))
-    body = u''.join(u'<row r="%d">%s</row>' % (n, u''.join(_cell(n, c, v, s) for c, v, s in cells))
+    body = u''.join(u'<row r="%d">%s</row>' % (n, u''.join(_cell(n, c, v, s, cut) for c, v, s in cells))
                     for n, cells in lines)
     return (u'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             u'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
@@ -228,16 +230,13 @@ def _workbook(sheet):
             u'<sheets><sheet name="%s" sheetId="1" r:id="rId1"/></sheets></workbook>' % name)
 
 
-def truncated_cells(headers, rows, footer):
-    """Number of text cells longer than an xlsx cell holds (they are cut with an ellipsis; the module warns)."""
-    cells = list(headers) + [c for row in rows for c in row] + list(footer)
-    # A value that is neither text nor an integer is written as its text (see _cell), so it is cut the same way.
-    texts = [c for c in (_coerce(cell) for cell in cells) if isinstance(c, str)]
-    return sum(1 for c in texts if _units(_normalize(c)) > MAX_CELL)
-
-
 def build_xlsx(sheet, headers, rows, footer, widths):
-    """The bytes of the workbook. Raises ValueError for a row that does not fit the header or an unsupported cell."""
+    """``(bytes of the workbook, number of cells cut to fit)``.
+
+    Text longer than an xlsx cell holds is cut with an ellipsis (the module warns); the count comes from the same pass
+    that writes the cells, so it cannot disagree with what was written. Raises ValueError for a row that does not fit
+    the header or an unsupported cell.
+    """
     headers = list(headers)
     if not headers:
         raise ValueError('headers must not be empty')
@@ -252,76 +251,24 @@ def build_xlsx(sheet, headers, rows, footer, widths):
     if len(widths) > len(headers):
         raise ValueError('%d column widths for %d headers' % (len(widths), len(headers)))
     widths = [int(w) for w in widths] + [DEFAULT_WIDTH] * (len(headers) - len(widths))
+    cut = [0]
     parts = [
         (u'[Content_Types].xml', _CONTENT_TYPES),
         (u'_rels/.rels', _ROOT_RELS),
         (u'xl/workbook.xml', _workbook(sheet)),
         (u'xl/_rels/workbook.xml.rels', _WORKBOOK_RELS),
         (u'xl/styles.xml', _STYLES),
-        (u'xl/worksheets/sheet1.xml', _sheet_xml(headers, rows, footer, widths[:len(headers)])),
+        (u'xl/worksheets/sheet1.xml', _sheet_xml(headers, rows, footer, widths[:len(headers)], cut)),
     ]
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:
         for name, xml in parts:
             info = zipfile.ZipInfo(name, FIXED_TIME)
-            info.compress_type = zipfile.ZIP_STORED  # not deflate: its bytes depend on the zlib build
+            info.compress_type = zipfile.ZIP_STORED  # not deflate: its bytes depend on the zlib implementation/build, even at a pinned level (docs 17.2)
             info.external_attr = 0o600 << 16
             info.create_system = 3  # fixed (unix), not the platform the module happens to run on
             archive.writestr(info, xml.encode('utf-8'))
-    return buffer.getvalue()
-
-
-def _same(dest, data):
-    """True when dest already holds exactly these bytes with mode 0600 (anything else is a change)."""
-    try:
-        with open(dest, 'rb') as handle:
-            return handle.read() == data and (os.stat(dest).st_mode & 0o777) == 0o600
-    except (IOError, OSError):
-        return False
-
-
-def _sync_directory(directory):
-    """Make the rename durable (best effort: not every platform can open a directory)."""
-    try:
-        fd = os.open(directory, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
-def _write(dest, data):
-    """Write atomically with mode 0600; returns True when the file changed."""
-    if _same(dest, data):
-        return False
-    directory = os.path.dirname(dest) or '.'
-    if not os.path.isdir(directory):
-        # One level only (xlsx/ under the run directory): a missing parent is an error, never a directory created
-        # with a mode the role did not choose.
-        os.mkdir(directory, 0o700)
-        os.chmod(directory, 0o700)
-    # mkstemp: exclusive create with an unpredictable name (no symlink to follow), mode 0600. The name starts with a
-    # dot, so AUD-512 (ansible.builtin.find without hidden files) never lists a leftover of a killed run.
-    fd, tmp = tempfile.mkstemp(prefix='.', suffix='.tmp', dir=directory)
-    try:
-        with os.fdopen(fd, 'wb') as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())  # the renamed file must not be empty after a crash
-        os.replace(tmp, dest)
-        _sync_directory(directory)
-    except BaseException:
-        # A leftover .tmp in xlsx/ would be found and kept by AUD-512.
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
-    return True
+    return buffer.getvalue(), cut[0]
 
 
 def main():
@@ -344,14 +291,13 @@ def main():
     module.no_log_values = set(v for v in module.no_log_values if len(v) >= MIN_MASKED)
     p = module.params
     try:
-        data = build_xlsx(p['sheet'], p['headers'], p['rows'], p['footer'], p['widths'])
+        data, cut = build_xlsx(p['sheet'], p['headers'], p['rows'], p['footer'], p['widths'])
     except ValueError as exc:
         module.fail_json(msg=str(exc))
-    cut = truncated_cells(p['headers'], p['rows'], p['footer'])
     if cut:
         module.warn('%d cell(s) longer than %d characters were cut' % (cut, MAX_CELL))
     try:
-        changed = (not _same(p['dest'], data)) if module.check_mode else _write(p['dest'], data)
+        changed = (not same_file(p['dest'], data)) if module.check_mode else write_atomic(p['dest'], data, create_parent=True)
     except (IOError, OSError) as exc:
         module.fail_json(msg='cannot write %s: %s' % (p['dest'], exc.strerror or exc))
     module.exit_json(changed=changed, dest=p['dest'])

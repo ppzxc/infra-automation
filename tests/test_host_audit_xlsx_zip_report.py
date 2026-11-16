@@ -78,6 +78,7 @@ def _ansible(tmp_path, play, extra_vars=None, name="pb"):
         cmd += ["-e", "@%s" % ev]
     env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
                ANSIBLE_LIBRARY=str(ROOT_DIR / "roles" / "host_audit" / "library"),
+               ANSIBLE_MODULE_UTILS=str(ROOT_DIR / "roles" / "host_audit" / "module_utils"),
                ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins"),
                ANSIBLE_ROLES_PATH=str(ROOT_DIR / "roles"))
     return subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300,
@@ -197,7 +198,7 @@ def _report_stage(tmp_path, out, model=None, break_xlsx=False):
     (out / "report.html").write_text("<html>report</html>")
     names = ("Build the Remediation Plan of every host", "[AUD-025]",
              "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]",
-             "Remove a leftover xlsx zip", "Reset the xlsx zip failure mark", "Remember that the xlsx zip", "Remove the xlsx zip when packing", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
+             "Remove a leftover xlsx zip", "Remember that the xlsx zip", "Remove the xlsx zip when packing", "Summarize the Remediation Plan xlsx", "Check whether the xlsx directory exists", "Find the xlsx files that this attempt did not write", "Remove the xlsx files that this attempt did not write", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in names)]
     assert len(tasks) == len(names), [t.get("name") for t in tasks]
@@ -241,9 +242,12 @@ def test_a_stale_xlsx_of_an_earlier_run_with_the_same_id_is_not_packed(tmp_path)
     out = tmp_path / "run"
     (out / "xlsx").mkdir(parents=True)
     (out / "xlsx" / ("host-audit-%s-gone.xlsx" % RUN_ID)).write_bytes(b"stale plan of a host not audited now")
-    _report_stage(tmp_path, out)
+    stats = _report_stage(tmp_path, out)
     with zipfile.ZipFile(out / "xlsx" / ZIP_NAME) as z:
         assert z.namelist() == ["host-audit-%s-h1.xlsx" % RUN_ID, "host-audit-%s-h2.xlsx" % RUN_ID]
+    # not only left out of the zip: AUD-512 uploads xlsx/ recursively, so the stale plan must be gone from the disk too
+    assert not (out / "xlsx" / ("host-audit-%s-gone.xlsx" % RUN_ID)).exists()
+    assert "xlsx/host-audit-%s-gone.xlsx" % RUN_ID not in stats
 
 
 def test_a_stale_zip_of_an_earlier_attempt_is_not_hashed_mailed_or_kept_when_this_attempt_builds_none(tmp_path):
@@ -429,3 +433,51 @@ def test_resend_of_a_run_kept_before_the_zip_existed_sends_the_report_alone(tmp_
     res = _resend(tmp_path, smtp, bucket, summary_zip=None, served_zip=None)
     assert res.returncode == 0, res.stdout[-3000:]
     assert list(_attachments(smtp.messages[0])[0]) == ["host-audit-%s.html" % RUN_ID]
+
+
+def test_an_old_xlsx_of_a_host_whose_write_failed_this_attempt_is_removed_too(tmp_path):
+    """A failed write leaves the plan of an earlier attempt with the same run ID; it must not be uploaded as this run's."""
+    out = tmp_path / "run"
+    (out / "xlsx").mkdir(parents=True)
+    for host in ("h1", "h2", "gone"):
+        (out / "xlsx" / ("host-audit-%s-%s.xlsx" % (RUN_ID, host))).write_bytes(b"old " + host.encode())
+    (out / "xlsx" / ZIP_NAME).write_bytes(b"not an xlsx")
+    block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
+    tasks = [t for t in block if any(n in t.get("name", "") for n in
+                                     ("Collect the hosts whose Remediation Plan xlsx", "Check whether the xlsx directory", "xlsx files that this attempt did not write",
+                                      "Summarize the Remediation Plan xlsx"))]
+    assert len(tasks) == 5
+    plans = {h: {"file_name": "host-audit-%s-%s.xlsx" % (RUN_ID, h)} for h in ("h1", "h2")}
+    play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+            "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"hosts": ["h1", "h2"]},
+                     "_host_audit_remediation_plans": plans,
+                     "_host_audit_xlsx_write": {"results": [{"item": "h1"}, {"item": "h2", "failed": True}]}},
+            "tasks": tasks}
+    res = _ansible(tmp_path, play)
+    assert res.returncode == 0, res.stdout[-2000:]
+    assert sorted(p.name for p in (out / "xlsx").iterdir()) == ["host-audit-%s-h1.xlsx" % RUN_ID, ZIP_NAME]
+
+
+def test_a_stale_xlsx_that_cannot_be_removed_does_not_stop_the_stage_but_ends_the_run_failed(tmp_path):
+    """The block goes on (keep and mail are not hostage to a stale file); the xlsx problem fact carries the failure."""
+    if os.geteuid() == 0:
+        pytest.skip("root can remove files from a read-only directory")
+    out = tmp_path / "run"
+    (out / "xlsx").mkdir(parents=True)
+    (out / "xlsx" / ("host-audit-%s-gone.xlsx" % RUN_ID)).write_bytes(b"stale")
+    (out / "xlsx").chmod(0o500)
+    block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
+    tasks = [t for t in block if any(n in t.get("name", "") for n in
+                                     ("Check whether the xlsx directory", "xlsx files that this attempt did not write",
+                                      "Summarize the Remediation Plan xlsx"))]
+    show = {"ansible.builtin.debug": {"var": "_host_audit_xlsx_problem"}}
+    play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
+            "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"hosts": []},
+                     "_host_audit_remediation_plans": {}, "_host_audit_xlsx_failed_hosts": []},
+            "tasks": tasks + [show]}
+    try:
+        res = _ansible(tmp_path, play)
+    finally:
+        (out / "xlsx").chmod(0o700)
+    assert res.returncode == 0, res.stdout[-2000:]
+    assert "이전 시도 xlsx 삭제" in _text(res) and '"failed": true' in _text(res)

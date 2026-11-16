@@ -22,7 +22,8 @@ from host_audit_kisa import (  # noqa: E402
     BLANK, EXCEPTION, ITEMS, MANUAL, REGISTER_ACTIVE, REGISTER_EXPIRED, REGISTER_PENDING, REMEDIATION_SOURCE,
     order_findings)
 from host_audit_baseline import NEW, PERSIST, RECUR  # noqa: E402
-from host_audit_inventory import LOOKUP_FAILED, UNASSIGNED, _unsafe  # noqa: E402  (the Asset Inventory label; the unsafe mark)
+from host_audit_inventory import LOOKUP_FAILED, UNASSIGNED  # noqa: E402  (the Asset Inventory labels)
+from host_audit_unsafe import unsafe as _unsafe  # noqa: E402
 
 SHEET = '이행계획서'
 # SolidStep 이행계획서 column order. 구현내용 is three columns.

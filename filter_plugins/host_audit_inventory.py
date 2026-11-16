@@ -11,8 +11,14 @@ list stays in the per-host JSON and never reaches the report model.
 """
 
 import ipaddress
+import os
 import re
+import sys
 from datetime import date, datetime, timedelta, timezone
+
+# Ansible loads each filter plugin by path, without filter_plugins/ on sys.path (see host_audit.py).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from host_audit_unsafe import unsafe  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo
@@ -297,13 +303,6 @@ DECLARED_MAX_LEN = 500
 INVALID_SHOWN_LEN = 20
 
 
-try:
-    from ansible.utils.unsafe_proxy import wrap_var as _unsafe
-except ImportError:  # pragma: no cover - plain Python without ansible
-    def _unsafe(value):
-        return value
-
-
 def _cap(text, limit):
     return text if len(text) <= limit else text[:limit - 1] + '…'
 
@@ -331,7 +330,7 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
             malformed.append(key)
             value = ''
         # KV text is data, never a template: ansible-core < 2.19 needs the explicit unsafe mark (2.19+ is a no-op).
-        decl[key] = _unsafe(_cap(value.strip(), DECLARED_MAX_LEN)) if isinstance(value, str) else ''
+        decl[key] = unsafe(_cap(value.strip(), DECLARED_MAX_LEN)) if isinstance(value, str) else ''
     decl['lookup'] = 'ok' if lookup_ok else 'failed'
     if malformed:
         decl['malformed'] = malformed
@@ -447,6 +446,8 @@ def _declared(record):
         elif not value:
             state, shown = 'unassigned', UNASSIGNED
         elif key == 'asset_importance' and value not in IMPORTANCE_LEVELS:
+            # Exact, case-sensitive: the value is shown as the ledger writes it (spec #488), so 'h' is a copy error to fix.
+            # The cell names only the original value; the allowed H/M/L are in the glossary and docs, not repeated per cell.
             state, shown = 'invalid', '%s (%s)' % (INVALID, _cap(value, INVALID_SHOWN_LEN))
         else:
             state, shown = 'ok', value
