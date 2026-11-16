@@ -4,7 +4,7 @@ Two pure steps, mirroring the rest of Host Audit:
   host_audit_inventory_record  registered inventory probe -> ``inventory`` part of the per-host record
   inventory_section            per-host records + run metadata -> the Asset Inventory part of the report model
 
-Every judgement the report shows for Asset Inventory — '미지정' declarations,
+Every judgement the report shows for Asset Inventory — '미지정'/'조회 실패'/'잘못된 값' declarations,
 '선언 외' privileged users, '장기 미사용' accounts, OS end-of-life status — is
 made in ``inventory_section``; the template only draws it. The full package
 list stays in the per-host JSON and never reaches the report model.
@@ -24,6 +24,13 @@ INVENTORY_END = '__HOST_AUDIT_INVENTORY_END__'
 INACTIVE_DAYS = 90
 EOL_SOON_DAYS = 180
 UNASSIGNED = '미지정'
+LOOKUP_FAILED = '조회 실패'
+INVALID = '잘못된 값'
+IMPORTANCE_LEVELS = ('H', 'M', 'L')
+# 표시 상태 -> 태그 색. 조회 실패는 인프라 문제(값을 알 수 없음)라 지원 종료·선언 외 같은 발견(crit)과 구분해
+# 회색, 잘못된 값은 사람이 고칠 사본 오류라 빨강이다. 메일 요약은 세 상태 모두 호스트 수를 WARN으로 센다
+# (색은 보고서 안에서 눈에 띄게 하는 용도이고 메일 등급을 따로 정한다).
+DECLARED_TAGS = {'unassigned': 'na', 'lookup_failed': 'na', 'invalid': 'crit'}
 NOT_DECLARED = '선언 외'
 INACTIVE = '장기 미사용'
 
@@ -32,7 +39,7 @@ DECLARED_FIELDS = [
     ('department', '관리 부서'),
     ('owner_role', '책임자(직책)'),
     ('admin_role', '관리자(직책)'),
-    ('security_grade', '보안등급'),
+    ('asset_importance', '자산중요도'),
 ]
 LIST_KEYS = ('disk', 'pkg', 'listen_tcp', 'listen_udp', 'netstat', 'passwd', 'shadow', 'group',
              'sudoers', 'lastlog', 'recent_login', 'agent_bin', 'timesync_tool')
@@ -276,6 +283,61 @@ def _host_agents(v):
     }
 
 
+# OpenBao hosts/<Inventory Hostname> 키 -> 기록 키. 같은 dict에 접속 정보가 있어 이 다섯 키만 고른다.
+DECLARATION_KEYS = [
+    ('description', 'purpose'),
+    ('isms_department', 'department'),
+    ('isms_owner_role', 'owner_role'),
+    ('isms_admin_role', 'admin_role'),
+    ('isms_asset_importance', 'asset_importance'),
+]
+
+
+DECLARED_MAX_LEN = 500
+INVALID_SHOWN_LEN = 20
+
+
+try:
+    from ansible.utils.unsafe_proxy import wrap_var as _unsafe
+except ImportError:  # pragma: no cover - plain Python without ansible
+    def _unsafe(value):
+        return value
+
+
+def _cap(text, limit):
+    return text if len(text) <= limit else text[:limit - 1] + '…'
+
+
+def host_audit_asset_declaration(host_kv, lookup_ok=True):
+    """Asset Inventory declared values from the host KV that ``resolve_connection`` already read.
+
+    Picks exactly five keys (never hands the whole dict on: it also holds connection values).
+    ``lookup_ok`` false (``hosts/<host>`` did not answer 200) -> every value empty and ``lookup: failed``.
+
+    Values are kept as the ledger copy has them (evidence): only surrounding blanks are cut and a value
+    longer than 500 characters ends with '…' (far above a description with its trailing ``[그룹자산명]``;
+    the cap only keeps a pasted blob out of the record). Anything that is not a string (dict, list, bool, number) is not text: the value is
+    empty and the key is listed in ``malformed`` so the report shows '잘못된 값' instead of '미지정'.
+    No template escaping: the strings are marked unsafe (needed before ansible-core 2.19; from 2.19 data
+    from a lookup or a filter is untrusted by default); ``tests/test_host_audit_inventory.py`` proves
+    with a real run that template text stays text.
+    """
+    host_kv = host_kv if isinstance(host_kv, dict) and lookup_ok else {}
+    decl = {}
+    malformed = []
+    for kv_key, key in DECLARATION_KEYS:
+        value = host_kv.get(kv_key)
+        if value is not None and not isinstance(value, str):
+            malformed.append(key)
+            value = ''
+        # KV text is data, never a template: ansible-core < 2.19 needs the explicit unsafe mark (2.19+ is a no-op).
+        decl[key] = _unsafe(_cap(value.strip(), DECLARED_MAX_LEN)) if isinstance(value, str) else ''
+    decl['lookup'] = 'ok' if lookup_ok else 'failed'
+    if malformed:
+        decl['malformed'] = malformed
+    return decl
+
+
 def host_audit_inventory_record(probe):
     """Turn the registered inventory probe into the ``inventory`` part of the per-host record."""
     probe = probe or {}
@@ -371,10 +433,24 @@ def _fmt_uptime(seconds):
 
 def _declared(record):
     asset = ((record.get('declared') or {}).get('asset') or {})
+    failed = asset.get('lookup') == 'failed'
     fields = []
     for key, label in DECLARED_FIELDS:
         value = str(asset.get(key) or '').strip()
-        fields.append({'key': key, 'label': label, 'value': value or UNASSIGNED, 'unassigned': not value})
+        if key == 'asset_importance' and 'lookup' not in asset:
+            # 이 변경 전에 저장한 기록(lookup 키 없음)의 security_grade도 값을 잃지 않고 '잘못된 값'으로 보인다.
+            value = str(asset.get('security_grade') or '').strip()
+        if failed:
+            state, shown = 'lookup_failed', LOOKUP_FAILED
+        elif key in (asset.get('malformed') or []):
+            state, shown = 'invalid', '%s (값이 문자열이 아님)' % INVALID
+        elif not value:
+            state, shown = 'unassigned', UNASSIGNED
+        elif key == 'asset_importance' and value not in IMPORTANCE_LEVELS:
+            state, shown = 'invalid', '%s (%s)' % (INVALID, _cap(value, INVALID_SHOWN_LEN))
+        else:
+            state, shown = 'ok', value
+        fields.append({'key': key, 'label': label, 'value': shown, 'state': state, 'tag': DECLARED_TAGS.get(state, '')})
     return fields, [str(n) for n in (asset.get('privileged_allowlist') or [])]
 
 
@@ -539,7 +615,9 @@ def inventory_section(records, meta):
         'counts': {
             'not_declared': sum(len(h.get('not_declared', [])) for h in hosts),
             'inactive': sum(len(h.get('inactive', [])) for h in hosts),
-            'unassigned_hosts': sum(1 for h in hosts if any(f['unassigned'] for f in h['declared'])),
+            'unassigned_hosts': sum(1 for h in hosts if any(f['state'] == 'unassigned' for f in h['declared'])),
+            'invalid_hosts': sum(1 for h in hosts if any(f['state'] == 'invalid' for f in h['declared'])),
+            'lookup_failed_hosts': sum(1 for h in hosts if any(f['state'] == 'lookup_failed' for f in h['declared'])),
             'eos': len(eos),
         },
     }
@@ -566,6 +644,7 @@ def host_audit_privileged_allowlist(accounts, principals=None, extra=None):
 class FilterModule(object):
     def filters(self):
         return {
+            'host_audit_asset_declaration': host_audit_asset_declaration,
             'host_audit_inventory_record': host_audit_inventory_record,
             'host_audit_privileged_allowlist': host_audit_privileged_allowlist,
         }
