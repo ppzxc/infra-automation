@@ -708,8 +708,9 @@ AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·�
 
 | 상황 | 동작 |
 |---|---|
-| Remediation Plan xlsx 쓰기 실패(보관 여부·메일 결과와 무관) | 남긴다. 맨 끝 판정(`Fail the run when a Remediation Plan xlsx could not be written`)이 호스트 이름과 함께 실행을 실패로 끝내고 `AUD-632`가 이유를 보여 준다(§17). 아래 행들보다 먼저 판정한다. |
-| 보관 성공(xlsx 쓰기 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
+| Remediation Plan xlsx 쓰기·zip 묶기·이전 시도 xlsx 정리 실패(보관 여부·메일 결과와 무관) | 남긴다. 맨 끝 판정(`Fail the run when a Remediation Plan xlsx could not be written`)이 실패한 대상과 함께 실행을 실패로 끝내고 `AUD-632`가 이유(`xlsx 산출물 실패(<대상>)`)를 보여 준다(§17). 아래 행들보다 먼저 판정한다. |
+| xlsx 판정 사실(`_host_audit_xlsx_problem`)이 없음(그 앞 단계에서 멈춤) | 남긴다. 값이 없는 것을 '실패 없음'으로 읽지 않고, 이유는 '앞 단계에서 멈춰 xlsx 판정이 없음'이다. |
+| 보관 성공(xlsx 산출물 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
 | 보관 꺼짐(`host_audit_storage_enabled=false`), 메일 발송 성공 | 지운다. |
 | 보관 꺼짐, 메일 실패 또는 미발송 | 남긴다. 러너 사본이 유일하다. |
 | 보관 실패(업로드 실패, 보관 입력 누락) | 남긴다. AUD-516 메시지가 이 디렉터리를 가리킨다. |
