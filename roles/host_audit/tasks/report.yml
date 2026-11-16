@@ -153,6 +153,7 @@
       register: _host_audit_xlsx_zip_write
       ignore_errors: true
       when:
+        - not ansible_check_mode  # check 모드의 xlsx 쓰기는 파일을 만들지 않으므로 묶을 것이 없다
         - host_audit_model.hosts | length > 0
         - _host_audit_xlsx_failed_hosts | default([]) | length == 0
 

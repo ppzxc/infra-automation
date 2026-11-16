@@ -322,7 +322,7 @@ def test_mail_is_not_sent_in_check_mode_or_without_a_kept_archive():
 
 
 def test_resend_checks_the_hash_against_the_archived_summary_before_sending():
-    resend = _tasks("resend.yml")
+    resend = list(_flatten(_tasks("resend.yml")))  # the download, check and mail sit in one block (cleanup in always)
     names = [t.get("name", "") for t in resend]
     check = names.index(next(n for n in names if "[AUD-626]" in n))
     mail = next(i for i, t in enumerate(resend) if t.get("ansible.builtin.include_tasks") == "mail.yml")

@@ -31,13 +31,14 @@
          and (host_audit_baseline_history.state | default('failed')) != 'failed'
          and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0
          and not (_pointer_failed | bool) }}
-    _xlsx_failed: "{{ (_host_audit_xlsx_failed_hosts | default([]) | length > 0) or (_host_audit_xlsx_zip_failed | default(false)) }}"
+    _xlsx_hosts_failed: "{{ _host_audit_xlsx_failed_hosts | default([]) | length > 0 }}"
+    _xlsx_failed: "{{ (_xlsx_hosts_failed | bool) or (_host_audit_xlsx_zip_failed | default(false)) }}"
     _mail_sent: >-
       {{ (_host_audit_mail_plan.send | default(false) | bool) and (host_audit_mail_outcome.sent | default(false) | bool) }}
     _reason: >-
       {{ {'remove': false, 'reason': 'check 모드'} if ansible_check_mode
          else ({'remove': false, 'reason': '경로 검증 실패(이번 실행 디렉터리가 출력 상위 경로 바로 아래가 아님)'} if not (_path_ok | bool)
-         else ({'remove': false, 'reason': (('Remediation Plan xlsx 쓰기 실패와 원본 보관 미완료 - 두 실패 메시지가 이 디렉터리를 가리킴' if _host_audit_xlsx_failed_hosts | default([]) | length > 0 else 'xlsx zip 쓰기 실패와 원본 보관 미완료 - 두 실패 메시지가 이 디렉터리를 가리킴') if not (_kept_in_bucket | bool) and (host_audit_storage_enabled | bool) else ('Remediation Plan xlsx 쓰기 실패 - 실패 메시지가 이 디렉터리를 가리킴' if _host_audit_xlsx_failed_hosts | default([]) | length > 0 else 'xlsx zip 쓰기 실패 - 실패 메시지가 이 디렉터리를 가리킴'))} if _xlsx_failed | bool
+         else ({'remove': false, 'reason': (('Remediation Plan xlsx 쓰기 실패와 원본 보관 미완료 - 두 실패 메시지가 이 디렉터리를 가리킴' if _xlsx_hosts_failed | bool else 'xlsx zip 쓰기 실패와 원본 보관 미완료 - 두 실패 메시지가 이 디렉터리를 가리킴') if not (_kept_in_bucket | bool) and (host_audit_storage_enabled | bool) else ('Remediation Plan xlsx 쓰기 실패 - 실패 메시지가 이 디렉터리를 가리킴' if _xlsx_hosts_failed | bool else 'xlsx zip 쓰기 실패 - 실패 메시지가 이 디렉터리를 가리킴'))} if _xlsx_failed | bool
          else ({'remove': true, 'reason': '원본이 버킷에 보관됨'} if _kept_in_bucket | bool
          else ({'remove': true, 'reason': '보관 꺼짐, 메일 발송 성공'} if (not (host_audit_storage_enabled | bool)) and (_mail_sent | bool)
          else ({'remove': false, 'reason': '보관 꺼짐, 메일 실패 또는 미발송 - 러너 사본이 유일함'} if not (host_audit_storage_enabled | bool)

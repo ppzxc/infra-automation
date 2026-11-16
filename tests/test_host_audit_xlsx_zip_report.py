@@ -383,6 +383,7 @@ def test_resend_stops_without_sending_when_the_zip_hash_differs(tmp_path, smtp, 
     res = _resend(tmp_path, smtp, bucket, served_zip=b"PK-tampered")  # AUD-633
     assert res.returncode != 0 and smtp.messages == []
     assert "받은 xlsx zip의 SHA-256" in _text(res)
+    assert not list((tmp_path / "out").iterdir())  # a stopped resend leaves no downloaded file on the runner
 
 
 def test_resend_stops_without_sending_when_the_recorded_zip_is_missing_from_the_bucket(tmp_path, smtp, bucket):
