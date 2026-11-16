@@ -8,3 +8,4 @@ pytest-xdist==3.8.0
 pytest-timeout>=2.4,<3
 psutil==7.1.0
 PyYAML==6.0.3
+openpyxl==3.1.5  # 테스트 전용: Remediation Plan xlsx를 다시 열어 확인한다(러너 이미지에는 넣지 않음)
