@@ -550,6 +550,7 @@ U-28:
         firewalld가 없는 CentOS 6/7(iptables): 관리 접속 허용 규칙을 먼저 넣고 INPUT 기본 정책을 DROP으로 한 뒤 service iptables save
         RHEL 8 이상은 TCP Wrapper(hosts.deny)가 적용되지 않으므로 firewalld나 nftables 규칙으로 제한한다
       debian: |
+        ufw가 없으면 apt install ufw (Debian 12는 기본 설치가 아니며 nftables나 iptables-persistent를 쓸 수도 있다)
         ufw status numbered 로 현재 설정 확인
         ufw default deny incoming 과 허용 규칙(관리 접속 포함): ufw allow from <IP> to any port <포트>
         규칙을 만든 뒤 ufw enable (비활성 상태면 켜야 점검에 통과하며, 관리 접속 규칙이 없으면 접속이 끊김)
@@ -1140,7 +1141,7 @@ U-60:
         /etc/snmp/snmpd.conf의 com2sec(IPv6는 com2sec6) 줄(com2sec notConfigUser <수집 서버 대역> <새 값>)에서 community 값을 변경(source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
       debian: |
-        /etc/snmp/snmpd.conf에 있는 rocommunity, rwcommunity와 IPv6용 rocommunity6, rwcommunity6 줄을 모두 rocommunity <새 값> <수집 서버 대역> 형태로 바꾼다(rwcommunity를 새로 만들지 않고, source를 default로 두면 U-61이 취약)
+        /etc/snmp/snmpd.conf에 있는 rocommunity, rwcommunity와 IPv6용 rocommunity6, rwcommunity6 줄을 모두 rocommunity <새 값> <수집 서버 대역> 형태로 바꾼다(기존 -V <view> 뒤쪽 옵션은 그대로 둔다. rwcommunity를 새로 만들지 않고, source를 default로 두면 U-61이 취약)
         systemctl restart snmpd
   remediation_impact:
     level: 1
@@ -1256,7 +1257,7 @@ U-66:
   threat: 로깅이 설정되지 않으면 사고 원인 규명이 어렵고 법적 대응에 쓸 증거로도 부족하다.
   guide_page: 166
   remediation:
-    summary: '로그 기록 정책을 세우고 /etc/rsyslog.conf(또는 /etc/rsyslog.d/ 아래 파일)에 정책대로 규칙을 둔 뒤 systemctl restart rsyslog로 적용한다(syslog-ng는 같은 auth·authpriv 규칙을 그 설정에). 예: authpriv.*는 /var/log/secure 또는 auth.log, *.info는 /var/log/messages, mail.*과 cron.*은 각 로그 파일.'
+    summary: '로그 기록 정책을 세우고 syslog 데몬(rsyslog 등, 없으면 설치·활성화)의 /etc/rsyslog.conf 또는 /etc/rsyslog.d/ 아래 파일에 정책대로 규칙을 둔 뒤 systemctl restart rsyslog로 적용한다(syslog-ng는 같은 auth·authpriv 규칙을 그 설정에). 예: authpriv.*는 /var/log/secure 또는 auth.log, mail.*과 cron.*은 각 로그 파일.'
   remediation_impact:
     level: 2
     reason: 가이드가 제시한 로그를 모두 켜면 시스템 성능과 저장 용량에 부담이 생길 수 있어 운영 환경에 맞게 적용해야 한다.
