@@ -7,6 +7,7 @@
 # level은 1~3, reason은 그 근거이며 초안이다(PR에서 확정). 위험도·우선순위·시급성은 severity에서 계산하므로 저장하지 않는다.
 # remediation은 가이드의 조치 방법을 요약한 것이고 check(우리 probe)와 범위가 겹치지 않는 부분이 있을 수 있다
 # (예: 가이드는 xinetd.d·systemd 설정 파일까지 다룬다). 조치 뒤의 판정은 다음 실행에서 probe가 확인한다.
+# purpose·threat·check·steps·guide_page는 이어지는 티켓(항목 단위 조치 안내 부록, Remediation Plan xlsx)이 쓴다.
 U-01:
   title: root 계정 원격 접속 제한
   severity: 상
@@ -317,7 +318,7 @@ U-16:
   threat: 비인가자가 /etc/passwd를 변조해 쉘을 바꾸거나 계정을 추가·삭제해 root를 포함한 권한을 얻을 수 있다.
   guide_page: 41
   remediation:
-    summary: chown root /etc/passwd와 chmod 644 /etc/passwd로 소유자를 root, 권한을 644 이하로 맞춘다.
+    summary: chown root /etc/passwd와 chmod 644 /etc/passwd로 소유자를 root, 권한을 644 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -353,7 +354,7 @@ U-18:
   threat: shadow에 담긴 비밀번호 해시가 노출되면 크래킹으로 비밀번호를 탈취당할 수 있다.
   guide_page: 44
   remediation:
-    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다.
+    summary: chown root /etc/shadow 와 chmod 400 /etc/shadow 로 소유자를 root, 권한을 400 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -371,7 +372,7 @@ U-19:
   threat: 비인가자가 hosts에 악의적 매핑을 등록하면 정상 DNS를 우회해 악성 사이트로 유도하는 파밍에 악용된다.
   guide_page: 45
   remediation:
-    summary: chown root /etc/hosts 와 chmod 644 /etc/hosts 로 소유자를 root, 권한을 644 이하로 맞춘다.
+    summary: chown root /etc/hosts 와 chmod 644 /etc/hosts 로 소유자를 root, 권한을 644 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다.
   remediation_impact:
     level: 2
     reason: hosts에 시스템 정보가 설정돼 있으면 이 파일을 참조하는 서비스가 영향받을 수 있다고 가이드가 서술한다.
@@ -407,7 +408,7 @@ U-21:
   threat: 설정이 노출·변조되면 로그 저장 위치가 드러나고, 로그를 끄거나 과다 기록시켜 시스템 과부하를 유발할 수 있다.
   guide_page: 48
   remediation:
-    summary: chown root /etc/syslog.conf 또는 /etc/rsyslog.conf 로 소유자를 root(또는 bin, sys)로, chmod 640 으로 권한을 640 이하로 맞춘다.
+    summary: chown root /etc/syslog.conf 또는 /etc/rsyslog.conf 로 소유자를 root(또는 bin, sys)로, chmod 640 으로 권한을 640 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -425,7 +426,7 @@ U-22:
   threat: 접근 권한이 부적절하면 포트 번호를 바꿔 정상 서비스를 막거나 허용되지 않은 포트로 악성 서비스를 실행할 수 있다.
   guide_page: 49
   remediation:
-    summary: chown root /etc/services 와 chmod 644 /etc/services 로 소유자를 root(또는 bin, sys), 권한을 644 이하로 맞춘다.
+    summary: chown root /etc/services 와 chmod 644 /etc/services 로 소유자를 root(또는 bin, sys), 권한을 644 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -533,13 +534,13 @@ U-28:
   threat: IP와 포트 제한이 없으면 Telnet, FTP 같은 취약 서비스를 통한 불법 접근과 침해사고가 발생할 수 있다.
   guide_page: 56
   remediation:
-    summary: '방화벽(firewalld, ufw, iptables, nftables)이나 TCP Wrapper로 허용 IP와 포트를 등록한다. 방화벽이 꺼져 있으면 관리 접속 허용 규칙을 먼저 넣고 켠다. TCP Wrapper는 /etc/hosts.deny 에 ALL:ALL 을 넣고 /etc/hosts.allow 에 서비스와 허용 IP(예 sshd : 허용IP)를 적으며, 두 파일이 없으면 모든 접근이 허용된다.'
+    summary: 방화벽(firewalld, ufw, iptables, nftables)으로 허용 IP와 포트를 등록한다. 방화벽이 꺼져 있으면 관리 접속 허용 규칙을 먼저 넣고 켠다. TCP Wrapper(/etc/hosts.deny에 ALL:ALL, /etc/hosts.allow에 허용 IP)는 RHEL 8 이상에서 libwrap이 없어 적용되지 않는다.
     steps:
       rhel: |
-        firewalld가 꺼져 있으면 먼저 허용 규칙(관리 접속 포함)을 만든 뒤 systemctl enable --now firewalld 로 켠다(접속이 끊길 수 있음)
         firewall-cmd --list-all 로 현재 설정과 기본 zone target 확인(ACCEPT면 안 됨)
-        허용 규칙 추가: firewall-cmd --permanent --add-rich-rule (source address, port protocol, port, accept)
-        firewall-cmd --reload 로 적용
+        target이 ACCEPT면: firewall-cmd --permanent --zone=<zone> --set-target=default 후 firewall-cmd --reload
+        허용 규칙 추가: firewall-cmd --permanent --add-rich-rule (source address, port protocol, port, accept) 후 --reload
+        firewalld가 꺼져 있으면 관리 접속 포트를 firewall-offline-cmd 로 먼저 허용한 뒤 systemctl enable --now firewalld (접속이 끊길 수 있음)
       debian: |
         ufw status numbered 로 현재 설정 확인
         ufw default deny incoming 과 허용 규칙(관리 접속 포함): ufw allow from <IP> to any port <포트>
@@ -562,7 +563,7 @@ U-29:
   threat: 권한이 부적절하면 비인가자가 파일을 수정해 허가된 사용자의 서비스를 방해하거나 호스트 정보를 얻을 수 있다.
   guide_page: 61
   remediation:
-    summary: /etc/hosts.lpd 가 있으면 제거하고, 불가피하게 쓰면 chown root 와 chmod 600 으로 소유자를 root, 권한을 600 이하로 맞춘다.
+    summary: /etc/hosts.lpd 가 있으면 제거하고, 불가피하게 쓰면 chown root 와 chmod 600 으로 소유자를 root, 권한을 600 이하로 맞춘다. 이미 그보다 엄격하면 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.
@@ -1188,7 +1189,7 @@ U-63:
   threat: sudo 접근이 통제되지 않으면 비인가자가 root 권한으로 허가되지 않은 명령을 실행해 악성 코드 실행·데이터 유출을 시도할 수 있다.
   guide_page: 159
   remediation:
-    summary: /etc/sudoers 소유자를 root로, 권한을 640 이하로 바꾼다(chown root /etc/sudoers, chmod 640 /etc/sudoers).
+    summary: /etc/sudoers의 소유자를 root로 하고 권한이 640을 넘으면 chmod 440(또는 640 이하)으로 낮춘다(chown root /etc/sudoers). 이미 640 이하면 바꾸지 않는다.
   remediation_impact:
     level: 1
     reason: 가이드가 일반적인 경우 영향 없음으로 서술한다.

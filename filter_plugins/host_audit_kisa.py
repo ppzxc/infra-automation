@@ -107,9 +107,14 @@ def _blank(value):
     return not isinstance(value, str) or not value.strip()
 
 
-def _untrimmed(value):
-    """Blank text, or text with surrounding whitespace (it would show as a stray gap in report cells)."""
-    return _blank(value) or value != value.strip()
+def _untrimmed(value, block=False):
+    """Blank text, or text with surrounding whitespace (it would show as a stray gap in report cells).
+
+    ``block`` is for YAML ``|`` blocks (steps), which always end with a newline: only leading space is refused.
+    """
+    if _blank(value):
+        return True
+    return value != value.lstrip() if block else value != value.strip()
 
 
 def _validate_remediation(code, meta, path):
@@ -133,7 +138,7 @@ def _validate_remediation(code, meta, path):
         fail('remediation.summary', 'must be one line of at most %d characters' % SUMMARY_MAX)
     steps = rem.get('steps')
     if steps is not None and (not isinstance(steps, dict) or not steps or set(steps) - set(STEP_FAMILIES)
-                              or any(_blank(v) or v != v.lstrip() for v in steps.values())):
+                              or any(_untrimmed(v, block=True) for v in steps.values())):
         fail('remediation.steps', 'must map rhel/debian to non-blank text')
     for field in ('remediation_impact', 'remediation_effort'):
         part = meta[field]
@@ -220,7 +225,11 @@ def urgency_of(severity):
 
 
 def remediation_view(code, items=None):
-    """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values."""
+    """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values.
+
+    ``risk`` and ``urgency`` are not shown in the body table; the Remediation Plan xlsx (a later Spec #488 ticket)
+    has columns for them and reads them from this one view, so they are computed and tested here once.
+    """
     meta = (ITEMS if items is None else items).get(code.split(':', 1)[-1])
     if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
         return {'remediation_summary': '', 'impact_level': '', 'effort_level': '', 'risk': '', 'priority': '',
@@ -239,9 +248,7 @@ def order_findings(findings, items=None):
     """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
     low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable."""
     def key(finding):
-        # A finding built by the section already carries the three values; look them up only when it does not.
-        view = finding if {'priority', 'impact_level', 'effort_level'} <= set(finding) else remediation_view(
-            finding['code'], items)  # unknown codes (blank values) sort last
+        view = remediation_view(finding['code'], items)  # unknown codes (blank values) sort last
         return (view['priority'] or 9, view['impact_level'] or 9, view['effort_level'] or 9,
                 VERDICTS.index(finding['verdict']), finding['code'])
 
