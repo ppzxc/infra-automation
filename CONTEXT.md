@@ -72,6 +72,10 @@ _Avoid_: impact, 영향도 (unqualified)
 How hard a Configuration Vulnerability is to fix — one setting changed versus a package replaced, a structure rebuilt or another team consulted. Set once per checklist item, the same for every host. The "환경성" column of the implementation plan.
 _Avoid_: difficulty, 환경성 (outside the plan's column name)
 
+**Remediation Plan**:
+The per-host workbook a Host Audit run hands to the people who fix things: one row for each checklist item that is not 양호 on that host, carrying its verdict and evidence, how it is checked, how to fix it on that host's OS family, and its severity, Remediation Impact and Remediation Effort with the priority and urgency derived from them. One per host per run, kept with the run's report; the columns for who does the work and what came of it are left for people to fill. The "이행계획서" of the implementation plan.
+_Avoid_: xlsx report, 조치계획서, action plan
+
 **Package Vulnerability**:
 An installed package version that is affected by a known CVE or vendor security advisory.
 _Avoid_: vulnerability (unqualified), CVE (when meaning the finding on a host)
