@@ -12,7 +12,7 @@
 |---|---|
 | 수신 | 스위치와 같은 syslog-ng 컨테이너가 받는다. 수신 허용 목록에 방화벽 출발지를 등록해야 한다(2절 HA 멤버 구성). |
 | 파일 보관 | `/var/log/remote/fortigate/<송신 장비>/<날짜>.log`. **스위치 파일(`/var/log/remote/<송신 장비>/`)보다 한 단계 깊은 경로**에 써서 스위치용 수집 경로(`/var/log/remote/*/*.log`)가 방화벽 줄을 한 번 더 읽어 `system_logs`에 중복 수집하지 않게 한다. 호스트 logrotate 보관 기간은 스위치와 같다. |
-| 중앙 수집 | 호스트 KV `otel_extra_logs`에 `path=/var/log/remote/fortigate/*/*.log`, `stream=security_logs`, `service=fortigate-syslog`를 더한다. 절차와 KV 주의는 스위치 런북 2절과 같다(PATCH 불가, 전체를 읽어 합쳐 `cas`, 값 출력 금지). 코드 변경은 필요 없다. |
+| 중앙 수집 | Asset 문서 `inventory/assets/<관리번호>`의 `agents.otel.extra_logs`에 `path=/var/log/remote/fortigate/*/*.log`, `stream=security_logs`, `service=fortigate-syslog`를 더한다. 값은 `scripts/openbao_docs.py put --merge`로 쓴다(스키마 검증과 `cas`가 도구에 있다, [openbao_docs.md](../openbao_docs.md)). 값 출력 금지. 코드 변경은 필요 없다. |
 | 분류·보관 | `security_logs`. 스위치(`system_logs`, `switch-syslog`)와 서비스 이름으로 구분한다. 보관은 서버 전역 365일(ISMS 로그 1년). |
 | 중앙 변환 | 추가 경로에는 파서가 적용되지 않는다(ADR-0006 §2.3). 원문은 그대로 저장되고 `security_semantics` 함수는 이 레코드를 건드리지 않는다. 대신 같은 보안 로그 파이프라인의 다음 함수 `fortigate_semantics`가 `fortigate-syslog` 레코드에만 장비(`device_name`, 관리번호 `device_id`)·유형·하위 유형·동작·출발지·사용자·정책 식별자 필드를 **추가**한다(필드 표는 [OpenObserve 구성](../openobserve_config.md), ADR-0008, Spec #282 / Ticket-2). 해석할 수 없는 줄은 그대로 통과한다. |
 

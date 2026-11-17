@@ -106,3 +106,59 @@ def test_public_docs_have_no_real_addresses_or_clock_times():
         assert not re.search(r"\b\d{1,2}:\d{2}\b", text), f"{path.name}: 시각"
         assert not re.search(r"\bns\d{4}\b", text), f"{path.name}: 관리번호"
         assert not re.search(r"https?://|\b\d{1,2}\s?(KST|UTC)\b|/\d{1,2}\b(?=[\s`)])", text), f"{path.name}: URL·시각·CIDR"
+
+
+# --- 전환 PR 문서(Spec #511 / Ticket-20, #531) -------------------------------------------------------------------------
+
+INTEGRATION = ROOT / "docs" / "openbao_integration.md"
+SEMAPHORE = ROOT / "docs" / "semaphore-setup.md"
+AGENTS = ROOT / "AGENTS.md"
+
+
+def test_integration_doc_follows_the_agreed_table_of_contents_and_copies_no_key_table():
+    text = _read(INTEGRATION)
+    heads = re.findall(r"^## (\d+)\. (.+)$", text, re.M)
+    assert [h[1].split()[0] for h in heads] == ["개요", "골격", "저장", "접속", "인증과", "실패", "새", "관련"]
+    assert "schemas/openbao/index.yml" in text and "tofu/openbao/policies" in text
+    for stale in ("VAULT_MOUNT", "OPENBAO_", "infra/prod/host", "Hybrid Fallback", "secret/data", "hosts/<ns>"):
+        assert stale not in text, stale
+    assert "required_keys" not in text and "| 키 |" not in text
+
+
+def test_semaphore_setup_has_one_environment_per_family_and_no_token_or_mount_trace():
+    text = _read(SEMAPHORE)
+    for family in ("provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit", "network_backup",
+                   "github_webhook_watch", "periodic_check"):
+        assert re.search(rf"^\| `{family}` \|", text, re.M), family
+    for old in ("VAULT_TOKEN", "VAULT_MOUNT", "OPENBAO_HOSTS_PREFIX", "infra/prod/host"):
+        assert old not in text, old
+
+
+def test_the_old_adrs_carry_a_superseded_by_adr_0014_line():
+    for name in ("0006-host-agents-otelcol-resticprofile", "0009-host-audit-read-only-inspection",
+                 "0012-container-app-telemetry-via-host-otelcol"):
+        text = _read(ROOT / "docs" / "adr" / f"{name}.md")
+        assert re.search(r"\(개정[^)]*#531\)[^\n]*ADR-0014", text), name
+
+
+def test_index_and_readme_describe_the_new_integration_doc():
+    assert "동적 시크릿" not in _read(INDEX)
+    assert "VAULT_TOKEN" not in _read(ROOT / "README.md")
+
+
+def test_agents_rules_state_the_agent_session_and_do_not_call_the_reader_a_hashicorp_lookup_plugin():
+    text = _read(AGENTS)
+    section4 = text.split("## 4.", 1)[1].split("\n## ", 1)[0]
+    assert "에이전트 세션" in section4 and "`inventory/`" in section4 and "계열 템플릿" in section4
+    assert "openbao_integration.md" in section4
+    assert "Vault lookup 플러그인" not in text
+
+
+def test_no_current_doc_describes_the_old_openbao_layout():
+    """옛 구조 설명이 남은 현재 동작 문서가 없다(ADR·research·prototypes와 전환 런북은 당시 기록이라 제외)."""
+    old = re.compile(r"OpenBao `hosts/|OpenBao `agents/(?:openobserve|rustfs)|`OPENBAO_[A-Z_]*PREFIX`|`infra/prod/host`의 `secret`")
+    for path in (ROOT / "docs").rglob("*.md"):
+        rel = path.relative_to(ROOT / "docs").parts
+        if rel[0] in ("adr", "research", "prototypes") or path.name in ("openbao-cutover.md",):
+            continue
+        assert not old.search(_read(path)), path

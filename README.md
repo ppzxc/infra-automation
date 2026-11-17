@@ -51,8 +51,8 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 ### 1. 플레이북 실행
 #### Option A: Semaphore Web UI를 통한 실행 (권장)
 - Overseer 컨트롤 플레인 브라우저 접속: `http://<컨트롤플레인IP>:3000` (초기 계정: `admin` / `semaphoreadmin`)
-- UI에서 **Key Store** (OpenBao 연동) 및 **Environment** (`VAULT_ADDR` / `VAULT_TOKEN`)를 통해 중앙 집중식 시크릿이 자동 주입됩니다.
-- 상세 연동 가이드: [OpenBao & Semaphore UI Secret Integration](docs/openbao_integration.md)
+- UI에서 **Key Store** (OpenBao 연동) 와 계열별 **Environment**(`VAULT_ADDR`, AppRole `VAULT_ROLE_ID`/`VAULT_SECRET_ID`)를 통해 OpenBao 값이 실행 때 읽힙니다. 평문 토큰은 쓰지 않습니다.
+- 상세 연동 가이드: [OpenBao 구조와 읽기 지점](docs/openbao_integration.md)
 - UI에서 **Playbook Template** 선택 후 원클릭 실행 및 실시간 모니터링
 
 #### Option B: CLI 스크립트 직접 실행 (개발 및 일회성 검증)

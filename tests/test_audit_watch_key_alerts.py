@@ -385,7 +385,7 @@ def test_each_runbook_entry_opens_with_the_broad_signature_limit_and_the_account
 
 def test_the_spec_and_the_variable_comment_state_the_limit_and_the_recommended_procedure():
     spec = (ROOT_DIR / "docs" / "openobserve_config.md").read_text(encoding="utf-8")
-    assert "권고 절차" in spec and "alert_audit_provisioning_accounts" in spec
+    assert "권고 절차" in spec and "o2c_audit_provisioning_accounts" in spec and "alert_audit_provisioning_accounts" not in spec
     defaults = (ROOT_DIR / "roles" / "openobserve_config" / "defaults" / "main.yml").read_text(encoding="utf-8")
     comment = defaults.split("o2c_audit_provisioning_accounts:", 1)[0].rsplit("o2c_audit_secret_metadata_syscalls", 1)[1]
     assert "한계" in comment and "채워" in comment

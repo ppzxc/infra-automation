@@ -2,7 +2,7 @@
 
 > Semaphore 템플릿 **Host Agents — Deploy All**가 대상 호스트에 설치·구성하는 otelcol-contrib, restic, resticprofile의 상세 내역이다.
 > 요약본은 [host-agents-deploy-inventory-simple.md](host-agents-deploy-inventory-simple.md), 설계 근거는 [ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md)·[ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md), 태스크 명세는 [monitoring.md](monitoring.md)·[backup.md](backup.md)를 본다.
-> 본 문서의 값은 Git 기본값(`roles/*/defaults`, `roles/monitoring/vars`) 기준이며, 호스트별 OpenBao KV로 추가·제외된 항목은 반영하지 않는다.
+> 본 문서의 값은 Git 기본값(`roles/*/defaults`, `roles/monitoring/vars`) 기준이며, 호스트별 OpenBao Asset 문서(`agents` 절)로 추가·제외된 항목은 반영하지 않는다.
 
 ---
 
@@ -119,8 +119,8 @@
 - **없는 파일은 오류가 아니다.** OS 계열이 다르거나 해당 서비스가 없으면 그냥 매칭되지 않는다. 그래서 목록은 RHEL과 Debian의 합집합으로 둔다.
 - **배포 이후 새로 쓰인 줄부터 수집한다**(`start_at: end`). 기존 내용은 소급하지 않는다. 읽은 위치는 `/var/lib/otelcol/storage`에 저장되므로 재시작해도 중복되거나 빠지지 않는다.
 - **원문 본문은 바꾸지 않는다.** 파서는 시각, 프로세스명, PID, severity, audit 필드만 attributes에 올린다. 포맷이 맞지 않는 줄도 버리지 않고 `log.parse_error=true`를 붙여 보낸다(파싱에 성공한 줄은 `false`).
-- **security_logs 경로 6종은 호스트 KV `otel_exclude_logs`로 제외할 수 없다.** 시도하면 해당 호스트는 변경 전에 실패한다. 나머지 system_logs 경로는 제외할 수 있다.
-- **호스트별 추가 경로**: KV `otel_extra_logs`로 추가하며, 스트림 기본값은 `app_logs`다. 추가 경로에는 파서를 적용하지 않는다.
+- **security_logs 경로 6종은 Asset 문서 `agents.otel.exclude_logs`로 제외할 수 없다.** 시도하면 해당 호스트는 변경 전에 실패한다. 나머지 system_logs 경로는 제외할 수 있다.
+- **호스트별 추가 경로**: Asset 문서 `agents.otel.extra_logs`로 추가하며, 스트림 기본값은 `app_logs`다. 추가 경로에는 파서를 적용하지 않는다.
 
 **고정 수신기**
 
@@ -128,15 +128,15 @@
 |---|---|---|---|---|
 | `filelog/backup_logs` | 항상 | backup_logs | backup | `/var/log/host-agents/backup.jsonl`(백업 결과, 4.4 참고). JSON 필드를 attributes로 파싱 |
 | `journald` | rsyslog가 **없는** 호스트만. legacy_el6은 항상 끔 | system_logs | journald | journal 전체. `PRIORITY`를 severity로 매핑 |
-| `filelog/containers` | KV `otel_container_logs: true`인 modern 호스트만 (기본 꺼짐) | app_logs | `<프로젝트>-<서비스>`(compose 라벨, 없으면 `container`) | docker `json-file` 파일(`/var/lib/docker/containers/*/*-json.log`). 라벨은 줄의 `attrs`로, 컨테이너 ID는 `container.id`로, stdout/stderr는 `log.iostream`으로 싣고 16KiB로 쪼개진 줄은 합친다. 본문은 줄 끝 개행만 뗀다. Docker 소켓 불필요 |
-| `otlp` | 기본 **비활성**. KV `otel_app_telemetry: true`인 호스트만(ADR-0012) | 트레이스·메트릭(로그 파이프라인에는 넣지 않음) | 앱이 지정 | HTTP만(gRPC 없음), 모든 주소의 `otel_otlp_http_port`에서 받음. 외부 노출은 방화벽이 막음 |
+| `filelog/containers` | Asset 문서 `agents.otel.container_logs: true`인 modern 호스트만 (기본 꺼짐) | app_logs | `<프로젝트>-<서비스>`(compose 라벨, 없으면 `container`) | docker `json-file` 파일(`/var/lib/docker/containers/*/*-json.log`). 라벨은 줄의 `attrs`로, 컨테이너 ID는 `container.id`로, stdout/stderr는 `log.iostream`으로 싣고 16KiB로 쪼개진 줄은 합친다. 본문은 줄 끝 개행만 뗀다. Docker 소켓 불필요 |
+| `otlp` | 기본 **비활성**. Asset 문서 `agents.otel.app_telemetry: true`인 호스트만(ADR-0012) | 트레이스·메트릭(로그 파이프라인에는 넣지 않음) | 앱이 지정 | HTTP만(gRPC 없음), 모든 주소의 `otel_otlp_http_port`에서 받음. 외부 노출은 방화벽이 막음 |
 
 ### 3.4 기본 수집 메트릭
 
 | 수신기 | 조건 | 주기 | service.name | 항목 |
 |---|---|---|---|---|
 | `hostmetrics` | 항상 | 60s | host-metrics | cpu, memory, disk, filesystem, load, network, paging, processes |
-| `docker_stats` | KV `otel_docker_metrics: true`인 호스트만 | 60s | docker | 컨테이너별 CPU·메모리·네트워크·블록 IO (`unix:///var/run/docker.sock`) |
+| `docker_stats` | Asset 문서 `agents.otel.docker_metrics: true`인 호스트만 | 60s | docker | 컨테이너별 CPU·메모리·네트워크·블록 IO (`unix:///var/run/docker.sock`) |
 
 ### 3.5 모든 로그·메트릭에 붙는 리소스 속성
 
@@ -144,9 +144,9 @@
 |---|---|---|
 | `host.name` | Inventory Hostname (예: `ns0331`) | OS hostname이 아님 |
 | `host.id` | `/etc/machine-id` | 없으면(CentOS 6) 생략하고 경고 |
-| `host.ip` | 인벤토리 `ip` → KV `ip` → KV `public_ip` | 모두 없으면 생략하고 경고 |
+| `host.ip` | `ip` 팩트(인벤토리 `ip`, 없으면 ssh Endpoint 주소) | 모두 없으면 생략하고 경고 |
 | `host.arch`, `os.type`, `os.name`, `os.version`, `os.description` | OS 프로브 | |
-| `deployment.environment.name` | `host_agents_environment` (인벤토리 또는 KV) | **필수**. `production`·`staging`·`development`·`test` 중 하나가 아니면 실패 |
+| `deployment.environment.name` | `host_agents_environment` (역할 기본값) | **필수**. `production`·`staging`·`development`·`test` 중 하나가 아니면 실패 |
 
 ### 3.6 전송 (OpenObserve)
 
@@ -190,7 +190,7 @@
 
 **백업 경로 (`source`)**
 
-| 경로 | 구분 | 호스트 KV로 제외 | 포함 내용 |
+| 경로 | 구분 | Asset 문서로 제외 | 포함 내용 |
 |---|---|---|---|
 | `/etc` | 필수 (ISMS 2.9.3) | 불가 | 시스템·서비스 설정 전체: 계정(`passwd`, `shadow`, `group`), sudoers, sshd, 네트워크, 방화벽, systemd 유닛, cron(`/etc/cron.d`, `/etc/crontab`), logrotate, Host Agents 설정(`/etc/otelcol*`, `/etc/restic/env`·`profiles.yaml`) |
 | `/var/spool/cron` | 필수 | 불가 | 사용자별 crontab (`crontab -e`로 등록한 작업) |
@@ -209,7 +209,7 @@
 | `*.tmp`, `*.swp` | 임시·편집기 스왑 파일 |
 | `/etc/restic/password` | repo 비밀번호를 repo 안에 두지 않음 |
 | `exclude-caches: true` | `CACHEDIR.TAG`가 있는 디렉터리 |
-| 호스트 KV `backup_exclude_paths` | 호스트별 추가 제외. 필수 경로나 그 상위 경로는 지정할 수 없음(지정 시 실패) |
+| Asset 문서 `agents.backup.exclude_paths` | 호스트별 추가 제외. 필수 경로나 그 상위 경로는 지정할 수 없음(지정 시 실패) |
 
 > 참고: `/etc/restic/env`(RustFS 호스트 키)와 `/etc/otelcol-contrib/secrets.env`는 `/etc`에 속하므로 백업에 포함된다. repo는 `/etc/restic/password`로 암호화된다.
 
@@ -223,7 +223,7 @@
 | 스케줄 | 매일 **02:00~03:59** 중 하나. `inventory_hostname`을 시드로 분을 고정하므로 호스트마다 다르고 실행마다 같음 |
 | 실행 명령 | `resticprofile -f yaml -c /etc/restic/profiles.yaml -n default unlock; ... backup` |
 | 잠금 대기 | `retry-lock: 30m` |
-| 사전 훅 | `host-agents-backup-event start`, 이어서 KV `backup_pre_hooks`(예: DB 덤프). 훅이 쓸 수 있는 추가 경로는 `/var/backups`(systemd 샌드박스 허용) |
+| 사전 훅 | `host-agents-backup-event start`, 이어서 Asset 문서 `agents.backup.pre_hooks`(예: DB 덤프). 훅이 쓸 수 있는 추가 경로는 `/var/backups`(systemd 샌드박스 허용) |
 | 사후 훅 | `host-agents-backup-event finish <host>` (성공·실패 모두 실행) |
 | 보관 정책 (참고) | Deploy가 아니라 **Host Agents — Repo Maintenance** 템플릿이 컨트롤러에서 `forget --prune` 실행: daily 7 / weekly 4 / monthly 12. 매월 첫째 일요일에 `check --read-data-subset=10%` |
 
