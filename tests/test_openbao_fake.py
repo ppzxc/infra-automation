@@ -70,3 +70,13 @@ def test_index_and_schema_checks_are_off_by_default_and_switchable(fake):
         _get(f, "/v1/m/data/ok/1")
         _get(f, "/v1/m/data/other")
         assert f.violations == [("m", "other")] and seen == [("m", "ok/1")]
+
+
+def test_list_and_metadata_and_raw_routes(fake):
+    fake.set("m1", "a/b", {"k": "v"}, updated_time="2026-01-02T03:04:05.123456789Z").set("m1", "c", {})
+    assert _get(fake, "/v1/m1/metadata/?list=true")[1]["data"]["keys"] == ["a/", "c"]
+    assert _get(fake, "/v1/m1/metadata/a?list=true")[1]["data"]["keys"] == ["b"]
+    assert _get(fake, "/v1/m1/metadata/a/b")[1]["data"]["updated_time"] == "2026-01-02T03:04:05.123456789Z"
+    assert _get(fake, "/v1/m1/metadata/zzz")[0] == 404
+    fake.raw("GET", "sys/mounts", {"data": {"m1/": {}}})
+    assert _get(fake, "/v1/sys/mounts")[1]["data"] == {"m1/": {}}
