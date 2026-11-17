@@ -29,6 +29,7 @@ class Request:
     doc: str | None
     token: str | None
     namespace: str | None
+    body: dict | None = None  # POST 본문(쓰기·로그인)
 
 
 class FakeOpenBao:
@@ -57,30 +58,37 @@ class FakeOpenBao:
 
             def do_POST(self):  # noqa: N802
                 raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                try:
+                    body = json.loads(raw) if raw else None
+                except ValueError:
+                    body = None
                 mount, doc = _split(self.path)
-                outer.requests.append(Request("POST", self.path, mount, doc, self.headers.get("X-Vault-Token"),
-                                              self.headers.get("X-Vault-Namespace")))
-                if mount is not None:
-                    return self._write(mount, doc, raw)
+                ns = self.headers.get("X-Vault-Namespace")
+                outer.requests.append(Request("POST", self.path, mount, doc, self.headers.get("X-Vault-Token"), ns, body))
                 if outer.approle and self.path == "/v1/auth/approle/login":
                     return self._reply(200, {"auth": {"client_token": outer.token or APPROLE_TOKEN}})
-                self._reply(404, {})
-
-            def _write(self, mount, doc, raw):
-                """KV v2 쓰기. `options.cas`가 0이면 문서가 없을 때만 쓴다(없지 않으면 400)."""
-                if (outer.namespace is not None and self.headers.get("X-Vault-Namespace") != outer.namespace) or \
-                        (outer.token is not None and self.headers.get("X-Vault-Token") != outer.token):
+                if mount is None:
+                    return self._reply(404, {})
+                want_token = outer.token or (APPROLE_TOKEN if outer.approle else None)
+                if (outer.namespace is not None and ns != outer.namespace) or \
+                        (want_token is not None and self.headers.get("X-Vault-Token") != want_token):
                     return self._reply(403, {"errors": ["permission denied"]})
-                body = json.loads(raw or b"{}")
-                if body.get("options", {}).get("cas") == 0 and (mount, doc) in outer._docs:
+                # KV v2 쓰기: options.cas가 현재 버전(없으면 0)과 다르면 400이다.
+                status, current = outer._docs.get((mount, doc), (404, None))
+                if status == 403:
+                    return self._reply(403, {"errors": ["permission denied"]})
+                version = ((current or {}).get("data") or {}).get("metadata", {}).get("version", 0)
+                cas = ((body or {}).get("options") or {}).get("cas")
+                if cas is not None and cas != version:
                     return self._reply(400, {"errors": ["check-and-set parameter did not match the current version"]})
-                outer._docs[(mount, doc)] = (200, {"data": {"data": body.get("data", {}), "metadata": {"version": 1}}})
-                self._reply(200, {"data": {"version": 1}})
+                outer._docs[(mount, doc)] = (200, {"data": {"data": (body or {}).get("data"),
+                                                            "metadata": {"version": version + 1}}})
+                self._reply(200, {"data": {"version": version + 1}})
 
             def _list(self, mount, prefix):
                 keys = set()
-                for (m, d) in outer._docs:
-                    if m == mount and (not prefix or d.startswith(prefix + "/")):
+                for (m, d), (status, _) in outer._docs.items():
+                    if m == mount and status == 200 and (not prefix or d.startswith(prefix + "/")):
                         rest = d[len(prefix) + 1:] if prefix else d
                         keys.add(rest.split("/")[0] + "/" if "/" in rest else rest)
                 if not keys:
@@ -88,7 +96,7 @@ class FakeOpenBao:
                 self._reply(200, {"data": {"keys": sorted(keys)}})
 
             def do_GET(self):  # noqa: N802
-                if "list=true" in self.path:
+                if "list=true" in self.path:  # KV v2 목록: GET /v1/<마운트>/metadata/<접두사>?list=true
                     parts = self.path.split("?")[0].split("/")
                     if len(parts) >= 4 and parts[3] == "metadata":
                         return self._list(parts[2], "/".join(parts[4:]).strip("/"))
@@ -114,8 +122,24 @@ class FakeOpenBao:
     def set(self, mount, doc, data):
         if self.schema_check is not None:
             self.schema_check(mount, doc, data)
-        self._docs[(mount, doc)] = (200, {"data": {"data": data, "metadata": {"version": 1}}})
+        status, current = self._docs.get((mount, doc), (404, None))
+        version = ((current or {}).get("data") or {}).get("metadata", {}).get("version", 0) + 1
+        self._docs[(mount, doc)] = (200, {"data": {"data": data, "metadata": {"version": version}}})
         return self
+
+    def soft_delete(self, mount, doc):
+        """KV v2 소프트 삭제: 404를 내지만 버전 카운터는 남는다(404 본문의 metadata.version)."""
+        _, version = self.get(mount, doc)
+        self._docs[(mount, doc)] = (404, {"data": {"data": None, "metadata": {"version": version}}})
+        return self
+
+    def get(self, mount, doc):
+        """저장된 (데이터, 버전). 없으면 None."""
+        status, body = self._docs.get((mount, doc), (404, None))
+        return (body["data"]["data"], body["data"]["metadata"]["version"]) if status == 200 else None
+
+    def writes(self):
+        return [r for r in self.requests if r.method == "POST" and r.doc is not None]
 
     def deny(self, mount, doc):
         self._docs[(mount, doc)] = (403, {"errors": ["permission denied"]})
@@ -131,9 +155,6 @@ class FakeOpenBao:
 
     def logins(self):
         return [r for r in self.requests if r.method == "POST" and r.path == "/v1/auth/approle/login"]
-
-    def writes(self):
-        return [r for r in self.requests if r.method == "POST" and r.mount is not None]
 
     def env(self, token="bao-test-token"):
         env = {"VAULT_ADDR": self.url, "VAULT_TOKEN": token}

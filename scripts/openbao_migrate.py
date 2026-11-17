@@ -102,7 +102,9 @@ class _Builder:
 
     # -- 보조 ---------------------------------------------------------------------------------------------------------
     def err(self, doc, what):
-        self.plan.errors.append("%s\t%s" % (doc, what))
+        line = "%s\t%s" % (doc, what)
+        if line not in self.plan.errors:  # 같은 전역 계정 문서를 참조하는 호스트마다 같은 줄이 쌓이지 않게 한다
+            self.plan.errors.append(line)
 
     def put(self, doc, parts, value, src=None):
         node = self.plan.store.setdefault(doc, {})
@@ -385,13 +387,13 @@ class _Builder:
                 ha.pop(k, None)
         self.finish("agents/host_audit", ha)
         # github
+        if "github_token" in gw or "github_org" in gw:
+            self.put("inventory/services/github", ["url"], GITHUB_API_URL)
         if "github_token" in gw:
             self.put("secrets/services/github/org_hooks_read", ["token"], gw.pop("github_token"),
                      ("agents/github-webhook-watch", "github_token"))
         if "github_org" in gw:
-            org = gw["github_org"]
-            self.put("inventory/services/github", ["url"], GITHUB_API_URL)
-            self.put("inventory/services/github", ["org"], org, ("agents/github-webhook-watch", "github_org"))
+            self.put("inventory/services/github", ["org"], gw["github_org"], ("agents/github-webhook-watch", "github_org"))
             self.put("inventory/config/github_webhook_watch", ["github_org"], gw.pop("github_org"),
                      ("agents/github-webhook-watch", "github_org"))
         for k in ("hook_url", "o2_org"):
@@ -470,11 +472,17 @@ class Client:
 
     def read(self, mount, doc):
         status, body = self._call("GET", "/v1/%s/data/%s" % (mount, urllib.parse.quote(doc)), missing=(404,))
-        return None if status == 404 else body["data"]["data"]
+        try:
+            return None if status == 404 else body["data"]["data"]
+        except (KeyError, TypeError):
+            raise ClientError("GET %s/%s -> 예상 밖 응답 모양(KV v2 마운트인지 확인)" % (mount, doc)) from None
 
     def list(self, mount, prefix):
         status, body = self._call("GET", "/v1/%s/metadata/%s?list=true" % (mount, urllib.parse.quote(prefix)), missing=(404,))
-        return [] if status == 404 else body["data"]["keys"]
+        try:
+            return [] if status == 404 else body["data"]["keys"]
+        except (KeyError, TypeError):
+            raise ClientError("LIST %s/%s -> 예상 밖 응답 모양(KV v2 마운트인지 확인)" % (mount, prefix)) from None
 
     def create(self, mount, doc, data):
         """cas=0 쓰기. 이미 있으면 False."""

@@ -76,17 +76,18 @@ def _post(fake, path, body):
     req = urllib.request.Request(fake.url + path, data=json.dumps(body).encode(), method="POST")
     try:
         with urllib.request.urlopen(req) as r:
-            return r.status, json.load(r)
+            return r.status
     except urllib.error.HTTPError as e:
-        return e.code, json.load(e)
+        return e.code
 
 
-def test_post_writes_document_and_cas_zero_rejects_existing(fake):
-    body = {"options": {"cas": 0}, "data": {"k": "v"}}
-    assert _post(fake, "/v1/m1/data/a/b", body)[0] == 200
-    assert _get(fake, "/v1/m1/data/a/b")[1]["data"]["data"] == {"k": "v"}
-    assert _post(fake, "/v1/m1/data/a/b", body)[0] == 400
-    assert [(w.mount, w.doc) for w in fake.writes()] == [("m1", "a/b"), ("m1", "a/b")]
+def test_write_enforces_cas_and_bumps_version(fake):
+    assert _post(fake, "/v1/m1/data/a", {"options": {"cas": 0}, "data": {"k": 1}}) == 200
+    assert fake.get("m1", "a") == ({"k": 1}, 1)
+    assert _post(fake, "/v1/m1/data/a", {"options": {"cas": 0}, "data": {"k": 2}}) == 400
+    assert _post(fake, "/v1/m1/data/a", {"options": {"cas": 1}, "data": {"k": 2}}) == 200
+    assert fake.get("m1", "a") == ({"k": 2}, 2)
+    assert len(fake.writes()) == 3
 
 
 def test_list_returns_children_with_folders_marked(fake):

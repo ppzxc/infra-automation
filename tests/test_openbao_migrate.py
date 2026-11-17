@@ -387,7 +387,7 @@ def test_bad_skip_file_is_an_exit_code_not_a_traceback(servers, tmp_path):
 
 def test_cas_conflict_on_an_unreadable_document_stops_instead_of_reporting_a_difference(servers, tmp_path):
     new = servers[1]
-    new._docs[("inventory", "assets/ns0001")] = (404, {"errors": []})  # 소프트 삭제: 읽으면 404, cas는 실패
+    new.set("inventory", "assets/ns0001", {}).soft_delete("inventory", "assets/ns0001")  # 읽으면 404, cas=0은 실패
     r = run_cli(servers, tmp_path)
     assert r.returncode == 4 and "소프트 삭제" in r.stderr
 
@@ -423,3 +423,17 @@ def test_bootstrap_document_goes_to_the_bootstrap_credential_only():
     plan = om.build_new(old, SKIP)
     assert plan.store["secrets/assets/ns0007/credentials/other"] == {"type": "password", "username": "other", "password": "pw-other"}
     assert plan.store["secrets/assets/ns0007/credentials/admin01"]["type"] == "password"
+
+
+def test_github_token_without_org_still_gets_a_service_document():
+    old = old_docs()
+    del old["agents/github-webhook-watch"]["github_org"]
+    plan = om.build_new(old, SKIP)
+    assert plan.store["inventory/services/github"] == {"url": "https://api.github.com"}
+
+
+def test_same_unmapped_key_in_a_global_account_is_reported_once():
+    old = old_docs()
+    old["users/admin01"]["foo"] = "x"
+    lines = [e for e in om.build_new(old, SKIP).errors if "foo" in e]
+    assert len(lines) == 1
