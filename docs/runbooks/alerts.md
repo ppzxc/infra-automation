@@ -672,7 +672,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 **왜 중요한가**: 점검이 GitHub을 확인하지 못해 웹훅 삭제·변경 감시와 실패 전달 재전송이 멈춘다. 토큰 만료가 가장 흔하며, 방치하면 재전송 가능 기간(3일)이 지나 실패 전달을 복구할 수 없게 된다.
 
 **오류 코드별 조치**
-- `credential_missing`: OpenBao `secrets/services/github/org_hooks_read`의 `token` 또는 `inventory/config/github_webhook_watch`의 `github_org`가 비었다. 값을 채운다.
+- `credential_missing`: OpenBao `secrets/services/github/org_hooks_read`의 `token`이 비었다. 값을 채운다. `github_org`·`hook_url`·`o2_org`가 비었거나 필수 키가 빠지면 점검 전에 `[GWW-INPUT]`으로 실행이 실패하고 하트비트는 남지 않는다(침묵 알림으로 드러난다).
 - `api_http_401`: 토큰이 만료·폐기됐다. 새 세분화 토큰(조직 Webhooks 권한, 만료일 있음)을 발급해 OpenBao에 교체한다.
 - `api_http_403`: 권한 부족이거나 요청 한도 초과다. 토큰의 조직 Webhooks 권한(읽기·재전송은 쓰기)과 조직의 토큰 승인 정책을 확인한다.
 - `api_http_404`: 조직 이름이나 훅 경로가 틀렸다. `github_org`를 확인한다.
