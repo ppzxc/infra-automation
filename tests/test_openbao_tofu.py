@@ -73,6 +73,11 @@ def test_kv_v2_mounts_and_auth_mounts_declared():
     assert 'type        = "approle"' in auth
 
 
+def test_kv_mounts_are_protected_from_destroy_and_state_is_locked():
+    assert _tf("mounts.tf").count("prevent_destroy = true") == 2
+    assert "use_lockfile                = true" in _tf("versions.tf")
+
+
 def test_operator_users_use_hash_only_and_are_sensitive():
     auth = _tf("auth.tf")
     assert "operator_password_hashes" in auth

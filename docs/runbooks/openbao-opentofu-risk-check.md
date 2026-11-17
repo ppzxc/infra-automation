@@ -29,7 +29,7 @@
 - 실서버 버전·패키지 빌드에서의 버전 문자열 파싱(위 표).
 - `infra` 네임스페이스 생성을 `vault_namespace` 리소스로 해 보지 않았다. bootstrap은 `bao namespace create infra`(`admin`)로 한다.
 - 실서버 `plan`에서 `operator` 정책이 아직 없어도 사용자 선언은 통과하지만(정책 이름만 참조), 로그인 후 권한은 #518 이후에 확인한다.
-- S3 backend(RustFS)에서 `init`·lock·암호화 state 왕복. 로컬 backend로만 확인했다. RustFS는 `skip_s3_checksum`·`use_path_style`이 필요할 수 있다(`versions.tf`에 켰다). 첫 `init` 때 확인한다.
+- S3 backend(RustFS)에서 `init`·`use_lockfile`(조건부 쓰기 지원 여부)·암호화 state 왕복. 로컬 backend로만 확인했다. RustFS는 `skip_s3_checksum`·`use_path_style`이 필요할 수 있다(`versions.tf`에 켰다). 첫 `init` 때 확인한다.
 - 이 확인은 사람이 손으로 한 것이 아니라 에이전트가 로컬 컨테이너에서 실행했다. 전환 동결 창의 확인 목록에서 운영자가 실서버로 다시 확인한다.
 
 ## 4. 재현

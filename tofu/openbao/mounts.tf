@@ -4,6 +4,11 @@ resource "vault_mount" "inventory" {
   type        = "kv"
   options     = { version = "2" }
   description = "Asset·Service·Operator·작업 설정(비밀 아님)"
+
+  # 마운트를 지우면 안의 데이터가 모두 사라진다. 교체·삭제가 plan에 뜨면 apply가 실패하게 한다.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "vault_mount" "secrets" {
@@ -11,4 +16,8 @@ resource "vault_mount" "secrets" {
   type        = "kv"
   options     = { version = "2" }
   description = "Credential·Service 권한 비밀"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
