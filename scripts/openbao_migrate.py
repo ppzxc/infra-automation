@@ -36,12 +36,18 @@ import openbao_validation as ov  # noqa: E402
 
 GITHUB_API_URL = "https://api.github.com"  # 공개 상수. 옛 KV에는 github_api_url이 없다(선택 키 기본값).
 OLD_TOP_LEVEL = ("hosts", "users", "agents", "clusters", "fortigate")
+ACCOUNT_KEYS = ("username", "type", "password", "ssh_private_key", "ssh_public_key", "ssh_passphrase", "revoked_keys")
 DROPPED_HOST_KEYS = ("hostname", "fqdn", "cloudflare_api_token")  # 계산되는 값·아무도 읽지 않는 키(#501 §5)
 INGEST_SOURCES = ("webhook_watch", "controller_token")
 
 
 class MigrationError(Exception):
     pass
+
+
+def skipped(path, skip):
+    """skip 항목(문서 경로 또는 끝이 `/`인 접두사)에 걸리는지. `문서:키` 항목은 문서 단위가 아니다."""
+    return any(s == path or (s.endswith("/") and path.startswith(s)) for s in skip if ":" not in s)
 
 
 class Plan:
@@ -85,7 +91,7 @@ class _Builder:
         self.plan = Plan()
         self.skip = list(skip)
         self.ingest_source = ingest_source
-        self.old = {p: copy.deepcopy(d) for p, d in old.items() if not self._doc_skipped(p)}
+        self.old = {p: copy.deepcopy(d) for p, d in old.items() if not skipped(p, self.skip)}
         self.keyskip = {tuple(s.split(":", 1)) for s in self.skip if ":" in s}
         self.consumed = set()
         self.endpoints = collections.defaultdict(dict)   # ns -> {이름: Endpoint}
@@ -93,9 +99,6 @@ class _Builder:
         self.credentials = collections.defaultdict(dict)  # ns -> {이름: (데이터, 출처 목록)}
 
     # -- 보조 ---------------------------------------------------------------------------------------------------------
-    def _doc_skipped(self, path):
-        return any(s == path or (s.endswith("/") and path.startswith(s)) for s in self.skip if ":" not in s)
-
     def err(self, doc, what):
         self.plan.errors.append("%s\t%s" % (doc, what))
 
@@ -135,6 +138,8 @@ class _Builder:
             for ns, dom in sorted(domains.items()):
                 if dom != common:
                     self.put("inventory/assets/%s" % ns, ["domain"], dom, ("hosts/%s" % ns, "domain"))
+        for ns in sorted({p.split("/")[1] for p in self.old if p.startswith("hosts/") and p.count("/") > 1} - set(names)):
+            self.err("hosts/%s" % ns, "no_host_document")
         self.credentials_and_endpoints()
 
     def host(self, ns, domains):
@@ -175,7 +180,7 @@ class _Builder:
             self.put(asset, ["funa", _env_to_key(k)], d.pop(k), (doc, k))
         self.finish(doc, d)
         self.asset_agents(ns)
-        if ctype is not None or user is not None:
+        if ctype is not None or (user is not None and not admin and not boot):  # 서버는 admin_users·bootstrap_user로 접속한다
             self.device_endpoint(ns, doc, address, port, user, password, ctype, bastion)
         elif address:
             self.server_endpoint(ns, address, port, admin, boot, pwauth)
@@ -246,7 +251,7 @@ class _Builder:
             parts = p.split("/")
             if len(parts) == 4 and parts[0] == "hosts" and parts[2] == "users":
                 self.credentials[parts[1]].setdefault(parts[3], None)
-        for ns in sorted(set(self.credentials) | set(self.logins) | {p.split("/")[1] for p in self.old if p.startswith("hosts/")}):
+        for ns in sorted(p.split("/")[1] for p in self.old if p.startswith("hosts/") and p.count("/") == 1):
             access = self.plan.store.get("inventory/assets/%s" % ns, {}).get("access", {})
             wanted = set(access.get("admin_credentials", [])) | set(self.logins[ns])
             if access.get("bootstrap_credential"):
@@ -281,9 +286,10 @@ class _Builder:
         merged, src = {}, {}
         for path, layer, is_boot in layers:
             self.consumed.add(path)
+            self.finish(path, {k: v for k, v in layer.items() if k not in ACCOUNT_KEYS})
             for k in ("password", "ssh_private_key", "ssh_passphrase"):
                 if layer.get(k) not in (None, ""):
-                    if k.startswith("ssh_") and not is_boot:
+                    if k.startswith("ssh_") and path.startswith("users/"):
                         continue  # 전역 계정의 키는 Automation Identity다(Credential로 복사하지 않는다)
                     merged[k], src[k] = layer[k], (path, k)
         if "ssh_private_key" in merged:
@@ -309,6 +315,7 @@ class _Builder:
             name = path.split("/")[1]
             d = self.old[path]
             self.consumed.add(path)
+            self.finish(path, {k: v for k, v in d.items() if k not in ACCOUNT_KEYS})
             if d.get("ssh_public_key"):
                 op = {"public_keys": [d["ssh_public_key"]]}
                 self.put("inventory/operators/%s" % name, ["public_keys"], op["public_keys"], (path, "ssh_public_key"))
@@ -404,8 +411,12 @@ class _Builder:
         for path, new in (("clusters/funa", "inventory/services/funa"), ("clusters/funa/proxy", "secrets/services/funa/proxy"),
                           ("clusters/funa/vrrp", "secrets/services/funa/vrrp")):
             d = self.take(path)
+            names = collections.Counter(_env_to_key(k) for k in d or {})
             for k in sorted(d or {}):
-                self.put(new, [_env_to_key(k)], d[k], (path, k))
+                if names[_env_to_key(k)] > 1:
+                    self.err(path, "key_collision:%s" % k)
+                else:
+                    self.put(new, [_env_to_key(k)], d[k], (path, k))
 
     def run(self):
         self.global_users()
@@ -466,15 +477,12 @@ class Client:
 
 
 def read_old(client, mount, skip):
-    def skipped(path):
-        return any(s == path or (s.endswith("/") and path.startswith(s)) for s in skip if ":" not in s)
-
     docs = {}
 
     def walk(prefix):
         for key in client.list(mount, prefix.rstrip("/")):
             path = prefix + key
-            if skipped(path) or skipped(path + "/"):
+            if skipped(path, skip) or skipped(path + "/", skip):
                 continue
             if key.endswith("/"):
                 walk(path)
@@ -518,14 +526,16 @@ def _at(doc, pointer):
     return node, True
 
 
-def hash_report(plan, actual):
+def hash_report(plan, actual, dry_run=False):
     """옛 값(기대 값)과 새 문서에서 읽은 값의 해시 대조. (줄 목록, 불일치 수). 경로·키 이름·일치 여부만 낸다."""
     lines, bad = [], 0
     for new_doc, pointer, old_doc, old_key, expected in plan.lineage:
         got = actual.get(new_doc)
         value, found = _at(got, pointer) if got is not None else (None, False)
         status = "absent" if not found else ("match" if _hash(value) == _hash(expected) else "MISMATCH")
-        bad += status == "MISMATCH"
+        if got is None:
+            status = "pending" if dry_run else "absent"
+        bad += status in ("MISMATCH", "absent")
         lines.append("%s\t%s\t%s\t%s\t%s" % (new_doc, pointer, old_doc, old_key, status))
     return lines, bad
 
@@ -545,6 +555,8 @@ def apply(plan, new_client, dry_run):
                 actual[path] = new_client.read(mount, doc)
                 continue
             existing = new_client.read(mount, doc)  # 그 사이 누가 만들었다
+            if existing is None:  # 읽히지 않는 문서에 cas가 실패했다: 소프트 삭제이거나 다른 400이다
+                raise ClientError("POST %s -> 400, 읽히지 않는 문서(소프트 삭제인지 확인)" % path)
         actual[path] = existing
         found = diff_keys(plan.store[path], existing)
         if not found:
@@ -579,12 +591,14 @@ def main(argv=None):
     if not args.old_addr or not args.new_addr:
         print("--old-addr/--new-addr 또는 VAULT_ADDR가 필요하다", file=sys.stderr)
         return 4
-    skip = yaml.safe_load(Path(args.skip_file).read_text(encoding="utf-8")) if args.skip_file else []
-    skip = [str(s) for s in (skip or [])]
-    token = read_token(args.token_file)
-    old_client = Client(args.old_addr, args.old_namespace, token)
-    new_client = Client(args.new_addr, args.new_namespace, token)
     try:
+        skip = yaml.safe_load(Path(args.skip_file).read_text(encoding="utf-8")) if args.skip_file else []
+        if skip is not None and not (isinstance(skip, list) and all(isinstance(s, str) for s in skip)):
+            raise MigrationError("skip 파일은 문자열 목록(YAML 리스트)이어야 한다")
+        skip = skip or []
+        token = read_token(args.token_file)
+        old_client = Client(args.old_addr, args.old_namespace, token)
+        new_client = Client(args.new_addr, args.new_namespace, token)
         plan = build_new(read_old(old_client, args.old_mount, skip), skip, args.ingest_source)
         violations = ov.validate_store(plan.store)
         if plan.errors or violations:
@@ -597,11 +611,11 @@ def main(argv=None):
         lines, actual, differs = apply(plan, new_client, args.dry_run)
         print("# %s: %d documents" % ("dry-run" if args.dry_run else "migrate", len(plan.store)))
         print("\n".join(lines))
-        report, bad = hash_report(plan, actual)
+        report, bad = hash_report(plan, actual, args.dry_run)
         print("# hash report (old value vs new document)")
         print("\n".join(report))
-    except (ClientError, MigrationError) as e:
-        print("오류: %s" % e, file=sys.stderr)
+    except (ClientError, MigrationError, OSError, yaml.YAMLError) as e:
+        print("오류: %s" % (e if isinstance(e, (ClientError, MigrationError)) else type(e).__name__), file=sys.stderr)
         return 4
     if differs:  # 이미 있는 다른 문서의 값은 해시 불일치로도 잡히므로 차이를 먼저 알린다
         return 2

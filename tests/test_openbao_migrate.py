@@ -333,3 +333,68 @@ def test_old_namespace_is_read_with_that_namespace_header_only(servers, tmp_path
     old, new = servers
     assert old.reads() and all(r.namespace == "infra/prod/host" for r in old.requests)
     assert all(r.namespace == "infra" for r in new.requests)
+
+
+# ---- 리뷰 반영: 경계 사례 -----------------------------------------------------------------------------------------
+
+def test_host_level_account_keeps_its_own_ssh_key():
+    old = old_docs()
+    old["hosts/ns0002/users/bk"] = {"username": "bk", "type": "SSH", "password": "pw-bk-0002", "ssh_private_key": "KEY-BK"}
+    plan = om.build_new(old, SKIP)
+    assert plan.store["secrets/assets/ns0002/credentials/bk"]["private_key"] == "KEY-BK"
+    assert plan.store["secrets/assets/ns0002/credentials/bk"]["type"] == "ssh_key"
+
+
+def test_unknown_key_in_an_account_document_is_an_error():
+    old = old_docs()
+    old["hosts/ns0002/users/bk"]["api_key"] = "leak-me-0088"
+    plan = om.build_new(old, SKIP)
+    assert any("hosts/ns0002/users/bk" in e and "api_key" in e for e in plan.errors)
+    assert "leak-me-0088" not in " ".join(plan.errors)
+
+
+def test_server_with_ansible_user_is_still_a_server_endpoint():
+    old = old_docs()
+    old["hosts/ns0001"]["ansible_user"] = "admin01"
+    plan = om.build_new(old, SKIP)
+    assert plan.store["inventory/assets/ns0001/endpoints"]["ssh"]["identity"] == "automation"
+    assert plan.store["inventory/assets/ns0001/endpoints"]["ssh"]["become"] == {"method": "sudo"}
+
+
+def test_keys_that_normalise_to_the_same_name_are_a_collision_error():
+    old = old_docs()
+    old["clusters/funa"]["FUNA_TZ"] = "x"
+    plan = om.build_new(old, SKIP)
+    assert any("key_collision" in e for e in plan.errors)
+
+
+def test_account_document_without_host_document_is_an_error():
+    old = old_docs()
+    old["hosts/ns0999/users/bk"] = {"username": "bk", "type": "PASSWORD", "password": "x"}
+    assert any("ns0999" in e and "no_host_document" in e for e in om.build_new(old, SKIP).errors)
+
+
+def test_bad_skip_file_is_an_exit_code_not_a_traceback(servers, tmp_path):
+    old, new = servers
+    skip = tmp_path / "skip.yml"
+    skip.write_text("hosts/ns0001: x\n")
+    token = tmp_path / "token"
+    token.write_text("t\n")
+    r = subprocess.run([sys.executable, str(CLI), "--old-addr", old.url, "--new-addr", new.url, "--skip-file", str(skip),
+                        "--token-file", str(token)], capture_output=True, text=True)
+    assert r.returncode == 4 and "Traceback" not in r.stderr
+
+
+def test_cas_conflict_on_an_unreadable_document_stops_instead_of_reporting_a_difference(servers, tmp_path):
+    new = servers[1]
+    new._docs[("inventory", "assets/ns0001")] = (404, {"errors": []})  # 소프트 삭제: 읽으면 404, cas는 실패
+    r = run_cli(servers, tmp_path)
+    assert r.returncode == 4 and "소프트 삭제" in r.stderr
+
+
+def test_hash_report_flags_a_value_missing_after_write():
+    plan = om.build_new(old_docs(), SKIP)
+    actual = {path: copy.deepcopy(data) for path, data in plan.store.items()}
+    del actual["secrets/assets/ns0001/agents"]["restic_password"]
+    lines, bad = om.hash_report(plan, actual)
+    assert bad == 1 and any(l.endswith("restic_password\tabsent") for l in lines)
