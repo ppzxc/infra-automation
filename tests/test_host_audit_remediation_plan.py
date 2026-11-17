@@ -466,7 +466,8 @@ def test_a_run_without_hosts_has_no_files():
 
 
 def test_the_total_has_a_label_that_is_not_a_host_name():
-    assert host_audit_remediation_total(_total_model())["label"] == "합계 xlsx"
+    total = host_audit_remediation_total(_total_model())
+    assert total["label"] == "합계 xlsx" and total["kind"] == "total"
 
 
 def test_each_plan_names_its_zip_member_under_hosts():

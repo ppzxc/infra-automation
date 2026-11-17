@@ -136,7 +136,7 @@ def main():
     try:
         if module.params['members'] is not None:
             members = dict((str(k), str(v)) for k, v in module.params['members'].items())
-            bad = _bad_zip_names(members)
+            bad = _bad_zip_names(members) if members else ['no members']
             if bad:
                 module.fail_json(msg='zip names must be unique relative paths without .. or backslash: %s' % ', '.join(bad))
         else:
