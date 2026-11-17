@@ -3,8 +3,7 @@
 # FortiGate 방화벽 설정 백업 플레이북
 # ==============================================================================
 # 호스트 = 접속 대상(IDC 클러스터 1, 사무실 1). 직전 백업과 달라지면 webhook 알림(#286).
-# 인벤토리 호스트 변수: ansible_host(멤버 관리 주소), fortigate_device, fortigate_member.
-# API 토큰은 Semaphore Environment(fortigate_api_token) 또는 OpenBao KV로 주입한다.
+# 접속 주소·포트와 API 토큰은 OpenBao Endpoint `https`·Credential `api`에서 역할이 읽는다. 인벤토리에는 관리번호만 둔다.
 #
 # 실행 예:
 #   ansible-playbook -i inventory/hosts.yml playbooks/backup_fortigate.yml
@@ -16,6 +15,15 @@
   gather_facts: false
   connection: local
   become: false
+
+  pre_tasks:
+    # 플레이당 한 번만 로그인한다. 호스트마다 AppRole 로그인을 하지 않도록 토큰을 변수로 넘긴다.
+    - name: Acquire the OpenBao client token once for the whole play
+      ansible.builtin.set_fact:
+        _vault_token: "{{ lookup('openbao_doc', '@token') }}"
+      run_once: true
+      check_mode: false
+      no_log: true
 
   roles:
     - role: fortigate_backup
