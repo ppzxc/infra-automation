@@ -11,6 +11,9 @@ AppRole 로그인(`POST /v1/auth/approle/login`)만 흉내 낸다.
 - `index_patterns`(`<마운트>/<문서 경로>` glob 목록)와 `schema_check`(문서 검증 함수)는 스위치다. 기본은 꺼짐(None)이다.
   켜면 패턴에 맞지 않는 요청은 `violations`에 기록하고, 등록하는 문서는 `schema_check`를 거친다.
   전환 PR에서 `index.yml`·스키마와 연결한다.
+- 점검용 확장(#519): `set(..., updated_time=)`은 KV v2 `metadata/<경로>`로, 문서 목록은 `?list=true`로 준다.
+  `raw(method, path, body, status)`는 `sys/`·`auth/` 같은 임의 경로의 응답을 등록한다(경로는 `/v1/` 뒤, 쿼리 제외,
+  목록 조회는 method `LIST`).
 """
 import fnmatch
 import json
@@ -42,6 +45,8 @@ class FakeOpenBao:
         self.requests: list[Request] = []
         self.violations: list[tuple[str, str]] = []
         self._docs: dict[tuple[str, str], tuple[int, dict]] = {}
+        self._updated: dict[tuple[str, str], str] = {}
+        self._raw: dict[tuple[str, str], tuple[int, dict]] = {}
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -67,6 +72,12 @@ class FakeOpenBao:
                 outer.requests.append(Request("POST", self.path, mount, doc, self.headers.get("X-Vault-Token"), ns, body))
                 if outer.approle and self.path == "/v1/auth/approle/login":
                     return self._reply(200, {"auth": {"client_token": outer.token or APPROLE_TOKEN}})
+                key = ("POST", self.path.split("?")[0][len("/v1/"):].strip("/"))
+                if mount is None and key in outer._raw:
+                    if (outer.namespace is not None and ns != outer.namespace) or \
+                            (outer.token is not None and self.headers.get("X-Vault-Token") != outer.token):
+                        return self._reply(403, {"errors": ["permission denied"]})
+                    return self._reply(*outer._raw[key])
                 if mount is None:
                     return self._reply(404, {})
                 want_token = outer.token or (APPROLE_TOKEN if outer.approle else None)
@@ -86,6 +97,18 @@ class FakeOpenBao:
                 self._reply(200, {"data": {"version": version + 1}})
 
             def do_GET(self):  # noqa: N802
+                bare = self.path.split("?")[0]
+                kind, m_mount, m_doc = _meta(self.path)
+                key = ("LIST" if "list=true" in self.path else "GET", bare[len("/v1/"):].strip("/"))
+                if bare.startswith("/v1/") and (kind is not None or key in outer._raw):
+                    outer.requests.append(Request("GET", self.path, None, None, self.headers.get("X-Vault-Token"),
+                                                  self.headers.get("X-Vault-Namespace")))
+                    if (outer.namespace is not None and self.headers.get("X-Vault-Namespace") != outer.namespace) or \
+                            (outer.token is not None and self.headers.get("X-Vault-Token") != outer.token):
+                        return self._reply(403, {"errors": ["permission denied"]})
+                    if key in outer._raw:
+                        return self._reply(*outer._raw[key])
+                    return self._reply(*outer._meta_reply(kind, m_mount, m_doc))
                 mount, doc = _split(self.path)
                 req = Request("GET", self.path, mount, doc, self.headers.get("X-Vault-Token"),
                               self.headers.get("X-Vault-Namespace"))
@@ -105,13 +128,32 @@ class FakeOpenBao:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     # --- 라우트 등록 -------------------------------------------------------
-    def set(self, mount, doc, data):
+    def set(self, mount, doc, data, updated_time="2026-11-01T00:00:00.000000Z"):
         if self.schema_check is not None:
             self.schema_check(mount, doc, data)
+        self._updated[(mount, doc)] = updated_time
         status, current = self._docs.get((mount, doc), (404, None))
         version = ((current or {}).get("data") or {}).get("metadata", {}).get("version", 0) + 1
         self._docs[(mount, doc)] = (200, {"data": {"data": data, "metadata": {"version": version}}})
         return self
+
+    def raw(self, method, path, body, status=200):
+        self._raw[(method, path.strip("/"))] = (status, body)
+        return self
+
+    def _meta_reply(self, kind, mount, doc):
+        if kind == "list":
+            prefix = doc.strip("/")
+            keys = set()
+            for (m, d) in self._docs:  # 실제 KV v2처럼 소프트 삭제된 문서도 목록에 나온다
+                if m != mount or (prefix and not d.startswith(prefix + "/")):
+                    continue
+                rest = d[len(prefix) + 1:] if prefix else d
+                keys.add(rest.split("/")[0] + ("/" if "/" in rest else ""))
+            return (200, {"data": {"keys": sorted(keys)}}) if keys else (404, {"errors": []})
+        if self._docs.get((mount, doc), (0,))[0] == 200:
+            return 200, {"data": {"updated_time": self._updated[(mount, doc)], "current_version": 1}}
+        return 404, {"errors": []}
 
     def soft_delete(self, mount, doc):
         """KV v2 소프트 삭제: 404를 내지만 버전 카운터는 남는다(404 본문의 metadata.version)."""
@@ -165,3 +207,12 @@ def _split(path):
     if len(parts) >= 5 and parts[1] == "v1" and parts[3] == "data":
         return parts[2], "/".join(parts[4:])
     return None, None
+
+
+def _meta(path):
+    """`/v1/<마운트>/metadata/<경로>` -> ("list"|"read", 마운트, 경로). 아니면 (None, None, None)."""
+    bare, _, query = path.partition("?")
+    parts = bare.split("/")
+    if len(parts) >= 4 and parts[1] == "v1" and parts[3] == "metadata":
+        return ("list" if "list=true" in query else "read"), parts[2], "/".join(parts[4:])
+    return None, None, None
