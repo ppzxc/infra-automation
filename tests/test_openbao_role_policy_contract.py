@@ -82,7 +82,7 @@ def test_declared_keys_cover_the_schema_required(role):
 
 
 # ---- lookup 플러그인이 읽는 문서 -------------------------------------------------------------------------------------
-# 역할 선언(`<역할>_openbao_required`)에는 공용 읽기 지점이 대신 읽는 문서가 없다. openbao_admin_accounts는 관리 계정의 공개키를
+# 역할 선언(`<역할>_openbao_required`)에는 공용 읽기 지점이 대신 읽는 문서가 없다. openbao_host_connection은 관리 계정의 공개키를
 # `inventory/operators/<계정>`에서 읽는데 어느 정책에도 없어 서버 계열이 403으로 멈출 뻔했으므로, 플러그인의 읽기 표를 같이 대조한다.
 
 # lookup을 쓰는 파일 -> 그 파일을 실행하는 계열 AppRole. 새 사용처가 생기면 이 표에도 적어야 통과한다.
@@ -117,7 +117,7 @@ def test_every_lookup_user_file_is_listed_with_its_families():
     users = set()
     for base in ("roles", "playbooks"):
         for p in (ROOT / base).rglob("*.yml"):
-            if re.search(r"lookup\('openbao_(connection|admin_accounts|host_connection)'", p.read_text(encoding="utf-8")):
+            if re.search(r"lookup\('openbao_(connection|host_connection)'", p.read_text(encoding="utf-8")):
                 users.add(str(p.relative_to(ROOT)))
     assert users == set(LOOKUP_USERS), sorted(users ^ set(LOOKUP_USERS))
 

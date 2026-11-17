@@ -64,7 +64,7 @@ def test_the_connection_is_resolved_by_one_lookup_per_host_not_by_repeated_looku
     """호스트당 해석은 lookup 하나다(같은 문서를 요약·전체·관리 계정마다 다시 읽지 않는다)."""
     text = RESOLVE.read_text(encoding="utf-8")
     assert text.count("lookup('openbao_host_connection'") == 1
-    for retired in ("lookup('openbao_connection'", "lookup('openbao_admin_accounts'", "_primary_admin_user"):
+    for retired in ("lookup('openbao_connection'", "_primary_admin_user"):
         assert retired not in text, retired
 
 
