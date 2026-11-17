@@ -5,8 +5,13 @@
 
 * 네임스페이스는 `infra`, 마운트는 `inventory`·`secrets` 둘뿐이다. 이를 바꾸는 변수·환경 변수는 없다.
 * 문서가 없으면(404) 실패한다. `required=False`를 명시한 호출만 `{}`를 돌려받는다. 403·연결 오류는 항상 실패한다.
-* 인증 순서: 변수 `_vault_token`(resolve_connection이 한 번 받아 둔 토큰) -> AppRole(`vault_role_id`/`vault_secret_id`
-  또는 환경 변수 `VAULT_ROLE_ID`/`VAULT_SECRET_ID`) -> `vault_token`/`VAULT_TOKEN`. 주소는 `vault_addr`/`VAULT_ADDR`.
+* 인증은 AppRole뿐이다. 변수 `_vault_token`(플레이 첫머리에서 `@token`으로 한 번 받아 둔 토큰)이 있으면 그것을 쓰고, 없으면
+  `vault_role_id`/`vault_secret_id`(또는 환경 변수 `VAULT_ROLE_ID`/`VAULT_SECRET_ID`)로 로그인한다. `VAULT_TOKEN`·`vault_token`
+  같은 평문 토큰 경로는 없다(운영자 토큰은 scripts/ 쪽 도구만 쓴다). 주소는 `vault_addr`/`VAULT_ADDR`.
+* https는 인증서를 검증한다. 끄려면 변수 `vault_validate_certs: false`(또는 `VAULT_SKIP_VERIFY=true`), 사설 CA는
+  `vault_cacert`/`VAULT_CACERT`(CA 파일 경로)로 준다.
+* 로그인은 프로세스 안에서만 캐시한다. Ansible은 호스트·태스크마다 프로세스를 나누므로 `@token`을 한 번 받아 `_vault_token`으로
+  넘기지 않는 읽기는 그 호스트·태스크마다 로그인한다. 토큰 TTL은 30분이라 오래 쓸 토큰은 일찍 받아 두지 않는다.
 * 특수 용어 `@token`은 위 순서로 얻은 토큰만 돌려준다(플레이당 한 번 로그인해서 변수로 넘길 때 쓴다).
 * `openbao_fixture`(키 `<마운트>/<문서 경로>`, 값 문서)가 정의돼 있으면 네트워크 없이 그 안에서만 답한다(molecule용).
   이 변수는 여기서만 처리한다.
@@ -72,7 +77,11 @@ class Reader:
             fixture = templar.template(fixture)
         self.fixture = fixture if isinstance(fixture, dict) else None
         self.addr = (_first(variables, ["vault_addr"], ["VAULT_ADDR"]) or DEFAULT_ADDR).rstrip("/")
-        self.verify = str(variables.get("vault_validate_certs", "false")).lower() in ("true", "1", "yes")
+        validate = variables.get("vault_validate_certs")
+        if validate in (None, ""):
+            validate = "false" if os.environ.get("VAULT_SKIP_VERIFY", "").lower() in ("true", "1", "yes") else "true"
+        self.verify = str(validate).lower() in ("true", "1", "yes")
+        self.cacert = _first(variables, ["vault_cacert"], ["VAULT_CACERT"])
 
     # --- 인증 --------------------------------------------------------------
     def token(self):
@@ -86,10 +95,7 @@ class Reader:
         secret = _first(v, ["vault_secret_id"], ["VAULT_SECRET_ID"])
         if role and secret:
             return self._login(role, secret)
-        tok = _first(v, ["vault_token"], ["VAULT_TOKEN"])
-        if tok:
-            return tok
-        raise OpenBaoError("OpenBao 인증 정보가 없습니다(_vault_token, AppRole 또는 vault_token)")
+        raise OpenBaoError("OpenBao 인증 정보가 없습니다(AppRole: VAULT_ROLE_ID와 VAULT_SECRET_ID)")
 
     def _login(self, role, secret):
         key = (self.addr, role, secret)
@@ -132,8 +138,11 @@ class Reader:
 
     def _send(self, req, what):
         ctx = None
-        if self.addr.startswith("https") and not self.verify:
-            ctx = ssl._create_unverified_context()  # noqa: S323 - 기존 동작(validate_certs: false)과 같다
+        if self.addr.startswith("https"):
+            if not self.verify:
+                ctx = ssl._create_unverified_context()  # noqa: S323 - 변수·환경 변수로 명시했을 때만
+            elif self.cacert:
+                ctx = ssl.create_default_context(cafile=self.cacert)
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
                 return json.load(resp)
