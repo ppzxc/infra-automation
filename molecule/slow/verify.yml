@@ -70,7 +70,7 @@
     - name: Verify the funa_env role
       when: "'funa_env' in molecule_roles"
       block:
-        # 001~006은 OpenBao 조회·검증 태스크다. molecule에는 OpenBao가 없어 funa_env_kv_fixture가 조회를 대신하므로
+        # 003·005·006·017은 OpenBao 조회·검증 태스크다. molecule에는 OpenBao가 없어 openbao_fixture가 읽기 지점의 조회를 대신하므로
         # (조회·실패 경로는 tests/test_funa_env.py가 가짜 OpenBao로 검증) 여기서는 그 결과가 파일에 반영됐는지 본다.
         - name: "[VERIFY-FUNA-001] Verify the dockermgmt group the files are owned by exists"
           ansible.builtin.assert:
@@ -82,23 +82,26 @@
             that: f.stat['/etc/funa-cluster/cluster.env'].exists
           when: "'funa_cluster' in group_names"
 
-        - name: "[VERIFY-FUNA-003] Verify the node values reached cluster.env"
+        - name: "[VERIFY-FUNA-003] Verify the node and cluster values reached cluster.env as environment names"
           ansible.builtin.assert:
             that:
               - "'FUNA_NODE_EXTERNAL_HOSTNAME=node.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
               - "'FUNA_NODE_NAME=node' in f.read['/etc/funa-cluster/cluster.env']"
+              - "'FUNA_FLOATING_HOSTNAME=vip.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
           when: "'funa_cluster' in group_names"
 
-        - name: "[VERIFY-FUNA-004] Verify the cluster values reached cluster.env"
-          ansible.builtin.assert:
-            that: "'FUNA_FLOATING_HOSTNAME=vip.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
-          when: "'funa_cluster' in group_names"
-
-        - name: "[VERIFY-FUNA-005] Verify every file was built from the KV contents"
+        - name: "[VERIFY-FUNA-005] Verify every file was built from the OpenBao documents"
           ansible.builtin.assert:
             that:
               - f.read['/etc/funa-cluster/proxy.secrets.env'] | length > 0
               - f.read['/etc/funa-cluster/vrrp.secrets.env'] | length > 0
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-017] Verify the declared documents were all read (the node Credential and service secrets are in proxy.secrets.env)"
+          ansible.builtin.assert:
+            that:
+              - "'DB_PASSWORD=molecule-db' in f.read['/etc/funa-cluster/proxy.secrets.env']"
+              - "'CLOUDFLARE_API_TOKEN=molecule-cf' in f.read['/etc/funa-cluster/proxy.secrets.env']"
           when: "'funa_cluster' in group_names"
 
         - name: "[VERIFY-FUNA-006] Verify the files carry the Managed-by header (validated content only)"
@@ -910,44 +913,34 @@
           delegate_to: localhost
           become: false
 
-        - name: "[VERIFY-BAK-087] Verify the maintenance path logs in with AppRole before the KV lookup"
+        - name: "[VERIFY-BAK-087] Verify the maintenance path logs in once through the shared read point before the document lookup"
           ansible.builtin.assert:
             that:
-              - "'auth/approle/login' in _maint"
+              - "\"lookup('openbao_doc', '@token')\" in _maint"
               - "_maint.index('[BAK-087]') < _maint.index('[BAK-071]')"
+              - "'approle/login' not in _maint and 'VAULT_TOKEN' not in _maint"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
           delegate_to: localhost
           become: false
 
-        - name: "[VERIFY-BAK-088] Verify the issued AppRole token is the one the KV lookup prefers"
+        - name: "[VERIFY-BAK-071] Verify the maintenance task file reads exactly the documents backup_openbao_required declares"
           ansible.builtin.assert:
             that:
-              - "'_maint_approle_login.json.auth.client_token' in _maint"
-              - "\"_vault_token | default(\" in _maint"
-              - "_maint.index('[BAK-088]') < _maint.index('[BAK-071]')"
+              - "'backup_openbao_required' in _maint and \"query('openbao_doc'\" in _maint"
+              - "'secrets/services/rustfs/maintenance' in _req and 'inventory/services/rustfs' in _req and 'secrets/services/openobserve/ingest' in _req"
+              - "'secrets/assets/+/agents' in _req and 'inventory/services/openobserve' in _req"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
-          delegate_to: localhost
-          become: false
-
-        - name: "[VERIFY-BAK-071] Verify the maintenance task file reads the OpenBao KV through the same agents paths"
-          ansible.builtin.assert:
-            that:
-              - "'agents/rustfs' in _maint"
-              - "'agents/openobserve' in _maint"
-              - "'/agents' in _maint"
-            quiet: true
-          vars:
-            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+            _req: "{{ (lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/vars/main.yml') | from_yaml).backup_openbao_required }}"
           delegate_to: localhost
           become: false
 
         - name: "[VERIFY-BAK-072] Verify the maintenance inputs are asserted before any command runs"
           ansible.builtin.assert:
-            that: "_maint.index('maintenance_access_key') < _maint.index('[BAK-078]')"
+            that: "_maint.index('backup_openbao_required.items()') < _maint.index('[BAK-078]')"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
@@ -1470,41 +1463,41 @@
     _o2c_tasks: "{{ _o2c_all | selectattr('name', 'match', '^\\[O2C-') | list }}"
     _o2c_ids: "{{ _o2c_tasks | map(attribute='name') | map('regex_replace', '^\\[(O2C-\\d+)\\].*$', '\\1') | list }}"
   tasks:
-    - name: "[VERIFY-O2C-000] Verify the AppRole login is a quiet POST that runs in check mode and its token comes before VAULT_TOKEN"
+    - name: "[VERIFY-O2C-000] Verify the OpenBao login goes through the shared reader once per play, quietly and in check mode, with no VAULT_TOKEN path"
       ansible.builtin.assert:
         that:
-          - _t['O2C-000']['ansible.builtin.uri'].method == 'POST'
-          - _t['O2C-000']['ansible.builtin.uri'].url is search('/v1/auth/approle/login')
-          - _t['O2C-000'].check_mode is false and _t['O2C-000'].changed_when is false and _t['O2C-000'].no_log is true
-          - _t['O2C-001'].vars._vault_token_eff is match('<< \\(_o2c_approle_login.json.auth.client_token')
+          - "'openbao_doc' in _t['O2C-000']['ansible.builtin.set_fact']._vault_token and '@token' in _t['O2C-000']['ansible.builtin.set_fact']._vault_token"
+          - _t['O2C-000']['ansible.builtin.set_fact'].cacheable is false
+          - _t['O2C-000'].check_mode is false and _t['O2C-000'].no_log is true
+          - "'VAULT_TOKEN' not in _o2c_raw"
         quiet: true
 
-    - name: "[VERIFY-O2C-001] Verify the OpenBao KV read is read-only, GET-only and hides the token"
+    - name: "[VERIFY-O2C-001] Verify the OpenBao documents are read through the shared reader, read-only, hidden and never cached"
       ansible.builtin.assert:
         that:
-          - _t['O2C-001']['ansible.builtin.uri'].method == 'GET'
-          - _t['O2C-001'].check_mode is false and _t['O2C-001'].changed_when is false and _t['O2C-001'].no_log is true
+          - _t['O2C-001']['ansible.builtin.set_fact'].cacheable is false
+          - _t['O2C-001']['ansible.builtin.set_fact'].o2c_docs | length == 5
+          - "'required=false' in _t['O2C-001']['ansible.builtin.set_fact'].o2c_docs['inventory/config/openobserve_config']"
+          - _t['O2C-001'].check_mode is false and _t['O2C-001'].no_log is true
         quiet: true
 
-    - name: "[VERIFY-O2C-002] Verify the inputs are asserted quietly and never cached as facts"
+    - name: "[VERIFY-O2C-002] Verify the inputs are asserted quietly against the declared required keys"
       ansible.builtin.assert:
         that:
-          - _t['O2C-002'].block | map(attribute='no_log') | list == [true, true]
-          - _t['O2C-002'].block[0]['ansible.builtin.set_fact'].cacheable is false
-          - _t['O2C-002'].block[1]['ansible.builtin.assert'].quiet is true
+          - _t['O2C-002'].block | map(attribute='no_log') | list == [true]
+          - _t['O2C-002'].block[0]['ansible.builtin.assert'].quiet is true
+          - "'o2c_missing_openbao_keys(openobserve_config_openbao_required)' in _t['O2C-002'].block[0]['ansible.builtin.assert'].that | join(' ')"
         quiet: true
 
-    - name: "[VERIFY-O2C-004] Verify the app telemetry switch read is a parallel read-only OpenBao GET batch that tolerates only 200 and 404"
+    - name: "[VERIFY-O2C-004] Verify the Asset documents are read in one read-only shared-reader query that treats a missing document as empty"
       ansible.builtin.assert:
         that:
-          - _t['O2C-004'].o2c_http.parallel is true
-          - _t['O2C-004'].o2c_http.status_code == [200, 404]
-          - "'/agents' in _t['O2C-004'].o2c_http.requests"
-          - _t['O2C-004'].check_mode is false and _t['O2C-004'].changed_when is false and _t['O2C-004'].no_log is true
-          - "'o2c_app_telemetry_kv_fixture is not defined' in _t['O2C-004'].when"
+          - "'inventory/assets/' in _t['O2C-004'].vars._paths and 'endpoints' not in _t['O2C-004'].vars._paths"
+          - "'required=false' in _t['O2C-004']['ansible.builtin.set_fact'].o2c_asset_docs"
+          - _t['O2C-004'].check_mode is false and _t['O2C-004'].no_log is true
         quiet: true
 
-    - name: "[VERIFY-O2C-005] Verify only the host names with the switch on are kept as a fact (no KV body, never cached)"
+    - name: "[VERIFY-O2C-005] Verify only the host names with the switch on are kept as a fact (no document body, never cached)"
       ansible.builtin.assert:
         that:
           - "'o2c_app_telemetry_roster(' in _t['O2C-005']['ansible.builtin.set_fact'].o2c_app_switch_on"
@@ -1512,17 +1505,15 @@
           - _t['O2C-005'].no_log is true
         quiet: true
 
-    - name: "[VERIFY-O2C-006] Verify the host address read is a parallel read-only OpenBao GET batch over hosts/<host> that tolerates only 200 and 404"
+    - name: "[VERIFY-O2C-006] Verify the Endpoints documents are read in one read-only shared-reader query that treats a missing document as empty"
       ansible.builtin.assert:
         that:
-          - _t['O2C-006'].o2c_http.parallel is true
-          - _t['O2C-006'].o2c_http.status_code == [200, 404]
-          - "'/agents' not in _t['O2C-006'].o2c_http.requests"
-          - _t['O2C-006'].check_mode is false and _t['O2C-006'].changed_when is false and _t['O2C-006'].no_log is true
-          - "'o2c_host_kv_fixture is not defined' in _t['O2C-006'].when"
+          - "'/endpoints' in _t['O2C-006'].vars._paths"
+          - "'required=false' in _t['O2C-006']['ansible.builtin.set_fact'].o2c_endpoint_docs"
+          - _t['O2C-006'].check_mode is false and _t['O2C-006'].no_log is true
         quiet: true
 
-    - name: "[VERIFY-O2C-007] Verify only the host to address table is kept as a fact (no KV body, never cached)"
+    - name: "[VERIFY-O2C-007] Verify only the host to address table is kept as a fact (no document body, never cached)"
       ansible.builtin.assert:
         that:
           - "'o2c_host_addresses(' in _t['O2C-007']['ansible.builtin.set_fact'].o2c_host_addresses"

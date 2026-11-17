@@ -5,130 +5,70 @@
 # playbooks/host_agents_maintenance.yml이 컨트롤러(connection: local)에서 호스트마다 include_role(tasks_from: maintenance)로 호출한다.
 # restic은 backup 역할이 고정한 버전·체크섬(monitoring/vars/main.yml)을 쓰고 Deploy와 같은 컨트롤러 캐시를 공유한다(별도 버전 표 없음).
 # 순서: check → (첫째 일요일) check --read-data-subset=10% → 모두 성공한 호스트만 forget --prune. 강제 unlock은 하지 않는다.
-# 시크릿(restic 비밀번호, RustFS 유지보수 키, 컨트롤러 토큰)은 OpenBao에서 조회하며 모든 해당 태스크는 no_log이다.
+# 시크릿(restic 비밀번호, RustFS 유지보수 키, OpenObserve 수집 자격)은 OpenBao에서 조회하며 모든 해당 태스크는 no_log이다.
 - name: "[BAK-070] Load the shared Host Agents version table and constants from monitoring"
   ansible.builtin.include_vars:
     file: "{{ role_path }}/../monitoring/vars/main.yml"
 
-# Deploy는 resolve_connection.yml이 AppRole(VAULT_ROLE_ID/VAULT_SECRET_ID)로 토큰을 받지만, 유지보수 플레이북은 SSH 접속
-# 해석이 필요 없어 그 플레이를 import하지 않는다. 같은 Semaphore Environment로 동작하도록 로그인만 같은 방식으로 수행한다.
-- name: "[BAK-087] Log in to OpenBao with AppRole when no token is given (same as resolve_connection.yml)"
-  vars:
-    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
-    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
-    _vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
-    _vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
-    _vault_token_given: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true) }}"
-  ansible.builtin.uri:
-    url: "{{ _vault_addr_eff }}/v1/auth/approle/login"
-    method: POST
-    headers: "{{ {'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {} }}"
-    body_format: json
-    body:
-      role_id: "{{ _vault_role_id }}"
-      secret_id: "{{ _vault_secret_id }}"
-    status_code: [-1, 200, 400, 401, 403, 404, 500]
-    timeout: 5
-    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
-  register: _maint_approle_login
+# 네임스페이스·마운트·인증(AppRole)·우회는 공용 읽기 지점(lookup_plugins/openbao_doc.py)이 정한다. 이 파일에는 경로 접두사가 없다.
+# 읽는 문서는 vars/main.yml의 backup_openbao_required가 선언한다. 유지보수 플레이북은 SSH 접속 해석(resolve_connection)을 쓰지 않으므로
+# 같은 방식으로 토큰만 플레이당 한 번 받아 둔다.
+- name: "[BAK-087] Log in to OpenBao once through the shared read point (token for the whole play)"
+  ansible.builtin.set_fact:
+    _vault_token: "{{ lookup('openbao_doc', '@token') }}"
   run_once: true
   check_mode: false
   no_log: true
-  when:
-    - host_agents_kv_fixture is not defined
-    - _vault_token_given | length == 0
-    - _vault_role_id | length > 0
-    - _vault_secret_id | length > 0
 
-- name: "[BAK-088] Use the AppRole client token for the maintenance KV lookups"
-  ansible.builtin.set_fact:
-    _vault_token: "{{ _maint_approle_login.json.auth.client_token }}"
-  no_log: true
-  when: (_maint_approle_login.json.auth.client_token | default('')) | length > 0
-
-- name: "[BAK-071] Fetch maintenance KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)"
+- name: "[BAK-071] Read the maintenance documents from OpenBao (backup_openbao_required)"
   vars:
-    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
-    _vault_token_eff: "{{ _vault_token | default(vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true), true) }}"
-    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
-    _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
-    _vault_hosts_prefix_eff: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true)) | regex_replace('^secret/', '') }}"
-  ansible.builtin.uri:
-    url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/{{ item.path }}"
-    method: GET
-    headers: >-
-      {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
-    status_code: [200, 404]
-    timeout: 5
-    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
-  loop:
-    - { key: host, path: "{{ _vault_hosts_prefix_eff }}{{ inventory_hostname }}/agents" }
-    - { key: openobserve, path: agents/openobserve }
-    - { key: rustfs, path: agents/rustfs }
-  loop_control:
-    label: "{{ item.key }}"
-  register: _maint_kv_resp
-  changed_when: false
-  failed_when: false
+    _maint_patterns: "{{ backup_openbao_required.keys() | list }}"
+    _maint_paths: "{{ _maint_patterns | map('replace', '+', inventory_hostname) | list }}"
+  ansible.builtin.set_fact:
+    _maint_docs: "{{ dict(_maint_patterns | zip(query('openbao_doc', *_maint_paths))) }}"
   check_mode: false
   no_log: true
-  when:
-    - host_agents_kv_fixture is not defined
-    - _vault_token_eff | length > 0
 
 - name: "[BAK-072] Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)"
   vars:
-    # 토큰이 없어 BAK-071이 skip되면 results는 status 없는 항목 3개다 — 빈 목록으로 보고 '자격증명 없음'을 안내한다.
-    _statuses: "{{ _maint_kv_resp.results | default([]) | rejectattr('skipped', 'defined') | map(attribute='status', default=-1) | list }}"
-    _by_key: >-
-      {{ dict(_maint_kv_resp.results | default([]) | map(attribute='item.key') | zip(
-           _maint_kv_resp.results | default([]) | map(attribute='json.data.data', default={}))) }}
-    _kv: >-
-      {{ host_agents_kv_fixture if host_agents_kv_fixture is defined
-         else {'host': _by_key.host | default({}), 'openobserve': _by_key.openobserve | default({}), 'rustfs': _by_key.rustfs | default({})} }}
+    _maint_missing: >-
+      {%- set found = namespace(names=[]) -%}
+      {%- for pattern, keys in backup_openbao_required.items() -%}
+      {%- for key in keys -%}
+      {%- if (_maint_docs[pattern][key] | default('')) | string | length == 0 -%}
+      {%- set found.names = found.names + [pattern | replace('+', inventory_hostname) ~ '.' ~ key] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ found.names | to_json }}
   block:
-    - name: Assert OpenBao answered every maintenance lookup
-      ansible.builtin.assert:
-        that: host_agents_kv_fixture is defined or (_statuses | length == 3 and _statuses | select('in', [200, 404]) | list | length == 3)
-        fail_msg: >-
-          {{ inventory_hostname }}: OpenBao 조회 실패 — {{ ('status=' ~ (_statuses | string)) if _statuses | length > 0
-          else ('AppRole 로그인 실패(status=' ~ (_maint_approle_login.status | default(-1)) ~ ')' if (_maint_approle_login.status is defined)
-          else 'OpenBao 자격증명 없음') }} (Semaphore Environment에 VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN 주입)
-        quiet: true
-
-    - name: Expose the shared agents KV so endpoint defaults resolve like the Deploy path
-      ansible.builtin.set_fact:
-        # #526 전까지의 이음매: 옛 KV 값을 Deploy 경로(inventory/services/*)와 같은 팩트 모양으로 맞춘다.
-        host_agents_services: >-
-          {{ {'openobserve': {'url': _kv.openobserve.o2_endpoint | default(''), 'org': _kv.openobserve.o2_org | default('default', true)},
-              'rustfs': {'url': _kv.rustfs.rustfs_endpoint | default(''), 'region': _kv.rustfs.rustfs_region | default('')}} }}
-        rustfs_bucket: "{{ ((_kv.host | default({})).rustfs_bucket | default('')) | string | trim or (rustfs_bucket_prefix ~ '-' ~ inventory_hostname) }}"
-
     # 빠진 항목의 이름만(값은 절대 아님) 모아 한 번에 보여 준다. 버킷 이름은 시크릿이 아니므로 그대로 보여 준다.
     # 주의: assert의 fail_msg는 블록의 no_log와 무관하게 출력된다 — 이 목록에 시크릿 값을 넣지 않는다.
-    - name: Assert the required maintenance secrets exist
+    - name: Assert the required maintenance inputs exist
       vars:
-        _maint_missing: >-
-          {{ (['hosts/' ~ inventory_hostname ~ '/agents.restic_password'] if (_kv.host.restic_password | default('')) | length == 0 else [])
-             + (['agents/rustfs.maintenance_access_key'] if (_kv.rustfs.maintenance_access_key | default('')) | length == 0 else [])
-             + (['agents/rustfs.maintenance_secret_key'] if (_kv.rustfs.maintenance_secret_key | default('')) | length == 0 else [])
-             + (['agents/openobserve.controller_ingest_token'] if (_kv.openobserve.controller_ingest_token | default('')) | length == 0 else [])
-             + (['agents/openobserve.o2_endpoint'] if o2_endpoint | default('') | length == 0 else [])
-             + (['agents/rustfs.rustfs_endpoint'] if rustfs_endpoint | default('') | length == 0 else [])
+        _maint_problems: >-
+          {{ (_maint_missing | from_json)
              + ([] if rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') else ['rustfs_bucket(S3 이름 규칙 위반: ' ~ rustfs_bucket ~ ')']) }}
       ansible.builtin.assert:
-        that: _maint_missing | length == 0
+        that: _maint_problems | length == 0
         fail_msg: >-
-          {{ inventory_hostname }}: 유지보수 필수 입력 누락: {{ _maint_missing | join(', ') }}
+          {{ inventory_hostname }}: 유지보수 필수 입력 누락: {{ _maint_problems | join(', ') }}
           (Host Agents가 적용되지 않은 호스트라면 인벤토리 host_agents_excluded 그룹에 넣는다)
         quiet: true
 
+    - name: Expose the service addresses so endpoint defaults resolve like the Deploy path
+      ansible.builtin.set_fact:
+        host_agents_services:
+          openobserve: "{{ _maint_docs['inventory/services/openobserve'] }}"
+          rustfs: "{{ _maint_docs['inventory/services/rustfs'] }}"
+
     - name: Keep the resolved secrets as host facts
       ansible.builtin.set_fact:
-        _maint_restic_password: "{{ _kv.host.restic_password }}"
-        _maint_access_key: "{{ _kv.rustfs.maintenance_access_key }}"
-        _maint_secret_key: "{{ _kv.rustfs.maintenance_secret_key }}"
-        _maint_ingest_token: "{{ _kv.openobserve.controller_ingest_token }}"
+        _maint_restic_password: "{{ _maint_docs['secrets/assets/+/agents'].restic_password }}"
+        _maint_access_key: "{{ _maint_docs['secrets/services/rustfs/maintenance'].access_key }}"
+        _maint_secret_key: "{{ _maint_docs['secrets/services/rustfs/maintenance'].secret_key }}"
+        _maint_ingest_user: "{{ _maint_docs['secrets/services/openobserve/ingest'].username }}"
+        _maint_ingest_password: "{{ _maint_docs['secrets/services/openobserve/ingest'].password }}"
   no_log: true
 
 - name: "[BAK-073] Detect the controller architecture for the pinned restic"
@@ -256,7 +196,7 @@
     url: "{{ o2_endpoint }}/api/{{ o2_org }}/backup_logs/_json"
     method: POST
     headers:
-      Authorization: "Basic {{ (o2_org ~ ':' ~ _maint_ingest_token) | b64encode }}"
+      Authorization: "Basic {{ (_maint_ingest_user ~ ':' ~ _maint_ingest_password) | b64encode }}"
     body_format: json
     body: "{{ _maint_events }}"
     status_code: [200, 201]

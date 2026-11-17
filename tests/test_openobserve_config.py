@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from o2c_render import KV, WEBHOOK_URL, fixture_args, render_desired
+from o2c_render import ADMIN, CONFIG_DOC, INGEST, INGEST_DOC, ADMIN_DOC, NOTIFY, NOTIFY_DOC, WEBHOOK_URL, fixture_args, render_desired
 from o2c_alert_helpers import (  # 렌더 테스트와 공유하는 상수·헬퍼(#348)
     DEFAULTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS,
     FORTIGATE_FN, GITHUB_FN, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS,
@@ -227,11 +227,11 @@ def o2():
     srv.close()
 
 
-def _apply(o2, *args, kv=None, extra=None, inventory="localhost,"):
-    # 앱 텔레메트리 스위치는 OpenBao에서 읽고 토큰이 없으면 실패하므로, 기본은 "아무 호스트도 안 켬" 픽스처다(None이면 픽스처 없음).
+def _apply(o2, *args, config=None, docs=None, assets=None, endpoints=None, extra=None, inventory="localhost,"):
+    # OpenBao는 공용 읽기 지점의 우회 변수(openbao_fixture)로만 흉내 낸다. 기본은 "Asset 문서 없음"(아무 호스트도 스위치·주소 없음)이다.
     extra = {"o2c_verify_retries": 1, "o2c_verify_delay": 0, **(extra or {})}
     env = dict(os.environ, ANSIBLE_NOCOLOR="1")
-    cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), *fixture_args(o2.url, kv=kv, extra=extra), *args]
+    cmd = ["ansible-playbook", "-i", str(inventory), str(PLAYBOOK), *fixture_args(o2.url, config=config, docs=docs, assets=assets, endpoints=endpoints, extra=extra), *args]
     res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     return res
 
@@ -277,13 +277,6 @@ def test_the_legacy_json_destination_and_template_are_neither_defined_nor_delete
 
 
 
-def test_webhook_auth_header_name_comes_from_openbao(o2):
-    kv = dict(KV, alert_webhook_auth_header="X-NANOIT-ACCESS")
-    assert _apply(o2, kv=kv).returncode == 0
-    assert o2.store["destination"]["infra-automation-plain"]["headers"] == {
-        "Content-Type": PLAIN_CT, "X-NANOIT-ACCESS": "WEBHOOK-TOKEN-abc"}
-
-
 def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions(o2):
     assert _apply(o2).returncode == 0
     fn = o2.store["function"]["security_semantics"]
@@ -294,7 +287,7 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert func_node["name"] == "security_semantics" and func_node["after_flatten"] is True
     dest = o2.store["destination"]["infra-automation-plain"]
     assert dest["url"] == WEBHOOK_URL and dest["type"] == "http"
-    assert dest["headers"] == {"Content-Type": PLAIN_CT, "Authorization": "WEBHOOK-TOKEN-abc"}
+    assert dest["headers"] == {"Content-Type": PLAIN_CT}   # 인증 헤더·토큰은 없다(URL 자체가 권한, alert/notify는 url 하나)
     assert dest["template"] == "infra-automation-plain"
     by = o2.store["alert"]
     assert all(a["destinations"] == ["infra-automation-plain"] for a in by.values())
@@ -464,22 +457,41 @@ def test_check_mode_after_apply_reports_no_changes(o2):
 def test_secrets_never_reach_the_output(o2):
     res = _apply(o2, "-vvv")
     assert res.returncode == 0, res.stdout + res.stderr
-    for secret in ("API-PASSWORD-xyz", "WEBHOOK-TOKEN-abc", "SECRET-PATH-123"):
+    for secret in ("API-PASSWORD-xyz", "INGEST-TOKEN-qrs", "SECRET-PATH-123"):
         assert secret not in res.stdout + res.stderr
     assert o2.auth == {"Basic " + base64.b64encode(b"cfg@example.com:API-PASSWORD-xyz").decode(),
-                       "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}   # 설정 API 계정 + 검증 주입 토큰
+                       "Basic " + base64.b64encode(b"ingest@example.com:INGEST-TOKEN-qrs").decode()}   # 설정 API 계정 + 검증 주입 자격
 
 
-@pytest.mark.parametrize("missing", ["api_user", "api_password", "alert_webhook_plain_url"])
-def test_missing_inputs_fail_before_any_request(o2, missing):
-    res = _apply(o2, kv={k: v for k, v in KV.items() if k != missing})
+@pytest.mark.parametrize("doc, key", [(ADMIN_DOC, "username"), (ADMIN_DOC, "password"), (INGEST_DOC, "username"), (INGEST_DOC, "password"),
+                                      (NOTIFY_DOC, "url"), ("inventory/services/openobserve", "url")])
+def test_missing_required_keys_fail_before_any_request_and_name_only_the_path_and_key(o2, doc, key):
+    full = {ADMIN_DOC: ADMIN, INGEST_DOC: INGEST, NOTIFY_DOC: NOTIFY, "inventory/services/openobserve": {"url": o2.url}}[doc]
+    res = _apply(o2, docs={doc: {k: v for k, v in full.items() if k != key}})
     assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+    assert f"{doc}: {key}" in res.stdout   # 문서 경로와 키 이름만 밝힌다
+    assert not any(v in res.stdout + res.stderr for v in (*ADMIN.values(), *INGEST.values(), WEBHOOK_URL))
 
 
-def test_webhook_without_token_sends_no_auth_header(o2):
-    res = _apply(o2, kv={k: v for k, v in KV.items() if k != "alert_webhook_token"})
+@pytest.mark.parametrize("doc", [ADMIN_DOC, INGEST_DOC, NOTIFY_DOC, "inventory/services/openobserve"])
+def test_a_missing_required_document_fails_before_any_request(o2, doc):
+    res = _apply(o2, docs={doc: None})
+    assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+    assert doc in res.stdout + res.stderr
+
+
+def test_the_job_config_document_is_optional_and_a_missing_one_means_empty_lists(o2):
+    res = _apply(o2, docs={CONFIG_DOC: None})
     assert res.returncode == 0, res.stdout + res.stderr
-    assert o2.store["destination"]["infra-automation-plain"]["headers"] == {"Content-Type": PLAIN_CT}
+
+
+def test_without_any_openbao_auth_the_run_fails_before_any_request(o2, monkeypatch):
+    for var in ("VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID"):
+        monkeypatch.delenv(var, raising=False)
+    cmd = ["ansible-playbook", "-i", "localhost,", str(PLAYBOOK), "-e", json.dumps({"vault_addr": "http://127.0.0.1:9"})]
+    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300,
+                         env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
+    assert res.returncode != 0 and "OpenBao" in res.stdout + res.stderr and o2.reads == [] and o2.writes == []
 
 
 def test_every_api_task_is_no_log_and_writes_are_skipped_in_check_mode():
@@ -506,7 +518,7 @@ def test_credential_facts_are_never_cacheable_and_reads_use_the_plan_path_table(
     tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
     flat = [t for top in tasks for t in (top.get("block") or [top])]
     facts = [t for t in flat if "ansible.builtin.set_fact" in t
-             and ({"o2c_kv", "o2c_auth_headers"} & set(t["ansible.builtin.set_fact"]))]
+             and ({"o2c_docs", "o2c_auth_headers"} & set(t["ansible.builtin.set_fact"]))]
     assert len(facts) == 2 and all(t["ansible.builtin.set_fact"].get("cacheable") is False for t in facts)
     read = next(t for t in tasks if t["name"].startswith("[O2C-010]"))
     assert "o2c_org | o2c_read_requests" in read["o2c_http"]["requests"]
@@ -541,7 +553,7 @@ def test_verification_injects_synthetic_records_into_suffixed_streams_with_the_c
                        "network_device_uptime_ticks_alert_verify",
                        "backup_logs_alert_verify", "app_logs_alert_verify", "jvm_memory_used_alert_verify",
                        "host_status_logs_alert_verify", SELFTEST_STREAM}   # 마지막은 O2C-014가 빈 스트림을 만드는 시드
-    assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()}
+    assert {a for _, a, _ in o2.ingests} == {"Basic " + base64.b64encode(b"ingest@example.com:INGEST-TOKEN-qrs").decode()}
     assert len(o2.searches) == len(EXPECTED_ALERTS)
     for stream, sql in o2.searches:
         assert stream.endswith("_alert_verify") and 'FROM "security_logs"' not in sql and 'FROM "system_logs"' not in sql
@@ -623,8 +635,8 @@ def test_check_mode_sends_no_verification_requests(o2):
     assert o2.ingests == [] and o2.searches == [] and not any("history" in r for r in o2.reads)
 
 
-def test_missing_controller_ingest_token_fails_the_verification(o2):
-    res = _apply(o2, kv={k: v for k, v in KV.items() if k != "controller_ingest_token"})
+def test_missing_ingest_credential_fails_before_the_verification_injects_anything(o2):
+    res = _apply(o2, docs={INGEST_DOC: {"username": INGEST["username"]}})
     assert res.returncode != 0 and o2.ingests == []
 
 
@@ -637,21 +649,21 @@ def test_verification_never_leaks_secrets_and_every_verify_uri_task_is_no_log():
 def test_ingest_token_is_not_printed(o2):
     res = _apply(o2, "-vvv")
     assert "INGEST-TOKEN-qrs" not in res.stdout + res.stderr
-    assert base64.b64encode(b"default:INGEST-TOKEN-qrs").decode() not in res.stdout + res.stderr
+    assert base64.b64encode(b"ingest@example.com:INGEST-TOKEN-qrs").decode() not in res.stdout + res.stderr
 
 
 # --- root 로그인 정상 출발지 (Spec #184 / Ticket-8) ---------------------------------------------------------------------
-# 정상 출발지 목록은 OpenBao(agents/openobserve)의 normal_sources에만 있다. 아래 주소는 문서용(TEST-NET-1) 가짜 값이다.
+# 정상 출발지 목록은 OpenBao(inventory/config/openobserve_config)의 normal_sources에만 있다. 아래 주소는 문서용(TEST-NET-1) 가짜 값이다.
 SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP = "192.0.2.10", "192.0.2.20", "192.0.2.21"
 SOURCES = [{"address": SEMAPHORE_IP, "kind": "semaphore"}, {"address": OFFICE_IP, "kind": "office"},
            {"address": OFFICE_S2S_IP, "kind": "office"}]
-KV_SOURCES = dict(KV, normal_sources=SOURCES)
+CONFIG_SOURCES = {"normal_sources": SOURCES}
 
 
 
 
 def test_external_root_login_alert_excludes_every_normal_source_and_stays_p1_event_alert(o2):
-    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    assert _apply(o2, config=CONFIG_SOURCES).returncode == 0
     alert = o2.store["alert"]["infra-root-login-success"]
     sql = alert["query_condition"]["sql"]
     for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP):
@@ -662,7 +674,7 @@ def test_external_root_login_alert_excludes_every_normal_source_and_stays_p1_eve
 
 
 def test_known_root_login_alert_is_a_p2_event_alert_of_registered_and_private_sources(o2):
-    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    assert _apply(o2, config=CONFIG_SOURCES).returncode == 0
     alert = o2.store["alert"]["infra-root-login-known"]
     sql = alert["query_condition"]["sql"]
     assert "infra-root-login-office-daily" not in o2.store["alert"]
@@ -683,7 +695,7 @@ def test_known_root_login_silence_comes_from_the_role_variable_and_must_be_an_in
 
 
 def test_private_ranges_are_plain_like_patterns_with_172_16_to_31_expanded(o2):
-    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    assert _apply(o2, config=CONFIG_SOURCES).returncode == 0
     for name in ("infra-root-login-success", "infra-root-login-known"):
         sql = _sql(o2, name)
         for pat in ("10.%", "192.168.%", "127.%", "169.254.%", "172.16.%", "172.24.%", "172.31.%"):
@@ -691,9 +703,9 @@ def test_private_ranges_are_plain_like_patterns_with_172_16_to_31_expanded(o2):
         assert "'172.15.%'" not in sql and "'172.32.%'" not in sql and "'172.%'" not in sql
 
 
-def _root_rows(o2, kv, records):
+def _root_rows(o2, config, records):
     """Both root alert SQLs run on sqlite over the records; returns the sets of fired hosts (P1, P2)."""
-    assert _apply(o2, kv=kv).returncode == 0
+    assert _apply(o2, config=config).returncode == 0
     fired = []
     for name in ("infra-root-login-success", "infra-root-login-known"):
         sql = _sql(o2, name).replace('"security_logs"', '"t"')
@@ -728,37 +740,37 @@ ROOT_CASES = [  # (host, source, user, outcome, P1, P2)
 
 
 def test_root_alert_sql_splits_logins_into_p1_external_and_p2_known_on_the_real_rows(o2):
-    p1, p2 = _root_rows(o2, KV_SOURCES, [_login(h, src, u, o) for h, src, u, o, _, _ in ROOT_CASES])
+    p1, p2 = _root_rows(o2, CONFIG_SOURCES, [_login(h, src, u, o) for h, src, u, o, _, _ in ROOT_CASES])
     assert p1 == {h for h, _, _, _, a, _ in ROOT_CASES if a}
     assert p2 == {h for h, _, _, _, _, b in ROOT_CASES if b}
     assert not p1 & p2   # 한 로그인은 한 계층에만 걸린다
 
 
 def test_root_alert_sql_with_an_empty_source_list_sends_public_to_p1_and_private_to_p2(o2):
-    p1, p2 = _root_rows(o2, KV, [_login(h, src, u, o) for h, src, u, o, _, _ in ROOT_CASES])
+    p1, p2 = _root_rows(o2, {}, [_login(h, src, u, o) for h, src, u, o, _, _ in ROOT_CASES])
     registered = {"semaphore", "office", "s2s"}   # 목록이 비면 192.0.2.x는 그냥 공인 출발지다
     assert registered <= p1 and not registered & p2
     assert {"private-10", "loopback", "linklocal", "private-172-16"} <= p2 and not {"private-10", "loopback"} & p1
 
 
 def test_ssh_failure_alerts_ignore_the_normal_source_list(o2):
-    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    assert _apply(o2, config=CONFIG_SOURCES).returncode == 0
     for name in ("infra-ssh-login-failures-per-source", "infra-ssh-login-failures-per-host"):
         assert not any(ip in _sql(o2, name) for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP)), name
 
 
 def test_changing_the_source_list_updates_only_the_alerts_that_read_it(o2):
-    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    assert _apply(o2, config=CONFIG_SOURCES).returncode == 0
     o2.writes.clear()
-    moved = dict(KV, normal_sources=[{"address": "192.0.2.99", "kind": "office"}])
-    assert _apply(o2, kv=moved).returncode == 0
+    moved = {"normal_sources": [{"address": "192.0.2.99", "kind": "office"}]}
+    assert _apply(o2, config=moved).returncode == 0
     ids = {o2.store["alert"][n]["alert_id"] for n in ("infra-root-login-success", "infra-root-login-known",
                                                       "infra-ssh-login-unregistered-source", "infra-fortigate-admin-login-new-source")}   # 뒤 둘은 #330
     assert {p.rsplit("/", 1)[1] for _, p, _ in o2.writes} == ids and all(m == "PUT" for m, _, _ in o2.writes)
 
 
 def test_source_addresses_never_reach_the_output(o2):
-    res = _apply(o2, "-vvv", kv=KV_SOURCES)
+    res = _apply(o2, "-vvv", config=CONFIG_SOURCES)
     assert res.returncode == 0, res.stdout + res.stderr
     for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP):
         assert ip not in res.stdout + res.stderr
@@ -767,13 +779,13 @@ def test_source_addresses_never_reach_the_output(o2):
 @pytest.mark.parametrize("bad", [{"address": "192.0.2.4' OR '1'='1", "kind": "office"},
                                  {"address": "192.0.2.5", "kind": "partner"}, {"address": "", "kind": "office"}])
 def test_invalid_source_entries_fail_before_any_request(o2, bad):
-    res = _apply(o2, kv=dict(KV, normal_sources=[bad]))
+    res = _apply(o2, config={"normal_sources": [bad]})
     assert res.returncode != 0 and o2.reads == [] and o2.writes == []
     assert "1' OR" not in res.stdout + res.stderr
 
 
 def test_verification_places_normal_sources_in_the_synthetic_records_by_kind(o2):
-    res = _apply(o2, kv=KV_SOURCES)
+    res = _apply(o2, config=CONFIG_SOURCES)
     assert res.returncode == 0, res.stdout + res.stderr
     recs = [r for _, _, rs in o2.ingests for r in rs if r.get("user_name") == "root"]
     by_host = {r["host_name"].rsplit("-", 1)[0]: r["source_address"] for r in recs}
@@ -808,10 +820,10 @@ def test_a_committed_file_never_holds_a_real_looking_internal_address():
 
 # --- 리소스 고갈 알림 (Spec #184 / Ticket-3) ------------------------------------------------------------
 
-def test_openbao_exclusions_and_threshold_overrides_reach_the_sql(o2):
-    kv = dict(KV, alert_resource_exclusions=[{"host": "ns0297", "mount": "/data"}, {"host": "ns0288", "metric": "memory"}],
-              alert_resource_thresholds=[{"host": "ns0300", "mount": "/var", "p2": 97, "p1": 99}])
-    assert _apply(o2, kv=kv).returncode == 0
+def test_role_variable_exclusions_and_threshold_overrides_reach_the_sql(o2):
+    extra = {"o2c_resource_exclusions": [{"host": "ns0297", "mount": "/data"}, {"host": "ns0288", "metric": "memory"}],
+             "o2c_resource_thresholds": [{"host": "ns0300", "mount": "/var", "p2": 97, "p1": 99}]}
+    assert _apply(o2, extra=extra).returncode == 0
     disk = _sql(o2, "infra-disk-usage-p2")
     assert "NOT (host_name = 'ns0297' AND mountpoint = '/data')" in disk and "ns0288" not in disk
     assert "ns0288" in _sql(o2, "infra-memory-usage-p2")
@@ -819,11 +831,11 @@ def test_openbao_exclusions_and_threshold_overrides_reach_the_sql(o2):
     assert "THEN 99" in _sql(o2, "infra-disk-usage-p1") and "ns0300" not in _sql(o2, "infra-memory-usage-p1")
 
 
-def test_empty_openbao_resource_keys_work_and_second_run_changes_nothing_with_them(o2):
-    kv = dict(KV, alert_resource_exclusions=[{"host": "ns0297", "mount": "/data"}])
-    assert _apply(o2, kv=kv).returncode == 0
+def test_empty_resource_variables_work_and_second_run_changes_nothing_with_them(o2):
+    extra = {"o2c_resource_exclusions": [{"host": "ns0297", "mount": "/data"}]}
+    assert _apply(o2, extra=extra).returncode == 0
     o2.writes.clear()
-    assert _apply(o2, kv=kv).returncode == 0 and o2.writes == []
+    assert _apply(o2, extra=extra).returncode == 0 and o2.writes == []
 
 
 def test_resource_fixtures_cover_the_ns0334_case_squashfs_and_below_threshold():
@@ -894,7 +906,7 @@ def test_first_run_seeds_the_missing_selftest_stream_with_one_past_record_before
     assert res.returncode == 0, res.stdout + res.stderr
     sent = _selftest_ingests(o2)
     assert len(sent) == 1 and len(sent[0][2]) == 1
-    assert sent[0][1] == "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()
+    assert sent[0][1] == "Basic " + base64.b64encode(b"ingest@example.com:INGEST-TOKEN-qrs").decode()
     # 알림 조회 구간(5분)보다 오래된 시각이라 시드 레코드로는 통지가 나가지 않는다
     age_s = time.time() - sent[0][2][0]["_timestamp"] / 1_000_000
     assert age_s > o2.store["alert"][SELFTEST]["trigger_condition"]["period"] * 60 and age_s < 5 * 3600
@@ -920,7 +932,7 @@ def test_verify_notify_injects_exactly_one_selftest_record_with_the_controller_t
     assert res.returncode == 0, res.stdout + res.stderr
     sent = _selftest_ingests(o2)
     assert len(sent) == 1 and len(sent[0][2]) == 1
-    assert sent[0][1] == "Basic " + base64.b64encode(b"default:INGEST-TOKEN-qrs").decode()
+    assert sent[0][1] == "Basic " + base64.b64encode(b"ingest@example.com:INGEST-TOKEN-qrs").decode()
     assert sent[0][2][0]["host_name"].startswith("selftest")
 
 
@@ -1005,9 +1017,9 @@ def test_changing_the_inventory_changes_the_roster_sql_and_a_rerun_with_the_same
 
 
 def test_expired_planned_stop_exception_is_ignored_and_a_valid_one_removes_the_host(o2, tmp_path):
-    kv = dict(KV, silent_host_exceptions=[{"host": "ns0001", "expires": "2000-01-01"},
-                                          {"host": "ns0004", "expires": "2999-12-31"}])
-    assert _apply(o2, kv=kv, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
+    config = {"silent_host_exceptions": [{"host": "ns0001", "expires": "2000-01-01"},
+                                         {"host": "ns0004", "expires": "2999-12-31"}]}
+    assert _apply(o2, config=config, inventory=_inventory(tmp_path, SERVERS)).returncode == 0
     for name in ("infra-silent-host-p2", "infra-silent-host-p1"):
         hosts = _branch_hosts(_sql(o2, name))
         assert "ns0001" in hosts and "ns0004" not in hosts, name
@@ -1016,7 +1028,7 @@ def test_expired_planned_stop_exception_is_ignored_and_a_valid_one_removes_the_h
 @pytest.mark.parametrize("bad", [{"host": "ns0001"}, {"host": "ns0001", "expires": "soon"},
                                  {"expires": "2999-12-31"}, {"host": "ns0001' OR '1'='1", "expires": "2999-12-31"}])
 def test_planned_stop_exception_without_a_valid_expiry_fails_before_any_request(o2, tmp_path, bad):
-    res = _apply(o2, kv=dict(KV, silent_host_exceptions=[bad]), inventory=_inventory(tmp_path, SERVERS))
+    res = _apply(o2, config={"silent_host_exceptions": [bad]}, inventory=_inventory(tmp_path, SERVERS))
     assert res.returncode != 0 and o2.writes == [] and o2.reads == []
 
 
@@ -1289,26 +1301,25 @@ def test_check_mode_plans_the_retention_but_writes_nothing(o2):
 
 
 def _app_kv(*hosts, off=()):
-    return {h: {"otel_app_telemetry": True} for h in hosts} | {h: {"otel_app_telemetry": False} for h in off}
+    """Asset 문서(inventory/assets/<ns>)의 agents.otel.app_telemetry 스위치."""
+    return {h: {"agents": {"otel": {"app_telemetry": h not in off}}} for h in (*hosts, *off)}
 
 
-def _app_apply(o2, tmp_path, kv_by_host, **kw):
-    extra = {"o2c_app_telemetry_kv_fixture": kv_by_host}
-    return _apply(o2, inventory=_inventory(tmp_path, SERVERS, **kw), extra=extra)
+def _app_apply(o2, tmp_path, assets, **kw):
+    return _apply(o2, inventory=_inventory(tmp_path, SERVERS, **kw), assets=assets)
 
 
 def test_app_telemetry_silent_roster_holds_only_hosts_with_the_switch_on(o2, tmp_path):
-    kv = _app_kv("ns0001", "ns0004", off=["ns0002"])   # ns0003은 키가 없다(꺼짐), ns0002는 명시적으로 꺼짐
+    kv = _app_kv("ns0001", "ns0004", off=["ns0002"])   # ns0003은 Asset 문서가 없다(꺼짐), ns0002는 명시적으로 꺼짐
     res = _app_apply(o2, tmp_path, kv)
     assert res.returncode == 0, res.stdout + res.stderr
     assert _branch_hosts(_sql(o2, APP_ALERT)) == {"ns0001", "ns0004"}
 
 
 def test_app_telemetry_roster_ignores_hosts_outside_the_collect_roster_and_planned_stops(o2, tmp_path):
-    kv = dict(KV, silent_host_exceptions=[{"host": "ns0004", "expires": "2999-12-31"}])
+    config = {"silent_host_exceptions": [{"host": "ns0004", "expires": "2999-12-31"}]}
     fixture = _app_kv("ns0001", "ns0002", "ns0003", "ns0004", "ns0999")
-    res = _apply(o2, kv=kv, inventory=_inventory(tmp_path, SERVERS, excluded=["ns0002"], backup_only=["ns0003"]),
-                 extra={"o2c_app_telemetry_kv_fixture": fixture})
+    res = _apply(o2, config=config, inventory=_inventory(tmp_path, SERVERS, excluded=["ns0002"], backup_only=["ns0003"]), assets=fixture)
     assert res.returncode == 0, res.stdout + res.stderr
     assert _branch_hosts(_sql(o2, APP_ALERT)) == {"ns0001"}
 
@@ -1334,11 +1345,11 @@ def test_app_telemetry_silent_follows_the_state_alert_rules(o2, tmp_path):
 
 def test_switching_a_host_on_changes_only_the_app_alert_and_a_rerun_writes_nothing(o2, tmp_path):
     inv = _inventory(tmp_path, SERVERS)
-    on = {"o2c_app_telemetry_kv_fixture": _app_kv("ns0001")}
-    assert _apply(o2, inventory=inv, extra=on).returncode == 0
+    on = _app_kv("ns0001")
+    assert _apply(o2, inventory=inv, assets=on).returncode == 0
     o2.writes.clear()
-    assert _apply(o2, inventory=inv, extra=on).returncode == 0 and o2.writes == []
-    assert _apply(o2, inventory=inv, extra={"o2c_app_telemetry_kv_fixture": _app_kv("ns0001", "ns0004")}).returncode == 0
+    assert _apply(o2, inventory=inv, assets=on).returncode == 0 and o2.writes == []
+    assert _apply(o2, inventory=inv, assets=_app_kv("ns0001", "ns0004")).returncode == 0
     assert [(m, p) for m, p, _ in o2.writes] == [("PUT", f"/api/v2/default/alerts/{o2.store['alert'][APP_ALERT]['alert_id']}")]
 
 
@@ -1354,20 +1365,24 @@ def test_app_telemetry_fixtures_cover_firing_and_quiet_cases_and_verification_us
     assert "ns0001" in _branch_hosts(searched)
 
 
-def test_missing_openbao_token_fails_instead_of_emptying_the_app_telemetry_roster(o2, tmp_path, monkeypatch):
-    for var in ("VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID"):
-        monkeypatch.delenv(var, raising=False)
-    res = _apply(o2, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_app_telemetry_kv_fixture": None})   # roster has hosts, no switch fixture, no token
-    assert res.returncode != 0
-    assert "OpenBao" in res.stdout and "O2C-004" not in res.stderr
+def test_an_unreadable_asset_document_fails_instead_of_dropping_the_host_from_the_app_telemetry_roster(o2, tmp_path):
+    """404는 스위치 꺼짐이지만 403 같은 읽기 실패는 짐작하지 않고 실패한다(호스트가 감시에서 조용히 빠지지 않도록)."""
+    from openbao_fake import FakeOpenBao
+    with FakeOpenBao.with_schemas(approle=False) as bao:
+        bao.deny("inventory", "assets/ns0001")
+        env = dict(os.environ, ANSIBLE_NOCOLOR="1", **bao.env())
+        cmd = ["ansible-playbook", "-i", str(_inventory(tmp_path, SERVERS)), str(PLAYBOOK)]
+        res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    assert res.returncode != 0 and "inventory/assets/ns0001" in res.stdout and "HTTP 403" in res.stdout
     assert o2.writes == []
 
 
-def test_app_telemetry_roster_lookup_task_is_read_only_and_no_log():
+def test_asset_lookup_tasks_are_read_only_and_no_log_and_read_only_the_declared_documents():
     tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
-    t = next(t for t in tasks if t["name"].startswith("[O2C-004]"))
-    assert t["no_log"] is True and t["changed_when"] is False and t["check_mode"] is False
-    assert "o2c_app_telemetry_kv_fixture is not defined" in str(t["when"])
+    for prefix in ("[O2C-004]", "[O2C-006]"):
+        t = next(t for t in tasks if t["name"].startswith(prefix))
+        assert t["no_log"] is True and t["check_mode"] is False
+        assert "required=false" in str(t["ansible.builtin.set_fact"])   # 없는 Asset 문서(404)는 스위치·주소 없음이다
 
 
 # --- 메모리 사용률 알림: 1 - available / limit (Spec #253 / Ticket-6, #259) -------------------------------------------------
@@ -1386,10 +1401,10 @@ def test_memory_alert_fixtures_include_a_host_missing_either_stream(o2):
         assert all(not c["fires"] for c in only_avail + only_limit), name
 
 
-def test_memory_alert_keeps_thresholds_severity_and_silence_and_openbao_overrides(o2):
-    kv = dict(KV, alert_resource_exclusions=[{"host": "ns0288", "metric": "memory"}],
-              alert_resource_thresholds=[{"host": "ns0300", "metric": "memory", "p2": 97, "p1": 99}])
-    assert _apply(o2, kv=kv).returncode == 0
+def test_memory_alert_keeps_thresholds_severity_and_silence_and_variable_overrides(o2):
+    extra = {"o2c_resource_exclusions": [{"host": "ns0288", "metric": "memory"}],
+             "o2c_resource_thresholds": [{"host": "ns0300", "metric": "memory", "p2": 97, "p1": 99}]}
+    assert _apply(o2, extra=extra).returncode == 0
     p2, p1 = _sql(o2, "infra-memory-usage-p2"), _sql(o2, "infra-memory-usage-p1")
     assert "THEN 97" in p2 and "THEN 99" in p1
     assert "ns0288" in p2 and "ns0288" in p1 and "THEN 99" in p1
@@ -2501,7 +2516,7 @@ def test_invalid_security_alert_variables_fail_before_any_request(o2, extra):
 
 def test_unregistered_source_alerts_skip_every_registered_source_and_alert_on_the_rest(o2):
     """With normal_sources set, a registered office login is quiet and an unknown source (public or private) alerts (#330)."""
-    assert _apply(o2, kv=KV_SOURCES).returncode == 0
+    assert _apply(o2, config=CONFIG_SOURCES).returncode == 0
     ssh = _sql(o2, "infra-ssh-login-unregistered-source")
     fw = _sql(o2, "infra-fortigate-admin-login-new-source")
     for ip in (SEMAPHORE_IP, OFFICE_IP, OFFICE_S2S_IP):
@@ -2660,10 +2675,11 @@ def test_device_name_and_source_display_do_not_change(o2):
 
 # ---- 서버 행의 접속 주소 — Spec #339 / Ticket-5 (#345) ----
 
-HOST_KV = {"ns0001": {"ansible_host": "192.0.2.201", "public_ip": "192.0.2.101"},   # 둘 다 있으면 ansible_host
-           "ns0002": {"ssh_user": "ppzxc"},                                          # 주소가 없다
-           "ns0003": {"public_ip": "192.0.2.203"},                                  # public_ip만 있다
-           "ns0004": {"ansible_host": "192.0.2.204"}}
+ENDPOINTS = {"ns0001": {"ssh": {"protocol": "ssh", "address": "192.0.2.201", "port": 22, "credential": "root"},
+                        "telnet": {"protocol": "telnet", "address": "192.0.2.101", "port": 23, "credential": "root"}},   # ssh만 쓴다
+             "ns0002": {"https": {"protocol": "https", "address": "192.0.2.102", "port": 443, "credential": "api"}},     # ssh가 없다
+             "ns0003": {"ssh": {"protocol": "ssh", "address": "192.0.2.203", "port": 2222, "credential": "root"}},
+             "ns0004": {"ssh": {"protocol": "ssh", "address": "192.0.2.204", "port": 22, "credential": "root"}}}
 ADDRESS_LABELS = {"ns0001": "ns0001 (192.0.2.201)", "ns0002": "ns0002", "ns0003": "ns0003 (192.0.2.203)", "ns0004": "ns0004 (192.0.2.204)"}
 SERVER_ADDRESS_ALERTS = {   # 서버 행을 쓰는 로그 SQL 알림(missing·장비 행·도달성 검사 대상 행 제외)
     **{n: ("security_logs", *SECURITY_TIME_CASES[n]) for n in SECURITY_TIME_CASES},
@@ -2671,34 +2687,21 @@ SERVER_ADDRESS_ALERTS = {   # 서버 행을 쓰는 로그 SQL 알림(missing·�
 }
 
 
-def _addr_apply(o2, tmp_path, *args, host_kv=None):
-    return _apply(o2, *args, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_host_kv_fixture": HOST_KV if host_kv is None else host_kv})
+def _addr_apply(o2, tmp_path, *args, endpoints=None):
+    return _apply(o2, *args, inventory=_inventory(tmp_path, SERVERS), endpoints=ENDPOINTS if endpoints is None else endpoints)
 
 
 def _on_host(records, host):
     return [dict(r, host_name=host, **({"host": host} if "host" in r else {})) for r in records]
 
 
-def test_host_address_picks_ansible_host_then_public_ip_and_skips_blank_or_unsafe_values():
+def test_host_address_is_the_ssh_endpoint_address_and_skips_missing_blank_or_unsafe_values():
     from openobserve_config import o2c_host_addresses
-    kv = dict(HOST_KV, ns0005={"ansible_host": " ", "public_ip": "192.0.2.105"}, ns0006={"ansible_host": "x'; DROP TABLE y; --"},
-              ns0007={"ns0007": {"public_ip": "192.0.2.107"}}, ns0008={"only": {"ansible_host": "192.0.2.108"}}, ns0009=None)
+    eps = dict(ENDPOINTS, ns0005={"ssh": {"address": " "}}, ns0006={"ssh": {"address": "x'; DROP TABLE y; --"}},
+               ns0007={"ssh": {"address": "host-7.example.test"}}, ns0008={"ssh": {}}, ns0009=None)
     roster = ["ns0001", "ns0002", "ns0003", "ns0004", "ns0005", "ns0006", "ns0007", "ns0008", "ns0009", "ns0010"]
-    assert o2c_host_addresses(roster, kv) == {"ns0001": "192.0.2.201", "ns0003": "192.0.2.203", "ns0004": "192.0.2.204",
-                                              "ns0005": "192.0.2.105", "ns0007": "192.0.2.107", "ns0008": "192.0.2.108"}
-
-
-def test_host_address_follows_the_reachability_check_priority_ansible_host_public_ip_ip_host():
-    from openobserve_config import o2c_host_addresses
-    kv = {"ns0001": {"ansible_host": "192.0.2.211", "public_ip": "192.0.2.212", "ip": "192.0.2.213", "host": "192.0.2.214"},
-          "ns0002": {"public_ip": "192.0.2.222", "ip": "192.0.2.223", "host": "192.0.2.224"},
-          "ns0003": {"ip": "192.0.2.233", "host": "192.0.2.234"},
-          "ns0004": {"host": "192.0.2.244"},
-          "ns0005": {"ansible_host": " ", "ip": "192.0.2.255"}}
-    roster = list(kv)
-    got = o2c_host_addresses(roster, kv)
-    assert got == {"ns0001": "192.0.2.211", "ns0002": "192.0.2.222", "ns0003": "192.0.2.233", "ns0004": "192.0.2.244", "ns0005": "192.0.2.255"}
-    # (도달성 검사의 주소 해석은 Endpoint 문서로 바뀌었다(#525). 이 함수의 새 구조 전환은 #527이 한다.)
+    assert o2c_host_addresses(roster, eps) == {"ns0001": "192.0.2.201", "ns0003": "192.0.2.203", "ns0004": "192.0.2.204",
+                                               "ns0007": "host-7.example.test"}
 
 
 def _label_of(expression, host):
@@ -2769,8 +2772,8 @@ def test_an_address_change_updates_only_the_server_alerts_and_a_rerun_writes_not
     assert _addr_apply(o2, tmp_path).returncode == 0
     o2.writes.clear()
     assert _addr_apply(o2, tmp_path).returncode == 0 and o2.writes == []
-    moved = dict(HOST_KV, ns0004={"ansible_host": "192.0.2.244"})
-    assert _addr_apply(o2, tmp_path, host_kv=moved).returncode == 0
+    moved = dict(ENDPOINTS, ns0004={"ssh": {"protocol": "ssh", "address": "192.0.2.244", "port": 22, "credential": "root"}})
+    assert _addr_apply(o2, tmp_path, endpoints=moved).returncode == 0
     updated = {path.rsplit("/", 1)[-1] for method, path, _ in o2.writes if method == "PUT"}
     in_scope = {o2.store["alert"][n]["alert_id"] for n in SERVER_ADDRESS_ALERTS} | {
         a["alert_id"] for n, a in o2.store["alert"].items() if "host_label" in a["row_template"]}
@@ -2781,30 +2784,13 @@ def test_addresses_stay_out_of_the_output_and_the_repository_files(o2, tmp_path)
     res = _addr_apply(o2, tmp_path)
     assert res.returncode == 0
     sql = o2.store["alert"]["infra-ssh-login-failures-per-source"]["query_condition"]["sql"]
-    assert "192.0.2.201" in sql and "192.0.2.101" not in sql   # 알림에는 고른 주소만 있다(ansible_host가 이긴 public_ip는 없다)
-    addresses = {v for kv in HOST_KV.values() for v in kv.values() if isinstance(v, str) and v[0].isdigit()}
+    assert "192.0.2.201" in sql and "192.0.2.101" not in sql   # 알림에는 ssh Endpoint 주소만 있다(telnet Endpoint 주소는 없다)
+    addresses = {ep["address"] for eps in ENDPOINTS.values() for ep in eps.values()}
     files = [p for p in list(ROLE.rglob("*")) + list((ROOT_DIR / "docs").glob("*.md")) + list((ROOT_DIR / "playbooks").glob("openobserve*")) if p.is_file()]
     for address in addresses:
         assert address not in res.stdout + res.stderr, address
         for path in files:
             assert not re.search(rf"(?<![\d.]){re.escape(address)}(?![\d])", path.read_text(encoding="utf-8", errors="ignore")), (address, path.name)
-
-
-def test_the_host_address_lookup_is_read_only_no_log_and_fails_on_anything_but_200_and_404():
-    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))
-    t = next(t for t in tasks if t["name"].startswith("[O2C-006]"))
-    assert t["no_log"] is True and t["changed_when"] is False and t["check_mode"] is False
-    assert t["o2c_http"]["status_code"] == [200, 404] and "o2c_host_kv_fixture is not defined" in str(t["when"])
-    assert "/data/' ~ _vault_hosts_prefix_eff ~ '{host}'" in t["o2c_http"]["requests"].replace("\n", " ") or "{host}'" in t["o2c_http"]["requests"]
-    guard = next(t for t in tasks if "address" in t["name"].lower() and t.get("ansible.builtin.assert"))
-    assert guard["no_log"] is True and "o2c_host_kv_fixture is not defined" in str(guard["when"])
-
-
-def test_without_an_openbao_token_the_address_lookup_fails_instead_of_dropping_the_addresses(o2, tmp_path, monkeypatch):
-    for var in ("VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID"):
-        monkeypatch.delenv(var, raising=False)
-    res = _apply(o2, inventory=_inventory(tmp_path, SERVERS), extra={"o2c_host_kv_fixture": None})
-    assert res.returncode != 0 and "OpenBao" in res.stdout and o2.writes == []
 
 
 def test_check_mode_reads_the_addresses_but_writes_nothing(o2, tmp_path):

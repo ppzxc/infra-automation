@@ -66,7 +66,7 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **백업만 적용하는 호스트**: 로그를 다른 체계가 수집하는 호스트는 `servers`에 두고 `host_agents_backup_only` 그룹에도 넣는다(ADR-0006 §2.1). Deploy·Config·Backup이 이 호스트에는 otelcol 단계를 건너뛰고 restic·resticprofile만 적용하며, Repo Maintenance도 포함한다. OpenBao `hosts/<host>/agents`에 `o2_ingest_token`은 없어도 된다. 매일의 `job=backup` 결과는 OpenObserve로 가지 않는다. `host_agents_excluded`와 함께 넣지 않는다(제외가 우선한다).
 
-**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `agents/openobserve`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao `hosts/<host>/agents`의 `otel_app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `OpenObserve — Config`의 OpenBao 토큰이 `hosts/*/agents` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
+**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao `hosts/<host>/agents`의 Asset 문서의 `agents.otel.app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `OpenObserve — Config`의 AppRole이 `inventory/assets/+` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
 
 **방화벽을 건드리지 않는 호스트**: `servers`(또는 `loadbalancers`)에 두면서 `firewall_unmanaged` 그룹에도 넣는다. HOST PROVISIONING(`site.yml`)이 이 호스트의 방화벽(UFW·firewalld·iptables, CentOS 7 raw 경로 포함) 태스크를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo 정책은 그대로 적용한다. Host Audit 드리프트 검사는 같은 인벤토리로 `site.yml`을 check 실행하므로 따로 설정할 것이 없다. 프로비저닝 전에 `--check --diff`로 방화벽 태스크가 하나도 나오지 않는지 확인한다(#220).
 
@@ -148,7 +148,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 |---|---|---|
 | `VAULT_ROLE_ID` | ● | OpenBao AppRole |
 | `VAULT_SECRET_ID` | ● | OpenBao AppRole |
-| `VAULT_TOKEN` | OpenObserve — Config에는 ● | Deploy·Config는 AppRole이 있으면 AppRole이 우선하고, Repo Maintenance는 토큰이 있으면 토큰을 쓴다(BAK-087은 토큰이 없을 때만 로그인) |
+| `VAULT_TOKEN` | OpenObserve — Config에는 ● | Deploy·Config는 AppRole이 있으면 AppRole이 우선하고, Repo Maintenance는 자체 토큰 대체 경로가 없고 공용 읽기 지점의 인증을 따른다(BAK-087, `docs/openbao_integration.md`) |
 
 **AppRole 정책이 읽을 수 있어야 하는 KV 경로** (mount `secret`, namespace 기준)
 
@@ -163,7 +163,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
 - **호스트별 선택 키 `hosts/<host>/agents`**: `otel_docker_metrics`(docker 메트릭), `otel_app_telemetry`(boolean, 컨테이너 앱 텔레메트리 OTLP HTTP 수신 — traces는 `app_traces` 스트림, metrics는 기존 경로. 기본 꺼짐, ADR-0012), `otel_container_logs`(docker 컨테이너 로그를 `app_logs`로 수집, 기본 꺼짐. 컨테이너가 compose에서 `json-file` 드라이버(`max-size`·`max-file`)와 `com.docker.compose.project`·`com.docker.compose.service` 라벨 전달 옵션(`logging.options.labels`)을 써야 한다. compose를 먼저 `json-file`로 전환한 뒤 Config를 실행한다: 이전 구현이 둔 rsyslog 규칙이 이때 제거되고 rsyslog가 재시작된다).
 - **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
-- **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_plain_url`(사내 알림 플랫폼 text/plain 경로). 알림 검증용 `controller_ingest_token`(합성 레코드 주입). 선택으로 `alert_webhook_token`·`alert_webhook_auth_header`(봇은 `X-NANOIT-ACCESS`).
+- **OpenObserve — Config**: `inventory/services/openobserve`의 `url`, `secrets/services/openobserve/admin`(설정 API 계정)·`ingest`(알림 검증 합성 레코드 주입), `secrets/services/alert/notify`의 `url`(사내 알림 플랫폼 text/plain 경로), 작업 설정 `inventory/config/openobserve_config`와 로스터 호스트의 `inventory/assets/<ns>`·`inventory/assets/<ns>/endpoints`. 토큰·인증 헤더 키는 없다.
 - **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 `host_audit_mail_to`로 덮어쓴다(값은 로그에 나오지 않는다). 템플릿 Survey에는 두지 않으므로 API 실행의 `environment`로 넘긴다(§5 실행 시 입력).
 
 ### Periodic Check Environment
@@ -187,7 +187,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 | 이름 | Playbook | CLI args | Survey variables | 실행 방식 | 대상 |
 |---|---|---|---|---|---|
-| Host Provisioning | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_admin_users` | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). `provision_allowed` 그룹에 있는 호스트만 가능(기본 거부). 지정하지 않거나 허용 목록에 없으면 접속 전에 실패한다 |
+| Host Provisioning | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_removed_users`(선택) | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). `provision_allowed` 그룹에 있는 호스트만 가능(기본 거부). 지정하지 않거나 허용 목록에 없으면 접속 전에 실패한다 |
 | Host Agents — Deploy All | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `target_hosts`로 지정(필수, 전체는 `servers` 입력), 한 번에 25%씩. otelcol과 restic 모두 설치·설정 |
 | Host Agents — Config All | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `target_hosts`로 지정(필수). otelcol과 restic **설정 모두** 재적용(설치·repo 초기화·등록 이벤트는 하지 않음) |
 | Host Agents — Deploy Restic | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `target_hosts`로 지정(필수), 한 번에 25%씩 (restic·resticprofile만 설치·설정) |
@@ -220,7 +220,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 | 템플릿 | 변수 | 형식 | 기본값 | 필수 |
 |---|---|---|---|---|
 | Host Provisioning | `target_hosts` | String | (없음) | 예 |
-| Host Provisioning | `target_admin_users` | String | 템플릿에 설정한 기본값(관리자 계정 JSON 목록) | 아니오 |
+| Host Provisioning | `target_removed_users` | String | (없음) | 아니오. 이번 실행에서만 지울 계정(일회성 명령). 관리·bootstrap 계정은 Asset 문서의 `access` 절이 정한다 |
 | Deploy All, Config All, Deploy Restic | `target_hosts` | String | (없음) | 예 |
 | On-demand | `target_hosts` | String | (비움 = 전체) | 아니오 |
 | On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |

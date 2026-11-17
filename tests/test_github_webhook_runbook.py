@@ -114,7 +114,7 @@ def test_alert_apply_step_runs_plan_only_first_and_compares_server_alerts():
 
 def test_s5_inputs_include_heartbeat_destination_and_alert_check_is_after_s6():
     s5 = _row("S-5")
-    for key in ("o2_endpoint", "o2_org", "o2_ingest_user", "o2_ingest_password"):
+    for key in ("inventory/services/openobserve", "o2_org", "secrets/services/openobserve/ingest", "username", "password"):
         assert key in s5, key
     assert "하트비트 레코드로만" in s5
 

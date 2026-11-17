@@ -46,15 +46,18 @@ def test_inventory_example_documents_group_without_secrets():
     hosts = inv["all"]["children"]["fortigate_firewalls"]["hosts"]
     assert {"ns0380", "ns0399"} <= set(hosts)
     for vars_ in hosts.values():
-        assert "ansible_host" in vars_
-        assert "token" not in " ".join(vars_)
+        assert not vars_   # 주소·포트·토큰은 OpenBao Endpoint·Credential이 정한다
 
 
 def test_defaults_have_ninety_day_retention_and_no_token():
     d = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
     assert d["fortigate_backup_retention_days"] == 90
-    assert d["fortigate_api_token"] == ""
     assert d["fortigate_backup_validate_certs"] is True
+    assert d["fortigate_backup_endpoint_preference"] == ["https"]
+    for old in ("fortigate_api_token", "fortigate_backup_openbao_prefix", "fortigate_backup_openbao_mount",
+                "fortigate_backup_openbao_namespace", "fortigate_backup_vault_addr", "fortigate_backup_api_port",
+                "fortigate_backup_alert_webhook_url", "fortigate_backup_alert_webhook_token"):
+        assert old not in d, old
 
 
 def test_spec_ids_match_docs_one_to_one():
@@ -93,11 +96,11 @@ def _tasks_by_id():
 
 def test_no_plaintext_token_or_unprotected_secret_tasks():
     by_id = _tasks_by_id()
-    for tid in ("FGBK-002", "FGBK-003", "FGBK-004", "FGBK-006", "FGBK-009", "FGBK-011"):
+    for tid in ("FGBK-003", "FGBK-004", "FGBK-006", "FGBK-009", "FGBK-011", "FGBK-022"):
         assert by_id[tid].get("no_log") is True, tid
     assert by_id["FGBK-011"]["ansible.builtin.copy"]["mode"] == "0600"
     assert by_id["FGBK-005"]["ansible.builtin.file"]["mode"] == "0700"
-    assert "token" not in (ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8").replace("api_token", "").replace("webhook_token", "").replace("vault_token", "").replace("X-Vault-Token", "")
+    assert "token" not in (ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------
@@ -168,27 +171,55 @@ def ansible_env(tmp_path):
     return tmp_path
 
 
-def _run(env_dir, device, backup_dir, targets=("ns0380",), token=SECRET_TOKEN, extra=None, host_vars=None, env_extra=None, drop_port=False):
-    hosts = {inv: ({"ansible_host": "127.0.0.1"} if host_vars is None else dict(host_vars)) for inv in targets}
-    (env_dir / "inv.yml").write_text(yaml.safe_dump({"all": {"hosts": hosts}}), encoding="utf-8")
+_BAOS = []
+
+
+@pytest.fixture(autouse=True)
+def _close_baos():
+    yield
+    while _BAOS:
+        _BAOS.pop().close()
+
+
+def _bao(device, targets=("ns0380",), token=SECRET_TOKEN, hook=None, address="127.0.0.1", via=None):
+    """가짜 OpenBao: Asset마다 Endpoint https와 Credential api(+ alert/notify url). 스키마 검증을 켠다(가짜 값만)."""
+    store = {}
+    for ns in targets:
+        store[f"inventory/assets/{ns}"] = {"description": "Fake firewall", "type": "firewall"}
+        ep = {"protocol": "https", "address": address, "port": device.port, "credential": "api"}
+        if via and ns == targets[0]:
+            ep["via"] = via
+        store[f"inventory/assets/{ns}/endpoints"] = {"https": ep}
+        if token is not None:
+            store[f"secrets/assets/{ns}/credentials/api"] = {"type": "api_token", "token": token}
+    if hook is not None:
+        store["secrets/services/alert/notify"] = {"url": hook.url}
+    b = FakeOpenBao.with_schemas(store, namespace="infra", token="bao-test-token")
+    _BAOS.append(b)
+    return b
+
+
+def _run(env_dir, device, backup_dir, targets=("ns0380",), token=SECRET_TOKEN, extra=None, hook=None, bao=None):
+    bao = bao or _bao(device, targets, token, hook)
+    (env_dir / "inv.yml").write_text(yaml.safe_dump({"all": {"hosts": {inv: {} for inv in targets}}}), encoding="utf-8")
     ev = {
         "fortigate_backup_dir": str(backup_dir),
         "fortigate_backup_scheme": "http",
-        "fortigate_backup_api_port": device.port,
-        "fortigate_api_token": token,
         "fortigate_backup_timeout": 5,
     }
-    if drop_port:
-        del ev["fortigate_backup_api_port"]
     ev.update(extra or {})
     (env_dir / "ev.yml").write_text(yaml.safe_dump(ev), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
     env["ANSIBLE_CONFIG"] = str(env_dir / "ansible.cfg")
-    env.update(env_extra or {})
-    return subprocess.run(
+    env["ANSIBLE_LOOKUP_PLUGINS"] = str(ROOT_DIR / "lookup_plugins")
+    env["ANSIBLE_FILTER_PLUGINS"] = str(ROOT_DIR / "filter_plugins")
+    env.update(bao.env())
+    res = subprocess.run(
         ["ansible-playbook", "-i", str(env_dir / "inv.yml"), str(env_dir / "play.yml"), "-e", f"@{env_dir / 'ev.yml'}"],
         capture_output=True, text=True, env=env, cwd=env_dir,
     )
+    res.bao = bao
+    return res
 
 
 def _files(d):
@@ -271,9 +302,9 @@ def test_wrong_token_fails(ansible_env, device, tmp_path):
 
 
 def test_missing_token_fails_before_calling_device(ansible_env, device, tmp_path):
-    res = _run(ansible_env, device, tmp_path / "bk", token="")
+    res = _run(ansible_env, device, tmp_path / "bk", token=None)
     assert res.returncode != 0
-    assert "FORTIGATE-TOKEN" in res.stdout + res.stderr
+    assert "secrets/assets/ns0380/credentials/api" in res.stdout + res.stderr   # 없는 문서는 경로만 밝히고 실패한다
     assert device.requests == []
 
 
@@ -388,9 +419,7 @@ def hook():
 
 
 def _drift_run(env_dir, device, out, hook, **extra):
-    ev = {"fortigate_backup_alert_webhook_url": hook.url, "fortigate_backup_alert_webhook_token": "hook-token-xyz"}
-    ev.update(extra)
-    return _run(env_dir, device, out, extra=ev)
+    return _run(env_dir, device, out, extra=extra, hook=hook)
 
 
 def _two_runs(env_dir, device, out, hook, first, second):
@@ -426,14 +455,14 @@ def test_change_alerts_once_with_target_member_and_runbook_without_secrets(ansib
     for needle in ("P2", "■ 무슨 일", "■ 왜 중요", "■ 대상", "■ 조치", "▶ 런북", "#fortigate-config-change", "ns0380", "fw-primary",
                    "config firewall policy", "config system global"):
         assert needle in text, needle
-    assert hook.posts[0][1] == "hook-token-xyz"
+    assert hook.posts[0][1] is None   # URL 자체가 권한이라 인증 헤더가 없다
     # 같은 변경으로 다시 실행해도 반복 알림 없음
     time.sleep(1.1)
     assert _drift_run(ansible_env, device, out, hook).returncode == 0
     assert len(hook.posts) == 1
     # 비밀 값은 알림·로그 어디에도 없다
     everything = text + r1.stdout + r1.stderr + r2.stdout + r2.stderr
-    for secret in (HASH, "SECRETPSKvalue123456", "hook-token-xyz", hook.url, "allow-all", "480"):
+    for secret in (HASH, "SECRETPSKvalue123456", hook.url, "allow-all", "480"):
         assert secret not in everything, secret
 
 
@@ -574,7 +603,7 @@ def test_retention_runs_even_when_the_alert_cannot_be_delivered_but_the_host_sti
 
 def test_tasks_compute_token_and_member_once():
     tasks = (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
-    assert tasks.count("fortigate_backup_kv_response.json.data.data.api_token }}") == 1
+    assert tasks.count("lookup('openbao_connection'") == 2   # 요약(FGBK-023)과 본 해석(FGBK-003)
     assert tasks.count("regex_replace('[^A-Za-z0-9-]'") == 1
     assert tasks.count("fortigate_backup_member(fortigate_backup_file_prefix)") == 1
 
@@ -586,63 +615,74 @@ def test_doc_records_why_there_is_no_molecule_verify():
 
 
 # --------------------------------------------------------------------------
-# OpenBao KV 접속 정보 (ansible_host / ansible_port / fqdn, 스위치 시크릿과 같은 키 이름)
+# OpenBao 새 구조 (Spec #511 / Ticket-18): Endpoint https + Credential api, alert/notify text/plain
 # --------------------------------------------------------------------------
-@pytest.fixture
-def bao_factory():
-    made = []
+import sys  # noqa: E402
 
-    def make(data, status=200):
-        b = FakeOpenBao(namespace="infra/prod/host", token="bao-test-token")
-        if status == 200:
-            b.set("secret", "fortigate/ns0380", data)
-        made.append(b)
-        return b
-
-    yield make
-    for b in made:
-        b.close()
+sys.path.insert(0, str(ROOT_DIR / "scripts"))
+import openbao_validation as ov  # noqa: E402
 
 
-def test_connection_info_comes_from_kv_when_inventory_has_only_the_host_name(ansible_env, device, bao_factory, tmp_path):
-    """Semaphore inventories list host names only: address and port come from the KV, and the file is saved as usual."""
-    bao = bao_factory({"api_token": SECRET_TOKEN, "ansible_host": "127.0.0.1", "ansible_port": str(device.port)})
-    res = _run(ansible_env, device, tmp_path / "bk", token="", host_vars={}, drop_port=True, env_extra=bao.env())
+def _required():
+    return yaml.safe_load((ROLE_DIR / "vars" / "main.yml").read_text(encoding="utf-8"))["fortigate_backup_openbao_required"]
+
+
+def test_connection_comes_from_the_https_endpoint_and_api_credential_only(ansible_env, device, tmp_path):
+    res = _run(ansible_env, device, tmp_path / "bk")
     assert res.returncode == 0, res.stdout + res.stderr
     assert len(_files(tmp_path / "bk")) == 1 and device.requests
-    assert (bao.reads()[0].mount, bao.reads()[0].doc, bao.reads()[0].namespace) == ("secret", "fortigate/ns0380", "infra/prod/host")
+    assert {f"{r.mount}/{r.doc}" for r in res.bao.reads()} == {"inventory/assets/ns0380/endpoints", "secrets/assets/ns0380/credentials/api"}
     assert "127.0.0.1" not in res.stdout + res.stderr and str(device.port) not in res.stdout + res.stderr   # 주소·포트는 로그에 없다
 
 
-def test_fqdn_in_kv_is_the_connection_target_and_the_inventory_address_still_wins_for_the_address(ansible_env, device, bao_factory, tmp_path):
-    """fqdn (certificate name) is preferred as the target; here it is localhost, which only resolves when it is really used."""
-    bao = bao_factory({"api_token": SECRET_TOKEN, "fqdn": "localhost", "ansible_host": "203.0.113.77"})
-    res = _run(ansible_env, device, tmp_path / "bk", token="", env_extra=bao.env())   # 인벤토리 ansible_host=127.0.0.1이 KV 주소보다 우선
+def test_every_read_document_is_inside_the_declared_patterns_and_the_index(ansible_env, device, hook, tmp_path):
+    device.config = _cfg()
+    out = tmp_path / "bk"
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    device.config = _cfg().replace("admintimeout 5", "admintimeout 9")
+    time.sleep(1.1)
+    res = _drift_run(ansible_env, device, out, hook)
     assert res.returncode == 0, res.stdout + res.stderr
-    assert device.requests and not any("203.0.113.77" in r[0] for r in device.requests)
+    docs = {f"{r.mount}/{r.doc}" for r in res.bao.reads()}
+    assert "secrets/services/alert/notify" in docs
+    patterns = list(_required())
+    assert all(any(ov._matches(p, d) for p in patterns) for d in docs), docs
+    assert res.bao.violations == []
 
 
-def test_kv_address_is_used_when_inventory_has_none_and_kv_port_beats_the_variable(ansible_env, device, bao_factory, tmp_path):
-    bao = bao_factory({"api_token": SECRET_TOKEN, "ansible_host": "127.0.0.1", "ansible_port": str(device.port)})
-    res = _run(ansible_env, device, tmp_path / "bk", token="", host_vars={}, extra={"fortigate_backup_api_port": 1}, env_extra=bao.env())
+def test_declared_required_keys_match_the_schemas():
+    import json
+    schema_dir = ROOT_DIR / "schemas" / "openbao"
+    declared = _required()
+    for pattern, keys in declared.items():
+        sample = pattern.replace("+", "x")
+        rel = ov.resolve_schema(sample)
+        assert rel is not None, pattern
+        schema = json.loads((schema_dir / rel).read_text(encoding="utf-8"))
+        if "oneOf" in schema:   # credential: api_token 분기
+            schema = next(b for b in schema["oneOf"] if b["properties"]["type"]["const"] == "api_token")
+        assert set(keys) <= set(schema.get("required", [])), pattern
+
+
+def test_the_required_declaration_is_what_the_assert_uses():
+    tasks = (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
+    assert "fortigate_backup_openbao_required" in tasks
+
+
+def test_a_via_endpoint_is_refused_because_the_api_is_called_from_the_controller(ansible_env, device, tmp_path):
+    res = _run(ansible_env, device, tmp_path / "bk", targets=("ns0380",), bao=_bao(device, ("ns0380", "ns0399"), via="ns0399/https"))
+    assert res.returncode != 0 and "FORTIGATE-VIA" in res.stdout + res.stderr
+    assert device.requests == []
+
+
+def test_a_missing_document_fails_with_its_path_and_status_not_a_censored_message(ansible_env, device, tmp_path):
+    res = _run(ansible_env, device, tmp_path / "bk", token=None)
+    assert res.returncode != 0
+    assert "secrets/assets/ns0380/credentials/api" in res.stdout + res.stderr
+    assert "censored" not in res.stdout + res.stderr
+
+
+def test_alert_webhook_is_read_only_when_a_change_is_detected(ansible_env, device, hook, tmp_path):
+    res = _drift_run(ansible_env, device, tmp_path / "bk", hook)
     assert res.returncode == 0, res.stdout + res.stderr
-
-
-def test_kv_without_connection_keys_keeps_the_old_behaviour_and_missing_address_fails_without_values(ansible_env, device, bao_factory, tmp_path):
-    bao = bao_factory({"api_token": SECRET_TOKEN})
-    assert _run(ansible_env, device, tmp_path / "bk", token="", env_extra=bao.env()).returncode == 0   # 인벤토리 ansible_host 사용
-    res = _run(ansible_env, device, tmp_path / "bk2", token="", host_vars={}, env_extra=bao.env())     # 주소가 어디에도 없다
-    assert res.returncode != 0 and "FORTIGATE-TOKEN" in res.stdout + res.stderr
-    assert SECRET_TOKEN not in res.stdout + res.stderr
-
-
-def test_inventory_address_and_injected_token_work_even_when_the_kv_path_does_not_exist(ansible_env, device, bao_factory, tmp_path):
-    bao = bao_factory({}, status=404)
-    res = _run(ansible_env, device, tmp_path / "bk", env_extra=bao.env())
-    assert res.returncode == 0, res.stdout + res.stderr
-
-
-def test_doc_names_the_kv_connection_keys_without_values():
-    doc = (ROOT_DIR / "docs" / "fortigate_backup.md").read_text(encoding="utf-8")
-    for key in ("ansible_host", "ansible_port", "fqdn"):
-        assert f"`{key}`" in doc, key
+    assert "secrets/services/alert/notify" not in {f"{r.mount}/{r.doc}" for r in res.bao.reads()}

@@ -21,7 +21,7 @@
 ## 공통 절차
 
 1. 메시지의 `▶ 로그 보기`로 OpenObserve에서 알림 조건에 맞는 원문 로그(최근 1일, 최신순 200줄)를 바로 연다. 같은 메시지의 `▶ 상세 보기`는 알림 화면(집계 결과)이다. `▶ 로그 보기`가 알림 화면으로 열리는 알림(원문 조건을 만들 수 없는 알림)과 메트릭 알림(`▶ 상세 보기`만 있음)은 알림 화면에서 이어 조회한다. 원문 링크는 열 때부터 1일 전까지를 보므로 오래된 알림은 `⏱ 평가` 시각이 구간 밖일 수 있다. `⏱ 평가` 시각은 알림이 판단한 시각이며 **KST**다. 사건(로그) 시각보다 늦을 수 있으니 사건 시각은 `▶ 로그 보기`에서 확인한다(예: 방화벽 변경 08:59:14, 평가 09:00:56). `■ 대상 N건`은 조건에 걸린 전체 건수이고 행은 20줄까지만 실린다.
-2. `■ 대상`의 호스트·출발지·사용자를 작업 일정, 배포 기록(Semaphore Task 이력)과 대조한다. Semaphore와 사무실에서 시작된 접속은 대부분 운영 작업이다(정상 출발지 목록은 OpenBao `normal_sources`).
+2. `■ 대상`의 호스트·출발지·사용자를 작업 일정, 배포 기록(Semaphore Task 이력)과 대조한다. Semaphore와 사무실에서 시작된 접속은 대부분 운영 작업이다(정상 출발지 목록은 OpenBao `inventory/config/openobserve_config`의 `normal_sources`).
 3. 대응하면 결과(원인, 조치, 담당자)를 기록한다. ISMS 2.11.5(사고 대응) 증적이 된다.
 4. 같은 알림이 반복되고 원인이 정상 작업이면 임계값이나 예외 조건을 고치는 PR을 낸다. 알림을 끄지 않는다.
 
@@ -32,7 +32,7 @@
 
 **조건**: `security_logs`에서 `user_name = 'root'`인 SSH 로그인 성공이 5분 안에 1건 이상이고, 출발지가 **정상 출발지 목록에도 사설 대역에도 없을 때**(진짜 외부 출발지). 목록의 출발지(kind 무관)와 미등록 사설 대역은 아래 P2(알고 있는 출발지)로 간다. 출발지 값이 없는 로그인은 알 수 없는 출발지라 이 P1이다.
 
-**정상 출발지 목록**: OpenBao `agents/openobserve`의 `normal_sources`(`[{"address": "<IP>", "kind": "semaphore|office"}]`)에만 둔다. 저장소에는 주소를 두지 않는다. 바꾼 뒤 `OpenObserve — Config`를 다시 실행하면 반영된다. `kind`는 구분용 표시이고 판정은 같다(semaphore·office 모두 P1에서 빠지고 P2로 간다). 사설 대역은 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16이다. 목록이 비어 있으면 모든 공인 출발지 root 로그인이 이 P1로 오고 사설 대역은 P2로 간다. SSH 로그인 실패 급증 알림에는 이 목록을 적용하지 않는다(정상 출발지의 실패 급증도 신호다).
+**정상 출발지 목록**: OpenBao `inventory/config/openobserve_config`의 `normal_sources`(`[{"address": "<IP>", "kind": "semaphore|office"}]`)에만 둔다. 저장소에는 주소를 두지 않는다. 바꾼 뒤 `OpenObserve — Config`를 다시 실행하면 반영된다. `kind`는 구분용 표시이고 판정은 같다(semaphore·office 모두 P1에서 빠지고 P2로 간다). 사설 대역은 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16이다. 목록이 비어 있으면 모든 공인 출발지 root 로그인이 이 P1로 오고 사설 대역은 P2로 간다. SSH 로그인 실패 급증 알림에는 이 목록을 적용하지 않는다(정상 출발지의 실패 급증도 신호다).
 
 **왜 중요한가**: root 직접 접속은 누가 접속했는지 식별할 수 없고, 프로비저닝 이후에는 막혀야 한다(`PermitRootLogin`, KISA U-01). 등록되지도 사내도 아닌 곳의 성공 기록은 침해이거나 설정이 우회된 것이다.
 
@@ -545,7 +545,7 @@ sudo ausearch -k secret_access -ts today -i
 <a id="ssh-login-unregistered-source"></a>
 ## 🟠 일반 계정이 등록되지 않은 출발지에서 SSH 로그인 성공 (`infra-ssh-login-unregistered-source`)
 
-**조건**: root가 아닌 계정의 SSH 로그인 성공이 정상 출발지 목록(OpenBao `agents/openobserve`의 `normal_sources`, kind 무관)에 없는 출발지에서 5분 안에 1건 이상(재통지 `o2c_unregistered_login_silence_minutes`, 기본 60분). 목록이 비어 있으면 모든 출발지가 미등록이라 모든 로그인이 대상이 되므로, 목록을 먼저 채운다. root 로그인은 root 알림이 맡는다.
+**조건**: root가 아닌 계정의 SSH 로그인 성공이 정상 출발지 목록(OpenBao `inventory/config/openobserve_config`의 `normal_sources`, kind 무관)에 없는 출발지에서 5분 안에 1건 이상(재통지 `o2c_unregistered_login_silence_minutes`, 기본 60분). 목록이 비어 있으면 모든 출발지가 미등록이라 모든 로그인이 대상이 되므로, 목록을 먼저 채운다. root 로그인은 root 알림이 맡는다.
 
 **왜 중요한가**: 탈취된 계정은 처음 보는 출발지에서 로그인한다. 출발지를 등록하지 않은 정상 접속도 같은 모양이다.
 
@@ -613,7 +613,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 1. 같은 호스트의 서버 응답 없음(Unreachable Host) 알림이 있으면 그쪽이 원인이다. 서버·네트워크부터 복구한다.
 2. 서버가 살아 있으면 호스트에서 `systemctl status otelcol-contrib`(CentOS 6은 `service otelcol-contrib status`)와 최근 로그를 본다.
 
-**대응**: 수집기를 재기동하고 하트비트가 돌아오는지 본다. P1이면 끊긴 구간 로그가 5시간 한도 안에 들어오는지 확인하고, 넘었다면 호스트의 원본 로그를 보존한다. 며칠 이상 계획 정지하는 호스트는 OpenBao `silent_host_exceptions`에 만료일과 함께 등록하고 `OpenObserve — Config`를 다시 실행한다. 호스트를 편입·폐기했다면 같은 Config 재실행이 필요하다.
+**대응**: 수집기를 재기동하고 하트비트가 돌아오는지 본다. P1이면 끊긴 구간 로그가 5시간 한도 안에 들어오는지 확인하고, 넘었다면 호스트의 원본 로그를 보존한다. 며칠 이상 계획 정지하는 호스트는 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`에 만료일과 함께 등록하고 `OpenObserve — Config`를 다시 실행한다. 호스트를 편입·폐기했다면 같은 Config 재실행이 필요하다.
 
 ---
 
@@ -641,7 +641,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 5. 같은 사고로 fail2ban의 sshd jail도 멈췄을 수 있다. `fail2ban-client status sshd`의 `Total failed`가 늘지 않으면 `systemctl restart fail2ban`을 한다(재시작하면 카운터가 0으로 초기화된다).
 6. 끊긴 구간(`journalctl -u sshd --since … --until …`)에 신뢰 출발지가 아닌 로그인 성공(`Accepted`)이 없는지 점검하고 호스트 원본 로그를 보존한다.
 
-며칠 이상 계획 정지하는 호스트면 OpenBao `silent_host_exceptions`에 만료일과 함께 등록한다.
+며칠 이상 계획 정지하는 호스트면 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`에 만료일과 함께 등록한다.
 
 ---
 
@@ -672,7 +672,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 **왜 중요한가**: 점검이 GitHub을 확인하지 못해 웹훅 삭제·변경 감시와 실패 전달 재전송이 멈춘다. 토큰 만료가 가장 흔하며, 방치하면 재전송 가능 기간(3일)이 지나 실패 전달을 복구할 수 없게 된다.
 
 **오류 코드별 조치**
-- `credential_missing`: OpenBao `agents/github-webhook-watch`의 `github_token`·`github_org`가 비었다. 값을 채운다.
+- `credential_missing`: OpenBao `secrets/services/github/org_hooks_read`의 `token`이 비었다. 값을 채운다. `github_org`·`hook_url`·`o2_org`가 비었거나 필수 키가 빠지면 점검 전에 `[GWW-INPUT]`으로 실행이 실패하고 하트비트는 남지 않는다(침묵 알림으로 드러난다).
 - `api_http_401`: 토큰이 만료·폐기됐다. 새 세분화 토큰(조직 Webhooks 권한, 만료일 있음)을 발급해 OpenBao에 교체한다.
 - `api_http_403`: 권한 부족이거나 요청 한도 초과다. 토큰의 조직 Webhooks 권한(읽기·재전송은 쓰기)과 조직의 토큰 승인 정책을 확인한다.
 - `api_http_404`: 조직 이름이나 훅 경로가 틀렸다. `github_org`를 확인한다.
@@ -695,7 +695,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 1. 통지 행의 상태와 `hook_problems`(문제 목록)를 본다.
 2. GitHub 조직 설정의 웹훅 화면에서 수신 URL·활성 여부·구독 이벤트를 의도한 값(점검 작업 입력의 수신 URL, 확정한 13개 이벤트)과 대조한다.
 3. 조직 감사 로그(웹 UI)의 웹훅 변경 이력으로 변경한 사람과 시각을 확인하고 작업 일정과 대조한다.
-4. 승인되지 않은 변경이면 웹훅을 의도한 값으로 되돌리고 해당 계정·토큰을 점검한다. `missing`인데 수신 URL을 바꾼 것이면 OpenBao `agents/github-webhook-watch`의 `hook_url`을 새 값으로 고친다. 구독 이벤트를 의도적으로 바꿨다면 `expected_events`도 함께 바꾼다.
+4. 승인되지 않은 변경이면 웹훅을 의도한 값으로 되돌리고 해당 계정·토큰을 점검한다. `missing`인데 수신 URL을 바꾼 것이면 OpenBao `inventory/config/github_webhook_watch`의 `hook_url`을 새 값으로 고친다. 구독 이벤트를 의도적으로 바꿨다면 역할 기본값 `gww_expected_events`도 코드 리뷰를 거쳐 함께 바꾼다.
 5. 복구 뒤 작업을 수동 실행해 다음 하트비트의 `hook_status`가 `ok`인지 확인한다. 훅이 삭제되어 있던 동안의 이벤트는 GitHub이 전달하지 않았으므로 조직 감사 로그 내보내기로 해당 구간을 보완한다.
 
 ---
@@ -823,7 +823,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="app-telemetry-silent"></a>
 ## 🟠 앱 텔레메트리 무소식 — funa JVM 메트릭 끊김 (`infra-app-telemetry-silent`)
 
-OpenBao `hosts/<host>/agents`의 `otel_app_telemetry`가 켜진 호스트에서 funa JVM 메트릭(`jvm_memory_used`, `service_name=funa`)이 15분 넘게 오지 않으면 온다. 스위치가 꺼진 호스트는 대상이 아니다. 대상 목록은 `OpenObserve — Config`를 실행할 때 만들어지므로 스위치를 바꾸면 Config를 다시 실행한다.
+OpenBao Asset 문서(`inventory/assets/<ns>`)의 `agents.otel.app_telemetry`가 켜진 호스트에서 funa JVM 메트릭(`jvm_memory_used`, `service_name=funa`)이 15분 넘게 오지 않으면 온다. 스위치가 꺼진 호스트는 대상이 아니다. 대상 목록은 `OpenObserve — Config`를 실행할 때 만들어지므로 스위치를 바꾸면 Config를 다시 실행한다.
 
 **왜 중요한가**: 2026-10-01처럼 앱 텔레메트리(트레이스, 앱 메트릭)가 알림 없이 버려질 수 있다.
 
@@ -1095,7 +1095,7 @@ Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 �
 
 **대응**: 승인되지 않은 변경이면 해당 관리자 계정·접속 경로를 막고 직전 백업으로 되돌린 뒤 보안 담당에게 보고한다. 승인된 작업이면 변경 기록에 남긴다. 알림에 멤버 변경 비교라고 되어 있으면 장애 전환이 있었던 것이니 멤버 고유 설정은 변경으로 세지 않았음을 감안한다.
 
-**알림이 오지 않을 때**: Semaphore 백업 작업이 `FORTIGATE-ALERT`로 실패했다면 변경은 감지했으나 webhook이 없거나 전송이 실패한 것이다. 같은 변경은 다시 알리지 않으므로 작업 로그의 변경 항목을 직접 확인하고 webhook(`fortigate_backup_alert_webhook_url`) 설정을 고친다. 이 값은 OpenBao `agents/openobserve`의 `alert_webhook_plain_url`(text/plain 경로)이어야 한다. 옛 JSON 경로 주소가 남아 있으면 text/plain 본문이 거부되어 같은 오류가 난다.
+**알림이 오지 않을 때**: Semaphore 백업 작업이 `FORTIGATE-ALERT`로 실패했다면 변경은 감지했으나 webhook이 없거나 전송이 실패한 것이다. 같은 변경은 다시 알리지 않으므로 작업 로그의 변경 항목을 직접 확인하고 webhook(`fortigate_backup_alert_webhook_url`) 설정을 고친다. 이 값은 OpenBao `secrets/services/alert/notify`의 `url`(text/plain 경로)이어야 한다. 옛 JSON 경로 주소가 남아 있으면 text/plain 본문이 거부되어 같은 오류가 난다.
 
 <a id="switch-login-failures"></a>
 ### 🟠 스위치 로그인 실패 반복 (`infra-switch-login-failures`)
@@ -1292,7 +1292,7 @@ sudo du -xh <마운트> --max-depth=2 | sort -h | tail -20
 docker system df   # Docker 사용 호스트
 ```
 
-**대응**: 큰 파일·오래된 로그·Docker 이미지/볼륨을 정리하거나 증설한다. 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외를 등록한다.
+**대응**: 큰 파일·오래된 로그·Docker 이미지/볼륨을 정리하거나 증설한다. 원래 가득 차게 쓰는 볼륨이면 역할 변수 `o2c_resource_exclusions`에 예외를 등록한다(PR).
 
 <a id="inode-usage"></a>
 ### 🟠/🔴 inode 사용률 (`infra-inode-usage-p2`, `infra-inode-usage-p1`)

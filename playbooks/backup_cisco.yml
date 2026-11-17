@@ -2,6 +2,7 @@
 # ==============================================================================
 # Cisco IOS Network Switch Configuration Backup Playbook
 # ==============================================================================
+# 접속 정보(주소·포트·계정·enable·경유)는 OpenBao Endpoint·Credential에서 역할이 읽는다. 인벤토리에는 관리번호만 둔다.
 # Execution example:
 #   ansible-playbook -i inventory/hosts.yml playbooks/backup_cisco.yml
 # ==============================================================================
@@ -9,206 +10,16 @@
 - name: Backup Cisco IOS Network Switches
   hosts: cisco_switches
   gather_facts: false
-  connection: "{{ 'network_cli' if (ansible_host | default('') | length > 0 and (connection_type | default('ssh') == 'ssh')) else 'local' }}"
-
-  vars_files:
-    - "{{ playbook_dir }}/../inventory/group_vars/cisco_switches.yml"
-
-  vars:
-    cisco_openbao_secret_prefix: "{{ openbao_cisco_prefix | default(lookup('ansible.builtin.env', 'OPENBAO_CISCO_PREFIX'), true) | default(lookup('ansible.builtin.env', 'VAULT_CISCO_PREFIX'), true) | default('hosts/', true) }}"
+  connection: local
 
   pre_tasks:
-    - name: Run OpenBao direct diagnostic probe from controller
-      ansible.builtin.uri:
-        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/sys/health"
-        method: GET
-        status_code: [-1, 200, 429, 472, 473, 501, 503]
-        timeout: 5
-        validate_certs: false
-      register: _openbao_health_probe
-      ignore_errors: true
-      delegate_to: localhost
+    # 플레이당 한 번만 로그인한다. 호스트마다 AppRole 로그인을 하지 않도록 토큰을 변수로 넘긴다.
+    - name: Acquire the OpenBao client token once for the whole play
+      ansible.builtin.set_fact:
+        _vault_token: "{{ lookup('openbao_doc', '@token') }}"
       run_once: true
       check_mode: false
-
-    - name: Run OpenBao AppRole login diagnostic probe from controller
-      ansible.builtin.uri:
-        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/auth/approle/login"
-        method: POST
-        headers: "{{ {'X-Vault-Namespace': cisco_openbao_namespace} if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else {} }}"
-        body_format: json
-        body:
-          role_id: "{{ _vault_role_id | default('', true) }}"
-          secret_id: "{{ _vault_secret_id | default('', true) }}"
-        status_code: [-1, 200, 400, 401, 403, 404, 500]
-        timeout: 5
-        validate_certs: false
-      register: _openbao_login_probe
-      ignore_errors: true
-      delegate_to: localhost
-      run_once: true
-      check_mode: false
-      when: _has_approle | default(false)
-
-    - name: Register acquired OpenBao client token from AppRole probe
-      ansible.builtin.set_fact:
-        _vault_token: "{{ _openbao_login_probe.json.auth.client_token }}"
-        _vault_auth_method: "token"
-      when:
-        - _openbao_login_probe.json is defined
-        - _openbao_login_probe.json.auth is defined
-        - _openbao_login_probe.json.auth.client_token is defined
-
-    - name: Resolve Cisco switch secret directly from OpenBao API
-      ansible.builtin.uri:
-        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/{{ cisco_openbao_mount }}/data/{{ cisco_openbao_secret_prefix }}{{ inventory_hostname }}"
-        method: GET
-        headers: >-
-          {{
-            {
-              'X-Vault-Token': _vault_token
-            } | combine(
-              {'X-Vault-Namespace': cisco_openbao_namespace} if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else {}
-            )
-          }}
-        status_code: [-1, 200, 403, 404]
-        timeout: 5
-        validate_certs: false
-      register: _openbao_direct_secret_resp
-      ignore_errors: true
-      delegate_to: localhost
-      check_mode: false
-      when:
-        - (_vault_token | default('') | length) > 0
-        - (ansible_host | default('') | length) == 0
-
-    - name: Apply OpenBao switch secret data to host facts
-      vars:
-        _sw_raw: "{{ _openbao_direct_secret_resp.json.data.data if (_openbao_direct_secret_resp is defined and _openbao_direct_secret_resp.json is defined and _openbao_direct_secret_resp.json.data is defined and _openbao_direct_secret_resp.json.data.data is defined) else {} }}"
-        _sw_unwrapped: "{{ (_sw_raw if _sw_raw is not mapping else (_sw_raw[inventory_hostname] if inventory_hostname in _sw_raw else ((_sw_raw.values() | first) if (_sw_raw | length > 0 and (_sw_raw.values() | first) is mapping) else _sw_raw))) }}"
-        _sw_dict: "{{ (_sw_unwrapped | first) if (_sw_unwrapped is sequence and _sw_unwrapped is not string and _sw_unwrapped | length > 0 and (_sw_unwrapped | first) is mapping) else (_sw_unwrapped if _sw_unwrapped is mapping else {}) }}"
-        _sw_resolved_host: "{{ _sw_dict.ansible_host | default(_sw_dict.ip | default('', true), true) }}"
-        _sw_resolved_user: "{{ _sw_dict.ansible_user | default(_sw_dict.user | default(_sw_dict.username | default('', true), true), true) }}"
-        _sw_resolved_port: "{{ _sw_dict.ansible_port | default(_sw_dict.port | default('', true), true) }}"
-        _sw_resolved_conn: "{{ _sw_dict.connection_type | default('', true) }}"
-        _sw_resolved_pwd: "{{ _sw_dict.ansible_password | default(_sw_dict.password | default('', true), true) }}"
-        _sw_resolved_become_pwd: "{{ _sw_dict.ansible_become_password | default(_sw_dict.enable_password | default('', true), true) }}"
-        _sw_resolved_bastion: "{{ _sw_dict.bastion_host | default('', true) }}"
-        _sw_resolved_fqdn: "{{ _sw_dict.fqdn | default('', true) }}"
-      ansible.builtin.set_fact:
-        ansible_host: "{{ _sw_resolved_host if (_sw_resolved_host | length > 0) else (ansible_host | default('', true)) }}"
-        ansible_user: "{{ _sw_resolved_user if (_sw_resolved_user | length > 0) else (ansible_user | default('', true)) }}"
-        ansible_port: "{{ ((_sw_resolved_port if (_sw_resolved_port | string | length > 0) else (ansible_port | default(22))) | int) }}"
-        connection_type: "{{ _sw_resolved_conn if (_sw_resolved_conn | length > 0) else (connection_type | default('ssh', true)) }}"
-        ansible_password: "{{ _sw_resolved_pwd if (_sw_resolved_pwd | length > 0) else (ansible_password | default(omit)) }}"
-        ansible_become_password: "{{ _sw_resolved_become_pwd if (_sw_resolved_become_pwd | length > 0) else (ansible_become_password | default(omit)) }}"
-        bastion_host: "{{ _sw_resolved_bastion if (_sw_resolved_bastion | length > 0) else (bastion_host | default(omit)) }}"
-        fqdn: "{{ _sw_resolved_fqdn if (_sw_resolved_fqdn | length > 0) else (fqdn | default('', true)) }}"
-      when:
-        - _openbao_direct_secret_resp is defined
-        - _openbao_direct_secret_resp.json is defined
-        - _openbao_direct_secret_resp.json.data is defined
-        - _openbao_direct_secret_resp.json.data.data is defined
-
-    - name: Resolve Bastion host secret directly from OpenBao API
-      ansible.builtin.uri:
-        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true) }}/v1/{{ cisco_openbao_mount }}/data/{{ cisco_openbao_secret_prefix }}{{ bastion_host }}"
-        method: GET
-        headers: >-
-          {{
-            {
-              'X-Vault-Token': _vault_token
-            } | combine(
-              {'X-Vault-Namespace': cisco_openbao_namespace} if (cisco_openbao_namespace is defined and cisco_openbao_namespace | length > 0) else {}
-            )
-          }}
-        status_code: [-1, 200, 403, 404]
-        timeout: 5
-        validate_certs: false
-      register: _openbao_bastion_secret_resp
-      ignore_errors: true
-      delegate_to: localhost
-      check_mode: false
-      when:
-        - (_vault_token | default('') | length) > 0
-        - connection_type | default('ssh') == 'jump_ssh'
-        - bastion_host is defined
-        - bastion_host | length > 0
-
-    - name: Apply OpenBao Bastion secret data to host facts
-      vars:
-        _b_raw: "{{ _openbao_bastion_secret_resp.json.data.data if (_openbao_bastion_secret_resp is defined and _openbao_bastion_secret_resp.json is defined and _openbao_bastion_secret_resp.json.data is defined and _openbao_bastion_secret_resp.json.data.data is defined) else {} }}"
-        _b_unwrapped: "{{ (_b_raw if _b_raw is not mapping else (_b_raw[bastion_host] if bastion_host in _b_raw else ((_b_raw.values() | first) if (_b_raw | length > 0 and (_b_raw.values() | first) is mapping) else _b_raw))) }}"
-        _b_dict: "{{ (_b_unwrapped | first) if (_b_unwrapped is sequence and _b_unwrapped is not string and _b_unwrapped | length > 0 and (_b_unwrapped | first) is mapping) else (_b_unwrapped if _b_unwrapped is mapping else {}) }}"
-        _b_resolved_host: "{{ _b_dict.ansible_host | default(_b_dict.ip | default('', true), true) }}"
-        _b_resolved_user: "{{ _b_dict.ansible_user | default(_b_dict.user | default(_b_dict.username | default('', true), true), true) }}"
-        _b_resolved_port: "{{ _b_dict.ansible_port | default(_b_dict.port | default('', true), true) }}"
-        _b_resolved_pwd: "{{ _b_dict.ansible_password | default(_b_dict.password | default('', true), true) }}"
-      ansible.builtin.set_fact:
-        bastion_resolved_host: "{{ _b_resolved_host if (_b_resolved_host | length > 0) else bastion_host }}"
-        bastion_resolved_port: "{{ ((_b_resolved_port if (_b_resolved_port | string | length > 0) else 22) | int) }}"
-        bastion_resolved_user: "{{ _b_resolved_user if (_b_resolved_user | length > 0) else (ansible_user | default('', true)) }}"
-        bastion_resolved_password: "{{ _b_resolved_pwd if (_b_resolved_pwd | length > 0) else '' }}"
-      when:
-        - _openbao_bastion_secret_resp is defined
-        - _openbao_bastion_secret_resp.json is defined
-        - _openbao_bastion_secret_resp.json.data is defined
-        - _openbao_bastion_secret_resp.json.data.data is defined
-
-    - name: Debug direct OpenBao secret response
-      ansible.builtin.debug:
-        msg:
-          host: "{{ inventory_hostname }}"
-          status: "{{ _openbao_direct_secret_resp.status | default('UNSET') }}"
-          url: "{{ _openbao_direct_secret_resp.url | default('UNSET') }}"
-          msg: "{{ _openbao_direct_secret_resp.msg | default('N/A') }}"
-          json_keys: "{{ (_openbao_direct_secret_resp.json | default({})).keys() | list }}"
-          data_keys: "{{ (_openbao_direct_secret_resp.json.data | default({})).keys() | list if _openbao_direct_secret_resp.json is defined else [] }}"
-          subdata_keys: "{{ (_openbao_direct_secret_resp.json.data.data | default({})).keys() | list if (_openbao_direct_secret_resp.json is defined and _openbao_direct_secret_resp.json.data is defined) else [] }}"
-      when: _openbao_direct_secret_resp is defined
-
-    - name: Debug OpenBao switch resolution and environment
-      ansible.builtin.debug:
-        msg:
-          inventory_hostname: "{{ inventory_hostname }}"
-          vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('NOT_SET', true) }}"
-          vault_mount: "{{ cisco_openbao_mount | default('NOT_SET', true) }}"
-          vault_namespace: "{{ cisco_openbao_namespace | default('NOT_SET', true) }}"
-          secret_prefix: "{{ cisco_openbao_secret_prefix | default('', true) }}"
-          secret_path: "{{ (cisco_openbao_secret_prefix | default('', true)) ~ inventory_hostname }}"
-          auth_method: "{{ _vault_auth_method | default('NONE', true) }}"
-          has_approle: "{{ _has_approle | default(false) }}"
-          has_vault_token: "{{ (_vault_token | default('') | length) > 0 }}"
-          openbao_health_status: "{{ _openbao_health_probe.status | default('FAILED') }}"
-          openbao_health_msg: "{{ _openbao_health_probe.msg | default(_openbao_health_probe.content | default('N/A')) }}"
-          openbao_login_status: "{{ _openbao_login_probe.status | default('SKIPPED') }}"
-          openbao_login_msg: "{{ _openbao_login_probe.msg | default(_openbao_login_probe.content | default('N/A')) }}"
-          openbao_secret_raw_type: "{{ _cisco_sec.__class__.__name__ | default('dict') }}"
-          openbao_secret_keys: "{{ (_cisco_sec | default({})).keys() | list }}"
-          openbao_secret_retrieved: "{{ (_cisco_sec | default({}) | length) > 0 }}"
-          resolved_ansible_host: "{{ ansible_host | default('UNSET', true) }}"
-          resolved_ansible_user: "{{ ansible_user | default('UNSET', true) }}"
-          resolved_connection_type: "{{ connection_type | default('ssh', true) }}"
-
-    - name: Verify OpenBao switch metadata is resolved
-      ansible.builtin.assert:
-        that:
-          - ansible_host is defined
-          - ansible_host | length > 0
-          - ansible_host != inventory_hostname
-          - ansible_user is defined
-          - ansible_user | length > 0
-        fail_msg: >-
-          [OPENBAO-MISSING] Switch metadata not found or invalid in OpenBao for '{{ inventory_hostname }}'.
-          Resolved ansible_host='{{ ansible_host | default("UNSET", true) }}', ansible_user='{{ ansible_user | default("UNSET", true) }}'.
-          Attempted OpenBao lookup: VAULT_ADDR='{{ lookup("ansible.builtin.env", "VAULT_ADDR") | default("NOT_SET", true) }}',
-          Mount='{{ cisco_openbao_mount | default("secret", true) }}',
-          Path='{{ (cisco_openbao_secret_prefix | default("", true)) ~ inventory_hostname }}',
-          AuthMethod='{{ _vault_auth_method | default("NONE", true) }}' (has_approle: {{ _has_approle | default(false) }}, has_token: {{ (_vault_token | default('') | length) > 0 }}).
-          Please check Semaphore Variable Group (Secrets / Extra vars / Environment):
-          1) Set vault_role_id & vault_secret_id (in Secrets or Environment) OR vault_token.
-          2) Verify openbao_cisco_prefix matches your OpenBao secret path structure.
-          3) Ensure OpenBao secret at '{{ (cisco_openbao_secret_prefix | default("", true)) ~ inventory_hostname }}' has 'ansible_host' and 'ansible_user'.
+      no_log: true
 
   roles:
     - role: cisco_backup

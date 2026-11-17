@@ -102,52 +102,18 @@ monitoring_openbao_required:
   "inventory/assets/+": []
 ```
 
-### (1-1) FUNA Cluster 환경 값 (`funa_env`, #222)
-`funa_cluster` 그룹 호스트에만 쓰인다. **값은 이 문서와 Git에 두지 않는다.** KV 키 이름이 곧 환경 변수 이름이다. 자세한 필수 키는 [docs/funa_env.md](funa_env.md).
-* `secret/data/hosts/<inventory_hostname>`: 노드별 키 `FUNA_NODE_EXTERNAL_HOSTNAME`, `FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME`(→ `cluster.env`)과 노드마다 값이 다른 시크릿 `CLOUDFLARE_API_TOKEN`(→ `proxy.secrets.env`)을 기존 호스트 KV에 **추가**한다(역할은 이 키들만 읽는다).
-* `secret/data/clusters/funa`: 클러스터 공통 비시크릿(→ `cluster.env`, `0644`). 키 전부를 렌더링한다.
-* `secret/data/clusters/funa/proxy`: Caddy 시크릿(→ `proxy.secrets.env`, `0640 root:dockermgmt`).
-* `secret/data/clusters/funa/vrrp`: keepalived 시크릿(→ `vrrp.secrets.env`, `0640 root:dockermgmt`).
-* 정책: Semaphore AppRole에 위 경로의 **읽기** 권한이 필요하다(`clusters/funa/*`). 경로가 없거나 필수 키가 빠지면 플레이는 경로·키 이름을 대며 실패한다.
+### (1-1) FUNA Cluster 환경 값 (`funa_env`, #222, #524)
+`funa_cluster` 그룹 호스트에만 쓰인다. **값은 이 문서와 Git에 두지 않는다.** 필수 키·대응표는 [docs/funa_env.md](funa_env.md)와 `roles/funa_env/vars/main.yml`(`funa_env_openbao_required`)이 원본이다.
+* `inventory/assets/<관리번호>`의 `funa` 절: 노드별 설정(→ `cluster.env`).
+* `inventory/services/funa`: 클러스터 공통 비시크릿(→ `cluster.env`, `0644`).
+* `secrets/services/funa/proxy`·`vrrp`: 소비 컨테이너별 시크릿(→ `proxy.secrets.env`·`vrrp.secrets.env`, `0640 root:dockermgmt`).
+* `secrets/assets/<관리번호>/credentials/cloudflare`: 노드별 Cloudflare 토큰(`token` → `proxy.secrets.env`의 `CLOUDFLARE_API_TOKEN`). Cloudflare는 Service가 아니다.
+* 저장 키는 snake_case(`FUNA_` 접두사 제거 후 소문자)이고 역할의 대응표가 env 이름으로 바꾼다. 경로가 없거나 필수 키가 빠지면 대체값 없이 실패한다.
 
-### (4) Cisco 스위치별 접속 정보 및 자격증명
-* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0000`, `secret/data/hosts/ns0278`)
-* **변수 해석 우선순위**: OpenBao KV v2 최우선 ➔ 인벤토리/로컬 변수 폴백 ➔ 시스템 기본값
-* **필드 (Key-Value) - SSH 스위치**:
-  ```json
-  {
-    "ansible_host": "211.210.44.182",
-    "ansible_port": 22,
-    "ansible_user": "ansible-backup",
-    "ansible_password": "SwitchSecretPassword123!",
-    "connection_type": "ssh",
-    "fqdn": "ns0278.nanoit.kr"
-  }
-  ```
-* **필드 (Key-Value) - Telnet 스위치 (예: `ns0000`, 무암호 허용)**:
-  ```json
-  {
-    "ansible_host": "218.54.219.82",
-    "ansible_port": "23",
-    "ansible_user": "ansible-backup",
-    "ansible_password": "",
-    "connection_type": "telnet",
-    "fqdn": "ns0065.nanoit.kr"
-  }
-  ```
-* **Bastion 경유 장비 필드 추가 (예: `ns0279`)**:
-  ```json
-  {
-    "ansible_host": "10.10.200.4",
-    "ansible_port": 22,
-    "ansible_user": "ansible-backup",
-    "ansible_password": "SwitchSecretPassword123!",
-    "connection_type": "jump_ssh",
-    "bastion_host": "ns0278",
-    "fqdn": "ns0279.nanoit.kr"
-  }
-  ```
-
+### (4) 네트워크 장비(Cisco·FortiGate) 접속 정보 (Spec #511 / Ticket-18)
+Asset 하나에 Endpoint와 Credential로 둔다(옛 `hosts/<ns>`의 `ansible_*`·`connection_type`·`bastion_host`와 별도 경로 `fortigate/<ns>`는 없다).
+* Cisco: Endpoint `ssh`·`telnet`(선호 순서 `[ssh, telnet]`), 로그인 Credential(`password`), 승격 `become: enable`. 비밀번호 로그인 경유지는 `via`로 한 단까지 역할이 직접 처리한다. 자세한 규칙은 [cisco_backup.md](cisco_backup.md).
+* FortiGate: Endpoint `https`와 Credential `api`(`api_token`), 알림은 `secrets/services/alert/notify`(text/plain `url`). 자세한 규칙은 [fortigate_backup.md](fortigate_backup.md).
 
 ### (5) 전역 인프라 서비스 시크릿
 * **경로**: `secret/data/global/services`
@@ -185,15 +151,13 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
   {
     "VAULT_ADDR": "https://openbao.internal:8200",
     "VAULT_NAMESPACE": "root",
-    "OPENBAO_CISCO_PREFIX": "hosts/",
     "VAULT_SKIP_VERIFY": "false"
   }
   ```
 * **Extra variables (추가 변수)**:
   ```json
   {
-    "cisco_backup_dir": "/opt/backups/cisco",
-    "openbao_cisco_prefix": "hosts/"
+    "cisco_backup_dir": "/opt/backups/cisco"
   }
   ```
 * **Secrets (보안 변수 - AppRole 인증 시)**:
