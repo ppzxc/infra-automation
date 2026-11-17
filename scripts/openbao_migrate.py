@@ -100,6 +100,8 @@ class _Builder:
         self.ingest_source = ingest_source
         self.old = {p: copy.deepcopy(d) for p, d in old.items() if not skipped(p, self.skip)}
         self.keyskip = {tuple(s.split(":", 1)) for s in self.skip if ":" in s}
+        for doc, key in self.keyskip:  # 문서:키 항목은 대응표가 쓰는 키여도 옮기지 않는다
+            self.old.get(doc, {}).pop(key, None)
         self.consumed = set()
         self.environments = {}
         self.endpoints = collections.defaultdict(dict)   # ns -> {이름: Endpoint}
@@ -580,9 +582,10 @@ def hash_report(plan, actual, dry_run=False):
     return lines, bad
 
 
-def apply(plan, new_client, dry_run):
-    """문서마다 상태를 정한다. (상태 줄, 새 문서에서 읽은 내용, 다른 문서 수)."""
-    lines, actual, differs = [], {}, 0
+def apply(plan, new_client, dry_run, lines=None):
+    """문서마다 상태를 정한다. (상태 줄, 새 문서에서 읽은 내용, 다른 문서 수). 중간에 실패해도 `lines`에는 지금까지가 남는다."""
+    lines = [] if lines is None else lines
+    actual, differs = {}, 0
     for path in sorted(plan.store):
         mount, doc = path.split("/", 1)
         existing = new_client.read(mount, doc)
@@ -650,7 +653,12 @@ def main(argv=None):
                 print(v.format())
             print("검증 실패: 아무것도 쓰지 않았다", file=sys.stderr)
             return 1
-        lines, actual, differs = apply(plan, new_client, args.dry_run)
+        lines = []
+        try:
+            _, actual, differs = apply(plan, new_client, args.dry_run, lines)
+        except ClientError:
+            print("# 쓰기 중 실패: 여기까지의 상태\n" + "\n".join(lines))
+            raise
         print("# %s: %d documents" % ("dry-run" if args.dry_run else "migrate", len(plan.store)))
         print("\n".join(lines))
         report, bad = hash_report(plan, actual, args.dry_run)

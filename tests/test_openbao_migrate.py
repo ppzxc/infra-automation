@@ -490,3 +490,9 @@ def test_missing_environment_value_is_not_a_difference_and_passphrase_follows_it
     old["hosts/ns0002/users/bk2"] = {"username": "bk2", "ssh_private_key": "KEY-H", "password": "p"}
     plan = om.build_new(old, SKIP)
     assert "passphrase" not in plan.store["secrets/assets/ns0002/credentials/bk2"]
+
+
+def test_key_skip_entry_also_holds_back_keys_the_mapping_would_consume():
+    plan = om.build_new(old_docs(), SKIP + ["hosts/ns0001/agents:restic_password", "hosts/ns0006:FUNA_NODE_NAME"])
+    assert "restic_password" not in plan.store["secrets/assets/ns0001/agents"]
+    assert "node_name" not in plan.store["inventory/assets/ns0006"]["funa"]
