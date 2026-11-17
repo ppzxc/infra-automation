@@ -75,23 +75,22 @@
       check_mode: false
       no_log: true
 
-    - name: Select the Asset document and the access clause credential names (admin, bootstrap)
+    # 묶음은 한 태스크에서 모두 풀고 같은 태스크에서 비운다: _admin_conn·_boot_conn이 비밀의 사본이므로 호스트 변수에 같은 비밀의 사본이 하나만 남고,
+    # 중간 태스크가 실패해도 묶음이 남지 않는다. 요약(_admin_summary·_boot_summary)은 비밀이 없어 뒤 태스크와 보고가 이것만 쓴다.
+    - name: Take apart the resolution bundle (Asset document, access names, admin accounts, connections, secret-free summaries) and drop it
       ansible.builtin.set_fact:
         _asset_doc: "{{ _host_res.asset }}"
         _access: "{{ _host_res.asset.access | default({}, true) }}"
         _admin_credential: "{{ _host_res.admin_credential }}"
         _bootstrap_credential: "{{ _host_res.bootstrap_credential }}"
-
-    - name: Take the admin accounts (access.admin_credentials to accounts input)
-      ansible.builtin.set_fact:
         _admin_accounts: "{{ _host_res.admin_accounts }}"
         _normalized_admin_users: "{{ _host_res.admin_accounts | map(attribute='name') | list }}"
-
-    # 비밀 없는 요약: 뒤 태스크와 보고(연결 결정 요약, via 검사)는 이 요약만 쓴다.
-    - name: Summarize the admin and bootstrap connections (secret-free)
-      ansible.builtin.set_fact:
         _admin_summary: "{{ _host_res.admin | openbao_connection_summary }}"
         _boot_summary: "{{ (_host_res.bootstrap | openbao_connection_summary) if _host_res.bootstrap | length > 0 else {} }}"
+        _admin_conn: "{{ _host_res.admin }}"
+        _boot_conn: "{{ _host_res.bootstrap }}"
+        _host_res: {}
+      no_log: true
 
     - name: Refuse via hops that are not key logins
       ansible.builtin.assert:
@@ -102,14 +101,6 @@
           ({{ _admin_summary.via | rejectattr('login_mode', 'in', ['identity', 'key']) | map(attribute='asset') | list }}).
           경유지는 identity 또는 ssh_key Credential만 지원합니다(비밀번호는 명령행에 남기지 않기 위해 거부).
         quiet: true
-
-    # _admin_conn·_boot_conn이 묶음의 비밀 사본이므로 묶음은 비워 호스트 변수에 같은 비밀의 사본이 하나만 남게 한다.
-    - name: Take the admin connection (Endpoint, login, become, via) and the bootstrap connection (same Endpoint, bootstrap Credential)
-      ansible.builtin.set_fact:
-        _admin_conn: "{{ _host_res.admin }}"
-        _boot_conn: "{{ _host_res.bootstrap }}"
-        _host_res: {}
-      no_log: true
 
     # 계정 삭제(Explicit account removal): Asset 문서의 access.removed_accounts와 실행 변수 'target_removed_users'
     # (문자열/리스트/JSON 문자열 모두 허용)를 합집합으로 통합합니다.

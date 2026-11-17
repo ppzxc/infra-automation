@@ -161,7 +161,7 @@ class Reader:
             raise _fail("알 수 없는 문서 경로입니다: %s (마운트는 %s)" % (doc, ", ".join(MOUNTS)))
         if self.fixture is not None:
             if doc in self.fixture:
-                return self.fixture[doc]
+                return copy.deepcopy(self.fixture[doc])      # 실서버 경로처럼 호출자가 문서를 고쳐도 뒤 읽기에 새지 않는다
             return self._missing(doc, required)
         if doc in self._memo:
             return copy.deepcopy(self._memo[doc])     # 호출자가 문서를 고쳐도 뒤 읽기에 새지 않는다

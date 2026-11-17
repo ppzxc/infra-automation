@@ -689,6 +689,14 @@ def test_maintenance_rejects_a_host_bucket_that_breaks_the_s3_name_rule(tmp_path
     assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Bad/Bucket)" in res.stdout + res.stderr
 
 
+@pytest.mark.parametrize("bad", ["good-bucket\n", 12345, ["a-b"]], ids=["trailing-newline", "integer", "list"])
+def test_maintenance_rejects_a_host_bucket_that_is_not_a_clean_string(tmp_path, bad):
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"], agents={"backup": {"bucket": bad}})
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반" in res.stdout + res.stderr
+
+
 def test_maintenance_reads_only_the_declared_documents(tmp_path):
     """읽은 문서는 backup_openbao_required가 선언한 패턴 안에 있고, 선언한 문서는 모두 읽는다."""
     with FakeOpenBao.with_schemas(token="tok") as bao:

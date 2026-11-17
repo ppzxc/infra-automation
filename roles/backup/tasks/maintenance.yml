@@ -57,7 +57,7 @@
       vars:
         _maint_problems: >-
           {{ (_maint_missing | from_json)
-             + ([] if rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') else ['rustfs_bucket(S3 이름 규칙 위반: ' ~ rustfs_bucket ~ ')']) }}
+             + ([] if (rustfs_bucket is string and rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](?!(?s:.))')) else ['rustfs_bucket(S3 이름 규칙 위반: ' ~ rustfs_bucket ~ ')']) }}
       ansible.builtin.assert:
         that: _maint_problems | length == 0
         fail_msg: >-

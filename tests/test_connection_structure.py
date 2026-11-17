@@ -53,7 +53,7 @@ def test_tasks_that_carry_secrets_are_no_log():
     tasks = {t["name"]: t for t in _load(RESOLVE)[0]["tasks"]}
     for name in ("Acquire the OpenBao client token once for the whole play",
                  "Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass",
-                 "Take the admin connection (Endpoint, login, become, via) and the bootstrap connection (same Endpoint, bootstrap Credential)",
+                 "Take apart the resolution bundle (Asset document, access names, admin accounts, connections, secret-free summaries) and drop it",
                  "Write admin SSH private key to temporary file", "Write bootstrap SSH private key to temporary file",
                  "Write via hop SSH private keys to temporary files", "Create temporary SSH private key files for via hops",
                  "Configure connection parameters from the active connection"):
@@ -68,18 +68,15 @@ def test_the_connection_is_resolved_by_one_lookup_per_host_not_by_repeated_looku
         assert retired not in text, retired
 
 
-def test_the_secret_bearing_resolution_bundle_is_emptied_after_it_is_taken_apart():
+def test_the_secret_bearing_resolution_bundle_is_taken_apart_and_emptied_in_one_task():
     tasks = _load(RESOLVE)[0]["tasks"]
-    last = next(i for i, t in enumerate(tasks) if t["name"].startswith("Take the admin connection"))
-    assert tasks[last]["ansible.builtin.set_fact"]["_host_res"] == {} and tasks[last]["no_log"] is True
-    later = yaml.safe_dump(tasks[last + 1:])
-    assert "_host_res" not in later
-
-
-def test_secret_free_summaries_are_never_no_log():
-    """요약 태스크는 비밀이 없다: no_log를 달면 운영자가 실패 사유를 볼 수 없다."""
-    task = next(t for t in _load(RESOLVE)[0]["tasks"] if t["name"].startswith("Summarize the admin and bootstrap connections"))
-    assert not task.get("no_log")
+    take = next(t for t in tasks if t["name"].startswith("Take apart the resolution bundle"))
+    facts = take["ansible.builtin.set_fact"]
+    assert facts["_host_res"] == {} and take["no_log"] is True
+    assert {"_admin_conn", "_boot_conn", "_admin_summary", "_boot_summary", "_asset_doc", "_admin_accounts"} <= set(facts)
+    before = tasks[:tasks.index(take)]
+    assert [t for t in before if "_host_res" in yaml.safe_dump(t) and not t["name"].startswith("Resolve the Asset document")] == []
+    assert "_host_res" not in yaml.safe_dump(tasks[tasks.index(take) + 1:])
 
 
 def test_hop_key_paths_are_recorded_before_any_key_is_written():
