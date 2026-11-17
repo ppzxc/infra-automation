@@ -85,7 +85,9 @@ def host_audit_drift_plan(records, site_scope, agents_scope, raw_declared=None):
     Exclusion). ``raw_declared``: {host: inventory raw_provisioning_path}.
 
     Hosts not inspected by the audit and Raw Provisioning Path hosts are never
-    sent to a sub-run; they are reported as not inspectable with the reason.
+    sent to a sub-run. ``excluded`` keeps the reason of both; ``not_applicable``
+    lists the raw ones, which Drift cannot see by design (reported as 비대상,
+    not counted as 점검불가).
     """
     raw_declared = raw_declared or {}
     by_host = {r.get('inventory_hostname'): r for r in (records or []) if r.get('inventory_hostname')}
