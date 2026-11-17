@@ -1,0 +1,7 @@
+description: Fake FUNA node
+type: server
+funa:
+  node_external_hostname: node.example.test
+  node_external_wildcard_hostname: '*.node.example.test'
+  notification_header: fake-header
+  node_name: fake-node

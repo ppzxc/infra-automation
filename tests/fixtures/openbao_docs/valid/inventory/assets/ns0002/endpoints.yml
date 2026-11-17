@@ -1,0 +1,8 @@
+ssh:
+  protocol: ssh
+  address: 192.0.2.12
+  port: 22
+  credential: root
+  become:
+    method: su
+    credential: root

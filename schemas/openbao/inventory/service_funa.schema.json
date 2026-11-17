@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Service funa 클러스터 공통 설정(비밀 아님)",
+  "type": "object",
+  "description": "키는 snake_case, 렌더링 때 env 이름으로 바꾼다.",
+  "patternProperties": {
+    "^[a-z][a-z0-9_]*$": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

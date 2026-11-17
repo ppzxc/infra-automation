@@ -1,0 +1,1 @@
+inventory/assets/ns0001/endpoints	#/ssh	additionalProperties

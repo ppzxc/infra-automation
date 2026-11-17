@@ -1,0 +1,5 @@
+Web-1:
+  protocol: ssh
+  address: 192.0.2.23
+  port: 22
+  credential: root

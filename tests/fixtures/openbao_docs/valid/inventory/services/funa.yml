@@ -1,0 +1,4 @@
+service_name: fake-funa
+health_check_uri: /health
+notification_smtp_port: 25
+tz: Asia/Seoul

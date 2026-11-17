@@ -1,0 +1,27 @@
+# 문서 경로 패턴 -> 스키마 대응표 (#515, Spec #511). 이 파일이 대응의 유일한 원본이다.
+# 패턴은 `<마운트>/<문서 경로>`이고 `+`는 경로 한 마디(`/`를 넘지 않는다)에 맞는다. 문서 하나는 패턴 하나에만 맞아야 한다.
+# 스키마 경로는 이 디렉터리 기준이다. 키 정의는 각 스키마의 description이 원본이다.
+"inventory/assets/+": inventory/asset.schema.json
+"inventory/assets/+/endpoints": inventory/endpoints.schema.json
+"inventory/operators/+": inventory/operator.schema.json
+"inventory/services/openobserve": inventory/service_openobserve.schema.json
+"inventory/services/rustfs": inventory/service_rustfs.schema.json
+"inventory/services/github": inventory/service_github.schema.json
+"inventory/services/semaphore": inventory/service_semaphore.schema.json
+"inventory/services/funa": inventory/service_funa.schema.json
+"inventory/config/common": inventory/config/common.schema.json
+"inventory/config/host_audit": inventory/config/host_audit.schema.json
+"inventory/config/openobserve_config": inventory/config/openobserve_config.schema.json
+"inventory/config/github_webhook_watch": inventory/config/github_webhook_watch.schema.json
+"secrets/assets/+/credentials/+": secrets/credential.schema.json
+"secrets/assets/+/agents": secrets/agents.schema.json
+"secrets/automation/ssh": secrets/automation_ssh.schema.json
+"secrets/services/openobserve/admin": secrets/services/basic_auth.schema.json
+"secrets/services/openobserve/ingest": secrets/services/basic_auth.schema.json
+"secrets/services/rustfs/maintenance": secrets/services/access_key.schema.json
+"secrets/services/rustfs/audit_reports": secrets/services/access_key.schema.json
+"secrets/services/alert/notify": secrets/services/alert_notify.schema.json
+"secrets/services/github/org_hooks_read": secrets/services/token.schema.json
+"secrets/services/semaphore/inventory_read": secrets/services/token.schema.json
+"secrets/services/funa/proxy": secrets/services/funa_secrets.schema.json
+"secrets/services/funa/vrrp": secrets/services/funa_secrets.schema.json

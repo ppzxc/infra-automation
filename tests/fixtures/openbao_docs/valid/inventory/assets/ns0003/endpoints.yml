@@ -1,0 +1,15 @@
+ssh:
+  protocol: ssh
+  address: 192.0.2.13
+  port: 22
+  credential: netadmin
+  via: ns0001/ssh
+  become:
+    method: enable
+    credential: enable
+telnet:
+  protocol: telnet
+  address: 192.0.2.13
+  port: 23
+  credential: netadmin
+  via: ns0001/ssh
