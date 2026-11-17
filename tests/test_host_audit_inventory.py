@@ -439,6 +439,12 @@ def test_aud_101_task_marks_a_missing_asset_document_fact_as_lookup_failed(tmp_p
     assert asset["lookup"] == "failed" and asset["purpose"] == ""
 
 
+def test_an_isms_clause_that_is_not_an_object_is_malformed_not_silently_empty():
+    decl = host_audit_asset_declaration({"description": "x", "isms": ["not", "an", "object"]}, True)
+    assert decl["purpose"] == "x" and decl["department"] == "" and decl["lookup"] == "ok"
+    assert decl["malformed"] == ["department", "owner_role", "admin_role", "asset_importance"]
+
+
 def test_declaration_with_failed_lookup_ignores_whatever_the_dict_holds():
     decl = host_audit_asset_declaration(HOST_KV, False)
     assert decl["lookup"] == "failed" and decl["purpose"] == "" and decl["asset_importance"] == ""

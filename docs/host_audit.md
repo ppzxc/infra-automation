@@ -77,7 +77,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 |---|---|
 | `status` | `ok`(수집 완료) · `unreachable`(접속 실패) · `probe_failed`(접속은 됐으나 수집 표식 없음) |
 | `reason` | 점검불가 이유(첫 줄, 최대 200자). `ok`이면 빈 문자열 |
-| `declared` | 인벤토리 값 (`fqdn`, `ip`, 그룹)과 환경(`host_audit_environment`, 역할 기본값 `production`). 환경이 비면 보고서에 '미지정' |
+| `declared` | 인벤토리 값 (`fqdn`, `ip`, 그룹)과 환경(`host_audit_environment`, 역할 기본값 `production`). 허용 값만 받는다(AUD-001) |
 | `identity` / `os` | 호스트에서 수집한 값. `status`가 `ok`가 아니면 `null`. `ips`는 루프백·링크 로컬을 뺀 전체 주소, `account`는 점검에 쓴 계정 |
 | `os.name` | `/etc/os-release`의 `PRETTY_NAME`, 없으면(CentOS 6) `/etc/redhat-release` 첫 줄 |
 
@@ -505,7 +505,7 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 | `secrets/services/alert/notify` | `url` | ● (악화 알림이 있을 때) | KISA 악화 알림 webhook(§15). 못 읽어도 보관·메일은 막히지 않는다 |
 | `inventory/config/host_audit` | `mail_recipients`, `mail_sender`, `mail_sender_display_name` | (필수 키 없음) | 메일 입력(§13.3). 없으면 읽기 실패가 아니라 메일 문제로 남는다 |
 
-버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다. 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이다. 이 역할은 토큰을 따로 받아 두지 않는다(`_vault_token`을 만들지 않음): 읽는 태스크마다 새로 로그인하므로 앞 단계가 토큰 TTL(30분)보다 길어도 만료된 토큰을 쓰지 않는다. `host_audit_environment`는 `production|staging|development|test`만 허용한다(`AUD-001`). `host_audit` AppRole 정책이 위 문서를 읽는다(`tofu/openbao`).
+버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다(전용 키의 정책이 이 버킷으로 범위가 정해져 있다). 주소·키는 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이다. 이 역할은 토큰을 따로 받아 두지 않는다(`_vault_token`을 만들지 않음): 읽는 태스크마다 새로 로그인하므로 앞 단계가 토큰 TTL(30분)보다 길어도 만료된 토큰을 쓰지 않는다. `host_audit_environment`는 `production|staging|development|test`만 허용한다(`AUD-001`). `host_audit` AppRole 정책이 위 문서를 읽는다(`tofu/openbao`).
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -809,7 +809,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `EXP-SEC-3` | secret-file-permissions | `sec_env_files` | 선언한 시크릿 env 파일이 모두 있고 0640 이하 `root:dockermgmt`다(AGENTS.md 4절 예외) |
 
 - 노드 otelcol OTLP 수신기의 모든 주소 바인드는 설계된 예외(ADR-0012)이므로 `mgmt_wildcard_allowed`에 그 포트를 적는다. 관리 웹이 아니라서 `EXP-MGMT-1`의 대상도 아니다.
-- **서버에서 정책을 직접 읽지 않는다**: Host Audit 전용 키는 IAM 정책을 읽을 수 없고 유지보수 키는 쓰지 않는다(`AUD-500`, 최소 권한). `EXP-BAK-2`·`EXP-BAK-3`은 운영자가 읽기 전용 수집기(`scripts/collect-rustfs-policy.py`)로 만든 스냅샷 파일을 `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT`(러너 경로)로 주면 판정하고, 주지 않으면 점검불가다. 항목 판정을 켜는 변수는 `host_audit_regression_backup_enabled`다.
+- **서버에서 정책을 직접 읽지 않는다**: Host Audit 전용 키는 IAM 정책을 읽을 수 없고 유지보수 키는 쓰지 않는다(최소 권한). `EXP-BAK-2`·`EXP-BAK-3`은 운영자가 읽기 전용 수집기(`scripts/collect-rustfs-policy.py`)로 만든 스냅샷 파일을 `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT`(러너 경로)로 주면 판정하고, 주지 않으면 점검불가다. 항목 판정을 켜는 변수는 `host_audit_regression_backup_enabled`다.
 - 이 섹션에 넣지 않은 것: 평문 인증 정보 정리와 서버 밖 사본(#374 선행), 패치 재부팅(#376), 이미지 버전 목록, `docker compose config --quiet`(운영자 계정의 compose 컨텍스트가 필요해 읽기 전용 원격 점검이 아님).
 
 ### 16.3 호스트별 JSON 추가 필드

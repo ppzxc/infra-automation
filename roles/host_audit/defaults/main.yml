@@ -103,7 +103,7 @@ host_audit_kisa_capability_defaults:
 host_audit_storage_enabled: true
 
 # 버킷 이름(공개해도 되는 값). 주소·리전은 inventory/services/rustfs, 쓰기 키는 secrets/services/rustfs/audit_reports에서 읽는다.
-# 보관 대상을 실행 변수로 덮어쓰는 길은 없다.
+# 주소·키를 실행 변수로 덮어쓰는 길은 없다(버킷 이름만 이 기본값이고, 키 정책이 host-audit 버킷으로 범위가 정해져 있다).
 host_audit_storage_bucket: host-audit
 
 # RustFS TLS 검증과 사설 CA 파일(러너 경로). 비우면 시스템 CA를 쓴다.
