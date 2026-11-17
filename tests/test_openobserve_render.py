@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from o2c_render import KV, RENDER_LOG_ENV, ROOT_DIR, render_desired
+from o2c_render import ADMIN, NOTIFY, RENDER_LOG_ENV, ROOT_DIR, render_desired
 from o2c_alert_helpers import (
     COUNT_FIELDS, DEVICE_TIME_ALERTS, EXPECTED_ALERTS, FIXTURES, FORTIGATE_ALERTS, FORTIGATE_FN, GITHUB_FN, LONGEST_ROW_VALUES,
     LONGEST_TEXT, MEM_ALERTS, PROMQL_ALERTS, PROMQL_DEFS, PROMQL_ROW_FIELDS, RAID_ALERTS, RESOURCE_ALERTS, ROLE, TIME_ALERTS,
@@ -67,7 +67,7 @@ def test_render_returns_every_managed_alert(rendered_alerts):
 def test_render_never_dumps_the_webhook_destination(rendered):
     assert "destination" not in {o["kind"] for o in rendered}
     text = str(rendered)
-    assert KV["alert_webhook_plain_url"] not in text and KV["alert_webhook_token"] not in text and KV["api_password"] not in text
+    assert NOTIFY["url"] not in text and ADMIN["password"] not in text
 
 
 def test_resource_alerts_are_metric_state_alerts_with_grade_and_renotify_interval(rendered_alerts):
