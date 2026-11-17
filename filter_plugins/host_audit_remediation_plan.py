@@ -39,7 +39,8 @@ PLAN_FAILED = '이행계획서 생성 실패'
 UNKNOWN_ITEM = '(카탈로그에 없는 항목)'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
 ZIP_NAME = 'host-audit-%s-xlsx.zip'
-TOTAL_LABEL = '합계 xlsx'  # what a failure message calls the total (a host may be named ``total``)
+TOTAL_LABEL = '합계 xlsx'  # what a failure message calls the total (a host may be named ``total``; Inventory Hostnames
+# are ASCII management numbers, so no host is named like this label)
 TOTAL_PART = 'total'  # the name part of the total workbook: ``host-audit-<run_id>-total.xlsx``
 TOTAL_MEMBER = 'total.xlsx'  # the folder names exist only inside the zip: the files on disk stay flat in xlsx/
 HOST_MEMBER = 'hosts/%s.xlsx'
@@ -214,8 +215,10 @@ def _total(plans, run_id):
 def host_audit_remediation_files(model):
     """``{file_name: plan}`` of every xlsx of the run (AUD-025, AUD-026): each host's plan and the total, one evaluation."""
     model = model or {}
-    plans = host_audit_remediation_plans(model)
-    files = dict((plan['file_name'], plan) for plan in plans)
+    # one plan per file: a host listed twice gets one file, and its rows are not counted twice in the total.
+    # (_total only sorts the strings and numbers that _row already normalized, so it has no guard of its own.)
+    files = dict((plan['file_name'], plan) for plan in host_audit_remediation_plans(model))
+    plans = list(files.values())
     if plans:
         total = _total(plans, (model.get('cover') or {}).get('run_id', ''))
         files[total['file_name']] = total
@@ -241,7 +244,8 @@ def _name_part(value):
 def _host_part(host):
     """The name part of a host: ``_name_part``, and never the total's own part (a host called ``total`` must not take its file)."""
     part = _name_part(host)
-    return part if part != TOTAL_PART else '%s-%s' % (part, hashlib.sha256(str(host).encode('utf-8', 'replace')).hexdigest()[:8])
+    # lower(): a case-folding disk (a recipient's laptop) would also merge ``TOTAL`` with the total's file
+    return part if part.lower() != TOTAL_PART else '%s-%s' % (part, hashlib.sha256(str(host).encode('utf-8', 'replace')).hexdigest()[:8])
 
 
 def host_audit_remediation_file_name(run_id, host):

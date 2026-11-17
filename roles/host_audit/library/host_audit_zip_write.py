@@ -41,7 +41,7 @@ options:
     description:
       - Mapping of a file name inside C(src_dir) to the name the file gets inside the zip (may hold folders such as
         C(hosts/ns0001.xlsx)). Only the listed files are packed, in zip-name order, and a listed file that is missing is an error.
-        A zip name must be a relative path without C(..), empty parts, C(.) parts or a backslash, and unique (no name may also be a folder of another). Names are case-sensitive, like the host names they carry. The files on disk
+        A zip name must be a relative path without C(..), empty parts, C(.) parts, a backslash, a colon or control characters, and unique (no name may also be a folder of another). Names are case-sensitive, like the host names they carry. The files on disk
         keep their flat names. Not together with C(names).
     type: dict
 author:
@@ -94,11 +94,11 @@ def _bad_zip_names(members):
     bad = []
     for name in members.values():
         parts = str(name).split('/')
-        if not name or '\\' in name or name.startswith('/') or any(part in ('', '.', '..') for part in parts):
-            bad.append(str(name))
+        if (not name or '\\' in name or ':' in name or any(ord(ch) < 32 for ch in name)
+                or any(part in ('', '.', '..') for part in parts)):
+            bad.append(repr(str(name)))
     names = [str(name) for name in members.values()]
-    if len(set(names)) != len(names):
-        bad.append('duplicates')
+    bad += ['duplicate %r' % name for name in sorted(set(names)) if names.count(name) > 1]
     if any(other.startswith(name + '/') for name in names for other in names):  # a file that is also a folder
         bad.append('file and folder with the same name')
     return bad

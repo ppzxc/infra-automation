@@ -484,6 +484,22 @@ def test_a_host_named_total_does_not_take_the_name_of_the_total():
     assert by_file["host-audit-ha-1-total.xlsx"]["zip_member"] == "total.xlsx"
 
 
+def test_a_host_listed_twice_has_one_file_and_is_not_counted_twice_in_the_total():
+    from host_audit_remediation_plan import host_audit_remediation_files
+    model = _model([_record("h1", {1: "VULN"}), _record("h2", {})])
+    once = host_audit_remediation_total(model)["rows"]
+    model["hosts"] = ["h1", "h1", "h2"]
+    files = host_audit_remediation_files(model)
+    assert len(files) == 3 and host_audit_remediation_total(model)["rows"] == once
+
+
+def test_a_host_named_total_in_another_case_does_not_take_the_name_of_the_total_either():
+    from host_audit_remediation_plan import host_audit_remediation_files
+    model = _model([_record("TOTAL", {1: "VULN"})])
+    names = sorted(host_audit_remediation_files(model))
+    assert len(names) == 2 and "host-audit-ha-1-TOTAL.xlsx" not in names
+
+
 def test_zip_members_map_every_file_to_its_folder_name():
     from host_audit_remediation_plan import host_audit_remediation_files, host_audit_remediation_zip_members
     model = _total_model()
