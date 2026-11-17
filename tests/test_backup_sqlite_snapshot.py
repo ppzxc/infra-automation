@@ -20,7 +20,7 @@ import yaml
 from test_backup import HOOK, ROLE, ROOT_DIR, _render, _run, _task, _vars, needs_restic
 
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
-from host_agents import host_agents_resolve_inputs  # noqa: E402
+import test_host_agents as base  # noqa: E402
 
 SNAPSHOT = ROLE / "files" / "host-agents-sqlite-snapshot.sh"
 HOST_AGENTS_PROFILE = "profiles.yaml.j2"
@@ -89,11 +89,8 @@ def _rows(path):
 
 # --- 입력 (host_agents_inputs) -------------------------------------------------------------------------------
 
-REQUIRED = {"o2_ingest_token": "t", "restic_password": "p", "rustfs_access_key": "a", "rustfs_secret_key": "s"}
-
-
 def _resolve(**kv):
-    return host_agents_resolve_inputs(dict(REQUIRED, **kv), ["/var/log/messages"], [], ["/etc"], "hosts/h/agents")
+    return base._filter(dict(base.REQUIRED, **kv), ["/var/log/messages"], [], ["/etc"], "inventory/assets/h")
 
 
 def test_without_the_input_the_resolved_list_is_empty():
@@ -109,7 +106,7 @@ def test_the_input_is_a_deduplicated_list_of_absolute_paths():
 @pytest.mark.parametrize("bad", ["relative.db", "/data/it's.db", "/data/with space.db", "/data/../etc/x.db", "/data/a;b.db", "/"])
 def test_unsafe_or_relative_paths_are_errors_naming_the_key(bad):
     res = _resolve(backup_sqlite_snapshots=[bad])
-    assert len(res["errors"]) == 1 and "backup_sqlite_snapshots" in res["errors"][0] and "hosts/h/agents" in res["errors"][0]
+    assert len(res["errors"]) == 1 and "agents.backup.sqlite_snapshots" in res["errors"][0] and "inventory/assets/h" in res["errors"][0]
 
 
 # --- 렌더링: 입력이 없으면 아무것도 바뀌지 않는다 ----------------------------------------------------------------

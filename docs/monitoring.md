@@ -55,28 +55,34 @@
 - **호스트 집합**: `target_hosts:&servers:!host_agents_excluded` (축소만 가능, `servers` 밖으로 확장 불가). 인벤토리 `host_agents_excluded` 그룹의 호스트는 Deploy·Config·Repo Maintenance 모두에서 빠집니다(ADR-0006 §2.1). `host_agents_backup_only` 그룹의 호스트는 대상에 남지만 `enable_otelcol`이 `false`로 파생되어 otelcol 블록(설치·설정·서비스, legacy node_exporter 정리 포함)을 모두 건너뜁니다. 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
 - **롤아웃**: `serial: 25%`, `gather_facts: false`. 프로비저닝 assert·OS 프로브·fact 수집·입력 검증은 모두 역할 안에서 수행됩니다.
 - **태그**: 설치 단계 `agents_install`, 설정/스케줄 단계 `agents_config`, 역할 공통 `otel`(향후 `backup`). 사전 단계(`MON-020~035`)는 `always`라 `--tags agents_config`에서도 수행됩니다. Deploy = 태그 없음, Config = `--tags agents_config`.
-- **사전 단계**: `_is_already_provisioned`가 아니고 `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`도 없으면 즉시 실패(아래 "비밀번호 접속 예외" 참고) → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
-- **OpenBao 입력**: `hosts/<host>/agents`(호스트별)와 `agents/openobserve`, `agents/rustfs`(공용, `run_once`)를 컨트롤러에서 조회합니다.
+- **사전 단계**: `_is_already_provisioned`가 아니고 선택된 ssh Endpoint에 `identity`가 있으면(`_connection.password_auth_exception`이 거짓) 즉시 실패(아래 "비밀번호 접속 예외" 참고) → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
+- **OpenBao 입력**(Spec #511 / Ticket-14): 공용 읽기 지점(`lookup('openbao_doc', ...)`) 한 곳으로 호스트마다 컨트롤러에서 읽는다. 읽는 문서 패턴과 필수 키는 `vars/main.yml`의 `monitoring_openbao_required` 한 선언이고 입력 검증 assert(`MON-031`)·테스트가 같은 선언을 쓴다. 필수 문서·키가 없으면 대체값 없이 실패한다(상태 코드는 경고로, 시크릿 문서 조회는 `no_log`).
 
-  | 키 (`hosts/<host>/agents`) | 필수 | 용도 |
-  |---|---|---|
-  | `o2_ingest_token`, `rustfs_access_key`, `rustfs_secret_key`, `restic_password` | 예 | 호스트 전용 시크릿 (누락 시 해당 호스트 실패). `host_agents_backup_only` 호스트는 `o2_ingest_token` 불필요 |
-  | `otel_extra_logs` | 아니오 | glob(→ `app_logs`) 또는 `{path, stream, service}` 추가. `service`(소문자·숫자·`.-_`)는 선택, 없으면 스트림 이름(`app` 등)으로 보고 |
-  | `otel_exclude_logs` | 아니오 | 표준 목록에서 정확히 일치하는 경로 제거. `security_logs` 경로는 제외 불가 |
-  | `otel_docker_metrics` | 아니오 | Docker 메트릭 opt-in |
-  | `otel_container_logs` | 아니오 | docker 컨테이너 로그 수집 opt-in(기본 꺼짐, modern 호스트만, docker `json-file` 드라이버 파일). 아래 §3-3 "컨테이너 로그" |
-  | `otel_app_telemetry` | 아니오 | boolean. 컨테이너 앱 텔레메트리(Business Telemetry, ADR-0012) 수신 opt-in(기본 꺼짐). 아래 §3-3 "컨테이너 앱 텔레메트리" |
-  | `otel_github_webhook` | 아니오 | boolean. GitHub 조직 웹훅 수신기 opt-in(기본 꺼짐, modern 호스트만, Spec #399). 켜면 아래 5개 키가 **모두** 필요하다(하나라도 비면 `MON-034`에서 변경 전 실패). 아래 §3-3 "GitHub 조직 웹훅 수신기" |
-  | `github_webhook_address`, `github_webhook_port`, `github_webhook_path`, `github_webhook_secret`, `github_webhook_network` | 웹훅을 켤 때만 | 수신기 바인딩 주소(컨테이너 브리지 전용 IPv4, 모든 인터페이스·루프백 불가)·포트·수신 경로(`/`로 시작)·웹훅 시크릿·도커 네트워크 이름. **저장소에 기본값이 없고** OpenBao 호스트 KV로만 주입한다 |
-  | `host_agents_environment` | 예(호스트별) | `production` \| `staging` \| `development` \| `test`. 인벤토리 변수가 우선이고 없으면 이 KV 키. **그룹 기본값 없음** — 누락·허용 밖 값은 변경 전 실패(`MON-037`) |
-  | `backup_extra_paths`, `backup_exclude_paths`, `backup_pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
-  | `backup_sqlite_snapshots` | 아니오 | SQLite 파일 절대 경로 목록(안전한 글자만, `..` 불가). 있으면 백업 직전 online backup 스냅샷을 만들어 백업한다(`docs/backup.md` §3-1, #323). 없으면 동작이 바뀌지 않는다 |
+  | 문서 | 키 | 필수 | 용도 |
+  |---|---|---|---|
+  | `secrets/assets/<ns>/agents` | `ingest_token`, `rustfs_access_key`, `rustfs_secret_key`, `restic_password` | 예 | 호스트 전용 시크릿 (누락 시 해당 호스트 실패). `host_agents_backup_only` 호스트는 `ingest_token` 불필요 |
+  | `secrets/assets/<ns>/agents` | `webhook_secret` | 웹훅을 켤 때만 | GitHub 웹훅 시크릿 |
+  | `inventory/assets/<ns>` `agents.otel` | `extra_logs` | 아니오 | glob(→ `app_logs`) 또는 `{path, stream, service}` 추가. `service`(소문자·숫자·`.-_`)는 선택, 없으면 스트림 이름(`app` 등)으로 보고 |
+  | | `exclude_logs` | 아니오 | 표준 목록에서 정확히 일치하는 경로 제거. `security_logs` 경로는 제외 불가 |
+  | | `docker_metrics` | 아니오 | Docker 메트릭 opt-in |
+  | | `container_logs` | 아니오 | docker 컨테이너 로그 수집 opt-in(기본 꺼짐, modern 호스트만, docker `json-file` 드라이버 파일). 아래 §3-3 "컨테이너 로그" |
+  | | `app_telemetry` | 아니오 | boolean. 컨테이너 앱 텔레메트리(Business Telemetry, ADR-0012) 수신 opt-in(기본 꺼짐). 아래 §3-3 "컨테이너 앱 텔레메트리" |
+  | | `github_webhook` | 아니오 | boolean. GitHub 조직 웹훅 수신기 opt-in(기본 꺼짐, modern 호스트만, Spec #399). 켜면 아래 `agents.github_webhook` 키 4개와 `webhook_secret`이 **모두** 필요하다(하나라도 비면 `MON-034`에서 변경 전 실패). 아래 §3-3 "GitHub 조직 웹훅 수신기" |
+  | `inventory/assets/<ns>` `agents.github_webhook` | `address`, `port`, `path`, `network` | 웹훅을 켤 때만 | 수신기 바인딩 주소(컨테이너 브리지 전용 IPv4, 모든 인터페이스·루프백 불가)·포트·수신 경로(`/`로 시작)·도커 네트워크 이름. **저장소에 기본값이 없고** Asset 문서로만 주입한다 |
+  | `inventory/assets/<ns>` `agents.backup` | `extra_paths`, `exclude_paths`, `pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
+  | | `sqlite_snapshots` | 아니오 | `{path}` 항목 목록(경로는 안전한 글자만, `..` 불가). 있으면 백업 직전 online backup 스냅샷을 만들어 백업한다(`docs/backup.md` §3-1, #323). 없으면 동작이 바뀌지 않는다 |
+  | `inventory/services/openobserve`, `inventory/services/rustfs` | `url`(필수), `org`·`region`(선택) | 예 | 공유 주소(조회는 호스트마다). `o2_ca_file`·`rustfs_ca_file`은 OpenBao에 없고 역할 기본값(빈 값)·Extra variables다 |
+  | `secrets/services/openobserve/ingest` | `username`, `password` | 예 | 컨트롤러의 백업 등록 이벤트 전송 자격(`BAK-060`) |
+  | `secrets/services/alert/notify` | `url` | 검사 호스트만 | 생존 타이머의 text/plain 알림 주소(`MON-220`) |
+  | `inventory/assets/<ns>/endpoints` | `ssh`의 `address`·`port` | 검사 호스트만 | 서버 도달성 대상(`MON-227`~`229`) |
 
-- **실패 조건 (변경 전, check 모드 포함)**: 필수 키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 KV 키를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
-- **공유 시크릿**: `agents/openobserve`, `agents/rustfs`가 없거나 값이 비어 있으면 실패합니다(조회는 호스트마다 수행, TLS 검증은 `host_agents_vault_validate_certs`).
+  `host_agents_environment`(`production` \| `staging` \| `development` \| `test`)는 모든 호스트가 같은 값이라 **역할 기본값**이고 OpenBao에서 읽지 않는다. 허용 밖 값은 변경 전 실패(`MON-037`).
+
+- **실패 조건 (변경 전, check 모드 포함)**: 필수 문서·키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 저장 위치(`agents.backup.exclude_paths` 등)를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
+- **공유 Service 문서**: `inventory/services/openobserve`·`rustfs`에 `url`이 없으면 실패합니다(조회는 호스트마다 수행. TLS 검증과 인증은 읽기 지점이 정한다).
 - **제외 판정**: `otel_exclude_logs`는 경로 정규화 후 동일/glob/상위 디렉터리가 `security_logs` 경로를 덮으면 실패합니다(`/var/log/audit`, `/var/log/secure*` 포함).
-- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `otel_container_logs`, `otel_app_telemetry`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `backup_sqlite_snapshots`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_shared_secrets`(`no_log`).
-- **테스트 seam**: `host_agents_kv_fixture`(`{host, openobserve, rustfs}`)가 정의되면 OpenBao를 조회하지 않습니다(molecule 공용 `group_vars`가 `_is_already_provisioned: true`와 함께 제공).
+- **fact 출력**: `host_agents_inputs`(`otel_logs`, `otel_docker_metrics`, `otel_container_logs`, `otel_app_telemetry`, `backup_paths`, `backup_exclude_paths`, `backup_pre_hooks`, `backup_sqlite_snapshots`, `errors`; 시크릿 없음), `host_agents_secrets`, `host_agents_services`(OpenObserve·RustFS 공유 주소), `host_agents_ingest_auth`(`no_log`).
+- **테스트 seam**: 변수 `openbao_fixture`(키 `<마운트>/<문서 경로>`, 값 문서)가 정의되면 읽기 지점이 네트워크 없이 그 안에서만 답합니다(molecule 공용 `group_vars`가 `_is_already_provisioned: true`와 함께 제공).
 
 ---
 
@@ -84,11 +90,11 @@
 
 SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(CentOS 6/7 등)에도 Host Agents를 설치할 수 있습니다. **호스트별 명시 허용**이 필요합니다.
 
-1. OpenBao `secret/hosts/<호스트>`(접속 정보 KV, `/agents` 아님)에 `"host_agents_allow_password_auth": true`를 추가합니다. 이 플래그가 없는 호스트는 기존처럼 `MON-020`에서 중단됩니다.
-2. 접속 계정은 **root** 또는 **일반 계정 + sudo 비밀번호** 모두 가능합니다. 키가 없으면 호스트는 부트스트랩 모드로 접속하므로 계정과 비밀번호는 `hosts/<호스트>/bootstrap`(우선) 또는 `users/<bootstrap_user>`의 `password`에서 읽고(`bootstrap_user`는 `hosts/<호스트>` KV로 호스트별 지정, 기본 `root`), 일반 계정이면 같은 비밀번호가 sudo 비밀번호(`ansible_become_password`)로 쓰입니다.
-3. `admin_users`는 접속 계정이 아니라 `Validate an admin user is resolved` 단언을 통과시키는 용도입니다(없으면 `resolve_connection`이 중단).
+1. 호스트의 `ssh` Endpoint(`inventory/assets/<ns>/endpoints`)를 `identity` 없이 등록합니다. `resolve_connection`이 `_connection.password_auth_exception`을 계산하고(`host_agents_allow_password_auth` 플래그는 폐지), 이 값이 참이 아닌 호스트는 기존처럼 `MON-020`에서 중단됩니다.
+2. 접속 계정은 **root** 또는 **일반 계정 + sudo 비밀번호** 모두 가능합니다. Endpoint의 기본 Credential(또는 `access.bootstrap_credential`)의 `password`로 접속하고, 일반 계정이면 `become`의 승격 비밀번호가 쓰입니다.
+3. `access.admin_credentials`는 접속 계정이 아니라 관리 계정 목록을 만드는 용도입니다.
 4. CentOS 6/7 바이너리 업로드는 `sshpass -e scp`(`MON-104`)로 진행합니다. 비밀번호는 `SSHPASS` 환경변수로만 전달되어 인자·프로세스 목록·로그에 나타나지 않습니다(`no_log`). 컨트롤러(Semaphore 러너)에 `sshpass`가 필요하며 없으면 `MON-109`에서 중단합니다. 설정 파일·unit은 기존 base64 raw 전송이라 비밀번호 접속으로 동작합니다.
-5. 이 예외로 설치된 호스트는 실행마다 `PASSWORD-AUTH-EXCEPTION` 경고(`MON-029`)가 남습니다(ISMS 증적). **만료 기준**: 해당 호스트를 `site.yml`로 하드닝(키 인증)하면 플래그를 제거합니다.
+5. 이 예외로 설치된 호스트는 실행마다 `PASSWORD-AUTH-EXCEPTION` 경고(`MON-029`)가 남습니다(ISMS 증적). **만료 기준**: 해당 호스트를 `site.yml`로 하드닝(키 인증)하면 Endpoint에 `identity: automation`을 등록합니다.
 
 ## 3-2. 바이너리 버전 고정과 전달 (`deliver_binary.yml`)
 
@@ -118,7 +124,7 @@ SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(Cen
 - **라우팅**: `logs/in`(memory_limiter, `resource/host`: `host.name`=인벤토리 호스트명, `os.type`, `os.name`, `os.version`, `os.description`, `host.arch`, `host.id`(없으면 생략), `host.ip`(인벤토리 `ip` > 호스트 KV `ip` > `public_ip`, 없으면 생략), `deployment.environment.name`; `service.name`은 파일 그룹·수집기별로 따로 부여; 값 정의는 [ADR-0006 §2.3](adr/0006-host-agents-otelcol-resticprofile.md)) → `routing/logs`(`log_type`) → `security_logs`/`system_logs`/`app_logs`/`backup_logs` 파이프라인 → 스트림별 `otlphttp` exporter(`stream-name` 헤더).
 - **전송**: `<o2_endpoint>/api/<o2_org>`(끝 슬래시 금지), `Authorization: Basic ${env:O2_BASIC_AUTH}`, 사설 CA는 `o2_ca_file`. 로그 exporter는 `file_storage` 영속 bytes 큐(`otel_log_queue_bytes`) + `block_on_overflow: true` + `max_elapsed_time: 0`; 메트릭은 별도 메모리 큐(`block_on_overflow: false`) 파이프라인입니다. `file_storage`는 `compaction.on_rebound: true`.
 - **시크릿**: `/etc/otelcol-contrib/secrets.env`(`0600`, `no_log`, `diff: false`)에만 있고 설정은 `${env:…}`로 참조합니다. systemd 유닛은 비root `otelcol` + `CAP_DAC_READ_SEARCH` + `EnvironmentFile`.
-- **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 **Semaphore Extra variables 또는 `group_vars`(우선) → OpenBao `agents/openobserve`의 같은 이름 키(폴백) → 기본값(`o2_org=default`, 나머지 빈 값)** 순으로 해석합니다. 저장소가 공개라 내부 도메인은 Git에 두지 않고 평상시에는 OpenBao에 둡니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.
+- **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 **Semaphore Extra variables 또는 `group_vars`(우선) → OpenBao `inventory/services/openobserve`의 `url`·`org`(폴백) → 기본값(`o2_org=default`, 나머지 빈 값)** 순으로 해석합니다. `o2_ca_file`은 OpenBao에 없어 Extra variables·`group_vars`로만 줍니다. 저장소가 공개라 내부 도메인은 Git에 두지 않고 평상시에는 OpenBao에 둡니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.
 
 ---
 
@@ -215,7 +221,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-004` | `Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 (`otelcol-contrib.yaml.j2`) |
 | `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.template` | Systemd OS | 파일 내용 일치 시 `ok` |
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
-| `MON-020` | `Assert host was provisioned by site.yml (or opted in to password-auth install)` | `ansible.builtin.assert` | All | 읽기 전용 (SSH 키 접속 가능 호스트이거나 `hosts/<호스트>` KV에 `host_agents_allow_password_auth: true`를 명시한 호스트만 통과) |
+| `MON-020` | `Assert host was provisioned by site.yml (or opted in to password-auth install)` | `ansible.builtin.assert` | All | 읽기 전용 (SSH 키 접속 가능 호스트이거나 선택된 ssh Endpoint에 `identity`가 없어 `_connection.password_auth_exception`이 참인 호스트만 통과) |
 | `MON-021` | `Probe OS release and architecture from target host (raw, read-only)` | `ansible.builtin.raw` | All | `changed_when: false`, `check_mode: false` |
 | `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수. |
 | `MON-039` | `Set host_agents_conntrack fact from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수. 프로브가 커널 conntrack 파일(count·max)을 읽기만 하고 `host_agents_conntrack` fact를 만든다. 참인 호스트의 설정에서만 `system.network.conntrack.count/.max`가 켜진다(스위치 없음, modern·raw 공통) |
@@ -225,9 +231,9 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-029` | `Warn that this host is installed through the password-auth exception (ISMS evidence)` | `ansible.builtin.debug` | All | 읽기 전용 (비밀번호 예외로 통과한 호스트에만 `PASSWORD-AUTH-EXCEPTION` 경고를 남김) |
 | `MON-026` | `Install python3 on modern path when absent` | `ansible.builtin.raw` | modern | 부재 시에만 실행 (check 모드 스킵) |
 | `MON-027` | `Assert python3 is available on modern path` | `ansible.builtin.assert` | modern | 읽기 전용 |
-| `MON-030` | `Fetch agents KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)` | `ansible.builtin.uri` | All | GET, `check_mode: false`, `no_log` |
-| `MON-031` | `Assert OpenBao answered every agents lookup` | `ansible.builtin.assert` | All | 읽기 전용 (오류 시 check 모드에서도 실패) |
-| `MON-032` | `Resolve agents KV contents (host + shared)` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
+| `MON-030` | `Read the agents documents from OpenBao (Asset agents clause, agents secrets, shared services)` | `ansible.builtin.set_fact` | All | 읽기 전용 (`lookup('openbao_doc')`, `errors='warn'`, `check_mode: false`, `no_log`) |
+| `MON-031` | `Assert every agents document was read and carries its declared required keys` | `ansible.builtin.assert` | All | 읽기 전용 (`monitoring_openbao_required` 선언과 대조, 오류 시 check 모드에서도 실패) |
+| `MON-032` | `Resolve the agents inputs (Asset clause + secrets + shared services)` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
 | `MON-033` | `Merge agents inputs with the Git standard` | `ansible.builtin.set_fact` | All | 순수 함수 (시크릿 미포함) |
 | `MON-034` | `Assert agents inputs are valid before any change` | `ansible.builtin.assert` | All | 읽기 전용 |
 | `MON-035` | `Set agents secrets as host facts` | `ansible.builtin.set_fact` | All | 순수 함수 (`no_log`) |
@@ -297,15 +303,15 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-215` | `Ensure otelcol-contrib is enabled and started (raw, sentinel)` | `ansible.builtin.raw` | legacy_el7 | `raw_service_cmd`: `is-enabled`/`is-active` 확인 후에만 enable/start (systemd 219에는 `enable --now`가 없음) |
 | `MON-216` | `Verify otelcol-contrib stayed alive after restart (raw)` | `ansible.builtin.raw` | legacy_el6, legacy_el7 | `Restart otelcol-contrib (raw)` 핸들러와 같은 topic을 listen하는 핸들러(`include_tasks`)가 재시작 뒤 `otelcol_alive_grace_seconds`(기본 5초) 대기 후 CentOS 6 `service status`, CentOS 7 `systemctl is-active`를 확인. 죽었으면 `start`를 1회 재시도·재확인하고, 그래도 죽어 있으면 로그 꼬리(`tail -n 20`/`journalctl -n 20`)와 함께 그 호스트만 실패(나머지 호스트는 계속). 변경이 없으면 핸들러가 돌지 않아 실행되지 않음(`changed=0` 유지), `changed_when: false`. 재시작 핸들러는 종료코드를 삼키고(`failed_when: false`) 실패 판정은 이 핸들러가 전담. EL7은 `activating`(auto-restart) 동안 대기 후 재확인. 기본값 근거는 `roles/monitoring/defaults/main.yml`. modern 경로는 대상 아님 |
 | `MON-219` | `Assert the checker host uses the modern path so the health timer is not silently skipped` | `ansible.builtin.assert` | 검사 호스트 | `host_agents_o2_health_checker`가 modern 경로가 아니면 조용히 건너뛰지 않고 실패(생존 타이머 누락 방지) |
-| `MON-220` | `Assert the alert webhook URL is available for the health timer` | `ansible.builtin.assert` | modern, 검사 호스트 | OpenObserve 생존 타이머(Spec #184 / Ticket-7)는 `host_agents_o2_health_checker`(기본 ns0266) 한 대에만 배포. OpenBao `agents/openobserve`의 `alert_webhook_plain_url`(text/plain 경로, 옛 JSON 경로 키 `alert_webhook_url`은 읽지 않음)이 `http(s)://`가 아니면 변경 전에 실패. 배포 순서: OpenBao에 `alert_webhook_plain_url`을 먼저 넣은 뒤 Host Agents를 돌린다 |
+| `MON-220` | `Assert the alert webhook URL is available for the health timer` | `ansible.builtin.assert` | modern, 검사 호스트 | OpenObserve 생존 타이머(Spec #184 / Ticket-7)는 `host_agents_o2_health_checker`(기본 ns0266) 한 대에만 배포. OpenBao `secrets/services/alert/notify`의 `url`(text/plain 경로, 인증 헤더 없음)이 `http(s)://`가 아니면 변경 전에 실패(`no_log`). 배포 순서: OpenBao에 `url`을 먼저 넣은 뒤 Host Agents를 돌린다 |
 | `MON-221` | `Ensure OpenObserve health config and state directories exist` | `ansible.builtin.file` | modern, 검사 호스트 | `/etc/openobserve-health`, `/var/lib/openobserve-health` (`0700`) |
 | `MON-222` | `Deploy the OpenObserve health check script` | `ansible.builtin.copy` | modern, 검사 호스트 | `openobserve-health-check`를 `0755`로 배포. 헬스(`/healthz`) 실패 시 OpenObserve를 거치지 않고 webhook으로 직접 P1 통지, 같은 장애는 60분(`o2_health_renotify_minutes`)마다만 재통지, 복구 통지 없음. webhook 전송 실패는 종료코드 1로 드러나고 다음 실행에서 재시도 |
-| `MON-223` | `Deploy the OpenObserve health env file (0600, no_log, no diff)` | `ansible.builtin.template` | modern, 검사 호스트 | webhook URL·토큰(OpenBao 기존 값)을 담는 시크릿 파일 `0600`, `no_log`, diff 없음 |
+| `MON-223` | `Deploy the OpenObserve health env file (0600, no_log, no diff)` | `ansible.builtin.template` | modern, 검사 호스트 | webhook URL(`secrets/services/alert/notify`)을 담는 시크릿 파일 `0600`, `no_log`, diff 없음 |
 | `MON-224` | `Deploy the OpenObserve health service and timer units` | `ansible.builtin.template` | modern, 검사 호스트 | `openobserve-health.service`(oneshot)와 `.timer`(`OnUnitActiveSec=5min`) `0644` |
 | `MON-225` | `Reload systemd units when the OpenObserve health units changed` | `ansible.builtin.systemd` | modern, 검사 호스트 | 유닛 변경 시에만 `daemon_reload` |
-| `MON-227` | `Fetch the SSH endpoint of every server from OpenBao (hosts/<hostname>)` | `ansible.builtin.uri` | 검사 호스트 | 읽기 전용 (GET, `changed_when: false`, `check_mode: false`, `no_log`). `servers`에서 `host_agents_tcpcheck_excluded`를 뺀 모든 호스트를 OpenBao에서 직접 읽어 실행 범위(`target_hosts`)와 무관하게 같은 목록이 나온다 |
-| `MON-228` | `Assert OpenBao answered every server endpoint lookup` | `ansible.builtin.assert` | 검사 호스트 | 읽기 전용 (200·404 외 응답이 있으면 포트를 22로 짐작하지 않고 변경 없이 실패, 호스트 이름과 status만 보고) |
-| `MON-229` | `Build the server reachability targets (address:port) from the OpenBao values` | `ansible.builtin.set_fact` | 검사 호스트 | 순수 함수 (`host_agents_tcpcheck_targets`: 주소 `ansible_host→public_ip→ip→host→인벤토리→호스트명`, 포트 `ansible_port→port→인벤토리→22`, resolve_connection과 같은 규칙) |
+| `MON-227` | `Read the Endpoint document of every server from OpenBao (inventory/assets/<ns>/endpoints)` | `ansible.builtin.set_fact` | 검사 호스트 | 읽기 전용 (`lookup('openbao_doc')`, `check_mode: false`). `servers`에서 `host_agents_tcpcheck_excluded`를 뺀 모든 호스트를 OpenBao에서 직접 읽어 실행 범위(`target_hosts`)와 무관하게 같은 목록이 나온다 |
+| `MON-228` | `Assert OpenBao answered every server Endpoint lookup` | `ansible.builtin.assert` | 검사 호스트 | 읽기 전용 (읽지 못한 문서가 있으면 포트를 22로 짐작하지 않고 변경 없이 실패, 호스트 이름만 보고하고 status는 경고) |
+| `MON-229` | `Build the server reachability targets (address:port) from the ssh Endpoints` | `ansible.builtin.set_fact` | 검사 호스트 | 순수 함수 (`host_agents_tcpcheck_targets`: ssh Endpoint의 `address`:`port`, 없으면 대체값 없이 호스트 이름을 대며 실패) |
 | `MON-226` | `Ensure the OpenObserve health timer is enabled and running` | `ansible.builtin.systemd` | modern, 검사 호스트 | 타이머 `enabled` + `started` |
 | `MON-230` | `Ensure the Host Agents result and state directories exist (0755)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` (`/var/log/host-agents`, `/var/lib/host-agents`, root `0755`, 백업 역할 `BAK-025`와 같은 속성) |
 | `MON-231` | `Deploy the RAID status collector script (POSIX sh, read-only)` | `ansible.builtin.copy` | modern | Checksum 비교 (`/usr/local/sbin/host-agents-raid-status`, `0755`) |

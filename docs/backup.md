@@ -7,7 +7,7 @@
 ## 1. 개요 및 구현 기능 (What)
 
 - **바이너리 배포**: 컨트롤러가 다운로드·SHA256 검증한 `restic`/`resticprofile`을 버전 디렉터리(`/opt/host-agents/<agent>/<version>/`)에 배치하고 `/usr/local/bin` symlink로 활성화 (ADR-0006 §2.8).
-- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
+- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, Extra variables `rustfs_bucket`으로만 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
 - **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
@@ -36,7 +36,7 @@
 | 소산 | 서버 측 S3→S3 원격 복제 (전제조건) |
 | 복구 테스트 | 분기 1회, ADR-0006 §2.11 runbook |
 
-호스트별 오버라이드(`hosts/<host>/agents`): `backup_extra_paths`, `backup_exclude_paths`(필수 경로 제외 불가), `backup_pre_hooks`(DB 덤프 등 `run-before`), `backup_sqlite_snapshots`(SQLite 스냅샷, 아래).
+호스트별 오버라이드(Asset 문서 `inventory/assets/<ns>`의 `agents.backup`): `extra_paths`, `exclude_paths`(필수 경로 제외 불가), `pre_hooks`(DB 덤프 등 `run-before`), `sqlite_snapshots`(`{path}` 목록, SQLite 스냅샷, 아래). 호스트별 비밀(`restic_password`·RustFS 키)은 `secrets/assets/<ns>/agents`, 주소는 `inventory/services/rustfs`(`url`·`region`)에서 읽는다.
 
 ### 3-1. SQLite 스냅샷 (`backup_sqlite_snapshots`, Spec #322 / Ticket-1, #323)
 
@@ -96,7 +96,7 @@
 | `BAK-050` | `Probe whether the restic repository exists (read-only, restic cat config)` | `ansible.builtin.shell` | All | 읽기 전용 (`changed_when: false`, check 모드에서는 건너뜀(바이너리가 아직 없을 수 있음), Deploy 한정 — `agents_config` 제외) |
 | `BAK-051` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | All | 읽기 전용 (저장소 부재가 아닌 오류에서는 init하지 않고 실패) |
 | `BAK-052` | `Initialize the restic repository when it does not exist` | `ansible.builtin.shell` | All | 프로브 결과 조건 (저장소가 없을 때만 `init`) |
-| `BAK-060` | `Assert the controller OpenObserve ingestion token exists` | `ansible.builtin.assert` | All | 읽기 전용 (`no_log`, Deploy 한정 — 토큰 또는 `o2_endpoint` 없으면 호스트 실패) |
+| `BAK-060` | `Assert the controller OpenObserve ingestion token exists` | `ansible.builtin.assert` | All | 읽기 전용 (`no_log`, Deploy 한정 — `secrets/services/openobserve/ingest`의 `username`·`password` 또는 `o2_endpoint` 없으면 호스트 실패) |
 | `BAK-061` | `Emit the job=inventory event to backup_logs` | `ansible.builtin.uri` | All (controller) | Deploy 마지막 태스크이자 한정(`agents_config` 제외, check 모드 제외). 실행마다 이벤트 1건 전송(`changed`) |
 | `BAK-070` | `Load the shared Host Agents version table and constants from monitoring` | `ansible.builtin.include_vars` | Controller | 읽기 전용 (고정 restic 버전·체크섬의 단일 출처 — 별도 버전 표 없음) |
 | `BAK-071` | `Read the maintenance documents from OpenBao (backup_openbao_required)` | `ansible.builtin.set_fact` | Controller | 공용 읽기 지점(`lookup('openbao_doc')`)으로 선언된 문서 5개를 읽음, `check_mode: false`, `no_log`. 없는 문서는 대체값 없이 실패 |
@@ -150,7 +150,7 @@
 |---|---|---|
 | `job=backup` | 호스트 훅 | `job`, `host`, `command`(`backup`), `success`(bool), `exit_code`, `duration`(초), `error`(실패 시 마지막 오류 요약, ≤500자), `ts`(UTC ISO8601) |
 | `job=maintenance` | 중앙 Repo Maintenance(후속 티켓) | `job`, `host`, `command`(`check`/`forget`…), `success`, `duration`, `error` |
-| `job=inventory` | Deploy 종료 시 컨트롤러(`BAK-061`, Config 제외; OpenBao `agents/openobserve`의 `controller_ingest_token`으로 인증, 인증서는 기본 검증) | `job`, `host`, `deployed_at`(UTC ISO8601) |
+| `job=inventory` | Deploy 종료 시 컨트롤러(`BAK-061`, Config 제외; OpenBao `secrets/services/openobserve/ingest`의 `username`·`password`로 인증, 인증서는 기본 검증) | `job`, `host`, `deployed_at`(UTC ISO8601) |
 
 표준 알림:
 

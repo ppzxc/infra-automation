@@ -58,13 +58,9 @@
 
     - name: Expose the service addresses so endpoint defaults resolve like the Deploy path
       ansible.builtin.set_fact:
-        host_agents_shared_secrets:
-          openobserve:
-            o2_endpoint: "{{ _maint_docs['inventory/services/openobserve'].url }}"
-            o2_org: "{{ _maint_docs['inventory/services/openobserve'].org | default('default') }}"
-          rustfs:
-            rustfs_endpoint: "{{ _maint_docs['inventory/services/rustfs'].url }}"
-            rustfs_region: "{{ _maint_docs['inventory/services/rustfs'].region | default('') }}"
+        host_agents_services:
+          openobserve: "{{ _maint_docs['inventory/services/openobserve'] }}"
+          rustfs: "{{ _maint_docs['inventory/services/rustfs'] }}"
 
     - name: Keep the resolved secrets as host facts
       ansible.builtin.set_fact:

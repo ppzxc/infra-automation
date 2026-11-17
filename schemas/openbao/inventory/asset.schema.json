@@ -124,6 +124,14 @@
                 "additionalProperties": false
               },
               "description": "SQLite 스냅샷 대상."
+            },
+            "pre_hooks": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "백업 직전 사전 훅 명령 목록(예: DB 덤프)."
             }
           },
           "additionalProperties": false

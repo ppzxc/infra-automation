@@ -224,7 +224,7 @@ def _env_vars(tmp_path):
                                              {"path": "/var/log/secure", "stream": "security_logs"}],
                                "otel_docker_metrics": False, "backup_pre_hooks": ["pg_dump -f /var/backups/db.sql mydb"],
                                "backup_paths": ["/etc"], "backup_exclude_paths": []},
-        "host_agents_secrets": {"o2_ingest_token": "s3cr3t-token", "rustfs_access_key": "AKIA-secret",
+        "host_agents_secrets": {"ingest_token": "s3cr3t-token", "rustfs_access_key": "AKIA-secret",
                                 "rustfs_secret_key": "S3-secret", "restic_password": "pw-secret"},
         "host_agents_journald": False,
         "host_agents_resource_attrs": host_agents_resource_attributes(

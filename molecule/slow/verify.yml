@@ -331,15 +331,15 @@
           ignore_errors: true
           register: _keyless
 
-        - name: "[VERIFY-MON-109] Assert the refusal happened and names host_agents_allow_password_auth"
+        - name: "[VERIFY-MON-109] Assert the refusal happened and names the Endpoint without identity"
           ansible.builtin.assert:
             that:
               - _keyless is failed
-              - "'host_agents_allow_password_auth' in (_keyless.msg | default(''))"
+              - "'Endpoint without identity' in (_keyless.msg | default(''))"
 
-        - name: "[VERIFY-MON-029] Verify the password-auth exception flag is honoured per host only"
+        - name: "[VERIFY-MON-029] Verify the password-auth exception follows the Endpoint calculation per host only"
           vars:
-            _flag: "{{ ({'host_agents_allow_password_auth': 'true'}.host_agents_allow_password_auth | string | lower) in ['true', 'yes', '1'] }}"
+            _flag: "{{ ({'password_auth_exception': true}.password_auth_exception | bool) }}"
           ansible.builtin.assert:
             that:
               - _flag | bool

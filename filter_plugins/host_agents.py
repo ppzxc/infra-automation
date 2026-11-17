@@ -4,9 +4,9 @@ Two concerns live here so they can be tested without a target host:
 
 * OS probe parsing: the raw probe output is turned into ``host_agents_os_*``
   facts and the ``legacy_el6`` / ``legacy_el7`` / ``modern`` path.
-* Agents KV validation/merge: the per-host OpenBao ``hosts/<host>/agents``
-  secret is checked (required keys, non-excludable paths) and merged with the
-  Git standard lists. Problems are returned as messages (never raised) so the
+* Agents input validation/merge: the Asset document ``agents`` clause and the per-host
+  ``secrets/assets/<ns>/agents`` secrets (Spec #511) are checked (required keys, non-excludable paths)
+  and merged with the Git standard lists. Problems are returned as messages (never raised) so the
   playbook can print them without hiding the task output behind ``no_log``.
 """
 
@@ -38,9 +38,9 @@ _REDHAT_NAME_IDS = (('red hat', 'rhel'), ('centos', 'centos'), ('rocky', 'rocky'
 _MACHINE_ID = re.compile(r'^[0-9a-f]{32}$')
 _DEBIAN_LIKE = {'debian', 'ubuntu'}
 
-REQUIRED_KEYS = ('o2_ingest_token', 'rustfs_access_key', 'rustfs_secret_key', 'restic_password')
+REQUIRED_KEYS = ('ingest_token', 'rustfs_access_key', 'rustfs_secret_key', 'restic_password')
 # Required only where otelcol is installed (not on Host Agents Backup Only hosts).
-OTEL_ONLY_KEYS = ('o2_ingest_token',)
+OTEL_ONLY_KEYS = ('ingest_token',)
 LOG_STREAMS = ('security_logs', 'system_logs', 'app_logs')
 
 
@@ -234,8 +234,7 @@ def host_agents_resource_attributes(hostname, environment, os_facts, ip=None):
     errors, omitted = [], []
     env = '' if environment is None else str(environment).strip()
     if env not in ENVIRONMENTS:
-        errors.append("host_agents_environment %s: %s 중 하나여야 합니다 (인벤토리 변수 host_agents_environment 또는 "
-                      "OpenBao hosts/%s/agents의 같은 이름 키)"
+        errors.append("host_agents_environment %s: %s 중 하나여야 합니다 (역할 기본값 또는 Extra variables host_agents_environment) — 호스트 %s"
                       % ("누락" if not env else "값 %r 허용 안 됨" % env, ' | '.join(ENVIRONMENTS), hostname))
     attrs = {'host.name': str(hostname)}
     if facts.get('machine_id'):
@@ -320,12 +319,12 @@ _SQLITE_PATH = re.compile(r'^/[A-Za-z0-9._/@+:%-]+$')
 
 
 def _sqlite_snapshot_paths(value, errors, kv_path):
-    items = _string_list(value, 'backup_sqlite_snapshots', errors)
+    items = _string_list(value, _label('backup_sqlite_snapshots'), errors)
     out = []
     for path in items:
         parts = path.split('/')
         if not _SQLITE_PATH.match(path) or '..' in parts or path.endswith('/') or '//' in path:
-            errors.append("backup_sqlite_snapshots: 안전한 절대 경로(영문·숫자·._/@+:%%- 만, '..' 없음, 파일)여야 합니다: %s (OpenBao %s)" % (path, kv_path))
+            errors.append("agents.backup.sqlite_snapshots: 안전한 절대 경로(영문·숫자·._/@+:%%- 만, '..' 없음, 파일)여야 합니다: %s (OpenBao %s)" % (path, kv_path))
         else:
             out.append(path)
     return out
@@ -340,10 +339,46 @@ def _dedupe(items):
     return out
 
 
-def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory_backup_paths,
-                               kv_path='hosts/<host>/agents', shared=None, service_map=None,
+_SECTIONS = (('backup_', 'backup'), ('otel_', 'otel'), ('github_webhook_', 'github_webhook'))
+_PATH_LABELS = {'backup_extra_paths': 'agents.backup.extra_paths', 'backup_exclude_paths': 'agents.backup.exclude_paths',
+                'backup_pre_hooks': 'agents.backup.pre_hooks', 'backup_sqlite_snapshots': 'agents.backup.sqlite_snapshots'}
+
+
+def _label(flat_key):
+    """저장 위치 이름: 평면 키(`backup_extra_paths`)를 Asset 문서의 절 경로(`agents.backup.extra_paths`)로 돌린다."""
+    if flat_key in REQUIRED_KEYS:
+        return flat_key
+    for prefix, section in _SECTIONS:
+        if flat_key.startswith(prefix):
+            return 'agents.%s.%s' % (section, flat_key[len(prefix):])
+    return flat_key
+
+
+def _flatten(agents, secrets):
+    """Asset 문서의 `agents` 절과 `secrets/assets/<ns>/agents`를 검증기가 읽는 평면 dict로 합친다(저장 형태 → 내부 키)."""
+    flat = {}
+    for prefix, section in _SECTIONS:
+        body = (agents or {}).get(section) if isinstance(agents, dict) else None
+        for key, value in (body.items() if isinstance(body, dict) else ()):
+            if section == 'github_webhook' and key == 'secret':
+                continue    # 시크릿은 secrets/assets/<ns>/agents의 webhook_secret에서만 받는다(비밀 아닌 마운트의 값은 무시하고 오류로 알린다)
+            flat[prefix + key] = value
+    snaps = flat.get('backup_sqlite_snapshots')
+    if isinstance(snaps, list):   # 스키마상 항목은 {path: ...} 오브젝트다
+        flat['backup_sqlite_snapshots'] = [i.get('path', '') if isinstance(i, dict) else i for i in snaps]
+    sec = secrets if isinstance(secrets, dict) else {}
+    for key in REQUIRED_KEYS:
+        if key in sec:
+            flat[key] = sec[key]
+    if 'webhook_secret' in sec:
+        flat['github_webhook_secret'] = sec['webhook_secret']
+    return flat
+
+
+def host_agents_resolve_inputs(agents, secrets, standard_logs, security_paths, mandatory_backup_paths,
+                               kv_path='inventory/assets/<ns>', shared=None, service_map=None,
                                otel_enabled=True, os_path=None):
-    """Validate the per-host agents KV and merge it with the Git standard.
+    """Validate the Asset ``agents`` clause plus the agents secrets and merge them with the Git standard.
 
     Returns ``{'errors': [...], ...merged inputs...}``; the merged part never
     contains secret values. Missing required keys and excludes that target a
@@ -358,49 +393,52 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
 
     With ``otel_enabled`` false (Host Agents Backup Only) the otelcol-only keys are not required.
     """
-    kv = host_kv if isinstance(host_kv, dict) else {}
+    kv = _flatten(agents, secrets)
     errors = []
+    if isinstance((agents or {}).get('github_webhook') if isinstance(agents, dict) else None, dict) \
+            and 'secret' in agents['github_webhook']:
+        errors.append("agents.github_webhook.secret: 시크릿은 Asset 문서에 둘 수 없습니다 — secrets/assets/<ns>/agents의 webhook_secret을 쓰세요")
 
-    for name, secret in sorted((shared or {}).items()):
-        errors.extend(host_agents_shared_errors(secret, name))
+    for name, doc in sorted((shared or {}).items()):
+        errors.extend(host_agents_shared_errors(doc, name))
 
     for key in REQUIRED_KEYS:
         if key in OTEL_ONLY_KEYS and not otel_enabled:
             continue
         if _is_blank(kv.get(key)):
-            errors.append("필수 키 누락: %s (OpenBao %s)" % (key, kv_path))
+            errors.append("필수 키 누락: %s (OpenBao secrets/assets/<ns>/agents)" % key)
 
     security = list(security_paths or [])
-    extra_logs_in = _as_list(kv.get('otel_extra_logs'), 'otel_extra_logs', errors)
-    exclude_logs = _string_list(kv.get('otel_exclude_logs'), 'otel_exclude_logs', errors)
-    extra_paths = _string_list(kv.get('backup_extra_paths'), 'backup_extra_paths', errors)
-    exclude_paths = _string_list(kv.get('backup_exclude_paths'), 'backup_exclude_paths', errors)
-    pre_hooks = _string_list(kv.get('backup_pre_hooks'), 'backup_pre_hooks', errors)
+    extra_logs_in = _as_list(kv.get('otel_extra_logs'), _label('otel_extra_logs'), errors)
+    exclude_logs = _string_list(kv.get('otel_exclude_logs'), _label('otel_exclude_logs'), errors)
+    extra_paths = _string_list(kv.get('backup_extra_paths'), _label('backup_extra_paths'), errors)
+    exclude_paths = _string_list(kv.get('backup_exclude_paths'), _label('backup_exclude_paths'), errors)
+    pre_hooks = _string_list(kv.get('backup_pre_hooks'), _label('backup_pre_hooks'), errors)
     sqlite_snapshots = _sqlite_snapshot_paths(kv.get('backup_sqlite_snapshots'), errors, kv_path)
-    docker_metrics = _as_bool(kv.get('otel_docker_metrics'), 'otel_docker_metrics', errors)
-    container_logs = _as_bool(kv.get('otel_container_logs'), 'otel_container_logs', errors)
-    app_telemetry = _as_bool(kv.get('otel_app_telemetry'), 'otel_app_telemetry', errors)
-    github_webhook = _as_bool(kv.get('otel_github_webhook'), 'otel_github_webhook', errors)
+    docker_metrics = _as_bool(kv.get('otel_docker_metrics'), _label('otel_docker_metrics'), errors)
+    container_logs = _as_bool(kv.get('otel_container_logs'), _label('otel_container_logs'), errors)
+    app_telemetry = _as_bool(kv.get('otel_app_telemetry'), _label('otel_app_telemetry'), errors)
+    github_webhook = _as_bool(kv.get('otel_github_webhook'), _label('otel_github_webhook'), errors)
     if github_webhook:
         errors.extend(_github_webhook_errors(kv))
         if os_path not in (None, 'modern'):
-            errors.append("otel_github_webhook: modern 경로 호스트에서만 지원합니다(현재 %s, CentOS 6/7 제외)" % os_path)
+            errors.append("agents.otel.github_webhook: modern 경로 호스트에서만 지원합니다(현재 %s, CentOS 6/7 제외)" % os_path)
 
     for path in exclude_logs:
         if any(_covers(path, sec) for sec in security):
-            errors.append("otel_exclude_logs: security_logs 경로는 제외할 수 없습니다: %s (OpenBao %s)"
+            errors.append("agents.otel.exclude_logs: security_logs 경로는 제외할 수 없습니다: %s (OpenBao %s)"
                           % (path, kv_path))
 
     mandatory = [_norm_path(p) for p in (mandatory_backup_paths or [])]
     for path in exclude_paths:
         norm = _norm_path(path)
         if any(norm == m or m.startswith(norm.rstrip('/') + '/') for m in mandatory):
-            errors.append("backup_exclude_paths: 필수 백업 경로는 제외할 수 없습니다: %s (OpenBao %s)"
+            errors.append("agents.backup.exclude_paths: 필수 백업 경로는 제외할 수 없습니다: %s (OpenBao %s)"
                           % (path, kv_path))
 
     for path in extra_paths:
         if not path.startswith('/'):
-            errors.append("backup_extra_paths: 절대 경로여야 합니다: %s" % path)
+            errors.append("agents.backup.extra_paths: 절대 경로여야 합니다: %s" % path)
 
     services = service_map or {}
     logs = []
@@ -420,17 +458,17 @@ def host_agents_resolve_inputs(host_kv, standard_logs, security_paths, mandatory
             path, stream = entry['path'].strip(), entry.get('stream') or 'app_logs'
             service = entry.get('service')
         else:
-            errors.append("otel_extra_logs: glob 문자열 또는 {path, stream} 항목만 허용됩니다")
+            errors.append("agents.otel.extra_logs: glob 문자열 또는 {path, stream} 항목만 허용됩니다")
             continue
         if not path.startswith('/'):
-            errors.append("otel_extra_logs: 절대 경로여야 합니다: %s" % path)
+            errors.append("agents.otel.extra_logs: 절대 경로여야 합니다: %s" % path)
         elif stream not in LOG_STREAMS:
-            errors.append("otel_extra_logs: 알 수 없는 stream %r (%s): %s"
+            errors.append("agents.otel.extra_logs: 알 수 없는 stream %r (%s): %s"
                           % (stream, ', '.join(LOG_STREAMS), path))
         elif _GLOB_UNSUPPORTED.search(path):
-            errors.append("otel_extra_logs: 지원하지 않는 글롭 문법입니다 ([ ] { } \\ ^ 따옴표 제외): %s" % path)
+            errors.append("agents.otel.extra_logs: 지원하지 않는 글롭 문법입니다 ([ ] { } \\ ^ 따옴표 제외): %s" % path)
         elif service is not None and not (isinstance(service, str) and _SERVICE_NAME.match(service)):
-            errors.append("otel_extra_logs: service는 소문자·숫자·.-_ 로 된 이름이어야 합니다 (%r): %s"
+            errors.append("agents.otel.extra_logs: service는 소문자·숫자·.-_ 로 된 이름이어야 합니다 (%r): %s"
                           % (service, path))
         elif not any(l['path'] == path for l in logs):
             logs.append({'path': path, 'stream': stream, 'service': service or _default_service(stream)})
@@ -468,21 +506,25 @@ def _home_log_dirs(logs):
     return _dedupe(sorted(dirs))
 
 
-# GitHub 조직 웹훅 수신기(Spec #399): 주소·포트·경로·시크릿·네트워크 이름은 저장소에 기본값이 없고 OpenBao hosts/<host>/agents의
-# 아래 키로만 들어온다. 켰는데 하나라도 비면 배포가 실패한다(오류 메시지에는 키 이름만 쓰고 값은 쓰지 않는다).
+# GitHub 조직 웹훅 수신기(Spec #399): 주소·포트·경로·네트워크 이름은 Asset 문서의 `agents.github_webhook` 절, 시크릿은
+# `secrets/assets/<ns>/agents`의 `webhook_secret`에서만 들어온다(저장소에 기본값 없음). 켰는데 하나라도 비면 배포가 실패한다
+# (오류 메시지에는 키 이름만 쓰고 값은 쓰지 않는다).
 GITHUB_WEBHOOK_FIELDS = ('address', 'port', 'path', 'secret', 'network')
 
 
-def host_agents_github_webhook(host_kv):
+def host_agents_github_webhook(agents, secrets=None):
     """The webhook receiver values (private; call from a ``no_log`` task). Blank or absent values become ``''``; others are kept verbatim (the validation rejects stray whitespace)."""
-    kv = host_kv if isinstance(host_kv, dict) else {}
+    return _webhook_values(_flatten(agents, secrets))
+
+
+def _webhook_values(kv):
     return {f: ('' if _is_blank(kv.get('github_webhook_' + f)) else str(kv['github_webhook_' + f]))
             for f in GITHUB_WEBHOOK_FIELDS}
 
 
 def _github_webhook_errors(kv):
-    values = host_agents_github_webhook(kv)
-    errors = ["필수 키 누락: github_webhook_%s (otel_github_webhook가 켜져 있음)" % f
+    values = _webhook_values(kv)
+    errors = [("필수 키 누락: webhook_secret (agents.otel.github_webhook가 켜져 있음)" if f == 'secret' else "필수 키 누락: agents.github_webhook.%s (agents.otel.github_webhook가 켜져 있음)" % f)
               for f in GITHUB_WEBHOOK_FIELDS if not values[f]]
     if values['address']:
         try:
@@ -490,16 +532,16 @@ def _github_webhook_errors(kv):
             if addr.is_unspecified or addr.is_loopback:
                 raise ValueError
         except ValueError:
-            errors.append("github_webhook_address: 컨테이너 브리지 전용 IPv4 주소여야 합니다(모든 인터페이스·루프백 불가)")
+            errors.append("agents.github_webhook.address: 컨테이너 브리지 전용 IPv4 주소여야 합니다(모든 인터페이스·루프백 불가)")
     if values['port'] and not (re.fullmatch('[0-9]{1,5}', values['port']) and 1 <= int(values['port']) <= 65535):
-        errors.append("github_webhook_port: 1~65535 정수(ASCII 숫자)여야 합니다")
+        errors.append("agents.github_webhook.port: 1~65535 정수(ASCII 숫자)여야 합니다")
     if values['path']:
         segments = values['path'].split('/')[1:]
         if not (re.fullmatch(r'/[A-Za-z0-9._~/-]+', values['path']) and all(seg and seg not in ('.', '..') for seg in segments)):
-            errors.append("github_webhook_path: '/'로 시작하고 비어 있지 않은 세그먼트(영문·숫자·._~-)로만 이루어져야 합니다"
+            errors.append("agents.github_webhook.path: '/'로 시작하고 비어 있지 않은 세그먼트(영문·숫자·._~-)로만 이루어져야 합니다"
                           "('/' 단독, 빈·'.'·'..' 세그먼트, 끝 슬래시 불가)")
     if values['secret'] and not re.fullmatch('[\x20-\x7e]+', values['secret']):
-        errors.append("github_webhook_secret: 인쇄 가능한 ASCII(공백 포함)만 허용됩니다(제어문자·비ASCII 불가, EnvironmentFile 이스케이프 한계)")
+        errors.append("webhook_secret: 인쇄 가능한 ASCII(공백 포함)만 허용됩니다(제어문자·비ASCII 불가, EnvironmentFile 이스케이프 한계)")
     return errors
 
 
@@ -507,21 +549,35 @@ def host_agents_github_webhook_gateway_errors(inspect_stdout, address):
     """Errors when the docker network gateway (``docker network inspect`` output) differs from the bind address."""
     gateway = (inspect_stdout or '').strip()
     if gateway != str(address or '').strip() or not gateway:
-        return ["도커 네트워크 게이트웨이가 github_webhook_address와 다릅니다(바인딩 설정과 불일치 — 배포 중단)"]
+        return ["도커 네트워크 게이트웨이가 agents.github_webhook.address와 다릅니다(바인딩 설정과 불일치 — 배포 중단)"]
     return []
 
 
-def host_agents_shared_errors(shared, name):
-    """A shared ``agents/<name>`` secret must exist and carry at least one value."""
-    if not isinstance(shared, dict) or not any(not _is_blank(v) for v in shared.values()):
-        return ["공유 시크릿 누락 또는 비어 있음: agents/%s" % name]
+def host_agents_shared_errors(doc, name):
+    """A shared Service document (``inventory/services/<name>``) must exist and carry a ``url``."""
+    if not isinstance(doc, dict) or _is_blank(doc.get('url')):
+        return ["공유 설정 누락 또는 url 없음: inventory/services/%s" % name]
     return []
 
 
-def host_agents_secrets(host_kv):
+def host_agents_secrets(secrets):
     """The required per-host secrets only (call from a ``no_log`` task)."""
-    kv = host_kv if isinstance(host_kv, dict) else {}
-    return {key: kv[key] for key in REQUIRED_KEYS if not _is_blank(kv.get(key))}
+    sec = secrets if isinstance(secrets, dict) else {}
+    return {key: sec[key] for key in REQUIRED_KEYS if not _is_blank(sec.get(key))}
+
+
+def host_agents_openbao_gaps(docs, required):
+    """읽은 문서(`{index.yml 패턴: 문서}`)가 `<역할>_openbao_required` 선언을 채우는지 본다. 문서 없음·필수 키 누락의 이름만 돌려준다(값은 아님).
+
+    선언에는 있지만 ``docs``에 없는 패턴(다른 태스크가 읽는 문서)은 건너뛴다.
+    """
+    gaps = []
+    for pattern, doc in (docs or {}).items():
+        if not isinstance(doc, dict):
+            gaps.append("%s(문서 없음)" % pattern)
+            continue
+        gaps.extend("%s.%s" % (pattern, key) for key in (required or {}).get(pattern, []) if _is_blank(doc.get(key)))
+    return gaps
 
 
 def host_agents_warn(msg):
@@ -539,40 +595,24 @@ def _blank(value):
     return value is None or str(value).strip() == ''
 
 
-def _tcpcheck_host_kv(name, raw):
-    """OpenBao hosts/<host> 본문을 평면 dict로 푼다(resolve_connection.yml과 같은 규칙: 호스트명 키 → 키가 하나뿐인 오브젝트 → 평면)."""
-    if not isinstance(raw, dict):
-        return {}
-    if isinstance(raw.get(name), dict):
-        return raw[name]
-    if len(raw) == 1 and isinstance(next(iter(raw.values())), dict):
-        return next(iter(raw.values()))
-    return raw
+def host_agents_tcpcheck_targets(roster, endpoints_by_host, endpoint='ssh'):
+    """서버 도달성(tcp_check) 대상 'address:port' 목록 — 실행 범위(target_hosts)와 무관하게 Asset의 Endpoint 문서로 만든다.
 
-
-def host_agents_tcpcheck_targets(roster, kv_by_host, inventory_by_host=None):
-    """서버 도달성(tcp_check) 대상 'address:port' 목록 — 실행 범위(target_hosts)와 무관하게 OpenBao 값으로 만든다.
-
-    주소·포트 해석은 playbooks/common/resolve_connection.yml과 같다. 주소: KV ansible_host → public_ip → ip → host → 인벤토리 ansible_host → 호스트명.
-    포트: KV ansible_port → port → 인벤토리 ansible_port → 22 (정수가 아니면 다음 후보). roster 순서를 유지한다.
+    ``endpoints_by_host``는 `{<관리번호>: inventory/assets/<ns>/endpoints 문서}`다. 이름이 ``endpoint``인 Endpoint의 주소·포트를 쓴다.
+    없으면 22나 호스트명으로 짐작하지 않고 실패한다(대체값 없음). roster 순서를 유지한다.
     """
-    inventory_by_host = {} if inventory_by_host is None else inventory_by_host   # 평면 dict 또는 Ansible hostvars
-    targets = []
+    targets, missing = [], []
     for name in roster:
-        kv = _tcpcheck_host_kv(name, (kv_by_host or {}).get(name))
-        inv = inventory_by_host.get(name) or {}
-        address = next((str(v).strip() for v in (kv.get('ansible_host'), kv.get('public_ip'), kv.get('ip'), kv.get('host'),
-                                                  inv.get('ansible_host')) if not _blank(v)), name)
-        port = 22
-        for candidate in (kv.get('ansible_port'), kv.get('port'), inv.get('ansible_port')):
-            if _blank(candidate):
-                continue
-            try:
-                port = int(str(candidate).strip())
-                break
-            except ValueError:
-                continue
-        targets.append('%s:%d' % (address, port))
+        ep = ((endpoints_by_host or {}).get(name) or {}).get(endpoint)
+        port = ep.get('port') if isinstance(ep, dict) else None
+        if not isinstance(ep, dict) or _blank(ep.get('address')) or isinstance(port, bool) \
+                or not re.fullmatch(r'[0-9]{1,5}', str(port).strip()) or not 1 <= int(str(port).strip()) <= 65535:
+            missing.append(name)
+            continue
+        targets.append('%s:%d' % (str(ep['address']).strip(), int(str(port).strip())))
+    if missing:
+        from ansible.errors import AnsibleFilterError
+        raise AnsibleFilterError("서버 도달성 대상을 만들 수 없습니다 — %s Endpoint가 없거나 주소·포트가 잘못된 Asset: %s" % (endpoint, ', '.join(missing)))
     return targets
 
 
@@ -584,6 +624,7 @@ class FilterModule(object):
             'host_agents_parse_os_probe': host_agents_parse_os_probe,
             'host_agents_resolve_inputs': host_agents_resolve_inputs,
             'host_agents_resource_attributes': host_agents_resource_attributes,
+            'host_agents_openbao_gaps': host_agents_openbao_gaps,
             'host_agents_secrets': host_agents_secrets,
             'host_agents_github_webhook': host_agents_github_webhook,
             'host_agents_github_webhook_gateway_errors': host_agents_github_webhook_gateway_errors,

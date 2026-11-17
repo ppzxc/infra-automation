@@ -1,7 +1,7 @@
 ---
 # Host Agents 내부 고정 상수 (ADR-0006) — 외부에서 덮어쓸 수 없다.
 
-# security_logs 스트림으로 라우팅되는 경로. hosts/<host>/agents의 otel_exclude_logs로 제외할 수 없다.
+# security_logs 스트림으로 라우팅되는 경로. Asset 문서 agents.otel.exclude_logs로 제외할 수 없다.
 otel_security_log_paths:
   - /var/log/secure
   - /var/log/auth.log
@@ -54,7 +54,7 @@ otel_service_journald: journald
 otel_service_hostmetrics: host-metrics
 otel_service_docker: docker
 
-# ISMS 2.9.3 필수 백업 경로. hosts/<host>/agents의 backup_exclude_paths로 제외할 수 없다.
+# ISMS 2.9.3 필수 백업 경로. Asset 문서 agents.backup.exclude_paths로 제외할 수 없다.
 # (roles/backup이 소비하며, 입력 검증은 monitoring이 먼저 실행되므로 여기서 함께 수행한다.)
 host_agents_backup_mandatory_paths:
   - /etc
@@ -124,3 +124,15 @@ otel_github_webhook_env:
   endpoint: {name: GITHUB_WEBHOOK_ENDPOINT, validate_value: "127.0.0.1:1"}
   path: {name: GITHUB_WEBHOOK_PATH, validate_value: /validate-only}
   secret: {name: GITHUB_WEBHOOK_SECRET, validate_value: validate-only}
+
+# 이 역할이 읽는 OpenBao 문서 패턴과 필수 키(Spec #511). 입력 검증 assert(MON-031)·스키마 required 대조·요청 기록 단언이 같은 선언을 쓴다.
+# 필수 키가 없는 선택 문서는 []다. ingest_token은 otelcol을 설치하는 호스트에서만 필요해 입력 검증기(host_agents_resolve_inputs)가 따로 본다.
+# 사용처: agents_input.yml(자산·시크릿·공유 Service), o2_health_watch.yml(alert/notify, 검사하는 쪽만), tcpcheck_targets.yml(endpoints, 검사하는 쪽만).
+monitoring_openbao_required:
+  "inventory/assets/+": [description]
+  "inventory/assets/+/endpoints": []
+  "secrets/assets/+/agents": [rustfs_access_key, rustfs_secret_key, restic_password]
+  "inventory/services/openobserve": [url]
+  "inventory/services/rustfs": [url]
+  "secrets/services/openobserve/ingest": [username, password]
+  "secrets/services/alert/notify": [url]

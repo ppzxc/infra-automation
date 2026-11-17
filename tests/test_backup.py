@@ -406,21 +406,21 @@ def test_inventory_event_posts_host_and_deployed_at_to_backup_logs(tmp_path):
             t.pop("no_log", None)
             t.pop("delegate_to", None)
         res = _run(tmp_path, tasks, _vars(o2_endpoint=f"http://127.0.0.1:{srv.server_port}", o2_org="default",
-                                          host_agents_shared_secrets={"openobserve": {"controller_ingest_token": "ctl-tok"}},
+                                          host_agents_ingest_auth={"username": "ctl-user", "password": "ctl-tok"},
                                           inventory_hostname="web01"))
     finally:
         srv.shutdown()
     assert res.returncode == 0, res.stdout + res.stderr
     ((path, auth, body),) = _O2.seen
     assert path == "/api/default/backup_logs/_json"
-    assert auth == "Basic " + base64.b64encode(b"default:ctl-tok").decode()
+    assert auth == "Basic " + base64.b64encode(b"ctl-user:ctl-tok").decode()
     assert len(body) == 1 and body[0]["job"] == "inventory" and body[0]["host"] == "web01"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", body[0]["deployed_at"])
 
 
 def test_inventory_event_requires_the_controller_token():
     cond = _task("[BAK-060]")["ansible.builtin.assert"]["that"]
-    assert any("controller_ingest_token" in c for c in cond)
+    assert any("host_agents_ingest_auth" in c and "password" in c for c in cond)
     assert "backup_inventory_event_enabled | bool" in str(_task("[BAK-061]")["when"])
     assert "not ansible_check_mode" in str(_task("[BAK-061]")["when"])
 
