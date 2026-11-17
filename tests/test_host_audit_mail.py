@@ -22,7 +22,7 @@ from host_audit_kisa import host_audit_kisa_result  # noqa: E402
 from host_audit_mail import (  # noqa: E402
     REDACTED, host_audit_mail_attachment_name, host_audit_mail_outcome, host_audit_mail_recipients,
     host_audit_mail_redact, host_audit_mail_resend_prefix, host_audit_mail_resend_summary,
-    host_audit_mail_summary,
+    host_audit_mail_sender, host_audit_mail_summary,
 )
 
 ROLE_DIR = ROOT_DIR / "roles" / "host_audit"
@@ -374,3 +374,63 @@ def test_mail_body_labels_host_card_and_item_count_differently():
     assert re.search(r">\s*2건 \(호스트·항목\)\s*<", html)
     assert re.search(r">\s*2대 — raw 태스크가 --check에서 스킵됨", html)
     assert "Configuration Drift 비대상" in html
+
+
+# --- 발신자 표시 이름 -----------------------------------------------------------------------------------
+
+def test_sender_without_a_name_is_the_bare_address():
+    assert host_audit_mail_sender("noreply@example.kr", "") == "noreply@example.kr"
+    assert host_audit_mail_sender("noreply@example.kr", None) == "noreply@example.kr"
+    assert host_audit_mail_sender("noreply@example.kr") == "noreply@example.kr"
+
+
+def test_sender_name_is_rfc2047_encoded_and_keeps_the_address_apart():
+    from email.header import decode_header, make_header
+    from email.utils import parseaddr
+
+    header = host_audit_mail_sender("noreply@example.kr", "서버 감사")
+    assert header.isascii()  # the From: header carries no raw non-ASCII bytes
+    phrase, addr = parseaddr(header)
+    assert addr == "noreply@example.kr"  # the envelope sender the module takes from parseaddr
+    assert str(make_header(decode_header(phrase))) == "서버 감사"
+
+
+@pytest.mark.parametrize("name", ["a\r\nBcc: x@example.kr", "x\ny", "서버 <evil@example.kr>", 'a"b', "x@example.kr", "  "])
+def test_unsafe_or_blank_sender_name_is_dropped_not_sent(name):
+    assert host_audit_mail_sender("noreply@example.kr", name) == "noreply@example.kr"
+
+
+def test_the_name_comes_from_the_variable_then_openbao_and_the_header_is_sent():
+    defaults = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert defaults["host_audit_mail_from_name"] == ""  # the name itself never lives in Git
+    resolve = next(t for t in _tasks("mail.yml") if "[AUD-603]" in t.get("name", ""))
+    text = json.dumps(resolve)
+    assert "host_audit_mail_from_name" in text and "_kv.mail_from_name" in text
+    assert resolve.get("no_log") is True
+    send = next(t for t in _flatten(_tasks("mail.yml")) if "community.general.mail" in t)
+    assert "from_header" in send["community.general.mail"]["sender"]
+    outcome = next(t for t in _tasks("mail.yml") if "[AUD-608]" in t.get("name", ""))
+    assert "from_header" not in json.dumps(outcome)  # the judged value never carries the header form
+
+
+def test_comma_in_a_sender_name_is_quoted_not_dropped():
+    from email.utils import parseaddr
+
+    header = host_audit_mail_sender("noreply@example.kr", "Audit, Server")
+    phrase, addr = parseaddr(header)
+    assert (phrase, addr) == ("Audit, Server", "noreply@example.kr")
+
+
+def test_the_sender_name_is_redacted_from_the_mail_outcome():
+    outcome = next(t for t in _tasks("mail.yml") if "[AUD-608]" in t.get("name", ""))
+    assert "sender_name" in json.dumps(outcome)
+    assert host_audit_mail_redact("From: Audit Name <a@example.kr> rejected", ["a@example.kr", "Audit Name"]) \
+        .count("Audit Name") == 0
+
+
+def test_a_too_long_name_and_an_empty_address_never_make_a_malformed_from():
+    assert host_audit_mail_sender("noreply@example.kr", "가" * 16) == "noreply@example.kr"
+    assert all(len(w) <= 75 for w in host_audit_mail_sender("noreply@example.kr", "가" * 15).split()[:-1])
+    assert host_audit_mail_sender("noreply@example.kr", "a" * 65) == "noreply@example.kr"
+    assert host_audit_mail_sender("noreply@example.kr", "a" * 64) != "noreply@example.kr"
+    assert host_audit_mail_sender("", "서버 감사") == ""

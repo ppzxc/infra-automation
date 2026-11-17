@@ -157,6 +157,9 @@ host_audit_mail_enabled: true
 # 수신자마다 따로 보낸다 — 받는 사람은 다른 수신자의 주소를 보지 않는다.
 host_audit_mail_to: []
 host_audit_mail_from: ""
+# 보내는 사람 표시 이름(예: "서버 감사"). 비워 두면 주소만 보낸다. 값은 OpenBao agents/host_audit의
+# mail_from_name에 두고 Git에는 넣지 않는다. 헤더에만 반영하며 릴레이가 보는 봉투 발신자는 주소 그대로다.
+host_audit_mail_from_name: ""
 
 # SMTP relay. 운영값은 바꾸지 않는다 — 시험용 SMTP(mailpit 등)를 쓸 때만 Extra variables로 덮어쓴다.
 host_audit_mail_host: smtp-relay.gmail.com
