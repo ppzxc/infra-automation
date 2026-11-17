@@ -1,6 +1,6 @@
-"""Filters for the FUNA Cluster environment files (funa_env role, #222).
+"""Filters for the FUNA Cluster environment files (funa_env role, #222, #524).
 
-The OpenBao values of the FUNA Cluster are turned into dotenv text that compose
+The OpenBao documents of the FUNA Cluster (snake_case stored keys) are turned into dotenv text that compose
 (``env_file:``, ``--env-file``), Caddy/keepalived containers and a login shell
 (``. file`` under ``set -a``) all read the same way. Problems are returned as
 messages that name the path or key and never contain a value, so the playbook
@@ -13,6 +13,10 @@ _NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 # Written without quotes only when no shell/dotenv metacharacter can change the value.
 _BARE = re.compile(r'^[A-Za-z0-9_@%+=:,./-]+$')
 HEADER = '# Managed by Ansible (funa_env). Do not edit; values come from OpenBao.\n'
+
+ASSET, CLUSTER, PROXY, VRRP, CREDENTIAL = (
+    'inventory/assets/+', 'inventory/services/funa', 'secrets/services/funa/proxy',
+    'secrets/services/funa/vrrp', 'secrets/assets/+/credentials/+')
 
 
 def _scalar(value):
@@ -54,75 +58,69 @@ def _shell_refs(mapping, label, errors):
             errors.append('%s: %s contains a shell reference' % (label, key))
 
 
-def _missing(mapping, required, label, errors):
-    for key in required:
-        value = _scalar(mapping.get(key))
-        if value is None or value == '':
-            errors.append('%s: required key %s is missing' % (label, key))
+def funa_env_doc_path(pattern, host, credential):
+    """Concrete document path of an index.yml pattern: the first ``+`` is the host, the second the Credential name."""
+    for fill in (host, credential):
+        pattern = pattern.replace('+', fill, 1)
+    return pattern
 
 
-def funa_env_kv_by_key(results):
-    """{loop key: KV data, or None} from the uri loop results (a 404 has no data)."""
+def _env_values(doc, key_map, path, errors):
+    """{ENV_NAME: value} of a document; keys without a table entry are reported by name only."""
     out = {}
-    for r in results or []:
-        data = ((r.get('json') or {}).get('data') or {}).get('data') if r.get('status') == 200 else None
-        out[r['item']['key']] = data
+    for key in sorted(doc or {}):
+        if key in key_map:
+            out[key_map[key]] = doc[key]
+        else:
+            errors.append('%s: %s has no environment variable mapping' % (path, key))
     return out
 
 
-def funa_env_resolve(kv, node_keys, required_cluster, required_proxy, required_vrrp,
-                     cluster_path, host_path, node_secret_keys=()):
-    """Build the three env files from the OpenBao reads.
+def funa_env_resolve(docs, key_map, node_required, cloudflare_env, host, credential):
+    """Build the three env files from the OpenBao documents.
 
-    ``node_secret_keys`` are per-node secrets read from the host KV and written to the
-    proxy file (e.g. a Caddy token that differs per node).
-    ``kv`` maps node/cluster/proxy/vrrp to the KV data, or None when the path
-    does not exist. Returns ``{'errors': [...], 'cluster': text, 'proxy': text,
-    'vrrp': text}``; the texts are empty when there are errors.
+    ``docs`` maps the index.yml pattern of each document the role reads to its data. ``key_map`` is the
+    stored-key -> environment-name table; a key without an entry is an error. The node's own settings are
+    the ``funa`` section of its Asset document (``node_required`` must be in it) and its Cloudflare token
+    is the Credential ``credential``, written to the proxy file as ``cloudflare_env``.
+    Returns ``{'errors': [...], 'cluster': text, 'proxy': text, 'vrrp': text}``; the texts are empty when there are errors.
     """
     errors = []
-    sources = (
-        ('node', host_path, list(node_keys) + list(node_secret_keys)),
-        ('cluster', cluster_path, required_cluster),
-        ('proxy', cluster_path + '/proxy', required_proxy),
-        ('vrrp', cluster_path + '/vrrp', required_vrrp),
-    )
-    data = {}
-    for name, path, required in sources:
-        value = kv.get(name)
-        if value is None:
-            errors.append('%s: OpenBao path does not exist' % path)
-            value = {}
-        elif name in ('proxy', 'vrrp') and not value:
-            errors.append('%s: no keys' % path)
-        data[name] = value
-        if name != 'proxy':
-            _missing(value, required, path, errors)
+    path = {p: funa_env_doc_path(p, host, credential) for p in (ASSET, CLUSTER, PROXY, VRRP, CREDENTIAL)}
+    section = (docs.get(ASSET) or {}).get('funa')
+    if not isinstance(section, dict):
+        errors.append('%s: required key funa is missing' % path[ASSET])
+        section = {}
+    for key in node_required:
+        if _scalar(section.get(key)) in (None, ''):
+            errors.append('%s: required key funa.%s is missing' % (path[ASSET], key))
+    node = _env_values(section, key_map, path[ASSET], errors)
+    cluster = _env_values(docs.get(CLUSTER), key_map, path[CLUSTER], errors)
+    proxy = _env_values(docs.get(PROXY), key_map, path[PROXY], errors)
+    vrrp = _env_values(docs.get(VRRP), key_map, path[VRRP], errors)
+    token = (docs.get(CREDENTIAL) or {}).get('token')
+    if _scalar(token) in (None, ''):
+        errors.append('%s: required key token is missing' % path[CREDENTIAL])
+        token = None
 
-    # Node values only come from the declared keys; hosts/<host> also holds SSH credentials.
-    node = {k: data['node'][k] for k in node_keys if k in data['node']}
-    node_secrets = {k: data['node'][k] for k in node_secret_keys if k in data['node']}
-    _shell_refs(node, host_path, errors)
-    _shell_refs(node_secrets, host_path, errors)
-    _shell_refs(data['cluster'], cluster_path, errors)
-    _shell_refs(data['proxy'], cluster_path + '/proxy', errors)
-    _shell_refs(data['vrrp'], cluster_path + '/vrrp', errors)
-    cluster = dict(data['cluster'])
+    for mapping, label in ((node, path[ASSET]), (cluster, path[CLUSTER]), (proxy, path[PROXY]), (vrrp, path[VRRP])):
+        _shell_refs(mapping, label, errors)
+    if token is not None:
+        _shell_refs({cloudflare_env: token}, path[CREDENTIAL], errors)
+        proxy[cloudflare_env] = token
+    errors.extend('%s: %s is also set by the service document %s' % (path[ASSET], k, path[CLUSTER])
+                  for k in sorted(set(node) & set(cluster)))
     cluster.update(node)
-    proxy = dict(data['proxy'])
-    proxy.update(node_secrets)
-    _missing(proxy, required_proxy, cluster_path + '/proxy', errors)
-    for name in ('proxy', 'vrrp'):
-        for key in sorted(set(proxy if name == 'proxy' else data[name]) & set(cluster)):
-            errors.append('%s: %s is also in the non-secret cluster values' % (cluster_path + '/' + name, key))
-    both = sorted(set(proxy) & set(data['vrrp']))
-    errors.extend('%s: %s is in both consumer secret files' % (cluster_path, k) for k in both)
+    for secret, label in ((proxy, path[PROXY]), (vrrp, path[VRRP])):
+        for key in sorted(set(secret) & set(cluster)):
+            errors.append('%s: %s is also in the non-secret cluster values' % (label, key))
+    errors.extend('%s: %s is in both consumer secret files' % (path[PROXY], k) for k in sorted(set(proxy) & set(vrrp)))
 
     out = {'errors': errors, 'cluster': '', 'proxy': '', 'vrrp': ''}
     rendered = {
-        'cluster': _render(cluster, cluster_path, errors),
-        'proxy': _render(proxy, cluster_path + '/proxy', errors),
-        'vrrp': _render(data['vrrp'], cluster_path + '/vrrp', errors),
+        'cluster': _render(cluster, path[CLUSTER], errors),
+        'proxy': _render(proxy, path[PROXY], errors),
+        'vrrp': _render(vrrp, path[VRRP], errors),
     }
     if not errors:
         out.update({k: HEADER + v for k, v in rendered.items()})
@@ -131,4 +129,4 @@ def funa_env_resolve(kv, node_keys, required_cluster, required_proxy, required_v
 
 class FilterModule(object):
     def filters(self):
-        return {'funa_env_resolve': funa_env_resolve, 'funa_env_kv_by_key': funa_env_kv_by_key}
+        return {'funa_env_resolve': funa_env_resolve, 'funa_env_doc_path': funa_env_doc_path}

@@ -148,7 +148,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 |---|---|---|
 | `VAULT_ROLE_ID` | ● | OpenBao AppRole |
 | `VAULT_SECRET_ID` | ● | OpenBao AppRole |
-| `VAULT_TOKEN` | OpenObserve — Config에는 ● | Deploy·Config는 AppRole이 있으면 AppRole이 우선하고, Repo Maintenance는 토큰이 있으면 토큰을 쓴다(BAK-087은 토큰이 없을 때만 로그인) |
+| `VAULT_TOKEN` | OpenObserve — Config에는 ● | Deploy·Config는 AppRole이 있으면 AppRole이 우선하고, Repo Maintenance는 자체 토큰 대체 경로가 없고 공용 읽기 지점의 인증을 따른다(BAK-087, `docs/openbao_integration.md`) |
 
 **AppRole 정책이 읽을 수 있어야 하는 KV 경로** (mount `secret`, namespace 기준)
 
@@ -187,7 +187,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 | 이름 | Playbook | CLI args | Survey variables | 실행 방식 | 대상 |
 |---|---|---|---|---|---|
-| Host Provisioning | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_admin_users` | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). `provision_allowed` 그룹에 있는 호스트만 가능(기본 거부). 지정하지 않거나 허용 목록에 없으면 접속 전에 실패한다 |
+| Host Provisioning | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_removed_users`(선택) | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). `provision_allowed` 그룹에 있는 호스트만 가능(기본 거부). 지정하지 않거나 허용 목록에 없으면 접속 전에 실패한다 |
 | Host Agents — Deploy All | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `target_hosts`로 지정(필수, 전체는 `servers` 입력), 한 번에 25%씩. otelcol과 restic 모두 설치·설정 |
 | Host Agents — Config All | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `target_hosts`로 지정(필수). otelcol과 restic **설정 모두** 재적용(설치·repo 초기화·등록 이벤트는 하지 않음) |
 | Host Agents — Deploy Restic | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `target_hosts`로 지정(필수), 한 번에 25%씩 (restic·resticprofile만 설치·설정) |
@@ -220,7 +220,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 | 템플릿 | 변수 | 형식 | 기본값 | 필수 |
 |---|---|---|---|---|
 | Host Provisioning | `target_hosts` | String | (없음) | 예 |
-| Host Provisioning | `target_admin_users` | String | 템플릿에 설정한 기본값(관리자 계정 JSON 목록) | 아니오 |
+| Host Provisioning | `target_removed_users` | String | (없음) | 아니오. 이번 실행에서만 지울 계정(일회성 명령). 관리·bootstrap 계정은 Asset 문서의 `access` 절이 정한다 |
 | Deploy All, Config All, Deploy Restic | `target_hosts` | String | (없음) | 예 |
 | On-demand | `target_hosts` | String | (비움 = 전체) | 아니오 |
 | On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |

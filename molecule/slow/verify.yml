@@ -70,7 +70,7 @@
     - name: Verify the funa_env role
       when: "'funa_env' in molecule_roles"
       block:
-        # 001~006은 OpenBao 조회·검증 태스크다. molecule에는 OpenBao가 없어 funa_env_kv_fixture가 조회를 대신하므로
+        # 003·005·006·017은 OpenBao 조회·검증 태스크다. molecule에는 OpenBao가 없어 openbao_fixture가 읽기 지점의 조회를 대신하므로
         # (조회·실패 경로는 tests/test_funa_env.py가 가짜 OpenBao로 검증) 여기서는 그 결과가 파일에 반영됐는지 본다.
         - name: "[VERIFY-FUNA-001] Verify the dockermgmt group the files are owned by exists"
           ansible.builtin.assert:
@@ -82,23 +82,26 @@
             that: f.stat['/etc/funa-cluster/cluster.env'].exists
           when: "'funa_cluster' in group_names"
 
-        - name: "[VERIFY-FUNA-003] Verify the node values reached cluster.env"
+        - name: "[VERIFY-FUNA-003] Verify the node and cluster values reached cluster.env as environment names"
           ansible.builtin.assert:
             that:
               - "'FUNA_NODE_EXTERNAL_HOSTNAME=node.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
               - "'FUNA_NODE_NAME=node' in f.read['/etc/funa-cluster/cluster.env']"
+              - "'FUNA_FLOATING_HOSTNAME=vip.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
           when: "'funa_cluster' in group_names"
 
-        - name: "[VERIFY-FUNA-004] Verify the cluster values reached cluster.env"
-          ansible.builtin.assert:
-            that: "'FUNA_FLOATING_HOSTNAME=vip.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
-          when: "'funa_cluster' in group_names"
-
-        - name: "[VERIFY-FUNA-005] Verify every file was built from the KV contents"
+        - name: "[VERIFY-FUNA-005] Verify every file was built from the OpenBao documents"
           ansible.builtin.assert:
             that:
               - f.read['/etc/funa-cluster/proxy.secrets.env'] | length > 0
               - f.read['/etc/funa-cluster/vrrp.secrets.env'] | length > 0
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-017] Verify the declared documents were all read (the node Credential and service secrets are in proxy.secrets.env)"
+          ansible.builtin.assert:
+            that:
+              - "'DB_PASSWORD=molecule-db' in f.read['/etc/funa-cluster/proxy.secrets.env']"
+              - "'CLOUDFLARE_API_TOKEN=molecule-cf' in f.read['/etc/funa-cluster/proxy.secrets.env']"
           when: "'funa_cluster' in group_names"
 
         - name: "[VERIFY-FUNA-006] Verify the files carry the Managed-by header (validated content only)"
@@ -910,44 +913,34 @@
           delegate_to: localhost
           become: false
 
-        - name: "[VERIFY-BAK-087] Verify the maintenance path logs in with AppRole before the KV lookup"
+        - name: "[VERIFY-BAK-087] Verify the maintenance path logs in once through the shared read point before the document lookup"
           ansible.builtin.assert:
             that:
-              - "'auth/approle/login' in _maint"
+              - "\"lookup('openbao_doc', '@token')\" in _maint"
               - "_maint.index('[BAK-087]') < _maint.index('[BAK-071]')"
+              - "'approle/login' not in _maint and 'VAULT_TOKEN' not in _maint"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
           delegate_to: localhost
           become: false
 
-        - name: "[VERIFY-BAK-088] Verify the issued AppRole token is the one the KV lookup prefers"
+        - name: "[VERIFY-BAK-071] Verify the maintenance task file reads exactly the documents backup_openbao_required declares"
           ansible.builtin.assert:
             that:
-              - "'_maint_approle_login.json.auth.client_token' in _maint"
-              - "\"_vault_token | default(\" in _maint"
-              - "_maint.index('[BAK-088]') < _maint.index('[BAK-071]')"
+              - "'backup_openbao_required' in _maint and \"query('openbao_doc'\" in _maint"
+              - "'secrets/services/rustfs/maintenance' in _req and 'inventory/services/rustfs' in _req and 'secrets/services/openobserve/ingest' in _req"
+              - "'secrets/assets/+/agents' in _req and 'inventory/services/openobserve' in _req"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
-          delegate_to: localhost
-          become: false
-
-        - name: "[VERIFY-BAK-071] Verify the maintenance task file reads the OpenBao KV through the same agents paths"
-          ansible.builtin.assert:
-            that:
-              - "'agents/rustfs' in _maint"
-              - "'agents/openobserve' in _maint"
-              - "'/agents' in _maint"
-            quiet: true
-          vars:
-            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+            _req: "{{ (lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/vars/main.yml') | from_yaml).backup_openbao_required }}"
           delegate_to: localhost
           become: false
 
         - name: "[VERIFY-BAK-072] Verify the maintenance inputs are asserted before any command runs"
           ansible.builtin.assert:
-            that: "_maint.index('maintenance_access_key') < _maint.index('[BAK-078]')"
+            that: "_maint.index('backup_openbao_required.items()') < _maint.index('[BAK-078]')"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
