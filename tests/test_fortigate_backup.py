@@ -96,8 +96,11 @@ def _tasks_by_id():
 
 def test_no_plaintext_token_or_unprotected_secret_tasks():
     by_id = _tasks_by_id()
-    for tid in ("FGBK-003", "FGBK-004", "FGBK-006", "FGBK-009", "FGBK-011", "FGBK-022"):
+    for tid in ("FGBK-003", "FGBK-006", "FGBK-009", "FGBK-011", "FGBK-022"):
         assert by_id[tid].get("no_log") is True, tid
+    # 검사 태스크의 fail_msg에는 값이 없다: no_log를 달면 [FORTIGATE-VIA] 사유가 가려진다.
+    assert not by_id["FGBK-004"].get("no_log")
+    assert "{{" not in by_id["FGBK-004"]["ansible.builtin.assert"]["fail_msg"].replace("{{ inventory_hostname }}", "")
     assert by_id["FGBK-011"]["ansible.builtin.copy"]["mode"] == "0600"
     assert by_id["FGBK-005"]["ansible.builtin.file"]["mode"] == "0700"
     assert "token" not in (ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8")
@@ -603,7 +606,7 @@ def test_retention_runs_even_when_the_alert_cannot_be_delivered_but_the_host_sti
 
 def test_tasks_compute_token_and_member_once():
     tasks = (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
-    assert tasks.count("lookup('openbao_connection'") == 2   # 요약(FGBK-023)과 본 해석(FGBK-003)
+    assert tasks.count("lookup('openbao_connection'") == 1   # 해석은 한 번(FGBK-003)이다
     assert tasks.count("regex_replace('[^A-Za-z0-9-]'") == 1
     assert tasks.count("fortigate_backup_member(fortigate_backup_file_prefix)") == 1
 
@@ -672,14 +675,14 @@ def test_the_required_declaration_is_what_the_assert_uses():
 def test_a_via_endpoint_is_refused_because_the_api_is_called_from_the_controller(ansible_env, device, tmp_path):
     res = _run(ansible_env, device, tmp_path / "bk", targets=("ns0380",), bao=_bao(device, ("ns0380", "ns0399"), via="ns0399/https"))
     assert res.returncode != 0 and "FORTIGATE-VIA" in res.stdout + res.stderr
+    assert SECRET_TOKEN not in res.stdout + res.stderr      # no_log가 없는 검사 태스크의 실패 출력에도 토큰은 없다
     assert device.requests == []
 
 
-def test_a_missing_document_fails_with_its_path_and_status_not_a_censored_message(ansible_env, device, tmp_path):
+def test_a_missing_document_fails_with_its_path_and_status_even_though_the_task_is_no_log(ansible_env, device, tmp_path):
     res = _run(ansible_env, device, tmp_path / "bk", token=None)
     assert res.returncode != 0
     assert "secrets/assets/ns0380/credentials/api" in res.stdout + res.stderr
-    assert "censored" not in res.stdout + res.stderr
 
 
 def test_alert_webhook_is_read_only_when_a_change_is_detected(ansible_env, device, hook, tmp_path):

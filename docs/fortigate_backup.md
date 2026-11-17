@@ -12,7 +12,7 @@
 - **무결성 검증**: HTTP 200이 아니거나 본문이 비었거나 FortiOS 설정 헤더(`#config-version=`)로 시작하지 않으면 저장하지 않고 호스트를 실패 처리한다. 기존 정상 백업은 건드리지 않는다.
 - **권한**: 디렉터리 `0700`, 파일 `0600`. 설정에는 VPN 사전 공유 키와 관리자 해시가 들어 있다.
 - **보관 주기**: `fortigate_backup_retention_days`(기본 90일)를 넘은 같은 대상(`<장비>_*`, 멤버 무관)의 파일을 백업 성공 직후 삭제한다. 변경 알림 전송이 실패해도 정리는 건너뛰지 않는다(호스트는 알림 실패로 실패 처리). 백업이 실패하면 정리도 하지 않는다.
-- **접속 정보(OpenBao)**: 같은 Asset 아래 Endpoint `https`(`address`·`port`)와 Credential `api`(`api_token`)로 합쳐 읽는다(옛 별도 경로 `fortigate/<ns>`와 접두사 변수는 없다). 역할은 읽기 지점(`lookup('openbao_connection', ..., preference=[https])`)만 쓰며 Endpoint 선호 순서(`fortigate_backup_endpoint_preference`, 기본 `[https]`)에서 등록된 첫 번째를 고르고 실패해도 다른 Endpoint로 넘어가지 않는다. API는 컨트롤러에서 직접 호출하므로 `via`(경유)가 있는 Endpoint는 `FORTIGATE-VIA`로 거부한다. 주소·포트·토큰은 로그에 남기지 않는다(관련 태스크 `no_log`, 실패 메시지에도 값 없음).
+- **접속 정보(OpenBao)**: 같은 Asset 아래 Endpoint `https`(`address`·`port`. 인증서 이름 검증을 하므로 `address`는 인증서에 있는 이름이어야 한다: 옛 `fortigate/<ns>`의 `fqdn`이 있으면 migrate가 그 값을 `address`로 옮긴다)와 Credential `api`(`api_token`)로 합쳐 읽는다(옛 별도 경로 `fortigate/<ns>`와 접두사 변수는 없다). 역할은 읽기 지점(`lookup('openbao_connection', ..., preference=[https])`)만 쓰며 Endpoint 선호 순서(`fortigate_backup_endpoint_preference`, 기본 `[https]`)에서 등록된 첫 번째를 고르고 실패해도 다른 Endpoint로 넘어가지 않는다. API는 컨트롤러에서 직접 호출하므로 `via`(경유)가 있는 Endpoint는 `FORTIGATE-VIA`로 거부한다. 주소·포트·토큰은 로그에 남기지 않는다(관련 태스크 `no_log`, 실패 메시지에도 값 없음).
 - **시크릿**: 읽기 전용 API 토큰은 Git에 없다. OpenBao Credential `api`에서만 읽는다(AppRole은 `network_backup` 계열). 토큰·응답 본문을 다루는 태스크는 `no_log`다. 읽는 문서와 필수 키는 `fortigate_backup_openbao_required`(`vars/main.yml`) 한 곳에 선언한다.
 
 ---
@@ -50,7 +50,6 @@
 | `FGBK-020` | `Send the configuration change alert once` | `ansible.builtin.uri` | Controller / Localhost | text/plain POST, `no_log`, 변경이 있을 때만(변경이 없거나 첫 백업이면 건너뜀) |
 | `FGBK-021` | `Assert the alert was delivered` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (전송 실패 시 호스트 실패) |
 | `FGBK-022` | `Read the alert webhook from OpenBao when a change is detected` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, `no_log`, 변경이 있을 때만 `secrets/services/alert/notify`를 읽음(없으면 FGBK-019가 실패 처리) |
-| `FGBK-023` | `Check the connection resolves (secret-free summary)` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, 비밀 없는 요약(`openbao_connection_summary`)만 남겨 `no_log`인 FGBK-003이 가리는 실패 사유(없는 문서·선호 순서 불일치)를 보이게 함 |
 
 테스트는 [tests/test_fortigate_backup.py](../tests/test_fortigate_backup.py)다. 구조·3-Way 추적성은 정적으로, 동작(대상별 저장·응답 멤버 파일명·장애 전환 시 멤버 변경·`0600`, 상태·설정 응답이 비정상이거나 비면 저장 안 함과 실패, 보관 일수 정리, 토큰 비노출, 설정 변경 알림·첫 백업·멤버 전환·비밀 비노출)은 장비를 로컬 HTTP 서버(장비와 알림 수신기)로 모사해 역할을 실제 실행해 검증한다. 장비에는 닿지 않는다.
 

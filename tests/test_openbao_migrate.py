@@ -25,7 +25,7 @@ spec.loader.exec_module(om)
 
 import openbao_validation as ov  # noqa: E402
 
-SECRET_VALUES = ["pw-admin-0001", "pw-bk-0002", "pw-net-0003", "tok-fg-0005", "cf-0006", "ingest-0001", "rk-0001",
+SECRET_VALUES = ["raw-passcode-0014", "pw-admin-0001", "pw-bk-0002", "pw-net-0003", "tok-fg-0005", "cf-0006", "ingest-0001", "rk-0001",
                  "rs-0001", "restic-0001", "o2-pass-0010", "hook-secret-0011", "gh-token-0012", "alert-url-0013"]
 
 
@@ -85,7 +85,7 @@ def old_docs():
                           "ssh_private_key": "KEY-AUTO", "ssh_public_key": "PUB-AUTO", "ssh_passphrase": ""},
         "users/root": {"username": "root", "type": "PASSWORD", "password": "pw-root-global"},
         "agents/openobserve": {
-            "api_user": "o2admin", "api_password": "o2-admin-pass", "controller_ingest_token": "Y3VzZXI6Y3Bhc3M=",
+            "api_user": "o2admin", "api_password": "o2-admin-pass", "controller_ingest_token": "raw-passcode-0014",
             "o2_endpoint": "https://o2.example.test", "normal_sources": [{"address": "192.0.2.250", "kind": "semaphore"}],
             "o2_ca_file": "/etc/pki/fake-o2-ca.pem",
             "alert_resource_exclusions": [{"host": "ns0001", "mount": "/data"}],
@@ -181,9 +181,15 @@ def test_jump_connection_becomes_via_to_bastion_endpoint(plan):
 
 def test_fortigate_document_merges_into_same_asset_as_https_endpoint_and_api_credential(plan):
     assert plan.store["inventory/assets/ns0005/endpoints"] == {
-        "https": {"protocol": "https", "address": "192.0.2.30", "port": 8443, "credential": "api"}}
+        "https": {"protocol": "https", "address": "ns0005.example.test", "port": 8443, "credential": "api"}}   # 옛 fqdn 우선(인증서 이름 검증)
     assert plan.store["secrets/assets/ns0005/credentials/api"] == {"type": "api_token", "token": "tok-fg-0005"}
     assert plan.store["inventory/assets/ns0005"] == {"description": "Fake fw", "type": "FIREWALL"}
+
+
+def test_a_fortigate_without_fqdn_keeps_the_address(plan):
+    old = old_docs()
+    old["fortigate/ns0005"].pop("fqdn")
+    assert om.build_new(old, SKIP).store["inventory/assets/ns0005/endpoints"]["https"]["address"] == "192.0.2.30"
 
 
 def test_funa_node_keys_and_cloudflare_token_go_to_asset_and_its_credential(plan):
@@ -264,7 +270,13 @@ def test_extra_skip_entry_for_a_single_key_silences_that_key():
 
 def test_ingest_account_can_be_taken_from_the_controller_token():
     plan = om.build_new(old_docs(), SKIP, ingest_source="controller_token")
-    assert plan.store["secrets/services/openobserve/ingest"] == {"username": "cuser", "password": "cpass"}
+    # 옛 소비자는 raw passcode를 Basic `<o2_org>:<passcode>`로 인코딩했다: 조직이 없으면 default
+    assert plan.store["secrets/services/openobserve/ingest"] == {"username": "default", "password": "raw-passcode-0014"}
+    old = old_docs()
+    old["agents/openobserve"]["o2_org"] = "fake-o2"
+    plan = om.build_new(old, SKIP, ingest_source="controller_token")
+    assert plan.store["secrets/services/openobserve/ingest"] == {"username": "fake-o2", "password": "raw-passcode-0014"}
+    assert plan.store["inventory/services/openobserve"]["org"] == "fake-o2" and plan.errors == []
 
 
 # ---- CLI: 쓰기·재실행·보고서 -----------------------------------------------------------------------------------

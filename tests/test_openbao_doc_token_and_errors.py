@@ -161,6 +161,38 @@ def test_connection_resolution_failures_are_shown_with_the_reason_and_no_secret(
     assert len(lines) == 1 and "선호 순서" in lines[0] and "fake-secret" not in lines[0]
 
 
+def test_quiet_lookups_show_nothing_and_do_not_leak_into_the_next_lookup(fake_openbao, shown):
+    lookup = openbao_doc.LookupModule()
+    lookup._templar = None
+    fake_openbao.deny("inventory", "assets/ns0001")
+    with pytest.raises(OpenBaoError):
+        lookup.run(["inventory/assets/ns0001"], variables=_vars(fake_openbao), quiet=True, required=False)
+    assert shown == []                       # ERROR 수준으로는 내지 않는다
+    with pytest.raises(OpenBaoError):
+        lookup.run(["inventory/assets/ns0001"], variables=_vars(fake_openbao))
+    assert len(shown) == 1
+
+
+def test_quiet_failures_are_still_available_at_verbose_level(fake_openbao, monkeypatch):
+    lines = []
+    monkeypatch.setattr(openbao_doc.display, "vv", lambda msg, *a, **k: lines.append(msg))
+    fake_openbao.deny("inventory", "assets/ns0001")
+    lookup = openbao_doc.LookupModule()
+    lookup._templar = None
+    with pytest.raises(OpenBaoError):
+        lookup.run(["inventory/assets/ns0001"], variables=_vars(fake_openbao), quiet=True)
+    assert len(lines) == 1 and "inventory/assets/ns0001" in lines[0] and "403" in lines[0]
+
+
+def test_every_tolerant_openbao_doc_call_in_the_roles_is_quiet():
+    """errors='ignore'·'warn' 호출은 quiet=true를 함께 준다(이중 ERROR 줄 방지). 기본 strict 호출에는 quiet이 없다."""
+    import re
+    for path in (ROOT_DIR / "roles").rglob("*.yml"):
+        for call in re.findall(r"openbao_doc'[^}]*?\)", path.read_text(encoding="utf-8")):
+            tolerant = "errors='ignore'" in call or "errors='warn'" in call
+            assert tolerant == ("quiet=true" in call), (str(path), call)
+
+
 def test_a_no_log_task_still_tells_the_operator_why_it_failed(fake_openbao, tmp_path):
     """실제 ansible-playbook: no_log 태스크의 결과는 가려지지만 실패 사유(경로·상태)는 출력에 남고 비밀은 없다."""
     fake_openbao.deny("secrets", "automation/ssh")

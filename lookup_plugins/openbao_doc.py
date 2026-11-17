@@ -15,6 +15,7 @@
 * 특수 용어 `@token`은 위 순서로 얻은 토큰만 돌려준다(플레이당 한 번 로그인해서 변수로 넘길 때 쓴다).
 * `openbao_fixture`(키 `<마운트>/<문서 경로>`, 값 문서)가 정의돼 있으면 네트워크 없이 그 안에서만 답한다(molecule용).
   이 변수는 여기서만 처리한다.
+* 호출자가 `errors='ignore'`·`'warn'`으로 실패를 직접 다루면 `quiet=true`를 함께 줘서 표시 수준을 ERROR에서 상세(-vv)로 낮춘다(기본 strict는 항상 ERROR로 낸다).
 * 오류 메시지에는 문서 경로와 상태 코드만 넣는다. 응답 본문은 비밀을 담을 수 있어 넣지 않는다. 이 메시지는 `no_log: true` 태스크에서도
   운영자가 403과 연결 오류를 구분할 수 있도록 표시 채널(Display.error)로도 낸다.
 * 플레이 첫머리에서 받은 `_vault_token`은 30분 뒤 만료된다. 그 토큰으로 읽다가 403이면 AppRole로 한 번 다시 로그인해 같은 읽기를
@@ -52,11 +53,20 @@ TIMEOUT = 5
 
 _LOGIN_CACHE: dict = {}
 display = Display()
+_QUIET = False      # 호출자가 errors='ignore'·'warn'으로 실패를 직접 다루면(quiet=true) 표시 채널로 내지 않는다
 
 
 class OpenBaoError(AnsibleError):
     status = None       # HTTP 상태(없으면 None)
     shown = False       # 표시 채널로 이미 냈는가
+
+
+def _emit(msg):
+    """strict 호출은 ERROR로, errors='ignore'·'warn' 호출(quiet)은 상세(-vv) 수준으로만 낸다(조용히 삼키지는 않는다)."""
+    if _QUIET:
+        display.vv(msg)
+    else:
+        display.error(msg)
 
 
 def _fail(msg, status=None, show=True):
@@ -68,7 +78,7 @@ def _fail(msg, status=None, show=True):
     exc = OpenBaoError(msg)
     exc.status = status
     if show:
-        display.error(msg)
+        _emit(msg)
         exc.shown = True
     return exc
 
@@ -183,12 +193,12 @@ class Reader:
                 except OpenBaoError:
                     # 다시 로그인하지 못했다(로그인 실패 사유는 이미 표시됐다). 운영자가 막힌 문서를 알 수 있게 원래 403을 낸다.
                     if not exc.shown:
-                        display.error(str(exc))
+                        _emit(str(exc))
                         exc.shown = True
                     raise exc from None
                 if renewed is None:
                     if not exc.shown:
-                        display.error(str(exc))
+                        _emit(str(exc))
                     raise
                 data = attempt(False)
         except _NotFound:
@@ -236,9 +246,14 @@ class Reader:
 
 class LookupModule(LookupBase):
     def run(self, terms, variables=None, **kwargs):
+        global _QUIET
+        _QUIET = bool(kwargs.pop("quiet", False))     # errors='ignore'·'warn' 호출자는 quiet=true를 함께 준다
         reader = Reader(variables or {}, self._templar)
         required = kwargs.get("required", True)
         out = []
-        for term in terms:
-            out.append(reader.token() if term == "@token" else reader.read(str(term), required))
+        try:
+            for term in terms:
+                out.append(reader.token() if term == "@token" else reader.read(str(term), required))
+        finally:
+            _QUIET = False
         return out

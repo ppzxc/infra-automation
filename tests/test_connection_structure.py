@@ -30,23 +30,39 @@ def test_controller_plays_never_escalate_privileges():
         assert play["connection"] == "local" and play["become"] is False
 
 
+STAGE = ROOT_DIR / "playbooks" / "common" / "stage_ssh_key.yml"
+
+
+def _flat_tasks(tasks):
+    for t in tasks:
+        yield t
+        for key in ("block", "always", "rescue"):
+            yield from _flat_tasks(t.get(key) or [])
+
+
 def test_controller_credential_tasks_run_in_check_mode_too():
-    tasks = _load(RESOLVE)[0]["tasks"]
-    names = ["Create temporary SSH private key file for admin user if key provided",
-             "Write admin SSH private key to temporary file",
-             "Strip passphrase from temporary admin SSH key if passphrase defined",
-             "Create temporary SSH private key file for bootstrap user if key provided",
-             "Write bootstrap SSH private key to temporary file",
-             "Strip passphrase from temporary bootstrap SSH key if passphrase defined",
-             "Create temporary SSH private key files for via hops",
-             "Write via hop SSH private keys to temporary files",
-             "Probe SSH connection using primary admin user credentials"]
-    for name in names:
-        task = next((t for t in tasks if t.get("name") == name), None)
-        assert task is not None, name
-        assert task.get("check_mode") is False, name
+    for task in _flat_tasks(_load(STAGE)):
+        if "ansible.builtin.set_fact" not in task and "block" not in task:
+            assert task.get("check_mode") is False, task["name"]
     for task in _load(CLEANUP)[0]["tasks"]:
         assert task.get("check_mode") is False, task["name"]
+    plays = _load(RESOLVE)[0]["tasks"]
+    probe = next(t for t in plays if t.get("name") == "Probe SSH connection using primary admin user credentials")
+    assert probe.get("check_mode") is False
+
+
+def test_key_staging_is_one_helper_used_for_admin_bootstrap_and_hops_and_passphrase_is_not_in_argv():
+    text = RESOLVE.read_text(encoding="utf-8")
+    assert text.count("ansible.builtin.include_tasks: stage_ssh_key.yml") == 3
+    assert "ansible.builtin.tempfile" not in text and "ssh-keygen" not in text
+    stage = STAGE.read_text(encoding="utf-8")
+    assert stage.count("ansible.builtin.tempfile") == 1 and stage.count("ssh-keygen") >= 1
+    assert " -P " not in stage and "SSH_ASKPASS_REQUIRE" in stage
+    paths = _flat_tasks(_load(STAGE))
+    record = next(i for i, t in enumerate(_flat_tasks(_load(STAGE))) if t["name"].startswith("Record the temporary key path"))
+    write = next(i for i, t in enumerate(_flat_tasks(_load(STAGE))) if t["name"].startswith("Write the SSH private key"))
+    assert record < write       # 경로를 먼저 남긴다(뒤 단계가 실패해도 cleanup이 지운다)
+    assert all(t.get("no_log") is True for t in paths if t["name"].startswith(("Write the SSH private key", "Remove the passphrase")))
 
 
 def test_tasks_that_carry_secrets_are_no_log():
@@ -54,8 +70,6 @@ def test_tasks_that_carry_secrets_are_no_log():
     for name in ("Acquire the OpenBao client token once for the whole play",
                  "Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass",
                  "Take apart the resolution bundle (Asset document, access names, admin accounts, connections, secret-free summaries) and drop it",
-                 "Write admin SSH private key to temporary file", "Write bootstrap SSH private key to temporary file",
-                 "Write via hop SSH private keys to temporary files", "Create temporary SSH private key files for via hops",
                  "Configure connection parameters from the active connection"):
         assert tasks[name].get("no_log") is True, name
 
@@ -77,11 +91,6 @@ def test_the_secret_bearing_resolution_bundle_is_taken_apart_and_emptied_in_one_
     before = tasks[:tasks.index(take)]
     assert [t for t in before if "_host_res" in yaml.safe_dump(t) and not t["name"].startswith("Resolve the Asset document")] == []
     assert "_host_res" not in yaml.safe_dump(tasks[tasks.index(take) + 1:])
-
-
-def test_hop_key_paths_are_recorded_before_any_key_is_written():
-    names = [t["name"] for t in _load(RESOLVE)[0]["tasks"]]
-    assert names.index("Record the via hop temporary key paths") < names.index("Write via hop SSH private keys to temporary files")
 
 
 def test_the_token_is_acquired_once_per_play():

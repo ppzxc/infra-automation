@@ -218,13 +218,17 @@ def _fail(message):
     return 1
 
 
+# 문서 경로 마디: 영숫자·_-와 점(`first.last` 같은 Operator 이름). 점만으로 된 마디(`.`, `..`)는 경로 이동이라 거부한다.
+DOC_PATH_RE = re.compile(r"(?!\.+(?:/|$))[A-Za-z0-9_.-]+(/(?!\.+(?:/|$))[A-Za-z0-9_.-]+)+")
+
+
 def run_put(args):
     addr = os.environ.get("VAULT_ADDR")
     if not addr:
         print("VAULT_ADDR가 필요하다", file=sys.stderr)
         return 2
     doc = args.doc.strip("/")
-    if not re.fullmatch(r"[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)+", doc) or ov.resolve_schema(doc, args.schemas) is None:
+    if not DOC_PATH_RE.fullmatch(doc) or ov.resolve_schema(doc, args.schemas) is None:
         print(ov.Violation(doc, "#", "no_schema").format())
         return 1
     try:
