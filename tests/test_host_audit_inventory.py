@@ -369,10 +369,10 @@ def test_non_text_values_and_old_security_grade_records_show_as_invalid_not_unas
     assert old["asset_importance"]["value"] == "잘못된 값 (2등급)"
 
 
-def test_resolve_connection_still_sets_the_variables_host_audit_reads():
+def test_resolve_connection_publishes_the_asset_document_for_host_audit():
+    # #523: 옛 `_host_kv_dict`는 사라졌다. Asset 문서(isms 절 포함)는 `_asset_doc`로 나온다. Host Audit 전환(#528)이 이를 읽는다.
     text = (ROOT_DIR / "playbooks" / "common" / "resolve_connection.yml").read_text(encoding="utf-8")
-    assert "register: _openbao_host_kv_resp\n" in text
-    assert "_effective_host_resp:" in text and "_host_kv_dict:" in text
+    assert "_asset_doc:" in text and "_host_kv_dict" not in text
 
 
 def test_invalid_importance_echoes_at_most_twenty_characters_of_the_original():

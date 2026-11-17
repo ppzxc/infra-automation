@@ -4,8 +4,7 @@
 # 온프레미스 IDC 인프라 통합 프로비저닝 (일반 서버 및 로드밸런서)
 # ==============================================================================
 # 실행 예시:
-#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml \
-#     -e "bootstrap_user=root target_admin_users=ppzxc"
+#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml -e target_hosts=ns0001
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -14,6 +13,8 @@
 # ------------------------------------------------------------------------------
 - name: Resolve OpenBao Connection and Credentials
   ansible.builtin.import_playbook: common/resolve_connection.yml
+  vars:
+    connection_requires_access: true   # 프로비저닝 대상: Asset 문서에 access 절이 없으면 실패한다
   tags: [always]
 
 # ------------------------------------------------------------------------------

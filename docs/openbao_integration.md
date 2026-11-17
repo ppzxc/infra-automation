@@ -41,111 +41,66 @@ flowchart TD
 
 OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키를 배치합니다:
 
-### (1) 호스트별 개별 접속 정보
-* **원칙**: 정적 인벤토리(Semaphore UI 및 `inventory/hosts.yml`)에는 관리번호(호스트명, 예: `ns0331`)만 전달되며, 실제 연결 대상 IP(`ansible_host`) 및 SSH 포트(`ansible_port`)는 OpenBao KV에서 동적으로 로딩하여 바인딩합니다.
-* **네임스페이스**: `infra/prod/host/` (Semaphore UI `VAULT_NAMESPACE` 주입)
-* **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0266`, `secret/data/hosts/ns0331`)
-* **필드 (Key-Value)** (플랫 오브젝트, 호스트명 키 중첩, 또는 배열 포맷 지원):
-  ```json
-  {
-    "ansible_host": "39.116.31.40",
-    "ansible_port": 22,
-    "ansible_python_interpreter": "auto_silent"
-  }
-  ```
-  또는 `public_ip` (IDC 기본 호스트 메타데이터 포맷) / `ip` 필드 사용:
-  ```json
-  {
-    "hostname": "ns0331",
-    "domain": "nanoit.kr",
-    "fqdn": "ns0331.nanoit.kr",
-    "public_ip": "39.116.31.40",
-    "ssh_user": "ppzxc"
-  }
-  ```
-  > `ssh_user`는 IDC 메타데이터 필드로 **플레이북이 읽지 않습니다**(기존 호스트의 동작이 바뀌지 않도록 의도적으로 무시). 접속 계정을 바꾸려면 아래 `admin_users`를 사용하세요.
+### (0) 공용 읽기 지점과 접속 해석 (Spec #511 / Ticket-12)
 
-  **관리 IP (`ip` 변수)**: Host Agents가 로그·메트릭의 `host.ip`로 쓰는 값입니다(ADR-0006 §2.3). 우선순위는 **인벤토리 `ip` > 호스트 KV `ip` > 호스트 KV `public_ip`** 이며, 접속 주소(`ansible_host`)와 별개로 관리 IP를 따로 선언하려면 KV `ip`를 쓰세요. 셋 다 없거나 IP 형식이 아니면 `host.ip`만 생략하고 WARN(`MON-038`)합니다.
+> 이 절이 새 구조의 공개 인터페이스다. 옛 `hosts/<ns>`·`users/<계정>` 경로, 접두사 변수, 주소 별칭 대체 체인, 부트스트랩 자동 대체값은 없다.
+> 문서 키의 정의는 `schemas/openbao/`(원본)에 있고 여기에 복사하지 않는다. 구조 문서 전체 재작성은 전환 PR이 한다(#509).
 
-  **호스트별 접속 사용자 선택 (선택 필드)**: 해당 호스트에서만 실행 변수를 덮어씁니다. 필드가 없으면 기존 동작(실행 변수 `target_admin_users` / `bootstrap_user`, 기본값 `root`)을 그대로 따릅니다.
-  ```json
-  {
-    "ansible_host": "39.116.31.40",
-    "admin_users": ["svcadm", "ppzxc"],
-    "bootstrap_user": "centos"
-  }
-  ```
-  * `admin_users`: 이 호스트의 관리자 목록(문자열 1개도 허용). **첫 번째 항목이 SSH 접속 계정**이 되며, 목록 전체가 `common` 역할의 `accounts`로 프로비저닝됩니다. 각 사용자의 자격증명은 `users/<user>`에서 조회합니다.
-  * `bootstrap_user`: 이 호스트의 부트스트랩(최초 접속) 계정.
-  * 우선순위: **호스트 KV > 실행 변수 > 기본값**. 어느 쪽에서도 관리자를 결정할 수 없으면 해당 호스트만 실패합니다.
+**읽기 지점 하나.** 네임스페이스(`infra`), 마운트(`inventory`·`secrets`), 인증, 우회는 `lookup_plugins/openbao_doc.py`에서만 정한다.
+역할·플레이북은 경로 접두사를 갖지 않고 `<마운트>/<문서 경로>`만 쓴다.
 
-  또는 호스트명 키 래핑 사용:
-  ```json
-  {
-    "ns0331": {
-      "ip": "39.116.31.40",
-      "port": 22
-    }
-  }
-  ```
+```yaml
+- ansible.builtin.set_fact:
+    _doc: "{{ lookup('openbao_doc', 'inventory/assets/' ~ inventory_hostname) }}"           # 없으면 실패
+    _opt: "{{ lookup('openbao_doc', 'inventory/config/host_audit', required=false) }}"      # 없으면 {} (명시한 호출만)
+  no_log: true   # secrets/ 문서를 읽는 태스크는 반드시 no_log
+```
 
-  **호스트별 사용자 자격증명 재정의 (선택 필드, #26)**: `hosts/<hostname>` 자체가 아니라
-  `secret/data/hosts/<inventory_hostname>/users/<username>`에 **평면(flat) 오브젝트**로 둡니다
-  (`(2) 사용자 계정 자격증명`의 배열 포맷과 다릅니다). 인식하는 필드는 두 그룹으로 나뉩니다:
-  - **자격증명 4개** (`ssh_private_key`, `ssh_passphrase`, `password`, `ssh_public_key`): **존재하는
-    키만** 전역 `users/<username>` 값 위에 덮어씁니다 — 값이 비어 있어도 "존재"로 취급되므로,
-    예를 들어 호스트가 평문 키로 교체되어 `ssh_passphrase: ""`를 명시하면 상속된 전역 passphrase를
-    지우는 것으로 처리됩니다(전역 키를 잘못된 passphrase로 복호화 시도하지 않음). 전역
-    `users/<username>` 자체가 없는(404) 신규 계정이라도 호스트 재정의만으로 적용됩니다.
-  - **`revoked_keys`** (별도 취급, 아래 참고): 전역 값과 **항상 합집합**이며 존재 기준 덮어쓰기가
-    아닙니다.
-  ```json
-  {
-    "ssh_private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
-    "ssh_passphrase": "",
-    "password": "HostSpecificPassword123!",
-    "ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
-    "revoked_keys": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... old@laptop"]
-  }
-  ```
-  * 부트스트랩 계정(`bootstrap_user`)의 접속 비밀번호에도 같은 재정의가 적용됩니다. 조회 대상은
-    `admin_users`로 해석된 사용자와 부트스트랩 계정의 합집합이므로, 부트스트랩 계정이 `admin_users`에 없어도
-    (예: `admin_users: [root]`, `bootstrap_user: bot`) `hosts/<hostname>/users/<bootstrap_user>`가 조회됩니다.
-  * `common` 역할은 접속(primary) 사용자에게만 `ssh_private_key`/`ssh_passphrase`/`password`를
-    실제로 사용합니다(SSH 연결·sudo 자격증명). `accounts`로만 프로비저닝되는 나머지 사용자는
-    로컬 계정 자체에 비밀번호를 두지 않으므로, 의미 있게 반영되는 필드는 `ssh_public_key`와
-    `revoked_keys`뿐입니다 — 그 외 사용자에 대한 `ssh_private_key`/`ssh_passphrase`/`password`
-    재정의는 저장은 되지만 아무 곳에도 쓰이지 않습니다.
-  * 조회는 `admin_users`로 해석된 사용자 전원(접속 계정 + `accounts`로 프로비저닝되는 나머지)에 대해
-    호스트마다 반복되므로, OpenBao 조회 횟수가 호스트 × 사용자 수만큼 늘어납니다(허용된 비용).
-  * `secret/` 폴백 없이 404는 정상(해당 호스트에 재정의가 없음)으로 처리합니다. AppRole/Token
-    정책에 `hosts/+/users/*` 읽기 권한이 없어 403이 발생하면, 해당 사용자의 호스트별 재정의와
-    `revoked_keys`가 조용히 적용되지 않으므로 플레이북 출력의 `[WARN]` 메시지로 확인하세요.
-  * `revoked_keys`는 예외적으로 **항상 전역 값과 합집합**입니다(호스트가 이 필드로 전역 폐기를
-    되살릴 수 없음). 실제로 배포하지 않는 판정(키가 `revoked_keys`와 겹치면 배포 생략)은
-    `common` 역할(COMMON-015) 한 곳에서만 이뤄집니다.
+- 문서가 없거나(404) 403이거나 연결이 안 되면 실패한다. 기본값으로 대체하지 않는다. 실패 메시지에는 문서 경로와 상태 코드만 있다.
+- 인증 순서: 변수 `_vault_token`(resolve_connection이 플레이당 한 번 받아 둔 토큰) -> AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID` 또는 같은 이름 소문자 변수) -> `VAULT_TOKEN`. 주소는 `VAULT_ADDR`(`vault_addr`).
+  네임스페이스·마운트·접두사를 바꾸는 변수나 환경 변수는 없다(`VAULT_NAMESPACE`·`VAULT_MOUNT`는 읽지 않는다).
+- `lookup('openbao_doc', '@token')`은 토큰만 돌려준다. 플레이당 한 번 로그인할 때 쓴다.
+- 우회(`openbao_fixture`): 변수 `openbao_fixture`가 정의돼 있으면 네트워크 없이 그 안에서만 답한다. 키는 `<마운트>/<문서 경로>`(예: `inventory/assets/ns0001`), 값은 문서다.
+  없는 키는 404와 같다. 이 변수는 읽기 지점에서만 처리한다(molecule용. 기본 데이터는 `tests/fixtures/openbao_docs/valid`).
 
-  **명시적 계정 삭제 및 키 폐기 (선택 필드, #26, ISMS 2.5.1 증적)**:
-  ```json
-  {
-    "removed_users": ["legacy-hand-made-account"]
-  }
-  ```
-  * `removed_users`: 이 호스트에서 `common` 역할이 `state: absent`로 제거할 계정 목록(문자열
-    1개도 허용). 실행 변수 `target_removed_users`(문자열/리스트/JSON 문자열 배열 모두 허용)와
-    **합집합**으로 통합되며, `admin_users`에서 자동으로 빠지는 계정은 없습니다(삭제는 항상 명시).
-    지원 형태는 문자열(콤마로 여러 개 구분 가능)과 리스트/JSON 배열 문자열뿐입니다. mapping(객체)
-    형태로 오면 전부 무시되고 `[WARN]` 메시지가 남습니다(키 이름이 계정명으로 오인되는 것을
-    막기 위함이며, 리스트 안의 문자열이 아닌 원소도 조용히 걸러집니다).
-  * **안전장치**: `removed_users`가 접속 계정, 부트스트랩 계정(호스트별 override 포함), 또는
-    이번 실행에서 선언된 `admin_users`와 겹치면 SSH 프로브 성공 여부와 무관하게 그 호스트만
-    결정적으로 실패합니다(`REMOVED-USER-CONFLICT`).
-  * **증적**: 매 실행마다 호스트 KV/실행 변수 각각에서 온 목록과 최종 합집합을 debug로 남깁니다
-    (`Log accounts resolved for removal (ISMS 2.5.1 evidence)`).
-  * `accounts[].revoked_keys`(전역 `users/<user>` 또는 호스트별 재정의에서 합집합)에 나열된
-    공개키는 `common` 역할이 `authorized_key: state: absent`로 제거합니다(`exclusive`는 사용하지
-    않으므로 수동으로 추가된 다른 키는 보존됩니다). 배포하려는 키와 폐기 목록이 겹치면 배포되지
-    않습니다(타입+본문 비교, 주석/개행 차이는 무시).
+**접속 해석** `lookup('openbao_connection', <관리번호>, preference=[...], credential=<이름>)`
+
+| 입력 | 뜻 |
+|---|---|
+| `preference` | Endpoint 이름의 선호 순서 목록(작업 기본값. 서버 `[ssh]`, FortiGate `[https]`, Cisco `[ssh, telnet]`). 등록된 것 중 첫 번째만 쓴다. 접속에 실패해도 다른 Endpoint로 넘어가지 않는다 |
+| `credential` | 선택. Endpoint 기본 Credential 대신 쓸 이름(`access` 절의 admin·bootstrap). 기본과 다르면 그 Credential 자신의 비밀로 로그인한다 |
+
+결과(비밀을 담으므로 `no_log`): `endpoint`·`protocol`·`address`·`port`, `credential`(로그인에 쓴 이름), `login`(`mode`: `identity`·`password`·`key`·`token`과 `username` 및 해당 비밀),
+`become`(`method`: `sudo`·`su`·`enable`, `password`; 승격이 없으면 `{}`), `password_auth_exception`(ssh Endpoint에 `identity`가 없으면 true), `via`(경유 체인, 컨트롤러에서 가까운 경유지부터).
+
+- `identity: automation`이면 Automation Identity 키(`secrets/automation/ssh`)로 `username`에 로그인하고 Credential `password`는 승격에만 쓴다. 없으면 Credential 자신의 비밀로 로그인한다.
+- `become`: 비밀번호는 `become.credential`의 비밀번호이고, 생략하면 로그인 Credential의 `password`다. `su`는 비밀번호가 없으면 실패한다.
+- `via`: `<ns>/<endpoint>`를 끝까지 따라가며 경유지마다 자기 Endpoint의 기본 Credential·`identity`를 쓴다. 순환·없는 참조는 실패한다.
+  `openbao_connection_summary` 필터는 비밀을 뺀 요약을, `openbao_ssh_common_args`·`openbao_ssh_proxy_command` 필터는 hop 키 임시 파일 경로 목록으로 `ProxyCommand`를 만든다(키 로그인 경유지만 지원, 비밀번호 경유지는 거부).
+- 관리 계정: `lookup('openbao_admin_accounts', <관리번호>, preference=[...])`가 `access.admin_credentials`를 common 역할의 `accounts`로 만든다.
+  계정 이름은 Credential의 `username`이고, 공개키는 자동화 계정이면 `secrets/automation/ssh`의 `public_key`, 그 밖에는 `inventory/operators/<username>`의 `public_keys`·`revoked_keys`다.
+
+**`playbooks/common/resolve_connection.yml` 입력과 출력**
+
+| 입력 변수 | 뜻 |
+|---|---|
+| `connection_endpoint_preference` | 선호 순서 목록. 기본 `[ssh]` |
+| `connection_requires_access` | true면 Asset 문서에 `access` 절(`admin_credentials`·`bootstrap_credential`)이 없을 때 실패한다. `site.yml`(프로비저닝)이 켠다 |
+| `target_removed_users` | 이번 실행에서 지울 계정. `access.removed_accounts`와 합집합이다. 계정 입력 중 실행 변수로 남은 유일한 값이다 |
+
+출력 팩트: `ansible_host`·`ansible_port`·`ansible_user`·`ansible_password`·`ansible_ssh_private_key_file`·`ansible_ssh_common_args`(경유 시)·`ansible_become_method`·`ansible_become_password`(승격이 있을 때)·`ansible_python_interpreter`(`/usr/bin/python3`),
+`ip`(인벤토리 `ip`가 있으면 그 값, 없으면 선택된 Endpoint 주소), `accounts`, `_removed_users`, `_normalized_admin_users`, `_primary_admin_user`, `_is_already_provisioned`(관리 계정 키 접속 시험 성공),
+`_asset_doc`(Asset 문서), `_connection`(비밀 없는 요약: `endpoint`·`address`·`port`·`credential`·`login_mode`·`become_method`·`password_auth_exception`·`via`), `_vault_token`.
+관리 계정 접속이 안 되면 `access.bootstrap_credential`의 연결로 바꾼다. 임시 키 파일은 `cleanup_connection.yml`이 지운다.
+
+**`<역할>_openbao_required` 선언 형식.** 역할의 `vars/main.yml`에 `{index.yml 패턴: [필수 키, ...]}`로 둔다. 필수 키가 없는 선택 문서는 `[]`다.
+입력 검증 assert, 스키마 `required` 대조 테스트, 요청 기록 단언(읽은 문서가 선언한 패턴 안에 있는가)이 같은 선언을 쓴다.
+
+```yaml
+monitoring_openbao_required:
+  "secrets/assets/+/agents": [restic_password]
+  "inventory/assets/+": []
+```
 
 ### (1-1) FUNA Cluster 환경 값 (`funa_env`, #222)
 `funa_cluster` 그룹 호스트에만 쓰인다. **값은 이 문서와 Git에 두지 않는다.** KV 키 이름이 곧 환경 변수 이름이다. 자세한 필수 키는 [docs/funa_env.md](funa_env.md).
@@ -154,36 +109,6 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
 * `secret/data/clusters/funa/proxy`: Caddy 시크릿(→ `proxy.secrets.env`, `0640 root:dockermgmt`).
 * `secret/data/clusters/funa/vrrp`: keepalived 시크릿(→ `vrrp.secrets.env`, `0640 root:dockermgmt`).
 * 정책: Semaphore AppRole에 위 경로의 **읽기** 권한이 필요하다(`clusters/funa/*`). 경로가 없거나 필수 키가 빠지면 플레이는 경로·키 이름을 대며 실패한다.
-
-### (2) 사용자 계정 자격증명 (Users)
-* **경로**: `secret/data/users/<username>` (예: `secret/data/users/ppzxc`, `secret/data/users/root`)
-* **SSH 자격증명 포맷 (JSON Array)**:
-  ```json
-  [
-    {
-      "ssh_passphrase": "",
-      "ssh_private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
-      "ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
-      "type": "SSH",
-      "username": "ppzxc"
-    }
-  ]
-  ```
-* **패스워드 자격증명 포맷 (JSON Array, root 등 부트스트랩 계정)**:
-  ```json
-  [
-    {
-      "password": "InitialRootPassword123!",
-      "type": "PASSWORD",
-      "username": "root"
-    }
-  ]
-  ```
-
-### (3) 부트스트랩 접속 및 관리자 자동 폴백 메커니즘
-* `target_admin_users`와 `bootstrap_user`는 실행 단위 기본값입니다. 호스트 KV(`hosts/<hostname>`)의 `admin_users` / `bootstrap_user`가 있으면 그 호스트에서는 KV 값이 우선합니다 ([(1) 호스트별 개별 접속 정보](#1-호스트별-개별-접속-정보) 참고). `target_admin_users`는 모든 대상 호스트의 KV에 `admin_users`가 있을 때만 생략할 수 있습니다.
-* **1차 시도 (관리자 접속)**: OpenBao `users/<target_admin_user>`의 SSH Private Key로 타겟 호스트 접속을 시도합니다. 성공 시 이미 프로비저닝된 상태로 판단하여 해당 키로 플레이북을 실행합니다.
-* **2차 시도 (부트스트랩 폴백)**: 관리자 SSH 연결 실패 시 신규 호스트로 판단, OpenBao `users/<bootstrap_user>`에서 패스워드/키를 취득하여 `ansible_user=bootstrap_user`로 자동 폴백 접속 후 프로비저닝을 수행합니다. 프로비저닝이 완료되면 `root` 원격 접속은 차단되고 등록된 관리자 계정만 유지됩니다.
 
 ### (4) Cisco 스위치별 접속 정보 및 자격증명
 * **경로**: `secret/data/hosts/<inventory_hostname>` (예: `secret/data/hosts/ns0000`, `secret/data/hosts/ns0278`)
@@ -277,31 +202,16 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
 
 ---
 
-## 4. 로컬 및 CI 하이브리드 지원 동작 원리
-
-`inventory/group_vars/all.yml`에 다음과 같은 3중 안전 폴백이 구성되어 있습니다:
-
-```yaml
-# 1. 로컬 환경: _local_* 변수 또는 로컬 git 미추적 yml에 변수가 있으면 로컬 값 사용
-# 2. Semaphore 환경: 로컬 변수가 없고 VAULT_ADDR가 주입되어 있으면 OpenBao 조회
-# 3. 개발/테스트 환경: OpenBao가 없거나 미설정 시에도 에러 없이 기본값(default/omit)으로 안전 폴백
-```
-
-이 설계를 통해 개발자는 로컬 머신에서 별도의 Vault 서버 없이도 작업을 진행할 수 있으며, Semaphore UI에서는 완전한 중앙 집중식 시크릿 격리가 이루어집니다.
-
----
-
 ## 5. 신규 플레이북 작성을 위한 재사용 연결 모듈 (`common/resolve_connection.yml`)
 
-모든 신규 플레이북에서 복잡한 OpenBao 자격증명 조회, SSH 키 복호화, 지능형 접속 진단(Probe), 부트스트랩 폴백 로직을 중복 구현할 필요 없이 `playbooks/common/` 모듈을 `ansible.builtin.import_playbook`으로 재사용할 수 있습니다.
+모든 신규 플레이북에서 OpenBao 자격증명 조회, SSH 키 복호화, 접속 진단(Probe), 부트스트랩 전환 로직을 중복 구현할 필요 없이 `playbooks/common/` 모듈을 `ansible.builtin.import_playbook`으로 재사용할 수 있습니다.
 
 ### (1) 제공되는 공통 모듈
-1. `playbooks/common/resolve_connection.yml`:
-   - OpenBao AppRole / Token 자동 인증 및 Health 체크
-   - 대상 호스트 IP / Port KV 메타데이터 자동 바인딩
-   - 관리자 SSH Private Key 복호화(Passphrase 해제) 및 임시 파일화
-   - 대상 호스트 SSH 사전 진단(Probe) 및 미프로비저닝 시 부트스트랩 자동 폴백
-   - 원격 Python 인터프리터 자동 탐색 (`ansible_python_interpreter: auto_silent`) 강제
+1. `playbooks/common/resolve_connection.yml` (입력·출력은 위 (0)절):
+   - 공용 읽기 지점으로 OpenBao 토큰을 플레이당 한 번 받는다
+   - Asset 문서의 Endpoint·Credential로 주소·포트·계정·승격·경유(`via`)를 해석한다
+   - 관리 계정 개인키 복호화(Passphrase 해제)와 임시 파일화, 접속 시험(Probe), 실패 시 `access.bootstrap_credential` 연결로 전환
+   - 원격 Python 인터프리터는 항상 `/usr/bin/python3`
 2. `playbooks/common/cleanup_connection.yml`:
    - 컨트롤러에 임시 생성된 SSH 키 파일 안전 제거
 

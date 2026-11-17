@@ -1,0 +1,165 @@
+"""접속 해석 (Spec #511 / Ticket-12, #523): Endpoint 선택, 로그인·승격 규칙, via 경유 체인.
+
+결정은 `resolve(read, asset, preference, credential=None)` 순수 함수에 있다. `read(doc, required=True)`는 문서를 돌려주는
+함수이고, 이 lookup은 공용 읽기 지점(`openbao_doc.Reader`)을 꽂아 쓴다. 규칙(#502, #504):
+
+* 선호 순서 목록에서 Asset에 등록된 첫 Endpoint를 고른다. 접속 성공 여부는 보지 않는다(실패해도 다른 Endpoint로 넘어가지 않음).
+* 로그인: Endpoint에 `identity: automation`이 있고 Credential이 바뀌지 않았으면 Automation Identity 키로 로그인하고
+  Credential `password`는 승격에만 쓴다. 아니면 그 Credential 자신의 비밀로 로그인한다.
+* `credential=`로 이름을 넘기면(access 절의 admin·bootstrap) Endpoint 기본 Credential 대신 쓰고, 기본과 다르면 자기 비밀로 로그인한다.
+* `via: <ns>/<endpoint>`는 여러 단을 따라가며 경유지 Endpoint의 기본 Credential·identity를 쓴다. 순환·없는 참조는 실패다.
+* `become.method`는 sudo·su·enable. 비밀번호는 `become.credential`의 비밀번호이고, 없으면 로그인 Credential의 `password`다.
+"""
+from __future__ import annotations
+
+import os
+import sys
+
+from ansible.errors import AnsibleError
+from ansible.plugins.lookup import LookupBase
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from openbao_doc import Reader  # noqa: E402
+
+DOCUMENTATION = r"""
+name: openbao_connection
+short_description: Asset 접속 해석(Endpoint 선택, 로그인, 승격, via 체인)
+description:
+  - 결과 맵은 비밀을 담는다. 호출하는 태스크는 no_log여야 한다. 자세한 규칙은 docs/openbao_integration.md 4절.
+options:
+  _terms:
+    description: Asset 관리번호(인벤토리 호스트명).
+    required: true
+  preference:
+    description: Endpoint 이름의 선호 순서 목록.
+    type: list
+    required: true
+  credential:
+    description: 기본 대신 쓸 Credential 이름(access 절의 admin·bootstrap).
+    type: str
+"""
+
+
+class ConnectionError_(AnsibleError):  # noqa: N801
+    pass
+
+
+def _asset_endpoints(read, asset):
+    return read("inventory/assets/%s/endpoints" % asset)
+
+
+def _credential(read, asset, name):
+    return read("secrets/assets/%s/credentials/%s" % (asset, name))
+
+
+def _login(read, asset, endpoint, credential, overridden):
+    doc = _credential(read, asset, credential)
+    kind = doc.get("type")
+    if endpoint.get("identity") and not overridden:
+        if not doc.get("username"):
+            raise ConnectionError_("identity 로그인에는 Credential %s/%s의 username이 필요합니다" % (asset, credential))
+        key = read("secrets/automation/ssh")
+        out = {"mode": "identity", "username": doc["username"], "private_key": key["private_key"]}
+        if key.get("passphrase"):
+            out["passphrase"] = key["passphrase"]
+        return out
+    if kind == "password":
+        out = {"mode": "password", "password": doc["password"]}
+        if doc.get("username"):
+            out["username"] = doc["username"]
+        return out
+    if kind == "ssh_key":
+        out = {"mode": "key", "username": doc["username"], "private_key": doc["private_key"]}
+        if doc.get("passphrase"):
+            out["passphrase"] = doc["passphrase"]
+        return out
+    if kind == "api_token":
+        return {"mode": "token", "token": doc["token"]}
+    raise ConnectionError_("Credential %s/%s의 type을 알 수 없습니다" % (asset, credential))
+
+
+def _become(read, asset, endpoint, login_credential):
+    spec = endpoint.get("become")
+    if not spec:
+        return {}
+    name = spec.get("credential") or login_credential
+    password = _credential(read, asset, name).get("password")
+    if spec["method"] == "su" and not password:
+        raise ConnectionError_("su 승격에는 비밀번호가 필요합니다(%s/%s)" % (asset, name))
+    return {"method": spec["method"], "password": password}
+
+
+def _via_chain(read, via):
+    hops, seen = [], set()
+    while via:
+        if via in seen:
+            raise ConnectionError_("via 순환입니다: %s" % via)
+        seen.add(via)
+        asset, _, name = via.partition("/")
+        endpoints = read("inventory/assets/%s/endpoints" % asset, True) if asset else {}
+        if name not in endpoints:
+            raise ConnectionError_("via 대상 Endpoint가 없습니다: %s" % via)
+        ep = endpoints[name]
+        hops.append({"asset": asset, "endpoint": name, "protocol": ep["protocol"], "address": ep["address"],
+                     "port": ep["port"], "credential": ep["credential"],
+                     "login": _login(read, asset, ep, ep["credential"], False)})
+        via = ep.get("via")
+    hops.reverse()          # 컨트롤러에서 가까운 경유지가 먼저
+    return hops
+
+
+def resolve(read, asset, preference, credential=None):
+    endpoints = _asset_endpoints(read, asset)
+    name = next((p for p in preference if p in endpoints), None)
+    if name is None:
+        raise ConnectionError_("%s에 선호 순서 %s의 Endpoint가 하나도 등록돼 있지 않습니다" % (asset, list(preference)))
+    ep = endpoints[name]
+    cred = credential or ep["credential"]
+    overridden = cred != ep["credential"]
+    return {
+        "asset": asset, "endpoint": name, "protocol": ep["protocol"], "address": ep["address"], "port": ep["port"],
+        "credential": cred,
+        "login": _login(read, asset, ep, cred, overridden),
+        "become": _become(read, asset, ep, cred),
+        "password_auth_exception": ep["protocol"] == "ssh" and not ep.get("identity"),
+        "via": _via_chain(read, ep.get("via")),
+    }
+
+
+def admin_accounts(read, asset, preference):
+    """`access.admin_credentials`를 common 역할의 `accounts` 항목으로 바꾼다.
+
+    계정 이름은 Credential의 username이다. 공개키는 Endpoint 기본 Credential이 identity를 쓰면 그 계정(자동화 계정)은 Automation
+    Identity의 `public_key`, 그 밖의 계정은 `inventory/operators/<username>`의 `public_keys`·`revoked_keys`다.
+    """
+    access = read("inventory/assets/%s" % asset).get("access") or {}
+    endpoints = _asset_endpoints(read, asset)
+    name = next((p for p in preference if p in endpoints), None)
+    if name is None:
+        raise ConnectionError_("%s에 선호 순서 %s의 Endpoint가 하나도 등록돼 있지 않습니다" % (asset, list(preference)))
+    default = endpoints[name]
+    out = []
+    for cred_name in access.get("admin_credentials") or []:
+        username = _credential(read, asset, cred_name).get("username")
+        if not username:
+            raise ConnectionError_("관리 계정 Credential %s/%s에 username이 없습니다" % (asset, cred_name))
+        if default.get("identity") and default.get("credential") == cred_name:
+            key = read("secrets/automation/ssh").get("public_key")
+            if not key:
+                raise ConnectionError_("자동화 계정에는 secrets/automation/ssh의 public_key가 필요합니다")
+            keys, revoked = [key], []
+        else:
+            op = read("inventory/operators/%s" % username)
+            keys, revoked = list(op.get("public_keys") or []), list(op.get("revoked_keys") or [])
+        out.append({"name": username, "tier": "admin", "comment": "Administrator provisioned via OpenBao",
+                    "shell": "/bin/bash", "keys": keys, "revoked_keys": revoked})
+    return out
+
+
+class LookupModule(LookupBase):
+    def run(self, terms, variables=None, **kwargs):
+        reader = Reader(variables or {}, self._templar)
+        preference = kwargs.get("preference")
+        if not preference:
+            raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 필요합니다")
+        return [resolve(reader.read, str(t), list(preference), kwargs.get("credential")) for t in terms]

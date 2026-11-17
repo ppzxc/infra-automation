@@ -128,3 +128,14 @@ def pytest_collection_modifyitems(config, items):
     keep = [item for item in items if zlib.crc32(_shard_key(item).encode()) % total == index - 1]
     config.hook.pytest_deselected(items=[item for item in items if item not in keep])
     items[:] = keep
+
+
+@pytest.fixture
+def fake_openbao():
+    """공용 가짜 OpenBao: 네임스페이스 `infra`·AppRole 로그인·`index.yml`/스키마 검사 켬·기본 fixture 적재(#523).
+
+    테스트가 끝날 때 `index.yml` 밖 요청이 있었으면 실패시킨다."""
+    from openbao_fake import NAMESPACE, FakeOpenBao
+    with FakeOpenBao.with_schemas(namespace=NAMESPACE, approle=True) as fake:
+        yield fake
+        assert fake.violations == [], "index.yml 밖 문서를 요청했다: %s" % fake.violations
