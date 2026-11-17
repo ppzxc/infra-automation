@@ -1,53 +1,53 @@
-# OpenBao & Semaphore UI Secret Management Integration Guide
+# OpenBao 구조와 읽기 지점
 
-본 문서는 **Semaphore UI** 최신 버전과 **OpenBao**(HashiCorp Vault 호환 Secret Manager)를 연동하여 대상 노드 프로비저닝 시크릿을 안전하게 주입하고 관리하는 표준 아키텍처 및 설정 가이드입니다.
+이 저장소의 자동화가 OpenBao에서 값을 읽는 방식을 설명한다: 어디에 무엇을 저장하는지, 코드가 어떻게 읽는지, 누가 무엇을 읽을 수 있는지, 없으면 어떻게 실패하는지. 결정과 기각한 대안은 [ADR-0014](adr/0014-openbao-storage-structure-and-access-policy.md), 용어는 [CONTEXT.md](../CONTEXT.md)(Asset·Endpoint·Credential·Automation Identity·Service·Operator)를 따른다.
 
----
+문서 키의 정의는 이 문서에 복사하지 않는다. 원본은 `schemas/openbao/`의 스키마(키 설명은 각 스키마의 `description`)와 경로 패턴 대응표 `schemas/openbao/index.yml`이다. 누가 어느 경로를 읽는지의 원본은 `tofu/openbao/policies/*.hcl`과 `tofu/openbao/approles.tf`다.
 
-## 1. 아키텍처 개요 (Architecture Overview)
+## 1. 개요
 
 ```mermaid
-flowchart TD
-    subgraph ExecutionContext["실행 환경 (Execution Context)"]
-        Local["🖥️ 로컬 실행 (ansible-playbook CLI)"]
-        Semaphore["🚀 Semaphore UI Task Runner"]
-    end
-
-    subgraph SecretSources["시크릿 저장소"]
-        LocalYAML["📄 로컬 Git 미추적 YAML (host_vars / group_vars)"]
-        OpenBaoKV["🔐 OpenBao KV v2 (secret/data/...)"]
-    end
-
-    subgraph AnsibleResolution["Ansible 런타임 변수 해석 (Hybrid Fallback)"]
-        Priority1["1순위: 로컬 명시 변수 (_local_*)"]
-        Priority2["2순위: OpenBao KV v2 (community.hashi_vault lookup)"]
-        Priority3["3순위: Defaults / omit 안전 폴백"]
-    end
-
-    subgraph Targets["대상 노드 및 파이프라인"]
-        SSHConn["🔑 SSH 연결 (ansible_user / ansible_password / ansible_become_password)"]
-        Services["🛡️ 서비스 토큰 (otel_auth_header / openbao_ssh_ca_public_key)"]
-    end
-
-    Local -->|로컬 파일 우선| LocalYAML --> Priority1 --> Targets
-    Semaphore -->|VAULT_ADDR / VAULT_TOKEN 주입| OpenBaoKV --> Priority2 --> Targets
-    Priority1 -.->|미정의 시| Priority2
-    Priority2 -.->|미정의 시| Priority3
+flowchart LR
+    Semaphore["Semaphore 템플릿\n(계열 Environment)"] -->|AppRole 로그인| Reader["공용 읽기 지점\nlookup_plugins/openbao_doc.py"]
+    Reader -->|네임스페이스 infra| Bao[("OpenBao\ninventory/ · secrets/")]
+    Reader --> Roles["역할·플레이북\nlookup('openbao_doc', '<마운트>/<문서 경로>')"]
+    Tofu["tofu/openbao\n(정책·AppRole·마운트)"] -.->|적용| Bao
+    Tools["scripts/openbao_docs.py\nvalidate · put · check"] -->|운영자 토큰 또는 periodic_check| Bao
 ```
 
----
+- 값은 OpenBao에만 있고 Git에는 없다. 코드는 문서 경로와 키 이름만 안다.
+- 문서를 읽는 곳은 공용 읽기 지점 하나다. 역할마다 접두사·마운트·인증 설정을 따로 갖지 않는다.
+- 문서를 쓰는 곳은 등록 도구(`scripts/openbao_docs.py put`)뿐이고, 스키마 검증을 통과해야 쓴다([openbao_docs.md](openbao_docs.md)).
 
-## 2. OpenBao KV v2 Secret Path 표준 명세
+## 2. 골격
 
-OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키를 배치합니다:
+네임스페이스는 `infra` 하나이고 그 안에 KV v2 마운트 둘을 둔다. 비밀이 아닌 값은 `inventory/`, 비밀만 `secrets/`다. 네임스페이스와 마운트를 바꾸는 변수나 환경 변수는 없다.
 
-### (0) 공용 읽기 지점과 접속 해석 (Spec #511 / Ticket-12)
+| 소유 대상 | 비밀이 아닌 값 | 비밀 | 스키마 |
+|---|---|---|---|
+| Asset | `inventory/assets/<관리번호>` | `secrets/assets/<관리번호>/agents`(호스트별 에이전트 비밀) | `asset.schema.json`, `agents.schema.json` |
+| Asset의 접속 | `inventory/assets/<관리번호>/endpoints` | `secrets/assets/<관리번호>/credentials/<이름>` | `endpoints.schema.json`, `credential.schema.json` |
+| Service(OpenObserve·RustFS·GitHub·Semaphore·FUNA) | `inventory/services/<서비스>` | `secrets/services/<서비스>/<권한 이름>` | `service_*.schema.json`, `secrets/services/` |
+| Operator | `inventory/operators/<계정>`(공개키) | 없음 | `operator.schema.json` |
+| Automation Identity | 없음 | `secrets/automation/ssh` | `automation_ssh.schema.json` |
+| 작업 설정 | `inventory/config/<작업>` | 없음 | `inventory/config/*.schema.json` |
 
-> 이 절이 새 구조의 공개 인터페이스다. 옛 `hosts/<ns>`·`users/<계정>` 경로, 접두사 변수, 주소 별칭 대체 체인, 부트스트랩 자동 대체값은 없다.
-> 문서 키의 정의는 `schemas/openbao/`(원본)에 있고 여기에 복사하지 않는다. 구조 문서 전체 재작성은 전환 PR이 한다(#509).
+경로 패턴과 스키마의 정확한 대응은 `schemas/openbao/index.yml`만이 원본이다. 알림 웹훅 URL(`secrets/services/alert/notify`)처럼 URL 자체가 권한인 값은 Service 비밀이다.
 
-**읽기 지점 하나.** 네임스페이스(`infra`), 마운트(`inventory`·`secrets`), 인증, 우회는 `lookup_plugins/openbao_doc.py`에서만 정한다.
-역할·플레이북은 경로 접두사를 갖지 않고 `<마운트>/<문서 경로>`만 쓴다.
+## 3. 저장 규칙
+
+1. **소유 대상별로 둔다.** 한 문서에는 한 소유 대상의 값만 있다. 같은 Asset의 값이라도 비밀이 아니면 `inventory/`, 비밀이면 `secrets/`다.
+2. **계산값은 저장하지 않는다.** 주소를 이름으로 줄인 값, 파일명, 다른 문서에서 유도되는 값은 코드가 계산한다.
+3. **그룹 공통값은 OpenBao가 아니다.** 여러 호스트가 같이 쓰는 설정은 Semaphore 인벤토리의 그룹 변수나 역할 `defaults/`에 둔다. 저장소의 `inventory/group_vars`는 Semaphore 인벤토리에 적용되지 않으므로 쓰지 않는다.
+4. **비밀을 Git·실행 변수에 두지 않는다.** 역할이 문서의 값을 실행 변수(Extra variables)로 덮어쓰게 두지 않는다. 바꾸려면 문서를 고친다.
+5. **키 이름은 도메인 용어의 snake_case다.** 도구 이름(`ansible_host`)이나 별칭을 쓰지 않는다. 스키마는 `additionalProperties: false`라 모르는 키는 등록되지 않는다.
+6. **쓰기는 등록 도구로만 한다.** 스키마 검증과 `cas`(동시 수정 방지)가 거기에 있다. 정책으로 강제할 수 없는 운영 규칙이다.
+
+## 4. 접속 해석
+
+SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. 서버·스위치·방화벽 모두 같은 방식이다.
+
+**공용 읽기 지점**: `lookup('openbao_doc', '<마운트>/<문서 경로>')`는 문서의 데이터 맵을 돌려준다. `lookup('openbao_doc', '@token')`은 로그인으로 얻은 토큰만 돌려준다(플레이당 한 번 로그인해 `_vault_token` 변수로 넘길 때 쓴다).
 
 ```yaml
 - ansible.builtin.set_fact:
@@ -56,13 +56,6 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
   no_log: true   # secrets/ 문서를 읽는 태스크는 반드시 no_log
 ```
 
-- 문서가 없거나(404) 403이거나 연결이 안 되면 실패한다. 기본값으로 대체하지 않는다. 실패 메시지에는 문서 경로와 상태 코드만 있다.
-- 인증 순서: 변수 `_vault_token`(resolve_connection이 플레이당 한 번 받아 둔 토큰) -> AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID` 또는 같은 이름 소문자 변수) -> `VAULT_TOKEN`. 주소는 `VAULT_ADDR`(`vault_addr`).
-  네임스페이스·마운트·접두사를 바꾸는 변수나 환경 변수는 없다(`VAULT_NAMESPACE`·`VAULT_MOUNT`는 읽지 않는다).
-- `lookup('openbao_doc', '@token')`은 토큰만 돌려준다. 플레이당 한 번 로그인할 때 쓴다.
-- 우회(`openbao_fixture`): 변수 `openbao_fixture`가 정의돼 있으면 네트워크 없이 그 안에서만 답한다. 키는 `<마운트>/<문서 경로>`(예: `inventory/assets/ns0001`), 값은 문서다.
-  없는 키는 404와 같다. 이 변수는 읽기 지점에서만 처리한다(molecule용. 기본 데이터는 `tests/fixtures/openbao_docs/valid`).
-
 **접속 해석** `lookup('openbao_connection', <관리번호>, preference=[...], credential=<이름>)`
 
 | 입력 | 뜻 |
@@ -70,17 +63,14 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
 | `preference` | Endpoint 이름의 선호 순서 목록(작업 기본값. 서버 `[ssh]`, FortiGate `[https]`, Cisco `[ssh, telnet]`). 등록된 것 중 첫 번째만 쓴다. 접속에 실패해도 다른 Endpoint로 넘어가지 않는다 |
 | `credential` | 선택. Endpoint 기본 Credential 대신 쓸 이름(`access` 절의 admin·bootstrap). 기본과 다르면 그 Credential 자신의 비밀로 로그인한다 |
 
-결과(비밀을 담으므로 `no_log`): `endpoint`·`protocol`·`address`·`port`, `credential`(로그인에 쓴 이름), `login`(`mode`: `identity`·`password`·`key`·`token`과 `username` 및 해당 비밀),
-`become`(`method`: `sudo`·`su`·`enable`, `password`; 승격이 없으면 `{}`), `password_auth_exception`(ssh Endpoint에 `identity`가 없으면 true), `via`(경유 체인, 컨트롤러에서 가까운 경유지부터).
+결과(비밀을 담으므로 `no_log`): `endpoint`·`protocol`·`address`·`port`, `credential`(로그인에 쓴 이름), `login`(`mode`: `identity`·`password`·`key`·`token`과 `username` 및 해당 비밀), `become`(`method`: `sudo`·`su`·`enable`, `password`; 승격이 없으면 `{}`), `password_auth_exception`(ssh Endpoint에 `identity`가 없으면 true), `via`(경유 체인, 컨트롤러에서 가까운 경유지부터).
 
-- `identity: automation`이면 Automation Identity 키(`secrets/automation/ssh`)로 `username`에 로그인하고 Credential `password`는 승격에만 쓴다. 없으면 Credential 자신의 비밀로 로그인한다.
-- `become`: 비밀번호는 `become.credential`의 비밀번호이고, 생략하면 로그인 Credential의 `password`다. `su`는 비밀번호가 없으면 실패한다.
-- `via`: `<ns>/<endpoint>`를 끝까지 따라가며 경유지마다 자기 Endpoint의 기본 Credential·`identity`를 쓴다. 순환·없는 참조는 실패한다.
-  `openbao_connection_summary` 필터는 비밀을 뺀 요약을, `openbao_ssh_common_args`·`openbao_ssh_proxy_command` 필터는 hop 키 임시 파일 경로 목록으로 `ProxyCommand`를 만든다(키 로그인 경유지만 지원, 비밀번호 경유지는 거부).
-- 관리 계정: `lookup('openbao_admin_accounts', <관리번호>, preference=[...])`가 `access.admin_credentials`를 common 역할의 `accounts`로 만든다.
-  계정 이름은 Credential의 `username`이고, 공개키는 자동화 계정이면 `secrets/automation/ssh`의 `public_key`, 그 밖에는 `inventory/operators/<username>`의 `public_keys`·`revoked_keys`다.
+- **Automation Identity**: Endpoint에 `identity: automation`이면 Automation Identity 키(`secrets/automation/ssh`)로 Credential의 `username`에 로그인하고 Credential `password`는 승격에만 쓴다. 없으면 Credential 자신의 비밀로 로그인한다(비밀번호 로그인은 예외로 취급해 `password_auth_exception`이 true).
+- **승격**: 비밀번호는 `become.credential`의 비밀번호이고, 생략하면 로그인 Credential의 `password`다. `su`는 비밀번호가 없으면 실패한다.
+- **경유**: `via`는 `<관리번호>/<endpoint>`를 끝까지 따라가며 경유지마다 자기 Endpoint의 기본 Credential·`identity`를 쓴다. 순환·없는 참조는 실패한다. 키 로그인 경유지만 `ProxyCommand`로 만들 수 있고(`openbao_ssh_common_args`·`openbao_ssh_proxy_command` 필터) 비밀번호 경유지는 거부한다. 비밀을 뺀 요약은 `openbao_connection_summary` 필터다.
+- **관리 계정**: `lookup('openbao_admin_accounts', <관리번호>, preference=[...])`가 Asset의 `access.admin_credentials`를 common 역할의 `accounts`로 만든다. 계정 이름은 Credential의 `username`이고, 공개키는 자동화 계정이면 `secrets/automation/ssh`의 `public_key`, 그 밖에는 `inventory/operators/<계정>`의 `public_keys`·`revoked_keys`다.
 
-**`playbooks/common/resolve_connection.yml` 입력과 출력**
+**`playbooks/common/resolve_connection.yml`** (서버 플레이북이 첫 플레이로 import)
 
 | 입력 변수 | 뜻 |
 |---|---|
@@ -88,13 +78,54 @@ OpenBao의 `secret/` (KV v2) 마운트 아래에 다음과 같이 경로와 키�
 | `connection_requires_access` | true면 Asset 문서에 `access` 절(`admin_credentials`·`bootstrap_credential`)이 없을 때 실패한다. `site.yml`(프로비저닝)이 켠다 |
 | `target_removed_users` | 이번 실행에서 지울 계정. `access.removed_accounts`와 합집합이다. 계정 입력 중 실행 변수로 남은 유일한 값이다 |
 
-출력 팩트: `ansible_host`·`ansible_port`·`ansible_user`·`ansible_password`·`ansible_ssh_private_key_file`·`ansible_ssh_common_args`(경유 시)·`ansible_become_method`·`ansible_become_password`(승격이 있을 때)·`ansible_python_interpreter`(`/usr/bin/python3`),
-`ip`(인벤토리 `ip`가 있으면 그 값, 없으면 선택된 Endpoint 주소), `accounts`, `_removed_users`, `_normalized_admin_users`, `_primary_admin_user`, `_is_already_provisioned`(관리 계정 키 접속 시험 성공),
-`_asset_doc`(Asset 문서), `_connection`(비밀 없는 요약: `endpoint`·`address`·`port`·`credential`·`login_mode`·`become_method`·`password_auth_exception`·`via`), `_vault_token`.
-관리 계정 접속이 안 되면 `access.bootstrap_credential`의 연결로 바꾼다. 임시 키 파일은 `cleanup_connection.yml`이 지운다.
+출력 팩트는 접속 변수(`ansible_host`·`ansible_port`·`ansible_user`·`ansible_password`·`ansible_ssh_private_key_file`·`ansible_ssh_common_args`·`ansible_become_method`·`ansible_become_password`·`ansible_python_interpreter`), `ip`(인벤토리 `ip`가 있으면 그 값, 없으면 선택된 Endpoint 주소), `accounts`, `_removed_users`, `_normalized_admin_users`, `_primary_admin_user`, `_is_already_provisioned`, `_asset_doc`(Asset 문서), `_connection`(비밀 없는 요약), `_vault_token`이다. 관리 계정 키로 접속이 안 되면 `access.bootstrap_credential`의 연결로 바꾸고, 임시 키 파일은 `cleanup_connection.yml`이 지운다. 원격 Python 인터프리터는 항상 `/usr/bin/python3`다.
 
-**`<역할>_openbao_required` 선언 형식.** 역할의 `vars/main.yml`에 `{index.yml 패턴: [필수 키, ...]}`로 둔다. 필수 키가 없는 선택 문서는 `[]`다.
-입력 검증 assert, 스키마 `required` 대조 테스트, 요청 기록 단언(읽은 문서가 선언한 패턴 안에 있는가)이 같은 선언을 쓴다.
+## 5. 인증과 정책
+
+### 5.1 읽기 지점의 인증
+
+- **AppRole만 쓴다.** 변수 `_vault_token`(플레이 첫머리에서 `@token`으로 받아 둔 토큰)이 있으면 그것을, 없으면 `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(같은 이름 소문자 변수도 된다)로 로그인한다. 평문 토큰(`VAULT_TOKEN`)으로는 읽지 않는다. 주소는 `VAULT_ADDR`(`vault_addr`)다.
+- **https 인증서는 기본으로 검증한다.** 사설 CA는 `VAULT_CACERT`(`vault_cacert`)로 준다. 검증을 끄려면 `vault_validate_certs: false` 또는 `VAULT_SKIP_VERIFY=true`이고 마지막 수단이다.
+- **토큰 TTL은 30분이다.** 로그인은 프로세스 안에서만 캐시한다. Ansible은 호스트·태스크마다 프로세스를 나누므로 `@token`을 받아 두지 않는 읽기는 그 호스트·태스크마다 로그인한다. 긴 플레이(Host Audit의 드리프트 하위 실행 등)가 만료된 토큰을 들고 있지 않도록 오래 쓸 토큰은 일찍 받아 두지 않는다.
+- **우회(`openbao_fixture`)**: 변수 `openbao_fixture`가 정의돼 있으면 네트워크 없이 그 안에서만 답한다. 키는 `<마운트>/<문서 경로>`, 값은 문서다. 없는 키는 404와 같다. molecule·테스트용이며 운영 템플릿의 Extra variables에 넣지 않는다.
+- 운영자가 로컬에서 쓰는 `scripts/`의 도구(`openbao_docs.py`, 수집 스크립트)는 읽기 지점이 아니라 자기 접속 코드를 쓰며 운영자 토큰(`VAULT_TOKEN`)을 받을 수 있다. 이 예외는 Ansible 쪽으로 새지 않는다.
+
+### 5.2 계열, 템플릿, Environment
+
+Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나를 쓴다. 계열이 읽는 경로는 정책 HCL이 정한다.
+
+| 계열(AppRole·Environment) | 템플릿 |
+|---|---|
+| `provision` | Host Provisioning |
+| `host_agents` | Host Agents — Deploy·Config·Deploy Restic |
+| `backup_maintenance` | Host Agents — Repo Maintenance |
+| `openobserve_config` | OpenObserve — Config |
+| `host_audit` | Host Audit — Monthly·On-demand·Resend |
+| `network_backup` | Cisco·FortiGate 백업 |
+| `github_webhook_watch` | 조직 웹훅 감시 |
+| `periodic_check` | OpenBao — Periodic Check |
+| `agent_session` | 에이전트 세션(Semaphore 밖) |
+| `applier` | OpenBao — OpenTofu(적용 전용) |
+
+Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, secret_id 발급·교체는 [openbao-operations](runbooks/openbao-operations.md)다. 계열 × 경로 매트릭스는 복사하지 않는다: `tofu/openbao/policies/*.hcl`(경로 묶음 단위의 작은 정책)과 `tofu/openbao/approles.tf`(계열이 조합하는 정책)가 원본이고, `tests/test_openbao_policies.py`가 매트릭스를, `tests/test_openbao_role_policy_contract.py`가 각 역할이 읽는 문서가 그 계열 정책 안에 있는지를 묶어 둔다. `host_audit`은 드리프트 하위 실행이 `site.yml`과 Host Agents Config를 같은 AppRole로 렌더링하므로 `provision`과 `host_agents`의 경로를 모두 읽는다.
+
+### 5.3 사람과 에이전트
+
+- `operator`: `infra` 안 userpass 사용자. 전체 읽기(list 포함)와 create/update만 하고 delete·`sys/`는 없다. 등록 도구가 이 권한으로 쓴다.
+- `admin`: 루트 네임스페이스의 비상용. 삭제·영구 삭제·정책 수동 변경에만 쓴다([openbao-operations](runbooks/openbao-operations.md)).
+- 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절).
+
+정책·AppRole·마운트는 OpenTofu 코드로만 바꾼다([openbao_opentofu.md](openbao_opentofu.md)).
+
+## 6. 실패 규칙
+
+대체값이 없다.
+
+- 문서가 없으면(404) 실패한다. `required=false`를 명시한 호출만 `{}`를 받는다(작업 설정처럼 선택인 문서).
+- 403(정책 밖)·연결 오류·인증 정보 없음은 항상 실패한다. 기본값으로 대신하지 않는다.
+- 알 수 없는 마운트(`inventory`·`secrets` 밖)는 요청을 보내기 전에 실패한다.
+- 오류 메시지에는 문서 경로와 상태 코드만 있다. 응답 본문은 비밀을 담을 수 있어 넣지 않는다.
+- 역할의 `vars/main.yml`에 `<역할>_openbao_required`로 `{index.yml 패턴: [필수 키, ...]}`를 선언한다(필수 키가 없는 선택 문서는 `[]`). 입력 검증이 문서 경로와 키 이름만 대며 실패하고, 같은 선언을 스키마 `required` 대조 테스트와 요청 기록 단언이 쓴다.
 
 ```yaml
 monitoring_openbao_required:
@@ -102,102 +133,15 @@ monitoring_openbao_required:
   "inventory/assets/+": []
 ```
 
-### (1-1) FUNA Cluster 환경 값 (`funa_env`, #222, #524)
-`funa_cluster` 그룹 호스트에만 쓰인다. **값은 이 문서와 Git에 두지 않는다.** 필수 키·대응표는 [docs/funa_env.md](funa_env.md)와 `roles/funa_env/vars/main.yml`(`funa_env_openbao_required`)이 원본이다.
-* `inventory/assets/<관리번호>`의 `funa` 절: 노드별 설정(→ `cluster.env`).
-* `inventory/services/funa`: 클러스터 공통 비시크릿(→ `cluster.env`, `0644`).
-* `secrets/services/funa/proxy`·`vrrp`: 소비 컨테이너별 시크릿(→ `proxy.secrets.env`·`vrrp.secrets.env`, `0640 root:dockermgmt`).
-* `secrets/assets/<관리번호>/credentials/cloudflare`: 노드별 Cloudflare 토큰(`token` → `proxy.secrets.env`의 `CLOUDFLARE_API_TOKEN`). Cloudflare는 Service가 아니다.
-* 저장 키는 snake_case(`FUNA_` 접두사 제거 후 소문자)이고 역할의 대응표가 env 이름으로 바꾼다. 경로가 없거나 필수 키가 빠지면 대체값 없이 실패한다.
+## 7. 새 플레이북 작성 템플릿
 
-### (4) 네트워크 장비(Cisco·FortiGate) 접속 정보 (Spec #511 / Ticket-18)
-Asset 하나에 Endpoint와 Credential로 둔다(옛 `hosts/<ns>`의 `ansible_*`·`connection_type`·`bastion_host`와 별도 경로 `fortigate/<ns>`는 없다).
-* Cisco: Endpoint `ssh`·`telnet`(선호 순서 `[ssh, telnet]`), 로그인 Credential(`password`), 승격 `become: enable`. 비밀번호 로그인 경유지는 `via`로 한 단까지 역할이 직접 처리한다. 자세한 규칙은 [cisco_backup.md](cisco_backup.md).
-* FortiGate: Endpoint `https`와 Credential `api`(`api_token`), 알림은 `secrets/services/alert/notify`(text/plain `url`). 자세한 규칙은 [fortigate_backup.md](fortigate_backup.md).
-
-### (4-1) Host Audit 입력 (Spec #511 / Ticket-17)
-Monthly·On-demand·Resend가 새 구조만으로 돈다. 자세한 규칙은 [host_audit.md](host_audit.md) §11.4·§13.3이고 선언은 역할 `vars/main.yml`의 `host_audit_openbao_required`다.
-* Asset Inventory의 선언 값(용도·부서·책임자·관리자·자산중요도)은 `resolve_connection`이 발행한 `_asset_doc`의 `description`과 `isms` 절이다.
-* 보고서 저장: `secrets/services/rustfs/audit_reports`(`access_key`·`secret_key`)와 `inventory/services/rustfs`(`url`, 선택 `region`). 버킷 이름은 역할 기본값이다.
-* 메일: `inventory/config/host_audit`(`mail_recipients`·`mail_sender`·`mail_sender_display_name`). 덮어쓰는 Extra variables는 없다.
-* KISA 악화 알림: `secrets/services/alert/notify`의 `url`. 환경(`declared.environment`)은 역할 기본값 `host_audit_environment`다.
-* 드리프트 하위 실행은 새 구조의 Host Provisioning(`site.yml`)과 Host Agents Config를 `--check`로 렌더링하고, 하위 프로세스에는 주소와 인증(환경 변수)만 넘긴다.
-
-### (5) 전역 인프라 서비스 시크릿
-* **경로**: `secret/data/global/services`
-* **필드 (Key-Value)**:
-
-  ```json
-  {
-    "openbao_ssh_ca_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... openbao-ca@internal",
-    "otel_auth_header": "Bearer gls_secret_otlp_token_here",
-    "boundary_token": "s.boundary_worker_auth_token"
-  }
-  ```
-
----
-
-## 3. Semaphore UI 최신 버전 연동 가이드
-
-Semaphore UI 최신 버전은 **OpenBao** 및 **HashiCorp Vault**를 일급 시민(First-Class) 스토리지 백엔드로 지원합니다.
-
-### 1단계: Semaphore Settings에서 OpenBao Storage 설정
-1. Semaphore UI 대시보드 진입 ➔ **Settings** ➔ **Secrets / Key Store**
-2. **Storage Type**을 `OpenBao` 또는 `HashiCorp Vault`로 지정
-3. OpenBao Server URL (`https://openbao.internal:8200`), Mount Path (`secret`), Token 또는 Vault Agent 토큰 파일 경로(`/var/run/openbao/token`) 설정
-
-### 2단계: Key Store 등록
-* **Type**: `OpenBao`
-* **Path**: `secret/data/semaphore/ssh_key` 또는 `secret/data/semaphore/sudo_pass`
-* Semaphore가 태스크 실행 시 OpenBao로부터 인증서를 실시간으로 취득하여 Runner에 주입합니다.
-
-### 3단계: Environment (Variable Group) 구성
-Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hashi_vault` lookup을 위한 환경변수와 Extra Variables를 등록합니다:
-
-* **Environment variables (환경 변수)**:
-  ```json
-  {
-    "VAULT_ADDR": "https://openbao.internal:8200",
-    "VAULT_NAMESPACE": "root",
-    "VAULT_SKIP_VERIFY": "false"
-  }
-  ```
-* **Extra variables (추가 변수)**:
-  ```json
-  {
-    "cisco_backup_dir": "/opt/backups/cisco"
-  }
-  ```
-* **Secrets (보안 변수 - AppRole 인증 시)**:
-  - `VAULT_ROLE_ID`: OpenBao AppRole Role ID
-  - `VAULT_SECRET_ID`: OpenBao AppRole Secret ID
-
----
-
-## 5. 신규 플레이북 작성을 위한 재사용 연결 모듈 (`common/resolve_connection.yml`)
-
-모든 신규 플레이북에서 OpenBao 자격증명 조회, SSH 키 복호화, 접속 진단(Probe), 부트스트랩 전환 로직을 중복 구현할 필요 없이 `playbooks/common/` 모듈을 `ansible.builtin.import_playbook`으로 재사용할 수 있습니다.
-
-### (1) 제공되는 공통 모듈
-1. `playbooks/common/resolve_connection.yml` (입력·출력은 위 (0)절):
-   - 공용 읽기 지점으로 OpenBao 토큰을 플레이당 한 번 받는다
-   - Asset 문서의 Endpoint·Credential로 주소·포트·계정·승격·경유(`via`)를 해석한다
-   - 관리 계정 개인키 복호화(Passphrase 해제)와 임시 파일화, 접속 시험(Probe), 실패 시 `access.bootstrap_credential` 연결로 전환
-   - 원격 Python 인터프리터는 항상 `/usr/bin/python3`
-2. `playbooks/common/cleanup_connection.yml`:
-   - 컨트롤러에 임시 생성된 SSH 키 파일 안전 제거
-
-### (2) 신규 플레이북 작성 표준 템플릿 (참고 예제: `playbooks/example_task.yml`)
-
-저장소 내 [playbooks/example_task.yml](file:///home/ppzxc/projects/infra-automation/playbooks/example_task.yml) 파일이 바로 복사/참고하여 사용할 수 있는 공식 템플릿입니다.
+접속이 필요한 플레이북은 `playbooks/common/`의 해석·정리 플레이를 import하고, 읽는 문서는 `<역할>_openbao_required`로 선언한다. 참고 예제는 [playbooks/example_task.yml](../playbooks/example_task.yml)이다.
 
 ```yaml
 ---
-# 1. OpenBao 자격증명 및 서버 접속 연결 사전 해결
 - name: Resolve OpenBao Connection and Credentials
   ansible.builtin.import_playbook: common/resolve_connection.yml
 
-# 2. 본 작업 플레이 (임의의 작업 수행)
 - name: Execute Custom Host Tasks
   hosts: "{{ target_hosts | default('servers:loadbalancers') }}"
   become: true
@@ -208,18 +152,20 @@ Semaphore UI의 **Environment / Variable Groups**에 Ansible 및 `community.hash
       register: _result
       changed_when: false
 
-    - name: Print host status
-      ansible.builtin.debug:
-        msg: "Connected successfully to {{ inventory_hostname }}: {{ _result.stdout }}"
-
-# 3. 컨트롤러 임시 키 정리
 - name: Cleanup Controller Temporary Credentials
   ansible.builtin.import_playbook: common/cleanup_connection.yml
 ```
 
-### (3) 특정 호스트만 지정하여 실행 (Semaphore Task Template)
-Semaphore UI 또는 CLI 실행 시 Extra Variable로 `target_hosts`를 지정하여 특정 단일 호스트 또는 그룹만 필터링하여 실행할 수 있습니다:
-```bash
-ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0331"
-```
+특정 호스트만 돌리려면 Extra variable `target_hosts`를 준다: `ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0331"`.
 
+새 역할이 OpenBao 문서를 읽으면 (1) `vars/main.yml`에 `<역할>_openbao_required`를 선언하고 (2) 그 역할을 돌리는 계열 AppRole 정책이 패턴을 읽게 하며 (3) `tests/test_openbao_role_policy_contract.py`의 역할↔계열 표에 한 줄을 더한다. 정책 누락은 이 테스트가 잡는다.
+
+## 8. 관련 문서
+
+- 결정: [ADR-0014](adr/0014-openbao-storage-structure-and-access-policy.md)
+- 스키마와 대응표: `schemas/openbao/`, `schemas/openbao/index.yml`
+- 등록·점검 도구: [openbao_docs.md](openbao_docs.md)
+- 정책·AppRole 코드: [openbao_opentofu.md](openbao_opentofu.md), `tofu/openbao/`
+- 운영: [openbao-operations](runbooks/openbao-operations.md), 전환(일회성): [openbao-cutover](runbooks/openbao-cutover.md)
+- Semaphore Environment: [semaphore-setup.md](semaphore-setup.md)
+- 역할별 읽는 문서: [funa_env.md](funa_env.md), [host_audit.md](host_audit.md), [backup.md](backup.md), [openobserve_config.md](openobserve_config.md), [cisco_backup.md](cisco_backup.md), [fortigate_backup.md](fortigate_backup.md), [github_webhook_watch.md](github_webhook_watch.md)

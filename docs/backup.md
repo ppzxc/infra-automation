@@ -48,7 +48,7 @@
 - systemd 샌드박스(`ProtectSystem=strict`)에서는 원본 디렉터리가 읽기 전용이라 WAL 모드 DB를 읽을 때 `-shm` 접근이 막힐 수 있어, 입력이 있을 때만 각 원본의 디렉터리를 `ReadWritePaths`에 더한다(`-` 접두사).
 - 입력이 있는 호스트에 `sqlite3` 명령이 없으면 Deploy가 백업 파일(자격증명·훅·프로파일)을 쓰기 전에 분명한 오류로 멈춘다(`BAK-028`, CentOS 6/7은 `BAK-218`; 바이너리 전달은 그보다 앞서 끝난다). 도구는 설치하지 않는다. 입력이 없는 호스트는 프로파일·유닛·파일이 바뀌지 않는다.
 - RHEL 계열에는 `/var/backups`가 없어 샌드박스(`ProtectSystem=strict`)가 그 경로를 읽기 전용으로 두므로 스크립트의 `mkdir`이 실패한다. 그래서 Deploy가 입력이 있는 호스트에 스냅샷 디렉터리(와 없는 부모)를 미리 만든다(`BAK-032`, CentOS 6/7 cron 경로는 샌드박스가 없어 스크립트의 `mkdir -p`로 충분하다).
-- 첫 사용처는 ns0331의 OpenObserve 메타 DB다(값은 OpenBao `hosts/ns0331/agents`에만 둔다).
+- 첫 사용처는 ns0331의 OpenObserve 메타 DB다(값은 OpenBao Asset 문서 `inventory/assets/ns0331`의 `agents.backup.sqlite_snapshots`에만 둔다).
 
 ---
 

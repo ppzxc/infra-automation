@@ -33,10 +33,10 @@
 | **security_logs** (호스트별 제외 불가) | `/var/log/secure`, `/var/log/auth.log`, `/var/log/audit/audit.log`, `/var/log/sudo.log`, `/var/log/fail2ban.log`, `/var/log/firewalld` |
 | system_logs | `/var/log/messages`, `/var/log/syslog`, `/var/log/cron*`, `/var/log/kern.log`, `/var/log/boot.log`, `/var/log/dnf.log`, `/var/log/yum.log`, `/var/log/dpkg.log`, journald(rsyslog가 없는 호스트만) |
 | backup_logs | `/var/log/host-agents/backup.jsonl` |
-| app_logs | 기본 없음. 호스트 KV `otel_extra_logs`로 추가 |
+| app_logs | 기본 없음. Asset 문서 `agents.otel.extra_logs`로 추가 |
 
 - 배포 이후 새로 쓰인 줄부터 수집한다. 원문은 그대로 보내고, 시각·프로세스·severity만 추출한다.
-- **메트릭**: 60초마다 cpu, memory, disk, filesystem, load, network, paging, processes를 수집한다. docker 컨테이너 메트릭은 호스트 KV로 켠 호스트만 수집한다.
+- **메트릭**: 60초마다 cpu, memory, disk, filesystem, load, network, paging, processes를 수집한다. docker 컨테이너 메트릭은 Asset 문서(`agents.otel.docker_metrics`)로 켠 호스트만 수집한다.
 
 ## 4. 기본 백업 대상
 
@@ -44,7 +44,7 @@
 |---|---|
 | 필수 (제외 불가, ISMS 2.9.3) | `/etc`, `/var/spool/cron`, `/usr/local/bin`, `/usr/local/etc`, `/usr/local/sbin` |
 | 있으면 포함 | `/opt/services` |
-| 호스트별 추가 | 호스트 KV `backup_extra_paths` (예: `/root`, `/home`, `/data`) |
+| 호스트별 추가 | Asset 문서 `agents.backup.extra_paths` (예: `/root`, `/home`, `/data`) |
 | 제외 | `/home/*/.cache`, `**/node_modules`, `*.tmp`, `*.swp`, `/etc/restic/password`, `CACHEDIR.TAG`가 있는 디렉터리 |
 
 - **저장소**: RustFS 버킷 `backup-prod-<호스트명>` (호스트 전용 키)

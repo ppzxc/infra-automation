@@ -214,7 +214,8 @@ from openbao_doc import NAMESPACE, OpenBaoError, Reader  # noqa: E402
 @pytest.fixture(autouse=True)
 def _clean_login_cache(monkeypatch):
     openbao_doc._LOGIN_CACHE.clear()
-    for name in ("VAULT_ADDR", "VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID", "VAULT_NAMESPACE", "VAULT_MOUNT"):
+    for name in ("VAULT_ADDR", "VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_SECRET_ID", "VAULT_NAMESPACE", "VAULT_MOUNT", "VAULT_SKIP_VERIFY",
+                 "VAULT_CACERT"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -257,6 +258,48 @@ def test_a_token_from_one_login_serves_every_later_read(fake_openbao):
     for doc in ("inventory/assets/ns0001", "inventory/assets/ns0002/endpoints"):
         Reader(shared).read(doc)
     assert len(fake_openbao.logins()) == 1
+
+
+def test_a_plain_token_is_never_a_way_in_only_approle_or_the_shared_login_token(fake_openbao, monkeypatch):
+    """VAULT_TOKEN·vault_token 대체 경로는 없다(Spec #511 user story 41). 운영자 토큰은 scripts/ 쪽 도구만 쓴다."""
+    monkeypatch.setenv("VAULT_TOKEN", "operator-token")
+    only_token = {"vault_addr": fake_openbao.url, "vault_token": "operator-token"}
+    with pytest.raises(OpenBaoError, match="AppRole"):
+        Reader(only_token).read("inventory/assets/ns0001")
+    assert fake_openbao.requests == []
+    with pytest.raises(OpenBaoError, match="AppRole"):
+        Reader({"vault_addr": fake_openbao.url}).token()
+
+
+def test_https_certificates_are_verified_unless_the_variable_or_env_turns_it_off(monkeypatch):
+    assert Reader({}).verify is True
+    assert Reader({"vault_validate_certs": False}).verify is False
+    assert Reader({"vault_validate_certs": "false"}).verify is False
+    assert Reader({"vault_validate_certs": "true"}).verify is True
+    monkeypatch.setenv("VAULT_SKIP_VERIFY", "true")
+    assert Reader({}).verify is False
+
+
+def test_a_private_ca_is_given_by_variable_or_env_not_by_turning_verification_off(monkeypatch):
+    assert Reader({"vault_cacert": "/etc/pki/ca.pem"}).cacert == "/etc/pki/ca.pem"
+    monkeypatch.setenv("VAULT_CACERT", "/etc/pki/env-ca.pem")
+    assert Reader({}).cacert == "/etc/pki/env-ca.pem"
+
+
+def test_an_unreadable_ca_file_is_an_openbao_error_not_a_raw_exception():
+    reader = Reader({"vault_addr": "https://127.0.0.1:1", "vault_cacert": "/nonexistent/ca.pem",
+                     "vault_role_id": "r", "vault_secret_id": "s"})
+    with pytest.raises(OpenBaoError, match="CA"):
+        reader.read("inventory/assets/ns0001")
+
+
+def test_a_ca_file_that_is_not_pem_is_an_openbao_error_naming_the_file(tmp_path):
+    bad = tmp_path / "bad.pem"
+    bad.write_text("not a certificate")
+    reader = Reader({"vault_addr": "https://127.0.0.1:1", "vault_cacert": str(bad),
+                     "vault_role_id": "r", "vault_secret_id": "s"})
+    with pytest.raises(OpenBaoError, match="bad.pem"):
+        reader.read("inventory/assets/ns0001")
 
 
 def test_openbao_fixture_answers_without_any_network_and_is_the_only_source():

@@ -33,3 +33,5 @@ FUNA Cluster의 Caddy와 funa가 내는 **Business Telemetry**(트레이스와 �
 - 각 노드에 남은 옛 docker 수집기 compose와 이미지는 롤아웃할 때 삭제한다.
 - 역할의 `otel_otlp_enabled` 기본값은 `otel_app_telemetry` 스위치로 대체한다.
 - 잡음을 거르는 규칙(어떤 span과 시계열을 버릴지)은 이 ADR의 범위가 아니다. Business Telemetry 잡음 규칙 티켓에서 정한다.
+
+- (개정, 2026-11-18, #531) 켜는 스위치의 위치(OpenBao `hosts/<host>/agents`의 `otel_app_telemetry`)는 [ADR-0014](0014-openbao-storage-structure-and-access-policy.md)로 대체됐다. 스위치는 Asset 문서(`inventory/assets/<관리번호>`)의 `agents.otel.app_telemetry`이고 위치와 키 정의는 `docs/openbao_integration.md`와 `schemas/openbao/`가 원본이다.

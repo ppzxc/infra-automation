@@ -6,7 +6,7 @@
 
 ## 1. 개요 및 구현 기능 (What)
 
-- **접속 대상 단위 수집**: HA 관리 인터페이스가 없어 멤버별 직접 접속은 불가능하다. 백업 대상은 **접속 대상**(IDC 클러스터 1, 사무실 1)이며 인벤토리 호스트 하나가 대상 하나다. 대상은 `ansible_host`로 접속해 REST API(`/api/v2/monitor/system/config/backup`, 범위 `global`)로 전체 설정을 받는다. IDC 클러스터는 현재 active 멤버가 응답한다.
+- **접속 대상 단위 수집**: HA 관리 인터페이스가 없어 멤버별 직접 접속은 불가능하다. 백업 대상은 **접속 대상**(IDC 클러스터 1, 사무실 1)이며 인벤토리 호스트 하나가 대상 하나다. 대상은 OpenBao `https` Endpoint의 주소로 접속해 REST API(`/api/v2/monitor/system/config/backup`, 범위 `global`)로 전체 설정을 받는다. IDC 클러스터는 현재 active 멤버가 응답한다.
 - **응답 멤버 식별**: 같은 접속으로 `/api/v2/monitor/system/status`를 먼저 조회해 실제 응답한 멤버(기본 hostname, 변수로 serial)를 파일명의 `<멤버>` 자리에 쓴다. 장애 전환으로 응답 멤버가 바뀌면 같은 대상인데 파일명의 멤버가 달라진다(4절).
 - **인증**: `Authorization: Bearer <토큰>` 헤더. 토큰을 URL(`access_token`)에 넣지 않는다 — 최근 FortiOS는 기본으로 URL 토큰을 거부하고 이후 버전은 제거했으며, 헤더 방식이 대상 장비 버전 모두에서 공식 방식이다(Fortinet 관리 가이드 "Using APIs", 커뮤니티 기술 문서). 장비 모델·버전은 비공개 자료에 둔다.
 - **무결성 검증**: HTTP 200이 아니거나 본문이 비었거나 FortiOS 설정 헤더(`#config-version=`)로 시작하지 않으면 저장하지 않고 호스트를 실패 처리한다. 기존 정상 백업은 건드리지 않는다.

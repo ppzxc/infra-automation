@@ -98,7 +98,8 @@ def test_the_environment_is_a_role_default_not_an_inventory_lookup():
 def test_the_drift_subrun_forwards_only_the_one_off_account_input_and_the_runner_credentials():
     assert _defaults()["host_audit_drift_forward_vars"] == ["target_removed_users"]
     run = _task("drift_subrun.yml", "[AUD-403]")
-    assert set(run["environment"]) >= {"VAULT_ADDR", "VAULT_ROLE_ID", "VAULT_SECRET_ID", "VAULT_TOKEN"}
+    assert set(run["environment"]) >= {"VAULT_ADDR", "VAULT_ROLE_ID", "VAULT_SECRET_ID"}
+    assert "VAULT_TOKEN" not in run["environment"]
     assert not {"VAULT_NAMESPACE", "VAULT_MOUNT"} & set(run["environment"])
     assert run["no_log"] is True
 

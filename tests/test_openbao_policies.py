@@ -222,7 +222,7 @@ AGENTS = {"secrets/assets/+/agents"}
 FUNA = {"secrets/services/funa/proxy", "secrets/services/funa/vrrp"}
 OO_ING = {"secrets/services/openobserve/ingest"}
 PROVISION = COMMON | ASSETS | CRED | SSH | FUNA
-HOST_AGENTS = COMMON | ASSETS | CRED | SSH | AGENTS | OO_ING
+HOST_AGENTS = COMMON | ASSETS | CRED | SSH | AGENTS | OO_ING | {"secrets/services/alert/notify"}  # 헬스 워치 알림(monitoring)
 
 EXPECTED_READS = {
     "provision": PROVISION,

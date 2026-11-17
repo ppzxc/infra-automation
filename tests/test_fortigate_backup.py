@@ -194,7 +194,7 @@ def _bao(device, targets=("ns0380",), token=SECRET_TOKEN, hook=None, address="12
             store[f"secrets/assets/{ns}/credentials/api"] = {"type": "api_token", "token": token}
     if hook is not None:
         store["secrets/services/alert/notify"] = {"url": hook.url}
-    b = FakeOpenBao.with_schemas(store, namespace="infra", token="bao-test-token")
+    b = FakeOpenBao.with_schemas(store, namespace="infra", token="bao-test-token", approle=True)
     _BAOS.append(b)
     return b
 
@@ -213,7 +213,7 @@ def _run(env_dir, device, backup_dir, targets=("ns0380",), token=SECRET_TOKEN, e
     env["ANSIBLE_CONFIG"] = str(env_dir / "ansible.cfg")
     env["ANSIBLE_LOOKUP_PLUGINS"] = str(ROOT_DIR / "lookup_plugins")
     env["ANSIBLE_FILTER_PLUGINS"] = str(ROOT_DIR / "filter_plugins")
-    env.update(bao.env())
+    env.update(bao.approle_env())
     res = subprocess.run(
         ["ansible-playbook", "-i", str(env_dir / "inv.yml"), str(env_dir / "play.yml"), "-e", f"@{env_dir / 'ev.yml'}"],
         capture_output=True, text=True, env=env, cwd=env_dir,

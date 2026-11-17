@@ -481,7 +481,7 @@ sudo ausearch -k firewall_config -ts today -i
 <a id="audit-auth-config-change"></a>
 ## 🟠 PAM·로그인 정책 파일이 변경됨 (`infra-audit-auth-config-change`)
 
-> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
 
 **조건**: auditd 감시 키 `auth_config`(`/etc/pam.d/`, `/etc/login.defs`)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 패키지 관리자(`rpm`·`dnf`·`yum`·`dpkg`·`apt`, `o2c_audit_package_managers`)와 계정 관리 도구(`o2c_audit_account_tools`)가 만든 변경은 뺀다. 터미널 없이 로그인 사용자 권한으로 한 변경(프로비저닝·배포 후보)은 아래 정상 변경 후보 알림(P3)이 맡는다. 그래서 한 변경에 알림이 두 번 오지 않는다. 행은 호스트·사용자(AUID)·실행 파일·대상 경로·건수·발생 시각이다.
 
@@ -497,7 +497,7 @@ sudo ausearch -k auth_config -ts today -i
 <a id="audit-container-config-change"></a>
 ## 🟠 컨테이너 런타임 설정이 변경됨 (`infra-audit-container-config-change`)
 
-> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
 
 **조건**: auditd 감시 키 `container_config`(docker 데몬 설정 `/etc/docker/`와 호스트별 compose 위치)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 터미널 없이 로그인 사용자 권한으로 한 변경은 정상 변경 후보 알림(P3)이 맡는다.
 
@@ -513,7 +513,7 @@ sudo ausearch -k container_config -ts today -i
 <a id="audit-secret-access"></a>
 ## 🟠 지정한 비밀 파일이 열리거나 바뀜 (`infra-audit-secret-access`)
 
-> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
 
 **조건**: auditd 감시 키 `secret_access`(호스트별 지정 비밀 파일, 읽기·쓰기·속성 변경 감시)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 다음은 뺀다. ① 파일을 열지 않고 속성만 보는 syscall(`getxattr`·`listxattr`·`readlink` 등, `o2c_audit_secret_metadata_syscalls`) ② 로그인 사용자 없이(`auid unset`) 도는 서비스 프로세스(`o2c_audit_secret_service_exes`, 기본 백업 에이전트) — 같은 바이너리를 사람이 손으로 돌리면 울린다 ③ 정상 소비자(`o2c_audit_secret_operator_exes`, 기본 compose 플러그인) ④ 제외 사용자(`o2c_audit_secret_excluded_users`, 기본 비어 있음) ⑤ 터미널 없이 로그인 사용자 권한으로 한 접근(정상 변경 후보 알림(P3)이 맡는다). 감시 대상이 없는 호스트(`audit_watch_paths` 비어 있음)에는 이 키의 기록이 없어 아무 것도 하지 않는다.
 
@@ -531,7 +531,7 @@ sudo ausearch -k secret_access -ts today -i
 
 > **기본 설정의 한계**: 이 알림은 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없는 로그인 사용자 전부를 받는다. 같은 키로 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 이 P3로만 오므로 무시하지 않는다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(권고 절차는 명세 참조).
 
-**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(OpenBao `agents/openobserve`의 `alert_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
+**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
 
 **왜 이 알림이 있는가**: Ansible 프로비저닝·배포가 만드는 정상 변경은 감사 행으로 식별할 수 없다(프로세스 제목이 인터프리터뿐이고, 래퍼 문자열 `BECOME-SUCCESS`는 감사 행이 아니라 sudo 로그에만 있다). 같은 방식으로 도는 다른 명령과 구분되지 않아 제외하지 않고 등급만 낮춰 따로 알린다. 그래서 P2 알림은 `AND NOT <서명>`, 이 알림은 `AND <서명>`이라 한 변경에 알림이 하나만 온다.
 
@@ -857,10 +857,10 @@ Semaphore 호스트(ns0266)의 수집기가 `servers` 전체(Host Agents Backup 
 nc -vz -w 5 <주소> <포트>
 ```
 1. 접속이 안 되면 서버 전원·콘솔·네트워크 경로를 확인한다. 서버가 계획 정지라면 그대로 둔다(정지 중에는 계속 온다).
-2. 접속이 되는데 알림이 온다면 ns0266 수집기(`otelcol-contrib`) 상태, ns0266에서 대상까지의 방화벽 경로, OpenBao `hosts/<호스트>`의 `ansible_port`·`public_ip`가 실제 SSH 포트·주소와 같은지 본다(대상은 OpenBao 값으로 만든다).
+2. 접속이 되는데 알림이 온다면 ns0266 수집기(`otelcol-contrib`) 상태, ns0266에서 대상까지의 방화벽 경로, OpenBao `inventory/assets/<호스트>/endpoints`의 `ssh` Endpoint(`address`·`port`)가 실제 SSH 주소·포트와 같은지 본다(대상은 OpenBao 값으로 만든다).
 3. ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. 이는 ns0266의 Silent Host 알림으로 잡힌다.
 
-**편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `hosts/<호스트>`(주소 `public_ip`, 비표준 SSH 포트 `ansible_port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `Host Agents — Deploy All`(또는 Config)를 ns0266에 다시 반영해야 한다.
+**편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `inventory/assets/<호스트>/endpoints`의 `ssh` Endpoint(`address`, `port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `Host Agents — Deploy All`(또는 Config)를 ns0266에 다시 반영해야 한다.
 **제외**: 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 Semaphore 인벤토리(`hosts`)의 `tcpcheck_excluded` 그룹에 넣는다(`host_agents_excluded`와 같은 방식). 현재 `ns0229`·`ns0246`이 들어 있다: 순수 내부 IP(10.10.10.x)만 할당된 서버라 공인 `218.234.206.79`의 포트 2002·2001 포워딩으로만 접근하고, ns0266에서는 이 경로가 막혀 있다(`connect: no route to host`). 그래서 서버 도달성 감시의 사각지대다. 접속 못 하는 이유가 없어지면 그룹에서 뺀다. 목록에서 빠진 서버는 도달성 알림을 받지 못한다. Extra variables `host_agents_tcpcheck_excluded`로도 지정할 수 있다. 저장소의 `inventory/group_vars`는 Semaphore에서 읽히지 않으니 거기에 두지 않는다.
 <a id="backup-failure"></a>
 ## 🟠 백업 실패 (`infra-backup-failure`)
@@ -1278,7 +1278,7 @@ Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 �
 
 ## 리소스 알림 (디스크·inode·메모리)
 
-사용률은 `_timestamp`별로 묶은 값의 **조회 구간 최솟값**으로 판정한다(구간 내내 높아야 발화). 디스크·inode는 15분, 메모리는 10분. 90% 이상 95% 미만은 P2(재통지 1440분), 95% 이상은 P1(재통지 60분). 통지 행에 호스트·마운트·사용률이 나온다. squashfs·iso9660·tmpfs·devtmpfs·overlay는 감시하지 않고 `/boot`·`/boot/efi`는 감시한다. 항상 높게 쓰는 볼륨은 OpenBao `agents/openobserve`의 `alert_resource_exclusions`(호스트·마운트 예외)나 `alert_resource_thresholds`(임계값 덮어쓰기)에 넣고 `OpenObserve — Config`를 다시 실행한다.
+사용률은 `_timestamp`별로 묶은 값의 **조회 구간 최솟값**으로 판정한다(구간 내내 높아야 발화). 디스크·inode는 15분, 메모리는 10분. 90% 이상 95% 미만은 P2(재통지 1440분), 95% 이상은 P1(재통지 60분). 통지 행에 호스트·마운트·사용률이 나온다. squashfs·iso9660·tmpfs·devtmpfs·overlay는 감시하지 않고 `/boot`·`/boot/efi`는 감시한다. 항상 높게 쓰는 볼륨은 `OpenObserve — Config`의 Extra variables `o2c_resource_exclusions`(호스트·마운트 예외)나 `o2c_resource_thresholds`(임계값 덮어쓰기)에 넣고 `OpenObserve — Config`를 다시 실행한다.
 
 <a id="disk-usage"></a>
 ### 🟠/🔴 디스크 사용률 (`infra-disk-usage-p2`, `infra-disk-usage-p1`)

@@ -224,6 +224,15 @@ class FakeOpenBao:
     def logins(self):
         return [r for r in self.requests if r.method == "POST" and r.path == "/v1/auth/approle/login"]
 
+    def approle_env(self):
+        """Ansible 읽기 지점이 쓰는 접속 환경(AppRole만 있다). `approle=True`로 만든 가짜 서버와 짝이다."""
+        if not self.approle:
+            raise ValueError("approle_env()는 approle=True로 만든 가짜 서버와만 쓴다")
+        env = {"VAULT_ADDR": self.url, "VAULT_ROLE_ID": "fake-role", "VAULT_SECRET_ID": "fake-secret"}
+        if self.namespace is not None:
+            env["VAULT_NAMESPACE"] = self.namespace
+        return env
+
     def env(self, token="bao-test-token"):
         env = {"VAULT_ADDR": self.url, "VAULT_TOKEN": token}
         if self.namespace is not None:
