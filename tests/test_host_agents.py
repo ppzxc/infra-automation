@@ -647,6 +647,14 @@ def test_missing_shared_service_document_fails_the_host(tmp_path, bao, openbao):
     assert "inventory/services/rustfs(문서 없음)" in res.stdout + res.stderr
 
 
+def test_the_controller_ingest_document_is_only_required_where_the_inventory_event_runs(tmp_path, bao, openbao):
+    bao.remove("secrets", "services/openobserve/ingest")
+    res, out = _run_input_tasks(tmp_path, ["good"], openbao)
+    assert res.returncode != 0 and "secrets/services/openobserve/ingest(문서 없음)" in res.stdout + res.stderr
+    res, out = _run_input_tasks(tmp_path, ["good"], openbao, extra_vars={"backup_inventory_event_enabled": False})
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
 def test_the_openbao_fixture_seam_answers_without_any_network(tmp_path, fake_openbao):
     docs = {"inventory/assets/good": {"description": "Fake host good"},
             "secrets/assets/good/agents": dict(REQUIRED),

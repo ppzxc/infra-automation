@@ -234,8 +234,7 @@ def host_agents_resource_attributes(hostname, environment, os_facts, ip=None):
     errors, omitted = [], []
     env = '' if environment is None else str(environment).strip()
     if env not in ENVIRONMENTS:
-        errors.append("host_agents_environment %s: %s 중 하나여야 합니다 (인벤토리 변수 host_agents_environment 또는 "
-                      "OpenBao hosts/%s/agents의 같은 이름 키)"
+        errors.append("host_agents_environment %s: %s 중 하나여야 합니다 (역할 기본값 또는 Extra variables host_agents_environment, %s)"
                       % ("누락" if not env else "값 %r 허용 안 됨" % env, ' | '.join(ENVIRONMENTS), hostname))
     attrs = {'host.name': str(hostname)}
     if facts.get('machine_id'):
@@ -361,6 +360,8 @@ def _flatten(agents, secrets):
     for prefix, section in _SECTIONS:
         body = (agents or {}).get(section) if isinstance(agents, dict) else None
         for key, value in (body.items() if isinstance(body, dict) else ()):
+            if section == 'github_webhook' and key == 'secret':
+                continue    # 시크릿은 secrets/assets/<ns>/agents의 webhook_secret에서만 받는다(비밀 아닌 마운트의 값은 무시하고 오류로 알린다)
             flat[prefix + key] = value
     snaps = flat.get('backup_sqlite_snapshots')
     if isinstance(snaps, list):   # 스키마상 항목은 {path: ...} 오브젝트다
@@ -394,6 +395,9 @@ def host_agents_resolve_inputs(agents, secrets, standard_logs, security_paths, m
     """
     kv = _flatten(agents, secrets)
     errors = []
+    if isinstance((agents or {}).get('github_webhook') if isinstance(agents, dict) else None, dict) \
+            and 'secret' in agents['github_webhook']:
+        errors.append("agents.github_webhook.secret: 시크릿은 Asset 문서에 둘 수 없습니다 — secrets/assets/<ns>/agents의 webhook_secret을 쓰세요")
 
     for name, doc in sorted((shared or {}).items()):
         errors.extend(host_agents_shared_errors(doc, name))

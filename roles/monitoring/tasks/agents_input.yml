@@ -9,12 +9,16 @@
 # secrets/ 문서 조회는 no_log라서 실패 메시지가 가려진다 — errors='warn'으로 문서 경로·상태 코드만 경고로 내고, 아래 assert가 중단시킨다.
 - name: "[MON-030] Read the agents documents from OpenBao (Asset agents clause, agents secrets, shared services)"
   ansible.builtin.set_fact:
-    _host_agents_docs:
+    _host_agents_docs: >-
+      {{ _host_agents_docs_base | combine(_host_agents_docs_ingest if (backup_inventory_event_enabled | default(true) | bool) else {}) }}
+  vars:
+    _host_agents_docs_ingest:
+      "secrets/services/openobserve/ingest": "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest', errors='warn') }}"
+    _host_agents_docs_base:
       "inventory/assets/+": "{{ lookup('openbao_doc', 'inventory/assets/' ~ inventory_hostname, errors='warn') }}"
       "secrets/assets/+/agents": "{{ lookup('openbao_doc', 'secrets/assets/' ~ inventory_hostname ~ '/agents', errors='warn') }}"
       "inventory/services/openobserve": "{{ lookup('openbao_doc', 'inventory/services/openobserve', errors='warn') }}"
       "inventory/services/rustfs": "{{ lookup('openbao_doc', 'inventory/services/rustfs', errors='warn') }}"
-      "secrets/services/openobserve/ingest": "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest', errors='warn') }}"
   become: false
   check_mode: false
   no_log: true
@@ -34,7 +38,7 @@
     _host_agents_asset_agents: "{{ _host_agents_docs['inventory/assets/+'].agents | default({}, true) }}"
     _host_agents_secret_doc: "{{ _host_agents_docs['secrets/assets/+/agents'] }}"
     host_agents_services: "{{ {'openobserve': _host_agents_docs['inventory/services/openobserve'], 'rustfs': _host_agents_docs['inventory/services/rustfs']} }}"
-    host_agents_ingest_auth: "{{ _host_agents_docs['secrets/services/openobserve/ingest'] }}"
+    host_agents_ingest_auth: "{{ _host_agents_docs['secrets/services/openobserve/ingest'] | default({}) }}"
   no_log: true
 
 # 병합 결과에는 시크릿 값이 없다(경로/스트림/플래그와 오류 메시지뿐).

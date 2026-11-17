@@ -483,3 +483,12 @@ def test_real_run_still_requires_the_unit_file_to_exist(tmp_path, monkeypatch):
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(_wants_play(tmp_path, unit_dir, True))],
                          capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT, timeout=120)
     assert res.returncode != 0 and not (unit_dir / "docker.service.wants" / "otelcol-contrib.service").exists()
+
+
+def test_a_secret_in_the_asset_clause_is_rejected_and_never_used_as_the_webhook_secret():
+    agents, secrets = base._stored(_kv())
+    secrets.pop("webhook_secret")
+    agents["github_webhook"]["secret"] = SECRET
+    res = host_agents_resolve_inputs(agents, secrets, [], [], [], "inventory/assets/h")
+    assert any("agents.github_webhook.secret" in e for e in res["errors"]) and any("webhook_secret" in e for e in res["errors"])
+    assert all(SECRET not in e for e in res["errors"])
