@@ -15,7 +15,7 @@
 #   target_removed_users            이번 실행에서 지울 계정(실행 변수로 남는 유일한 계정 입력).
 #   connection_hosts / target_hosts 대상 호스트 패턴.
 #
-# 네임스페이스·마운트·인증은 lookup_plugins/openbao_doc.py 한 곳에서만 정한다. 이 파일에는 경로 접두사가 없다.
+# 네임스페이스·마운트·인증은 lookup_plugins/_openbao_reader.py 한 곳에서만 정한다. 이 파일에는 경로 접두사가 없다.
 # 대상 호스트: 기본 target_hosts(없으면 servers:loadbalancers). import_playbook의 vars로 connection_hosts를 넘기면 그 패턴이
 # 우선한다(host_agents.yml은 "<target_hosts>:&servers"를 넘겨 에이전트 play와 동일한 호스트 집합만 해석한다).
 # ==============================================================================
@@ -54,6 +54,28 @@
         label: "{{ item.path }}"
       run_once: true
 
+    # 앞 실행이 중간에 실패해 cleanup_connection이 돌지 못한 임시 개인키(복호화됨)를 지운다. 토큰 최대 수명(2시간)보다 오래된 것만이라 지금 도는
+    # 다른 실행의 키는 건드리지 않는다.
+    - name: Find stale temporary SSH key files left by failed earlier runs
+      ansible.builtin.find:
+        paths: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}"
+        patterns: ['*_bao_admin_key', '*_bao_boot_key', '*_bao_hop_key']
+        file_type: file
+        age: 12h
+      register: _stale_key_files
+      check_mode: false
+      run_once: true
+
+    - name: Remove stale temporary SSH key files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ _stale_key_files.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      check_mode: false
+      run_once: true
+
     - name: Clear cached in-memory facts for target hosts
       ansible.builtin.meta: clear_facts
 
@@ -67,7 +89,7 @@
 
     # 호스트당 해석은 한 번이다: Asset 문서, 관리·부트스트랩 연결, 관리 계정 공개키를 lookup 한 번(같은 읽기 객체)에서 만든다.
     # 같은 문서(Endpoint, Credential, Automation Identity 키)를 여러 번 HTTP로 읽지 않는다. 결과에 비밀이 있어 no_log지만 실패 사유
-    # (문서 경로와 HTTP 상태)는 읽기 지점이 따로 표시한다(lookup_plugins/openbao_doc.py). access 절 누락은 프로비저닝 대상(connection_requires_access)이면
+    # (문서 경로와 HTTP 상태)는 읽기 지점이 따로 표시한다(lookup_plugins/_openbao_reader.py). access 절 누락은 프로비저닝 대상(connection_requires_access)이면
     # 연결을 해석하기 전에 [ACCESS-MISSING]으로 실패한다.
     - name: Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass
       ansible.builtin.set_fact:

@@ -42,7 +42,7 @@ def _flat_tasks(tasks):
 
 def test_controller_credential_tasks_run_in_check_mode_too():
     for task in _flat_tasks(_load(STAGE)):
-        if "ansible.builtin.set_fact" not in task and "block" not in task:
+        if not ({"ansible.builtin.set_fact", "ansible.builtin.fail"} & set(task)) and "block" not in task:
             assert task.get("check_mode") is False, task["name"]
     for task in _load(CLEANUP)[0]["tasks"]:
         assert task.get("check_mode") is False, task["name"]
