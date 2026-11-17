@@ -22,7 +22,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_kisa import (  # noqa: E402
     BLANK, EXCEPTION, ITEMS, MANUAL, REGISTER_ACTIVE, REGISTER_EXPIRED, REGISTER_PENDING, REMEDIATION_SOURCE,
-    order_findings)
+    order_findings, VERDICTS)
 from host_audit_baseline import NEW, PERSIST, RECUR  # noqa: E402
 from host_audit_inventory import LOOKUP_FAILED, UNASSIGNED  # noqa: E402  (the Asset Inventory labels)
 from host_audit_unsafe import unsafe as _unsafe  # noqa: E402
@@ -195,16 +195,23 @@ def _level(row):
     return tuple(row[COL[name]] or 9 for name in ('우선순위', '영향도', '환경성'))
 
 
+def _verdict(row):
+    """Sort position of a row's verdict (the cell starts with ``<verdict>: ``), in the order of order_findings."""
+    word = str(row[COL['취약점현황']]).split(':', 1)[0]
+    return VERDICTS.index(word) if word in VERDICTS else len(VERDICTS)
+
+
 def _total(plans, run_id):
     """The ``total`` plan made of the plans of the hosts (their rows, so a host has the same lines in both files).
 
-    Items are sorted by priority, impact and effort, ties by host name and item code (the decision of #488's total
-    workbook; a host's own sheet also orders equal levels by verdict, which the total leaves out). A host that has no
+    Items are sorted by priority, impact and effort, then verdict (취약, 점검불가(수동), 예외(승인): as in a host's own
+    sheet), then host name and item code (the decision of #488's total workbook). A host that has no
     check result or whose plan could not be built keeps its one line after the items: it is not clean. A clean host adds
     nothing, and when no host has an item or a line the sheet has the one line 양호 외 항목 없음.
     """
     items = [row for plan in plans if plan['kind'] == 'items' for row in plan['rows']]
-    items.sort(key=lambda row: (_level(row), str(row[COL['자산명']]), str(row[COL['통제내용']]).split(' ', 1)[0]))
+    items.sort(key=lambda row: (_level(row), _verdict(row), str(row[COL['자산명']]),
+                                str(row[COL['통제내용']]).split(' ', 1)[0]))
     rows = items + [plan['rows'][0] for plan in plans if plan['kind'] in ('no_result', 'failed')]
     if not rows:
         rows = [[''] * 3 + [NO_FINDINGS] + [''] * (len(HEADERS) - 4)]

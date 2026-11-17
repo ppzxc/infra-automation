@@ -522,3 +522,21 @@ def test_every_string_cell_of_the_total_is_made_of_values_the_model_or_the_catal
                 assert _residue(cell, known) == "", cell
                 checked += 1
     assert checked > 10
+
+
+def test_the_total_puts_the_verdict_after_the_levels_and_before_the_host():
+    reg = [_exception("U-01")]
+    model = _model([_record("h1", {1: "MANUAL"}), _record("h2", {1: "VULN"}), _record("h3", {1: "VULN"}, register=reg)],
+                   reg)
+    rows = host_audit_remediation_total(model)["rows"]
+    same = [r for r in rows if r[COL["통제내용"]].startswith("U-01 ")]
+    order = [(r[COL["자산명"]], r[COL["취약점현황"]].split(":")[0]) for r in same]
+    assert order == [("h2", "취약"), ("h1", "점검불가(수동)"), ("h3", "예외(승인)")]
+    assert len({(r[COL["우선순위"]], r[COL["영향도"]], r[COL["환경성"]]) for r in same}) == 1  # only the verdict differs
+
+
+def test_a_host_sheet_keeps_its_own_order_and_the_total_changes_nothing_in_it():
+    model = _model([_record("h1", {1: "MANUAL", 2: "VULN"})])
+    before = host_audit_remediation_plan(model, "h1")["rows"]
+    host_audit_remediation_total(model)
+    assert host_audit_remediation_plan(model, "h1")["rows"] == before
