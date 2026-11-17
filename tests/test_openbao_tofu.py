@@ -149,6 +149,14 @@ def test_ci_runs_tofu_fmt_and_validate():
     assert "tofu validate" in wf
 
 
+def test_ci_tofu_job_has_a_throwaway_encryption_key():
+    """encryption 블록은 enforced = true라 TF_ENCRYPTION이 없으면 validate도 실패한다. CI는 비밀이 아닌 임시 키를 준다."""
+    import yaml
+    job = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["tofu"]
+    enc = job["env"]["TF_ENCRYPTION"]
+    assert 'key_provider "pbkdf2" "main"' in enc and "secrets." not in enc
+
+
 def test_config_doc_documents_template_and_secrets_handling():
     doc = DOC.read_text(encoding="utf-8")
     assert "Auto Approve" in doc and "끔" in doc

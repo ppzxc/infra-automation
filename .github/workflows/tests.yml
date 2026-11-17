@@ -33,6 +33,13 @@ jobs:
     name: tofu (fmt, validate)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      # encryption 블록이 enforced = true라 validate에도 key_provider가 필요하다. state에 닿지 않으므로 운영 passphrase가 아닌
+      # 임시 값을 쓴다(비밀이 아니다).
+      TF_ENCRYPTION: |
+        key_provider "pbkdf2" "main" {
+          passphrase = "ci-validate-only-not-a-secret"
+        }
     defaults:
       run:
         working-directory: tofu/openbao

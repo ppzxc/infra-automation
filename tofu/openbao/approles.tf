@@ -15,7 +15,7 @@ locals {
   # list 권한은 periodic_check(periodic-check)에만 준다.
   family_policies = {
     provision          = ["inventory-base", "connect", "funa-secrets"]
-    host_agents        = ["inventory-base", "connect", "asset-agents", "openobserve-ingest"]
+    host_agents        = ["inventory-base", "connect", "asset-agents", "openobserve-ingest", "alert-notify"]
     backup_maintenance = ["inventory-base", "asset-agents", "rustfs-maintenance", "openobserve-ingest"]
     openobserve_config = [
       "inventory-base", "inventory-assets", "openobserve-admin", "openobserve-ingest", "alert-notify",
