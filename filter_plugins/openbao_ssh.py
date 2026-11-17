@@ -20,10 +20,11 @@ _PYTHON_PATH = re.compile(r"/[A-Za-z0-9._+/-]+")
 
 def python_interpreter_problem(value):
     """원격 Python 경로가 안 되는 이유(맞으면 None). 컨트롤러(Semaphore)의 venv 경로가 원격으로 새는 사고를 막는 규칙이다:
-    절대 경로여야 하고 `venv`·`semaphore`가 들어가거나 `/tmp/` 아래이거나 `auto_silent`이면 안 된다."""
+    절대 경로여야 하고(그래서 `auto_silent` 같은 값도 걸러진다) `venv`·`semaphore`(대소문자 무시)가 들어가거나 `/tmp/` 아래이면 안 된다."""
     if not isinstance(value, str) or not _PYTHON_PATH.fullmatch(value) or ".." in value.split("/"):
         return "절대 경로(영숫자·._+-/)여야 합니다"
-    if "semaphore" in value or "venv" in value or value.startswith("/tmp/"):
+    lowered = value.lower()
+    if "semaphore" in lowered or "venv" in lowered or lowered.startswith("/tmp/"):
         return "컨트롤러의 venv·semaphore·임시 경로는 원격 호스트에서 쓸 수 없습니다"
     return None
 

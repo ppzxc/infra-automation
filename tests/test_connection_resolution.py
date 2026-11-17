@@ -95,10 +95,17 @@ def test_a_venv_python_interpreter_in_the_asset_document_is_refused(tmp_path, fa
     assert list(private_tmp.glob("*_bao_*_key")) == []
 
 
+def test_removing_a_declared_admin_is_refused_even_when_the_consumer_reads_no_accounts(tmp_path, fake_openbao):
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"],
+                              extra_vars={"connection_needs_accounts": False, "target_removed_users": ["admin01"]})
+    assert res.returncode != 0 and "REMOVED-USER-CONFLICT" in res.stdout + res.stderr
+
+
 def test_a_consumer_without_accounts_does_not_read_the_operator_documents(tmp_path, fake_openbao):
     res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"], extra_vars={"connection_needs_accounts": False})
     assert res.returncode == 0, res.stdout + res.stderr
-    assert all(a["state"] == "absent" for a in out["ns0001"]["accounts"]) and out["ns0001"]["normalized"] == []   # 삭제 대상만 남는다
+    assert all(a["state"] == "absent" for a in out["ns0001"]["accounts"])        # 삭제 대상만 남는다
+    assert out["ns0001"]["normalized"] == ["admin01"]                              # 관리 계정 이름은 지킨다
     assert not [r for r in fake_openbao.reads() if (r.doc or "").startswith("operators/")]
 
 

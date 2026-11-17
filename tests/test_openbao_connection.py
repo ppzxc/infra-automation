@@ -383,6 +383,7 @@ def test_host_connections_without_accounts_do_not_need_the_operator_documents(st
     store.pop("inventory/operators/root", None)
     out = host_connections(reader(store), "ns0001", ["ssh"], with_accounts=False)
     assert out["admin_accounts"] == [] and out["admin"]["credential"] == "admin01"
+    assert out["admin_names"] == ["admin01", "root"]               # 이름은 공개키 없이도 준다(삭제 대상 충돌 검사용)
     store["inventory/assets/ns0001"]["access"]["admin_credentials"] = ["root", "admin01"]
     with pytest.raises(ConnectionError_, match="operators/root"):
         host_connections(reader(store), "ns0001", ["ssh"])               # 기본(프로비저닝)은 그대로 필수다
@@ -394,7 +395,7 @@ def test_a_plain_absolute_python_path_is_accepted(value):
 
 
 @pytest.mark.parametrize("value", ["python3", "/srv/semaphore/venv/bin/python", "/home/x/.venv/bin/python", "/tmp/py/python",
-                                   "auto_silent", "/usr/bin/../bin/python", "/usr/bin/python3; rm", 7])
+                                   "auto_silent", "/opt/Semaphore/bin/python", "/home/x/.VENV/bin/python", "/usr/bin/../bin/python", "/usr/bin/python3; rm", 7])
 def test_a_relative_venv_semaphore_or_temporary_python_path_is_refused(value):
     with pytest.raises(Exception, match="python_interpreter"):
         openbao_python_interpreter(value)

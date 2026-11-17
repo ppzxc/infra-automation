@@ -217,6 +217,8 @@ def host_connections(read, asset, preference, requires_access=False, with_accoun
         "admin": resolve(read, asset, preference, admin or None),
         "bootstrap": resolve(read, asset, preference, boot) if boot else {},
         "admin_accounts": admin_accounts(read, asset, preference) if (admin and with_accounts) else [],
+        # 선언된 관리 계정 이름은 공개키를 읽지 않아도 항상 준다(삭제 대상 충돌 검사가 계정 목록 없이도 관리 계정을 지킨다).
+        "admin_names": [_credential(read, asset, n).get("username") or "" for n in (access.get("admin_credentials") or [])],
     }
 
 

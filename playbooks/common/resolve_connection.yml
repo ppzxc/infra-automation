@@ -107,7 +107,7 @@
         _admin_credential: "{{ _host_res.admin_credential }}"
         _bootstrap_credential: "{{ _host_res.bootstrap_credential }}"
         _admin_accounts: "{{ _host_res.admin_accounts }}"
-        _normalized_admin_users: "{{ _host_res.admin_accounts | map(attribute='name') | list }}"
+        _normalized_admin_users: "{{ _host_res.admin_names | select | list }}"
         _admin_summary: "{{ _host_res.admin | openbao_connection_summary }}"
         _boot_summary: "{{ (_host_res.bootstrap | openbao_connection_summary) if _host_res.bootstrap | length > 0 else {} }}"
         _admin_conn: "{{ _host_res.admin }}"
