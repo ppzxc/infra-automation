@@ -32,6 +32,18 @@
           "minLength": 1,
           "description": "관리자 직책"
         },
+        "target": {
+          "type": "boolean",
+          "description": "ISMS 인증 대상 여부. 저장소 코드는 읽지 않고 자산대장 스크립트가 쓴다."
+        },
+        "group_asset_name": {
+          "type": "string",
+          "description": "그룹 자산명. 빈 문자열이 올 수 있다."
+        },
+        "personal_info_system": {
+          "type": "boolean",
+          "description": "개인정보 처리 시스템 여부."
+        },
         "asset_importance": {
           "enum": [
             "H",
