@@ -28,7 +28,9 @@ def test_environment_uses_approle_without_vault_token():
         assert name in section
     table_keys = [l for l in section.splitlines() if l.startswith("| `")]
     assert not any("VAULT_TOKEN" in l for l in table_keys), "표에 VAULT_TOKEN을 두면 안 된다"
-    assert "`VAULT_TOKEN`은 이 Environment에 넣지 않는다" in section
+    # 문서 전체에 옛 토큰 대체 경로와 옛 마운트·접두사 변수 흔적이 없다(Spec #511 / Ticket-20).
+    for old in ("VAULT_TOKEN", "VAULT_MOUNT", "OPENBAO_HOSTS_PREFIX", "infra/prod/host"):
+        assert old not in SETUP, old
 
 
 def test_wrapper_is_executable_and_strict():

@@ -32,7 +32,7 @@ DOCUMENTATION = r"""
 name: openbao_doc
 short_description: 공용 OpenBao 읽기 지점(KV v2, 네임스페이스 infra)
 description:
-  - C(<마운트>/<문서 경로>) 문서를 읽어 데이터 맵을 돌려준다. 자세한 규칙은 docs/openbao_integration.md 4절.
+  - C(<마운트>/<문서 경로>) 문서를 읽어 데이터 맵을 돌려준다. 자세한 규칙은 docs/openbao_integration.md 5·6절.
 options:
   _terms:
     description: 문서 경로(C(inventory/assets/ns0001)) 또는 C(@token).

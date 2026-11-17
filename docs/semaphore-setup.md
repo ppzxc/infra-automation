@@ -10,7 +10,7 @@
 1. Key Store: Git 저장소 접근 키
 2. Repository: `ppzxc/infra-automation`, branch `main`
 3. Inventory: Static 인벤토리 (Semaphore UI에서 편집, `inventory/hosts.yml.example` 형식)
-4. Variable Group(Environment): OpenBao 접속 값 (모든 템플릿 공용 1개)
+4. Variable Group(Environment): OpenBao 접속 값 (AppRole 계열마다 1개, §4)
 5. Task Template 8개 (아래 §5)
 6. Schedule: Repo Maintenance(매일), Host Audit — Monthly(월 1회)
 7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → OpenObserve — Config → Host Audit(§7.1)
@@ -27,7 +27,7 @@
 | `bunzip2` | restic 배포 파일(`.bz2`) 압축 해제 (Deploy, Repo Maintenance) |
 | `sshpass` | CentOS 6/7 중 비밀번호로 접속하는 호스트에 바이너리를 업로드할 때 (MON-104) |
 | GitHub releases로 나가는 HTTPS | otelcol·restic·resticprofile 다운로드. 호스트는 인터넷에 접근하지 않음 |
-| OpenBao, OpenObserve, RustFS로 가는 네트워크 | KV 조회, 이벤트 전송, repo 유지보수 |
+| OpenBao, OpenObserve, RustFS로 가는 네트워크 | OpenBao 문서 조회, 이벤트 전송, repo 유지보수 |
 | 쓰기 가능한 `$HOME/.cache/host-agents` | 검증된 바이너리 캐시 |
 | 사설 CA를 쓴다면 러너 신뢰 저장소에 CA 등록 | OpenObserve 등록 이벤트와 Repo Maintenance는 인증서를 검증함 |
 | **Host Audit** 추가: GitHub releases(Trivy 바이너리)와 Trivy 취약점 DB 레지스트리로 나가는 HTTPS | Package Vulnerability. DB 레지스트리는 `host_audit_trivy_db_repository`로 내부 미러를 지정할 수 있다 |
@@ -46,7 +46,7 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 | `github-deploy-key` | SSH Key | Repository clone (`git@github.com:ppzxc/infra-automation.git`) |
 | `none` | None | Task Template의 SSH Key 칸에 지정 |
 
-대상 호스트의 SSH 키와 계정은 Key Store에 두지 않는다. `playbooks/common/resolve_connection.yml`이 OpenBao `hosts/<host>`와 `users/`에서 키를 가져와 임시 파일로 만들고, 실행이 끝나면 지운다. 그래서 템플릿의 SSH Key는 `None`으로 둔다.
+대상 호스트의 SSH 키와 계정은 Key Store에 두지 않는다. `playbooks/common/resolve_connection.yml`이 OpenBao에서 Asset의 Endpoint·Credential과 Automation Identity(`secrets/automation/ssh`)를 읽어 키를 임시 파일로 만들고, 실행이 끝나면 지운다. 그래서 템플릿의 SSH Key는 `None`으로 둔다.
 
 ---
 
@@ -64,9 +64,9 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **Host Agents를 적용하지 않는 호스트**: Semaphore Static 인벤토리에서 `servers`에는 두되 `host_agents_excluded` 그룹에도 넣는다. Deploy·Config·Backup·Repo Maintenance가 모두 이 그룹을 뺀다. 템플릿의 Limit이나 `target_hosts`로 따로 빼지 않는다.
 
-**백업만 적용하는 호스트**: 로그를 다른 체계가 수집하는 호스트는 `servers`에 두고 `host_agents_backup_only` 그룹에도 넣는다(ADR-0006 §2.1). Deploy·Config·Backup이 이 호스트에는 otelcol 단계를 건너뛰고 restic·resticprofile만 적용하며, Repo Maintenance도 포함한다. OpenBao `hosts/<host>/agents`에 `o2_ingest_token`은 없어도 된다. 매일의 `job=backup` 결과는 OpenObserve로 가지 않는다. `host_agents_excluded`와 함께 넣지 않는다(제외가 우선한다).
+**백업만 적용하는 호스트**: 로그를 다른 체계가 수집하는 호스트는 `servers`에 두고 `host_agents_backup_only` 그룹에도 넣는다(ADR-0006 §2.1). Deploy·Config·Backup이 이 호스트에는 otelcol 단계를 건너뛰고 restic·resticprofile만 적용하며, Repo Maintenance도 포함한다. OpenBao `secrets/assets/<ns>/agents` 문서의 수집 토큰은 없어도 된다. 매일의 `job=backup` 결과는 OpenObserve로 가지 않는다. `host_agents_excluded`와 함께 넣지 않는다(제외가 우선한다).
 
-**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao `hosts/<host>/agents`의 Asset 문서의 `agents.otel.app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `OpenObserve — Config`의 AppRole이 `inventory/assets/+` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
+**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao Asset 문서(`inventory/assets/<ns>`)의 `agents.otel.app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `OpenObserve — Config`의 AppRole이 `inventory/assets/+` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
 
 **방화벽을 건드리지 않는 호스트**: `servers`(또는 `loadbalancers`)에 두면서 `firewall_unmanaged` 그룹에도 넣는다. HOST PROVISIONING(`site.yml`)이 이 호스트의 방화벽(UFW·firewalld·iptables, CentOS 7 raw 경로 포함) 태스크를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo 정책은 그대로 적용한다. Host Audit 드리프트 검사는 같은 인벤토리로 `site.yml`을 check 실행하므로 따로 설정할 것이 없다. 프로비저닝 전에 `--check --diff`로 방화벽 태스크가 하나도 나오지 않는지 확인한다(#220).
 
@@ -129,61 +129,58 @@ all:
 
 ## 4. Variable Group (Environment)
 
-Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maintenance도 Deploy와 같은 AppRole로 로그인한다(BAK-087).
+Environment는 **AppRole 계열마다 하나**다. 템플릿이 읽을 수 있는 OpenBao 경로는 그 Environment의 AppRole 정책이 정하므로, 한 템플릿이 침해돼도 그 계열 밖의 비밀은 읽히지 않는다. 계열과 정책의 원본은 `tofu/openbao`(정책 HCL과 `approles.tf`)이고, 구조와 인증은 [openbao_integration.md](openbao_integration.md) 5절이 설명한다. 이 문서에 경로 표를 복사하지 않는다.
 
-> **OpenObserve — Config도 같은 AppRole로 로그인한다**(O2C-000). 받은 토큰을 `VAULT_TOKEN`보다 먼저 쓰고, AppRole 값이 없거나 로그인이 실패할 때만 `VAULT_TOKEN`으로 조회한다(O2C-001). 둘 다 쓸 수 없으면 입력 누락으로 실패하며, 실패 메시지에 OpenBao 응답 코드가 나온다.
+### 공통 변수
 
-**Environment variables**
+모든 계열 Environment가 같은 세 변수를 가진다. 네임스페이스(`infra`)와 마운트(`inventory`·`secrets`)는 공용 읽기 지점이 정하므로 변수로 받지 않는다.
 
-| 키 | 값(예) | 필수 | 비고 |
-|---|---|---|---|
-| `VAULT_ADDR` | `https://openbao.internal:8200` | ● | 기본값 `http://openbao:8200` |
-| `VAULT_NAMESPACE` | `infra/prod/host/` | | 이 값이 기본값 |
-| `VAULT_MOUNT` | `secret` | | 이 값이 기본값 |
-| `OPENBAO_HOSTS_PREFIX` | `hosts/` | | 이 값이 기본값 |
-
-**Secrets** (Semaphore Variable Group의 Secret 탭)
-
-| 키 | 필수 | 비고 |
+| 키 | 종류 | 비고 |
 |---|---|---|
-| `VAULT_ROLE_ID` | ● | OpenBao AppRole |
-| `VAULT_SECRET_ID` | ● | OpenBao AppRole |
-| `VAULT_TOKEN` | OpenObserve — Config에는 ● | Deploy·Config는 AppRole이 있으면 AppRole이 우선하고, Repo Maintenance는 자체 토큰 대체 경로가 없고 공용 읽기 지점의 인증을 따른다(BAK-087, `docs/openbao_integration.md`) |
+| `VAULT_ADDR` | Environment variable | OpenBao 주소(필수). 예: `https://openbao.internal:8200`. 기본 `http://openbao:8200`은 개발용이다 |
+| `VAULT_ROLE_ID` | Secret | 그 계열 AppRole의 role_id |
+| `VAULT_SECRET_ID` | Secret | 그 계열 AppRole의 secret_id. 180일 수명이고 러너 CIDR에 묶여 있다. 발급과 교체는 [openbao-operations](runbooks/openbao-operations.md) 2절 |
 
-**AppRole 정책이 읽을 수 있어야 하는 KV 경로** (mount `secret`, namespace 기준)
+https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment variable `VAULT_CACERT`(러너의 CA 파일 경로)로 준다. 검증을 끄는 `VAULT_SKIP_VERIFY=true`는 마지막 수단이다.
 
-| 경로 | 쓰는 템플릿 |
-|---|---|
-| `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config (SSH 접속) |
-| `hosts/<host>/agents` | Deploy, Config, Repo Maintenance |
-| `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config |
-| `agents/rustfs` | Deploy, Config, Repo Maintenance |
-| `secrets/services/rustfs/audit_reports`, `inventory/services/rustfs`, `secrets/services/alert/notify`(KISA 악화 알림), `inventory/config/host_audit`(메일) | Host Audit, Host Audit — Resend (보관 키·메일 입력 — [host_audit.md §11.4](host_audit.md#114-입력-openbao-git에는-시크릿-없음)·[§13.3](host_audit.md#133-입력-openbao-git에는-주소-없음)). 드리프트 하위 실행 때문에 `host_audit` AppRole은 provision·host_agents가 읽는 경로도 읽는다 |
+### 계열별 Environment
 
-필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
-- **호스트별 선택 키 `hosts/<host>/agents`**: `otel_docker_metrics`(docker 메트릭), `otel_app_telemetry`(boolean, 컨테이너 앱 텔레메트리 OTLP HTTP 수신 — traces는 `app_traces` 스트림, metrics는 기존 경로. 기본 꺼짐, ADR-0012), `otel_container_logs`(docker 컨테이너 로그를 `app_logs`로 수집, 기본 꺼짐. 컨테이너가 compose에서 `json-file` 드라이버(`max-size`·`max-file`)와 `com.docker.compose.project`·`com.docker.compose.service` 라벨 전달 옵션(`logging.options.labels`)을 써야 한다. compose를 먼저 `json-file`로 전환한 뒤 Config를 실행한다: 이전 구현이 둔 rsyslog 규칙이 이때 제거되고 rsyslog가 재시작된다).
-- **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
-- **OpenObserve — Config**: `inventory/services/openobserve`의 `url`, `secrets/services/openobserve/admin`(설정 API 계정)·`ingest`(알림 검증 합성 레코드 주입), `secrets/services/alert/notify`의 `url`(사내 알림 플랫폼 text/plain 경로), 작업 설정 `inventory/config/openobserve_config`와 로스터 호스트의 `inventory/assets/<ns>`·`inventory/assets/<ns>/endpoints`. 토큰·인증 헤더 키는 없다.
-- **Host Audit 메일**: `inventory/config/host_audit`의 `mail_recipients`(받는 사람 목록)·`mail_sender`(보내는 주소 1개)·`mail_sender_display_name`(선택 표시 이름). 주소는 개인정보라 저장소와 템플릿 Extra variables에 두지 않는다. 덮어쓰는 Extra variables는 없다: 받는 사람을 바꾸려면 문서를 고친다.
+| Environment(계열) | 템플릿 | 주요 읽기 범위(정책 HCL이 원본) |
+|---|---|---|
+| `provision` | Host Provisioning | Asset·Endpoint·Credential·Automation Identity, Service 문서, FUNA 소비자별 시크릿 |
+| `host_agents` | Host Agents — Deploy All·Config All·Deploy Restic | `provision`의 접속 경로, 호스트별 `agents` 비밀, OpenObserve 수집 계정, 알림 URL |
+| `backup_maintenance` | Host Agents — Repo Maintenance | 호스트별 `agents`(restic 비밀번호), RustFS 유지보수 키, OpenObserve 수집 계정 |
+| `openobserve_config` | OpenObserve — Config | Asset·Endpoint, OpenObserve 관리·수집 계정, 알림 URL, 작업 설정 |
+| `host_audit` | Host Audit — Monthly·On-demand·Resend | `provision`·`host_agents`의 합집합(드리프트 하위 실행 때문), 보고서 보관 키, 메일 설정, 알림 URL |
+| `network_backup` | Cisco 백업, FortiGate 백업 | Asset·Endpoint, Credential, 알림 URL |
+| `github_webhook_watch` | 조직 웹훅 감시 | 조직 훅 읽기 토큰, OpenObserve 수집 계정, 작업 설정 |
+| `periodic_check` | OpenBao — Periodic Check | 전체 읽기와 메타데이터 목록(스키마 대조용) |
+
+`OpenBao — OpenTofu`는 위와 별개의 전용 Environment를 쓴다([openbao_opentofu.md](openbao_opentofu.md) 5절). 에이전트 세션의 `agent_session`은 Semaphore 밖에서 쓰므로 Environment가 없다.
+
+평문 토큰은 어느 Environment에도 넣지 않는다. 공용 읽기 지점은 AppRole로만 인증한다(Spec #511). 운영자가 로컬에서 쓰는 `scripts/`의 도구는 운영자 토큰을 쓰며 접속 방법은 [openbao_docs.md](openbao_docs.md) 4절을 따른다.
 
 ### Periodic Check Environment
 
-`OpenBao — Periodic Check`(§5)는 위 공용 Variable Group을 쓰지 않고 **전용 Environment `periodic_check` 하나**를 쓴다. `periodic_check` AppRole 자격만 주입하며, `scripts/openbao_docs.py check`가 읽는 환경변수 이름 그대로다([openbao_docs.md §4](openbao_docs.md)). 값은 저장소에 쓰지 않는다.
+`OpenBao — Periodic Check`(§5)의 `periodic_check` Environment는 `scripts/openbao_docs.py check`가 읽는 환경변수 이름 그대로 `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`(위 공통 변수)에 더해 선택 `VAULT_NAMESPACE`(생략하면 `infra`)를 가진다([openbao_docs.md §4](openbao_docs.md)). AppRole 자격만 주입하고 값은 저장소에 쓰지 않는다. 토큰 TTL·secret_id 바인딩은 OpenTofu 코드(`tofu/openbao`)가 정한다.
 
-| 키 | 종류 | 값 |
-|---|---|---|
-| `VAULT_ADDR` | Environment variable | OpenBao 주소(필수) |
-| `VAULT_NAMESPACE` | Environment variable | `infra`(생략하면 `infra`) |
-| `VAULT_ROLE_ID` | Secret | `periodic_check` AppRole의 role_id |
-| `VAULT_SECRET_ID` | Secret | `periodic_check` AppRole의 secret_id(180일 교체, `openbao-operations` 런북) |
+### 한계
 
-`VAULT_TOKEN`은 이 Environment에 넣지 않는다(토큰 대체 경로 폐지, Spec #511). `check` 코드는 토큰이 있으면 로그인을 건너뛰므로, 토큰이 섞여 들어오면 AppRole 정책 대신 그 토큰의 권한으로 점검한다. 옛 `infra/prod/host` 값이나 `OPENBAO_HOSTS_PREFIX`·`VAULT_MOUNT`도 쓰지 않는다. AppRole의 토큰 TTL·secret_id 바인딩은 OpenTofu 코드(`tofu/openbao`)가 정한다.
+- 토큰 TTL은 30분이다. 플레이 첫머리에 토큰을 한 번 받아 두는 곳(`resolve_connection`, 네트워크 장비 백업)은 로그인이 플레이당 한 번이고, 그렇지 않은 읽기는 호스트·태스크마다 새로 로그인한다. 대상 호스트가 많으면 로그인 요청도 그만큼 나간다.
+- 템플릿을 잘못된 계열 Environment로 돌리면 정책 밖 경로가 403이 되고 실패 메시지에 문서 경로와 상태 코드가 나온다(§8).
+
+### 템플릿별로 추가로 알아 둘 점
+
+- **호스트별 선택 키(`secrets/assets/<ns>/agents`와 Asset 문서의 `agents` 절)**: `otel_docker_metrics`(docker 메트릭), `otel_app_telemetry`(boolean, 컨테이너 앱 텔레메트리 OTLP HTTP 수신 — traces는 `app_traces` 스트림, metrics는 기존 경로. 기본 꺼짐, ADR-0012), `otel_container_logs`(docker 컨테이너 로그를 `app_logs`로 수집, 기본 꺼짐. 컨테이너가 compose에서 `json-file` 드라이버(`max-size`·`max-file`)와 `com.docker.compose.project`·`com.docker.compose.service` 라벨 전달 옵션(`logging.options.labels`)을 써야 한다. compose를 먼저 `json-file`로 전환한 뒤 Config를 실행한다: 이전 구현이 둔 rsyslog 규칙이 이때 제거되고 rsyslog가 재시작된다). 키 정의는 `schemas/openbao/`가 원본이다.
+- **Repo Maintenance**: `secrets/services/rustfs/maintenance`의 키는 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
+- **Host Audit 메일**: `inventory/config/host_audit`의 `mail_recipients`·`mail_sender`·`mail_sender_display_name`(선택). 주소는 개인정보라 저장소와 템플릿 Extra variables에 두지 않는다. 덮어쓰는 Extra variables는 없다: 받는 사람을 바꾸려면 문서를 고친다.
+- 읽는 문서와 정책 이름은 각 기능 문서([host_audit.md §11.4](host_audit.md#114-입력-openbao-git에는-시크릿-없음)·[§13.3](host_audit.md#133-입력-openbao-git에는-주소-없음), [backup.md](backup.md), [openobserve_config.md](openobserve_config.md) 등)가 적는다.
 
 ---
 
 ## 5. Task Template
 
-공통 설정: Inventory `inventory/hosts.yml`, Repository `infra-automation`, Variable Group은 §4의 것, **Limit은 비움**.
+공통 설정: Inventory `inventory/hosts.yml`, Repository `infra-automation`, Environment는 §4의 계열별 Environment(템플릿마다 표의 계열), **Limit은 비움**.
 
 | 이름 | Playbook | CLI args | Survey variables | 실행 방식 | 대상 |
 |---|---|---|---|---|---|
@@ -250,7 +247,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
   - Survey `host_audit_mail_enabled`·`host_audit_storage_enabled`를 `false`로: 시험 실행. 보관을 끄면 비교하지 않고 러너 로컬에만 남는다
   - API `environment`만: `{"host_audit_drift_enabled": false}`·`{"host_audit_packages_enabled": false}` 해당 섹션 수집·판정 건너뛰기(정기 실행에는 쓰지 않는다)
 - Host Audit은 `--check`로 돌리지 않는다. 그 자체가 읽기 전용이고, check 모드에서는 보관·발송을 하지 않는다.
-- Variable Group은 §4의 것을 그대로 쓴다. Configuration Drift가 `site.yml`·Host Agents Config를 하위 실행하므로 AppRole이 Deploy·Config와 같은 KV 경로를 읽을 수 있어야 한다(§4 표).
+- Environment는 `host_audit`(§4)다. Configuration Drift가 `site.yml`·Host Agents Config를 하위 실행하므로 이 AppRole은 `provision`·`host_agents`가 읽는 경로도 읽는다.
 
 **Host Audit 보고서 다시 보내기 (Host Audit — Resend)**
 
@@ -354,11 +351,11 @@ OpenObserve에서 `backup_logs` 스트림에 `job=inventory`, `job=backup`(다�
 | 증상 | 원인 | 조치 |
 |---|---|---|
 | 수정을 머지했는데 로그에 예전 코드가 돈다(`Checkout repository to <예전 해시>`) | 실패한 태스크를 **Re-run**하면 원래 태스크의 커밋으로 다시 실행된다 | 템플릿 목록의 **Run**으로 새 태스크를 실행한다. 그래도 같으면 Repository Branch가 `main`인지 확인한다 |
-| `OpenBao 자격증명 없음` | 템플릿에 Variable Group이 연결되지 않았거나 Secret이 비어 있다 | §4 확인 |
-| `AppRole 로그인 실패(status=…)` | `VAULT_ADDR`/`VAULT_NAMESPACE`가 틀렸거나 secret_id가 만료됐다 | AppRole 재발급 |
-| `OpenBao 조회 실패 — status=[200, 200, 403]` 등 | AppRole 정책에 해당 KV 경로가 없다 | §4 경로를 정책에 추가 |
-| `유지보수 필수 입력 누락: agents/rustfs.maintenance_access_key` 등 | 표시된 키가 OpenBao에 없다. Maintenance 전용 키는 Deploy 성공으로 확인되지 않는다 | 표시된 경로에 키 등록 |
-| `유지보수 필수 입력 누락: hosts/<host>/agents.restic_password` | Host Agents가 적용되지 않은 호스트다 | 적용 전이면 `host_agents_excluded` 그룹에 넣는다 |
+| `OpenBao 인증 정보가 없습니다` | 템플릿에 계열 Environment가 연결되지 않았거나 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`가 비어 있다 | §4 확인 |
+| `OpenBao 조회 실패: AppRole 로그인 (HTTP …)` | `VAULT_ADDR`이 틀렸거나 secret_id가 만료됐거나 러너 CIDR 밖이다 | secret_id 재발급([openbao-operations](runbooks/openbao-operations.md) 2절) |
+| `OpenBao 조회 실패: <문서 경로> (HTTP 403)` | 템플릿이 그 문서를 읽을 수 없는 계열 Environment로 돈다 | 템플릿의 Environment를 §4 표의 계열로 바꾼다. 계열 정책이 모자라면 `tofu/openbao` 정책을 고친다 |
+| `유지보수 필수 입력 누락: <문서 경로>.<키>` 등 | 표시된 키가 OpenBao에 없다. Maintenance 전용 키는 Deploy 성공으로 확인되지 않는다 | `scripts/openbao_docs.py put`으로 등록 |
+| `유지보수 필수 입력 누락: secrets/assets/<host>/agents.restic_password` | Host Agents가 적용되지 않은 호스트다 | 적용 전이면 `host_agents_excluded` 그룹에 넣는다 |
 | CentOS 6/7 업로드 실패(MON-109) | 러너에 `sshpass`가 없다 | 러너 이미지에 설치 |
 | 대상이 0대로 끝난다 | `target_hosts`가 `servers` 밖이거나, FQDN으로 입력했거나, `host_agents_excluded`에 속한 호스트다 | Inventory Hostname으로 입력, 제외 그룹 확인 |
 | Host Audit 보고서는 만들어졌는데 실행이 실패로 끝난다 | 보관(업로드·Audit Baseline 조회) 또는 메일 단계 실패. 보고서는 러너에 남고, 업로드됐다면 버킷에도 있다 | 로그의 `AUD-5xx`/`AUD-6xx` 메시지 확인. 메일만 실패했으면 Resend로 다시 보낸다 |
