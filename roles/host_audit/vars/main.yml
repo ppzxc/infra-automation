@@ -25,6 +25,14 @@ host_audit_openbao_required:
   "secrets/services/alert/notify": [url]
   "inventory/config/host_audit": []
 
+# 읽는 단계별 문서(위 선언의 키를 나눈 것, 합집합이 선언과 같다). 보관 입력은 못 읽으면 보관 문제, 알림은 못 읽어도 보관을 막지 않고,
+# 메일 설정은 못 읽으면 메일 문제다.
+host_audit_openbao_storage_docs:
+  - inventory/services/rustfs
+  - secrets/services/rustfs/audit_reports
+host_audit_openbao_alert_doc: secrets/services/alert/notify
+host_audit_openbao_mail_doc: inventory/config/host_audit
+
 # OS 지원 종료일(EOL) 정적 표 (#120). 키는 '<os-release ID>-<주 버전>'(Ubuntu는 '<ID>-<VERSION_ID>').
 # os-release가 없는 CentOS 6은 /etc/redhat-release에서 'centos-6'을 만든다.
 # eol은 무상 표준 지원(보안 업데이트) 종료일이다 — 유상 연장 지원(ELS·ESM)은 반영하지 않는다.

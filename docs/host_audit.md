@@ -539,8 +539,8 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
-| `AUD-500` | `Log in to OpenBao once through the shared read point (token for the storage reads)` | `ansible.builtin.set_fact` (`lookup openbao_doc @token`) | 러너 | 읽기 전용, `no_log`, 실패해도 멈추지 않고 보관 문제로 남김 |
-| `AUD-501` | `Read the Host Audit storage documents and the alert document (host_audit_openbao_required)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 보관 문서 둘은 하나라도 못 읽으면 모두 비워 보관 문제로, 알림 문서는 따로 읽어 실패해도 보관을 막지 않음 |
+| `AUD-500` | `Log in to OpenBao through the shared read point (fresh token before each read)` | `ansible.builtin.set_fact` (`lookup openbao_doc @token`, `vault_token.yml`) | 러너 | 읽기 전용, `no_log`. 보관 자격증명과 메일 설정 읽기 직전마다 새로 로그인해 토큰 TTL(30분) 만료를 피함. 실패해도 멈추지 않고 문제로 남김 |
+| `AUD-501` | `Read the Host Audit storage documents and the alert document (host_audit_openbao_required)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 문서마다 따로 읽어(`errors='ignore'`) 못 읽은 문서 경로만 보관 문제로 이름 붙이고, 알림 문서는 실패해도 보관을 막지 않음. 읽을 문서는 `host_audit_openbao_*_doc` 선언에서 옴 |
 | `AUD-502` | `Resolve the Host Audit storage target and dedicated key` | `ansible.builtin.set_fact` | 러너 | 누락 항목은 문서 경로와 키 이름만(선언 `host_audit_openbao_required` 기준), `no_log` |
 | `AUD-503` | `List the Audit Baseline pointers of scheduled runs` | `ansible.builtin.uri` (S3 ListObjectsV2) | 러너 | 읽기 전용, `no_log` |
 | `AUD-504` | `Get the pointers of scheduled runs within the 12-month window` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
@@ -663,7 +663,7 @@ report.yml
 | `host_audit_mail_ehlohost` | `""` | relay 설정이 HELO 도메인을 요구할 때 그 이름 |
 | `host_audit_mail_timeout` | `30` | SMTP 접속 제한 시간(초) |
 
-주소는 개인정보다. 주소를 다루는 태스크(AUD-601~603, 606, 608)는 모두 `no_log`이고, 오류 문구는 `host_audit_mail_redact`로 주소를 `<수신자>`로 바꾼 뒤에만 보여 준다. 보고서·호스트별 JSON·`run.json`·`mail_summary.json`에는 주소가 들어가지 않는다. 발송 태스크는 `ignore_errors`가 아니라 `failed_when: false`다 — ansible-core는 무시된 모듈 오류의 메시지("Failed to send mail to '<주소>'")를 `no_log`와 상관없이 찍는다(실측). 성공 여부는 `rc`와 모듈의 성공 메시지로 판정한다.
+주소는 개인정보다. 주소를 다루는 태스크(AUD-602·603, 606, 608)는 모두 `no_log`이고, 오류 문구는 `host_audit_mail_redact`로 주소를 `<수신자>`로 바꾼 뒤에만 보여 준다. 보고서·호스트별 JSON·`run.json`·`mail_summary.json`에는 주소가 들어가지 않는다. 발송 태스크는 `ignore_errors`가 아니라 `failed_when: false`다 — ansible-core는 무시된 모듈 오류의 메시지("Failed to send mail to '<주소>'")를 `no_log`와 상관없이 찍는다(실측). 성공 여부는 `rc`와 모듈의 성공 메시지로 판정한다.
 
 알려진 한계: `community.general.mail`의 STARTTLS는 서버 인증서를 검증하지 않는다(파이썬 `smtplib.starttls()` 기본 컨텍스트). relay 구간은 암호화되지만 중간자 공격을 막지 못한다 — 러너에서 relay까지의 경로는 사내망과 Google 사이 인터넷 구간이다.
 
@@ -680,7 +680,6 @@ report.yml
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `AUD-600` | `Decide whether this run sends the report mail` | `ansible.builtin.set_fact` | 러너 | 비활성·check 모드·보관 실패면 보내지 않음 |
-| `AUD-601` | `Log in to OpenBao once through the shared read point (token for the mail settings)` | `ansible.builtin.set_fact` (`lookup openbao_doc @token`) | 러너 | 읽기 전용, `no_log`. 이미 받은 토큰이 있으면 건너뜀 |
 | `AUD-602` | `Read the Host Audit mail settings from OpenBao (inventory/config/host_audit)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 문서가 없으면 `{}`, 못 읽으면 값 없음(AUD-603이 문제로 남김) |
 | `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 수신자·발신자 주소와 선택 표시 이름(`From:` 헤더 값)을 해석, 문제는 키 이름·건수만, `no_log` |
 | `AUD-604` | `Create a private temporary directory for the attachment` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 디렉터리, AUD-607이 삭제 |

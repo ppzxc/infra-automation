@@ -223,7 +223,7 @@ def _flat(items):
 def test_the_webhook_comes_from_the_alert_notify_document_and_stays_out_of_logs():
     tasks = list(_flat(yaml.safe_load((ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8"))))
     fetch = next(t for t in tasks if t["name"].startswith("[AUD-501]"))
-    assert "secrets/services/alert/notify" in json.dumps(fetch) and fetch["no_log"] is True
+    assert "host_audit_openbao_alert_doc" in json.dumps(fetch) and fetch["no_log"] is True
     resolve = next(t for t in tasks if t["name"].startswith("[AUD-502]"))
     facts = resolve["ansible.builtin.set_fact"]
     assert "_host_audit_alert_target" in facts and resolve["no_log"] is True

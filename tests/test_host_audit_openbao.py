@@ -112,6 +112,17 @@ def test_the_drift_subruns_render_the_provisioning_and_host_agents_config_playbo
         assert "common/resolve_connection.yml" in text
 
 
+def test_the_read_lists_come_from_the_declaration_and_both_logins_share_one_task():
+    v = _vars()
+    parts = set(v["host_audit_openbao_storage_docs"]) | {v["host_audit_openbao_alert_doc"], v["host_audit_openbao_mail_doc"]}
+    assert parts == set(v["host_audit_openbao_required"])
+    for name in ("storage_credentials.yml", "mail.yml"):
+        text = (ROLE_DIR / "tasks" / name).read_text(encoding="utf-8")
+        assert "vault_token.yml" in text and "'@token'" not in text
+    assert "[AUD-500]" in (ROLE_DIR / "tasks" / "vault_token.yml").read_text(encoding="utf-8")
+    assert "inventory/services/rustfs'" not in (ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8").split("[AUD-501]")[1].split("[AUD-502]")[0]
+
+
 # ------------------------------------------------------------------ 가짜 OpenBao로 실제 태스크를 돌린다
 
 def _run(tmp_path, fake, tasks, play_vars=None, extra_files=None):
@@ -178,8 +189,10 @@ def test_a_storage_document_that_cannot_be_read_is_a_storage_problem_naming_docu
     fake_openbao.deny(*deny)
     res, out = _storage(tmp_path, fake_openbao)
     assert res.returncode == 0, res.stdout + res.stderr          # 실행을 여기서 멈추지 않는다(AUD-516이 판정한다)
-    assert "OpenBao" in out["problem"] and all(d in out["problem"] for d in STORAGE_DOCS)
-    assert "fake-secret-0018" not in res.stdout + res.stderr + json.dumps(out)
+    failing = f"{deny[0]}/{deny[1]}"
+    assert "OpenBao" in out["problem"] and failing in out["problem"]
+    assert all(d not in out["problem"] for d in STORAGE_DOCS - {failing})   # 못 읽은 문서만 이름이 나온다
+    assert "fake-secret-0018" not in res.stdout + res.stderr + out["problem"]
 
 
 @needs_ansible
@@ -223,10 +236,15 @@ def _mail(tmp_path, fake, send=True):
     report = tmp_path / "report.html"
     report.write_text("<html></html>")
     mail_tasks = yaml.safe_load((ROLE_DIR / "tasks" / "mail.yml").read_text(encoding="utf-8"))
-    tasks = [t for t in mail_tasks if re.match(r"\[AUD-60[0-3]\]", t.get("name", ""))]
+    # AUD-600, 로그인(vault_token.yml을 포함하는 태스크), AUD-602·603
+    tasks = [t for t in mail_tasks if re.match(r"\[AUD-60[023]\]", t.get("name", ""))
+             or "vault_token.yml" in json.dumps(t)]
     assert len(tasks) == 4
+    tasks = [dict(t, **{"ansible.builtin.include_tasks": str(ROLE_DIR / "tasks" / "vault_token.yml")})
+             if "ansible.builtin.include_tasks" in t else t for t in tasks]
     play_vars = {"host_audit_mail_doc": {"subject": "s", "run_id": "r"}, "_host_audit_archive_ok": send,
-                 "_host_audit_mail_report_path": str(report), "host_audit_mail_enabled": True}
+                 "_host_audit_mail_report_path": str(report), "host_audit_mail_enabled": True,
+                 "host_audit_openbao_mail_doc": _vars()["host_audit_openbao_mail_doc"]}
     tasks.append({"ansible.builtin.set_fact": {"_result": {
         "problem": "{{ _host_audit_mail_problem | default('') }}",
         "sender": "{{ _host_audit_mail_rcpt.from_header | default('') }}",

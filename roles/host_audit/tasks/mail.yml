@@ -28,25 +28,18 @@
          else ('' if _host_audit_archive_ok | default(false) | bool
          else '원본 보관 실패 — 메일 보내지 않음')) }}
 
-# 공용 읽기 지점으로 토큰을 한 번 받는다(이미 AUD-500이 받아 뒀으면 그 토큰을 쓴다). 못 받아도 여기서 멈추지 않는다: 아래 AUD-603이 문제로 남긴다.
-- name: "[AUD-601] Log in to OpenBao once through the shared read point (token for the mail settings)"
-  ansible.builtin.set_fact:
-    _vault_token: "{{ lookup('openbao_doc', '@token', errors='ignore') | default('', true) }}"
-  check_mode: false
-  no_log: true
-  when:
-    - _host_audit_mail_plan.send | bool
-    - _vault_token is not defined
+# 설정을 읽기 직전에 새로 로그인한다(vault_token.yml): 앞 단계가 토큰 TTL보다 길어도 만료된 토큰을 쓰지 않는다.
+- name: Log in to OpenBao for the mail settings
+  ansible.builtin.include_tasks: vault_token.yml
+  when: _host_audit_mail_plan.send | bool
 
 # 문서가 없으면(404) {}이고(수신자 없음 문제로 남는다), 403이나 연결 불가는 읽기 실패다(errors='ignore'가 값 없음으로 돌려준다).
 - name: "[AUD-602] Read the Host Audit mail settings from OpenBao (inventory/config/host_audit)"
   ansible.builtin.set_fact:
-    _host_audit_mail_config: "{{ lookup('openbao_doc', 'inventory/config/host_audit', required=false, errors='ignore') }}"
+    _host_audit_mail_config: "{{ lookup('openbao_doc', host_audit_openbao_mail_doc, required=false, errors='ignore') }}"
   check_mode: false
   no_log: true
-  when:
-    - _host_audit_mail_plan.send | bool
-    - _vault_token is defined
+  when: _host_audit_mail_plan.send | bool
 
 # 수신자·발신자·표시 이름은 문서 값뿐이다(mail_recipients·mail_sender·mail_sender_display_name).
 # 문제는 키 이름과 건수로만 남긴다 — 주소 값은 어디에도 쓰지 않는다.
