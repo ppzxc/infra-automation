@@ -27,6 +27,7 @@
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | secret | state 버킷 전용 키 |
 | `TF_ENCRYPTION` | secret | pbkdf2 passphrase(3절) |
 | `TF_VAR_runner_cidrs` | env | Semaphore 러너 CIDR 목록. JSON 배열 문자열, 예 `["<러너 CIDR>"]`. 기본값 없음 |
+| `TF_VAR_agent_session_cidrs` | env | `agent_session` AppRole의 출발지 CIDR 목록(`secret_id_bound_cidrs`·`token_bound_cidrs`). 형식은 `TF_VAR_runner_cidrs`와 같다. 기본값 없음 |
 | `TF_VAR_operator_password_hashes` | secret | `{"<사용자>":"<bcrypt 해시>"}`. 해시는 `htpasswd -niBC 10 x \| cut -d: -f2 \| sed 's/^\$2y/$2a/'`로 만든다(비밀번호는 표준 입력 프롬프트로 입력, 명령행 인자 금지). 평문 비밀번호는 넣지 않는다 |
 
 ## 3. state·plan 암호화(pbkdf2)

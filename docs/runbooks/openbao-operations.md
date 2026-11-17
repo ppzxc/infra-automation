@@ -81,7 +81,7 @@ OpenBao에는 두지 않는다. OpenBao가 고장 났을 때 고칠 state를 열
 
 ## 6. operator 사용자 추가
 
-`operator`는 `infra` 안 userpass 사용자다. 전체 읽기와 create/update만 있고 delete·destroy·`sys/`는 없다.
+`operator`는 `infra` 안 userpass 사용자다. 전체 읽기(list 포함)와 create/update만 있고 delete·destroy·`sys/`는 없다.
 
 1. OpenTofu 코드의 운영자 사용자 목록에 사람을 추가하는 PR을 낸다(§4 절차로 적용).
 2. 적용 뒤 본인이 초기 비밀번호를 정하고 바꾼다. 비밀번호는 비밀번호 관리자에만 둔다.
