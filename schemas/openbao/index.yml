@@ -23,5 +23,5 @@
 "secrets/services/alert/notify": secrets/services/alert_notify.schema.json
 "secrets/services/github/org_hooks_read": secrets/services/token.schema.json
 "secrets/services/semaphore/inventory_read": secrets/services/token.schema.json
-"secrets/services/funa/proxy": secrets/services/funa_secrets.schema.json
-"secrets/services/funa/vrrp": secrets/services/funa_secrets.schema.json
+"secrets/services/funa/proxy": secrets/services/funa_proxy.schema.json
+"secrets/services/funa/vrrp": secrets/services/funa_vrrp.schema.json

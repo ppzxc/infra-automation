@@ -99,7 +99,10 @@ def old_docs():
             "o2_ingest_password": "o2-pass-0010",
         },
         "clusters/funa": {"FUNA_SERVICE_NAME": "fake-funa", "FUNA_HEALTH_CHECK_URI": "/health", "TZ": "Asia/Seoul",
-                          "FUNA_NOTIFICATION_SMTP_PORT": "25"},
+                          "FUNA_NOTIFICATION_SMTP_PORT": "25", "FUNA_FLOATING_HOSTNAME": "vip.example.test",
+                          "FUNA_NOTIFICATION_SMTP_FROM": "f@example.test", "FUNA_NOTIFICATION_SMTP_HOST": "smtp.example.test",
+                          "FUNA_NOTIFICATION_SMTP_TO": "t@example.test", "FUNA_NOTIFICATION_SMTP_USERNAME": "u",
+                          "FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL": "https://bot.example.test/x"},
         "clusters/funa/proxy": {"DB_PASSWORD": "dbp", "FUNA_ADMIN_TOKEN": "adm"},
         "clusters/funa/vrrp": {"FUNA_NOTIFICATION_SMTP_PASSWORD": "sp", "FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN": "bt"},
     }
@@ -210,8 +213,11 @@ def test_services_config_and_permission_documents(plan):
 
 
 def test_funa_cluster_keys_are_lowercased_without_funa_prefix(plan):
-    assert plan.store["inventory/services/funa"] == {"service_name": "fake-funa", "health_check_uri": "/health",
-                                                     "tz": "Asia/Seoul", "notification_smtp_port": "25"}
+    assert plan.store["inventory/services/funa"] == {
+        "service_name": "fake-funa", "health_check_uri": "/health", "tz": "Asia/Seoul", "notification_smtp_port": "25",
+        "floating_hostname": "vip.example.test", "notification_smtp_from": "f@example.test",
+        "notification_smtp_host": "smtp.example.test", "notification_smtp_to": "t@example.test",
+        "notification_smtp_username": "u", "notification_naver_works_bot_url": "https://bot.example.test/x"}
     assert plan.store["secrets/services/funa/proxy"] == {"db_password": "dbp", "admin_token": "adm"}
     assert plan.store["secrets/services/funa/vrrp"] == {"notification_smtp_password": "sp",
                                                         "notification_naver_works_bot_token": "bt"}

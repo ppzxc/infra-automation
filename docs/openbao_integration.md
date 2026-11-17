@@ -102,13 +102,13 @@ monitoring_openbao_required:
   "inventory/assets/+": []
 ```
 
-### (1-1) FUNA Cluster 환경 값 (`funa_env`, #222)
-`funa_cluster` 그룹 호스트에만 쓰인다. **값은 이 문서와 Git에 두지 않는다.** KV 키 이름이 곧 환경 변수 이름이다. 자세한 필수 키는 [docs/funa_env.md](funa_env.md).
-* `secret/data/hosts/<inventory_hostname>`: 노드별 키 `FUNA_NODE_EXTERNAL_HOSTNAME`, `FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME`(→ `cluster.env`)과 노드마다 값이 다른 시크릿 `CLOUDFLARE_API_TOKEN`(→ `proxy.secrets.env`)을 기존 호스트 KV에 **추가**한다(역할은 이 키들만 읽는다).
-* `secret/data/clusters/funa`: 클러스터 공통 비시크릿(→ `cluster.env`, `0644`). 키 전부를 렌더링한다.
-* `secret/data/clusters/funa/proxy`: Caddy 시크릿(→ `proxy.secrets.env`, `0640 root:dockermgmt`).
-* `secret/data/clusters/funa/vrrp`: keepalived 시크릿(→ `vrrp.secrets.env`, `0640 root:dockermgmt`).
-* 정책: Semaphore AppRole에 위 경로의 **읽기** 권한이 필요하다(`clusters/funa/*`). 경로가 없거나 필수 키가 빠지면 플레이는 경로·키 이름을 대며 실패한다.
+### (1-1) FUNA Cluster 환경 값 (`funa_env`, #222, #524)
+`funa_cluster` 그룹 호스트에만 쓰인다. **값은 이 문서와 Git에 두지 않는다.** 필수 키·대응표는 [docs/funa_env.md](funa_env.md)와 `roles/funa_env/vars/main.yml`(`funa_env_openbao_required`)이 원본이다.
+* `inventory/assets/<관리번호>`의 `funa` 절: 노드별 설정(→ `cluster.env`).
+* `inventory/services/funa`: 클러스터 공통 비시크릿(→ `cluster.env`, `0644`).
+* `secrets/services/funa/proxy`·`vrrp`: 소비 컨테이너별 시크릿(→ `proxy.secrets.env`·`vrrp.secrets.env`, `0640 root:dockermgmt`).
+* `secrets/assets/<관리번호>/credentials/cloudflare`: 노드별 Cloudflare 토큰(`token` → `proxy.secrets.env`의 `CLOUDFLARE_API_TOKEN`). Cloudflare는 Service가 아니다.
+* 저장 키는 snake_case(`FUNA_` 접두사 제거 후 소문자)이고 역할의 대응표가 env 이름으로 바꾼다. 경로가 없거나 필수 키가 빠지면 대체값 없이 실패한다.
 
 ### (4) 네트워크 장비(Cisco·FortiGate) 접속 정보 (Spec #511 / Ticket-18)
 Asset 하나에 Endpoint와 Credential로 둔다(옛 `hosts/<ns>`의 `ansible_*`·`connection_type`·`bastion_host`와 별도 경로 `fortigate/<ns>`는 없다).
