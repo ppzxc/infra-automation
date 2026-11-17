@@ -104,6 +104,12 @@ def test_applier_policy_covers_only_control_plane_paths_never_kv_data():
     assert not any(p.startswith(("inventory", "secrets", "auth/token", "sys/*", "*")) for p in paths)
 
 
+def test_applier_cannot_mint_secret_ids_for_other_roles():
+    text = _strip_comments((TOFU / "policies" / "applier.hcl").read_text(encoding="utf-8"))
+    for p in ("auth/approle/role/+/secret-id", "auth/approle/role/+/secret-id-accessor/*"):
+        assert re.search(rf'path "{re.escape(p)}" \{{\s*capabilities = \["deny"\]', text), p
+
+
 def test_applier_policy_has_no_wildcard_root_or_kv_capabilities():
     text = _strip_comments((TOFU / "policies" / "applier.hcl").read_text(encoding="utf-8"))
     assert 'path "+' not in text and 'path "*' not in text

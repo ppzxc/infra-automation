@@ -184,6 +184,8 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | `target_hosts`, `host_audit_mail_enabled`, `host_audit_storage_enabled` | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
 | Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |
 
+**OpenTofu 템플릿(위 표와 별개)**: `OpenBao — OpenTofu`(앱 OpenTofu, Sub-directory `tofu/openbao`, **Auto Approve 끔**, 수동 실행)는 Ansible 템플릿이 아니라 위 8개에 세지 않는다. 전용 Environment를 쓰고 다른 템플릿과 공유하지 않는다. 정의와 입력 값은 [OpenBao 구성 OpenTofu](openbao_opentofu.md) 5절을 본다.
+
 **실행 시 입력 (Survey variables)**
 
 Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Message, 템플릿이 허용한 Prompt(Limit 등), 템플릿에 정의한 **Survey variables**만 보인다. 실행할 때 넘길 변수는 템플릿 편집 → Survey Variables에 정의한다(값은 `--extra-vars`로 전달된다).

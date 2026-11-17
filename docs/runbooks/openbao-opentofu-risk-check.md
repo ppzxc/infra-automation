@@ -21,6 +21,7 @@
 
 - `vault_generic_endpoint`로 userpass 사용자를 `password_hash`(bcrypt, `$2a$`) 없이 만들면 `must provide either password or password_hash`로 거부된다. 그래서 코드는 평문 비밀번호 대신 해시를 받는다(평문이 state에 남지 않게 한다).
 - state 파일의 `key_provider.pbkdf2.main` 메타만 보이고 passphrase 문자열은 state에 없다. `TF_ENCRYPTION` 없이 plan하면 실패한다(enforced).
+- `applier` 정책에 `auth/approle/role/+/secret-id` 등을 `deny`로 두면 `applier` 토큰의 secret_id 발급이 403이고 `tofu plan`은 `No changes`다(role 리소스는 `role-id`만 읽는다).
 - `applier` 토큰으로 `secrets/`에 KV를 쓰려 하면 403이다. 정책 조회·변경은 통과한다.
 
 ## 3. 확인하지 못한 것 (운영자 확인 필요)

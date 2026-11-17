@@ -17,6 +17,24 @@ path "auth/approle/role/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
 
+# secret_id 발급은 admin 런북으로만 한다. 이 경로를 열어 두면 applier가 다른 AppRole의 secret_id를 만들어 로그인해
+# 그 계열의 KV 읽기 권한을 얻을 수 있다.
+path "auth/approle/role/+/secret-id" {
+  capabilities = ["deny"]
+}
+
+path "auth/approle/role/+/secret-id/*" {
+  capabilities = ["deny"]
+}
+
+path "auth/approle/role/+/custom-secret-id" {
+  capabilities = ["deny"]
+}
+
+path "auth/approle/role/+/secret-id-accessor/*" {
+  capabilities = ["deny"]
+}
+
 path "sys/mounts" {
   capabilities = ["read", "list"]
 }
