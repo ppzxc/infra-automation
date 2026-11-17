@@ -1,4 +1,4 @@
-"""funa_env 필터(#222): OpenBao 값 → dotenv 파일 내용, 오류는 이름만 말하고 값은 말하지 않는다."""
+"""funa_env 필터(#222, #524): 새 구조 문서(snake_case 저장 키) → dotenv 파일 내용. 오류는 이름만 말하고 값은 말하지 않는다."""
 import sys
 from pathlib import Path
 
@@ -7,35 +7,40 @@ import pytest
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
-from funa_env import HEADER, funa_env_kv_by_key, funa_env_resolve  # noqa: E402
+from funa_env import HEADER, funa_env_doc_path, funa_env_resolve  # noqa: E402
 
-NODE_KEYS = ["FUNA_NODE_EXTERNAL_HOSTNAME"]
-NODE_SECRET_KEYS = ["NODE_TOKEN"]
-KV = {
-    "node": {"FUNA_NODE_EXTERNAL_HOSTNAME": "n1.example.test", "NODE_TOKEN": "node-secret", "ansible_password": "ssh-secret"},
-    "cluster": {"TZ": "Asia/Seoul", "FUNA_SERVICE_NAME": "funa"},
-    "proxy": {"CLOUDFLARE_API_TOKEN": "cf-secret", "DB_PASSWORD": "passw0rd"},
-    "vrrp": {"BOT_TOKEN": "vrrp-secret"},
+KEY_MAP = {"node_external_hostname": "FUNA_NODE_EXTERNAL_HOSTNAME", "tz": "TZ", "service_name": "FUNA_SERVICE_NAME",
+           "db_password": "DB_PASSWORD", "bot_token": "FUNA_BOT_TOKEN", "extra": "FUNA_EXTRA"}
+NODE_REQUIRED = ["node_external_hostname"]
+ASSET, CLUSTER, PROXY, VRRP, CRED = ("inventory/assets/+", "inventory/services/funa", "secrets/services/funa/proxy",
+                                     "secrets/services/funa/vrrp", "secrets/assets/+/credentials/+")
+DOCS = {
+    ASSET: {"description": "Fake", "funa": {"node_external_hostname": "n1.example.test"}},
+    CLUSTER: {"tz": "Asia/Seoul", "service_name": "funa"},
+    PROXY: {"db_password": "passw0rd"},
+    VRRP: {"bot_token": "vrrp-secret"},
+    CRED: {"type": "api_token", "token": "cf-secret"},
 }
 
 
-def resolve(kv=None, **over):
-    kv = dict(KV if kv is None else kv)
-    return funa_env_resolve(kv, NODE_KEYS, over.get("cluster_req", ["TZ"]),
-                            over.get("proxy_req", ["CLOUDFLARE_API_TOKEN"]), over.get("vrrp_req", []),
-                            "clusters/funa", "hosts/n1", NODE_SECRET_KEYS)
+def resolve(docs=None):
+    return funa_env_resolve(DOCS if docs is None else docs, KEY_MAP, NODE_REQUIRED, "CLOUDFLARE_API_TOKEN", "n1", "cloudflare")
 
 
-def test_files_hold_only_their_own_values():
+def test_doc_path_fills_plus_with_host_then_credential():
+    assert funa_env_doc_path(ASSET, "n1", "cloudflare") == "inventory/assets/n1"
+    assert funa_env_doc_path(CRED, "n1", "cloudflare") == "secrets/assets/n1/credentials/cloudflare"
+    assert funa_env_doc_path(PROXY, "n1", "cloudflare") == PROXY
+
+
+def test_stored_keys_become_env_names_and_files_hold_only_their_own_values():
     out = resolve()
     assert out["errors"] == []
-    assert "TZ=Asia/Seoul\n" in out["cluster"]
-    assert "FUNA_NODE_EXTERNAL_HOSTNAME=n1.example.test\n" in out["cluster"]
-    assert "ansible_password" not in out["cluster"] and "ssh-secret" not in out["cluster"]
-    assert "CLOUDFLARE_API_TOKEN=cf-secret\n" in out["proxy"] and "vrrp-secret" not in out["proxy"]
-    assert out["vrrp"] == HEADER + "BOT_TOKEN=vrrp-secret\n"
-    assert "cf-secret" not in out["cluster"] + out["vrrp"]
-    assert "NODE_TOKEN=node-secret\n" in out["proxy"] and "node-secret" not in out["cluster"] + out["vrrp"]
+    assert "TZ=Asia/Seoul\n" in out["cluster"] and "FUNA_NODE_EXTERNAL_HOSTNAME=n1.example.test\n" in out["cluster"]
+    assert "description" not in out["cluster"]
+    assert "DB_PASSWORD=passw0rd\n" in out["proxy"] and "CLOUDFLARE_API_TOKEN=cf-secret\n" in out["proxy"]
+    assert out["vrrp"] == HEADER + "FUNA_BOT_TOKEN=vrrp-secret\n"
+    assert "cf-secret" not in out["cluster"] + out["vrrp"] and "vrrp-secret" not in out["proxy"]
 
 
 def test_output_is_deterministic():
@@ -43,74 +48,63 @@ def test_output_is_deterministic():
 
 
 @pytest.mark.parametrize("value, line", [
-    ("plain-1.2/x", "K=plain-1.2/x\n"),
-    ("two words", "K='two words'\n"),
-    ("a$b#c", "K='a$b#c'\n"),
-    ("", "K=\n"),
+    ("plain-1.2/x", "FUNA_EXTRA=plain-1.2/x\n"),
+    ("two words", "FUNA_EXTRA='two words'\n"),
+    ("a$b#c", "FUNA_EXTRA='a$b#c'\n"),
+    ("", "FUNA_EXTRA=\n"),
 ])
 def test_values_are_quoted_only_when_needed(value, line):
-    kv = {**KV, "cluster": {"TZ": "x", "K": value}}
-    assert line in resolve(kv)["cluster"]
+    assert line in resolve({**DOCS, CLUSTER: {"tz": "x", "extra": value}})["cluster"]
 
 
-@pytest.mark.parametrize("path, kv_patch, expect", [
-    ("missing node path", {"node": None}, "hosts/n1: OpenBao path does not exist"),
-    ("missing cluster path", {"cluster": None}, "clusters/funa: OpenBao path does not exist"),
-    ("missing proxy path", {"proxy": None}, "clusters/funa/proxy: OpenBao path does not exist"),
-    ("missing node key", {"node": {}}, "hosts/n1: required key FUNA_NODE_EXTERNAL_HOSTNAME is missing"),
-    ("missing node secret", {"node": {"FUNA_NODE_EXTERNAL_HOSTNAME": "x"}}, "hosts/n1: required key NODE_TOKEN is missing"),
-    ("missing cluster key", {"cluster": {}}, "clusters/funa: required key TZ is missing"),
-    ("empty required", {"cluster": {"TZ": ""}}, "clusters/funa: required key TZ is missing"),
-    ("empty vrrp", {"vrrp": {}}, "clusters/funa/vrrp: no keys"),
-    ("bad name", {"cluster": {"TZ": "x", "bad-name": "v"}}, "'bad-name' is not a valid environment variable name"),
-    ("nested", {"cluster": {"TZ": "x", "N": {"a": 1}}}, "N is not a single scalar value"),
-    ("newline", {"cluster": {"TZ": "x", "N": "a\nb"}}, "N contains a line break"),
-    ("quote", {"cluster": {"TZ": "x", "N": "it's"}}, "N contains a single quote"),
-    ("secret in cluster", {"cluster": {"TZ": "x", "DB_PASSWORD": "v"}}, "DB_PASSWORD is also in the non-secret cluster values"),
+@pytest.mark.parametrize("path, docs_patch, expect", [
+    ("missing node section", {ASSET: {"description": "Fake"}}, "inventory/assets/n1: required key funa is missing"),
+    ("missing node key", {ASSET: {"funa": {}}}, "inventory/assets/n1: required key funa.node_external_hostname is missing"),
+    ("unmapped cluster key", {CLUSTER: {"tz": "x", "nope": "v"}}, "inventory/services/funa: nope has no environment variable mapping"),
+    ("unmapped secret key", {PROXY: {"db_password": "x", "nope": "v"}}, "secrets/services/funa/proxy: nope has no environment variable mapping"),
+    ("no token", {CRED: {"type": "api_token"}}, "secrets/assets/n1/credentials/cloudflare: required key token is missing"),
+    ("nested", {CLUSTER: {"tz": "x", "extra": {"a": 1}}}, "FUNA_EXTRA is not a single scalar value"),
+    ("newline", {CLUSTER: {"tz": "x", "extra": "a\nb"}}, "FUNA_EXTRA contains a line break"),
+    ("quote", {CLUSTER: {"tz": "x", "extra": "it's"}}, "FUNA_EXTRA contains a single quote"),
+    ("secret in cluster", {CLUSTER: {"tz": "x", "db_password": "v"}}, "DB_PASSWORD is also in the non-secret cluster values"),
 ])
-def test_errors_name_the_problem(path, kv_patch, expect):
-    out = resolve({**KV, **kv_patch})
+def test_errors_name_the_problem(path, docs_patch, expect):
+    out = resolve({**DOCS, **docs_patch})
     assert any(expect in e for e in out["errors"]), out["errors"]
     assert out["cluster"] == out["proxy"] == out["vrrp"] == ""
 
 
 def test_errors_never_contain_values():
-    kv = {**KV, "cluster": {"TZ": "x", "N": "line\nsecret-value", "Q": "it's-secret"},
-          "proxy": {"CLOUDFLARE_API_TOKEN": "cf-secret", "dup": {"a": "nested-secret"}}}
-    text = " ".join(resolve(kv)["errors"])
+    docs = {**DOCS, CLUSTER: {"tz": "x", "extra": "line\nsecret-value", "nope": "nope-secret"},
+            PROXY: {"db_password": "it's-secret", "dup": {"a": "nested-secret"}}}
+    text = " ".join(resolve(docs)["errors"])
     assert text
-    for value in ("secret-value", "it's-secret", "cf-secret", "nested-secret"):
+    for value in ("secret-value", "nope-secret", "it's-secret", "nested-secret", "cf-secret"):
         assert value not in text
 
 
-@pytest.mark.parametrize("source, path", [
-    ("cluster", "clusters/funa"),
-    ("proxy", "clusters/funa/proxy"),
-    ("vrrp", "clusters/funa/vrrp"),
-    ("node", "hosts/n1"),
+@pytest.mark.parametrize("source, path, key", [
+    (CLUSTER, "inventory/services/funa", "extra"),
+    (PROXY, "secrets/services/funa/proxy", "db_password"),
+    (VRRP, "secrets/services/funa/vrrp", "bot_token"),
 ])
 @pytest.mark.parametrize("value", ["${LEAKVAL}", "${LEAKVAL:-x}", "pre-${LEAKVAL}-post"])
-def test_shell_reference_is_rejected_by_path_and_key_only(source, path, value):
-    key = "FUNA_NODE_EXTERNAL_HOSTNAME" if source == "node" else "REF_KEY"
-    out = resolve({**KV, source: {**KV[source], key: value}})
-    expect = "%s: %s contains a shell reference" % (path, key)
-    assert expect in out["errors"], out["errors"]
+def test_shell_reference_is_rejected_by_path_and_key_only(source, path, key, value):
+    out = resolve({**DOCS, source: {**DOCS[source], key: value}})
+    assert "%s: %s contains a shell reference" % (path, KEY_MAP[key]) in out["errors"], out["errors"]
     assert "LEAKVAL" not in " ".join(out["errors"])
     assert out["cluster"] == out["proxy"] == out["vrrp"] == ""
 
 
+def test_shell_reference_in_the_node_section_and_the_credential_is_rejected():
+    node = resolve({**DOCS, ASSET: {"funa": {"node_external_hostname": "${LEAKVAL}"}}})
+    assert "inventory/assets/n1: FUNA_NODE_EXTERNAL_HOSTNAME contains a shell reference" in node["errors"]
+    cred = resolve({**DOCS, CRED: {"type": "api_token", "token": "${LEAKVAL}"}})
+    assert "secrets/assets/n1/credentials/cloudflare: CLOUDFLARE_API_TOKEN contains a shell reference" in cred["errors"]
+
+
 @pytest.mark.parametrize("value", ["pa$word", "ends-with$", "$", "$NAME", "a$$b"])
 def test_dollar_without_brace_passes(value):
-    out = resolve({**KV, "proxy": {**KV["proxy"], "DB_PASSWORD": value}})
+    out = resolve({**DOCS, PROXY: {"db_password": value}})
     assert out["errors"] == []
     assert "DB_PASSWORD='%s'\n" % value in out["proxy"]
-
-
-def test_kv_by_key_maps_status_to_data_or_none():
-    results = [
-        {"item": {"key": "node"}, "status": 200, "json": {"data": {"data": {"A": "1"}}}},
-        {"item": {"key": "cluster"}, "status": 404, "json": {"errors": []}},
-        {"item": {"key": "proxy"}, "status": 404},
-    ]
-    assert funa_env_kv_by_key(results) == {"node": {"A": "1"}, "cluster": None, "proxy": None}
-    assert funa_env_kv_by_key(None) == {}

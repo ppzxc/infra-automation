@@ -5,6 +5,7 @@ root가 아니므로 소유자는 현재 사용자로 바꿔 돌리고(`funa_env
 """
 import getpass
 import grp
+import json
 import os
 import re
 import shutil
@@ -15,32 +16,49 @@ from pathlib import Path
 import pytest
 import yaml
 
-from openbao_fake import FakeOpenBao
+from openbao_fake import FakeOpenBao, default_store
+import openbao_migrate as om
+import openbao_validation as ov
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROLE = ROOT_DIR / "roles" / "funa_env"
 USER_GROUP = grp.getgrgid(os.getgid()).gr_name
 
-NODE = {"FUNA_NODE_EXTERNAL_HOSTNAME": "n1.funa.test", "FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME": "*.n1.funa.test",
-        "FUNA_NOTIFICATION_HEADER": "[FUNA n1] alert", "FUNA_NODE_NAME": "n1",
-        "CLOUDFLARE_API_TOKEN": "cf-token-SECRET", "ansible_password": "ssh-pass-SECRET"}
-CLUSTER = {"FUNA_FLOATING_HOSTNAME": "vip.funa.test", "FUNA_HEALTH_CHECK_URI": "/health", "FUNA_SERVICE_NAME": "funa",
-           "TZ": "Asia/Seoul",
-           "FUNA_NOTIFICATION_SMTP_FROM": "a@funa.test", "FUNA_NOTIFICATION_SMTP_HOST": "smtp.funa.test",
-           "FUNA_NOTIFICATION_SMTP_PORT": 25, "FUNA_NOTIFICATION_SMTP_TO": "b@funa.test",
-           "FUNA_NOTIFICATION_SMTP_USERNAME": "user", "FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL": "https://bot.funa.test/x"}
-PROXY = {"FUNA_ADMIN_TOKEN": "admin-token-SECRET", "DB_PASSWORD": "db-pass-SECRET"}
-VRRP = {"FUNA_NOTIFICATION_SMTP_PASSWORD": "smtp-pass-SECRET", "FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN": "bot-token-SECRET"}
+NODE = {"node_external_hostname": "n1.funa.test", "node_external_wildcard_hostname": "*.n1.funa.test",
+        "notification_header": "[FUNA n1] alert", "node_name": "n1"}
+CLUSTER = {"floating_hostname": "vip.funa.test", "health_check_uri": "/health", "service_name": "funa",
+           "tz": "Asia/Seoul",
+           "notification_smtp_from": "a@funa.test", "notification_smtp_host": "smtp.funa.test",
+           "notification_smtp_port": 25, "notification_smtp_to": "b@funa.test",
+           "notification_smtp_username": "user", "notification_naver_works_bot_url": "https://bot.funa.test/x"}
+PROXY = {"admin_token": "admin-token-SECRET", "db_password": "db-pass-SECRET"}
+VRRP = {"notification_smtp_password": "smtp-pass-SECRET", "notification_naver_works_bot_token": "bot-token-SECRET"}
+CF = {"type": "api_token", "token": "cf-token-SECRET"}
+SSH = {"type": "password", "username": "root", "password": "ssh-pass-SECRET"}
 SECRETS = [v for d in (PROXY, VRRP) for v in d.values()] + ["ssh-pass-SECRET", "cf-token-SECRET"]
+# 저장 키 -> env 이름(렌더링 결과 확인용. 역할의 대응표와 따로 손으로 적은 기대값이다)
+ENV = {"node_external_hostname": "FUNA_NODE_EXTERNAL_HOSTNAME", "tz": "TZ", "db_password": "DB_PASSWORD",
+       "node_name": "FUNA_NODE_NAME", "admin_token": "FUNA_ADMIN_TOKEN"}
+CLUSTER_DOC = "inventory/services/funa"
+
+
+def _vars():
+    return yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))
+
+
+def _asset(funa=NODE):
+    return {"description": "Fake FUNA node", "type": "server", "funa": funa}
 
 
 @pytest.fixture
 def bao():
-    with FakeOpenBao() as f:
-        f.set("secret", "hosts/n1", NODE)
-        f.set("secret", "clusters/funa", CLUSTER)
-        f.set("secret", "clusters/funa/proxy", PROXY)
-        f.set("secret", "clusters/funa/vrrp", VRRP)
+    with FakeOpenBao.with_schemas(store={}, namespace="infra", token="tok") as f:
+        f.set("inventory", "assets/n1", _asset())
+        f.set("inventory", "services/funa", CLUSTER)
+        f.set("secrets", "services/funa/proxy", PROXY)
+        f.set("secrets", "services/funa/vrrp", VRRP)
+        f.set("secrets", "assets/n1/credentials/cloudflare", CF)
+        f.set("secrets", "assets/n1/credentials/root", SSH)
         yield f
 
 
@@ -69,7 +87,7 @@ def run(tmp_path, addr, hosts=("n1",), groups=("funa_cluster",), check=False, ex
     for k, v in (extra or {}).items():
         inv["all"]["vars"][k] = v
     (tmp_path / "inv.yml").write_text(yaml.safe_dump(inv))
-    cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml"), "-e", "vault_namespace=''"]
+    cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")]
     if diff:
         cmd.append("--diff")
     if check:
@@ -77,6 +95,7 @@ def run(tmp_path, addr, hosts=("n1",), groups=("funa_cluster",), check=False, ex
     res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR,
                          env={**os.environ, "ANSIBLE_NOCOLOR": "1", "ANSIBLE_ROLES_PATH": str(ROOT_DIR / "roles"),
                               "ANSIBLE_FILTER_PLUGINS": str(ROOT_DIR / "filter_plugins"),
+                              "ANSIBLE_LOOKUP_PLUGINS": str(ROOT_DIR / "lookup_plugins"),
                               "ANSIBLE_LOCALHOST_WARNING": "False", "ANSIBLE_DEPRECATION_WARNINGS": "False"})
     return res, dest / "funa-cluster", prof
 
@@ -99,15 +118,16 @@ def test_renders_files_with_modes_and_consumer_separation(tmp_path, openbao):
     assert _mode(cluster) == 0o644 and _mode(proxy) == 0o640 and _mode(vrrp) == 0o640
     assert grp.getgrgid(proxy.stat().st_gid).gr_name == USER_GROUP
     kv = _kv_of(cluster)
-    assert kv["FUNA_NODE_EXTERNAL_HOSTNAME"] == "n1.funa.test" and kv["TZ"] == "Asia/Seoul"
+    assert kv[ENV["node_external_hostname"]] == "n1.funa.test" and kv[ENV["tz"]] == "Asia/Seoul"
     assert kv["FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME"] == "'*.n1.funa.test'"
-    # 알림 헤더는 노드의 호스트명이 들어가므로 노드 KV에서 온다(클러스터 공통 KV에는 없다).
+    # 알림 헤더는 노드의 호스트명이 들어가므로 Asset 문서의 funa 절에서 온다(클러스터 공통 설정에는 없다).
     assert kv["FUNA_NOTIFICATION_HEADER"] == "'[FUNA n1] alert'"
-    # funa 로그의 service.node.name 이 기본값 local 로 남지 않도록 노드 이름도 노드 KV 에서 온다(funa#337).
+    # funa 로그의 service.node.name 이 기본값 local 로 남지 않도록 노드 이름도 Asset funa 절에서 온다(funa#337).
     assert kv["FUNA_NODE_NAME"] == "n1"
-    assert "ansible_password" not in cluster.read_text()
     # 소비자별 분리: proxy 파일에는 keepalived 시크릿이 없고 그 반대도 같다
-    assert set(_kv_of(proxy)) == set(PROXY) | {"CLOUDFLARE_API_TOKEN"} and set(_kv_of(vrrp)) == set(VRRP)
+    assert set(_kv_of(proxy)) == {"FUNA_ADMIN_TOKEN", "DB_PASSWORD", "CLOUDFLARE_API_TOKEN"}
+    assert set(_kv_of(vrrp)) == {"FUNA_NOTIFICATION_SMTP_PASSWORD", "FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN"}
+    assert _kv_of(proxy)["CLOUDFLARE_API_TOKEN"] == "cf-token-SECRET"
     assert not any(v in proxy.read_text() for v in VRRP.values())
     assert not any(v in vrrp.read_text() for v in PROXY.values())
     assert not any(s in cluster.read_text() for s in SECRETS)
@@ -193,17 +213,17 @@ def _without(data, key):
     return {k: v for k, v in data.items() if k != key}
 
 
-# (문서, 덮어쓸 데이터 — None이면 문서를 지워 404, 기대 메시지)
-@pytest.mark.parametrize("doc, data, expect", [
-    ("clusters/funa/proxy", _without(PROXY, "DB_PASSWORD"), "required key DB_PASSWORD is missing"),
-    ("hosts/n1", _without(NODE, "CLOUDFLARE_API_TOKEN"), "clusters/funa/proxy: required key CLOUDFLARE_API_TOKEN is missing"),
-    ("clusters/funa", _without(CLUSTER, "TZ"), "required key TZ is missing"),
-    ("hosts/n1", {"ansible_password": "ssh-pass-SECRET"}, "required key FUNA_NODE_EXTERNAL_HOSTNAME is missing"),
-    ("hosts/n1", _without(NODE, "FUNA_NODE_NAME"), "hosts/n1: required key FUNA_NODE_NAME is missing"),
-    ("clusters/funa/vrrp", None, "clusters/funa/vrrp: OpenBao path does not exist"),
+# (마운트, 문서, 덮어쓸 데이터 — None이면 문서를 지워 404, 기대 메시지)
+@pytest.mark.parametrize("mount, doc, data, expect", [
+    ("secrets", "services/funa/proxy", _without(PROXY, "db_password"), "secrets/services/funa/proxy 문서에 필수 키가 없습니다 — db_password"),
+    ("inventory", "services/funa", _without(CLUSTER, "tz"), "inventory/services/funa 문서에 필수 키가 없습니다 — tz"),
+    ("secrets", "assets/n1/credentials/cloudflare", {"type": "api_token"}, "secrets/assets/+/credentials/+ 문서에 필수 키가 없습니다 — token"),
+    ("inventory", "assets/n1", {"description": "Fake", "type": "server"}, "inventory/assets/+ 문서에 필수 키가 없습니다 — funa"),
+    ("inventory", "assets/n1", _asset(_without(NODE, "node_name")), "inventory/assets/n1: required key funa.node_name is missing"),
 ])
-def test_missing_values_fail_naming_what_is_missing(tmp_path, bao, doc, data, expect):
-    bao.remove("secret", doc) if data is None else bao.set("secret", doc, data)
+def test_missing_values_fail_naming_what_is_missing(tmp_path, bao, mount, doc, data, expect):
+    bao.schema_check = None   # 스키마를 어긴 문서도 서버에 둬서 역할의 검증이 막는지 본다
+    bao.set(mount, doc, data)
     res, d, _ = run(tmp_path, bao.url)
     out = res.stdout + res.stderr
     assert res.returncode != 0
@@ -212,11 +232,47 @@ def test_missing_values_fail_naming_what_is_missing(tmp_path, bao, doc, data, ex
     assert not (d / "cluster.env").exists()
 
 
-def test_openbao_error_stops_without_changes(tmp_path, bao):
-    bao.deny("secret", "clusters/funa")
+@pytest.mark.parametrize("mount, doc", [("secrets", "services/funa/vrrp"), ("secrets", "assets/n1/credentials/cloudflare")])
+def test_missing_document_stops_without_changes_naming_the_document(tmp_path, bao, mount, doc):
+    bao.remove(mount, doc)
     res, d, _ = run(tmp_path, bao.url)
-    assert res.returncode != 0 and "OpenBao 조회 실패" in res.stdout
+    assert res.returncode != 0 and "필수 문서가 없습니다: %s/%s" % (mount, doc) in res.stdout
     assert not d.exists()
+
+
+def test_unmapped_stored_key_fails_naming_it_without_the_value(tmp_path, bao):
+    bao.schema_check = None
+    bao.set("inventory", "services/funa", {**CLUSTER, "surprise": "surprise-value-SECRET"})
+    res, d, _ = run(tmp_path, bao.url)
+    out = res.stdout + res.stderr
+    assert res.returncode != 0 and "surprise has no environment variable mapping" in out
+    assert "surprise-value-SECRET" not in out and not (d / "cluster.env").exists()
+
+
+def test_openbao_error_stops_without_changes(tmp_path, bao):
+    bao.deny("inventory", "services/funa")
+    res, d, _ = run(tmp_path, bao.url)
+    assert res.returncode != 0 and "OpenBao 조회 실패: inventory/services/funa (HTTP 403)" in res.stdout
+    assert not d.exists()
+
+
+def _pattern_regex(pattern):
+    return re.compile("^" + re.escape(pattern).replace(r"\+", "[^/]+") + "$")
+
+
+def test_every_read_stays_inside_the_declared_patterns_and_the_infra_namespace(tmp_path, bao):
+    res, _, _ = run(tmp_path, bao.url)
+    assert res.returncode == 0, res.stdout + res.stderr
+    declared = [_pattern_regex(p) for p in _vars()["funa_env_openbao_required"]]
+    reads = bao.reads()
+    assert reads and not bao.violations
+    for r in reads:
+        assert r.namespace == "infra" and r.token == "tok"
+        assert any(rx.match(f"{r.mount}/{r.doc}") for rx in declared), r.path
+    # 선언한 문서는 하나도 빠짐없이 읽는다
+    assert {f"{r.mount}/{r.doc}" for r in reads} == {
+        "inventory/assets/n1", "inventory/services/funa", "secrets/services/funa/proxy", "secrets/services/funa/vrrp",
+        "secrets/assets/n1/credentials/cloudflare"}
 
 
 def test_missing_dockermgmt_group_fails_naming_it(tmp_path, openbao):
@@ -224,6 +280,70 @@ def test_missing_dockermgmt_group_fails_naming_it(tmp_path, openbao):
     assert res.returncode != 0
     assert "no-such-group-xyz" in res.stdout and "docker_engine" in res.stdout
     assert not d.exists()
+
+
+# --- 대응표·선언과 스키마의 일치(정적) -----------------------------------------------------------------------------
+SCHEMAS = ROOT_DIR / "schemas" / "openbao"
+
+
+def _schema(rel):
+    return json.loads((SCHEMAS / rel).read_text(encoding="utf-8"))
+
+
+def _stored_keys_in_schemas():
+    asset = _schema("inventory/asset.schema.json")["properties"]["funa"]
+    docs = {"asset funa": asset, "service": _schema("inventory/service_funa.schema.json"),
+            "proxy": _schema("secrets/services/funa_proxy.schema.json"),
+            "vrrp": _schema("secrets/services/funa_vrrp.schema.json")}
+    return docs, set().union(*(set(d["properties"]) for d in docs.values()))
+
+
+def test_key_map_covers_exactly_the_schema_keys_and_follows_the_migration_rule():
+    key_map = _vars()["funa_env_key_map"]
+    docs, keys = _stored_keys_in_schemas()
+    assert set(key_map) == keys
+    # 마이그레이션(#521)이 저장 키를 만드는 규칙의 역: env 이름에서 규칙을 적용하면 저장 키가 나온다
+    for key, env in key_map.items():
+        assert om._env_to_key(env) == key, (key, env)
+    assert len(set(key_map.values())) == len(key_map)
+    for d in docs.values():
+        assert d["additionalProperties"] is False
+
+
+def test_declared_required_keys_match_the_schemas():
+    v = _vars()
+    declared = v["funa_env_openbao_required"]
+    index = dict(ov.load_index(SCHEMAS))
+    for pattern in ("inventory/services/funa", "secrets/services/funa/proxy", "secrets/services/funa/vrrp"):
+        assert set(declared[pattern]) == set(_schema(index[pattern])["required"]), pattern
+    for pattern in declared:
+        assert pattern in index, pattern   # 선언한 패턴은 index.yml에 있다
+    asset = _schema(index["inventory/assets/+"])["properties"]
+    assert declared["inventory/assets/+"] == ["funa"] and "funa" in asset
+    assert set(v["funa_env_node_required"]) == set(asset["funa"]["required"])
+    api_token = [b for b in _schema(index["secrets/assets/+/credentials/+"])["oneOf"] if b["properties"]["type"]["const"] == "api_token"]
+    assert set(declared["secrets/assets/+/credentials/+"]) <= set(api_token[0]["required"])
+
+
+def test_the_cloudflare_token_is_the_node_credential_not_a_service_secret():
+    v = _vars()
+    assert v["funa_env_credential"] == "cloudflare" and v["funa_env_credential_env"] == "CLOUDFLARE_API_TOKEN"
+    _, keys = _stored_keys_in_schemas()
+    assert not any("cloudflare" in k for k in keys) and "CLOUDFLARE_API_TOKEN" not in v["funa_env_key_map"].values()
+    assert "cloudflare_api_token" not in default_store()["secrets/services/funa/proxy"]
+    assert default_store()["secrets/assets/ns0002/credentials/cloudflare"]["type"] == "api_token"
+
+
+def test_the_assert_walks_the_declaration_and_old_knobs_are_gone():
+    tasks = yaml.safe_load((ROLE / "tasks" / "main.yml").read_text(encoding="utf-8"))[0]["block"]
+    by_id = {re.match(r"\[(FUNA-\d+)", t["name"]).group(1): t for t in tasks if re.match(r"\[FUNA-\d+\]", t["name"])}
+    assert "FUNA-004" not in by_id
+    assert "funa_env_openbao_required" in by_id["FUNA-017"]["loop"] and by_id["FUNA-017"]["ansible.builtin.assert"]
+    assert by_id["FUNA-003"]["no_log"] is True and "openbao_doc" in str(by_id["FUNA-003"])
+    text = (ROLE / "tasks" / "main.yml").read_text(encoding="utf-8") + (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
+    for retired in ("kv_fixture", "X-Vault", "VAULT_NAMESPACE", "OPENBAO_", "_vault_token", "funa_env_cluster_path", "funa_env_host_path",
+                    "funa_env_node_keys", "funa_env_node_secret_keys", "funa_env_validate_certs", "ansible.builtin.uri"):
+        assert retired not in text, retired
 
 
 def test_defaults_match_the_standard():
