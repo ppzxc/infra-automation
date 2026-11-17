@@ -155,6 +155,7 @@
     content: "{{ cisco_running_config_raw }}"
     dest: "{{ cisco_backup_dir }}/{{ cisco_backup_filename_format }}"
     mode: '0600'
+  diff: false
   delegate_to: localhost
   become: false
 
