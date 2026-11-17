@@ -93,3 +93,54 @@ def test_check_mode_writes_nothing(tmp_path):
 def test_a_missing_source_directory_fails_with_its_path(tmp_path):
     out = _run(tmp_path, {"src_dir": str(tmp_path / "none"), "dest": str(tmp_path / "x.zip")})
     assert out["failed"] is True and str(tmp_path / "none") in out["msg"]
+
+
+# ------------------------------------------------------------------------------
+# members: the zip names of the files (folders inside the zip only)
+# ------------------------------------------------------------------------------
+def _members_args(d, dest):
+    return {"src_dir": str(d), "dest": str(dest), "members": {"b.xlsx": "hosts/b.xlsx", "a.xlsx": "total.xlsx"}}
+
+
+def test_members_give_the_files_their_folder_names_sorted_by_member_name(tmp_path):
+    d = _dir(tmp_path)
+    dest = d / "out.zip"
+    out = _run(tmp_path, _members_args(d, dest))
+    assert not out.get("failed") and out["files"] == ["hosts/b.xlsx", "total.xlsx"]
+    with zipfile.ZipFile(dest) as z:
+        assert z.namelist() == ["hosts/b.xlsx", "total.xlsx"]
+        assert z.read("total.xlsx") == b"A-bytes" and z.read("hosts/b.xlsx") == b"B-bytes"
+        assert {i.date_time for i in z.infolist()} == {(1980, 1, 1, 0, 0, 0)}
+        assert z.testzip() is None
+    assert (d / "a.xlsx").exists()  # the source names are untouched: folders exist only inside the zip
+
+
+def test_members_give_the_same_bytes_again_and_the_second_run_changes_nothing(tmp_path):
+    d = _dir(tmp_path)
+    dest = d / "out.zip"
+    _run(tmp_path, _members_args(d, dest))
+    first = dest.read_bytes()
+    out = _run(tmp_path, _members_args(d, dest))
+    assert out["changed"] is False and dest.read_bytes() == first
+
+
+def test_members_with_an_unsafe_or_duplicate_zip_name_fail(tmp_path):
+    d = _dir(tmp_path)
+    for bad in ({"a.xlsx": "../x.xlsx"}, {"a.xlsx": "/abs.xlsx"}, {"a.xlsx": "a\\b.xlsx"},
+                {"a.xlsx": "x.xlsx", "b.xlsx": "x.xlsx"}, {"a.xlsx": ""}):
+        out = _run(tmp_path, {"src_dir": str(d), "dest": str(d / "o.zip"), "members": bad})
+        assert out.get("failed"), bad
+    assert not (d / "o.zip").exists()
+
+
+def test_a_member_whose_source_file_is_missing_fails(tmp_path):
+    d = _dir(tmp_path)
+    out = _run(tmp_path, {"src_dir": str(d), "dest": str(d / "o.zip"), "members": {"gone.xlsx": "total.xlsx"}})
+    assert out.get("failed") and "gone.xlsx" in out["msg"]
+
+
+def test_names_and_members_together_are_refused(tmp_path):
+    d = _dir(tmp_path)
+    out = _run(tmp_path, {"src_dir": str(d), "dest": str(d / "o.zip"), "names": ["a.xlsx"],
+                          "members": {"a.xlsx": "total.xlsx"}})
+    assert out.get("failed")
