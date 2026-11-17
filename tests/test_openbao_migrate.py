@@ -461,3 +461,20 @@ def test_device_without_password_is_left_to_validation_and_orphan_fortigate_is_a
     assert ("secrets/assets/ns0003/credentials/netadmin", "#", "required") in [tuple(v) for v in ov.validate_store(plan.store, SCHEMA_DIR)]
     old["fortigate/ns0999/extra"] = {"x": "y"}
     assert any("no_host_document" in e or "unmapped_document" in e for e in om.build_new(old, SKIP).errors)
+
+
+def test_inconsistent_environment_or_hostname_and_control_characters_are_reported_safely():
+    old = old_docs()
+    old["hosts/ns0001/agents"]["host_agents_environment"] = "prod"
+    old["hosts/ns0006/agents"] = {"host_agents_environment": "staging"}
+    old["hosts/ns0001"]["hostname"] = "other"
+    old["hosts/ns0001"]["bad\nkey"] = "x"
+    errors = om.build_new(old, SKIP).errors
+    assert any("host_agents_environment_differs" in e for e in errors)
+    assert any("hostname_differs" in e for e in errors)
+    assert all("\n" not in e for e in errors)
+
+
+def test_access_lists_are_covered_by_the_hash_report():
+    plan = om.build_new(old_docs(), SKIP)
+    assert ("inventory/assets/ns0002", "/access/admin_credentials", "hosts/ns0002", "admin_users", ["admin01"]) in plan.lineage

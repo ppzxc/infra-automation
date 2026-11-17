@@ -43,6 +43,11 @@ DROPPED_HOST_KEYS = ("hostname", "fqdn", "cloudflare_api_token")  # 계산되는
 INGEST_SOURCES = ("webhook_watch", "controller_token")
 
 
+def _printable(text):
+    """제어 문자가 보고 줄 구조를 깨지 않게 한다(openbao_validation.Violation.format과 같은 규칙)."""
+    return "".join(c if c.isprintable() else "?" for c in text)
+
+
 class MigrationError(Exception):
     pass
 
@@ -96,13 +101,14 @@ class _Builder:
         self.old = {p: copy.deepcopy(d) for p, d in old.items() if not skipped(p, self.skip)}
         self.keyskip = {tuple(s.split(":", 1)) for s in self.skip if ":" in s}
         self.consumed = set()
+        self.environments = {}
         self.endpoints = collections.defaultdict(dict)   # ns -> {이름: Endpoint}
         self.logins = collections.defaultdict(set)       # ns -> 필요한 Credential 이름
         self.credentials = collections.defaultdict(dict)  # ns -> {이름: (데이터, 출처 목록)}
 
     # -- 보조 ---------------------------------------------------------------------------------------------------------
     def err(self, doc, what):
-        line = "%s\t%s" % (doc, what)
+        line = "%s\t%s" % (_printable(doc), _printable(what))
         if line not in self.plan.errors:  # 같은 전역 계정 문서를 참조하는 호스트마다 같은 줄이 쌓이지 않게 한다
             self.plan.errors.append(line)
 
@@ -133,7 +139,7 @@ class _Builder:
         names = sorted(p.split("/")[1] for p in self.old if p.startswith("hosts/") and p.count("/") == 1)
         for ns in names:
             self.host(ns, domains)
-        for ns in sorted(p.split("/")[1] for p in self.old if p.startswith("fortigate/")):
+        for ns in sorted({p.split("/")[1] for p in self.old if p.startswith("fortigate/")}):
             self.fortigate(ns)
         if domains:
             common, _ = collections.Counter(domains.values()).most_common(1)[0]
@@ -155,6 +161,8 @@ class _Builder:
                 self.put(asset, [new], d.pop(k), (doc, k))
         for k in sorted(k for k in d if k.startswith("isms_")):
             self.put(asset, ["isms", k[len("isms_"):]], d.pop(k), (doc, k))
+        if d.get("hostname", ns) != ns:
+            self.err(doc, "hostname_differs")  # 계산되는 값이라 버리는데, 관리번호와 다르면 사람이 봐야 한다
         for k in DROPPED_HOST_KEYS:
             d.pop(k, None)
         if "domain" in d:
@@ -175,8 +183,10 @@ class _Builder:
             access["bootstrap_credential"] = boot
         if removed:
             access["removed_accounts"] = removed
+        access_src = {"admin_credentials": "admin_users", "bootstrap_credential": "bootstrap_user",
+                      "removed_accounts": "removed_users"}
         for k, v in access.items():
-            self.put(asset, ["access", k], v)
+            self.put(asset, ["access", k], v, (doc, access_src[k]))
         if "CLOUDFLARE_API_TOKEN" in d:
             self.credentials[ns]["cloudflare"] = ({"type": "api_token", "token": d.pop("CLOUDFLARE_API_TOKEN")},
                                                   {"token": (doc, "CLOUDFLARE_API_TOKEN")})
@@ -250,7 +260,9 @@ class _Builder:
         for old, new in secrets.items():
             if old in d:
                 self.put(sec, [new], d.pop(old), (doc, old))
-        d.pop("host_agents_environment", None)  # 모든 호스트가 같은 값. 역할 기본값으로 옮겼다(#503·#504)
+        env = d.pop("host_agents_environment", None)  # 모든 호스트가 같은 값이어야 한다. 역할 기본값으로 옮겼다(#503·#504)
+        if self.environments.setdefault("value", env) != env:
+            self.err(doc, "host_agents_environment_differs")
         for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
             for k in sorted(k for k in d if k.startswith(prefix)):
                 self.put(asset, ["agents", section, k[len(prefix):]], d.pop(k), (doc, k))
