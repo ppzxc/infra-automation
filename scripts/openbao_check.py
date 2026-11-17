@@ -394,14 +394,14 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
     unread = {v.doc for v in failures if v.rule == "read_failed"}
     if any(v.rule == "list_failed" for v in failures):  # 목록이 불완전하면 호스트 대조가 가짜 위반을 쏟는다(list_failed로 보고했다)
         unread.add("*")
-    failures.extend(_inventory_checks(client, store, listed, unread, now, warnings))
+    failures.extend(_guard("inventory", lambda: _inventory_checks(client, store, listed, unread, now, warnings)))
     try:
         roles = role_names(client)
     except BaoError:
         roles = []
         failures.append(Violation("auth/approle/role", "#", "secret_id_lookup_failed"))
-    failures.extend(check_secret_ids(client, roles, now))
-    failures.extend(check_unmanaged(client, expected, roles))
+    failures.extend(_guard("auth/approle/role", lambda: check_secret_ids(client, roles, now)))
+    failures.extend(_guard("sys", lambda: check_unmanaged(client, expected, roles)))
     failures = sorted(set(failures))
 
     for w in warnings:
@@ -413,6 +413,14 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
         return 0
     _notify(store, failures)
     return 1
+
+
+def _guard(name, fn):
+    """점검 단계 하나. 예상 밖 예외는 트레이스백(값이 섞일 수 있다) 대신 `check_internal_error`로 보고하고 나머지를 계속한다."""
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001
+        return [Violation(name, "#", "check_internal_error")]
 
 
 def _inventory_checks(client, store, listed, unread, now, warnings):

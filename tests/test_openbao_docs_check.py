@@ -388,3 +388,11 @@ def test_failed_secrets_listing_still_alerts_with_partial_store(env):
     assert run(fake).returncode == 1
     body = alert_text(rec)  # alert/notify 문서가 목록에서 빠져도 이미 읽은 문서로 알림이 간다
     assert "secrets/assets/\t#\tlist_failed" in body and "semaphore_config_missing" not in body
+
+
+def test_unexpected_response_shape_is_reported_not_a_traceback(env):
+    fake, rec = env
+    fake.raw("POST", "auth/approle/role/provision/secret-id-accessor/lookup", ["not", "a", "dict"])
+    r = run(fake)
+    assert r.returncode == 1 and "Traceback" not in r.stderr
+    assert "check_internal_error" in alert_text(rec)
