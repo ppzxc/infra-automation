@@ -270,3 +270,41 @@ def test_feature_doc_is_indexed_and_explains_validate_put_and_onboarding_order()
     for needle in ("`validate`", "`put`", "Credential 먼저, Endpoint 다음", "cas", "getpass"):
         assert needle in text
     assert text.index("secrets/assets/<ns>/credentials") < text.index("inventory/assets/<ns>/endpoints")
+
+
+# ---- 코드 리뷰 반영 ------------------------------------------------------------------------------------------------
+
+def test_soft_deleted_document_can_be_recreated_with_its_remaining_version(fake, run):
+    seed_asset(fake)
+    fake.soft_delete("inventory", "assets/ns0001")
+    rc, _, _ = run("inventory/assets/ns0001", ASSET)
+    assert rc == 0 and fake.writes()[-1].body["options"] == {"cas": 1}
+
+
+def test_closed_stdin_cancels_cleanly(fake, run):
+    seed_asset(fake)
+
+    def eof():
+        raise EOFError
+    rc, _, err = run("inventory/assets/ns0001", dict(ASSET, description="Y"), on_confirm=eof)
+    assert rc == 1 and fake.writes() == []
+
+
+def test_invalid_document_is_refused_before_any_secret_prompt(fake, run):
+    rc, _, _ = run("secrets/assets/ns0001/credentials/admin01",
+                   {"type": "password", "usernme": "typo", "password": None}, secrets={"password": "fake-x"})
+    assert rc == 1 and run.prompted == [] and fake.writes() == []
+
+
+def test_empty_prompted_value_is_refused(fake, run):
+    rc, _, _ = run("secrets/assets/ns0001/credentials/admin01",
+                   {"type": "password", "username": "admin01", "password": None}, secrets={"password": ""})
+    assert rc == 1 and fake.writes() == []
+
+
+def test_empty_namespace_variable_falls_back_to_default(fake, run, monkeypatch):
+    monkeypatch.setenv("VAULT_NAMESPACE", "")
+    seed_asset(fake)
+    rc, _, _ = run("inventory/assets/ns0001", dict(ASSET, description="Z"))
+    assert rc == 0
+    assert {r.namespace for r in fake.requests if r.doc and r.method == "POST"} == {"infra"}

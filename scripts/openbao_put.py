@@ -31,9 +31,14 @@ _ASSET_DOC = re.compile(r"^inventory/assets/([^/]+)$")
 
 
 class HttpError(Exception):
-    def __init__(self, status):
+    def __init__(self, status, body=None):
         super().__init__(status)
         self.status = status
+        self.body = body if isinstance(body, dict) else {}  # 파싱만 하고 출력하지 않는다(값이 섞일 수 있다)
+
+    @property
+    def is_cas_conflict(self):
+        return self.status == 400 and any("check-and-set" in str(e) for e in self.body.get("errors") or [])
 
 
 class Client:
@@ -42,6 +47,7 @@ class Client:
     def __init__(self, addr, token, namespace):
         self.addr = addr.rstrip("/")
         self.headers = {"X-Vault-Token": token, "X-Vault-Namespace": namespace}
+        self._cache = {}  # 한 번 실행 안의 읽기 결과(쓰기 전 새 문서·옛 문서 참조 검사가 같은 대상을 다시 읽지 않게 한다)
 
     def _call(self, method, doc, body=None):
         mount, _, path = doc.partition("/")
@@ -52,20 +58,31 @@ class Client:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
-            raise HttpError(exc.code) from None
+            try:
+                body = json.load(exc)
+            except (ValueError, OSError):
+                body = None
+            raise HttpError(exc.code, body) from None
         except (urllib.error.URLError, OSError, ValueError):
             raise HttpError(0) from None
 
-    def read(self, doc):
-        """(데이터, 버전). 문서가 없으면 None."""
+    def read_for_write(self, doc):
+        """(데이터, 버전). 문서가 없으면 데이터 None. 소프트 삭제된 문서는 버전이 남아 있어(404 본문) cas에 그 버전을 써야 한다."""
         try:
             body = self._call("GET", doc)
         except HttpError as exc:
             if exc.status == 404:
-                return None
+                return None, ((exc.body.get("data") or {}).get("metadata") or {}).get("version", 0)
             raise
         inner = body.get("data") or {}
         return inner.get("data"), (inner.get("metadata") or {}).get("version", 0)
+
+    def read(self, doc):
+        """(데이터, 버전). 문서가 없으면 None. 같은 실행 안에서는 한 번만 읽는다."""
+        if doc not in self._cache:
+            data, version = self.read_for_write(doc)
+            self._cache[doc] = None if data is None else (data, version)
+        return self._cache[doc]
 
     def write(self, doc, data, cas):
         self._call("POST", doc, {"options": {"cas": cas}, "data": data})
@@ -211,18 +228,16 @@ def run_put(args):
             print(v.format())
         return 1
     token = os.environ.get("VAULT_TOKEN") or getpass.getpass("token: ")
-    client = Client(addr, token, os.environ.get("VAULT_NAMESPACE", DEFAULT_NAMESPACE))
+    client = Client(addr, token, os.environ.get("VAULT_NAMESPACE") or DEFAULT_NAMESPACE)
     try:
-        current = client.read(doc)
-        old, version = current if current else (None, 0)
-        for key in prompt:
-            given[key] = getpass.getpass("%s: " % key)
+        old, version = client.read_for_write(doc)
         if "private_key" in given and doc.startswith("secrets/"):
             try:
                 given["private_key"] = Path(given["private_key"]).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 return _fail("private_key 파일을 읽을 수 없다")
         new = _deep_merge(old, given) if args.merge and old is not None else given
+        # 값을 입력받기 전에 검증한다(null 자리는 자리표시자로 본다). 입력 실수로 값을 다시 치게 하지 않는다.
         violations = ov.validate_document(doc, new, args.schemas)
         if violations:
             for v in violations:
@@ -237,18 +252,27 @@ def run_put(args):
             for v in blocking:
                 print(v.format())
             return 1
+        for key in prompt:
+            value = getpass.getpass("%s: " % key)
+            if not value:
+                return _fail("빈 값은 쓸 수 없다")
+            new[key] = value
         lines = diff_lines(doc, old, new)
         if not lines:
             print("변경 없음", file=sys.stderr)
             return 0
         print("\n".join(lines))
-        if input("%s 문서를 쓸까요? [y/N] " % doc).strip().lower() not in ("y", "yes"):
+        try:
+            answer = input("%s 문서를 쓸까요? [y/N] " % doc)
+        except (EOFError, KeyboardInterrupt):
+            return _fail("확인을 받지 못해 취소했다")
+        if answer.strip().lower() not in ("y", "yes"):
             return _fail("취소했다")
         try:
             client.write(doc, new, version)
         except HttpError as exc:
-            if exc.status == 400:
-                return _fail("conflict: 읽은 뒤 다른 쪽이 문서를 바꿨거나 쓰기가 거부됐다(cas). 다시 읽고 시도한다")
+            if exc.is_cas_conflict:
+                return _fail("conflict: 읽은 뒤 다른 쪽이 문서를 바꿨다(cas). 다시 읽고 시도한다")
             raise
     except HttpError as exc:
         return _fail("OpenBao 요청 실패: HTTP %s" % (exc.status or "연결 불가"))

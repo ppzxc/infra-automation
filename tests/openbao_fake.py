@@ -75,7 +75,7 @@ class FakeOpenBao:
                     return self._reply(403, {"errors": ["permission denied"]})
                 # KV v2 쓰기: options.cas가 현재 버전(없으면 0)과 다르면 400이다.
                 status, current = outer._docs.get((mount, doc), (404, None))
-                version = current["data"]["metadata"]["version"] if status == 200 else 0
+                version = ((current or {}).get("data") or {}).get("metadata", {}).get("version", 0)
                 cas = ((body or {}).get("options") or {}).get("cas")
                 if cas is not None and cas != version:
                     return self._reply(400, {"errors": ["check-and-set parameter did not match the current version"]})
@@ -109,6 +109,12 @@ class FakeOpenBao:
         status, current = self._docs.get((mount, doc), (404, None))
         version = current["data"]["metadata"]["version"] + 1 if status == 200 else 1
         self._docs[(mount, doc)] = (200, {"data": {"data": data, "metadata": {"version": version}}})
+        return self
+
+    def soft_delete(self, mount, doc):
+        """KV v2 소프트 삭제: 404를 내지만 버전 카운터는 남는다(404 본문의 metadata.version)."""
+        _, version = self.get(mount, doc)
+        self._docs[(mount, doc)] = (404, {"data": {"data": None, "metadata": {"version": version}}})
         return self
 
     def get(self, mount, doc):
