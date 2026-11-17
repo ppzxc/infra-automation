@@ -57,6 +57,86 @@
         "additionalProperties": false
       },
       "description": "무음 예외(만료일 필수)"
+    },
+    "resource_exclusions": {
+      "type": "array",
+      "description": "리소스 알림 제외(호스트·마운트 예외). 관리번호가 들어가 공개 저장소에 둘 수 없어 문서에 둔다.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "description": "관리번호"
+          },
+          "mount": {
+            "type": "string",
+            "minLength": 1,
+            "description": "마운트 경로(선택)"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "disk",
+              "inode",
+              "memory"
+            ],
+            "description": "지표(선택)"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "resource_thresholds": {
+      "type": "array",
+      "description": "리소스 알림 임계값 덮어쓰기(호스트별).",
+      "items": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "description": "관리번호"
+          },
+          "mount": {
+            "type": "string",
+            "minLength": 1,
+            "description": "마운트 경로(선택)"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "disk",
+              "inode",
+              "memory"
+            ],
+            "description": "지표(선택)"
+          },
+          "p2": {
+            "type": "integer",
+            "description": "P2 임계(%)"
+          },
+          "p1": {
+            "type": "integer",
+            "description": "P1 임계(%)"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "audit_provisioning_accounts": {
+      "type": "array",
+      "description": "Audit Watch Key 알림이 정상 변경(프로비저닝) 서명을 좁힐 접속 계정(로그인 이름) 목록. 비어 있으면 터미널 없는 로그인 사용자 전부.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
   "additionalProperties": false

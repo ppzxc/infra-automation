@@ -1292,7 +1292,7 @@ sudo du -xh <마운트> --max-depth=2 | sort -h | tail -20
 docker system df   # Docker 사용 호스트
 ```
 
-**대응**: 큰 파일·오래된 로그·Docker 이미지/볼륨을 정리하거나 증설한다. 원래 가득 차게 쓰는 볼륨이면 역할 변수 `o2c_resource_exclusions`에 예외를 등록한다(PR).
+**대응**: 큰 파일·오래된 로그·Docker 이미지/볼륨을 정리하거나 증설한다. 원래 가득 차게 쓰는 볼륨이면 OpenBao `inventory/config/openobserve_config`의 `resource_exclusions`에 예외를 등록한다(관리번호가 들어가 저장소에 두지 않는다).
 
 <a id="inode-usage"></a>
 ### 🟠/🔴 inode 사용률 (`infra-inode-usage-p2`, `infra-inode-usage-p1`)

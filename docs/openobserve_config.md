@@ -233,12 +233,12 @@
 
 | 키 | 설명 |
 |---|---|
-| `inventory/services/openobserve`의 `url`(끝 슬래시 금지)·`org`(선택, 기본 `default`) | OpenObserve 주소와 조직. 사설 CA 파일은 OpenBao가 아니라 변수 `o2_ca_file`로 준다 |
+| `inventory/services/openobserve`의 `url`(끝 슬래시 금지)·`org`(선택, 기본 `default`) | OpenObserve 주소와 조직. 사설 CA 파일은 같은 문서의 `ca_file`(선택, 컨트롤러의 파일 경로)로 준다 |
 | `secrets/services/openobserve/admin`의 `username`, `password` | 설정 API(함수·파이프라인·알림)를 쓸 수 있는 OpenObserve 계정 (수집 자격과 별개) |
 | `secrets/services/openobserve/ingest`의 `username`, `password` | 알림 검증 합성 레코드를 넣는 수집 자격(컨트롤러 계열 공유) |
 | `secrets/services/alert/notify`의 `url` | 통지 webhook URL(사내 알림 플랫폼 `text/plain` 경로). 없거나 `http(s)://`가 아니면 `O2C-002`가 요청 전에 실패한다. 값은 출력하지 않는다 |
 | `inventory/config/openobserve_config`의 `normal_sources` | (선택) root 로그인 정상 출발지 `[{address: <IP>, kind: semaphore\|office}]`. `kind`는 구분용이고 판정은 같다: 목록의 출발지는 P1(외부 출발지)에서 빠지고 P2(알고 있는 출발지)로 간다. 목록에 없어도 사설 대역(10/8·172.16/12·192.168/16·127/8·169.254/16)은 P2, 공인은 P1. 목록이 비면 공인은 모두 P1. 일반 계정 SSH 로그인(`infra-ssh-login-unregistered-source`)과 방화벽 관리자 로그인(`infra-fortigate-admin-login-new-source`) 알림도 이 목록을 읽는다(목록에 없으면 사설·공인 모두 미등록, 목록이 비면 전부 미등록, #330). SSH 실패 급증 알림에는 적용하지 않음. 주소는 IP 문자·종류를 검증하며 출력하지 않음 |
-| 역할 변수 `o2c_resource_exclusions`, `o2c_resource_thresholds` | (선택, 기본 `[]`, 공개해도 되는 값이라 OpenBao가 아니라 역할 변수) 리소스 알림의 호스트·마운트 예외 `[{host, mount?, metric?}]`와 임계값 덮어쓰기 `[{host, mount?, metric?, p2?, p1?}]` (`metric`: disk·inode·memory) |
+| `inventory/config/openobserve_config`의 `resource_exclusions`, `resource_thresholds` | (선택, 기본 `[]`. 관리번호가 들어가 공개 저장소에 둘 수 없어 문서에 둔다. 역할 변수 `o2c_resource_exclusions`·`o2c_resource_thresholds`가 된다) 리소스 알림의 호스트·마운트 예외 `[{host, mount?, metric?}]`와 임계값 덮어쓰기 `[{host, mount?, metric?, p2?, p1?}]` (`metric`: disk·inode·memory) |
 | `inventory/config/openobserve_config`의 `silent_host_exceptions` | (선택) Silent Host 계획 정지 예외 `[{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason?}]`. 만료일 필수(없거나 형식이 틀리면 요청 전에 실패), 만료일이 지난 항목은 무시 |
 | `inventory/assets/<ns>`의 `agents.otel.app_telemetry`, `inventory/assets/<ns>/endpoints`의 `ssh` Endpoint `address` | 수집 로스터 호스트마다 읽는다(앱 텔레메트리 무소식 로스터, 알림 행의 접속 주소). 문서가 없으면(404) 스위치 꺼짐·주소 없음. `secrets/assets/+/agents`는 읽지 않는다 |
 
@@ -260,7 +260,7 @@
 | `o2c_audit_secret_operator_exes` | `['/usr/libexec/docker/cli-plugins/docker-compose']` | `secret_access` 알림에서 사용자와 무관하게 뺄 정상 소비자의 실행 파일 경로 패턴(compose는 `env_file`을 실행한 사용자 권한으로 읽는다) |
 | `o2c_audit_secret_excluded_users` | `[]` | `secret_access` 알림에서 뺄 로그인 사용자(AUID 이름). 공개 저장소라 기본 비어 있고 Environment로 준다. 로그인 이름(대소문자·`.`·`_`·`-` 허용, 따옴표·공백 거부, `O2C-002`) |
 | `o2c_audit_secret_metadata_syscalls` | `[getxattr, lgetxattr, fgetxattr, listxattr, llistxattr, flistxattr, readlink, readlinkat]` | 파일을 열지 않고 속성만 보는 syscall: `secret_access` 알림이 열람으로 세지 않는다. 해석된 `SYSCALL=` 필드가 없는 줄은 걸리지 않는다 |
-| `o2c_audit_provisioning_accounts` | `[]`(필요하면 변수로 준다) | 정상 변경 서명(터미널 없는 로그인 사용자)을 좁힐 로그인(AUID) 목록. 비어 있으면 터미널 없이 변경한 로그인 사용자 전부가 서명이라 `ssh host 'sudo …'` 공격도 P3로 내려간다(한계). 프로비저닝 계정을 채워 좁히길 권한다(권고 절차는 위 항목). 로그인 이름(`O2C-002`) |
+| `o2c_audit_provisioning_accounts` | `[]`(OpenBao `inventory/config/openobserve_config`의 `audit_provisioning_accounts`에서 읽는다. 선택, 문서에 없으면 빈 목록) | 정상 변경 서명(터미널 없는 로그인 사용자)을 좁힐 로그인(AUID) 목록. 비어 있으면 터미널 없이 변경한 로그인 사용자 전부가 서명이라 `ssh host 'sudo …'` 공격도 P3로 내려간다(한계). 프로비저닝 계정을 채워 좁히길 권한다(권고 절차는 위 항목). 로그인 이름(`O2C-002`) |
 | `o2c_audit_provisioning_keys` | `[auth_config, container_config, secret_access, audit_config, syslog_config, ssh_keys, firewall_config]` | 정상 변경 후보 알림(`infra-audit-watch-provisioning`)이 보는 감시 키. 같은 구분을 쓰는 알림(#430)은 자기 키를 여기에 더한다. 1개 이상(`O2C-002`) |
 | `o2c_audit_provisioning_filter` | `o2c_audit_provisioning_cond`가 만든 SQL 조각 | 정상 변경 서명(`tty=(none)` + 로그인 사용자 + 지정 계정). P2 알림은 `AND NOT <조각>`, P3 알림은 `AND <조각>`으로 쓴다. 변수를 직접 덮어쓰지 않고 위 계정 목록으로 조정한다 |
 | `o2c_audit_watch_silence_minutes` | `5` | P2 알림 3개(`infra-audit-auth-config-change`·`-container-config-change`·`-secret-access`)의 재통지 간격(분). Event Alert 원칙대로 조회 구간(5분)과 같다. 정수(`O2C-002`) |

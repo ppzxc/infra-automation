@@ -71,7 +71,7 @@
   | `inventory/assets/<ns>` `agents.github_webhook` | `address`, `port`, `path`, `network` | 웹훅을 켤 때만 | 수신기 바인딩 주소(컨테이너 브리지 전용 IPv4, 모든 인터페이스·루프백 불가)·포트·수신 경로(`/`로 시작)·도커 네트워크 이름. **저장소에 기본값이 없고** Asset 문서로만 주입한다 |
   | `inventory/assets/<ns>` `agents.backup` | `extra_paths`, `exclude_paths`, `pre_hooks` | 아니오 | 필수 백업 경로(`/etc`, `/var/spool/cron`, `/usr/local/{bin,etc,sbin}`)와 그 상위 경로는 제외 불가 |
   | | `sqlite_snapshots` | 아니오 | `{path}` 항목 목록(경로는 안전한 글자만, `..` 불가). 있으면 백업 직전 online backup 스냅샷을 만들어 백업한다(`docs/backup.md` §3-1, #323). 없으면 동작이 바뀌지 않는다 |
-  | `inventory/services/openobserve`, `inventory/services/rustfs` | `url`(필수), `org`·`region`(선택) | 예 | 공유 주소(조회는 호스트마다). `o2_ca_file`·`rustfs_ca_file`은 OpenBao에 없고 역할 기본값(빈 값)·Extra variables다 |
+  | `inventory/services/openobserve`, `inventory/services/rustfs` | `url`(필수), `org`·`region`(선택) | 예 | 공유 주소(조회는 호스트마다). `ca_file`(선택, 사설 CA 파일 경로)은 두 문서 모두에 둘 수 있고 각각 `o2_ca_file`·`rustfs_ca_file`(대상 호스트의 파일 경로)이 된다. 비우면 시스템 CA를 쓴다 |
   | `secrets/services/openobserve/ingest` | `username`, `password` | 예 | 컨트롤러의 백업 등록 이벤트 전송 자격(`BAK-060`) |
   | `secrets/services/alert/notify` | `url` | 검사 호스트만 | 생존 타이머의 text/plain 알림 주소(`MON-220`) |
   | `inventory/assets/<ns>/endpoints` | `ssh`의 `address`·`port` | 검사 호스트만 | 서버 도달성 대상(`MON-227`~`229`) |
@@ -124,7 +124,7 @@ SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(Cen
 - **라우팅**: `logs/in`(memory_limiter, `resource/host`: `host.name`=인벤토리 호스트명, `os.type`, `os.name`, `os.version`, `os.description`, `host.arch`, `host.id`(없으면 생략), `host.ip`(`ip` 팩트: 인벤토리 `ip`, 없으면 ssh Endpoint 주소; 둘 다 없으면 생략), `deployment.environment.name`; `service.name`은 파일 그룹·수집기별로 따로 부여; 값 정의는 [ADR-0006 §2.3](adr/0006-host-agents-otelcol-resticprofile.md)) → `routing/logs`(`log_type`) → `security_logs`/`system_logs`/`app_logs`/`backup_logs` 파이프라인 → 스트림별 `otlphttp` exporter(`stream-name` 헤더).
 - **전송**: `<o2_endpoint>/api/<o2_org>`(끝 슬래시 금지), `Authorization: Basic ${env:O2_BASIC_AUTH}`, 사설 CA는 `o2_ca_file`. 로그 exporter는 `file_storage` 영속 bytes 큐(`otel_log_queue_bytes`) + `block_on_overflow: true` + `max_elapsed_time: 0`; 메트릭은 별도 메모리 큐(`block_on_overflow: false`) 파이프라인입니다. `file_storage`는 `compaction.on_rebound: true`.
 - **시크릿**: `/etc/otelcol-contrib/secrets.env`(`0600`, `no_log`, `diff: false`)에만 있고 설정은 `${env:…}`로 참조합니다. systemd 유닛은 비root `otelcol` + `CAP_DAC_READ_SEARCH` + `EnvironmentFile`.
-- **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 **Semaphore Extra variables 또는 `group_vars`(우선) → OpenBao `inventory/services/openobserve`의 `url`·`org`(폴백) → 기본값(`o2_org=default`, 나머지 빈 값)** 순으로 해석합니다. `o2_ca_file`은 OpenBao에 없어 Extra variables·`group_vars`로만 줍니다. 저장소가 공개라 내부 도메인은 Git에 두지 않고 평상시에는 OpenBao에 둡니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.
+- **입력 변수**: `o2_endpoint`, `o2_org`, `o2_ca_file`은 **Semaphore Extra variables 또는 `group_vars`(우선) → OpenBao `inventory/services/openobserve`의 `url`·`org`·`ca_file`(폴백) → 기본값(`o2_org=default`, 나머지 빈 값)** 순으로 해석합니다. `o2_ca_file`은 OpenBao `inventory/services/openobserve`의 `ca_file`(선택)에서 읽고 Extra variables가 우선합니다. 같은 경로의 CA 파일이 대상 호스트에 있어야 합니다. 저장소가 공개라 내부 도메인은 Git에 두지 않고 평상시에는 OpenBao에 둡니다. 이전 gRPC exporter(`otel_target_*`)와 `organization` 헤더 없는 템플릿은 제거되었습니다.
 
 ---
 

@@ -12,6 +12,11 @@
       "type": "string",
       "minLength": 1,
       "description": "리전"
+    },
+    "ca_file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "사설 CA 파일 경로(선택, 비밀 아님). 읽는 쪽 파일시스템의 경로다: 에이전트 배포는 대상 호스트, OpenObserve Config·Repo Maintenance는 컨트롤러(러너). 비우면 시스템 CA를 쓴다."
     }
   },
   "required": [

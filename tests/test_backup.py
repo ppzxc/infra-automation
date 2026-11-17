@@ -665,6 +665,21 @@ def test_maintenance_resolves_inputs_from_the_new_structure(tmp_path):
         "access": "fake-access-0015", "secret": "fake-secret-0016", "ingest": "fake-ingest:fake-pw-0014"}
 
 
+def test_maintenance_takes_the_host_bucket_and_the_private_ca_from_openbao(tmp_path):
+    """이름 규칙 밖 호스트의 버킷(Asset agents.backup.bucket)과 RustFS 사설 CA(Service ca_file)를 읽는다."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"],
+                                                  agents={"backup": {"bucket": "backup-prod-oldname"}})
+    store["inventory/services/rustfs"] = dict(store["inventory/services/rustfs"], ca_file="/etc/pki/fake-rustfs-ca.pem")
+    dump = {"name": "Dump", "ansible.builtin.copy": {
+        "content": "{{ {'bucket': rustfs_bucket, 'ca': backup_maintenance_ca_file, 'host_ca': rustfs_ca_file} | to_json }}",
+        "dest": str(tmp_path / "eff.json")}}
+    res = _run(tmp_path, _maint_read_tasks() + [dump], _read_vars(store))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert json.loads((tmp_path / "eff.json").read_text()) == {
+        "bucket": "backup-prod-oldname", "ca": "/etc/pki/fake-rustfs-ca.pem", "host_ca": "/etc/pki/fake-rustfs-ca.pem"}
+
+
 def test_maintenance_reads_only_the_declared_documents(tmp_path):
     """읽은 문서는 backup_openbao_required가 선언한 패턴 안에 있고, 선언한 문서는 모두 읽는다."""
     with FakeOpenBao.with_schemas(token="tok") as bao:

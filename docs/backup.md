@@ -7,7 +7,7 @@
 ## 1. 개요 및 구현 기능 (What)
 
 - **바이너리 배포**: 컨트롤러가 다운로드·SHA256 검증한 `restic`/`resticprofile`을 버전 디렉터리(`/opt/host-agents/<agent>/<version>/`)에 배치하고 `/usr/local/bin` symlink로 활성화 (ADR-0006 §2.8).
-- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, Extra variables `rustfs_bucket`으로만 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
+- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`. 이름 규칙 밖인 이전·개명 호스트는 Asset 문서의 `agents.backup.bucket`, 일회성 재정의는 Extra variables `rustfs_bucket`)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
 - **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
@@ -181,7 +181,7 @@
 
 **호스트별 순서**: `check` → (첫째 일요일(`backup_maintenance_timezone`, 기본 Asia/Seoul 기준 달력일) 또는 `always`) `check --read-data-subset=10%` → 모든 check가 성공한 경우에만 `forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`. `check`가 실패한 호스트는 `prune`을 건너뜁니다(데이터 삭제 차단). 강제 `unlock`은 하지 않고 `--retry-lock 30m`만 사용합니다.
 
-**OpenBao 입력**(`roles/backup/vars/main.yml`의 `backup_openbao_required`): `secrets/assets/<호스트>/agents`의 `restic_password`(호스트별 repo 비밀번호), `secrets/services/rustfs/maintenance`의 `access_key`/`secret_key`(RustFS 유지보수 키 — `forget`/`prune`의 삭제 권한 보유), `secrets/services/openobserve/ingest`의 `username`/`password`(컨트롤러 수집 자격), `inventory/services/rustfs`의 `url`/`region`, `inventory/services/openobserve`의 `url`/`org`. 버킷은 Extra variables > 규칙 `<rustfs_bucket_prefix>-<호스트명>`(기본 `backup-prod-ns****`)입니다. 유지보수 키는 모든 호스트 버킷(`backup-prod-*`)에 접근할 수 있어야 합니다. 사설 CA는 컨트롤러 신뢰 저장소에 등록하거나 `backup_maintenance_ca_file`로 지정합니다.
+**OpenBao 입력**(`roles/backup/vars/main.yml`의 `backup_openbao_required`): `secrets/assets/<호스트>/agents`의 `restic_password`(호스트별 repo 비밀번호), `secrets/services/rustfs/maintenance`의 `access_key`/`secret_key`(RustFS 유지보수 키 — `forget`/`prune`의 삭제 권한 보유), `secrets/services/openobserve/ingest`의 `username`/`password`(컨트롤러 수집 자격), `inventory/services/rustfs`의 `url`/`region`/`ca_file`(선택), `inventory/services/openobserve`의 `url`/`org`, `inventory/assets/<호스트>`(`agents.backup.bucket`, 선택). 버킷은 Extra variables > Asset 문서의 `agents.backup.bucket` > 규칙 `<rustfs_bucket_prefix>-<호스트명>`(기본 `backup-prod-ns****`)입니다(`BAK-071`이 Asset 문서를 읽고 변수 `backup_asset_bucket`에 둡니다). 유지보수 키는 모든 호스트 버킷(`backup-prod-*`)에 접근할 수 있어야 합니다. 사설 CA는 컨트롤러 신뢰 저장소에 등록하거나 `inventory/services/rustfs`의 `ca_file`(컨트롤러의 파일 경로, `backup_maintenance_ca_file`로 쓰입니다)로 지정합니다.
 
 **restic 바이너리**: Deploy와 같은 고정 버전·체크섬(`monitoring/vars/main.yml`)을 컨트롤러 캐시(`host_agents_cache_dir`)에서 사용합니다.
 

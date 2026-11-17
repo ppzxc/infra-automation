@@ -1370,6 +1370,26 @@ def test_bucket_follows_the_naming_rule_per_host(tmp_path, bao, openbao):
     assert _effective(tmp_path, openbao, host="bare")["rustfs_bucket"] == "backup-prod-bare"
 
 
+def test_private_ca_files_come_from_the_service_documents(tmp_path, bao, openbao):
+    bao.set("inventory", "services/openobserve", dict(_O2_SERVICE, ca_file="/etc/pki/fake-o2-ca.pem"))
+    bao.set("inventory", "services/rustfs", dict(_RUSTFS_SERVICE, ca_file="/etc/pki/fake-rustfs-ca.pem"))
+    eff = _effective(tmp_path, openbao)
+    assert (eff["o2_ca_file"], eff["rustfs_ca_file"]) == ("/etc/pki/fake-o2-ca.pem", "/etc/pki/fake-rustfs-ca.pem")
+
+
+def test_a_host_bucket_in_the_asset_agents_clause_overrides_the_naming_rule(tmp_path, bao, openbao):
+    """이름 규칙 밖 호스트(이전·개명 호스트)는 Asset 문서 agents.backup.bucket으로 버킷을 가리킨다."""
+    _host(bao, "renamed", agents={"backup": {"bucket": "backup-prod-oldname"}})
+    assert _effective(tmp_path, openbao, host="renamed")["rustfs_bucket"] == "backup-prod-oldname"
+    assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
+
+
+def test_extra_vars_still_win_over_the_asset_bucket(tmp_path, bao, openbao):
+    _host(bao, "renamed", agents={"backup": {"bucket": "backup-prod-oldname"}})
+    eff = _effective(tmp_path, openbao, host="renamed", extra_vars={"rustfs_bucket": "extra-bucket"})
+    assert eff["rustfs_bucket"] == "extra-bucket"
+
+
 def test_bucket_prefix_variable_changes_the_naming_rule(tmp_path, openbao):
     eff = _effective(tmp_path, openbao, extra_vars={"rustfs_bucket_prefix": "backup-stg"})
     assert eff["rustfs_bucket"] == "backup-stg-good"

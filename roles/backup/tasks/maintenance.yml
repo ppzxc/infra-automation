@@ -56,11 +56,13 @@
           (Host Agents가 적용되지 않은 호스트라면 인벤토리 host_agents_excluded 그룹에 넣는다)
         quiet: true
 
-    - name: Expose the service addresses so endpoint defaults resolve like the Deploy path
+    - name: Expose the service addresses and the host bucket so endpoint defaults resolve like the Deploy path
       ansible.builtin.set_fact:
         host_agents_services:
           openobserve: "{{ _maint_docs['inventory/services/openobserve'] }}"
           rustfs: "{{ _maint_docs['inventory/services/rustfs'] }}"
+        # 이름 규칙 밖 호스트의 버킷(Asset 문서 agents.backup.bucket, 선택). 없으면 빈 값이라 규칙 이름을 쓴다.
+        backup_asset_bucket: "{{ (((_maint_docs['inventory/assets/+'].agents | default({}, true)).backup | default({}, true)).bucket) | default('', true) }}"
 
     - name: Keep the resolved secrets as host facts
       ansible.builtin.set_fact:
