@@ -44,8 +44,22 @@ class ConnectionError_(AnsibleError):  # noqa: N801
     pass
 
 
+def _need(doc, key, where):
+    """문서의 필수 키. 없으면 어느 문서인지 밝히고(값은 밝히지 않고) 실패한다."""
+    if doc.get(key) in (None, ""):
+        raise ConnectionError_("%s에 %s가 없습니다" % (where, key))
+    return doc[key]
+
+
 def _asset_endpoints(read, asset):
     return read("inventory/assets/%s/endpoints" % asset)
+
+
+def _select_endpoint(endpoints, asset, preference):
+    name = next((p for p in preference if p in endpoints), None)
+    if name is None:
+        raise ConnectionError_("%s에 선호 순서 %s의 Endpoint가 하나도 등록돼 있지 않습니다" % (asset, list(preference)))
+    return name, endpoints[name]
 
 
 def _credential(read, asset, name):
@@ -53,29 +67,31 @@ def _credential(read, asset, name):
 
 
 def _login(read, asset, endpoint, credential, overridden):
+    where = "Credential %s/%s" % (asset, credential)
     doc = _credential(read, asset, credential)
     kind = doc.get("type")
     if endpoint.get("identity") and not overridden:
-        if not doc.get("username"):
-            raise ConnectionError_("identity 로그인에는 Credential %s/%s의 username이 필요합니다" % (asset, credential))
+        username = _need(doc, "username", where)
         key = read("secrets/automation/ssh")
-        out = {"mode": "identity", "username": doc["username"], "private_key": key["private_key"]}
+        out = {"mode": "identity", "username": username, "private_key": _need(key, "private_key", "secrets/automation/ssh")}
         if key.get("passphrase"):
             out["passphrase"] = key["passphrase"]
         return out
     if kind == "password":
-        out = {"mode": "password", "password": doc["password"]}
+        out = {"mode": "password", "password": _need(doc, "password", where)}
         if doc.get("username"):
             out["username"] = doc["username"]
-        return out
-    if kind == "ssh_key":
-        out = {"mode": "key", "username": doc["username"], "private_key": doc["private_key"]}
+    elif kind == "ssh_key":
+        out = {"mode": "key", "username": _need(doc, "username", where), "private_key": _need(doc, "private_key", where)}
         if doc.get("passphrase"):
             out["passphrase"] = doc["passphrase"]
-        return out
-    if kind == "api_token":
-        return {"mode": "token", "token": doc["token"]}
-    raise ConnectionError_("Credential %s/%s의 type을 알 수 없습니다" % (asset, credential))
+    elif kind == "api_token":
+        out = {"mode": "token", "token": _need(doc, "token", where)}
+    else:
+        raise ConnectionError_("%s의 type을 알 수 없습니다" % where)
+    if endpoint["protocol"] == "ssh":
+        _need(out, "username", where + "(ssh 로그인)")      # 계정 없이 접속하면 컨트롤러 사용자로 시도하게 된다
+    return out
 
 
 def _become(read, asset, endpoint, login_credential):
@@ -84,6 +100,7 @@ def _become(read, asset, endpoint, login_credential):
         return {}
     name = spec.get("credential") or login_credential
     password = _credential(read, asset, name).get("password")
+    _need(spec, "method", "%s/%s의 become" % (asset, login_credential))
     if spec["method"] == "su" and not password:
         raise ConnectionError_("su 승격에는 비밀번호가 필요합니다(%s/%s)" % (asset, name))
     return {"method": spec["method"], "password": password}
@@ -109,12 +126,8 @@ def _via_chain(read, via):
 
 
 def resolve(read, asset, preference, credential=None):
-    endpoints = _asset_endpoints(read, asset)
-    name = next((p for p in preference if p in endpoints), None)
-    if name is None:
-        raise ConnectionError_("%s에 선호 순서 %s의 Endpoint가 하나도 등록돼 있지 않습니다" % (asset, list(preference)))
-    ep = endpoints[name]
-    cred = credential or ep["credential"]
+    name, ep = _select_endpoint(_asset_endpoints(read, asset), asset, preference)
+    cred = credential or _need(ep, "credential", "%s/endpoints의 %s" % (asset, name))
     overridden = cred != ep["credential"]
     return {
         "asset": asset, "endpoint": name, "protocol": ep["protocol"], "address": ep["address"], "port": ep["port"],
@@ -133,11 +146,7 @@ def admin_accounts(read, asset, preference):
     Identity의 `public_key`, 그 밖의 계정은 `inventory/operators/<username>`의 `public_keys`·`revoked_keys`다.
     """
     access = read("inventory/assets/%s" % asset).get("access") or {}
-    endpoints = _asset_endpoints(read, asset)
-    name = next((p for p in preference if p in endpoints), None)
-    if name is None:
-        raise ConnectionError_("%s에 선호 순서 %s의 Endpoint가 하나도 등록돼 있지 않습니다" % (asset, list(preference)))
-    default = endpoints[name]
+    _, default = _select_endpoint(_asset_endpoints(read, asset), asset, preference)
     out = []
     for cred_name in access.get("admin_credentials") or []:
         username = _credential(read, asset, cred_name).get("username")

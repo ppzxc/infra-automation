@@ -285,3 +285,18 @@ def test_the_connection_summary_carries_no_secret(store):
     for secret in ("fake-api-0012", "fake-pw", "/fake/path"):
         assert secret not in text
     assert summary["login_mode"] == "token" and [h["asset"] for h in summary["via"]] == ["ns0001", "ns0003"]
+
+
+def test_an_ssh_login_without_a_username_is_an_error_not_the_controller_user(store):
+    store["secrets/assets/ns0002/credentials/root"] = {"type": "password", "password": "fake-pw"}
+    with pytest.raises(ConnectionError_, match="ns0002/root.*username"):
+        resolve(reader(store), "ns0002", ["ssh"])
+
+
+def test_a_document_missing_a_required_key_names_the_document_not_a_key_error(store):
+    store["secrets/automation/ssh"] = {"public_key": "ssh-ed25519 AAAAFAKE"}
+    with pytest.raises(ConnectionError_, match="secrets/automation/ssh.*private_key"):
+        resolve(reader(store), "ns0001", ["ssh"])
+    store["inventory/assets/ns0002/endpoints"]["ssh"]["become"] = {"credential": "root"}
+    with pytest.raises(ConnectionError_, match="become.*method"):
+        resolve(reader(store), "ns0002", ["ssh"])

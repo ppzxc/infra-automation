@@ -60,6 +60,11 @@ def test_tasks_that_carry_secrets_are_no_log():
         assert tasks[name].get("no_log") is True, name
 
 
+def test_hop_key_paths_are_recorded_before_any_key_is_written():
+    names = [t["name"] for t in _load(RESOLVE)[0]["tasks"]]
+    assert names.index("Record the via hop temporary key paths") < names.index("Write via hop SSH private keys to temporary files")
+
+
 def test_the_token_is_acquired_once_per_play():
     task = next(t for t in _load(RESOLVE)[0]["tasks"] if t["name"].startswith("Acquire the OpenBao client token"))
     assert task["run_once"] is True

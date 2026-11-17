@@ -289,6 +289,11 @@
       no_log: true
       when: (item.login.private_key | default('')) | length > 0
 
+    # 임시 키 경로는 키를 쓰기 전에 기록한다(뒤 단계가 실패해도 cleanup_connection이 지울 수 있게).
+    - name: Record the via hop temporary key paths
+      ansible.builtin.set_fact:
+        _hop_key_paths: "{{ _hop_key_tempfiles.results | map(attribute='path', default='') | list }}"
+
     - name: Write via hop SSH private keys to temporary files
       ansible.builtin.copy:
         content: "{{ item.0.login.private_key }}\n"
@@ -316,8 +321,7 @@
 
     - name: Build the ssh ProxyCommand arguments for the via chain
       ansible.builtin.set_fact:
-        _hop_key_paths: "{{ _hop_key_tempfiles.results | map(attribute='path', default='') | list }}"
-        _ssh_common_args: "{{ _admin_conn.via | openbao_ssh_common_args(_hop_key_tempfiles.results | map(attribute='path', default='') | list, _admin_conn.address, _admin_conn.port) }}"
+        _ssh_common_args: "{{ _admin_conn.via | openbao_ssh_common_args(_hop_key_paths, _admin_conn.address, _admin_conn.port) }}"
       no_log: true
 
     - name: Probe SSH connection using primary admin user credentials
