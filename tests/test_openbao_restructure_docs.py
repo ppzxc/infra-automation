@@ -90,11 +90,7 @@ def test_cutover_runbook_covers_freeze_checks_rollback_and_cleanup():
     assert "revert" in rollback and "Environment" in rollback and "데이터" in rollback
     cleanup = runbook_section(CUTOVER, "옛 구조 삭제", numbered=True)
     assert "2주" in cleanup and "raft" in cleanup and "월간 Host Audit" in cleanup
-    assert cutover_points_to_private_note()
-
-
-def cutover_points_to_private_note():
-    return "~/.local/share/infra-automation/openbao-restructure/" in _read(CUTOVER)
+    assert "~/.local/share/infra-automation/openbao-restructure/" in _read(CUTOVER), "비공개 노트를 가리키지 않는다"
 
 
 def test_runbooks_and_adr_are_indexed():
@@ -109,3 +105,4 @@ def test_public_docs_have_no_real_addresses_or_clock_times():
         assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b", text), f"{path.name}: IP 주소"
         assert not re.search(r"\b\d{1,2}:\d{2}\b", text), f"{path.name}: 시각"
         assert not re.search(r"\bns\d{4}\b", text), f"{path.name}: 관리번호"
+        assert not re.search(r"https?://|\b\d{1,2}\s?(KST|UTC)\b|/\d{1,2}\b(?=[\s`)])", text), f"{path.name}: URL·시각·CIDR"

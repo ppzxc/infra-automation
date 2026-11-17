@@ -11,7 +11,7 @@
 | 네임스페이스 | `infra`. 모든 명령에 네임스페이스를 지정한다(`bao` CLI의 `-namespace=infra`) |
 | 마운트 | `inventory/`(비밀 아님), `secrets/`(비밀) |
 | AppRole | 계열별: `provision`·`host_agents`·`backup_maintenance`·`openobserve_config`·`host_audit`·`network_backup`·`github_webhook_watch`, 그리고 `periodic_check`·`agent_session`·`applier` |
-| secret_id 수명 | Semaphore 계열 AppRole(7개)과 `periodic_check`: 180일. `applier`: 1일(적용할 때마다 발급). `agent_session`: 24시간. 30일 전 만료 알림은 180일 계열이 대상이다. `applier`·`agent_session`은 만료가 짧아 알림 없이 필요할 때 새로 발급한다 |
+| secret_id 수명 | Semaphore 계열 AppRole(7개)과 `periodic_check`: 180일(단 이 AppRole은 만료되면 알림을 보낼 검사 자체가 멈추므로 알림 대상이 아니고 §3 4번으로 따로 챙긴다). `applier`: 1일(적용할 때마다 발급). `agent_session`: 24시간. 30일 전 만료 알림은 Semaphore 계열 AppRole 7개가 대상이다. `applier`·`agent_session`은 만료가 짧아 알림 없이 필요할 때 새로 발급한다 |
 | 정책·AppRole 원본 | OpenTofu 코드와 정책 HCL. 손으로 바꾸지 않는다(바꾸면 Periodic Check가 OpenTofu 밖 객체로 잡는다) |
 | 비밀을 쓰는 곳 | secret_id는 Semaphore Environment(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`)에만 둔다. Git·이슈·채팅에 붙이지 않는다 |
 
@@ -29,7 +29,9 @@ Semaphore용 AppRole의 `secret_id`는 TTL이 180일이고 러너 CIDR에 묶여
 3. 출력의 래핑 토큰을 한 번만 풀어 secret_id를 얻고, 곧바로 Semaphore Environment의 `VAULT_SECRET_ID`를 갱신한다. 셸 이력에 값이 남지 않게 한다(프롬프트로 입력하고 인자·환경변수에 값을 쓰지 않는다).
 
    ```bash
-   bao unwrap -namespace=infra <wrapping_token>
+   read -rs BAO_TOKEN && export BAO_TOKEN   # 래핑 토큰을 프롬프트로 입력(인자·이력에 남기지 않는다)
+   bao unwrap -namespace=infra
+   unset BAO_TOKEN
    ```
 
 4. 해당 계열 템플릿을 한 번 실행해 로그인되는지 확인한다(읽기 전용 실행이나 `--check`).
@@ -90,7 +92,7 @@ OpenBao에는 두지 않는다. OpenBao가 고장 났을 때 고칠 state를 열
 
 ## 7. 비상용 admin 사용
 
-`admin`은 루트 네임스페이스의 비상용 신분이다. 삭제, 영구 삭제(destroy), 정책 수동 변경이 필요할 때만 쓴다. 쓰기 전에 사유를 비공개 노트에 적고, 일이 끝나면 토큰을 폐기한다.
+`admin`은 루트 네임스페이스의 비상용 신분이다. 삭제, 영구 삭제(destroy), 정책 수동 변경이 필요할 때만 쓴다. `admin` 자격은 운영자 비밀번호 관리자의 오프라인 사본에 보관하고 OpenBao·Semaphore가 고장 난 때에도 이 경로로 꺼낸다. 허용되는 정기 용도는 `applier`·`agent_session` secret_id 발급(§2, §4)이고, 그 밖에는 삭제·영구 삭제·정책 수동 변경이다. 쓰기 전에 사유를 비공개 노트에 적고, 일이 끝나면 토큰을 폐기한다.
 
 ### 7.1 참조 중인 Credential 삭제
 
