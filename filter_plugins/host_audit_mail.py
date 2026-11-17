@@ -16,8 +16,8 @@ carry them goes through ``host_audit_mail_redact`` before it is shown.
 """
 
 import re
-from email.utils import formataddr
 from datetime import datetime, timezone
+from email.utils import formataddr
 
 try:
     from ansible.errors import AnsibleFilterError
@@ -83,7 +83,8 @@ def host_audit_mail_recipients(value):
 
 # A display name is decoration, never a reason to hold the audit mail: anything that could
 # break out of the header (CR/LF, angle brackets, quotes, an @) is dropped and the bare address is sent.
-_UNSAFE_NAME = re.compile(r'[\x00-\x1f\x7f<>"@,;]')
+# Commas and semicolons stay: ``formataddr`` quotes them.
+_UNSAFE_NAME = re.compile(r'[\x00-\x1f\x7f<>"@]')
 
 
 def host_audit_mail_sender(address, name=''):

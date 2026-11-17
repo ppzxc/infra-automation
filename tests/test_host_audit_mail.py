@@ -408,6 +408,21 @@ def test_the_name_comes_from_the_variable_then_openbao_and_the_header_is_sent():
     assert "host_audit_mail_from_name" in text and "_kv.mail_from_name" in text
     assert resolve.get("no_log") is True
     send = next(t for t in _flatten(_tasks("mail.yml")) if "community.general.mail" in t)
-    assert "sender_header" in send["community.general.mail"]["sender"]
+    assert "from_header" in send["community.general.mail"]["sender"]
     outcome = next(t for t in _tasks("mail.yml") if "[AUD-608]" in t.get("name", ""))
-    assert "sender_header" not in json.dumps(outcome)  # the judged/redacted value stays the bare address
+    assert "from_header" not in json.dumps(outcome)  # the judged value never carries the header form
+
+
+def test_comma_in_a_sender_name_is_quoted_not_dropped():
+    from email.utils import parseaddr
+
+    header = host_audit_mail_sender("noreply@example.kr", "Audit, Server")
+    phrase, addr = parseaddr(header)
+    assert (phrase, addr) == ("Audit, Server", "noreply@example.kr")
+
+
+def test_the_sender_name_is_redacted_from_the_mail_outcome():
+    outcome = next(t for t in _tasks("mail.yml") if "[AUD-608]" in t.get("name", ""))
+    assert "sender_name" in json.dumps(outcome)
+    assert host_audit_mail_redact("From: Audit Name <a@example.kr> rejected", ["a@example.kr", "Audit Name"]) \
+        .count("Audit Name") == 0

@@ -652,7 +652,7 @@ report.yml
 |---|---|---|
 | `host_audit_mail_enabled` | `true` | false면 보내지 않음 |
 | `host_audit_mail_to` · `host_audit_mail_from` | `[]` · `""` | Extra variables로 OpenBao 값을 덮어씀. 둘 다 주면 OpenBao를 조회하지 않음 |
-| `host_audit_mail_from_name` | `""` | 표시 이름. 변수가 OpenBao `mail_from_name`보다 앞선다. 이름은 RFC 2047로 인코딩해 `From:` 헤더에만 넣고 봉투 발신자(릴레이가 보는 값)는 주소 그대로다. CR/LF·`<>"@,;` 같은 제어·구분 문자가 있거나 공백뿐이면 이름을 버리고 주소만 보낸다(메일을 막지 않는다). 수신자·발신자를 둘 다 변수로 주면 OpenBao를 조회하지 않으므로 이름도 변수로 줘야 한다 |
+| `host_audit_mail_from_name` | `""` | 표시 이름. 변수가 OpenBao `mail_from_name`보다 앞선다. 이름은 RFC 2047로 인코딩해 `From:` 헤더에만 넣고 봉투 발신자(릴레이가 보는 값)는 주소 그대로다. CR/LF 같은 제어 문자나 `<>"@`가 있거나 공백뿐이면 이름을 버리고 주소만 보낸다(메일을 막지 않는다). 쉼표·세미콜론은 따옴표로 감싸 그대로 쓴다. 이름은 결과 판정의 가림 대상에도 들어간다. 수신자·발신자를 둘 다 변수로 주면 OpenBao를 조회하지 않으므로 이름도 변수로 줘야 한다 |
 | `host_audit_mail_host` · `host_audit_mail_port` | `smtp-relay.gmail.com` · `587` | 운영값. 시험용 SMTP를 쓸 때만 덮어씀 |
 | `host_audit_mail_secure` | `starttls` | STARTTLS를 못 하면 보내지 않음. 시험용 평문은 `never` |
 | `host_audit_mail_ehlohost` | `""` | relay 설정이 HELO 도메인을 요구할 때 그 이름 |
@@ -677,7 +677,7 @@ report.yml
 | `AUD-600` | `Decide whether this run sends the report mail` | `ansible.builtin.set_fact` | 러너 | 비활성·check 모드·보관 실패면 보내지 않음 |
 | `AUD-601` | `Log in to OpenBao with AppRole for the Host Audit mail settings` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
 | `AUD-602` | `Fetch the Host Audit mail settings from OpenBao (agents/host_audit)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
-| `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 문제는 키 이름·건수만, `no_log` |
+| `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 수신자·발신자 주소와 선택 표시 이름(`From:` 헤더 값)을 해석, 문제는 키 이름·건수만, `no_log` |
 | `AUD-604` | `Create a private temporary directory for the attachment` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 디렉터리, AUD-607이 삭제 |
 | `AUD-605` | `Copy the report and the xlsx zip under their ASCII attachment names` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600`. 보고서 1개와 (요약에 `xlsx_zip`이 있고 호출자가 경로를 준 때만) xlsx zip 1개 |
 | `AUD-606` | `Send the summary, the A4 report and the xlsx zip (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통(첨부 둘), `failed_when: false`, `no_log` |
