@@ -15,8 +15,8 @@ OpenBao의 거의 모든 데이터가 `infra/prod/host` 네임스페이스의 `h
 2. **저장은 소유 대상별로, 접근은 작업 계열별로 나눈다.** 소유 대상은 Asset, Service, Operator, Automation Identity다. 같은 Asset의 정보도 비밀이 아닌 값은 `inventory/`, 비밀은 `secrets/`에 두고, 무엇을 읽을 수 있는지는 정책이 정한다. 문서 종류별 경로 골격은 스키마와 `index.yml`이 원본이다.
 3. **스키마를 강제하고 쓰기는 등록 도구로만 한다.** 문서 종류마다 JSON Schema(2020-12)를 저장소에 두고, 경로 패턴 → 스키마 대응표는 `index.yml` 한 파일로 한다. `validate`·`put`·`check`가 같은 검증 코드를 쓰고, `put`은 `cas`로 동시 수정을 막는다. 모든 객체는 `additionalProperties: false`다. 매일 정기 점검(Periodic Check)이 전체를 스키마·참조·Semaphore 인벤토리와 대조한다. "등록은 도구로만"은 정책으로 강제할 수 없는 운영 규칙이다.
 4. **정책·AppRole·마운트·userpass는 OpenTofu 코드로 관리한다.** `hashicorp/vault` provider(버전 고정)를 쓰고 Semaphore 템플릿으로 Auto Approve 없이 적용한다. state는 S3 호환 저장소에 두고 `pbkdf2`로 state·plan을 암호화한다. AppRole `secret_id`는 state에 남지 않도록 OpenTofu로 발급하지 않고 response-wrapping 수동 런북으로 발급한다([openbao-operations](../runbooks/openbao-operations.md)).
-5. **AppRole은 작업 계열마다 하나다.** 정책은 경로 묶음 단위의 작은 정책이고 AppRole이 `token_policies`로 조합한다. 계열 × 경로 매트릭스의 원본은 정책 HCL이며 문서에 복사하지 않는다. 정책 경로는 `+`와 끝자리 `*`만 쓰므로 "이번 실행 Asset만 읽기" 제한은 만들 수 없고 문서 종류로 나눈다. list 권한은 `periodic_check`에만 준다.
-6. **사람은 일상용 `operator`와 비상용 `admin`으로 나눈다.** `operator`는 `infra` 안 userpass 사용자로 전체 읽기와 create/update만 하고 delete·destroy·`sys/`는 없다. 삭제·영구 삭제·정책 수동 변경은 루트 네임스페이스의 `admin`으로만 한다. 에이전트 세션(`agent_session`)은 `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다.
+5. **AppRole은 작업 계열마다 하나다.** 정책은 경로 묶음 단위의 작은 정책이고 AppRole이 `token_policies`로 조합한다. 계열 × 경로 매트릭스의 원본은 정책 HCL이며 문서에 복사하지 않는다. 정책 경로는 `+`와 끝자리 `*`만 쓰므로 "이번 실행 Asset만 읽기" 제한은 만들 수 없고 문서 종류로 나눈다. 기계 계열 중 list 권한은 `periodic_check`에만 준다.
+6. **사람은 일상용 `operator`와 비상용 `admin`으로 나눈다.** `operator`는 `infra` 안 userpass 사용자로 전체 읽기(list 포함, 등록 도구의 `check`와 참조 확인에 필요)와 create/update만 하고 delete·destroy·`sys/`는 없다. 삭제·영구 삭제·정책 수동 변경은 루트 네임스페이스의 `admin`으로만 한다. 에이전트 세션(`agent_session`)은 `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다.
 7. **전환은 이중 읽기 없이 한 번에 한다.** 운영에 영향 없는 준비 PR을 먼저 병합하고, 동결 창에서 이전 스크립트로 적재한 뒤 전환 PR 하나를 병합한다. 옛 `infra/prod/host`는 읽기 전용으로 남겨 되돌리기를 코드 revert와 Environment 복귀로 끝낸다.
 
 ## Considered Options

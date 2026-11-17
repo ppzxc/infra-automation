@@ -11,6 +11,7 @@
 | 네임스페이스 | `infra`. 모든 명령에 네임스페이스를 지정한다(`bao` CLI의 `-namespace=infra`) |
 | 마운트 | `inventory/`(비밀 아님), `secrets/`(비밀) |
 | AppRole | 계열별: `provision`·`host_agents`·`backup_maintenance`·`openobserve_config`·`host_audit`·`network_backup`·`github_webhook_watch`, 그리고 `periodic_check`·`agent_session`·`applier` |
+| secret_id 수명 | Semaphore 계열 AppRole(7개)과 `periodic_check`: 180일. `applier`: 1일(적용할 때마다 발급). `agent_session`: 24시간. 30일 전 만료 알림은 180일 계열이 대상이다. `applier`·`agent_session`은 만료가 짧아 알림 없이 필요할 때 새로 발급한다 |
 | 정책·AppRole 원본 | OpenTofu 코드와 정책 HCL. 손으로 바꾸지 않는다(바꾸면 Periodic Check가 OpenTofu 밖 객체로 잡는다) |
 | 비밀을 쓰는 곳 | secret_id는 Semaphore Environment(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`)에만 둔다. Git·이슈·채팅에 붙이지 않는다 |
 
@@ -18,7 +19,7 @@
 
 Semaphore용 AppRole의 `secret_id`는 TTL이 180일이고 러너 CIDR에 묶여 있다. OpenTofu로 발급하면 state에 남으므로 response-wrapping으로 수동 발급한다. 래핑 토큰은 한 번만 풀 수 있어 전달 중에 가로채이면 발급자가 알아챈다.
 
-1. 교체할 계열과 Environment를 정한다(계열 하나당 Environment 하나). 만료가 가까운 순서는 Periodic Check 알림이나 `bao read -namespace=infra auth/approle/role/<계열>/secret-id-accessor` 목록으로 확인한다.
+1. 교체할 계열과 Environment를 정한다(계열 하나당 Environment 하나). 만료가 가까운 것은 Periodic Check 알림으로 알고, 폐기할 옛 accessor는 `bao list -namespace=infra auth/approle/role/<계열>/secret-id`로 목록을 보고 `bao write -namespace=infra auth/approle/role/<계열>/secret-id-accessor/lookup secret_id_accessor=<accessor>`로 만료 시각을 확인해 고른다.
 2. `operator`에는 `sys/`와 AppRole 권한이 없으므로 `admin`(§7)으로 래핑해 발급한다. 사유를 비공개 노트에 적는다.
 
    ```bash

@@ -36,7 +36,9 @@ def test_adr_lists_each_rejected_alternative_with_a_reason():
     for option in ("현행 유지", "다단 네임스페이스", "작업별 저장", "이중 읽기", "문서 버전"):
         row = next((line for line in section.splitlines() if option in line), None)
         assert row, option
-        assert "기각" in row and "이유" in row, f"{option}: 기각 이유가 없다"
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        assert cells[1] == "기각", option
+        assert cells[2].startswith("기각 이유:") and len(cells[2]) > 40, f"{option}: 기각 이유가 없다"
 
 
 def test_adr_states_the_out_of_scope_items_in_one_line():
