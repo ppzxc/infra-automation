@@ -79,4 +79,4 @@ tofu validate
 
 CI(`.github/workflows/tests.yml`의 `tofu` 잡)가 같은 세 명령을 돈다. 운영 서버에는 닿지 않는다. 정적 구조 검사는 `tests/test_openbao_tofu.py`다. 실서버 허용·거부 시험은 전환 동결 창의 확인 목록에서 한다.
 
-위험 확인(자식 토큰·버전 문자열·네임스페이스) 결과는 [openbao-opentofu-risk-check.md](runbooks/openbao-opentofu-risk-check.md)에 있다.
+위험 확인(자식 토큰·버전 문자열·네임스페이스) 결과는 [openbao-operations.md 8절](runbooks/openbao-operations.md)에 있다.

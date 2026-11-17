@@ -28,7 +28,7 @@
 * [OpenBao 운영 런북](runbooks/openbao-operations.md) - secret_id 발급(response-wrapping)·180일 교체·만료 알림 대응, OpenTofu 적용과 state passphrase 보관, `operator` 추가, 비상용 `admin` 사용 (Spec #511)
 * [OpenBao 구조 일괄 전환 런북](runbooks/openbao-cutover.md) - 전환 9단계, 동결 창 규칙, 계열별 확인 목록·거부 시험, 되돌리기, 2주 뒤 옛 구조 삭제 (Spec #511)
 * [Host Agents (otelcol + resticprofile) ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md) - Host Agents 설치·재구성, ISMS 수집/백업 표준, OpenBao 입력(위치는 ADR-0014로 대체), CentOS 6/7 분기
-* [OpenBao 구성 OpenTofu](openbao_opentofu.md) - `tofu/openbao`의 마운트·applier·userpass 코드, state pbkdf2 암호화, 입력 값(TF_VAR_*), Semaphore OpenTofu 템플릿(Auto Approve 끔), 호환 위험 확인 결과 [런북](runbooks/openbao-opentofu-risk-check.md) (Spec #511 / Ticket-6, #517)
+* [OpenBao 구성 OpenTofu](openbao_opentofu.md) - `tofu/openbao`의 마운트·applier·userpass 코드, state pbkdf2 암호화, 입력 값(TF_VAR_*), Semaphore OpenTofu 템플릿(Auto Approve 끔), 호환 위험 확인 결과 [런북 8절](runbooks/openbao-operations.md) (Spec #511 / Ticket-6, #517)
 * [OpenBao 문서 도구](openbao_docs.md) - `openbao_docs.py` 하위 명령별 절. Periodic Check(`check`): 점검 항목·규칙 이름·종료 코드·알림·실패 대응 (Spec #511 / Ticket-8, #519)
 * [Semaphore 셋업 가이드](semaphore-setup.md) - Key Store·Repository·Inventory·Variable Group·Host Agents/OpenObserve 템플릿·스케줄(UTC/KST) 등록 절차와 자주 겪는 문제
 * Host Agents — Deploy All 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상

@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 TOFU = ROOT / "tofu" / "openbao"
 DOC = ROOT / "docs" / "openbao_opentofu.md"
-RISK = ROOT / "docs" / "runbooks" / "openbao-opentofu-risk-check.md"
+RISK = ROOT / "docs" / "runbooks" / "openbao-operations.md"
 WORKFLOW = ROOT / ".github" / "workflows" / "tests.yml"
 
 TF_FILES = sorted(TOFU.glob("*.tf"))
@@ -169,4 +169,5 @@ def test_risk_check_runbook_records_three_open_risks_honestly():
     for needle in ("자식 토큰", "버전 문자열", "네임스페이스"):
         assert needle in text, needle
     assert "확인 결과" in text
-    assert "openbao-operations" in text  # T1 머지 후 합칠 것
+    assert "## 8. OpenTofu 호환 위험 확인 결과" in text
+    assert not (ROOT / "docs" / "runbooks" / "openbao-opentofu-risk-check.md").exists()
