@@ -175,7 +175,7 @@
 |---|---|
 | Playbook | `playbooks/host_agents_maintenance.yml` |
 | 스케줄 | 매일 05:00 KST — Semaphore 스케줄 시간대가 Asia/Seoul이면 `0 5 * * *`, 기본값 UTC면 `0 20 * * *` ([semaphore-setup.md](semaphore-setup.md) §6) |
-| Environment | Deploy와 같은 Variable Group: `VAULT_ADDR`, `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(AppRole `backup_maintenance`, BAK-087) — `VAULT_TOKEN` 대체 경로와 네임스페이스·마운트 변수는 없다. 시크릿은 Git에 두지 않음. 등록 절차는 [semaphore-setup.md](semaphore-setup.md) |
+| Environment | Deploy와 같은 Variable Group: `VAULT_ADDR`, `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(AppRole `backup_maintenance`, BAK-087) — 역할 안에 `VAULT_TOKEN` 대체 경로와 네임스페이스·마운트 변수는 없고 인증은 공용 읽기 지점이 정한다. 주소(`o2_endpoint`·`rustfs_endpoint`)는 `inventory/services/*`의 `url`이 유일한 출처이며 문서가 없으면 Extra variables가 있어도 실패한다. 시크릿은 Git에 두지 않음. 등록 절차는 [semaphore-setup.md](semaphore-setup.md) |
 | 대상 | `servers` 중 인벤토리 `host_agents_excluded` 그룹을 뺀 호스트 (Deploy와 같은 집합, `host_agents_backup_only` 호스트 포함) |
 | 수동 실행 | `-e target_hosts=<host>`(1대), `-e backup_maintenance_read_subset=always\|never` |
 

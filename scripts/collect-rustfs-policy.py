@@ -131,11 +131,15 @@ def _openbao_doc(addr, token, namespace, mount, doc):
                                  headers={"X-Vault-Token": token, "X-Vault-Namespace": namespace})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())["data"]["data"]
+            body = json.loads(r.read())
     except urllib.error.HTTPError as e:
         raise SystemExit(f"OpenBao 조회 실패: {mount}/{doc} (HTTP {e.code})")
-    except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
+    except (urllib.error.URLError, OSError, ValueError) as e:
         raise SystemExit(f"OpenBao 접속 실패: {mount}/{doc} ({type(e).__name__})")
+    data = ((body or {}).get("data") or {}).get("data")
+    if not isinstance(data, dict):
+        raise SystemExit(f"OpenBao 응답에 문서 데이터가 없습니다: {mount}/{doc}")
+    return data
 
 
 def read_rustfs_service(env):
