@@ -380,3 +380,11 @@ def test_unexpected_semaphore_response_shape_is_unreachable(env):
     rec.hosts = None  # 가짜가 본문을 만들다 실패해 연결이 끊긴다
     r = run(fake)
     assert r.returncode == 1 and "semaphore_unreachable" in alert_text(rec)
+
+
+def test_failed_secrets_listing_still_alerts_with_partial_store(env):
+    fake, rec = env
+    fake.raw("LIST", "secrets/metadata/assets", {"errors": []}, status=500)
+    assert run(fake).returncode == 1
+    body = alert_text(rec)  # alert/notify 문서가 목록에서 빠져도 이미 읽은 문서로 알림이 간다
+    assert "secrets/assets/\t#\tlist_failed" in body and "semaphore_config_missing" not in body

@@ -94,18 +94,26 @@ class Client:
 
 # ---- 문서 읽기 ----------------------------------------------------------------------------------------------------
 
-def list_documents(client, mount, prefix=""):
-    """마운트 아래 모든 문서 경로(`<마운트>/<경로>`). 목록이 404면 비어 있다."""
+def list_documents(client, mount, prefix="", failed=None):
+    """마운트 아래 모든 문서 경로(`<마운트>/<경로>`). 하위 목록이 404면 비어 있다.
+
+    목록 조회가 실패한 접두사는 `failed`에 모으고 나머지는 계속 모은다(읽은 문서는 버리지 않는다).
+    마운트 최상위의 404는 마운트가 없거나 비었다는 뜻이라 실패로 본다.
+    """
+    failed = [] if failed is None else failed
     try:
         keys = client.request("LIST", "%s/metadata/%s" % (mount, prefix))["data"]["keys"]
     except BaoError as exc:
-        if exc.status == 404:
-            return []
-        raise
+        if exc.status != 404 or not prefix:
+            failed.append(prefix)
+        return []
+    except (KeyError, TypeError):
+        failed.append(prefix)
+        return []
     docs = []
     for key in keys:
         if key.endswith("/"):
-            docs.extend(list_documents(client, mount, prefix + key))
+            docs.extend(list_documents(client, mount, prefix + key, failed))
         else:
             docs.append("%s/%s%s" % (mount, prefix, key))
     return docs
@@ -115,11 +123,9 @@ def read_store(client):
     """({문서 경로: 데이터}, [Violation], 목록에 있던 문서 경로 집합). 읽지 못한 문서는 store에서 빼고 `read_failed`로 보고한다."""
     store, problems, listed = {}, [], set()
     for mount in MOUNTS:
-        try:
-            docs = list_documents(client, mount)
-        except BaoError:
-            problems.append(Violation(mount + "/", "#", "list_failed"))
-            continue
+        failed = []
+        docs = list_documents(client, mount, failed=failed)
+        problems.extend(Violation("%s/%s" % (mount, p), "#", "list_failed") for p in failed)
         for doc in docs:
             try:
                 store[doc] = client.request("GET", "%s/data/%s" % (mount, doc[len(mount) + 1:]))["data"]["data"]
@@ -131,6 +137,10 @@ def read_store(client):
                 problems.append(Violation(doc, "#", "read_failed"))
             listed.add(doc)
     return store, problems, listed
+
+
+def _is_zero_time(text):
+    return isinstance(text, str) and (text == "" or text.startswith("0001-"))
 
 
 def _parse_time(text):
@@ -257,7 +267,10 @@ def check_secret_ids(client, roles, now):
                 continue
             expires = _parse_time((info.get("data") or {}).get("expiration_time"))
             if expires is None:
-                no_expiry = True
+                if _is_zero_time((info.get("data") or {}).get("expiration_time")):
+                    no_expiry = True
+                else:  # 읽을 수 없는 만료 시각을 "만료 없음"으로 보면 임박한 것을 놓친다
+                    out.append(Violation(doc, "#", "secret_id_lookup_failed"))
             elif latest is None or expires > latest:
                 latest = expires
         # 교체 중에는 옛 secret_id가 남아 있다. 가장 늦게 만료되는 것이 임박할 때만 알린다.
@@ -361,7 +374,7 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
         if not client.token:
             client.login_approle(environ["VAULT_ROLE_ID"], environ["VAULT_SECRET_ID"])
         expected = expected_from_tofu(tofu_dir)
-    except (KeyError, BaoError, OSError):
+    except (KeyError, BaoError, OSError, ValueError):  # ValueError: tofu 파일 디코딩
         print("접속 설정 오류: VAULT_ADDR와 VAULT_TOKEN(또는 VAULT_ROLE_ID·VAULT_SECRET_ID)이 필요하고, "
               "tofu 디렉터리를 읽을 수 있어야 한다", file=sys.stderr)
         return 2
@@ -379,8 +392,8 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
 
     warnings = []
     unread = {v.doc for v in failures if v.rule == "read_failed"}
-    if any(v.rule == "list_failed" and v.doc == "inventory/" for v in failures):
-        unread.add("inventory/")  # Asset 목록이 비어 모든 호스트가 가짜 위반이 되므로 대조를 건너뛴다(list_failed로 보고했다)
+    if any(v.rule == "list_failed" for v in failures):  # 목록이 불완전하면 호스트 대조가 가짜 위반을 쏟는다(list_failed로 보고했다)
+        unread.add("*")
     failures.extend(_inventory_checks(client, store, listed, unread, now, warnings))
     try:
         roles = role_names(client)
@@ -403,7 +416,7 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
 
 
 def _inventory_checks(client, store, listed, unread, now, warnings):
-    if unread & {"inventory/", "inventory/services/semaphore", "secrets/services/semaphore/inventory_read"}:
+    if unread & {"*", "inventory/services/semaphore", "secrets/services/semaphore/inventory_read"}:
         return []  # read_failed로 이미 보고했다
     sem_url = (store.get("inventory/services/semaphore") or {}).get("url")
     sem_token = (store.get("secrets/services/semaphore/inventory_read") or {}).get("token")
