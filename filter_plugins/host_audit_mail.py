@@ -16,6 +16,7 @@ carry them goes through ``host_audit_mail_redact`` before it is shown.
 """
 
 import re
+from email.utils import formataddr
 from datetime import datetime, timezone
 
 try:
@@ -78,6 +79,23 @@ def host_audit_mail_recipients(value):
         seen.add(key)
         addresses.append(item)
     return {'addresses': addresses, 'invalid': invalid}
+
+
+# A display name is decoration, never a reason to hold the audit mail: anything that could
+# break out of the header (CR/LF, angle brackets, quotes, an @) is dropped and the bare address is sent.
+_UNSAFE_NAME = re.compile(r'[\x00-\x1f\x7f<>"@,;]')
+
+
+def host_audit_mail_sender(address, name=''):
+    """The ``From`` value: ``formataddr`` (RFC 2047 for non-ASCII) or the bare address.
+
+    ``community.general.mail`` takes the envelope sender from ``parseaddr`` of this value,
+    so the relay still sees only the address.
+    """
+    name = str(name or '').strip()
+    if not name or _UNSAFE_NAME.search(name):
+        return address
+    return formataddr((name, address))
 
 
 def host_audit_mail_redact(text, addresses):
@@ -335,6 +353,7 @@ class FilterModule(object):
         return {
             'host_audit_mail_recipients': host_audit_mail_recipients,
             'host_audit_mail_redact': host_audit_mail_redact,
+            'host_audit_mail_sender': host_audit_mail_sender,
             'host_audit_mail_attachment_name': host_audit_mail_attachment_name,
             'host_audit_mail_resend_prefix': host_audit_mail_resend_prefix,
             'host_audit_mail_summary': host_audit_mail_summary,

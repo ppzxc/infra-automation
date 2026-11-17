@@ -157,11 +157,11 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 - **EOL**: `roles/host_audit/vars/main.yml`의 `host_audit_eol_table`(기준일 `reviewed_on`, 무상 표준 지원 종료일). 실행 시작일 기준 지난 날짜면 지원 종료(EOS), 180일 이내면 EOL 임박, 표에 없으면 확인 불가.
 - **점검불가**: Asset Inventory 수집이 실패하면 '점검불가(수집 실패)', /etc/shadow를 읽지 못하면 '계정 잠금 상태 점검불가'.
 
-**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값에는 사람 이름이 아니라 직책을 적는다. 호스트 KV의 다섯 키 외 값(접속 정보)은 기록·보고서·메일에 넘어가지 않는다.
+**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값은 ISMS 자산대장에 적힌 표기 그대로 넣는다. 호스트 KV의 다섯 키 외 값(접속 정보)은 기록·보고서·메일에 넘어가지 않는다.
 
 **읽기 전용**: 스크립트는 sudo로 돌지만 rpm 조회만은 `nobody`로 낮춰 실행한다(`setpriv`, 없으면 `su`). root로 `rpm -qa`를 돌리면 rpm이 DB를 쓰기 모드로 열어 EL9의 `rpmdb.sqlite-shm` 수정 시각(EL6/7은 Berkeley DB 환경 파일)이 바뀌기 때문이다. molecule `VERIFY-AUD-010`과 pytest의 `centos:6`/`centos:7` 컨테이너 시험이 관리 영역의 메타데이터까지 같은지 확인한다.
 
-**선언 예시** (OpenBao `hosts/<Inventory Hostname>`의 키. 사람 이름이 아니라 직책을 적는다)
+**선언 예시** (OpenBao `hosts/<Inventory Hostname>`의 키. 자산대장 표기 그대로 적는다)
 
 ```yaml
 description: "웹 서비스 [그룹자산명]"
@@ -646,11 +646,13 @@ report.yml
 |---|---|---|---|
 | `agents/host_audit` | `mail_to` | ● | 받는 사람. 목록 또는 `,`·`;`·공백 구분 문자열. 중복은 대소문자 무시로 하나만 |
 | `agents/host_audit` | `mail_from` | ● | 보내는 주소 1개. Workspace relay가 허용한 도메인의 역할 주소 |
+| `agents/host_audit` | `mail_from_name` | | 보내는 사람 표시 이름. 없으면 주소만 보낸다 |
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `host_audit_mail_enabled` | `true` | false면 보내지 않음 |
 | `host_audit_mail_to` · `host_audit_mail_from` | `[]` · `""` | Extra variables로 OpenBao 값을 덮어씀. 둘 다 주면 OpenBao를 조회하지 않음 |
+| `host_audit_mail_from_name` | `""` | 표시 이름. 변수가 OpenBao `mail_from_name`보다 앞선다. 이름은 RFC 2047로 인코딩해 `From:` 헤더에만 넣고 봉투 발신자(릴레이가 보는 값)는 주소 그대로다. CR/LF·`<>"@,;` 같은 제어·구분 문자가 있거나 공백뿐이면 이름을 버리고 주소만 보낸다(메일을 막지 않는다). 수신자·발신자를 둘 다 변수로 주면 OpenBao를 조회하지 않으므로 이름도 변수로 줘야 한다 |
 | `host_audit_mail_host` · `host_audit_mail_port` | `smtp-relay.gmail.com` · `587` | 운영값. 시험용 SMTP를 쓸 때만 덮어씀 |
 | `host_audit_mail_secure` | `starttls` | STARTTLS를 못 하면 보내지 않음. 시험용 평문은 `never` |
 | `host_audit_mail_ehlohost` | `""` | relay 설정이 HELO 도메인을 요구할 때 그 이름 |
