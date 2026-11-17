@@ -29,6 +29,7 @@ RUN pip install --no-cache-dir \
     pytest-xdist \
     docker \
     hvac \
+    "jsonschema==4.26.0" \
     cryptography \
     jmespath \
     netaddr \
