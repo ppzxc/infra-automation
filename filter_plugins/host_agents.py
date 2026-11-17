@@ -604,13 +604,14 @@ def host_agents_tcpcheck_targets(roster, endpoints_by_host, endpoint='ssh'):
     targets, missing = [], []
     for name in roster:
         ep = ((endpoints_by_host or {}).get(name) or {}).get(endpoint)
-        if not isinstance(ep, dict) or _blank(ep.get('address')) or _blank(ep.get('port')):
+        port = ep.get('port') if isinstance(ep, dict) else None
+        if not isinstance(ep, dict) or _blank(ep.get('address')) or isinstance(port, bool) or not re.fullmatch(r'[0-9]{1,5}', str(port).strip()):
             missing.append(name)
             continue
-        targets.append('%s:%d' % (str(ep['address']).strip(), int(ep['port'])))
+        targets.append('%s:%d' % (str(ep['address']).strip(), int(str(port).strip())))
     if missing:
         from ansible.errors import AnsibleFilterError
-        raise AnsibleFilterError("서버 도달성 대상을 만들 수 없습니다 — %s Endpoint가 없는 Asset: %s" % (endpoint, ', '.join(missing)))
+        raise AnsibleFilterError("서버 도달성 대상을 만들 수 없습니다 — %s Endpoint가 없거나 주소·포트가 잘못된 Asset: %s" % (endpoint, ', '.join(missing)))
     return targets
 
 

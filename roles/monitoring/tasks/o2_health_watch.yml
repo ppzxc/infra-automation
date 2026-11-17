@@ -20,9 +20,14 @@
     - inventory_hostname == host_agents_o2_health_checker
     - host_agents_os_path == 'modern'
   block:
-    - name: "[MON-220] Assert the alert webhook URL is available for the health timer"
-      vars:
+    # 알림 주소 문서는 한 번만 읽고(시크릿이라 no_log) 검증과 env 렌더링이 같은 값을 쓴다. 실패 사유(문서 경로·상태 코드)는 경고로 나온다.
+    - name: Read the alert notify document once for the health timer
+      ansible.builtin.set_fact:
         _alert_notify: "{{ lookup('openbao_doc', 'secrets/services/alert/notify', errors='warn') }}"
+      check_mode: false
+      no_log: true
+
+    - name: "[MON-220] Assert the alert webhook URL is available for the health timer"
       ansible.builtin.assert:
         that:
           - _alert_notify is mapping
@@ -31,7 +36,6 @@
           {{ inventory_hostname }}: OpenBao secrets/services/alert/notify의 url을 읽지 못했거나 형식이 잘못되어
           OpenObserve 생존 타이머를 배포할 수 없습니다(OpenObserve — Config와 같은 값을 쓴다).
         quiet: true
-      no_log: true
 
     - name: "[MON-221] Ensure OpenObserve health config and state directories exist"
       ansible.builtin.file:
@@ -53,8 +57,6 @@
         mode: '0755'
 
     - name: "[MON-223] Deploy the OpenObserve health env file (0600, no_log, no diff)"
-      vars:
-        _alert_notify: "{{ lookup('openbao_doc', 'secrets/services/alert/notify') }}"
       ansible.builtin.template:
         src: "{{ role_path }}/templates/openobserve-health.env.j2"
         dest: "{{ o2_health_config_dir }}/env"

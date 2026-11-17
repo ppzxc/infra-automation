@@ -1438,6 +1438,9 @@ def test_tcpcheck_targets_fail_naming_the_assets_without_an_ssh_endpoint_instead
     with pytest.raises(AnsibleFilterError) as err:
         host_agents_tcpcheck_targets(["ns0001", "ns0002", "ns0003"], docs)
     assert "ns0002" in str(err.value) and "ns0003" in str(err.value) and "ns0001" not in str(err.value)
+    bad = {"ns0004": {"ssh": {"protocol": "ssh", "address": "192.0.2.4", "port": "ssh"}}}
+    with pytest.raises(AnsibleFilterError, match="ns0004"):
+        host_agents_tcpcheck_targets(["ns0004"], bad)
 
 
 def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token=APPROLE_TOKEN, others=(), excluded_group=None):
