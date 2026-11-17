@@ -74,3 +74,62 @@ def test_the_role_has_no_own_openbao_reading_code_token_fallback_or_test_bypass_
     text = "".join(p.read_text(encoding="utf-8") for p in [PLAYBOOK, *ROLE.rglob("*")] if p.is_file() and p.suffix in (".yml", ".j2"))
     for banned in ("VAULT_TOKEN", "VAULT_ROLE_ID", "VAULT_NAMESPACE", "OPENBAO_", "o2c_vault", "_kv_fixture", "agents/openobserve", "/v1/"):
         assert banned not in text, banned
+
+
+# --- 호스트별 알림 설정과 사설 CA는 OpenBao 문서에서 읽는다(최종 리뷰 5·6번) ---------------------------------------------------
+
+def _render_with(directory, *, config=None):
+    from o2c_render import fixture_args
+    directory.mkdir()
+    cmd = ["ansible-playbook", "-i", "localhost,", str(PLAYBOOK),
+           *fixture_args("http://127.0.0.1:9", config=config, extra={"o2c_render_dump": str(directory / "d.json")})]
+    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300,
+                         env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
+    assert res.returncode == 0, res.stdout + res.stderr
+    return (directory / "d.json").read_text(encoding="utf-8")
+
+
+def test_host_exclusions_thresholds_and_provisioning_accounts_come_from_the_job_config_document(tmp_path):
+    base = _render_with(tmp_path / "base")
+    for marker in ("ns0297", "ns0300", "deployer"):
+        assert marker not in base
+    cfg = {"resource_exclusions": [{"host": "ns0297", "mount": "/data"}],
+           "resource_thresholds": [{"host": "ns0300", "p2": 97, "p1": 99}],
+           "audit_provisioning_accounts": ["deployer"]}
+    out = _render_with(tmp_path / "cfg", config=cfg)
+    for marker in ("ns0297", "ns0300", "deployer"):
+        assert marker in out, marker
+
+
+def test_the_new_job_config_keys_are_schema_checked():
+    ok = {"resource_exclusions": [{"host": "ns0297", "mount": "/data", "metric": "disk"}],
+          "resource_thresholds": [{"host": "ns0300", "p2": 97, "p1": 99}], "audit_provisioning_accounts": ["deployer"]}
+    assert ov.validate_document("inventory/config/openobserve_config", ok) == []
+    for bad in ({"resource_exclusions": [{"mount": "/data"}]}, {"resource_exclusions": [{"host": "ns1", "metric": "cpu"}]},
+                {"resource_thresholds": [{"host": "ns1", "p2": "97"}]}, {"audit_provisioning_accounts": [""]}):
+        assert ov.validate_document("inventory/config/openobserve_config", bad), bad
+
+
+def test_the_private_ca_file_comes_from_the_openobserve_service_document(tmp_path):
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False,
+             "vars_files": [str(ROLE / "defaults" / "main.yml")],
+             "tasks": [{"ansible.builtin.assert": {"that": ["o2c_ca_file == '/etc/pki/fake-o2-ca.pem'"], "quiet": True}}]}]
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump(play))
+    docs = {"o2c_docs": {"inventory/services/openobserve": {"url": "https://o2.example.test", "ca_file": "/etc/pki/fake-o2-ca.pem"}}}
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb), "-e", json.dumps(docs)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_the_o2_ca_file_extra_variable_still_wins_over_the_document(tmp_path):
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False,
+             "vars_files": [str(ROLE / "defaults" / "main.yml")],
+             "tasks": [{"ansible.builtin.assert": {"that": ["o2c_ca_file == '/runner/ca.pem'"], "quiet": True}}]}]
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump(play))
+    extra = {"o2_ca_file": "/runner/ca.pem",
+             "o2c_docs": {"inventory/services/openobserve": {"url": "https://o2.example.test", "ca_file": "/etc/pki/fake-o2-ca.pem"}}}
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb), "-e", json.dumps(extra)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr

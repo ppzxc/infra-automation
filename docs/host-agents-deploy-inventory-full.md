@@ -157,7 +157,7 @@
 | 트레이스 | `otlphttp/app_traces` (`otel_app_telemetry`일 때만) | 동일, 헤더 `stream-name: app_traces` | 메모리 큐 | 버림(역압 없음) |
 
 - 인증은 HTTP Basic(`Authorization: Basic ${env:O2_BASIC_AUTH}`)이고 값은 `secrets.env`에서 읽는다.
-- 사설 CA를 쓰면 `o2_ca_file`을 `tls.ca_file`에 넣는다.
+- 사설 CA를 쓰면 OpenBao `inventory/services/openobserve`의 `ca_file`(변수 `o2_ca_file`)을 `tls.ca_file`에 넣는다.
 - 공통 프로세서: `memory_limiter`(75%/스파이크 20%), `batch`(1024건/1s).
 
 ---
@@ -218,7 +218,7 @@
 | 항목 | 값 |
 |---|---|
 | Repository | `s3:<rustfs_endpoint>/<bucket>` (버킷 루트) |
-| 버킷 | `backup-prod-<inventory_hostname>`. Extra variables `rustfs_bucket`으로만 재정의 가능(OpenBao 값은 쓰지 않음) |
+| 버킷 | `backup-prod-<inventory_hostname>`. Asset 문서의 `agents.backup.bucket`(이름 규칙 밖 호스트만)이나 Extra variables `rustfs_bucket`으로 재정의 |
 | 스냅샷 host 라벨 | Inventory Hostname(예: `ns0331`) |
 | 스케줄 | 매일 **02:00~03:59** 중 하나. `inventory_hostname`을 시드로 분을 고정하므로 호스트마다 다르고 실행마다 같음 |
 | 실행 명령 | `resticprofile -f yaml -c /etc/restic/profiles.yaml -n default unlock; ... backup` |
@@ -271,6 +271,6 @@
 | `secrets/services/openobserve/ingest` | `username`, `password` | 등록 이벤트를 켤 때 | 컨트롤러의 등록 이벤트 인증 |
 | `inventory/services/rustfs` | `url`, `region` | url 필수 | 백업 대상 |
 
-`host_agents_environment`는 역할 기본값이고 버킷은 규칙 `backup-prod-<inventory_hostname>`(Extra variables로만 재정의)다. 사설 CA 파일(`o2_ca_file`·`rustfs_ca_file`)은 Extra variables다.
+`host_agents_environment`는 역할 기본값이고 버킷은 규칙 `backup-prod-<inventory_hostname>`(Asset 문서 `agents.backup.bucket`이나 Extra variables로 재정의)다. 사설 CA 파일(`o2_ca_file`·`rustfs_ca_file`)은 Service 문서의 `ca_file`이다.
 
 필수 키가 없거나, 제외할 수 없는 경로를 제외하려 하면 해당 호스트는 **어떤 변경도 하기 전에** 실패한다(fail-closed).

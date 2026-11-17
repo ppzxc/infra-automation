@@ -268,6 +268,10 @@ class _Builder:
         for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
             for k in sorted(k for k in d if k.startswith(prefix)):
                 self.put(asset, ["agents", section, k[len(prefix):]], d.pop(k), (doc, k))
+        if d.get("rustfs_bucket") not in (None, ""):  # 이름 규칙 밖 호스트(이전·개명)의 버킷: 호스트별 덮어쓰기
+            self.put(asset, ["agents", "backup", "bucket"], d.pop("rustfs_bucket"), (doc, "rustfs_bucket"))
+        else:
+            d.pop("rustfs_bucket", None)
         self.finish(doc, d)
 
     # -- Credential·Endpoint 확정 -------------------------------------------------------------------------------------
@@ -373,6 +377,10 @@ class _Builder:
         # openobserve
         if "o2_endpoint" in o2:
             self.put("inventory/services/openobserve", ["url"], o2.pop("o2_endpoint"), ("agents/openobserve", "o2_endpoint"))
+        if o2.get("o2_ca_file"):  # 사설 CA 경로(선택)
+            self.put("inventory/services/openobserve", ["ca_file"], o2.pop("o2_ca_file"), ("agents/openobserve", "o2_ca_file"))
+        else:
+            o2.pop("o2_ca_file", None)
         gw.pop("o2_endpoint", None)  # OpenObserve 주소와 중복(#501 §1)
         if "api_user" in o2:
             self.put("secrets/services/openobserve/admin", ["username"], o2.pop("api_user"), ("agents/openobserve", "api_user"))
@@ -383,6 +391,13 @@ class _Builder:
         if "normal_sources" in o2:
             self.put("inventory/config/openobserve_config", ["normal_sources"], o2.pop("normal_sources"),
                      ("agents/openobserve", "normal_sources"))
+        # 호스트별 알림 제외·임계값·프로비저닝 계정은 관리번호·계정이 들어가 공개 저장소(역할 기본값)에 둘 수 없다(#504 §7)
+        for k, new in (("alert_resource_exclusions", "resource_exclusions"), ("alert_resource_thresholds", "resource_thresholds"),
+                       ("alert_audit_provisioning_accounts", "audit_provisioning_accounts")):
+            if o2.get(k):
+                self.put("inventory/config/openobserve_config", [new], o2.pop(k), ("agents/openobserve", k))
+            else:
+                o2.pop(k, None)
         if "alert_webhook_plain_url" in o2:
             self.put("secrets/services/alert/notify", ["url"], o2.pop("alert_webhook_plain_url"),
                      ("agents/openobserve", "alert_webhook_plain_url"))
@@ -393,6 +408,10 @@ class _Builder:
         # rustfs
         if "rustfs_endpoint" in rf:
             self.put("inventory/services/rustfs", ["url"], rf.pop("rustfs_endpoint"), ("agents/rustfs", "rustfs_endpoint"))
+        if rf.get("rustfs_ca_file"):  # 사설 CA 경로(선택)
+            self.put("inventory/services/rustfs", ["ca_file"], rf.pop("rustfs_ca_file"), ("agents/rustfs", "rustfs_ca_file"))
+        else:
+            rf.pop("rustfs_ca_file", None)
         for k, new in (("maintenance_access_key", "access_key"), ("maintenance_secret_key", "secret_key")):
             if k in rf:
                 self.put("secrets/services/rustfs/maintenance", [new], rf.pop(k), ("agents/rustfs", k))

@@ -73,8 +73,10 @@ def test_the_role_reads_only_through_the_shared_read_point():
     text = _role_text(skip=("drift_subrun.yml",))
     for banned in ("VAULT_", "OPENBAO_", "vault_namespace", "vault_mount", "vault_addr", "X-Vault", "approle", "infra/prod/host",
                    "agents/host_audit", "agents/rustfs", "agents/openobserve", "_host_kv_dict", "_effective_host_resp",
-                   "host_agents_environment", "host_agents_vault"):
+                   "host_agents_vault"):
         assert banned not in text, banned
+    # 환경은 monitoring 기본값 한 곳에서 오고, 이 역할에서는 기본값 파일의 그 한 줄만 이름을 안다.
+    assert "host_agents_environment" not in _role_text().replace((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"), "")
     assert "lookup('openbao_doc'" in text or 'lookup("openbao_doc"' in text or "query('openbao_doc'" in text
     for task in _flat(yaml.safe_load((ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8"))):
         assert "ansible.builtin.uri" not in task or "approle" not in json.dumps(task)
@@ -90,9 +92,30 @@ def test_no_extra_variable_replaces_the_stored_values():
 
 
 def test_the_environment_is_a_role_default_not_an_inventory_lookup():
-    assert _defaults()["host_audit_environment"] == "production"
-    assert "host_agents_environment" not in _role_text()
     assert "host_audit_environment" in _task("main.yml", "[AUD-011]")["vars"]["_declared"]["environment"]
+    assert "production" not in str(_defaults()["host_audit_environment"])      # 값은 한 곳(monitoring 기본값)에만 있다
+
+
+def _resolved_environment(tmp_path, **extra):
+    """host_audit 역할 기본값만 읽어 host_audit_environment가 무엇으로 해석되는지 ansible로 본다."""
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "vars_files": [str(ROLE_DIR / "defaults" / "main.yml")],
+             "tasks": [{"ansible.builtin.copy": {"content": "{{ host_audit_environment }}", "dest": str(tmp_path / "env.txt")},
+                        "become": False}]}]
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump(play))
+    cmd = ["ansible-playbook", "-i", "localhost,", str(pb), "-e", json.dumps({"role_path": str(ROLE_DIR), **extra})]
+    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROLE_DIR.parent.parent, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    return (tmp_path / "env.txt").read_text(encoding="utf-8")
+
+
+def test_the_environment_is_defined_once_in_the_monitoring_defaults_and_host_audit_follows_it(tmp_path):
+    monitoring = yaml.safe_load((ROLE_DIR.parent / "monitoring" / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert _resolved_environment(tmp_path) == monitoring["host_agents_environment"] == "production"
+
+
+def test_an_overridden_host_agents_environment_is_the_host_audit_environment_too(tmp_path):
+    assert _resolved_environment(tmp_path, host_agents_environment="staging") == "staging"
 
 
 def test_the_drift_subrun_forwards_only_the_one_off_account_input_and_the_runner_credentials():

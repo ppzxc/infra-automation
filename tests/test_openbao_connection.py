@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 sys.path.insert(0, str(ROOT_DIR / "scripts"))
 
 import openbao_validation as ov  # noqa: E402
-from openbao_connection import ConnectionError_, admin_accounts, preference_list, resolve  # noqa: E402
+from openbao_connection import ConnectionError_, admin_accounts, host_connections, preference_list, resolve  # noqa: E402
 from openbao_ssh import openbao_connection_summary, openbao_ssh_common_args, openbao_ssh_proxy_command  # noqa: E402
 
 VALID = ROOT_DIR / "tests" / "fixtures" / "openbao_docs" / "valid"
@@ -83,7 +83,17 @@ def test_an_ssh_key_credential_without_identity_logs_in_with_its_own_key(store):
     out = resolve(reader(store), "ns0001", ["ssh"])
     assert out["login"] == {"mode": "key", "username": "admin01", "private_key": "/fake/path/to/key",
                             "passphrase": "fake-pass-0002"}
-    assert out["password_auth_exception"] is True       # 판정은 identity 유무만 본다
+    assert out["password_auth_exception"] is False      # 키로 로그인하면 비밀번호 접속 예외가 아니다(MON-020 게이트가 통과시키면 안 된다)
+
+
+def test_a_password_login_on_an_identity_endpoint_override_is_not_a_password_exception(store):
+    """Endpoint가 identity면 bootstrap Credential을 비밀번호로 쓰는 조회도 예외가 아니다(예외는 identity 없는 Endpoint만)."""
+    out = resolve(reader(store), "ns0001", ["ssh"], credential="root")
+    assert out["login"]["mode"] == "password" and out["password_auth_exception"] is False
+
+
+def test_a_non_ssh_endpoint_is_never_a_password_exception(store):
+    assert resolve(reader(store), "ns0004", ["https"])["password_auth_exception"] is False
 
 
 def test_a_credential_name_override_logs_in_with_that_credentials_own_secret_even_on_an_identity_endpoint(store):
@@ -320,6 +330,44 @@ def test_default_fixture_documents_all_match_the_index():
 def test_admin_accounts_also_refuse_an_unregistered_preference(store):
     with pytest.raises(ConnectionError_, match="선호 순서"):
         admin_accounts(reader(store), "ns0001", ["https"])
+
+
+def test_host_connections_equal_the_separate_resolutions_and_read_each_document_once(store):
+    reads = []
+
+    def counting(doc, required=True):
+        reads.append(doc)
+        return reader(store)(doc, required)
+
+    memo = {}
+
+    def memoized(doc, required=True):          # Reader.read와 같은 규칙: 읽은 문서는 다시 읽지 않는다
+        if doc not in memo:
+            memo[doc] = counting(doc, required)
+        return memo[doc]
+
+    out = host_connections(memoized, "ns0001", ["ssh"])
+    admin = store["inventory/assets/ns0001"]["access"]["admin_credentials"][0]
+    assert out["admin"] == resolve(reader(store), "ns0001", ["ssh"], credential=admin)
+    assert out["admin_accounts"] == admin_accounts(reader(store), "ns0001", ["ssh"])
+    assert out["asset"] == store["inventory/assets/ns0001"] and out["admin_credential"] == admin
+    assert len(reads) == len(set(reads))
+
+
+def test_host_connections_without_an_access_clause_use_the_default_credential_and_have_no_bootstrap(store):
+    store["inventory/assets/ns0001"].pop("access")
+    out = host_connections(reader(store), "ns0001", ["ssh"])
+    assert out["admin_credential"] == "" and out["bootstrap"] == {} and out["admin_accounts"] == []
+    assert out["admin"] == resolve(reader(store), "ns0001", ["ssh"])
+
+
+def test_host_connections_stop_before_resolving_when_a_provisioning_target_has_no_access_clause(store):
+    store["inventory/assets/ns0001"].pop("access")
+    with pytest.raises(ConnectionError_, match=r"ACCESS-MISSING.*ns0001"):
+        host_connections(reader(store), "ns0001", ["ssh"], requires_access=True)
+    store["inventory/assets/ns0001"]["access"] = {"admin_credentials": ["admin01"]}          # bootstrap이 없어도 실패
+    with pytest.raises(ConnectionError_, match="ACCESS-MISSING"):
+        host_connections(reader(store), "ns0001", ["ssh"], requires_access=True)
 
 
 def test_the_connection_summary_carries_no_secret(store):

@@ -27,13 +27,15 @@ o2c_notify: "{{ o2c_docs['secrets/services/alert/notify'] | default({}) }}"
 o2c_config: "{{ o2c_docs['inventory/config/openobserve_config'] | default({}) }}"
 o2c_org: "{{ (o2c_docs['inventory/services/openobserve'] | default({})).org | default('default', true) }}"
 o2c_endpoint: "{{ (o2c_docs['inventory/services/openobserve'] | default({})).url | default('', true) }}"
-# 사설 CA 파일 경로(선택). 비밀이 아니고 컨트롤러 파일 경로라 문서가 아니라 변수(-e o2_ca_file=...)로 준다.
-o2c_ca_file: "{{ o2_ca_file | default('', true) }}"
-# 자원 알림의 호스트·마운트별 제외와 임계값(선택). 공개해도 되는 값이라 역할 변수다.
-#   o2c_resource_exclusions: [{host: ns0297, mount: /data(선택), metric: memory(선택)}]
-#   o2c_resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
-o2c_resource_exclusions: []
-o2c_resource_thresholds: []
+# 사설 CA 파일 경로(선택). 비밀이 아니고 컨트롤러 파일 경로다. OpenBao inventory/services/openobserve의 ca_file(선택)에서 읽고,
+# 변수 o2_ca_file(Extra variables)이 있으면 그 값이 우선한다(이전 방식 호환, 컨트롤러 경로가 에이전트 호스트 경로와 다를 때).
+o2c_ca_file: "{{ o2_ca_file | default((o2c_docs['inventory/services/openobserve'] | default({})).ca_file | default('', true), true) }}"
+# 자원 알림의 호스트·마운트별 제외와 임계값(선택). 관리번호가 들어가 공개 저장소에 둘 수 없어 OpenBao
+# inventory/config/openobserve_config의 resource_exclusions·resource_thresholds에서 읽는다(Spec #504 §7). 문서에 없으면 빈 목록이다.
+#   resource_exclusions: [{host: ns0297, mount: /data(선택), metric: memory(선택)}]
+#   resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
+o2c_resource_exclusions: "{{ o2c_config.resource_exclusions | default([], true) }}"
+o2c_resource_thresholds: "{{ o2c_config.resource_thresholds | default([], true) }}"
 
 # 알림 본문의 원문 로그 링크 베이스 URL(웹 UI 외부 주소). 기본은 연결 엔드포인트다. 사용자가 브라우저로 여는 주소와 다르면
 # -e o2c_web_url=...로 덮어쓴다. 비우면 원문 링크 없이 `▶ 상세 보기: {alert_url}`만 나간다.
@@ -411,8 +413,9 @@ o2c_audit_secret_metadata_syscalls: [getxattr, lgetxattr, fgetxattr, listxattr, 
 # P2 알림은 `AND NOT <서명>`, P3 알림(infra-audit-watch-provisioning)은 `AND <서명>`. 계정 목록(역할 변수 `o2c_audit_provisioning_accounts`)을 주면 서명이 그 로그인(AUID)으로 좁아진다
 # (기본 비어 있음 = 터미널 없는 로그인 사용자 전부).
 # 한계(기본 설정): 계정 목록이 비어 있으면 서명이 넓어 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 P3로만 온다.
-# 프로비저닝 접속 계정을 이 목록(`o2c_audit_provisioning_accounts`)에 채워 서명을 좁히는 것을 권한다. 절차는 docs/openobserve_config.md. 값은 저장소에 두지 않는다.
-o2c_audit_provisioning_accounts: []
+# 프로비저닝 접속 계정을 이 목록에 채워 서명을 좁히는 것을 권한다. 절차는 docs/openobserve_config.md. 값은 저장소에 두지 않고
+# OpenBao inventory/config/openobserve_config의 audit_provisioning_accounts에서 읽는다(문서에 없으면 빈 목록).
+o2c_audit_provisioning_accounts: "{{ o2c_config.audit_provisioning_accounts | default([], true) }}"
 # P3 알림이 보는 감시 키. 같은 구분을 쓰는 알림(#430)은 자기 키를 여기에 더하고 자기 P2 SQL에 `AND NOT {{ o2c_audit_provisioning_filter }}`를 붙인다.
 o2c_audit_provisioning_keys: [auth_config, container_config, secret_access, audit_config, syslog_config, ssh_keys, firewall_config]
 # 재통지 간격(분)과 임계: P2 알림 3개는 한 (호스트, 사용자, 실행 파일, 경로) 행의 사건이 임계 이상일 때 울리고, 간격은 Event Alert 원칙대로 조회 구간(5분)과 같다.
@@ -434,9 +437,9 @@ o2c_audit_watch_cfg:
 o2c_audit_provisioning_filter: "{{ o2c_audit_watch_cfg | o2c_audit_provisioning_cond }}"
 
 # 리소스 알림(Spec #184 / Ticket-3). 제외 파일시스템 유형은 Git 기본값, /boot·/boot/efi는 감시한다.
-# 호스트·마운트 예외와 임계값 덮어쓰기는 역할 변수 o2c_resource_exclusions·o2c_resource_thresholds(기본 비어 있어도 동작):
-#   o2c_resource_exclusions: [{host: ns0297, mount: /data, metric: disk(선택: disk|inode|memory)}]
-#   o2c_resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
+# 호스트·마운트 예외와 임계값 덮어쓰기는 OpenBao inventory/config/openobserve_config의 resource_exclusions·resource_thresholds(역할 변수 o2c_resource_*, 비어 있어도 동작):
+#   resource_exclusions: [{host: ns0297, mount: /data, metric: disk(선택: disk|inode|memory)}]
+#   resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
 o2c_resource_p2_threshold: 90
 o2c_resource_p1_threshold: 95
 o2c_resource_excluded_fstypes: [squashfs, iso9660, tmpfs, devtmpfs, overlay]

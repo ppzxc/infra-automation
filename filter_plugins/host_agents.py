@@ -339,6 +339,7 @@ def _dedupe(items):
     return out
 
 
+_BUCKET_NAME = re.compile(r'^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
 _SECTIONS = (('backup_', 'backup'), ('otel_', 'otel'), ('github_webhook_', 'github_webhook'))
 _PATH_LABELS = {'backup_extra_paths': 'agents.backup.extra_paths', 'backup_exclude_paths': 'agents.backup.exclude_paths',
                 'backup_pre_hooks': 'agents.backup.pre_hooks', 'backup_sqlite_snapshots': 'agents.backup.sqlite_snapshots'}
@@ -415,6 +416,12 @@ def host_agents_resolve_inputs(agents, secrets, standard_logs, security_paths, m
     exclude_paths = _string_list(kv.get('backup_exclude_paths'), _label('backup_exclude_paths'), errors)
     pre_hooks = _string_list(kv.get('backup_pre_hooks'), _label('backup_pre_hooks'), errors)
     sqlite_snapshots = _sqlite_snapshot_paths(kv.get('backup_sqlite_snapshots'), errors, kv_path)
+    backup_bucket = kv.get('backup_bucket')
+    if _is_blank(backup_bucket):
+        backup_bucket = ''
+    elif not (isinstance(backup_bucket, str) and _BUCKET_NAME.fullmatch(backup_bucket)):
+        errors.append("agents.backup.bucket: S3 버킷 이름 규칙(소문자·숫자·점·하이픈 3~63자)을 지켜야 합니다 (OpenBao %s)" % kv_path)
+        backup_bucket = ''
     docker_metrics = _as_bool(kv.get('otel_docker_metrics'), _label('otel_docker_metrics'), errors)
     container_logs = _as_bool(kv.get('otel_container_logs'), _label('otel_container_logs'), errors)
     app_telemetry = _as_bool(kv.get('otel_app_telemetry'), _label('otel_app_telemetry'), errors)
@@ -485,6 +492,7 @@ def host_agents_resolve_inputs(agents, secrets, standard_logs, security_paths, m
         'backup_exclude_paths': _dedupe(exclude_paths),
         'backup_pre_hooks': pre_hooks,
         'backup_sqlite_snapshots': _dedupe(sqlite_snapshots),
+        'backup_bucket': backup_bucket,
     }
 
 

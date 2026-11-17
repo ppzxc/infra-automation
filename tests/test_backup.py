@@ -665,6 +665,48 @@ def test_maintenance_resolves_inputs_from_the_new_structure(tmp_path):
         "access": "fake-access-0015", "secret": "fake-secret-0016", "ingest": "fake-ingest:fake-pw-0014"}
 
 
+def test_maintenance_takes_the_host_bucket_and_the_private_ca_from_openbao(tmp_path):
+    """이름 규칙 밖 호스트의 버킷(Asset agents.backup.bucket)과 RustFS 사설 CA(Service ca_file)를 읽는다."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"],
+                                                  agents={"backup": {"bucket": "backup-prod-oldname"}})
+    store["inventory/services/rustfs"] = dict(store["inventory/services/rustfs"], ca_file="/etc/pki/fake-rustfs-ca.pem")
+    dump = {"name": "Dump", "ansible.builtin.copy": {
+        "content": "{{ {'bucket': rustfs_bucket, 'ca': backup_maintenance_ca_file, 'host_ca': rustfs_ca_file} | to_json }}",
+        "dest": str(tmp_path / "eff.json")}}
+    res = _run(tmp_path, _maint_read_tasks() + [dump], _read_vars(store))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert json.loads((tmp_path / "eff.json").read_text()) == {
+        "bucket": "backup-prod-oldname", "ca": "/etc/pki/fake-rustfs-ca.pem", "host_ca": "/etc/pki/fake-rustfs-ca.pem"}
+
+
+def test_maintenance_rejects_a_host_bucket_that_breaks_the_s3_name_rule(tmp_path):
+    """Asset 문서의 호스트별 버킷도 이름 규칙 검증(BAK-072)을 거친다(Deploy의 입력 검증과 같다)."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"],
+                                                  agents={"backup": {"bucket": "Bad/Bucket"}})
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Bad/Bucket)" in res.stdout + res.stderr
+
+
+def test_maintenance_accepts_an_all_digit_host_bucket_as_a_string(tmp_path):
+    """숫자만으로 된 버킷 이름도 규칙상 올바르다: 템플릿을 거쳐도 정수로 바뀌지 않는다."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"], agents={"backup": {"bucket": "12345678"}})
+    dump = {"name": "Dump", "ansible.builtin.copy": {"content": "{{ rustfs_bucket | to_json }}", "dest": str(tmp_path / "b.json")}}
+    res = _run(tmp_path, _maint_read_tasks() + [dump], _read_vars(store))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert json.loads((tmp_path / "b.json").read_text()) == "12345678"
+
+
+@pytest.mark.parametrize("bad", ["good-bucket\n", 12345, ["a-b"]], ids=["trailing-newline", "integer", "list"])
+def test_maintenance_rejects_a_host_bucket_that_is_not_a_clean_string(tmp_path, bad):
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"], agents={"backup": {"bucket": bad}})
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반" in res.stdout + res.stderr
+
+
 def test_maintenance_reads_only_the_declared_documents(tmp_path):
     """읽은 문서는 backup_openbao_required가 선언한 패턴 안에 있고, 선언한 문서는 모두 읽는다."""
     with FakeOpenBao.with_schemas(token="tok") as bao:

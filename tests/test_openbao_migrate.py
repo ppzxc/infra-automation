@@ -42,6 +42,7 @@ def old_docs():
         "hosts/ns0001/agents": {
             "o2_ingest_token": "ingest-0001", "rustfs_access_key": "rk-0001", "rustfs_secret_key": "rs-0001",
             "restic_password": "restic-0001", "host_agents_environment": "prod", "backup_extra_paths": ["/srv/fake"],
+            "rustfs_bucket": "backup-prod-fakeold",
             "otel_container_logs": True, "github_webhook_port": "9000", "github_webhook_secret": "hook-secret-0011",
         },
         # 서버(레거시: 비밀번호 접속, bootstrap 계정)
@@ -86,11 +87,15 @@ def old_docs():
         "agents/openobserve": {
             "api_user": "o2admin", "api_password": "o2-admin-pass", "controller_ingest_token": "Y3VzZXI6Y3Bhc3M=",
             "o2_endpoint": "https://o2.example.test", "normal_sources": [{"address": "192.0.2.250", "kind": "semaphore"}],
+            "o2_ca_file": "/etc/pki/fake-o2-ca.pem",
+            "alert_resource_exclusions": [{"host": "ns0001", "mount": "/data"}],
+            "alert_resource_thresholds": [{"host": "ns0001", "p2": 97, "p1": 99}],
+            "alert_audit_provisioning_accounts": ["admin01"],
             "alert_webhook_plain_url": "https://alert.example.test/plain/alert-url-0013",
             "alert_webhook_url": "https://alert.example.test/json", "alert_webhook_token": "t", "alert_webhook_auth_header": "h",
         },
         "agents/rustfs": {"maintenance_access_key": "mk", "maintenance_secret_key": "ms",
-                          "rustfs_endpoint": "https://rustfs.example.test"},
+                          "rustfs_endpoint": "https://rustfs.example.test", "rustfs_ca_file": "/etc/pki/fake-rustfs-ca.pem"},
         "agents/host_audit": {"storage_access_key": "sk", "storage_secret_key": "ss", "mail_from": "noreply@example.test",
                               "mail_from_name": "Fake Audit", "mail_to": "a@example.test, b@example.test"},
         "agents/github-webhook-watch": {
@@ -122,7 +127,7 @@ def test_asset_document_gets_metadata_isms_access_agents_and_drops_computed_keys
         "isms": {"target": True, "group_asset_name": "", "personal_info_system": False, "department": "Fake Dept",
                  "owner_role": "Fake Owner", "admin_role": "Fake Admin", "asset_importance": "H"},
         "access": {"admin_credentials": ["admin01"]},
-        "agents": {"backup": {"extra_paths": ["/srv/fake"]}, "otel": {"container_logs": True},
+        "agents": {"backup": {"extra_paths": ["/srv/fake"], "bucket": "backup-prod-fakeold"}, "otel": {"container_logs": True},
                    "github_webhook": {"port": "9000"}},
     }
 
@@ -196,8 +201,8 @@ def test_domain_majority_becomes_common_and_only_exceptions_keep_a_domain(plan):
 
 def test_services_config_and_permission_documents(plan):
     s = plan.store
-    assert s["inventory/services/openobserve"] == {"url": "https://o2.example.test"}
-    assert s["inventory/services/rustfs"] == {"url": "https://rustfs.example.test"}
+    assert s["inventory/services/openobserve"] == {"url": "https://o2.example.test", "ca_file": "/etc/pki/fake-o2-ca.pem"}
+    assert s["inventory/services/rustfs"] == {"url": "https://rustfs.example.test", "ca_file": "/etc/pki/fake-rustfs-ca.pem"}
     assert s["inventory/services/github"] == {"url": "https://api.github.com", "org": "fake-org"}
     assert s["secrets/services/openobserve/admin"] == {"username": "o2admin", "password": "o2-admin-pass"}
     assert s["secrets/services/openobserve/ingest"] == {"username": "ingest", "password": "o2-pass-0010"}
@@ -207,7 +212,11 @@ def test_services_config_and_permission_documents(plan):
     assert s["secrets/services/github/org_hooks_read"] == {"token": "gh-token-0012"}
     assert s["inventory/config/host_audit"] == {"mail_recipients": ["a@example.test", "b@example.test"],
                                                 "mail_sender": "noreply@example.test", "mail_sender_display_name": "Fake Audit"}
-    assert s["inventory/config/openobserve_config"] == {"normal_sources": [{"address": "192.0.2.250", "kind": "semaphore"}]}
+    assert s["inventory/config/openobserve_config"] == {
+        "normal_sources": [{"address": "192.0.2.250", "kind": "semaphore"}],
+        "resource_exclusions": [{"host": "ns0001", "mount": "/data"}],
+        "resource_thresholds": [{"host": "ns0001", "p2": 97, "p1": 99}],
+        "audit_provisioning_accounts": ["admin01"]}
     assert s["inventory/config/github_webhook_watch"] == {"hook_url": "https://hooks.example.test/x",
                                                           "github_org": "fake-org", "o2_org": "fake-o2"}
 

@@ -180,16 +180,18 @@ def test_service_permission_policies_are_named_after_the_permission():
         assert readable_patterns([name]) == {doc}, name
 
 
-def test_connect_bundle_is_assets_credentials_and_automation_identity():
+def test_connect_bundle_is_assets_credentials_automation_identity_and_operator_public_keys():
     assert readable_patterns(["connect"]) == {
         "inventory/assets/+", "inventory/assets/+/endpoints",
         "secrets/assets/+/credentials/+", "secrets/automation/ssh",
+        "inventory/operators/+",
     }
 
 
 def test_connect_bundle_equals_its_small_policies():
     paths = lambda names: {p for n in names for p, _ in policy(n)}  # noqa: E731
-    assert paths(["connect"]) == paths(["inventory-assets", "asset-credentials"]) | {"secrets/data/automation/ssh"}
+    assert paths(["connect"]) == paths(["inventory-assets", "asset-credentials"]) | {
+        "secrets/data/automation/ssh", "inventory/data/operators/*"}
 
 
 def test_no_machine_policy_has_delete_or_sys_outside_applier_and_periodic_check():
@@ -218,11 +220,12 @@ COMMON = {
 ASSETS = {"inventory/assets/+", "inventory/assets/+/endpoints"}
 CRED = {"secrets/assets/+/credentials/+"}
 SSH = {"secrets/automation/ssh"}
-AGENTS = {"secrets/assets/+/agents"}
+OPERATORS = {"inventory/operators/+"}   # connect 묶음: 관리 계정 공개키(lookup openbao_host_connection)
+AGENTS = {"secrets/assets/+/agents", "inventory/assets/+"}   # asset-agents 정책: 에이전트 비밀과 Asset 문서 한 개(버킷 덮어쓰기)
 FUNA = {"secrets/services/funa/proxy", "secrets/services/funa/vrrp"}
 OO_ING = {"secrets/services/openobserve/ingest"}
-PROVISION = COMMON | ASSETS | CRED | SSH | FUNA
-HOST_AGENTS = COMMON | ASSETS | CRED | SSH | AGENTS | OO_ING | {"secrets/services/alert/notify"}  # 헬스 워치 알림(monitoring)
+PROVISION = COMMON | ASSETS | CRED | SSH | OPERATORS | FUNA
+HOST_AGENTS = COMMON | ASSETS | CRED | SSH | OPERATORS | AGENTS | OO_ING | {"secrets/services/alert/notify"}  # 헬스 워치 알림(monitoring)
 
 EXPECTED_READS = {
     "provision": PROVISION,

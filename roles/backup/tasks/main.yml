@@ -47,7 +47,9 @@
         - rustfs_endpoint | length > 0
         - rustfs_endpoint is match('^https?://')
         - not (rustfs_endpoint is match('.*/$'))
-        - rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
+        # 끝의 (?!(?s:.))는 `$`와 달리 줄바꿈 하나가 뒤따르는 이름도 거른다(스키마 패턴·host_agents 필터와 같은 규칙).
+        - rustfs_bucket is string
+        - rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](?!(?s:.))')
       fail_msg: >-
         {{ inventory_hostname }}: rustfs_endpoint(OpenBao inventory/services/rustfs 또는 Extra variables)나 버킷 이름({{ rustfs_bucket }})이 잘못되었습니다
         (endpoint: http(s)://host:port, 끝 슬래시 금지 / 버킷: S3 규칙 — 소문자·숫자·점·하이픈 3~63자, 밑줄·대문자 불가).

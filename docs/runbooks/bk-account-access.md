@@ -11,7 +11,7 @@
 | 프로비저닝 호스트(`setup_complete`) | `inventory/assets/<호스트>/endpoints`의 `ssh` Endpoint(`identity: automation`): Automation Identity 키로 Credential `username` 로그인 | sudo | Asset의 `access.admin_credentials`, `secrets/assets/<호스트>/credentials/<이름>`, `secrets/automation/ssh` |
 | 레거시 호스트(`agents_only`) | `ssh` Endpoint(`identity` 없음)의 Credential `bk`(이 문서에서는 `bk`), 비밀번호 | sudo(`become.method: sudo`), 같은 Credential의 비밀번호가 승격 비밀번호 | `inventory/assets/<호스트>/endpoints`, `secrets/assets/<호스트>/credentials/bk`의 `password` |
 
-- 레거시 호스트는 SSH 키가 없어 `identity` 없는 `ssh` Endpoint의 Credential 자신의 비밀(비밀번호)로 접속한다. 이것이 `password_auth_exception`이다(`openbao_integration.md` 4절, `monitoring.md`의 "비밀번호 접속 예외"). 이 값이 참이 아니면 `MON-020`에서 중단된다.
+- 레거시 호스트는 SSH 키가 없어 `identity` 없는 `ssh` Endpoint의 Credential 자신의 비밀(비밀번호)로 접속한다. 이것이 `password_auth_exception`이다(Credential이 `password`일 때만 참)(`openbao_integration.md` 4절, `monitoring.md`의 "비밀번호 접속 예외"). 이 값이 참이 아니면 `MON-020`에서 중단된다.
 - 접속 계정은 Endpoint의 기본 Credential(`credential`)이 정한다. 접속 계정을 바꾸는 것은 Endpoint의 `credential` 값을 고치는 일이다.
 - 비밀번호만 있는 계정(`bk`)을 `access.admin_credentials`에 넣는 방식은 쓰지 않는다. 관리 계정 Credential은 키 로그인(Automation Identity) 계정을 위한 것이다.
 

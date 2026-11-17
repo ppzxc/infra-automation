@@ -132,6 +132,11 @@
                 "minLength": 1
               },
               "description": "백업 직전 사전 훅 명령 목록(예: DB 덤프)."
+            },
+            "bucket": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](?!\\n)$",
+              "description": "RustFS 버킷 이름(선택). 없으면 규칙 <rustfs_bucket_prefix>-<관리번호>다. 이름 규칙 밖인 호스트(이전·개명 호스트)만 둔다. S3 이름 규칙(소문자·숫자·점·하이픈 3~63자)."
             }
           },
           "additionalProperties": false

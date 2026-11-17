@@ -19,7 +19,7 @@ from ansible.errors import AnsibleError
 from ansible.plugins.lookup import LookupBase
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbao_doc import Reader  # noqa: E402
+from openbao_doc import Reader, display  # noqa: E402
 
 DOCUMENTATION = r"""
 name: openbao_connection
@@ -42,6 +42,13 @@ options:
 
 class ConnectionError_(AnsibleError):  # noqa: N801
     pass
+
+
+# 이 파일의 lookup이 읽는 문서 패턴(schemas/openbao/index.yml의 패턴). 정책 계약 테스트가 계열 AppRole 정책과 대조하고,
+# 코드의 read() 호출과 이 표가 같은지도 본다. 새 읽기를 더하면 여기에도 적는다.
+CONNECTION_READS = ("inventory/assets/+/endpoints", "secrets/assets/+/credentials/+")
+IDENTITY_READS = ("secrets/automation/ssh",)                 # Endpoint가 identity일 때만 읽는다(서버 계열)
+ADMIN_ACCOUNTS_READS = ("inventory/assets/+", "inventory/operators/+")
 
 
 def preference_list(value):
@@ -149,11 +156,14 @@ def resolve(read, asset, preference, credential=None):
     default_cred = _need(ep, "credential", where)
     cred = credential or default_cred
     overridden = cred != default_cred
+    login = _login(read, asset, ep, cred, overridden)
     return {
         "asset": asset, "endpoint": name, **_endpoint_fields(ep, where), "credential": cred,
-        "login": _login(read, asset, ep, cred, overridden),
+        "login": login,
         "become": _become(read, asset, ep, cred),
-        "password_auth_exception": ep["protocol"] == "ssh" and not ep.get("identity"),
+        # 비밀번호 접속 예외(MON-020 게이트): identity 없는 ssh Endpoint를 Credential 자신의 비밀번호로 로그인할 때만이다.
+        # identity가 없어도 ssh_key Credential로 로그인하면 키 접속이라 예외가 아니다(스펙 #504: identity 없음 = 비밀번호로 접속하는 예외).
+        "password_auth_exception": ep["protocol"] == "ssh" and not ep.get("identity") and login["mode"] == "password",
         "via": _via_chain(read, ep.get("via")),
     }
 
@@ -184,10 +194,38 @@ def admin_accounts(read, asset, preference):
     return out
 
 
+def host_connections(read, asset, preference, requires_access=False):
+    """호스트 하나의 접속 해석 묶음: Asset 문서, 관리·부트스트랩 연결, 관리 계정 목록.
+
+    같은 읽기 함수(`Reader.read`는 한 객체 안에서 문서를 다시 읽지 않는다)로 한 번에 만들어, 호스트당 같은 문서를 여러 번 HTTP로
+    읽지 않는다. 관리 Credential 이름은 `access.admin_credentials`의 첫째, 부트스트랩은 `access.bootstrap_credential`이다
+    (둘 다 없으면 관리 연결은 Endpoint 기본 Credential, 부트스트랩 연결·관리 계정은 비어 있다).
+    `requires_access`(프로비저닝 대상)면 access 절이 없을 때 연결을 해석하기 전에 실패한다.
+    """
+    doc = read("inventory/assets/%s" % asset)
+    access = doc.get("access") or {}
+    admin = next(iter(access.get("admin_credentials") or []), "") or ""
+    boot = access.get("bootstrap_credential") or ""
+    if requires_access and not (admin and boot):
+        raise ConnectionError_(
+            "[ACCESS-MISSING] '%s'의 Asset 문서(inventory/assets/%s)에 access.admin_credentials 또는 access.bootstrap_credential이 없습니다. "
+            "프로비저닝 대상은 access 절이 필수입니다(실행 변수로 대신 줄 수 없습니다)." % (asset, asset))
+    return {
+        "asset": doc, "admin_credential": admin, "bootstrap_credential": boot,
+        "admin": resolve(read, asset, preference, admin or None),
+        "bootstrap": resolve(read, asset, preference, boot) if boot else {},
+        "admin_accounts": admin_accounts(read, asset, preference) if admin else [],
+    }
+
+
 class LookupModule(LookupBase):
     def run(self, terms, variables=None, **kwargs):
         reader = Reader(variables or {}, self._templar)
         preference = kwargs.get("preference")
         if not preference:
             raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 필요합니다")
-        return [resolve(reader.read, str(t), preference_list(preference), kwargs.get("credential")) for t in terms]
+        try:
+            return [resolve(reader.read, str(t), preference_list(preference), kwargs.get("credential")) for t in terms]
+        except ConnectionError_ as exc:
+            display.error(str(exc))      # no_log 태스크에서도 실패 사유(문서 경로·키 이름, 비밀 없음)가 보인다
+            raise
