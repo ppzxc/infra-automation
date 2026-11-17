@@ -70,7 +70,7 @@
     - name: Verify the funa_env role
       when: "'funa_env' in molecule_roles"
       block:
-        # 001~006은 OpenBao 조회·검증 태스크다. molecule에는 OpenBao가 없어 funa_env_kv_fixture가 조회를 대신하므로
+        # 003·005·006·017은 OpenBao 조회·검증 태스크다. molecule에는 OpenBao가 없어 openbao_fixture가 읽기 지점의 조회를 대신하므로
         # (조회·실패 경로는 tests/test_funa_env.py가 가짜 OpenBao로 검증) 여기서는 그 결과가 파일에 반영됐는지 본다.
         - name: "[VERIFY-FUNA-001] Verify the dockermgmt group the files are owned by exists"
           ansible.builtin.assert:
@@ -82,23 +82,26 @@
             that: f.stat['/etc/funa-cluster/cluster.env'].exists
           when: "'funa_cluster' in group_names"
 
-        - name: "[VERIFY-FUNA-003] Verify the node values reached cluster.env"
+        - name: "[VERIFY-FUNA-003] Verify the node and cluster values reached cluster.env as environment names"
           ansible.builtin.assert:
             that:
               - "'FUNA_NODE_EXTERNAL_HOSTNAME=node.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
               - "'FUNA_NODE_NAME=node' in f.read['/etc/funa-cluster/cluster.env']"
+              - "'FUNA_FLOATING_HOSTNAME=vip.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
           when: "'funa_cluster' in group_names"
 
-        - name: "[VERIFY-FUNA-004] Verify the cluster values reached cluster.env"
-          ansible.builtin.assert:
-            that: "'FUNA_FLOATING_HOSTNAME=vip.funa.invalid' in f.read['/etc/funa-cluster/cluster.env']"
-          when: "'funa_cluster' in group_names"
-
-        - name: "[VERIFY-FUNA-005] Verify every file was built from the KV contents"
+        - name: "[VERIFY-FUNA-005] Verify every file was built from the OpenBao documents"
           ansible.builtin.assert:
             that:
               - f.read['/etc/funa-cluster/proxy.secrets.env'] | length > 0
               - f.read['/etc/funa-cluster/vrrp.secrets.env'] | length > 0
+          when: "'funa_cluster' in group_names"
+
+        - name: "[VERIFY-FUNA-017] Verify the declared documents were all read (the node Credential and service secrets are in proxy.secrets.env)"
+          ansible.builtin.assert:
+            that:
+              - "'DB_PASSWORD=molecule-db' in f.read['/etc/funa-cluster/proxy.secrets.env']"
+              - "'CLOUDFLARE_API_TOKEN=molecule-cf' in f.read['/etc/funa-cluster/proxy.secrets.env']"
           when: "'funa_cluster' in group_names"
 
         - name: "[VERIFY-FUNA-006] Verify the files carry the Managed-by header (validated content only)"

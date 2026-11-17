@@ -1,0 +1,60 @@
+---
+# FUNA Cluster 환경 파일의 내부 고정 상수 (#524). 외부에서 바꾸지 않는다.
+
+# 이 역할이 읽는 OpenBao 문서 패턴과 필수 키(저장 키, snake_case). 형식은 docs/openbao_integration.md.
+# 입력 검증 assert(FUNA-017), 스키마 required 대조 테스트, 요청 기록 단언이 이 선언을 같이 쓴다.
+# 패턴의 첫 `+`는 인벤토리 호스트(관리번호), 둘째는 funa_env_credential이다.
+funa_env_openbao_required:
+  "inventory/assets/+": [funa]
+  "inventory/services/funa":
+    - floating_hostname
+    - health_check_uri
+    - service_name
+    - notification_smtp_from
+    - notification_smtp_host
+    - notification_smtp_port
+    - notification_smtp_to
+    - notification_smtp_username
+    - notification_naver_works_bot_url
+    - tz
+  "secrets/services/funa/proxy": [admin_token, db_password]
+  "secrets/services/funa/vrrp": [notification_smtp_password, notification_naver_works_bot_token]
+  "secrets/assets/+/credentials/+": [token]
+
+# Asset 문서 funa 절 안의 필수 키(노드별 설정).
+funa_env_node_required:
+  - node_external_hostname
+  - node_external_wildcard_hostname
+  - notification_header
+  - node_name
+
+# 노드별 Cloudflare 토큰은 Asset의 Credential(type api_token)이고, 렌더링 때 이 env 이름으로 proxy.secrets.env에 들어간다.
+funa_env_credential: cloudflare
+funa_env_credential_env: CLOUDFLARE_API_TOKEN
+
+# 저장 키(snake_case) -> 컨테이너 env 이름 대응표. 규칙은 "FUNA_ 접두사를 떼고 소문자"이고(scripts/openbao_migrate.py와 같다)
+# 접두사가 없는 TZ·DB_PASSWORD도 같은 규칙으로 저장된다. 표에 없는 키는 렌더링 전에 이름을 대며 실패한다.
+# 스키마(schemas/openbao)의 키와 일치하는지는 tests/test_funa_env.py가 정적으로 검사한다.
+funa_env_key_map:
+  # Asset 문서 funa 절(노드별)
+  node_external_hostname: FUNA_NODE_EXTERNAL_HOSTNAME
+  node_external_wildcard_hostname: FUNA_NODE_EXTERNAL_WILDCARD_HOSTNAME
+  notification_header: FUNA_NOTIFICATION_HEADER
+  node_name: FUNA_NODE_NAME
+  # inventory/services/funa(클러스터 공통, 비밀 아님)
+  floating_hostname: FUNA_FLOATING_HOSTNAME
+  health_check_uri: FUNA_HEALTH_CHECK_URI
+  service_name: FUNA_SERVICE_NAME
+  notification_smtp_from: FUNA_NOTIFICATION_SMTP_FROM
+  notification_smtp_host: FUNA_NOTIFICATION_SMTP_HOST
+  notification_smtp_port: FUNA_NOTIFICATION_SMTP_PORT
+  notification_smtp_to: FUNA_NOTIFICATION_SMTP_TO
+  notification_smtp_username: FUNA_NOTIFICATION_SMTP_USERNAME
+  notification_naver_works_bot_url: FUNA_NOTIFICATION_NAVER_WORKS_BOT_URL
+  tz: TZ
+  # secrets/services/funa/proxy
+  admin_token: FUNA_ADMIN_TOKEN
+  db_password: DB_PASSWORD
+  # secrets/services/funa/vrrp
+  notification_smtp_password: FUNA_NOTIFICATION_SMTP_PASSWORD
+  notification_naver_works_bot_token: FUNA_NOTIFICATION_NAVER_WORKS_BOT_TOKEN
