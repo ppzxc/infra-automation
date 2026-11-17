@@ -101,7 +101,7 @@ def test_one_xlsx_per_host_is_written_and_is_in_the_keep_list(tmp_path):
     (out / "xlsx" / ".leftover.tmp").write_bytes(b"partial")
     stats = _run(tmp_path, out, _model())
     assert not [rel for rel in stats if rel.endswith(".tmp")]  # a killed writer's (hidden) temp file is never listed
-    names = {"xlsx/host-audit-ha-1-h1.xlsx", "xlsx/host-audit-ha-1-h2.xlsx"}
+    names = {"xlsx/host-audit-ha-1-h1.xlsx", "xlsx/host-audit-ha-1-h2.xlsx", "xlsx/host-audit-ha-1-total.xlsx"}
     assert names <= set(stats)
     for rel in names:
         assert stats[rel] == hashlib.sha256((out / rel).read_bytes()).hexdigest()
@@ -110,6 +110,15 @@ def test_one_xlsx_per_host_is_written_and_is_in_the_keep_list(tmp_path):
     assert h1.max_row > 3 and h1["B2"].value == "h1"
     h2 = openpyxl.load_workbook(out / "xlsx/host-audit-ha-1-h2.xlsx").active
     assert h2["D2"].value == "양호 외 항목 없음"
+    total = openpyxl.load_workbook(out / "xlsx/host-audit-ha-1-total.xlsx").active
+    assert [c.value for c in total[1]] == [c.value for c in h1[1]]  # the same 15 columns
+    def body(ws):  # the rows under the header, up to the blank row before the footer
+        rows = [[c.value for c in row] for row in ws.iter_rows(min_row=2)]
+        return rows[:rows.index(next(r for r in rows if not any(r)))], rows[-2:]
+
+    h1_rows, h1_footer = body(h1)
+    total_rows, total_footer = body(total)
+    assert sorted(total_rows, key=repr) == sorted(h1_rows, key=repr) and total_footer == h1_footer  # h2 is clean
 
 
 def test_template_text_in_host_evidence_stays_text_through_the_module_arguments(tmp_path):
@@ -119,9 +128,10 @@ def test_template_text_in_host_evidence_stays_text_through_the_module_arguments(
     evidence = "{{ lookup('pipe', 'echo pwned') }} {% if x %}"
     model["config_vulnerability"]["findings"][0]["hosts"][0]["evidence"] = evidence
     _run(tmp_path, out, model)
-    ws = openpyxl.load_workbook(out / "xlsx/host-audit-ha-1-h1.xlsx").active
-    texts = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, str)]
-    assert any(evidence in t for t in texts)
+    for name in ("h1", "total"):  # the total carries the same cell, and it is text there too
+        ws = openpyxl.load_workbook(out / ("xlsx/host-audit-ha-1-%s.xlsx" % name)).active
+        texts = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, str)]
+        assert any(evidence in t for t in texts), name
 
 
 def test_a_host_whose_plan_cannot_be_built_gets_a_one_line_file_and_the_run_goes_on(tmp_path):
@@ -192,7 +202,7 @@ def test_the_failed_hosts_of_a_real_failing_write_loop_are_collected(tmp_path):
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     assert res.returncode == 0, res.stdout[-2000:]
     tasks = json.JSONDecoder().raw_decode(res.stdout[res.stdout.index("{"):])[0]["plays"][0]["tasks"]
-    assert tasks[-1]["hosts"]["localhost"]["_host_audit_xlsx_failed_hosts"] == ["h1", "h2"]
+    assert tasks[-1]["hosts"]["localhost"]["_host_audit_xlsx_failed_hosts"] == ["h1", "h2", "total"]  # the total is a file of its own
 
 
 def test_the_xlsx_is_written_for_an_on_demand_run_too(tmp_path):
@@ -221,5 +231,5 @@ def test_a_failing_item_does_not_echo_the_rows(tmp_path):
     """The loop only carries host names, so a failing item prints no rows; the plan is built once in a set_fact
     (deliberately not no_log, so a filter error stays readable)."""
     write = _task("report.yml", "AUD-025")
-    assert write["loop"] == "{{ host_audit_model.hosts }}"
+    assert write["loop"] == "{{ _host_audit_remediation_by_file | list }}"  # ASCII file names, not plans
     assert "no_log" not in _plan_task()  # a filter error must stay readable

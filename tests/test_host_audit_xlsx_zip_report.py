@@ -225,10 +225,14 @@ def test_the_zip_is_built_deterministically_hashed_into_the_summary_and_kept(tmp
     zip_path = out / "xlsx" / ZIP_NAME
     assert zip_path.is_file()
     with zipfile.ZipFile(zip_path) as z:
-        assert z.namelist() == ["host-audit-%s-h1.xlsx" % RUN_ID, "host-audit-%s-h2.xlsx" % RUN_ID]
+        assert z.namelist() == ["hosts/h1.xlsx", "hosts/h2.xlsx", "total.xlsx"]
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     assert stats["xlsx/" + ZIP_NAME] == digest  # kept with its own SHA-256, like every other file
-    assert {"xlsx/host-audit-%s-h1.xlsx" % RUN_ID, "xlsx/host-audit-%s-h2.xlsx" % RUN_ID} <= set(stats)
+    # the files on disk and in the bucket stay flat (total included); the folders exist only inside the zip
+    assert {"xlsx/host-audit-%s-%s.xlsx" % (RUN_ID, part) for part in ("h1", "h2", "total")} <= set(stats)
+    with zipfile.ZipFile(zip_path) as z:
+        for member, part in (("hosts/h1.xlsx", "h1"), ("hosts/h2.xlsx", "h2"), ("total.xlsx", "total")):
+            assert z.read(member) == (out / "xlsx" / ("host-audit-%s-%s.xlsx" % (RUN_ID, part))).read_bytes()
     summary = json.loads((out / "mail_summary.json").read_text())
     assert summary["xlsx_zip"]["sha256"] == digest and summary["xlsx_zip"]["file_name"] == ZIP_NAME
     assert summary["xlsx_zip"]["size"] == zip_path.stat().st_size
@@ -244,10 +248,30 @@ def test_a_stale_xlsx_of_an_earlier_run_with_the_same_id_is_not_packed(tmp_path)
     (out / "xlsx" / ("host-audit-%s-gone.xlsx" % RUN_ID)).write_bytes(b"stale plan of a host not audited now")
     stats = _report_stage(tmp_path, out)
     with zipfile.ZipFile(out / "xlsx" / ZIP_NAME) as z:
-        assert z.namelist() == ["host-audit-%s-h1.xlsx" % RUN_ID, "host-audit-%s-h2.xlsx" % RUN_ID]
+        assert z.namelist() == ["hosts/h1.xlsx", "hosts/h2.xlsx", "total.xlsx"]
     # not only left out of the zip: AUD-512 uploads xlsx/ recursively, so the stale plan must be gone from the disk too
     assert not (out / "xlsx" / ("host-audit-%s-gone.xlsx" % RUN_ID)).exists()
     assert "xlsx/host-audit-%s-gone.xlsx" % RUN_ID not in stats
+
+
+def test_a_stale_total_of_an_earlier_attempt_is_replaced_and_a_run_without_hosts_leaves_none(tmp_path):
+    total = "host-audit-%s-total.xlsx" % RUN_ID
+    out = tmp_path / "run"
+    (out / "xlsx").mkdir(parents=True)
+    (out / "xlsx" / total).write_bytes(b"stale total of an earlier attempt")
+    _report_stage(tmp_path, out)
+    assert (out / "xlsx" / total).read_bytes() != b"stale total of an earlier attempt"  # rewritten, not kept
+    with zipfile.ZipFile(out / "xlsx" / ZIP_NAME) as z:
+        assert z.read("total.xlsx") == (out / "xlsx" / total).read_bytes()
+    # a rerun without hosts: the old total is gone like every other stale xlsx
+    out2 = tmp_path / "run2"
+    (out2 / "xlsx").mkdir(parents=True)
+    (tmp_path / "second").mkdir()
+    (out2 / "xlsx" / total).write_bytes(b"stale total")
+    meta = {"run_id": RUN_ID, "started_at": "2026-10-31T22:00:05Z", "generated_at": "2026-10-31T22:01:00Z",
+            "run_kind": "scheduled", "targets": [], "timezone": "Asia/Seoul", "kisa_exceptions": []}
+    stats = _report_stage(tmp_path / "second", out2, host_audit_report_model([], meta))
+    assert not (out2 / "xlsx" / total).exists() and "xlsx/" + total not in stats
 
 
 def test_a_stale_zip_of_an_earlier_attempt_is_not_hashed_mailed_or_kept_when_this_attempt_builds_none(tmp_path):
@@ -439,7 +463,7 @@ def test_an_old_xlsx_of_a_host_whose_write_failed_this_attempt_is_removed_too(tm
     """A failed write leaves the plan of an earlier attempt with the same run ID; it must not be uploaded as this run's."""
     out = tmp_path / "run"
     (out / "xlsx").mkdir(parents=True)
-    for host in ("h1", "h2", "gone"):
+    for host in ("h1", "h2", "gone", "total"):
         (out / "xlsx" / ("host-audit-%s-%s.xlsx" % (RUN_ID, host))).write_bytes(b"old " + host.encode())
     (out / "xlsx" / ZIP_NAME).write_bytes(b"not an xlsx")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
@@ -447,14 +471,17 @@ def test_an_old_xlsx_of_a_host_whose_write_failed_this_attempt_is_removed_too(tm
                                      ("Collect the hosts whose Remediation Plan xlsx", "Check whether the xlsx directory", "xlsx files that this attempt did not write",
                                       "Summarize the Remediation Plan xlsx"))]
     assert len(tasks) == 5
-    plans = {h: {"file_name": "host-audit-%s-%s.xlsx" % (RUN_ID, h)} for h in ("h1", "h2")}
+    files = {h: "host-audit-%s-%s.xlsx" % (RUN_ID, h) for h in ("h1", "h2", "total")}
+    by_file = {files[h]: {"file_name": files[h], "label": h} for h in files}
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
             "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"hosts": ["h1", "h2"]},
-                     "_host_audit_remediation_plans": plans,
-                     "_host_audit_xlsx_write": {"results": [{"item": "h1"}, {"item": "h2", "failed": True}]}},
+                     "_host_audit_remediation_by_file": by_file,
+                     "_host_audit_xlsx_write": {"results": [{"item": files["h1"]}, {"item": files["h2"], "failed": True},
+                                                            {"item": files["total"], "failed": True}]}},
             "tasks": tasks}
     res = _ansible(tmp_path, play)
     assert res.returncode == 0, res.stdout[-2000:]
+    # the failed total's old file goes too, like the failed host's
     assert sorted(p.name for p in (out / "xlsx").iterdir()) == ["host-audit-%s-h1.xlsx" % RUN_ID, ZIP_NAME]
 
 
@@ -473,7 +500,8 @@ def test_a_stale_xlsx_that_cannot_be_removed_does_not_stop_the_stage_but_ends_th
     show = {"ansible.builtin.debug": {"var": "_host_audit_xlsx_problem"}}
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
             "vars": {"host_audit_run": {"output_dir": str(out)}, "host_audit_model": {"hosts": []},
-                     "_host_audit_remediation_plans": {}, "_host_audit_xlsx_failed_hosts": []},
+                     "_host_audit_remediation_by_file": {}, "_host_audit_xlsx_failed_files": [],
+                     "_host_audit_xlsx_failed_hosts": []},
             "tasks": tasks + [show]}
     try:
         res = _ansible(tmp_path, play)
