@@ -74,35 +74,189 @@
       report: "{{ host_audit_run.output_dir }}/report.html"
       hosts: "{{ host_audit_model.summary }}"
 
-- name: "[AUD-611] Compute the SHA-256 of the report to attach"
-  ansible.builtin.stat:
-    path: "{{ host_audit_run.output_dir }}/report.html"
-    checksum_algorithm: sha256
-    get_mime: false
-  register: _host_audit_report_stat
-
-# 메일 요약은 실행과 함께 보관해 재발송(resend.yml)이 같은 본문·같은 첨부를 다시 보내게 한다. 주소는 넣지 않는다.
-- name: "[AUD-612] Build the mail summary of this run"
-  ansible.builtin.set_fact:
-    host_audit_mail_doc: >-
-      {{ host_audit_model | host_audit_mail_summary({
-           'sha256': _host_audit_report_stat.stat.checksum,
-           'size': _host_audit_report_stat.stat.size,
-           'file_name': host_audit_run.run_id | host_audit_mail_attachment_name,
-           'archive': ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/'
-                       ~ _host_audit_storage_prefix ~ 'report.html (3년 보관)') if _host_audit_storage_active | bool
-                      else ('러너 ' ~ host_audit_run.output_dir ~ '/report.html (보관 안 함)')}) }}
-
-- name: "[AUD-613] Save the mail summary on the runner"
-  ansible.builtin.copy:
-    content: "{{ host_audit_mail_doc | to_nice_json(indent=2) }}\n"
-    dest: "{{ host_audit_run.output_dir }}/mail_summary.json"
-    mode: '0600'
-
 # 보관·메일·두 판정(AUD-516·AUD-610은 assert로 실행을 끝낸다)이 어디서 끝나든 always에서 이번 실행
 # 디렉터리를 정책대로 정리한다(cleanup.yml, #157).
 - name: Keep the originals, mail the report, judge both, and clean up the run directory
   block:
+    # 호스트마다 Remediation Plan xlsx 1개(양호 외 항목이 없는 호스트도 "양호 외 항목 없음" 한 줄 파일). 행은 보고서 모델과
+    # 항목 카탈로그에서만 만든다(필터 host_audit_remediation_plans, docs/host_audit.md §17). 실행 디렉터리 xlsx/ 아래에 쓰면
+    # 보관(AUD-512~514)이 <YYYY-MM>/<run_id>/xlsx/로 올린다. 정기·수시 실행 모두 만든다.
+    # 쓰기에 실패해도 보관·메일·KISA 악화 알림·Audit Baseline 포인터는 계속한다(그것들은 xlsx에 기대지 않는다). 실패는
+    # 보관·메일 판정처럼 맨 끝에서 실행을 실패로 끝내고(Judge ... xlsx), 그때 정리가 디렉터리를 남긴다(cleanup.yml).
+    # 계획(행에 호스트 증적과 예외 사유가 있다)은 한 번만 만들어 set_fact에 두고, 반복문은 호스트 이름만 돈다:
+    # 반복문의 item은 실패 결과에 그대로 찍히기 때문이다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이
+    # 보여야 하고(no_log면 가려진다), 성공 때의 fact는 -v에서만 찍히며 내용은 report.html과 같다.
+    - name: Build the Remediation Plan of every host
+      ansible.builtin.set_fact:
+        _host_audit_remediation_plans: "{{ host_audit_model | host_audit_remediation_plan_map }}"
+
+    # 계획을 못 만든 호스트는 그 호스트만 한 줄 파일이 되고 실행은 계속된다. 로그에 호스트와 원인을 남긴다.
+    - name: Name the hosts whose Remediation Plan could not be built
+      ansible.builtin.debug:
+        msg: "Remediation Plan 생성 실패 {{ item.key }}: {{ item.value.error.split(':')[0] }} (메시지는 xlsx의 한 줄 파일에 있다)"
+      loop: "{{ _host_audit_remediation_plans | dict2items | selectattr('value.error', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    # 모든 호스트가 실패했다면 필터나 카탈로그 자체가 깨진 것이라 빈 증적을 보관하지 않고 멈춘다.
+    - name: Stop when the Remediation Plan could not be built for any host
+      ansible.builtin.assert:
+        that: _host_audit_remediation_plans | dict2items | selectattr('value.error', 'defined') | list | length
+              < _host_audit_remediation_plans | length
+        fail_msg: "모든 호스트의 Remediation Plan 생성이 실패했다(필터·카탈로그 오류, 위 로그 참고)"
+      when: _host_audit_remediation_plans | length > 0
+
+    - name: "[AUD-025] Write the Remediation Plan xlsx of every host"
+      vars:
+        _plan: "{{ _host_audit_remediation_plans[item] }}"
+      host_audit_xlsx_write:
+        dest: "{{ host_audit_run.output_dir }}/xlsx/{{ _plan.file_name }}"
+        sheet: "{{ _plan.sheet }}"
+        headers: "{{ _plan.headers }}"
+        rows: "{{ _plan.rows }}"
+        footer: "{{ _plan.footer }}"
+        widths: "{{ _plan.widths }}"
+      loop: "{{ host_audit_model.hosts }}"
+      register: _host_audit_xlsx_write
+      ignore_errors: true
+
+    # 실패한 호스트를 한 번만 모아 두고, 묶을 수 있는지(_host_audit_xlsx_pack)도 같은 자리에서 한 번만 정한다.
+    # 아래 zip 지우기·묶기 조건이 같은 식을 따로 쓰지 않는다.
+    - name: Collect the hosts whose Remediation Plan xlsx could not be written
+      vars:
+        _failed: >-
+          {{ _host_audit_xlsx_write.results | default([]) | selectattr('failed', 'defined') | selectattr('failed')
+             | map(attribute='item') | list }}
+      ansible.builtin.set_fact:
+        _host_audit_xlsx_failed_hosts: "{{ _failed }}"
+        _host_audit_xlsx_pack: "{{ (host_audit_model.hosts | length > 0) and (_failed | length == 0) }}"
+
+    # 같은 실행 ID로 다시 돌린 실행이 이전 시도의 xlsx를 남겼으면(쓰기에 실패한 호스트의 옛 파일, 이번 대상에 없는 호스트의
+    # 파일) 보관(AUD-512)이 xlsx/를 통째로 올리므로 이번 실행의 증적으로 오른다. 이번 시도가 쓴 파일(실패하지 않은 호스트의
+    # 계획 파일명)만 남기고 나머지 *.xlsx는 지운다. 범위는 xlsx다: xlsx/ 아래에는 이 역할의 모듈만 쓰고 이름은 모두
+    # host-audit-<run_id>-<host>.xlsx라서 그 밖의 파일이 생길 길이 없다(zip은 아래 zip 단계가, 숨김 임시 파일은 AUD-512의
+    # find가 따로 다룬다). 찾기·지우기 실패는 보관·메일을 막지 않고(AUD-025와 같은 원칙) 아래 요약으로 모여 맨 끝에서
+    # 실행을 실패로 끝낸다.
+    - name: Check whether the xlsx directory exists
+      ansible.builtin.stat:
+        path: "{{ host_audit_run.output_dir }}/xlsx"
+        get_checksum: false
+        get_mime: false
+      register: _host_audit_xlsx_dir
+      failed_when: false  # a stat that errors leaves .stat undefined: the find below then still runs and reports
+
+    - name: Find the xlsx files that this attempt did not write
+      ansible.builtin.find:
+        paths: "{{ host_audit_run.output_dir }}/xlsx"
+        patterns: '*.xlsx'
+        file_type: any  # an entry of another type named *.xlsx would be uploaded by AUD-512 too
+      register: _host_audit_xlsx_present
+      ignore_errors: true
+      when:
+        - not ansible_check_mode
+        - _host_audit_xlsx_dir.stat.exists | default(true)  # skipped only when stat positively says absent
+
+    - name: Remove the xlsx files that this attempt did not write
+      vars:
+        _written: >-
+          {{ host_audit_model.hosts | difference(_host_audit_xlsx_failed_hosts)
+             | map('extract', _host_audit_remediation_plans) | map(attribute='file_name') | list }}
+        _present: "{{ _host_audit_xlsx_present.files | default([]) | map(attribute='path') | map('basename') | list }}"
+      ansible.builtin.file:
+        path: "{{ host_audit_run.output_dir }}/xlsx/{{ item }}"
+        state: absent
+      loop: "{{ _present | difference(_written) }}"
+      register: _host_audit_xlsx_stale
+      ignore_errors: true
+      when: not ansible_check_mode
+
+    # 쓰기·묶기·옛 파일 정리 실패를 하나의 사실로 모은다: 소비자(맨 끝 판정, 그 메시지, 정리 cleanup.yml)가 같은 값을 읽는다.
+    # 묶기가 실패하면 'Remember that the xlsx zip could not be written'이 같은 사실에 더한다. targets가 실패한 것을 전부 담아 정리의
+    # 이유 문구와 맨 끝 판정 메시지가 그대로 쓴다.
+    - name: Summarize the Remediation Plan xlsx problem of this run
+      vars:
+        _hosts: "{{ _host_audit_xlsx_failed_hosts | default([]) }}"
+        _stale: "{{ (_host_audit_xlsx_present.failed | default(false) | bool) or (_host_audit_xlsx_stale.failed | default(false) | bool) }}"
+      ansible.builtin.set_fact:
+        _host_audit_xlsx_problem:
+          failed: "{{ (_hosts | length > 0) or _stale }}"
+          targets: "{{ _hosts + (['이전 시도 xlsx 삭제'] if _stale else []) }}"
+
+    # 호스트별 xlsx 전부를 zip 하나로 묶는다. 메일의 두 번째 첨부이자 보고서와 함께 보관되는 파일이다(xlsx/ 아래, 보관은
+    # AUD-512~514가 한다). 같은 xlsx면 같은 바이트다(표준 라이브러리 writer). xlsx 쓰기에 실패한 호스트가 있으면 빠진 채
+    # 완성본처럼 해시를 붙여 보내고 3년 보관하지 않도록 묶지 않는다(메일은 보고서만, 실패는 맨 끝 판정이 호스트 이름과 함께
+    # 실행을 실패로 끝낸다). 호스트가 하나도 없으면 묶을 것이 없다. 묶기 자체의 실패도 xlsx 쓰기 실패처럼 모아 맨 끝에서
+    # 판정한다 — 보조 첨부 때문에 보관·메일이 막히지 않는다(AUD-025와 같은 원칙).
+    # 같은 실행 ID로 다시 돌린 실행이 이전 시도의 zip을 남겼으면, 이번에 묶지 못한 경우 그 옛 zip이 해시·첨부·보관에
+    # 오르지 않도록 먼저 지운다.
+    # 묶는 경우에는 모듈이 같은 바이트면 그대로 두고(멱등) 아니면 원자적으로 바꾼다. 묶지 않는 경우(호스트 없음·xlsx 실패)에만 지운다.
+    - name: Remove a leftover xlsx zip of an earlier attempt
+      ansible.builtin.file:
+        path: "{{ _host_audit_xlsx_zip_path }}"
+        state: absent
+      when: not (_host_audit_xlsx_pack | bool)
+
+    - name: "[AUD-026] Pack every Remediation Plan xlsx into one zip"
+      host_audit_zip_write:
+        src_dir: "{{ host_audit_run.output_dir }}/xlsx"
+        dest: "{{ _host_audit_xlsx_zip_path }}"
+        names: "{{ _host_audit_remediation_plans.values() | map(attribute='file_name') | list }}"
+      register: _host_audit_xlsx_zip_write
+      ignore_errors: true
+      when:
+        - not ansible_check_mode  # check 모드의 xlsx 쓰기는 파일을 만들지 않으므로 묶을 것이 없다
+        - _host_audit_xlsx_pack | bool
+
+    # 소비자 셋(맨 끝 판정, 그 메시지, 정리 cleanup.yml)은 _host_audit_xlsx_problem 하나만 읽는다. 묶기 실패 자체는 모듈
+    # 결과(_host_audit_xlsx_zip_write.failed)가 이미 담고 있어 별도 표지를 두지 않는다.
+    - name: Remember that the xlsx zip could not be written
+      ansible.builtin.set_fact:
+        _host_audit_xlsx_problem: "{{ _host_audit_xlsx_problem | combine({'failed': true, 'targets': _host_audit_xlsx_problem.targets + ['xlsx zip']}) }}"
+      when: _host_audit_xlsx_zip_write.failed | default(false)
+
+    # 묶기가 실패했으면 이전 시도의 zip이 남아 있어도 해시·첨부·보관에 오르지 않게 지운다.
+    - name: Remove the xlsx zip when packing it failed
+      ansible.builtin.file:
+        path: "{{ _host_audit_xlsx_zip_path }}"
+        state: absent
+      when: _host_audit_xlsx_zip_write.failed | default(false)
+
+    - name: "[AUD-611] Compute the SHA-256 of the report to attach"
+      ansible.builtin.stat:
+        path: "{{ host_audit_run.output_dir }}/report.html"
+        checksum_algorithm: sha256
+        get_mime: false
+      register: _host_audit_report_stat
+
+    - name: "[AUD-615] Compute the SHA-256 of the xlsx zip to attach"
+      ansible.builtin.stat:
+        path: "{{ _host_audit_xlsx_zip_path }}"
+        checksum_algorithm: sha256
+        get_mime: false
+      register: _host_audit_xlsx_zip_stat
+
+    # 메일 요약은 실행과 함께 보관해 재발송(resend.yml)이 같은 본문·같은 첨부(보고서·xlsx zip)를 다시 보내게 한다. 주소는 넣지 않는다.
+    - name: "[AUD-612] Build the mail summary of this run"
+      ansible.builtin.set_fact:
+        host_audit_mail_doc: >-
+          {{ host_audit_model | host_audit_mail_summary({
+               'sha256': _host_audit_report_stat.stat.checksum,
+               'size': _host_audit_report_stat.stat.size,
+               'file_name': host_audit_run.run_id | host_audit_mail_attachment_name,
+               'archive': ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/'
+                           ~ _host_audit_storage_prefix ~ 'report.html (3년 보관)') if _host_audit_storage_active | bool
+                          else ('러너 ' ~ host_audit_run.output_dir ~ '/report.html (보관 안 함)')},
+               ({'sha256': _host_audit_xlsx_zip_stat.stat.checksum,
+                 'size': _host_audit_xlsx_zip_stat.stat.size,
+                 'file_name': _host_audit_xlsx_zip_name,
+                 'archive': _host_audit_xlsx_zip_archive} if _host_audit_xlsx_zip_stat.stat.exists else none)) }}
+
+    - name: "[AUD-613] Save the mail summary on the runner"
+      ansible.builtin.copy:
+        content: "{{ host_audit_mail_doc | to_nice_json(indent=2) }}\n"
+        dest: "{{ host_audit_run.output_dir }}/mail_summary.json"
+        mode: '0600'
+
     - name: Keep the originals in the Host Audit bucket
       ansible.builtin.include_tasks: storage_upload.yml
 
@@ -117,6 +271,7 @@
              or ((_host_audit_storage_active | bool) and (_host_audit_storage_problem | default('보관 비활성') | length == 0)
                  and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0) }}
         _host_audit_mail_report_path: "{{ host_audit_run.output_dir }}/report.html"
+        _host_audit_mail_xlsx_path: "{{ _host_audit_xlsx_zip_path }}"
 
     - name: Mail the report
       ansible.builtin.include_tasks: mail.yml
@@ -132,6 +287,12 @@
 
     - name: Judge the KISA worsening notification
       ansible.builtin.include_tasks: kisa_alert_result.yml
+
+    # AUD-025의 실패를 모아 맨 끝에서 실행을 실패로 끝낸다. 호스트 이름만 밝힌다(오류 메시지는 모듈 출력에 이미 있다).
+    - name: Fail the run when a Remediation Plan xlsx could not be written
+      ansible.builtin.assert:
+        that: not (_host_audit_xlsx_problem.failed | bool)
+        fail_msg: "Remediation Plan xlsx 쓰기·묶기·이전 시도 파일 정리에 실패한 대상: {{ _host_audit_xlsx_problem.targets | join(', ') }} (실행 디렉터리는 남김)"
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml

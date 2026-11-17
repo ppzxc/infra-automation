@@ -3,7 +3,7 @@
 # Host Audit — 원본 보관 (러너 localhost 전용, ADR-0009 §5, #125)
 # ==============================================================================
 # 보고서가 러너에 만들어진 뒤, 이번 실행 디렉터리 전체(report.html, run.json, findings.json,
-# hosts/·packages/·sbom/ 원본과 Trivy 버전·DB 기록. 러너 전용 trivy/·package_findings/는 제외, #159·#155)를 RustFS Host Audit 버킷의 <YYYY-MM>/<run_id>/에 올린다.
+# hosts/·packages/·sbom/ 원본, 호스트별 Remediation Plan xlsx와 그 zip(xlsx/, AUD-025·026)과 Trivy 버전·DB 기록. 러너 전용 trivy/·package_findings/는 제외, #159·#155)를 RustFS Host Audit 버킷의 <YYYY-MM>/<run_id>/에 올린다.
 # 정기 실행은 모든 업로드가 성공한 뒤에만 포인터 baseline/<run_id>.json을 올린다 — 반쯤 올라간
 # 실행이 다음 달의 Audit Baseline이 되지 않게 한다. 수시 실행은 포인터를 남기지 않는다.
 # Audit Baseline 조회가 실패해도 원본은 올린다(비교만 빠진 보고서). 업로드 실패 또는 조회 실패는
@@ -55,7 +55,9 @@
     _req: >-
       {{ _host_audit_storage_target | host_audit_s3_request('PUT', _host_audit_storage_prefix ~ _rel, none, item.stat.checksum) }}
     _content_type: >-
-      {{ {'.html': 'text/html; charset=utf-8'}.get((_rel | splitext)[1], 'application/json') }}
+      {{ {'.html': 'text/html; charset=utf-8',
+          '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          '.zip': 'application/zip'}.get((_rel | splitext)[1], 'application/json') }}
   ansible.builtin.uri:
     url: "{{ _req.url }}"
     method: PUT

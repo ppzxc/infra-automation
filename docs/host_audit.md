@@ -36,6 +36,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 <run_id>/                 # 예: ha-20261008T220005Z (UTC 시작 시각)
 ├── hosts/<Inventory Hostname>.json   # 호스트별 원본 기록 (§4)
 ├── run.json                          # 실행 메타 (run_id, run_kind, started_at, target_hosts, output_dir, timezone, targets)
+├── xlsx/host-audit-<run_id>-<Inventory Hostname>.xlsx   # 호스트별 Remediation Plan (§17)
 └── report.html                       # A4 인쇄용 보고서
 ```
 
@@ -113,13 +114,15 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-010` | `Probe host identity and OS (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-011` | `Build the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_host_record` 필터 |
 | `AUD-100` | `Probe Asset Inventory (raw, read-only)` | `ansible.builtin.raw` (`become: true`) | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
-| `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record` 필터 |
+| `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record`·`host_audit_asset_declaration` 필터. 선언 값은 `resolve_connection`이 이미 읽은 호스트 KV(`_host_kv_dict`)에서 다섯 키만 고른다(OpenBao 재조회 없음) |
 | `AUD-012` | `Save the per-host record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
 | `AUD-020` | `Find the per-host records of this run` | `ansible.builtin.find` | 러너 | 읽기 전용 |
 | `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터. Package 발견은 넘기지 않고 `package_findings_dir`(파일 디렉터리)만 넘긴다(#155) |
 | `AUD-022` | `Save the run metadata on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 | `AUD-023` | `Render the A4 report HTML` | `ansible.builtin.template` | 러너 | 실행별 파일 `0600` |
 | `AUD-024` | `Show where the report was written` | `ansible.builtin.debug` | 러너 | 읽기 전용 |
+
+호스트별 Remediation Plan xlsx를 쓰는 `AUD-025`는 §17.1에 있다.
 
 ## 7. Asset Inventory (#120)
 
@@ -138,28 +141,36 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 
 **판정 규칙**
 
-- **미지정**: `host_audit_asset`의 용도·관리 부서·책임자(직책)·관리자(직책)·보안등급 중 빈 값.
+- **선언 값 출처**: ISMS 자산대장의 사본인 OpenBao `hosts/<Inventory Hostname>`다. `resolve_connection`이 접속 해석 때 이미 읽은 호스트 KV dict에서 다섯 키만 고르고(같은 dict에 접속 정보가 있어 통째로 기록·보고서에 넘기지 않는다) OpenBao를 다시 조회하지 않는다. 키는 용도=`description`(끝의 `[그룹자산명]`도 그대로 표시), `isms_department`(관리 부서), `isms_owner_role`(책임자 직책), `isms_admin_role`(관리자 직책), `isms_asset_importance`(자산중요도, H/M/L)다.
+- **조회 실패**: 다음 둘 중 하나면 다섯 칸 모두 '조회 실패'로 표시한다. (1) `hosts/<host>` 조회가 200이 아니다. 404도 같다. 항목이 없는 서버도 조회 실패다. (2) 200인데 읽은 dict가 비어 있다. KV 모양이 달라 `resolve_connection`이 `{}`로 떨어진 경우를 값 없음으로 오해하지 않기 위해서다. 접속 정보만 있고 선언 키가 없는 항목은 비어 있지 않으므로 '미지정'이다. 값이 정말 없는 것('미지정')과 구분하며 메일 요약도 '선언 미지정 호스트'와 '선언 조회 실패 호스트'를 따로 센다.
+- **미지정**: 조회는 됐는데 다섯 키 중 빈 값. `hosts/<host>`가 200으로 답했지만 키가 없는 서버와 `isms_target=false` 서버도 별도 상태 없이 '미지정'이다.
+- **잘못된 값**: 자산중요도가 H/M/L이 아니면 `잘못된 값 (<원래 값>)`으로 표시한다(원래 값은 20자까지, 넘으면 `…`). 비교는 대문자 H/M/L 정확 일치이고 정규화하지 않는다(자산대장 표기 그대로라는 용어 정의를 따른다. 소문자·다른 표기는 사본 오류로 보고 고치게 한다). 표시 문구는 원래 값만 덧붙이고 허용 값(H·M·L)을 칸마다 되풀이하지 않는다: 스펙이 '원래 값과 함께 잘못된 값'으로 정했고 허용 값은 용어 정의(Asset Importance)와 이 절에 있다.
+- **선언 값 처리 결정**
+  - 저장 값은 자산대장 사본 그대로다(증적). 앞뒤 공백만 자른다. 상한은 값 하나 500자이고 넘으면 `…`로 끝낸다. 실제 용도(끝의 `[그룹자산명]` 포함)는 그보다 훨씬 짧아 잘리지 않으며, 상한은 엉뚱한 긴 덩어리가 기록에 들어가는 것만 막는다. 문자열이 아닌 값(dict·list·bool·숫자)은 빈 값으로 저장하되 `declared.asset.malformed`에 키를 남기고 보고서에는 '잘못된 값 (값이 문자열이 아님)'으로 보인다('미지정'이 아니다).
+  - 호스트 KV 텍스트에 `{{ }}` 같은 템플릿 문법이 있어도 평가되지 않는다. 필터가 값을 unsafe로 표시하므로(2.19 이전 버전에 필요하고 2.19 이상에서는 기본 동작과 같다) 러너 버전과 무관하게 템플릿으로 해석되지 않는다. `tests/test_host_audit_inventory.py`가 실제 `[AUD-101]` 태스크를 `ansible-playbook`으로 돌려 확인한다. 그래서 값을 고쳐 저장하지 않는다. 태스크는 입력에 호스트 KV 전체(접속 정보)가 있어 `no_log`다(실패하면 내용이 가려지므로 필터 동작은 pytest가 직접 검증한다).
+  - 404를 포함해 200이 아닌 응답은 모두 '조회 실패'다(티켓 #492의 기준). 원인(403·404·타임아웃)은 기록하지 않는다. 호스트 KV를 읽는 곳이 `resolve_connection` 하나라(변수 이름은 `tests/test_host_audit_inventory.py`가 고정한다) 같은 판정을 거기서 받아 쓰고, 그 변수(`_effective_host_resp`, `_host_kv_dict`)가 없으면 조회 실패다.
+  - 태그 색: '미지정'·'조회 실패'는 회색, '잘못된 값'만 빨강이다. 조회 실패는 값을 알 수 없다는 뜻이지 발견이 아니므로 지원 종료·선언 외(빨강)와 구분하고, 메일 요약은 조회 실패 호스트 수를 경고(WARN)로 센다. 치명(CRIT)으로 올리지 않는 이유는, 상태 코드를 기록하지 않아 항목 없음(404)과 장애(403·타임아웃)를 구분할 수 없는 채로 전체 실패를 장애로 단정하면 `--limit` 실행이나 신규 호스트에서 오경보가 나기 때문이다. 세 상태 호스트 수(`미지정`·`조회 실패`·`잘못된 값`)는 각각 따로 세므로 한 호스트가 둘 이상에 들어갈 수 있다.
+  - 호스트별 JSON `schema_version`은 2로 둔다. `declared.asset`은 `security_grade`가 `asset_importance`로 바뀌고 `lookup`이 더해졌다. 이 필드는 Audit Baseline 비교에 쓰이지 않고 보고서 모델을 만들 때 실행 안에서 읽힌다. 이 변경 전에 저장한 기록의 `security_grade`는 자산중요도 칸에 '잘못된 값 (<원래 값>)'으로 보인다. Git 호스트 변수에 남은 옛 선언은 더 이상 읽지 않으므로(경고 없음), 호스트 변수의 옛 선언은 지우고 자산대장 사본(OpenBao)에 값을 등록한다.
 - **선언 외**: 특수권한자(uid 0, wheel·sudo·admin 그룹 구성원, sudoers 규칙 대상) 중 허용 목록에 없는 계정. 허용 목록은 `accounts`의 sudo 권한 계정(`sudo: true`, 또는 `sudo` 미지정 + `tier: admin`, `state: absent` 제외), `openbao_ssh_allowed_principals`, `host_audit_privileged_extra`, 그리고 root다. sudoers의 `User_Alias` 등 별칭은 펼치지 않는다.
 - **장기 미사용**: 로그인 가능한 셸을 가진 계정 중 `lastlog -t 90`에 없는 계정(기록 없음 포함). 점검 계정과 uid 0 계정은 제외하고 표지에 명시한다. uid 0의 직접 로그인은 Configuration Vulnerability(KISA-2026) 항목이 다룬다. lastlog가 없으면 '마지막 로그인 점검불가'로 표시하고 장기 미사용 판정을 하지 않는다.
 - **EOL**: `roles/host_audit/vars/main.yml`의 `host_audit_eol_table`(기준일 `reviewed_on`, 무상 표준 지원 종료일). 실행 시작일 기준 지난 날짜면 지원 종료(EOS), 180일 이내면 EOL 임박, 표에 없으면 확인 불가.
 - **점검불가**: Asset Inventory 수집이 실패하면 '점검불가(수집 실패)', /etc/shadow를 읽지 못하면 '계정 잠금 상태 점검불가'.
 
-**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값에는 사람 이름이 아니라 직책을 적는다.
+**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값에는 사람 이름이 아니라 직책을 적는다. 호스트 KV의 다섯 키 외 값(접속 정보)은 기록·보고서·메일에 넘어가지 않는다.
 
 **읽기 전용**: 스크립트는 sudo로 돌지만 rpm 조회만은 `nobody`로 낮춰 실행한다(`setpriv`, 없으면 `su`). root로 `rpm -qa`를 돌리면 rpm이 DB를 쓰기 모드로 열어 EL9의 `rpmdb.sqlite-shm` 수정 시각(EL6/7은 Berkeley DB 환경 파일)이 바뀌기 때문이다. molecule `VERIFY-AUD-010`과 pytest의 `centos:6`/`centos:7` 컨테이너 시험이 관리 영역의 메타데이터까지 같은지 확인한다.
 
-**선언 예시** (`inventory/host_vars/<Inventory Hostname>.yml`)
+**선언 예시** (OpenBao `hosts/<Inventory Hostname>`의 키. 사람 이름이 아니라 직책을 적는다)
 
 ```yaml
-host_audit_asset:
-  purpose: "웹 서비스"
-  department: "인프라팀"
-  owner_role: "인프라팀장"
-  admin_role: "시스템 관리자"
-  security_grade: "2등급"
+description: "웹 서비스 [그룹자산명]"
+isms_department: "인프라팀"
+isms_owner_role: "인프라팀장"
+isms_admin_role: "시스템 관리자"
+isms_asset_importance: "M"
 ```
 
-**호스트별 JSON 추가 필드 (schema_version 2)**: `declared.asset`(위 5개 + `privileged_allowlist`)과 `inventory`가 붙는다. 식별이 실패한 호스트는 `inventory: null`.
+**호스트별 JSON 추가 필드 (schema_version 2)**: `declared.asset`(위 5개 + `lookup`(`ok`/`failed`) + `privileged_allowlist` + 문자열이 아닌 값이 있을 때만 `malformed`(그 키 목록))과 `inventory`가 붙는다. 식별이 실패한 호스트는 `inventory: null`.
 
 ```json
 "inventory": {
@@ -184,7 +195,6 @@ host_audit_asset:
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `host_audit_asset` | `{}` | 선언 값 (위 예시) |
 | `host_audit_privileged_extra` | `[]` | 특수권한 허용 목록에 더할 이름 |
 
 ## 8. 검증
@@ -195,7 +205,7 @@ host_audit_asset:
   - 템플릿의 인쇄 CSS와 외부 리소스 부재
 - **pytest** `tests/test_host_audit_inventory.py`는 Asset Inventory를 검증한다.
   - 수집 결과 해석: 8개 영역, 특수권한 근거, 비밀번호 해시 미포함, CentOS 6 출력(netstat, epoch 없는 rpm)
-  - 보고서 모델: 미지정·선언 외·90일 장기 미사용(점검 계정·uid 0 제외)·EOS/임박/미확인·전체 패키지 목록 미포함·수집 실패 점검불가
+  - 보고서 모델: 미지정·조회 실패·잘못된 값(호스트 KV에서 다섯 키만 읽음, 접속 정보 미포함)·선언 외·90일 장기 미사용(점검 계정·uid 0 제외)·EOS/임박/미확인·전체 패키지 목록 미포함·수집 실패 점검불가
   - 수집 스크립트를 이 머신과 `centos:6`·`centos:7` 컨테이너(이미지가 로컬에 있을 때)에서 실제로 실행
 - **molecule Fast Scenario** `molecule/fast/verify.yml`:
   - `VERIFY-AUD-010`: 수집(식별 + Asset Inventory) 전후 관리 영역의 체크섬·메타데이터가 같은지 확인한다.
@@ -343,7 +353,8 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
 ## 10. Configuration Vulnerability (KISA-2026, #121)
 
 - **기준**: KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」 Unix 서버 항목. 항목 코드는 판을 붙여 `KISA-2026:U-NN`으로 적는다(2021판과 번호가 다르다). CIS RHEL 9 Benchmark v2.0.0 규칙 번호는 참조 열로만 둔다. 근거: `docs/research/host-audit-configuration-vulnerability-baseline.md`(#102, `research/host-audit-configuration-vulnerability-baseline` 브랜치).
-- **구현 범위**: Unix U-01~U-67 전 항목. 계정 관리 U-01~U-13(#121), 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67(#122). 자동 판정할 수 없는 항목은 점검불가(수동)로 두고 판단에 쓸 목록을 증적으로 남긴다(§10.1·§10.4).
+- **구현 범위**: Unix U-01~U-67 전 항목. 계정 관리 U-01~U-13(#121), 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67(#122). 자동 판정할 수 없는 항목은 점검불가(수동)로 두고 판단에 쓸 목록을 증적으로 남긴다(항목별 방법은 YAML `check`, 공통 규칙은 §10.4).
+- **항목 목록의 원본은 YAML**: U-01~U-67의 항목 메타데이터는 `filter_plugins/host_audit_kisa_items.yml` 한 파일이 유일한 원본이다(Spec #488). `title`·`severity`·`category`·`criteria`·`cis`에 우리 probe가 보는 것을 한 줄로 쓴 `check`, 가이드를 우리 말로 요약한 `purpose`·`threat`·`remediation`, 조치 영향도·조치 난이도, 가이드 쪽 번호 `guide_page`가 붙는다(필드는 §10.5). `host_audit_kisa.py`는 import 시 이 파일을 읽기만 한다. 항목 표는 문서에 두지 않으니 항목 내용은 YAML을 고친다.
 - **실행**: `roles/host_audit/files/kisa/`의 `_lib.sh` + `U-NN.sh`(이름순) + `_end.sh`를 이어 붙여 `ansible.builtin.raw`로 `sh -s`에 넣는다. 호스트에 파일을 남기지 않고 Python이 필요 없어 CentOS 6 ~ Rocky 10, Ubuntu에서 같은 경로로 돈다. `/etc/shadow`와 `sshd -T`를 읽어야 해서 이 태스크만 root로 승격한다. 식별 수집(`AUD-010`)에 실패한 호스트는 건너뛴다.
 - **출력 규약**: 표식(`__HOST_AUDIT_KISA_BEGIN__`/`__HOST_AUDIT_KISA_END__`) 사이에 항목마다 `U-NN|<GOOD·VULN·NA·MANUAL>|증적` 한 줄. 증적은 설정 값·계정 이름·개수만 담고 비밀번호 해시 같은 비밀값은 싣지 않는다. 스크립트는 `KISA_ROOT`로 점검할 루트를 바꿀 수 있어 pytest가 가짜 `/etc`로 판정을 검증한다.
 - **판정 5종**: 양호 · 취약 · 예외(승인) · 해당없음 · 점검불가(수동). 스크립트가 결과를 내지 않은 항목은 양호로 두지 않고 점검불가(수동)로 둔다. 판정과 예외 적용은 `filter_plugins/host_audit_kisa.py`의 `host_audit_kisa_result`가 한다.
@@ -359,27 +370,11 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
   양호·해당없음은 예외가 있어도 바뀌지 않는다. 첫 항목은 Docker 구간의 `KISA-2026:U-28`(접속 IP 및 포트 제한)이며 승인 전이라 '승인 대기'다. U-28은 Docker가 도는 호스트(`dockerd` 실행 또는 `docker0`)를 점검불가(수동)로 내므로, 승인자·승인일·만료일을 채우면 그 호스트들이 예외(승인)가 된다. 레지스터는 항목 코드 단위라, Docker 호스트에 방화벽 제한이 전혀 없어 취약으로 나온 경우에도 같은 예외가 적용된다는 점에 유의한다(증적에 `docker=yes`와 "no IP/port restriction"이 함께 남는다).
 - **보고서**: "4. Configuration Vulnerability" 섹션에 항목별 판정 건수, 양호 외 항목(취약·점검불가(수동)·예외(승인), 항목·판정별로 호스트 묶음), 예외 레지스터를 싣는다. 양호 항목과 증적은 호스트별 부록(`sections/appendix_config_vulnerability.html.j2`)에 싣는다. 섹션 모델은 `host_audit_report_model`이 `host_audit_kisa_section`을 불러 `config_vulnerability` 키로 넣고, 예외 레지스터는 실행 메타의 `kisa_exceptions`로 넘어간다. 점검이 돌지 못한 호스트는 요약의 점검불가 표에 'Configuration Vulnerability'로 나온다.
 
-### 10.1 구현 항목 (계정 관리)
+### 10.1 항목 목록 (YAML)
 
-| 코드 | 항목 (중요도) | 자동 판정 방법 | CIS 참조 |
-|---|---|---|---|
-| `KISA-2026:U-01` | root 계정 원격 접속 제한 (상) | `sshd -T`(실패 시 `sshd_config`)의 `PermitRootLogin`이 `no`이고 telnet(23/tcp) listening이 없으면 양호 | 5.1.20 |
-| `KISA-2026:U-02` | 비밀번호 관리정책 설정 (상) | `PASS_MAX_DAYS` ≤ 90, `PASS_MIN_DAYS` ≥ 1, 문자 종류 3종+8자 또는 2종+10자(pwquality·PAM 인자) | 5.3.3.2.2, 5.3.3.2.3, 5.4.1.1, 5.4.1.2 |
-| `KISA-2026:U-03` | 계정 잠금 임계값 설정 (상) | auth 스택 pam_faillock·pam_tally2·pam_tally의 `deny`(없으면 faillock.conf, 기본 3)가 1~10 | 5.3.3.1.1 |
-| `KISA-2026:U-04` | 비밀번호 파일 보호 (상) | `/etc/passwd` 비밀번호 필드가 모두 `x`(잠금 표시 허용)이고 `/etc/shadow` 존재 | 7.2.1 |
-| `KISA-2026:U-05` | root 이외의 UID가 '0' 금지 (상) | UID 0 계정이 root뿐 | 5.4.2.1 |
-| `KISA-2026:U-06` | 사용자 계정 su 기능 제한 (상) | `/etc/pam.d/su`의 pam_wheel.so, 또는 su가 root 외 그룹 소유·other 실행 불가. su 없으면 해당없음 | 5.2.7 |
-| `KISA-2026:U-07` | 불필요한 계정 제거 (하) | 점검불가(수동) — 로그인 가능 계정 목록을 증적으로 | - |
-| `KISA-2026:U-08` | 관리자 그룹에 최소한의 계정 포함 (중) | 점검불가(수동) — GID 0 그룹·기본 그룹 GID 0 계정·wheel/sudo/admin 구성원을 증적으로 | 5.4.2.2, 5.4.2.3 |
-| `KISA-2026:U-09` | 계정이 존재하지 않는 GID 금지 (하) | 모든 계정의 기본 GID가 `/etc/group`에 있음 | 7.2.3 |
-| `KISA-2026:U-10` | 동일한 UID 금지 (중) | 중복 UID 없음 | 7.2.4 |
-| `KISA-2026:U-11` | 사용자 shell 점검 (하) | 가이드가 나열한 시스템 계정(daemon, bin, sys, adm, listen, nobody, nobody4, noaccess, diag, operator, games, gopher)의 셸이 nologin/false | 5.4.2.7 |
-| `KISA-2026:U-12` | 세션 종료 시간 설정 (하) | 전역 sh 프로필의 `TMOUT`이 1~600초(여러 곳이면 가장 큰 값) | 5.4.3.2 |
-| `KISA-2026:U-13` | 안전한 비밀번호 암호화 알고리즘 사용 (중) | `/etc/shadow`에 MD5·Blowfish·DES 해시가 없고 `ENCRYPT_METHOD`·pam_unix 설정이 약한 알고리즘이 아님 | 5.3.3.4.3, 5.4.1.4 |
+항목 목록(코드, 항목명, 중요도, 분류, 판단 기준, CIS 참조, 점검방법)은 `filter_plugins/host_audit_kisa_items.yml`이다. 문서의 항목 표를 지웠으므로 두 곳이 어긋나지 않는다. 항목명·중요도·판단 기준(`criteria`)은 2026판 가이드 PDF 원문과 대조해 원문 문장을 따랐고(그래서 U-09는 "불필요한 그룹이 제거된 경우", U-63은 "권한이 640"이며 우리 probe는 기본 GID 누락과 640 이하를 본다 — 이 차이는 `check`에 있고 본문 표는 `criteria`만 싣는다), 항목마다 `guide_page`(가이드 인쇄 쪽)로 원문을 찾을 수 있다. 처음에는 `9u4a/kisa-infra-audit`(MIT)가 인용한 설명을 따랐으나 #490에서 원문과 대조해 바로잡았다(U-05 따옴표, U-09·U-26·U-63의 판단 기준 등). 판정 스크립트는 가이드를 참고해 새로 작성했다(코드 차용 없음).
 
-항목명·중요도·판단 기준 문장은 `9u4a/kisa-infra-audit`(MIT, 2026판 기준)가 가이드에서 인용한 항목 설명을 따랐고, 873쪽 PDF 원문과 직접 대조하지는 않았다. 판정 스크립트는 그 설명을 참고해 새로 작성했다(코드 차용 없음). §10.4도 같다.
-
-### 10.4 구현 항목 (파일 및 디렉토리·서비스·패치·로그 관리, #122)
+### 10.4 파일 및 디렉토리·서비스·패치·로그 관리 항목의 공통 규칙 (#122)
 
 공통 규칙:
 - **서비스 사용 여부**: 프로세스 이름(`ps -e -o comm=`), systemd unit active(`systemctl is-active`), (x)inetd 항목(`/etc/xinetd.d/NAME`의 `disable = yes` 아님, `inetd.conf`의 주석 아닌 줄), 필요한 경우 TCP listening(`ss`·`netstat`) 중 하나라도 있으면 사용 중으로 본다. 서비스를 쓰지 않아 기준이 성립하지 않는 항목은 해당없음이다.
@@ -395,62 +390,6 @@ Host Audit 러너(Semaphore 컨테이너)가 발견을 변수로 들고 다니�
   - 증적 문구: `file capability: none`(없음), `file capability: default only (N)`(기본만), `file capability review (N): ...; default: M`(기본 밖 있음), `file capability: 점검불가(...)`(`getcap`이 없거나 실행할 수 없음, 시간 초과).
 - **비밀값**: SNMP community는 길이·문자 종류만 판정하고 값은 증적에 싣지 않는다.
 
-| 코드 | 항목 (중요도) | 자동 판정 방법 | CIS 참조 |
-|---|---|---|---|
-| `KISA-2026:U-14` | root 홈, 패스 디렉터리 권한 및 패스 설정 (상) | 전역 프로필·`/etc/environment`·root 시작 파일의 `PATH=` 값에 `.` 또는 빈 항목이 맨 뒤가 아닌 위치에 없음 | - |
-| `KISA-2026:U-15` | 파일 및 디렉터리 소유자 설정 (상) | `-nouser`·`-nogroup` 파일 없음 | 7.1.12 |
-| `KISA-2026:U-16` | /etc/passwd 파일 소유자 및 권한 설정 (상) | root, 644 이하 | 7.1.1 |
-| `KISA-2026:U-17` | 시스템 시작 스크립트 권한 설정 (상) | `/etc/rc.d/init.d`·`/etc/init.d`·`/etc/systemd/system` 일반 파일이 root 소유, 그룹·기타 쓰기 없음(755 이하). 파일이 없으면 해당없음 | - |
-| `KISA-2026:U-18` | /etc/shadow 파일 소유자 및 권한 설정 (상) | root, 400 이하 | 7.1.5 |
-| `KISA-2026:U-19` | /etc/hosts 파일 소유자 및 권한 설정 (상) | root, 644 이하 | - |
-| `KISA-2026:U-20` | /etc/(x)inetd.conf 파일 소유자 및 권한 설정 (상) | root, 600 이하. 둘 다 없으면 해당없음 | - |
-| `KISA-2026:U-21` | /etc/(r)syslog.conf 파일 소유자 및 권한 설정 (상) | root·bin·sys, 640 이하. 둘 다 없으면 해당없음 | - |
-| `KISA-2026:U-22` | /etc/services 파일 소유자 및 권한 설정 (상) | root·bin·sys, 644 이하 | - |
-| `KISA-2026:U-23` | SUID, SGID, Sticky bit 설정 파일 점검 (상) | 점검불가(수동) — SUID/SGID 파일 목록(최대 40개)을 증적으로. 없으면 양호. 같은 증적 줄에 file capability 목록이 덧붙으며 판정은 바꾸지 않는다(아래 file capability) | 7.1.13 |
-| `KISA-2026:U-24` | 사용자, 시스템 환경변수 파일 소유자 및 권한 설정 (상) | 로그인 계정 홈의 `.profile`·`.bashrc` 등이 root 또는 해당 계정 소유, 그룹·기타 쓰기 없음 | 7.2.10 |
-| `KISA-2026:U-25` | world writable 파일 점검 (상) | 없으면 양호, 있으면 점검불가(수동) — 목록(최대 30개)을 증적으로 | 7.1.11 |
-| `KISA-2026:U-26` | /dev에 존재하지 않는 device 파일 점검 (상) | `/dev` 아래 일반 파일 없음(`/dev/shm`·`/dev/mqueue`·`/dev/hugepages` 제외) | - |
-| `KISA-2026:U-27` | $HOME/.rhosts, hosts.equiv 사용 금지 (상) | 파일이 없거나, 있으면 root/해당 계정 소유·600 이하·`+` 없음 | - |
-| `KISA-2026:U-28` | 접속 IP 및 포트 제한 (상) | firewalld 기본 zone target이 ACCEPT 아님, ufw active, nftables input drop 정책·`saddr` 규칙, 레거시 iptables INPUT DROP·`-s` 규칙, `hosts.deny` `ALL: ALL` 중 하나. Docker 호스트는 점검불가(수동) | 4.1.2 |
-| `KISA-2026:U-29` | hosts.lpd 파일 소유자 및 권한 설정 (하) | 없거나, root·600 이하 | - |
-| `KISA-2026:U-30` | UMASK 설정 관리 (중) | 전역 프로필·`login.defs`의 모든 umask 값이 022 비트를 포함. 지정이 없으면 취약 | 5.4.3.3 |
-| `KISA-2026:U-31` | 홈디렉토리 소유자 및 권한 설정 (중) | 로그인 계정 홈이 해당 계정 소유, 기타 쓰기 없음 | 7.2.9 |
-| `KISA-2026:U-32` | 홈 디렉토리로 지정한 디렉토리의 존재 관리 (중) | 로그인 계정의 홈 디렉터리가 모두 존재 | 7.2.9 |
-| `KISA-2026:U-33` | 숨겨진 파일 및 디렉토리 검색 및 제거 (하) | 점검불가(수동) — 로그인 홈·`/tmp`·`/var/tmp`·`/dev`의 숨김 항목 중 통상 항목(`.ssh`, `.bashrc` 등) 외 목록. 없으면 양호 | - |
-| `KISA-2026:U-34` | Finger 서비스 비활성화 (상) | finger 서비스·79/tcp 없음 | - |
-| `KISA-2026:U-35` | 공유 서비스에 대한 익명 접근 제한 설정 (상) | vsftpd `anonymous_enable=YES`, proftpd `<Anonymous>`, exports `no_root_squash`·`anonuid=0`, Samba `guest ok = yes`가 없음 | - |
-| `KISA-2026:U-36` | r 계열 서비스 비활성화 (상) | rlogin·rsh·rexec 서비스·512~514/tcp 없음 | - |
-| `KISA-2026:U-37` | crontab 설정파일 권한 설정 미흡 (상) | `/usr/bin/crontab`·`/usr/bin/at` 750 이하, `/etc/crontab`·`cron.allow/deny`·`at.allow/deny` root·640 이하. 모두 없으면 해당없음 | 2.4.1.2~2.4.1.8, 2.4.2.1 |
-| `KISA-2026:U-38` | DoS 공격에 취약한 서비스 비활성화 (상) | echo·discard·daytime·chargen (x)inetd 항목·7/9/13/19 tcp 없음 | - |
-| `KISA-2026:U-39` | 불필요한 NFS 서비스 비활성화 (상) | NFS 서버(nfsd·nfs-server) 없음. 필요하면 예외 레지스터 | - |
-| `KISA-2026:U-40` | NFS 접근 통제 (상) | 모든 export가 허용 호스트 지정(`*`·호스트 없음 아님), `/etc/exports` root·644 이하. NFS 서버 없으면 해당없음 | - |
-| `KISA-2026:U-41` | 불필요한 automountd 제거 (상) | automount(autofs) 없음 | - |
-| `KISA-2026:U-42` | 불필요한 RPC 서비스 비활성화 (상) | 가이드 목록(rpc.cmsd, rpc.ttdbserverd, sadmind, rusersd, walld, sprayd, rstatd, rpc.nisd, rexd, rpc.pcnfsd, rpc.statd, rpc.ypupdated, rpc.rquotad, kcms_server, cachefsd) 없음 | - |
-| `KISA-2026:U-43` | NIS, NIS+ 점검 (상) | ypserv·ypbind·ypxfrd·yppasswdd 없음 | - |
-| `KISA-2026:U-44` | tftp, talk 서비스 비활성화 (상) | tftp·talk·ntalk 없음 | - |
-| `KISA-2026:U-45` | 메일 서비스 버전 점검 (상) | 점검불가(수동) — 사용 중인 MTA와 버전(postfix `mail_version`, sendmail.cf `DZ`, `exim -bV`). 알려진 취약 버전은 Package Vulnerability. MTA 없으면 해당없음 | - |
-| `KISA-2026:U-46` | 일반 사용자의 메일 서비스 실행 방지 (상) | sendmail `PrivacyOptions`에 `restrictqrun`, postfix `postsuper`·exim `exiqgrep`에 기타 실행 권한 없음 | - |
-| `KISA-2026:U-47` | 스팸 메일 릴레이 제한 (상) | postfix relay·recipient restrictions에 `reject_`/`defer_unauth_destination`, sendmail `promiscuous_relay` 없음. exim은 점검불가(수동) | - |
-| `KISA-2026:U-48` | expn, vrfy 명령어 제한 (중) | postfix `disable_vrfy_command = yes`, sendmail `noexpn`+`novrfy` 또는 `goaway`. exim은 점검불가(수동) | - |
-| `KISA-2026:U-49` | DNS 보안 버전 패치 (상) | 점검불가(수동) — `named -v`. named 없으면 해당없음 | - |
-| `KISA-2026:U-50` | DNS ZoneTransfer 설정 (상) | named 설정(+include 1단계)에 `allow-transfer`가 있고 `any`가 아님 | - |
-| `KISA-2026:U-51` | DNS 서비스의 취약한 동적 업데이트 설정 금지 (중) | `allow-update`가 없거나 `any`가 아님 | - |
-| `KISA-2026:U-52` | Telnet 서비스 비활성화 (중) | telnet 서비스·`telnet.socket`·23/tcp 없음 | - |
-| `KISA-2026:U-53` | FTP 서비스 정보 노출 제한 (하) | vsftpd `ftpd_banner` 지정, proftpd `ServerIdent` 제한. pure-ftpd는 점검불가(수동). FTP 없으면 해당없음 | - |
-| `KISA-2026:U-54` | 암호화되지 않는 FTP 서비스 비활성화 (중) | FTP 데몬·21/tcp 없음, 또는 vsftpd `ssl_enable=YES`이고 SSL 강제를 끄지 않음 | - |
-| `KISA-2026:U-55` | FTP 계정 shell 제한 (중) | `ftp` 계정 셸이 nologin/false. 계정 없으면 해당없음 | - |
-| `KISA-2026:U-56` | FTP 서비스 접근 제어 설정 (하) | TCP Wrapper에 FTP 데몬(또는 ALL) 항목, proftpd `<Limit LOGIN>`. FTP 없으면 해당없음 | - |
-| `KISA-2026:U-57` | Ftpusers 파일 설정 (중) | `ftpusers`·vsftpd `user_list`에 root, proftpd `RootLogin on` 아님. FTP 없으면 해당없음 | - |
-| `KISA-2026:U-58` | 불필요한 SNMP 서비스 구동 점검 (중) | snmpd 없음. 필요하면 예외 레지스터 | - |
-| `KISA-2026:U-59` | 안전한 SNMP 버전 사용 (상) | snmpd.conf에 v1/v2c(`rocommunity`·`rwcommunity`·`com2sec`) 없음. snmpd 없으면 해당없음 | - |
-| `KISA-2026:U-60` | SNMP Community String 복잡성 설정 (중) | 모든 community가 public·private 아니고 영문+숫자 10자 이상 또는 영문+숫자+특수 8자 이상(값 비노출). v3 전용은 점검불가(수동) | - |
-| `KISA-2026:U-61` | SNMP Access Control 설정 (상) | community 항목마다 source가 default가 아님. v3 전용은 점검불가(수동) | - |
-| `KISA-2026:U-62` | 로그인 시 경고 메시지 설정 (하) | `/etc/motd` 또는 `/etc/issue`에 OS 이름·escape 외 문구가 있고, sshd `Banner` 지정, telnet 사용 시 `/etc/issue.net` | 1.7.1~1.7.3, 5.1.5 |
-| `KISA-2026:U-63` | sudo 명령어 접근 관리 (중) | `/etc/sudoers` root·640 이하. 없으면 해당없음 | - |
-| `KISA-2026:U-64` | 주기적 보안 패치 및 벤더 권고사항 적용 (상) | 점검불가(수동) — OS·커널을 증적으로. 미적용 보안 패치는 같은 보고서의 Package Vulnerability가 판정 | - |
-| `KISA-2026:U-65` | NTP 및 시각 동기화 설정 (중) | chronyd·ntpd가 돌고 `server`/`pool` 지정, 또는 systemd-timesyncd active | 2.3.1 |
-| `KISA-2026:U-66` | 정책에 따른 시스템 로깅 설정 (중) | rsyslogd·syslog-ng·syslogd가 돌고 auth/authpriv 규칙이 있음(로그 정책은 ADR-0006 Host Agents) | - |
-| `KISA-2026:U-67` | 로그 디렉터리 소유자 및 권한 설정 (중) | `/var/log` 바로 아래 파일이 root 소유·644 이하 | 6.2.4.1 |
 
 OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `rockylinux:8`, `rockylinux:9`, `ubuntu:22.04`, `debian:13` 컨테이너에서 돌려 67개 항목 모두 판정(양호·취약·해당없음·점검불가(수동))이 나오는 것을 확인했다. Rocky 10은 로컬 이미지가 없어 컨테이너로 돌리지 않았다(같은 POSIX sh·coreutils 경로).
 
@@ -481,6 +420,22 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 
 검증: pytest `tests/test_host_audit_kisa_capability.py`(#432: file capability 세 경우 — 기본만 있음·기본 밖 항목 있음·`getcap` 없음/실행 불가, SUID 판정 불변, 옛·현재 libcap 표기, 길이 제한, 역할 변수 주입)와 `tests/test_host_audit_kisa.py`(판정 5종, 예외 유효·만료·승인 대기·범위, 보고서 섹션·부록, 가짜 루트에서의 스크립트 판정과 해시 미노출, #122: U-01~U-67 카탈로그·스크립트 1:1, 프로비저닝된 서버·취약 서버 가짜 루트의 항목별 판정, postfix 메일 항목, U-28 Docker 구간과 예외 레지스터, SNMP community 비노출, dash·`bash --posix`·bash 결과 일치). 프로세스·unit·listening 포트는 `ps`·`systemctl`·`ss` 스텁으로 고정해 pytest가 실행 머신에 좌우되지 않는다. molecule Fast `VERIFY-AUD-200`·`VERIFY-AUD-201`(점검 실행·판정 기록). 읽기 전용은 `VERIFY-AUD-010` 스냅샷 사이에서 함께 확인된다.
 
+### 10.5 조치방법과 조치 영향도 (Spec #488 / Ticket-2, #490)
+
+보고서 본문의 "양호 외 항목" 표가 항목마다 무엇을 어떻게 고치는지, 고치면 서비스가 얼마나 흔들리는지를 보여 준다. 이 단계에서 호스트는 여전히 바꾸지 않고(읽기 전용), 조치도 이행 추적도 하지 않는다.
+
+- **YAML 필드(항목마다 필수)**: `check`(우리 probe가 보는 것 한 줄), `remediation.summary`(OS 공통 조치 요약, 한 줄 300자 이하, 앞뒤 공백 없음 — 본문 표가 한 줄로 싣는다), `remediation.steps.rhel`·`steps.debian`(계열에 따라 명령·파일이 실제로 다른 항목만, 키는 이 둘뿐), `remediation_impact`·`remediation_effort`(`level` 1~3과 `reason`), `guide_page`, `purpose`·`threat`(각 1~2문장). 가이드 원문은 옮기지 않고 우리 말로 요약하며 설정값·경로 같은 사실만 그대로 둔다. `tests/test_host_audit_kisa_remediation.py`가 67개 전부의 필드와 level 범위, steps 키, 인프라 상세(주소·관리번호·메일)가 없음을 검사한다.
+- **조치 영향도(Remediation Impact)**: 조치가 호스트에서 돌고 있는 서비스를 흔드는 정도. 1은 가이드가 영향 없음으로 본 경우(설정·권한 변경 위주이며, 서비스 재기동이 따르는 항목도 있어 구체적인 부수 작업은 항목의 reason을 따른다), 2는 재기동·재로그인이나 특정 연동이 조건부로 영향받는 경우, 3은 접속 불가·서비스 중단·로그인 불능 가능성이 있는 경우다. 가이드 "조치 시 영향"이 "영향 없음"류(정형문 50개와 조건부 U-05·U-50)인 52개는 1이고, 가이드가 개별로 서술한 15개(U-02, 03, 04, 06, 10, 12, 19, 23, 28, 41, 45, 49, 56, 57, 66)만 그 문장을 근거로 2 또는 3이다. 판정 위험(중요도)과 별개다.
+- **조치 난이도(Remediation Effort)**: 고치기 어려운 정도. 1은 설정 한 곳이나 명령 한두 개, 2는 여러 파일이나 대상 목록을 하나씩 처리하거나 재기동이 따르는 경우, 3은 패키지 교체·정책 수립·협의·판단이 필요한 대량 검토다. 조치 방법·사례를 근거로 67개 모두 매긴다.
+- **값의 근거와 확정**: level과 reason은 2026판 가이드 PDF와 조치 방법을 근거로 쓴 값이며 확정은 PR 검토로 한다(바꿀 때는 reason도 함께 검토한다). 영향도 1인 52개는 가이드 서술에 따라 1로 고정하고, 실제 우려가 있으면(예: U-37 일반 사용자 실행 차단, U-64 서비스 영향 파악) reason에 적어 두며 올릴지는 PR에서 정한다. 이 고정 때문에 reason에 우려가 적힌 1이 정렬에서는 위로 올 수 있다. 개별 서술 15개에는 U-04도 들어 있어 Linux만 보면 영향이 없어도 가이드의 HP-UX 서술을 근거로 2다. 영향도 2·3 항목과 난이도 분포는 PR 본문 표로 보여 준 뒤 사용자가 확정한다.
+- **조치 문구와 probe의 범위**: `remediation`은 가이드의 조치 방법이고 `check`는 우리 probe가 보는 범위라 둘이 완전히 겹치지는 않는다(예: 가이드는 xinetd.d·systemd 설정 파일까지 다루고 U-20 probe는 두 파일만 판정한다). 조치 뒤 판정은 다음 실행에서 probe가 확인한다. 알려진 차이: U-57의 vsftpd 조치 문구는 `userlist_deny=yes`일 때만 user_list가 차단 목록이라고 적지만 probe는 `userlist_deny`를 보지 않는다(probe 쪽 보강은 이 티켓 범위 밖이다).
+- **파생 값(저장하지 않음)**: 위험도 = 가이드 중요도(상 3, 중 2, 하 1), 우선순위 = 상 1, 중 2, 하 3, 시급성 = 우선순위 1 단기, 2 중기, 3 장기(기한은 정하지 않는다). 판정·호스트와 무관하게 항목마다 같은 값이다. `host_audit_kisa.py`의 `risk_level`·`priority_of`·`urgency_of`·`remediation_view`가 계산한다.
+- **본문 표**: "양호 외 항목" 표에 중요도 옆 `조치 영향도` 열(숫자)과 판단 기준 칸 아래 `조치: <remediation.summary>` 한 줄이 붙는다. 호스트별 부록(`appendix_config_vulnerability`)에는 조치 데이터를 싣지 않는다(부록 행은 기본 열만 쓴다). 표 아래에 조치 영향도 설명이 실리고, 가이드 출처 문장("조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 바탕으로 요약함")은 양호 외 항목이 없어도 보고서 맨 끝(검토 및 결재 뒤)에 한 번 실린다.
+- **정렬**: 본문 표는 우선순위(1이 먼저) → 조치 영향도(낮은 것 먼저) → 조치 난이도(쉬운 것 먼저) → 판정(취약 → 점검불가(수동) → 예외(승인)) → 항목 코드 순이다. 앞의 세 키가 우선순위 규칙이고, 세 키가 같은 행끼리(다른 항목 포함)는 판정, 그다음 항목 코드가 순서를 정한다. 이전의 판정 우선 정렬은 이 규칙으로 바뀌었다(Spec #488 결정: 표 정렬은 우선순위 규칙을 따르며 판정은 정렬 키가 아니라 열로 보인다. 그래서 예외(승인) 행이 같은 우선순위의 취약 행보다 위에 올 수 있다). 정렬은 `order_findings`가 한다.
+- **호스트별 JSON 불변**: 조치 데이터는 보고서 모델을 만들 때 YAML에서 붙인다. `config_vulnerability`의 `edition`·`status`·`reason`·`results[].{code,result,verdict,evidence,exception}`와 레코드 `schema_version` 2는 바뀌지 않는다(Audit Baseline 비교 호환).
+- **조치 안내 부록(`부록 N+1. 조치 안내`, Spec #488 / Ticket-3, #491)**: 호스트별 부록 뒤, 검토 및 결재 앞에 항목 단위 부록이 붙는다. N은 호스트별 부록 수이므로 번호는 그 뒤로 이어진다. 대상은 본문 "양호 외 항목" 표와 같은 항목 집합이고 같은 순서(`order_findings`)다. 한 항목은 판정이 달라도 한 블록이다. 블록(`<section class="rg-block">`)은 머리에 판정별 호스트 목록(`취약: … · 점검불가(수동): … · 예외(승인): …`, 호스트가 없는 판정은 뺀다), 이어서 점검 목적·보안 위협·판단 기준·점검방법(`check`)·조치방법·조치 영향도와 조치 난이도(단계와 이유)·`가이드 p.<guide_page>`를 싣는다. 조치방법은 `summary`와 그 항목에 있는 계열별 `steps` 전부이며 계열 이름(RHEL 계열·Debian 계열)을 붙이고 호스트의 계열로 고르지 않는다(계열이 섞인 호스트 목록을 한 블록으로 처리하기 위해서다. 호스트 계열에 맞춘 단계는 Remediation Plan xlsx가 고른다). steps의 줄바꿈은 `white-space: pre-wrap`으로 살린다. 호스트별 증적은 다시 싣지 않는다. 블록은 `break-inside: avoid`라 쪽 중간에서 잘리지 않고 쪽수 상한은 없다(블록 하나가 한 쪽보다 길면 브라우저가 어쩔 수 없이 나눈다. 호스트 목록이 아주 길어지는 경우도 같다. 스펙이 쪽수 상한을 두지 않기로 했으므로 호스트 목록 상한이나 접기는 두지 않는다. 블록은 항목 전체 코드(`KISA-2026:U-NN`)로 구분하고 카탈로그 조회는 본문 표(`_item_meta`·`remediation_view`)와 같은 규칙이라 다른 판 접두어의 코드도 같은 항목 번호의 카탈로그 문구를 쓰며(알려진 한계, 저장 기록의 판은 항상 `KISA-2026`이다), 카탈로그에 없는 코드도 본문 표와 같은 집합이 되도록 가진 열만으로 블록을 만든다). 양호 외 항목이 없는 실행에서는 부록 제목 아래에 `조치 안내 대상 없음`을 표시해 부록이 빠진 것과 대상이 없는 것을 구분한다. 데이터는 보고서 모델의 `config_vulnerability.remediation_guide`(항목 YAML에서 붙인 값뿐)이고 템플릿은 `sections/remediation_guide.html.j2`다. 검증은 공유 렌더링 테스트 `tests/test_host_audit_remediation_guide.py`(부록 위치·번호, 본문 표와 같은 순서, 판정이 섞인 항목의 호스트 목록, steps 있는 항목·없는 항목, 대상 없음, 이스케이프, `break-inside`)다.
+- **범위**: 호스트별 Remediation Plan xlsx는 §17이다. HTML의 조치 요약·조치 영향도·조치 안내 부록은 필터·템플릿 변경이라 SPEC-ID가 없다.
+
 ## 11. 보관과 Audit Baseline (#125)
 
 실행마다 러너의 실행 디렉터리 전체를 RustFS **Host Audit 전용 버킷**(기본 `host-audit`)에 올리고, 직전 정기 실행(Audit Baseline)과 비교해 모든 섹션의 발견을 표시한다. 모든 동작은 러너 localhost의 보고서 단계에서 일어나고 대상 호스트에는 아무것도 하지 않는다. check 모드에서는 조회·업로드를 하지 않는다.
@@ -495,6 +450,8 @@ OS별 판정 확인: 같은 스크립트를 root로 `centos:6`, `centos:7`, `roc
 | `<YYYY-MM>/<run_id>/findings.json` | 섹션별 발견 색인 `{section: {hosts, ids: {host: [id]}}}`, `resolved`, `baseline_run_id` | 모든 실행 |
 | `<YYYY-MM>/<run_id>/trivy_version.json` | 판정 당시 Trivy 버전·취약점 DB 메타데이터 `{trivy_version, db_version, db_updated_at, db_downloaded_at, db_next_update, db_status, db_refreshed, source}` (#159) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/sbom/<host>.cdx.json` | Trivy 입력 SBOM(CycloneDX), 압축 없이 그대로. 다시 판정하는 입력이다(아래 재판정) (#159) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/xlsx/host-audit-<run_id>-<host>.xlsx` | 호스트별 Remediation Plan(§17). 파일마다 `AUD-513` SHA-256, Content-Type `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`(`AUD-514`) (#494) | 모든 실행 |
+| `<YYYY-MM>/<run_id>/xlsx/host-audit-<run_id>-xlsx.zip` | 위 xlsx 전부를 묶은 zip(`AUD-026`). 메일의 두 번째 첨부이고 같은 바이트가 여기 보관된다. `AUD-513` SHA-256, Content-Type `application/zip`(`AUD-514`). 재발송이 받아 요약에 기록된 해시와 대조한다(§13.4) (#495) | 모든 실행 |
 | `<YYYY-MM>/<run_id>/hosts/*.json` 등 | 호스트별 JSON, 패키지 목록(`packages/`), `package_vulnerability.json`, `pointer.json`. `trivy/`와 `package_findings/`는 올리지 않음(§9) | 모든 실행 |
 | `baseline/<run_id>.json` | 포인터 `{run_id, run_kind, started_at, findings_key, resolved}` | **정기 실행만**, 모든 업로드 성공 후 |
 
@@ -587,9 +544,9 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 | `AUD-506` | `Decide the Audit Baseline state of this run` | `ansible.builtin.set_fact` | 러너 | `ok`·`failed`·`disabled` |
 | `AUD-510` | `Save the findings index of this run on the runner` | `host_audit_findings_write` (role `library/` 커스텀 모듈) | 러너 | 실행별 파일 `0600`. 다른 섹션은 모델의 document 그대로, Package 발견 id는 `package_findings/<호스트>.json`에서 호스트 하나씩 읽어 쓴다(#155) |
 | `AUD-511` | `Save the Audit Baseline pointer of a scheduled run on the runner` | `ansible.builtin.copy` | 러너 | 정기 실행만, `0600` |
-| `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용 |
-| `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
-| `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log` |
+| `AUD-512` | `Find every file of this run to keep` | `ansible.builtin.find` | 러너 | 읽기 전용. 실행 디렉터리를 재귀로 찾으므로 `xlsx/`의 호스트별 xlsx(AUD-025)와 그 zip(AUD-026)도 대상이다 |
+| `AUD-513` | `Compute the SHA-256 of every file to keep` | `ansible.builtin.stat` | 러너 | 읽기 전용. xlsx와 zip도 파일별로 구한다 |
+| `AUD-514` | `Upload this run to the Host Audit bucket (<YYYY-MM>/<run_id>/)` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 실행 ID별 새 키, `no_log`. Content-Type은 `.html` text/html, `.xlsx` OOXML 스프레드시트, `.zip` application/zip, 나머지 application/json. xlsx와 zip은 `<YYYY-MM>/<run_id>/xlsx/`에 올라간다 |
 | `AUD-515` | `Upload the Audit Baseline pointer of a scheduled run` | `ansible.builtin.uri` (S3 PutObject) | 러너 | 정기 실행·전체 업로드 성공 시만, `no_log` |
 | `AUD-516` | `Fail the run when the Audit Baseline lookup or keeping the originals failed` | `ansible.builtin.assert` | 러너 | 파일 이름·상태만 표시 |
 
@@ -654,7 +611,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 
 ```text
 report.yml
-  AUD-023 보고서 HTML → AUD-611 SHA-256 → AUD-612·613 메일 요약(mail_summary.json, 주소 없음)
+  AUD-025 호스트별 xlsx → AUD-026 xlsx zip → AUD-611·615 보고서·zip SHA-256 → AUD-612·613 메일 요약(mail_summary.json, 주소 없음, zip 해시 포함)
   storage_upload.yml   AUD-510~515 원본(요약 포함, trivy/·package_findings/ 제외) 업로드
   AUD-614              보관 성공 판정 — 업로드가 하나라도 실패하면 보내지 않음
   mail.yml             AUD-600~609 수신자 해석 → 수신자마다 1통 발송 → 결과(주소 없이)
@@ -675,8 +632,8 @@ report.yml
 
 - 제목: `[Host Audit] <정기|수시> 점검 보고서 <시작일> — 취약 n · 긴급/높음 n · 점검불가 n`
 - 본문: `<table>` 레이아웃과 `style=""` 인라인만 쓴다(`<style>`·이미지·SVG·data URI 없음 — Gmail·Outlook이 지운다). 호스트 수 3칸, 섹션별 한 줄 요약(점검불가, Asset Inventory, Configuration Vulnerability, Package Vulnerability, Configuration Drift, Audit Baseline), EOS 호스트, 비교 기준, 첨부 파일명·**SHA-256**·**원본 보관 경로**.
-- 첨부: 보고서 1개, 파일명은 ASCII `host-audit-<run_id>.html`(한글 파일명은 RFC 2231 인코딩이 클라이언트마다 깨진다). 첨부 바이트는 버킷의 `report.html`과 같다.
-- 머리글: `X-Host-Audit-Run-Id`, `X-Host-Audit-Report-SHA256`.
+- 첨부: 보고서 `host-audit-<run_id>.html`과 호스트별 Remediation Plan xlsx를 묶은 `host-audit-<run_id>-xlsx.zip`, 모두 ASCII 파일명이다(한글 파일명은 RFC 2231 인코딩이 클라이언트마다 깨진다). 첨부 바이트는 버킷의 `report.html`·`xlsx/…-xlsx.zip`과 같다. 본문에 zip 파일명·**zip SHA-256**·보관 경로가 한 줄씩 더 실린다(보고서 해시 줄과 같은 형태).
+- 머리글: `X-Host-Audit-Run-Id`, `X-Host-Audit-Report-SHA256`, `X-Host-Audit-Xlsx-Zip-SHA256`(zip을 붙인 메일만).
 - **수신자마다 1통**을 보낸다. 받는 사람은 다른 수신자의 주소를 보지 않는다. 또 한 통에 여러 명을 넣으면 일부 거부 시 `community.general.mail`이 거부된 주소를 경고로 찍는데, 모듈 경고는 `no_log`로 가려지지 않는다(실측).
 
 ### 13.3 입력 (OpenBao KV v2, Git에는 주소 없음)
@@ -701,11 +658,11 @@ report.yml
 
 ### 13.4 재발송
 
-`playbooks/host_audit_resend.yml`(Semaphore 템플릿 Host Audit — Resend)은 다시 점검하지 않는다. 버킷 `<YYYY-MM>/<run_id>/`에서 `report.html`과 `mail_summary.json`을 받아 SHA-256을 비교하고(다르면 보내지 않음), 같은 첨부·같은 요약에 제목 앞 `[재발송]`을 붙여 지금의 수신자에게 보낸다. 받은 보고서는 보낸 뒤 러너에서 지운다.
+`playbooks/host_audit_resend.yml`(Semaphore 템플릿 Host Audit — Resend)은 다시 점검하지 않는다. 버킷 `<YYYY-MM>/<run_id>/`에서 `report.html`과 `mail_summary.json`을 받아 SHA-256을 비교하고(다르면 보내지 않음), 요약이 xlsx zip을 기록했으면 `xlsx/host-audit-<run_id>-xlsx.zip`도 받아(`AUD-629`) 기록된 해시와 대조한다(`AUD-633`: 받지 못함·이름 불일치·해시 불일치면 하나도 보내지 않고 멈춘다). 같은 첨부 둘·같은 요약에 제목 앞 `[재발송]`을 붙여 지금의 수신자에게 보낸다. 받은 보고서와 zip은 보낸 뒤 러너에서 지운다(`AUD-628`). zip의 받을 이름은 요약의 값이 아니라 실행 ID에서 정한다(요약은 버킷에서 받은 값이라 경로 문자를 믿지 않는다).
 
 - `host_audit_resend_run_id`: 보관된 실행 ID(필수, 영문·숫자·`._-`).
 - `host_audit_resend_month`: 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID일 때 `YYYY-MM`(보고서 시간대 기준 실행 시작 월). 기본 형식이면 ID에서 계산한다(예: `ha-20261031T220000Z` → KST 11월 1일 → `2026-11/`).
-- `mail_summary.json`이 없는 실행은 최소 요약(첨부·SHA-256·보관 경로)으로 보낸다.
+- `mail_summary.json`이 없는 실행은 최소 요약(첨부·SHA-256·보관 경로)으로 보낸다. 요약에 `xlsx_zip` 기록이 없는 옛 실행(zip이 생기기 전)은 보고서만 보낸다.
 
 ### 13.5 태스크 매트릭스
 
@@ -716,15 +673,16 @@ report.yml
 | `AUD-602` | `Fetch the Host Audit mail settings from OpenBao (agents/host_audit)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
 | `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 문제는 키 이름·건수만, `no_log` |
 | `AUD-604` | `Create a private temporary directory for the attachment` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 디렉터리, AUD-607이 삭제 |
-| `AUD-605` | `Copy the report under its ASCII attachment name` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600` |
-| `AUD-606` | `Send the summary and the A4 report (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통, `failed_when: false`, `no_log` |
+| `AUD-605` | `Copy the report and the xlsx zip under their ASCII attachment names` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600`. 보고서 1개와 (요약에 `xlsx_zip`이 있고 호출자가 경로를 준 때만) xlsx zip 1개 |
+| `AUD-606` | `Send the summary, the A4 report and the xlsx zip (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통(첨부 둘), `failed_when: false`, `no_log` |
 | `AUD-607` | `Remove the temporary attachment directory` | `ansible.builtin.file` | 러너 | `always`, `state: absent` |
 | `AUD-608` | `Judge the mail outcome without any address` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_outcome` 필터, `no_log` |
 | `AUD-609` | `Show the mail outcome (counts only)` | `ansible.builtin.debug` | 러너 | 수신자 수·첨부명·SHA-256만 |
 | `AUD-610` | `Fail the run when the report mail was not delivered` | `ansible.builtin.assert` | 러너 | 보관 판정 뒤, 주소 없는 문구 |
 | `AUD-611` | `Compute the SHA-256 of the report to attach` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
-| `AUD-612` | `Build the mail summary of this run` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_summary` 필터 |
+| `AUD-612` | `Build the mail summary of this run` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_summary` 필터(보고서·xlsx zip의 파일명·SHA-256·크기·보관 경로) |
 | `AUD-613` | `Save the mail summary on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600`, 원본과 함께 보관 |
+| `AUD-615` | `Compute the SHA-256 of the xlsx zip to attach` | `ansible.builtin.stat` | 러너 | 읽기 전용. 메일 요약(AUD-612)이 싣는 zip 해시 |
 | `AUD-614` | `Decide whether the originals were kept` | `ansible.builtin.set_fact` | 러너 | 업로드 상태 코드만 |
 | `AUD-620` | `Fix the resend metadata and the archived run location` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_prefix` 필터 |
 | `AUD-621` | `Create the runner-local directory for the downloaded report` | `ansible.builtin.file` | 러너 | `0700` |
@@ -733,8 +691,12 @@ report.yml
 | `AUD-624` | `Get the archived mail summary` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
 | `AUD-625` | `Compute the SHA-256 of the downloaded report` | `ansible.builtin.stat` | 러너 | 읽기 전용 |
 | `AUD-626` | `Assert the archived report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 해시 불일치면 보내지 않음 |
-| `AUD-627` | `Prepare the resend summary and attachment` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
-| `AUD-628` | `Remove the downloaded report from the runner` | `ansible.builtin.file` | 러너 | `state: absent` |
+| `AUD-629` | `Get the archived xlsx zip` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log`. 요약이 xlsx zip을 기록한 실행만 |
+| `AUD-633` | `Assert the archived xlsx zip exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 받지 못함·이름 불일치·해시 불일치면 보내지 않음. 번호는 `AUD-630`(정리 판정)이 이미 쓰여 633이다 |
+| `AUD-627` | `Prepare the resend summary and attachments` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
+| `AUD-628` | `Remove the downloaded report and xlsx zip from the runner` | `ansible.builtin.file` | 러너 | `state: absent`(재발송 실행 디렉터리 통째로) |
+
+재발송의 `Read the xlsx zip record of the archived summary`(요약에서 zip 기록을 읽는 `set_fact`), `Compute the SHA-256 of the downloaded xlsx zip`(받은 zip의 `stat`), `Say that the xlsx zip is not resent without its recorded hash`(요약이 없을 때 알리는 `debug`)는 AUD-629·633의 보조 태스크라 SPEC-ID를 두지 않는다(스펙이 재발송 zip에 정한 번호는 둘뿐이다). 메일 첨부 경로는 AUD-605의 `copy` 결과(`dest`)를 AUD-606이 그대로 쓴다.
 
 ## 14. 러너 디렉터리 정리 (#157)
 
@@ -746,13 +708,15 @@ AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·�
 
 | 상황 | 동작 |
 |---|---|
-| 보관 성공 | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
+| Remediation Plan xlsx 쓰기·zip 묶기·이전 시도 xlsx 정리 실패(보관 여부·메일 결과와 무관) | 남긴다. 맨 끝 판정(`Fail the run when a Remediation Plan xlsx could not be written`)이 실패한 대상과 함께 실행을 실패로 끝내고 `AUD-632`가 이유(`xlsx 산출물 실패(<대상>)`)를 보여 준다(§17). 아래 행들보다 먼저 판정한다. |
+| xlsx 판정 사실(`_host_audit_xlsx_problem`)이 없음(그 앞 단계에서 멈춤) | 남긴다. 값이 없는 것을 '실패 없음'으로 읽지 않고, 이유는 '앞 단계에서 멈춰 xlsx 판정이 없음'이다. |
+| 보관 성공(xlsx 산출물 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
 | 보관 꺼짐(`host_audit_storage_enabled=false`), 메일 발송 성공 | 지운다. |
 | 보관 꺼짐, 메일 실패 또는 미발송 | 남긴다. 러너 사본이 유일하다. |
 | 보관 실패(업로드 실패, 보관 입력 누락) | 남긴다. AUD-516 메시지가 이 디렉터리를 가리킨다. |
 | check 모드 | 지우지 않는다. |
 
-"보관 성공"은 AUD-516이 통과하는 조건과 같다: 보관 입력 이상 없음, 업로드 전부 200, 정기 실행은 포인터 업로드 200, Audit Baseline 조회가 `failed`가 아님. Audit Baseline 조회만 실패한 실행은 AUD-516이 실패로 끝내고 메시지가 러너 디렉터리를 가리키므로 남긴다. 판정에 쓸 값이 없으면(앞 단계가 일찍 끝남) 남긴다. 남긴 경우 실행 로그에 경로와 이유를 보여 준다(`AUD-632`).
+"보관 성공"은 AUD-516이 통과하는 조건과 같다: 보관 입력 이상 없음, 업로드 전부 200, 정기 실행은 포인터 업로드 200, Audit Baseline 조회가 `failed`가 아님. Audit Baseline 조회만 실패한 실행은 AUD-516이 실패로 끝내고 메시지가 러너 디렉터리를 가리키므로 남긴다. 판정에 쓸 값이 없으면(앞 단계가 일찍 끝남) 남긴다. 남긴 경우 실행 로그에 경로와 이유를 보여 준다(`AUD-632`). 이유는 보관 단계 실패뿐 아니라 그 앞 단계(AUD-025 Remediation Plan 생성·쓰기)의 실패도 가리킨다.
 
 **경로 검증**: `output_dir`이 정확히 `<host_audit_output_root>/<run_id>`(출력 상위 경로 바로 아래 한 단계)이고, `run_id`가 `[A-Za-z0-9][A-Za-z0-9._-]*`이며 `resend-`로 시작하지 않을 때만 지운다. 하나라도 어긋나면 지우지 않고 이유를 보여 준다.
 
@@ -773,9 +737,9 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 
 ### 13.6 검증
 
-- pytest `tests/test_host_audit_mail.py`: 수신자 정규화(목록·구분 문자열·중복·형식 오류는 건수만), 오류 문구의 주소 가림, 수신자별 발송 결과 판정(일부 실패·`failed_when` 재작성 대비), ASCII 첨부명, 실제 보고서 모델에서 만든 요약(주소 없음), 본문 템플릿(표·인라인만, `<style>`·이미지·SVG 없음, 50KB 미만, 이스케이프), 재발송 위치(KST 월 경계·형식 검사), 태스크 순서(보관 → 메일 → 보관 판정 → 메일 판정)와 `no_log`.
+- pytest `tests/test_host_audit_mail.py`: 수신자 정규화(목록·구분 문자열·중복·형식 오류는 건수만), 오류 문구의 주소 가림, 수신자별 발송 결과 판정(일부 실패·`failed_when` 재작성 대비), ASCII 첨부명, 실제 보고서 모델에서 만든 요약(주소 없음), 본문 템플릿(표·인라인만, `<style>`·이미지·SVG 없음, 50KB 미만, 이스케이프), 재발송 위치(KST 월 경계·형식 검사), 태스크 순서(보관 → 메일 → 보관 판정 → 메일 판정)와 `no_log`, 요약·본문의 zip SHA-256 줄. `tests/test_host_audit_xlsx_zip_report.py`(통합, 임시 SMTP·S3 서버): `report.yml`이 `xlsx/host-audit-<run_id>-xlsx.zip`을 같은 바이트로 만들고 보관 목록에 해시와 함께 올리며 요약에 zip 해시를 싣는지, 메일에 첨부 둘이 가는지, 재발송이 해시가 같으면 둘 다 보내고 다르거나 zip이 없으면 아무것도 보내지 않는지(zip 기록이 없는 옛 실행은 보고서만). `tests/test_host_audit_zip_write.py`: zip 모듈의 구성·순서·고정 시각·같은 바이트.
 - 수동 E2E(2026-10-08, 러너 로컬): mailpit(STARTTLS 필수, 자체 서명 인증서, 수신자 허용 규칙) + RustFS + OpenBao dev(namespace `infra/prod/host`)로 실제 report 단계를 돌렸다 — 수신자 3명에게 1통씩 도착, 첨부 SHA-256 = 버킷 `report.html` SHA-256, 재발송 첨부도 같은 해시, 업로드 실패 시 메일 0통·실행 실패, 메일 실패(닫힌 포트·전원 거부·일부 거부) 시 원본 유지·실행 실패, 수신자 없음 시 키 이름만 표시하고 실패, OpenBao `mail_to`(`;` 구분 문자열) 조회. 모든 경우 실행 로그에서 주소 0건. mailpit HTML 검사(caniemail 기준) 본문 지원율 95.5% — 미지원은 classic Outlook의 `max-width`(표 `width="640"` 속성으로 대체)뿐.
-- 운영 확인(운영자, #105 이후): 실제 relay 발송, Gmail·Outlook(웹·classic) 표시, `.html` 첨부 차단 여부.
+- 운영 확인(운영자, #105 이후): 실제 relay 발송, Gmail·Outlook(웹·classic) 표시, `.html` 첨부 차단 여부. #495부터는 Gmail이 zip 안의 xlsx를 막지 않는지도 첫 실제 실행에서 확인한다(압축 안 한 zip이라 내용 검사를 받는다).
 
 ## 15. KISA 월간 악화 알림 (Spec #322 / Ticket-9, #331)
 
@@ -868,3 +832,52 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - pytest `tests/test_host_audit_regression.py` — 판정(선언 안 한 항목은 해당없음, 말하지 않은 선언 항목은 점검불가), 쉘 메타문자 차단, 백업 정책 판정(수집기 출력 형식 사용: 정상, 삭제 범위 확대, 다른 버킷, 정책 없음, 스냅샷 없음), 보고서 섹션과 Audit Baseline 발견, 항목 단위 악화 비교와 알림 본문(주소·시크릿 없음).
 - **molecule Fast Scenario** `VERIFY-AUD-700`(수렴된 호스트에서 선언 항목이 모두 통과하고 프로브가 호스트를 바꾸지 않는다), `VERIFY-AUD-701`(sshd 제한 블록 제거, journald 휘발성, 시크릿 파일 권한 확대를 일부러 만들면 해당 항목이 실패로 보고된다), `VERIFY-AUD-700`이 원복 뒤 다시 통과하는지도 본다(같은 판정 재확인). 컨테이너에서는 fail2ban·감사 규칙 적재·게시 포트를 재현하지 않아 이 항목들은 pytest가 본다.
 - `AUD-710`(백업 정책 판정)은 러너에서 저장소 JSON만 읽으므로 molecule 검증이 없고(`INTEGRATED`), pytest `tests/test_host_audit_regression.py`가 판정을 검증한다.
+
+## 17. Remediation Plan (Spec #488 / Ticket-6, #494)
+
+호스트마다 SolidStep 이행계획서 열 구성의 xlsx 1개를 만든다(CONTEXT.md Remediation Plan). 보고서와 함께 보관하며 정기·수시 실행 모두 만든다. 조치는 하지 않고 이행도 추적하지 않는다: 사람이 채운 파일을 다시 읽는 길은 없고, 이행 여부는 다음 정기 실행의 판정(Audit Baseline의 해소)이 증명한다. xlsx 전부는 zip 하나로 묶여 메일의 두 번째 첨부가 되고 보고서와 함께 보관되며, 재발송은 보관된 zip의 해시를 대조한 뒤 같이 보낸다(Ticket-7, #495, §17.2).
+
+- **파일**: 실행 디렉터리 `xlsx/host-audit-<run_id>-<inventory_hostname>.xlsx`(ASCII, `[A-Za-z0-9._-]` 밖의 글자는 `_`이고, 바뀐 이름과 80자를 넘어 잘린 이름에는 원래 이름의 SHA-256 앞 8자를 붙여 서로 다른 호스트가 같은 파일명을 쓰지 않게 한다). 시트 1개(`이행계획서`), 보관은 `<YYYY-MM>/<run_id>/xlsx/`(§11.1).
+- **행 범위**: 그 호스트에서 양호 외로 판정된 항목(취약·점검불가(수동)·예외(승인))이 한 행씩이다. 양호·해당없음은 넣지 않는다. 양호 외 항목이 없으면 `양호 외 항목 없음` 한 줄(통제내용 칸)만 있는 파일이다. KISA 점검 결과 자체가 없는 호스트(수집 실패·미점검)는 양호로 보이지 않도록 `점검 결과 없음(점검불가)` 한 줄이다.
+- **열(순서대로)**: 그룹(`category`) · 자산명(Inventory Hostname) · 담당자 · 통제내용(`U-xx 항목명`) · 취약점현황(`<판정>: <evidence>`, 메모가 있으면 다음 줄에 HTML 부록과 같은 note) · 점검방법(`check`) · 조치방법 · 위험도(3/2/1) · 이행과제 · 시급성(단기·중기·장기) · 영향도(조치 영향도) · 환경성(조치 난이도) · 우선순위(1~3) · 이행 결과 · 비고. 위험도·시급성·우선순위는 §10.5의 파생 규칙이고, 영향도·환경성은 항목 YAML의 level이다. 이행과제·이행 결과는 사람이 채우므로 비워 둔다.
+- **조치방법**: 호스트 OS 계열(steps는 계열(rhel·debian)별로만 두고 버전 차이는 문장 안에 적는다는 스펙 결정에 따라, CentOS 6처럼 systemd가 없는 호스트에도 같은 rhel 단계를 쓰므로 `systemctl`이 들어간 rhel steps에는 service 대안을 적어 둔다. `os-release` ID로 rhel·debian, 보고서 모델 `inventory[].os_family`)의 `steps`. 그 계열의 steps가 없거나 계열을 알 수 없으면 `remediation.summary`다. 계열은 `os-release` ID의 정확한 일치(rhel·centos·rocky·almalinux·ol·fedora·amzn은 rhel, debian·ubuntu는 debian)로만 정한다. `ID_LIKE`는 호스트별 JSON(`schema_version` 2)에 없고 그 스키마를 바꾸지 않으므로 파생 배포판은 계열을 알 수 없는 호스트로 보고 공통 요약을 받는다(틀린 계열의 명령을 싣는 것보다 낫다).
+- **담당자**: Asset Inventory의 관리자(직책)를 보고서가 보이는 그대로 싣는다. 값이 없으면 `미지정`, 조회가 실패했으면 `조회 실패`(Asset Inventory 표와 같은 말), Asset Inventory에 그 호스트 항목이나 관리자 칸이 없거나 호스트에 닿지 못해(수집 실패·기록 없음) 선언 값을 읽을 수 없었으면 역시 `조회 실패`(자료 없음을 '배정 안 됨'으로 꾸미지 않는다)이고, 값이 문자열이 아니면 그 표가 보이는 `잘못된 값 …`이다. 담당자를 따로 해석하거나 다른 곳에서 채우지 않으므로 셀 출처 규칙이 그대로 지켜진다(#492 검토에서 정함).
+- **비고**: 앞에 Audit Baseline 상태(`[신규]`·`[지속]`·`[재발]` 셋만, 다른 상태는 붙이지 않는다)가 붙고, 점검불가(수동) 행과 Audit Baseline이 없거나 조회되지 않은 실행(첫 실행 포함)에는 붙지 않는다. 그 뒤에 예외 레지스터 상태가 온다: 예외(승인)은 `예외(승인) — 사유: … / 위험: … / 보완: … / 승인: <직책> <승인일> / 만료: <만료일>`(날짜가 없거나 형식이 틀리면 레지스터 표처럼 `-`), 만료로 취약이 된 행은 `예외 만료(<만료일>)`, 승인 대기는 `예외 승인 대기`. 예외 값은 보고서 모델의 해당 호스트 발견(`findings[].hosts[].exception`, 레지스터 표와 같은 값)에서 읽는다. 이 필드는 보고서 모델 안에만 있다(Audit Baseline 문서와 보관 파일은 `appendix`와 id 색인만 쓰고 `findings`를 직렬화하지 않는다).
+- **취약점현황과 비고의 겹침**: 취약점현황은 HTML 부록과 같은 증적·메모(같은 말을 보여 주는 요구)이고 비고는 이행계획서 양식의 상태 열이다. 둘 다 호스트 발견 항목에서 나온 값이라 어긋나지 않는다. 활성 예외로 점검불가(수동)이 예외(승인)이 된 행은 Audit Baseline의 발견(예외 포함)이므로 `[신규]`·`[지속]` 앞머리가 붙는다(판정이 점검불가(수동)인 행에만 붙이지 않는다).
+- **정렬**: 우선순위 → 영향도(낮은 것 먼저) → 환경성(쉬운 것 먼저) → 판정(취약 → 점검불가(수동) → 예외(승인)) → 항목 코드(§10.5 `order_findings` 그대로).
+- **하단**: KISA 출처 문장과 `실행 ID: <run_id>`가 표 아래 빈 줄 하나 뒤에 온다.
+- **셀 출처 규칙**: 모든 셀 문자열은 보고서 모델이나 항목 YAML에 이미 있는 값이거나 위 고정 문구(열 이름, `양호 외 항목 없음`, 비고 문구의 연결어)다. xlsx 전용 비공개 값 필터는 두지 않는다. `host_audit_remediation_plan`은 모델과 카탈로그만 읽고 파일·lookup을 쓰지 않는다. 담당자는 직책이라 개인정보도 없다.
+- **판정 순서와 남는 디렉터리**: 맨 끝의 xlsx 쓰기 판정은 보관·메일·알림 판정 뒤에 있어, 앞 판정이 먼저 실패하면 그 메시지가 앞선다(실패한 호스트는 로그의 `ignoring` 줄에 남는다). xlsx 쓰기 실패 한 건이 실행 디렉터리를 남기는 비용(러너 디스크)은 증적 보존을 우선한 결정이며, 남은 디렉터리는 오래된 실행 정리(§14.2)가 보존 일수 뒤에 지운다.
+- **한 줄 파일의 자리**: `양호 외 항목 없음`과 `점검 결과 없음(점검불가)`는 통제내용 칸에 한 줄로 들어가고 위험도·우선순위 칸은 비어 있어 발견 행과 섞여도 구분된다. 한 호스트의 기록이 이상해 계획을 못 만들면 그 호스트만 `이행계획서 생성 실패 (<예외 종류: 메시지>)` 한 줄 파일(담당자는 아는 값 그대로)이 되고 다른 호스트는 계속된다. 로그에는 호스트와 예외 종류만 남기는 태스크가 있고(메시지는 레코드 값을 인용할 수 있어 `xlsx` 한 줄 파일에만 둔다), 모든 호스트가 실패했으면(필터·카탈로그 자체의 오류) 빈 증적을 보관하지 않도록 실행을 멈춘다(일부만 실패했을 때는 실패시키지 않는다: 계획 생성은 호스트별 격리, 파일 쓰기는 증적 보존을 위해 중단이라는 구분이다).
+- **카탈로그에 없는 코드**: 저장된 기록에 카탈로그에 없는 항목 코드가 있으면 통제내용은 `U-99 (카탈로그에 없는 항목)`이고 위험도·시급성·영향도·환경성·우선순위·점검방법·조치방법 셀은 빈 칸이다(None을 셀에 넣지 않는다). 쓰기 모듈도 문자열·정수가 아닌 값은 문자열로, None은 빈 셀로 쓰고, 짝 없는 서로게이트 같은 XML에 못 쓰는 글자는 뺀다.
+- **쓰기 실패와 실행 흐름**: xlsx를 쓰지 못해도(`ignore_errors`) 보관·메일·KISA 악화 알림·Audit Baseline 포인터는 계속한다(그것들은 xlsx에 기대지 않는다). 실패는 보관·메일 판정처럼 맨 끝(`Fail the run when a Remediation Plan xlsx could not be written`, 호스트 이름만 밝힘)에서 실행을 실패로 끝내고, 정리는 그 실행의 디렉터리를 남긴다(`AUD-630`은 보관 여부와 무관하게 xlsx 쓰기 실패를 '남긴다'로 판정하고 `AUD-632`가 이유를 보여 준다). 보관을 끈 실행은 xlsx가 러너에만 있지만 zip이 메일의 두 번째 첨부로 가고 정리는 메일 판정 뒤(`always`)에 돌므로, 메일 성공 뒤 정리가 디렉터리를 지워도 xlsx는 메일에 남는다(#494의 전환 기간 한계는 #495에서 닫혔다). 메일이 실패하면 보관을 끈 실행은 디렉터리를 남긴다(§14).
+- **실패 처리**: `AUD-025`의 `rows`는 모듈의 `no_log` 인자다(호스트 증적과 예외 사유가 러너의 syslog·journal 호출 기록에 남지 않게 한다). `no_log`는 모듈 결과 안의 같은 값까지 가려 `row 2 has ********`처럼 원인을 못 읽게 하므로, 모듈이 가림 대상을 24자 이상 값(증적 같은 자유 문장)으로 좁혀 행 번호·경로·호스트 이름은 보이게 한다. 오류 메시지는 행 번호와 개수만 적는다. 호스트마다 모듈을 한 번씩 부르는 것은 실패한 호스트를 라벨로 남기기 위해서다. 만들기에 실패하면 실행을 멈춘다. xlsx도 이번 실행의 증적이라 빠진 채 보관·메일로 넘어가지 않으며, 실패 원인이 될 입력(None 셀, 형식이 다른 셀, 인코딩 불가 글자)은 위처럼 모듈이 흡수한다. 쓰다 실패해도 `xlsx/`에 임시 파일을 남기지 않고, 프로세스가 죽어 남더라도 임시 파일 이름이 점(`.`)으로 시작해 `AUD-512`(숨김 파일을 찾지 않음)가 목록에 올리지 않는다(`mkstemp`로 만들고 `fsync` 뒤 `replace`). 정수 셀은 2^53을 넘으면 문자열로 쓴다(Excel은 숫자를 double로 저장). 쓰기 오류(디스크 가득 등)는 `dest`를 밝힌 실패 메시지로 낸다. 셀이 xlsx 한도(32,767자, Excel처럼 UTF-16 단위로 센다)보다 길면 잘라 `…`를 붙이고 모듈이 경고를 낸다. 시트 이름(31자 이하, 금지 문자·가장자리 작은따옴표)과 열 너비(1~255, 머리글보다 많으면 오류)는 모듈이 검증한다. 길이 한도는 줄바꿈 정규화와 XML에 못 쓰는 글자를 뺀 뒤의 길이로 판단하고 경고도 같은 기준이다. check 모드는 파일이 이미 같은 바이트면 `changed`가 아니다. 호스트마다 필터를 다섯 번 부르지 않도록(호스트·발견 탐색은 호스트 수에 비례해 다시 돌지만 수십 대 규모에서는 무시할 만하다) `host_audit_remediation_plans`가 모든 호스트의 계획을 한 번에 만든다.
+- **같은 입력이면 같은 바이트**: 쓰기 모듈이 zip 항목 시각을 1980-01-01로 고정하고 항목 순서를 고정하며 압축하지 않는다(`ZIP_STORED`: deflate 결과는 zlib 빌드에 따라 달라 러너 이미지가 바뀌면 같은 입력이 다른 바이트가 되기 때문이다). 보관 해시로 동일성을 확인한다. 러너 이미지에는 스프레드시트 라이브러리를 더하지 않는다(표준 라이브러리 `zipfile`). 모듈은 시트 1개, 문자열·정수, 머리글 굵게·열 너비·줄바꿈·틀 고정만 쓴다. 호스트별 JSON(`schema_version` 2)은 바뀌지 않는다.
+
+### 17.1 태스크 매트릭스
+
+`AUD-025` 앞의 `Build the Remediation Plan of every host`(계획을 한 번에 만드는 `set_fact`)와 `Name the hosts whose Remediation Plan could not be built`(생성 실패 호스트를 로그에 남기는 `debug`), `Stop when …`(전 호스트 생성 실패 시 중단)과 맨 끝의 `Fail the run when a Remediation Plan xlsx could not be written`(실패 판정)과 아래 정리 태스크들은 AUD-025의 준비·보고·판정 보조 태스크라 별도 SPEC-ID를 두지 않는다(`AUD-026`·`AUD-615`는 아래 17.2). 동작은 위 실패 처리 항목과 `tests/test_host_audit_remediation_plan_report.py`가 고정한다. 이 보조 태스크의 순서와 역할은 다음과 같다. `Collect the hosts …`는 실패 호스트와 묶을 수 있는지(`_host_audit_xlsx_pack`)를 한 번만 정한다. `Check whether the xlsx directory exists`·`Find`·`Remove the xlsx files that this attempt did not write`는 같은 실행 ID의 이전 시도가 남긴 xlsx(쓰기에 실패한 호스트의 옛 파일, 이번 대상에 없는 호스트의 파일)를 보관 전에 지운다: AUD-512가 `xlsx/`를 재귀로 올리므로 그대로 두면 이번 실행의 증적으로 오른다. 범위는 `*.xlsx`다(`xlsx/`에는 이 역할의 모듈만 쓰고 이름이 모두 `host-audit-<run_id>-<host>.xlsx`라 다른 파일이 생길 길이 없다. zip은 zip 단계가, 숨김 임시 파일은 AUD-512가 따로 다룬다). 찾기·지우기 실패는 보관·메일을 막지 않고 요약으로 모여 맨 끝에서 실행을 실패로 끝낸다(AUD-025의 원칙: 보조 산출물 때문에 보관·메일이 막히지 않는다. 지우지 못한 옛 파일이 올라가는 위험은 실행 실패와 남긴 실행 디렉터리, 오류 메시지로 드러난다). `Summarize the Remediation Plan xlsx problem of this run`은 쓰기·옛 파일 정리 실패를 `_host_audit_xlsx_problem`(failed·targets: 실패한 호스트 이름과 `이전 시도 xlsx 삭제`·`xlsx zip`)으로 모으고, 묶기 실패는 `Remember that the xlsx zip …`가 같은 사실에 더한다. 맨 끝 판정·메시지·정리 `cleanup.yml`은 이 값 하나만 읽는다. 옛 파일 정리를 쓰기·묶기 모듈의 옵션으로 옮기지 않은 이유: 모듈은 한 파일을 쓰는 책임만 지고(AUD-025·026은 호스트마다·실행마다 따로 돈다), 정리 대상은 이번 시도의 호스트 집합이라 역할 변수에서만 알며, 실패를 요약 사실로 모으는 일도 태스크 층의 몫이라 그대로 두었다. SPEC-ID 검증기(`scripts/validate-ansible-specs.py`)가 강제하는 것은 docs 표와 태스크의 ID·이름 일치뿐이고 molecule 검증(`[VERIFY-…]`)은 `INTEGRATED`로 표시만 할 뿐 요구하지 않는다. 스펙 #488이 보고서 단계를 molecule 대상 밖으로 정했으므로 AUD-025·026·615·629·633에 `[VERIFY-…]`를 더하지 않는다(검증은 pytest, ADR-0013).
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-025` | `Write the Remediation Plan xlsx of every host` | `host_audit_xlsx_write` (role `library/` 커스텀 모듈) | 러너 | 같은 입력이면 같은 바이트, 이미 같은 파일이면 `changed` 없음. 파일 `0600`, `xlsx/`는 만들 때 `0700`. 보고서 모델 뒤, 보관(AUD-512~514) 앞. 보관·메일·정리를 묶은 block 안의 첫 태스크다. 실패는 모아 맨 끝 판정에서 실행을 실패로 끝낸다(위 '쓰기 실패와 실행 흐름'). 계획은 `host_audit_remediation_plan_map`(각 계획의 `host`를 키로 한 dict, 안에서 `host_audit_remediation_plans`를 부른다)으로 set_fact에 한 번 만들고(`no_log`가 아니다: 필터 예외의 원인이 가려지지 않게 하고, 성공 때의 fact는 `-v`에서만 찍히며 `report.html`과 같은 내용) 반복문은 호스트 이름만 돈다(반복문 item은 실패 결과에 그대로 찍히므로) |
+| `AUD-026` | `Pack every Remediation Plan xlsx into one zip` | `host_audit_zip_write` (role `library/` 커스텀 모듈) | 러너 | `xlsx/`의 숨김 아닌 `*.xlsx`를 이름순으로 `host-audit-<run_id>-xlsx.zip`(같은 디렉터리)에 압축 없이(`ZIP_STORED`) 고정 시각으로 묶는다: 같은 xlsx면 같은 바이트, 이미 같은 파일(모드 `0600`)이면 `changed` 없음. AUD-025와 보관(AUD-512~514) 사이, 메일 요약(AUD-612) 앞. xlsx 쓰기 실패가 있거나 호스트가 없으면 건너뛰고, 묶기 실패는 `ignore_errors`로 받아 맨 끝 판정에 모은다(17.2) |
+
+검증: pytest `tests/test_host_audit_remediation_plan.py`(행 범위, 한 줄 파일, 계열별 steps와 summary 대체, 담당자, 비고 세 문구와 Baseline 앞머리 규칙, 빈칸 열, 정렬, 셀 출처), `tests/test_host_audit_xlsx_write.py`(openpyxl로 다시 열어 값·머리글 서식·너비·줄바꿈·틀 고정, 같은 바이트), `tests/test_host_audit_remediation_plan_report.py`(`report.yml`의 AUD-025와 보관 목록, Content-Type). 보고서 단계는 molecule 대상이 아니라 `[VERIFY-…]`는 없고(`INTEGRATED`, AUD-710과 같음) 위 pytest가 검증한다. 모듈 인자 템플릿에서 호스트 증적의 `{{ }}`가 평가되지 않는지도 `tests/test_host_audit_remediation_plan_report.py`가 본다.
+
+### 17.2 xlsx zip: 첨부·보관·재발송 (Ticket-7, #495)
+
+호스트별 xlsx는 24대 규모에서 파일이 많으므로 전부 zip 하나로 묶어 메일에 붙인다. 별도 xlsx를 메일에 따로 붙이지 않는다.
+
+- **묶기(`AUD-026`)**: `host_audit_zip_write`(표준 라이브러리 `zipfile`, 러너 이미지 변경 없음)가 `xlsx/`의 숨김 아닌 `*.xlsx`를 이름순으로 압축 없이 고정 시각(1980-01-01)으로 묶어 `xlsx/host-audit-<run_id>-xlsx.zip`(파일명은 `host_audit_remediation_zip_name`, xlsx와 같은 ASCII 규칙)에 쓴다. 같은 xlsx면 같은 바이트이므로 보관 해시로 동일성을 확인한다. xlsx 쓰기에 실패한 호스트가 하나라도 있으면 zip을 만들지 않는다(일부만 든 zip이 해시까지 붙어 완성본처럼 메일로 가고 3년 보관되는 것을 막는다). 그 실행의 메일은 보고서만 싣고(요약에 `xlsx_zip`이 없다) 실패는 맨 끝 판정이 호스트 이름과 함께 실행을 실패로 끝낸다. 호스트가 하나도 없으면 묶을 것이 없어 건너뛴다. 묶기 자체의 실패(디스크 등)는 `ignore_errors`로 받아 `_host_audit_xlsx_problem`에 zip을 더하고(`Remember that the xlsx zip could not be written`; 지우기는 모듈 결과의 `failed`를 읽는다) 맨 끝 판정과 정리(디렉터리를 남김)가 xlsx 쓰기 실패와 함께 처리한다. 묶기 전에 같은 실행 ID의 이전 시도가 남긴 zip을 지운다(`Remove a leftover xlsx zip of an earlier attempt`: 이번에 묶지 못했을 때 옛 zip이 해시·첨부·보관에 오르지 않게). 요약·본문의 zip 보관 경로는 보고서와 같이 업로드 전의 의도 값이다(업로드가 실패하면 AUD-516이 실행을 실패로 끝내고 재발송은 AUD-633에서 멈춘다). 묶는 파일은 이번 실행 계획의 파일명 목록(`names`)이다: 같은 실행 ID로 다시 돌렸거나 대상을 좁힌 수시 실행이 `xlsx/`에 이전 실행의 xlsx를 남겼어도 zip에 들어가지 않고, 목록의 파일이 없으면 모듈이 실패한다. 보조 첨부 때문에 보관·메일이 막히지 않는다는 AUD-025의 원칙과 같다. 이름·경로·보관 위치는 role 변수(`_host_audit_xlsx_zip_name`·`_path`·`_archive`, `vars/main.yml`) 한 곳에서 정한다. zip은 통째로 메모리에 만들고 해시를 두 번(AUD-615, AUD-513) 구한다: 파일이 수 KB~수백 KB(수십 호스트)라 스트리밍보다 단순한 쪽을 택했다.
+- **해시와 요약(`AUD-615`·`AUD-612`)**: zip의 SHA-256을 구해 메일 요약 `mail_summary.json`의 `xlsx_zip`(`file_name`·`sha256`·`size`·`archive`)에 싣는다. 보고서 해시(`report`)와 별개다. 본문과 머리글 `X-Host-Audit-Xlsx-Zip-SHA256`에도 실린다. 요약이 이 키를 갖지 않는 옛 실행은 zip 줄이 없다. 해시나 파일명이 빈 기록은 검증할 수 없으므로 요약에 싣지 않는다.
+- **보관**: zip도 `<YYYY-MM>/<run_id>/xlsx/`로 올라가며(`AUD-512`~`514`, Content-Type `application/zip`) 파일별 SHA-256이 남는다. xlsx 자체도 그대로 보관된다.
+- **첨부(`AUD-605`·`AUD-606`)**: 보고서에 이어 zip이 두 번째 첨부다. 메일 요약(AUD-612) 단계를 xlsx·zip 쓰기 뒤로 옮겨(구조 변경) 요약이 zip 해시를 알고, 정리(cleanup)는 메일 판정 뒤에 돌므로 보관을 끈 실행에서도 xlsx는 지워지기 전에 메일에 실린다.
+- **재발송(`AUD-629`·`AUD-633`)**: §13.4. 해시가 다르거나 zip을 받지 못하거나 요약의 zip 기록 형식·이름이 맞지 않으면 보고서도 보내지 않는다. 요약 자체가 없으면(404) 기록된 해시를 몰라 검증할 수 없으므로 zip은 보내지 않고 보고서만 보내며 그 사실을 로그에 남긴다. 요약의 zip 기록을 믿는 기준은 `host_audit_mail_resend_summary`와 같다(`schema_version`이 있는 요약만). 반대로 요약이 zip을 기록했는데 보관된 zip이 없거나 해시가 다르면 보고서도 보내지 않는다: 스펙이 정한 대로 해시가 다르면 보내지 않는 것이 무결성 증적을 우선하는 결정이고(처음 보낸 것과 다른 파일이 나가면 안 된다), 운영자는 원인(보관 누락·변조)을 먼저 풀어야 한다. 메일 본문과 첨부가 어긋나지 않도록 요약에 zip이 있는데 첨부 경로가 없으면 메일은 보내지 않고 이유를 낸다(`AUD-603`의 문제 목록).
+- **운영 확인(미실시)**: Gmail이 zip 안의 xlsx를 막지 않는지는 첫 실제 실행의 메일 수신으로 확인한다(#495 인수 조건, 운영자 몫).
+- **보관 중복**: zip은 보관된 xlsx와 같은 내용을 한 번 더 담지만(압축 안 함), 재발송이 같은 바이트를 해시로 검증하며 보내려면 zip 자체를 보관해야 한다. 규모(호스트당 수 KB~수백 KB)로 보아 3년 보관 비용은 실행당 수 MB 이하라 감수한다. 재발송의 보고서 첨부 이름도 요약 값이 아니라 실행 ID에서 정한다.
+- **압축 안 함(`ZIP_STORED`)을 유지하는 이유와 크기 실측**: 같은 입력이면 같은 바이트(사용자 이야기 35)와 재발송의 해시 대조가 요구이고, deflate 결과는 같은 레벨이어도 zlib 구현·빌드(zlib, zlib-ng 등)에 따라 달라질 수 있다. 레벨과 `ZipInfo`를 고정해도 러너 이미지가 바뀌면 같은 입력이 다른 바이트가 될 수 있고, 테스트는 한 빌드에서만 돌아 그 보장을 증명하지 못한다. 그래서 압축하지 않는다(#494 결정 유지). 크기 실측: 양호 외 67항목이 전부 찬 최악의 호스트 1대가 xlsx 약 88 KB(압축하면 약 16 KB)다. 호스트 25대면 약 2.2 MB, 100대면 약 9 MB이고 base64로 부풀어도 relay 한도(25 MB)는 약 200대부터 닿는다. 한도에 닿으면 메일 실패(AUD-610)로 드러나므로 그때 보고서만 보내기나 압축 방식(바이트 고정이 가능한 다른 방법)을 다시 정한다.
+- **메일 크기**: zip은 호스트당 수 KB~수백 KB의 xlsx를 묶은 것이라 수십 호스트에서 수 MB 이하이고, 보고서 HTML과 base64로 부풀어도 Workspace relay 한도(25 MB)보다 한참 작다. 한도에 닿을 규모가 되면 메일 실패(AUD-610)로 드러나고 원본·zip은 버킷에 그대로이므로 크기 상한과 보고서만 보내기 되돌림은 그때 더한다.
+- **check 모드**: xlsx 쓰기가 파일을 만들지 않으므로 묶기(AUD-026)는 건너뛴다.
+- **재발송 정리**: 받기·검증·발송을 block으로 묶고 `always`에서 내려받은 디렉터리를 지운다(AUD-628). 검증에서 멈춘 재발송도 러너에 파일을 남기지 않는다.
+- **번호**: 스펙이 정한 재발송 대조 번호 `AUD-630`은 정리 판정(§14)이 먼저 쓰고 있어 `AUD-633`으로 둔다(3-Way 검증은 중복 ID를 허용하지 않는다).

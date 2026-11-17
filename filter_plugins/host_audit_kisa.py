@@ -17,7 +17,13 @@ Entry points:
                            ``host_audit_report_model``, the single report builder
 """
 
+import functools
+import os
+import re
+from types import MappingProxyType
 from datetime import datetime, timezone
+
+import yaml
 
 try:
     from zoneinfo import ZoneInfo
@@ -49,167 +55,206 @@ CATEGORY_PATCH = '패치 관리'
 CATEGORY_LOG = '로그 관리'
 CATEGORIES = [CATEGORY_ACCOUNT, CATEGORY_FILE, CATEGORY_SERVICE, CATEGORY_PATCH, CATEGORY_LOG]
 
-# KISA-2026 Unix items implemented so far. title/severity/criteria follow the
-# 2026 guide's item descriptions as quoted by 9u4a/kisa-infra-audit (MIT); cis
-# is the CIS Red Hat Enterprise Linux 9 Benchmark v2.0.0 rule number (reference only).
-ITEMS = {
-    'U-01': {'title': 'root 계정 원격 접속 제한', 'severity': '상', 'category': CATEGORY_ACCOUNT,
-             'criteria': '원격터미널 서비스를 사용하지 않거나, 사용 시 root 직접 접속을 차단한 경우 양호',
-             'cis': '5.1.20'},
-    'U-02': {'title': '비밀번호 관리정책 설정', 'severity': '상', 'category': CATEGORY_ACCOUNT,
-             'criteria': '비밀번호 관리 정책(복잡성·최소 길이·최대/최소 사용기간)이 설정된 경우 양호',
-             'cis': '5.3.3.2.2, 5.3.3.2.3, 5.4.1.1, 5.4.1.2'},
-    'U-03': {'title': '계정 잠금 임계값 설정', 'severity': '상', 'category': CATEGORY_ACCOUNT,
-             'criteria': '계정 잠금 임계값이 10회 이하로 설정된 경우 양호',
-             'cis': '5.3.3.1.1'},
-    'U-04': {'title': '비밀번호 파일 보호', 'severity': '상', 'category': CATEGORY_ACCOUNT,
-             'criteria': '쉐도우 비밀번호를 사용하거나 비밀번호를 암호화하여 저장하는 경우 양호',
-             'cis': '7.2.1'},
-    'U-05': {'title': "root 이외의 UID가 '0' 금지", 'severity': '상', 'category': CATEGORY_ACCOUNT,
-             'criteria': 'root 계정과 동일한 UID를 갖는 계정이 존재하지 않는 경우 양호',
-             'cis': '5.4.2.1'},
-    'U-06': {'title': '사용자 계정 su 기능 제한', 'severity': '상', 'category': CATEGORY_ACCOUNT,
-             'criteria': 'su 명령어를 특정 그룹에 속한 사용자만 사용하도록 제한된 경우 양호',
-             'cis': '5.2.7'},
-    'U-07': {'title': '불필요한 계정 제거', 'severity': '하', 'category': CATEGORY_ACCOUNT,
-             'criteria': '불필요한 계정이 존재하지 않는 경우 양호 (로그인 가능 계정 목록으로 수동 판정)',
-             'cis': ''},
-    'U-08': {'title': '관리자 그룹에 최소한의 계정 포함', 'severity': '중', 'category': CATEGORY_ACCOUNT,
-             'criteria': '관리자 그룹(root, GID 0)에 불필요한 계정이 없는 경우 양호 (구성원 목록으로 수동 판정)',
-             'cis': '5.4.2.2, 5.4.2.3'},
-    'U-09': {'title': '계정이 존재하지 않는 GID 금지', 'severity': '하', 'category': CATEGORY_ACCOUNT,
-             'criteria': '계정의 기본 GID가 모두 /etc/group에 존재하는 경우 양호',
-             'cis': '7.2.3'},
-    'U-10': {'title': '동일한 UID 금지', 'severity': '중', 'category': CATEGORY_ACCOUNT,
-             'criteria': '동일한 UID로 설정된 사용자 계정이 존재하지 않는 경우 양호',
-             'cis': '7.2.4'},
-    'U-11': {'title': '사용자 shell 점검', 'severity': '하', 'category': CATEGORY_ACCOUNT,
-             'criteria': '로그인이 불필요한 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호',
-             'cis': '5.4.2.7'},
-    'U-12': {'title': '세션 종료 시간 설정', 'severity': '하', 'category': CATEGORY_ACCOUNT,
-             'criteria': 'Session Timeout이 600초(10분) 이하로 설정된 경우 양호',
-             'cis': '5.4.3.2'},
-    'U-13': {'title': '안전한 비밀번호 암호화 알고리즘 사용', 'severity': '중', 'category': CATEGORY_ACCOUNT,
-             'criteria': 'SHA-2 이상(SHA-256, SHA-512, yescrypt)의 안전한 알고리즘을 사용하는 경우 양호',
-             'cis': '5.3.3.4.3, 5.4.1.4'},
-}
+# KISA-2026 Unix items U-01~U-67. The item list lives only in host_audit_kisa_items.yml next to this
+# module (base fields ITEM_FIELDS plus the remediation fields REMEDIATION_FIELDS) and is never edited here.
+#
+# The catalog is read at import time on purpose (Spec #488 / Ticket-1, #489: "the filter only reads the YAML
+# when imported"). A broken or missing catalog must fail loudly at that point with the cause named in the
+# RuntimeError, instead of surfacing later as a missing item inside a report. _load_items caches per path, so
+# each process parses the file once however often it is called.
+CODE_PATTERN = re.compile(r'^U-\d\d$')
+ITEM_FIELDS = ('title', 'severity', 'category', 'criteria', 'cis')
+# Text fields added by Spec #488 / Ticket-2 (#490), plus the nested remediation, remediation_impact,
+# remediation_effort mappings and the guide_page number validated in _validate_remediation.
+TEXT_FIELDS = ('check', 'purpose', 'threat')
+REMEDIATION_FIELDS = TEXT_FIELDS + ('guide_page', 'remediation', 'remediation_impact', 'remediation_effort')
+STEP_FAMILIES = ('rhel', 'debian')
+LEVELS = (1, 2, 3)
+CATALOG_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'host_audit_kisa_items.yml')
 
 
-def _item(title, severity, category, criteria, cis=''):
-    return {'title': title, 'severity': severity, 'category': category, 'criteria': criteria, 'cis': cis}
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """SafeLoader that refuses a mapping key written twice (safe_load would silently keep the last one)."""
+
+    def construct_mapping(self, node, deep=False):
+        # Check the keys written in this mapping before merge flattening: an explicit key may legitimately
+        # override a merged one. (construct_object memoizes, so the parent does not rebuild the key nodes.)
+        seen = set()
+        for key_node, _ in node.value:
+            if key_node.tag == 'tag:yaml.org,2002:merge':
+                continue
+            key = self.construct_object(key_node, deep=True)
+            if key in seen:
+                raise yaml.YAMLError('duplicate key %r (line %d)' % (key, key_node.start_mark.line + 1))
+            seen.add(key)
+        self.flatten_mapping(node)
+        return super().construct_mapping(node, deep)
 
 
-# #122: 파일 및 디렉토리 관리 U-14~U-33, 서비스 관리 U-34~U-63, 패치 관리 U-64, 로그 관리 U-65~U-67.
-# 판정 기준 문장은 가이드의 양호 기준을 옮기고, 자동화 범위(괄호)를 덧붙였다. cis는 참조 열이다.
-ITEMS.update({
-    'U-14': _item('root 홈, 패스 디렉터리 권한 및 패스 설정', '상', CATEGORY_FILE,
-                  'PATH 환경변수에 "."이 맨 앞이나 중간에 포함되지 않은 경우 양호 (전역·root 프로필)'),
-    'U-15': _item('파일 및 디렉터리 소유자 설정', '상', CATEGORY_FILE,
-                  '소유자가 존재하지 않는 파일 및 디렉터리가 없는 경우 양호 (로컬 디스크 파일시스템)', '7.1.12'),
-    'U-16': _item('/etc/passwd 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
-                  '/etc/passwd 소유자 root, 권한 644 이하인 경우 양호', '7.1.1'),
-    'U-17': _item('시스템 시작 스크립트 권한 설정', '상', CATEGORY_FILE,
-                  '시작 스크립트 소유자가 root이고 일반 사용자 쓰기 권한이 없는 경우 양호 (init.d, /etc/systemd/system)'),
-    'U-18': _item('/etc/shadow 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
-                  '/etc/shadow 소유자 root, 권한 400 이하인 경우 양호', '7.1.5'),
-    'U-19': _item('/etc/hosts 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
-                  '/etc/hosts 소유자 root, 권한 644 이하인 경우 양호'),
-    'U-20': _item('/etc/(x)inetd.conf 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
-                  '/etc/(x)inetd.conf 소유자 root, 권한 600 이하인 경우 양호 (없으면 해당없음)'),
-    'U-21': _item('/etc/(r)syslog.conf 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
-                  '/etc/(r)syslog.conf 소유자 root(bin, sys), 권한 640 이하인 경우 양호'),
-    'U-22': _item('/etc/services 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
-                  '/etc/services 소유자 root(bin, sys), 권한 644 이하인 경우 양호'),
-    'U-23': _item('SUID, SGID, Sticky bit 설정 파일 점검', '상', CATEGORY_FILE,
-                  '주요 실행 파일에 불필요한 SUID/SGID가 없는 경우 양호 (목록으로 수동 판정, file capability 목록은 증적에 덧붙임)', '7.1.13'),
-    'U-24': _item('사용자, 시스템 환경변수 파일 소유자 및 권한 설정', '상', CATEGORY_FILE,
-                  '환경변수 파일 소유자가 root 또는 해당 계정이고 root·소유자 외 쓰기 권한이 없는 경우 양호', '7.2.10'),
-    'U-25': _item('world writable 파일 점검', '상', CATEGORY_FILE,
-                  'world writable 파일이 없거나 설정 이유를 인지하고 있는 경우 양호 (있으면 목록으로 수동 판정)', '7.1.11'),
-    'U-26': _item('/dev에 존재하지 않는 device 파일 점검', '상', CATEGORY_FILE,
-                  '/dev에 major·minor 번호가 없는 device 파일이 없는 경우 양호'),
-    'U-27': _item('$HOME/.rhosts, hosts.equiv 사용 금지', '상', CATEGORY_FILE,
-                  'r-command 미사용, 또는 사용 시 소유자 root/해당 계정·권한 600 이하·"+" 설정 없음인 경우 양호'),
-    'U-28': _item('접속 IP 및 포트 제한', '상', CATEGORY_FILE,
-                  '접속을 허용할 특정 호스트에 대한 IP 주소 및 포트 제한을 설정한 경우 양호 (Docker 구간은 수동)', '4.1.2'),
-    'U-29': _item('hosts.lpd 파일 소유자 및 권한 설정', '하', CATEGORY_FILE,
-                  'hosts.lpd 파일이 없거나, 소유자 root·권한 600 이하인 경우 양호'),
-    'U-30': _item('UMASK 설정 관리', '중', CATEGORY_FILE,
-                  'UMASK 값이 022 이상으로 설정된 경우 양호', '5.4.3.3'),
-    'U-31': _item('홈디렉토리 소유자 및 권한 설정', '중', CATEGORY_FILE,
-                  '홈 디렉터리 소유자가 해당 계정이고 타 사용자 쓰기 권한이 없는 경우 양호', '7.2.9'),
-    'U-32': _item('홈 디렉토리로 지정한 디렉토리의 존재 관리', '중', CATEGORY_FILE,
-                  '홈 디렉터리가 존재하지 않는 계정이 발견되지 않는 경우 양호', '7.2.9'),
-    'U-33': _item('숨겨진 파일 및 디렉토리 검색 및 제거', '하', CATEGORY_FILE,
-                  '의심스러운 숨겨진 파일 및 디렉터리를 제거한 경우 양호 (목록으로 수동 판정)'),
-    'U-34': _item('Finger 서비스 비활성화', '상', CATEGORY_SERVICE, 'Finger 서비스가 비활성화된 경우 양호'),
-    'U-35': _item('공유 서비스에 대한 익명 접근 제한 설정', '상', CATEGORY_SERVICE,
-                  '공유 서비스(FTP·NFS·Samba)를 쓰지 않거나 익명 접근을 제한한 경우 양호'),
-    'U-36': _item('r 계열 서비스 비활성화', '상', CATEGORY_SERVICE,
-                  'r 계열(rlogin, rsh, rexec) 서비스가 비활성화된 경우 양호'),
-    'U-37': _item('crontab 설정파일 권한 설정 미흡', '상', CATEGORY_SERVICE,
-                  'crontab·at 명령 권한 750 이하, cron·at 관련 파일 소유자 root·권한 640 이하인 경우 양호',
-                  '2.4.1.2~2.4.1.8, 2.4.2.1'),
-    'U-38': _item('DoS 공격에 취약한 서비스 비활성화', '상', CATEGORY_SERVICE,
-                  'echo, discard, daytime, chargen 서비스가 비활성화된 경우 양호'),
-    'U-39': _item('불필요한 NFS 서비스 비활성화', '상', CATEGORY_SERVICE,
-                  '불필요한 NFS 서비스 관련 데몬이 비활성화된 경우 양호'),
-    'U-40': _item('NFS 접근 통제', '상', CATEGORY_SERVICE,
-                  'NFS 공유에 접근 통제가 설정되어 있고 설정 파일 권한이 644 이하인 경우 양호 (NFS 미사용 시 해당없음)'),
-    'U-41': _item('불필요한 automountd 제거', '상', CATEGORY_SERVICE,
-                  'automountd(autofs) 서비스가 비활성화된 경우 양호'),
-    'U-42': _item('불필요한 RPC 서비스 비활성화', '상', CATEGORY_SERVICE,
-                  '가이드가 열거한 불필요한 RPC 서비스가 비활성화된 경우 양호'),
-    'U-43': _item('NIS, NIS+ 점검', '상', CATEGORY_SERVICE,
-                  'NIS 서비스가 비활성화되어 있거나 불가피 시 NIS+를 사용하는 경우 양호'),
-    'U-44': _item('tftp, talk 서비스 비활성화', '상', CATEGORY_SERVICE,
-                  'tftp, talk, ntalk 서비스가 비활성화된 경우 양호'),
-    'U-45': _item('메일 서비스 버전 점검', '상', CATEGORY_SERVICE,
-                  '메일 서비스 버전이 최신인 경우 양호 (버전으로 수동 판정, 미사용 시 해당없음)'),
-    'U-46': _item('일반 사용자의 메일 서비스 실행 방지', '상', CATEGORY_SERVICE,
-                  '일반 사용자의 메일 큐 조작(q 옵션) 실행을 막은 경우 양호 (미사용 시 해당없음)'),
-    'U-47': _item('스팸 메일 릴레이 제한', '상', CATEGORY_SERVICE,
-                  '메일 릴레이 제한이 설정된 경우 양호 (미사용 시 해당없음)'),
-    'U-48': _item('expn, vrfy 명령어 제한', '중', CATEGORY_SERVICE,
-                  'noexpn, novrfy(또는 동등) 설정이 적용된 경우 양호 (미사용 시 해당없음)'),
-    'U-49': _item('DNS 보안 버전 패치', '상', CATEGORY_SERVICE,
-                  'DNS 서비스를 주기적으로 패치 관리하는 경우 양호 (버전으로 수동 판정, 미사용 시 해당없음)'),
-    'U-50': _item('DNS ZoneTransfer 설정', '상', CATEGORY_SERVICE,
-                  'Zone Transfer를 허가된 사용자에게만 허용한 경우 양호 (미사용 시 해당없음)'),
-    'U-51': _item('DNS 서비스의 취약한 동적 업데이트 설정 금지', '중', CATEGORY_SERVICE,
-                  '동적 업데이트를 쓰지 않거나 접근 통제를 적용한 경우 양호 (미사용 시 해당없음)'),
-    'U-52': _item('Telnet 서비스 비활성화', '중', CATEGORY_SERVICE, 'Telnet 서비스를 사용하지 않는 경우 양호'),
-    'U-53': _item('FTP 서비스 정보 노출 제한', '하', CATEGORY_SERVICE,
-                  'FTP 접속 배너에 노출되는 정보가 없는 경우 양호 (미사용 시 해당없음)'),
-    'U-54': _item('암호화되지 않는 FTP 서비스 비활성화', '중', CATEGORY_SERVICE,
-                  '암호화되지 않은 FTP 서비스가 비활성화된 경우 양호'),
-    'U-55': _item('FTP 계정 shell 제한', '중', CATEGORY_SERVICE,
-                  'ftp 계정에 /bin/false(/sbin/nologin) 쉘이 부여된 경우 양호 (계정 없으면 해당없음)'),
-    'U-56': _item('FTP 서비스 접근 제어 설정', '하', CATEGORY_SERVICE,
-                  '특정 IP·호스트만 FTP에 접속하도록 접근 제어를 설정한 경우 양호 (미사용 시 해당없음)'),
-    'U-57': _item('Ftpusers 파일 설정', '중', CATEGORY_SERVICE,
-                  'root 계정의 FTP 접속을 차단한 경우 양호 (미사용 시 해당없음)'),
-    'U-58': _item('불필요한 SNMP 서비스 구동 점검', '중', CATEGORY_SERVICE, 'SNMP 서비스를 사용하지 않는 경우 양호'),
-    'U-59': _item('안전한 SNMP 버전 사용', '상', CATEGORY_SERVICE,
-                  'SNMP v3 이상을 사용하는 경우 양호 (미사용 시 해당없음)'),
-    'U-60': _item('SNMP Community String 복잡성 설정', '중', CATEGORY_SERVICE,
-                  'public·private가 아니고 영문+숫자 10자 이상 또는 영문+숫자+특수문자 8자 이상인 경우 양호'),
-    'U-61': _item('SNMP Access Control 설정', '상', CATEGORY_SERVICE,
-                  'SNMP 접근 허용 대상을 제한한 경우 양호 (미사용 시 해당없음)'),
-    'U-62': _item('로그인 시 경고 메시지 설정', '하', CATEGORY_SERVICE,
-                  '서버 및 사용 중인 원격 서비스에 로그온 경고 메시지가 설정된 경우 양호', '1.7.1~1.7.3, 5.1.5'),
-    'U-63': _item('sudo 명령어 접근 관리', '중', CATEGORY_SERVICE,
-                  '/etc/sudoers 소유자 root, 권한 640 이하인 경우 양호 (없으면 해당없음)'),
-    'U-64': _item('주기적 보안 패치 및 벤더 권고사항 적용', '상', CATEGORY_PATCH,
-                  '패치 적용 정책을 수립하여 주기적으로 관리하는 경우 양호 (수동, 미적용 패치는 Package Vulnerability)'),
-    'U-65': _item('NTP 및 시각 동기화 설정', '중', CATEGORY_LOG,
-                  'NTP 및 시각 동기화 설정이 기준에 따라 적용된 경우 양호', '2.3.1'),
-    'U-66': _item('정책에 따른 시스템 로깅 설정', '중', CATEGORY_LOG,
-                  '로그 기록 정책에 따라 로그를 남기는 경우 양호 (syslog 데몬 동작·인증 로그 규칙)'),
-    'U-67': _item('로그 디렉터리 소유자 및 권한 설정', '중', CATEGORY_LOG,
-                  '로그 디렉터리 내 로그 파일의 소유자가 root이고 권한이 644 이하인 경우 양호', '6.2.4.1'),
-})
+def _deep_freeze(value):
+    """Read-only view of nested mappings; lists become tuples, scalars pass through."""
+    if isinstance(value, dict):
+        return MappingProxyType({k: _deep_freeze(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return tuple(_deep_freeze(v) for v in value)
+    return value
 
+
+SUMMARY_MAX = 300  # the body table prints remediation.summary on one line; longer notes belong in steps/reason
+
+
+def _invalid_text(value, block=False):
+    """True when ``value`` is not acceptable catalog text: not a string, blank, multi-line, or with surrounding
+    whitespace (it would show as a stray gap or break in report cells).
+
+    ``block`` is for YAML ``|`` blocks (steps), which always end with a newline: only leading space is refused.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return True
+    if not block and '\n' in value:  # report and xlsx cells are single-line text (only steps blocks span lines)
+        return True
+    return value != value.lstrip() if block else value != value.strip()
+
+
+def _validate_remediation(code, meta, path):
+    """Check the remediation fields of one item; bool is rejected on purpose (True == 1 in Python)."""
+    def fail(field, why):
+        raise RuntimeError('KISA item %s field %s %s in %s' % (code, field, why, path))
+
+    for field in REMEDIATION_FIELDS:
+        if field not in meta:
+            fail(field, 'is missing')
+    for field in TEXT_FIELDS:
+        if _invalid_text(meta[field]):
+            fail(field, 'must be non-blank text without surrounding whitespace')
+    page = meta['guide_page']
+    if type(page) is not int or page < 1:
+        fail('guide_page', 'must be a positive integer')
+    rem = meta['remediation']
+    if not isinstance(rem, dict) or set(rem) - {'summary', 'steps'} or _invalid_text(rem.get('summary')):
+        fail('remediation', 'must be a mapping of summary (trimmed text) and optional steps')
+    if len(rem['summary']) > SUMMARY_MAX:  # (a newline is already refused by _invalid_text above)
+        fail('remediation.summary', 'must be one line of at most %d characters' % SUMMARY_MAX)
+    steps = rem.get('steps')
+    if steps is not None and (not isinstance(steps, dict) or not steps or set(steps) - set(STEP_FAMILIES)
+                              or any(_invalid_text(v, block=True) for v in steps.values())):
+        fail('remediation.steps', 'must map rhel/debian to non-blank text')
+    for field in ('remediation_impact', 'remediation_effort'):
+        part = meta[field]
+        if (not isinstance(part, dict) or set(part) != {'level', 'reason'} or type(part['level']) is not int
+                or part['level'] not in LEVELS or _invalid_text(part['reason'])):
+            fail(field, 'must be {level: 1..3, reason: text}')
+
+
+def _validate(items, path):
+    if not isinstance(items, dict) or not items:
+        raise RuntimeError('KISA item catalog %s is empty or not a mapping' % path)
+    for code, meta in items.items():
+        if not isinstance(code, str) or not CODE_PATTERN.match(code):
+            raise RuntimeError('KISA item code %r is not U-NN in %s' % (code, path))
+        if not isinstance(meta, dict):
+            raise RuntimeError('KISA item %s is not a mapping in %s' % (code, path))
+        for field in ITEM_FIELDS:
+            if field not in meta:
+                raise RuntimeError('KISA item %s lacks field %s in %s' % (code, field, path))
+            if not isinstance(meta[field], str):
+                raise RuntimeError('KISA item %s field %s must be a string (quote it) in %s' % (code, field, path))
+        for field in ('title', 'criteria'):
+            if _invalid_text(meta[field]):
+                raise RuntimeError('KISA item %s field %s is blank or has surrounding whitespace in %s'
+                                   % (code, field, path))
+        _validate_remediation(code, meta, path)
+        extra = sorted(set(meta) - set(ITEM_FIELDS) - set(REMEDIATION_FIELDS))
+        if extra:
+            raise RuntimeError('KISA item %s has unknown field %s in %s' % (code, ', '.join(map(str, extra)), path))
+        if meta['severity'] not in SEVERITY_ORDER:
+            raise RuntimeError('KISA item %s field severity %r is not 상/중/하 in %s' % (code, meta['severity'], path))
+        if meta['category'] not in CATEGORIES:
+            raise RuntimeError('KISA item %s field category %r is unknown in %s' % (code, meta['category'], path))
+
+
+@functools.lru_cache(maxsize=None)
+def _parse_catalog(path):
+    try:
+        with open(path, encoding='utf-8') as fh:
+            items = yaml.load(fh, Loader=_UniqueKeyLoader)  # noqa: S506 - SafeLoader subclass
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+        raise RuntimeError('KISA item catalog %s cannot be loaded: %s' % (path, exc)) from exc
+    _validate(items, path)
+    return _deep_freeze(items)
+
+
+def _load_items(path=None):
+    """Read-only item catalog of ``path`` (default: the YAML next to this module), parsed once per path."""
+    return _parse_catalog(os.path.realpath(path or CATALOG_PATH))
+
+
+def _require_all_items(items):
+    """The shipped catalog must hold every KISA-2026 Unix item, U-01..U-67 (the check scripts are U-NN.sh)."""
+    missing = sorted(set('U-%02d' % i for i in range(1, 68)) - set(items))
+    if missing:
+        raise RuntimeError('KISA item catalog %s lacks %s' % (CATALOG_PATH, ', '.join(missing)))
+    return items
+
+
+ITEMS = _require_all_items(_load_items())
+
+# Values derived from the guide severity (Spec #488 / #479). They are never stored in the catalog, so they
+# cannot drift from it, and they are the same for every host and every verdict.
+URGENCY_BY_PRIORITY = {1: '단기', 2: '중기', 3: '장기'}
+REMEDIATION_SOURCE = ('조치방법은 KISA 「2026 주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드」를 '
+                      '바탕으로 요약함')
+
+
+def risk_level(severity):
+    """Risk of the finding itself, from the guide severity: 상 3, 중 2, 하 1."""
+    return len(SEVERITY_ORDER) - SEVERITY_ORDER[severity]
+
+
+def priority_of(severity):
+    """Priority 1 (most urgent) to 3, from the guide severity: 상 1, 중 2, 하 3."""
+    return SEVERITY_ORDER[severity] + 1
+
+
+def urgency_of(severity):
+    """Urgency label of the priority: 단기, 중기, 장기 (no deadline is defined)."""
+    return URGENCY_BY_PRIORITY[priority_of(severity)]
+
+
+def remediation_view(code):
+    """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values.
+
+    ``risk`` and ``urgency`` are not shown in the body table; the Remediation Plan xlsx (a later Spec #488 ticket)
+    has columns for them and reads them from this one view, so they are computed and tested here once.
+    """
+    meta = ITEMS.get(code.split(':', 1)[-1])
+    if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
+        return {'remediation_summary': '', 'impact_level': None, 'effort_level': None, 'risk': None, 'priority': None,
+                'urgency': None}
+    return {
+        'remediation_summary': meta['remediation']['summary'],
+        'impact_level': meta['remediation_impact']['level'],
+        'effort_level': meta['remediation_effort']['level'],
+        'risk': risk_level(meta['severity']),
+        'priority': priority_of(meta['severity']),
+        'urgency': urgency_of(meta['severity']),
+    }
+
+
+def order_findings(findings):
+    """Order findings by priority, then Remediation Impact, then Remediation Effort (both ascending: easy and
+    low-risk fixes first). Ties keep verdict order (취약 first) and then item code, so the order is stable.
+
+    Each finding carries its own ``priority``, ``impact_level`` and ``effort_level`` (from ``remediation_view``,
+    merged when the section builds it); blank values (a code the catalog lacks) sort last."""
+    def key(finding):
+        return (finding['priority'] or 9, finding['impact_level'] or 9, finding['effort_level'] or 9,
+                VERDICTS.index(finding['verdict']), finding['code'])
+
+    return sorted(findings, key=key)
+
+
+BLANK = '-'  # what the register table (and the Remediation Plan remark) shows for an absent value
 REGISTER_REQUIRED = ('code', 'reason', 'risk', 'mitigation')
 REGISTER_PENDING = '승인 대기'
 REGISTER_EXPIRED = '만료'
@@ -354,8 +399,10 @@ def host_audit_kisa_result(probe, register, inventory_hostname, groups, today):
 
 
 def _item_meta(code):
+    """Base columns of an item (what summary rows and the per-host appendix may show)."""
     short = code.split(':', 1)[-1]
-    meta = dict(ITEMS.get(short, {'title': short, 'severity': '', 'category': '', 'criteria': '', 'cis': ''}))
+    known = ITEMS.get(short, {})
+    meta = {field: known.get(field, short if field == 'title' else '') for field in ITEM_FIELDS}
     meta['code'] = code
     return meta
 
@@ -372,15 +419,63 @@ def _register_rows(register, applied, today):
             'reason': entry.get('reason', ''),
             'risk': entry.get('risk', ''),
             'mitigation': entry.get('mitigation', ''),
-            'approver': entry.get('approver') or '-',
-            'approved_on': _date(entry.get('approved_on')) or '-',
-            'expires_on': _date(entry.get('expires_on')) or '-',
+            'approver': entry.get('approver') or BLANK,
+            'approved_on': _date(entry.get('approved_on')) or BLANK,
+            'expires_on': _date(entry.get('expires_on')) or BLANK,
             'state': state,
             'state_class': {REGISTER_ACTIVE: 'ok', REGISTER_EXPIRED: 'crit',
                             REGISTER_PENDING: 'warn', REGISTER_INVALID: 'crit'}[state],
             'applied': applied.get(entry.get('code', ''), 0) if state == REGISTER_ACTIVE else 0,
         })
     return rows
+
+
+def _build_findings(groups):
+    """Findings (one per item and verdict) in the body table order, from ``{(code, verdict): [host rows]}``."""
+    findings = []
+    for (code, verdict), hosts in groups.items():
+        findings.append(dict(_item_meta(code), **remediation_view(code), verdict=verdict,
+                             verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
+    return order_findings(findings)
+
+
+FAMILY_LABELS = (('rhel', 'RHEL 계열'), ('debian', 'Debian 계열'))
+
+
+def _build_remediation_guide(findings):
+    """Item-level blocks of the remediation appendix: the same items in the same order as the body table.
+
+    ``findings`` is already in body table order, one entry per (item, verdict). Blocks are keyed by the full item code and
+    placed where the item first appears, so the block order is the body table's item order even when the verdicts
+    of one item are not adjacent (equal priority and levels sort by verdict before code). Each block lists the
+    hosts per verdict (no evidence) and every family of ``steps`` (not filtered by a host's family). A code the
+    catalog lacks (a stored record can carry one) still gets a block, with the finding's own columns and empty
+    catalog text, so the block set always equals the body table's item set.
+    Catalog entries are validated at load (_validate_remediation), so their keys are indexed directly here, as in
+    remediation_view.
+    """
+    blocks = {}
+    for finding in findings:
+        code = finding['code']  # the full code, as the body table shows it (also keeps editions apart)
+        block = blocks.get(code)
+        if block is None:
+            meta = ITEMS.get(code.split(':', 1)[-1])  # the same lookup as _item_meta/remediation_view (body table)
+            block = {'code': code, 'title': finding['title'], 'severity': finding['severity'],
+                     'purpose': '', 'threat': '', 'criteria': finding['criteria'], 'check': '', 'summary': '',
+                     'steps': [], 'impact': None, 'effort': None, 'guide_page': None, 'verdict_hosts': []}
+            if meta is not None:
+                steps = meta['remediation'].get('steps') or {}
+                block.update(
+                    title=meta['title'], severity=meta['severity'], purpose=meta['purpose'], threat=meta['threat'],
+                    criteria=meta['criteria'], check=meta['check'], summary=meta['remediation']['summary'],
+                    steps=[{'family': label, 'text': steps[key].strip()} for key, label in FAMILY_LABELS
+                           if (steps.get(key) or '').strip()],
+                    impact=dict(meta['remediation_impact']), effort=dict(meta['remediation_effort']),
+                    guide_page=meta['guide_page'])
+            blocks[code] = block
+        block['verdict_hosts'].append({'verdict': finding['verdict'], 'verdict_class': finding['verdict_class'],
+                                       'hosts': [h['host'] for h in finding['hosts']]})
+    return list(blocks.values())
 
 
 def host_audit_kisa_section(model, records, register=None, today=None):
@@ -433,17 +528,15 @@ def host_audit_kisa_section(model, records, register=None, today=None):
                     applied[it['code']] = applied.get(it['code'], 0) + 1
             if verdict not in (GOOD, NOT_APPLICABLE):
                 key = (it['code'], verdict)
-                groups.setdefault(key, []).append({'host': host, 'evidence': it['evidence'], 'note': note})
+                # ``exception`` is the register entry view the report already draws in its register table; the
+                # Remediation Plan remark reads it from here (no second path from the register).
+                groups.setdefault(key, []).append({'host': host, 'evidence': it['evidence'], 'note': note,
+                                                   'exception': dict(exc) if exc else None})
             rows.append(dict(_item_meta(it['code']), verdict=verdict, verdict_class=VERDICT_CLASSES[verdict],
                              evidence=it['evidence'], note=note))
         appendix[host] = rows
 
-    findings = []
-    for (code, verdict), hosts in groups.items():
-        meta = _item_meta(code)
-        findings.append(dict(meta, verdict=verdict, verdict_class=VERDICT_CLASSES[verdict],
-                             hosts=hosts, host_count=len(hosts)))
-    findings.sort(key=lambda f: (VERDICTS.index(f['verdict']), SEVERITY_ORDER.get(f['severity'], 9), f['code']))
+    findings = _build_findings(groups)
 
     summary = [dict(_item_meta(code), counts=[counts[code][v] for v in VERDICTS]) for code in codes]
     implemented = sorted(ITEMS)
@@ -464,6 +557,8 @@ def host_audit_kisa_section(model, records, register=None, today=None):
         'totals': [totals[v] for v in VERDICTS],
         'summary': summary,
         'findings': findings,
+        'remediation_guide': _build_remediation_guide(findings),
+        'remediation_source': REMEDIATION_SOURCE,
         'appendix': appendix,
         'register': _register_rows(register, applied, today),
         'run_date': today,

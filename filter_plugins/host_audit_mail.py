@@ -127,11 +127,13 @@ def _level(count, level_when_any=LEVEL_CRIT):
     return level_when_any if count else LEVEL_OK
 
 
-def host_audit_mail_summary(model, report):
+def host_audit_mail_summary(model, report, xlsx_zip=None):
     """Build the mail summary (saved as ``mail_summary.json``) from the report model.
 
     ``report``: {'sha256', 'file_name' (attachment name), 'archive' (where the
-    original is kept), 'size'}. Only counts and host names go in — no addresses.
+    original is kept), 'size'}. ``xlsx_zip`` (same keys, for the zip of the per-host Remediation Plan xlsx, AUD-615)
+    is the second attachment; without it the summary has no ``xlsx_zip`` (runs kept before the zip existed).
+    Only counts and host names go in — no addresses.
     """
     model = model or {}
     report = report or {}
@@ -145,11 +147,13 @@ def host_audit_mail_summary(model, report):
     ai = model.get('asset_inventory') or {}
     counts = ai.get('counts') or {}
     if counts:
-        lines.append(_line('Asset Inventory', '지원 종료(EOS) OS %d대 · 선언 외 특수권한자 %d · 장기 미사용 계정 %d · 선언 미지정 호스트 %d' % (
+        lines.append(_line('Asset Inventory', '지원 종료(EOS) OS %d대 · 선언 외 특수권한자 %d · 장기 미사용 계정 %d · 선언 미지정 호스트 %d · 선언 조회 실패 호스트 %d · 선언 잘못된 값 호스트 %d' % (
             counts.get('eos', 0), counts.get('not_declared', 0), counts.get('inactive', 0),
-            counts.get('unassigned_hosts', 0)),
+            counts.get('unassigned_hosts', 0), counts.get('lookup_failed_hosts', 0),
+            counts.get('invalid_hosts', 0)),
             LEVEL_CRIT if counts.get('eos') or counts.get('not_declared') else
-            (LEVEL_WARN if counts.get('inactive') or counts.get('unassigned_hosts') else LEVEL_OK)))
+            (LEVEL_WARN if counts.get('inactive') or counts.get('unassigned_hosts')
+             or counts.get('lookup_failed_hosts') or counts.get('invalid_hosts') else LEVEL_OK)))
 
     cv = model.get('config_vulnerability') or {}
     if cv.get('verdicts'):
@@ -213,7 +217,7 @@ def host_audit_mail_summary(model, report):
         run_kind, (cover.get('started_at') or '').split(' ')[0], cv_vuln,
         '-' if pv_ch is None else pv_ch, len(unavailable))
 
-    return {
+    doc = {
         'schema_version': SUMMARY_SCHEMA_VERSION,
         'subject': subject,
         'title': model.get('title', 'Host Audit 점검 보고서'),
@@ -237,16 +241,33 @@ def host_audit_mail_summary(model, report):
             'archive': report.get('archive') or cover.get('archive', ''),
         },
     }
+    if xlsx_zip and xlsx_zip.get('sha256') and xlsx_zip.get('file_name'):  # a record without a hash could never be checked
+        doc['xlsx_zip'] = {
+            'file_name': xlsx_zip.get('file_name', ''),
+            'sha256': (xlsx_zip.get('sha256') or '').lower(),
+            'size': int(xlsx_zip.get('size') or 0),
+            'archive': xlsx_zip.get('archive', ''),
+        }
+    return doc
 
 
-def host_audit_mail_resend_summary(summary, run_id, archive, sha256, size=0):
-    """Summary for a resend: the kept one (marked as resent), or a minimal one if it is missing."""
+def host_audit_mail_resend_summary(summary, run_id, archive, sha256, size=0, xlsx_archive=''):
+    """Summary for a resend: the kept one (marked as resent), or a minimal one if it is missing.
+
+    The kept summary's ``xlsx_zip`` record (file name and the SHA-256 it was sent with) stays; only where it is kept
+    is updated to ``xlsx_archive``. A minimal summary has none: without the kept record nothing says a zip existed.
+    """
     if isinstance(summary, dict) and summary.get('schema_version'):
         out = dict(summary)
         out['subject'] = '[재발송] ' + str(summary.get('subject') or '')
         out['resent'] = True
         out['report'] = dict(summary.get('report') or {})
         out['report']['archive'] = archive
+        # the attachment name is derived from the run id, never trusted from the bucket (it becomes a path in mail.yml)
+        out['report']['file_name'] = host_audit_mail_attachment_name(run_id)
+        out.pop('xlsx_zip', None)  # kept only when it is a usable record
+        if isinstance(summary.get('xlsx_zip'), dict) and summary['xlsx_zip']:  # an empty record is no record (resend.yml agrees)
+            out['xlsx_zip'] = dict(summary['xlsx_zip'], archive=xlsx_archive or summary['xlsx_zip'].get('archive', ''))
         return out
     return {
         'schema_version': SUMMARY_SCHEMA_VERSION,

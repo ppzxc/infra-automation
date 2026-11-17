@@ -3,8 +3,9 @@
 # Host Audit — 보관된 보고서 재발송 (러너 localhost 전용, ADR-0009 §6, #126)
 # ==============================================================================
 # 다시 점검하지 않고, Host Audit 버킷에 보관된 실행(<YYYY-MM>/<run_id>/)의 report.html과
-# mail_summary.json을 받아 그대로 다시 보낸다. 받은 보고서의 SHA-256이 보관된 요약의 값과
-# 다르면 보내지 않는다 — 처음 보낸 첨부와 해시가 같다.
+# mail_summary.json, 그리고 요약이 기록한 xlsx zip(xlsx/)을 받아 그대로 다시 보낸다. 받은 보고서와
+# zip의 SHA-256이 보관된 요약의 값과 다르면 보내지 않는다 — 처음 보낸 첨부와 해시가 같다.
+# 요약에 xlsx zip 기록이 없는 옛 실행은 보고서만 보낸다.
 # 입력: host_audit_resend_run_id (기본 실행 ID가 아니면 host_audit_resend_month도).
 # ------------------------------------------------------------------------------
 - name: "[AUD-620] Fix the resend metadata and the archived run location"
@@ -17,6 +18,7 @@
       output_dir: "{{ host_audit_output_root }}/resend-{{ _now | regex_replace('[-:]', '') }}"
       timezone: "{{ host_audit_timezone }}"
     _host_audit_resend_prefix: "{{ host_audit_resend_run_id | host_audit_mail_resend_prefix(host_audit_resend_month, host_audit_timezone) }}"
+    _host_audit_resend_zip_name: "{{ host_audit_resend_run_id | host_audit_remediation_zip_name }}"
   vars:
     _now: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
 
@@ -43,85 +45,161 @@
          else _host_audit_storage_problem }}
     quiet: true
 
-- name: "[AUD-623] Get the archived report"
-  vars:
-    _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_resend_prefix ~ 'report.html') }}"
-  ansible.builtin.uri:
-    url: "{{ _req.url }}"
-    method: GET
-    headers: "{{ _req.headers }}"
-    dest: "{{ host_audit_run.output_dir }}/report.html"
-    mode: '0600'
-    status_code: [-1, 200, 403, 404, 500, 503]
-    timeout: "{{ host_audit_storage_timeout }}"
-    validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-    ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-  register: _host_audit_resend_report
-  changed_when: false
-  no_log: true
+# 받기·검증·발송을 한 block으로 묶고 러너의 내려받은 파일은 always에서 지운다(AUD-628): 검증에서 멈춰도 resend-* 디렉터리가
+# 남지 않는다(정리 정책과 오래된 실행 정리는 resend-*를 건드리지 않는다).
+- name: Download, verify and mail the archived run
+  block:
+    - name: "[AUD-623] Get the archived report"
+      vars:
+        _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_resend_prefix ~ 'report.html') }}"
+      ansible.builtin.uri:
+        url: "{{ _req.url }}"
+        method: GET
+        headers: "{{ _req.headers }}"
+        dest: "{{ host_audit_run.output_dir }}/report.html"
+        mode: '0600'
+        status_code: [-1, 200, 403, 404, 500, 503]
+        timeout: "{{ host_audit_storage_timeout }}"
+        validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
+        ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
+      register: _host_audit_resend_report
+      changed_when: false
+      no_log: true
 
-- name: "[AUD-624] Get the archived mail summary"
-  vars:
-    _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_resend_prefix ~ 'mail_summary.json') }}"
-  ansible.builtin.uri:
-    url: "{{ _req.url }}"
-    method: GET
-    headers: "{{ _req.headers }}"
-    return_content: true
-    status_code: [-1, 200, 403, 404, 500, 503]
-    timeout: "{{ host_audit_storage_timeout }}"
-    validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-    ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-  register: _host_audit_resend_summary
-  changed_when: false
-  no_log: true
-  when: (_host_audit_resend_report.status | default(-1)) == 200
+    - name: "[AUD-624] Get the archived mail summary"
+      vars:
+        _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_resend_prefix ~ 'mail_summary.json') }}"
+      ansible.builtin.uri:
+        url: "{{ _req.url }}"
+        method: GET
+        headers: "{{ _req.headers }}"
+        return_content: true
+        status_code: [-1, 200, 403, 404, 500, 503]
+        timeout: "{{ host_audit_storage_timeout }}"
+        validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
+        ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
+      register: _host_audit_resend_summary
+      changed_when: false
+      no_log: true
+      when: (_host_audit_resend_report.status | default(-1)) == 200
 
-- name: "[AUD-625] Compute the SHA-256 of the downloaded report"
-  ansible.builtin.stat:
-    path: "{{ host_audit_run.output_dir }}/report.html"
-    checksum_algorithm: sha256
-    get_mime: false
-  register: _host_audit_resend_stat
-  when: (_host_audit_resend_report.status | default(-1)) == 200
+    - name: "[AUD-625] Compute the SHA-256 of the downloaded report"
+      ansible.builtin.stat:
+        path: "{{ host_audit_run.output_dir }}/report.html"
+        checksum_algorithm: sha256
+        get_mime: false
+      register: _host_audit_resend_stat
+      when: (_host_audit_resend_report.status | default(-1)) == 200
 
-- name: "[AUD-626] Assert the archived report exists and matches its recorded SHA-256"
-  vars:
-    _summary: "{{ (_host_audit_resend_summary.content | default('')) | host_audit_json_loads if (_host_audit_resend_summary.status | default(-1)) == 200 else none }}"
-    _recorded: "{{ ((_summary or {}).report | default({})).sha256 | default('') }}"
-  ansible.builtin.assert:
-    that:
-      - (_host_audit_resend_report.status | default(-1)) == 200
-      - (_host_audit_resend_summary.status | default(-1)) in [200, 404]
-      - _recorded | length == 0 or _recorded == _host_audit_resend_stat.stat.checksum
-    fail_msg: >-
-      재발송 중단 — {{ ('보관된 보고서를 받지 못함(' ~ _host_audit_resend_prefix ~ 'report.html, status='
-                         ~ (_host_audit_resend_report.status | default(-1)) ~ ')')
-                        if (_host_audit_resend_report.status | default(-1)) != 200
-                        else ('보관된 요약 조회 실패(status=' ~ (_host_audit_resend_summary.status | default(-1)) ~ ')')
-                        if (_host_audit_resend_summary.status | default(-1)) not in [200, 404]
-                        else ('받은 보고서의 SHA-256(' ~ _host_audit_resend_stat.stat.checksum ~ ')이 보관된 요약의 값('
-                              ~ _recorded ~ ')과 다름') }}
-    quiet: true
+    - name: "[AUD-626] Assert the archived report exists and matches its recorded SHA-256"
+      vars:
+        _summary: "{{ (_host_audit_resend_summary.content | default('')) | host_audit_json_loads if (_host_audit_resend_summary.status | default(-1)) == 200 else none }}"
+        _recorded: "{{ ((_summary or {}).report | default({})).sha256 | default('') }}"
+      ansible.builtin.assert:
+        that:
+          - (_host_audit_resend_report.status | default(-1)) == 200
+          - (_host_audit_resend_summary.status | default(-1)) in [200, 404]
+          - _recorded | length == 0 or _recorded == _host_audit_resend_stat.stat.checksum
+        fail_msg: >-
+          재발송 중단 — {{ ('보관된 보고서를 받지 못함(' ~ _host_audit_resend_prefix ~ 'report.html, status='
+                             ~ (_host_audit_resend_report.status | default(-1)) ~ ')')
+                            if (_host_audit_resend_report.status | default(-1)) != 200
+                            else ('보관된 요약 조회 실패(status=' ~ (_host_audit_resend_summary.status | default(-1)) ~ ')')
+                            if (_host_audit_resend_summary.status | default(-1)) not in [200, 404]
+                            else ('받은 보고서의 SHA-256(' ~ _host_audit_resend_stat.stat.checksum ~ ')이 보관된 요약의 값('
+                                  ~ _recorded ~ ')과 다름') }}
+        quiet: true
 
-- name: "[AUD-627] Prepare the resend summary and attachment"
-  vars:
-    _summary: "{{ (_host_audit_resend_summary.content | default('')) | host_audit_json_loads if (_host_audit_resend_summary.status | default(-1)) == 200 else none }}"
-  ansible.builtin.set_fact:
-    host_audit_mail_doc: >-
-      {{ _summary | host_audit_mail_resend_summary(host_audit_resend_run_id,
-           'RustFS ' ~ _host_audit_storage_target.bucket ~ '/' ~ _host_audit_resend_prefix ~ 'report.html (3년 보관)',
-           _host_audit_resend_stat.stat.checksum, _host_audit_resend_stat.stat.size) }}
-    _host_audit_archive_ok: true
-    _host_audit_mail_report_path: "{{ host_audit_run.output_dir }}/report.html"
+    # 요약이 xlsx zip을 기록한 실행만 zip을 받는다. 받을 이름은 요약의 값이 아니라 실행 ID에서 정한 이름이다(요약은 버킷에서
+    # 받은 값이라 경로 문자를 믿지 않는다). 기록이 있는데 받지 못하거나 이름·해시가 다르면 AUD-633이 보내지 않고 멈춘다.
+    - name: Read the xlsx zip record of the archived summary
+      vars:
+        _doc: "{{ (_host_audit_resend_summary.content | default('')) | host_audit_json_loads }}"
+        # 요약을 믿는 기준은 host_audit_mail_resend_summary와 같다(schema_version이 있는 요약만). 어긋나면 받은 zip이 첨부되지 않는다.
+        _raw: "{{ _doc.xlsx_zip | default({}, true) if (_doc.schema_version | default(0)) else {} }}"
+      ansible.builtin.set_fact:
+        _host_audit_resend_zip_record: >-
+          {{ _raw if _raw is mapping else ({'invalid': true} if _raw else {}) }}
+      when: (_host_audit_resend_summary.status | default(-1)) == 200
 
-- name: Mail the archived report again
-  ansible.builtin.include_tasks: mail.yml
+    - name: "[AUD-629] Get the archived xlsx zip"
+      vars:
+        _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_resend_prefix ~ 'xlsx/' ~ _host_audit_resend_zip_name) }}"
+      ansible.builtin.uri:
+        url: "{{ _req.url }}"
+        method: GET
+        headers: "{{ _req.headers }}"
+        dest: "{{ host_audit_run.output_dir }}/{{ _host_audit_resend_zip_name }}"
+        mode: '0600'
+        status_code: [-1, 200, 403, 404, 500, 503]
+        timeout: "{{ host_audit_storage_timeout }}"
+        validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
+        ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
+      register: _host_audit_resend_zip
+      changed_when: false
+      no_log: true
+      when:
+        - _host_audit_resend_zip_record | default({}) | length > 0
+        - not (_host_audit_resend_zip_record.invalid | default(false) | bool)
 
-- name: "[AUD-628] Remove the downloaded report from the runner"
-  ansible.builtin.file:
-    path: "{{ host_audit_run.output_dir }}"
-    state: absent
+    - name: Compute the SHA-256 of the downloaded xlsx zip
+      ansible.builtin.stat:
+        path: "{{ host_audit_run.output_dir }}/{{ _host_audit_resend_zip_name }}"
+        checksum_algorithm: sha256
+        get_mime: false
+      register: _host_audit_resend_zip_stat
+      when: (_host_audit_resend_zip.status | default(-1)) == 200
+
+    # 요약 자체가 없으면(404) 기록된 해시가 없어 zip을 검증할 수 없다. 검증 못 한 파일을 보내지 않고, 그 사실을 남긴다.
+    - name: Say that the xlsx zip is not resent without its recorded hash
+      ansible.builtin.debug:
+        msg: "보관된 요약이 없어 xlsx zip의 기록된 해시를 알 수 없음 — zip은 보내지 않고 보고서만 다시 보낸다({{ _host_audit_resend_prefix }}xlsx/{{ _host_audit_resend_zip_name }}가 보관돼 있을 수 있다)"
+      when: (_host_audit_resend_summary.status | default(-1)) == 404
+
+    - name: "[AUD-633] Assert the archived xlsx zip exists and matches its recorded SHA-256"
+      vars:
+        _record: "{{ _host_audit_resend_zip_record | default({}) }}"
+        _status: "{{ _host_audit_resend_zip.status | default(-1) }}"
+        _has: "{{ _record | length > 0 }}"
+      ansible.builtin.assert:
+        that:
+          - not (_record.invalid | default(false) | bool)
+          - not (_has | bool) or _status | int == 200
+          - not (_has | bool) or _record.file_name | default('') == _host_audit_resend_zip_name
+          - not (_has | bool) or _record.sha256 | default('') == _host_audit_resend_zip_stat.stat.checksum
+        fail_msg: >-
+          재발송 중단 — {{ '보관된 요약의 xlsx zip 기록 형식이 맞지 않음(객체가 아님)'
+                            if _record.invalid | default(false) | bool
+                            else ('보관된 xlsx zip을 받지 못함(' ~ _host_audit_resend_prefix ~ 'xlsx/' ~ _host_audit_resend_zip_name
+                                  ~ ', status=' ~ _status ~ ')')
+                            if _status | int != 200
+                            else ('보관된 요약의 xlsx zip 이름(' ~ (_record.file_name | default('')) ~ ')이 실행 ID에서 정한 이름('
+                                  ~ _host_audit_resend_zip_name ~ ')과 다름')
+                            if _record.file_name | default('') != _host_audit_resend_zip_name
+                            else ('받은 xlsx zip의 SHA-256(' ~ _host_audit_resend_zip_stat.stat.checksum ~ ')이 보관된 요약의 값('
+                                  ~ (_record.sha256 | default('')) ~ ')과 다름') }}
+        quiet: true
+
+    - name: "[AUD-627] Prepare the resend summary and attachments"
+      vars:
+        _summary: "{{ (_host_audit_resend_summary.content | default('')) | host_audit_json_loads if (_host_audit_resend_summary.status | default(-1)) == 200 else none }}"
+      ansible.builtin.set_fact:
+        host_audit_mail_doc: >-
+          {{ _summary | host_audit_mail_resend_summary(host_audit_resend_run_id,
+               'RustFS ' ~ _host_audit_storage_target.bucket ~ '/' ~ _host_audit_resend_prefix ~ 'report.html (3년 보관)',
+               _host_audit_resend_stat.stat.checksum, _host_audit_resend_stat.stat.size,
+               'RustFS ' ~ _host_audit_storage_target.bucket ~ '/' ~ _host_audit_resend_prefix ~ 'xlsx/' ~ _host_audit_resend_zip_name ~ ' (3년 보관)') }}
+        _host_audit_archive_ok: true
+        _host_audit_mail_report_path: "{{ host_audit_run.output_dir }}/report.html"
+        _host_audit_mail_xlsx_path: "{{ host_audit_run.output_dir }}/{{ _host_audit_resend_zip_name }}"
+
+    - name: Mail the archived report again
+      ansible.builtin.include_tasks: mail.yml
+  always:
+    - name: "[AUD-628] Remove the downloaded report and xlsx zip from the runner"
+      ansible.builtin.file:
+        path: "{{ host_audit_run.output_dir }}"
+        state: absent
 
 - name: Judge the report mail
   ansible.builtin.include_tasks: mail_result.yml

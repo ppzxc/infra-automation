@@ -49,16 +49,32 @@ The traces and metrics that an application and its edge proxy produce while serv
 _Avoid_: app metrics, APM data, observability data (when the noise is meant to be excluded)
 
 **Host Audit**:
-A read-only, periodic inspection of managed hosts and produces one consolidated report per run — an overall summary followed by a per-host appendix — covering Asset Inventory, Configuration Drift, Configuration Vulnerabilities and Package Vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Read-only means it leaves every managed state of a host unchanged — configuration files, packages and their caches, repository definitions, services, accounts, kernel settings; the traces of logging in and using privilege (authentication, sudo and audit logs, login records) and temporary files created and removed within the same run are allowed. Fixing what it finds belongs to provisioning and maintenance, not to it.
+A read-only, periodic inspection of managed hosts and produces one consolidated report per run — an overall summary followed by a per-host appendix and then a per-item appendix explaining how to fix each Configuration Vulnerability found in that run — covering Asset Inventory, Configuration Drift, Configuration Vulnerabilities and Package Vulnerabilities. It inspects every managed host, including those in Host Agents Exclusion and the CentOS 6/7 hosts, and names the checks a host could not undergo rather than omitting them. Read-only means it leaves every managed state of a host unchanged — configuration files, packages and their caches, repository definitions, services, accounts, kernel settings; the traces of logging in and using privilege (authentication, sudo and audit logs, login records) and temporary files created and removed within the same run are allowed. Fixing what it finds belongs to provisioning and maintenance, not to it.
 _Avoid_: audit (when meaning only the CIS audit), scan, compliance check
 
 **Asset Inventory**:
-The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. Part of it is collected from the host; the rest — purpose, owning department, owner and administrator (by role, never by name) and security grade — cannot be, so it is declared per host in Git, and a host with none declared is shown as unassigned. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product. Covers only the hosts Host Audit inspects, not network devices.
+The per-host record of what a host is and in what state — identity, OS and its end-of-life status, hardware, installed packages, listening ports, accounts and who holds privilege. Part of it is collected from the host; the rest — purpose, owning department, owner and administrator (by role, never by name) and asset importance — cannot be, so it is copied per host into OpenBao from the ISMS asset ledger, which stays the source. A host with a value missing is shown as unassigned there; a host whose values could not be read is shown as lookup-failed, never as unassigned. The asset list that ISMS control 1.2.1 (asset identification) asks for; produced by Host Audit, not kept in a separate CMDB product. Covers only the hosts Host Audit inspects, not network devices.
 _Avoid_: CMDB, operational info, server list
+
+**Asset Importance**:
+How much a host matters to the business, as the ISMS asset ledger rates it — H, M or L, written as the ledger writes it. A rating of the host, not of a finding: how dangerous a Configuration Vulnerability is belongs to the item's severity from the KISA guide (상/중/하), never to Asset Importance.
+_Avoid_: security grade, 보안등급, 중요도 (unqualified)
 
 **Configuration Vulnerability**:
 A host setting that falls short of the KISA technical vulnerability checklist for Unix servers, 2026 edition — e.g. remote root login allowed, weak password policy. Each finding is named with its edition (`KISA-2026:U-13`), because the editions reuse item numbers for different checks; CIS Benchmark is cited only as a cross-reference, not checked separately.
 _Avoid_: vulnerability (unqualified), misconfiguration
+
+**Remediation Impact**:
+How much fixing a Configuration Vulnerability disturbs the service running on the host — a restart, dropped sessions, a client that stops connecting. Set once per checklist item, the same for every host; how dangerous the finding itself is belongs to the item's severity from the KISA guide (상/중/하), not to Remediation Impact.
+_Avoid_: impact, 영향도 (unqualified)
+
+**Remediation Effort**:
+How hard a Configuration Vulnerability is to fix — one setting changed versus a package replaced, a structure rebuilt or another team consulted. Set once per checklist item, the same for every host. The "환경성" column of the implementation plan.
+_Avoid_: difficulty, 환경성 (outside the plan's column name)
+
+**Remediation Plan**:
+The per-host workbook a Host Audit run hands to the people who fix things: one row for each checklist item that is not 양호 on that host, carrying its verdict and evidence, how it is checked, how to fix it on that host's OS family, and its severity, Remediation Impact and Remediation Effort with the priority and urgency derived from them. One per host per run, kept with the run's report; the owner column carries the Asset Inventory administrator's role exactly as the Asset Inventory shows it (including unassigned and lookup-failed), and the columns for the plan and what came of it are left for people to fill. The "이행계획서" of the implementation plan.
+_Avoid_: xlsx report, 조치계획서, action plan
 
 **Package Vulnerability**:
 An installed package version that is affected by a known CVE or vendor security advisory.
