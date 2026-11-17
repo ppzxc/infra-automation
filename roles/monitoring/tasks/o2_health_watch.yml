@@ -3,7 +3,7 @@
 # OpenObserve 생존 타이머 (Spec #184 / Ticket-7) — 검사하는 쪽 호스트(host_agents_o2_health_checker, ns0266)에만 배포
 # ==============================================================================
 # OpenObserve 헬스(/healthz)가 실패하면 OpenObserve를 거치지 않고 네이버웍스 webhook으로 직접 P1을 보낸다.
-# webhook 값은 OpenBao agents/openobserve(alert_webhook_url/_token/_auth_header)를 그대로 쓴다.
+# webhook 값은 OpenBao agents/openobserve(alert_webhook_plain_url/_token/_auth_header)를 그대로 쓴다.
 - name: "[MON-219] Assert the checker host uses the modern path so the health timer is not silently skipped"
   ansible.builtin.assert:
     that:
@@ -23,9 +23,9 @@
     - name: "[MON-220] Assert the alert webhook URL is available for the health timer"
       ansible.builtin.assert:
         that:
-          - (((host_agents_shared_secrets | default({})).openobserve | default({})).alert_webhook_url | default('')) is match('^https?://')
+          - (((host_agents_shared_secrets | default({})).openobserve | default({})).alert_webhook_plain_url | default('')) is match('^https?://')
         fail_msg: >-
-          {{ inventory_hostname }}: OpenBao agents/openobserve의 alert_webhook_url이 없거나 형식이 잘못되어
+          {{ inventory_hostname }}: OpenBao agents/openobserve의 alert_webhook_plain_url이 없거나 형식이 잘못되어
           OpenObserve 생존 타이머를 배포할 수 없습니다(OpenObserve — Config와 같은 값을 쓴다).
         quiet: true
 
