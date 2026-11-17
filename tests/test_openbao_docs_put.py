@@ -337,3 +337,11 @@ def test_empty_namespace_variable_falls_back_to_default(fake, run, monkeypatch):
     rc, _, _ = run("inventory/assets/ns0001", dict(ASSET, description="Z"))
     assert rc == 0
     assert {r.namespace for r in fake.requests if r.doc and r.method == "POST"} == {"infra"}
+
+
+@pytest.mark.parametrize("doc, ok", [("inventory/operators/first.last", True), ("inventory/operators/alice", True),
+                                     ("inventory/operators/..", False), ("inventory/../operators/x", False),
+                                     ("inventory/operators/.", False), ("inventory/operators/a b", False),
+                                     ("inventory/operators/", False), ("secrets/assets/ns0001/credentials/a.b", True)])
+def test_document_path_segments_allow_dots_but_not_traversal(doc, ok):
+    assert (docs.openbao_put.DOC_PATH_RE.fullmatch(doc) is not None) is ok

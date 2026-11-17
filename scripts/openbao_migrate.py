@@ -16,7 +16,6 @@ Spec #511 / Ticket-10(#521). 대응표는 #501~#504 결정을 코드로 옮긴 �
 종료 코드: 0 성공, 1 대응·검증 실패(쓰기 없음), 2 이미 있는 문서와 내용이 다름, 3 해시 불일치(차이가 없는데도), 4 통신·쓰기 오류.
 """
 import argparse
-import base64
 import collections
 import copy
 import getpass
@@ -239,8 +238,10 @@ class _Builder:
         d = self.take(doc)
         if d is None:
             return self.err(doc, "no_document")
-        d.pop("fqdn", None)
+        # 옛 역할은 접속 대상을 fqdn 우선(인증서 이름 검증), 없으면 ansible_host로 썼다. Endpoint address는 "IP 또는 이름"이라 같은 대상을 보존한다.
+        fqdn = d.pop("fqdn", None)
         address, port, token = d.pop("ansible_host", None), d.pop("ansible_port", None), d.pop("api_token", None)
+        address = fqdn or address
         self.endpoints[ns]["https"] = {"protocol": "https", "address": address, "port": _int(port if port is not None else 443),
                                        "credential": "api"}
         if token is not None:
@@ -377,6 +378,8 @@ class _Builder:
         # openobserve
         if "o2_endpoint" in o2:
             self.put("inventory/services/openobserve", ["url"], o2.pop("o2_endpoint"), ("agents/openobserve", "o2_endpoint"))
+        if o2.get("o2_org"):   # 조직(선택). 수집 계정 이름이기도 하다(ingest())
+            self.put("inventory/services/openobserve", ["org"], o2["o2_org"], ("agents/openobserve", "o2_org"))
         if o2.get("o2_ca_file"):  # 사설 CA 경로(선택)
             self.put("inventory/services/openobserve", ["ca_file"], o2.pop("o2_ca_file"), ("agents/openobserve", "o2_ca_file"))
         else:
@@ -388,6 +391,7 @@ class _Builder:
                 self.put("secrets/services/openobserve/admin", ["password"], o2.pop("api_password"),
                          ("agents/openobserve", "api_password"))
         self.ingest(o2, gw)
+        o2.pop("o2_org", None)
         if "normal_sources" in o2:
             self.put("inventory/config/openobserve_config", ["normal_sources"], o2.pop("normal_sources"),
                      ("agents/openobserve", "normal_sources"))
@@ -454,13 +458,12 @@ class _Builder:
             self.put(doc, ["username"], gw["o2_ingest_user"], (src, "o2_ingest_user"))
             self.put(doc, ["password"], gw["o2_ingest_password"], (src, "o2_ingest_password"))
             return
+        # 옛 소비자는 raw passcode(controller_ingest_token)를 Basic `<o2_org>:<passcode>`로 인코딩했다(조직 기본값 default).
         token = o2.get("controller_ingest_token")
-        try:
-            user, password = base64.b64decode(token, validate=True).decode().split(":", 1)
-        except (ValueError, TypeError, UnicodeDecodeError):
-            return self.err("agents/openobserve", "controller_ingest_token_not_basic_auth")
-        self.put(doc, ["username"], user, ("agents/openobserve", "controller_ingest_token"))
-        self.put(doc, ["password"], password, ("agents/openobserve", "controller_ingest_token"))
+        if not isinstance(token, str) or not token:
+            return self.err("agents/openobserve", "controller_ingest_token_missing")
+        self.put(doc, ["username"], o2.get("o2_org") or "default", ("agents/openobserve", "o2_org"))
+        self.put(doc, ["password"], token, ("agents/openobserve", "controller_ingest_token"))
 
     def funa(self):
         for path, new in (("clusters/funa", "inventory/services/funa"), ("clusters/funa/proxy", "secrets/services/funa/proxy"),
