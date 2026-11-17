@@ -115,6 +115,29 @@ def _plan(rows, host, run_id, admin):
             'footer': _unsafe([REMEDIATION_SOURCE, '실행 ID: %s' % run_id])}
 
 
+def _host_findings(model, host):
+    """The findings of one host (each with its host ``entry``), in priority order (same key as the HTML table)."""
+    cv = model.get('config_vulnerability') or {}
+    mine = [dict(finding, entry=entry) for finding in cv.get('findings') or []
+            for entry in finding.get('hosts') or [] if entry.get('host') == host]
+    return order_findings(mine)
+
+
+def _row(finding, host, admin, family):
+    entry = finding['entry']
+    values = {
+        '그룹': finding['category'], '자산명': host, '담당자': admin,
+        '통제내용': ('%s %s' % (finding['code'].split(':', 1)[-1], finding['title'])) if _item(finding)
+        else '%s %s' % (finding['code'].split(':', 1)[-1], UNKNOWN_ITEM),
+        '취약점현황': _status(finding, entry), '점검방법': _item(finding).get('check', ''),
+        '조치방법': _steps(finding, family),
+        '위험도': _number(finding['risk']), '이행과제': '', '시급성': finding['urgency'] or '',
+        '영향도': _number(finding['impact_level']), '환경성': _number(finding['effort_level']),
+        '우선순위': _number(finding['priority']), '이행 결과': '', '비고': _remark(finding['verdict'], entry),
+    }
+    return [values[h] for h in HEADERS]
+
+
 def host_audit_remediation_plan(model, host):
     """Rows of one host's Remediation Plan: every item that is not 양호 (and not 해당없음), in priority order."""
     model = model or {}
@@ -125,23 +148,7 @@ def host_audit_remediation_plan(model, host):
         row = ['', host, admin, NO_RESULT] + [''] * (len(HEADERS) - 4)
         return _plan([row], host, run_id, admin)
     family = _family(model, host)
-    mine = [dict(finding, entry=entry) for finding in cv.get('findings') or []
-            for entry in finding.get('hosts') or [] if entry.get('host') == host]
-    rows = []
-    # Same key as the HTML table (order_findings: priority, impact, effort, verdict, code).
-    for finding in order_findings(mine):
-        entry = finding['entry']
-        values = {
-            '그룹': finding['category'], '자산명': host, '담당자': admin,
-            '통제내용': ('%s %s' % (finding['code'].split(':', 1)[-1], finding['title'])) if _item(finding)
-            else '%s %s' % (finding['code'].split(':', 1)[-1], UNKNOWN_ITEM),
-            '취약점현황': _status(finding, entry), '점검방법': _item(finding).get('check', ''),
-            '조치방법': _steps(finding, family),
-            '위험도': _number(finding['risk']), '이행과제': '', '시급성': finding['urgency'] or '',
-            '영향도': _number(finding['impact_level']), '환경성': _number(finding['effort_level']),
-            '우선순위': _number(finding['priority']), '이행 결과': '', '비고': _remark(finding['verdict'], entry),
-        }
-        rows.append([values[h] for h in HEADERS])
+    rows = [_row(finding, host, admin, family) for finding in _host_findings(model, host)]
     return _plan(rows, host, run_id, admin)
 
 
