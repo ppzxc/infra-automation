@@ -120,12 +120,16 @@ def read_store(client):
         except BaoError:
             problems.append(Violation(mount + "/", "#", "list_failed"))
             continue
-        listed.update(docs)
         for doc in docs:
             try:
                 store[doc] = client.request("GET", "%s/data/%s" % (mount, doc[len(mount) + 1:]))["data"]["data"]
-            except (BaoError, KeyError, TypeError):
+            except BaoError as exc:
+                if exc.status == 404:  # 소프트 삭제된 문서도 목록에는 나온다. 없는 문서로 본다
+                    continue
                 problems.append(Violation(doc, "#", "read_failed"))
+            except (KeyError, TypeError):
+                problems.append(Violation(doc, "#", "read_failed"))
+            listed.add(doc)
     return store, problems, listed
 
 
@@ -148,18 +152,27 @@ def _parse_time(text):
 
 # ---- Semaphore 인벤토리 -------------------------------------------------------------------------------------------
 
+def _yaml_group_hosts(group, out):
+    """Ansible YAML 인벤토리의 그룹 하나: `hosts` 키와 `children` 그룹만 따라간다(vars 등은 보지 않는다)."""
+    if not isinstance(group, dict):
+        return
+    hosts = group.get("hosts")
+    if isinstance(hosts, (dict, list)):
+        out.update(str(k) for k in hosts)
+    children = group.get("children")
+    if isinstance(children, dict):
+        for child in children.values():
+            _yaml_group_hosts(child, out)
+
+
 def _yaml_hosts(node, out):
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "hosts" and isinstance(value, dict):
-                out.update(str(k) for k in value)
-            elif key == "hosts" and isinstance(value, list):
-                out.update(str(k) for k in value)
-            else:
-                _yaml_hosts(value, out)
-    elif isinstance(node, list):
-        for value in node:
-            _yaml_hosts(value, out)
+    if not isinstance(node, dict):
+        return
+    if "all" in node:
+        _yaml_group_hosts(node["all"], out)
+    else:  # `all` 없이 최상위가 그룹인 형식
+        for group in node.values():
+            _yaml_group_hosts(group, out)
 
 
 def parse_inventory_hosts(text, kind):
@@ -235,6 +248,7 @@ def check_secret_ids(client, roles, now):
             if exc.status != 404:
                 out.append(Violation(doc, "#", "secret_id_lookup_failed"))
             continue
+        latest, no_expiry = None, False
         for accessor in accessors:
             try:
                 info = client.request("POST", doc + "/secret-id-accessor/lookup", {"secret_id_accessor": accessor})
@@ -242,8 +256,13 @@ def check_secret_ids(client, roles, now):
                 out.append(Violation(doc, "#", "secret_id_lookup_failed"))
                 continue
             expires = _parse_time((info.get("data") or {}).get("expiration_time"))
-            if expires is not None and expires - now <= EXPIRY_WARN:
-                out.append(Violation(doc, "#", "secret_id_expiring"))
+            if expires is None:
+                no_expiry = True
+            elif latest is None or expires > latest:
+                latest = expires
+        # 교체 중에는 옛 secret_id가 남아 있다. 가장 늦게 만료되는 것이 임박할 때만 알린다.
+        if latest is not None and not no_expiry and latest - now <= EXPIRY_WARN:
+            out.append(Violation(doc, "#", "secret_id_expiring"))
     return sorted(set(out))
 
 
@@ -326,7 +345,7 @@ def build_alert(violations):
 def send_alert(url, text):
     req = urllib.request.Request(url, data=text.encode("utf-8"), method="POST",
                                  headers={"Content-Type": "text/plain; charset=utf-8"})
-    urllib.request.urlopen(req, timeout=TIMEOUT).close()
+    _OPENER.open(req, timeout=TIMEOUT).close()
 
 
 # ---- 진입점 -------------------------------------------------------------------------------------------------------

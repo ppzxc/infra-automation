@@ -5,7 +5,8 @@
   validate ROOT   로컬 YAML 트리를 스키마·참조 규칙으로 검증한다(OpenBao에 접속하지 않는다).
                   ROOT 아래 `<마운트>/<문서 경로>.yml`이 문서 하나다(예: ROOT/inventory/assets/ns0001.yml).
                   `secrets/` 문서는 값 자리에 null을 적어도 된다(값은 put이 getpass로 받는다).
-  (put, check는 후속 티켓이 같은 검증 모듈 `openbao_validation`으로 추가한다.)
+  put ...         검증 후 쓰기(`openbao_put`, #516).
+  check           Periodic Check: OpenBao 전체 대조(`openbao_check`, #519).
 
 출력은 `문서 경로<TAB>JSON 포인터<TAB>규칙 이름`뿐이다. 값은 어디에도 내지 않는다.
 종료 코드: 0 통과, 1 위반 있음, 2 사용법 오류.
@@ -15,6 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import openbao_put  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 
 
@@ -58,6 +60,7 @@ def main(argv=None):
     p.add_argument("--schemas", default=str(ov.DEFAULT_SCHEMA_DIR))
     p.add_argument("--tofu-dir", default=None, help="OpenTofu 코드 디렉터리(기본: tofu/openbao)")
     p.set_defaults(func=cmd_check)
+    openbao_put.register(sub)
     args = parser.parse_args(argv)
     return args.func(args)
 

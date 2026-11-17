@@ -305,6 +305,35 @@ def test_failed_role_listing_is_reported_not_skipped(env):
     assert "auth/approle/role\t#\tsecret_id_lookup_failed" in alert_text(rec)
 
 
+def test_soft_deleted_document_is_ignored_not_read_failed(env):
+    fake, rec = env
+    fake.set("inventory", "assets/ns0004", fake_doc(fake, "assets/ns0004"))
+    rec.hosts = HOSTS[:3]
+    fake.soft_delete("inventory", "assets/ns0004")
+    r = run(fake)
+    assert r.returncode == 0, r.stdout
+
+
+def test_old_secret_id_during_rotation_does_not_alert():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import openbao_check as oc
+
+    class Stub:  # 옛 secret_id는 5일, 새것은 150일 남았다
+        def request(self, method, path, body=None):
+            if method == "LIST":
+                return {"data": {"keys": ["old", "new"]}}
+            return {"data": {"expiration_time": iso(5 if body["secret_id_accessor"] == "old" else 150)}}
+
+    assert oc.check_secret_ids(Stub(), ["provision"], datetime.now(timezone.utc)) == []
+
+
+def test_yaml_hosts_only_come_from_inventory_structure():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import openbao_check as oc
+    text = "all:\n  vars:\n    hosts: [not-a-host]\n  children:\n    g:\n      hosts:\n        ns0001: {}\n"
+    assert oc.parse_inventory_hosts(text, "static-yaml") == {"ns0001"}
+
+
 def test_expected_objects_are_read_from_the_real_opentofu_code():
     sys.path.insert(0, str(ROOT / "scripts"))
     import openbao_check as oc

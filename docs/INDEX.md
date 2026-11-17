@@ -17,6 +17,7 @@
 9. [OpenObserve Config (`openobserve_config`)](openobserve_config.md) - 컨트롤러 전용. OpenObserve VRL ingest function(sshd/sudo 해석)·파이프라인·통지 webhook·알림 규칙(서버·스위치·방화벽 로그 알림, 방화벽은 #287, 대응 절차는 [알림 런북](runbooks/alerts.md))을 코드로 관리하고 API로 반영 (ADR-0008)
 10. [FUNA Env (`funa_env`)](funa_env.md) - FUNA Cluster 환경 값을 OpenBao에서 읽어 `/etc/funa-cluster/`의 비시크릿 파일과 소비자별 시크릿 파일(0640 root:dockermgmt)로 렌더링 (#222)
 11. [GitHub Webhook Watch (`github_webhook_watch`)](github_webhook_watch.md) - 컨트롤러 전용. GitHub 조직 웹훅의 존재·활성·구독 이벤트를 의도값과 비교하고 최근 실패한 전달을 재전송하며 하트비트 레코드를 OpenObserve에 남김, Semaphore 템플릿 등록 방법 (Spec #399 / Ticket-5, #404)
+12. [OpenBao 문서 등록·검증 도구 (`openbao_docs`)](openbao_docs.md) - `validate`(로컬 검증)·`put`(검증 후 쓰기, cas·차이 확인·참조 검사)·새 Asset 편입 순서(Credential 먼저, Endpoint 다음) (Spec #511 / Ticket-5, #516)
 
 ---
 
