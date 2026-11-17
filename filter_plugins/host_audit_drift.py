@@ -281,6 +281,10 @@ def host_audit_drift_parse(callback_json, hosts, declared_plays, ignore=None):
     return {'status': 'ok', 'reason': '', 'hosts': out}
 
 
+def _new_state(host):
+    return {'host': host, 'rows': [], 'excluded': [], 'unavailable': [], 'not_applicable': []}
+
+
 def host_audit_drift_section(plan, runs):
     """Build the Configuration Drift section model.
 
@@ -315,7 +319,7 @@ def host_audit_drift_section(plan, runs):
         for host in hosts:
             result = (parsed.get('hosts') or {}).get(host) or {
                 'status': HOST_NO_RESULT, 'reason': '하위 실행 결과에 이 호스트가 없음', 'rows': [], 'excluded': []}
-            state = host_rows.setdefault(host, {'host': host, 'rows': [], 'excluded': [], 'unavailable': [], 'not_applicable': []})
+            state = host_rows.setdefault(host, _new_state(host))
             if result['status'] != HOST_OK:
                 label_text = HOST_LABELS.get(result['status'], UNAVAILABLE_LABEL)
                 state['unavailable'].append({'subrun': label, 'label': label_text, 'reason': result.get('reason') or '-'})
@@ -334,7 +338,7 @@ def host_audit_drift_section(plan, runs):
             sub['rows'] += len(result.get('rows') or [])
         subruns.append(sub)
     for host, reason in sorted((plan.get('excluded') or {}).items()):
-        state = host_rows.setdefault(host, {'host': host, 'rows': [], 'excluded': [], 'unavailable': [], 'not_applicable': []})
+        state = host_rows.setdefault(host, _new_state(host))
         if reason == REASON_RAW:
             # By design Drift cannot be seen on a Raw Provisioning Path host: not an item to act on,
             # so it stays out of the 점검불가 count and table and is reported as its own line.
@@ -378,7 +382,7 @@ def _baseline_findings(plan, subruns, host_rows):
     hosts, findings = [], []
     for host, state in sorted(host_rows.items()):
         planned = [k for k in SUBRUN_ORDER if host in (plan.get(k) or [])]
-        if not planned or failed & set(planned) or state['unavailable']:
+        if not planned or failed & set(planned) or state['unavailable'] or state['not_applicable']:
             continue
         hosts.append(host)
         for row in state['rows']:

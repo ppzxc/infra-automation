@@ -79,7 +79,7 @@
   </div>
 {% include 'sections/asset_inventory_summary.html.j2' %}
 {% if m.configuration_drift and m.configuration_drift.not_applicable %}
-  <div class="note keep">Configuration Drift 비대상 {{ m.configuration_drift.not_applicable | length }}대 — raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님): {% for n in m.configuration_drift.not_applicable %}{{ n.host | e }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+  <div class="note keep">Configuration Drift 비대상 {{ m.configuration_drift.not_applicable | length }}대 — raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님): {% for n in m.configuration_drift.not_applicable[:10] %}{{ n.host | e }}{% if not loop.last %}, {% endif %}{% endfor %}{% if m.configuration_drift.not_applicable | length > 10 %} 외 {{ m.configuration_drift.not_applicable | length - 10 }}대{% endif %}</div>
 {% endif %}
 {% if m.unavailable %}
   <div class="note keep"><b>점검불가 항목 {{ m.unavailable | length }}건 (호스트·항목)</b> — 아래 호스트·항목은 이번 실행에서 확인하지 못했습니다.</div>

@@ -289,6 +289,7 @@ def test_template_renders_judgement_column_and_no_diff_text():
     appendix = env.get_template("sections/appendix_configuration_drift.html.j2").render(
         m={"configuration_drift": section}, host="c7")
     assert "Raw Provisioning Path" in appendix
+    assert "<div>Drift</div><div>비대상</div>" in appendix
 
 
 # --- wiring --------------------------------------------------------------------------------------

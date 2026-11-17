@@ -370,5 +370,6 @@ def test_no_not_applicable_line_without_hosts():
 def test_mail_body_labels_host_card_and_item_count_differently():
     html = _render(_summary(_model_with_not_applicable()))
     assert "점검불가 호스트 (수집 단계)" in html
-    assert re.search(r"<div[^>]*>점검불가</div>", html) is None
+    assert re.search(r">\s*2건 \(호스트·항목\)\s*<", html)
+    assert re.search(r">\s*2대 — raw 태스크가 --check에서 스킵됨", html)
     assert "Configuration Drift 비대상" in html
