@@ -70,3 +70,27 @@ def test_index_and_schema_checks_are_off_by_default_and_switchable(fake):
         _get(f, "/v1/m/data/ok/1")
         _get(f, "/v1/m/data/other")
         assert f.violations == [("m", "other")] and seen == [("m", "ok/1")]
+
+
+def _post(fake, path, body):
+    req = urllib.request.Request(fake.url + path, data=json.dumps(body).encode(), method="POST")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, json.load(e)
+
+
+def test_post_writes_document_and_cas_zero_rejects_existing(fake):
+    body = {"options": {"cas": 0}, "data": {"k": "v"}}
+    assert _post(fake, "/v1/m1/data/a/b", body)[0] == 200
+    assert _get(fake, "/v1/m1/data/a/b")[1]["data"]["data"] == {"k": "v"}
+    assert _post(fake, "/v1/m1/data/a/b", body)[0] == 400
+    assert [(w.mount, w.doc) for w in fake.writes()] == [("m1", "a/b"), ("m1", "a/b")]
+
+
+def test_list_returns_children_with_folders_marked(fake):
+    fake.set("m1", "a/b", {}).set("m1", "a/c/d", {}).set("m1", "z", {})
+    status, body = _get(fake, "/v1/m1/metadata/a?list=true")
+    assert status == 200 and sorted(body["data"]["keys"]) == ["b", "c/"]
+    assert _get(fake, "/v1/m1/metadata/none?list=true")[0] == 404

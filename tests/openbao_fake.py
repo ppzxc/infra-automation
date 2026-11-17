@@ -56,13 +56,42 @@ class FakeOpenBao:
                 self.wfile.write(data)
 
             def do_POST(self):  # noqa: N802
-                self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                outer.requests.append(Request("POST", self.path, None, None, None, self.headers.get("X-Vault-Namespace")))
+                raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                mount, doc = _split(self.path)
+                outer.requests.append(Request("POST", self.path, mount, doc, self.headers.get("X-Vault-Token"),
+                                              self.headers.get("X-Vault-Namespace")))
+                if mount is not None:
+                    return self._write(mount, doc, raw)
                 if outer.approle and self.path == "/v1/auth/approle/login":
                     return self._reply(200, {"auth": {"client_token": outer.token or APPROLE_TOKEN}})
                 self._reply(404, {})
 
+            def _write(self, mount, doc, raw):
+                """KV v2 쓰기. `options.cas`가 0이면 문서가 없을 때만 쓴다(없지 않으면 400)."""
+                if (outer.namespace is not None and self.headers.get("X-Vault-Namespace") != outer.namespace) or \
+                        (outer.token is not None and self.headers.get("X-Vault-Token") != outer.token):
+                    return self._reply(403, {"errors": ["permission denied"]})
+                body = json.loads(raw or b"{}")
+                if body.get("options", {}).get("cas") == 0 and (mount, doc) in outer._docs:
+                    return self._reply(400, {"errors": ["check-and-set parameter did not match the current version"]})
+                outer._docs[(mount, doc)] = (200, {"data": {"data": body.get("data", {}), "metadata": {"version": 1}}})
+                self._reply(200, {"data": {"version": 1}})
+
+            def _list(self, mount, prefix):
+                keys = set()
+                for (m, d) in outer._docs:
+                    if m == mount and (not prefix or d.startswith(prefix + "/")):
+                        rest = d[len(prefix) + 1:] if prefix else d
+                        keys.add(rest.split("/")[0] + "/" if "/" in rest else rest)
+                if not keys:
+                    return self._reply(404, {"errors": []})
+                self._reply(200, {"data": {"keys": sorted(keys)}})
+
             def do_GET(self):  # noqa: N802
+                if "list=true" in self.path:
+                    parts = self.path.split("?")[0].split("/")
+                    if len(parts) >= 4 and parts[3] == "metadata":
+                        return self._list(parts[2], "/".join(parts[4:]).strip("/"))
                 mount, doc = _split(self.path)
                 req = Request("GET", self.path, mount, doc, self.headers.get("X-Vault-Token"),
                               self.headers.get("X-Vault-Namespace"))
@@ -102,6 +131,9 @@ class FakeOpenBao:
 
     def logins(self):
         return [r for r in self.requests if r.method == "POST" and r.path == "/v1/auth/approle/login"]
+
+    def writes(self):
+        return [r for r in self.requests if r.method == "POST" and r.mount is not None]
 
     def env(self, token="bao-test-token"):
         env = {"VAULT_ADDR": self.url, "VAULT_TOKEN": token}
