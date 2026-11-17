@@ -105,7 +105,7 @@
     - name: Stop when the Remediation Plan could not be built for any host
       ansible.builtin.assert:
         that: _host_audit_remediation_by_file | dict2items | selectattr('value.error', 'defined') | list | length
-              < host_audit_model.hosts | unique | list | length
+              < _host_audit_remediation_by_file | dict2items | rejectattr('value.zip_member', 'equalto', 'total.xlsx') | list | length
         fail_msg: "모든 호스트의 Remediation Plan 생성이 실패했다(필터·카탈로그 오류, 위 로그 참고)"
       when: host_audit_model.hosts | length > 0
 

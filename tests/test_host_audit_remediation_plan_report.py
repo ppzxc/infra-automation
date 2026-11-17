@@ -148,9 +148,10 @@ def test_a_host_whose_plan_cannot_be_built_gets_a_one_line_file_and_the_run_goes
 def test_the_run_stops_when_every_plan_failed_but_not_when_one_did(tmp_path):
     assert_task = _named("Stop when the Remediation Plan could not be built for any host")
     for failing, ok in ((2, False), (1, True)):
-        facts = {"f%d" % i: ({"error": "KeyError: x", "label": "h%d" % i} if i < failing else {"rows": []})
+        facts = {"f%d" % i: ({"error": "KeyError: x", "label": "h%d" % i, "zip_member": "hosts/h%d.xlsx" % i}
+                  if i < failing else {"rows": [], "zip_member": "hosts/h%d.xlsx" % i})
                  for i in range(2)}
-        facts["total"] = {"rows": [], "label": "합계 xlsx"}  # the total has no error: it must not hide that every host failed
+        facts["total"] = {"rows": [], "label": "합계 xlsx", "zip_member": "total.xlsx"}  # the total has no error: it must not hide that every host failed
         pb = tmp_path / ("a%d.yml" % failing)
         pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False,
                                        "vars": {"_host_audit_remediation_by_file": facts,
