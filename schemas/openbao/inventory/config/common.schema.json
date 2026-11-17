@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "inventory/config/common",
+  "type": "object",
+  "properties": {
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "description": "회사 기본 domain. fqdn은 <ns>.<domain>으로 계산한다."
+    }
+  },
+  "required": [
+    "domain"
+  ],
+  "additionalProperties": false
+}

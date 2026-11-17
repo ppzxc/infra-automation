@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Asset 문서 (inventory/assets/<ns>)",
+  "type": "object",
+  "properties": {
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Asset 설명(용도). 자산대장 표기 그대로."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Asset 유형(server, switch, firewall 등)."
+    },
+    "isms": {
+      "type": "object",
+      "description": "ISMS 자산대장 메타데이터.",
+      "properties": {
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "description": "관리 부서"
+        },
+        "owner_role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "책임자 직책"
+        },
+        "admin_role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "관리자 직책"
+        },
+        "asset_importance": {
+          "enum": [
+            "H",
+            "M",
+            "L"
+          ],
+          "description": "자산중요도(대문자 H/M/L)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "access": {
+      "type": "object",
+      "description": "접근 정책. 프로비저닝 대상 Asset은 필수(없으면 작업이 실패한다).",
+      "properties": {
+        "admin_credentials": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Credential 이름. 같은 Asset의 secrets/assets/<ns>/credentials/<이름>.",
+            "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
+          },
+          "uniqueItems": true,
+          "description": "관리 계정 Credential 이름 목록."
+        },
+        "bootstrap_credential": {
+          "type": "string",
+          "minLength": 1,
+          "description": "bootstrap 접속에 쓰는 Credential 이름.",
+          "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
+        },
+        "removed_accounts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "제거 대상 계정 이름 목록."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agents": {
+      "type": "object",
+      "description": "호스트별 에이전트 설정(비밀 아님).",
+      "properties": {
+        "backup": {
+          "type": "object",
+          "description": "백업 설정.",
+          "properties": {
+            "extra_paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true,
+              "description": "백업 추가 경로"
+            },
+            "exclude_paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true,
+              "description": "백업 제외 경로"
+            },
+            "sqlite_snapshots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "patternProperties": {
+                  "^[a-z][a-z0-9_]*(?!\\n)$": {}
+                },
+                "additionalProperties": false
+              },
+              "description": "SQLite 스냅샷 대상."
+            }
+          },
+          "additionalProperties": false
+        },
+        "otel": {
+          "type": "object",
+          "description": "otel 수집 설정. 키는 snake_case, 값 형태는 host_agents 역할이 정한다.",
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*(?!\\n)$": {}
+          },
+          "additionalProperties": false
+        },
+        "github_webhook": {
+          "type": "object",
+          "description": "GitHub 웹훅 수신 설정. 키는 snake_case.",
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*(?!\\n)$": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "funa": {
+      "type": "object",
+      "description": "FUNA 노드별 설정. 키는 snake_case, 렌더링 때 env 이름으로 바꾼다.",
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*(?!\\n)$": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "description": "이 Asset만 inventory/config/common의 domain을 덮어쓴다(예외 Asset 전용)."
+    }
+  },
+  "required": [
+    "description"
+  ],
+  "additionalProperties": false
+}

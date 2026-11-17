@@ -354,6 +354,7 @@ def _cfg(version="FGT-vA-build1:opmode=0:vdom=0:user=admin", hostname="fw-primar
 class _Hook:
     def __init__(self):
         self.posts = []
+        self.content_types = []
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -362,6 +363,7 @@ class _Hook:
 
             def do_POST(self):
                 n = int(self.headers.get("Content-Length", 0))
+                outer.content_types.append(self.headers.get("Content-Type"))
                 outer.posts.append((self.path, self.headers.get("X-NANOIT-ACCESS"), self.rfile.read(n).decode()))
                 self.send_response(200)
                 self.send_header("Content-Length", "0")
@@ -372,7 +374,7 @@ class _Hook:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def texts(self):
-        return [json.loads(b)["content"]["text"] for _, _, b in self.posts]
+        return [b for _, _, b in self.posts]
 
     def close(self):
         self.server.shutdown()
@@ -433,6 +435,31 @@ def test_change_alerts_once_with_target_member_and_runbook_without_secrets(ansib
     everything = text + r1.stdout + r1.stderr + r2.stdout + r2.stderr
     for secret in (HASH, "SECRETPSKvalue123456", "hook-token-xyz", hook.url, "allow-all", "480"):
         assert secret not in everything, secret
+
+
+def test_alert_is_sent_as_plain_text_not_a_json_wrapper(ansible_env, device, hook, tmp_path):
+    changed = _cfg().replace("admintimeout 5", "admintimeout 9")
+    _, r2 = _two_runs(ansible_env, device, tmp_path / "bk", hook, _cfg(), changed)
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert hook.content_types == ["text/plain; charset=utf-8"]
+    body = hook.texts()[0]
+    assert body.startswith("🟠 [P2 경고]") and "\n■ 조치" in body and '"content"' not in body
+
+
+def test_a_body_over_the_old_2000_char_json_limit_is_delivered_whole(ansible_env, device, hook, tmp_path):
+    """JSON 경로는 본문 2000자 초과를 거부했다. 변경 항목이 길어도 text/plain으로 잘림 없이 간다."""
+    extra = "".join(f"config firewall section-{i:03d}-" + "x" * 60 + "\n    set a 1\nend\n" for i in range(60))
+    out = tmp_path / "bk"
+    device.config = _cfg()
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    device.config = _cfg(extra=extra)
+    time.sleep(1.1)
+    res = _drift_run(ansible_env, device, out, hook, fortigate_backup_alert_max_items=200)
+    assert res.returncode == 0, res.stdout + res.stderr
+    (body,) = hook.texts()
+    assert len(body) > 2000
+    assert "section-000-" in body and "section-059-" in body and "외 " not in body
+    assert body.rstrip().endswith("fortigate-config-change")
 
 
 def test_secret_only_change_alerts_but_never_prints_values(ansible_env, device, hook, tmp_path):

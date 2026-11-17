@@ -1,0 +1,4 @@
+normal_sources:
+  - 192.0.2.250
+silent_host_exceptions:
+  - ns0004

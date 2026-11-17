@@ -1,0 +1,6 @@
+ssh:
+  protocol: ssh
+  address: 192.0.2.21
+  port: 22
+  credential: root
+  via: ns0001/ssh

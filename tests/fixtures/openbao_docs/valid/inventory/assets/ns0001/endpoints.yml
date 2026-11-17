@@ -1,0 +1,8 @@
+ssh:
+  protocol: ssh
+  address: 192.0.2.11
+  port: 22
+  credential: admin01
+  identity: automation
+  become:
+    method: sudo

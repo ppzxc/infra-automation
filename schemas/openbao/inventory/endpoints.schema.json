@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Endpoint 맵 (inventory/assets/<ns>/endpoints)",
+  "type": "object",
+  "description": "Endpoint 이름별 맵. 키는 보통 protocol과 같다.",
+  "patternProperties": {
+    "^[a-z][a-z0-9_]*(?!\\n)$": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "enum": [
+            "ssh",
+            "telnet",
+            "https"
+          ],
+          "description": "접속 프로토콜."
+        },
+        "address": {
+          "type": "string",
+          "minLength": 1,
+          "description": "주소(IP 또는 이름)."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "credential": {
+          "type": "string",
+          "minLength": 1,
+          "description": "기본 Credential 이름.",
+          "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
+        },
+        "identity": {
+          "const": "automation",
+          "description": "있으면 Automation Identity 키로 로그인한다. 없으면 Credential 자신의 비밀로 로그인한다."
+        },
+        "via": {
+          "type": "string",
+          "minLength": 1,
+          "description": "경유지 Endpoint 참조 <ns>/<endpoint 이름>. 여러 단 가능, 순환 금지.",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*/[a-z][a-z0-9_]*(?!\\n)$"
+        },
+        "become": {
+          "type": "object",
+          "description": "승격.",
+          "properties": {
+            "method": {
+              "enum": [
+                "sudo",
+                "su",
+                "enable"
+              ]
+            },
+            "credential": {
+              "type": "string",
+              "minLength": 1,
+              "description": "승격 Credential 이름. 생략하면 로그인 Credential의 password.",
+              "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
+            }
+          },
+          "required": [
+            "method"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocol",
+        "address",
+        "port",
+        "credential"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "minProperties": 1
+}

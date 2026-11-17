@@ -1095,7 +1095,7 @@ Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 �
 
 **대응**: 승인되지 않은 변경이면 해당 관리자 계정·접속 경로를 막고 직전 백업으로 되돌린 뒤 보안 담당에게 보고한다. 승인된 작업이면 변경 기록에 남긴다. 알림에 멤버 변경 비교라고 되어 있으면 장애 전환이 있었던 것이니 멤버 고유 설정은 변경으로 세지 않았음을 감안한다.
 
-**알림이 오지 않을 때**: Semaphore 백업 작업이 `FORTIGATE-ALERT`로 실패했다면 변경은 감지했으나 webhook이 없거나 전송이 실패한 것이다. 같은 변경은 다시 알리지 않으므로 작업 로그의 변경 항목을 직접 확인하고 webhook(`fortigate_backup_alert_webhook_url`) 설정을 고친다.
+**알림이 오지 않을 때**: Semaphore 백업 작업이 `FORTIGATE-ALERT`로 실패했다면 변경은 감지했으나 webhook이 없거나 전송이 실패한 것이다. 같은 변경은 다시 알리지 않으므로 작업 로그의 변경 항목을 직접 확인하고 webhook(`fortigate_backup_alert_webhook_url`) 설정을 고친다. 이 값은 OpenBao `agents/openobserve`의 `alert_webhook_plain_url`(text/plain 경로)이어야 한다. 옛 JSON 경로 주소가 남아 있으면 text/plain 본문이 거부되어 같은 오류가 난다.
 
 <a id="switch-login-failures"></a>
 ### 🟠 스위치 로그인 실패 반복 (`infra-switch-login-failures`)
