@@ -2,6 +2,8 @@
 # ==============================================================================
 # Host Audit — Configuration Drift 하위 실행 1회 (drift.yml이 _drift 루프로 포함, #124)
 # ==============================================================================
+# 하위 실행(site.yml, host_agents.yml)은 새 OpenBao 구조(inventory/·secrets/ 마운트의 Asset·Endpoint·Credential·Service 문서)를
+# 자기 resolve_connection과 공용 읽기 지점으로 읽는다. 이 러너의 AppRole(host_audit = provision ∪ host_agents ∪ 자기 경로)이 그 문서를 모두 읽는다.
 - name: Run one Drift sub-run when it has targets
   when: _drift.hosts | length > 0
   block:
@@ -30,8 +32,7 @@
         ANSIBLE_CALLBACKS_ENABLED: ansible.posix.timer
         ANSIBLE_FORCE_COLOR: "0"
         VAULT_ADDR: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR'), true), true) }}"
-        VAULT_NAMESPACE: "{{ vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE'), true), true) }}"
-        VAULT_MOUNT: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT'), true), true) }}"
+        # 네임스페이스·마운트는 하위 실행의 읽기 지점(lookup openbao_doc)이 정한다. 넘기는 것은 주소와 인증뿐이다.
         VAULT_ROLE_ID: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID'), true), true) }}"
         VAULT_SECRET_ID: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID'), true), true) }}"
         VAULT_TOKEN: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN'), true), true) }}"

@@ -77,7 +77,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 |---|---|
 | `status` | `ok`(수집 완료) · `unreachable`(접속 실패) · `probe_failed`(접속은 됐으나 수집 표식 없음) |
 | `reason` | 점검불가 이유(첫 줄, 최대 200자). `ok`이면 빈 문자열 |
-| `declared` | 인벤토리 값 (`fqdn`, `ip`, `host_agents_environment`, 그룹). 환경이 비면 보고서에 '미지정' |
+| `declared` | 인벤토리 값 (`fqdn`, `ip`, 그룹)과 환경(`host_audit_environment`, 역할 기본값 `production`). 허용 값만 받는다(AUD-001) |
 | `identity` / `os` | 호스트에서 수집한 값. `status`가 `ok`가 아니면 `null`. `ips`는 루프백·링크 로컬을 뺀 전체 주소, `account`는 점검에 쓴 계정 |
 | `os.name` | `/etc/os-release`의 `PRETTY_NAME`, 없으면(CentOS 6) `/etc/redhat-release` 첫 줄 |
 
@@ -95,7 +95,8 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_timezone` | `Asia/Seoul` | 보고서 시각 표기 |
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
 | `host_audit_kisa_alert_enabled` | `true` | 정기 실행의 KISA 월간 악화 알림(§15, #331). false면 알리지 않음 |
-| `host_audit_alert_webhook` · `host_audit_alert_validate_certs` | `{}` · `true` | 알림 webhook 직접 지정(`{url, header, token}`, Extra variables) · TLS 검증. 비우면 OpenBao `agents/openobserve` 값 |
+| `host_audit_alert_validate_certs` | `true` | 알림 webhook TLS 검증. 주소는 OpenBao `secrets/services/alert/notify`의 `url`이고 실행 변수로 덮어쓰지 않는다 |
+| `host_audit_environment` | `production` | 점검 기록의 환경(`declared.environment`). 모든 호스트가 같은 값이라 인벤토리 변수가 아니라 역할 기본값이다 |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
 | `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |
@@ -115,7 +116,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-010` | `Probe host identity and OS (raw, read-only)` | `ansible.builtin.raw` | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
 | `AUD-011` | `Build the per-host audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_host_record` 필터 |
 | `AUD-100` | `Probe Asset Inventory (raw, read-only)` | `ansible.builtin.raw` (`become: true`) | All (CentOS 6 ~ Rocky 10, Ubuntu) | 조회 전용, `changed_when: false`, `check_mode: false`, `ignore_unreachable: true` |
-| `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record`·`host_audit_asset_declaration` 필터. 선언 값은 `resolve_connection`이 이미 읽은 호스트 KV(`_host_kv_dict`)에서 다섯 키만 고른다(OpenBao 재조회 없음) |
+| `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record`·`host_audit_asset_declaration` 필터. 선언 값은 `resolve_connection`이 이미 읽은 Asset 문서(`_asset_doc`)의 `description`과 `isms` 절에서 다섯 값만 고른다(OpenBao 재조회 없음) |
 | `AUD-012` | `Save the per-host record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
 | `AUD-020` | `Find the per-host records of this run` | `ansible.builtin.find` | 러너 | 읽기 전용 |
 | `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터. Package 발견은 넘기지 않고 `package_findings_dir`(파일 디렉터리)만 넘긴다(#155) |
@@ -142,33 +143,34 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 
 **판정 규칙**
 
-- **선언 값 출처**: ISMS 자산대장의 사본인 OpenBao `hosts/<Inventory Hostname>`다. `resolve_connection`이 접속 해석 때 이미 읽은 호스트 KV dict에서 다섯 키만 고르고(같은 dict에 접속 정보가 있어 통째로 기록·보고서에 넘기지 않는다) OpenBao를 다시 조회하지 않는다. 키는 용도=`description`(끝의 `[그룹자산명]`도 그대로 표시), `isms_department`(관리 부서), `isms_owner_role`(책임자 직책), `isms_admin_role`(관리자 직책), `isms_asset_importance`(자산중요도, H/M/L)다.
-- **조회 실패**: 다음 둘 중 하나면 다섯 칸 모두 '조회 실패'로 표시한다. (1) `hosts/<host>` 조회가 200이 아니다. 404도 같다. 항목이 없는 서버도 조회 실패다. (2) 200인데 읽은 dict가 비어 있다. KV 모양이 달라 `resolve_connection`이 `{}`로 떨어진 경우를 값 없음으로 오해하지 않기 위해서다. 접속 정보만 있고 선언 키가 없는 항목은 비어 있지 않으므로 '미지정'이다. 값이 정말 없는 것('미지정')과 구분하며 메일 요약도 '선언 미지정 호스트'와 '선언 조회 실패 호스트'를 따로 센다.
-- **미지정**: 조회는 됐는데 다섯 키 중 빈 값. `hosts/<host>`가 200으로 답했지만 키가 없는 서버와 `isms_target=false` 서버도 별도 상태 없이 '미지정'이다.
+- **선언 값 출처**: ISMS 자산대장의 사본인 OpenBao Asset 문서 `inventory/assets/<Inventory Hostname>`다. `resolve_connection`이 접속 해석 때 이미 읽어 `_asset_doc`으로 발행한 문서에서 다섯 값만 고르고(같은 문서에 접속 절(`access`)이 있어 통째로 기록·보고서에 넘기지 않는다) OpenBao를 다시 조회하지 않는다. 값은 용도=최상위 `description`(끝의 `[그룹자산명]`도 그대로 표시), `isms` 절의 `department`(관리 부서), `owner_role`(책임자 직책), `admin_role`(관리자 직책), `asset_importance`(자산중요도, H/M/L)다. `isms`의 나머지 키(`target`·`group_asset_name`·`personal_info_system`)는 이 역할이 읽지 않는다(자산대장 스크립트의 몫). 스키마(`schemas/openbao/inventory/asset.schema.json`)의 이름이 읽는 키와 같다.
+- **조회 실패**: 다음 둘 중 하나면 다섯 칸 모두 '조회 실패'로 표시한다. (1) `_asset_doc`이 발행되지 않았다(`resolve_connection`은 Asset 문서가 없으면 그 호스트를 실패시키므로, 접속 해석을 거치지 않은 실행에서만 생긴다). (2) 발행됐지만 문서가 비어 있다. 접속 절만 있고 선언 값이 없는 문서는 비어 있지 않으므로 '미지정'이다. 값이 정말 없는 것('미지정')과 구분하며 메일 요약도 '선언 미지정 호스트'와 '선언 조회 실패 호스트'를 따로 센다.
+- **미지정**: 조회는 됐는데 다섯 값 중 빈 값. Asset 문서에 `isms` 절이 없는 서버와 `isms.target=false` 서버도 별도 상태 없이 '미지정'이다.
 - **잘못된 값**: 자산중요도가 H/M/L이 아니면 `잘못된 값 (<원래 값>)`으로 표시한다(원래 값은 20자까지, 넘으면 `…`). 비교는 대문자 H/M/L 정확 일치이고 정규화하지 않는다(자산대장 표기 그대로라는 용어 정의를 따른다. 소문자·다른 표기는 사본 오류로 보고 고치게 한다). 표시 문구는 원래 값만 덧붙이고 허용 값(H·M·L)을 칸마다 되풀이하지 않는다: 스펙이 '원래 값과 함께 잘못된 값'으로 정했고 허용 값은 용어 정의(Asset Importance)와 이 절에 있다.
 - **선언 값 처리 결정**
   - 저장 값은 자산대장 사본 그대로다(증적). 앞뒤 공백만 자른다. 상한은 값 하나 500자이고 넘으면 `…`로 끝낸다. 실제 용도(끝의 `[그룹자산명]` 포함)는 그보다 훨씬 짧아 잘리지 않으며, 상한은 엉뚱한 긴 덩어리가 기록에 들어가는 것만 막는다. 문자열이 아닌 값(dict·list·bool·숫자)은 빈 값으로 저장하되 `declared.asset.malformed`에 키를 남기고 보고서에는 '잘못된 값 (값이 문자열이 아님)'으로 보인다('미지정'이 아니다).
-  - 호스트 KV 텍스트에 `{{ }}` 같은 템플릿 문법이 있어도 평가되지 않는다. 필터가 값을 unsafe로 표시하므로(2.19 이전 버전에 필요하고 2.19 이상에서는 기본 동작과 같다) 러너 버전과 무관하게 템플릿으로 해석되지 않는다. `tests/test_host_audit_inventory.py`가 실제 `[AUD-101]` 태스크를 `ansible-playbook`으로 돌려 확인한다. 그래서 값을 고쳐 저장하지 않는다. 태스크는 입력에 호스트 KV 전체(접속 정보)가 있어 `no_log`다(실패하면 내용이 가려지므로 필터 동작은 pytest가 직접 검증한다).
-  - 404를 포함해 200이 아닌 응답은 모두 '조회 실패'다(티켓 #492의 기준). 원인(403·404·타임아웃)은 기록하지 않는다. 호스트 KV를 읽는 곳이 `resolve_connection` 하나라(변수 이름은 `tests/test_host_audit_inventory.py`가 고정한다) 같은 판정을 거기서 받아 쓰고, 그 변수(`_effective_host_resp`, `_host_kv_dict`)가 없으면 조회 실패다.
-  - 태그 색: '미지정'·'조회 실패'는 회색, '잘못된 값'만 빨강이다. 조회 실패는 값을 알 수 없다는 뜻이지 발견이 아니므로 지원 종료·선언 외(빨강)와 구분하고, 메일 요약은 조회 실패 호스트 수를 경고(WARN)로 센다. 치명(CRIT)으로 올리지 않는 이유는, 상태 코드를 기록하지 않아 항목 없음(404)과 장애(403·타임아웃)를 구분할 수 없는 채로 전체 실패를 장애로 단정하면 `--limit` 실행이나 신규 호스트에서 오경보가 나기 때문이다. 세 상태 호스트 수(`미지정`·`조회 실패`·`잘못된 값`)는 각각 따로 세므로 한 호스트가 둘 이상에 들어갈 수 있다.
-  - 호스트별 JSON `schema_version`은 2로 둔다. `declared.asset`은 `security_grade`가 `asset_importance`로 바뀌고 `lookup`이 더해졌다. 이 필드는 Audit Baseline 비교에 쓰이지 않고 보고서 모델을 만들 때 실행 안에서 읽힌다. 이 변경 전에 저장한 기록의 `security_grade`는 자산중요도 칸에 '잘못된 값 (<원래 값>)'으로 보인다. Git 호스트 변수에 남은 옛 선언은 더 이상 읽지 않으므로(경고 없음), 호스트 변수의 옛 선언은 지우고 자산대장 사본(OpenBao)에 값을 등록한다.
+  - Asset 문서 텍스트에 `{{ }}` 같은 템플릿 문법이 있어도 평가되지 않는다. 필터가 값을 unsafe로 표시하므로(2.19 이전 버전에 필요하고 2.19 이상에서는 기본 동작과 같다) 러너 버전과 무관하게 템플릿으로 해석되지 않는다. `tests/test_host_audit_inventory.py`가 실제 `[AUD-101]` 태스크를 `ansible-playbook`으로 돌려 확인한다. 그래서 값을 고쳐 저장하지 않는다. 태스크는 입력에 Asset 문서 전체(접속 절 포함)가 있어 `no_log`다(실패하면 내용이 가려지므로 필터 동작은 pytest가 직접 검증한다).
+  - Asset 문서를 읽는 곳이 `resolve_connection` 하나라(변수 이름 `_asset_doc`은 `tests/test_host_audit_inventory.py`가 고정한다) 같은 결과를 거기서 받아 쓰고, 그 변수가 없거나 비어 있으면 조회 실패다. 원인(403·404·타임아웃)은 기록하지 않는다(문서가 없거나 못 읽으면 `resolve_connection`이 그 호스트를 실패시킨다).
+  - 태그 색: '미지정'·'조회 실패'는 회색, '잘못된 값'만 빨강이다. 조회 실패는 값을 알 수 없다는 뜻이지 발견이 아니므로 지원 종료·선언 외(빨강)와 구분하고, 메일 요약은 조회 실패 호스트 수를 경고(WARN)로 센다. 치명(CRIT)으로 올리지 않는 이유는, 상태 코드를 기록하지 않아 문서 없음(404)과 장애(403·타임아웃)를 구분할 수 없는 채로 전체 실패를 장애로 단정하면 `--limit` 실행이나 신규 호스트에서 오경보가 나기 때문이다. 세 상태 호스트 수(`미지정`·`조회 실패`·`잘못된 값`)는 각각 따로 세므로 한 호스트가 둘 이상에 들어갈 수 있다.
+  - 호스트별 JSON `schema_version`은 2로 둔다. `declared.asset`은 `security_grade`가 `asset_importance`로 바뀌고 `lookup`이 더해졌다. 이 필드는 Audit Baseline 비교에 쓰이지 않고 보고서 모델을 만들 때 실행 안에서 읽힌다. 이 변경 전에 저장한 기록의 `security_grade`는 자산중요도 칸에 '잘못된 값 (<원래 값>)'으로 보인다. Git 호스트 변수에 남은 옛 선언은 더 이상 읽지 않으므로(경고 없음), 호스트 변수의 옛 선언은 지우고 자산대장 사본(OpenBao Asset 문서의 `isms` 절)에 값을 등록한다.
 - **선언 외**: 특수권한자(uid 0, wheel·sudo·admin 그룹 구성원, sudoers 규칙 대상) 중 허용 목록에 없는 계정. 허용 목록은 `accounts`의 sudo 권한 계정(`sudo: true`, 또는 `sudo` 미지정 + `tier: admin`, `state: absent` 제외), `openbao_ssh_allowed_principals`, `host_audit_privileged_extra`, 그리고 root다. sudoers의 `User_Alias` 등 별칭은 펼치지 않는다.
 - **장기 미사용**: 로그인 가능한 셸을 가진 계정 중 `lastlog -t 90`에 없는 계정(기록 없음 포함). 점검 계정과 uid 0 계정은 제외하고 표지에 명시한다. uid 0의 직접 로그인은 Configuration Vulnerability(KISA-2026) 항목이 다룬다. lastlog가 없으면 '마지막 로그인 점검불가'로 표시하고 장기 미사용 판정을 하지 않는다.
 - **EOL**: `roles/host_audit/vars/main.yml`의 `host_audit_eol_table`(기준일 `reviewed_on`, 무상 표준 지원 종료일). 실행 시작일 기준 지난 날짜면 지원 종료(EOS), 180일 이내면 EOL 임박, 표에 없으면 확인 불가.
 - **점검불가**: Asset Inventory 수집이 실패하면 '점검불가(수집 실패)', /etc/shadow를 읽지 못하면 '계정 잠금 상태 점검불가'.
 
-**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값은 ISMS 자산대장에 적힌 표기 그대로 넣는다. 호스트 KV의 다섯 키 외 값(접속 정보)은 기록·보고서·메일에 넘어가지 않는다.
+**보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값은 ISMS 자산대장에 적힌 표기 그대로 넣는다. Asset 문서의 다섯 값 외(접속 절 등)는 기록·보고서·메일에 넘어가지 않는다.
 
 **읽기 전용**: 스크립트는 sudo로 돌지만 rpm 조회만은 `nobody`로 낮춰 실행한다(`setpriv`, 없으면 `su`). root로 `rpm -qa`를 돌리면 rpm이 DB를 쓰기 모드로 열어 EL9의 `rpmdb.sqlite-shm` 수정 시각(EL6/7은 Berkeley DB 환경 파일)이 바뀌기 때문이다. molecule `VERIFY-AUD-010`과 pytest의 `centos:6`/`centos:7` 컨테이너 시험이 관리 영역의 메타데이터까지 같은지 확인한다.
 
-**선언 예시** (OpenBao `hosts/<Inventory Hostname>`의 키. 자산대장 표기 그대로 적는다)
+**선언 예시** (OpenBao Asset 문서 `inventory/assets/<Inventory Hostname>`의 `description`과 `isms` 절. 자산대장 표기 그대로 적는다)
 
 ```yaml
 description: "웹 서비스 [그룹자산명]"
-isms_department: "인프라팀"
-isms_owner_role: "인프라팀장"
-isms_admin_role: "시스템 관리자"
-isms_asset_importance: "M"
+isms:
+  department: "인프라팀"
+  owner_role: "인프라팀장"
+  admin_role: "시스템 관리자"
+  asset_importance: "M"
 ```
 
 **호스트별 JSON 추가 필드 (schema_version 2)**: `declared.asset`(위 5개 + `lookup`(`ok`/`failed`) + `privileged_allowlist` + 문자열이 아닌 값이 있을 때만 `malformed`(그 키 목록))과 `inventory`가 붙는다. 식별이 실패한 호스트는 `inventory: null`.
@@ -206,7 +208,7 @@ isms_asset_importance: "M"
   - 템플릿의 인쇄 CSS와 외부 리소스 부재
 - **pytest** `tests/test_host_audit_inventory.py`는 Asset Inventory를 검증한다.
   - 수집 결과 해석: 8개 영역, 특수권한 근거, 비밀번호 해시 미포함, CentOS 6 출력(netstat, epoch 없는 rpm)
-  - 보고서 모델: 미지정·조회 실패·잘못된 값(호스트 KV에서 다섯 키만 읽음, 접속 정보 미포함)·선언 외·90일 장기 미사용(점검 계정·uid 0 제외)·EOS/임박/미확인·전체 패키지 목록 미포함·수집 실패 점검불가
+  - 보고서 모델: 미지정·조회 실패·잘못된 값(Asset 문서에서 다섯 값만 읽음, 접속 정보 미포함)·선언 외·90일 장기 미사용(점검 계정·uid 0 제외)·EOS/임박/미확인·전체 패키지 목록 미포함·수집 실패 점검불가
   - 수집 스크립트를 이 머신과 `centos:6`·`centos:7` 컨테이너(이미지가 로컬에 있을 때)에서 실제로 실행
 - **molecule Fast Scenario** `molecule/fast/verify.yml`:
   - `VERIFY-AUD-010`: 수집(식별 + Asset Inventory) 전후 관리 영역의 체크섬·메타데이터가 같은지 확인한다.
@@ -489,24 +491,26 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 - 자격증명·입력 누락: 업로드하지 않는다. 보고서는 만들고(비교 기준 '조회 실패') 실행은 실패로 끝난다(`AUD-516`).
 - Audit Baseline 조회 실패(목록·포인터·findings.json): 비교 없이 보고서를 만들고 원본은 올린 뒤 실행을 실패로 끝낸다.
 - 업로드 실패(파일 하나라도): 실행을 실패로 끝낸다. 정기 실행이면 포인터를 올리지 않아 이 실행은 다음 달 비교 기준이 되지 않는다.
-- 판정 위치(#126): 자격증명은 `storage_credentials.yml`(AUD-500~502, 재발송도 사용), 판정 `AUD-516`은 `storage_result.yml`에 있고 메일 발송(§13) **뒤에** 돈다. 그래서 원본이 다 올라간 실행은 Audit Baseline 조회만 실패했어도 메일이 나가고, 실행은 그 뒤 실패로 끝난다.
+- 판정 위치(#126): 자격증명은 `storage_credentials.yml`(AUD-501·502, 재발송도 사용), 판정 `AUD-516`은 `storage_result.yml`에 있고 메일 발송(§13) **뒤에** 돈다. 그래서 원본이 다 올라간 실행은 Audit Baseline 조회만 실패했어도 메일이 나가고, 실행은 그 뒤 실패로 끝난다.
 
-### 11.4 입력 (OpenBao KV v2, Git에는 시크릿 없음)
+### 11.4 입력 (OpenBao, Git에는 시크릿 없음)
 
-| 경로 | 키 | 필수 | 설명 |
+읽는 문서와 필수 키는 역할 `vars/main.yml`의 `host_audit_openbao_required` 하나가 선언하고, 입력 검증(`AUD-502`·`AUD-603`)·스키마 `required` 대조 테스트·요청 기록 단언이 같은 선언을 쓴다. 읽기는 공용 읽기 지점(`lookup('openbao_doc', ...)`, [openbao_integration.md](openbao_integration.md))뿐이라 역할에는 네임스페이스·마운트·접두사·로그인 코드가 없다.
+
+| 문서 | 키 | 필수 | 설명 |
 |---|---|---|---|
-| `agents/host_audit` | `storage_access_key`, `storage_secret_key` | ● | Host Audit 전용 키(Put·Get·List). 백업·유지보수 키 재사용 금지 |
-| `agents/host_audit` | `storage_bucket` | | 기본 `host-audit` |
-| `agents/host_audit` | `storage_endpoint` | | 비우면 `agents/rustfs.rustfs_endpoint` |
-| `agents/host_audit` | `storage_region` | | 기본 `us-east-1` |
+| `secrets/services/rustfs/audit_reports` | `access_key`, `secret_key` | ● | Host Audit 전용 키(Put·Get·List). 백업·유지보수 키 재사용 금지 |
+| `inventory/services/rustfs` | `url` | ● | RustFS 주소(비밀 아님) |
+| `inventory/services/rustfs` | `region` | | 기본 `us-east-1` |
+| `secrets/services/alert/notify` | `url` | ● (악화 알림이 있을 때) | KISA 악화 알림 webhook(§15). 못 읽어도 보관·메일은 막히지 않는다 |
+| `inventory/config/host_audit` | `mail_recipients`, `mail_sender`, `mail_sender_display_name` | (필수 키 없음) | 메일 입력(§13.3). 없으면 읽기 실패가 아니라 메일 문제로 남는다 |
 
-로그인은 Host Agents와 같은 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`) 또는 `VAULT_TOKEN`이다. AppRole 정책에 `agents/host_audit`, `agents/rustfs`, `agents/openobserve`(KISA 악화 알림 webhook, §15) 읽기가 있어야 한다. 시험할 때는 Extra variables `host_audit_storage`(endpoint·bucket·access_key·secret_key·region)로 OpenBao를 건너뛸 수 있고, 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다.
+버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다(전용 키의 정책이 이 버킷으로 범위가 정해져 있다). 주소·키는 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이다. 이 역할은 토큰을 따로 받아 두지 않는다(`_vault_token`을 만들지 않음): 읽는 태스크마다 새로 로그인하므로 앞 단계가 토큰 TTL(30분)보다 길어도 만료된 토큰을 쓰지 않는다. `host_audit_environment`는 `production|staging|development|test`만 허용한다(`AUD-001`). `host_audit` AppRole 정책이 위 문서를 읽는다(`tofu/openbao`).
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `host_audit_storage_enabled` | `true` | false면 러너 로컬만, 비교 안 함 |
-| `host_audit_storage_bucket` | `host-audit` | 버킷 기본값 |
-| `host_audit_storage` | `{}` | 보관 대상 직접 지정(시험용, Extra variables) |
+| `host_audit_storage_bucket` | `host-audit` | 버킷 이름 |
 | `host_audit_storage_validate_certs` · `host_audit_storage_ca_file` | `true` · `""` | RustFS TLS 검증 · 사설 CA(러너 경로) |
 | `host_audit_storage_timeout` | `60` | S3 요청 하나의 최대 시간(초) |
 
@@ -527,7 +531,7 @@ $S3 put-object-lock-configuration --bucket host-audit --object-lock-configuratio
 $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configuration file://host-audit-lifecycle.json
 ```
 
-전용 키: 정책 `host-audit-putget-policy.json`(`s3:PutObject`·`s3:GetObject` on `host-audit/*`, `s3:ListBucket` on `host-audit`, Delete 없음)을 만들고 Host Audit 전용 사용자에 붙인 뒤 키를 OpenBao `agents/host_audit`에 넣는다. RustFS 콘솔(Identity → Policies/Users) 또는 `rc admin`(MinIO 호환 관리 API `/rustfs/admin/v3/add-canned-policy`, `add-user`, `idp/builtin/policy/attach`)으로 한다. 확인 결과: 이 키로 Put·Get·List는 성공, Delete·다른 버킷 쓰기·수명주기 변경은 `AccessDenied`.
+전용 키: 정책 `host-audit-putget-policy.json`(`s3:PutObject`·`s3:GetObject` on `host-audit/*`, `s3:ListBucket` on `host-audit`, Delete 없음)을 만들고 Host Audit 전용 사용자에 붙인 뒤 키를 OpenBao `secrets/services/rustfs/audit_reports`에 넣는다. RustFS 콘솔(Identity → Policies/Users) 또는 `rc admin`(MinIO 호환 관리 API `/rustfs/admin/v3/add-canned-policy`, `add-user`, `idp/builtin/policy/attach`)으로 한다. 확인 결과: 이 키로 Put·Get·List는 성공, Delete·다른 버킷 쓰기·수명주기 변경은 `AccessDenied`.
 
 **Object Lock (RustFS 1.0.1 확인)**: 생성 시 Object Lock을 켜면 버저닝이 함께 켜지고, 기본 보존과 객체별 보존(`x-amz-object-lock-mode`)이 적용되며, 보존 중인 버전 삭제는 `AccessDenied`로 거부된다(COMPLIANCE로 확인). **GOVERNANCE**를 권장한다 — 개인정보나 시크릿이 잘못 올라갔을 때 관리자가 우회 권한으로 지울 수 있어야 하고, 전용 키에는 Delete도 우회 권한도 없으므로 점검 원본은 그대로 보호된다. 같은 키로 덮어쓰면 새 버전이 생길 뿐 이전 버전은 보존된다. Host Agents의 restic 버킷은 Object Lock을 끈다(ADR-0006) — 이 버킷과 다르다.
 
@@ -535,9 +539,8 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
-| `AUD-500` | `Log in to OpenBao with AppRole for the Host Audit storage key` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
-| `AUD-501` | `Fetch the Host Audit storage KV from OpenBao (agents/host_audit, agents/rustfs, agents/openobserve alert webhook)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
-| `AUD-502` | `Resolve the Host Audit storage target and dedicated key` | `ansible.builtin.set_fact` | 러너 | 누락 항목은 이름만, `no_log` |
+| `AUD-501` | `Read the Host Audit storage documents and the alert document (host_audit_openbao_required)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 문서마다 따로 읽어(`errors='ignore'`) 못 읽은 문서 경로만 보관 문제로 이름 붙이고, 알림 문서는 실패해도 보관을 막지 않음. 읽을 문서는 `host_audit_openbao_*_doc` 선언에서 옴 |
+| `AUD-502` | `Resolve the Host Audit storage target and dedicated key` | `ansible.builtin.set_fact` | 러너 | 누락 항목은 문서 경로와 키 이름만(선언 `host_audit_openbao_required` 기준), `no_log` |
 | `AUD-503` | `List the Audit Baseline pointers of scheduled runs` | `ansible.builtin.uri` (S3 ListObjectsV2) | 러너 | 읽기 전용, `no_log` |
 | `AUD-504` | `Get the pointers of scheduled runs within the 12-month window` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log` |
 | `AUD-507` | `Make the runner-only directory for the previous findings` | `ansible.builtin.file` | 러너 | `package_findings/`와 `previous/`, `0700` (보관하지 않는 디렉터리, #155·#156) |
@@ -564,7 +567,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
   | 프로비저닝 | `site.yml --check --diff` | `host_audit_drift_site_pattern` (`servers:loadbalancers`) | `Provision Baseline On-Premise Target Hosts` |
   | Host Agents Config | `host_agents.yml --tags agents_config --check --diff` | `host_audit_drift_agents_pattern` (`servers:!host_agents_excluded`) | `Apply Host Agents` |
 
-- **인증**: 하위 실행은 평소 Semaphore 실행과 같은 경로로 접속한다. 각 플레이북이 자기 `resolve_connection`·`cleanup_connection` 플레이를 돌리고, 같은 인벤토리 소스(`ansible_inventory_sources`를 `-i`로)와 같은 OpenBao 자격증명을 쓴다. 자격증명(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`·`VAULT_TOKEN`·`VAULT_ADDR`·`VAULT_NAMESPACE`·`VAULT_MOUNT`)은 이번 실행의 변수(Semaphore Secret extra var) 또는 환경 변수에서 읽어 **하위 프로세스 환경 변수로만** 넘긴다. 명령줄과 파일에는 남기지 않고 태스크는 `no_log`다. 그래서 Host Audit 템플릿의 AppRole 정책은 Deploy·Config와 같은 KV 경로(`hosts/<host>`, `users/*`, `hosts/<host>/agents`, `agents/*`)를 읽을 수 있어야 한다. 비밀이 아닌 실행 변수는 `host_audit_drift_forward_vars`(기본 `bootstrap_user`, `target_admin_users`)에 정의돼 있으면 넘기고, 더 필요한 값은 `host_audit_drift_extra_vars`로 준다.
+- **인증**: 하위 실행은 평소 Semaphore 실행과 같은 경로로 접속한다. 각 플레이북이 자기 `resolve_connection`·`cleanup_connection` 플레이를 돌리고, 같은 인벤토리 소스(`ansible_inventory_sources`를 `-i`로)와 같은 OpenBao 자격증명을 쓴다. 새 구조의 Host Provisioning(`site.yml`, FUNA env 포함)과 Host Agents Config가 읽는 문서(Asset·Endpoint·Credential·Automation Identity·Service·작업 설정)를 하위 실행이 같은 공용 읽기 지점으로 읽어 렌더링하므로, `host_audit` AppRole은 `provision`과 `host_agents`가 읽는 경로를 모두 읽는다(정책 합집합, `tofu/openbao/approles.tf`). 하위 프로세스에는 OpenBao 주소와 인증(`VAULT_ADDR`·`VAULT_ROLE_ID`·`VAULT_SECRET_ID`·`VAULT_TOKEN`)을 이번 실행의 변수(Semaphore Secret extra var) 또는 환경 변수에서 읽어 **하위 프로세스 환경 변수로만** 넘긴다(네임스페이스·마운트는 읽기 지점이 정하므로 넘기지 않는다). 명령줄과 파일에는 남기지 않고 태스크는 `no_log`다. 비밀이 아닌 실행 변수는 `host_audit_drift_forward_vars`(기본 `target_removed_users`: 계정 입력 중 실행 변수로 남은 유일한 값, 저장된 사실은 Asset 문서의 `access` 절이 준다)에 정의돼 있으면 넘기고, 더 필요한 값은 `host_audit_drift_extra_vars`로 준다.
 - **diff 원문 미보관**: 콜백 출력에는 diff 원문(파일 내용)이 있어 비밀값이 있을 수 있다. 러너 임시 파일(실행 디렉터리 밖, `0600`)에 받아 해석한 뒤 `always`에서 지운다. 행 요약에는 경로, 추가·삭제 줄 수, 바뀌는 속성 이름, 반복 항목 수만 남는다. `no_log` 태스크는 '비공개(no_log)'로만 나온다. 핸들러 결과는 바뀐 태스크의 결과일 뿐이라 행을 만들지 않는다.
 - **비대상(점검불가 아님)**: Raw Provisioning Path 호스트(CentOS 6/7, 인벤토리 `raw_provisioning_path`가 우선)는 하위 실행에 넣지 않는다. raw 태스크는 `--check`에서 스킵되어(ADR-0005) Drift를 볼 수 없는 것이 설계다. 조치할 항목이 아니므로 점검불가 숫자·표에 넣지 않고, 섹션 모델의 `not_applicable`(호스트·이유)로 모아 보고서 요약과 메일 본문에 'Configuration Drift 비대상 N대 — raw 태스크가 --check에서 스킵됨' 한 줄로 따로 보인다(호스트별 부록에는 '비대상'과 이유가 나온다).
 - **점검불가**(실제 확인이 필요한 것):
@@ -588,7 +591,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 | `host_audit_drift_site_pattern` | `servers:loadbalancers` | site.yml 하위 실행 대상 |
 | `host_audit_drift_agents_pattern` | `servers:!host_agents_excluded` | Host Agents Config 하위 실행 대상 |
 | `host_audit_drift_timeout` | `3600` | 하위 실행 하나의 최대 시간(초) |
-| `host_audit_drift_forward_vars` | `[bootstrap_user, target_admin_users]` | 정의돼 있으면 하위 실행에 넘길 실행 변수 이름 |
+| `host_audit_drift_forward_vars` | `[target_removed_users]` | 정의돼 있으면 하위 실행에 넘길 실행 변수 이름 |
 | `host_audit_drift_extra_vars` | `{}` | 하위 실행에 더 넘길 비밀 아닌 변수 |
 | `host_audit_drift_ignore` | `[]` | check 모드 노이즈 제외 표식 (`spec_id` 또는 `task`, `reason`) |
 
@@ -603,7 +606,7 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 | `AUD-406` | `Build the Configuration Drift section model` | `ansible.builtin.set_fact` | 러너 | `host_audit_drift_section` 필터 |
 | `AUD-407` | `Remove the callback output (holds raw diff text)` | `ansible.builtin.file` | 러너 | `state: absent` |
 
-검증: pytest `tests/test_host_audit_drift.py` — 실제 `ansible.posix.json` `--check --diff` 출력(`tests/fixtures/host_audit_drift/check_callback.json`, 로컬 호스트 대상 check 실행으로 생성)에서 SPEC-ID 행, 준수·스킵 태스크 제외, diff 원문·no_log 내용 미포함, 실패·접속 실패 호스트, 선언 플레이만 행 생성, 핸들러 제외, 노이즈 제외 표식, Raw 경로·수집 실패 호스트 계획, 하위 실행 실패 시 부분 점검불가, 보고서 모델·템플릿(판단 칸). 하위 실행은 OpenBao 접속이 필요해 molecule 범위 밖이다.
+검증: pytest `tests/test_host_audit_drift.py` — 실제 `ansible.posix.json` `--check --diff` 출력(`tests/fixtures/host_audit_drift/check_callback.json`, 로컬 호스트 대상 check 실행으로 생성)에서 SPEC-ID 행, 준수·스킵 태스크 제외, diff 원문·no_log 내용 미포함, 실패·접속 실패 호스트, 선언 플레이만 행 생성, 핸들러 제외, 노이즈 제외 표식, Raw 경로·수집 실패 호스트 계획, 하위 실행 실패 시 부분 점검불가, 보고서 모델·템플릿(판단 칸). 하위 실행은 OpenBao 접속이 필요해 molecule 범위 밖이다. 하위 실행 정의(site.yml·host_agents.yml `--tags agents_config`, `--check`)와 넘기는 환경(주소·인증뿐, 네임스페이스·마운트 없음)은 `tests/test_host_audit_openbao.py`가 정적으로 고정한다.
 
 ## 13. 메일 발송 (#126)
 
@@ -640,25 +643,26 @@ report.yml
 - 머리글: `X-Host-Audit-Run-Id`, `X-Host-Audit-Report-SHA256`, `X-Host-Audit-Xlsx-Zip-SHA256`(zip을 붙인 메일만).
 - **수신자마다 1통**을 보낸다. 받는 사람은 다른 수신자의 주소를 보지 않는다. 또 한 통에 여러 명을 넣으면 일부 거부 시 `community.general.mail`이 거부된 주소를 경고로 찍는데, 모듈 경고는 `no_log`로 가려지지 않는다(실측).
 
-### 13.3 입력 (OpenBao KV v2, Git에는 주소 없음)
+### 13.3 입력 (OpenBao, Git에는 주소 없음)
 
-| 경로 | 키 | 필수 | 설명 |
+| 문서 | 키 | 필수 | 설명 |
 |---|---|---|---|
-| `agents/host_audit` | `mail_to` | ● | 받는 사람. 목록 또는 `,`·`;`·공백 구분 문자열. 중복은 대소문자 무시로 하나만 |
-| `agents/host_audit` | `mail_from` | ● | 보내는 주소 1개. Workspace relay가 허용한 도메인의 역할 주소 |
-| `agents/host_audit` | `mail_from_name` | | 보내는 사람 표시 이름. 없으면 주소만 보낸다 |
+| `inventory/config/host_audit` | `mail_recipients` | ● (보낼 때) | 받는 사람 목록. 중복은 대소문자 무시로 하나만(문자열 하나나 `,`·`;`·공백 구분 문자열도 받는다) |
+| `inventory/config/host_audit` | `mail_sender` | ● (보낼 때) | 보내는 주소 1개. Workspace relay가 허용한 도메인의 역할 주소 |
+| `inventory/config/host_audit` | `mail_sender_display_name` | | 보내는 사람 표시 이름. 없으면 주소만 보낸다 |
+
+수신자·발신자·표시 이름을 덮어쓰는 Extra variables는 없다(값의 출처는 이 문서 하나). 문서가 없으면(404) 수신자 없음 문제로, 못 읽으면(403·연결 불가·인증 정보 없음) 읽기 실패 문제로 남고(문서 경로만, 원인은 가림) 보내지 않으며 `AUD-610`이 실행을 실패로 끝낸다. 표시 이름은 선택이다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `host_audit_mail_enabled` | `true` | false면 보내지 않음 |
-| `host_audit_mail_to` · `host_audit_mail_from` | `[]` · `""` | Extra variables로 OpenBao 값을 덮어씀. 둘 다 주면 OpenBao를 조회하지 않음 |
-| `host_audit_mail_from_name` | `""` | 표시 이름. 변수가 OpenBao `mail_from_name`보다 앞선다. 이름은 RFC 2047로 인코딩해 `From:` 헤더에만 넣고 봉투 발신자(릴레이가 보는 값)는 주소 그대로다. CR/LF 같은 제어 문자나 `<>"@`가 있거나 공백뿐이거나 길면(영문 64자, 한글 등 비ASCII 15자 초과; 인코딩된 한 단어가 75자 안에 들게 한다) 이름을 버리고 주소만 보낸다(메일을 막지 않는다). 쉼표·세미콜론은 따옴표로 감싸 그대로 쓴다. 이름은 결과 판정의 가림 대상에도 들어간다(원문 일치만 가리며, 짧은 이름은 오류 문구의 같은 글자도 가린다). 수신자·발신자를 둘 다 변수로 주면 OpenBao를 조회하지 않으므로 이름도 변수로 줘야 한다 |
+| 표시 이름 | (문서 값) | 이름은 RFC 2047로 인코딩해 `From:` 헤더에만 넣고 봉투 발신자(릴레이가 보는 값)는 주소 그대로다. CR/LF 같은 제어 문자나 `<>"@`가 있거나 공백뿐이거나 길면(영문 64자, 한글 등 비ASCII 15자 초과; 인코딩된 한 단어가 75자 안에 들게 한다) 이름을 버리고 주소만 보낸다(메일을 막지 않는다). 쉼표·세미콜론은 따옴표로 감싸 그대로 쓴다. 이름은 결과 판정의 가림 대상에도 들어간다(원문 일치만 가리며, 짧은 이름은 오류 문구의 같은 글자도 가린다) |
 | `host_audit_mail_host` · `host_audit_mail_port` | `smtp-relay.gmail.com` · `587` | 운영값. 시험용 SMTP를 쓸 때만 덮어씀 |
 | `host_audit_mail_secure` | `starttls` | STARTTLS를 못 하면 보내지 않음. 시험용 평문은 `never` |
 | `host_audit_mail_ehlohost` | `""` | relay 설정이 HELO 도메인을 요구할 때 그 이름 |
 | `host_audit_mail_timeout` | `30` | SMTP 접속 제한 시간(초) |
 
-주소는 개인정보다. 주소를 다루는 태스크(AUD-601~603, 606, 608)는 모두 `no_log`이고, 오류 문구는 `host_audit_mail_redact`로 주소를 `<수신자>`로 바꾼 뒤에만 보여 준다. 보고서·호스트별 JSON·`run.json`·`mail_summary.json`에는 주소가 들어가지 않는다. 발송 태스크는 `ignore_errors`가 아니라 `failed_when: false`다 — ansible-core는 무시된 모듈 오류의 메시지("Failed to send mail to '<주소>'")를 `no_log`와 상관없이 찍는다(실측). 성공 여부는 `rc`와 모듈의 성공 메시지로 판정한다.
+주소는 개인정보다. 주소를 다루는 태스크(AUD-602·603, 606, 608)는 모두 `no_log`이고, 오류 문구는 `host_audit_mail_redact`로 주소를 `<수신자>`로 바꾼 뒤에만 보여 준다. 보고서·호스트별 JSON·`run.json`·`mail_summary.json`에는 주소가 들어가지 않는다. 발송 태스크는 `ignore_errors`가 아니라 `failed_when: false`다 — ansible-core는 무시된 모듈 오류의 메시지("Failed to send mail to '<주소>'")를 `no_log`와 상관없이 찍는다(실측). 성공 여부는 `rc`와 모듈의 성공 메시지로 판정한다.
 
 알려진 한계: `community.general.mail`의 STARTTLS는 서버 인증서를 검증하지 않는다(파이썬 `smtplib.starttls()` 기본 컨텍스트). relay 구간은 암호화되지만 중간자 공격을 막지 못한다 — 러너에서 relay까지의 경로는 사내망과 Google 사이 인터넷 구간이다.
 
@@ -675,8 +679,7 @@ report.yml
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `AUD-600` | `Decide whether this run sends the report mail` | `ansible.builtin.set_fact` | 러너 | 비활성·check 모드·보관 실패면 보내지 않음 |
-| `AUD-601` | `Log in to OpenBao with AppRole for the Host Audit mail settings` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
-| `AUD-602` | `Fetch the Host Audit mail settings from OpenBao (agents/host_audit)` | `ansible.builtin.uri` | 러너 | 읽기 전용, `no_log` |
+| `AUD-602` | `Read the Host Audit mail settings from OpenBao (inventory/config/host_audit)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 문서가 없으면 `{}`, 못 읽으면 값 없음(AUD-603이 문제로 남김) |
 | `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 수신자·발신자 주소와 선택 표시 이름(`From:` 헤더 값)을 해석, 문제는 키 이름·건수만, `no_log` |
 | `AUD-604` | `Create a private temporary directory for the attachment` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 디렉터리, AUD-607이 삭제 |
 | `AUD-605` | `Copy the report and the xlsx zip under their ASCII attachment names` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600`. 보고서 1개와 (요약에 `xlsx_zip`이 있고 호출자가 경로를 준 때만) xlsx zip 1개 |
@@ -744,7 +747,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 ### 13.6 검증
 
 - pytest `tests/test_host_audit_mail.py`: 수신자 정규화(목록·구분 문자열·중복·형식 오류는 건수만), 오류 문구의 주소 가림, 수신자별 발송 결과 판정(일부 실패·`failed_when` 재작성 대비), ASCII 첨부명, 실제 보고서 모델에서 만든 요약(주소 없음), 본문 템플릿(표·인라인만, `<style>`·이미지·SVG 없음, 50KB 미만, 이스케이프), 재발송 위치(KST 월 경계·형식 검사), 태스크 순서(보관 → 메일 → 보관 판정 → 메일 판정)와 `no_log`, 요약·본문의 zip SHA-256 줄. `tests/test_host_audit_xlsx_zip_report.py`(통합, 임시 SMTP·S3 서버): `report.yml`이 `xlsx/host-audit-<run_id>-xlsx.zip`을 같은 바이트로 만들고 보관 목록에 해시와 함께 올리며 요약에 zip 해시를 싣는지, 메일에 첨부 둘이 가는지, 재발송이 해시가 같으면 둘 다 보내고 다르거나 zip이 없으면 아무것도 보내지 않는지(zip 기록이 없는 옛 실행은 보고서만). `tests/test_host_audit_zip_write.py`: zip 모듈의 구성·순서·고정 시각·같은 바이트.
-- 수동 E2E(2026-10-08, 러너 로컬): mailpit(STARTTLS 필수, 자체 서명 인증서, 수신자 허용 규칙) + RustFS + OpenBao dev(namespace `infra/prod/host`)로 실제 report 단계를 돌렸다 — 수신자 3명에게 1통씩 도착, 첨부 SHA-256 = 버킷 `report.html` SHA-256, 재발송 첨부도 같은 해시, 업로드 실패 시 메일 0통·실행 실패, 메일 실패(닫힌 포트·전원 거부·일부 거부) 시 원본 유지·실행 실패, 수신자 없음 시 키 이름만 표시하고 실패, OpenBao `mail_to`(`;` 구분 문자열) 조회. 모든 경우 실행 로그에서 주소 0건. mailpit HTML 검사(caniemail 기준) 본문 지원율 95.5% — 미지원은 classic Outlook의 `max-width`(표 `width="640"` 속성으로 대체)뿐.
+- 수동 E2E(2026-10-08, 러너 로컬, 옛 OpenBao 구조 당시의 기록): mailpit(STARTTLS 필수, 자체 서명 인증서, 수신자 허용 규칙) + RustFS + OpenBao dev(namespace `infra/prod/host`)로 실제 report 단계를 돌렸다 — 수신자 3명에게 1통씩 도착, 첨부 SHA-256 = 버킷 `report.html` SHA-256, 재발송 첨부도 같은 해시, 업로드 실패 시 메일 0통·실행 실패, 메일 실패(닫힌 포트·전원 거부·일부 거부) 시 원본 유지·실행 실패, 수신자 없음 시 키 이름만 표시하고 실패, OpenBao `mail_to`(`;` 구분 문자열) 조회. 모든 경우 실행 로그에서 주소 0건. mailpit HTML 검사(caniemail 기준) 본문 지원율 95.5% — 미지원은 classic Outlook의 `max-width`(표 `width="640"` 속성으로 대체)뿐.
 - 운영 확인(운영자, #105 이후): 실제 relay 발송, Gmail·Outlook(웹·classic) 표시, `.html` 첨부 차단 여부. #495부터는 Gmail이 zip 안의 xlsx를 막지 않는지도 첫 실제 실행에서 확인한다(압축 안 한 zip이라 내용 검사를 받는다).
 
 ## 15. KISA 월간 악화 알림 (Spec #322 / Ticket-9, #331)
@@ -756,7 +759,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **한계**: 지난달 예외(승인)였던 항목이 예외 만료로 이번에 취약이 된 경우는 Audit Baseline 색인(`findings.json`)이 취약과 예외를 구분해 담지 않아 지속으로 보이고 이 알림에 잡히지 않는다. 보고서의 예외 만료 표시를 본다.
 - **언제 보내나**: 정기 실행(`host_audit_run_kind=scheduled`)만 보낸다. 수시 실행은 Audit Baseline이 되지 않으므로 알리지 않고, check 모드도 보내지 않는다(`AUD-640`). 보관·메일 뒤에 한 번 보낸다.
 - **본문**: 악화된 항목 목록(`• <호스트>: KISA-2026:U-NN <항목 이름>`)과 비교한 두 실행 ID, 조치 안내가 text/plain으로 들어간다. 플랫폼 한도(5000자)에 맞춰 자르고 남은 건수를 `… 외 N건`으로 적는다. 주소·시크릿은 없다.
-- **webhook 입력**: Extra variables `host_audit_alert_webhook`(`{url, header, token}`)이 있으면 그것을, 없으면 OpenBao `agents/openobserve`의 `alert_webhook_plain_url`·`alert_webhook_auth_header`(기본 `Authorization`)·`alert_webhook_token`을 쓴다(`AUD-501`·`AUD-502`가 보관 입력과 함께 읽음 — OpenObserve 알림과 같은 대상). 값은 모든 태스크에서 `no_log`이고 보고서·로그에 남지 않는다. AppRole 정책에 `agents/openobserve` 읽기가 필요하다.
+- **webhook 입력**: OpenBao `secrets/services/alert/notify`의 `url`(text/plain 경로, URL 자체가 권한이라 인증 헤더·토큰이 없다)이다. 실행 변수로 덮어쓰지 않는다(`AUD-501`·`AUD-502`가 보관 입력과 함께 읽는다). 값은 모든 태스크에서 `no_log`이고 보고서·로그에 남지 않는다. `host_audit` AppRole 정책에 `alert-notify`(이 문서 읽기)가 필요하다. 못 읽어도 보관·메일은 막히지 않고 악화 항목이 있을 때만 `AUD-642`가 실패시킨다.
 - **전달 실패는 실행 실패로 드러난다**: 악화 항목이 있는데 webhook이 없거나 전송이 거부되면(`AUD-642`) 보관·메일 판정이 모두 끝난 뒤 마지막에 실행을 실패로 끝낸다(보고서와 보관은 이미 끝남). 알림 실패가 다른 판정을 가리지 않는다.
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
@@ -765,7 +768,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `AUD-641` | `Send the KISA worsening notification to the alert webhook` | `ansible.builtin.uri` | 러너 | 악화 항목이 있을 때만 text/plain POST, `no_log`, 전송 결과는 실패시키지 않고 AUD-642가 판정 |
 | `AUD-642` | `Fail the run when a KISA worsening notification could not be delivered` | `ansible.builtin.assert` | 러너 | 읽기 전용 (webhook 없음·응답이 2xx가 아님이면 실패, 다른 판정 뒤에 마지막으로) |
 
-검증: pytest `tests/test_host_audit_kisa_worsened.py` — 개수가 같아도 항목이 바뀌면 악화로 잡히는 것, 지난 결과가 없는 호스트·첫 실행·취약이 아닌 판정은 잡히지 않는 것, 통지 본문의 항목 목록·길이 한도, 로컬 HTTP 서버로 받은 실제 요청(text/plain, 인증 헤더, 본문), 수시 실행·check 모드·비활성에서 보내지 않는 것, 전달 실패 시 실행 실패, 판정이 다른 판정 뒤에 오는 배선.
+검증: pytest `tests/test_host_audit_kisa_worsened.py` — 개수가 같아도 항목이 바뀌면 악화로 잡히는 것, 지난 결과가 없는 호스트·첫 실행·취약이 아닌 판정은 잡히지 않는 것, 통지 본문의 항목 목록·길이 한도, 로컬 HTTP 서버로 받은 실제 요청(text/plain, 인증 헤더 없음, 본문), 수시 실행·check 모드·비활성에서 보내지 않는 것, 전달 실패 시 실행 실패, 판정이 다른 판정 뒤에 오는 배선.
 
 ## 16. Security Regression (Spec #364 / Ticket-10, #377)
 
@@ -806,7 +809,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `EXP-SEC-3` | secret-file-permissions | `sec_env_files` | 선언한 시크릿 env 파일이 모두 있고 0640 이하 `root:dockermgmt`다(AGENTS.md 4절 예외) |
 
 - 노드 otelcol OTLP 수신기의 모든 주소 바인드는 설계된 예외(ADR-0012)이므로 `mgmt_wildcard_allowed`에 그 포트를 적는다. 관리 웹이 아니라서 `EXP-MGMT-1`의 대상도 아니다.
-- **서버에서 정책을 직접 읽지 않는다**: Host Audit 전용 키는 IAM 정책을 읽을 수 없고 유지보수 키는 쓰지 않는다(`AUD-500`, 최소 권한). `EXP-BAK-2`·`EXP-BAK-3`은 운영자가 읽기 전용 수집기(`scripts/collect-rustfs-policy.py`)로 만든 스냅샷 파일을 `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT`(러너 경로)로 주면 판정하고, 주지 않으면 점검불가다. 항목 판정을 켜는 변수는 `host_audit_regression_backup_enabled`다.
+- **서버에서 정책을 직접 읽지 않는다**: Host Audit 전용 키는 IAM 정책을 읽을 수 없고 유지보수 키는 쓰지 않는다(최소 권한). `EXP-BAK-2`·`EXP-BAK-3`은 운영자가 읽기 전용 수집기(`scripts/collect-rustfs-policy.py`)로 만든 스냅샷 파일을 `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT`(러너 경로)로 주면 판정하고, 주지 않으면 점검불가다. 항목 판정을 켜는 변수는 `host_audit_regression_backup_enabled`다.
 - 이 섹션에 넣지 않은 것: 평문 인증 정보 정리와 서버 밖 사본(#374 선행), 패치 재부팅(#376), 이미지 버전 목록, `docker compose config --quiet`(운영자 계정의 compose 컨텍스트가 필요해 읽기 전용 원격 점검이 아님).
 
 ### 16.3 호스트별 JSON 추가 필드

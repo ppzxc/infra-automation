@@ -16,6 +16,10 @@ host_audit_scope_pattern: "servers:loadbalancers:overseer:!host_audit_excluded"
 # 보고서 시각 표기 시간대.
 host_audit_timezone: Asia/Seoul
 
+# 점검 기록의 환경(declared.environment, 리소스 속성 deployment.environment.name과 같은 값). 모든 호스트가 같은 값이라
+# 인벤토리 변수가 아니라 역할 기본값이다(Spec #511 §3). production|staging|development|test.
+host_audit_environment: production
+
 # 특수권한(uid 0, wheel·sudo·admin 그룹, sudoers 규칙) 선언 허용 목록에 더할 이름.
 # 기본 허용 목록은 common의 accounts 중 sudo 권한 계정(sudo: true, 또는 sudo 미지정 + tier admin,
 # state absent 제외)과 access_security의 openbao_ssh_allowed_principals이며 root는 항상 허용한다.
@@ -98,12 +102,9 @@ host_audit_kisa_capability_defaults:
 # false면 러너 로컬에만 남기고 비교도 하지 않는다(로컬 시험용). 운영 템플릿은 true로 둔다.
 host_audit_storage_enabled: true
 
-# 버킷 이름 기본값. OpenBao agents/host_audit.storage_bucket이 있으면 그 값이 우선한다.
+# 버킷 이름(공개해도 되는 값). 주소·리전은 inventory/services/rustfs, 쓰기 키는 secrets/services/rustfs/audit_reports에서 읽는다.
+# 주소·키를 실행 변수로 덮어쓰는 길은 없다(버킷 이름만 이 기본값이고, 키 정책이 host-audit 버킷으로 범위가 정해져 있다).
 host_audit_storage_bucket: host-audit
-
-# 보관 대상을 직접 지정할 때만 쓴다(OpenBao 조회를 건너뜀). 키를 Git에 넣지 말고 Extra variables로 준다.
-#   {"endpoint": "https://rustfs.example:9000", "bucket": "host-audit", "access_key": "...", "secret_key": "...", "region": "us-east-1"}
-host_audit_storage: {}
 
 # RustFS TLS 검증과 사설 CA 파일(러너 경로). 비우면 시스템 CA를 쓴다.
 host_audit_storage_validate_certs: true
@@ -116,10 +117,7 @@ host_audit_storage_timeout: 60
 # 비교는 항목 단위이고 지난 결과가 없는 호스트는 알리지 않는다. 수시 실행·check 모드는 알리지 않는다. false면 알리지 않는다.
 host_audit_kisa_alert_enabled: true
 
-# webhook을 직접 지정할 때만 쓴다(OpenBao 값 대신). 토큰을 Git에 넣지 말고 Extra variables로 준다.
-#   {"url": "https://...", "header": "Authorization", "token": "..."}
-# 비워 두면 OpenBao agents/openobserve의 alert_webhook_plain_url·alert_webhook_auth_header·alert_webhook_token을 쓴다(OpenObserve 알림과 같은 대상).
-host_audit_alert_webhook: {}
+# webhook 주소는 secrets/services/alert/notify의 url(text/plain, URL 자체가 권한)이다. 실행 변수로 덮어쓰는 길은 없다.
 host_audit_alert_validate_certs: true
 # --- Configuration Drift (#124) ---------------------------------------------------------------
 # 러너가 site.yml과 host_agents.yml(--tags agents_config)을 --check --diff로 하위 실행해, Git 선언과
@@ -136,10 +134,10 @@ host_audit_drift_timeout: 3600
 
 # 하위 실행에 그대로 넘길 실행 변수(site.yml을 평소 실행할 때 템플릿에 주는 비밀 아닌 값).
 # 아래 이름은 이번 실행에 정의돼 있으면 자동으로 넘긴다. 비밀값은 여기 두지 않는다
-# (OpenBao 자격증명은 하위 프로세스 환경 변수로만 넘긴다).
+# (OpenBao 자격증명은 하위 프로세스 환경 변수로만 넘긴다). 계정 입력은 저장된 사실(Asset 문서의 access 절)이 되었고,
+# 실행 변수로 남은 것은 이번 실행에서만 지울 계정(target_removed_users)뿐이다.
 host_audit_drift_forward_vars:
-  - bootstrap_user
-  - target_admin_users
+  - target_removed_users
 host_audit_drift_extra_vars: {}
 
 # check 모드 노이즈 제외 표식. 정상(수렴된) 호스트에서도 --check에서 매번 changed로 나오는 태스크는
@@ -152,14 +150,10 @@ host_audit_drift_ignore: []
 # false면 보내지 않는다(로컬 시험용). 운영 템플릿은 true로 둔다.
 host_audit_mail_enabled: true
 
-# 수신자·발신자는 개인정보다 — Git에 넣지 않는다. 기본은 OpenBao agents/host_audit의
-# mail_to(목록 또는 쉼표 구분 문자열)·mail_from이고, 아래 Extra variables가 있으면 그 값이 우선한다.
+# 수신자·발신자·표시 이름은 개인정보다 — Git에 넣지 않고 OpenBao inventory/config/host_audit의
+# mail_recipients·mail_sender·mail_sender_display_name에서 읽는다. 실행 변수(Extra variables)로 덮어쓰는 길은 없다.
 # 수신자마다 따로 보낸다 — 받는 사람은 다른 수신자의 주소를 보지 않는다.
-host_audit_mail_to: []
-host_audit_mail_from: ""
-# 보내는 사람 표시 이름(예: "서버 감사"). 비워 두면 주소만 보낸다. 값은 OpenBao agents/host_audit의
-# mail_from_name에 두고 Git에는 넣지 않는다. 헤더에만 반영하며 릴레이가 보는 봉투 발신자는 주소 그대로다.
-host_audit_mail_from_name: ""
+# 표시 이름은 선택이다(없으면 주소만 보낸다). 헤더에만 반영하며 릴레이가 보는 봉투 발신자는 주소 그대로다.
 
 # SMTP relay. 운영값은 바꾸지 않는다 — 시험용 SMTP(mailpit 등)를 쓸 때만 Extra variables로 덮어쓴다.
 host_audit_mail_host: smtp-relay.gmail.com

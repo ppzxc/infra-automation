@@ -536,6 +536,7 @@
           - record.status == 'ok'
           - record.collected_at is match('^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
           - record.declared.keys() | sort == ['asset', 'environment', 'fqdn', 'groups', 'ip']
+          - record.declared.environment == 'production'   # 역할 기본값 host_audit_environment(인벤토리 변수가 아니다, #528)
           - record.identity.keys() | sort == ['account', 'fqdn', 'hostname', 'ips']
           - record.identity.account == 'root'
           - record.os.keys() | sort == ['arch', 'id', 'kernel', 'name', 'redhat_release', 'version_id']

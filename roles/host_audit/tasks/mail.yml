@@ -6,9 +6,8 @@
 # IP 인증 — 자격증명 없음)로 보낸다. 본문은 inline CSS 요약(이미지·SVG 없음) + 첨부 SHA-256 +
 # 보관 경로, 첨부는 ASCII 파일명의 자체 완결 .html 1개와 합계·호스트별 Remediation Plan xlsx를 묶은 zip 1개다
 # (요약에 xlsx_zip이 없는 옛 실행의 재발송은 .html만).
-# 수신자·발신자는 OpenBao agents/host_audit(mail_to·mail_from)에서 읽고 Extra variables
-# (host_audit_mail_to·host_audit_mail_from)로 덮어쓴다.
-# 표시 이름(mail_from_name)은 선택이며 헤더에만 넣는다. 주소는 개인정보라 이 파일의 모든 관련
+# 수신자·발신자는 OpenBao inventory/config/host_audit(mail_recipients·mail_sender)에서만 읽는다(Extra variables 대체 없음).
+# 표시 이름(mail_sender_display_name)은 선택이며 헤더에만 넣는다. 주소는 개인정보라 이 파일의 모든 관련
 # 태스크가 no_log이고, 보고서·JSON·실행 메타·로그에 남지 않는다. 수신자마다 따로 보낸다(AUD-606):
 # 한 번에 여러 명에게 보내면 일부 거부 시 모듈 경고가 no_log를 무시하고 주소를 찍고, 수신자끼리
 # 서로의 주소를 보게 된다.
@@ -29,77 +28,35 @@
          else ('' if _host_audit_archive_ok | default(false) | bool
          else '원본 보관 실패 — 메일 보내지 않음')) }}
 
-# Extra variables로 수신자와 발신자를 모두 주면 OpenBao를 조회하지 않는다.
-- name: "[AUD-601] Log in to OpenBao with AppRole for the Host Audit mail settings"
-  vars:
-    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
-    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
-    _vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
-    _vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
-    _vault_token_given: "{{ vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true) }}"
-  ansible.builtin.uri:
-    url: "{{ _vault_addr_eff }}/v1/auth/approle/login"
-    method: POST
-    headers: "{{ {'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {} }}"
-    body_format: json
-    body:
-      role_id: "{{ _vault_role_id }}"
-      secret_id: "{{ _vault_secret_id }}"
-    status_code: [-1, 200, 400, 401, 403, 404, 500]
-    timeout: 5
-    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
-  register: _host_audit_mail_login
+# 로그인 태스크는 따로 없다: `_vault_token`을 정해 두지 않으므로 읽기 지점이 이 읽기 태스크에서 AppRole로 새로 로그인한다(만료된 토큰을 쓰지 않는다).
+# 문서가 없으면(404) {}이고(수신자 없음 문제로 남는다), 403이나 연결 불가는 읽기 실패다(errors='ignore'가 값 없음으로 돌려준다).
+- name: "[AUD-602] Read the Host Audit mail settings from OpenBao (inventory/config/host_audit)"
+  ansible.builtin.set_fact:
+    _host_audit_mail_config: "{{ lookup('openbao_doc', host_audit_openbao_mail_doc, required=false, errors='ignore') }}"
+  check_mode: false
   no_log: true
-  when:
-    - _host_audit_mail_plan.send | bool
-    - _host_audit_mail_needs_kv | bool
-    - _vault_token_given | length == 0
-    - _vault_role_id | length > 0
-    - _vault_secret_id | length > 0
+  when: _host_audit_mail_plan.send | bool
 
-- name: "[AUD-602] Fetch the Host Audit mail settings from OpenBao (agents/host_audit)"
-  vars:
-    _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
-    _vault_token_eff: "{{ (_host_audit_mail_login.json.auth.client_token | default('')) or (vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true)) }}"
-    _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
-    _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
-  ansible.builtin.uri:
-    url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/agents/host_audit"
-    method: GET
-    headers: >-
-      {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
-    status_code: [-1, 200, 403, 404, 500]
-    timeout: 5
-    validate_certs: "{{ host_agents_vault_validate_certs | default(false) }}"
-  register: _host_audit_mail_kv
-  changed_when: false
-  no_log: true
-  when:
-    - _host_audit_mail_plan.send | bool
-    - _host_audit_mail_needs_kv | bool
-    - _vault_token_eff | length > 0
-
-# 우선순위: Extra variables(host_audit_mail_*) > OpenBao agents/host_audit(mail_*).
+# 수신자·발신자·표시 이름은 문서 값뿐이다(mail_recipients·mail_sender·mail_sender_display_name).
 # 문제는 키 이름과 건수로만 남긴다 — 주소 값은 어디에도 쓰지 않는다.
 - name: "[AUD-603] Resolve the mail recipients and sender"
   vars:
-    _kv: "{{ _host_audit_mail_kv.json.data.data | default({}) if (_host_audit_mail_kv.status | default(-1)) == 200 else {} }}"
-    _to: "{{ (host_audit_mail_to if (host_audit_mail_to | default([], true) | length > 0) else _kv.mail_to | default([])) | host_audit_mail_recipients }}"
-    _from: "{{ (host_audit_mail_from if (host_audit_mail_from | default('', true) | length > 0) else _kv.mail_from | default('')) | host_audit_mail_recipients }}"
+    _config_ok: "{{ _host_audit_mail_config is defined and _host_audit_mail_config is mapping }}"
+    _kv: "{{ _host_audit_mail_config if _config_ok | bool else {} }}"
+    _to: "{{ _kv.mail_recipients | default([]) | host_audit_mail_recipients }}"
+    _from: "{{ _kv.mail_sender | default('') | host_audit_mail_recipients }}"
     _from_addr: "{{ _from.addresses | first | default('') }}"
-    _from_name: "{{ host_audit_mail_from_name if (host_audit_mail_from_name | default('', true) | length > 0) else _kv.mail_from_name | default('') }}"
-    _lookup_failed: >-
-      {{ (_host_audit_mail_needs_kv | bool) and (_host_audit_mail_kv.status | default(-1)) not in [200, 404] }}
+    _from_name: "{{ _kv.mail_sender_display_name | default('') }}"
     _problems: >-
-      {{ (['OpenBao agents/host_audit 조회 실패 또는 자격증명 없음(VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN, 정책에 agents/host_audit 경로)'] if _lookup_failed else [])
-         + (['메일 수신자 없음 — OpenBao agents/host_audit.mail_to 또는 Extra variables host_audit_mail_to에 넣는다'] if _to.addresses | length == 0 else [])
+      {{ (['OpenBao 문서(inventory/config/host_audit)를 읽지 못함(문서 읽기 권한 403, 연결 불가, 인증 정보 없음. 원인은 가려진다)'] if not (_config_ok | bool) else [])
+         + (['메일 수신자 없음 — OpenBao inventory/config/host_audit.mail_recipients에 넣는다'] if _to.addresses | length == 0 else [])
          + (['요약에 xlsx zip이 있는데 첨부할 경로가 없음(본문과 첨부가 어긋남)'] if (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip
                                                                     and (_host_audit_mail_xlsx_path | default('')) | length == 0) else [])
          + (['첨부할 파일이 없음(보고서 또는 xlsx zip)'] if (not (_host_audit_mail_report_path is file)
                                                   or ((host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip)
                                                       and not ((_host_audit_mail_xlsx_path | default('')) is file))) else [])
-         + (['수신자(mail_to) 주소 형식 오류 ' ~ _to.invalid ~ '건'] if _to.invalid > 0 else [])
-         + (['발신자 없음 또는 형식 오류 — agents/host_audit.mail_from 또는 host_audit_mail_from(주소 1개)'] if (_from.addresses | length != 1 or _from.invalid > 0) else []) }}
+         + (['수신자(mail_recipients) 주소 형식 오류 ' ~ _to.invalid ~ '건'] if _to.invalid > 0 else [])
+         + (['발신자 없음 또는 형식 오류 — inventory/config/host_audit.mail_sender(주소 1개)'] if (_from.addresses | length != 1 or _from.invalid > 0) else []) }}
   ansible.builtin.set_fact:
     _host_audit_mail_rcpt:
       to: "{{ _to.addresses }}"

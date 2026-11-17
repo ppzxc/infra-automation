@@ -287,14 +287,14 @@ def test_every_task_touching_addresses_is_no_log():
     for name in ("mail.yml", "resend.yml"):
         for task in _flatten(_tasks(name)):
             text = json.dumps(task)
-            touches = any(k in text for k in ("_host_audit_mail_rcpt", "host_audit_mail_to", "mail_to",
-                                              "mail_from", "_host_audit_mail_kv", "X-Vault-Token", "_req.headers"))
+            touches = any(k in text for k in ("_host_audit_mail_rcpt", "mail_recipients", "mail_sender",
+                                              "_host_audit_mail_config", "_req.headers"))
             if touches and "[AUD-608]" not in task.get("name", "") and "block" not in task:
                 assert task.get("no_log") is True, task.get("name")
     outcome = next(t for t in _tasks("mail.yml") if "[AUD-608]" in t.get("name", ""))
     assert outcome.get("no_log") is True
     shown = next(t for t in _tasks("mail.yml") if "[AUD-609]" in t.get("name", ""))
-    assert "_host_audit_mail_rcpt" not in json.dumps(shown) and "mail_to" not in json.dumps(shown)
+    assert "_host_audit_mail_rcpt" not in json.dumps(shown) and "mail_recipients" not in json.dumps(shown)
 
 
 def test_send_uses_the_relay_defaults_and_attaches_the_ascii_report_and_the_xlsx_zip():
@@ -302,7 +302,8 @@ def test_send_uses_the_relay_defaults_and_attaches_the_ascii_report_and_the_xlsx
     assert defaults["host_audit_mail_host"] == "smtp-relay.gmail.com"
     assert defaults["host_audit_mail_port"] == 587
     assert defaults["host_audit_mail_secure"] == "starttls"
-    assert defaults["host_audit_mail_to"] == [] and defaults["host_audit_mail_from"] == ""
+    # 수신자·발신자·표시 이름은 OpenBao 문서에서만 읽는다(실행 변수 대체 없음, #528)
+    assert not {"host_audit_mail_to", "host_audit_mail_from", "host_audit_mail_from_name"} & set(defaults)
     assert "host_audit_mail_cc" not in defaults
     send = next(t for t in _flatten(_tasks("mail.yml")) if "community.general.mail" in t)
     args = send["community.general.mail"]
@@ -400,12 +401,10 @@ def test_unsafe_or_blank_sender_name_is_dropped_not_sent(name):
     assert host_audit_mail_sender("noreply@example.kr", name) == "noreply@example.kr"
 
 
-def test_the_name_comes_from_the_variable_then_openbao_and_the_header_is_sent():
-    defaults = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
-    assert defaults["host_audit_mail_from_name"] == ""  # the name itself never lives in Git
+def test_the_name_comes_from_the_config_document_only_and_the_header_is_sent():
     resolve = next(t for t in _tasks("mail.yml") if "[AUD-603]" in t.get("name", ""))
     text = json.dumps(resolve)
-    assert "host_audit_mail_from_name" in text and "_kv.mail_from_name" in text
+    assert "mail_sender_display_name" in text and "host_audit_mail_from_name" not in text
     assert resolve.get("no_log") is True
     send = next(t for t in _flatten(_tasks("mail.yml")) if "community.general.mail" in t)
     assert "from_header" in send["community.general.mail"]["sender"]

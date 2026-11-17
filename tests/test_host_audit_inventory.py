@@ -309,17 +309,24 @@ def test_unassigned_declarations_are_shown_as_unassigned():
     assert model["asset_inventory"]["counts"]["unassigned_hosts"] == 1
 
 
-# ------------------------------------------------- 선언 값은 OpenBao hosts/<host>에서 읽는다 (#492)
+# ------------------------------------------------- 선언 값은 Asset 문서(inventory/assets/<ns>)에서 읽는다 (#492, #528)
+# resolve_connection이 읽어 둔 `_asset_doc`의 description과 isms 절에서 다섯 값만 고른다. 같은 문서에 접속 절(access)이 있다.
 
 HOST_KV = {
-    "description": "웹 서비스 [그룹자산A]", "isms_department": "인프라팀", "isms_owner_role": "인프라팀장",
-    "isms_admin_role": "시스템 관리자", "isms_asset_importance": "H",
-    "ssh_private_key": "-----BEGIN PRIVATE KEY-----zzz", "password": "s3cret-pw", "public_ip": "203.0.113.7",
-    "admin_users": ["opuser"], "ansible_port": 2222, "isms_target": True,
+    "description": "웹 서비스 [그룹자산A]", "type": "server",
+    "isms": {"department": "인프라팀", "owner_role": "인프라팀장", "admin_role": "시스템 관리자", "asset_importance": "H",
+             "target": True, "group_asset_name": "그룹자산A", "personal_info_system": False},
+    "access": {"admin_credentials": ["opuser"], "bootstrap_credential": "root"},
+    "agents": {"otel": {"tcpcheck_enabled": True}}, "domain": "203.0.113.7.example.test",
 }
 
 
-def test_declaration_reads_exactly_the_five_keys_from_the_host_kv():
+def _isms(**values):
+    """HOST_KV with some isms keys replaced (the Asset document is nested, so dict(HOST_KV, ...) is not enough)."""
+    return dict(HOST_KV, isms=dict(HOST_KV["isms"], **values))
+
+
+def test_declaration_reads_exactly_the_description_and_four_isms_keys_of_the_asset_document():
     decl = host_audit_asset_declaration(HOST_KV, True)
 
     assert decl == {"purpose": "웹 서비스 [그룹자산A]", "department": "인프라팀", "owner_role": "인프라팀장",
@@ -328,15 +335,15 @@ def test_declaration_reads_exactly_the_five_keys_from_the_host_kv():
 
 def test_declaration_never_carries_connection_values():
     text = json.dumps(host_audit_asset_declaration(HOST_KV, True), ensure_ascii=False)
-    for secret in ("PRIVATE KEY", "s3cret-pw", "203.0.113.7", "opuser", "2222"):
+    for secret in ("203.0.113.7", "opuser", "tcpcheck", "personal_info", "group_asset_name", "bootstrap"):
         assert secret not in text
 
 
 def test_declaration_keeps_the_ledger_text_unchanged_caps_only_blobs_and_drops_non_text_values():
     group_tail = "웹 서비스 [그룹자산A]"
     long_but_real = "가" * 200 + " " + group_tail
-    decl = host_audit_asset_declaration({"description": long_but_real, "isms_owner_role": False,
-                                         "isms_admin_role": ["x"], "isms_department": "{{ x }}"}, True)
+    decl = host_audit_asset_declaration({"description": long_but_real, "isms": {
+        "owner_role": False, "admin_role": ["x"], "department": "{{ x }}"}}, True)
 
     assert decl["purpose"] == long_but_real and decl["purpose"].endswith("[그룹자산A]")
     assert decl["department"] == "{{ x }}", "evidence is stored as the ledger copy has it"
@@ -349,7 +356,7 @@ def test_declaration_keeps_the_ledger_text_unchanged_caps_only_blobs_and_drops_n
 def test_tag_colors_separate_unknown_values_from_data_errors():
     _m, failed = _decl_model(HOST_KV, lookup_ok=False)
     _m, unassigned = _decl_model({})
-    _m, invalid = _decl_model(dict(HOST_KV, isms_asset_importance="높음"))
+    _m, invalid = _decl_model(_isms(asset_importance="높음"))
     _m, ok = _decl_model(HOST_KV)
 
     assert {f["tag"] for f in failed.values()} == {"na"} and {f["tag"] for f in unassigned.values()} == {"na"}
@@ -358,7 +365,7 @@ def test_tag_colors_separate_unknown_values_from_data_errors():
 
 
 def test_non_text_values_and_old_security_grade_records_show_as_invalid_not_unassigned():
-    _m, declared = _decl_model(dict(HOST_KV, isms_owner_role=["x"], isms_department=True, isms_admin_role=123))
+    _m, declared = _decl_model(_isms(owner_role=["x"], department=True, admin_role=123))
     assert declared["owner_role"]["state"] == "invalid" and declared["department"]["state"] == "invalid"
     assert declared["admin_role"]["state"] == "invalid" and declared["purpose"]["state"] == "ok"
 
@@ -376,27 +383,29 @@ def test_resolve_connection_publishes_the_asset_document_for_host_audit():
 
 
 def test_invalid_importance_echoes_at_most_twenty_characters_of_the_original():
-    _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance="가" * 80))
+    _model, declared = _decl_model(_isms(asset_importance="가" * 80))
     shown = declared["asset_importance"]["value"]
 
     assert shown.startswith("잘못된 값 (") and shown.endswith("…)") and len(shown) <= len("잘못된 값 ()") + 20
 
 
-def _aud101_record(tmp_path, kv, status):
-    """Run the real [AUD-101] task with ansible-playbook. The KV text arrives as parsed JSON data (like the
-    OpenBao response), not as trusted playbook text, so any template syntax in it must stay plain text."""
+def _aud101_record(tmp_path, doc, defined=True):
+    """Run the real [AUD-101] task with ansible-playbook. The Asset document arrives as parsed JSON data (like the
+    OpenBao response), not as trusted playbook text, so any template syntax in it must stay plain text.
+    ``defined`` false: resolve_connection never published `_asset_doc` (no such fact at all)."""
     tasks = yaml.safe_load((ROLE / "tasks" / "inventory.yml").read_text(encoding="utf-8"))
     task = next(t for t in tasks if t["name"].startswith("[AUD-101]"))
     task["no_log"] = False
-    (tmp_path / "kv.json").write_text(json.dumps({"kv": kv, "resp": {"status": status}}), encoding="utf-8")
+    (tmp_path / "kv.json").write_text(json.dumps({"doc": doc}), encoding="utf-8")
+    facts = {"host_audit_record": {"status": "unreachable"},
+             "_host_audit_inventory_probe": {"unreachable": True, "msg": "x"},
+             "host_audit_privileged_extra": []}
+    if defined:
+        facts["_asset_doc"] = "{{ _loaded.doc }}"
     play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
         {"ansible.builtin.set_fact": {
             "_loaded": "{{ lookup('ansible.builtin.file', '%s') | from_json }}" % (tmp_path / "kv.json")}},
-        {"ansible.builtin.set_fact": {"_host_kv_dict": "{{ _loaded.kv }}",
-                                      "_effective_host_resp": "{{ _loaded.resp }}",
-                                      "host_audit_record": {"status": "unreachable"},
-                                      "_host_audit_inventory_probe": {"unreachable": True, "msg": "x"},
-                                      "host_audit_privileged_extra": []}},
+        {"ansible.builtin.set_fact": facts},
         task,
         {"ansible.builtin.copy": {"content": "{{ host_audit_record | to_json }}",
                                   "dest": str(tmp_path / "record.json"), "mode": "0600"}},
@@ -411,26 +420,29 @@ def _aud101_record(tmp_path, kv, status):
     return json.loads((tmp_path / "record.json").read_text(encoding="utf-8"))["declared"]["asset"]
 
 
-def test_aud_101_task_reads_the_five_keys_and_never_evaluates_template_text_from_the_kv(tmp_path):
+def test_aud_101_task_reads_the_isms_clause_and_never_evaluates_template_text_from_the_document(tmp_path):
     hostile = "{{ lookup('pipe', 'echo PWNED-' ~ 'X') }} [그룹자산A]"
-    asset = _aud101_record(tmp_path, dict(HOST_KV, description=hostile), 200)
+    asset = _aud101_record(tmp_path, dict(HOST_KV, description=hostile))
 
     assert asset["lookup"] == "ok" and asset["purpose"] == hostile
-    assert asset["asset_importance"] == "H" and asset["privileged_allowlist"] == []
-    assert "PWNED-X" not in json.dumps(asset) and "s3cret-pw" not in json.dumps(asset)
+    assert asset["department"] == "인프라팀" and asset["asset_importance"] == "H"
+    assert asset["privileged_allowlist"] == []
+    assert "PWNED-X" not in json.dumps(asset) and "opuser" not in json.dumps(asset)
 
 
-def test_aud_101_task_treats_a_200_without_usable_data_as_lookup_failed(tmp_path):
-    asset = _aud101_record(tmp_path, {}, 200)
-    assert asset["lookup"] == "failed"
+def test_aud_101_task_treats_an_empty_asset_document_as_lookup_failed(tmp_path):
+    assert _aud101_record(tmp_path, {})["lookup"] == "failed"
 
 
-def test_aud_101_task_marks_a_non_200_host_kv_response_as_lookup_failed(tmp_path):
-    for status in (404, 403, -1):
-        sub = tmp_path / str(status)
-        sub.mkdir()
-        asset = _aud101_record(sub, HOST_KV, status)
-        assert asset["lookup"] == "failed" and asset["purpose"] == ""
+def test_aud_101_task_marks_a_missing_asset_document_fact_as_lookup_failed(tmp_path):
+    asset = _aud101_record(tmp_path, HOST_KV, defined=False)
+    assert asset["lookup"] == "failed" and asset["purpose"] == ""
+
+
+def test_an_isms_clause_that_is_not_an_object_is_malformed_not_silently_empty():
+    decl = host_audit_asset_declaration({"description": "x", "isms": ["not", "an", "object"]}, True)
+    assert decl["purpose"] == "x" and decl["department"] == "" and decl["lookup"] == "ok"
+    assert decl["malformed"] == ["department", "owner_role", "admin_role", "asset_importance"]
 
 
 def test_declaration_with_failed_lookup_ignores_whatever_the_dict_holds():
@@ -466,7 +478,7 @@ def test_failed_lookup_shows_all_five_cells_as_lookup_failed_and_is_not_counted_
 
 
 def test_empty_keys_are_unassigned_even_for_isms_target_false_hosts():
-    kv = {"description": "", "isms_target": False, "isms_asset_importance": "L"}
+    kv = {"description": "", "isms": {"target": False, "asset_importance": "L"}}
     model, declared = _decl_model(kv)
 
     assert declared["purpose"]["value"] == "미지정" and declared["department"]["state"] == "unassigned"
@@ -476,10 +488,10 @@ def test_empty_keys_are_unassigned_even_for_isms_target_false_hosts():
 
 def test_asset_importance_outside_h_m_l_is_shown_as_invalid_with_the_original_value():
     for raw, shown in (("높음", "잘못된 값 (높음)"), ("h", "잘못된 값 (h)"), ("3", "잘못된 값 (3)")):
-        _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance=raw))
+        _model, declared = _decl_model(_isms(asset_importance=raw))
         assert declared["asset_importance"]["value"] == shown
         assert declared["asset_importance"]["state"] == "invalid"
-    _model, declared = _decl_model(dict(HOST_KV, isms_asset_importance=" M "))
+    _model, declared = _decl_model(_isms(asset_importance=" M "))
     assert declared["asset_importance"]["value"] == "M"
 
 
@@ -491,7 +503,7 @@ def test_nothing_but_the_five_keys_reaches_the_record_the_report_model_or_the_ma
 
     for doc in (rec, model, summary):
         text = json.dumps(doc, ensure_ascii=False, default=str)
-        for secret in ("PRIVATE KEY", "s3cret-pw", "203.0.113.7", "opuser", "isms_target"):
+        for secret in ("203.0.113.7", "opuser", "tcpcheck", "personal_info", "group_asset_name", "bootstrap"):
             assert secret not in text
 
 
@@ -504,7 +516,7 @@ def test_mail_summary_counts_unassigned_and_lookup_failed_hosts_separately():
     line = summary(failed_model)
     assert "선언 미지정 호스트 0" in line["text"] and "선언 조회 실패 호스트 1" in line["text"]
     assert line["level"] in ("warn", "crit")
-    invalid_model, _ = _decl_model(dict(HOST_KV, isms_asset_importance="높음"))
+    invalid_model, _ = _decl_model(_isms(asset_importance="높음"))
     assert "선언 잘못된 값 호스트 1" in summary(invalid_model)["text"]
     unassigned_model, _ = _decl_model({})
     assert "선언 미지정 호스트 1" in summary(unassigned_model)["text"]
@@ -542,13 +554,14 @@ def test_removed_asset_variable_is_gone_from_the_repository():
     assert offenders == []
 
 
-def test_inventory_record_task_reads_the_host_kv_without_querying_openbao_again():
+def test_inventory_record_task_reads_the_published_asset_document_without_querying_openbao_again():
     tasks = yaml.safe_load((ROLE / "tasks" / "inventory.yml").read_text(encoding="utf-8"))
     record_task = next(t for t in tasks if t["name"].startswith("[AUD-101]"))
     text = json.dumps(record_task)
 
-    assert "host_audit_asset_declaration" in text and "_host_kv_dict" in text
-    assert "ansible.builtin.uri" not in json.dumps(tasks)
+    assert "host_audit_asset_declaration" in text and "_asset_doc" in text
+    assert "_host_kv_dict" not in text and "_effective_host_resp" not in text
+    assert "ansible.builtin.uri" not in json.dumps(tasks) and "openbao_doc" not in json.dumps(tasks)
 
 
 def test_privileged_users_outside_the_declared_allowlist_are_flagged():

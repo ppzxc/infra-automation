@@ -154,17 +154,17 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 | 경로 | 쓰는 템플릿 |
 |---|---|
-| `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config, Host Audit (SSH 접속) |
-| `hosts/<host>/agents` | Deploy, Config, Repo Maintenance, Host Audit (Configuration Drift의 Config `--check` 하위 실행) |
-| `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config, Host Audit (Configuration Drift) |
-| `agents/rustfs` | Deploy, Config, Repo Maintenance, Host Audit(엔드포인트) |
-| `agents/host_audit` | Host Audit, Host Audit — Resend (전용 보관 키 `storage_access_key`/`storage_secret_key`, 선택 `storage_bucket`·`storage_endpoint`·`storage_region` — [host_audit.md §11](host_audit.md#11-보관과-audit-baseline-125); 메일 수신자 `mail_to`·발신자 `mail_from` — [host_audit.md §13](host_audit.md#13-메일-발송-126)) |
+| `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config (SSH 접속) |
+| `hosts/<host>/agents` | Deploy, Config, Repo Maintenance |
+| `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config |
+| `agents/rustfs` | Deploy, Config, Repo Maintenance |
+| `secrets/services/rustfs/audit_reports`, `inventory/services/rustfs`, `secrets/services/alert/notify`(KISA 악화 알림), `inventory/config/host_audit`(메일) | Host Audit, Host Audit — Resend (보관 키·메일 입력 — [host_audit.md §11.4](host_audit.md#114-입력-openbao-git에는-시크릿-없음)·[§13.3](host_audit.md#133-입력-openbao-git에는-주소-없음)). 드리프트 하위 실행 때문에 `host_audit` AppRole은 provision·host_agents가 읽는 경로도 읽는다 |
 
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.
 - **호스트별 선택 키 `hosts/<host>/agents`**: `otel_docker_metrics`(docker 메트릭), `otel_app_telemetry`(boolean, 컨테이너 앱 텔레메트리 OTLP HTTP 수신 — traces는 `app_traces` 스트림, metrics는 기존 경로. 기본 꺼짐, ADR-0012), `otel_container_logs`(docker 컨테이너 로그를 `app_logs`로 수집, 기본 꺼짐. 컨테이너가 compose에서 `json-file` 드라이버(`max-size`·`max-file`)와 `com.docker.compose.project`·`com.docker.compose.service` 라벨 전달 옵션(`logging.options.labels`)을 써야 한다. compose를 먼저 `json-file`로 전환한 뒤 Config를 실행한다: 이전 구현이 둔 rsyslog 규칙이 이때 제거되고 rsyslog가 재시작된다).
 - **Repo Maintenance**: `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`. 모든 `backup-prod-*` 버킷에서 삭제(prune)할 권한이 있어야 한다.
 - **OpenObserve — Config**: `inventory/services/openobserve`의 `url`, `secrets/services/openobserve/admin`(설정 API 계정)·`ingest`(알림 검증 합성 레코드 주입), `secrets/services/alert/notify`의 `url`(사내 알림 플랫폼 text/plain 경로), 작업 설정 `inventory/config/openobserve_config`와 로스터 호스트의 `inventory/assets/<ns>`·`inventory/assets/<ns>/endpoints`. 토큰·인증 헤더 키는 없다.
-- **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 `host_audit_mail_to`로 덮어쓴다(값은 로그에 나오지 않는다). 템플릿 Survey에는 두지 않으므로 API 실행의 `environment`로 넘긴다(§5 실행 시 입력).
+- **Host Audit 메일**: `inventory/config/host_audit`의 `mail_recipients`(받는 사람 목록)·`mail_sender`(보내는 주소 1개)·`mail_sender_display_name`(선택 표시 이름). 주소는 개인정보라 저장소와 템플릿 Extra variables에 두지 않는다. 덮어쓰는 Extra variables는 없다: 받는 사람을 바꾸려면 문서를 고친다.
 
 ### Periodic Check Environment
 
@@ -232,7 +232,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - Deploy All·Config All·Deploy Restic의 `target_hosts`는 **기본값이 없고 비워 둘 수 없다**(Survey 필수). 인벤토리가 공용이라 새 서버가 계속 추가되므로, 대상을 입력하지 않아 전체에 도는 일을 막는다. 전체에 적용하려면 `servers`를 직접 입력한다. `host_agents.yml`은 `target_hosts | default('servers')`라 빈 문자열이 넘어오면 대상 패턴이 깨지므로 Survey 필수가 이를 막는 장치다. Host Audit은 빈 값을 전체로 처리한다.
 - **Config All이 하는 일**: otelcol 설정과 restic 설정을 모두 재적용한다. restic 설정 블록(`roles/backup/tasks/main.yml`)이 `agents_config`와 `backup` 두 태그를 모두 가져서, `--tags agents_config`가 두 에이전트의 설정을 함께 돌린다. 설치와 repo 초기화, 등록 이벤트는 Deploy All·Deploy Restic에만 있다.
 - Monthly에는 Survey를 두지 않는다. 정기 실행은 항상 전체 대상·보관·발송이어야 Audit Baseline이 맞다.
-- Survey에 없는 변수(아래의 `host_audit_mail_to`, `host_audit_drift_enabled`, `backup_maintenance_read_subset` 등)는 API로 실행할 때 `POST /api/project/<id>/tasks`의 `environment`(JSON 문자열)로 넘긴다. 자주 쓰게 되면 해당 템플릿 Survey에 추가한다.
+- Survey에 없는 변수(아래의 `host_audit_drift_enabled`, `backup_maintenance_read_subset` 등)는 API로 실행할 때 `POST /api/project/<id>/tasks`의 `environment`(JSON 문자열)로 넘긴다. 자주 쓰게 되면 해당 템플릿 Survey에 추가한다.
 
 **restic 백업만 적용할 때 (Host Agents — Deploy Restic)**
 
@@ -248,7 +248,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - On-demand에서 쓸 수 있는 변수:
   - Survey `target_hosts`(예: `ns0266,ns0294`): 대상 좁히기(Inventory Hostname)
   - Survey `host_audit_mail_enabled`·`host_audit_storage_enabled`를 `false`로: 시험 실행. 보관을 끄면 비교하지 않고 러너 로컬에만 남는다
-  - API `environment`만: `{"host_audit_mail_to": "a@example.com"}` 이번 실행만 수신자 덮어쓰기(로그에 나오지 않는다), `{"host_audit_drift_enabled": false}`·`{"host_audit_packages_enabled": false}` 해당 섹션 수집·판정 건너뛰기(정기 실행에는 쓰지 않는다)
+  - API `environment`만: `{"host_audit_drift_enabled": false}`·`{"host_audit_packages_enabled": false}` 해당 섹션 수집·판정 건너뛰기(정기 실행에는 쓰지 않는다)
 - Host Audit은 `--check`로 돌리지 않는다. 그 자체가 읽기 전용이고, check 모드에서는 보관·발송을 하지 않는다.
 - Variable Group은 §4의 것을 그대로 쓴다. Configuration Drift가 `site.yml`·Host Agents Config를 하위 실행하므로 AppRole이 Deploy·Config와 같은 KV 경로를 읽을 수 있어야 한다(§4 표).
 
@@ -257,7 +257,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - 다시 점검하지 않고, 버킷에 보관된 실행의 보고서를 같은 첨부(같은 SHA-256)로 다시 보낸다. 메일 발송이 실패했거나 받는 사람을 추가할 때 쓴다.
 - Survey `host_audit_resend_run_id`(예: `ha-20261031T220000Z`) — 실행 ID는 메일 제목 아래·본문 상단, 실패 메시지, Semaphore 로그(`AUD-003`)에 있다.
 - 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID면 Survey `host_audit_resend_month`에 `2026-11`(KST 기준 실행 시작 월)을 함께 준다.
-- 수신자는 지금의 OpenBao `agents/host_audit.mail_to`다(또는 `host_audit_mail_to`). 받은 보고서의 SHA-256이 보관된 요약의 값과 다르면 보내지 않는다.
+- 수신자는 지금의 OpenBao `inventory/config/host_audit.mail_recipients`다. 받은 보고서의 SHA-256이 보관된 요약의 값과 다르면 보내지 않는다.
 
 **CIS 감사 파일럿 템플릿 삭제**
 
@@ -333,7 +333,7 @@ OpenObserve에서 `backup_logs` 스트림에 `job=inventory`, `job=backup`(다�
 
 ### 7.1 Host Audit 첫 실행
 
-준비: RustFS `host-audit` 버킷과 전용 키([host_audit.md §11.5](host_audit.md#115-버킷-준비-운영자-1회)), OpenBao `agents/host_audit`의 보관 키·`mail_to`·`mail_from`(§4), [SMTP 릴레이 확보](https://github.com/ppzxc/infra-automation/issues/105).
+준비: RustFS `host-audit` 버킷과 전용 키([host_audit.md §11.5](host_audit.md#115-버킷-준비-운영자-1회)), OpenBao `secrets/services/rustfs/audit_reports`의 보관 키와 `inventory/config/host_audit`의 `mail_recipients`·`mail_sender`(§4), [SMTP 릴레이 확보](https://github.com/ppzxc/infra-automation/issues/105).
 
 | 순서 | 실행 | 확인 |
 |---|---|---|
