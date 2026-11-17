@@ -166,7 +166,7 @@ monitoring_openbao_required:
 
 특정 호스트만 돌리려면 Extra variable `target_hosts`를 준다: `ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0331"`.
 
-새 역할이 OpenBao 문서를 읽으면 (1) `vars/main.yml`에 `<역할>_openbao_required`를 선언하고 (2) 그 역할을 돌리는 계열 AppRole 정책이 패턴을 읽게 하며 (3) `tests/test_openbao_role_policy_contract.py`의 역할↔계열 표에 한 줄을 더한다. 정책 누락은 이 테스트가 잡는다. 공용 읽기 지점의 lookup이 대신 읽는 문서(호스트 묶음의 관리 계정 공개키 `inventory/operators/<계정>` 등)는 역할 선언에 나오지 않으므로 `lookup_plugins/openbao_connection.py`의 `*_READS` 표에 적고, 같은 테스트가 그 표와 코드의 `read()` 호출, 계열 정책(`connect`)을 대조한다. lookup을 쓰는 새 파일은 테스트의 `LOOKUP_USERS` 표에 한 줄을 더해야 통과한다.
+새 역할이 OpenBao 문서를 읽으면 (1) `vars/main.yml`에 `<역할>_openbao_required`를 선언하고 (2) 그 역할을 돌리는 계열 AppRole 정책이 패턴을 읽게 하며 (3) `tests/test_openbao_role_policy_contract.py`의 역할↔계열 표에 한 줄을 더한다. 정책 누락은 이 테스트가 잡는다. 공용 읽기 지점의 lookup이 대신 읽는 문서(호스트 묶음의 관리 계정 공개키 `inventory/operators/<계정>` 등)는 역할 선언에 나오지 않으므로 `lookup_plugins/openbao_connection.py`의 `*_READS` 표에 적고, 같은 테스트가 그 표와 코드의 `read()` 호출, 계열 정책(`connect`)을 대조한다. lookup을 쓰는 새 파일은 테스트의 `LOOKUP_USERS` 표에 한 줄을 더해야 통과한다. 선언이 읽은 문서에서 채워졌는지는 공용 필터 `openbao_required_gaps`(`filter_plugins/openbao_required.py`, 옵션 `scope`·`missing_doc`·`blank`·`skip_plus`·`host`·`fmt`)로 본다(host_agents·openobserve_config·backup·host_audit·github_webhook_watch가 쓴다. funa_env는 문서마다 assert를 돌려 달라 그대로다).
 
 ## 8. 관련 문서
 

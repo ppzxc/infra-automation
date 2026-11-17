@@ -8,8 +8,13 @@ Pure functions so the desired state and the change plan are unit-testable withou
 
 import base64
 import hashlib
+import os
 import re
+import sys
 from urllib.parse import quote
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from openbao_required import openbao_required_gaps as _required_gaps  # noqa: E402
 
 KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
@@ -544,17 +549,9 @@ def o2c_host_addresses(roster, endpoints_by_host):
 def o2c_missing_openbao_keys(docs, required):
     """선언(``<역할>_openbao_required``: ``{문서 경로 패턴: [필수 키]}``) 중 읽은 문서(``{경로: 문서}``)에 빠진 키를 ``['<경로>: <키>']``로 돌려준다.
 
-    ``+``가 든 패턴(호스트마다 읽는 문서)은 건너뛴다. 값은 담지 않는다: 문서 경로와 키 이름뿐이다.
+    ``+``가 든 패턴(호스트마다 읽는 문서)은 건너뛴다. 값은 담지 않는다: 문서 경로와 키 이름뿐이다. 구현은 공용 필터 `openbao_required_gaps`다.
     """
-    out = []
-    for pattern, keys in (required or {}).items():
-        if '+' in pattern:
-            continue
-        doc = (docs or {}).get(pattern)
-        for key in keys or []:
-            if not isinstance(doc, dict) or doc.get(key) in (None, ''):
-                out.append('%s: %s' % (pattern, key))
-    return out
+    return _required_gaps(docs, required, scope='required', missing_doc='keys', blank='none_empty', skip_plus=True, fmt='colon_space')
 
 
 def o2c_host_label(column, addresses):
