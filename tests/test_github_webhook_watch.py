@@ -4,12 +4,14 @@ seam 1(빠름): 점검 모듈 `gww_check.check()`를 외부 API(GitHub)를 모�
 seam 2(slow, 소수): 역할을 실제 `ansible-playbook`으로 실행해 하트비트 레코드, 실패 표면화, check 모드, no_log를 증명한다.
 실제 호스트·주소·조직명·시크릿은 쓰지 않는다. 모든 값은 가짜다.
 """
+import importlib
 import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -20,6 +22,8 @@ import pytest
 import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR / "scripts"))
+sys.path.insert(0, str(ROOT_DIR / "tests"))
 ROLE_DIR = ROOT_DIR / "roles" / "github_webhook_watch"
 DOC = ROOT_DIR / "docs" / "github_webhook_watch.md"
 TOKEN = "fake-github-token-0123456789"
@@ -363,8 +367,30 @@ def test_defaults_hold_no_credentials_or_real_urls():
     text = (ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8")
     d = yaml.safe_load(text)
     for key in ("gww_github_token", "gww_o2_password", "gww_hook_url", "gww_o2_endpoint"):
-        assert "default('', true)" in d[key], key
-    assert set(re.findall(r"https?://[A-Za-z0-9.-]+", text)) <= {"https://api.github.com", "http://openbao"}
+        assert "gww_docs[" in d[key] and "default(" not in d[key], key  # 공용 읽기 지점의 문서에서만 온다(대체값 없음)
+    assert set(re.findall(r"https?://[A-Za-z0-9.-]+", text)) <= {"https://api.github.com"}
+
+
+def test_role_has_no_own_openbao_mount_namespace_chain_or_path_variables():
+    text = "".join(p.read_text(encoding="utf-8") for p in ROLE_DIR.rglob("*.yml"))
+    for banned in ("gww_openbao", "gww_vault", "gww_kv", "VAULT_", "OPENBAO_", "X-Vault", "approle", "agents/github-webhook-watch",
+                   "infra/prod/host"):
+        assert banned not in text, banned
+    assert "ansible.builtin.uri" in text and text.count("url: \"{{ gww_vault") == 0  # OpenBao를 부르는 uri 태스크가 없다
+    assert "lookup('openbao_doc'" in text
+
+
+def test_openbao_required_is_declared_and_matches_index_and_schemas():
+    ob = importlib.import_module("openbao_validation")
+    declared = yaml.safe_load((ROLE_DIR / "vars" / "main.yml").read_text(encoding="utf-8"))["github_webhook_watch_openbao_required"]
+    assert set(declared) == {"inventory/config/github_webhook_watch", "inventory/services/openobserve",
+                             "secrets/services/github/org_hooks_read", "secrets/services/openobserve/ingest"}
+    for pattern, keys in declared.items():
+        rel = ob.resolve_schema(pattern)
+        assert rel is not None, pattern
+        schema = json.loads((ob.DEFAULT_SCHEMA_DIR / rel).read_text(encoding="utf-8"))
+        assert set(keys) <= set(schema["properties"]), pattern
+        assert set(schema.get("required", [])) <= set(keys), pattern
 
 
 def test_credential_and_url_tasks_are_no_log():
@@ -372,7 +398,7 @@ def test_credential_and_url_tasks_are_no_log():
         blob = json.dumps(t)
         if tid == "GWW-005":
             continue  # 값을 출력하지 않는 assert(조건식 문자열만 나온다): 안내 메시지가 보여야 해서 no_log를 쓰지 않는다
-        if any(s in blob for s in ("gww_github_token", "gww_o2_password", "gww_kv", "vault_token", "role_id", "secret_id", "gww_hook_url")):
+        if any(s in blob for s in ("gww_github_token", "gww_o2_password", "gww_docs", "gww_hook_url")):
             assert t.get("no_log") is True, tid
 
 
@@ -423,28 +449,46 @@ def test_role_files_hold_no_real_values():
 def ansible_env(tmp_path):
     if shutil.which("ansible-playbook") is None:
         pytest.skip("ansible-playbook not installed")
-    (tmp_path / "ansible.cfg").write_text(f"[defaults]\nroles_path = {ROOT_DIR / 'roles'}\nretry_files_enabled = False\n", encoding="utf-8")
-    (tmp_path / "play.yml").write_text("- hosts: localhost\n  gather_facts: false\n  connection: local\n  roles:\n    - github_webhook_watch\n", encoding="utf-8")
+    (tmp_path / "play.yml").write_text("- hosts: localhost\n  gather_facts: false\n  connection: local\n  become: false\n  roles:\n    - github_webhook_watch\n", encoding="utf-8")
     return tmp_path
 
 
-def _run(env_dir, fake, extra=None, check=False):
-    ev = {"gww_github_api_url": fake.url, "gww_github_token": TOKEN, "gww_github_org": ORG, "gww_hook_url": HOOK_URL,
-          "gww_expected_events": EVENTS, "gww_o2_endpoint": fake.url, "gww_o2_org": "default",
-          "gww_o2_user": "fake-o2-user", "gww_o2_password": O2_PASSWORD}
+def _seed(bao, fake, token=TOKEN, user="fake-o2-user", hook_url=HOOK_URL, org=ORG, drop=None, loose=False):
+    """역할이 읽는 문서 4개를 가짜 OpenBao에 싣는다. `loose`면 스키마 검사 없이 싣는다(빈 값 시험)."""
+    if loose:
+        bao.schema_check = None
+    docs = {
+        ("inventory", "config/github_webhook_watch"): {"hook_url": hook_url, "github_org": org, "o2_org": "default"},
+        ("inventory", "services/openobserve"): {"url": fake.url},
+        ("secrets", "services/github/org_hooks_read"): {"token": token},
+        ("secrets", "services/openobserve/ingest"): {"username": user, "password": O2_PASSWORD},
+    }
+    for (mount, doc), data in docs.items():
+        bao.set(mount, doc, data)
+    if drop:
+        mount, doc, key = drop
+        data = dict(bao.get(mount, doc)[0])
+        data.pop(key)
+        bao.schema_check = None
+        bao.set(mount, doc, data)
+
+
+def _run(env_dir, fake, bao, extra=None, check=False, seed=None):
+    _seed(bao, fake, **(seed or {}))
+    ev = {"gww_github_api_url": fake.url, "gww_expected_events": EVENTS}
     ev.update(extra or {})
     (env_dir / "ev.yml").write_text(yaml.safe_dump(ev), encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
-    env["ANSIBLE_CONFIG"] = str(env_dir / "ansible.cfg")
+    env.update(VAULT_ADDR=bao.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret")
     cmd = ["ansible-playbook", "-i", "localhost,", str(env_dir / "play.yml"), "-e", f"@{env_dir / 'ev.yml'}"]
     if check:
         cmd.append("--check")
-    return subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=env_dir)
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=ROOT_DIR)
 
 
-def test_run_leaves_heartbeat_with_time_status_and_counts(ansible_env, fake):
+def test_run_leaves_heartbeat_with_time_status_and_counts(ansible_env, fake, fake_openbao):
     fake.deliveries = [_delivery(1, "g1", 2, 500)]
-    res = _run(ansible_env, fake)
+    res = _run(ansible_env, fake, fake_openbao)
     assert res.returncode == 0, res.stdout + res.stderr
     assert len(fake.heartbeats) == 1
     hb = fake.heartbeats[0]
@@ -454,88 +498,88 @@ def test_run_leaves_heartbeat_with_time_status_and_counts(ansible_env, fake):
     assert fake.redelivered == [1]
 
 
-def test_missing_hook_run_succeeds_and_heartbeat_carries_status(ansible_env, fake):
+def test_missing_hook_run_succeeds_and_heartbeat_carries_status(ansible_env, fake, fake_openbao):
     fake.hooks = []
-    res = _run(ansible_env, fake)
+    res = _run(ansible_env, fake, fake_openbao)
     assert res.returncode == 0, res.stdout + res.stderr
     assert fake.heartbeats[0]["hook_status"] == "missing"
 
 
-def test_api_failure_fails_run_and_heartbeat_records_error(ansible_env, fake):
+def test_api_failure_fails_run_and_heartbeat_records_error(ansible_env, fake, fake_openbao):
     fake.mode = "api_500"
-    res = _run(ansible_env, fake)
+    res = _run(ansible_env, fake, fake_openbao)
     assert res.returncode != 0
     assert len(fake.heartbeats) == 1
     assert fake.heartbeats[0]["result"] == "error" and fake.heartbeats[0]["error"] == "api_http_500"
 
 
-def test_missing_credential_fails_run_and_heartbeat_records_error(ansible_env, fake):
-    res = _run(ansible_env, fake, extra={"gww_github_token": ""})
+def test_missing_credential_fails_run_and_heartbeat_records_error(ansible_env, fake, fake_openbao):
+    res = _run(ansible_env, fake, fake_openbao, seed={"token": "", "loose": True})
     assert res.returncode != 0
     assert fake.heartbeats[0]["error"] == "credential_missing"
     assert fake.requests == [("POST", "/api/default/security_logs/_json")]
 
 
-def test_input_assert_message_is_visible_when_input_missing(ansible_env, fake):
-    res = _run(ansible_env, fake, extra={"gww_o2_user": ""})
+def test_input_assert_message_is_visible_when_input_missing(ansible_env, fake, fake_openbao):
+    res = _run(ansible_env, fake, fake_openbao, seed={"user": "", "loose": True})
     out = res.stdout + res.stderr
     assert res.returncode != 0 and "[GWW-INPUT]" in out and fake.requests == []
     for secret in (TOKEN, O2_PASSWORD, HOOK_URL, "fake-secret-path"):
         assert secret not in out
 
 
-@pytest.mark.parametrize("key", ["gww_github_org", "gww_hook_url"])
-def test_empty_org_or_hook_url_fails_input_validation(ansible_env, fake, key):
-    res = _run(ansible_env, fake, extra={key: ""})
+@pytest.mark.parametrize("key", ["org", "hook_url"])
+def test_empty_org_or_hook_url_fails_input_validation(ansible_env, fake, fake_openbao, key):
+    res = _run(ansible_env, fake, fake_openbao, seed={key: "", "loose": True})
     assert res.returncode != 0 and "[GWW-INPUT]" in res.stdout + res.stderr
     assert fake.requests == [] and fake.heartbeats == []
 
 
-def test_truncated_listing_is_in_heartbeat(ansible_env, fake):
+def test_truncated_listing_is_in_heartbeat(ansible_env, fake, fake_openbao):
     fake.page_size = 1
     fake.deliveries = [_delivery(i, f"g{i}", 1, 200) for i in range(1, 4)]
-    res = _run(ansible_env, fake, extra={"gww_max_pages": 1})
+    res = _run(ansible_env, fake, fake_openbao, extra={"gww_max_pages": 1})
     assert res.returncode == 0, res.stdout + res.stderr
     assert fake.heartbeats[0]["deliveries_truncated"] is True
 
 
-def test_redelivery_5xx_fails_run_and_heartbeat_records_error(ansible_env, fake):
+def test_redelivery_5xx_fails_run_and_heartbeat_records_error(ansible_env, fake, fake_openbao):
     fake.deliveries = [_delivery(1, "g1", 2, 500)]
     fake.redeliver_status = 500
-    res = _run(ansible_env, fake)
+    res = _run(ansible_env, fake, fake_openbao)
     assert res.returncode != 0
     assert fake.heartbeats[0]["result"] == "error" and fake.heartbeats[0]["error"] == "api_http_500"
 
 
-def test_unexpected_response_fails_run_and_heartbeat_records_error(ansible_env, fake):
+def test_unexpected_response_fails_run_and_heartbeat_records_error(ansible_env, fake, fake_openbao):
     fake.raw_hooks = {"message": "oops"}
-    res = _run(ansible_env, fake)
+    res = _run(ansible_env, fake, fake_openbao)
     assert res.returncode != 0
     assert fake.heartbeats[0]["result"] == "error" and fake.heartbeats[0]["error"] == "api_unexpected_response"
 
 
-def test_heartbeat_ingest_failure_fails_run(ansible_env, fake):
+def test_heartbeat_ingest_failure_fails_run(ansible_env, fake, fake_openbao):
     fake.o2_status = 500
-    assert _run(ansible_env, fake).returncode != 0
+    assert _run(ansible_env, fake, fake_openbao).returncode != 0
 
 
-def test_check_mode_does_not_redeliver_or_write_heartbeat(ansible_env, fake):
+def test_check_mode_does_not_redeliver_or_write_heartbeat(ansible_env, fake, fake_openbao):
     fake.deliveries = [_delivery(1, "g1", 2, 500)]
-    res = _run(ansible_env, fake, check=True)
+    res = _run(ansible_env, fake, fake_openbao, check=True)
     assert res.returncode == 0, res.stdout + res.stderr
     assert fake.redelivered == [] and fake.heartbeats == []
     assert not any(m == "POST" for m, _ in fake.requests)
 
 
-def test_interval_not_shorter_than_window_is_rejected(ansible_env, fake):
-    res = _run(ansible_env, fake, extra={"gww_check_interval_hours": 72})
+def test_interval_not_shorter_than_window_is_rejected(ansible_env, fake, fake_openbao):
+    res = _run(ansible_env, fake, fake_openbao, extra={"gww_check_interval_hours": 72})
     assert res.returncode != 0 and fake.requests == []
 
 
-def test_credentials_and_urls_never_printed(ansible_env, fake):
+def test_credentials_and_urls_never_printed(ansible_env, fake, fake_openbao):
     for mode in ("ok", "api_500"):
         fake.mode = mode
-        out = _run(ansible_env, fake)
+        out = _run(ansible_env, fake, fake_openbao)
         blob = out.stdout + out.stderr
         for secret in (TOKEN, O2_PASSWORD, HOOK_URL, "fake-secret-path"):
             assert secret not in blob
@@ -546,3 +590,36 @@ def test_credentials_and_urls_never_printed(ansible_env, fake):
 def test_parse_time_accepts_github_timestamps_with_and_without_milliseconds(gww, text):
     parsed = gww._parse_time(text)
     assert parsed is not None and (parsed.year, parsed.month, parsed.day, parsed.hour, parsed.minute, parsed.second) == (2026, 11, 4, 2, 22, 21)
+
+
+def test_run_reads_only_the_declared_documents_from_the_infra_namespace_with_the_approle(ansible_env, fake, fake_openbao):
+    res = _run(ansible_env, fake, fake_openbao)
+    assert res.returncode == 0, res.stdout + res.stderr
+    declared = yaml.safe_load((ROLE_DIR / "vars" / "main.yml").read_text(encoding="utf-8"))["github_webhook_watch_openbao_required"]
+    assert {f"{r.mount}/{r.doc}" for r in fake_openbao.reads()} == set(declared)
+    assert {r.namespace for r in fake_openbao.reads()} == {"infra"}
+    assert fake_openbao.writes() == [] and len(fake_openbao.logins()) >= 1
+
+
+@pytest.mark.parametrize("drop", [("inventory", "config/github_webhook_watch", "o2_org"),
+                                  ("secrets", "services/github/org_hooks_read", "token"),
+                                  ("secrets", "services/openobserve/ingest", "password")])
+def test_a_missing_required_key_fails_before_calling_anything_naming_document_and_key_only(ansible_env, fake, fake_openbao, drop):
+    res = _run(ansible_env, fake, fake_openbao, seed={"drop": drop})
+    out = res.stdout + res.stderr
+    assert res.returncode != 0 and "[GWW-INPUT]" in out and f"{drop[1]}:{drop[2]}" in out
+    assert fake.requests == [] and fake.heartbeats == []
+    for secret in (TOKEN, O2_PASSWORD, HOOK_URL):
+        assert secret not in out
+
+
+def test_a_missing_document_fails_without_a_fallback_value(ansible_env, fake, fake_openbao):
+    _seed(fake_openbao, fake)
+    fake_openbao.remove("secrets", "services/github/org_hooks_read")
+    ev = ansible_env / "ev.yml"
+    ev.write_text(yaml.safe_dump({"gww_github_api_url": fake.url}), encoding="utf-8")
+    env = dict(os.environ, VAULT_ADDR=fake_openbao.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret")
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(ansible_env / "play.yml"), "-e", f"@{ev}"],
+                         capture_output=True, text=True, env=env, cwd=ROOT_DIR)
+    assert res.returncode != 0 and "[GWW-OPENBAO]" in res.stdout + res.stderr and "org_hooks_read" in res.stdout + res.stderr
+    assert fake.requests == [] and fake.heartbeats == []
