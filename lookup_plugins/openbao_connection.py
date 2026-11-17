@@ -19,7 +19,7 @@ from ansible.errors import AnsibleError
 from ansible.plugins.lookup import LookupBase
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbao_doc import Reader, display  # noqa: E402
+from _openbao_reader import Reader, display  # noqa: E402
 
 DOCUMENTATION = r"""
 name: openbao_connection

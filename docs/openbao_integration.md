@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart LR
-    Semaphore["Semaphore 템플릿\n(계열 Environment)"] -->|AppRole 로그인| Reader["공용 읽기 지점\nlookup_plugins/openbao_doc.py"]
+    Semaphore["Semaphore 템플릿\n(계열 Environment)"] -->|AppRole 로그인| Reader["공용 읽기 지점\nlookup_plugins/_openbao_reader.py"]
     Reader -->|네임스페이스 infra| Bao[("OpenBao\ninventory/ · secrets/")]
     Reader --> Roles["역할·플레이북\nlookup('openbao_doc', '<마운트>/<문서 경로>')"]
     Tofu["tofu/openbao\n(정책·AppRole·마운트)"] -.->|적용| Bao
@@ -74,7 +74,7 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 
 **`playbooks/common/resolve_connection.yml`** (서버 플레이북이 첫 플레이로 import)
 
-임시 SSH 개인키 파일(관리·부트스트랩·경유지)은 `playbooks/common/stage_ssh_key.yml` 한 곳에서 만든다. 키에 암호문이 있으면 `ssh-keygen -P`(인자라 `ps`에 보인다)가 아니라 `SSH_ASKPASS`(키 파일 옆에 잠깐 만드는 비밀 없는 스크립트)와 환경 변수 `BAO_KEY_PASSPHRASE`로 넘긴다. 임시 디렉터리가 `noexec`로 마운트된 러너에서는 askpass 스크립트를 실행하지 못해 암호문 제거가 실패한다(그때는 임시 디렉터리를 바꾼다).
+임시 SSH 개인키 파일(관리·부트스트랩·경유지)은 `playbooks/common/stage_ssh_key.yml` 한 곳에서 만든다. 키에 암호문이 있으면 `ssh-keygen -P`(인자라 `ps`에 보인다)가 아니라 `SSH_ASKPASS`(키 파일 옆에 잠깐 만드는 비밀 없는 스크립트)와 환경 변수 `BAO_KEY_PASSPHRASE`로 넘긴다. 임시 디렉터리가 `noexec`로 마운트된 러너에서는 askpass 스크립트를 실행하지 못해 암호문 제거가 실패한다(그때는 임시 디렉터리를 바꾼다). 키를 쓰거나 암호문을 벗기는 단계가 실패하면 헬퍼가 그 자리에서 키 파일을 지우고 실패한다. 이 헬퍼 밖(뒤 플레이)에서 호스트가 실패하면 ansible-playbook이 그 호스트를 뒤 플레이에서 빼 `cleanup_connection`이 돌지 못하므로 키가 임시 디렉터리에 남을 수 있다. 이를 `ansible-playbook` 안에서 보장하는 방법은 없어(플레이북 전체의 `always`가 없다), 다음 `resolve_connection` 실행이 12시간 넘은 `*_bao_{admin,boot,hop}_key` 파일을 지운다. 그 사이에도 파일은 `0600`이다.
 
 | 입력 변수 | 뜻 |
 |---|---|

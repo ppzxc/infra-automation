@@ -6,35 +6,31 @@
 # (inventory/assets/<ns>/endpoints의 ssh)에서 직접 읽는다.
 # 연결 해석(resolve_connection.yml)은 실행 대상 호스트만 하므로 hostvars를 쓰면 부분 실행(target_hosts=ns0266)에서
 # 나머지가 모두 22로 만들어져 도달성 알림이 오발화한다. ssh Endpoint가 없으면 22나 호스트명으로 짐작하지 않고 실패시킨다.
-# Endpoint 문서에는 시크릿이 없다. 읽기 실패는 문서 경로와 상태 코드만 경고로 남기고(errors='warn', quiet=true) assert가 중단시킨다.
+# Endpoint 문서에는 시크릿이 없다. 문서는 한 번의 조회로(같은 읽기 객체, 로그인도 한 번) 읽고, 읽기 실패(403·연결 오류·없는 문서)는
+# 읽기 지점이 문서 경로와 상태 코드를 내며 그 자리에서 중단한다(포트를 22로 짐작하지 않는다).
 - name: "[MON-227] Read the Endpoint document of every server from OpenBao (inventory/assets/<ns>/endpoints)"
+  vars:
+    _paths: "{{ otel_tcpcheck_roster | map('regex_replace', '^(.*)$', 'inventory/assets/\\1/endpoints') | list }}"
   ansible.builtin.set_fact:
-    _tcpcheck_doc: "{{ lookup('openbao_doc', 'inventory/assets/' ~ item ~ '/endpoints', errors='warn', quiet=true) }}"
-  loop: "{{ otel_tcpcheck_roster }}"
-  loop_control:
-    label: "{{ item }}"
-  register: _tcpcheck_read
+    _tcpcheck_docs: "{{ query('openbao_doc', *_paths) if _paths | length > 0 else [] }}"
   become: false
   check_mode: false
   when: otel_tcpcheck_enabled | bool
 
 - name: "[MON-228] Assert OpenBao answered every server Endpoint lookup"
   vars:
-    _docs: "{{ _tcpcheck_read.results | default([]) | map(attribute='ansible_facts._tcpcheck_doc', default=[]) | list }}"
-    _bad: "{{ otel_tcpcheck_roster | zip(_docs) | rejectattr('1', 'mapping') | map(attribute='0') | list }}"
+    _bad: "{{ otel_tcpcheck_roster | zip(_tcpcheck_docs) | rejectattr('1', 'mapping') | map(attribute='0') | list }}"
   ansible.builtin.assert:
     that:
-      - _docs | length == otel_tcpcheck_roster | length
+      - _tcpcheck_docs | length == otel_tcpcheck_roster | length
       - _bad | length == 0
     fail_msg: >-
-      {{ inventory_hostname }}: 서버 도달성 대상을 만들 수 없습니다 — OpenBao inventory/assets/<ns>/endpoints 조회 실패(변경 없이 중단).
-      실패 호스트={{ _bad if _bad | length > 0 else '없음(미조회)' }} (상태 코드는 바로 위 경고에 있습니다)
+      {{ inventory_hostname }}: 서버 도달성 대상을 만들 수 없습니다 — OpenBao inventory/assets/<ns>/endpoints 조회 결과가 맞지 않습니다(변경 없이 중단).
+      실패 호스트={{ _bad if _bad | length > 0 else '없음(미조회)' }}
     quiet: true
   when: otel_tcpcheck_enabled | bool
 
 - name: "[MON-229] Build the server reachability targets (address:port) from the ssh Endpoints"
-  vars:
-    _docs: "{{ _tcpcheck_read.results | map(attribute='ansible_facts._tcpcheck_doc') | list }}"
   ansible.builtin.set_fact:
-    otel_tcpcheck_targets: "{{ otel_tcpcheck_roster | host_agents_tcpcheck_targets(dict(otel_tcpcheck_roster | zip(_docs))) }}"
+    otel_tcpcheck_targets: "{{ otel_tcpcheck_roster | host_agents_tcpcheck_targets(dict(otel_tcpcheck_roster | zip(_tcpcheck_docs))) }}"
   when: otel_tcpcheck_enabled | bool

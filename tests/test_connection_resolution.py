@@ -217,3 +217,63 @@ def test_the_staging_helper_really_strips_a_passphrase_through_askpass_with_the_
         assert "fake-pass-xyz" not in res.stdout + res.stderr
     finally:
         staged.unlink(missing_ok=True)
+
+
+def test_old_keys_of_failed_runs_are_purged_but_recent_ones_are_kept(tmp_path, fake_openbao):
+    import os as _os
+    import time
+    stale = Path("/tmp") / "zz_stale_bao_admin_key"
+    fresh = Path("/tmp") / "zz_fresh_bao_admin_key"
+    for f in (stale, fresh):
+        f.write_text("fake")
+    old = time.time() - 13 * 3600
+    _os.utime(stale, (old, old))
+    try:
+        res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"])
+        assert res.returncode == 0, res.stdout + res.stderr
+        assert not stale.exists() and fresh.exists()                  # 12시간 넘은 것만 지운다
+    finally:
+        fresh.unlink(missing_ok=True)
+        stale.unlink(missing_ok=True)
+
+
+def test_a_failing_passphrase_step_removes_the_half_prepared_key_and_fails(tmp_path):
+    import shutil
+    import subprocess as sp
+    if not shutil.which("ssh-keygen"):
+        pytest.skip("ssh-keygen이 없다")
+    key = tmp_path / "k"
+    sp.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "right-pass", "-f", str(key)], check=True)
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
+        {"ansible.builtin.include_tasks": str(ROOT_DIR / "playbooks" / "common" / "stage_ssh_key.yml"),
+         "vars": {"_sk_suffix": "_bao_failtest_key", "_sk_key": key.read_text(), "_sk_passphrase": "wrong-pass", "_sk_record": "_staged"}}]}]
+    (tmp_path / "pb.yml").write_text(yaml.safe_dump(play))
+    before = set(Path("/tmp").glob("*_bao_failtest_key*"))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "pb.yml")], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode != 0 and "임시 SSH 키를 준비하지 못했습니다" in res.stdout + res.stderr
+    assert set(Path("/tmp").glob("*_bao_failtest_key*")) == before
+
+
+def test_a_failing_hop_also_removes_the_keys_of_the_hops_staged_before_it(tmp_path):
+    import shutil
+    import subprocess as sp
+    if not shutil.which("ssh-keygen"):
+        pytest.skip("ssh-keygen이 없다")
+    good, bad = tmp_path / "good", tmp_path / "bad"
+    sp.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(good)], check=True)
+    sp.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "right-pass", "-f", str(bad)], check=True)
+    hops = [{"asset": "a", "endpoint": "ssh", "login": {"private_key": good.read_text()}},
+            {"asset": "b", "endpoint": "ssh", "login": {"private_key": bad.read_text(), "passphrase": "wrong-pass"}}]
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
+        {"ansible.builtin.set_fact": {"_hop_key_paths": []}},
+        {"ansible.builtin.include_tasks": str(ROOT_DIR / "playbooks" / "common" / "stage_ssh_key.yml"),
+         "loop": hops, "loop_control": {"loop_var": "_hop", "label": "{{ _hop.asset }}"},
+         "vars": {"_sk_suffix": "_bao_hoptest_key", "_sk_key": "{{ _hop.login.private_key | default('') }}",
+                  "_sk_passphrase": "{{ _hop.login.passphrase | default('') }}", "_sk_append_to": "_hop_key_paths"}}]}]
+    (tmp_path / "pb.yml").write_text(yaml.safe_dump(play))
+    before = set(Path("/tmp").glob("*_bao_hoptest_key*"))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "pb.yml")], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode != 0
+    assert set(Path("/tmp").glob("*_bao_hoptest_key*")) == before

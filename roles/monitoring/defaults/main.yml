@@ -188,7 +188,8 @@ otel_system_logs:
   - /var/log/kern.log
 
 # 리소스 속성 deployment.environment.name (production|staging|development|test). 모든 호스트가 같은 값이라 역할 기본값이다(Spec #511 §3).
-host_agents_environment: production
+# 값은 playbooks/group_vars/all.yml의 deployment_environment 한 곳이다(Host Audit과 공유).
+host_agents_environment: "{{ deployment_environment }}"
 
 # Legacy node_exporter Cleanup Toggle
 cleanup_legacy_node_exporter: true

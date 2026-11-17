@@ -297,7 +297,9 @@ def test_periodic_check_has_list_and_reads_everything_but_agent_session_cannot_r
     ag = dict(policy("agent-session"))
     assert ag["inventory/data/*"] == ["read"]
     assert set(ag["secrets/metadata/*"]) == {"read", "list"}
+    assert set(ag["inventory/metadata/*"]) == {"read", "list"}      # AGENTS.md: 에이전트 세션은 inventory/를 읽는다(문서 목록 포함)
     assert not any(p.startswith("secrets/data") for p in ag)
+    assert not any(p.startswith("inventory/") and ({"create", "update", "delete", "patch"} & set(c)) for p, c in ag.items())
     assert readable_patterns(["agent-session"]) == {p for p in index_patterns() if p.startswith("inventory/")}
 
 

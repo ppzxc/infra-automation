@@ -125,6 +125,27 @@ def test_a_missing_login_credential_is_shown(shown):
     assert len(shown) == 1
 
 
+def test_a_process_login_is_preferred_over_the_stale_shared_token_so_the_403_is_not_repeated(fake_openbao):
+    first = Reader(_vars(fake_openbao, _vault_token="expired-token"))
+    first.read("inventory/assets/ns0001")                 # 403 뒤 재로그인(캐시에 새 토큰)
+    second = Reader(_vars(fake_openbao, _vault_token="expired-token"))
+    second.read("inventory/assets/ns0002")
+    assert len(fake_openbao.logins()) == 1
+    assert [r.token for r in fake_openbao.reads()] == ["expired-token", "approle-issued", "approle-issued"]
+
+
+def test_the_reader_module_is_one_copy_shared_by_every_lookup_as_the_ansible_loader_sees_them():
+    import sys
+    from ansible.plugins.loader import lookup_loader
+    for name in ("openbao_doc", "openbao_connection", "openbao_host_connection"):
+        assert lookup_loader.get(name) is not None, name
+    copies = [m for m in sys.modules if m.split(".")[-1] == "_openbao_reader"]
+    assert copies == ["_openbao_reader"], copies                       # 이름을 달리해 두 번 올라간 사본이 없다
+    shared = sys.modules["_openbao_reader"]
+    assert openbao_doc.Reader is shared.Reader and openbao_doc._LOGIN_CACHE is shared._LOGIN_CACHE
+    assert sys.modules["openbao_connection"].Reader is shared.Reader
+
+
 def test_a_denied_login_is_shown_once(fake_openbao, shown):
     fake_openbao.approle = False
     fake_openbao.raw("POST", "/v1/auth/approle/login", {"errors": ["denied"]}, status=403)

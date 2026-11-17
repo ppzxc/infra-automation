@@ -76,7 +76,7 @@
   | `secrets/services/alert/notify` | `url` | 검사 호스트만 | 생존 타이머의 text/plain 알림 주소(`MON-220`) |
   | `inventory/assets/<ns>/endpoints` | `ssh`의 `address`·`port` | 검사 호스트만 | 서버 도달성 대상(`MON-227`~`229`) |
 
-  `host_agents_environment`(`production` \| `staging` \| `development` \| `test`)는 모든 호스트가 같은 값이라 **역할 기본값**이고 OpenBao에서 읽지 않는다. 허용 밖 값은 변경 전 실패(`MON-037`).
+  `host_agents_environment`(`production` \| `staging` \| `development` \| `test`)는 모든 호스트가 같은 값이라 공용 `deployment_environment`(`playbooks/group_vars/all.yml`, Host Audit과 공유)를 따르는 **역할 기본값**이고 OpenBao에서 읽지 않는다. 허용 밖 값은 변경 전 실패(`MON-037`).
 
 - **실패 조건 (변경 전, check 모드 포함)**: 필수 문서·키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 저장 위치(`agents.backup.exclude_paths` 등)를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
 - **공유 Service 문서**: `inventory/services/openobserve`·`rustfs`에 `url`이 없으면 실패합니다(조회는 호스트마다 수행. TLS 검증과 인증은 읽기 지점이 정한다).
@@ -309,8 +309,8 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-223` | `Deploy the OpenObserve health env file (0600, no_log, no diff)` | `ansible.builtin.template` | modern, 검사 호스트 | webhook URL(`secrets/services/alert/notify`)을 담는 시크릿 파일 `0600`, `no_log`, diff 없음 |
 | `MON-224` | `Deploy the OpenObserve health service and timer units` | `ansible.builtin.template` | modern, 검사 호스트 | `openobserve-health.service`(oneshot)와 `.timer`(`OnUnitActiveSec=5min`) `0644` |
 | `MON-225` | `Reload systemd units when the OpenObserve health units changed` | `ansible.builtin.systemd` | modern, 검사 호스트 | 유닛 변경 시에만 `daemon_reload` |
-| `MON-227` | `Read the Endpoint document of every server from OpenBao (inventory/assets/<ns>/endpoints)` | `ansible.builtin.set_fact` | 검사 호스트 | 읽기 전용 (`lookup('openbao_doc')`, `check_mode: false`). `servers`에서 `host_agents_tcpcheck_excluded`를 뺀 모든 호스트를 OpenBao에서 직접 읽어 실행 범위(`target_hosts`)와 무관하게 같은 목록이 나온다 |
-| `MON-228` | `Assert OpenBao answered every server Endpoint lookup` | `ansible.builtin.assert` | 검사 호스트 | 읽기 전용 (읽지 못한 문서가 있으면 포트를 22로 짐작하지 않고 변경 없이 실패, 호스트 이름만 보고하고 status는 경고) |
+| `MON-227` | `Read the Endpoint document of every server from OpenBao (inventory/assets/<ns>/endpoints)` | `ansible.builtin.set_fact` | 검사 호스트 | 읽기 전용 (`query('openbao_doc', *paths)` 한 번, `check_mode: false`. 읽기 실패는 읽기 지점이 경로·상태를 내며 중단). `servers`에서 `host_agents_tcpcheck_excluded`를 뺀 모든 호스트를 OpenBao에서 직접 읽어 실행 범위(`target_hosts`)와 무관하게 같은 목록이 나온다 |
+| `MON-228` | `Assert OpenBao answered every server Endpoint lookup` | `ansible.builtin.assert` | 검사 호스트 | 읽기 전용 (결과 수나 형태가 맞지 않으면 포트를 22로 짐작하지 않고 변경 없이 실패, 호스트 이름만 보고) |
 | `MON-229` | `Build the server reachability targets (address:port) from the ssh Endpoints` | `ansible.builtin.set_fact` | 검사 호스트 | 순수 함수 (`host_agents_tcpcheck_targets`: ssh Endpoint의 `address`:`port`, 없으면 대체값 없이 호스트 이름을 대며 실패) |
 | `MON-226` | `Ensure the OpenObserve health timer is enabled and running` | `ansible.builtin.systemd` | modern, 검사 호스트 | 타이머 `enabled` + `started` |
 | `MON-230` | `Ensure the Host Agents result and state directories exist (0755)` | `ansible.builtin.file` | modern | 디렉터리 존재 시 `ok` (`/var/log/host-agents`, `/var/lib/host-agents`, root `0755`, 백업 역할 `BAK-025`와 같은 속성) |

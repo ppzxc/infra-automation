@@ -8,11 +8,14 @@ import shlex
 
 from ansible.errors import AnsibleFilterError
 
-_FIXED = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+# ConnectTimeout: 응답 없는 경유지에서 시스템 기본(약 2분)씩 멈추지 않게 한다(관리 연결 프로브와 같은 5초).
+_FIXED = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
           "-o", "IdentitiesOnly=yes"]
 
 
 def openbao_ssh_proxy_command(hops, key_files, host, port):
+    if not hops:
+        raise AnsibleFilterError("ProxyCommand에는 경유지가 하나 이상 필요합니다(경유지 없는 연결은 직접 접속입니다)")
     if len(hops) != len(key_files):
         raise AnsibleFilterError("경유지 수와 키 파일 수가 다릅니다")
 

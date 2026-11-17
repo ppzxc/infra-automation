@@ -174,12 +174,19 @@ def test_two_hop_proxy_command_nests_each_hops_user_port_and_key():
     import shlex
     hops = [_hop("a", "192.0.2.21", 2201, "u1"), _hop("b", "192.0.2.22", 2202, "u2")]
     cmd = openbao_ssh_proxy_command(hops, ["/k/1", "/k/2"], "192.0.2.30", 22)
-    fixed = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+    fixed = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
              "-o", "IdentitiesOnly=yes"]
     inner = ["ssh", "-W", "192.0.2.22:2202"] + fixed + ["-i", "/k/1", "-p", "2201", "u1@192.0.2.21"]
     outer = ["ssh", "-W", "192.0.2.30:22"] + fixed + ["-i", "/k/2", "-p", "2202", "u2@192.0.2.22",
                                                        "-o", "ProxyCommand=" + shlex.join(inner)]
     assert shlex.split(cmd) == outer
+
+
+def test_every_hop_has_a_connect_timeout_and_a_proxy_command_without_hops_is_a_clear_error():
+    hops = [{"asset": "a", "endpoint": "ssh", "address": "192.0.2.1", "port": 22, "login": {"mode": "key", "username": "u"}}]
+    assert "ConnectTimeout=5" in openbao_ssh_proxy_command(hops, ["/k"], "192.0.2.30", 22)
+    with pytest.raises(Exception, match="경유지가 하나 이상"):
+        openbao_ssh_proxy_command([], [], "192.0.2.30", 22)
 
 
 def test_common_args_wrap_the_proxy_command_and_are_empty_without_hops():
