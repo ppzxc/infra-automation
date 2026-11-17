@@ -910,44 +910,34 @@
           delegate_to: localhost
           become: false
 
-        - name: "[VERIFY-BAK-087] Verify the maintenance path logs in with AppRole before the KV lookup"
+        - name: "[VERIFY-BAK-087] Verify the maintenance path logs in once through the shared read point before the document lookup"
           ansible.builtin.assert:
             that:
-              - "'auth/approle/login' in _maint"
+              - "\"lookup('openbao_doc', '@token')\" in _maint"
               - "_maint.index('[BAK-087]') < _maint.index('[BAK-071]')"
+              - "'approle/login' not in _maint and 'VAULT_TOKEN' not in _maint"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
           delegate_to: localhost
           become: false
 
-        - name: "[VERIFY-BAK-088] Verify the issued AppRole token is the one the KV lookup prefers"
+        - name: "[VERIFY-BAK-071] Verify the maintenance task file reads exactly the documents backup_openbao_required declares"
           ansible.builtin.assert:
             that:
-              - "'_maint_approle_login.json.auth.client_token' in _maint"
-              - "\"_vault_token | default(\" in _maint"
-              - "_maint.index('[BAK-088]') < _maint.index('[BAK-071]')"
+              - "'backup_openbao_required' in _maint and \"query('openbao_doc'\" in _maint"
+              - "'secrets/services/rustfs/maintenance' in _req and 'inventory/services/rustfs' in _req and 'secrets/services/openobserve/ingest' in _req"
+              - "'secrets/assets/+/agents' in _req and 'inventory/services/openobserve' in _req"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
-          delegate_to: localhost
-          become: false
-
-        - name: "[VERIFY-BAK-071] Verify the maintenance task file reads the OpenBao KV through the same agents paths"
-          ansible.builtin.assert:
-            that:
-              - "'agents/rustfs' in _maint"
-              - "'agents/openobserve' in _maint"
-              - "'/agents' in _maint"
-            quiet: true
-          vars:
-            _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"
+            _req: "{{ (lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/vars/main.yml') | from_yaml).backup_openbao_required }}"
           delegate_to: localhost
           become: false
 
         - name: "[VERIFY-BAK-072] Verify the maintenance inputs are asserted before any command runs"
           ansible.builtin.assert:
-            that: "_maint.index('maintenance_access_key') < _maint.index('[BAK-078]')"
+            that: "_maint.index('backup_openbao_required.items()') < _maint.index('[BAK-078]')"
             quiet: true
           vars:
             _maint: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../../roles/backup/tasks/maintenance.yml') }}"

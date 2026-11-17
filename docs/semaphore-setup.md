@@ -148,7 +148,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 |---|---|---|
 | `VAULT_ROLE_ID` | ● | OpenBao AppRole |
 | `VAULT_SECRET_ID` | ● | OpenBao AppRole |
-| `VAULT_TOKEN` | OpenObserve — Config에는 ● | Deploy·Config는 AppRole이 있으면 AppRole이 우선하고, Repo Maintenance는 토큰이 있으면 토큰을 쓴다(BAK-087은 토큰이 없을 때만 로그인) |
+| `VAULT_TOKEN` | OpenObserve — Config에는 ● | Deploy·Config는 AppRole이 있으면 AppRole이 우선하고, Repo Maintenance도 AppRole만 쓴다(`VAULT_TOKEN` 대체 경로 없음, BAK-087) |
 
 **AppRole 정책이 읽을 수 있어야 하는 KV 경로** (mount `secret`, namespace 기준)
 
