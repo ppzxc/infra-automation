@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ansible managed — OpenObserve 생존 확인 (Spec #184 / Ticket-7).
-# OpenObserve 헬스 엔드포인트가 실패하면 OpenObserve를 거치지 않고 네이버웍스 webhook으로 직접 P1을 보낸다.
+# OpenObserve 헬스 엔드포인트가 실패하면 OpenObserve를 거치지 않고 사내 알림 플랫폼 text/plain webhook으로 직접 P1을 보낸다.
 # 같은 장애는 O2_HEALTH_RENOTIFY_MINUTES(기본 60)마다만 다시 통지하고, 복구되면 상태를 지운다(복구 통지 없음).
 # 설정은 env 파일(O2_HEALTH_ENV_FILE, 기본 /etc/openobserve-health/env, 0600)에서 읽는다.
 # 수동 검증: O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz 로 한 번 실행하면 통지가 도착해야 한다.
@@ -40,13 +40,21 @@ if [ -e "$MARKER" ]; then
 fi
 
 host="$(hostname -s 2>/dev/null || echo unknown)"
-text="🔴 [P1 긴급] OpenObserve 응답 없음\\n\\n■ 무슨 일: OpenObserve 헬스 확인이 실패했습니다 (검사 호스트 ${host}).\\n■ 왜 중요: OpenObserve가 죽으면 알림 시스템 자체가 동작하지 않아 다른 장애도 통지되지 않습니다.\\n■ 대상: ${HEALTH_URL%%\\?*}\\n■ 조치: ① ns0331에서 OpenObserve 서비스·디스크·메모리 확인 ② 복구 후 Host Agents 수집 재개와 Silent Host 알림 확인\\n\\n▶ 런북: https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#openobserve-health"
-body="{\"content\": {\"type\": \"text\", \"text\": \"${text}\"}}"
+# 본문은 사내 알림 플랫폼의 text/plain 경로로 그대로 보낸다(JSON 래퍼·2000자 제한 없음).
+body="$(printf '%s\n' \
+  "🔴 [P1 긴급] OpenObserve 응답 없음" \
+  "" \
+  "■ 무슨 일: OpenObserve 헬스 확인이 실패했습니다 (검사 호스트 ${host})." \
+  "■ 왜 중요: OpenObserve가 죽으면 알림 시스템 자체가 동작하지 않아 다른 장애도 통지되지 않습니다." \
+  "■ 대상: ${HEALTH_URL%%\?*}" \
+  "■ 조치: ① ns0331에서 OpenObserve 서비스·디스크·메모리 확인 ② 복구 후 Host Agents 수집 재개와 Silent Host 알림 확인" \
+  "" \
+  "▶ 런북: https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#openobserve-health")"
 
 # webhook URL·토큰이 프로세스 목록에 보이지 않도록 curl 설정을 stdin으로 넘긴다.
 {
   printf 'url = "%s"\n' "$O2_WEBHOOK_URL"
-  printf 'header = "Content-Type: application/json"\n'
+  printf 'header = "Content-Type: text/plain; charset=utf-8"\n'
   [ -n "${O2_WEBHOOK_TOKEN:-}" ] && printf 'header = "%s: %s"\n' "${O2_WEBHOOK_AUTH_HEADER:-Authorization}" "$O2_WEBHOOK_TOKEN"
 } | curl -fsS -o /dev/null --max-time 15 -K - --data-binary "$body" >/dev/null 2>&1
 rc=$?
