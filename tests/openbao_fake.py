@@ -8,20 +8,43 @@ AppRole 로그인(`POST /v1/auth/approle/login`)만 흉내 낸다.
 - `namespace`를 주면 `X-Vault-Namespace` 헤더가 그 값과 다른 요청을 403으로 거부한다.
   `token`을 주면 `X-Vault-Token`이 다른 요청을 403으로 거부하고, `approle=True`면 로그인으로 받은 토큰이 있어야 읽는다.
 - 받은 요청은 `requests`에 `Request`로 쌓이고, 테스트는 그 기록으로 단언한다(`reads()`·`logins()`).
-- `index_patterns`(`<마운트>/<문서 경로>` glob 목록)와 `schema_check`(문서 검증 함수)는 스위치다. 기본은 꺼짐(None)이다.
-  켜면 패턴에 맞지 않는 요청은 `violations`에 기록하고, 등록하는 문서는 `schema_check`를 거친다.
-  전환 PR에서 `index.yml`·스키마와 연결한다.
+- `index_patterns`(`<마운트>/<문서 경로>` glob 목록)·`index_check`(마운트, 문서 경로 -> 허용 여부)와 `schema_check`
+  (문서 검증 함수)는 스위치다. 기본은 꺼짐(None)이다. 켜면 패턴에 맞지 않는 요청은 `violations`에 기록하고, 등록하는
+  문서는 `schema_check`를 거친다. `FakeOpenBao.with_schemas()`가 `index.yml`·스키마와 연결하고 기본 fixture를 싣는다
+  (#523). glob의 `*`는 `/`를 넘으므로 `index.yml` 대조에는 `index_check`를 쓴다.
 - 점검용 확장(#519): `set(..., updated_time=)`은 KV v2 `metadata/<경로>`로, 문서 목록은 `?list=true`로 준다.
   `raw(method, path, body, status)`는 `sys/`·`auth/` 같은 임의 경로의 응답을 등록한다(경로는 `/v1/` 뒤, 쿼리 제외,
   목록 조회는 method `LIST`).
 """
 import fnmatch
 import json
+import sys
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR / "scripts"))
+import openbao_validation as ov  # noqa: E402
+
 APPROLE_TOKEN = "approle-issued"
+VALID_FIXTURES = ROOT_DIR / "tests" / "fixtures" / "openbao_docs" / "valid"
+NAMESPACE = "infra"
+
+
+def default_store():
+    """스키마 통과 예제 문서 `{<마운트>/<문서 경로>: 데이터}`. 가짜 서버와 `openbao_fixture`가 같이 쓰는 기본 데이터다(가짜 값만)."""
+    return ov.load_tree(VALID_FIXTURES)
+
+
+def _index_check(mount, doc):
+    return ov.resolve_schema(f"{mount}/{doc}") is not None
+
+
+def _schema_check(mount, doc, data):
+    found = ov.validate_document(f"{mount}/{doc}", data)
+    assert not found, "fixture가 스키마를 어긴다: " + "; ".join(v.format() for v in found)
 
 
 @dataclass(frozen=True)
@@ -36,11 +59,13 @@ class Request:
 
 
 class FakeOpenBao:
-    def __init__(self, *, namespace=None, token=None, approle=False, index_patterns=None, schema_check=None):
+    def __init__(self, *, namespace=None, token=None, approle=False, index_patterns=None, schema_check=None,
+                 index_check=None):
         self.namespace = namespace
         self.token = token
         self.approle = approle
         self.index_patterns = index_patterns
+        self.index_check = index_check
         self.schema_check = schema_check
         self.requests: list[Request] = []
         self.violations: list[tuple[str, str]] = []
@@ -113,8 +138,7 @@ class FakeOpenBao:
                 req = Request("GET", self.path, mount, doc, self.headers.get("X-Vault-Token"),
                               self.headers.get("X-Vault-Namespace"))
                 outer.requests.append(req)
-                if mount is not None and outer.index_patterns is not None and \
-                        not any(fnmatch.fnmatchcase(f"{mount}/{doc}", p) for p in outer.index_patterns):
+                if mount is not None and not outer._allowed(mount, doc):
                     outer.violations.append((mount, doc))
                 want_token = outer.token or (APPROLE_TOKEN if outer.approle else None)
                 if (outer.namespace is not None and req.namespace != outer.namespace) or \
@@ -126,6 +150,22 @@ class FakeOpenBao:
         self.server = HTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def with_schemas(cls, store=None, **kwargs):
+        """`index.yml` 검사와 스키마 검사를 켠 가짜 서버. `store`(기본: 통과 예제 fixture 전체)를 라우트로 싣는다."""
+        fake = cls(index_check=_index_check, schema_check=_schema_check, **kwargs)
+        for path, data in (default_store() if store is None else store).items():
+            mount, _, doc = path.partition("/")
+            fake.set(mount, doc, data)
+        return fake
+
+    def _allowed(self, mount, doc):
+        if self.index_check is not None:
+            return self.index_check(mount, doc)
+        if self.index_patterns is not None:
+            return any(fnmatch.fnmatchcase(f"{mount}/{doc}", p) for p in self.index_patterns)
+        return True
 
     # --- 라우트 등록 -------------------------------------------------------
     def set(self, mount, doc, data, updated_time="2026-11-01T00:00:00.000000Z"):
