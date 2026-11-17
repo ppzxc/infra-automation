@@ -48,6 +48,8 @@ HOST_LABELS = {
 REASON_RAW = ('Raw Provisioning Path(CentOS 6/7) 호스트 — raw 태스크는 --check에서 스킵되므로 '
               'Drift를 판정할 수 없음 (ADR-0005)')
 REASON_NOT_COLLECTED = 'Host Audit 수집 단계에서 점검불가인 호스트라 Drift 점검 대상에서 제외'
+NOT_APPLICABLE_LABEL = '비대상'
+NOT_APPLICABLE_NOTE = 'raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님)'
 REASON_OUT_OF_SCOPE = '선언 범위 밖'
 
 SPEC_ID_RE = re.compile(r'\[([A-Z][A-Z0-9]*-[A-Z0-9]+(?:-[A-Z0-9]+)*)\]')
@@ -83,12 +85,14 @@ def host_audit_drift_plan(records, site_scope, agents_scope, raw_declared=None):
     Exclusion). ``raw_declared``: {host: inventory raw_provisioning_path}.
 
     Hosts not inspected by the audit and Raw Provisioning Path hosts are never
-    sent to a sub-run; they are reported as not inspectable with the reason.
+    sent to a sub-run. ``excluded`` keeps the reason of both; ``not_applicable``
+    lists the raw ones, which Drift cannot see by design (reported as 비대상,
+    not counted as 점검불가).
     """
     raw_declared = raw_declared or {}
     by_host = {r.get('inventory_hostname'): r for r in (records or []) if r.get('inventory_hostname')}
     site_scope, agents_scope = set(site_scope or []), set(agents_scope or [])
-    plan = {'site': [], 'agents': [], 'excluded': {}}
+    plan = {'site': [], 'agents': [], 'excluded': {}, 'not_applicable': []}
     for host in sorted(site_scope | agents_scope):
         record = by_host.get(host)
         if not record or record.get('status') != 'ok':
@@ -96,6 +100,7 @@ def host_audit_drift_plan(records, site_scope, agents_scope, raw_declared=None):
             continue
         if _is_raw_path(record, raw_declared.get(host)):
             plan['excluded'][host] = REASON_RAW
+            plan['not_applicable'].append(host)
             continue
         if host in site_scope:
             plan['site'].append(host)
@@ -280,6 +285,10 @@ def host_audit_drift_parse(callback_json, hosts, declared_plays, ignore=None):
     return {'status': 'ok', 'reason': '', 'hosts': out}
 
 
+def _new_state(host):
+    return {'host': host, 'rows': [], 'excluded': [], 'unavailable': [], 'not_applicable': []}
+
+
 def host_audit_drift_section(plan, runs):
     """Build the Configuration Drift section model.
 
@@ -290,7 +299,7 @@ def host_audit_drift_section(plan, runs):
     """
     plan = plan or {}
     runs = runs or {}
-    subruns, rows, excluded, unavailable = [], [], [], []
+    subruns, rows, excluded, unavailable, not_applicable = [], [], [], [], []
     host_rows = {}
     for key in SUBRUN_ORDER:
         label, command = SUBRUNS[key]
@@ -314,7 +323,7 @@ def host_audit_drift_section(plan, runs):
         for host in hosts:
             result = (parsed.get('hosts') or {}).get(host) or {
                 'status': HOST_NO_RESULT, 'reason': '하위 실행 결과에 이 호스트가 없음', 'rows': [], 'excluded': []}
-            state = host_rows.setdefault(host, {'host': host, 'rows': [], 'excluded': [], 'unavailable': []})
+            state = host_rows.setdefault(host, _new_state(host))
             if result['status'] != HOST_OK:
                 label_text = HOST_LABELS.get(result['status'], UNAVAILABLE_LABEL)
                 state['unavailable'].append({'subrun': label, 'label': label_text, 'reason': result.get('reason') or '-'})
@@ -333,10 +342,14 @@ def host_audit_drift_section(plan, runs):
             sub['rows'] += len(result.get('rows') or [])
         subruns.append(sub)
     for host, reason in sorted((plan.get('excluded') or {}).items()):
-        state = host_rows.setdefault(host, {'host': host, 'rows': [], 'excluded': [], 'unavailable': []})
-        state['unavailable'].append({'subrun': '전체', 'label': UNAVAILABLE_LABEL, 'reason': reason})
-        if reason == REASON_RAW:
-            unavailable.append({'host': host, 'item': SECTION, 'label': UNAVAILABLE_LABEL, 'reason': reason})
+        state = host_rows.setdefault(host, _new_state(host))
+        if host in (plan.get('not_applicable') or []):
+            # By design Drift cannot be seen on a Raw Provisioning Path host: not an item to act on,
+            # so it stays out of the 점검불가 count and table and is reported as its own line.
+            state['not_applicable'].append({'subrun': '전체', 'label': NOT_APPLICABLE_LABEL, 'reason': reason})
+            not_applicable.append({'host': host, 'reason': reason})
+        else:
+            state['unavailable'].append({'subrun': '전체', 'label': UNAVAILABLE_LABEL, 'reason': reason})
     baseline_findings = _baseline_findings(plan, subruns, host_rows)
     order = {SUBRUNS[k][0]: i for i, k in enumerate(SUBRUN_ORDER)}
     rows.sort(key=lambda r: (r['host'], order.get(r['subrun'], 99), r['spec_id'] or '~', r['task']))
@@ -353,6 +366,8 @@ def host_audit_drift_section(plan, runs):
                      for k, v in sorted(excluded_summary.items())],
         'by_host': host_rows,
         'unavailable': unavailable,
+        'not_applicable': not_applicable,
+        'not_applicable_note': NOT_APPLICABLE_NOTE,
         'baseline_findings': baseline_findings,
     }
 

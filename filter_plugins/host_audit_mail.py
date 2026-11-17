@@ -127,6 +127,11 @@ def _level(count, level_when_any=LEVEL_CRIT):
     return level_when_any if count else LEVEL_OK
 
 
+def _unavailable_count(model):
+    """The one '점검불가' number (host·item rows) the subject and the body line share."""
+    return len(model.get('unavailable') or [])
+
+
 def host_audit_mail_summary(model, report, xlsx_zip=None):
     """Build the mail summary (saved as ``mail_summary.json``) from the report model.
 
@@ -141,8 +146,8 @@ def host_audit_mail_summary(model, report, xlsx_zip=None):
     summary = model.get('summary') or {}
     lines = []
 
-    unavailable = model.get('unavailable') or []
-    lines.append(_line('점검불가', '%d건 (호스트·항목)' % len(unavailable), _level(len(unavailable), LEVEL_WARN)))
+    unavailable_count = _unavailable_count(model)
+    lines.append(_line('점검불가', '%d건 (호스트·항목)' % unavailable_count, _level(unavailable_count, LEVEL_WARN)))
 
     ai = model.get('asset_inventory') or {}
     counts = ai.get('counts') or {}
@@ -191,6 +196,10 @@ def host_audit_mail_summary(model, report, xlsx_zip=None):
             text += ' · 하위 실행 점검불가: %s' % ', '.join(failed)
         lines.append(_line('Configuration Drift', text, LEVEL_WARN if rows or failed else LEVEL_OK))
 
+    na_hosts = len(cd.get('not_applicable') or [])
+    if na_hosts:
+        lines.append(_line('Configuration Drift 비대상', '%d대 — %s' % (na_hosts, cd.get('not_applicable_note') or '설계상 점검 대상 아님'), LEVEL_NA))
+
     bl = model.get('baseline') or {}
     if bl:
         if bl.get('failed'):
@@ -215,7 +224,7 @@ def host_audit_mail_summary(model, report, xlsx_zip=None):
     pv_ch = ((pv.get('totals') or {}).get('CRITICAL', 0) + (pv.get('totals') or {}).get('HIGH', 0)) if pv.get('status') == 'ok' else None
     subject = '[Host Audit] %s 점검 보고서 %s — 취약 %d · 긴급/높음 %s · 점검불가 %d' % (
         run_kind, (cover.get('started_at') or '').split(' ')[0], cv_vuln,
-        '-' if pv_ch is None else pv_ch, len(unavailable))
+        '-' if pv_ch is None else pv_ch, unavailable_count)
 
     doc = {
         'schema_version': SUMMARY_SCHEMA_VERSION,

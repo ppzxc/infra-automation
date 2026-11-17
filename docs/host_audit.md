@@ -566,8 +566,8 @@ Git에 선언된 상태(프로비저닝 `site.yml`, Host Agents Config)와 호�
 
 - **인증**: 하위 실행은 평소 Semaphore 실행과 같은 경로로 접속한다. 각 플레이북이 자기 `resolve_connection`·`cleanup_connection` 플레이를 돌리고, 같은 인벤토리 소스(`ansible_inventory_sources`를 `-i`로)와 같은 OpenBao 자격증명을 쓴다. 자격증명(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`·`VAULT_TOKEN`·`VAULT_ADDR`·`VAULT_NAMESPACE`·`VAULT_MOUNT`)은 이번 실행의 변수(Semaphore Secret extra var) 또는 환경 변수에서 읽어 **하위 프로세스 환경 변수로만** 넘긴다. 명령줄과 파일에는 남기지 않고 태스크는 `no_log`다. 그래서 Host Audit 템플릿의 AppRole 정책은 Deploy·Config와 같은 KV 경로(`hosts/<host>`, `users/*`, `hosts/<host>/agents`, `agents/*`)를 읽을 수 있어야 한다. 비밀이 아닌 실행 변수는 `host_audit_drift_forward_vars`(기본 `bootstrap_user`, `target_admin_users`)에 정의돼 있으면 넘기고, 더 필요한 값은 `host_audit_drift_extra_vars`로 준다.
 - **diff 원문 미보관**: 콜백 출력에는 diff 원문(파일 내용)이 있어 비밀값이 있을 수 있다. 러너 임시 파일(실행 디렉터리 밖, `0600`)에 받아 해석한 뒤 `always`에서 지운다. 행 요약에는 경로, 추가·삭제 줄 수, 바뀌는 속성 이름, 반복 항목 수만 남는다. `no_log` 태스크는 '비공개(no_log)'로만 나온다. 핸들러 결과는 바뀐 태스크의 결과일 뿐이라 행을 만들지 않는다.
-- **점검불가**:
-  - Raw Provisioning Path 호스트(CentOS 6/7, 인벤토리 `raw_provisioning_path`가 우선)는 하위 실행에 넣지 않고 '점검불가'와 이유(raw 태스크는 `--check`에서 스킵, ADR-0005)로 표시한다.
+- **비대상(점검불가 아님)**: Raw Provisioning Path 호스트(CentOS 6/7, 인벤토리 `raw_provisioning_path`가 우선)는 하위 실행에 넣지 않는다. raw 태스크는 `--check`에서 스킵되어(ADR-0005) Drift를 볼 수 없는 것이 설계다. 조치할 항목이 아니므로 점검불가 숫자·표에 넣지 않고, 섹션 모델의 `not_applicable`(호스트·이유)로 모아 보고서 요약과 메일 본문에 'Configuration Drift 비대상 N대 — raw 태스크가 --check에서 스킵됨' 한 줄로 따로 보인다(호스트별 부록에는 '비대상'과 이유가 나온다).
+- **점검불가**(실제 확인이 필요한 것):
   - Host Audit 수집 단계에서 점검불가였던 호스트는 하위 실행에서 뺀다(이유는 이미 요약의 점검불가 표에 있다).
   - 하위 실행 안에서 접속 실패·태스크 실패·결과 없음인 호스트는 그 하위 실행에 대해 '점검불가'와 이유로 표시한다. 실패한 태스크 뒤의 태스크는 판정되지 않았다는 뜻이다.
   - 하위 실행이 통째로 실패하면(시간 초과 `host_audit_drift_timeout`, JSON 해석 불가) 그 하위 실행 부분만 점검불가로 표시하고 Host Audit 실행은 계속된다.
@@ -632,8 +632,10 @@ report.yml
 
 ### 13.2 메일 형태
 
-- 제목: `[Host Audit] <정기|수시> 점검 보고서 <시작일> — 취약 n · 긴급/높음 n · 점검불가 n`
-- 본문: `<table>` 레이아웃과 `style=""` 인라인만 쓴다(`<style>`·이미지·SVG·data URI 없음 — Gmail·Outlook이 지운다). 호스트 수 3칸, 섹션별 한 줄 요약(점검불가, Asset Inventory, Configuration Vulnerability, Package Vulnerability, Configuration Drift, Audit Baseline), EOS 호스트, 비교 기준, 첨부 파일명·**SHA-256**·**원본 보관 경로**.
+- 제목: `[Host Audit] <정기|수시> 점검 보고서 <시작일> — 취약 n · 긴급/높음 n · 점검불가 n`. 제목의 점검불가 n은 본문 '점검불가' 줄(`n건 (호스트·항목)`)·보고서 요약 '점검불가 항목 n건 (호스트·항목)'·본문 점검불가 표 행 수와 같은 숫자(`model['unavailable']`의 행 수)다. 설계상 비대상(Drift raw 경로)은 이 숫자에 들지 않는다.
+- **점검불가 숫자의 정의(#488 후속)**: 두 가지가 있고 라벨이 다르다. (1) 호스트 수 카드 '점검불가 호스트 (수집 단계)' — Host Audit 수집이 접속 실패·수집 실패·접속 준비 실패로 끝난 호스트(`summary.hosts_unavailable`). 점검 대상 = 점검 완료 + 점검불가 호스트가 성립한다. (2) 호스트·항목 건수 '점검불가 n건 (호스트·항목)' — 점검불가 표의 행 수로, 위 (1)의 호스트에 더해 점검 중 오류·결과 없음·하위 실행 실패·Package Vulnerability·Asset Inventory 등 항목 단위 점검불가를 센다. 설계상 비대상은 둘 다에 들지 않고 'Configuration Drift 비대상 N대' 한 줄로만 나온다.
+  - 결정: 점검 중 오류(수집은 끝났으나 Drift 하위 실행에서 판정이 빈 호스트)는 호스트 카드에 넣지 않는 현재 동작을 유지한다. 근거: 그 호스트는 수집·KISA·패키지 등 나머지 섹션 판정이 정상이라 '점검 완료'에 들며, 카드에 더하면 점검 완료와 점검불가가 겹쳐 합이 대상 수와 어긋난다. 대신 호스트 이름과 이유가 점검불가 표(2)에 남아 건수에 잡힌다. 바꾸면 '점검 완료'의 정의(수집 성공)와 Audit Baseline의 '점검한 호스트' 기준이 달라지므로 바꾸지 않았다.
+- 본문: `<table>` 레이아웃과 `style=""` 인라인만 쓴다(`<style>`·이미지·SVG·data URI 없음 — Gmail·Outlook이 지운다). 호스트 수 3칸(점검 대상 호스트·점검 완료·점검불가 호스트 (수집 단계)), 섹션별 한 줄 요약(점검불가, Asset Inventory, Configuration Vulnerability, Package Vulnerability, Configuration Drift, Configuration Drift 비대상(있을 때만), Audit Baseline), EOS 호스트, 비교 기준, 첨부 파일명·**SHA-256**·**원본 보관 경로**.
 - 첨부: 보고서 `host-audit-<run_id>.html`과 합계·호스트별 Remediation Plan xlsx를 묶은 `host-audit-<run_id>-xlsx.zip`(압축 안은 `total.xlsx`와 `hosts/<Inventory Hostname>.xlsx`), 모두 ASCII 파일명이다(한글 파일명은 RFC 2231 인코딩이 클라이언트마다 깨진다). 첨부 바이트는 버킷의 `report.html`·`xlsx/…-xlsx.zip`과 같다. 본문에 zip 파일명·**zip SHA-256**·보관 경로가 한 줄씩 더 실린다(보고서 해시 줄과 같은 형태).
 - 머리글: `X-Host-Audit-Run-Id`, `X-Host-Audit-Report-SHA256`, `X-Host-Audit-Xlsx-Zip-SHA256`(zip을 붙인 메일만).
 - **수신자마다 1통**을 보낸다. 받는 사람은 다른 수신자의 주소를 보지 않는다. 또 한 통에 여러 명을 넣으면 일부 거부 시 `community.general.mail`이 거부된 주소를 경고로 찍는데, 모듈 경고는 `no_log`로 가려지지 않는다(실측).

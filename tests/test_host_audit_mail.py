@@ -338,3 +338,39 @@ def test_no_address_is_committed_in_the_role():
     pattern = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
     for path in list((ROLE_DIR / "defaults").glob("*.yml")) + list((ROLE_DIR / "tasks").glob("mail*.yml")):
         assert not pattern.search(path.read_text(encoding="utf-8")), path
+
+
+# ------------------------------------------------------------------------------
+# '점검불가' means one thing everywhere in one mail (#488 follow-up)
+# ------------------------------------------------------------------------------
+def _model_with_not_applicable():
+    model = _model()
+    model["unavailable"] = list(model["unavailable"]) + [
+        {"host": "ns0003", "item": "Configuration Drift — 프로비저닝", "label": "점검불가(점검 중 오류)", "reason": "x"}]
+    model["configuration_drift"] = {"rows": [], "hosts_with_drift": 0, "subruns": [],
+                                    "not_applicable_note": "raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님)",
+                                    "not_applicable": [{"host": "ns0100", "reason": "raw"}, {"host": "ns0101", "reason": "raw"}]}
+    return model
+
+
+def test_subject_and_body_line_use_the_same_unavailable_count_and_not_applicable_is_its_own_line():
+    doc = _summary(_model_with_not_applicable())
+    line = next(l for l in doc["lines"] if l["section"] == "점검불가")
+    assert line["text"] == "2건 (호스트·항목)"
+    assert doc["subject"].endswith("점검불가 2")
+    na = next(l for l in doc["lines"] if l["section"] == "Configuration Drift 비대상")
+    assert na["text"].startswith("2대") and "--check에서 스킵" in na["text"]
+    assert na["level"] == "na"
+
+
+def test_no_not_applicable_line_without_hosts():
+    doc = _summary()
+    assert not any(l["section"] == "Configuration Drift 비대상" for l in doc["lines"])
+
+
+def test_mail_body_labels_host_card_and_item_count_differently():
+    html = _render(_summary(_model_with_not_applicable()))
+    assert "점검불가 호스트 (수집 단계)" in html
+    assert re.search(r">\s*2건 \(호스트·항목\)\s*<", html)
+    assert re.search(r">\s*2대 — raw 태스크가 --check에서 스킵됨", html)
+    assert "Configuration Drift 비대상" in html

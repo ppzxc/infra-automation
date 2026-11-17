@@ -169,6 +169,7 @@ def test_plan_routes_hosts_and_excludes_raw_and_uninspected():
     )
     assert plan["site"] == ["lb1", "web1"]
     assert plan["agents"] == ["web1"]
+    assert plan["not_applicable"] == ["c6", "c7", "forced"]
     assert plan["excluded"] == {"c6": REASON_RAW, "c7": REASON_RAW, "forced": REASON_RAW, "down": REASON_NOT_COLLECTED}
 
 
@@ -200,8 +201,15 @@ def test_section_rows_counts_and_unavailable():
     reasons = {(u["host"], u["label"]) for u in section["unavailable"]}
     assert ("hostb", "점검불가(점검 중 오류)") in reasons
     assert ("hostc", "점검불가(접속 실패)") in reasons
-    assert ("c7", "점검불가") in reasons
-    assert section["by_host"]["c7"]["unavailable"][0]["reason"] == REASON_RAW
+    assert "c7" not in {host for host, _ in reasons}
+    assert section["by_host"]["c7"]["unavailable"] == []
+    assert section["by_host"]["c7"]["not_applicable"][0]["reason"] == REASON_RAW
+
+
+def test_raw_path_hosts_are_not_applicable_not_unavailable():
+    section = _section({"ran": True, "rc": 0, "parsed": host_audit_drift_parse(_fixture_text(), ["hosta"], PLAYS)})
+    assert section["not_applicable"] == [{"host": "c7", "reason": REASON_RAW}]
+    assert {u["host"] for u in section["unavailable"]} == {"hostb", "hostc"}
 
 
 def test_section_failed_subrun_marks_only_that_part():
@@ -234,6 +242,37 @@ def test_report_model_carries_drift_and_its_unavailable_entries():
     assert any(u["item"].startswith("Configuration Drift") for u in model["unavailable"])
 
 
+def _full_model():
+    section = _section({"ran": True, "rc": 0, "parsed": host_audit_drift_parse(_fixture_text(), ["hosta"], PLAYS)})
+    return _model(section)
+
+
+def test_report_model_unavailable_excludes_design_not_applicable_hosts():
+    model = _full_model()
+    assert {u["host"] for u in model["unavailable"]} == {"hostb", "hostc"}
+    assert [n["host"] for n in model["configuration_drift"]["not_applicable"]] == ["c7"]
+
+
+def test_drift_error_host_stays_inspected_so_the_host_card_counts_collection_failures_only():
+    model = _full_model()
+    assert model["summary"] == {"hosts_total": 1, "hosts_inspected": 1, "hosts_unavailable": 0}
+    assert any(u["host"] == "hostb" for u in model["unavailable"])
+
+
+def test_report_summary_separates_not_applicable_line_and_labels_units():
+    jinja2 = pytest.importorskip("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROOT_DIR / "roles" / "host_audit" / "templates")),
+                             extensions=["jinja2.ext.do"])
+    html = env.get_template("report.html.j2").render(host_audit_model=_full_model())
+    assert "Configuration Drift 비대상 1대" in html and "--check에서 스킵" in html
+    assert "점검불가 항목 2건 (호스트·항목)" in html
+    assert "<span>점검불가 호스트 (수집 단계)</span>" in html
+    assert "<span>점검불가</span>" not in html
+    # the not-applicable host is not a row of the 점검불가 table
+    table = html.split("점검불가 항목 2건", 1)[1].split("</table>", 1)[0]
+    assert "c7" not in table and "hostb" in table
+
+
 def test_report_model_without_drift_has_none():
     assert _model({})["configuration_drift"] is None
 
@@ -251,6 +290,7 @@ def test_template_renders_judgement_column_and_no_diff_text():
     appendix = env.get_template("sections/appendix_configuration_drift.html.j2").render(
         m={"configuration_drift": section}, host="c7")
     assert "Raw Provisioning Path" in appendix
+    assert "<div>Drift</div><div>비대상</div>" in appendix
 
 
 # --- wiring --------------------------------------------------------------------------------------

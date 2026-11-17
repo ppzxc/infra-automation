@@ -38,7 +38,7 @@
     </tbody>
   </table>
 {% else %}
-  <div class="note keep">Drift 항목 없음.</div>
+  <div class="note keep">Drift 항목 없음.{% if cd.not_applicable %} (비대상 {{ cd.not_applicable | length }}대는 Drift를 점검하지 않았습니다.){% endif %}</div>
 {% endif %}
 
 {% if cd.excluded %}
