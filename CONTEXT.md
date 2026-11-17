@@ -60,6 +60,30 @@ _Avoid_: CMDB, operational info, server list
 How much a host matters to the business, as the ISMS asset ledger rates it — H, M or L, written as the ledger writes it. A rating of the host, not of a finding: how dangerous a Configuration Vulnerability is belongs to the item's severity from the KISA guide (상/중/하), never to Asset Importance.
 _Avoid_: security grade, 보안등급, 중요도 (unqualified)
 
+**Asset**:
+A piece of equipment or system listed in the ISMS asset ledger under a management number (written lowercase, `nsXXXX`) — a server, switch, firewall, NAS or database instance. The thing itself; what Host Audit collects about it is its Asset Inventory.
+_Avoid_: host (when the thing may not be a server), device, node
+
+**Endpoint**:
+One way to reach an Asset: an address, a port, a protocol (SSH, Telnet, HTTPS, a database protocol) and the Credential used by default. It may reach the Asset through another Asset's Endpoint, and that hop may itself go through another. An Asset can have several, and each job picks the one it needs. Whether the far end speaks a shell or a network device CLI is a property of the Asset, not of the Endpoint.
+_Avoid_: connection info, target, bastion address (a hop is always another Asset's Endpoint)
+
+**Credential**:
+One set of secrets for reaching an Asset or a Service, whose `type` names the shape of the secret — a password, an SSH key, an API token — not the channel it is used over; the same account password serves both login and privilege escalation. Who owns it follows how it is issued: a secret issued to one Asset alone (its own ingest token, its own DNS provider token) belongs to that Asset even when it opens a Service; a secret several jobs share belongs to the Service it opens. It never belongs to the job that uses it.
+_Avoid_: account (when the secret is meant), login, user entry
+
+**Automation Identity**:
+The identity the automation itself presents when it connects — an SSH key pair whose public half is installed on many Assets. An Endpoint says whether logging in through it uses this identity (then the Credential supplies only the account name and the escalation password). It opens nothing on its own, so it is not a Credential of any Asset and not an Operator's personal key.
+_Avoid_: admin key, deploy key (unqualified), the operator's key
+
+**Service**:
+A shared system that several jobs talk to — OpenObserve, RustFS, GitHub, the alert platform, the FUNA Cluster, Semaphore — whose address is kept once and whose shared Credentials are split by privilege level (`admin`, `ingest`, …), named for what the privilege allows, never for the job that uses it. A system the jobs reach without any secret (the mail relay) is not kept as a Service.
+_Avoid_: agent (for these shared systems), global secret
+
+**Operator**:
+A person who operates the infrastructure, holding personal SSH public keys and revoked keys. Not an account on an Asset.
+_Avoid_: admin user, user (when the person is meant)
+
 **Configuration Vulnerability**:
 A host setting that falls short of the KISA technical vulnerability checklist for Unix servers, 2026 edition — e.g. remote root login allowed, weak password policy. Each finding is named with its edition (`KISA-2026:U-13`), because the editions reuse item numbers for different checks; CIS Benchmark is cited only as a cross-reference, not checked separately.
 _Avoid_: vulnerability (unqualified), misconfiguration
