@@ -70,3 +70,21 @@ def test_index_and_schema_checks_are_off_by_default_and_switchable(fake):
         _get(f, "/v1/m/data/ok/1")
         _get(f, "/v1/m/data/other")
         assert f.violations == [("m", "other")] and seen == [("m", "ok/1")]
+
+
+def _post(fake, path, body):
+    req = urllib.request.Request(fake.url + path, data=json.dumps(body).encode(), method="POST")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def test_write_enforces_cas_and_bumps_version(fake):
+    assert _post(fake, "/v1/m1/data/a", {"options": {"cas": 0}, "data": {"k": 1}}) == 200
+    assert fake.get("m1", "a") == ({"k": 1}, 1)
+    assert _post(fake, "/v1/m1/data/a", {"options": {"cas": 0}, "data": {"k": 2}}) == 400
+    assert _post(fake, "/v1/m1/data/a", {"options": {"cas": 1}, "data": {"k": 2}}) == 200
+    assert fake.get("m1", "a") == ({"k": 2}, 2)
+    assert len(fake.writes()) == 3
