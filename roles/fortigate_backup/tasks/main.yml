@@ -215,12 +215,9 @@
       ansible.builtin.uri:
         url: "{{ fortigate_backup_alert_webhook_url }}"
         method: POST
-        headers: "{{ {'Content-Type': 'application/json'} | combine({fortigate_backup_alert_webhook_auth_header: fortigate_backup_alert_webhook_token} if (fortigate_backup_alert_webhook_token | length > 0) else {}) }}"
-        body_format: json
-        body:
-          content:
-            type: text
-            text: "{{ _fgbk_text }}"
+        headers: "{{ {'Content-Type': 'text/plain; charset=utf-8'} | combine({fortigate_backup_alert_webhook_auth_header: fortigate_backup_alert_webhook_token} if (fortigate_backup_alert_webhook_token | length > 0) else {}) }}"
+        body_format: raw
+        body: "{{ _fgbk_text }}"
         status_code: [200, 201, 202, 204]
         timeout: 15
       register: fortigate_backup_alert_result
