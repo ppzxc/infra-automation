@@ -194,11 +194,11 @@ class _Builder:
             self.put(asset, ["funa", _env_to_key(k)], d.pop(k), (doc, k))
         self.finish(doc, d)
         self.asset_agents(ns)
-        if ctype is not None or (user is not None and not admin and not boot):  # 서버는 admin_users·bootstrap_user로 접속한다
+        if (ctype is not None or user is not None) and not (admin or boot):  # 서버는 admin_users·bootstrap_user로 접속한다
             self.device_endpoint(ns, doc, address, port, user, password, ctype, bastion)
         elif address and not ("fortigate/%s" % ns in self.old and not (admin or boot)):  # 방화벽은 fortigate 문서가 맡는다
-            if user is not None or password is not None:
-                self.err(doc, "unused_key:ansible_user/ansible_password")  # 서버는 계정 문서로 접속한다. 조용히 버리지 않는다
+            if ctype is not None or user is not None or password is not None:
+                self.err(doc, "unused_key:connection_type/ansible_user/ansible_password")  # 서버는 계정 문서로 접속한다. 조용히 버리지 않는다
             self.server_endpoint(ns, address, port, admin, boot, pwauth)
         elif admin or boot:
             self.err(doc, "no_address")
@@ -261,7 +261,7 @@ class _Builder:
             if old in d:
                 self.put(sec, [new], d.pop(old), (doc, old))
         env = d.pop("host_agents_environment", None)  # 모든 호스트가 같은 값이어야 한다. 역할 기본값으로 옮겼다(#503·#504)
-        if self.environments.setdefault("value", env) != env:
+        if env is not None and self.environments.setdefault("value", env) != env:
             self.err(doc, "host_agents_environment_differs")
         for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
             for k in sorted(k for k in d if k.startswith(prefix)):
@@ -317,6 +317,8 @@ class _Builder:
                 if layer.get(k) not in (None, ""):
                     if k.startswith("ssh_") and path.startswith("users/"):
                         continue  # 전역 계정의 키는 Automation Identity다(Credential로 복사하지 않는다)
+                    if k == "ssh_private_key":
+                        merged.pop("ssh_passphrase", None)  # 암호문은 키를 준 층의 것만 쓴다
                     merged[k], src[k] = layer[k], (path, k)
         if "ssh_private_key" in merged:
             data = {"type": "ssh_key", "username": name, "private_key": merged["ssh_private_key"]}

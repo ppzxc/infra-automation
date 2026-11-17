@@ -478,3 +478,15 @@ def test_inconsistent_environment_or_hostname_and_control_characters_are_reporte
 def test_access_lists_are_covered_by_the_hash_report():
     plan = om.build_new(old_docs(), SKIP)
     assert ("inventory/assets/ns0002", "/access/admin_credentials", "hosts/ns0002", "admin_users", ["admin01"]) in plan.lineage
+
+
+def test_missing_environment_value_is_not_a_difference_and_passphrase_follows_its_key():
+    old = old_docs()
+    old["hosts/ns0001/agents"]["host_agents_environment"] = "prod"
+    old["hosts/ns0006/agents"] = {"restic_password": "r"}
+    assert not [e for e in om.build_new(old, SKIP).errors if "environment" in e]
+    old["users/bk2"] = {"username": "bk2", "type": "SSH", "ssh_passphrase": "pp-other"}
+    old["hosts/ns0002"]["admin_users"] = ["bk2"]
+    old["hosts/ns0002/users/bk2"] = {"username": "bk2", "ssh_private_key": "KEY-H", "password": "p"}
+    plan = om.build_new(old, SKIP)
+    assert "passphrase" not in plan.store["secrets/assets/ns0002/credentials/bk2"]
