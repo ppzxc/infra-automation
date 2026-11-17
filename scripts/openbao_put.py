@@ -85,6 +85,7 @@ class Client:
         return self._cache[doc]
 
     def write(self, doc, data, cas):
+        self._cache.pop(doc, None)
         self._call("POST", doc, {"options": {"cas": cas}, "data": data})
 
 
@@ -162,6 +163,14 @@ def diff_lines(doc, old, new):
 
 # ---- 참조 검사 ----------------------------------------------------------------------------------------------------
 
+def _value_at(data, pointer):
+    """`#/a/b` 포인터가 가리키는 값(없으면 None)."""
+    for part in pointer[2:].split("/") if pointer != "#" else []:
+        part = part.replace("~1", "/").replace("~0", "~")
+        data = data.get(part) if isinstance(data, dict) else data[int(part)] if isinstance(data, list) and part.isdigit() and int(part) < len(data) else None
+    return data
+
+
 def _names(*values):
     return [v for v in values if isinstance(v, str)]
 
@@ -176,8 +185,8 @@ def reference_violations(client, doc, data):
     if m_ep:
         for ep in data.values():
             if isinstance(ep, dict):
-                wanted += _names(ep.get("credential"), (ep.get("become") or {}).get("credential") if
-                                 isinstance(ep.get("become"), dict) else None)
+                become = ep.get("become") if isinstance(ep.get("become"), dict) else {}
+                wanted += _names(ep.get("credential"), become.get("credential"))
         hops = [ep.get("via") for ep in data.values() if isinstance(ep, dict)]
         seen = set()
         while hops:
@@ -252,8 +261,10 @@ def _put(args, addr, doc, given, prompt):
             return 1
         after = set(reference_violations(client, doc, new))
         before = set(reference_violations(client, doc, old)) if old is not None else set()
-        blocking = sorted(after - before)
-        for v in sorted(after & before):
+        # 이미 깨져 있던 참조라도 같은 자리가 다른 값을 가리키게 바뀌었으면 새로 깨뜨린 것으로 본다.
+        stale = {v for v in after & before if _value_at(old, v.pointer) == _value_at(new, v.pointer)}
+        blocking = sorted(after - stale)
+        for v in sorted(stale):
             print("경고(이미 깨져 있음)\t" + v.format(), file=sys.stderr)
         if blocking:
             for v in blocking:

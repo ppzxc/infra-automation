@@ -248,6 +248,13 @@ def test_already_broken_reference_in_the_written_document_only_warns(fake, run):
     assert "credential_missing" in err  # 경고는 표준오류
 
 
+def test_repointing_a_broken_reference_to_another_missing_name_is_blocked(fake, run):
+    seed_asset(fake)
+    fake.set("inventory", "assets/ns0001/endpoints", {"ssh": dict(ENDPOINTS["ssh"], credential="ghost")})
+    rc, out, _ = run("inventory/assets/ns0001/endpoints", {"ssh": dict(ENDPOINTS["ssh"], credential="ghost2")})
+    assert rc == 1 and "credential_missing" in out and fake.writes() == []
+
+
 def test_other_documents_that_are_already_broken_do_not_block(fake, run):
     seed_asset(fake)
     fake.set("inventory", "assets/ns0002/endpoints", {"ssh": dict(ENDPOINTS["ssh"], credential="ghost")})

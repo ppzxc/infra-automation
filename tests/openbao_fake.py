@@ -75,6 +75,8 @@ class FakeOpenBao:
                     return self._reply(403, {"errors": ["permission denied"]})
                 # KV v2 쓰기: options.cas가 현재 버전(없으면 0)과 다르면 400이다.
                 status, current = outer._docs.get((mount, doc), (404, None))
+                if status == 403:
+                    return self._reply(403, {"errors": ["permission denied"]})
                 version = ((current or {}).get("data") or {}).get("metadata", {}).get("version", 0)
                 cas = ((body or {}).get("options") or {}).get("cas")
                 if cas is not None and cas != version:
@@ -107,7 +109,7 @@ class FakeOpenBao:
         if self.schema_check is not None:
             self.schema_check(mount, doc, data)
         status, current = self._docs.get((mount, doc), (404, None))
-        version = current["data"]["metadata"]["version"] + 1 if status == 200 else 1
+        version = ((current or {}).get("data") or {}).get("metadata", {}).get("version", 0) + 1
         self._docs[(mount, doc)] = (200, {"data": {"data": data, "metadata": {"version": version}}})
         return self
 
