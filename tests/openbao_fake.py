@@ -29,6 +29,7 @@ class Request:
     doc: str | None
     token: str | None
     namespace: str | None
+    body: dict | None = None  # POST 본문(쓰기·로그인)
 
 
 class FakeOpenBao:
@@ -56,11 +57,31 @@ class FakeOpenBao:
                 self.wfile.write(data)
 
             def do_POST(self):  # noqa: N802
-                self.rfile.read(int(self.headers.get("Content-Length", 0)))
-                outer.requests.append(Request("POST", self.path, None, None, None, self.headers.get("X-Vault-Namespace")))
+                raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                try:
+                    body = json.loads(raw) if raw else None
+                except ValueError:
+                    body = None
+                mount, doc = _split(self.path)
+                ns = self.headers.get("X-Vault-Namespace")
+                outer.requests.append(Request("POST", self.path, mount, doc, self.headers.get("X-Vault-Token"), ns, body))
                 if outer.approle and self.path == "/v1/auth/approle/login":
                     return self._reply(200, {"auth": {"client_token": outer.token or APPROLE_TOKEN}})
-                self._reply(404, {})
+                if mount is None:
+                    return self._reply(404, {})
+                want_token = outer.token or (APPROLE_TOKEN if outer.approle else None)
+                if (outer.namespace is not None and ns != outer.namespace) or \
+                        (want_token is not None and self.headers.get("X-Vault-Token") != want_token):
+                    return self._reply(403, {"errors": ["permission denied"]})
+                # KV v2 쓰기: options.cas가 현재 버전(없으면 0)과 다르면 400이다.
+                status, current = outer._docs.get((mount, doc), (404, None))
+                version = current["data"]["metadata"]["version"] if status == 200 else 0
+                cas = ((body or {}).get("options") or {}).get("cas")
+                if cas is not None and cas != version:
+                    return self._reply(400, {"errors": ["check-and-set parameter did not match the current version"]})
+                outer._docs[(mount, doc)] = (200, {"data": {"data": (body or {}).get("data"),
+                                                            "metadata": {"version": version + 1}}})
+                self._reply(200, {"data": {"version": version + 1}})
 
             def do_GET(self):  # noqa: N802
                 mount, doc = _split(self.path)
@@ -85,8 +106,18 @@ class FakeOpenBao:
     def set(self, mount, doc, data):
         if self.schema_check is not None:
             self.schema_check(mount, doc, data)
-        self._docs[(mount, doc)] = (200, {"data": {"data": data, "metadata": {"version": 1}}})
+        status, current = self._docs.get((mount, doc), (404, None))
+        version = current["data"]["metadata"]["version"] + 1 if status == 200 else 1
+        self._docs[(mount, doc)] = (200, {"data": {"data": data, "metadata": {"version": version}}})
         return self
+
+    def get(self, mount, doc):
+        """저장된 (데이터, 버전). 없으면 None."""
+        status, body = self._docs.get((mount, doc), (404, None))
+        return (body["data"]["data"], body["data"]["metadata"]["version"]) if status == 200 else None
+
+    def writes(self):
+        return [r for r in self.requests if r.method == "POST" and r.doc is not None]
 
     def deny(self, mount, doc):
         self._docs[(mount, doc)] = (403, {"errors": ["permission denied"]})
