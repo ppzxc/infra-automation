@@ -5,6 +5,9 @@ isms:
   owner_role: Fake Owner
   admin_role: Fake Admin
   asset_importance: H
+  target: true
+  group_asset_name: ''
+  personal_info_system: false
 access:
   admin_credentials:
     - admin01

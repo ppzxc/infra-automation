@@ -98,3 +98,10 @@ def test_write_enforces_cas_and_bumps_version(fake):
     assert _post(fake, "/v1/m1/data/a", {"options": {"cas": 1}, "data": {"k": 2}}) == 200
     assert fake.get("m1", "a") == ({"k": 2}, 2)
     assert len(fake.writes()) == 3
+
+
+def test_list_returns_children_with_folders_marked(fake):
+    fake.set("m1", "a/b", {}).set("m1", "a/c/d", {}).set("m1", "z", {})
+    status, body = _get(fake, "/v1/m1/metadata/a?list=true")
+    assert status == 200 and sorted(body["data"]["keys"]) == ["b", "c/"]
+    assert _get(fake, "/v1/m1/metadata/none?list=true")[0] == 404
