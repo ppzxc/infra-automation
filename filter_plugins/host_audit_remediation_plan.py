@@ -8,6 +8,9 @@ the bytes is the job of the ``host_audit_xlsx_write`` module.
 Entry points:
   host_audit_remediation_plan       (filter) model, host -> {'sheet', 'headers', 'widths', 'rows', 'footer'}
   host_audit_remediation_plans      (filter) model -> the plan of every host with its file name (AUD-025)
+  host_audit_remediation_total      (filter) model -> the plan of the ``total`` workbook: the rows of every host in one sheet
+  host_audit_remediation_by_file    (filter) plan map, total plan -> ``{file_name: plan}`` of every xlsx of the run
+  host_audit_remediation_zip_members (filter) that map -> ``{file_name: name inside the zip}`` (``total.xlsx``, ``hosts/<host>.xlsx``)
   host_audit_remediation_file_name  (filter) run id, host -> ``host-audit-<run_id>-<inventory_hostname>.xlsx``
   host_audit_remediation_zip_name   (filter) run id -> ``host-audit-<run_id>-xlsx.zip``
 """
@@ -30,12 +33,16 @@ SHEET = '이행계획서'
 HEADERS = ['그룹', '자산명', '담당자', '통제내용', '취약점현황', '점검방법', '조치방법', '위험도', '이행과제', '시급성',
            '영향도', '환경성', '우선순위', '이행 결과', '비고']
 WIDTHS = [14, 12, 14, 32, 40, 40, 60, 8, 24, 8, 8, 8, 8, 24, 48]
+COL = dict((name, i) for i, name in enumerate(HEADERS))
 NO_FINDINGS = '양호 외 항목 없음'
 NO_RESULT = '점검 결과 없음(점검불가)'
 PLAN_FAILED = '이행계획서 생성 실패'
 UNKNOWN_ITEM = '(카탈로그에 없는 항목)'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
 ZIP_NAME = 'host-audit-%s-xlsx.zip'
+TOTAL_PART = 'total'  # the name part of the total workbook: ``host-audit-<run_id>-total.xlsx``
+TOTAL_MEMBER = 'total.xlsx'  # the folder names exist only inside the zip: the files on disk stay flat in xlsx/
+HOST_MEMBER = 'hosts/%s.xlsx'
 MAX_NAME_PART = 80  # characters of the run id and of the host name kept in the file name
 BASELINE_PREFIXED = (NEW, PERSIST, RECUR)  # the only Audit Baseline states the remark shows (not 첫 실행 or others)
 
@@ -152,6 +159,18 @@ def host_audit_remediation_plan(model, host):
     return _plan(rows, host, run_id, admin)
 
 
+def _failed_plan(model, host, run_id, exc):
+    """The one-line plan of a host whose plan could not be built (the error text is unsafe-marked like the cells)."""
+    error = '%s: %s' % (type(exc).__name__, str(exc)[:200])
+    try:
+        admin = _admin_role(model, host)
+    except Exception:  # the lookup itself may be what broke
+        admin = LOOKUP_FAILED
+    row = ['', host, admin, '%s (%s)' % (PLAN_FAILED, error)] + [''] * (len(HEADERS) - 4)
+    # error is exception text that can echo record data: marked unsafe like the cells (it is templated later)
+    return dict(_plan([row], host, run_id, ''), error=_unsafe(error))
+
+
 def host_audit_remediation_plans(model):
     """The plan of every host of the run (one evaluation for AUD-025), each with its ``host`` and ``file_name``."""
     model = model or {}
@@ -161,16 +180,59 @@ def host_audit_remediation_plans(model):
         try:
             plan = host_audit_remediation_plan(model, host)
         except Exception as exc:  # one odd record must not stop the evidence of every other host
-            error = '%s: %s' % (type(exc).__name__, str(exc)[:200])
-            try:
-                admin = _admin_role(model, host)
-            except Exception:  # the lookup itself may be what broke
-                admin = LOOKUP_FAILED
-            row = ['', host, admin, '%s (%s)' % (PLAN_FAILED, error)] + [''] * (len(HEADERS) - 4)
-            # error is exception text that can echo record data: marked unsafe like the cells (it is templated later)
-            plan = dict(_plan([row], host, run_id, ''), error=_unsafe(error))
-        plans.append(dict(plan, host=host, file_name=host_audit_remediation_file_name(run_id, host)))
+            plan = _failed_plan(model, host, run_id, exc)
+        plans.append(dict(plan, host=host, label=host, file_name=host_audit_remediation_file_name(run_id, host),
+                          zip_member=HOST_MEMBER % _host_part(host)))
     return plans
+
+
+def _level(row):
+    """Sort key of a row: the levels as in order_findings (a blank level sorts last)."""
+    return tuple(row[COL[name]] or 9 for name in ('우선순위', '영향도', '환경성'))
+
+
+def host_audit_remediation_total(model):
+    """The plan of the ``total`` workbook: the rows of every host of the run in one sheet; {} when the run has no host.
+
+    Items are sorted by priority, impact and effort (the rule of one host's sheet), ties by host name and item code. A host
+    that has no check result or whose plan could not be built keeps its one line (after the items): it is not clean. When no
+    host has an item the sheet has the one line "양호 외 항목 없음".
+    """
+    model = model or {}
+    hosts = model.get('hosts') or []
+    if not hosts:
+        return {}
+    run_id = (model.get('cover') or {}).get('run_id', '')
+    cv = model.get('config_vulnerability') or {}
+    items, lines = [], []
+    for host in hosts:
+        try:
+            if host not in (cv.get('appendix') or {}):
+                lines.append(host_audit_remediation_plan(model, host)['rows'][0])
+                continue
+            admin, family = _admin_role(model, host), _family(model, host)
+            items += [(_row(finding, host, admin, family), finding['code']) for finding in _host_findings(model, host)]
+        except Exception as exc:  # the same line as in the host's own file
+            lines.append(_failed_plan(model, host, run_id, exc)['rows'][0])
+    items.sort(key=lambda item: (_level(item[0]), item[0][COL['자산명']], item[1]))
+    rows = [row for row, _ in items] + lines
+    if not rows:
+        rows = [[''] * 3 + [NO_FINDINGS] + [''] * (len(HEADERS) - 4)]
+    return dict(_plan(rows, '', run_id, ''), label=TOTAL_PART, file_name=host_audit_remediation_total_file_name(run_id),
+                zip_member=TOTAL_MEMBER)
+
+
+def host_audit_remediation_by_file(plans, total):
+    """``{file_name: plan}`` of every xlsx of the run: the plan map plus the total (when there is one)."""
+    by_file = dict((plan['file_name'], plan) for plan in plans.values())
+    if total:
+        by_file[total['file_name']] = total
+    return by_file
+
+
+def host_audit_remediation_zip_members(by_file):
+    """``{file_name: name inside the zip}`` of every xlsx of the run."""
+    return dict((name, plan['zip_member']) for name, plan in by_file.items())
 
 
 def _name_part(value):
@@ -184,9 +246,20 @@ def _name_part(value):
     return clean if clean == value else '%s-%s' % (clean, hashlib.sha256(value.encode('utf-8', 'replace')).hexdigest()[:8])
 
 
+def _host_part(host):
+    """The name part of a host: ``_name_part``, and never the total's own part (a host called ``total`` must not take its file)."""
+    part = _name_part(host)
+    return part if part != TOTAL_PART else '%s-%s' % (part, hashlib.sha256(str(host).encode('utf-8', 'replace')).hexdigest()[:8])
+
+
 def host_audit_remediation_file_name(run_id, host):
     """ASCII file name of a host's xlsx (``_name_part`` rule for both parts)."""
-    return FILE_NAME % (_name_part(run_id), _name_part(host))
+    return FILE_NAME % (_name_part(run_id), _host_part(host))
+
+
+def host_audit_remediation_total_file_name(run_id):
+    """ASCII file name of the total xlsx: ``host-audit-<run_id>-total.xlsx``."""
+    return FILE_NAME % (_name_part(run_id), TOTAL_PART)
 
 
 def host_audit_remediation_zip_name(run_id):
@@ -205,6 +278,9 @@ class FilterModule(object):
             'host_audit_remediation_plan': host_audit_remediation_plan,
             'host_audit_remediation_plans': host_audit_remediation_plans,
             'host_audit_remediation_plan_map': host_audit_remediation_plan_map,
+            'host_audit_remediation_total': host_audit_remediation_total,
+            'host_audit_remediation_by_file': host_audit_remediation_by_file,
+            'host_audit_remediation_zip_members': host_audit_remediation_zip_members,
             'host_audit_remediation_file_name': host_audit_remediation_file_name,
             'host_audit_remediation_zip_name': host_audit_remediation_zip_name,
         }

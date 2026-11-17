@@ -393,3 +393,119 @@ def test_zip_name_is_ascii_and_follows_the_xlsx_naming_rule():
     odd = host_audit_remediation_zip_name("월간 점검/1")
     assert odd.isascii() and odd.endswith("-xlsx.zip") and "/" not in odd and " " not in odd
     assert odd != host_audit_remediation_zip_name("월간 점검/2")
+
+
+# ------------------------------------------------------------------------------
+# Total workbook: the rows of every host in one sheet (follow-up of #488)
+# ------------------------------------------------------------------------------
+def _total_model():
+    return _model([_record("h2", {1: "VULN", 2: "VULN"}), _record("h1", {1: "VULN", 12: "VULN"}, admin="직책-A"),
+                   _record("h3", {})])
+
+
+def test_the_total_has_the_rows_of_every_host_with_the_same_columns():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    model = _total_model()
+    total = host_audit_remediation_total(model)
+    assert total["headers"] == HEADERS and total["sheet"] == host_audit_remediation_plan(model, "h1")["sheet"]
+    per_host = [r for h in ("h1", "h2") for r in host_audit_remediation_plan(model, h)["rows"]]
+    assert sorted(total["rows"], key=repr) == sorted(per_host, key=repr)
+    assert {r[COL["자산명"]] for r in total["rows"]} == {"h1", "h2"}  # h3 is clean: no line of its own
+    assert {r[COL["담당자"]] for r in total["rows"] if r[COL["자산명"]] == "h1"} == {"직책-A"}
+
+
+def test_the_total_is_sorted_by_priority_impact_effort_then_host_then_code():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    model = _model([_record("h2", {1: "VULN", 2: "VULN", 12: "VULN"}), _record("h1", {1: "VULN", 2: "VULN", 28: "VULN"})])
+    rows = host_audit_remediation_total(model)["rows"]
+    keys = [(r[COL["우선순위"]], r[COL["영향도"]], r[COL["환경성"]], r[COL["자산명"]], r[COL["통제내용"]]) for r in rows]
+    assert keys == sorted(keys) and len(keys) == 6
+    same = [r for r in rows if r[COL["통제내용"]].startswith("U-01 ")]
+    assert [r[COL["자산명"]] for r in same] == ["h1", "h2"]  # equal level: host name order
+
+
+def test_a_total_without_any_non_good_item_is_one_line():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    total = host_audit_remediation_total(_model([_record("h1", {}), _record("h2", {})]))
+    assert total["rows"] == [[""] * 3 + [NO_FINDINGS] + [""] * (len(HEADERS) - 4)]
+
+
+def test_a_host_without_check_results_keeps_its_line_in_the_total():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    model = _model([_record("h1", {1: "VULN"}), _record("h2", {})], )
+    model["config_vulnerability"]["appendix"].pop("h2")
+    rows = host_audit_remediation_total(model)["rows"]
+    assert [r[COL["자산명"]] for r in rows if r[COL["통제내용"]] == NO_RESULT] == ["h2"]
+    assert rows[-1][COL["통제내용"]] == NO_RESULT  # no data sorts after the items
+
+
+def test_the_total_has_the_footer_and_its_own_file_name_and_member():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    model = _total_model()
+    total = host_audit_remediation_total(model)
+    assert total["footer"] == host_audit_remediation_plan(model, "h1")["footer"]
+    assert total["file_name"] == "host-audit-ha-1-total.xlsx" and total["zip_member"] == "total.xlsx"
+
+
+def test_a_run_without_hosts_has_no_total():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    assert host_audit_remediation_total(_model([])) == {}
+
+
+def test_a_host_that_breaks_its_plan_still_has_its_line_in_the_total(monkeypatch):
+    from host_audit_remediation_plan import host_audit_remediation_total
+    model = _model([_record("h1", {1: "VULN"}), _record("h2", {1: "VULN"})])
+    real = plan_module._host_findings
+
+    def boom(model, host):
+        if host == "h2":
+            raise ValueError("odd record")
+        return real(model, host)
+
+    monkeypatch.setattr(plan_module, "_host_findings", boom)
+    rows = host_audit_remediation_total(model)["rows"]
+    assert [r[COL["자산명"]] for r in rows] == ["h1", "h2"]
+    assert rows[1][COL["통제내용"]].startswith(plan_module.PLAN_FAILED)
+
+
+def test_each_plan_names_its_zip_member_under_hosts():
+    model = _total_model()
+    plans = host_audit_remediation_plans(model)
+    assert [p["zip_member"] for p in plans] == ["hosts/h1.xlsx", "hosts/h2.xlsx", "hosts/h3.xlsx"]
+    assert [p["label"] for p in plans] == ["h1", "h2", "h3"]
+
+
+def test_a_host_named_total_does_not_take_the_name_of_the_total():
+    from host_audit_remediation_plan import host_audit_remediation_by_file, host_audit_remediation_plan_map, \
+        host_audit_remediation_total
+    model = _model([_record("total", {1: "VULN"}), _record("h1", {})])
+    by_file = host_audit_remediation_by_file(host_audit_remediation_plan_map(model), host_audit_remediation_total(model))
+    assert len(by_file) == 3 and "host-audit-ha-1-total.xlsx" in by_file
+    assert by_file["host-audit-ha-1-total.xlsx"]["zip_member"] == "total.xlsx"
+
+
+def test_zip_members_map_every_file_to_its_folder_name():
+    from host_audit_remediation_plan import (
+        host_audit_remediation_by_file, host_audit_remediation_plan_map, host_audit_remediation_total,
+        host_audit_remediation_zip_members)
+    model = _total_model()
+    by_file = host_audit_remediation_by_file(host_audit_remediation_plan_map(model), host_audit_remediation_total(model))
+    assert host_audit_remediation_zip_members(by_file) == {
+        "host-audit-ha-1-total.xlsx": "total.xlsx", "host-audit-ha-1-h1.xlsx": "hosts/h1.xlsx",
+        "host-audit-ha-1-h2.xlsx": "hosts/h2.xlsx", "host-audit-ha-1-h3.xlsx": "hosts/h3.xlsx"}
+
+
+def test_every_string_cell_of_the_total_is_made_of_values_the_model_or_the_catalog_already_has():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    reg = [_exception("U-01")]
+    model = _model([_record("h1", {1: "VULN", 2: "MANUAL"}, register=reg), _record("h2", {2: "VULN"}, admin="")],
+                   reg, _history())
+    known = _strings(model, set()) | _strings(ITEMS, set()) | {REMEDIATION_SOURCE, NO_FINDINGS, NO_RESULT} | set(HEADERS)
+    total = host_audit_remediation_total(model)
+    checked = 0
+    for row in total["rows"] + [[line] for line in total["footer"]]:
+        for cell in row:
+            if isinstance(cell, str):
+                assert _residue(cell, known) == "", cell
+                checked += 1
+    assert checked > 10
