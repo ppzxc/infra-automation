@@ -322,3 +322,9 @@ def test_a_credential_override_on_an_endpoint_without_a_default_credential_names
     store["inventory/assets/ns0001/endpoints"]["ssh"].pop("credential")
     with pytest.raises(ConnectionError_, match="ns0001/endpoints.*credential"):
         resolve(reader(store), "ns0001", ["ssh"], credential="root")
+
+
+@pytest.mark.parametrize("bad", ["", ",", [], {"a": 1}, 7])
+def test_a_bad_preference_is_a_readable_error(bad):
+    with pytest.raises(ConnectionError_, match="preference"):
+        preference_list(bad)

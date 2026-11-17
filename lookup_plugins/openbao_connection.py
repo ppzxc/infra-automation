@@ -48,7 +48,12 @@ def preference_list(value):
     """선호 순서 입력을 목록으로. 쉼표 문자열(Semaphore 변수)도 받는다."""
     if isinstance(value, str):
         value = [v.strip() for v in value.split(",")]
-    return [str(v) for v in value if str(v)]
+    if not isinstance(value, (list, tuple)):
+        raise ConnectionError_("preference는 Endpoint 이름 목록이어야 합니다")
+    names = [str(v) for v in value if str(v)]
+    if not names:
+        raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 비어 있습니다")
+    return names
 
 
 def _need(doc, key, where):
