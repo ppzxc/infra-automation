@@ -296,6 +296,28 @@ def test_invalid_document_is_refused_before_any_secret_prompt(fake, run):
     assert rc == 1 and run.prompted == [] and fake.writes() == []
 
 
+def test_closed_stdin_at_secret_prompt_cancels_cleanly(fake, run):
+    def eof(*a, **k):
+        raise EOFError
+    rc, _, _ = run("secrets/assets/ns0001/credentials/admin01",
+                   {"type": "password", "username": "admin01", "password": None}, secrets=type("D", (), {
+                       "__getitem__": lambda self, k: eof()})())
+    assert rc == 1 and fake.writes() == []
+
+
+def test_prompted_value_is_validated_against_the_schema_after_substitution(fake, run):
+    rc, out, _ = run("secrets/assets/ns0001/credentials/admin01",
+                     {"type": "password", "username": "admin01", "password": None}, secrets={"password": "x"},
+                     answers=("y",))
+    assert rc == 0  # 현재 스키마가 허용하는 값이면 통과한다(재검증이 돌아도 정상 값은 막지 않는다)
+
+
+@pytest.mark.parametrize("doc", ["inventory/assets/ns0001?x", "inventory/assets/ns 0001", "inventory/assets/../x"])
+def test_document_path_with_url_special_characters_is_refused(fake, run, doc):
+    rc, out, _ = run(doc, ASSET)
+    assert rc == 1 and fake.writes() == [] and "no_schema" in out
+
+
 def test_empty_prompted_value_is_refused(fake, run):
     rc, _, _ = run("secrets/assets/ns0001/credentials/admin01",
                    {"type": "password", "username": "admin01", "password": None}, secrets={"password": ""})

@@ -215,7 +215,7 @@ def run_put(args):
         print("VAULT_ADDR가 필요하다", file=sys.stderr)
         return 2
     doc = args.doc.strip("/")
-    if ov.resolve_schema(doc, args.schemas) is None:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)+", doc) or ov.resolve_schema(doc, args.schemas) is None:
         print(ov.Violation(doc, "#", "no_schema").format())
         return 1
     try:
@@ -227,6 +227,13 @@ def run_put(args):
         for v in problems:
             print(v.format())
         return 1
+    try:
+        return _put(args, addr, doc, given, prompt)
+    except (EOFError, KeyboardInterrupt):
+        return _fail("입력을 받지 못해 취소했다")
+
+
+def _put(args, addr, doc, given, prompt):
     token = os.environ.get("VAULT_TOKEN") or getpass.getpass("token: ")
     client = Client(addr, token, os.environ.get("VAULT_NAMESPACE") or DEFAULT_NAMESPACE)
     try:
@@ -257,6 +264,11 @@ def run_put(args):
             if not value:
                 return _fail("빈 값은 쓸 수 없다")
             new[key] = value
+        violations = ov.validate_document(doc, new, args.schemas)  # 실제 값으로 다시 검증한다(길이·형식 규칙)
+        if violations:
+            for v in violations:
+                print(v.format())
+            return 1
         lines = diff_lines(doc, old, new)
         if not lines:
             print("변경 없음", file=sys.stderr)
