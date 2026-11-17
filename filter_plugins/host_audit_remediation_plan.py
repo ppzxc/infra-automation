@@ -204,7 +204,7 @@ def _total(plans, run_id):
     nothing, and when no host has an item or a line the sheet has the one line 양호 외 항목 없음.
     """
     items = [row for plan in plans if plan['kind'] == 'items' for row in plan['rows']]
-    items.sort(key=lambda row: (_level(row), row[COL['자산명']], row[COL['통제내용']].split(' ', 1)[0]))
+    items.sort(key=lambda row: (_level(row), str(row[COL['자산명']]), str(row[COL['통제내용']]).split(' ', 1)[0]))
     rows = items + [plan['rows'][0] for plan in plans if plan['kind'] in ('no_result', 'failed')]
     if not rows:
         rows = [[''] * 3 + [NO_FINDINGS] + [''] * (len(HEADERS) - 4)]
