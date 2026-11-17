@@ -207,7 +207,7 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | App | Bash |
 | Script filename | `scripts/run-periodic-check.sh` (저장소 루트에서 `openbao_docs.py check` 실행) |
 | Repository | `infra-automation` |
-| Environment | `periodic_check`(위 절). 다른 템플릿과 공유하지 않는다 |
+| Environment | `periodic_check`(§4 Periodic Check Environment). 다른 템플릿과 공유하지 않는다 |
 | Survey·Extra variables | 없음 |
 | 실행 방식 | 매일 1회 스케줄(§6.3). 수동 실행도 가능 |
 
@@ -315,7 +315,7 @@ Deploy, Config, Backup, OpenObserve — Config, Host Audit — On-demand, Host A
 | 의도한 시각 | 매일 `<HH:MM>` KST(시각은 운영자 비공개 노트에 둔다) |
 | Cron | 6.1과 같은 시간대 규칙으로 계산한다 |
 
-템플릿은 정의만 하고 **스케줄은 일괄 전환 뒤(`openbao-cutover` 런북 9단계)에 건다.** 전환 전에는 8단계의 수동 1회 실행만 한다.
+템플릿은 정의만 하고 **스케줄은 일괄 전환 뒤([openbao-cutover 런북](runbooks/openbao-cutover.md) 9단계)에 건다.** 전환 전에는 8단계의 수동 1회 실행만 한다.
 
 ---
 

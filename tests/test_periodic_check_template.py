@@ -12,7 +12,7 @@ SETUP = (ROOT / "docs" / "semaphore-setup.md").read_text(encoding="utf-8")
 
 def test_runner_image_installs_jsonschema():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert re.search(r"^\s+jsonschema\b", dockerfile, re.M), "러너 이미지 pip 목록에 jsonschema가 없다"
+    assert re.search(r"^\s+\"?jsonschema\b", dockerfile, re.M), "러너 이미지 pip 목록에 jsonschema가 없다"
 
 
 def test_template_defined_in_setup_doc():
@@ -26,7 +26,9 @@ def test_environment_uses_approle_without_vault_token():
     section = SETUP.split("### Periodic Check Environment", 1)[1].split("\n## ", 1)[0]
     for name in ("VAULT_ADDR", "VAULT_NAMESPACE", "VAULT_ROLE_ID", "VAULT_SECRET_ID"):
         assert name in section
-    assert "VAULT_TOKEN" in section and "넣지 않는다" in section
+    table_keys = [l for l in section.splitlines() if l.startswith("| `")]
+    assert not any("VAULT_TOKEN" in l for l in table_keys), "표에 VAULT_TOKEN을 두면 안 된다"
+    assert "`VAULT_TOKEN`은 이 Environment에 넣지 않는다" in section
 
 
 def test_wrapper_is_executable_and_strict():
