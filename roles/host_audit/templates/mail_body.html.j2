@@ -20,7 +20,7 @@
       <tr>
         <td width="33%" align="center" style="padding:10px;border:1px solid #eaecf0;{{ font }}"><div style="font-size:22px;font-weight:bold;color:#101828;">{{ s.hosts.total }}</div><div style="font-size:12px;color:#475467;">점검 대상 호스트</div></td>
         <td width="33%" align="center" style="padding:10px;border:1px solid #eaecf0;{{ font }}"><div style="font-size:22px;font-weight:bold;color:{{ colors.ok }};">{{ s.hosts.inspected }}</div><div style="font-size:12px;color:#475467;">점검 완료</div></td>
-        <td width="33%" align="center" style="padding:10px;border:1px solid #eaecf0;{{ font }}"><div style="font-size:22px;font-weight:bold;color:{{ colors.crit if s.hosts.unavailable else colors.na }};">{{ s.hosts.unavailable }}</div><div style="font-size:12px;color:#475467;">점검불가</div></td>
+        <td width="33%" align="center" style="padding:10px;border:1px solid #eaecf0;{{ font }}"><div style="font-size:22px;font-weight:bold;color:{{ colors.crit if s.hosts.unavailable else colors.na }};">{{ s.hosts.unavailable }}</div><div style="font-size:12px;color:#475467;">점검불가 호스트 (수집 단계)</div></td>
       </tr>
     </table>
   </td></tr>

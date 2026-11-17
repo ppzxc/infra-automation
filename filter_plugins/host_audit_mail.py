@@ -127,6 +127,9 @@ def _level(count, level_when_any=LEVEL_CRIT):
     return level_when_any if count else LEVEL_OK
 
 
+DRIFT_NA_TEXT = '%d대 — raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님)'
+
+
 def _unavailable_count(model):
     """The one '점검불가' number (host·item rows) the subject and the body line share."""
     return len(model.get('unavailable') or [])
@@ -195,6 +198,10 @@ def host_audit_mail_summary(model, report, xlsx_zip=None):
         if failed:
             text += ' · 하위 실행 점검불가: %s' % ', '.join(failed)
         lines.append(_line('Configuration Drift', text, LEVEL_WARN if rows or failed else LEVEL_OK))
+
+    na_hosts = len(cd.get('not_applicable') or [])
+    if na_hosts:
+        lines.append(_line('Configuration Drift 비대상', DRIFT_NA_TEXT % na_hosts, LEVEL_NA))
 
     bl = model.get('baseline') or {}
     if bl:

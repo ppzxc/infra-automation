@@ -75,11 +75,14 @@
   <div class="tiles">
     <div class="tile"><b>{{ m.summary.hosts_total }}</b><span>점검 대상 호스트</span></div>
     <div class="tile"><b class="ok">{{ m.summary.hosts_inspected }}</b><span>점검 완료</span></div>
-    <div class="tile"><b class="{{ 'crit' if m.summary.hosts_unavailable else 'na' }}">{{ m.summary.hosts_unavailable }}</b><span>점검불가</span></div>
+    <div class="tile"><b class="{{ 'crit' if m.summary.hosts_unavailable else 'na' }}">{{ m.summary.hosts_unavailable }}</b><span>점검불가 호스트 (수집 단계)</span></div>
   </div>
 {% include 'sections/asset_inventory_summary.html.j2' %}
+{% if m.configuration_drift and m.configuration_drift.not_applicable %}
+  <div class="note keep">Configuration Drift 비대상 {{ m.configuration_drift.not_applicable | length }}대 — raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님): {% for n in m.configuration_drift.not_applicable %}{{ n.host | e }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+{% endif %}
 {% if m.unavailable %}
-  <div class="note keep"><b>점검불가 항목</b> — 아래 호스트·항목은 이번 실행에서 확인하지 못했습니다.</div>
+  <div class="note keep"><b>점검불가 항목 {{ m.unavailable | length }}건 (호스트·항목)</b> — 아래 호스트·항목은 이번 실행에서 확인하지 못했습니다.</div>
   <table>
     <thead><tr><th>호스트</th><th>항목</th><th>판정</th><th>이유</th></tr></thead>
     <tbody>

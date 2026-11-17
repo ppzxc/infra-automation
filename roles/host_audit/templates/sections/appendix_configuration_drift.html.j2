@@ -8,5 +8,8 @@
 {%- for u in d.unavailable %}
     <div>{{ u.subrun | e }}</div><div><span class="tag na">{{ u.label | e }}</span> {{ u.reason | e }}</div>
 {%- endfor %}
+{%- for u in d.not_applicable | default([]) %}
+    <div>{{ u.subrun | e }}</div><div><span class="tag na">{{ u.label | e }}</span> {{ u.reason | e }}</div>
+{%- endfor %}
   </div>
 {%- endif %}
