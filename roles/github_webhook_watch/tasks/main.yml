@@ -16,15 +16,24 @@
       [GWW-INTERVAL] 점검 주기(gww_check_interval_hours)는 재전송 가능 기간(gww_redelivery_window_hours)보다 짧아야 한다.
       기간을 넘기면 실패한 전달을 재전송하지 못하고 잃는다.
 
-- name: "[GWW-003] Read the webhook check inputs from the OpenBao documents (shared reader, no fallback)"
-  ansible.builtin.set_fact:
-    gww_docs:
-      "inventory/config/github_webhook_watch": "{{ lookup('openbao_doc', 'inventory/config/github_webhook_watch') }}"
-      "inventory/services/openobserve": "{{ lookup('openbao_doc', 'inventory/services/openobserve') }}"
-      "secrets/services/github/org_hooks_read": "{{ lookup('openbao_doc', 'secrets/services/github/org_hooks_read') }}"
-      "secrets/services/openobserve/ingest": "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest') }}"
-    cacheable: false
-  no_log: true
+# no_log가 읽기 오류의 원인까지 가리므로, 실패하면 rescue가 읽으려던 문서 경로(비밀 아님)와 확인 항목을 대신 알린다.
+- name: Read the webhook check inputs from OpenBao
+  block:
+    - name: "[GWW-003] Read the webhook check inputs from the OpenBao documents (shared reader, no fallback)"
+      ansible.builtin.set_fact:
+        gww_docs:
+          "inventory/config/github_webhook_watch": "{{ lookup('openbao_doc', 'inventory/config/github_webhook_watch') }}"
+          "inventory/services/openobserve": "{{ lookup('openbao_doc', 'inventory/services/openobserve') }}"
+          "secrets/services/github/org_hooks_read": "{{ lookup('openbao_doc', 'secrets/services/github/org_hooks_read') }}"
+          "secrets/services/openobserve/ingest": "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest') }}"
+        cacheable: false
+      no_log: true
+  rescue:
+    - name: Report which documents could not be read (paths only)
+      ansible.builtin.fail:
+        msg: >-
+          [GWW-OPENBAO] OpenBao 문서를 읽지 못했다(없음, 권한 403, 연결 불가 중 하나). 읽는 문서:
+          {{ github_webhook_watch_openbao_required.keys() | list | join(', ') }}. 문서 존재, 이 AppRole의 읽기 권한, OpenBao 접속 주소 설정을 확인한다.
 
 - name: "[GWW-005] Assert the required document keys and heartbeat destination inputs exist before calling GitHub"
   vars:

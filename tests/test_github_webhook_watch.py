@@ -621,5 +621,5 @@ def test_a_missing_document_fails_without_a_fallback_value(ansible_env, fake, fa
     env = dict(os.environ, VAULT_ADDR=fake_openbao.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret")
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(ansible_env / "play.yml"), "-e", f"@{ev}"],
                          capture_output=True, text=True, env=env, cwd=ROOT_DIR)
-    assert res.returncode != 0 and "org_hooks_read" in res.stdout + res.stderr
+    assert res.returncode != 0 and "[GWW-OPENBAO]" in res.stdout + res.stderr and "org_hooks_read" in res.stdout + res.stderr
     assert fake.requests == [] and fake.heartbeats == []
