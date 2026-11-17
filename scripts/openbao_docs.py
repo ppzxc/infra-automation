@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import openbao_put  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 
 
@@ -46,6 +47,7 @@ def main(argv=None):
     p.add_argument("root")
     p.add_argument("--schemas", default=str(ov.DEFAULT_SCHEMA_DIR), help="스키마 디렉터리(기본: schemas/openbao)")
     p.set_defaults(func=cmd_validate)
+    openbao_put.register(sub)
     args = parser.parse_args(argv)
     return args.func(args)
 
