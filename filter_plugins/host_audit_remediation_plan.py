@@ -9,7 +9,7 @@ Entry points:
   host_audit_remediation_plan       (filter) model, host -> {'sheet', 'headers', 'widths', 'rows', 'footer'}
   host_audit_remediation_plans      (filter) model -> the plan of every host with its file name (AUD-025)
   host_audit_remediation_total      (filter) model -> the plan of the ``total`` workbook: the rows of every host in one sheet
-  host_audit_remediation_by_file    (filter) plan map, total plan -> ``{file_name: plan}`` of every xlsx of the run
+  host_audit_remediation_files      (filter) model -> ``{file_name: plan}`` of every xlsx of the run (hosts and total)
   host_audit_remediation_zip_members (filter) that map -> ``{file_name: name inside the zip}`` (``total.xlsx``, ``hosts/<host>.xlsx``)
   host_audit_remediation_file_name  (filter) run id, host -> ``host-audit-<run_id>-<inventory_hostname>.xlsx``
   host_audit_remediation_zip_name   (filter) run id -> ``host-audit-<run_id>-xlsx.zip``
@@ -40,6 +40,7 @@ PLAN_FAILED = '이행계획서 생성 실패'
 UNKNOWN_ITEM = '(카탈로그에 없는 항목)'
 FILE_NAME = 'host-audit-%s-%s.xlsx'
 ZIP_NAME = 'host-audit-%s-xlsx.zip'
+TOTAL_LABEL = '합계 xlsx'  # what a failure message calls the total (a host may be named ``total``)
 TOTAL_PART = 'total'  # the name part of the total workbook: ``host-audit-<run_id>-total.xlsx``
 TOTAL_MEMBER = 'total.xlsx'  # the folder names exist only inside the zip: the files on disk stay flat in xlsx/
 HOST_MEMBER = 'hosts/%s.xlsx'
@@ -113,13 +114,16 @@ def _status(finding, entry):
     return cell + '\n' + entry['note'] if entry.get('note') else cell
 
 
-def _plan(rows, host, run_id, admin):
+def _plan(rows, host, run_id, admin, kind='items'):
+    """One sheet. ``kind`` tells the total how to take it: items, clean (the one 양호 외 항목 없음 line), no_result
+    (점검 결과 없음) or failed (the plan could not be built)."""
     if not rows:
         rows = [['', host, admin, NO_FINDINGS] + [''] * (len(HEADERS) - 4)]
+        kind = 'clean'
     # Cells hold host evidence and register text. They go to the writer module as task arguments, which Ansible
     # templates, so the rows are marked unsafe: '{{ ... }}' in a cell stays text (needed before ansible-core 2.19).
     return {'sheet': SHEET, 'headers': list(HEADERS), 'widths': list(WIDTHS), 'rows': _unsafe(rows),
-            'footer': _unsafe([REMEDIATION_SOURCE, '실행 ID: %s' % run_id])}
+            'footer': _unsafe([REMEDIATION_SOURCE, '실행 ID: %s' % run_id]), 'kind': kind}
 
 
 def _host_findings(model, host):
@@ -153,7 +157,7 @@ def host_audit_remediation_plan(model, host):
     admin = _admin_role(model, host)
     if host not in (cv.get('appendix') or {}):
         row = ['', host, admin, NO_RESULT] + [''] * (len(HEADERS) - 4)
-        return _plan([row], host, run_id, admin)
+        return _plan([row], host, run_id, admin, 'no_result')
     family = _family(model, host)
     rows = [_row(finding, host, admin, family) for finding in _host_findings(model, host)]
     return _plan(rows, host, run_id, admin)
@@ -168,7 +172,7 @@ def _failed_plan(model, host, run_id, exc):
         admin = LOOKUP_FAILED
     row = ['', host, admin, '%s (%s)' % (PLAN_FAILED, error)] + [''] * (len(HEADERS) - 4)
     # error is exception text that can echo record data: marked unsafe like the cells (it is templated later)
-    return dict(_plan([row], host, run_id, ''), error=_unsafe(error))
+    return dict(_plan([row], host, run_id, '', 'failed'), error=_unsafe(error))
 
 
 def host_audit_remediation_plans(model):
@@ -191,48 +195,44 @@ def _level(row):
     return tuple(row[COL[name]] or 9 for name in ('우선순위', '영향도', '환경성'))
 
 
-def host_audit_remediation_total(model):
-    """The plan of the ``total`` workbook: the rows of every host of the run in one sheet; {} when the run has no host.
+def _total(plans, run_id):
+    """The ``total`` plan made of the plans of the hosts (their rows, so a host has the same lines in both files).
 
-    Items are sorted by priority, impact and effort (the rule of one host's sheet), ties by host name and item code. A host
-    that has no check result or whose plan could not be built keeps its one line (after the items): it is not clean. When no
-    host has an item the sheet has the one line "양호 외 항목 없음".
+    Items are sorted by priority, impact and effort, ties by host name and item code (the decision of #488's total
+    workbook; a host's own sheet also orders equal levels by verdict, which the total leaves out). A host that has no
+    check result or whose plan could not be built keeps its one line after the items: it is not clean. A clean host adds
+    nothing, and when no host has an item or a line the sheet has the one line 양호 외 항목 없음.
     """
-    model = model or {}
-    hosts = model.get('hosts') or []
-    if not hosts:
-        return {}
-    run_id = (model.get('cover') or {}).get('run_id', '')
-    cv = model.get('config_vulnerability') or {}
-    items, lines = [], []
-    for host in hosts:
-        try:
-            if host not in (cv.get('appendix') or {}):
-                lines.append(host_audit_remediation_plan(model, host)['rows'][0])
-                continue
-            admin, family = _admin_role(model, host), _family(model, host)
-            items += [(_row(finding, host, admin, family), finding['code']) for finding in _host_findings(model, host)]
-        except Exception as exc:  # the same line as in the host's own file
-            lines.append(_failed_plan(model, host, run_id, exc)['rows'][0])
-    items.sort(key=lambda item: (_level(item[0]), item[0][COL['자산명']], item[1]))
-    rows = [row for row, _ in items] + lines
+    items = [row for plan in plans if plan['kind'] == 'items' for row in plan['rows']]
+    items.sort(key=lambda row: (_level(row), row[COL['자산명']], row[COL['통제내용']]))
+    rows = items + [plan['rows'][0] for plan in plans if plan['kind'] in ('no_result', 'failed')]
     if not rows:
         rows = [[''] * 3 + [NO_FINDINGS] + [''] * (len(HEADERS) - 4)]
-    return dict(_plan(rows, '', run_id, ''), label=TOTAL_PART, file_name=host_audit_remediation_total_file_name(run_id),
+    return dict(_plan(rows, '', run_id, ''), label=TOTAL_LABEL, file_name=host_audit_remediation_total_file_name(run_id),
                 zip_member=TOTAL_MEMBER)
 
 
-def host_audit_remediation_by_file(plans, total):
-    """``{file_name: plan}`` of every xlsx of the run: the plan map plus the total (when there is one)."""
-    by_file = dict((plan['file_name'], plan) for plan in plans.values())
-    if total:
-        by_file[total['file_name']] = total
-    return by_file
+def host_audit_remediation_total(model):
+    """The plan of the ``total`` workbook: the rows of every host of the run in one sheet; {} when the run has no host."""
+    model = model or {}
+    plans = host_audit_remediation_plans(model)
+    return _total(plans, (model.get('cover') or {}).get('run_id', '')) if plans else {}
 
 
-def host_audit_remediation_zip_members(by_file):
+def host_audit_remediation_files(model):
+    """``{file_name: plan}`` of every xlsx of the run (AUD-025, AUD-026): each host's plan and the total, one evaluation."""
+    model = model or {}
+    plans = host_audit_remediation_plans(model)
+    files = dict((plan['file_name'], plan) for plan in plans)
+    if plans:
+        total = _total(plans, (model.get('cover') or {}).get('run_id', ''))
+        files[total['file_name']] = total
+    return files
+
+
+def host_audit_remediation_zip_members(files):
     """``{file_name: name inside the zip}`` of every xlsx of the run."""
-    return dict((name, plan['zip_member']) for name, plan in by_file.items())
+    return dict((name, plan['zip_member']) for name, plan in files.items())
 
 
 def _name_part(value):
@@ -279,7 +279,7 @@ class FilterModule(object):
             'host_audit_remediation_plans': host_audit_remediation_plans,
             'host_audit_remediation_plan_map': host_audit_remediation_plan_map,
             'host_audit_remediation_total': host_audit_remediation_total,
-            'host_audit_remediation_by_file': host_audit_remediation_by_file,
+            'host_audit_remediation_files': host_audit_remediation_files,
             'host_audit_remediation_zip_members': host_audit_remediation_zip_members,
             'host_audit_remediation_file_name': host_audit_remediation_file_name,
             'host_audit_remediation_zip_name': host_audit_remediation_zip_name,

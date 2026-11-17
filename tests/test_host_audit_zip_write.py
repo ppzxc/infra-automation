@@ -127,7 +127,8 @@ def test_members_give_the_same_bytes_again_and_the_second_run_changes_nothing(tm
 def test_members_with_an_unsafe_or_duplicate_zip_name_fail(tmp_path):
     d = _dir(tmp_path)
     for bad in ({"a.xlsx": "../x.xlsx"}, {"a.xlsx": "/abs.xlsx"}, {"a.xlsx": "a\\b.xlsx"},
-                {"a.xlsx": "x.xlsx", "b.xlsx": "x.xlsx"}, {"a.xlsx": ""}):
+                {"a.xlsx": "x.xlsx", "b.xlsx": "x.xlsx"}, {"a.xlsx": ""}, {"a.xlsx": "T.xlsx", "b.xlsx": "t.xlsx"},
+                {"a.xlsx": "hosts", "b.xlsx": "hosts/b.xlsx"}):
         out = _run(tmp_path, {"src_dir": str(d), "dest": str(d / "o.zip"), "members": bad})
         assert out.get("failed"), bad
     assert not (d / "o.zip").exists()

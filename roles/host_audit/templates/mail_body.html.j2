@@ -50,7 +50,7 @@
         <b>SHA-256</b> <span style="font-family:Consolas,'Courier New',monospace;word-break:break-all;">{{ s.report.sha256 | e }}</span><br>
         <b>원본 보관</b> {{ s.report.archive | e }}
 {% if s.xlsx_zip is defined and s.xlsx_zip %}
-        <br><b>첨부</b> {{ s.xlsx_zip.file_name | e }} — 호스트별 Remediation Plan(xlsx)을 묶은 파일. 이행계획서 양식이며, 조치 이행은 이 시스템이 추적하지 않습니다.<br>
+        <br><b>첨부</b> {{ s.xlsx_zip.file_name | e }} — Remediation Plan(xlsx)을 묶은 파일(호스트별 파일과, 합계가 있는 실행은 total.xlsx). 이행계획서 양식이며, 조치 이행은 이 시스템이 추적하지 않습니다.<br>
         <b>xlsx zip SHA-256</b> <span style="font-family:Consolas,'Courier New',monospace;word-break:break-all;">{{ s.xlsx_zip.sha256 | e }}</span><br>
         <b>xlsx zip 보관</b> {{ s.xlsx_zip.archive | e }}
 {% endif %}

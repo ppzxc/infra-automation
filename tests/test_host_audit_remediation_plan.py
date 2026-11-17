@@ -468,6 +468,16 @@ def test_a_host_that_breaks_its_plan_still_has_its_line_in_the_total(monkeypatch
     assert rows[1][COL["통제내용"]].startswith(plan_module.PLAN_FAILED)
 
 
+def test_a_run_without_hosts_has_no_files():
+    from host_audit_remediation_plan import host_audit_remediation_files
+    assert host_audit_remediation_files(_model([])) == {}
+
+
+def test_the_total_has_a_label_that_is_not_a_host_name():
+    from host_audit_remediation_plan import host_audit_remediation_total
+    assert host_audit_remediation_total(_total_model())["label"] == "합계 xlsx"
+
+
 def test_each_plan_names_its_zip_member_under_hosts():
     model = _total_model()
     plans = host_audit_remediation_plans(model)
@@ -476,20 +486,17 @@ def test_each_plan_names_its_zip_member_under_hosts():
 
 
 def test_a_host_named_total_does_not_take_the_name_of_the_total():
-    from host_audit_remediation_plan import host_audit_remediation_by_file, host_audit_remediation_plan_map, \
-        host_audit_remediation_total
+    from host_audit_remediation_plan import host_audit_remediation_files
     model = _model([_record("total", {1: "VULN"}), _record("h1", {})])
-    by_file = host_audit_remediation_by_file(host_audit_remediation_plan_map(model), host_audit_remediation_total(model))
+    by_file = host_audit_remediation_files(model)
     assert len(by_file) == 3 and "host-audit-ha-1-total.xlsx" in by_file
     assert by_file["host-audit-ha-1-total.xlsx"]["zip_member"] == "total.xlsx"
 
 
 def test_zip_members_map_every_file_to_its_folder_name():
-    from host_audit_remediation_plan import (
-        host_audit_remediation_by_file, host_audit_remediation_plan_map, host_audit_remediation_total,
-        host_audit_remediation_zip_members)
+    from host_audit_remediation_plan import host_audit_remediation_files, host_audit_remediation_zip_members
     model = _total_model()
-    by_file = host_audit_remediation_by_file(host_audit_remediation_plan_map(model), host_audit_remediation_total(model))
+    by_file = host_audit_remediation_files(model)
     assert host_audit_remediation_zip_members(by_file) == {
         "host-audit-ha-1-total.xlsx": "total.xlsx", "host-audit-ha-1-h1.xlsx": "hosts/h1.xlsx",
         "host-audit-ha-1-h2.xlsx": "hosts/h2.xlsx", "host-audit-ha-1-h3.xlsx": "hosts/h3.xlsx"}
