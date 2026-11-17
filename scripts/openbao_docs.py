@@ -39,6 +39,14 @@ def cmd_validate(args):
     return 1 if violations else 0
 
 
+def cmd_check(args):
+    import os
+
+    import openbao_check as oc  # 하위 명령별 모듈(#519)
+    kwargs = {"tofu_dir": args.tofu_dir} if args.tofu_dir else {}
+    return oc.run_check(os.environ, schema_dir=args.schemas, **kwargs)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -46,6 +54,10 @@ def main(argv=None):
     p.add_argument("root")
     p.add_argument("--schemas", default=str(ov.DEFAULT_SCHEMA_DIR), help="스키마 디렉터리(기본: schemas/openbao)")
     p.set_defaults(func=cmd_validate)
+    p = sub.add_parser("check", help="Periodic Check: OpenBao 전체 대조(#519)")
+    p.add_argument("--schemas", default=str(ov.DEFAULT_SCHEMA_DIR))
+    p.add_argument("--tofu-dir", default=None, help="OpenTofu 코드 디렉터리(기본: tofu/openbao)")
+    p.set_defaults(func=cmd_check)
     args = parser.parse_args(argv)
     return args.func(args)
 
