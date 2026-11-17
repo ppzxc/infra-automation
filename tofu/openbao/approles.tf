@@ -2,15 +2,16 @@
 # 정책은 policies/*.hcl의 작은 정책이고 AppRole이 token_policies로 조합한다. 계열 x 경로 매트릭스의 원본은 그 HCL이다.
 # applier 정책은 applier.tf가 따로 만든다.
 resource "vault_policy" "small" {
-  for_each = setsubtract(fileset("${path.module}/policies", "*.hcl"), ["applier.hcl"])
+  # 키는 정책 이름(파일명에서 .hcl 뺀 것)이다. AppRole이 이름으로 가리킨다.
+  for_each = { for f in fileset("${path.module}/policies", "*.hcl") : trimsuffix(f, ".hcl") => f if f != "applier.hcl" }
 
-  name   = trimsuffix(each.key, ".hcl")
-  policy = file("${path.module}/policies/${each.key}")
+  name   = each.key
+  policy = file("${path.module}/policies/${each.value}")
 }
 
 locals {
   # 계열 -> 작은 정책 이름. 모든 계열이 inventory-base(Service·공통 설정)를 읽는다.
-  # Automation Identity(connect, automation-ssh)는 서버 계열 provision·host_agents·host_audit에만 준다.
+  # Automation Identity(connect 묶음에 들어 있다)는 서버 계열 provision·host_agents·host_audit에만 준다.
   # list 권한은 periodic_check(periodic-check)에만 준다.
   family_policies = {
     provision          = ["inventory-base", "connect", "funa-secrets"]

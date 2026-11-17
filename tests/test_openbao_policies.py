@@ -252,6 +252,17 @@ def test_family_policies_exist_as_files():
             assert n in POLICY_NAMES, f"{family}: {n}"
 
 
+def test_every_policy_file_is_used_by_a_role_or_is_applier_or_operator():
+    fam, _ = _role_policies()
+    used = {n for names in fam.values() for n in names}
+    assert set(POLICY_NAMES) - used == {"applier", "operator"}
+
+
+def test_policy_for_each_is_keyed_by_policy_name_not_file_name():
+    _, text = _role_policies()
+    assert 'trimsuffix(f, ".hcl") => f' in text  # token_policies가 이름으로 vault_policy.small[...]을 찾는다
+
+
 def test_automation_identity_only_for_server_families():
     fam, _ = _role_policies()
     for family, names in fam.items():
