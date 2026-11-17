@@ -114,10 +114,12 @@
           경유지는 identity 또는 ssh_key Credential만 지원합니다(비밀번호는 명령행에 남기지 않기 위해 거부).
         quiet: true
 
+    # 해석 묶음에서 필요한 것을 모두 꺼냈으니 비밀이 든 묶음은 비운다(호스트 변수에 남는 비밀 사본을 줄인다).
     - name: Take the admin connection (Endpoint, login, become, via) and the bootstrap connection (same Endpoint, bootstrap Credential)
       ansible.builtin.set_fact:
         _admin_conn: "{{ _host_res.admin }}"
         _boot_conn: "{{ _host_res.bootstrap }}"
+        _host_res: {}
       no_log: true
 
     # 계정 삭제(Explicit account removal): Asset 문서의 access.removed_accounts와 실행 변수 'target_removed_users'

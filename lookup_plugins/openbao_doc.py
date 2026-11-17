@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import ssl
@@ -163,7 +164,7 @@ class Reader:
                 return self.fixture[doc]
             return self._missing(doc, required)
         if doc in self._memo:
-            return self._memo[doc]
+            return copy.deepcopy(self._memo[doc])     # 호출자가 문서를 고쳐도 뒤 읽기에 새지 않는다
         url = "%s/v1/%s/data/%s" % (self.addr, mount, rest)
 
         def attempt(deferred):
@@ -185,7 +186,7 @@ class Reader:
         except _NotFound:
             return self._missing(doc, required)
         out = (data.get("data") or {}).get("data") or {}
-        self._memo[doc] = out
+        self._memo[doc] = copy.deepcopy(out)
         return out
 
     @staticmethod

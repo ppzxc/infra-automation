@@ -68,6 +68,14 @@ def test_the_connection_is_resolved_by_one_lookup_per_host_not_by_repeated_looku
         assert retired not in text, retired
 
 
+def test_the_secret_bearing_resolution_bundle_is_emptied_after_it_is_taken_apart():
+    tasks = _load(RESOLVE)[0]["tasks"]
+    last = next(i for i, t in enumerate(tasks) if t["name"].startswith("Take the admin connection"))
+    assert tasks[last]["ansible.builtin.set_fact"]["_host_res"] == {} and tasks[last]["no_log"] is True
+    later = yaml.safe_dump(tasks[last + 1:])
+    assert "_host_res" not in later
+
+
 def test_secret_free_summaries_are_never_no_log():
     """요약 태스크는 비밀이 없다: no_log를 달면 운영자가 실패 사유를 볼 수 없다."""
     task = next(t for t in _load(RESOLVE)[0]["tasks"] if t["name"].startswith("Summarize the admin and bootstrap connections"))

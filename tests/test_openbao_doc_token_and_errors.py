@@ -131,6 +131,15 @@ def test_a_reader_reads_each_document_over_http_once(fake_openbao):
     assert [r.doc for r in fake_openbao.reads()] == ["assets/ns0001", "assets/ns0099", "assets/ns0099"]
 
 
+def test_a_caller_that_changes_a_returned_document_does_not_change_later_reads(fake_openbao):
+    reader = Reader(_vars(fake_openbao))
+    first = reader.read("inventory/assets/ns0001")
+    first["access"] = "mutated"
+    first.pop("description", None)
+    again = reader.read("inventory/assets/ns0001")
+    assert again["access"] != "mutated" and "description" in again
+
+
 def test_a_no_log_task_still_tells_the_operator_why_it_failed(fake_openbao, tmp_path):
     """실제 ansible-playbook: no_log 태스크의 결과는 가려지지만 실패 사유(경로·상태)는 출력에 남고 비밀은 없다."""
     fake_openbao.deny("secrets", "automation/ssh")

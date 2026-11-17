@@ -42,6 +42,15 @@
       {%- endfor -%}
       {{ found.names | to_json }}
   block:
+    # 버킷 검증(아래 assert)이 Asset 문서의 호스트별 버킷까지 보도록 서비스 주소와 버킷을 먼저 정한다.
+    - name: Expose the service addresses and the host bucket so endpoint defaults resolve like the Deploy path
+      ansible.builtin.set_fact:
+        host_agents_services:
+          openobserve: "{{ _maint_docs['inventory/services/openobserve'] }}"
+          rustfs: "{{ _maint_docs['inventory/services/rustfs'] }}"
+        # 이름 규칙 밖 호스트의 버킷(Asset 문서 agents.backup.bucket, 선택). 없으면 빈 값이라 규칙 이름을 쓴다.
+        backup_asset_bucket: "{{ (((_maint_docs['inventory/assets/+'].agents | default({}, true)).backup | default({}, true)).bucket) | default('', true) }}"
+
     # 빠진 항목의 이름만(값은 절대 아님) 모아 한 번에 보여 준다. 버킷 이름은 시크릿이 아니므로 그대로 보여 준다.
     # 주의: assert의 fail_msg는 블록의 no_log와 무관하게 출력된다 — 이 목록에 시크릿 값을 넣지 않는다.
     - name: Assert the required maintenance inputs exist
@@ -55,14 +64,6 @@
           {{ inventory_hostname }}: 유지보수 필수 입력 누락: {{ _maint_problems | join(', ') }}
           (Host Agents가 적용되지 않은 호스트라면 인벤토리 host_agents_excluded 그룹에 넣는다)
         quiet: true
-
-    - name: Expose the service addresses and the host bucket so endpoint defaults resolve like the Deploy path
-      ansible.builtin.set_fact:
-        host_agents_services:
-          openobserve: "{{ _maint_docs['inventory/services/openobserve'] }}"
-          rustfs: "{{ _maint_docs['inventory/services/rustfs'] }}"
-        # 이름 규칙 밖 호스트의 버킷(Asset 문서 agents.backup.bucket, 선택). 없으면 빈 값이라 규칙 이름을 쓴다.
-        backup_asset_bucket: "{{ (((_maint_docs['inventory/assets/+'].agents | default({}, true)).backup | default({}, true)).bucket) | default('', true) }}"
 
     - name: Keep the resolved secrets as host facts
       ansible.builtin.set_fact:

@@ -680,6 +680,15 @@ def test_maintenance_takes_the_host_bucket_and_the_private_ca_from_openbao(tmp_p
         "bucket": "backup-prod-oldname", "ca": "/etc/pki/fake-rustfs-ca.pem", "host_ca": "/etc/pki/fake-rustfs-ca.pem"}
 
 
+def test_maintenance_rejects_a_host_bucket_that_breaks_the_s3_name_rule(tmp_path):
+    """Asset 문서의 호스트별 버킷도 이름 규칙 검증(BAK-072)을 거친다(Deploy의 입력 검증과 같다)."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"],
+                                                  agents={"backup": {"bucket": "Bad/Bucket"}})
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Bad/Bucket)" in res.stdout + res.stderr
+
+
 def test_maintenance_reads_only_the_declared_documents(tmp_path):
     """읽은 문서는 backup_openbao_required가 선언한 패턴 안에 있고, 선언한 문서는 모두 읽는다."""
     with FakeOpenBao.with_schemas(token="tok") as bao:
