@@ -275,6 +275,20 @@ def test_names_with_a_trailing_newline_are_rejected():
     assert [v.rule for v in got] == ["additionalProperties"]
 
 
+def test_yaml_anchors_merge_keys_and_unhashable_keys_do_not_crash(tmp_path):
+    _tree(tmp_path, "inventory/config/common.yml", "base: &b {x: 1}\nmerged:\n  <<: *b\n  y: 2\ndomain: a.example.test\n")
+    _tree(tmp_path, "inventory/config/host_audit.yml", "? [a]\n: 1\n")
+    res = run_cli("validate", str(tmp_path))
+    assert res.returncode == 1
+    assert sorted(res.stdout.splitlines()) == ["inventory/config/common\t#\tadditionalProperties",
+                                               "inventory/config/host_audit\t#\tyaml_parse"]
+
+
+def test_one_and_true_are_distinct_keys_not_duplicates(tmp_path):
+    _tree(tmp_path, "inventory/config/common.yml", "1: a\ntrue: b\n")
+    assert run_cli("validate", str(tmp_path)).stdout.strip() == "inventory/config/common\t#\tnon_string_key"
+
+
 # ---- 의존성 ------------------------------------------------------------------------------------------------------
 
 def test_jsonschema_is_a_test_dependency():

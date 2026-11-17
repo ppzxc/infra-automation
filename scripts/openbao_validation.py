@@ -25,7 +25,8 @@ PROMPTED_KEYS = frozenset({"password", "passphrase", "private_key", "token", "se
 
 class Violation(collections.namedtuple("Violation", "doc pointer rule")):
     def format(self):
-        return "%s\t%s\t%s" % (self.doc, self.pointer, self.rule)
+        doc = "".join(c if c.isprintable() else "?" for c in self.doc)  # 제어 문자가 출력 줄 구조를 깨지 않게 한다
+        return "%s\t%s\t%s" % (doc, self.pointer, self.rule)
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -34,10 +35,11 @@ class _UniqueKeyLoader(yaml.SafeLoader):
     def construct_mapping(self, node, deep=False):
         seen = set()
         for key_node, _ in node.value:
-            key = self.construct_object(key_node, deep=True)
-            if key in seen:
-                raise yaml.YAMLError("duplicate key")
-            seen.add(key)
+            if isinstance(key_node, yaml.ScalarNode) and key_node.tag != "tag:yaml.org,2002:merge":
+                ident = (key_node.tag, key_node.value)  # 구성한 값이 아니라 표기로 비교한다(1과 true는 서로 다른 키)
+                if ident in seen:
+                    raise yaml.YAMLError("duplicate key")
+                seen.add(ident)
         return super().construct_mapping(node, deep)
 
 
@@ -246,6 +248,6 @@ def load_tree(root):
             continue
         try:
             store[doc] = yaml.load(f.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
-        except (yaml.YAMLError, UnicodeDecodeError, OSError):
+        except (yaml.YAMLError, UnicodeDecodeError, OSError, TypeError):
             store[doc] = Unparseable()
     return store

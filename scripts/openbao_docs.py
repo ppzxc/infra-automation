@@ -15,9 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import jsonschema  # noqa: E402
 import openbao_validation as ov  # noqa: E402
-import yaml  # noqa: E402
 
 
 def cmd_validate(args):
@@ -31,7 +29,7 @@ def cmd_validate(args):
         return 2
     try:
         violations = ov.validate_store(store, args.schemas)
-    except (ValueError, OSError, yaml.YAMLError, jsonschema.SchemaError) as exc:
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 종료 코드 2와 예외 종류만 낸다(트레이스백에 값이 섞이지 않게)
         # 스키마·index.yml 자체의 문제다(문서 위반이 아니다). 예외 내용에 경로·값이 섞일 수 있어 종류만 낸다.
         print("스키마 또는 index.yml 오류: %s" % type(exc).__name__, file=sys.stderr)
         return 2
