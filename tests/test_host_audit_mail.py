@@ -348,6 +348,7 @@ def _model_with_not_applicable():
     model["unavailable"] = list(model["unavailable"]) + [
         {"host": "ns0003", "item": "Configuration Drift — 프로비저닝", "label": "점검불가(점검 중 오류)", "reason": "x"}]
     model["configuration_drift"] = {"rows": [], "hosts_with_drift": 0, "subruns": [],
+                                    "not_applicable_note": "raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님)",
                                     "not_applicable": [{"host": "ns0100", "reason": "raw"}, {"host": "ns0101", "reason": "raw"}]}
     return model
 

@@ -49,6 +49,7 @@ REASON_RAW = ('Raw Provisioning Path(CentOS 6/7) 호스트 — raw 태스크는 
               'Drift를 판정할 수 없음 (ADR-0005)')
 REASON_NOT_COLLECTED = 'Host Audit 수집 단계에서 점검불가인 호스트라 Drift 점검 대상에서 제외'
 NOT_APPLICABLE_LABEL = '비대상'
+NOT_APPLICABLE_NOTE = 'raw 태스크가 --check에서 스킵됨 (Raw Provisioning Path, 점검불가 아님)'
 REASON_OUT_OF_SCOPE = '선언 범위 밖'
 
 SPEC_ID_RE = re.compile(r'\[([A-Z][A-Z0-9]*-[A-Z0-9]+(?:-[A-Z0-9]+)*)\]')
@@ -89,7 +90,7 @@ def host_audit_drift_plan(records, site_scope, agents_scope, raw_declared=None):
     raw_declared = raw_declared or {}
     by_host = {r.get('inventory_hostname'): r for r in (records or []) if r.get('inventory_hostname')}
     site_scope, agents_scope = set(site_scope or []), set(agents_scope or [])
-    plan = {'site': [], 'agents': [], 'excluded': {}}
+    plan = {'site': [], 'agents': [], 'excluded': {}, 'not_applicable': []}
     for host in sorted(site_scope | agents_scope):
         record = by_host.get(host)
         if not record or record.get('status') != 'ok':
@@ -97,6 +98,7 @@ def host_audit_drift_plan(records, site_scope, agents_scope, raw_declared=None):
             continue
         if _is_raw_path(record, raw_declared.get(host)):
             plan['excluded'][host] = REASON_RAW
+            plan['not_applicable'].append(host)
             continue
         if host in site_scope:
             plan['site'].append(host)
@@ -339,7 +341,7 @@ def host_audit_drift_section(plan, runs):
         subruns.append(sub)
     for host, reason in sorted((plan.get('excluded') or {}).items()):
         state = host_rows.setdefault(host, _new_state(host))
-        if reason == REASON_RAW:
+        if host in (plan.get('not_applicable') or []):
             # By design Drift cannot be seen on a Raw Provisioning Path host: not an item to act on,
             # so it stays out of the 점검불가 count and table and is reported as its own line.
             state['not_applicable'].append({'subrun': '전체', 'label': NOT_APPLICABLE_LABEL, 'reason': reason})
@@ -363,6 +365,7 @@ def host_audit_drift_section(plan, runs):
         'by_host': host_rows,
         'unavailable': unavailable,
         'not_applicable': not_applicable,
+        'not_applicable_note': NOT_APPLICABLE_NOTE,
         'baseline_findings': baseline_findings,
     }
 
@@ -382,7 +385,7 @@ def _baseline_findings(plan, subruns, host_rows):
     hosts, findings = [], []
     for host, state in sorted(host_rows.items()):
         planned = [k for k in SUBRUN_ORDER if host in (plan.get(k) or [])]
-        if not planned or failed & set(planned) or state['unavailable'] or state['not_applicable']:
+        if not planned or failed & set(planned) or state['unavailable']:
             continue
         hosts.append(host)
         for row in state['rows']:

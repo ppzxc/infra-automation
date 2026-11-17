@@ -169,6 +169,7 @@ def test_plan_routes_hosts_and_excludes_raw_and_uninspected():
     )
     assert plan["site"] == ["lb1", "web1"]
     assert plan["agents"] == ["web1"]
+    assert plan["not_applicable"] == ["c6", "c7", "forced"]
     assert plan["excluded"] == {"c6": REASON_RAW, "c7": REASON_RAW, "forced": REASON_RAW, "down": REASON_NOT_COLLECTED}
 
 
