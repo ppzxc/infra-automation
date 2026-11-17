@@ -103,6 +103,12 @@ def test_failing_health_sends_one_p1_notification_to_the_webhook(world):
     assert "[P1 긴급]" in text and "OpenObserve" in text
 
 
+def test_query_string_of_the_health_url_is_not_put_in_the_alert_body(world):
+    run_check(world, O2_HEALTH_URL_OVERRIDE="http://127.0.0.1:1/healthz?token=SECRET-QUERY")
+    (req,) = posts(world)
+    assert "SECRET-QUERY" not in req["body"] and "■ 대상: http://127.0.0.1:1/healthz\n" in req["body"]
+
+
 def test_a_body_over_the_old_json_limit_is_delivered_whole(world):
     """JSON 경로는 본문 2000자를 넘으면 거부했다. text/plain 경로는 그대로 전달한다."""
     long_target = "http://127.0.0.1:1/" + "x" * 3000
