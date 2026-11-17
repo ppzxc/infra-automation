@@ -437,3 +437,27 @@ def test_same_unmapped_key_in_a_global_account_is_reported_once():
     old["users/admin01"]["foo"] = "x"
     lines = [e for e in om.build_new(old, SKIP).errors if "foo" in e]
     assert len(lines) == 1
+
+
+def test_firewall_host_document_with_address_is_left_to_the_fortigate_document():
+    old = old_docs()
+    old["hosts/ns0005"]["ansible_host"] = "192.0.2.30"
+    plan = om.build_new(old, SKIP)
+    assert plan.errors == [] and list(plan.store["inventory/assets/ns0005/endpoints"]) == ["https"]
+
+
+def test_ansible_login_on_a_server_is_reported_not_dropped():
+    old = old_docs()
+    old["hosts/ns0001"]["ansible_password"] = "leak-me-0066"
+    plan = om.build_new(old, SKIP)
+    assert any("hosts/ns0001" in e and "unused_key" in e for e in plan.errors)
+    assert "leak-me-0066" not in " ".join(plan.errors)
+
+
+def test_device_without_password_is_left_to_validation_and_orphan_fortigate_is_an_error():
+    old = old_docs()
+    del old["hosts/ns0003"]["ansible_password"]
+    plan = om.build_new(old, SKIP)
+    assert ("secrets/assets/ns0003/credentials/netadmin", "#", "required") in [tuple(v) for v in ov.validate_store(plan.store, SCHEMA_DIR)]
+    old["fortigate/ns0999/extra"] = {"x": "y"}
+    assert any("no_host_document" in e or "unmapped_document" in e for e in om.build_new(old, SKIP).errors)

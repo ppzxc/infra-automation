@@ -186,7 +186,9 @@ class _Builder:
         self.asset_agents(ns)
         if ctype is not None or (user is not None and not admin and not boot):  # 서버는 admin_users·bootstrap_user로 접속한다
             self.device_endpoint(ns, doc, address, port, user, password, ctype, bastion)
-        elif address:
+        elif address and not ("fortigate/%s" % ns in self.old and not (admin or boot)):  # 방화벽은 fortigate 문서가 맡는다
+            if user is not None or password is not None:
+                self.err(doc, "unused_key:ansible_user/ansible_password")  # 서버는 계정 문서로 접속한다. 조용히 버리지 않는다
             self.server_endpoint(ns, address, port, admin, boot, pwauth)
         elif admin or boot:
             self.err(doc, "no_address")
@@ -215,13 +217,16 @@ class _Builder:
             else:
                 ep["via"] = "%s/ssh" % bastion
         self.endpoints[ns][name] = ep
-        if password is not None:
-            self.credentials[ns][user] = ({"type": "password", "username": user, "password": password},
-                                          {"username": (doc, "ansible_user"), "password": (doc, "ansible_password")})
+        data, srcs = {"type": "password", "username": user}, {"username": (doc, "ansible_user")}
+        if password is not None:  # 없으면 스키마 검증이 password 누락을 알린다
+            data["password"], srcs["password"] = password, (doc, "ansible_password")
+        self.credentials[ns][user] = (data, srcs)
 
     def fortigate(self, ns):
         doc = "fortigate/%s" % ns
         d = self.take(doc)
+        if d is None:
+            return self.err(doc, "no_document")
         d.pop("fqdn", None)
         address, port, token = d.pop("ansible_host", None), d.pop("ansible_port", None), d.pop("api_token", None)
         self.endpoints[ns]["https"] = {"protocol": "https", "address": address, "port": _int(port if port is not None else 443),
@@ -309,6 +314,8 @@ class _Builder:
             if "password" in merged:
                 data["password"], m["password"] = merged["password"], src["password"]
         else:
+            if "ssh_passphrase" in merged:
+                self.err("secrets/assets/%s/credentials/%s" % (ns, name), "passphrase_without_key")
             data = {"type": "password", "username": name}
             m = {}
             if "password" in merged:
@@ -328,8 +335,7 @@ class _Builder:
             if d.get("revoked_keys") and not d.get("ssh_public_key"):
                 self.err(path, "revoked_keys_without_public_key")
             if d.get("ssh_public_key"):
-                op = {"public_keys": [d["ssh_public_key"]]}
-                self.put("inventory/operators/%s" % name, ["public_keys"], op["public_keys"], (path, "ssh_public_key"))
+                self.put("inventory/operators/%s" % name, ["public_keys"], [d["ssh_public_key"]], (path, "ssh_public_key"))
                 if d.get("revoked_keys"):
                     self.put("inventory/operators/%s" % name, ["revoked_keys"], _as_list(d["revoked_keys"]), (path, "revoked_keys"))
             if d.get("ssh_private_key"):
@@ -354,8 +360,9 @@ class _Builder:
         gw.pop("o2_endpoint", None)  # OpenObserve 주소와 중복(#501 §1)
         if "api_user" in o2:
             self.put("secrets/services/openobserve/admin", ["username"], o2.pop("api_user"), ("agents/openobserve", "api_user"))
-            self.put("secrets/services/openobserve/admin", ["password"], o2.pop("api_password", None),
-                     ("agents/openobserve", "api_password"))
+            if "api_password" in o2:
+                self.put("secrets/services/openobserve/admin", ["password"], o2.pop("api_password"),
+                         ("agents/openobserve", "api_password"))
         self.ingest(o2, gw)
         if "normal_sources" in o2:
             self.put("inventory/config/openobserve_config", ["normal_sources"], o2.pop("normal_sources"),
@@ -456,7 +463,7 @@ class Client:
     def __init__(self, addr, namespace, token):
         self.addr, self.namespace, self.token = addr.rstrip("/"), namespace, token
 
-    def _call(self, method, path, body=None, ok=(200,), missing=()):
+    def _call(self, method, path, body=None, missing=()):
         data = json.dumps(body).encode() if body is not None else None
         headers = {"X-Vault-Token": self.token, "X-Vault-Namespace": self.namespace, "Content-Type": "application/json"}
         req = urllib.request.Request(self.addr + path, data=data, headers=headers, method=method)
@@ -501,7 +508,7 @@ def read_old(client, mount, skip):
     def walk(prefix):
         for key in client.list(mount, prefix.rstrip("/")):
             path = prefix + key
-            if skipped(path, skip) or skipped(path + "/", skip):
+            if skipped(path, skip):
                 continue
             if key.endswith("/"):
                 walk(path)
