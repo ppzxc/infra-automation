@@ -85,7 +85,7 @@ def old_docs():
         "users/root": {"username": "root", "type": "PASSWORD", "password": "pw-root-global"},
         "agents/openobserve": {
             "api_user": "o2admin", "api_password": "o2-admin-pass", "controller_ingest_token": "Y3VzZXI6Y3Bhc3M=",
-            "o2_endpoint": "https://o2.example.test", "normal_sources": ["192.0.2.250"],
+            "o2_endpoint": "https://o2.example.test", "normal_sources": [{"address": "192.0.2.250", "kind": "semaphore"}],
             "alert_webhook_plain_url": "https://alert.example.test/plain/alert-url-0013",
             "alert_webhook_url": "https://alert.example.test/json", "alert_webhook_token": "t", "alert_webhook_auth_header": "h",
         },
@@ -207,7 +207,7 @@ def test_services_config_and_permission_documents(plan):
     assert s["secrets/services/github/org_hooks_read"] == {"token": "gh-token-0012"}
     assert s["inventory/config/host_audit"] == {"mail_recipients": ["a@example.test", "b@example.test"],
                                                 "mail_sender": "noreply@example.test", "mail_sender_display_name": "Fake Audit"}
-    assert s["inventory/config/openobserve_config"] == {"normal_sources": ["192.0.2.250"]}
+    assert s["inventory/config/openobserve_config"] == {"normal_sources": [{"address": "192.0.2.250", "kind": "semaphore"}]}
     assert s["inventory/config/github_webhook_watch"] == {"hook_url": "https://hooks.example.test/x",
                                                           "github_org": "fake-org", "o2_org": "fake-o2"}
 
