@@ -77,7 +77,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 |---|---|
 | `status` | `ok`(수집 완료) · `unreachable`(접속 실패) · `probe_failed`(접속은 됐으나 수집 표식 없음) |
 | `reason` | 점검불가 이유(첫 줄, 최대 200자). `ok`이면 빈 문자열 |
-| `declared` | 인벤토리 값 (`fqdn`, `ip`, 그룹)과 환경(`host_audit_environment`, monitoring `host_agents_environment` 기본값 `production`을 따른다). 허용 값만 받는다(AUD-001) |
+| `declared` | 인벤토리 값 (`fqdn`, `ip`, 그룹)과 환경(`host_audit_environment`, 공용 `deployment_environment`(`playbooks/group_vars/all.yml`, 기본 `production`)를 따른다). 허용 값만 받는다(AUD-001) |
 | `identity` / `os` | 호스트에서 수집한 값. `status`가 `ok`가 아니면 `null`. `ips`는 루프백·링크 로컬을 뺀 전체 주소, `account`는 점검에 쓴 계정 |
 | `os.name` | `/etc/os-release`의 `PRETTY_NAME`, 없으면(CentOS 6) `/etc/redhat-release` 첫 줄 |
 
@@ -96,7 +96,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
 | `host_audit_kisa_alert_enabled` | `true` | 정기 실행의 KISA 월간 악화 알림(§15, #331). false면 알리지 않음 |
 | `host_audit_alert_validate_certs` | `true` | 알림 webhook TLS 검증. 주소는 OpenBao `secrets/services/alert/notify`의 `url`이고 실행 변수로 덮어쓰지 않는다 |
-| `host_audit_environment` | monitoring의 `host_agents_environment` 기본값(`production`) | 점검 기록의 환경(`declared.environment`). 모든 호스트가 같은 값이라 인벤토리 변수가 아니라 역할 기본값이고, 값은 Host Agents와 한 곳(`roles/monitoring/defaults/main.yml`)에서 정한다. `host_agents_environment`를 따로 주면(Extra variables) 그 값을 따른다 |
+| `host_audit_environment` | 공용 `deployment_environment`(`playbooks/group_vars/all.yml`, `production`) | 점검 기록의 환경(`declared.environment`). 모든 호스트가 같은 값이라 인벤토리 변수가 아니라 공용 값이고, Host Agents(`host_agents_environment`)와 한 곳에서 정한다. 역할만 따로 돌리는 시험·molecule은 `deployment_environment`를 직접 준다. `-e`로 덮어쓸 수 있다 |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
 | `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |

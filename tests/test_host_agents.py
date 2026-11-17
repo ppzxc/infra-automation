@@ -523,7 +523,7 @@ def _assert_reads_are_declared(fake):
 
 def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token=APPROLE_TOKEN, extra_tasks=None,
                      with_backup_defaults=False, environment="production", backup_only_hosts=()):
-    role_vars = {}
+    role_vars = yaml.safe_load((ROOT_DIR / "playbooks" / "group_vars" / "all.yml").read_text(encoding="utf-8"))   # 공용 deployment_environment
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
     if environment is not None:

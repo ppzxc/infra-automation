@@ -1,0 +1,6 @@
+---
+# 모든 플레이북이 공유하는 값(playbooks/ 옆 group_vars라 이 디렉터리의 어느 플레이북으로 실행해도 읽힌다).
+# 배포 환경(deployment.environment.name, 점검 기록의 environment): production|staging|development|test.
+# Host Agents(monitoring의 host_agents_environment)와 Host Audit(host_audit_environment)이 같은 환경을 말해야 하므로 여기 한 곳에서 정한다.
+# 역할 단독 시험·molecule은 이 파일을 vars_files로 읽는다. Extra variables(-e)가 우선한다.
+deployment_environment: production

@@ -76,7 +76,7 @@
   | `secrets/services/alert/notify` | `url` | 검사 호스트만 | 생존 타이머의 text/plain 알림 주소(`MON-220`) |
   | `inventory/assets/<ns>/endpoints` | `ssh`의 `address`·`port` | 검사 호스트만 | 서버 도달성 대상(`MON-227`~`229`) |
 
-  `host_agents_environment`(`production` \| `staging` \| `development` \| `test`)는 모든 호스트가 같은 값이라 **역할 기본값**이고 OpenBao에서 읽지 않는다. 허용 밖 값은 변경 전 실패(`MON-037`).
+  `host_agents_environment`(`production` \| `staging` \| `development` \| `test`)는 모든 호스트가 같은 값이라 공용 `deployment_environment`(`playbooks/group_vars/all.yml`, Host Audit과 공유)를 따르는 **역할 기본값**이고 OpenBao에서 읽지 않는다. 허용 밖 값은 변경 전 실패(`MON-037`).
 
 - **실패 조건 (변경 전, check 모드 포함)**: 필수 문서·키 누락, OpenBao 조회 오류(연결 실패/403/토큰 없음), 제외 불가 경로를 지정한 exclude → 위반 경로와 저장 위치(`agents.backup.exclude_paths` 등)를 메시지에 명시. 선택 키 부재는 Git 표준만 적용합니다.
 - **공유 Service 문서**: `inventory/services/openobserve`·`rustfs`에 `url`이 없으면 실패합니다(조회는 호스트마다 수행. TLS 검증과 인증은 읽기 지점이 정한다).

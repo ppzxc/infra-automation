@@ -483,6 +483,7 @@
   gather_facts: false
   become: false
   vars:
+    deployment_environment: production   # playbooks/group_vars/all.yml의 값(역할 단독 실행이라 직접 준다)
     host_audit_output_root: "{{ lookup('ansible.builtin.env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/host_audit"
   tasks:
     - name: Fix run metadata and the output directory
@@ -495,6 +496,7 @@
   gather_facts: false
   become: true
   vars:
+    deployment_environment: production   # playbooks/group_vars/all.yml의 값(역할 단독 실행이라 직접 준다)
     snapshot_script: |
       paths=""
       for p in /etc /usr /var/lib/rpm /var/lib/dnf /var/lib/yum /var/lib/dpkg /var/lib/apt \
