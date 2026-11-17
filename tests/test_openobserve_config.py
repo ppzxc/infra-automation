@@ -1368,9 +1368,9 @@ def test_app_telemetry_fixtures_cover_firing_and_quiet_cases_and_verification_us
 def test_an_unreadable_asset_document_fails_instead_of_dropping_the_host_from_the_app_telemetry_roster(o2, tmp_path):
     """404는 스위치 꺼짐이지만 403 같은 읽기 실패는 짐작하지 않고 실패한다(호스트가 감시에서 조용히 빠지지 않도록)."""
     from openbao_fake import FakeOpenBao
-    with FakeOpenBao.with_schemas(approle=False) as bao:
+    with FakeOpenBao.with_schemas(approle=True) as bao:
         bao.deny("inventory", "assets/ns0001")
-        env = dict(os.environ, ANSIBLE_NOCOLOR="1", **bao.env())
+        env = dict(os.environ, ANSIBLE_NOCOLOR="1", **bao.approle_env())
         cmd = ["ansible-playbook", "-i", str(_inventory(tmp_path, SERVERS)), str(PLAYBOOK)]
         res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
     assert res.returncode != 0 and "inventory/assets/ns0001" in res.stdout and "HTTP 403" in res.stdout

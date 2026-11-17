@@ -36,7 +36,7 @@
         VAULT_ROLE_ID: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID'), true), true) }}"
         VAULT_SECRET_ID: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID'), true), true) }}"
         # 평문 토큰은 넘기지 않는다(하위 실행도 AppRole로 로그인한다). 인증서 검증 설정은 읽기 지점과 같게 맞춘다.
-        VAULT_SKIP_VERIFY: "{{ 'true' if (vault_validate_certs | default(true) | bool) == false else lookup('ansible.builtin.env', 'VAULT_SKIP_VERIFY') }}"
+        VAULT_SKIP_VERIFY: "{% if vault_validate_certs is defined and vault_validate_certs not in (none, '') %}{{ 'false' if vault_validate_certs | bool else 'true' }}{% else %}{{ lookup('ansible.builtin.env', 'VAULT_SKIP_VERIFY') }}{% endif %}"
         VAULT_CACERT: "{{ vault_cacert | default(lookup('ansible.builtin.env', 'VAULT_CACERT'), true) }}"
       register: _host_audit_drift_cmd
       # ansible-playbook exits non-zero when a host failed or was unreachable; that is a per-host

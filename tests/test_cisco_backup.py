@@ -158,7 +158,7 @@ def run_role(tmp_path):
         f"sys.stdout.write({FAKE_CONFIG!r})\n", encoding="utf-8")
 
     def run(store, extra=None):
-        bao = FakeOpenBao.with_schemas(store, namespace="infra", token="bao-test-token")
+        bao = FakeOpenBao.with_schemas(store, namespace="infra", token="bao-test-token", approle=True)
         _BAOS.append(bao)
         (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"hosts": {"ns0003": {}}}}), encoding="utf-8")
         ev = {"cisco_backup_dir": str(tmp_path / "bk"), "cisco_backup_collector": str(stub)}
@@ -168,7 +168,7 @@ def run_role(tmp_path):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
         env.update(ANSIBLE_CONFIG=str(tmp_path / "ansible.cfg"), STUB_RECORD=str(record),
                    ANSIBLE_LOOKUP_PLUGINS=str(ROOT_DIR / "lookup_plugins"), ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins"))
-        env.update(bao.env())
+        env.update(bao.approle_env())
         res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml"), "-e", f"@{tmp_path / 'ev.yml'}"],
                              capture_output=True, text=True, env=env, cwd=tmp_path)
         res.bao = bao

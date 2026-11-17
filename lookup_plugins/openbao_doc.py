@@ -138,11 +138,14 @@ class Reader:
 
     def _send(self, req, what):
         ctx = None
-        if self.addr.startswith("https"):
-            if not self.verify:
-                ctx = ssl._create_unverified_context()  # noqa: S323 - 변수·환경 변수로 명시했을 때만
-            elif self.cacert:
-                ctx = ssl.create_default_context(cafile=self.cacert)
+        try:
+            if self.addr.startswith("https"):
+                if not self.verify:
+                    ctx = ssl._create_unverified_context()  # noqa: S323 - 변수·환경 변수로 명시했을 때만
+                elif self.cacert:
+                    ctx = ssl.create_default_context(cafile=self.cacert)
+        except (OSError, ssl.SSLError):
+            raise OpenBaoError("OpenBao CA 파일(vault_cacert/VAULT_CACERT)을 읽을 수 없습니다") from None
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
                 return json.load(resp)
