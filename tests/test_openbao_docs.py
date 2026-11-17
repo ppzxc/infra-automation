@@ -204,6 +204,43 @@ def test_cli_reports_unreadable_yaml_without_content(tmp_path):
     assert "yaml_parse" in res.stdout
 
 
+# ---- 리뷰 반영: 빈 루트·null 범위·깨진 문서 경유·스키마 오류 --------------------------------------------------------
+
+def test_cli_rejects_a_root_without_documents(tmp_path):
+    assert run_cli("validate", str(tmp_path)).returncode == 2
+
+
+def test_only_secret_fields_may_be_left_null_for_prompting(tmp_path):
+    doc = tmp_path / "secrets" / "assets" / "ns0001" / "credentials" / "root.yml"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("type: password\nusername:\npassword:\n")
+    res = run_cli("validate", str(tmp_path))
+    assert res.returncode == 1
+    assert res.stdout.strip().split("\t") == ["secrets/assets/ns0001/credentials/root", "#/username", "type"]
+
+
+def test_via_into_a_schema_invalid_document_is_not_reported_as_missing():
+    store = {
+        "inventory/assets/ns0001/endpoints": {"ssh": {"protocol": "ssh", "address": "192.0.2.1", "port": 22,
+                                                     "credential": "root", "via": "ns0002/ssh"}},
+        "inventory/assets/ns0002/endpoints": {"ssh": {"protocol": "ssh", "address": "192.0.2.2", "port": "x",
+                                                     "credential": "root"}},
+        "secrets/assets/ns0001/credentials/root": {"type": "password", "password": "fake-pw-1"},
+        "secrets/assets/ns0002/credentials/root": {"type": "password", "password": "fake-pw-2"},
+    }
+    got = [v.format() for v in ov.validate_store(store, SCHEMA_DIR)]
+    assert got == ["inventory/assets/ns0002/endpoints\t#/ssh/port\ttype"]
+
+
+def test_cli_exits_2_on_broken_index(tmp_path):
+    schemas = tmp_path / "schemas"
+    schemas.mkdir()
+    (schemas / "index.yml").write_text('"inventory/config/common": missing.schema.json\n')
+    res = run_cli("validate", str(FIXTURES / "valid"), "--schemas", str(schemas))
+    assert res.returncode == 2
+    assert "Traceback" not in res.stderr
+
+
 # ---- 의존성 ------------------------------------------------------------------------------------------------------
 
 def test_jsonschema_is_a_test_dependency():

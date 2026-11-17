@@ -15,7 +15,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import jsonschema  # noqa: E402
 import openbao_validation as ov  # noqa: E402
+import yaml  # noqa: E402
 
 
 def cmd_validate(args):
@@ -24,7 +26,15 @@ def cmd_validate(args):
         print("루트 디렉터리가 없다", file=sys.stderr)
         return 2
     store = ov.load_tree(root)
-    violations = ov.validate_store(store, args.schemas)
+    if not store:
+        print("검증할 문서(.yml)가 없다: <마운트>/<경로>.yml 배치를 확인한다", file=sys.stderr)
+        return 2
+    try:
+        violations = ov.validate_store(store, args.schemas)
+    except (ValueError, OSError, yaml.YAMLError, jsonschema.SchemaError) as exc:
+        # 스키마·index.yml 자체의 문제다(문서 위반이 아니다). 예외 내용에 경로·값이 섞일 수 있어 종류만 낸다.
+        print("스키마 또는 index.yml 오류: %s" % type(exc).__name__, file=sys.stderr)
+        return 2
     for v in violations:
         print(v.format())
     print("%d개 문서, 위반 %d건" % (len(store), len(violations)), file=sys.stderr)
