@@ -255,6 +255,22 @@ def test_secrets_never_reach_the_log_and_missing_documents_name_their_path(run_r
     assert res.returncode != 0 and "secrets/assets/ns0003/credentials/netadmin" in res.out
 
 
+def test_non_enable_become_and_a_non_ssh_hop_are_refused_before_collection(run_role):
+    sudo = {**SSH_EP, "become": {"method": "sudo", "credential": "enable"}}
+    res = run_role(_store({"ns0003": {"ssh": sudo}}, SWITCH_CREDS))
+    assert res.returncode != 0 and res.records == [] and "CISCO-VIA" in res.out
+    eps = {"ns0003": {"ssh": {**SSH_EP, "via": "ns0001/telnet"}}, "ns0001": {"telnet": {**BASTION_EP, "protocol": "telnet"}}}
+    res = run_role(_store(eps, {**SWITCH_CREDS, **BASTION_CRED}))
+    assert res.returncode != 0 and res.records == [] and "CISCO-VIA" in res.out
+
+
+def test_a_username_with_spaces_stays_one_argument(run_role):
+    creds = {**SWITCH_CREDS, ("ns0003", "netadmin"): {"type": "password", "username": "dom ain", "password": "fake-pw-net-0010"}}
+    res = run_role(_store({"ns0003": {"ssh": SSH_EP}}, creds))
+    assert res.returncode == 0, res.out
+    assert _arg(res.records[0], "--user") == "dom ain"
+
+
 def _required():
     return yaml.safe_load((ROLE_DIR / "vars" / "main.yml").read_text(encoding="utf-8"))["cisco_backup_openbao_required"]
 

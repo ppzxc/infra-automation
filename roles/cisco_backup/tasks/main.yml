@@ -40,10 +40,12 @@
       - cisco_backup_openbao_required['secrets/assets/+/credentials/+'] | difference(_cisco_login.keys() | list) | length == 0
       - cisco_backup_connection.via | length <= 1
       - cisco_backup_connection.via | length == 0 or cisco_backup_connection.protocol == 'ssh'
+      - cisco_backup_connection.via | length == 0 or _cisco_hop.protocol == 'ssh'
+      - cisco_backup_connection.become.method | default('enable') == 'enable'
       - cisco_backup_connection.via | length == 0 or (_cisco_hop.login.mode == 'password' and _cisco_hop.login.username | default('') | length > 0)
     fail_msg: >-
       [CISCO-VIA] {{ inventory_hostname }}: 수집기가 지원하지 않는 접속이다. 로그인은 계정이 있는 비밀번호 Credential이어야 하고,
-      경유(via)는 ssh Endpoint가 비밀번호 로그인 경유지 한 단만 거칠 수 있다(값은 로그에 남기지 않는다).
+      승격은 enable만, 경유(via)는 ssh Endpoint가 ssh 비밀번호 로그인 경유지 한 단만 거칠 수 있다(값은 로그에 남기지 않는다).
   delegate_to: localhost
   become: false
   no_log: true
@@ -53,9 +55,9 @@
   ansible.builtin.command: >-
     python3 {{ cisco_backup_collector }}
     --mode direct_ssh
-    --host {{ cisco_backup_connection.address }}
-    --port {{ cisco_backup_connection.port }}
-    --user {{ _cisco_login.username }}
+    --host {{ cisco_backup_connection.address | string | quote }}
+    --port {{ cisco_backup_connection.port | string | quote }}
+    --user {{ _cisco_login.username | string | quote }}
     --timeout {{ cisco_backup_timeout | default(30) }}
     {{ _cisco_algorithm_args }}
   args:
@@ -80,9 +82,9 @@
   ansible.builtin.command: >-
     python3 {{ cisco_backup_collector }}
     --mode telnet
-    --host {{ cisco_backup_connection.address }}
-    --port {{ cisco_backup_connection.port }}
-    --user {{ _cisco_login.username }}
+    --host {{ cisco_backup_connection.address | string | quote }}
+    --port {{ cisco_backup_connection.port | string | quote }}
+    --user {{ _cisco_login.username | string | quote }}
     --timeout {{ cisco_backup_timeout | default(30) }}
   args:
     stdin: >-
@@ -106,12 +108,12 @@
   ansible.builtin.command: >-
     python3 {{ cisco_backup_collector }}
     --mode jump_ssh
-    --bastion-host {{ _cisco_hop.address }}
-    --bastion-port {{ _cisco_hop.port }}
-    --bastion-user {{ _cisco_hop.login.username }}
-    --host {{ cisco_backup_connection.address }}
-    --port {{ cisco_backup_connection.port }}
-    --user {{ _cisco_login.username }}
+    --bastion-host {{ _cisco_hop.address | string | quote }}
+    --bastion-port {{ _cisco_hop.port | string | quote }}
+    --bastion-user {{ _cisco_hop.login.username | string | quote }}
+    --host {{ cisco_backup_connection.address | string | quote }}
+    --port {{ cisco_backup_connection.port | string | quote }}
+    --user {{ _cisco_login.username | string | quote }}
     --timeout {{ cisco_backup_timeout | default(30) }}
     {{ _cisco_algorithm_args }}
   args:

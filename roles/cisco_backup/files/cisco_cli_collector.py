@@ -24,18 +24,22 @@ except ImportError:
     paramiko = None
 
 
+# 역할 기본값(cisco_backup_ssh_*)이 --kex/--host-key-algorithms/--ciphers로 넘기는 레거시 알고리즘 목록. 비어 있으면 아래 기본 목록을 쓴다.
+ALGORITHM_OVERRIDES = {}
+
+
 def enable_legacy_algorithms():
     """Ensure legacy KEX, ciphers, and key types are enabled in Paramiko for Cisco IOS devices."""
     if paramiko is None:
         return
     try:
         transport = paramiko.Transport
-        legacy_kex = (
+        legacy_kex = tuple(ALGORITHM_OVERRIDES.get("kex") or (
             "diffie-hellman-group1-sha1",
             "diffie-hellman-group14-sha1",
             "diffie-hellman-group-exchange-sha1",
             "diffie-hellman-group-exchange-sha256",
-        )
+        ))
         if hasattr(transport, "_preferred_kex"):
             current_kex = list(transport._preferred_kex)
             for kex in legacy_kex:
@@ -43,10 +47,10 @@ def enable_legacy_algorithms():
                     current_kex.append(kex)
             transport._preferred_kex = tuple(current_kex)
 
-        legacy_keys = (
+        legacy_keys = tuple(ALGORITHM_OVERRIDES.get("host_keys") or (
             "ssh-rsa",
             "ssh-dss",
-        )
+        ))
         if hasattr(transport, "_preferred_keys"):
             current_keys = list(transport._preferred_keys)
             for key in legacy_keys:
@@ -54,12 +58,12 @@ def enable_legacy_algorithms():
                     current_keys.append(key)
             transport._preferred_keys = tuple(current_keys)
 
-        legacy_ciphers = (
+        legacy_ciphers = tuple(ALGORITHM_OVERRIDES.get("ciphers") or (
             "aes128-cbc",
             "3des-cbc",
             "aes192-cbc",
             "aes256-cbc",
-        )
+        ))
         if hasattr(transport, "_preferred_ciphers"):
             current_ciphers = list(transport._preferred_ciphers)
             for c in legacy_ciphers:
@@ -270,10 +274,6 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
                 proc.wait(timeout=2)
             except Exception:
                 proc.kill()
-
-
-# 역할 기본값(cisco_backup_ssh_*)이 --kex/--host-key-algorithms/--ciphers로 넘기는 레거시 알고리즘 목록. 비어 있으면 아래 기본 목록을 쓴다.
-ALGORITHM_OVERRIDES = {}
 
 
 def get_supported_ssh_algorithms(query_type: str) -> set:
