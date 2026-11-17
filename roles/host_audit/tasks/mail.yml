@@ -4,7 +4,7 @@
 # ==============================================================================
 # 보관이 끝난 보고서를 Google Workspace SMTP relay(smtp-relay.gmail.com:587, STARTTLS 필수,
 # IP 인증 — 자격증명 없음)로 보낸다. 본문은 inline CSS 요약(이미지·SVG 없음) + 첨부 SHA-256 +
-# 보관 경로, 첨부는 ASCII 파일명의 자체 완결 .html 1개와 호스트별 Remediation Plan xlsx를 묶은 zip 1개다
+# 보관 경로, 첨부는 ASCII 파일명의 자체 완결 .html 1개와 합계·호스트별 Remediation Plan xlsx를 묶은 zip 1개다
 # (요약에 xlsx_zip이 없는 옛 실행의 재발송은 .html만).
 # 수신자·발신자는 OpenBao agents/host_audit(mail_to·mail_from)에서 읽고 Extra variables
 # (host_audit_mail_to·host_audit_mail_from)로 덮어쓴다. 주소는 개인정보라 이 파일의 모든 관련
