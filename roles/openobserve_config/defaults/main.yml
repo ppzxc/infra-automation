@@ -27,8 +27,9 @@ o2c_notify: "{{ o2c_docs['secrets/services/alert/notify'] | default({}) }}"
 o2c_config: "{{ o2c_docs['inventory/config/openobserve_config'] | default({}) }}"
 o2c_org: "{{ (o2c_docs['inventory/services/openobserve'] | default({})).org | default('default', true) }}"
 o2c_endpoint: "{{ (o2c_docs['inventory/services/openobserve'] | default({})).url | default('', true) }}"
-# 사설 CA 파일 경로(선택). 비밀이 아니고 컨트롤러 파일 경로다. OpenBao inventory/services/openobserve의 ca_file(선택)에서 읽는다.
-o2c_ca_file: "{{ (o2c_docs['inventory/services/openobserve'] | default({})).ca_file | default('', true) }}"
+# 사설 CA 파일 경로(선택). 비밀이 아니고 컨트롤러 파일 경로다. OpenBao inventory/services/openobserve의 ca_file(선택)에서 읽고,
+# 변수 o2_ca_file(Extra variables)이 있으면 그 값이 우선한다(이전 방식 호환, 컨트롤러 경로가 에이전트 호스트 경로와 다를 때).
+o2c_ca_file: "{{ o2_ca_file | default((o2c_docs['inventory/services/openobserve'] | default({})).ca_file | default('', true), true) }}"
 # 자원 알림의 호스트·마운트별 제외와 임계값(선택). 관리번호가 들어가 공개 저장소에 둘 수 없어 OpenBao
 # inventory/config/openobserve_config의 resource_exclusions·resource_thresholds에서 읽는다(Spec #504 §7). 문서에 없으면 빈 목록이다.
 #   resource_exclusions: [{host: ns0297, mount: /data(선택), metric: memory(선택)}]

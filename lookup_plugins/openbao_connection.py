@@ -19,7 +19,7 @@ from ansible.errors import AnsibleError
 from ansible.plugins.lookup import LookupBase
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbao_doc import Reader  # noqa: E402
+from openbao_doc import Reader, display  # noqa: E402
 
 DOCUMENTATION = r"""
 name: openbao_connection
@@ -194,17 +194,22 @@ def admin_accounts(read, asset, preference):
     return out
 
 
-def host_connections(read, asset, preference):
+def host_connections(read, asset, preference, requires_access=False):
     """호스트 하나의 접속 해석 묶음: Asset 문서, 관리·부트스트랩 연결, 관리 계정 목록.
 
     같은 읽기 함수(`Reader.read`는 한 객체 안에서 문서를 다시 읽지 않는다)로 한 번에 만들어, 호스트당 같은 문서를 여러 번 HTTP로
     읽지 않는다. 관리 Credential 이름은 `access.admin_credentials`의 첫째, 부트스트랩은 `access.bootstrap_credential`이다
     (둘 다 없으면 관리 연결은 Endpoint 기본 Credential, 부트스트랩 연결·관리 계정은 비어 있다).
+    `requires_access`(프로비저닝 대상)면 access 절이 없을 때 연결을 해석하기 전에 실패한다.
     """
     doc = read("inventory/assets/%s" % asset)
     access = doc.get("access") or {}
     admin = next(iter(access.get("admin_credentials") or []), "") or ""
     boot = access.get("bootstrap_credential") or ""
+    if requires_access and not (admin and boot):
+        raise ConnectionError_(
+            "[ACCESS-MISSING] '%s'의 Asset 문서(inventory/assets/%s)에 access.admin_credentials 또는 access.bootstrap_credential이 없습니다. "
+            "프로비저닝 대상은 access 절이 필수입니다(실행 변수로 대신 줄 수 없습니다)." % (asset, asset))
     return {
         "asset": doc, "admin_credential": admin, "bootstrap_credential": boot,
         "admin": resolve(read, asset, preference, admin or None),
@@ -219,4 +224,8 @@ class LookupModule(LookupBase):
         preference = kwargs.get("preference")
         if not preference:
             raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 필요합니다")
-        return [resolve(reader.read, str(t), preference_list(preference), kwargs.get("credential")) for t in terms]
+        try:
+            return [resolve(reader.read, str(t), preference_list(preference), kwargs.get("credential")) for t in terms]
+        except ConnectionError_ as exc:
+            display.error(str(exc))      # no_log 태스크에서도 실패 사유(문서 경로·키 이름, 비밀 없음)가 보인다
+            raise

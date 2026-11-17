@@ -361,6 +361,15 @@ def test_host_connections_without_an_access_clause_use_the_default_credential_an
     assert out["admin"] == resolve(reader(store), "ns0001", ["ssh"])
 
 
+def test_host_connections_stop_before_resolving_when_a_provisioning_target_has_no_access_clause(store):
+    store["inventory/assets/ns0001"].pop("access")
+    with pytest.raises(ConnectionError_, match=r"ACCESS-MISSING.*ns0001"):
+        host_connections(reader(store), "ns0001", ["ssh"], requires_access=True)
+    store["inventory/assets/ns0001"]["access"] = {"admin_credentials": ["admin01"]}          # bootstrap이 없어도 실패
+    with pytest.raises(ConnectionError_, match="ACCESS-MISSING"):
+        host_connections(reader(store), "ns0001", ["ssh"], requires_access=True)
+
+
 def test_the_connection_summary_carries_no_secret(store):
     summary = openbao_connection_summary(resolve(reader(store), "ns0004", ["https"]))
     text = repr(summary)

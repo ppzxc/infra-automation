@@ -120,3 +120,16 @@ def test_the_private_ca_file_comes_from_the_openobserve_service_document(tmp_pat
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb), "-e", json.dumps(docs)], capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_the_o2_ca_file_extra_variable_still_wins_over_the_document(tmp_path):
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False,
+             "vars_files": [str(ROLE / "defaults" / "main.yml")],
+             "tasks": [{"ansible.builtin.assert": {"that": ["o2c_ca_file == '/runner/ca.pem'"], "quiet": True}}]}]
+    pb = tmp_path / "pb.yml"
+    pb.write_text(yaml.safe_dump(play))
+    extra = {"o2_ca_file": "/runner/ca.pem",
+             "o2c_docs": {"inventory/services/openobserve": {"url": "https://o2.example.test", "ca_file": "/etc/pki/fake-o2-ca.pem"}}}
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb), "-e", json.dumps(extra)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr

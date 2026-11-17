@@ -11,7 +11,7 @@ from ansible.plugins.lookup import LookupBase
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbao_connection import ConnectionError_, admin_accounts, preference_list  # noqa: E402
-from openbao_doc import Reader  # noqa: E402
+from openbao_doc import Reader, display  # noqa: E402
 
 DOCUMENTATION = r"""
 name: openbao_admin_accounts
@@ -35,4 +35,8 @@ class LookupModule(LookupBase):
         preference = kwargs.get("preference")
         if not preference:
             raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 필요합니다")
-        return [admin_accounts(reader.read, str(t), preference_list(preference)) for t in terms]
+        try:
+            return [admin_accounts(reader.read, str(t), preference_list(preference)) for t in terms]
+        except ConnectionError_ as exc:
+            display.error(str(exc))
+            raise

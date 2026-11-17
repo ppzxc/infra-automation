@@ -419,7 +419,7 @@ def host_agents_resolve_inputs(agents, secrets, standard_logs, security_paths, m
     backup_bucket = kv.get('backup_bucket')
     if _is_blank(backup_bucket):
         backup_bucket = ''
-    elif not (isinstance(backup_bucket, str) and _BUCKET_NAME.match(backup_bucket)):
+    elif not (isinstance(backup_bucket, str) and _BUCKET_NAME.fullmatch(backup_bucket)):
         errors.append("agents.backup.bucket: S3 버킷 이름 규칙(소문자·숫자·점·하이픈 3~63자)을 지켜야 합니다 (OpenBao %s)" % kv_path)
         backup_bucket = ''
     docker_metrics = _as_bool(kv.get('otel_docker_metrics'), _label('otel_docker_metrics'), errors)

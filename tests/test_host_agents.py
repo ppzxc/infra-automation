@@ -1384,6 +1384,13 @@ def test_a_host_bucket_in_the_asset_agents_clause_overrides_the_naming_rule(tmp_
     assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
 
 
+def test_a_bucket_with_a_trailing_newline_is_not_a_valid_bucket_name():
+    bad = host_agents_resolve_inputs({"backup": {"bucket": "good-bucket\n"}}, dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p")
+    assert any("agents.backup.bucket" in e for e in bad["errors"]) and bad["backup_bucket"] == ""
+    ok = host_agents_resolve_inputs({"backup": {"bucket": "good-bucket"}}, dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p")
+    assert ok["backup_bucket"] == "good-bucket" and not any("bucket" in e for e in ok["errors"])
+
+
 def test_extra_vars_still_win_over_the_asset_bucket(tmp_path, bao, openbao):
     _host(bao, "renamed", agents={"backup": {"bucket": "backup-prod-oldname"}})
     eff = _effective(tmp_path, openbao, host="renamed", extra_vars={"rustfs_bucket": "extra-bucket"})

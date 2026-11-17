@@ -233,7 +233,7 @@
 
 | 키 | 설명 |
 |---|---|
-| `inventory/services/openobserve`의 `url`(끝 슬래시 금지)·`org`(선택, 기본 `default`) | OpenObserve 주소와 조직. 사설 CA 파일은 같은 문서의 `ca_file`(선택, 컨트롤러의 파일 경로)로 준다 |
+| `inventory/services/openobserve`의 `url`(끝 슬래시 금지)·`org`(선택, 기본 `default`) | OpenObserve 주소와 조직. 사설 CA 파일은 같은 문서의 `ca_file`(선택, 컨트롤러의 파일 경로)로 준다(변수 `o2_ca_file`을 Extra variables로 주면 그 값이 우선한다) |
 | `secrets/services/openobserve/admin`의 `username`, `password` | 설정 API(함수·파이프라인·알림)를 쓸 수 있는 OpenObserve 계정 (수집 자격과 별개) |
 | `secrets/services/openobserve/ingest`의 `username`, `password` | 알림 검증 합성 레코드를 넣는 수집 자격(컨트롤러 계열 공유) |
 | `secrets/services/alert/notify`의 `url` | 통지 webhook URL(사내 알림 플랫폼 `text/plain` 경로). 없거나 `http(s)://`가 아니면 `O2C-002`가 요청 전에 실패한다. 값은 출력하지 않는다 |

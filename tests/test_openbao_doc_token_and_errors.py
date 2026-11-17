@@ -140,6 +140,17 @@ def test_a_caller_that_changes_a_returned_document_does_not_change_later_reads(f
     assert again["access"] != "mutated" and "description" in again
 
 
+def test_connection_resolution_failures_are_shown_with_the_reason_and_no_secret(fake_openbao, shown, monkeypatch):
+    import openbao_host_connection as ohc
+    lines = []
+    monkeypatch.setattr(ohc.display, "error", lambda msg, *a, **k: lines.append(msg))
+    lookup = ohc.LookupModule()
+    lookup._templar = None
+    with pytest.raises(Exception, match="선호 순서"):
+        lookup.run(["ns0001"], variables=_vars(fake_openbao), preference=["https"])
+    assert len(lines) == 1 and "선호 순서" in lines[0] and "fake-secret" not in lines[0]
+
+
 def test_a_no_log_task_still_tells_the_operator_why_it_failed(fake_openbao, tmp_path):
     """실제 ansible-playbook: no_log 태스크의 결과는 가려지지만 실패 사유(경로·상태)는 출력에 남고 비밀은 없다."""
     fake_openbao.deny("secrets", "automation/ssh")

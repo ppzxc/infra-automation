@@ -70,7 +70,7 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 - **경유**: `via`는 `<관리번호>/<endpoint>`를 끝까지 따라가며 경유지마다 자기 Endpoint의 기본 Credential·`identity`를 쓴다. 순환·없는 참조는 실패한다. 키 로그인 경유지만 `ProxyCommand`로 만들 수 있고(`openbao_ssh_common_args`·`openbao_ssh_proxy_command` 필터) 비밀번호 경유지는 거부한다. 비밀을 뺀 요약은 `openbao_connection_summary` 필터다.
 - **관리 계정**: `lookup('openbao_admin_accounts', <관리번호>, preference=[...])`가 Asset의 `access.admin_credentials`를 common 역할의 `accounts`로 만든다. 계정 이름은 Credential의 `username`이고, 공개키는 자동화 계정이면 `secrets/automation/ssh`의 `public_key`, 그 밖에는 `inventory/operators/<계정>`의 `public_keys`·`revoked_keys`다(서버 계열 `connect` 정책이 이 문서를 읽는다).
 
-- **호스트 묶음**: `lookup('openbao_host_connection', <관리번호>, preference=[...])`는 Asset 문서, 관리·부트스트랩 연결, 관리 계정 목록(`asset`·`admin`·`bootstrap`·`admin_accounts`와 `access`의 Credential 이름)을 읽기 객체 하나로 한 번에 만든다. `resolve_connection.yml`이 호스트당 이것 한 번만 부르므로 같은 문서(Endpoint·Credential·Automation Identity 키)를 호스트당 한 번씩만 읽는다. 개별 lookup(`openbao_connection`·`openbao_admin_accounts`)은 네트워크 장비 백업이 쓴다.
+- **호스트 묶음**: `lookup('openbao_host_connection', <관리번호>, preference=[...])`는 Asset 문서, 관리·부트스트랩 연결, 관리 계정 목록(`asset`·`admin`·`bootstrap`·`admin_accounts`와 `access`의 Credential 이름)을 읽기 객체 하나로 한 번에 만든다. `requires_access=true`(프로비저닝 대상)면 `access` 절이 없을 때 연결을 해석하기 전에 `[ACCESS-MISSING]`으로 실패한다. `resolve_connection.yml`이 호스트당 이것 한 번만 부르므로 같은 문서(Endpoint·Credential·Automation Identity 키)를 호스트당 한 번씩만 읽는다. 개별 lookup(`openbao_connection`·`openbao_admin_accounts`)은 네트워크 장비 백업이 쓴다.
 
 **`playbooks/common/resolve_connection.yml`** (서버 플레이북이 첫 플레이로 import)
 
@@ -90,7 +90,7 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 - **https 인증서는 기본으로 검증한다.** 사설 CA는 `VAULT_CACERT`(`vault_cacert`)로 준다. 검증을 끄려면 `vault_validate_certs: false` 또는 `VAULT_SKIP_VERIFY=true`이고 마지막 수단이다.
 - **토큰 TTL은 30분이다.** 로그인은 프로세스 안에서만 캐시한다. Ansible은 호스트·태스크마다 프로세스를 나누므로 `@token`을 받아 두지 않는 읽기는 그 호스트·태스크마다 로그인한다. 긴 플레이(Host Audit의 드리프트 하위 실행 등)가 만료된 토큰을 들고 있지 않도록 오래 쓸 토큰은 일찍 받아 두지 않는다.
 - **만료된 토큰은 한 번 다시 로그인한다.** `_vault_token`으로 읽다가 403이면 AppRole로 새로 로그인해 같은 읽기를 되풀이한다(30분 넘게 걸리는 실행의 후반 호스트가 멈추지 않게 한다). 새 토큰은 그 읽기 호출 안에서만 쓰이므로, 만료 뒤에는 태스크마다 로그인이 한 번씩 더 나간다. 정책이 막은 403은 다시 로그인해도 같은 403이라 그대로 실패한다. `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 없으면 되풀이하지 못하고 실패한다.
-- **실패 사유는 `no_log`와 무관하게 보인다.** 읽기 지점은 실패 메시지(문서 경로와 HTTP 상태·예외 종류만, 응답 본문과 비밀은 없음)를 Ansible 표시 채널로도 낸다. 비밀을 돌려주는 태스크가 `no_log: true`여도 운영자가 403(정책)과 연결 오류(주소·TLS)를 구분할 수 있다.
+- **실패 사유는 `no_log`와 무관하게 보인다.** 읽기 지점과 접속 해석 lookup은 실패 메시지(문서 경로와 HTTP 상태·예외 종류·키 이름만, 응답 본문과 비밀은 없음)를 Ansible 표시 채널로도 낸다. 비밀을 돌려주는 태스크가 `no_log: true`여도 운영자가 403(정책)과 연결 오류(주소·TLS)를 구분할 수 있다. 고정 ansible-core 2.21.4에서는 인자 해석 중 lookup 오류가 `no_log`여도 이미 보이므로(같은 메시지가 한 번 더 나온다) 이 표시는 버전·문맥에 따라 `no_log`가 사유를 가릴 때를 위한 안전장치다.
 - **같은 읽기 호출 안에서는 문서를 한 번만 읽는다.** 한 lookup 호출(`Reader`)이 읽은 문서는 다시 HTTP로 읽지 않는다.
 - **우회(`openbao_fixture`)**: 변수 `openbao_fixture`가 정의돼 있으면 네트워크 없이 그 안에서만 답한다. 키는 `<마운트>/<문서 경로>`, 값은 문서다. 없는 키는 404와 같다. molecule·테스트용이며 운영 템플릿의 Extra variables에 넣지 않는다.
 - 운영자가 로컬에서 쓰는 `scripts/`의 도구(`openbao_docs.py`, 수집 스크립트)는 읽기 지점이 아니라 자기 접속 코드를 쓰며 운영자 토큰(`VAULT_TOKEN`)을 받을 수 있다. 이 예외는 Ansible 쪽으로 새지 않는다.

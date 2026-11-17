@@ -12,7 +12,7 @@ from ansible.plugins.lookup import LookupBase
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from openbao_connection import ConnectionError_, host_connections, preference_list  # noqa: E402
-from openbao_doc import Reader  # noqa: E402
+from openbao_doc import Reader, display  # noqa: E402
 
 DOCUMENTATION = r"""
 name: openbao_host_connection
@@ -28,6 +28,10 @@ options:
     description: Endpoint 이름의 선호 순서 목록.
     type: list
     required: true
+  requires_access:
+    description: true면 Asset 문서에 access 절이 없을 때 [ACCESS-MISSING]으로 실패한다(프로비저닝 대상).
+    type: bool
+    default: false
 """
 
 
@@ -37,4 +41,9 @@ class LookupModule(LookupBase):
         preference = kwargs.get("preference")
         if not preference:
             raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 필요합니다")
-        return [host_connections(reader.read, str(t), preference_list(preference)) for t in terms]
+        requires = bool(kwargs.get("requires_access", False))
+        try:
+            return [host_connections(reader.read, str(t), preference_list(preference), requires) for t in terms]
+        except ConnectionError_ as exc:
+            display.error(str(exc))      # no_log 태스크에서도 실패 사유(문서 경로·키 이름, 비밀 없음)가 보인다
+            raise
