@@ -1,6 +1,7 @@
 ---
 # ==============================================================================
 # Cisco IOS Switch Configuration Backup Tasks
+# 접속 정보는 OpenBao Endpoint(선호 순서 [ssh, telnet])와 Credential에서 읽는다(Spec #511 / Ticket-18).
 # ==============================================================================
 
 - name: "[CISCO-001] Ensure local backup destination directory exists"
@@ -12,21 +13,57 @@
   become: false
   run_once: true
 
-# 1. Direct SSH 수집 (connection_type 미지정 또는 ssh)
+# 결과에 비밀번호가 들어 있어 CISCO-008은 no_log다. no_log는 실패 사유도 가리므로 같은 해석을 비밀 없는 요약으로 먼저
+# 돌려 실패 사유(선호 순서 불일치, 없는 문서 등)가 운영자에게 보이게 한다.
+- name: "[CISCO-010] Check the connection resolves (secret-free summary)"
+  ansible.builtin.set_fact:
+    cisco_backup_summary: "{{ lookup('openbao_connection', inventory_hostname, preference=cisco_backup_endpoint_preference) | openbao_connection_summary }}"
+  check_mode: false
+  delegate_to: localhost
+  become: false
+
+- name: "[CISCO-008] Resolve the Endpoint, login Credential, enable and bastion hop from OpenBao"
+  ansible.builtin.set_fact:
+    cisco_backup_connection: "{{ lookup('openbao_connection', inventory_hostname, preference=cisco_backup_endpoint_preference) }}"
+  check_mode: false
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+# 수집기는 비밀번호 로그인만 한다. 경유지는 비밀번호 로그인 한 단(Bastion 점프 세션)만 지원한다.
+- name: "[CISCO-009] Assert the resolved connection is supported by the collector"
+  ansible.builtin.assert:
+    that:
+      - cisco_backup_connection.protocol in ['ssh', 'telnet']
+      - cisco_backup_connection.login.mode == 'password'
+      - cisco_backup_connection.login.username | default('') | length > 0
+      - cisco_backup_openbao_required['secrets/assets/+/credentials/+'] | difference(_cisco_login.keys() | list) | length == 0
+      - cisco_backup_connection.via | length <= 1
+      - cisco_backup_connection.via | length == 0 or cisco_backup_connection.protocol == 'ssh'
+      - cisco_backup_connection.via | length == 0 or (_cisco_hop.login.mode == 'password' and _cisco_hop.login.username | default('') | length > 0)
+    fail_msg: >-
+      [CISCO-VIA] {{ inventory_hostname }}: 수집기가 지원하지 않는 접속이다. 로그인은 계정이 있는 비밀번호 Credential이어야 하고,
+      경유(via)는 ssh Endpoint가 비밀번호 로그인 경유지 한 단만 거칠 수 있다(값은 로그에 남기지 않는다).
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+# 1. Direct SSH 수집 (Endpoint ssh, 경유 없음)
 - name: "[CISCO-002] Collect running configuration from Cisco IOS switch"
   ansible.builtin.command: >-
-    python3 {{ role_path }}/files/cisco_cli_collector.py
+    python3 {{ cisco_backup_collector }}
     --mode direct_ssh
-    --host {{ ansible_host }}
-    --port {{ ansible_port | default(22) }}
-    --user {{ ansible_user }}
+    --host {{ cisco_backup_connection.address }}
+    --port {{ cisco_backup_connection.port }}
+    --user {{ _cisco_login.username }}
     --timeout {{ cisco_backup_timeout | default(30) }}
+    {{ _cisco_algorithm_args }}
   args:
     stdin: >-
       {{
         {
-          "password": ansible_password | default(''),
-          "enable_password": ansible_become_password | default(ansible_password | default(''))
+          "password": _cisco_login.password,
+          "enable_password": _cisco_enable_password
         } | to_json
       }}
   register: cisco_config_direct_output
@@ -34,23 +71,25 @@
   become: false
   changed_when: false
   no_log: "{{ cisco_backup_no_log }}"
-  when: connection_type | default('ssh') == 'ssh'
+  when:
+    - cisco_backup_connection.protocol == 'ssh'
+    - cisco_backup_connection.via | length == 0
 
-# 2. Telnet 직접 수집 (cisco_direct_telnet 장비: ns0341, ns0065)
+# 2. Telnet 수집 (Endpoint telnet, 경유 없음)
 - name: "[CISCO-006] Collect running configuration via Telnet"
   ansible.builtin.command: >-
-    python3 {{ role_path }}/files/cisco_cli_collector.py
+    python3 {{ cisco_backup_collector }}
     --mode telnet
-    --host {{ ansible_host }}
-    --port {{ ansible_port | default(23) }}
-    --user {{ ansible_user }}
+    --host {{ cisco_backup_connection.address }}
+    --port {{ cisco_backup_connection.port }}
+    --user {{ _cisco_login.username }}
     --timeout {{ cisco_backup_timeout | default(30) }}
   args:
     stdin: >-
       {{
         {
-          "password": ansible_password | default(''),
-          "enable_password": ansible_become_password | default(ansible_password | default(''))
+          "password": _cisco_login.password,
+          "enable_password": _cisco_enable_password
         } | to_json
       }}
   register: cisco_config_telnet_output
@@ -58,27 +97,30 @@
   become: false
   changed_when: false
   no_log: "{{ cisco_backup_no_log }}"
-  when: connection_type | default('ssh') == 'telnet'
+  when:
+    - cisco_backup_connection.protocol == 'telnet'
+    - cisco_backup_connection.via | length == 0
 
-# 3. Bastion 경유 Jump SSH 수집 (cisco_jump_switches 장비: ns0279, ns0281, ns0282)
+# 3. Bastion 경유 Jump SSH 수집 (Endpoint via: 비밀번호 로그인 경유지 한 단)
 - name: "[CISCO-007] Collect running configuration via Bastion jump session"
   ansible.builtin.command: >-
-    python3 {{ role_path }}/files/cisco_cli_collector.py
+    python3 {{ cisco_backup_collector }}
     --mode jump_ssh
-    --bastion-host {{ bastion_resolved_host | default(hostvars[bastion_host].ansible_host if (bastion_host in hostvars and hostvars[bastion_host].ansible_host is defined) else bastion_host) }}
-    --bastion-port {{ bastion_resolved_port | default(hostvars[bastion_host].ansible_port if (bastion_host in hostvars and hostvars[bastion_host].ansible_port is defined) else 22) }}
-    --bastion-user {{ bastion_resolved_user | default(hostvars[bastion_host].ansible_user if (bastion_host in hostvars and hostvars[bastion_host].ansible_user is defined) else ansible_user) }}
-    --host {{ ansible_host }}
-    --port {{ ansible_port | default(22) }}
-    --user {{ ansible_user }}
+    --bastion-host {{ _cisco_hop.address }}
+    --bastion-port {{ _cisco_hop.port }}
+    --bastion-user {{ _cisco_hop.login.username }}
+    --host {{ cisco_backup_connection.address }}
+    --port {{ cisco_backup_connection.port }}
+    --user {{ _cisco_login.username }}
     --timeout {{ cisco_backup_timeout | default(30) }}
+    {{ _cisco_algorithm_args }}
   args:
     stdin: >-
       {{
         {
-          "password": ansible_password | default(''),
-          "enable_password": ansible_become_password | default(ansible_password | default('')),
-          "bastion_password": (bastion_resolved_password if (bastion_resolved_password is defined and bastion_resolved_password | length > 0) else (hostvars[bastion_host].ansible_password if (bastion_host in hostvars and hostvars[bastion_host].ansible_password is defined) else (lookup('ansible.builtin.env', 'BASTION_PASSWORD') | default(ansible_password | default(''), true))))
+          "password": _cisco_login.password,
+          "enable_password": _cisco_enable_password,
+          "bastion_password": _cisco_hop.login.password
         } | to_json
       }}
   register: cisco_config_jump_output
@@ -86,7 +128,7 @@
   become: false
   changed_when: false
   no_log: "{{ cisco_backup_no_log }}"
-  when: connection_type | default('ssh') == 'jump_ssh'
+  when: cisco_backup_connection.via | length > 0
 
 - name: Set unified collected configuration fact
   ansible.builtin.set_fact:
@@ -131,4 +173,3 @@
   loop: "{{ expired_backups.files | default([]) }}"
   delegate_to: localhost
   become: false
-

@@ -18,3 +18,19 @@ cisco_backup_timeout: 60
 # Hide collector output because it contains the device running configuration.
 # Override per host only for controlled diagnostics.
 cisco_backup_no_log: true
+
+# Endpoint 선호 순서(등록된 첫 번째만 쓰고, 실패해도 다른 Endpoint로 넘어가지 않는다). 주소·포트·계정·승격은 OpenBao
+# Endpoint와 Credential이 정한다(become: enable). 경유(via)는 비밀번호 로그인 경유지 한 단만 지원한다.
+cisco_backup_endpoint_preference: [ssh, telnet]
+
+# 수집기 경로(테스트에서 대역으로 바꾼다)
+cisco_backup_collector: "{{ role_path }}/files/cisco_cli_collector.py"
+
+# 구형 Cisco IOS 장비 SSH 레거시 알고리즘 호환 목록(옛 group_vars cisco_switches의 접속 조정값). 수집기가 OpenSSH에서 지원하는 것만 켠다.
+cisco_backup_ssh_kex_algorithms:
+  - diffie-hellman-group1-sha1
+  - diffie-hellman-group14-sha1
+  - diffie-hellman-group-exchange-sha1
+  - diffie-hellman-group-exchange-sha256
+cisco_backup_ssh_host_key_algorithms: [ssh-rsa, ssh-dss]
+cisco_backup_ssh_ciphers: [aes128-cbc, 3des-cbc, aes192-cbc, aes256-cbc]

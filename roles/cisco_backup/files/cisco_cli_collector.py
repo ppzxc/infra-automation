@@ -272,6 +272,10 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
                 proc.kill()
 
 
+# 역할 기본값(cisco_backup_ssh_*)이 --kex/--host-key-algorithms/--ciphers로 넘기는 레거시 알고리즘 목록. 비어 있으면 아래 기본 목록을 쓴다.
+ALGORITHM_OVERRIDES = {}
+
+
 def get_supported_ssh_algorithms(query_type: str) -> set:
     """Query OpenSSH for supported algorithms (e.g. 'key', 'kex', 'cipher')."""
     try:
@@ -283,14 +287,14 @@ def get_supported_ssh_algorithms(query_type: str) -> set:
 
 def get_openssh_direct_args(host: str, port: int, user: str) -> list:
     """Build OpenSSH CLI invocation with legacy ciphers, key exchanges, and host keys enabled (filtered by system support)."""
-    desired_kex = [
+    desired_kex = ALGORITHM_OVERRIDES.get("kex") or [
         "diffie-hellman-group1-sha1",
         "diffie-hellman-group14-sha1",
         "diffie-hellman-group-exchange-sha1",
         "diffie-hellman-group-exchange-sha256",
     ]
-    desired_keys = ["ssh-rsa", "ssh-dss"]
-    desired_ciphers = ["aes128-cbc", "3des-cbc", "aes192-cbc", "aes256-cbc"]
+    desired_keys = ALGORITHM_OVERRIDES.get("host_keys") or ["ssh-rsa", "ssh-dss"]
+    desired_ciphers = ALGORITHM_OVERRIDES.get("ciphers") or ["aes128-cbc", "3des-cbc", "aes192-cbc", "aes256-cbc"]
 
     sup_kex = get_supported_ssh_algorithms("kex")
     sup_keys = get_supported_ssh_algorithms("key")
@@ -627,7 +631,13 @@ def main():
     parser.add_argument("--bastion-user")
     parser.add_argument("--bastion-password", help="Password for bastion (prefer stdin JSON)")
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--kex", help="Comma separated legacy KexAlgorithms to enable (OpenSSH path)")
+    parser.add_argument("--host-key-algorithms", help="Comma separated legacy HostKeyAlgorithms to enable")
+    parser.add_argument("--ciphers", help="Comma separated legacy Ciphers to enable")
     args = parser.parse_args()
+    for key, value in (("kex", args.kex), ("host_keys", args.host_key_algorithms), ("ciphers", args.ciphers)):
+        if value:
+            ALGORITHM_OVERRIDES[key] = [v for v in value.split(",") if v]
 
     stdin_creds = read_passwords_from_stdin()
     password = stdin_creds.get("password") or args.password
