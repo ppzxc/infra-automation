@@ -230,7 +230,8 @@ EXPECTED_READS = {
     "backup_maintenance": COMMON | AGENTS | {"secrets/services/rustfs/maintenance"} | OO_ING,
     "openobserve_config": COMMON | ASSETS | {"secrets/services/openobserve/admin", "secrets/services/alert/notify"}
     | OO_ING | {"inventory/config/openobserve_config"},
-    "host_audit": PROVISION | HOST_AGENTS | {"secrets/services/rustfs/audit_reports", "inventory/config/host_audit"},
+    "host_audit": PROVISION | HOST_AGENTS | {"secrets/services/rustfs/audit_reports", "secrets/services/alert/notify",
+                                                  "inventory/config/host_audit"},
     "network_backup": COMMON | ASSETS | CRED | {"secrets/services/alert/notify"},
     "github_webhook_watch": COMMON | {"secrets/services/github/org_hooks_read"} | OO_ING
     | {"inventory/config/github_webhook_watch"},

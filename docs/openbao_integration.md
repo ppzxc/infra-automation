@@ -115,6 +115,14 @@ Asset 하나에 Endpoint와 Credential로 둔다(옛 `hosts/<ns>`의 `ansible_*`
 * Cisco: Endpoint `ssh`·`telnet`(선호 순서 `[ssh, telnet]`), 로그인 Credential(`password`), 승격 `become: enable`. 비밀번호 로그인 경유지는 `via`로 한 단까지 역할이 직접 처리한다. 자세한 규칙은 [cisco_backup.md](cisco_backup.md).
 * FortiGate: Endpoint `https`와 Credential `api`(`api_token`), 알림은 `secrets/services/alert/notify`(text/plain `url`). 자세한 규칙은 [fortigate_backup.md](fortigate_backup.md).
 
+### (4-1) Host Audit 입력 (Spec #511 / Ticket-17)
+Monthly·On-demand·Resend가 새 구조만으로 돈다. 자세한 규칙은 [host_audit.md](host_audit.md) §11.4·§13.3이고 선언은 역할 `vars/main.yml`의 `host_audit_openbao_required`다.
+* Asset Inventory의 선언 값(용도·부서·책임자·관리자·자산중요도)은 `resolve_connection`이 발행한 `_asset_doc`의 `description`과 `isms` 절이다.
+* 보고서 저장: `secrets/services/rustfs/audit_reports`(`access_key`·`secret_key`)와 `inventory/services/rustfs`(`url`, 선택 `region`). 버킷 이름은 역할 기본값이다.
+* 메일: `inventory/config/host_audit`(`mail_recipients`·`mail_sender`·`mail_sender_display_name`). 덮어쓰는 Extra variables는 없다.
+* KISA 악화 알림: `secrets/services/alert/notify`의 `url`. 환경(`declared.environment`)은 역할 기본값 `host_audit_environment`다.
+* 드리프트 하위 실행은 새 구조의 Host Provisioning(`site.yml`)과 Host Agents Config를 `--check`로 렌더링하고, 하위 프로세스에는 주소와 인증(환경 변수)만 넘긴다.
+
 ### (5) 전역 인프라 서비스 시크릿
 * **경로**: `secret/data/global/services`
 * **필드 (Key-Value)**:

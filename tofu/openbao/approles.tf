@@ -34,7 +34,7 @@ locals {
   host_audit_policies = distinct(concat(
     local.family_policies.provision,
     local.family_policies.host_agents,
-    ["rustfs-audit-reports", "config-host-audit"]
+    ["rustfs-audit-reports", "alert-notify", "config-host-audit"]
   ))
 
   role_policies = merge(local.family_policies, { host_audit = local.host_audit_policies })

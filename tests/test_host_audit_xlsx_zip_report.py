@@ -174,8 +174,18 @@ def _attachments(raw):
     return {part.get_filename(): part.get_payload(decode=True) for part in msg.iter_attachments()}, msg
 
 
-def _mail_vars(smtp):
-    return {"host_audit_mail_to": ["a@example.test"], "host_audit_mail_from": "b@example.test",
+def _openbao_fixture(endpoint=None):
+    """The OpenBao documents the role reads, answered by the shared read point's `openbao_fixture` bypass (no network).
+    Recipients and sender live in `inventory/config/host_audit`; the bucket key and address are the RustFS Service documents."""
+    docs = {"inventory/config/host_audit": {"mail_recipients": ["a@example.test"], "mail_sender": "b@example.test"}}
+    if endpoint:
+        docs["inventory/services/rustfs"] = {"url": endpoint}
+        docs["secrets/services/rustfs/audit_reports"] = {"access_key": "k", "secret_key": "s"}
+    return docs
+
+
+def _mail_vars(smtp, endpoint=None):
+    return {"openbao_fixture": _openbao_fixture(endpoint),
             "host_audit_mail_host": "127.0.0.1", "host_audit_mail_port": smtp.server_address[1],
             "host_audit_mail_secure": "never"}
 
@@ -401,10 +411,8 @@ def _resend(tmp_path, smtp, bucket, summary_zip=ZIP, served_zip=ZIP, summary_doc
         bucket[BUCKET + "/" + PREFIX + "xlsx/" + ZIP_NAME] = served_zip
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
             "tasks": [{"ansible.builtin.include_role": {"name": "host_audit", "tasks_from": "resend"}}]}
-    extra = dict(_mail_vars(smtp), host_audit_resend_run_id=RUN_ID, host_audit_output_root=str(tmp_path / "out"),
-                 host_audit_storage={"endpoint": bucket["endpoint"], "bucket": BUCKET, "access_key": "k",
-                                     "secret_key": "s", "region": "us-east-1"},
-                 host_audit_storage_validate_certs=False)
+    extra = dict(_mail_vars(smtp, bucket["endpoint"]), host_audit_resend_run_id=RUN_ID,
+                 host_audit_output_root=str(tmp_path / "out"), host_audit_storage_validate_certs=False)
     return _ansible(tmp_path, play, extra)
 
 
