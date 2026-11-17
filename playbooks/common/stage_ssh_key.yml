@@ -18,6 +18,7 @@
 - name: Reset the staged key state
   ansible.builtin.set_fact:
     _sk_tmp: {}
+    "{{ _sk_record | default('_sk_unused') }}": {}      # 같은 호스트를 다시 해석할 때 앞 실행의 경로가 남지 않게 비운다
 
 - name: Create temporary SSH private key file
   ansible.builtin.tempfile:

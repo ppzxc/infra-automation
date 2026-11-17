@@ -248,6 +248,8 @@ def test_key_login_hops_and_multi_hop_chains_are_refused_before_any_collection(r
     creds = {**SWITCH_CREDS, ("ns0001", "k"): {"type": "ssh_key", "username": "jump", "private_key": "fake-key"}}
     res = run_role(_store(eps, creds))
     assert res.returncode != 0 and res.records == [] and "CISCO-VIA" in res.out
+    for secret in ("fake-pw", "fake-key"):      # no_log가 없는 검사 태스크의 실패 출력에도 비밀은 없다
+        assert secret not in res.out
     eps = {"ns0003": {"ssh": {**SSH_EP, "via": "ns0001/ssh"}},
            "ns0001": {"ssh": {**BASTION_EP, "via": "ns0002/ssh"}}, "ns0002": {"ssh": BASTION_EP}}
     creds = {**SWITCH_CREDS, **BASTION_CRED, ("ns0002", "bastion"): BASTION_CRED[("ns0001", "bastion")]}

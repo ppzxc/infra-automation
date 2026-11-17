@@ -167,10 +167,21 @@ def test_quiet_lookups_show_nothing_and_do_not_leak_into_the_next_lookup(fake_op
     fake_openbao.deny("inventory", "assets/ns0001")
     with pytest.raises(OpenBaoError):
         lookup.run(["inventory/assets/ns0001"], variables=_vars(fake_openbao), quiet=True, required=False)
-    assert shown == []
+    assert shown == []                       # ERROR 수준으로는 내지 않는다
     with pytest.raises(OpenBaoError):
         lookup.run(["inventory/assets/ns0001"], variables=_vars(fake_openbao))
     assert len(shown) == 1
+
+
+def test_quiet_failures_are_still_available_at_verbose_level(fake_openbao, monkeypatch):
+    lines = []
+    monkeypatch.setattr(openbao_doc.display, "vv", lambda msg, *a, **k: lines.append(msg))
+    fake_openbao.deny("inventory", "assets/ns0001")
+    lookup = openbao_doc.LookupModule()
+    lookup._templar = None
+    with pytest.raises(OpenBaoError):
+        lookup.run(["inventory/assets/ns0001"], variables=_vars(fake_openbao), quiet=True)
+    assert len(lines) == 1 and "inventory/assets/ns0001" in lines[0] and "403" in lines[0]
 
 
 def test_every_tolerant_openbao_doc_call_in_the_roles_is_quiet():

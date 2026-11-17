@@ -675,6 +675,7 @@ def test_the_required_declaration_is_what_the_assert_uses():
 def test_a_via_endpoint_is_refused_because_the_api_is_called_from_the_controller(ansible_env, device, tmp_path):
     res = _run(ansible_env, device, tmp_path / "bk", targets=("ns0380",), bao=_bao(device, ("ns0380", "ns0399"), via="ns0399/https"))
     assert res.returncode != 0 and "FORTIGATE-VIA" in res.stdout + res.stderr
+    assert SECRET_TOKEN not in res.stdout + res.stderr      # no_log가 없는 검사 태스크의 실패 출력에도 토큰은 없다
     assert device.requests == []
 
 
