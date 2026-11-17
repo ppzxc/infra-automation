@@ -149,9 +149,30 @@
     },
     "funa": {
       "type": "object",
-      "description": "FUNA 노드별 설정. 키는 snake_case, 렌더링 때 env 이름으로 바꾼다.",
-      "patternProperties": {
-        "^[a-z][a-z0-9_]*(?!\\n)$": {
+      "description": "FUNA 노드별 설정(비밀 아님). 키는 snake_case, 렌더링 때 funa_env 대응표로 env 이름이 된다.",
+      "properties": {
+        "node_external_hostname": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "node_external_wildcard_hostname": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "notification_header": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "node_name": {
           "type": [
             "string",
             "integer",
@@ -159,6 +180,12 @@
           ]
         }
       },
+      "required": [
+        "node_external_hostname",
+        "node_external_wildcard_hostname",
+        "notification_header",
+        "node_name"
+      ],
       "additionalProperties": false
     },
     "domain": {

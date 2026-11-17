@@ -1,0 +1,15 @@
+---
+# 이 역할이 읽는 OpenBao 문서와 필수 키(`index.yml` 패턴: [필수 키]). 입력 검증 assert(CISCO-009), 스키마 대조 테스트,
+# 요청 기록 단언이 같은 선언을 쓴다(docs/openbao_integration.md). 경유지·승격 Credential도 같은 패턴이다.
+cisco_backup_openbao_required:
+  "inventory/assets/+/endpoints": []
+  "secrets/assets/+/credentials/+": [password]
+
+# 내부 파생값(CISCO-008이 해석한 cisco_backup_connection에서 온다). 값은 로그에 남기지 않는다(관련 태스크는 no_log).
+_cisco_login: "{{ cisco_backup_connection.login }}"
+_cisco_hop: "{{ (cisco_backup_connection.via | first) if (cisco_backup_connection.via | length > 0) else {} }}"
+_cisco_enable_password: "{{ cisco_backup_connection.become.password | default(_cisco_login.password, true) }}"
+_cisco_algorithm_args: >-
+  --kex {{ cisco_backup_ssh_kex_algorithms | join(',') }}
+  --host-key-algorithms {{ cisco_backup_ssh_host_key_algorithms | join(',') }}
+  --ciphers {{ cisco_backup_ssh_ciphers | join(',') }}

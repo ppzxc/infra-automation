@@ -1,7 +1,7 @@
 ---
 # ==============================================================================
 # GitHub 조직 웹훅 전달 점검 (Spec #399 / Ticket-5) — 컨트롤러 전용
-# 순서: 입력 검증 → (OpenBao 값 조회) → 점검 모듈(웹훅 비교 + 실패 전달 재전송) → 하트비트 기록 → 오류면 실행 실패.
+# 순서: 입력 검증 → (OpenBao 문서 조회) → 점검 모듈(웹훅 비교 + 실패 전달 재전송) → 하트비트 기록 → 오류면 실행 실패.
 # API 실패·자격 없음도 먼저 하트비트에 오류 코드를 남기고 마지막에 실패 처리한다.
 # 자격·URL을 다루는 태스크는 모두 no_log다. check 모드: 재전송과 하트비트 기록 없이 비교·계획만 한다.
 # ==============================================================================
@@ -16,56 +16,33 @@
       [GWW-INTERVAL] 점검 주기(gww_check_interval_hours)는 재전송 가능 기간(gww_redelivery_window_hours)보다 짧아야 한다.
       기간을 넘기면 실패한 전달을 재전송하지 못하고 잃는다.
 
-- name: "[GWW-002] Log in to OpenBao with AppRole when no Vault token is given"
-  ansible.builtin.uri:
-    url: "{{ gww_vault_addr }}/v1/auth/approle/login"
-    method: POST
-    headers: "{{ {'X-Vault-Namespace': gww_openbao_namespace} if (gww_openbao_namespace | length > 0) else {} }}"
-    body_format: json
-    body:
-      role_id: "{{ gww_vault_role_id }}"
-      secret_id: "{{ gww_vault_secret_id }}"
-    status_code: [-1, 200, 400, 401, 403, 404, 500]
-    timeout: 10
-    validate_certs: "{{ gww_vault_validate_certs }}"
-  register: gww_approle_login
-  changed_when: false
-  check_mode: false
-  delegate_to: localhost
-  no_log: true
-  when:
-    - gww_vault_token | length == 0
-    - gww_vault_role_id | length > 0
-    - gww_vault_secret_id | length > 0
+# no_log가 읽기 오류의 원인까지 가리므로, 실패하면 rescue가 읽으려던 문서 경로(비밀 아님)와 확인 항목을 대신 알린다.
+- name: Read the webhook check inputs from OpenBao
+  block:
+    - name: "[GWW-003] Read the webhook check inputs from the OpenBao documents (shared reader, no fallback)"
+      ansible.builtin.set_fact:
+        gww_docs:
+          "inventory/config/github_webhook_watch": "{{ lookup('openbao_doc', 'inventory/config/github_webhook_watch') }}"
+          "inventory/services/openobserve": "{{ lookup('openbao_doc', 'inventory/services/openobserve') }}"
+          "secrets/services/github/org_hooks_read": "{{ lookup('openbao_doc', 'secrets/services/github/org_hooks_read') }}"
+          "secrets/services/openobserve/ingest": "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest') }}"
+        cacheable: false
+      no_log: true
+  rescue:
+    - name: Report which documents could not be read (paths only)
+      ansible.builtin.fail:
+        msg: >-
+          [GWW-OPENBAO] OpenBao 문서를 읽지 못했다(문서 없음, 권한 403, 연결 불가, 읽기 지점 설정 오류 등. 원인은 no_log로 가려진다). 읽는 문서:
+          {{ github_webhook_watch_openbao_required.keys() | list | join(', ') }}. 문서 존재, 이 AppRole의 읽기 권한, OpenBao 접속 주소 설정을 확인한다.
 
-- name: "[GWW-003] Fetch the webhook check inputs from OpenBao KV when OpenBao access is given"
+- name: "[GWW-005] Assert the required document keys and heartbeat destination inputs exist before calling GitHub"
   vars:
-    _gww_vault_token: "{{ gww_vault_token if (gww_vault_token | length > 0) else (gww_approle_login.json.auth.client_token | default('')) }}"
-  ansible.builtin.uri:
-    url: "{{ gww_vault_addr }}/v1/{{ gww_openbao_mount }}/data/{{ gww_openbao_path }}"
-    method: GET
-    headers: "{{ {'X-Vault-Token': _gww_vault_token} | combine({'X-Vault-Namespace': gww_openbao_namespace} if (gww_openbao_namespace | length > 0) else {}) }}"
-    status_code: [-1, 200, 403, 404]
-    timeout: 10
-    validate_certs: "{{ gww_vault_validate_certs }}"
-  register: gww_kv_response
-  changed_when: false
-  check_mode: false
-  delegate_to: localhost
-  no_log: true
-  when:
-    - (gww_vault_token | length > 0) or ((gww_approle_login.json.auth.client_token | default('')) | length > 0)
-
-- name: "[GWW-004] Keep the OpenBao KV values as a fact that never reaches the fact cache"
-  ansible.builtin.set_fact:
-    gww_kv: "{{ gww_kv_response.json.data.data | default({}) }}"
-    cacheable: false
-  no_log: true
-  when: gww_kv_response.json is defined
-
-- name: "[GWW-005] Assert the heartbeat destination inputs exist before calling GitHub"
+    # 앞의 `=`는 비어 있을 때 템플릿이 None으로 바뀌지 않게 하는 표지다.
+    _gww_missing: >-
+      ={% for doc, keys in github_webhook_watch_openbao_required.items() %}{% for k in keys | reject('in', gww_docs[doc]) %}{{ doc }}:{{ k }} {% endfor %}{% endfor %}
   ansible.builtin.assert:
     that:
+      - _gww_missing | trim == '='
       - gww_o2_endpoint is match('^https?://[^/]+(/.*[^/])?$')
       - gww_o2_user | length > 0
       - gww_o2_password | length > 0
@@ -73,9 +50,9 @@
       - gww_github_org | length > 0
       - gww_hook_url | length > 0
     fail_msg: >-
-      [GWW-INPUT] 점검 입력이 비었거나 형식이 틀리다: 하트비트를 남길 OpenObserve 연결 값(endpoint, 수집 계정)
-      또는 GitHub 조직 이름(github_org)·수신 URL(hook_url). 값은 로그에 남기지 않는다.
-      OpenBao agents/github-webhook-watch 또는 -e gww_*로 주입한다. 하트비트를 남길 수 없거나 훅을 찾을 기준이 없으면 점검하지 않는다.
+      [GWW-INPUT] 점검 입력이 비었거나 형식이 틀리다{{ (' (빠진 키: ' ~ (_gww_missing | trim)[1:] ~ ')') if (_gww_missing | trim != '=') else '' }}:
+      하트비트를 남길 OpenObserve 연결 값(endpoint, 수집 계정) 또는 GitHub 조직 이름(github_org)·수신 URL(hook_url). 값은 로그에 남기지 않는다.
+      OpenBao의 해당 문서(vars/main.yml의 github_webhook_watch_openbao_required)를 채운다. 하트비트를 남길 수 없거나 훅을 찾을 기준이 없으면 점검하지 않는다.
 
 - name: "[GWW-006] Compare the organization webhook and redeliver recently failed deliveries"
   gww_check:
@@ -149,4 +126,4 @@
       - gww_heartbeat.error | length == 0
     fail_msg: >-
       [GWW-API] 웹훅 점검이 실패했다(오류 코드 {{ gww_heartbeat.error }}). 하트비트에 오류를 남겼다.
-      자격(OpenBao agents/github-webhook-watch의 github_token)의 만료·권한(조직 Webhooks)·조직 이름과 API 가용성을 확인한다.
+      자격(OpenBao `secrets/services/github/org_hooks_read`의 token)의 만료·권한(조직 Webhooks)·조직 이름과 API 가용성을 확인한다.
