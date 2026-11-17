@@ -298,3 +298,41 @@ def test_expected_objects_are_read_from_the_real_opentofu_code():
     assert expected["mounts"] == {"inventory", "secrets"}
     assert expected["auth"] == {"userpass", "approle"}
     assert {"applier", "periodic-check", "operator", "agent-session"} <= expected["policies"]
+
+
+def test_secret_id_zero_expiry_time_means_no_expiry(env):
+    fake, rec = env
+    fake.raw("POST", "auth/approle/role/provision/secret-id-accessor/lookup",
+             {"data": {"expiration_time": "0001-01-01T00:00:00Z"}})
+    assert run(fake).returncode == 0
+
+
+def test_wrong_tofu_dir_is_usage_error_not_false_alert(env):
+    fake, rec = env
+    environ = {"PATH": "/usr/bin:/bin", "VAULT_ADDR": fake.url, "VAULT_TOKEN": OPENBAO_TOKEN, "VAULT_NAMESPACE": "infra"}
+    r = subprocess.run([sys.executable, str(CLI), "check", "--tofu-dir", str(ROOT / "nope")], capture_output=True,
+                       text=True, env=environ)
+    assert r.returncode == 2 and rec.alerts == []
+
+
+def test_unreadable_document_does_not_cascade_into_reference_failures(env):
+    fake, rec = env
+    fake.deny("secrets", "assets/ns0001/credentials/root")
+    assert run(fake).returncode == 1
+    body = alert_text(rec)
+    assert "read_failed" in body and "missing" not in body
+
+
+def test_orphan_with_unreadable_update_time_is_labelled_so(env):
+    fake, rec = env
+    rec.hosts = HOSTS[:3]
+    fake.set("inventory", "assets/ns0004", fake_doc(fake, "assets/ns0004"), updated_time="garbage")
+    assert run(fake).returncode == 1
+    assert "inventory/assets/ns0004\t#\torphan_metadata_unreadable" in alert_text(rec)
+
+
+def test_unexpected_semaphore_response_shape_is_unreachable(env):
+    fake, rec = env
+    rec.hosts = None  # 가짜가 본문을 만들다 실패해 연결이 끊긴다
+    r = run(fake)
+    assert r.returncode == 1 and "semaphore_unreachable" in alert_text(rec)

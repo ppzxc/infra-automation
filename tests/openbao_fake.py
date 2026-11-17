@@ -66,6 +66,10 @@ class FakeOpenBao:
                                               self.headers.get("X-Vault-Namespace")))
                 key = ("POST", self.path.split("?")[0][len("/v1/"):].strip("/"))
                 if key in outer._raw:
+                    if key[1] != "auth/approle/login" and (
+                            (outer.namespace is not None and self.headers.get("X-Vault-Namespace") != outer.namespace) or
+                            (outer.token is not None and self.headers.get("X-Vault-Token") != outer.token)):
+                        return self._reply(403, {"errors": ["permission denied"]})
                     return self._reply(*outer._raw[key])
                 if outer.approle and self.path == "/v1/auth/approle/login":
                     return self._reply(200, {"auth": {"client_token": outer.token or APPROLE_TOKEN}})

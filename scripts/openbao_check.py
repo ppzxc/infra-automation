@@ -72,7 +72,10 @@ class Client:
             raise BaoError(exc.code) from None
         except (urllib.error.URLError, OSError):
             raise BaoError(0) from None
-        return json.loads(raw) if raw else {}
+        try:
+            return json.loads(raw) if raw else {}
+        except ValueError:  # 프록시의 HTML 200 응답 등. 본문은 버린다
+            raise BaoError(0) from None
 
     def login_approle(self, role_id, secret_id):
         out = self.request("POST", "auth/approle/login", {"role_id": role_id, "secret_id": secret_id})
@@ -122,6 +125,8 @@ def _parse_time(text):
         return None
     m = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)", text)
     if not m:
+        return None
+    if m.group(1).startswith("0001-"):  # secret_id_ttl=0(만료 없음)일 때 OpenBao가 주는 영(0) 시각
         return None
     frac = (m.group(2) or "0")[:6].ljust(6, "0")
     zone = "+00:00" if m.group(3) == "Z" else m.group(3)
@@ -181,10 +186,13 @@ def fetch_semaphore_hosts(base_url, token):
             raise BaoError(0) from None
 
     hosts = set()
-    for project in get("/api/projects"):
-        for inv in get("/api/project/%s/inventory" % project["id"]):
-            if str(inv.get("type", "")).startswith("static") or inv.get("type") == "yaml":
-                hosts |= parse_inventory_hosts(inv.get("inventory") or "", inv["type"])
+    try:
+        for project in get("/api/projects"):
+            for inv in get("/api/project/%s/inventory" % project["id"]):
+                if str(inv.get("type", "")).startswith("static") or inv.get("type") == "yaml":
+                    hosts |= parse_inventory_hosts(inv.get("inventory") or "", inv["type"])
+    except (KeyError, TypeError, AttributeError):  # 예상 밖 응답 모양
+        raise BaoError(0) from None
     hosts.discard("localhost")
     return hosts
 
@@ -198,7 +206,9 @@ def compare_inventory(asset_docs, semaphore_hosts, updated_times, now):
     for name in sorted(set(assets) - semaphore_hosts):
         warnings.append(Violation(assets[name], "#", "orphan_asset"))
         updated = _parse_time(updated_times.get(assets[name]))
-        if updated is None or now - updated > ORPHAN_LIMIT:
+        if updated is None:  # 시각을 못 읽은 것은 30일 넘음과 다르다. 이름을 달리해 알린다
+            failures.append(Violation(assets[name], "#", "orphan_metadata_unreadable"))
+        elif now - updated > ORPHAN_LIMIT:
             failures.append(Violation(assets[name], "#", "orphan_asset_stale"))
     return failures, warnings
 
@@ -232,6 +242,8 @@ def check_secret_ids(client, roles, now):
 def expected_from_tofu(tofu_dir):
     """OpenTofu 코드가 만드는 {policies, roles, mounts, auth} 이름 집합."""
     tofu_dir = Path(tofu_dir)
+    if not (tofu_dir / "policies").is_dir() or not list(tofu_dir.glob("*.tf")):
+        raise OSError("tofu 디렉터리를 읽을 수 없다")
     policies = {p.stem for p in (tofu_dir / "policies").glob("*.hcl")}
     roles, mounts, auth = set(), set(), set()
     for tf in sorted(tofu_dir.glob("*.tf")):
@@ -252,7 +264,9 @@ def check_unmanaged(client, expected):
 
     def keys(method, path):
         data = client.request(method, path).get("data", {})
-        return list(data["keys"]) if "keys" in data else [k.rstrip("/") for k in data]
+        if method == "LIST":
+            return list(data["keys"])
+        return [k.rstrip("/") for k, v in data.items() if isinstance(v, dict)]  # 마운트 이름이 keys여도 안전하다
 
     plans = (
         ("LIST", "sys/policies/acl", "sys/policies/acl/", expected["policies"] | BUILTIN_POLICIES),
@@ -313,13 +327,18 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
 
     store, failures, listed = read_store(client)
     try:
-        failures.extend(ov.validate_store(store, schema_dir))
+        if failures:  # 읽지 못한 문서가 있으면 참조 검사는 가짜 위반을 내므로 문서별 스키마 검증만 한다
+            for doc in sorted(store):
+                failures.extend(ov.validate_document(doc, store[doc], schema_dir))
+        else:
+            failures.extend(ov.validate_store(store, schema_dir))
     except Exception as exc:  # noqa: BLE001 - 스키마·index.yml 문제는 종류만 낸다(값이 섞이지 않게)
         print("스키마 또는 index.yml 오류: %s" % type(exc).__name__, file=sys.stderr)
         return 2
 
     warnings = []
-    failures.extend(_inventory_checks(client, store, listed, now, warnings))
+    unread = {v.doc for v in failures if v.rule == "read_failed"}
+    failures.extend(_inventory_checks(client, store, listed, unread, now, warnings))
     failures.extend(check_secret_ids(client, role_names(client), now))
     failures.extend(check_unmanaged(client, expected))
     failures = sorted(set(failures))
@@ -335,7 +354,9 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
     return 1
 
 
-def _inventory_checks(client, store, listed, now, warnings):
+def _inventory_checks(client, store, listed, unread, now, warnings):
+    if unread & {"inventory/services/semaphore", "secrets/services/semaphore/inventory_read"}:
+        return []  # read_failed로 이미 보고했다
     sem_url = (store.get("inventory/services/semaphore") or {}).get("url")
     sem_token = (store.get("secrets/services/semaphore/inventory_read") or {}).get("token")
     if not isinstance(sem_url, str) or not isinstance(sem_token, str):

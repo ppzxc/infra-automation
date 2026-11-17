@@ -28,12 +28,14 @@ Semaphore API 읽기는 Service `semaphore`를 쓴다: 주소 `inventory/service
 | 문서를 읽을 수 없음 | 실패 | `read_failed`, `list_failed` |
 | Semaphore 인벤토리에만 있는 호스트 | 실패 | `inventory_missing_asset` |
 | Asset 문서에만 있음(폐기·편입 대기) | 경고(stderr 로그만) | `orphan_asset` |
-| 위의 고아이면서 metadata `updated_time`이 30일 넘음 | 실패 | `orphan_asset_stale` |
+| 위의 고아이면서 metadata `updated_time`이 30일 넘음(시각을 읽지 못하면 `orphan_metadata_unreadable`) | 실패 | `orphan_asset_stale` |
 | Semaphore 설정 문서 없음·API 접속 실패 | 실패 | `semaphore_config_missing`, `semaphore_unreachable` |
 | AppRole secret_id 만료까지 30일 이하 | 실패 | `secret_id_expiring`, `secret_id_lookup_failed` |
 | OpenTofu 코드에 없는 정책·role·마운트 | 실패 | `not_in_opentofu`, `unmanaged_lookup_failed` |
 
 - secret_id 만료 점검은 `applier`(1일·1회용)와 `agent_session`(24시간)을 뺀다. 둘은 짧게 쓰는 것이 정상이다.
+- 문서를 읽지 못한 실행(`read_failed`)에서는 참조 검사를 건너뛴다(가짜 위반을 막기 위해). 읽기를 고친 뒤 다시 돌린다.
+- 점검이 접속 설정 오류(종료 코드 2)나 로그인 실패로 시작하지 못하면 알림 URL을 읽을 수 없어 알림이 가지 않는다. 템플릿 실패 상태가 유일한 신호이므로 `periodic_check` secret_id 만료에 유의한다.
 - OpenTofu 코드에는 있는데 서버에 없는 객체는 점검 대상이 아니다. `plan`이 잡는다.
 - 고아 판정은 상태 저장소 없이 계산하는 근사다("고아가 된 지 30일"이 아니라 "고아이면서 30일간 수정 없음").
 - 정적 인벤토리(`static`, `static-yaml`, `yaml`)만 읽는다. 파일형 인벤토리는 API로 본문을 얻을 수 없어 건너뛴다.
