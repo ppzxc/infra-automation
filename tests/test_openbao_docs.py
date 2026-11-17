@@ -241,6 +241,40 @@ def test_cli_exits_2_on_broken_index(tmp_path):
     assert "Traceback" not in res.stderr
 
 
+def _tree(tmp_path, rel, text):
+    f = tmp_path / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text)
+
+
+def test_non_string_keys_are_a_violation_not_a_crash(tmp_path):
+    _tree(tmp_path, "inventory/assets/ns0001/endpoints.yml", "22:\n  protocol: ssh\n")
+    res = run_cli("validate", str(tmp_path))
+    assert res.returncode == 1
+    assert res.stdout.strip() == "inventory/assets/ns0001/endpoints\t#\tnon_string_key"
+
+
+def test_duplicate_keys_and_yaml_extension_are_violations(tmp_path):
+    _tree(tmp_path, "inventory/config/common.yml", "domain: a.example.test\ndomain: b.example.test\n")
+    _tree(tmp_path, "inventory/config/host_audit.yaml", "mail_sender: x@example.test\n")
+    res = run_cli("validate", str(tmp_path))
+    assert res.returncode == 1
+    assert sorted(res.stdout.splitlines()) == ["inventory/config/common\t#\tyaml_parse",
+                                               "inventory/config/host_audit\t#\tyaml_parse"]
+
+
+def test_directory_named_like_a_document_does_not_crash(tmp_path):
+    (tmp_path / "inventory" / "config" / "common.yml").mkdir(parents=True)
+    assert run_cli("validate", str(tmp_path)).stdout.strip() == "inventory/config/common\t#\tyaml_parse"
+
+
+def test_names_with_a_trailing_newline_are_rejected():
+    got = ov.validate_document("inventory/assets/ns0001/endpoints",
+                               {"ssh\n": {"protocol": "ssh", "address": "192.0.2.1", "port": 22, "credential": "root"}},
+                               SCHEMA_DIR)
+    assert [v.rule for v in got] == ["additionalProperties"]
+
+
 # ---- 의존성 ------------------------------------------------------------------------------------------------------
 
 def test_jsonschema_is_a_test_dependency():

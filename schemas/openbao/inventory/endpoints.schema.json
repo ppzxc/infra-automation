@@ -4,7 +4,7 @@
   "type": "object",
   "description": "Endpoint 이름별 맵. 키는 보통 protocol과 같다.",
   "patternProperties": {
-    "^[a-z][a-z0-9_]*$": {
+    "^[a-z][a-z0-9_]*(?!\\n)$": {
       "type": "object",
       "properties": {
         "protocol": {
@@ -29,7 +29,7 @@
           "type": "string",
           "minLength": 1,
           "description": "기본 Credential 이름.",
-          "pattern": "^[a-z][a-z0-9_]*$"
+          "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
         },
         "identity": {
           "const": "automation",
@@ -39,7 +39,7 @@
           "type": "string",
           "minLength": 1,
           "description": "경유지 Endpoint 참조 <ns>/<endpoint 이름>. 여러 단 가능, 순환 금지.",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*/[a-z][a-z0-9_]*$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*/[a-z][a-z0-9_]*(?!\\n)$"
         },
         "become": {
           "type": "object",
@@ -56,7 +56,7 @@
               "type": "string",
               "minLength": 1,
               "description": "승격 Credential 이름. 생략하면 로그인 Credential의 password.",
-              "pattern": "^[a-z][a-z0-9_]*$"
+              "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
             }
           },
           "required": [

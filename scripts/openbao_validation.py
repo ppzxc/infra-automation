@@ -28,6 +28,19 @@ class Violation(collections.namedtuple("Violation", "doc pointer rule")):
         return "%s\t%s\t%s" % (self.doc, self.pointer, self.rule)
 
 
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """중복 키를 거부하는 로더(마지막 값만 남아 위반이 가려지는 일을 막는다)."""
+
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=True)
+            if key in seen:
+                raise yaml.YAMLError("duplicate key")
+            seen.add(key)
+        return super().construct_mapping(node, deep)
+
+
 class Unparseable:
     """YAML로 읽을 수 없는 파일. 내용은 보관하지 않는다."""
 
@@ -40,7 +53,9 @@ def _pointer(parts):
 
 @functools.lru_cache(maxsize=None)
 def _read_index(index_path, mtime_ns):
-    data = yaml.safe_load(Path(index_path).read_text(encoding="utf-8")) or {}
+    data = yaml.load(Path(index_path).read_text(encoding="utf-8"), Loader=_UniqueKeyLoader) or {}
+    if not isinstance(data, dict):
+        raise ValueError("index.yml은 패턴 -> 스키마 매핑이어야 한다")
     return tuple(data.items())
 
 
@@ -102,6 +117,21 @@ def _leaf_errors(error):
     yield path, error.validator
 
 
+def _non_string_key_paths(node, path):
+    """문자열이 아닌 매핑 키(22:, true: 등)를 가진 객체의 포인터 조각 목록. jsonschema가 정규식에서 죽는 입력이다."""
+    found = []
+    if isinstance(node, dict):
+        if any(not isinstance(k, str) for k in node):
+            found.append(path)
+        for k, v in node.items():
+            if isinstance(k, str):
+                found.extend(_non_string_key_paths(v, path + [k]))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            found.extend(_non_string_key_paths(v, path + [i]))
+    return found
+
+
 def validate_document(doc_path, data, schema_dir=DEFAULT_SCHEMA_DIR):
     """문서 하나를 스키마로 검증한다. [Violation]."""
     rel = resolve_schema(doc_path, schema_dir)
@@ -111,6 +141,9 @@ def validate_document(doc_path, data, schema_dir=DEFAULT_SCHEMA_DIR):
         return [Violation(doc_path, "#", "yaml_parse")]
     if doc_path.startswith("secrets/"):
         data = _fill_placeholders(doc_path, data)
+    bad_keys = _non_string_key_paths(data, [])
+    if bad_keys:
+        return [Violation(doc_path, _pointer(p), "non_string_key") for p in bad_keys]
     out = []
     for error in _validator(str(Path(schema_dir) / rel)).iter_errors(data):
         for parts, rule in _leaf_errors(error):
@@ -206,10 +239,13 @@ def load_tree(root):
     """`root` 아래 `<마운트>/<경로>.yml`을 {문서 경로: 데이터}로 읽는다. 읽을 수 없는 파일은 Unparseable."""
     root = Path(root)
     store = {}
-    for f in sorted(root.rglob("*.yml")):
+    for f in sorted(list(root.rglob("*.yml")) + list(root.rglob("*.yaml"))):
         doc = f.relative_to(root).with_suffix("").as_posix()
+        if f.suffix != ".yml" or doc in store:  # .yaml은 문서로 인정하지 않는다(조용히 건너뛰지 않고 위반으로 낸다)
+            store[doc] = Unparseable()
+            continue
         try:
-            store[doc] = yaml.safe_load(f.read_text(encoding="utf-8"))
-        except (yaml.YAMLError, UnicodeDecodeError):
+            store[doc] = yaml.load(f.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)
+        except (yaml.YAMLError, UnicodeDecodeError, OSError):
             store[doc] = Unparseable()
     return store

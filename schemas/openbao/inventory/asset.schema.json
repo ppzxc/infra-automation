@@ -53,7 +53,7 @@
             "type": "string",
             "minLength": 1,
             "description": "Credential 이름. 같은 Asset의 secrets/assets/<ns>/credentials/<이름>.",
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
           },
           "uniqueItems": true,
           "description": "관리 계정 Credential 이름 목록."
@@ -62,7 +62,7 @@
           "type": "string",
           "minLength": 1,
           "description": "bootstrap 접속에 쓰는 Credential 이름.",
-          "pattern": "^[a-z][a-z0-9_]*$"
+          "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
         },
         "removed_accounts": {
           "type": "array",
@@ -107,7 +107,7 @@
               "items": {
                 "type": "object",
                 "patternProperties": {
-                  "^[a-z][a-z0-9_]*$": {}
+                  "^[a-z][a-z0-9_]*(?!\\n)$": {}
                 },
                 "additionalProperties": false
               },
@@ -120,7 +120,7 @@
           "type": "object",
           "description": "otel 수집 설정. 키는 snake_case, 값 형태는 host_agents 역할이 정한다.",
           "patternProperties": {
-            "^[a-z][a-z0-9_]*$": {}
+            "^[a-z][a-z0-9_]*(?!\\n)$": {}
           },
           "additionalProperties": false
         },
@@ -128,7 +128,7 @@
           "type": "object",
           "description": "GitHub 웹훅 수신 설정. 키는 snake_case.",
           "patternProperties": {
-            "^[a-z][a-z0-9_]*$": {}
+            "^[a-z][a-z0-9_]*(?!\\n)$": {}
           },
           "additionalProperties": false
         }
@@ -139,7 +139,7 @@
       "type": "object",
       "description": "FUNA 노드별 설정. 키는 snake_case, 렌더링 때 env 이름으로 바꾼다.",
       "patternProperties": {
-        "^[a-z][a-z0-9_]*$": {
+        "^[a-z][a-z0-9_]*(?!\\n)$": {
           "type": [
             "string",
             "integer",
