@@ -118,7 +118,7 @@
 - **멤버가 바뀐 비교**: 장애 전환으로 직전 백업과 응답 멤버가 다르면 멤버 고유 설정(`config system global`의 `hostname`, `config system ha`의 `priority`)은 변경으로 세지 않고, 알림에 멤버 변경 비교임을 적는다.
 - **반복 알림 금지(멱등)**: 비교는 항상 "직전 백업 대 이번 백업"이므로 같은 변경은 변경이 처음 보인 실행에서만 한 번 알린다. 다음 실행은 변경 후 상태끼리 비교해 조용하다.
 - **비밀 비노출**: 알림과 로그에는 섹션·항목 이름과 바뀐 설정 키 이름만 나온다(예: `config system admin > edit "admin" (변경: password)`). 값(VPN 사전 공유 키, 관리자 해시, 인증서)은 어느 곳에도 쓰지 않으며, 설정을 다루는 태스크는 `no_log`다. 항목은 기본 20개까지 보이고 나머지는 건수로 줄인다.
-- **통지 형식**: 기존 알림 형식(등급 P2, 무슨 일, 왜 중요, 대상, 조치, 런북)을 따라 네이버웍스 webhook으로 직접 보낸다. 런북은 [alerts.md](runbooks/alerts.md#fortigate-config-change)다.
+- **통지 형식**: 기존 알림 형식(등급 P2, 무슨 일, 왜 중요, 대상, 조치, 런북)을 따라 사내 알림 플랫폼 text/plain webhook으로 직접 보낸다. 런북은 [alerts.md](runbooks/alerts.md#fortigate-config-change)다.
 - **설정**: `fortigate_backup_alert_webhook_url`(필수, 변경이 있을 때만 필요), `fortigate_backup_alert_webhook_token`, `fortigate_backup_alert_webhook_auth_header`(기본 `X-NANOIT-ACCESS`)를 Semaphore Environment로 주입한다. `fortigate_backup_alert_webhook_url`은 OpenBao `agents/openobserve`의 `alert_webhook_plain_url`(사내 알림 플랫폼 text/plain 경로)과 같은 값이어야 하며 JSON 경로 주소(`alert_webhook_url`)가 아니다. 본문은 `Content-Type: text/plain; charset=utf-8` 원문이라 JSON 경로의 본문 2000자 제한을 받지 않는다. 저장소에는 두지 않는다.
 - **알림 실패**: webhook이 없거나 전송이 실패하면(3회 시도) 호스트를 `FORTIGATE-ALERT`로 실패 처리하고 변경 항목 이름을 로그에 남긴다. 백업은 이미 저장돼 같은 변경을 다시 알리지 않으므로 이때는 사람이 변경 항목을 확인해야 한다.
 - **한계**: 값이 바뀐 사실만 알리고 무엇으로 바뀌었는지는 보여 주지 않는다(원본은 백업 파일 `diff`로 사람이 확인). 설정 키 이름이 같은 값 변경은 키 이름만 나온다.
