@@ -11,7 +11,6 @@ OpenBao 전체를 읽어 다음을 대조한다. 위반은 `Violation(문서 경
 
 접속 설정은 환경변수다: VAULT_ADDR, VAULT_NAMESPACE(기본 infra), VAULT_TOKEN 또는 VAULT_ROLE_ID+VAULT_SECRET_ID(AppRole).
 """
-import collections
 import json
 import re
 import sys
@@ -41,6 +40,16 @@ TIMEOUT = 30
 Violation = ov.Violation
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """리다이렉트를 따르지 않는다(토큰 헤더가 다른 호스트로 넘어가지 않게)."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 class BaoError(Exception):
     """HTTP 실패. 내용(응답 본문)은 보관하지 않는다."""
 
@@ -58,7 +67,8 @@ class Client:
     def request(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
         real = "GET" if method == "LIST" else method
-        url = self.addr + "/v1/" + path.strip("/") + ("?list=true" if method == "LIST" else "")
+        url = self.addr + "/v1/" + urllib.parse.quote(path.strip("/"), safe="/") + \
+            ("?list=true" if method == "LIST" else "")
         req = urllib.request.Request(url, data=data, method=real)
         req.add_header("X-Vault-Namespace", self.namespace)
         if self.token:
@@ -66,7 +76,7 @@ class Client:
         if data is not None:
             req.add_header("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            with _OPENER.open(req, timeout=TIMEOUT) as r:
                 raw = r.read()
         except urllib.error.HTTPError as exc:
             raise BaoError(exc.code) from None
@@ -180,7 +190,7 @@ def fetch_semaphore_hosts(base_url, token):
     def get(path):
         req = urllib.request.Request(base_url.rstrip("/") + path, headers={"Authorization": "Bearer " + token})
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            with _OPENER.open(req, timeout=TIMEOUT) as r:
                 return json.loads(r.read())
         except (urllib.error.URLError, OSError, ValueError):
             raise BaoError(0) from None
@@ -194,7 +204,7 @@ def fetch_semaphore_hosts(base_url, token):
     except (KeyError, TypeError, AttributeError):  # 예상 밖 응답 모양
         raise BaoError(0) from None
     hosts.discard("localhost")
-    return hosts
+    return {h for h in hosts if not re.search(r"[\[\]*?]", h)}  # `ns[01:05]` 같은 패턴은 Asset 이름이 아니라 건너뛴다
 
 
 def compare_inventory(asset_docs, semaphore_hosts, updated_times, now):
@@ -231,7 +241,7 @@ def check_secret_ids(client, roles, now):
             except BaoError:
                 out.append(Violation(doc, "#", "secret_id_lookup_failed"))
                 continue
-            expires = _parse_time(info.get("data", {}).get("expiration_time"))
+            expires = _parse_time((info.get("data") or {}).get("expiration_time"))
             if expires is not None and expires - now <= EXPIRY_WARN:
                 out.append(Violation(doc, "#", "secret_id_expiring"))
     return sorted(set(out))
@@ -258,15 +268,22 @@ def expected_from_tofu(tofu_dir):
     return {"policies": policies, "roles": roles, "mounts": mounts, "auth": auth}
 
 
-def check_unmanaged(client, expected):
+def check_unmanaged(client, expected, roles):
     """코드에 없는 정책·role·마운트·인증 마운트. 서버 조회 실패는 `unmanaged_lookup_failed`."""
     out = []
 
     def keys(method, path):
-        data = client.request(method, path).get("data", {})
-        if method == "LIST":
-            return list(data["keys"])
-        return [k.rstrip("/") for k, v in data.items() if isinstance(v, dict)]  # 마운트 이름이 keys여도 안전하다
+        try:
+            data = client.request(method, path).get("data") or {}
+            if method == "LIST":
+                return list(data["keys"])
+            return [k.rstrip("/") for k, v in data.items() if isinstance(v, dict)]  # 마운트 이름이 keys여도 안전하다
+        except BaoError as exc:
+            if method == "LIST" and exc.status == 404:  # 비어 있는 목록
+                return []
+            raise
+        except (KeyError, TypeError, AttributeError):
+            raise BaoError(0) from None
 
     plans = (
         ("LIST", "sys/policies/acl", "sys/policies/acl/", expected["policies"] | BUILTIN_POLICIES),
@@ -276,7 +293,7 @@ def check_unmanaged(client, expected):
     )
     for method, path, prefix, allowed in plans:
         try:
-            names = keys(method, path)
+            names = roles if path == "auth/approle/role" else keys(method, path)
         except BaoError:
             out.append(Violation(path, "#", "unmanaged_lookup_failed"))
             continue
@@ -285,10 +302,15 @@ def check_unmanaged(client, expected):
 
 
 def role_names(client):
+    """서버의 AppRole role 이름. 비어 있으면 []. 조회·해석에 실패하면 BaoError."""
     try:
-        return client.request("LIST", "auth/approle/role")["data"]["keys"]
-    except BaoError:
-        return []
+        return list(client.request("LIST", "auth/approle/role")["data"]["keys"])
+    except BaoError as exc:
+        if exc.status == 404:
+            return []
+        raise
+    except (KeyError, TypeError):
+        raise BaoError(0) from None
 
 
 # ---- 알림 ---------------------------------------------------------------------------------------------------------
@@ -338,9 +360,16 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
 
     warnings = []
     unread = {v.doc for v in failures if v.rule == "read_failed"}
+    if any(v.rule == "list_failed" and v.doc == "inventory/" for v in failures):
+        unread.add("inventory/")  # Asset 목록이 비어 모든 호스트가 가짜 위반이 되므로 대조를 건너뛴다(list_failed로 보고했다)
     failures.extend(_inventory_checks(client, store, listed, unread, now, warnings))
-    failures.extend(check_secret_ids(client, role_names(client), now))
-    failures.extend(check_unmanaged(client, expected))
+    try:
+        roles = role_names(client)
+    except BaoError:
+        roles = []
+        failures.append(Violation("auth/approle/role", "#", "secret_id_lookup_failed"))
+    failures.extend(check_secret_ids(client, roles, now))
+    failures.extend(check_unmanaged(client, expected, roles))
     failures = sorted(set(failures))
 
     for w in warnings:
@@ -355,7 +384,7 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
 
 
 def _inventory_checks(client, store, listed, unread, now, warnings):
-    if unread & {"inventory/services/semaphore", "secrets/services/semaphore/inventory_read"}:
+    if unread & {"inventory/", "inventory/services/semaphore", "secrets/services/semaphore/inventory_read"}:
         return []  # read_failed로 이미 보고했다
     sem_url = (store.get("inventory/services/semaphore") or {}).get("url")
     sem_token = (store.get("secrets/services/semaphore/inventory_read") or {}).get("token")

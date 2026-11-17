@@ -290,6 +290,21 @@ def test_approle_login_is_used_without_token():
     rec.close()
 
 
+def test_failed_inventory_listing_does_not_flood_missing_asset_failures(env):
+    fake, rec = env
+    fake.raw("LIST", "inventory/metadata", {"errors": []}, status=500)
+    assert run(fake).returncode == 1
+    body = alert_text(rec)
+    assert "inventory/\t#\tlist_failed" in body and "inventory_missing_asset" not in body
+
+
+def test_failed_role_listing_is_reported_not_skipped(env):
+    fake, rec = env
+    fake.raw("LIST", "auth/approle/role", {"errors": []}, status=500)
+    assert run(fake).returncode == 1
+    assert "auth/approle/role\t#\tsecret_id_lookup_failed" in alert_text(rec)
+
+
 def test_expected_objects_are_read_from_the_real_opentofu_code():
     sys.path.insert(0, str(ROOT / "scripts"))
     import openbao_check as oc
