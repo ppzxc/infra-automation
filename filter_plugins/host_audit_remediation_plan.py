@@ -212,7 +212,9 @@ def _total(plans, run_id):
     items = [row for plan in plans if plan['kind'] == 'items' for row in plan['rows']]
     items.sort(key=lambda row: (_level(row), _verdict(row), str(row[COL['자산명']]),
                                 str(row[COL['통제내용']]).split(' ', 1)[0]))
-    rows = items + [plan['rows'][0] for plan in plans if plan['kind'] in ('no_result', 'failed')]
+    lines = sorted((plan['rows'][0] for plan in plans if plan['kind'] in ('no_result', 'failed')),
+                   key=lambda row: str(row[COL['자산명']]))  # by host name, so the host order of the model cannot change the bytes
+    rows = items + lines
     if not rows:
         rows = [[''] * 3 + [NO_FINDINGS] + [''] * (len(HEADERS) - 4)]
     return dict(_plan(rows, '', run_id, '', 'total'), label=TOTAL_LABEL, file_name=host_audit_remediation_total_file_name(run_id),

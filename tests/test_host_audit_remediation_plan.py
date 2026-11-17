@@ -434,6 +434,15 @@ def test_a_host_without_check_results_keeps_its_line_in_the_total():
     assert rows[-1][COL["통제내용"]] == NO_RESULT  # no data sorts after the items
 
 
+def test_the_lines_of_hosts_without_results_follow_host_name_order_whatever_the_model_order():
+    model = _model([_record("h1", {1: "VULN"}), _record("h2", {}), _record("h3", {})])
+    for host in ("h2", "h3"):
+        model["config_vulnerability"]["appendix"].pop(host)
+    model["hosts"] = ["h3", "h1", "h2"]
+    rows = host_audit_remediation_total(model)["rows"]
+    assert [r[COL["자산명"]] for r in rows if r[COL["통제내용"]] == NO_RESULT] == ["h2", "h3"]
+
+
 def test_the_total_has_the_footer_and_its_own_file_name_and_member():
     model = _total_model()
     total = host_audit_remediation_total(model)
