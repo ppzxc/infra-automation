@@ -33,6 +33,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_plugins"))
 from openbao_ssh import python_interpreter_problem  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lookup_plugins"))
+import _bao_http  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 
 GITHUB_API_URL = "https://api.github.com"  # 공개 상수. 옛 KV에는 github_api_url이 없다(선택 키 기본값).
@@ -512,7 +514,7 @@ class Client:
         headers = {"X-Vault-Token": self.token, "X-Vault-Namespace": self.namespace, "Content-Type": "application/json"}
         req = urllib.request.Request(self.addr + path, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with _bao_http.urlopen(req, timeout=30) as r:
                 return r.status, json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as e:
             if e.code in missing:

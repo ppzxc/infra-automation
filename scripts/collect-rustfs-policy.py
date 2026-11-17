@@ -25,6 +25,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lookup_plugins"))
+import _bao_http  # noqa: E402
+
 ADMIN = "/rustfs/admin/v3"
 DEFAULT_BASE = Path.home() / ".local/share/infra-automation/sec-review-20261026/baseline"
 SECRET_PATTERN = re.compile(
@@ -66,7 +69,7 @@ def make_fetch(endpoint, access_key, secret_key, region="us-east-1"):
                                        f"SignedHeaders={signed}, Signature={sig}")},
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with _bao_http.urlopen(req, timeout=30) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             raise SystemExit(f"RustFS API 오류 {e.code}: {path}")
@@ -130,7 +133,7 @@ def _openbao_doc(addr, token, namespace, mount, doc):
     req = urllib.request.Request(f"{addr.rstrip('/')}/v1/{mount}/data/{doc}",
                                  headers={"X-Vault-Token": token, "X-Vault-Namespace": namespace})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with _bao_http.urlopen(req, timeout=30) as r:
             body = json.loads(r.read())
     except urllib.error.HTTPError as e:
         raise SystemExit(f"OpenBao 조회 실패: {mount}/{doc} (HTTP {e.code})")

@@ -23,6 +23,8 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lookup_plugins"))
+import _bao_http  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 
 DEFAULT_NAMESPACE = "infra"
@@ -55,7 +57,7 @@ class Client:
         req = urllib.request.Request("%s/v1/%s/data/%s" % (self.addr, mount, path), data=data, method=method,
                                      headers=dict(self.headers, **{"Content-Type": "application/json"}))
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with _bao_http.urlopen(req, timeout=30) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
             try:

@@ -23,6 +23,8 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lookup_plugins"))
+import _bao_http  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 
 DEFAULT_TOFU_DIR = Path(__file__).resolve().parent.parent / "tofu" / "openbao"
@@ -38,16 +40,6 @@ ALERT_MAX_LINES = 50
 TIMEOUT = 30
 
 Violation = ov.Violation
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """리다이렉트를 따르지 않는다(토큰 헤더가 다른 호스트로 넘어가지 않게)."""
-
-    def redirect_request(self, *args, **kwargs):
-        return None
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 class BaoError(Exception):
@@ -76,7 +68,7 @@ class Client:
         if data is not None:
             req.add_header("Content-Type", "application/json")
         try:
-            with _OPENER.open(req, timeout=TIMEOUT) as r:
+            with _bao_http.urlopen(req, timeout=TIMEOUT) as r:
                 raw = r.read()
         except urllib.error.HTTPError as exc:
             raise BaoError(exc.code) from None
@@ -213,7 +205,7 @@ def fetch_semaphore_hosts(base_url, token):
     def get(path):
         req = urllib.request.Request(base_url.rstrip("/") + path, headers={"Authorization": "Bearer " + token})
         try:
-            with _OPENER.open(req, timeout=TIMEOUT) as r:
+            with _bao_http.urlopen(req, timeout=TIMEOUT) as r:
                 return json.loads(r.read())
         except (urllib.error.URLError, OSError, ValueError):
             raise BaoError(0) from None
@@ -361,7 +353,7 @@ def build_alert(violations):
 def send_alert(url, text):
     req = urllib.request.Request(url, data=text.encode("utf-8"), method="POST",
                                  headers={"Content-Type": "text/plain; charset=utf-8"})
-    _OPENER.open(req, timeout=TIMEOUT).close()
+    _bao_http.urlopen(req, timeout=TIMEOUT).close()
 
 
 # ---- 진입점 -------------------------------------------------------------------------------------------------------

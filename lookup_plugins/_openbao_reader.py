@@ -33,11 +33,15 @@ import copy
 import json
 import os
 import ssl
+import sys
 import urllib.error
 import urllib.request
 
 from ansible.errors import AnsibleError
 from ansible.utils.display import Display
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _bao_http  # noqa: E402
 
 
 NAMESPACE = "infra"
@@ -236,7 +240,7 @@ class Reader:
         """`defer_denied`면 403을 표시하지 않고 던진다(호출자가 토큰을 새로 받아 되풀이할 수 있다)."""
         ctx = self._context()
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
+            with _bao_http.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
             if exc.code == 404:

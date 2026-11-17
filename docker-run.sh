@@ -51,9 +51,15 @@ if [ -S "/var/run/docker.sock" ]; then
     DOCKER_RUN_OPTS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
 fi
 
-# 환경 변수 전달 (OpenBao 토큰, Ansible 환경변수 등)
-[ -n "${BAO_ADDR}" ] && DOCKER_RUN_OPTS+=(-e BAO_ADDR="${BAO_ADDR}")
-[ -n "${BAO_TOKEN}" ] && DOCKER_RUN_OPTS+=(-e BAO_TOKEN="${BAO_TOKEN}")
+# OpenBao 읽기 지점(lookup_plugins/_openbao_reader.py)이 받는 환경 변수만 넘긴다: 주소 + AppRole(+ 사설 CA·검증 끄기).
+# 평문 토큰으로 넘기는 경로는 없다. 값은 호출하는 셸의 환경에 있어야 하고 이 스크립트가 출력하지 않는다.
+for var in VAULT_ADDR VAULT_ROLE_ID VAULT_SECRET_ID VAULT_SKIP_VERIFY; do
+    [ -n "${!var}" ] && DOCKER_RUN_OPTS+=(-e "${var}")
+done
+# 사설 CA는 파일 경로다: 같은 경로로 읽기 전용 마운트해 컨테이너 안에서도 그 경로가 맞게 한다.
+if [ -n "${VAULT_CACERT}" ] && [ -f "${VAULT_CACERT}" ]; then
+    DOCKER_RUN_OPTS+=(-v "${VAULT_CACERT}:${VAULT_CACERT}:ro" -e "VAULT_CACERT")
+fi
 
 # 3. 명령어 실행
 if [ $# -eq 0 ]; then

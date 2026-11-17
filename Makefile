@@ -6,7 +6,7 @@ help:
 	@echo "                     Infra Automation (Ansible Automation)                      "
 	@echo "================================================================================"
 	@echo "  make init-hooks                 - Install Git Pre-Commit security & lint hooks"
-	@echo "  make provision                  - Run full provisioning (overseer + servers)"
+	@echo "  make provision                  - Run full provisioning (site.yml: servers and loadbalancers)"
 	@echo "  make provision-hosts            - Run baseline provisioning for IDC target hosts"
 	@echo "  make check                      - Dry-run simulation (--check --diff)"
 	@echo "  make spec-check                 - Validate 3-way consistency (Docs <-> Code <-> Tests)"
