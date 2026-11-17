@@ -689,6 +689,16 @@ def test_maintenance_rejects_a_host_bucket_that_breaks_the_s3_name_rule(tmp_path
     assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Bad/Bucket)" in res.stdout + res.stderr
 
 
+def test_maintenance_accepts_an_all_digit_host_bucket_as_a_string(tmp_path):
+    """숫자만으로 된 버킷 이름도 규칙상 올바르다: 템플릿을 거쳐도 정수로 바뀌지 않는다."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"], agents={"backup": {"bucket": "12345678"}})
+    dump = {"name": "Dump", "ansible.builtin.copy": {"content": "{{ rustfs_bucket | to_json }}", "dest": str(tmp_path / "b.json")}}
+    res = _run(tmp_path, _maint_read_tasks() + [dump], _read_vars(store))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert json.loads((tmp_path / "b.json").read_text()) == "12345678"
+
+
 @pytest.mark.parametrize("bad", ["good-bucket\n", 12345, ["a-b"]], ids=["trailing-newline", "integer", "list"])
 def test_maintenance_rejects_a_host_bucket_that_is_not_a_clean_string(tmp_path, bad):
     store = default_store()
