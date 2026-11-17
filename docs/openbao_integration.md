@@ -87,6 +87,9 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 - **AppRole만 쓴다.** 변수 `_vault_token`(플레이 첫머리에서 `@token`으로 받아 둔 토큰)이 있으면 그것을, 없으면 `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(같은 이름 소문자 변수도 된다)로 로그인한다. 평문 토큰(`VAULT_TOKEN`)으로는 읽지 않는다. 주소는 `VAULT_ADDR`(`vault_addr`)다.
 - **https 인증서는 기본으로 검증한다.** 사설 CA는 `VAULT_CACERT`(`vault_cacert`)로 준다. 검증을 끄려면 `vault_validate_certs: false` 또는 `VAULT_SKIP_VERIFY=true`이고 마지막 수단이다.
 - **토큰 TTL은 30분이다.** 로그인은 프로세스 안에서만 캐시한다. Ansible은 호스트·태스크마다 프로세스를 나누므로 `@token`을 받아 두지 않는 읽기는 그 호스트·태스크마다 로그인한다. 긴 플레이(Host Audit의 드리프트 하위 실행 등)가 만료된 토큰을 들고 있지 않도록 오래 쓸 토큰은 일찍 받아 두지 않는다.
+- **만료된 토큰은 한 번 다시 로그인한다.** `_vault_token`으로 읽다가 403이면 AppRole로 새로 로그인해 같은 읽기를 되풀이한다(30분 넘게 걸리는 실행의 후반 호스트가 멈추지 않게 한다). 새 토큰은 그 읽기 호출 안에서만 쓰이므로, 만료 뒤에는 태스크마다 로그인이 한 번씩 더 나간다. 정책이 막은 403은 다시 로그인해도 같은 403이라 그대로 실패한다. `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 없으면 되풀이하지 못하고 실패한다.
+- **실패 사유는 `no_log`와 무관하게 보인다.** 읽기 지점은 실패 메시지(문서 경로와 HTTP 상태·예외 종류만, 응답 본문과 비밀은 없음)를 Ansible 표시 채널로도 낸다. 비밀을 돌려주는 태스크가 `no_log: true`여도 운영자가 403(정책)과 연결 오류(주소·TLS)를 구분할 수 있다.
+- **같은 읽기 호출 안에서는 문서를 한 번만 읽는다.** 한 lookup 호출(`Reader`)이 읽은 문서는 다시 HTTP로 읽지 않는다.
 - **우회(`openbao_fixture`)**: 변수 `openbao_fixture`가 정의돼 있으면 네트워크 없이 그 안에서만 답한다. 키는 `<마운트>/<문서 경로>`, 값은 문서다. 없는 키는 404와 같다. molecule·테스트용이며 운영 템플릿의 Extra variables에 넣지 않는다.
 - 운영자가 로컬에서 쓰는 `scripts/`의 도구(`openbao_docs.py`, 수집 스크립트)는 읽기 지점이 아니라 자기 접속 코드를 쓰며 운영자 토큰(`VAULT_TOKEN`)을 받을 수 있다. 이 예외는 Ansible 쪽으로 새지 않는다.
 
