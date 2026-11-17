@@ -1,0 +1,9 @@
+---
+# Repo Maintenance가 읽는 OpenBao 문서 패턴과 필수 키 (Spec #511 / Ticket-15). 형식은 docs/openbao_integration.md.
+# 입력 검증(BAK-072), 스키마 대조 테스트, 요청 기록 단언이 이 선언 하나를 쓴다. `+`는 inventory_hostname이다.
+backup_openbao_required:
+  "secrets/assets/+/agents": [restic_password]
+  "secrets/services/rustfs/maintenance": [access_key, secret_key]
+  "secrets/services/openobserve/ingest": [username, password]
+  "inventory/services/rustfs": [url]
+  "inventory/services/openobserve": [url]
