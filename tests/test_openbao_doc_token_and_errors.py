@@ -65,6 +65,16 @@ def test_a_policy_denial_is_not_hidden_by_the_retry_it_logs_in_once_and_fails_wi
     assert len(shown) == 1 and "secrets/automation/ssh" in shown[0] and "403" in shown[0]
 
 
+def test_when_the_renewal_login_fails_the_original_denied_document_is_still_named(fake_openbao, shown):
+    fake_openbao.approle = False
+    fake_openbao.raw("POST", "/v1/auth/approle/login", {"errors": ["denied"]}, status=400)
+    fake_openbao.set("inventory", "assets/ns0001", {"description": "d"})
+    fake_openbao.token = "valid-only"             # 공유 토큰은 403, 새 로그인은 400
+    with pytest.raises(OpenBaoError, match=r"inventory/assets/ns0001.*403"):
+        Reader(_vars(fake_openbao, _vault_token="expired-token")).read("inventory/assets/ns0001")
+    assert any("inventory/assets/ns0001" in line and "403" in line for line in shown)
+
+
 def test_a_fresh_login_that_is_denied_is_not_retried(fake_openbao):
     fake_openbao.deny("secrets", "automation/ssh")
     with pytest.raises(OpenBaoError):

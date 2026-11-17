@@ -178,7 +178,15 @@ class Reader:
                 # 만료됐을 수 있는 토큰이 403이면 한 번 다시 로그인한다. 다시 로그인할 수 없으면 원래 실패 그대로다.
                 if exc.status != 403:
                     raise
-                if self._renew() is None:
+                try:
+                    renewed = self._renew()
+                except OpenBaoError:
+                    # 다시 로그인하지 못했다(로그인 실패 사유는 이미 표시됐다). 운영자가 막힌 문서를 알 수 있게 원래 403을 낸다.
+                    if not exc.shown:
+                        display.error(str(exc))
+                        exc.shown = True
+                    raise exc from None
+                if renewed is None:
                     if not exc.shown:
                         display.error(str(exc))
                     raise

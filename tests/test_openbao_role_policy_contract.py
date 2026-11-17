@@ -104,9 +104,12 @@ def test_the_lookup_read_table_matches_the_read_calls_in_the_plugin_code():
     found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "read" and node.args:
-            m = re.search(r"['\"]([a-z]+/[^'\"]*)['\"]", ast.unparse(node.args[0]))
-            if m:
-                found.add(m.group(1).replace("%s", "+"))
+            arg = node.args[0]
+            # 읽기 경로는 문자열 상수 또는 "문자열 % 값" 꼴만 허용한다. 다른 꼴(f-string, 덧셈)이 생기면 이 표를 고치도록 실패시킨다.
+            literal = arg if isinstance(arg, ast.Constant) else (arg.left if isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mod) else None)
+            assert isinstance(literal, ast.Constant) and isinstance(literal.value, str), \
+                f"read() 경로는 문자열 상수나 '%' 서식만 허용한다(표와 대조하려면): {ast.unparse(arg)}"
+            found.add(literal.value.replace("%s", "+"))
     assert found == SERVER_READS, f"플러그인의 read() 경로와 읽기 표가 다르다: {sorted(found ^ SERVER_READS)}"
 
 
