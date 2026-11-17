@@ -8,7 +8,6 @@ the bytes is the job of the ``host_audit_xlsx_write`` module.
 Entry points:
   host_audit_remediation_plan       (filter) model, host -> {'sheet', 'headers', 'widths', 'rows', 'footer'}
   host_audit_remediation_plans      (filter) model -> the plan of every host with its file name (AUD-025)
-  host_audit_remediation_total      (filter) model -> the plan of the ``total`` workbook: the rows of every host in one sheet
   host_audit_remediation_files      (filter) model -> ``{file_name: plan}`` of every xlsx of the run (hosts and total)
   host_audit_remediation_zip_members (filter) that map -> ``{file_name: name inside the zip}`` (``total.xlsx``, ``hosts/<host>.xlsx``)
   host_audit_remediation_file_name  (filter) run id, host -> ``host-audit-<run_id>-<inventory_hostname>.xlsx``
@@ -204,19 +203,12 @@ def _total(plans, run_id):
     nothing, and when no host has an item or a line the sheet has the one line 양호 외 항목 없음.
     """
     items = [row for plan in plans if plan['kind'] == 'items' for row in plan['rows']]
-    items.sort(key=lambda row: (_level(row), row[COL['자산명']], row[COL['통제내용']]))
+    items.sort(key=lambda row: (_level(row), row[COL['자산명']], row[COL['통제내용']].split(' ', 1)[0]))
     rows = items + [plan['rows'][0] for plan in plans if plan['kind'] in ('no_result', 'failed')]
     if not rows:
         rows = [[''] * 3 + [NO_FINDINGS] + [''] * (len(HEADERS) - 4)]
     return dict(_plan(rows, '', run_id, ''), label=TOTAL_LABEL, file_name=host_audit_remediation_total_file_name(run_id),
                 zip_member=TOTAL_MEMBER)
-
-
-def host_audit_remediation_total(model):
-    """The plan of the ``total`` workbook: the rows of every host of the run in one sheet; {} when the run has no host."""
-    model = model or {}
-    plans = host_audit_remediation_plans(model)
-    return _total(plans, (model.get('cover') or {}).get('run_id', '')) if plans else {}
 
 
 def host_audit_remediation_files(model):
@@ -267,18 +259,11 @@ def host_audit_remediation_zip_name(run_id):
     return ZIP_NAME % _name_part(run_id)
 
 
-def host_audit_remediation_plan_map(model):
-    """``{host: plan}`` of every host (the plans filter keyed by each plan's own ``host``)."""
-    return dict((plan['host'], plan) for plan in host_audit_remediation_plans(model))
-
-
 class FilterModule(object):
     def filters(self):
         return {
             'host_audit_remediation_plan': host_audit_remediation_plan,
             'host_audit_remediation_plans': host_audit_remediation_plans,
-            'host_audit_remediation_plan_map': host_audit_remediation_plan_map,
-            'host_audit_remediation_total': host_audit_remediation_total,
             'host_audit_remediation_files': host_audit_remediation_files,
             'host_audit_remediation_zip_members': host_audit_remediation_zip_members,
             'host_audit_remediation_file_name': host_audit_remediation_file_name,

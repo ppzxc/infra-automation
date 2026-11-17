@@ -87,8 +87,8 @@
     # 계획(행에 호스트 증적과 예외 사유가 있다)은 한 번만 만들어 set_fact에 두고, 반복문은 호스트 이름만 돈다:
     # 반복문의 item은 실패 결과에 그대로 찍히기 때문이다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이
     # 보여야 하고(no_log면 가려진다), 성공 때의 fact는 -v에서만 찍히며 내용은 report.html과 같다.
-    # _host_audit_remediation_by_file은 이번 실행이 쓸 xlsx 전부({파일명: 계획})다: 호스트별 계획과 합계. 쓰기·정리·묶기가
-    # 모두 이 하나를 읽는다. 호스트 계획 맵(_host_audit_remediation_plans)은 생성 실패 판정이 읽는다.
+    # _host_audit_remediation_by_file은 이번 실행이 쓸 xlsx 전부({파일명: 계획})다: 호스트별 계획과 합계. 쓰기·정리·묶기·
+    # 생성 실패 판정이 모두 이 하나를 읽는다(합계는 error가 없다).
     - name: Build the Remediation Plan of every host
       ansible.builtin.set_fact:
         _host_audit_remediation_by_file: "{{ host_audit_model | host_audit_remediation_files }}"
@@ -105,7 +105,7 @@
     - name: Stop when the Remediation Plan could not be built for any host
       ansible.builtin.assert:
         that: _host_audit_remediation_by_file | dict2items | selectattr('value.error', 'defined') | list | length
-              < host_audit_model.hosts | length
+              < host_audit_model.hosts | unique | list | length
         fail_msg: "모든 호스트의 Remediation Plan 생성이 실패했다(필터·카탈로그 오류, 위 로그 참고)"
       when: host_audit_model.hosts | length > 0
 
