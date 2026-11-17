@@ -166,6 +166,19 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 - **OpenObserve — Config**: `agents/openobserve`의 `api_user`/`api_password`, `alert_webhook_plain_url`(사내 알림 플랫폼 text/plain 경로). 알림 검증용 `controller_ingest_token`(합성 레코드 주입). 선택으로 `alert_webhook_token`·`alert_webhook_auth_header`(봇은 `X-NANOIT-ACCESS`).
 - **Host Audit 메일**: `agents/host_audit`의 `mail_to`(받는 사람, 목록 또는 `,`·`;` 구분 문자열)와 `mail_from`(보내는 주소 1개). 주소는 개인정보라 저장소와 템플릿 Extra variables에 고정하지 않는다. 한 번만 다른 사람에게 보낼 때는 `host_audit_mail_to`로 덮어쓴다(값은 로그에 나오지 않는다). 템플릿 Survey에는 두지 않으므로 API 실행의 `environment`로 넘긴다(§5 실행 시 입력).
 
+### Periodic Check Environment
+
+`OpenBao — Periodic Check`(§5)는 위 공용 Variable Group을 쓰지 않고 **전용 Environment `periodic_check` 하나**를 쓴다. `periodic_check` AppRole 자격만 주입하며, `scripts/openbao_docs.py check`가 읽는 환경변수 이름 그대로다([openbao_docs.md §4](openbao_docs.md)). 값은 저장소에 쓰지 않는다.
+
+| 키 | 종류 | 값 |
+|---|---|---|
+| `VAULT_ADDR` | Environment variable | OpenBao 주소(필수) |
+| `VAULT_NAMESPACE` | Environment variable | `infra`(생략하면 `infra`) |
+| `VAULT_ROLE_ID` | Secret | `periodic_check` AppRole의 role_id |
+| `VAULT_SECRET_ID` | Secret | `periodic_check` AppRole의 secret_id(180일 교체, `openbao-operations` 런북) |
+
+`VAULT_TOKEN`은 이 Environment에 넣지 않는다(토큰 대체 경로 폐지, Spec #511). `check` 코드는 토큰이 있으면 로그인을 건너뛰므로, 토큰이 섞여 들어오면 AppRole 정책 대신 그 토큰의 권한으로 점검한다. 옛 `infra/prod/host` 값이나 `OPENBAO_HOSTS_PREFIX`·`VAULT_MOUNT`도 쓰지 않는다. AppRole의 토큰 TTL·secret_id 바인딩은 OpenTofu 코드(`tofu/openbao`)가 정한다.
+
 ---
 
 ## 5. Task Template
@@ -185,6 +198,20 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 | Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |
 
 **OpenTofu 템플릿(위 표와 별개)**: `OpenBao — OpenTofu`(앱 OpenTofu, Sub-directory `tofu/openbao`, **Auto Approve 끔**, 수동 실행)는 Ansible 템플릿이 아니라 위 8개에 세지 않는다. 전용 Environment를 쓰고 다른 템플릿과 공유하지 않는다. 정의와 입력 값은 [OpenBao 구성 OpenTofu](openbao_opentofu.md) 5절을 본다.
+
+**Periodic Check 템플릿(위 표와 별개, #520)**: `OpenBao — Periodic Check`는 Ansible이 아니라 **Bash** 앱 템플릿이라 위 8개에 세지 않는다.
+
+| 항목 | 값 |
+|---|---|
+| Name | `OpenBao — Periodic Check` |
+| App | Bash |
+| Script filename | `scripts/run-periodic-check.sh` (저장소 루트에서 `openbao_docs.py check` 실행) |
+| Repository | `infra-automation` |
+| Environment | `periodic_check`(§4 Periodic Check Environment). 다른 템플릿과 공유하지 않는다 |
+| Survey·Extra variables | 없음 |
+| 실행 방식 | 매일 1회 스케줄(§6.3). 수동 실행도 가능 |
+
+러너 이미지에는 `jsonschema`가 들어 있어야 한다(`Dockerfile`, 이미지 재빌드 필요). 점검이 실패(종료 코드 1)하거나 설정 오류(종료 코드 2)로 끝나면 스크립트가 같은 비0 코드로 끝나고 Semaphore 작업이 실패 상태가 된다. 판정 규칙과 실패 대응은 [openbao_docs.md §4](openbao_docs.md)를 본다.
 
 **실행 시 입력 (Survey variables)**
 
@@ -279,6 +306,16 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - **점검 주기**: ISMS 2.11.2(취약점 점검 및 조치)는 정기 점검을 요구한다. 내부 지침에는 **분기 1회 이상** 점검하고 결과를 결재·보관하도록 정하고, 그 이행 수단으로 **월 1회 자동 실행**(이 스케줄)을 둔다. 월 보고서 중 분기마다 최소 한 부는 결재란에 서명해 ISMS 증적 보관 위치에 둔다.
 
 Deploy, Config, Backup, OpenObserve — Config, Host Audit — On-demand, Host Audit — Resend는 스케줄을 걸지 않는다.
+
+### 6.3 OpenBao — Periodic Check
+
+| 항목 | 값 |
+|---|---|
+| Template | OpenBao — Periodic Check |
+| 의도한 시각 | 매일 `<HH:MM>` KST(시각은 운영자 비공개 노트에 둔다) |
+| Cron | 6.1과 같은 시간대 규칙으로 계산한다 |
+
+템플릿은 정의만 하고 **스케줄은 일괄 전환 뒤([openbao-cutover 런북](runbooks/openbao-cutover.md) 9단계)에 건다.** 전환 전에는 8단계의 수동 1회 실행만 한다.
 
 ---
 

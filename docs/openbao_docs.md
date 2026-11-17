@@ -62,7 +62,7 @@ python3 scripts/openbao_docs.py put <문서 경로> <입력 YAML> [--merge]
 
 ## 4. Periodic Check (`check`, Ticket-8 #519)
 
-Semaphore 템플릿 "OpenBao — Periodic Check"가 `periodic_check` AppRole Environment로 **매일 1회** 돌린다(템플릿·스케줄 생성은 일괄 전환 티켓). 코드는 `scripts/openbao_check.py`이고 `openbao_docs.py check`가 부른다.
+Semaphore 템플릿 "OpenBao — Periodic Check"가 `periodic_check` AppRole Environment로 **매일 1회** 돌린다(템플릿 정의와 Environment는 [semaphore-setup.md](semaphore-setup.md) 4·5절, 스케줄은 전환 뒤). 코드는 `scripts/openbao_check.py`이고 `openbao_docs.py check`가 부른다.
 
 ### 입력
 
@@ -70,7 +70,7 @@ Semaphore 템플릿 "OpenBao — Periodic Check"가 `periodic_check` AppRole Env
 |---|---|
 | `VAULT_ADDR` | OpenBao 주소 |
 | `VAULT_NAMESPACE` | 기본 `infra` |
-| `VAULT_TOKEN` 또는 `VAULT_ROLE_ID`+`VAULT_SECRET_ID` | 토큰이 없으면 AppRole로 로그인한다 |
+| `VAULT_TOKEN` 또는 `VAULT_ROLE_ID`+`VAULT_SECRET_ID` | 토큰이 없으면 AppRole로 로그인한다. `periodic_check` Environment는 `VAULT_TOKEN`을 넣지 않고 AppRole만 쓴다(로컬 점검용 수단) |
 | `--tofu-dir` | OpenTofu 코드 디렉터리(기본 `tofu/openbao`). 저장소 루트에서 돈다 |
 
 Semaphore API 읽기는 Service `semaphore`를 쓴다: 주소 `inventory/services/semaphore`, 토큰 `secrets/services/semaphore/inventory_read`(`inventory_read`). OpenBao 토큰과 섞지 않는다.
