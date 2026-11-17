@@ -27,22 +27,22 @@
 
 - **오류 표면화**: GitHub API가 실패하거나(상태 코드 오류, 연결 불가) 자격이 없으면 먼저 `result=error`와 오류 코드를 하트비트에 남기고, 마지막 태스크(GWW-010)가 실행을 실패시킨다. 하트비트를 남길 OpenObserve 연결이 없거나 수집이 실패하면 실행이 실패한다.
 - **check 모드**: 재전송하지 않고(`would_redeliver_count`만 계산해 출력) 하트비트도 쓰지 않는다. 읽기 요청만 보낸다.
-- **자격 최소화**: GitHub 자격은 조직 권한 **Webhooks**(읽기와 재전송을 위한 쓰기)만 가진 세분화 토큰 또는 GitHub App이고 만료일을 둔다. 읽기와 재전송 권한은 분리할 수 없다(Ticket-1). 값은 OpenBao KV `agents/github-webhook-watch`에만 둔다. 이 값을 다루는 태스크는 모두 `no_log`이고 실패 메시지·하트비트에는 값이 없다.
+- **자격 최소화**: GitHub 자격은 조직 권한 **Webhooks**(읽기와 재전송을 위한 쓰기)만 가진 세분화 토큰 또는 GitHub App이고 만료일을 둔다. 읽기와 재전송 권한은 분리할 수 없다(Ticket-1). 값은 OpenBao `secrets/services/github/org_hooks_read`에만 둔다. 이 값을 다루는 태스크는 모두 `no_log`이고 실패 메시지·하트비트에는 값이 없다.
 
 ---
 
 ## 2. OpenBao 입력
 
-KV `agents/github-webhook-watch`(호스트 네임스페이스, 다른 컨트롤러 역할과 같은 AppRole·환경변수). Extra variables(`-e gww_...`)가 KV보다 우선한다.
+공용 읽기 지점(`lookup('openbao_doc', ...)`, 네임스페이스 `infra`, [docs/openbao_integration.md](openbao_integration.md))으로 문서 4개만 읽는다. 읽는 문서와 필수 키는 역할 `vars/main.yml`의 `github_webhook_watch_openbao_required` 한 선언이 원본이고, GWW-005 입력 검증, 스키마 대조 테스트, 요청 기록 단언이 같은 선언을 쓴다. 문서나 필수 키가 없으면 대체값 없이 실패한다. 이 역할은 마운트·네임스페이스·경로 접두사 변수를 갖지 않는다.
 
-| 키 | 용도 |
-|---|---|
-| `github_token` | 조직 Webhooks 권한 토큰(만료일 있음) |
-| `github_org` | 조직 이름 |
-| `hook_url` | 의도한 웹훅 수신 URL(훅을 찾는 기준) |
-| `o2_endpoint`, `o2_org`, `o2_ingest_user`, `o2_ingest_password` | 하트비트를 남길 OpenObserve 연결 |
-| `github_api_url`(선택) | 기본 공개 API 주소 |
-| `expected_events`(선택) | 의도한 구독 이벤트 목록(기본은 Ticket-1에서 확정한 13개) |
+| 문서 | 키 | 용도 |
+|---|---|---|
+| `secrets/services/github/org_hooks_read` | `token` | 조직 Webhooks 권한 토큰(만료일 있음) |
+| `inventory/config/github_webhook_watch` | `github_org`, `hook_url`, `o2_org` | 조직 이름, 의도한 웹훅 수신 URL(훅을 찾는 기준), 하트비트를 남길 OpenObserve 조직 |
+| `inventory/services/openobserve` | `url` | 하트비트를 보낼 OpenObserve 주소 |
+| `secrets/services/openobserve/ingest` | `username`, `password` | 하트비트 수집 자격(컨트롤러 계열이 공유하는 하나) |
+
+GitHub API 주소(`https://api.github.com`)와 의도한 구독 이벤트 목록(기본은 Ticket-1에서 확정한 13개)은 공개해도 되는 값이라 역할 기본값(`gww_github_api_url`, `gww_expected_events`)이다. 이 AppRole(`github_webhook_watch` 계열)의 정책은 위 문서와 `inventory/services/*`만 읽는다.
 
 ---
 
@@ -51,10 +51,8 @@ KV `agents/github-webhook-watch`(호스트 네임스페이스, 다른 컨트롤�
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `GWW-001` | `Assert the check interval is shorter than the redelivery window` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (주기 < 재전송 가능 기간, 양의 정수) |
-| `GWW-002` | `Log in to OpenBao with AppRole when no Vault token is given` | `ansible.builtin.uri` | Controller / Localhost | POST `auth/approle/login`, `no_log`, check 모드에서도 실행, Vault 토큰이 없고 AppRole 자격이 있을 때만 |
-| `GWW-003` | `Fetch the webhook check inputs from OpenBao KV when OpenBao access is given` | `ansible.builtin.uri` | Controller / Localhost | GET, `no_log`, OpenBao 인증이 있을 때만 |
-| `GWW-004` | `Keep the OpenBao KV values as a fact that never reaches the fact cache` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수, `no_log`, `cacheable: false` |
-| `GWW-005` | `Assert the heartbeat destination inputs exist before calling GitHub` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, 값을 출력하지 않아 `no_log` 없이 `[GWW-INPUT]` 안내를 보인다 (OpenObserve 연결·조직 이름·수신 URL이 비면 점검 전에 실패) |
+| `GWW-003` | `Read the webhook check inputs from the OpenBao documents (shared reader, no fallback)` | `ansible.builtin.set_fact` | Controller / Localhost | 읽기 전용(공용 읽기 지점의 GET만), 문서·키가 없으면 실패, `no_log`, `cacheable: false` |
+| `GWW-005` | `Assert the required document keys and heartbeat destination inputs exist before calling GitHub` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, 값을 출력하지 않아 `no_log` 없이 `[GWW-INPUT]` 안내를 보인다 (필수 키가 빠졌거나 OpenObserve 연결·조직 이름·수신 URL이 비면 점검 전에 실패, 빠진 키는 `문서:키` 이름만 출력) |
 | `GWW-006` | `Compare the organization webhook and redeliver recently failed deliveries` | `gww_check` | Controller / Localhost | 훅 비교는 읽기 전용, 재전송은 같은 전달을 다시 보내지 않아 멱등, check 모드는 재전송 없음, `no_log` |
 | `GWW-007` | `Build the heartbeat record (codes and counts only, no credentials or URLs)` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수, `no_log`, `cacheable: false` |
 | `GWW-008` | `Send the heartbeat record to OpenObserve` | `ansible.builtin.uri` | Controller / Localhost | POST `_json`, `no_log`, 재시도 2회, check 모드에서는 건너뜀 |
@@ -69,7 +67,7 @@ KV `agents/github-webhook-watch`(호스트 네임스페이스, 다른 컨트롤�
 
 1. Semaphore 프로젝트에서 새 Task Template을 만든다. 이름은 `GitHub Webhook Watch`.
 2. Playbook은 `playbooks/github_webhook_watch.yml`, Inventory는 `localhost`가 들어 있는 인벤토리(컨트롤러 전용이라 호스트에는 접속하지 않는다), Repository는 이 저장소의 기본 브랜치.
-3. Environment(시크릿 변수)에는 OpenBao 접속(`VAULT_ADDR`, AppRole `VAULT_ROLE_ID`/`VAULT_SECRET_ID`, 네임스페이스)만 둔다. GitHub 토큰·URL은 OpenBao KV `agents/github-webhook-watch`에 둔다. 이 AppRole은 해당 KV 읽기 권한이 필요하다.
+3. Environment(시크릿 변수)에는 `github_webhook_watch` 계열의 OpenBao 접속(`VAULT_ADDR`, AppRole `VAULT_ROLE_ID`/`VAULT_SECRET_ID`)만 둔다(네임스페이스·마운트 변수는 없다). GitHub 토큰·URL은 2절의 문서에 둔다. Extra variables로 덮어쓰는 경로는 없다.
 4. 예약(Schedule)은 6시간마다 `0 */6 * * *`(cron, 서버 시간대 기준)이다. 재전송 가능 기간이 3일이므로 주기를 하루 이상으로 늘리지 않는다. 주기를 바꾸면 `gww_check_interval_hours`도 맞춘다(하트비트 침묵 알림 임계가 이 값을 쓴다).
 5. 처음 등록할 때는 `--check`(Semaphore의 Dry Run)로 한 번 돌려 훅 상태와 재전송 예정 건수가 기대와 같은지 본 뒤 일반 실행으로 바꾼다.
 6. 실패 알림: 실행이 실패하면 Semaphore가 실패로 표시하고 하트비트에는 `result=error`가 남는다.
@@ -80,4 +78,4 @@ KV `agents/github-webhook-watch`(호스트 네임스페이스, 다른 컨트롤�
 
 - 실행 결과의 `[GWW-RESULT]` 줄에서 훅 상태와 건수를 본다(자격·URL은 출력되지 않는다).
 - `failed_count`나 `expired_count`가 0이 아니면 수신기 쪽 장애 기간을 확인하고, 기간을 넘긴 실패는 복구할 수 없으므로 월간 감사 로그 내보내기로 보완한다.
-- 자격 만료 전에 OpenBao의 `github_token`을 교체한다(만료일은 비공개 노트에 기록).
+- 자격 만료 전에 OpenBao `secrets/services/github/org_hooks_read`의 `token`을 교체한다(만료일은 비공개 노트에 기록).

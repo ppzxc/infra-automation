@@ -672,7 +672,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 **왜 중요한가**: 점검이 GitHub을 확인하지 못해 웹훅 삭제·변경 감시와 실패 전달 재전송이 멈춘다. 토큰 만료가 가장 흔하며, 방치하면 재전송 가능 기간(3일)이 지나 실패 전달을 복구할 수 없게 된다.
 
 **오류 코드별 조치**
-- `credential_missing`: OpenBao `agents/github-webhook-watch`의 `github_token`·`github_org`가 비었다. 값을 채운다.
+- `credential_missing`: OpenBao `secrets/services/github/org_hooks_read`의 `token` 또는 `inventory/config/github_webhook_watch`의 `github_org`가 비었다. 값을 채운다.
 - `api_http_401`: 토큰이 만료·폐기됐다. 새 세분화 토큰(조직 Webhooks 권한, 만료일 있음)을 발급해 OpenBao에 교체한다.
 - `api_http_403`: 권한 부족이거나 요청 한도 초과다. 토큰의 조직 Webhooks 권한(읽기·재전송은 쓰기)과 조직의 토큰 승인 정책을 확인한다.
 - `api_http_404`: 조직 이름이나 훅 경로가 틀렸다. `github_org`를 확인한다.
@@ -695,7 +695,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 1. 통지 행의 상태와 `hook_problems`(문제 목록)를 본다.
 2. GitHub 조직 설정의 웹훅 화면에서 수신 URL·활성 여부·구독 이벤트를 의도한 값(점검 작업 입력의 수신 URL, 확정한 13개 이벤트)과 대조한다.
 3. 조직 감사 로그(웹 UI)의 웹훅 변경 이력으로 변경한 사람과 시각을 확인하고 작업 일정과 대조한다.
-4. 승인되지 않은 변경이면 웹훅을 의도한 값으로 되돌리고 해당 계정·토큰을 점검한다. `missing`인데 수신 URL을 바꾼 것이면 OpenBao `agents/github-webhook-watch`의 `hook_url`을 새 값으로 고친다. 구독 이벤트를 의도적으로 바꿨다면 `expected_events`도 함께 바꾼다.
+4. 승인되지 않은 변경이면 웹훅을 의도한 값으로 되돌리고 해당 계정·토큰을 점검한다. `missing`인데 수신 URL을 바꾼 것이면 OpenBao `inventory/config/github_webhook_watch`의 `hook_url`을 새 값으로 고친다. 구독 이벤트를 의도적으로 바꿨다면 역할 기본값 `gww_expected_events`도 코드 리뷰를 거쳐 함께 바꾼다.
 5. 복구 뒤 작업을 수동 실행해 다음 하트비트의 `hook_status`가 `ok`인지 확인한다. 훅이 삭제되어 있던 동안의 이벤트는 GitHub이 전달하지 않았으므로 조직 감사 로그 내보내기로 해당 구간을 보완한다.
 
 ---
