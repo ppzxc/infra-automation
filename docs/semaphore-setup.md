@@ -154,10 +154,10 @@ Host Agents 4개가 **같은 Variable Group 하나를 공유**한다. Repo Maint
 
 | 경로 | 쓰는 템플릿 |
 |---|---|
-| `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config, Host Audit (SSH 접속) |
-| `hosts/<host>/agents` | Deploy, Config, Repo Maintenance, Host Audit (Configuration Drift의 Config `--check` 하위 실행) |
-| `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config, Host Audit (Configuration Drift) |
-| `agents/rustfs` | Deploy, Config, Repo Maintenance, Host Audit(엔드포인트) |
+| `hosts/<host>`, `hosts/<host>/users/*`, `users/*` | Deploy, Config (SSH 접속) |
+| `hosts/<host>/agents` | Deploy, Config, Repo Maintenance |
+| `agents/openobserve` | Deploy, Config, Repo Maintenance, OpenObserve — Config |
+| `agents/rustfs` | Deploy, Config, Repo Maintenance |
 | `secrets/services/rustfs/audit_reports`, `inventory/services/rustfs`, `secrets/services/alert/notify`(KISA 악화 알림), `inventory/config/host_audit`(메일) | Host Audit, Host Audit — Resend (보관 키·메일 입력 — [host_audit.md §11.4](host_audit.md#114-입력-openbao-git에는-시크릿-없음)·[§13.3](host_audit.md#133-입력-openbao-git에는-주소-없음)). 드리프트 하위 실행 때문에 `host_audit` AppRole은 provision·host_agents가 읽는 경로도 읽는다 |
 
 필요한 키 목록은 [배포 내역서 Full §5](host-agents-deploy-inventory-full.md#5-입력-openbao-kv-v2-git에는-시크릿-없음)를 본다. 템플릿별로 추가로 필요한 키는 다음과 같다.

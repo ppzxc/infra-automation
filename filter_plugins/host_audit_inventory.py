@@ -335,9 +335,8 @@ def host_audit_asset_declaration(asset_doc, lookup_ok=True):
     for path, key in DECLARATION_KEYS:
         value = _doc_value(asset_doc, path)
         # isms 절이 객체가 아니면(문자열·목록) 그 아래 값은 읽을 수 없다: 비어 있는 것이 아니라 잘못된 값이다.
-        if len(path) > 1 and asset_doc.get(path[0]) is not None and not isinstance(asset_doc.get(path[0]), dict):
-            value = path
-        if value is not None and not isinstance(value, str):
+        clause_broken = len(path) > 1 and asset_doc.get(path[0]) is not None and not isinstance(asset_doc.get(path[0]), dict)
+        if clause_broken or (value is not None and not isinstance(value, str)):
             malformed.append(key)
             value = ''
         # Document text is data, never a template: ansible-core < 2.19 needs the explicit unsafe mark (2.19+ is a no-op).
