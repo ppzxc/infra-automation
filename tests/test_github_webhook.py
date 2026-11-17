@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_plugins"))
 import otelcol_harness as h  # noqa: E402
 import test_host_agents as base  # noqa: E402
+bao = base.bao  # noqa: E402  공용 가짜 서버 위에 Host Agents 호스트를 채운 fixture
 from host_agents import (  # noqa: E402
     host_agents_github_webhook,
     host_agents_github_webhook_gateway_errors,
@@ -225,9 +226,7 @@ def test_unit_starts_after_docker_and_restarts_on_failure_only_where_the_receive
 # ---- deploy-time input checks (filters; no binary needed) -----------------------------------------------------------
 
 def _resolve(**kv):
-    required = {"o2_ingest_token": "t", "rustfs_access_key": "a", "rustfs_secret_key": "s", "restic_password": "p"}
-    kv = dict(required, **kv)
-    return host_agents_resolve_inputs(kv, [], [], [], "hosts/h/agents")
+    return base._filter(dict(base.REQUIRED, **kv), [], [], [], "inventory/assets/h")
 
 
 def _kv(**over):
@@ -243,7 +242,7 @@ def test_webhook_is_off_by_default_and_needs_no_inputs_then():
 def test_enabled_webhook_with_complete_inputs_is_valid_and_the_values_are_resolved_separately():
     res = _resolve(**_kv())
     assert res["errors"] == [] and res["otel_github_webhook"] is True
-    assert host_agents_github_webhook(_kv()) == FAKE
+    assert host_agents_github_webhook(*base._stored(_kv())) == FAKE
     assert SECRET not in json.dumps(res) and PATH not in json.dumps(res)         # the merged inputs carry no private value
 
 
@@ -251,7 +250,7 @@ def test_enabled_webhook_with_complete_inputs_is_valid_and_the_values_are_resolv
 @pytest.mark.parametrize("blank", ["", "  ", None])
 def test_enabled_webhook_fails_when_any_required_input_is_blank(key, blank):
     errors = _resolve(**_kv(**{f"github_webhook_{key}": blank}))["errors"]
-    assert len(errors) == 1 and f"github_webhook_{key}" in errors[0]
+    assert len(errors) == 1 and ("webhook_secret" if key == "secret" else f"agents.github_webhook.{key}") in errors[0]
     assert SECRET not in errors[0] and PATH not in errors[0]
 
 
@@ -291,7 +290,7 @@ def test_secrets_with_systemd_special_characters_survive_the_env_file_and_still_
 @pytest.mark.parametrize("secret", ["line\nbreak", "tab\there", "café", "sep arator", "nul\x00", "del\x7f"])
 def test_secret_outside_printable_ascii_is_rejected_without_echoing_it(secret):
     errors = _resolve(**_kv(github_webhook_secret=secret))["errors"]
-    assert len(errors) == 1 and "github_webhook_secret" in errors[0] and secret not in errors[0]
+    assert len(errors) == 1 and "webhook_secret" in errors[0] and secret not in errors[0]
 
 
 @pytest.mark.parametrize("port", ["٣٤", "123456", "0", "65536", "-1", "1 2", ""])
@@ -310,10 +309,9 @@ def test_path_with_ordinary_segments_is_accepted():
 
 @pytest.mark.parametrize("os_path, ok", [("modern", True), ("legacy_el6", False), ("legacy_el7", False)])
 def test_enabling_the_webhook_on_a_legacy_host_fails_input_validation(os_path, ok):
-    required = {"o2_ingest_token": "t", "rustfs_access_key": "a", "rustfs_secret_key": "s", "restic_password": "p"}
-    res = host_agents_resolve_inputs(dict(required, **_kv()), [], [], [], "hosts/h/agents", os_path=os_path)
+    res = base._filter(dict(base.REQUIRED, **_kv()), [], [], [], "inventory/assets/h", os_path=os_path)
     assert (res["errors"] == []) is ok
-    off = host_agents_resolve_inputs(dict(required), [], [], [], "hosts/h/agents", os_path=os_path)
+    off = base._filter(dict(base.REQUIRED), [], [], [], "inventory/assets/h", os_path=os_path)
     assert off["errors"] == []                                   # off hosts are never affected
 
 
@@ -346,13 +344,14 @@ def _fake_docker(tmp_path, monkeypatch, gateway, rc=0):
     return log
 
 
-def _run_gateway_play(tmp_path, kv, os_path="modern"):
+def _run_gateway_play(tmp_path, bao, kv, os_path="modern"):
     marker = tmp_path / "later-change-ran"
-    fixture = {"host": kv, "openobserve": base.SHARED_O2, "rustfs": base.SHARED_RUSTFS}
+    agents, secrets = base._stored(kv)
+    base._host(bao, "good", secrets, agents)
     later = [{"name": "stands for the binary delivery and the rule removal", "ansible.builtin.file":
               {"path": str(marker), "state": "touch", "mode": "0600"}, "check_mode": False}]
-    res, _ = base._run_input_tasks(tmp_path, ["good"], "http://127.0.0.1:1", extra_tasks=later,
-                                   extra_vars={"host_agents_kv_fixture": fixture, "host_agents_os_path": os_path})
+    res, _ = base._run_input_tasks(tmp_path, ["good"], bao.url, extra_tasks=later,
+                                   extra_vars={"host_agents_os_path": os_path})
     return res, marker
 
 
@@ -360,9 +359,9 @@ def _host_kv(**over):
     return dict(base.REQUIRED, **_kv(**over))
 
 
-def test_matching_gateway_lets_the_play_continue(tmp_path, monkeypatch):
+def test_matching_gateway_lets_the_play_continue(tmp_path, monkeypatch, bao):
     log = _fake_docker(tmp_path, monkeypatch, BRIDGE_ADDRESS)
-    res, marker = _run_gateway_play(tmp_path, _host_kv())
+    res, marker = _run_gateway_play(tmp_path, bao, _host_kv())
     assert res.returncode == 0, res.stdout + res.stderr
     assert marker.exists()
     call = log.read_text().split()
@@ -370,16 +369,16 @@ def test_matching_gateway_lets_the_play_continue(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("case", ["other-gateway", "docker-fails"])
-def test_gateway_mismatch_or_docker_failure_stops_the_host_before_any_later_change(tmp_path, monkeypatch, case):
+def test_gateway_mismatch_or_docker_failure_stops_the_host_before_any_later_change(tmp_path, monkeypatch, bao, case):
     _fake_docker(tmp_path, monkeypatch, "192.0.2.78" if case == "other-gateway" else "", rc=0 if case == "other-gateway" else 1)
-    res, marker = _run_gateway_play(tmp_path, _host_kv())
+    res, marker = _run_gateway_play(tmp_path, bao, _host_kv())
     assert res.returncode != 0 and not marker.exists()
     assert "게이트웨이" in res.stdout + res.stderr and BRIDGE_ADDRESS not in res.stdout + res.stderr
 
 
-def test_docker_is_not_called_when_the_webhook_is_off(tmp_path, monkeypatch):
+def test_docker_is_not_called_when_the_webhook_is_off(tmp_path, monkeypatch, bao):
     log = _fake_docker(tmp_path, monkeypatch, "192.0.2.78")
-    res, marker = _run_gateway_play(tmp_path, dict(base.REQUIRED))
+    res, marker = _run_gateway_play(tmp_path, bao, dict(base.REQUIRED))
     assert res.returncode == 0 and marker.exists() and not log.exists()
 
 

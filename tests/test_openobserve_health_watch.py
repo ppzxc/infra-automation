@@ -191,9 +191,7 @@ def _deploy(tmp_path, is_checker, os_path="modern", expect_ok=True):
         "role_path": str(ROLE), "host_agents_os_path": os_path, "ansible_service_mgr": "sysv",
         "host_agents_o2_health_checker": "localhost" if is_checker else "ns0266",
         "o2_endpoint": "https://o2.example:5080", "o2_ca_file": "",
-        "host_agents_shared_secrets": {"openobserve": {
-            "alert_webhook_plain_url": "https://hook.example/SECRET", "alert_webhook_token": "tok",
-            "alert_webhook_auth_header": "X-NANOIT-ACCESS"}},
+        "openbao_fixture": {"secrets/services/alert/notify": {"url": "https://hook.example/SECRET"}},
         "o2_health_script_path": str(t / "sbin" / "check.sh"), "o2_health_config_dir": str(t / "etc"),
         "o2_health_state_dir": str(t / "var"), "otelcol_systemd_unit_dir": str(t / "units"),
         "host_agents_owner": getpass.getuser(), "host_agents_group": grp.getgrgid(os.getgid()).gr_name,
@@ -252,18 +250,18 @@ def test_checker_host_is_declared_in_role_defaults_and_defaults_to_ns0266():
     assert d["host_agents_o2_health_checker"] == "ns0266"
 
 
-def test_deploy_does_not_read_the_old_json_webhook_key(tmp_path):
-    """JSON 경로 키(alert_webhook_url)만 있고 text/plain 키가 없으면 배포 전에 실패한다."""
+def test_deploy_fails_before_any_change_when_the_alert_notify_document_is_missing(tmp_path):
+    """secrets/services/alert/notify 문서가 없으면 다른 값으로 대체하지 않고 배포 전에 실패한다."""
     t = tmp_path
     vars_ = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text())
     vars_.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text()))
     vars_.update({"role_path": str(ROLE), "host_agents_os_path": "modern", "ansible_service_mgr": "sysv",
                   "host_agents_o2_health_checker": "localhost", "o2_endpoint": "https://o2.example:5080",
-                  "o2_ca_file": "", "host_agents_shared_secrets": {"openobserve": {"alert_webhook_url": "https://old.example/x"}}})
+                  "o2_ca_file": "", "openbao_fixture": {"inventory/services/openobserve": {"url": "https://o2.example:5080"}}})
     (t / "vars.yml").write_text(yaml.safe_dump(vars_))
     pb = t / "deploy.yml"
     pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False,
         "vars_files": [str(t / "vars.yml")], "tasks": [{"ansible.builtin.import_tasks": str(TASKS)}]}]))
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, cwd=ROOT, timeout=120)
-    assert res.returncode != 0 and "alert_webhook_plain_url" in res.stdout + res.stderr
+    assert res.returncode != 0 and "secrets/services/alert/notify" in res.stdout + res.stderr

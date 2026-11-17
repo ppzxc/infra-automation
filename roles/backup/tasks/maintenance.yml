@@ -98,8 +98,11 @@
 
     - name: Expose the shared agents KV so endpoint defaults resolve like the Deploy path
       ansible.builtin.set_fact:
-        host_agents_shared_secrets: "{{ {'openobserve': _kv.openobserve, 'rustfs': _kv.rustfs} }}"
-        host_agents_host_overrides: "{{ {'rustfs_bucket': ((_kv.host | default({})).rustfs_bucket | default('')) | string | trim} }}"
+        # #526 전까지의 이음매: 옛 KV 값을 Deploy 경로(inventory/services/*)와 같은 팩트 모양으로 맞춘다.
+        host_agents_services: >-
+          {{ {'openobserve': {'url': _kv.openobserve.o2_endpoint | default(''), 'org': _kv.openobserve.o2_org | default('default')},
+              'rustfs': {'url': _kv.rustfs.rustfs_endpoint | default(''), 'region': _kv.rustfs.rustfs_region | default('')}} }}
+        rustfs_bucket: "{{ ((_kv.host | default({})).rustfs_bucket | default('')) | string | trim or (rustfs_bucket_prefix ~ '-' ~ inventory_hostname) }}"
 
     # 빠진 항목의 이름만(값은 절대 아님) 모아 한 번에 보여 준다. 버킷 이름은 시크릿이 아니므로 그대로 보여 준다.
     # 주의: assert의 fail_msg는 블록의 no_log와 무관하게 출력된다 — 이 목록에 시크릿 값을 넣지 않는다.

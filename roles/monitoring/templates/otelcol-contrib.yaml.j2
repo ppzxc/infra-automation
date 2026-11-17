@@ -184,7 +184,7 @@
         if: {{ (c ~ ' and attributes["message"] != nil' if fmt != 'audit' else c ~ ' and attributes["audit.type"] != nil') | to_json }}
 {% endmacro %}
 {#
-  컨테이너 로그(hosts/<host>/agents의 otel_container_logs). docker json-file 드라이버 파일을 읽으므로 검증한 modern 경로에서만 켠다.
+  컨테이너 로그(Asset 문서 agents.otel.container_logs). docker json-file 드라이버 파일을 읽으므로 검증한 modern 경로에서만 켠다.
 #}
 {% set container_logs = (host_agents_inputs.otel_container_logs | default(false) | bool) and (host_agents_os_path | default('modern')) == 'modern' %}
 {% set legacy = (host_agents_os_path | default('modern')) == 'legacy_el6' %}
@@ -449,7 +449,7 @@ receivers:
     collection_interval: {{ otel_hostmetrics_interval }}
 {% endif %}
 {% if app_telemetry %}
-  # 컨테이너 앱 텔레메트리(hosts/<host>/agents의 otel_app_telemetry, ADR-0012): HTTP만 연다(gRPC 없음).
+  # 컨테이너 앱 텔레메트리(Asset 문서 agents.otel.app_telemetry, ADR-0012): HTTP만 연다(gRPC 없음).
   otlp:
     protocols:
       http:

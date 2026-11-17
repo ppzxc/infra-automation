@@ -118,13 +118,13 @@ def raw_scp_argv(src, dest, host, port, user, key, password_auth=False):
     absolute path. The host key check is relaxed like the connection probe and ansible.cfg.
     With a key, scp runs with BatchMode so it can never hang on a prompt. Without a key a
     password-only connection is supported only when ``password_auth`` is true (the per-host
-    ``host_agents_allow_password_auth`` exception, ADR-0006 §2.1): the command is wrapped in
+    password-auth exception: an ssh Endpoint without ``identity``, ADR-0006 §2.1): the command is wrapped in
     ``sshpass -e`` so the password comes from the ``SSHPASS`` environment variable and never
     appears in argv, logs or the process list. Otherwise it fails here with a clear message.
     """
     if not key and not password_auth:
         raise ValueError('scp upload needs the resolved SSH private key (password-only connections need '
-                         'host_agents_allow_password_auth)')
+                         'a ssh Endpoint without identity)')
     if not _SAFE_REMOTE_PATH.match(str(dest)) or '..' in str(dest).split('/'):
         raise ValueError('unsafe remote scp path: %r' % (dest,))
     host = str(host)

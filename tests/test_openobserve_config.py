@@ -2689,7 +2689,6 @@ def test_host_address_picks_ansible_host_then_public_ip_and_skips_blank_or_unsaf
 
 
 def test_host_address_follows_the_reachability_check_priority_ansible_host_public_ip_ip_host():
-    from host_agents import host_agents_tcpcheck_targets
     from openobserve_config import o2c_host_addresses
     kv = {"ns0001": {"ansible_host": "192.0.2.211", "public_ip": "192.0.2.212", "ip": "192.0.2.213", "host": "192.0.2.214"},
           "ns0002": {"public_ip": "192.0.2.222", "ip": "192.0.2.223", "host": "192.0.2.224"},
@@ -2699,8 +2698,7 @@ def test_host_address_follows_the_reachability_check_priority_ansible_host_publi
     roster = list(kv)
     got = o2c_host_addresses(roster, kv)
     assert got == {"ns0001": "192.0.2.211", "ns0002": "192.0.2.222", "ns0003": "192.0.2.233", "ns0004": "192.0.2.244", "ns0005": "192.0.2.255"}
-    # 도달성 검사가 실제로 접속하는 주소와 같다
-    assert [t.rsplit(":", 1)[0] for t in host_agents_tcpcheck_targets(roster, kv)] == [got[h] for h in roster]
+    # (도달성 검사의 주소 해석은 Endpoint 문서로 바뀌었다(#525). 이 함수의 새 구조 전환은 #527이 한다.)
 
 
 def _label_of(expression, host):
