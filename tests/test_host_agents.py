@@ -12,12 +12,12 @@ import os
 import subprocess
 import sys
 import tarfile
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
 import yaml
+
+from openbao_fake import FakeOpenBao
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
@@ -452,49 +452,28 @@ SHARED_O2 = {"controller_token": "shared-o2"}
 SHARED_RUSTFS = {"maintenance_access_key": "shared-rfs"}
 
 
-class _FakeOpenBao(BaseHTTPRequestHandler):
-    routes = {}
-
-    def do_GET(self):  # noqa: N802
-        status, body = self.routes.get(self.path, (404, {"errors": []}))
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self, *args):
-        pass
-
-
-def _kv(data):
-    return 200, {"data": {"data": data, "metadata": {"version": 1}}}
+@pytest.fixture
+def bao():
+    with FakeOpenBao() as f:
+        f.set("secret", "hosts/good/agents", GOOD)
+        f.set("secret", "hosts/bare/agents", REQUIRED)
+        f.set("secret", "hosts/badexclude/agents", BAD_EXCLUDE)
+        f.set("secret", "hosts/missing/agents", MISSING)
+        f.set("secret", "hosts/backuponly/agents", {k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"})
+        f.set("secret", "hosts/notoken/agents", {k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"})
+        f.deny("secret", "hosts/denied/agents")
+        f.set("secret", "agents/openobserve", SHARED_O2)
+        f.set("secret", "agents/rustfs", SHARED_RUSTFS)
+        # tcpcheck 대상 해석(hosts/<host>): 주소는 public_ip, 비표준 SSH 포트는 ansible_port (Issue #203)
+        f.set("secret", "hosts/svc-std", {"public_ip": "192.0.2.10", "fqdn": "svc-std.example.internal"})
+        f.set("secret", "hosts/svc-odd", {"public_ip": "192.0.2.11", "ansible_port": 8487})
+        f.deny("secret", "hosts/svc-denied")
+        yield f
 
 
 @pytest.fixture
-def openbao():
-    server = HTTPServer(("127.0.0.1", 0), _FakeOpenBao)
-    _FakeOpenBao.routes = {
-        "/v1/secret/data/hosts/good/agents": _kv(GOOD),
-        "/v1/secret/data/hosts/bare/agents": _kv(REQUIRED),
-        "/v1/secret/data/hosts/badexclude/agents": _kv(BAD_EXCLUDE),
-        "/v1/secret/data/hosts/missing/agents": _kv(MISSING),
-        "/v1/secret/data/hosts/backuponly/agents": _kv({k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}),
-        "/v1/secret/data/hosts/notoken/agents": _kv({k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}),
-        "/v1/secret/data/hosts/nokv/agents": (404, {"errors": []}),
-        "/v1/secret/data/hosts/denied/agents": (403, {"errors": ["permission denied"]}),
-        "/v1/secret/data/agents/openobserve": _kv(SHARED_O2),
-        "/v1/secret/data/agents/rustfs": _kv(SHARED_RUSTFS),
-        # tcpcheck 대상 해석(hosts/<host>): 주소는 public_ip, 비표준 SSH 포트는 ansible_port (Issue #203)
-        "/v1/secret/data/hosts/svc-std": _kv({"public_ip": "192.0.2.10", "fqdn": "svc-std.example.internal"}),
-        "/v1/secret/data/hosts/svc-odd": _kv({"public_ip": "192.0.2.11", "ansible_port": 8487}),
-        "/v1/secret/data/hosts/svc-denied": (403, {"errors": ["permission denied"]}),
-    }
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+def openbao(bao):
+    return bao.url
 
 
 def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token="tok", extra_tasks=None,
@@ -604,8 +583,8 @@ def test_missing_vault_token_fails_instead_of_previewing_incomplete_config(tmp_p
     assert "OpenBao 조회 실패" in res.stdout + res.stderr
 
 
-def test_missing_shared_secret_fails_the_host(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = (404, {"errors": []})
+def test_missing_shared_secret_fails_the_host(tmp_path, bao, openbao):
+    bao.remove("secret", "agents/rustfs")
     res, out = _run_input_tasks(tmp_path, ["good"], openbao)
     assert res.returncode != 0 and out == {}
     assert "공유 시크릿 누락 또는 비어 있음: agents/rustfs" in res.stdout + res.stderr
@@ -1293,18 +1272,18 @@ def _effective(tmp_path, openbao, extra_vars=None, host="good"):
     return json.loads((tmp_path / "eff.json").read_text())
 
 
-def test_endpoints_come_from_openbao_when_not_set_elsewhere(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/agents/openobserve"] = _kv(_ENDPOINTS_O2)
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
+def test_endpoints_come_from_openbao_when_not_set_elsewhere(tmp_path, bao, openbao):
+    bao.set("secret", "agents/openobserve", _ENDPOINTS_O2)
+    bao.set("secret", "agents/rustfs", _ENDPOINTS_RUSTFS)
     eff = _effective(tmp_path, openbao)
     assert eff == {"o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme", "o2_ca_file": "/etc/pki/o2-ca.pem",
                    "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup-prod-good",
                    "rustfs_region": "kr-1", "rustfs_ca_file": "/etc/pki/rfs-ca.pem"}
 
 
-def test_extra_vars_win_over_openbao_endpoints(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/agents/openobserve"] = _kv(_ENDPOINTS_O2)
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
+def test_extra_vars_win_over_openbao_endpoints(tmp_path, bao, openbao):
+    bao.set("secret", "agents/openobserve", _ENDPOINTS_O2)
+    bao.set("secret", "agents/rustfs", _ENDPOINTS_RUSTFS)
     eff = _effective(tmp_path, openbao, extra_vars={"o2_endpoint": "https://o2.extra.invalid:5080",
                                                     "rustfs_bucket": "extra-bucket"})
     assert eff["o2_endpoint"] == "https://o2.extra.invalid:5080" and eff["rustfs_bucket"] == "extra-bucket"
@@ -1317,8 +1296,8 @@ def test_endpoint_defaults_apply_when_openbao_has_none(tmp_path, openbao):
                    "rustfs_bucket": "backup-prod-good", "rustfs_region": "", "rustfs_ca_file": ""}
 
 
-def test_bucket_follows_the_naming_rule_per_host_and_can_be_overridden_in_the_host_kv(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/hosts/special/agents"] = _kv(dict(REQUIRED, rustfs_bucket="backup-prod-special-a"))
+def test_bucket_follows_the_naming_rule_per_host_and_can_be_overridden_in_the_host_kv(tmp_path, bao, openbao):
+    bao.set("secret", "hosts/special/agents", dict(REQUIRED, rustfs_bucket="backup-prod-special-a"))
     assert _effective(tmp_path, openbao, host="special")["rustfs_bucket"] == "backup-prod-special-a"
     assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
 
@@ -1328,9 +1307,9 @@ def test_bucket_prefix_variable_changes_the_naming_rule(tmp_path, openbao):
     assert eff["rustfs_bucket"] == "backup-stg-good"
 
 
-def test_shared_openbao_bucket_key_is_ignored(tmp_path, openbao):
+def test_shared_openbao_bucket_key_is_ignored(tmp_path, bao, openbao):
     """공용 agents/rustfs의 rustfs_bucket은 더는 쓰지 않는다 — 호스트별 버킷만 허용(실수로 공용 버킷에 쌓이지 않게)."""
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(dict(_ENDPOINTS_RUSTFS, rustfs_bucket="shared-bucket"))
+    bao.set("secret", "agents/rustfs", dict(_ENDPOINTS_RUSTFS, rustfs_bucket="shared-bucket"))
     assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup-prod-good"
 
 

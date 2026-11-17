@@ -5,18 +5,17 @@ root가 아니므로 소유자는 현재 사용자로 바꿔 돌리고(`funa_env
 """
 import getpass
 import grp
-import json
 import os
 import re
 import shutil
 import stat
 import subprocess
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
 import yaml
+
+from openbao_fake import FakeOpenBao
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROLE = ROOT_DIR / "roles" / "funa_env"
@@ -35,44 +34,19 @@ VRRP = {"FUNA_NOTIFICATION_SMTP_PASSWORD": "smtp-pass-SECRET", "FUNA_NOTIFICATIO
 SECRETS = [v for d in (PROXY, VRRP) for v in d.values()] + ["ssh-pass-SECRET", "cf-token-SECRET"]
 
 
-class _FakeOpenBao(BaseHTTPRequestHandler):
-    routes = {}
-
-    def do_GET(self):  # noqa: N802
-        status, body = self.routes.get(self.path, (404, {"errors": []}))
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self, *args):
-        pass
-
-
-def _kv(data):
-    return 200, {"data": {"data": data, "metadata": {"version": 1}}}
-
-
-def _routes(**over):
-    base = {
-        "/v1/secret/data/hosts/n1": _kv(NODE),
-        "/v1/secret/data/clusters/funa": _kv(CLUSTER),
-        "/v1/secret/data/clusters/funa/proxy": _kv(PROXY),
-        "/v1/secret/data/clusters/funa/vrrp": _kv(VRRP),
-    }
-    base.update(over)
-    return base
+@pytest.fixture
+def bao():
+    with FakeOpenBao() as f:
+        f.set("secret", "hosts/n1", NODE)
+        f.set("secret", "clusters/funa", CLUSTER)
+        f.set("secret", "clusters/funa/proxy", PROXY)
+        f.set("secret", "clusters/funa/vrrp", VRRP)
+        yield f
 
 
 @pytest.fixture
-def openbao():
-    server = HTTPServer(("127.0.0.1", 0), _FakeOpenBao)
-    _FakeOpenBao.routes = _routes()
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+def openbao(bao):
+    return bao.url
 
 
 def run(tmp_path, addr, hosts=("n1",), groups=("funa_cluster",), check=False, extra=None, diff=True):
@@ -215,22 +189,22 @@ def test_host_outside_the_group_gets_nothing(tmp_path, openbao):
     assert not d.exists() and list(prof.iterdir()) == []
 
 
-@pytest.mark.parametrize("routes, expect", [
-    ({"/v1/secret/data/clusters/funa/proxy": _kv({k: v for k, v in PROXY.items() if k != "DB_PASSWORD"})},
-     "required key DB_PASSWORD is missing"),
-    ({"/v1/secret/data/hosts/n1": _kv({k: v for k, v in NODE.items() if k != "CLOUDFLARE_API_TOKEN"})},
-     "clusters/funa/proxy: required key CLOUDFLARE_API_TOKEN is missing"),
-    ({"/v1/secret/data/clusters/funa": _kv({k: v for k, v in CLUSTER.items() if k != "TZ"})},
-     "required key TZ is missing"),
-    ({"/v1/secret/data/hosts/n1": _kv({"ansible_password": "ssh-pass-SECRET"})},
-     "required key FUNA_NODE_EXTERNAL_HOSTNAME is missing"),
-    ({"/v1/secret/data/hosts/n1": _kv({k: v for k, v in NODE.items() if k != "FUNA_NODE_NAME"})},
-     "hosts/n1: required key FUNA_NODE_NAME is missing"),
-    ({"/v1/secret/data/clusters/funa/vrrp": (404, {"errors": []})}, "clusters/funa/vrrp: OpenBao path does not exist"),
+def _without(data, key):
+    return {k: v for k, v in data.items() if k != key}
+
+
+# (문서, 덮어쓸 데이터 — None이면 문서를 지워 404, 기대 메시지)
+@pytest.mark.parametrize("doc, data, expect", [
+    ("clusters/funa/proxy", _without(PROXY, "DB_PASSWORD"), "required key DB_PASSWORD is missing"),
+    ("hosts/n1", _without(NODE, "CLOUDFLARE_API_TOKEN"), "clusters/funa/proxy: required key CLOUDFLARE_API_TOKEN is missing"),
+    ("clusters/funa", _without(CLUSTER, "TZ"), "required key TZ is missing"),
+    ("hosts/n1", {"ansible_password": "ssh-pass-SECRET"}, "required key FUNA_NODE_EXTERNAL_HOSTNAME is missing"),
+    ("hosts/n1", _without(NODE, "FUNA_NODE_NAME"), "hosts/n1: required key FUNA_NODE_NAME is missing"),
+    ("clusters/funa/vrrp", None, "clusters/funa/vrrp: OpenBao path does not exist"),
 ])
-def test_missing_values_fail_naming_what_is_missing(tmp_path, openbao, routes, expect):
-    _FakeOpenBao.routes = _routes(**routes)
-    res, d, _ = run(tmp_path, openbao)
+def test_missing_values_fail_naming_what_is_missing(tmp_path, bao, doc, data, expect):
+    bao.remove("secret", doc) if data is None else bao.set("secret", doc, data)
+    res, d, _ = run(tmp_path, bao.url)
     out = res.stdout + res.stderr
     assert res.returncode != 0
     assert expect in out
@@ -238,9 +212,9 @@ def test_missing_values_fail_naming_what_is_missing(tmp_path, openbao, routes, e
     assert not (d / "cluster.env").exists()
 
 
-def test_openbao_error_stops_without_changes(tmp_path, openbao):
-    _FakeOpenBao.routes = _routes(**{"/v1/secret/data/clusters/funa": (403, {"errors": ["permission denied"]})})
-    res, d, _ = run(tmp_path, openbao)
+def test_openbao_error_stops_without_changes(tmp_path, bao):
+    bao.deny("secret", "clusters/funa")
+    res, d, _ = run(tmp_path, bao.url)
     assert res.returncode != 0 and "OpenBao 조회 실패" in res.stdout
     assert not d.exists()
 

@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from openbao_fake import FakeOpenBao
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROLE_DIR = ROOT_DIR / "roles" / "fortigate_backup"
 SECRET_TOKEN = "unit-test-token-0123456789"
@@ -559,43 +561,14 @@ def test_doc_records_why_there_is_no_molecule_verify():
 # --------------------------------------------------------------------------
 # OpenBao KV 접속 정보 (ansible_host / ansible_port / fqdn, 스위치 시크릿과 같은 키 이름)
 # --------------------------------------------------------------------------
-class _Bao:
-    """Minimal OpenBao KV v2 stand-in: serves one secret per path and records the requests."""
-
-    def __init__(self, data, status=200):
-        outer = self
-        self.requests = []
-
-        class H(BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def do_GET(self):
-                outer.requests.append((self.path, self.headers.get("X-Vault-Token"), self.headers.get("X-Vault-Namespace")))
-                body = json.dumps({"data": {"data": data}}) if status == 200 else "{}"
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body.encode())))
-                self.end_headers()
-                self.wfile.write(body.encode())
-
-        self.server = HTTPServer(("127.0.0.1", 0), H)
-        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-    def env(self):
-        return {"VAULT_ADDR": self.url, "VAULT_TOKEN": "bao-test-token", "VAULT_NAMESPACE": "infra/prod/host"}
-
-    def close(self):
-        self.server.shutdown()
-
-
 @pytest.fixture
 def bao_factory():
     made = []
 
     def make(data, status=200):
-        b = _Bao(data, status)
+        b = FakeOpenBao(namespace="infra/prod/host", token="bao-test-token")
+        if status == 200:
+            b.set("secret", "fortigate/ns0380", data)
         made.append(b)
         return b
 
@@ -610,7 +583,7 @@ def test_connection_info_comes_from_kv_when_inventory_has_only_the_host_name(ans
     res = _run(ansible_env, device, tmp_path / "bk", token="", host_vars={}, drop_port=True, env_extra=bao.env())
     assert res.returncode == 0, res.stdout + res.stderr
     assert len(_files(tmp_path / "bk")) == 1 and device.requests
-    assert bao.requests[0][0] == "/v1/secret/data/fortigate/ns0380" and bao.requests[0][2] == "infra/prod/host"
+    assert (bao.reads()[0].mount, bao.reads()[0].doc, bao.reads()[0].namespace) == ("secret", "fortigate/ns0380", "infra/prod/host")
     assert "127.0.0.1" not in res.stdout + res.stderr and str(device.port) not in res.stdout + res.stderr   # 주소·포트는 로그에 없다
 
 
