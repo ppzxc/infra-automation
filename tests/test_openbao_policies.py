@@ -187,6 +187,11 @@ def test_connect_bundle_is_assets_credentials_and_automation_identity():
     }
 
 
+def test_connect_bundle_equals_its_small_policies():
+    paths = lambda names: {p for n in names for p, _ in policy(n)}  # noqa: E731
+    assert paths(["connect"]) == paths(["inventory-assets", "asset-credentials"]) | {"secrets/data/automation/ssh"}
+
+
 def test_no_machine_policy_has_delete_or_sys_outside_applier_and_periodic_check():
     for name in POLICY_NAMES:
         for path, caps in policy(name):

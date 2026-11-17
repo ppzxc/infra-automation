@@ -43,6 +43,11 @@ path "auth/approle/role/*" {
   capabilities = ["read"]
 }
 
+# role 설정(TTL·정책·CIDR)만 읽는다. role-id는 로그인 입력이라 막는다.
+path "auth/approle/role/+/role-id" {
+  capabilities = ["deny"]
+}
+
 # secret_id 만료 조회: accessor 목록과 accessor 조회만. secret_id 발급(create/update)은 없다.
 path "auth/approle/role/+/secret-id" {
   capabilities = ["list"]
