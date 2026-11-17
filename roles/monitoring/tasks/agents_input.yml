@@ -6,19 +6,19 @@
 # 해당 호스트를 실패시킨다(check 모드 포함). 조회는 호스트마다 컨트롤러에서 수행한다
 # (호스트별 실패 범위를 호스트 단위로 유지하기 위해 run_once를 쓰지 않는다).
 # 읽기는 공용 읽기 지점(lookup openbao_doc) 한 곳이다. 읽는 문서 패턴과 필수 키는 vars의 monitoring_openbao_required에 선언한다.
-# secrets/ 문서 조회는 no_log라서 실패 메시지가 가려진다 — errors='warn'으로 문서 경로·상태 코드만 경고로 내고, 아래 assert가 중단시킨다.
+# secrets/ 문서 조회는 no_log라서 실패 메시지가 가려진다 — errors='warn', quiet=true으로 문서 경로·상태 코드만 경고로 내고, 아래 assert가 중단시킨다.
 - name: "[MON-030] Read the agents documents from OpenBao (Asset agents clause, agents secrets, shared services)"
   ansible.builtin.set_fact:
     _host_agents_docs: >-
       {{ _host_agents_docs_base | combine(_host_agents_docs_ingest if (backup_inventory_event_enabled | default(true) | bool) else {}) }}
   vars:
     _host_agents_docs_ingest:
-      "secrets/services/openobserve/ingest": "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest', errors='warn') }}"
+      "secrets/services/openobserve/ingest": "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest', errors='warn', quiet=true) }}"
     _host_agents_docs_base:
-      "inventory/assets/+": "{{ lookup('openbao_doc', 'inventory/assets/' ~ inventory_hostname, errors='warn') }}"
-      "secrets/assets/+/agents": "{{ lookup('openbao_doc', 'secrets/assets/' ~ inventory_hostname ~ '/agents', errors='warn') }}"
-      "inventory/services/openobserve": "{{ lookup('openbao_doc', 'inventory/services/openobserve', errors='warn') }}"
-      "inventory/services/rustfs": "{{ lookup('openbao_doc', 'inventory/services/rustfs', errors='warn') }}"
+      "inventory/assets/+": "{{ lookup('openbao_doc', 'inventory/assets/' ~ inventory_hostname, errors='warn', quiet=true) }}"
+      "secrets/assets/+/agents": "{{ lookup('openbao_doc', 'secrets/assets/' ~ inventory_hostname ~ '/agents', errors='warn', quiet=true) }}"
+      "inventory/services/openobserve": "{{ lookup('openbao_doc', 'inventory/services/openobserve', errors='warn', quiet=true) }}"
+      "inventory/services/rustfs": "{{ lookup('openbao_doc', 'inventory/services/rustfs', errors='warn', quiet=true) }}"
   become: false
   check_mode: false
   no_log: true

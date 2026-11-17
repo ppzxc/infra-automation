@@ -6,10 +6,10 @@
 # (inventory/assets/<ns>/endpoints의 ssh)에서 직접 읽는다.
 # 연결 해석(resolve_connection.yml)은 실행 대상 호스트만 하므로 hostvars를 쓰면 부분 실행(target_hosts=ns0266)에서
 # 나머지가 모두 22로 만들어져 도달성 알림이 오발화한다. ssh Endpoint가 없으면 22나 호스트명으로 짐작하지 않고 실패시킨다.
-# Endpoint 문서에는 시크릿이 없다. 읽기 실패는 문서 경로와 상태 코드만 경고로 남기고(errors='warn') assert가 중단시킨다.
+# Endpoint 문서에는 시크릿이 없다. 읽기 실패는 문서 경로와 상태 코드만 경고로 남기고(errors='warn', quiet=true) assert가 중단시킨다.
 - name: "[MON-227] Read the Endpoint document of every server from OpenBao (inventory/assets/<ns>/endpoints)"
   ansible.builtin.set_fact:
-    _tcpcheck_doc: "{{ lookup('openbao_doc', 'inventory/assets/' ~ item ~ '/endpoints', errors='warn') }}"
+    _tcpcheck_doc: "{{ lookup('openbao_doc', 'inventory/assets/' ~ item ~ '/endpoints', errors='warn', quiet=true) }}"
   loop: "{{ otel_tcpcheck_roster }}"
   loop_control:
     label: "{{ item }}"

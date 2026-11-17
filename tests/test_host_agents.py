@@ -1384,6 +1384,18 @@ def test_a_host_bucket_in_the_asset_agents_clause_overrides_the_naming_rule(tmp_
     assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
 
 
+@pytest.mark.parametrize("value, ok", [("backup-prod-ns0001", True), ("12345678", True), ("ab", False), ("Bad_Name", False),
+                                       ("good-bucket\n", False), (12345678, False), (["a-b"], False), ("-abc", False)])
+def test_the_one_bucket_rule_filter(value, ok):
+    from host_agents import host_agents_valid_bucket
+    assert host_agents_valid_bucket(value) is ok
+
+
+def test_no_other_bucket_regex_is_left_in_the_roles():
+    for path in (ROOT_DIR / "roles").rglob("*.yml"):
+        assert "[a-z0-9][a-z0-9.-]{1,61}" not in path.read_text(encoding="utf-8"), str(path)
+
+
 def test_a_bucket_with_a_trailing_newline_is_not_a_valid_bucket_name():
     bad = host_agents_resolve_inputs({"backup": {"bucket": "good-bucket\n"}}, dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p")
     assert any("agents.backup.bucket" in e for e in bad["errors"]) and bad["backup_bucket"] == ""

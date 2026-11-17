@@ -14,14 +14,7 @@
       [FORTIGATE-TARGET] {{ inventory_hostname }}: fortigate_device는 영문·숫자·하이픈만(밑줄 금지),
       멤버 출처는 hostname 또는 serial이며, 보관 일수는 1 이상이어야 한다(접속 주소는 FGBK-004에서 본다).
 
-# 결과에 토큰이 들어 있어 FGBK-003은 no_log다. no_log는 실패 사유도 가리므로 같은 해석을 비밀 없는 요약으로 먼저 돌려
-# 실패 사유(선호 순서 불일치, 없는 문서 등)가 운영자에게 보이게 한다.
-- name: "[FGBK-023] Check the connection resolves (secret-free summary)"
-  ansible.builtin.set_fact:
-    fortigate_backup_summary: "{{ lookup('openbao_connection', inventory_hostname, preference=fortigate_backup_endpoint_preference) | openbao_connection_summary }}"
-  check_mode: false
-  delegate_to: localhost
-
+# 결과에 토큰이 들어 있어 FGBK-003은 no_log다. 실패 사유(선호 순서 불일치, 없는 문서 등)는 lookup이 표시 채널로 따로 낸다(비밀 없음).
 - name: "[FGBK-003] Resolve the https Endpoint and the api Credential from OpenBao"
   ansible.builtin.set_fact:
     fortigate_backup_connection: "{{ lookup('openbao_connection', inventory_hostname, preference=fortigate_backup_endpoint_preference) }}"
@@ -42,7 +35,7 @@
       [FORTIGATE-VIA] {{ inventory_hostname }}: https Endpoint에 via(경유)가 있거나 토큰·주소·포트가 올바르지 않다
       (API는 컨트롤러에서 직접 호출한다. 값은 로그에 남기지 않는다).
       Endpoint `https`(address·port)와 Credential `api`(api_token)의 등록을 확인한다.
-  no_log: true
+  # no_log를 달지 않는다: fail_msg에는 값이 없고, 달면 [FORTIGATE-VIA] 사유가 가려진다.
 
 - name: "[FGBK-005] Ensure local backup destination directory exists (0700)"
   ansible.builtin.file:

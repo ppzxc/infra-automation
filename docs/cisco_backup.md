@@ -39,7 +39,6 @@
 | `CISCO-007` | `Collect running configuration via Bastion jump session` | `ansible.builtin.command` | Controller / Localhost | Endpoint `via`의 비밀번호 로그인 경유지(Bastion) 한 단을 통한 대화형 쉘 점프로 설정 수집 |
 | `CISCO-008` | `Resolve the Endpoint, login Credential, enable and bastion hop from OpenBao` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, `no_log`, 읽기 지점 `openbao_connection`(선호 순서 `[ssh, telnet]`, `become: enable`) |
 | `CISCO-009` | `Assert the resolved connection is supported by the collector` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, `no_log` (ssh·telnet, 계정이 있는 비밀번호 로그인, 필수 키 선언, 경유는 ssh의 비밀번호 경유지 한 단까지, 위반 시 수집 전에 `CISCO-VIA` 실패) |
-| `CISCO-010` | `Check the connection resolves (secret-free summary)` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, 비밀 없는 요약만 남겨 `no_log`인 CISCO-008이 가리는 실패 사유(없는 문서·선호 순서 불일치)를 보이게 함 |
 
 ### 수집 로그 제어
 

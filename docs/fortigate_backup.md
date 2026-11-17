@@ -50,7 +50,6 @@
 | `FGBK-020` | `Send the configuration change alert once` | `ansible.builtin.uri` | Controller / Localhost | text/plain POST, `no_log`, 변경이 있을 때만(변경이 없거나 첫 백업이면 건너뜀) |
 | `FGBK-021` | `Assert the alert was delivered` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (전송 실패 시 호스트 실패) |
 | `FGBK-022` | `Read the alert webhook from OpenBao when a change is detected` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, `no_log`, 변경이 있을 때만 `secrets/services/alert/notify`를 읽음(없으면 FGBK-019가 실패 처리) |
-| `FGBK-023` | `Check the connection resolves (secret-free summary)` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, 비밀 없는 요약(`openbao_connection_summary`)만 남겨 `no_log`인 FGBK-003이 가리는 실패 사유(없는 문서·선호 순서 불일치)를 보이게 함 |
 
 테스트는 [tests/test_fortigate_backup.py](../tests/test_fortigate_backup.py)다. 구조·3-Way 추적성은 정적으로, 동작(대상별 저장·응답 멤버 파일명·장애 전환 시 멤버 변경·`0600`, 상태·설정 응답이 비정상이거나 비면 저장 안 함과 실패, 보관 일수 정리, 토큰 비노출, 설정 변경 알림·첫 백업·멤버 전환·비밀 비노출)은 장비를 로컬 HTTP 서버(장비와 알림 수신기)로 모사해 역할을 실제 실행해 검증한다. 장비에는 닿지 않는다.
 

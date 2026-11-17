@@ -42,6 +42,14 @@ def test_cisco_backup_collector_no_log_is_inventory_configurable():
     assert all(task["no_log"] == "{{ cisco_backup_no_log }}" for task in collector_tasks)
 
 
+def test_the_support_check_is_not_no_log_so_its_reason_is_visible_and_the_connection_is_resolved_once():
+    raw = (ROLE_DIR / "tasks" / "main.yml").read_text()
+    tasks = {t["name"].split("]")[0].lstrip("["): t for t in yaml.safe_load(raw) if t.get("name", "").startswith("[CISCO-")}
+    assert not tasks["CISCO-009"].get("no_log") and tasks["CISCO-008"]["no_log"] is True
+    assert "{{" not in tasks["CISCO-009"]["ansible.builtin.assert"]["fail_msg"].replace("{{ inventory_hostname }}", "")
+    assert raw.count("lookup('openbao_connection'") == 1
+
+
 def test_cisco_backup_playbook_structure():
     """플레이북은 역할만 돌린다: OpenBao 우회 pre_tasks·group_vars 의존이 없다."""
     playbook_file = ROOT_DIR / "playbooks" / "backup_cisco.yml"
@@ -83,7 +91,7 @@ def test_inventory_cisco_switches_example_documents_the_group_without_connection
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
     tasks_content = (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
     doc_content = (ROOT_DIR / "docs" / "cisco_backup.md").read_text(encoding="utf-8")
-    for n in range(1, 11):
+    for n in [n for n in range(1, 11) if n != 10]:
         spec = f"CISCO-{n:03d}"
         assert f"[{spec}]" in tasks_content, f"Spec [{spec}] missing in tasks"
         assert f"`{spec}`" in doc_content, f"Spec `{spec}` missing in docs"
