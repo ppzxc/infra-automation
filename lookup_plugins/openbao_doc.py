@@ -136,16 +136,23 @@ class Reader:
             raise OpenBaoError("필수 문서가 없습니다: %s" % doc)
         return {}
 
+    def _context(self):
+        """https용 TLS 컨텍스트. 한 Reader 안에서 한 번만 만든다(CA 파일을 요청마다 다시 읽지 않는다)."""
+        if not self.addr.startswith("https"):
+            return None
+        if not hasattr(self, "_ctx"):
+            self._ctx = None
+            if not self.verify:
+                self._ctx = ssl._create_unverified_context()  # noqa: S323 - 변수·환경 변수로 명시했을 때만
+            elif self.cacert:
+                try:
+                    self._ctx = ssl.create_default_context(cafile=self.cacert)
+                except (OSError, ssl.SSLError) as exc:
+                    raise OpenBaoError("OpenBao CA 파일을 읽을 수 없습니다: %s (%s)" % (self.cacert, type(exc).__name__)) from None
+        return self._ctx
+
     def _send(self, req, what):
-        ctx = None
-        try:
-            if self.addr.startswith("https"):
-                if not self.verify:
-                    ctx = ssl._create_unverified_context()  # noqa: S323 - 변수·환경 변수로 명시했을 때만
-                elif self.cacert:
-                    ctx = ssl.create_default_context(cafile=self.cacert)
-        except (OSError, ssl.SSLError):
-            raise OpenBaoError("OpenBao CA 파일(vault_cacert/VAULT_CACERT)을 읽을 수 없습니다") from None
+        ctx = self._context()
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT, context=ctx) as resp:
                 return json.load(resp)

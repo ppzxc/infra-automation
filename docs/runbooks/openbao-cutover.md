@@ -19,7 +19,7 @@
 1. 준비 PR을 모두 병합하고 Semaphore 러너 이미지를 다시 빌드한다.
 2. `admin`으로 한 번만 bootstrap한다. `infra` 안에 applier 정책과 AppRole을 만든다.
 3. OpenTofu apply로 마운트 `inventory/`·`secrets/`, 정책, AppRole(계열별 7개, `periodic_check`, `agent_session`), userpass와 운영자 사용자를 만든다.
-4. 계열별 secret_id를 수동 발급하고(https 주소가 사설 CA 인증서면 계열 Environment마다 `VAULT_CACERT`도 넣는다. 읽기 지점이 인증서를 기본으로 검증하므로 빠지면 전환 뒤 모든 계열이 연결 실패한다)(operations §2) Semaphore Environment를 계열별 7개와 Periodic Check용 1개 만든다. `applier`는 적용할 때마다 발급해 OpenTofu 템플릿에 넣고(operations §4), `agent_session`은 Semaphore 밖이고 secret_id가 24시간 만료라 Environment 없이 7단계 직전(동결 창 안)에 발급한다. 이 단계에서는 템플릿에 붙이지 않는다. Periodic Check 템플릿은 만들어 두되 스케줄은 아직 걸지 않는다.
+4. 계열별 secret_id를 수동 발급하고(https 주소가 사설 CA 인증서면 계열 Environment 7개와 Periodic Check Environment, 에이전트 세션의 환경에도 `VAULT_CACERT`를 넣는다. 읽기 지점이 인증서를 기본으로 검증하므로 빠지면 전환 뒤 그 자리가 연결 실패한다)(operations §2) Semaphore Environment를 계열별 7개와 Periodic Check용 1개 만든다. `applier`는 적용할 때마다 발급해 OpenTofu 템플릿에 넣고(operations §4), `agent_session`은 Semaphore 밖이고 secret_id가 24시간 만료라 Environment 없이 7단계 직전(동결 창 안)에 발급한다. 이 단계에서는 템플릿에 붙이지 않는다. Periodic Check 템플릿은 만들어 두되 스케줄은 아직 걸지 않는다.
 5. 이전 스크립트 dry-run으로 적재를 연습한다(전체 검증, 값 해시 대조). 새 Service `semaphore` 문서는 이전 대상이 아니라 새로 발급하는 값이므로 dry-run이 통과한 뒤 등록 도구 `put`으로 등록한다.
 6. **동결 창을 시작한다.** 스케줄을 전부 끄고, 옛 KV 쓰기를 멈추고, 이전 스크립트를 실제로 실행한다.
 7. 전환 PR을 병합하고 템플릿마다 계열 Environment로 바꾼다. 에이전트 세션은 새 `agent_session` AppRole로 바꾼다.

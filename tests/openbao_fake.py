@@ -226,6 +226,7 @@ class FakeOpenBao:
 
     def approle_env(self):
         """Ansible 읽기 지점이 쓰는 접속 환경(AppRole만 있다). `approle=True`로 만든 가짜 서버와 짝이다."""
+        assert self.approle, "approle_env()는 approle=True로 만든 가짜 서버와만 쓴다"
         env = {"VAULT_ADDR": self.url, "VAULT_ROLE_ID": "fake-role", "VAULT_SECRET_ID": "fake-secret"}
         if self.namespace is not None:
             env["VAULT_NAMESPACE"] = self.namespace

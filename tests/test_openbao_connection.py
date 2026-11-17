@@ -293,6 +293,15 @@ def test_an_unreadable_ca_file_is_an_openbao_error_not_a_raw_exception():
         reader.read("inventory/assets/ns0001")
 
 
+def test_a_ca_file_that_is_not_pem_is_an_openbao_error_naming_the_file(tmp_path):
+    bad = tmp_path / "bad.pem"
+    bad.write_text("not a certificate")
+    reader = Reader({"vault_addr": "https://127.0.0.1:1", "vault_cacert": str(bad),
+                     "vault_role_id": "r", "vault_secret_id": "s"})
+    with pytest.raises(OpenBaoError, match="bad.pem"):
+        reader.read("inventory/assets/ns0001")
+
+
 def test_openbao_fixture_answers_without_any_network_and_is_the_only_source():
     fixture = {"inventory/assets/ns0001": {"type": "server"}}
     reader = Reader({"openbao_fixture": fixture, "vault_addr": "http://127.0.0.1:1"})
