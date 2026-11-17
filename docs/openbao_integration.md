@@ -68,7 +68,7 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 - **Automation Identity**: Endpoint에 `identity: automation`이면 Automation Identity 키(`secrets/automation/ssh`)로 Credential의 `username`에 로그인하고 Credential `password`는 승격에만 쓴다. 없으면 Credential 자신의 비밀로 로그인한다(비밀번호 로그인은 예외로 취급해 `password_auth_exception`이 true).
 - **승격**: 비밀번호는 `become.credential`의 비밀번호이고, 생략하면 로그인 Credential의 `password`다. `su`는 비밀번호가 없으면 실패한다.
 - **경유**: `via`는 `<관리번호>/<endpoint>`를 끝까지 따라가며 경유지마다 자기 Endpoint의 기본 Credential·`identity`를 쓴다. 순환·없는 참조는 실패한다. 키 로그인 경유지만 `ProxyCommand`로 만들 수 있고(`openbao_ssh_common_args`·`openbao_ssh_proxy_command` 필터) 비밀번호 경유지는 거부한다. 비밀을 뺀 요약은 `openbao_connection_summary` 필터다.
-- **관리 계정**: `lookup('openbao_admin_accounts', <관리번호>, preference=[...])`가 Asset의 `access.admin_credentials`를 common 역할의 `accounts`로 만든다. 계정 이름은 Credential의 `username`이고, 공개키는 자동화 계정이면 `secrets/automation/ssh`의 `public_key`, 그 밖에는 `inventory/operators/<계정>`의 `public_keys`·`revoked_keys`다.
+- **관리 계정**: `lookup('openbao_admin_accounts', <관리번호>, preference=[...])`가 Asset의 `access.admin_credentials`를 common 역할의 `accounts`로 만든다. 계정 이름은 Credential의 `username`이고, 공개키는 자동화 계정이면 `secrets/automation/ssh`의 `public_key`, 그 밖에는 `inventory/operators/<계정>`의 `public_keys`·`revoked_keys`다(서버 계열 `connect` 정책이 이 문서를 읽는다).
 
 **`playbooks/common/resolve_connection.yml`** (서버 플레이북이 첫 플레이로 import)
 
@@ -158,7 +158,7 @@ monitoring_openbao_required:
 
 특정 호스트만 돌리려면 Extra variable `target_hosts`를 준다: `ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0331"`.
 
-새 역할이 OpenBao 문서를 읽으면 (1) `vars/main.yml`에 `<역할>_openbao_required`를 선언하고 (2) 그 역할을 돌리는 계열 AppRole 정책이 패턴을 읽게 하며 (3) `tests/test_openbao_role_policy_contract.py`의 역할↔계열 표에 한 줄을 더한다. 정책 누락은 이 테스트가 잡는다.
+새 역할이 OpenBao 문서를 읽으면 (1) `vars/main.yml`에 `<역할>_openbao_required`를 선언하고 (2) 그 역할을 돌리는 계열 AppRole 정책이 패턴을 읽게 하며 (3) `tests/test_openbao_role_policy_contract.py`의 역할↔계열 표에 한 줄을 더한다. 정책 누락은 이 테스트가 잡는다. 공용 읽기 지점의 lookup이 대신 읽는 문서(`openbao_admin_accounts`의 `inventory/operators/<계정>` 등)는 역할 선언에 나오지 않으므로 `lookup_plugins/openbao_connection.py`의 `*_READS` 표에 적고, 같은 테스트가 그 표와 코드의 `read()` 호출, 계열 정책(`connect`)을 대조한다. lookup을 쓰는 새 파일은 테스트의 `LOOKUP_USERS` 표에 한 줄을 더해야 통과한다.
 
 ## 8. 관련 문서
 

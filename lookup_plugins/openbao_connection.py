@@ -44,6 +44,13 @@ class ConnectionError_(AnsibleError):  # noqa: N801
     pass
 
 
+# 이 파일의 lookup이 읽는 문서 패턴(schemas/openbao/index.yml의 패턴). 정책 계약 테스트가 계열 AppRole 정책과 대조하고,
+# 코드의 read() 호출과 이 표가 같은지도 본다. 새 읽기를 더하면 여기에도 적는다.
+CONNECTION_READS = ("inventory/assets/+/endpoints", "secrets/assets/+/credentials/+")
+IDENTITY_READS = ("secrets/automation/ssh",)                 # Endpoint가 identity일 때만 읽는다(서버 계열)
+ADMIN_ACCOUNTS_READS = ("inventory/assets/+", "inventory/operators/+")
+
+
 def preference_list(value):
     """선호 순서 입력을 목록으로. 쉼표 문자열(Semaphore 변수)도 받는다."""
     if isinstance(value, str):
