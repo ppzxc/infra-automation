@@ -28,11 +28,7 @@
          else ('' if _host_audit_archive_ok | default(false) | bool
          else '원본 보관 실패 — 메일 보내지 않음')) }}
 
-# 설정을 읽기 직전에 새로 로그인한다(vault_token.yml): 앞 단계가 토큰 TTL보다 길어도 만료된 토큰을 쓰지 않는다.
-- name: Log in to OpenBao for the mail settings
-  ansible.builtin.include_tasks: vault_token.yml
-  when: _host_audit_mail_plan.send | bool
-
+# 로그인 태스크는 따로 없다: `_vault_token`을 정해 두지 않으므로 읽기 지점이 이 읽기 태스크에서 AppRole로 새로 로그인한다(만료된 토큰을 쓰지 않는다).
 # 문서가 없으면(404) {}이고(수신자 없음 문제로 남는다), 403이나 연결 불가는 읽기 실패다(errors='ignore'가 값 없음으로 돌려준다).
 - name: "[AUD-602] Read the Host Audit mail settings from OpenBao (inventory/config/host_audit)"
   ansible.builtin.set_fact:

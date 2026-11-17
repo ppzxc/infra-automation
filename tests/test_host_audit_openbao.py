@@ -112,15 +112,22 @@ def test_the_drift_subruns_render_the_provisioning_and_host_agents_config_playbo
         assert "common/resolve_connection.yml" in text
 
 
-def test_the_read_lists_come_from_the_declaration_and_both_logins_share_one_task():
+def test_the_read_lists_come_from_the_declaration_and_no_token_is_pinned_across_steps():
     v = _vars()
     parts = set(v["host_audit_openbao_storage_docs"]) | {v["host_audit_openbao_alert_doc"], v["host_audit_openbao_mail_doc"]}
     assert parts == set(v["host_audit_openbao_required"])
-    for name in ("storage_credentials.yml", "mail.yml"):
-        text = (ROLE_DIR / "tasks" / name).read_text(encoding="utf-8")
-        assert "vault_token.yml" in text and "'@token'" not in text
-    assert "[AUD-500]" in (ROLE_DIR / "tasks" / "vault_token.yml").read_text(encoding="utf-8")
-    assert "inventory/services/rustfs'" not in (ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8").split("[AUD-501]")[1].split("[AUD-502]")[0]
+    storage = (ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8")
+    read = json.dumps(_task("storage_credentials.yml", "[AUD-501]"))
+    assert "host_audit_openbao_storage_docs" in read and "inventory/services/rustfs" not in read
+    # `_vault_token`을 사실로 정해 두면 읽기 지점이 그 토큰을 그대로 쓴다(TTL 30분 뒤 만료). 정하지 않으면 읽는 태스크마다 새로 로그인한다.
+    for task in _flat(yaml.safe_load(storage) + yaml.safe_load((ROLE_DIR / "tasks" / "mail.yml").read_text(encoding="utf-8"))):
+        assert "_vault_token" not in json.dumps(task.get("ansible.builtin.set_fact", {}))
+        assert "'@token'" not in json.dumps(task)
+    assert not (ROLE_DIR / "tasks" / "vault_token.yml").exists()
+
+
+def test_the_environment_default_is_validated_with_the_run_inputs():
+    assert "host_audit_environment" in json.dumps(_task("prepare.yml", "[AUD-001]"))
 
 
 # ------------------------------------------------------------------ 가짜 OpenBao로 실제 태스크를 돌린다
@@ -236,12 +243,8 @@ def _mail(tmp_path, fake, send=True):
     report = tmp_path / "report.html"
     report.write_text("<html></html>")
     mail_tasks = yaml.safe_load((ROLE_DIR / "tasks" / "mail.yml").read_text(encoding="utf-8"))
-    # AUD-600, 로그인(vault_token.yml을 포함하는 태스크), AUD-602·603
-    tasks = [t for t in mail_tasks if re.match(r"\[AUD-60[023]\]", t.get("name", ""))
-             or "vault_token.yml" in json.dumps(t)]
-    assert len(tasks) == 4
-    tasks = [dict(t, **{"ansible.builtin.include_tasks": str(ROLE_DIR / "tasks" / "vault_token.yml")})
-             if "ansible.builtin.include_tasks" in t else t for t in tasks]
+    tasks = [t for t in mail_tasks if re.match(r"\[AUD-60[023]\]", t.get("name", ""))]
+    assert len(tasks) == 3
     play_vars = {"host_audit_mail_doc": {"subject": "s", "run_id": "r"}, "_host_audit_archive_ok": send,
                  "_host_audit_mail_report_path": str(report), "host_audit_mail_enabled": True,
                  "host_audit_openbao_mail_doc": _vars()["host_audit_openbao_mail_doc"]}

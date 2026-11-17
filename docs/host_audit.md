@@ -491,7 +491,7 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 - 자격증명·입력 누락: 업로드하지 않는다. 보고서는 만들고(비교 기준 '조회 실패') 실행은 실패로 끝난다(`AUD-516`).
 - Audit Baseline 조회 실패(목록·포인터·findings.json): 비교 없이 보고서를 만들고 원본은 올린 뒤 실행을 실패로 끝낸다.
 - 업로드 실패(파일 하나라도): 실행을 실패로 끝낸다. 정기 실행이면 포인터를 올리지 않아 이 실행은 다음 달 비교 기준이 되지 않는다.
-- 판정 위치(#126): 자격증명은 `storage_credentials.yml`(AUD-500~502, 재발송도 사용), 판정 `AUD-516`은 `storage_result.yml`에 있고 메일 발송(§13) **뒤에** 돈다. 그래서 원본이 다 올라간 실행은 Audit Baseline 조회만 실패했어도 메일이 나가고, 실행은 그 뒤 실패로 끝난다.
+- 판정 위치(#126): 자격증명은 `storage_credentials.yml`(AUD-501·502, 재발송도 사용), 판정 `AUD-516`은 `storage_result.yml`에 있고 메일 발송(§13) **뒤에** 돈다. 그래서 원본이 다 올라간 실행은 Audit Baseline 조회만 실패했어도 메일이 나가고, 실행은 그 뒤 실패로 끝난다.
 
 ### 11.4 입력 (OpenBao, Git에는 시크릿 없음)
 
@@ -505,7 +505,7 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 | `secrets/services/alert/notify` | `url` | ● (악화 알림이 있을 때) | KISA 악화 알림 webhook(§15). 못 읽어도 보관·메일은 막히지 않는다 |
 | `inventory/config/host_audit` | `mail_recipients`, `mail_sender`, `mail_sender_display_name` | (필수 키 없음) | 메일 입력(§13.3). 없으면 읽기 실패가 아니라 메일 문제로 남는다 |
 
-버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다. 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이고, `host_audit` AppRole 정책이 위 문서를 읽는다(`tofu/openbao`).
+버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다. 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이다. 이 역할은 토큰을 따로 받아 두지 않는다(`_vault_token`을 만들지 않음): 읽는 태스크마다 새로 로그인하므로 앞 단계가 토큰 TTL(30분)보다 길어도 만료된 토큰을 쓰지 않는다. `host_audit_environment`는 `production|staging|development|test`만 허용한다(`AUD-001`). `host_audit` AppRole 정책이 위 문서를 읽는다(`tofu/openbao`).
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -539,7 +539,6 @@ $S3 put-bucket-lifecycle-configuration --bucket host-audit --lifecycle-configura
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
-| `AUD-500` | `Log in to OpenBao through the shared read point (fresh token before each read)` | `ansible.builtin.set_fact` (`lookup openbao_doc @token`, `vault_token.yml`) | 러너 | 읽기 전용, `no_log`. 보관 자격증명과 메일 설정 읽기 직전마다 새로 로그인해 토큰 TTL(30분) 만료를 피함. 실패해도 멈추지 않고 문제로 남김 |
 | `AUD-501` | `Read the Host Audit storage documents and the alert document (host_audit_openbao_required)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 문서마다 따로 읽어(`errors='ignore'`) 못 읽은 문서 경로만 보관 문제로 이름 붙이고, 알림 문서는 실패해도 보관을 막지 않음. 읽을 문서는 `host_audit_openbao_*_doc` 선언에서 옴 |
 | `AUD-502` | `Resolve the Host Audit storage target and dedicated key` | `ansible.builtin.set_fact` | 러너 | 누락 항목은 문서 경로와 키 이름만(선언 `host_audit_openbao_required` 기준), `no_log` |
 | `AUD-503` | `List the Audit Baseline pointers of scheduled runs` | `ansible.builtin.uri` (S3 ListObjectsV2) | 러너 | 읽기 전용, `no_log` |
