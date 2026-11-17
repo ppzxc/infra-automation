@@ -426,3 +426,11 @@ def test_the_sender_name_is_redacted_from_the_mail_outcome():
     assert "sender_name" in json.dumps(outcome)
     assert host_audit_mail_redact("From: Audit Name <a@example.kr> rejected", ["a@example.kr", "Audit Name"]) \
         .count("Audit Name") == 0
+
+
+def test_a_too_long_name_and_an_empty_address_never_make_a_malformed_from():
+    assert host_audit_mail_sender("noreply@example.kr", "가" * 16) == "noreply@example.kr"
+    assert all(len(w) <= 75 for w in host_audit_mail_sender("noreply@example.kr", "가" * 15).split()[:-1])
+    assert host_audit_mail_sender("noreply@example.kr", "a" * 65) == "noreply@example.kr"
+    assert host_audit_mail_sender("noreply@example.kr", "a" * 64) != "noreply@example.kr"
+    assert host_audit_mail_sender("", "서버 감사") == ""

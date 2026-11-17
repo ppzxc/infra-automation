@@ -84,6 +84,9 @@ def host_audit_mail_recipients(value):
 # A display name is decoration, never a reason to hold the audit mail: anything that could
 # break out of the header (CR/LF, angle brackets, quotes, an @) is dropped and the bare address is sent.
 # Commas and semicolons stay: ``formataddr`` quotes them.
+# formataddr makes one RFC 2047 encoded-word per name; 12 + 4 * ceil(3n/3) <= 75 holds up to 15 Korean characters.
+MAX_SENDER_NAME = 64
+MAX_SENDER_NAME_ENCODED = 15
 _UNSAFE_NAME = re.compile(r'[\x00-\x1f\x7f<>"@]')
 
 
@@ -94,7 +97,8 @@ def host_audit_mail_sender(address, name=''):
     so the relay still sees only the address.
     """
     name = str(name or '').strip()
-    if not name or _UNSAFE_NAME.search(name):
+    limit = MAX_SENDER_NAME if name.isascii() else MAX_SENDER_NAME_ENCODED
+    if not address or not name or len(name) > limit or _UNSAFE_NAME.search(name):
         return address
     return formataddr((name, address))
 
