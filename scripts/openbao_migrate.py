@@ -31,9 +31,9 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_plugins"))
+sys.path.append(str(Path(__file__).resolve().parent.parent / "filter_plugins"))
 from openbao_ssh import python_interpreter_problem  # noqa: E402
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lookup_plugins"))
+sys.path.append(str(Path(__file__).resolve().parent.parent / "lookup_plugins"))   # 끝에 붙인다(stdlib·scripts/ 이름을 가리지 않는다)
 import _bao_http  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 

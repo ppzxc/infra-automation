@@ -37,7 +37,7 @@
 
 - name: "[GWW-005] Assert the required document keys and heartbeat destination inputs exist before calling GitHub"
   vars:
-    _gww_missing: "{{ gww_docs | openbao_required_gaps(github_webhook_watch_openbao_required, blank='absent', fmt='colon') }}"
+    _gww_missing: "{{ gww_docs | openbao_required_gaps(github_webhook_watch_openbao_required, blank='absent', fmt='colon') | list }}"
   ansible.builtin.assert:
     that:
       - _gww_missing | length == 0

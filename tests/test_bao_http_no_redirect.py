@@ -83,6 +83,12 @@ def test_the_reader_login_and_reads_never_forward_the_token_or_the_approle_body(
     assert seen == []
 
 
+def test_a_redirect_tells_the_operator_to_point_vault_addr_at_the_active_node(redirect_pair):
+    a, _ = redirect_pair
+    with pytest.raises(_openbao_reader.OpenBaoError, match="활성 노드"):
+        _openbao_reader.Reader({"vault_addr": a.url, "_vault_token": "t"}).read("inventory/assets/ns0001")
+
+
 def test_every_script_http_call_goes_through_the_shared_opener():
     for name in ("openbao_check.py", "openbao_put.py", "openbao_migrate.py", "collect-rustfs-policy.py"):
         text = (ROOT / "scripts" / name).read_text(encoding="utf-8")

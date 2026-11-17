@@ -26,3 +26,13 @@ def test_no_entry_point_document_or_makefile_still_names_the_old_token_variables
         text = (ROOT / name).read_text(encoding="utf-8")
         for old in ("BAO_TOKEN", "BAO_ADDR"):
             assert old not in text, (name, old)
+
+
+def test_a_missing_ca_file_fails_loudly_instead_of_being_dropped(tmp_path):
+    import os
+    import subprocess
+    (tmp_path / "docker").write_text("#!/bin/sh\nexit 0\n")
+    (tmp_path / "docker").chmod(0o755)
+    env = dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", VAULT_CACERT=str(tmp_path / "missing.pem"))
+    res = subprocess.run(["bash", str(ROOT / "docker-run.sh"), "playbooks/site.yml"], capture_output=True, text=True, env=env)
+    assert res.returncode == 2 and "VAULT_CACERT" in res.stderr

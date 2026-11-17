@@ -245,7 +245,8 @@ class Reader:
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 raise _NotFound() from None
-            raise _fail("OpenBao 조회 실패: %s (HTTP %s)" % (what, exc.code), exc.code,
+            hint = " — 리다이렉트는 따르지 않습니다(토큰 재전송 방지). VAULT_ADDR을 활성 노드 주소로 지정하세요" if 300 <= exc.code < 400 else ""
+            raise _fail("OpenBao 조회 실패: %s (HTTP %s)%s" % (what, exc.code, hint), exc.code,
                         show=not (defer_denied and exc.code == 403)) from None
         except (urllib.error.URLError, OSError, ValueError) as exc:
             raise _fail("OpenBao 접속 실패: %s (%s)" % (what, type(exc).__name__)) from None

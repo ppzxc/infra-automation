@@ -57,7 +57,11 @@ for var in VAULT_ADDR VAULT_ROLE_ID VAULT_SECRET_ID VAULT_SKIP_VERIFY; do
     [ -n "${!var}" ] && DOCKER_RUN_OPTS+=(-e "${var}")
 done
 # 사설 CA는 파일 경로다: 같은 경로로 읽기 전용 마운트해 컨테이너 안에서도 그 경로가 맞게 한다.
-if [ -n "${VAULT_CACERT}" ] && [ -f "${VAULT_CACERT}" ]; then
+if [ -n "${VAULT_CACERT}" ]; then
+    if [ ! -f "${VAULT_CACERT}" ]; then
+        echo "[!] VAULT_CACERT 파일이 없습니다: ${VAULT_CACERT} (경로를 확인하세요)" >&2
+        exit 2
+    fi
     DOCKER_RUN_OPTS+=(-v "${VAULT_CACERT}:${VAULT_CACERT}:ro" -e "VAULT_CACERT")
 fi
 

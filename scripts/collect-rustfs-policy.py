@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lookup_plugins"))
+sys.path.append(str(Path(__file__).resolve().parent.parent / "lookup_plugins"))   # 끝에 붙인다(stdlib·scripts/ 이름을 가리지 않는다)
 import _bao_http  # noqa: E402
 
 ADMIN = "/rustfs/admin/v3"

@@ -13,8 +13,19 @@ import re
 import sys
 from urllib.parse import quote
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from openbao_required import openbao_required_gaps as _required_gaps  # noqa: E402
+def _load_required_gaps():
+    """공용 필터 구현을 파일 경로로 한 번만 올린다(sys.path를 건드리지 않고, 로더가 올린 사본과 따로 두 번 올리지 않는다)."""
+    import importlib.util
+    name = "_openbao_required_shared"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "openbao_required.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name].openbao_required_gaps
+
+
+_required_gaps = _load_required_gaps()
 
 KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
