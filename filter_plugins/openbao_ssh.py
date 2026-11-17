@@ -45,8 +45,8 @@ def openbao_connection_summary(conn):
            "login_mode": login["mode"], "username": login.get("username", ""),
            "become_method": (conn.get("become") or {}).get("method", ""),
            "password_auth_exception": conn["password_auth_exception"],
-           "via": [{k: hop[k] for k in ("asset", "endpoint", "protocol", "address", "port", "credential")}
-                   for hop in conn["via"]]}
+           "via": [dict({k: hop[k] for k in ("asset", "endpoint", "protocol", "address", "port", "credential")},
+                        login_mode=hop["login"]["mode"]) for hop in conn["via"]]}
     return out
 
 

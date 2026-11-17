@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 sys.path.insert(0, str(ROOT_DIR / "scripts"))
 
 import openbao_validation as ov  # noqa: E402
-from openbao_connection import ConnectionError_, admin_accounts, resolve  # noqa: E402
+from openbao_connection import ConnectionError_, admin_accounts, preference_list, resolve  # noqa: E402
 from openbao_ssh import openbao_connection_summary, openbao_ssh_common_args, openbao_ssh_proxy_command  # noqa: E402
 
 VALID = ROOT_DIR / "tests" / "fixtures" / "openbao_docs" / "valid"
@@ -311,3 +311,14 @@ def test_an_endpoint_missing_address_names_the_endpoint(store):
     store["inventory/assets/ns0001/endpoints"]["ssh"].pop("port")
     with pytest.raises(ConnectionError_, match="ns0001/endpoints.*port"):
         resolve(reader(store), "ns0003", ["ssh"])
+
+
+def test_a_string_preference_is_split_on_commas_not_into_characters():
+    assert preference_list("ssh, telnet") == ["ssh", "telnet"]
+    assert preference_list(["ssh"]) == ["ssh"]
+
+
+def test_a_credential_override_on_an_endpoint_without_a_default_credential_names_the_endpoint(store):
+    store["inventory/assets/ns0001/endpoints"]["ssh"].pop("credential")
+    with pytest.raises(ConnectionError_, match="ns0001/endpoints.*credential"):
+        resolve(reader(store), "ns0001", ["ssh"], credential="root")

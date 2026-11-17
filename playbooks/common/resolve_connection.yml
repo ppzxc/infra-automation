@@ -110,6 +110,16 @@
         _boot_summary: "{{ (lookup('openbao_connection', inventory_hostname, preference=_connection_preference, credential=_bootstrap_credential) | openbao_connection_summary) if _bootstrap_credential | length > 0 else {} }}"
       check_mode: false
 
+    - name: Refuse via hops that are not key logins
+      ansible.builtin.assert:
+        that:
+          - _admin_summary.via | rejectattr('login_mode', 'in', ['identity', 'key']) | list | length == 0
+        fail_msg: >-
+          [VIA-HOP-LOGIN] '{{ inventory_hostname }}'의 경유지 중 키 로그인이 아닌 것이 있습니다
+          ({{ _admin_summary.via | rejectattr('login_mode', 'in', ['identity', 'key']) | map(attribute='asset') | list }}).
+          경유지는 identity 또는 ssh_key Credential만 지원합니다(비밀번호는 명령행에 남기지 않기 위해 거부).
+        quiet: true
+
     - name: Resolve the admin connection (Endpoint, login, become, via)
       ansible.builtin.set_fact:
         _admin_conn: "{{ lookup('openbao_connection', inventory_hostname, preference=_connection_preference, credential=_admin_credential) }}"

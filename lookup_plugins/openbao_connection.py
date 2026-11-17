@@ -44,6 +44,13 @@ class ConnectionError_(AnsibleError):  # noqa: N801
     pass
 
 
+def preference_list(value):
+    """선호 순서 입력을 목록으로. 쉼표 문자열(Semaphore 변수)도 받는다."""
+    if isinstance(value, str):
+        value = [v.strip() for v in value.split(",")]
+    return [str(v) for v in value if str(v)]
+
+
 def _need(doc, key, where):
     """문서의 필수 키. 없으면 어느 문서인지 밝히고(값은 밝히지 않고) 실패한다."""
     if doc.get(key) in (None, ""):
@@ -134,8 +141,9 @@ def _via_chain(read, via):
 def resolve(read, asset, preference, credential=None):
     name, ep = _select_endpoint(_asset_endpoints(read, asset), asset, preference)
     where = "%s/endpoints의 %s" % (asset, name)
-    cred = credential or _need(ep, "credential", where)
-    overridden = cred != ep["credential"]
+    default_cred = _need(ep, "credential", where)
+    cred = credential or default_cred
+    overridden = cred != default_cred
     return {
         "asset": asset, "endpoint": name, **_endpoint_fields(ep, where), "credential": cred,
         "login": _login(read, asset, ep, cred, overridden),
@@ -177,4 +185,4 @@ class LookupModule(LookupBase):
         preference = kwargs.get("preference")
         if not preference:
             raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 필요합니다")
-        return [resolve(reader.read, str(t), list(preference), kwargs.get("credential")) for t in terms]
+        return [resolve(reader.read, str(t), preference_list(preference), kwargs.get("credential")) for t in terms]

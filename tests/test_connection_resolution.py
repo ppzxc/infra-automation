@@ -168,3 +168,10 @@ def test_an_automation_key_passphrase_is_stripped_from_the_temporary_key_only(tm
     (call,) = (tmp_path / "keygen-calls.log").read_text().splitlines()
     assert "-p -f /" in call and "_bao_admin_key" in call
     assert "fake-pass-automation" not in res.stdout + res.stderr
+
+
+def test_a_password_via_hop_is_refused_with_a_readable_reason(tmp_path, fake_openbao):
+    # ns0004(https)는 ns0003(비밀번호 로그인)을 경유한다. 경유지는 키 로그인만 지원한다.
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0004"], extra_vars={"connection_endpoint_preference": ["https"]})
+    assert res.returncode != 0 and out == {}
+    assert "VIA-HOP-LOGIN" in res.stdout + res.stderr and "ns0003" in res.stdout + res.stderr
