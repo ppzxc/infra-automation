@@ -46,7 +46,7 @@ def test_controller_credential_tasks_run_in_check_mode_too():
             assert task.get("check_mode") is False, task["name"]
     for task in _load(CLEANUP)[0]["tasks"]:
         assert task.get("check_mode") is False, task["name"]
-    plays = _load(RESOLVE)[0]["tasks"]
+    plays = list(_flat_tasks(_load(RESOLVE)[0]["tasks"]))
     probe = next(t for t in plays if t.get("name") == "Probe SSH connection using primary admin user credentials")
     assert probe.get("check_mode") is False
 
@@ -66,7 +66,7 @@ def test_key_staging_is_one_helper_used_for_admin_bootstrap_and_hops_and_passphr
 
 
 def test_tasks_that_carry_secrets_are_no_log():
-    tasks = {t["name"]: t for t in _load(RESOLVE)[0]["tasks"]}
+    tasks = {t["name"]: t for t in list(_flat_tasks(_load(RESOLVE)[0]["tasks"]))}
     for name in ("Acquire the OpenBao client token once for the whole play",
                  "Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass",
                  "Take apart the resolution bundle (Asset document, access names, admin accounts, connections, secret-free summaries) and drop it",
@@ -83,7 +83,7 @@ def test_the_connection_is_resolved_by_one_lookup_per_host_not_by_repeated_looku
 
 
 def test_the_secret_bearing_resolution_bundle_is_taken_apart_and_emptied_in_one_task():
-    tasks = _load(RESOLVE)[0]["tasks"]
+    tasks = list(_flat_tasks(_load(RESOLVE)[0]["tasks"]))
     take = next(t for t in tasks if t["name"].startswith("Take apart the resolution bundle"))
     facts = take["ansible.builtin.set_fact"]
     assert facts["_host_res"] == {} and take["no_log"] is True
@@ -93,8 +93,14 @@ def test_the_secret_bearing_resolution_bundle_is_taken_apart_and_emptied_in_one_
     assert "_host_res" not in yaml.safe_dump(tasks[tasks.index(take) + 1:])
 
 
+def test_the_proxy_command_is_built_once_and_both_the_probe_and_the_common_args_use_it():
+    text = RESOLVE.read_text(encoding="utf-8")
+    assert text.count("openbao_ssh_proxy_command(") == 1 and "openbao_ssh_common_args" not in text
+    assert text.count("_ssh_proxy_command") >= 3
+
+
 def test_the_token_is_acquired_once_per_play():
-    task = next(t for t in _load(RESOLVE)[0]["tasks"] if t["name"].startswith("Acquire the OpenBao client token"))
+    task = next(t for t in list(_flat_tasks(_load(RESOLVE)[0]["tasks"])) if t["name"].startswith("Acquire the OpenBao client token"))
     assert task["run_once"] is True
 
 
@@ -120,9 +126,10 @@ def test_shared_connection_plays_honour_target_hosts_narrowing():
         assert _load(path)[0]["hosts"] == "{{ connection_hosts | default(target_hosts | default('servers:loadbalancers')) }}"
 
 
-def test_remote_python_is_always_usr_bin_python3():
-    task = next(t for t in _load(RESOLVE)[0]["tasks"] if t["name"].startswith("Configure connection parameters"))
-    assert task["ansible.builtin.set_fact"]["ansible_python_interpreter"] == "/usr/bin/python3"
+def test_remote_python_defaults_to_usr_bin_python3_and_only_the_validated_asset_key_overrides_it():
+    task = next(t for t in list(_flat_tasks(_load(RESOLVE)[0]["tasks"])) if t["name"].startswith("Configure connection parameters"))
+    assert "openbao_python_interpreter" in task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "_access.python_interpreter" in task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
     assert "ansible_python_interpreter" not in (_load(RESOLVE)[0].get("vars") or {})
     assert _load(SITE)[1]["vars"]["ansible_python_interpreter"] == "/usr/bin/python3"
     assert "interpreter_python = auto_silent" in (ROOT_DIR / "ansible.cfg").read_text(encoding="utf-8")

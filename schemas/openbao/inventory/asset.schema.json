@@ -84,6 +84,11 @@
           },
           "uniqueItems": true,
           "description": "제거 대상 계정 이름 목록."
+        },
+        "python_interpreter": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._+/-]+(?!\\n)$",
+          "description": "원격 호스트의 Python 경로(선택). 없으면 /usr/bin/python3. 절대 경로여야 하고 venv·semaphore가 들어가거나 /tmp/ 아래인 경로는 작업이 거부한다."
         }
       },
       "additionalProperties": false

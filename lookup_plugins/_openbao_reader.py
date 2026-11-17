@@ -139,9 +139,12 @@ class Reader:
         raise _fail("OpenBao 인증 정보가 없습니다(AppRole: VAULT_ROLE_ID와 VAULT_SECRET_ID)")
 
     def _renew(self):
-        """만료됐을 수 있는 토큰(공유 토큰·캐시)이 403이면 AppRole로 새로 로그인한 토큰. 다시 로그인할 수 없으면 None."""
+        """플레이 첫머리에서 받은 공유 토큰이 403이면 AppRole로 새로 로그인한 토큰. 다시 로그인할 수 없으면 None.
+
+        이 프로세스가 로그인한 토큰(캐시·방금 로그인)은 만료됐을 리 없어 403은 정책 거부다: 다시 로그인하지 않고 바로 실패한다.
+        그래서 errors='ignore'로 거부 문서를 읽어도 태스크당 재로그인은 한 번(공유 토큰이 만료됐을 때)뿐이다."""
         role, secret = self._approle()
-        if self._token_origin not in ("shared", "cache") or not (role and secret):
+        if self._token_origin != "shared" or not (role and secret):
             return None
         _LOGIN_CACHE.pop((self.addr, role, secret), None)
         self._renewed = self._login(role, secret)

@@ -16,7 +16,8 @@ sys.path.insert(0, str(ROOT_DIR / "scripts"))
 
 import openbao_validation as ov  # noqa: E402
 from openbao_connection import ConnectionError_, admin_accounts, host_connections, preference_list, resolve  # noqa: E402
-from openbao_ssh import openbao_connection_summary, openbao_ssh_common_args, openbao_ssh_proxy_command  # noqa: E402
+from openbao_ssh import (  # noqa: E402
+    openbao_connection_summary, openbao_python_interpreter, openbao_ssh_common_args, openbao_ssh_proxy_command)
 
 VALID = ROOT_DIR / "tests" / "fixtures" / "openbao_docs" / "valid"
 
@@ -375,6 +376,33 @@ def test_host_connections_stop_before_resolving_when_a_provisioning_target_has_n
     store["inventory/assets/ns0001"]["access"] = {"admin_credentials": ["admin01"]}          # bootstrap이 없어도 실패
     with pytest.raises(ConnectionError_, match="ACCESS-MISSING"):
         host_connections(reader(store), "ns0001", ["ssh"], requires_access=True)
+
+
+def test_host_connections_without_accounts_do_not_need_the_operator_documents(store):
+    store["inventory/assets/ns0001"]["access"]["admin_credentials"] = ["admin01", "root"]
+    store.pop("inventory/operators/root", None)
+    out = host_connections(reader(store), "ns0001", ["ssh"], with_accounts=False)
+    assert out["admin_accounts"] == [] and out["admin"]["credential"] == "admin01"
+    assert out["admin_names"] == ["admin01", "root"]               # 이름은 공개키 없이도 준다(삭제 대상 충돌 검사용)
+    store["inventory/assets/ns0001"]["access"]["admin_credentials"] = ["root", "admin01"]
+    with pytest.raises(ConnectionError_, match="operators/root"):
+        host_connections(reader(store), "ns0001", ["ssh"])               # 기본(프로비저닝)은 그대로 필수다
+
+
+@pytest.mark.parametrize("value", ["/usr/bin/python3", "/usr/local/bin/python3.11", "/opt/py/bin/python"])
+def test_a_plain_absolute_python_path_is_accepted(value):
+    assert openbao_python_interpreter(value) == value
+
+
+@pytest.mark.parametrize("value", ["python3", "/srv/semaphore/venv/bin/python", "/home/x/.venv/bin/python", "/tmp/py/python",
+                                   "auto_silent", "/opt/Semaphore/bin/python", "/home/x/.VENV/bin/python", "/usr/bin/../bin/python", "/usr/bin/python3; rm", 7])
+def test_a_relative_venv_semaphore_or_temporary_python_path_is_refused(value):
+    with pytest.raises(Exception, match="python_interpreter"):
+        openbao_python_interpreter(value)
+
+
+def test_an_empty_python_value_means_the_default():
+    assert openbao_python_interpreter("") == openbao_python_interpreter(None) == "/usr/bin/python3"
 
 
 def test_the_connection_summary_carries_no_secret(store):

@@ -344,6 +344,25 @@ def test_expected_objects_are_read_from_the_real_opentofu_code():
     assert {"applier", "periodic-check", "operator", "agent-session"} <= expected["policies"]
 
 
+def test_managed_approles_list_equals_the_role_policy_keys_in_the_tf_code():
+    import re
+    tf = (TOFU / "approles.tf").read_text(encoding="utf-8")
+    listed = set(re.findall(r'"([^"]+)"', re.search(r"managed_approles\s*=\s*\[(.*?)\]", tf, re.S).group(1)))
+    family = re.search(r"family_policies\s*=\s*\{(.*?)\n  \}", tf, re.S).group(1)
+    keys = set(re.findall(r"^    (\w+)\s*=\s*\[", family, re.M)) | {"host_audit"}      # role_policies = merge(family_policies, {host_audit})
+    assert listed == keys
+
+
+def test_an_unreadable_tofu_structure_fails_clearly_instead_of_reporting_everything_unmanaged(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import openbao_check as oc
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "policies" / "x.hcl").write_text('path "inventory/data/x" {\n  capabilities = ["read"]\n}\n')
+    (tmp_path / "main.tf").write_text("# 구조가 바뀌어 role·마운트가 없다\n")
+    with pytest.raises(OSError, match="읽지 못했다"):
+        oc.expected_from_tofu(tmp_path)
+
+
 def test_secret_id_zero_expiry_time_means_no_expiry(env):
     fake, rec = env
     fake.raw("POST", "auth/approle/role/provision/secret-id-accessor/lookup",

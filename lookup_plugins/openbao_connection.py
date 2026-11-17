@@ -194,13 +194,15 @@ def admin_accounts(read, asset, preference):
     return out
 
 
-def host_connections(read, asset, preference, requires_access=False):
+def host_connections(read, asset, preference, requires_access=False, with_accounts=True):
     """호스트 하나의 접속 해석 묶음: Asset 문서, 관리·부트스트랩 연결, 관리 계정 목록.
 
     같은 읽기 함수(`Reader.read`는 한 객체 안에서 문서를 다시 읽지 않는다)로 한 번에 만들어, 호스트당 같은 문서를 여러 번 HTTP로
     읽지 않는다. 관리 Credential 이름은 `access.admin_credentials`의 첫째, 부트스트랩은 `access.bootstrap_credential`이다
     (둘 다 없으면 관리 연결은 Endpoint 기본 Credential, 부트스트랩 연결·관리 계정은 비어 있다).
     `requires_access`(프로비저닝 대상)면 access 절이 없을 때 연결을 해석하기 전에 실패한다.
+    `with_accounts=False`면 관리 계정 목록(`inventory/operators/<계정>` 읽기)을 만들지 않는다: `accounts`를 쓰지 않는 소비자(Host Agents)가
+    Operator 문서가 없다는 이유로 실패하지 않게 한다.
     """
     doc = read("inventory/assets/%s" % asset)
     access = doc.get("access") or {}
@@ -214,7 +216,9 @@ def host_connections(read, asset, preference, requires_access=False):
         "asset": doc, "admin_credential": admin, "bootstrap_credential": boot,
         "admin": resolve(read, asset, preference, admin or None),
         "bootstrap": resolve(read, asset, preference, boot) if boot else {},
-        "admin_accounts": admin_accounts(read, asset, preference) if admin else [],
+        "admin_accounts": admin_accounts(read, asset, preference) if (admin and with_accounts) else [],
+        # 선언된 관리 계정 이름은 공개키를 읽지 않아도 항상 준다(삭제 대상 충돌 검사가 계정 목록 없이도 관리 계정을 지킨다).
+        "admin_names": [_credential(read, asset, n).get("username") or "" for n in (access.get("admin_credentials") or [])],
     }
 
 

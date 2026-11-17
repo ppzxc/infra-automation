@@ -6,13 +6,14 @@
 # (inventory/assets/<ns>/endpoints의 ssh)에서 직접 읽는다.
 # 연결 해석(resolve_connection.yml)은 실행 대상 호스트만 하므로 hostvars를 쓰면 부분 실행(target_hosts=ns0266)에서
 # 나머지가 모두 22로 만들어져 도달성 알림이 오발화한다. ssh Endpoint가 없으면 22나 호스트명으로 짐작하지 않고 실패시킨다.
-# Endpoint 문서에는 시크릿이 없다. 문서는 한 번의 조회로(같은 읽기 객체, 로그인도 한 번) 읽고, 읽기 실패(403·연결 오류·없는 문서)는
+# Host Agents 제외 호스트(host_agents_excluded, 에이전트도 게이트웨이도 없는 호스트)는 로스터에서 빠진다(읽지 않는다). 아직 Endpoint 문서가
+# 없는 호스트는 경고와 함께 건너뛴다(옛 코드의 호스트명:22 대체는 오발화하므로 하지 않는다). Endpoint 문서에는 시크릿이 없다. 문서는 한 번의 조회로(같은 읽기 객체, 로그인도 한 번) 읽고, 읽기 실패(403·연결 오류·없는 문서)는
 # 읽기 지점이 문서 경로와 상태 코드를 내며 그 자리에서 중단한다(포트를 22로 짐작하지 않는다).
 - name: "[MON-227] Read the Endpoint document of every server from OpenBao (inventory/assets/<ns>/endpoints)"
   vars:
     _paths: "{{ otel_tcpcheck_roster | map('regex_replace', '^(.*)$', 'inventory/assets/\\1/endpoints') | list }}"
   ansible.builtin.set_fact:
-    _tcpcheck_docs: "{{ query('openbao_doc', *_paths) if _paths | length > 0 else [] }}"
+    _tcpcheck_docs: "{{ query('openbao_doc', *_paths, required=false) if _paths | length > 0 else [] }}"
   become: false
   check_mode: false
   when: otel_tcpcheck_enabled | bool
@@ -23,7 +24,7 @@
   ansible.builtin.assert:
     that:
       - _tcpcheck_docs | length == otel_tcpcheck_roster | length
-      - _bad | length == 0
+      - _bad | length == 0          # 문서가 없으면 {}(mapping)이라 통과하고 MON-229가 경고와 함께 건너뛴다
     fail_msg: >-
       {{ inventory_hostname }}: 서버 도달성 대상을 만들 수 없습니다 — OpenBao inventory/assets/<ns>/endpoints 조회 결과가 맞지 않습니다(변경 없이 중단).
       실패 호스트={{ _bad if _bad | length > 0 else '없음(미조회)' }}
@@ -32,5 +33,5 @@
 
 - name: "[MON-229] Build the server reachability targets (address:port) from the ssh Endpoints"
   ansible.builtin.set_fact:
-    otel_tcpcheck_targets: "{{ otel_tcpcheck_roster | host_agents_tcpcheck_targets(dict(otel_tcpcheck_roster | zip(_tcpcheck_docs))) }}"
+    otel_tcpcheck_targets: "{{ otel_tcpcheck_roster | host_agents_tcpcheck_targets(dict(otel_tcpcheck_roster | zip(_tcpcheck_docs)), skip_unregistered=true) }}"
   when: otel_tcpcheck_enabled | bool

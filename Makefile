@@ -1,4 +1,4 @@
-.PHONY: help provision provision-overseer provision-hosts check spec-check lint test test-unit test-molecule test-fast test-slow test-full test-role test-images test-scripts clean init-hooks
+.PHONY: help provision provision-hosts check spec-check lint test test-unit test-molecule test-fast test-slow test-full test-role test-images test-scripts clean init-hooks
 
 # Default Target
 help:
@@ -7,7 +7,6 @@ help:
 	@echo "================================================================================"
 	@echo "  make init-hooks                 - Install Git Pre-Commit security & lint hooks"
 	@echo "  make provision                  - Run full provisioning (overseer + servers)"
-	@echo "  make provision-overseer         - Run provisioning for Overseer Control Plane host"
 	@echo "  make provision-hosts            - Run baseline provisioning for IDC target hosts"
 	@echo "  make check                      - Dry-run simulation (--check --diff)"
 	@echo "  make spec-check                 - Validate 3-way consistency (Docs <-> Code <-> Tests)"
@@ -32,9 +31,6 @@ init-hooks:
 
 provision:
 	@./docker-run.sh playbooks/site.yml
-
-provision-overseer:
-	@./docker-run.sh playbooks/provision_overseer.yml
 
 provision-hosts:
 	@./docker-run.sh playbooks/provision_hosts.yml

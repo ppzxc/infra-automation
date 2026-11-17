@@ -33,7 +33,7 @@ def _stub(path, body):
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
-def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
+def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None, extra_env=None):
     bindir = tmp_path / "bin"
     bindir.mkdir()
     log = tmp_path / "ssh-calls.log"
@@ -49,7 +49,7 @@ def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
     ]))
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", STUB_SSH_LOG=str(log), STUB_SSH_RC=str(probe_rc),
                STUB_KEYGEN_LOG=str(tmp_path / "keygen-calls.log"),
-               VAULT_ADDR=fake.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret", ANSIBLE_NOCOLOR="1")
+               VAULT_ADDR=fake.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret", ANSIBLE_NOCOLOR="1", **(extra_env or {}))
     cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")]
     for k, v in (extra_vars or {}).items():
         cmd += ["-e", json.dumps({k: v})]
@@ -70,6 +70,43 @@ def test_each_document_is_read_over_http_once_per_host_and_the_login_once_per_pl
     per_host = [d for m, d in reads if d.startswith(("assets/ns0001", "assets/ns0002"))]
     assert len(per_host) == len(set(per_host)), per_host
     assert len(fake_openbao.logins()) == 1
+
+
+ALT_PYTHON = __import__("os").path.realpath(__import__("shutil").which("python3"))   # 실제로 있는 다른 경로(Dump 플레이가 이 값으로 도는 컨트롤러 연결)
+
+
+def test_the_asset_python_interpreter_is_used_and_a_bad_one_fails_the_host(tmp_path, fake_openbao):
+    asset = fake_openbao.get("inventory", "assets/ns0001")[0]
+    fake_openbao.set("inventory", "assets/ns0001", {**asset, "access": {**asset["access"], "python_interpreter": ALT_PYTHON}})
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["ns0001"]["python"] == ALT_PYTHON
+
+
+def test_a_venv_python_interpreter_in_the_asset_document_is_refused(tmp_path, fake_openbao):
+    asset = fake_openbao.get("inventory", "assets/ns0001")[0]
+    fake_openbao._docs[("inventory", "assets/ns0001")] = (200, {"data": {"data": {**asset, "access": {
+        **asset["access"], "python_interpreter": "/srv/semaphore/venv/bin/python"}}, "metadata": {"version": 2}}})   # 스키마 검사를 건너뛴 직접 적재
+    private_tmp = tmp_path / "tmpdir"          # 병렬 테스트의 임시 키와 섞이지 않게 이 실행만의 임시 디렉터리를 쓴다
+    private_tmp.mkdir()
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"], extra_env={"TMPDIR": str(private_tmp)})
+    assert res.returncode != 0 and out == {} and "python_interpreter" in res.stdout + res.stderr
+    # 키를 준비한 뒤(접속 변수 설정 단계)에 실패해도 이 호스트가 만든 임시 키는 남지 않는다(cleanup_connection은 실패한 호스트에 돌지 않는다)
+    assert list(private_tmp.glob("*_bao_*_key")) == []
+
+
+def test_removing_a_declared_admin_is_refused_even_when_the_consumer_reads_no_accounts(tmp_path, fake_openbao):
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"],
+                              extra_vars={"connection_needs_accounts": False, "target_removed_users": ["admin01"]})
+    assert res.returncode != 0 and "REMOVED-USER-CONFLICT" in res.stdout + res.stderr
+
+
+def test_a_consumer_without_accounts_does_not_read_the_operator_documents(tmp_path, fake_openbao):
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"], extra_vars={"connection_needs_accounts": False})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert all(a["state"] == "absent" for a in out["ns0001"]["accounts"])        # 삭제 대상만 남는다
+    assert out["ns0001"]["normalized"] == ["admin01"]                              # 관리 계정 이름은 지킨다
+    assert not [r for r in fake_openbao.reads() if (r.doc or "").startswith("operators/")]
 
 
 def test_a_provisioned_identity_host_connects_with_the_automation_key_and_reads_only_infra_documents(tmp_path, fake_openbao):

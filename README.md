@@ -10,7 +10,7 @@
 |---|---|---|---|
 | **`servers`** | `inventory/group_vars/servers.yml` | 온프레미스 IDC 일반 연산 호스트 (타겟 호스트) | `playbooks/site.yml` |
 | **`loadbalancers`**| `inventory/group_vars/loadbalancers.yml` | HAProxy, Keepalived, VIP 로드밸런서 호스트 (L4 포워딩 & ARP Flux 방지) | `playbooks/site.yml` |
-| **`cisco_switches`**| `inventory/group_vars/cisco_switches.yml` | Cisco IOS 네트워크 스위치 장비군 (L2/L3 스위치) | `playbooks/backup_cisco.yml` |
+| **`cisco_switches`**| Semaphore 인벤토리 그룹(저장소 `group_vars` 파일 없음. 접속 조정값은 `roles/cisco_backup` 기본값, 접속 정보는 OpenBao) | Cisco IOS 네트워크 스위치 장비군 (L2/L3 스위치) | `playbooks/backup_cisco.yml` |
 
 ---
 

@@ -75,6 +75,15 @@ def test_when_the_renewal_login_fails_the_original_denied_document_is_still_name
     assert any("inventory/assets/ns0001" in line and "403" in line for line in shown)
 
 
+def test_denied_documents_do_not_add_logins_after_the_one_renewal(fake_openbao):
+    fake_openbao.deny("secrets", "automation/ssh")
+    fake_openbao.deny("secrets", "services/alert/notify")
+    for doc in ("secrets/automation/ssh", "secrets/services/alert/notify", "secrets/automation/ssh"):
+        with pytest.raises(OpenBaoError):
+            Reader(_vars(fake_openbao, _vault_token="expired-token")).read(doc)
+    assert len(fake_openbao.logins()) == 1
+
+
 def test_a_fresh_login_that_is_denied_is_not_retried(fake_openbao):
     fake_openbao.deny("secrets", "automation/ssh")
     with pytest.raises(OpenBaoError):

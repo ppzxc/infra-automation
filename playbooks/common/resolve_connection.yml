@@ -11,6 +11,7 @@
 #
 # 입력(공개 인터페이스는 docs/openbao_integration.md 4절):
 #   connection_endpoint_preference  Endpoint 이름 선호 순서 목록(기본 [ssh]). 첫 번째로 등록된 것만 쓴다.
+#   connection_needs_accounts       false면 관리 계정 공개키(inventory/operators/<계정>)를 읽지 않는다(기본 true. accounts를 안 쓰는 Host Agents가 끈다).
 #   connection_requires_access      true면 Asset 문서에 access 절이 없을 때 실패한다(프로비저닝 대상).
 #   target_removed_users            이번 실행에서 지울 계정(실행 변수로 남는 유일한 계정 입력).
 #   connection_hosts / target_hosts 대상 호스트 패턴.
@@ -93,7 +94,7 @@
     # 연결을 해석하기 전에 [ACCESS-MISSING]으로 실패한다.
     - name: Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass
       ansible.builtin.set_fact:
-        _host_res: "{{ lookup('openbao_host_connection', inventory_hostname, preference=_connection_preference, requires_access=(connection_requires_access | default(false) | bool)) }}"
+        _host_res: "{{ lookup('openbao_host_connection', inventory_hostname, preference=_connection_preference, requires_access=(connection_requires_access | default(false) | bool), accounts=(connection_needs_accounts | default(true) | bool)) }}"
       check_mode: false
       no_log: true
 
@@ -106,7 +107,7 @@
         _admin_credential: "{{ _host_res.admin_credential }}"
         _bootstrap_credential: "{{ _host_res.bootstrap_credential }}"
         _admin_accounts: "{{ _host_res.admin_accounts }}"
-        _normalized_admin_users: "{{ _host_res.admin_accounts | map(attribute='name') | list }}"
+        _normalized_admin_users: "{{ _host_res.admin_names | select | list }}"
         _admin_summary: "{{ _host_res.admin | openbao_connection_summary }}"
         _boot_summary: "{{ (_host_res.bootstrap | openbao_connection_summary) if _host_res.bootstrap | length > 0 else {} }}"
         _admin_conn: "{{ _host_res.admin }}"
@@ -218,103 +219,127 @@
         # 관리 IP(`ip`, Host Agents의 host.ip 출처): 인벤토리 ip가 있으면 그 값, 없으면 선택된 Endpoint 주소.
         ip: "{{ ip if (ip is defined and (ip | string | trim | length) > 0) else _admin_conn.address }}"
 
-    # 임시 키 파일 만들기·쓰기·암호문 제거는 stage_ssh_key.yml 한 곳이다(관리·부트스트랩·경유지가 같은 단계를 쓴다).
-    - name: Stage the admin SSH private key as a temporary file
-      ansible.builtin.include_tasks: stage_ssh_key.yml
-      vars:
-        _sk_suffix: _bao_admin_key
-        _sk_key: "{{ _admin_conn.login.private_key | default('') }}"
-        _sk_passphrase: "{{ _admin_conn.login.passphrase | default('') }}"
-        _sk_record: _admin_key_tempfile
+    # 임시 개인키를 만든 뒤의 모든 단계(키 준비, ProxyCommand, 프로브, 접속 변수 설정)는 한 블록이다. 어느 단계가 실패해도 이 호스트가 만든 임시 키를 모두
+    # 지우고 실패를 다시 올린다(실패한 호스트에게는 cleanup_connection 플레이가 돌지 않는다).
+    - name: Stage the temporary keys, probe the connection and publish the connection facts
+      block:
+        # 임시 키 파일 만들기·쓰기·암호문 제거는 stage_ssh_key.yml 한 곳이다(관리·부트스트랩·경유지가 같은 단계를 쓴다).
+        - name: Stage the admin SSH private key as a temporary file
+          ansible.builtin.include_tasks: stage_ssh_key.yml
+          vars:
+            _sk_suffix: _bao_admin_key
+            _sk_key: "{{ _admin_conn.login.private_key | default('') }}"
+            _sk_passphrase: "{{ _admin_conn.login.passphrase | default('') }}"
+            _sk_record: _admin_key_tempfile
 
-    - name: Stage the bootstrap SSH private key as a temporary file
-      ansible.builtin.include_tasks: stage_ssh_key.yml
-      vars:
-        _sk_suffix: _bao_boot_key
-        _sk_key: "{{ _boot_conn.login.private_key | default('') }}"
-        _sk_passphrase: "{{ _boot_conn.login.passphrase | default('') }}"
-        _sk_record: _boot_key_tempfile
+        - name: Stage the bootstrap SSH private key as a temporary file
+          ansible.builtin.include_tasks: stage_ssh_key.yml
+          vars:
+            _sk_suffix: _bao_boot_key
+            _sk_key: "{{ _boot_conn.login.private_key | default('') }}"
+            _sk_passphrase: "{{ _boot_conn.login.passphrase | default('') }}"
+            _sk_record: _boot_key_tempfile
 
-    # 경유(via) 체인: 경유지마다 자기 Endpoint의 기본 Credential·identity로 로그인한다. 키 로그인 경유지만 지원한다.
-    # 경로 목록(_hop_key_paths)은 경유 순서와 맞춘다(키가 없는 경유지는 '').
-    - name: Start the via hop temporary key path list
-      ansible.builtin.set_fact:
-        _hop_key_paths: []
+        # 경유(via) 체인: 경유지마다 자기 Endpoint의 기본 Credential·identity로 로그인한다. 키 로그인 경유지만 지원한다.
+        # 경로 목록(_hop_key_paths)은 경유 순서와 맞춘다(키가 없는 경유지는 '').
+        - name: Start the via hop temporary key path list
+          ansible.builtin.set_fact:
+            _hop_key_paths: []
 
-    - name: Stage the via hop SSH private keys as temporary files
-      ansible.builtin.include_tasks: stage_ssh_key.yml
-      loop: "{{ _admin_conn.via }}"
-      loop_control:
-        loop_var: _hop
-        label: "{{ _hop.asset }}/{{ _hop.endpoint }}"
-      vars:
-        _sk_suffix: _bao_hop_key
-        _sk_key: "{{ _hop.login.private_key | default('') }}"
-        _sk_passphrase: "{{ _hop.login.passphrase | default('') }}"
-        _sk_append_to: _hop_key_paths
+        - name: Stage the via hop SSH private keys as temporary files
+          ansible.builtin.include_tasks: stage_ssh_key.yml
+          loop: "{{ _admin_conn.via }}"
+          loop_control:
+            loop_var: _hop
+            label: "{{ _hop.asset }}/{{ _hop.endpoint }}"
+          vars:
+            _sk_suffix: _bao_hop_key
+            _sk_key: "{{ _hop.login.private_key | default('') }}"
+            _sk_passphrase: "{{ _hop.login.passphrase | default('') }}"
+            _sk_append_to: _hop_key_paths
 
-    - name: Build the ssh ProxyCommand arguments for the via chain
-      ansible.builtin.set_fact:
-        _ssh_common_args: "{{ _admin_conn.via | openbao_ssh_common_args(_hop_key_paths, _admin_conn.address, _admin_conn.port) }}"
-      no_log: true
+        # ProxyCommand는 여기서 한 번만 만든다. 프로브(argv)와 Ansible 접속 인자(ansible_ssh_common_args)가 같은 값에서 나온다.
+        - name: Build the ssh ProxyCommand for the via chain
+          ansible.builtin.set_fact:
+            _ssh_proxy_command: "{{ (_admin_conn.via | openbao_ssh_proxy_command(_hop_key_paths, _admin_conn.address, _admin_conn.port)) if (_admin_conn.via | length > 0) else '' }}"
+          no_log: true
 
-    - name: Probe SSH connection using primary admin user credentials
-      ansible.builtin.command:
-        argv: >-
-          {{ ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
-              '-o', 'UserKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-p', ansible_port | string,
-              '-i', _admin_key_tempfile.path]
-             + (['-o', 'ProxyCommand=' ~ (_admin_conn.via | openbao_ssh_proxy_command(_hop_key_paths, _admin_conn.address, _admin_conn.port))]
-                if (_admin_conn.via | length > 0) else [])
-             + [_admin_conn.login.username ~ '@' ~ ansible_host, 'echo OK'] }}
-      register: _admin_ssh_probe
-      changed_when: false
-      failed_when: false
-      check_mode: false
-      when:
-        - _admin_key_tempfile is defined
-        - _admin_key_tempfile.path is defined
-        - (_admin_conn.login.private_key | default('')) | length > 0
+        - name: Derive the ansible_ssh_common_args from that ProxyCommand
+          ansible.builtin.set_fact:
+            _ssh_common_args: "{{ ('-o ' ~ (('ProxyCommand=' ~ _ssh_proxy_command) | quote)) if (_ssh_proxy_command | length > 0) else '' }}"
+          no_log: true
 
-    - name: Set connection mode facts based on admin SSH probe result
-      ansible.builtin.set_fact:
-        _is_already_provisioned: "{{ (_admin_ssh_probe.rc == 0) if (_admin_ssh_probe is defined and _admin_ssh_probe.rc is defined) else false }}"
+        - name: Probe SSH connection using primary admin user credentials
+          ansible.builtin.command:
+            argv: >-
+              {{ ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no',
+                  '-o', 'UserKnownHostsFile=/dev/null', '-o', 'IdentitiesOnly=yes', '-p', ansible_port | string,
+                  '-i', _admin_key_tempfile.path]
+                 + (['-o', 'ProxyCommand=' ~ _ssh_proxy_command] if (_ssh_proxy_command | length > 0) else [])
+                 + [_admin_conn.login.username ~ '@' ~ ansible_host, 'echo OK'] }}
+          register: _admin_ssh_probe
+          changed_when: false
+          failed_when: false
+          check_mode: false
+          when:
+            - _admin_key_tempfile is defined
+            - _admin_key_tempfile.path is defined
+            - (_admin_conn.login.private_key | default('')) | length > 0
 
-    # 관리 계정으로 접속되면 그 연결을, 아니면 부트스트랩 Credential(access.bootstrap_credential)의 연결을 쓴다.
-    # 부트스트랩 Credential이 없는 Asset(프로비저닝 대상이 아님)은 선택된 Endpoint의 기본 연결을 그대로 쓴다.
-    - name: Select the active connection (admin when provisioned, else bootstrap)
-      ansible.builtin.set_fact:
-        _active_conn: "{{ _admin_conn if ((_is_already_provisioned | bool) or (_boot_conn | length == 0)) else _boot_conn }}"
-        _active_key_path: "{{ (_admin_key_tempfile.path | default('')) if ((_is_already_provisioned | bool) or (_boot_conn | length == 0)) else (_boot_key_tempfile.path | default('')) }}"
-      no_log: true
+        - name: Set connection mode facts based on admin SSH probe result
+          ansible.builtin.set_fact:
+            _is_already_provisioned: "{{ (_admin_ssh_probe.rc == 0) if (_admin_ssh_probe is defined and _admin_ssh_probe.rc is defined) else false }}"
 
-    - name: Configure connection parameters from the active connection
-      ansible.builtin.set_fact:
-        ansible_user: "{{ _active_conn.login.username | default(omit) }}"
-        ansible_password: "{{ _active_conn.login.password | default(omit) }}"
-        ansible_ssh_private_key_file: "{{ _active_key_path if (_active_key_path | length > 0) else omit }}"
-        ansible_become_method: "{{ _active_conn.become.method | default(omit, true) }}"
-        ansible_become_password: "{{ _active_conn.become.password | default(omit, true) }}"
-        # 원격 Python은 항상 /usr/bin/python3다. 호스트별 인터프리터 값은 OpenBao에 두지 않는다(스키마에 없음).
-        ansible_python_interpreter: /usr/bin/python3
-      no_log: true
+        # 관리 계정으로 접속되면 그 연결을, 아니면 부트스트랩 Credential(access.bootstrap_credential)의 연결을 쓴다.
+        # 부트스트랩 Credential이 없는 Asset(프로비저닝 대상이 아님)은 선택된 Endpoint의 기본 연결을 그대로 쓴다.
+        - name: Select the active connection (admin when provisioned, else bootstrap)
+          ansible.builtin.set_fact:
+            _active_conn: "{{ _admin_conn if ((_is_already_provisioned | bool) or (_boot_conn | length == 0)) else _boot_conn }}"
+            _active_key_path: "{{ (_admin_key_tempfile.path | default('')) if ((_is_already_provisioned | bool) or (_boot_conn | length == 0)) else (_boot_key_tempfile.path | default('')) }}"
+          no_log: true
 
-    - name: Configure the ssh ProxyCommand for the via chain
-      ansible.builtin.set_fact:
-        ansible_ssh_common_args: "{{ _ssh_common_args }}"
-      no_log: true
-      when: _ssh_common_args | length > 0
+        - name: Configure connection parameters from the active connection
+          ansible.builtin.set_fact:
+            ansible_user: "{{ _active_conn.login.username | default(omit) }}"
+            ansible_password: "{{ _active_conn.login.password | default(omit) }}"
+            ansible_ssh_private_key_file: "{{ _active_key_path if (_active_key_path | length > 0) else omit }}"
+            ansible_become_method: "{{ _active_conn.become.method | default(omit, true) }}"
+            ansible_become_password: "{{ _active_conn.become.password | default(omit, true) }}"
+            # 원격 Python: 기본 /usr/bin/python3, Asset 문서 access.python_interpreter(선택)가 있으면 그 값(venv·semaphore·임시 경로는 거부).
+            ansible_python_interpreter: "{{ _access.python_interpreter | default('', true) | openbao_python_interpreter }}"
+          no_log: true
 
-    - name: Publish the secret-free connection summary
-      ansible.builtin.set_fact:
-        _connection: "{{ _admin_summary if ((_is_already_provisioned | bool) or (_boot_summary | length == 0)) else _boot_summary }}"
+        - name: Configure the ssh ProxyCommand for the via chain
+          ansible.builtin.set_fact:
+            ansible_ssh_common_args: "{{ _ssh_common_args }}"
+          no_log: true
+          when: _ssh_common_args | length > 0
 
-    - name: Connection decision summary
-      ansible.builtin.debug:
-        msg:
-          "대상 호스트": "{{ inventory_hostname }} ({{ _connection.endpoint }}: {{ _connection.address }}:{{ _connection.port }})"
-          "경유": "{{ _connection.via | map(attribute='asset') | join(' -> ') | default('없음', true) }}"
-          "프로비저닝 상태": "{{ '기존 배포 완료됨 (Already Provisioned)' if _is_already_provisioned else '신규 호스트 (부트스트랩 모드 실행)' }}"
-          "원격 접속 계정": "{{ _connection.username | default('') }} ({{ _connection.login_mode }})"
-          "승격": "{{ _connection.become_method | default('없음', true) }}"
-          "비밀번호 접속 예외": "{{ _connection.password_auth_exception }}"
+        - name: Publish the secret-free connection summary
+          ansible.builtin.set_fact:
+            _connection: "{{ _admin_summary if ((_is_already_provisioned | bool) or (_boot_summary | length == 0)) else _boot_summary }}"
+
+        - name: Connection decision summary
+          ansible.builtin.debug:
+            msg:
+              "대상 호스트": "{{ inventory_hostname }} ({{ _connection.endpoint }}: {{ _connection.address }}:{{ _connection.port }})"
+              "경유": "{{ _connection.via | map(attribute='asset') | join(' -> ') | default('없음', true) }}"
+              "프로비저닝 상태": "{{ '기존 배포 완료됨 (Already Provisioned)' if _is_already_provisioned else '신규 호스트 (부트스트랩 모드 실행)' }}"
+              "원격 접속 계정": "{{ _connection.username | default('') }} ({{ _connection.login_mode }})"
+              "승격": "{{ _connection.become_method | default('없음', true) }}"
+              "비밀번호 접속 예외": "{{ _connection.password_auth_exception }}"
+
+      rescue:
+        - name: Remove every temporary key this host staged before the failure
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop: "{{ ([_admin_key_tempfile.path | default('')] if _admin_key_tempfile is defined else []) + ([_boot_key_tempfile.path | default('')] if _boot_key_tempfile is defined else []) + (_hop_key_paths | default([])) }}"
+          loop_control:
+            label: "{{ item | basename }}"
+          when: item | length > 0
+          check_mode: false
+
+        - name: Fail the host with the original failure
+          ansible.builtin.fail:
+            msg: "{{ inventory_hostname }}: 접속 해석 중 '{{ ansible_failed_task.name | default('?') }}' 단계가 실패했습니다(임시 키는 지웠습니다). {{ ansible_failed_result.msg | default('') }}"
