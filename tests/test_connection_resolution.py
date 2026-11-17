@@ -72,6 +72,25 @@ def test_each_document_is_read_over_http_once_per_host_and_the_login_once_per_pl
     assert len(fake_openbao.logins()) == 1
 
 
+ALT_PYTHON = __import__("os").path.realpath(__import__("shutil").which("python3"))   # 실제로 있는 다른 경로(Dump 플레이가 이 값으로 도는 컨트롤러 연결)
+
+
+def test_the_asset_python_interpreter_is_used_and_a_bad_one_fails_the_host(tmp_path, fake_openbao):
+    asset = fake_openbao.get("inventory", "assets/ns0001")[0]
+    fake_openbao.set("inventory", "assets/ns0001", {**asset, "access": {**asset["access"], "python_interpreter": ALT_PYTHON}})
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["ns0001"]["python"] == ALT_PYTHON
+
+
+def test_a_venv_python_interpreter_in_the_asset_document_is_refused(tmp_path, fake_openbao):
+    asset = fake_openbao.get("inventory", "assets/ns0001")[0]
+    fake_openbao._docs[("inventory", "assets/ns0001")] = (200, {"data": {"data": {**asset, "access": {
+        **asset["access"], "python_interpreter": "/srv/semaphore/venv/bin/python"}}, "metadata": {"version": 2}}})   # 스키마 검사를 건너뛴 직접 적재
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"])
+    assert res.returncode != 0 and out == {} and "python_interpreter" in res.stdout + res.stderr
+
+
 def test_a_consumer_without_accounts_does_not_read_the_operator_documents(tmp_path, fake_openbao):
     res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"], extra_vars={"connection_needs_accounts": False})
     assert res.returncode == 0, res.stdout + res.stderr

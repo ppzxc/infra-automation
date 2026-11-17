@@ -1482,7 +1482,7 @@ def test_tcpcheck_targets_fail_naming_the_assets_without_an_ssh_endpoint_instead
         host_agents_tcpcheck_targets(["ns0004"], bad)
 
 
-def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token=APPROLE_TOKEN, others=(), excluded_group=None):
+def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token=APPROLE_TOKEN, others=(), excluded_group=None, extra_groups=None):
     role_vars = {}
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
@@ -1498,6 +1498,8 @@ def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inv
                    "children": {"servers": {"hosts": {h: {} for h in servers}}}}}
     if excluded_group is not None:   # Semaphore 인벤토리의 tcpcheck_excluded 그룹(host_agents_excluded와 같은 방식)
         inv["all"]["children"]["tcpcheck_excluded"] = {"hosts": {h: {} for h in excluded_group}}
+    for group, members in (extra_groups or {}).items():
+        inv["all"]["children"][group] = {"hosts": {h: {} for h in members}}
     (tmp_path / "inv.yml").write_text(yaml.safe_dump(inv))
     res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")],
                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR,
@@ -1546,10 +1548,26 @@ def test_an_openbao_error_fails_the_checker_instead_of_silently_guessing_port_22
     assert "svc-denied" in text and "403" in text
 
 
-def test_a_server_without_an_ssh_endpoint_fails_the_checker_instead_of_guessing(tmp_path, openbao):
+def test_a_server_whose_endpoint_document_does_not_exist_yet_is_skipped_with_a_warning_not_guessed(tmp_path, openbao):
     res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-noep"])
-    assert res.returncode != 0 and out == {}
-    assert "svc-noep" in res.stdout + res.stderr
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["192.0.2.10:22"]                   # 호스트명:22로 짐작하지 않는다
+    assert "svc-noep" in res.stdout + res.stderr and "뺐습니다" in res.stdout + res.stderr
+
+
+def test_servers_of_the_host_agents_excluded_group_are_not_even_read(tmp_path, bao, openbao):
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-noep"], others=(), excluded_group=None,
+                                   inventory_hosts=None, extra_groups={"host_agents_excluded": ["svc-noep"]})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["192.0.2.10:22"] and "svc-noep" not in res.stdout + res.stderr
+    assert "assets/svc-noep/endpoints" not in {f"{r.doc}" for r in bao.reads()}
+
+
+def test_a_document_with_endpoints_but_no_ssh_endpoint_still_fails_the_checker(tmp_path, bao, openbao):
+    bao.set("inventory", "assets/svc-noep/endpoints", {"https": {"protocol": "https", "address": "192.0.2.9", "port": 443,
+                                                              "credential": "api"}})
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-noep"])
+    assert res.returncode != 0 and out == {} and "svc-noep" in res.stdout + res.stderr
 
 
 def test_the_declared_openbao_documents_are_known_to_index_yml_and_their_required_keys_exist_in_the_schema():

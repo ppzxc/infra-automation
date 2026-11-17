@@ -31,6 +31,8 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_plugins"))
+from openbao_ssh import python_interpreter_problem  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 
 GITHUB_API_URL = "https://api.github.com"  # 공개 상수. 옛 KV에는 github_api_url이 없다(선택 키 기본값).
@@ -171,6 +173,7 @@ class _Builder:
         admin = _as_list(d.pop("admin_users", None))
         boot = d.pop("bootstrap_user", None) or None
         removed = _as_list(d.pop("removed_users", None))
+        interp = d.pop("ansible_python_interpreter", None)
         pwauth = _truthy(d.pop("host_agents_allow_password_auth", False))
         address = d.pop("ansible_host", None) or d.pop("public_ip", None) or None
         d.pop("public_ip", None)
@@ -184,8 +187,11 @@ class _Builder:
             access["bootstrap_credential"] = boot
         if removed:
             access["removed_accounts"] = removed
+        # 옛 접속 해석은 호스트별 인터프리터를 쓰되 venv·semaphore·임시 경로 등은 걸러 기본값으로 돌렸다: 같은 규칙으로 옮긴다
+        if isinstance(interp, str) and interp and python_interpreter_problem(interp) is None:
+            access["python_interpreter"] = interp
         access_src = {"admin_credentials": "admin_users", "bootstrap_credential": "bootstrap_user",
-                      "removed_accounts": "removed_users"}
+                      "removed_accounts": "removed_users", "python_interpreter": "ansible_python_interpreter"}
         for k, v in access.items():
             self.put(asset, ["access", k], v, (doc, access_src[k]))
         if "CLOUDFLARE_API_TOKEN" in d:

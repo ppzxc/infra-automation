@@ -610,14 +610,21 @@ def _blank(value):
     return value is None or str(value).strip() == ''
 
 
-def host_agents_tcpcheck_targets(roster, endpoints_by_host, endpoint='ssh'):
+def host_agents_tcpcheck_targets(roster, endpoints_by_host, endpoint='ssh', skip_unregistered=False):
     """서버 도달성(tcp_check) 대상 'address:port' 목록 — 실행 범위(target_hosts)와 무관하게 Asset의 Endpoint 문서로 만든다.
 
     ``endpoints_by_host``는 `{<관리번호>: inventory/assets/<ns>/endpoints 문서}`다. 이름이 ``endpoint``인 Endpoint의 주소·포트를 쓴다.
     없으면 22나 호스트명으로 짐작하지 않고 실패한다(대체값 없음). roster 순서를 유지한다.
+
+    ``skip_unregistered``면 Endpoint 문서 자체가 아직 없는 Asset(편입 전 호스트)은 실패시키지 않고 경고와 함께 건너뛴다. 옛 코드는 이런
+    호스트를 호스트명:22로 대체했지만 짐작한 대상은 오발화하므로 대체하지 않는다. 문서는 있는데 `endpoint`가 없거나 주소·포트가 잘못된
+    것은 잘못 등록된 것이라 그대로 실패한다.
     """
     targets, missing = [], []
     for name in roster:
+        if skip_unregistered and not (endpoints_by_host or {}).get(name):
+            host_agents_warn("서버 도달성 검사 대상에서 뺐습니다: %s의 Endpoint 문서(inventory/assets/%s/endpoints)가 아직 없습니다" % (name, name))
+            continue
         ep = ((endpoints_by_host or {}).get(name) or {}).get(endpoint)
         port = ep.get('port') if isinstance(ep, dict) else None
         if not isinstance(ep, dict) or _blank(ep.get('address')) or isinstance(port, bool) \

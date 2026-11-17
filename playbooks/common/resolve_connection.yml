@@ -296,8 +296,8 @@
         ansible_ssh_private_key_file: "{{ _active_key_path if (_active_key_path | length > 0) else omit }}"
         ansible_become_method: "{{ _active_conn.become.method | default(omit, true) }}"
         ansible_become_password: "{{ _active_conn.become.password | default(omit, true) }}"
-        # 원격 Python은 항상 /usr/bin/python3다. 호스트별 인터프리터 값은 OpenBao에 두지 않는다(스키마에 없음).
-        ansible_python_interpreter: /usr/bin/python3
+        # 원격 Python: 기본 /usr/bin/python3, Asset 문서 access.python_interpreter(선택)가 있으면 그 값(venv·semaphore·임시 경로는 거부).
+        ansible_python_interpreter: "{{ _access.python_interpreter | default('', true) | openbao_python_interpreter }}"
       no_log: true
 
     - name: Configure the ssh ProxyCommand for the via chain

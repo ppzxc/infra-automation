@@ -120,9 +120,10 @@ def test_shared_connection_plays_honour_target_hosts_narrowing():
         assert _load(path)[0]["hosts"] == "{{ connection_hosts | default(target_hosts | default('servers:loadbalancers')) }}"
 
 
-def test_remote_python_is_always_usr_bin_python3():
+def test_remote_python_defaults_to_usr_bin_python3_and_only_the_validated_asset_key_overrides_it():
     task = next(t for t in _load(RESOLVE)[0]["tasks"] if t["name"].startswith("Configure connection parameters"))
-    assert task["ansible.builtin.set_fact"]["ansible_python_interpreter"] == "/usr/bin/python3"
+    assert "openbao_python_interpreter" in task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
+    assert "_access.python_interpreter" in task["ansible.builtin.set_fact"]["ansible_python_interpreter"]
     assert "ansible_python_interpreter" not in (_load(RESOLVE)[0].get("vars") or {})
     assert _load(SITE)[1]["vars"]["ansible_python_interpreter"] == "/usr/bin/python3"
     assert "interpreter_python = auto_silent" in (ROOT_DIR / "ansible.cfg").read_text(encoding="utf-8")

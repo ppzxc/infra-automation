@@ -37,7 +37,7 @@ def old_docs():
             "domain": "example.test", "isms_target": True, "isms_group_asset_name": "", "isms_personal_info_system": False,
             "isms_department": "Fake Dept", "isms_owner_role": "Fake Owner", "isms_admin_role": "Fake Admin",
             "isms_asset_importance": "H", "admin_users": ["admin01"], "public_ip": "192.0.2.10", "ansible_port": "2222",
-            "host_agents_allow_password_auth": False,
+            "host_agents_allow_password_auth": False, "ansible_python_interpreter": "/opt/py/bin/python3",
         },
         "hosts/ns0001/agents": {
             "o2_ingest_token": "ingest-0001", "rustfs_access_key": "rk-0001", "rustfs_secret_key": "rs-0001",
@@ -126,10 +126,18 @@ def test_asset_document_gets_metadata_isms_access_agents_and_drops_computed_keys
         "description": "Fake server one", "type": "SERVER",
         "isms": {"target": True, "group_asset_name": "", "personal_info_system": False, "department": "Fake Dept",
                  "owner_role": "Fake Owner", "admin_role": "Fake Admin", "asset_importance": "H"},
-        "access": {"admin_credentials": ["admin01"]},
+        "access": {"admin_credentials": ["admin01"], "python_interpreter": "/opt/py/bin/python3"},
         "agents": {"backup": {"extra_paths": ["/srv/fake"], "bucket": "backup-prod-fakeold"}, "otel": {"container_logs": True},
                    "github_webhook": {"port": "9000"}},
     }
+
+
+def test_a_venv_or_semaphore_python_interpreter_is_dropped_like_the_old_resolution_did():
+    for bad in ("/srv/semaphore/venv/bin/python", "/tmp/x/python", "auto_silent", "python3"):
+        old = old_docs()
+        old["hosts/ns0001"]["ansible_python_interpreter"] = bad
+        plan = om.build_new(old, SKIP)
+        assert plan.errors == [] and "python_interpreter" not in plan.store["inventory/assets/ns0001"]["access"]
 
 
 def test_agent_secrets_use_new_key_names_and_environment_is_dropped(plan):

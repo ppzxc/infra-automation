@@ -212,7 +212,8 @@ otel_tcpcheck_interval: "60s"
 # 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 대상에서 빠진다(이름만, 시크릿 아님). 제외 방법 두 가지를 합친다:
 #   - Semaphore 인벤토리의 `tcpcheck_excluded` 그룹(host_agents_excluded·host_audit_excluded와 같은 방식, 평상시 방법)
 #   - 변수 host_agents_tcpcheck_excluded(Extra variables 재정의용)
+# 인벤토리 `host_agents_excluded` 그룹(Host Agents 제외 호스트)도 뺀다: 읽지 않는다.
 # Semaphore 인벤토리는 DB에 저장된 static-yaml이라 저장소 inventory/group_vars는 읽히지 않는다 — 그룹으로 지정한다.
 host_agents_tcpcheck_excluded: []
-otel_tcpcheck_roster: "{{ groups['servers'] | default([]) | difference(host_agents_tcpcheck_excluded | union(groups['tcpcheck_excluded'] | default([]))) | sort }}"
+otel_tcpcheck_roster: "{{ groups['servers'] | default([]) | difference(host_agents_tcpcheck_excluded | union(groups['tcpcheck_excluded'] | default([])) | union(groups['host_agents_excluded'] | default([]))) | sort }}"
 
