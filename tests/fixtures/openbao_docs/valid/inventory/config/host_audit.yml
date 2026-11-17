@@ -1,0 +1,4 @@
+mail_recipients:
+  - audit@example.test
+mail_sender: noreply@example.test
+mail_sender_display_name: Fake Audit

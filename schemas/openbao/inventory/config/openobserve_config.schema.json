@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "inventory/config/openobserve_config",
+  "type": "object",
+  "properties": {
+    "normal_sources": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "description": "정상 출발지"
+    },
+    "silent_host_exceptions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "description": "무음 예외 관리번호"
+    }
+  },
+  "additionalProperties": false
+}

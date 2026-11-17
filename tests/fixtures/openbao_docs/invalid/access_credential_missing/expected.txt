@@ -1,0 +1,2 @@
+inventory/assets/ns0001	#/access/admin_credentials/1	access_credential_missing
+inventory/assets/ns0001	#/access/bootstrap_credential	access_credential_missing

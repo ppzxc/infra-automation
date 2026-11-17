@@ -1,0 +1,25 @@
+description: Fake server one [fake-group]
+type: server
+isms:
+  department: Fake Dept
+  owner_role: Fake Owner
+  admin_role: Fake Admin
+  asset_importance: H
+access:
+  admin_credentials:
+    - admin01
+  bootstrap_credential: root
+  removed_accounts:
+    - olduser
+agents:
+  backup:
+    extra_paths:
+      - /srv/fake
+    exclude_paths:
+      - /srv/fake/cache
+    sqlite_snapshots:
+      - path: /srv/fake/app.db
+  otel:
+    tcpcheck_enabled: true
+  github_webhook:
+    port: 9000

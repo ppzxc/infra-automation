@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "inventory/config/host_audit",
+  "type": "object",
+  "properties": {
+    "mail_recipients": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "description": "메일 수신자"
+    },
+    "mail_sender": {
+      "type": "string",
+      "minLength": 1,
+      "description": "발신자"
+    },
+    "mail_sender_display_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "발신자 표시 이름"
+    }
+  },
+  "additionalProperties": false
+}
