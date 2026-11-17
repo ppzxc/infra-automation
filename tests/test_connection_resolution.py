@@ -38,7 +38,7 @@ def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
     bindir.mkdir()
     log = tmp_path / "ssh-calls.log"
     _stub(bindir / "ssh", 'printf "%s\\n" "$*" >> "$STUB_SSH_LOG"\nexit "$STUB_SSH_RC"\n')
-    _stub(bindir / "ssh-keygen", "exit 0\n")
+    _stub(bindir / "ssh-keygen", 'printf "%s\\n" "$*" >> "$STUB_KEYGEN_LOG"\nexit 0\n')
     (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {h: {} for h in hosts}}}}}))
     (tmp_path / "play.yml").write_text(yaml.safe_dump([
         {"ansible.builtin.import_playbook": str(RESOLVE), "vars": {"connection_hosts": "servers"}},
@@ -48,6 +48,7 @@ def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
         {"ansible.builtin.import_playbook": str(CLEANUP), "vars": {"connection_hosts": "servers"}},
     ]))
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", STUB_SSH_LOG=str(log), STUB_SSH_RC=str(probe_rc),
+               STUB_KEYGEN_LOG=str(tmp_path / "keygen-calls.log"),
                VAULT_ADDR=fake.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret", ANSIBLE_NOCOLOR="1")
     cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")]
     for k, v in (extra_vars or {}).items():
@@ -149,3 +150,21 @@ def test_a_missing_required_document_fails_instead_of_falling_back(tmp_path, fak
     assert res.returncode != 0 and out == {}
     assert "필수 문서가 없습니다" in res.stdout + res.stderr
     assert {r.mount for r in fake_openbao.reads()} <= {"inventory", "secrets"}      # 옛 secret/ 마운트 대체 읽기 없음
+
+
+def test_a_mapping_shaped_removed_accounts_run_variable_is_ignored_with_a_warning(tmp_path, fake_openbao):
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"], extra_vars={"target_removed_users": {"legacy": 1}})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["ns0001"]["removed"] == ["olduser"]
+    assert "mapping" in res.stdout
+
+
+def test_an_automation_key_passphrase_is_stripped_from_the_temporary_key_only(tmp_path, fake_openbao):
+    fake_openbao.set("secrets", "automation/ssh", {"private_key": "/fake/path/to/automation_key",
+                                                   "public_key": "ssh-ed25519 AAAAFAKEAUTOMATIONKEY automation@example.test",
+                                                   "passphrase": "fake-pass-automation"})
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    (call,) = (tmp_path / "keygen-calls.log").read_text().splitlines()
+    assert "-p -f /" in call and "_bao_admin_key" in call
+    assert "fake-pass-automation" not in res.stdout + res.stderr

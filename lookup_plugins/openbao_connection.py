@@ -51,6 +51,11 @@ def _need(doc, key, where):
     return doc[key]
 
 
+def _endpoint_fields(ep, where):
+    """Endpoint의 필수 키 묶음(protocol·address·port)."""
+    return {k: _need(ep, k, where) for k in ("protocol", "address", "port")}
+
+
 def _asset_endpoints(read, asset):
     return read("inventory/assets/%s/endpoints" % asset)
 
@@ -117,9 +122,10 @@ def _via_chain(read, via):
         if name not in endpoints:
             raise ConnectionError_("via 대상 Endpoint가 없습니다: %s" % via)
         ep = endpoints[name]
-        hops.append({"asset": asset, "endpoint": name, "protocol": ep["protocol"], "address": ep["address"],
-                     "port": ep["port"], "credential": ep["credential"],
-                     "login": _login(read, asset, ep, ep["credential"], False)})
+        where = "%s/endpoints의 %s" % (asset, name)
+        cred = _need(ep, "credential", where)
+        hops.append({"asset": asset, "endpoint": name, **_endpoint_fields(ep, where), "credential": cred,
+                     "login": _login(read, asset, ep, cred, False)})
         via = ep.get("via")
     hops.reverse()          # 컨트롤러에서 가까운 경유지가 먼저
     return hops
@@ -127,11 +133,11 @@ def _via_chain(read, via):
 
 def resolve(read, asset, preference, credential=None):
     name, ep = _select_endpoint(_asset_endpoints(read, asset), asset, preference)
-    cred = credential or _need(ep, "credential", "%s/endpoints의 %s" % (asset, name))
+    where = "%s/endpoints의 %s" % (asset, name)
+    cred = credential or _need(ep, "credential", where)
     overridden = cred != ep["credential"]
     return {
-        "asset": asset, "endpoint": name, "protocol": ep["protocol"], "address": ep["address"], "port": ep["port"],
-        "credential": cred,
+        "asset": asset, "endpoint": name, **_endpoint_fields(ep, where), "credential": cred,
         "login": _login(read, asset, ep, cred, overridden),
         "become": _become(read, asset, ep, cred),
         "password_auth_exception": ep["protocol"] == "ssh" and not ep.get("identity"),

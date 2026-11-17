@@ -300,3 +300,14 @@ def test_a_document_missing_a_required_key_names_the_document_not_a_key_error(st
     store["inventory/assets/ns0002/endpoints"]["ssh"]["become"] = {"credential": "root"}
     with pytest.raises(ConnectionError_, match="become.*method"):
         resolve(reader(store), "ns0002", ["ssh"])
+
+
+def test_an_endpoint_missing_address_names_the_endpoint(store):
+    store["inventory/assets/ns0001/endpoints"]["ssh"].pop("address")
+    with pytest.raises(ConnectionError_, match="ns0001/endpoints.*address"):
+        resolve(reader(store), "ns0001", ["ssh"])
+    store["inventory/assets/ns0003/endpoints"]["ssh"]["via"] = "ns0001/ssh"
+    store["inventory/assets/ns0001/endpoints"]["ssh"]["address"] = "192.0.2.11"
+    store["inventory/assets/ns0001/endpoints"]["ssh"].pop("port")
+    with pytest.raises(ConnectionError_, match="ns0001/endpoints.*port"):
+        resolve(reader(store), "ns0003", ["ssh"])
