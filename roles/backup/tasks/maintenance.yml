@@ -31,16 +31,7 @@
 
 - name: "[BAK-072] Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)"
   vars:
-    _maint_missing: >-
-      {%- set found = namespace(names=[]) -%}
-      {%- for pattern, keys in backup_openbao_required.items() -%}
-      {%- for key in keys -%}
-      {%- if (_maint_docs[pattern][key] | default('')) | string | length == 0 -%}
-      {%- set found.names = found.names + [pattern | replace('+', inventory_hostname) ~ '.' ~ key] -%}
-      {%- endif -%}
-      {%- endfor -%}
-      {%- endfor -%}
-      {{ found.names | to_json }}
+    _maint_missing: "{{ _maint_docs | openbao_required_gaps(backup_openbao_required, host=inventory_hostname) | to_json }}"
   block:
     # 버킷 검증(아래 assert)이 Asset 문서의 호스트별 버킷까지 보도록 서비스 주소와 버킷을 먼저 정한다.
     - name: Expose the service addresses and the host bucket so endpoint defaults resolve like the Deploy path

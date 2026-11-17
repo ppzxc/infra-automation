@@ -56,7 +56,12 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 - UI에서 **Playbook Template** 선택 후 원클릭 실행 및 실시간 모니터링
 
 #### Option B: CLI 스크립트 직접 실행 (개발 및 일회성 검증)
+OpenBao를 읽는 플레이북은 호출하는 셸에 `VAULT_ADDR`와 계열 AppRole(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이 있어야 합니다(사설 CA는 `VAULT_CACERT`).
+`docker-run.sh`·`make provision`·`make provision-hosts`·`make check`는 이 값만 컨테이너로 넘기며 평문 토큰 경로는 없습니다.
 ```bash
+export VAULT_ADDR=...                       # 값은 운영자 비공개 노트에 있다
+read -rs VAULT_ROLE_ID && export VAULT_ROLE_ID
+read -rs VAULT_SECRET_ID && export VAULT_SECRET_ID   # 프롬프트로 입력(인자·이력에 남기지 않는다)
 # 1. 전체 타겟 호스트 일괄 프로비저닝 (마스터 플레이북)
 ./docker-run.sh playbooks/site.yml
 

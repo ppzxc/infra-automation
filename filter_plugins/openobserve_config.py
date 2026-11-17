@@ -8,8 +8,24 @@ Pure functions so the desired state and the change plan are unit-testable withou
 
 import base64
 import hashlib
+import os
 import re
+import sys
 from urllib.parse import quote
+
+def _load_required_gaps():
+    """공용 필터 구현을 파일 경로로 한 번만 올린다(sys.path를 건드리지 않고, 로더가 올린 사본과 따로 두 번 올리지 않는다)."""
+    import importlib.util
+    name = "_openbao_required_shared"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "openbao_required.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name].openbao_required_gaps
+
+
+_required_gaps = _load_required_gaps()
 
 KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
@@ -544,17 +560,9 @@ def o2c_host_addresses(roster, endpoints_by_host):
 def o2c_missing_openbao_keys(docs, required):
     """선언(``<역할>_openbao_required``: ``{문서 경로 패턴: [필수 키]}``) 중 읽은 문서(``{경로: 문서}``)에 빠진 키를 ``['<경로>: <키>']``로 돌려준다.
 
-    ``+``가 든 패턴(호스트마다 읽는 문서)은 건너뛴다. 값은 담지 않는다: 문서 경로와 키 이름뿐이다.
+    ``+``가 든 패턴(호스트마다 읽는 문서)은 건너뛴다. 값은 담지 않는다: 문서 경로와 키 이름뿐이다. 구현은 공용 필터 `openbao_required_gaps`다.
     """
-    out = []
-    for pattern, keys in (required or {}).items():
-        if '+' in pattern:
-            continue
-        doc = (docs or {}).get(pattern)
-        for key in keys or []:
-            if not isinstance(doc, dict) or doc.get(key) in (None, ''):
-                out.append('%s: %s' % (pattern, key))
-    return out
+    return _required_gaps(docs, required, scope='required', missing_doc='keys', blank='none_empty', skip_plus=True, fmt='colon_space')
 
 
 def o2c_host_label(column, addresses):

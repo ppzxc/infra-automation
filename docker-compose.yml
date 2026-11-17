@@ -9,8 +9,13 @@ services:
       - ~/.ssh:/root/.ssh:ro
     environment:
       - ANSIBLE_FORCE_COLOR=True
-      - BAO_ADDR=${BAO_ADDR:-}
-      - BAO_TOKEN=${BAO_TOKEN:-}
+      # OpenBao 읽기 지점이 받는 값: 주소 + AppRole(평문 토큰 경로 없음). 사설 CA 파일(VAULT_CACERT)은 compose가 마운트하지 못하니 docker-run.sh를 쓰거나
+      # volumes에 같은 경로로 직접 마운트한다(값만 넘기고 파일이 없으면 읽기 지점이 CA 파일을 읽을 수 없다고 실패한다).
+      - VAULT_ADDR=${VAULT_ADDR:-}
+      - VAULT_ROLE_ID=${VAULT_ROLE_ID:-}
+      - VAULT_SECRET_ID=${VAULT_SECRET_ID:-}
+      - VAULT_CACERT=${VAULT_CACERT:-}
+      - VAULT_SKIP_VERIFY=${VAULT_SKIP_VERIFY:-}
     working_dir: /ansible
     entrypoint: ["ansible-playbook"]
     command: ["--help"]

@@ -577,7 +577,7 @@
           failed_when: >-
             not _verify_otel_env.stat.exists or _verify_otel_env.stat.pw_name != 'root' or
             _verify_otel_env.stat.mode != '0600' or
-            'molecule-fixture-o2-ingest' in f.read['/etc/otelcol/config.yaml']
+            'fixture-fixture-fixture' in f.read['/etc/otelcol/config.yaml']
 
         - name: "[VERIFY-MON-065] Verify secrets.env carries the basic-auth value"
           ansible.builtin.command: grep -q '^O2_BASIC_AUTH=.\+' /etc/otelcol-contrib/secrets.env

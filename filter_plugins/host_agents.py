@@ -13,7 +13,9 @@ Two concerns live here so they can be tested without a target host:
 import fnmatch
 import ipaddress
 import json
+import os
 import re
+import sys
 
 OS_MARKER = '__HOST_AGENTS_OS_RELEASE__'
 REDHAT_MARKER = '__HOST_AGENTS_REDHAT_RELEASE__'
@@ -271,6 +273,21 @@ def _covers(pattern, path):
     norm, target = _norm_path(pattern), _norm_path(path)
     return (norm == target or fnmatch.fnmatchcase(target, norm)
             or target.startswith(norm.rstrip('/') + '/'))
+
+
+def _load_required_gaps():
+    """공용 필터 구현을 파일 경로로 한 번만 올린다(sys.path를 건드리지 않고, 로더가 올린 사본과 따로 두 번 올리지 않는다)."""
+    import importlib.util
+    name = "_openbao_required_shared"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "openbao_required.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name].openbao_required_gaps
+
+
+_required_gaps = _load_required_gaps()
 
 
 def _is_blank(value):
@@ -584,15 +601,9 @@ def host_agents_secrets(secrets):
 def host_agents_openbao_gaps(docs, required):
     """읽은 문서(`{index.yml 패턴: 문서}`)가 `<역할>_openbao_required` 선언을 채우는지 본다. 문서 없음·필수 키 누락의 이름만 돌려준다(값은 아님).
 
-    선언에는 있지만 ``docs``에 없는 패턴(다른 태스크가 읽는 문서)은 건너뛴다.
+    선언에는 있지만 ``docs``에 없는 패턴(다른 태스크가 읽는 문서)은 건너뛴다. 구현은 공용 필터 `openbao_required_gaps`(openbao_required.py)다.
     """
-    gaps = []
-    for pattern, doc in (docs or {}).items():
-        if not isinstance(doc, dict):
-            gaps.append("%s(문서 없음)" % pattern)
-            continue
-        gaps.extend("%s.%s" % (pattern, key) for key in (required or {}).get(pattern, []) if _is_blank(doc.get(key)))
-    return gaps
+    return _required_gaps(docs, required, scope='docs', missing_doc='doc', blank='blank')
 
 
 def host_agents_warn(msg):

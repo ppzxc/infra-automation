@@ -12,7 +12,7 @@ resource "vault_policy" "small" {
 locals {
   # 계열 -> 작은 정책 이름. 모든 계열이 inventory-base(Service·공통 설정)를 읽는다.
   # Automation Identity(connect 묶음에 들어 있다)는 서버 계열 provision·host_agents·host_audit에만 준다.
-  # list 권한은 periodic_check(periodic-check)에만 준다.
+  # 서버·작업 계열의 list 권한은 periodic_check(periodic-check)에만 준다. 에이전트 세션(agent_session)은 조사용으로 inventory/·secrets/의 metadata list만 갖는다(비밀 값 아님).
   family_policies = {
     provision          = ["inventory-base", "connect", "funa-secrets"]
     host_agents        = ["inventory-base", "connect", "asset-agents", "openobserve-ingest", "alert-notify"]

@@ -37,12 +37,10 @@
 
 - name: "[GWW-005] Assert the required document keys and heartbeat destination inputs exist before calling GitHub"
   vars:
-    # 앞의 `=`는 비어 있을 때 템플릿이 None으로 바뀌지 않게 하는 표지다.
-    _gww_missing: >-
-      ={% for doc, keys in github_webhook_watch_openbao_required.items() %}{% for k in keys | reject('in', gww_docs[doc]) %}{{ doc }}:{{ k }} {% endfor %}{% endfor %}
+    _gww_missing: "{{ gww_docs | openbao_required_gaps(github_webhook_watch_openbao_required, blank='absent', fmt='colon') | list }}"
   ansible.builtin.assert:
     that:
-      - _gww_missing | trim == '='
+      - _gww_missing | length == 0
       - gww_o2_endpoint is match('^https?://[^/]+(/.*[^/])?$')
       - gww_o2_user | length > 0
       - gww_o2_password | length > 0
@@ -50,7 +48,7 @@
       - gww_github_org | length > 0
       - gww_hook_url | length > 0
     fail_msg: >-
-      [GWW-INPUT] 점검 입력이 비었거나 형식이 틀리다{{ (' (빠진 키: ' ~ (_gww_missing | trim)[1:] ~ ')') if (_gww_missing | trim != '=') else '' }}:
+      [GWW-INPUT] 점검 입력이 비었거나 형식이 틀리다{{ (' (빠진 키: ' ~ (_gww_missing | join(' ')) ~ ')') if (_gww_missing | length > 0) else '' }}:
       하트비트를 남길 OpenObserve 연결 값(endpoint, 수집 계정) 또는 GitHub 조직 이름(github_org)·수신 URL(hook_url). 값은 로그에 남기지 않는다.
       OpenBao의 해당 문서(vars/main.yml의 github_webhook_watch_openbao_required)를 채운다. 하트비트를 남길 수 없거나 훅을 찾을 기준이 없으면 점검하지 않는다.
 

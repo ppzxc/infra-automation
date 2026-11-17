@@ -96,6 +96,9 @@ firewall_ingress_rules:
 # OpenBao-supplied documents as the `openbao_fixture` bypass (Spec #511): the shared read point answers from
 # this variable without any network. Keys are `<mount>/<document path>`.
 _is_already_provisioned: true
+# 배포 환경(playbooks/group_vars/all.yml의 deployment_environment와 같은 이름). monitoring의 host_agents_environment·host_audit의
+# host_audit_environment 기본값이 이 값을 따른다. molecule은 playbooks/를 거치지 않아 직접 준다(verify가 "test"를 단언한다).
+deployment_environment: "test"
 ip: "192.0.2.10"
 o2_endpoint: "https://openobserve.molecule.invalid:5080"
 o2_org: "default"
