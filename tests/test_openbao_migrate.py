@@ -398,3 +398,28 @@ def test_hash_report_flags_a_value_missing_after_write():
     del actual["secrets/assets/ns0001/agents"]["restic_password"]
     lines, bad = om.hash_report(plan, actual)
     assert bad == 1 and any(l.endswith("restic_password\tabsent") for l in lines)
+
+
+def test_public_key_on_a_host_level_account_and_revoked_keys_without_public_key_are_errors():
+    old = old_docs()
+    old["hosts/ns0002/users/bk"]["ssh_public_key"] = "PUB-BK"
+    old["users/root"]["revoked_keys"] = ["OLD"]
+    errors = " ".join(om.build_new(old, SKIP).errors)
+    assert "hosts/ns0002/users/bk" in errors and "users/root\trevoked_keys_without_public_key" in errors
+
+
+def test_incomplete_ingest_account_and_server_without_address_are_errors():
+    old = old_docs()
+    del old["agents/github-webhook-watch"]["o2_ingest_password"]
+    del old["hosts/ns0001"]["public_ip"]
+    errors = " ".join(om.build_new(old, SKIP).errors)
+    assert "ingest_account_incomplete" in errors and "hosts/ns0001\tno_address" in errors
+
+
+def test_bootstrap_document_goes_to_the_bootstrap_credential_only():
+    old = old_docs()
+    old["hosts/ns0007"]["admin_users"] = ["admin01", "other"]
+    old["users/other"] = {"username": "other", "type": "PASSWORD", "password": "pw-other"}
+    plan = om.build_new(old, SKIP)
+    assert plan.store["secrets/assets/ns0007/credentials/other"] == {"type": "password", "username": "other", "password": "pw-other"}
+    assert plan.store["secrets/assets/ns0007/credentials/admin01"]["type"] == "password"

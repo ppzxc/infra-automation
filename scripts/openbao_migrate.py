@@ -36,7 +36,9 @@ import openbao_validation as ov  # noqa: E402
 
 GITHUB_API_URL = "https://api.github.com"  # 공개 상수. 옛 KV에는 github_api_url이 없다(선택 키 기본값).
 OLD_TOP_LEVEL = ("hosts", "users", "agents", "clusters", "fortigate")
-ACCOUNT_KEYS = ("username", "type", "password", "ssh_private_key", "ssh_public_key", "ssh_passphrase", "revoked_keys")
+ACCOUNT_KEYS = ("username", "type", "password", "ssh_private_key", "ssh_passphrase")
+GLOBAL_ACCOUNT_KEYS = ACCOUNT_KEYS + ("ssh_public_key", "revoked_keys")  # 공개키·폐기 키는 Operator로 간다
+BOOTSTRAP_KEYS = ACCOUNT_KEYS + ("ssh_public_key",)  # 공개키는 아무도 읽지 않는다(#501 §5)
 DROPPED_HOST_KEYS = ("hostname", "fqdn", "cloudflare_api_token")  # 계산되는 값·아무도 읽지 않는 키(#501 §5)
 INGEST_SOURCES = ("webhook_watch", "controller_token")
 
@@ -184,6 +186,8 @@ class _Builder:
             self.device_endpoint(ns, doc, address, port, user, password, ctype, bastion)
         elif address:
             self.server_endpoint(ns, address, port, admin, boot, pwauth)
+        elif admin or boot:
+            self.err(doc, "no_address")
 
     def server_endpoint(self, ns, address, port, admin, boot, pwauth):
         login = boot if (pwauth and boot) else (admin[0] if admin else boot)
@@ -277,7 +281,9 @@ class _Builder:
         host = self.old.get("hosts/%s/users/%s" % (ns, name))
         if glob is not None:
             layers.append(("users/%s" % name, glob, False))
-        if boot is not None and (boot.get("username") or name) == name:
+        bname = (boot or {}).get("username") or self.plan.store.get("inventory/assets/%s" % ns, {}).get("access", {}).get(
+            "bootstrap_credential")
+        if boot is not None and bname == name:
             layers.append(("hosts/%s/bootstrap" % ns, boot, True))
         if host is not None:
             layers.append(("hosts/%s/users/%s" % (ns, name), host, False))
@@ -286,7 +292,8 @@ class _Builder:
         merged, src = {}, {}
         for path, layer, is_boot in layers:
             self.consumed.add(path)
-            self.finish(path, {k: v for k, v in layer.items() if k not in ACCOUNT_KEYS})
+            allowed = GLOBAL_ACCOUNT_KEYS if path.startswith("users/") else (BOOTSTRAP_KEYS if is_boot else ACCOUNT_KEYS)
+            self.finish(path, {k: v for k, v in layer.items() if k not in allowed})
             for k in ("password", "ssh_private_key", "ssh_passphrase"):
                 if layer.get(k) not in (None, ""):
                     if k.startswith("ssh_") and path.startswith("users/"):
@@ -315,7 +322,9 @@ class _Builder:
             name = path.split("/")[1]
             d = self.old[path]
             self.consumed.add(path)
-            self.finish(path, {k: v for k, v in d.items() if k not in ACCOUNT_KEYS})
+            self.finish(path, {k: v for k, v in d.items() if k not in GLOBAL_ACCOUNT_KEYS})
+            if d.get("revoked_keys") and not d.get("ssh_public_key"):
+                self.err(path, "revoked_keys_without_public_key")
             if d.get("ssh_public_key"):
                 op = {"public_keys": [d["ssh_public_key"]]}
                 self.put("inventory/operators/%s" % name, ["public_keys"], op["public_keys"], (path, "ssh_public_key"))
@@ -395,17 +404,19 @@ class _Builder:
     def ingest(self, o2, gw):
         doc = "secrets/services/openobserve/ingest"
         if self.ingest_source == "webhook_watch":
-            if "o2_ingest_user" in gw:
-                self.put(doc, ["username"], gw["o2_ingest_user"], ("agents/github-webhook-watch", "o2_ingest_user"))
-                self.put(doc, ["password"], gw.get("o2_ingest_password"), ("agents/github-webhook-watch", "o2_ingest_password"))
+            src = "agents/github-webhook-watch"
+            if "o2_ingest_user" not in gw or "o2_ingest_password" not in gw:
+                return self.err(src, "ingest_account_incomplete")
+            self.put(doc, ["username"], gw["o2_ingest_user"], (src, "o2_ingest_user"))
+            self.put(doc, ["password"], gw["o2_ingest_password"], (src, "o2_ingest_password"))
             return
         token = o2.get("controller_ingest_token")
         try:
             user, password = base64.b64decode(token, validate=True).decode().split(":", 1)
         except (ValueError, TypeError, UnicodeDecodeError):
             return self.err("agents/openobserve", "controller_ingest_token_not_basic_auth")
-        self.put(doc, ["username"], user)
-        self.put(doc, ["password"], password)
+        self.put(doc, ["username"], user, ("agents/openobserve", "controller_ingest_token"))
+        self.put(doc, ["password"], password, ("agents/openobserve", "controller_ingest_token"))
 
     def funa(self):
         for path, new in (("clusters/funa", "inventory/services/funa"), ("clusters/funa/proxy", "secrets/services/funa/proxy"),
@@ -597,6 +608,8 @@ def main(argv=None):
             raise MigrationError("skip 파일은 문자열 목록(YAML 리스트)이어야 한다")
         skip = skip or []
         token = read_token(args.token_file)
+        if not token:
+            raise MigrationError("토큰이 비어 있다")
         old_client = Client(args.old_addr, args.old_namespace, token)
         new_client = Client(args.new_addr, args.new_namespace, token)
         plan = build_new(read_old(old_client, args.old_mount, skip), skip, args.ingest_source)
