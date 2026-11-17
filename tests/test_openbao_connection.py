@@ -83,7 +83,17 @@ def test_an_ssh_key_credential_without_identity_logs_in_with_its_own_key(store):
     out = resolve(reader(store), "ns0001", ["ssh"])
     assert out["login"] == {"mode": "key", "username": "admin01", "private_key": "/fake/path/to/key",
                             "passphrase": "fake-pass-0002"}
-    assert out["password_auth_exception"] is True       # 판정은 identity 유무만 본다
+    assert out["password_auth_exception"] is False      # 키로 로그인하면 비밀번호 접속 예외가 아니다(MON-020 게이트가 통과시키면 안 된다)
+
+
+def test_a_password_login_on_an_identity_endpoint_override_is_not_a_password_exception(store):
+    """Endpoint가 identity면 bootstrap Credential을 비밀번호로 쓰는 조회도 예외가 아니다(예외는 identity 없는 Endpoint만)."""
+    out = resolve(reader(store), "ns0001", ["ssh"], credential="root")
+    assert out["login"]["mode"] == "password" and out["password_auth_exception"] is False
+
+
+def test_a_non_ssh_endpoint_is_never_a_password_exception(store):
+    assert resolve(reader(store), "ns0004", ["https"])["password_auth_exception"] is False
 
 
 def test_a_credential_name_override_logs_in_with_that_credentials_own_secret_even_on_an_identity_endpoint(store):

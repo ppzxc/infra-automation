@@ -65,7 +65,7 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 
 결과(비밀을 담으므로 `no_log`): `endpoint`·`protocol`·`address`·`port`, `credential`(로그인에 쓴 이름), `login`(`mode`: `identity`·`password`·`key`·`token`과 `username` 및 해당 비밀), `become`(`method`: `sudo`·`su`·`enable`, `password`; 승격이 없으면 `{}`), `password_auth_exception`(ssh Endpoint에 `identity`가 없으면 true), `via`(경유 체인, 컨트롤러에서 가까운 경유지부터).
 
-- **Automation Identity**: Endpoint에 `identity: automation`이면 Automation Identity 키(`secrets/automation/ssh`)로 Credential의 `username`에 로그인하고 Credential `password`는 승격에만 쓴다. 없으면 Credential 자신의 비밀로 로그인한다(비밀번호 로그인은 예외로 취급해 `password_auth_exception`이 true).
+- **Automation Identity**: Endpoint에 `identity: automation`이면 Automation Identity 키(`secrets/automation/ssh`)로 Credential의 `username`에 로그인하고 Credential `password`는 승격에만 쓴다. 없으면 Credential 자신의 비밀로 로그인한다(identity 없는 ssh Endpoint를 Credential 자신의 비밀번호로 로그인하면 예외로 취급해 `password_auth_exception`이 true다. identity가 없어도 ssh_key Credential로 로그인하면 키 접속이라 false다).
 - **승격**: 비밀번호는 `become.credential`의 비밀번호이고, 생략하면 로그인 Credential의 `password`다. `su`는 비밀번호가 없으면 실패한다.
 - **경유**: `via`는 `<관리번호>/<endpoint>`를 끝까지 따라가며 경유지마다 자기 Endpoint의 기본 Credential·`identity`를 쓴다. 순환·없는 참조는 실패한다. 키 로그인 경유지만 `ProxyCommand`로 만들 수 있고(`openbao_ssh_common_args`·`openbao_ssh_proxy_command` 필터) 비밀번호 경유지는 거부한다. 비밀을 뺀 요약은 `openbao_connection_summary` 필터다.
 - **관리 계정**: `lookup('openbao_admin_accounts', <관리번호>, preference=[...])`가 Asset의 `access.admin_credentials`를 common 역할의 `accounts`로 만든다. 계정 이름은 Credential의 `username`이고, 공개키는 자동화 계정이면 `secrets/automation/ssh`의 `public_key`, 그 밖에는 `inventory/operators/<계정>`의 `public_keys`·`revoked_keys`다(서버 계열 `connect` 정책이 이 문서를 읽는다).

@@ -55,7 +55,7 @@
 - **호스트 집합**: `target_hosts:&servers:!host_agents_excluded` (축소만 가능, `servers` 밖으로 확장 불가). 인벤토리 `host_agents_excluded` 그룹의 호스트는 Deploy·Config·Repo Maintenance 모두에서 빠집니다(ADR-0006 §2.1). `host_agents_backup_only` 그룹의 호스트는 대상에 남지만 `enable_otelcol`이 `false`로 파생되어 otelcol 블록(설치·설정·서비스, legacy node_exporter 정리 포함)을 모두 건너뜁니다. 연결 해석/정리 플레이(`resolve_connection.yml`, `cleanup_connection.yml`)도 `connection_hosts` 변수로 같은 집합만 처리하며 두 import 모두 `tags: [always]`입니다.
 - **롤아웃**: `serial: 25%`, `gather_facts: false`. 프로비저닝 assert·OS 프로브·fact 수집·입력 검증은 모두 역할 안에서 수행됩니다.
 - **태그**: 설치 단계 `agents_install`, 설정/스케줄 단계 `agents_config`, 역할 공통 `otel`(향후 `backup`). 사전 단계(`MON-020~035`)는 `always`라 `--tags agents_config`에서도 수행됩니다. Deploy = 태그 없음, Config = `--tags agents_config`.
-- **사전 단계**: `_is_already_provisioned`가 아니고 선택된 ssh Endpoint에 `identity`가 있으면(`_connection.password_auth_exception`이 거짓) 즉시 실패(아래 "비밀번호 접속 예외" 참고) → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
+- **사전 단계**: `_is_already_provisioned`가 아니고 선택된 ssh Endpoint에 `identity`가 있거나 비밀번호가 아닌 키(ssh_key Credential)로 로그인하면(`_connection.password_auth_exception`이 거짓) 즉시 실패(아래 "비밀번호 접속 예외" 참고) → raw 프로브(`/etc/os-release`, `/etc/redhat-release`, `uname -m`)로 `host_agents_os_path`(`legacy_el6`/`legacy_el7`/`modern`)와 `host_agents_os_*` fact 생성 → `modern`만 `/usr/bin/python3` 보장 + `setup`. `legacy_el7`(CentOS 7, §3-4)과 `legacy_el6`(CentOS 6, §3-5)은 raw 경로로 적용됩니다.
 - **OpenBao 입력**(Spec #511 / Ticket-14): 공용 읽기 지점(`lookup('openbao_doc', ...)`) 한 곳으로 호스트마다 컨트롤러에서 읽는다. 읽는 문서 패턴과 필수 키는 `vars/main.yml`의 `monitoring_openbao_required` 한 선언이고 입력 검증 assert(`MON-031`)·테스트가 같은 선언을 쓴다. 필수 문서·키가 없으면 대체값 없이 실패한다(상태 코드는 경고로, 시크릿 문서 조회는 `no_log`).
 
   | 문서 | 키 | 필수 | 용도 |
@@ -90,7 +90,7 @@
 
 SSH 키가 없고 `USERNAME/PASSWORD`로만 접속되는 레거시 호스트(CentOS 6/7 등)에도 Host Agents를 설치할 수 있습니다. **호스트별 명시 허용**이 필요합니다.
 
-1. 호스트의 `ssh` Endpoint(`inventory/assets/<ns>/endpoints`)를 `identity` 없이 등록합니다. `resolve_connection`이 `_connection.password_auth_exception`을 계산하고(`host_agents_allow_password_auth` 플래그는 폐지), 이 값이 참이 아닌 호스트는 기존처럼 `MON-020`에서 중단됩니다.
+1. 호스트의 `ssh` Endpoint(`inventory/assets/<ns>/endpoints`)를 `identity` 없이 등록하고 그 Credential을 `type: password`로 둡니다(ssh_key Credential은 키 접속이라 이 예외가 아닙니다). `resolve_connection`이 `_connection.password_auth_exception`을 계산하고(`host_agents_allow_password_auth` 플래그는 폐지), 이 값이 참이 아닌 호스트는 기존처럼 `MON-020`에서 중단됩니다.
 2. 접속 계정은 **root** 또는 **일반 계정 + sudo 비밀번호** 모두 가능합니다. Endpoint의 기본 Credential(또는 `access.bootstrap_credential`)의 `password`로 접속하고, 일반 계정이면 `become`의 승격 비밀번호가 쓰입니다.
 3. `access.admin_credentials`는 접속 계정이 아니라 관리 계정 목록을 만드는 용도입니다.
 4. CentOS 6/7 바이너리 업로드는 `sshpass -e scp`(`MON-104`)로 진행합니다. 비밀번호는 `SSHPASS` 환경변수로만 전달되어 인자·프로세스 목록·로그에 나타나지 않습니다(`no_log`). 컨트롤러(Semaphore 러너)에 `sshpass`가 필요하며 없으면 `MON-109`에서 중단합니다. 설정 파일·unit은 기존 base64 raw 전송이라 비밀번호 접속으로 동작합니다.
@@ -221,7 +221,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 | `MON-004` | `Deploy OpenTelemetry Collector Contrib configuration (Hostmetrics & Log Pipeline)` | `ansible.builtin.template` | RHEL 7+, Debian | Checksum 비교 (`otelcol-contrib.yaml.j2`) |
 | `MON-005` | `Create systemd service for otelcol-contrib` | `ansible.builtin.template` | Systemd OS | 파일 내용 일치 시 `ok` |
 | `MON-006` | `Ensure otelcol-contrib service is started and enabled` | `ansible.builtin.service` | All | 서비스 기동 상태면 `ok` |
-| `MON-020` | `Assert host was provisioned by site.yml (or opted in to password-auth install)` | `ansible.builtin.assert` | All | 읽기 전용 (SSH 키 접속 가능 호스트이거나 선택된 ssh Endpoint에 `identity`가 없어 `_connection.password_auth_exception`이 참인 호스트만 통과) |
+| `MON-020` | `Assert host was provisioned by site.yml (or opted in to password-auth install)` | `ansible.builtin.assert` | All | 읽기 전용 (SSH 키 접속 가능 호스트이거나 선택된 ssh Endpoint에 `identity`가 없고 Credential 자신의 비밀번호로 로그인해 `_connection.password_auth_exception`이 참인 호스트만 통과) |
 | `MON-021` | `Probe OS release and architecture from target host (raw, read-only)` | `ansible.builtin.raw` | All | `changed_when: false`, `check_mode: false` |
 | `MON-022` | `Classify OS path and set host_agents_os facts from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수. |
 | `MON-039` | `Set host_agents_conntrack fact from probe` | `ansible.builtin.set_fact` | All | 프로브 결과 순수 함수. 프로브가 커널 conntrack 파일(count·max)을 읽기만 하고 `host_agents_conntrack` fact를 만든다. 참인 호스트의 설정에서만 `system.network.conntrack.count/.max`가 켜진다(스위치 없음, modern·raw 공통) |

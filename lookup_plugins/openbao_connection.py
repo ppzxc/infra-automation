@@ -156,11 +156,14 @@ def resolve(read, asset, preference, credential=None):
     default_cred = _need(ep, "credential", where)
     cred = credential or default_cred
     overridden = cred != default_cred
+    login = _login(read, asset, ep, cred, overridden)
     return {
         "asset": asset, "endpoint": name, **_endpoint_fields(ep, where), "credential": cred,
-        "login": _login(read, asset, ep, cred, overridden),
+        "login": login,
         "become": _become(read, asset, ep, cred),
-        "password_auth_exception": ep["protocol"] == "ssh" and not ep.get("identity"),
+        # 비밀번호 접속 예외(MON-020 게이트): identity 없는 ssh Endpoint를 Credential 자신의 비밀번호로 로그인할 때만이다.
+        # identity가 없어도 ssh_key Credential로 로그인하면 키 접속이라 예외가 아니다(스펙 #504: identity 없음 = 비밀번호로 접속하는 예외).
+        "password_auth_exception": ep["protocol"] == "ssh" and not ep.get("identity") and login["mode"] == "password",
         "via": _via_chain(read, ep.get("via")),
     }
 
