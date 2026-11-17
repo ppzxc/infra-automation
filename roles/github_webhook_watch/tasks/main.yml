@@ -32,7 +32,7 @@
     - name: Report which documents could not be read (paths only)
       ansible.builtin.fail:
         msg: >-
-          [GWW-OPENBAO] OpenBao 문서를 읽지 못했다(없음, 권한 403, 연결 불가 중 하나). 읽는 문서:
+          [GWW-OPENBAO] OpenBao 문서를 읽지 못했다(문서 없음, 권한 403, 연결 불가, 읽기 지점 설정 오류 등. 원인은 no_log로 가려진다). 읽는 문서:
           {{ github_webhook_watch_openbao_required.keys() | list | join(', ') }}. 문서 존재, 이 AppRole의 읽기 권한, OpenBao 접속 주소 설정을 확인한다.
 
 - name: "[GWW-005] Assert the required document keys and heartbeat destination inputs exist before calling GitHub"

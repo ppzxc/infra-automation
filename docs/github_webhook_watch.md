@@ -48,6 +48,8 @@ GitHub API 주소(`https://api.github.com`)와 의도한 구독 이벤트 목록
 
 ## 3. 태스크 매트릭스 (Task Matrix)
 
+`GWW-002`(AppRole 로그인)와 `GWW-004`(KV 사실 보관)는 공용 읽기 지점으로 바뀌며 폐지됐다(`GWW-003`이 대신한다). 번호는 다시 쓰지 않는다.
+
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `GWW-001` | `Assert the check interval is shorter than the redelivery window` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (주기 < 재전송 가능 기간, 양의 정수) |
@@ -67,7 +69,7 @@ GitHub API 주소(`https://api.github.com`)와 의도한 구독 이벤트 목록
 
 1. Semaphore 프로젝트에서 새 Task Template을 만든다. 이름은 `GitHub Webhook Watch`.
 2. Playbook은 `playbooks/github_webhook_watch.yml`, Inventory는 `localhost`가 들어 있는 인벤토리(컨트롤러 전용이라 호스트에는 접속하지 않는다), Repository는 이 저장소의 기본 브랜치.
-3. Environment(시크릿 변수)에는 `github_webhook_watch` 계열의 OpenBao 접속(`VAULT_ADDR`, AppRole `VAULT_ROLE_ID`/`VAULT_SECRET_ID`)만 둔다(네임스페이스·마운트 변수는 없다). GitHub 토큰·URL은 2절의 문서에 둔다. Extra variables로 덮어쓰는 경로는 없다.
+3. Environment(시크릿 변수)에는 `github_webhook_watch` 계열의 OpenBao 접속(`VAULT_ADDR`, AppRole `VAULT_ROLE_ID`/`VAULT_SECRET_ID`)만 둔다(네임스페이스·마운트 변수는 없다). GitHub 토큰·URL은 2절의 문서에 둔다. 비공개 값(토큰·URL·조직·수집 자격)을 Extra variables로 주입하지 않는다(값의 출처는 2절의 문서 하나다).
 4. 예약(Schedule)은 6시간마다 `0 */6 * * *`(cron, 서버 시간대 기준)이다. 재전송 가능 기간이 3일이므로 주기를 하루 이상으로 늘리지 않는다. 주기를 바꾸면 `gww_check_interval_hours`도 맞춘다(하트비트 침묵 알림 임계가 이 값을 쓴다).
 5. 처음 등록할 때는 `--check`(Semaphore의 Dry Run)로 한 번 돌려 훅 상태와 재전송 예정 건수가 기대와 같은지 본 뒤 일반 실행으로 바꾼다.
 6. 실패 알림: 실행이 실패하면 Semaphore가 실패로 표시하고 하트비트에는 `result=error`가 남는다.
