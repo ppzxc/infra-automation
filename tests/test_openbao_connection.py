@@ -377,6 +377,16 @@ def test_host_connections_stop_before_resolving_when_a_provisioning_target_has_n
         host_connections(reader(store), "ns0001", ["ssh"], requires_access=True)
 
 
+def test_host_connections_without_accounts_do_not_need_the_operator_documents(store):
+    store["inventory/assets/ns0001"]["access"]["admin_credentials"] = ["admin01", "root"]
+    store.pop("inventory/operators/root", None)
+    out = host_connections(reader(store), "ns0001", ["ssh"], with_accounts=False)
+    assert out["admin_accounts"] == [] and out["admin"]["credential"] == "admin01"
+    store["inventory/assets/ns0001"]["access"]["admin_credentials"] = ["root", "admin01"]
+    with pytest.raises(ConnectionError_, match="operators/root"):
+        host_connections(reader(store), "ns0001", ["ssh"])               # 기본(프로비저닝)은 그대로 필수다
+
+
 def test_the_connection_summary_carries_no_secret(store):
     summary = openbao_connection_summary(resolve(reader(store), "ns0004", ["https"]))
     text = repr(summary)

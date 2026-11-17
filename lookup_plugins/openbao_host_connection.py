@@ -28,6 +28,10 @@ options:
     description: Endpoint 이름의 선호 순서 목록.
     type: list
     required: true
+  accounts:
+    description: false면 관리 계정 목록(Operator 공개키)을 읽지 않는다(accounts를 쓰지 않는 소비자용).
+    type: bool
+    default: true
   requires_access:
     description: true면 Asset 문서에 access 절이 없을 때 [ACCESS-MISSING]으로 실패한다(프로비저닝 대상).
     type: bool
@@ -42,8 +46,9 @@ class LookupModule(LookupBase):
         if not preference:
             raise ConnectionError_("preference(Endpoint 선호 순서 목록)가 필요합니다")
         requires = bool(kwargs.get("requires_access", False))
+        with_accounts = bool(kwargs.get("accounts", True))
         try:
-            return [host_connections(reader.read, str(t), preference_list(preference), requires) for t in terms]
+            return [host_connections(reader.read, str(t), preference_list(preference), requires, with_accounts) for t in terms]
         except ConnectionError_ as exc:
             display.error(str(exc))      # no_log 태스크에서도 실패 사유(문서 경로·키 이름, 비밀 없음)가 보인다
             raise

@@ -39,6 +39,13 @@ locals {
 
   role_policies = merge(local.family_policies, { host_audit = local.host_audit_policies })
 
+  # 이 코드가 만드는 계열 AppRole 이름의 명시 목록. scripts/openbao_check.py(Periodic Check의 OpenTofu 밖 객체 점검)가 이 목록만 읽는다.
+  # role_policies의 키와 같아야 하고, 어긋나면 tests/test_openbao_docs_check.py가 실패한다.
+  managed_approles = [
+    "provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit",
+    "network_backup", "github_webhook_watch", "periodic_check", "agent_session",
+  ]
+
   # 계열별 토큰 최대 TTL(초). 가장 긴 실행보다 길게 잡는다. Host Audit은 드리프트 시간 제한 3600초를 고려한다.
   token_max_ttl = {
     provision            = 7200

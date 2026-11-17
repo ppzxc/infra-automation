@@ -11,6 +11,7 @@
 #
 # 입력(공개 인터페이스는 docs/openbao_integration.md 4절):
 #   connection_endpoint_preference  Endpoint 이름 선호 순서 목록(기본 [ssh]). 첫 번째로 등록된 것만 쓴다.
+#   connection_needs_accounts       false면 관리 계정 공개키(inventory/operators/<계정>)를 읽지 않는다(기본 true. accounts를 안 쓰는 Host Agents가 끈다).
 #   connection_requires_access      true면 Asset 문서에 access 절이 없을 때 실패한다(프로비저닝 대상).
 #   target_removed_users            이번 실행에서 지울 계정(실행 변수로 남는 유일한 계정 입력).
 #   connection_hosts / target_hosts 대상 호스트 패턴.
@@ -93,7 +94,7 @@
     # 연결을 해석하기 전에 [ACCESS-MISSING]으로 실패한다.
     - name: Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass
       ansible.builtin.set_fact:
-        _host_res: "{{ lookup('openbao_host_connection', inventory_hostname, preference=_connection_preference, requires_access=(connection_requires_access | default(false) | bool)) }}"
+        _host_res: "{{ lookup('openbao_host_connection', inventory_hostname, preference=_connection_preference, requires_access=(connection_requires_access | default(false) | bool), accounts=(connection_needs_accounts | default(true) | bool)) }}"
       check_mode: false
       no_log: true
 

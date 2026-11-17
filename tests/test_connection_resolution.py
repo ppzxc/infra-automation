@@ -72,6 +72,13 @@ def test_each_document_is_read_over_http_once_per_host_and_the_login_once_per_pl
     assert len(fake_openbao.logins()) == 1
 
 
+def test_a_consumer_without_accounts_does_not_read_the_operator_documents(tmp_path, fake_openbao):
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"], extra_vars={"connection_needs_accounts": False})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert all(a["state"] == "absent" for a in out["ns0001"]["accounts"]) and out["ns0001"]["normalized"] == []   # 삭제 대상만 남는다
+    assert not [r for r in fake_openbao.reads() if (r.doc or "").startswith("operators/")]
+
+
 def test_a_provisioned_identity_host_connects_with_the_automation_key_and_reads_only_infra_documents(tmp_path, fake_openbao):
     res, out, calls = run_resolve(tmp_path, fake_openbao, ["ns0001"])
     assert res.returncode == 0, res.stdout + res.stderr

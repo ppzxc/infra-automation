@@ -290,13 +290,16 @@ def expected_from_tofu(tofu_dir):
     roles, mounts, auth = set(), set(), set()
     for tf in sorted(tofu_dir.glob("*.tf")):
         text = tf.read_text(encoding="utf-8")
-        roles.update(re.findall(r'role_name\s*=\s*"([^"$]+)"', text))
-        block = re.search(r"token_max_ttl\s*=\s*\{(.*?)\n\s*\}", text, re.S)  # 계열별 role이 for_each로 만들어진다
-        if block:
-            roles.update(re.findall(r"^\s*(\w+)\s*=\s*\d+", block.group(1), re.M))
+        roles.update(re.findall(r'role_name\s*=\s*"([^"$]+)"', text))                  # 단독 role(applier)
+        listed = re.search(r"managed_approles\s*=\s*\[(.*?)\]", text, re.S)              # 계열 role의 명시 목록
+        if listed:
+            roles.update(re.findall(r'"([^"]+)"', listed.group(1)))
         for kind, bucket in (("vault_mount", mounts), ("vault_auth_backend", auth)):
             for body in re.findall(r'resource\s+"%s"\s+"\w+"\s*\{(.*?)\n\}' % kind, text, re.S):
                 bucket.update(re.findall(r'^\s*path\s*=\s*"([^"$]+)"', body, re.M))
+    # 구조가 바뀌어 아무것도 못 읽었는데 "모두 OpenTofu 밖"으로 알리면 거짓 경보다: 읽기 실패로 멈춘다.
+    if not (policies and roles and mounts and auth):
+        raise OSError("tofu 코드에서 정책·role·마운트·인증 이름을 읽지 못했다(구조가 바뀌었다)")
     return {"policies": policies, "roles": roles, "mounts": mounts, "auth": auth}
 
 
