@@ -33,7 +33,7 @@ def _stub(path, body):
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
-def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
+def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None, extra_env=None):
     bindir = tmp_path / "bin"
     bindir.mkdir()
     log = tmp_path / "ssh-calls.log"
@@ -49,7 +49,7 @@ def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
     ]))
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", STUB_SSH_LOG=str(log), STUB_SSH_RC=str(probe_rc),
                STUB_KEYGEN_LOG=str(tmp_path / "keygen-calls.log"),
-               VAULT_ADDR=fake.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret", ANSIBLE_NOCOLOR="1")
+               VAULT_ADDR=fake.url, VAULT_ROLE_ID="fake-role", VAULT_SECRET_ID="fake-secret", ANSIBLE_NOCOLOR="1", **(extra_env or {}))
     cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")]
     for k, v in (extra_vars or {}).items():
         cmd += ["-e", json.dumps({k: v})]
@@ -87,8 +87,12 @@ def test_a_venv_python_interpreter_in_the_asset_document_is_refused(tmp_path, fa
     asset = fake_openbao.get("inventory", "assets/ns0001")[0]
     fake_openbao._docs[("inventory", "assets/ns0001")] = (200, {"data": {"data": {**asset, "access": {
         **asset["access"], "python_interpreter": "/srv/semaphore/venv/bin/python"}}, "metadata": {"version": 2}}})   # 스키마 검사를 건너뛴 직접 적재
-    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"])
+    private_tmp = tmp_path / "tmpdir"          # 병렬 테스트의 임시 키와 섞이지 않게 이 실행만의 임시 디렉터리를 쓴다
+    private_tmp.mkdir()
+    res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0001"], extra_env={"TMPDIR": str(private_tmp)})
     assert res.returncode != 0 and out == {} and "python_interpreter" in res.stdout + res.stderr
+    # 키를 준비한 뒤(접속 변수 설정 단계)에 실패해도 이 호스트가 만든 임시 키는 남지 않는다(cleanup_connection은 실패한 호스트에 돌지 않는다)
+    assert list(private_tmp.glob("*_bao_*_key")) == []
 
 
 def test_a_consumer_without_accounts_does_not_read_the_operator_documents(tmp_path, fake_openbao):
