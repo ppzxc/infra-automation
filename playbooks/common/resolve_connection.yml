@@ -59,7 +59,7 @@
     - name: Find stale temporary SSH key files left by failed earlier runs
       ansible.builtin.find:
         paths: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}"
-        patterns: ['*_bao_admin_key', '*_bao_boot_key', '*_bao_hop_key']
+        patterns: ['*_bao_admin_key', '*_bao_boot_key', '*_bao_hop_key', '*_bao_*_key.askpass']
         file_type: file
         age: 12h
       register: _stale_key_files

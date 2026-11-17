@@ -84,10 +84,14 @@
           state: absent
         check_mode: false
   rescue:
-    - name: Remove the half-prepared temporary key
+    - name: Remove the half-prepared temporary key and the keys of the hops staged before it
       ansible.builtin.file:
-        path: "{{ _sk_tmp.path }}"
+        path: "{{ item }}"
         state: absent
+      loop: "{{ [_sk_tmp.path] + (lookup('ansible.builtin.vars', _sk_append_to, default=[]) if _sk_append_to is defined else []) }}"
+      loop_control:
+        label: "{{ item | basename }}"
+      when: item | length > 0
       check_mode: false
 
     - name: Stop because the temporary key could not be prepared

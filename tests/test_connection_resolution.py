@@ -253,3 +253,27 @@ def test_a_failing_passphrase_step_removes_the_half_prepared_key_and_fails(tmp_p
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
     assert res.returncode != 0 and "임시 SSH 키를 준비하지 못했습니다" in res.stdout + res.stderr
     assert set(Path("/tmp").glob("*_bao_failtest_key*")) == before
+
+
+def test_a_failing_hop_also_removes_the_keys_of_the_hops_staged_before_it(tmp_path):
+    import shutil
+    import subprocess as sp
+    if not shutil.which("ssh-keygen"):
+        pytest.skip("ssh-keygen이 없다")
+    good, bad = tmp_path / "good", tmp_path / "bad"
+    sp.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(good)], check=True)
+    sp.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "right-pass", "-f", str(bad)], check=True)
+    hops = [{"asset": "a", "endpoint": "ssh", "login": {"private_key": good.read_text()}},
+            {"asset": "b", "endpoint": "ssh", "login": {"private_key": bad.read_text(), "passphrase": "wrong-pass"}}]
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
+        {"ansible.builtin.set_fact": {"_hop_key_paths": []}},
+        {"ansible.builtin.include_tasks": str(ROOT_DIR / "playbooks" / "common" / "stage_ssh_key.yml"),
+         "loop": hops, "loop_control": {"loop_var": "_hop", "label": "{{ _hop.asset }}"},
+         "vars": {"_sk_suffix": "_bao_hoptest_key", "_sk_key": "{{ _hop.login.private_key | default('') }}",
+                  "_sk_passphrase": "{{ _hop.login.passphrase | default('') }}", "_sk_append_to": "_hop_key_paths"}}]}]
+    (tmp_path / "pb.yml").write_text(yaml.safe_dump(play))
+    before = set(Path("/tmp").glob("*_bao_hoptest_key*"))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "pb.yml")], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode != 0
+    assert set(Path("/tmp").glob("*_bao_hoptest_key*")) == before
