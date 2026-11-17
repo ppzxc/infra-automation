@@ -108,6 +108,8 @@ def funa_env_resolve(docs, key_map, node_required, cloudflare_env, host, credent
     if token is not None:
         _shell_refs({cloudflare_env: token}, path[CREDENTIAL], errors)
         proxy[cloudflare_env] = token
+    errors.extend('%s: %s is also set by the service document %s' % (path[ASSET], k, path[CLUSTER])
+                  for k in sorted(set(node) & set(cluster)))
     cluster.update(node)
     for secret, label in ((proxy, path[PROXY]), (vrrp, path[VRRP])):
         for key in sorted(set(secret) & set(cluster)):

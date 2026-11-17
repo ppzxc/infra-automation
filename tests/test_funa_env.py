@@ -11,6 +11,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ import yaml
 from openbao_fake import FakeOpenBao, default_store
 import openbao_migrate as om
 import openbao_validation as ov
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_plugins"))
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROLE = ROOT_DIR / "roles" / "funa_env"
@@ -308,6 +311,16 @@ def test_key_map_covers_exactly_the_schema_keys_and_follows_the_migration_rule()
     assert len(set(key_map.values())) == len(key_map)
     for d in docs.values():
         assert d["additionalProperties"] is False
+
+
+def test_secret_and_non_secret_documents_share_no_key_and_filter_patterns_match_the_declaration():
+    docs, _ = _stored_keys_in_schemas()
+    names = list(docs)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            assert not set(docs[a]["properties"]) & set(docs[b]["properties"]), (a, b)
+    import funa_env
+    assert {funa_env.ASSET, funa_env.CLUSTER, funa_env.PROXY, funa_env.VRRP, funa_env.CREDENTIAL} == set(_vars()["funa_env_openbao_required"])
 
 
 def test_declared_required_keys_match_the_schemas():

@@ -66,6 +66,7 @@ def test_values_are_quoted_only_when_needed(value, line):
     ("nested", {CLUSTER: {"tz": "x", "extra": {"a": 1}}}, "FUNA_EXTRA is not a single scalar value"),
     ("newline", {CLUSTER: {"tz": "x", "extra": "a\nb"}}, "FUNA_EXTRA contains a line break"),
     ("quote", {CLUSTER: {"tz": "x", "extra": "it's"}}, "FUNA_EXTRA contains a single quote"),
+    ("node overrides cluster", {ASSET: {"funa": {"node_external_hostname": "x", "tz": "UTC"}}}, "inventory/assets/n1: TZ is also set by the service document inventory/services/funa"),
     ("secret in cluster", {CLUSTER: {"tz": "x", "db_password": "v"}}, "DB_PASSWORD is also in the non-secret cluster values"),
 ])
 def test_errors_name_the_problem(path, docs_patch, expect):
