@@ -38,7 +38,7 @@ def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
     bindir.mkdir()
     log = tmp_path / "ssh-calls.log"
     _stub(bindir / "ssh", 'printf "%s\\n" "$*" >> "$STUB_SSH_LOG"\nexit "$STUB_SSH_RC"\n')
-    _stub(bindir / "ssh-keygen", 'printf "%s\\n" "$*" >> "$STUB_KEYGEN_LOG"\nexit 0\n')
+    _stub(bindir / "ssh-keygen", 'printf "%s ENV=%s\\n" "$*" "$BAO_KEY_PASSPHRASE" >> "$STUB_KEYGEN_LOG"\nexit 0\n')
     (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {h: {} for h in hosts}}}}}))
     (tmp_path / "play.yml").write_text(yaml.safe_dump([
         {"ansible.builtin.import_playbook": str(RESOLVE), "vars": {"connection_hosts": "servers"}},
@@ -180,6 +180,9 @@ def test_an_automation_key_passphrase_is_stripped_from_the_temporary_key_only(tm
     assert res.returncode == 0, res.stdout + res.stderr
     (call,) = (tmp_path / "keygen-calls.log").read_text().splitlines()
     assert "-p -f /" in call and "_bao_admin_key" in call
+    args, env = call.split(" ENV=")
+    assert "fake-pass-automation" not in args and "-P" not in args.split()       # argv(ps)에는 암호문이 없다
+    assert env == "fake-pass-automation"                                          # SSH_ASKPASS가 쓰는 환경 변수로만 간다
     assert "fake-pass-automation" not in res.stdout + res.stderr
 
 
@@ -188,3 +191,29 @@ def test_a_password_via_hop_is_refused_with_a_readable_reason(tmp_path, fake_ope
     res, out, _ = run_resolve(tmp_path, fake_openbao, ["ns0004"], extra_vars={"connection_endpoint_preference": ["https"]})
     assert res.returncode != 0 and out == {}
     assert "VIA-HOP-LOGIN" in res.stdout + res.stderr and "ns0003" in res.stdout + res.stderr
+
+
+def test_the_staging_helper_really_strips_a_passphrase_through_askpass_with_the_real_ssh_keygen(tmp_path):
+    """스텁이 아닌 실제 ssh-keygen: 암호문이 걸린 가짜 키가 임시 파일에서 암호문 없이 읽히고, askpass 파일은 남지 않는다."""
+    import shutil
+    import subprocess as sp
+    if not shutil.which("ssh-keygen"):
+        pytest.skip("ssh-keygen이 없다")
+    key = tmp_path / "k"
+    sp.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "fake-pass-xyz", "-f", str(key)], check=True)
+    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "tasks": [
+        {"ansible.builtin.include_tasks": str(ROOT_DIR / "playbooks" / "common" / "stage_ssh_key.yml"),
+         "vars": {"_sk_suffix": "_bao_test_key", "_sk_key": key.read_text(), "_sk_passphrase": "fake-pass-xyz",
+                  "_sk_record": "_staged"}},
+        {"ansible.builtin.copy": {"content": "{{ _staged.path }}", "dest": str(tmp_path / "path.txt")}, "become": False}]}]
+    (tmp_path / "pb.yml").write_text(yaml.safe_dump(play))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "pb.yml")], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
+    assert res.returncode == 0, res.stdout + res.stderr
+    staged = Path((tmp_path / "path.txt").read_text())
+    try:
+        assert sp.run(["ssh-keygen", "-y", "-P", "", "-f", str(staged)], capture_output=True).returncode == 0
+        assert not Path(str(staged) + ".askpass").exists()
+        assert "fake-pass-xyz" not in res.stdout + res.stderr
+    finally:
+        staged.unlink(missing_ok=True)

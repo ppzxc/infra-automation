@@ -196,108 +196,40 @@
         # 관리 IP(`ip`, Host Agents의 host.ip 출처): 인벤토리 ip가 있으면 그 값, 없으면 선택된 Endpoint 주소.
         ip: "{{ ip if (ip is defined and (ip | string | trim | length) > 0) else _admin_conn.address }}"
 
-    - name: Create temporary SSH private key file for admin user if key provided
-      ansible.builtin.tempfile:
-        state: file
-        suffix: "_bao_admin_key"
-      register: _admin_key_tempfile
-      check_mode: false
-      when:
-        - (_admin_conn.login.private_key | default('')) | length > 0
+    # 임시 키 파일 만들기·쓰기·암호문 제거는 stage_ssh_key.yml 한 곳이다(관리·부트스트랩·경유지가 같은 단계를 쓴다).
+    - name: Stage the admin SSH private key as a temporary file
+      ansible.builtin.include_tasks: stage_ssh_key.yml
+      vars:
+        _sk_suffix: _bao_admin_key
+        _sk_key: "{{ _admin_conn.login.private_key | default('') }}"
+        _sk_passphrase: "{{ _admin_conn.login.passphrase | default('') }}"
+        _sk_record: _admin_key_tempfile
 
-    - name: Write admin SSH private key to temporary file
-      ansible.builtin.copy:
-        content: "{{ _admin_conn.login.private_key }}\n"
-        dest: "{{ _admin_key_tempfile.path }}"
-        mode: '0600'
-      check_mode: false
-      no_log: true
-      when:
-        - _admin_key_tempfile.path is defined
-        - (_admin_conn.login.private_key | default('')) | length > 0
-
-    - name: Strip passphrase from temporary admin SSH key if passphrase defined
-      ansible.builtin.command: >-
-        ssh-keygen -p -f {{ _admin_key_tempfile.path }} -P {{ _admin_conn.login.passphrase | quote }} -N ""
-      check_mode: false
-      changed_when: true
-      no_log: true
-      when:
-        - _admin_key_tempfile.path is defined
-        - (_admin_conn.login.passphrase | default('')) | length > 0
-
-    - name: Create temporary SSH private key file for bootstrap user if key provided
-      ansible.builtin.tempfile:
-        state: file
-        suffix: "_bao_boot_key"
-      register: _boot_key_tempfile
-      check_mode: false
-      when:
-        - (_boot_conn.login.private_key | default('')) | length > 0
-
-    - name: Write bootstrap SSH private key to temporary file
-      ansible.builtin.copy:
-        content: "{{ _boot_conn.login.private_key }}\n"
-        dest: "{{ _boot_key_tempfile.path }}"
-        mode: '0600'
-      check_mode: false
-      no_log: true
-      when:
-        - _boot_key_tempfile.path is defined
-        - (_boot_conn.login.private_key | default('')) | length > 0
-
-    - name: Strip passphrase from temporary bootstrap SSH key if passphrase defined
-      ansible.builtin.command: >-
-        ssh-keygen -p -f {{ _boot_key_tempfile.path }} -P {{ _boot_conn.login.passphrase | quote }} -N ""
-      check_mode: false
-      changed_when: true
-      no_log: true
-      when:
-        - _boot_key_tempfile.path is defined
-        - (_boot_conn.login.passphrase | default('')) | length > 0
+    - name: Stage the bootstrap SSH private key as a temporary file
+      ansible.builtin.include_tasks: stage_ssh_key.yml
+      vars:
+        _sk_suffix: _bao_boot_key
+        _sk_key: "{{ _boot_conn.login.private_key | default('') }}"
+        _sk_passphrase: "{{ _boot_conn.login.passphrase | default('') }}"
+        _sk_record: _boot_key_tempfile
 
     # 경유(via) 체인: 경유지마다 자기 Endpoint의 기본 Credential·identity로 로그인한다. 키 로그인 경유지만 지원한다.
-    - name: Create temporary SSH private key files for via hops
-      ansible.builtin.tempfile:
-        state: file
-        suffix: "_bao_hop_key"
-      register: _hop_key_tempfiles
+    # 경로 목록(_hop_key_paths)은 경유 순서와 맞춘다(키가 없는 경유지는 '').
+    - name: Start the via hop temporary key path list
+      ansible.builtin.set_fact:
+        _hop_key_paths: []
+
+    - name: Stage the via hop SSH private keys as temporary files
+      ansible.builtin.include_tasks: stage_ssh_key.yml
       loop: "{{ _admin_conn.via }}"
       loop_control:
-        label: "{{ item.asset }}/{{ item.endpoint }}"
-      check_mode: false
-      no_log: true
-      when: (item.login.private_key | default('')) | length > 0
-
-    # 임시 키 경로는 키를 쓰기 전에 기록한다(뒤 단계가 실패해도 cleanup_connection이 지울 수 있게).
-    - name: Record the via hop temporary key paths
-      ansible.builtin.set_fact:
-        _hop_key_paths: "{{ _hop_key_tempfiles.results | map(attribute='path', default='') | list }}"
-
-    - name: Write via hop SSH private keys to temporary files
-      ansible.builtin.copy:
-        content: "{{ item.0.login.private_key }}\n"
-        dest: "{{ item.1.path }}"
-        mode: '0600'
-      loop: "{{ _admin_conn.via | zip(_hop_key_tempfiles.results) | list }}"
-      loop_control:
-        label: "{{ item.0.asset }}/{{ item.0.endpoint }}"
-      check_mode: false
-      no_log: true
-      when: item.1.path is defined
-
-    - name: Strip passphrase from temporary via hop SSH keys
-      ansible.builtin.command: >-
-        ssh-keygen -p -f {{ item.1.path }} -P {{ item.0.login.passphrase | quote }} -N ""
-      loop: "{{ _admin_conn.via | zip(_hop_key_tempfiles.results) | list }}"
-      loop_control:
-        label: "{{ item.0.asset }}/{{ item.0.endpoint }}"
-      check_mode: false
-      changed_when: true
-      no_log: true
-      when:
-        - item.1.path is defined
-        - (item.0.login.passphrase | default('')) | length > 0
+        loop_var: _hop
+        label: "{{ _hop.asset }}/{{ _hop.endpoint }}"
+      vars:
+        _sk_suffix: _bao_hop_key
+        _sk_key: "{{ _hop.login.private_key | default('') }}"
+        _sk_passphrase: "{{ _hop.login.passphrase | default('') }}"
+        _sk_append_to: _hop_key_paths
 
     - name: Build the ssh ProxyCommand arguments for the via chain
       ansible.builtin.set_fact:

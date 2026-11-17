@@ -74,6 +74,8 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 
 **`playbooks/common/resolve_connection.yml`** (서버 플레이북이 첫 플레이로 import)
 
+임시 SSH 개인키 파일(관리·부트스트랩·경유지)은 `playbooks/common/stage_ssh_key.yml` 한 곳에서 만든다. 키에 암호문이 있으면 `ssh-keygen -P`(인자라 `ps`에 보인다)가 아니라 `SSH_ASKPASS`(키 파일 옆에 잠깐 만드는 비밀 없는 스크립트)와 환경 변수 `BAO_KEY_PASSPHRASE`로 넘긴다. 임시 디렉터리가 `noexec`로 마운트된 러너에서는 askpass 스크립트를 실행하지 못해 암호문 제거가 실패한다(그때는 임시 디렉터리를 바꾼다).
+
 | 입력 변수 | 뜻 |
 |---|---|
 | `connection_endpoint_preference` | 선호 순서 목록. 기본 `[ssh]` |

@@ -352,3 +352,10 @@ def test_index_matches_documented_operator_list_decision():
     runbook = (ROOT / "docs" / "runbooks" / "openbao-operations.md").read_text(encoding="utf-8")
     assert "list 포함" in adr
     assert "list 포함" in runbook
+
+
+def test_the_applier_policy_says_plainly_that_it_is_effectively_admin_and_the_deny_is_only_a_guardrail():
+    text = (POLICIES / "applier.hcl").read_text(encoding="utf-8")
+    assert "사실상 관리자" in text and "가드레일" in text and "보안 경계가 아니라" in text
+    # 정책을 쓸 수 있는 한 deny는 지울 수 있다: 이 전제가 바뀌면(정책 쓰기를 막으면) 위 문구를 다시 검토한다.
+    assert any(p == "sys/policies/acl/*" and "update" in caps for p, caps in policy("applier"))
