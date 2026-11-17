@@ -234,7 +234,7 @@ def host_agents_resource_attributes(hostname, environment, os_facts, ip=None):
     errors, omitted = [], []
     env = '' if environment is None else str(environment).strip()
     if env not in ENVIRONMENTS:
-        errors.append("host_agents_environment %s: %s 중 하나여야 합니다 (역할 기본값 또는 Extra variables host_agents_environment, %s)"
+        errors.append("host_agents_environment %s: %s 중 하나여야 합니다 (역할 기본값 또는 Extra variables host_agents_environment) — 호스트 %s"
                       % ("누락" if not env else "값 %r 허용 안 됨" % env, ' | '.join(ENVIRONMENTS), hostname))
     attrs = {'host.name': str(hostname)}
     if facts.get('machine_id'):
@@ -605,7 +605,8 @@ def host_agents_tcpcheck_targets(roster, endpoints_by_host, endpoint='ssh'):
     for name in roster:
         ep = ((endpoints_by_host or {}).get(name) or {}).get(endpoint)
         port = ep.get('port') if isinstance(ep, dict) else None
-        if not isinstance(ep, dict) or _blank(ep.get('address')) or isinstance(port, bool) or not re.fullmatch(r'[0-9]{1,5}', str(port).strip()):
+        if not isinstance(ep, dict) or _blank(ep.get('address')) or isinstance(port, bool) \
+                or not re.fullmatch(r'[0-9]{1,5}', str(port).strip()) or not 1 <= int(str(port).strip()) <= 65535:
             missing.append(name)
             continue
         targets.append('%s:%d' % (str(ep['address']).strip(), int(str(port).strip())))

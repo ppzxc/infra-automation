@@ -100,7 +100,7 @@
       ansible.builtin.set_fact:
         # #526 전까지의 이음매: 옛 KV 값을 Deploy 경로(inventory/services/*)와 같은 팩트 모양으로 맞춘다.
         host_agents_services: >-
-          {{ {'openobserve': {'url': _kv.openobserve.o2_endpoint | default(''), 'org': _kv.openobserve.o2_org | default('default')},
+          {{ {'openobserve': {'url': _kv.openobserve.o2_endpoint | default(''), 'org': _kv.openobserve.o2_org | default('default', true)},
               'rustfs': {'url': _kv.rustfs.rustfs_endpoint | default(''), 'region': _kv.rustfs.rustfs_region | default('')}} }}
         rustfs_bucket: "{{ ((_kv.host | default({})).rustfs_bucket | default('')) | string | trim or (rustfs_bucket_prefix ~ '-' ~ inventory_hostname) }}"
 
