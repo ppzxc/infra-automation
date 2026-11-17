@@ -194,6 +194,25 @@ def admin_accounts(read, asset, preference):
     return out
 
 
+def host_connections(read, asset, preference):
+    """호스트 하나의 접속 해석 묶음: Asset 문서, 관리·부트스트랩 연결, 관리 계정 목록.
+
+    같은 읽기 함수(`Reader.read`는 한 객체 안에서 문서를 다시 읽지 않는다)로 한 번에 만들어, 호스트당 같은 문서를 여러 번 HTTP로
+    읽지 않는다. 관리 Credential 이름은 `access.admin_credentials`의 첫째, 부트스트랩은 `access.bootstrap_credential`이다
+    (둘 다 없으면 관리 연결은 Endpoint 기본 Credential, 부트스트랩 연결·관리 계정은 비어 있다).
+    """
+    doc = read("inventory/assets/%s" % asset)
+    access = doc.get("access") or {}
+    admin = next(iter(access.get("admin_credentials") or []), "") or ""
+    boot = access.get("bootstrap_credential") or ""
+    return {
+        "asset": doc, "admin_credential": admin, "bootstrap_credential": boot,
+        "admin": resolve(read, asset, preference, admin or None),
+        "bootstrap": resolve(read, asset, preference, boot) if boot else {},
+        "admin_accounts": admin_accounts(read, asset, preference) if admin else [],
+    }
+
+
 class LookupModule(LookupBase):
     def run(self, terms, variables=None, **kwargs):
         reader = Reader(variables or {}, self._templar)

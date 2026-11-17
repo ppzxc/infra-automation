@@ -59,6 +59,19 @@ def run_resolve(tmp_path, fake, hosts, probe_rc=0, extra_vars=None):
     return res, out, calls
 
 
+def test_each_document_is_read_over_http_once_per_host_and_the_login_once_per_play(tmp_path, fake_openbao):
+    """호스트당 같은 문서를 반복해 읽지 않는다(요약·전체·관리 계정 해석이 읽기 객체 하나를 나눠 쓴다)."""
+    res, _, _ = run_resolve(tmp_path, fake_openbao, ["ns0001", "ns0002"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    reads = [(r.mount, r.doc) for r in fake_openbao.reads()]
+    # 호스트 사이에 공유하는 문서(automation/ssh, operators/*)는 호스트당 한 번씩이라 호스트 수만큼까지 나온다.
+    for doc in set(reads):
+        assert reads.count(doc) <= 2, (doc, reads.count(doc))
+    per_host = [d for m, d in reads if d.startswith(("assets/ns0001", "assets/ns0002"))]
+    assert len(per_host) == len(set(per_host)), per_host
+    assert len(fake_openbao.logins()) == 1
+
+
 def test_a_provisioned_identity_host_connects_with_the_automation_key_and_reads_only_infra_documents(tmp_path, fake_openbao):
     res, out, calls = run_resolve(tmp_path, fake_openbao, ["ns0001"])
     assert res.returncode == 0, res.stdout + res.stderr

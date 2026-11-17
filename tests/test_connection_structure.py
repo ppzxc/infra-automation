@@ -52,12 +52,26 @@ def test_controller_credential_tasks_run_in_check_mode_too():
 def test_tasks_that_carry_secrets_are_no_log():
     tasks = {t["name"]: t for t in _load(RESOLVE)[0]["tasks"]}
     for name in ("Acquire the OpenBao client token once for the whole play",
-                 "Resolve the admin connection (Endpoint, login, become, via)",
-                 "Resolve the bootstrap connection (same Endpoint, bootstrap Credential)",
+                 "Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass",
+                 "Take the admin connection (Endpoint, login, become, via) and the bootstrap connection (same Endpoint, bootstrap Credential)",
                  "Write admin SSH private key to temporary file", "Write bootstrap SSH private key to temporary file",
                  "Write via hop SSH private keys to temporary files", "Create temporary SSH private key files for via hops",
                  "Configure connection parameters from the active connection"):
         assert tasks[name].get("no_log") is True, name
+
+
+def test_the_connection_is_resolved_by_one_lookup_per_host_not_by_repeated_lookups():
+    """호스트당 해석은 lookup 하나다(같은 문서를 요약·전체·관리 계정마다 다시 읽지 않는다)."""
+    text = RESOLVE.read_text(encoding="utf-8")
+    assert text.count("lookup('openbao_host_connection'") == 1
+    for retired in ("lookup('openbao_connection'", "lookup('openbao_admin_accounts'", "_primary_admin_user"):
+        assert retired not in text, retired
+
+
+def test_secret_free_summaries_are_never_no_log():
+    """요약 태스크는 비밀이 없다: no_log를 달면 운영자가 실패 사유를 볼 수 없다."""
+    task = next(t for t in _load(RESOLVE)[0]["tasks"] if t["name"].startswith("Summarize the admin and bootstrap connections"))
+    assert not task.get("no_log")
 
 
 def test_hop_key_paths_are_recorded_before_any_key_is_written():

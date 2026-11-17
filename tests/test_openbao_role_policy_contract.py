@@ -114,7 +114,7 @@ def test_every_lookup_user_file_is_listed_with_its_families():
     users = set()
     for base in ("roles", "playbooks"):
         for p in (ROOT / base).rglob("*.yml"):
-            if re.search(r"lookup\('openbao_(connection|admin_accounts)'", p.read_text(encoding="utf-8")):
+            if re.search(r"lookup\('openbao_(connection|admin_accounts|host_connection)'", p.read_text(encoding="utf-8")):
                 users.add(str(p.relative_to(ROOT)))
     assert users == set(LOOKUP_USERS), sorted(users ^ set(LOOKUP_USERS))
 
