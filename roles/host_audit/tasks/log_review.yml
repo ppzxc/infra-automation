@@ -124,6 +124,7 @@
                 {%- for h in groups['host_audit_targets'] | default([]) -%}
                 {%- set hv = hostvars[h] -%}
                 {%- set _ = src.update({h: {
+                      'resolved': hv['_normalized_admin_users'] is defined,
                       'accounts': hv['accounts'] | default([]) | select('mapping') | selectattr('name', 'defined')
                                   | rejectattr('state', 'defined') | map(attribute='name') | list
                                   + (hv['accounts'] | default([]) | select('mapping') | selectattr('name', 'defined')

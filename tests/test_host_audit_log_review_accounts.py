@@ -257,6 +257,13 @@ def test_item3_an_empty_holiday_list_for_the_year_is_a_list_not_a_missing_one():
     assert i["status"] == "auto" and "공휴일 목록 없음" not in i["criterion"]
 
 
+def test_item3_business_hours_must_be_whole_hours_or_the_item_is_a_judge_error_not_a_silent_midnight():
+    ok = _item(_model(_results(), _settings(business_hours={"start": "09:00", "end": "18"})), 3)
+    assert "평일 09:00~18:00 KST" in ok["criterion"]
+    m = _model(_results(), _settings(business_hours={"start": "08:30", "end": 20}))
+    assert _item(m, 3)["status"] == "failed" and any(e.startswith("part1.off_hours_login") for e in m["errors"])
+
+
 def test_item3_the_criterion_states_the_business_hours_and_the_holiday_count():
     i = _item(_model(), 3)
     assert "평일 08:00~20:00 KST" in i["criterion"] and "2026년 공휴일 3일" in i["criterion"]
@@ -338,6 +345,14 @@ def test_account_hosts_are_built_from_declared_accounts_bootstrap_and_asset_inve
     assert out["ns0003"]["inventory_accounts"] is None  # 수집하지 못한 호스트는 목록을 알 수 없다
 
 
+def test_a_host_whose_connection_was_not_resolved_has_no_allowed_list_not_root_only():
+    out = host_audit_log_review_account_hosts({"ns0001": {"resolved": False, "accounts": [], "admin_users": [],
+                                                          "bootstrap": "", "agents_only": False}})
+    assert out["ns0001"]["declared"] is None
+    i = _item(_model(_results(success=[_login("ns0001", "alice", "2026-10-12 10")]), _settings(hosts=out)), 1)
+    assert _col(i, "계정") == ["alice"] and "허용 계정 목록 없음" in _col(i, "비고")[0]
+
+
 def test_missing_account_settings_and_results_never_raise():
     meta = {"run_id": "ha-x", "run_kind": "scheduled", "started_at": STARTED, "generated_at": STARTED, "timezone": TZ,
             "period": host_audit_log_review_period(STARTED, TZ), "settings": {}}
@@ -354,6 +369,7 @@ class _O2(object):
     def __init__(self):
         rows = [{"host": "ns0001", "user": u, "hour": "2026-10-12 10", "logins": 1} for u in ("alice", "boot", "intruder")]
         rows += [{"host": "ns0002", "user": u, "hour": "2026-10-12 10", "logins": 1} for u in ("legacy", "alice")]
+        rows += [{"host": "ns0003", "user": "alice", "hour": "2026-10-12 10", "logins": 1}]
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
@@ -383,7 +399,8 @@ def test_the_report_task_builds_the_allowed_accounts_from_resolved_host_variable
             "host_audit_targets": {"hosts": {
                 "ns0001": {"accounts": [{"name": "alice", "keys": ["ssh-ed25519 AAAA fake"]}, {"name": "gone", "state": "absent"}],
                            "_normalized_admin_users": ["alice"], "_boot_summary": {"username": "boot", "address": "192.0.2.1"}},
-                "ns0002": {}}},
+                "ns0002": {},
+                "ns0003": {}}},  # 접속 해석을 거치지 못한 호스트(선언 계정 변수가 없다)
             "agents_only": {"hosts": {"ns0002": {}}}}}}
         (tmp_path / "inv.yml").write_text(yaml.safe_dump(inventory))
         model = {"asset_inventory": {"hosts": [{"host": "ns0002", "collected": True, "accounts": [{"name": "legacy"}]}]}}
@@ -411,5 +428,7 @@ def test_the_report_task_builds_the_allowed_accounts_from_resolved_host_variable
         o2.server.shutdown()
         o2.server.server_close()
     # ns0001: 선언 계정 alice·bootstrap boot은 허용, intruder만 발견. ns0002(에이전트만): Asset Inventory 계정 legacy만 허용
-    assert [(r[0], r[1]) for r in item["rows"]] == [("ns0001", "intruder"), ("ns0002", "alice")]
+    # ns0003: 해석되지 않은 호스트는 root만 허용이 아니라 '허용 계정 목록 없음'
+    assert [(r[0], r[1]) for r in item["rows"]] == [("ns0001", "intruder"), ("ns0002", "alice"), ("ns0003", "alice")]
+    assert "허용 계정 목록 없음" in item["rows"][2][-1] and "허용 계정 목록 없음" not in item["rows"][0][-1]
     assert item["verdict"] == "확인 필요"

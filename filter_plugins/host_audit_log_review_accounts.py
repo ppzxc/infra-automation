@@ -190,7 +190,9 @@ def _allowed(entry):
             return None
         names = set(_text(n) for n in inventory)
     else:
-        names = set(_text(n) for n in (entry.get('declared') or []))
+        if entry.get('declared') is None:  # 접속 해석(resolve_connection)을 거치지 못한 호스트: 선언을 모른다
+            return None
+        names = set(_text(n) for n in entry['declared'])
         names.add(_text(entry.get('bootstrap')))
     names.add('root')
     names.discard('')
@@ -200,8 +202,8 @@ def _allowed(entry):
 def host_audit_log_review_account_hosts(sources, asset_inventory_hosts=None):
     """1번 허용 계정 입력을 만든다(tasks/log_review.yml AUD-804).
 
-    ``sources``: ``{호스트: {'accounts': provisioning 계정 선언(dict 목록, state absent 제외), 'admin_users': [...],
-    'bootstrap': bootstrap 계정 이름, 'agents_only': bool}}``. ``asset_inventory_hosts``: 보고서 모델의
+    ``sources``: ``{호스트: {'resolved': 접속 해석을 거쳤는지, 'accounts': provisioning 계정 선언(이름 또는 dict, state absent 제외),
+    'admin_users': [...], 'bootstrap': bootstrap 계정 이름, 'agents_only': bool}}``. ``asset_inventory_hosts``: 보고서 모델의
     ``asset_inventory.hosts``(수집한 호스트만 계정 목록이 있다). 비밀이 없는 이름만 남긴다.
     """
     inventory = {}
@@ -219,7 +221,9 @@ def host_audit_log_review_account_hosts(sources, asset_inventory_hosts=None):
             elif isinstance(account, str):
                 declared.add(_text(account))
         declared.discard('')
-        out[_text(host)] = {'declared': sorted(declared), 'bootstrap': _text(src.get('bootstrap')),
+        # resolved=False: resolve_connection이 이 호스트의 선언을 발행하지 못했다. 빈 목록(root만 허용)으로 읽지 않는다.
+        resolved = src.get('resolved', True) is not False
+        out[_text(host)] = {'declared': sorted(declared) if resolved else None, 'bootstrap': _text(src.get('bootstrap')),
                             'agents_only': bool(src.get('agents_only')),
                             'inventory_accounts': inventory.get(_text(host))}
     return out
@@ -312,14 +316,25 @@ def judge_login_failures(ctx):
 
 # ------------------------------------------------------------------ 업무시간
 
+def _whole_hour(value, default):
+    """업무시간 경계(정시). 8·'8'·'08:00'을 받는다. 정시가 아니거나 0~24 밖이면 오류다(시 단위 집계로 판정할 수 없다)."""
+    if value is None or _text(value) == '':
+        return default
+    text = _text(value)
+    hour, _sep, minute = text.partition(':')
+    if not hour.isdigit() or (minute and minute.strip('0')) or not 0 <= int(hour) <= 24:
+        raise ValueError('업무시간 경계는 정시여야 함: %r' % (value,))
+    return int(hour)
+
+
 class _Calendar(object):
     """업무시간 판정: 평일 start~end시(정시, 끝 미포함) KST, 주말·연도별 공휴일 목록."""
 
     def __init__(self, ctx):
         cfg = _account_settings(ctx)
         hours = cfg.get('business_hours') or {}
-        self.start = _int(hours.get('start')) if hours.get('start') is not None else 8
-        self.end = _int(hours.get('end')) if hours.get('end') is not None else 20
+        self.start = _whole_hour(hours.get('start'), 8)
+        self.end = _whole_hour(hours.get('end'), 20)
         self.year = _text(ctx['period'].get('month'))[:4]
         listed = None
         for key, days in (cfg.get('holidays') or {}).items():
