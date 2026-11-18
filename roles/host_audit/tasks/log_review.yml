@@ -127,6 +127,9 @@
       no_log: true
       when: _host_audit_log_review_read_problem | length == 0
 
+    - name: Check the signed copy of the previous scheduled run (#564)
+      ansible.builtin.include_tasks: log_review_signed.yml
+
     # 판정은 모두 필터에 있다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이 보여야 한다(성공 때 값은 -v에서만 찍힌다).
     - name: "[AUD-804] Build the Log Review Report model"
       vars:
@@ -177,6 +180,7 @@
               {{ (_host_audit_log_review_reference.personal_info_systems | default(none))
                  if _host_audit_log_review_reference | default(none) is mapping else none }}
             log_management: "{{ host_audit_log_review_log_management }}"
+            previous_signed_copy: "{{ _host_audit_log_review_signed }}"
       ansible.builtin.set_fact:
         host_audit_log_review_model: "{{ _results | host_audit_log_review_model(_meta) }}"
       register: _host_audit_log_review_built

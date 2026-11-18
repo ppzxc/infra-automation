@@ -108,7 +108,7 @@ Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나�
 | `host_agents` | Host Agents — Deploy·Config·Deploy Restic |
 | `backup_maintenance` | Host Agents — Repo Maintenance |
 | `openobserve_config` | OpenObserve — Config |
-| `host_audit` | Host Audit — Monthly·On-demand·Resend |
+| `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review |
 | `network_backup` | Cisco·FortiGate 백업 |
 | `github_webhook_watch` | 조직 웹훅 감시 |
 | `periodic_check` | OpenBao — Periodic Check |

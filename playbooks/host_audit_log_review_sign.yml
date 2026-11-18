@@ -1,0 +1,26 @@
+---
+# ==============================================================================
+# Log Review Report 서명본 등록 (Spec #544 / Ticket-9 #564, ADR-0015 §4)
+# ==============================================================================
+# 결재가 끝난 Log Review Report의 서명 스캔본(PDF)을 그 보고서를 만든 정기 실행의 보관 경로 signed/에 올린다.
+# Semaphore는 파일을 받지 못하므로 운영자가 러너의 접수 폴더(host_audit_signed_intake_dir, 기본 <출력 상위 경로>/_signed_intake)에
+# <실행 ID>.pdf를 두고, 실행 ID와 SHA-256(sha256sum 값)만 넘긴다. 다음 달 정기 실행의 보고서가 '전월 서명본: 있음(일시·해시)'을 적는다.
+# 버킷은 잠금이 걸려 있고 키에 Delete가 없어 잘못 올리면 지울 수 없다: 검증이 모두 통과해야만 올린다(roles/host_audit/tasks/log_review_sign.yml).
+# 대상 호스트에 접속하지 않는다.
+#
+# 실행 예시:
+#   sha256sum /srv/host_audit/_signed_intake/ha-20261031T220000Z.pdf
+#   ansible-playbook -i inventory/hosts.yml playbooks/host_audit_log_review_sign.yml \
+#     -e host_audit_signed_run_id=ha-20261031T220000Z -e host_audit_signed_sha256=<위 값>
+# ==============================================================================
+
+- name: Register the signed copy of a Log Review Report
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Verify the signed copy and keep it with its run
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: log_review_sign

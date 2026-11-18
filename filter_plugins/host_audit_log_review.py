@@ -29,6 +29,7 @@ import host_audit_log_review_collection as _collection  # noqa: E402
 import host_audit_log_review_accounts as _accounts  # noqa: E402
 import host_audit_log_review_sources as _sources  # noqa: E402
 import host_audit_log_review_status as _status  # noqa: E402
+import host_audit_log_review_signed as _signed  # noqa: E402
 
 try:
     from ansible.errors import AnsibleFilterError
@@ -50,6 +51,7 @@ _JUDGE_MODULES = (
     _accounts,
     _sources,
     _status,
+    _signed,
 )
 
 APPROVERS = ('점검자', '정보보호관리자', '정보보호책임자(CISO)')

@@ -1,6 +1,6 @@
 # Semaphore 셋업 가이드 (Host Agents · OpenObserve · Host Audit)
 
-> Semaphore UI에 Host Agents 템플릿 4개, OpenObserve — Config, Host Audit 템플릿 3개를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
+> Semaphore UI에 Host Agents 템플릿 4개, OpenObserve — Config, Host Audit 템플릿 4개를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
 > OpenBao 구조와 공통 접속 모듈은 [openbao_integration.md](openbao_integration.md), 배포 내용은 [Host Agents 배포 내역서](host-agents-deploy-inventory-simple.md)를 본다.
 
 ---
@@ -11,7 +11,7 @@
 2. Repository: `ppzxc/infra-automation`, branch `main`
 3. Inventory: Static 인벤토리 (Semaphore UI에서 편집, `inventory/hosts.yml.example` 형식)
 4. Variable Group(Environment): OpenBao 접속 값 (AppRole 계열마다 1개, §4)
-5. Task Template 8개 (아래 §5)
+5. Task Template 9개 (아래 §5)
 6. Schedule: Repo Maintenance(매일), Host Audit — Monthly(월 1회)
 7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → OpenObserve — Config → Host Audit(§7.1)
 
@@ -151,7 +151,7 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | `host_agents` | Host Agents — Deploy All·Config All·Deploy Restic | `provision`의 접속 경로, 호스트별 `agents` 비밀, OpenObserve 수집 계정, 알림 URL |
 | `backup_maintenance` | Host Agents — Repo Maintenance | 호스트별 `agents`(restic 비밀번호), RustFS 유지보수 키, OpenObserve 수집 계정 |
 | `openobserve_config` | OpenObserve — Config | Asset·Endpoint, OpenObserve 관리·수집 계정, 알림 URL, 작업 설정 |
-| `host_audit` | Host Audit — Monthly·On-demand·Resend | `provision`·`host_agents`의 합집합(드리프트 하위 실행 때문), 보고서 보관 키, 메일 설정, 알림 URL |
+| `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review | `provision`·`host_agents`의 합집합(드리프트 하위 실행 때문), 보고서 보관 키, 메일 설정, 알림 URL |
 | `network_backup` | Cisco 백업, FortiGate 백업 | Asset·Endpoint, Credential, 알림 URL |
 | `github_webhook_watch` | 조직 웹훅 감시 | 조직 훅 읽기 토큰, OpenObserve 수집 계정, 작업 설정 |
 | `periodic_check` | OpenBao — Periodic Check | 전체 읽기와 메타데이터 목록(스키마 대조용) |
@@ -193,9 +193,10 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | (없음 — 두지 않는다) | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함, `host_audit_excluded` 제외) |
 | Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | `target_hosts`, `host_audit_mail_enabled`, `host_audit_storage_enabled` | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
 | Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |
+| Host Audit — Register Signed Log Review | `playbooks/host_audit_log_review_sign.yml` | (없음) | `host_audit_signed_run_id`, `host_audit_signed_sha256` | 수동 | localhost (러너 접수 폴더의 서명본 PDF → Host Audit 버킷 `signed/`) |
 
 
-**Periodic Check 템플릿(위 표와 별개, #520)**: `OpenBao — Periodic Check`는 Ansible이 아니라 **Bash** 앱 템플릿이라 위 8개에 세지 않는다.
+**Periodic Check 템플릿(위 표와 별개, #520)**: `OpenBao — Periodic Check`는 Ansible이 아니라 **Bash** 앱 템플릿이라 위 9개에 세지 않는다.
 
 | 항목 | 값 |
 |---|---|
@@ -222,6 +223,8 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 | On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |
 | Resend | `host_audit_resend_run_id` | String | (없음) | 예 |
 | Resend | `host_audit_resend_month` | String `YYYY-MM` | (비움) | 아니오 |
+| Register Signed Log Review | `host_audit_signed_run_id` | String | (없음) | 예 |
+| Register Signed Log Review | `host_audit_signed_sha256` | String(16진수 64자) | (없음) | 예 |
 
 - **Host Provisioning은 `playbooks/provision_hosts.yml`만 쓴다.** `site.yml`을 Semaphore 템플릿에 직접 연결하지 않는다. `site.yml` 직접 실행(기본 대상 `servers:loadbalancers`)은 CLI 전용이다. 인벤토리를 공용으로 쓰므로 대상 지정이 없으면 새로 추가된 서버까지 전부 프로비저닝되기 때문이다.
 - Host Provisioning의 `target_hosts`는 인벤토리 호스트명을 쉼표로 구분한 문자열이다(예: `ns0001,ns0002`). `provision_hosts.yml`의 사전 검증(localhost)이 접속 전에 다음을 확인하고 어기면 한국어 메시지로 즉시 실패한다. 값이 없거나 비어 있음, 호스트 패턴(`:`, `!`, `&`, `*`)·공백·빈 항목, 인벤토리에 없는 이름, 그룹 이름(`all`·`servers`·`loadbalancers` 등), `provision_excluded` 소속 호스트(제외, 허용보다 우선), `provision_allowed`에 없는 호스트(그룹이 없거나 비어 있으면 모두 거부, 허용하려면 그룹에 넣고 끝나면 뺀다), 개수가 `provision_max_hosts`(기본 5)를 넘음. 더 많은 호스트를 한 번에 하려면 `provision_max_hosts`를 명시적으로 올린다(Environment 또는 API `environment`). 이 검증은 `--tags`로도 건너뛸 수 없다.
@@ -254,6 +257,14 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - Survey `host_audit_resend_run_id`(예: `ha-20261031T220000Z`) — 실행 ID는 메일 제목 아래·본문 상단, 실패 메시지, Semaphore 로그(`AUD-003`)에 있다.
 - 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID면 Survey `host_audit_resend_month`에 `2026-11`(KST 기준 실행 시작 월)을 함께 준다.
 - 수신자는 지금의 OpenBao `inventory/config/host_audit.mail_recipients`다. 받은 보고서의 SHA-256이 보관된 요약의 값과 다르면 보내지 않는다.
+
+**Log Review Report 서명본 등록 (Host Audit — Register Signed Log Review)** ([host_audit.md §18.3](host_audit.md), #564)
+
+- 결재가 끝난 Log Review Report의 서명 스캔본(PDF)을 그 보고서를 만든 정기 실행의 보관 경로 `signed/`에 올린다. 다음 달 정기 실행의 보고서가 '전월 서명본: 있음(일시·해시)/없음'을 적는다.
+- Semaphore는 실행 때 파일을 받지 못한다. 운영자가 러너 호스트의 접수 폴더(컨테이너 안 경로 `host_audit_signed_intake_dir`, 기본 `<HOST_AUDIT_OUTPUT_ROOT>/_signed_intake`)에 `<실행 ID>.pdf`로 두고, `sha256sum <실행 ID>.pdf` 값을 Survey `host_audit_signed_sha256`에, 보고서의 실행 ID(예: `ha-20261031T220000Z`)를 `host_audit_signed_run_id`에 넣는다. 보관소 키는 운영자에게 주지 않는다(템플릿이 Environment `host_audit`의 보관 키로 올린다).
+- **준비(사람 작업, 1회)**: 그 폴더가 러너 컨테이너 안에서 보이도록 바인드 마운트하고 컨테이너 실행 사용자가 읽고 지울 수 있게 한다(폴더 `0700`·파일 `0600`). 마운트하지 않으면 등록이 '서명본 파일이 접수 폴더에 없음'으로 멈춘다.
+- 버킷은 3년 잠금이고 보관 키에 Delete가 없어 **잘못 올리면 지울 수 없다.** 그래서 해시 불일치·PDF 아님·심볼릭 링크·크기 상한 초과·정기 실행 기록 없음(실행 ID 오타·수시 실행)·Log Review Report를 보내지 않은 실행·이미 등록된 실행이면 아무것도 올리지 않고 멈춘다. 같은 실행에 다시 올리는 방법은 없다(지난 등록이 잘못됐으면 관리자가 판단한다).
+- 성공하면 접수 폴더의 파일을 지우고, 작업 로그 끝에 보관 위치·SHA-256·크기를 남긴다.
 
 **CIS 감사 파일럿 템플릿 삭제**
 

@@ -955,3 +955,38 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **수집 공백 연결**: 3부 수집 공백 호스트(수집 대상 호스트 중)는 1~4번 표에 `비고`로 붙고, 발견이 없어도 행으로 남는다. 공백이 있거나 수집 공백 조회가 실패하면 그 항목은 `일부 자동`·`확인 필요`이고 요약에 이름이 적힌다(로그가 없어서 이상 없음이 되지 않게). 5번은 요약에 적는다.
 - **개인정보처리시스템**: 판정 문맥 `settings['personal_info_systems']`(호스트 이름 목록)가 있으면 행마다 `예`·`아니오`와 요약의 해당 행 수를, 없으면 `미지정`을 적는다. 값의 원본은 로그 검토 작업 설정 문서(#560)이고, 그 문서를 읽는 쪽이 AUD-804에 이 키를 더한다.
 - **입력**: AUD-804 `_meta.settings.accounts`(`hosts`는 필터 `host_audit_log_review_account_hosts`가 이름만 남겨 만든다. 공개 키·접속 주소는 넘기지 않는다).
+
+### 18.3 서명본 등록과 전월 서명본 확인 (Ticket-9 #564)
+
+결재가 끝난 Log Review Report의 서명 스캔본(PDF)은 그 보고서를 만든 **정기 실행의 보관 경로** `signed/`에 둔다(Host Audit 버킷, 다른 보관 파일과 같은 GOVERNANCE 3년 잠금). 다음 달 정기 실행의 보고서는 3부 7번 `전월 보고서 서명본 등록`과 결재란 바로 위에 `전월 서명본: 있음(등록 일시 · SHA-256)` / `없음(…)` / `전월 정기 실행 없음` / `확인 실패`를 적는다.
+
+- **보관 형태**: `<YYYY-MM>/<run_id>/signed/host-audit-<run_id>-log-review-signed.pdf`(받은 바이트 그대로)와 `signed/registration.json`(등록 기록: `run_id`·`review_month`·`file_key`·`sha256`·`size`·`registered_at`(UTC)). 기록이 **등록 완료 표시**다: PDF가 올라간 뒤에만 쓰고, 다음 달 보고서는 이 기록만 읽는다(목록 조회 없음).
+- **등록 방식(#556 결론)**: Semaphore는 작업 실행 때 파일을 받지 못한다. 운영자가 러너의 접수 폴더(`host_audit_signed_intake_dir`)에 `<실행 ID>.pdf`를 두고, 템플릿 `Host Audit — Register Signed Log Review`([semaphore-setup.md](semaphore-setup.md))에 실행 ID와 `sha256sum` 값만 준다. 올리는 키는 이 역할이 이미 쓰는 Host Audit 보관 키이고 운영자에게 보관소 키를 따로 주지 않는다. 새 OpenBao 문서·정책은 없다.
+- **올리기 전 검증(전부 통과해야만 PUT)**: 잠금 버킷이고 키에 Delete가 없어 **잘못 올리면 지울 수 없다**(관리자 우회 권한으로만 지울 수 있다). 그래서 ① 입력 형식(실행 ID 규칙, 16진수 64자 해시, 접수 폴더 절대 경로, AUD-860) ② 파일(심볼릭 링크가 아닌 일반 파일, 0바이트 초과 `host_audit_signed_max_bytes` 이하, 머리 `%PDF-`, 입력 해시와 일치, AUD-861~863) ③ 버킷(`baseline/<run_id>.json` 포인터가 있음 = 보관을 마친 정기 실행이고 보관 월도 여기서 정함, 그 실행의 `mail_summary.json`에 Log Review Report 기록이 있음, `signed/registration.json`이 아직 없음, AUD-865~868)을 모두 확인한다. 실행 ID 오타·수시 실행·보고서를 보내지 않은 실행·이미 등록된 실행은 아무것도 올리지 않고 멈춘다. 조회가 404가 아닌 오류면(403·500·연결 불가) 등록 여부를 알 수 없으므로 멈춘다.
+- **올리는 순서**: PDF(AUD-869, `x-amz-content-sha256`에 검증한 해시를 실어 서버가 본문을 다시 대조) → 기록(AUD-871) → 둘 다 200일 때만 접수 파일 삭제(AUD-872). 잠금은 객체마다 헤더로 걸지 않고 버킷 기본 보존(§11.5)이 걸린다. 기록을 쓰지 못하고 끝난 등록은 같은 입력으로 다시 돌린다(기록이 없으므로 같은 키로 PDF를 다시 올리고, 이전 버전은 잠금으로 남는다).
+- **전월 서명본 확인(AUD-850~852)**: '전월 서명본'은 직전 정기 실행(Audit Baseline과 같은 고르기, `host_audit_baseline_pick`)의 `signed/`다. 보관 조회(AUD-503~504)가 이미 읽은 포인터를 쓰고 `signed/registration.json` 하나만 GET한다. 404면 `없음`(자동 판정 확인 필요), 형식이 맞는 기록이면 `있음`(이상 없음), 포인터가 없으면 `점검 불가(전월 정기 실행 없음)`, 포인터·기록 조회 실패나 기록 형식 오류는 `조회 실패`, 보관 비활성은 `점검 불가`. 직전 정기 실행이 이번 점검 월의 실행이 아니면(그 달 정기 실행이 보관을 마치지 못함) 서명본이 있어도 `확인 필요`와 그 사실을 적는다. 판정은 `filter_plugins/host_audit_log_review_signed.py`(`JUDGES`), 입력은 AUD-804 `settings.previous_signed_copy`.
+- **변수**: `host_audit_signed_run_id`·`host_audit_signed_sha256`(템플릿 Survey, 필수), `host_audit_signed_intake_dir`(env `HOST_AUDIT_SIGNED_INTAKE_DIR` 또는 `<host_audit_output_root>/_signed_intake`. `_`로 시작해 오래된 실행 디렉터리 정리 AUD-006의 이름 규칙에 걸리지 않는다), `host_audit_signed_max_bytes`(기본 20 MiB).
+- **운영자 준비(사람 작업, 이 저장소가 하지 않음)**: 접수 폴더가 **러너 컨테이너 안에서 보여야 한다.** 운영자가 SSH로 두는 러너 호스트의 폴더를 컨테이너의 `host_audit_signed_intake_dir` 경로에 바인드 마운트하고, 컨테이너 실행 사용자가 그 폴더의 파일을 읽고 지울 수 있어야 한다(폴더 `0700`·파일 `0600`, 소유자를 컨테이너 사용자와 맞춘다). 마운트가 없으면 등록은 `서명본 파일이 접수 폴더에 없음`으로 멈춘다(아무것도 올리지 않음).
+- **한계**: 잘못된(그러나 검증을 통과한) 서명본, 예를 들어 다른 달 보고서의 서명본을 올바른 해시로 올리면 지울 수 없다. 재등록(같은 실행에 새 서명본)은 이 템플릿이 막으며 이름 규칙은 정하지 않았다(필요하면 ADR로 정한다). 서명본 내용(서명이 실제로 있는지)은 확인하지 않는다.
+
+| Spec ID | 태스크 명칭 | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-850` | `Pick the previous scheduled run whose signed copy this report checks` | `ansible.builtin.set_fact` | 러너 | 보관 조회가 읽은 포인터에서 고르기만 함 |
+| `AUD-851` | `Get the signed copy record of the previous scheduled run` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET 하나, 실패는 상태 코드로 받음(`changed_when: false`, `no_log`) |
+| `AUD-852` | `Decide the previous signed copy state of this report` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_signed_lookup` |
+| `AUD-860` | `Validate the signed copy request (run ID and SHA-256 only)` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_signed_request`, 틀리면 읽기 전에 실패 |
+| `AUD-861` | `Inspect the signed copy in the intake folder` | `ansible.builtin.stat` | 러너 | 읽기 전용, `follow: false`, SHA-256 |
+| `AUD-862` | `Read the first bytes of the signed copy (head, read-only)` | `ansible.builtin.command` | 러너 | 머리 5바이트만 읽음, `changed_when: false` |
+| `AUD-863` | `Assert the signed copy is the PDF the operator named` | `ansible.builtin.assert` | 러너 | 필터 `host_audit_log_review_signed_file_problems`, 어긋나면 올리지 않음 |
+| `AUD-864` | `Assert the Host Audit storage key is available for the signed copy` | `ansible.builtin.assert` | 러너 | check 모드·보관 비활성·키 없음이면 중단 |
+| `AUD-865` | `Get the scheduled run pointer of the signed report` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET, `no_log` |
+| `AUD-866` | `Get the archived mail summary of the signed report` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET, `no_log` |
+| `AUD-867` | `Get the signed copy record of the run (must not exist yet)` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET, `no_log` |
+| `AUD-868` | `Assert the run takes this signed copy` | `ansible.builtin.assert` | 러너 | 필터 `host_audit_log_review_signed_target`, 어긋나면 올리지 않음 |
+| `AUD-869` | `Upload the signed copy to the run's signed/ (Object Lock bucket)` | `ansible.builtin.uri` | 러너 | 검증 통과 뒤 한 번, 기록이 없을 때만(이미 있으면 AUD-868이 막음) |
+| `AUD-870` | `Write the signed copy record on the runner` | `ansible.builtin.copy` | 러너 | 임시 디렉터리 `0600`, `always`에서 지움 |
+| `AUD-871` | `Upload the signed copy record (registration complete)` | `ansible.builtin.uri` | 러너 | PDF가 200일 때만 |
+| `AUD-872` | `Remove the registered signed copy from the intake folder` | `ansible.builtin.file` | 러너 | 둘 다 200일 때만 `state: absent` |
+| `AUD-873` | `Assert the signed copy and its record were kept` | `ansible.builtin.assert` | 러너 | 업로드 실패면 실행 실패 |
+
+`Check the signed copy of the previous scheduled run (#564)`(include)·`Locate the archived run of the signed report`·`Decide whether the run takes this signed copy`·`Make a runner-local directory for the signed copy record`·`Compute the SHA-256 of the signed copy record`·`Remove the runner-local signed copy record`는 보조 태스크라 SPEC-ID를 두지 않는다. 검증은 pytest다: 판정·검증 필터 단위와 결재란 문구 `tests/test_host_audit_log_review_signed.py`, 등록 템플릿과 다음 달 보고서 통합(가짜 S3, 검증 실패 시 PUT 0건) `tests/test_host_audit_log_review_sign.py`.
