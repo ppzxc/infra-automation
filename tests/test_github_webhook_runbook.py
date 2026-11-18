@@ -43,7 +43,7 @@ def test_scope_table_lists_collected_events_and_the_gaps_explicitly():
 
 def test_monthly_review_has_the_audit_log_export_step_with_the_unverified_free_plan_status():
     text = MONTHLY.read_text(encoding="utf-8")
-    step = re.search(r"^\d+\. \*\*GitHub 조직 감사 로그 내보내기.*?(?=^\d+\. \*\*|^## )", text, re.S | re.M)
+    step = re.search(r"^### C\. GitHub 조직 감사 로그 내보내기.*?(?=^### |^## )", text, re.S | re.M)
     assert step, "감사 로그 내보내기 단계가 없다"
     body = step.group(0)
     assert "미확인" in body and "Ticket-1" in body and "Ticket-8" in body
