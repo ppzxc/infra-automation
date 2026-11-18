@@ -197,9 +197,14 @@ def test_a_scheduled_run_posts_only_to_search_and_writes_the_report_with_the_col
 @needs_ansible
 def test_a_rejected_search_is_a_query_failure_in_the_report_not_a_failed_run(tmp_path, o2):
     server = o2(status=401)
-    out, state, _ = _run(tmp_path, server.url)
+    # 기준 목록 문서도 준다(#560): 읽히면 6·7·12번은 기준 목록이 아니라 조회 자체의 실패로 남는다.
+    fixture = {"inventory/services/openobserve": {"url": server.url + "/", "org": "acme"},
+               "secrets/services/openobserve/readonly": {"username": "reader", "password": "pw-7f3a9c"},
+               "inventory/config/log_review": {"normal_sources": [{"address": "203.0.113.0/24", "name": "fake office"}]}}
+    out, state, _ = _run(tmp_path, server.url, extra={"openbao_fixture": fixture})
     html = (out / "log_review" / FILE).read_text(encoding="utf-8")
     assert "조회 실패(호스트 로그 HTTP 401(인증·권한))" in html
+    assert "조회 실패(기준 목록)" not in html and html.count("조회 실패(HTTP 401(인증·권한))") == 3
     assert state["problem"] == ""  # 조회 실패는 실행 실패가 아니다(메일은 나간다)
 
 

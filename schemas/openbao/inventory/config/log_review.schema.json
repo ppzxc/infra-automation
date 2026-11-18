@@ -14,7 +14,7 @@
           "address": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
+            "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?(?!\\n)$",
             "description": "출발지 IP 또는 CIDR 대역"
           },
           "name": {
@@ -38,7 +38,7 @@
           "address": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$",
+            "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?(?!\\n)$",
             "description": "내부 주소 IP 또는 CIDR 대역"
           },
           "host": {
