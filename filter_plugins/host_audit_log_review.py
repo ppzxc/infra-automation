@@ -27,6 +27,7 @@ from host_audit_log_review_items import (  # noqa: E402
 )
 import host_audit_log_review_collection as _collection  # noqa: E402
 import host_audit_log_review_accounts as _accounts  # noqa: E402
+import host_audit_log_review_status as _status  # noqa: E402
 
 try:
     from ansible.errors import AnsibleFilterError
@@ -46,6 +47,7 @@ TITLE = 'Log Review Report (로그·보안정책 검토 결과)'
 _JUDGE_MODULES = (
     _collection,
     _accounts,
+    _status,
 )
 
 APPROVERS = ('점검자', '정보보호관리자', '정보보호책임자(CISO)')

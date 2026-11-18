@@ -139,6 +139,7 @@
               holidays: "{{ host_audit_log_review_holidays }}"
               failure_threshold: "{{ host_audit_log_review_failure_threshold | int }}"
               failure_window_minutes: "{{ host_audit_log_review_failure_window_minutes | int }}"
+            log_management: "{{ host_audit_log_review_log_management }}"
       ansible.builtin.set_fact:
         host_audit_log_review_model: "{{ _results | host_audit_log_review_model(_meta) }}"
       register: _host_audit_log_review_built
