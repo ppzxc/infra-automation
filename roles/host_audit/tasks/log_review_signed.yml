@@ -31,6 +31,8 @@
     ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
   register: _host_audit_signed_record_get
   changed_when: false
+  # 목록 밖 상태(400·401·429·502 등)도 값으로 받는다: 한 항목의 조회 실패가 정기 실행·메일을 멈추면 안 된다(AUD-852가 '조회 실패'로 남긴다).
+  failed_when: false
   no_log: true
   when:
     - _host_audit_storage_active | bool

@@ -33,7 +33,7 @@ class _S3:
     """경로 방식 S3 흉내: GET은 저장된 객체(없으면 404), PUT은 x-amz-content-sha256과 본문 해시가 같을 때만 200."""
 
     def __init__(self):
-        self.objects, self.requests = {}, []
+        self.objects, self.requests, self.errors = {}, [], {}
         s3 = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -50,6 +50,9 @@ class _S3:
             def do_GET(self):
                 key = self._key()
                 s3.requests.append(("GET", key))
+                if key in s3.errors:
+                    self._send(s3.errors[key], b"<Error/>")
+                    return
                 body = s3.objects.get(key)
                 self._send(200 if body is not None else 404, body or b"")
 
@@ -178,7 +181,15 @@ def test_a_verified_copy_is_kept_with_its_record_and_next_months_report_says_it_
 
 
 @needs_ansible
-@pytest.mark.parametrize("case", ["wrong_hash", "not_pdf", "symlink", "unknown_run", "no_report"])
+def test_an_unexpected_storage_answer_is_a_query_failure_in_the_report_not_a_failed_monthly_run(tmp_path, s3):
+    s3.errors[PREFIX + "signed/registration.json"] = 502
+    html = _next_month_report(tmp_path, s3)  # 실행은 성공해야 한다(메일이 나간다)
+    assert "조회 실패(서명본 기록 HTTP 502)" in html
+    assert "전월 서명본: 확인 실패" in html.split('<section class="approval', 1)[1]
+
+
+@needs_ansible
+@pytest.mark.parametrize("case",["wrong_hash", "not_pdf", "symlink", "unknown_run", "no_report"])
 def test_a_copy_that_fails_any_check_uploads_nothing_and_stays_in_the_intake(tmp_path, s3, case):
     sha = hashlib.sha256(PDF).hexdigest()
     run_id, needle = PREV_ID, ""
