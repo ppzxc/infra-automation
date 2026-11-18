@@ -239,6 +239,7 @@
 | `secrets/services/alert/notify`의 `url` | 통지 webhook URL(사내 알림 플랫폼 `text/plain` 경로). 없거나 `http(s)://`가 아니면 `O2C-002`가 요청 전에 실패한다. 값은 출력하지 않는다 |
 | `secrets/services/alert/notify`의 `token`·`auth_header` | 선택. `token`이 있을 때만 destination의 `webhook_headers`에 `auth_header`(기본 `X-NANOIT-ACCESS`, 형식 `^[A-Za-z0-9-]+$`, 어긋나면 `O2C-002`가 실패)로 붙는다. 값은 출력하지 않는다 |
 | `inventory/config/openobserve_config`의 `normal_sources` | (선택) root 로그인 정상 출발지 `[{address: <IP>, kind: semaphore\|office}]`. `kind`는 구분용이고 판정은 같다: 목록의 출발지는 P1(외부 출발지)에서 빠지고 P2(알고 있는 출발지)로 간다. 목록에 없어도 사설 대역(10/8·172.16/12·192.168/16·127/8·169.254/16)은 P2, 공인은 P1. 목록이 비면 공인은 모두 P1. 일반 계정 SSH 로그인(`infra-ssh-login-unregistered-source`)과 방화벽 관리자 로그인(`infra-fortigate-admin-login-new-source`) 알림도 이 목록을 읽는다(목록에 없으면 사설·공인 모두 미등록, 목록이 비면 전부 미등록, #330). SSH 실패 급증 알림에는 적용하지 않음. 주소는 IP 문자·종류를 검증하며 출력하지 않음 |
+| `inventory/config/openobserve_config`의 `fortigate_syslog_roster`, `fortigate_device_aliases`, `appsec_hosts` | (선택, 기본 비어 있음. 장비 이름·호스트가 들어가 공개 저장소에 둘 수 없어 문서에 둔다. 역할 변수 `o2c_fortigate_syslog_roster`·`o2c_fortigate_device_aliases`·`o2c_appsec_hosts`가 읽고, 같은 이름의 실행 변수가 우선한다. 값 검사는 `O2C-002`) | 방화벽 수신 중단 감시 장비, 장비 이름→관리번호 별칭표, 보안 제품 로그 공백 검사 호스트 |
 | `inventory/config/openobserve_config`의 `resource_exclusions`, `resource_thresholds` | (선택, 기본 `[]`. 관리번호가 들어가 공개 저장소에 둘 수 없어 문서에 둔다. 역할 변수 `o2c_resource_exclusions`·`o2c_resource_thresholds`가 된다) 리소스 알림의 호스트·마운트 예외 `[{host, mount?, metric?}]`와 임계값 덮어쓰기 `[{host, mount?, metric?, p2?, p1?}]` (`metric`: disk·inode·memory) |
 | `inventory/config/openobserve_config`의 `silent_host_exceptions` | (선택) Silent Host 계획 정지 예외 `[{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason?}]`. 만료일 필수(없거나 형식이 틀리면 요청 전에 실패), 만료일이 지난 항목은 무시 |
 | `inventory/assets/<ns>`의 `agents.otel.app_telemetry`, `inventory/assets/<ns>/endpoints`의 `ssh` Endpoint `address` | 수집 로스터 호스트마다 읽는다(앱 텔레메트리 무소식 로스터, 알림 행의 접속 주소). 문서가 없으면(404) 스위치 꺼짐·주소 없음. `secrets/assets/+/agents`는 읽지 않는다 |
@@ -273,7 +274,7 @@
 | `o2c_security_stop_services` | `[fail2ban, firewalld, rsyslog]` | 보안 서비스 중지 알림(`infra-security-service-stopped`)의 대상 unit. 소문자 이름이고 비어 있거나 `auditd`가 있으면 안 된다(`O2C-002`) |
 | `o2c_security_stop_grace_minutes`, `o2c_security_stop_window_minutes`, `o2c_security_stop_renotify_minutes`, `o2c_security_stop_frequency_minutes` | `20`, `1440`, `10`, `5` | 중지가 이어져야 하는 유예(분, SQL이 행마다 판정), 조회 구간(분, 통지 지속 시간의 상한 — 복구하지 않아도 이 구간이 지나면 멎는다), 재통지 간격(알림 `silence`), 평가 주기(분). 양의 정수이고 조회 > 유예 > 재통지 ≥ 평가 주기(`O2C-002`). 유예는 실로그 재부팅 최장 14분보다 길게 잡았다 |
 | `o2c_appsec_service_prefix` | `chakramax-` | 일일 보고가 읽는 `app_logs` `service_name` 접두어 |
-| `o2c_appsec_hosts` | `[]` | 로그 공백을 검사할 호스트 로스터. Environment로 주입하며 비면 공백 검사를 하지 않는다 |
+| `o2c_appsec_hosts` | `[]`(OpenBao `inventory/config/openobserve_config`의 `appsec_hosts`에서 읽는다) | 로그 공백을 검사할 호스트 로스터. 비면 공백 검사를 하지 않는다. 같은 이름의 실행 변수를 주면 그것이 우선한다 |
 | `o2c_appsec_silent_services` | `[cgw-gw, cgw-sf, maxsvr, chad]` | 하루 종일 로그를 남겨야 하는 서비스(접두어 뒤 이름) |
 | `o2c_appsec_restart_phrase` | `Chakra Max Server Start` | 관리 서버 기동 기록으로 보는 배너 문구 |
 | `o2c_appsec_exit_patterns` | `[segmentation, core dumped, killed, abnormal]` | 비정상 종료 흔적으로 보는 문구(소문자, 부분 일치) |

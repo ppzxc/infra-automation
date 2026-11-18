@@ -334,11 +334,11 @@ o2c_fortigate_detection_silence_minutes: 60
 # 기본값은 비어 있다(opt in). 장비가 전송을 시작하고 로그가 들어오는 것을 확인한 장비를 그때 더한다
 # (사무실이 먼저). 미리 넣으면 전송 설정 전까지 허위 알림이 계속 온다. 목록이 비어도 알림 규칙은 있지만 절대 행을 돌려주지 않는다.
 # 항목은 관리번호이거나, hostname을 관리번호로 바꾸지 못한 장비의 원래 이름(devname 그대로, 대소문자 무관)이다.
-o2c_fortigate_syslog_roster: []
+o2c_fortigate_syslog_roster: "{{ o2c_config.fortigate_syslog_roster | default([], true) }}"
 # 장비 이름 → 관리번호 별칭표. hostname을 관리번호로 못 바꾼 장비의 device_id를 채운다(키는 소문자 정규화한 devname, 도메인 제외).
-# 표에 없는 이름은 `ns`+숫자 추출을 쓴다. 공개 저장소라 실제 이름은 여기 쓰지 않고 Semaphore Environment/Extra variables로 넣는다.
+# 표에 없는 이름은 `ns`+숫자 추출을 쓴다. 공개 저장소라 실제 이름은 여기 쓰지 않고 OpenBao `inventory/config/openobserve_config`의 `fortigate_device_aliases`에 둔다.
 # 예: {example_branch_fw: ns0000}. 값이 바뀌면 다음 Config 실행에서 fortigate_semantics 함수가 갱신된다.
-o2c_fortigate_device_aliases: {}
+o2c_fortigate_device_aliases: "{{ o2c_config.fortigate_device_aliases | default({}, true) }}"
 # 방화벽은 로그가 계속 나오므로 기준 시간은 스위치(o2c_switch_silent_hours, 24시간)보다 짧다. 실측으로 가장 조용한 사무실 장비도 분당 약 100건, IDC 쌍은 분당 약 1,500건이 나온다(2026-10-28). TCP 연결이 점유·단절돼 장비가 로그를 쌓다 버리기 전에 알리려고 120분에서 30분으로 줄였다. 전송 로그를 정책별로 줄인 장비가 오탐을 내면 관찰 뒤 늘린다.
 o2c_fortigate_silent_minutes: 30
 # 장비 이름은 원문의 devname(소문자, 도메인 제외). 시각은 원문의 time=(장비 시계)에서 시를 읽고 못 읽으면 -1이다.
@@ -521,8 +521,8 @@ o2c_host_label_sql_for_host_column: "{{ 'host' | o2c_host_label(o2c_host_address
 # 보안 제품 로그 일일 보고(infra-appsec-daily-report): app_logs의 service_name이 <접두어><서비스>인 줄을 하루 1번 요약한다. 신호가 없는 날은 보내지 않는다.
 # 로그 줄에는 연도·시간대가 없고 레벨 표기가 일정하지 않아 즉시 알림이 아니라 대략적인 일일 보고로 둔다(실측: 평상시에도 WARN·연결 끊김 줄이 매일 쌓인다).
 o2c_appsec_service_prefix: "chakramax-"
-# 로그가 하루 동안 없으면 알리는 호스트 로스터. 저장소에는 호스트를 두지 않고 Semaphore Environment(Extra variables)로 준다. 비면 공백 검사를 하지 않는다.
-o2c_appsec_hosts: []
+# 로그가 하루 동안 없으면 알리는 호스트 로스터. 저장소에는 호스트를 두지 않고 OpenBao `inventory/config/openobserve_config`의 `appsec_hosts`에 둔다. 비면 공백 검사를 하지 않는다.
+o2c_appsec_hosts: "{{ o2c_config.appsec_hosts | default([], true) }}"
 # 하루 종일 로그를 남겨야 하는 서비스(접두어 뒤 이름). 하루에 한두 번만 쓰는 서비스는 넣지 않는다.
 o2c_appsec_silent_services: [cgw-gw, cgw-sf, maxsvr, chad]
 o2c_appsec_restart_phrase: "Chakra Max Server Start"
