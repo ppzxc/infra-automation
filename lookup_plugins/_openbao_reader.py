@@ -15,7 +15,8 @@
   같은 평문 토큰 경로는 없다(운영자 토큰은 scripts/ 쪽 도구만 쓴다). 주소는 `vault_addr`/`VAULT_ADDR`.
 * https는 인증서를 검증한다. 끄려면 변수 `vault_validate_certs: false`(또는 `VAULT_SKIP_VERIFY=true`), 사설 CA는
   `vault_cacert`/`VAULT_CACERT`(CA 파일 경로)로 준다.
-* 로그인은 프로세스 안에서만 캐시한다. Ansible은 호스트·태스크마다 프로세스를 나누므로 `@token`을 한 번 받아 `_vault_token`으로
+* 로그인은 프로세스 안에서만 캐시하고, 로그인한 지 TTL(30분)에서 여유(5분)를 뺀 시간이 지난 항목은 버리고 다시 로그인한다(장수 프로세스에서 만료 토큰을 쓰지 않는다).
+   Ansible은 호스트·태스크마다 프로세스를 나누므로 `@token`을 한 번 받아 `_vault_token`으로
   넘기지 않는 읽기는 그 호스트·태스크마다 로그인한다. 토큰 TTL은 30분이라 오래 쓸 토큰은 일찍 받아 두지 않는다(받아 둔 토큰이 만료돼도 아래처럼 한 번 복구한다).
 * 특수 용어 `@token`은 위 순서로 얻은 토큰만 돌려준다(플레이당 한 번 로그인해서 변수로 넘길 때 쓴다).
 * `openbao_fixture`(키 `<마운트>/<문서 경로>`, 값 문서)가 정의돼 있으면 네트워크 없이 그 안에서만 답한다(molecule용).
@@ -34,6 +35,7 @@ import json
 import os
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -48,10 +50,29 @@ NAMESPACE = "infra"
 MOUNTS = ("inventory", "secrets")
 DEFAULT_ADDR = "http://openbao:8200"
 TIMEOUT = 5
+LOGIN_TTL = 1800      # AppRole 로그인 토큰 TTL(30분)
+LOGIN_MARGIN = 300    # 캐시 토큰은 TTL에서 이 여유를 뺀 시간이 지나면 버리고 다시 로그인한다
 
-_LOGIN_CACHE: dict = {}
+_LOGIN_CACHE: dict = {}     # (주소, role, secret) -> (토큰, 로그인 시각)
+
 display = Display()
 _QUIET = False      # 호출자가 errors='ignore'·'warn'으로 실패를 직접 다루면(quiet=true) 표시 채널로 내지 않는다
+
+
+def _now():
+    return time.monotonic()
+
+
+def _cached_token(key):
+    """캐시한 로그인 토큰. 로그인한 지 TTL-여유가 지났으면 버리고 None(장수 프로세스에서 만료 토큰을 쓰지 않는다)."""
+    entry = _LOGIN_CACHE.get(key)
+    if entry is None:
+        return None
+    token, at = entry
+    if _now() - at >= LOGIN_TTL - LOGIN_MARGIN:
+        _LOGIN_CACHE.pop(key, None)
+        return None
+    return token
 
 
 class OpenBaoError(AnsibleError):
@@ -127,7 +148,7 @@ class Reader:
         if self._renewed:
             return self._renewed
         role, secret = self._approle()
-        cached = _LOGIN_CACHE.get((self.addr, role, secret)) if (role and secret) else None
+        cached = _cached_token((self.addr, role, secret)) if (role and secret) else None
         if cached:
             # 이 프로세스가 로그인해 둔 토큰은 플레이 첫머리에서 받은 `_vault_token`보다 항상 새롭다. 만료된 공유 토큰으로
             # 읽다가 403 → 재로그인을 읽기마다 되풀이하지 않게 캐시를 먼저 쓴다.
@@ -157,7 +178,7 @@ class Reader:
 
     def _login(self, role, secret):
         key = (self.addr, role, secret)
-        if key not in _LOGIN_CACHE:
+        if _cached_token(key) is None:
             body = json.dumps({"role_id": role, "secret_id": secret}).encode()
             req = urllib.request.Request(self.addr + "/v1/auth/approle/login", data=body, method="POST",
                                          headers={"X-Vault-Namespace": NAMESPACE, "Content-Type": "application/json"})
@@ -168,8 +189,8 @@ class Reader:
             tok = (data.get("auth") or {}).get("client_token")
             if not tok:
                 raise _fail("AppRole 로그인 응답에 토큰이 없습니다")
-            _LOGIN_CACHE[key] = tok
-        return _LOGIN_CACHE[key]
+            _LOGIN_CACHE[key] = (tok, _now())
+        return _LOGIN_CACHE[key][0]
 
     # --- 읽기 --------------------------------------------------------------
     def read(self, doc, required=True):

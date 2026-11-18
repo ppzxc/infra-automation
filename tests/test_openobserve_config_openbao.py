@@ -133,3 +133,14 @@ def test_the_o2_ca_file_extra_variable_still_wins_over_the_document(tmp_path):
     res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb), "-e", json.dumps(extra)], capture_output=True, text=True,
                          stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=120)
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_alert_actions_point_at_the_openbao_document_key_not_the_role_variable():
+    """알림 조치 문구는 운영자가 고칠 위치(OpenBao 문서 키)를 가리킨다. 역할 변수명(o2c_resource_exclusions)은 운영자가 못 고친다(최종 리뷰 6차 3번)."""
+    import re
+    text = (ROLE / "defaults" / "main.yml").read_text(encoding="utf-8")
+    actions = [ln for ln in text.splitlines() if ln.lstrip().startswith("action:") and "예외 등록" in ln]
+    assert len(actions) >= 6
+    for ln in actions:
+        assert "o2c_resource_exclusions" not in ln
+        assert re.search(r"inventory/config/openobserve_config의 resource_exclusions", ln), ln

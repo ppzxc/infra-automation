@@ -43,11 +43,15 @@
     state: directory
     mode: '0700'
 
+# 변경 비교(FGBK-014~017)와 알림 webhook 읽기·확인(FGBK-022·019)은 새 백업을 저장(FGBK-011)하기 *전에* 한다. 저장한 뒤에 webhook 읽기가 실패하면
+# 다음 실행의 직전 백업이 이미 바뀐 설정이라 알림이 영영 나가지 않는다. 지금은 실패하면 저장하지 않아 다음 실행이 같은 변경을 다시 본다.
 # 토큰·응답 멤버 계산은 한 곳(블록 vars)에서 한다. 블록 vars는 사용 시점에 계산되므로 앞 태스크의 register 결과를 그대로 쓰고 fact로 남지 않는다.
-- name: Query the device, derive the responding member and save the configuration (FGBK-006 to FGBK-011)
+- name: Query the device, derive the responding member and save the configuration (FGBK-006 to FGBK-011, FGBK-014 to FGBK-019, FGBK-022)
   vars:
     _fgbk_member_raw: "{{ (fortigate_backup_status.json.results.hostname | default('')) if fortigate_backup_member_source == 'hostname' else (fortigate_backup_status.json.serial | default('')) }}"
     _fgbk_member: "{{ _fgbk_member_raw | string | regex_replace('[^A-Za-z0-9-]', '-') | trim('-') }}"
+    _fgbk_prev_member: "{{ fortigate_backup_previous_name | fortigate_backup_member(fortigate_backup_file_prefix) }}"
+    _fgbk_member_changed: "{{ _fgbk_prev_member != fortigate_backup_member }}"
   block:
     - name: "[FGBK-006] Query the system status through the same connection to identify the responding member"
       ansible.builtin.uri:
@@ -107,21 +111,6 @@
           [FORTIGATE-RESPONSE] {{ inventory_hostname }}: 설정 응답이 비정상이다(HTTP 상태 {{ fortigate_backup_response.status | default('연결 실패') }},
           본문 길이 {{ (fortigate_backup_response.content | default('')) | length }}). 파일을 저장하지 않았다.
 
-    - name: "[FGBK-011] Save the configuration to the backup destination (0600)"
-      ansible.builtin.copy:
-        content: "{{ fortigate_backup_response.content }}"
-        dest: "{{ fortigate_backup_dir }}/{{ fortigate_backup_file_name }}"
-        mode: '0600'
-        force: false
-      no_log: true
-      diff: false
-
-# 보관 정리(FGBK-012·013)는 변경 감지·알림이 실패해도(예: FGBK-021) 건너뛰지 않는다. 알림 실패는 호스트 실패로 남는다.
-- name: Compare with the previous backup, alert on changes and always apply retention (FGBK-014 to FGBK-021, FGBK-012 to FGBK-013)
-  vars:
-    _fgbk_prev_member: "{{ fortigate_backup_previous_name | fortigate_backup_member(fortigate_backup_file_prefix) }}"
-    _fgbk_member_changed: "{{ _fgbk_prev_member != fortigate_backup_member }}"
-  block:
     - name: "[FGBK-014] Find the backup files of this target to locate the previous backup"
       ansible.builtin.find:
         paths: "{{ fortigate_backup_dir }}"
@@ -143,6 +132,7 @@
     - name: "[FGBK-017] Compare with the previous backup and keep only section and item names"
       ansible.builtin.set_fact:
         fortigate_backup_member_changed: "{{ _fgbk_member_changed }}"
+        fortigate_backup_previous_member: "{{ _fgbk_prev_member }}"
         fortigate_backup_changes: "{{ fortigate_backup_response.content | fortigate_config_changes(fortigate_backup_previous_content.content | b64decode, _fgbk_member_changed | bool) | list }}"
       no_log: true
       when: fortigate_backup_previous_name | length > 0
@@ -179,11 +169,23 @@
         - fortigate_backup_previous_name | length > 0
         - fortigate_backup_changes | length > 0
 
+    - name: "[FGBK-011] Save the configuration to the backup destination (0600)"
+      ansible.builtin.copy:
+        content: "{{ fortigate_backup_response.content }}"
+        dest: "{{ fortigate_backup_dir }}/{{ fortigate_backup_file_name }}"
+        mode: '0600'
+        force: false
+      no_log: true
+      diff: false
+
+# 보관 정리(FGBK-012·013)는 변경 감지·알림이 실패해도(예: FGBK-021) 건너뛰지 않는다. 알림 실패는 호스트 실패로 남는다.
+- name: Send the change alert and always apply retention (FGBK-020 to FGBK-021, FGBK-012 to FGBK-013)
+  block:
     - name: "[FGBK-020] Send the configuration change alert once"
       vars:
         _fgbk_items: "{{ fortigate_backup_changes[:fortigate_backup_alert_max_items | int] | map('regex_replace', '^', '  - ') | join('\n') }}"
         _fgbk_more: "{{ ('\n  - 외 ' ~ (fortigate_backup_changes | length - (fortigate_backup_alert_max_items | int)) ~ '건') if (fortigate_backup_changes | length > (fortigate_backup_alert_max_items | int)) else '' }}"
-        _fgbk_member_note: "{{ (' (응답 멤버가 ' ~ _fgbk_prev_member ~ '에서 ' ~ fortigate_backup_member ~ '로 바뀐 비교: 멤버 고유 설정은 제외)') if fortigate_backup_member_changed | bool else '' }}"
+        _fgbk_member_note: "{{ (' (응답 멤버가 ' ~ fortigate_backup_previous_member ~ '에서 ' ~ fortigate_backup_member ~ '로 바뀐 비교: 멤버 고유 설정은 제외)') if fortigate_backup_member_changed | bool else '' }}"
         _fgbk_text: |-
           🟠 [P2 경고] 포티게이트 설정 변경 감지
 
