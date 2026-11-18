@@ -116,6 +116,7 @@
             collection_targets:
               hosts: "{{ host_audit_log_review_collect_hosts }}"
               devices: "{{ host_audit_log_review_devices }}"
+            log_management: "{{ host_audit_log_review_log_management }}"
       ansible.builtin.set_fact:
         host_audit_log_review_model: "{{ _results | host_audit_log_review_model(_meta) }}"
       register: _host_audit_log_review_built
