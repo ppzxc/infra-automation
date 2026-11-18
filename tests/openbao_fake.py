@@ -226,6 +226,12 @@ class FakeOpenBao:
                 store[name] = (body or {}).get("policy", "")
                 return 204, {}
             return (200, {"data": {"name": name, "policy": store[name]}}) if name in store else (404, {"errors": []})
+        if path.startswith("sys/auth/") and path.endswith("/tune") and method == "POST":   # 인증 마운트 tune(max_lease_ttl 등)
+            name = path.split("/")[2]
+            if name not in self.auth_mounts:
+                return 404, {"errors": []}
+            self.auth_mounts[name].setdefault("config", {}).update(body or {})
+            return 204, {}
         if path.startswith("sys/mounts/") or path.startswith("sys/auth/"):
             table = self.mounts if path.startswith("sys/mounts/") else self.auth_mounts
             name = path.split("/", 2)[2]

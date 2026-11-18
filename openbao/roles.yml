@@ -22,6 +22,8 @@ auth_mounts:
   approle:
     type: approle
     description: Semaphore 작업 계열 로그인
+    # 인증 마운트의 max_lease_ttl 기본값(32일)이 role의 secret_id_ttl(180일)을 깎는다. 180일(4320h)보다 크게 올린다(낮추지 않는다).
+    max_lease_ttl: 4400h
 
 # 운영자 사용자(userpass)에 연결하는 정책. 사용자 이름과 bcrypt 해시는 OPENBAO_OPERATOR_PASSWORD_HASHES로 받는다.
 operator:

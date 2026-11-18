@@ -7,7 +7,7 @@
   plan    차이만 보고한다(쓰기 없음). 종료 코드 2면 차이 있음, 0이면 없음.
   apply   차이만 쓴다. 정책·AppRole 설정·인증 마운트·userpass 운영자 사용자·(없을 때만) 마운트.
           secret_id는 만들지 않는다(수동 response-wrapping 런북). 코드에 없는 객체는 지우지 않고 보고만 한다.
-          마운트는 없을 때만 만들고 삭제·tune하지 않는다.
+          KV 마운트는 없을 때만 만들고 삭제·tune하지 않는다. AppRole 인증 마운트의 max_lease_ttl만 올린다(낮추지 않는다).
 
 접속·입력은 환경변수다(저장소에 쓰지 않는다):
   VAULT_ADDR                          OpenBao 주소(필수). 네임스페이스는 roles.yml의 namespace(infra)다.
@@ -118,6 +118,14 @@ def _cidr(value):
         return value
 
 
+def _seconds(value):
+    """`4400h`·`30m`·`90s` 또는 초(정수)를 초로. 없거나 읽을 수 없으면 0."""
+    if isinstance(value, (int, float)):
+        return int(value)
+    m = re.fullmatch(r"(\d+)([smhd]?)", str(value or "").strip())
+    return int(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)] if m else 0
+
+
 def _norm(key, value):
     if key in ("secret_id_bound_cidrs", "token_bound_cidrs"):
         return sorted(_cidr(v) for v in (value or []))
@@ -140,9 +148,12 @@ def compute_plan(client, code, roles, hashes):
         if name + "/" not in mounts:
             changes.append(("mount", name, "create", None))
     auth = client.request("GET", "sys/auth").get("data") or {}
-    for name in code["auth_mounts"]:
+    for name, spec in code["auth_mounts"].items():
         if name + "/" not in auth:
             changes.append(("auth", name, "create", None))
+        elif "max_lease_ttl" in spec and _seconds(spec["max_lease_ttl"]) > _seconds(
+                (auth[name + "/"].get("config") or {}).get("max_lease_ttl")):    # 올리기만 한다(서버 값이 크면 차이가 아니다)
+            changes.append(("auth", name, "update max_lease_ttl", None))
     for name, text in code["policies"].items():
         have = _get(client, "sys/policies/acl/" + name)
         if have is None:
@@ -172,7 +183,7 @@ def compute_plan(client, code, roles, hashes):
 # ---- 쓰기 ---------------------------------------------------------------------------------------------------------
 
 def apply_changes(client, code, roles, hashes, changes, rotate_operators=False):
-    """계획의 차이만 쓴다. 삭제·tune·secret_id 발급은 하지 않는다. 쓴 (종류, 이름, 동작) 목록."""
+    """계획의 차이만 쓴다. 삭제·KV 마운트 변경·secret_id 발급은 하지 않는다. 쓴 (종류, 이름, 동작) 목록."""
     done = []
     for kind, name, action, _ in changes:
         if kind == "mount":
@@ -182,7 +193,14 @@ def apply_changes(client, code, roles, hashes, changes, rotate_operators=False):
             client.request("POST", "sys/mounts/" + name, body)
         elif kind == "auth":
             spec = code["auth_mounts"][name]
-            client.request("POST", "sys/auth/" + name, {"type": spec["type"], "description": spec.get("description", "")})
+            ttl = {"max_lease_ttl": spec["max_lease_ttl"]} if "max_lease_ttl" in spec else None
+            if action == "create":
+                body = {"type": spec["type"], "description": spec.get("description", "")}
+                if ttl:
+                    body["config"] = ttl
+                client.request("POST", "sys/auth/" + name, body)
+            else:   # 인증 마운트의 max_lease_ttl만 올린다(KV 마운트는 건드리지 않는다)
+                client.request("POST", "sys/auth/%s/tune" % name, ttl)
         elif kind == "policy":
             client.request("POST", "sys/policies/acl/" + name, {"policy": code["policies"][name]})
         elif kind == "approle":

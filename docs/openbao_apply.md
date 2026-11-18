@@ -28,7 +28,7 @@ python3 scripts/openbao_apply.py --code-dir <디렉터리> plan  # 선언 디렉
 
 - `plan`은 서버를 읽기만 한다. 정책 본문, AppRole 설정 키(`token_policies`·`secret_id_ttl`·`secret_id_num_uses`·`token_ttl`·`token_max_ttl`·`secret_id_bound_cidrs`·`token_bound_cidrs`), 마운트·인증 마운트 존재, 운영자 사용자 존재와 연결 정책을 코드와 비교한다. AppRole 차이는 다른 설정 키의 이름만 보인다.
 - `apply`는 그 차이만 쓴다. 두 번째 `apply`는 변경이 0이고, 이어서 `plan`하면 차이가 없다.
-- 마운트는 없을 때만 만들고 삭제하거나 tune하지 않는다. 마운트를 지우면 안의 데이터가 모두 사라진다.
+- KV 마운트는 없을 때만 만들고 삭제하거나 tune하지 않는다. 마운트를 지우면 안의 데이터가 모두 사라진다. 예외로 AppRole 인증 마운트의 `max_lease_ttl`은 `roles.yml` 값보다 낮으면 올린다(기본 32일이 role의 180일 `secret_id_ttl`을 깎기 때문이다). 서버 값이 더 크면 건드리지 않는다.
 - 코드에 없는 정책·AppRole은 지우지 않고 `코드에 없음(삭제하지 않는다)`으로 보고만 한다. 지우는 일은 사람이 `admin`으로 한다([런북 7절](runbooks/openbao-operations.md)). 같은 항목을 Periodic Check가 `not_in_code`로 알린다.
 - `secret_id`는 만들지 않는다. 수동 response-wrapping 런북으로 발급한다(4절).
 
