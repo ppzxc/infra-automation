@@ -100,6 +100,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_log_review_enabled` | `false` | 수시 실행에서도 Log Review Report를 만든다(§18). 정기 실행은 이 값과 무관하게 만든다 |
 | `host_audit_log_review_timeout` · `host_audit_log_review_validate_certs` | `120` · `true` | OpenObserve `_search` 한 번의 최대 시간(초)과 TLS 검증. 주소·조직은 `inventory/services/openobserve`, 계정은 `secrets/services/openobserve/readonly`이고 실행 변수로 덮어쓰지 않는다 |
 | `host_audit_log_review_collect_hosts` · `host_audit_log_review_devices` | 수집 로스터(`o2c_roster('collect')`) · `fortigate_firewalls` 그룹 + `host_audit_log_review_switch_syslog_devices`(`o2c_switch_syslog_roster`와 같은 목록) | 3부 수집 공백의 수집 대상(§18) |
+| `host_audit_log_review_business_hours` · `host_audit_log_review_holidays` · `host_audit_log_review_failure_threshold` · `host_audit_log_review_failure_window_minutes` | `{start: 8, end: 20}` · 연도별 공휴일(2026) · `5` · `10` | 1부 1~5번 판정 기준(§18.2). 업무시간은 평일 정시 구간(끝 미포함) KST, 공휴일은 `"YYYY": ["YYYY-MM-DD", ...]`이고 점검 달의 연도가 없으면 보고서가 '공휴일 목록 없음'으로 적는다 |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
 | `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |
@@ -928,3 +929,19 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `AUD-635` | `Assert the archived Log Review Report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 다르면 재발송 중단 |
 
 `Remove a leftover Log Review Report of an earlier attempt`·`Create the Log Review Report directory`·`Resolve the OpenObserve search target`·`Remove a Log Review Report that could not be completed`·`Summarize the Log Review Report of this run`과 재발송의 `Read the Log Review Report record of the archived summary`·`Compute the SHA-256 of the downloaded Log Review Report`·`Say that the Log Review Report is not resent without its recorded hash`는 위 태스크의 보조 태스크라 SPEC-ID를 두지 않는다. 보고서 단계는 Molecule 대상 밖이라 `[VERIFY-…]`가 없고 검증은 pytest다(ADR-0013): 모델 필터 단위 `tests/test_host_audit_log_review.py`, 공유 렌더링 `tests/test_host_audit_log_review_render.py`, 조회 경로·메일·보관·재발송 `tests/test_host_audit_log_review_tasks.py`·`tests/test_host_audit_xlsx_zip_report.py`.
+
+### 18.2 1부 계정·시간 항목 1~5번 (#559)
+
+판정은 `filter_plugins/host_audit_log_review_accounts.py`이고 테스트는 `tests/test_host_audit_log_review_accounts.py`다. 서버 sshd·sudo·su 기록(`security_logs`, `security_semantics` VRL 필드)과 auditd 계정 관리 기록만 본다(장비 관리자 로그인은 #562). 조회는 모두 OpenObserve에서 시(로그인 성공·sudo·su·계정 변경) 또는 분(로그인 실패) 단위로 집계해 받는다: 원시 이벤트를 받으면 자동화 로그인과 Ansible `become`만으로 조회 한도에 닿기 때문이다. 시각은 수신 시각 `_timestamp`의 KST다.
+
+| 번호 | 판정 | 상태 |
+|---|---|---|
+| 1 | SSH 로그인 성공 중 호스트별 허용 계정 밖 계정. 허용 계정은 provisioning 선언 사용자(`accounts`, `state: absent` 제외, `resolve_connection`의 관리 계정)·bootstrap 사용자(`_boot_summary.username`)·root이고, `agents_only` 호스트는 Asset Inventory 계정(보고서 모델 `asset_inventory`)과 root다. 목록을 알 수 없는 호스트(점검 대상 밖·수집 실패)는 '허용 계정 목록 없음'으로 행에 나온다. 존재하지 않는 계정 시도(`Invalid user` 줄, `event_outcome` 없음)는 요약에 별도 통계로만 적는다 | 자동 판정 |
+| 2 | 같은 계정·같은 호스트에서 `failure_window_minutes`분 안에 `failure_threshold`회 이상 실패(존재하지 않는 계정 시도 제외, 분 단위 집계라 구간 경계는 분 단위) | 자동 판정 |
+| 3 | 평일 업무시간 밖·주말·공휴일의 SSH 로그인 성공 | 자동 판정(그 해 공휴일 목록이 없으면 일부 자동) |
+| 4 | 업무시간 밖 sudo·su 성공과 auditd 계정 관리 기록(ADD_USER·USER_MGMT 등). Ansible `become`(명령에 `BECOME-SUCCESS-`)은 자동화 건수로 따로 세고, 자동화 건만 있는 행은 확인 필요로 세지 않는다 | 자동 판정(위와 같음) |
+| 5 | 계정별 접속일·호스트 목록. 휴직·휴가자 명단과의 대조는 점검자가 한다 | 사람 대조 |
+
+- **수집 공백 연결**: 3부 수집 공백 호스트(수집 대상 호스트 중)는 1~4번 표에 `비고`로 붙고, 발견이 없어도 행으로 남는다. 공백이 있거나 수집 공백 조회가 실패하면 그 항목은 `일부 자동`·`확인 필요`이고 요약에 이름이 적힌다(로그가 없어서 이상 없음이 되지 않게). 5번은 요약에 적는다.
+- **개인정보처리시스템**: 판정 문맥 `settings['personal_info_systems']`(호스트 이름 목록)가 있으면 행마다 `예`·`아니오`와 요약의 해당 행 수를, 없으면 `미지정`을 적는다. 값의 원본은 로그 검토 작업 설정 문서(#560)이고, 그 문서를 읽는 쪽이 AUD-804에 이 키를 더한다.
+- **입력**: AUD-804 `_meta.settings.accounts`(`hosts`는 필터 `host_audit_log_review_account_hosts`가 이름만 남겨 만든다. 공개 키·접속 주소는 넘기지 않는다).
