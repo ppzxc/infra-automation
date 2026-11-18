@@ -314,16 +314,22 @@
       ansible.builtin.include_tasks: kisa_alert_result.yml
 
     # AUD-025의 실패를 모아 맨 끝에서 실행을 실패로 끝낸다. 호스트 이름만 밝힌다(오류 메시지는 모듈 출력에 이미 있다).
+    # 이 assert가 실행을 끝내면 뒤의 AUD-807은 돌지 않으므로, Log Review Report 작성 실패가 함께 있으면 그 사유를 이 메시지에 붙인다.
     - name: Fail the run when a Remediation Plan xlsx could not be written
+      vars:
+        _log_review_problem: "{{ _host_audit_log_review_problem | default('') }}"
       ansible.builtin.assert:
         that: not (_host_audit_xlsx_problem.failed | bool)
-        fail_msg: "Remediation Plan xlsx 쓰기·묶기·이전 시도 파일 정리에 실패한 대상: {{ _host_audit_xlsx_problem.targets | join(', ') }} (실행 디렉터리는 남김)"
+        fail_msg: >-
+          Remediation Plan xlsx 쓰기·묶기·이전 시도 파일 정리에 실패한 대상: {{ _host_audit_xlsx_problem.targets | join(', ') }}{{
+          (' · Log Review Report 작성 실패 — ' ~ _log_review_problem) if _log_review_problem | length > 0 else '' }} (실행 디렉터리는 남김)
 
-    # 모델·렌더링 오류(필터 버그)만 여기서 실행을 실패로 끝낸다. 조회 실패는 보고서 안의 '조회 실패'라 실패가 아니다.
+    # 모델·렌더링·판정 오류(필터 버그)와 모델 이전 단계의 중단만 여기서 실행을 실패로 끝낸다. 조회 실패는 보고서 안의 '조회 실패'라
+    # 실패가 아니다. 실행 디렉터리는 xlsx 실패와 같이 남긴다(cleanup.yml).
     - name: "[AUD-807] Fail the run when the Log Review Report could not be drafted"
       ansible.builtin.assert:
         that: (_host_audit_log_review_problem | default('')) | length == 0
-        fail_msg: "Log Review Report 작성 실패 — {{ _host_audit_log_review_problem | default('') }} (위 로그 참고. 메일은 보고서 첨부 없이 또는 오류 항목을 '조회 실패'로 표시해 나갔다)"
+        fail_msg: "Log Review Report 작성 실패 — {{ _host_audit_log_review_problem | default('') }} (위 로그 참고. 메일은 보고서 첨부 없이 또는 오류 항목을 '조회 실패'로 표시해 나갔다. 실행 디렉터리는 남김)"
         quiet: true
   always:
     - name: Clean up this run's output directory by policy

@@ -730,7 +730,8 @@ AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·�
 |---|---|
 | Remediation Plan xlsx 쓰기·zip 묶기·이전 시도 xlsx 정리 실패(보관 여부·메일 결과와 무관) | 남긴다. 맨 끝 판정(`Fail the run when a Remediation Plan xlsx could not be written`)이 실패한 대상과 함께 실행을 실패로 끝내고 `AUD-632`가 이유(`xlsx 산출물 실패(<대상>)`)를 보여 준다(§17). 아래 행들보다 먼저 판정한다. |
 | xlsx 판정 사실(`_host_audit_xlsx_problem`)이 없음(그 앞 단계에서 멈춤) | 남긴다. 값이 없는 것을 '실패 없음'으로 읽지 않고, 이유는 '앞 단계에서 멈춰 xlsx 판정이 없음'이다. |
-| 보관 성공(xlsx 산출물 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
+| Log Review Report 작성 실패(`_host_audit_log_review_problem`이 비어 있지 않음: 모델·렌더링·판정 오류, 모델 이전 단계 중단. 조회 실패는 아님, 보관 여부·메일 결과와 무관) | 남긴다. xlsx 산출물 실패와 같다: 맨 끝 판정(`AUD-807`)이 실행을 실패로 끝내고 `AUD-632`가 이유(`Log Review Report 작성 실패(<사유>)`)를 보여 준다(§18). 판정 값이 없으면(그 앞 단계에서 멈춤) 남긴다. xlsx 행 다음, 아래 행들보다 먼저 판정한다. |
+| 보관 성공(xlsx 산출물·Log Review Report 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
 | 보관 꺼짐(`host_audit_storage_enabled=false`), 메일 발송 성공 | 지운다. |
 | 보관 꺼짐, 메일 실패 또는 미발송 | 남긴다. 러너 사본이 유일하다. |
 | 보관 실패(업로드 실패, 보관 입력 누락) | 남긴다. AUD-516 메시지가 이 디렉터리를 가리킨다. |
@@ -921,7 +922,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **판정 위치와 확장(후속 티켓)**: 판정은 모두 필터에 있다. 항목 정의는 `filter_plugins/host_audit_log_review_items.py`의 표(`PART1`·`PART2`·`PART3`)이고, 판정은 묶음별 모듈(`host_audit_log_review_<묶음>.py`)의 `JUDGES = {항목 key: judge(ctx)}`, 그 판정이 쓰는 조회는 같은 모듈의 `QUERIES = {항목 key: [{name, sql, size}]}`다. 모듈을 더하면 `host_audit_log_review.py`의 `_JUDGE_MODULES`에 한 줄을 더한다. 다른 모듈이 판정하는 항목에 몫을 덧붙이는 모듈은 `EXTENDS = {항목 key: 함수(ctx, 판정 결과)}`를 두고, 덧붙인 표는 결과의 `sections`로 항목 표 아래에 그려진다(§18.4 장비 관리자 로그인). 조회만 더하는 항목은 태스크(`tasks/log_review.yml`)와 템플릿(`templates/log_review.html.j2`)을 고치지 않는다. 판정에 새 기준 입력(호스트별 기록·허용 계정, 작업 설정 문서, 서명본 목록 등)이 필요하면 그 입력을 AUD-804의 `_meta.settings`에 티켓마다 키 하나로 더하고(문서를 새로 읽으면 AUD-802의 `host_audit_openbao_log_review_docs`와 `host_audit_openbao_required`에도), 판정 함수는 `ctx['settings'][<키>]`로 읽는다. 한 항목의 판정 오류는 그 항목만 `조회 실패(판정 오류 …)`로 표시하고 실행을 맨 끝에서 실패로 끝낸다(AUD-807).
 - **1부 6·7·12번(출발지, #560)**: 서버 sshd 로그인 성공(`security_logs`, `event_action='ssh_login'`·`event_outcome='success'`)만 본다(장비 관리자 로그인은 #562). 기준 목록은 OpenBao 작업 설정 문서 `inventory/config/log_review`(정상 출발지 `normal_sources`, 내부 주소 대응 `internal_addresses`, 개인정보처리시스템 표시 `personal_info_systems`)이고, 내부 주소 대응 중 인벤토리에서 계산되는 몫(인벤토리 변수 `ip`, 이번 실행에서 호스트가 보고한 주소. 여러 호스트에 걸친 주소는 뺀다)은 Host Audit이 계산한다(필터 `host_audit_log_review_managed_addresses`). 6번은 출발지가 다른 관리 호스트 주소인 로그인(출발·대상 호스트·계정별 묶음), 7번은 정상 출발지 목록 밖 로그인(관리 호스트 주소는 6번에서 보므로 뺀다), 12번은 같은 로그인 이름(호스트 무관)이 `host_audit_log_review_multi_source_window_seconds`(120초, 경계 포함) 안에 `host_audit_log_review_multi_source_min_sources`(2개) 이상의 출발지에서 성공한 구간이다(분 단위로 모은 처음·마지막 시각으로 잰다). 행에 개인정보처리시스템 표시(예·아니오, 문서에 목록이 없으면 미지정)가 붙고, 같은 목록을 AUD-804 `settings.personal_info_systems`로 1~5번(§18.2)에도 넘긴다. 기준 목록 문서가 없거나 읽지 못하거나 형식이 틀리면 세 항목은 `조회 실패(기준 목록)`이고 나머지 항목과 실행은 그대로다. 수집 공백 호스트가 있으면 세 항목은 `일부 자동`이고 그 호스트를 요약에 적는다. 판정 모듈 `filter_plugins/host_audit_log_review_sources.py`.
 - **조회**: OpenObserve `POST /api/<org>/_search` 하나뿐이다(AUD-803, 조회 이름별 반복, 결과는 `no_log`). 주소·조직은 `inventory/services/openobserve`, 계정은 조회 전용 용도의 `secrets/services/openobserve/readonly`(Host Audit 계열 정책 `openobserve-readonly`가 읽기만 허용)이고 admin 자격은 쓰지 않는다. **OpenObserve 오픈소스 빌드는 RBAC가 없어 서버가 조회 전용을 강제하지 못한다(#556).** 그래서 이 역할이 OpenObserve에 `_search` POST 외의 호출을 하지 않는다는 것을 `tests/test_host_audit_log_review_tasks.py`가 지킨다(계정이 유출되면 쓰기도 가능하다는 한계는 그대로다).
-- **조회 실패**: 문서를 읽지 못함·401/403·연결 불가·결과가 조회 한도에 닿음(잘렸을 수 있음)은 해당 항목의 `조회 실패(사유)`로 남고 메일은 그대로 나간다. 사유에는 상태 코드만 쓰고 주소·계정·응답 본문은 쓰지 않는다. 모델 생성·렌더링 자체가 실패하면 첨부를 빼고 메일을 보낸 뒤 맨 끝에서 실행을 실패로 끝낸다(AUD-807).
+- **조회 실패**: 문서를 읽지 못함·401/403·그 밖의 비200 상태(목록 밖 301·405·413·501 등 포함)·연결 불가·요청 전 실패(ca_file 누락 등)·결과가 조회 한도에 닿음(잘렸을 수 있음)은 해당 항목의 `조회 실패(사유)`로 남고 메일은 그대로 나간다(AUD-803은 `failed_when: false`, ADR-0015 6항). 사유에는 상태 코드만 쓰고 주소·계정·응답 본문은 쓰지 않는다. 모델 생성·렌더링 자체가 실패하거나 모델 이전 단계(AUD-801 기간 계산·관리 호스트 주소 계산·전월 서명본 확인)의 필터가 예외를 내면(`rescue`, 사유 `작성 중단: <태스크 이름>`) 첨부를 빼고 메일을 보낸 뒤 맨 끝에서 실행을 실패로 끝낸다(AUD-807). 실행 디렉터리는 남긴다(§14.1).
 - **메일·보관·재발송**: 해시는 AUD-806, 요약의 `log_review`(`file_name`·`sha256`·`size`·`archive`·`period`), 본문과 머리글 `X-Host-Audit-Log-Review-SHA256`. 보관은 output_dir 전체를 올리는 AUD-512~514가 함께 하고 보관 성공(AUD-614) 뒤에만 보낸다. 재발송은 요약이 기록한 경우만 `log_review/<실행 ID에서 정한 이름>`을 받아(AUD-634) 기록된 해시와 대조한다(AUD-635: 받지 못함·이름 불일치·해시 불일치면 하나도 보내지 않는다). 같은 실행 ID로 다시 돌린 실행은 쓰기 전에 `log_review/`를 지운다(이전 시도의 파일이 보관·첨부되지 않게).
 - **수신자**: 보고서에 출발지·계정명이 들어가므로 메일 수신자(`inventory/config/host_audit.mail_recipients`)는 점검자·결재자로 한정한다(ADR-0015 Consequences).
 
@@ -932,11 +933,11 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `AUD-800` | `Decide whether this run drafts the Log Review Report` | `ansible.builtin.set_fact` | 러너 | 정기 실행 또는 플래그, check 모드 제외 |
 | `AUD-801` | `Fix the Log Review period and its OpenObserve searches` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_period`·`host_audit_log_review_queries`(같은 시작 시각이면 같은 값) |
 | `AUD-802` | `Read the OpenObserve address and the read-only search account (host_audit_openbao_log_review_docs)` | `ansible.builtin.set_fact` | 러너 | 공용 읽기 지점 `lookup('openbao_doc')`, `errors='ignore'`, `no_log` |
-| `AUD-803` | `Search OpenObserve for the review period (POST _search only)` | `ansible.builtin.uri` | 러너 | 읽기 전용 조회, 실패는 상태 코드로 받음(`changed_when: false`, `no_log`) |
+| `AUD-803` | `Search OpenObserve for the review period (POST _search only)` | `ansible.builtin.uri` | 러너 | 읽기 전용 조회, 실패는 상태 코드로 받음(목록 밖 상태·요청 전 실패도 `failed_when: false`로 값, `changed_when: false`, `no_log`) |
 | `AUD-804` | `Build the Log Review Report model` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_results`·`host_audit_log_review_model` |
 | `AUD-805` | `Render the Log Review Report A4 HTML` | `ansible.builtin.template` | 러너 | `log_review/`(`0700`) 아래 `0600` |
 | `AUD-806` | `Compute the SHA-256 of the Log Review Report to attach` | `ansible.builtin.stat` | 러너 | 읽기 전용. 메일 요약(AUD-612)이 싣는 해시 |
-| `AUD-807` | `Fail the run when the Log Review Report could not be drafted` | `ansible.builtin.assert` | 러너 | 모델·렌더링·판정 오류만 실패(조회 실패는 실패 아님) |
+| `AUD-807` | `Fail the run when the Log Review Report could not be drafted` | `ansible.builtin.assert` | 러너 | 모델·렌더링·판정 오류와 모델 이전 단계 중단만 실패(조회 실패는 실패 아님). 실행 디렉터리는 남김(§14.1). xlsx 판정이 먼저 실행을 끝내면 그 메시지에 같은 사유를 붙인다 |
 | `AUD-634` | `Get the archived Log Review Report` | `ansible.builtin.uri` | 러너 | 요약이 기록한 실행만, 이름은 실행 ID에서 |
 | `AUD-635` | `Assert the archived Log Review Report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 다르면 재발송 중단 |
 

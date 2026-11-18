@@ -227,10 +227,10 @@ def _switch_failures(ctx, devices):
     if not res['ok']:
         return _section(SWITCH, FAILED, reason=res['error'])
     threshold, window = _failure_settings(ctx)
-    series = {}
+    wanted, series = set(devices), {}
     for h in res['hits']:
         device, t, n = _text(h.get('device')), _minute(h.get('minute')), _int(h.get('failures'))
-        if device in set(devices) and t is not None and n > 0:
+        if device in wanted and t is not None and n > 0:
             series.setdefault(device, []).append((t, n))
     rows = []
     for device, points in sorted(series.items()):
@@ -281,10 +281,10 @@ def _fortigate_off_hours_privilege(ctx, devices):
     if not res['ok']:
         return _section(FORTIGATE, FAILED, reason=res['error'])
     cal = _accounts._Calendar(ctx)
-    found = {}
+    wanted, found = set(devices), {}
     for h in res['hits']:
         device, at, n = _text(h.get('device')), _accounts._hour(h.get('hour')), _int(h.get('changes'))
-        if device not in set(devices) or not at or n <= 0:
+        if device not in wanted or not at or n <= 0:
             continue
         kind = cal.kind(*at)
         if not kind:
@@ -314,10 +314,10 @@ def _switch_off_hours_privilege(ctx, devices):
     if not res['ok']:
         return _section(SWITCH, FAILED, reason=res['error'])
     cal = _accounts._Calendar(ctx)
-    found = {}
+    wanted, found = set(devices), {}
     for h in res['hits']:
         device, at, n = _text(h.get('device')), _accounts._hour(h.get('hour')), _int(h.get('changes'))
-        if device not in set(devices) or not at or n <= 0:
+        if device not in wanted or not at or n <= 0:
             continue
         kind = cal.kind(*at)
         if kind:

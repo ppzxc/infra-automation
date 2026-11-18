@@ -81,6 +81,7 @@ def test_the_role_never_reads_the_openobserve_admin_or_ingest_accounts_and_its_m
 def test_the_search_task_hides_its_results_and_takes_failures_as_values():
     task = next(t for _, t in _all_tasks() if t.get("name", "").startswith("[AUD-803]"))
     assert task["no_log"] is True and task["changed_when"] is False
+    assert task["failed_when"] is False  # 목록 밖 상태·요청 전 실패도 '조회 실패'다(ADR-0015 6항)
     assert -1 in task["ansible.builtin.uri"]["status_code"] and 401 in task["ansible.builtin.uri"]["status_code"]
 
 
@@ -231,3 +232,59 @@ def test_an_on_demand_run_drafts_nothing_unless_the_flag_is_on_and_a_leftover_dr
     assert state["made"] in (False, "False") and server.requests == [] and not (out / "log_review").exists()
     out, state, _ = _run(tmp_path / "flag", server.url, run_kind="on_demand", extra={"host_audit_log_review_enabled": True})
     assert (out / "log_review" / FILE).is_file() and server.requests
+
+
+# ------------------------------------------------------------------ 조회·작성 실패가 메일을 막지 않는다(ADR-0015 6항)
+
+@needs_ansible
+@pytest.mark.parametrize("status", [301, 405, 413, 501])
+def test_a_search_answered_outside_the_expected_statuses_is_a_query_failure_not_a_stopped_run(tmp_path, o2, status):
+    server = o2(status=status)
+    out, state, _ = _run(tmp_path, server.url)
+    html = (out / "log_review" / FILE).read_text(encoding="utf-8")
+    assert "조회 실패(HTTP %d)" % status in html
+    assert state["made"] in (True, "True") and state["problem"] == ""
+
+
+@needs_ansible
+def test_a_search_that_cannot_even_be_sent_is_a_query_failure_not_a_stopped_run(tmp_path, o2):
+    """ca_file이 러너에 없어 uri 모듈이 요청 전에 실패해도 메일은 나가야 한다."""
+    server = o2()
+    fixture = {"inventory/services/openobserve": {"url": server.url.replace("http:", "https:") + "/", "org": "acme",
+                                                  "ca_file": str(tmp_path / "missing-ca.pem")},
+               "secrets/services/openobserve/readonly": {"username": "reader", "password": "pw-7f3a9c"}}
+    out, state, res = _run(tmp_path, server.url, extra={"openbao_fixture": fixture})
+    html = (out / "log_review" / FILE).read_text(encoding="utf-8")
+    assert "조회 실패(호스트 로그 " in html
+    assert state["problem"] == "" and "pw-7f3a9c" not in res.stdout + res.stderr
+
+
+def _broken_period(tmp):
+    return {"host_audit_run": {"run_id": RUN_ID, "run_kind": "scheduled", "started_at": "not-a-time",
+                               "output_dir": str(tmp / "run"), "timezone": "Asia/Seoul", "target_hosts": ""}}
+
+
+def _broken_records(tmp):
+    """호스트 기록의 identity가 객체가 아니다(필터 host_audit_log_review_managed_addresses가 예외를 낸다)."""
+    bad = tmp / "records" / "h1.json"
+    bad.parent.mkdir(parents=True)
+    bad.write_text(json.dumps({"inventory_hostname": "h1", "identity": "broken"}))
+    return {"_host_audit_record_files": {"files": [{"path": str(bad)}]}}
+
+
+def _broken_signed_history(tmp):
+    return {"host_audit_baseline_history": {"state": "ok", "pointers": "not-a-list"}}
+
+
+@needs_ansible
+@pytest.mark.parametrize("broken, step", [
+    (_broken_period, "[AUD-801]"),
+    (_broken_records, "Compute the managed host addresses"),
+    (_broken_signed_history, "[AUD-850]"),
+], ids=["period", "managed_addresses", "signed_copy"])
+def test_an_error_before_the_model_drops_the_attachment_and_is_reported_instead_of_stopping_the_run(tmp_path, o2, broken, step):
+    """파일 머리 주석의 약속: 모델 이전 단계의 필터 예외도 첨부만 빼고 메일은 나간다(실패 판정은 report.yml AUD-807)."""
+    server = o2()
+    out, state, _ = _run(tmp_path, server.url, extra=broken(tmp_path))
+    assert state["made"] in (False, "False") and not (out / "log_review").exists()
+    assert state["problem"].startswith("작성 중단") and step in state["problem"], state["problem"]

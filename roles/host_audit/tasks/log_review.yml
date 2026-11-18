@@ -14,7 +14,9 @@
 # - 항목별 쿼리와 판정은 모두 필터(filter_plugins/host_audit_log_review*.py)에 있다. 이 파일은 조회 결과를 그대로 넘기기만 한다:
 #   항목을 더해도 이 파일은 바뀌지 않는다.
 # - 조회 실패(자격증명·주소 문서를 못 읽음, 401/403, 연결 불가, 결과가 한도에 닿음)는 항목에 '조회 실패'로 남고 실행을 멈추지 않는다.
-#   모델·렌더링 자체의 오류(필터 버그)는 첨부를 빼고 메일을 보낸 뒤 맨 끝에서 실행을 실패로 끝낸다(report.yml).
+#   목록 밖 상태 코드나 요청 전 실패(ca_file 누락 등)도 같다(AUD-803 failed_when: false).
+#   모델·렌더링 자체의 오류(필터 버그)와 모델 이전 단계의 필터 예외(rescue)는 첨부를 빼고 메일을 보낸 뒤 맨 끝에서 실행을
+#   실패로 끝낸다(report.yml AUD-807). 실행 디렉터리는 남긴다(cleanup.yml).
 # 결과: _host_audit_log_review_made(파일을 썼는지), _host_audit_log_review_problem(빈 문자열 = 문제 없음).
 # ------------------------------------------------------------------------------
 - name: "[AUD-800] Decide whether this run drafts the Log Review Report"
@@ -124,6 +126,9 @@
         label: "{{ item.name }}"
       register: _host_audit_log_review_search
       changed_when: false
+      # 목록 밖 상태(301·405·413·501 등)나 요청 전 실패(ca_file 누락 등)도 값으로 받는다: 조회 실패는 메일을 막지 않는다
+      # (ADR-0015 6항, AUD-851과 같은 원칙). 비200은 host_audit_log_review_results가 그 조회의 '조회 실패'로 바꾼다.
+      failed_when: false
       no_log: true
       when: _host_audit_log_review_read_problem | length == 0
 
@@ -230,3 +235,17 @@
         _host_audit_log_review_problem: >-
           {{ ('모델 생성 실패' if not (_built | bool) else ('HTML 렌더링 실패' if not (_rendered | bool)
               else ('판정 오류: ' ~ (_judge_errors | join(', ')) if _judge_errors | length > 0 else ''))) }}
+
+  # 모델 이전 단계(AUD-801 기간 계산, 관리 호스트 주소 계산, 전월 서명본 확인 등)의 필터 예외도 AUD-804·805와 같이 다룬다:
+  # 첨부를 빼고 메일은 나가며, 맨 끝 AUD-807이 멈춘 단계 이름과 함께 실행을 실패로 끝낸다. 원인은 위 실패 태스크 출력에 있고
+  # 여기서는 태스크 이름만 남긴다(no_log 태스크의 결과를 옮기지 않는다).
+  rescue:
+    - name: Remove a Log Review Report left by the interrupted draft
+      ansible.builtin.file:
+        path: "{{ host_audit_run.output_dir }}/log_review"
+        state: absent
+
+    - name: Remember where the Log Review draft stopped
+      ansible.builtin.set_fact:
+        _host_audit_log_review_made: false
+        _host_audit_log_review_problem: "작성 중단: {{ ansible_failed_task.name | default('알 수 없는 단계') }}"

@@ -10,6 +10,7 @@
 #   보관 꺼짐 + 메일 실패·미발송                               → 남긴다(러너 사본이 유일)
 #   보관 실패(업로드 실패·보관 입력 누락 등)                    → 남긴다(AUD-516 메시지가 가리킴)
 #   Remediation Plan xlsx 쓰기·zip 묶기·이전 시도 xlsx 정리 실패(보관 여부와 무관) → 남긴다(맨 끝 판정 메시지가 가리킴)
+#   Log Review Report 작성 실패(AUD-807, 보관 여부와 무관)                      → 남긴다(맨 끝 판정 메시지가 가리킴)
 #   check 모드·경로 검증 실패                                  → 지우지 않는다
 # 판정에 쓰는 값이 없으면(앞 단계가 일찍 끝남) 남기는 쪽으로 기운다.
 # ------------------------------------------------------------------------------
@@ -38,16 +39,24 @@
          else 'xlsx 산출물 실패(' ~ (_xlsx.targets | join(', ')) ~ ')' ~ ('와 원본 보관 미완료 - 두 실패 메시지가'
                                  if not (_kept_in_bucket | bool) and (host_audit_storage_enabled | bool)
                                  else ' - 실패 메시지가') ~ ' 이 디렉터리를 가리킴' }}
+    # Log Review Report 작성 실패(AUD-807, 조회 실패는 아님)도 xlsx 산출물 실패와 같이 남긴다: 맨 끝 판정이 실행을 실패로 끝내고
+    # 원인 확인과 다시 만들기에 쓸 이번 실행의 입력(호스트 기록 등)이 러너에 있어야 한다. 판정 값이 없으면 남기는 쪽으로 기운다.
+    _log_review_known: "{{ _host_audit_log_review_problem is defined }}"
+    _log_review_problem: "{{ _host_audit_log_review_problem | default('') }}"
+    _log_review_why: >-
+      {{ '앞 단계에서 멈춰 Log Review 판정이 없음 - 실행 실패 메시지가 이 디렉터리를 가리킴' if not (_log_review_known | bool)
+         else 'Log Review Report 작성 실패(' ~ _log_review_problem ~ ') - 실패 메시지가 이 디렉터리를 가리킴' }}
     _mail_sent: >-
       {{ (_host_audit_mail_plan.send | default(false) | bool) and (host_audit_mail_outcome.sent | default(false) | bool) }}
     _reason: >-
       {{ {'remove': false, 'reason': 'check 모드'} if ansible_check_mode
          else ({'remove': false, 'reason': '경로 검증 실패(이번 실행 디렉터리가 출력 상위 경로 바로 아래가 아님)'} if not (_path_ok | bool)
          else ({'remove': false, 'reason': _xlsx_why} if _xlsx.failed | bool
+         else ({'remove': false, 'reason': _log_review_why} if (not (_log_review_known | bool)) or _log_review_problem | length > 0
          else ({'remove': true, 'reason': '원본이 버킷에 보관됨'} if _kept_in_bucket | bool
          else ({'remove': true, 'reason': '보관 꺼짐, 메일 발송 성공'} if (not (host_audit_storage_enabled | bool)) and (_mail_sent | bool)
          else ({'remove': false, 'reason': '보관 꺼짐, 메일 실패 또는 미발송 - 러너 사본이 유일함'} if not (host_audit_storage_enabled | bool)
-         else {'remove': false, 'reason': '원본 보관이 끝나지 않음 - 보관 실패 메시지가 이 디렉터리를 가리킴'}))))) }}
+         else {'remove': false, 'reason': '원본 보관이 끝나지 않음 - 보관 실패 메시지가 이 디렉터리를 가리킴'})))))) }}
   ansible.builtin.set_fact:
     _host_audit_cleanup:
       remove: "{{ _reason.remove }}"
