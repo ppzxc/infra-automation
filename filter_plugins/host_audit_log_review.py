@@ -26,6 +26,7 @@ from host_audit_log_review_items import (  # noqa: E402
     AUTO, FAILED, MANUAL, PART1, PART2, PART3, PARTIAL, STATUS_LABELS, UNAVAILABLE, result as _result,
 )
 import host_audit_log_review_collection as _collection  # noqa: E402
+import host_audit_log_review_status as _status  # noqa: E402
 import host_audit_log_review_signed as _signed  # noqa: E402
 
 try:
@@ -45,6 +46,7 @@ TITLE = 'Log Review Report (로그·보안정책 검토 결과)'
 # 판정 모듈. 후속 티켓은 모듈 하나를 만들고 여기에 한 줄을 더한다(같은 파일의 다른 줄을 건드리지 않는다).
 _JUDGE_MODULES = (
     _collection,
+    _status,
     _signed,
 )
 

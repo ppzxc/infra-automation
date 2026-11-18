@@ -202,6 +202,16 @@ host_audit_log_review_collect_hosts: "{{ groups | o2c_roster('collect') }}"
 host_audit_log_review_switch_syslog_devices: [ns0250, ns0347]
 host_audit_log_review_devices: "{{ (groups['fortigate_firewalls'] | default([])) + host_audit_log_review_switch_syslog_devices }}"
 
+# 3부 로그 관리 상태 나머지(#563)의 기준 설정. 시각 동기·백업 대상은 위 수집 로스터(백업 누락 알림과 같은 대상)다.
+# - retention_days: 로그 종류(스트림)별 OpenObserve 보존 일수의 저장소 선언(ADR-0006 스트림 표, 서버 전역 365일). 서버의 실제 값은
+#   POST _search로 읽을 수 없어 보고서가 '일부 자동'으로 두고 점검자가 화면에서 대조한다. 서버 값을 바꾸면 여기도 바꾼다.
+# - personal_info_system: 수집 대상에 개인정보처리시스템이 들어오면 true(접속기록 2년 기준, ADR-0006 security_logs 주석).
+# - time_sync_max_offset_ms: 시각 오차 기준(알림 infra-time-offset-exceeded와 같은 1초).
+host_audit_log_review_log_management:
+  retention_days: {security_logs: 365, system_logs: 365, backup_logs: 365}
+  personal_info_system: false
+  time_sync_max_offset_ms: 1000
+
 # --- Security Regression (Spec #364 / Ticket-10, #377) ---------------------------------------
 # 스펙 #364 기대치의 퇴행 점검. 호스트별 선언 host_audit_regression_expect가 비어 있으면 그 호스트는 대상이 아니다.
 # 선언 값(포트·경로·허용 출발지)은 공개 저장소에 두지 않고 Semaphore 인벤토리·Environment로 준다(docs/host_audit.md §16).
