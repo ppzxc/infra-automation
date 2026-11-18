@@ -15,6 +15,9 @@ AppRole 로그인(`POST /v1/auth/approle/login`)만 흉내 낸다.
 - 점검용 확장(#519): `set(..., updated_time=)`은 KV v2 `metadata/<경로>`로, 문서 목록은 `?list=true`로 준다.
   `raw(method, path, body, status)`는 `sys/`·`auth/` 같은 임의 경로의 응답을 등록한다(경로는 `/v1/` 뒤, 쿼리 제외,
   목록 조회는 method `LIST`).
+- 제어 경로 확장(openbao_apply.py): `sys/policies/acl`·`sys/mounts`·`sys/auth`·`auth/approle/role`·`auth/userpass/users`를
+  상태가 있는 저장소로 흉내 낸다(`policies`·`mounts`·`auth_mounts`·`roles`·`users` 딕셔너리). `raw`로 등록한 경로가 먼저다.
+  DELETE는 항상 405로 거절하고 요청만 기록한다(`deletes()`).
 """
 import fnmatch
 import json
@@ -72,6 +75,11 @@ class FakeOpenBao:
         self._docs: dict[tuple[str, str], tuple[int, dict]] = {}
         self._updated: dict[tuple[str, str], str] = {}
         self._raw: dict[tuple[str, str], tuple[int, dict]] = {}
+        self.policies: dict[str, str] = {}
+        self.mounts: dict[str, dict] = {}
+        self.auth_mounts: dict[str, dict] = {}
+        self.roles: dict[str, dict] = {}
+        self.users: dict[str, dict] = {}
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -98,6 +106,8 @@ class FakeOpenBao:
                 if outer.approle and self.path == "/v1/auth/approle/login":
                     return self._reply(200, {"auth": {"client_token": outer.token or APPROLE_TOKEN}})
                 key = ("POST", self.path.split("?")[0][len("/v1/"):].strip("/"))
+                if mount is None and key not in outer._raw and _is_control(key[1]):
+                    return self._control("POST", key[1], ns, body)
                 if mount is None and key in outer._raw:
                     if (outer.namespace is not None and ns != outer.namespace) or \
                             (outer.token is not None and self.headers.get("X-Vault-Token") != outer.token):
@@ -121,8 +131,26 @@ class FakeOpenBao:
                                                             "metadata": {"version": version + 1}}})
                 self._reply(200, {"data": {"version": version + 1}})
 
+            def _control(self, method, path, ns, body=None):
+                token = self.headers.get("X-Vault-Token")
+                want_token = outer.token or (APPROLE_TOKEN if outer.approle else None)
+                if (outer.namespace is not None and ns != outer.namespace) or \
+                        (want_token is not None and token != want_token):
+                    return self._reply(403, {"errors": ["permission denied"]})
+                self._reply(*outer._control_reply(method, path, body))
+
+            def do_DELETE(self):  # noqa: N802
+                outer.requests.append(Request("DELETE", self.path, None, None, self.headers.get("X-Vault-Token"),
+                                              self.headers.get("X-Vault-Namespace")))
+                self._reply(405, {"errors": ["delete is not allowed"]})
+
             def do_GET(self):  # noqa: N802
                 bare = self.path.split("?")[0]
+                ckey = ("LIST" if "list=true" in self.path else "GET", bare[len("/v1/"):].strip("/"))
+                if bare.startswith("/v1/") and ckey not in outer._raw and _is_control(ckey[1]):
+                    outer.requests.append(Request("GET", self.path, None, None, self.headers.get("X-Vault-Token"),
+                                                  self.headers.get("X-Vault-Namespace")))
+                    return self._control(ckey[0], ckey[1], self.headers.get("X-Vault-Namespace"))
                 kind, m_mount, m_doc = _meta(self.path)
                 key = ("LIST" if "list=true" in self.path else "GET", bare[len("/v1/"):].strip("/"))
                 if bare.startswith("/v1/") and (kind is not None or key in outer._raw):
@@ -180,6 +208,51 @@ class FakeOpenBao:
     def raw(self, method, path, body, status=200):
         self._raw[(method, path.strip("/"))] = (status, body)
         return self
+
+    def _control_reply(self, method, path, body):
+        """제어 경로의 상태 있는 응답. (상태 코드, 본문)."""
+        parts = path.split("/")
+        if path in ("sys/policies/acl", "auth/approle/role"):
+            names = sorted(self.policies if path.startswith("sys") else self.roles)
+            return (200, {"data": {"keys": names}}) if names else (404, {"errors": []})
+        if path in ("sys/mounts", "sys/auth"):
+            table = self.mounts if path == "sys/mounts" else self.auth_mounts
+            builtin = {"sys/": {}, "identity/": {}, "cubbyhole/": {}} if path == "sys/mounts" else {"token/": {}}
+            data = {**builtin, **{k + "/": dict(v) for k, v in table.items()}}
+            return 200, {"data": data}
+        if path.startswith("sys/policies/acl/"):
+            store, name = self.policies, path[len("sys/policies/acl/"):]
+            if method == "POST":
+                store[name] = (body or {}).get("policy", "")
+                return 204, {}
+            return (200, {"data": {"name": name, "policy": store[name]}}) if name in store else (404, {"errors": []})
+        if path.startswith("sys/mounts/") or path.startswith("sys/auth/"):
+            table = self.mounts if path.startswith("sys/mounts/") else self.auth_mounts
+            name = path.split("/", 2)[2]
+            if method == "POST":
+                if name in table:
+                    return 400, {"errors": ["path is already in use"]}
+                table[name] = dict(body or {})
+                return 204, {}
+            return (200, {"data": table[name]}) if name in table else (404, {"errors": []})
+        if path.startswith("auth/approle/role/") and len(parts) == 4:
+            name = parts[3]
+            if method == "POST":
+                self.roles[name] = dict(body or {})
+                return 204, {}
+            return (200, {"data": self.roles[name]}) if name in self.roles else (404, {"errors": []})
+        if path.startswith("auth/userpass/users/"):
+            name = parts[3]
+            if method == "POST":
+                self.users[name] = dict(body or {})
+                return 204, {}
+            if name not in self.users:
+                return 404, {"errors": []}
+            return 200, {"data": {k: v for k, v in self.users[name].items() if k != "password_hash"}}
+        return 404, {"errors": []}
+
+    def deletes(self):
+        return [r for r in self.requests if r.method == "DELETE"]
 
     def _meta_reply(self, kind, mount, doc):
         if kind == "list":
@@ -248,6 +321,12 @@ class FakeOpenBao:
 
     def __exit__(self, *exc):
         self.close()
+
+
+def _is_control(path):
+    """제어 경로(정책·마운트·인증·AppRole·userpass). AppRole 로그인과 KV는 아니다."""
+    return path.startswith(("sys/policies/acl", "sys/mounts", "sys/auth", "auth/userpass/users")) or \
+        (path.startswith("auth/approle/role") and not path.startswith("auth/approle/login"))
 
 
 def _split(path):

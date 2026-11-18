@@ -38,3 +38,5 @@ OpenBao의 거의 모든 데이터가 `infra/prod/host` 네임스페이스의 `h
 - 운영 부담이 늘어난다. 두 번째 도구(OpenTofu)와 state 저장소, 180일마다 하는 수동 `secret_id` 교체가 생기고, 교체를 놓치면 작업이 멈춘다. 만료 30일 전 알림이 이를 완화한다.
 - applier AppRole은 사실상 관리자 권한이다. secret_id를 짧게 두고 러너 CIDR로 묶어 노출을 줄인다.
 - 이 ADR로 ADR-0006 §2.2(OpenBao KV 스키마)·ADR-0009·ADR-0012의 OpenBao 위치 서술이 대체된다. 개정 줄은 해당 ADR 끝에 붙어 있다.
+
+- (개정, 2026-11-18) 결정 4의 도구 선택(#505: OpenTofu)을 `scripts/openbao_apply.py`(Python 적용 스크립트)로 대체한다. 이유는 운영 도구 추가 부담이다. state 저장소·암호화 passphrase 보관·provider 호환 관리를 없앴다. 선언 원본은 `openbao/roles.yml`과 `openbao/policies/*.hcl`, 적용 방법은 [openbao_apply.md](../openbao_apply.md)다. `secret_id` 수동 발급, applier의 사실상 관리자 권한과 가드레일 성격, Periodic Check의 코드 밖 객체 탐지(`not_in_code`)는 그대로다. 위 본문의 OpenTofu·state·Auto Approve 서술은 이 줄로 대체된다.

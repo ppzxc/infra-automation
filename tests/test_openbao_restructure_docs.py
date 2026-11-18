@@ -27,7 +27,7 @@ def test_adr_records_the_structure_decisions():
     text = _read(ADR)
     assert text.startswith("---\nstatus: accepted\n")
     for item in ("`infra`", "`inventory/`", "`secrets/`", "소유 대상", "작업 계열", "JSON Schema", "`index.yml`",
-                 "등록 도구", "OpenTofu", "AppRole", "`operator`", "`admin`"):
+                 "등록 도구", "openbao_apply.py", "AppRole", "`operator`", "`admin`"):
         assert item in text, item
 
 
@@ -58,12 +58,13 @@ def test_context_has_the_six_terms_and_six_service_examples():
 
 def test_operations_runbook_covers_the_recurring_procedures():
     text = _read(OPERATIONS)
-    for title in ("secret_id 발급과 교체", "만료 알림 대응", "OpenTofu 적용", "state passphrase 보관",
+    for title in ("secret_id 발급과 교체", "만료 알림 대응", "정책 적용", "운영자 비밀번호 해시 만들기",
                   "operator 사용자 추가", "비상용 admin 사용"):
         assert runbook_section(OPERATIONS, title, numbered=True).strip(), title
     assert "response-wrapping" in text and "180일" in text
-    assert "오프라인 사본" in runbook_section(OPERATIONS, "state passphrase 보관", numbered=True)
-    assert "Semaphore" in runbook_section(OPERATIONS, "state passphrase 보관", numbered=True)
+    apply_section = runbook_section(OPERATIONS, "정책 적용", numbered=True)
+    assert "plan" in apply_section and "apply" in apply_section and "변경이 없다" in apply_section
+    assert "bcrypt" in runbook_section(OPERATIONS, "운영자 비밀번호 해시 만들기", numbered=True)
     admin = runbook_section(OPERATIONS, "비상용 admin 사용", numbered=True)
     assert "참조" in admin and "Credential" in admin and "삭제" in admin
 
@@ -73,7 +74,7 @@ def test_cutover_runbook_has_the_nine_steps_in_order():
     numbered = re.findall(r"^(\d+)\. ", steps, re.M)
     assert numbered == [str(n) for n in range(1, 10)]
     by_number = dict(re.findall(r"^(\d+)\. (.+)$", steps, re.M))
-    for number, keyword in (("2", "admin"), ("3", "OpenTofu"), ("6", "동결 창을 시작"), ("7", "전환 PR"),
+    for number, keyword in (("2", "admin"), ("3", "openbao_apply.py"), ("6", "동결 창을 시작"), ("7", "전환 PR"),
                             ("8", "확인 목록"), ("9", "스케줄")):
         assert keyword in by_number[number], (number, keyword)
 
@@ -119,7 +120,7 @@ def test_integration_doc_follows_the_agreed_table_of_contents_and_copies_no_key_
     text = _read(INTEGRATION)
     heads = re.findall(r"^## (\d+)\. (.+)$", text, re.M)
     assert [h[1].split()[0] for h in heads] == ["개요", "골격", "저장", "접속", "인증과", "실패", "새", "관련"]
-    assert "schemas/openbao/index.yml" in text and "tofu/openbao/policies" in text
+    assert "schemas/openbao/index.yml" in text and "openbao/policies" in text
     for stale in ("VAULT_MOUNT", "OPENBAO_", "infra/prod/host", "Hybrid Fallback", "secret/data", "hosts/<ns>"):
         assert stale not in text, stale
     assert "required_keys" not in text and "| 키 |" not in text
