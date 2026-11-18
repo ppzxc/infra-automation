@@ -115,7 +115,7 @@ def test_items_8_to_11_and_14_to_19_say_every_month_that_application_records_are
 
 def test_items_without_a_judge_yet_are_unavailable_as_not_implemented_never_dropped_or_ok():
     m = _model()
-    others = [i for i in m["part1"] if i["no"] in (1, 2, 3, 4, 5, 13)]
+    others = [i for i in m["part1"] if i["no"] in (13,)]
     assert {i["status_label"] for i in others} == {"점검 불가(미구현)"}
     assert all(i["verdict"] == "" for i in others)
 

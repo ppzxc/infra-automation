@@ -125,7 +125,7 @@ def test_a_login_whose_source_is_a_managed_host_address_is_listed_under_item_6()
         ("h-gw", NAT_ONLY, "h-db", "bob", 1),
         ("h-relay", RELAY, "h-web", "alice", 3),
     ]
-    assert rows[0]["개인정보처리시스템"] == "예" and rows[1]["개인정보처리시스템"] == ""
+    assert rows[0]["개인정보처리시스템"] == "예" and rows[1]["개인정보처리시스템"] == "아니오"
     assert rows[1]["처음"] == "2026-10-15 10:00" and rows[1]["마지막"] == "2026-10-15 11:00"
 
 
@@ -153,11 +153,15 @@ def test_a_login_from_outside_the_normal_sources_is_listed_under_item_7_and_cidr
     assert item["status"] == "auto" and item["verdict"] == "확인 필요"
     rows = [dict(zip(item["columns"], r)) for r in item["rows"]]
     assert [(r["출발지"], r["대상 호스트"], r["계정"], r["건수"], r["개인정보처리시스템"]) for r in rows] == [
-        ("(출발지 없음)", "h-web", "frank", 1, ""),
+        ("(출발지 없음)", "h-web", "frank", 1, "아니오"),
         ("192.0.2.77", "h-db", "alice", 2, "예"),
-        ("198.51.100.20", "h-web", "bob", 1, ""),
-        ("2001:db8::7", "h-web", "erin", 1, ""),
+        ("198.51.100.20", "h-web", "bob", 1, "아니오"),
+        ("2001:db8::7", "h-web", "erin", 1, "아니오"),
     ]
+    # 개인정보처리시스템 목록이 문서에 없으면 1~5번과 같이 '미지정'이다
+    no_pii = {k: v for k, v in REFERENCE.items() if k != "personal_info_systems"}
+    item = _item(_model(logins=[_login("h-db", "alice", OUTSIDE)], reference=no_pii), UNAUTHORIZED)
+    assert [dict(zip(item["columns"], r))["개인정보처리시스템"] for r in item["rows"]] == ["미지정"]
 
 
 def test_logins_only_from_normal_sources_are_no_finding_under_item_7():

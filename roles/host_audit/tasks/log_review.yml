@@ -144,11 +144,38 @@
             collection_targets:
               hosts: "{{ host_audit_log_review_collect_hosts }}"
               devices: "{{ host_audit_log_review_devices }}"
+            # 1부 1~5번(#559). 허용 계정은 resolve_connection이 남긴 선언 계정·bootstrap 계정 이름(비밀 없는 요약)과
+            # Asset Inventory 계정(에이전트만 설치된 호스트)이다. 이름만 넘긴다(공개 키·접속 주소는 넘기지 않는다).
+            accounts:
+              hosts: >-
+                {%- set src = {} -%}
+                {%- for h in groups['host_audit_targets'] | default([]) -%}
+                {%- set hv = hostvars[h] -%}
+                {%- set _ = src.update({h: {
+                      'resolved': hv['_normalized_admin_users'] is defined,
+                      'accounts': hv['accounts'] | default([]) | select('mapping') | selectattr('name', 'defined')
+                                  | rejectattr('state', 'defined') | map(attribute='name') | list
+                                  + (hv['accounts'] | default([]) | select('mapping') | selectattr('name', 'defined')
+                                     | selectattr('state', 'defined') | rejectattr('state', 'equalto', 'absent')
+                                     | map(attribute='name') | list),
+                      'admin_users': hv['_normalized_admin_users'] | default([]),
+                      'bootstrap': (hv['_boot_summary'] | default({}, true)).username | default(''),
+                      'agents_only': h in (groups['agents_only'] | default([]))}}) -%}
+                {%- endfor -%}
+                {{ src | host_audit_log_review_account_hosts(host_audit_model.asset_inventory.hosts | default([])) }}
+              business_hours: "{{ host_audit_log_review_business_hours }}"
+              holidays: "{{ host_audit_log_review_holidays }}"
+              failure_threshold: "{{ host_audit_log_review_failure_threshold | int }}"
+              failure_window_minutes: "{{ host_audit_log_review_failure_window_minutes | int }}"
             sources:
               reference: "{{ _host_audit_log_review_reference | default(none) }}"
               managed_addresses: "{{ _host_audit_log_review_managed_addresses }}"
               window_seconds: "{{ host_audit_log_review_multi_source_window_seconds | int }}"
               min_sources: "{{ host_audit_log_review_multi_source_min_sources | int }}"
+            # 개인정보처리시스템 표시(1~5번 등이 행마다 찍는다). 원본은 위 기준 목록 문서이고, 문서나 키가 없으면 None(= 미지정).
+            personal_info_systems: >-
+              {{ (_host_audit_log_review_reference.personal_info_systems | default(none))
+                 if _host_audit_log_review_reference | default(none) is mapping else none }}
             log_management: "{{ host_audit_log_review_log_management }}"
       ansible.builtin.set_fact:
         host_audit_log_review_model: "{{ _results | host_audit_log_review_model(_meta) }}"

@@ -53,10 +53,17 @@ def _reference(settings):
     try:
         normal = [(_network(s['address']), str(s.get('name') or '')) for s in ref['normal_sources']]
         internal = [(_network(s['address']), str(s['host'])) for s in (ref.get('internal_addresses') or [])]
-        pii = set(str(h) for h in (ref.get('personal_info_systems') or []))
+        pii = None if ref.get('personal_info_systems') is None else set(str(h) for h in ref['personal_info_systems'])
     except (_BadReference, KeyError, TypeError, AttributeError):
         return None
     return {'normal': normal, 'internal': internal, 'pii': pii}
+
+
+def _pii_cell(ref, host):
+    """개인정보처리시스템 표시. 1~5번(host_audit_log_review_accounts)과 같은 문구: 예·아니오, 목록이 없으면 미지정."""
+    if ref['pii'] is None:
+        return '미지정'
+    return '예' if host in ref['pii'] else '아니오'
 
 
 def _ip(text):
@@ -151,7 +158,7 @@ def judge_relogin(ctx):
         origin = _managed_host(source, ctx, ref)
         if not origin or origin == target:
             continue
-        rows.append([origin, source, target, '예' if target in ref['pii'] else '', str(h.get('user_name') or ''),
+        rows.append([origin, source, target, _pii_cell(ref, target), str(h.get('user_name') or ''),
                      _int(h.get('logins')), _local(h.get('first_us'), ctx), _local(h.get('last_us'), ctx)])
     rows.sort(key=lambda x: (x[0], x[2], x[4], x[1]))
     summary = '관리 호스트에서 온 로그인 %d묶음(출발·대상 호스트·계정별)' % len(rows)
@@ -177,7 +184,7 @@ def judge_unauthorized(ctx):
         target, source = str(h.get('host_name') or ''), str(h.get('source_address') or '').strip()
         if _normal_name(source, ref)[0] or _managed_host(source, ctx, ref):
             continue
-        rows.append([source or '(출발지 없음)', target, '예' if target in ref['pii'] else '', str(h.get('user_name') or ''),
+        rows.append([source or '(출발지 없음)', target, _pii_cell(ref, target), str(h.get('user_name') or ''),
                      _int(h.get('logins')), _local(h.get('first_us'), ctx), _local(h.get('last_us'), ctx)])
     rows.sort(key=lambda x: (x[0], x[1], x[3]))
     summary = '정상 출발지 목록 밖 로그인 %d묶음(출발지·대상 호스트·계정별)' % len(rows)
