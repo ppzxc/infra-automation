@@ -55,7 +55,7 @@ body="$(printf '%s\n' \
 {
   printf 'url = "%s"\n' "$O2_WEBHOOK_URL"
   printf 'header = "Content-Type: text/plain; charset=utf-8"\n'
-  [ -n "${O2_WEBHOOK_TOKEN:-}" ] && printf 'header = "%s: %s"\n' "${O2_WEBHOOK_AUTH_HEADER:-Authorization}" "$O2_WEBHOOK_TOKEN"
+  [ -n "${O2_WEBHOOK_TOKEN:-}" ] && printf 'header = "%s: %s"\n' "${O2_WEBHOOK_AUTH_HEADER:-X-NANOIT-ACCESS}" "$O2_WEBHOOK_TOKEN"
 } | curl -fsS -o /dev/null --max-time 15 -K - --data-binary "$body" >/dev/null 2>&1
 rc=$?
 if [ "$rc" -ne 0 ]; then

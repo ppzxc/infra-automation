@@ -277,6 +277,20 @@ def test_the_legacy_json_destination_and_template_are_neither_defined_nor_delete
 
 
 
+@pytest.mark.parametrize("extra, header", [({"token": "WEBHOOK-TOKEN-abc"}, "X-NANOIT-ACCESS"),
+                                           ({"token": "WEBHOOK-TOKEN-abc", "auth_header": "X-Alert-Auth"}, "X-Alert-Auth")])
+def test_destination_carries_the_webhook_token_only_under_the_default_or_given_header_and_never_prints_it(o2, extra, header):
+    res = _apply(o2, "-vvv", docs={NOTIFY_DOC: {**NOTIFY, **extra}})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert o2.store["destination"]["infra-automation-plain"]["headers"] == {"Content-Type": PLAIN_CT, header: "WEBHOOK-TOKEN-abc"}
+    assert "WEBHOOK-TOKEN-abc" not in res.stdout + res.stderr
+
+
+def test_a_malformed_webhook_auth_header_name_fails_before_any_request(o2):
+    res = _apply(o2, docs={NOTIFY_DOC: {**NOTIFY, "token": "t", "auth_header": "Bad Header"}})
+    assert res.returncode != 0 and o2.reads == [] and o2.writes == []
+
+
 def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions(o2):
     assert _apply(o2).returncode == 0
     fn = o2.store["function"]["security_semantics"]
@@ -287,7 +301,7 @@ def test_function_pipeline_destination_and_alert_payloads_follow_the_definitions
     assert func_node["name"] == "security_semantics" and func_node["after_flatten"] is True
     dest = o2.store["destination"]["infra-automation-plain"]
     assert dest["url"] == WEBHOOK_URL and dest["type"] == "http"
-    assert dest["headers"] == {"Content-Type": PLAIN_CT}   # 인증 헤더·토큰은 없다(URL 자체가 권한, alert/notify는 url 하나)
+    assert dest["headers"] == {"Content-Type": PLAIN_CT}   # alert/notify에 token이 없으면 인증 헤더도 없다
     assert dest["template"] == "infra-automation-plain"
     by = o2.store["alert"]
     assert all(a["destinations"] == ["infra-automation-plain"] for a in by.values())

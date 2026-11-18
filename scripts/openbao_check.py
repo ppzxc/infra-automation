@@ -335,10 +335,23 @@ def build_alert(violations):
     return "OpenBao Periodic Check 실패 %d건\n%s\n" % (len(violations), "\n".join(shown))
 
 
-def send_alert(url, text):
-    req = urllib.request.Request(url, data=text.encode("utf-8"), method="POST",
-                                 headers={"Content-Type": "text/plain; charset=utf-8"})
-    _bao_http.urlopen_following(req, timeout=TIMEOUT).close()  # 토큰 없는 알림 POST: 리다이렉트를 따라도 새는 비밀이 없다
+DEFAULT_ALERT_AUTH_HEADER = "X-NANOIT-ACCESS"
+ALERT_HEADER_NAME = re.compile(r"^[A-Za-z0-9-]+$")
+
+
+def send_alert(url, text, token=None, auth_header=None):
+    """알림 POST. token이 있을 때만 auth_header(기본 X-NANOIT-ACCESS)로 붙인다.
+
+    토큰을 싣는 요청은 리다이렉트를 따르지 않는다(헤더가 다른 호스트로 새지 않게). 토큰이 없는 요청은 새는 비밀이 없어 따른다."""
+    headers = {"Content-Type": "text/plain; charset=utf-8"}
+    if token:
+        name = auth_header or DEFAULT_ALERT_AUTH_HEADER
+        if not ALERT_HEADER_NAME.match(name):
+            raise ValueError("auth_header")
+        headers[name] = token
+    req = urllib.request.Request(url, data=text.encode("utf-8"), method="POST", headers=headers)
+    opener = _bao_http.urlopen if token else _bao_http.urlopen_following
+    opener(req, timeout=TIMEOUT).close()
 
 
 # ---- 진입점 -------------------------------------------------------------------------------------------------------
@@ -428,11 +441,14 @@ def _inventory_checks(client, store, listed, unread, now, warnings):
 
 
 def _notify(store, failures):
-    url = (store.get("secrets/services/alert/notify") or {}).get("url")
+    doc = store.get("secrets/services/alert/notify") or {}
+    url = doc.get("url")
     if not isinstance(url, str):
         print("알림 전송 불가: alert/notify 문서를 읽지 못했다", file=sys.stderr)
         return
     try:
-        send_alert(url, build_alert(failures))
+        token, header = doc.get("token"), doc.get("auth_header")
+        send_alert(url, build_alert(failures), token if isinstance(token, str) else None,
+                   header if isinstance(header, str) else None)
     except (urllib.error.URLError, OSError, ValueError) as exc:  # 예외 메시지에 URL이 들어갈 수 있어 종류만 낸다
         print("알림 전송 실패: %s" % type(exc).__name__, file=sys.stderr)

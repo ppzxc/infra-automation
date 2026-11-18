@@ -5,8 +5,8 @@
 # 정기 실행에서 지난 정기 점검(Audit Baseline)에 취약이 아니던 KISA 항목이 이번에 취약이면, 악화된 항목 목록을 사내 알림
 # webhook(text/plain, 본문 5000자 한도)으로 한 번 보낸다. 판단과 본문은 필터 host_audit_kisa_alert가 한다(항목 단위 비교,
 # 지난 결과가 없는 호스트는 제외). 수시 실행·check 모드·host_audit_kisa_alert_enabled=false는 보내지 않는다.
-# webhook 주소는 storage_credentials.yml(AUD-502)이 secrets/services/alert/notify에서 해석한 _host_audit_alert_target(url만)이고
-# 모든 관련 태스크가 no_log다. URL 자체가 권한이라 인증 헤더를 따로 싣지 않는다.
+# webhook 주소는 storage_credentials.yml(AUD-502)이 secrets/services/alert/notify에서 해석한 _host_audit_alert_target(url과 선택 token·auth_header)이고
+# 모든 관련 태스크가 no_log다. token이 있을 때만 인증 헤더를 싣는다.
 # 이 파일은 실행을 실패로 끝내지 않는다. 전달 실패 판정은 kisa_alert_result.yml(AUD-642)이 다른 판정 뒤에 한다.
 # ------------------------------------------------------------------------------
 - name: "[AUD-640] Decide whether this run notifies KISA worsening"
@@ -21,8 +21,11 @@
   ansible.builtin.uri:
     url: "{{ _host_audit_alert_target.url }}"
     method: POST
-    headers:
-      Content-Type: "text/plain; charset=utf-8"
+    # token이 있을 때만 auth_header(기본 X-NANOIT-ACCESS)로 붙인다. 이 태스크는 no_log다.
+    headers: >-
+      {{ {'Content-Type': 'text/plain; charset=utf-8'}
+         | combine({(_host_audit_alert_target.auth_header | default('X-NANOIT-ACCESS', true)): _host_audit_alert_target.token}
+                   if (_host_audit_alert_target.token | default('', true)) | length > 0 else {}) }}
     body: "{{ _host_audit_kisa_alert_plan.text }}"
     body_format: raw
     status_code: [-1, 200, 201, 202, 204, 301, 302, 400, 401, 403, 404, 500, 502, 503]
@@ -35,3 +38,4 @@
   when:
     - _host_audit_kisa_alert_plan.send | bool
     - (_host_audit_alert_target | default({})).url | default('') is match('^https?://')
+    - (_host_audit_alert_target.auth_header | default('X-NANOIT-ACCESS', true)) is match('^[A-Za-z0-9-]+$')

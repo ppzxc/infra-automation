@@ -1,7 +1,7 @@
 """OpenBao·RustFS HTTP 호출의 공용 보호 (최종 리뷰 5차 3·8번).
 
 `urllib.request.urlopen`은 리다이렉트를 따라가며 `X-Vault-Token`·`Authorization` 헤더와 AppRole 로그인 본문을 다른 호스트로 다시 보낼 수
-있다. 이 모듈의 `urlopen`은 리다이렉트를 따르지 않는다(3xx는 HTTPError로 올라온다). 토큰 없는 알림 POST만 `urlopen_following`을 쓴다. 공용 읽기 지점(`_openbao_reader.py`)과 운영자
+있다. 이 모듈의 `urlopen`은 리다이렉트를 따르지 않는다(3xx는 HTTPError로 올라온다). 토큰 없는 알림 POST만 `urlopen_following`을 쓴다(알림에 인증 토큰이 있으면 `urlopen`). 공용 읽기 지점(`_openbao_reader.py`)과 운영자
 스크립트(`scripts/openbao_check.py`·`openbao_put.py`·`openbao_migrate.py`·`collect-rustfs-policy.py`)가 이 한 곳을 쓴다.
 
 파일 이름이 `_`로 시작해 Ansible이 플러그인으로 읽지 않는다. 스크립트는 `lookup_plugins/`를 sys.path에 넣어 가져온다.

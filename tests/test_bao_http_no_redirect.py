@@ -36,7 +36,7 @@ def redirect_pair():
             pass
 
         def _rec(self):
-            seen.append({"path": self.path, "token": self.headers.get("X-Vault-Token"),
+            seen.append({"path": self.path, "token": self.headers.get("X-Vault-Token"), "headers": dict(self.headers.items()),
                          "body": self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()})
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -120,3 +120,38 @@ def test_the_alert_post_has_no_token_so_it_follows_a_redirect_to_the_webhook(red
     with pytest.raises(urllib.error.HTTPError):       # 같은 서버로 OpenBao 호출용 열기는 여전히 따르지 않는다
         _bao_http.urlopen(urllib.request.Request(a.url + "/x", method="POST", data=b"{}"), timeout=5)
     assert len(seen) == 1
+
+
+def test_the_alert_post_with_a_token_does_not_follow_a_redirect_so_the_header_stays_home(redirect_pair):
+    """알림 인증 토큰이 있으면 리다이렉트를 따르지 않는다: 다른 호스트로 헤더가 새지 않는다(#503 보완)."""
+    a, seen = redirect_pair
+    import openbao_check
+    with pytest.raises(urllib.error.HTTPError):
+        openbao_check.send_alert(a.url + "/hook", "x\n", token="ALERT-TOKEN-1")
+    assert seen == []
+
+
+def test_the_alert_post_attaches_the_token_under_the_default_or_given_header_name():
+    import openbao_check
+    got = []
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            got.append({k.lower(): v for k, v in self.headers.items()})
+            self.send_response(200)
+            self.end_headers()
+
+    srv = _Server(H)
+    try:
+        openbao_check.send_alert(srv.url + "/h", "x\n", token="T1")
+        openbao_check.send_alert(srv.url + "/h", "x\n", token="T2", auth_header="X-Custom-Auth")
+        openbao_check.send_alert(srv.url + "/h", "x\n")
+    finally:
+        srv.close()
+    assert got[0]["x-nanoit-access"] == "T1" and "x-custom-auth" not in got[0]
+    assert got[1]["x-custom-auth"] == "T2" and "x-nanoit-access" not in got[1]
+    assert "x-nanoit-access" not in got[2] and "x-custom-auth" not in got[2]

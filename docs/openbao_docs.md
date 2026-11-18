@@ -103,7 +103,7 @@ Semaphore API 읽기는 Service `semaphore`를 쓴다: 주소 `inventory/service
 ### 종료 코드와 알림
 
 - 종료 코드: 0 정상, 1 실패(템플릿이 실패로 끝난다), 2 설정 오류.
-- 실패하면 `secrets/services/alert/notify` URL로 `text/plain` 요약(위 세 칸 줄, 최대 50줄)을 보낸다. 정상이면 보내지 않는다.
+- 실패하면 `secrets/services/alert/notify` URL로 `text/plain` 요약(위 세 칸 줄, 최대 50줄)을 보낸다. 문서에 `token`이 있으면 `auth_header`(기본 `X-NANOIT-ACCESS`) 헤더로 붙이고, 이때는 헤더가 다른 호스트로 새지 않도록 리다이렉트를 따르지 않는다. 정상이면 보내지 않는다.
 
 ### 실패 대응
 

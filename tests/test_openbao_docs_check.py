@@ -41,6 +41,7 @@ class Recorder:
         self.hosts = hosts
         self.auth = []
         self.alerts = []
+        self.alert_headers = []
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -72,6 +73,7 @@ class Recorder:
             def do_POST(self):  # noqa: N802
                 n = int(self.headers.get("Content-Length", 0))
                 outer.alerts.append((self.path, self.headers.get("Content-Type"), self.rfile.read(n).decode()))
+                outer.alert_headers.append({k.lower(): v for k, v in self.headers.items()})
                 self._json(200, {})
 
         self.server = HTTPServer(("127.0.0.1", 0), H)
@@ -153,6 +155,29 @@ def test_schema_violation_fails_and_alert_names_doc_and_rule_without_values(env)
     for text in (body, r.stdout, r.stderr):
         assert SECRET_LIKE not in text
     assert rec.alerts[0][0] == "/notify-hook" and rec.alerts[0][1].startswith("text/plain")
+
+
+ALERT_TOKEN = "ALERT-TOKEN-FAKE-77"
+
+
+@pytest.mark.parametrize("extra, header", [({"token": ALERT_TOKEN}, "x-nanoit-access"),
+                                           ({"token": ALERT_TOKEN, "auth_header": "X-Alert-Auth"}, "x-alert-auth")])
+def test_alert_carries_the_token_only_when_the_notify_document_has_one(env, extra, header):
+    fake, rec = env
+    fake.set("secrets", "services/alert/notify", {"url": rec.url + "/notify-hook", **extra})
+    fake.set("inventory", "assets/ns0001", {"description": SECRET_LIKE, "type": "server", "bogus_key": SECRET_LIKE})
+    r = run(fake)
+    assert r.returncode == 1
+    assert rec.alert_headers[0][header] == ALERT_TOKEN
+    for text in (alert_text(rec), r.stdout, r.stderr):
+        assert ALERT_TOKEN not in text
+
+
+def test_alert_has_no_auth_header_without_a_token(env):
+    fake, rec = env
+    fake.set("inventory", "assets/ns0001", {"description": SECRET_LIKE, "type": "server", "bogus_key": SECRET_LIKE})
+    assert run(fake).returncode == 1
+    assert not {"x-nanoit-access", "authorization"} & set(rec.alert_headers[0])
 
 
 def test_secret_document_violation_hides_value_too(env):
