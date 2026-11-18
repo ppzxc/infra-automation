@@ -71,10 +71,12 @@ _PRIVILEGE_QUERY = {
            "GROUP BY host, user, action, hour"}
 _ACCOUNT_CHANGE_QUERY = {
     'name': ACCOUNT_CHANGE_HOURLY, 'size': _SIZE,
-    'sql': "SELECT host_name AS host, regexp_replace(body, '^type=([A-Z_]+) .*$', '\\1') AS kind, "
+    # 종류는 파싱된 audit_type 필드로 거른다. 본문 LIKE로 거르면 한 달 범위가 Caddy 쓰기 제한(30초)을 넘긴다(#577, 실측 2.6초 대 55초 이상).
+    # 실행 계정(AUID)은 거른 소수 행에만 본문에서 뽑는다.
+    'sql': "SELECT host_name AS host, audit_type AS kind, "
            "CASE WHEN body LIKE '%AUID=\"%' THEN substr(regexp_replace(body, '^.*AUID=\"([^\"]*)\".*$', '\\1'), 1, 40) "
            "ELSE '' END AS actor, " + _HOUR + " AS hour, count(*) AS changes FROM \"security_logs\" "
-           "WHERE service_name = 'audit' AND (" + ' OR '.join("body LIKE 'type=%s %%'" % t for t in _ACCOUNT_TYPES) + ") "
+           "WHERE service_name = 'audit' AND audit_type IN (" + ', '.join("'%s'" % t for t in _ACCOUNT_TYPES) + ") "
            "GROUP BY host, kind, actor, hour"}
 
 QUERIES = {

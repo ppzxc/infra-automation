@@ -305,6 +305,15 @@ def test_item4_business_hours_only_activity_is_no_finding():
     assert i["verdict"] == "이상 없음" and i["rows"] == []
 
 
+def test_account_change_query_filters_by_audit_type_not_body_like():
+    """#577: 본문 LIKE로 거르면 한 달 범위가 Caddy 쓰기 제한(30초)을 넘는다. 종류는 audit_type 필드로 거른다."""
+    import host_audit_log_review_accounts as accounts
+    sql = accounts._ACCOUNT_CHANGE_QUERY["sql"]
+    where = sql.split("WHERE", 1)[1].split("GROUP BY", 1)[0]
+    assert "audit_type IN (" in where and "'USER_MGMT'" in where and "'ACCT_UNLOCK'" in where
+    assert "body LIKE 'type=" not in where
+
+
 def test_item4_either_query_failing_is_query_failure():
     assert _item(_model(_results(accounts_account_change_hourly=_fail())), 4)["status"] == "failed"
     assert _item(_model(_results(accounts_privilege_hourly=_fail())), 4)["status"] == "failed"
