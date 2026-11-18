@@ -205,3 +205,11 @@ def test_chained_after_the_existing_functions_the_github_fields_are_added_to_the
     rec = _fields(CASES["member"][0], "member", "added")
     out = _apply(tmp_path, _apply(tmp_path, _apply(tmp_path, rec, SECURITY_VRL), FORTIGATE_VRL))
     assert out == _apply(tmp_path, rec)
+
+
+def test_every_vrl_program_ends_with_a_bare_dot_so_the_server_keeps_the_body_unchanged():
+    """OpenObserve가 `.`로 끝나지 않는 본문 뒤에 ` .`를 덧붙여 저장하므로, 파일에 이미 `.`가 없으면 서버 본문과 영원히 달라 매번 update로 계획된다."""
+    vrl_dir = Path(__file__).resolve().parent.parent / "roles" / "openobserve_config" / "files" / "vrl"
+    for path in sorted(vrl_dir.glob("*.vrl")):
+        last = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()][-1]
+        assert last == ".", "%s는 마지막 줄이 `.`여야 한다(서버 정규화와 같은 본문)" % path.name
