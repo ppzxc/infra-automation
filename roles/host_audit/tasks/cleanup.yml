@@ -51,7 +51,8 @@
     _reason: >-
       {{ {'remove': false, 'reason': 'check 모드'} if ansible_check_mode
          else ({'remove': false, 'reason': '경로 검증 실패(이번 실행 디렉터리가 출력 상위 경로 바로 아래가 아님)'} if not (_path_ok | bool)
-         else ({'remove': false, 'reason': _xlsx_why} if _xlsx.failed | bool
+         else ({'remove': false, 'reason': _xlsx_why ~ ((' · ' ~ _log_review_why) if _log_review_problem | length > 0 else '')}
+               if _xlsx.failed | bool
          else ({'remove': false, 'reason': _log_review_why} if (not (_log_review_known | bool)) or _log_review_problem | length > 0
          else ({'remove': true, 'reason': '원본이 버킷에 보관됨'} if _kept_in_bucket | bool
          else ({'remove': true, 'reason': '보관 꺼짐, 메일 발송 성공'} if (not (host_audit_storage_enabled | bool)) and (_mail_sent | bool)

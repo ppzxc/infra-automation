@@ -151,6 +151,9 @@ def test_a_log_review_failure_is_not_hidden_by_an_xlsx_failure(tmp_path):
     assert res.returncode != 0
     assert any("h2" in line and "[AUD-801]" in line for line in failed), failed
     assert (out / "report.html").exists()
+    # 보관·메일 판정이 먼저 실행을 끝내도 남김 이유(AUD-632)에는 둘 다 나온다
+    kept = [line for line in res.stdout.splitlines() if "실행 디렉터리 남김" in line]
+    assert kept and "xlsx 산출물 실패(h2)" in kept[0] and "Log Review Report 작성 실패" in kept[0], kept
 
 
 def test_a_missing_log_review_verdict_keeps_this_run(tmp_path):

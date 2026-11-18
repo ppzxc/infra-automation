@@ -248,7 +248,11 @@ def test_a_search_answered_outside_the_expected_statuses_is_a_query_failure_not_
 
 @needs_ansible
 def test_a_search_that_cannot_even_be_sent_is_a_query_failure_not_a_stopped_run(tmp_path, o2):
-    """ca_file이 러너에 없어 uri 모듈이 요청 전에 실패해도 메일은 나가야 한다."""
+    """ca_file이 러너에 없어 요청을 보내지 못해도 메일은 나가야 한다.
+
+    ansible-core 2.21의 uri는 이 경우를 status -1(Connection failure)로 돌려주어 failed_when: false 이전에도 통과했다.
+    이 시험은 그 동작이 바뀌어도(모듈이 실패로 끝내도) '조회 실패'로 남는지 지키는 가드다.
+    """
     server = o2()
     fixture = {"inventory/services/openobserve": {"url": server.url.replace("http:", "https:") + "/", "org": "acme",
                                                   "ca_file": str(tmp_path / "missing-ca.pem")},
