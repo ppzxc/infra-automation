@@ -22,7 +22,9 @@ import getpass
 import hashlib
 import json
 import os
+import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -86,6 +88,12 @@ def _int(value):
         return int(str(value).strip())
     except (TypeError, ValueError):
         return value  # 스키마 검증이 규칙 이름으로 거부한다
+
+
+def _credential_name(username):
+    """Credential 이름은 snake_case 규칙(`^[a-z][a-z0-9_]*`)이다. 계정 이름의 하이픈·점 등은 밑줄로, 대문자는 소문자로 바꾼다.
+    실제 로그인 이름은 Credential의 username에 그대로 남는다."""
+    return re.sub(r"[^a-z0-9_]", "_", str(username).lower())
 
 
 def _env_to_key(name):
@@ -228,8 +236,9 @@ class _Builder:
         if not user:
             return self.err(doc, "no_login_account")
         name = "telnet" if ctype == "telnet" else "ssh"
+        cred = _credential_name(user)
         ep = {"protocol": name, "address": address, "port": _int(port if port not in (None, "") else (23 if name == "telnet" else 22)),
-              "credential": user, "become": {"method": "enable"}}
+              "credential": cred, "become": {"method": "enable"}}
         if ctype == "jump_ssh":
             if not bastion:
                 self.err(doc, "jump_without_bastion")
@@ -239,7 +248,7 @@ class _Builder:
         data, srcs = {"type": "password", "username": user}, {"username": (doc, "ansible_user")}
         if password is not None:  # 없으면 스키마 검증이 password 누락을 알린다
             data["password"], srcs["password"] = password, (doc, "ansible_password")
-        self.credentials[ns][user] = (data, srcs)
+        self.credentials[ns][cred] = (data, srcs)
 
     def fortigate(self, ns):
         doc = "fortigate/%s" % ns
@@ -276,7 +285,10 @@ class _Builder:
             self.err(doc, "host_agents_environment_differs")
         for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
             for k in sorted(k for k in d if k.startswith(prefix)):
-                self.put(asset, ["agents", section, k[len(prefix):]], d.pop(k), (doc, k))
+                value = d.pop(k)
+                if k == "backup_sqlite_snapshots" and isinstance(value, list):   # 옛 값은 경로 문자열 목록, 새 값은 {path} 객체 목록
+                    value = [{"path": v} if isinstance(v, str) else v for v in value]
+                self.put(asset, ["agents", section, k[len(prefix):]], value, (doc, k))
         if d.get("rustfs_bucket") not in (None, ""):  # 이름 규칙 밖 호스트(이전·개명)의 버킷: 호스트별 덮어쓰기
             self.put(asset, ["agents", "backup", "bucket"], d.pop("rustfs_bucket"), (doc, "rustfs_bucket"))
         else:
@@ -505,6 +517,18 @@ class ClientError(Exception):
     pass
 
 
+RETRIES_429 = 8
+
+
+def _wait_429(error, attempt):
+    """429 응답의 Retry-After(초)를 따르고, 없으면 지수 대기. 30초를 넘기지 않는다."""
+    try:
+        wait = float(error.headers.get("Retry-After"))
+    except (TypeError, ValueError, AttributeError):
+        wait = 0.5 * (2 ** attempt)
+    return min(max(wait, 0.1), 30)
+
+
 class Client:
     def __init__(self, addr, namespace, token):
         self.addr, self.namespace, self.token = addr.rstrip("/"), namespace, token
@@ -512,16 +536,20 @@ class Client:
     def _call(self, method, path, body=None, missing=()):
         data = json.dumps(body).encode() if body is not None else None
         headers = {"X-Vault-Token": self.token, "X-Vault-Namespace": self.namespace, "Content-Type": "application/json"}
-        req = urllib.request.Request(self.addr + path, data=data, headers=headers, method=method)
-        try:
-            with _bao_http.urlopen(req, timeout=30) as r:
-                return r.status, json.loads(r.read() or b"{}")
-        except urllib.error.HTTPError as e:
-            if e.code in missing:
-                return e.code, {}
-            raise ClientError("%s %s -> HTTP %d" % (method, path.split("?")[0], e.code)) from None  # 본문은 내지 않는다
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            raise ClientError("%s %s -> %s" % (method, path.split("?")[0], type(e).__name__)) from None
+        for attempt in range(RETRIES_429 + 1):
+            req = urllib.request.Request(self.addr + path, data=data, headers=headers, method=method)
+            try:
+                with _bao_http.urlopen(req, timeout=30) as r:
+                    return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < RETRIES_429:   # 운영 OpenBao의 요청 제한. 처리 전에 거절하므로 쓰기도 다시 보내도 안전하다
+                    time.sleep(_wait_429(e, attempt))
+                    continue
+                if e.code in missing:
+                    return e.code, {}
+                raise ClientError("%s %s -> HTTP %d" % (method, path.split("?")[0], e.code)) from None  # 본문은 내지 않는다
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                raise ClientError("%s %s -> %s" % (method, path.split("?")[0], type(e).__name__)) from None
 
     def read(self, mount, doc):
         status, body = self._call("GET", "/v1/%s/data/%s" % (mount, urllib.parse.quote(doc)), missing=(404,))

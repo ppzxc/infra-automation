@@ -531,3 +531,72 @@ def test_key_skip_entry_also_holds_back_keys_the_mapping_would_consume():
     plan = om.build_new(old_docs(), SKIP + ["hosts/ns0001/agents:restic_password", "hosts/ns0006:FUNA_NODE_NAME"])
     assert "restic_password" not in plan.store["secrets/assets/ns0001/agents"]
     assert "node_name" not in plan.store["inventory/assets/ns0006"]["funa"]
+
+
+def test_client_retries_on_429_honoring_a_short_wait_then_succeeds(monkeypatch):
+    """운영 OpenBao는 요청 제한(429)을 건다. 읽기·쓰기 모두 기다렸다 다시 시도해야 한다."""
+    import io
+    import urllib.error
+    calls = []
+    waits = []
+
+    class Resp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"data": {"data": {"k": "v"}}}'
+
+    def fake_urlopen(req, timeout=30):
+        calls.append(1)
+        if len(calls) < 3:
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many", {"Retry-After": "1"}, io.BytesIO(b""))
+        return Resp()
+
+    monkeypatch.setattr(om._bao_http, "urlopen", fake_urlopen)
+    monkeypatch.setattr(om.time, "sleep", waits.append)
+    assert om.Client("http://x", "infra", "t").read("secret", "a/b") == {"k": "v"}
+    assert len(calls) == 3 and len(waits) == 2 and all(0 < w <= 30 for w in waits)
+
+
+def test_client_gives_up_after_repeated_429_with_status_only(monkeypatch):
+    import io
+    import urllib.error
+
+    def always_429(req, timeout=30):
+        raise urllib.error.HTTPError(req.full_url, 429, "x", {}, io.BytesIO(b"secret-body"))
+
+    monkeypatch.setattr(om._bao_http, "urlopen", always_429)
+    monkeypatch.setattr(om.time, "sleep", lambda s: None)
+    with pytest.raises(om.ClientError) as exc:
+        om.Client("http://x", "infra", "t").read("secret", "a")
+    assert "429" in str(exc.value) and "secret-body" not in str(exc.value)
+
+
+def _device(user):
+    return {"hosts/ns0003": {
+        "description": "Fake switch", "host_type": "SWITCH", "fqdn": "ns0003.example.test", "ansible_host": "192.0.2.20",
+        "ansible_port": 22, "ansible_user": user, "ansible_password": "pw-net-0003", "connection_type": "ssh"}}
+
+
+def test_device_login_with_a_hyphen_gets_a_snake_case_credential_name_and_keeps_the_real_username():
+    """Credential 이름은 snake_case 규칙이다. 실서버 장비 계정에 하이픈이 있어 그대로 쓰면 스키마 검증이 실패했다."""
+    p = om.build_new(_device("net-admin"))
+    assert p.store["inventory/assets/ns0003/endpoints"]["ssh"]["credential"] == "net_admin"
+    assert p.store["secrets/assets/ns0003/credentials/net_admin"] == {
+        "type": "password", "username": "net-admin", "password": "pw-net-0003"}
+    assert [v.format() for v in ov.validate_store(p.store) if "ns0003" in v.format()] == []
+
+
+def test_sqlite_snapshot_paths_become_path_objects():
+    """옛 값은 경로 문자열 목록, 새 스키마는 {path} 객체 목록이다(docs/backup.md)."""
+    old = {"hosts/ns0003": _device("netadmin")["hosts/ns0003"], "hosts/ns0003/agents": {
+        "backup_sqlite_snapshots": ["/srv/fake/a.db", "/srv/fake/b.db"]}}
+    p = om.build_new(old)
+    assert p.store["inventory/assets/ns0003"]["agents"]["backup"]["sqlite_snapshots"] == [
+        {"path": "/srv/fake/a.db"}, {"path": "/srv/fake/b.db"}]
