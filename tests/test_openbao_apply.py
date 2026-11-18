@@ -254,3 +254,11 @@ def test_approle_login_token_is_used_as_is_without_child_token():
 def test_unreadable_code_dir_is_usage_error_not_empty_plan(fake, capsys, tmp_path):
     code, _, err = run(fake, capsys, "--code-dir", str(tmp_path), "plan")
     assert code == 2 and "읽을 수 없다" in err and writes(fake) == []
+
+
+def test_single_host_cidr_is_the_same_whether_the_server_adds_a_prefix_or_not():
+    """실서버는 token_bound_cidrs의 단일 IP를 접두사 없이 돌려준다(secret_id_bound_cidrs는 /32를 붙여 돌려준다)."""
+    want = {"token_bound_cidrs": ["192.0.2.7/32", "198.51.100.0/24"], "secret_id_bound_cidrs": ["192.0.2.7/32"]}
+    have = {"token_bound_cidrs": ["198.51.100.0/24", "192.0.2.7"], "secret_id_bound_cidrs": ["192.0.2.7/32"]}
+    assert oa.role_drift(want, have) == []
+    assert oa.role_drift(want, {**have, "token_bound_cidrs": ["192.0.2.8"]}) == ["token_bound_cidrs"]
