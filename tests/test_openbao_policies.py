@@ -364,3 +364,9 @@ def test_the_applier_policy_says_plainly_that_it_is_effectively_admin_and_the_de
     assert "사실상 관리자" in text and "가드레일" in text and "보안 경계가 아니라" in text
     # 정책을 쓸 수 있는 한 deny는 지울 수 있다: 이 전제가 바뀌면(정책 쓰기를 막으면) 위 문구를 다시 검토한다.
     assert any(p == "sys/policies/acl/*" and "update" in caps for p, caps in policy("applier"))
+
+
+def test_periodic_check_can_list_secret_id_accessors_with_the_trailing_slash_path():
+    """LIST 요청의 ACL 경로는 끝에 /가 붙는다. `.../secret-id`만 있으면 role/*의 read에 걸려 목록이 403이다(실서버 확인)."""
+    paths = dict(policy("periodic-check"))
+    assert paths.get("auth/approle/role/+/secret-id/") == ["list"]
