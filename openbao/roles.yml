@@ -1,0 +1,92 @@
+# OpenBao 정책·AppRole·마운트 선언 원본 (Spec #511, #505 변경). scripts/openbao_apply.py가 이 파일과 policies/*.hcl을 서버에 맞춘다.
+# 정책 본문의 원본은 policies/*.hcl이다(정책 이름 = 파일명에서 .hcl 뺀 것). 여기서는 AppRole이 어떤 정책을 묶는지와 수명을 정한다.
+# 출발지 CIDR·운영자 비밀번호 해시는 저장소에 두지 않고 환경변수로 받는다(docs/openbao_apply.md).
+namespace: infra
+
+# infra 안의 KV v2 마운트 두 개. apply는 없을 때만 만들고 지우거나 tune하지 않는다(마운트를 지우면 안의 데이터가 모두 사라진다).
+mounts:
+  inventory:
+    type: kv
+    version: 2
+    description: Asset·Service·Operator·작업 설정(비밀 아님)
+  secrets:
+    type: kv
+    version: 2
+    description: Credential·Service 권한 비밀
+
+# 사람용 userpass와 기계용 AppRole 인증 마운트.
+auth_mounts:
+  userpass:
+    type: userpass
+    description: 운영자 로그인
+  approle:
+    type: approle
+    description: Semaphore 작업 계열 로그인
+
+# 운영자 사용자(userpass)에 연결하는 정책. 사용자 이름과 bcrypt 해시는 OPENBAO_OPERATOR_PASSWORD_HASHES로 받는다.
+operator:
+  policies: [operator]
+
+# applier: 이 도구가 쓰는 AppRole. 사실상 관리자 권한이라 수명을 짧게(secret_id 1일, 1회용), 출발지를 러너로 묶는다.
+# 첫 bootstrap(이 정책과 role)만 admin으로 한 번 만들고, 그 뒤에는 이 role이 자기 정의까지 관리한다.
+# secret_id는 이 도구로 만들지 않는다. 적용할 때 response-wrapping 수동 런북으로 발급한다.
+applier:
+  policies: [applier]
+  secret_id_ttl: 86400        # 1일
+  secret_id_num_uses: 1
+  token_ttl: 1800             # 30분
+  token_max_ttl: 3600         # 1시간
+  cidrs: runner
+
+# 작업 계열별 정책과 AppRole(Spec #511 / Ticket-7, #506 §1~§5). 키가 AppRole 이름이고, 관리 대상 AppRole 목록은 이 키에서 파생한다.
+# 모든 계열이 inventory-base(Service·공통 설정)를 읽는다. Automation Identity(connect 묶음)는 서버 계열 provision·host_agents·host_audit에만 준다.
+# 서버·작업 계열의 list 권한은 periodic_check(periodic-check)에만 준다. 에이전트 세션(agent_session)은 조사용으로 inventory/·secrets/의 metadata list만 갖는다(비밀 값 아님).
+# secret_id_ttl 기본값은 180일(15552000초)이다. agent_session은 Semaphore 밖(에이전트 세션)에서 쓰므로 24시간, 별도 출발지 CIDR이다.
+# token_ttl은 모두 1800초(30분), token_max_ttl은 가장 긴 실행보다 길게 잡는다(Host Audit은 드리프트 시간 제한 3600초를 고려한다).
+families:
+  provision:
+    policies: [inventory-base, connect, funa-secrets]
+    token_max_ttl: 7200
+  host_agents:
+    policies: [inventory-base, connect, asset-agents, openobserve-ingest, alert-notify]
+    token_max_ttl: 7200
+  backup_maintenance:
+    policies: [inventory-base, asset-agents, rustfs-maintenance, openobserve-ingest]
+    token_max_ttl: 7200
+  openobserve_config:
+    policies:
+      - inventory-base
+      - inventory-assets
+      - openobserve-admin
+      - openobserve-ingest
+      - alert-notify
+      - config-openobserve-config
+    token_max_ttl: 3600
+  # host_audit = provision ∪ host_agents ∪ 자기 경로. 드리프트 하위 실행이 같은 AppRole로 site.yml과 Host Agents Config를
+  # --check로 렌더링하므로 전체를 읽어야 한다(근거는 policies/config-host-audit.hcl 주석).
+  # 계산하지 않고 풀어서 쓴다. 합집합과 어긋나면 tests/test_openbao_policies.py가 실패한다.
+  host_audit:
+    policies:
+      - inventory-base
+      - connect
+      - funa-secrets
+      - asset-agents
+      - openobserve-ingest
+      - alert-notify
+      - rustfs-audit-reports
+      - config-host-audit
+    token_max_ttl: 7200
+  network_backup:
+    policies: [inventory-base, inventory-assets, asset-credentials, alert-notify]
+    token_max_ttl: 3600
+  github_webhook_watch:
+    policies: [inventory-base, github-org-hooks-read, openobserve-ingest, config-github-webhook-watch]
+    token_max_ttl: 3600
+  periodic_check:
+    policies: [periodic-check]
+    token_max_ttl: 3600
+  agent_session:
+    policies: [agent-session]
+    token_max_ttl: 3600
+    secret_id_ttl: 86400      # 24시간
+    cidrs: agent_session

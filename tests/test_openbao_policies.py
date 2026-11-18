@@ -1,6 +1,6 @@
 """OpenBao 계열별 정책·AppRole의 정적 검사(Spec #511 / Ticket-7, #518).
 
-tofu 바이너리 없이 HCL·tf 파일만 읽는다. 정책 HCL은 `path "..." { capabilities = [...] }` 형태만 정규식으로 읽고
+서버 없이 HCL·roles.yml 파일만 읽는다. 정책 HCL은 `path "..." { capabilities = [...] }` 형태만 정규식으로 읽고
 다른 문법(템플릿 변수, `allowed_parameters` 등)이 나오면 실패한다. 계열 x 경로 매트릭스의 원본은 정책 HCL이고,
 여기의 EXPECTED_READS는 그 원본이 어긋나지 않게 묶어 두는 회귀 표다(#506 §3).
 """
@@ -8,10 +8,12 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-TOFU = ROOT / "tofu" / "openbao"
-POLICIES = TOFU / "policies"
+CODE = ROOT / "openbao"
+POLICIES = CODE / "policies"
+ROLES_YML = CODE / "roles.yml"
 INDEX = ROOT / "schemas" / "openbao" / "index.yml"
 
 KV_MOUNTS = {"inventory", "secrets"}
@@ -120,19 +122,14 @@ def readable_patterns(policy_names):
 
 # ---- AppRole 읽기 ---------------------------------------------------------------------------------------------------
 
+def _roles_yml():
+    return yaml.safe_load(ROLES_YML.read_text(encoding="utf-8"))
+
+
 def _role_policies():
-    """approles.tf의 locals에서 계열별 token_policies를 읽는다. host_audit은 합집합 식을 따로 검사한다."""
-    text = (TOFU / "approles.tf").read_text(encoding="utf-8")
-    block = re.search(r"family_policies\s*=\s*\{(.*?)\n  \}", text, re.S)
-    assert block, "locals.family_policies가 없다"
-    fam = {}
-    for m in re.finditer(r"^\s*(\w+)\s*=\s*\[([^\]]*)\]", block.group(1), re.M):
-        fam[m.group(1)] = re.findall(r'"([^"]+)"', m.group(2))
-    ha = re.search(r"host_audit_policies\s*=\s*distinct\(concat\(\s*local\.family_policies\.provision,\s*"
-                   r"local\.family_policies\.host_agents,\s*\[([^\]]*)\]\s*\)\)", text)
-    assert ha, "host_audit_policies는 provision ∪ host_agents ∪ 자기 경로 식이어야 한다"
-    fam["host_audit"] = list(dict.fromkeys(
-        fam["provision"] + fam["host_agents"] + re.findall(r'"([^"]+)"', ha.group(1))))
+    """roles.yml의 families에서 계열별 정책 목록을 읽는다. (계열 -> 정책 목록, roles.yml 본문 텍스트)."""
+    text = ROLES_YML.read_text(encoding="utf-8")
+    fam = {name: list(spec["policies"]) for name, spec in yaml.safe_load(text)["families"].items()}
     return fam, text
 
 
@@ -242,10 +239,9 @@ EXPECTED_READS = {
 
 
 def test_there_are_exactly_nine_semaphore_family_approles():
-    fam, text = _role_policies()
-    roles = set(fam) | {"periodic_check", "agent_session"}
+    fam, _ = _role_policies()
+    roles = set(fam)
     assert roles == ALL_FAMILIES
-    assert "vault_approle_auth_backend_role" in text
 
 
 @pytest.mark.parametrize("family", sorted(EXPECTED_READS))
@@ -267,9 +263,11 @@ def test_every_policy_file_is_used_by_a_role_or_is_applier_or_operator():
     assert set(POLICY_NAMES) - used == {"applier", "operator"}
 
 
-def test_policy_for_each_is_keyed_by_policy_name_not_file_name():
-    _, text = _role_policies()
-    assert 'trimsuffix(f, ".hcl") => f' in text  # token_policies가 이름으로 vault_policy.small[...]을 찾는다
+def test_host_audit_is_union_of_provision_host_agents_and_its_own_paths():
+    fam, _ = _role_policies()
+    own = {"rustfs-audit-reports", "alert-notify", "config-host-audit"}
+    assert set(fam["host_audit"]) == set(fam["provision"]) | set(fam["host_agents"]) | own
+    assert len(fam["host_audit"]) == len(set(fam["host_audit"]))
 
 
 def test_automation_identity_only_for_server_families():
@@ -332,26 +330,26 @@ def test_periodic_check_machine_only_gets_approle_metadata_and_sys_reads():
 
 # ---- AppRole 수명·출발지 ---------------------------------------------------------------------------------------------
 
-def test_semaphore_approles_have_ttls_and_cidr_binding_from_variables():
-    _, text = _role_policies()
-    assert "secret_id_ttl" in text and "15552000" in text  # 180일
-    assert re.search(r"token_ttl\s*=\s*1800", text)
-    assert "token_max_ttl" in text
-    assert "var.runner_cidrs" in text
-    assert "token_bound_cidrs" in text
-    assert "var.agent_session_cidrs" in text
-    # CIDR 값이 코드에 직접 박히지 않는다.
-    assert not re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/\d+)?\b", text)
+def test_semaphore_approles_have_ttls_and_cidr_binding_from_environment():
+    data = _roles_yml()
+    for name, spec in data["families"].items():
+        assert spec["token_max_ttl"] >= 3600, name
+        assert spec.get("token_ttl", 1800) == 1800, name
+        if name != "agent_session":
+            assert spec.get("secret_id_ttl", 15552000) == 15552000, name   # 180일
+            assert spec.get("cidrs", "runner") == "runner", name
+    assert data["families"]["agent_session"]["cidrs"] == "agent_session"
+    # CIDR 값은 코드에 직접 박히지 않는다(환경변수로 받는다).
+    assert not re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/\d+)?\b", ROLES_YML.read_text(encoding="utf-8"))
 
 
 def test_agent_session_secret_id_is_24h():
-    _, text = _role_policies()
-    assert "86400" in text
+    assert _roles_yml()["families"]["agent_session"]["secret_id_ttl"] == 86400
 
 
 def test_operator_policy_is_attached_to_userpass_users():
     assert "operator" in POLICY_NAMES
-    assert 'token_policies = ["operator"]' in (TOFU / "auth.tf").read_text(encoding="utf-8")
+    assert _roles_yml()["operator"]["policies"] == ["operator"]
 
 
 def test_index_matches_documented_operator_list_decision():

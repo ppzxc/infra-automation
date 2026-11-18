@@ -45,7 +45,7 @@ def cmd_check(args):
     import os
 
     import openbao_check as oc  # 하위 명령별 모듈(#519)
-    kwargs = {"tofu_dir": args.tofu_dir} if args.tofu_dir else {}
+    kwargs = {"code_dir": args.code_dir} if args.code_dir else {}
     return oc.run_check(os.environ, schema_dir=args.schemas, **kwargs)
 
 
@@ -58,7 +58,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_validate)
     p = sub.add_parser("check", help="Periodic Check: OpenBao 전체 대조(#519)")
     p.add_argument("--schemas", default=str(ov.DEFAULT_SCHEMA_DIR))
-    p.add_argument("--tofu-dir", default=None, help="OpenTofu 코드 디렉터리(기본: tofu/openbao)")
+    p.add_argument("--code-dir", default=None, help="선언 코드 디렉터리(기본: openbao)")
     p.set_defaults(func=cmd_check)
     openbao_put.register(sub)
     args = parser.parse_args(argv)

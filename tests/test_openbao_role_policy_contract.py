@@ -1,7 +1,7 @@
 """역할이 읽는 문서 선언과 계열 AppRole 정책의 정적 대조(Spec #511 / Ticket-20, #531).
 
 `<역할>_openbao_required`(역할 vars/main.yml)의 문서 패턴이 그 역할을 돌리는 계열 AppRole의 정책 경로에 모두 들어가고,
-선언한 키가 스키마의 required를 덮고 properties 안에 있는지 본다. tofu 바이너리도 서버도 필요 없다.
+선언한 키가 스키마의 required를 덮고 properties 안에 있는지 본다. 서버가 필요 없다.
 """
 import ast
 import json
