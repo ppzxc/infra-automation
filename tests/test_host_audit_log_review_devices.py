@@ -305,6 +305,15 @@ def test_a_failed_server_search_stays_a_query_failure_with_the_device_sections_a
     assert {s["kind"] for s in item["sections"]} == {"fortigate", "switch"}
 
 
+def test_a_failed_device_collection_search_makes_that_kind_partial_check_not_no_finding():
+    m = _model(_results(collection_fortigate_daily=_fail()))
+    fw = _section(_item(m, 1), "fortigate")
+    assert (fw["status"], fw["verdict"]) == ("partial", "확인 필요")
+    assert "수집 공백을 확인하지 못함(HTTP 503)" in fw["summary"]
+    sw = _section(_item(m, 2), "switch")
+    assert sw["verdict"] == "이상 없음" and "수집 공백을 확인하지 못함" not in sw["summary"]
+
+
 def test_a_device_with_a_collection_gap_is_not_judged_as_no_finding():
     days = [d for d in OCT if d != "2026-10-20"]
     res = _results(collection_fortigate_daily=_ok([{"name": "ns0901", "day": d, "records": 1} for d in days]))

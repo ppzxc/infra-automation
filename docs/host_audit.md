@@ -1010,6 +1010,6 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | 12 | 같은 관리자 계정(장비 무관)이 서버와 같은 시간·출발지 수 기준 | 점검 불가(파싱 없음) |
 
 - **FortiGate 로그인 결과**: VRL `fortigate_semantics`가 관리자 로그인 줄(`subtype=system`, `action=login`)에 `event_outcome`(success·failure)과 실패 사유 `event_reason`을 붙인다(#562에서 추가, 서버 적용은 다음 `OpenObserve — Config` 실행). VRL 보완 전에 들어온 기록은 `event_outcome`이 없으므로 조회가 원문 `status` 키로 가른다(OpenObserve Config의 방화벽 로그인 알림과 같은 원문 일치). 어느 쪽으로도 가르지 못한 로그인이 있으면 장비 몫은 `일부 자동`·`확인 필요`이고 건수를 적는다. `event_outcome`·`event_reason`은 서버 로그로 이미 있는 컬럼이라 스키마 문제는 없다.
-- **수집 공백 장비**: 3부 수집 공백에 든 장비는 장비 몫 요약에 이름이 적히고 `일부 자동`·`확인 필요`다.
+- **수집 공백 장비**: 3부 수집 공백에 든 장비는 장비 몫 요약에 이름이 적히고 `일부 자동`·`확인 필요`다. 그 종류의 수집 공백 조회(스위치 `system_logs`·FortiGate `security_logs` 일자별)가 실패해도 공백을 모르므로 같다(`수집 공백을 확인하지 못함`).
 - **입력**: AUD-804 `settings.command_burst`(`threshold`·`window_minutes`)와 `settings.devices`(`fortigate`: `fortigate_firewalls` 그룹, `switch`: `host_audit_log_review_switch_syslog_devices`, `parsing`, `admin_accounts`: 작업 설정 문서 `inventory/config/log_review`의 `device_admin_accounts` `[{device, accounts}]`). 장비 관리자 계정 이름은 공개 저장소에 두지 않는다.
 - **GitHub**: 조직 웹훅에는 로그인 이벤트가 없어 이번 적용 대상이 아니다(§18 3부 GitHub 감사 로그 수집 상태).

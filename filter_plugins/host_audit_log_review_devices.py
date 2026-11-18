@@ -24,6 +24,7 @@ from host_audit_log_review_items import (  # noqa: E402
 )
 import host_audit_log_review_accounts as _accounts  # noqa: E402
 import host_audit_log_review_sources as _sources  # noqa: E402
+import host_audit_log_review_collection as _collection  # noqa: E402
 
 COMMAND_BURST = 'part1.command_burst'
 SUDO_MINUTELY = 'command_burst_sudo_minutely'
@@ -33,6 +34,7 @@ FORTIGATE_CHANGES = 'device_fortigate_changes'
 SWITCH_FAILURES = 'device_switch_login_failures'
 SWITCH_CHANGES = 'device_switch_config_changes'
 MAX_ROWS = _accounts.MAX_ROWS
+_COLLECTION = {FORTIGATE: _collection.FORTIGATE_DAILY, SWITCH: _collection.SWITCH_DAILY}
 
 _MINUTE = "date_format(_timestamp, '%Y-%m-%d %H:%M', '{offset}')"
 _LIMIT = ('sudo 명령만 본다: sudo 없이 root 셸 안에서 실행한 명령, su 뒤의 명령, root 직접 로그인의 명령, Ansible become(자동화)은 '
@@ -134,9 +136,13 @@ def _finish(ctx, kind, devices, status, findings, summary, columns, rows, unknow
         parts.append('결과를 알 수 없는 로그인 %d건(성공·실패가 구조화되지 않음)은 판정 밖' % unknown)
     if gap:
         parts.append('수집 공백 장비 %d대(%s)는 로그가 없어 판정 밖' % (len(gap), ', '.join(gap)))
-    if status == AUTO and (gap or unknown):
+    collected = ctx['results'].get(_COLLECTION[kind]) or {}
+    blind = not collected.get('ok')  # 수집 공백 조회가 실패하면 공백 장비를 모른다: 로그가 없어 '이상 없음'이 될 수 있다
+    if blind:
+        parts.append('수집 공백을 확인하지 못함(%s)' % (collected.get('error') or '조회하지 않음'))
+    if status == AUTO and (gap or unknown or blind):
         status = PARTIAL
-    verdict = VERDICT_CHECK if (findings or gap or unknown) else VERDICT_OK
+    verdict = VERDICT_CHECK if (findings or gap or unknown or blind) else VERDICT_OK
     if len(rows) > MAX_ROWS:
         parts.append('표는 앞 %d행만 싣는다(전체 %d행)' % (MAX_ROWS, len(rows)))
         rows = rows[:MAX_ROWS]
