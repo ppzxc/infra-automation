@@ -7,7 +7,7 @@
 ## 1. 전제와 병합 단위
 
 - `infra` 네임스페이스는 이미 있고 비어 있다. 새로 만들 것은 그 안의 마운트·정책·AppRole·userpass다.
-- **준비 PR 여러 개**: 병합해도 운영에 영향이 없다(스키마·`index.yml`·등록 도구, 정책·AppRole 선언 코드와 `openbao_apply.py`, 이전 스크립트, 러너 이미지 `jsonschema`, Periodic Check 템플릿 코드, 이 문서들).
+- **준비 PR 여러 개**: 병합해도 운영에 영향이 없다(스키마·`index.yml`·등록 도구, 정책·AppRole 선언 코드와 `openbao_apply.py`, 이전 스크립트, 러너 `jsonschema`, Periodic Check 템플릿 코드, 이 문서들).
 - **전환 PR 하나**: 모든 소비자의 경로·키 변경, 접두사 변수 폐지, `VAULT_TOKEN` 대체 경로 제거, 테스트·fixture 교체. 동결 창 안에서 병합한다.
 - 알림 text/plain 전환은 전환 PR보다 먼저 병합돼 있어야 한다.
 - 옮기지 않는 것: 어떤 호스트도 가리키지 않는 계정 문서(목록은 비공개 노트), 소프트 삭제된 `switches/` 문서, 읽는 곳이 없는 키. 옛 네임스페이스를 지우기 전까지는 원본이 남아 있고, 필요하면 `operator`로 다시 등록한다.
@@ -16,7 +16,7 @@
 
 1~5단계는 동결 전에 끝낸다. 그래서 창이 짧다.
 
-1. 준비 PR을 모두 병합하고 Semaphore 러너 이미지를 다시 빌드한다.
+1. 준비 PR을 모두 병합하고 러너에 `jsonschema`를 넣는다(운영 러너는 순정 이미지라 재빌드가 아니라 Semaphore 설정 디렉터리의 `requirements.txt`에 한 줄을 더하고 컨테이너를 `docker restart`한다. 재생성은 필요 없다).
 2. `admin`으로 한 번만 bootstrap한다. `infra` 안에 applier 정책과 AppRole을 만든다.
 3. `scripts/openbao_apply.py apply`로 마운트 `inventory/`·`secrets/`, 정책, AppRole(계열별 7개, `periodic_check`, `agent_session`), userpass와 운영자 사용자를 만든다.
 4. 계열별 secret_id를 수동 발급하고(https 주소가 사설 CA 인증서면 계열 Environment 7개와 Periodic Check Environment, 에이전트 세션의 환경에도 `VAULT_CACERT`를 넣는다. 읽기 지점이 인증서를 기본으로 검증하므로 빠지면 전환 뒤 그 자리가 연결 실패한다)(operations §2) Semaphore Environment를 계열별 7개와 Periodic Check용 1개 만든다. `applier`는 적용할 때마다 발급해 `openbao_apply.py`를 돌리는 작업 환경에만 넣고(operations §4), `agent_session`은 Semaphore 밖이고 secret_id가 24시간 만료라 Environment 없이 7단계 직전(동결 창 안)에 발급한다. 이 단계에서는 템플릿에 붙이지 않는다. Periodic Check 템플릿은 만들어 두되 스케줄은 아직 걸지 않는다.
