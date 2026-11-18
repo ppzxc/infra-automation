@@ -32,7 +32,9 @@ def model():
     meta = {"run_id": "ha-20261031T220000Z", "run_kind": "scheduled", "started_at": STARTED,
             "generated_at": "2026-10-31T22:10:00Z", "timezone": "Asia/Seoul",
             "period": host_audit_log_review_period(STARTED, "Asia/Seoul"),
-            "settings": {"collection_targets": {"hosts": ["ns0001", "ns0002"], "devices": ["ns0900"]}},
+            "settings": {"collection_targets": {"hosts": ["ns0001", "ns0002"], "devices": ["ns0900"]},
+                         # 장비 관리자 로그인 몫(#562): 파싱 설정이 없는 스위치는 항목마다 '점검 불가(파싱 없음)'
+                         "devices": {"fortigate": [], "switch": ["ns0900"], "parsing": {}}},
             "archive": "RustFS host-audit/2026-11/ha-20261031T220000Z/log_review/x.html (3년 보관)"}
     return host_audit_log_review_model(results, meta)
 
@@ -121,7 +123,8 @@ def test_the_last_page_has_three_empty_signature_boxes_with_a_date_row(rendered,
 def test_the_period_status_reasons_and_criteria_are_printed(rendered):
     assert "2026-10-01 00:00 ~ 2026-10-31 24:00 (KST)" in rendered
     assert "점검 불가(애플리케이션 접속기록·업무 기록 미수집)" in rendered
-    assert "점검 불가(미구현)" in rendered
+    assert "점검 불가(파싱 없음)" in rendered  # 장비 관리자 로그인 몫(#562)
+    assert "장비 관리자 로그인 — 스위치" in rendered
     assert "조회 실패(장비 로그 HTTP 503)" in rendered  # 조회 실패는 숨기지 않는다
     assert "하루 이상 빈 날이 있으면" in rendered  # 수집 공백의 판정 기준
     assert "ns0002" in rendered and "전월 로그 없음" in rendered

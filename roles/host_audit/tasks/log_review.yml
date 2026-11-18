@@ -179,6 +179,17 @@
             personal_info_systems: >-
               {{ (_host_audit_log_review_reference.personal_info_systems | default(none))
                  if _host_audit_log_review_reference | default(none) is mapping else none }}
+            # 1부 13번과 장비 관리자 로그인(#562). 장비 종류는 수집 공백의 장비 목록과 같은 출처(FortiGate 그룹·syslog 스위치 목록)다.
+            command_burst:
+              threshold: "{{ host_audit_log_review_command_burst_threshold | int }}"
+              window_minutes: "{{ host_audit_log_review_command_burst_window_minutes | int }}"
+            devices:
+              fortigate: "{{ groups['fortigate_firewalls'] | default([]) }}"
+              switch: "{{ host_audit_log_review_switch_syslog_devices }}"
+              parsing: "{{ host_audit_log_review_device_parsing }}"
+              admin_accounts: >-
+                {{ (_host_audit_log_review_reference.device_admin_accounts | default(none))
+                   if _host_audit_log_review_reference | default(none) is mapping else none }}
             log_management: "{{ host_audit_log_review_log_management }}"
             previous_signed_copy: "{{ _host_audit_log_review_signed }}"
       ansible.builtin.set_fact:

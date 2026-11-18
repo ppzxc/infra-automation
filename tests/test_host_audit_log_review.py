@@ -113,11 +113,12 @@ def test_items_8_to_11_and_14_to_19_say_every_month_that_application_records_are
     assert not_collected == {8, 9, 10, 11, 14, 15, 16, 17, 18, 19}
 
 
-def test_items_without_a_judge_yet_are_unavailable_as_not_implemented_never_dropped_or_ok():
+def test_every_item_now_has_a_judge_and_a_missing_search_is_a_query_failure_never_not_implemented_or_ok():
     m = _model()
-    others = [i for i in m["part1"] if i["no"] in (13,)]
-    assert {i["status_label"] for i in others} == {"점검 불가(미구현)"}
-    assert all(i["verdict"] == "" for i in others)
+    labels = [i["status_label"] for i in m["part1"] + m["part3"]]
+    assert "점검 불가(미구현)" not in labels
+    item13 = next(i for i in m["part1"] if i["no"] == 13)
+    assert item13["status_label"] == "조회 실패(조회하지 않음)" and item13["verdict"] == ""
 
 
 def test_the_people_columns_are_always_empty_and_the_approval_has_three_signers():

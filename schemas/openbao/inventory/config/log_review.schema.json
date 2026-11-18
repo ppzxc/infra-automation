@@ -62,6 +62,34 @@
         "minLength": 1
       },
       "uniqueItems": true
+    },
+    "device_admin_accounts": {
+      "type": "array",
+      "description": "장비 관리자 허용 계정(1부 1번 장비 몫, #562). 목록에 없는 장비의 로그인 계정은 '장비 관리자 허용 목록 없음'으로 보고서에 나온다.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "string",
+            "pattern": "^ns[0-9]+(?!\\n)$",
+            "description": "장비 관리번호(로그의 device_id)"
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true,
+            "description": "그 장비의 관리자 계정 이름"
+          }
+        },
+        "required": [
+          "device",
+          "accounts"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [

@@ -8,6 +8,9 @@ Host Audit 정기 실행이 전월 한 달(KST 달력 월)의 OpenObserve 조회
 - 항목 정의(1부 19·2부 9·3부)는 ``host_audit_log_review_items.py``의 표다.
 - 판정은 묶음별 모듈(``host_audit_log_review_<묶음>.py``)의 ``JUDGES = {항목 key: 함수}``이고, 그 판정이 쓰는 OpenObserve
   조회는 같은 모듈의 ``QUERIES = {항목 key: [{'name', 'sql', 'size'}]}``다. 모듈을 만들면 아래 ``_JUDGE_MODULES``에 한 줄 더한다.
+- 다른 모듈이 판정하는 항목에 몫을 덧붙이는 모듈은 ``EXTENDS = {항목 key: 함수(ctx, 판정 결과) -> 판정 결과}``를 둔다(#562 장비
+  관리자 로그인). 덧붙인 표는 결과의 ``sections``(``[{'kind', 'title', 'status', 'status_label', 'verdict', 'summary', 'columns',
+  'rows'}]``)에 담겨 항목 표 아래에 그려진다. 그 몫의 조회는 ``QUERIES``의 그 모듈 고유 키(항목 key가 아니어도 된다)에 둔다.
 - 판정 함수는 ``judge(ctx)``이고 ``host_audit_log_review_items.result(...)``로 만든 dict를 돌려준다. ``ctx``: ``period``, ``results``({조회 이름:
   {'ok', 'hits', 'error'}}), ``settings``(기준 설정), ``collection_gap``(3부 수집 공백 이름 집합, 1부가 공백과 연결할 때 쓴다).
 - 조회는 OpenObserve ``POST /api/<org>/_search`` 하나뿐이다(조회 전용 계정, 서버는 조회 전용을 강제하지 못한다: #556).
@@ -30,6 +33,7 @@ import host_audit_log_review_accounts as _accounts  # noqa: E402
 import host_audit_log_review_sources as _sources  # noqa: E402
 import host_audit_log_review_status as _status  # noqa: E402
 import host_audit_log_review_signed as _signed  # noqa: E402
+import host_audit_log_review_devices as _devices  # noqa: E402
 
 try:
     from ansible.errors import AnsibleFilterError
@@ -52,6 +56,7 @@ _JUDGE_MODULES = (
     _sources,
     _status,
     _signed,
+    _devices,
 )
 
 APPROVERS = ('점검자', '정보보호관리자', '정보보호책임자(CISO)')
@@ -195,7 +200,7 @@ def _status_label(status, reason):
     return label
 
 
-def _evaluate(definition, part, judges, ctx, errors):
+def _evaluate(definition, part, judges, ctx, errors, extenders=None):
     judge = judges.get(definition['key'])
     if judge is None:
         res = _result(definition['default_status'], reason=definition['default_reason'])
@@ -203,6 +208,13 @@ def _evaluate(definition, part, judges, ctx, errors):
         try:
             res = judge(ctx)
         except Exception as exc:  # 한 항목의 판정 오류가 보고서 전체를 막지 않는다. 실행은 끝에서 실패로 끝난다(AUD-806).
+            errors.append('%s: %s' % (definition['key'], type(exc).__name__))
+            res = _result(FAILED, reason='판정 오류 %s' % type(exc).__name__)
+    extend = (extenders or {}).get(definition['key'])
+    if extend is not None:  # 다른 모듈의 판정 결과에 몫(장비 관리자 로그인 등)을 덧붙인다. 오류는 판정 오류와 같게 다룬다
+        try:
+            res = extend(ctx, res)
+        except Exception as exc:
             errors.append('%s: %s' % (definition['key'], type(exc).__name__))
             res = _result(FAILED, reason='판정 오류 %s' % type(exc).__name__)
     if res['status'] not in STATUS_LABELS:
@@ -214,6 +226,8 @@ def _evaluate(definition, part, judges, ctx, errors):
         'status_label': _status_label(res['status'], res['reason']),
         # 사람이 쓰는 칸(ADR-0015 §4). 모델은 언제나 비워 둔다.
         'final_verdict': '', 'remarks': '', 'action': '',
+        # 덧붙인 판정 몫(EXTENDS)의 소제목별 표. 없으면 빈 목록.
+        'sections': [],
     }
     item.update((k, v) for k, v in res.items() if k not in ('method', 'criterion'))
     for key in ('method', 'criterion'):  # 판정이 이번에 쓴 방법·기준(임곗값)을 주면 표 문구 대신 찍힌다
@@ -242,12 +256,13 @@ def host_audit_log_review_model(results, meta):
     period = meta.get('period') or host_audit_log_review_period(meta.get('started_at'), tz_name)
     settings = meta.get('settings') or {}
     judges = _registry('JUDGES')
+    extenders = _registry('EXTENDS')
     ctx = {'period': period, 'results': results or {}, 'settings': settings, 'collection_gap': set()}
     errors = []
     # 3부를 먼저 계산한다: 1부 판정이 수집 공백 호스트를 연결해 '이상 없음'으로 단정하지 않게 한다(#544 이야기 21).
-    part3 = [_evaluate(d, 3, judges, ctx, errors) for d in PART3]
-    part1 = [_evaluate(d, 1, judges, ctx, errors) for d in PART1]
-    part2 = [_evaluate(d, 2, judges, ctx, errors) for d in PART2]
+    part3 = [_evaluate(d, 3, judges, ctx, errors, extenders) for d in PART3]
+    part1 = [_evaluate(d, 1, judges, ctx, errors, extenders) for d in PART1]
+    part2 = [_evaluate(d, 2, judges, ctx, errors, extenders) for d in PART2]
     counts = dict((s, 0) for s in STATUS_LABELS)
     for item in part1 + part2 + part3:
         counts[item['status']] += 1

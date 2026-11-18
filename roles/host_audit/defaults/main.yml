@@ -222,6 +222,29 @@ host_audit_log_review_holidays:
 host_audit_log_review_multi_source_window_seconds: 120
 host_audit_log_review_multi_source_min_sources: 2
 
+# 1부 13번(#562): 같은 계정(호스트 무관)이 이 시간(분, 분 단위 집계) 안에 sudo를 이 횟수 이상 실행하면 '확인 필요'.
+# sudo 명령만 본다(root 셸 안의 명령·su 뒤 명령은 보지 않는다). Ansible become(BECOME-SUCCESS)은 세지 않는다.
+host_audit_log_review_command_burst_threshold: 30
+host_audit_log_review_command_burst_window_minutes: 2
+
+# 장비 관리자 로그인(#562)을 1·2·3·4·7·12번에 적용하는 표: {장비 종류: {항목 key: auto|partial}}. 없는 칸은 보고서에
+# '점검 불가(파싱 없음)'로 나온다. 근거는 #556 사전 확인(VRL이 무엇을 구조화하는지):
+# - FortiGate: 관리자 로그인 계정·출발지·결과(event_outcome, VRL에 없던 기간은 원문 status로 가름)와 설정 변경(cfgpath)이 있다.
+# - 스위치: 로그인 실패(SEC_LOGIN-4-LOGIN_FAILED)와 설정 변경(SYS-5-CONFIG_I)의 장비·시각만 있다. 계정·출발지는 원문에만 있고
+#   로그인 성공 줄은 수신 사례가 없다. VRL이 계정·출발지를 구조화하면 해당 칸을 더하고 판정 함수를 더한다.
+# 장비 관리자 허용 계정은 OpenBao inventory/config/log_review의 device_admin_accounts에서 읽는다(공개 저장소에 두지 않는다).
+host_audit_log_review_device_parsing:
+  fortigate:
+    part1.unauthorized_account: auto
+    part1.login_failures: auto
+    part1.off_hours_login: auto
+    part1.off_hours_privilege: auto
+    part1.unauthorized_source: auto
+    part1.multi_source_login: auto
+  switch:
+    part1.login_failures: partial
+    part1.off_hours_privilege: partial
+
 # 3부 로그 관리 상태 나머지(#563)의 기준 설정. 시각 동기·백업 대상은 위 수집 로스터(백업 누락 알림과 같은 대상)다.
 # - retention_days: 로그 종류(스트림)별 OpenObserve 보존 일수의 저장소 선언(ADR-0006 스트림 표, 서버 전역 365일). 서버의 실제 값은
 #   POST _search로 읽을 수 없어 보고서가 '일부 자동'으로 두고 점검자가 화면에서 대조한다. 서버 값을 바꾸면 여기도 바꾼다.

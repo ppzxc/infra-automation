@@ -8,3 +8,6 @@ internal_addresses:
     host: ns0002
 personal_info_systems:
   - ns0001
+device_admin_accounts:
+  - device: ns0900
+    accounts: [fake-fwadmin]

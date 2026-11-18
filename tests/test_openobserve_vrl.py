@@ -293,11 +293,12 @@ FGT_CASES = {
     "admin_login": ('logid="0100032001" type="event" subtype="system" level="information" vd="root" logdesc="Admin login successful" '
                     'action="login" status="success" user="admin" ui="https(192.0.2.10)" msg="Administrator admin logged in successfully"',
                     {"event_action": "login", "user_name": "admin", "source_address": "192.0.2.10", "fortigate_log_type": "event",
-                     "fortigate_log_subtype": "system"}),
+                     "fortigate_log_subtype": "system", "event_outcome": "success"}),
     "admin_login_failed": ('logid="0100032002" type="event" subtype="system" level="alert" vd="root" logdesc="Admin login failed" '
                            'action="login" status="failed" user="admin" ui="ssh(192.0.2.11)" reason="passwd_invalid"',
                            {"event_action": "login", "user_name": "admin", "source_address": "192.0.2.11",
-                            "fortigate_log_type": "event", "fortigate_log_subtype": "system"}),
+                            "fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_outcome": "failure",
+                            "event_reason": "passwd_invalid"}),
     "config_change": ('logid="0100044546" type="event" subtype="system" level="information" vd="root" logdesc="Attribute configured" '
                       'action="Edit" user="admin" ui="GUI(192.0.2.10)" cfgpath="firewall.policy" cfgobj="7" msg="Edit firewall.policy 7"',
                       {"event_action": "edit", "user_name": "admin", "source_address": "192.0.2.10", "fortigate_log_type": "event",
@@ -326,6 +327,26 @@ def test_firewall_line_gets_device_type_subtype_action_source_user_and_policy_fi
     rec = _fgt(rest)
     expected = {"device_name": "ns0399", "device_id": "ns0399", **expected}
     assert _added(rec, _apply_fgt(tmp_path, rec)) == expected
+
+
+# 관리자 로그인 결과(Spec #544 / Ticket-7 #562): subtype=system·action=login 줄만 status를 event_outcome(success|failure)으로,
+# 실패의 reason을 event_reason으로 옮긴다. 서버 sshd와 같은 이름이라 Log Review가 같은 조회식을 쓴다. 다른 줄의 status·reason
+# (VPN 터널 reason="login successfully", 엔드포인트 status="error")은 옮기지 않는다.
+@pytest.mark.parametrize("rest", [
+    'type="event" subtype="vpn" action="tunnel-up" status="success" reason="login successfully" remip=192.0.2.20',
+    'type="event" subtype="endpoint" action="add" status="error" reason="License Number Exceeded"',
+    'type="event" subtype="system" action="Edit" status="success" user="admin" ui="GUI(192.0.2.10)"',
+    'type="event" subtype="system" action="login" user="admin" ui="https(192.0.2.10)"',
+    'type="event" subtype="system" action="login" status="locked" user="admin" ui="https(192.0.2.10)"',
+])
+def test_only_admin_login_lines_with_a_known_status_get_an_outcome_and_a_reason(tmp_path, rest):
+    out = _apply_fgt(tmp_path, _fgt(rest))
+    assert "event_outcome" not in out and "event_reason" not in out
+
+
+def test_a_failed_admin_login_without_a_reason_gets_only_the_outcome(tmp_path):
+    out = _apply_fgt(tmp_path, _fgt('type="event" subtype="system" action="login" status="failed" user="admin" ui="ssh(192.0.2.11)"'))
+    assert out["event_outcome"] == "failure" and "event_reason" not in out
 
 
 @pytest.mark.parametrize("dev, name, ident", [("NS0380", "ns0380", "ns0380"), ("ns0381", "ns0381", "ns0381"), ("Ns0399", "ns0399", "ns0399"),
@@ -432,9 +453,11 @@ OFFICE = {"device_name": "example_branch_fw", "device_id": "ns0001"}   # 관리�
 IDC1 = {"device_name": "ns0001", "device_id": "ns0001"}
 REAL_CASES = {
     "login_failed": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "login",
-                              "source_address": "192.0.2.11", "user_name": "example-admin"}),
+                              "source_address": "192.0.2.11", "user_name": "example-admin", "event_outcome": "failure",
+                              "event_reason": "passwd_invalid"}),
+    # 성공 줄의 reason="none"은 사유가 아니다: event_reason을 만들지 않는다(서버 sshd처럼 사유는 실패에만)
     "login_success": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "login",
-                               "source_address": "192.0.2.11", "user_name": "example-admin"}),
+                               "source_address": "192.0.2.11", "user_name": "example-admin", "event_outcome": "success"}),
     "policy_edit_gui": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "edit",
                                  "source_address": "192.0.2.11", "user_name": "example-admin"}),
     "syslogd_filter_edit": (OFFICE, {"fortigate_log_type": "event", "fortigate_log_subtype": "system", "event_action": "edit",
