@@ -2,8 +2,9 @@
 """RustFS 사용자·그룹·서비스 계정·정책 읽기 전용 수집기 (#368, Spec #364).
 
 관리 API의 GET 조회만 쓴다. 접근키는 출력하지 않고 해시 앞 12자(key_id)로만 기록하며
-비밀키는 어디에도 쓰지 않는다. 자격은 OpenBao `agents/rustfs`의 유지보수 키를 쓰고,
-OpenBao 주소·토큰은 환경변수 OPENBAO_URL/OPENBAO_TOKEN 또는 --env-file(줄 단위로 파싱)에서 얻는다.
+비밀키는 어디에도 쓰지 않는다. 주소·리전은 OpenBao `inventory/services/rustfs`, 유지보수 키는
+`secrets/services/rustfs/maintenance`에서 읽는다(네임스페이스 `infra`, Spec #511).
+접속은 운영자 `operator` 토큰이다: 환경변수 VAULT_ADDR/VAULT_TOKEN(선택 VAULT_NAMESPACE) 또는 --env-file(줄 단위로 파싱).
 
 사용법:
   scripts/collect-rustfs-policy.py --label ns0331 --env-file <저장소 루트 .env>
@@ -23,6 +24,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parent.parent / "lookup_plugins"))   # 끝에 붙인다(stdlib·scripts/ 이름을 가리지 않는다)
+import _bao_http  # noqa: E402
 
 ADMIN = "/rustfs/admin/v3"
 DEFAULT_BASE = Path.home() / ".local/share/infra-automation/sec-review-20261026/baseline"
@@ -65,7 +69,7 @@ def make_fetch(endpoint, access_key, secret_key, region="us-east-1"):
                                        f"SignedHeaders={signed}, Signature={sig}")},
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with _bao_http.urlopen(req, timeout=30) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             raise SystemExit(f"RustFS API 오류 {e.code}: {path}")
@@ -125,11 +129,35 @@ def _parse_env_file(path):
     return env
 
 
-def _openbao_kv(url, token, path):
-    req = urllib.request.Request(f"{url}/v1/secret/data/{path}",
-                                 headers={"X-Vault-Token": token, "X-Vault-Namespace": "infra/prod/host"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())["data"]["data"]
+def _openbao_doc(addr, token, namespace, mount, doc):
+    req = urllib.request.Request(f"{addr.rstrip('/')}/v1/{mount}/data/{doc}",
+                                 headers={"X-Vault-Token": token, "X-Vault-Namespace": namespace})
+    try:
+        with _bao_http.urlopen(req, timeout=30) as r:
+            body = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"OpenBao 조회 실패: {mount}/{doc} (HTTP {e.code})")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise SystemExit(f"OpenBao 접속 실패: {mount}/{doc} ({type(e).__name__})")
+    data = ((body or {}).get("data") or {}).get("data")
+    if not isinstance(data, dict):
+        raise SystemExit(f"OpenBao 응답에 문서 데이터가 없습니다: {mount}/{doc}")
+    return data
+
+
+def read_rustfs_service(env):
+    """RustFS 주소·리전과 유지보수 키를 새 구조에서 읽는다. 없는 문서·키는 대체값 없이 멈춘다."""
+    addr, token = env.get("VAULT_ADDR"), env.get("VAULT_TOKEN")
+    if not addr or not token:
+        raise SystemExit("VAULT_ADDR와 VAULT_TOKEN(운영자 operator 토큰)이 필요합니다.")
+    ns = env.get("VAULT_NAMESPACE") or "infra"
+    svc = _openbao_doc(addr, token, ns, "inventory", "services/rustfs")
+    key = _openbao_doc(addr, token, ns, "secrets", "services/rustfs/maintenance")
+    try:
+        return {"endpoint": svc["url"], "region": svc.get("region") or "us-east-1",
+                "access_key": key["access_key"], "secret_key": key["secret_key"]}
+    except KeyError as e:
+        raise SystemExit(f"필수 키가 없습니다: {e.args[0]}")
 
 
 def _check_out_dir(base):
@@ -154,9 +182,9 @@ def main():
         env = {**_parse_env_file(args.env_file), **env}
     base = Path(args.out)
     _check_out_dir(base)
-    kv = _openbao_kv(env["OPENBAO_URL"], env["OPENBAO_TOKEN"], "agents/rustfs")
-    report = build_report(make_fetch(kv["rustfs_endpoint"], kv["maintenance_access_key"], kv["maintenance_secret_key"]))
-    if SECRET_PATTERN.search(report) or kv["maintenance_secret_key"] in report:
+    kv = read_rustfs_service(env)
+    report = build_report(make_fetch(kv["endpoint"], kv["access_key"], kv["secret_key"], kv["region"]))
+    if SECRET_PATTERN.search(report) or kv["secret_key"] in report:
         raise SystemExit("거부: 결과에 시크릿으로 보이는 패턴이 있어 저장하지 않습니다.")
     out = base / args.label / datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
     out.mkdir(parents=True, mode=0o700)

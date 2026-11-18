@@ -11,7 +11,8 @@
   ansible.builtin.assert:
     that:
       - host_audit_run_kind in ['scheduled', 'on_demand']
-    fail_msg: "host_audit_run_kind는 scheduled 또는 on_demand여야 합니다 (현재: {{ host_audit_run_kind }})"
+      - host_audit_environment in ['production', 'staging', 'development', 'test']
+    fail_msg: "host_audit_run_kind는 scheduled 또는 on_demand, host_audit_environment는 production|staging|development|test여야 합니다 (현재: {{ host_audit_run_kind }}, {{ host_audit_environment }})"
     quiet: true
 
 - name: "[AUD-002] Fix the run start time once per run"

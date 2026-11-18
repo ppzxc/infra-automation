@@ -1,0 +1,2 @@
+inventory/assets/ns0001/endpoints	#/ssh/via	via_cycle
+inventory/assets/ns0002/endpoints	#/ssh/via	via_cycle

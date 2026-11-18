@@ -289,13 +289,14 @@ def _host_agents(v):
     }
 
 
-# OpenBao hosts/<Inventory Hostname> 키 -> 기록 키. 같은 dict에 접속 정보가 있어 이 다섯 키만 고른다.
+# Asset 문서(inventory/assets/<Inventory Hostname>)의 키 경로 -> 기록 키. 같은 문서에 접속 절(access)과 에이전트 절이 있어
+# description과 isms 절의 네 키만 고른다. 나머지 isms 키(target·group_asset_name·personal_info_system)는 자산대장 스크립트의 몫이라 읽지 않는다.
 DECLARATION_KEYS = [
-    ('description', 'purpose'),
-    ('isms_department', 'department'),
-    ('isms_owner_role', 'owner_role'),
-    ('isms_admin_role', 'admin_role'),
-    ('isms_asset_importance', 'asset_importance'),
+    (('description',), 'purpose'),
+    (('isms', 'department'), 'department'),
+    (('isms', 'owner_role'), 'owner_role'),
+    (('isms', 'admin_role'), 'admin_role'),
+    (('isms', 'asset_importance'), 'asset_importance'),
 ]
 
 
@@ -307,11 +308,18 @@ def _cap(text, limit):
     return text if len(text) <= limit else text[:limit - 1] + '…'
 
 
-def host_audit_asset_declaration(host_kv, lookup_ok=True):
-    """Asset Inventory declared values from the host KV that ``resolve_connection`` already read.
+def _doc_value(doc, path):
+    for key in path:
+        doc = doc.get(key) if isinstance(doc, dict) else None
+    return doc
 
-    Picks exactly five keys (never hands the whole dict on: it also holds connection values).
-    ``lookup_ok`` false (``hosts/<host>`` did not answer 200) -> every value empty and ``lookup: failed``.
+
+def host_audit_asset_declaration(asset_doc, lookup_ok=True):
+    """Asset Inventory declared values from the Asset document that ``resolve_connection`` already read (``_asset_doc``).
+
+    Picks exactly five values (``description`` and four ``isms`` keys; never hands the whole document on: it also
+    holds the access clause).
+    ``lookup_ok`` false (the document is not published for this host) -> every value empty and ``lookup: failed``.
 
     Values are kept as the ledger copy has them (evidence): only surrounding blanks are cut and a value
     longer than 500 characters ends with '…' (far above a description with its trailing ``[그룹자산명]``;
@@ -321,15 +329,17 @@ def host_audit_asset_declaration(host_kv, lookup_ok=True):
     from a lookup or a filter is untrusted by default); ``tests/test_host_audit_inventory.py`` proves
     with a real run that template text stays text.
     """
-    host_kv = host_kv if isinstance(host_kv, dict) and lookup_ok else {}
+    asset_doc = asset_doc if isinstance(asset_doc, dict) and lookup_ok else {}
     decl = {}
     malformed = []
-    for kv_key, key in DECLARATION_KEYS:
-        value = host_kv.get(kv_key)
-        if value is not None and not isinstance(value, str):
+    for path, key in DECLARATION_KEYS:
+        value = _doc_value(asset_doc, path)
+        # isms 절이 객체가 아니면(문자열·목록) 그 아래 값은 읽을 수 없다: 비어 있는 것이 아니라 잘못된 값이다.
+        clause_broken = len(path) > 1 and asset_doc.get(path[0]) is not None and not isinstance(asset_doc.get(path[0]), dict)
+        if clause_broken or (value is not None and not isinstance(value, str)):
             malformed.append(key)
             value = ''
-        # KV text is data, never a template: ansible-core < 2.19 needs the explicit unsafe mark (2.19+ is a no-op).
+        # Document text is data, never a template: ansible-core < 2.19 needs the explicit unsafe mark (2.19+ is a no-op).
         decl[key] = unsafe(_cap(value.strip(), DECLARED_MAX_LEN)) if isinstance(value, str) else ''
     decl['lookup'] = 'ok' if lookup_ok else 'failed'
     if malformed:

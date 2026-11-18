@@ -1,0 +1,11 @@
+---
+# 이 역할이 OpenBao에서 읽는 문서와 필수 키(Spec #511 / Ticket-16). 형식: {schemas/openbao/index.yml 패턴: [필수 키, ...]}, 필수 키가 없는 선택 문서는 [].
+# 같은 선언을 입력 검증 assert(O2C-002), 스키마 `required` 대조 테스트, 요청 기록 단언이 쓴다. 외부에서 바꾸지 않는다.
+openobserve_config_openbao_required:
+  "inventory/services/openobserve": [url]
+  "secrets/services/openobserve/admin": [username, password]
+  "secrets/services/openobserve/ingest": [username, password]
+  "secrets/services/alert/notify": [url]
+  "inventory/config/openobserve_config": []
+  "inventory/assets/+": []
+  "inventory/assets/+/endpoints": []

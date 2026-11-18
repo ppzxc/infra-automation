@@ -2,20 +2,22 @@
 # Host Agents 백업 (restic + resticprofile, ADR-0006 §2.4~2.5)
 enable_backup: true
 
-# RustFS(S3) 연결. 우선순위: Extra variables/group_vars > OpenBao agents/rustfs의 같은 이름 키 > 아래 기본값.
-# 저장소가 공개(PUBLIC)라 내부 도메인을 Git에 두지 않는다 — 평상시에는 OpenBao agents/rustfs에 넣는다.
+# RustFS(S3) 연결. 우선순위: Extra variables/group_vars > OpenBao inventory/services/rustfs(url·region) > 아래 기본값.
+# 저장소가 공개(PUBLIC)라 내부 도메인을 Git에 두지 않는다 — 평상시에는 OpenBao Service 문서에 넣는다.
 # 호스트별 repo: s3:<rustfs_endpoint>/<rustfs_bucket> (버킷 루트)
-rustfs_endpoint: "{{ ((host_agents_shared_secrets | default({})).rustfs | default({})).rustfs_endpoint | default('', true) }}"        # 예: https://rustfs.example.internal:9000 (끝 슬래시 금지)
-# 버킷은 호스트(액세스 키)마다 하나다. 해석 순서: Extra variables/group_vars > hosts/<host>/agents의 rustfs_bucket > 규칙 <rustfs_bucket_prefix>-<inventory_hostname>.
-# 공용 agents/rustfs의 rustfs_bucket은 쓰지 않는다(실수로 공용 버킷에 백업이 쌓이는 것을 막는다).
+rustfs_endpoint: "{{ (host_agents_services | default({})).rustfs.url | default('', true) }}"        # 예: https://rustfs.example.internal:9000 (끝 슬래시 금지)
+# 버킷은 호스트(액세스 키)마다 하나다. 해석 순서: Extra variables > Asset 문서의 agents.backup.bucket(이름 규칙 밖인 이전·개명 호스트만) >
+# 규칙 <rustfs_bucket_prefix>-<inventory_hostname>. 공용 버킷은 키 하나로 둘 수 없다(스키마가 S3 이름 규칙을 검증한다).
+# Deploy는 MON-033이 만든 host_agents_inputs.backup_bucket, Repo Maintenance는 BAK-088이 Asset 문서에서 읽어 backup_asset_bucket에 둔다.
 rustfs_bucket_prefix: "backup-prod"
-rustfs_bucket: "{{ ((host_agents_host_overrides | default({})).rustfs_bucket | default('', true)) or (rustfs_bucket_prefix ~ '-' ~ inventory_hostname) }}"
-rustfs_region: "{{ ((host_agents_shared_secrets | default({})).rustfs | default({})).rustfs_region | default('', true) }}"          # 비우면 AWS_DEFAULT_REGION을 설정하지 않는다
-rustfs_ca_file: "{{ ((host_agents_shared_secrets | default({})).rustfs | default({})).rustfs_ca_file | default('', true) }}"         # 사설 CA 사용 시 호스트상의 CA 파일 경로(restic --cacert)
+backup_asset_bucket: "{{ (host_agents_inputs | default({})).backup_bucket | default('', true) }}"
+rustfs_bucket: "{{ backup_asset_bucket if ((backup_asset_bucket | string | length) > 0) else (rustfs_bucket_prefix ~ '-' ~ inventory_hostname) }}"
+rustfs_region: "{{ (host_agents_services | default({})).rustfs.region | default('', true) }}"          # 비우면 AWS_DEFAULT_REGION을 설정하지 않는다
+rustfs_ca_file: "{{ (host_agents_services | default({})).rustfs.ca_file | default('', true) }}"   # 사설 CA 사용 시 호스트상의 CA 파일 경로(restic --cacert). OpenBao inventory/services/rustfs의 ca_file(선택)
 
 # OpenObserve 연결 — Repo Maintenance(backup 역할만 로드)와 Deploy 등록 이벤트가 쓴다. monitoring defaults와 동일하게 유지한다.
-o2_endpoint: "{{ ((host_agents_shared_secrets | default({})).openobserve | default({})).o2_endpoint | default('', true) }}"
-o2_org: "{{ ((host_agents_shared_secrets | default({})).openobserve | default({})).o2_org | default('default', true) }}"
+o2_endpoint: "{{ (host_agents_services | default({})).openobserve.url | default('', true) }}"
+o2_org: "{{ (host_agents_services | default({})).openobserve.org | default('default', true) }}"
 
 # 바이너리 전달 헬퍼(monitoring/tasks/deliver_binary.yml 공용)가 쓰는 값 — monitoring defaults와 동일하게 유지한다.
 host_agents_cache_dir: "{{ lookup('ansible.builtin.env', 'HOME') | default('/tmp', true) }}/.cache/host-agents"
@@ -63,7 +65,7 @@ backup_standard_excludes:
   - /etc/restic/password
 
 # 백업 전 SQLite 스냅샷 (Spec #322 / Ticket-1, #323). 호스트별 입력 backup_sqlite_snapshots(SQLite 파일 절대 경로 목록, OpenBao
-# hosts/<host>/agents)가 있을 때만 쓰인다: 백업 직전에 각 파일을 sqlite3 online backup으로 아래 디렉터리에 스냅샷으로 만들고 그 디렉터리를 백업한다.
+# Asset 문서 inventory/assets/<host>의 agents.backup)가 있을 때만 쓰인다: 백업 직전에 각 파일을 sqlite3 online backup으로 아래 디렉터리에 스냅샷으로 만들고 그 디렉터리를 백업한다.
 # 입력이 없는 호스트에서는 이 값들이 쓰이지 않고 프로파일·유닛이 바뀌지 않는다. 디렉터리는 서비스 샌드박스가 이미 쓸 수 있는 /var/backups 아래에 둔다.
 backup_sqlite_snapshot_script_path: /usr/local/sbin/host-agents-sqlite-snapshot
 backup_sqlite_snapshot_dir: /var/backups/host-agents-sqlite
@@ -78,7 +80,7 @@ backup_hook_write_paths:
   - /var/backups
 
 # Repo Maintenance (Semaphore "Host Agents — Repo Maintenance", 컨트롤러 실행, playbooks/host_agents_maintenance.yml)
-# 호스트별 repo에 대해 check → (성공 시) forget --prune. 유지보수 키/컨트롤러 토큰은 OpenBao agents/rustfs, agents/openobserve.
+# 호스트별 repo에 대해 check → (성공 시) forget --prune. 유지보수 키/컨트롤러 토큰은 OpenBao secrets/services/rustfs/maintenance(유지보수 키), secrets/services/openobserve/ingest(컨트롤러 토큰).
 backup_retention_daily: 7
 backup_retention_weekly: 4
 backup_retention_monthly: 12
@@ -91,7 +93,8 @@ backup_host_key_unlock_sid: HostKeyUnlockLocks
 backup_maintenance_read_subset: auto
 backup_maintenance_timezone: Asia/Seoul   # 스케줄(일요일 05:00)이 기준으로 삼는 달력 시간대
 backup_maintenance_read_subset_percent: "10%"
-# 컨트롤러에서 RustFS 사설 CA를 신뢰시킬 때의 CA 파일 경로(RESTIC_CACERT). rustfs_ca_file은 호스트 경로이므로 따로 둔다.
-backup_maintenance_ca_file: ""
+# 컨트롤러에서 RustFS 사설 CA를 신뢰시킬 때의 CA 파일 경로(RESTIC_CACERT). rustfs_ca_file은 호스트 경로이므로 따로 두지만
+# 값의 출처는 같은 OpenBao inventory/services/rustfs의 ca_file(선택)이다(컨트롤러에도 같은 경로로 CA 파일이 있어야 한다).
+backup_maintenance_ca_file: "{{ (host_agents_services | default({})).rustfs.ca_file | default('', true) }}"
 # 테스트 전용 seam: 비워 두면 s3:<rustfs_endpoint>/<rustfs_bucket>를 사용한다(molecule/pytest만 로컬 repo를 지정).
 backup_maintenance_repository: ""

@@ -29,7 +29,8 @@ Ansible과 Semaphore UI는 저장소 루트(`cwd`)를 기준으로 동작하므�
 ## 4. 보안 및 시크릿(Secret) 관리
 1. **Git 무결성 및 평문 시크릿 커밋 금지**
    - Private Key, Passwords, S3 Secret Key, Tokens(OpenBao/Vault/GitHub)는 절대로 Git에 커밋하지 않습니다.
-   - 시크릿은 Semaphore UI의 Environment(-e) 주입 또는 OpenBao/Vault lookup 플러그인을 활용합니다.
+   - 시크릿은 OpenBao에만 두고 공용 읽기 지점(`lookup('openbao_doc', ...)`)이 계열 AppRole로 읽습니다. Semaphore 계열 Environment에는 `VAULT_ADDR`와 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`)만 둡니다. 평문 토큰 경로는 없습니다.
+   - **에이전트 세션 규칙**: 에이전트 세션은 OpenBao의 `inventory/`만 읽고(개인정보·웹훅 주소 문서 `config/host_audit`·`config/github_webhook_watch`는 제외) `secrets/`의 비밀 값은 읽지 못합니다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청합니다. 읽는 방식과 계열 표는 `docs/openbao_integration.md` 5절입니다.
 2. **권한 최소화**
    - 민감한 설정/키 파일은 반드시 `mode: '0600'` 이하로 제한합니다.
    - **예외: 시크릿 env 파일은 `mode: '0640'` `root:dockermgmt`입니다.** compose는 `env_file:`을 *실행한 사용자* 권한으로 읽는데 실행 주체가 `docker` 그룹의 개인 운영자 계정이고, `docker` 그룹은 root와 같은 권한이라 이 그룹에게 읽기를 막아도 실질적인 보호가 늘지 않습니다. 막는 대상은 `dockermgmt`가 아닌 계정입니다. 예외는 소비자별로 나눈 시크릿 env 파일(예: `funa_env`의 `proxy.secrets.env`, `vrrp.secrets.env`)에만 적용합니다(근거: ADR-0002 개정, #222).

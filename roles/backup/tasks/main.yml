@@ -47,9 +47,10 @@
         - rustfs_endpoint | length > 0
         - rustfs_endpoint is match('^https?://')
         - not (rustfs_endpoint is match('.*/$'))
-        - rustfs_bucket is match('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
+        # 버킷 이름 규칙은 필터 한 곳(host_agents_valid_bucket)이다: 문자열이 아니거나 줄바꿈이 붙은 이름도 거른다.
+        - rustfs_bucket | host_agents_valid_bucket
       fail_msg: >-
-        {{ inventory_hostname }}: rustfs_endpoint(OpenBao agents/rustfs 또는 Extra variables)나 버킷 이름({{ rustfs_bucket }})이 잘못되었습니다
+        {{ inventory_hostname }}: rustfs_endpoint(OpenBao inventory/services/rustfs 또는 Extra variables)나 버킷 이름({{ rustfs_bucket }})이 잘못되었습니다
         (endpoint: http(s)://host:port, 끝 슬래시 금지 / 버킷: S3 규칙 — 소문자·숫자·점·하이픈 3~63자, 밑줄·대문자 불가).
       quiet: true
 
@@ -320,9 +321,10 @@
   - name: "[BAK-060] Assert the controller OpenObserve ingestion token exists"
     ansible.builtin.assert:
       that:
-        - (host_agents_shared_secrets.openobserve.controller_ingest_token | default('')) | length > 0
+        - (host_agents_ingest_auth | default({})).username | default('') | length > 0
+        - (host_agents_ingest_auth | default({})).password | default('') | length > 0
         - o2_endpoint | length > 0
-      fail_msg: "{{ inventory_hostname }}: agents/openobserve의 controller_ingest_token 또는 o2_endpoint가 없어 등록 이벤트를 보낼 수 없습니다."
+      fail_msg: "{{ inventory_hostname }}: secrets/services/openobserve/ingest의 username·password 또는 inventory/services/openobserve의 url이 없어 등록 이벤트를 보낼 수 없습니다."
       quiet: true
     no_log: true
     when:
@@ -334,7 +336,7 @@
       url: "{{ o2_endpoint }}/api/{{ o2_org }}/backup_logs/_json"
       method: POST
       headers:
-        Authorization: "Basic {{ (o2_org ~ ':' ~ host_agents_shared_secrets.openobserve.controller_ingest_token) | b64encode }}"
+        Authorization: "Basic {{ (host_agents_ingest_auth.username ~ ':' ~ host_agents_ingest_auth.password) | b64encode }}"
       body_format: json
       body:
         - job: inventory

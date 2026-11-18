@@ -97,8 +97,25 @@ def test_failing_health_sends_one_p1_notification_to_the_webhook(world):
     (req,) = posts(world)
     assert req["path"] == WEBHOOK_URL_PATH
     assert req["headers"]["X-NANOIT-ACCESS"] == "tok-123"
-    text = json.loads(req["body"])["content"]["text"]
+    assert req["headers"]["Content-Type"].startswith("text/plain")
+    text = req["body"]
+    assert not text.lstrip().startswith("{") and "\\n" not in text and "\n■ 조치" in text
     assert "[P1 긴급]" in text and "OpenObserve" in text
+
+
+def test_query_string_of_the_health_url_is_not_put_in_the_alert_body(world):
+    run_check(world, O2_HEALTH_URL_OVERRIDE="http://127.0.0.1:1/healthz?token=SECRET-QUERY")
+    (req,) = posts(world)
+    assert "SECRET-QUERY" not in req["body"] and "■ 대상: http://127.0.0.1:1/healthz\n" in req["body"]
+
+
+def test_a_body_over_the_old_json_limit_is_delivered_whole(world):
+    """JSON 경로는 본문 2000자를 넘으면 거부했다. text/plain 경로는 그대로 전달한다."""
+    long_target = "http://127.0.0.1:1/" + "x" * 3000
+    run_check(world, O2_HEALTH_URL_OVERRIDE=long_target)
+    (req,) = posts(world)
+    assert len(req["body"]) > 2000
+    assert req["body"].rstrip().endswith("#openobserve-health")
 
 
 def test_unreachable_openobserve_is_also_a_failure(world):
@@ -174,9 +191,7 @@ def _deploy(tmp_path, is_checker, os_path="modern", expect_ok=True):
         "role_path": str(ROLE), "host_agents_os_path": os_path, "ansible_service_mgr": "sysv",
         "host_agents_o2_health_checker": "localhost" if is_checker else "ns0266",
         "o2_endpoint": "https://o2.example:5080", "o2_ca_file": "",
-        "host_agents_shared_secrets": {"openobserve": {
-            "alert_webhook_url": "https://hook.example/SECRET", "alert_webhook_token": "tok",
-            "alert_webhook_auth_header": "X-NANOIT-ACCESS"}},
+        "openbao_fixture": {"secrets/services/alert/notify": {"url": "https://hook.example/SECRET"}},
         "o2_health_script_path": str(t / "sbin" / "check.sh"), "o2_health_config_dir": str(t / "etc"),
         "o2_health_state_dir": str(t / "var"), "otelcol_systemd_unit_dir": str(t / "units"),
         "host_agents_owner": getpass.getuser(), "host_agents_group": grp.getgrgid(os.getgid()).gr_name,
@@ -233,3 +248,20 @@ def test_non_checker_host_on_a_non_modern_path_is_not_an_error(tmp_path):
 def test_checker_host_is_declared_in_role_defaults_and_defaults_to_ns0266():
     d = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text())
     assert d["host_agents_o2_health_checker"] == "ns0266"
+
+
+def test_deploy_fails_before_any_change_when_the_alert_notify_document_is_missing(tmp_path):
+    """secrets/services/alert/notify 문서가 없으면 다른 값으로 대체하지 않고 배포 전에 실패한다."""
+    t = tmp_path
+    vars_ = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text())
+    vars_.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text()))
+    vars_.update({"role_path": str(ROLE), "host_agents_os_path": "modern", "ansible_service_mgr": "sysv",
+                  "host_agents_o2_health_checker": "localhost", "o2_endpoint": "https://o2.example:5080",
+                  "o2_ca_file": "", "openbao_fixture": {"inventory/services/openobserve": {"url": "https://o2.example:5080"}}})
+    (t / "vars.yml").write_text(yaml.safe_dump(vars_))
+    pb = t / "deploy.yml"
+    pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False,
+        "vars_files": [str(t / "vars.yml")], "tasks": [{"ansible.builtin.import_tasks": str(TASKS)}]}]))
+    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True,
+                         stdin=subprocess.DEVNULL, cwd=ROOT, timeout=120)
+    assert res.returncode != 0 and "secrets/services/alert/notify" in res.stdout + res.stderr

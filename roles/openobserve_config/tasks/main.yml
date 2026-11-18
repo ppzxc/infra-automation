@@ -5,81 +5,38 @@
 # 순서: 입력 해석(OpenBao) → 원하는 상태 도출 → GET으로 현재 상태 조회 → 차이만 계획 → (check 모드가 아니면) POST/PUT.
 # 모든 API 호출 태스크는 no_log다 — 통지 대상(destination)에 webhook URL/토큰이 들어 있다.
 # check 모드: GET과 계획 출력만 한다(쓰기 요청 0건).
-# OpenBao 인증: AppRole(VAULT_ROLE_ID/VAULT_SECRET_ID)이 있으면 로그인해 받은 토큰을 먼저 쓰고, 없거나 실패하면 VAULT_TOKEN을 쓴다.
-# Semaphore의 다른 템플릿과 같은 순서다 — 만료된 VAULT_TOKEN 때문에 KV가 비어 입력 누락으로 실패하던 문제를 막는다.
-# OpenBao 접속 값은 여기서 한 번만 해석하고 아래 태스크가 함께 쓴다(태스크마다 같은 해석을 되풀이하지 않는다).
-# 토큰은 AppRole 로그인(O2C-000) 뒤에 해석하므로 따로 둔다. 시크릿이 들어 있어 no_log이고 팩트 캐시에 두지 않는다.
-- name: Resolve the OpenBao address, namespace and mount used by the tasks below
+# OpenBao: 읽는 곳은 공용 읽기 지점(lookup('openbao_doc', '<마운트>/<문서 경로>'))뿐이다(docs/openbao_integration.md). 네임스페이스·마운트·인증·우회는 거기서 정하고
+# 이 역할은 경로 접두사도 토큰 대체 경로도 갖지 않는다. 읽는 문서는 `openobserve_config_openbao_required`(vars/main.yml)가 선언한다.
+# 문서가 없거나(선택 문서 제외) 403이거나 연결이 안 되면 대체값 없이 실패한다. 값은 로그에 남기지 않는다(no_log, 팩트 캐시 금지).
+- name: "[O2C-000] Log in to OpenBao once for the whole play through the shared reader (AppRole)"
   ansible.builtin.set_fact:
-    o2c_vault_addr: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
-    o2c_vault_ns: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
-    o2c_vault_mount: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
-    cacheable: false
-  no_log: true
-
-- name: "[O2C-000] Log in to OpenBao with AppRole for the OpenObserve configuration KV"
-  ansible.builtin.uri:
-    url: "{{ o2c_vault_addr }}/v1/auth/approle/login"
-    method: POST
-    headers: "{{ {'X-Vault-Namespace': o2c_vault_ns} if (o2c_vault_ns | length > 0) else {} }}"
-    body_format: json
-    body:
-      role_id: "{{ o2c_vault_role_id }}"
-      secret_id: "{{ o2c_vault_secret_id }}"
-    status_code: [-1, 200, 400, 401, 403, 404, 500]
-    timeout: 5
-    validate_certs: "{{ o2c_vault_validate_certs }}"
-  register: _o2c_approle_login
-  changed_when: false
-  check_mode: false
-  no_log: true
-  when:
-    - o2c_kv_fixture is not defined
-    - o2c_vault_role_id | length > 0
-    - o2c_vault_secret_id | length > 0
-
-- name: Resolve the OpenBao token (the AppRole login token first, then VAULT_TOKEN)
-  ansible.builtin.set_fact:
-    o2c_vault_token: "{{ (_o2c_approle_login.json.auth.client_token | default('')) or (vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true)) }}"
+    _vault_token: "{{ lookup('openbao_doc', '@token') }}"
     cacheable: false   # the token never goes to the fact cache (ansible.cfg fact_caching = jsonfile)
-  no_log: true
-
-- name: "[O2C-001] Fetch OpenObserve configuration KV from OpenBao (agents/openobserve)"
-  ansible.builtin.uri:
-    url: "{{ o2c_vault_addr }}/v1/{{ o2c_vault_mount }}/data/agents/openobserve"
-    method: GET
-    headers: >-
-      {{ {'X-Vault-Token': o2c_vault_token} | combine({'X-Vault-Namespace': o2c_vault_ns} if (o2c_vault_ns | length > 0) else {}) }}
-    status_code: [200, 404]
-    timeout: 5
-    validate_certs: "{{ o2c_vault_validate_certs }}"
-  register: _o2c_kv_resp
-  changed_when: false
-  failed_when: false
   check_mode: false
   no_log: true
-  when:
-    - o2c_kv_fixture is not defined
-    - o2c_vault_token | length > 0
+
+- name: "[O2C-001] Read the OpenObserve configuration documents from OpenBao (openobserve service, admin, ingest, alert notify, job config)"
+  ansible.builtin.set_fact:
+    o2c_docs:
+      inventory/services/openobserve: "{{ lookup('openbao_doc', 'inventory/services/openobserve') }}"
+      secrets/services/openobserve/admin: "{{ lookup('openbao_doc', 'secrets/services/openobserve/admin') }}"
+      secrets/services/openobserve/ingest: "{{ lookup('openbao_doc', 'secrets/services/openobserve/ingest') }}"
+      secrets/services/alert/notify: "{{ lookup('openbao_doc', 'secrets/services/alert/notify') }}"
+      inventory/config/openobserve_config: "{{ lookup('openbao_doc', 'inventory/config/openobserve_config', required=false) }}"
+    cacheable: false   # credentials never go to the fact cache (ansible.cfg fact_caching = jsonfile)
+  check_mode: false
+  no_log: true
 
 - name: "[O2C-002] Resolve and assert the OpenObserve inputs (endpoint, API account, webhook URL)"
-  vars:
-    _kv: "{{ o2c_kv_fixture if o2c_kv_fixture is defined else (_o2c_kv_resp.json.data.data | default({})) }}"
   block:
-    - name: Keep the resolved KV as a fact
-      ansible.builtin.set_fact:
-        o2c_kv: "{{ _kv }}"
-        cacheable: false   # credentials never go to the fact cache (ansible.cfg fact_caching = jsonfile)
-      no_log: true
-
     - name: Assert the required inputs exist
       ansible.builtin.assert:
         that:
           - o2c_endpoint | length > 0
           - o2c_endpoint is match('^https?://[^/]+(/.*[^/])?$')
-          - (o2c_kv.api_user | default('')) | length > 0
-          - (o2c_kv.api_password | default('')) | length > 0
-          - (o2c_kv.alert_webhook_plain_url | default('')) is match('^https?://')
+          # 선언한 필수 키(openobserve_config_openbao_required)가 읽은 문서에 있는가: 없으면 문서 경로와 키 이름만 밝히고 실패한다
+          - o2c_docs | o2c_missing_openbao_keys(openobserve_config_openbao_required) | length == 0
+          - (o2c_notify.url | default('')) is match('^https?://')
           # 정상 출발지는 SQL에 들어가므로 IP 문자와 알려진 종류만 허용한다
           - (o2c_normal_sources | selectattr('address', 'match', '^[0-9A-Fa-f.:]+$') | selectattr('kind', 'in', ['semaphore', 'office']) | list | length) == (o2c_normal_sources | length)
           # Silent Host 계획 정지 예외는 SQL에 들어가므로 호스트 이름 문자와 만료일(YYYY-MM-DD)이 필수다
@@ -160,7 +117,7 @@
           - (o2c_p1_destination | string) is match('^[A-Za-z0-9._-]*$')
           - (o2c_retired_alerts | o2c_retired_conflicts((o2c_alerts_managed | map(attribute='name') | list) + [o2c_selftest_alert.name])) | length == 0
         fail_msg: >-
-          agents/openobserve에 o2_endpoint(끝 슬래시 금지), api_user, api_password, alert_webhook_plain_url이 필요하고 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
+          inventory/services/openobserve의 url(끝 슬래시 금지)과 secrets/services/openobserve의 admin·ingest(username, password), secrets/services/alert/notify의 url(http(s)://)이 필요하고 inventory/config/openobserve_config의 normal_sources는 [{address: IP, kind: semaphore|office}], silent_host_exceptions는 [{host: 호스트명, expires: YYYY-MM-DD}](만료일 필수) 형식이어야 합니다
           (스위치 syslog 알림 변수는 o2c_switch_*_events가 FACILITY-SEVERITY-MNEMONIC 코드 목록, o2c_switch_syslog_roster가 [ns0250, ...], o2c_switch_uplinks가 [{device: ns0250, port: Gi1/0/49}] 형식이어야 합니다)
           (방화벽 알림 변수는 o2c_fortigate_syslog_roster가 [ns0399, 장비 이름, ns0380+ns0381], o2c_fortigate_device_aliases가 {소문자 장비 이름: ns관리번호}, 승인 시간이 0~24 정수(시작 < 끝), o2c_fortigate_ha_ignored_logids가 숫자 문자열 목록 형식이어야 합니다)
           (Audit Watch Key 알림 변수는 o2c_audit_package_managers·o2c_audit_secret_metadata_syscalls가 소문자 이름 목록, o2c_audit_secret_excluded_users·o2c_audit_provisioning_accounts가 로그인 이름 목록(대소문자·`.`·`_`·`-` 허용), o2c_audit_secret_service_exes·o2c_audit_secret_operator_exes가 `/`로 시작하는 실행 파일 경로 목록(`%` 와일드카드 가능), o2c_audit_provisioning_keys가 1개 이상의 소문자 이름 목록, o2c_audit_watch_silence_minutes·o2c_audit_provisioning_silence_minutes가 정수, o2c_audit_watch_min_events가 양의 정수여야 합니다)
@@ -169,106 +126,45 @@
           (/var/log 삭제 알림 변수 o2c_var_log_excluded_exes는 `_`·공백·따옴표·%가 없는 절대 경로 목록, o2c_var_log_excluded_exe_comm_pairs는 그런 경로 exe와 15자 이하 영숫자 comm의 쌍 목록이어야 합니다)
           (o2c_p1_destination은 비워 두거나 destination 이름(영문·숫자·._-)이어야 합니다)
           (폐기 목록 o2c_retired_alerts는 ^infra-[a-z0-9-]+$ 형식의 중복 없는 이름 목록이어야 하고 현행 알림 정의의 이름을 담으면 안 됩니다)
-          (OpenBao 인증은 Semaphore Environment의 VAULT_ROLE_ID/VAULT_SECRET_ID 또는 VAULT_TOKEN). 값은 출력하지 않습니다.
-          OpenBao 응답: AppRole 로그인 {{ _o2c_approle_login.status | default('시도 안 함') }}, KV 조회 {{ _o2c_kv_resp.status | default('시도 안 함') }}.
+          누락: {{ o2c_docs | o2c_missing_openbao_keys(openobserve_config_openbao_required) }}. 값은 출력하지 않습니다.
         quiet: true
       no_log: true
 
-# 무소식 알림(infra-app-telemetry-silent)의 로스터는 스위치가 켜진 호스트만이다(Spec #253 / Ticket-8). 스위치(otel_app_telemetry)는 인벤토리가 아니라
-# OpenBao hosts/<host>/agents에만 있으므로 수집 로스터 호스트마다 읽는다. 200·404 외로 답하면 짐작하지 않고 실패한다(호스트가 감시에서 조용히 빠지지 않도록).
-# 응답 본문에 시크릿이 있으므로 no_log이고, 스위치 값(true)만 O2C-005에서 골라 쓴다.
-- name: Assert an OpenBao token is available to read the app telemetry switches
-  ansible.builtin.assert:
-    that:
-      - o2c_vault_token | length > 0
-    fail_msg: >-
-      수집 로스터 호스트의 앱 텔레메트리 스위치를 OpenBao에서 읽을 토큰이 없습니다(AppRole 로그인 실패이거나 VAULT_TOKEN이 비어 있음).
-      비어 있는 채로 진행하면 무소식 알림 로스터가 조용히 비므로 실패합니다.
-    quiet: true
-  no_log: true
-  when:
-    - o2c_app_telemetry_kv_fixture is not defined
-    - o2c_roster_collect | length > 0
-
-- name: "[O2C-004] Read the otel_app_telemetry switch of every collect-roster host from OpenBao (hosts/<host>/agents)"
+# 무소식 알림(infra-app-telemetry-silent)의 로스터는 스위치가 켜진 호스트만이다(Spec #253 / Ticket-8). 스위치(`agents.otel.app_telemetry`)는 인벤토리가 아니라
+# OpenBao Asset 문서(inventory/assets/<ns>)의 `agents` 절에만 있으므로 수집 로스터 호스트마다 읽는다. Asset 문서가 없으면(404) 스위치가 꺼진 것이고,
+# 403이나 연결 오류는 짐작하지 않고 실패한다(호스트가 감시에서 조용히 빠지지 않도록). 문서는 한 번의 조회로 읽어 로그인도 한 번이다.
+- name: "[O2C-004] Read the Asset document of every collect-roster host from OpenBao (inventory/assets/<ns>, agents clause)"
   vars:
-    _vault_hosts_prefix_eff: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true)) | regex_replace('^secret/', '') }}"
-  o2c_http:
-    base_url: "{{ o2c_vault_addr }}"
-    headers: >-
-      {{ {'X-Vault-Token': o2c_vault_token} | combine({'X-Vault-Namespace': o2c_vault_ns} if (o2c_vault_ns | length > 0) else {}) }}
-    requests: >-
-      {{ o2c_roster_collect | o2c_host_items
-         | o2c_as_requests(path='/v1/' ~ o2c_vault_mount ~ '/data/' ~ _vault_hosts_prefix_eff ~ '{host}/agents', label='{host}') }}
-    status_code: [200, 404]
-    timeout: 10
-    parallel: true
-    validate_certs: "{{ o2c_vault_validate_certs }}"
-  register: _o2c_app_kv_resp
-  changed_when: false
+    _paths: "{{ o2c_roster_collect | map('regex_replace', '^', 'inventory/assets/') | list }}"
+  ansible.builtin.set_fact:
+    o2c_asset_docs: "{{ dict(o2c_roster_collect | zip(query('openbao_doc', *_paths, required=false))) }}"
+    cacheable: false
   check_mode: false
   no_log: true
-  when:
-    - o2c_app_telemetry_kv_fixture is not defined
-    - o2c_vault_token | length > 0
+  when: o2c_roster_collect | length > 0
 
 - name: "[O2C-005] Keep the hosts with the otel_app_telemetry switch on (the roster of the app telemetry silent alert)"
-  vars:
-    _kv_by_host: >-
-      {{ o2c_app_telemetry_kv_fixture if o2c_app_telemetry_kv_fixture is defined
-         else dict(_o2c_app_kv_resp.results | default([]) | map(attribute='item.host')
-                   | zip(_o2c_app_kv_resp.results | default([]) | map(attribute='json.data.data', default={}))) }}
   ansible.builtin.set_fact:
-    o2c_app_switch_on: "{{ o2c_roster_collect | o2c_app_telemetry_roster(_kv_by_host) }}"   # 호스트 이름만 남긴다(KV 본문은 팩트로 두지 않는다)
+    o2c_app_switch_on: "{{ o2c_roster_collect | o2c_app_telemetry_roster(o2c_asset_docs) }}"   # 호스트 이름만 남긴다(문서 본문은 팩트로 두지 않는다)
     cacheable: false
   no_log: true
 
-# 서버 행 표시 이름(Spec #339 / Ticket-5): 알림 대상 행에 관리번호 옆 접속 주소를 `ns0272 (<주소>)`로 보인다. 주소는 OpenBao hosts/<host>에서
-# Config 실행 때 한 번 읽어 알림 SQL의 CASE 식에 고정한다(알림이 울릴 때는 OpenBao에 접속하지 않는다). 200·404 외로 답하면 짐작하지 않고 실패한다.
-# 응답 본문에 시크릿이 있으므로 no_log이고, 주소(ansible_host, 없으면 public_ip)만 O2C-007에서 골라 쓴다.
-- name: Assert an OpenBao token is available to read the host addresses
-  ansible.builtin.assert:
-    that:
-      - o2c_vault_token | length > 0
-    fail_msg: >-
-      수집 로스터 호스트의 접속 주소를 OpenBao에서 읽을 토큰이 없습니다(AppRole 로그인 실패이거나 VAULT_TOKEN이 비어 있음).
-      비어 있는 채로 진행하면 알림 대상 행의 주소가 조용히 사라지므로 실패합니다.
-    quiet: true
-  no_log: true
-  when:
-    - o2c_host_kv_fixture is not defined
-    - o2c_roster_collect | length > 0
-
-- name: "[O2C-006] Read the access address source of every collect-roster host from OpenBao (hosts/<host>)"
+# 서버 행 표시 이름(Spec #339 / Ticket-5): 알림 대상 행에 관리번호 옆 접속 주소를 `ns0272 (<주소>)`로 보인다. 주소는 Asset의 Endpoint `ssh`
+# (inventory/assets/<ns>/endpoints)에서 Config 실행 때 한 번 읽어 알림 SQL의 CASE 식에 고정한다(알림이 울릴 때는 OpenBao에 접속하지 않는다).
+# 문서가 없으면(404) 주소 없이 관리번호만 보이고, 403이나 연결 오류는 짐작하지 않고 실패한다.
+- name: "[O2C-006] Read the Endpoints document of every collect-roster host from OpenBao (inventory/assets/<ns>/endpoints)"
   vars:
-    _vault_hosts_prefix_eff: "{{ (lookup('ansible.builtin.env', 'OPENBAO_HOSTS_PREFIX') | default('hosts/', true)) | regex_replace('^secret/', '') }}"
-  o2c_http:
-    base_url: "{{ o2c_vault_addr }}"
-    headers: >-
-      {{ {'X-Vault-Token': o2c_vault_token} | combine({'X-Vault-Namespace': o2c_vault_ns} if (o2c_vault_ns | length > 0) else {}) }}
-    requests: >-
-      {{ o2c_roster_collect | o2c_host_items
-         | o2c_as_requests(path='/v1/' ~ o2c_vault_mount ~ '/data/' ~ _vault_hosts_prefix_eff ~ '{host}', label='{host}') }}
-    status_code: [200, 404]
-    timeout: 10
-    parallel: true
-    validate_certs: "{{ o2c_vault_validate_certs }}"
-  register: _o2c_host_kv_resp
-  changed_when: false
+    _paths: "{{ o2c_roster_collect | map('regex_replace', '^', 'inventory/assets/') | map('regex_replace', '$', '/endpoints') | list }}"
+  ansible.builtin.set_fact:
+    o2c_endpoint_docs: "{{ dict(o2c_roster_collect | zip(query('openbao_doc', *_paths, required=false))) }}"
+    cacheable: false
   check_mode: false
   no_log: true
-  when:
-    - o2c_host_kv_fixture is not defined
-    - o2c_vault_token | length > 0
+  when: o2c_roster_collect | length > 0
 
-- name: "[O2C-007] Resolve the access address of each host (ansible_host, then public_ip) for the alert row display names"
-  vars:
-    _host_kv_by_host: >-
-      {{ o2c_host_kv_fixture if o2c_host_kv_fixture is defined
-         else dict(_o2c_host_kv_resp.results | default([]) | map(attribute='item.host')
-                   | zip(_o2c_host_kv_resp.results | default([]) | map(attribute='json.data.data', default={}))) }}
+- name: "[O2C-007] Resolve the access address of each host (Endpoint ssh) for the alert row display names"
   ansible.builtin.set_fact:
-    o2c_host_addresses: "{{ o2c_roster_collect | o2c_host_addresses(_host_kv_by_host) }}"   # 호스트 → 주소만 남긴다(KV 본문은 팩트로 두지 않는다)
+    o2c_host_addresses: "{{ o2c_roster_collect | o2c_host_addresses(o2c_endpoint_docs) }}"   # 호스트 → 주소만 남긴다(문서 본문은 팩트로 두지 않는다)
     cacheable: false
   no_log: true
 
@@ -277,8 +173,8 @@
     o2c_desired_objects: >-
       {{ {'org': o2c_org, 'stream': o2c_stream, 'function_name': o2c_function_name, 'pipeline_name': o2c_pipeline_name,
           'template_name': o2c_template_name, 'template_body': o2c_template_body, 'destination_name': o2c_destination_name,
-          'webhook_url': o2c_kv.alert_webhook_plain_url, 'web_url': o2c_web_url, 'p1_destination': o2c_p1_destination,
-          'webhook_headers': {'Content-Type': 'text/plain; charset=utf-8'} | combine({o2c_webhook_auth_header: o2c_kv.alert_webhook_token} if (o2c_kv.alert_webhook_token | default('')) | length > 0 else {}),
+          'webhook_url': o2c_notify.url, 'web_url': o2c_web_url, 'p1_destination': o2c_p1_destination,
+          'webhook_headers': {'Content-Type': 'text/plain; charset=utf-8'},
           'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/security_semantics.vrl'),
           'fortigate': {'function_name': o2c_fortigate_function_name, 'vrl': lookup('ansible.builtin.file', role_path ~ '/files/vrl/fortigate_semantics.vrl'),
                         'aliases': o2c_fortigate_device_aliases},
@@ -288,7 +184,7 @@
           'alerts': o2c_alerts_managed, 'selftest_alert': o2c_selftest_alert,
           'tz_offset': o2c_tz_offset, 'traces_stream': o2c_traces_stream, 'traces_retention_days': o2c_traces_retention_days} | o2c_desired }}
     o2c_auth_headers:
-      Authorization: "Basic {{ (o2c_kv.api_user ~ ':' ~ o2c_kv.api_password) | b64encode }}"
+      Authorization: "Basic {{ (o2c_admin.username ~ ':' ~ o2c_admin.password) | b64encode }}"
     cacheable: false   # credentials never go to the fact cache (ansible.cfg fact_caching = jsonfile)
   no_log: true
 
@@ -374,8 +270,9 @@
 - name: "[O2C-031] Assert the controller ingest token exists (needed to inject the synthetic records)"
   ansible.builtin.assert:
     that:
-      - (o2c_kv.controller_ingest_token | default('')) | length > 0
-    fail_msg: "알림 검증에 agents/openobserve의 controller_ingest_token이 필요합니다. 값은 출력하지 않습니다."
+      - (o2c_ingest.username | default('')) | length > 0
+      - (o2c_ingest.password | default('')) | length > 0
+    fail_msg: "알림 검증에 secrets/services/openobserve/ingest의 username·password가 필요합니다. 값은 출력하지 않습니다."
     quiet: true
   no_log: true
   when: not ansible_check_mode
@@ -388,7 +285,7 @@
     url: "{{ o2c_endpoint }}/api/{{ o2c_org }}/{{ o2c_selftest_stream }}/_json"
     method: POST
     headers:
-      Authorization: "Basic {{ (o2c_org ~ ':' ~ (o2c_kv.controller_ingest_token | default(''))) | b64encode }}"
+      Authorization: "Basic {{ ((o2c_ingest.username | default('')) ~ ':' ~ (o2c_ingest.password | default(''))) | b64encode }}"
     body_format: json
     body:
       - _timestamp: "{{ ((now().timestamp() - o2c_selftest_seed_age_s) * 1000000) | int }}"   # now(utc=true)는 naive라 .timestamp()가 현지 시각으로 해석한다
@@ -456,7 +353,7 @@
     o2c_verify: >-
       {{ o2c_alerts_managed | o2c_verify_plan(o2c_alert_fixtures, o2c_org, o2c_verify_stream_suffix, _run_id, _start_us | int, sources=o2c_normal_sources, rosters=o2c_rosters) }}
     o2c_verify_auth_headers:
-      Authorization: "Basic {{ (o2c_org ~ ':' ~ (o2c_kv.controller_ingest_token | default(''))) | b64encode }}"
+      Authorization: "Basic {{ ((o2c_ingest.username | default('')) ~ ':' ~ (o2c_ingest.password | default(''))) | b64encode }}"
     cacheable: false   # credentials never go to the fact cache
   no_log: true
   when: not ansible_check_mode

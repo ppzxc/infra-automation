@@ -122,7 +122,8 @@ def build_playbook(out, hosts):
     names = [_name(i) for i in range(hosts)]
     play = {
         "hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
-        "vars_files": [str(ROLE / "defaults" / "main.yml"), str(ROLE / "vars" / "main.yml")],
+        "vars_files": [str(ROOT_DIR / "playbooks" / "group_vars" / "all.yml"), str(ROLE / "defaults" / "main.yml"),
+                       str(ROLE / "vars" / "main.yml")],
         "vars": {
             "host_audit_run": {"run_id": "harness", "run_kind": "scheduled", "started_at": STARTED_AT,
                                "timezone": "Asia/Seoul", "target_hosts": names, "output_dir": str(out)},

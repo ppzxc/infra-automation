@@ -1,0 +1,4 @@
+public_keys:
+  - ssh-ed25519 AAAAFAKEKEYBODYFORTESTSONLY alice@example.test
+revoked_keys:
+  - ssh-ed25519 AAAAFAKEREVOKEDKEYBODY alice-old@example.test

@@ -28,6 +28,7 @@
   ansible.builtin.import_playbook: common/resolve_connection.yml
   vars:
     connection_hosts: "{{ target_hosts | default('servers') | regex_replace('\\s*,\\s*', ':') }}:&servers:!host_agents_excluded"
+    connection_needs_accounts: false   # Host Agents는 accounts를 쓰지 않는다(Operator 공개키 문서를 읽지 않는다)
   tags: [always]
 
 # ------------------------------------------------------------------------------

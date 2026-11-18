@@ -32,55 +32,35 @@
       ansible.builtin.set_fact:
         _funa_env_group_present: "{{ (getent_group | default({})).get(funa_env_group) is not none }}"
 
-    - name: "[FUNA-003] Fetch OpenBao KV (hosts/<host>, clusters/funa, clusters/funa/proxy, clusters/funa/vrrp)"
+    # 문서 경로·네임스페이스·인증은 공용 읽기 지점(lookup openbao_doc)이 정한다. 문서가 없거나 접근이 거부되면
+    # 대체값 없이 문서 경로와 상태 코드만 대며 실패한다. 읽는 문서는 funa_env_openbao_required 선언이 정한다.
+    - name: "[FUNA-003] Read the OpenBao documents declared in funa_env_openbao_required"
       vars:
-        _vault_addr_eff: "{{ vault_addr | default(VAULT_ADDR | default(lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://openbao:8200', true), true), true) }}"
-        _vault_token_eff: "{{ _vault_token | default(vault_token | default(VAULT_TOKEN | default(lookup('ansible.builtin.env', 'VAULT_TOKEN') | default('', true), true), true), true) }}"
-        _vault_ns_eff: "{{ (vault_namespace | default(VAULT_NAMESPACE | default(lookup('ansible.builtin.env', 'VAULT_NAMESPACE') | default(lookup('ansible.builtin.env', 'OPENBAO_NAMESPACE') | default('infra/prod/host/', true), true), true), true)) | regex_replace('/+$', '') }}"
-        _vault_mount_eff: "{{ vault_mount | default(VAULT_MOUNT | default(lookup('ansible.builtin.env', 'VAULT_MOUNT') | default(lookup('ansible.builtin.env', 'OPENBAO_MOUNT') | default('secret', true), true), true), true) }}"
-      ansible.builtin.uri:
-        url: "{{ _vault_addr_eff }}/v1/{{ _vault_mount_eff }}/data/{{ item.path }}"
-        method: GET
-        headers: >-
-          {{ {'X-Vault-Token': _vault_token_eff} | combine({'X-Vault-Namespace': _vault_ns_eff} if (_vault_ns_eff | length > 0) else {}) }}
-        status_code: [200, 404]
-        timeout: 5
-        validate_certs: "{{ funa_env_validate_certs }}"
-      loop:
-        - { key: node, path: "{{ funa_env_host_path }}" }
-        - { key: cluster, path: "{{ funa_env_cluster_path }}" }
-        - { key: proxy, path: "{{ funa_env_cluster_path }}/proxy" }
-        - { key: vrrp, path: "{{ funa_env_cluster_path }}/vrrp" }
-      loop_control:
-        label: "{{ item.key }}"
-      register: funa_env_kv_resp
-      delegate_to: localhost
-      become: false
-      changed_when: false
-      failed_when: false
+        _funa_env_paths: "{{ funa_env_openbao_required | map('funa_env_doc_path', inventory_hostname, funa_env_credential) | list }}"
+      ansible.builtin.set_fact:
+        _funa_env_docs: "{{ dict(funa_env_openbao_required.keys() | list | zip(lookup('openbao_doc', *_funa_env_paths, wantlist=True))) }}"
       check_mode: false
       no_log: true
-      when:
-        - funa_env_kv_fixture is not defined
-        - _vault_token_eff | length > 0
 
-    - name: "[FUNA-004] Assert OpenBao answered every FUNA lookup"
+    # 선언한 필수 키가 문서에 있는지(비어 있지 않은지) 선언을 돌며 확인한다. 실패 메시지에는 패턴과 키 이름만 있다.
+    - name: "[FUNA-017] Assert every declared document holds its required keys"
       vars:
-        _statuses: "{{ funa_env_kv_resp.results | default([]) | map(attribute='status', default=-1) | list }}"
+        _present: "{{ _funa_env_docs[item.key] | dict2items | rejectattr('value', 'in', ['', none]) | map(attribute='key') | list }}"
+        _absent: "{{ item.value | difference(_present) }}"
       ansible.builtin.assert:
-        that: funa_env_kv_fixture is defined or (_statuses | length == 4 and _statuses | select('in', [200, 404]) | list | length == 4)
-        fail_msg: >-
-          {{ inventory_hostname }}: OpenBao 조회 실패 — 변경 없이 중단합니다.
-          status({{ funa_env_host_path }}, {{ funa_env_cluster_path }}, {{ funa_env_cluster_path }}/proxy, {{ funa_env_cluster_path }}/vrrp)={{ _statuses if _statuses | length > 0 else '토큰 없음/미조회' }}
+        that: _absent | length == 0
+        fail_msg: "{{ inventory_hostname }}: {{ item.key }} 문서에 필수 키가 없습니다 — {{ _absent | join(', ') }}"
         quiet: true
+      loop: "{{ funa_env_openbao_required | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
 
-    - name: "[FUNA-005] Build the environment files from the KV contents"
+    - name: "[FUNA-005] Build the environment files from the OpenBao documents"
       ansible.builtin.set_fact:
         _funa_env: >-
-          {{ (funa_env_kv_fixture if funa_env_kv_fixture is defined else (funa_env_kv_resp.results | default([]) | funa_env_kv_by_key))
-             | funa_env_resolve(funa_env_node_keys, funa_env_required_cluster_keys,
-                                funa_env_required_proxy_keys, funa_env_required_vrrp_keys,
-                                funa_env_cluster_path, funa_env_host_path, funa_env_node_secret_keys) }}
+          {{ _funa_env_docs
+             | funa_env_resolve(funa_env_key_map, funa_env_node_required, funa_env_credential_env,
+                                inventory_hostname, funa_env_credential) }}
       no_log: true
 
     # 오류 목록에는 경로와 키 이름만 있고 값은 없다.

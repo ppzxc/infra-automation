@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Asset 문서 (inventory/assets/<ns>)",
+  "type": "object",
+  "properties": {
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Asset 설명(용도). 자산대장 표기 그대로."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Asset 유형(server, switch, firewall 등)."
+    },
+    "isms": {
+      "type": "object",
+      "description": "ISMS 자산대장 메타데이터.",
+      "properties": {
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "description": "관리 부서"
+        },
+        "owner_role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "책임자 직책"
+        },
+        "admin_role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "관리자 직책"
+        },
+        "target": {
+          "type": "boolean",
+          "description": "ISMS 인증 대상 여부. 저장소 코드는 읽지 않고 자산대장 스크립트가 쓴다."
+        },
+        "group_asset_name": {
+          "type": "string",
+          "description": "그룹 자산명. 빈 문자열이 올 수 있다."
+        },
+        "personal_info_system": {
+          "type": "boolean",
+          "description": "개인정보 처리 시스템 여부."
+        },
+        "asset_importance": {
+          "enum": [
+            "H",
+            "M",
+            "L"
+          ],
+          "description": "자산중요도(대문자 H/M/L)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "access": {
+      "type": "object",
+      "description": "접근 정책. 프로비저닝 대상 Asset은 필수(없으면 작업이 실패한다).",
+      "properties": {
+        "admin_credentials": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Credential 이름. 같은 Asset의 secrets/assets/<ns>/credentials/<이름>.",
+            "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
+          },
+          "uniqueItems": true,
+          "description": "관리 계정 Credential 이름 목록."
+        },
+        "bootstrap_credential": {
+          "type": "string",
+          "minLength": 1,
+          "description": "bootstrap 접속에 쓰는 Credential 이름.",
+          "pattern": "^[a-z][a-z0-9_]*(?!\\n)$"
+        },
+        "removed_accounts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "제거 대상 계정 이름 목록."
+        },
+        "python_interpreter": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._+/-]+(?!\\n)$",
+          "allOf": [
+            {
+              "not": {
+                "pattern": "(^|/)\\.\\.(/|$)"
+              }
+            },
+            {
+              "not": {
+                "pattern": "[sS][eE][mM][aA][pP][hH][oO][rR][eE]|[vV][eE][nN][vV]"
+              }
+            },
+            {
+              "not": {
+                "pattern": "^/[tT][mM][pP]/"
+              }
+            }
+          ],
+          "description": "원격 호스트의 Python 경로(선택). 없으면 /usr/bin/python3. 절대 경로여야 하고 `..` 마디, venv·semaphore(대소문자 무시)가 들어간 경로, /tmp/ 아래 경로는 거부한다(컨트롤러의 venv 경로가 원격으로 새는 사고 방지). 실행 시 필터 openbao_python_interpreter와 같은 규칙이다."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agents": {
+      "type": "object",
+      "description": "호스트별 에이전트 설정(비밀 아님).",
+      "properties": {
+        "backup": {
+          "type": "object",
+          "description": "백업 설정.",
+          "properties": {
+            "extra_paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true,
+              "description": "백업 추가 경로"
+            },
+            "exclude_paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true,
+              "description": "백업 제외 경로"
+            },
+            "sqlite_snapshots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "patternProperties": {
+                  "^[a-z][a-z0-9_]*(?!\\n)$": {}
+                },
+                "additionalProperties": false
+              },
+              "description": "SQLite 스냅샷 대상."
+            },
+            "pre_hooks": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "백업 직전 사전 훅 명령 목록(예: DB 덤프)."
+            },
+            "bucket": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](?!\\n)$",
+              "description": "RustFS 버킷 이름(선택). 없으면 규칙 <rustfs_bucket_prefix>-<관리번호>다. 이름 규칙 밖인 호스트(이전·개명 호스트)만 둔다. S3 이름 규칙(소문자·숫자·점·하이픈 3~63자)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "otel": {
+          "type": "object",
+          "description": "otel 수집 설정. 키는 snake_case, 값 형태는 host_agents 역할이 정한다.",
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*(?!\\n)$": {}
+          },
+          "additionalProperties": false
+        },
+        "github_webhook": {
+          "type": "object",
+          "description": "GitHub 웹훅 수신 설정. 키는 snake_case.",
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*(?!\\n)$": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "funa": {
+      "type": "object",
+      "description": "FUNA 노드별 설정(비밀 아님). 키는 snake_case, 렌더링 때 funa_env 대응표로 env 이름이 된다.",
+      "properties": {
+        "node_external_hostname": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "node_external_wildcard_hostname": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "notification_header": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        },
+        "node_name": {
+          "type": [
+            "string",
+            "integer",
+            "boolean"
+          ]
+        }
+      },
+      "required": [
+        "node_external_hostname",
+        "node_external_wildcard_hostname",
+        "notification_header",
+        "node_name"
+      ],
+      "additionalProperties": false
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "description": "이 Asset만 inventory/config/common의 domain을 덮어쓴다(예외 Asset 전용)."
+    }
+  },
+  "required": [
+    "description"
+  ],
+  "additionalProperties": false
+}

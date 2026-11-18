@@ -1,0 +1,6 @@
+description: fake
+access:
+  admin_credentials:
+    - root
+    - ghost
+  bootstrap_credential: ghost2

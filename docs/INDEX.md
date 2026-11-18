@@ -17,13 +17,19 @@
 9. [OpenObserve Config (`openobserve_config`)](openobserve_config.md) - 컨트롤러 전용. OpenObserve VRL ingest function(sshd/sudo 해석)·파이프라인·통지 webhook·알림 규칙(서버·스위치·방화벽 로그 알림, 방화벽은 #287, 대응 절차는 [알림 런북](runbooks/alerts.md))을 코드로 관리하고 API로 반영 (ADR-0008)
 10. [FUNA Env (`funa_env`)](funa_env.md) - FUNA Cluster 환경 값을 OpenBao에서 읽어 `/etc/funa-cluster/`의 비시크릿 파일과 소비자별 시크릿 파일(0640 root:dockermgmt)로 렌더링 (#222)
 11. [GitHub Webhook Watch (`github_webhook_watch`)](github_webhook_watch.md) - 컨트롤러 전용. GitHub 조직 웹훅의 존재·활성·구독 이벤트를 의도값과 비교하고 최근 실패한 전달을 재전송하며 하트비트 레코드를 OpenObserve에 남김, Semaphore 템플릿 등록 방법 (Spec #399 / Ticket-5, #404)
+12. [OpenBao 문서 등록·검증 도구 (`openbao_docs`)](openbao_docs.md) - `validate`(로컬 검증)·`put`(검증 후 쓰기, cas·차이 확인·참조 검사)·새 Asset 편입 순서(Credential 먼저, Endpoint 다음) (Spec #511 / Ticket-5, #516)
 
 ---
 
 ## 2. 통합 아키텍처 및 시크릿 관리 (Integrations & Secrets)
 
-* [OpenBao & Semaphore UI Secret Management Integration](openbao_integration.md) - OpenBao KV v2 동적 시크릿 및 Semaphore UI 최신 연동 가이드
-* [Host Agents (otelcol + resticprofile) ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md) - Host Agents 설치·재구성, ISMS 수집/백업 표준, OpenBao KV 스키마, CentOS 6/7 분기
+* [OpenBao 구조와 읽기 지점](openbao_integration.md) - 네임스페이스 `infra`와 마운트 두 개, 소유 대상별 저장 규칙, `resolve_connection` 접속 해석, 작업 계열별 AppRole 인증과 정책, 필수 문서 누락 실패 규칙
+* [OpenBao 저장 구조와 접근 정책 ADR-0014](adr/0014-openbao-storage-structure-and-access-policy.md) - `infra` 1단·마운트 `inventory/`·`secrets/`, 소유 대상별 저장·작업 계열별 정책, 스키마 강제, OpenTofu 정책 코드, `operator`/`admin` 분리와 기각한 대안 (Spec #511)
+* [OpenBao 운영 런북](runbooks/openbao-operations.md) - secret_id 발급(response-wrapping)·180일 교체·만료 알림 대응, OpenTofu 적용과 state passphrase 보관, `operator` 추가, 비상용 `admin` 사용 (Spec #511)
+* [OpenBao 구조 일괄 전환 런북](runbooks/openbao-cutover.md) - 전환 9단계, 동결 창 규칙, 계열별 확인 목록·거부 시험, 되돌리기, 2주 뒤 옛 구조 삭제 (Spec #511)
+* [Host Agents (otelcol + resticprofile) ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md) - Host Agents 설치·재구성, ISMS 수집/백업 표준, OpenBao 입력(위치는 ADR-0014로 대체), CentOS 6/7 분기
+* [OpenBao 구성 OpenTofu](openbao_opentofu.md) - `tofu/openbao`의 마운트·applier·userpass 코드, state pbkdf2 암호화, 입력 값(TF_VAR_*), Semaphore OpenTofu 템플릿(Auto Approve 끔), 호환 위험 확인 결과 [런북 8절](runbooks/openbao-operations.md) (Spec #511 / Ticket-6, #517)
+* [OpenBao 문서 도구](openbao_docs.md) - `openbao_docs.py` 하위 명령별 절. Periodic Check(`check`): 점검 항목·규칙 이름·종료 코드·알림·실패 대응 (Spec #511 / Ticket-8, #519)
 * [Semaphore 셋업 가이드](semaphore-setup.md) - Key Store·Repository·Inventory·Variable Group·Host Agents/OpenObserve 템플릿·스케줄(UTC/KST) 등록 절차와 자주 겪는 문제
 * Host Agents — Deploy All 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상
 * [Log Structuring ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md) - 엣지 Envelope Parsing + 중앙(OpenObserve VRL·알림) 의미 해석
@@ -46,6 +52,6 @@
 * [관리용 웹 접점 루프백 바인드 런북](runbooks/mgmt-web-loopback-bind.md) - 관리 웹 접점 루프백 바인드, 승인 항목별 체크리스트·롤백·부정 시험, Host Audit 기대치 (#369)
 * [Host Audit 퇴행 점검 적용 런북](runbooks/host-audit-regression.md) - 스펙 #364 기대치(EXP-*) 퇴행 점검의 선언·적용 전후 스냅샷·롤백·알림 절차, 합격 기준은 host_audit.md 16절 (#377)
 * [Uptime Kuma 이전 절차와 모니터 운영 규칙 런북](runbooks/kuma-migration.md) - 내장 MariaDB 이전(정상 종료·소유권 보존), 이전 뒤 모니터 실패 원인 세 곳, 사설망 감시 push 전환(interval은 주기의 1.5배 이상), 모니터 이름·심각도·알림 제목 규칙 (#394)
-* [레거시 호스트 `bk` 계정 접속 전환 런북](runbooks/bk-account-access.md) - `agents_only` 호스트의 Host Agents 접속을 root 직접 접속에서 `bk` 로그인 + sudo 승격으로 바꾸는 절차(`bootstrap_user`, `/etc/sudoers.d/bk`), 카나리→확대, 확인·롤백, root 접속은 막지 않는 범위
+* [레거시 호스트 `bk` 계정 접속 전환 런북](runbooks/bk-account-access.md) - `agents_only` 호스트의 Host Agents 접속을 root 직접 접속에서 `bk` 로그인 + sudo 승격으로 바꾸는 절차(`ssh` Endpoint의 `bk` Credential, `/etc/sudoers.d/bk`), 카나리→확대, 확인·롤백, root 접속은 막지 않는 범위
 * [Uptime Kuma 모니터 태그 규칙 런북](runbooks/uptime-kuma-tag-convention.md) - 태그 키 6종과 심각도 태그(P1~P3, 이름 자체가 심각도)·값 규칙, IP는 설명에 쓰는 이유, UI 권장과 DB 직접 수정 시 Kuma 재시작(Prometheus 라벨 집합) 주의
 * [GitHub 조직 감사 웹훅 런북](runbooks/github-audit-webhook.md) - 웹훅이 받는 이벤트와 받지 못하는 공백(로그인·2FA·토큰 사용·Actions·시크릿), 월간 웹 UI 내보내기 보완, 출발지 대역(`/meta` hooks) 갱신, 서버 적용 단계(S-1~S-6)·스냅샷 diff·롤백 (Spec #399 / Ticket-7, #406)

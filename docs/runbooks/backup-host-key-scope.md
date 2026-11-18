@@ -74,7 +74,7 @@
 
 ## 8. 중앙 유지보수 경로 확인 (계속 동작하는지)
 
-1. 유지보수 키(`agents/rustfs`의 `maintenance_access_key`)는 이 변경으로 바뀌지 않는다. 정책을 건드리는 대상은 호스트 서비스 계정뿐이다.
+1. 유지보수 키(`secrets/services/rustfs/maintenance`의 `access_key`)는 이 변경으로 바뀌지 않는다. 정책을 건드리는 대상은 호스트 서비스 계정뿐이다.
 2. 정책 교체 전후 모두 [backup.md](../backup.md) §7의 수동 실행으로 카나리 1대를 확인한다: `-e target_hosts=<카나리>`.
 3. `backup_logs`의 `job=maintenance` 이벤트에서 `command=check`와 `command=forget`이 모두 `success=true`인지 본다. 8일 이상 `check` 이벤트가 없으면 "유지보수 누락" 알림이 발생한다.
 4. 정책 변경 후 `forget --prune`이 실제로 데이터를 지울 수 있는지는 다음 보존 만료 때까지 알 수 없으므로, 확대 후 첫 주간 유지보수(일요일 05:00)의 성공 이벤트까지 확인한다.

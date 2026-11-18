@@ -36,7 +36,7 @@
 
 | 대상 | 원천 | KeePassXC 위치 | 비고 |
 |---|---|---|---|
-| 호스트별 restic 복호 암호, 유지보수 키, 감사·수집 키 등 KV 시크릿 | OpenBao KV(`infra/prod/host`의 `secret`) | `Backup/OpenBao/infra/prod/host/secret/<경로>` | 항목마다 원본 JSON을 `bao_json`에 두고 키별 필드를 함께 둔다 |
+| 호스트별 restic 복호 암호, 유지보수 키, 감사·수집 키 등 KV 시크릿 | OpenBao KV(네임스페이스 `infra`의 `secrets/` 마운트와 `inventory/` 마운트) | `Backup/OpenBao/infra/<마운트>/<경로>` | 항목마다 원본 JSON을 `bao_json`에 두고 키별 필드를 함께 둔다 |
 | 시크릿 저장소 데이터 스냅샷 | 시크릿 저장소 서버 | `Backup/OpenBao/snapshots/<날짜>` | 문자열이 아니라 파일이므로 첨부로 둔다. 읽기 전용 AppRole로는 만들 수 없고 관리 권한이 필요하다 |
 | 시크릿 파일(서비스 `.env`, 수동 실행 스크립트 등) | 두 핵심 서버 | `Backup/files/<서버>/<경로>` | 경로 후보는 [#375 소비자 목록](secret-file-permissions.md)과 비공개 노트에서 정한다. 파일 값은 첨부로만 둔다 |
 

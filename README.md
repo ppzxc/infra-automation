@@ -10,7 +10,7 @@
 |---|---|---|---|
 | **`servers`** | `inventory/group_vars/servers.yml` | 온프레미스 IDC 일반 연산 호스트 (타겟 호스트) | `playbooks/site.yml` |
 | **`loadbalancers`**| `inventory/group_vars/loadbalancers.yml` | HAProxy, Keepalived, VIP 로드밸런서 호스트 (L4 포워딩 & ARP Flux 방지) | `playbooks/site.yml` |
-| **`cisco_switches`**| `inventory/group_vars/cisco_switches.yml` | Cisco IOS 네트워크 스위치 장비군 (L2/L3 스위치) | `playbooks/backup_cisco.yml` |
+| **`cisco_switches`**| Semaphore 인벤토리 그룹(저장소 `group_vars` 파일 없음. 접속 조정값은 `roles/cisco_backup` 기본값, 접속 정보는 OpenBao) | Cisco IOS 네트워크 스위치 장비군 (L2/L3 스위치) | `playbooks/backup_cisco.yml` |
 
 ---
 
@@ -51,12 +51,17 @@ cp inventory/hosts.yml.example inventory/hosts.yml
 ### 1. 플레이북 실행
 #### Option A: Semaphore Web UI를 통한 실행 (권장)
 - Overseer 컨트롤 플레인 브라우저 접속: `http://<컨트롤플레인IP>:3000` (초기 계정: `admin` / `semaphoreadmin`)
-- UI에서 **Key Store** (OpenBao 연동) 및 **Environment** (`VAULT_ADDR` / `VAULT_TOKEN`)를 통해 중앙 집중식 시크릿이 자동 주입됩니다.
-- 상세 연동 가이드: [OpenBao & Semaphore UI Secret Integration](docs/openbao_integration.md)
+- UI에서 **Key Store** (OpenBao 연동) 와 계열별 **Environment**(`VAULT_ADDR`, AppRole `VAULT_ROLE_ID`/`VAULT_SECRET_ID`)를 통해 OpenBao 값이 실행 때 읽힙니다. 평문 토큰은 쓰지 않습니다.
+- 상세 연동 가이드: [OpenBao 구조와 읽기 지점](docs/openbao_integration.md)
 - UI에서 **Playbook Template** 선택 후 원클릭 실행 및 실시간 모니터링
 
 #### Option B: CLI 스크립트 직접 실행 (개발 및 일회성 검증)
+OpenBao를 읽는 플레이북은 호출하는 셸에 `VAULT_ADDR`와 계열 AppRole(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이 있어야 합니다(사설 CA는 `VAULT_CACERT`).
+`docker-run.sh`·`make provision`·`make provision-hosts`·`make check`는 이 값만 컨테이너로 넘기며 평문 토큰 경로는 없습니다.
 ```bash
+export VAULT_ADDR=...                       # 값은 운영자 비공개 노트에 있다
+read -rs VAULT_ROLE_ID && export VAULT_ROLE_ID
+read -rs VAULT_SECRET_ID && export VAULT_SECRET_ID   # 프롬프트로 입력(인자·이력에 남기지 않는다)
 # 1. 전체 타겟 호스트 일괄 프로비저닝 (마스터 플레이북)
 ./docker-run.sh playbooks/site.yml
 

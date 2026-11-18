@@ -44,6 +44,8 @@
 
 ### 2.2 설정·시크릿 소스 (OpenBao KV 스키마)
 
+> (개정 2026-11-18, #531) 이 절의 OpenBao 위치(`hosts/<host>`·`hosts/<host>/agents`·`agents/openobserve`·`agents/rustfs`, 네임스페이스 `infra/prod/host`)와 그 키 이름은 [ADR-0014](0014-openbao-storage-structure-and-access-policy.md)로 대체됐다. 저장 위치와 키 정의는 `docs/openbao_integration.md`와 `schemas/openbao/`가 원본이다. 지나간 판단의 본문은 고치지 않는다.
+
 - **Git (`inventory/group_vars/servers`, PR 감사)**: 비시크릿 공용값 — OpenObserve endpoint/org, RustFS endpoint/bucket/region, CA 참조, ISMS 표준 수집·백업 목록.
 - **OpenBao `hosts/<host>/agents`** (접속 KV `hosts/<host>`와 분리, `host_agents.yml`만 조회):
 

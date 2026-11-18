@@ -46,6 +46,7 @@ provisioner:
     ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/roles"
     # verify runs the host_audit collection, whose filters live in the project's filter_plugins/.
     ANSIBLE_FILTER_PLUGINS: "${MOLECULE_PROJECT_DIRECTORY}/filter_plugins"
+    ANSIBLE_LOOKUP_PLUGINS: "${MOLECULE_PROJECT_DIRECTORY}/lookup_plugins"
     SCENARIO_ROLES: "common,security,access_security"
     ANSIBLE_CALLBACKS_ENABLED: "ansible.posix.timer,ansible.posix.profile_tasks"
     # Per-task overhead (one `docker exec` + module transfer each) dominates

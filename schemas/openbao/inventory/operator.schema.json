@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Operator (inventory/operators/<사람>)",
+  "type": "object",
+  "properties": {
+    "public_keys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "description": "개인 SSH 공개키."
+    },
+    "revoked_keys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "폐기한 SSH 공개키."
+    }
+  },
+  "required": [
+    "public_keys"
+  ],
+  "additionalProperties": false
+}

@@ -12,6 +12,6 @@
       - not (_host_audit_kisa_alert_plan.send | bool) or ((_host_audit_kisa_alert_post.status | default(-1)) in [200, 201, 202, 204])
     fail_msg: >-
       Host Audit KISA 악화 알림을 보내지 못했습니다(악화 항목 {{ _host_audit_kisa_alert_plan.count | default(0) }}건).
-      webhook 주소가 없거나(OpenBao agents/openobserve의 alert_webhook_plain_url) 전송이 거부됐습니다
+      webhook 주소가 없거나(OpenBao secrets/services/alert/notify의 url을 읽지 못함) 전송이 거부됐습니다
       (응답 {{ _host_audit_kisa_alert_post.status | default('없음') }}). 보고서와 보관은 끝났으니 webhook을 고친 뒤 담당자에게 직접 알리세요.
     quiet: true

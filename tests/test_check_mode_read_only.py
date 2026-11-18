@@ -39,6 +39,8 @@ CONTROLLER_TASK_FILES = {
     # 하위 실행 자체가 --check라 호스트를 바꾸지 않는다(Configuration Drift, #124).
     "roles/host_audit/tasks/drift.yml",
     "roles/host_audit/tasks/drift_subrun.yml",
+    # playbooks/common/resolve_connection.yml(connection: local 플레이)가 include_tasks로 부르는 컨트롤러 임시 키 파일 헬퍼.
+    "playbooks/common/stage_ssh_key.yml",
 }
 
 TASK_KEYWORDS = {

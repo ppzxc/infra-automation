@@ -1,28 +1,39 @@
-import pytest
-import yaml
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+import yaml
+
+from openbao_fake import FakeOpenBao
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
+ROLE_DIR = ROOT_DIR / "roles" / "cisco_backup"
+FAKE_CONFIG = "Building configuration...\nCurrent configuration : 100 bytes\nversion 15.0\nhostname fake\n"
+sys.path.insert(0, str(ROOT_DIR / "scripts"))
+import openbao_validation as ov  # noqa: E402
+
 
 def test_requirements_includes_cisco_ios():
     """Verify requirements.yml defines cisco.ios collection"""
-    req_file = ROOT_DIR / "requirements.yml"
-    assert req_file.exists(), "requirements.yml is missing"
-    with open(req_file, "r", encoding="utf-8") as f:
-        req_data = yaml.safe_load(f)
+    req_data = yaml.safe_load((ROOT_DIR / "requirements.yml").read_text(encoding="utf-8"))
     collections = [col.get("name") for col in req_data.get("collections", []) if isinstance(col, dict)]
     assert "cisco.ios" in collections, "cisco.ios collection missing in requirements.yml"
 
+
 def test_cisco_backup_role_structure():
-    """Verify roles/cisco_backup structure and required files"""
-    role_dir = ROOT_DIR / "roles" / "cisco_backup"
-    assert role_dir.exists(), "roles/cisco_backup directory missing"
-    assert (role_dir / "tasks" / "main.yml").exists(), "roles/cisco_backup/tasks/main.yml missing"
-    assert (role_dir / "defaults" / "main.yml").exists(), "roles/cisco_backup/defaults/main.yml missing"
+    assert (ROLE_DIR / "tasks" / "main.yml").exists()
+    assert (ROLE_DIR / "defaults" / "main.yml").exists()
+    assert (ROLE_DIR / "vars" / "main.yml").exists()
+
 
 def test_cisco_backup_collector_no_log_is_inventory_configurable():
-    defaults = yaml.safe_load((ROOT_DIR / "roles/cisco_backup" / "defaults" / "main.yml").read_text())
-    tasks = yaml.safe_load((ROOT_DIR / "roles/cisco_backup" / "tasks" / "main.yml").read_text())
+    defaults = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text())
+    tasks = yaml.safe_load((ROLE_DIR / "tasks" / "main.yml").read_text())
     collector_tasks = [task for task in tasks if task.get("register") in {
         "cisco_config_direct_output", "cisco_config_telnet_output", "cisco_config_jump_output"
     }]
@@ -30,131 +41,264 @@ def test_cisco_backup_collector_no_log_is_inventory_configurable():
     assert len(collector_tasks) == 3
     assert all(task["no_log"] == "{{ cisco_backup_no_log }}" for task in collector_tasks)
 
+
+def test_the_support_check_is_not_no_log_so_its_reason_is_visible_and_the_connection_is_resolved_once():
+    raw = (ROLE_DIR / "tasks" / "main.yml").read_text()
+    tasks = {t["name"].split("]")[0].lstrip("["): t for t in yaml.safe_load(raw) if t.get("name", "").startswith("[CISCO-")}
+    assert not tasks["CISCO-009"].get("no_log") and tasks["CISCO-008"]["no_log"] is True
+    assert "{{" not in tasks["CISCO-009"]["ansible.builtin.assert"]["fail_msg"].replace("{{ inventory_hostname }}", "")
+    assert raw.count("lookup('openbao_connection'") == 1
+
+
 def test_cisco_backup_playbook_structure():
-    """Verify playbooks/backup_cisco.yml exists and defines correct hosts, pre_tasks, and role"""
+    """플레이북은 역할만 돌린다: OpenBao 우회 pre_tasks·group_vars 의존이 없다."""
     playbook_file = ROOT_DIR / "playbooks" / "backup_cisco.yml"
-    assert playbook_file.exists(), "playbooks/backup_cisco.yml is missing"
-    with open(playbook_file, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    assert isinstance(data, list) and len(data) > 0
-    play = data[0]
+    play = yaml.safe_load(playbook_file.read_text(encoding="utf-8"))[0]
     assert play.get("hosts") == "cisco_switches"
     assert play.get("gather_facts") is False
+    assert play.get("connection") == "local"
     roles = [r if isinstance(r, str) else r.get("role") for r in play.get("roles", [])]
     assert "cisco_backup" in roles
-    # Verify vars_files includes cisco_switches.yml
-    vars_files = play.get("vars_files", [])
-    assert any("cisco_switches.yml" in str(v) for v in vars_files)
-    # Verify fail-fast pre_tasks
-    pre_tasks = play.get("pre_tasks", [])
-    assert len(pre_tasks) > 0, "pre_tasks missing in backup_cisco.yml"
-    assert any("ansible_host" in str(t.get("ansible.builtin.assert", {}).get("that", [])) for t in pre_tasks)
-    assert any("ansible_host != inventory_hostname" in str(t.get("ansible.builtin.assert", {}).get("that", [])) for t in pre_tasks)
+    assert "vars_files" not in play
+    text = playbook_file.read_text(encoding="utf-8")
+    for old in ("cisco_openbao", "OPENBAO_CISCO_PREFIX", "ansible.builtin.uri", "ansible_host"):
+        assert old not in text, old
 
-def test_inventory_cisco_switches_example():
-    """Verify cisco_switches group is documented in inventory hosts and group_vars"""
-    inv_example = ROOT_DIR / "inventory" / "hosts.yml.example"
-    with open(inv_example, "r", encoding="utf-8") as f:
-        inv_data = yaml.safe_load(f)
-    children = inv_data["all"].get("children", {})
-    assert "cisco_switches" in children, "cisco_switches group missing from hosts.yml.example"
-    assert "cisco_snmp_targets" in children, "cisco_snmp_targets group missing from hosts.yml.example"
 
-    cisco_vars_file = ROOT_DIR / "inventory" / "group_vars" / "cisco_switches.yml"
-    assert cisco_vars_file.exists(), "group_vars/cisco_switches.yml is missing"
-    with open(cisco_vars_file, "r", encoding="utf-8") as f:
-        cisco_vars = yaml.safe_load(f)
-    assert cisco_vars.get("ansible_network_os") in ["cisco.ios", "cisco.ios.ios"]
-    assert cisco_vars.get("ansible_connection") == "network_cli"
-    raw_content = cisco_vars_file.read_text(encoding="utf-8")
-    assert "community.hashi_vault.hashi_vault" in raw_content
-    assert "cisco_openbao_secret_prefix" in raw_content
-    assert "cisco_openbao_namespace" in raw_content
-    assert "secret=global/services" in raw_content
+def test_cisco_group_vars_are_gone_and_connection_tuning_lives_in_role_defaults():
+    assert not (ROOT_DIR / "inventory" / "group_vars" / "cisco_switches.yml").exists()
+    d = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert d["cisco_backup_endpoint_preference"] == ["ssh", "telnet"]
+    assert "diffie-hellman-group1-sha1" in d["cisco_backup_ssh_kex_algorithms"]
+    assert "ssh-rsa" in d["cisco_backup_ssh_host_key_algorithms"]
+    assert "aes128-cbc" in d["cisco_backup_ssh_ciphers"]
+    assert d["cisco_backup_timeout"] == 60
+    text = (ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8")
+    for old in ("openbao_prefix", "OPENBAO_", "VAULT_"):
+        assert old not in text, old
 
-    # OpenBao 우선 로딩 및 인벤토리 폴백 검증
-    assert "_cisco_sec.ansible_host" in raw_content
-    assert "_cisco_sec.ansible_port" in raw_content
-    assert "_cisco_sec.connection_type" in raw_content
-    assert "_cisco_sec.ansible_user" in raw_content
-    assert "_cisco_sec.ansible_password" in raw_content
-    assert "_vault_token" in raw_content
-    assert "vault_role_id" in raw_content
-    assert "vault_secret_id" in raw_content
+
+def test_inventory_cisco_switches_example_documents_the_group_without_connection_vars():
+    inv = yaml.safe_load((ROOT_DIR / "inventory" / "hosts.yml.example").read_text(encoding="utf-8"))
+    children = inv["all"].get("children", {})
+    assert "cisco_snmp_targets" in children
+    hosts = children["cisco_switches"]["hosts"]
+    assert hosts
+    for vars_ in hosts.values():
+        assert not (vars_ or {}), "주소·포트·계정은 OpenBao Endpoint·Credential이 정한다"
+
+
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
-    """Verify CISCO spec IDs exist in tasks and docs"""
-    tasks_file = ROOT_DIR / "roles" / "cisco_backup" / "tasks" / "main.yml"
-    doc_file = ROOT_DIR / "docs" / "cisco_backup.md"
-    assert tasks_file.exists()
-    assert doc_file.exists()
-
-    tasks_content = tasks_file.read_text(encoding="utf-8")
-    doc_content = doc_file.read_text(encoding="utf-8")
-
-    expected_specs = ["CISCO-001", "CISCO-002", "CISCO-003", "CISCO-004", "CISCO-005", "CISCO-006", "CISCO-007"]
-    for spec in expected_specs:
+    tasks_content = (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
+    doc_content = (ROOT_DIR / "docs" / "cisco_backup.md").read_text(encoding="utf-8")
+    for n in [n for n in range(1, 11) if n != 10]:
+        spec = f"CISCO-{n:03d}"
         assert f"[{spec}]" in tasks_content, f"Spec [{spec}] missing in tasks"
         assert f"`{spec}`" in doc_content, f"Spec `{spec}` missing in docs"
 
 
 def test_openssh_cli_collector_args_compatibility():
     """Verify OpenSSH arguments generated by collector do not fail OpenSSH option validation"""
-    import subprocess
-    import sys
-    sys.path.insert(0, str(ROOT_DIR / "roles" / "cisco_backup" / "files"))
+    sys.path.insert(0, str(ROLE_DIR / "files"))
     from cisco_cli_collector import get_openssh_direct_args
 
     args = get_openssh_direct_args("127.0.0.1", 22, "dummy")
-    # Validate with ssh -G dummy@127.0.0.1 or test invocation
-    # ssh -G accepts the options and outputs the effective config, exiting 0 if valid
-    val_cmd = ["ssh", "-G"] + args[2:]
-    res = subprocess.run(val_cmd, capture_output=True, text=True)
+    res = subprocess.run(["ssh", "-G"] + args[2:], capture_output=True, text=True)
     assert res.returncode == 0, f"OpenSSH rejected generated options: {res.stderr}"
 
 
-def test_cisco_backup_openbao_unwrapping_logic():
-    """Verify that backup_cisco.yml unwraps flat, nested, and array schemas with ansible_host, ip, user, port."""
-    from jinja2 import Environment
-    env = Environment()
-    template_str = """
-    {%- set _sw_raw = _openbao_direct_secret_resp.json.data.data if (_openbao_direct_secret_resp is defined and _openbao_direct_secret_resp.json is defined and _openbao_direct_secret_resp.json.data is defined and _openbao_direct_secret_resp.json.data.data is defined) else {} -%}
-    {%- set _sw_unwrapped = (_sw_raw if _sw_raw is not mapping else (_sw_raw[inventory_hostname] if inventory_hostname in _sw_raw else ((_sw_raw.values() | first) if (_sw_raw | length > 0 and (_sw_raw.values() | first) is mapping) else _sw_raw))) -%}
-    {%- set _sw_dict = (_sw_unwrapped | first) if (_sw_unwrapped is sequence and _sw_unwrapped is not string and _sw_unwrapped | length > 0 and (_sw_unwrapped | first) is mapping) else (_sw_unwrapped if _sw_unwrapped is mapping else {}) -%}
-    {%- set _sw_resolved_host = _sw_dict.get('ansible_host', _sw_dict.get('ip', '')) -%}
-    {%- set _sw_resolved_user = _sw_dict.get('ansible_user', _sw_dict.get('user', _sw_dict.get('username', ''))) -%}
-    {%- set _sw_resolved_port = _sw_dict.get('ansible_port', _sw_dict.get('port', '')) -%}
-    {{ {
-      'ansible_host': _sw_resolved_host if (_sw_resolved_host | length > 0) else (ansible_host | default('', true)),
-      'ansible_user': _sw_resolved_user if (_sw_resolved_user | length > 0) else (ansible_user | default('', true)),
-      'ansible_port': ((_sw_resolved_port if (_sw_resolved_port | string | length > 0) else (ansible_port | default(22))) | int)
-    } | tojson }}
-    """
-    tmpl = env.from_string(template_str)
-
-    # 1. Flat schema
-    r1 = yaml.safe_load(tmpl.render(
-        _openbao_direct_secret_resp={'json': {'data': {'data': {'ansible_host': '211.210.44.182', 'ansible_user': 'ansible-backup', 'ansible_port': 22}}}},
-        inventory_hostname='ns0278'
-    ))
-    assert r1['ansible_host'] == '211.210.44.182'
-    assert r1['ansible_user'] == 'ansible-backup'
-    assert r1['ansible_port'] == 22
-
-    # 2. Nested dictionary under hostname with 'ip' and 'user'
-    r2 = yaml.safe_load(tmpl.render(
-        _openbao_direct_secret_resp={'json': {'data': {'data': {'ns0278': {'ip': '211.210.44.182', 'user': 'admin', 'port': 2222}}}}},
-        inventory_hostname='ns0278'
-    ))
-    assert r2['ansible_host'] == '211.210.44.182'
-    assert r2['ansible_user'] == 'admin'
-    assert r2['ansible_port'] == 2222
-
-    # 3. Array of dictionaries
-    r3 = yaml.safe_load(tmpl.render(
-        _openbao_direct_secret_resp={'json': {'data': {'data': [{'ansible_host': '218.54.219.82', 'username': 'telnet-user'}]}}},
-        inventory_hostname='ns0065'
-    ))
-    assert r3['ansible_host'] == '218.54.219.82'
-    assert r3['ansible_user'] == 'telnet-user'
+def test_collector_uses_the_algorithm_lists_given_by_the_role():
+    sys.path.insert(0, str(ROLE_DIR / "files"))
+    import cisco_cli_collector as c
+    c.ALGORITHM_OVERRIDES.update(kex=["diffie-hellman-group14-sha1"], host_keys=["ssh-rsa"], ciphers=["aes128-cbc"])
+    try:
+        args = " ".join(c.get_openssh_direct_args("127.0.0.1", 22, "u"))
+    finally:
+        c.ALGORITHM_OVERRIDES.clear()
+    assert "group1-sha1" not in args and "3des-cbc" not in args and "aes128-cbc" in args
 
 
+# --------------------------------------------------------------------------
+# 역할 실행: 수집기는 인자와 stdin을 기록하는 대역으로 바꾼다(장비에는 닿지 않는다).
+# --------------------------------------------------------------------------
+_BAOS = []
+
+
+@pytest.fixture(autouse=True)
+def _close_baos():
+    yield
+    while _BAOS:
+        _BAOS.pop().close()
+
+
+def _store(endpoints, credentials):
+    store = {}
+    for ns, eps in endpoints.items():
+        store[f"inventory/assets/{ns}"] = {"description": "Fake switch", "type": "switch"}
+        store[f"inventory/assets/{ns}/endpoints"] = eps
+    for (ns, name), doc in credentials.items():
+        store[f"secrets/assets/{ns}/credentials/{name}"] = doc
+    return store
+
+
+SSH_EP = {"protocol": "ssh", "address": "192.0.2.13", "port": 2222, "credential": "netadmin",
+          "become": {"method": "enable", "credential": "enable"}}
+TELNET_EP = {"protocol": "telnet", "address": "192.0.2.13", "port": 23, "credential": "netadmin"}
+SWITCH_CREDS = {
+    ("ns0003", "netadmin"): {"type": "password", "username": "netadmin", "password": "fake-pw-net-0010"},
+    ("ns0003", "enable"): {"type": "password", "password": "fake-pw-enable-0011"},
+}
+BASTION_EP = {"protocol": "ssh", "address": "192.0.2.11", "port": 22, "credential": "bastion"}
+BASTION_CRED = {("ns0001", "bastion"): {"type": "password", "username": "jump", "password": "fake-pw-jump-0013"}}
+
+
+@pytest.fixture
+def run_role(tmp_path):
+    if shutil.which("ansible-playbook") is None:
+        pytest.skip("ansible-playbook not installed")
+    (tmp_path / "ansible.cfg").write_text(f"[defaults]\nroles_path = {ROOT_DIR / 'roles'}\nretry_files_enabled = False\n", encoding="utf-8")
+    (tmp_path / "play.yml").write_text("- hosts: all\n  gather_facts: false\n  connection: local\n  roles:\n    - cisco_backup\n", encoding="utf-8")
+    stub = tmp_path / "collector.py"
+    stub.write_text(
+        "import json, os, sys\n"
+        "rec = {'argv': sys.argv[1:], 'stdin': json.loads(sys.stdin.read() or '{}')}\n"
+        "open(os.environ['STUB_RECORD'], 'a').write(json.dumps(rec) + '\\n')\n"
+        f"sys.stdout.write({FAKE_CONFIG!r})\n", encoding="utf-8")
+
+    def run(store, extra=None):
+        bao = FakeOpenBao.with_schemas(store, namespace="infra", token="bao-test-token", approle=True)
+        _BAOS.append(bao)
+        (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"hosts": {"ns0003": {}}}}), encoding="utf-8")
+        ev = {"cisco_backup_dir": str(tmp_path / "bk"), "cisco_backup_collector": str(stub)}
+        ev.update(extra or {})
+        (tmp_path / "ev.yml").write_text(yaml.safe_dump(ev), encoding="utf-8")
+        record = tmp_path / "record.jsonl"
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
+        env.update(ANSIBLE_CONFIG=str(tmp_path / "ansible.cfg"), STUB_RECORD=str(record),
+                   ANSIBLE_LOOKUP_PLUGINS=str(ROOT_DIR / "lookup_plugins"), ANSIBLE_FILTER_PLUGINS=str(ROOT_DIR / "filter_plugins"))
+        env.update(bao.approle_env())
+        res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml"), "-e", f"@{tmp_path / 'ev.yml'}"],
+                             capture_output=True, text=True, env=env, cwd=tmp_path)
+        res.bao = bao
+        res.records = [json.loads(line) for line in record.read_text().splitlines()] if record.exists() else []
+        res.files = sorted((tmp_path / "bk").glob("*.txt")) if (tmp_path / "bk").exists() else []
+        res.out = res.stdout + res.stderr
+        return res
+
+    return run
+
+
+def _arg(rec, flag):
+    return rec["argv"][rec["argv"].index(flag) + 1]
+
+
+def test_ssh_is_preferred_and_login_and_enable_come_from_credentials(run_role):
+    res = run_role(_store({"ns0003": {"ssh": SSH_EP, "telnet": TELNET_EP}}, SWITCH_CREDS))
+    assert res.returncode == 0, res.out
+    (rec,) = res.records
+    assert _arg(rec, "--mode") == "direct_ssh" and _arg(rec, "--host") == "192.0.2.13"
+    assert _arg(rec, "--port") == "2222" and _arg(rec, "--user") == "netadmin"
+    assert rec["stdin"] == {"password": "fake-pw-net-0010", "enable_password": "fake-pw-enable-0011"}
+    assert "fake-pw" not in " ".join(rec["argv"])
+    assert len(res.files) == 1 and stat.S_IMODE(res.files[0].stat().st_mode) == 0o600
+    assert res.files[0].read_text().strip() == FAKE_CONFIG.strip()
+
+
+def test_enable_password_falls_back_to_the_login_password_without_become(run_role):
+    ep = {k: v for k, v in SSH_EP.items() if k != "become"}
+    res = run_role(_store({"ns0003": {"ssh": ep}}, SWITCH_CREDS))
+    assert res.returncode == 0, res.out
+    assert res.records[0]["stdin"]["enable_password"] == "fake-pw-net-0010"
+
+
+def test_telnet_is_used_when_only_telnet_is_registered(run_role):
+    res = run_role(_store({"ns0003": {"telnet": TELNET_EP}}, SWITCH_CREDS))
+    assert res.returncode == 0, res.out
+    (rec,) = res.records
+    assert _arg(rec, "--mode") == "telnet" and _arg(rec, "--port") == "23"
+
+
+def test_ssh_failure_does_not_fall_back_to_telnet(run_role, tmp_path):
+    (tmp_path / "bad.py").write_text("import sys\nsys.exit(3)\n", encoding="utf-8")
+    res = run_role(_store({"ns0003": {"ssh": SSH_EP, "telnet": TELNET_EP}}, SWITCH_CREDS), extra={"cisco_backup_collector": str(tmp_path / "bad.py")})
+    assert res.returncode != 0 and res.files == []
+
+
+def test_no_registered_preferred_endpoint_fails_with_the_reason(run_role):
+    https = {"protocol": "https", "address": "192.0.2.13", "port": 443, "credential": "netadmin"}
+    res = run_role(_store({"ns0003": {"https": https}}, SWITCH_CREDS))
+    assert res.returncode != 0 and res.records == []
+    assert "선호 순서" in res.out
+
+
+def test_a_password_bastion_hop_uses_the_jump_mode_with_the_hop_credentials(run_role):
+    eps = {"ns0003": {"ssh": {**SSH_EP, "via": "ns0001/ssh"}}, "ns0001": {"ssh": BASTION_EP}}
+    res = run_role(_store(eps, {**SWITCH_CREDS, **BASTION_CRED}))
+    assert res.returncode == 0, res.out
+    (rec,) = res.records
+    assert _arg(rec, "--mode") == "jump_ssh"
+    assert (_arg(rec, "--bastion-host"), _arg(rec, "--bastion-port"), _arg(rec, "--bastion-user")) == ("192.0.2.11", "22", "jump")
+    assert _arg(rec, "--host") == "192.0.2.13"
+    assert rec["stdin"]["bastion_password"] == "fake-pw-jump-0013"
+    assert "fake-pw" not in " ".join(rec["argv"])
+
+
+def test_key_login_hops_and_multi_hop_chains_are_refused_before_any_collection(run_role):
+    eps = {"ns0003": {"ssh": {**SSH_EP, "via": "ns0001/ssh"}}, "ns0001": {"ssh": {**BASTION_EP, "credential": "k"}}}
+    creds = {**SWITCH_CREDS, ("ns0001", "k"): {"type": "ssh_key", "username": "jump", "private_key": "fake-key"}}
+    res = run_role(_store(eps, creds))
+    assert res.returncode != 0 and res.records == [] and "CISCO-VIA" in res.out
+    for secret in ("fake-pw", "fake-key"):      # no_log가 없는 검사 태스크의 실패 출력에도 비밀은 없다
+        assert secret not in res.out
+    eps = {"ns0003": {"ssh": {**SSH_EP, "via": "ns0001/ssh"}},
+           "ns0001": {"ssh": {**BASTION_EP, "via": "ns0002/ssh"}}, "ns0002": {"ssh": BASTION_EP}}
+    creds = {**SWITCH_CREDS, **BASTION_CRED, ("ns0002", "bastion"): BASTION_CRED[("ns0001", "bastion")]}
+    res = run_role(_store(eps, creds))
+    assert res.returncode != 0 and res.records == [] and "CISCO-VIA" in res.out
+
+
+def test_secrets_never_reach_the_log_and_missing_documents_name_their_path(run_role):
+    res = run_role(_store({"ns0003": {"ssh": SSH_EP}}, SWITCH_CREDS))
+    for secret in ("fake-pw-net-0010", "fake-pw-enable-0011", "192.0.2.13", "Building configuration"):
+        assert secret not in res.out, secret
+    res = run_role(_store({"ns0003": {"ssh": SSH_EP}}, {k: v for k, v in SWITCH_CREDS.items() if k[1] != "netadmin"}))
+    assert res.returncode != 0 and "secrets/assets/ns0003/credentials/netadmin" in res.out
+
+
+def test_non_enable_become_and_a_non_ssh_hop_are_refused_before_collection(run_role):
+    sudo = {**SSH_EP, "become": {"method": "sudo", "credential": "enable"}}
+    res = run_role(_store({"ns0003": {"ssh": sudo}}, SWITCH_CREDS))
+    assert res.returncode != 0 and res.records == [] and "CISCO-VIA" in res.out
+    eps = {"ns0003": {"ssh": {**SSH_EP, "via": "ns0001/telnet"}}, "ns0001": {"telnet": {**BASTION_EP, "protocol": "telnet"}}}
+    res = run_role(_store(eps, {**SWITCH_CREDS, **BASTION_CRED}))
+    assert res.returncode != 0 and res.records == [] and "CISCO-VIA" in res.out
+
+
+def test_a_username_with_spaces_stays_one_argument(run_role):
+    creds = {**SWITCH_CREDS, ("ns0003", "netadmin"): {"type": "password", "username": "dom ain", "password": "fake-pw-net-0010"}}
+    res = run_role(_store({"ns0003": {"ssh": SSH_EP}}, creds))
+    assert res.returncode == 0, res.out
+    assert _arg(res.records[0], "--user") == "dom ain"
+
+
+def _required():
+    return yaml.safe_load((ROLE_DIR / "vars" / "main.yml").read_text(encoding="utf-8"))["cisco_backup_openbao_required"]
+
+
+def test_every_read_document_is_inside_the_declared_patterns(run_role):
+    eps = {"ns0003": {"ssh": {**SSH_EP, "via": "ns0001/ssh"}}, "ns0001": {"ssh": BASTION_EP}}
+    res = run_role(_store(eps, {**SWITCH_CREDS, **BASTION_CRED}))
+    assert res.returncode == 0, res.out
+    docs = {f"{r.mount}/{r.doc}" for r in res.bao.reads()}
+    assert docs and all(any(ov._matches(p, d) for p in _required()) for d in docs), docs
+    assert res.bao.violations == []
+
+
+def test_declared_required_keys_match_the_schema_and_the_assert_uses_them():
+    schema_dir = ROOT_DIR / "schemas" / "openbao"
+    for pattern, keys in _required().items():
+        schema = json.loads((schema_dir / ov.resolve_schema(pattern.replace("+", "x"))).read_text(encoding="utf-8"))
+        if "oneOf" in schema:
+            schema = next(b for b in schema["oneOf"] if b["properties"]["type"]["const"] == "password")
+        assert set(keys) <= set(schema.get("required", [])), pattern
+    assert "cisco_backup_openbao_required" in (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")

@@ -1,0 +1,7 @@
+normal_sources:
+  - address: 192.0.2.250
+    kind: semaphore
+silent_host_exceptions:
+  - host: ns0004
+    expires: '2099-12-31'
+    reason: fake planned stop

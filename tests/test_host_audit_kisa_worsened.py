@@ -135,7 +135,7 @@ class _Hook(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         body = self.rfile.read(int(self.headers["Content-Length"])).decode("utf-8")
-        type(self).seen.append((self.path, self.headers.get("Content-Type"), self.headers.get("X-Test-Auth"), body))
+        type(self).seen.append((self.path, self.headers.get("Content-Type"), self.headers.get("Authorization"), body))
         self.send_response(type(self).reply)
         self.end_headers()
         self.wfile.write(b"{}")
@@ -167,7 +167,7 @@ def _run_alert_tasks(tmp_path, server, *, compared, run=RUN, target=None, check=
     vars_ = {"host_audit_alert_validate_certs": defaults["host_audit_alert_validate_certs"],
              "host_audit_model": compared[0], "host_audit_baseline_history": compared[1], "host_audit_run": run, "host_audit_kisa_alert_enabled": enabled,
              "_host_audit_alert_target": {} if drop_target else (target or {
-                 "url": "http://127.0.0.1:%d/hook" % server.server_port, "header": "X-Test-Auth", "token": "tok-123"})}
+                 "url": "http://127.0.0.1:%d/hook" % server.server_port})}
     pb = tmp_path / "pb.yml"
     pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
                                    "vars": vars_, "tasks": [dict(tasks["[AUD-640]"]), dict(tasks["[AUD-641]"]), dict(tasks["[AUD-642]"])]}],
@@ -177,14 +177,14 @@ def _run_alert_tasks(tmp_path, server, *, compared, run=RUN, target=None, check=
                           env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
 
 
-def test_the_notification_is_posted_as_plain_text_with_the_auth_header_and_the_item_list(tmp_path, hook):
+def test_the_notification_is_posted_as_plain_text_to_the_url_alone_with_the_item_list(tmp_path, hook):
     server, handler = hook
     res = _run_alert_tasks(tmp_path, server, compared=_compared(ns1=[2], ns2=[3]))
     assert res.returncode == 0, res.stdout + res.stderr
     ((path, ctype, auth, body),) = handler.seen
-    assert path == "/hook" and ctype.startswith("text/plain") and auth == "tok-123"
+    assert path == "/hook" and ctype.startswith("text/plain") and auth is None   # the URL itself is the permission
     assert "• ns1: %s 항목 2" % (CODE % 2) in body and "• ns2: %s 항목 3" % (CODE % 3) in body
-    assert "tok-123" not in res.stdout + res.stderr and "127.0.0.1:%d" % server.server_port not in res.stdout + res.stderr
+    assert "127.0.0.1:%d" % server.server_port not in res.stdout + res.stderr
 
 
 def test_nothing_is_posted_when_nothing_got_worse_or_the_run_is_on_demand_or_it_is_a_check_run_or_disabled(tmp_path, hook):
@@ -208,7 +208,7 @@ def test_the_run_fails_loudly_when_the_notification_cannot_be_delivered(tmp_path
     (tmp_path / "missing").mkdir()
     missing = _run_alert_tasks(tmp_path / "missing", server, compared=_compared(ns1=[1]), drop_target=True)
     assert missing.returncode != 0 and "webhook" in missing.stdout + missing.stderr
-    assert "tok-123" not in rejected.stdout + rejected.stderr + missing.stdout + missing.stderr
+    assert "/hook" not in rejected.stdout + rejected.stderr + missing.stdout + missing.stderr
 
 
 # --- 입력과 배선 ------------------------------------------------------------------------------------------------
@@ -220,16 +220,17 @@ def _flat(items):
             yield from _flat(t.get(key) or [])
 
 
-def test_the_webhook_comes_from_the_alert_kv_and_stays_out_of_logs():
+def test_the_webhook_comes_from_the_alert_notify_document_and_stays_out_of_logs():
     tasks = list(_flat(yaml.safe_load((ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8"))))
     fetch = next(t for t in tasks if t["name"].startswith("[AUD-501]"))
-    assert "agents/openobserve" in fetch["loop"]
+    assert "host_audit_openbao_alert_doc" in json.dumps(fetch) and fetch["no_log"] is True
     resolve = next(t for t in tasks if t["name"].startswith("[AUD-502]"))
     facts = resolve["ansible.builtin.set_fact"]
     assert "_host_audit_alert_target" in facts and resolve["no_log"] is True
-    text = (ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8")
-    for key in ("alert_webhook_plain_url", "alert_webhook_auth_header", "alert_webhook_token"):
-        assert key in text, key
+    # the URL alone: no header or token keys (the old JSON path with token/auth_header is not moved to the new structure)
+    assert "header" not in json.dumps(facts["_host_audit_alert_target"]) and "token" not in json.dumps(facts["_host_audit_alert_target"])
+    post = next(t for t in _kisa_tasks().values() if "ansible.builtin.uri" in t)
+    assert post["ansible.builtin.uri"]["headers"] == {"Content-Type": "text/plain; charset=utf-8"}
 
 
 def test_the_alert_is_sent_after_the_mail_and_judged_after_every_other_judgement_of_the_run():
@@ -265,37 +266,3 @@ def test_a_baseline_that_went_through_the_real_loader_still_gives_the_same_worse
     model = _model(ns1=[_row(1), _row(2)])
     assert _worsened(model, document) == _worsened(model, stored) == [("ns1", CODE % 2)]
     assert host_audit_kisa_alert(model, RUN, {"state": "ok", "baseline": document})["send"] is True
-
-
-def _resolve_storage_target(tmp_path, statuses):
-    """Run AUD-502 alone on KV lookup results with the given status per path (host_audit, rustfs, openobserve)."""
-    tasks = list(_flat(yaml.safe_load((ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8"))))
-    resolve = next(t for t in tasks if t["name"].startswith("[AUD-502]"))
-    data = {"agents/host_audit": {"storage_access_key": "ak", "storage_secret_key": "sk"},
-            "agents/rustfs": {"rustfs_endpoint": "https://rustfs.example:9000"},
-            "agents/openobserve": {"alert_webhook_plain_url": "https://hooks.example/x", "alert_webhook_token": "tok"}}
-    results = [{"item": path, "status": statuses[path], "json": {"data": {"data": data[path] if statuses[path] == 200 else {}}}}
-               for path in data]
-    vars_ = {"_host_audit_storage_active": True, "host_audit_storage": {}, "host_audit_storage_bucket": "host-audit",
-             "host_audit_alert_webhook": {}, "_host_audit_storage_kv": {"results": results}}
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    out = tmp_path / "out.json"
-    pb = tmp_path / "pb.yml"
-    pb.write_text(yaml.safe_dump([{"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False, "vars": vars_,
-                                   "tasks": [dict(resolve), {"ansible.builtin.copy": {"dest": str(out), "content":
-                                            "{{ {'problem': _host_audit_storage_problem, 'alert': _host_audit_alert_target} | to_json }}"}}]}]))
-    res = subprocess.run(["ansible-playbook", "-i", "localhost,", str(pb)], capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                         cwd=ROOT_DIR, timeout=300, env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
-    assert res.returncode == 0, res.stdout + res.stderr
-    return json.loads(out.read_text())
-
-
-def test_not_being_allowed_to_read_the_alert_webhook_does_not_stop_the_archive_and_baseline(tmp_path):
-    """A 403 on agents/openobserve must cost only the notification, never the monthly archive and report mail."""
-    ok = _resolve_storage_target(tmp_path / "ok", {"agents/host_audit": 200, "agents/rustfs": 200, "agents/openobserve": 200})
-    assert ok["problem"] == "" and ok["alert"]["url"] == "https://hooks.example/x" and ok["alert"]["token"] == "tok"
-    denied = _resolve_storage_target(tmp_path / "denied", {"agents/host_audit": 200, "agents/rustfs": 200, "agents/openobserve": 403})
-    assert denied["problem"] == "" and denied["alert"]["url"] == ""
-    # a failure on the storage paths is still a storage problem
-    broken = _resolve_storage_target(tmp_path / "broken", {"agents/host_audit": 403, "agents/rustfs": 200, "agents/openobserve": 200})
-    assert "OpenBao 조회 실패" in broken["problem"]

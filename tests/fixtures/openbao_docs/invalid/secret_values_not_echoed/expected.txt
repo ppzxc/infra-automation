@@ -1,0 +1,3 @@
+secrets/assets/ns0001/agents	#	additionalProperties
+secrets/assets/ns0001/credentials/root	#/password	type
+inventory/config/host_audit	#/mail_recipients	type

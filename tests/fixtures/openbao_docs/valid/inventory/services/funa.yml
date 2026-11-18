@@ -1,0 +1,10 @@
+floating_hostname: vip.example.test
+health_check_uri: /health
+service_name: fake-funa
+notification_smtp_from: from@example.test
+notification_smtp_host: smtp.example.test
+notification_smtp_port: 25
+notification_smtp_to: to@example.test
+notification_smtp_username: fake-user
+notification_naver_works_bot_url: https://bot.example.test/x
+tz: Asia/Seoul

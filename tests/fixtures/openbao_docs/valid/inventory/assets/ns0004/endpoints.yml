@@ -1,0 +1,6 @@
+https:
+  protocol: https
+  address: 192.0.2.14
+  port: 443
+  credential: api
+  via: ns0003/ssh

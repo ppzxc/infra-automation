@@ -2,7 +2,7 @@
 # ==============================================================================
 # Host Audit — 보관 자격증명과 Audit Baseline 조회 (러너 localhost 전용, ADR-0009 §5, #125)
 # ==============================================================================
-# RustFS Host Audit 전용 버킷의 전용 키(Put·Get·List, Delete 없음)를 OpenBao agents/host_audit에서
+# RustFS Host Audit 전용 버킷의 전용 키(Put·Get·List, Delete 없음)를 OpenBao secrets/services/rustfs/audit_reports에서
 # 읽고, 정기 실행이 남긴 포인터(baseline/<run_id>.json)로 직전 정기 실행(Audit Baseline)과
 # 지난 12개월 정기 실행의 '해소' 기록을 가져온다. 백업·유지보수 키는 쓰지 않는다.
 # 조회 실패는 보고서를 막지 않는다: 비교 없이 보고서를 만들고 storage_result.yml이 실행을 실패로 끝낸다.

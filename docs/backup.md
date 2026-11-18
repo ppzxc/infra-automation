@@ -7,7 +7,7 @@
 ## 1. 개요 및 구현 기능 (What)
 
 - **바이너리 배포**: 컨트롤러가 다운로드·SHA256 검증한 `restic`/`resticprofile`을 버전 디렉터리(`/opt/host-agents/<agent>/<version>/`)에 배치하고 `/usr/local/bin` symlink로 활성화 (ADR-0006 §2.8).
-- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`, `hosts/<host>/agents`의 `rustfs_bucket`으로 재정의)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
+- **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`. 이름 규칙 밖인 이전·개명 호스트는 Asset 문서의 `agents.backup.bucket`, 일회성 재정의는 Extra variables `rustfs_bucket`)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
 - **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
@@ -36,7 +36,7 @@
 | 소산 | 서버 측 S3→S3 원격 복제 (전제조건) |
 | 복구 테스트 | 분기 1회, ADR-0006 §2.11 runbook |
 
-호스트별 오버라이드(`hosts/<host>/agents`): `backup_extra_paths`, `backup_exclude_paths`(필수 경로 제외 불가), `backup_pre_hooks`(DB 덤프 등 `run-before`), `backup_sqlite_snapshots`(SQLite 스냅샷, 아래).
+호스트별 오버라이드(Asset 문서 `inventory/assets/<ns>`의 `agents.backup`): `extra_paths`, `exclude_paths`(필수 경로 제외 불가), `pre_hooks`(DB 덤프 등 `run-before`), `sqlite_snapshots`(`{path}` 목록, SQLite 스냅샷, 아래). 호스트별 비밀(`restic_password`·RustFS 키)은 `secrets/assets/<ns>/agents`, 주소는 `inventory/services/rustfs`(`url`·`region`)에서 읽는다.
 
 ### 3-1. SQLite 스냅샷 (`backup_sqlite_snapshots`, Spec #322 / Ticket-1, #323)
 
@@ -48,7 +48,7 @@
 - systemd 샌드박스(`ProtectSystem=strict`)에서는 원본 디렉터리가 읽기 전용이라 WAL 모드 DB를 읽을 때 `-shm` 접근이 막힐 수 있어, 입력이 있을 때만 각 원본의 디렉터리를 `ReadWritePaths`에 더한다(`-` 접두사).
 - 입력이 있는 호스트에 `sqlite3` 명령이 없으면 Deploy가 백업 파일(자격증명·훅·프로파일)을 쓰기 전에 분명한 오류로 멈춘다(`BAK-028`, CentOS 6/7은 `BAK-218`; 바이너리 전달은 그보다 앞서 끝난다). 도구는 설치하지 않는다. 입력이 없는 호스트는 프로파일·유닛·파일이 바뀌지 않는다.
 - RHEL 계열에는 `/var/backups`가 없어 샌드박스(`ProtectSystem=strict`)가 그 경로를 읽기 전용으로 두므로 스크립트의 `mkdir`이 실패한다. 그래서 Deploy가 입력이 있는 호스트에 스냅샷 디렉터리(와 없는 부모)를 미리 만든다(`BAK-032`, CentOS 6/7 cron 경로는 샌드박스가 없어 스크립트의 `mkdir -p`로 충분하다).
-- 첫 사용처는 ns0331의 OpenObserve 메타 DB다(값은 OpenBao `hosts/ns0331/agents`에만 둔다).
+- 첫 사용처는 ns0331의 OpenObserve 메타 DB다(값은 OpenBao Asset 문서 `inventory/assets/ns0331`의 `agents.backup.sqlite_snapshots`에만 둔다).
 
 ---
 
@@ -96,11 +96,11 @@
 | `BAK-050` | `Probe whether the restic repository exists (read-only, restic cat config)` | `ansible.builtin.shell` | All | 읽기 전용 (`changed_when: false`, check 모드에서는 건너뜀(바이너리가 아직 없을 수 있음), Deploy 한정 — `agents_config` 제외) |
 | `BAK-051` | `Fail when the repository probe errors for a reason other than a missing repository` | `ansible.builtin.assert` | All | 읽기 전용 (저장소 부재가 아닌 오류에서는 init하지 않고 실패) |
 | `BAK-052` | `Initialize the restic repository when it does not exist` | `ansible.builtin.shell` | All | 프로브 결과 조건 (저장소가 없을 때만 `init`) |
-| `BAK-060` | `Assert the controller OpenObserve ingestion token exists` | `ansible.builtin.assert` | All | 읽기 전용 (`no_log`, Deploy 한정 — 토큰 또는 `o2_endpoint` 없으면 호스트 실패) |
+| `BAK-060` | `Assert the controller OpenObserve ingestion token exists` | `ansible.builtin.assert` | All | 읽기 전용 (`no_log`, Deploy 한정 — `secrets/services/openobserve/ingest`의 `username`·`password` 또는 `o2_endpoint` 없으면 호스트 실패) |
 | `BAK-061` | `Emit the job=inventory event to backup_logs` | `ansible.builtin.uri` | All (controller) | Deploy 마지막 태스크이자 한정(`agents_config` 제외, check 모드 제외). 실행마다 이벤트 1건 전송(`changed`) |
 | `BAK-070` | `Load the shared Host Agents version table and constants from monitoring` | `ansible.builtin.include_vars` | Controller | 읽기 전용 (고정 restic 버전·체크섬의 단일 출처 — 별도 버전 표 없음) |
-| `BAK-071` | `Fetch maintenance KV from OpenBao (hosts/<hostname>/agents, agents/openobserve, agents/rustfs)` | `ansible.builtin.uri` | Controller | GET, `check_mode: false`, `no_log` |
-| `BAK-072` | `Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)` | `ansible.builtin.block` | Controller | 읽기 전용 (`no_log`; 비밀번호·유지보수 키·컨트롤러 토큰·엔드포인트 누락 또는 버킷 이름 규칙 위반 시 해당 호스트 실패 — 실패 메시지는 누락 항목의 이름만 나열) |
+| `BAK-071` | `Read the maintenance documents from OpenBao (backup_openbao_required)` | `ansible.builtin.set_fact` | Controller | 공용 읽기 지점(`lookup('openbao_doc')`)으로 선언된 문서 5개를 읽음, `check_mode: false`, `no_log`. 없는 문서는 대체값 없이 실패 |
+| `BAK-072` | `Resolve and assert the maintenance inputs (repo password, maintenance key, controller token)` | `ansible.builtin.block` | Controller | 읽기 전용 (`no_log`; `backup_openbao_required`의 필수 키 누락 또는 버킷 이름 규칙 위반 시 해당 호스트 실패 — 실패 메시지는 `<문서 경로>.<키>` 이름만 나열) |
 | `BAK-073` | `Detect the controller architecture for the pinned restic` | `ansible.builtin.command` | Controller | 읽기 전용 (`uname -m`, `run_once`) |
 | `BAK-074` | `Resolve the controller restic paths from the pinned version table` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`run_once`, Deploy와 같은 캐시 경로) |
 | `BAK-075` | `Download the pinned restic release on the controller and verify SHA256` | `ansible.builtin.get_url` | Controller | 체크섬 일치 시 `ok` (`run_once`) |
@@ -114,8 +114,7 @@
 | `BAK-084` | `Ensure the controller restic cache directory exists` | `ansible.builtin.file` | Controller | 디렉터리 존재 시 `ok` (`0755`, `run_once`) |
 | `BAK-085` | `Derive the restic environment from the repository` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`no_log`; 시크릿은 `environment`로만 전달) |
 | `BAK-086` | `Assert the controller architecture is supported` | `ansible.builtin.assert` | Controller | 읽기 전용 (`x86_64`/`aarch64`만 — 고정 릴리스에 없는 아키텍처는 명확한 메시지로 실패) |
-| `BAK-087` | `Log in to OpenBao with AppRole when no token is given (same as resolve_connection.yml)` | `ansible.builtin.uri` | Controller | POST `auth/approle/login`, `run_once`, `no_log`, `check_mode: false` — 토큰 미지정 + `VAULT_ROLE_ID`/`VAULT_SECRET_ID`가 있을 때만 (Deploy와 같은 Semaphore Environment) |
-| `BAK-088` | `Use the AppRole client token for the maintenance KV lookups` | `ansible.builtin.set_fact` | Controller | 순수 함수 (`no_log`; 발급 토큰을 BAK-071이 우선 사용) |
+| `BAK-087` | `Log in to OpenBao once through the shared read point (token for the whole play)` | `ansible.builtin.set_fact` | Controller | `lookup('openbao_doc', '@token')`, `run_once`, `no_log`, `check_mode: false` — 플레이당 AppRole 로그인 한 번(Deploy와 같은 Semaphore Environment) |
 | `BAK-083` | `Fail the host when any maintenance command failed` | `ansible.builtin.assert` | Controller | 이벤트 전송 뒤 판정(전송 실패도 실패로 처리) — 한 호스트라도 실패하면 Semaphore 실행 실패 |
 
 ---
@@ -151,7 +150,7 @@
 |---|---|---|
 | `job=backup` | 호스트 훅 | `job`, `host`, `command`(`backup`), `success`(bool), `exit_code`, `duration`(초), `error`(실패 시 마지막 오류 요약, ≤500자), `ts`(UTC ISO8601) |
 | `job=maintenance` | 중앙 Repo Maintenance(후속 티켓) | `job`, `host`, `command`(`check`/`forget`…), `success`, `duration`, `error` |
-| `job=inventory` | Deploy 종료 시 컨트롤러(`BAK-061`, Config 제외; OpenBao `agents/openobserve`의 `controller_ingest_token`으로 인증, 인증서는 기본 검증) | `job`, `host`, `deployed_at`(UTC ISO8601) |
+| `job=inventory` | Deploy 종료 시 컨트롤러(`BAK-061`, Config 제외; OpenBao `secrets/services/openobserve/ingest`의 `username`·`password`로 인증, 인증서는 기본 검증) | `job`, `host`, `deployed_at`(UTC ISO8601) |
 
 표준 알림:
 
@@ -176,13 +175,13 @@
 |---|---|
 | Playbook | `playbooks/host_agents_maintenance.yml` |
 | 스케줄 | 매일 05:00 KST — Semaphore 스케줄 시간대가 Asia/Seoul이면 `0 5 * * *`, 기본값 UTC면 `0 20 * * *` ([semaphore-setup.md](semaphore-setup.md) §6) |
-| Environment | Deploy와 같은 Variable Group: `VAULT_ADDR`, `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(AppRole, BAK-087) 또는 `VAULT_TOKEN`, 선택 `VAULT_NAMESPACE`/`VAULT_MOUNT` — 시크릿은 Git에 두지 않음. 등록 절차는 [semaphore-setup.md](semaphore-setup.md) |
+| Environment | Deploy와 같은 Variable Group: `VAULT_ADDR`, `VAULT_ROLE_ID`/`VAULT_SECRET_ID`(AppRole `backup_maintenance`, BAK-087) — 역할 안에 `VAULT_TOKEN` 대체 경로와 네임스페이스·마운트 변수는 없고 인증은 공용 읽기 지점이 정한다. 주소(`o2_endpoint`·`rustfs_endpoint`)는 `inventory/services/*`의 `url`이 유일한 출처이며 문서가 없으면 Extra variables가 있어도 실패한다. 시크릿은 Git에 두지 않음. 등록 절차는 [semaphore-setup.md](semaphore-setup.md) |
 | 대상 | `servers` 중 인벤토리 `host_agents_excluded` 그룹을 뺀 호스트 (Deploy와 같은 집합, `host_agents_backup_only` 호스트 포함) |
 | 수동 실행 | `-e target_hosts=<host>`(1대), `-e backup_maintenance_read_subset=always\|never` |
 
 **호스트별 순서**: `check` → (첫째 일요일(`backup_maintenance_timezone`, 기본 Asia/Seoul 기준 달력일) 또는 `always`) `check --read-data-subset=10%` → 모든 check가 성공한 경우에만 `forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --prune`. `check`가 실패한 호스트는 `prune`을 건너뜁니다(데이터 삭제 차단). 강제 `unlock`은 하지 않고 `--retry-lock 30m`만 사용합니다.
 
-**OpenBao 입력**: `hosts/<host>/agents`의 `restic_password`(호스트별 repo 비밀번호), `agents/rustfs`의 `maintenance_access_key`/`maintenance_secret_key`(RustFS 유지보수 키 — `forget`/`prune`의 삭제 권한 보유), `agents/openobserve`의 `controller_ingest_token`. `o2_endpoint`/`rustfs_endpoint`는 Extra variables 또는 `group_vars`가 우선이고, 없으면 `agents/openobserve`의 `o2_endpoint`/`o2_org`, `agents/rustfs`의 `rustfs_endpoint`를 씁니다. 버킷은 Extra variables > `hosts/<host>/agents`의 `rustfs_bucket` > 규칙 `<rustfs_bucket_prefix>_<호스트명>`(기본 `backup-prod-ns****`)이며 공용 `agents/rustfs`의 `rustfs_bucket`은 쓰지 않습니다(Deploy와 같은 해석). 유지보수 키는 모든 호스트 버킷(`backup-prod-*`)에 접근할 수 있어야 합니다. 사설 CA는 컨트롤러 신뢰 저장소에 등록하거나 `backup_maintenance_ca_file`로 지정합니다.
+**OpenBao 입력**(`roles/backup/vars/main.yml`의 `backup_openbao_required`): `secrets/assets/<호스트>/agents`의 `restic_password`(호스트별 repo 비밀번호), `secrets/services/rustfs/maintenance`의 `access_key`/`secret_key`(RustFS 유지보수 키 — `forget`/`prune`의 삭제 권한 보유), `secrets/services/openobserve/ingest`의 `username`/`password`(컨트롤러 수집 자격), `inventory/services/rustfs`의 `url`/`region`/`ca_file`(선택), `inventory/services/openobserve`의 `url`/`org`, `inventory/assets/<호스트>`(`agents.backup.bucket`, 선택). 버킷은 Extra variables > Asset 문서의 `agents.backup.bucket` > 규칙 `<rustfs_bucket_prefix>-<호스트명>`(기본 `backup-prod-ns****`)입니다(`BAK-071`이 Asset 문서를 읽고 변수 `backup_asset_bucket`에 둡니다). 유지보수 키는 모든 호스트 버킷(`backup-prod-*`)에 접근할 수 있어야 합니다. 사설 CA는 컨트롤러 신뢰 저장소에 등록하거나 `inventory/services/rustfs`의 `ca_file`(컨트롤러의 파일 경로, `backup_maintenance_ca_file`로 쓰입니다)로 지정합니다.
 
 **restic 바이너리**: Deploy와 같은 고정 버전·체크섬(`monitoring/vars/main.yml`)을 컨트롤러 캐시(`host_agents_cache_dir`)에서 사용합니다.
 

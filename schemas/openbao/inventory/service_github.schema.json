@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Service github 주소",
+  "type": "object",
+  "properties": {
+    "url": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Service 주소."
+    },
+    "org": {
+      "type": "string",
+      "minLength": 1,
+      "description": "조직"
+    }
+  },
+  "required": [
+    "url"
+  ],
+  "additionalProperties": false
+}

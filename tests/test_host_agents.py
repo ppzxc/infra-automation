@@ -1,23 +1,24 @@
-"""Host Agents entry point (ADR-0006, Spec #38 / Ticket-2).
+"""Host Agents entry point (ADR-0006, Spec #38 / Ticket-2; Spec #511 / Ticket-14).
 
 * host_agents.yml / site.yml / maintenance.yml structure.
 * OS probe classification (sample os-release / redhat-release / uname outputs).
-* Agents KV resolution: the real ``agents_input.yml`` task file is executed with
-  ``ansible-playbook`` against a fake OpenBao HTTP server, in normal and check mode.
+* Agents input resolution: the real ``agents_input.yml`` task file is executed with
+  ``ansible-playbook`` against the shared fake OpenBao (tests/openbao_fake.py), in normal and check mode.
 """
 
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
 import yaml
+
+from openbao_fake import APPROLE_TOKEN
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
@@ -310,7 +311,7 @@ def test_os_probe_command_runs_and_parses_on_this_host():
 STANDARD = ["/var/log/messages", "/var/log/secure", "/var/log/audit/audit.log", "/var/log/cron*"]
 SECURITY = ["/var/log/secure", "/var/log/audit/audit.log"]
 MANDATORY = ["/etc", "/var/spool/cron", "/usr/local/bin"]
-REQUIRED = {"o2_ingest_token": "tok-o2-ingest-0001", "rustfs_access_key": "rfs-access-0002",
+REQUIRED = {"ingest_token": "tok-o2-ingest-0001", "rustfs_access_key": "rfs-access-0002",
             "rustfs_secret_key": "rfs-secret-0003", "restic_password": "restic-pass-0004"}
 
 
@@ -318,9 +319,32 @@ SERVICES = {"/var/log/messages": "syslog", "/var/log/secure": "auth", "/var/log/
             "/var/log/cron*": "cron"}
 
 
+_SECRET_KEYS = set(REQUIRED) | {"webhook_secret"}
+_LABELS = {"otel_exclude_logs": "agents.otel.exclude_logs", "backup_exclude_paths": "agents.backup.exclude_paths",
+           "otel_app_telemetry": "agents.otel.app_telemetry"}
+
+
+def _stored(flat):
+    """테스트가 쓰는 평면 키(`backup_extra_paths`, `otel_*`, 비밀)를 저장 형태(agents 절, 비밀 문서)로 나눈다."""
+    agents, secrets = {}, {}
+    for key, value in flat.items():
+        if key in _SECRET_KEYS or key == "github_webhook_secret":
+            secrets["webhook_secret" if key == "github_webhook_secret" else key] = value
+            continue
+        for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
+            if key.startswith(prefix):
+                agents.setdefault(section, {})[key[len(prefix):]] = value
+                break
+    return agents, secrets
+
+
+def _filter(flat, *args, **kwargs):
+    agents, secrets = _stored(flat)
+    return host_agents_resolve_inputs(agents, secrets, *args, **kwargs)
+
+
 def _resolve(**kv):
-    return host_agents_resolve_inputs(dict(REQUIRED, **kv), STANDARD, SECURITY, MANDATORY, "hosts/h/agents",
-                                      service_map=SERVICES)
+    return _filter(dict(REQUIRED, **kv), STANDARD, SECURITY, MANDATORY, "inventory/assets/h", service_map=SERVICES)
 
 
 def test_absent_overrides_mean_git_standard_only():
@@ -346,7 +370,7 @@ def test_app_telemetry_flag_is_opt_in_and_accepts_string_booleans():
 
 def test_app_telemetry_flag_that_is_not_boolean_fails_naming_the_key():
     res = _resolve(otel_app_telemetry="maybe")
-    assert len(res["errors"]) == 1 and "otel_app_telemetry" in res["errors"][0] and "maybe" in res["errors"][0]
+    assert len(res["errors"]) == 1 and "agents.otel.app_telemetry" in res["errors"][0] and "maybe" in res["errors"][0]
 
 
 def test_container_logs_flag_is_opt_in_and_accepts_string_booleans():
@@ -376,23 +400,22 @@ def test_extra_lists_are_appended_and_exclude_lists_subtracted():
 @pytest.mark.parametrize("missing", sorted(REQUIRED))
 @pytest.mark.parametrize("blank", [None, ""])
 def test_missing_required_key_is_an_error_naming_key_and_path(missing, blank):
-    res = host_agents_resolve_inputs(dict(REQUIRED, **{missing: blank}), STANDARD, SECURITY, MANDATORY, "hosts/h/agents")
-    assert len(res["errors"]) == 1 and missing in res["errors"][0] and "hosts/h/agents" in res["errors"][0]
+    res = _filter(dict(REQUIRED, **{missing: blank}), STANDARD, SECURITY, MANDATORY, "inventory/assets/h")
+    assert len(res["errors"]) == 1 and missing in res["errors"][0] and "secrets/assets/<ns>/agents" in res["errors"][0]
 
 
 def test_otelcol_only_keys_are_not_required_when_otel_is_disabled():
-    kv = {k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}
-    assert host_agents_resolve_inputs(kv, STANDARD, SECURITY, MANDATORY, "p", otel_enabled=False)["errors"] == []
-    res = host_agents_resolve_inputs(dict(kv, restic_password=""), STANDARD, SECURITY, MANDATORY, "p",
-                                     otel_enabled=False)
-    assert res["errors"] == ["필수 키 누락: restic_password (OpenBao p)"]
+    kv = {k: v for k, v in REQUIRED.items() if k != "ingest_token"}
+    assert _filter(kv, STANDARD, SECURITY, MANDATORY, "p", otel_enabled=False)["errors"] == []
+    res = _filter(dict(kv, restic_password=""), STANDARD, SECURITY, MANDATORY, "p", otel_enabled=False)
+    assert res["errors"] == ["필수 키 누락: restic_password (OpenBao secrets/assets/<ns>/agents)"]
 
 
 def test_secrets_are_never_part_of_the_merged_result():
     res = _resolve()
     assert not any(v in json.dumps(res) for v in REQUIRED.values())
     assert not set(REQUIRED) & set(res)
-    assert host_agents_secrets(dict(REQUIRED, otel_extra_logs=["/x"])) == REQUIRED
+    assert host_agents_secrets(dict(REQUIRED, webhook_secret="hook-0009", extra="/x")) == REQUIRED
 
 
 @pytest.mark.parametrize("kv_key, entry, item", [
@@ -413,7 +436,7 @@ def test_secrets_are_never_part_of_the_merged_result():
 def test_non_excludable_exclude_fails_naming_path_and_key(kv_key, entry, item):
     res = _resolve(**{kv_key: [entry]})
     assert len(res["errors"]) == 1
-    assert kv_key in res["errors"][0] and item in res["errors"][0] and "hosts/h/agents" in res["errors"][0]
+    assert _LABELS[kv_key] in res["errors"][0] and item in res["errors"][0] and "inventory/assets/h" in res["errors"][0]
 
 
 @pytest.mark.parametrize("kv", [
@@ -433,8 +456,8 @@ def test_non_security_glob_exclude_removes_matching_standard_logs():
 
 @pytest.mark.parametrize("shared", [{}, {"a": ""}, None])
 def test_empty_shared_secret_is_an_error(shared):
-    res = host_agents_resolve_inputs(dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p", {"rustfs": shared})
-    assert res["errors"] == ["공유 시크릿 누락 또는 비어 있음: agents/rustfs"]
+    res = _filter(dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p", {"rustfs": shared})
+    assert res["errors"] == ["공유 설정 누락 또는 url 없음: inventory/services/rustfs"]
 
 
 def test_json_encoded_string_lists_are_accepted():
@@ -445,63 +468,66 @@ def test_json_encoded_string_lists_are_accepted():
 # agents_input.yml executed under ansible-playbook against a fake OpenBao
 # --------------------------------------------------------------------------
 
-GOOD = dict(REQUIRED, otel_docker_metrics=True, otel_extra_logs=["/opt/app/*.log"])
-BAD_EXCLUDE = dict(REQUIRED, backup_exclude_paths=["/etc"])
-MISSING = {k: v for k, v in REQUIRED.items() if k != "restic_password"}
-SHARED_O2 = {"controller_token": "shared-o2"}
-SHARED_RUSTFS = {"maintenance_access_key": "shared-rfs"}
+GOOD_AGENTS = {"otel": {"docker_metrics": True, "extra_logs": ["/opt/app/*.log"]}}
+BAD_EXCLUDE_AGENTS = {"backup": {"exclude_paths": ["/etc"]}}
+NO_INGEST = {k: v for k, v in REQUIRED.items() if k != "ingest_token"}
 
 
-class _FakeOpenBao(BaseHTTPRequestHandler):
-    routes = {}
-
-    def do_GET(self):  # noqa: N802
-        status, body = self.routes.get(self.path, (404, {"errors": []}))
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self, *args):
-        pass
-
-
-def _kv(data):
-    return 200, {"data": {"data": data, "metadata": {"version": 1}}}
+def _host(fake, name, secrets=REQUIRED, agents=None):
+    """Asset 문서(agents 절)와 에이전트 비밀을 가짜 서버에 올린다. 스키마 검사가 켜져 있어 모양이 틀리면 여기서 실패한다."""
+    fake.set("inventory", "assets/" + name, dict({"description": "Fake host " + name}, **({"agents": agents} if agents else {})))
+    if secrets is not None:
+        fake.set("secrets", "assets/%s/agents" % name, secrets)
 
 
 @pytest.fixture
-def openbao():
-    server = HTTPServer(("127.0.0.1", 0), _FakeOpenBao)
-    _FakeOpenBao.routes = {
-        "/v1/secret/data/hosts/good/agents": _kv(GOOD),
-        "/v1/secret/data/hosts/bare/agents": _kv(REQUIRED),
-        "/v1/secret/data/hosts/badexclude/agents": _kv(BAD_EXCLUDE),
-        "/v1/secret/data/hosts/missing/agents": _kv(MISSING),
-        "/v1/secret/data/hosts/backuponly/agents": _kv({k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}),
-        "/v1/secret/data/hosts/notoken/agents": _kv({k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}),
-        "/v1/secret/data/hosts/nokv/agents": (404, {"errors": []}),
-        "/v1/secret/data/hosts/denied/agents": (403, {"errors": ["permission denied"]}),
-        "/v1/secret/data/agents/openobserve": _kv(SHARED_O2),
-        "/v1/secret/data/agents/rustfs": _kv(SHARED_RUSTFS),
-        # tcpcheck 대상 해석(hosts/<host>): 주소는 public_ip, 비표준 SSH 포트는 ansible_port (Issue #203)
-        "/v1/secret/data/hosts/svc-std": _kv({"public_ip": "192.0.2.10", "fqdn": "svc-std.example.internal"}),
-        "/v1/secret/data/hosts/svc-odd": _kv({"public_ip": "192.0.2.11", "ansible_port": 8487}),
-        "/v1/secret/data/hosts/svc-denied": (403, {"errors": ["permission denied"]}),
-    }
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{server.server_port}"
-    server.shutdown()
+def bao(fake_openbao):
+    f = fake_openbao
+    _host(f, "good", agents=GOOD_AGENTS)
+    _host(f, "bare")
+    _host(f, "badexclude", agents=BAD_EXCLUDE_AGENTS)
+    _host(f, "missing", {k: v for k, v in REQUIRED.items() if k != "restic_password"})
+    _host(f, "backuponly", NO_INGEST)
+    _host(f, "notoken", NO_INGEST)
+    _host(f, "nokv", None)
+    _host(f, "denied")
+    f.deny("secrets", "assets/denied/agents")
+    # tcpcheck 대상 해석(inventory/assets/<ns>/endpoints): 주소·포트는 ssh Endpoint에서
+    for name, address, port in (("svc-std", "192.0.2.10", 22), ("svc-odd", "192.0.2.11", 8487)):
+        _host(f, name, None)
+        f.set("inventory", "assets/%s/endpoints" % name, {"ssh": {"protocol": "ssh", "address": address, "port": port,
+                                                                   "credential": "admin01"}})
+    _host(f, "svc-noep", None)
+    _host(f, "svc-denied", None)
+    f.deny("inventory", "assets/svc-denied/endpoints")
+    return f
 
 
-def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token="tok", extra_tasks=None,
+@pytest.fixture
+def openbao(bao):
+    return bao.url
+
+
+def _declared_pattern(mount, doc):
+    """index.yml 패턴처럼 `+`가 경로 한 마디에 맞는 선언 패턴 가운데 이 문서를 덮는 것을 찾는다."""
+    declared = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))["monitoring_openbao_required"]
+    path = "%s/%s" % (mount, doc)
+    return next((pat for pat in declared if re.fullmatch(pat.replace("+", "[^/]+"), path)), None)
+
+
+def _assert_reads_are_declared(fake):
+    """요청 기록 단언: 역할이 읽은 문서는 모두 monitoring_openbao_required 패턴 안에 있다."""
+    undeclared = [(r.mount, r.doc) for r in fake.reads() if r.mount and _declared_pattern(r.mount, r.doc) is None]
+    assert undeclared == [], "선언 밖 문서를 읽었다: %s" % undeclared
+
+
+def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token=APPROLE_TOKEN, extra_tasks=None,
                      with_backup_defaults=False, environment="production", backup_only_hosts=()):
-    role_vars = {} if environment is None else {"host_agents_environment": environment}
+    role_vars = yaml.safe_load((ROOT_DIR / "playbooks" / "group_vars" / "all.yml").read_text(encoding="utf-8"))   # 공용 deployment_environment
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
+    if environment is not None:
+        role_vars["host_agents_environment"] = environment
     if with_backup_defaults:
         role_vars.update(yaml.safe_load((ROLE.parent / "backup" / "defaults" / "main.yml").read_text(encoding="utf-8")))
     tasks = [{"ansible.builtin.import_tasks": str(ROLE / "tasks" / "agents_input.yml")}]
@@ -509,49 +535,58 @@ def _run_input_tasks(tmp_path, hosts, addr, check=False, extra_vars=None, token=
         "name": "Dump result",
         "ansible.builtin.copy": {
             "content": "{{ {'inputs': host_agents_inputs, 'secrets': host_agents_secrets,"
-                       " 'shared': host_agents_shared_secrets, 'attrs': host_agents_resource_attrs} | to_json }}",
+                       " 'services': host_agents_services, 'attrs': host_agents_resource_attrs} | to_json }}",
             "dest": f"{tmp_path}/out-{{{{ inventory_hostname }}}}.json", "mode": "0600"},
         "check_mode": False,
     })
     (tmp_path / "play.yml").write_text(yaml.safe_dump([{
         "hosts": "all", "gather_facts": False, "connection": "local", "become": False,
         "vars": role_vars, "tasks": tasks + (extra_tasks or [])}]))
-    inv = {"all": {"hosts": {h: {"_vault_token": token} for h in hosts}, "vars": {"vault_addr": addr},
+    inv = {"all": {"hosts": {h: {"_vault_token": token} for h in hosts},
                    "children": {"host_agents_backup_only": {"hosts": {h: {} for h in backup_only_hosts}}}}}
     (tmp_path / "inv.yml").write_text(yaml.safe_dump(inv))
-    cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml"), "-e", "vault_namespace=''"]
+    cmd = ["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")]
     if check:
         cmd.append("--check")
     for k, v in (extra_vars or {}).items():
         cmd += ["-e", json.dumps({k: v})]
-    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR)
+    res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR,
+                         env=dict(os.environ, VAULT_ADDR=addr, ANSIBLE_NOCOLOR="1"))
     return res, {h: json.loads((tmp_path / f"out-{h}.json").read_text())
                  for h in hosts if (tmp_path / f"out-{h}.json").exists()}
 
 
-@pytest.mark.parametrize("environment, ok", [(None, False), ("prod", False), ("production", True), ("staging", True)])
+@pytest.mark.parametrize("environment, ok", [(None, True), ("prod", False), ("production", True), ("staging", True)])
 @pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
-def test_environment_is_validated_before_any_change_in_both_modes(tmp_path, openbao, check, environment, ok):
+def test_environment_is_a_role_default_validated_before_any_change_in_both_modes(tmp_path, openbao, check, environment, ok):
     res, out = _run_input_tasks(tmp_path, ["bare"], openbao, check=check, environment=environment)
     assert (res.returncode == 0) is ok and (set(out) == {"bare"}) is ok
     if ok:
-        assert out["bare"]["attrs"]["attributes"]["deployment.environment.name"] == environment
+        assert out["bare"]["attrs"]["attributes"]["deployment.environment.name"] == (environment or "production")
     else:
         assert "bare: 리소스 속성 검증 실패" in res.stdout + res.stderr and "host_agents_environment" in res.stdout + res.stderr
 
 
+def test_environment_is_never_read_from_openbao(tmp_path, bao, openbao):
+    bao.set("secrets", "assets/bare/agents", dict(REQUIRED))
+    res, out = _run_input_tasks(tmp_path, ["bare"], openbao)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert not [r for r in bao.reads() if "environment" in (r.doc or "")]
+
+
 @pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
-def test_agents_kv_resolution_under_ansible(tmp_path, openbao, check):
+def test_agents_resolution_under_ansible(tmp_path, bao, openbao, check):
     hosts = ["good", "bare", "badexclude", "missing"]
     res, out = _run_input_tasks(tmp_path, hosts, openbao, check=check)
     text = res.stdout + res.stderr
     assert set(out) == {"good", "bare"}                       # invalid hosts fail before any later task
-    assert "badexclude: Host Agents 입력 검증 실패" in text and "backup_exclude_paths" in text and "/etc" in text
-    assert "hosts/badexclude/agents" in text
-    assert "missing: Host Agents 입력 검증 실패" in text and "필수 키 누락: restic_password" in text
+    assert "badexclude: Host Agents 입력 검증 실패" in text and "agents.backup.exclude_paths" in text and "/etc" in text
+    assert "inventory/assets/badexclude" in text
+    assert "missing: OpenBao 조회 실패 또는 필수 키 누락" in text and "secrets/assets/+/agents.restic_password" in text
     assert res.returncode != 0
     assert out["good"]["secrets"] == REQUIRED
-    assert out["good"]["shared"] == {"openobserve": SHARED_O2, "rustfs": SHARED_RUSTFS}
+    assert out["good"]["services"] == {"openobserve": {"url": "https://o2.example.test", "org": "fake-org"},
+                                       "rustfs": {"url": "https://s3.example.test", "region": "fake-region-1"}}
     assert out["good"]["inputs"]["otel_docker_metrics"] is True
     assert out["good"]["inputs"]["otel_logs"][-1] == {"path": "/opt/app/*.log", "stream": "app_logs", "service": "app"}
     services = {l["path"]: l["service"] for l in out["bare"]["inputs"]["otel_logs"]}
@@ -563,25 +598,27 @@ def test_agents_kv_resolution_under_ansible(tmp_path, openbao, check):
         "/var/log/secure", "/var/log/audit/audit.log"}
     for secret in REQUIRED.values():                          # secrets never reach the console
         assert secret not in text
+    _assert_reads_are_declared(bao)
+    assert {r.namespace for r in bao.reads()} == {"infra"} and {r.mount for r in bao.reads()} <= {"inventory", "secrets"}
 
 
 @pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
 def test_backup_only_host_does_not_need_the_otelcol_ingest_token(tmp_path, openbao, check):
-    """Host Agents Backup Only 호스트는 o2_ingest_token 없이 통과하고, 그룹 밖 호스트는 같은 KV로 실패한다."""
+    """Host Agents Backup Only 호스트는 ingest_token 없이 통과하고, 그룹 밖 호스트는 같은 비밀로 실패한다."""
     res, out = _run_input_tasks(tmp_path, ["backuponly", "notoken"], openbao, check=check,
                                 backup_only_hosts=["backuponly"])
     text = res.stdout + res.stderr
     assert set(out) == {"backuponly"} and res.returncode != 0
-    assert "notoken: Host Agents 입력 검증 실패" in text and "필수 키 누락: o2_ingest_token" in text
-    assert out["backuponly"]["secrets"] == {k: v for k, v in REQUIRED.items() if k != "o2_ingest_token"}
+    assert "notoken: Host Agents 입력 검증 실패" in text and "필수 키 누락: ingest_token" in text
+    assert out["backuponly"]["secrets"] == NO_INGEST
 
 
 @pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
-@pytest.mark.parametrize("host", ["denied"])
-def test_openbao_error_fails_the_host_in_normal_and_check_mode(tmp_path, openbao, check, host):
-    res, out = _run_input_tasks(tmp_path, [host], openbao, check=check)
+def test_openbao_error_fails_the_host_in_normal_and_check_mode(tmp_path, openbao, check):
+    res, out = _run_input_tasks(tmp_path, ["denied"], openbao, check=check)
+    text = res.stdout + res.stderr
     assert res.returncode != 0 and out == {}
-    assert "OpenBao 조회 실패" in res.stdout + res.stderr and "403" in res.stdout + res.stderr
+    assert "OpenBao 조회 실패" in text and "403" in text and "secrets/assets/denied/agents" in text
 
 
 @pytest.mark.parametrize("check", [False, True], ids=["normal", "check"])
@@ -591,31 +628,43 @@ def test_unreachable_openbao_fails_the_host(tmp_path, check):
     assert "OpenBao 조회 실패" in res.stdout + res.stderr
 
 
-def test_missing_kv_secret_fails_naming_all_required_keys(tmp_path, openbao):
+def test_missing_agents_secret_document_fails_without_a_fallback(tmp_path, openbao):
     res, out = _run_input_tasks(tmp_path, ["nokv"], openbao)
     assert res.returncode != 0 and out == {}
-    for key in REQUIRED:
-        assert f"필수 키 누락: {key}" in res.stdout + res.stderr
+    assert "secrets/assets/+/agents(문서 없음)" in res.stdout + res.stderr
 
 
-def test_missing_vault_token_fails_instead_of_previewing_incomplete_config(tmp_path, openbao):
+def test_missing_vault_credentials_fail_instead_of_previewing_incomplete_config(tmp_path, openbao):
     res, out = _run_input_tasks(tmp_path, ["good"], openbao, token="", check=True)
     assert res.returncode != 0 and out == {}
     assert "OpenBao 조회 실패" in res.stdout + res.stderr
 
 
-def test_missing_shared_secret_fails_the_host(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = (404, {"errors": []})
+def test_missing_shared_service_document_fails_the_host(tmp_path, bao, openbao):
+    bao.remove("inventory", "services/rustfs")
     res, out = _run_input_tasks(tmp_path, ["good"], openbao)
     assert res.returncode != 0 and out == {}
-    assert "공유 시크릿 누락 또는 비어 있음: agents/rustfs" in res.stdout + res.stderr
+    assert "inventory/services/rustfs(문서 없음)" in res.stdout + res.stderr
 
 
-def test_fixture_seam_skips_openbao_entirely(tmp_path):
-    fixture = {"host": REQUIRED, "openobserve": SHARED_O2, "rustfs": SHARED_RUSTFS}
-    res, out = _run_input_tasks(tmp_path, ["good"], "http://127.0.0.1:1", extra_vars={"host_agents_kv_fixture": fixture})
+def test_the_controller_ingest_document_is_only_required_where_the_inventory_event_runs(tmp_path, bao, openbao):
+    bao.remove("secrets", "services/openobserve/ingest")
+    res, out = _run_input_tasks(tmp_path, ["good"], openbao)
+    assert res.returncode != 0 and "secrets/services/openobserve/ingest(문서 없음)" in res.stdout + res.stderr
+    res, out = _run_input_tasks(tmp_path, ["good"], openbao, extra_vars={"backup_inventory_event_enabled": False})
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_the_openbao_fixture_seam_answers_without_any_network(tmp_path, fake_openbao):
+    docs = {"inventory/assets/good": {"description": "Fake host good"},
+            "secrets/assets/good/agents": dict(REQUIRED),
+            "inventory/services/openobserve": {"url": "https://o2.example.test"},
+            "inventory/services/rustfs": {"url": "https://s3.example.test"},
+            "secrets/services/openobserve/ingest": {"username": "fake-ingest", "password": "fake-pw-0014"}}
+    res, out = _run_input_tasks(tmp_path, ["good"], "http://127.0.0.1:1", extra_vars={"openbao_fixture": docs})
     assert res.returncode == 0, res.stdout + res.stderr
     assert out["good"]["secrets"] == REQUIRED and out["good"]["inputs"]["errors"] == []
+    assert fake_openbao.requests == []
 
 
 def test_unprovisioned_host_fails_pointing_at_site_yml(tmp_path):
@@ -628,7 +677,7 @@ def test_unprovisioned_host_fails_pointing_at_site_yml(tmp_path):
                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
     text = res.stdout + res.stderr
     assert "fresh: 접속 계정으로 SSH 접속할 수 없는" in text and "undef: 접속 계정으로 SSH 접속할 수 없는" in text
-    assert "ready: 접속 계정" not in text and "admin_users" in text and "site.yml" in text
+    assert "ready: 접속 계정" not in text and "access.admin_credentials" in text and "site.yml" in text
     assert res.returncode != 0
 
 
@@ -881,7 +930,7 @@ def _render_config(tmp_path, _inventory=None, **over):
     vars_.update({
         "inventory_hostname": "h1", "host_agents_os_type": "linux", "host_agents_os_description": "Rocky Linux 9",
         "host_agents_journald": False, "o2_endpoint": "https://o2.example:5080", "o2_org": "default",
-        "host_agents_secrets": {"o2_ingest_token": "s3cr3t-token"},
+        "host_agents_secrets": {"ingest_token": "s3cr3t-token"},
         "host_agents_resource_attrs": host_agents_resource_attributes("h1", "production", OS_FACTS, "192.0.2.10"),
         "host_agents_inputs": {"otel_docker_metrics": False, "otel_logs": [
             {"path": "/var/log/secure", "stream": "security_logs", "service": "auth"},
@@ -1277,10 +1326,8 @@ def test_raw_upload_password_connection_uses_sshpass_and_hides_the_password(tmp_
 
 # --- 엔드포인트 해석: Extra variables / group_vars(A) > OpenBao agents/*(B) > 역할 기본값 -------------------------
 _EFFECTIVE_KEYS = ("o2_endpoint", "o2_org", "o2_ca_file", "rustfs_endpoint", "rustfs_bucket", "rustfs_region", "rustfs_ca_file")
-_ENDPOINTS_O2 = {"controller_ingest_token": "ctl-token", "o2_endpoint": "https://o2.bao.invalid:5080",
-                 "o2_org": "acme", "o2_ca_file": "/etc/pki/o2-ca.pem"}
-_ENDPOINTS_RUSTFS = {"maintenance_access_key": "m-access", "rustfs_endpoint": "https://rfs.bao.invalid:9000",
-                     "rustfs_region": "kr-1", "rustfs_ca_file": "/etc/pki/rfs-ca.pem"}
+_O2_SERVICE = {"url": "https://o2.bao.invalid:5080", "org": "acme"}
+_RUSTFS_SERVICE = {"url": "https://rfs.bao.invalid:9000", "region": "kr-1"}
 
 
 def _effective(tmp_path, openbao, extra_vars=None, host="good"):
@@ -1293,45 +1340,78 @@ def _effective(tmp_path, openbao, extra_vars=None, host="good"):
     return json.loads((tmp_path / "eff.json").read_text())
 
 
-def test_endpoints_come_from_openbao_when_not_set_elsewhere(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/agents/openobserve"] = _kv(_ENDPOINTS_O2)
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
+def test_endpoints_come_from_the_service_documents_when_not_set_elsewhere(tmp_path, bao, openbao):
+    bao.set("inventory", "services/openobserve", _O2_SERVICE)
+    bao.set("inventory", "services/rustfs", _RUSTFS_SERVICE)
     eff = _effective(tmp_path, openbao)
-    assert eff == {"o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme", "o2_ca_file": "/etc/pki/o2-ca.pem",
+    assert eff == {"o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme", "o2_ca_file": "",
                    "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup-prod-good",
-                   "rustfs_region": "kr-1", "rustfs_ca_file": "/etc/pki/rfs-ca.pem"}
+                   "rustfs_region": "kr-1", "rustfs_ca_file": ""}
 
 
-def test_extra_vars_win_over_openbao_endpoints(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/agents/openobserve"] = _kv(_ENDPOINTS_O2)
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(_ENDPOINTS_RUSTFS)
+def test_extra_vars_win_over_openbao_endpoints(tmp_path, bao, openbao):
+    bao.set("inventory", "services/openobserve", _O2_SERVICE)
+    bao.set("inventory", "services/rustfs", _RUSTFS_SERVICE)
     eff = _effective(tmp_path, openbao, extra_vars={"o2_endpoint": "https://o2.extra.invalid:5080",
                                                     "rustfs_bucket": "extra-bucket"})
     assert eff["o2_endpoint"] == "https://o2.extra.invalid:5080" and eff["rustfs_bucket"] == "extra-bucket"
     assert eff["o2_org"] == "acme" and eff["rustfs_endpoint"] == "https://rfs.bao.invalid:9000"
 
 
-def test_endpoint_defaults_apply_when_openbao_has_none(tmp_path, openbao):
+def test_optional_service_keys_fall_back_to_the_role_defaults(tmp_path, bao, openbao):
+    bao.set("inventory", "services/openobserve", {"url": "https://o2.bao.invalid:5080"})
+    bao.set("inventory", "services/rustfs", {"url": "https://rfs.bao.invalid:9000"})
     eff = _effective(tmp_path, openbao)
-    assert eff == {"o2_endpoint": "", "o2_org": "default", "o2_ca_file": "", "rustfs_endpoint": "",
-                   "rustfs_bucket": "backup-prod-good", "rustfs_region": "", "rustfs_ca_file": ""}
+    assert (eff["o2_org"], eff["rustfs_region"], eff["o2_ca_file"], eff["rustfs_ca_file"]) == ("default", "", "", "")
 
 
-def test_bucket_follows_the_naming_rule_per_host_and_can_be_overridden_in_the_host_kv(tmp_path, openbao):
-    _FakeOpenBao.routes["/v1/secret/data/hosts/special/agents"] = _kv(dict(REQUIRED, rustfs_bucket="backup-prod-special-a"))
-    assert _effective(tmp_path, openbao, host="special")["rustfs_bucket"] == "backup-prod-special-a"
+def test_bucket_follows_the_naming_rule_per_host(tmp_path, bao, openbao):
     assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
+    assert _effective(tmp_path, openbao, host="bare")["rustfs_bucket"] == "backup-prod-bare"
+
+
+def test_private_ca_files_come_from_the_service_documents(tmp_path, bao, openbao):
+    bao.set("inventory", "services/openobserve", dict(_O2_SERVICE, ca_file="/etc/pki/fake-o2-ca.pem"))
+    bao.set("inventory", "services/rustfs", dict(_RUSTFS_SERVICE, ca_file="/etc/pki/fake-rustfs-ca.pem"))
+    eff = _effective(tmp_path, openbao)
+    assert (eff["o2_ca_file"], eff["rustfs_ca_file"]) == ("/etc/pki/fake-o2-ca.pem", "/etc/pki/fake-rustfs-ca.pem")
+
+
+def test_a_host_bucket_in_the_asset_agents_clause_overrides_the_naming_rule(tmp_path, bao, openbao):
+    """이름 규칙 밖 호스트(이전·개명 호스트)는 Asset 문서 agents.backup.bucket으로 버킷을 가리킨다."""
+    _host(bao, "renamed", agents={"backup": {"bucket": "backup-prod-oldname"}})
+    assert _effective(tmp_path, openbao, host="renamed")["rustfs_bucket"] == "backup-prod-oldname"
+    assert _effective(tmp_path, openbao, host="good")["rustfs_bucket"] == "backup-prod-good"
+
+
+@pytest.mark.parametrize("value, ok", [("backup-prod-ns0001", True), ("12345678", True), ("ab", False), ("Bad_Name", False),
+                                       ("good-bucket\n", False), (12345678, False), (["a-b"], False), ("-abc", False)])
+def test_the_one_bucket_rule_filter(value, ok):
+    from host_agents import host_agents_valid_bucket
+    assert host_agents_valid_bucket(value) is ok
+
+
+def test_no_other_bucket_regex_is_left_in_the_roles():
+    for path in (ROOT_DIR / "roles").rglob("*.yml"):
+        assert "[a-z0-9][a-z0-9.-]{1,61}" not in path.read_text(encoding="utf-8"), str(path)
+
+
+def test_a_bucket_with_a_trailing_newline_is_not_a_valid_bucket_name():
+    bad = host_agents_resolve_inputs({"backup": {"bucket": "good-bucket\n"}}, dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p")
+    assert any("agents.backup.bucket" in e for e in bad["errors"]) and bad["backup_bucket"] == ""
+    ok = host_agents_resolve_inputs({"backup": {"bucket": "good-bucket"}}, dict(REQUIRED), STANDARD, SECURITY, MANDATORY, "p")
+    assert ok["backup_bucket"] == "good-bucket" and not any("bucket" in e for e in ok["errors"])
+
+
+def test_extra_vars_still_win_over_the_asset_bucket(tmp_path, bao, openbao):
+    _host(bao, "renamed", agents={"backup": {"bucket": "backup-prod-oldname"}})
+    eff = _effective(tmp_path, openbao, host="renamed", extra_vars={"rustfs_bucket": "extra-bucket"})
+    assert eff["rustfs_bucket"] == "extra-bucket"
 
 
 def test_bucket_prefix_variable_changes_the_naming_rule(tmp_path, openbao):
     eff = _effective(tmp_path, openbao, extra_vars={"rustfs_bucket_prefix": "backup-stg"})
     assert eff["rustfs_bucket"] == "backup-stg-good"
-
-
-def test_shared_openbao_bucket_key_is_ignored(tmp_path, openbao):
-    """공용 agents/rustfs의 rustfs_bucket은 더는 쓰지 않는다 — 호스트별 버킷만 허용(실수로 공용 버킷에 쌓이지 않게)."""
-    _FakeOpenBao.routes["/v1/secret/data/agents/rustfs"] = _kv(dict(_ENDPOINTS_RUSTFS, rustfs_bucket="shared-bucket"))
-    assert _effective(tmp_path, openbao)["rustfs_bucket"] == "backup-prod-good"
 
 
 def _run_mon020(tmp_path, hosts):
@@ -1343,22 +1423,23 @@ def _run_mon020(tmp_path, hosts):
                           capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
 
 
-def test_password_auth_exception_is_allowed_only_for_hosts_that_opt_in_in_their_kv(tmp_path):
+def test_password_auth_exception_follows_the_endpoint_calculation_of_resolve_connection(tmp_path):
+    exc = {"password_auth_exception": True}
     res = _run_mon020(tmp_path, {
-        "optin": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": True}},
-        "optin_str": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": "true"}},
-        "optout": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": False}},
-        "nokv": {"_is_already_provisioned": False}})
+        "optin": {"_is_already_provisioned": False, "_connection": exc},
+        "optout": {"_is_already_provisioned": False, "_connection": {"password_auth_exception": False}},
+        "noconn": {"_is_already_provisioned": False}})
     text = res.stdout + res.stderr
-    assert "optin: 접속 계정" not in text and "optin_str: 접속 계정" not in text
-    assert "optout: 접속 계정으로 SSH 접속할 수 없는" in text and "nokv: 접속 계정으로 SSH 접속할 수 없는" in text
-    assert "host_agents_allow_password_auth" in text
+    assert "optin: 접속 계정" not in text
+    assert "optout: 접속 계정으로 SSH 접속할 수 없는" in text and "noconn: 접속 계정으로 SSH 접속할 수 없는" in text
+    assert "host_agents_allow_password_auth" not in text and "identity" in text
 
 
 def test_password_auth_exception_leaves_an_audit_warning_only_where_it_applies(tmp_path):
+    exc = {"password_auth_exception": True}
     res = _run_mon020(tmp_path, {
-        "optin": {"_is_already_provisioned": False, "_host_kv_dict": {"host_agents_allow_password_auth": True}},
-        "keyed": {"_is_already_provisioned": True, "_host_kv_dict": {"host_agents_allow_password_auth": True}}})
+        "optin": {"_is_already_provisioned": False, "_connection": exc},
+        "keyed": {"_is_already_provisioned": True, "_connection": exc}})
     text = res.stdout + res.stderr
     assert res.returncode == 0, text
     assert "PASSWORD-AUTH-EXCEPTION optin" in text and "PASSWORD-AUTH-EXCEPTION keyed" not in text
@@ -1383,32 +1464,25 @@ def test_only_the_checker_host_gets_tcp_check_for_every_target_in_the_resolved_l
 
 # --- tcpcheck 대상 해석: 실행 범위와 무관하게 OpenBao에서 읽는다 (Issue #203) --------------------------------------------
 
-def test_tcpcheck_targets_use_the_connection_rules_of_resolve_connection():
+def test_tcpcheck_targets_come_from_the_ssh_endpoint_in_roster_order():
     f = host_agents_tcpcheck_targets
-    kv = {"ns0001": {"public_ip": "192.0.2.1"},                                  # 주소: public_ip, 포트: 22
-          "ns0002": {"public_ip": "192.0.2.2", "ansible_port": 8487},            # 비표준 포트는 KV에서
-          "ns0003": {"ansible_host": "192.0.2.3", "public_ip": "192.0.2.9", "ip": "10.0.0.3", "ansible_port": "77"},   # ansible_host가 먼저
-          "ns0004": {"ip": "10.0.0.4", "port": 2001},                            # ip → host 순서, port 키
-          "ns0005": {"host": "192.0.2.5"}}
-    assert f(["ns0001", "ns0002", "ns0003", "ns0004", "ns0005"], kv) == [
-        "192.0.2.1:22", "192.0.2.2:8487", "192.0.2.3:77", "10.0.0.4:2001", "192.0.2.5:22"]
+    docs = {"ns0001": {"ssh": {"protocol": "ssh", "address": "192.0.2.1", "port": 22}},
+            "ns0002": {"ssh": {"protocol": "ssh", "address": "192.0.2.2", "port": 8487}, "telnet": {"address": "x", "port": 23}}}
+    assert f(["ns0002", "ns0001"], docs) == ["192.0.2.2:8487", "192.0.2.1:22"]
 
 
-def test_tcpcheck_targets_fall_back_to_the_inventory_and_then_the_name_and_port_22():
-    f = host_agents_tcpcheck_targets
-    inv = {"ns0001": {"ansible_host": "192.0.2.1", "ansible_port": 2222}, "ns0002": {"ansible_host": "", "ansible_port": ""}}
-    assert f(["ns0001", "ns0002", "ns0003"], {"ns0001": {}}, inv) == ["192.0.2.1:2222", "ns0002:22", "ns0003:22"]
-    # KV가 인벤토리보다 우선한다
-    assert f(["ns0001"], {"ns0001": {"public_ip": "192.0.2.77", "ansible_port": 8487}}, inv) == ["192.0.2.77:8487"]
+def test_tcpcheck_targets_fail_naming_the_assets_without_an_ssh_endpoint_instead_of_guessing():
+    from ansible.errors import AnsibleFilterError
+    docs = {"ns0001": {"ssh": {"protocol": "ssh", "address": "192.0.2.1", "port": 22}}, "ns0002": {"https": {"address": "h", "port": 443}}}
+    with pytest.raises(AnsibleFilterError) as err:
+        host_agents_tcpcheck_targets(["ns0001", "ns0002", "ns0003"], docs)
+    assert "ns0002" in str(err.value) and "ns0003" in str(err.value) and "ns0001" not in str(err.value)
+    bad = {"ns0004": {"ssh": {"protocol": "ssh", "address": "192.0.2.4", "port": "ssh"}}}
+    with pytest.raises(AnsibleFilterError, match="ns0004"):
+        host_agents_tcpcheck_targets(["ns0004"], bad)
 
 
-def test_tcpcheck_targets_accept_the_nested_kv_format_and_ignore_an_invalid_port():
-    f = host_agents_tcpcheck_targets
-    assert f(["ns0001"], {"ns0001": {"ns0001": {"public_ip": "192.0.2.1", "ansible_port": 8487}}}) == ["192.0.2.1:8487"]
-    assert f(["ns0001"], {"ns0001": {"public_ip": "192.0.2.1", "ansible_port": "abc"}}) == ["192.0.2.1:22"]
-
-
-def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token="tok", others=(), excluded_group=None):
+def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inventory_hosts=None, token=APPROLE_TOKEN, others=(), excluded_group=None, extra_groups=None):
     role_vars = {}
     for f in ("defaults", "vars"):
         role_vars.update(yaml.safe_load((ROLE / f / "main.yml").read_text(encoding="utf-8")))
@@ -1421,23 +1495,25 @@ def _run_tcpcheck_tasks(tmp_path, addr, servers, checker="chk", excluded=(), inv
         "hosts": "all:!servers", "gather_facts": False, "connection": "local", "become": False, "vars": role_vars, "tasks": tasks}]))
     hosts = {h: dict((inventory_hosts or {}).get(h, {})) for h in [checker, *others, *servers]}
     inv = {"all": {"hosts": {h: {"_vault_token": token, **v} for h, v in hosts.items()},
-                   "vars": {"vault_addr": addr, "vault_namespace": ""},
                    "children": {"servers": {"hosts": {h: {} for h in servers}}}}}
     if excluded_group is not None:   # Semaphore 인벤토리의 tcpcheck_excluded 그룹(host_agents_excluded와 같은 방식)
         inv["all"]["children"]["tcpcheck_excluded"] = {"hosts": {h: {} for h in excluded_group}}
+    for group, members in (extra_groups or {}).items():
+        inv["all"]["children"][group] = {"hosts": {h: {} for h in members}}
     (tmp_path / "inv.yml").write_text(yaml.safe_dump(inv))
     res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"), str(tmp_path / "play.yml")],
-                         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR)
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, cwd=ROOT_DIR,
+                         env=dict(os.environ, VAULT_ADDR=addr, ANSIBLE_NOCOLOR="1"))
     out = {h: json.loads((tmp_path / f"targets-{h}.json").read_text()) for h in hosts if (tmp_path / f"targets-{h}.json").exists()}
     return res, out
 
 
-def test_checker_resolves_every_server_endpoint_from_openbao_regardless_of_the_run_scope(tmp_path, openbao):
+def test_checker_resolves_every_server_endpoint_from_openbao_regardless_of_the_run_scope(tmp_path, bao, openbao):
     # 인벤토리에는 포트가 없다(실제 값은 OpenBao에만 있다) — 부분 실행에서도 비표준 포트가 맞아야 한다
-    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd", "svc-none"], inventory_hosts={"svc-none": {"ansible_host": "192.0.2.9"}})
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd"])
     assert res.returncode == 0, res.stdout + res.stderr
-    # 로스터는 호스트명 정렬: svc-none(OpenBao 404 → 인벤토리 주소), svc-odd(KV 비표준 포트), svc-std
-    assert out["chk"] == ["192.0.2.9:22", "192.0.2.11:8487", "192.0.2.10:22"]
+    assert out["chk"] == ["192.0.2.11:8487", "192.0.2.10:22"]     # 로스터는 호스트명 정렬(svc-odd, svc-std)
+    _assert_reads_are_declared(bao)
 
 
 def test_excluded_servers_are_not_probed(tmp_path, openbao):
@@ -1454,9 +1530,9 @@ def test_servers_in_the_tcpcheck_excluded_inventory_group_are_not_probed(tmp_pat
 
 
 def test_group_and_variable_exclusions_are_combined(tmp_path, openbao):
-    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd", "svc-none"], excluded=["svc-odd"], excluded_group=["svc-std"])
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-odd", "svc-none"], excluded=["svc-odd"], excluded_group=["svc-std", "svc-none"])
     assert res.returncode == 0, res.stdout + res.stderr
-    assert out["chk"] == ["svc-none:22"]
+    assert out["chk"] == []
 
 
 def test_a_non_checker_host_gets_no_targets(tmp_path, openbao):
@@ -1470,3 +1546,38 @@ def test_an_openbao_error_fails_the_checker_instead_of_silently_guessing_port_22
     text = res.stdout + res.stderr
     assert res.returncode != 0 and out == {}
     assert "svc-denied" in text and "403" in text
+
+
+def test_a_server_whose_endpoint_document_does_not_exist_yet_is_skipped_with_a_warning_not_guessed(tmp_path, openbao):
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-noep"])
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["192.0.2.10:22"]                   # 호스트명:22로 짐작하지 않는다
+    assert "svc-noep" in res.stdout + res.stderr and "뺐습니다" in res.stdout + res.stderr
+
+
+def test_servers_of_the_host_agents_excluded_group_are_not_even_read(tmp_path, bao, openbao):
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-noep"], others=(), excluded_group=None,
+                                   inventory_hosts=None, extra_groups={"host_agents_excluded": ["svc-noep"]})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert out["chk"] == ["192.0.2.10:22"] and "svc-noep" not in res.stdout + res.stderr
+    assert "assets/svc-noep/endpoints" not in {f"{r.doc}" for r in bao.reads()}
+
+
+def test_a_document_with_endpoints_but_no_ssh_endpoint_still_fails_the_checker(tmp_path, bao, openbao):
+    bao.set("inventory", "assets/svc-noep/endpoints", {"https": {"protocol": "https", "address": "192.0.2.9", "port": 443,
+                                                              "credential": "api"}})
+    res, out = _run_tcpcheck_tasks(tmp_path, openbao, ["svc-std", "svc-noep"])
+    assert res.returncode != 0 and out == {} and "svc-noep" in res.stdout + res.stderr
+
+
+def test_the_declared_openbao_documents_are_known_to_index_yml_and_their_required_keys_exist_in_the_schema():
+    """`monitoring_openbao_required` 선언과 스키마 대조: 패턴은 index.yml에 있고, 선언한 키는 스키마가 아는 키다."""
+    sys.path.insert(0, str(ROOT_DIR / "scripts"))
+    import openbao_validation as ov
+    declared = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))["monitoring_openbao_required"]
+    index = dict(ov.load_index(ov.DEFAULT_SCHEMA_DIR))
+    assert set(declared) <= set(index)
+    for pattern, keys in declared.items():
+        schema = json.loads((Path(ov.DEFAULT_SCHEMA_DIR) / index[pattern]).read_text(encoding="utf-8"))
+        assert set(keys) <= set(schema.get("properties", {})), pattern
+        assert set(schema.get("required", [])) <= set(keys), pattern   # 스키마가 필수로 정한 키는 선언에도 있다

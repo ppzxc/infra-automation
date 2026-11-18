@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from openbao_fake import APPROLE_TOKEN, FakeOpenBao, default_store
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROLE = ROOT_DIR / "roles" / "backup"
 MON = ROOT_DIR / "roles" / "monitoring"
@@ -28,6 +30,7 @@ needs_restic = pytest.mark.skipif(not (shutil.which("restic") and shutil.which("
 def _vars(**over):
     v = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text(encoding="utf-8"))
     v.update(yaml.safe_load((MON / "vars" / "main.yml").read_text(encoding="utf-8")))
+    v.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8")))
     v.update({
         "inventory_hostname": "h1", "backup_restic_binary": "/opt/host-agents/restic/0.19.1/restic",
         "backup_repository": "s3:https://rustfs.example:9000/backup-prod-h1",
@@ -403,21 +406,21 @@ def test_inventory_event_posts_host_and_deployed_at_to_backup_logs(tmp_path):
             t.pop("no_log", None)
             t.pop("delegate_to", None)
         res = _run(tmp_path, tasks, _vars(o2_endpoint=f"http://127.0.0.1:{srv.server_port}", o2_org="default",
-                                          host_agents_shared_secrets={"openobserve": {"controller_ingest_token": "ctl-tok"}},
+                                          host_agents_ingest_auth={"username": "ctl-user", "password": "ctl-tok"},
                                           inventory_hostname="web01"))
     finally:
         srv.shutdown()
     assert res.returncode == 0, res.stdout + res.stderr
     ((path, auth, body),) = _O2.seen
     assert path == "/api/default/backup_logs/_json"
-    assert auth == "Basic " + base64.b64encode(b"default:ctl-tok").decode()
+    assert auth == "Basic " + base64.b64encode(b"ctl-user:ctl-tok").decode()
     assert len(body) == 1 and body[0]["job"] == "inventory" and body[0]["host"] == "web01"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", body[0]["deployed_at"])
 
 
 def test_inventory_event_requires_the_controller_token():
     cond = _task("[BAK-060]")["ansible.builtin.assert"]["that"]
-    assert any("controller_ingest_token" in c for c in cond)
+    assert any("host_agents_ingest_auth" in c and "password" in c for c in cond)
     assert "backup_inventory_event_enabled | bool" in str(_task("[BAK-061]")["when"])
     assert "not ansible_check_mode" in str(_task("[BAK-061]")["when"])
 
@@ -556,7 +559,7 @@ def _restic_repo(tmp_path):
 def _maintain(tmp_path, server, **over):
     vars_ = _vars(
         _maint_restic_bin=shutil.which("restic"), _maint_restic_password="pw", _maint_access_key="ak",
-        _maint_secret_key="sk", _maint_ingest_token="tok", rustfs_region="", backup_maintenance_ca_file="",
+        _maint_secret_key="sk", _maint_ingest_user="u", _maint_ingest_password="tok", rustfs_region="", backup_maintenance_ca_file="",
         backup_maintenance_repository=str(tmp_path / "repo"), o2_endpoint=f"http://127.0.0.1:{server.server_port}",
         o2_org="default", backup_inventory_validate_certs=False)
     vars_.update(over)
@@ -576,7 +579,7 @@ def test_healthy_repo_is_checked_then_pruned_and_reported(tmp_path, collector):
     assert res.returncode == 0, res.stdout + res.stderr
     ((path, auth, events),) = posts
     assert path == "/api/default/backup_logs/_json"
-    assert base64.b64decode(auth.split()[1]).decode() == "default:tok"
+    assert base64.b64decode(auth.split()[1]).decode() == "u:tok"
     assert [(e["command"], e["success"], e["job"], e["host"]) for e in events] == [("check", True, "maintenance", "h1"), ("forget", True, "maintenance", "h1")]
     assert len(_snapshots(env)) == 1          # retention applied: the older snapshot was forgotten
 
@@ -621,39 +624,171 @@ def test_maintenance_playbook_runs_on_the_controller_for_servers_only():
 
 
 def test_every_secret_bearing_maintenance_task_is_no_log():
-    names = {"[BAK-087]", "[BAK-088]", "[BAK-071]", "[BAK-072]", "[BAK-077]", "[BAK-085]", "[BAK-078]", "[BAK-079]", "[BAK-080]", "[BAK-081]", "[BAK-082]"}
+    names = {"[BAK-087]", "[BAK-071]", "[BAK-072]", "[BAK-077]", "[BAK-085]", "[BAK-078]", "[BAK-079]", "[BAK-080]", "[BAK-081]", "[BAK-082]"}
     tasks = [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"][:9] in names]
     assert len(tasks) == len(names) and all(t.get("no_log") is True for t in tasks)
 
 
-def test_maintenance_resolves_endpoints_from_the_openbao_kv_like_deploy(tmp_path):
-    """Repo Maintenance 경로(BAK-072)도 agents/openobserve·agents/rustfs의 엔드포인트 키로 defaults를 해석한다."""
-    fixture = {
-        "host": {"restic_password": "pw"},
-        "openobserve": {"controller_ingest_token": "t", "o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme"},
-        "rustfs": {"maintenance_access_key": "a", "maintenance_secret_key": "s",
-                   "rustfs_endpoint": "https://rfs.bao.invalid:9000"},
-    }
-    resolve = [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"].startswith("[BAK-072]")]
+MAINT_HOST = "ns0001"   # tests/fixtures/openbao_docs/valid의 가짜 Asset
+
+
+def _maint_read_tasks():
+    """BAK-087(토큰 한 번)·BAK-071(문서 읽기)·BAK-072(해석·검증)."""
+    return [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"].startswith(("[BAK-087]", "[BAK-071]", "[BAK-072]"))]
+
+
+def _read_vars(store=None, **over):
+    return _vars(inventory_hostname=MAINT_HOST, openbao_fixture=default_store() if store is None else store, **over)
+
+
+def test_maintenance_has_no_vault_token_fallback_or_private_prefix_variables():
+    raw = MAINT.read_text(encoding="utf-8")
+    assert not re.search(r"(?<!_)vault_token", raw)       # 대체 토큰 변수(`_vault_token` 팩트만 허용)
+    for old in ("VAULT_TOKEN", "VAULT_NAMESPACE", "VAULT_MOUNT", "OPENBAO_", "host_agents_kv_fixture",
+                "approle/login", "hosts/", "agents/rustfs", "agents/openobserve"):
+        assert old not in raw, old
+    assert "lookup('openbao_doc'" in raw
+
+
+def test_maintenance_resolves_inputs_from_the_new_structure(tmp_path):
+    """Repo Maintenance는 secrets/services/rustfs/maintenance, inventory/services/rustfs·openobserve, 에이전트 비밀, openobserve/ingest를 읽는다."""
     dump = {"name": "Dump", "ansible.builtin.copy": {
-        "content": "{{ {'o2_endpoint': o2_endpoint, 'o2_org': o2_org, 'rustfs_endpoint': rustfs_endpoint,"
-                   " 'rustfs_bucket': rustfs_bucket} | to_json }}", "dest": str(tmp_path / "eff.json")}}
-    res = _run(tmp_path, resolve + [dump], _vars(host_agents_kv_fixture=fixture))
+        "content": "{{ {'o2_endpoint': o2_endpoint, 'o2_org': o2_org, 'rustfs_endpoint': rustfs_endpoint, 'rustfs_region': rustfs_region,"
+                   " 'rustfs_bucket': rustfs_bucket, 'restic': _maint_restic_password, 'access': _maint_access_key,"
+                   " 'secret': _maint_secret_key, 'ingest': _maint_ingest_user ~ ':' ~ _maint_ingest_password} | to_json }}",
+        "dest": str(tmp_path / "eff.json")}}
+    res = _run(tmp_path, _maint_read_tasks() + [dump], _read_vars())
     assert res.returncode == 0, res.stdout + res.stderr
     assert json.loads((tmp_path / "eff.json").read_text()) == {
-        "o2_endpoint": "https://o2.bao.invalid:5080", "o2_org": "acme",
-        "rustfs_endpoint": "https://rfs.bao.invalid:9000", "rustfs_bucket": "backup-prod-h1"}
+        "o2_endpoint": "https://o2.example.test", "o2_org": "fake-org", "rustfs_endpoint": "https://s3.example.test",
+        "rustfs_region": "fake-region-1", "rustfs_bucket": "backup-prod-ns0001", "restic": "fake-restic-0006",
+        "access": "fake-access-0015", "secret": "fake-secret-0016", "ingest": "fake-ingest:fake-pw-0014"}
 
 
-def test_maintenance_bucket_honours_the_host_kv_override(tmp_path):
-    fixture = {"host": {"restic_password": "pw", "rustfs_bucket": "backup-prod-custom"},
-               "openobserve": {"controller_ingest_token": "t", "o2_endpoint": "https://o2.bao.invalid:5080"},
-               "rustfs": {"maintenance_access_key": "a", "maintenance_secret_key": "s", "rustfs_endpoint": "https://rfs.bao.invalid:9000"}}
-    resolve = [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"].startswith("[BAK-072]")]
-    dump = {"name": "Dump", "ansible.builtin.copy": {"content": "{{ rustfs_bucket }}", "dest": str(tmp_path / "bucket.txt")}}
-    res = _run(tmp_path, resolve + [dump], _vars(host_agents_kv_fixture=fixture))
+def test_maintenance_takes_the_host_bucket_and_the_private_ca_from_openbao(tmp_path):
+    """이름 규칙 밖 호스트의 버킷(Asset agents.backup.bucket)과 RustFS 사설 CA(Service ca_file)를 읽는다."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"],
+                                                  agents={"backup": {"bucket": "backup-prod-oldname"}})
+    store["inventory/services/rustfs"] = dict(store["inventory/services/rustfs"], ca_file="/etc/pki/fake-rustfs-ca.pem")
+    dump = {"name": "Dump", "ansible.builtin.copy": {
+        "content": "{{ {'bucket': rustfs_bucket, 'ca': backup_maintenance_ca_file, 'host_ca': rustfs_ca_file} | to_json }}",
+        "dest": str(tmp_path / "eff.json")}}
+    res = _run(tmp_path, _maint_read_tasks() + [dump], _read_vars(store))
     assert res.returncode == 0, res.stdout + res.stderr
-    assert (tmp_path / "bucket.txt").read_text() == "backup-prod-custom"
+    assert json.loads((tmp_path / "eff.json").read_text()) == {
+        "bucket": "backup-prod-oldname", "ca": "/etc/pki/fake-rustfs-ca.pem", "host_ca": "/etc/pki/fake-rustfs-ca.pem"}
+
+
+def test_maintenance_rejects_a_host_bucket_that_breaks_the_s3_name_rule(tmp_path):
+    """Asset 문서의 호스트별 버킷도 이름 규칙 검증(BAK-072)을 거친다(Deploy의 입력 검증과 같다)."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"],
+                                                  agents={"backup": {"bucket": "Bad/Bucket"}})
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Bad/Bucket)" in res.stdout + res.stderr
+
+
+def test_maintenance_accepts_an_all_digit_host_bucket_as_a_string(tmp_path):
+    """숫자만으로 된 버킷 이름도 규칙상 올바르다: 템플릿을 거쳐도 정수로 바뀌지 않는다."""
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"], agents={"backup": {"bucket": "12345678"}})
+    dump = {"name": "Dump", "ansible.builtin.copy": {"content": "{{ rustfs_bucket | to_json }}", "dest": str(tmp_path / "b.json")}}
+    res = _run(tmp_path, _maint_read_tasks() + [dump], _read_vars(store))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert json.loads((tmp_path / "b.json").read_text()) == "12345678"
+
+
+@pytest.mark.parametrize("bad", ["good-bucket\n", 12345, ["a-b"]], ids=["trailing-newline", "integer", "list"])
+def test_maintenance_rejects_a_host_bucket_that_is_not_a_clean_string(tmp_path, bad):
+    store = default_store()
+    store[f"inventory/assets/{MAINT_HOST}"] = dict(store[f"inventory/assets/{MAINT_HOST}"], agents={"backup": {"bucket": bad}})
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반" in res.stdout + res.stderr
+
+
+def test_maintenance_reads_only_the_declared_documents(tmp_path):
+    """읽은 문서는 backup_openbao_required가 선언한 패턴 안에 있고, 선언한 문서는 모두 읽는다."""
+    with FakeOpenBao.with_schemas(token="tok") as bao:
+        res = _run(tmp_path, _maint_read_tasks(), _vars(inventory_hostname=MAINT_HOST, _vault_token="tok"),
+                   extra_env={"VAULT_ADDR": bao.url})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert bao.violations == []
+    declared = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))["backup_openbao_required"]
+    assert sorted(f"{r.mount}/{r.doc}" for r in bao.reads()) == sorted(k.replace("+", MAINT_HOST) for k in declared)
+    assert all(r.namespace == "infra" for r in bao.reads())
+
+
+def test_backup_openbao_required_matches_the_schemas():
+    import openbao_validation as ov
+    declared = yaml.safe_load((ROLE / "vars" / "main.yml").read_text(encoding="utf-8"))["backup_openbao_required"]
+    for pattern, keys in declared.items():
+        rel = ov.resolve_schema(pattern.replace("+", MAINT_HOST))
+        assert rel is not None, pattern
+        schema = json.loads((ROOT_DIR / "schemas" / "openbao" / rel).read_text(encoding="utf-8"))
+        assert set(keys) <= set(schema["properties"]), pattern
+        assert set(schema.get("required", [])) <= set(keys), pattern
+
+
+def test_maintenance_logs_in_once_for_all_hosts(tmp_path):
+    """플레이당 AppRole 로그인은 한 번이고 모든 호스트의 읽기가 그 토큰을 쓴다(공용 읽기 지점)."""
+    docs = default_store()
+    with FakeOpenBao.with_schemas(docs, approle=True) as bao:
+        (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {"ns0002": {}, "ns0003": {}}}}}}))
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
+        env.update(VAULT_ADDR=bao.url, VAULT_ROLE_ID="rid", VAULT_SECRET_ID="sid")
+        res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"),
+                              str(ROOT_DIR / "playbooks" / "host_agents_maintenance.yml")],
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    out = res.stdout + res.stderr
+    assert [r.path for r in bao.logins()] == ["/v1/auth/approle/login"], out
+    assert bao.reads() and all(r.token == APPROLE_TOKEN for r in bao.reads())
+    assert bao.violations == []
+    # 두 호스트 모두 에이전트 비밀 문서가 없어 그 문서 경로를 대며 실패한다(기본값으로 대체하지 않고, restic 내려받기까지 가지 않는다).
+    assert "secrets/assets/ns0002/agents" in out and "secrets/assets/ns0003/agents" in out
+
+
+def test_maintenance_without_any_openbao_credential_says_so(tmp_path):
+    (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {"h1": {}}}}}}))
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
+    env.update(VAULT_ADDR="http://127.0.0.1:1")
+    res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"),
+                          str(ROOT_DIR / "playbooks" / "host_agents_maintenance.yml")],
+                         capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
+    out = res.stdout + res.stderr
+    assert res.returncode != 0
+    assert "OpenBao 인증 정보가 없습니다" in out, out
+
+
+@pytest.mark.parametrize("doc,key,expected", [
+    ("secrets/assets/ns0001/agents", "restic_password", "secrets/assets/ns0001/agents.restic_password"),
+    ("secrets/services/rustfs/maintenance", "access_key", "secrets/services/rustfs/maintenance.access_key"),
+    ("secrets/services/rustfs/maintenance", "secret_key", "secrets/services/rustfs/maintenance.secret_key"),
+    ("secrets/services/openobserve/ingest", "password", "secrets/services/openobserve/ingest.password"),
+    ("inventory/services/rustfs", "url", "inventory/services/rustfs.url"),
+    ("inventory/services/openobserve", "url", "inventory/services/openobserve.url"),
+])
+def test_maintenance_names_exactly_the_missing_input(tmp_path, doc, key, expected):
+    """필수 입력 검증 실패 시 어느 항목이 빠졌는지 이름만(값 없이) 알려 준다."""
+    store = copy.deepcopy(default_store())
+    del store[doc][key]
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    out = res.stdout + res.stderr
+    assert res.returncode != 0
+    missing = out.split("누락:", 1)[1].splitlines()[0]
+    assert [m.strip() for m in missing.split("(")[0].split(",") if m.strip()] == [expected], missing
+    assert "fake-" not in missing and "https://" not in missing
+
+
+def test_maintenance_fails_on_a_missing_document_without_a_fallback(tmp_path):
+    store = {k: v for k, v in default_store().items() if k != "secrets/services/rustfs/maintenance"}
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(store))
+    assert res.returncode != 0 and "secrets/services/rustfs/maintenance" in res.stdout + res.stderr
+
+
+def test_maintenance_reports_an_invalid_bucket_name(tmp_path):
+    res = _run(tmp_path, _maint_read_tasks(), _read_vars(rustfs_bucket="Backup_Prod"))
+    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Backup_Prod)" in res.stdout + res.stderr
 
 
 def test_deploy_and_maintenance_use_the_bucket_root_as_the_repository():
@@ -663,107 +798,3 @@ def test_deploy_and_maintenance_use_the_bucket_root_as_the_repository():
     assert 'backup_repository: "s3:{{ rustfs_endpoint }}/{{ rustfs_bucket }}"' in (ROLE / "tasks" / "main.yml").read_text(encoding="utf-8")
 
 
-class _FakeBao(BaseHTTPRequestHandler):
-    """AppRole 로그인 + KV v2 읽기만 흉내 내는 OpenBao. 받은 요청을 (method, path, token)으로 기록한다."""
-    requests = []
-
-    def _reply(self, code, body):
-        data = json.dumps(body).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        self.requests.append(("POST", self.path, None))
-        if self.path == "/v1/auth/approle/login":
-            return self._reply(200, {"auth": {"client_token": "approle-issued"}})
-        return self._reply(404, {})
-
-    def do_GET(self):
-        self.requests.append(("GET", self.path, self.headers.get("X-Vault-Token")))
-        if self.headers.get("X-Vault-Token") != "approle-issued":
-            return self._reply(403, {"errors": ["permission denied"]})
-        return self._reply(200, {"data": {"data": {}}})
-
-    def log_message(self, *args):
-        pass
-
-
-def test_maintenance_logs_in_with_approle_like_deploy(tmp_path):
-    """Semaphore Environment에 VAULT_ROLE_ID/SECRET_ID만 있을 때도(=Deploy와 같은 설정) 유지보수 KV를 조회한다.
-
-    회귀: Repo Maintenance는 resolve_connection.yml을 import하지 않아 AppRole 로그인이 없었고, 토큰이 비어
-    BAK-071이 전부 skip → 'OpenBao 조회 실패 — status=[-1, -1, -1]'로 모든 호스트가 실패했다.
-    """
-    handler = type("B", (_FakeBao,), {"requests": []})
-    server = HTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {"h1": {}, "h2": {}}}}}}))
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
-        env.update(VAULT_ADDR=f"http://127.0.0.1:{server.server_port}", VAULT_ROLE_ID="rid", VAULT_SECRET_ID="sid")
-        res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"),
-                              str(ROOT_DIR / "playbooks" / "host_agents_maintenance.yml")],
-                             capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
-    finally:
-        server.shutdown()
-    out = res.stdout + res.stderr
-    assert "OpenBao 조회 실패" not in out, out
-    logins = [r for r in handler.requests if r[0] == "POST"]
-    gets = [r for r in handler.requests if r[0] == "GET"]
-    assert logins == [("POST", "/v1/auth/approle/login", None)]
-    assert len(gets) == 6 and all(token == "approle-issued" for _, _, token in gets)
-    # KV가 비어 있으므로 다음 단계(필수 유지보수 시크릿 검증)에서 멈춘다 — 조회 자체는 성공했다는 뜻이다.
-    assert "restic_password" in out
-
-
-def test_maintenance_without_any_openbao_credential_says_so(tmp_path):
-    """토큰도 AppRole도 없으면 status=[-1, -1, -1] 대신 자격증명이 없다고 알려 준다."""
-    (tmp_path / "inv.yml").write_text(yaml.safe_dump({"all": {"children": {"servers": {"hosts": {"h1": {}}}}}}))
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("VAULT_", "OPENBAO_"))}
-    env.update(VAULT_ADDR="http://127.0.0.1:1")
-    res = subprocess.run(["ansible-playbook", "-i", str(tmp_path / "inv.yml"),
-                          str(ROOT_DIR / "playbooks" / "host_agents_maintenance.yml")],
-                         capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300, env=env)
-    out = res.stdout + res.stderr
-    assert res.returncode != 0
-    assert "[-1, -1, -1]" not in out and "VAULT_ROLE_ID" in out, out
-
-
-def _bak072_tasks():
-    return [t for t in yaml.safe_load(MAINT.read_text(encoding="utf-8")) if t["name"].startswith("[BAK-072]")]
-
-
-_MAINT_OK_KV = {"host": {"restic_password": "pw"},
-                "openobserve": {"controller_ingest_token": "t", "o2_endpoint": "https://o2.bao.invalid:5080"},
-                "rustfs": {"maintenance_access_key": "a", "maintenance_secret_key": "s",
-                           "rustfs_endpoint": "https://rfs.bao.invalid:9000"}}
-
-
-@pytest.mark.parametrize("section,key,expected", [
-    ("host", "restic_password", "hosts/h1/agents.restic_password"),
-    ("rustfs", "maintenance_access_key", "agents/rustfs.maintenance_access_key"),
-    ("openobserve", "controller_ingest_token", "agents/openobserve.controller_ingest_token"),
-    ("rustfs", "rustfs_endpoint", "agents/rustfs.rustfs_endpoint"),
-])
-def test_maintenance_names_exactly_the_missing_input(tmp_path, section, key, expected):
-    """필수 입력 검증 실패 시 어느 항목이 빠졌는지 이름만(값 없이) 알려 준다 — 7개 조건을 한 문장으로 묶지 않는다."""
-    kv = copy.deepcopy(_MAINT_OK_KV)
-    del kv[section][key]
-    res = _run(tmp_path, _bak072_tasks(), _vars(host_agents_kv_fixture=kv))
-    out = res.stdout + res.stderr
-    assert res.returncode != 0
-    missing = out.split("누락:", 1)[1].splitlines()[0]
-    assert expected in missing
-    assert [m.strip() for m in missing.split("(")[0].split(",") if m.strip()] == [expected], missing
-    assert "pw" not in missing and "https://" not in missing
-
-
-def test_maintenance_reports_an_invalid_bucket_name(tmp_path):
-    kv = copy.deepcopy(_MAINT_OK_KV)
-    kv["host"]["rustfs_bucket"] = "Backup_Prod"
-    res = _run(tmp_path, _bak072_tasks(), _vars(host_agents_kv_fixture=kv))
-    assert res.returncode != 0 and "rustfs_bucket(S3 이름 규칙 위반: Backup_Prod)" in res.stdout + res.stderr

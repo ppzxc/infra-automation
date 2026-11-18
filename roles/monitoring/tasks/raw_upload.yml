@@ -74,7 +74,7 @@
     - not ansible_check_mode
     - _raw_would_change | bool
   block:
-    # 키 없이 비밀번호로 올리는 호스트(host_agents_allow_password_auth)만: 컨트롤러에 sshpass가 있고 비밀번호가 비어 있지 않은지 업로드 전에 확인한다.
+    # 키 없이 비밀번호로 올리는 호스트(ssh Endpoint에 identity 없음, password_auth_exception)만: 컨트롤러에 sshpass가 있고 비밀번호가 비어 있지 않은지 업로드 전에 확인한다.
     - name: "[MON-109] Assert sshpass and a password are available for a keyless upload"
       ansible.builtin.command: sshpass -V
       delegate_to: localhost

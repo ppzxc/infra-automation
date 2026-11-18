@@ -1,0 +1,99 @@
+---
+# ==============================================================================
+# 임시 SSH 개인키 파일 한 벌 만들기 (resolve_connection.yml이 관리·부트스트랩·경유지마다 include_tasks로 부른다)
+# ==============================================================================
+# 입력 변수(include_tasks의 vars):
+#   _sk_suffix       임시 파일 접미사(예: _bao_admin_key)
+#   _sk_key          개인키 본문(비면 아무것도 하지 않는다)
+#   _sk_passphrase   키 암호문(비면 제거 단계를 건너뛴다)
+#   _sk_record       임시 파일 경로를 {path: ...}로 남길 호스트 fact 이름(cleanup_connection.yml이 읽는다)
+#   _sk_append_to    (선택) 경로 목록 fact 이름. 키가 없는 경유지도 '' 를 더해 경유 순서와 맞춘다
+#
+# 임시 경로는 키를 쓰기 전에 fact로 남긴다(뒤 단계가 실패해도 cleanup_connection이 지울 수 있게).
+# 암호문은 ssh-keygen 인자(-P, ps에 보임)가 아니라 SSH_ASKPASS(환경 변수)로 넘긴다.
+# 컨트롤러 전용 태스크라 check 모드에서도 실행한다.
+# ==============================================================================
+
+# 앞 호출의 등록 결과가 남지 않게 비운다(키가 없는 경유지가 앞 경유지의 경로를 이어받으면 안 된다).
+- name: Reset the staged key state
+  ansible.builtin.set_fact:
+    _sk_tmp: {}
+    "{{ _sk_record | default('_sk_unused') }}": {}      # 같은 호스트를 다시 해석할 때 앞 실행의 경로가 남지 않게 비운다
+
+- name: Create temporary SSH private key file
+  ansible.builtin.tempfile:
+    state: file
+    suffix: "{{ _sk_suffix }}"
+  register: _sk_tmp
+  check_mode: false
+  when: _sk_key | length > 0
+
+- name: Record the temporary key path before the key is written
+  ansible.builtin.set_fact:
+    "{{ _sk_record }}": "{{ {'path': _sk_tmp.path} }}"
+  when: _sk_key | length > 0 and _sk_record is defined
+
+- name: Add the temporary key path to the hop path list
+  ansible.builtin.set_fact:
+    "{{ _sk_append_to }}": "{{ (lookup('ansible.builtin.vars', _sk_append_to, default=[])) + [_sk_tmp.path | default('')] }}"
+  when: _sk_append_to is defined
+
+# 키를 쓰거나 암호문을 벗기는 단계가 실패하면 복호화되다 만 키 파일을 그 자리에서 지우고 실패한다(cleanup_connection 플레이는
+# 실패한 호스트에게 돌지 않는다). 이 헬퍼 밖(뒤 플레이)에서 실패하는 경우는 resolve_connection의 오래된 임시 키 정리가 맡는다.
+- name: Write the key and strip its passphrase, removing the file when either step fails
+  when: _sk_key | length > 0
+  block:
+  - name: Write the SSH private key to the temporary file
+    ansible.builtin.copy:
+      content: "{{ _sk_key }}\n"
+      dest: "{{ _sk_tmp.path }}"
+      mode: '0600'
+    check_mode: false
+    no_log: true
+    when: _sk_key | length > 0
+
+  # askpass 스크립트에는 비밀이 없다(암호문은 환경 변수로만 받는다). 키 파일 옆에 만들고 쓰고 나면 지운다.
+  - name: Strip the passphrase from the temporary SSH key
+    when:
+      - _sk_key | length > 0
+      - _sk_passphrase | length > 0
+    block:
+      - name: Create the askpass helper next to the temporary key
+        ansible.builtin.copy:
+          content: |
+            #!/bin/sh
+            printf '%s\n' "$BAO_KEY_PASSPHRASE"
+          dest: "{{ _sk_tmp.path }}.askpass"
+          mode: '0700'
+        check_mode: false
+
+      - name: Remove the passphrase with ssh-keygen (askpass, not argv)
+        ansible.builtin.command:
+          argv: [ssh-keygen, -p, -f, "{{ _sk_tmp.path }}", -N, ""]
+        environment:
+          SSH_ASKPASS: "{{ _sk_tmp.path }}.askpass"
+          SSH_ASKPASS_REQUIRE: force
+          BAO_KEY_PASSPHRASE: "{{ _sk_passphrase }}"
+        check_mode: false
+        changed_when: true
+        no_log: true
+    always:
+      - name: Remove the askpass helper
+        ansible.builtin.file:
+          path: "{{ _sk_tmp.path }}.askpass"
+          state: absent
+        check_mode: false
+  rescue:
+    - name: Remove the half-prepared temporary key and the keys of the hops staged before it
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ [_sk_tmp.path] + (lookup('ansible.builtin.vars', _sk_append_to, default=[]) if _sk_append_to is defined else []) }}"
+      loop_control:
+        label: "{{ item | basename }}"
+      when: item | length > 0
+      check_mode: false
+
+    - name: Stop because the temporary key could not be prepared
+      ansible.builtin.fail:
+        msg: "임시 SSH 키를 준비하지 못했습니다(만들던 키 파일은 지웠습니다). 키 파일 쓰기와 passphrase 제거 단계를 확인하세요."

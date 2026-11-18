@@ -39,12 +39,12 @@ host_agents_bin_dir: /usr/local/bin
 host_agents_owner: root
 host_agents_group: root
 
-# OpenObserve 연결 (ADR-0006 §2.7). 우선순위: Extra variables/group_vars > OpenBao agents/openobserve의 같은 이름 키 > 아래 기본값.
-# 저장소가 공개(PUBLIC)라 내부 도메인을 Git에 두지 않는다 — 평상시에는 OpenBao agents/openobserve에 넣고, 일회성 재정의만 -e로 준다.
+# OpenObserve 연결 (ADR-0006 §2.7). 우선순위: Extra variables/group_vars > OpenBao inventory/services/openobserve(url·org) > 아래 기본값.
+# 저장소가 공개(PUBLIC)라 내부 도메인을 Git에 두지 않는다 — 평상시에는 OpenBao Service 문서에 넣고, 일회성 재정의만 -e로 준다.
 # o2_endpoint: "https://<openobserve>:5080"   # 끝 슬래시 금지 (exporter는 <endpoint>/api/<org>로 전송)
-o2_endpoint: "{{ ((host_agents_shared_secrets | default({})).openobserve | default({})).o2_endpoint | default('', true) }}"
-o2_org: "{{ ((host_agents_shared_secrets | default({})).openobserve | default({})).o2_org | default('default', true) }}"
-o2_ca_file: "{{ ((host_agents_shared_secrets | default({})).openobserve | default({})).o2_ca_file | default('', true) }}"   # 사설 CA 사용 시 호스트상의 CA 파일 경로(tls.ca_file)
+o2_endpoint: "{{ (host_agents_services | default({})).openobserve.url | default('', true) }}"
+o2_org: "{{ (host_agents_services | default({})).openobserve.org | default('default', true) }}"
+o2_ca_file: "{{ (host_agents_services | default({})).openobserve.ca_file | default('', true) }}"   # 사설 CA 사용 시 호스트상의 CA 파일 경로(tls.ca_file). OpenBao inventory/services/openobserve의 ca_file(선택)
 
 # OpenTelemetry Hostmetrics Receiver (ADR-0006 §2.3: 60s)
 otel_hostmetrics_interval: "60s"
@@ -80,13 +80,13 @@ otel_hostmetrics_scrapers_conntrack:
       system.network.conntrack.count: {enabled: true}
       system.network.conntrack.max: {enabled: true}
 
-# Docker 메트릭은 hosts/<host>/agents의 otel_docker_metrics: true인 호스트만 (docker_engine의 docker_metrics_enabled와 별개).
+# Docker 메트릭은 Asset 문서 agents.otel.docker_metrics: true인 호스트만 (docker_engine의 docker_metrics_enabled와 별개).
 # otelcol 사용자에게 소켓 접근 권한이 필요하다(예: docker 그룹 멤버십은 docker_engine 책임).
 otel_docker_endpoint: "unix:///var/run/docker.sock"
 # 소켓 읽기용: 이 그룹이 존재하고 otel_docker_metrics인 호스트에서만 otelcol 사용자에 추가한다.
 otel_docker_group: "docker"
 
-# 컨테이너 로그(hosts/<host>/agents의 otel_container_logs: true): docker json-file 드라이버 파일을 filelog/containers가 읽는다.
+# 컨테이너 로그(Asset 문서 agents.otel.container_logs: true): docker json-file 드라이버 파일을 filelog/containers가 읽는다.
 otel_container_log_glob: /var/lib/docker/containers/*/*-json.log
 # 한 줄(분할 조각 재결합 후) 최대 크기. 넘으면 recombine이 그 시점에 내보낸다.
 otel_container_max_log_size: 1048576
@@ -100,7 +100,7 @@ otel_container_trace_keys:
 # 이전 구현(journald 드라이버)이 배포했던 rsyslog 규칙 파일. 지금은 사용하지 않으며 남아 있으면 지운다(MON-068).
 otel_rsyslog_container_rule_path: /etc/rsyslog.d/00-host-agents-containers.conf
 
-# 컨테이너 앱 텔레메트리(hosts/<host>/agents의 otel_app_telemetry: true, ADR-0012): 켠 호스트만 OTLP HTTP 수신기(gRPC 없음)를
+# 컨테이너 앱 텔레메트리(Asset 문서 agents.otel.app_telemetry: true, ADR-0012): 켠 호스트만 OTLP HTTP 수신기(gRPC 없음)를
 # 모든 주소에 바인드하고 traces/metrics 파이프라인을 만든다. 외부 노출은 호스트 방화벽(public 존 기본 거부)이 막는다.
 otel_otlp_bind: "0.0.0.0"
 otel_otlp_http_port: 4318
@@ -116,8 +116,8 @@ otel_trace_decision_wait: 15s
 otel_trace_num_traces: 20000
 otel_trace_non_sampled_cache_size: 20000
 
-# GitHub 조직 웹훅 수신기(hosts/<host>/agents의 otel_github_webhook: true, Spec #399): 켠 호스트만 수신기를 렌더링한다.
-# 주소·포트·경로·시크릿·도커 네트워크 이름은 저장소에 기본값이 없고 OpenBao hosts/<host>/agents(github_webhook_*)로만 주입한다.
+# GitHub 조직 웹훅 수신기(Asset 문서 agents.otel.github_webhook: true, Spec #399): 켠 호스트만 수신기를 렌더링한다.
+# 주소·포트·경로·시크릿·도커 네트워크 이름은 저장소에 기본값이 없고 OpenBao Asset 문서 agents.github_webhook 절과 secrets/assets/<ns>/agents의 webhook_secret으로만 주입한다.
 # 제한 시간은 GitHub의 10초 응답 제한 안에서 수신기 기본 500ms보다 크게 둔다. 본문 상한을 넘으면 거부된다.
 otel_github_webhook_read_timeout: 5s
 otel_github_webhook_write_timeout: 5s
@@ -187,19 +187,15 @@ otel_system_logs:
   - /var/log/boot.log
   - /var/log/kern.log
 
-# Host Agents 입력 (host_agents.yml 전용)
-# OpenBao를 조회하지 않고 아래 값을 그대로 사용한다(molecule 등 테스트 전용 seam).
-# 형식: {host: <hosts/<host>/agents 내용>, openobserve: <agents/openobserve>, rustfs: <agents/rustfs>}
-# host_agents_kv_fixture: {}
-
-# OpenBao TLS 검증. resolve_connection.yml과 동일하게 기본 false(사설 CA)이며, 신뢰 CA가 있으면 true로 올린다.
-host_agents_vault_validate_certs: false
+# 리소스 속성 deployment.environment.name (production|staging|development|test). 모든 호스트가 같은 값이라 역할 기본값이다(Spec #511 §3).
+# 값은 playbooks/group_vars/all.yml의 deployment_environment 한 곳이다(Host Audit과 공유).
+host_agents_environment: "{{ deployment_environment }}"
 
 # Legacy node_exporter Cleanup Toggle
 cleanup_legacy_node_exporter: true
 
 # OpenObserve 생존 타이머 (Spec #184 / Ticket-7): 이 호스트에만 5분 주기 확인 타이머를 배포한다.
-# OpenObserve(ns0331)가 죽으면 OpenObserve를 거치지 않고 네이버웍스 webhook(OpenBao agents/openobserve의 alert_webhook_url)으로 직접 P1을 보낸다.
+# OpenObserve(ns0331)가 죽으면 OpenObserve를 거치지 않고 사내 알림 플랫폼 text/plain webhook(OpenBao secrets/services/alert/notify의 url)으로 직접 P1을 보낸다.
 host_agents_o2_health_checker: ns0266
 o2_health_config_dir: /etc/openobserve-health
 o2_health_state_dir: /var/lib/openobserve-health
@@ -209,14 +205,15 @@ o2_health_renotify_minutes: 60
 
 # 서버 도달성 검사(Spec #184 / Ticket-6, ADR-0010): 같은 검사하는 쪽 호스트의 otelcol에만 tcp_check 수신기를 붙인다.
 # tcp_check는 contrib 0.161.0(modern/legacy_el7 행)에 있다. legacy_el6 행(0.119.0)에는 없으므로 검사하는 쪽을 CentOS 6에 두지 않는다.
-# 대상 목록은 검사하는 쪽이 실행 때마다 OpenBao hosts/<host>에서 직접 읽어 만든다(주소 public_ip, 비표준 SSH 포트 ansible_port).
+# 대상 목록은 검사하는 쪽이 실행 때마다 OpenBao inventory/assets/<ns>/endpoints의 ssh Endpoint(주소·포트)에서 직접 읽어 만든다.
 # 부분 실행(target_hosts)에서도 같은 목록이 나온다. 호스트를 편입·폐기하면 검사하는 쪽에 Host Agents 설정을 다시 반영해야 한다.
 otel_tcpcheck_enabled: "{{ inventory_hostname == host_agents_o2_health_checker }}"
 otel_tcpcheck_interval: "60s"
 # 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 대상에서 빠진다(이름만, 시크릿 아님). 제외 방법 두 가지를 합친다:
 #   - Semaphore 인벤토리의 `tcpcheck_excluded` 그룹(host_agents_excluded·host_audit_excluded와 같은 방식, 평상시 방법)
 #   - 변수 host_agents_tcpcheck_excluded(Extra variables 재정의용)
+# 인벤토리 `host_agents_excluded` 그룹(Host Agents 제외 호스트)도 뺀다: 읽지 않는다.
 # Semaphore 인벤토리는 DB에 저장된 static-yaml이라 저장소 inventory/group_vars는 읽히지 않는다 — 그룹으로 지정한다.
 host_agents_tcpcheck_excluded: []
-otel_tcpcheck_roster: "{{ groups['servers'] | default([]) | difference(host_agents_tcpcheck_excluded | union(groups['tcpcheck_excluded'] | default([]))) | sort }}"
+otel_tcpcheck_roster: "{{ groups['servers'] | default([]) | difference(host_agents_tcpcheck_excluded | union(groups['tcpcheck_excluded'] | default([])) | union(groups['host_agents_excluded'] | default([]))) | sort }}"
 

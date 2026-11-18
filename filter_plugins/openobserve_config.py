@@ -8,8 +8,24 @@ Pure functions so the desired state and the change plan are unit-testable withou
 
 import base64
 import hashlib
+import os
 import re
+import sys
 from urllib.parse import quote
+
+def _load_required_gaps():
+    """공용 필터 구현을 파일 경로로 한 번만 올린다(sys.path를 건드리지 않고, 로더가 올린 사본과 따로 두 번 올리지 않는다)."""
+    import importlib.util
+    name = "_openbao_required_shared"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), "openbao_required.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name].openbao_required_gaps
+
+
+_required_gaps = _load_required_gaps()
 
 KINDS = ('template', 'destination', 'function', 'pipeline', 'alert', 'trace_stream')   # apply order: dependencies first
 LIST_PATHS = {
@@ -513,49 +529,40 @@ _DATE_RE = _re.compile(r'^\d{4}-\d{2}-\d{2}$')
 SILENT_RECENT_US = 15 * 60 * 1000000   # P2: 최근 15분 없음
 
 
-def o2c_app_telemetry_roster(roster, kv_by_host):
-    """Roster hosts whose OpenBao ``hosts/<host>/agents`` has ``otel_app_telemetry: true`` (a real boolean; absent means off)."""
-    return [h for h in roster or [] if ((kv_by_host or {}).get(h) or {}).get('otel_app_telemetry') is True]
-
-
-def o2c_host_items(hosts):
-    """``[{host: <name>}, ...]`` so a host list can go through ``o2c_as_requests`` (path ``.../{host}/agents``)."""
-    return [{'host': h} for h in hosts or []]
+def o2c_app_telemetry_roster(roster, asset_by_host):
+    """Roster hosts whose Asset document (``inventory/assets/<ns>``) has ``agents.otel.app_telemetry: true`` (a real boolean; absent means off)."""
+    def on(doc):
+        otel = ((doc or {}).get('agents') or {}).get('otel') or {}
+        return otel.get('app_telemetry') is True
+    return [h for h in roster or [] if on((asset_by_host or {}).get(h))]
 
 
 _SAFE_HOST_NAME = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
 _SAFE_ADDRESS = re.compile(r'^[A-Za-z0-9._:-]{1,64}$')   # IPv4·IPv6·호스트 이름. 알림 SQL에 문자열로 들어가므로 따옴표·공백 등은 받지 않는다
 
 
-def _host_kv(name, raw):
-    """OpenBao ``hosts/<host>`` 본문을 평면 dict로 푼다(resolve_connection.yml과 같은 규칙: 호스트명 키 → 키가 하나뿐인 오브젝트 → 평면)."""
-    if not isinstance(raw, dict):
-        return {}
-    if isinstance(raw.get(name), dict):
-        return raw[name]
-    if len(raw) == 1 and isinstance(next(iter(raw.values())), dict):
-        return next(iter(raw.values()))
-    return raw
+def o2c_host_addresses(roster, endpoints_by_host):
+    """``{호스트: 접속 주소}`` — Asset의 Endpoint ``ssh``(``inventory/assets/<ns>/endpoints``)의 ``address``다.
 
-
-# host_agents.host_agents_tcpcheck_targets의 KV 주소 우선순위와 같아야 한다(tests가 두 쪽이 어긋나지 않는지 본다)
-KV_ADDRESS_KEYS = ('ansible_host', 'public_ip', 'ip', 'host')
-
-
-def o2c_host_addresses(roster, kv_by_host):
-    """``{호스트: 접속 주소}`` — 도달성 검사 대상(``host_agents_tcpcheck_targets``)과 같은 우선순위로 고른다: KV ``ansible_host`` → ``public_ip`` → ``ip`` → ``host``.
-
-    주소가 없거나 SQL에 안전하지 않은 값이면 그 호스트는 빠진다(알림에는 관리번호만 보인다). 짐작해서 채우지 않는다.
+    Endpoint ``ssh``가 없거나 주소가 SQL에 안전하지 않은 값이면 그 호스트는 빠진다(알림에는 관리번호만 보인다). 짐작해서 채우지 않는다.
     """
     out = {}
     for name in roster or []:
         if not _SAFE_HOST_NAME.match(str(name)):
             continue
-        kv = _host_kv(name, (kv_by_host or {}).get(name))
-        address = next((str(v).strip() for v in (kv.get(k) for k in KV_ADDRESS_KEYS) if v is not None and str(v).strip()), '')
+        endpoint = ((endpoints_by_host or {}).get(name) or {}).get('ssh') or {}
+        address = str(endpoint.get('address') if endpoint.get('address') is not None else '').strip()
         if _SAFE_ADDRESS.match(address):
             out[name] = address
     return out
+
+
+def o2c_missing_openbao_keys(docs, required):
+    """선언(``<역할>_openbao_required``: ``{문서 경로 패턴: [필수 키]}``) 중 읽은 문서(``{경로: 문서}``)에 빠진 키를 ``['<경로>: <키>']``로 돌려준다.
+
+    ``+``가 든 패턴(호스트마다 읽는 문서)은 건너뛴다. 값은 담지 않는다: 문서 경로와 키 이름뿐이다. 구현은 공용 필터 `openbao_required_gaps`다.
+    """
+    return _required_gaps(docs, required, scope='required', missing_doc='keys', blank='none_empty', skip_plus=True, fmt='colon_space')
 
 
 def o2c_host_label(column, addresses):
@@ -1219,7 +1226,7 @@ class FilterModule(object):
                 'o2c_roster': o2c_roster, 'o2c_valid_exceptions': o2c_valid_exceptions,
                 'o2c_without_exceptions': o2c_without_exceptions, 'o2c_absence_sql': o2c_absence_sql,
                 'o2c_missing_sql': o2c_missing_sql, 'o2c_app_telemetry_roster': o2c_app_telemetry_roster,
-                'o2c_host_items': o2c_host_items, 'o2c_host_addresses': o2c_host_addresses, 'o2c_host_label': o2c_host_label,
+                'o2c_missing_openbao_keys': o2c_missing_openbao_keys, 'o2c_host_addresses': o2c_host_addresses, 'o2c_host_label': o2c_host_label,
                 'o2c_valid_switch_events': o2c_valid_switch_events, 'o2c_valid_switch_roster': o2c_valid_switch_roster,
                 'o2c_valid_switch_uplinks': o2c_valid_switch_uplinks, 'o2c_switch_noise_filter': o2c_switch_noise_filter,
                 'o2c_switch_uplink_sql': o2c_switch_uplink_sql, 'o2c_managed_alerts': o2c_managed_alerts,

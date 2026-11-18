@@ -15,10 +15,23 @@ _host_audit_xlsx_zip_archive: >-
       ~ 'xlsx/' ~ _host_audit_xlsx_zip_name ~ ' (3년 보관)') if _host_audit_storage_active | bool
      else ('러너 ' ~ _host_audit_xlsx_zip_path ~ ' (보관 안 함)') }}
 
-# 메일 발송 (#126). Extra variables로 수신자(host_audit_mail_to)와 발신자(host_audit_mail_from)를
-# 모두 주면 OpenBao agents/host_audit을 조회하지 않는다.
-_host_audit_mail_needs_kv: >-
-  {{ not ((host_audit_mail_to | default([], true) | length > 0) and (host_audit_mail_from | default('', true) | length > 0)) }}
+# 이 역할이 읽는 OpenBao 문서 패턴과 필수 키(Spec #511 / Ticket-17). 입력 검증(AUD-502·603), 스키마 `required` 대조 테스트,
+# 요청 기록 단언이 같은 선언을 쓴다. 읽기는 공용 읽기 지점(lookup 'openbao_doc')뿐이다(docs/openbao_integration.md).
+# 접속·Asset 문서(inventory/assets/<호스트>의 description·isms 절)는 resolve_connection이 읽어 `_asset_doc`으로 넘기므로 여기에 없다.
+# `inventory/config/host_audit`은 필수 키가 없다: 수신자·발신자가 없으면 읽기 실패가 아니라 메일 문제(AUD-603)로 남는다.
+host_audit_openbao_required:
+  "inventory/services/rustfs": [url]
+  "secrets/services/rustfs/audit_reports": [access_key, secret_key]
+  "secrets/services/alert/notify": [url]
+  "inventory/config/host_audit": []
+
+# 읽는 단계별 문서(위 선언의 키를 나눈 것, 합집합이 선언과 같다). 보관 입력은 못 읽으면 보관 문제, 알림은 못 읽어도 보관을 막지 않고,
+# 메일 설정은 못 읽으면 메일 문제다.
+host_audit_openbao_storage_docs:
+  - inventory/services/rustfs
+  - secrets/services/rustfs/audit_reports
+host_audit_openbao_alert_doc: secrets/services/alert/notify
+host_audit_openbao_mail_doc: inventory/config/host_audit
 
 # OS 지원 종료일(EOL) 정적 표 (#120). 키는 '<os-release ID>-<주 버전>'(Ubuntu는 '<ID>-<VERSION_ID>').
 # os-release가 없는 CentOS 6은 /etc/redhat-release에서 'centos-6'을 만든다.

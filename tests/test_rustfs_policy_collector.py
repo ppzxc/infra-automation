@@ -5,7 +5,13 @@
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from openbao_fake import FakeOpenBao  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "collect-rustfs-policy.py"
 spec = importlib.util.spec_from_file_location("collect_rustfs_policy", SCRIPT)
@@ -75,3 +81,39 @@ def test_only_get_requests_are_defined():
     assert '"GET"' in text
     for verb in ("PUT", "POST", "DELETE", "PATCH"):
         assert f'"{verb}"' not in text
+
+
+# --- 새 OpenBao 구조(Spec #511 / Ticket-15) -------------------------------------------------------
+
+def test_credentials_come_from_the_new_structure_with_the_operator_token():
+    """`inventory/services/rustfs`(주소·리전)와 `secrets/services/rustfs/maintenance`(키)를 `infra` 네임스페이스에서 읽는다."""
+    with FakeOpenBao.with_schemas(namespace="infra", token="operator-token") as bao:
+        got = mod.read_rustfs_service({"VAULT_ADDR": bao.url, "VAULT_TOKEN": "operator-token"})
+    assert got == {"endpoint": "https://s3.example.test", "region": "fake-region-1",
+                   "access_key": "fake-access-0015", "secret_key": "fake-secret-0016"}
+    assert sorted(f"{r.mount}/{r.doc}" for r in bao.reads()) == ["inventory/services/rustfs", "secrets/services/rustfs/maintenance"]
+    assert bao.violations == []
+
+
+def test_env_file_values_fill_in_the_connection(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("# 주석\nVAULT_TOKEN=operator-token\n")
+    with FakeOpenBao.with_schemas(namespace="infra", token="operator-token") as bao:
+        env = {**mod._parse_env_file(env_file), "VAULT_ADDR": bao.url}
+        assert mod.read_rustfs_service(env)["access_key"] == "fake-access-0015"
+
+
+def test_missing_document_or_token_stops_with_the_document_path_only():
+    with FakeOpenBao.with_schemas({}, namespace="infra", token="operator-token") as bao:
+        with pytest.raises(SystemExit) as exc:
+            mod.read_rustfs_service({"VAULT_ADDR": bao.url, "VAULT_TOKEN": "operator-token"})
+    assert "inventory/services/rustfs" in str(exc.value) and "404" in str(exc.value)
+    with pytest.raises(SystemExit) as exc:
+        mod.read_rustfs_service({"VAULT_ADDR": "http://127.0.0.1:1"})
+    assert "VAULT_TOKEN" in str(exc.value)
+
+
+def test_script_has_no_old_structure_or_fallback():
+    text = SCRIPT.read_text()
+    for old in ("agents/rustfs", "infra/prod/host", "secret/data", "OPENBAO_URL", "OPENBAO_TOKEN", "maintenance_access_key", "rustfs_endpoint"):
+        assert old not in text, old

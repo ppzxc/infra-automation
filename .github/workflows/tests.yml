@@ -28,6 +28,30 @@ jobs:
       - run: pip install -r requirements-test.txt
       - run: python3 scripts/validate-ansible-specs.py
 
+  # OpenBao 구성 OpenTofu(Spec #511 / Ticket-6): fmt와 validate만 한다. 운영 서버·state 저장소에는 닿지 않는다(-backend=false).
+  tofu:
+    name: tofu (fmt, validate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # encryption 블록이 enforced = true라 validate에도 key_provider가 필요하다. state에 닿지 않으므로 운영 passphrase가 아닌
+      # 임시 값을 쓴다(비밀이 아니다).
+      TF_ENCRYPTION: |
+        key_provider "pbkdf2" "main" {
+          passphrase = "ci-validate-only-not-a-secret"
+        }
+    defaults:
+      run:
+        working-directory: tofu/openbao
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.13.9
+      - run: tofu fmt -check -recursive
+      - run: tofu init -backend=false
+      - run: tofu validate
+
   pytest:
     name: pytest (${{ matrix.shard }}/6)
     runs-on: ubuntu-24.04

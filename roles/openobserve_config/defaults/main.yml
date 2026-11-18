@@ -1,28 +1,42 @@
 ---
 # OpenObserve 설정 as code (ADR-0008, Spec #93 / Ticket-2) — 컨트롤러(connection: local)에서만 실행한다.
-# 연결 정보와 시크릿은 Git에 두지 않는다: OpenBao agents/openobserve 키
-#   o2_endpoint, o2_org(기본 default), o2_ca_file(선택)  — host_agents와 같은 키
-#   api_user, api_password        — OpenObserve 설정 API(알림·함수·파이프라인)를 쓸 수 있는 계정(수집 토큰과 다름)
-#   alert_webhook_plain_url       — 통지 대상 webhook URL (사내 알림 플랫폼(Google Chat)의 text/plain 경로, 본문은 Google Chat 한도 50,000자까지)
-#   alert_webhook_token           — (선택) webhook 인증 토큰. 헤더 이름은 alert_webhook_auth_header(기본 Authorization,
-#                                   사내 알림 플랫폼은 X-NANOIT-ACCESS)
-#   normal_sources                — (선택) root 로그인 정상 출발지 목록 [{address: <IP>, kind: semaphore|office}, ...] (Spec #184 / Ticket-8).
-#                                   저장소에는 주소를 두지 않는다. kind(semaphore·office)는 구분용 표시일 뿐 판정은 같다:
-#                                   목록에 있는 출발지는 P1(외부 출발지)에서 빠지고 P2(알고 있는 출발지)로 간다.
-#                                   목록에 없어도 사설 대역(10/8·172.16/12·192.168/16·127/8·169.254/16)은 P2, 그 밖(공인)은 P1이다.
-#   silent_host_exceptions        — (선택) Silent Host 계획 정지 예외 [{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason: ...}] (Spec #184 / Ticket-4).
-#                                   만료일(expires)은 필수이며 형식이 틀리면 요청 전에 실패한다. 만료일이 지난 항목은 로스터 생성 때 무시되어
-#                                   해제를 잊어도 감시가 돌아온다.
-# Extra variables(-e o2_endpoint=...)가 OpenBao 값보다 우선한다.
+# 연결 정보와 시크릿은 Git에 두지 않는다. 공용 읽기 지점(lookup openbao_doc, docs/openbao_integration.md)이 OpenBao에서 읽는 문서(Spec #511 / Ticket-16):
+#   inventory/services/openobserve        — url(OpenObserve 주소), org(선택, 기본 default)
+#   secrets/services/openobserve/admin    — username, password: OpenObserve 설정 API(알림·함수·파이프라인)를 쓸 수 있는 계정(수집 자격과 다름)
+#   secrets/services/openobserve/ingest   — username, password: 알림 검증 합성 레코드를 넣는 수집 자격(컨트롤러 계열이 하나로 공유)
+#   secrets/services/alert/notify         — url: 통지 대상 webhook URL(사내 알림 플랫폼(Google Chat)의 text/plain 경로, 본문은 Google Chat 한도 50,000자까지). URL 자체가 권한이다
+#   inventory/config/openobserve_config   — (선택) 이 작업의 비공개 설정
+#       normal_sources           — root 로그인 정상 출발지 목록 [{address: <IP>, kind: semaphore|office}, ...] (Spec #184 / Ticket-8).
+#                                  저장소에는 주소를 두지 않는다. kind(semaphore·office)는 구분용 표시일 뿐 판정은 같다:
+#                                  목록에 있는 출발지는 P1(외부 출발지)에서 빠지고 P2(알고 있는 출발지)로 간다.
+#                                  목록에 없어도 사설 대역(10/8·172.16/12·192.168/16·127/8·169.254/16)은 P2, 그 밖(공인)은 P1이다.
+#       silent_host_exceptions   — Silent Host 계획 정지 예외 [{host: <인벤토리 호스트명>, expires: YYYY-MM-DD, reason: ...}] (Spec #184 / Ticket-4).
+#                                  만료일(expires)은 필수이며 형식이 틀리면 요청 전에 실패한다. 만료일이 지난 항목은 로스터 생성 때 무시되어
+#                                  해제를 잊어도 감시가 돌아온다.
+#   inventory/assets/<ns>, inventory/assets/<ns>/endpoints — 수집 로스터 호스트마다: Asset의 agents.otel.app_telemetry 스위치와 Endpoint ssh 주소
+# 이 값들은 외부 변수(-e)로 덮어쓰지 않는다. 임계값·제외 목록처럼 공개해도 되는 값만 아래 역할 변수로 둔다.
 
-o2c_vault_validate_certs: false
-# OpenBao AppRole 입력(O2C-000). 로그인해 받은 토큰이 VAULT_TOKEN보다 먼저다(O2C-001).
-o2c_vault_role_id: "{{ vault_role_id | default(VAULT_ROLE_ID | default(lookup('ansible.builtin.env', 'VAULT_ROLE_ID') | default('', true), true), true) }}"
-o2c_vault_secret_id: "{{ vault_secret_id | default(VAULT_SECRET_ID | default(lookup('ansible.builtin.env', 'VAULT_SECRET_ID') | default('', true), true), true) }}"
-o2c_kv: {}
-o2c_org: "{{ o2_org | default(o2c_kv.o2_org | default('default', true), true) }}"
-o2c_endpoint: "{{ o2_endpoint | default(o2c_kv.o2_endpoint | default('', true), true) }}"
-o2c_ca_file: "{{ o2_ca_file | default(o2c_kv.o2_ca_file | default('', true), true) }}"
+# 읽은 문서(O2C-001, 경로 -> 문서). 시크릿이 있으므로 no_log이고 팩트 캐시에 두지 않는다.
+o2c_docs: {}
+# 수집 로스터 호스트별 Asset 문서와 Endpoints 문서(O2C-004·O2C-006, {관리번호: 문서}). 로스터가 비면 읽지 않는다.
+o2c_asset_docs: {}
+o2c_endpoint_docs: {}
+o2c_admin: "{{ o2c_docs['secrets/services/openobserve/admin'] | default({}) }}"
+o2c_ingest: "{{ o2c_docs['secrets/services/openobserve/ingest'] | default({}) }}"
+o2c_notify: "{{ o2c_docs['secrets/services/alert/notify'] | default({}) }}"
+o2c_config: "{{ o2c_docs['inventory/config/openobserve_config'] | default({}) }}"
+o2c_org: "{{ (o2c_docs['inventory/services/openobserve'] | default({})).org | default('default', true) }}"
+o2c_endpoint: "{{ (o2c_docs['inventory/services/openobserve'] | default({})).url | default('', true) }}"
+# 사설 CA 파일 경로(선택). 비밀이 아니고 컨트롤러 파일 경로다. OpenBao inventory/services/openobserve의 ca_file(선택)에서 읽고,
+# 변수 o2_ca_file(Extra variables)이 있으면 그 값이 우선한다(이전 방식 호환, 컨트롤러 경로가 에이전트 호스트 경로와 다를 때).
+o2c_ca_file: "{{ o2_ca_file | default((o2c_docs['inventory/services/openobserve'] | default({})).ca_file | default('', true), true) }}"
+# 자원 알림의 호스트·마운트별 제외와 임계값(선택). 관리번호가 들어가 공개 저장소에 둘 수 없어 OpenBao
+# inventory/config/openobserve_config의 resource_exclusions·resource_thresholds에서 읽는다(Spec #504 §7). 문서에 없으면 빈 목록이다.
+#   resource_exclusions: [{host: ns0297, mount: /data(선택), metric: memory(선택)}]
+#   resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
+o2c_resource_exclusions: "{{ o2c_config.resource_exclusions | default([], true) }}"
+o2c_resource_thresholds: "{{ o2c_config.resource_thresholds | default([], true) }}"
+
 # 알림 본문의 원문 로그 링크 베이스 URL(웹 UI 외부 주소). 기본은 연결 엔드포인트다. 사용자가 브라우저로 여는 주소와 다르면
 # -e o2c_web_url=...로 덮어쓴다. 비우면 원문 링크 없이 `▶ 상세 보기: {alert_url}`만 나간다.
 o2c_web_url: "{{ o2c_endpoint }}"
@@ -44,7 +58,6 @@ o2c_github_audit_function_name: github_audit_semantics
 # 알림도 쓰지 않는다(삭제는 폐기 목록의 알림 이름뿐이다).
 o2c_template_name: infra-automation-plain
 o2c_destination_name: infra-automation-plain
-o2c_webhook_auth_header: "{{ o2c_kv.alert_webhook_auth_header | default('Authorization', true) }}"
 # (선택) P1 알림만 보낼 별도 destination 이름. 비어 있으면(기본) 모든 알림이 o2c_destination_name으로 간다.
 # 이 destination(과 그 템플릿·웹훅)은 이 역할이 만들지 않는다: 서버에 미리 있어야 하고 없으면 O2C-012 계획이 쓰기 전에 실패한다.
 o2c_p1_destination: ""
@@ -335,8 +348,8 @@ o2c_fortigate_hour_sql: >-
   CASE WHEN body LIKE '% time=__:__:__%' THEN CAST(regexp_replace(body, '^.* time=([0-9][0-9]):.*$', '\1') AS INT) ELSE -1 END
 o2c_fortigate_in_hours_sql: "{{ o2c_fortigate_hour_sql }} >= {{ o2c_fortigate_approved_start_hour }} AND {{ o2c_fortigate_hour_sql }} < {{ o2c_fortigate_approved_end_hour }}"
 
-# 정상 출발지(OpenBao normal_sources). 주소는 O2C-002에서 IP 문자 형식을 검증하므로 SQL에 그대로 넣는다.
-o2c_normal_sources: "{{ o2c_kv.normal_sources | default([], true) }}"
+# 정상 출발지(OpenBao inventory/config/openobserve_config의 normal_sources). 주소는 O2C-002에서 IP 문자 형식을 검증하므로 SQL에 그대로 넣는다.
+o2c_normal_sources: "{{ o2c_config.normal_sources | default([], true) }}"
 o2c_normal_addresses: "{{ o2c_normal_sources | map(attribute='address') | list }}"
 o2c_office_addresses: "{{ o2c_normal_sources | selectattr('kind', 'equalto', 'office') | map(attribute='address') | list }}"
 # 사설 대역(RFC1918·루프백·링크로컬)은 단순 LIKE 패턴으로 판별한다 — 테스트 하네스(sqlite)와 OpenObserve(DataFusion) 둘 다에서 같게 동작한다.
@@ -397,11 +410,12 @@ o2c_audit_secret_excluded_users: []
 o2c_audit_secret_metadata_syscalls: [getxattr, lgetxattr, fgetxattr, listxattr, llistxattr, flistxattr, readlink, readlinkat]
 # 정상 변경(프로비저닝·배포) 구분(Spec #419): Ansible become 경로를 감사 행에서 식별할 수 없으므로(프로세스 제목이 인터프리터뿐, 래퍼 문자열 BECOME-SUCCESS는
 # 감사 행이 아니라 sudo 로그에만 있고 세션 단위) "터미널 없이(tty=(none)) 로그인 사용자(auid 설정)가 한 변경"이라는 서명으로 갈라 제외하지 않고 등급을 낮춘다:
-# P2 알림은 `AND NOT <서명>`, P3 알림(infra-audit-watch-provisioning)은 `AND <서명>`. 계정 목록을 주면 서명이 그 로그인(AUID)으로 좁아진다(OpenBao agents/openobserve의
-# `alert_audit_provisioning_accounts`, 기본 비어 있음 = 터미널 없는 로그인 사용자 전부).
+# P2 알림은 `AND NOT <서명>`, P3 알림(infra-audit-watch-provisioning)은 `AND <서명>`. 계정 목록(역할 변수 `o2c_audit_provisioning_accounts`)을 주면 서명이 그 로그인(AUID)으로 좁아진다
+# (기본 비어 있음 = 터미널 없는 로그인 사용자 전부).
 # 한계(기본 설정): 계정 목록이 비어 있으면 서명이 넓어 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 P3로만 온다.
-# 프로비저닝 접속 계정을 이 목록(OpenBao `alert_audit_provisioning_accounts`)에 채워 서명을 좁히는 것을 권한다. 절차는 docs/openobserve_config.md. 값은 저장소에 두지 않는다.
-o2c_audit_provisioning_accounts: "{{ o2c_kv.alert_audit_provisioning_accounts | default([], true) }}"
+# 프로비저닝 접속 계정을 이 목록에 채워 서명을 좁히는 것을 권한다. 절차는 docs/openobserve_config.md. 값은 저장소에 두지 않고
+# OpenBao inventory/config/openobserve_config의 audit_provisioning_accounts에서 읽는다(문서에 없으면 빈 목록).
+o2c_audit_provisioning_accounts: "{{ o2c_config.audit_provisioning_accounts | default([], true) }}"
 # P3 알림이 보는 감시 키. 같은 구분을 쓰는 알림(#430)은 자기 키를 여기에 더하고 자기 P2 SQL에 `AND NOT {{ o2c_audit_provisioning_filter }}`를 붙인다.
 o2c_audit_provisioning_keys: [auth_config, container_config, secret_access, audit_config, syslog_config, ssh_keys, firewall_config]
 # 재통지 간격(분)과 임계: P2 알림 3개는 한 (호스트, 사용자, 실행 파일, 경로) 행의 사건이 임계 이상일 때 울리고, 간격은 Event Alert 원칙대로 조회 구간(5분)과 같다.
@@ -423,9 +437,9 @@ o2c_audit_watch_cfg:
 o2c_audit_provisioning_filter: "{{ o2c_audit_watch_cfg | o2c_audit_provisioning_cond }}"
 
 # 리소스 알림(Spec #184 / Ticket-3). 제외 파일시스템 유형은 Git 기본값, /boot·/boot/efi는 감시한다.
-# 호스트·마운트 예외와 임계값 덮어쓰기는 OpenBao agents/openobserve(비어 있어도 동작):
-#   alert_resource_exclusions: [{host: ns0297, mount: /data, metric: disk(선택: disk|inode|memory)}]
-#   alert_resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
+# 호스트·마운트 예외와 임계값 덮어쓰기는 OpenBao inventory/config/openobserve_config의 resource_exclusions·resource_thresholds(역할 변수 o2c_resource_*, 비어 있어도 동작):
+#   resource_exclusions: [{host: ns0297, mount: /data, metric: disk(선택: disk|inode|memory)}]
+#   resource_thresholds: [{host: ns0300, mount: /var(선택), metric(선택), p2: 97, p1: 99}]
 o2c_resource_p2_threshold: 90
 o2c_resource_p1_threshold: 95
 o2c_resource_excluded_fstypes: [squashfs, iso9660, tmpfs, devtmpfs, overlay]
@@ -433,20 +447,20 @@ o2c_resource_cfg:
   p2: "{{ o2c_resource_p2_threshold }}"
   p1: "{{ o2c_resource_p1_threshold }}"
   fstypes: "{{ o2c_resource_excluded_fstypes }}"
-  exclusions: "{{ o2c_kv.alert_resource_exclusions | default([], true) }}"
-  thresholds: "{{ o2c_kv.alert_resource_thresholds | default([], true) }}"
+  exclusions: "{{ o2c_resource_exclusions }}"
+  thresholds: "{{ o2c_resource_thresholds }}"
 
 # 로스터(Spec #184 / Ticket-4): 실행 시 인벤토리 그룹에서 만든다(OpenObserve — Config 템플릿은 servers 인벤토리를 읽는다).
 #   수집 로스터   = servers - host_agents_excluded - host_agents_backup_only (ns0266·ns0331 포함) — Silent Host·백업 누락
 #   유지보수 로스터 = servers - host_agents_excluded — 유지보수 누락
 # 호스트 이름은 인벤토리 호스트명(관리번호)이며 수집기가 보내는 host_name과 같다. 편입·폐기 후 Config를 다시 실행하면 따라온다.
 o2c_today: "{{ now(utc=true).strftime('%Y-%m-%d') }}"
-o2c_silent_exceptions: "{{ o2c_kv.silent_host_exceptions | default([], true) }}"
+o2c_silent_exceptions: "{{ o2c_config.silent_host_exceptions | default([], true) }}"
 o2c_roster_collect: "{{ groups | o2c_roster('collect') }}"
 o2c_roster_maintenance: "{{ groups | o2c_roster('maintenance') }}"
 # Silent Host는 계획 정지 예외 중 만료되지 않은 호스트를 뺀 수집 로스터를 쓴다.
 o2c_roster_silent: "{{ o2c_roster_collect | o2c_without_exceptions(o2c_silent_exceptions, o2c_today) }}"
-# 앱 텔레메트리 무소식(Spec #253 / Ticket-8): 수집 로스터 중 OpenBao hosts/<host>/agents의 otel_app_telemetry가 true인 호스트(O2C-004·005)에서
+# 앱 텔레메트리 무소식(Spec #253 / Ticket-8): 수집 로스터 중 OpenBao Asset 문서(inventory/assets/<ns>)의 agents.otel.app_telemetry가 true인 호스트(O2C-004·005)에서
 # Silent Host와 같은 계획 정지 예외를 뺀다. 스위치가 꺼진 호스트는 들어가지 않는다.
 o2c_app_switch_on: []
 o2c_roster_app: "{{ o2c_app_switch_on | o2c_without_exceptions(o2c_silent_exceptions, o2c_today) }}"
@@ -496,7 +510,7 @@ o2c_gha_group: "github_actor, github_actor_ghost, github_target, github_repo, gi
 
 # 알림 대상 서버 행의 표시 이름(Spec #339 / Ticket-5): `host_label` 컬럼이 관리번호 옆에 접속 주소를 붙인다(`ns0272 (<주소>)`).
 # 알림 SQL의 SELECT 목록 끝에 `, {{ o2c_host_label_sql }}`(서버 컬럼이 `host`인 알림은 `o2c_host_label_sql_for_host_column`)를 붙이고 행 템플릿은 `{host_label}`을 쓴다.
-# 주소 표(o2c_host_addresses)는 Config 실행 때 OpenBao hosts/<host>에서 읽어 만든다(O2C-006·O2C-007, ansible_host → public_ip). 주소가 없는 호스트는 관리번호만
+# 주소 표(o2c_host_addresses)는 Config 실행 때 OpenBao Asset의 Endpoint ssh(inventory/assets/<ns>/endpoints)에서 읽어 만든다(O2C-006·O2C-007). 주소가 없는 호스트는 관리번호만
 # 보인다. 값은 저장소에 두지 않는다. 기본 `{}`이면 모든 서버가 관리번호만 보인다. host_name 컬럼은 그대로 남아 검증·발화 조건에 영향이 없다.
 o2c_host_addresses: {}
 o2c_host_label_sql: "{{ 'host_name' | o2c_host_label(o2c_host_addresses) }}"
@@ -1016,7 +1030,7 @@ o2c_alerts:
     title: "일반 계정이 등록되지 않은 출발지에서 SSH 로그인 성공"
     what: "root가 아닌 계정이 정상 출발지 목록(OpenBao normal_sources)에 없는 출발지에서 SSH 로그인에 성공했습니다."
     why: "계정이 탈취되면 처음 보는 출발지에서 로그인합니다. 출발지를 등록하지 않은 정상 접속도 같은 모양이라 사람이 확인해야 합니다(ISMS 2.5 사용자 인증)."
-    action: "① 행의 계정과 출발지가 본인·작업자·자동화인지 확인 ② 정상 접속이면 그 출발지를 normal_sources에 등록(OpenBao agents/openobserve)하고 OpenObserve — Config를 다시 실행 ③ 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 후 보안 담당 보고"
+    action: "① 행의 계정과 출발지가 본인·작업자·자동화인지 확인 ② 정상 접속이면 그 출발지를 normal_sources에 등록(OpenBao inventory/config/openobserve_config)하고 OpenObserve — Config를 다시 실행 ③ 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 후 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#ssh-login-unregistered-source"
     row_template: '• {host_label}: {user_name} ← {source_address} ({logins}회) · {event_time}'
     description: "일반 계정(root 제외)의 SSH 로그인 성공이 정상 출발지 목록(normal_sources, kind 무관)에 없는 출발지에서 발생 (Event Alert, 재통지 {{ o2c_unregistered_login_silence_minutes }}분). 목록이 비어 있으면 모든 출발지가 미등록이다"
@@ -1210,7 +1224,7 @@ o2c_alerts:
     title: "디스크 사용률 높음"
     what: "디스크 사용률이 15분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
     why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 서비스 장애로 이어집니다."
-    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외 등록"
+    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao inventory/config/openobserve_config의 resource_exclusions에 예외 등록"
     runbook: "{{ o2c_runbook_base }}#disk-usage"
     row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
     description: "디스크 사용률 15분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
@@ -1226,7 +1240,7 @@ o2c_alerts:
     title: "디스크 사용률 임계 초과"
     what: "디스크 사용률이 15분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
     why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
-    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao 예외 등록"
+    action: "① 로그 보기로 대상 호스트·마운트 확인 ② 큰 파일·로그·Docker 데이터 정리 또는 증설 ③ 원래 가득 차게 쓰는 볼륨이면 OpenBao inventory/config/openobserve_config의 resource_exclusions에 예외 등록"
     runbook: "{{ o2c_runbook_base }}#disk-usage"
     row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
     description: "디스크 사용률 15분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
@@ -1242,7 +1256,7 @@ o2c_alerts:
     title: "inode 사용률 높음"
     what: "inode 사용률이 15분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
     why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 서비스 장애로 이어집니다."
-    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao 예외 등록"
+    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao inventory/config/openobserve_config의 resource_exclusions에 예외 등록"
     runbook: "{{ o2c_runbook_base }}#inode-usage"
     row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
     description: "inode 사용률 15분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
@@ -1258,7 +1272,7 @@ o2c_alerts:
     title: "inode 사용률 임계 초과"
     what: "inode 사용률이 15분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
     why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
-    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao 예외 등록"
+    action: "① 작은 파일이 몰린 디렉터리 확인(du --inodes) ② 불필요한 파일 정리 ③ 원래 그런 볼륨이면 OpenBao inventory/config/openobserve_config의 resource_exclusions에 예외 등록"
     runbook: "{{ o2c_runbook_base }}#inode-usage"
     row_template: '• {host_name} {mountpoint}: 사용률 {usage_pct}%'
     description: "inode 사용률 15분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
@@ -1274,7 +1288,7 @@ o2c_alerts:
     title: "메모리 사용률 높음"
     what: "메모리 사용률이 10분 내내 {{ o2c_resource_p2_threshold }}% 이상 {{ o2c_resource_p1_threshold }}% 미만입니다."
     why: "방치하면 {{ o2c_resource_p1_threshold }}%를 넘어 OOM kill·서비스 중단로 이어집니다."
-    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
+    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao inventory/config/openobserve_config의 resource_exclusions에 예외 등록"
     runbook: "{{ o2c_runbook_base }}#memory-usage"
     row_template: '• {host_name}: 사용률 {usage_pct}%'
     description: "메모리 사용률(1 − available/limit) 10분 최솟값이 P2 임계 이상, P1 임계 미만 (State Alert, 재통지 1440분)"
@@ -1291,7 +1305,7 @@ o2c_alerts:
     title: "메모리 사용률 임계 초과"
     what: "메모리 사용률이 10분 내내 {{ o2c_resource_p1_threshold }}% 이상입니다."
     why: "곧 가득 차 서비스 중단·데이터 손실이 발생할 수 있습니다."
-    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao 예외 등록"
+    action: "① 메모리 상위 프로세스·컨테이너 확인 ② 누수·한도 점검 후 재기동 또는 증설 ③ 원래 높게 쓰는 호스트면 OpenBao inventory/config/openobserve_config의 resource_exclusions에 예외 등록"
     runbook: "{{ o2c_runbook_base }}#memory-usage"
     row_template: '• {host_name}: 사용률 {usage_pct}%'
     description: "메모리 사용률(1 − available/limit) 10분 최솟값이 P1 임계 이상 (State Alert, 재통지 60분)"
@@ -1309,7 +1323,7 @@ o2c_alerts:
     title: "Silent Host: 메트릭이 15분 넘게 끊김"
     what: "수집 로스터의 호스트에서 메트릭 하트비트(system_memory_usage)가 15분 넘게 오지 않습니다(3시간 미만)."
     why: "수집기가 멈췄거나 서버가 내려갔을 수 있습니다. 방치하면 3시간 뒤 P1이 되고, 약 {{ o2c_ingest_allowed_hours }}시간이 지나면 이 구간 로그는 OpenObserve로 복구되지 않습니다."
-    action: "① 같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인 — 서버·네트워크부터 복구 ② 서버가 살아 있으면 otelcol-contrib 서비스 상태 확인·재기동 ③ 며칠 이상 계획 정지하는 호스트면 OpenBao silent_host_exceptions에 만료일과 함께 등록"
+    action: "① 같은 호스트의 서버 응답 없음 알림이 있으면 그쪽이 원인 — 서버·네트워크부터 복구 ② 서버가 살아 있으면 otelcol-contrib 서비스 상태 확인·재기동 ③ 며칠 이상 계획 정지하는 호스트면 OpenBao inventory/config/openobserve_config의 silent_host_exceptions에 만료일과 함께 등록"
     runbook: "{{ o2c_runbook_base }}#silent-host"
     row_template: '• {host_name}'
     description: "수집 로스터 호스트의 system_memory_usage가 15분 없음, 3시간 미만 (State Alert, 재통지 1440분) — UNION ALL 로스터 가지 방식"
@@ -1656,7 +1670,7 @@ o2c_alerts:
     title: "앱 텔레메트리 무소식: funa JVM 메트릭이 15분 넘게 끊김"
     what: "otel_app_telemetry를 켠 호스트에서 funa JVM 메트릭(jvm_memory_used, service_name=funa)이 15분 넘게 오지 않습니다."
     why: "앱 텔레메트리 경로(funa → 노드 수집기 → OpenObserve)가 알림 없이 끊긴 상태입니다. 2026-10-01처럼 트레이스와 앱 메트릭이 조용히 버려질 수 있습니다."
-    action: "① 같은 호스트의 Silent Host 알림이 있으면 수집기 전체가 원인 — 그쪽부터 복구 ② 호스트의 otelcol-contrib 상태와 OTLP 수신기 설정 확인 ③ funa 컨테이너의 OTLP exporter 설정과 컨테이너 상태 확인 ④ 의도적으로 껐다면 OpenBao hosts/<host>/agents의 otel_app_telemetry를 끄고 Config를 다시 실행"
+    action: "① 같은 호스트의 Silent Host 알림이 있으면 수집기 전체가 원인 — 그쪽부터 복구 ② 호스트의 otelcol-contrib 상태와 OTLP 수신기 설정 확인 ③ funa 컨테이너의 OTLP exporter 설정과 컨테이너 상태 확인 ④ 의도적으로 껐다면 OpenBao Asset 문서의 agents.otel.app_telemetry를 끄고 Config를 다시 실행"
     runbook: "{{ o2c_runbook_base }}#app-telemetry-silent"
     row_template: '• {host_name}'
     description: "otel_app_telemetry를 켠 호스트의 funa JVM 메트릭(jvm_memory_used)이 15분 없음 (State Alert, 재통지 1440분) — UNION ALL 로스터 가지 방식"
@@ -2677,7 +2691,7 @@ o2c_plan_only: false
 
 # 알림 검증 단계(Spec #184 / Ticket-1): 반영 직후 합성 레코드를 검증 전용 스트림(<운영 스트림><접미사>)에 넣고
 # 알림 SQL(스트림명만 교체)을 검색해 기대와 비교한다. 운영 스트림·알림·통지 대상은 건드리지 않는다.
-# 수집 인증은 OpenBao agents/openobserve의 controller_ingest_token(컨트롤러 전용, 설정 API 계정과 다름).
+# 수집 인증은 OpenBao secrets/services/openobserve/ingest의 username·password(컨트롤러 계열 공유, 설정 API 계정과 다름).
 o2c_verify_stream_suffix: _alert_verify
 o2c_verify_retries: 6       # 수집 직후 검색에 보이기까지 걸리는 시간을 기다린다
 o2c_verify_delay: 5

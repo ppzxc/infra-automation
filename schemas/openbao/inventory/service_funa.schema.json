@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Service funa 클러스터 공통 설정(비밀 아님)",
+  "type": "object",
+  "description": "키는 snake_case(`FUNA_` 접두사 제거 후 소문자), 렌더링 때 funa_env 역할의 대응표로 env 이름이 된다. required는 funa_env_openbao_required와 같다.",
+  "properties": {
+    "floating_hostname": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "health_check_uri": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "service_name": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "notification_smtp_from": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "notification_smtp_host": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "notification_smtp_port": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "notification_smtp_to": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "notification_smtp_username": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "notification_naver_works_bot_url": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    },
+    "tz": {
+      "type": [
+        "string",
+        "integer",
+        "boolean"
+      ]
+    }
+  },
+  "required": [
+    "floating_hostname",
+    "health_check_uri",
+    "service_name",
+    "notification_smtp_from",
+    "notification_smtp_host",
+    "notification_smtp_port",
+    "notification_smtp_to",
+    "notification_smtp_username",
+    "notification_naver_works_bot_url",
+    "tz"
+  ],
+  "additionalProperties": false
+}

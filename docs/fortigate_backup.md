@@ -6,14 +6,14 @@
 
 ## 1. 개요 및 구현 기능 (What)
 
-- **접속 대상 단위 수집**: HA 관리 인터페이스가 없어 멤버별 직접 접속은 불가능하다. 백업 대상은 **접속 대상**(IDC 클러스터 1, 사무실 1)이며 인벤토리 호스트 하나가 대상 하나다. 대상은 `ansible_host`로 접속해 REST API(`/api/v2/monitor/system/config/backup`, 범위 `global`)로 전체 설정을 받는다. IDC 클러스터는 현재 active 멤버가 응답한다.
+- **접속 대상 단위 수집**: HA 관리 인터페이스가 없어 멤버별 직접 접속은 불가능하다. 백업 대상은 **접속 대상**(IDC 클러스터 1, 사무실 1)이며 인벤토리 호스트 하나가 대상 하나다. 대상은 OpenBao `https` Endpoint의 주소로 접속해 REST API(`/api/v2/monitor/system/config/backup`, 범위 `global`)로 전체 설정을 받는다. IDC 클러스터는 현재 active 멤버가 응답한다.
 - **응답 멤버 식별**: 같은 접속으로 `/api/v2/monitor/system/status`를 먼저 조회해 실제 응답한 멤버(기본 hostname, 변수로 serial)를 파일명의 `<멤버>` 자리에 쓴다. 장애 전환으로 응답 멤버가 바뀌면 같은 대상인데 파일명의 멤버가 달라진다(4절).
 - **인증**: `Authorization: Bearer <토큰>` 헤더. 토큰을 URL(`access_token`)에 넣지 않는다 — 최근 FortiOS는 기본으로 URL 토큰을 거부하고 이후 버전은 제거했으며, 헤더 방식이 대상 장비 버전 모두에서 공식 방식이다(Fortinet 관리 가이드 "Using APIs", 커뮤니티 기술 문서). 장비 모델·버전은 비공개 자료에 둔다.
 - **무결성 검증**: HTTP 200이 아니거나 본문이 비었거나 FortiOS 설정 헤더(`#config-version=`)로 시작하지 않으면 저장하지 않고 호스트를 실패 처리한다. 기존 정상 백업은 건드리지 않는다.
 - **권한**: 디렉터리 `0700`, 파일 `0600`. 설정에는 VPN 사전 공유 키와 관리자 해시가 들어 있다.
 - **보관 주기**: `fortigate_backup_retention_days`(기본 90일)를 넘은 같은 대상(`<장비>_*`, 멤버 무관)의 파일을 백업 성공 직후 삭제한다. 변경 알림 전송이 실패해도 정리는 건너뛰지 않는다(호스트는 알림 실패로 실패 처리). 백업이 실패하면 정리도 하지 않는다.
-- **접속 정보(OpenBao KV)**: 같은 KV에 스위치 시크릿과 같은 키 이름으로 `ansible_host`(주소), `ansible_port`(포트, 문자열), `fqdn`(도메인)을 둘 수 있다. 접속 대상은 `fqdn`이 있으면 `fqdn`(인증서 이름 검증), 없으면 주소다. 주소는 인벤토리의 `ansible_host`(호스트명과 다를 때)가 KV보다 우선이라 Semaphore 인벤토리에는 호스트명만 있어도 동작한다. 포트는 KV `ansible_port`, 없으면 `fortigate_backup_api_port`(기본 443)다. KV에 접속 키가 없으면 기존처럼 인벤토리 `ansible_host`를 쓴다. 주소·포트 값은 로그에 남기지 않는다(관련 태스크 `no_log`, 실패 메시지에도 값 없음).
-- **시크릿**: 읽기 전용 API 토큰은 Git에 없다. Semaphore Environment(`fortigate_api_token`)로 호스트별 주입하거나 OpenBao KV `<mount>/fortigate/<인벤토리 호스트명>`의 `api_token`에서 읽는다(AppRole 또는 `VAULT_TOKEN`, `cisco_backup`·`backup`과 같은 환경변수). 토큰·응답 본문을 다루는 태스크는 `no_log`다.
+- **접속 정보(OpenBao)**: 같은 Asset 아래 Endpoint `https`(`address`·`port`. 인증서 이름 검증을 하므로 `address`는 인증서에 있는 이름이어야 한다: 옛 `fortigate/<ns>`의 `fqdn`이 있으면 migrate가 그 값을 `address`로 옮긴다)와 Credential `api`(`api_token`)로 합쳐 읽는다(옛 별도 경로 `fortigate/<ns>`와 접두사 변수는 없다). 역할은 읽기 지점(`lookup('openbao_connection', ..., preference=[https])`)만 쓰며 Endpoint 선호 순서(`fortigate_backup_endpoint_preference`, 기본 `[https]`)에서 등록된 첫 번째를 고르고 실패해도 다른 Endpoint로 넘어가지 않는다. API는 컨트롤러에서 직접 호출하므로 `via`(경유)가 있는 Endpoint는 `FORTIGATE-VIA`로 거부한다. 주소·포트·토큰은 로그에 남기지 않는다(관련 태스크 `no_log`, 실패 메시지에도 값 없음).
+- **시크릿**: 읽기 전용 API 토큰은 Git에 없다. OpenBao Credential `api`에서만 읽는다(AppRole은 `network_backup` 계열). 토큰·응답 본문을 다루는 태스크는 `no_log`다. 읽는 문서와 필수 키는 `fortigate_backup_openbao_required`(`vars/main.yml`) 한 곳에 선언한다.
 
 ---
 
@@ -30,9 +30,8 @@
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
 |---|---|---|---|---|
 | `FGBK-001` | `Assert the backup target identity` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (장비·멤버 이름은 영문·숫자·하이픈만, 보관 일수 1 이상, 멤버 출처는 hostname/serial) |
-| `FGBK-002` | `Log in to OpenBao with AppRole when no API token or Vault token is given` | `ansible.builtin.uri` | Controller / Localhost | POST `auth/approle/login`, `no_log`, Vault 토큰이 없고 AppRole 자격이 있을 때만 |
-| `FGBK-003` | `Fetch the API token and connection info from OpenBao KV when OpenBao access is given` | `ansible.builtin.uri` | Controller / Localhost | GET(200 또는 404), `no_log`, OpenBao 인증이 있을 때만 (404면 인벤토리·Environment 값으로 계속) |
-| `FGBK-004` | `Resolve and assert the read-only API token and the connection target` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, `no_log` (토큰 없음·접속 주소 없음·포트가 숫자가 아님이면 장비를 호출하기 전에 실패, 값은 로그에 없음) |
+| `FGBK-003` | `Resolve the https Endpoint and the api Credential from OpenBao` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, `no_log`, 읽기 지점 `openbao_connection`(선호 순서 `[https]`) |
+| `FGBK-004` | `Assert the read-only API token and the connection target` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, `no_log` (https Endpoint·토큰 로그인·필수 키 선언·주소·숫자 포트이며 `via`가 없는지 확인, 위반 시 장비를 호출하기 전에 실패, 값은 로그에 없음) |
 | `FGBK-005` | `Ensure local backup destination directory exists (0700)` | `ansible.builtin.file` | Controller / Localhost | 디렉터리 상태 및 권한(`0700`) 일치 시 `ok` |
 | `FGBK-006` | `Query the system status through the same connection to identify the responding member` | `ansible.builtin.uri` | Controller / Localhost | GET `system/status`, `changed_when: false`, `no_log`, 인증서 기본 검증 |
 | `FGBK-007` | `Verify the status response names the responding member` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (200 + 응답 멤버 hostname/serial 확인, 위반 시 장비 설정을 받기 전에 실패) |
@@ -48,8 +47,9 @@
 | `FGBK-017` | `Compare with the previous backup and keep only section and item names` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수, `no_log`, `#` 헤더 줄 제외, 값은 결과에 넣지 않음 |
 | `FGBK-018` | `Report the changed sections (names only, no values)` | `ansible.builtin.debug` | Controller / Localhost | 읽기 전용, 변경이 있을 때만 |
 | `FGBK-019` | `Assert the alert webhook is configured when a change is detected` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (변경이 있는데 webhook이 없으면 실패) |
-| `FGBK-020` | `Send the configuration change alert once` | `ansible.builtin.uri` | Controller / Localhost | POST, `no_log`, 변경이 있을 때만(변경이 없거나 첫 백업이면 건너뜀) |
+| `FGBK-020` | `Send the configuration change alert once` | `ansible.builtin.uri` | Controller / Localhost | text/plain POST, `no_log`, 변경이 있을 때만(변경이 없거나 첫 백업이면 건너뜀) |
 | `FGBK-021` | `Assert the alert was delivered` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (전송 실패 시 호스트 실패) |
+| `FGBK-022` | `Read the alert webhook from OpenBao when a change is detected` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, `no_log`, 변경이 있을 때만 `secrets/services/alert/notify`를 읽음. 새 백업 저장(FGBK-011) 전에 실행하므로 읽기 실패 시 저장하지 않고 다음 실행이 같은 변경을 다시 알린다(없으면 FGBK-019가 실패 처리) |
 
 테스트는 [tests/test_fortigate_backup.py](../tests/test_fortigate_backup.py)다. 구조·3-Way 추적성은 정적으로, 동작(대상별 저장·응답 멤버 파일명·장애 전환 시 멤버 변경·`0600`, 상태·설정 응답이 비정상이거나 비면 저장 안 함과 실패, 보관 일수 정리, 토큰 비노출, 설정 변경 알림·첫 백업·멤버 전환·비밀 비노출)은 장비를 로컬 HTTP 서버(장비와 알림 수신기)로 모사해 역할을 실제 실행해 검증한다. 장비에는 닿지 않는다.
 
@@ -100,9 +100,9 @@
 ./docker-run.sh playbooks/backup_fortigate.yml --limit <인벤토리 호스트명>
 ```
 
-1. **인벤토리**: 그룹 `fortigate_firewalls`에 접속 대상마다 호스트 하나(호스트명은 관리번호, 파일명의 `<장비>`). 호스트 변수는 `ansible_host`(IDC는 클러스터 주소)가 있으면 그것을 쓰고, 없으면 OpenBao KV의 접속 키를 쓴다(1절). 대상 목록: IDC 클러스터(`ns0380`; 쌍의 다른 멤버 `ns0381`은 대상이 아니다), 사무실 `ns0399`. 예시는 `inventory/hosts.yml.example`. Semaphore 인벤토리는 정적이므로 저장소 `group_vars`가 아니라 Semaphore 인벤토리에 직접 넣는다.
-2. **Task Template**: Playbook `playbooks/backup_fortigate.yml`. Environment에 `VAULT_ADDR`와 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`)을 주입하거나 호스트별 `fortigate_api_token`을 Secret으로 주입한다.
-3. **OpenBao KV**: `fortigate/<인벤토리 호스트명>`에 `api_token` 하나(접두사는 `OPENBAO_FORTIGATE_PREFIX`).
+1. **인벤토리**: 그룹 `fortigate_firewalls`에 접속 대상마다 호스트 하나(호스트명은 관리번호, 파일명의 `<장비>`). 주소·포트는 인벤토리가 아니라 OpenBao Endpoint가 정한다(호스트 변수 `ansible_host`는 쓰지 않는다). 대상 목록: IDC 클러스터(`ns0380`; 쌍의 다른 멤버 `ns0381`은 대상이 아니다), 사무실 `ns0399`. 예시는 `inventory/hosts.yml.example`. Semaphore 인벤토리는 정적이므로 저장소 `group_vars`가 아니라 Semaphore 인벤토리에 직접 넣는다.
+2. **Task Template**: Playbook `playbooks/backup_fortigate.yml`. Environment는 `network_backup` 계열의 `VAULT_ADDR`와 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`)이다.
+3. **OpenBao**: Asset `inventory/assets/<관리번호>/endpoints`의 `https`와 `secrets/assets/<관리번호>/credentials/api`(`api_token`), 알림은 `secrets/services/alert/notify`의 `url`.
 4. **예약**: 매일 03:30(`30 3 * * *`). 실패한 멤버가 있으면 Semaphore 실행이 실패로 끝나 기존 알림 채널로 전달된다.
 5. **인증서**: 기본은 인증서 검증을 한다. 장비가 사설 인증서면 컨트롤러가 그 CA를 신뢰하게 하고, 검증을 끄는 `fortigate_backup_validate_certs: false`는 마지막 수단이다.
 
@@ -118,8 +118,8 @@
 - **멤버가 바뀐 비교**: 장애 전환으로 직전 백업과 응답 멤버가 다르면 멤버 고유 설정(`config system global`의 `hostname`, `config system ha`의 `priority`)은 변경으로 세지 않고, 알림에 멤버 변경 비교임을 적는다.
 - **반복 알림 금지(멱등)**: 비교는 항상 "직전 백업 대 이번 백업"이므로 같은 변경은 변경이 처음 보인 실행에서만 한 번 알린다. 다음 실행은 변경 후 상태끼리 비교해 조용하다.
 - **비밀 비노출**: 알림과 로그에는 섹션·항목 이름과 바뀐 설정 키 이름만 나온다(예: `config system admin > edit "admin" (변경: password)`). 값(VPN 사전 공유 키, 관리자 해시, 인증서)은 어느 곳에도 쓰지 않으며, 설정을 다루는 태스크는 `no_log`다. 항목은 기본 20개까지 보이고 나머지는 건수로 줄인다.
-- **통지 형식**: 기존 알림 형식(등급 P2, 무슨 일, 왜 중요, 대상, 조치, 런북)을 따라 네이버웍스 webhook으로 직접 보낸다. 런북은 [alerts.md](runbooks/alerts.md#fortigate-config-change)다.
-- **설정**: `fortigate_backup_alert_webhook_url`(필수, 변경이 있을 때만 필요), `fortigate_backup_alert_webhook_token`, `fortigate_backup_alert_webhook_auth_header`(기본 `X-NANOIT-ACCESS`)를 Semaphore Environment로 주입한다. OpenBao `agents/openobserve`의 `alert_webhook_*`와 같은 값이다. 저장소에는 두지 않는다.
+- **통지 형식**: 기존 알림 형식(등급 P2, 무슨 일, 왜 중요, 대상, 조치, 런북)을 따라 사내 알림 플랫폼 text/plain webhook으로 직접 보낸다. 런북은 [alerts.md](runbooks/alerts.md#fortigate-config-change)다.
+- **설정**: webhook 주소는 OpenBao `secrets/services/alert/notify`의 `url` 하나다(URL 자체가 권한이라 인증 헤더·토큰 변수가 없다). 변경이 있을 때만 읽는다. 본문은 `Content-Type: text/plain; charset=utf-8` 원문이라 JSON 경로의 본문 2000자 제한을 받지 않는다. 저장소에는 두지 않는다.
 - **알림 실패**: webhook이 없거나 전송이 실패하면(3회 시도) 호스트를 `FORTIGATE-ALERT`로 실패 처리하고 변경 항목 이름을 로그에 남긴다. 백업은 이미 저장돼 같은 변경을 다시 알리지 않으므로 이때는 사람이 변경 항목을 확인해야 한다.
 - **한계**: 값이 바뀐 사실만 알리고 무엇으로 바뀌었는지는 보여 주지 않는다(원본은 백업 파일 `diff`로 사람이 확인). 설정 키 이름이 같은 값 변경은 키 이름만 나온다.
 
