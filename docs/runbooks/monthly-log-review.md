@@ -85,12 +85,20 @@
   ```
 
 - **1부 6·7·12번(출발지)**: 위 첫 쿼리의 출발지를 정상 출발지 목록과 대조한다. 출발지가 다른 관리 호스트 주소인 로그인(6번), 목록 밖 출발지의 로그인(7번), 같은 계정이 2분 안에 출발지 둘 이상에서 성공한 구간(12번)을 찾는다. root 성공과 목록에 없는 출발지의 성공은 모두 사유를 확인한다.
-- **1부 13번(짧은 시간의 명령어 집중)**: 판정이 아직 구현되지 않아 매달 '점검 불가(미구현)'로 나온다. 호스트·계정별 sudo 건수가 분 단위로 몰린 구간이 있는지 직접 본다.
+- **1부 13번(짧은 시간의 명령어 집중)**: 보고서가 같은 계정의 2분 내 sudo 30회 이상을 자동 판정한다(Ansible become 제외, sudo 명령만 본다). 조회 실패일 때는 호스트·계정별 sudo 건수가 분 단위로 몰린 구간이 있는지 직접 본다. 판정 함수가 없는 항목이 '점검 불가(미구현)'으로 나오면 같은 방식으로 직접 보고 이슈로 올린다.
 
   ```sql
   SELECT host_name, user_name, date_format(_timestamp, '%Y-%m-%d %H:%M', '+09:00') AS minute, count(*) AS records
   FROM "security_logs" WHERE event_action = 'sudo' AND event_outcome = 'success'
   GROUP BY host_name, user_name, minute ORDER BY records DESC LIMIT 20
+  ```
+
+- **장비 관리자 로그인(1·2·3·4·7·12번의 소제목 표)**: FortiGate는 관리자 로그인 계정·출발지·결과와 관리자 계정 변경을 자동 판정한다. 스위치는 로그인 실패·설정 변경을 장비 단위로만 세고(일부 자동) 나머지 칸은 '점검 불가(파싱 없음)'이다. 스위치의 계정·출발지는 원문(`Configured from console by <계정> on vty0 (<주소>)`, `[user: ...] [Source: ...]`)에만 있으므로 확인 필요 행이 있으면 원문을 연다.
+
+  ```sql
+  SELECT coalesce(device_id, device_name) AS device, event_name, body FROM "system_logs"
+  WHERE service_name = 'switch-syslog' AND event_name IN ('SEC_LOGIN-4-LOGIN_FAILED', 'SYS-5-CONFIG_I')
+  ORDER BY _timestamp DESC LIMIT 50
   ```
 
 - **1부 8~11·14~19번(개인정보 조회·다운로드·업무 승인 관련)**: 애플리케이션 접속기록·업무 기록을 수집하지 않아 매달 '점검 불가(애플리케이션 접속기록·업무 기록 미수집)'이다. 서버 로그로는 대신할 수 없다. 해당 개인정보처리시스템의 담당자에게서 그 시스템 자체의 접속기록 점검 결과를 받아 소견에 '해당 시스템 점검 결과 수령(위치)'으로 적는다. 받지 못하면 '점검 불가'로 남기고 사유를 적는다. 이 공백은 매달 보고서에 나타나며 수집은 후속 과제다.
