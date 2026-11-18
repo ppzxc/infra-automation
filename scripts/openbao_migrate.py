@@ -22,6 +22,7 @@ import getpass
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -87,6 +88,12 @@ def _int(value):
         return int(str(value).strip())
     except (TypeError, ValueError):
         return value  # 스키마 검증이 규칙 이름으로 거부한다
+
+
+def _credential_name(username):
+    """Credential 이름은 snake_case 규칙(`^[a-z][a-z0-9_]*`)이다. 계정 이름의 하이픈·점 등은 밑줄로, 대문자는 소문자로 바꾼다.
+    실제 로그인 이름은 Credential의 username에 그대로 남는다."""
+    return re.sub(r"[^a-z0-9_]", "_", str(username).lower())
 
 
 def _env_to_key(name):
@@ -229,8 +236,9 @@ class _Builder:
         if not user:
             return self.err(doc, "no_login_account")
         name = "telnet" if ctype == "telnet" else "ssh"
+        cred = _credential_name(user)
         ep = {"protocol": name, "address": address, "port": _int(port if port not in (None, "") else (23 if name == "telnet" else 22)),
-              "credential": user, "become": {"method": "enable"}}
+              "credential": cred, "become": {"method": "enable"}}
         if ctype == "jump_ssh":
             if not bastion:
                 self.err(doc, "jump_without_bastion")
@@ -240,7 +248,7 @@ class _Builder:
         data, srcs = {"type": "password", "username": user}, {"username": (doc, "ansible_user")}
         if password is not None:  # 없으면 스키마 검증이 password 누락을 알린다
             data["password"], srcs["password"] = password, (doc, "ansible_password")
-        self.credentials[ns][user] = (data, srcs)
+        self.credentials[ns][cred] = (data, srcs)
 
     def fortigate(self, ns):
         doc = "fortigate/%s" % ns
@@ -277,7 +285,10 @@ class _Builder:
             self.err(doc, "host_agents_environment_differs")
         for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
             for k in sorted(k for k in d if k.startswith(prefix)):
-                self.put(asset, ["agents", section, k[len(prefix):]], d.pop(k), (doc, k))
+                value = d.pop(k)
+                if k == "backup_sqlite_snapshots" and isinstance(value, list):   # 옛 값은 경로 문자열 목록, 새 값은 {path} 객체 목록
+                    value = [{"path": v} if isinstance(v, str) else v for v in value]
+                self.put(asset, ["agents", section, k[len(prefix):]], value, (doc, k))
         if d.get("rustfs_bucket") not in (None, ""):  # 이름 규칙 밖 호스트(이전·개명)의 버킷: 호스트별 덮어쓰기
             self.put(asset, ["agents", "backup", "bucket"], d.pop("rustfs_bucket"), (doc, "rustfs_bucket"))
         else:

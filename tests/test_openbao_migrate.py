@@ -576,3 +576,27 @@ def test_client_gives_up_after_repeated_429_with_status_only(monkeypatch):
     with pytest.raises(om.ClientError) as exc:
         om.Client("http://x", "infra", "t").read("secret", "a")
     assert "429" in str(exc.value) and "secret-body" not in str(exc.value)
+
+
+def _device(user):
+    return {"hosts/ns0003": {
+        "description": "Fake switch", "host_type": "SWITCH", "fqdn": "ns0003.example.test", "ansible_host": "192.0.2.20",
+        "ansible_port": 22, "ansible_user": user, "ansible_password": "pw-net-0003", "connection_type": "ssh"}}
+
+
+def test_device_login_with_a_hyphen_gets_a_snake_case_credential_name_and_keeps_the_real_username():
+    """Credential 이름은 snake_case 규칙이다. 실서버 장비 계정에 하이픈이 있어 그대로 쓰면 스키마 검증이 실패했다."""
+    p = om.build_new(_device("net-admin"))
+    assert p.store["inventory/assets/ns0003/endpoints"]["ssh"]["credential"] == "net_admin"
+    assert p.store["secrets/assets/ns0003/credentials/net_admin"] == {
+        "type": "password", "username": "net-admin", "password": "pw-net-0003"}
+    assert [v.format() for v in ov.validate_store(p.store) if "ns0003" in v.format()] == []
+
+
+def test_sqlite_snapshot_paths_become_path_objects():
+    """옛 값은 경로 문자열 목록, 새 스키마는 {path} 객체 목록이다(docs/backup.md)."""
+    old = {"hosts/ns0003": _device("netadmin")["hosts/ns0003"], "hosts/ns0003/agents": {
+        "backup_sqlite_snapshots": ["/srv/fake/a.db", "/srv/fake/b.db"]}}
+    p = om.build_new(old)
+    assert p.store["inventory/assets/ns0003"]["agents"]["backup"]["sqlite_snapshots"] == [
+        {"path": "/srv/fake/a.db"}, {"path": "/srv/fake/b.db"}]
