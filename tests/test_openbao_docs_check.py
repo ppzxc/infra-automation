@@ -19,7 +19,7 @@ from openbao_fake import FakeOpenBao
 ROOT = Path(__file__).resolve().parent.parent
 CLI = ROOT / "scripts" / "openbao_docs.py"
 FIXTURES = ROOT / "tests" / "fixtures" / "openbao_docs" / "valid"
-TOFU = ROOT / "tofu" / "openbao"
+CODE = ROOT / "openbao"
 
 SEMAPHORE_TOKEN = "fake-semaphore-inventory-token"
 OPENBAO_TOKEN = "fake-periodic-check-token"
@@ -99,7 +99,7 @@ def load_valid(fake, rec):
 
 
 def healthy_routes(fake, secret_id_days=100):
-    policies = sorted(p.stem for p in (TOFU / "policies").glob("*.hcl"))
+    policies = sorted(p.stem for p in (CODE / "policies").glob("*.hcl"))
     fake.raw("LIST", "sys/policies/acl", {"data": {"keys": policies + ["default", "root"]}})
     fake.raw("LIST", "auth/approle/role", {"data": {"keys": list(ROLES)}})
     fake.raw("GET", "sys/mounts", {"data": {"inventory/": {}, "secrets/": {}, "sys/": {}, "identity/": {},
@@ -126,7 +126,7 @@ def run(fake, extra_env=None):
     environ = {"PATH": "/usr/bin:/bin", "VAULT_ADDR": fake.url, "VAULT_TOKEN": OPENBAO_TOKEN,
                "VAULT_NAMESPACE": "infra"}
     environ.update(extra_env or {})
-    return subprocess.run([sys.executable, str(CLI), "check", "--tofu-dir", str(TOFU)],
+    return subprocess.run([sys.executable, str(CLI), "check", "--code-dir", str(CODE)],
                           capture_output=True, text=True, env=environ)
 
 
@@ -231,7 +231,7 @@ def test_secret_id_without_expiry_passes(env):
     (("GET", "sys/mounts", "mount"), "sys/mounts/hand-made"),
     (("GET", "sys/auth", "mount"), "sys/auth/hand-made"),
 ])
-def test_object_missing_from_opentofu_code_is_detected(env, route, doc):
+def test_object_missing_from_declared_code_is_detected(env, route, doc):
     fake, rec = env
     method, path, _ = route
     body = fake._raw[(method, path)][1]
@@ -241,11 +241,11 @@ def test_object_missing_from_opentofu_code_is_detected(env, route, doc):
         body["data"]["hand-made/"] = {}
     r = run(fake)
     assert r.returncode == 1
-    assert doc + "\t#\tnot_in_opentofu" in alert_text(rec)
+    assert doc + "\t#\tnot_in_code" in alert_text(rec)
 
 
-def test_tofu_object_missing_from_server_is_not_a_failure(env):
-    fake, rec = env  # 코드에는 있고 서버에는 없는 것은 plan이 잡는다. 점검 대상은 코드에 없는 것이다
+def test_declared_object_missing_from_server_is_not_a_failure(env):
+    fake, rec = env  # 코드에는 있고 서버에는 없는 것은 openbao_apply.py plan이 잡는다. 점검 대상은 코드에 없는 것이다
     fake._raw[("LIST", "auth/approle/role")][1]["data"]["keys"].remove("agent_session")
     assert run(fake).returncode == 0
 
@@ -271,7 +271,7 @@ def test_unreadable_document_fails_with_rule_name(env):
 
 def test_missing_connection_settings_is_usage_error(env):
     fake, rec = env
-    r = subprocess.run([sys.executable, str(CLI), "check", "--tofu-dir", str(TOFU)], capture_output=True, text=True,
+    r = subprocess.run([sys.executable, str(CLI), "check", "--code-dir", str(CODE)], capture_output=True, text=True,
                        env={"PATH": "/usr/bin:/bin"})
     assert r.returncode == 2
 
@@ -282,7 +282,7 @@ def test_approle_login_is_used_without_token():
         load_valid(fake, rec)
         healthy_routes(fake)
         fake._raw[("POST", "auth/approle/login")] = (200, {"auth": {"client_token": "approle-issued"}})
-        r = subprocess.run([sys.executable, str(CLI), "check", "--tofu-dir", str(TOFU)], capture_output=True,
+        r = subprocess.run([sys.executable, str(CLI), "check", "--code-dir", str(CODE)], capture_output=True,
                            text=True, env={"PATH": "/usr/bin:/bin", "VAULT_ADDR": fake.url, "VAULT_NAMESPACE": "infra",
                                             "VAULT_ROLE_ID": "fake-role", "VAULT_SECRET_ID": "fake-secret"})
         assert r.returncode == 0, r.stderr
@@ -334,33 +334,32 @@ def test_yaml_hosts_only_come_from_inventory_structure():
     assert oc.parse_inventory_hosts(text, "static-yaml") == {"ns0001"}
 
 
-def test_expected_objects_are_read_from_the_real_opentofu_code():
+def test_expected_objects_are_read_from_the_real_declared_code():
     sys.path.insert(0, str(ROOT / "scripts"))
     import openbao_check as oc
-    expected = oc.expected_from_tofu(TOFU)
+    expected = oc.expected_from_code(CODE)
     assert expected["roles"] == set(ROLES)
     assert expected["mounts"] == {"inventory", "secrets"}
     assert expected["auth"] == {"userpass", "approle"}
     assert {"applier", "periodic-check", "operator", "agent-session"} <= expected["policies"]
 
 
-def test_managed_approles_list_equals_the_role_policy_keys_in_the_tf_code():
-    import re
-    tf = (TOFU / "approles.tf").read_text(encoding="utf-8")
-    listed = set(re.findall(r'"([^"]+)"', re.search(r"managed_approles\s*=\s*\[(.*?)\]", tf, re.S).group(1)))
-    family = re.search(r"family_policies\s*=\s*\{(.*?)\n  \}", tf, re.S).group(1)
-    keys = set(re.findall(r"^    (\w+)\s*=\s*\[", family, re.M)) | {"host_audit"}      # role_policies = merge(family_policies, {host_audit})
-    assert listed == keys
+def test_managed_approles_are_derived_from_the_family_keys_of_roles_yml():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import openbao_check as oc
+    import yaml
+    families = set(yaml.safe_load((CODE / "roles.yml").read_text(encoding="utf-8"))["families"])
+    assert oc.expected_from_code(CODE)["roles"] == families | {"applier"}
 
 
-def test_an_unreadable_tofu_structure_fails_clearly_instead_of_reporting_everything_unmanaged(tmp_path):
+def test_an_unreadable_code_structure_fails_clearly_instead_of_reporting_everything_unmanaged(tmp_path):
     sys.path.insert(0, str(ROOT / "scripts"))
     import openbao_check as oc
     (tmp_path / "policies").mkdir()
     (tmp_path / "policies" / "x.hcl").write_text('path "inventory/data/x" {\n  capabilities = ["read"]\n}\n')
-    (tmp_path / "main.tf").write_text("# 구조가 바뀌어 role·마운트가 없다\n")
-    with pytest.raises(OSError, match="읽지 못했다"):
-        oc.expected_from_tofu(tmp_path)
+    (tmp_path / "roles.yml").write_text("# 구조가 바뀌어 role·마운트가 없다\nnamespace: infra\n")
+    with pytest.raises(OSError):
+        oc.expected_from_code(tmp_path)
 
 
 def test_secret_id_zero_expiry_time_means_no_expiry(env):
@@ -370,10 +369,10 @@ def test_secret_id_zero_expiry_time_means_no_expiry(env):
     assert run(fake).returncode == 0
 
 
-def test_wrong_tofu_dir_is_usage_error_not_false_alert(env):
+def test_wrong_code_dir_is_usage_error_not_false_alert(env):
     fake, rec = env
     environ = {"PATH": "/usr/bin:/bin", "VAULT_ADDR": fake.url, "VAULT_TOKEN": OPENBAO_TOKEN, "VAULT_NAMESPACE": "infra"}
-    r = subprocess.run([sys.executable, str(CLI), "check", "--tofu-dir", str(ROOT / "nope")], capture_output=True,
+    r = subprocess.run([sys.executable, str(CLI), "check", "--code-dir", str(ROOT / "nope")], capture_output=True,
                        text=True, env=environ)
     assert r.returncode == 2 and rec.alerts == []
 

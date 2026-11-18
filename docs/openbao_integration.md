@@ -2,7 +2,7 @@
 
 이 저장소의 자동화가 OpenBao에서 값을 읽는 방식을 설명한다: 어디에 무엇을 저장하는지, 코드가 어떻게 읽는지, 누가 무엇을 읽을 수 있는지, 없으면 어떻게 실패하는지. 결정과 기각한 대안은 [ADR-0014](adr/0014-openbao-storage-structure-and-access-policy.md), 용어는 [CONTEXT.md](../CONTEXT.md)(Asset·Endpoint·Credential·Automation Identity·Service·Operator)를 따른다.
 
-문서 키의 정의는 이 문서에 복사하지 않는다. 원본은 `schemas/openbao/`의 스키마(키 설명은 각 스키마의 `description`)와 경로 패턴 대응표 `schemas/openbao/index.yml`이다. 누가 어느 경로를 읽는지의 원본은 `tofu/openbao/policies/*.hcl`과 `tofu/openbao/approles.tf`다.
+문서 키의 정의는 이 문서에 복사하지 않는다. 원본은 `schemas/openbao/`의 스키마(키 설명은 각 스키마의 `description`)와 경로 패턴 대응표 `schemas/openbao/index.yml`이다. 누가 어느 경로를 읽는지의 원본은 `openbao/policies/*.hcl`과 `openbao/roles.yml`이다.
 
 ## 1. 개요
 
@@ -11,7 +11,7 @@ flowchart LR
     Semaphore["Semaphore 템플릿\n(계열 Environment)"] -->|AppRole 로그인| Reader["공용 읽기 지점\nlookup_plugins/_openbao_reader.py"]
     Reader -->|네임스페이스 infra| Bao[("OpenBao\ninventory/ · secrets/")]
     Reader --> Roles["역할·플레이북\nlookup('openbao_doc', '<마운트>/<문서 경로>')"]
-    Tofu["tofu/openbao\n(정책·AppRole·마운트)"] -.->|적용| Bao
+    Code["openbao/\n(정책·AppRole·마운트)"] -.->|openbao_apply.py| Bao
     Tools["scripts/openbao_docs.py\nvalidate · put · check"] -->|운영자 토큰 또는 periodic_check| Bao
 ```
 
@@ -113,9 +113,9 @@ Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나�
 | `github_webhook_watch` | 조직 웹훅 감시 |
 | `periodic_check` | OpenBao — Periodic Check |
 | `agent_session` | 에이전트 세션(Semaphore 밖) |
-| `applier` | OpenBao — OpenTofu(적용 전용) |
+| `applier` | `scripts/openbao_apply.py`(적용 전용, Semaphore 밖) |
 
-Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, secret_id 발급·교체는 [openbao-operations](runbooks/openbao-operations.md)다. 계열 × 경로 매트릭스는 복사하지 않는다: `tofu/openbao/policies/*.hcl`(경로 묶음 단위의 작은 정책)과 `tofu/openbao/approles.tf`(계열이 조합하는 정책)가 원본이고, `tests/test_openbao_policies.py`가 매트릭스를, `tests/test_openbao_role_policy_contract.py`가 각 역할이 읽는 문서가 그 계열 정책 안에 있는지를 묶어 둔다. `host_audit`은 드리프트 하위 실행이 `site.yml`과 Host Agents Config를 같은 AppRole로 렌더링하므로 `provision`과 `host_agents`의 경로를 모두 읽는다.
+Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, secret_id 발급·교체는 [openbao-operations](runbooks/openbao-operations.md)다. 계열 × 경로 매트릭스는 복사하지 않는다: `openbao/policies/*.hcl`(경로 묶음 단위의 작은 정책)과 `openbao/roles.yml`(계열이 조합하는 정책)가 원본이고, `tests/test_openbao_policies.py`가 매트릭스를, `tests/test_openbao_role_policy_contract.py`가 각 역할이 읽는 문서가 그 계열 정책 안에 있는지를 묶어 둔다. `host_audit`은 드리프트 하위 실행이 `site.yml`과 Host Agents Config를 같은 AppRole로 렌더링하므로 `provision`과 `host_agents`의 경로를 모두 읽는다.
 
 ### 5.3 사람과 에이전트
 
@@ -123,7 +123,7 @@ Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, s
 - `admin`: 루트 네임스페이스의 비상용. 삭제·영구 삭제·정책 수동 변경에만 쓴다([openbao-operations](runbooks/openbao-operations.md)).
 - 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절). `inventory/`·`secrets/`의 metadata list·read(이름·버전)를 가지며, 작업 계열 중 list는 `periodic_check`만 갖는다. 개인정보(`inventory/config/host_audit`의 수신자·발신자)와 웹훅 주소(`inventory/config/github_webhook_watch`의 `hook_url`) 문서는 `deny`라 읽지 못한다(두 문서의 metadata는 보인다).
 
-정책·AppRole·마운트는 OpenTofu 코드로만 바꾼다([openbao_opentofu.md](openbao_opentofu.md)).
+정책·AppRole·마운트는 선언 코드(`openbao/`)를 고치고 `scripts/openbao_apply.py`로만 바꾼다([openbao_apply.md](openbao_apply.md)).
 
 ## 6. 실패 규칙
 
@@ -175,7 +175,7 @@ monitoring_openbao_required:
 - 결정: [ADR-0014](adr/0014-openbao-storage-structure-and-access-policy.md)
 - 스키마와 대응표: `schemas/openbao/`, `schemas/openbao/index.yml`
 - 등록·점검 도구: [openbao_docs.md](openbao_docs.md)
-- 정책·AppRole 코드: [openbao_opentofu.md](openbao_opentofu.md), `tofu/openbao/`
+- 정책·AppRole 코드: [openbao_apply.md](openbao_apply.md), `openbao/`
 - 운영: [openbao-operations](runbooks/openbao-operations.md), 전환(일회성): [openbao-cutover](runbooks/openbao-cutover.md)
 - Semaphore Environment: [semaphore-setup.md](semaphore-setup.md)
 - 역할별 읽는 문서: [funa_env.md](funa_env.md), [host_audit.md](host_audit.md), [backup.md](backup.md), [openobserve_config.md](openobserve_config.md), [cisco_backup.md](cisco_backup.md), [fortigate_backup.md](fortigate_backup.md), [github_webhook_watch.md](github_webhook_watch.md)

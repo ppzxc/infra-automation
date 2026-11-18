@@ -129,7 +129,7 @@ all:
 
 ## 4. Variable Group (Environment)
 
-Environment는 **AppRole 계열마다 하나**다. 템플릿이 읽을 수 있는 OpenBao 경로는 그 Environment의 AppRole 정책이 정하므로, 한 템플릿이 침해돼도 그 계열 밖의 비밀은 읽히지 않는다. 계열과 정책의 원본은 `tofu/openbao`(정책 HCL과 `approles.tf`)이고, 구조와 인증은 [openbao_integration.md](openbao_integration.md) 5절이 설명한다. 이 문서에 경로 표를 복사하지 않는다.
+Environment는 **AppRole 계열마다 하나**다. 템플릿이 읽을 수 있는 OpenBao 경로는 그 Environment의 AppRole 정책이 정하므로, 한 템플릿이 침해돼도 그 계열 밖의 비밀은 읽히지 않는다. 계열과 정책의 원본은 `openbao/`(정책 HCL과 `roles.yml`)이고, 구조와 인증은 [openbao_integration.md](openbao_integration.md) 5절이 설명한다. 이 문서에 경로 표를 복사하지 않는다.
 
 ### 공통 변수
 
@@ -156,13 +156,13 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | `github_webhook_watch` | 조직 웹훅 감시 | 조직 훅 읽기 토큰, OpenObserve 수집 계정, 작업 설정 |
 | `periodic_check` | OpenBao — Periodic Check | 전체 읽기와 메타데이터 목록(스키마 대조용) |
 
-`OpenBao — OpenTofu`는 위와 별개의 전용 Environment를 쓴다([openbao_opentofu.md](openbao_opentofu.md) 5절). 에이전트 세션의 `agent_session`은 Semaphore 밖에서 쓰므로 Environment가 없다.
+정책·AppRole 적용(`scripts/openbao_apply.py`)은 Semaphore 템플릿이 아니라 운영자 작업 환경에서 돌리므로 Environment가 없다([openbao_apply.md](openbao_apply.md)). 에이전트 세션의 `agent_session`은 Semaphore 밖에서 쓰므로 Environment가 없다.
 
 평문 토큰은 어느 Environment에도 넣지 않는다. 공용 읽기 지점은 AppRole로만 인증한다(Spec #511). 운영자가 로컬에서 쓰는 `scripts/`의 도구는 운영자 토큰을 쓰며 접속 방법은 [openbao_docs.md](openbao_docs.md) 4절을 따른다.
 
 ### Periodic Check Environment
 
-`OpenBao — Periodic Check`(§5)의 `periodic_check` Environment는 `scripts/openbao_docs.py check`가 읽는 환경변수 이름 그대로 `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`(위 공통 변수)에 더해 선택 `VAULT_NAMESPACE`(생략하면 `infra`)를 가진다([openbao_docs.md §4](openbao_docs.md)). AppRole 자격만 주입하고 값은 저장소에 쓰지 않는다. 토큰 TTL·secret_id 바인딩은 OpenTofu 코드(`tofu/openbao`)가 정한다.
+`OpenBao — Periodic Check`(§5)의 `periodic_check` Environment는 `scripts/openbao_docs.py check`가 읽는 환경변수 이름 그대로 `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`(위 공통 변수)에 더해 선택 `VAULT_NAMESPACE`(생략하면 `infra`)를 가진다([openbao_docs.md §4](openbao_docs.md)). AppRole 자격만 주입하고 값은 저장소에 쓰지 않는다. 토큰 TTL·secret_id 바인딩은 선언 코드(`openbao/roles.yml`)가 정한다.
 
 ### 한계
 
@@ -194,7 +194,6 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | `target_hosts`, `host_audit_mail_enabled`, `host_audit_storage_enabled` | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
 | Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |
 
-**OpenTofu 템플릿(위 표와 별개)**: `OpenBao — OpenTofu`(앱 OpenTofu, Sub-directory `tofu/openbao`, **Auto Approve 끔**, 수동 실행)는 Ansible 템플릿이 아니라 위 8개에 세지 않는다. 전용 Environment를 쓰고 다른 템플릿과 공유하지 않는다. 정의와 입력 값은 [OpenBao 구성 OpenTofu](openbao_opentofu.md) 5절을 본다.
 
 **Periodic Check 템플릿(위 표와 별개, #520)**: `OpenBao — Periodic Check`는 Ansible이 아니라 **Bash** 앱 템플릿이라 위 8개에 세지 않는다.
 
@@ -353,7 +352,7 @@ OpenObserve에서 `backup_logs` 스트림에 `job=inventory`, `job=backup`(다�
 | 수정을 머지했는데 로그에 예전 코드가 돈다(`Checkout repository to <예전 해시>`) | 실패한 태스크를 **Re-run**하면 원래 태스크의 커밋으로 다시 실행된다 | 템플릿 목록의 **Run**으로 새 태스크를 실행한다. 그래도 같으면 Repository Branch가 `main`인지 확인한다 |
 | `OpenBao 인증 정보가 없습니다` | 템플릿에 계열 Environment가 연결되지 않았거나 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`가 비어 있다 | §4 확인 |
 | `OpenBao 조회 실패: AppRole 로그인 (HTTP …)` | `VAULT_ADDR`이 틀렸거나 secret_id가 만료됐거나 러너 CIDR 밖이다 | secret_id 재발급([openbao-operations](runbooks/openbao-operations.md) 2절) |
-| `OpenBao 조회 실패: <문서 경로> (HTTP 403)` | 템플릿이 그 문서를 읽을 수 없는 계열 Environment로 돈다 | 템플릿의 Environment를 §4 표의 계열로 바꾼다. 계열 정책이 모자라면 `tofu/openbao` 정책을 고친다 |
+| `OpenBao 조회 실패: <문서 경로> (HTTP 403)` | 템플릿이 그 문서를 읽을 수 없는 계열 Environment로 돈다 | 템플릿의 Environment를 §4 표의 계열로 바꾼다. 계열 정책이 모자라면 `openbao/policies` 정책을 고친다 |
 | `유지보수 필수 입력 누락: <문서 경로>.<키>` 등 | 표시된 키가 OpenBao에 없다. Maintenance 전용 키는 Deploy 성공으로 확인되지 않는다 | `scripts/openbao_docs.py put`으로 등록 |
 | `유지보수 필수 입력 누락: secrets/assets/<host>/agents.restic_password` | Host Agents가 적용되지 않은 호스트다 | 적용 전이면 `host_agents_excluded` 그룹에 넣는다 |
 | CentOS 6/7 업로드 실패(MON-109) | 러너에 `sshpass`가 없다 | 러너 이미지에 설치 |

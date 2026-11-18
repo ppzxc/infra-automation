@@ -24,11 +24,11 @@
 ## 2. 통합 아키텍처 및 시크릿 관리 (Integrations & Secrets)
 
 * [OpenBao 구조와 읽기 지점](openbao_integration.md) - 네임스페이스 `infra`와 마운트 두 개, 소유 대상별 저장 규칙, `resolve_connection` 접속 해석, 작업 계열별 AppRole 인증과 정책, 필수 문서 누락 실패 규칙
-* [OpenBao 저장 구조와 접근 정책 ADR-0014](adr/0014-openbao-storage-structure-and-access-policy.md) - `infra` 1단·마운트 `inventory/`·`secrets/`, 소유 대상별 저장·작업 계열별 정책, 스키마 강제, OpenTofu 정책 코드, `operator`/`admin` 분리와 기각한 대안 (Spec #511)
-* [OpenBao 운영 런북](runbooks/openbao-operations.md) - secret_id 발급(response-wrapping)·180일 교체·만료 알림 대응, OpenTofu 적용과 state passphrase 보관, `operator` 추가, 비상용 `admin` 사용 (Spec #511)
+* [OpenBao 저장 구조와 접근 정책 ADR-0014](adr/0014-openbao-storage-structure-and-access-policy.md) - `infra` 1단·마운트 `inventory/`·`secrets/`, 소유 대상별 저장·작업 계열별 정책, 스키마 강제, 정책·AppRole 선언 코드와 적용 스크립트, `operator`/`admin` 분리와 기각한 대안 (Spec #511)
+* [OpenBao 운영 런북](runbooks/openbao-operations.md) - secret_id 발급(response-wrapping)·180일 교체·만료 알림 대응, 정책 적용(`openbao_apply.py`), `operator` 추가, 비상용 `admin` 사용 (Spec #511)
 * [OpenBao 구조 일괄 전환 런북](runbooks/openbao-cutover.md) - 전환 9단계, 동결 창 규칙, 계열별 확인 목록·거부 시험, 되돌리기, 2주 뒤 옛 구조 삭제 (Spec #511)
 * [Host Agents (otelcol + resticprofile) ADR-0006](adr/0006-host-agents-otelcol-resticprofile.md) - Host Agents 설치·재구성, ISMS 수집/백업 표준, OpenBao 입력(위치는 ADR-0014로 대체), CentOS 6/7 분기
-* [OpenBao 구성 OpenTofu](openbao_opentofu.md) - `tofu/openbao`의 마운트·applier·userpass 코드, state pbkdf2 암호화, 입력 값(TF_VAR_*), Semaphore OpenTofu 템플릿(Auto Approve 끔), 호환 위험 확인 결과 [런북 8절](runbooks/openbao-operations.md) (Spec #511 / Ticket-6, #517)
+* [OpenBao 정책·AppRole 적용 도구](openbao_apply.md) - `openbao/roles.yml`·`policies/`와 `scripts/openbao_apply.py`(plan·apply), 입력 환경변수(`OPENBAO_*`), bootstrap, 운영자 해시 만드는 법 (Spec #511, #505 변경)
 * [OpenBao 문서 도구](openbao_docs.md) - `openbao_docs.py` 하위 명령별 절. Periodic Check(`check`): 점검 항목·규칙 이름·종료 코드·알림·실패 대응 (Spec #511 / Ticket-8, #519)
 * [Semaphore 셋업 가이드](semaphore-setup.md) - Key Store·Repository·Inventory·Variable Group·Host Agents/OpenObserve 템플릿·스케줄(UTC/KST) 등록 절차와 자주 겪는 문제
 * Host Agents — Deploy All 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상

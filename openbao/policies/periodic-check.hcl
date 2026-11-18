@@ -1,4 +1,4 @@
-# periodic_check: 매일 정기 점검(스키마·참조·Semaphore 인벤토리 대조, secret_id 만료 알림, OpenTofu 밖 객체 탐지).
+# periodic_check: 매일 정기 점검(스키마·참조·Semaphore 인벤토리 대조, secret_id 만료 알림, 코드 밖 객체 탐지).
 # 전체 읽기·list와 AppRole 메타데이터 조회만 한다. 쓰기·삭제·secret_id 발급은 없다.
 # 스키마 대조에 비밀 문서 값 검사가 필요해 secrets/data/*도 읽는다(#506 §6의 "전체 읽기"). 그래서 Automation Identity
 # (secrets/automation/ssh)도 읽는 점이 서버 계열 한정 규칙의 유일한 예외다. list 권한을 가진 유일한 작업 계열이다(에이전트 세션은 metadata list만, agent-session.hcl).

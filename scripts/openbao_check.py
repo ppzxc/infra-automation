@@ -6,7 +6,7 @@ OpenBao 전체를 읽어 다음을 대조한다. 위반은 `Violation(문서 경
        인벤토리에만 있음 -> 실패 `inventory_missing_asset`
        Asset 문서에만 있음 -> 경고(로그만) `orphan_asset`, 수정 없이 30일 넘으면 실패 `orphan_asset_stale`
   3. AppRole secret_id 만료 30일 전 -> 실패 `secret_id_expiring`
-  4. OpenTofu 코드에 없는 정책·role·마운트 -> 실패 `not_in_opentofu`
+  4. 선언 코드(openbao/)에 없는 정책·role·마운트 -> 실패 `not_in_code`
 실패하면 `secrets/services/alert/notify` URL로 요약(문서 경로·규칙 이름)을 보낸다.
 
 접속 설정은 환경변수다: VAULT_ADDR, VAULT_NAMESPACE(기본 infra), VAULT_TOKEN 또는 VAULT_ROLE_ID+VAULT_SECRET_ID(AppRole).
@@ -26,8 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.append(str(Path(__file__).resolve().parent.parent / "lookup_plugins"))   # 끝에 붙인다(stdlib·scripts/ 이름을 가리지 않는다)
 import _bao_http  # noqa: E402
 import openbao_validation as ov  # noqa: E402
+from openbao_code import DEFAULT_CODE_DIR, load_code  # noqa: E402
 
-DEFAULT_TOFU_DIR = Path(__file__).resolve().parent.parent / "tofu" / "openbao"
 MOUNTS = ("inventory", "secrets")
 EXPIRY_WARN = timedelta(days=30)
 ORPHAN_LIMIT = timedelta(days=30)
@@ -271,28 +271,13 @@ def check_secret_ids(client, roles, now):
     return sorted(set(out))
 
 
-# ---- OpenTofu 밖 객체 ---------------------------------------------------------------------------------------------
+# ---- 선언 코드 밖 객체 --------------------------------------------------------------------------------------------
 
-def expected_from_tofu(tofu_dir):
-    """OpenTofu 코드가 만드는 {policies, roles, mounts, auth} 이름 집합."""
-    tofu_dir = Path(tofu_dir)
-    if not (tofu_dir / "policies").is_dir() or not list(tofu_dir.glob("*.tf")):
-        raise OSError("tofu 디렉터리를 읽을 수 없다")
-    policies = {p.stem for p in (tofu_dir / "policies").glob("*.hcl")}
-    roles, mounts, auth = set(), set(), set()
-    for tf in sorted(tofu_dir.glob("*.tf")):
-        text = tf.read_text(encoding="utf-8")
-        roles.update(re.findall(r'role_name\s*=\s*"([^"$]+)"', text))                  # 단독 role(applier)
-        listed = re.search(r"managed_approles\s*=\s*\[(.*?)\]", text, re.S)              # 계열 role의 명시 목록
-        if listed:
-            roles.update(re.findall(r'"([^"]+)"', listed.group(1)))
-        for kind, bucket in (("vault_mount", mounts), ("vault_auth_backend", auth)):
-            for body in re.findall(r'resource\s+"%s"\s+"\w+"\s*\{(.*?)\n\}' % kind, text, re.S):
-                bucket.update(re.findall(r'^\s*path\s*=\s*"([^"$]+)"', body, re.M))
-    # 구조가 바뀌어 아무것도 못 읽었는데 "모두 OpenTofu 밖"으로 알리면 거짓 경보다: 읽기 실패로 멈춘다.
-    if not (policies and roles and mounts and auth):
-        raise OSError("tofu 코드에서 정책·role·마운트·인증 이름을 읽지 못했다(구조가 바뀌었다)")
-    return {"policies": policies, "roles": roles, "mounts": mounts, "auth": auth}
+def expected_from_code(code_dir):
+    """선언 코드(`roles.yml`·`policies/*.hcl`)가 만드는 {policies, roles, mounts, auth} 이름 집합."""
+    code = load_code(code_dir)   # 구조를 못 읽으면 OSError: "모두 코드 밖"이라는 거짓 경보 대신 읽기 실패로 멈춘다
+    return {"policies": set(code["policies"]), "roles": set(code["roles"]), "mounts": set(code["mounts"]),
+            "auth": set(code["auth_mounts"])}
 
 
 def check_unmanaged(client, expected, roles):
@@ -324,7 +309,7 @@ def check_unmanaged(client, expected, roles):
         except BaoError:
             out.append(Violation(path, "#", "unmanaged_lookup_failed"))
             continue
-        out.extend(Violation(prefix + n, "#", "not_in_opentofu") for n in names if n not in allowed)
+        out.extend(Violation(prefix + n, "#", "not_in_code") for n in names if n not in allowed)
     return out
 
 
@@ -358,7 +343,7 @@ def send_alert(url, text):
 
 # ---- 진입점 -------------------------------------------------------------------------------------------------------
 
-def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_DIR, now=None):
+def run_check(environ, code_dir=DEFAULT_CODE_DIR, schema_dir=ov.DEFAULT_SCHEMA_DIR, now=None):
     """종료 코드: 0 정상, 1 위반(알림 전송), 2 설정 오류."""
     now = now or datetime.now(timezone.utc)
     addr = environ.get("VAULT_ADDR")
@@ -368,10 +353,10 @@ def run_check(environ, tofu_dir=DEFAULT_TOFU_DIR, schema_dir=ov.DEFAULT_SCHEMA_D
             raise KeyError
         if not client.token:
             client.login_approle(environ["VAULT_ROLE_ID"], environ["VAULT_SECRET_ID"])
-        expected = expected_from_tofu(tofu_dir)
-    except (KeyError, BaoError, OSError, ValueError):  # ValueError: tofu 파일 디코딩
+        expected = expected_from_code(code_dir)
+    except (KeyError, BaoError, OSError, ValueError):  # ValueError: 파일 디코딩
         print("접속 설정 오류: VAULT_ADDR와 VAULT_TOKEN(또는 VAULT_ROLE_ID·VAULT_SECRET_ID)이 필요하고, "
-              "tofu 디렉터리를 읽을 수 있어야 한다", file=sys.stderr)
+              "선언 코드 디렉터리(openbao/)를 읽을 수 있어야 한다", file=sys.stderr)
         return 2
 
     store, failures, listed = read_store(client)
