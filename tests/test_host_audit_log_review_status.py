@@ -66,7 +66,7 @@ def test_every_host_synced_within_one_second_is_ok():
 
 def test_unsynced_readings_or_an_offset_over_one_second_need_a_check():
     m = _model({"status_time_sync": _ok([_sync("ns0001", readings=7990), _sync("ns0001", "unsynced", readings=10),
-                                         _sync("ns0002", max_offset_ms=-1500)])})
+                                         _sync("ns0002", max_offset_ms="-1500.5")])})
     item = _item(m, "time_sync")
     assert item["verdict"] == "확인 필요"
     rows = {r[0]: r for r in item["rows"]}

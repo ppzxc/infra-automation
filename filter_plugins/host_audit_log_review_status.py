@@ -88,8 +88,12 @@ def judge_time_sync(ctx):
             s['no_tool'] += n
         else:
             s['bad'] += n
-        if h.get('max_offset_ms') is not None:
-            off = abs(_int(h.get('max_offset_ms')))
+        try:  # 문자열·소수로 와도 오차를 0으로 읽지 않는다(_int는 실패를 0으로 바꾼다)
+            off = abs(float(h.get('max_offset_ms')))
+        except (TypeError, ValueError):
+            off = None
+        if off is not None:
+            off = int(round(off))
             s['offset'] = off if s['offset'] is None else max(s['offset'], off)
     rows, unknown, check = [], 0, 0
     for name in hosts:
