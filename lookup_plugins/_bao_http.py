@@ -6,10 +6,13 @@
 
 파일 이름이 `_`로 시작해 Ansible이 플러그인으로 읽지 않는다. 스크립트는 `lookup_plugins/`를 sys.path에 넣어 가져온다.
 """
+import time
 import urllib.error
 import urllib.request
 
 DEFAULT_TIMEOUT = 30
+RETRIES_429 = 8      # 운영 OpenBao는 요청 제한(HTTP 429, Retry-After 1초)을 건다. 대량 읽기(Periodic Check 등)가 견디게 한다
+MAX_WAIT_429 = 30
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -19,12 +22,31 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _wait_429(error, attempt):
+    """429 응답의 Retry-After(초)를 따르고, 없으면 지수 대기. MAX_WAIT_429초를 넘기지 않는다."""
+    try:
+        wait = float(error.headers.get("Retry-After"))
+    except (TypeError, ValueError, AttributeError):
+        wait = 0.5 * (2 ** attempt)
+    return min(max(wait, 0.1), MAX_WAIT_429)
+
+
 def urlopen(req, timeout=DEFAULT_TIMEOUT, context=None):
-    """`urllib.request.urlopen`과 같은 사용법. 리다이렉트를 따르지 않는다. `context`는 https용 ssl 컨텍스트(선택)."""
+    """`urllib.request.urlopen`과 같은 사용법. 리다이렉트를 따르지 않는다. `context`는 https용 ssl 컨텍스트(선택).
+
+    HTTP 429는 Retry-After만큼 기다렸다 최대 RETRIES_429번 다시 보낸다(서버가 처리 전에 거절하므로 쓰기도 안전하다)."""
     handlers = [NoRedirect()]
     if context is not None:
         handlers.append(urllib.request.HTTPSHandler(context=context))
-    return urllib.request.build_opener(*handlers).open(req, timeout=timeout)
+    opener = urllib.request.build_opener(*handlers)
+    for attempt in range(RETRIES_429 + 1):
+        try:
+            return opener.open(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == RETRIES_429:
+                raise
+            exc.close()
+            time.sleep(_wait_429(exc, attempt))
 
 
 class _FollowRedirect(urllib.request.HTTPRedirectHandler):
