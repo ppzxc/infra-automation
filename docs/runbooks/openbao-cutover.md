@@ -63,6 +63,8 @@
 
 - **Endpoint 문서가 없는 Asset 0개**: 도달성 알림(MON-227)은 Endpoint 문서가 없는 호스트를 경고만 하고 건너뛴다. 전환 적재 뒤 Periodic Check로 없는 호스트가 0개인지 본다.
 - **알림 URL만으로 수신되는지**: 옛 코드는 `Authorization`·`X-NANOIT-ACCESS` 헤더를 붙일 수 있었고 새 구조는 text/plain URL 하나다(#503). host_audit의 KISA 악화 알림과 FortiGate 변경 알림을 한 번 보내 수신되는지 확인한다. 401이면 `secrets/services/alert/notify`에 인증 값을 추가하는 수정이 필요하다.
+- **Python 인터프리터**: 적재 뒤 Asset의 `access.python_interpreter` 값 목록(호스트·값)을 뽑아 옛 값과 대조한다. 새 규칙(절대 경로, venv·semaphore·`/tmp/` 제외)에 걸려 옮겨지지 않은 값이 없는지 본다. `/usr/bin/python3`이 없는 호스트(CentOS 6·7 일부 등)는 이 값을 채운다.
+- **ansible-core 버전**: 운영 Semaphore의 ansible-core 버전을 기록한다. 2.21.4가 아니면 `no_log` 태스크가 실패 사유를 가릴 수 있다(읽기 지점의 Display 출력이 안전망이다).
 - **`token_max_ttl`**: 계열별 값(7200/3600)은 추정이다. 가장 긴 실행(Host Agents Deploy 전체, Repo Maintenance)이 이 안에 끝나는지 본다.
 - **state 잠금**: RustFS에서 `use_lockfile`이 동작하는지(동시 apply 하나가 거부되는지) 확인한다.
 - **`TF_VAR_agent_session_cidrs`**: 새 필수 입력이다. OpenTofu 템플릿 Environment에 값이 있는지 확인한다.

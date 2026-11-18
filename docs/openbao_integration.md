@@ -134,6 +134,8 @@ Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, s
 - 알 수 없는 마운트(`inventory`·`secrets` 밖)는 요청을 보내기 전에 실패한다.
 - 오류 메시지에는 문서 경로와 상태 코드만 있다. 응답 본문은 비밀을 담을 수 있어 넣지 않는다.
 - 역할의 `vars/main.yml`에 `<역할>_openbao_required`로 `{index.yml 패턴: [필수 키, ...]}`를 선언한다(필수 키가 없는 선택 문서는 `[]`). 입력 검증이 문서 경로와 키 이름만 대며 실패하고, 같은 선언을 스키마 `required` 대조 테스트와 요청 기록 단언이 쓴다.
+- 환경 이름 `deployment_environment`는 `playbooks/group_vars/all.yml`에 있어 `playbooks/` 안의 플레이북으로 돌릴 때만 자동으로 읽힌다. 다른 위치의 플레이북이나 하네스에서는 `-e deployment_environment=...`로 준다.
+- Service 문서의 `ca_file`(사설 CA)은 호스트 경로와 컨트롤러 경로를 겸한다. 두 경로가 다르면 `-e`로 따로 지정한다.
 
 ```yaml
 monitoring_openbao_required:
