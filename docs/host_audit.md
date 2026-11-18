@@ -97,6 +97,9 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_kisa_alert_enabled` | `true` | 정기 실행의 KISA 월간 악화 알림(§15, #331). false면 알리지 않음 |
 | `host_audit_alert_validate_certs` | `true` | 알림 webhook TLS 검증. 주소는 OpenBao `secrets/services/alert/notify`의 `url`(과 선택 `token`·`auth_header`)이고 실행 변수로 덮어쓰지 않는다 |
 | `host_audit_environment` | 공용 `deployment_environment`(`playbooks/group_vars/all.yml`, `production`) | 점검 기록의 환경(`declared.environment`). 모든 호스트가 같은 값이라 인벤토리 변수가 아니라 공용 값이고, Host Agents(`host_agents_environment`)와 한 곳에서 정한다. 역할만 따로 돌리는 시험·molecule은 `deployment_environment`를 직접 준다. `-e`로 덮어쓸 수 있다 |
+| `host_audit_log_review_enabled` | `false` | 수시 실행에서도 Log Review Report를 만든다(§18). 정기 실행은 이 값과 무관하게 만든다 |
+| `host_audit_log_review_timeout` · `host_audit_log_review_validate_certs` | `120` · `true` | OpenObserve `_search` 한 번의 최대 시간(초)과 TLS 검증. 주소·조직은 `inventory/services/openobserve`, 계정은 `secrets/services/openobserve/readonly`이고 실행 변수로 덮어쓰지 않는다 |
+| `host_audit_log_review_collect_hosts` · `host_audit_log_review_devices` | 수집 로스터(`o2c_roster('collect')`) · `fortigate_firewalls`+`cisco_switches` 그룹 | 3부 수집 공백의 수집 대상(§18) |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
 | `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |
@@ -504,6 +507,8 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 | `inventory/services/rustfs` | `region` | | 기본 `us-east-1` |
 | `secrets/services/alert/notify` | `url`, 선택 `token`·`auth_header` | ● (악화 알림이 있을 때, url만 필수) | KISA 악화 알림 webhook(§15). `token`이 있을 때만 `auth_header`(기본 `X-NANOIT-ACCESS`) 헤더로 붙인다. 못 읽어도 보관·메일은 막히지 않는다 |
 | `inventory/config/host_audit` | `mail_recipients`, `mail_sender`, `mail_sender_display_name` | (필수 키 없음) | 메일 입력(§13.3). 없으면 읽기 실패가 아니라 메일 문제로 남는다 |
+| `inventory/services/openobserve` | `url`, 선택 `org`·`ca_file` | ● (Log Review Report를 만들 때) | OpenObserve 주소(비밀 아님, §18). `org` 기본 `default` |
+| `secrets/services/openobserve/readonly` | `username`, `password` | ● (Log Review Report를 만들 때) | OpenObserve 조회 전용 용도 계정(정책 `openobserve-readonly`, 읽기만). 서버가 조회 전용을 강제하지 못하므로 역할은 `POST _search`만 부른다(§18). 못 읽으면 보고서 항목이 '조회 실패'이고 실행은 계속된다 |
 
 버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다(전용 키의 정책이 이 버킷으로 범위가 정해져 있다). 주소·키는 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이다. 이 역할은 토큰을 따로 받아 두지 않는다(`_vault_token`을 만들지 않음): 읽는 태스크마다 새로 로그인하므로 앞 단계가 토큰 TTL(30분)보다 길어도 만료된 토큰을 쓰지 않는다. `host_audit_environment`는 `production|staging|development|test`만 허용한다(`AUD-001`). `host_audit` AppRole 정책이 위 문서를 읽는다(`openbao/`).
 
@@ -682,8 +687,8 @@ report.yml
 | `AUD-602` | `Read the Host Audit mail settings from OpenBao (inventory/config/host_audit)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 문서가 없으면 `{}`, 못 읽으면 값 없음(AUD-603이 문제로 남김) |
 | `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 수신자·발신자 주소와 선택 표시 이름(`From:` 헤더 값)을 해석, 문제는 키 이름·건수만, `no_log` |
 | `AUD-604` | `Create a private temporary directory for the attachment` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 디렉터리, AUD-607이 삭제 |
-| `AUD-605` | `Copy the report and the xlsx zip under their ASCII attachment names` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600`. 보고서 1개와 (요약에 `xlsx_zip`이 있고 호출자가 경로를 준 때만) xlsx zip 1개 |
-| `AUD-606` | `Send the summary, the A4 report and the xlsx zip (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통(첨부 둘), `failed_when: false`, `no_log` |
+| `AUD-605` | `Copy the report, the xlsx zip and the Log Review Report under their ASCII attachment names` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600`. 보고서 1개와 (요약에 `xlsx_zip`이 있고 호출자가 경로를 준 때만) xlsx zip 1개, (요약에 `log_review`가 있고 경로를 준 때만) Log Review Report 1개(18절) |
+| `AUD-606` | `Send the summary, the A4 report, the xlsx zip and the Log Review Report (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통(첨부 최대 셋, 머리글 `X-Host-Audit-Log-Review-SHA256`), `failed_when: false`, `no_log` |
 | `AUD-607` | `Remove the temporary attachment directory` | `ansible.builtin.file` | 러너 | `always`, `state: absent` |
 | `AUD-608` | `Judge the mail outcome without any address` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_outcome` 필터, `no_log` |
 | `AUD-609` | `Show the mail outcome (counts only)` | `ansible.builtin.debug` | 러너 | 수신자 수·첨부명·SHA-256만 |
@@ -703,7 +708,7 @@ report.yml
 | `AUD-629` | `Get the archived xlsx zip` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log`. 요약이 xlsx zip을 기록한 실행만 |
 | `AUD-633` | `Assert the archived xlsx zip exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 받지 못함·이름 불일치·해시 불일치면 보내지 않음. 번호는 `AUD-630`(정리 판정)이 이미 쓰여 633이다 |
 | `AUD-627` | `Prepare the resend summary and attachments` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
-| `AUD-628` | `Remove the downloaded report and xlsx zip from the runner` | `ansible.builtin.file` | 러너 | `state: absent`(재발송 실행 디렉터리 통째로) |
+| `AUD-628` | `Remove the downloaded report, xlsx zip and Log Review Report from the runner` | `ansible.builtin.file` | 러너 | `state: absent`(재발송 실행 디렉터리 통째로) |
 
 재발송의 `Read the xlsx zip record of the archived summary`(요약에서 zip 기록을 읽는 `set_fact`), `Compute the SHA-256 of the downloaded xlsx zip`(받은 zip의 `stat`), `Say that the xlsx zip is not resent without its recorded hash`(요약이 없을 때 알리는 `debug`)는 AUD-629·633의 보조 태스크라 SPEC-ID를 두지 않는다(스펙이 재발송 zip에 정한 번호는 둘뿐이다). 메일 첨부 경로는 AUD-605의 `copy` 결과(`dest`)를 AUD-606이 그대로 쓴다.
 
@@ -891,3 +896,35 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **check 모드**: xlsx 쓰기가 파일을 만들지 않으므로 묶기(AUD-026)는 건너뛴다.
 - **재발송 정리**: 받기·검증·발송을 block으로 묶고 `always`에서 내려받은 디렉터리를 지운다(AUD-628). 검증에서 멈춘 재발송도 러너에 파일을 남기지 않는다.
 - **번호**: 스펙이 정한 재발송 대조 번호 `AUD-630`은 정리 판정(§14)이 먼저 쓰고 있어 `AUD-633`으로 둔다(3-Way 검증은 중복 ID를 허용하지 않는다).
+
+## 18. Log Review Report (Spec #544 / Ticket-3 #558, ADR-0015)
+
+정기 실행은 전월 한 달의 **Log Review Report** 초안(A4 HTML)을 만들어 Host Audit 메일의 세 번째 첨부로 보내고 같은 실행 보관 경로(`<YYYY-MM>/<run_id>/log_review/host-audit-<run_id>-log-review.html`)에 남긴다. Host Audit 보고서의 일부가 아니라 별도 첨부다. 호스트에는 접속하지 않고 OpenObserve만 읽는다(ADR-0009 읽기 전용 그대로).
+
+- **만드는 실행**: 정기 실행만. 수시 실행은 `host_audit_log_review_enabled=true`일 때만(같은 달 결재본이 여러 부 생기지 않게). check 모드는 만들지 않는다. 만들지 않은 실행의 메일은 첨부 둘(또는 하나)로 정상 발송된다.
+- **점검 기간**: 실행 시작 시각이 속한 보고서 시간대(KST) 월의 전월 1일 00:00 ~ 말일 24:00(끝 미포함). 정기 실행은 매월 1일 07:00 KST라 `2026-11/` 실행이 10월을 점검한다. 필터 `host_audit_log_review_period`.
+- **구성**: 머리(기간·대상·데이터·항목 상태 집계) → 1부 로그 검토 19개(AK-034 순서·문구) → 2부 보안시스템 정책 적정성 9개(1차는 점검자가 채우는 빈 표) → 3부 로그 관리 상태 → 마지막 쪽 결재란(점검자·정보보호관리자·정보보호책임자(CISO) 서명·일자). 항목마다 상태·점검 방법·판정 기준·결과 표와 사람이 쓰는 칸(최종 판정·점검자 소견·조치 내역, 언제나 빈 칸)이 있다.
+- **항목 상태**: `자동 판정`(이상 없음/확인 필요), `일부 자동`, `사람 대조`, `점검 불가(사유)`, `조회 실패(사유)`. 1부 8~11·14~19는 매달 `점검 불가(애플리케이션 접속기록·업무 기록 미수집)`이다. 판정 함수가 아직 없는 항목은 `점검 불가(미구현)`으로 나온다(빼거나 이상 없음으로 쓰지 않는다).
+- **이번 티켓의 실제 값은 3부 수집 공백 하나다**: 수집 대상 호스트(`host_audit_log_review_collect_hosts`, Silent Host와 같은 수집 로스터)와 장비(`host_audit_log_review_devices`, FortiGate·Cisco 스위치 그룹의 관리번호) 중 점검 기간에 로그가 하루도 없으면 `전월 로그 없음`, 하루 이상 빈 날이 있으면 `끊김`(빈 날짜 범위와 일수). 호스트는 `system_logs`의 `host_name`, 장비는 스위치 `system_logs`·FortiGate `security_logs`의 `device_id`를 KST 일자별로 센다. 공백 이름은 1부 판정이 '이상 없음'으로 단정하지 않도록 판정 문맥에 남는다(후속 #559).
+- **판정 위치와 확장(후속 티켓)**: 판정은 모두 필터에 있다. 항목 정의는 `filter_plugins/host_audit_log_review_items.py`의 표(`PART1`·`PART2`·`PART3`)이고, 판정은 묶음별 모듈(`host_audit_log_review_<묶음>.py`)의 `JUDGES = {항목 key: judge(ctx)}`, 그 판정이 쓰는 조회는 같은 모듈의 `QUERIES = {항목 key: [{name, sql, size}]}`다. 모듈을 더하면 `host_audit_log_review.py`의 `_JUDGE_MODULES`에 한 줄을 더한다. 태스크(`tasks/log_review.yml`)와 템플릿(`templates/log_review.html.j2`)은 바뀌지 않는다. 한 항목의 판정 오류는 그 항목만 `조회 실패(판정 오류 …)`로 표시하고 실행을 맨 끝에서 실패로 끝낸다(AUD-807).
+- **조회**: OpenObserve `POST /api/<org>/_search` 하나뿐이다(AUD-803, 조회 이름별 반복, 결과는 `no_log`). 주소·조직은 `inventory/services/openobserve`, 계정은 조회 전용 용도의 `secrets/services/openobserve/readonly`(Host Audit 계열 정책 `openobserve-readonly`가 읽기만 허용)이고 admin 자격은 쓰지 않는다. **OpenObserve 오픈소스 빌드는 RBAC가 없어 서버가 조회 전용을 강제하지 못한다(#556).** 그래서 이 역할이 OpenObserve에 `_search` POST 외의 호출을 하지 않는다는 것을 `tests/test_host_audit_log_review_tasks.py`가 지킨다(계정이 유출되면 쓰기도 가능하다는 한계는 그대로다).
+- **조회 실패**: 문서를 읽지 못함·401/403·연결 불가·결과가 조회 한도에 닿음(잘렸을 수 있음)은 해당 항목의 `조회 실패(사유)`로 남고 메일은 그대로 나간다. 사유에는 상태 코드만 쓰고 주소·계정·응답 본문은 쓰지 않는다. 모델 생성·렌더링 자체가 실패하면 첨부를 빼고 메일을 보낸 뒤 맨 끝에서 실행을 실패로 끝낸다(AUD-807).
+- **메일·보관·재발송**: 해시는 AUD-806, 요약의 `log_review`(`file_name`·`sha256`·`size`·`archive`·`period`), 본문과 머리글 `X-Host-Audit-Log-Review-SHA256`. 보관은 output_dir 전체를 올리는 AUD-512~514가 함께 하고 보관 성공(AUD-614) 뒤에만 보낸다. 재발송은 요약이 기록한 경우만 `log_review/<실행 ID에서 정한 이름>`을 받아(AUD-634) 기록된 해시와 대조한다(AUD-635: 받지 못함·이름 불일치·해시 불일치면 하나도 보내지 않는다). 같은 실행 ID로 다시 돌린 실행은 쓰기 전에 `log_review/`를 지운다(이전 시도의 파일이 보관·첨부되지 않게).
+- **수신자**: 보고서에 출발지·계정명이 들어가므로 메일 수신자(`inventory/config/host_audit.mail_recipients`)는 점검자·결재자로 한정한다(ADR-0015 Consequences).
+
+### 18.1 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-800` | `Decide whether this run drafts the Log Review Report` | `ansible.builtin.set_fact` | 러너 | 정기 실행 또는 플래그, check 모드 제외 |
+| `AUD-801` | `Fix the Log Review period and its OpenObserve searches` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_period`·`host_audit_log_review_queries`(같은 시작 시각이면 같은 값) |
+| `AUD-802` | `Read the OpenObserve address and the read-only search account (host_audit_openbao_log_review_docs)` | `ansible.builtin.set_fact` | 러너 | 공용 읽기 지점 `lookup('openbao_doc')`, `errors='ignore'`, `no_log` |
+| `AUD-803` | `Search OpenObserve for the review period (POST _search only)` | `ansible.builtin.uri` | 러너 | 읽기 전용 조회, 실패는 상태 코드로 받음(`changed_when: false`, `no_log`) |
+| `AUD-804` | `Build the Log Review Report model` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_results`·`host_audit_log_review_model` |
+| `AUD-805` | `Render the Log Review Report A4 HTML` | `ansible.builtin.template` | 러너 | `log_review/`(`0700`) 아래 `0600` |
+| `AUD-806` | `Compute the SHA-256 of the Log Review Report to attach` | `ansible.builtin.stat` | 러너 | 읽기 전용. 메일 요약(AUD-612)이 싣는 해시 |
+| `AUD-807` | `Fail the run when the Log Review Report could not be drafted` | `ansible.builtin.assert` | 러너 | 모델·렌더링·판정 오류만 실패(조회 실패는 실패 아님) |
+| `AUD-634` | `Get the archived Log Review Report` | `ansible.builtin.uri` | 러너 | 요약이 기록한 실행만, 이름은 실행 ID에서 |
+| `AUD-635` | `Assert the archived Log Review Report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 다르면 재발송 중단 |
+
+`Remove a leftover Log Review Report of an earlier attempt`·`Create the Log Review Report directory`·`Resolve the OpenObserve search target`·`Remove a Log Review Report that could not be completed`·`Summarize the Log Review Report of this run`과 재발송의 `Read the Log Review Report record of the archived summary`·`Compute the SHA-256 of the downloaded Log Review Report`·`Say that the Log Review Report is not resent without its recorded hash`는 위 태스크의 보조 태스크라 SPEC-ID를 두지 않는다. 보고서 단계는 Molecule 대상 밖이라 `[VERIFY-…]`가 없고 검증은 pytest다(ADR-0013): 모델 필터 단위 `tests/test_host_audit_log_review.py`, 공유 렌더링 `tests/test_host_audit_log_review_render.py`, 조회 경로·메일·보관·재발송 `tests/test_host_audit_log_review_tasks.py`·`tests/test_host_audit_xlsx_zip_report.py`.

@@ -15,6 +15,15 @@ _host_audit_xlsx_zip_archive: >-
       ~ 'xlsx/' ~ _host_audit_xlsx_zip_name ~ ' (3년 보관)') if _host_audit_storage_active | bool
      else ('러너 ' ~ _host_audit_xlsx_zip_path ~ ' (보관 안 함)') }}
 
+# Log Review Report (Spec #544 / Ticket-3 #558). 이름·경로·보관 위치를 한 곳에서 정한다(AUD-805·806·612·614와 재발송이 같이 쓴다).
+# 이름은 실행 ID에서만 만든다(재발송도 요약의 값이 아니라 이 규칙으로 받는다).
+_host_audit_log_review_name: "{{ host_audit_run.run_id | host_audit_log_review_file_name }}"
+_host_audit_log_review_path: "{{ host_audit_run.output_dir }}/log_review/{{ _host_audit_log_review_name }}"
+_host_audit_log_review_archive: >-
+  {{ ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/' ~ _host_audit_storage_prefix
+      ~ 'log_review/' ~ _host_audit_log_review_name ~ ' (3년 보관)') if _host_audit_storage_active | bool
+     else ('러너 ' ~ _host_audit_log_review_path ~ ' (보관 안 함)') }}
+
 # 이 역할이 읽는 OpenBao 문서 패턴과 필수 키(Spec #511 / Ticket-17). 입력 검증(AUD-502·603), 스키마 `required` 대조 테스트,
 # 요청 기록 단언이 같은 선언을 쓴다. 읽기는 공용 읽기 지점(lookup 'openbao_doc')뿐이다(docs/openbao_integration.md).
 # 접속·Asset 문서(inventory/assets/<호스트>의 description·isms 절)는 resolve_connection이 읽어 `_asset_doc`으로 넘기므로 여기에 없다.
@@ -24,14 +33,20 @@ host_audit_openbao_required:
   "secrets/services/rustfs/audit_reports": [access_key, secret_key]
   "secrets/services/alert/notify": [url]
   "inventory/config/host_audit": []
+  # Log Review Report의 OpenObserve 조회(#558): 주소·조직과 조회 전용 계정. 못 읽으면 항목이 '조회 실패'다(실행은 계속).
+  "inventory/services/openobserve": [url]
+  "secrets/services/openobserve/readonly": [username, password]
 
 # 읽는 단계별 문서(위 선언의 키를 나눈 것, 합집합이 선언과 같다). 보관 입력은 못 읽으면 보관 문제, 알림은 못 읽어도 보관을 막지 않고,
-# 메일 설정은 못 읽으면 메일 문제다.
+# 메일 설정은 못 읽으면 메일 문제, Log Review 조회 입력은 못 읽으면 그 보고서의 '조회 실패'다.
 host_audit_openbao_storage_docs:
   - inventory/services/rustfs
   - secrets/services/rustfs/audit_reports
 host_audit_openbao_alert_doc: secrets/services/alert/notify
 host_audit_openbao_mail_doc: inventory/config/host_audit
+host_audit_openbao_log_review_docs:
+  - inventory/services/openobserve
+  - secrets/services/openobserve/readonly
 
 # OS 지원 종료일(EOL) 정적 표 (#120). 키는 '<os-release ID>-<주 버전>'(Ubuntu는 '<ID>-<VERSION_ID>').
 # os-release가 없는 CentOS 6은 /etc/redhat-release에서 'centos-6'을 만든다.

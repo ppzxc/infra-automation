@@ -76,6 +76,7 @@ families:
       - openobserve-ingest
       - alert-notify
       - rustfs-audit-reports
+      - openobserve-readonly
       - config-host-audit
     token_max_ttl: 7200
   network_backup:

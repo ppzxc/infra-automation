@@ -155,12 +155,14 @@ def _unavailable_count(model):
     return len(model.get('unavailable') or [])
 
 
-def host_audit_mail_summary(model, report, xlsx_zip=None):
+def host_audit_mail_summary(model, report, xlsx_zip=None, log_review=None):
     """Build the mail summary (saved as ``mail_summary.json``) from the report model.
 
     ``report``: {'sha256', 'file_name' (attachment name), 'archive' (where the
     original is kept), 'size'}. ``xlsx_zip`` (same keys, for the zip of the per-host Remediation Plan xlsx, AUD-615)
     is the second attachment; without it the summary has no ``xlsx_zip`` (runs kept before the zip existed).
+    ``log_review`` (same keys plus ``period``, the reviewed month) is the Log Review Report, the third attachment (Spec #544,
+    #558); a run that did not draft one has none.
     Only counts and host names go in — no addresses.
     """
     model = model or {}
@@ -280,14 +282,23 @@ def host_audit_mail_summary(model, report, xlsx_zip=None):
             'size': int(xlsx_zip.get('size') or 0),
             'archive': xlsx_zip.get('archive', ''),
         }
+    if log_review and log_review.get('sha256') and log_review.get('file_name'):
+        doc['log_review'] = {
+            'file_name': log_review.get('file_name', ''),
+            'sha256': (log_review.get('sha256') or '').lower(),
+            'size': int(log_review.get('size') or 0),
+            'archive': log_review.get('archive', ''),
+            'period': log_review.get('period', ''),
+        }
     return doc
 
 
-def host_audit_mail_resend_summary(summary, run_id, archive, sha256, size=0, xlsx_archive=''):
+def host_audit_mail_resend_summary(summary, run_id, archive, sha256, size=0, xlsx_archive='', log_review_archive=''):
     """Summary for a resend: the kept one (marked as resent), or a minimal one if it is missing.
 
     The kept summary's ``xlsx_zip`` record (file name and the SHA-256 it was sent with) stays; only where it is kept
     is updated to ``xlsx_archive``. A minimal summary has none: without the kept record nothing says a zip existed.
+    The ``log_review`` record (the Log Review Report, #558) is kept the same way and points at ``log_review_archive``.
     """
     if isinstance(summary, dict) and summary.get('schema_version'):
         out = dict(summary)
@@ -300,6 +311,10 @@ def host_audit_mail_resend_summary(summary, run_id, archive, sha256, size=0, xls
         out.pop('xlsx_zip', None)  # kept only when it is a usable record
         if isinstance(summary.get('xlsx_zip'), dict) and summary['xlsx_zip']:  # an empty record is no record (resend.yml agrees)
             out['xlsx_zip'] = dict(summary['xlsx_zip'], archive=xlsx_archive or summary['xlsx_zip'].get('archive', ''))
+        out.pop('log_review', None)
+        if isinstance(summary.get('log_review'), dict) and summary['log_review']:
+            out['log_review'] = dict(summary['log_review'],
+                                     archive=log_review_archive or summary['log_review'].get('archive', ''))
         return out
     return {
         'schema_version': SUMMARY_SCHEMA_VERSION,

@@ -329,7 +329,7 @@ OpenObserve에서 `backup_logs` 스트림에 `job=inventory`, `job=backup`(다�
 
 ### 7.1 Host Audit 첫 실행
 
-준비: RustFS `host-audit` 버킷과 전용 키([host_audit.md §11.5](host_audit.md#115-버킷-준비-운영자-1회)), OpenBao `secrets/services/rustfs/audit_reports`의 보관 키와 `inventory/config/host_audit`의 `mail_recipients`·`mail_sender`(§4), [SMTP 릴레이 확보](https://github.com/ppzxc/infra-automation/issues/105).
+준비: RustFS `host-audit` 버킷과 전용 키([host_audit.md §11.5](host_audit.md#115-버킷-준비-운영자-1회)), OpenBao `secrets/services/rustfs/audit_reports`의 보관 키와 `inventory/config/host_audit`의 `mail_recipients`·`mail_sender`(§4), 정기 실행의 Log Review Report용 OpenObserve 조회 계정 `secrets/services/openobserve/readonly`([host_audit.md §18](host_audit.md#18-log-review-report-spec-544--ticket-3-558-adr-0015), 없으면 보고서 항목이 '조회 실패'로 나가고 실행은 계속된다), [SMTP 릴레이 확보](https://github.com/ppzxc/infra-automation/issues/105).
 
 | 순서 | 실행 | 확인 |
 |---|---|---|

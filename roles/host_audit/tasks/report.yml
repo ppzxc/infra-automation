@@ -225,6 +225,12 @@
         state: absent
       when: _host_audit_xlsx_zip_write.failed | default(false)
 
+    # Log Review Report(Spec #544, #558): 정기 실행(수시는 플래그)만 전월 초안을 log_review/에 쓴다. 해시·요약·보관보다 먼저 있어야
+    # 같은 실행의 보관(AUD-512)이 함께 올리고 메일이 세 번째 첨부로 보낸다. 조회 실패는 보고서 안의 '조회 실패'이고, 모델·렌더링
+    # 오류만 맨 끝에서 실행을 실패로 끝낸다(첨부 없이 메일은 나간다).
+    - name: Draft the Log Review Report of the previous month
+      ansible.builtin.include_tasks: log_review.yml
+
     - name: "[AUD-611] Compute the SHA-256 of the report to attach"
       ansible.builtin.stat:
         path: "{{ host_audit_run.output_dir }}/report.html"
@@ -239,7 +245,15 @@
         get_mime: false
       register: _host_audit_xlsx_zip_stat
 
-    # 메일 요약은 실행과 함께 보관해 재발송(resend.yml)이 같은 본문·같은 첨부(보고서·xlsx zip)를 다시 보내게 한다. 주소는 넣지 않는다.
+    - name: "[AUD-806] Compute the SHA-256 of the Log Review Report to attach"
+      ansible.builtin.stat:
+        path: "{{ _host_audit_log_review_path }}"
+        checksum_algorithm: sha256
+        get_mime: false
+      register: _host_audit_log_review_stat
+      when: _host_audit_log_review_made | default(false) | bool
+
+    # 메일 요약은 실행과 함께 보관해 재발송(resend.yml)이 같은 본문·같은 첨부(보고서·xlsx zip·Log Review Report)를 다시 보내게 한다. 주소는 넣지 않는다.
     - name: "[AUD-612] Build the mail summary of this run"
       ansible.builtin.set_fact:
         host_audit_mail_doc: >-
@@ -253,7 +267,13 @@
                ({'sha256': _host_audit_xlsx_zip_stat.stat.checksum,
                  'size': _host_audit_xlsx_zip_stat.stat.size,
                  'file_name': _host_audit_xlsx_zip_name,
-                 'archive': _host_audit_xlsx_zip_archive} if _host_audit_xlsx_zip_stat.stat.exists else none)) }}
+                 'archive': _host_audit_xlsx_zip_archive} if _host_audit_xlsx_zip_stat.stat.exists else none),
+               ({'sha256': _host_audit_log_review_stat.stat.checksum,
+                 'size': _host_audit_log_review_stat.stat.size,
+                 'file_name': _host_audit_log_review_name,
+                 'archive': _host_audit_log_review_archive,
+                 'period': _host_audit_log_review_period.month}
+                if (_host_audit_log_review_stat.stat is defined and _host_audit_log_review_stat.stat.exists) else none)) }}
 
     - name: "[AUD-613] Save the mail summary on the runner"
       ansible.builtin.copy:
@@ -276,6 +296,7 @@
                  and _uploaded | length > 0 and _uploaded | reject('equalto', 200) | list | length == 0) }}
         _host_audit_mail_report_path: "{{ host_audit_run.output_dir }}/report.html"
         _host_audit_mail_xlsx_path: "{{ _host_audit_xlsx_zip_path }}"
+        _host_audit_mail_log_review_path: "{{ _host_audit_log_review_path if host_audit_mail_doc.log_review is defined else '' }}"
 
     - name: Mail the report
       ansible.builtin.include_tasks: mail.yml
@@ -297,6 +318,13 @@
       ansible.builtin.assert:
         that: not (_host_audit_xlsx_problem.failed | bool)
         fail_msg: "Remediation Plan xlsx 쓰기·묶기·이전 시도 파일 정리에 실패한 대상: {{ _host_audit_xlsx_problem.targets | join(', ') }} (실행 디렉터리는 남김)"
+
+    # 모델·렌더링 오류(필터 버그)만 여기서 실행을 실패로 끝낸다. 조회 실패는 보고서 안의 '조회 실패'라 실패가 아니다.
+    - name: "[AUD-807] Fail the run when the Log Review Report could not be drafted"
+      ansible.builtin.assert:
+        that: (_host_audit_log_review_problem | default('')) | length == 0
+        fail_msg: "Log Review Report 작성 실패 — {{ _host_audit_log_review_problem | default('') }} (위 로그 참고. 메일은 보고서 첨부 없이 또는 오류 항목을 '조회 실패'로 표시해 나갔다)"
+        quiet: true
   always:
     - name: Clean up this run's output directory by policy
       ansible.builtin.include_tasks: cleanup.yml

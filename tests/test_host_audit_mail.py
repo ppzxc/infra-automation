@@ -207,6 +207,42 @@ def test_summary_without_an_xlsx_zip_has_no_zip_line():
     assert ZIP_NAME not in _render(doc)
 
 
+LR_SHA = "d" * 64
+LR_NAME = "host-audit-ha-20261031T220000Z-log-review.html"
+
+
+def _log_review(**override):
+    info = {"sha256": LR_SHA.upper(), "size": 999, "file_name": LR_NAME, "period": "2026-10",
+            "archive": "RustFS host-audit/2026-11/ha-20261031T220000Z/log_review/" + LR_NAME + " (3년 보관)"}
+    info.update(override)
+    return info
+
+
+def test_summary_carries_the_log_review_report_as_a_third_record_and_the_body_shows_its_hash():
+    """Spec #544 / Ticket-3 (#558): 세 번째 첨부. 해시는 메일 본문·헤더와 보관 경로에 함께 남는다."""
+    doc = host_audit_mail_summary(_model(), _summary()["report"], _xlsx_zip(), _log_review())
+    assert doc["log_review"] == {"file_name": LR_NAME, "sha256": LR_SHA, "size": 999, "period": "2026-10",
+                                 "archive": "RustFS host-audit/2026-11/ha-20261031T220000Z/log_review/" + LR_NAME + " (3년 보관)"}
+    html = _render(doc)
+    assert LR_SHA in html and LR_NAME in html and "log_review/" + LR_NAME in html and "2026-10" in html
+    assert ZIP_SHA in html and SHA in html
+    # 보고서를 만들지 않은 실행과 해시 없는 기록은 첨부 기록이 없다
+    assert "log_review" not in _summary(xlsx_zip=_xlsx_zip())
+    assert "log_review" not in host_audit_mail_summary(_model(), _summary()["report"], None, _log_review(sha256=""))
+    assert LR_NAME not in _render(_summary())
+
+
+def test_resend_keeps_the_archived_log_review_record_and_points_it_at_the_archive():
+    kept = host_audit_mail_summary(_model(), _summary()["report"], None, _log_review())
+    doc = host_audit_mail_resend_summary(kept, kept["run_id"], "RustFS b/x/report.html", SHA,
+                                         log_review_archive="RustFS b/x/log_review/" + LR_NAME)
+    assert doc["log_review"]["sha256"] == LR_SHA and doc["log_review"]["file_name"] == LR_NAME
+    assert doc["log_review"]["archive"] == "RustFS b/x/log_review/" + LR_NAME
+    assert kept["log_review"]["archive"].startswith("RustFS host-audit/")  # the kept summary is not mutated
+    assert "log_review" not in host_audit_mail_resend_summary(dict(kept, log_review={}), kept["run_id"], "a", SHA)
+    assert "log_review" not in host_audit_mail_resend_summary(None, kept["run_id"], "a", SHA)  # 최소 요약엔 기록이 없다
+
+
 def test_body_escapes_model_text():
     doc = _summary()
     doc["lines"].append({"section": "<b>x</b>", "text": "<script>alert(1)</script>", "level": "crit"})

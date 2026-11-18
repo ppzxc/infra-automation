@@ -18,6 +18,7 @@
 "secrets/automation/ssh": secrets/automation_ssh.schema.json
 "secrets/services/openobserve/admin": secrets/services/basic_auth.schema.json
 "secrets/services/openobserve/ingest": secrets/services/basic_auth.schema.json
+"secrets/services/openobserve/readonly": secrets/services/basic_auth.schema.json
 "secrets/services/rustfs/maintenance": secrets/services/access_key.schema.json
 "secrets/services/rustfs/audit_reports": secrets/services/access_key.schema.json
 "secrets/services/alert/notify": secrets/services/alert_notify.schema.json

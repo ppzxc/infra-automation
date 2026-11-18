@@ -231,7 +231,8 @@ EXPECTED_READS = {
     "openobserve_config": COMMON | ASSETS | {"secrets/services/openobserve/admin", "secrets/services/alert/notify"}
     | OO_ING | {"inventory/config/openobserve_config"},
     "host_audit": PROVISION | HOST_AGENTS | {"secrets/services/rustfs/audit_reports", "secrets/services/alert/notify",
-                                                  "inventory/config/host_audit"},
+                                                  "inventory/config/host_audit",
+                                                  "secrets/services/openobserve/readonly"},  # Log Review Report 조회(#558)
     "network_backup": COMMON | ASSETS | CRED | {"secrets/services/alert/notify"},
     "github_webhook_watch": COMMON | {"secrets/services/github/org_hooks_read"} | OO_ING
     | {"inventory/config/github_webhook_watch"},
@@ -265,7 +266,7 @@ def test_every_policy_file_is_used_by_a_role_or_is_applier_or_operator():
 
 def test_host_audit_is_union_of_provision_host_agents_and_its_own_paths():
     fam, _ = _role_policies()
-    own = {"rustfs-audit-reports", "alert-notify", "config-host-audit"}
+    own = {"rustfs-audit-reports", "alert-notify", "config-host-audit", "openobserve-readonly"}
     assert set(fam["host_audit"]) == set(fam["provision"]) | set(fam["host_agents"]) | own
     assert len(fam["host_audit"]) == len(set(fam["host_audit"]))
 

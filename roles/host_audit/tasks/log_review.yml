@@ -1,0 +1,156 @@
+---
+# ==============================================================================
+# Host Audit — Log Review Report 초안 (러너 localhost 전용, Spec #544 / Ticket-3 #558, ADR-0015)
+# ==============================================================================
+# 전월 한 달(KST 달력 월)의 OpenObserve 로그를 조회해 Log Review Report(A4 HTML)를 이번 실행의 log_review/ 아래에 쓴다.
+# 그 파일은 보관(AUD-512~514, output_dir 전체)이 <YYYY-MM>/<run_id>/log_review/로 올리고, 메일이 세 번째 첨부로 보낸다.
+# 호스트에는 접속하지 않는다(ADR-0009 읽기 전용 그대로).
+#
+# - 정기 실행에서만 만든다. 수시 실행은 host_audit_log_review_enabled=true일 때만(같은 달 결재본이 여러 부 생기지 않게).
+#   check 모드는 만들지 않는다. 만들지 않는 실행도 메일은 첨부 없이 정상으로 나간다.
+# - 조회는 OpenObserve `POST /api/<org>/_search` 한 경로뿐이다(AUD-803). 조회 전용 계정(secrets/services/openobserve/readonly)으로
+#   부르지만 오픈소스 빌드는 서버가 조회 전용을 강제하지 못한다(#556). 그래서 이 역할이 다른 경로를 부르지 않는다는 것을
+#   tests/test_host_audit_log_review_tasks.py가 지킨다. admin 자격은 쓰지 않는다.
+# - 항목별 쿼리와 판정은 모두 필터(filter_plugins/host_audit_log_review*.py)에 있다. 이 파일은 조회 결과를 그대로 넘기기만 한다:
+#   항목을 더해도 이 파일은 바뀌지 않는다.
+# - 조회 실패(자격증명·주소 문서를 못 읽음, 401/403, 연결 불가, 결과가 한도에 닿음)는 항목에 '조회 실패'로 남고 실행을 멈추지 않는다.
+#   모델·렌더링 자체의 오류(필터 버그)는 첨부를 빼고 메일을 보낸 뒤 맨 끝에서 실행을 실패로 끝낸다(report.yml).
+# 결과: _host_audit_log_review_made(파일을 썼는지), _host_audit_log_review_problem(빈 문자열 = 문제 없음).
+# ------------------------------------------------------------------------------
+- name: "[AUD-800] Decide whether this run drafts the Log Review Report"
+  ansible.builtin.set_fact:
+    _host_audit_log_review_wanted: >-
+      {{ (not ansible_check_mode) and (host_audit_run.run_kind == 'scheduled' or host_audit_log_review_enabled | bool) }}
+    _host_audit_log_review_made: false
+    _host_audit_log_review_problem: ""
+
+# 같은 실행 ID로 다시 돌린 실행이 이전 시도의 보고서를 남겼으면 보관(AUD-512)이 log_review/를 통째로 올리므로, 이번 시도가
+# 쓰기 전에 지운다. 이번에 만들지 않는 실행에서도 옛 파일이 해시·첨부·보관에 오르지 않는다.
+- name: Remove a leftover Log Review Report of an earlier attempt
+  ansible.builtin.file:
+    path: "{{ host_audit_run.output_dir }}/log_review"
+    state: absent
+
+- name: Draft the Log Review Report
+  when: _host_audit_log_review_wanted | bool
+  block:
+    - name: "[AUD-801] Fix the Log Review period and its OpenObserve searches"
+      vars:
+        _period: "{{ host_audit_run.started_at | host_audit_log_review_period(host_audit_run.timezone) }}"
+      ansible.builtin.set_fact:
+        _host_audit_log_review_period: "{{ _period }}"
+        _host_audit_log_review_queries: "{{ _period | host_audit_log_review_queries }}"
+
+    # 로그인 태스크는 따로 없다: 읽는 태스크마다 공용 읽기 지점이 AppRole로 새로 로그인한다(storage_credentials.yml과 같은 이유).
+    # 문서마다 따로 읽어(errors='ignore', quiet=true) 못 읽은 문서를 이름으로 말한다. 값은 로그에 남기지 않는다.
+    - name: "[AUD-802] Read the OpenObserve address and the read-only search account (host_audit_openbao_log_review_docs)"
+      ansible.builtin.set_fact:
+        _host_audit_log_review_docs: >-
+          {{ ({} if ansible_loop.first else _host_audit_log_review_docs)
+             | combine({item: lookup('openbao_doc', item, errors='ignore', quiet=true)}) }}
+      loop: "{{ host_audit_openbao_log_review_docs }}"
+      loop_control:
+        extended: true
+        label: "{{ item }}"
+      check_mode: false
+      no_log: true
+
+    - name: Resolve the OpenObserve search target
+      vars:
+        _all: "{{ _host_audit_log_review_docs | default({}, true) }}"
+        _docs: "{{ dict(_all.items() | rejectattr('1', 'none') | selectattr('0', 'in', host_audit_openbao_log_review_docs)) }}"
+        _unread: "{{ host_audit_openbao_log_review_docs | reject('in', _docs.keys()) | list }}"
+        _missing: "{{ _docs | openbao_required_gaps(host_audit_openbao_required, missing_doc='skip', blank='falsy') }}"
+        _service: "{{ _docs['inventory/services/openobserve'] | default({}, true) }}"
+        _account: "{{ _docs['secrets/services/openobserve/readonly'] | default({}, true) }}"
+      ansible.builtin.set_fact:
+        _host_audit_log_review_o2:
+          url: "{{ _service.url | default('', true) | regex_replace('/+$', '') }}"
+          org: "{{ _service.org | default('default', true) }}"
+          ca_file: "{{ _service.ca_file | default('', true) }}"
+          username: "{{ _account.username | default('', true) }}"
+          password: "{{ _account.password | default('', true) }}"
+        _host_audit_log_review_read_problem: >-
+          {{ ('OpenBao 문서를 읽지 못함(원인은 가려진다): ' ~ (_unread | join(', '))) if _unread | length > 0
+             else (('조회 입력 누락: ' ~ (_missing | join(', '))) if _missing | length > 0 else '') }}
+      no_log: true
+
+    # 조회는 이 태스크 하나이고 POST _search뿐이다. 실패는 상태 코드로 받는다(-1 = 연결 불가). 결과에는 계정명·출발지가
+    # 들어 있으므로 no_log다. 자격증명을 못 읽었으면 부르지 않고 모든 항목이 그 사유로 '조회 실패'가 된다(AUD-804).
+    - name: "[AUD-803] Search OpenObserve for the review period (POST _search only)"
+      ansible.builtin.uri:
+        url: "{{ _host_audit_log_review_o2.url }}/api/{{ _host_audit_log_review_o2.org | urlencode }}/_search"
+        method: POST
+        url_username: "{{ _host_audit_log_review_o2.username }}"
+        url_password: "{{ _host_audit_log_review_o2.password }}"
+        force_basic_auth: true
+        body_format: json
+        body: "{{ item.body }}"
+        return_content: false
+        status_code: [-1, 200, 400, 401, 403, 404, 408, 429, 500, 502, 503, 504]
+        timeout: "{{ host_audit_log_review_timeout | int }}"
+        validate_certs: "{{ host_audit_log_review_validate_certs | bool }}"
+        ca_path: "{{ _host_audit_log_review_o2.ca_file | default(omit, true) }}"
+      loop: "{{ _host_audit_log_review_queries }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _host_audit_log_review_search
+      changed_when: false
+      no_log: true
+      when: _host_audit_log_review_read_problem | length == 0
+
+    # 판정은 모두 필터에 있다. set_fact는 no_log가 아니다: 필터가 예외를 내면 원인이 보여야 한다(성공 때 값은 -v에서만 찍힌다).
+    - name: "[AUD-804] Build the Log Review Report model"
+      vars:
+        _results: >-
+          {{ _host_audit_log_review_search | default({'results': []}) | host_audit_log_review_results(_host_audit_log_review_read_problem) }}
+        _meta:
+          run_id: "{{ host_audit_run.run_id }}"
+          run_kind: "{{ host_audit_run.run_kind }}"
+          started_at: "{{ host_audit_run.started_at }}"
+          generated_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+          timezone: "{{ host_audit_run.timezone }}"
+          period: "{{ _host_audit_log_review_period }}"
+          archive: "{{ _host_audit_log_review_archive }}"
+          settings:
+            collection_targets:
+              hosts: "{{ host_audit_log_review_collect_hosts }}"
+              devices: "{{ host_audit_log_review_devices }}"
+      ansible.builtin.set_fact:
+        host_audit_log_review_model: "{{ _results | host_audit_log_review_model(_meta) }}"
+      register: _host_audit_log_review_built
+      ignore_errors: true
+
+    - name: Create the Log Review Report directory
+      ansible.builtin.file:
+        path: "{{ host_audit_run.output_dir }}/log_review"
+        state: directory
+        mode: '0700'
+      when: not (_host_audit_log_review_built.failed | default(false))
+
+    - name: "[AUD-805] Render the Log Review Report A4 HTML"
+      ansible.builtin.template:
+        src: log_review.html.j2
+        dest: "{{ _host_audit_log_review_path }}"
+        mode: '0600'
+      register: _host_audit_log_review_render
+      ignore_errors: true
+      when: not (_host_audit_log_review_built.failed | default(false))
+
+    # 모델을 못 만들었거나 렌더링에 실패하면 반쯤 쓴 파일이 해시·첨부·보관되지 않게 지운다.
+    - name: Remove a Log Review Report that could not be completed
+      ansible.builtin.file:
+        path: "{{ host_audit_run.output_dir }}/log_review"
+        state: absent
+      when: (_host_audit_log_review_built.failed | default(false)) or (_host_audit_log_review_render.failed | default(false))
+
+    - name: Summarize the Log Review Report of this run
+      vars:
+        _built: "{{ not (_host_audit_log_review_built.failed | default(false)) }}"
+        _rendered: "{{ (_built | bool) and not (_host_audit_log_review_render.failed | default(false)) }}"
+        _judge_errors: "{{ (host_audit_log_review_model.errors | default([])) if _built | bool else [] }}"
+      ansible.builtin.set_fact:
+        _host_audit_log_review_made: "{{ _rendered | bool }}"
+        _host_audit_log_review_problem: >-
+          {{ ('모델 생성 실패' if not (_built | bool) else ('HTML 렌더링 실패' if not (_rendered | bool)
+              else ('판정 오류: ' ~ (_judge_errors | join(', ')) if _judge_errors | length > 0 else ''))) }}
