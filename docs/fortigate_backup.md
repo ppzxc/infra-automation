@@ -47,7 +47,7 @@
 | `FGBK-017` | `Compare with the previous backup and keep only section and item names` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 함수, `no_log`, `#` 헤더 줄 제외, 값은 결과에 넣지 않음 |
 | `FGBK-018` | `Report the changed sections (names only, no values)` | `ansible.builtin.debug` | Controller / Localhost | 읽기 전용, 변경이 있을 때만 |
 | `FGBK-019` | `Assert the alert webhook is configured when a change is detected` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (변경이 있는데 webhook이 없으면 실패) |
-| `FGBK-020` | `Send the configuration change alert once` | `ansible.builtin.uri` | Controller / Localhost | text/plain POST, `no_log`, 변경이 있을 때만(변경이 없거나 첫 백업이면 건너뜀) |
+| `FGBK-020` | `Send the configuration change alert once` | `ansible.builtin.uri` | Controller / Localhost | text/plain POST(`secrets/services/alert/notify`에 `token`이 있을 때만 `auth_header`(기본 `X-NANOIT-ACCESS`) 헤더로 붙인다), `no_log`, 변경이 있을 때만(변경이 없거나 첫 백업이면 건너뜀) |
 | `FGBK-021` | `Assert the alert was delivered` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용 (전송 실패 시 호스트 실패) |
 | `FGBK-022` | `Read the alert webhook from OpenBao when a change is detected` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, `no_log`, 변경이 있을 때만 `secrets/services/alert/notify`를 읽음. 새 백업 저장(FGBK-011) 전에 실행하므로 읽기 실패 시 저장하지 않고 다음 실행이 같은 변경을 다시 알린다(없으면 FGBK-019가 실패 처리) |
 
@@ -102,7 +102,7 @@
 
 1. **인벤토리**: 그룹 `fortigate_firewalls`에 접속 대상마다 호스트 하나(호스트명은 관리번호, 파일명의 `<장비>`). 주소·포트는 인벤토리가 아니라 OpenBao Endpoint가 정한다(호스트 변수 `ansible_host`는 쓰지 않는다). 대상 목록: IDC 클러스터(`ns0380`; 쌍의 다른 멤버 `ns0381`은 대상이 아니다), 사무실 `ns0399`. 예시는 `inventory/hosts.yml.example`. Semaphore 인벤토리는 정적이므로 저장소 `group_vars`가 아니라 Semaphore 인벤토리에 직접 넣는다.
 2. **Task Template**: Playbook `playbooks/backup_fortigate.yml`. Environment는 `network_backup` 계열의 `VAULT_ADDR`와 AppRole(`VAULT_ROLE_ID`/`VAULT_SECRET_ID`)이다.
-3. **OpenBao**: Asset `inventory/assets/<관리번호>/endpoints`의 `https`와 `secrets/assets/<관리번호>/credentials/api`(`api_token`), 알림은 `secrets/services/alert/notify`의 `url`.
+3. **OpenBao**: Asset `inventory/assets/<관리번호>/endpoints`의 `https`와 `secrets/assets/<관리번호>/credentials/api`(`api_token`), 알림은 `secrets/services/alert/notify`의 `url`(필수)과 선택 `token`·`auth_header`.
 4. **예약**: 매일 03:30(`30 3 * * *`). 실패한 멤버가 있으면 Semaphore 실행이 실패로 끝나 기존 알림 채널로 전달된다.
 5. **인증서**: 기본은 인증서 검증을 한다. 장비가 사설 인증서면 컨트롤러가 그 CA를 신뢰하게 하고, 검증을 끄는 `fortigate_backup_validate_certs: false`는 마지막 수단이다.
 
@@ -119,7 +119,7 @@
 - **반복 알림 금지(멱등)**: 비교는 항상 "직전 백업 대 이번 백업"이므로 같은 변경은 변경이 처음 보인 실행에서만 한 번 알린다. 다음 실행은 변경 후 상태끼리 비교해 조용하다.
 - **비밀 비노출**: 알림과 로그에는 섹션·항목 이름과 바뀐 설정 키 이름만 나온다(예: `config system admin > edit "admin" (변경: password)`). 값(VPN 사전 공유 키, 관리자 해시, 인증서)은 어느 곳에도 쓰지 않으며, 설정을 다루는 태스크는 `no_log`다. 항목은 기본 20개까지 보이고 나머지는 건수로 줄인다.
 - **통지 형식**: 기존 알림 형식(등급 P2, 무슨 일, 왜 중요, 대상, 조치, 런북)을 따라 사내 알림 플랫폼 text/plain webhook으로 직접 보낸다. 런북은 [alerts.md](runbooks/alerts.md#fortigate-config-change)다.
-- **설정**: webhook 주소는 OpenBao `secrets/services/alert/notify`의 `url` 하나다(URL 자체가 권한이라 인증 헤더·토큰 변수가 없다). 변경이 있을 때만 읽는다. 본문은 `Content-Type: text/plain; charset=utf-8` 원문이라 JSON 경로의 본문 2000자 제한을 받지 않는다. 저장소에는 두지 않는다.
+- **설정**: webhook 주소는 OpenBao `secrets/services/alert/notify`의 `url`이고, 알림 플랫폼이 인증 헤더를 요구하면 `token`(선택, 비밀)과 `auth_header`(선택, 헤더 이름, 기본 `X-NANOIT-ACCESS`)를 같은 문서에 더한다(`token`이 있을 때만 헤더를 붙이고 값은 `no_log`로 어디에도 남기지 않는다). 변경이 있을 때만 읽는다. 본문은 `Content-Type: text/plain; charset=utf-8` 원문이라 JSON 경로의 본문 2000자 제한을 받지 않는다. 저장소에는 두지 않는다.
 - **알림 실패**: webhook이 없거나 전송이 실패하면(3회 시도) 호스트를 `FORTIGATE-ALERT`로 실패 처리하고 변경 항목 이름을 로그에 남긴다. 백업은 이미 저장돼 같은 변경을 다시 알리지 않으므로 이때는 사람이 변경 항목을 확인해야 한다.
 - **한계**: 값이 바뀐 사실만 알리고 무엇으로 바뀌었는지는 보여 주지 않는다(원본은 백업 파일 `diff`로 사람이 확인). 설정 키 이름이 같은 값 변경은 키 이름만 나온다.
 

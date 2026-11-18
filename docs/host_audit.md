@@ -95,7 +95,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_timezone` | `Asia/Seoul` | 보고서 시각 표기 |
 | `target_hosts` | (없음) | 일부 호스트만 점검할 때 Inventory Hostname 패턴 |
 | `host_audit_kisa_alert_enabled` | `true` | 정기 실행의 KISA 월간 악화 알림(§15, #331). false면 알리지 않음 |
-| `host_audit_alert_validate_certs` | `true` | 알림 webhook TLS 검증. 주소는 OpenBao `secrets/services/alert/notify`의 `url`이고 실행 변수로 덮어쓰지 않는다 |
+| `host_audit_alert_validate_certs` | `true` | 알림 webhook TLS 검증. 주소는 OpenBao `secrets/services/alert/notify`의 `url`(과 선택 `token`·`auth_header`)이고 실행 변수로 덮어쓰지 않는다 |
 | `host_audit_environment` | 공용 `deployment_environment`(`playbooks/group_vars/all.yml`, `production`) | 점검 기록의 환경(`declared.environment`). 모든 호스트가 같은 값이라 인벤토리 변수가 아니라 공용 값이고, Host Agents(`host_agents_environment`)와 한 곳에서 정한다. 역할만 따로 돌리는 시험·molecule은 `deployment_environment`를 직접 준다. `-e`로 덮어쓸 수 있다 |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
@@ -502,7 +502,7 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 | `secrets/services/rustfs/audit_reports` | `access_key`, `secret_key` | ● | Host Audit 전용 키(Put·Get·List). 백업·유지보수 키 재사용 금지 |
 | `inventory/services/rustfs` | `url` | ● | RustFS 주소(비밀 아님) |
 | `inventory/services/rustfs` | `region` | | 기본 `us-east-1` |
-| `secrets/services/alert/notify` | `url` | ● (악화 알림이 있을 때) | KISA 악화 알림 webhook(§15). 못 읽어도 보관·메일은 막히지 않는다 |
+| `secrets/services/alert/notify` | `url`, 선택 `token`·`auth_header` | ● (악화 알림이 있을 때, url만 필수) | KISA 악화 알림 webhook(§15). `token`이 있을 때만 `auth_header`(기본 `X-NANOIT-ACCESS`) 헤더로 붙인다. 못 읽어도 보관·메일은 막히지 않는다 |
 | `inventory/config/host_audit` | `mail_recipients`, `mail_sender`, `mail_sender_display_name` | (필수 키 없음) | 메일 입력(§13.3). 없으면 읽기 실패가 아니라 메일 문제로 남는다 |
 
 버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다(전용 키의 정책이 이 버킷으로 범위가 정해져 있다). 주소·키는 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이다. 이 역할은 토큰을 따로 받아 두지 않는다(`_vault_token`을 만들지 않음): 읽는 태스크마다 새로 로그인하므로 앞 단계가 토큰 TTL(30분)보다 길어도 만료된 토큰을 쓰지 않는다. `host_audit_environment`는 `production|staging|development|test`만 허용한다(`AUD-001`). `host_audit` AppRole 정책이 위 문서를 읽는다(`openbao/`).
@@ -759,7 +759,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **한계**: 지난달 예외(승인)였던 항목이 예외 만료로 이번에 취약이 된 경우는 Audit Baseline 색인(`findings.json`)이 취약과 예외를 구분해 담지 않아 지속으로 보이고 이 알림에 잡히지 않는다. 보고서의 예외 만료 표시를 본다.
 - **언제 보내나**: 정기 실행(`host_audit_run_kind=scheduled`)만 보낸다. 수시 실행은 Audit Baseline이 되지 않으므로 알리지 않고, check 모드도 보내지 않는다(`AUD-640`). 보관·메일 뒤에 한 번 보낸다.
 - **본문**: 악화된 항목 목록(`• <호스트>: KISA-2026:U-NN <항목 이름>`)과 비교한 두 실행 ID, 조치 안내가 text/plain으로 들어간다. 플랫폼 한도(5000자)에 맞춰 자르고 남은 건수를 `… 외 N건`으로 적는다. 주소·시크릿은 없다.
-- **webhook 입력**: OpenBao `secrets/services/alert/notify`의 `url`(text/plain 경로, URL 자체가 권한이라 인증 헤더·토큰이 없다)이다. 실행 변수로 덮어쓰지 않는다(`AUD-501`·`AUD-502`가 보관 입력과 함께 읽는다). 값은 모든 태스크에서 `no_log`이고 보고서·로그에 남지 않는다. `host_audit` AppRole 정책에 `alert-notify`(이 문서 읽기)가 필요하다. 못 읽어도 보관·메일은 막히지 않고 악화 항목이 있을 때만 `AUD-642`가 실패시킨다.
+- **webhook 입력**: OpenBao `secrets/services/alert/notify`의 `url`(text/plain 경로)이고, 인증이 필요하면 `token`(선택, 비밀)과 `auth_header`(선택, 헤더 이름, 기본 `X-NANOIT-ACCESS`)를 더한다(`AUD-641`은 `token`이 있을 때만 헤더를 붙인다). 실행 변수로 덮어쓰지 않는다(`AUD-501`·`AUD-502`가 보관 입력과 함께 읽는다). 값은 모든 태스크에서 `no_log`이고 보고서·로그에 남지 않는다. `host_audit` AppRole 정책에 `alert-notify`(이 문서 읽기)가 필요하다. 못 읽어도 보관·메일은 막히지 않고 악화 항목이 있을 때만 `AUD-642`가 실패시킨다.
 - **전달 실패는 실행 실패로 드러난다**: 악화 항목이 있는데 webhook이 없거나 전송이 거부되면(`AUD-642`) 보관·메일 판정이 모두 끝난 뒤 마지막에 실행을 실패로 끝낸다(보고서와 보관은 이미 끝남). 알림 실패가 다른 판정을 가리지 않는다.
 
 | Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |

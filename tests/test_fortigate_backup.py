@@ -196,7 +196,7 @@ def _bao(device, targets=("ns0380",), token=SECRET_TOKEN, hook=None, address="12
         if token is not None:
             store[f"secrets/assets/{ns}/credentials/api"] = {"type": "api_token", "token": token}
     if hook is not None:
-        store["secrets/services/alert/notify"] = {"url": hook.url}
+        store["secrets/services/alert/notify"] = {"url": hook.url, **hook.notify_extra}
     b = FakeOpenBao.with_schemas(store, namespace="infra", token="bao-test-token", approle=True)
     _BAOS.append(b)
     return b
@@ -389,6 +389,8 @@ class _Hook:
     def __init__(self):
         self.posts = []
         self.content_types = []
+        self.headers_seen = []
+        self.notify_extra = {}   # secrets/services/alert/notify에 더 넣을 키(token, auth_header)
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -398,6 +400,7 @@ class _Hook:
             def do_POST(self):
                 n = int(self.headers.get("Content-Length", 0))
                 outer.content_types.append(self.headers.get("Content-Type"))
+                outer.headers_seen.append({k.lower(): v for k, v in self.headers.items()})
                 outer.posts.append((self.path, self.headers.get("X-NANOIT-ACCESS"), self.rfile.read(n).decode()))
                 self.send_response(200)
                 self.send_header("Content-Length", "0")
@@ -448,6 +451,27 @@ def test_unchanged_or_header_only_change_does_not_alert(ansible_env, device, hoo
     assert hook.posts == []
 
 
+ALERT_TOKEN = "ALERT-TOKEN-FAKE-4242"
+_CHANGED = _cfg().replace("admintimeout 5", "admintimeout 480")
+
+
+@pytest.mark.parametrize("extra, header", [({"token": ALERT_TOKEN}, "x-nanoit-access"),
+                                           ({"token": ALERT_TOKEN, "auth_header": "X-Alert-Auth"}, "x-alert-auth")])
+def test_alert_carries_the_token_under_the_default_or_given_header_and_never_logs_it(ansible_env, device, hook, tmp_path, extra, header):
+    hook.notify_extra = extra
+    r1, r2 = _two_runs(ansible_env, device, tmp_path / "bk", hook, _cfg(), _CHANGED)
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert len(hook.posts) == 1 and hook.headers_seen[0][header] == ALERT_TOKEN
+    assert not {"x-nanoit-access", "x-alert-auth"} - {header} & set(hook.headers_seen[0])
+    assert ALERT_TOKEN not in hook.texts()[0] + r1.stdout + r1.stderr + r2.stdout + r2.stderr
+
+
+def test_alert_without_a_token_has_no_auth_header(ansible_env, device, hook, tmp_path):
+    _, r2 = _two_runs(ansible_env, device, tmp_path / "bk", hook, _cfg(), _CHANGED)
+    assert r2.returncode == 0, r2.stdout + r2.stderr
+    assert len(hook.posts) == 1 and not {"x-nanoit-access", "authorization"} & set(hook.headers_seen[0])
+
+
 def test_change_alerts_once_with_target_member_and_runbook_without_secrets(ansible_env, device, hook, tmp_path):
     out = tmp_path / "bk"
     changed = _cfg(extra='config firewall policy\n    edit 7\n        set name "allow-all"\n    next\nend\n').replace("admintimeout 5", "admintimeout 480")
@@ -458,7 +482,7 @@ def test_change_alerts_once_with_target_member_and_runbook_without_secrets(ansib
     for needle in ("P2", "■ 무슨 일", "■ 왜 중요", "■ 대상", "■ 조치", "▶ 런북", "#fortigate-config-change", "ns0380", "fw-primary",
                    "config firewall policy", "config system global"):
         assert needle in text, needle
-    assert hook.posts[0][1] is None   # URL 자체가 권한이라 인증 헤더가 없다
+    assert hook.posts[0][1] is None   # token이 없으면 인증 헤더가 없다
     # 같은 변경으로 다시 실행해도 반복 알림 없음
     time.sleep(1.1)
     assert _drift_run(ansible_env, device, out, hook).returncode == 0
@@ -623,6 +647,7 @@ def test_retention_runs_even_when_the_alert_cannot_be_delivered_but_the_host_sti
 
 class _DeadHook:
     url = "http://127.0.0.1:9/hook"      # 아무도 듣지 않는 포트
+    notify_extra = {}
 
 
 def test_tasks_compute_token_and_member_once():

@@ -118,7 +118,7 @@ host_audit_storage_timeout: 60
 # 비교는 항목 단위이고 지난 결과가 없는 호스트는 알리지 않는다. 수시 실행·check 모드는 알리지 않는다. false면 알리지 않는다.
 host_audit_kisa_alert_enabled: true
 
-# webhook 주소는 secrets/services/alert/notify의 url(text/plain, URL 자체가 권한)이다. 실행 변수로 덮어쓰는 길은 없다.
+# webhook 주소는 secrets/services/alert/notify의 url(text/plain)이고 인증은 선택 token·auth_header다. 실행 변수로 덮어쓰는 길은 없다.
 host_audit_alert_validate_certs: true
 # --- Configuration Drift (#124) ---------------------------------------------------------------
 # 러너가 site.yml과 host_agents.yml(--tags agents_config)을 --check --diff로 하위 실행해, Git 선언과

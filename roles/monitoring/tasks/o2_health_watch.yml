@@ -3,7 +3,7 @@
 # OpenObserve 생존 타이머 (Spec #184 / Ticket-7) — 검사하는 쪽 호스트(host_agents_o2_health_checker, ns0266)에만 배포
 # ==============================================================================
 # OpenObserve 헬스(/healthz)가 실패하면 OpenObserve를 거치지 않고 사내 알림 플랫폼 text/plain webhook으로 직접 P1을 보낸다.
-# webhook 주소는 OpenBao secrets/services/alert/notify의 url 하나다(URL 자체가 권한이라 비밀 쪽, 인증 헤더 없음).
+# webhook 주소는 OpenBao secrets/services/alert/notify의 url이고, 인증이 필요하면 token(선택)과 auth_header(선택, 기본 X-NANOIT-ACCESS)를 더한다.
 - name: "[MON-219] Assert the checker host uses the modern path so the health timer is not silently skipped"
   ansible.builtin.assert:
     that:
@@ -32,6 +32,7 @@
         that:
           - _alert_notify is mapping
           - (_alert_notify.url | default('')) is match('^https?://')
+          - (_alert_notify.auth_header | default('X-NANOIT-ACCESS', true)) is match('^[A-Za-z0-9-]+$')
         fail_msg: >-
           {{ inventory_hostname }}: OpenBao secrets/services/alert/notify의 url을 읽지 못했거나 형식이 잘못되어
           OpenObserve 생존 타이머를 배포할 수 없습니다(OpenObserve — Config와 같은 값을 쓴다).

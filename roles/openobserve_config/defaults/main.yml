@@ -4,7 +4,7 @@
 #   inventory/services/openobserve        — url(OpenObserve 주소), org(선택, 기본 default)
 #   secrets/services/openobserve/admin    — username, password: OpenObserve 설정 API(알림·함수·파이프라인)를 쓸 수 있는 계정(수집 자격과 다름)
 #   secrets/services/openobserve/ingest   — username, password: 알림 검증 합성 레코드를 넣는 수집 자격(컨트롤러 계열이 하나로 공유)
-#   secrets/services/alert/notify         — url: 통지 대상 webhook URL(사내 알림 플랫폼(Google Chat)의 text/plain 경로, 본문은 Google Chat 한도 50,000자까지). URL 자체가 권한이다
+#   secrets/services/alert/notify         — url: 통지 대상 webhook URL(사내 알림 플랫폼(Google Chat)의 text/plain 경로, 본문은 Google Chat 한도 50,000자까지). URL 자체가 권한이다. 알림 플랫폼이 인증 헤더를 요구하면 token(선택)과 auth_header(선택, 기본 X-NANOIT-ACCESS)를 더하고, token이 있을 때만 destination의 webhook_headers에 붙는다
 #   inventory/config/openobserve_config   — (선택) 이 작업의 비공개 설정
 #       normal_sources           — root 로그인 정상 출발지 목록 [{address: <IP>, kind: semaphore|office}, ...] (Spec #184 / Ticket-8).
 #                                  저장소에는 주소를 두지 않는다. kind(semaphore·office)는 구분용 표시일 뿐 판정은 같다:

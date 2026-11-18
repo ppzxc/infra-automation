@@ -190,7 +190,7 @@ def test_the_storage_target_comes_from_the_service_documents_and_only_the_declar
     assert out["problem"] == ""
     assert out["target"] == {"endpoint": "https://s3.example.test", "bucket": "host-audit", "access_key": "fake-ak-1",
                              "secret_key": "fake-sk-1", "region": "fake-region-1"}
-    assert out["alert"] == {"url": "https://hooks.example.test/fake-notify-0019"}
+    assert out["alert"] == {"url": "https://hooks.example.test/fake-notify-0019", "token": "", "auth_header": "X-NANOIT-ACCESS"}   # token은 선택이라 비어 있다
     _assert_reads_inside(fake_openbao, _vars()["host_audit_openbao_required"])
     assert {f"{r.mount}/{r.doc}" for r in fake_openbao.reads()} == STORAGE_DOCS | {"secrets/services/alert/notify"}
     assert fake_openbao.writes() == [] and len(fake_openbao.logins()) >= 1

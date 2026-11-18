@@ -164,6 +164,27 @@ def test_manual_verification_override_points_the_check_at_a_wrong_url(world):
     assert world.o2.requests == []
 
 
+def _rewrite_env(world, drop=(), add=""):
+    lines = [l for l in world.env_file.read_text().splitlines() if not l.startswith(tuple(k + "=" for k in drop))]
+    world.env_file.write_text("\n".join(lines) + "\n" + add)
+
+
+def test_token_without_a_header_name_is_sent_as_x_nanoit_access(world):
+    _rewrite_env(world, drop=("O2_WEBHOOK_AUTH_HEADER",))
+    world.o2.status = 503
+    assert run_check(world).returncode == 0
+    (req,) = posts(world)
+    assert req["headers"]["X-NANOIT-ACCESS"] == "tok-123" and "Authorization" not in req["headers"]
+
+
+def test_no_token_means_no_auth_header(world):
+    _rewrite_env(world, drop=("O2_WEBHOOK_AUTH_HEADER", "O2_WEBHOOK_TOKEN"))
+    world.o2.status = 503
+    assert run_check(world).returncode == 0
+    (req,) = posts(world)
+    assert not {"X-NANOIT-ACCESS", "Authorization"} & set(req["headers"])
+
+
 def test_webhook_secret_is_not_printed(world):
     world.o2.status = 503
     res = run_check(world)
@@ -183,7 +204,7 @@ def test_missing_config_fails_the_unit_and_names_the_missing_setting(world, miss
 
 # --- 배포 태스크 -------------------------------------------------------------------------------
 
-def _deploy(tmp_path, is_checker, os_path="modern", expect_ok=True):
+def _deploy(tmp_path, is_checker, os_path="modern", expect_ok=True, notify=None):
     t = tmp_path
     vars_ = yaml.safe_load((ROLE / "defaults" / "main.yml").read_text())
     vars_.update(yaml.safe_load((ROLE / "vars" / "main.yml").read_text()))
@@ -191,7 +212,7 @@ def _deploy(tmp_path, is_checker, os_path="modern", expect_ok=True):
         "role_path": str(ROLE), "host_agents_os_path": os_path, "ansible_service_mgr": "sysv",
         "host_agents_o2_health_checker": "localhost" if is_checker else "ns0266",
         "o2_endpoint": "https://o2.example:5080", "o2_ca_file": "",
-        "openbao_fixture": {"secrets/services/alert/notify": {"url": "https://hook.example/SECRET"}},
+        "openbao_fixture": {"secrets/services/alert/notify": notify or {"url": "https://hook.example/SECRET"}},
         "o2_health_script_path": str(t / "sbin" / "check.sh"), "o2_health_config_dir": str(t / "etc"),
         "o2_health_state_dir": str(t / "var"), "otelcol_systemd_unit_dir": str(t / "units"),
         "host_agents_owner": getpass.getuser(), "host_agents_group": grp.getgrgid(os.getgid()).gr_name,
@@ -227,6 +248,28 @@ def test_checker_host_gets_script_secret_env_and_five_minute_timer(tmp_path):
     service = (tmp_path / "units" / "openobserve-health.service").read_text()
     assert "Type=oneshot" in service and str(tmp_path / "sbin" / "check.sh") in service
     assert "SECRET" not in res.stdout + res.stderr
+
+
+def test_env_file_carries_token_and_header_name_only_when_the_notify_document_has_a_token(tmp_path):
+    secret = "ALERT-TOKEN-FAKE-9"
+    (tmp_path / "with").mkdir()
+    res = _deploy(tmp_path / "with", True, notify={"url": "https://hook.example/SECRET", "token": secret})
+    env = (tmp_path / "with" / "etc" / "env").read_text()
+    assert f"O2_WEBHOOK_TOKEN='{secret}'" in env or f"O2_WEBHOOK_TOKEN={secret}" in env
+    assert "O2_WEBHOOK_AUTH_HEADER=X-NANOIT-ACCESS" in env and mode(tmp_path / "with" / "etc" / "env") == "0o600"
+    assert secret not in res.stdout + res.stderr
+    (tmp_path / "named").mkdir()
+    _deploy(tmp_path / "named", True, notify={"url": "https://hook.example/SECRET", "token": secret, "auth_header": "X-Alert-Auth"})
+    assert "O2_WEBHOOK_AUTH_HEADER=X-Alert-Auth" in (tmp_path / "named" / "etc" / "env").read_text()
+    (tmp_path / "without").mkdir()
+    _deploy(tmp_path / "without", True)
+    assert "O2_WEBHOOK_TOKEN" not in (tmp_path / "without" / "etc" / "env").read_text()
+
+
+def test_a_malformed_auth_header_name_fails_the_deploy_before_any_change(tmp_path):
+    res = _deploy(tmp_path, True, expect_ok=False, notify={"url": "https://hook.example/SECRET", "token": "t", "auth_header": 'X"\nurl = "http://evil'})
+    assert res.returncode != 0 and not (tmp_path / "etc" / "env").exists()
+    assert "http://evil" not in res.stdout + res.stderr
 
 
 def test_other_hosts_get_nothing(tmp_path):

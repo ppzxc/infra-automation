@@ -161,6 +161,7 @@
         that:
           - fortigate_backup_openbao_required['secrets/services/alert/notify'] | difference(fortigate_backup_alert.keys() | list) | length == 0
           - fortigate_backup_alert.url is match('^https?://')
+          - (fortigate_backup_alert.auth_header | default('X-NANOIT-ACCESS', true)) is match('^[A-Za-z0-9-]+$')
         fail_msg: >-
           [FORTIGATE-ALERT] {{ fortigate_device }}: 설정 변경을 감지했으나 알림 webhook(OpenBao secrets/services/alert/notify의 url)이 없어
           알리지 못했다. 변경 항목: {{ fortigate_backup_changes | join(' / ') }}
@@ -202,8 +203,11 @@
       ansible.builtin.uri:
         url: "{{ fortigate_backup_alert.url }}"
         method: POST
-        headers:
-          Content-Type: "text/plain; charset=utf-8"
+        # 인증 값(token)이 있을 때만 auth_header(기본 X-NANOIT-ACCESS)로 붙인다. 이 태스크는 no_log다.
+        headers: >-
+          {{ {'Content-Type': 'text/plain; charset=utf-8'}
+             | combine({(fortigate_backup_alert.auth_header | default('X-NANOIT-ACCESS', true)): fortigate_backup_alert.token}
+                       if (fortigate_backup_alert.token | default('', true)) | length > 0 else {}) }}
         body_format: raw
         body: "{{ _fgbk_text }}"
         status_code: [200, 201, 202, 204]

@@ -32,7 +32,7 @@ flowchart LR
 | Automation Identity | 없음 | `secrets/automation/ssh` | `automation_ssh.schema.json` |
 | 작업 설정 | `inventory/config/<작업>` | 없음 | `inventory/config/*.schema.json` |
 
-경로 패턴과 스키마의 정확한 대응은 `schemas/openbao/index.yml`만이 원본이다. 알림 웹훅 URL(`secrets/services/alert/notify`)처럼 URL 자체가 권한인 값은 Service 비밀이다.
+경로 패턴과 스키마의 정확한 대응은 `schemas/openbao/index.yml`만이 원본이다. 알림 웹훅 URL(`secrets/services/alert/notify`)처럼 URL 자체가 권한인 값은 Service 비밀이다. 이 문서의 키는 `url`(필수), `token`(선택, 인증 값)과 `auth_header`(선택, 헤더 이름, 기본 `X-NANOIT-ACCESS`)이고, `token`이 있을 때만 알림 POST에 헤더로 붙는다.
 
 ## 3. 저장 규칙
 

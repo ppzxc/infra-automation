@@ -28,6 +28,6 @@ fortigate_backup_scope: global
 fortigate_backup_timeout: 60
 
 # 설정 변경 알림 (#286). 직전 백업과 달라졌을 때만 사내 알림 플랫폼 text/plain webhook으로 한 번 보낸다.
-# webhook URL은 OpenBao `secrets/services/alert/notify`의 `url` 하나다(URL 자체가 권한이라 인증 헤더가 없다). 저장소에 두지 않는다.
+# webhook URL은 OpenBao `secrets/services/alert/notify`의 `url`이고 인증 값은 같은 문서의 선택 키다(docs/fortigate_backup.md). 저장소에 두지 않는다.
 fortigate_backup_alert_max_items: 20
 fortigate_backup_alert_runbook: "https://github.com/ppzxc/infra-automation/blob/main/docs/runbooks/alerts.md#fortigate-config-change"

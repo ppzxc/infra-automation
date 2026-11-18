@@ -131,11 +131,13 @@ def test_the_notification_text_carries_no_address_or_secret():
 
 class _Hook(BaseHTTPRequestHandler):
     seen = []
+    headers = []
     reply = 200
 
     def do_POST(self):  # noqa: N802
         body = self.rfile.read(int(self.headers["Content-Length"])).decode("utf-8")
         type(self).seen.append((self.path, self.headers.get("Content-Type"), self.headers.get("Authorization"), body))
+        type(self).headers.append({k.lower(): v for k, v in self.headers.items()})
         self.send_response(type(self).reply)
         self.end_headers()
         self.wfile.write(b"{}")
@@ -146,7 +148,7 @@ class _Hook(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def hook():
-    handler = type("H", (_Hook,), {"seen": [], "reply": 200})
+    handler = type("H", (_Hook,), {"seen": [], "headers": [], "reply": 200})
     server = HTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield server, handler
@@ -185,6 +187,28 @@ def test_the_notification_is_posted_as_plain_text_to_the_url_alone_with_the_item
     assert path == "/hook" and ctype.startswith("text/plain") and auth is None   # the URL itself is the permission
     assert "• ns1: %s 항목 2" % (CODE % 2) in body and "• ns2: %s 항목 3" % (CODE % 3) in body
     assert "127.0.0.1:%d" % server.server_port not in res.stdout + res.stderr
+
+
+ALERT_TOKEN = "ALERT-TOKEN-FAKE-31337"
+
+
+@pytest.mark.parametrize("extra, header", [({"token": ALERT_TOKEN}, "x-nanoit-access"),
+                                           ({"token": ALERT_TOKEN, "auth_header": "X-Alert-Auth"}, "x-alert-auth")])
+def test_the_token_is_sent_only_under_the_default_or_given_header_and_never_printed(tmp_path, hook, extra, header):
+    server, handler = hook
+    target = {"url": "http://127.0.0.1:%d/hook" % server.server_port, **extra}
+    res = _run_alert_tasks(tmp_path, server, compared=_compared(ns1=[2]), target=target)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert handler.headers[0][header] == ALERT_TOKEN
+    assert not {"x-nanoit-access", "x-alert-auth"} - {header} & set(handler.headers[0])
+    assert ALERT_TOKEN not in res.stdout + res.stderr
+
+
+def test_no_auth_header_is_sent_without_a_token(tmp_path, hook):
+    server, handler = hook
+    res = _run_alert_tasks(tmp_path, server, compared=_compared(ns1=[2]), target={"url": "http://127.0.0.1:%d/hook" % server.server_port, "token": ""})
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert not {"x-nanoit-access", "authorization"} & set(handler.headers[0])
 
 
 def test_nothing_is_posted_when_nothing_got_worse_or_the_run_is_on_demand_or_it_is_a_check_run_or_disabled(tmp_path, hook):
@@ -227,10 +251,10 @@ def test_the_webhook_comes_from_the_alert_notify_document_and_stays_out_of_logs(
     resolve = next(t for t in tasks if t["name"].startswith("[AUD-502]"))
     facts = resolve["ansible.builtin.set_fact"]
     assert "_host_audit_alert_target" in facts and resolve["no_log"] is True
-    # the URL alone: no header or token keys (the old JSON path with token/auth_header is not moved to the new structure)
-    assert "header" not in json.dumps(facts["_host_audit_alert_target"]) and "token" not in json.dumps(facts["_host_audit_alert_target"])
+    # url plus the optional token and auth_header (#503 follow-up); the post task attaches them only when a token exists
+    assert set(facts["_host_audit_alert_target"]) == {"url", "token", "auth_header"}
     post = next(t for t in _kisa_tasks().values() if "ansible.builtin.uri" in t)
-    assert post["ansible.builtin.uri"]["headers"] == {"Content-Type": "text/plain; charset=utf-8"}
+    assert "text/plain; charset=utf-8" in json.dumps(post["ansible.builtin.uri"]["headers"]) and "X-NANOIT-ACCESS" in json.dumps(post["ansible.builtin.uri"]["headers"])
 
 
 def test_the_alert_is_sent_after_the_mail_and_judged_after_every_other_judgement_of_the_run():
