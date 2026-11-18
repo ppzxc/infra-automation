@@ -49,7 +49,12 @@ path "auth/approle/role/+/role-id" {
 }
 
 # secret_id 만료 조회: accessor 목록과 accessor 조회만. secret_id 발급(create/update)은 없다.
+# LIST 요청의 ACL 경로는 끝에 /가 붙으므로 슬래시 경로도 필요하다(없으면 role/*의 read에 걸려 403).
 path "auth/approle/role/+/secret-id" {
+  capabilities = ["list"]
+}
+
+path "auth/approle/role/+/secret-id/" {
   capabilities = ["list"]
 }
 

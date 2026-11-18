@@ -88,8 +88,11 @@ def test_no_ip_or_cidr_literals_in_repo_code(path):
 def test_script_never_deletes_or_tunes_or_mints_secret_ids():
     code = _strip_comments(SCRIPT.read_text(encoding="utf-8"))
     code = re.sub(r'""".*?"""', "", code, flags=re.S)
-    for forbidden in ('"DELETE"', "tune", "secret-id", "auth/token", "custom-secret-id"):
+    for forbidden in ('"DELETE"', "secret-id", "auth/token", "custom-secret-id"):
         assert forbidden not in code, forbidden
+    # tune은 인증 마운트의 max_lease_ttl 하나뿐이다(KV 마운트 sys/mounts는 tune하지 않는다).
+    assert all("sys/auth" in line for line in code.splitlines() if "tune" in line)
+    assert "sys/mounts/%s/tune" not in code
 
 
 # ---- 통합: 가짜 OpenBao ------------------------------------------------------------------------------------------------
@@ -200,7 +203,7 @@ def test_apply_never_deletes_and_never_mints_secret_ids_or_tunes_mounts(fake, ca
     assert "hand-made" in fake.policies and "hand-made" in fake.roles and "hand-made" in fake.mounts
     assert fake.mounts["inventory"]["description"] == "changed by hand"       # tune하지 않는다
     assert fake.deletes() == []
-    assert not [r for r in fake.requests if "secret-id" in r.path or "auth/token" in r.path or "tune" in r.path]
+    assert not [r for r in fake.requests if "secret-id" in r.path or "auth/token" in r.path or "sys/mounts" in r.path and "tune" in r.path]
 
 
 def test_existing_mount_is_not_rewritten(fake, capsys):
@@ -262,3 +265,29 @@ def test_single_host_cidr_is_the_same_whether_the_server_adds_a_prefix_or_not():
     have = {"token_bound_cidrs": ["198.51.100.0/24", "192.0.2.7"], "secret_id_bound_cidrs": ["192.0.2.7/32"]}
     assert oa.role_drift(want, have) == []
     assert oa.role_drift(want, {**have, "token_bound_cidrs": ["192.0.2.8"]}) == ["token_bound_cidrs"]
+
+
+def _secs(value):
+    return value if isinstance(value, int) else int(str(value).rstrip("h")) * 3600
+
+
+def test_approle_mount_max_lease_ttl_is_raised_so_180_day_secret_ids_are_not_cut_to_the_default(fake, capsys):
+    """운영 OpenBao의 인증 마운트 기본 max_lease_ttl(32일)이 role의 180일 secret_id_ttl을 깎았다(Periodic Check가 만료 임박을 알림)."""
+    code, _, _ = run(fake, capsys, "apply")
+    assert code == 0 and _secs(fake.auth_mounts["approle"]["config"]["max_lease_ttl"]) >= 180 * 86400
+    code, out, _ = run(fake, capsys, "plan")
+    assert code == 0, out
+    fake.auth_mounts["approle"]["config"] = {"max_lease_ttl": 0}          # 서버 기본값 상태
+    code, out, _ = run(fake, capsys, "plan")
+    assert code == 2 and "auth\tapprole\tupdate max_lease_ttl" in out
+    code, _, _ = run(fake, capsys, "apply")
+    assert code == 0 and _secs(fake.auth_mounts["approle"]["config"]["max_lease_ttl"]) >= 180 * 86400
+    assert run(fake, capsys, "plan")[0] == 0
+
+
+def test_a_larger_server_max_lease_ttl_is_not_drift_and_never_lowered(fake, capsys):
+    run(fake, capsys, "apply")
+    fake.auth_mounts["approle"]["config"] = {"max_lease_ttl": 99999999}
+    assert run(fake, capsys, "plan")[0] == 0
+    run(fake, capsys, "apply")
+    assert fake.auth_mounts["approle"]["config"]["max_lease_ttl"] == 99999999

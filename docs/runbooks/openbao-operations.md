@@ -69,7 +69,7 @@ Periodic Check가 secret_id 만료 30일 전에 `alert/notify`로 알림을 보�
 
 3. `applier`는 정책·role·마운트·auth만 다루고 KV 데이터는 읽지 못한다. `applier` 정책에는 `auth/token/create`가 없어야 하고, 스크립트는 자식 토큰을 만들지 않고 AppRole 로그인 토큰을 그대로 쓴다.
 4. 적용 뒤 정책이 바뀐 계열의 대표 실행을 한 번 돌려 허용과 거부(범위 밖 경로 403)를 확인한다.
-5. 코드 밖에서 만든 정책·role·마운트는 `plan`이 `코드에 없음`으로 보고만 하고 `apply`도 지우지 않는다. Periodic Check가 `not_in_code`로 알리면 코드로 편입하거나 `admin`(§7)으로 지운다. 마운트는 지우거나 tune하지 않는다.
+5. 코드 밖에서 만든 정책·role·마운트는 `plan`이 `코드에 없음`으로 보고만 하고 `apply`도 지우지 않는다. Periodic Check가 `not_in_code`로 알리면 코드로 편입하거나 `admin`(§7)으로 지운다. KV 마운트는 지우거나 tune하지 않는다(AppRole 인증 마운트의 `max_lease_ttl`만 올린다).
 
 러너·에이전트 세션 CIDR(`OPENBAO_RUNNER_CIDRS`·`OPENBAO_AGENT_SESSION_CIDRS`)과 운영자 해시는 환경변수로 넣고 저장소에 쓰지 않는다.
 

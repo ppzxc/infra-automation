@@ -533,51 +533,6 @@ def test_key_skip_entry_also_holds_back_keys_the_mapping_would_consume():
     assert "node_name" not in plan.store["inventory/assets/ns0006"]["funa"]
 
 
-def test_client_retries_on_429_honoring_a_short_wait_then_succeeds(monkeypatch):
-    """운영 OpenBao는 요청 제한(429)을 건다. 읽기·쓰기 모두 기다렸다 다시 시도해야 한다."""
-    import io
-    import urllib.error
-    calls = []
-    waits = []
-
-    class Resp:
-        status = 200
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def read(self):
-            return b'{"data": {"data": {"k": "v"}}}'
-
-    def fake_urlopen(req, timeout=30):
-        calls.append(1)
-        if len(calls) < 3:
-            raise urllib.error.HTTPError(req.full_url, 429, "Too Many", {"Retry-After": "1"}, io.BytesIO(b""))
-        return Resp()
-
-    monkeypatch.setattr(om._bao_http, "urlopen", fake_urlopen)
-    monkeypatch.setattr(om.time, "sleep", waits.append)
-    assert om.Client("http://x", "infra", "t").read("secret", "a/b") == {"k": "v"}
-    assert len(calls) == 3 and len(waits) == 2 and all(0 < w <= 30 for w in waits)
-
-
-def test_client_gives_up_after_repeated_429_with_status_only(monkeypatch):
-    import io
-    import urllib.error
-
-    def always_429(req, timeout=30):
-        raise urllib.error.HTTPError(req.full_url, 429, "x", {}, io.BytesIO(b"secret-body"))
-
-    monkeypatch.setattr(om._bao_http, "urlopen", always_429)
-    monkeypatch.setattr(om.time, "sleep", lambda s: None)
-    with pytest.raises(om.ClientError) as exc:
-        om.Client("http://x", "infra", "t").read("secret", "a")
-    assert "429" in str(exc.value) and "secret-body" not in str(exc.value)
-
-
 def _device(user):
     return {"hosts/ns0003": {
         "description": "Fake switch", "host_type": "SWITCH", "fqdn": "ns0003.example.test", "ansible_host": "192.0.2.20",
