@@ -187,6 +187,8 @@ def test_a_scheduled_run_posts_only_to_search_and_writes_the_report_with_the_col
     html = (out / "log_review" / FILE).read_text(encoding="utf-8")
     assert "2026-10-01 00:00 ~ 2026-10-31 24:00 (KST)" in html
     assert "h2" in html and "전월 로그 없음" in html
+    # 기준 목록 문서(inventory/config/log_review)가 없으면 조회는 그대로 하고 1부 6·7·12번만 기준 목록 실패다(#560).
+    assert html.count("조회 실패(기준 목록)") == 3
     assert oct((out / "log_review" / FILE).stat().st_mode & 0o777) == "0o600"
     # 계정·비밀번호는 출력에 나오지 않는다
     assert "pw-7f3a9c" not in res.stdout + res.stderr

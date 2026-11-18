@@ -75,6 +75,34 @@
              else (('조회 입력 누락: ' ~ (_missing | join(', '))) if _missing | length > 0 else '') }}
       no_log: true
 
+    # 로그 검토 작업 설정 문서(정상 출발지·내부 주소 대응·개인정보처리시스템 표시, #560)는 조회 입력과 따로 읽는다. 없거나 읽지 못하면
+    # 값이 비고(None) OpenObserve 조회는 그대로 한다. 그때는 1부 6·7·12번만 '조회 실패(기준 목록)'다(판정은 필터).
+    - name: Read the Log Review settings document (reference lists of items 6, 7 and 12)
+      ansible.builtin.set_fact:
+        _host_audit_log_review_reference: >-
+          {{ lookup('openbao_doc', host_audit_openbao_log_review_settings_doc, errors='ignore', quiet=true) }}
+      check_mode: false
+      no_log: true
+
+    # 내부 주소 대응 중 인벤토리에서 계산되는 몫: 인벤토리 변수 ip(AUD-011이 기록하는 값)와 이번 실행에서 호스트가 보고한 주소.
+    # 계산되지 않는 주소(NAT 뒤 주소 등)만 작업 설정 문서의 internal_addresses에 둔다.
+    - name: Compute the managed host addresses from the inventory
+      vars:
+        _records: >-
+          {%- set r = [] -%}
+          {%- for p in (_host_audit_record_files | default({'files': []})).files | map(attribute='path') | sort -%}
+          {%- set _ = r.append(lookup('ansible.builtin.file', p) | from_json) -%}
+          {%- endfor -%}
+          {{ r }}
+        _declared: >-
+          {%- set d = {} -%}
+          {%- for h in groups['all'] -%}
+          {%- set _ = d.update({h: [hostvars[h]['ip'] | default('', true)]}) -%}
+          {%- endfor -%}
+          {{ d }}
+      ansible.builtin.set_fact:
+        _host_audit_log_review_managed_addresses: "{{ _records | host_audit_log_review_managed_addresses(_declared) }}"
+
     # 조회는 이 태스크 하나이고 POST _search뿐이다. 실패는 상태 코드로 받는다(-1 = 연결 불가). 결과에는 계정명·출발지가
     # 들어 있으므로 no_log다. 자격증명을 못 읽었으면 부르지 않고 모든 항목이 그 사유로 '조회 실패'가 된다(AUD-804).
     - name: "[AUD-803] Search OpenObserve for the review period (POST _search only)"
@@ -116,6 +144,11 @@
             collection_targets:
               hosts: "{{ host_audit_log_review_collect_hosts }}"
               devices: "{{ host_audit_log_review_devices }}"
+            sources:
+              reference: "{{ _host_audit_log_review_reference | default(none) }}"
+              managed_addresses: "{{ _host_audit_log_review_managed_addresses }}"
+              window_seconds: "{{ host_audit_log_review_multi_source_window_seconds | int }}"
+              min_sources: "{{ host_audit_log_review_multi_source_min_sources | int }}"
       ansible.builtin.set_fact:
         host_audit_log_review_model: "{{ _results | host_audit_log_review_model(_meta) }}"
       register: _host_audit_log_review_built

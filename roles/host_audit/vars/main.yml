@@ -36,6 +36,9 @@ host_audit_openbao_required:
   # Log Review Report의 OpenObserve 조회(#558): 주소·조직과 조회 전용 계정. 못 읽으면 항목이 '조회 실패'다(실행은 계속).
   "inventory/services/openobserve": [url]
   "secrets/services/openobserve/readonly": [username, password]
+  # Log Review 작업 설정 문서(#560): 정상 출발지·내부 주소 대응·개인정보처리시스템 표시. 못 읽으면 1부 6·7·12번만 '조회 실패(기준 목록)'다.
+  # 정상 출발지가 비거나 형식이 틀린 문서도 필터가 같은 '조회 실패(기준 목록)'로 본다(빈 목록이면 모든 로그인이 목록 밖이 된다).
+  "inventory/config/log_review": [normal_sources]
 
 # 읽는 단계별 문서(위 선언의 키를 나눈 것, 합집합이 선언과 같다). 보관 입력은 못 읽으면 보관 문제, 알림은 못 읽어도 보관을 막지 않고,
 # 메일 설정은 못 읽으면 메일 문제, Log Review 조회 입력은 못 읽으면 그 보고서의 '조회 실패'다.
@@ -47,6 +50,8 @@ host_audit_openbao_mail_doc: inventory/config/host_audit
 host_audit_openbao_log_review_docs:
   - inventory/services/openobserve
   - secrets/services/openobserve/readonly
+# 조회 입력과 따로 읽는다: 이 문서가 없어도 OpenObserve 조회는 하고 6·7·12번만 실패로 남는다(tasks/log_review.yml).
+host_audit_openbao_log_review_settings_doc: inventory/config/log_review
 
 # OS 지원 종료일(EOL) 정적 표 (#120). 키는 '<os-release ID>-<주 버전>'(Ubuntu는 '<ID>-<VERSION_ID>').
 # os-release가 없는 CentOS 6은 /etc/redhat-release에서 'centos-6'을 만든다.

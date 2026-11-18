@@ -232,7 +232,8 @@ EXPECTED_READS = {
     | OO_ING | {"inventory/config/openobserve_config"},
     "host_audit": PROVISION | HOST_AGENTS | {"secrets/services/rustfs/audit_reports", "secrets/services/alert/notify",
                                                   "inventory/config/host_audit",
-                                                  "secrets/services/openobserve/readonly"},  # Log Review Report 조회(#558)
+                                                  "secrets/services/openobserve/readonly",  # Log Review Report 조회(#558)
+                                                  "inventory/config/log_review"},  # Log Review 기준 목록(#560)
     "network_backup": COMMON | ASSETS | CRED | {"secrets/services/alert/notify"},
     "github_webhook_watch": COMMON | {"secrets/services/github/org_hooks_read"} | OO_ING
     | {"inventory/config/github_webhook_watch"},
@@ -295,15 +296,17 @@ def test_periodic_check_has_list_and_reads_everything_but_agent_session_cannot_r
     assert not any("create" in c or "update" in c for _, c in pc if _.startswith(("inventory/", "secrets/")))
     ag = dict(policy("agent-session"))
     assert ag["inventory/data/*"] == ["read"]
-    # 개인정보·웹훅 주소 문서는 deny(#504 단일 원본은 그대로, 읽기만 막는다). 이 두 개만 deny이고 나머지는 read다.
+    # 개인정보·웹훅 주소·Log Review 기준 목록 문서는 deny(#504 단일 원본은 그대로, 읽기만 막는다). 이 셋만 deny이고 나머지는 read다.
     assert ag["inventory/data/config/host_audit"] == ["deny"]
     assert ag["inventory/data/config/github_webhook_watch"] == ["deny"]
-    assert {p for p, c in ag.items() if "deny" in c} == {"inventory/data/config/host_audit", "inventory/data/config/github_webhook_watch"}
+    assert ag["inventory/data/config/log_review"] == ["deny"]
+    assert {p for p, c in ag.items() if "deny" in c} == {"inventory/data/config/host_audit", "inventory/data/config/github_webhook_watch",
+                                                          "inventory/data/config/log_review"}
     assert set(ag["secrets/metadata/*"]) == {"read", "list"}
     assert set(ag["inventory/metadata/*"]) == {"read", "list"}      # AGENTS.md: 에이전트 세션은 inventory/를 읽는다(문서 목록 포함)
     assert not any(p.startswith("secrets/data") for p in ag)
     assert not any(p.startswith("inventory/") and ({"create", "update", "delete", "patch"} & set(c)) for p, c in ag.items())
-    denied = {"inventory/config/host_audit", "inventory/config/github_webhook_watch"}
+    denied = {"inventory/config/host_audit", "inventory/config/github_webhook_watch", "inventory/config/log_review"}
     assert readable_patterns(["agent-session"]) - denied == {p for p in index_patterns() if p.startswith("inventory/")} - denied
 
 

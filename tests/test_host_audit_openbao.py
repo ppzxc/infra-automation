@@ -29,7 +29,8 @@ needs_ansible = pytest.mark.skipif(not shutil.which("ansible-playbook"), reason=
 
 STORAGE_DOCS = {"inventory/services/rustfs", "secrets/services/rustfs/audit_reports"}
 # Log Review Report의 OpenObserve 조회 입력(Spec #544 / Ticket-3 #558): 주소·조직과 조회 전용 용도 계정.
-LOG_REVIEW_DOCS = {"inventory/services/openobserve", "secrets/services/openobserve/readonly"}
+LOG_REVIEW_DOCS = {"inventory/services/openobserve", "secrets/services/openobserve/readonly",
+                   "inventory/config/log_review"}  # 마지막은 Log Review 기준 목록(#560), 조회 입력과 따로 읽는다
 
 
 def _vars():
@@ -132,7 +133,7 @@ def test_the_drift_subruns_render_the_provisioning_and_host_agents_config_playbo
 def test_the_read_lists_come_from_the_declaration_and_no_token_is_pinned_across_steps():
     v = _vars()
     parts = set(v["host_audit_openbao_storage_docs"]) | {v["host_audit_openbao_alert_doc"], v["host_audit_openbao_mail_doc"]} \
-        | set(v["host_audit_openbao_log_review_docs"])
+        | set(v["host_audit_openbao_log_review_docs"]) | {v["host_audit_openbao_log_review_settings_doc"]}
     assert parts == set(v["host_audit_openbao_required"])
     storage = (ROLE_DIR / "tasks" / "storage_credentials.yml").read_text(encoding="utf-8")
     read = json.dumps(_task("storage_credentials.yml", "[AUD-501]"))

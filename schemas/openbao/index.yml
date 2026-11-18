@@ -13,6 +13,7 @@
 "inventory/config/host_audit": inventory/config/host_audit.schema.json
 "inventory/config/openobserve_config": inventory/config/openobserve_config.schema.json
 "inventory/config/github_webhook_watch": inventory/config/github_webhook_watch.schema.json
+"inventory/config/log_review": inventory/config/log_review.schema.json
 "secrets/assets/+/credentials/+": secrets/credential.schema.json
 "secrets/assets/+/agents": secrets/agents.schema.json
 "secrets/automation/ssh": secrets/automation_ssh.schema.json
