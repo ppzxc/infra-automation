@@ -247,6 +247,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - On-demand에서 쓸 수 있는 변수:
   - Survey `target_hosts`(예: `ns0266,ns0294`): 대상 좁히기(Inventory Hostname)
   - Survey `host_audit_mail_enabled`·`host_audit_storage_enabled`를 `false`로: 시험 실행. 보관을 끄면 비교하지 않고 러너 로컬에만 남는다
+  - API `environment`만: `{"host_audit_log_review_enabled": true}` 수시 실행에서도 Log Review Report 초안을 만든다([host_audit.md §18](host_audit.md#18-log-review-report-spec-544--ticket-3-558-adr-0015)). 기본은 `false`이고 Survey·CLI args에 두지 않는다(정기 실행은 항상 만든다). 수시 실행은 기준선이 아니라 이 보고서의 서명본은 등록하지 못한다(§18.3). 형식·내용을 시험할 때만 쓴다([월간 로그 점검 런북](runbooks/monthly-log-review.md))
   - API `environment`만: `{"host_audit_drift_enabled": false}`·`{"host_audit_packages_enabled": false}` 해당 섹션 수집·판정 건너뛰기(정기 실행에는 쓰지 않는다)
 - Host Audit은 `--check`로 돌리지 않는다. 그 자체가 읽기 전용이고, check 모드에서는 보관·발송을 하지 않는다.
 - Environment는 `host_audit`(§4)다. Configuration Drift가 `site.yml`·Host Agents Config를 하위 실행하므로 이 AppRole은 `provision`·`host_agents`가 읽는 경로도 읽는다.
