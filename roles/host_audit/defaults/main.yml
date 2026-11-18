@@ -185,9 +185,12 @@ host_audit_log_review_timeout: 120
 host_audit_log_review_validate_certs: true
 
 # 3부 수집 공백의 수집 대상. 호스트는 OpenObserve Silent Host와 같은 수집 로스터(servers - host_agents_excluded -
-# host_agents_backup_only, filter o2c_roster)이고, 장비는 FortiGate·Cisco 스위치 인벤토리 그룹의 관리번호(로그의 device_id)다.
+# host_agents_backup_only, filter o2c_roster)이고, 장비는 FortiGate 인벤토리 그룹과 syslog 전송이 확인된 스위치의 관리번호(로그의 device_id)다.
+# 스위치 목록은 OpenObserve Config의 수신 중단 감시 대상(o2c_switch_syslog_roster)과 같아야 한다: cisco_switches 그룹 전체를 쓰면
+# syslog를 보내지 않는 스위치가 매달 '전월 로그 없음'으로 나온다. 두 값이 같은지는 tests/test_host_audit_log_review_tasks.py가 본다.
 host_audit_log_review_collect_hosts: "{{ groups | o2c_roster('collect') }}"
-host_audit_log_review_devices: "{{ (groups['fortigate_firewalls'] | default([])) + (groups['cisco_switches'] | default([])) }}"
+host_audit_log_review_switch_syslog_devices: [ns0250, ns0347]
+host_audit_log_review_devices: "{{ (groups['fortigate_firewalls'] | default([])) + host_audit_log_review_switch_syslog_devices }}"
 
 # --- Security Regression (Spec #364 / Ticket-10, #377) ---------------------------------------
 # 스펙 #364 기대치의 퇴행 점검. 호스트별 선언 host_audit_regression_expect가 비어 있으면 그 호스트는 대상이 아니다.

@@ -84,6 +84,13 @@ def test_the_search_task_hides_its_results_and_takes_failures_as_values():
     assert -1 in task["ansible.builtin.uri"]["status_code"] and 401 in task["ansible.builtin.uri"]["status_code"]
 
 
+def test_the_switches_checked_for_collection_gaps_are_the_ones_the_silent_switch_alert_watches():
+    """cisco_switches 전체가 아니라 syslog 전송이 확인된 스위치만 본다. OpenObserve Config의 목록과 어긋나면 매달 허위 공백이 나온다."""
+    ours = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    o2c = yaml.safe_load((ROOT_DIR / "roles" / "openobserve_config" / "defaults" / "main.yml").read_text(encoding="utf-8"))
+    assert ours["host_audit_log_review_switch_syslog_devices"] == o2c["o2c_switch_syslog_roster"]
+
+
 def test_the_draft_is_included_before_the_hashes_summary_upload_and_mail():
     block = next(t for t in yaml.safe_load((TASKS / "report.yml").read_text(encoding="utf-8")) if "always" in t)["block"]
     names = [json.dumps(t, ensure_ascii=False) if "include_tasks" in json.dumps(t) else t.get("name", "") for t in block]
