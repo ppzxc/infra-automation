@@ -37,3 +37,5 @@ date: 2026-10-08
 - **보관 용량 결정 (#147 → #151 → #159)**: Trivy 원본(`trivy/`)은 24대 기준 실행당 약 3.5 GiB이고 3년 잠금 버킷이라 지울 수 없다. #147/#151은 gzip해 올리기(옵션 2)로 정했으나, #159에서 **`trivy/`를 보관하지 않는 쪽(옵션 1)으로 뒤집었다**. 이유는 (1) 대부분이 `References`·`Description`이라 압축해도 지울 수 없는 용량이 크고, (2) 원본은 보관되는 `sbom/`(약 30 MB)을 Trivy로 다시 판정해 얻을 수 있고, (3) 판정 당시 결과는 `findings.json`·`package_vulnerability.json`이 이미 증적이기 때문이다. 판정 당시 Trivy 버전·DB 메타데이터(`trivy_version.json`)를 함께 보관한다. 한계: 재판정은 그 시점의 DB를 쓰므로 판정 당시와 결과가 다를 수 있고 DB 자체는 보관하지 않는다. 압축 단계는 없앴다. `package_findings/`도 보관하지 않는다(SBOM 재판정으로 다시 만든다).
 
 - (개정, 2026-11-18, #531) 위 #492 개정이 가리키는 OpenBao `hosts/<host>` 위치는 [ADR-0014](0014-openbao-storage-structure-and-access-policy.md)로 대체됐다. 선언 값은 Asset 문서(`inventory/assets/<관리번호>`)의 `description`·`isms` 절에서 읽고, 위치와 키 정의는 `docs/openbao_integration.md`와 `schemas/openbao/`가 원본이다.
+
+- (보완, 2026-11-18) 월간 정기 실행이 같은 메일의 별도 첨부로 Log Review Report 초안을 낸다. 데이터는 OpenObserve 조회 전용 계정으로 읽으며 호스트 쪽 읽기 전용 범위는 바뀌지 않는다. [ADR-0015](0015-log-review-report-drafted-by-host-audit.md).
