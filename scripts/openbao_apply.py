@@ -24,6 +24,7 @@
 종료 코드: 0 정상(plan은 차이 없음), 1 서버·실행 오류, 2 plan에 차이 있음 또는 사용법·입력 오류.
 """
 import argparse
+import ipaddress
 import json
 import re
 import sys
@@ -109,7 +110,17 @@ def _list(client, path):
         raise BaoError(0) from None
 
 
+def _cidr(value):
+    """CIDR 표기를 하나로 맞춘다. 서버는 token_bound_cidrs의 단일 IP를 접두사 없이 돌려준다(접두사 없는 단일 IP와 /32 표기는 같다)."""
+    try:
+        return str(ipaddress.ip_network(value, strict=False))
+    except ValueError:
+        return value
+
+
 def _norm(key, value):
+    if key in ("secret_id_bound_cidrs", "token_bound_cidrs"):
+        return sorted(_cidr(v) for v in (value or []))
     if key in ROLE_SET_KEYS:
         return sorted(value or [])
     return value
