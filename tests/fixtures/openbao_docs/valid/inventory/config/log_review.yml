@@ -1,0 +1,13 @@
+normal_sources:
+  - address: 192.0.2.250
+    name: fake runner
+  - address: 198.51.100.0/28
+    name: fake office
+internal_addresses:
+  - address: 203.0.113.9
+    host: ns0002
+personal_info_systems:
+  - ns0001
+device_admin_accounts:
+  - device: ns0900
+    accounts: [fake-fwadmin]

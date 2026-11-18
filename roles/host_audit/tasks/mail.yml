@@ -5,7 +5,8 @@
 # 보관이 끝난 보고서를 Google Workspace SMTP relay(smtp-relay.gmail.com:587, STARTTLS 필수,
 # IP 인증 — 자격증명 없음)로 보낸다. 본문은 inline CSS 요약(이미지·SVG 없음) + 첨부 SHA-256 +
 # 보관 경로, 첨부는 ASCII 파일명의 자체 완결 .html 1개와 합계·호스트별 Remediation Plan xlsx를 묶은 zip 1개다
-# (요약에 xlsx_zip이 없는 옛 실행의 재발송은 .html만).
+# (요약에 xlsx_zip이 없는 옛 실행의 재발송은 .html만). 요약에 log_review가 있으면 Log Review Report(.html, Spec #544 #558)가
+# 세 번째 첨부다(만들지 않은 실행은 그 첨부 없이 보낸다).
 # 수신자·발신자는 OpenBao inventory/config/host_audit(mail_recipients·mail_sender)에서만 읽는다(Extra variables 대체 없음).
 # 표시 이름(mail_sender_display_name)은 선택이며 헤더에만 넣는다. 주소는 개인정보라 이 파일의 모든 관련
 # 태스크가 no_log이고, 보고서·JSON·실행 메타·로그에 남지 않는다. 수신자마다 따로 보낸다(AUD-606):
@@ -13,6 +14,7 @@
 # 서로의 주소를 보게 된다.
 # 입력(호출자가 정함): host_audit_mail_doc(요약), _host_audit_mail_report_path(첨부할 보고서),
 #   _host_audit_mail_xlsx_path(첨부할 xlsx zip, 비우면 보고서만),
+#   _host_audit_mail_log_review_path(첨부할 Log Review Report, 요약에 log_review가 있을 때만),
 #   _host_audit_archive_ok(보관 성공 여부 — false면 보내지 않음).
 # 이 파일은 실행을 실패로 끝내지 않는다. 판정은 mail_result.yml(AUD-610)이 보관 판정 뒤에 한다.
 # ------------------------------------------------------------------------------
@@ -52,9 +54,13 @@
          + (['메일 수신자 없음 — OpenBao inventory/config/host_audit.mail_recipients에 넣는다'] if _to.addresses | length == 0 else [])
          + (['요약에 xlsx zip이 있는데 첨부할 경로가 없음(본문과 첨부가 어긋남)'] if (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip
                                                                     and (_host_audit_mail_xlsx_path | default('')) | length == 0) else [])
-         + (['첨부할 파일이 없음(보고서 또는 xlsx zip)'] if (not (_host_audit_mail_report_path is file)
+         + (['요약에 Log Review Report가 있는데 첨부할 경로가 없음(본문과 첨부가 어긋남)'] if (host_audit_mail_doc.log_review is defined and host_audit_mail_doc.log_review
+                                                                    and (_host_audit_mail_log_review_path | default('')) | length == 0) else [])
+         + (['첨부할 파일이 없음(보고서, xlsx zip 또는 Log Review Report)'] if (not (_host_audit_mail_report_path is file)
                                                   or ((host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip)
-                                                      and not ((_host_audit_mail_xlsx_path | default('')) is file))) else [])
+                                                      and not ((_host_audit_mail_xlsx_path | default('')) is file))
+                                                  or ((host_audit_mail_doc.log_review is defined and host_audit_mail_doc.log_review)
+                                                      and not ((_host_audit_mail_log_review_path | default('')) is file))) else [])
          + (['수신자(mail_recipients) 주소 형식 오류 ' ~ _to.invalid ~ '건'] if _to.invalid > 0 else [])
          + (['발신자 없음 또는 형식 오류 — inventory/config/host_audit.mail_sender(주소 1개)'] if (_from.addresses | length != 1 or _from.invalid > 0) else []) }}
   ansible.builtin.set_fact:
@@ -72,12 +78,20 @@
     - _host_audit_mail_plan.send | bool
     - _host_audit_mail_problem | length == 0
   vars:
-    # 첨부는 보고서 1개 + (요약에 xlsx_zip이 있고 호출자가 경로를 준) xlsx zip 1개. 이름은 요약의 ASCII 이름이다.
+    # 첨부는 보고서 1개 + (요약에 xlsx_zip이 있고 호출자가 경로를 준) xlsx zip 1개 + (요약에 log_review가 있고 경로를 준)
+    # Log Review Report 1개. 이름은 요약의 ASCII 이름이다.
+    _host_audit_mail_has_zip: >-
+      {{ (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip
+          and (_host_audit_mail_xlsx_path | default('')) | length > 0) | bool }}
+    _host_audit_mail_has_log_review: >-
+      {{ (host_audit_mail_doc.log_review is defined and host_audit_mail_doc.log_review
+          and (_host_audit_mail_log_review_path | default('')) | length > 0) | bool }}
     _host_audit_mail_attachments: >-
       {{ [{'src': _host_audit_mail_report_path, 'name': host_audit_mail_doc.report.file_name}]
          + ([{'src': _host_audit_mail_xlsx_path, 'name': host_audit_mail_doc.xlsx_zip.file_name}]
-            if (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip
-                and (_host_audit_mail_xlsx_path | default('')) | length > 0) else []) }}
+            if _host_audit_mail_has_zip | bool else [])
+         + ([{'src': _host_audit_mail_log_review_path, 'name': host_audit_mail_doc.log_review.file_name}]
+            if _host_audit_mail_has_log_review | bool else []) }}
   block:
     - name: "[AUD-604] Create a private temporary directory for the attachment"
       ansible.builtin.tempfile:
@@ -85,7 +99,7 @@
         prefix: host-audit-mail.
       register: _host_audit_mail_tmp
 
-    - name: "[AUD-605] Copy the report and the xlsx zip under their ASCII attachment names"
+    - name: "[AUD-605] Copy the report, the xlsx zip and the Log Review Report under their ASCII attachment names"
       ansible.builtin.copy:
         src: "{{ item.src }}"
         dest: "{{ _host_audit_mail_tmp.path }}/{{ item.name }}"
@@ -95,7 +109,7 @@
         label: "{{ item.name }}"
       register: _host_audit_mail_copied
 
-    - name: "[AUD-606] Send the summary, the A4 report and the xlsx zip (community.general.mail)"
+    - name: "[AUD-606] Send the summary, the A4 report, the xlsx zip and the Log Review Report (community.general.mail)"
       community.general.mail:
         host: "{{ host_audit_mail_host }}"
         port: "{{ host_audit_mail_port | int }}"
@@ -112,7 +126,8 @@
         headers: >-
           {{ ['X-Host-Audit-Run-Id=' ~ host_audit_mail_doc.run_id,
               'X-Host-Audit-Report-SHA256=' ~ host_audit_mail_doc.report.sha256]
-             + (['X-Host-Audit-Xlsx-Zip-SHA256=' ~ host_audit_mail_doc.xlsx_zip.sha256] if _host_audit_mail_attachments | length > 1 else []) }}
+             + (['X-Host-Audit-Xlsx-Zip-SHA256=' ~ host_audit_mail_doc.xlsx_zip.sha256] if _host_audit_mail_has_zip | bool else [])
+             + (['X-Host-Audit-Log-Review-SHA256=' ~ host_audit_mail_doc.log_review.sha256] if _host_audit_mail_has_log_review | bool else []) }}
       loop: "{{ _host_audit_mail_rcpt.to }}"
       loop_control:
         index_var: _host_audit_mail_idx
@@ -153,6 +168,8 @@
       {{ ('메일 보냄 — 수신 ' ~ host_audit_mail_outcome.recipients ~ '명, 첨부 ' ~ host_audit_mail_doc.report.file_name
           ~ ', SHA-256 ' ~ host_audit_mail_doc.report.sha256
           ~ (', xlsx zip ' ~ host_audit_mail_doc.xlsx_zip.file_name ~ ', SHA-256 ' ~ host_audit_mail_doc.xlsx_zip.sha256
-             if host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip else '')) if host_audit_mail_outcome.sent | bool
+             if host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip else '')
+          ~ (', Log Review ' ~ host_audit_mail_doc.log_review.file_name ~ ', SHA-256 ' ~ host_audit_mail_doc.log_review.sha256
+             if host_audit_mail_doc.log_review is defined and host_audit_mail_doc.log_review else '')) if host_audit_mail_outcome.sent | bool
          else ('메일 안 보냄 — ' ~ host_audit_mail_outcome.skipped_reason) if not (_host_audit_mail_plan.send | bool)
          else ('메일 실패 — ' ~ host_audit_mail_outcome.error) }}

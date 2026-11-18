@@ -112,6 +112,18 @@ _Avoid_: drift (unqualified), config change, diff
 The previous scheduled Host Audit run, against which the current run marks each finding as new, resolved, recurring or persisting and each Asset Inventory change (new account, port, privileged user). An on-demand run is kept but never becomes the baseline. A finding is recurring when a scheduled run in the past twelve months had marked it resolved.
 _Avoid_: previous run (when an on-demand run could be meant), last audit, snapshot
 
+**Log Review**:
+The monthly review by a person of one calendar month of the logs held centrally in OpenObserve — those of the hosts Host Audit inspects and of the network and security devices and services whose logs are collected there — item by item against the log review items of the company's log and security-policy review ledger (AK-034), ending in a Log Review Report that the CISO approves by signature. Every such host is reviewed each month, which is more often than the company guideline asks of hosts other than personal information processing systems; those systems are marked separately because the company guideline sets their review at monthly to meet the legal duty to review access records on a cycle the company itself sets. Logs that are not collected centrally are outside it, and the report names them and the review items they leave unchecked. Figures and threshold breaches are drafted automatically, but the verdict, the reviewer's remarks and the actions taken are the reviewer's; a draft no person has completed is not a Log Review.
+_Avoid_: 로그 점검, log audit, 감사 (Host Audit and Audit Watch Key already use "audit")
+
+**Log Review Report**:
+The record of one calendar month's Log Review, Security Policy Review and state of log management (collection gaps, retention, time synchronisation): the period and hosts reviewed, each review item with how it was checked, what was found and the verdict — an item that could not be checked is named as such with the reason, never dropped or marked not applicable — the actions taken, and the signatures with dates of the reviewer, the information security manager and the CISO. A signed copy is kept beside it, and the next month's report says whether it was. Sent as a separate attachment in the same mail as a Host Audit report, but not part of that report.
+_Avoid_: 로그 점검 보고서, log audit report
+
+**Security Policy Review**:
+The periodic review of whether the policies set on a security system (the firewalls) are still appropriate — rules unused for a long time, left behind by a departure or a role change, kept from a test, allowing too much, past their period, duplicated, or naming addresses no longer in use — against the security-policy items of the same company ledger (AK-034). It reads the policies themselves, not logs, so it is not part of Log Review, although its result travels in the same Log Review Report under the same signatures.
+_Avoid_: firewall audit, 정책 점검 (unqualified), rule cleanup (that is the fix, not the review)
+
 **Log Type**:
 The routing key (`log_type`: `security_logs`, `system_logs`, `app_logs`, `backup_logs`) that decides which OpenObserve stream, and so which retention, a log record goes to. Not a service name: `service.name` says which file group or daemon produced the record and is what operators filter on; one Log Type holds several service names.
 _Avoid_: log category, stream tag

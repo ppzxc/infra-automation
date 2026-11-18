@@ -13,11 +13,13 @@
 "inventory/config/host_audit": inventory/config/host_audit.schema.json
 "inventory/config/openobserve_config": inventory/config/openobserve_config.schema.json
 "inventory/config/github_webhook_watch": inventory/config/github_webhook_watch.schema.json
+"inventory/config/log_review": inventory/config/log_review.schema.json
 "secrets/assets/+/credentials/+": secrets/credential.schema.json
 "secrets/assets/+/agents": secrets/agents.schema.json
 "secrets/automation/ssh": secrets/automation_ssh.schema.json
 "secrets/services/openobserve/admin": secrets/services/basic_auth.schema.json
 "secrets/services/openobserve/ingest": secrets/services/basic_auth.schema.json
+"secrets/services/openobserve/readonly": secrets/services/basic_auth.schema.json
 "secrets/services/rustfs/maintenance": secrets/services/access_key.schema.json
 "secrets/services/rustfs/audit_reports": secrets/services/access_key.schema.json
 "secrets/services/alert/notify": secrets/services/alert_notify.schema.json

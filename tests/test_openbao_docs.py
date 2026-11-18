@@ -88,6 +88,7 @@ def test_index_covers_every_document_kind_of_the_skeleton():
         "secrets/services/funa/proxy", "secrets/services/funa/vrrp", "secrets/services/semaphore/inventory_read",
         "secrets/automation/ssh", "inventory/operators/alice", "inventory/config/common",
         "inventory/config/host_audit", "inventory/config/openobserve_config", "inventory/config/github_webhook_watch",
+        "inventory/config/log_review",
     ]
     for p in paths:
         assert ov.resolve_schema(p, SCHEMA_DIR) is not None, p

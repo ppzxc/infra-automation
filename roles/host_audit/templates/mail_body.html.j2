@@ -54,9 +54,14 @@
         <b>xlsx zip SHA-256</b> <span style="font-family:Consolas,'Courier New',monospace;word-break:break-all;">{{ s.xlsx_zip.sha256 | e }}</span><br>
         <b>xlsx zip 보관</b> {{ s.xlsx_zip.archive | e }}
 {% endif %}
+{% if s.log_review is defined and s.log_review %}
+        <br><b>첨부</b> {{ s.log_review.file_name | e }} — Log Review Report({{ s.log_review.period | e }}분 로그·보안정책 검토 초안). 점검자가 최종 판정·소견·조치를 쓰고 3단 결재합니다.<br>
+        <b>Log Review SHA-256</b> <span style="font-family:Consolas,'Courier New',monospace;word-break:break-all;">{{ s.log_review.sha256 | e }}</span><br>
+        <b>Log Review 보관</b> {{ s.log_review.archive | e }}
+{% endif %}
       </td></tr>
     </table>
-    <div style="padding-top:10px;font-size:11px;color:#667085;{{ font }}">이 메일은 Host Audit(읽기 전용 정기 점검)이 자동으로 보냈습니다. 첨부의 SHA-256(보고서·xlsx zip)이 보관 원본과 같은지 확인할 수 있습니다.</div>
+    <div style="padding-top:10px;font-size:11px;color:#667085;{{ font }}">이 메일은 Host Audit(읽기 전용 정기 점검)이 자동으로 보냈습니다. 첨부의 SHA-256(보고서·xlsx zip·Log Review Report)이 보관 원본과 같은지 확인할 수 있습니다.</div>
   </td></tr>
 </table>
 </td></tr>

@@ -1,55 +1,149 @@
 # 월간 로그 점검 런북
 
-> 운영자가 매달 한 번 따라 하는 로그 점검 절차와 기록 양식이다(ISMS 정기 점검 증적, Spec #322 / Ticket-11, #333). 공개 저장소라 IP·계정·포트·장비 식별자와 실제 점검 결과는 적지 않는다. **실제 점검 기록은 비공개 노트에 둔다.** 이 문서에는 절차·쿼리·양식·관찰 목록만 있다.
+> 운영자가 매달 한 번 따라 하는 로그 점검 절차와 기록 양식이다(ISMS 2.9.5 정기 점검 증적, Spec #322 / Ticket-11, #333, 개정 Spec #544 / Ticket-10, #565, [ADR-0015](../adr/0015-log-review-report-drafted-by-host-audit.md)). 공개 저장소라 IP·계정·포트·장비 식별자와 실제 점검 결과는 적지 않는다. **실제 점검 기록과 서명본 사본은 비공개 노트에 둔다.** 이 문서에는 절차·쿼리·양식·관찰 목록만 있다.
 
 ## 점검 개요
 
-- **주기**: 매달 1회. 점검 기간은 직전 한 달(OpenObserve 화면의 시간 범위를 "지난 30일"로 둔다). 로그 보존은 서버 전역 365일이라 한 달 전 로그는 모두 남아 있다.
-- **담당과 기록 위치**: 점검자와 기록을 둘 비공개 노트의 위치는 운영에서 정한다. 이 문서는 어느 쪽이든 같은 양식으로 쓰도록 양식만 둔다.
-- **쓰는 화면**: OpenObserve 로그 화면(스트림을 고르고 SQL 모드로 쿼리), OpenObserve 알림 화면의 이력, Semaphore 작업 이력, 월간 Host Audit 보고서 메일.
-- **원칙**: 읽기만 한다. 점검 중 발견한 이상은 조치 전에 기록하고, 이슈에는 요약만 적는다(공개 저장소라 IP·포트·방화벽·SSH 약점 같은 상세는 비공개 노트에).
+- **방식**: 매달 1일 정기 실행(Host Audit — Monthly)이 전월 한 달(KST 달력 월)의 **Log Review Report** 초안을 만들어 월간 Host Audit 메일의 세 번째 첨부(A4 HTML)로 보낸다. 사람은 그 초안을 읽고 확인해 칸을 채우고 3단 서명한 뒤 서명 스캔본을 등록한다. 자동은 집계와 초안 판정까지이고 **최종 판정은 사람이 한다**([host_audit.md §18](../host_audit.md#18-log-review-report-spec-544--ticket-3-558-adr-0015)). 예전처럼 쿼리를 하나씩 돌려 옮겨 적지 않는다. 쿼리는 보고서가 '조회 실패'·'점검 불가'를 낸 항목과 보고서가 다루지 않는 항목을 그 달에 보완할 때만 쓴다(보완 절차).
+- **점검 기간**: 전월 1일 00:00 ~ 말일 24:00(KST). 예를 들어 11월 1일 실행은 10월을 점검한다. 보고서 머리에 기간이 적혀 있으니 그 기간을 그대로 따른다. OpenObserve 화면에서 쿼리를 돌릴 때는 시간 범위를 이 기간에 맞춘다. 로그 보존은 서버 전역 365일이다.
+- **구성**: 1부 로그 검토 19개 항목(회사 로그·보안정책 검토결과 대장 AK-034 순서), 2부 보안시스템 정책 적정성 9개 항목(Security Policy Review), 3부 로그 관리 상태 7개 항목(수집 공백·보존·시각 동기·백업·알림 이력·GitHub 감사 수집 상태·전월 서명본), 마지막 쪽 결재란. 항목마다 상태·점검 방법·판정 기준·결과 표와 사람이 쓰는 칸(최종 판정·점검자 소견·조치 내역)이 있고 이 칸은 항상 비어 온다.
+- **항목 상태 읽는 법**
+
+  | 상태 | 뜻 | 사람이 할 일 |
+  |---|---|---|
+  | 자동 판정(이상 없음) | 기준에 걸린 건이 없다 | 결과 표를 훑고 최종 판정에 옮긴다 |
+  | 자동 판정(확인 필요) | 기준에 걸린 건이 있다 | 결과 표의 행마다 사유를 확인해 소견에 적는다. 이상이면 조치를 적는다 |
+  | 일부 자동 | 수집 공백 호스트가 있거나 기준 목록의 일부만 자동으로 알 수 있다 | 요약에 적힌 호스트·부분을 사람이 보완한다(보완 절차) |
+  | 사람 대조 | 자동으로 판정할 수 없는 항목(1부 5번, 3부 알림 이력) | 해당 절차로 직접 대조한다 |
+  | 점검 불가(사유) | 필요한 데이터를 수집하지 않거나 판정이 구현되지 않았다 | 사유를 소견에 옮기고 가능하면 보완 절차로 보완한다. '해당 없음'이나 '이상 없음'으로 적지 않는다 |
+  | 조회 실패(사유) | 그 항목의 조회·판정이 실패했다 | 사유를 소견에 옮기고 보완 절차로 그 달에 수동 보완한다 |
+
+- **원칙**: 읽기만 한다. 점검 중 발견한 이상은 조치 전에 기록하고, 이슈에는 요약만 적는다(공개 저장소라 IP·포트·방화벽·SSH 약점 같은 상세는 비공개 노트에). 보고서 메일의 수신자는 점검자·결재자로 한정되어 있다. 보고서에는 출발지·계정명이 들어 있으니 전달·게시하지 않는다.
+- **쓰는 화면**: 메일(보고서), OpenObserve 로그·알림 화면, Semaphore 작업 이력, FortiGate 관리 화면(2부), GitHub 조직 감사 로그 화면(웹 UI).
 
 ## 월간 점검 절차
 
-쿼리의 출발지·호스트 이름은 결과에서 읽는다. "정상 출발지 목록"과 "수집 대상 호스트 목록"은 비공개 자료에 있다. 각 단계마다 결과를 아래 기록 양식에 한 줄씩 적는다.
+순서는 아래와 같다. 앞 단계가 끝나기 전에 서명으로 넘어가지 않는다.
 
-1. **수집이 끊긴 호스트 찾기 (`system_logs`)**: 호스트마다 지난 한 달 레코드가 있는지 본다. 수집 대상 호스트 목록과 대조해 빠진 호스트가 있으면 기록한다. 평소보다 건수가 크게 적은 호스트도 기록한다.
+1. **메일 수령**: 매달 1일 정기 실행이 끝나면 월간 Host Audit 메일이 온다(첨부는 Host Audit 보고서·Log Review Report). 메일 본문에 실행 ID와 Log Review Report의 SHA-256이 있다. **실행 ID를 비공개 노트에 적어 둔다.** 서명본 등록에 쓴다.
+   - 메일이 없거나 Log Review Report 첨부가 없으면 Semaphore 작업 이력에서 Host Audit — Monthly 실행을 확인한다. 보고서를 만들지 못하면 첨부를 뺀 메일이 나가고 실행은 실패로 끝난다. 메일 발송만 실패했으면 Host Audit — Resend 템플릿으로 보관본을 다시 보낸다([Semaphore 설정](../semaphore-setup.md)).
+   - 그 달 정기 실행이 실패해서 Monthly 템플릿을 수동으로 다시 돌린 경우, 그 실행이 정기 실행이고 새 실행 ID의 보고서가 만들어진다. 한 달에 보고서가 둘 이상 나왔으면 **결재할 한 부(실행 ID)를 정하고 비공개 노트에 적는다.** 서명본은 그 실행 ID로 등록한다.
+   - 수시 실행(On-demand)은 기본적으로 보고서를 만들지 않는다. 운영자가 환경 변수 `host_audit_log_review_enabled=true`로 켜서 만든 수시 실행 보고서는 형식·내용 시험용이다. 수시 실행은 기준선(정기 실행 기록)이 아니라 **그 보고서의 서명본은 등록할 수 없다.** 결재는 정기 실행 보고서로 한다.
+2. **자동 초안 확인**: 보고서 머리의 점검 기간·항목 상태 집계를 보고, 1부 19개·2부 9개·3부 7개를 위에서부터 읽는다. '확인 필요' 항목은 결과 표의 행마다 원인을 확인하고, '점검 불가'·'조회 실패'·'일부 자동' 항목은 보완 절차 A의 방법으로 보완한다. 3부의 수집 공백(전월 로그가 없거나 끊긴 호스트·장비)과 전월 서명본 줄은 그대로 소견에 옮긴다. 보고서 파일의 SHA-256이 메일 본문 값과 같은지도 본다(다르면 그 파일로 결재하지 않는다).
+3. **5번 휴가자 대조**: 1부 5번(휴직자 또는 휴가자 등의 접속한 행위)은 자동으로 판정하지 않는다. 보고서의 '계정별 접속일·호스트' 표를, 인사 담당에게서 받은 해당 월 휴직·휴가자 명단과 대조해 명단에 있는 사람의 접속일이 있는지 본다. 있으면 사유를 확인해 소견에 적고 조치가 필요하면 조치 내역에 적는다. **명단과 대조 결과의 상세(사람 이름·날짜)는 비공개 노트에 두고 보고서 소견에는 '대조함, 해당 있음/없음'과 조치 번호만 적는다.** 명단을 받지 못했으면 '대조 못 함(명단 미수령)'으로 적고 사유를 남긴다.
+4. **2부 정책 검토 기입**: 2부 9개 항목은 1차 구현에서 자동 조회가 없는 빈 표다(FortiGate 정책·Hit-Count 자동 조회는 후속 과제). 점검자가 방화벽 관리 화면에서 정책 목록과 Hit-Count를 직접 보고 항목마다 최종 판정·소견·조치 내역을 적는다. 사용하지 않는 정책(Hit-Count 0), 퇴직·직무변경 관련 정책, 테스트 정책, 과다 허용(Any 서비스·전체 대역), 사용기간 초과·중복·미사용 IP·대역·불필요한 목적지 정책을 본다. 정책 이름·주소 같은 상세는 비공개 노트에 두고 보고서에는 건수와 조치 번호만 적는다.
+5. **최종 판정·소견·조치**: 항목마다 사람이 쓰는 칸 세 개(최종 판정, 점검자 소견, 조치 내역)를 채운다. 비워 두는 항목이 없게 한다. 점검 불가 항목은 사유를 판정에 적는다. 이상은 이슈로 만들되 본문에는 요약만 적고 이슈 번호를 조치 내역에 쓴다. 보고서 원본(HTML)은 수정하지 않는다. 원본은 그대로 보관본(해시 고정)이고, 칸을 채운 결재본은 인쇄해서 만든다.
+6. **3단 서명**: 채운 결재본을 A4로 인쇄(또는 PDF로 출력)해 마지막 쪽 결재란에 **점검자 → 정보보호관리자 → 정보보호책임자(CISO)** 순서로 서명·일자를 받는다. 앞 서명자가 서명하기 전에 다음 서명자에게 넘기지 않는다.
+7. **서명본 등록**: 서명이 끝난 결재본 전체를 PDF로 스캔해 Host Audit 보관소에 올린다(절차는 아래 '서명본 등록'). 등록은 되돌릴 수 없으니 올리기 전에 그 절의 확인을 먼저 한다.
+8. **다음 달 확인**: 다음 달 보고서의 3부 7번과 결재란 위 문구가 '전월 서명본: 있음'인지 본다. '없음'이면 등록이 빠진 것이니 전월 실행 ID로 등록한다.
+9. **보고서 밖의 점검과 기록**: 방화벽 로그·스위치 로그·수집량·GitHub 감사 로그 내보내기(보완 절차 B·C)는 보고서가 다루지 않으니 그 달에 직접 본다. 점검 기록 양식(아래)을 채워 비공개 노트에 둔다.
 
-   ```sql
-   SELECT host_name, count(*) AS records FROM "system_logs" GROUP BY host_name ORDER BY records
-   ```
+## 보완 절차
 
-2. **SSH 로그인 실패 상위 출발지 (`security_logs`)**: 상위 출발지가 알려진 스캐너·내부 점검 도구인지 본다. 새로 올라온 출발지와 한 호스트에 몰린 시도를 기록한다.
+### A. '조회 실패'·'점검 불가'·'일부 자동' 항목을 그 달에 수동으로 보완하기
 
-   ```sql
-   SELECT source_address, count(*) AS failures FROM "security_logs"
-   WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
-   GROUP BY source_address ORDER BY failures DESC LIMIT 20
-   ```
+보고서는 판단하지 못한 항목을 비우거나 '이상 없음'으로 쓰지 않고 상태와 사유로 낸다. 그 항목은 사람이 그 달 안에 아래 방법으로 보완하고, 보완했다는 사실과 결과 요약을 그 항목의 점검자 소견에 적는다. 쿼리의 시간 범위는 보고서 머리의 점검 기간이다. 쿼리의 출발지·호스트 이름은 결과에서 읽고, "정상 출발지 목록"과 "수집 대상 호스트 목록"은 비공개 자료에 있다.
 
-3. **SSH 로그인 성공 (`security_logs`)**: 계정·출발지 조합이 정상 출발지 목록에 있는지 대조한다. root 성공과 목록에 없는 출발지의 성공은 모두 기록하고 사유를 확인한다.
+**조회 실패의 원인을 먼저 읽는다.** 사유에는 상태 코드와 종류만 있다(주소·계정은 없다).
 
-   ```sql
-   SELECT host_name, user_name, source_address, count(*) AS logins FROM "security_logs"
-   WHERE event_action = 'ssh_login' AND event_outcome = 'success'
-   GROUP BY host_name, user_name, source_address ORDER BY logins DESC LIMIT 50
-   ```
+| 사유 | 의미 | 조치 |
+|---|---|---|
+| 기준 목록 | 작업 설정 문서(정상 출발지 등)를 읽지 못했거나 형식이 틀렸다. 1부 6·7·12번에 나온다 | 운영자에게 알려 OpenBao 문서를 고치게 한다. 그 달에는 1부 6·7·12번을 아래 쿼리로 수동 보완한다 |
+| 401·403 | OpenObserve 조회 계정이 거부됐다 | 운영자에게 조회 계정을 확인시킨다. 그 달에는 아래 쿼리로 수동 보완한다 |
+| 연결 불가·5xx | OpenObserve에 닿지 못했다 | 서버 상태를 확인하고, 그 달에는 수동 보완한다 |
+| 조회 한도 | 결과가 한도에 닿아 잘렸을 수 있다 | 쿼리 범위를 호스트·일 단위로 나눠 수동으로 센다 |
+| 판정 오류 | 그 항목의 판정 코드가 실패했다. 실행도 실패로 끝난다 | 이슈로 올리고(요약만) 수동으로 보완한다 |
 
-4. **권한 상승 실패와 계정 변경 (`security_logs`)**: sudo 실패가 특정 계정에 몰리는지, 계정 추가·삭제·변경이 작업 일정과 맞는지 본다. 일정에 없는 변경은 기록한다.
+**보고서를 다시 만들어 보완하는 것은 기본 절차가 아니다.** 원인을 고친 뒤 Monthly를 다시 돌리면 새 실행 ID의 보고서가 만들어져 결재본이 둘이 된다(절차 1단계). 그 달에는 원인과 상관없이 수동 보완 결과를 소견에 적고 현재 보고서에 서명하는 쪽을 기본으로 한다.
 
-   ```sql
-   SELECT host_name, user_name, count(*) AS failures FROM "security_logs"
-   WHERE event_action = 'sudo' AND event_outcome = 'failure'
-   GROUP BY host_name, user_name ORDER BY failures DESC LIMIT 20
-   ```
+**항목별 보완 방법**(OpenObserve 로그 화면, SQL 모드)
 
-   ```sql
-   SELECT host_name, count(*) AS changes FROM "security_logs"
-   WHERE body LIKE '%type=ADD_USER%' OR body LIKE '%type=DEL_USER%' OR body LIKE '%type=USER_MGMT%'
-   GROUP BY host_name ORDER BY changes DESC
-   ```
+- **1부 1~4번(계정·업무시간)**: 서버 sshd 로그인 성공을 호스트·계정·출발지별로 센다. 호스트별 허용 계정 목록은 비공개 자료에 있다. 목록 밖 계정, 업무시간 밖·주말·공휴일 로그인, 업무시간 밖 sudo·su·계정 변경을 본다.
 
-5. **방화벽 로그 (`security_logs`, `service_name = 'fortigate-syslog'`)**: 장비마다 유형별 건수를 보고, 관리자 로그인 실패·설정 변경·중대 탐지가 있었는지 본다. 장비 이름 하나가 한 달 내내 안 보이면 수신 중단이다([방화벽 로그 런북](fortigate-syslog.md) 3절).
+  ```sql
+  SELECT host_name, user_name, source_address, count(*) AS logins FROM "security_logs"
+  WHERE event_action = 'ssh_login' AND event_outcome = 'success'
+  GROUP BY host_name, user_name, source_address ORDER BY logins DESC LIMIT 50
+  ```
+
+  ```sql
+  SELECT host_name, user_name, source_address, count(*) AS failures FROM "security_logs"
+  WHERE event_action = 'ssh_login' AND event_outcome = 'failure'
+  GROUP BY host_name, user_name, source_address ORDER BY failures DESC LIMIT 20
+  ```
+
+  ```sql
+  SELECT host_name, user_name, count(*) AS failures FROM "security_logs"
+  WHERE event_action = 'sudo' AND event_outcome = 'failure'
+  GROUP BY host_name, user_name ORDER BY failures DESC LIMIT 20
+  ```
+
+  ```sql
+  SELECT host_name, count(*) AS changes FROM "security_logs"
+  WHERE body LIKE '%type=ADD_USER%' OR body LIKE '%type=DEL_USER%' OR body LIKE '%type=USER_MGMT%'
+  GROUP BY host_name ORDER BY changes DESC
+  ```
+
+- **1부 6·7·12번(출발지)**: 위 첫 쿼리의 출발지를 정상 출발지 목록과 대조한다. 출발지가 다른 관리 호스트 주소인 로그인(6번), 목록 밖 출발지의 로그인(7번), 같은 계정이 2분 안에 출발지 둘 이상에서 성공한 구간(12번)을 찾는다. root 성공과 목록에 없는 출발지의 성공은 모두 사유를 확인한다.
+- **1부 13번(짧은 시간의 명령어 집중)**: 보고서가 같은 계정의 2분 내 sudo 30회 이상을 자동 판정한다(Ansible become 제외, sudo 명령만 본다). 조회 실패일 때는 호스트·계정별 sudo 건수가 분 단위로 몰린 구간이 있는지 직접 본다. 판정 함수가 없는 항목이 '점검 불가(미구현)'으로 나오면 같은 방식으로 직접 보고 이슈로 올린다.
+
+  ```sql
+  SELECT host_name, user_name, date_format(_timestamp, '%Y-%m-%d %H:%M', '+09:00') AS minute, count(*) AS records
+  FROM "security_logs" WHERE event_action = 'sudo' AND event_outcome = 'success'
+  GROUP BY host_name, user_name, minute ORDER BY records DESC LIMIT 20
+  ```
+
+- **장비 관리자 로그인(1·2·3·4·7·12번의 소제목 표)**: FortiGate는 관리자 로그인 계정·출발지·결과와 관리자 계정 변경을 자동 판정한다. 스위치는 로그인 실패·설정 변경을 장비 단위로만 세고(일부 자동) 나머지 칸은 '점검 불가(파싱 없음)'이다. 스위치의 계정·출발지는 원문(`Configured from console by <계정> on vty0 (<주소>)`, `[user: ...] [Source: ...]`)에만 있으므로 확인 필요 행이 있으면 원문을 연다.
+
+  ```sql
+  SELECT coalesce(device_id, device_name) AS device, event_name, body FROM "system_logs"
+  WHERE service_name = 'switch-syslog' AND event_name IN ('SEC_LOGIN-4-LOGIN_FAILED', 'SYS-5-CONFIG_I')
+  ORDER BY _timestamp DESC LIMIT 50
+  ```
+
+- **1부 8~11·14~19번(개인정보 조회·다운로드·업무 승인 관련)**: 애플리케이션 접속기록·업무 기록을 수집하지 않아 매달 '점검 불가(애플리케이션 접속기록·업무 기록 미수집)'이다. 서버 로그로는 대신할 수 없다. 해당 개인정보처리시스템의 담당자에게서 그 시스템 자체의 접속기록 점검 결과를 받아 소견에 '해당 시스템 점검 결과 수령(위치)'으로 적는다. 받지 못하면 '점검 불가'로 남기고 사유를 적는다. 이 공백은 매달 보고서에 나타나며 수집은 후속 과제다.
+- **2부 1~9번**: 자동 조회가 없다. 절차 4단계로 점검자가 직접 기입한다.
+- **3부 1번(수집 공백)**: 호스트마다 지난 한 달 레코드가 있는지, 일자별 빈 날이 있는지 본다. 수집 대상 호스트 목록과 대조해 빠진 호스트와 평소보다 건수가 크게 적은 호스트를 적는다.
+
+  ```sql
+  SELECT host_name, count(*) AS records FROM "system_logs" GROUP BY host_name ORDER BY records
+  ```
+
+  ```sql
+  SELECT host_name, date_format(_timestamp, '%Y-%m-%d', '+09:00') AS day, count(*) AS records
+  FROM "system_logs" GROUP BY host_name, day ORDER BY host_name, day
+  ```
+
+- **3부 2번(보존 기간, '일부 자동')**: OpenObserve 스트림 설정 화면에서 스트림별 보존 기간이 서버 전역 값(365일, 개인정보처리시스템은 2년 기준)에서 바뀌지 않았는지 직접 확인한다. 서버 값은 조회 API로 읽을 수 없어 보고서가 저장소 선언과만 대조한다.
+- **3부 3번(시각 동기)**: 미동기·오차 1초 초과 판독과 판독이 없는 호스트를 본다. 수집 도구가 없는 호스트(구형 OS)는 보고서가 '확인 불가'로 낸다. 그런 호스트는 호스트 쪽 시각 동기 방식(주기 동기 등)을 비공개 자료에서 확인해 소견에 적는다.
+
+  ```sql
+  SELECT host_name, sync_status, count(*) AS readings FROM "host_status_logs"
+  WHERE kind = 'time_sync' AND sync_status <> 'synced'
+  GROUP BY host_name, sync_status ORDER BY readings DESC
+  ```
+
+- **3부 4번(전월 백업 결과)**: 실패한 백업과 한 달 안에 성공 기록이 없는 호스트를 본다. 유지보수(`job = 'maintenance'`) 실패와 무결성 검사 실패도 함께 본다.
+
+  ```sql
+  SELECT host, job, command, count(*) AS failures FROM "backup_logs"
+  WHERE success = false GROUP BY host, job, command ORDER BY failures DESC
+  ```
+
+  ```sql
+  SELECT host, count(DISTINCT date_format(_timestamp, '%Y-%m-%d', '+09:00')) AS success_days FROM "backup_logs"
+  WHERE job = 'backup' AND success = true GROUP BY host ORDER BY success_days
+  ```
+
+- **3부 5번(알림 이력)**: 보고서가 읽을 수 없는 '사람 대조' 항목이다. OpenObserve 알림 화면에서 점검 기간에 발생한 알림을 이름별로 센다. 같은 알림이 같은 호스트에서 반복되면 원인이 풀렸는지, 조건을 조정할지 기록한다. 조치 없이 닫힌 알림은 사유를 기록한다([알림 런북](alerts.md)).
+- **3부 6번(GitHub 감사 로그 수집 상태)**: 보고서의 전달 점검 판정이 실패하면 전달 점검 알림 이력과 웹훅 화면에서 끊긴 구간을 직접 본다. 조직 웹훅에는 로그인 이벤트가 없으니 아래 C의 웹 UI 내보내기로 보완한다([수집 범위와 공백](github-audit-webhook.md) 1.2).
+- **3부 7번(전월 서명본)**: '없음'이면 전월 실행 ID로 등록한다(서명본 등록). '확인 실패'면 보관소 조회 오류이니 운영자에게 알리고 등록 여부를 확인한 뒤 같은 입력으로 다시 시도한다.
+
+### B. 보고서가 다루지 않는 항목(방화벽·스위치 로그, 수집량)
+
+수집 공백(3부 1번)은 장비가 한 달 내내 안 보이는지만 알려 준다. 장비 로그 내용은 사람이 본다. 보고서의 1부는 서버 sshd·sudo 기록이 기준이다.
+
+1. **방화벽 로그(`security_logs`, `service_name = 'fortigate-syslog'`)**: 장비마다 유형별 건수를 보고, 관리자 로그인 실패·설정 변경·중대 탐지가 있었는지 본다([방화벽 로그 런북](fortigate-syslog.md) 3절).
 
    ```sql
    SELECT device_name, fortigate_log_type, fortigate_log_subtype, count(*) AS records FROM "security_logs"
@@ -57,21 +151,14 @@
    GROUP BY device_name, fortigate_log_type, fortigate_log_subtype ORDER BY records DESC
    ```
 
-6. **스위치 로그 (`system_logs`, `service_name = 'switch-syslog'`)**: 메시지 코드별 건수로 설정 변경·로그인 실패·MAC 플랩이 있었는지 본다. 새로 많아진 코드는 잡음 목록에 넣을지 알림에 넣을지 판단해 기록한다([스위치 로그 런북](switch-syslog.md), [알림 런북](alerts.md)).
+2. **스위치 로그(`system_logs`, `service_name = 'switch-syslog'`)**: 메시지 코드별 건수로 설정 변경·로그인 실패·MAC 플랩이 있었는지 본다. 새로 많아진 코드는 잡음 목록에 넣을지 알림에 넣을지 판단해 기록한다([스위치 로그 런북](switch-syslog.md), [알림 런북](alerts.md)).
 
    ```sql
    SELECT event_name, count(*) AS records FROM "system_logs"
    WHERE service_name = 'switch-syslog' GROUP BY event_name ORDER BY records DESC LIMIT 20
    ```
 
-7. **백업 결과 (`backup_logs`)**: 실패한 백업과, 한 달 안에 성공 기록이 없는 호스트를 본다. 유지보수(`job = 'maintenance'`) 실패와 무결성 검사 실패도 함께 본다.
-
-   ```sql
-   SELECT host, job, command, count(*) AS failures FROM "backup_logs"
-   WHERE success = false GROUP BY host, job, command ORDER BY failures DESC
-   ```
-
-8. **하드웨어·시각 동기 점검 (`host_status_logs`)**: RAID 이상 판독과 시각 동기가 어긋난 호스트를 본다. 같은 호스트에서 반복되면 알림이 닫혔는지, 조치 일정이 있는지 기록한다.
+3. **RAID·하드웨어(`host_status_logs`)**: RAID 이상 판독이 반복되는 호스트는 알림이 닫혔는지, 조치 일정이 있는지 기록한다.
 
    ```sql
    SELECT host_name, kind, hw_name, raw_state, count(*) AS readings FROM "host_status_logs"
@@ -79,42 +166,50 @@
    GROUP BY host_name, kind, hw_name, raw_state ORDER BY readings DESC
    ```
 
-   ```sql
-   SELECT host_name, sync_status, count(*) AS readings FROM "host_status_logs"
-   WHERE kind = 'time_sync' AND sync_status <> 'synced'
-   GROUP BY host_name, sync_status ORDER BY readings DESC
-   ```
+4. **수집량**: 스트림별 일일 수집량이 지난달과 크게 다르지 않은지 본다(관찰 목록의 로그량 재측정과 같은 화면).
 
-9. **알림 이력**: OpenObserve 알림 화면에서 지난 한 달 발생한 알림을 이름별로 센다. 같은 알림이 같은 호스트에서 반복되면 원인이 풀렸는지, 조건을 조정할지 기록한다. 조치 없이 닫힌 알림이 있으면 사유를 기록한다([알림 런북](alerts.md)).
-10. **월간 Host Audit 보고서**: 보고서 메일이 도착했는지, 지난달보다 나빠진 항목이 있는지 본다. 보고서가 오지 않았으면 Semaphore 작업 이력에서 월간 Host Audit 실행 결과를 확인한다.
-11. **수집량과 보존**: 스트림별 일일 수집량이 지난달과 크게 다르지 않은지 본다(관찰 목록의 로그량 재측정과 같은 화면). 보존 기간이 서버 전역 값(365일)에서 바뀌지 않았는지 확인한다.
-12. **GitHub 조직 감사 로그 내보내기 (웹 UI)**: 조직 owner가 조직 설정의 감사 로그 화면에서 지난 한 달을 JSON(또는 CSV)으로 내보내 본다. 조직 웹훅은 로그인·2FA·토큰 사용·Actions 설정 변경·시크릿 변경을 받지 못하므로 이 공백을 여기서 보완한다([수집 범위와 공백](github-audit-webhook.md) 1.2). 로그인 실패·낯선 로그인, 2FA 해제, 토큰·키 사용, Actions·시크릿 변경이 작업 일정과 맞는지 보고, 웹훅이 끊긴 구간(전달 점검 알림 이력, 재전송 가능 기간 3일 초과 실패)이 있었다면 그 구간의 관리 변경을 이 내보내기로 대조한다. 내보내기는 최근 180일이 한도이고(한 달 주기면 충분하다) 파일은 비공개 노트에 둔다. **Free 조직에서 이 화면과 내보내기가 되는지는 미확인이다(공식 문서에 플랜 제한 근거도, 되는 근거도 없다). Ticket-1에서 확인하지 못했으므로 Ticket-8 서버 적용에서 실제 owner 계정으로 실측한 뒤 이 단계를 확정한다.** 안 되면 기록 양식에 "수집 불가"로 적고 사용자에게 보고한다.
-13. **기록과 후속**: 점검 기록 양식을 채워 비공개 노트에 둔다. 조치가 필요한 항목은 이슈로 만들되 본문에는 요약만 적고 상세는 비공개 노트에 둔다.
+### C. GitHub 조직 감사 로그 내보내기 (웹 UI)
+
+조직 owner가 조직 설정의 감사 로그 화면에서 점검 기간을 JSON(또는 CSV)으로 내보내 본다. 조직 웹훅은 로그인·2FA·토큰 사용·Actions 설정 변경·시크릿 변경을 받지 못하므로 이 공백을 여기서 보완한다([수집 범위와 공백](github-audit-webhook.md) 1.2). 로그인 실패·낯선 로그인, 2FA 해제, 토큰·키 사용, Actions·시크릿 변경이 작업 일정과 맞는지 보고, 웹훅이 끊긴 구간(재전송 가능 기간 3일 초과 실패)이 있었다면 그 구간의 관리 변경을 이 내보내기로 대조한다. 내보내기는 최근 180일이 한도이고(한 달 주기면 충분하다) 파일은 비공개 노트에 둔다. **Free 조직에서 이 화면과 내보내기가 되는지는 미확인이다(공식 문서에 플랜 제한 근거도, 되는 근거도 없다). Ticket-1에서 확인하지 못했으므로 Ticket-8 서버 적용에서 실제 owner 계정으로 실측한 뒤 이 단계를 확정한다.** 안 되면 기록 양식에 '수집 불가'로 적고 사용자에게 보고한다.
+
+## 서명본 등록
+
+결재가 끝난 Log Review Report의 서명 스캔본(PDF)을 그 보고서를 만든 **정기 실행의 보관 경로**에 올린다(Semaphore 템플릿 `Host Audit — Register Signed Log Review`). 다음 달 정기 실행의 보고서가 '전월 서명본: 있음(일시·SHA-256)/없음'을 적는다. 세부는 [host_audit.md §18.3](../host_audit.md#183-서명본-등록과-전월-서명본-확인-ticket-9-564), Semaphore 입력은 [semaphore-setup.md](../semaphore-setup.md)의 해당 템플릿 설명이다.
+
+**올리기 전에 반드시 확인한다. 보관소는 3년 잠금이고 보관 키에 삭제 권한이 없어 잘못 올리면 지울 수 없다**(관리자 우회 권한으로만 지울 수 있다). 같은 실행에 서명본을 다시 올리는 방법도 없다.
+
+1. **실행 ID 확인**: 서명한 보고서의 실행 ID(메일 본문, 형식 `ha-<UTC 시작 시각>`)를 절차 1단계에서 적어 둔 값과 맞춘다. 서명한 보고서가 **정기 실행의 보고서**인지, 점검 월이 맞는지 확인한다. 다른 달 보고서의 서명본을 올바른 해시로 올리면 템플릿이 막지 못하고 지울 수도 없다(서명본 내용은 검증하지 않는다).
+2. **PDF 확인**: 파일을 열어 모든 쪽이 있고 점검자·정보보호관리자·CISO 서명과 일자가 모두 있는지 본다(서명이 실제로 있는지는 템플릿이 확인하지 않는다). 형식은 PDF여야 하고 심볼릭 링크가 아닌 일반 파일, 크기는 상한(기본 20 MiB) 이하여야 한다.
+3. **접수 폴더에 두기**: 러너 호스트의 접수 폴더(컨테이너 안 경로 `host_audit_signed_intake_dir`)에 `<실행 ID>.pdf`로 둔다(폴더 `0700`·파일 `0600`). 이 폴더를 러너 컨테이너 안에서 보이게 바인드 마운트하는 것은 운영자의 1회 준비 작업이다. 마운트가 없으면 등록이 '서명본 파일이 접수 폴더에 없음'으로 멈춘다(아무것도 올리지 않는다).
+4. **해시 계산**: 같은 파일을 `sha256sum <실행 ID>.pdf`로 계산한다. 이 값이 입력이다.
+5. **템플릿 실행**: Semaphore에서 `Host Audit — Register Signed Log Review`를 실행하고 Survey `host_audit_signed_run_id`에 실행 ID, `host_audit_signed_sha256`에 해시를 넣는다. Semaphore는 실행 때 파일을 받지 못하므로 파일은 접수 폴더로만 전달한다. 보관소 키는 운영자에게 주지 않는다(템플릿이 Host Audit의 보관 키로 올린다).
+6. **결과 확인**: 템플릿은 올리기 전에 입력 형식(실행 ID·해시), 파일(일반 파일, 0바이트 초과 상한 이하, 머리 `%PDF-`, 입력 해시 일치), 보관소(정기 실행 포인터, 그 실행의 Log Review Report 기록, 이미 등록되지 않음)를 모두 확인하고 하나라도 어긋나면 아무것도 올리지 않고 멈춘다. 성공하면 접수 폴더의 파일을 지우고 작업 로그 끝에 보관 위치·SHA-256·크기를 남긴다. 그 줄을 비공개 노트의 점검 기록에 옮긴다. 실패하면 사유(해시 불일치·PDF 아님·실행 ID 오타나 수시 실행·이미 등록됨·보관소 오류)를 읽고 입력을 고쳐 다시 한다. 보관소 조회가 403·5xx·연결 불가면 등록 여부를 알 수 없으니 운영자에게 알리고 같은 입력으로 다시 한다.
+7. 서명본 사본은 비공개 노트에도 둔다.
 
 ## 점검 기록 양식
 
-비공개 노트에 이 표를 복사해 매달 새로 채운다. 이 문서(공개 저장소)에는 채운 기록을 올리지 않는다.
+비공개 노트에 이 표를 복사해 매달 새로 채운다. 이 문서(공개 저장소)에는 채운 기록을 올리지 않는다. 항목별 판정·소견·조치는 서명한 보고서(서명본)가 증적이고, 이 양식은 보고서에 없는 보완 점검과 보관 위치를 잇는 기록이다.
 
 ```text
 월간 로그 점검 기록
 - 점검 기간: YYYY-MM-DD ~ YYYY-MM-DD
 - 점검일:
 - 점검자:
+- 보고서 실행 ID / SHA-256:
+- 서명 일자(점검자 / 정보보호관리자 / CISO):
+- 서명본 등록일 / 등록 SHA-256 / 보관 위치(작업 로그 끝 줄):
 
 | 단계 | 점검 항목 | 결과(정상 / 이상 / 확인 필요) | 근거(쿼리·화면, 건수) | 조치(이슈 번호·담당·기한) |
 |---|---|---|---|---|
-| 1 | 수집이 끊긴 호스트 | | | |
-| 2 | SSH 로그인 실패 상위 출발지 | | | |
-| 3 | SSH 로그인 성공(root·목록 밖 출발지) | | | |
-| 4 | 권한 상승 실패·계정 변경 | | | |
-| 5 | 방화벽 로그 | | | |
-| 6 | 스위치 로그 | | | |
-| 7 | 백업 결과 | | | |
-| 8 | 하드웨어·시각 동기 | | | |
-| 9 | 알림 이력 | | | |
-| 10 | 월간 Host Audit 보고서 | | | |
-| 11 | 수집량·보존 | | | |
-| 12 | GitHub 감사 로그 내보내기(웹 UI, Free 조직 가능 여부 미확인) | | | |
+| 1 | 보고서 수령·해시 대조 | | | |
+| 2 | 점검 불가·조회 실패·일부 자동 항목의 수동 보완(항목 번호별) | | | |
+| 3 | 1부 5번 휴가자 대조(명단 수령 여부) | | | |
+| 4 | 2부 정책 검토 기입 | | | |
+| 5 | 방화벽 로그(보완 절차 B) | | | |
+| 6 | 스위치 로그(보완 절차 B) | | | |
+| 7 | RAID·하드웨어·수집량(보완 절차 B) | | | |
+| 8 | GitHub 감사 로그 내보내기(웹 UI, Free 조직 가능 여부 미확인) | | | |
+| 9 | 전월 서명본 등록 확인 | | | |
 
 - 종합 의견:
 - 다음 점검에서 추적할 항목:

@@ -97,6 +97,14 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_kisa_alert_enabled` | `true` | 정기 실행의 KISA 월간 악화 알림(§15, #331). false면 알리지 않음 |
 | `host_audit_alert_validate_certs` | `true` | 알림 webhook TLS 검증. 주소는 OpenBao `secrets/services/alert/notify`의 `url`(과 선택 `token`·`auth_header`)이고 실행 변수로 덮어쓰지 않는다 |
 | `host_audit_environment` | 공용 `deployment_environment`(`playbooks/group_vars/all.yml`, `production`) | 점검 기록의 환경(`declared.environment`). 모든 호스트가 같은 값이라 인벤토리 변수가 아니라 공용 값이고, Host Agents(`host_agents_environment`)와 한 곳에서 정한다. 역할만 따로 돌리는 시험·molecule은 `deployment_environment`를 직접 준다. `-e`로 덮어쓸 수 있다 |
+| `host_audit_log_review_enabled` | `false` | 수시 실행에서도 Log Review Report를 만든다(§18). 정기 실행은 이 값과 무관하게 만든다 |
+| `host_audit_log_review_timeout` · `host_audit_log_review_validate_certs` | `120` · `true` | OpenObserve `_search` 한 번의 최대 시간(초)과 TLS 검증. 주소·조직은 `inventory/services/openobserve`, 계정은 `secrets/services/openobserve/readonly`이고 실행 변수로 덮어쓰지 않는다 |
+| `host_audit_log_review_collect_hosts` · `host_audit_log_review_devices` | 수집 로스터(`o2c_roster('collect')`) · `fortigate_firewalls` 그룹 + `host_audit_log_review_switch_syslog_devices`(`o2c_switch_syslog_roster`와 같은 목록) | 3부 수집 공백의 수집 대상(§18). 3부 시각 동기·백업 대상도 같은 수집 로스터 |
+| `host_audit_log_review_business_hours` · `host_audit_log_review_holidays` · `host_audit_log_review_failure_threshold` · `host_audit_log_review_failure_window_minutes` | `{start: 8, end: 20}` · 연도별 공휴일(2026) · `5` · `10` | 1부 1~5번 판정 기준(§18.2). 업무시간은 평일 정시 구간(끝 미포함) KST이고 정시가 아니면 3·4번이 판정 오류가 된다. 공휴일은 `"YYYY": ["YYYY-MM-DD", ...]`이고 점검 달의 연도가 없으면 보고서가 '공휴일 목록 없음'으로 적는다 |
+| `host_audit_log_review_log_management` | `retention_days` `{security_logs: 365, system_logs: 365, backup_logs: 365}`, `personal_info_system: false`, `time_sync_max_offset_ms: 1000` | 3부 보존 기간(저장소 선언 대 기준 1년, 개인정보처리시스템이면 2년)·시각 오차 기준(§18) |
+| `host_audit_log_review_multi_source_window_seconds` · `host_audit_log_review_multi_source_min_sources` | `120` · `2` | 1부 12번: 같은 계정이 이 시간(초, 경계 포함) 안에 이 개수 이상의 출발지에서 로그인 성공하면 '확인 필요'(§18) |
+| `host_audit_log_review_command_burst_threshold` · `host_audit_log_review_command_burst_window_minutes` | `30` · `2` | 1부 13번: 같은 계정(호스트 무관)이 이 시간(분) 안에 sudo를 이 횟수 이상 실행하면 '확인 필요'(§18.4) |
+| `host_audit_log_review_device_parsing` | FortiGate 1·2·3·4·7·12번 `auto`, 스위치 2·4번 `partial` | 장비 관리자 로그인 적용 표(§18.4). 없는 칸은 '점검 불가(파싱 없음)' |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
 | `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |
@@ -504,6 +512,9 @@ Asset Inventory 항목은 발견이 아니라 변경이다: 기준선 대비 **�
 | `inventory/services/rustfs` | `region` | | 기본 `us-east-1` |
 | `secrets/services/alert/notify` | `url`, 선택 `token`·`auth_header` | ● (악화 알림이 있을 때, url만 필수) | KISA 악화 알림 webhook(§15). `token`이 있을 때만 `auth_header`(기본 `X-NANOIT-ACCESS`) 헤더로 붙인다. 못 읽어도 보관·메일은 막히지 않는다 |
 | `inventory/config/host_audit` | `mail_recipients`, `mail_sender`, `mail_sender_display_name` | (필수 키 없음) | 메일 입력(§13.3). 없으면 읽기 실패가 아니라 메일 문제로 남는다 |
+| `inventory/services/openobserve` | `url`, 선택 `org`·`ca_file` | ● (Log Review Report를 만들 때) | OpenObserve 주소(비밀 아님, §18). `org` 기본 `default` |
+| `secrets/services/openobserve/readonly` | `username`, `password` | ● (Log Review Report를 만들 때) | OpenObserve 조회 전용 용도 계정(정책 `openobserve-readonly`, 읽기만). 서버가 조회 전용을 강제하지 못하므로 역할은 `POST _search`만 부른다(§18). 못 읽으면 보고서 항목이 '조회 실패'이고 실행은 계속된다 |
+| `inventory/config/log_review` | `normal_sources`, 선택 `internal_addresses`·`personal_info_systems`·`device_admin_accounts` | ● (Log Review Report를 만들 때) | Log Review 판정 기준 목록(정책 `config-host-audit`, 읽기만, 에이전트 세션 deny): 정상 출발지(IP·CIDR), 인벤토리에서 계산되지 않는 내부 주소 대응, 개인정보처리시스템 표시(§18). 조회 입력과 따로 읽어 없거나 못 읽으면 1부 6·7·12번만 '조회 실패(기준 목록)'다 |
 
 버킷 이름(`host_audit_storage_bucket`, 기본 `host-audit`)은 공개해도 되는 값이라 역할 기본값이다(전용 키의 정책이 이 버킷으로 범위가 정해져 있다). 주소·키는 대체값도 실행 변수(Extra variables) 덮어쓰기도 없다: 문서나 필수 키가 없으면 대체값 없이 보관 문제가 된다. 읽기 실패(문서 없음·403·연결 불가·인증 정보 없음)와 필수 키 누락은 실행을 여기서 멈추지 않고 `_host_audit_storage_problem`에 문서 경로와 키 이름만(값·원인은 가림) 남기며, 보고서는 비교 없이 만들어지고 `AUD-516`이 실행을 실패로 끝낸다. 보관 없이 돌리려면 `host_audit_storage_enabled=false`를 준다. 인증은 공용 읽기 지점의 AppRole(Semaphore Environment의 `VAULT_ROLE_ID`·`VAULT_SECRET_ID`)이다. 이 역할은 토큰을 따로 받아 두지 않는다(`_vault_token`을 만들지 않음): 읽는 태스크마다 새로 로그인하므로 앞 단계가 토큰 TTL(30분)보다 길어도 만료된 토큰을 쓰지 않는다. `host_audit_environment`는 `production|staging|development|test`만 허용한다(`AUD-001`). `host_audit` AppRole 정책이 위 문서를 읽는다(`openbao/`).
 
@@ -682,8 +693,8 @@ report.yml
 | `AUD-602` | `Read the Host Audit mail settings from OpenBao (inventory/config/host_audit)` | `ansible.builtin.set_fact` (`lookup openbao_doc`) | 러너 | 읽기 전용, `no_log`. 문서가 없으면 `{}`, 못 읽으면 값 없음(AUD-603이 문제로 남김) |
 | `AUD-603` | `Resolve the mail recipients and sender` | `ansible.builtin.set_fact` | 러너 | 수신자·발신자 주소와 선택 표시 이름(`From:` 헤더 값)을 해석, 문제는 키 이름·건수만, `no_log` |
 | `AUD-604` | `Create a private temporary directory for the attachment` | `ansible.builtin.tempfile` | 러너 | 실행마다 새 디렉터리, AUD-607이 삭제 |
-| `AUD-605` | `Copy the report and the xlsx zip under their ASCII attachment names` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600`. 보고서 1개와 (요약에 `xlsx_zip`이 있고 호출자가 경로를 준 때만) xlsx zip 1개 |
-| `AUD-606` | `Send the summary, the A4 report and the xlsx zip (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통(첨부 둘), `failed_when: false`, `no_log` |
+| `AUD-605` | `Copy the report, the xlsx zip and the Log Review Report under their ASCII attachment names` | `ansible.builtin.copy` | 러너 | 임시 디렉터리, `0600`. 보고서 1개와 (요약에 `xlsx_zip`이 있고 호출자가 경로를 준 때만) xlsx zip 1개, (요약에 `log_review`가 있고 경로를 준 때만) Log Review Report 1개(18절) |
+| `AUD-606` | `Send the summary, the A4 report, the xlsx zip and the Log Review Report (community.general.mail)` | `community.general.mail` | 러너 | 수신자마다 1통(첨부 최대 셋, 머리글 `X-Host-Audit-Log-Review-SHA256`), `failed_when: false`, `no_log` |
 | `AUD-607` | `Remove the temporary attachment directory` | `ansible.builtin.file` | 러너 | `always`, `state: absent` |
 | `AUD-608` | `Judge the mail outcome without any address` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_outcome` 필터, `no_log` |
 | `AUD-609` | `Show the mail outcome (counts only)` | `ansible.builtin.debug` | 러너 | 수신자 수·첨부명·SHA-256만 |
@@ -703,7 +714,7 @@ report.yml
 | `AUD-629` | `Get the archived xlsx zip` | `ansible.builtin.uri` (S3 GetObject) | 러너 | 읽기 전용, `no_log`. 요약이 xlsx zip을 기록한 실행만 |
 | `AUD-633` | `Assert the archived xlsx zip exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 받지 못함·이름 불일치·해시 불일치면 보내지 않음. 번호는 `AUD-630`(정리 판정)이 이미 쓰여 633이다 |
 | `AUD-627` | `Prepare the resend summary and attachments` | `ansible.builtin.set_fact` | 러너 | `host_audit_mail_resend_summary` 필터 |
-| `AUD-628` | `Remove the downloaded report and xlsx zip from the runner` | `ansible.builtin.file` | 러너 | `state: absent`(재발송 실행 디렉터리 통째로) |
+| `AUD-628` | `Remove the downloaded report, xlsx zip and Log Review Report from the runner` | `ansible.builtin.file` | 러너 | `state: absent`(재발송 실행 디렉터리 통째로) |
 
 재발송의 `Read the xlsx zip record of the archived summary`(요약에서 zip 기록을 읽는 `set_fact`), `Compute the SHA-256 of the downloaded xlsx zip`(받은 zip의 `stat`), `Say that the xlsx zip is not resent without its recorded hash`(요약이 없을 때 알리는 `debug`)는 AUD-629·633의 보조 태스크라 SPEC-ID를 두지 않는다(스펙이 재발송 zip에 정한 번호는 둘뿐이다). 메일 첨부 경로는 AUD-605의 `copy` 결과(`dest`)를 AUD-606이 그대로 쓴다.
 
@@ -719,7 +730,8 @@ AUD-516·AUD-610은 assert로 실행을 끝낸다. 그래서 정리는 보관·�
 |---|---|
 | Remediation Plan xlsx 쓰기·zip 묶기·이전 시도 xlsx 정리 실패(보관 여부·메일 결과와 무관) | 남긴다. 맨 끝 판정(`Fail the run when a Remediation Plan xlsx could not be written`)이 실패한 대상과 함께 실행을 실패로 끝내고 `AUD-632`가 이유(`xlsx 산출물 실패(<대상>)`)를 보여 준다(§17). 아래 행들보다 먼저 판정한다. |
 | xlsx 판정 사실(`_host_audit_xlsx_problem`)이 없음(그 앞 단계에서 멈춤) | 남긴다. 값이 없는 것을 '실패 없음'으로 읽지 않고, 이유는 '앞 단계에서 멈춰 xlsx 판정이 없음'이다. |
-| 보관 성공(xlsx 산출물 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
+| Log Review Report 작성 실패(`_host_audit_log_review_problem`이 비어 있지 않음: 모델·렌더링·판정 오류, 모델 이전 단계 중단. 조회 실패는 아님, 보관 여부·메일 결과와 무관) | 남긴다. xlsx 산출물 실패와 같다: 맨 끝 판정(`AUD-807`)이 실행을 실패로 끝내고 `AUD-632`가 이유(`Log Review Report 작성 실패(<사유>)`)를 보여 준다(§18). 판정 값이 없으면(그 앞 단계에서 멈춤) 남긴다. xlsx 행 다음, 아래 행들보다 먼저 판정한다. |
+| 보관 성공(xlsx 산출물·Log Review Report 실패 없음) | 지운다. 메일 결과와 관계없다(재발송은 버킷에서 한다). |
 | 보관 꺼짐(`host_audit_storage_enabled=false`), 메일 발송 성공 | 지운다. |
 | 보관 꺼짐, 메일 실패 또는 미발송 | 남긴다. 러너 사본이 유일하다. |
 | 보관 실패(업로드 실패, 보관 입력 누락) | 남긴다. AUD-516 메시지가 이 디렉터리를 가리킨다. |
@@ -891,3 +903,114 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **check 모드**: xlsx 쓰기가 파일을 만들지 않으므로 묶기(AUD-026)는 건너뛴다.
 - **재발송 정리**: 받기·검증·발송을 block으로 묶고 `always`에서 내려받은 디렉터리를 지운다(AUD-628). 검증에서 멈춘 재발송도 러너에 파일을 남기지 않는다.
 - **번호**: 스펙이 정한 재발송 대조 번호 `AUD-630`은 정리 판정(§14)이 먼저 쓰고 있어 `AUD-633`으로 둔다(3-Way 검증은 중복 ID를 허용하지 않는다).
+
+## 18. Log Review Report (Spec #544 / Ticket-3 #558, ADR-0015)
+
+정기 실행은 전월 한 달의 **Log Review Report** 초안(A4 HTML)을 만들어 Host Audit 메일의 세 번째 첨부로 보내고 같은 실행 보관 경로(`<YYYY-MM>/<run_id>/log_review/host-audit-<run_id>-log-review.html`)에 남긴다. Host Audit 보고서의 일부가 아니라 별도 첨부다. 호스트에는 접속하지 않고 OpenObserve만 읽는다(ADR-0009 읽기 전용 그대로).
+
+- **만드는 실행**: 정기 실행만. 수시 실행은 `host_audit_log_review_enabled=true`일 때만(같은 달 결재본이 여러 부 생기지 않게). check 모드는 만들지 않는다. 만들지 않은 실행의 메일은 첨부 둘(또는 하나)로 정상 발송된다.
+- **점검 기간**: 실행 시작 시각이 속한 보고서 시간대(KST) 월의 전월 1일 00:00 ~ 말일 24:00(끝 미포함). 정기 실행은 매월 1일 07:00 KST라 `2026-11/` 실행이 10월을 점검한다. 필터 `host_audit_log_review_period`.
+- **구성**: 머리(기간·대상·데이터·항목 상태 집계) → 1부 로그 검토 19개(AK-034 순서·문구) → 2부 보안시스템 정책 적정성 9개(1차는 점검자가 채우는 빈 표) → 3부 로그 관리 상태 → 마지막 쪽 결재란(점검자·정보보호관리자·정보보호책임자(CISO) 서명·일자). 항목마다 상태·점검 방법·판정 기준·결과 표와 사람이 쓰는 칸(최종 판정·점검자 소견·조치 내역, 언제나 빈 칸)이 있다.
+- **항목 상태**: `자동 판정`(이상 없음/확인 필요), `일부 자동`, `사람 대조`, `점검 불가(사유)`, `조회 실패(사유)`. 1부 8~11·14~19는 매달 `점검 불가(애플리케이션 접속기록·업무 기록 미수집)`이다. 판정 함수가 아직 없는 항목은 `점검 불가(미구현)`으로 나온다(빼거나 이상 없음으로 쓰지 않는다).
+- **이번 티켓의 실제 값은 3부 수집 공백 하나다**: 수집 대상 호스트(`host_audit_log_review_collect_hosts`, Silent Host와 같은 수집 로스터)와 장비(`host_audit_log_review_devices`, `fortigate_firewalls` 그룹과 syslog 전송이 확인된 스위치 `host_audit_log_review_switch_syslog_devices`(= `o2c_switch_syslog_roster`)의 관리번호) 중 점검 기간에 로그가 하루도 없으면 `전월 로그 없음`, 하루 이상 빈 날이 있으면 `끊김`(빈 날짜 범위와 일수). 호스트는 `system_logs`의 `host_name`, 장비는 스위치 `system_logs`·FortiGate `security_logs`의 `device_id`를 KST 일자별로 센다. 공백 이름은 1부 판정이 '이상 없음'으로 단정하지 않도록 판정 문맥에 남는다(후속 #559).
+- **3부 로그 관리 상태 나머지(#563, `filter_plugins/host_audit_log_review_status.py`)**: 조회는 모두 점검 기간 안의 `_search`다.
+  - 보존 기간: 서버의 스트림 보존 설정은 `_search`로 읽을 수 없어 `일부 자동`이다. 저장소 선언(`host_audit_log_review_log_management.retention_days`)을 기준(1년, `personal_info_system`이면 2년)과 대조하고, 서버 값과 같은지는 점검자가 화면에서 본다.
+  - 시각 동기: `host_status_logs`의 `kind=time_sync` 판독을 수집 로스터 호스트별로 센다. 미동기·오류 판독이나 오차 1초 초과는 `확인 필요`, 판독이 없거나 도구가 없는(`no_tool`) 호스트는 `확인 불가`(수집 공백 호스트는 그렇게 표시)이고 그런 호스트가 있으면 항목이 `일부 자동`이다.
+  - 전월 백업 결과: `backup_logs`의 `job=backup` 성공 일자·실패 횟수를 호스트(`host`)별로 보고(성공 없음·누락 일수·실패), 유지보수·무결성 검사(`job≠backup`) 실패를 함께 센다. 대상은 백업 누락 알림과 같은 수집 로스터다.
+  - 알림 이력: OpenObserve 알림 이력은 로그 스트림이 아니라 `_search`로 읽을 수 없다. `사람 대조`로 두고 점검자가 알림 화면에서 센다.
+  - GitHub 감사 로그 수집 상태: 전달 점검 하트비트(`service_name=github-webhook-watch`)의 기록 없는 날·점검 오류·훅 상태 이상·재전송 기간 초과 실패로 판정하고 수신 이벤트(`github-audit`) 건수는 참고로 싣는다. 조직 웹훅에는 로그인 이벤트가 없다.
+- **판정 위치와 확장(후속 티켓)**: 판정은 모두 필터에 있다. 항목 정의는 `filter_plugins/host_audit_log_review_items.py`의 표(`PART1`·`PART2`·`PART3`)이고, 판정은 묶음별 모듈(`host_audit_log_review_<묶음>.py`)의 `JUDGES = {항목 key: judge(ctx)}`, 그 판정이 쓰는 조회는 같은 모듈의 `QUERIES = {항목 key: [{name, sql, size}]}`다. 모듈을 더하면 `host_audit_log_review.py`의 `_JUDGE_MODULES`에 한 줄을 더한다. 다른 모듈이 판정하는 항목에 몫을 덧붙이는 모듈은 `EXTENDS = {항목 key: 함수(ctx, 판정 결과)}`를 두고, 덧붙인 표는 결과의 `sections`로 항목 표 아래에 그려진다(§18.4 장비 관리자 로그인). 조회만 더하는 항목은 태스크(`tasks/log_review.yml`)와 템플릿(`templates/log_review.html.j2`)을 고치지 않는다. 판정에 새 기준 입력(호스트별 기록·허용 계정, 작업 설정 문서, 서명본 목록 등)이 필요하면 그 입력을 AUD-804의 `_meta.settings`에 티켓마다 키 하나로 더하고(문서를 새로 읽으면 AUD-802의 `host_audit_openbao_log_review_docs`와 `host_audit_openbao_required`에도), 판정 함수는 `ctx['settings'][<키>]`로 읽는다. 한 항목의 판정 오류는 그 항목만 `조회 실패(판정 오류 …)`로 표시하고 실행을 맨 끝에서 실패로 끝낸다(AUD-807).
+- **1부 6·7·12번(출발지, #560)**: 서버 sshd 로그인 성공(`security_logs`, `event_action='ssh_login'`·`event_outcome='success'`)만 본다(장비 관리자 로그인은 #562). 기준 목록은 OpenBao 작업 설정 문서 `inventory/config/log_review`(정상 출발지 `normal_sources`, 내부 주소 대응 `internal_addresses`, 개인정보처리시스템 표시 `personal_info_systems`)이고, 내부 주소 대응 중 인벤토리에서 계산되는 몫(인벤토리 변수 `ip`, 이번 실행에서 호스트가 보고한 주소. 여러 호스트에 걸친 주소는 뺀다)은 Host Audit이 계산한다(필터 `host_audit_log_review_managed_addresses`). 6번은 출발지가 다른 관리 호스트 주소인 로그인(출발·대상 호스트·계정별 묶음), 7번은 정상 출발지 목록 밖 로그인(관리 호스트 주소는 6번에서 보므로 뺀다), 12번은 같은 로그인 이름(호스트 무관)이 `host_audit_log_review_multi_source_window_seconds`(120초, 경계 포함) 안에 `host_audit_log_review_multi_source_min_sources`(2개) 이상의 출발지에서 성공한 구간이다(분 단위로 모은 처음·마지막 시각으로 잰다). 행에 개인정보처리시스템 표시(예·아니오, 문서에 목록이 없으면 미지정)가 붙고, 같은 목록을 AUD-804 `settings.personal_info_systems`로 1~5번(§18.2)에도 넘긴다. 기준 목록 문서가 없거나 읽지 못하거나 형식이 틀리면 세 항목은 `조회 실패(기준 목록)`이고 나머지 항목과 실행은 그대로다. 수집 공백 호스트가 있으면 세 항목은 `일부 자동`이고 그 호스트를 요약에 적는다. 판정 모듈 `filter_plugins/host_audit_log_review_sources.py`.
+- **조회**: OpenObserve `POST /api/<org>/_search` 하나뿐이다(AUD-803, 조회 이름별 반복, 결과는 `no_log`). 주소·조직은 `inventory/services/openobserve`, 계정은 조회 전용 용도의 `secrets/services/openobserve/readonly`(Host Audit 계열 정책 `openobserve-readonly`가 읽기만 허용)이고 admin 자격은 쓰지 않는다. **OpenObserve 오픈소스 빌드는 RBAC가 없어 서버가 조회 전용을 강제하지 못한다(#556).** 그래서 이 역할이 OpenObserve에 `_search` POST 외의 호출을 하지 않는다는 것을 `tests/test_host_audit_log_review_tasks.py`가 지킨다(계정이 유출되면 쓰기도 가능하다는 한계는 그대로다).
+- **조회 실패**: 문서를 읽지 못함·401/403·그 밖의 비200 상태(목록 밖 301·405·413·501 등 포함)·연결 불가·요청 전 실패(ca_file 누락 등)·결과가 조회 한도에 닿음(잘렸을 수 있음)은 해당 항목의 `조회 실패(사유)`로 남고 메일은 그대로 나간다(AUD-803은 `failed_when: false`, ADR-0015 6항). 사유에는 상태 코드만 쓰고 주소·계정·응답 본문은 쓰지 않는다. 모델 생성·렌더링 자체가 실패하거나 모델 이전 단계(AUD-801 기간 계산·관리 호스트 주소 계산·전월 서명본 확인)의 필터가 예외를 내면(`rescue`, 사유 `작성 중단: <태스크 이름>`) 첨부를 빼고 메일을 보낸 뒤 맨 끝에서 실행을 실패로 끝낸다(AUD-807). 실행 디렉터리는 남긴다(§14.1).
+- **메일·보관·재발송**: 해시는 AUD-806, 요약의 `log_review`(`file_name`·`sha256`·`size`·`archive`·`period`), 본문과 머리글 `X-Host-Audit-Log-Review-SHA256`. 보관은 output_dir 전체를 올리는 AUD-512~514가 함께 하고 보관 성공(AUD-614) 뒤에만 보낸다. 재발송은 요약이 기록한 경우만 `log_review/<실행 ID에서 정한 이름>`을 받아(AUD-634) 기록된 해시와 대조한다(AUD-635: 받지 못함·이름 불일치·해시 불일치면 하나도 보내지 않는다). 같은 실행 ID로 다시 돌린 실행은 쓰기 전에 `log_review/`를 지운다(이전 시도의 파일이 보관·첨부되지 않게).
+- **수신자**: 보고서에 출발지·계정명이 들어가므로 메일 수신자(`inventory/config/host_audit.mail_recipients`)는 점검자·결재자로 한정한다(ADR-0015 Consequences).
+
+### 18.1 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-800` | `Decide whether this run drafts the Log Review Report` | `ansible.builtin.set_fact` | 러너 | 정기 실행 또는 플래그, check 모드 제외 |
+| `AUD-801` | `Fix the Log Review period and its OpenObserve searches` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_period`·`host_audit_log_review_queries`(같은 시작 시각이면 같은 값) |
+| `AUD-802` | `Read the OpenObserve address and the read-only search account (host_audit_openbao_log_review_docs)` | `ansible.builtin.set_fact` | 러너 | 공용 읽기 지점 `lookup('openbao_doc')`, `errors='ignore'`, `no_log` |
+| `AUD-803` | `Search OpenObserve for the review period (POST _search only)` | `ansible.builtin.uri` | 러너 | 읽기 전용 조회, 실패는 상태 코드로 받음(목록 밖 상태·요청 전 실패도 `failed_when: false`로 값, `changed_when: false`, `no_log`) |
+| `AUD-804` | `Build the Log Review Report model` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_results`·`host_audit_log_review_model` |
+| `AUD-805` | `Render the Log Review Report A4 HTML` | `ansible.builtin.template` | 러너 | `log_review/`(`0700`) 아래 `0600` |
+| `AUD-806` | `Compute the SHA-256 of the Log Review Report to attach` | `ansible.builtin.stat` | 러너 | 읽기 전용. 메일 요약(AUD-612)이 싣는 해시 |
+| `AUD-807` | `Fail the run when the Log Review Report could not be drafted` | `ansible.builtin.assert` | 러너 | 모델·렌더링·판정 오류와 모델 이전 단계 중단만 실패(조회 실패는 실패 아님). 실행 디렉터리는 남김(§14.1). xlsx 판정이 먼저 실행을 끝내면 그 메시지에 같은 사유를 붙인다 |
+| `AUD-634` | `Get the archived Log Review Report` | `ansible.builtin.uri` | 러너 | 요약이 기록한 실행만, 이름은 실행 ID에서 |
+| `AUD-635` | `Assert the archived Log Review Report exists and matches its recorded SHA-256` | `ansible.builtin.assert` | 러너 | 다르면 재발송 중단 |
+
+`Remove a leftover Log Review Report of an earlier attempt`·`Create the Log Review Report directory`·`Resolve the OpenObserve search target`·`Read the Log Review settings document (reference lists of items 6, 7 and 12)`·`Compute the managed host addresses from the inventory`·`Remove a Log Review Report that could not be completed`·`Summarize the Log Review Report of this run`과 재발송의 `Read the Log Review Report record of the archived summary`·`Compute the SHA-256 of the downloaded Log Review Report`·`Say that the Log Review Report is not resent without its recorded hash`는 위 태스크의 보조 태스크라 SPEC-ID를 두지 않는다. 보고서 단계는 Molecule 대상 밖이라 `[VERIFY-…]`가 없고 검증은 pytest다(ADR-0013): 모델 필터 단위 `tests/test_host_audit_log_review.py`·`tests/test_host_audit_log_review_sources.py`(6·7·12번)·`tests/test_host_audit_log_review_devices.py`(13번·장비 관리자 로그인), 공유 렌더링 `tests/test_host_audit_log_review_render.py`, 조회 경로·메일·보관·재발송 `tests/test_host_audit_log_review_tasks.py`·`tests/test_host_audit_xlsx_zip_report.py`.
+
+### 18.2 1부 계정·시간 항목 1~5번 (#559)
+
+판정은 `filter_plugins/host_audit_log_review_accounts.py`이고 테스트는 `tests/test_host_audit_log_review_accounts.py`다. 서버 sshd·sudo·su 기록(`security_logs`, `security_semantics` VRL 필드)과 auditd 계정 관리 기록만 본다(장비 관리자 로그인은 #562). 조회는 모두 OpenObserve에서 시(로그인 성공·sudo·su·계정 변경) 또는 분(로그인 실패) 단위로 집계해 받는다: 원시 이벤트를 받으면 자동화 로그인과 Ansible `become`만으로 조회 한도에 닿기 때문이다. 시각은 수신 시각 `_timestamp`의 KST다.
+
+| 번호 | 판정 | 상태 |
+|---|---|---|
+| 1 | SSH 로그인 성공 중 호스트별 허용 계정 밖 계정. 허용 계정은 provisioning 선언 사용자(`accounts`, `state: absent` 제외, `resolve_connection`의 관리 계정)·bootstrap 사용자(`_boot_summary.username`)·root이고, `agents_only` 호스트는 Asset Inventory 계정(보고서 모델 `asset_inventory`)과 root다. 목록을 알 수 없는 호스트(점검 대상 밖·접속 해석 실패·Asset Inventory 수집 실패)는 '허용 계정 목록 없음'으로 행에 나온다. 존재하지 않는 계정 시도(`Invalid user` 줄, `event_outcome` 없음)는 요약에 별도 통계로만 적는다 | 자동 판정 |
+| 2 | 같은 계정·같은 호스트에서 `failure_window_minutes`분 안에 `failure_threshold`회 이상 실패(존재하지 않는 계정 시도 제외, 분 단위 집계라 구간 경계는 분 단위) | 자동 판정 |
+| 3 | 평일 업무시간 밖·주말·공휴일의 SSH 로그인 성공 | 자동 판정(그 해 공휴일 목록이 없으면 일부 자동) |
+| 4 | 업무시간 밖 sudo·su 성공과 auditd 계정 관리 기록(ADD_USER·USER_MGMT 등). Ansible `become`(명령에 `BECOME-SUCCESS-`)은 자동화 건수로 따로 세고, 자동화 건만 있는 행은 확인 필요로 세지 않는다 | 자동 판정(위와 같음) |
+| 5 | 계정별 접속일·호스트 목록. 휴직·휴가자 명단과의 대조는 점검자가 한다 | 사람 대조 |
+
+- **수집 공백 연결**: 3부 수집 공백 호스트(수집 대상 호스트 중)는 1~4번 표에 `비고`로 붙고, 발견이 없어도 행으로 남는다. 공백이 있거나 수집 공백 조회가 실패하면 그 항목은 `일부 자동`·`확인 필요`이고 요약에 이름이 적힌다(로그가 없어서 이상 없음이 되지 않게). 5번은 요약에 적는다.
+- **개인정보처리시스템**: 판정 문맥 `settings['personal_info_systems']`(호스트 이름 목록)가 있으면 행마다 `예`·`아니오`와 요약의 해당 행 수를, 없으면 `미지정`을 적는다. 값의 원본은 로그 검토 작업 설정 문서(#560)이고, 그 문서를 읽는 쪽이 AUD-804에 이 키를 더한다.
+- **입력**: AUD-804 `_meta.settings.accounts`(`hosts`는 필터 `host_audit_log_review_account_hosts`가 이름만 남겨 만든다. 공개 키·접속 주소는 넘기지 않는다).
+
+### 18.3 서명본 등록과 전월 서명본 확인 (Ticket-9 #564)
+
+결재가 끝난 Log Review Report의 서명 스캔본(PDF)은 그 보고서를 만든 **정기 실행의 보관 경로** `signed/`에 둔다(Host Audit 버킷, 다른 보관 파일과 같은 GOVERNANCE 3년 잠금). 다음 달 정기 실행의 보고서는 3부 7번 `전월 보고서 서명본 등록`과 결재란 바로 위에 `전월 서명본: 있음(등록 일시 · SHA-256)` / `없음(…)` / `전월 정기 실행 없음` / `확인 실패`를 적는다.
+
+- **보관 형태**: `<YYYY-MM>/<run_id>/signed/host-audit-<run_id>-log-review-signed.pdf`(받은 바이트 그대로)와 `signed/registration.json`(등록 기록: `run_id`·`review_month`·`file_key`·`sha256`·`size`·`registered_at`(UTC)). 기록이 **등록 완료 표시**다: PDF가 올라간 뒤에만 쓰고, 다음 달 보고서는 이 기록만 읽는다(목록 조회 없음).
+- **등록 방식(#556 결론)**: Semaphore는 작업 실행 때 파일을 받지 못한다. 운영자가 러너의 접수 폴더(`host_audit_signed_intake_dir`)에 `<실행 ID>.pdf`를 두고, 템플릿 `Host Audit — Register Signed Log Review`([semaphore-setup.md](semaphore-setup.md))에 실행 ID와 `sha256sum` 값만 준다. 올리는 키는 이 역할이 이미 쓰는 Host Audit 보관 키이고 운영자에게 보관소 키를 따로 주지 않는다. 새 OpenBao 문서·정책은 없다.
+- **올리기 전 검증(전부 통과해야만 PUT)**: 잠금 버킷이고 키에 Delete가 없어 **잘못 올리면 지울 수 없다**(관리자 우회 권한으로만 지울 수 있다). 그래서 ① 입력 형식(실행 ID 규칙, 16진수 64자 해시, 접수 폴더 절대 경로, AUD-860) ② 파일(심볼릭 링크가 아닌 일반 파일, 0바이트 초과 `host_audit_signed_max_bytes` 이하, 머리 `%PDF-`, 입력 해시와 일치, AUD-861~863) ③ 버킷(`baseline/<run_id>.json` 포인터가 있음 = 보관을 마친 정기 실행이고 보관 월도 여기서 정함, 그 실행의 `mail_summary.json`에 Log Review Report 기록이 있음, `signed/registration.json`이 아직 없음, AUD-865~868)을 모두 확인한다. 실행 ID 오타·수시 실행·보고서를 보내지 않은 실행·이미 등록된 실행은 아무것도 올리지 않고 멈춘다. 조회가 404가 아닌 오류면(403·500·연결 불가) 등록 여부를 알 수 없으므로 멈춘다.
+- **올리는 순서**: PDF(AUD-869, `x-amz-content-sha256`에 검증한 해시를 실어 서버가 본문을 다시 대조) → 기록(AUD-871) → 둘 다 200일 때만 접수 파일 삭제(AUD-872). 잠금은 객체마다 헤더로 걸지 않고 버킷 기본 보존(§11.5)이 걸린다. 기록을 쓰지 못하고 끝난 등록은 같은 입력으로 다시 돌린다(기록이 없으므로 같은 키로 PDF를 다시 올리고, 이전 버전은 잠금으로 남는다).
+- **전월 서명본 확인(AUD-850~852)**: '전월 서명본'은 직전 정기 실행(Audit Baseline과 같은 고르기, `host_audit_baseline_pick`)의 `signed/`다. 보관 조회(AUD-503~504)가 이미 읽은 포인터를 쓰고 `signed/registration.json` 하나만 GET한다. 404면 `없음`(자동 판정 확인 필요), 형식이 맞는 기록이면 `있음`(이상 없음), 포인터가 없으면 `점검 불가(전월 정기 실행 없음)`, 포인터·기록 조회 실패나 기록 형식 오류는 `조회 실패`, 보관 비활성은 `점검 불가`. 직전 정기 실행이 이번 점검 월의 실행이 아니면(그 달 정기 실행이 보관을 마치지 못함) 서명본이 있어도 `확인 필요`와 그 사실을 적는다. 판정은 `filter_plugins/host_audit_log_review_signed.py`(`JUDGES`), 입력은 AUD-804 `settings.previous_signed_copy`.
+- **변수**: `host_audit_signed_run_id`·`host_audit_signed_sha256`(템플릿 Survey, 필수), `host_audit_signed_intake_dir`(env `HOST_AUDIT_SIGNED_INTAKE_DIR` 또는 `<host_audit_output_root>/_signed_intake`. `_`로 시작해 오래된 실행 디렉터리 정리 AUD-006의 이름 규칙에 걸리지 않는다), `host_audit_signed_max_bytes`(기본 20 MiB).
+- **운영자 준비(사람 작업, 이 저장소가 하지 않음)**: 접수 폴더가 **러너 컨테이너 안에서 보여야 한다.** 운영자가 SSH로 두는 러너 호스트의 폴더를 컨테이너의 `host_audit_signed_intake_dir` 경로에 바인드 마운트하고, 컨테이너 실행 사용자가 그 폴더의 파일을 읽고 지울 수 있어야 한다(폴더 `0700`·파일 `0600`, 소유자를 컨테이너 사용자와 맞춘다). 마운트가 없으면 등록은 `서명본 파일이 접수 폴더에 없음`으로 멈춘다(아무것도 올리지 않음).
+- **한계**: 잘못된(그러나 검증을 통과한) 서명본, 예를 들어 다른 달 보고서의 서명본을 올바른 해시로 올리면 지울 수 없다. 재등록(같은 실행에 새 서명본)은 이 템플릿이 막으며 이름 규칙은 정하지 않았다(필요하면 ADR로 정한다). 서명본 내용(서명이 실제로 있는지)은 확인하지 않는다.
+
+| Spec ID | 태스크 명칭 | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-850` | `Pick the previous scheduled run whose signed copy this report checks` | `ansible.builtin.set_fact` | 러너 | 보관 조회가 읽은 포인터에서 고르기만 함 |
+| `AUD-851` | `Get the signed copy record of the previous scheduled run` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET 하나, 실패는 상태 코드로 받음(`changed_when: false`, `no_log`) |
+| `AUD-852` | `Decide the previous signed copy state of this report` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_signed_lookup` |
+| `AUD-860` | `Validate the signed copy request (run ID and SHA-256 only)` | `ansible.builtin.set_fact` | 러너 | 필터 `host_audit_log_review_signed_request`, 틀리면 읽기 전에 실패 |
+| `AUD-861` | `Inspect the signed copy in the intake folder` | `ansible.builtin.stat` | 러너 | 읽기 전용, `follow: false`, SHA-256 |
+| `AUD-862` | `Read the first bytes of the signed copy (head, read-only)` | `ansible.builtin.command` | 러너 | 머리 5바이트만 읽음, `changed_when: false` |
+| `AUD-863` | `Assert the signed copy is the PDF the operator named` | `ansible.builtin.assert` | 러너 | 필터 `host_audit_log_review_signed_file_problems`, 어긋나면 올리지 않음 |
+| `AUD-864` | `Assert the Host Audit storage key is available for the signed copy` | `ansible.builtin.assert` | 러너 | check 모드·보관 비활성·키 없음이면 중단 |
+| `AUD-865` | `Get the scheduled run pointer of the signed report` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET, `no_log` |
+| `AUD-866` | `Get the archived mail summary of the signed report` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET, `no_log` |
+| `AUD-867` | `Get the signed copy record of the run (must not exist yet)` | `ansible.builtin.uri` | 러너 | 읽기 전용 GET, `no_log` |
+| `AUD-868` | `Assert the run takes this signed copy` | `ansible.builtin.assert` | 러너 | 필터 `host_audit_log_review_signed_target`, 어긋나면 올리지 않음 |
+| `AUD-869` | `Upload the signed copy to the run's signed/ (Object Lock bucket)` | `ansible.builtin.uri` | 러너 | 검증 통과 뒤 한 번, 기록이 없을 때만(이미 있으면 AUD-868이 막음) |
+| `AUD-870` | `Write the signed copy record on the runner` | `ansible.builtin.copy` | 러너 | 임시 디렉터리 `0600`, `always`에서 지움 |
+| `AUD-871` | `Upload the signed copy record (registration complete)` | `ansible.builtin.uri` | 러너 | PDF가 200일 때만 |
+| `AUD-872` | `Remove the registered signed copy from the intake folder` | `ansible.builtin.file` | 러너 | 둘 다 200일 때만 `state: absent` |
+| `AUD-873` | `Assert the signed copy and its record were kept` | `ansible.builtin.assert` | 러너 | 업로드 실패면 실행 실패 |
+
+`Check the signed copy of the previous scheduled run (#564)`(include)·`Locate the archived run of the signed report`·`Decide whether the run takes this signed copy`·`Make a runner-local directory for the signed copy record`·`Compute the SHA-256 of the signed copy record`·`Remove the runner-local signed copy record`는 보조 태스크라 SPEC-ID를 두지 않는다. 검증은 pytest다: 판정·검증 필터 단위와 결재란 문구 `tests/test_host_audit_log_review_signed.py`, 등록 템플릿과 다음 달 보고서 통합(가짜 S3, 검증 실패 시 PUT 0건) `tests/test_host_audit_log_review_sign.py`.
+
+### 18.4 1부 13번과 장비 관리자 로그인 (Ticket-7 #562)
+
+판정은 `filter_plugins/host_audit_log_review_devices.py`이고 테스트는 `tests/test_host_audit_log_review_devices.py`다.
+
+- **13번 명령 집중**: 서버 sudo 성공(`security_logs`, `event_action='sudo'`·`event_outcome='success'`)을 계정·호스트·분(KST)별로 모아 같은 계정(호스트 무관)의 `host_audit_log_review_command_burst_window_minutes`(2)분 구간 최대 실행 수가 `host_audit_log_review_command_burst_threshold`(30)회 이상이면 확인 필요(분 단위 집계라 구간은 시작 분과 다음 분). Ansible `become`(명령에 `BECOME-SUCCESS-`)은 매 실행이 기준을 넘으므로 조회에서 뺀다. **한계(보고서 판정 기준 칸에 찍힘)**: sudo 명령만 본다. root 셸 안에서 실행한 명령, su 뒤의 명령, root 직접 로그인의 명령은 보지 않는다. 수집 공백 호스트가 있으면 일부 자동·확인 필요.
+- **장비 관리자 로그인(1·2·3·4·7·12번)**: 서버 판정(§18.2·6·7·12번)은 그대로 두고 장비 종류별 몫을 항목 표 아래 소제목 표(`장비 관리자 로그인 — FortiGate`·`— 스위치`)로 덧붙인다. 장비 몫 중 하나라도 자동 판정이 아니면(파싱 없음·일부 자동·조회 실패) 항목은 `일부 자동`이고, 장비 몫이 확인 필요이거나 조회 실패면 항목 판정은 `확인 필요`다. 서버 조회가 실패한 항목은 `조회 실패` 그대로 장비 몫만 붙는다. 적용 표는 role 기본값 `host_audit_log_review_device_parsing`이고(#556 사전 확인), 표에 없는 칸은 `점검 불가(파싱 없음)`이다.
+
+| 번호 | FortiGate | 스위치 |
+|---|---|---|
+| 1 | 관리자 로그인 성공의 계정을 장비별 허용 목록(`device_admin_accounts`)과 대조. 목록이 없는 장비는 계정마다 '장비 관리자 허용 목록 없음' 행 | 점검 불가(파싱 없음): 성공 로그·계정 필드 없음 |
+| 2 | 장비·계정별 로그인 실패, 서버와 같은 `failure_window_minutes`·`failure_threshold` | 일부 자동: `SEC_LOGIN-4-LOGIN_FAILED`를 장비 단위로 셈(계정·출발지 미구조화) |
+| 3 | 업무시간 밖 로그인 성공(서버와 같은 업무시간·공휴일) | 점검 불가(파싱 없음) |
+| 4 | 업무시간 밖 설정 변경(`edit`·`add`·`delete`) 중 `cfgpath`가 `system.admin`·`system.accprofile`이면 관리자 계정·권한 변경(확인 필요), 그 밖의 설정 변경과 HA 동기화(`ui="ha_daemon"`)는 참고 행 | 일부 자동: 업무시간 밖 `SYS-5-CONFIG_I`(권한 변경과 구분 못 함, 변경 주체는 원문에만) |
+| 7 | 로그인 성공 출발지를 정상 출발지 목록과 대조. 관리 호스트 주소에서 온 것은 행에만 싣고 확인 필요로 세지 않음 | 점검 불가(파싱 없음) |
+| 12 | 같은 관리자 계정(장비 무관)이 서버와 같은 시간·출발지 수 기준 | 점검 불가(파싱 없음) |
+
+- **FortiGate 로그인 결과**: VRL `fortigate_semantics`가 관리자 로그인 줄(`subtype=system`, `action=login`)에 `event_outcome`(success·failure)과 실패 사유 `event_reason`을 붙인다(#562에서 추가, 서버 적용은 다음 `OpenObserve — Config` 실행). VRL 보완 전에 들어온 기록은 `event_outcome`이 없으므로 조회가 원문 `status` 키로 가른다(OpenObserve Config의 방화벽 로그인 알림과 같은 원문 일치). 어느 쪽으로도 가르지 못한 로그인이 있으면 장비 몫은 `일부 자동`·`확인 필요`이고 건수를 적는다. `event_outcome`·`event_reason`은 서버 로그로 이미 있는 컬럼이라 스키마 문제는 없다.
+- **수집 공백 장비**: 3부 수집 공백에 든 장비는 장비 몫 요약에 이름이 적히고 `일부 자동`·`확인 필요`다. 그 종류의 수집 공백 조회(스위치 `system_logs`·FortiGate `security_logs` 일자별)가 실패해도 공백을 모르므로 같다(`수집 공백을 확인하지 못함`).
+- **입력**: AUD-804 `settings.command_burst`(`threshold`·`window_minutes`)와 `settings.devices`(`fortigate`: `fortigate_firewalls` 그룹, `switch`: `host_audit_log_review_switch_syslog_devices`, `parsing`, `admin_accounts`: 작업 설정 문서 `inventory/config/log_review`의 `device_admin_accounts` `[{device, accounts}]`). 장비 관리자 계정 이름은 공개 저장소에 두지 않는다.
+- **GitHub**: 조직 웹훅에는 로그인 이벤트가 없어 이번 적용 대상이 아니다(§18 3부 GitHub 감사 로그 수집 상태).

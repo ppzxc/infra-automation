@@ -32,11 +32,11 @@ def _tail_block():
         out = []
         for t in tasks:
             inc = t.get("ansible.builtin.include_tasks")
-            if inc in ("storage_upload.yml", "mail.yml"):
-                continue  # network and mail tasks: their results are given as variables
+            if inc in ("storage_upload.yml", "mail.yml", "log_review.yml"):
+                continue  # network and mail tasks: their results are given as variables (Log Review: test_host_audit_log_review_tasks.py)
             if t.get("name") in ("Build the Remediation Plan of every host", "[AUD-025] Write the Remediation Plan xlsx of every host") \
                     or "Remediation Plan could not" in t.get("name", "") or t.get("name", "").startswith(("Collect the hosts", "Remember that the xlsx zip", "Remove a leftover xlsx zip", "Remove the xlsx zip when", "Summarize the Remediation Plan xlsx", "Check whether the xlsx directory", "Find the xlsx files", "Remove the xlsx files")) \
-                    or any("[%s]" % i in t.get("name", "") for i in ("AUD-026", "AUD-611", "AUD-612", "AUD-613", "AUD-615")):
+                    or any("[%s]" % i in t.get("name", "") for i in ("AUD-026", "AUD-611", "AUD-612", "AUD-613", "AUD-615", "AUD-806")):
                 continue  # xlsx writing, the zip and the mail summary need the report model; they have their own test
             out.append({"block": _load(inc)} if inc else t)
         return out
@@ -64,6 +64,7 @@ def _vars(root, out, *, storage=True, uploads=(200,), problem="", mail_sent=None
         "host_audit_output_root": str(root),
         "host_audit_run": {"run_id": run_id, "run_kind": run_kind, "output_dir": output_dir or str(out)},
         "_host_audit_xlsx_problem": {"failed": False, "targets": []},  # no xlsx problem unless a test sets one
+        "_host_audit_log_review_problem": "",  # log_review.yml's verdict (AUD-800 sets it first); no problem unless a test sets one
         "_host_audit_xlsx_zip_path": str(out / "xlsx" / "z.zip"),  # a role variable (AUD-614 hands it to the mail)
         "host_audit_storage_enabled": storage,
         "_host_audit_storage_active": storage,
@@ -124,6 +125,44 @@ def test_both_failures_are_named_in_the_kept_reason(tmp_path):
     res = _run(tmp_path, variables)
     assert res.returncode != 0 and "xlsx 산출물 실패(h2)와 원본 보관 미완료" in res.stdout
     assert (out / "report.html").exists()
+
+
+_LOG_REVIEW_PROBLEM = "작성 중단: [AUD-801] Fix the Log Review period and its OpenObserve searches"
+
+
+@pytest.mark.parametrize("storage", [True, False])
+def test_a_log_review_failure_keeps_this_run_like_an_xlsx_failure_and_ends_it_failed_after_the_mail(tmp_path, storage):
+    root, out = _run_dir(tmp_path)
+    variables = dict(_vars(root, out, storage=storage, uploads=(200,) if storage else (), mail_sent=True),
+                     _host_audit_log_review_problem=_LOG_REVIEW_PROBLEM)
+    res = _run(tmp_path, variables)
+    assert res.returncode != 0 and "Log Review Report 작성 실패" in res.stdout and "[AUD-801]" in res.stdout
+    assert (out / "report.html").exists()
+    assert "Log Review Report 작성 실패(" in res.stdout and "남김" in res.stdout
+
+
+def test_a_log_review_failure_is_not_hidden_by_an_xlsx_failure(tmp_path):
+    """두 산출물이 함께 실패하면 맨 끝 판정 메시지가 둘 다 말한다(앞 assert가 뒤 assert를 가리지 않게)."""
+    root, out = _run_dir(tmp_path)
+    variables = dict(_vars(root, out, mail_sent=True), _host_audit_xlsx_problem=_XLSX_PROBLEM,
+                     _host_audit_log_review_problem=_LOG_REVIEW_PROBLEM)
+    res = _run(tmp_path, variables)
+    failed = [line for line in res.stdout.splitlines() if "fatal:" in line or '"msg"' in line or "msg:" in line]
+    assert res.returncode != 0
+    assert any("h2" in line and "[AUD-801]" in line for line in failed), failed
+    assert (out / "report.html").exists()
+    # 보관·메일 판정이 먼저 실행을 끝내도 남김 이유(AUD-632)에는 둘 다 나온다
+    kept = [line for line in res.stdout.splitlines() if "실행 디렉터리 남김" in line]
+    assert kept and "xlsx 산출물 실패(h2)" in kept[0] and "Log Review Report 작성 실패" in kept[0], kept
+
+
+def test_a_missing_log_review_verdict_keeps_this_run(tmp_path):
+    """log_review.yml이 판정을 남기지 못하고 멈췄으면 남긴다(값이 없는 것을 '실패 없음'으로 읽지 않는다)."""
+    root, out = _run_dir(tmp_path)
+    variables = _vars(root, out, mail_sent=True)
+    del variables["_host_audit_log_review_problem"]
+    res = _run(tmp_path, variables)
+    assert out.exists() and "앞 단계에서 멈춰 Log Review 판정이 없음" in res.stdout
 
 
 # ---- this run's directory: the policy table ---------------------------------

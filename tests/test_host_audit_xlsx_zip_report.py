@@ -34,6 +34,7 @@ pytestmark = pytest.mark.skipif(not shutil.which("ansible-playbook"), reason="an
 
 RUN_ID = "ha-20261031T220000Z"
 ZIP_NAME = "host-audit-%s-xlsx.zip" % RUN_ID
+LR_NAME = "host-audit-%s-log-review.html" % RUN_ID  # Log Review Report, 세 번째 첨부 (Spec #544 / Ticket-3 #558)
 PREFIX = "2026-11/%s/" % RUN_ID
 BUCKET = "host-audit"
 
@@ -196,19 +197,22 @@ def _mail_vars(smtp, endpoint=None):
 def _role_vars():
     """The role's own zip name/path/archive variables (vars/main.yml), so the test plays the real definitions."""
     role_vars = yaml.safe_load((ROOT_DIR / "roles" / "host_audit" / "vars" / "main.yml").read_text(encoding="utf-8"))
-    return {k: v for k, v in role_vars.items() if k.startswith("_host_audit_xlsx_zip_")}
+    return {k: v for k, v in role_vars.items() if k.startswith(("_host_audit_xlsx_zip_", "_host_audit_log_review_"))}
 
 
-def _report_stage(tmp_path, out, model=None, break_xlsx=False):
+def _report_stage(tmp_path, out, model=None, break_xlsx=False, log_review=None):
     out.mkdir(parents=True, exist_ok=True)
     if break_xlsx:  # xlsx/ is read-only: no writer can create a file in it, so every xlsx write fails
         (out / "xlsx").mkdir(mode=0o500)
     model_file = tmp_path / "model.json"
     model_file.write_text(json.dumps(model or _model(), ensure_ascii=False))
     (out / "report.html").write_text("<html>report</html>")
+    if log_review is not None:  # log_review.yml이 쓴 것처럼 둔다(작성 자체는 test_host_audit_log_review_tasks.py)
+        (out / "log_review").mkdir(exist_ok=True)
+        (out / "log_review" / LR_NAME).write_bytes(log_review)
     names = ("Build the Remediation Plan of every host", "[AUD-025]",
              "Collect the hosts whose Remediation Plan xlsx could not be written", "[AUD-026]",
-             "Remove a leftover xlsx zip", "Remember that the xlsx zip", "Remove the xlsx zip when packing", "Summarize the Remediation Plan xlsx", "Check whether the xlsx directory exists", "Find the xlsx files that this attempt did not write", "Remove the xlsx files that this attempt did not write", "[AUD-615]", "[AUD-611]", "[AUD-612]", "[AUD-613]")
+             "Remove a leftover xlsx zip", "Remember that the xlsx zip", "Remove the xlsx zip when packing", "Summarize the Remediation Plan xlsx", "Check whether the xlsx directory exists", "Find the xlsx files that this attempt did not write", "Remove the xlsx files that this attempt did not write", "[AUD-615]", "[AUD-611]", "[AUD-806]", "[AUD-612]", "[AUD-613]")
     block = next(t for t in _tasks("report.yml") if "always" in t)["block"]
     tasks = [t for t in block if any(n in t.get("name", "") for n in names)]
     assert len(tasks) == len(names), [t.get("name") for t in tasks]
@@ -221,7 +225,8 @@ def _report_stage(tmp_path, out, model=None, break_xlsx=False):
                                                        "timezone": "Asia/Seoul"},
                          _host_audit_storage_active=True, _host_audit_storage_problem="",
                          _host_audit_storage_prefix=PREFIX, _host_audit_storage_target={"bucket": BUCKET},
-                         host_audit_storage_bucket=BUCKET),
+                         host_audit_storage_bucket=BUCKET, _host_audit_log_review_made=log_review is not None,
+                         _host_audit_log_review_period={"month": "2026-10"}),
             "tasks": [load] + tasks + [show]}
     res = _ansible(tmp_path, play)
     assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-2000:]
@@ -250,6 +255,19 @@ def test_the_zip_is_built_deterministically_hashed_into_the_summary_and_kept(tmp
     assert summary["report"]["sha256"] == hashlib.sha256(b"<html>report</html>").hexdigest()
     # the same input gives the same bytes: a second run of the whole stage changes nothing
     assert _report_stage(tmp_path / "again", tmp_path / "again" / "run")["xlsx/" + ZIP_NAME] == digest
+
+
+def test_the_log_review_report_is_hashed_into_the_summary_and_kept_beside_the_report(tmp_path):
+    out = tmp_path / "run"
+    stats = _report_stage(tmp_path, out, log_review=b"<html>log review</html>")
+    digest = hashlib.sha256(b"<html>log review</html>").hexdigest()
+    assert stats["log_review/" + LR_NAME] == digest  # 보관(AUD-512~514)이 같은 실행 경로 log_review/로 올린다
+    summary = json.loads((out / "mail_summary.json").read_text())
+    assert summary["log_review"] == {"file_name": LR_NAME, "sha256": digest, "size": 23, "period": "2026-10",
+                                     "archive": "RustFS %s/%slog_review/%s (3년 보관)" % (BUCKET, PREFIX, LR_NAME)}
+    # 만들지 않은 실행(수시 실행 등)은 요약에 기록이 없다: 메일은 첨부 없이 정상 발송된다
+    _report_stage(tmp_path / "none", tmp_path / "none" / "run")
+    assert "log_review" not in json.loads((tmp_path / "none" / "run" / "mail_summary.json").read_text())
 
 
 def test_a_stale_xlsx_of_an_earlier_run_with_the_same_id_is_not_packed(tmp_path):
@@ -336,22 +354,25 @@ def test_the_zip_exists_before_the_mail_and_before_the_cleanup_so_a_storage_off_
 # ------------------------------------------------------------------------------
 # Mail: two attachments
 # ------------------------------------------------------------------------------
-def _send_play(tmp_path, smtp, doc, report, zip_path):
+def _send_play(tmp_path, smtp, doc, report, zip_path, log_review_path=None):
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
             "vars": dict(_mail_vars(smtp), host_audit_mail_doc=doc, _host_audit_archive_ok=True,
                          _host_audit_mail_report_path=str(report),
-                         _host_audit_mail_xlsx_path=str(zip_path) if zip_path else ""),
+                         _host_audit_mail_xlsx_path=str(zip_path) if zip_path else "",
+                         _host_audit_mail_log_review_path=str(log_review_path) if log_review_path else ""),
             "tasks": [{"ansible.builtin.include_role": {"name": "host_audit", "tasks_from": "mail"}}]}
     return _ansible(tmp_path, play)
 
 
-def _summary_doc(report_bytes, zip_bytes):
+def _summary_doc(report_bytes, zip_bytes, lr_bytes=None):
     zip_info = {"sha256": hashlib.sha256(zip_bytes).hexdigest(), "size": len(zip_bytes), "file_name": ZIP_NAME,
                 "archive": "RustFS %s/%sxlsx/%s (3년 보관)" % (BUCKET, PREFIX, ZIP_NAME)} if zip_bytes else None
+    lr_info = {"sha256": hashlib.sha256(lr_bytes).hexdigest(), "size": len(lr_bytes), "file_name": LR_NAME, "period": "2026-10",
+               "archive": "RustFS %s/%slog_review/%s (3년 보관)" % (BUCKET, PREFIX, LR_NAME)} if lr_bytes else None
     return host_audit_mail_summary(_model(), {
         "sha256": hashlib.sha256(report_bytes).hexdigest(), "size": len(report_bytes),
         "file_name": "host-audit-%s.html" % RUN_ID, "archive": "RustFS %s/%sreport.html (3년 보관)" % (BUCKET, PREFIX)},
-        **({"xlsx_zip": zip_info} if zip_info else {}))
+        zip_info, lr_info)
 
 
 def test_the_mail_has_the_report_and_the_xlsx_zip_and_the_body_shows_the_zip_hash(tmp_path, smtp):
@@ -365,6 +386,42 @@ def test_the_mail_has_the_report_and_the_xlsx_zip_and_the_body_shows_the_zip_has
     assert files == {"host-audit-%s.html" % RUN_ID: b"<html>report</html>", ZIP_NAME: zip_bytes}
     body = msg.get_body(preferencelist=("html",)).get_content()
     assert hashlib.sha256(zip_bytes).hexdigest() in body and hashlib.sha256(b"<html>report</html>").hexdigest() in body
+
+
+def test_the_log_review_report_is_the_third_attachment_with_its_hash_in_the_body_and_header(tmp_path, smtp):
+    report, lr = tmp_path / "report.html", tmp_path / "lr.html"
+    report.write_bytes(b"<html>report</html>")
+    lr.write_bytes(b"<html>log review</html>")
+    (tmp_path / "x.zip").write_bytes(b"PK-zip")
+    doc = _summary_doc(report.read_bytes(), b"PK-zip", lr.read_bytes())
+    res = _send_play(tmp_path, smtp, doc, report, tmp_path / "x.zip", lr)
+    assert res.returncode == 0, res.stdout[-3000:]
+    files, msg = _attachments(smtp.messages[0])
+    assert files == {"host-audit-%s.html" % RUN_ID: b"<html>report</html>", ZIP_NAME: b"PK-zip", LR_NAME: b"<html>log review</html>"}
+    lr_sha = hashlib.sha256(b"<html>log review</html>").hexdigest()
+    assert msg["X-Host-Audit-Log-Review-SHA256"] == lr_sha
+    assert msg["X-Host-Audit-Xlsx-Zip-SHA256"] == hashlib.sha256(b"PK-zip").hexdigest()
+    assert lr_sha in msg.get_body(preferencelist=("html",)).get_content()
+
+
+def test_a_log_review_report_without_a_zip_does_not_pass_for_the_zip_header(tmp_path, smtp):
+    """Two attachments used to mean 'report + zip'; a run without hosts can mail the report and the Log Review Report."""
+    report, lr = tmp_path / "report.html", tmp_path / "lr.html"
+    report.write_bytes(b"<html>report</html>")
+    lr.write_bytes(b"<html>log review</html>")
+    res = _send_play(tmp_path, smtp, _summary_doc(report.read_bytes(), None, lr.read_bytes()), report, None, lr)
+    assert res.returncode == 0, res.stdout[-3000:]
+    files, msg = _attachments(smtp.messages[0])
+    assert sorted(files) == sorted(["host-audit-%s.html" % RUN_ID, LR_NAME])
+    assert msg["X-Host-Audit-Xlsx-Zip-SHA256"] is None and msg["X-Host-Audit-Log-Review-SHA256"]
+
+
+def test_a_summary_that_names_a_log_review_report_but_gets_no_path_sends_nothing(tmp_path, smtp):
+    report = tmp_path / "report.html"
+    report.write_bytes(b"<html>report</html>")
+    res = _send_play(tmp_path, smtp, _summary_doc(report.read_bytes(), None, b"<html>lr</html>"), report, None, None)
+    assert res.returncode == 0 and smtp.messages == []
+    assert "Log Review Report가 있는데 첨부할 경로가 없음" in _text(res)
 
 
 def test_a_summary_that_names_a_zip_but_gets_no_zip_path_sends_nothing(tmp_path, smtp):
@@ -400,15 +457,21 @@ REPORT = b"<html>report</html>"
 ZIP = b"PK-archived-zip"
 
 
-def _resend(tmp_path, smtp, bucket, summary_zip=ZIP, served_zip=ZIP, summary_doc=None, no_summary=False):
+LR = b"<html>archived log review</html>"
+
+
+def _resend(tmp_path, smtp, bucket, summary_zip=ZIP, served_zip=ZIP, summary_doc=None, no_summary=False,
+            summary_lr=None, served_lr=None):
     """Serve a kept run and run the real resend.yml; ``summary_zip`` is the zip the summary recorded, ``served_zip``
     the zip the bucket returns now (None: missing)."""
     bucket[BUCKET + "/" + PREFIX + "report.html"] = REPORT
     if not no_summary:
         bucket[BUCKET + "/" + PREFIX + "mail_summary.json"] = json.dumps(
-            summary_doc or _summary_doc(REPORT, summary_zip)).encode()
+            summary_doc or _summary_doc(REPORT, summary_zip, summary_lr)).encode()
     if served_zip is not None:
         bucket[BUCKET + "/" + PREFIX + "xlsx/" + ZIP_NAME] = served_zip
+    if served_lr is not None:
+        bucket[BUCKET + "/" + PREFIX + "log_review/" + LR_NAME] = served_lr
     play = {"hosts": "localhost", "connection": "local", "gather_facts": False, "become": False,
             "tasks": [{"ansible.builtin.include_role": {"name": "host_audit", "tasks_from": "resend"}}]}
     extra = dict(_mail_vars(smtp, bucket["endpoint"]), host_audit_resend_run_id=RUN_ID,
@@ -423,6 +486,33 @@ def test_resend_sends_both_when_the_archived_zip_matches_the_recorded_hash(tmp_p
     assert files == {"host-audit-%s.html" % RUN_ID: REPORT, ZIP_NAME: ZIP}
     assert msg["Subject"].startswith("[재발송]")
     assert not (tmp_path / "out").exists() or not list((tmp_path / "out").iterdir())  # the downloads are removed
+
+
+def test_resend_sends_the_log_review_report_too_when_it_matches_the_recorded_hash(tmp_path, smtp, bucket):
+    res = _resend(tmp_path, smtp, bucket, summary_lr=LR, served_lr=LR)
+    assert res.returncode == 0, res.stdout[-3000:]
+    files, msg = _attachments(smtp.messages[0])
+    assert files == {"host-audit-%s.html" % RUN_ID: REPORT, ZIP_NAME: ZIP, LR_NAME: LR}
+    assert msg["X-Host-Audit-Log-Review-SHA256"] == hashlib.sha256(LR).hexdigest()
+
+
+def test_resend_stops_without_sending_when_the_log_review_report_hash_differs_or_it_is_gone(tmp_path, smtp, bucket):
+    res = _resend(tmp_path, smtp, bucket, summary_lr=LR, served_lr=b"<html>tampered</html>")  # AUD-635
+    assert res.returncode != 0 and smtp.messages == []
+    assert "받은 Log Review Report의 SHA-256" in _text(res)
+    bucket.pop(BUCKET + "/" + PREFIX + "log_review/" + LR_NAME)
+    (tmp_path / "again").mkdir()
+    res = _resend(tmp_path / "again", smtp, bucket, summary_lr=LR, served_lr=None)
+    assert res.returncode != 0 and smtp.messages == []
+    assert "보관된 Log Review Report를 받지 못함" in _text(res)
+
+
+def test_resend_stops_when_the_recorded_log_review_name_is_not_the_one_the_run_id_gives(tmp_path, smtp, bucket):
+    doc = _summary_doc(REPORT, ZIP, LR)
+    doc["log_review"]["file_name"] = "../evil.html"
+    res = _resend(tmp_path, smtp, bucket, summary_doc=doc, served_lr=LR)
+    assert res.returncode != 0 and smtp.messages == []
+    assert "Log Review Report 이름(../evil.html)이 실행 ID에서 정한 이름" in _text(res)
 
 
 def test_resend_stops_without_sending_when_the_zip_hash_differs(tmp_path, smtp, bucket):

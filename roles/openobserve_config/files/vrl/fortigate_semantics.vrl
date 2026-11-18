@@ -15,6 +15,9 @@
 #   source_address           srcip; else remip (VPN events); else the address inside ui="https(192.0.2.10)" (admin login, config change)
 #   user_name                user; absent when empty, N/A or the peer address of a tunnel (user equals remip)
 #   fortigate_policy_id      policyid as an integer (0 is the implicit deny policy)
+#   event_outcome            admin login result (subtype=system, action=login only): status success -> success, failed -> failure;
+#                            absent for any other status and on every other line (same name and values as the server sshd field)
+#   event_reason             reason of a failed admin login (e.g. passwd_invalid); absent on success (reason="none") and other lines
 #
 # Expected line (FortiOS default key=value format): `[<PRI>][syslog header] date=... time=... devname="..." type="..." ...`.
 # Values are bare or double-quoted (quoted values may hold spaces and text that looks like keys; they are consumed as one value).
@@ -90,6 +93,21 @@ if service == "fortigate-syslog" {
             # VPN tunnel statistics carry user="<peer gateway address>", which is the remote device and not a user
             if user != "" && downcase(user) != "n/a" && user != (string(kv.remip) ?? "") {
                 .user_name = user
+            }
+
+            # Admin login result (Spec #544 / Ticket-7): only subtype=system action=login lines. Other lines carry status/reason
+            # with other meanings (VPN reason="login successfully", endpoint status="error") and are left alone.
+            if subtype == "system" && action == "login" {
+                status = downcase(string(kv.status) ?? "")
+                if status == "success" {
+                    .event_outcome = "success"
+                } else if status == "failed" {
+                    .event_outcome = "failure"
+                    reason = string(kv.reason) ?? ""
+                    if reason != "" && downcase(reason) != "none" {
+                        .event_reason = reason
+                    }
+                }
             }
 
             policy_text = string(kv.policyid) ?? ""
