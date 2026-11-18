@@ -79,10 +79,14 @@ def test_the_role_has_no_own_openbao_reading_code_token_fallback_or_test_bypass_
 # --- 호스트별 알림 설정과 사설 CA는 OpenBao 문서에서 읽는다(최종 리뷰 5·6번) ---------------------------------------------------
 
 def _render_with(directory, *, config=None):
+    return _render_with_extra(directory, config=config, extra={})
+
+
+def _render_with_extra(directory, *, config=None, extra):
     from o2c_render import fixture_args
     directory.mkdir()
     cmd = ["ansible-playbook", "-i", "localhost,", str(PLAYBOOK),
-           *fixture_args("http://127.0.0.1:9", config=config, extra={"o2c_render_dump": str(directory / "d.json")})]
+           *fixture_args("http://127.0.0.1:9", config=config, extra={"o2c_render_dump": str(directory / "d.json"), **extra})]
     res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=ROOT_DIR, timeout=300,
                          env=dict(os.environ, ANSIBLE_NOCOLOR="1"))
     assert res.returncode == 0, res.stdout + res.stderr
@@ -108,6 +112,31 @@ def test_the_new_job_config_keys_are_schema_checked():
     for bad in ({"resource_exclusions": [{"mount": "/data"}]}, {"resource_exclusions": [{"host": "ns1", "metric": "cpu"}]},
                 {"resource_thresholds": [{"host": "ns1", "p2": "97"}]}, {"audit_provisioning_accounts": [""]}):
         assert ov.validate_document("inventory/config/openobserve_config", bad), bad
+
+
+def test_the_appsec_roster_and_fortigate_lists_come_from_the_job_config_document(tmp_path):
+    """#535: 로스터·별칭표는 옛 Environment 실행 변수가 아니라 작업 설정 문서에서 읽는다."""
+    base = _render_with(tmp_path / "base")
+    for marker in ("ns0555", "ns0556", "example_fw"):
+        assert marker not in base, marker
+    cfg = {"appsec_hosts": ["ns0555"], "fortigate_syslog_roster": ["ns0556"], "fortigate_device_aliases": {"example_fw": "ns0557"}}
+    out = _render_with(tmp_path / "cfg", config=cfg)
+    for marker in ("ns0555", "ns0556", "example_fw"):
+        assert marker in out, marker
+
+
+def test_the_roster_and_alias_keys_are_schema_checked():
+    ok = {"appsec_hosts": ["ns0555"], "fortigate_syslog_roster": ["ns0556", "ns0380+ns0381"], "fortigate_device_aliases": {"example_fw": "ns0557"}}
+    assert ov.validate_document("inventory/config/openobserve_config", ok) == []
+    for bad in ({"appsec_hosts": "ns0555"}, {"appsec_hosts": [""]}, {"fortigate_syslog_roster": [1]},
+                {"fortigate_device_aliases": ["ns0557"]}, {"fortigate_device_aliases": {"example_fw": ""}}):
+        assert ov.validate_document("inventory/config/openobserve_config", bad), bad
+
+
+def test_the_environment_extra_variable_still_wins_over_the_roster_document(tmp_path):
+    """전환 기간 호환: 같은 이름의 실행 변수를 주면 문서보다 우선한다(변수 우선순위)."""
+    out = _render_with_extra(tmp_path / "x", config={"appsec_hosts": ["ns0555"]}, extra={"o2c_appsec_hosts": ["ns0558"]})
+    assert "ns0558" in out and "ns0555" not in out
 
 
 def test_the_private_ca_file_comes_from_the_openobserve_service_document(tmp_path):

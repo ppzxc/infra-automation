@@ -137,6 +137,33 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "appsec_hosts": {
+      "type": "array",
+      "description": "보안 제품 로그 공백을 검사할 호스트 로스터(관리번호). 비면 공백 검사를 하지 않는다.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "fortigate_syslog_roster": {
+      "type": "array",
+      "description": "방화벽 수신 중단 감시 장비. 관리번호, HA 쌍(ns0380+ns0381), 또는 관리번호로 못 바꾼 장비의 devname 그대로의 이름.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "fortigate_device_aliases": {
+      "type": "object",
+      "description": "방화벽 장비 이름→관리번호 별칭표(키는 소문자 정규화한 devname, 도메인 제외).",
+      "patternProperties": {
+        "^.+$": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
