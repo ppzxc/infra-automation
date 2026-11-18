@@ -647,6 +647,7 @@ def test_retention_runs_even_when_the_alert_cannot_be_delivered_but_the_host_sti
 
 class _DeadHook:
     url = "http://127.0.0.1:9/hook"      # 아무도 듣지 않는 포트
+    notify_extra = {}
 
 
 def test_tasks_compute_token_and_member_once():
