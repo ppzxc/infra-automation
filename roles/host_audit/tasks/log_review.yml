@@ -149,6 +149,7 @@
               managed_addresses: "{{ _host_audit_log_review_managed_addresses }}"
               window_seconds: "{{ host_audit_log_review_multi_source_window_seconds | int }}"
               min_sources: "{{ host_audit_log_review_multi_source_min_sources | int }}"
+            log_management: "{{ host_audit_log_review_log_management }}"
       ansible.builtin.set_fact:
         host_audit_log_review_model: "{{ _results | host_audit_log_review_model(_meta) }}"
       register: _host_audit_log_review_built
