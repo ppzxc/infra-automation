@@ -121,7 +121,7 @@ Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, s
 
 - `operator`: `infra` 안 userpass 사용자. 전체 읽기(list 포함)와 create/update만 하고 delete·`sys/`는 없다. 등록 도구가 이 권한으로 쓴다.
 - `admin`: 루트 네임스페이스의 비상용. 삭제·영구 삭제·정책 수동 변경에만 쓴다([openbao-operations](runbooks/openbao-operations.md)).
-- 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절). `inventory/`·`secrets/`의 metadata list·read(이름·버전)를 가지며, 작업 계열 중 list는 `periodic_check`만 갖는다. `inventory/data/*` 전체 읽기에는 개인정보(`inventory/config/host_audit`의 수신자·발신자)와 웹훅 주소(`inventory/config/github_webhook_watch`의 `hook_url`)가 포함된다(#504가 단일 원본으로 정한 위치라 옮기지 않았다, 사용자 결정 항목).
+- 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절). `inventory/`·`secrets/`의 metadata list·read(이름·버전)를 가지며, 작업 계열 중 list는 `periodic_check`만 갖는다. 개인정보(`inventory/config/host_audit`의 수신자·발신자)와 웹훅 주소(`inventory/config/github_webhook_watch`의 `hook_url`) 문서는 `deny`라 읽지 못한다(두 문서의 metadata는 보인다).
 
 정책·AppRole·마운트는 OpenTofu 코드로만 바꾼다([openbao_opentofu.md](openbao_opentofu.md)).
 

@@ -152,3 +152,7 @@ docker exec -e BAO_ADDR=<로컬 dev 주소> -e BAO_TOKEN=<임시값> bao-dev bao
 # VAULT_ADDR, VAULT_TOKEN, TF_VAR_runner_cidrs, TF_ENCRYPTION을 주고 init/plan/apply
 docker rm -f bao-dev
 ```
+
+## 9. 실패한 실행 뒤 남은 임시 키
+
+접속 해석 뒤 플레이에서 호스트가 실패하면 컨트롤러 임시 디렉터리에 복호화한 키 파일(`*_bao_{admin,boot,hop}_key`, `*_bao_*_key.askpass`)이 다음 실행 때까지 남을 수 있다. 파일은 `0600`이고 다음 `resolve_connection`이 12시간 지난 것을 지운다. 실패한 실행 뒤에는 컨트롤러에서 이 이름의 파일이 남아 있는지 보고, 있으면 지운다.

@@ -296,11 +296,16 @@ def test_periodic_check_has_list_and_reads_everything_but_agent_session_cannot_r
     assert not any("create" in c or "update" in c for _, c in pc if _.startswith(("inventory/", "secrets/")))
     ag = dict(policy("agent-session"))
     assert ag["inventory/data/*"] == ["read"]
+    # 개인정보·웹훅 주소 문서는 deny(#504 단일 원본은 그대로, 읽기만 막는다). 이 두 개만 deny이고 나머지는 read다.
+    assert ag["inventory/data/config/host_audit"] == ["deny"]
+    assert ag["inventory/data/config/github_webhook_watch"] == ["deny"]
+    assert {p for p, c in ag.items() if "deny" in c} == {"inventory/data/config/host_audit", "inventory/data/config/github_webhook_watch"}
     assert set(ag["secrets/metadata/*"]) == {"read", "list"}
     assert set(ag["inventory/metadata/*"]) == {"read", "list"}      # AGENTS.md: 에이전트 세션은 inventory/를 읽는다(문서 목록 포함)
     assert not any(p.startswith("secrets/data") for p in ag)
     assert not any(p.startswith("inventory/") and ({"create", "update", "delete", "patch"} & set(c)) for p, c in ag.items())
-    assert readable_patterns(["agent-session"]) == {p for p in index_patterns() if p.startswith("inventory/")}
+    denied = {"inventory/config/host_audit", "inventory/config/github_webhook_watch"}
+    assert readable_patterns(["agent-session"]) - denied == {p for p in index_patterns() if p.startswith("inventory/")} - denied
 
 
 def test_operator_reads_everything_and_writes_but_never_deletes():

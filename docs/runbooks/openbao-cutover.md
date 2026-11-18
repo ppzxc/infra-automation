@@ -54,7 +54,18 @@
 | `periodic_check` | 1회 통과(스키마·참조·인벤토리 대조) |
 
 - **거부 시험**: AppRole마다 자기 범위 밖 경로 하나를 읽어 403을 확인한다. 새 정책이 열어야 할 것은 열고 막아야 할 것은 막는지 보는 시험이다. 어떤 경로를 쓰는지는 비공개 노트에 둔다.
+- **거부 시험 추가**: `agent_session`은 `inventory/config/host_audit`·`inventory/config/github_webhook_watch`를 읽으려 하면 403이어야 한다.
 - 값은 출력하지 않는다. 결과는 통과·실패만 기록한다.
+
+### 전환 전 추가 확인 (실서버 필요)
+
+로컬에서는 확인하지 못해 사람이 확인한다(#522).
+
+- **Endpoint 문서가 없는 Asset 0개**: 도달성 알림(MON-227)은 Endpoint 문서가 없는 호스트를 경고만 하고 건너뛴다. 전환 적재 뒤 Periodic Check로 없는 호스트가 0개인지 본다.
+- **알림 URL만으로 수신되는지**: 옛 코드는 `Authorization`·`X-NANOIT-ACCESS` 헤더를 붙일 수 있었고 새 구조는 text/plain URL 하나다(#503). host_audit의 KISA 악화 알림과 FortiGate 변경 알림을 한 번 보내 수신되는지 확인한다. 401이면 `secrets/services/alert/notify`에 인증 값을 추가하는 수정이 필요하다.
+- **`token_max_ttl`**: 계열별 값(7200/3600)은 추정이다. 가장 긴 실행(Host Agents Deploy 전체, Repo Maintenance)이 이 안에 끝나는지 본다.
+- **state 잠금**: RustFS에서 `use_lockfile`이 동작하는지(동시 apply 하나가 거부되는지) 확인한다.
+- **`TF_VAR_agent_session_cidrs`**: 새 필수 입력이다. OpenTofu 템플릿 Environment에 값이 있는지 확인한다.
 
 ## 5. 되돌리기
 
