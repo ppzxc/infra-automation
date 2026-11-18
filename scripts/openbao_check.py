@@ -353,7 +353,7 @@ def build_alert(violations):
 def send_alert(url, text):
     req = urllib.request.Request(url, data=text.encode("utf-8"), method="POST",
                                  headers={"Content-Type": "text/plain; charset=utf-8"})
-    _bao_http.urlopen(req, timeout=TIMEOUT).close()
+    _bao_http.urlopen_following(req, timeout=TIMEOUT).close()  # 토큰 없는 알림 POST: 리다이렉트를 따라도 새는 비밀이 없다
 
 
 # ---- 진입점 -------------------------------------------------------------------------------------------------------

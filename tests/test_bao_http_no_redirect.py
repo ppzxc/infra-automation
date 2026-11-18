@@ -108,3 +108,15 @@ def test_the_script_clients_do_not_forward_the_token_on_a_redirect(redirect_pair
     with pytest.raises(openbao_migrate.ClientError):
         openbao_migrate.Client(a.url, "infra", "tok-xyz")._call("GET", "/v1/inventory/data/assets/ns0001")
     assert seen == []
+
+
+def test_the_alert_post_has_no_token_so_it_follows_a_redirect_to_the_webhook(redirect_pair):
+    """Periodic Check 실패 알림은 토큰이 없는 POST라 리다이렉트를 따른다(최종 리뷰 6차 4번). OpenBao 요청의 비추종은 그대로다."""
+    a, seen = redirect_pair
+    import openbao_check
+    openbao_check.send_alert(a.url + "/hook", "OpenBao Periodic Check 실패 1건\n")
+    assert [s["path"] for s in seen] == ["/hook"]
+    assert seen[0]["token"] is None and "Periodic Check" in seen[0]["body"]
+    with pytest.raises(urllib.error.HTTPError):       # 같은 서버로 OpenBao 호출용 열기는 여전히 따르지 않는다
+        _bao_http.urlopen(urllib.request.Request(a.url + "/x", method="POST", data=b"{}"), timeout=5)
+    assert len(seen) == 1

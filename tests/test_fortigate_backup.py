@@ -539,6 +539,23 @@ def test_alert_failure_or_missing_webhook_fails_host_loudly(ansible_env, device,
     assert "admintimeout 9" not in res.stdout + res.stderr
 
 
+def test_a_failed_webhook_read_does_not_swallow_the_change_the_next_run_still_alerts(ansible_env, device, hook, tmp_path):
+    """webhook을 읽지 못해 실패한 실행은 새 백업을 저장하지 않는다. 저장했다면 다음 실행의 직전 백업이 이미 바뀐 설정이라 알림이 영영 가지 않는다(최종 리뷰 6차 1번)."""
+    out = tmp_path / "bk"
+    device.config = _cfg()
+    assert _run(ansible_env, device, out).returncode == 0
+    before = _files(out)
+    device.config = _cfg().replace("admintimeout 5", "admintimeout 9")
+    time.sleep(1.1)
+    res = _run(ansible_env, device, out)      # webhook 문서 없음: 읽기·확인이 실패한다
+    assert res.returncode != 0 and "FORTIGATE-ALERT" in res.stdout + res.stderr
+    assert _files(out) == before              # 변경을 담은 새 파일은 저장되지 않았다
+    time.sleep(1.1)
+    assert _drift_run(ansible_env, device, out, hook).returncode == 0
+    assert len(hook.posts) == 1 and "config system global" in hook.texts()[0]
+    assert len(_files(out)) == len(before) + 1
+
+
 def _filters():
     import importlib.util
     spec = importlib.util.spec_from_file_location("fgdrift", ROLE_DIR / "filter_plugins" / "fortigate_config_drift.py")
@@ -599,9 +616,13 @@ def test_retention_runs_even_when_the_alert_cannot_be_delivered_but_the_host_sti
     os.utime(expired, (old, old))
     device.config = _cfg().replace("admintimeout 5", "admintimeout 9")
     time.sleep(1.1)
-    res = _run(ansible_env, device, out)   # webhook 없음: 변경 알림이 나가지 못한다
+    res = _run(ansible_env, device, out, hook=_DeadHook())   # webhook은 있으나 전송이 실패한다
     assert res.returncode != 0 and "FORTIGATE-ALERT" in res.stdout + res.stderr
     assert not expired.exists()
+
+
+class _DeadHook:
+    url = "http://127.0.0.1:9/hook"      # 아무도 듣지 않는 포트
 
 
 def test_tasks_compute_token_and_member_once():

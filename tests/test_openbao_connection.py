@@ -454,3 +454,26 @@ def test_a_credential_override_on_an_endpoint_without_a_default_credential_names
 def test_a_bad_preference_is_a_readable_error(bad):
     with pytest.raises(ConnectionError_, match="preference"):
         preference_list(bad)
+
+
+def test_a_cached_login_older_than_the_token_ttl_minus_margin_is_dropped_and_logged_in_again(fake_openbao, monkeypatch):
+    """장수 프로세스의 캐시 토큰이 만료돼도 정책 거부로 오인한 403으로 실패하지 않는다(최종 리뷰 6차 2번)."""
+    import _openbao_reader as core
+    clock = [1000.0]
+    monkeypatch.setattr(core, "_now", lambda: clock[0])
+    Reader(_vars(fake_openbao)).token()
+    clock[0] += core.LOGIN_TTL - core.LOGIN_MARGIN - 1
+    Reader(_vars(fake_openbao)).token()
+    assert len(fake_openbao.logins()) == 1       # 아직 여유 안: 캐시를 쓴다
+    clock[0] += 2
+    reader = Reader(_vars(fake_openbao))
+    assert reader.read("inventory/assets/ns0001")["type"] == "server"
+    assert len(fake_openbao.logins()) == 2       # 여유를 넘기면 버리고 다시 로그인한다
+
+
+def test_a_policy_denial_on_a_fresh_cached_login_is_not_retried_with_another_login(fake_openbao):
+    fake_openbao.deny("secrets", "automation/ssh")
+    for _ in range(2):
+        with pytest.raises(OpenBaoError):
+            Reader(_vars(fake_openbao)).read("secrets/automation/ssh")
+    assert len(fake_openbao.logins()) == 1
