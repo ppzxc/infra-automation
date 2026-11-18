@@ -119,6 +119,29 @@
             collection_targets:
               hosts: "{{ host_audit_log_review_collect_hosts }}"
               devices: "{{ host_audit_log_review_devices }}"
+            # 1부 1~5번(#559). 허용 계정은 resolve_connection이 남긴 선언 계정·bootstrap 계정 이름(비밀 없는 요약)과
+            # Asset Inventory 계정(에이전트만 설치된 호스트)이다. 이름만 넘긴다(공개 키·접속 주소는 넘기지 않는다).
+            accounts:
+              hosts: >-
+                {%- set src = {} -%}
+                {%- for h in groups['host_audit_targets'] | default([]) -%}
+                {%- set hv = hostvars[h] -%}
+                {%- set _ = src.update({h: {
+                      'resolved': hv['_normalized_admin_users'] is defined,
+                      'accounts': hv['accounts'] | default([]) | select('mapping') | selectattr('name', 'defined')
+                                  | rejectattr('state', 'defined') | map(attribute='name') | list
+                                  + (hv['accounts'] | default([]) | select('mapping') | selectattr('name', 'defined')
+                                     | selectattr('state', 'defined') | rejectattr('state', 'equalto', 'absent')
+                                     | map(attribute='name') | list),
+                      'admin_users': hv['_normalized_admin_users'] | default([]),
+                      'bootstrap': (hv['_boot_summary'] | default({}, true)).username | default(''),
+                      'agents_only': h in (groups['agents_only'] | default([]))}}) -%}
+                {%- endfor -%}
+                {{ src | host_audit_log_review_account_hosts(host_audit_model.asset_inventory.hosts | default([])) }}
+              business_hours: "{{ host_audit_log_review_business_hours }}"
+              holidays: "{{ host_audit_log_review_holidays }}"
+              failure_threshold: "{{ host_audit_log_review_failure_threshold | int }}"
+              failure_window_minutes: "{{ host_audit_log_review_failure_window_minutes | int }}"
             log_management: "{{ host_audit_log_review_log_management }}"
             previous_signed_copy: "{{ _host_audit_log_review_signed }}"
       ansible.builtin.set_fact:

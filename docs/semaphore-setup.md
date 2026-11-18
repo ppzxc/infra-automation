@@ -258,7 +258,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID면 Survey `host_audit_resend_month`에 `2026-11`(KST 기준 실행 시작 월)을 함께 준다.
 - 수신자는 지금의 OpenBao `inventory/config/host_audit.mail_recipients`다. 받은 보고서의 SHA-256이 보관된 요약의 값과 다르면 보내지 않는다.
 
-**Log Review Report 서명본 등록 (Host Audit — Register Signed Log Review)** ([host_audit.md §18.2](host_audit.md), #564)
+**Log Review Report 서명본 등록 (Host Audit — Register Signed Log Review)** ([host_audit.md §18.3](host_audit.md), #564)
 
 - 결재가 끝난 Log Review Report의 서명 스캔본(PDF)을 그 보고서를 만든 정기 실행의 보관 경로 `signed/`에 올린다. 다음 달 정기 실행의 보고서가 '전월 서명본: 있음(일시·해시)/없음'을 적는다.
 - Semaphore는 실행 때 파일을 받지 못한다. 운영자가 러너 호스트의 접수 폴더(컨테이너 안 경로 `host_audit_signed_intake_dir`, 기본 `<HOST_AUDIT_OUTPUT_ROOT>/_signed_intake`)에 `<실행 ID>.pdf`로 두고, `sha256sum <실행 ID>.pdf` 값을 Survey `host_audit_signed_sha256`에, 보고서의 실행 ID(예: `ha-20261031T220000Z`)를 `host_audit_signed_run_id`에 넣는다. 보관소 키는 운영자에게 주지 않는다(템플릿이 Environment `host_audit`의 보관 키로 올린다).

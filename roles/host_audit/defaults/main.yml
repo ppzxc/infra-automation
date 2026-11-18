@@ -172,7 +172,7 @@ host_audit_resend_month: ""
 
 # Log Review Report 서명본 등록 (playbooks/host_audit_log_review_sign.yml, Spec #544 / Ticket-9 #564).
 # Semaphore는 파일을 받지 못하므로(#556) 운영자가 러너의 접수 폴더에 <실행 ID>.pdf를 두고, 템플릿에는 실행 ID와 SHA-256만 준다.
-# 접수 폴더는 러너 컨테이너에서 보여야 한다(바인드 마운트는 운영자 작업, docs/host_audit.md §18.2).
+# 접수 폴더는 러너 컨테이너에서 보여야 한다(바인드 마운트는 운영자 작업, docs/host_audit.md §18.3).
 # 기본값은 출력 상위 경로 아래 '_signed_intake'다: '_'로 시작해 오래된 실행 디렉터리 정리(AUD-006)의 이름 규칙에 걸리지 않는다.
 host_audit_signed_run_id: ""
 host_audit_signed_sha256: ""
@@ -201,6 +201,21 @@ host_audit_log_review_validate_certs: true
 host_audit_log_review_collect_hosts: "{{ groups | o2c_roster('collect') }}"
 host_audit_log_review_switch_syslog_devices: [ns0250, ns0347]
 host_audit_log_review_devices: "{{ (groups['fortigate_firewalls'] | default([])) + host_audit_log_review_switch_syslog_devices }}"
+
+# 1부 계정·시간 항목 1~5(#559)의 판정 기준. 보고서의 판정 기준 칸에 그 달 값이 그대로 찍힌다.
+# 업무시간은 평일 start시~end시(정시, 끝 미포함) KST다: 19:59는 업무시간, 20:00은 업무시간 밖.
+host_audit_log_review_business_hours: {start: 8, end: 20}
+# 2번: 같은 계정·같은 호스트에서 window분 안에 threshold회 이상 실패(분 단위 집계).
+host_audit_log_review_failure_threshold: 5
+host_audit_log_review_failure_window_minutes: 10
+# 연도별 공휴일(대체공휴일·선거일 포함). 점검하는 달의 연도가 없으면 보고서가 '공휴일 목록 없음'이라고 적고 공휴일 없이 판정한다
+# (빈 목록 []은 '공휴일 없음'으로 읽는다). 날짜는 따옴표로 둔다(YAML이 date로 읽지 않게). 매년 12월에 다음 해를 더한다.
+# 2026: 한국천문연구원 월력 자료(astro.kasi.re.kr 2026년 국경일과 공휴일, 2026-11-18 확인). 근로자의 날(5/1)·제헌절(7/17)은
+# 그 자료에 공휴일로 없어서 넣지 않았다(회사 휴무로 보려면 운영자가 더한다).
+host_audit_log_review_holidays:
+  "2026": ["2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18", "2026-03-01", "2026-03-02", "2026-05-05",
+           "2026-05-24", "2026-05-25", "2026-06-03", "2026-06-06", "2026-08-15", "2026-08-17", "2026-09-24",
+           "2026-09-25", "2026-09-26", "2026-10-03", "2026-10-05", "2026-10-09", "2026-12-25"]
 
 # 3부 로그 관리 상태 나머지(#563)의 기준 설정. 시각 동기·백업 대상은 위 수집 로스터(백업 누락 알림과 같은 대상)다.
 # - retention_days: 로그 종류(스트림)별 OpenObserve 보존 일수의 저장소 선언(ADR-0006 스트림 표, 서버 전역 365일). 서버의 실제 값은
