@@ -102,6 +102,9 @@
   <section class="approval pb keep">
     <h2>결재</h2>
     <p class="small mute">점검 기간 {{ m.period.label | e }} · 실행 {{ m.run_id | e }}. 서명 스캔본은 같은 실행 보관 경로의 signed/에 등록한다.</p>
+{%- for i in m.part3 if i.key == 'part3.previous_signed_copy' and i.summary %}
+    <p class="previous-signed small">{{ i.summary | e }}</p>
+{%- endfor %}
     <table class="sign">
       <thead><tr>{% for a in m.approvals %}<th>{{ a.role | e }}</th>{% endfor %}</tr></thead>
       <tbody>

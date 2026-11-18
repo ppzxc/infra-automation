@@ -170,6 +170,16 @@ host_audit_mail_timeout: 30
 host_audit_resend_run_id: ""
 host_audit_resend_month: ""
 
+# Log Review Report 서명본 등록 (playbooks/host_audit_log_review_sign.yml, Spec #544 / Ticket-9 #564).
+# Semaphore는 파일을 받지 못하므로(#556) 운영자가 러너의 접수 폴더에 <실행 ID>.pdf를 두고, 템플릿에는 실행 ID와 SHA-256만 준다.
+# 접수 폴더는 러너 컨테이너에서 보여야 한다(바인드 마운트는 운영자 작업, docs/host_audit.md §18.2).
+# 기본값은 출력 상위 경로 아래 '_signed_intake'다: '_'로 시작해 오래된 실행 디렉터리 정리(AUD-006)의 이름 규칙에 걸리지 않는다.
+host_audit_signed_run_id: ""
+host_audit_signed_sha256: ""
+host_audit_signed_intake_dir: "{{ lookup('ansible.builtin.env', 'HOST_AUDIT_SIGNED_INTAKE_DIR') | default(host_audit_output_root ~ '/_signed_intake', true) }}"
+# 받는 서명본 크기 상한(바이트). 스캔본은 보통 수백 KB~수 MB다. 잠금 버킷이라 올린 뒤에는 지울 수 없다.
+host_audit_signed_max_bytes: 20971520
+
 # 러너 출력 상위 경로 아래에서 이 일수가 지난 실행 디렉터리는 다음 실행 초기에 지운다(#157).
 # 정상 종료한 실행은 끝에서 정책대로 지우므로(cleanup.yml) 이 값은 중간에 죽은 실행의 찌꺼기를 위한 것이다.
 host_audit_output_retention_days: 7
