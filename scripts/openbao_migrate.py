@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -505,6 +506,18 @@ class ClientError(Exception):
     pass
 
 
+RETRIES_429 = 8
+
+
+def _wait_429(error, attempt):
+    """429 응답의 Retry-After(초)를 따르고, 없으면 지수 대기. 30초를 넘기지 않는다."""
+    try:
+        wait = float(error.headers.get("Retry-After"))
+    except (TypeError, ValueError, AttributeError):
+        wait = 0.5 * (2 ** attempt)
+    return min(max(wait, 0.1), 30)
+
+
 class Client:
     def __init__(self, addr, namespace, token):
         self.addr, self.namespace, self.token = addr.rstrip("/"), namespace, token
@@ -512,16 +525,20 @@ class Client:
     def _call(self, method, path, body=None, missing=()):
         data = json.dumps(body).encode() if body is not None else None
         headers = {"X-Vault-Token": self.token, "X-Vault-Namespace": self.namespace, "Content-Type": "application/json"}
-        req = urllib.request.Request(self.addr + path, data=data, headers=headers, method=method)
-        try:
-            with _bao_http.urlopen(req, timeout=30) as r:
-                return r.status, json.loads(r.read() or b"{}")
-        except urllib.error.HTTPError as e:
-            if e.code in missing:
-                return e.code, {}
-            raise ClientError("%s %s -> HTTP %d" % (method, path.split("?")[0], e.code)) from None  # 본문은 내지 않는다
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            raise ClientError("%s %s -> %s" % (method, path.split("?")[0], type(e).__name__)) from None
+        for attempt in range(RETRIES_429 + 1):
+            req = urllib.request.Request(self.addr + path, data=data, headers=headers, method=method)
+            try:
+                with _bao_http.urlopen(req, timeout=30) as r:
+                    return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < RETRIES_429:   # 운영 OpenBao의 요청 제한. 처리 전에 거절하므로 쓰기도 다시 보내도 안전하다
+                    time.sleep(_wait_429(e, attempt))
+                    continue
+                if e.code in missing:
+                    return e.code, {}
+                raise ClientError("%s %s -> HTTP %d" % (method, path.split("?")[0], e.code)) from None  # 본문은 내지 않는다
+            except (urllib.error.URLError, OSError, ValueError) as e:
+                raise ClientError("%s %s -> %s" % (method, path.split("?")[0], type(e).__name__)) from None
 
     def read(self, mount, doc):
         status, body = self._call("GET", "/v1/%s/data/%s" % (mount, urllib.parse.quote(doc)), missing=(404,))
