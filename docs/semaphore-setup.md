@@ -207,7 +207,7 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | Survey·Extra variables | 없음 |
 | 실행 방식 | 매일 1회 스케줄(§6.3). 수동 실행도 가능 |
 
-러너 이미지에는 `jsonschema`가 들어 있어야 한다(`Dockerfile`, 이미지 재빌드 필요). 점검이 실패(종료 코드 1)하거나 설정 오류(종료 코드 2)로 끝나면 스크립트가 같은 비0 코드로 끝나고 Semaphore 작업이 실패 상태가 된다. 판정 규칙과 실패 대응은 [openbao_docs.md §4](openbao_docs.md)를 본다.
+러너에는 `jsonschema`가 있어야 한다(`Dockerfile`에 있고, 순정 이미지를 쓰는 운영은 Semaphore 설정 디렉터리의 `requirements.txt`에 `jsonschema`를 적고 컨테이너를 `docker restart`하면 시작 때 설치된다). 러너가 공인 주소로 Semaphore API를 읽으므로 앞단 프록시 허용 목록에 러너 고정 주소가 있어야 한다. 점검이 실패(종료 코드 1)하거나 설정 오류(종료 코드 2)로 끝나면 스크립트가 같은 비0 코드로 끝나고 Semaphore 작업이 실패 상태가 된다. 판정 규칙과 실패 대응은 [openbao_docs.md §4](openbao_docs.md)를 본다.
 
 **실행 시 입력 (Survey variables)**
 

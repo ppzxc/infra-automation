@@ -127,3 +127,18 @@ Credential을 지우면 그것을 가리키는 Endpoint의 접속이 깨진다. 
 ## 9. 실패한 실행 뒤 남은 임시 키
 
 접속 해석 뒤 플레이에서 호스트가 실패하면 컨트롤러 임시 디렉터리에 복호화한 키 파일(`*_bao_{admin,boot,hop}_key`, `*_bao_*_key.askpass`)이 다음 실행 때까지 남을 수 있다. 파일은 `0600`이고 다음 `resolve_connection`이 12시간 지난 것을 지운다. 실패한 실행 뒤에는 컨트롤러에서 이 이름의 파일이 남아 있는지 보고, 있으면 지운다.
+
+## 10. 출발지 CIDR과 프록시(X-Forwarded-For)
+
+AppRole의 `secret_id_bound_cidrs`·`token_bound_cidrs`는 OpenBao가 본 접속 출발지로 검사한다. 이 서버는 접속 경로가 둘이라 출발지가 다르게 보인다.
+
+| 경로 | OpenBao가 보는 출발지 | CIDR 값 |
+|---|---|---|
+| Semaphore 러너 → OpenBao(도커 내부 주소, 프록시를 거치지 않음) | 러너 컨테이너의 도커 IP | `OPENBAO_RUNNER_CIDRS`: 러너 컨테이너 고정 IP 하나(호스트 단위) |
+| 외부(에이전트 세션·운영자 로컬) → 프록시 → OpenBao | `X-Forwarded-For`의 실제 클라이언트 공인 IP | `OPENBAO_AGENT_SESSION_CIDRS`: 에이전트 세션 출발지 공인 IP |
+
+- **리스너 설정**: OpenBao 리스너가 프록시 컨테이너의 고정 IP 하나에서 온 `X-Forwarded-For`만 믿는다(`x_forwarded_for_authorized_addrs`). 다른 주소가 헤더를 보내면 거부하고(`x_forwarded_for_reject_not_authorized = true`), 헤더가 없는 직접 접속은 허용한다(`x_forwarded_for_reject_not_present = false`, 러너용).
+- **고정 IP가 전제다**: 프록시와 러너 컨테이너는 compose에서 `ipv4_address`를 고정한다(미리 만든 `external` 네트워크의 대역 안, 도커 자동 할당과 겹치지 않는 구간). 프록시 IP가 바뀌면 프록시를 거친 요청이 모두 거부되고, 러너 IP가 바뀌면 러너 로그인이 거부된다. 어느 쪽이든 닫히는 방향으로 실패한다.
+- **프록시가 최전방 엣지여야 한다**: 프록시가 `trusted_proxies`를 쓰지 않아 클라이언트가 보낸 `X-Forwarded-For`를 덮어쓴다. 앞단에 다른 프록시를 두면 이 전제가 깨지므로 리스너 설정을 다시 봐야 한다.
+- **확인 방법**: 외부에서 러너 role로 로그인해 보면 400이고 메시지의 출발지가 실제 공인 IP다(도커 IP가 아님). `X-Forwarded-For`를 위조해도 같은 결과여야 한다. 러너가 쓰는 같은 대역의 다른 컨테이너(예: 다른 서비스)는 러너 IP 밖이라 로그인할 수 없다.
+- **리스너 설정을 바꾸면 OpenBao를 재시작해야 하고 Shamir 키로 unseal해야 한다.** 재시작은 `docker restart`(env 유지)로 하고 compose 재생성은 하지 않는다(overseer 키가 env로만 들어간다). 재시작 전에 raft 스냅샷을 뜬다.
