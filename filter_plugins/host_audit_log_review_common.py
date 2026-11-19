@@ -47,3 +47,9 @@ def pii_cell(pii, host):
     if pii is None:
         return PII_UNSET
     return PII_YES if host in pii else PII_NO
+
+
+def gap_label(gap):
+    """요약 줄에 쓰는 '로그가 없는 날이 있는 호스트' 표기. 3대까지는 이름을, 그 이상은 대수만 적는다(전체 목록은 3부 1번)."""
+    names = ', '.join(gap) if len(gap) <= 3 else '목록은 3부 1번'
+    return '점검 기간 중 로그가 없는 날이 있는 호스트 %d대(%s)' % (len(gap), names)

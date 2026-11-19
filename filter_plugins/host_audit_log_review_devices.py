@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, FAILED, PARTIAL, STATUS_LABELS, UNAVAILABLE, VERDICT_CHECK, VERDICT_OK, failed, result,
 )
-from host_audit_log_review_common import to_int as _int  # noqa: E402
+from host_audit_log_review_common import gap_label, to_int as _int  # noqa: E402
 import host_audit_log_review_accounts as _accounts  # noqa: E402
 import host_audit_log_review_sources as _sources  # noqa: E402
 import host_audit_log_review_collection as _collection  # noqa: E402
@@ -90,7 +90,7 @@ def judge_command_burst(ctx):
     gap, unknown = _accounts._coverage(ctx)
     parts = ['sudo를 실행한 계정 %d개 중 기준 이상 %d' % (len(per_minute), len(rows))]
     if gap:
-        parts.append('수집 공백 호스트 %d대(%s)는 로그가 없어 판정 밖' % (len(gap), ', '.join(gap)))
+        parts.append('%s는 그 날짜를 점검하지 못함' % gap_label(gap))
     if unknown:
         parts.append(unknown)
     status = PARTIAL if (gap or unknown) else AUTO

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import AUTO, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result  # noqa: E402
-from host_audit_log_review_common import pii_cell, to_int as _int, tz as _tz  # noqa: E402
+from host_audit_log_review_common import gap_label, pii_cell, to_int as _int, tz as _tz  # noqa: E402
 
 RELOGIN = 'part1.relogin_from_managed_host'
 UNAUTHORIZED = 'part1.unauthorized_source'
@@ -123,7 +123,7 @@ def _verdict(rows, ctx, summary, columns, method, criterion):
     gap = _gap_hosts(ctx)
     status = PARTIAL if gap else AUTO
     if gap:
-        summary += ' · 수집 공백 호스트 %d대(%s)는 로그가 없어 판정 밖' % (len(gap), ', '.join(gap))
+        summary += ' · %s는 그 날짜를 점검하지 못함' % gap_label(gap)
     return result(status, VERDICT_CHECK if rows else VERDICT_OK, summary=summary, columns=columns if rows else [],
                   rows=rows, method=method, criterion=criterion)
 

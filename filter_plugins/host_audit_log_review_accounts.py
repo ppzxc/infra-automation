@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, MANUAL, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result,
 )
-from host_audit_log_review_common import to_int as _int  # noqa: E402
+from host_audit_log_review_common import gap_label as _gap_label, to_int as _int  # noqa: E402
 from host_audit_log_review_common import PII_NO, PII_UNSET, PII_YES, pii_cell as _pii_cell  # noqa: E402,F401
 import host_audit_log_review_collection as _collection  # noqa: E402
 
@@ -87,7 +87,8 @@ QUERIES = {
     ITEM_OFF_HOURS_PRIVILEGE: [_PRIVILEGE_QUERY, _ACCOUNT_CHANGE_QUERY],
 }
 
-NOTE_GAP = '수집 공백 호스트(로그 없음·끊김): 이 호스트는 판정하지 못함'
+NOTE_GAP = '점검 기간 중 로그가 없는 날이 있어 그 날짜는 점검하지 못함(3부 1번 참조)'
+
 NOTE_NO_LIST = '허용 계정 목록 없음(점검 대상 밖이거나 계정 정보를 얻지 못함)'
 
 
@@ -146,7 +147,7 @@ def _finish(ctx, status, findings, summary, columns, rows, method, criterion, no
             out_rows.append([host] + ['-'] * (len(columns) - 1) + [_pii_cell(pii, host), NOTE_GAP])
     parts = [summary] + [n for n in notes if n]
     if gap:
-        parts.append('수집 공백 호스트 %d대(%s)는 로그가 없어 판정하지 못함' % (len(gap), ', '.join(gap)))
+        parts.append('%s는 그 날짜를 점검하지 못함' % _gap_label(gap))
     if unknown:
         parts.append(unknown)
     if pii is None:
@@ -464,7 +465,7 @@ def judge_absentee_login(ctx):
     gap, unknown = _coverage(ctx)
     parts = ['로그인 계정 %d개' % len(per_user)]
     if gap:
-        parts.append('수집 공백 호스트 %d대(%s)는 접속일이 빠졌을 수 있음' % (len(gap), ', '.join(gap)))
+        parts.append('%s는 접속일이 빠졌을 수 있음' % _gap_label(gap))
     if unknown:
         parts.append(unknown)
     if pii is None:

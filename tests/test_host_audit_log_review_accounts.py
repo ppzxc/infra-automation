@@ -159,8 +159,8 @@ def test_a_host_with_a_collection_gap_is_shown_on_the_item_and_never_judged_ok()
     gap = _ok([{"name": "ns0001", "day": d, "records": 3} for d in OCT])  # ns0002는 전월 로그 없음
     i = _item(_model(_results(collection=gap)), 1)
     assert i["status"] == "partial" and i["verdict"] == "확인 필요"
-    assert _col(i, "호스트") == ["ns0002"] and "수집 공백" in _col(i, "비고")[0]
-    assert "수집 공백 호스트 1대(ns0002)" in i["summary"]
+    assert _col(i, "호스트") == ["ns0002"] and "로그가 없는 날" in _col(i, "비고")[0]
+    assert "로그가 없는 날이 있는 호스트 1대(ns0002)" in i["summary"]
 
 
 def test_when_the_collection_gap_is_unknown_the_item_does_not_say_ok():
@@ -335,7 +335,7 @@ def test_item5_lists_login_days_per_account_for_people_to_check_against_leave_re
 def test_item5_query_failure_is_query_failure_and_gaps_are_named():
     assert _item(_model(_results(accounts_ssh_success_hourly=_fail())), 5)["status"] == "failed"
     gap = _ok([{"name": "ns0001", "day": d, "records": 3} for d in OCT])
-    assert "수집 공백 호스트 1대(ns0002)" in _item(_model(_results(collection=gap)), 5)["summary"]
+    assert "로그가 없는 날이 있는 호스트 1대(ns0002)" in _item(_model(_results(collection=gap)), 5)["summary"]
 
 
 # ------------------------------------------------------------------ 허용 계정 입력(태스크가 넘기는 값)
