@@ -169,7 +169,7 @@ def test_audit_connection_failure_is_not_retried_and_raises(monkeypatch):
     assert calls == [1]
 
 
-def _fake_paramiko(error):
+def _fake_paramiko(error, connect_ok=False):
     class SSHException(Exception):
         pass
 
@@ -187,6 +187,10 @@ def _fake_paramiko(error):
             pass
 
         def connect(self, **k):
+            if not connect_ok:
+                raise error(FakeParamiko)
+
+        def invoke_shell(self):
             raise error(FakeParamiko)
 
         def close(self):
@@ -248,3 +252,12 @@ def test_main_without_audit_still_prints_the_plain_config(monkeypatch, capsys):
         c.main()
     assert e.value.code == 0
     assert capsys.readouterr().out == CONFIG.strip()
+
+
+def test_audit_does_not_fall_back_after_a_post_login_ssh_exception(monkeypatch):
+    openssh = []
+    monkeypatch.setattr(c, "paramiko", _fake_paramiko(lambda p: p.SSHException("channel dropped"), connect_ok=True))
+    monkeypatch.setattr(c, "collect_openssh_pty", lambda *a, **k: openssh.append(1))
+    with pytest.raises(Exception, match="channel dropped"):
+        c.collect_direct_ssh("h", 22, "u", "p", audit=True)
+    assert openssh == []

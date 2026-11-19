@@ -424,6 +424,7 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
                        enable_pass: str = None, timeout: int = 30, audit: bool = False):
     """Collect config via Direct SSH. Tries Paramiko first, falls back to OpenSSH PTY."""
     paramiko_err = None
+    logged_in = False
     if paramiko is not None:
         try:
             enable_legacy_algorithms()
@@ -444,6 +445,7 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
             except TypeError:
                 del connect_kwargs["disabled_algorithms"]
                 ssh.connect(**connect_kwargs)
+            logged_in = True  # 이후 실패는 로그인 뒤의 실패라 점검은 다시 로그인하지 않는다
 
             try:
                 shell = ssh.invoke_shell()
@@ -465,7 +467,7 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
             finally:
                 ssh.close()
         except Exception as pe:
-            if audit and not _may_fall_back_to_openssh(pe):
+            if audit and (logged_in or not _may_fall_back_to_openssh(pe)):
                 raise
             paramiko_err = pe
 
@@ -628,6 +630,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
                      enable_pass: str = None, timeout: int = 35, audit: bool = False):
     """Collect config via Bastion jump SSH session."""
     paramiko_err = None
+    logged_in = False
     if paramiko is not None:
         try:
             enable_legacy_algorithms()
@@ -648,6 +651,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
             except TypeError:
                 del connect_kwargs["disabled_algorithms"]
                 ssh.connect(**connect_kwargs)
+            logged_in = True  # 이후 실패는 로그인 뒤의 실패라 점검은 다시 로그인하지 않는다
 
             try:
                 shell = ssh.invoke_shell()
@@ -695,7 +699,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
             finally:
                 ssh.close()
         except Exception as pe:
-            if audit and not _may_fall_back_to_openssh(pe):
+            if audit and (logged_in or not _may_fall_back_to_openssh(pe)):
                 raise
             paramiko_err = pe
 
