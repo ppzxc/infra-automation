@@ -770,7 +770,11 @@ def _parse_probe(probe):
         return None, None, '접속 실패'
     rc = probe.get('rc')
     if rc == 3:
-        return None, None, '접속·수집 실패 (수집기 종료 코드 3, 재시도하지 않음)'
+        # The collector prints "Error during collection on <host> (<ExceptionClass>): ..." — only the class name is
+        # safe to keep (the host and the message can carry addresses or secrets).
+        m = re.search(r'^Error during collection on \S+ \(([A-Za-z_][A-Za-z0-9_.]{0,60})\):', str(probe.get('stderr') or ''), re.M)
+        suffix = ', 예외 %s' % m.group(1) if m else ''
+        return None, None, '접속·수집 실패 (수집기 종료 코드 3%s, 재시도하지 않음)' % suffix
     if rc == 2:
         return None, None, '수집한 출력이 설정으로 보이지 않음 (수집기 종료 코드 2)'
     if rc != 0:

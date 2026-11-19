@@ -353,6 +353,20 @@ def test_collection_failures_make_the_switch_unavailable_without_leaking_output(
     assert "secret-word" not in str(result) and "192.0.2.1" not in str(result)
 
 
+def test_exit_3_reason_names_only_the_exception_class():
+    stderr = ("Error during collection on 192.0.2.1 (TimeoutError): Timed out waiting for prompt pw=secret-word\n"
+              "Traceback (most recent call last):\n  File x\nTimeoutError: pw=secret-word")
+    result = hs.host_audit_switch_result({"rc": 3, "stdout": "", "stderr": stderr}, "ssh", [], "sw0001", ["cisco_switches"], TODAY)
+    assert "TimeoutError" in result["reason"] and "수집기 종료 코드 3" in result["reason"]
+    assert "secret-word" not in str(result) and "192.0.2.1" not in str(result) and "Timed out" not in str(result)
+
+
+@pytest.mark.parametrize("stderr", ["", "garbage", "Error during collection on h (not a class!): x", "Error during collection on h (" + "A" * 80 + "): x"])
+def test_exit_3_reason_without_a_usable_class_name_keeps_the_fixed_text(stderr):
+    result = hs.host_audit_switch_result({"rc": 3, "stdout": "", "stderr": stderr}, "ssh", [], "sw0001", ["cisco_switches"], TODAY)
+    assert result["reason"] == "접속·수집 실패 (수집기 종료 코드 3, 재시도하지 않음)"
+
+
 def test_record_for_a_switch_that_could_not_be_inspected():
     declared = {"fqdn": "", "ip": "", "environment": "production", "groups": ["cisco_switches"]}
     rec = hs.host_audit_switch_record({"rc": 3, "stdout": ""}, "sw0001", declared, "2026-11-19T00:00:00Z", "ssh", [], TODAY)
