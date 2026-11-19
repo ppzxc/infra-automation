@@ -128,3 +128,20 @@ def test_the_period_status_reasons_and_criteria_are_printed(rendered):
     assert "조회 실패(장비 로그 HTTP 503)" in rendered  # 조회 실패는 숨기지 않는다
     assert "하루 이상 빈 날이 있으면" in rendered  # 수집 공백의 판정 기준
     assert "ns0002" in rendered and "전월 로그 없음" in rendered
+
+
+def test_header_lists_the_criteria_of_judged_items(model):
+    """머리에 이번 자동 판정에 쓴 기준을 모아 찍는다(#571). 공유 모델에는 판정된 항목이 없으니 출발지 판정이 있는 모델을 따로 그린다."""
+    results = {"source_logins": {"ok": True, "hits": [], "error": ""},
+               "source_login_minutes": {"ok": True, "hits": [], "error": ""}}
+    meta = {"run_id": "r", "run_kind": "scheduled", "started_at": STARTED, "generated_at": "2026-10-31T22:10:00Z",
+            "timezone": "Asia/Seoul", "period": host_audit_log_review_period(STARTED, "Asia/Seoul"),
+            "settings": {"sources": {"reference": {"normal_sources": [{"address": "203.0.113.10", "name": "사무실"}]}}}}
+    judged = host_audit_log_review_model(results, meta)
+    assert judged["criteria"]
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(TEMPLATES)), autoescape=False, undefined=jinja2.StrictUndefined)
+    html = env.get_template("log_review.html.j2").render(host_audit_log_review_model=judged)
+    head = html.split("1부 로그 검토 항목")[0]
+    assert "이번 자동 판정에 쓴 기준" in head
+    assert judged["criteria"][0]["criterion"] in head
+    assert "이번 자동 판정에 쓴 기준" not in env.get_template("log_review.html.j2").render(host_audit_log_review_model=model)

@@ -228,3 +228,60 @@ def test_a_failed_login_search_is_a_query_failure_of_items_6_and_7():
     m = _model(results={"source_logins": {"ok": False, "hits": [], "error": "HTTP 401(인증·권한)"}})
     for key in (RELOGIN, "part1.unauthorized_source"):
         assert _item(m, key)["status_label"] == "조회 실패(HTTP 401(인증·권한))"
+
+
+# ------------------------------------------------------------------ 예외 주소(#571): 러너·점프 호스트가 6번을 매달 '확인 필요'로 만들지 않게
+EXCLUDED = [{"address": RELAY, "name": "Semaphore 러너"}]
+
+
+def test_excluded_source_is_dropped_from_rows_and_counted_in_relogin_summary():
+    ref = dict(REFERENCE, excluded_sources=EXCLUDED)
+    item = _item(_model(logins=[_login("h-web", "ppzxc", RELAY, logins=4), _login("h-db", "ppzxc", RELAY)], reference=ref),
+                 "part1.relogin_from_managed_host")
+    assert item["verdict"] == "이상 없음" and not item["rows"]
+    assert "예외 2건" in item["summary"]
+
+
+def test_excluded_source_does_not_hide_other_managed_hosts():
+    ref = dict(REFERENCE, excluded_sources=EXCLUDED)
+    item = _item(_model(logins=[_login("h-web", "ppzxc", RELAY), _login("h-web", "ppzxc", NAT_ONLY)], reference=ref),
+                 "part1.relogin_from_managed_host")
+    assert [r[1] for r in item["rows"]] == [NAT_ONLY]
+    assert "예외 1건" in item["summary"]
+
+
+def test_excluded_source_may_be_a_cidr():
+    ref = dict(REFERENCE, excluded_sources=[{"address": "10.20.0.0/24", "name": "러너 대역"}])
+    item = _item(_model(logins=[_login("h-web", "ppzxc", RELAY)], reference=ref), "part1.relogin_from_managed_host")
+    assert not item["rows"] and "예외 1건" in item["summary"]
+
+
+def test_no_exception_mention_without_excluded_sources():
+    item = _item(_model(logins=[_login("h-web", "ppzxc", RELAY)]), "part1.relogin_from_managed_host")
+    assert "예외" not in item["summary"] and len(item["rows"]) == 1
+
+
+def test_excluded_source_is_dropped_from_unauthorized_and_counted():
+    ref = dict(REFERENCE, excluded_sources=[{"address": OUTSIDE, "name": "점검 장비"}])
+    item = _item(_model(logins=[_login("h-web", "ppzxc", OUTSIDE), _login("h-web", "ppzxc", "192.0.2.99")], reference=ref),
+                 "part1.unauthorized_source")
+    assert [r[0] for r in item["rows"]] == ["192.0.2.99"]
+    assert "예외 1건" in item["summary"]
+
+
+def test_malformed_excluded_sources_fail_the_reference():
+    ref = dict(REFERENCE, excluded_sources=[{"address": "not-an-ip"}])
+    item = _item(_model(logins=[_login("h-web", "ppzxc", RELAY)], reference=ref), "part1.relogin_from_managed_host")
+    assert item["status"] == "failed" and "기준 목록" in item["reason"]
+
+
+# ------------------------------------------------------------------ 머리의 판정 기준 모음(#571)
+def test_model_header_collects_the_criteria_of_judged_items():
+    model = _model(logins=[_login("h-web", "ppzxc", OUTSIDE)])
+    by_key = dict((c["key"], c) for c in model["criteria"])
+    assert "part1.unauthorized_source" in by_key
+    assert by_key["part1.multi_source_login"]["criterion"].startswith("같은 계정이 120초 안")
+    # 판정하지 않은(점검 불가·조회 실패) 항목의 기준은 머리에 모으지 않는다. 항목별 행은 그대로 남는다.
+    failed_item = _item(_model(reference=None), "part1.unauthorized_source")
+    assert failed_item["criterion"]
+    assert "part1.unauthorized_source" not in dict((c["key"], c) for c in _model(reference=None)["criteria"])
