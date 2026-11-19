@@ -187,3 +187,15 @@ _Avoid_: prerequisite role, seed
 **Test Image**:
 A derived container image with per-run preparation (SSH server, host keys, Python interpreter) already baked in, so a scenario spends no time on it. Rebuilt only when its definition changes.
 _Avoid_: base image, custom image
+
+**Firewall Policy**:
+The desired state of host firewalls — which sources may reach which host on which service — kept as the source of truth in a separate private repository (`firewall-policy`), not in this one. Written as one-line rules grouped in one file per receiving host, plus Firewall Policy Aliases. A change takes effect only by merging a reviewed pull request; hosts in `observe` mode are only compared, hosts in `enforce` mode are applied. Defined in ADR-0016.
+_Avoid_: firewall config, firewall rules (unqualified)
+
+**Firewall Policy Alias**:
+A name in the Firewall Policy for one or more addresses (CIDR) or other aliases. The address is the truth and the name is only a label, so rules never name hosts or inventory groups and the meaning of a rule cannot change by an inventory change alone. The reserved alias `always_allow` (execution server, office) is always allowed to every policy host's management port and cannot be removed by a policy. Defined in ADR-0016.
+_Avoid_: host group, inventory group, address group
+
+**Firewall Drift**:
+A difference between the Firewall Policy and the firewall state collected from a host, found by comparing the address-based communication models of both: "missing" when only the policy has a flow, "excess" when only the host has it. Container-engine published ports are reported separately, not compared. Unlike Configuration Drift it needs no check mode, so it is detectable on Raw Provisioning Path hosts. Defined in ADR-0016.
+_Avoid_: drift (unqualified), firewall change
