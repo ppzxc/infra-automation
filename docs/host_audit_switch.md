@@ -33,7 +33,7 @@ running-config는 기본값 그대로인 기능을 줄로 보여 주지 않는�
 
 - 기본으로 켜져 있는 기능은 `no ...` 줄이 있어야 양호이고, 줄이 없으면 취약이다(예: `no ip source-route`, `no ip http server`).
 - 기본으로 꺼져 있는 기능은 켜는 줄이 있으면 취약이고, 줄이 없으면 양호이다(예: `tftp-server`, `ip finger`).
-- 기본값은 IOS 12.2 이상 기준이다. 가이드가 이전 버전에서 기본값이 다르다고 밝힌 항목(N-15, N-26, N-28, N-35)은 `show version`의 버전이 12.2보다 낮으면 줄 부재로 양호를 주지 않고 점검불가로 내린다.
+- 기본값은 IOS 12.2 이상 기준이다. 가이드가 이전 버전에서 기본값이 다르다고 밝힌 항목(N-26, N-28, N-35)은 `show version`의 버전이 12.2보다 낮으면 줄 부재로 양호를 주지 않고 점검불가로 내린다.
 - 값 판정이 필요한 줄(SNMP community 등)은 판정만 남기고 값 자체를 결과 JSON·보고서·로그에 쓰지 않는다.
 
 ### 항목별 고정 규칙
@@ -62,7 +62,7 @@ running-config는 기본값 그대로인 기능을 줄로 보여 주지 않는�
 | N-12 | 주기적 보안 패치 및 벤더 권고사항 적용 | 상 | 패치 | 점검불가 | 점검불가 | show version의 소프트웨어 버전 문자열(수집만 함) | 벤더 권고·EoL 조회 출처가 정해지지 않아 버전만 수집하고 판정은 점검불가(수동 확인)로 고정 | 판정하지 않음(항상 점검불가(수동 확인)). 버전 문자열만 결과에 남김 |
 | N-13 | 로깅 버퍼 크기 설정 | 중 | 로그 | 적용 | 적용 | running-config의 logging buffered 크기 줄 | - | logging buffered 줄이 없거나 크기 미지정(기본값이 작음)이거나 16000 바이트 미만, 또는 no logging buffered |
 | N-14 | 정책에 따른 로깅 설정 | 중 | 로그 | 적용 | 적용 | running-config의 logging on, logging trap·buffered 수준 줄 | - | no logging on, 또는 logging trap 수준이 informational보다 낮은 상세(emergencies~notifications), 또는 logging trap 줄이 있는데 그 수준이 잘못된 값. 기준 수준 informational은 기관 로그 정책이 없을 때의 가이드 예시값 |
-| N-15 | NTP 및 시각 동기화 설정 | 중 | 로그 | 적용 | 적용 | running-config의 ntp server·ntp peer 줄, show version의 버전(12.2 미만 구분용) | - | ntp server·ntp peer 줄이 없음. 버전이 12.2 미만이면 ntp access-group이 없을 때도 취약이 아니라 점검불가 |
+| N-15 | NTP 및 시각 동기화 설정 | 중 | 로그 | 적용 | 적용 | running-config의 ntp server·ntp peer 줄, show version의 버전(12.2 미만 구분용) | - | ntp server·ntp peer 줄이 없음(버전과 무관하게 취약). ntp access-group은 버전이 12.2 미만일 때만 보며, 그때 ntp 줄은 있는데 ntp access-group이 없으면 점검불가이고 12.2 이상이면 ntp access-group은 묻지 않음 |
 | N-16 | Timestamp 로그 설정 | 하 | 로그 | 적용 | 적용 | running-config의 service timestamps log 줄 | - | service timestamps log datetime 줄이 없음(uptime 방식이거나 no service timestamps log 포함). msec·localtime·show-timezone 옵션은 묻지 않음 |
 | N-17 | SNMP 서비스 확인 | 상 | 기능 | 적용 | 적용 | running-config의 snmp-server community·user·group·host 줄 | - | snmp-server 관련 줄이 하나라도 있으면 취약. 운영상 사용이 승인된 장비는 Host Audit의 예외(승인) 규칙으로 양호 처리하며 판정 함수는 승인 여부를 알지 못함 |
 | N-18 | SNMP Community String 복잡성 설정 | 상 | 기능 | 적용 | 적용 | running-config의 snmp-server community <문자열> 줄 | - | community 줄이 있고 문자열이 public·private이거나 대소문자·숫자·특수문자 중 3종 미만 또는 8자 미만. community 줄이 없으면 양호. 문자열 값은 결과에 남기지 않음 |
