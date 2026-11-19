@@ -677,3 +677,11 @@ def test_no_command_other_than_the_collected_texts_is_available_to_the_checks():
     source = (ROOT_DIR / "filter_plugins" / "host_audit_switch.py").read_text(encoding="utf-8")
     for banned in ("subprocess", "socket", "paramiko", "open(", "os.system"):
         assert banned not in source, banned
+
+
+def test_n10_one_line_banner_is_judged_without_the_control_c_delimiter_leaking_into_the_body():
+    one_line = "banner login ^C%s^C"
+    base = "banner login ^C\nAuthorized users only.\n^C"
+    assert verdict(judge(edit(sub=[(base, one_line % "Cisco IOS router")])), "N-10")["verdict"] == VULNERABLE
+    assert verdict(judge(edit(sub=[(base, one_line % "swtest authorized only")])), "N-10")["verdict"] == VULNERABLE
+    assert verdict(judge(edit(sub=[(base, "banner motd ^C^C")])), "N-10")["verdict"] == VULNERABLE

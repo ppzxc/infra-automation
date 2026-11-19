@@ -77,6 +77,8 @@ class Config(object):
             m = _BANNER.match(line)
             if m:
                 kind, delim, rest = m.groups()
+                if delim == '^' and rest[:1] == 'C':
+                    rest = rest[1:]   # IOS prints the control-C delimiter as the two characters "^C"
                 body = rest
                 if delim not in rest:
                     chunk = []
