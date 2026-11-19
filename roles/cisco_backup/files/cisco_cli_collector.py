@@ -225,6 +225,11 @@ def run_cisco_commands(send_fn, recv_fn, commands, enable_pass: str = None, time
     send_fn(b"\n")
     initial_buf = wait_for(lambda b: b.strip().endswith(b">") or b.strip().endswith(b"#"), wait_timeout=5.0)
 
+    # Still at a login prompt: the login failed. Sending the commands now would feed them to the device as password
+    # guesses (extra failed logins toward N-04's lockout threshold), so stop before anything else is sent.
+    if not re.search(rb"[>#]\s*$", initial_buf) and re.search(rb"(?:password|username|login)\s*:\s*$", initial_buf.lower()):
+        raise RuntimeError("Cisco login failed (login prompt shown again); no command was sent")
+
     # Check if we need to escalate to enable mode
     if initial_buf.strip().endswith(b">") or b">" in initial_buf:
         send_fn(b"enable\n")

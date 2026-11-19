@@ -261,3 +261,12 @@ def test_audit_does_not_fall_back_after_a_post_login_ssh_exception(monkeypatch):
     with pytest.raises(Exception, match="channel dropped"):
         c.collect_direct_ssh("h", 22, "u", "p", audit=True)
     assert openssh == []
+
+
+def test_login_prompt_shown_again_stops_before_any_command_is_sent():
+    """로그인이 실패해 로그인 프롬프트가 다시 뜨면 명령을 비밀번호 추측으로 흘리지 않는다(N-04 1회 시도)."""
+    dev = FakeDevice()
+    dev.start = b"\r\nPassword: "
+    with pytest.raises(RuntimeError, match="login failed"):
+        c.run_cisco_commands(dev.send, dev.recv, ["show version"], enable_pass="x", timeout=1)
+    assert dev.commands == [""]
