@@ -138,7 +138,7 @@ def test_the_header_names_the_period_and_the_run():
 def test_the_status_counts_cover_every_item_once():
     m = _model()
     assert sum(c["count"] for c in m["counts"]) == 19 + 9 + len(m["part3"])
-    assert [c["label"] for c in m["counts"]] == ["자동 판정", "일부 자동", "사람 대조", "점검 불가", "조회 실패"]
+    assert [c["label"] for c in m["counts"]] == ["자동 점검", "일부 자동", "사람 대조", "점검 불가", "조회 실패"]
 
 
 # ------------------------------------------------------------------ 3부 수집 공백
@@ -146,27 +146,27 @@ def test_the_status_counts_cover_every_item_once():
 def test_hosts_with_logs_every_day_have_no_gap():
     m = _model(_results(hosts=_ok(_daily("ns0001", OCT) + _daily("ns0002", OCT))))
     gap = _part3(m)
-    assert gap["status_label"] == "자동 판정" and gap["verdict"] == "이상 없음" and gap["rows"] == []
+    assert gap["status_label"] == "자동 점검" and gap["verdict"] == "이상 없음" and gap["rows"] == []
 
 
 def test_a_host_without_any_log_in_the_month_is_a_gap():
     m = _model(_results(hosts=_ok(_daily("ns0001", OCT))))
     gap = _part3(m)
     assert gap["verdict"] == "확인 필요"
-    assert gap["rows"] == [["호스트", "ns0002", "전월 로그 없음", "전체", 31]]
+    assert gap["rows"] == [["호스트", "ns0002", "점검 기간 내내 로그 없음", "전체", 31]]
 
 
 def test_a_host_whose_logs_stop_for_some_days_is_a_broken_gap_with_the_missing_ranges():
     days = [d for d in OCT if d not in ("2026-10-03", "2026-10-04", "2026-10-05", "2026-10-20")]
     m = _model(_results(hosts=_ok(_daily("ns0001", OCT) + _daily("ns0002", days))))
-    assert _part3(m)["rows"] == [["호스트", "ns0002", "끊김", "10-03~10-05, 10-20", 4]]
+    assert _part3(m)["rows"] == [["호스트", "ns0002", "일부 날짜 로그 없음", "10-03~10-05, 10-20", 4]]
 
 
 def test_zero_record_rows_and_hosts_outside_the_targets_do_not_count():
     hits = _daily("ns0001", OCT) + _daily("ns0002", OCT[:30]) + _daily("ns0002", ["2026-10-31"], records=0) \
         + _daily("stranger", OCT)
     rows = _part3(_model(_results(hosts=_ok(hits))))["rows"]
-    assert rows == [["호스트", "ns0002", "끊김", "10-31", 1]]
+    assert rows == [["호스트", "ns0002", "일부 날짜 로그 없음", "10-31", 1]]
 
 
 def test_a_device_counts_as_collected_on_a_day_seen_in_either_device_stream():
@@ -174,7 +174,7 @@ def test_a_device_counts_as_collected_on_a_day_seen_in_either_device_stream():
     fg = _ok(_daily("ns0900", OCT[15:]) + _daily("ns0901", OCT))
     m = _model(_results(hosts=_ok(_daily("ns0001", OCT) + _daily("ns0002", OCT)), switch=sw, fortigate=fg),
                devices=("ns0900", "ns0901", "ns0902"))
-    assert _part3(m)["rows"] == [["장비", "ns0902", "전월 로그 없음", "전체", 31]]
+    assert _part3(m)["rows"] == [["장비", "ns0902", "점검 기간 내내 로그 없음", "전체", 31]]
 
 
 def test_a_failed_query_is_query_failure_not_no_gap():
@@ -187,7 +187,7 @@ def test_a_failed_device_query_keeps_the_host_gaps_found_but_stays_a_query_failu
     m = _model(_results(hosts=_ok(_daily("ns0001", OCT)), fortigate=_fail("연결 불가·시간 초과")), devices=("ns0900",))
     gap = _part3(m)
     assert gap["status"] == "failed" and "장비 로그 연결 불가" in gap["status_label"]
-    assert gap["rows"] == [["호스트", "ns0002", "전월 로그 없음", "전체", 31]]
+    assert gap["rows"] == [["호스트", "ns0002", "점검 기간 내내 로그 없음", "전체", 31]]
 
 
 def test_no_collection_targets_is_unavailable_not_ok():
@@ -197,7 +197,7 @@ def test_no_collection_targets_is_unavailable_not_ok():
 
 def test_the_collection_gap_states_its_method_and_criterion():
     gap = _part3(_model(_results(hosts=_ok(_daily("ns0001", OCT)))))
-    assert "system_logs" in gap["method"] and "끊김" in gap["criterion"]
+    assert "로그가 있는지" in gap["method"] and "일부 날짜 로그 없음" in gap["criterion"]
 
 
 # ------------------------------------------------------------------ 조회 결과 정리 (uri 반복 결과 -> 항목 입력)
@@ -265,3 +265,16 @@ def test_a_judge_that_raises_marks_only_its_item_and_records_the_error(monkeypat
 def test_the_attachment_name_is_ascii_and_derived_from_the_run_id():
     assert host_audit_log_review_file_name(RUN_ID) == "host-audit-ha-20261031T220000Z-log-review.html"
     assert host_audit_log_review_file_name("../x y") == "host-audit-x-y-log-review.html"
+
+
+def test_when_stamps_are_grouped_by_day_and_the_overflow_is_its_own_entry():
+    from host_audit_log_review_accounts import _when
+    stamps = ["2026-10-12 20", "2026-10-12 21", "2026-10-13 01", "2026-10-14 02", "2026-10-15 03", "2026-10-16 04", "2026-10-17 05"]
+    assert _when(stamps, limit=4) == ["10-12 20·21시", "10-13 01시", "10-14 02시", "외 3건"]
+
+
+def test_a_summary_is_a_list_of_lines_and_a_gap_host_row_says_no_record_instead_of_a_dash():
+    from host_audit_log_review_items import split_summary
+    assert split_summary("가 · 나 · ") == ["가", "나"]
+    gap = _part3(_model(_results(hosts=_ok(_daily("ns0001", OCT)))))
+    assert gap["summary_lines"] == split_summary(gap["summary"])

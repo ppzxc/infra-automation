@@ -59,7 +59,7 @@ def _sync(name, status="synced", readings=8000, max_offset_ms=3):
 def test_every_host_synced_within_one_second_is_ok():
     m = _model({"status_time_sync": _ok([_sync("ns0001"), _sync("ns0002", max_offset_ms=None)])})
     item = _item(m, "time_sync")
-    assert item["status_label"] == "자동 판정" and item["verdict"] == "이상 없음"
+    assert item["status_label"] == "자동 점검" and item["verdict"] == "이상 없음"
     assert [r[0] for r in item["rows"]] == ["ns0001", "ns0002"]
     assert item["rows"][0][-1] == "이상 없음"
 
@@ -84,7 +84,7 @@ def test_a_host_without_time_sync_readings_or_without_a_tool_is_unverifiable_not
 def test_a_host_in_the_collection_gap_is_marked_as_such_in_time_sync():
     results = {"collection_hosts_daily": _ok(_daily("ns0001", OCT)), "status_time_sync": _ok([_sync("ns0001")])}
     rows = {r[0]: r[-1] for r in _item(_model(results), "time_sync")["rows"]}
-    assert rows["ns0002"] == "확인 불가(수집 공백)"
+    assert rows["ns0002"] == "확인 불가(로그가 없는 날)"
 
 
 def test_a_failed_time_sync_query_is_a_query_failure():
@@ -104,7 +104,7 @@ def _backup(daily, others=None):
 
 def test_daily_successful_backups_on_every_target_are_ok():
     item = _item(_model(_backup(_runs("ns0001", OCT) + _runs("ns0002", OCT))), "backup")
-    assert item["status_label"] == "자동 판정" and item["verdict"] == "이상 없음"
+    assert item["status_label"] == "자동 점검" and item["verdict"] == "이상 없음"
     assert {r[0]: r[-1] for r in item["rows"]} == {"ns0001": "이상 없음", "ns0002": "이상 없음"}
 
 
@@ -122,7 +122,7 @@ def test_a_failure_missing_days_and_a_host_without_success_are_reported_per_host
 def test_a_host_in_the_collection_gap_without_backups_says_so():
     results = dict(_backup(_runs("ns0001", OCT)), collection_hosts_daily=_ok(_daily("ns0001", OCT)))
     rows = {r[0]: r[-1] for r in _item(_model(results), "backup")["rows"]}
-    assert rows["ns0002"] == "성공 없음(수집 공백)"
+    assert rows["ns0002"] == "성공 없음(로그가 없는 날)"
 
 
 def test_maintenance_and_integrity_check_failures_need_a_check():
@@ -151,7 +151,7 @@ def _github(beats, events=12):
 
 def test_a_heartbeat_every_day_with_a_healthy_hook_is_ok_even_without_org_events():
     item = _item(_model(_github(_beat(OCT), events=0)), "github_audit")
-    assert item["status_label"] == "자동 판정" and item["verdict"] == "이상 없음" and item["rows"] == []
+    assert item["status_label"] == "자동 점검" and item["verdict"] == "이상 없음" and item["rows"] == []
     assert "수신 이벤트 0건" in item["summary"] and "로그인" in item["method"]
 
 

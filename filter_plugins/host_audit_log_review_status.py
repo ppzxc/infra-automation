@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, MANUAL, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result, unavailable,
 )
-from host_audit_log_review_common import to_int as _int  # noqa: E402
+from host_audit_log_review_common import NO_DATA, to_int as _int  # noqa: E402
 from host_audit_log_review_collection import _ranges  # noqa: E402  같은 날짜 범위 표기(10-03~10-05)
 
 TIME_SYNC = 'part3.time_sync'
@@ -48,14 +48,13 @@ def _hosts(ctx):
 
 def _unverifiable(name, ctx, why=''):
     if name in ctx['collection_gap']:
-        return '%s(수집 공백)' % UNVERIFIABLE
+        return '%s(로그가 없는 날)' % UNVERIFIABLE
     return '%s(%s)' % (UNVERIFIABLE, why) if why else UNVERIFIABLE
 
 
 # ------------------------------------------------------------------ 시각 동기
 
-TIME_SYNC_METHOD = ('OpenObserve host_status_logs의 시각 동기 판독(kind=time_sync, 5분 주기)을 호스트별로 집계해 '
-                    '수집 로스터 호스트와 대조')
+TIME_SYNC_METHOD = '서버 상태 로그의 시각 동기 판독(5분 주기)을 서버별로 집계해 로그를 받기로 한 서버와 비교'
 TIME_SYNC_COLUMNS = ['호스트', '판독', '동기', '미동기·오류', '최대 오차(ms)', '상태']
 
 
@@ -94,7 +93,7 @@ def judge_time_sync(ctx):
         s = seen.get(name)
         if not s or not s['readings']:
             state = _unverifiable(name, ctx, '판독 없음')
-            rows.append([name, 0, 0, 0, '-', state])
+            rows.append([name, 0, 0, 0, NO_DATA, state])
             unknown += 1
             continue
         if s['no_tool'] and not s['synced'] and not s['bad']:
@@ -106,7 +105,7 @@ def judge_time_sync(ctx):
         else:
             state = VERDICT_OK
         rows.append([name, s['readings'], s['synced'], s['bad'] + s['no_tool'],
-                     '-' if s['offset'] is None else s['offset'], state])
+                     NO_DATA if s['offset'] is None else s['offset'], state])
     status = PARTIAL if unknown else AUTO
     verdict = VERDICT_CHECK if (check or unknown) else VERDICT_OK
     summary = '대상 호스트 %d대 중 확인 필요 %d · 확인 불가 %d' % (len(hosts), check, unknown)
@@ -117,8 +116,8 @@ def judge_time_sync(ctx):
 
 # ------------------------------------------------------------------ 전월 백업 결과
 
-BACKUP_METHOD = ('OpenObserve backup_logs의 job=backup 결과를 호스트(host)·KST 일자별로 집계해 수집 로스터 호스트와 대조하고, '
-                 '유지보수·무결성 검사(job≠backup) 실패를 함께 센다')
+BACKUP_METHOD = ('백업 로그의 결과를 서버·날짜별로 집계해 로그를 받기로 한 서버와 비교하고, '
+                 '유지보수·무결성 검사 실패를 함께 센다')
 BACKUP_CRITERION = '실패가 있거나, 성공한 백업이 없는 날이 있거나(누락), 유지보수·무결성 검사 실패가 있으면 "확인 필요"'
 BACKUP_COLUMNS = ['대상', '성공 일수', '실패', '빈 날짜', '상태']
 
@@ -153,7 +152,7 @@ def judge_backup(ctx):
         days, failed_runs = ok_days.get(name, set()), failures.get(name, 0)
         missing = [d for d in all_days if d not in days]
         if not days:
-            state = '성공 없음(수집 공백)' if name in ctx['collection_gap'] else '성공 없음'
+            state = '성공 없음(로그가 없는 날)' if name in ctx['collection_gap'] else '성공 없음'
             gaps = '전체'
         else:
             gaps = _ranges(missing) if missing else ''
@@ -184,10 +183,9 @@ def judge_backup(ctx):
 
 # ------------------------------------------------------------------ GitHub 감사 로그 수집 상태
 
-GITHUB_METHOD = ('OpenObserve security_logs의 GitHub 조직 웹훅 전달 점검 하트비트(service_name=github-webhook-watch)를 KST 일자별로 '
-                 '보고, 수신 이벤트(service_name=github-audit) 건수를 참고로 센다. 조직 웹훅에는 로그인 이벤트가 없어 로그인은 이 항목이 '
-                 '보지 않는다(월간 감사 로그 내보내기로 보완)')
-GITHUB_CRITERION = ('전달 점검 기록이 없는 날, 점검 오류, 훅 상태 이상(missing·inactive·events_mismatch·unknown), '
+GITHUB_METHOD = ('GitHub 조직 웹훅의 정상 동작 확인 신호를 날짜별로 보고, 수신 이벤트 건수를 참고로 센다. '
+                 '조직 웹훅에는 로그인 이벤트가 없어 로그인은 이 항목이 보지 않는다(월간 감사 로그 내보내기로 보완)')
+GITHUB_CRITERION = ('확인 신호가 없는 날, 점검 오류, 웹훅 설정 이상(없음·비활성·이벤트 불일치·알 수 없음), '
                     '재전송 기간을 넘기거나 복구되지 않은 실패 전달이 있으면 "확인 필요". 조직 이벤트가 없는 것은 이상이 아니다')
 GITHUB_COLUMNS = ['구분', '날짜', '건수']
 
@@ -245,8 +243,8 @@ def judge_github_audit(ctx):
 STANDARD_DAYS = 365           # 로그 1년(ISMS 2.9.4, 회사 로그 보관 정책)
 PERSONAL_INFO_DAYS = 730      # 개인정보처리시스템 접속기록 2년(개인정보의 안전성 확보조치 기준)
 RETENTION_COLUMNS = ['로그 종류(스트림)', '보존(일)', '기준(일)', '상태']
-RETENTION_METHOD = ('저장소가 선언한 로그 종류별 OpenObserve 보존 일수(ADR-0006 스트림 표, role 기본값)를 기준과 대조. '
-                    '서버의 실제 보존 설정은 조회 전용 경로(POST _search)로 읽을 수 없어 점검자가 OpenObserve 화면'
+RETENTION_METHOD = ('저장소에 선언된 로그 종류별 보존 기간을 기준과 비교. '
+                    '서버의 실제 보존 설정은 조회 전용 경로로 읽을 수 없어 점검자가 OpenObserve 화면'
                     '(스트림 상세의 Data Retention, 비어 있으면 서버 전역 값)에서 같은지 확인한다')
 
 
