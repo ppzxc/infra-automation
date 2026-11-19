@@ -13,34 +13,9 @@
   become: false
   run_once: true
 
-# 결과에 비밀번호가 들어 있어 CISCO-008은 no_log다. 실패 사유(선호 순서 불일치, 없는 문서 등)는 lookup이 표시 채널로 따로 낸다(비밀 없음).
-- name: "[CISCO-008] Resolve the Endpoint, login Credential, enable and bastion hop from OpenBao"
-  ansible.builtin.set_fact:
-    cisco_backup_connection: "{{ lookup('openbao_connection', inventory_hostname, preference=cisco_backup_endpoint_preference) }}"
-  check_mode: false
-  delegate_to: localhost
-  become: false
-  no_log: true
-
-# 수집기는 비밀번호 로그인만 한다. 경유지는 비밀번호 로그인 한 단(Bastion 점프 세션)만 지원한다.
-- name: "[CISCO-009] Assert the resolved connection is supported by the collector"
-  ansible.builtin.assert:
-    that:
-      - cisco_backup_connection.protocol in ['ssh', 'telnet']
-      - cisco_backup_connection.login.mode == 'password'
-      - cisco_backup_connection.login.username | default('') | length > 0
-      - cisco_backup_openbao_required['secrets/assets/+/credentials/+'] | difference(_cisco_login.keys() | list) | length == 0
-      - cisco_backup_connection.via | length <= 1
-      - cisco_backup_connection.via | length == 0 or cisco_backup_connection.protocol == 'ssh'
-      - cisco_backup_connection.via | length == 0 or _cisco_hop.protocol == 'ssh'
-      - cisco_backup_connection.become.method | default('enable') == 'enable'
-      - cisco_backup_connection.via | length == 0 or (_cisco_hop.login.mode == 'password' and _cisco_hop.login.username | default('') | length > 0)
-    fail_msg: >-
-      [CISCO-VIA] {{ inventory_hostname }}: 수집기가 지원하지 않는 접속이다. 로그인은 계정이 있는 비밀번호 Credential이어야 하고,
-      승격은 enable만, 경유(via)는 ssh Endpoint가 ssh 비밀번호 로그인 경유지 한 단만 거칠 수 있다(값은 로그에 남기지 않는다).
-  delegate_to: localhost
-  become: false
-  # no_log를 달지 않는다: fail_msg에는 값이 없고, 달면 [CISCO-VIA] 사유가 가려진다.
+# 접속 정보 해석(CISCO-008·009)은 resolve.yml이다. Host Audit 스위치 단계도 같은 파일을 쓴다.
+- name: Resolve and validate the switch connection
+  ansible.builtin.include_tasks: resolve.yml
 
 # 1. Direct SSH 수집 (Endpoint ssh, 경유 없음)
 - name: "[CISCO-002] Collect running configuration from Cisco IOS switch"

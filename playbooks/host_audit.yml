@@ -7,7 +7,7 @@
 # Host Agents Exclusion 호스트와 CentOS 6/7 호스트도 점검한다(raw 조회만 사용).
 #
 # 단계: ① 대상·실행 메타 확정(localhost) → ② 접속 해석(resolve_connection 재사용)
-#       → ③ 호스트별 raw 수집 → ④ 임시 키 정리 → ⑤ 보고서 모델 → HTML(localhost)
+#       → ③ 호스트별 raw 수집 → ④ 임시 키 정리 → ⑤ 스위치 점검(cisco_switches, 한 대씩) → ⑥ 보고서 모델 → HTML(localhost)
 # 접속에 실패한 호스트는 실행을 멈추지 않고 보고서에 '점검불가'로 남는다.
 #
 # 실행 예시:
@@ -44,6 +44,20 @@
   ansible.builtin.import_playbook: common/cleanup_connection.yml
   vars:
     connection_hosts: host_audit_targets
+
+# 스위치(cisco_switches)는 서버와 따로 점검한다(Spec #568). 한 번에 한 대씩(serial: 1), 접속 실패는 재시도 없이 '점검불가'로 남기고 멈추지 않는다.
+- name: Collect switch state (read-only, one at a time)
+  hosts: host_audit_switch_targets
+  serial: 1
+  max_fail_percentage: 100   # 기록 저장 같은 예상 밖 실패가 한 대에서 나도 나머지 스위치 점검은 계속한다
+  gather_facts: false
+  connection: local
+  become: false
+  tasks:
+    - name: Audit one switch
+      ansible.builtin.include_role:
+        name: host_audit
+        tasks_from: switch
 
 - name: Build Host Audit report
   hosts: localhost

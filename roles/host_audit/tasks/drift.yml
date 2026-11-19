@@ -31,7 +31,8 @@
     _records: >-
       {%- set r = [] -%}
       {%- for p in _host_audit_record_files.files | map(attribute='path') | sort -%}
-      {%- set _ = r.append(lookup('ansible.builtin.file', p) | from_json) -%}
+      {%- set rec = lookup('ansible.builtin.file', p) | from_json -%}
+      {%- if rec.device_type | default('') != 'SWITCH' -%}{%- set _ = r.append(rec) -%}{%- endif -%}
       {%- endfor -%}
       {{ r }}
 

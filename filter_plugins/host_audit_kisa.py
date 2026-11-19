@@ -221,13 +221,14 @@ def urgency_of(severity):
     return URGENCY_BY_PRIORITY[priority_of(severity)]
 
 
-def remediation_view(code):
+def remediation_view(code, items=ITEMS):
     """Remediation columns of one item (``U-NN`` or ``KISA-2026:U-NN``): text plus the derived values.
+    ``items`` is the catalog the code is looked up in (the Unix catalog; the switch report passes its own).
 
     ``risk`` and ``urgency`` are not shown in the body table; the Remediation Plan xlsx (a later Spec #488 ticket)
     has columns for them and reads them from this one view, so they are computed and tested here once.
     """
-    meta = ITEMS.get(code.split(':', 1)[-1])
+    meta = items.get(code.split(':', 1)[-1])
     if meta is None:  # a stored record can carry a code this catalog lacks; the section tolerates that
         return {'remediation_summary': '', 'impact_level': None, 'effort_level': None, 'risk': None, 'priority': None,
                 'urgency': None}
@@ -398,10 +399,10 @@ def host_audit_kisa_result(probe, register, inventory_hostname, groups, today):
     return result
 
 
-def _item_meta(code):
+def _item_meta(code, items=ITEMS):
     """Base columns of an item (what summary rows and the per-host appendix may show)."""
     short = code.split(':', 1)[-1]
-    known = ITEMS.get(short, {})
+    known = items.get(short, {})
     meta = {field: known.get(field, short if field == 'title' else '') for field in ITEM_FIELDS}
     meta['code'] = code
     return meta
@@ -430,11 +431,16 @@ def _register_rows(register, applied, today):
     return rows
 
 
-def _build_findings(groups):
+def _is_switch_entry(entry):
+    """True for an exception register entry of a switch item (``KISA-2026:N-NN``, Spec #568)."""
+    return str((entry or {}).get('code', '')).split(':', 1)[-1].startswith('N-')
+
+
+def _build_findings(groups, items=ITEMS):
     """Findings (one per item and verdict) in the body table order, from ``{(code, verdict): [host rows]}``."""
     findings = []
     for (code, verdict), hosts in groups.items():
-        findings.append(dict(_item_meta(code), **remediation_view(code), verdict=verdict,
+        findings.append(dict(_item_meta(code, items), **remediation_view(code, items), verdict=verdict,
                              verdict_class=VERDICT_CLASSES[verdict], hosts=hosts, host_count=len(hosts)))
     return order_findings(findings)
 
@@ -560,7 +566,8 @@ def host_audit_kisa_section(model, records, register=None, today=None):
         'remediation_guide': _build_remediation_guide(findings),
         'remediation_source': REMEDIATION_SOURCE,
         'appendix': appendix,
-        'register': _register_rows(register, applied, today),
+        # Switch items (N-NN) are drawn in the switch part of the report (host_audit_switch_report), not here.
+        'register': _register_rows([e for e in (register or []) if not _is_switch_entry(e)], applied, today),
         'run_date': today,
     }
     return model

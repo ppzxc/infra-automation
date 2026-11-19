@@ -1,0 +1,44 @@
+---
+# ==============================================================================
+# Host Audit — 스위치 단계 (Spec #568 / Ticket-3, KISA-2026 V장 N 항목)
+# ==============================================================================
+# playbooks/host_audit.yml의 스위치 play(serial: 1, 러너 localhost 접속)가 스위치 한 대마다 부른다.
+# 접속 정보·계정·enable·경유지는 설정 백업과 같은 OpenBao Endpoint·Credential이다(cisco_backup 역할의 audit.yml).
+# 수집기가 `show running-config`와 `show version`만 보낸다(읽기 전용, 설정·세션 상태 변경 없음).
+# 접속 정보 해석이나 수집이 실패해도 이 스위치를 '점검불가'로 기록하고 실행은 계속한다(재시도 없음).
+# 판정(5종·예외 레지스터)은 host_audit_switch 필터가 하고, 결과는 서버와 같은 실행 디렉터리의
+# hosts/<Inventory Hostname>.json에 쓴다(device_type: SWITCH).
+# ------------------------------------------------------------------------------
+- name: Collect the switch state
+  block:
+    - name: "[AUD-900] Collect the switch running configuration and version (read-only, one login, no retry)"
+      ansible.builtin.include_role:
+        name: cisco_backup
+        tasks_from: audit
+  rescue:
+    - name: "[AUD-901] Mark the switch as not inspected when its connection could not be resolved"
+      ansible.builtin.set_fact:
+        cisco_audit_probe:
+          resolve_failed: true
+      no_log: true
+
+- name: "[AUD-902] Build the per-switch audit record"
+  ansible.builtin.set_fact:
+    host_audit_record: "{{ cisco_audit_probe | host_audit_switch_record(inventory_hostname, _declared, now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ'), _access, host_audit_kisa_exceptions, _run_date) }}"
+  vars:
+    _declared:
+      fqdn: ""
+      ip: ""
+      environment: "{{ host_audit_environment }}"
+      groups: "{{ group_names | reject('equalto', 'host_audit_switch_targets') | list }}"
+    _access: "{{ cisco_backup_connection.protocol | default('') }}"
+    _run_date: "{{ hostvars['localhost'].host_audit_run.started_at | host_audit_kisa_run_date(hostvars['localhost'].host_audit_run.timezone) }}"
+  no_log: true
+
+- name: "[AUD-903] Save the per-switch record on the runner"
+  ansible.builtin.copy:
+    content: "{{ host_audit_record | to_nice_json(indent=2) }}\n"
+    dest: "{{ hostvars['localhost'].host_audit_run.output_dir }}/hosts/{{ inventory_hostname }}.json"
+    mode: '0600'
+  delegate_to: localhost
+  become: false

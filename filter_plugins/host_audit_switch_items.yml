@@ -1,0 +1,196 @@
+# 스위치 점검 항목(KISA-2026 N-01~N-38)의 보고서용 설명 (Spec #568 / Ticket-5, #587).
+# 항목 제목·중요도·분류는 여기에 두지 않는다: 판정 함수 레지스트리(filter_plugins/host_audit_switch.py의 CHECKS)가 원본이고,
+# 이 파일은 거기 등록된 항목에만 쓰인다(등록되지 않은 항목은 보고서에 나오지 않는다. 항목을 더하는 티켓이 이 파일을 건드릴 필요 없음).
+# criteria는 가이드의 "양호" 판단 기준을, remediation은 가이드 "조치 방법"과 Cisco IOS 조치 사례를 우리 말로 짧게 요약한 것이다
+# (원문을 옮기지 않는다. 명령의 <...>는 장비마다 정하는 값 자리표시자이며 실제 주소·계정·문자열을 적지 않는다).
+# 가이드가 "일반적인 경우 영향 없음"이 아닌 조치 영향을 밝힌 항목은 remediation 끝에 "주의:"로 덧붙인다.
+N-01:
+  criteria: >-
+    기본 비밀번호를 바꿔 쓰고, 비밀번호 없이 접속되는 라인이 없는 경우 양호
+  remediation: >-
+    enable secret <비밀번호>를 설정하고, line vty 0 4·line console 0·line aux 0에서 login(또는 login local)과 비밀번호를 설정해 인증 없이 들어오는 라인을 없앤다. 비밀번호는 기관 작성 규칙으로 정한다.
+N-02:
+  criteria: >-
+    기관 정책에 맞는 비밀번호 복잡성(최소 길이 등)을 설정한 경우 양호
+  remediation: >-
+    security passwords min-length <길이>로 최소 길이를 정하고(이미 만든 비밀번호에는 적용되지 않으므로 바꿔야 한다), 기관 작성 규칙에 맞는 비밀번호를 쓴다.
+N-03:
+  criteria: >-
+    enable·계정 비밀번호를 암호화해 저장한 경우 양호
+  remediation: >-
+    enable secret <비밀번호>와 username <이름> secret <비밀번호>로 일방향 암호화 저장하고, service password-encryption을 켜 남은 평문 비밀번호가 설정 파일에 보이지 않게 한다. enable secret과 enable password는 서로 다른 값을 쓴다.
+N-04:
+  criteria: >-
+    로그인 실패 임계값이 5회 이하로 설정된 경우 양호
+  remediation: >-
+    login block-for <잠금 초> attempts <5 이하> within <허용 초>로 실패 횟수 초과 시 로그인을 일정 시간 막는다. show login으로 확인한다.
+N-05:
+  criteria: >-
+    업무에 맞게 계정 권한을 차등 부여한 경우 양호
+  remediation: >-
+    username <이름> privilege <1~15> secret <비밀번호>로 계정별 권한 수준을 나누고, privilege exec level 15 <명령>으로 중요한 명령(connect, telnet, rlogin, show ip access-list, show logging)은 15로 올린다. 관리자 한 명뿐이면 해당하지 않는다. 주의: 권한이 부족한 계정은 일부 명령을 실행하지 못한다.
+N-06:
+  criteria: >-
+    VTY 접근을 허용 IP로 제한하는 ACL을 적용한 경우 양호
+  remediation: >-
+    access-list <번호> permit <관리 IP>와 access-list <번호> deny any log를 만들고 line vty 0 4에서 access-class <번호> in으로 적용한다. 주의: ACL을 만들면 나머지는 기본 차단이라 관리 IP를 먼저 확인한다.
+N-07:
+  criteria: >-
+    세션 종료(exec-timeout)를 모든 라인에 10분 이하로 설정한 경우 양호
+  remediation: >-
+    line con 0, line vty 0 4, line aux 0 각각에서 exec-timeout <분> <초>(10분 이하, 예 5 0)를 설정한다.
+N-08:
+  criteria: >-
+    VTY가 암호화 프로토콜(SSH)로만 접속을 받는 경우 양호
+  remediation: >-
+    hostname과 ip domain-name을 정하고 crypto key generate rsa(모듈러스 2048)로 키를 만든 뒤 ip ssh version 2를 설정하고, line vty 0 4에서 transport input ssh로 telnet을 막는다. SSH를 지원하는 IOS 이미지(k9)인지 show version으로 확인한다.
+N-09:
+  criteria: >-
+    쓰지 않는 보조 입출력 포트(AUX 등)를 막은 경우 양호
+  remediation: >-
+    line aux 0에서 no exec, transport input none, no password(필요하면 exec-timeout 0 1)로 접속을 막는다. 주의: 막은 포트를 다시 쓰려면 별도로 켜야 한다.
+N-10:
+  criteria: >-
+    로그인 시 접근 경고 메시지를 설정하고 장비 정보를 노출하지 않는 경우 양호
+  remediation: >-
+    banner motd, banner login, banner exec 중 쓰는 배너에 허가된 사용자만 접속하고 접속 내용이 기록된다는 경고 문구를 설정한다. 장비 모델·버전·위치 같은 정보는 넣지 않는다.
+N-11:
+  criteria: >-
+    별도의 로그 서버로 로그를 보내는 경우 양호
+  remediation: >-
+    logging on, logging host <로그 서버>, logging trap informational, logging facility <facility>로 syslog 서버에 보낸다. show logging으로 확인한다. 주의: 상세한 로깅은 장비 성능에 영향을 줄 수 있다.
+N-12:
+  criteria: >-
+    보안 패치와 벤더 권고를 주기적으로 적용하는 경우 양호
+  remediation: >-
+    show version으로 현재 버전을 확인하고 벤더가 알린 취약점·지원 종료 정보와 대조해 최신 권고 버전으로 올린다. 주의: 서비스 영향이 있어 벤더와 협의해 적용한다.
+N-13:
+  criteria: >-
+    로깅 버퍼 크기를 장비 성능에 맞춰 충분히 설정한 경우 양호
+  remediation: >-
+    logging on과 logging buffered <크기(바이트, 예 16000 이상)>, logging buffered informational로 메모리 로그 버퍼를 설정한다. 주의: 장비 성능에 비해 크게 잡으면 부담이 된다.
+N-14:
+  criteria: >-
+    로그 기록 정책에 따라 로깅을 설정한 경우 양호
+  remediation: >-
+    show logging으로 현재 로깅 상태를 보고 기관의 로그 기록 정책(대상·심각도 수준)에 맞게 logging buffered·logging trap·logging console 등을 설정한다.
+N-15:
+  criteria: >-
+    신뢰할 수 있는 NTP 서버와 시각을 동기화하는 경우 양호
+  remediation: >-
+    ntp server <NTP 서버>를 설정하고(필요하면 인증 설정), show ntp status로 동기화를 확인한다.
+N-16:
+  criteria: >-
+    로그에 시각(timestamp)이 기록되도록 설정한 경우 양호
+  remediation: >-
+    service timestamps log datetime msec show-timezone을 설정한다(로컬 시각이면 clock timezone <이름> <시차>와 localtime을 함께 지정).
+N-17:
+  criteria: >-
+    쓰지 않는 SNMP 서비스를 끈 경우 양호
+  remediation: >-
+    SNMP를 쓰지 않으면 no snmp-server로 끈다(show snmp가 "SNMP agent not enabled"). 쓴다면 보안 수준이 높은 SNMPv3를 권고한다.
+N-18:
+  criteria: >-
+    SNMP를 끄거나 community string을 복잡성 기준(3종 이상 조합, 8자 이상)에 맞게 설정한 경우 양호
+  remediation: >-
+    기본값(public, private)을 지우고 snmp-server community <복잡한 문자열> RO <ACL 번호>로 영문 대·소문자·숫자·특수문자 중 3종 이상, 8자 이상인 문자열로 바꾼다.
+N-19:
+  criteria: >-
+    SNMP를 끄거나 SNMP 접근을 제한하는 ACL을 적용한 경우 양호
+  remediation: >-
+    access-list <번호> permit <관리 서버 IP>와 access-list <번호> deny any log를 만들고 snmp-server community <문자열> RO <번호>로 community에 ACL을 건다.
+N-20:
+  criteria: >-
+    SNMP community 권한이 읽기 전용(RO)인 경우 양호
+  remediation: >-
+    snmp-server community <문자열> RW를 지우고 RO로 다시 설정한다(no snmp-server community <문자열> 뒤 snmp-server community <문자열> RO).
+N-21:
+  criteria: >-
+    TFTP 서비스를 차단한 경우 양호
+  remediation: >-
+    no service tftp를 설정한다.
+N-22:
+  criteria: >-
+    경계 장비에 스푸핑 방지 필터링(사설·예약 주소 차단)을 적용한 경우 양호
+  remediation: >-
+    확장 ACL(번호 100~199)로 사설·루프백·링크로컬·문서용·멀티캐스트 대역을 출발지로 하는 패킷을 deny하고 permit ip any any로 마무리한 뒤 외부 연결 인터페이스에 ip access-group <번호> in으로 적용한다. 주의: ACL 로그가 많으면 CPU가 오르므로 로그는 켜지 않는다. 경계 라우터 항목이라 L2 스위치는 해당하지 않는다.
+N-23:
+  criteria: >-
+    경계 라우터에 DDoS 방어 설정을 하거나 DDoS 대응 장비를 쓰는 경우 양호
+  remediation: >-
+    show running-config로 DDoS 방어 요소(ACL 필터링, rate-limit, TCP intercept 등)를 확인하고 없으면 설정하거나 전용 DDoS 대응 장비를 둔다. 주의: 필터링 ACL은 장비 성능에 영향이 크다. 경계 라우터 항목이라 L2 스위치는 해당하지 않는다.
+N-24:
+  criteria: >-
+    쓰지 않는 인터페이스를 모두 비활성화한 경우 양호
+  remediation: >-
+    show interface로 연결이 없는 포트를 찾아 interface <이름>에서 shutdown한다(Administratively down으로 표시된다). 주의: 사용 중인 포트를 끄지 않도록 먼저 확인한다.
+N-25:
+  criteria: >-
+    TCP keepalive 서비스를 설정한 경우 양호
+  remediation: >-
+    service tcp-keepalives-in과 service tcp-keepalives-out을 설정한다.
+N-26:
+  criteria: >-
+    Finger 서비스를 차단한 경우 양호
+  remediation: >-
+    no ip finger(오래된 IOS는 no service finger)를 설정한다. 12.1(5) 이상은 기본으로 꺼져 있다.
+N-27:
+  criteria: >-
+    쓰지 않는 웹 서비스를 끄거나 허용 IP에서만 관리 페이지에 접속하게 한 경우 양호
+  remediation: >-
+    no ip http server와 no ip http secure-server로 끈다. 웹 관리가 필요하면 ip http access-class로 관리 IP만 허용한다.
+N-28:
+  criteria: >-
+    TCP/UDP small 서비스를 차단한 경우 양호
+  remediation: >-
+    no service tcp-small-servers와 no service udp-small-servers를 설정한다.
+N-29:
+  criteria: >-
+    BOOTP 서비스를 차단한 경우 양호
+  remediation: >-
+    no ip bootp server를 설정한다. DHCP 서버·릴레이를 쓰면서 BOOTP만 막으려면 ip dhcp bootp ignore를 쓴다.
+N-30:
+  criteria: >-
+    CDP 서비스를 차단한 경우 양호
+  remediation: >-
+    전체는 no cdp run, 인터페이스별로는 no cdp enable로 끈다. LLDP도 필요 없으면 no lldp run을 함께 설정한다. 주의: IP 전화기가 CDP·LLDP를 쓰는 구성은 먼저 확인한다.
+N-31:
+  criteria: >-
+    Directed broadcast를 차단한 경우 양호
+  remediation: >-
+    L3 인터페이스마다 interface <이름>에서 no ip directed-broadcast를 설정한다. L2 스위치는 해당하지 않는다.
+N-32:
+  criteria: >-
+    IP source routing을 차단한 경우 양호
+  remediation: >-
+    no ip source-route를 설정한다. L2 스위치는 해당하지 않는다.
+N-33:
+  criteria: >-
+    Proxy ARP를 차단한 경우 양호
+  remediation: >-
+    L3 인터페이스마다 interface <이름>에서 no ip proxy-arp를 설정한다. 주의: 게이트웨이·서브넷 마스크를 잘못 잡은 호스트가 Proxy ARP로 통신 중일 수 있어 먼저 조사한다. L2 스위치는 해당하지 않는다.
+N-34:
+  criteria: >-
+    ICMP unreachable·redirect를 차단한 경우 양호
+  remediation: >-
+    L3 인터페이스마다 interface <이름>에서 no ip unreachables와 no ip redirects를 설정한다. 주의: 경로 탐색에 시간이 더 걸릴 수 있다. L2 스위치는 해당하지 않는다.
+N-35:
+  criteria: >-
+    identd 서비스를 차단한 경우 양호
+  remediation: >-
+    no ip identd를 설정한다. 설정하지 않으면 기본이 꺼짐이라 설정 파일에 나오지 않는다.
+N-36:
+  criteria: >-
+    도메인 이름 조회(domain lookup)를 차단한 경우 양호
+  remediation: >-
+    no ip domain lookup(또는 no ip domain-lookup)을 설정한다.
+N-37:
+  criteria: >-
+    PAD 서비스를 차단한 경우 양호
+  remediation: >-
+    no service pad를 설정한다.
+N-38:
+  criteria: >-
+    ICMP address mask reply를 차단한 경우 양호
+  remediation: >-
+    L3 인터페이스마다 interface <이름>에서 no ip mask-reply를 설정한다. 기본이 꺼짐이라 설정 파일에 나오지 않을 수 있다(show ip interface로 확인). L2 스위치는 해당하지 않는다.

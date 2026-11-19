@@ -1,0 +1,29 @@
+---
+# ==============================================================================
+# Cisco IOS Switch — Host Audit 수집 (Spec #568 / Ticket-3)
+# ==============================================================================
+# 설정 백업과 같은 Endpoint·Credential·경유지·enable로 접속해(resolve.yml) 수집기를 `--audit`로 한 번 부른다.
+# 수집기는 `show running-config`와 `show version`만 보내고(허용 목록, Ticket-2) 장비당 로그인은 한 번이다.
+# 실패해도 재시도하지 않는다(retries/until 없음): 두 번째 로그인이 N-04 로그인 실패 임계값에 걸려 계정이 잠길 수 있다.
+# 수집기 종료 코드(0/2/3)와 출력은 cisco_audit_probe에 남기고 판정·실패 기록은 host_audit_switch 필터가 한다.
+# ------------------------------------------------------------------------------
+- name: Resolve and validate the switch connection
+  ansible.builtin.include_tasks: resolve.yml
+
+- name: "[CISCO-010] Collect running configuration and version for the Host Audit (read-only, one login, no retry)"
+  ansible.builtin.command:
+    argv: "{{ _cisco_audit_argv }}"
+    stdin: >-
+      {{
+        {
+          "password": _cisco_login.password,
+          "enable_password": _cisco_enable_password
+        } | combine({"bastion_password": _cisco_hop.login.password} if cisco_backup_connection.via | length > 0 else {}) | to_json
+      }}
+  register: cisco_audit_probe
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  no_log: "{{ cisco_backup_no_log }}"

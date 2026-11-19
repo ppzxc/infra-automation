@@ -13,3 +13,17 @@ _cisco_algorithm_args: >-
   --kex {{ cisco_backup_ssh_kex_algorithms | join(',') }}
   --host-key-algorithms {{ cisco_backup_ssh_host_key_algorithms | join(',') }}
   --ciphers {{ cisco_backup_ssh_ciphers | join(',') }}
+
+# Host Audit 수집(audit.yml)의 접속 방식과 수집기 인자. 비밀번호는 인자가 아니라 stdin으로만 간다.
+_cisco_audit_mode: >-
+  {{ 'jump_ssh' if cisco_backup_connection.via | length > 0
+     else ('telnet' if cisco_backup_connection.protocol == 'telnet' else 'direct_ssh') }}
+_cisco_audit_argv: >-
+  {{ ['python3', cisco_backup_collector, '--audit', '--mode', _cisco_audit_mode,
+      '--host', cisco_backup_connection.address | string, '--port', cisco_backup_connection.port | string,
+      '--user', _cisco_login.username | string, '--timeout', cisco_backup_timeout | default(30) | string]
+     + (['--bastion-host', _cisco_hop.address | string, '--bastion-port', _cisco_hop.port | string,
+         '--bastion-user', _cisco_hop.login.username | string] if cisco_backup_connection.via | length > 0 else [])
+     + (['--kex', cisco_backup_ssh_kex_algorithms | join(','),
+         '--host-key-algorithms', cisco_backup_ssh_host_key_algorithms | join(','),
+         '--ciphers', cisco_backup_ssh_ciphers | join(',')] if _cisco_audit_mode != 'telnet' else []) }}

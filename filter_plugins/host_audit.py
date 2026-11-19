@@ -22,6 +22,7 @@ from host_audit_inventory import inventory_section  # noqa: E402
 from host_audit_kisa import host_audit_kisa_section, run_date as kisa_run_date  # noqa: E402
 from host_audit_regression import host_audit_regression_section  # noqa: E402
 from host_audit_baseline import host_audit_baseline_section  # noqa: E402
+from host_audit_switch_report import host_audit_switch_section  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo
@@ -269,7 +270,10 @@ def host_audit_report_model(records, meta):
     """
     meta = meta or {}
     tz_name = meta.get('timezone') or REPORT_TIMEZONE
-    by_host = {r['inventory_hostname']: r for r in (records or []) if r.get('inventory_hostname')}
+    # Switch records (Spec #568, device_type SWITCH) share the hosts/ directory but are not servers: the server model ignores them
+    # (they come in as meta['switch_records'], read by host_audit_switch_section).
+    records = [r for r in (records or []) if r.get('device_type') != 'SWITCH']
+    by_host = {r['inventory_hostname']: r for r in records if r.get('inventory_hostname')}
     hosts = sorted(set(meta.get('targets') or []) | set(by_host))
     rows = []
     for host in hosts:
@@ -337,6 +341,12 @@ def host_audit_report_model(records, meta):
     # Configuration Vulnerability (KISA-2026, #121): exception expiry is judged on the run date.
     model = host_audit_kisa_section(model, records, meta.get('kisa_exceptions') or [],
                                     kisa_run_date(meta.get('started_at'), tz_name))
+    # Switch part (Spec #568, #587): its own model key and its own part of the report; the server keys above stay as they are.
+    model = host_audit_switch_section(model, meta.get('switch_records'), meta.get('switch_targets'),
+                                      meta.get('kisa_exceptions') or [], kisa_run_date(meta.get('started_at'), tz_name))
+    if 'switch_vulnerability' in model:
+        model['unavailable_groups'] = list(model['unavailable_groups']) + host_audit_unavailable_groups(
+            model['switch_vulnerability']['unavailable'])
     # Security Regression (#377): spec #364 expectations; its failed items are findings for the Audit Baseline below.
     model = host_audit_regression_section(model, records, meta.get('regression_backup'))
     # Audit Baseline (#125) runs last: it marks the findings every section above produced.

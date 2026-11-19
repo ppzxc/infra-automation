@@ -39,3 +39,5 @@ date: 2026-10-08
 - (개정, 2026-11-18, #531) 위 #492 개정이 가리키는 OpenBao `hosts/<host>` 위치는 [ADR-0014](0014-openbao-storage-structure-and-access-policy.md)로 대체됐다. 선언 값은 Asset 문서(`inventory/assets/<관리번호>`)의 `description`·`isms` 절에서 읽고, 위치와 키 정의는 `docs/openbao_integration.md`와 `schemas/openbao/`가 원본이다.
 
 - (보완, 2026-11-18) 월간 정기 실행이 같은 메일의 별도 첨부로 Log Review Report 초안을 낸다. 데이터는 OpenObserve 조회 전용 계정으로 읽으며 호스트 쪽 읽기 전용 범위는 바뀌지 않는다. [ADR-0015](0015-log-review-report-drafted-by-host-audit.md).
+
+- (개정, 2026-11-19, #568 · #587) 점검 대상을 서버에서 Cisco 스위치(`cisco_switches`)로 넓힌다. 기준은 같은 KISA-2026이고 V장(네트워크 장비) N-01~N-38을 `KISA-2026:N-NN`으로 저장한다. 읽기 전용 원칙은 그대로이며 스위치에는 설정 조회(`show`) 명령의 허용 목록만 보내고(수집기가 허용 목록 밖 명령을 거부한다), 점검 단계는 장비당 로그인 한 번·재시도 없이 실행한다. 판정 상태 5종(양호·취약·예외(승인)·해당없음·점검불가)과 예외 레지스터는 서버와 같은 코드를 쓰고, 접속하지 못한 장비는 빼지 않고 점검불가로 보고서에 남긴다. 보고서는 같은 구조에 스위치를 별도 소제목·별도 부록으로 더하며 N 항목과 U 항목을 섞지 않는다. 스위치의 패키지·Drift·Asset Inventory 점검은 하지 않는다.
