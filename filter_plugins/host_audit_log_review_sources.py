@@ -6,7 +6,8 @@
 기준은 ``ctx['settings']['sources']``(tasks/log_review.yml AUD-804가 만든다):
 - ``reference``: OpenBao 로그 검토 작업 설정 문서(``inventory/config/log_review``). 없거나 읽지 못하면(``None``) 또는 형식이
   틀리면 세 항목 모두 '조회 실패(기준 목록)'다. 키: ``normal_sources``(정상 출발지 ``[{address, name}]``, 주소는 IP 또는 CIDR),
-  ``internal_addresses``(인벤토리로 계산되지 않는 내부 주소 대응 ``[{address, host}]``), ``personal_info_systems``(관리번호 목록).
+  ``internal_addresses``(인벤토리로 계산되지 않는 내부 주소 대응 ``[{address, host}]``), ``personal_info_systems``(관리번호 목록),
+  ``excluded_sources``(6·7번에서 뺄 예외 출발지 ``[{address, name}]``, Semaphore 러너·점프 호스트 등. 뺀 로그인 묶음 수는 요약에 '예외 N건'으로 찍는다).
 - ``managed_addresses``: 인벤토리에서 계산한 내부 주소 대응 ``{주소: 관리번호}``(``host_audit_log_review_managed_addresses``).
 - ``window_seconds``·``min_sources``: 12번 임곗값(role 기본값 2분·출발지 2개).
 """
@@ -54,9 +55,19 @@ def _reference(settings):
         normal = [(_network(s['address']), str(s.get('name') or '')) for s in ref['normal_sources']]
         internal = [(_network(s['address']), str(s['host'])) for s in (ref.get('internal_addresses') or [])]
         pii = None if ref.get('personal_info_systems') is None else set(str(h) for h in ref['personal_info_systems'])
+        excluded = [_network(s['address']) for s in (ref.get('excluded_sources') or [])]
     except (_BadReference, KeyError, TypeError, AttributeError):
         return None
-    return {'normal': normal, 'internal': internal, 'pii': pii}
+    return {'normal': normal, 'internal': internal, 'pii': pii, 'excluded': excluded}
+
+
+def _is_excluded(address, ref):
+    ip = _ip(address)
+    return ip is not None and any(ip.version == net.version and ip in net for net in ref['excluded'])
+
+
+def _with_exceptions(summary, count):
+    return summary + (' · 예외 %d건' % count if count else '')
 
 
 def _pii_cell(ref, host):
@@ -152,16 +163,19 @@ def judge_relogin(ctx):
     r = _logins(ctx)
     if not r['ok']:
         return failed(r['error'])
-    rows = []
+    rows, excepted = [], 0
     for h in r['hits']:
         target, source = str(h.get('host_name') or ''), str(h.get('source_address') or '')
         origin = _managed_host(source, ctx, ref)
         if not origin or origin == target:
             continue
+        if _is_excluded(source, ref):
+            excepted += 1
+            continue
         rows.append([origin, source, target, _pii_cell(ref, target), str(h.get('user_name') or ''),
                      _int(h.get('logins')), _local(h.get('first_us'), ctx), _local(h.get('last_us'), ctx)])
     rows.sort(key=lambda x: (x[0], x[2], x[4], x[1]))
-    summary = '관리 호스트에서 온 로그인 %d묶음(출발·대상 호스트·계정별)' % len(rows)
+    summary = _with_exceptions('관리 호스트에서 온 로그인 %d묶음(출발·대상 호스트·계정별)' % len(rows), excepted)
     return _verdict(rows, ctx, summary, RELOGIN_COLUMNS, RELOGIN_METHOD, RELOGIN_CRITERION)
 
 
@@ -179,15 +193,18 @@ def judge_unauthorized(ctx):
     r = _logins(ctx)
     if not r['ok']:
         return failed(r['error'])
-    rows = []
+    rows, excepted = [], 0
     for h in r['hits']:
         target, source = str(h.get('host_name') or ''), str(h.get('source_address') or '').strip()
         if _normal_name(source, ref)[0] or _managed_host(source, ctx, ref):
             continue
+        if _is_excluded(source, ref):
+            excepted += 1
+            continue
         rows.append([source or '(출발지 없음)', target, _pii_cell(ref, target), str(h.get('user_name') or ''),
                      _int(h.get('logins')), _local(h.get('first_us'), ctx), _local(h.get('last_us'), ctx)])
     rows.sort(key=lambda x: (x[0], x[1], x[3]))
-    summary = '정상 출발지 목록 밖 로그인 %d묶음(출발지·대상 호스트·계정별)' % len(rows)
+    summary = _with_exceptions('정상 출발지 목록 밖 로그인 %d묶음(출발지·대상 호스트·계정별)' % len(rows), excepted)
     return _verdict(rows, ctx, summary, UNAUTHORIZED_COLUMNS, UNAUTHORIZED_METHOD, UNAUTHORIZED_CRITERION)
 
 

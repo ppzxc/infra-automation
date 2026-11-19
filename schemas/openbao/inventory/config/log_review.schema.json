@@ -54,6 +54,30 @@
         "additionalProperties": false
       }
     },
+    "excluded_sources": {
+      "type": "array",
+      "description": "1부 6·7번에서 뺄 예외 출발지(Semaphore 러너·점프 호스트처럼 매달 정상인 관리 접속). 뺀 로그인 묶음 수는 보고서 요약에 '예외 N건'으로 찍힌다.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?(?!\\n)$",
+            "description": "예외 출발지 IP 또는 CIDR 대역"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "예외 사유를 알 수 있는 이름(예: Semaphore 러너)"
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "additionalProperties": false
+      }
+    },
     "personal_info_systems": {
       "type": "array",
       "description": "개인정보처리시스템 표시(관리번호). 보고서 행에 '개인정보처리시스템' 표시가 붙는다.",

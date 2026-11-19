@@ -85,6 +85,11 @@ def test_the_search_task_hides_its_results_and_takes_failures_as_values():
     assert -1 in task["ansible.builtin.uri"]["status_code"] and 401 in task["ansible.builtin.uri"]["status_code"]
 
 
+def test_the_report_model_task_hides_its_values_because_they_hold_accounts_and_sources():
+    task = next(t for _, t in _all_tasks() if t.get("name", "").startswith("[AUD-804]"))
+    assert task["no_log"] is True  # 계정명·출발지가 -v와 실패 출력에 남지 않게(#571)
+
+
 def test_the_switches_checked_for_collection_gaps_are_the_ones_the_silent_switch_alert_watches():
     """cisco_switches 전체가 아니라 syslog 전송이 확인된 스위치만 본다. OpenObserve Config의 목록과 어긋나면 매달 허위 공백이 나온다."""
     ours = yaml.safe_load((ROLE_DIR / "defaults" / "main.yml").read_text(encoding="utf-8"))

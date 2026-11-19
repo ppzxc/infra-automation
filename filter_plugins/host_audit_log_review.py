@@ -281,6 +281,9 @@ def host_audit_log_review_model(results, meta):
         'archive': meta.get('archive', ''),
         'status_legend': [{'key': s, 'label': STATUS_LABELS[s]} for s in (AUTO, PARTIAL, MANUAL, UNAVAILABLE, FAILED)],
         'counts': [{'key': s, 'label': STATUS_LABELS[s], 'count': counts[s]} for s in (AUTO, PARTIAL, MANUAL, UNAVAILABLE, FAILED)],
+        # 머리에 모아 찍는 판정 기준(#571): 이번에 자동으로 판정한 항목만. 항목별 '기준' 행은 그대로 둔다.
+        'criteria': [{'part': i['part'], 'no': i['no'], 'key': i['key'], 'title': i['title'], 'criterion': i['criterion']}
+                     for i in part1 + part2 + part3 if i['status'] in (AUTO, PARTIAL) and i['criterion']],
         'part1': part1,
         'part2': part2,
         'part3': part3,

@@ -33,7 +33,7 @@ class _S3:
     """경로 방식 S3 흉내: GET은 저장된 객체(없으면 404), PUT은 x-amz-content-sha256과 본문 해시가 같을 때만 200."""
 
     def __init__(self):
-        self.objects, self.requests, self.errors = {}, [], {}
+        self.objects, self.requests, self.errors, self.put_errors = {}, [], {}, {}
         s3 = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -56,8 +56,22 @@ class _S3:
                 body = s3.objects.get(key)
                 self._send(200 if body is not None else 404, body or b"")
 
+            def do_HEAD(self):
+                key = self._key()
+                s3.requests.append(("HEAD", key))
+                body = s3.objects.get(key)
+                self.send_response(200 if body is not None else 404)
+                self.send_header("Content-Length", str(len(body or b"")))
+                if body is not None:
+                    self.send_header("ETag", '"%s"' % hashlib.md5(body).hexdigest())
+                self.end_headers()
+
             def do_PUT(self):
                 key = self._key()
+                if key in s3.put_errors:
+                    s3.requests.append(("PUT", key))
+                    self._send(s3.put_errors[key], b"<Error/>")
+                    return
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 s3.requests.append(("PUT", key))
                 if hashlib.sha256(body).hexdigest() != self.headers.get("x-amz-content-sha256"):
@@ -178,6 +192,36 @@ def test_a_verified_copy_is_kept_with_its_record_and_next_months_report_says_it_
     again = _sign(tmp_path, s3, sha)
     assert again.returncode != 0 and "이미 등록된 서명본이 있음" in _said(again)
     assert s3.puts() == [pdf_key, record_key]
+
+
+@needs_ansible
+def test_a_rerun_after_a_failed_record_does_not_upload_the_same_pdf_again(tmp_path, s3):
+    """PDF만 올라가고 기록이 실패한 뒤 같은 입력으로 다시 돌려도 잠긴 사본이 늘지 않는다(#572)."""
+    sha = hashlib.sha256(PDF).hexdigest()
+    pdf_key = PREFIX + "signed/host-audit-%s-log-review-signed.pdf" % PREV_ID
+    record_key = PREFIX + "signed/registration.json"
+    path = _intake(tmp_path)
+    s3.put_errors[record_key] = 503
+    first = _sign(tmp_path, s3, sha)
+    assert first.returncode != 0 and "등록 기록 업로드 status=503" in _said(first)
+    assert s3.puts() == [pdf_key, record_key] and path.exists()  # PDF는 올라갔고 접수 파일은 그대로
+
+    s3.put_errors.clear()
+    second = _sign(tmp_path, s3, sha)
+    assert second.returncode == 0, second.stdout[-3000:] + second.stderr[-2000:]
+    assert s3.puts() == [pdf_key, record_key, record_key]  # PDF는 한 번만, 기록만 다시
+    assert json.loads(s3.objects[record_key])["sha256"] == sha and not path.exists()
+
+
+@needs_ansible
+def test_a_different_pdf_under_the_same_key_is_still_uploaded(tmp_path, s3):
+    """같은 키에 다른 바이트가 있으면 건너뛰지 않는다(건너뛰기는 같은 바이트일 때만)."""
+    pdf_key = PREFIX + "signed/host-audit-%s-log-review-signed.pdf" % PREV_ID
+    s3.objects[pdf_key] = b"%PDF-1.7\nan older upload\n"
+    _intake(tmp_path)
+    res = _sign(tmp_path, s3, hashlib.sha256(PDF).hexdigest())
+    assert res.returncode == 0, res.stdout[-3000:] + res.stderr[-2000:]
+    assert s3.puts()[0] == pdf_key and s3.objects[pdf_key] == PDF
 
 
 @needs_ansible
