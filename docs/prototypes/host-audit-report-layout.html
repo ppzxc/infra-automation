@@ -58,7 +58,7 @@
 const META = {
   title: "Host Audit 점검 보고서", run: "2026-10 정기", runId: "ha-20261005-0500",
   when: "2026-10-05 05:00 ~ 05:18 (KST)", baseline: "2026-09 정기 실행 (ha-20260907-0500)",
-  scope: "servers · loadbalancers · overseer (총 5대). 네트워크 장비 등 그 외 자산은 범위 밖",
+  scope: "servers · loadbalancers · overseer (총 5대). 스위치(cisco_switches)는 별도 절에서 점검하고 방화벽 등 그 외 자산은 범위 밖",
   method: "Ansible 읽기 전용 실행(관리 상태 불변). 설정: KISA-2026 Unix 항목(raw stdin). 패키지: Trivy(SBOM). 드리프트: site.yml·Host Agents Config --check --diff",
   account: "점검 계정: 관리 계정(Deploy와 동일). 이 계정은 장기 미사용 판정에서 제외",
   eolTable: "EOL 표 기준일 2026-09-30",

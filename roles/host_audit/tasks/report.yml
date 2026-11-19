@@ -27,8 +27,8 @@
   ansible.builtin.include_tasks: storage_lookup.yml
 
 # 스위치 기록(device_type: SWITCH, 스위치 단계가 같은 hosts/ 디렉터리에 쓴다)은 서버 보고서 모델에 섞지 않는다. 보고서의 스위치 부분이
-# 읽을 수 있게 따로 남긴다(_host_audit_switch_records).
-- name: Read the per-switch records of this run
+# 읽을 수 있게 따로 남기고(_host_audit_switch_records) 아래 AUD-021이 모델의 meta로 넘긴다(host_audit_switch_section).
+- name: "[AUD-027] Read the per-switch records of this run"
   ansible.builtin.set_fact:
     _host_audit_switch_records: "{{ _switch_records }}"
   vars:
@@ -60,6 +60,8 @@
       started_at: "{{ host_audit_run.started_at }}"
       generated_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
       targets: "{{ groups['host_audit_targets'] | default([]) }}"
+      switch_records: "{{ _host_audit_switch_records }}"
+      switch_targets: "{{ groups['host_audit_switch_targets'] | default([]) }}"
       target_hosts: "{{ host_audit_run.target_hosts }}"
       archive: >-
         {{ ('RustFS ' ~ (_host_audit_storage_target.bucket | default(host_audit_storage_bucket)) ~ '/' ~ _host_audit_storage_prefix

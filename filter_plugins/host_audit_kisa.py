@@ -431,6 +431,11 @@ def _register_rows(register, applied, today):
     return rows
 
 
+def _is_switch_entry(entry):
+    """True for an exception register entry of a switch item (``KISA-2026:N-NN``, Spec #568)."""
+    return str((entry or {}).get('code', '')).split(':', 1)[-1].startswith('N-')
+
+
 def _build_findings(groups, items=ITEMS):
     """Findings (one per item and verdict) in the body table order, from ``{(code, verdict): [host rows]}``."""
     findings = []
@@ -561,7 +566,8 @@ def host_audit_kisa_section(model, records, register=None, today=None):
         'remediation_guide': _build_remediation_guide(findings),
         'remediation_source': REMEDIATION_SOURCE,
         'appendix': appendix,
-        'register': _register_rows(register, applied, today),
+        # Switch items (N-NN) are drawn in the switch part of the report (host_audit_switch_report), not here.
+        'register': _register_rows([e for e in (register or []) if not _is_switch_entry(e)], applied, today),
         'run_date': today,
     }
     return model
