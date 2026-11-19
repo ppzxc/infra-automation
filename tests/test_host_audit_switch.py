@@ -685,3 +685,10 @@ def test_n10_one_line_banner_is_judged_without_the_control_c_delimiter_leaking_i
     assert verdict(judge(edit(sub=[(base, one_line % "Cisco IOS router")])), "N-10")["verdict"] == VULNERABLE
     assert verdict(judge(edit(sub=[(base, one_line % "swtest authorized only")])), "N-10")["verdict"] == VULNERABLE
     assert verdict(judge(edit(sub=[(base, "banner motd ^C^C")])), "N-10")["verdict"] == VULNERABLE
+
+
+def test_named_acl_entries_with_sequence_numbers_are_read_for_n06_and_n19():
+    seq = "ip access-list standard VTY_ACL\n 10 permit any"
+    assert verdict(judge(edit(sub=[("ip access-list standard VTY_ACL\n permit 192.0.2.0 0.0.0.255", seq)])), "N-06")["verdict"] == VULNERABLE
+    assert verdict(judge(edit(add=["ip access-list standard SNMP_ACL\n 10 permit any", "snmp-server community %s RO SNMP_ACL" % STRONG])),
+                   "N-19")["verdict"] == GOOD

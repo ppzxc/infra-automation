@@ -185,6 +185,8 @@ def _acl_entries(cfg, name):
             found = True
             for c in children:
                 toks = _tokens(c)
+                if toks and toks[0].isdigit():
+                    toks = toks[1:]   # sequence number ("10 permit ...")
                 if toks and toks[0] == 'permit':
                     entries.append((m.group(1), toks[1:]))
     return entries if found else None
