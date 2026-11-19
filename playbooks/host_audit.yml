@@ -31,6 +31,7 @@
   ansible.builtin.import_playbook: common/resolve_connection.yml
   vars:
     connection_hosts: host_audit_targets
+    connection_needs_accounts: false   # Host Audit은 읽기 전용이라 accounts를 쓰지 않는다(Operator 공개키 문서가 없어도 점검한다, #578)
 
 - name: Collect host state (read-only)
   hosts: host_audit_targets

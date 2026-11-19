@@ -80,7 +80,7 @@ SSH·API 접속 정보는 Asset 문서의 Endpoint와 Credential이 정한다. �
 |---|---|
 | `connection_endpoint_preference` | 선호 순서 목록. 기본 `[ssh]` |
 | `connection_requires_access` | true면 Asset 문서에 `access` 절(`admin_credentials`·`bootstrap_credential`)이 없을 때 실패한다. `site.yml`(프로비저닝)이 켠다 |
-| `connection_needs_accounts` | false면 관리 계정 공개키(`inventory/operators/<계정>`)를 읽지 않는다. 기본 true(프로비저닝·Host Audit). `accounts`를 쓰지 않는 Host Agents가 끈다 |
+| `connection_needs_accounts` | false면 관리 계정 공개키(`inventory/operators/<계정>`)를 읽지 않는다. 기본 true(프로비저닝). `accounts`를 쓰지 않는 Host Agents와 읽기 전용인 Host Audit이 끈다(#578) |
 | `target_removed_users` | 이번 실행에서 지울 계정. `access.removed_accounts`와 합집합이다. 계정 입력 중 실행 변수로 남은 유일한 값이다 |
 
 출력 팩트는 접속 변수(`ansible_host`·`ansible_port`·`ansible_user`·`ansible_password`·`ansible_ssh_private_key_file`·`ansible_ssh_common_args`·`ansible_become_method`·`ansible_become_password`·`ansible_python_interpreter`), `ip`(인벤토리 `ip`가 있으면 그 값, 없으면 선택된 Endpoint 주소), `accounts`, `_removed_users`, `_normalized_admin_users`, `_is_already_provisioned`, `_asset_doc`(Asset 문서), `_connection`(비밀 없는 요약), `_vault_token`이다. 관리 계정 키로 접속이 안 되면 `access.bootstrap_credential`의 연결로 바꾸고, 임시 키 파일은 `cleanup_connection.yml`이 지운다. 원격 Python 인터프리터는 기본 `/usr/bin/python3`이고, Asset 문서 `access.python_interpreter`(선택)가 있으면 그 값이다. 절대 경로여야 하며 `venv`·`semaphore`가 들어가거나 `/tmp/` 아래인 경로는 작업이 거부한다(컨트롤러의 venv 경로가 원격으로 새는 사고 방지). migrate는 옛 `ansible_python_interpreter` 중 이 규칙을 통과하는 값만 옮긴다.
