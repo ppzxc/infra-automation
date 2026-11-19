@@ -43,7 +43,7 @@ def test_cisco_backup_collector_no_log_is_inventory_configurable():
 
 
 def test_the_support_check_is_not_no_log_so_its_reason_is_visible_and_the_connection_is_resolved_once():
-    raw = (ROLE_DIR / "tasks" / "main.yml").read_text()
+    raw = (ROLE_DIR / "tasks" / "resolve.yml").read_text()
     tasks = {t["name"].split("]")[0].lstrip("["): t for t in yaml.safe_load(raw) if t.get("name", "").startswith("[CISCO-")}
     assert not tasks["CISCO-009"].get("no_log") and tasks["CISCO-008"]["no_log"] is True
     assert "{{" not in tasks["CISCO-009"]["ansible.builtin.assert"]["fail_msg"].replace("{{ inventory_hostname }}", "")
@@ -89,7 +89,7 @@ def test_inventory_cisco_switches_example_documents_the_group_without_connection
 
 
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
-    tasks_content = (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
+    tasks_content = "".join(f.read_text(encoding="utf-8") for f in sorted((ROLE_DIR / "tasks").glob("*.yml")))
     doc_content = (ROOT_DIR / "docs" / "cisco_backup.md").read_text(encoding="utf-8")
     for n in [n for n in range(1, 11) if n != 10]:
         spec = f"CISCO-{n:03d}"
@@ -301,4 +301,4 @@ def test_declared_required_keys_match_the_schema_and_the_assert_uses_them():
         if "oneOf" in schema:
             schema = next(b for b in schema["oneOf"] if b["properties"]["type"]["const"] == "password")
         assert set(keys) <= set(schema.get("required", [])), pattern
-    assert "cisco_backup_openbao_required" in (ROLE_DIR / "tasks" / "main.yml").read_text(encoding="utf-8")
+    assert "cisco_backup_openbao_required" in (ROLE_DIR / "tasks" / "resolve.yml").read_text(encoding="utf-8")

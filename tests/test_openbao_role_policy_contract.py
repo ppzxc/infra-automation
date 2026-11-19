@@ -88,7 +88,7 @@ def test_declared_keys_cover_the_schema_required(role):
 # lookup을 쓰는 파일 -> 그 파일을 실행하는 계열 AppRole. 새 사용처가 생기면 이 표에도 적어야 통과한다.
 LOOKUP_USERS = {
     "playbooks/common/resolve_connection.yml": {"provision", "host_agents", "host_audit"},
-    "roles/cisco_backup/tasks/main.yml": {"network_backup"},
+    "roles/cisco_backup/tasks/resolve.yml": {"network_backup", "host_audit"},
     "roles/fortigate_backup/tasks/main.yml": {"network_backup"},
 }
 # 계열이 쓰는 lookup이 읽는 패턴. 네트워크 장비 계열은 Automation Identity가 없어 IDENTITY_READS와 admin_accounts를 쓰지 않는다.
