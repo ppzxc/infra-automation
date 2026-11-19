@@ -164,6 +164,7 @@ ISMS 1.2.1 자산 목록. 수집 스크립트는 `roles/host_audit/files/invento
 - **선언 외**: 특수권한자(uid 0, wheel·sudo·admin 그룹 구성원, sudoers 규칙 대상) 중 허용 목록에 없는 계정. 허용 목록은 `accounts`의 sudo 권한 계정(`sudo: true`, 또는 `sudo` 미지정 + `tier: admin`, `state: absent` 제외), `openbao_ssh_allowed_principals`, `host_audit_privileged_extra`, 그리고 root다. sudoers의 `User_Alias` 등 별칭은 펼치지 않는다.
 - **장기 미사용**: 로그인 가능한 셸을 가진 계정 중 `lastlog -t 90`에 없는 계정(기록 없음 포함). 점검 계정과 uid 0 계정은 제외하고 표지에 명시한다. uid 0의 직접 로그인은 Configuration Vulnerability(KISA-2026) 항목이 다룬다. lastlog가 없으면 '마지막 로그인 점검불가'로 표시하고 장기 미사용 판정을 하지 않는다.
 - **EOL**: `roles/host_audit/vars/main.yml`의 `host_audit_eol_table`(기준일 `reviewed_on`, 무상 표준 지원 종료일). 실행 시작일 기준 지난 날짜면 지원 종료(EOS), 180일 이내면 EOL 임박, 표에 없으면 확인 불가.
+- **읽기 쉽게 보이기(표시 전용, 모델의 식별자·xlsx는 영어 이름 그대로)**: 보고서 제목은 쉬운 이름 뒤에 영어 이름을 작은 글씨로 둔다(자산 현황·설정 변경 여부·설정 취약점 점검·패키지 취약점·보안 설정 퇴행 점검·지난 정기 점검 대비 변경). 점검불가 항목은 `unavailable_groups`(`host_audit_unavailable_groups`)로 같은 사유끼리 묶어 사유 한 줄과 호스트 — 항목 목록으로 보이고(영어 태스크 이름·SSH 원문 오류는 쉬운 말로 바꾸되 `unavailable`에는 원문이 남는다), EOS 호스트는 운영 체제별로 묶고, 자산 현황 요약은 `-` 목록이며, 용어 풀이(EOS·CVE·구성 선언·--check 비교·열린 포트·SUID·world writable·벤더 미수정)가 요약 뒤에 붙는다.
 - **점검불가**: Asset Inventory 수집이 실패하면 '점검불가(수집 실패)', /etc/shadow를 읽지 못하면 '계정 잠금 상태 점검불가'.
 
 **보안**: 비밀번호 해시는 호스트에서 `set`/`locked`/`empty`로 줄여서만 넘어온다. 선언 값은 ISMS 자산대장에 적힌 표기 그대로 넣는다. Asset 문서의 다섯 값 외(접속 절 등)는 기록·보고서·메일에 넘어가지 않는다.

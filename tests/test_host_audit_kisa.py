@@ -235,7 +235,7 @@ def test_template_renders_section_appendix_and_register():
     model = _model([_record("ns0331", lines, register)], register)
     html = env.get_template("report.html.j2").render(host_audit_model=model)
 
-    assert "4. Configuration Vulnerability" in html
+    assert "4. 설정 취약점 점검" in html
     assert "KISA-2026:U-02" in html and EXCEPTION in html
     assert "ok-evidence-13" in html  # 양호 evidence lives in the appendix
     assert "부록 1. ns0331" in html and "<h3 class=\"small\">Configuration Vulnerability" in html

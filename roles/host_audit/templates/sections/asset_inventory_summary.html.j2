@@ -2,7 +2,19 @@
 {%- set ai = m.asset_inventory -%}
 {% if ai.eos %}
   <div class="note keep" style="border-left-color:var(--crit);"><b class="crit">지원 종료(EOS) 운영 체제 {{ ai.eos | length }}대</b> — 보안 업데이트가 더 이상 제공되지 않습니다.
-    {% for e in ai.eos %}<br><span class="nowrap">{{ e.host | e }}</span>: {{ e.os | e }} (지원 종료 {{ e.date | e }}){% endfor %}
+    <ul class="sum">{% for os, es in ai.eos | groupby('os') %}<li>{{ os | e }} (지원 종료 {{ es[0].date | e }}): {{ es | length }}대 — {% for e in es %}<span class="nowrap">{{ e.host | e }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>
   </div>
 {% endif %}
-  <p class="small mute">Asset Inventory: 선언 외 특수권한자 {{ ai.counts.not_declared }} · 장기 미사용 계정 {{ ai.counts.inactive }} · 선언 미지정 호스트 {{ ai.counts.unassigned_hosts }} · 선언 조회 실패 호스트 {{ ai.counts.lookup_failed_hosts }} · 선언 잘못된 값 호스트 {{ ai.counts.invalid_hosts }} · EOS {{ ai.counts.eos }}</p>
+  <p class="small mute"><b>자산 현황 요약</b> (Asset Inventory)</p>
+  <ul class="sum small">
+    <li>구성 선언(Git)에 없는 관리자 권한 계정: {{ ai.counts.not_declared }}개</li>
+    <li>장기 미사용 계정(마지막 로그인 90일 이상): {{ ai.counts.inactive }}개</li>
+    <li>구성 선언이 없는 호스트: {{ ai.counts.unassigned_hosts }}대</li>
+{%- if ai.counts.lookup_failed_hosts %}
+    <li>구성 선언 조회에 실패한 호스트: {{ ai.counts.lookup_failed_hosts }}대</li>
+{%- endif %}
+{%- if ai.counts.invalid_hosts %}
+    <li>구성 선언 값이 잘못된 호스트: {{ ai.counts.invalid_hosts }}대</li>
+{%- endif %}
+    <li>지원 종료(EOS) 운영 체제 호스트: {{ ai.counts.eos }}대</li>
+  </ul>
