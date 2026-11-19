@@ -14,7 +14,7 @@ Spec #568(Host Audit에 스위치 취약점 점검 포함)의 Ticket-1 산출물
 
 장비 역할은 인벤토리 변수를 새로 두지 않고 `show running-config` 출력에서 판정한다.
 
-- **L3**: `ip routing` 줄이 있거나(`no ip routing`이 아님), 라우팅 인터페이스가 하나라도 있으면 L3이다. 라우팅 인터페이스는 `ip address <주소> <마스크>` 줄이 있는 SVI(`interface Vlan*`), 라우티드 포트(`no switchport`), Loopback·Tunnel 인터페이스를 말한다. `no ip address`인 인터페이스는 세지 않는다.
+- **L3**: `ip routing` 줄이 있거나(`no ip routing`이 아님), 라우팅 인터페이스가 하나라도 있으면 L3이다. 라우팅 인터페이스는 `ip address <주소> <마스크>` 줄이 있는 SVI(`interface Vlan*`), 라우티드 포트(`no switchport`), Loopback·Tunnel 인터페이스를 말하며, 모두 `ip address <주소> <마스크>` 줄이 있어야 센다. `no ip address`이거나 주소 줄이 없는 인터페이스는 세지 않는다.
 - **L2**: 위 조건에 하나도 해당하지 않으면 L2이다.
 - 표의 L2·L3 열은 그 역할일 때의 처리다. 한 장비는 둘 중 하나의 열만 따른다.
 - "L3 인터페이스"라고 쓴 곳은 위 라우팅 인터페이스를 뜻한다.
@@ -23,7 +23,7 @@ Spec #568(Host Audit에 스위치 취약점 점검 포함)의 Ticket-1 산출물
 
 L2·L3 열은 `적용`, `해당없음`, `점검불가` 중 하나다.
 
-- `적용`: 판정 함수가 양호/취약을 낸다. (예외(승인)는 Host Audit의 기존 예외 규칙이 처리한다.)
+- `적용`: 판정 함수가 양호/취약을 낸다. (예외(승인)는 Host Audit의 기존 예외 규칙이 처리한다.) 대상 구성요소가 장비에 없어 개별 장비에서 해당없음이 되는 경우(예: N-09의 AUX 포트 없는 기종)는 표 상태가 아니라 장비별 결과로 낸다.
 - `해당없음`: 그 역할에는 의미 없는 항목이다. 사유 열에 한 줄로 적는다.
 - `점검불가`: 허용된 두 명령으로는 알 수 없다. 사유 열에 한 줄로 적고 보고서에는 "점검불가(수동 확인)"로 올린다. 항목을 빼지 않는다.
 
@@ -73,16 +73,16 @@ running-config는 기본값 그대로인 기능을 줄로 보여 주지 않는�
 | N-23 | DDoS 공격 방어 설정 또는 DDoS 장비 사용 | 상 | 기능 | 해당없음 | 점검불가 | running-config의 rate-limit·police·ip tcp intercept 줄(참고용으로만 읽음) | L2 해당없음: 경계 라우터의 IP 전달 방어 설정이라 L2에는 의미가 없음. L3 점검불가: 경계 라우터 여부와 별도 DDoS 장비 운용은 설정으로 알 수 없음(수동 확인) | L3도 판정하지 않음(항상 점검불가(수동 확인)). 방어 설정 줄이 보이면 참고로만 남김 |
 | N-24 | 사용하지 않는 인터페이스 비활성화 | 상 | 기능 | 점검불가 | 점검불가 | running-config의 interface 블록의 shutdown 줄(참고용) | 포트가 쓰이는지는 링크 상태와 연결 장비로만 알 수 있고 허용된 두 명령으로는 알 수 없어 수동 확인으로 둠 | 판정하지 않음(항상 점검불가(수동 확인)). shutdown이 없는 물리 포트 수는 참고 정보로만 남길 수 있음 |
 | N-25 | TCP Keepalive 서비스 설정 | 중 | 기능 | 적용 | 적용 | running-config의 service tcp-keepalives-in·out 줄 | - | service tcp-keepalives-in 또는 service tcp-keepalives-out 줄이 없음 |
-| N-26 | Finger 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 ip finger·service finger 줄, show version의 버전(12.1(5) 이상 기본 꺼짐) | - | ip finger 또는 service finger 줄이 있음(no가 붙은 줄은 양호) |
+| N-26 | Finger 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 ip finger·service finger 줄, show version의 버전(12.2 미만 구분용) | - | ip finger 또는 service finger 줄이 있음(no가 붙은 줄은 양호). 버전이 12.2 미만이면 줄 부재로 양호를 주지 않고 점검불가 |
 | N-27 | 웹 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 ip http server·ip http secure-server 줄과 ip http access-class 줄 | - | ip http server 또는 ip http secure-server 줄이 켜져 있고 ip http access-class로 접속 IP 제한도 없음. no ip http server와 no ip http secure-server 둘 다 있으면 양호 |
-| N-28 | TCP/UDP small 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 service tcp-small-servers·udp-small-servers 줄, show version의 버전(11.3 이상 기본 꺼짐) | - | service tcp-small-servers 또는 service udp-small-servers 줄이 켜져 있음(no가 붙은 줄은 양호) |
+| N-28 | TCP/UDP small 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 service tcp-small-servers·udp-small-servers 줄, show version의 버전(12.2 미만 구분용) | - | service tcp-small-servers 또는 service udp-small-servers 줄이 켜져 있음(no가 붙은 줄은 양호). 버전이 12.2 미만이면 줄 부재로 양호를 주지 않고 점검불가 |
 | N-29 | Bootp 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 no ip bootp server, ip dhcp bootp ignore 줄 | - | no ip bootp server 줄도 ip dhcp bootp ignore 줄도 없음(기본으로 켜져 있어 줄 부재가 취약) |
 | N-30 | CDP 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 no cdp run 줄, interface 블록의 no cdp enable 줄 | - | no cdp run 줄이 없고, 있어도 cdp run이 켜진 채 일부 인터페이스에만 no cdp enable이 있는 경우. 음성(IP 전화기) 용도로 승인된 장비는 예외(승인) 규칙으로 처리 |
 | N-31 | Directed-broadcast 차단 | 중 | 기능 | 해당없음 | 적용 | running-config의 L3 인터페이스 블록의 ip directed-broadcast 줄 | L2 해당없음: 서브넷 사이 IP 전달에서만 생기는 기능이라 라우팅하지 않는 L2에는 의미가 없음 | L3 인터페이스 블록에 ip directed-broadcast 줄이 있음(no가 붙은 줄이나 줄 부재는 양호) |
 | N-32 | Source Routing 차단 | 중 | 기능 | 해당없음 | 적용 | running-config의 no ip source-route 줄 | L2 해당없음: IP 패킷을 전달하지 않는 L2에는 의미가 없음 | no ip source-route 줄이 없음(기본으로 켜져 있어 줄 부재가 취약) |
 | N-33 | Proxy ARP 차단 | 중 | 기능 | 해당없음 | 적용 | running-config의 L3 인터페이스 블록의 no ip proxy-arp 줄 | L2 해당없음: 라우팅 인터페이스가 없으면 Proxy ARP 응답 주체가 아님 | L3 인터페이스 중 하나라도 no ip proxy-arp 줄이 없음(기본으로 켜져 있음) |
 | N-34 | ICMP unreachable, redirect 차단 | 중 | 기능 | 해당없음 | 적용 | running-config의 L3 인터페이스 블록의 no ip unreachables·no ip redirects 줄 | L2 해당없음: 라우팅 인터페이스가 없으면 ICMP unreachable·redirect를 만들지 않음 | L3 인터페이스 중 하나라도 no ip unreachables 또는 no ip redirects 줄이 없음. Null 인터페이스는 no ip unreachables만 요구 |
-| N-35 | identd 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 ip identd 줄, show version의 버전(12.2 이상 기본 꺼짐) | - | ip identd 줄이 있음(no ip identd 표시는 없어도 정상) |
+| N-35 | identd 서비스 차단 | 중 | 기능 | 적용 | 적용 | running-config의 ip identd 줄, show version의 버전(12.2 미만 구분용) | - | ip identd 줄이 있음(no ip identd 표시는 없어도 정상). 버전이 12.2 미만이면 줄 부재로 양호를 주지 않고 점검불가 |
 | N-36 | Domain Lookup 차단 | 중 | 기능 | 적용 | 적용 | running-config의 no ip domain-lookup·no ip domain lookup 줄 | - | 두 표기 중 어느 줄도 없음(기본으로 켜져 있어 줄 부재가 취약) |
 | N-37 | pad 차단 | 중 | 기능 | 적용 | 적용 | running-config의 no service pad 줄 | - | no service pad 줄이 없음(기본으로 켜져 있어 줄 부재가 취약) |
 | N-38 | mask-reply 차단 | 중 | 기능 | 해당없음 | 적용 | running-config의 L3 인터페이스 블록의 ip mask-reply 줄 | L2 해당없음: 서브넷마스크를 응답할 라우팅 인터페이스가 없음 | L3 인터페이스 블록에 ip mask-reply 줄이 있음(기본으로 꺼져 있어 줄 부재는 양호) |
