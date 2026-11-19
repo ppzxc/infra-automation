@@ -113,14 +113,14 @@ def test_good_config_is_good_for_every_item_except_the_fixed_manual_one():
     result = judge()
     verdicts = v(result)
     assert result["status"] == "ok" and result["edition"] == "KISA-2026"
-    assert sorted(verdicts) == ["N-%02d" % n for n in range(1, 17)]
+    assert sorted(verdicts) == sorted(hs.CHECKS)
     # 이 합성 설정은 AUX 포트가 있고, N-12는 항상 점검불가(수동 확인)다.
     assert {c: x for c, x in verdicts.items() if x != GOOD} == {"N-12": MANUAL}
 
 
 def test_only_registered_items_are_reported_and_unimplemented_ones_are_left_out():
-    assert sorted(hs.CHECKS) == ["N-%02d" % n for n in range(1, 17)]
-    assert not any(r["code"].endswith(("N-17", "N-38")) for r in judge()["results"])
+    assert set(hs.CHECKS) <= set(_table_rows())
+    assert sorted(r["code"].split(":")[1] for r in judge()["results"]) == sorted(hs.CHECKS)
 
 
 def test_result_rows_have_the_server_record_shape():
@@ -346,7 +346,7 @@ def test_record_for_a_switch_that_could_not_be_inspected():
     ok = hs.host_audit_switch_record({"rc": 0, "stdout": hs_json(GOOD_CONFIG, VERSION)}, "sw0001", declared,
                                      "2026-11-19T00:00:00Z", "telnet", [], TODAY)
     assert ok["status"] == "ok" and ok["switch"] == {"access": "telnet", "role": "L2", "version": "15.0(2)SE11"}
-    assert ok["config_vulnerability"]["status"] == "ok" and len(ok["config_vulnerability"]["results"]) == 16
+    assert ok["config_vulnerability"]["status"] == "ok" and len(ok["config_vulnerability"]["results"]) == len(hs.CHECKS)
     assert "running_config" not in str(ok) and "swtest" not in str(ok)
     from host_audit import RECORD_SCHEMA_VERSION
     assert ok["schema_version"] == RECORD_SCHEMA_VERSION

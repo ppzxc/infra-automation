@@ -128,19 +128,26 @@ def _tokens(line):
     return line.split()
 
 
-def device_role(config_text):
-    """L3 when ``ip routing`` is on or any routing interface has ``ip address <addr> <mask>``; else L2 (table, section 1)."""
-    cfg = config_text if isinstance(config_text, Config) else Config(config_text)
-    if 'no ip routing' not in cfg.lines and 'ip routing' in cfg.lines:
-        return 'L3'
+def routed_interfaces(cfg):
+    """Routing interfaces (table, section 1): SVI, routed port, Loopback or Tunnel with ``ip address <addr> <mask>``.
+    Returns (header, children) pairs."""
+    found = []
     for head, children in cfg.blocks:
         parts = head.split(None, 1)
         if parts[0] != 'interface' or len(parts) < 2:
             continue
         routed = parts[1].lower().startswith(('vlan', 'loopback', 'tunnel')) or 'no switchport' in children
         if routed and any(re.match(r'ip address\s+\S+\s+\S+', c) for c in children):
-            return 'L3'
-    return 'L2'
+            found.append((head, children))
+    return found
+
+
+def device_role(config_text):
+    """L3 when ``ip routing`` is on or any routing interface has ``ip address <addr> <mask>``; else L2 (table, section 1)."""
+    cfg = config_text if isinstance(config_text, Config) else Config(config_text)
+    if 'no ip routing' not in cfg.lines and 'ip routing' in cfg.lines:
+        return 'L3'
+    return 'L3' if routed_interfaces(cfg) else 'L2'
 
 
 def _ios_version(text):
