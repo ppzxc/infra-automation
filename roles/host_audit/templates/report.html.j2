@@ -62,7 +62,7 @@
   <h1>{{ m.title | e }}</h1>
   <div class="kv keep">
     <div>점검일시</div><div>{{ m.cover.started_at | e }} 시작 · {{ m.cover.generated_at | e }} 작성 · {{ m.cover.run_kind | e }} ({{ m.cover.run_id | e }})</div>
-    <div>점검대상</div><div>{{ m.cover.scope | e }}<br><span class="small mute">범위 밖: {{ m.cover.out_of_scope | e }}</span></div>
+    <div>점검대상</div><div>{{ m.cover.scope | e }}{% if m.cover.switch_scope %}<br>{{ m.cover.switch_scope | e }}{% endif %}<br><span class="small mute">범위 밖: {{ m.cover.out_of_scope | e }}</span></div>
     <div>점검방법</div><div>{{ m.cover.method | e }}</div>
     <div>점검내용</div><div>{% for c in m.cover.contents %}{{ c | e }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
     <div>비교 기준</div><div>{{ m.cover.baseline | e }}</div>
@@ -76,9 +76,14 @@
 
   <h2>1. 요약</h2>
   <div class="tiles">
-    <div class="tile"><b>{{ m.summary.hosts_total }}</b><span>점검 대상 호스트</span></div>
-    <div class="tile"><b class="ok">{{ m.summary.hosts_inspected }}</b><span>점검 완료</span></div>
-    <div class="tile"><b class="{{ 'crit' if m.summary.hosts_unavailable else 'na' }}">{{ m.summary.hosts_unavailable }}</b><span>점검불가 호스트 (수집 단계)</span></div>
+    <div class="tile"><b>{{ m.summary.hosts_total }}</b><span>{{ '서버 ' if m.summary.switch is defined }}점검 대상 호스트</span></div>
+    <div class="tile"><b class="ok">{{ m.summary.hosts_inspected }}</b><span>{{ '서버 ' if m.summary.switch is defined }}점검 완료</span></div>
+    <div class="tile"><b class="{{ 'crit' if m.summary.hosts_unavailable else 'na' }}">{{ m.summary.hosts_unavailable }}</b><span>{{ '서버 ' if m.summary.switch is defined }}점검불가 호스트 (수집 단계)</span></div>
+{%- if m.summary.switch is defined %}
+    <div class="tile"><b>{{ m.summary.switch.hosts_total }}</b><span>스위치 점검 대상 장비</span></div>
+    <div class="tile"><b class="ok">{{ m.summary.switch.hosts_inspected }}</b><span>스위치 점검 완료</span></div>
+    <div class="tile"><b class="{{ 'crit' if m.summary.switch.hosts_unavailable else 'na' }}">{{ m.summary.switch.hosts_unavailable }}</b><span>스위치 점검불가 장비</span></div>
+{%- endif %}
   </div>
 {% include 'sections/asset_inventory_summary.html.j2' %}
 {% if m.configuration_drift and m.configuration_drift.not_applicable %}
@@ -116,6 +121,8 @@
 
 {% if m.config_vulnerability is defined %}{% include 'sections/config_vulnerability.html.j2' %}{% endif %}
 
+{% if m.switch_vulnerability is defined %}{% include 'sections/switch_vulnerability.html.j2' %}{% endif %}
+
 {% include 'sections/package_vulnerability.html.j2' %}
 
 {% if m.security_regression is defined %}{% include 'sections/security_regression.html.j2' %}{% endif %}
@@ -125,6 +132,8 @@
 {% include 'sections/appendix.html.j2' %}
 
 {% if m.config_vulnerability is defined %}{% include 'sections/remediation_guide.html.j2' %}{% endif %}
+
+{% if m.switch_vulnerability is defined %}{% include 'sections/appendix_switch_vulnerability.html.j2' %}{% endif %}
 
   <h2 class="pb keep">검토 및 결재</h2>
   <p class="small mute">발견사항별 조치 의견(조치 / 예외 승인 / 선언 수정)과 검토 결과를 기재한다. 결재된 본 문서가 ISMS 2.11.2 검토 증적이다.</p>

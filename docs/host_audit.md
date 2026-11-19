@@ -132,6 +132,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-022` | `Save the run metadata on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 | `AUD-023` | `Render the A4 report HTML` | `ansible.builtin.template` | 러너 | 실행별 파일 `0600` |
 | `AUD-024` | `Show where the report was written` | `ansible.builtin.debug` | 러너 | 읽기 전용 |
+| `AUD-027` | `Read the per-switch records of this run` | `ansible.builtin.set_fact` | 러너 | 읽기 전용. `hosts/*.json` 중 `device_type: SWITCH`만 `_host_audit_switch_records`에 모아 AUD-021이 `meta.switch_records`로 넘긴다(서버 모델은 이 기록을 읽지 않는다) |
 
 호스트별 Remediation Plan xlsx와 합계 xlsx를 쓰는 `AUD-025`는 §17.1에 있다.
 
@@ -1022,7 +1023,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 
 ## 19. 스위치 취약점 점검 (Spec #568 / Ticket-3, #585)
 
-월간 실행이 `cisco_switches` 전체를 KISA-2026 V장(네트워크 장비) 항목(`KISA-2026:N-NN`)으로 점검한다. 항목별 적용 여부와 취약 판정 조건은 [host_audit_switch.md](host_audit_switch.md)(적용 표)가 기준이고, 판정 코드와 표는 `tests/test_host_audit_switch.py`가 대조한다. 판정 범위는 N-01~N-38 38개 전체다(N-01~N-16은 Ticket-3, N-17~N-38은 Ticket-4가 항목 함수로 등록). 역할(L2/L3)에서 해당없음인 항목(L2의 N-22·23·31~34·38)은 함수를 부르지 않고 표의 사유를 증적으로 남기며, 설정으로 알 수 없는 항목(N-12·N-24, L3의 N-23)은 점검불가(수동 확인)와 사유를 JSON에 남긴다. 보고서 렌더링은 Ticket-5 몫이라 이 단계는 호스트별 JSON만 쓴다.
+월간 실행이 `cisco_switches` 전체를 KISA-2026 V장(네트워크 장비) 항목(`KISA-2026:N-NN`)으로 점검한다. 항목별 적용 여부와 취약 판정 조건은 [host_audit_switch.md](host_audit_switch.md)(적용 표)가 기준이고, 판정 코드와 표는 `tests/test_host_audit_switch.py`가 대조한다. 판정 범위는 N-01~N-38 38개 전체다(N-01~N-16은 Ticket-3, N-17~N-38은 Ticket-4가 항목 함수로 등록). 역할(L2/L3)에서 해당없음인 항목(L2의 N-22·23·31~34·38)은 함수를 부르지 않고 표의 사유를 증적으로 남기며, 설정으로 알 수 없는 항목(N-12·N-24, L3의 N-23)은 점검불가(수동 확인)와 사유를 JSON에 남긴다. 이 단계는 호스트별 JSON만 쓰고, 보고서에 싣는 방법은 §19.3이다.
 
 - **단계 위치**: `playbooks/host_audit.yml`의 서버 수집·임시 키 정리 뒤, 보고서 앞. play는 `hosts: host_audit_switch_targets`, `serial: 1`(한 번에 한 대, 로그인 폭주 방지)이다. 서버 단계의 동작과 출력은 바뀌지 않는다.
 - **대상 선택**: `[AUD-008]`이 `host_audit_switch_scope_pattern`(기본 `cisco_switches:!host_audit_excluded`, 러너에서 접속할 수 없어 `host_audit_excluded`에 둔 호스트는 뺀다)을 서버 선택(`host_audit_scope_pattern`)과 따로 고른다. `target_hosts`가 있으면 교집합이고, 서버로 이미 선택된 호스트는 뺀다.
@@ -1054,3 +1055,18 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | `AUD-901` | `Mark the switch as not inspected when its connection could not be resolved` | `ansible.builtin.set_fact` | 러너 | `rescue`, `no_log`, 읽기 전용 |
 | `AUD-902` | `Build the per-switch audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_switch_record` 필터, `no_log`(입력에 설정 전문이 있음) |
 | `AUD-903` | `Save the per-switch record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
+
+### 19.3 보고서의 스위치 부분 (Ticket-5, #587)
+
+서버와 같은 구조(요약, 호스트별 부록, 항목별 부록)에 스위치를 별도 소제목으로 더한다. 서버 보고서 출력은 스위치 입력이 없을 때와 같다.
+
+- **모델**: `host_audit_report_model`이 `meta.switch_records`(`AUD-027`)와 `meta.switch_targets`(`host_audit_switch_targets` 그룹)를 `host_audit_switch_section`(`filter_plugins/host_audit_switch_report.py`)에 넘기고, 결과는 별도 키 `switch_vulnerability`에 있다. 서버 키(`config_vulnerability`, `hosts`, `inventory`, `summary.hosts_*`)는 바뀌지 않는다. 스위치 입력이 없으면 이 키도 없다. 항목 목록은 판정 레지스트리(`host_audit_switch.CHECKS`)에서 오며 항목 수는 코드에 없다. Audit Baseline·KISA 악화 알림·Remediation Plan xlsx·메일 본문 건수는 이번 티켓에서 스위치를 다루지 않는다.
+- **본문**: `스위치 설정 취약점 점검` 절(서버 4절 뒤)에 점검 대상 스위치 표(상태·역할·IOS 버전·접속·사유), 항목별 판정 건수 표, 양호 외 항목(스위치), 스위치 예외 레지스터가 나온다. 판정 5종, 예외 규칙, 정렬은 서버와 같다.
+- **부록**: 서버 부록 뒤에 `부록 N. <스위치>`(항목 전체와 증적)와 `스위치 조치 안내`(항목별 판단 기준과 IOS 조치 방법 요약)가 이어 번호를 받는다. 서버 부록과 조치 안내에는 N 항목이 없고 스위치 쪽에는 U 항목이 없다.
+- **조치 방법 요약**: `filter_plugins/host_audit_switch_items.yml`(N-01~N-38)이 항목마다 판단 기준과 IOS 명령 요약을 둔다. 근거는 KISA 가이드의 조치 방법·Cisco IOS 조치 사례이며 원문을 옮기지 않고 장비 값은 `<...>` 자리표시자로 쓴다. 레지스트리에 등록된 항목만 읽는다.
+- **예외 레지스터**: 서버 예외 표는 `N-NN` 항목 예외를 싣지 않고 스위치 표가 싣는다(같은 `host_audit_kisa_exceptions` 목록, 코드로 나눈다).
+- **점검불가 스위치**: 접속 실패·수집 실패 기록과 기록이 없는 선택 대상은 스위치 표에 `점검불가(...)`로 나오고, 요약의 점검불가 표(항목 `스위치 전체 점검`)와 `점검불가 항목` 건수에 들어간다(그래서 메일의 점검불가 건수에도 든다).
+- **요약·표지**: 서버 호스트 수 타일은 그대로이고(스위치가 있으면 `서버` 접두), 스위치 타일(점검 대상·완료·점검불가)이 따로 붙는다. 표지 점검대상에 `cisco_switches — N대`가 더해지고 범위 밖 문구는 `방화벽 등 Linux 서버·스위치 외 자산`이 된다.
+- **판정 기준 머리**: 스위치에 따로 만들지 않는다. 판정 5종과 예외 규칙이 서버와 같다.
+
+검증: pytest `tests/test_host_audit_switch_report.py`(공유 렌더링 `rendered` fixture 하나로 스위치 소제목·항목별·호스트별 결과, 점검불가 스위치, 요약 장비 종류별 호스트 수, 서버 출력 불변, N·U 비혼합, 조치 요약 38항목, `AUD-027` 배선).
