@@ -49,6 +49,7 @@
 - name: Collect switch state (read-only, one at a time)
   hosts: host_audit_switch_targets
   serial: 1
+  max_fail_percentage: 100   # 기록 저장 같은 예상 밖 실패가 한 대에서 나도 나머지 스위치 점검은 계속한다
   gather_facts: false
   connection: local
   become: false

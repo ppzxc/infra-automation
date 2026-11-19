@@ -105,7 +105,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_log_review_multi_source_window_seconds` · `host_audit_log_review_multi_source_min_sources` | `120` · `2` | 1부 12번: 같은 계정이 이 시간(초, 경계 포함) 안에 이 개수 이상의 출발지에서 로그인 성공하면 '확인 필요'(§18) |
 | `host_audit_log_review_command_burst_threshold` · `host_audit_log_review_command_burst_window_minutes` | `30` · `2` | 1부 13번: 같은 계정(호스트 무관)이 이 시간(분) 안에 sudo를 이 횟수 이상 실행하면 '확인 필요'(§18.4) |
 | `host_audit_log_review_device_parsing` | FortiGate 1·2·3·4·7·12번 `auto`, 스위치 2·4번 `partial` | 장비 관리자 로그인 적용 표(§18.4). 없는 칸은 '점검 불가(파싱 없음)' |
-| `host_audit_switch_enabled` · `host_audit_switch_scope_pattern` | `true` · `cisco_switches` | 스위치 단계(§19). 스위치는 서버 선택과 따로 고르며 `target_hosts`가 있으면 그 패턴과의 교집합, 서버로 이미 선택된 호스트는 제외한다. false면 단계를 건너뛴다 |
+| `host_audit_switch_enabled` · `host_audit_switch_scope_pattern` | `true` · `cisco_switches:!host_audit_excluded` | 스위치 단계(§19). 스위치는 서버 선택과 따로 고르며 `target_hosts`가 있으면 그 패턴과의 교집합, 서버로 이미 선택된 호스트는 제외한다. false면 단계를 건너뛴다 |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
 | `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |
@@ -1025,7 +1025,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 월간 실행이 `cisco_switches` 전체를 KISA-2026 V장(네트워크 장비) 항목(`KISA-2026:N-NN`)으로 점검한다. 항목별 적용 여부와 취약 판정 조건은 [host_audit_switch.md](host_audit_switch.md)(적용 표)가 기준이고, 판정 코드와 표는 `tests/test_host_audit_switch.py`가 대조한다. 이 티켓의 판정 범위는 N-01~N-16이다(N-17~N-38은 Ticket-4가 항목 함수만 등록한다). 보고서 렌더링은 Ticket-5 몫이라 이 단계는 호스트별 JSON만 쓴다.
 
 - **단계 위치**: `playbooks/host_audit.yml`의 서버 수집·임시 키 정리 뒤, 보고서 앞. play는 `hosts: host_audit_switch_targets`, `serial: 1`(한 번에 한 대, 로그인 폭주 방지)이다. 서버 단계의 동작과 출력은 바뀌지 않는다.
-- **대상 선택**: `[AUD-008]`이 `host_audit_switch_scope_pattern`(기본 `cisco_switches`)을 서버 선택(`host_audit_scope_pattern`)과 따로 고른다. `target_hosts`가 있으면 교집합이고, 서버로 이미 선택된 호스트는 뺀다.
+- **대상 선택**: `[AUD-008]`이 `host_audit_switch_scope_pattern`(기본 `cisco_switches:!host_audit_excluded`, 러너에서 접속할 수 없어 `host_audit_excluded`에 둔 호스트는 뺀다)을 서버 선택(`host_audit_scope_pattern`)과 따로 고른다. `target_hosts`가 있으면 교집합이고, 서버로 이미 선택된 호스트는 뺀다.
 - **접속**: 설정 백업과 같은 OpenBao Endpoint·Credential·경유지·enable을 같은 해석 파일(`roles/cisco_backup/tasks/resolve.yml`, `CISCO-008`·`CISCO-009`)로 읽는다. 수집기는 `--audit`로 한 번 호출하고(`CISCO-010`) 보내는 명령은 `show running-config`와 `show version`뿐이다(`docs/cisco_backup.md` 수집기 호출 인터페이스). 비밀번호는 stdin으로만 가고 수집 태스크는 `no_log`다.
 - **재시도 없음**: 수집 태스크에 `retries`·`until`이 없고 수집기도 점검 모드에서 재시도하지 않아 장비당 로그인은 1회다. 비밀번호가 틀려도 추가 시도는 0회라 N-04 로그인 실패 임계값에 걸리지 않는다.
 - **접속 실패**: 접속 정보 해석 실패, 수집기 종료 코드 `3`(접속·수집 실패)·`2`(출력이 설정 같지 않음), 출력 형식 오류는 그 장비를 점검불가로 기록하고 실행은 계속한다. 이유는 고정 문구이며 수집기 출력·주소는 기록하지 않는다.

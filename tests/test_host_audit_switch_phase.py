@@ -37,7 +37,8 @@ def test_switch_play_runs_one_switch_at_a_time_after_the_servers_and_before_the_
     play = next(p for p in plays if p["name"].startswith("Collect switch state"))
     assert play["hosts"] == "host_audit_switch_targets" and play["serial"] == 1
     assert play["connection"] == "local" and play["gather_facts"] is False and play.get("become") is False
-    assert "any_errors_fatal" not in play and "max_fail_percentage" not in play
+    # 한 대의 예상 밖 실패(기록 저장 등)가 나머지 스위치 점검을 멈추지 않는다.
+    assert "any_errors_fatal" not in play and play["max_fail_percentage"] == 100
     assert names.index("Collect host state (read-only)") < names.index(play["name"]) < names.index("Build Host Audit report")
     # 서버 play는 그대로다: 대상은 서버 선택 그룹뿐이다.
     server = next(p for p in plays if p["name"] == "Collect host state (read-only)")
@@ -74,7 +75,7 @@ def test_switch_selection_is_separate_from_the_server_selection():
     assert tasks["AUD-008"]["ansible.builtin.add_host"]["groups"] == "host_audit_switch_targets"
     assert tasks["AUD-004"]["ansible.builtin.add_host"]["groups"] == "host_audit_targets"
     defaults = yaml.safe_load((ROOT_DIR / "roles" / "host_audit" / "defaults" / "main.yml").read_text(encoding="utf-8"))
-    assert defaults["host_audit_switch_scope_pattern"] == "cisco_switches"
+    assert defaults["host_audit_switch_scope_pattern"] == "cisco_switches:!host_audit_excluded"
     assert "cisco_switches" not in defaults["host_audit_scope_pattern"]
     assert defaults["host_audit_switch_enabled"] is True
 
