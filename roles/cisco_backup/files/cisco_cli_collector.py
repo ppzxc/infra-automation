@@ -417,7 +417,10 @@ def get_openssh_direct_args(host: str, port: int, user: str) -> list:
 def _may_fall_back_to_openssh(exc) -> bool:
     """점검(audit)은 접속 실패를 재시도하지 않는다. 예외는 로그인 시도 전에 끝난 알고리즘 협상 실패(SSHException, 인증 실패 제외)뿐이다.
     레거시 IOS는 Paramiko가 협상하지 못해도 OpenSSH(--kex 등)로는 붙으므로 그때만 OpenSSH로 한 번 넘어간다.
+    Paramiko가 레거시 알고리즘 협상 중 내부에서 KeyError를 내는 경우도 같다(로그인 전이라 시도 횟수에 영향이 없다).
     인증 실패·연결 거부·시간 초과 같은 나머지는 두 번째 로그인(N-04 잠금 위험) 없이 곧바로 실패로 돌려준다."""
+    if isinstance(exc, KeyError):
+        return True
     ssh_exc = getattr(paramiko, "SSHException", None)
     auth_exc = getattr(paramiko, "AuthenticationException", None)
     if ssh_exc is None or not isinstance(exc, ssh_exc):

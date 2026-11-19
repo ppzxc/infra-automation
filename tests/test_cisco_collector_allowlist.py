@@ -224,6 +224,24 @@ def test_audit_falls_back_to_openssh_once_only_for_a_pre_login_negotiation_failu
     assert openssh == [1]
 
 
+def test_audit_falls_back_to_openssh_once_when_paramiko_fails_its_key_exchange_with_a_key_error(monkeypatch):
+    """레거시 IOS에서 Paramiko가 알고리즘 협상 중 KeyError를 내는 경우(로그인 전)는 백업처럼 OpenSSH로 한 번 넘어간다."""
+    openssh = []
+    monkeypatch.setattr(c, "paramiko", _fake_paramiko(lambda p: KeyError("diffie-hellman-group1-sha1")))
+    monkeypatch.setattr(c, "collect_openssh_pty", lambda *a, **k: openssh.append(1) or {"running_config": "x", "version": "y"})
+    assert c.collect_direct_ssh("h", 22, "u", "p", audit=True) == {"running_config": "x", "version": "y"}
+    assert openssh == [1]
+
+
+def test_audit_does_not_fall_back_after_a_post_login_key_error(monkeypatch):
+    openssh = []
+    monkeypatch.setattr(c, "paramiko", _fake_paramiko(lambda p: KeyError("late"), connect_ok=True))
+    monkeypatch.setattr(c, "collect_openssh_pty", lambda *a, **k: openssh.append(1))
+    with pytest.raises(KeyError):
+        c.collect_direct_ssh("h", 22, "u", "p", audit=True)
+    assert openssh == []
+
+
 def test_main_audit_prints_json_and_failure_exits_nonzero(monkeypatch, capsys):
     monkeypatch.setattr(c, "collect_direct_ssh", lambda **k: {"running_config": CONFIG.strip(), "version": VERSION})
     monkeypatch.setattr(c, "read_passwords_from_stdin", lambda: {"password": "p"})
