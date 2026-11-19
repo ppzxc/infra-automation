@@ -60,7 +60,7 @@
       started_at: "{{ host_audit_run.started_at }}"
       generated_at: "{{ now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
       targets: "{{ groups['host_audit_targets'] | default([]) }}"
-      switch_records: "{{ _host_audit_switch_records }}"
+      switch_records: "{{ _host_audit_switch_records | default([]) }}"
       switch_targets: "{{ groups['host_audit_switch_targets'] | default([]) }}"
       target_hosts: "{{ host_audit_run.target_hosts }}"
       archive: >-

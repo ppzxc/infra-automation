@@ -274,5 +274,5 @@ def test_report_tasks_read_switch_records_and_pass_them_into_the_model():
     assert "_host_audit_switch_records" in read["ansible.builtin.set_fact"]
     build = next(t for t in tasks if "[AUD-021]" in t.get("name", ""))
     meta = build["vars"]["_meta"]
-    assert meta["switch_records"] == "{{ _host_audit_switch_records }}"
+    assert meta["switch_records"] == "{{ _host_audit_switch_records | default([]) }}"
     assert "host_audit_switch_targets" in meta["switch_targets"]
