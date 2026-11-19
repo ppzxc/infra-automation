@@ -65,7 +65,7 @@
 | stdout | 러닝 컨피그 텍스트 | JSON 한 개: `{"running_config": "<텍스트>", "version": "<show version 출력, 명령 에코·프롬프트 제외>"}` |
 | 종료 코드 | `0` 성공 / `1` 인자 오류 / `2` 출력이 설정 같지 않음(점검은 `version`이 비어도 `2`) / `3` 접속·수집 실패 | 같음 |
 
-점검 모드는 접속 실패를 재시도하지 않는다. Paramiko 실패 뒤 OpenSSH로 다시 로그인하는 기존 대체 경로를 쓰지 않고 곧바로 종료 코드 `3`을 낸다(두 번째 로그인이 N-04 로그인 실패 임계값을 건드릴 수 있고, 장비 판정은 "점검불가"로 호출자가 정한다). 실패 시 stdout은 비어 있다. 함수 수준에서는 `run_cisco_session(send_fn, recv_fn, enable_pass, timeout, audit=True)`가 같은 dict를, `collect_*(..., audit=True)`가 접속까지 포함해 돌려준다.
+점검 모드는 접속 실패를 재시도하지 않는다. 인증 실패·연결 거부·시간 초과·세션 중 오류는 곧바로 종료 코드 `3`을 낸다(두 번째 로그인이 N-04 로그인 실패 임계값을 건드릴 수 있고, 장비 판정은 "점검불가"로 호출자가 정한다). 예외는 하나다. 로그인 시도 전에 끝난 Paramiko 알고리즘 협상 실패(`SSHException`, 인증 실패 제외)일 때만 레거시 IOS를 위해 OpenSSH(`--kex` 등)로 한 번 넘어간다. 실패 시 stdout은 비어 있다. 함수 수준에서는 `run_cisco_session(send_fn, recv_fn, enable_pass, timeout, audit=True)`가 같은 dict를, `collect_*(..., audit=True)`가 접속까지 포함해 돌려준다.
 
 ---
 

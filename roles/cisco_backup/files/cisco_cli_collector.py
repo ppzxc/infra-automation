@@ -409,6 +409,17 @@ def get_openssh_direct_args(host: str, port: int, user: str) -> list:
     return args
 
 
+def _may_fall_back_to_openssh(exc) -> bool:
+    """점검(audit)은 접속 실패를 재시도하지 않는다. 예외는 로그인 시도 전에 끝난 알고리즘 협상 실패(SSHException, 인증 실패 제외)뿐이다.
+    레거시 IOS는 Paramiko가 협상하지 못해도 OpenSSH(--kex 등)로는 붙으므로 그때만 OpenSSH로 한 번 넘어간다.
+    인증 실패·연결 거부·시간 초과 같은 나머지는 두 번째 로그인(N-04 잠금 위험) 없이 곧바로 실패로 돌려준다."""
+    ssh_exc = getattr(paramiko, "SSHException", None)
+    auth_exc = getattr(paramiko, "AuthenticationException", None)
+    if ssh_exc is None or not isinstance(exc, ssh_exc):
+        return False
+    return not (auth_exc is not None and isinstance(exc, auth_exc))
+
+
 def collect_direct_ssh(host: str, port: int, user: str, password: str,
                        enable_pass: str = None, timeout: int = 30, audit: bool = False):
     """Collect config via Direct SSH. Tries Paramiko first, falls back to OpenSSH PTY."""
@@ -454,8 +465,7 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
             finally:
                 ssh.close()
         except Exception as pe:
-            if audit:
-                # 점검은 접속 실패를 재시도하지 않는다(두 번째 로그인은 계정 잠금 N-04를 건드릴 수 있다).
+            if audit and not _may_fall_back_to_openssh(pe):
                 raise
             paramiko_err = pe
 
@@ -685,8 +695,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
             finally:
                 ssh.close()
         except Exception as pe:
-            if audit:
-                # 점검은 접속 실패를 재시도하지 않는다(두 번째 로그인은 계정 잠금 N-04를 건드릴 수 있다).
+            if audit and not _may_fall_back_to_openssh(pe):
                 raise
             paramiko_err = pe
 

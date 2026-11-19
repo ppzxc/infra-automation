@@ -169,29 +169,55 @@ def test_audit_connection_failure_is_not_retried_and_raises(monkeypatch):
     assert calls == [1]
 
 
-def test_audit_does_not_fall_back_to_a_second_login_after_a_paramiko_failure(monkeypatch):
+def _fake_paramiko(error):
+    class SSHException(Exception):
+        pass
+
+    class AuthenticationException(SSHException):
+        pass
+
     class FakeParamiko:
-        class SSHClient:
-            def set_missing_host_key_policy(self, _p):
-                pass
+        pass
 
-            def connect(self, **k):
-                raise RuntimeError("auth failed")
+    FakeParamiko.SSHException = SSHException
+    FakeParamiko.AuthenticationException = AuthenticationException
 
-            def close(self):
-                pass
-
-        class AutoAddPolicy:
+    class SSHClient:
+        def set_missing_host_key_policy(self, _p):
             pass
 
-        Transport = type("T", (), {})
+        def connect(self, **k):
+            raise error(FakeParamiko)
 
+        def close(self):
+            pass
+
+    FakeParamiko.SSHClient = SSHClient
+    FakeParamiko.AutoAddPolicy = type("AutoAddPolicy", (), {})
+    FakeParamiko.Transport = type("T", (), {})
+    return FakeParamiko
+
+
+@pytest.mark.parametrize("error", [
+    lambda p: p.AuthenticationException("auth failed"),
+    lambda p: RuntimeError("refused"),
+    lambda p: TimeoutError("timed out"),
+])
+def test_audit_does_not_fall_back_to_a_second_login_after_auth_or_network_failure(monkeypatch, error):
     openssh = []
-    monkeypatch.setattr(c, "paramiko", FakeParamiko)
+    monkeypatch.setattr(c, "paramiko", _fake_paramiko(error))
     monkeypatch.setattr(c, "collect_openssh_pty", lambda *a, **k: openssh.append(1))
-    with pytest.raises(RuntimeError, match="auth failed"):
+    with pytest.raises(Exception):
         c.collect_direct_ssh("h", 22, "u", "p", audit=True)
     assert openssh == []
+
+
+def test_audit_falls_back_to_openssh_once_only_for_a_pre_login_negotiation_failure(monkeypatch):
+    openssh = []
+    monkeypatch.setattr(c, "paramiko", _fake_paramiko(lambda p: p.SSHException("no acceptable kex")))
+    monkeypatch.setattr(c, "collect_openssh_pty", lambda *a, **k: openssh.append(1) or {"running_config": "x", "version": "y"})
+    assert c.collect_direct_ssh("h", 22, "u", "p", audit=True) == {"running_config": "x", "version": "y"}
+    assert openssh == [1]
 
 
 def test_main_audit_prints_json_and_failure_exits_nonzero(monkeypatch, capsys):
