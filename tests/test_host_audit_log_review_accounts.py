@@ -422,7 +422,7 @@ def test_the_report_task_builds_the_allowed_accounts_from_resolved_host_variable
               "host_audit_run": {"run_id": "ha-x", "run_kind": "scheduled", "started_at": STARTED,
                                  "output_dir": str(tmp_path / "run"), "timezone": TZ, "target_hosts": ""},
               "host_audit_model": model, "host_audit_log_review_collect_hosts": ["ns0001", "ns0002"],
-              "host_audit_log_review_devices": [], "host_audit_storage_enabled": False}
+              "host_audit_log_review_devices": [], "host_audit_storage_enabled": False, "_host_audit_records": []}
         (tmp_path / "vars.json").write_text(json.dumps(ev))
         (tmp_path / "run").mkdir()
         env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
@@ -441,3 +441,33 @@ def test_the_report_task_builds_the_allowed_accounts_from_resolved_host_variable
     assert [(r[0], r[1]) for r in item["rows"]] == [("ns0001", "intruder"), ("ns0002", "alice"), ("ns0003", "alice")]
     assert "허용 계정 목록 없음" in item["rows"][2][-1] and "허용 계정 목록 없음" not in item["rows"][0][-1]
     assert item["verdict"] == "확인 필요"
+
+
+# ------------------------------------------------------------------ role 기본값의 공휴일 목록(#574)
+
+def _default_holidays():
+    import yaml
+    path = ROOT_DIR / "roles" / "host_audit" / "defaults" / "main.yml"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["host_audit_log_review_holidays"]
+
+
+def test_default_holidays_are_well_formed_per_year():
+    holidays = _default_holidays()
+    assert {"2026", "2027"} <= set(holidays)
+    for year, days in holidays.items():
+        assert days == sorted(set(days)), year
+        assert all(d.startswith(year + "-") and len(d) == 10 for d in days), year
+
+
+def test_default_2026_holidays_include_labour_day_and_constitution_day():
+    """2026년부터 노동절(5/1)·제헌절(7/17)이 공휴일이다(공휴일에 관한 법률 개정, 인사혁신처 2026-04-28 보도자료)."""
+    days = _default_holidays()["2026"]
+    assert "2026-05-01" in days and "2026-07-17" in days
+
+
+def test_default_2027_holidays_match_the_2027_calendar():
+    """2027 월력요항(우주항공청, 2026-06-29 공표) 관공서 공휴일 24일: 대체공휴일 7일 포함."""
+    assert _default_holidays()["2027"] == [
+        "2027-01-01", "2027-02-06", "2027-02-07", "2027-02-08", "2027-02-09", "2027-03-01", "2027-05-01", "2027-05-03",
+        "2027-05-05", "2027-05-13", "2027-06-06", "2027-07-17", "2027-07-19", "2027-08-15", "2027-08-16", "2027-09-14",
+        "2027-09-15", "2027-09-16", "2027-10-03", "2027-10-04", "2027-10-09", "2027-10-11", "2027-12-25", "2027-12-27"]

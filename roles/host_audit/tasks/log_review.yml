@@ -90,12 +90,6 @@
     # 계산되지 않는 주소(NAT 뒤 주소 등)만 작업 설정 문서의 internal_addresses에 둔다.
     - name: Compute the managed host addresses from the inventory
       vars:
-        _records: >-
-          {%- set r = [] -%}
-          {%- for p in (_host_audit_record_files | default({'files': []})).files | map(attribute='path') | sort -%}
-          {%- set _ = r.append(lookup('ansible.builtin.file', p) | from_json) -%}
-          {%- endfor -%}
-          {{ r }}
         _declared: >-
           {%- set d = {} -%}
           {%- for h in groups['all'] -%}
@@ -103,7 +97,7 @@
           {%- endfor -%}
           {{ d }}
       ansible.builtin.set_fact:
-        _host_audit_log_review_managed_addresses: "{{ _records | host_audit_log_review_managed_addresses(_declared) }}"
+        _host_audit_log_review_managed_addresses: "{{ _host_audit_records | host_audit_log_review_managed_addresses(_declared) }}"
 
     # 조회는 이 태스크 하나이고 POST _search뿐이다. 실패는 상태 코드로 받는다(-1 = 연결 불가). 결과에는 계정명·출발지가
     # 들어 있으므로 no_log다. 자격증명을 못 읽었으면 부르지 않고 모든 항목이 그 사유로 '조회 실패'가 된다(AUD-804).

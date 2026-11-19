@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, FAILED, PARTIAL, STATUS_LABELS, UNAVAILABLE, VERDICT_CHECK, VERDICT_OK, failed, result,
 )
+from host_audit_log_review_common import to_int as _int  # noqa: E402
 import host_audit_log_review_accounts as _accounts  # noqa: E402
 import host_audit_log_review_sources as _sources  # noqa: E402
 import host_audit_log_review_collection as _collection  # noqa: E402
@@ -39,13 +40,6 @@ _COLLECTION = {FORTIGATE: _collection.FORTIGATE_DAILY, SWITCH: _collection.SWITC
 _MINUTE = "date_format(_timestamp, '%Y-%m-%d %H:%M', '{offset}')"
 _LIMIT = ('sudo 명령만 본다: sudo 없이 root 셸 안에서 실행한 명령, su 뒤의 명령, root 직접 로그인의 명령, Ansible become(자동화)은 '
           '세지 않는다')
-
-
-def _int(value):
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _text(value):

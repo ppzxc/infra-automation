@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, FAILED, MANUAL, PART1, PART2, PART3, PARTIAL, STATUS_LABELS, UNAVAILABLE, result as _result,
 )
+from host_audit_log_review_common import REPORT_TIMEZONE, STAMP as _STAMP, local_iso as _local, tz as _tz  # noqa: E402
 import host_audit_log_review_collection as _collection  # noqa: E402
 import host_audit_log_review_accounts as _accounts  # noqa: E402
 import host_audit_log_review_sources as _sources  # noqa: E402
@@ -40,13 +41,7 @@ try:
 except ImportError:  # pragma: no cover - pytest without ansible
     AnsibleFilterError = ValueError
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover - Python < 3.9 runner
-    ZoneInfo = None
-
 SCHEMA_VERSION = 1
-REPORT_TIMEZONE = 'Asia/Seoul'
 TITLE = 'Log Review Report (로그·보안정책 검토 결과)'
 
 # 판정 모듈. 후속 티켓은 모듈 하나를 만들고 여기에 한 줄을 더한다(같은 파일의 다른 줄을 건드리지 않는다).
@@ -61,13 +56,6 @@ _JUDGE_MODULES = (
 
 APPROVERS = ('점검자', '정보보호관리자', '정보보호책임자(CISO)')
 
-_STAMP = re.compile(r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$')
-
-
-def _tz(tz_name):
-    if ZoneInfo is None:  # pragma: no cover
-        return timezone(timedelta(hours=9))
-    return ZoneInfo(tz_name or REPORT_TIMEZONE)
 
 
 def _offset(dt):
@@ -234,14 +222,6 @@ def _evaluate(definition, part, judges, ctx, errors, extenders=None):
         if res.get(key):
             item[key] = res[key]
     return item
-
-
-def _local(iso, tz_name):
-    m = _STAMP.match(str(iso or '').strip())
-    if not m:
-        return str(iso or '')
-    dt = datetime(*[int(x) for x in m.groups()], tzinfo=timezone.utc).astimezone(_tz(tz_name))
-    return dt.strftime('%Y-%m-%d %H:%M')
 
 
 def host_audit_log_review_model(results, meta):

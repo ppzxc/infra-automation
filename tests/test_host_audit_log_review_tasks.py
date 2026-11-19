@@ -169,7 +169,7 @@ def _run(tmp_path, o2_url, run_kind="scheduled", docs=True, extra=None):
                "host_audit_run": {"run_id": RUN_ID, "run_kind": run_kind, "started_at": STARTED, "output_dir": str(out),
                                   "timezone": "Asia/Seoul", "target_hosts": ""},
                "host_audit_log_review_collect_hosts": ["h1", "h2"], "host_audit_log_review_devices": [],
-               "host_audit_storage_enabled": False}, **(extra or {}))
+               "host_audit_storage_enabled": False, "_host_audit_records": []}, **(extra or {}))
     evf = tmp_path / "vars.json"
     evf.write_text(json.dumps(ev))
     env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",
@@ -278,7 +278,7 @@ def _broken_records(tmp):
     bad = tmp / "records" / "h1.json"
     bad.parent.mkdir(parents=True)
     bad.write_text(json.dumps({"inventory_hostname": "h1", "identity": "broken"}))
-    return {"_host_audit_record_files": {"files": [{"path": str(bad)}]}}
+    return {"_host_audit_records": [json.loads(bad.read_text())]}
 
 
 def _broken_signed_history(tmp):
