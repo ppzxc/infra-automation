@@ -145,3 +145,19 @@ def test_header_lists_the_criteria_of_judged_items(model):
     assert "이번 자동 판정에 쓴 기준" in head
     assert judged["criteria"][0]["criterion"] in head
     assert "이번 자동 판정에 쓴 기준" not in env.get_template("log_review.html.j2").render(host_audit_log_review_model=model)
+
+
+def test_the_first_page_is_a_dashboard_with_status_cards_and_the_part3_state_before_part1(rendered, model):
+    head = rendered.split("1부 로그 검토 (19개 항목)")[0]
+    assert head.count('class="card st-') == 5
+    for c in model["counts"]:
+        assert ">%s</span>" % c["label"] in head
+    assert "확인이 필요한 항목" in head and "3부 로그 관리 상태" in head and "점검하지 못한 항목" in head
+    for item in model["part3"]:
+        assert item["title"].replace("&", "&amp;") in head
+
+
+def test_the_footnote_says_what_the_item_numbers_are_and_names_no_internal_document_number(rendered):
+    assert "회사 '로그·보안정책 검토결과 대장' 양식의 항목 번호" in rendered
+    assert "KISA 2026 취약점 점검 기준" in rendered
+    assert "AK-0" not in rendered

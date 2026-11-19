@@ -68,6 +68,12 @@
   .crit { color:var(--crit); } .ok { color:var(--ok); }
   .kv { display:grid; grid-template-columns: 30mm 1fr; gap:.6mm 3mm; font-size:9pt; }
   .kv div:nth-child(odd) { color:var(--mute); }
+  .cards { display:grid; grid-template-columns:repeat(5,1fr); gap:2.5mm; margin:3mm 0; }
+  .card { border:1px solid var(--line); border-top:4px solid currentColor; border-radius:1.5mm; padding:2mm 2.5mm; }
+  .card b { display:block; font-size:20pt; line-height:1.1; } .card span { font-size:8pt; color:var(--ink); }
+  .dash h3 { margin:5mm 0 1.2mm; font-size:10.5pt; }
+  .dash td.n { width:12mm; text-align:center; white-space:nowrap; }
+  .foot { font-size:7.5pt; color:var(--mute); margin-top:3mm; border-top:1px solid var(--line); padding-top:1.5mm; }
   .note { border-left:4px solid var(--na); background:var(--soft); padding:2mm 3mm; margin:2mm 0; font-size:8.5pt; }
   table.policy td.blank { height:9mm; }
   table.sign th, table.sign td { border:1px solid var(--ink); text-align:center; }
@@ -77,7 +83,7 @@
 <body>
 <div class="sheet">
 
-  <div class="mute small">ISMS-P 2.9.5 로그 및 접속기록 점검 · 회사 '로그·보안정책 검토결과 대장'(AK-034) 양식 순서 · 대외비</div>
+  <div class="mute small">ISMS-P 2.9.5 로그 및 접속기록 점검 · 회사 '로그·보안정책 검토결과 대장' 양식 순서 · 대외비</div>
   <h1>{{ m.title | e }}</h1>
   <div class="kv keep">
     <div>점검 기간</div><div class="period">{{ m.period.label | e }}</div>
@@ -89,17 +95,48 @@
 {%- endif %}
     <div>항목 상태</div><div>{% for c in m.counts %}{{ c.label | e }} {{ c.count }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
   </div>
+  <div class="dash">
+    <div class="cards">
+{%- for c in m.counts %}
+      <div class="card st-{{ c.key }}"><b>{{ c.count }}</b><span>{{ c.label | e }}</span></div>
+{%- endfor %}
+    </div>
+    <h3>확인이 필요한 항목 (자동 판정 '확인 필요')</h3>
+    <table class="rows keep">
+      <thead><tr><th style="width:12mm">부·번호</th><th style="width:60mm">항목</th><th>요약</th></tr></thead>
+      <tbody>
+{%- set ns = namespace(n=0) %}
+{%- for i in m.part1 + m.part3 if i.verdict == '확인 필요' %}{% set ns.n = ns.n + 1 %}
+        <tr><td class="n">{{ i.part }}부 {{ i.no }}</td><td>{{ i.title | e }}</td><td class="small">{{ (i.summary or '') | truncate(120, True, '…') | e }}</td></tr>
+{%- endfor %}
+{%- if ns.n == 0 %}
+        <tr><td colspan="3" class="mute">없음</td></tr>
+{%- endif %}
+      </tbody>
+    </table>
+    <h3>3부 로그 관리 상태</h3>
+    <table class="rows keep">
+      <tbody>
+{%- for i in m.part3 %}
+        <tr><td class="n">{{ i.no }}</td><td>{{ i.title | e }}</td><td style="width:34mm"><span class="tag st-{{ i.status }}">{{ i.status_label | e }}</span>{% if i.verdict %} <b class="{{ 'crit' if i.verdict == '확인 필요' else 'ok' }}">{{ i.verdict | e }}</b>{% endif %}</td></tr>
+{%- endfor %}
+      </tbody>
+    </table>
+    <h3>점검하지 못한 항목 (1부)</h3>
+    <p class="small">{% set ns2 = namespace(l=[]) %}{% for i in m.part1 if i.status in ('unavailable', 'failed') %}{% set ns2.l = ns2.l + [i.no | string] %}{% endfor %}{{ (ns2.l | join(', ') ~ '번') if ns2.l else '없음' }} — 사유는 각 항목 상태 줄에 있다. '점검 불가'는 이상 없음이 아니다.</p>
+  </div>
+  <div class="note">자동 집계·자동 판정(이상 없음/확인 필요)은 초안이다. 최종 판정·점검자 소견·조치 내역은 점검자가 쓰고, 마지막 쪽에서 점검자 → 정보보호관리자 → 정보보호책임자(CISO) 순으로 서명한다. 점검할 수 없는 항목은 빼지 않고 "점검 불가"와 사유로, 조회가 실패한 항목은 "조회 실패"로 남긴다.</div>
+
+  <p class="foot">※ 1부 1~19번, 2부 1~9번은 회사 '로그·보안정책 검토결과 대장' 양식의 항목 번호다. 그 양식이 ISMS-P 2.9.5(로그 및 접속기록 점검) 인증기준을 회사 업무로 풀어 정한 점검 항목이며, 이 보고서는 그 순서와 문구를 그대로 따른다. KISA 2026 취약점 점검 기준(Host Audit 보고서)과는 다른 문서다. 3부는 양식에 없는 로그 관리 상태(ISMS-P 2.9.4·2.9.6)를 더한 것이다.</p>
 {%- if m.criteria %}
-  <div class="criteria keep">
+  <div class="criteria pb">
     <h3>이번 자동 판정에 쓴 기준</h3>
     <table class="rows">
       <tbody>{% for c in m.criteria %}<tr><th>{{ c.part }}부 {{ c.no }}번 {{ c.title | e }}</th><td>{{ c.criterion | e }}</td></tr>{% endfor %}</tbody>
     </table>
   </div>
 {%- endif %}
-  <div class="note">자동 집계·자동 판정(이상 없음/확인 필요)은 초안이다. 최종 판정·점검자 소견·조치 내역은 점검자가 쓰고, 마지막 쪽에서 점검자 → 정보보호관리자 → 정보보호책임자(CISO) 순으로 서명한다. 점검할 수 없는 항목은 빼지 않고 "점검 불가"와 사유로, 조회가 실패한 항목은 "조회 실패"로 남긴다.</div>
-
-  <h2 class="pb">1부 로그 검토 (19개 항목)</h2>
+  <h2 class="{{ '' if m.criteria else 'pb' }}">1부 로그 검토 (19개 항목)</h2>
 {%- for i in m.part1 %}
 {{ item_block(i) }}
 {%- endfor %}
