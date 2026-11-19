@@ -110,6 +110,7 @@ def extract_clean_config(raw_output: str) -> str:
 
 _CONFIG_END_RE = re.compile(rb"(?:^|\n)end\r*\n")
 _CISCO_PROMPT_RE = re.compile(rb"(?:^|[\r\n])[^\r\n]{1,128}[>#]\s*$")
+_VERSION_DONE_RE = re.compile(rb"\n[^\n]*\n[^\r\n]{1,128}[>#]\s*$")
 
 
 def wait_for_cisco_login(pty_send, pty_recv, proc, passwords, timeout=30):
@@ -140,8 +141,74 @@ def wait_for_cisco_login(pty_send, pty_recv, proc, passwords, timeout=30):
     raise RuntimeError("Timed out waiting for Cisco prompt after SSH authentication")
 
 
-def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 30) -> str:
-    """Robust interactive logic for Cisco IOS CLI session."""
+# 장비로 보낼 수 있는 명령은 이 모듈 안의 고정 목록뿐이다(Spec #568 / Ticket-2).
+# 점검용 명령은 정확히 일치할 때만 허용하고(약어·대소문자·공백 변형도 거부), 호출자가 세션 준비 명령을 넘길 수 없다.
+RUNNING_CONFIG_COMMAND = "show running-config"
+VERSION_COMMAND = "show version"
+READ_ONLY_COMMANDS = (RUNNING_CONFIG_COMMAND, VERSION_COMMAND)
+SESSION_PREP_COMMANDS = ("terminal length 0",)
+
+
+class CommandNotAllowed(ValueError):
+    """허용 목록 밖 명령. 장비로는 아무것도 보내지 않는다."""
+
+
+class ConfigModeRejected(CommandNotAllowed):
+    """설정 모드 진입 명령(configure, conf t, config term ...)."""
+
+
+def _is_config_mode_entry(command: str) -> bool:
+    """IOS는 명령 약어를 받으므로(`conf t`, `config term`) 첫 단어가 configure의 접두어(3자 이상)면 설정 모드로 본다. 줄바꿈·세미콜론으로 이은 명령도 줄마다 본다."""
+    for part in re.split(r"[\r\n;]+", command):
+        tokens = part.split()
+        if tokens and len(tokens[0]) >= 3 and "configure".startswith(tokens[0].lower()):
+            return True
+    return False
+
+
+def check_command(command: str) -> str:
+    """허용 목록과 정확히 같은 명령만 통과시킨다. 거부 목록(설정 모드)은 더 분명한 오류를 내기 위한 방어 심층이다."""
+    if not isinstance(command, str):
+        raise CommandNotAllowed("command must be a string")
+    if _is_config_mode_entry(command):
+        raise ConfigModeRejected(f"configuration mode entry is never allowed: {command!r}")
+    if command not in READ_ONLY_COMMANDS:
+        raise CommandNotAllowed(f"command is not in the read-only allowlist: {command!r}")
+    return command
+
+
+def _send_checked(send_fn, command: str):
+    """점검 명령을 장비로 보내는 유일한 지점. 허용 목록 검사 뒤에만 보낸다."""
+    send_fn(check_command(command).encode() + b"\n")
+
+
+def _send_prep(send_fn, command: str):
+    """세션 준비 명령은 SESSION_PREP_COMMANDS 고정 목록만 보낸다."""
+    if command not in SESSION_PREP_COMMANDS:
+        raise ValueError(f"not a session prep command: {command!r}")
+    send_fn(command.encode() + b"\n")
+
+
+def extract_version_output(raw_output: str) -> str:
+    """`show version` 출력에서 명령 에코와 끝의 프롬프트 줄을 뺀다."""
+    text = raw_output
+    if VERSION_COMMAND in text:
+        text = text.split(VERSION_COMMAND, 1)[1]
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+    lines = text.replace("\r", "").split("\n")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and re.search(r"[>#]\s*$", lines[-1]) and len(lines[-1]) <= 128 and " " not in lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines).strip()
+
+
+def run_cisco_commands(send_fn, recv_fn, commands, enable_pass: str = None, timeout: int = 30) -> dict:
+    """한 세션에서 허용 목록 안의 읽기 전용 명령을 차례로 실행해 {명령: 출력}으로 돌려준다.
+
+    명령은 보내기 전에 모두 검사한다. 하나라도 벗어나면 장비로 아무것도 보내지 않고 CommandNotAllowed를 낸다."""
+    commands = [check_command(c) for c in commands]
+
     def wait_for(pred_fn, wait_timeout=8.0, poll_interval=0.2):
         accum = b""
         start = time.time()
@@ -167,30 +234,48 @@ def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 
             wait_for(lambda b: b.strip().endswith(b"#"), wait_timeout=5.0)
 
     # Disable terminal paging so config outputs continuously without --More--
-    send_fn(b"terminal length 0\n")
-    wait_for(lambda b: b.strip().endswith(b"#"), wait_timeout=5.0)
+    for prep in SESSION_PREP_COMMANDS:
+        _send_prep(send_fn, prep)
+        wait_for(lambda b: b.strip().endswith(b"#"), wait_timeout=5.0)
 
-    # Execute show running-config
-    send_fn(b"show running-config\n")
+    results = {}
+    for command in commands:
+        _send_checked(send_fn, command)
+        out = b""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            chunk = recv_fn(0.5)
+            if chunk:
+                out += chunk
+                if command == RUNNING_CONFIG_COMMAND:
+                    # Match on the accumulated buffer: the final "end" line may be split
+                    # across reads, and a PTY's onlcr turns "end\r\n" into "end\r\r\n".
+                    if _CONFIG_END_RE.search(out):
+                        break
+                elif _VERSION_DONE_RE.search(out):
+                    # 앞 명령 뒤에 남은 프롬프트 한 줄만 있는 경우를 넘기려고 두 줄 이상일 때만 끝으로 본다.
+                    break
+                if b"--More--" in chunk or b"--more--" in chunk:
+                    send_fn(b" ")
+        text = out.decode(errors="ignore")
+        results[command] = extract_clean_config(text) if command == RUNNING_CONFIG_COMMAND else extract_version_output(text)
+    return results
 
-    out = b""
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        chunk = recv_fn(0.5)
-        if chunk:
-            out += chunk
-            # Match on the accumulated buffer: the final "end" line may be split
-            # across reads, and a PTY's onlcr turns "end\r\n" into "end\r\r\n".
-            if _CONFIG_END_RE.search(out):
-                break
-            if b"--More--" in chunk or b"--more--" in chunk:
-                send_fn(b" ")
 
-    return extract_clean_config(out.decode(errors="ignore"))
+def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 30, audit: bool = False):
+    """Robust interactive logic for Cisco IOS CLI session.
+
+    기본(백업)은 `show running-config` 한 번만 실행해 문자열을 돌려준다. audit=True면 같은 세션에서
+    `show version`도 실행해 {"running_config": ..., "version": ...}를 돌려준다."""
+    commands = [RUNNING_CONFIG_COMMAND] + ([VERSION_COMMAND] if audit else [])
+    results = run_cisco_commands(send_fn, recv_fn, commands, enable_pass=enable_pass, timeout=timeout)
+    if audit:
+        return {"running_config": results[RUNNING_CONFIG_COMMAND], "version": results[VERSION_COMMAND]}
+    return results[RUNNING_CONFIG_COMMAND]
 
 
 def collect_telnet(host: str, port: int, user: str, password: str,
-                   enable_pass: str = None, timeout: int = 30) -> str:
+                   enable_pass: str = None, timeout: int = 30, audit: bool = False):
     """Connect to Cisco switch via direct Telnet socket."""
     s = socket.create_connection((host, port), timeout=timeout)
     time.sleep(2)
@@ -216,13 +301,13 @@ def collect_telnet(host: str, port: int, user: str, password: str,
             return b""
 
     try:
-        return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or password, timeout=timeout)
+        return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or password, timeout=timeout, audit=audit)
     finally:
         s.close()
 
 
 def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
-                        target_pass: str = None, timeout: int = 30) -> str:
+                        target_pass: str = None, timeout: int = 30, audit: bool = False):
     """PTY-based execution of OpenSSH command with controlling terminal and robust password negotiation."""
     master, slave = pty.openpty()
 
@@ -261,7 +346,7 @@ def collect_openssh_pty(cmd_args: list, password: str, enable_pass: str = None,
         wait_for_cisco_login(pty_send, pty_recv, proc, passwords_to_send)
 
         effective_enable = enable_pass or (target_pass if target_pass else password)
-        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout)
+        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout, audit=audit)
     finally:
         try:
             pty_send(b"exit\n")
@@ -325,7 +410,7 @@ def get_openssh_direct_args(host: str, port: int, user: str) -> list:
 
 
 def collect_direct_ssh(host: str, port: int, user: str, password: str,
-                       enable_pass: str = None, timeout: int = 30) -> str:
+                       enable_pass: str = None, timeout: int = 30, audit: bool = False):
     """Collect config via Direct SSH. Tries Paramiko first, falls back to OpenSSH PTY."""
     paramiko_err = None
     if paramiko is not None:
@@ -365,15 +450,18 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
                             time.sleep(0.05)
                     return out
 
-                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or password, timeout=timeout)
+                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or password, timeout=timeout, audit=audit)
             finally:
                 ssh.close()
         except Exception as pe:
+            if audit:
+                # 점검은 접속 실패를 재시도하지 않는다(두 번째 로그인은 계정 잠금 N-04를 건드릴 수 있다).
+                raise
             paramiko_err = pe
 
     cmd = get_openssh_direct_args(host, port, user)
     try:
-        return collect_openssh_pty(cmd, password=password, enable_pass=enable_pass or password, timeout=timeout)
+        return collect_openssh_pty(cmd, password=password, enable_pass=enable_pass or password, timeout=timeout, audit=audit)
     except Exception as oe:
         if paramiko_err:
             raise RuntimeError(f"Direct SSH failed with Paramiko ({paramiko_err}) and OpenSSH ({oe})")
@@ -383,7 +471,7 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
 def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, bastion_user: str, bastion_pass: str,
                                      target_host: str, target_user: str, target_pass: str,
                                      enable_pass: str = None, timeout: int = 35,
-                                     _bastion_cmd: list = None) -> str:
+                                     _bastion_cmd: list = None, audit: bool = False):
     """Collect config by SSHing into Bastion host first via PTY, then chaining SSH to target switch."""
     master, slave = pty.openpty()
 
@@ -468,7 +556,7 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
                 raise RuntimeError(f"Bastion shell exited unexpectedly: {err_msg}")
 
         if bastion_is_cisco:
-            pty_send(b"terminal length 0\n")
+            _send_prep(pty_send, "terminal length 0")
         else:
             pty_send(b"stty -echo\n")
         time.sleep(0.3)
@@ -510,7 +598,7 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
                 raise RuntimeError(f"Target SSH process exited unexpectedly: {err_msg}")
 
         effective_enable = enable_pass or target_pass
-        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout)
+        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout, audit=audit)
     finally:
         try:
             pty_send(b"exit\nexit\n")
@@ -527,7 +615,7 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
 
 def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, bastion_pass: str,
                      target_host: str, target_user: str, target_pass: str,
-                     enable_pass: str = None, timeout: int = 35) -> str:
+                     enable_pass: str = None, timeout: int = 35, audit: bool = False):
     """Collect config via Bastion jump SSH session."""
     paramiko_err = None
     if paramiko is not None:
@@ -576,7 +664,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
                         if b"$" in buf or b"#" in buf or b">" in buf:
                             break
 
-                send_fn(b"terminal length 0\n")
+                _send_prep(send_fn, "terminal length 0")
                 time.sleep(0.5)
                 recv_fn(0.5)
 
@@ -593,10 +681,13 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
                         if b"yes/no" in buf.lower():
                             send_fn(b"yes\n")
 
-                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or target_pass, timeout=timeout)
+                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or target_pass, timeout=timeout, audit=audit)
             finally:
                 ssh.close()
         except Exception as pe:
+            if audit:
+                # 점검은 접속 실패를 재시도하지 않는다(두 번째 로그인은 계정 잠금 N-04를 건드릴 수 있다).
+                raise
             paramiko_err = pe
 
     # Fallback to interactive OpenSSH Jump session via PTY
@@ -610,7 +701,8 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
             target_user=target_user,
             target_pass=target_pass,
             enable_pass=enable_pass,
-            timeout=timeout
+            timeout=timeout,
+            audit=audit
         )
     except Exception as oe:
         if paramiko_err:
@@ -631,6 +723,8 @@ def main():
     parser.add_argument("--bastion-user")
     parser.add_argument("--bastion-password", help="Password for bastion (prefer stdin JSON)")
     parser.add_argument("--timeout", type=int, default=30)
+    parser.add_argument("--audit", action="store_true",
+                        help="한 세션에서 show running-config와 show version을 읽어 JSON으로 출력한다(읽기 전용, 접속 실패는 재시도하지 않는다)")
     parser.add_argument("--kex", help="Comma separated legacy KexAlgorithms to enable (OpenSSH path)")
     parser.add_argument("--host-key-algorithms", help="Comma separated legacy HostKeyAlgorithms to enable")
     parser.add_argument("--ciphers", help="Comma separated legacy Ciphers to enable")
@@ -656,7 +750,8 @@ def main():
                 user=args.user,
                 password=password,
                 enable_pass=enable_password,
-                timeout=args.timeout
+                timeout=args.timeout,
+                audit=args.audit
             )
         elif args.mode == "jump_ssh":
             if not args.bastion_host or not args.bastion_user:
@@ -671,7 +766,8 @@ def main():
                 target_user=args.user,
                 target_pass=password,
                 enable_pass=enable_password,
-                timeout=args.timeout
+                timeout=args.timeout,
+                audit=args.audit
             )
         elif args.mode in ("direct_ssh", "ssh"):
             config = collect_direct_ssh(
@@ -680,18 +776,25 @@ def main():
                 user=args.user,
                 password=password,
                 enable_pass=enable_password,
-                timeout=args.timeout
+                timeout=args.timeout,
+                audit=args.audit
             )
         else:
             sys.stderr.write(f"Unknown mode: {args.mode}\n")
             sys.exit(1)
 
+        result = config
+        if args.audit:
+            config = result["running_config"]
+            if not (result["version"] or "").strip():
+                sys.stderr.write("Error: collected output has no show version text\n")
+                sys.exit(2)
         if not config or ("Building configuration" not in config and "Current configuration" not in config and "version " not in config):
             snippet = (config[:200] + "...") if config else "None"
             sys.stderr.write(f"Error: collected output does not look like a valid running-config (len={len(config) if config else 0}, snippet={snippet!r})\n")
             sys.exit(2)
 
-        sys.stdout.write(config)
+        sys.stdout.write(json.dumps(result, ensure_ascii=False) if args.audit else config)
         sys.exit(0)
     except Exception as e:
         import traceback

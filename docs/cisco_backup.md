@@ -44,6 +44,29 @@
 
 `cisco_backup_no_log`는 SSH/Telnet/Jump SSH 수집 태스크의 Ansible 출력을 숨길지 제어한다. 기본값은 `true`이며, 인벤토리의 `host_vars/<호스트>.yml`에서 진단이 필요한 장비만 `false`로 덮어쓸 수 있다. `false`로 실행하면 오류 원인을 확인할 수 있지만 `show running-config` 결과도 Semaphore 로그에 노출되므로, 접근을 제한하고 진단 후 즉시 기본값으로 되돌린다.
 
+### 수집기 호출 인터페이스와 읽기 전용 강제 (Spec #568 / Ticket-2)
+
+`roles/cisco_backup/files/cisco_cli_collector.py`는 백업과 스위치 점검(Host Audit 스위치 단계)이 함께 쓴다. 이 절은 수집기 코드의 규칙이며 Ansible 태스크가 아니라서 `Spec ID` 표에 행이 없다(점검 태스크는 Ticket-3이 `[CISCO-NNN]`으로 추가한다).
+
+**읽기 전용 강제** (코드, 시험 `tests/test_cisco_collector_allowlist.py`)
+
+- 장비로 보내는 점검 명령은 정확히 `show running-config`와 `show version` 둘뿐이다. 문자열이 정확히 같을 때만 보낸다(약어 `show run`, 대소문자, 앞뒤 공백 변형도 거부). 벗어나면 `CommandNotAllowed`로 거부하고, 한 세션의 명령 목록은 보내기 전에 모두 검사하므로 하나라도 벗어나면 장비로 아무것도 보내지 않는다.
+- 설정 모드 진입(`configure`, `conf t`, `config term`, `CONFIGURE terminal`, 줄바꿈·세미콜론으로 이은 명령 포함)은 `ConfigModeRejected`(`CommandNotAllowed`의 하위)로 어떤 경우에도 거부한다. IOS가 약어를 받으므로 첫 단어가 `configure`의 3자 이상 접두어이면 막는다. 허용 목록 정확 일치가 기본이고 이 거부 목록은 방어 심층이다.
+- 세션 준비 명령(`terminal length 0`, `enable`과 enable 비밀번호)은 수집기 내부 고정 목록(`SESSION_PREP_COMMANDS`)과 내장 절차로만 보낸다. 호출자가 넘길 인자가 없다.
+- 접속은 기존 SSH(직접·경유지)·telnet 경로를 그대로 쓴다.
+
+**호출 인터페이스**
+
+| 항목 | 백업(기본, 기존과 같음) | 점검(`--audit`) |
+|---|---|---|
+| 인자 | `--mode telnet\|direct_ssh\|ssh\|jump_ssh --host --port --user [--timeout] [--kex ...]` (경유지는 `--bastion-host --bastion-port --bastion-user`) | 백업과 같고 `--audit`만 더한다 |
+| stdin(JSON) | `{"password": ..., "enable_password": ..., "bastion_password": ...}` | 같음 |
+| 보내는 명령 | 준비 명령 + `show running-config` | 준비 명령 + `show running-config` + `show version` (한 세션) |
+| stdout | 러닝 컨피그 텍스트 | JSON 한 개: `{"running_config": "<텍스트>", "version": "<show version 출력, 명령 에코·프롬프트 제외>"}` |
+| 종료 코드 | `0` 성공 / `1` 인자 오류 / `2` 출력이 설정 같지 않음(점검은 `version`이 비어도 `2`) / `3` 접속·수집 실패 | 같음 |
+
+점검 모드는 접속 실패를 재시도하지 않는다. Paramiko 실패 뒤 OpenSSH로 다시 로그인하는 기존 대체 경로를 쓰지 않고 곧바로 종료 코드 `3`을 낸다(두 번째 로그인이 N-04 로그인 실패 임계값을 건드릴 수 있고, 장비 판정은 "점검불가"로 호출자가 정한다). 실패 시 stdout은 비어 있다. 함수 수준에서는 `run_cisco_session(send_fn, recv_fn, enable_pass, timeout, audit=True)`가 같은 dict를, `collect_*(..., audit=True)`가 접속까지 포함해 돌려준다.
+
 ---
 
 ## 4. 플레이북 실행 및 Semaphore UI 연동
