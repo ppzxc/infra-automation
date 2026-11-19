@@ -87,7 +87,7 @@ def test_the_search_task_hides_its_results_and_takes_failures_as_values():
 
 def test_the_report_model_task_hides_its_values_because_they_hold_accounts_and_sources():
     task = next(t for _, t in _all_tasks() if t.get("name", "").startswith("[AUD-804]"))
-    assert task["no_log"] is True  # 계정명·출발지가 -v와 실패 출력에 남지 않게(#571)
+    assert task["no_log"] is True  # 계정명·접속 위치가 -v와 실패 출력에 남지 않게(#571)
 
 
 def test_the_switches_checked_for_collection_gaps_are_the_ones_the_silent_switch_alert_watches():
@@ -192,7 +192,7 @@ def test_a_scheduled_run_posts_only_to_search_and_writes_the_report_with_the_col
     assert {b["query"]["start_time"] for *_, b in server.requests} == {1790780400 * 1000000}
     html = (out / "log_review" / FILE).read_text(encoding="utf-8")
     assert "2026-10-01 00:00 ~ 2026-10-31 24:00 (KST)" in html
-    assert "h2" in html and "전월 로그 없음" in html
+    assert "h2" in html and "점검 기간 내내 로그 없음" in html
     # 기준 목록 문서(inventory/config/log_review)가 없으면 조회는 그대로 하고 1부 6·7·12번만 기준 목록 실패다(#560).
     assert html.count("조회 실패(기준 목록)") == 3
     # 장비 관리자 로그인(#562): role 기본값의 syslog 스위치는 파싱이 없는 항목마다 '점검 불가(파싱 없음)'이다(1·3·7·12번).

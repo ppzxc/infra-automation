@@ -1,4 +1,4 @@
-"""Log Review Report 1부 출발지 항목 6·7·12번 (Spec #544 / Ticket-5 #560, ADR-0015).
+"""Log Review Report 1부 접속 위치 항목 6·7·12번 (Spec #544 / Ticket-5 #560, ADR-0015).
 
 필터 직접 테스트(ADR-0013 다수 층): fixture 조회 결과와 fixture 기준 목록(RFC 5737 문서용 주소, example 호스트명)으로
 보고서 모델의 항목 상태·사유·행만 본다. 쿼리 문자열과 내부 함수 구성은 시험하지 않는다(#544 Testing Decisions).
@@ -115,13 +115,13 @@ def test_a_login_whose_source_is_a_managed_host_address_is_listed_under_item_6()
     m = _model(logins=[
         _login("h-web", "alice", RELAY, logins=3, first=T0, last=T0 + 3600 * 1000000),
         _login("h-db", "bob", NAT_ONLY),
-        _login("h-web", "carol", OFFICE),          # 정상 출발지(관리 호스트 아님): 6번 아님
+        _login("h-web", "carol", OFFICE),          # 정상 접속 위치(관리 호스트 아님): 6번 아님
         _login("h-relay", "dave", RELAY),          # 자기 자신에게 로그인: 다른 시스템이 아니다
     ])
     item = _item(m, RELOGIN)
     assert item["status"] == "auto" and item["verdict"] == "확인 필요"
     rows = [dict(zip(item["columns"], r)) for r in item["rows"]]
-    assert [(r["출발 호스트"], r["출발지"], r["대상 호스트"], r["계정"], r["건수"]) for r in rows] == [
+    assert [(r["접속한 서버"], r["접속 위치"], r["대상 호스트"], r["계정"], r["건수"]) for r in rows] == [
         ("h-gw", NAT_ONLY, "h-db", "bob", 1),
         ("h-relay", RELAY, "h-web", "alice", 3),
     ]
@@ -134,7 +134,7 @@ def test_no_login_from_a_managed_host_is_no_finding():
     assert item["status"] == "auto" and item["verdict"] == "이상 없음" and item["rows"] == []
 
 
-# ------------------------------------------------------------------ 7번: 정상 출발지 목록 밖 로그인 성공
+# ------------------------------------------------------------------ 7번: 허용된 접속 위치(IP) 목록 밖 로그인 성공
 
 UNAUTHORIZED = "part1.unauthorized_source"
 
@@ -145,15 +145,15 @@ def test_a_login_from_outside_the_normal_sources_is_listed_under_item_7_and_cidr
         _login("h-web", "bob", "198.51.100.5"),     # SNAT /28 안: 정상
         _login("h-web", "bob", "198.51.100.20"),    # /28 밖
         _login("h-web", "carol", OFFICE),           # 정상
-        _login("h-web", "dave", RELAY),             # 관리 호스트 주소는 6번에서 본다
+        _login("h-web", "dave", RELAY),             # 관리 서버 주소는 6번에서 본다
         _login("h-web", "erin", "2001:db8::7"),
         _login("h-web", "frank", ""),
     ])
     item = _item(m, UNAUTHORIZED)
     assert item["status"] == "auto" and item["verdict"] == "확인 필요"
     rows = [dict(zip(item["columns"], r)) for r in item["rows"]]
-    assert [(r["출발지"], r["대상 호스트"], r["계정"], r["건수"], r["개인정보처리시스템"]) for r in rows] == [
-        ("(출발지 없음)", "h-web", "frank", 1, "아니오"),
+    assert [(r["접속 위치"], r["대상 호스트"], r["계정"], r["건수"], r["개인정보처리시스템"]) for r in rows] == [
+        ("(접속 위치 없음)", "h-web", "frank", 1, "아니오"),
         ("192.0.2.77", "h-db", "alice", 2, "예"),
         ("198.51.100.20", "h-web", "bob", 1, "아니오"),
         ("2001:db8::7", "h-web", "erin", 1, "아니오"),
@@ -177,7 +177,7 @@ def test_a_host_with_a_collection_gap_makes_items_6_7_12_partial_not_a_plain_no_
         assert "h-db" in item["summary"], key
 
 
-# ------------------------------------------------------------------ 12번: 2분 안에 출발지 2개 이상
+# ------------------------------------------------------------------ 12번: 2분 안에 접속 위치 2개 이상
 
 MULTI = "part1.multi_source_login"
 S = 1000000
@@ -193,16 +193,16 @@ def test_the_same_account_from_two_sources_within_two_minutes_is_listed_and_the_
         _minute("alice", OFFICE, T0), _minute("alice", OUTSIDE, T0 + 119 * S),         # 119초: 해당
         _minute("bob", OFFICE, T0), _minute("bob", OUTSIDE, T0 + 120 * S),             # 120초: 해당(2분 이내)
         _minute("carol", OFFICE, T0), _minute("carol", OUTSIDE, T0 + 121 * S),         # 121초: 아님
-        _minute("dave", OFFICE, T0, T0 + 50 * S, logins=4), _minute("dave", OFFICE, T0 + 60 * S),  # 출발지 하나: 아님
+        _minute("dave", OFFICE, T0, T0 + 50 * S, logins=4), _minute("dave", OFFICE, T0 + 60 * S),  # 접속 위치 하나: 아님
     ])
     assert item["status"] == "auto" and item["verdict"] == "확인 필요"
     assert [r["계정"] for r in rows] == ["alice", "bob"]
-    assert rows[0]["출발지"] == "192.0.2.77, 203.0.113.10(사무실)"
+    assert rows[0]["접속 위치"] == "192.0.2.77, 203.0.113.10(사무실)"
     assert rows[0]["시작"] == "2026-10-15 10:00" and rows[0]["끝"] == "2026-10-15 10:01" and rows[0]["건수"] == 2
 
 
 def test_the_gap_is_measured_from_the_last_login_of_the_earlier_minute():
-    # 사무실 로그인이 10:00:00~10:00:50 사이에 있었고 다른 출발지가 10:02:40(마지막에서 110초)에 왔다
+    # 사무실 로그인이 10:00:00~10:00:50 사이에 있었고 다른 접속 위치가 10:02:40(마지막에서 110초)에 왔다
     _, rows = _multi_rows([_minute("alice", OFFICE, T0, T0 + 50 * S, logins=3), _minute("alice", OUTSIDE, T0 + 160 * S)])
     assert [r["계정"] for r in rows] == ["alice"]
 
@@ -211,7 +211,7 @@ def test_overlapping_hits_of_one_account_are_one_row_and_the_thresholds_come_fro
     minutes = [_minute("alice", OFFICE, T0), _minute("alice", OUTSIDE, T0 + 60 * S), _minute("alice", RELAY, T0 + 100 * S)]
     _, rows = _multi_rows(minutes)
     assert len(rows) == 1 and rows[0]["건수"] == 3
-    assert rows[0]["출발지"] == "10.20.0.5(h-relay), 192.0.2.77, 203.0.113.10(사무실)"
+    assert rows[0]["접속 위치"] == "10.20.0.5(h-relay), 192.0.2.77, 203.0.113.10(사무실)"
     _, rows = _multi_rows(minutes[:2], min_sources=3)
     assert rows == []
     _, rows = _multi_rows([_minute("alice", OFFICE, T0), _minute("alice", OUTSIDE, T0 + 200 * S)], window=300)
@@ -287,16 +287,16 @@ def test_model_header_collects_the_criteria_of_judged_items():
     assert "part1.unauthorized_source" not in dict((c["key"], c) for c in _model(reference=None)["criteria"])
 
 
-# ------------------------------------------------------------------ IPv4-mapped IPv6 출발지(#573)
+# ------------------------------------------------------------------ IPv4-mapped IPv6 접속 위치(#573)
 
 def test_an_ipv4_mapped_ipv6_source_is_judged_as_its_ipv4_address():
-    """sshd가 ``::ffff:a.b.c.d``로 남긴 출발지가 IPv4 기준 목록·관리 호스트 주소·예외 출발지와 같게 맞는다."""
+    """sshd가 ``::ffff:a.b.c.d``로 남긴 접속 위치가 IPv4 기준 목록·관리 서버 주소·예외 접속 위치와 같게 맞는다."""
     mapped = lambda a: "::ffff:" + a  # noqa: E731
     reference = dict(REFERENCE, excluded_sources=[{"address": "192.0.2.0/24"}])
     m = _model(logins=[
-        _login("h-web", "alice", mapped(OFFICE)),        # 정상 출발지: 7번 아님
-        _login("h-web", "bob", mapped(RELAY)),           # 관리 호스트 주소: 6번
-        _login("h-web", "carol", mapped(OUTSIDE)),       # 예외 출발지: 6·7번 밖
+        _login("h-web", "alice", mapped(OFFICE)),        # 정상 접속 위치: 7번 아님
+        _login("h-web", "bob", mapped(RELAY)),           # 관리 서버 주소: 6번
+        _login("h-web", "carol", mapped(OUTSIDE)),       # 예외 접속 위치: 6·7번 밖
         _login("h-web", "dave", mapped("198.51.100.77")),  # 정상도 예외도 아님: 7번
     ], reference=reference)
     relogin, unauthorized = _item(m, RELOGIN), _item(m, "part1.unauthorized_source")

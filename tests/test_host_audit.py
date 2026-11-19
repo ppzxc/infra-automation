@@ -243,3 +243,16 @@ def test_collection_targets_follow_spec_and_raw_probe_is_read_only():
     assert all("ansible.builtin.raw" in t or "ansible.builtin.set_fact" in t for t in remote), target_modules
     probe = next(t for t in tasks if "ansible.builtin.raw" in t)
     assert probe["ignore_unreachable"] is True and probe["failed_when"] is False
+
+
+def test_unavailable_items_are_grouped_by_plain_reason_so_one_cause_is_not_repeated_per_host():
+    from host_audit import host_audit_unavailable_groups
+    ssh = "Task failed: Failed to connect to the host via ssh: ssh: connect to host 192.0.2.1 port 22: Operation timed out"
+    prep = "Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass 태스크 실패 — 이후 태스크는 판정되지 않음"
+    groups = host_audit_unavailable_groups([
+        {"host": "ns0001", "item": "전체 점검", "label": "점검불가(접속 실패)", "reason": ssh},
+        {"host": "ns0002", "item": "Configuration Drift — 프로비저닝 (site.yml)", "label": "점검불가(접속 실패)", "reason": ssh.replace("22", "2201")},
+        {"host": "ns0003", "item": "Configuration Drift — Host Agents Config", "label": "점검불가(점검 중 오류)", "reason": prep}])
+    assert [g["reason"] for g in groups][0] == "접속 실패(응답 없음)" and len(groups[0]["targets"]) == 2
+    assert groups[0]["targets"][1]["item"].startswith("설정 변경 여부")
+    assert "자산 문서와 관리자 접속 정보 확인" in groups[1]["reason"] and "Task failed" not in str(groups)

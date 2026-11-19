@@ -26,7 +26,8 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
-    AUTO, FAILED, MANUAL, PART1, PART2, PART3, PARTIAL, STATUS_LABELS, UNAVAILABLE, result as _result,
+    AUTO, FAILED, FOOTNOTES, MANUAL, PART1, PART2, PART3, PARTIAL, REFS, STATUS_LABELS, STATUS_MEANINGS, UNAVAILABLE,
+    result as _result,
 )
 from host_audit_log_review_common import REPORT_TIMEZONE, STAMP as _STAMP, local_iso as _local, tz as _tz  # noqa: E402
 import host_audit_log_review_collection as _collection  # noqa: E402
@@ -247,6 +248,14 @@ def host_audit_log_review_model(results, meta):
     for item in part1 + part2 + part3:
         counts[item['status']] += 1
     targets = settings.get('collection_targets') or {}
+    numbers = {}  # 각주 키 → 번호. 보고서(머리 → 1부 → 2부 → 3부)에서 처음 쓰인 순서로 붙인다.
+
+    def number(keys):
+        return [numbers.setdefault(k, len(numbers) + 1) for k in keys]
+    source_refs = number(['readonly'])
+    for item in part1 + part2 + part3:
+        item['refs'] = number(REFS.get(item['key'], []))
+    footnotes = [{'n': n, 'text': FOOTNOTES[k]} for k, n in sorted(numbers.items(), key=lambda kv: kv[1])]
     return {
         'schema_version': SCHEMA_VERSION,
         'title': TITLE,
@@ -257,9 +266,11 @@ def host_audit_log_review_model(results, meta):
         'period': period,
         'scope': '호스트 %d대 · 장비 %d대 (OpenObserve에 수집되는 서버·네트워크·보안 장비·서비스 로그)' % (
             len(targets.get('hosts') or []), len(targets.get('devices') or [])),
-        'source': 'OpenObserve(조회 전용 계정, POST _search만 호출. 서버가 조회 전용을 강제하지는 않는다)',
+        'source': 'OpenObserve(로그 저장소). 조회만 하는 계정으로 읽는다',
+        'source_refs': source_refs,
+        'footnotes': footnotes,
         'archive': meta.get('archive', ''),
-        'status_legend': [{'key': s, 'label': STATUS_LABELS[s]} for s in (AUTO, PARTIAL, MANUAL, UNAVAILABLE, FAILED)],
+        'status_legend': [{'key': s, 'label': STATUS_LABELS[s], 'meaning': STATUS_MEANINGS[s]} for s in (AUTO, PARTIAL, MANUAL, UNAVAILABLE, FAILED)],
         'counts': [{'key': s, 'label': STATUS_LABELS[s], 'count': counts[s]} for s in (AUTO, PARTIAL, MANUAL, UNAVAILABLE, FAILED)],
         # 머리에 모아 찍는 판정 기준(#571): 이번에 자동으로 판정한 항목만. 항목별 '기준' 행은 그대로 둔다.
         'criteria': [{'part': i['part'], 'no': i['no'], 'key': i['key'], 'title': i['title'], 'criterion': i['criterion']}

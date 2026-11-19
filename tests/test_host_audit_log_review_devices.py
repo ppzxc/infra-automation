@@ -189,7 +189,7 @@ def test_a_fortigate_admin_login_by_an_account_outside_the_device_list_is_listed
 def test_without_a_device_admin_list_every_fortigate_login_account_is_listed_as_no_list():
     m = _model(_results(device_fortigate_logins=_ok([_fgt("2026-10-15 10:00")])), _settings(admin_accounts=None))
     fw = _section(_item(m, 1), "fortigate")
-    assert fw["rows"] == [["ns0901", "fwadmin", 1, "장비 관리자 허용 목록 없음"]]
+    assert fw["rows"] == [["ns0901", "fwadmin", 1, "등록된 장비 관리자 계정 목록 없음"]]
     assert fw["verdict"] == "확인 필요"
 
 
@@ -201,7 +201,7 @@ def test_a_device_missing_from_the_admin_list_has_its_login_accounts_listed_as_n
     res = _results(device_fortigate_logins=_ok(hits),
                    collection_fortigate_daily=_ok(_every_day(("ns0901", "ns0903"))))
     fw = _section(_item(_model(res, s), 1), "fortigate")
-    assert fw["rows"] == [["ns0903", "fwadmin", 1, "장비 관리자 허용 목록 없음"]]
+    assert fw["rows"] == [["ns0903", "fwadmin", 1, "등록된 장비 관리자 계정 목록 없음"]]
 
 
 def test_fortigate_failures_4_in_10_minutes_is_no_finding_and_5_is_listed_under_item_2():
@@ -237,7 +237,7 @@ def test_a_fortigate_admin_login_off_hours_is_listed_under_item_3_and_19_59_is_b
     m = _model(_results(device_fortigate_logins=_ok(hits)))
     fw = _section(_item(m, 3), "fortigate")
     assert fw["verdict"] == "확인 필요"
-    assert fw["rows"] == [["ns0901", "fwadmin", "주말·야간", 2, "2026-10-15 20시, 2026-10-17 11시"]]
+    assert fw["rows"] == [["ns0901", "fwadmin", "주말·야간", 2, ["10-15 20시", "10-17 11시"]]]
 
 
 def test_off_hours_admin_account_changes_are_findings_other_config_and_ha_sync_are_reference_under_item_4():
@@ -261,7 +261,7 @@ def test_off_hours_switch_config_changes_are_partial_findings_under_item_4():
     m = _model(_results(device_switch_config_changes=_ok(hits)))
     sw = _section(_item(m, 4), "switch")
     assert (sw["status"], sw["verdict"]) == ("partial", "확인 필요")
-    assert sw["rows"] == [["ns0902", "설정 변경(SYS-5-CONFIG_I)", "야간", 1, "2026-10-15 23시"]]
+    assert sw["rows"] == [["ns0902", "설정 변경(SYS-5-CONFIG_I)", "야간", 1, ["10-15 23시"]]]
 
 
 def test_a_fortigate_admin_login_from_outside_the_normal_sources_is_listed_under_item_7():
@@ -309,9 +309,9 @@ def test_a_failed_device_collection_search_makes_that_kind_partial_check_not_no_
     m = _model(_results(collection_fortigate_daily=_fail()))
     fw = _section(_item(m, 1), "fortigate")
     assert (fw["status"], fw["verdict"]) == ("partial", "확인 필요")
-    assert "수집 공백을 확인하지 못함(HTTP 503)" in fw["summary"]
+    assert "로그가 없는 날을 확인하지 못함(HTTP 503)" in fw["summary"]
     sw = _section(_item(m, 2), "switch")
-    assert sw["verdict"] == "이상 없음" and "수집 공백을 확인하지 못함" not in sw["summary"]
+    assert sw["verdict"] == "이상 없음" and "로그가 없는 날을 확인하지 못함" not in sw["summary"]
 
 
 def test_a_device_with_a_collection_gap_is_not_judged_as_no_finding():

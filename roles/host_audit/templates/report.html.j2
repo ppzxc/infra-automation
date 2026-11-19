@@ -32,6 +32,9 @@
   .kv div:nth-child(odd) { color:var(--mute); }
   .tiles { display:grid; grid-template-columns: repeat(3,1fr); gap:3mm; margin:3mm 0; }
   .tile { border:1px solid var(--line); padding:2.5mm; } .tile b { display:block; font-size:16pt; } .tile span { font-size:8pt; color:var(--mute); }
+  ul.sum { margin:1mm 0 0; padding-left:5mm; } ul.sum ul { margin:0; padding-left:5mm; }
+  ul.items { margin:0; padding-left:4mm; } ul.items li { white-space:nowrap; }
+  dl.gloss { font-size:8.5pt; margin:1mm 0; display:grid; grid-template-columns:36mm 1fr; gap:.8mm 3mm; } dl.gloss dt { color:var(--mute); } dl.gloss dd { margin:0; }
   .note { border-left:4px solid var(--na); background:var(--soft); padding:2mm 3mm; margin:2mm 0; font-size:8.5pt; }
   .sign { width:100%; border-collapse:collapse; margin-top:4mm; }
   .sign td, .sign th { height:16mm; border:1px solid var(--ink); }
@@ -79,21 +82,33 @@
   </div>
 {% include 'sections/asset_inventory_summary.html.j2' %}
 {% if m.configuration_drift and m.configuration_drift.not_applicable %}
-  <div class="note keep">Configuration Drift 비대상 {{ m.configuration_drift.not_applicable | length }}대 — {{ m.configuration_drift.not_applicable_note | e }}: {% for n in m.configuration_drift.not_applicable[:10] %}{{ n.host | e }}{% if not loop.last %}, {% endif %}{% endfor %}{% if m.configuration_drift.not_applicable | length > 10 %} 외 {{ m.configuration_drift.not_applicable | length - 10 }}대{% endif %}</div>
+  <div class="note keep"><b>설정 변경 여부 점검 대상이 아닌 호스트 {{ m.configuration_drift.not_applicable | length }}대</b> — 구형 방식(raw)으로 구성한 호스트라 변경하지 않고 비교하는 점검(--check)을 지원하지 않는다. 오류나 점검불가가 아니다({{ m.configuration_drift.not_applicable_note | e }}): {% for n in m.configuration_drift.not_applicable[:10] %}{{ n.host | e }}{% if not loop.last %}, {% endif %}{% endfor %}{% if m.configuration_drift.not_applicable | length > 10 %} 외 {{ m.configuration_drift.not_applicable | length - 10 }}대{% endif %}</div>
 {% endif %}
 {% if m.unavailable %}
   <div class="note keep"><b>점검불가 항목 {{ m.unavailable | length }}건 (호스트·항목)</b> — 아래 호스트·항목은 이번 실행에서 확인하지 못했습니다.</div>
   <table>
-    <thead><tr><th>호스트</th><th>항목</th><th>판정</th><th>이유</th></tr></thead>
+    <thead><tr><th>판정</th><th>사유</th><th>호스트 — 항목</th></tr></thead>
     <tbody>
-{% for u in m.unavailable %}
-      <tr><td class="nowrap">{{ u.host | e }}</td><td class="nowrap">{{ u.item | e }}</td><td><span class="tag na">{{ u.label | e }}</span></td><td class="small">{{ u.reason | e }}</td></tr>
+{% for g in m.unavailable_groups %}
+      <tr><td><span class="tag na">{{ g.label | e }}</span><br><span class="small mute">{{ g.targets | length }}건</span></td><td class="small">{{ g.reason | e }}</td><td class="small"><ul class="items">{% for i in g.targets %}<li>{{ i.host | e }} — {{ i.item | e }}</li>{% endfor %}</ul></td></tr>
 {% endfor %}
     </tbody>
   </table>
 {% else %}
   <div class="note keep">점검불가 항목 없음.</div>
 {% endif %}
+
+  <h3>용어 풀이</h3>
+  <dl class="gloss keep">
+    <dt>지원 종료(EOS)</dt><dd>End of Support. 제조사가 보안 업데이트를 더 이상 제공하지 않는 운영 체제.</dd>
+    <dt>CVE</dt><dd>공개된 보안 취약점 번호(CVE-연도-번호).</dd>
+    <dt>구성 선언</dt><dd>Git에 적어 둔 호스트의 설정(계정·서비스 등). 실제 상태와 비교한다.</dd>
+    <dt>--check 비교</dt><dd>설정을 바꾸지 않고, 바뀔 내용만 계산해 선언과 실제의 차이를 본다.</dd>
+    <dt>열린 포트(listening)</dt><dd>외부 연결을 받으려고 열려 있는 네트워크 포트.</dd>
+    <dt>SUID·SGID</dt><dd>실행하는 사람이 아니라 파일 소유자(주로 root)의 권한으로 실행되는 파일 속성.</dd>
+    <dt>world writable</dt><dd>모든 사용자가 수정할 수 있는 파일.</dd>
+    <dt>벤더 미수정·will not fix</dt><dd>제조사가 수정본을 내지 않기로 한 취약점. 다른 방법으로 위험을 낮춰야 한다.</dd>
+  </dl>
 
 {% include 'sections/asset_inventory.html.j2' %}
 

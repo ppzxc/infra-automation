@@ -131,7 +131,7 @@ def test_item1_a_host_without_an_allowed_list_is_named_not_judged_ok():
     i = _item(m, 1)
     assert i["verdict"] == "확인 필요"
     notes = dict(zip(_col(i, "호스트"), _col(i, "비고")))
-    assert "허용 계정 목록 없음" in notes["ns0001"] and "허용 계정 목록 없음" in notes["ns0009"]
+    assert "등록된 관리 계정 목록 없음" in notes["ns0001"] and "등록된 관리 계정 목록 없음" in notes["ns0009"]
 
 
 def test_item1_invalid_user_attempts_are_a_separate_statistic_not_a_finding():
@@ -139,7 +139,7 @@ def test_item1_invalid_user_attempts_are_a_separate_statistic_not_a_finding():
                {"host": "ns0002", "attempts": 5, "users": 2, "sources": 1}]
     i = _item(_model(_results(invalid=invalid)), 1)
     assert i["verdict"] == "이상 없음" and i["rows"] == []
-    assert "존재하지 않는 계정 시도 125건" in i["summary"] and "호스트 2대" in i["summary"]
+    assert "서버에 없는 계정으로 시도한 로그인 125건" in i["summary"] and "호스트 2대" in i["summary"]
 
 
 def test_item1_a_failed_success_query_is_query_failure():
@@ -149,7 +149,7 @@ def test_item1_a_failed_success_query_is_query_failure():
 
 def test_item1_states_the_allowed_account_rule_as_its_criterion():
     i = _item(_model(), 1)
-    assert "root" in i["criterion"] and "bootstrap" in i["criterion"] and "Asset Inventory" in i["criterion"]
+    assert "root" in i["criterion"] and "초기 접속용" in i["criterion"] and "자산 목록" in i["criterion"]
     assert i["method"]
 
 
@@ -159,14 +159,14 @@ def test_a_host_with_a_collection_gap_is_shown_on_the_item_and_never_judged_ok()
     gap = _ok([{"name": "ns0001", "day": d, "records": 3} for d in OCT])  # ns0002는 전월 로그 없음
     i = _item(_model(_results(collection=gap)), 1)
     assert i["status"] == "partial" and i["verdict"] == "확인 필요"
-    assert _col(i, "호스트") == ["ns0002"] and "수집 공백" in _col(i, "비고")[0]
-    assert "수집 공백 호스트 1대(ns0002)" in i["summary"]
+    assert _col(i, "호스트") == ["ns0002"] and "로그가 없는 날" in _col(i, "비고")[0]
+    assert "로그가 없는 날이 있는 호스트 1대(ns0002)" in i["summary"]
 
 
 def test_when_the_collection_gap_is_unknown_the_item_does_not_say_ok():
     i = _item(_model(_results(collection=_fail())), 1)
     assert i["status"] == "partial" and i["verdict"] == "확인 필요"
-    assert "수집 공백을 확인하지 못함" in i["summary"]
+    assert "로그가 없는 날을 확인하지 못함" in i["summary"]
 
 
 def test_personal_information_systems_are_marked_on_rows_or_unset_when_not_given():
@@ -176,7 +176,7 @@ def test_personal_information_systems_are_marked_on_rows_or_unset_when_not_given
     assert "개인정보처리시스템 표시: 미지정" in unset["summary"]
     marked = _item(_model(res, _settings(pii=["ns0002"])), 1)
     assert _col(marked, "개인정보처리시스템") == ["아니오", "예"]
-    assert "개인정보처리시스템 해당 행 1(호스트 ns0002)" in marked["summary"]
+    assert "개인정보처리시스템에 해당하는 행 1건" in marked["summary"]
 
 
 # ------------------------------------------------------------------ 2번 연속 실패
@@ -242,7 +242,7 @@ def test_item3_weekends_and_listed_holidays_are_off_hours_all_day():
     i = _item(_model(res), 3)
     assert list(zip(_col(i, "호스트"), _col(i, "계정"), _col(i, "구분"), _col(i, "접속 수"))) == [
         ("ns0001", "alice", "주말", 1), ("ns0001", "bob", "주말", 1), ("ns0002", "alice", "공휴일", 2)]
-    assert "2026-10-09 14시" in _col(i, "일시(KST)")[2]
+    assert "10-09 14시" in _col(i, "일시(KST)")[2]
 
 
 def test_item3_a_year_without_a_holiday_list_says_so_and_judges_only_weekends_and_nights():
@@ -328,14 +328,14 @@ def test_item5_lists_login_days_per_account_for_people_to_check_against_leave_re
     assert i["status"] == "manual" and i["verdict"] == ""
     assert _col(i, "계정") == ["alice", "bob"]
     assert _col(i, "접속일 수") == [2, 1]
-    assert _col(i, "접속일") == ["10-12, 10-14", "10-13"]
+    assert _col(i, "접속일") == [["10-12", "10-14"], ["10-13"]]
     assert _col(i, "호스트") == ["ns0001, ns0002", "ns0002"]
 
 
 def test_item5_query_failure_is_query_failure_and_gaps_are_named():
     assert _item(_model(_results(accounts_ssh_success_hourly=_fail())), 5)["status"] == "failed"
     gap = _ok([{"name": "ns0001", "day": d, "records": 3} for d in OCT])
-    assert "수집 공백 호스트 1대(ns0002)" in _item(_model(_results(collection=gap)), 5)["summary"]
+    assert "로그가 없는 날이 있는 호스트 1대(ns0002)" in _item(_model(_results(collection=gap)), 5)["summary"]
 
 
 # ------------------------------------------------------------------ 허용 계정 입력(태스크가 넘기는 값)
@@ -359,7 +359,7 @@ def test_a_host_whose_connection_was_not_resolved_has_no_allowed_list_not_root_o
                                                           "bootstrap": "", "agents_only": False}})
     assert out["ns0001"]["declared"] is None
     i = _item(_model(_results(success=[_login("ns0001", "alice", "2026-10-12 10")]), _settings(hosts=out)), 1)
-    assert _col(i, "계정") == ["alice"] and "허용 계정 목록 없음" in _col(i, "비고")[0]
+    assert _col(i, "계정") == ["alice"] and "등록된 관리 계정 목록 없음" in _col(i, "비고")[0]
 
 
 def test_missing_account_settings_and_results_never_raise():
@@ -439,7 +439,7 @@ def test_the_report_task_builds_the_allowed_accounts_from_resolved_host_variable
     # ns0001: 선언 계정 alice·bootstrap boot은 허용, intruder만 발견. ns0002(에이전트만): Asset Inventory 계정 legacy만 허용
     # ns0003: 해석되지 않은 호스트는 root만 허용이 아니라 '허용 계정 목록 없음'
     assert [(r[0], r[1]) for r in item["rows"]] == [("ns0001", "intruder"), ("ns0002", "alice"), ("ns0003", "alice")]
-    assert "허용 계정 목록 없음" in item["rows"][2][-1] and "허용 계정 목록 없음" not in item["rows"][0][-1]
+    assert "등록된 관리 계정 목록 없음" in item["rows"][2][-1] and "등록된 관리 계정 목록 없음" not in item["rows"][0][-1]
     assert item["verdict"] == "확인 필요"
 
 

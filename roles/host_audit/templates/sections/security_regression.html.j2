@@ -5,7 +5,7 @@
 <style>
   .sr-ok { color:var(--ok); } .sr-fail { color:var(--crit); font-weight:600; }
 </style>
-  <h2 class="pb">보안 퇴행 점검 <span class="small mute">Security Regression · 스펙 #364 기대치</span></h2>
+  <h2 class="pb">보안 설정 퇴행 점검 <span class="small mute">Security Regression · 스펙 #364 기대치</span></h2>
   <p class="small mute">관리 웹 접점·수신 접점·원격 접속 제한·탐지와 로그 보존·백업 정책·시크릿 파일 권한이 계속 유지되는지 읽기 전용으로 확인한 결과입니다. 점검불가는 통과로 세지 않습니다.</p>
   <table>
     <thead><tr>{% for v in sr.verdicts %}<th class="nowrap">{{ v | e }}</th>{% endfor %}</tr></thead>

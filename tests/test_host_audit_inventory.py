@@ -533,7 +533,7 @@ def test_report_renders_asset_importance_and_lookup_failed_but_not_the_old_secur
     html = env.get_template("report.html.j2").render(
         host_audit_model=host_audit_report_model([ok_rec, bad_rec], meta()))
 
-    assert "선언 조회 실패 호스트 1" in html
+    assert "구성 선언 조회에 실패한 호스트: 1대" in html
     assert "자산중요도" in html and "조회 실패" in html and "OpenBao" in html
     assert "보안등급" not in html
 

@@ -5,36 +5,44 @@
     결과 표 아래의 소제목 표(i.sections, 장비 관리자 로그인 몫 등)도 같은 틀이다(#562).
     외부 리소스 없음(시스템 폰트). 최종 판정·소견·조치·서명란은 언제나 빈 칸이다. -#}
 {%- set m = host_audit_log_review_model -%}
+{%- macro cell(v) -%}
+{%- if v is string or v is number -%}{{ v | e }}{%- else -%}<ul class="dt{{ ' many' if v | length > 8 else '' }}">{% for x in v %}<li>{{ x | e }}</li>{% endfor %}</ul>{%- endif -%}
+{%- endmacro -%}
+{%- macro verdict_line(r) -%}
+{%- if r.verdict -%}<b class="{{ 'crit' if r.verdict == '확인 필요' else 'ok' }}">점검 결과: {% if r.verdict == '확인 필요' %}{{ (r.verdict_note ~ ' ') | e if r.verdict_note else '' }}확인 필요{% else %}기준에 걸린 건이 없음(이상 없음){% endif %}</b>{%- endif -%}
+{%- endmacro -%}
+{%- macro summary_list(r) -%}
+{%- if r.summary_lines -%}<ul class="sum">{% for line in r.summary_lines %}<li{% if line.startswith('점검 기간 중 로그가 없는 날이 있는') %} class="why"{% endif %}>{{ line | e }}{% if line.startswith('점검 기간 중 로그가 없는 날이 있는') %}<ul><li>그 날짜는 점검하지 못해 이상 없음으로 보지 않는다</li></ul>{% endif %}</li>{% endfor %}</ul>{%- endif -%}
+{%- endmacro -%}
 {%- macro item_block(i) -%}
 <section class="item keep" data-part="{{ i.part }}" data-no="{{ i.no }}" data-status="{{ i.status }}">
   <h3>{{ i.no }}) {{ i.title | e }}</h3>
   <table class="meta">
-    <tr><th>상태</th><td><span class="tag st-{{ i.status }}">{{ i.status_label | e }}</span>{% if i.verdict %} <b class="{{ 'crit' if i.verdict == '확인 필요' else 'ok' }}">자동 판정: {{ i.verdict | e }}</b>{% endif %}{% if i.summary %} <span class="mute">· {{ i.summary | e }}</span>{% endif %}</td></tr>
-    <tr><th>점검 방법</th><td>{{ i.method | e if i.method else '-' }}</td></tr>
+    <tr><th>상태</th><td><span class="tag st-{{ i.status }}">{{ i.status_label | e }}</span> {{ verdict_line(i) }}{{ summary_list(i) }}</td></tr>
+    <tr><th>점검 방법</th><td>{{ i.method | e if i.method else '-' }}{% for n in i.refs %}<sup>[{{ n }}]</sup>{% endfor %}</td></tr>
     <tr><th>판정 기준</th><td class="criterion">{{ i.criterion | e if i.criterion else '-' }}</td></tr>
   </table>
 {%- if i.rows %}
   <table class="rows">
     <thead><tr>{% for c in i.columns %}<th>{{ c | e }}</th>{% endfor %}</tr></thead>
-    <tbody>{% for r in i.rows %}<tr>{% for v in r %}<td>{{ v | e }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    <tbody>{% for r in i.rows %}<tr>{% for v in r %}<td{% if v == '기록 없음' %} class="nodata"{% endif %}>{{ cell(v) }}</td>{% endfor %}</tr>{% endfor %}</tbody>
   </table>
 {%- endif %}
 {%- for s in i.sections | default([]) %}
   <div class="section" data-kind="{{ s.kind | e }}" data-status="{{ s.status | e }}">
     <h4>{{ s.title | e }}</h4>
-    <p class="small"><span class="tag st-{{ s.status }}">{{ s.status_label | e }}</span>{% if s.verdict %} <b class="{{ 'crit' if s.verdict == '확인 필요' else 'ok' }}">자동 판정: {{ s.verdict | e }}</b>{% endif %}{% if s.summary %} <span class="mute">· {{ s.summary | e }}</span>{% endif %}</p>
+    <div class="small"><span class="tag st-{{ s.status }}">{{ s.status_label | e }}</span> {{ verdict_line(s) }}{{ summary_list(s) }}</div>
 {%- if s.rows %}
     <table class="rows">
       <thead><tr>{% for c in s.columns %}<th>{{ c | e }}</th>{% endfor %}</tr></thead>
-      <tbody>{% for r in s.rows %}<tr>{% for v in r %}<td>{{ v | e }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+      <tbody>{% for r in s.rows %}<tr>{% for v in r %}<td{% if v == '기록 없음' %} class="nodata"{% endif %}>{{ cell(v) }}</td>{% endfor %}</tr>{% endfor %}</tbody>
     </table>
 {%- endif %}
   </div>
 {%- endfor %}
-  <table class="human">
-    <tr><th>최종 판정</th><td class="final-verdict">{{ i.final_verdict | e }}</td></tr>
-    <tr><th>점검자 소견</th><td class="remarks">{{ i.remarks | e }}</td></tr>
-    <tr><th>조치 내역</th><td class="action">{{ i.action | e }}</td></tr>
+  <table class="human2{{ ' ok-small' if i.verdict == '이상 없음' else '' }}">
+    <tr><th>최종 판정</th><th>점검자 소견</th><th>조치 내역</th></tr>
+    <tr><td class="final-verdict">{{ i.final_verdict | e }}</td><td class="remarks">{{ i.remarks | e }}</td><td class="action">{{ i.action | e }}</td></tr>
   </table>
 </section>
 {%- endmacro -%}
@@ -68,6 +76,19 @@
   .crit { color:var(--crit); } .ok { color:var(--ok); }
   .kv { display:grid; grid-template-columns: 30mm 1fr; gap:.6mm 3mm; font-size:9pt; }
   .kv div:nth-child(odd) { color:var(--mute); }
+  .cards { display:grid; grid-template-columns:repeat(5,1fr); gap:2.5mm; margin:3mm 0; }
+  .card { border:1px solid var(--line); border-top:4px solid currentColor; border-radius:1.5mm; padding:2mm 2.5mm; }
+  .card b { display:block; font-size:20pt; line-height:1.1; } .card span { font-size:8pt; color:var(--ink); }
+  .dash h3 { margin:5mm 0 1.2mm; font-size:10.5pt; }
+  .dash td.n { width:12mm; text-align:center; white-space:nowrap; }
+  .foot { font-size:7.5pt; color:var(--mute); margin-top:3mm; border-top:1px solid var(--line); padding-top:1.5mm; }
+  table.human2 th { text-align:center; font-size:8pt; } table.human2 td { height:14mm; } table.human2.ok-small td { height:7mm; }
+  table.human2 th:nth-child(1), table.human2 td:nth-child(1) { width:26mm; } table.human2 th:nth-child(3), table.human2 td:nth-child(3) { width:42mm; }
+  ul.sum { margin:1mm 0 0; padding-left:5mm; font-size:8.5pt; } ul.sum ul { margin:0; padding-left:5mm; color:var(--mute); }
+  ul.sum li.why { color:var(--warn); font-weight:600; } ul.sum li.why li { font-weight:400; }
+  ul.dt { margin:0; padding-left:4mm; } ul.dt li { white-space:nowrap; } ul.dt.many { columns:3; column-gap:4mm; }
+  td.nodata { color:var(--mute); font-size:8pt; } sup { font-size:6.5pt; color:var(--mute); }
+  .legend { line-height:2; margin:1mm 0 2mm; } .fnotes li { margin:1mm 0; font-size:8.5pt; }
   .note { border-left:4px solid var(--na); background:var(--soft); padding:2mm 3mm; margin:2mm 0; font-size:8.5pt; }
   table.policy td.blank { height:9mm; }
   table.sign th, table.sign td { border:1px solid var(--ink); text-align:center; }
@@ -77,34 +98,74 @@
 <body>
 <div class="sheet">
 
-  <div class="mute small">ISMS-P 2.9.5 로그 및 접속기록 점검 · 회사 양식 AK-034 대응 · 대외비</div>
+  <div class="mute small">ISMS-P 2.9.5 로그 및 접속기록 점검 · 회사 '로그·보안정책 검토결과 대장' 양식 순서 · 대외비</div>
   <h1>{{ m.title | e }}</h1>
   <div class="kv keep">
     <div>점검 기간</div><div class="period">{{ m.period.label | e }}</div>
     <div>점검 대상</div><div>{{ m.scope | e }}</div>
-    <div>데이터</div><div>{{ m.source | e }}</div>
+    <div>데이터</div><div>{{ m.source | e }}{% for n in m.source_refs %}<sup>[{{ n }}]</sup>{% endfor %}</div>
     <div>작성</div><div>Host Audit {{ m.run_kind | e }} 실행 {{ m.run_id | e }} · {{ m.started_at | e }} 시작 · {{ m.generated_at | e }} 작성</div>
 {%- if m.archive %}
     <div>원본 보관</div><div>{{ m.archive | e }}</div>
 {%- endif %}
     <div>항목 상태</div><div>{% for c in m.counts %}{{ c.label | e }} {{ c.count }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
   </div>
+  <div class="dash">
+    <div class="cards">
+{%- for c in m.counts %}
+      <div class="card st-{{ c.key }}"><b>{{ c.count }}</b><span>{{ c.label | e }}</span></div>
+{%- endfor %}
+    </div>
+    <div class="legend small"><b>상태 읽는 법</b>
+{%- for l in m.status_legend %} · <span class="tag st-{{ l.key }}">{{ l.label | e }}</span> {{ l.meaning | e }}{% endfor %}</div>
+    <h3>보고서 구성</h3>
+    <table class="rows parts keep"><tbody>
+      <tr><th style="width:26mm">1부 (19개 항목)</th><td style="width:34mm">서버·장비 로그 점검</td><td>서버와 장비가 남긴 로그에서 이상 행위(로그인 실패 반복, 업무시간 밖 접속, 접속 위치 이상 등)를 찾는다. 서버가 자동으로 집계해 점검한다.</td></tr>
+      <tr><th>2부 (9개 항목)</th><td>방화벽 설정 점검</td><td>로그가 아니라 방화벽 정책 자체가 적절한지(안 쓰는 정책, 과다 허용, 중복 등) 본다. 지금은 자동 점검이 없어 점검자가 방화벽 화면에서 직접 보고 기입한다.</td></tr>
+      <tr><th>3부 (7개 항목)</th><td>로그 관리 상태</td><td>로그가 빠짐없이 쌓이고 보존되는지(로그가 없는 날, 보존 기간, 시각 동기, 백업, 알림 이력, GitHub 감사, 전월 서명본)를 본다. 회사 양식에는 없고 이 보고서가 더한 부분이다.</td></tr>
+      <tr><th>항목별 칸</th><td>사람이 쓰는 칸</td><td>각 항목 아래의 최종 판정·점검자 소견·조치 내역은 점검자가 직접 쓴다(서명이 아니다). 서명은 마지막 쪽 결재란에서 한 번만 받는다.</td></tr>
+    </tbody></table>
+    <h3>확인이 필요한 항목 (점검 결과 '확인 필요')</h3>
+    <table class="rows keep">
+      <thead><tr><th style="width:12mm">부·번호</th><th style="width:60mm">항목</th><th>요약</th></tr></thead>
+      <tbody>
+{%- set ns = namespace(n=0) %}
+{%- for i in m.part1 + m.part3 if i.verdict == '확인 필요' %}{% set ns.n = ns.n + 1 %}
+        <tr><td class="n">{{ i.part }}부 {{ i.no }}</td><td>{{ i.title | e }}</td><td class="small">{{ (i.summary_lines | join(' / ')) | truncate(120, True, '…') | e }}</td></tr>
+{%- endfor %}
+{%- if ns.n == 0 %}
+        <tr><td colspan="3" class="mute">없음</td></tr>
+{%- endif %}
+      </tbody>
+    </table>
+    <h3>3부 로그 관리 상태</h3>
+    <table class="rows keep">
+      <tbody>
+{%- for i in m.part3 %}
+        <tr><td class="n">{{ i.no }}</td><td>{{ i.title | e }}</td><td style="width:34mm"><span class="tag st-{{ i.status }}">{{ i.status_label | e }}</span>{% if i.verdict %} <b class="{{ 'crit' if i.verdict == '확인 필요' else 'ok' }}">{{ i.verdict | e }}</b>{% endif %}</td></tr>
+{%- endfor %}
+      </tbody>
+    </table>
+    <h3>점검하지 못한 항목 (1부)</h3>
+    <p class="small">{% set ns2 = namespace(l=[]) %}{% for i in m.part1 if i.status in ('unavailable', 'failed') %}{% set ns2.l = ns2.l + [i.no | string] %}{% endfor %}{{ (ns2.l | join(', ') ~ '번') if ns2.l else '없음' }} — 사유는 각 항목 상태 줄에 있다. '점검 불가'는 이상 없음이 아니다.</p>
+  </div>
+  <div class="note">자동 집계·자동 판정(이상 없음/확인 필요)은 초안이다. 최종 판정·점검자 소견·조치 내역은 점검자가 쓰고, 마지막 쪽에서 점검자 → 정보보호관리자 → 정보보호책임자(CISO) 순으로 서명한다. 점검할 수 없는 항목은 빼지 않고 "점검 불가"와 사유로, 조회가 실패한 항목은 "조회 실패"로 남긴다.</div>
+
+  <p class="foot">※ 1부 1~19번, 2부 1~9번은 회사 '로그·보안정책 검토결과 대장' 양식의 항목 번호다. 그 양식이 ISMS-P 2.9.5(로그 및 접속기록 점검) 인증기준을 회사 업무로 풀어 정한 점검 항목이며, 이 보고서는 그 순서와 문구를 그대로 따른다. KISA 2026 취약점 점검 기준(Host Audit 보고서)과는 다른 문서다. 3부는 양식에 없는 로그 관리 상태(ISMS-P 2.9.4·2.9.6)를 더한 것이다.</p>
 {%- if m.criteria %}
-  <div class="criteria keep">
-    <h3>이번 자동 판정에 쓴 기준</h3>
+  <div class="criteria pb">
+    <h3>이번 자동 점검에 쓴 기준</h3>
     <table class="rows">
       <tbody>{% for c in m.criteria %}<tr><th>{{ c.part }}부 {{ c.no }}번 {{ c.title | e }}</th><td>{{ c.criterion | e }}</td></tr>{% endfor %}</tbody>
     </table>
   </div>
 {%- endif %}
-  <div class="note">자동 집계·자동 판정(이상 없음/확인 필요)은 초안이다. 최종 판정·점검자 소견·조치 내역은 점검자가 쓰고, 마지막 쪽에서 점검자 → 정보보호관리자 → 정보보호책임자(CISO) 순으로 서명한다. 점검할 수 없는 항목은 빼지 않고 "점검 불가"와 사유로, 조회가 실패한 항목은 "조회 실패"로 남긴다.</div>
-
-  <h2 class="pb">1부 로그 검토 항목 (AK-034 1~19)</h2>
+  <h2 class="{{ '' if m.criteria else 'pb' }}">1부 로그 검토 (19개 항목)</h2>
 {%- for i in m.part1 %}
 {{ item_block(i) }}
 {%- endfor %}
 
-  <h2 class="pb">2부 보안시스템 정책 적정성 검토 (AK-034 1~9)</h2>
+  <h2 class="pb">2부 보안시스템 정책 적정성 검토 (9개 항목)</h2>
   <p class="small mute">방화벽 정책 자체를 읽는 Security Policy Review다(로그 검토가 아니다). 1차 구현은 점검자가 채우는 빈 표다.</p>
   <table class="policy">
     <thead><tr><th style="width:8mm">No</th><th>검토 항목</th><th style="width:22mm">해당 정책 수</th><th style="width:22mm">최종 판정</th><th>점검자 소견</th><th>조치 내역</th></tr></thead>
@@ -120,6 +181,13 @@
 {%- for i in m.part3 %}
 {{ item_block(i) }}
 {%- endfor %}
+
+{%- if m.footnotes %}
+  <section class="footnotes pb">
+    <h2>각주</h2>
+    <ol class="fnotes">{% for f in m.footnotes %}<li value="{{ f.n }}">{{ f.text | e }}</li>{% endfor %}</ol>
+  </section>
+{%- endif %}
 
   <section class="approval pb keep">
     <h2>결재</h2>

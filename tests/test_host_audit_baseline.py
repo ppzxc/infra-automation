@@ -295,7 +295,7 @@ def test_report_model_and_template_carry_the_baseline_and_storage_path():
     assert model["baseline"]["document"]["run_id"] == RUN["run_id"]
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROLE_DIR / "templates")))
     html = env.get_template("report.html.j2").render(host_audit_model=model)
-    assert "Audit Baseline 대비 변경" in html
+    assert "지난 정기 점검 대비 변경" in html
     assert "RustFS host-audit/2026-11/ha-20261101T000000Z/" in html
     assert "첫 정기 실행" in html
 

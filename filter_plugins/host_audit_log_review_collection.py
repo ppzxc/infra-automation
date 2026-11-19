@@ -34,9 +34,8 @@ QUERIES = {ITEM: [
             "count(*) AS records FROM \"security_logs\" WHERE service_name = 'fortigate-syslog' GROUP BY name, day"},
 ]}
 
-METHOD = ('OpenObserve system_logs(호스트 host_name), 스위치 system_logs·FortiGate security_logs(장비 device_id)의 '
-          '전월 KST 일자별 건수를 수집 대상 목록과 대조')
-CRITERION = '점검 기간 중 로그가 하루도 없으면 "전월 로그 없음", 하루 이상 빈 날이 있으면 "끊김"'
+METHOD = '로그를 받기로 한 서버·장비별로 날짜마다 로그가 있는지 확인'
+CRITERION = '점검 기간 중 로그가 하루도 없으면 "점검 기간 내내 로그 없음", 하루 이상 빈 날이 있으면 "일부 날짜 로그 없음"'
 COLUMNS = ['구분', '이름', '상태', '빈 날짜', '빈 일수']
 
 
@@ -74,11 +73,11 @@ def _gap_rows(kind, targets, seen, all_days):
     for name in sorted(set(targets)):
         days = seen.get(name, set())
         if not days:
-            rows.append([kind, name, '전월 로그 없음', '전체', len(all_days)])
+            rows.append([kind, name, '점검 기간 내내 로그 없음', '전체', len(all_days)])
             continue
         missing = [d for d in all_days if d not in days]
         if missing:
-            rows.append([kind, name, '끊김', _ranges(missing), len(missing)])
+            rows.append([kind, name, '일부 날짜 로그 없음', _ranges(missing), len(missing)])
     return rows
 
 

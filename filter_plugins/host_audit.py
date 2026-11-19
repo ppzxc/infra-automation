@@ -216,6 +216,47 @@ def _inventory_row(record):
     }
 
 
+# 보고서에 보이는 섹션 이름(모델 안의 식별자·xlsx는 영어 이름 그대로). 쉬운 이름 뒤에 영어 이름을 괄호로 붙인다.
+SECTION_NAMES = {
+    'Asset Inventory': '자산 현황', 'Configuration Drift': '설정 변경 여부', 'Configuration Vulnerability': '설정 취약점',
+    'Package Vulnerability': '패키지 취약점', 'Security Regression': '보안 설정 퇴행',
+}
+# 점검불가 사유의 영어 태스크 이름 → 쉬운 말(모르는 이름은 원문 그대로).
+TASK_NAMES = {
+    'Resolve the Asset document, admin and bootstrap connections and admin accounts in one pass': '자산 문서와 관리자 접속 정보 확인',
+}
+
+
+def _plain_item(item):
+    text = str(item or '')
+    for en, ko in SECTION_NAMES.items():
+        text = text.replace(en, '%s' % ko)
+    return text
+
+
+def _plain_reason(reason):
+    """점검불가 사유를 쉬운 말로. 원문은 모델에 그대로 있고 보고서가 이 값을 쓴다(접속 실패 문구는 호스트마다 주소만 달라 묶어서 보인다)."""
+    text = str(reason or '-')
+    if 'Failed to connect to the host via ssh' in text:
+        return '접속 실패(응답 없음)' if 'timed out' in text else '접속 실패'
+    if '태스크 실패' in text and '이후 태스크는 판정되지 않음' in text:
+        name = text.split(' 태스크 실패')[0].strip()
+        return '점검 중 오류: 「%s」 단계가 실패해 이후 단계는 점검하지 못함' % TASK_NAMES.get(name, name)
+    return text
+
+
+def host_audit_unavailable_groups(unavailable):
+    """점검불가 항목을 (판정, 쉬운 사유)로 묶는다. 같은 사유가 호스트마다 반복되지 않게 하는 표시 전용 값이다."""
+    groups, order = {}, []
+    for u in unavailable or []:
+        key = (u.get('label') or '', _plain_reason(u.get('reason')))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append({'host': u.get('host') or '', 'item': _plain_item(u.get('item'))})
+    return [{'label': k[0], 'reason': k[1], 'targets': groups[k]} for k in order]
+
+
 def host_audit_report_model(records, meta):
     """Turn per-host records and run metadata into the report model the template draws.
 
@@ -286,6 +327,7 @@ def host_audit_report_model(records, meta):
             'hosts_unavailable': sum(1 for _, row in rows if not row['inspected']),
         },
         'unavailable': unavailable,
+        'unavailable_groups': host_audit_unavailable_groups(unavailable),
         'inventory': [row for _, row in rows],
         'hosts': [row['host'] for _, row in rows],
         'asset_inventory': asset_inventory,

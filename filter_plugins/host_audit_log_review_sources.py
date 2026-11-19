@@ -1,15 +1,15 @@
-"""Log Review Report 1부 출발지 항목 6·7·12번 (Spec #544 / Ticket-5 #560, ADR-0015).
+"""Log Review Report 1부 접속 위치 항목 6·7·12번 (Spec #544 / Ticket-5 #560, ADR-0015).
 
 서버 sshd 로그인 성공(``security_logs``의 ``event_action='ssh_login'``·``event_outcome='success'``, security_semantics.vrl)만 본다.
 장비 관리자 로그인은 #562 몫이다.
 
 기준은 ``ctx['settings']['sources']``(tasks/log_review.yml AUD-804가 만든다):
 - ``reference``: OpenBao 로그 검토 작업 설정 문서(``inventory/config/log_review``). 없거나 읽지 못하면(``None``) 또는 형식이
-  틀리면 세 항목 모두 '조회 실패(기준 목록)'다. 키: ``normal_sources``(정상 출발지 ``[{address, name}]``, 주소는 IP 또는 CIDR),
+  틀리면 세 항목 모두 '조회 실패(기준 목록)'다. 키: ``normal_sources``(정상 접속 위치 ``[{address, name}]``, 주소는 IP 또는 CIDR),
   ``internal_addresses``(인벤토리로 계산되지 않는 내부 주소 대응 ``[{address, host}]``), ``personal_info_systems``(관리번호 목록),
-  ``excluded_sources``(6·7번에서 뺄 예외 출발지 ``[{address, name}]``, Semaphore 러너·점프 호스트 등. 뺀 로그인 묶음 수는 요약에 '예외 N건'으로 찍는다).
+  ``excluded_sources``(6·7번에서 뺄 예외 접속 위치 ``[{address, name}]``, Semaphore 러너·점프 호스트 등. 뺀 로그인 묶음 수는 요약에 '예외 N건'으로 찍는다).
 - ``managed_addresses``: 인벤토리에서 계산한 내부 주소 대응 ``{주소: 관리번호}``(``host_audit_log_review_managed_addresses``).
-- ``window_seconds``·``min_sources``: 12번 임곗값(role 기본값 2분·출발지 2개).
+- ``window_seconds``·``min_sources``: 12번 임곗값(role 기본값 2분·접속 위치 2개).
 """
 
 import ipaddress
@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import AUTO, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result  # noqa: E402
-from host_audit_log_review_common import pii_cell, to_int as _int, tz as _tz  # noqa: E402
+from host_audit_log_review_common import FINDING_NOTE, GAP_NOTE, gap_label, pii_cell, to_int as _int, tz as _tz  # noqa: E402
 
 RELOGIN = 'part1.relogin_from_managed_host'
 UNAUTHORIZED = 'part1.unauthorized_source'
@@ -72,7 +72,7 @@ def _pii_cell(ref, host):
 
 
 def _ip(text):
-    """주소 문자열을 주소 값으로. IPv4-mapped IPv6(``::ffff:a.b.c.d``)은 IPv4로 접는다(sshd가 그렇게 남기는 출발지가 있다)."""
+    """주소 문자열을 주소 값으로. IPv4-mapped IPv6(``::ffff:a.b.c.d``)은 IPv4로 접는다(sshd가 그렇게 남기는 접속 위치가 있다)."""
     try:
         ip = ipaddress.ip_address(str(text or '').strip())
     except ValueError:
@@ -81,7 +81,7 @@ def _ip(text):
 
 
 def _managed_host(address, ctx, ref):
-    """출발지 주소가 관리 호스트의 것이면 그 관리번호. 인벤토리 계산 값이 먼저, 그다음 문서의 내부 주소 대응."""
+    """접속 위치 주소가 관리 호스트의 것이면 그 관리번호. 인벤토리 계산 값이 먼저, 그다음 문서의 내부 주소 대응."""
     managed = (ctx['settings'].get('sources') or {}).get('managed_addresses') or {}
     ip = _ip(address)
     if ip is None:
@@ -95,7 +95,7 @@ def _managed_host(address, ctx, ref):
 
 
 def _normal_name(address, ref):
-    """정상 출발지면 (True, 이름)."""
+    """정상 접속 위치면 (True, 이름)."""
     ip = _ip(address)
     if ip is None:
         return False, ''
@@ -123,9 +123,9 @@ def _verdict(rows, ctx, summary, columns, method, criterion):
     gap = _gap_hosts(ctx)
     status = PARTIAL if gap else AUTO
     if gap:
-        summary += ' · 수집 공백 호스트 %d대(%s)는 로그가 없어 판정 밖' % (len(gap), ', '.join(gap))
+        summary += ' · %s는 그 날짜를 점검하지 못함' % gap_label(gap)
     return result(status, VERDICT_CHECK if rows else VERDICT_OK, summary=summary, columns=columns if rows else [],
-                  rows=rows, method=method, criterion=criterion)
+                  rows=rows, method=method, criterion=criterion, verdict_note=FINDING_NOTE if rows else '')
 
 
 def _logins(ctx):
@@ -133,10 +133,9 @@ def _logins(ctx):
     return r
 
 
-RELOGIN_COLUMNS = ['출발 호스트', '출발지', '대상 호스트', '개인정보처리시스템', '계정', '건수', '처음', '마지막']
-RELOGIN_METHOD = ('OpenObserve security_logs의 sshd 로그인 성공(event_action=ssh_login, event_outcome=success)을 대상 호스트·계정·'
-                  '출발지별로 모아 출발지가 관리 호스트 주소(인벤토리 계산 + 작업 설정 문서의 내부 주소 대응)인 것을 고른다')
-RELOGIN_CRITERION = '출발지가 다른 관리 호스트인 로그인 성공이 있으면 확인 필요(같은 호스트 자신에게서 온 로그인은 제외)'
+RELOGIN_COLUMNS = ['접속한 서버', '접속 위치', '대상 호스트', '개인정보처리시스템', '계정', '건수', '처음', '마지막']
+RELOGIN_METHOD = '로그인 성공 기록을 대상 호스트·계정·접속 위치별로 모아 접속 위치가 관리 서버 주소인 것을 고른다'
+RELOGIN_CRITERION = '접속 위치가 다른 관리 서버인 로그인 성공이 있으면 확인 필요(같은 서버 자신에게서 온 로그인은 제외)'
 
 
 def judge_relogin(ctx):
@@ -162,10 +161,9 @@ def judge_relogin(ctx):
     return _verdict(rows, ctx, summary, RELOGIN_COLUMNS, RELOGIN_METHOD, RELOGIN_CRITERION)
 
 
-UNAUTHORIZED_COLUMNS = ['출발지', '대상 호스트', '개인정보처리시스템', '계정', '건수', '처음', '마지막']
-UNAUTHORIZED_METHOD = ('OpenObserve security_logs의 sshd 로그인 성공을 대상 호스트·계정·출발지별로 모아 출발지를 작업 설정 문서의 '
-                       '정상 출발지 목록(IP·CIDR)과 대조')
-UNAUTHORIZED_CRITERION = ('정상 출발지 목록 밖에서 온 로그인 성공이 있으면 확인 필요. 출발지가 관리 호스트 주소인 로그인은 6번에서 보고 '
+UNAUTHORIZED_COLUMNS = ['접속 위치', '대상 호스트', '개인정보처리시스템', '계정', '건수', '처음', '마지막']
+UNAUTHORIZED_METHOD = '로그인 성공 기록의 접속 위치를 허용된 접속 위치(IP) 목록과 비교'
+UNAUTHORIZED_CRITERION = ('허용된 접속 위치(IP) 목록 밖에서 온 로그인 성공이 있으면 확인 필요. 접속 위치가 관리 서버 주소인 로그인은 6번에서 보고 '
                           '여기서는 뺀다')
 
 
@@ -184,16 +182,16 @@ def judge_unauthorized(ctx):
         if _is_excluded(source, ref):
             excepted += 1
             continue
-        rows.append([source or '(출발지 없음)', target, _pii_cell(ref, target), str(h.get('user_name') or ''),
+        rows.append([source or '(접속 위치 없음)', target, _pii_cell(ref, target), str(h.get('user_name') or ''),
                      _int(h.get('logins')), _local(h.get('first_us'), ctx), _local(h.get('last_us'), ctx)])
     rows.sort(key=lambda x: (x[0], x[1], x[3]))
-    summary = _with_exceptions('정상 출발지 목록 밖 로그인 %d묶음(출발지·대상 호스트·계정별)' % len(rows), excepted)
+    summary = _with_exceptions('허용된 접속 위치(IP) 목록 밖 로그인 %d묶음(접속 위치·대상 호스트·계정별)' % len(rows), excepted)
     return _verdict(rows, ctx, summary, UNAUTHORIZED_COLUMNS, UNAUTHORIZED_METHOD, UNAUTHORIZED_CRITERION)
 
 
-MULTI_COLUMNS = ['계정', '시작', '끝', '출발지', '건수']
-MULTI_METHOD = ('OpenObserve security_logs의 sshd 로그인 성공을 계정·출발지·분 단위로 모아(분마다 처음·마지막 시각) 같은 계정의 '
-                '서로 다른 출발지 로그인 간격을 잰다. 계정은 호스트를 가리지 않는 로그인 이름이다')
+MULTI_COLUMNS = ['계정', '시작', '끝', '접속 위치', '건수']
+MULTI_METHOD = ('로그인 성공 기록을 계정·접속 위치·분 단위로 모아(분마다 처음·마지막 시각) 같은 계정의 '
+                '서로 다른 접속 위치 로그인 간격을 잰다. 계정은 서버를 가리지 않는 로그인 이름이다')
 
 
 def _label(address, ctx, ref):
@@ -201,11 +199,11 @@ def _label(address, ctx, ref):
     if host:
         return '%s(%s)' % (address, host)
     normal, name = _normal_name(address, ref)
-    return '%s(%s)' % (address, name) if normal and name else (address or '(출발지 없음)')
+    return '%s(%s)' % (address, name) if normal and name else (address or '(접속 위치 없음)')
 
 
 def _hits_of_account(buckets, window_us, min_sources):
-    """시간순 분 묶음에서 window 안에 출발지가 min_sources개 이상 모이는 구간들을 겹치면 합쳐 돌려준다."""
+    """시간순 분 묶음에서 window 안에 접속 위치가 min_sources개 이상 모이는 구간들을 겹치면 합쳐 돌려준다."""
     found = []
     for i, b in enumerate(buckets):
         group = [i]
@@ -250,7 +248,7 @@ def judge_multi_source(ctx):
             srcs = sorted(set(b['source'] for b in hit['buckets']))
             rows.append([user, _local(hit['start'], ctx), _local(hit['end'], ctx),
                          ', '.join(_label(s, ctx, ref) for s in srcs), sum(b['logins'] for b in hit['buckets'])])
-    criterion = '같은 계정이 %d초 안(경계 포함)에 출발지 %d개 이상에서 로그인 성공하면 확인 필요' % (window, min_sources)
+    criterion = '같은 계정이 %d초 안(경계 포함)에 접속 위치 %d곳 이상에서 로그인 성공하면 확인 필요' % (window, min_sources)
     summary = '해당 %d건(계정 %d개)' % (len(rows), len(set(x[0] for x in rows)))
     return _verdict(rows, ctx, summary, MULTI_COLUMNS, MULTI_METHOD, criterion)
 
@@ -283,7 +281,7 @@ def host_audit_log_review_managed_addresses(records, declared=None):
 
 
 _SUCCESS = "FROM \"security_logs\" WHERE event_action = 'ssh_login' AND event_outcome = 'success' "
-# 6·7번은 (대상 호스트, 계정, 출발지) 묶음이라 행 수가 작다. 12번은 (계정, 출발지, 분) 묶음이라 자동화 계정이 자주 들어오면
+# 6·7번은 (대상 호스트, 계정, 접속 위치) 묶음이라 행 수가 작다. 12번은 (계정, 접속 위치, 분) 묶음이라 자동화 계정이 자주 들어오면
 # 많아질 수 있다. 한도에 닿으면 잘린 결과로 판정하지 않고 '조회 실패(결과가 조회 한도…)'가 된다(host_audit_log_review_results).
 QUERIES = {
     RELOGIN: [{'name': LOGINS, 'size': 20000,

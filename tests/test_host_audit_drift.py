@@ -264,7 +264,7 @@ def test_report_summary_separates_not_applicable_line_and_labels_units():
     env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROOT_DIR / "roles" / "host_audit" / "templates")),
                              extensions=["jinja2.ext.do"])
     html = env.get_template("report.html.j2").render(host_audit_model=_full_model())
-    assert "Configuration Drift 비대상 1대" in html and "--check에서 스킵" in html
+    assert "설정 변경 여부 점검 대상이 아닌 호스트 1대" in html and "--check에서 스킵" in html
     assert "점검불가 항목 2건 (호스트·항목)" in html
     assert "<span>점검불가 호스트 (수집 단계)</span>" in html
     assert "<span>점검불가</span>" not in html

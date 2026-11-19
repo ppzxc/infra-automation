@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, MANUAL, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result,
 )
-from host_audit_log_review_common import to_int as _int  # noqa: E402
+from host_audit_log_review_common import FINDING_NOTE, GAP_NOTE, NO_DATA, gap_label as _gap_label, to_int as _int  # noqa: E402
 from host_audit_log_review_common import PII_NO, PII_UNSET, PII_YES, pii_cell as _pii_cell  # noqa: E402,F401
 import host_audit_log_review_collection as _collection  # noqa: E402
 
@@ -87,8 +87,9 @@ QUERIES = {
     ITEM_OFF_HOURS_PRIVILEGE: [_PRIVILEGE_QUERY, _ACCOUNT_CHANGE_QUERY],
 }
 
-NOTE_GAP = '수집 공백 호스트(로그 없음·끊김): 이 호스트는 판정하지 못함'
-NOTE_NO_LIST = '허용 계정 목록 없음(점검 대상 밖이거나 계정 정보를 얻지 못함)'
+NOTE_GAP = '점검 기간 중 로그가 없는 날이 있어 그 날짜는 점검하지 못함(3부 1번 참조)'
+
+NOTE_NO_LIST = '등록된 관리 계정 목록 없음(점검 대상 밖이거나 계정 정보를 얻지 못함)'
 
 
 # ------------------------------------------------------------------ 입력
@@ -122,7 +123,7 @@ def _coverage(ctx):
     status = ctx['results'].get(_collection.HOSTS_DAILY)
     unknown = ''
     if hosts and not (status or {}).get('ok'):
-        unknown = '수집 공백을 확인하지 못함(%s)' % ((status or {}).get('error') or '조회하지 않음')
+        unknown = '로그가 없는 날을 확인하지 못함(%s)' % ((status or {}).get('error') or '조회하지 않음')
     return gap, unknown
 
 
@@ -143,18 +144,16 @@ def _finish(ctx, status, findings, summary, columns, rows, method, criterion, no
         out_rows.append(list(row) + [_pii_cell(pii, host), '; '.join(extra)])
     for host in gap:
         if host not in seen_hosts:
-            out_rows.append([host] + ['-'] * (len(columns) - 1) + [_pii_cell(pii, host), NOTE_GAP])
+            out_rows.append([host] + [NO_DATA] * (len(columns) - 1) + [_pii_cell(pii, host), NOTE_GAP])
     parts = [summary] + [n for n in notes if n]
     if gap:
-        parts.append('수집 공백 호스트 %d대(%s)는 로그가 없어 판정하지 못함' % (len(gap), ', '.join(gap)))
+        parts.append('%s는 그 날짜를 점검하지 못함' % _gap_label(gap))
     if unknown:
         parts.append(unknown)
     if pii is None:
         parts.append('개인정보처리시스템 표시: 미지정')
     else:
-        hit = sorted(set(r[0] for r in out_rows) & pii)
-        parts.append('개인정보처리시스템 해당 행 %d(호스트 %s)' % (
-            sum(1 for r in out_rows if r[0] in pii), ', '.join(hit) or '없음'))
+        parts.append('개인정보처리시스템에 해당하는 행 %d건(표의 개인정보처리시스템 칸 참고)' % sum(1 for r in out_rows if r[0] in pii))
     if len(out_rows) > MAX_ROWS:
         parts.append('표는 앞 %d행만 싣는다(전체 %d행)' % (MAX_ROWS, len(out_rows)))
         out_rows = out_rows[:MAX_ROWS]
@@ -164,8 +163,10 @@ def _finish(ctx, status, findings, summary, columns, rows, method, criterion, no
     if status in (AUTO, PARTIAL):
         verdict = VERDICT_CHECK if (findings or gap or unknown) else VERDICT_OK
     cols = list(columns) + ['개인정보처리시스템', '비고']
+    note = FINDING_NOTE if findings else (GAP_NOTE if (gap or unknown) else '')
     return result(status, verdict, summary=' · '.join(p for p in parts if p),
-                  columns=cols if out_rows else [], rows=out_rows, method=method, criterion=criterion)
+                  columns=cols if out_rows else [], rows=out_rows, method=method, criterion=criterion,
+                  verdict_note=note if verdict == VERDICT_CHECK else '')
 
 
 # ------------------------------------------------------------------ 허용 계정
@@ -219,14 +220,13 @@ def host_audit_log_review_account_hosts(sources, asset_inventory_hosts=None):
     return out
 
 
-ALLOWED_RULE = ('허용 계정: provisioning 선언 사용자·bootstrap 사용자·root(에이전트만 설치된 호스트는 Asset Inventory 계정과 root). '
-                '존재하지 않는 계정 시도(invalid user)는 1번과 별도 통계')
+ALLOWED_RULE = ('등록된 관리 계정: 운영자 계정·초기 접속용 계정·root(에이전트만 설치된 호스트는 자산 목록에 등록된 계정과 root). '
+                '서버에 없는 계정으로 시도한 로그인은 1번과 별도 통계')
 
 
 def judge_unauthorized(ctx):
-    method = ('OpenObserve security_logs의 SSH 로그인 성공(event_action=ssh_login, event_outcome=success)을 '
-              '호스트·계정별로 세어 호스트별 허용 계정 목록과 대조')
-    criterion = '허용 계정 목록 밖 계정의 로그인 성공이 1건 이상이면 확인 필요. ' + ALLOWED_RULE
+    method = '서버 로그인 성공 기록을 호스트·계정별로 세어 호스트별 등록된 관리 계정과 비교'
+    criterion = '등록된 관리 계정 밖 계정의 로그인 성공이 1건 이상이면 확인 필요. ' + ALLOWED_RULE
     success = _query(ctx, SUCCESS_HOURLY)
     if not success['ok']:
         out = failed(success['error'])
@@ -248,11 +248,11 @@ def judge_unauthorized(ctx):
     invalid = _query(ctx, INVALID_USER)
     if invalid['ok']:
         per_host = [h for h in invalid['hits'] if _int(h.get('attempts')) > 0]
-        stat = '존재하지 않는 계정 시도 %d건(호스트 %d대, 1번 판정과 별도 통계)' % (
+        stat = '서버에 없는 계정으로 시도한 로그인 %d건(호스트 %d대, 이 항목의 판정에는 넣지 않음)' % (
             sum(_int(h.get('attempts')) for h in per_host), len(per_host))
     else:
-        stat = '존재하지 않는 계정 시도 통계: 조회 실패(%s)' % invalid['error']
-    summary = '로그인 성공 계정 %d개(호스트·계정 조합) 중 허용 목록 밖 %d' % (len(counts), len(rows))
+        stat = '서버에 없는 계정으로 시도한 로그인 통계: 조회 실패(%s)' % invalid['error']
+    summary = '로그인 성공한 호스트·계정 조합 %d개 중 등록된 관리 계정 밖 %d개' % (len(counts), len(rows))
     return _finish(ctx, AUTO, rows, summary, ['호스트', '계정', '로그인 수'], rows, method, criterion, notes=[stat])
 
 
@@ -281,9 +281,9 @@ def judge_login_failures(ctx):
     cfg = _account_settings(ctx)
     threshold = _int(cfg.get('failure_threshold')) or 5
     window = _int(cfg.get('failure_window_minutes')) or 10
-    method = ('OpenObserve security_logs의 SSH 로그인 실패(event_outcome=failure, 존재하지 않는 계정 시도 제외)를 '
-              '호스트·계정·분(KST)별로 세어 %d분 구간의 최대 실패 수를 계산' % window)
-    criterion = '같은 계정·같은 호스트에서 %d분 안에 %d회 이상 실패하면 확인 필요(분 단위 집계)' % (window, threshold)
+    method = ('로그인 실패 기록(서버에 없는 계정으로 시도한 로그인은 제외)을 호스트·계정·분 단위로 세어 '
+              '%d분 구간의 최대 실패 수를 계산' % window)
+    criterion = '같은 계정·같은 호스트에서 %d분 안에 %d회 이상 실패하면 확인 필요' % (window, threshold)
     res = _query(ctx, FAILURE_MINUTELY)
     if not res['ok']:
         out = failed(res['error'])
@@ -351,7 +351,7 @@ class _Calendar(object):
             hol = '%s년 공휴일 목록 없음(공휴일은 판정에 반영되지 않음, role 기본값 host_audit_log_review_holidays에 추가)' % self.year
         else:
             hol = '%s년 공휴일 %d일' % (self.year, len(self.holidays))
-        return '업무시간 평일 %02d:00~%02d:00 KST 밖, 주말, 공휴일의 %s이 있으면 확인 필요(시 단위 집계). %s' % (
+        return '업무시간 평일 %02d:00~%02d:00 KST 밖, 주말, 공휴일의 %s이 있으면 확인 필요. %s' % (
             self.start, self.end, what, hol)
 
     def status(self):
@@ -367,15 +367,25 @@ def _hour(text):
 
 
 def _when(stamps, limit=6):
+    """일시 칸: 날짜별로 시각을 묶은 목록(``['10-12 20·21시', ...]``)이고, 한도를 넘으면 끝에 '외 N건'을 따로 둔다.
+
+    ``stamps``는 ``'YYYY-MM-DD HH'`` 문자열이다. 보고서는 목록 칸을 '-' 줄로 그리고, 한 줄에 하나씩 둔다.
+    """
     stamps = sorted(stamps)
-    shown = ', '.join('%s시' % s for s in stamps[:limit])
-    return shown + (' 외 %d' % (len(stamps) - limit) if len(stamps) > limit else '')
+    by_day = {}
+    for s in stamps[:limit]:
+        day, _sp, hour = s.partition(' ')
+        by_day.setdefault(day[5:], []).append(hour)
+    out = ['%s %s시' % (day, '·'.join(hours)) for day, hours in by_day.items()]
+    if len(stamps) > limit:
+        out.append('외 %d건' % (len(stamps) - limit))
+    return out
 
 
 def judge_off_hours_login(ctx):
     cal = _Calendar(ctx)
-    method = 'OpenObserve security_logs의 SSH 로그인 성공을 호스트·계정·시(KST)별로 세어 업무시간 밖 시각만 추림'
-    criterion = cal.criterion('SSH 로그인 성공')
+    method = '로그인 성공 기록을 호스트·계정·시간대별로 세어 업무시간 밖 시각만 추림'
+    criterion = cal.criterion('로그인 성공')
     res = _query(ctx, SUCCESS_HOURLY)
     if not res['ok']:
         out = failed(res['error'])
@@ -401,10 +411,9 @@ def judge_off_hours_login(ctx):
 
 def judge_off_hours_privilege(ctx):
     cal = _Calendar(ctx)
-    method = ('OpenObserve security_logs의 sudo·su 성공(event_action, 실행 계정 user_name)과 auditd 계정 관리 기록'
-              '(ADD_USER·USER_MGMT·USER_CHAUTHTOK 등, 실행 계정 AUID)을 호스트·계정·시(KST)별로 세어 업무시간 밖만 추림. '
-              'Ansible become(BECOME-SUCCESS 명령)은 자동화 건수로 따로 센다')
-    criterion = cal.criterion('sudo·su 실행 또는 계정·권한 변경') + '. 자동화(Ansible) 건만 있는 행은 확인 필요로 세지 않는다'
+    method = ('관리자 권한 명령(sudo·su) 성공 기록과 계정 생성·변경 기록을 호스트·계정·시간대별로 세어 업무시간 밖만 추림. '
+              '자동화 도구가 실행한 관리자 명령은 따로 센다')
+    criterion = cal.criterion('관리자 권한 명령(sudo·su) 실행 또는 계정·권한 변경') + '. 자동화 도구가 실행한 건만 있는 행은 확인 필요로 세지 않는다'
     privilege, changes = _query(ctx, PRIVILEGE_HOURLY), _query(ctx, ACCOUNT_CHANGE_HOURLY)
     bad = [r for r in (privilege, changes) if not r['ok']]
     if bad:
@@ -441,7 +450,7 @@ def judge_off_hours_privilege(ctx):
 
 
 def judge_absentee_login(ctx):
-    method = ('OpenObserve security_logs의 SSH 로그인 성공을 계정별 접속일(KST)·호스트로 정리. '
+    method = ('로그인 성공 기록을 계정별 접속일·호스트로 정리. '
               '휴직자·휴가자 명단은 수집하지 않으므로 점검자가 명단과 대조한다')
     criterion = '계정별 접속일이 휴직·휴가 기간과 겹치면 확인 필요(사람 대조)'
     res = _query(ctx, SUCCESS_HOURLY)
@@ -460,11 +469,11 @@ def judge_absentee_login(ctx):
     rows = []
     for user, e in sorted(per_user.items()):
         mark = PII_UNSET if pii is None else (PII_YES if e['hosts'] & pii else PII_NO)
-        rows.append([user, len(e['days']), ', '.join(d[5:] for d in sorted(e['days'])), ', '.join(sorted(e['hosts'])), mark])
+        rows.append([user, len(e['days']), [d[5:] for d in sorted(e['days'])], ', '.join(sorted(e['hosts'])), mark])
     gap, unknown = _coverage(ctx)
     parts = ['로그인 계정 %d개' % len(per_user)]
     if gap:
-        parts.append('수집 공백 호스트 %d대(%s)는 접속일이 빠졌을 수 있음' % (len(gap), ', '.join(gap)))
+        parts.append('%s는 접속일이 빠졌을 수 있음' % _gap_label(gap))
     if unknown:
         parts.append(unknown)
     if pii is None:

@@ -11,7 +11,7 @@
   판정이 없는 칸은 '점검 불가(파싱 없음)'이다.
 - ``admin_accounts``: ``[{'device': 장비 관리번호, 'accounts': [관리자 계정]}]``(OpenBao ``inventory/config/log_review``의 ``device_admin_accounts``). 없으면
   1번의 모든 로그인 계정이 '장비 관리자 허용 목록 없음'으로 나온다.
-업무시간·공휴일·2번 기준은 ``settings['accounts']``, 정상 출발지·12번 기준은 ``settings['sources']``를 서버와 같이 쓴다.
+업무시간·공휴일·2번 기준은 ``settings['accounts']``, 정상 접속 위치·12번 기준은 ``settings['sources']``를 서버와 같이 쓴다.
 """
 
 import os
@@ -20,9 +20,9 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
-    AUTO, FAILED, PARTIAL, STATUS_LABELS, UNAVAILABLE, VERDICT_CHECK, VERDICT_OK, failed, result,
+    AUTO, FAILED, PARTIAL, STATUS_LABELS, UNAVAILABLE, VERDICT_CHECK, VERDICT_OK, failed, result, split_summary,
 )
-from host_audit_log_review_common import to_int as _int  # noqa: E402
+from host_audit_log_review_common import FINDING_NOTE, GAP_NOTE, gap_label, to_int as _int  # noqa: E402
 import host_audit_log_review_accounts as _accounts  # noqa: E402
 import host_audit_log_review_sources as _sources  # noqa: E402
 import host_audit_log_review_collection as _collection  # noqa: E402
@@ -38,7 +38,7 @@ MAX_ROWS = _accounts.MAX_ROWS
 _COLLECTION = {FORTIGATE: _collection.FORTIGATE_DAILY, SWITCH: _collection.SWITCH_DAILY}
 
 _MINUTE = "date_format(_timestamp, '%Y-%m-%d %H:%M', '{offset}')"
-_LIMIT = ('sudo 명령만 본다: sudo 없이 root 셸 안에서 실행한 명령, su 뒤의 명령, root 직접 로그인의 명령, Ansible become(자동화)은 '
+_LIMIT = ('sudo 명령만 본다: sudo 없이 root 셸 안에서 실행한 명령, su 뒤의 명령, root 직접 로그인의 명령, 자동화 도구가 실행한 관리자 명령은 '
           '세지 않는다')
 
 
@@ -64,9 +64,9 @@ def _burst_settings(ctx):
 
 def judge_command_burst(ctx):
     threshold, window = _burst_settings(ctx)
-    method = ('OpenObserve security_logs의 sudo 성공(event_action=sudo, event_outcome=success, Ansible become 제외)을 '
-              '계정·호스트·분(KST)별로 세어 같은 계정(호스트 무관)의 %d분 구간 최대 실행 수를 계산' % window)
-    criterion = '같은 계정이 %d분 안에 sudo를 %d회 이상 실행하면 확인 필요(분 단위 집계). %s' % (window, threshold, _LIMIT)
+    method = ('관리자 권한 명령(sudo) 성공 기록(자동화 도구가 실행한 명령 제외)을 계정·호스트·분 단위로 세어 '
+              '같은 계정(호스트 무관)의 %d분 구간 최대 실행 수를 계산' % window)
+    criterion = '같은 계정이 %d분 안에 sudo를 %d회 이상 실행하면 확인 필요. %s' % (window, threshold, _LIMIT)
     res = _query(ctx, SUDO_MINUTELY)
     if not res['ok']:
         out = failed(res['error'])
@@ -90,21 +90,22 @@ def judge_command_burst(ctx):
     gap, unknown = _accounts._coverage(ctx)
     parts = ['sudo를 실행한 계정 %d개 중 기준 이상 %d' % (len(per_minute), len(rows))]
     if gap:
-        parts.append('수집 공백 호스트 %d대(%s)는 로그가 없어 판정 밖' % (len(gap), ', '.join(gap)))
+        parts.append('%s는 그 날짜를 점검하지 못함' % gap_label(gap))
     if unknown:
         parts.append(unknown)
     status = PARTIAL if (gap or unknown) else AUTO
     verdict = VERDICT_CHECK if (rows or gap or unknown) else VERDICT_OK
     columns = ['계정', '%d분 내 최대 sudo' % window, '처음 시각(KST)', '호스트', '전월 sudo 합계']
+    note = FINDING_NOTE if rows else (GAP_NOTE if (gap or unknown) else '')
     return result(status, verdict, summary=' · '.join(parts), columns=columns if rows else [], rows=rows,
-                  method=method, criterion=criterion)
+                  method=method, criterion=criterion, verdict_note=note if verdict == VERDICT_CHECK else '')
 
 
 # ------------------------------------------------------------------ 장비 관리자 로그인(1·2·3·4·7·12번)
 
 KIND_TITLES = {FORTIGATE: 'FortiGate', SWITCH: '스위치'}
 NO_PARSING = '파싱 없음'
-NOTE_NO_ADMIN_LIST = '장비 관리자 허용 목록 없음'
+NOTE_NO_ADMIN_LIST = '등록된 장비 관리자 계정 목록 없음'
 
 
 def _device_settings(ctx):
@@ -112,13 +113,14 @@ def _device_settings(ctx):
     return cfg if isinstance(cfg, dict) else None
 
 
-def _section(kind, status, verdict='', reason='', summary='', columns=None, rows=None):
+def _section(kind, status, verdict='', reason='', summary='', columns=None, rows=None, verdict_note=''):
     label = STATUS_LABELS.get(status, status)
     if status in (UNAVAILABLE, FAILED) and reason:
         label = '%s(%s)' % (label, reason)
     rows = [list(r) for r in (rows or [])]
     return {'kind': kind, 'title': '장비 관리자 로그인 — %s' % KIND_TITLES[kind], 'status': status, 'status_label': label,
             'verdict': verdict if status in (AUTO, PARTIAL) else '', 'summary': summary,
+            'summary_lines': split_summary(summary), 'verdict_note': verdict_note,
             'columns': list(columns or []) if rows else [], 'rows': rows}
 
 
@@ -127,20 +129,22 @@ def _finish(ctx, kind, devices, status, findings, summary, columns, rows, unknow
     gap = sorted(set(devices) & set(ctx['collection_gap']))
     parts = [summary]
     if unknown:
-        parts.append('결과를 알 수 없는 로그인 %d건(성공·실패가 구조화되지 않음)은 판정 밖' % unknown)
+        parts.append('결과를 알 수 없는 로그인 %d건(성공·실패를 구분하지 못함)은 점검하지 못함' % unknown)
     if gap:
-        parts.append('수집 공백 장비 %d대(%s)는 로그가 없어 판정 밖' % (len(gap), ', '.join(gap)))
+        parts.append('%s는 그 날짜를 점검하지 못함' % gap_label(gap, '장비'))
     collected = ctx['results'].get(_COLLECTION[kind]) or {}
     blind = not collected.get('ok')  # 수집 공백 조회가 실패하면 공백 장비를 모른다: 로그가 없어 '이상 없음'이 될 수 있다
     if blind:
-        parts.append('수집 공백을 확인하지 못함(%s)' % (collected.get('error') or '조회하지 않음'))
+        parts.append('로그가 없는 날을 확인하지 못함(%s)' % (collected.get('error') or '조회하지 않음'))
     if status == AUTO and (gap or unknown or blind):
         status = PARTIAL
     verdict = VERDICT_CHECK if (findings or gap or unknown or blind) else VERDICT_OK
     if len(rows) > MAX_ROWS:
         parts.append('표는 앞 %d행만 싣는다(전체 %d행)' % (MAX_ROWS, len(rows)))
         rows = rows[:MAX_ROWS]
-    return _section(kind, status, verdict, summary=' · '.join(p for p in parts if p), columns=columns, rows=rows)
+    note = FINDING_NOTE if findings else (GAP_NOTE if (gap or unknown or blind) else '')
+    return _section(kind, status, verdict, summary=' · '.join(p for p in parts if p), columns=columns, rows=rows,
+                    verdict_note=note if verdict == VERDICT_CHECK else '')
 
 
 def _logins(ctx, devices):
@@ -191,7 +195,7 @@ def _fortigate_unauthorized(ctx, devices):
             rows.append([device, user, n, NOTE_NO_ADMIN_LIST])
         elif user not in allowed:
             rows.append([device, user, n, ''])
-    summary = '관리자 로그인 성공 계정 %d개(장비·계정 조합) 중 허용 목록 밖 %d' % (len(counts), len(rows))
+    summary = '관리자 로그인 성공한 장비·계정 조합 %d개 중 등록된 관리 계정 밖 %d개' % (len(counts), len(rows))
     return _finish(ctx, FORTIGATE, devices, AUTO, rows, summary, ['장비', '계정', '로그인 수', '비고'], rows, unknown)
 
 
@@ -231,8 +235,8 @@ def _switch_failures(ctx, devices):
         worst, start = _accounts._worst_window(points, window)
         if worst >= threshold:
             rows.append([device, worst, start.strftime('%Y-%m-%d %H:%M'), sum(n for _t, n in points)])
-    summary = ('로그인 실패(SEC_LOGIN-4-LOGIN_FAILED)가 있는 장비 %d대 중 기준(%d분 %d회) 이상 %d. 계정·출발지가 구조화되지 않아 '
-               '장비 단위로만 센다' % (len(series), window, threshold, len(rows)))
+    summary = ('로그인 실패 기록이 있는 장비 %d대(기준 이상 %d대, 기준: %d분 안에 %d회 이상) · '
+               '스위치 로그는 계정과 접속 위치를 구분하지 못해 장비별로만 센다' % (len(series), len(rows), window, threshold))
     columns = ['장비', '%d분 내 최대 실패' % window, '처음 시각(KST)', '전월 실패 합계']
     return _finish(ctx, SWITCH, devices, PARTIAL, rows, summary, columns, rows)
 
@@ -344,14 +348,14 @@ def _fortigate_unauthorized_source(ctx, devices):
     rows, findings = [], []
     for (source, device, user), e in sorted(groups.items()):
         managed = _sources._managed_host(source, ctx, ref)
-        row = [source or '(출발지 없음)', device, user, e['count'], _sources._local(e['first'], ctx),
+        row = [source or '(접속 위치 없음)', device, user, e['count'], _sources._local(e['first'], ctx),
                _sources._local(e['last'], ctx), '관리 호스트 %s' % managed if managed else '']
         rows.append(row)
         if not managed:
             findings.append(row)
-    summary = ('정상 출발지 목록 밖 관리자 로그인 %d묶음(관리 호스트 주소에서 온 %d묶음은 행에만 싣고 확인 필요로 세지 않음)'
+    summary = ('허용된 접속 위치(IP) 목록 밖 관리자 로그인 %d묶음(관리 서버 주소에서 온 %d묶음은 행에만 싣고 확인 필요로 세지 않음)'
                % (len(findings), len(rows) - len(findings)))
-    columns = ['출발지', '장비', '계정', '건수', '처음', '마지막', '비고']
+    columns = ['접속 위치', '장비', '계정', '건수', '처음', '마지막', '비고']
     return _finish(ctx, FORTIGATE, devices, AUTO, findings, summary, columns, rows, unknown)
 
 
@@ -378,8 +382,8 @@ def _fortigate_multi_source(ctx, devices):
             srcs = sorted(set(b['source'] for b in hit['buckets']))
             rows.append([user, _sources._local(hit['start'], ctx), _sources._local(hit['end'], ctx),
                          ', '.join(_sources._label(s, ctx, ref) for s in srcs), sum(b['logins'] for b in hit['buckets'])])
-    summary = '같은 관리자 계정(장비 무관)이 %d초 안에 출발지 %d개 이상: %d건' % (window, min_sources, len(rows))
-    return _finish(ctx, FORTIGATE, devices, AUTO, rows, summary, ['계정', '시작', '끝', '출발지', '건수'], rows, unknown)
+    summary = '같은 관리자 계정(장비 무관)이 %d초 안에 접속 위치 %d개 이상: %d건' % (window, min_sources, len(rows))
+    return _finish(ctx, FORTIGATE, devices, AUTO, rows, summary, ['계정', '시작', '끝', '접속 위치', '건수'], rows, unknown)
 
 
 def _failure_settings(ctx):
@@ -428,10 +432,11 @@ def extend_with_devices(key):
         res['sections'] = sections
         if not sections:
             return res
-        note = '장비 관리자 로그인: ' + ', '.join(
-            '%s: %s%s' % (KIND_TITLES[s['kind']], s['status_label'], ' · %s' % s['verdict'] if s['verdict'] else '')
+        note = '장비 관리자 로그인 — ' + ', '.join(
+            '%s: %s%s' % (KIND_TITLES[s['kind']], s['status_label'], ', %s' % s['verdict'] if s['verdict'] else '')
             for s in sections)
-        res['summary'] = ' · '.join(p for p in (res.get('summary'), note) if p)
+        res['summary_lines'] = list(res.get('summary_lines') or []) + [note]
+        res['summary'] = ' · '.join(res['summary_lines'])
         if res['status'] in (AUTO, PARTIAL):
             if any(s['status'] != AUTO for s in sections):
                 res['status'] = PARTIAL
@@ -458,7 +463,7 @@ QUERIES = {
                "FROM \"security_logs\" WHERE event_action = 'sudo' AND event_outcome = 'success' "
                "AND coalesce(process_command_line, '') NOT LIKE '%BECOME-SUCCESS-%' GROUP BY host, user, minute"}],
     # 장비 몫의 조회. 키는 이 모듈 고유 키다(항목 key는 accounts·sources 모듈이 갖는다). 관리자 로그인은 한 달 수십~수백 건이라
-    # (장비, 계정, 출발지, 분, 결과) 묶음 하나로 1·2·3·7·12번을 모두 판정한다.
+    # (장비, 계정, 접속 위치, 분, 결과) 묶음 하나로 1·2·3·7·12번을 모두 판정한다.
     'devices.fortigate': [
         {'name': FORTIGATE_LOGINS, 'size': 50000,
          'sql': "SELECT coalesce(device_id, device_name) AS device, user_name AS user, source_address AS source, "
