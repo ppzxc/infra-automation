@@ -159,3 +159,13 @@ def test_common015_skips_a_key_that_is_also_revoked(key, revoked, expect_deploy)
         ctx[name] = _render(expr, ctx)
     results = [_render("{{ " + cond + " }}", ctx) for cond in task["when"] if "_key_fp" in cond or "_revoked_fps" in cond]
     assert all(results) is expect_deploy
+
+
+@pytest.mark.parametrize("playbook", ["host_agents.yml", "host_audit.yml"])
+def test_read_only_consumers_do_not_read_operator_key_documents(playbook):
+    """#578: accounts를 쓰지 않는 소비자(Host Agents, 읽기 전용 Host Audit)는 관리 계정 공개키 문서를 읽지 않는다.
+
+    읽으면 `inventory/operators/<계정>` 문서가 없는 호스트(root·bk 등)가 점검·수집 전에 탈락한다."""
+    plays = _load(ROOT_DIR / "playbooks" / playbook)
+    resolve = [p for p in plays if p.get(IMPORT) == "common/resolve_connection.yml"]
+    assert resolve and all(p["vars"].get("connection_needs_accounts") is False for p in resolve)
