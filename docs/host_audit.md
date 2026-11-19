@@ -1029,7 +1029,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **대상 선택**: `[AUD-008]`이 `host_audit_switch_scope_pattern`(기본 `cisco_switches:!host_audit_excluded`, 러너에서 접속할 수 없어 `host_audit_excluded`에 둔 호스트는 뺀다)을 서버 선택(`host_audit_scope_pattern`)과 따로 고른다. `target_hosts`가 있으면 교집합이고, 서버로 이미 선택된 호스트는 뺀다.
 - **접속**: 설정 백업과 같은 OpenBao Endpoint·Credential·경유지·enable을 같은 해석 파일(`roles/cisco_backup/tasks/resolve.yml`, `CISCO-008`·`CISCO-009`)로 읽는다. 수집기는 `--audit`로 한 번 호출하고(`CISCO-010`) 보내는 명령은 `show running-config`와 `show version`뿐이다(`docs/cisco_backup.md` 수집기 호출 인터페이스). 비밀번호는 stdin으로만 가고 수집 태스크는 `no_log`다.
 - **재시도 없음**: 수집 태스크에 `retries`·`until`이 없고 수집기도 점검 모드에서 재시도하지 않아 장비당 로그인은 1회다. 비밀번호가 틀려도 추가 시도는 0회라 N-04 로그인 실패 임계값에 걸리지 않는다.
-- **접속 실패**: 접속 정보 해석 실패, 수집기 종료 코드 `3`(접속·수집 실패)·`2`(출력이 설정 같지 않음), 출력 형식 오류는 그 장비를 점검불가로 기록하고 실행은 계속한다. 이유는 고정 문구이며 수집기 출력·주소는 기록하지 않는다.
+- **접속 실패**: 접속 정보 해석 실패, 수집기 종료 코드 `3`(접속·수집 실패)·`2`(출력이 설정 같지 않음), 출력 형식 오류는 그 장비를 점검불가로 기록하고 실행은 계속한다. 이유는 고정 문구이며 수집기 출력·주소는 기록하지 않는다. 종료 코드 3만 원인 파악을 위해 수집기가 낸 예외 클래스 이름(예: `TimeoutError`)을 덧붙인다(메시지·주소는 제외).
 - **판정**: `host_audit_switch_result` 필터. 판정 5종과 예외 레지스터는 서버와 같은 코드(`host_audit_kisa._apply_register`)다. 예외 항목 코드는 `KISA-2026:N-NN`이고 `hosts`에는 스위치 관리번호, `groups`에는 `cisco_switches`를 쓴다. 증적에는 설정의 비밀 값(SNMP community, 계정 비밀번호 등)과 주소를 적지 않는다.
 - **레지스트리**: 항목은 `filter_plugins/host_audit_switch.py`의 `@switch_check('N-NN', title, severity, category, l2, l3, reason)` 함수로 등록한다. `l2`·`l3`가 `해당없음`이면 함수를 부르지 않고 `reason`(표의 사유와 같은 문장)으로 해당없음을 기록한다. 등록하지 않은 항목은 JSON에 넣지 않는다.
 
