@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, MANUAL, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result, unavailable,
 )
+from host_audit_log_review_common import to_int as _int  # noqa: E402
 from host_audit_log_review_collection import _ranges  # noqa: E402  같은 날짜 범위 표기(10-03~10-05)
 
 TIME_SYNC = 'part3.time_sync'
@@ -43,13 +44,6 @@ def _settings(ctx):
 
 def _hosts(ctx):
     return sorted({str(h) for h in ((ctx['settings'].get('collection_targets') or {}).get('hosts') or [])})
-
-
-def _int(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _unverifiable(name, ctx, why=''):

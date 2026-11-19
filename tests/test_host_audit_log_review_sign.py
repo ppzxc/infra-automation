@@ -153,7 +153,7 @@ def _next_month_report(tmp_path, s3):
           "host_audit_run": {"run_id": run_id, "run_kind": "scheduled", "started_at": "2026-11-30T22:00:05Z",
                              "output_dir": str(out), "timezone": "Asia/Seoul", "target_hosts": ""},
           "host_audit_log_review_collect_hosts": [], "host_audit_log_review_devices": [],
-          "host_audit_storage_enabled": True, "_host_audit_storage_problem": "",
+          "_host_audit_records": [], "host_audit_storage_enabled": True, "_host_audit_storage_problem": "",
           "_host_audit_storage_target": {"endpoint": s3.url, "bucket": BUCKET, "access_key": "example-access",
                                          "secret_key": SECRET, "region": "us-east-1"},
           "host_audit_baseline_history": {"state": "ok", "reason": "", "pointers": [

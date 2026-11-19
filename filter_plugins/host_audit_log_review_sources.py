@@ -15,15 +15,11 @@
 import ipaddress
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import AUTO, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result  # noqa: E402
-
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover - Python < 3.9 runner
-    ZoneInfo = None
+from host_audit_log_review_common import pii_cell, to_int as _int, tz as _tz  # noqa: E402
 
 RELOGIN = 'part1.relogin_from_managed_host'
 UNAUTHORIZED = 'part1.unauthorized_source'
@@ -71,17 +67,17 @@ def _with_exceptions(summary, count):
 
 
 def _pii_cell(ref, host):
-    """개인정보처리시스템 표시. 1~5번(host_audit_log_review_accounts)과 같은 문구: 예·아니오, 목록이 없으면 미지정."""
-    if ref['pii'] is None:
-        return '미지정'
-    return '예' if host in ref['pii'] else '아니오'
+    """개인정보처리시스템 표시. 1~5번(host_audit_log_review_accounts)과 같은 문구(공용 ``pii_cell``)."""
+    return pii_cell(ref['pii'], host)
 
 
 def _ip(text):
+    """주소 문자열을 주소 값으로. IPv4-mapped IPv6(``::ffff:a.b.c.d``)은 IPv4로 접는다(sshd가 그렇게 남기는 출발지가 있다)."""
     try:
-        return ipaddress.ip_address(str(text or '').strip())
+        ip = ipaddress.ip_address(str(text or '').strip())
     except ValueError:
         return None
+    return getattr(ip, 'ipv4_mapped', None) or ip
 
 
 def _managed_host(address, ctx, ref):
@@ -109,25 +105,12 @@ def _normal_name(address, ref):
     return False, ''
 
 
-def _int(value):
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _local(us, ctx):
     stamp = _int(us)
     if not stamp:
         return ''
     tz = _tz(ctx['period'].get('timezone'))
     return datetime.fromtimestamp(stamp / 1000000.0, tz=timezone.utc).astimezone(tz).strftime('%Y-%m-%d %H:%M')
-
-
-def _tz(name):
-    if ZoneInfo is None:  # pragma: no cover
-        return timezone(timedelta(hours=9))
-    return ZoneInfo(name or 'Asia/Seoul')
 
 
 def _gap_hosts(ctx):
@@ -287,8 +270,8 @@ def host_audit_log_review_managed_addresses(records, declared=None):
             owners.setdefault(str(ip), set()).add(str(host))
 
     for record in records or []:
-        if not isinstance(record, dict):
-            continue
+        if not isinstance(record, dict):  # 깨진 기록을 조용히 넘기지 않는다(호출한 태스크가 '작성 중단'으로 알린다)
+            raise TypeError('호스트 기록이 객체가 아님: %r' % (type(record).__name__,))
         host = record.get('inventory_hostname')
         add(host, (record.get('declared') or {}).get('ip'))
         for value in (record.get('identity') or {}).get('ips') or []:

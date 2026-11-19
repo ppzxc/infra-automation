@@ -285,3 +285,33 @@ def test_model_header_collects_the_criteria_of_judged_items():
     failed_item = _item(_model(reference=None), "part1.unauthorized_source")
     assert failed_item["criterion"]
     assert "part1.unauthorized_source" not in dict((c["key"], c) for c in _model(reference=None)["criteria"])
+
+
+# ------------------------------------------------------------------ IPv4-mapped IPv6 출발지(#573)
+
+def test_an_ipv4_mapped_ipv6_source_is_judged_as_its_ipv4_address():
+    """sshd가 ``::ffff:a.b.c.d``로 남긴 출발지가 IPv4 기준 목록·관리 호스트 주소·예외 출발지와 같게 맞는다."""
+    mapped = lambda a: "::ffff:" + a  # noqa: E731
+    reference = dict(REFERENCE, excluded_sources=[{"address": "192.0.2.0/24"}])
+    m = _model(logins=[
+        _login("h-web", "alice", mapped(OFFICE)),        # 정상 출발지: 7번 아님
+        _login("h-web", "bob", mapped(RELAY)),           # 관리 호스트 주소: 6번
+        _login("h-web", "carol", mapped(OUTSIDE)),       # 예외 출발지: 6·7번 밖
+        _login("h-web", "dave", mapped("198.51.100.77")),  # 정상도 예외도 아님: 7번
+    ], reference=reference)
+    relogin, unauthorized = _item(m, RELOGIN), _item(m, "part1.unauthorized_source")
+    col = lambda item, name: [dict(zip(item["columns"], r))[name] for r in item["rows"]]  # noqa: E731
+    assert col(relogin, "계정") == ["bob"] and col(relogin, "대상 호스트") == ["h-web"]
+    assert col(unauthorized, "계정") == ["dave"]
+
+
+def test_managed_addresses_fold_an_ipv4_mapped_value_into_the_ipv4_key():
+    records = [{"inventory_hostname": "h-web", "identity": {"ips": ["::ffff:10.20.0.11"]}}]
+    assert host_audit_log_review_managed_addresses(records, {"h-db": ["::ffff:10.20.0.12"]}) == {
+        "10.20.0.11": "h-web", "10.20.0.12": "h-db"}
+
+
+def test_a_record_that_is_not_an_object_is_not_skipped_silently():
+    import pytest
+    with pytest.raises((TypeError, ValueError)):
+        host_audit_log_review_managed_addresses(["not-a-record"], {})

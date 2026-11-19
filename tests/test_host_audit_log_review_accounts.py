@@ -422,7 +422,7 @@ def test_the_report_task_builds_the_allowed_accounts_from_resolved_host_variable
               "host_audit_run": {"run_id": "ha-x", "run_kind": "scheduled", "started_at": STARTED,
                                  "output_dir": str(tmp_path / "run"), "timezone": TZ, "target_hosts": ""},
               "host_audit_model": model, "host_audit_log_review_collect_hosts": ["ns0001", "ns0002"],
-              "host_audit_log_review_devices": [], "host_audit_storage_enabled": False}
+              "host_audit_log_review_devices": [], "host_audit_storage_enabled": False, "_host_audit_records": []}
         (tmp_path / "vars.json").write_text(json.dumps(ev))
         (tmp_path / "run").mkdir()
         env = dict(os.environ, ANSIBLE_STDOUT_CALLBACK="ansible.posix.json",

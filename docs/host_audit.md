@@ -127,7 +127,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `AUD-101` | `Add Asset Inventory and declared values to the per-host record` | `ansible.builtin.set_fact` | 러너 | `host_audit_inventory_record`·`host_audit_asset_declaration` 필터. 선언 값은 `resolve_connection`이 이미 읽은 Asset 문서(`_asset_doc`)의 `description`과 `isms` 절에서 다섯 값만 고른다(OpenBao 재조회 없음) |
 | `AUD-012` | `Save the per-host record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |
 | `AUD-020` | `Find the per-host records of this run` | `ansible.builtin.find` | 러너 | 읽기 전용 |
-| `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터. Package 발견은 넘기지 않고 `package_findings_dir`(파일 디렉터리)만 넘긴다(#155) |
+| `AUD-021` | `Build the report model from the per-host records` | `ansible.builtin.set_fact` | 러너 | `host_audit_report_model` 필터. Package 발견은 넘기지 않고 `package_findings_dir`(파일 디렉터리)만 넘긴다(#155). 읽은 호스트 기록은 `_host_audit_records`에도 남겨 Log Review의 관리 호스트 주소 계산이 다시 읽지 않고 같은 값을 쓴다(#573) |
 | `AUD-022` | `Save the run metadata on the runner` | `ansible.builtin.copy` | 러너 | 실행별 파일 `0600` |
 | `AUD-023` | `Render the A4 report HTML` | `ansible.builtin.template` | 러너 | 실행별 파일 `0600` |
 | `AUD-024` | `Show where the report was written` | `ansible.builtin.debug` | 러너 | 읽기 전용 |

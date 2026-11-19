@@ -22,6 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import (  # noqa: E402
     AUTO, MANUAL, PARTIAL, VERDICT_CHECK, VERDICT_OK, failed, result,
 )
+from host_audit_log_review_common import to_int as _int  # noqa: E402
+from host_audit_log_review_common import PII_NO, PII_UNSET, PII_YES, pii_cell as _pii_cell  # noqa: E402,F401
 import host_audit_log_review_collection as _collection  # noqa: E402
 
 ITEM_UNAUTHORIZED = 'part1.unauthorized_account'
@@ -85,7 +87,6 @@ QUERIES = {
     ITEM_OFF_HOURS_PRIVILEGE: [_PRIVILEGE_QUERY, _ACCOUNT_CHANGE_QUERY],
 }
 
-PII_YES, PII_NO, PII_UNSET = '예', '아니오', '미지정'
 NOTE_GAP = '수집 공백 호스트(로그 없음·끊김): 이 호스트는 판정하지 못함'
 NOTE_NO_LIST = '허용 계정 목록 없음(점검 대상 밖이거나 계정 정보를 얻지 못함)'
 
@@ -94,13 +95,6 @@ NOTE_NO_LIST = '허용 계정 목록 없음(점검 대상 밖이거나 계정 �
 
 def _query(ctx, name):
     return ctx['results'].get(name) or {'ok': False, 'hits': [], 'error': '조회하지 않음'}
-
-
-def _int(value):
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _text(value):
@@ -117,12 +111,6 @@ def _pii(ctx):
     if value is None:
         return None
     return set(_text(h) for h in value if _text(h))
-
-
-def _pii_cell(pii, host):
-    if pii is None:
-        return PII_UNSET
-    return PII_YES if host in pii else PII_NO
 
 
 # ------------------------------------------------------------------ 수집 공백·개인정보처리시스템 연결

@@ -15,256 +15,246 @@
 # 잠금은 객체마다 헤더로 걸지 않는다: 버킷 기본 보존(GOVERNANCE 1095일)이 다른 보관 파일과 같이 걸린다(docs/host_audit.md §11.5).
 # 기록을 쓰지 못하고 끝난 등록은 다시 돌리면 된다: 같은 바이트의 PDF가 이미 있으면(HEAD의 ETag·크기, AUD-874·875) 다시 올리지 않고 기록만 쓴다.
 # ------------------------------------------------------------------------------
-- name: "[AUD-860] Validate the signed copy request (run ID and SHA-256 only)"
-  ansible.builtin.set_fact:
-    _host_audit_signed_request: >-
-      {{ host_audit_signed_run_id | host_audit_log_review_signed_request(host_audit_signed_sha256, host_audit_signed_intake_dir) }}
-
-- name: "[AUD-861] Inspect the signed copy in the intake folder"
-  ansible.builtin.stat:
-    path: "{{ _host_audit_signed_request.src }}"
-    follow: false
-    checksum_algorithm: sha256
-    get_mime: false
-  register: _host_audit_signed_stat
-
-# 러너 로컬 파일의 머리 5바이트만 읽는다(PDF 전체를 변수로 올리지 않는다). check 모드에서도 읽어야 검증 문장이 맞다.
-- name: "[AUD-862] Read the first bytes of the signed copy (head, read-only)"
-  ansible.builtin.command:
-    argv: [head, -c, "5", --, "{{ _host_audit_signed_request.src }}"]
-  register: _host_audit_signed_head
-  changed_when: false
-  failed_when: false
-  check_mode: false
-  when:
-    - _host_audit_signed_stat.stat.exists | default(false)
-    - _host_audit_signed_stat.stat.isreg | default(false)
-    - not (_host_audit_signed_stat.stat.islnk | default(false))
-
-- name: "[AUD-863] Assert the signed copy is the PDF the operator named"
-  vars:
-    _problems: >-
-      {{ _host_audit_signed_stat.stat | host_audit_log_review_signed_file_problems(
-           _host_audit_signed_head.stdout | default(''), _host_audit_signed_request.sha256, host_audit_signed_max_bytes) }}
-  ansible.builtin.assert:
-    that: _problems | length == 0
-    fail_msg: "서명본 등록 중단(아무것도 올리지 않음, {{ _host_audit_signed_request.src }}): {{ _problems | join('; ') }}"
-    quiet: true
-
-- name: Resolve the Host Audit storage key
-  ansible.builtin.include_tasks: storage_credentials.yml
-
-- name: "[AUD-864] Assert the Host Audit storage key is available for the signed copy"
-  ansible.builtin.assert:
-    that:
-      - _host_audit_storage_active | bool
-      - _host_audit_storage_problem | default('보관 비활성') | length == 0
-    fail_msg: >-
-      서명본 등록은 Host Audit 버킷에 올려야 한다 —
-      {{ ('check 모드 또는 보관 비활성(host_audit_storage_enabled=false)') if not (_host_audit_storage_active | bool)
-         else _host_audit_storage_problem }}
-    quiet: true
-
-- name: "[AUD-865] Get the scheduled run pointer of the signed report"
-  vars:
-    _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_signed_request.pointer_key) }}"
-  ansible.builtin.uri:
-    url: "{{ _req.url }}"
-    method: GET
-    headers: "{{ _req.headers }}"
-    return_content: true
-    status_code: [-1, 200, 403, 404, 500, 503]
-    timeout: "{{ host_audit_storage_timeout }}"
-    validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-    ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-  register: _host_audit_signed_pointer
-  changed_when: false
-  no_log: true
-
-# 포인터에서 보관 경로(<YYYY-MM>/<run_id>/)를 정한다. 포인터가 맞지 않으면 prefix가 비어 뒤의 조회를 하지 않는다.
-- name: Locate the archived run of the signed report
-  ansible.builtin.set_fact:
-    _host_audit_signed_where: >-
-      {{ _host_audit_signed_request | host_audit_log_review_signed_target(_host_audit_signed_pointer, none, none, host_audit_timezone) }}
-
-- name: "[AUD-866] Get the archived mail summary of the signed report"
-  vars:
-    _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_signed_where.prefix ~ 'mail_summary.json') }}"
-  ansible.builtin.uri:
-    url: "{{ _req.url }}"
-    method: GET
-    headers: "{{ _req.headers }}"
-    return_content: true
-    status_code: [-1, 200, 403, 404, 500, 503]
-    timeout: "{{ host_audit_storage_timeout }}"
-    validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-    ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-  register: _host_audit_signed_summary
-  changed_when: false
-  no_log: true
-  when: _host_audit_signed_where.prefix | length > 0
-
-- name: "[AUD-867] Get the signed copy record of the run (must not exist yet)"
-  vars:
-    _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_signed_where.record_key) }}"
-  ansible.builtin.uri:
-    url: "{{ _req.url }}"
-    method: GET
-    headers: "{{ _req.headers }}"
-    return_content: true
-    status_code: [-1, 200, 403, 404, 500, 503]
-    timeout: "{{ host_audit_storage_timeout }}"
-    validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-    ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-  register: _host_audit_signed_existing
-  changed_when: false
-  no_log: true
-  when: _host_audit_signed_where.prefix | length > 0
-
-- name: Decide whether the run takes this signed copy
-  vars:
-    _summary: "{{ _host_audit_signed_summary if _host_audit_signed_summary is not skipped else none }}"
-    _existing: "{{ _host_audit_signed_existing if _host_audit_signed_existing is not skipped else none }}"
-  ansible.builtin.set_fact:
-    _host_audit_signed_target: >-
-      {{ _host_audit_signed_request | host_audit_log_review_signed_target(_host_audit_signed_pointer, _summary, _existing, host_audit_timezone) }}
-
-- name: "[AUD-868] Assert the run takes this signed copy"
-  ansible.builtin.assert:
-    that: _host_audit_signed_target.problems | length == 0
-    fail_msg: "서명본 등록 중단(아무것도 올리지 않음, 실행 {{ _host_audit_signed_request.run_id }}): {{ _host_audit_signed_target.problems | join('; ') }}"
-    quiet: true
-
-# 이전 시도에서 PDF만 올라가고 기록이 실패했다면 다시 올리지 않는다(잠금 버킷이라 같은 키에 올릴 때마다 지울 수 없는 버전이 는다, #572).
-# 서버가 돌려주는 ETag(단일 PUT은 본문 MD5)와 Content-Length가 접수 파일과 같을 때만 건너뛴다. 그 밖(없음·다름·응답 이상)은 그대로 올린다.
-- name: "[AUD-874] Compute the MD5 of the signed copy to compare with the stored ETag"
-  ansible.builtin.stat:
-    path: "{{ _host_audit_signed_request.src }}"
-    follow: false
-    checksum_algorithm: md5
-    get_mime: false
-  register: _host_audit_signed_md5
-
-- name: "[AUD-875] Head the signed copy key (read-only, a copy of the same bytes may already be kept)"
-  vars:
-    _req: "{{ _host_audit_storage_target | host_audit_s3_request('HEAD', _host_audit_signed_target.pdf_key) }}"
-  ansible.builtin.uri:
-    url: "{{ _req.url }}"
-    method: HEAD
-    headers: "{{ _req.headers }}"
-    status_code: [-1, 200, 403, 404, 500, 503]
-    timeout: "{{ host_audit_storage_timeout }}"
-    validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-    ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-  register: _host_audit_signed_head_object
-  changed_when: false
-  no_log: true
-
-- name: Decide whether the same signed copy is already kept
-  ansible.builtin.set_fact:
-    _host_audit_signed_kept: >-
-      {{ _host_audit_signed_head_object | host_audit_log_review_signed_already_kept(
-           _host_audit_signed_md5.stat.checksum | default(''), _host_audit_signed_stat.stat.size) }}
-
-- name: Upload the signed copy and its record
+# 보관소 요청(uri)의 공통 인자(timeout·validate_certs·ca_path)는 module_defaults로 한 번만 둔다. status_code·본문은 태스크마다 다르다(#573).
+- name: Register the signed copy of a Log Review Report
+  module_defaults:
+    ansible.builtin.uri:
+      timeout: "{{ host_audit_storage_timeout }}"
+      validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
+      ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
   block:
-    - name: "[AUD-869] Upload the signed copy to the run's signed/ (Object Lock bucket)"
-      vars:
-        _req: >-
-          {{ _host_audit_storage_target | host_audit_s3_request('PUT', _host_audit_signed_target.pdf_key, none, _host_audit_signed_request.sha256) }}
-      ansible.builtin.uri:
-        url: "{{ _req.url }}"
-        method: PUT
-        src: "{{ _host_audit_signed_request.src }}"
-        remote_src: true
-        headers: "{{ _req.headers | combine({'Content-Type': 'application/pdf'}) }}"
-        status_code: [-1, 200, 400, 403, 404, 409, 500, 503]
-        timeout: "{{ host_audit_storage_timeout }}"
-        validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-        ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-      register: _host_audit_signed_put
-      changed_when: (_host_audit_signed_put.status | default(-1)) == 200
-      no_log: true
-      when: not (_host_audit_signed_kept | bool)
-
-    # PDF가 올라간 상태(이번에 올렸거나 이전 시도에서 같은 바이트가 이미 있음)를 한 값으로 둔다.
-    - name: Note whether the signed copy is kept
+    - name: "[AUD-860] Validate the signed copy request (run ID and SHA-256 only)"
       ansible.builtin.set_fact:
-        _host_audit_signed_pdf_status: "{{ 200 if (_host_audit_signed_kept | bool) else (_host_audit_signed_put.status | default(-1)) }}"
+        _host_audit_signed_request: >-
+          {{ host_audit_signed_run_id | host_audit_log_review_signed_request(host_audit_signed_sha256, host_audit_signed_intake_dir) }}
 
-    # 기록은 파일로 써서 그 해시로 올린다(서명한 SHA-256과 보낸 바이트가 같아야 한다, AUD-515 포인터와 같은 이유).
-    - name: Make a runner-local directory for the signed copy record
-      ansible.builtin.tempfile:
-        state: directory
-        suffix: signed
-      register: _host_audit_signed_tmp
-      when: _host_audit_signed_pdf_status | int == 200
-
-    - name: "[AUD-870] Write the signed copy record on the runner"
-      vars:
-        _record: >-
-          {{ _host_audit_signed_request | host_audit_log_review_signed_record(
-               _host_audit_signed_target, _host_audit_signed_stat.stat.size, now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')) }}
-      ansible.builtin.copy:
-        content: "{{ _record | to_json }}\n"
-        dest: "{{ _host_audit_signed_tmp.path }}/registration.json"
-        mode: '0600'
-      when: _host_audit_signed_pdf_status | int == 200
-
-    - name: Compute the SHA-256 of the signed copy record
+    - name: "[AUD-861] Inspect the signed copy in the intake folder"
       ansible.builtin.stat:
-        path: "{{ _host_audit_signed_tmp.path }}/registration.json"
+        path: "{{ _host_audit_signed_request.src }}"
+        follow: false
         checksum_algorithm: sha256
         get_mime: false
-      register: _host_audit_signed_record_stat
-      when: _host_audit_signed_pdf_status | int == 200
+      register: _host_audit_signed_stat
 
-    - name: "[AUD-871] Upload the signed copy record (registration complete)"
-      vars:
-        _req: >-
-          {{ _host_audit_storage_target | host_audit_s3_request('PUT', _host_audit_signed_target.record_key, none,
-                                                                  _host_audit_signed_record_stat.stat.checksum) }}
-      ansible.builtin.uri:
-        url: "{{ _req.url }}"
-        method: PUT
-        src: "{{ _host_audit_signed_tmp.path }}/registration.json"
-        remote_src: true
-        headers: "{{ _req.headers | combine({'Content-Type': 'application/json'}) }}"
-        status_code: [-1, 200, 400, 403, 404, 409, 500, 503]
-        timeout: "{{ host_audit_storage_timeout }}"
-        validate_certs: "{{ host_audit_storage_validate_certs | bool }}"
-        ca_path: "{{ host_audit_storage_ca_file | default(omit, true) }}"
-      register: _host_audit_signed_record_put
-      changed_when: _host_audit_signed_record_put.status == 200
-      no_log: true
-      when: _host_audit_signed_pdf_status | int == 200
-
-    - name: "[AUD-872] Remove the registered signed copy from the intake folder"
-      ansible.builtin.file:
-        path: "{{ _host_audit_signed_request.src }}"
-        state: absent
+    # 러너 로컬 파일의 머리 5바이트만 읽는다(PDF 전체를 변수로 올리지 않는다). check 모드에서도 읽어야 검증 문장이 맞다.
+    - name: "[AUD-862] Read the first bytes of the signed copy (head, read-only)"
+      ansible.builtin.command:
+        argv: [head, -c, "5", --, "{{ _host_audit_signed_request.src }}"]
+      register: _host_audit_signed_head
+      changed_when: false
+      failed_when: false
+      check_mode: false
       when:
-        - _host_audit_signed_pdf_status | int == 200
-        - (_host_audit_signed_record_put.status | default(-1)) == 200
+        - _host_audit_signed_stat.stat.exists | default(false)
+        - _host_audit_signed_stat.stat.isreg | default(false)
+        - not (_host_audit_signed_stat.stat.islnk | default(false))
 
-    - name: "[AUD-873] Assert the signed copy and its record were kept"
+    - name: "[AUD-863] Assert the signed copy is the PDF the operator named"
       vars:
-        _pdf: "{{ _host_audit_signed_pdf_status | default(-1) }}"
-        _rec: "{{ _host_audit_signed_record_put.status | default(-1) }}"
+        _problems: >-
+          {{ _host_audit_signed_stat.stat | host_audit_log_review_signed_file_problems(
+               _host_audit_signed_head.stdout | default(''), _host_audit_signed_request.sha256, host_audit_signed_max_bytes) }}
+      ansible.builtin.assert:
+        that: _problems | length == 0
+        fail_msg: "서명본 등록 중단(아무것도 올리지 않음, {{ _host_audit_signed_request.src }}): {{ _problems | join('; ') }}"
+        quiet: true
+
+    - name: Resolve the Host Audit storage key
+      ansible.builtin.include_tasks: storage_credentials.yml
+
+    - name: "[AUD-864] Assert the Host Audit storage key is available for the signed copy"
       ansible.builtin.assert:
         that:
-          - _pdf | int == 200
-          - _rec | int == 200
+          - _host_audit_storage_active | bool
+          - _host_audit_storage_problem | default('보관 비활성') | length == 0
         fail_msg: >-
-          서명본 등록 실패 — {{ ('서명본 업로드 status=' ~ _pdf ~ '(아무 기록도 남기지 않음, 접수 폴더의 파일은 그대로)') if _pdf | int != 200
-             else ('등록 기록 업로드 status=' ~ _rec ~ '(서명본은 올라갔지만 기록이 없어 다음 달 보고서가 "없음"으로 본다. 같은 입력으로 다시 실행한다)') }}
-        success_msg: >-
-          서명본 등록 완료 — {{ _host_audit_signed_target.pdf_key }} · SHA-256 {{ _host_audit_signed_request.sha256 }}
-          · {{ _host_audit_signed_stat.stat.size }}바이트 · 기록 {{ _host_audit_signed_target.record_key }}
-          {{ '(같은 PDF가 이미 올라가 있어 다시 올리지 않았다)' if _host_audit_signed_kept | bool else '' }}
-  always:
-    - name: Remove the runner-local signed copy record
-      ansible.builtin.file:
-        path: "{{ _host_audit_signed_tmp.path }}"
-        state: absent
-      when: _host_audit_signed_tmp.path is defined
+          서명본 등록은 Host Audit 버킷에 올려야 한다 —
+          {{ ('check 모드 또는 보관 비활성(host_audit_storage_enabled=false)') if not (_host_audit_storage_active | bool)
+             else _host_audit_storage_problem }}
+        quiet: true
+
+    - name: "[AUD-865] Get the scheduled run pointer of the signed report"
+      vars:
+        _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_signed_request.pointer_key) }}"
+      ansible.builtin.uri:
+        url: "{{ _req.url }}"
+        method: GET
+        headers: "{{ _req.headers }}"
+        return_content: true
+        status_code: [-1, 200, 403, 404, 500, 503]
+      register: _host_audit_signed_pointer
+      changed_when: false
+      no_log: true
+
+    # 포인터에서 보관 경로(<YYYY-MM>/<run_id>/)를 정한다. 포인터가 맞지 않으면 prefix가 비어 뒤의 조회를 하지 않는다.
+    - name: Locate the archived run of the signed report
+      ansible.builtin.set_fact:
+        _host_audit_signed_where: >-
+          {{ _host_audit_signed_request | host_audit_log_review_signed_target(_host_audit_signed_pointer, none, none, host_audit_timezone) }}
+
+    - name: "[AUD-866] Get the archived mail summary of the signed report"
+      vars:
+        _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_signed_where.prefix ~ 'mail_summary.json') }}"
+      ansible.builtin.uri:
+        url: "{{ _req.url }}"
+        method: GET
+        headers: "{{ _req.headers }}"
+        return_content: true
+        status_code: [-1, 200, 403, 404, 500, 503]
+      register: _host_audit_signed_summary
+      changed_when: false
+      no_log: true
+      when: _host_audit_signed_where.prefix | length > 0
+
+    - name: "[AUD-867] Get the signed copy record of the run (must not exist yet)"
+      vars:
+        _req: "{{ _host_audit_storage_target | host_audit_s3_request('GET', _host_audit_signed_where.record_key) }}"
+      ansible.builtin.uri:
+        url: "{{ _req.url }}"
+        method: GET
+        headers: "{{ _req.headers }}"
+        return_content: true
+        status_code: [-1, 200, 403, 404, 500, 503]
+      register: _host_audit_signed_existing
+      changed_when: false
+      no_log: true
+      when: _host_audit_signed_where.prefix | length > 0
+
+    - name: Decide whether the run takes this signed copy
+      vars:
+        _summary: "{{ _host_audit_signed_summary if _host_audit_signed_summary is not skipped else none }}"
+        _existing: "{{ _host_audit_signed_existing if _host_audit_signed_existing is not skipped else none }}"
+      ansible.builtin.set_fact:
+        _host_audit_signed_target: >-
+          {{ _host_audit_signed_request | host_audit_log_review_signed_target(_host_audit_signed_pointer, _summary, _existing, host_audit_timezone) }}
+
+    - name: "[AUD-868] Assert the run takes this signed copy"
+      ansible.builtin.assert:
+        that: _host_audit_signed_target.problems | length == 0
+        fail_msg: "서명본 등록 중단(아무것도 올리지 않음, 실행 {{ _host_audit_signed_request.run_id }}): {{ _host_audit_signed_target.problems | join('; ') }}"
+        quiet: true
+
+    # 이전 시도에서 PDF만 올라가고 기록이 실패했다면 다시 올리지 않는다(잠금 버킷이라 같은 키에 올릴 때마다 지울 수 없는 버전이 는다, #572).
+    # 서버가 돌려주는 ETag(단일 PUT은 본문 MD5)와 Content-Length가 접수 파일과 같을 때만 건너뛴다. 그 밖(없음·다름·응답 이상)은 그대로 올린다.
+    - name: "[AUD-874] Compute the MD5 of the signed copy to compare with the stored ETag"
+      ansible.builtin.stat:
+        path: "{{ _host_audit_signed_request.src }}"
+        follow: false
+        checksum_algorithm: md5
+        get_mime: false
+      register: _host_audit_signed_md5
+
+    - name: "[AUD-875] Head the signed copy key (read-only, a copy of the same bytes may already be kept)"
+      vars:
+        _req: "{{ _host_audit_storage_target | host_audit_s3_request('HEAD', _host_audit_signed_target.pdf_key) }}"
+      ansible.builtin.uri:
+        url: "{{ _req.url }}"
+        method: HEAD
+        headers: "{{ _req.headers }}"
+        status_code: [-1, 200, 403, 404, 500, 503]
+      register: _host_audit_signed_head_object
+      changed_when: false
+      no_log: true
+
+    - name: Decide whether the same signed copy is already kept
+      ansible.builtin.set_fact:
+        _host_audit_signed_kept: >-
+          {{ _host_audit_signed_head_object | host_audit_log_review_signed_already_kept(
+               _host_audit_signed_md5.stat.checksum | default(''), _host_audit_signed_stat.stat.size) }}
+
+    - name: Upload the signed copy and its record
+      block:
+        - name: "[AUD-869] Upload the signed copy to the run's signed/ (Object Lock bucket)"
+          vars:
+            _req: >-
+              {{ _host_audit_storage_target | host_audit_s3_request('PUT', _host_audit_signed_target.pdf_key, none, _host_audit_signed_request.sha256) }}
+          ansible.builtin.uri:
+            url: "{{ _req.url }}"
+            method: PUT
+            src: "{{ _host_audit_signed_request.src }}"
+            remote_src: true
+            headers: "{{ _req.headers | combine({'Content-Type': 'application/pdf'}) }}"
+            status_code: [-1, 200, 400, 403, 404, 409, 500, 503]
+          register: _host_audit_signed_put
+          changed_when: (_host_audit_signed_put.status | default(-1)) == 200
+          no_log: true
+          when: not (_host_audit_signed_kept | bool)
+
+        # PDF가 올라간 상태(이번에 올렸거나 이전 시도에서 같은 바이트가 이미 있음)를 한 값으로 둔다.
+        - name: Note whether the signed copy is kept
+          ansible.builtin.set_fact:
+            _host_audit_signed_pdf_status: "{{ 200 if (_host_audit_signed_kept | bool) else (_host_audit_signed_put.status | default(-1)) }}"
+
+        # 기록은 파일로 써서 그 해시로 올린다(서명한 SHA-256과 보낸 바이트가 같아야 한다, AUD-515 포인터와 같은 이유).
+        - name: Make a runner-local directory for the signed copy record
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: signed
+          register: _host_audit_signed_tmp
+          when: _host_audit_signed_pdf_status | int == 200
+
+        - name: "[AUD-870] Write the signed copy record on the runner"
+          vars:
+            _record: >-
+              {{ _host_audit_signed_request | host_audit_log_review_signed_record(
+                   _host_audit_signed_target, _host_audit_signed_stat.stat.size, now(utc=true).strftime('%Y-%m-%dT%H:%M:%SZ')) }}
+          ansible.builtin.copy:
+            content: "{{ _record | to_json }}\n"
+            dest: "{{ _host_audit_signed_tmp.path }}/registration.json"
+            mode: '0600'
+          when: _host_audit_signed_pdf_status | int == 200
+
+        - name: Compute the SHA-256 of the signed copy record
+          ansible.builtin.stat:
+            path: "{{ _host_audit_signed_tmp.path }}/registration.json"
+            checksum_algorithm: sha256
+            get_mime: false
+          register: _host_audit_signed_record_stat
+          when: _host_audit_signed_pdf_status | int == 200
+
+        - name: "[AUD-871] Upload the signed copy record (registration complete)"
+          vars:
+            _req: >-
+              {{ _host_audit_storage_target | host_audit_s3_request('PUT', _host_audit_signed_target.record_key, none,
+                                                                      _host_audit_signed_record_stat.stat.checksum) }}
+          ansible.builtin.uri:
+            url: "{{ _req.url }}"
+            method: PUT
+            src: "{{ _host_audit_signed_tmp.path }}/registration.json"
+            remote_src: true
+            headers: "{{ _req.headers | combine({'Content-Type': 'application/json'}) }}"
+            status_code: [-1, 200, 400, 403, 404, 409, 500, 503]
+          register: _host_audit_signed_record_put
+          changed_when: _host_audit_signed_record_put.status == 200
+          no_log: true
+          when: _host_audit_signed_pdf_status | int == 200
+
+        - name: "[AUD-872] Remove the registered signed copy from the intake folder"
+          ansible.builtin.file:
+            path: "{{ _host_audit_signed_request.src }}"
+            state: absent
+          when:
+            - _host_audit_signed_pdf_status | int == 200
+            - (_host_audit_signed_record_put.status | default(-1)) == 200
+
+        - name: "[AUD-873] Assert the signed copy and its record were kept"
+          vars:
+            _pdf: "{{ _host_audit_signed_pdf_status | default(-1) }}"
+            _rec: "{{ _host_audit_signed_record_put.status | default(-1) }}"
+          ansible.builtin.assert:
+            that:
+              - _pdf | int == 200
+              - _rec | int == 200
+            fail_msg: >-
+              서명본 등록 실패 — {{ ('서명본 업로드 status=' ~ _pdf ~ '(아무 기록도 남기지 않음, 접수 폴더의 파일은 그대로)') if _pdf | int != 200
+                 else ('등록 기록 업로드 status=' ~ _rec ~ '(서명본은 올라갔지만 기록이 없어 다음 달 보고서가 "없음"으로 본다. 같은 입력으로 다시 실행한다)') }}
+            success_msg: >-
+              서명본 등록 완료 — {{ _host_audit_signed_target.pdf_key }} · SHA-256 {{ _host_audit_signed_request.sha256 }}
+              · {{ _host_audit_signed_stat.stat.size }}바이트 · 기록 {{ _host_audit_signed_target.record_key }}
+              {{ '(같은 PDF가 이미 올라가 있어 다시 올리지 않았다)' if _host_audit_signed_kept | bool else '' }}
+      always:
+        - name: Remove the runner-local signed copy record
+          ansible.builtin.file:
+            path: "{{ _host_audit_signed_tmp.path }}"
+            state: absent
+          when: _host_audit_signed_tmp.path is defined

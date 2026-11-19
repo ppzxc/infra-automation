@@ -18,10 +18,10 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from host_audit_log_review_items import AUTO, VERDICT_CHECK, VERDICT_OK, failed, result, unavailable  # noqa: E402
+from host_audit_log_review_common import REPORT_TIMEZONE, local_iso as _local, parse_stamp as _parse  # noqa: E402
 from host_audit_baseline import host_audit_baseline_pick, host_audit_storage_prefix  # noqa: E402
 
 try:
@@ -29,21 +29,14 @@ try:
 except ImportError:  # pragma: no cover - pytest without ansible
     AnsibleFilterError = ValueError
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover - Python < 3.9 runner
-    ZoneInfo = None
-
 ITEM = 'part3.previous_signed_copy'
 SETTING = 'previous_signed_copy'
 SCHEMA_VERSION = 1
 RECORD_NAME = 'registration.json'
 PDF_MAGIC = '%PDF-'
-REPORT_TIMEZONE = 'Asia/Seoul'
 
 _SAFE_RUN_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')  # host_audit_mail._SAFE_RUN_ID와 같다
 _SHA256 = re.compile(r'^[0-9a-f]{64}$')
-_STAMP = re.compile(r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$')
 
 METHOD = ('직전 정기 실행(Audit Baseline 포인터로 고름)의 보관 경로 signed/registration.json(서명본 등록 기록)을 읽어 '
           '등록 일시와 SHA-256을 적는다')
@@ -52,22 +45,6 @@ COLUMNS = ['직전 정기 실행', '시작', '서명본', '등록 일시', 'SHA-
 
 
 # ------------------------------------------------------------------ 공통
-
-def _tz(tz_name):
-    if ZoneInfo is None:  # pragma: no cover
-        return timezone(timedelta(hours=9))
-    return ZoneInfo(tz_name or REPORT_TIMEZONE)
-
-
-def _parse(iso):
-    m = _STAMP.match(str(iso or '').strip())
-    return datetime(*[int(x) for x in m.groups()], tzinfo=timezone.utc) if m else None
-
-
-def _local(iso, tz_name, fmt='%Y-%m-%d %H:%M'):
-    dt = _parse(iso)
-    return dt.astimezone(_tz(tz_name)).strftime(fmt) if dt else str(iso or '')
-
 
 def _tz_label(tz_name):
     return 'KST' if (tz_name or REPORT_TIMEZONE) == REPORT_TIMEZONE else tz_name
