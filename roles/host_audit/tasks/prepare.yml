@@ -41,6 +41,19 @@
     _requested: "{{ query('ansible.builtin.inventory_hostnames', target_hosts | default('all')) }}"
   changed_when: false
 
+# 스위치는 서버 선택과 따로 고른다(Spec #568). 서버로 이미 선택된 호스트는 제외해 같은 hosts/<호스트>.json을 두 번 쓰지 않는다.
+- name: "[AUD-008] Select Host Audit switches into the host_audit_switch_targets group"
+  ansible.builtin.add_host:
+    name: "{{ item }}"
+    groups: host_audit_switch_targets
+  loop: "{{ ((_sw_scope | intersect(_sw_requested)) if (target_hosts | default('') | length > 0) else _sw_scope) | difference(_sw_servers) }}"
+  vars:
+    _sw_scope: "{{ query('ansible.builtin.inventory_hostnames', host_audit_switch_scope_pattern) }}"
+    _sw_requested: "{{ query('ansible.builtin.inventory_hostnames', target_hosts | default('all')) }}"
+    _sw_servers: "{{ query('ansible.builtin.inventory_hostnames', host_audit_scope_pattern) }}"
+  changed_when: false
+  when: host_audit_switch_enabled | bool
+
 - name: "[AUD-005] Create the runner-local output directory for this run"
   ansible.builtin.file:
     path: "{{ item }}"

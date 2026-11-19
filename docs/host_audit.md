@@ -12,7 +12,7 @@
   3. 호스트별 수집 (`tasks/main.yml`)
   4. 임시 키 정리 (`common/cleanup_connection.yml`)
   5. 보고서 (localhost, `tasks/report.yml`)
-- **대상**: `host_audit_scope_pattern`(`servers:loadbalancers:overseer:!host_audit_excluded`) ∩ `target_hosts`. Host Agents Exclusion 호스트와 CentOS 6/7 호스트도 대상이다. Semaphore 인벤토리의 `host_audit_excluded` 그룹(러너에서 접속할 수 없는 호스트 등)은 대상이 아니며 보고서에도 나오지 않는다. 네트워크 장비(`cisco_switches`)는 범위 밖이며 보고서 표지에 그렇게 적는다.
+- **대상**: `host_audit_scope_pattern`(`servers:loadbalancers:overseer:!host_audit_excluded`) ∩ `target_hosts`. Host Agents Exclusion 호스트와 CentOS 6/7 호스트도 대상이다. Semaphore 인벤토리의 `host_audit_excluded` 그룹(러너에서 접속할 수 없는 호스트 등)은 대상이 아니며 보고서에도 나오지 않는다. 네트워크 장비(`cisco_switches`)는 서버 단계의 대상이 아니다(보고서 표지에는 지금도 범위 밖으로 적는다). 스위치는 별도 단계(§19, Spec #568)가 점검하며 그 보고서 반영은 Ticket-5가 맡는다.
 - **읽기 전용 수집**: 대상 호스트에서는 `ansible.builtin.raw`로 POSIX sh 조회(`roles/host_audit/files/identity_probe.sh`)만 실행한다. Python·모듈·원격 임시 파일이 없고 `gather_facts: false`라 CentOS 6/7도 같은 경로로 수집한다.
 - **접속 실패**: 수집 태스크는 `ignore_unreachable: true`라 한 호스트가 실패해도 실행이 계속된다. 접속 실패는 `unreachable`, 수집 실패는 `probe_failed`로 기록된다. 접속 해석 단계에서 실패해 기록이 없는 대상은 보고서 모델이 대상 목록과 비교해 찾아낸다. 셋 모두 보고서에 '점검불가'와 이유로 나온다.
 - **보고서 모델**: `filter_plugins/host_audit.py`의 `host_audit_report_model(records, meta)` 하나가 판단·집계·라벨을 모두 정한다. 템플릿 `report.html.j2`는 모델을 그리기만 한다.
@@ -105,6 +105,7 @@ ISMS 1.2.1(자산 식별)·2.11.2(정기 취약점 점검)는 자산 목록과 �
 | `host_audit_log_review_multi_source_window_seconds` · `host_audit_log_review_multi_source_min_sources` | `120` · `2` | 1부 12번: 같은 계정이 이 시간(초, 경계 포함) 안에 이 개수 이상의 출발지에서 로그인 성공하면 '확인 필요'(§18) |
 | `host_audit_log_review_command_burst_threshold` · `host_audit_log_review_command_burst_window_minutes` | `30` · `2` | 1부 13번: 같은 계정(호스트 무관)이 이 시간(분) 안에 sudo를 이 횟수 이상 실행하면 '확인 필요'(§18.4) |
 | `host_audit_log_review_device_parsing` | FortiGate 1·2·3·4·7·12번 `auto`, 스위치 2·4번 `partial` | 장비 관리자 로그인 적용 표(§18.4). 없는 칸은 '점검 불가(파싱 없음)' |
+| `host_audit_switch_enabled` · `host_audit_switch_scope_pattern` | `true` · `cisco_switches` | 스위치 단계(§19). 스위치는 서버 선택과 따로 고르며 `target_hosts`가 있으면 그 패턴과의 교집합, 서버로 이미 선택된 호스트는 제외한다. false면 단계를 건너뛴다 |
 | `host_audit_regression_enabled` | `true` | Security Regression(§16) 전체 스위치. false면 수집·판정을 건너뛴다(롤백) |
 | `host_audit_regression_expect` | `{}` | 호스트별 기대치 선언(§16.2의 선언 키). 비면 그 호스트는 대상이 아님. 값은 비공개 인벤토리·Environment로 준다 |
 | `host_audit_regression_backup_enabled` · `host_audit_rustfs_policy_snapshot_file` | `false` · env `HOST_AUDIT_RUSTFS_POLICY_SNAPSHOT` | 백업 정책 항목(`EXP-BAK-*`) 판정 켜기 · 수집기 스냅샷 파일(러너 경로, 없으면 BAK-2/3 점검불가) |
@@ -1018,3 +1019,38 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 - **수집 공백 장비**: 3부 수집 공백에 든 장비는 장비 몫 요약에 이름이 적히고 `일부 자동`·`확인 필요`다. 그 종류의 수집 공백 조회(스위치 `system_logs`·FortiGate `security_logs` 일자별)가 실패해도 공백을 모르므로 같다(`수집 공백을 확인하지 못함`).
 - **입력**: AUD-804 `settings.command_burst`(`threshold`·`window_minutes`)와 `settings.devices`(`fortigate`: `fortigate_firewalls` 그룹, `switch`: `host_audit_log_review_switch_syslog_devices`, `parsing`, `admin_accounts`: 작업 설정 문서 `inventory/config/log_review`의 `device_admin_accounts` `[{device, accounts}]`). 장비 관리자 계정 이름은 공개 저장소에 두지 않는다.
 - **GitHub**: 조직 웹훅에는 로그인 이벤트가 없어 이번 적용 대상이 아니다(§18 3부 GitHub 감사 로그 수집 상태).
+
+## 19. 스위치 취약점 점검 (Spec #568 / Ticket-3, #585)
+
+월간 실행이 `cisco_switches` 전체를 KISA-2026 V장(네트워크 장비) 항목(`KISA-2026:N-NN`)으로 점검한다. 항목별 적용 여부와 취약 판정 조건은 [host_audit_switch.md](host_audit_switch.md)(적용 표)가 기준이고, 판정 코드와 표는 `tests/test_host_audit_switch.py`가 대조한다. 이 티켓의 판정 범위는 N-01~N-16이다(N-17~N-38은 Ticket-4가 항목 함수만 등록한다). 보고서 렌더링은 Ticket-5 몫이라 이 단계는 호스트별 JSON만 쓴다.
+
+- **단계 위치**: `playbooks/host_audit.yml`의 서버 수집·임시 키 정리 뒤, 보고서 앞. play는 `hosts: host_audit_switch_targets`, `serial: 1`(한 번에 한 대, 로그인 폭주 방지)이다. 서버 단계의 동작과 출력은 바뀌지 않는다.
+- **대상 선택**: `[AUD-008]`이 `host_audit_switch_scope_pattern`(기본 `cisco_switches`)을 서버 선택(`host_audit_scope_pattern`)과 따로 고른다. `target_hosts`가 있으면 교집합이고, 서버로 이미 선택된 호스트는 뺀다.
+- **접속**: 설정 백업과 같은 OpenBao Endpoint·Credential·경유지·enable을 같은 해석 파일(`roles/cisco_backup/tasks/resolve.yml`, `CISCO-008`·`CISCO-009`)로 읽는다. 수집기는 `--audit`로 한 번 호출하고(`CISCO-010`) 보내는 명령은 `show running-config`와 `show version`뿐이다(`docs/cisco_backup.md` 수집기 호출 인터페이스). 비밀번호는 stdin으로만 가고 수집 태스크는 `no_log`다.
+- **재시도 없음**: 수집 태스크에 `retries`·`until`이 없고 수집기도 점검 모드에서 재시도하지 않아 장비당 로그인은 1회다. 비밀번호가 틀려도 추가 시도는 0회라 N-04 로그인 실패 임계값에 걸리지 않는다.
+- **접속 실패**: 접속 정보 해석 실패, 수집기 종료 코드 `3`(접속·수집 실패)·`2`(출력이 설정 같지 않음), 출력 형식 오류는 그 장비를 점검불가로 기록하고 실행은 계속한다. 이유는 고정 문구이며 수집기 출력·주소는 기록하지 않는다.
+- **판정**: `host_audit_switch_result` 필터. 판정 5종과 예외 레지스터는 서버와 같은 코드(`host_audit_kisa._apply_register`)다. 예외 항목 코드는 `KISA-2026:N-NN`이고 `hosts`에는 스위치 관리번호, `groups`에는 `cisco_switches`를 쓴다. 증적에는 설정의 비밀 값(SNMP community, 계정 비밀번호 등)과 주소를 적지 않는다.
+- **레지스트리**: 항목은 `filter_plugins/host_audit_switch.py`의 `@switch_check('N-NN', title, severity, category, l2, l3, reason)` 함수로 등록한다. `l2`·`l3`가 `해당없음`이면 함수를 부르지 않고 `reason`(표의 사유와 같은 문장)으로 해당없음을 기록한다. 등록하지 않은 항목은 JSON에 넣지 않는다.
+
+### 19.1 스위치 기록 JSON (`hosts/<Inventory Hostname>.json`)
+
+서버 기록과 같은 `schema_version`·키에 다음이 다르다.
+
+| 필드 | 의미 |
+|---|---|
+| `device_type` | 스위치 기록은 `SWITCH`. 서버 기록에는 없다(보고서 모델은 `SWITCH` 기록을 서버 대상에서 뺀다) |
+| `status` · `reason` | `ok` · `unreachable`(접속 정보 해석·접속 실패) · `probe_failed`(접속했으나 쓸 수 있는 출력 없음), 이유는 고정 문구 |
+| `declared` | `fqdn`·`ip`는 빈 문자열, `environment`, `groups`(`cisco_switches`) |
+| `identity` · `os` | 항상 `null` |
+| `switch` | `status`가 `ok`일 때만: `access`(`ssh`\|`telnet`), `role`(`L2`\|`L3`, 설정에서 판정), `version`(`show version`의 버전 문자열) |
+| `config_vulnerability` | `edition`, `status`(`ok`\|`failed`), `reason`, `results[]`(서버와 같은 행: `code`, `result`(GOOD·VULN·NA·MANUAL), `verdict`, `evidence`, `exception`). 실패하면 `results`는 빈 목록 |
+
+### 19.2 태스크 매트릭스
+
+| Spec ID | 태스크 명칭 (Task Name) | Ansible 모듈 | 지원 OS | 멱등성 보장 방식 |
+|---|---|---|---|---|
+| `AUD-008` | `Select Host Audit switches into the host_audit_switch_targets group` | `ansible.builtin.add_host` | 러너 | 인메모리 그룹, `changed_when: false` |
+| `AUD-900` | `Collect the switch running configuration and version (read-only, one login, no retry)` | `ansible.builtin.include_role` | 러너 | `cisco_backup`의 `audit.yml`(`CISCO-010`)로 `show` 두 개만 조회, `no_log` |
+| `AUD-901` | `Mark the switch as not inspected when its connection could not be resolved` | `ansible.builtin.set_fact` | 러너 | `rescue`, `no_log`, 읽기 전용 |
+| `AUD-902` | `Build the per-switch audit record` | `ansible.builtin.set_fact` | 러너 | `host_audit_switch_record` 필터, `no_log`(입력에 설정 전문이 있음) |
+| `AUD-903` | `Save the per-switch record on the runner` | `ansible.builtin.copy` | 러너 (`delegate_to: localhost`) | 실행별 파일 `0600` |

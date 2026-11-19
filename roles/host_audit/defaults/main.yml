@@ -13,6 +13,11 @@ host_audit_output_root: "{{ lookup('ansible.builtin.env', 'HOST_AUDIT_OUTPUT_ROO
 # Semaphore 인벤토리의 host_audit_excluded 그룹(러너에서 접속할 수 없는 호스트 등)은 뺀다.
 host_audit_scope_pattern: "servers:loadbalancers:overseer:!host_audit_excluded"
 
+# 스위치 단계(Spec #568): cisco_switches 전체를 KISA-2026 N 항목으로 점검한다. 서버 선택(host_audit_scope_pattern)과 별도로 고르며,
+# target_hosts를 주면 그 패턴과의 교집합만 점검한다. false면 스위치 단계를 건너뛴다(롤백).
+host_audit_switch_enabled: true
+host_audit_switch_scope_pattern: cisco_switches
+
 # 보고서 시각 표기 시간대.
 host_audit_timezone: Asia/Seoul
 

@@ -26,6 +26,20 @@
 - name: Look up the Host Audit storage and the Audit Baseline
   ansible.builtin.include_tasks: storage_lookup.yml
 
+# 스위치 기록(device_type: SWITCH, 스위치 단계가 같은 hosts/ 디렉터리에 쓴다)은 서버 보고서 모델에 섞지 않는다. 보고서의 스위치 부분이
+# 읽을 수 있게 따로 남긴다(_host_audit_switch_records).
+- name: Read the per-switch records of this run
+  ansible.builtin.set_fact:
+    _host_audit_switch_records: "{{ _switch_records }}"
+  vars:
+    _switch_records: >-
+      {%- set r = [] -%}
+      {%- for p in _host_audit_record_files.files | map(attribute='path') | sort -%}
+      {%- set rec = lookup('ansible.builtin.file', p) | from_json -%}
+      {%- if rec.device_type | default('') == 'SWITCH' -%}{%- set _ = r.append(rec) -%}{%- endif -%}
+      {%- endfor -%}
+      {{ r }}
+
 # 호스트 기록은 여기서 한 번만 읽어 _host_audit_records에 남긴다. Log Review(log_review.yml)가 관리 호스트 주소를 계산할 때 같은 값을
 # 쓴다(파일을 다시 읽으며 누락·깨짐을 조용히 넘기지 않게, #573).
 - name: "[AUD-021] Build the report model from the per-host records"
@@ -36,7 +50,8 @@
     _records: >-
       {%- set r = [] -%}
       {%- for p in _host_audit_record_files.files | map(attribute='path') | sort -%}
-      {%- set _ = r.append(lookup('ansible.builtin.file', p) | from_json) -%}
+      {%- set rec = lookup('ansible.builtin.file', p) | from_json -%}
+      {%- if rec.device_type | default('') != 'SWITCH' -%}{%- set _ = r.append(rec) -%}{%- endif -%}
       {%- endfor -%}
       {{ r }}
     _meta:

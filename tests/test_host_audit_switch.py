@@ -439,3 +439,15 @@ def test_a_crashing_check_becomes_manual_instead_of_stopping_the_switch():
 def test_the_filters_are_exported_for_ansible():
     names = hs.FilterModule().filters()
     assert {"host_audit_switch_result", "host_audit_switch_record"} <= set(names)
+
+
+# ------------------------------------------------------------ 서버 보고서 모델 불변
+
+
+def test_server_report_model_is_unchanged_by_switch_records_in_the_same_directory():
+    from host_audit import host_audit_report_model, host_audit_host_record
+    declared = {"fqdn": "a.example", "ip": "192.0.2.5", "environment": "production", "groups": ["servers"]}
+    server = host_audit_host_record({"rc": 1, "stdout": "", "stderr": "x"}, "ns0001", declared, "2026-11-19T00:00:00Z")
+    switch = hs.host_audit_switch_record({"rc": 3}, "sw0001", declared, "2026-11-19T00:00:00Z", "ssh", [], TODAY)
+    meta = {"run_id": "ha-1", "run_kind": "on_demand", "started_at": "2026-11-19T00:00:00Z", "targets": ["ns0001"]}
+    assert host_audit_report_model([server, switch], meta) == host_audit_report_model([server], meta)

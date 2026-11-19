@@ -39,6 +39,7 @@
 | `CISCO-007` | `Collect running configuration via Bastion jump session` | `ansible.builtin.command` | Controller / Localhost | Endpoint `via`의 비밀번호 로그인 경유지(Bastion) 한 단을 통한 대화형 쉘 점프로 설정 수집 |
 | `CISCO-008` | `Resolve the Endpoint, login Credential, enable and bastion hop from OpenBao` | `ansible.builtin.set_fact` | Controller / Localhost | 순수 조회, `no_log`, 읽기 지점 `openbao_connection`(선호 순서 `[ssh, telnet]`, `become: enable`) |
 | `CISCO-009` | `Assert the resolved connection is supported by the collector` | `ansible.builtin.assert` | Controller / Localhost | 읽기 전용, `no_log` (ssh·telnet, 계정이 있는 비밀번호 로그인, 필수 키 선언, 경유는 ssh의 비밀번호 경유지 한 단까지, 위반 시 수집 전에 `CISCO-VIA` 실패) |
+| `CISCO-010` | `Collect running configuration and version for the Host Audit (read-only, one login, no retry)` | `ansible.builtin.command` | Controller / Localhost | `--audit`로 수집기를 한 번 호출(`show running-config`·`show version`만), `retries`·`until` 없음, `failed_when: false`로 종료 코드를 `cisco_audit_probe`에 남김, `no_log`. Host Audit 스위치 단계(`audit.yml`)가 쓴다 |
 
 ### 수집 로그 제어
 
@@ -46,7 +47,7 @@
 
 ### 수집기 호출 인터페이스와 읽기 전용 강제 (Spec #568 / Ticket-2)
 
-`roles/cisco_backup/files/cisco_cli_collector.py`는 백업과 스위치 점검(Host Audit 스위치 단계)이 함께 쓴다. 이 절은 수집기 코드의 규칙이며 Ansible 태스크가 아니라서 `Spec ID` 표에 행이 없다(점검 태스크는 Ticket-3이 `[CISCO-NNN]`으로 추가한다).
+`roles/cisco_backup/files/cisco_cli_collector.py`는 백업과 스위치 점검(Host Audit 스위치 단계)이 함께 쓴다. 이 절은 수집기 코드의 규칙이며 Ansible 태스크가 아니라서 `Spec ID` 표에 행이 없다(점검 수집 태스크는 `CISCO-010`).
 
 **읽기 전용 강제** (코드, 시험 `tests/test_cisco_collector_allowlist.py`)
 

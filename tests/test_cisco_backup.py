@@ -91,7 +91,7 @@ def test_inventory_cisco_switches_example_documents_the_group_without_connection
 def test_cisco_backup_spec_ids_in_tasks_and_docs():
     tasks_content = "".join(f.read_text(encoding="utf-8") for f in sorted((ROLE_DIR / "tasks").glob("*.yml")))
     doc_content = (ROOT_DIR / "docs" / "cisco_backup.md").read_text(encoding="utf-8")
-    for n in [n for n in range(1, 11) if n != 10]:
+    for n in range(1, 11):
         spec = f"CISCO-{n:03d}"
         assert f"[{spec}]" in tasks_content, f"Spec [{spec}] missing in tasks"
         assert f"`{spec}`" in doc_content, f"Spec `{spec}` missing in docs"

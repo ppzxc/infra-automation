@@ -269,7 +269,9 @@ def host_audit_report_model(records, meta):
     """
     meta = meta or {}
     tz_name = meta.get('timezone') or REPORT_TIMEZONE
-    by_host = {r['inventory_hostname']: r for r in (records or []) if r.get('inventory_hostname')}
+    # Switch records (Spec #568, device_type SWITCH) share the hosts/ directory but are not servers: the server model ignores them.
+    records = [r for r in (records or []) if r.get('device_type') != 'SWITCH']
+    by_host = {r['inventory_hostname']: r for r in records if r.get('inventory_hostname')}
     hosts = sorted(set(meta.get('targets') or []) | set(by_host))
     rows = []
     for host in hosts:
