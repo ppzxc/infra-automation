@@ -267,6 +267,24 @@ def host_audit_log_review_signed_target(request, pointer, summary=None, record=N
     return out
 
 
+def host_audit_log_review_signed_already_kept(head, md5, size):
+    """같은 바이트의 서명본 PDF가 그 키에 이미 올라가 있는가(#572). 있으면 다시 올리지 않는다.
+
+    ``head``: 키에 대한 HEAD 응답(``status``, 헤더 ``etag``·``content_length``). 200이고 크기와 ETag(큰따옴표 제외, 단일 PUT은 본문 MD5)가
+    접수 파일의 ``size``·``md5``와 모두 같을 때만 참이다. 응답이 이상하거나 ETag를 못 받으면 거짓이라 그대로 올린다
+    (건너뛰기는 최적화일 뿐, 틀리게 건너뛰면 기록이 없는 채 끝나므로 확실할 때만).
+    """
+    head = head or {}
+    if head.get('status') != 200 or not md5:
+        return False
+    etag = str(head.get('etag') or '').strip().strip('"').lower()
+    try:
+        length = int(head.get('content_length'))
+    except (TypeError, ValueError):
+        return False
+    return bool(etag) and etag == str(md5).strip().lower() and length == int(size or -1)
+
+
 def host_audit_log_review_signed_record(request, target, size, registered_at):
     """``signed/registration.json`` 내용. 서명본 PDF가 올라간 뒤에만 쓴다(등록 완료 표시)."""
     return {'schema_version': SCHEMA_VERSION, 'run_id': request['run_id'], 'review_month': target.get('review_month', ''),
@@ -285,4 +303,5 @@ class FilterModule(object):
             'host_audit_log_review_signed_file_problems': host_audit_log_review_signed_file_problems,
             'host_audit_log_review_signed_target': host_audit_log_review_signed_target,
             'host_audit_log_review_signed_record': host_audit_log_review_signed_record,
+            'host_audit_log_review_signed_already_kept': host_audit_log_review_signed_already_kept,
         }

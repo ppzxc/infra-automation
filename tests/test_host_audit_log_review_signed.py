@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT_DIR / "filter_plugins"))
 
 from host_audit_log_review import host_audit_log_review_model, host_audit_log_review_period  # noqa: E402
 from host_audit_log_review_signed import (  # noqa: E402
+    host_audit_log_review_signed_already_kept,
     host_audit_log_review_signed_file_problems,
     host_audit_log_review_signed_keys,
     host_audit_log_review_signed_lookup,
@@ -233,3 +234,31 @@ def test_the_record_carries_the_verified_hash_size_and_time():
     # 다음 달 보고서가 이 기록을 그대로 '있음'으로 읽는다(등록과 확인이 같은 형식을 쓴다)
     item = _model(_lookup(_ok(rec)))
     assert item["verdict"] == "이상 없음" and SHA in item["summary"]
+
+
+# ------------------------------------------------------------------ 이미 올라간 같은 PDF는 다시 올리지 않는다(#572)
+MD5 = "0123456789abcdef0123456789abcdef"
+
+
+def _head(status=200, etag='"%s"' % MD5, length="4096"):
+    return {"status": status, "etag": etag, "content_length": length}
+
+
+def test_the_same_bytes_already_in_the_bucket_are_not_uploaded_again():
+    assert host_audit_log_review_signed_already_kept(_head(), MD5, 4096) is True
+    assert host_audit_log_review_signed_already_kept(_head(etag=MD5.upper()), MD5, 4096) is True  # 따옴표·대소문자 무관
+
+
+@pytest.mark.parametrize("head", [
+    _head(status=404), _head(status=403), _head(status=-1), _head(status=503),   # 없음·권한·연결·서버 오류
+    _head(etag='"%s"' % ("f" * 32)),                                              # 다른 내용
+    _head(length="4097"),                                                         # 크기가 다름
+    _head(etag=""), _head(length=""), _head(length="abc"),                       # 확인할 값이 없음
+    {}, None,
+])
+def test_anything_short_of_a_certain_match_uploads(head):
+    assert host_audit_log_review_signed_already_kept(head, MD5, 4096) is False
+
+
+def test_without_a_local_md5_the_upload_is_never_skipped():
+    assert host_audit_log_review_signed_already_kept(_head(), "", 4096) is False
