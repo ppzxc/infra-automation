@@ -6,7 +6,7 @@ The collector (``roles/cisco_backup/files/cisco_cli_collector.py --audit``) prin
 ``docs/host_audit_switch.md`` (the application table). Verdicts, the exception register and the record shape are the
 server code path (``host_audit_kisa``): five verdicts, ``_apply_register``, ``results`` rows of the same keys.
 
-Adding an item (Ticket-4: N-17..N-38) is one decorated function::
+Adding an item is one decorated function (N-01..N-16 and N-17..N-38 are registered this way)::
 
     @switch_check('N-17', title='SNMP 서비스 확인', severity='상', category='기능', l2='적용', l3='적용')
     def _n17(ctx):
@@ -485,6 +485,320 @@ def _n16(ctx):
     if found and found[-1].startswith('service timestamps log datetime'):
         return 'GOOD', 'service timestamps log datetime'
     return 'VULN', 'service timestamps log datetime 아님'
+
+
+# ------------------------------------------------------------------ N-17 .. N-38 (function items, Ticket-4)
+
+def _snmp_lines(cfg):
+    return [ln for ln in cfg.top(r'snmp-server\s+\S+')]
+
+
+@switch_check('N-17', title='SNMP 서비스 확인', severity='상', category='기능')
+def _n17(ctx):
+    found = _snmp_lines(ctx['config'])
+    if found:
+        return 'VULN', 'snmp-server 설정 줄 %d개 (SNMP 사용 중)' % len(found)
+    return 'GOOD', 'snmp-server 설정 없음'
+
+
+def _communities(cfg):
+    """(string, access level or '', ACL name or '') per ``snmp-server community`` line. The string is judged, never reported."""
+    found = []
+    for ln in cfg.top(r'snmp-server community\s+\S+'):
+        toks = _tokens(ln)[3:]
+        string = _tokens(ln)[2]
+        level, acl, i = '', '', 0
+        while i < len(toks):
+            low = toks[i].lower()
+            if low in ('view', 'ipv6'):
+                i += 2
+                continue
+            if low in ('ro', 'rw'):
+                level = low
+            elif not acl:
+                acl = toks[i]
+            i += 1
+        found.append((string, level, acl))
+    return found
+
+
+def _strong_community(value):
+    classes = sum(bool(re.search(p, value)) for p in (r'[a-z]', r'[A-Z]', r'[0-9]', r'[^A-Za-z0-9]'))
+    return value.lower() not in ('public', 'private') and len(value) >= 8 and classes >= 3
+
+
+@switch_check('N-18', title='SNMP Community String 복잡성 설정', severity='상', category='기능')
+def _n18(ctx):
+    found = _communities(ctx['config'])
+    if not found:
+        return 'GOOD', 'snmp-server community 없음'
+    weak = [1 for string, _, _ in found if not _strong_community(string)]
+    if weak:
+        return 'VULN', 'community %d개 중 %d개가 public·private이거나 복잡성 기준(8자 이상, 3종 이상) 미달' % (len(found), len(weak))
+    return 'GOOD', 'community %d개 모두 복잡성 기준 충족' % len(found)
+
+
+@switch_check('N-19', title='SNMP ACL 설정', severity='상', category='기능')
+def _n19(ctx):
+    cfg = ctx['config']
+    communities = _communities(cfg)
+    groups = cfg.top(r'snmp-server group\s+\S+')
+    if not communities and not groups:
+        return 'GOOD', 'snmp-server community·group 없음'
+    problems = set()
+    for _, _, acl in communities:
+        if not acl:
+            problems.add('ACL 없는 community')
+        elif _acl_entries(cfg, acl) is None:
+            problems.add('community가 가리키는 ACL이 설정에 없음')
+    if any('access' not in _tokens(ln) for ln in groups):
+        problems.add('access 없는 SNMP group')
+    if problems:
+        return 'VULN', ', '.join(sorted(problems))
+    return 'GOOD', 'community·group %d개에 접속 제한 ACL 적용' % (len(communities) + len(groups))
+
+
+@switch_check('N-20', title='SNMP Community 권한 설정', severity='상', category='기능')
+def _n20(ctx):
+    found = _communities(ctx['config'])
+    writable = [1 for _, level, _ in found if level == 'rw']
+    if writable:
+        return 'VULN', 'community %d개 중 %d개가 RW' % (len(found), len(writable))
+    return 'GOOD', 'RW community 없음' if found else 'snmp-server community 없음'
+
+
+@switch_check('N-21', title='TFTP 서비스 차단', severity='상', category='기능')
+def _n21(ctx):
+    open_ = [ln for ln in ctx['config'].top(r'tftp-server\s+\S+') if len(_tokens(ln)) < 3]
+    if open_:
+        return 'VULN', 'tftp-server 줄 %d개에 접속 제한 ACL 없음' % len(open_)
+    return 'GOOD', 'tftp-server 없음 또는 ACL로 제한'
+
+
+# N-22: the guide's special-use ranges. A filter must deny at least the private and loopback ranges to count.
+_SPOOF_RANGES = [ipaddress.ip_network(n) for n in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8')]
+
+
+def _acl_deny_sources(cfg, name):
+    """(address, wildcard) of every deny entry's source; None when the ACL is not defined (``any`` has no address)."""
+    entries, found = [], False
+    lines = []
+    for ln in cfg.top(r'access-list\s+%s\s' % re.escape(name)):
+        found = True
+        number = int(name) if name.isdigit() else 0
+        lines.append(('standard' if (1 <= number <= 99 or 1300 <= number <= 1999) else 'extended', _tokens(ln)[2:]))
+    for head, children in cfg.blocks:
+        m = re.match(r'ip access-list\s+(standard|extended)\s+(\S+)$', head)
+        if m and m.group(2) == name:
+            found = True
+            for c in children:
+                toks = _tokens(c)
+                if toks and toks[0].isdigit():
+                    toks = toks[1:]
+                lines.append((m.group(1), toks))
+    for kind, toks in lines:
+        if not toks or toks[0] != 'deny':
+            continue
+        rest = toks[1:] if kind == 'standard' else toks[2:]
+        if not rest or rest[0] == 'any':
+            continue
+        if rest[0] == 'host' and len(rest) > 1:
+            entries.append((rest[1], '0.0.0.0'))
+        elif len(rest) > 1 and _is_address(rest[1]):
+            entries.append((rest[0], rest[1]))
+        else:
+            entries.append((rest[0], '0.0.0.0'))
+    return entries if found else None
+
+
+def _denies_spoof_ranges(sources):
+    mask = 0xFFFFFFFF
+    for net in _SPOOF_RANGES:
+        covered = False
+        for address, wildcard in sources:
+            try:
+                a, w = int(ipaddress.IPv4Address(address)), int(ipaddress.IPv4Address(wildcard))
+            except ValueError:
+                continue
+            host_bits = int(net.hostmask)
+            if (w & host_bits) == host_bits and ((a ^ int(net.network_address)) & ~w & mask) == 0:
+                covered = True
+                break
+        if not covered:
+            return False
+    return True
+
+
+@switch_check('N-22', title='Spoofing 방지 필터링 적용', severity='상', category='기능', l2='해당없음',
+              reason='L2 해당없음: 경계 구간 인터페이스에 거는 필터라 IP를 전달하지 않는 L2 스위치에는 의미가 없음')
+def _n22(ctx):
+    cfg = ctx['config']
+    interfaces = routed_interfaces(cfg)
+    for _, children in interfaces:
+        if any(c.startswith('ip verify unicast source reachable-via') for c in children):
+            return 'GOOD', 'L3 인터페이스에 uRPF 설정'
+        for c in children:
+            m = re.match(r'ip access-group\s+(\S+)\s+in$', c)
+            if m:
+                sources = _acl_deny_sources(cfg, m.group(1))
+                if sources is not None and _denies_spoof_ranges(sources):
+                    return 'GOOD', 'L3 인터페이스에 사설·루프백 대역 deny ACL을 입력 방향으로 적용'
+    return 'VULN', 'L3 인터페이스 %d개 중 스푸핑 방지 ACL(입력)·uRPF가 있는 곳 없음' % len(interfaces)
+
+
+_DDOS_REFERENCE = re.compile(r'(ip tcp intercept|rate-limit|police)\b')
+
+
+@switch_check('N-23', title='DDoS 공격 방어 설정 또는 DDoS 장비 사용', severity='상', category='기능', l2='해당없음', l3='점검불가',
+              reason='L2 해당없음: 경계 라우터의 IP 전달 방어 설정이라 L2에는 의미가 없음. L3 점검불가: 경계 라우터 여부와 별도 DDoS 장비 운용은 설정으로 알 수 없음(수동 확인)')
+def _n23(ctx):
+    cfg = ctx['config']
+    seen = sum(bool(_DDOS_REFERENCE.match(ln)) for ln in cfg.lines) + \
+        sum(bool(_DDOS_REFERENCE.match(c)) for _, children in cfg.blocks for c in children)
+    return 'MANUAL', '경계 라우터 여부와 별도 DDoS 장비 운용은 설정으로 알 수 없어 수동 확인 (참고: 방어 설정 줄 %d개)' % seen
+
+
+_PHYSICAL_PORT = re.compile(r'interface\s+(?:(?:Ten|Twenty|Forty|Hundred)?Gigabit|Fast|Ethernet)', re.I)
+
+
+@switch_check('N-24', title='사용하지 않는 인터페이스 비활성화', severity='상', category='기능', l2='점검불가', l3='점검불가',
+              reason='포트가 쓰이는지는 링크 상태와 연결 장비로만 알 수 있고 허용된 두 명령으로는 알 수 없어 수동 확인으로 둠')
+def _n24(ctx):
+    active = sum(1 for head, children in ctx['config'].blocks if _PHYSICAL_PORT.match(head) and 'shutdown' not in children)
+    return 'MANUAL', '포트 사용 여부는 링크 상태로만 알 수 있어 수동 확인 (참고: shutdown 아닌 물리 포트 %d개)' % active
+
+
+@switch_check('N-25', title='TCP Keepalive 서비스 설정', severity='중', category='기능')
+def _n25(ctx):
+    lines = ctx['config'].lines
+    missing = [n for n in ('in', 'out') if 'service tcp-keepalives-' + n not in lines]
+    if missing:
+        return 'VULN', 'service tcp-keepalives-%s 없음' % '·'.join(missing)
+    return 'GOOD', 'tcp-keepalives-in·out 설정'
+
+
+def _default_off_feature(ctx, label, enabled, explicit_off):
+    """A feature that is off by default on IOS 12.2+ (table, section 1): on -> VULN; absent -> GOOD, except before
+    12.2 (or unknown version) where only an explicit ``no`` line counts."""
+    cfg = ctx['config']
+    on = [ln for ln in cfg.lines if re.match(enabled, ln)]
+    if on:
+        return 'VULN', '%s 켜짐' % label
+    if all(line in cfg.lines for line in explicit_off):
+        return 'GOOD', '%s 끔 표기 있음' % label
+    if _is_old_or_unknown(ctx['version']):
+        return 'MANUAL', 'IOS 12.2 미만이거나 버전 불명이라 %s 줄 부재로 판정할 수 없어 수동 확인' % label
+    return 'GOOD', '%s 설정 없음(기본 꺼짐)' % label
+
+
+@switch_check('N-26', title='Finger 서비스 차단', severity='중', category='기능')
+def _n26(ctx):
+    cfg = ctx['config']
+    explicit = ['no ip finger'] if 'no ip finger' in cfg.lines else ['no service finger']
+    return _default_off_feature(ctx, 'finger 서비스', r'(ip|service) finger\b', explicit)
+
+
+@switch_check('N-27', title='웹 서비스 차단', severity='중', category='기능')
+def _n27(ctx):
+    cfg = ctx['config']
+    enabled = [ln for ln in ('ip http server', 'ip http secure-server') if ln in cfg.lines]
+    if enabled and not cfg.top(r'ip http access-class\b'):
+        return 'VULN', '%s 켜짐, ip http access-class 제한 없음' % '·'.join(enabled)
+    if enabled:
+        return 'GOOD', '웹 서비스가 켜져 있으나 ip http access-class로 제한'
+    return 'GOOD', '웹 서비스 꺼짐'
+
+
+@switch_check('N-28', title='TCP/UDP small 서비스 차단', severity='중', category='기능')
+def _n28(ctx):
+    return _default_off_feature(ctx, 'small 서비스', r'service (tcp|udp)-small-servers\b',
+                                ['no service tcp-small-servers', 'no service udp-small-servers'])
+
+
+@switch_check('N-29', title='Bootp 서비스 차단', severity='중', category='기능')
+def _n29(ctx):
+    lines = ctx['config'].lines
+    if 'no ip bootp server' in lines or 'ip dhcp bootp ignore' in lines:
+        return 'GOOD', 'bootp 서버 차단 설정'
+    return 'VULN', 'no ip bootp server·ip dhcp bootp ignore 모두 없음'
+
+
+@switch_check('N-30', title='CDP 서비스 차단', severity='중', category='기능')
+def _n30(ctx):
+    if 'no cdp run' in ctx['config'].lines:
+        return 'GOOD', 'no cdp run'
+    return 'VULN', 'no cdp run 없음'
+
+
+@switch_check('N-31', title='Directed-broadcast 차단', severity='중', category='기능', l2='해당없음',
+              reason='L2 해당없음: 서브넷 사이 IP 전달에서만 생기는 기능이라 라우팅하지 않는 L2에는 의미가 없음')
+def _n31(ctx):
+    interfaces = routed_interfaces(ctx['config'])
+    bad = [1 for _, children in interfaces if any(c.startswith('ip directed-broadcast') for c in children)]
+    if bad:
+        return 'VULN', 'L3 인터페이스 %d개 중 %d개에 ip directed-broadcast' % (len(interfaces), len(bad))
+    return 'GOOD', 'L3 인터페이스 %d개에 ip directed-broadcast 없음' % len(interfaces)
+
+
+@switch_check('N-32', title='Source Routing 차단', severity='중', category='기능', l2='해당없음',
+              reason='L2 해당없음: IP 패킷을 전달하지 않는 L2에는 의미가 없음')
+def _n32(ctx):
+    if 'no ip source-route' in ctx['config'].lines:
+        return 'GOOD', 'no ip source-route'
+    return 'VULN', 'no ip source-route 없음'
+
+
+@switch_check('N-33', title='Proxy ARP 차단', severity='중', category='기능', l2='해당없음',
+              reason='L2 해당없음: 라우팅 인터페이스가 없으면 Proxy ARP 응답 주체가 아님')
+def _n33(ctx):
+    interfaces = routed_interfaces(ctx['config'])
+    bad = [1 for _, children in interfaces if 'no ip proxy-arp' not in children]
+    if bad:
+        return 'VULN', 'L3 인터페이스 %d개 중 %d개에 no ip proxy-arp 없음' % (len(interfaces), len(bad))
+    return 'GOOD', 'L3 인터페이스 %d개 모두 no ip proxy-arp' % len(interfaces)
+
+
+@switch_check('N-34', title='ICMP unreachable, redirect 차단', severity='중', category='기능', l2='해당없음',
+              reason='L2 해당없음: 라우팅 인터페이스가 없으면 ICMP unreachable·redirect를 만들지 않음')
+def _n34(ctx):
+    cfg = ctx['config']
+    interfaces = routed_interfaces(cfg)
+    bad = [1 for _, children in interfaces
+           if 'no ip unreachables' not in children or 'no ip redirects' not in children]
+    bad += [1 for head, children in cfg.blocks if re.match(r'interface\s+Null', head) and 'no ip unreachables' not in children]
+    if bad:
+        return 'VULN', '인터페이스 %d개에 no ip unreachables·no ip redirects 누락' % len(bad)
+    return 'GOOD', 'L3 인터페이스 %d개 모두 unreachables·redirects 차단' % len(interfaces)
+
+
+@switch_check('N-35', title='identd 서비스 차단', severity='중', category='기능')
+def _n35(ctx):
+    return _default_off_feature(ctx, 'identd 서비스', r'ip identd\b', ['no ip identd'])
+
+
+@switch_check('N-36', title='Domain Lookup 차단', severity='중', category='기능')
+def _n36(ctx):
+    lines = ctx['config'].lines
+    if 'no ip domain-lookup' in lines or 'no ip domain lookup' in lines:
+        return 'GOOD', 'no ip domain-lookup'
+    return 'VULN', 'no ip domain-lookup 없음'
+
+
+@switch_check('N-37', title='pad 차단', severity='중', category='기능')
+def _n37(ctx):
+    if 'no service pad' in ctx['config'].lines:
+        return 'GOOD', 'no service pad'
+    return 'VULN', 'no service pad 없음'
+
+
+@switch_check('N-38', title='mask-reply 차단', severity='중', category='기능', l2='해당없음',
+              reason='L2 해당없음: 서브넷마스크를 응답할 라우팅 인터페이스가 없음')
+def _n38(ctx):
+    interfaces = routed_interfaces(ctx['config'])
+    bad = [1 for _, children in interfaces if any(c.startswith('ip mask-reply') for c in children)]
+    if bad:
+        return 'VULN', 'L3 인터페이스 %d개 중 %d개에 ip mask-reply' % (len(interfaces), len(bad))
+    return 'GOOD', 'L3 인터페이스 %d개에 ip mask-reply 없음' % len(interfaces)
 
 
 # ------------------------------------------------------------------ judgement

@@ -243,7 +243,7 @@ def test_every_switch_gets_a_record_with_the_audit_flag_one_login_and_secrets_on
     rec = res.records["ns0003"]
     assert rec["device_type"] == "SWITCH" and rec["status"] == "ok" and rec["inventory_hostname"] == "ns0003"
     assert rec["declared"]["groups"] == ["cisco_switches"] and rec["declared"]["environment"] == "production"
-    assert rec["switch"]["access"] == "ssh" and len(rec["config_vulnerability"]["results"]) == 16
+    assert rec["switch"]["access"] == "ssh" and len(rec["config_vulnerability"]["results"]) == 38
     assert rec["config_vulnerability"]["results"][0]["code"] == "KISA-2026:N-01"
     assert stat.S_IMODE((res.hosts_dir / "ns0003.json").stat().st_mode) == 0o600
     assert "fake-pw" not in res.out
