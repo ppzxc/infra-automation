@@ -1023,7 +1023,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 
 ## 19. 스위치 취약점 점검 (Spec #568 / Ticket-3, #585)
 
-월간 실행이 `cisco_switches` 전체를 KISA-2026 V장(네트워크 장비) 항목(`KISA-2026:N-NN`)으로 점검한다. 항목별 적용 여부와 취약 판정 조건은 [host_audit_switch.md](host_audit_switch.md)(적용 표)가 기준이고, 판정 코드와 표는 `tests/test_host_audit_switch.py`가 대조한다. 판정 범위는 N-01~N-38 38개 전체다(N-01~N-16은 Ticket-3, N-17~N-38은 Ticket-4가 항목 함수로 등록). 역할(L2/L3)에서 해당없음인 항목(L2의 N-22·23·31~34·38)은 함수를 부르지 않고 표의 사유를 증적으로 남기며, 설정으로 알 수 없는 항목(N-12·N-24, L3의 N-23)은 점검불가(수동 확인)와 사유를 JSON에 남긴다. 이 단계는 호스트별 JSON만 쓰고, 보고서에 싣는 방법은 §19.3이다.
+월간 실행이 `cisco_switches` 전체를 KISA-2026 V장(네트워크 장비) 항목(`KISA-2026:N-NN`)으로 점검한다. 항목별 적용 여부와 취약 판정 조건은 [host_audit_switch.md](host_audit_switch.md)(적용 표)가 기준이고, 판정 코드와 표는 `tests/test_host_audit_switch.py`가 대조한다. 판정 범위는 N-01~N-38 38개 전체다(N-01~N-16은 Ticket-3, N-17~N-38은 Ticket-4가 항목 함수로 등록). 역할(L2/L3, `ip routing` 줄이 있으면 L3)에서 해당없음인 항목(L2의 N-22·23·31~34·38)은 함수를 부르지 않고 표의 사유를 증적으로 남기며, 설정으로 알 수 없는 항목(N-12·N-24, L3의 N-22·N-23)은 점검불가(수동 확인)와 사유를 JSON에 남긴다. 이 단계는 호스트별 JSON만 쓰고, 보고서에 싣는 방법은 §19.3이다.
 
 - **단계 위치**: `playbooks/host_audit.yml`의 서버 수집·임시 키 정리 뒤, 보고서 앞. play는 `hosts: host_audit_switch_targets`, `serial: 1`(한 번에 한 대, 로그인 폭주 방지)이다. 서버 단계의 동작과 출력은 바뀌지 않는다.
 - **대상 선택**: `[AUD-008]`이 `host_audit_switch_scope_pattern`(기본 `cisco_switches:!host_audit_excluded`, 러너에서 접속할 수 없어 `host_audit_excluded`에 둔 호스트는 뺀다)을 서버 선택(`host_audit_scope_pattern`)과 따로 고른다. `target_hosts`가 있으면 교집합이고, 서버로 이미 선택된 호스트는 뺀다.

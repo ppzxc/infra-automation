@@ -270,8 +270,11 @@ def test_n15_without_access_group_is_manual_only_for_old_ios_or_unknown_version(
 # ------------------------------------------------------------ L2/L3 판정
 
 
-L3_CONFIGS = {
-    "ip routing": "ip routing",
+def test_l3_is_detected_by_ip_routing_only():
+    assert hs.device_role(edit(add=["ip routing"])) == "L3"
+
+
+MANAGEMENT_ADDRESSES = {
     "SVI 주소": "interface Vlan10\n ip address 192.0.2.1 255.255.255.0",
     "라우티드 포트": "interface GigabitEthernet1/0/1\n no switchport\n ip address 192.0.2.5 255.255.255.252",
     "Loopback 주소": "interface Loopback0\n ip address 192.0.2.9 255.255.255.255",
@@ -279,9 +282,9 @@ L3_CONFIGS = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(L3_CONFIGS))
-def test_l3_is_detected_by_the_table_rules(name):
-    assert hs.device_role(edit(add=[L3_CONFIGS[name]])) == "L3"
+@pytest.mark.parametrize("name", sorted(MANAGEMENT_ADDRESSES))
+def test_an_address_on_an_interface_without_ip_routing_stays_l2(name):
+    assert hs.device_role(edit(add=[MANAGEMENT_ADDRESSES[name]])) == "L2"
 
 
 def test_l2_when_nothing_routes():
@@ -556,18 +559,8 @@ FUNCTION_CASES = [
     ("N-37", "no service pad", edit(), GOOD),
     ("N-37", "줄 없음", edit(drop=[r"^no service pad\n"]), VULNERABLE),
     # L3 전용 항목
-    ("N-22", "ACL과 uRPF 없음", l3(drop=[r"^ ip access-group SPOOF in\n"]), VULNERABLE),
-    ("N-22", "특수 대역 deny ACL을 입력 방향으로", l3(), GOOD),
-    ("N-22", "uRPF만 있어도", l3(sub=[(" ip access-group SPOOF in", " ip verify unicast source reachable-via rx")]), GOOD),
-    ("N-22", "ACL을 출력 방향으로 걸면 인정 안 함", l3(sub=[(" ip access-group SPOOF in", " ip access-group SPOOF out")]), VULNERABLE),
-    ("N-22", "ACL에 사설 대역 deny 빠짐", l3(sub=[(" deny ip 10.0.0.0 0.255.255.255 any\n", "")]), VULNERABLE),
-    ("N-22", "ACL에 루프백 deny 빠짐", l3(sub=[(" deny ip 127.0.0.0 0.255.255.255 any\n", "")]), VULNERABLE),
-    ("N-22", "ACL이 설정에 없음", l3(sub=[("ip access-list extended SPOOF", "ip access-list extended OTHER")]), VULNERABLE),
-    ("N-22", "번호 ACL", l3(sub=[(" ip access-group SPOOF in", " ip access-group 150 in")],
-                         add=["access-list 150 deny ip 10.0.0.0 0.255.255.255 any", "access-list 150 deny ip 127.0.0.0 0.255.255.255 any",
-                              "access-list 150 deny ip 172.16.0.0 0.15.255.255 any", "access-list 150 deny ip 192.168.0.0 0.0.255.255 any",
-                              "access-list 150 permit ip any any"]), GOOD),
-    ("N-22", "라우팅 인터페이스가 없음", edit(add=["ip routing"]), VULNERABLE),
+    ("N-22", "L3는 항상 점검불가(수동 확인)", l3(), MANUAL),
+    ("N-22", "필터가 없어도 취약으로 내리지 않는다", l3(drop=[r"^ ip access-group SPOOF in\n"]), MANUAL),
     ("N-23", "L3는 항상 점검불가(수동 확인)", l3(), MANUAL),
     ("N-24", "항상 점검불가(수동 확인)", edit(), MANUAL),
     ("N-31", "directed-broadcast 없음", l3(), GOOD),
@@ -608,7 +601,7 @@ def test_default_dependent_items_are_manual_before_ios_12_2_unless_explicitly_of
 def test_l3_baseline_is_good_for_every_item_except_the_fixed_manual_ones():
     result = judge(L3_GOOD)
     assert result["role"] == "L3"
-    assert {c: x for c, x in v(result).items() if x != GOOD} == {"N-12": MANUAL, "N-23": MANUAL, "N-24": MANUAL}
+    assert {c: x for c, x in v(result).items() if x != GOOD} == {"N-12": MANUAL, "N-22": MANUAL, "N-23": MANUAL, "N-24": MANUAL}
 
 
 def test_all_38_items_are_registered_and_each_matches_the_table_for_l2_and_l3():
@@ -650,9 +643,10 @@ def test_unverifiable_items_keep_a_reason_in_the_json_for_both_roles():
         for code in ("N-12", "N-24"):
             row = verdict(judge(config), code)
             assert row["verdict"] == MANUAL and "수동 확인" in row["evidence"], code
-    row = verdict(judge(L3_GOOD), "N-23")
-    assert row["verdict"] == MANUAL and "수동 확인" in row["evidence"]
-    for code in ("N-23", "N-24"):
+    for code in ("N-22", "N-23"):
+        row = verdict(judge(L3_GOOD), code)
+        assert row["verdict"] == MANUAL and "수동 확인" in row["evidence"], code
+    for code in ("N-22", "N-23", "N-24"):
         assert hs.CHECKS[code]["reason"] == reasons[code]
 
 

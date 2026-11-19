@@ -145,11 +145,9 @@ def routed_interfaces(cfg):
 
 
 def device_role(config_text):
-    """L3 when ``ip routing`` is on or any routing interface has ``ip address <addr> <mask>``; else L2 (table, section 1)."""
+    """L3 only when ``ip routing`` is on; else L2 (table, section 1). A management SVI alone does not make an L3 switch."""
     cfg = config_text if isinstance(config_text, Config) else Config(config_text)
-    if 'no ip routing' not in cfg.lines and 'ip routing' in cfg.lines:
-        return 'L3'
-    return 'L3' if routed_interfaces(cfg) else 'L2'
+    return 'L3' if 'no ip routing' not in cfg.lines and 'ip routing' in cfg.lines else 'L2'
 
 
 def _ios_version(text):
@@ -579,75 +577,17 @@ def _n21(ctx):
     return 'GOOD', 'tftp-server 없음 또는 ACL로 제한'
 
 
-# N-22: the guide's special-use ranges. A filter must deny at least the private and loopback ranges to count.
-_SPOOF_RANGES = [ipaddress.ip_network(n) for n in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8')]
+_N22_REASON = ('L2 해당없음: 경계 구간 인터페이스에 거는 필터라 IP를 전달하지 않는 L2 스위치에는 의미가 없음. '
+               'L3 점검불가: 경계 구간 여부를 설정으로 알 수 없어 내부 L3 스위치가 대부분 취약으로 나오므로 수동 확인')
 
 
-def _acl_deny_sources(cfg, name):
-    """(address, wildcard) of every deny entry's source; None when the ACL is not defined (``any`` has no address)."""
-    entries, found = [], False
-    lines = []
-    for ln in cfg.top(r'access-list\s+%s\s' % re.escape(name)):
-        found = True
-        number = int(name) if name.isdigit() else 0
-        lines.append(('standard' if (1 <= number <= 99 or 1300 <= number <= 1999) else 'extended', _tokens(ln)[2:]))
-    for head, children in cfg.blocks:
-        m = re.match(r'ip access-list\s+(standard|extended)\s+(\S+)$', head)
-        if m and m.group(2) == name:
-            found = True
-            for c in children:
-                toks = _tokens(c)
-                if toks and toks[0].isdigit():
-                    toks = toks[1:]
-                lines.append((m.group(1), toks))
-    for kind, toks in lines:
-        if not toks or toks[0] != 'deny':
-            continue
-        rest = toks[1:] if kind == 'standard' else toks[2:]
-        if not rest or rest[0] == 'any':
-            continue
-        if rest[0] == 'host' and len(rest) > 1:
-            entries.append((rest[1], '0.0.0.0'))
-        elif len(rest) > 1 and _is_address(rest[1]):
-            entries.append((rest[0], rest[1]))
-        else:
-            entries.append((rest[0], '0.0.0.0'))
-    return entries if found else None
-
-
-def _denies_spoof_ranges(sources):
-    mask = 0xFFFFFFFF
-    for net in _SPOOF_RANGES:
-        covered = False
-        for address, wildcard in sources:
-            try:
-                a, w = int(ipaddress.IPv4Address(address)), int(ipaddress.IPv4Address(wildcard))
-            except ValueError:
-                continue
-            host_bits = int(net.hostmask)
-            if (w & host_bits) == host_bits and ((a ^ int(net.network_address)) & ~w & mask) == 0:
-                covered = True
-                break
-        if not covered:
-            return False
-    return True
-
-
-@switch_check('N-22', title='Spoofing 방지 필터링 적용', severity='상', category='기능', l2='해당없음',
-              reason='L2 해당없음: 경계 구간 인터페이스에 거는 필터라 IP를 전달하지 않는 L2 스위치에는 의미가 없음')
+@switch_check('N-22', title='Spoofing 방지 필터링 적용', severity='상', category='기능', l2='해당없음', l3='점검불가',
+              reason=_N22_REASON)
 def _n22(ctx):
     cfg = ctx['config']
-    interfaces = routed_interfaces(cfg)
-    for _, children in interfaces:
-        if any(c.startswith('ip verify unicast source reachable-via') for c in children):
-            return 'GOOD', 'L3 인터페이스에 uRPF 설정'
-        for c in children:
-            m = re.match(r'ip access-group\s+(\S+)\s+in$', c)
-            if m:
-                sources = _acl_deny_sources(cfg, m.group(1))
-                if sources is not None and _denies_spoof_ranges(sources):
-                    return 'GOOD', 'L3 인터페이스에 사설·루프백 대역 deny ACL을 입력 방향으로 적용'
-    return 'VULN', 'L3 인터페이스 %d개 중 스푸핑 방지 ACL(입력)·uRPF가 있는 곳 없음' % len(interfaces)
+    seen = sum(any(c.startswith('ip verify unicast source reachable-via') or re.match(r'ip access-group\s+\S+\s+in$', c)
+                   for c in children) for _, children in routed_interfaces(cfg))
+    return 'MANUAL', '경계 구간 여부는 설정으로 알 수 없어 수동 확인 (참고: 입력 필터·uRPF가 있는 인터페이스 %d개)' % seen
 
 
 _DDOS_REFERENCE = re.compile(r'(ip tcp intercept|rate-limit|police)\b')
