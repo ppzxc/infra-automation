@@ -87,6 +87,7 @@ def test_index_covers_every_document_kind_of_the_skeleton():
         "secrets/services/alert/notify", "secrets/services/github/org_hooks_read",
         "secrets/services/funa/proxy", "secrets/services/funa/vrrp", "secrets/services/semaphore/inventory_read",
         "secrets/services/forgejo/idc_access_bot", "secrets/services/forgejo/idc_access_bot_login",
+        "secrets/services/forgejo/idc_access_webhook",
         "secrets/services/gws/directory_read",
         "secrets/automation/ssh", "inventory/operators/alice", "inventory/config/common",
         "inventory/config/host_audit", "inventory/config/openobserve_config", "inventory/config/github_webhook_watch",

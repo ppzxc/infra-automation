@@ -30,4 +30,5 @@
 "secrets/services/forgejo/idc_access_bot": secrets/services/token.schema.json
 "secrets/services/forgejo/idc_access_bot_login": secrets/services/basic_auth.schema.json
 "secrets/services/forgejo/ops_read": secrets/services/token.schema.json
+"secrets/services/forgejo/idc_access_webhook": secrets/services/token.schema.json
 "secrets/services/gws/directory_read": secrets/services/gws_directory_read.schema.json
