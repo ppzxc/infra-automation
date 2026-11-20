@@ -41,7 +41,7 @@ applier:
   cidrs: runner
 
 # 작업 계열별 정책과 AppRole(Spec #511 / Ticket-7, #506 §1~§5). 키가 AppRole 이름이고, 관리 대상 AppRole 목록은 이 키에서 파생한다.
-# 모든 계열이 inventory-base(Service·공통 설정)를 읽는다. Automation Identity(connect 묶음)는 서버 계열 provision·host_agents·host_audit에만 준다.
+# 모든 계열이 inventory-base(Service·공통 설정)를 읽는다. Automation Identity(connect 묶음)는 서버 계열 provision·host_agents·host_audit에만 준다(원장 계열 ledger는 수집 템플릿 PR에서 더한다).
 # 서버·작업 계열의 list 권한은 periodic_check(periodic-check)에만 준다. 에이전트 세션(agent_session)은 조사용으로 inventory/·secrets/의 metadata list만 갖는다(비밀 값 아님).
 # secret_id_ttl 기본값은 180일(15552000초)이다. agent_session은 Semaphore 밖(에이전트 세션)에서 쓰므로 24시간, 별도 출발지 CIDR이다.
 # token_ttl은 모두 1800초(30분), token_max_ttl은 가장 긴 실행보다 길게 잡는다(Host Audit은 드리프트 시간 제한 3600초를 고려한다).
@@ -84,6 +84,11 @@ families:
     token_max_ttl: 3600
   github_webhook_watch:
     policies: [inventory-base, github-org-hooks-read, openobserve-ingest, config-github-webhook-watch]
+    token_max_ttl: 3600
+  # 원장(idc-access, 비공개 저장소) 템플릿 계열(Spec #630). GWS 키·고객 ID·봇 토큰 읽기만 준다. 서버 접속(connect)은 접속이 필요한 수집 템플릿(#645)이 별도 PR로 더한다.
+  # 쓰기 권한은 없다. 값 쓰기는 operator만 한다. 봇 로그인·개인 토큰 문서는 정책에 없다(ledger-secrets.hcl 주석).
+  ledger:
+    policies: [inventory-base, alert-notify, ledger-secrets]
     token_max_ttl: 3600
   periodic_check:
     policies: [periodic-check]

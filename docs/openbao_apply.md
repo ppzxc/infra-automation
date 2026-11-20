@@ -71,6 +71,8 @@ htpasswd -niBC 10 x | cut -d: -f2 | sed 's/^\$2y/$2a/'
 
 적용 뒤 정책이 바뀐 계열의 대표 실행을 한 번 돌려 허용과 거부(범위 밖 경로 403)를 확인한다.
 
+**새 계열 AppRole을 추가한 경우**(예: `ledger`, Spec #630): `apply`는 정책과 AppRole 정의만 만든다. `secret_id` 발급([운영 런북 2절](runbooks/openbao-operations.md))과 Semaphore Environment(`VAULT_ADDR`·`VAULT_ROLE_ID`·`VAULT_SECRET_ID`) 등록은 운영자 단계이고 이 도구가 하지 않는다. 비밀 값 문서 적재도 운영자가 `operator`로 한다. `ledger`에는 서버 접속용 `connect`가 아직 없고 수집 템플릿(#645)의 별도 PR에서 더한다.
+
 ## 6. 검증
 
 CI는 `pytest tests/`의 `tests/test_openbao_apply.py`(선언 코드 정적 검사와 공용 가짜 OpenBao 통합 검사: 멱등, `plan` 종료 코드, 값 비노출, 삭제·tune·`secret_id` 발급 없음), `tests/test_openbao_policies.py`(계열 × 경로 매트릭스), `tests/test_openbao_docs_check.py`(Periodic Check)가 돈다. 실서버 허용·거부 시험은 전환 동결 창의 확인 목록에서 한다.
