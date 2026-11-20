@@ -305,7 +305,10 @@ def test_jsonschema_is_a_test_dependency():
     {"sa_json": "x"},                                             # customer_id 없음
     {"customer_id": "C0"},                                        # sa_json 없음
     {"sa_json": "", "customer_id": "C0"},                         # 빈 문자열
-    {"sa_json": {"type": "service_account"}, "customer_id": "C0"},  # 객체가 아니라 문자열이어야 한다
+    {"sa_json": {}, "customer_id": "C0"},                         # 빈 객체
+    {"sa_json": {"type": "service_account"}, "customer_id": "C0"},  # 객체인데 client_email·private_key 없음
+    {"sa_json": {"type": "service_account", "client_email": "a", "private_key": "b", "x": "1"}, "customer_id": "C0"},  # 알 수 없는 키
+    {"sa_json": ["x"], "customer_id": "C0"},                      # 문자열도 객체도 아님
     {"sa_json": "x", "customer_id": "C0", "extra": "1"},          # 알 수 없는 키
 ])
 def test_gws_directory_read_rejects_malformed_documents(doc):
@@ -314,4 +317,10 @@ def test_gws_directory_read_rejects_malformed_documents(doc):
 
 def test_gws_directory_read_accepts_the_two_required_string_keys():
     doc = {"sa_json": "{\"fake\": true}", "customer_id": "C0fake"}
+    assert ov.validate_store({"secrets/services/gws/directory_read": doc}, SCHEMA_DIR) == []
+
+
+def test_gws_directory_read_accepts_sa_json_stored_as_an_object():
+    """소비 쪽(idc-access envload)이 객체는 json.dumps로 문자열화해 쓰므로, 객체로 둔 서비스 계정 JSON도 유효하다."""
+    doc = {"sa_json": {"type": "service_account", "client_email": "fake@x", "private_key": "FAKE"}, "customer_id": "C0fake"}
     assert ov.validate_store({"secrets/services/gws/directory_read": doc}, SCHEMA_DIR) == []
