@@ -59,7 +59,10 @@
 | 헤더 | `X-Forgejo-Event`(`push`, `pull_request` 등), `X-Forgejo-Delivery` | 소스 + 출처 [f-hooks] |
 | 웹훅 브랜치 필터 | 웹훅 설정에 `branch_filter`(glob)가 있어 `main`만 보내게 할 수 있다 | 소스 `hook.go` |
 
-예시 구성(추론): pull_request 웹훅 하나 + 매처 3개(`X-Forgejo-Event` equals `pull_request`, `action` equals `closed`, `pull_request.merged` equals `true`) + 추출기 2개(`pull_request.number` → `pr_number`, `pull_request.merge_commit_sha` → `merge_commit`). 매처를 쓰려면 프로젝트 alias로 받아야 한다.
+예시 구성(추론): pull_request 웹훅 하나 + 매처 5개(`X-Forgejo-Event` equals `pull_request`, `action` equals `closed`, `pull_request.merged` equals `true`, `pull_request.base.ref` equals `main`, `repository.full_name` equals 대상 저장소) + 추출기 2개(`pull_request.number` → `pr_number`, `pull_request.merge_commit_sha` → `merge_commit`). 매처를 쓰려면 프로젝트 alias로 받아야 한다.
+
+- 기준 브랜치 매처가 없으면 `main`이 아닌 브랜치로 병합된 PR도 적용 템플릿을 부른다(pull_request 이벤트에는 웹훅 `branch_filter`가 기준 브랜치 기준으로 걸리는지 확인하지 않았다).
+- 프로젝트 alias는 그 프로젝트의 **모든 integration**을 차례로 검사하고, 인증도 integration마다 따로 한다(소스 `ReceiveIntegration`). `firewall-policy`와 `idc-access`가 한 Semaphore 프로젝트에 있고 서명 비밀까지 같으면 한 저장소의 병합이 다른 저장소의 템플릿을 시작할 수 있다. integration마다 비밀을 따로 두고 `repository.full_name` 매처를 건다(권고).
 
 ## 2. (b) Forgejo Actions → Semaphore REST API
 
@@ -71,7 +74,7 @@
 | 커밋 고정의 한계 | ① `api-docs.yml` 요청 스키마에 없어 업그레이드 때 깨질 수 있다. ② 같은 템플릿의 병렬 태스크는 작업 트리를 공유한다(소스 주석: "parallel tasks pinned to different commits still share the working tree"). 연속 병합이 겹치면 서로의 체크아웃을 덮을 수 있다. ③ monorepo 저장소 모드에서는 브랜치·커밋 선택이 막힌다고 문서가 적는다 | 소스 + 출처 [s-repo] |
 | 브랜치 덮어쓰기 | `git_branch`는 템플릿의 `allow_override_branch_in_task`가 켜져 있을 때만 반영된다 | 소스 `resolveGitBranch` |
 | 덮어쓰기 제한이 없는 필드 | `playbook`(저장소 밖 경로만 막음), `commit_hash`, `environment`(extra vars)는 템플릿 허용 설정과 무관하게 반영된다 | 소스 `getPlaybookArgs`, `ValidatePlaybookPath` |
-| Forgejo Actions에서 호출 | `run:` 단계에서 `curl`로 호출하고 토큰은 `${{ secrets.X }}`로 읽는다. PR 번호는 `forgejo.event.pull_request.number`, 커밋은 `forgejo.sha` 등 컨텍스트로 얻는다 | 출처 [f-ref] |
+| Forgejo Actions에서 호출 | `run:` 단계에서 `curl`로 호출하고 토큰은 `${{ secrets.X }}`로 읽는다. 커밋은 `forgejo.sha`, 이벤트 페이로드 전체는 `forgejo.event`(PR 이벤트면 `forgejo.event.pull_request.number`)로 얻는다 | 출처 [f-ref](`forgejo.sha`·`forgejo.event` 정의) + 추론(PR 번호 경로는 웹훅 페이로드 구조에서 유추) |
 | 결과 표시 | 워크플로 작업의 성공·실패가 Forgejo에 커밋 상태로 보인다. 태스크가 끝날 때까지 폴링하면 그 결과가 곧 상태가 된다. 대신 폴링하는 동안 러너 하나를 점유한다 | 추론 |
 
 ## 3. 비교 항목별 정리
@@ -106,7 +109,7 @@
 **권고: (a) Integration 유지.** 이유:
 
 1. ADR-0016의 전제("병합이 곧 운영 변경, `main` 보호와 병합 리뷰 필수")를 지키는 데 (a)가 더 맞다. (b)의 Semaphore 토큰은 범위를 좁힐 수 없고, 같은 저장소 브랜치의 워크플로가 시크릿을 쓸 수 있어 리뷰 없이 적용 템플릿을 부를 수 있다.
-2. 커밋 고정은 ADR-0016이 정한 대안으로 충분하다. 웹훅의 `merge_commit_sha`(또는 push `after`)를 extra var로 받고, 플레이북 첫 태스크에서 체크아웃된 커밋(`semaphore_vars`의 `task_details.commit_hash`, 셸 앱은 `SEMAPHORE_TASK_DETAILS_COMMIT_HASH`, 출처 [s-taskenv])과 비교해 다르면 실패한다. 연속 병합 때 앞선 태스크가 실패하는 것은 의도된 동작(마지막 병합만 적용)으로 볼 수 있다.
+2. 커밋 고정은 ADR-0016이 정한 대안으로 충분하다. 웹훅의 `merge_commit_sha`(또는 push `after`)를 extra var로 받고, 플레이북 첫 태스크에서 체크아웃된 커밋(`semaphore_vars`의 `task_details.commit_hash`, 셸 앱은 `SEMAPHORE_TASK_DETAILS_COMMIT_HASH`, 출처 [s-taskenv])과 비교해 다르면 실패한다. `LocalExecutor.Run`은 `prepareRun`(체크아웃, 이때 커밋을 기록)을 끝낸 뒤 `getPlaybookArgs`에서 extra vars를 만들므로 이 값은 실제 체크아웃된 커밋이다(소스). 연속 병합 때 앞선 태스크가 실패하는 것은 의도된 동작(마지막 병합만 적용)으로 볼 수 있다.
 3. 결과 보고는 플레이북의 `always` 블록에서 Forgejo 상태 API를 호출한다. 토큰은 OpenBao `secrets/`에 두고 계열 AppRole로 읽는다. 플레이북 시작 전 실패는 Semaphore 알림(이메일)과 보조 스케줄(§4)로 메운다.
 4. 구성 요소가 적다. Forgejo Runner가 없어도 된다.
 
@@ -124,6 +127,7 @@
 - 운영 Forgejo 버전과 Forgejo Runner 운영 여부.
 - `commit_hash` 고정을 실제로 실행해 보지 않았다(소스만 읽음). 원격 러너 경로의 동작도 보지 않았다(운영은 로컬 실행기).
 - 프로젝트 alias에서 `pull_request.merged` 같은 bool 값 매칭을 실제 Forgejo 페이로드로 시험하지 않았다(소스상 `"true"` 문자열 비교).
+- Forgejo 웹훅 `branch_filter`가 pull_request 이벤트에서 기준 브랜치에 적용되는지 확인하지 않았다(그래서 매처로 기준 브랜치를 거는 것을 권고).
 - Semaphore 업그레이드 시 `hmac-sha512` 등 문서에만 있는 기능이 들어오는 버전.
 
 [s-int]: https://github.com/semaphoreui/semaphore-docs/blob/main/docs/user-guide/integrations.md
