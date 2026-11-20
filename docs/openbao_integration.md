@@ -111,7 +111,7 @@ Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나�
 | `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review |
 | `network_backup` | Cisco·FortiGate 백업 |
 | `github_webhook_watch` | 조직 웹훅 감시 |
-| `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap. 서버 접속(`connect`)은 아직 없고 수집 템플릿(#645)의 별도 PR에서 더한다 |
+| `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap. 서버 접속은 `connect` 묶음 대신 읽기 전용 `ledger-connect`(Asset·Endpoint·Automation Identity 키)만 준다. list는 예외로 `inventory/metadata/assets/` 한 경로뿐이다(Asset 스냅샷이 호스트 이름 목록을 나열해야 하고, 목록에는 이름만 보이며 `agent_session`이 이미 `inventory/` 전체를 list한다). 전 서버 로그인 Credential(`secrets/assets/+/credentials/+`)은 열지 않는다: 수집기는 키 접속만 지원하고 비밀번호 Credential은 어차피 쓰지 못한다. 비밀번호 Credential이 필요해지면 별도 결정이다 |
 | `periodic_check` | OpenBao — Periodic Check |
 | `agent_session` | 에이전트 세션(Semaphore 밖) |
 | `applier` | `scripts/openbao_apply.py`(적용 전용, Semaphore 밖) |
@@ -122,7 +122,7 @@ Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, s
 
 - `operator`: `infra` 안 userpass 사용자. 전체 읽기(list 포함)와 create/update만 하고 delete·`sys/`는 없다. 등록 도구가 이 권한으로 쓴다.
 - `admin`: 루트 네임스페이스의 비상용. 삭제·영구 삭제·정책 수동 변경에만 쓴다([openbao-operations](runbooks/openbao-operations.md)).
-- 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절). `inventory/`·`secrets/`의 metadata list·read(이름·버전)를 가지며, 작업 계열 중 list는 `periodic_check`만 갖는다. 개인정보(`inventory/config/host_audit`의 수신자·발신자), 웹훅 주소(`inventory/config/github_webhook_watch`의 `hook_url`), Log Review 기준 목록(`inventory/config/log_review`의 출발지·내부 주소·개인정보처리시스템 목록) 문서는 `deny`라 읽지 못한다(세 문서의 metadata는 보인다).
+- 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절). `inventory/`·`secrets/`의 metadata list·read(이름·버전)를 가지며, 작업 계열 중 list는 `periodic_check`와 예외 한 경로(`ledger`의 `inventory/metadata/assets/`)만 갖는다. 개인정보(`inventory/config/host_audit`의 수신자·발신자), 웹훅 주소(`inventory/config/github_webhook_watch`의 `hook_url`), Log Review 기준 목록(`inventory/config/log_review`의 출발지·내부 주소·개인정보처리시스템 목록) 문서는 `deny`라 읽지 못한다(세 문서의 metadata는 보인다).
 
 정책·AppRole·마운트는 선언 코드(`openbao/`)를 고치고 `scripts/openbao_apply.py`로만 바꾼다([openbao_apply.md](openbao_apply.md)).
 
