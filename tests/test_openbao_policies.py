@@ -194,13 +194,12 @@ def test_ledger_secrets_reads_only_gws_key_and_bot_token_not_login_or_personal_t
     assert "connect" not in fam["ledger"]
 
 
-def test_ledger_connect_is_read_only_key_access_without_login_credentials():
-    # Spec #630 / #645: Asset·Endpoint·Automation Identity 키만. 로그인 Credential·operators는 없다. 쓰기도 없고 list는 호스트 목록 한 경로뿐이다.
-    assert readable_patterns(["ledger-connect"]) == ASSETS | SSH
+def test_ledger_connect_is_read_only_connect_access_without_operators():
+    # Spec #630 / #645: Asset·Endpoint·로그인 Credential·Automation Identity 키. operators는 없다(로그인 Credential은 2026-11-20 사용자 결정). 쓰기도 없고 list는 호스트 목록 한 경로뿐이다.
+    assert readable_patterns(["ledger-connect"]) == ASSETS | SSH | CRED
     assert all(caps == ["read"] for p, caps in policy("ledger-connect") if p != "inventory/metadata/assets/")
     fam, _ = _role_policies()
     got = readable_patterns(fam["ledger"])
-    assert not (got & CRED), "ledger가 secrets/assets credentials를 읽는다"
     assert not (got & OPERATORS)
 
 
@@ -273,8 +272,8 @@ EXPECTED_READS = {
                                                   "secrets/services/openobserve/readonly",  # Log Review Report 조회(#558)
                                                   "inventory/config/log_review"},  # Log Review 기준 목록(#560)
     "network_backup": COMMON | ASSETS | CRED | {"secrets/services/alert/notify"},
-    # 원장 계열(Spec #630): 알림, GWS 키·봇 토큰. 쓰기 권한 없음. 서버 접속은 ledger-connect(로그인 Credential 제외, #645).
-    "ledger": COMMON | ASSETS | SSH | {"secrets/services/alert/notify"}
+    # 원장 계열(Spec #630): 알림, GWS 키·봇 토큰. 쓰기 권한 없음. 서버 접속은 ledger-connect(로그인 Credential 포함, operators 제외).
+    "ledger": COMMON | ASSETS | SSH | CRED | {"secrets/services/alert/notify"}
     | {"secrets/services/gws/directory_read", "secrets/services/forgejo/idc_access_bot"},
 }
 

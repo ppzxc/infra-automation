@@ -153,7 +153,7 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | `openobserve_config` | OpenObserve — Config | Asset·Endpoint, OpenObserve 관리·수집 계정, 알림 URL, 작업 설정 |
 | `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review | `provision`·`host_agents`의 합집합(드리프트 하위 실행 때문), 보고서 보관 키, 메일 설정, 알림 URL |
 | `network_backup` | Cisco 백업, FortiGate 백업 | Asset·Endpoint, Credential, 알림 URL |
-| `ledger` | 원장 저장소(idc-access) 템플릿 | 알림 URL, GWS 디렉터리 읽기 키, Forgejo 봇 쓰기 토큰. 봇 로그인·개인 토큰 문서는 스키마 대조용 전체 읽기인 `periodic_check`와 `operator`를 제외한 계열이 읽지 못한다. 서버 접속은 `connect` 대신 읽기 전용 `ledger-connect`(Asset·Endpoint·Automation Identity 키, 로그인 Credential 제외) |
+| `ledger` | 원장 저장소(idc-access) 템플릿 | 알림 URL, GWS 디렉터리 읽기 키, Forgejo 봇 쓰기 토큰. 봇 로그인·개인 토큰 문서는 스키마 대조용 전체 읽기인 `periodic_check`와 `operator`를 제외한 계열이 읽지 못한다. 서버 접속은 `connect` 대신 읽기 전용 `ledger-connect`(Asset·Endpoint·로그인 Credential·Automation Identity 키) |
 | `periodic_check` | OpenBao — Periodic Check | 전체 읽기와 메타데이터 목록(스키마 대조용) |
 
 정책·AppRole 적용(`scripts/openbao_apply.py`)은 Semaphore 템플릿이 아니라 운영자 작업 환경에서 돌리므로 Environment가 없다([openbao_apply.md](openbao_apply.md)). 에이전트 세션의 `agent_session`은 Semaphore 밖에서 쓰므로 Environment가 없다.
