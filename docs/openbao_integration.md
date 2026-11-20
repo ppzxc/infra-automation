@@ -111,7 +111,7 @@ Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나�
 | `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review |
 | `network_backup` | Cisco·FortiGate 백업 |
 | `github_webhook_watch` | 조직 웹훅 감시 |
-| `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap. 서버 접속(`connect`)은 아직 없고 수집 템플릿(#645)의 별도 PR에서 더한다 |
+| `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap. 서버 접속은 `connect` 묶음 대신 읽기 전용 `ledger-connect`(Asset·Endpoint·Automation Identity 키)만 준다. 전 서버 로그인 Credential(`secrets/assets/+/credentials/+`)은 열지 않는다: 수집기는 키 접속만 지원하고 비밀번호 Credential은 어차피 쓰지 못한다. 비밀번호 Credential이 필요해지면 별도 결정이다 |
 | `periodic_check` | OpenBao — Periodic Check |
 | `agent_session` | 에이전트 세션(Semaphore 밖) |
 | `applier` | `scripts/openbao_apply.py`(적용 전용, Semaphore 밖) |

@@ -22,7 +22,7 @@ CAPS = {"create", "read", "update", "delete", "list", "sudo", "deny", "patch"}
 NON_KV_POLICIES = {"applier", "periodic-check"}
 # list 권한을 가질 수 있는 정책(기계는 periodic_check, 에이전트 세션은 metadata 한정).
 LIST_POLICIES = {"periodic-check", "operator", "agent-session"}
-SERVER_FAMILIES = {"provision", "host_agents", "host_audit"}
+SERVER_FAMILIES = {"provision", "host_agents", "host_audit", "ledger"}
 ALL_FAMILIES = {
     "provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit", "network_backup",
     "github_webhook_watch", "ledger", "periodic_check", "agent_session",
@@ -189,6 +189,16 @@ def test_ledger_secrets_reads_only_gws_key_and_bot_token_not_login_or_personal_t
     assert "connect" not in fam["ledger"]
 
 
+def test_ledger_connect_is_read_only_key_access_without_login_credentials():
+    # Spec #630 / #645: Asset·Endpoint·Automation Identity 키만. 로그인 Credential·operators는 없다. 쓰기·list도 없다.
+    assert readable_patterns(["ledger-connect"]) == ASSETS | SSH
+    assert all(caps == ["read"] for _, caps in policy("ledger-connect"))
+    fam, _ = _role_policies()
+    got = readable_patterns(fam["ledger"])
+    assert not (got & CRED), "ledger가 secrets/assets credentials를 읽는다"
+    assert not (got & OPERATORS)
+
+
 def test_connect_bundle_is_assets_credentials_automation_identity_and_operator_public_keys():
     assert readable_patterns(["connect"]) == {
         "inventory/assets/+", "inventory/assets/+/endpoints",
@@ -249,8 +259,8 @@ EXPECTED_READS = {
     "network_backup": COMMON | ASSETS | CRED | {"secrets/services/alert/notify"},
     "github_webhook_watch": COMMON | {"secrets/services/github/org_hooks_read"} | OO_ING
     | {"inventory/config/github_webhook_watch"},
-    # 원장 계열(Spec #630): 알림, GWS 키·봇 토큰. 쓰기 권한 없음. 서버 접속(connect)은 수집 템플릿(#645) PR에서 더한다.
-    "ledger": COMMON | {"secrets/services/alert/notify"}
+    # 원장 계열(Spec #630): 알림, GWS 키·봇 토큰. 쓰기 권한 없음. 서버 접속은 ledger-connect(로그인 Credential 제외, #645).
+    "ledger": COMMON | ASSETS | SSH | {"secrets/services/alert/notify"}
     | {"secrets/services/gws/directory_read", "secrets/services/forgejo/idc_access_bot"},
 }
 
