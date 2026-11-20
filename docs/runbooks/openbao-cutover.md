@@ -50,11 +50,10 @@
 | `openobserve_config` | dry_run이 없어 apply하지 않는다. 렌더링 결과를 서버 알림과 비교만 한다. 실제 apply는 다음 정기 변경 때 한다 |
 | `host_audit` | On-demand, 카나리 1대(드리프트 포함) |
 | `network_backup` | Cisco·FortiGate 백업 실제 실행 |
-| `github_webhook_watch` | 실제 실행 |
 | `periodic_check` | 1회 통과(스키마·참조·인벤토리 대조) |
 
 - **거부 시험**: AppRole마다 자기 범위 밖 경로 하나를 읽어 403을 확인한다. 새 정책이 열어야 할 것은 열고 막아야 할 것은 막는지 보는 시험이다. 어떤 경로를 쓰는지는 비공개 노트에 둔다.
-- **거부 시험 추가**: `agent_session`은 `inventory/config/host_audit`·`inventory/config/github_webhook_watch`를 읽으려 하면 403이어야 한다.
+- **거부 시험 추가**: `agent_session`은 `inventory/config/host_audit`를 읽으려 하면 403이어야 한다.
 - 값은 출력하지 않는다. 결과는 통과·실패만 기록한다.
 
 ### 전환 전 추가 확인 (실서버 필요)

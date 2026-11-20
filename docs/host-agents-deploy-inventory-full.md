@@ -260,7 +260,6 @@
 | `secrets/assets/<ns>/agents` | `ingest_token` | ● (`host_agents_backup_only`는 불필요) | otelcol → OpenObserve 인증 |
 | | `rustfs_access_key`, `rustfs_secret_key` | ● | 호스트 전용 RustFS 키 → `/etc/restic/env` |
 | | `restic_password` | ● | repo 비밀번호 → `/etc/restic/password` |
-| | `webhook_secret` | 웹훅을 켤 때 | GitHub 웹훅 시크릿 |
 | `inventory/assets/<ns>` `agents.otel` | `extra_logs`, `exclude_logs` | | 수집 경로 추가·제외 |
 | | `docker_metrics` | | docker 메트릭 수집 |
 | | `app_telemetry` | | boolean. 컨테이너 앱 텔레메트리(OTLP HTTP 수신, traces → `app_traces`, metrics) 수신 |

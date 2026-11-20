@@ -9,7 +9,7 @@
 지울 수 없으므로, 아래 검증을 **모두 통과해야만** 올린다: 입력 형식(``..._request``), 파일(``..._file_problems``: 일반 파일·크기·
 ``%PDF-`` 머리·해시 일치), 버킷(``..._target``: 정기 실행 포인터가 있고, 그 실행이 Log Review Report를 보냈고, 아직 등록 기록이 없음).
 
-전월 서명본(3부 7번, ``JUDGES``): '전월 서명본'은 직전 정기 실행(Audit Baseline과 같은 고르기, ``host_audit_baseline_pick``)의 ``signed/``다.
+전월 서명본(3부 6번, ``JUDGES``): '전월 서명본'은 직전 정기 실행(Audit Baseline과 같은 고르기, ``host_audit_baseline_pick``)의 ``signed/``다.
 tasks/log_review_signed.yml이 그 등록 기록을 GET하고 ``host_audit_log_review_signed_lookup``으로 판정 입력을 만들어
 AUD-804 ``settings['previous_signed_copy']``로 넘긴다.
 """

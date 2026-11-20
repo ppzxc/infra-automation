@@ -28,7 +28,7 @@ LIST_EXCEPTIONS = {("ledger-connect", "inventory/metadata/assets/")}
 SERVER_FAMILIES = {"provision", "host_agents", "host_audit", "ledger"}
 ALL_FAMILIES = {
     "provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit", "network_backup",
-    "github_webhook_watch", "ledger", "periodic_check", "agent_session",
+    "ledger", "periodic_check", "agent_session",
 }
 
 
@@ -178,7 +178,6 @@ def test_service_permission_policies_are_named_after_the_permission():
         "rustfs-maintenance": "secrets/services/rustfs/maintenance",
         "rustfs-audit-reports": "secrets/services/rustfs/audit_reports",
         "alert-notify": "secrets/services/alert/notify",
-        "github-org-hooks-read": "secrets/services/github/org_hooks_read",
     }.items():
         assert readable_patterns([name]) == {doc}, name
 
@@ -250,7 +249,7 @@ def test_ledger_connect_list_exception_is_exactly_one_path_and_ledger_lists_noth
 # ---- 계열 x 경로 매트릭스(#506 §3) ------------------------------------------------------------------------------------
 
 COMMON = {
-    "inventory/services/openobserve", "inventory/services/rustfs", "inventory/services/github",
+    "inventory/services/openobserve", "inventory/services/rustfs",
     "inventory/services/semaphore", "inventory/services/funa", "inventory/config/common",
 }
 ASSETS = {"inventory/assets/+", "inventory/assets/+/endpoints"}
@@ -274,8 +273,6 @@ EXPECTED_READS = {
                                                   "secrets/services/openobserve/readonly",  # Log Review Report 조회(#558)
                                                   "inventory/config/log_review"},  # Log Review 기준 목록(#560)
     "network_backup": COMMON | ASSETS | CRED | {"secrets/services/alert/notify"},
-    "github_webhook_watch": COMMON | {"secrets/services/github/org_hooks_read"} | OO_ING
-    | {"inventory/config/github_webhook_watch"},
     # 원장 계열(Spec #630): 알림, GWS 키·봇 토큰. 쓰기 권한 없음. 서버 접속은 ledger-connect(로그인 Credential 제외, #645).
     "ledger": COMMON | ASSETS | SSH | {"secrets/services/alert/notify"}
     | {"secrets/services/gws/directory_read", "secrets/services/forgejo/idc_access_bot"},
@@ -338,17 +335,15 @@ def test_periodic_check_has_list_and_reads_everything_but_agent_session_cannot_r
     assert not any("create" in c or "update" in c for _, c in pc if _.startswith(("inventory/", "secrets/")))
     ag = dict(policy("agent-session"))
     assert ag["inventory/data/*"] == ["read"]
-    # 개인정보·웹훅 주소·Log Review 기준 목록 문서는 deny(#504 단일 원본은 그대로, 읽기만 막는다). 이 셋만 deny이고 나머지는 read다.
+    # 개인정보·Log Review 기준 목록 문서는 deny(#504 단일 원본은 그대로, 읽기만 막는다). 이 둘만 deny이고 나머지는 read다.
     assert ag["inventory/data/config/host_audit"] == ["deny"]
-    assert ag["inventory/data/config/github_webhook_watch"] == ["deny"]
     assert ag["inventory/data/config/log_review"] == ["deny"]
-    assert {p for p, c in ag.items() if "deny" in c} == {"inventory/data/config/host_audit", "inventory/data/config/github_webhook_watch",
-                                                          "inventory/data/config/log_review"}
+    assert {p for p, c in ag.items() if "deny" in c} == {"inventory/data/config/host_audit", "inventory/data/config/log_review"}
     assert set(ag["secrets/metadata/*"]) == {"read", "list"}
     assert set(ag["inventory/metadata/*"]) == {"read", "list"}      # AGENTS.md: 에이전트 세션은 inventory/를 읽는다(문서 목록 포함)
     assert not any(p.startswith("secrets/data") for p in ag)
     assert not any(p.startswith("inventory/") and ({"create", "update", "delete", "patch"} & set(c)) for p, c in ag.items())
-    denied = {"inventory/config/host_audit", "inventory/config/github_webhook_watch", "inventory/config/log_review"}
+    denied = {"inventory/config/host_audit", "inventory/config/log_review"}
     assert readable_patterns(["agent-session"]) - denied == {p for p in index_patterns() if p.startswith("inventory/")} - denied
 
 

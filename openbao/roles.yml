@@ -82,9 +82,6 @@ families:
   network_backup:
     policies: [inventory-base, inventory-assets, asset-credentials, alert-notify]
     token_max_ttl: 3600
-  github_webhook_watch:
-    policies: [inventory-base, github-org-hooks-read, openobserve-ingest, config-github-webhook-watch]
-    token_max_ttl: 3600
   # 원장(idc-access, 비공개 저장소) 템플릿 계열(Spec #630). GWS 키·고객 ID·봇 토큰 읽기만 준다. 서버 접속은 connect 묶음이 아니라 읽기 전용 작은 정책 ledger-connect(Asset·Endpoint·Automation Identity, 로그인 Credential 제외)로 준다.
   # 쓰기 권한은 없다. 값 쓰기는 operator만 한다. 봇 로그인·개인 토큰 문서는 정책에 없다(ledger-secrets.hcl 주석).
   ledger:

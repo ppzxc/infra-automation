@@ -77,7 +77,7 @@ The identity the automation itself presents when it connects — an SSH key pair
 _Avoid_: admin key, deploy key (unqualified), the operator's key
 
 **Service**:
-A shared system that several jobs talk to — OpenObserve, RustFS, GitHub, the alert platform, the FUNA Cluster, Semaphore — whose address is kept once and whose shared Credentials are split by privilege level (`admin`, `ingest`, …), named for what the privilege allows, never for the job that uses it. A system the jobs reach without any secret (the mail relay) is not kept as a Service.
+A shared system that several jobs talk to — OpenObserve, RustFS, the alert platform, the FUNA Cluster, Semaphore — whose address is kept once and whose shared Credentials are split by privilege level (`admin`, `ingest`, …), named for what the privilege allows, never for the job that uses it. A system the jobs reach without any secret (the mail relay) is not kept as a Service.
 _Avoid_: agent (for these shared systems), global secret
 
 **Operator**:

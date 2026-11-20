@@ -1,12 +1,10 @@
 """Log Review Report 3부 로그 관리 상태 나머지 (Spec #544 / Ticket-8 #563, ADR-0015).
 
-보존 기간·시각 동기·전월 백업 결과·알림 이력·GitHub 감사 로그 수집 상태. 조회는 점검 기간 안의 OpenObserve ``_search``뿐이다.
+보존 기간·시각 동기·전월 백업 결과·알림 이력. 조회는 점검 기간 안의 OpenObserve ``_search``뿐이다.
 - 시각 동기: ``host_status_logs``의 ``kind='time_sync'`` 판독(Host Agents 시각 동기 수집기, 5분 주기)을 수집 로스터 호스트와 대조한다.
   판독이 없는 호스트(수집기 미배포 등)와 도구가 없는 호스트(``no_tool``)는 '확인 불가'다(ADR-0015 Consequences, #544 이야기 23).
 - 백업: ``backup_logs``(``host`` 필드)의 ``job='backup'`` 성공 일자와 실패 건수, 유지보수·무결성 검사(``job<>'backup'``) 실패.
   대상은 백업 누락 알림(``infra-backup-missing``)과 같은 수집 로스터다.
-- GitHub: 조직 웹훅 수신 이벤트(``service_name='github-audit'``)는 참고 건수이고, 수집 상태는 전달 점검 작업의 하트비트
-  (``service_name='github-webhook-watch'``, ``record_type='heartbeat'``)로 본다. 조직 웹훅에는 로그인 이벤트가 없다.
 - 보존·알림 이력: 서버의 스트림 보존 설정과 알림 발생 이력은 ``_search``로 읽을 수 없다(이 역할은 다른 경로를 부르지 않는다, #556).
   보존은 저장소가 선언한 로그 종류별 보존 일수(기준 설정 ``log_management.retention_days``)를 기준과 대조하는 '일부 자동'이고,
   알림 이력은 '사람 대조'다.
@@ -28,9 +26,6 @@ TIME_SYNC_QUERY = 'status_time_sync'
 BACKUP = 'part3.backup'
 BACKUP_DAILY = 'status_backup_daily'
 BACKUP_OTHERS = 'status_backup_other_failures'
-GITHUB = 'part3.github_audit'
-GITHUB_HEARTBEATS = 'status_github_heartbeats'
-GITHUB_EVENTS = 'status_github_events'
 _SIZE = 20000
 
 DEFAULT_MAX_OFFSET_MS = 1000
@@ -181,63 +176,6 @@ def judge_backup(ctx):
                   method=BACKUP_METHOD, criterion=BACKUP_CRITERION)
 
 
-# ------------------------------------------------------------------ GitHub 감사 로그 수집 상태
-
-GITHUB_METHOD = ('GitHub 조직 웹훅의 정상 동작 확인 신호를 날짜별로 보고, 수신 이벤트 건수를 참고로 센다. '
-                 '조직 웹훅에는 로그인 이벤트가 없어 로그인은 이 항목이 보지 않는다(월간 감사 로그 내보내기로 보완)')
-GITHUB_CRITERION = ('확인 신호가 없는 날, 점검 오류, 웹훅 설정 이상(없음·비활성·이벤트 불일치·알 수 없음), '
-                    '재전송 기간을 넘기거나 복구되지 않은 실패 전달이 있으면 "확인 필요". 조직 이벤트가 없는 것은 이상이 아니다')
-GITHUB_COLUMNS = ['구분', '날짜', '건수']
-
-
-def _days_where(hits, pred, value):
-    days, total = set(), 0
-    for h in hits:
-        if pred(h):
-            days.add(str(h.get('day')))
-            total = value(h, total)
-    return days, total
-
-
-def judge_github_audit(ctx):
-    results, all_days = ctx['results'], ctx['period']['days']
-    beats = results.get(GITHUB_HEARTBEATS) or {'ok': False, 'error': '조회하지 않음'}
-    events = results.get(GITHUB_EVENTS) or {'ok': False, 'error': '조회하지 않음'}
-    if not beats['ok']:
-        return failed('전달 점검 기록 %s' % beats['error'])
-    hits = [h for h in beats['hits'] if str(h.get('day') or '').strip() and _int(h.get('checks')) > 0]
-    checks = sum(_int(h.get('checks')) for h in hits)
-    seen = {str(h['day']) for h in hits}
-    rows = []
-    missing = [d for d in all_days if d not in seen]
-    if missing:
-        rows.append(['전달 점검 기록 없는 날', '전체' if not seen else _ranges(missing), len(missing)])
-
-    def add(label, pred, value):
-        days, total = _days_where(hits, pred, value)
-        if days:
-            rows.append([label, _ranges(days), total])
-
-    count = lambda h, t: t + _int(h.get('checks'))  # noqa: E731
-    add('점검 오류(result=error)', lambda h: str(h.get('result')) != 'ok', count)
-    for status in sorted({str(h.get('hook_status')) for h in hits} - {'ok'}):
-        if status != 'unknown':  # unknown은 API 호출 실패(result=error)와 같은 줄이다
-            add('훅 상태 %s' % status, lambda h, s=status: str(h.get('hook_status')) == s, count)
-    add('재전송 기간을 넘긴 실패 전달(최대)', lambda h: _int(h.get('expired')) > 0,
-        lambda h, t: max(t, _int(h.get('expired'))))
-    add('복구되지 않은 실패 전달(최대)', lambda h: _int(h.get('failed')) > 0, lambda h, t: max(t, _int(h.get('failed'))))
-    received = sum(_int(h.get('records')) for h in events['hits']) if events['ok'] else None
-    summary = '전달 점검 %d회(%d일) · 수신 이벤트 %s' % (
-        checks, len(seen), ('%d건' % received) if received is not None else '조회 실패')
-    if not events['ok']:
-        out = failed('수신 이벤트 %s' % events['error'])
-        out.update(summary=summary, columns=GITHUB_COLUMNS if rows else [], rows=rows,
-                   method=GITHUB_METHOD, criterion=GITHUB_CRITERION)
-        return out
-    return result(AUTO, VERDICT_CHECK if rows else VERDICT_OK, summary=summary, columns=GITHUB_COLUMNS if rows else [],
-                  rows=rows, method=GITHUB_METHOD, criterion=GITHUB_CRITERION)
-
-
 # ------------------------------------------------------------------ 보존 기간
 
 STANDARD_DAYS = 365           # 로그 1년(ISMS 2.9.4, 회사 로그 보관 정책)
@@ -282,14 +220,6 @@ def judge_alert_history(ctx):
 
 
 QUERIES = {
-    GITHUB: [
-        {'name': GITHUB_HEARTBEATS, 'size': 2000,
-         'sql': "SELECT date_format(_timestamp, '%Y-%m-%d', '{offset}') AS day, result, hook_status, count(*) AS checks, "
-                "max(expired_count) AS expired, max(failed_count) AS failed FROM \"security_logs\" "
-                "WHERE service_name = 'github-webhook-watch' AND record_type = 'heartbeat' GROUP BY day, result, hook_status"},
-        {'name': GITHUB_EVENTS, 'size': 10,
-         'sql': "SELECT count(*) AS records FROM \"security_logs\" WHERE service_name = 'github-audit'"},
-    ],
     BACKUP: [
         {'name': BACKUP_DAILY, 'size': _SIZE,
          'sql': "SELECT host AS name, date_format(_timestamp, '%Y-%m-%d', '{offset}') AS day, success, count(*) AS runs "
@@ -308,7 +238,6 @@ QUERIES = {
 JUDGES = {
     'part3.retention': judge_retention,
     'part3.alert_history': judge_alert_history,
-    GITHUB: judge_github_audit,
     BACKUP: judge_backup,
     TIME_SYNC: judge_time_sync,
 }

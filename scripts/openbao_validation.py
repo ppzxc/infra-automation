@@ -19,8 +19,7 @@ DEFAULT_SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas" / "openb
 PLACEHOLDER = "<prompted>"  # secrets/ YAML에서 값 자리(null)는 getpass로 채워질 값이다.
 # null을 값 자리로 인정하는 필드: 비밀 값만이다. 그 밖의 필드(username, type 등)는 null이면 스키마 위반이다.
 PROMPTED_KEYS = frozenset({"password", "passphrase", "private_key", "token", "secret_key", "access_key", "url",
-                           "ingest_token", "rustfs_access_key", "rustfs_secret_key", "restic_password",
-                           "webhook_secret"})
+                           "ingest_token", "rustfs_access_key", "rustfs_secret_key", "restic_password"})
 
 
 class Violation(collections.namedtuple("Violation", "doc pointer rule")):

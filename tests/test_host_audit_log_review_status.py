@@ -1,6 +1,6 @@
 """Log Review Report 3부 로그 관리 상태 나머지 (Spec #544 / Ticket-8 #563, ADR-0015).
 
-보존·시각 동기·백업·알림 이력·GitHub 감사 로그 수집 상태. 필터 직접 테스트(ADR-0013 다수 층)로 보고서 모델의 3부 항목만 본다.
+보존·시각 동기·백업·알림 이력. 필터 직접 테스트(ADR-0013 다수 층)로 보고서 모델의 3부 항목만 본다.
 쿼리 문자열은 시험하지 않는다(#544 Testing Decisions). 호스트 이름은 fixture 값이다.
 """
 import sys
@@ -138,46 +138,6 @@ def test_a_failed_backup_query_is_a_query_failure():
     assert item["status_label"] == "조회 실패(연결 불가·시간 초과)"
 
 
-# ------------------------------------------------------------------ GitHub 감사 로그 수집 상태
-
-def _beat(days, result="ok", hook_status="ok", checks=4, expired=0, failed=0):
-    return [{"day": d, "result": result, "hook_status": hook_status, "checks": checks, "expired": expired,
-             "failed": failed} for d in days]
-
-
-def _github(beats, events=12):
-    return {"status_github_heartbeats": _ok(beats), "status_github_events": _ok([{"records": events}])}
-
-
-def test_a_heartbeat_every_day_with_a_healthy_hook_is_ok_even_without_org_events():
-    item = _item(_model(_github(_beat(OCT), events=0)), "github_audit")
-    assert item["status_label"] == "자동 점검" and item["verdict"] == "이상 없음" and item["rows"] == []
-    assert "수신 이벤트 0건" in item["summary"] and "로그인" in item["method"]
-
-
-def test_days_without_a_heartbeat_an_unhealthy_hook_and_expired_failures_need_a_check():
-    beats = _beat([d for d in OCT if d not in ("2026-10-09", "2026-10-10")]) \
-        + _beat(["2026-10-15"], hook_status="inactive", checks=2) + _beat(["2026-10-20"], result="error", hook_status="unknown",
-                                                                         checks=1) \
-        + _beat(["2026-10-21"], expired=3)
-    item = _item(_model(_github(beats)), "github_audit")
-    assert item["verdict"] == "확인 필요"
-    assert ["전달 점검 기록 없는 날", "10-09~10-10", 2] in item["rows"]
-    assert ["훅 상태 inactive", "10-15", 2] in item["rows"]
-    assert ["점검 오류(result=error)", "10-20", 1] in item["rows"]
-    assert ["재전송 기간을 넘긴 실패 전달(최대)", "10-21", 3] in item["rows"]
-
-
-def test_no_heartbeat_at_all_means_the_collection_state_is_unknown_for_the_whole_month():
-    item = _item(_model(_github([])), "github_audit")
-    assert item["verdict"] == "확인 필요" and ["전달 점검 기록 없는 날", "전체", 31] in item["rows"]
-
-
-def test_a_failed_github_query_is_a_query_failure():
-    item = _item(_model({"status_github_heartbeats": _fail("HTTP 400"), "status_github_events": _ok([])}), "github_audit")
-    assert item["status_label"] == "조회 실패(전달 점검 기록 HTTP 400)"
-
-
 # ------------------------------------------------------------------ 보존 기간
 
 RETENTION = {"security_logs": 365, "system_logs": 365, "backup_logs": 365}
@@ -219,8 +179,7 @@ def test_alert_history_is_a_manual_check_because_search_cannot_read_it():
 def test_the_status_queries_are_registered_and_stay_inside_the_review_period():
     period = host_audit_log_review_period(STARTED, TZ)
     qs = {q["name"]: q for q in host_audit_log_review_queries(period)}
-    assert {"status_time_sync", "status_backup_daily", "status_backup_other_failures", "status_github_heartbeats",
-            "status_github_events"} <= set(qs)
+    assert {"status_time_sync", "status_backup_daily", "status_backup_other_failures"} <= set(qs)
     for name, q in qs.items():
         if name.startswith("status_"):
             assert (q["body"]["query"]["start_time"], q["body"]["query"]["end_time"]) == (period["start_us"], period["end_us"])

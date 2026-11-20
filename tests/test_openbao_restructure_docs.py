@@ -47,12 +47,12 @@ def test_adr_states_the_out_of_scope_items_in_one_line():
     assert "동적 자격증명" in lines[0] and "감사 장치" in lines[0]
 
 
-def test_context_has_the_six_terms_and_six_service_examples():
+def test_context_has_the_six_terms_and_five_service_examples():
     text = _read(CONTEXT)
     for term in ("Asset", "Endpoint", "Credential", "Automation Identity", "Service", "Operator"):
         assert f"**{term}**:" in text, term
     service = re.search(r"^\*\*Service\*\*:\n(.+)$", text, re.M).group(1)
-    for name in ("OpenObserve", "RustFS", "GitHub", "alert platform", "FUNA Cluster", "Semaphore"):
+    for name in ("OpenObserve", "RustFS", "alert platform", "FUNA Cluster", "Semaphore"):
         assert name in service, name
 
 
@@ -84,7 +84,7 @@ def test_cutover_runbook_covers_freeze_checks_rollback_and_cleanup():
     assert "스케줄" in freeze and "옛 KV 쓰기" in freeze and "2시간" in freeze
     checks = runbook_section(CUTOVER, "계열별 확인 목록", numbered=True)
     for family in ("provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit",
-                   "network_backup", "github_webhook_watch", "periodic_check"):
+                   "network_backup", "periodic_check"):
         assert f"`{family}`" in checks, family
     assert "403" in checks
     rollback = runbook_section(CUTOVER, "되돌리기", numbered=True)
@@ -129,7 +129,7 @@ def test_integration_doc_follows_the_agreed_table_of_contents_and_copies_no_key_
 def test_semaphore_setup_has_one_environment_per_family_and_no_token_or_mount_trace():
     text = _read(SEMAPHORE)
     for family in ("provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit", "network_backup",
-                   "github_webhook_watch", "periodic_check"):
+                   "periodic_check"):
         assert re.search(rf"^\| `{family}` \|", text, re.M), family
     for old in ("VAULT_TOKEN", "VAULT_MOUNT", "OPENBAO_HOSTS_PREFIX", "infra/prod/host"):
         assert old not in text, old

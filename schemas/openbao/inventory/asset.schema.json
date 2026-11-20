@@ -170,14 +170,6 @@
             "^[a-z][a-z0-9_]*(?!\\n)$": {}
           },
           "additionalProperties": false
-        },
-        "github_webhook": {
-          "type": "object",
-          "description": "GitHub 웹훅 수신 설정. 키는 snake_case.",
-          "patternProperties": {
-            "^[a-z][a-z0-9_]*(?!\\n)$": {}
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -27,7 +27,7 @@ flowchart LR
 |---|---|---|---|
 | Asset | `inventory/assets/<관리번호>` | `secrets/assets/<관리번호>/agents`(호스트별 에이전트 비밀) | `asset.schema.json`, `agents.schema.json` |
 | Asset의 접속 | `inventory/assets/<관리번호>/endpoints` | `secrets/assets/<관리번호>/credentials/<이름>` | `endpoints.schema.json`, `credential.schema.json` |
-| Service(OpenObserve·RustFS·GitHub·Semaphore·FUNA) | `inventory/services/<서비스>` | `secrets/services/<서비스>/<권한 이름>` | `service_*.schema.json`, `secrets/services/` |
+| Service(OpenObserve·RustFS·Semaphore·FUNA) | `inventory/services/<서비스>` | `secrets/services/<서비스>/<권한 이름>` | `service_*.schema.json`, `secrets/services/` |
 | Operator | `inventory/operators/<계정>`(공개키) | 없음 | `operator.schema.json` |
 | Automation Identity | 없음 | `secrets/automation/ssh` | `automation_ssh.schema.json` |
 | 작업 설정 | `inventory/config/<작업>` | 없음 | `inventory/config/*.schema.json` |
@@ -110,7 +110,6 @@ Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나�
 | `openobserve_config` | OpenObserve — Config |
 | `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review |
 | `network_backup` | Cisco·FortiGate 백업 |
-| `github_webhook_watch` | 조직 웹훅 감시 |
 | `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap. 서버 접속은 `connect` 묶음 대신 읽기 전용 `ledger-connect`(Asset·Endpoint·Automation Identity 키)만 준다. list는 예외로 `inventory/metadata/assets/` 한 경로뿐이다(Asset 스냅샷이 호스트 이름 목록을 나열해야 하고, 목록에는 이름만 보이며 `agent_session`이 이미 `inventory/` 전체를 list한다). 전 서버 로그인 Credential(`secrets/assets/+/credentials/+`)은 열지 않는다: 수집기는 키 접속만 지원하고 비밀번호 Credential은 어차피 쓰지 못한다. 비밀번호 Credential이 필요해지면 별도 결정이다 |
 | `periodic_check` | OpenBao — Periodic Check |
 | `agent_session` | 에이전트 세션(Semaphore 밖) |
@@ -122,7 +121,7 @@ Environment 변수와 등록은 [semaphore-setup.md](semaphore-setup.md) 4절, s
 
 - `operator`: `infra` 안 userpass 사용자. 전체 읽기(list 포함)와 create/update만 하고 delete·`sys/`는 없다. 등록 도구가 이 권한으로 쓴다.
 - `admin`: 루트 네임스페이스의 비상용. 삭제·영구 삭제·정책 수동 변경에만 쓴다([openbao-operations](runbooks/openbao-operations.md)).
-- 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절). `inventory/`·`secrets/`의 metadata list·read(이름·버전)를 가지며, 작업 계열 중 list는 `periodic_check`와 예외 한 경로(`ledger`의 `inventory/metadata/assets/`)만 갖는다. 개인정보(`inventory/config/host_audit`의 수신자·발신자), 웹훅 주소(`inventory/config/github_webhook_watch`의 `hook_url`), Log Review 기준 목록(`inventory/config/log_review`의 출발지·내부 주소·개인정보처리시스템 목록) 문서는 `deny`라 읽지 못한다(세 문서의 metadata는 보인다).
+- 에이전트 세션(`agent_session`): `inventory/` 전체와 `secrets/`의 메타데이터(키 이름·버전)만 읽고 비밀 값은 읽지 못한다. 비밀 값이 필요하면 계열 템플릿을 실행하거나 운영자에게 요청한다(AGENTS.md 4절). `inventory/`·`secrets/`의 metadata list·read(이름·버전)를 가지며, 작업 계열 중 list는 `periodic_check`와 예외 한 경로(`ledger`의 `inventory/metadata/assets/`)만 갖는다. 개인정보(`inventory/config/host_audit`의 수신자·발신자), Log Review 기준 목록(`inventory/config/log_review`의 출발지·내부 주소·개인정보처리시스템 목록) 문서는 `deny`라 읽지 못한다(두 문서의 metadata는 보인다).
 
 정책·AppRole·마운트는 선언 코드(`openbao/`)를 고치고 `scripts/openbao_apply.py`로만 바꾼다([openbao_apply.md](openbao_apply.md)).
 
@@ -169,7 +168,7 @@ monitoring_openbao_required:
 
 특정 호스트만 돌리려면 Extra variable `target_hosts`를 준다: `ansible-playbook -i inventory/hosts.yml playbooks/example_task.yml -e "target_hosts=ns0331"`.
 
-새 역할이 OpenBao 문서를 읽으면 (1) `vars/main.yml`에 `<역할>_openbao_required`를 선언하고 (2) 그 역할을 돌리는 계열 AppRole 정책이 패턴을 읽게 하며 (3) `tests/test_openbao_role_policy_contract.py`의 역할↔계열 표에 한 줄을 더한다. 정책 누락은 이 테스트가 잡는다. 공용 읽기 지점의 lookup이 대신 읽는 문서(호스트 묶음의 관리 계정 공개키 `inventory/operators/<계정>` 등)는 역할 선언에 나오지 않으므로 `lookup_plugins/openbao_connection.py`의 `*_READS` 표에 적고, 같은 테스트가 그 표와 코드의 `read()` 호출, 계열 정책(`connect`)을 대조한다. lookup을 쓰는 새 파일은 테스트의 `LOOKUP_USERS` 표에 한 줄을 더해야 통과한다. 선언이 읽은 문서에서 채워졌는지는 공용 필터 `openbao_required_gaps`(`filter_plugins/openbao_required.py`, 옵션 `scope`·`missing_doc`·`blank`·`skip_plus`·`host`·`fmt`)로 본다(host_agents·openobserve_config·backup·host_audit·github_webhook_watch가 쓴다. funa_env는 문서마다 assert를 돌려 달라 그대로다).
+새 역할이 OpenBao 문서를 읽으면 (1) `vars/main.yml`에 `<역할>_openbao_required`를 선언하고 (2) 그 역할을 돌리는 계열 AppRole 정책이 패턴을 읽게 하며 (3) `tests/test_openbao_role_policy_contract.py`의 역할↔계열 표에 한 줄을 더한다. 정책 누락은 이 테스트가 잡는다. 공용 읽기 지점의 lookup이 대신 읽는 문서(호스트 묶음의 관리 계정 공개키 `inventory/operators/<계정>` 등)는 역할 선언에 나오지 않으므로 `lookup_plugins/openbao_connection.py`의 `*_READS` 표에 적고, 같은 테스트가 그 표와 코드의 `read()` 호출, 계열 정책(`connect`)을 대조한다. lookup을 쓰는 새 파일은 테스트의 `LOOKUP_USERS` 표에 한 줄을 더해야 통과한다. 선언이 읽은 문서에서 채워졌는지는 공용 필터 `openbao_required_gaps`(`filter_plugins/openbao_required.py`, 옵션 `scope`·`missing_doc`·`blank`·`skip_plus`·`host`·`fmt`)로 본다(host_agents·openobserve_config·backup·host_audit가 쓴다. funa_env는 문서마다 assert를 돌려 달라 그대로다).
 
 ## 8. 관련 문서
 
@@ -179,4 +178,4 @@ monitoring_openbao_required:
 - 정책·AppRole 코드: [openbao_apply.md](openbao_apply.md), `openbao/`
 - 운영: [openbao-operations](runbooks/openbao-operations.md), 전환(일회성): [openbao-cutover](runbooks/openbao-cutover.md)
 - Semaphore Environment: [semaphore-setup.md](semaphore-setup.md)
-- 역할별 읽는 문서: [funa_env.md](funa_env.md), [host_audit.md](host_audit.md), [backup.md](backup.md), [openobserve_config.md](openobserve_config.md), [cisco_backup.md](cisco_backup.md), [fortigate_backup.md](fortigate_backup.md), [github_webhook_watch.md](github_webhook_watch.md)
+- 역할별 읽는 문서: [funa_env.md](funa_env.md), [host_audit.md](host_audit.md), [backup.md](backup.md), [openobserve_config.md](openobserve_config.md), [cisco_backup.md](cisco_backup.md), [fortigate_backup.md](fortigate_backup.md)
