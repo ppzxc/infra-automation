@@ -154,6 +154,7 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review | `provision`·`host_agents`의 합집합(드리프트 하위 실행 때문), 보고서 보관 키, 메일 설정, 알림 URL |
 | `network_backup` | Cisco 백업, FortiGate 백업 | Asset·Endpoint, Credential, 알림 URL |
 | `github_webhook_watch` | 조직 웹훅 감시 | 조직 훅 읽기 토큰, OpenObserve 수집 계정, 작업 설정 |
+| `ledger` | 원장 저장소(idc-access) 템플릿 | `provision`의 접속 경로(수집기 읽기 전용 접속), 알림 URL, GWS 디렉터리 읽기 키, Forgejo 봇 쓰기 토큰. 봇 로그인·개인 토큰 문서는 읽지 않는다 |
 | `periodic_check` | OpenBao — Periodic Check | 전체 읽기와 메타데이터 목록(스키마 대조용) |
 
 정책·AppRole 적용(`scripts/openbao_apply.py`)은 Semaphore 템플릿이 아니라 운영자 작업 환경에서 돌리므로 Environment가 없다([openbao_apply.md](openbao_apply.md)). 에이전트 세션의 `agent_session`은 Semaphore 밖에서 쓰므로 Environment가 없다.

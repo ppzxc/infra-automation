@@ -25,7 +25,7 @@ SEMAPHORE_TOKEN = "fake-semaphore-inventory-token"
 OPENBAO_TOKEN = "fake-periodic-check-token"
 SECRET_LIKE = "S3cr3t-FAKE-value-9f2c"  # 위반 문서에 심어 출력·알림에 나오는지 본다
 ROLES = ["applier", "provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit",
-         "network_backup", "github_webhook_watch", "periodic_check", "agent_session"]
+         "network_backup", "github_webhook_watch", "ledger", "periodic_check", "agent_session"]
 HOSTS = ["ns0001", "ns0002", "ns0003", "ns0004"]
 
 
