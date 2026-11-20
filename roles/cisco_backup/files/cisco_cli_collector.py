@@ -203,10 +203,32 @@ def extract_version_output(raw_output: str) -> str:
     return "\n".join(lines).strip()
 
 
-def run_cisco_commands(send_fn, recv_fn, commands, enable_pass: str = None, timeout: int = 30) -> dict:
+class InnerLoginFailed(RuntimeError):
+    """경유 장비에서 내부 장비로 로그인하지 못했다(경유 장비 프롬프트에 남았거나 프롬프트가 없다)."""
+
+
+NO_RETRY_LOGIN_ERRORS = (InnerLoginFailed,)  # 두 번째 로그인으로 재시도하지 않는 오류
+INNER_LOGIN_WAIT = 15.0  # 내부 ssh 뒤 첫 프롬프트를 기다리는 시간(초). 느린 구형 IOS의 정상 로그인을 거짓 실패로 보지 않으려는 값
+
+
+def _prompt_hostname(buf: bytes) -> str:
+    """수신 버퍼의 마지막 줄에서 프롬프트의 호스트네임(끝의 > # 제외)을 돌려준다. 프롬프트가 아니면 빈 문자열."""
+    last = buf.decode(errors="ignore").replace("\r", "").rstrip().split("\n")[-1].strip()
+    return last[:-1] if last.endswith((">", "#")) else ""
+
+
+def _last_line(buf: bytes) -> str:
+    """수신 버퍼의 마지막 비어 있지 않은 줄(경유 장비의 프롬프트로 쓴다)."""
+    lines = [l.strip() for l in buf.decode(errors="ignore").replace("\r", "").split("\n") if l.strip()]
+    return lines[-1] if lines else ""
+
+
+def run_cisco_commands(send_fn, recv_fn, commands, enable_pass: str = None, timeout: int = 30,
+                       bastion_prompt: str = None) -> dict:
     """한 세션에서 허용 목록 안의 읽기 전용 명령을 차례로 실행해 {명령: 출력}으로 돌려준다.
 
-    명령은 보내기 전에 모두 검사한다. 하나라도 벗어나면 장비로 아무것도 보내지 않고 CommandNotAllowed를 낸다."""
+    명령은 보내기 전에 모두 검사한다. 하나라도 벗어나면 장비로 아무것도 보내지 않고 CommandNotAllowed를 낸다.
+    bastion_prompt(경유 장비의 프롬프트)를 주면 첫 프롬프트가 그와 같을 때 내부 로그인 실패로 보고 아무것도 보내지 않는다."""
     commands = [check_command(c) for c in commands]
 
     def wait_for(pred_fn, wait_timeout=8.0, poll_interval=0.2):
@@ -223,12 +245,22 @@ def run_cisco_commands(send_fn, recv_fn, commands, enable_pass: str = None, time
     # Send newline to wake up console and observe initial prompt
     time.sleep(0.5)
     send_fn(b"\n")
-    initial_buf = wait_for(lambda b: b.strip().endswith(b">") or b.strip().endswith(b"#"), wait_timeout=5.0)
+    initial_buf = wait_for(lambda b: b.strip().endswith(b">") or b.strip().endswith(b"#"),
+                           wait_timeout=INNER_LOGIN_WAIT if bastion_prompt else 5.0)
 
     # Still at a login prompt: the login failed. Sending the commands now would feed them to the device as password
     # guesses (extra failed logins toward N-04's lockout threshold), so stop before anything else is sent.
     if not re.search(rb"[>#]\s*$", initial_buf) and re.search(rb"(?:password|username|login)\s*:\s*$", initial_buf.lower()):
         raise RuntimeError("Cisco login failed (login prompt shown again); no command was sent")
+
+    # 내부 ssh가 실패하면 세션은 경유 장비의 프롬프트에 남는다. 그대로 수집하면 경유 장비의 설정이 대상의 백업으로 저장된다.
+    if bastion_prompt:
+        reason = initial_buf.decode(errors="ignore").replace("\r", "").strip()
+        seen = _prompt_hostname(initial_buf)
+        if not seen:
+            raise InnerLoginFailed(f"Inner SSH to the target gave no prompt; no command was sent: {reason}")
+        if seen == _prompt_hostname(bastion_prompt.encode()):
+            raise InnerLoginFailed(f"Inner SSH login to the target failed (still at the bastion prompt); no command was sent: {reason}")
 
     # Check if we need to escalate to enable mode
     if initial_buf.strip().endswith(b">") or b">" in initial_buf:
@@ -267,13 +299,15 @@ def run_cisco_commands(send_fn, recv_fn, commands, enable_pass: str = None, time
     return results
 
 
-def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 30, audit: bool = False):
+def run_cisco_session(send_fn, recv_fn, enable_pass: str = None, timeout: int = 30, audit: bool = False,
+                      bastion_prompt: str = None):
     """Robust interactive logic for Cisco IOS CLI session.
 
     기본(백업)은 `show running-config` 한 번만 실행해 문자열을 돌려준다. audit=True면 같은 세션에서
     `show version`도 실행해 {"running_config": ..., "version": ...}를 돌려준다."""
     commands = [RUNNING_CONFIG_COMMAND] + ([VERSION_COMMAND] if audit else [])
-    results = run_cisco_commands(send_fn, recv_fn, commands, enable_pass=enable_pass, timeout=timeout)
+    results = run_cisco_commands(send_fn, recv_fn, commands, enable_pass=enable_pass, timeout=timeout,
+                                 bastion_prompt=bastion_prompt)
     if audit:
         return {"running_config": results[RUNNING_CONFIG_COMMAND], "version": results[VERSION_COMMAND]}
     return results[RUNNING_CONFIG_COMMAND]
@@ -475,7 +509,7 @@ def collect_direct_ssh(host: str, port: int, user: str, password: str,
             finally:
                 ssh.close()
         except Exception as pe:
-            if audit and (logged_in or not _may_fall_back_to_openssh(pe)):
+            if isinstance(pe, NO_RETRY_LOGIN_ERRORS) or (audit and (logged_in or not _may_fall_back_to_openssh(pe))):
                 raise
             paramiko_err = pe
 
@@ -575,6 +609,7 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
                 err_msg = buf.decode(errors="ignore").strip()
                 raise RuntimeError(f"Bastion shell exited unexpectedly: {err_msg}")
 
+        bastion_prompt = _last_line(buf)
         if bastion_is_cisco:
             _send_prep(pty_send, "terminal length 0")
         else:
@@ -618,7 +653,8 @@ def collect_openssh_jump_interactive(bastion_host: str, bastion_port: int, basti
                 raise RuntimeError(f"Target SSH process exited unexpectedly: {err_msg}")
 
         effective_enable = enable_pass or target_pass
-        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout, audit=audit)
+        return run_cisco_session(pty_send, pty_recv, enable_pass=effective_enable, timeout=timeout, audit=audit,
+                                 bastion_prompt=bastion_prompt)
     finally:
         try:
             pty_send(b"exit\nexit\n")
@@ -686,6 +722,7 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
                         if b"$" in buf or b"#" in buf or b">" in buf:
                             break
 
+                bastion_prompt = _last_line(buf)
                 _send_prep(send_fn, "terminal length 0")
                 time.sleep(0.5)
                 recv_fn(0.5)
@@ -703,7 +740,8 @@ def collect_jump_ssh(bastion_host: str, bastion_port: int, bastion_user: str, ba
                         if b"yes/no" in buf.lower():
                             send_fn(b"yes\n")
 
-                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or target_pass, timeout=timeout, audit=audit)
+                return run_cisco_session(send_fn, recv_fn, enable_pass=enable_pass or target_pass, timeout=timeout, audit=audit,
+                                         bastion_prompt=bastion_prompt)
             finally:
                 ssh.close()
         except Exception as pe:
