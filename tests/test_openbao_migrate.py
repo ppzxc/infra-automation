@@ -127,8 +127,7 @@ def test_asset_document_gets_metadata_isms_access_agents_and_drops_computed_keys
         "isms": {"target": True, "group_asset_name": "", "personal_info_system": False, "department": "Fake Dept",
                  "owner_role": "Fake Owner", "admin_role": "Fake Admin", "asset_importance": "H"},
         "access": {"admin_credentials": ["admin01"], "python_interpreter": "/opt/py/bin/python3"},
-        "agents": {"backup": {"extra_paths": ["/srv/fake"], "bucket": "backup-prod-fakeold"}, "otel": {"container_logs": True},
-                   "github_webhook": {"port": "9000"}},
+        "agents": {"backup": {"extra_paths": ["/srv/fake"], "bucket": "backup-prod-fakeold"}, "otel": {"container_logs": True}},
     }
 
 
@@ -143,7 +142,7 @@ def test_a_venv_or_semaphore_python_interpreter_is_dropped_like_the_old_resoluti
 def test_agent_secrets_use_new_key_names_and_environment_is_dropped(plan):
     assert plan.store["secrets/assets/ns0001/agents"] == {
         "ingest_token": "ingest-0001", "rustfs_access_key": "rk-0001", "rustfs_secret_key": "rs-0001",
-        "restic_password": "restic-0001", "webhook_secret": "hook-secret-0011"}
+        "restic_password": "restic-0001"}
 
 
 def test_provisioned_server_endpoint_uses_automation_identity_and_global_account_password(plan):
@@ -217,13 +216,11 @@ def test_services_config_and_permission_documents(plan):
     s = plan.store
     assert s["inventory/services/openobserve"] == {"url": "https://o2.example.test", "ca_file": "/etc/pki/fake-o2-ca.pem"}
     assert s["inventory/services/rustfs"] == {"url": "https://rustfs.example.test", "ca_file": "/etc/pki/fake-rustfs-ca.pem"}
-    assert s["inventory/services/github"] == {"url": "https://api.github.com", "org": "fake-org"}
     assert s["secrets/services/openobserve/admin"] == {"username": "o2admin", "password": "o2-admin-pass"}
     assert s["secrets/services/openobserve/ingest"] == {"username": "ingest", "password": "o2-pass-0010"}
     assert s["secrets/services/rustfs/maintenance"] == {"access_key": "mk", "secret_key": "ms"}
     assert s["secrets/services/rustfs/audit_reports"] == {"access_key": "sk", "secret_key": "ss"}
     assert s["secrets/services/alert/notify"] == {"url": "https://alert.example.test/plain/alert-url-0013"}
-    assert s["secrets/services/github/org_hooks_read"] == {"token": "gh-token-0012"}
     assert s["inventory/config/host_audit"] == {"mail_recipients": ["a@example.test", "b@example.test"],
                                                 "mail_sender": "noreply@example.test", "mail_sender_display_name": "Fake Audit"}
     assert s["inventory/config/openobserve_config"] == {
@@ -231,8 +228,7 @@ def test_services_config_and_permission_documents(plan):
         "resource_exclusions": [{"host": "ns0001", "mount": "/data"}],
         "resource_thresholds": [{"host": "ns0001", "p2": 97, "p1": 99}],
         "audit_provisioning_accounts": ["admin01"]}
-    assert s["inventory/config/github_webhook_watch"] == {"hook_url": "https://hooks.example.test/x",
-                                                          "github_org": "fake-org", "o2_org": "fake-o2"}
+    assert not [d for d in s if "github" in d]   # GitHub 조직 감사 웹훅은 제거됐다(#651): 옛 값은 옮기지 않는다
 
 
 def test_funa_cluster_keys_are_lowercased_without_funa_prefix(plan):
@@ -460,11 +456,10 @@ def test_bootstrap_document_goes_to_the_bootstrap_credential_only():
     assert plan.store["secrets/assets/ns0007/credentials/admin01"]["type"] == "password"
 
 
-def test_github_token_without_org_still_gets_a_service_document():
-    old = old_docs()
-    del old["agents/github-webhook-watch"]["github_org"]
-    plan = om.build_new(old, SKIP)
-    assert plan.store["inventory/services/github"] == {"url": "https://api.github.com"}
+def test_old_github_webhook_values_are_dropped_without_errors():
+    plan = om.build_new(old_docs(), SKIP)
+    assert not plan.errors
+    assert "webhook_secret" not in plan.store.get("secrets/assets/ns0001/agents", {})
 
 
 def test_same_unmapped_key_in_a_global_account_is_reported_once():

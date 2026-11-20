@@ -38,7 +38,6 @@ FOOTNOTES = {
     'location': '접속 위치: 로그인이 들어온 출발지 IP. 허용 목록은 IP 또는 IP 대역(CIDR)으로 적는다.',
     'switchcode': '스위치 로그인 실패 코드: SEC_LOGIN-4-LOGIN_FAILED. 스위치가 로그인에 실패했을 때 남기는 메시지 코드다.',
     'timesync': '시각 동기: kind=time_sync 판독(5분 주기). 오차 1000ms(1초) 초과나 도구 없음(no_tool)이면 확인 필요, 판독이 없으면 확인 불가. 구형 CentOS 6은 rdate로 주기적으로 시각을 맞춰 도구가 판독하지 못한다.',
-    'heartbeat': '정상 동작 확인 신호: 하트비트(service_name=github-webhook-watch). 웹훅 상태 이상은 missing(없음)·inactive(비활성)·events_mismatch(이벤트 불일치)·unknown(알 수 없음).',
     'fingerprint': '파일 지문(SHA-256): 파일이 바뀌지 않았음을 확인하는 값. 서명본 등록 기록은 보관 경로의 signed/registration.json.',
 }
 # 항목 키 → 각주 키(본문 순서). 항목의 '점검 방법' 끝에 [번호]로 붙는다.
@@ -56,7 +55,6 @@ REFS = {
     'part3.retention': ['readonly'],
     'part3.time_sync': ['logs', 'timesync'],
     'part3.backup': ['logs'],
-    'part3.github_audit': ['logs', 'heartbeat'],
     'part3.previous_signed_copy': ['fingerprint'],
 }
 VERDICT_OK = '이상 없음'
@@ -157,8 +155,7 @@ PART3 = (
     _item(3, 'part3.time_sync', '시각 동기 상태'),
     _item(4, 'part3.backup', '전월 백업 결과'),
     _item(5, 'part3.alert_history', '알림 이력'),
-    _item(6, 'part3.github_audit', 'GitHub 감사 로그 수집 상태'),
-    _item(7, 'part3.previous_signed_copy', '전월 보고서 서명본 등록'),
+    _item(6, 'part3.previous_signed_copy', '전월 보고서 서명본 등록'),
 )
 
 

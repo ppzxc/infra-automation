@@ -118,13 +118,6 @@ host_agents_install_root: /opt/host-agents
 # 로그 스트림 (라우팅 테이블·exporter·파이프라인이 공유)
 host_agents_log_streams: [security_logs, system_logs, app_logs, backup_logs, host_status_logs]
 
-# GitHub 조직 웹훅 수신기(Spec #399)의 환경변수 이름과 설정 검증 때 쓰는 자리표시 값. 이름의 유일한 정의다
-# (설정 템플릿의 ${env:…} 참조, secrets.env.j2, 설정 검증 태스크가 모두 이 변수를 쓴다). 실제 값은 secrets.env에만 있다.
-otel_github_webhook_env:
-  endpoint: {name: GITHUB_WEBHOOK_ENDPOINT, validate_value: "127.0.0.1:1"}
-  path: {name: GITHUB_WEBHOOK_PATH, validate_value: /validate-only}
-  secret: {name: GITHUB_WEBHOOK_SECRET, validate_value: validate-only}
-
 # 이 역할이 읽는 OpenBao 문서 패턴과 필수 키(Spec #511). 입력 검증 assert(MON-031)·스키마 required 대조·요청 기록 단언이 같은 선언을 쓴다.
 # 필수 키가 없는 선택 문서는 []다. ingest_token은 otelcol을 설치하는 호스트에서만 필요해 입력 검증기(host_agents_resolve_inputs)가 따로 본다.
 # 사용처: agents_input.yml(자산·시크릿·공유 Service), o2_health_watch.yml(alert/notify, 검사하는 쪽만), tcpcheck_targets.yml(endpoints, 검사하는 쪽만).

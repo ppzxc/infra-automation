@@ -81,16 +81,16 @@ def test_index_covers_every_document_kind_of_the_skeleton():
     paths = [
         "inventory/assets/ns0001", "inventory/assets/ns0001/endpoints", "secrets/assets/ns0001/credentials/root",
         "secrets/assets/ns0001/agents", "inventory/services/openobserve", "inventory/services/rustfs",
-        "inventory/services/github", "inventory/services/funa", "inventory/services/semaphore",
+        "inventory/services/funa", "inventory/services/semaphore",
         "secrets/services/openobserve/admin", "secrets/services/openobserve/ingest",
         "secrets/services/rustfs/maintenance", "secrets/services/rustfs/audit_reports",
-        "secrets/services/alert/notify", "secrets/services/github/org_hooks_read",
+        "secrets/services/alert/notify",
         "secrets/services/funa/proxy", "secrets/services/funa/vrrp", "secrets/services/semaphore/inventory_read",
         "secrets/services/forgejo/idc_access_bot", "secrets/services/forgejo/idc_access_bot_login",
         "secrets/services/forgejo/idc_access_webhook",
         "secrets/services/gws/directory_read",
         "secrets/automation/ssh", "inventory/operators/alice", "inventory/config/common",
-        "inventory/config/host_audit", "inventory/config/openobserve_config", "inventory/config/github_webhook_watch",
+        "inventory/config/host_audit", "inventory/config/openobserve_config",
         "inventory/config/log_review",
     ]
     for p in paths:

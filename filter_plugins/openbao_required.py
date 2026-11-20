@@ -1,6 +1,6 @@
 """`<역할>_openbao_required` 선언이 읽은 문서에서 채워졌는지 보는 공용 필터 (최종 리뷰 5차 7번).
 
-역할마다 따로 구현돼 있던 "필수 키 충족 검사"(host_agents·openobserve_config·backup·host_audit·github_webhook_watch)를 한 곳으로 모은다.
+역할마다 따로 구현돼 있던 "필수 키 충족 검사"(host_agents·openobserve_config·backup·host_audit)를 한 곳으로 모은다.
 의미가 실제로 다른 부분은 옵션으로 표현한다:
 
 * `scope`: `required`면 선언을 돌고(읽지 못한 문서도 보고), `docs`면 읽은 문서를 돈다(선언에 없는 문서는 키를 보지 않는다).

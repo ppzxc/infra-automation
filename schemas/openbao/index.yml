@@ -6,13 +6,11 @@
 "inventory/operators/+": inventory/operator.schema.json
 "inventory/services/openobserve": inventory/service_openobserve.schema.json
 "inventory/services/rustfs": inventory/service_rustfs.schema.json
-"inventory/services/github": inventory/service_github.schema.json
 "inventory/services/semaphore": inventory/service_semaphore.schema.json
 "inventory/services/funa": inventory/service_funa.schema.json
 "inventory/config/common": inventory/config/common.schema.json
 "inventory/config/host_audit": inventory/config/host_audit.schema.json
 "inventory/config/openobserve_config": inventory/config/openobserve_config.schema.json
-"inventory/config/github_webhook_watch": inventory/config/github_webhook_watch.schema.json
 "inventory/config/log_review": inventory/config/log_review.schema.json
 "secrets/assets/+/credentials/+": secrets/credential.schema.json
 "secrets/assets/+/agents": secrets/agents.schema.json
@@ -23,7 +21,6 @@
 "secrets/services/rustfs/maintenance": secrets/services/access_key.schema.json
 "secrets/services/rustfs/audit_reports": secrets/services/access_key.schema.json
 "secrets/services/alert/notify": secrets/services/alert_notify.schema.json
-"secrets/services/github/org_hooks_read": secrets/services/token.schema.json
 "secrets/services/semaphore/inventory_read": secrets/services/token.schema.json
 "secrets/services/funa/proxy": secrets/services/funa_proxy.schema.json
 "secrets/services/funa/vrrp": secrets/services/funa_vrrp.schema.json

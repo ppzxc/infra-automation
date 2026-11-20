@@ -25,7 +25,6 @@ ROLE_FAMILY = {
     "host_audit": "host_audit",
     "cisco_backup": "network_backup",
     "fortigate_backup": "network_backup",
-    "github_webhook_watch": "github_webhook_watch",
 }
 
 

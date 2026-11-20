@@ -108,7 +108,7 @@ def test_every_item_title_is_printed(rendered, model):
 def test_the_verdict_remarks_and_action_cells_are_empty_everywhere(parsed):
     for cls in ("final-verdict", "remarks", "action"):
         cells = [text for c, text in parsed.cells if cls in c.split()]
-        assert len(cells) == 19 + 9 + 7 and set(cells) == {""}, cls
+        assert len(cells) == 19 + 9 + 6 and set(cells) == {""}, cls
 
 
 def test_the_last_page_has_three_empty_signature_boxes_with_a_date_row(rendered, parsed):

@@ -319,7 +319,7 @@ SERVICES = {"/var/log/messages": "syslog", "/var/log/secure": "auth", "/var/log/
             "/var/log/cron*": "cron"}
 
 
-_SECRET_KEYS = set(REQUIRED) | {"webhook_secret"}
+_SECRET_KEYS = set(REQUIRED)
 _LABELS = {"otel_exclude_logs": "agents.otel.exclude_logs", "backup_exclude_paths": "agents.backup.exclude_paths",
            "otel_app_telemetry": "agents.otel.app_telemetry"}
 
@@ -328,10 +328,10 @@ def _stored(flat):
     """테스트가 쓰는 평면 키(`backup_extra_paths`, `otel_*`, 비밀)를 저장 형태(agents 절, 비밀 문서)로 나눈다."""
     agents, secrets = {}, {}
     for key, value in flat.items():
-        if key in _SECRET_KEYS or key == "github_webhook_secret":
-            secrets["webhook_secret" if key == "github_webhook_secret" else key] = value
+        if key in _SECRET_KEYS:
+            secrets[key] = value
             continue
-        for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
+        for prefix, section in (("backup_", "backup"), ("otel_", "otel")):
             if key.startswith(prefix):
                 agents.setdefault(section, {})[key[len(prefix):]] = value
                 break
@@ -415,7 +415,7 @@ def test_secrets_are_never_part_of_the_merged_result():
     res = _resolve()
     assert not any(v in json.dumps(res) for v in REQUIRED.values())
     assert not set(REQUIRED) & set(res)
-    assert host_agents_secrets(dict(REQUIRED, webhook_secret="hook-0009", extra="/x")) == REQUIRED
+    assert host_agents_secrets(dict(REQUIRED, extra="/x")) == REQUIRED
 
 
 @pytest.mark.parametrize("kv_key, entry, item", [

@@ -1,8 +1,0 @@
----
-# 이 역할이 읽는 OpenBao 문서와 필수 키(Spec #511 / Ticket-19). 입력 검증(GWW-005), 스키마 대조 테스트, 요청 기록 단언이
-# 같은 선언을 쓴다. 읽기는 공용 읽기 지점(lookup 'openbao_doc')뿐이다(docs/openbao_integration.md).
-github_webhook_watch_openbao_required:
-  "inventory/config/github_webhook_watch": [hook_url, github_org, o2_org]
-  "inventory/services/openobserve": [url]
-  "secrets/services/github/org_hooks_read": [token]
-  "secrets/services/openobserve/ingest": [username, password]

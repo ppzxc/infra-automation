@@ -38,7 +38,6 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "lookup_plugins")) 
 import _bao_http  # noqa: E402
 import openbao_validation as ov  # noqa: E402
 
-GITHUB_API_URL = "https://api.github.com"  # 공개 상수. 옛 KV에는 github_api_url이 없다(선택 키 기본값).
 OLD_TOP_LEVEL = ("hosts", "users", "agents", "clusters", "fortigate")
 ACCOUNT_KEYS = ("username", "type", "password", "ssh_private_key", "ssh_passphrase")
 GLOBAL_ACCOUNT_KEYS = ACCOUNT_KEYS + ("ssh_public_key", "revoked_keys")  # 공개키·폐기 키는 Operator로 간다
@@ -274,15 +273,16 @@ class _Builder:
             return
         asset, sec = "inventory/assets/%s" % ns, "secrets/assets/%s/agents" % ns
         secrets = {"o2_ingest_token": "ingest_token", "rustfs_access_key": "rustfs_access_key",
-                   "rustfs_secret_key": "rustfs_secret_key", "restic_password": "restic_password",
-                   "github_webhook_secret": "webhook_secret"}
+                   "rustfs_secret_key": "rustfs_secret_key", "restic_password": "restic_password"}
         for old, new in secrets.items():
             if old in d:
                 self.put(sec, [new], d.pop(old), (doc, old))
+        for k in [k for k in d if k.startswith("github_webhook_")]:   # GitHub 조직 감사 웹훅은 제거됐다(#651). 옛 값은 옮기지 않고 버린다
+            d.pop(k)
         env = d.pop("host_agents_environment", None)  # 모든 호스트가 같은 값이어야 한다. 역할 기본값으로 옮겼다(#503·#504)
         if env is not None and self.environments.setdefault("value", env) != env:
             self.err(doc, "host_agents_environment_differs")
-        for prefix, section in (("backup_", "backup"), ("otel_", "otel"), ("github_webhook_", "github_webhook")):
+        for prefix, section in (("backup_", "backup"), ("otel_", "otel")):
             for k in sorted(k for k in d if k.startswith(prefix)):
                 value = d.pop(k)
                 if k == "backup_sqlite_snapshots" and isinstance(value, list):   # 옛 값은 경로 문자열 목록, 새 값은 {path} 객체 목록
@@ -451,19 +451,9 @@ class _Builder:
             else:
                 ha.pop(k, None)
         self.finish("agents/host_audit", ha)
-        # github
-        if "github_token" in gw or "github_org" in gw:
-            self.put("inventory/services/github", ["url"], GITHUB_API_URL)
-        if "github_token" in gw:
-            self.put("secrets/services/github/org_hooks_read", ["token"], gw.pop("github_token"),
-                     ("agents/github-webhook-watch", "github_token"))
-        if "github_org" in gw:
-            self.put("inventory/services/github", ["org"], gw["github_org"], ("agents/github-webhook-watch", "github_org"))
-            self.put("inventory/config/github_webhook_watch", ["github_org"], gw.pop("github_org"),
-                     ("agents/github-webhook-watch", "github_org"))
-        for k in ("hook_url", "o2_org"):
-            if k in gw:
-                self.put("inventory/config/github_webhook_watch", [k], gw.pop(k), ("agents/github-webhook-watch", k))
+        # GitHub 조직 감사 웹훅 설정은 제거됐다(#651). 옛 값은 옮기지 않고 버린다. 수집 계정(o2_ingest_*)만 ingest()가 쓴다.
+        for k in ("github_token", "github_org", "hook_url", "o2_org"):
+            gw.pop(k, None)
         gw.pop("o2_ingest_user", None)
         gw.pop("o2_ingest_password", None)
         self.finish("agents/github-webhook-watch", gw)
