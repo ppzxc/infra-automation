@@ -71,7 +71,7 @@ htpasswd -niBC 10 x | cut -d: -f2 | sed 's/^\$2y/$2a/'
 
 적용 뒤 정책이 바뀐 계열의 대표 실행을 한 번 돌려 허용과 거부(범위 밖 경로 403)를 확인한다.
 
-**새 계열 AppRole을 추가한 경우**(예: `ledger`, Spec #630): `apply`는 정책과 AppRole 정의만 만든다. `secret_id` 발급([운영 런북 2절](runbooks/openbao-operations.md))과 Semaphore Environment(`VAULT_ADDR`·`VAULT_ROLE_ID`·`VAULT_SECRET_ID`) 등록은 운영자 단계이고 이 도구가 하지 않는다. 비밀 값 문서 적재도 운영자가 `operator`로 한다. `ledger`의 서버 접속은 `connect` 묶음이 아니라 읽기 전용 `ledger-connect`이고 로그인 Credential은 읽지 못한다(#645). 이 정책 추가 뒤에는 `plan`에 정책 1개 추가와 `ledger` AppRole 정책 목록 변경만 나와야 한다.
+**새 계열 AppRole을 추가한 경우**(예: `ledger`, Spec #630): `apply`는 정책과 AppRole 정의만 만든다. `secret_id` 발급([운영 런북 2절](runbooks/openbao-operations.md))과 Semaphore Environment(`VAULT_ADDR`·`VAULT_ROLE_ID`·`VAULT_SECRET_ID`) 등록은 운영자 단계이고 이 도구가 하지 않는다. 비밀 값 문서 적재도 운영자가 `operator`로 한다. `ledger`의 서버 접속은 `connect` 묶음이 아니라 읽기 전용 `ledger-connect`이고 로그인 Credential은 읽지 못하고 list는 `inventory/metadata/assets/` 한 경로뿐이다(#645). 이 정책 추가 뒤에는 `plan`에 정책 1개 추가와 `ledger` AppRole 정책 목록 변경만 나와야 한다.
 
 ## 6. 검증
 

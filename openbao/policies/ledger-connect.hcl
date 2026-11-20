@@ -1,7 +1,7 @@
 # 원장 계열(Spec #630 / #645) 서버 접속 읽기 전용 묶음. 기존 connect 묶음을 쓰지 않는 이유는 connect가 모든 서버의
 # 로그인 Credential(secrets/assets/+/credentials/+)과 관리 계정 공개키(inventory/operators)까지 열기 때문이다.
 # 수집기는 SSH 키 접속(Automation Identity)만 지원하고 비밀번호 Credential 자격은 어차피 쓰지 못하므로 넣지 않는다.
-# 비밀번호 Credential이 필요해지면 별도 결정으로 따로 더한다. 읽기만 허용하고 list는 없다(수집기는 문서 경로를 이미 안다).
+# 비밀번호 Credential이 필요해지면 별도 결정으로 따로 더한다. 읽기만 허용한다. 예외로 호스트 이름 목록(list) 한 경로만 연다.
 
 path "inventory/data/assets/+" {
   capabilities = ["read"]
@@ -13,4 +13,10 @@ path "inventory/data/assets/+/endpoints" {
 
 path "secrets/data/automation/ssh" {
   capabilities = ["read"]
+}
+
+# list 예외(원장 계열 한정, 이 경로 하나뿐): 일일 Asset 스냅샷이 호스트 목록을 나열해야 한다. 목록에는 문서 이름만 보이고 값은 열리지 않는다.
+# agent_session이 이미 inventory/ 전체를 list하므로 노출이 늘지 않는다. LIST 요청의 ACL 경로는 끝에 /가 붙어 정책 경로도 /로 끝난다.
+path "inventory/metadata/assets/" {
+  capabilities = ["list"]
 }
