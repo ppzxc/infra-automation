@@ -81,7 +81,7 @@ A shared system that several jobs talk to — OpenObserve, RustFS, GitHub, the a
 _Avoid_: agent (for these shared systems), global secret
 
 **Operator**:
-A person who operates the infrastructure, holding personal SSH public keys and revoked keys. Not an account on an Asset.
+An Employee who operates the infrastructure. The person, not a login: what they log in as on an Asset is a Host Account they own. Until the Host Account Ledger takes over (ADR-0017), their personal SSH public keys and revoked keys are kept under `inventory/operators/` in OpenBao.
 _Avoid_: admin user, user (when the person is meant)
 
 **Configuration Vulnerability**:
@@ -199,3 +199,27 @@ _Avoid_: host group, inventory group, address group
 **Firewall Drift**:
 A difference between the Firewall Policy and the firewall state collected from a host, found by comparing the address-based communication models of both: "missing" when only the policy has a flow, "excess" when only the host has it. Container-engine published ports are reported separately, not compared. Unlike Configuration Drift it needs no check mode, so it is detectable on Raw Provisioning Path hosts. Defined in ADR-0016.
 _Avoid_: drift (unqualified), firewall change
+
+**Employee**:
+A person in the company's Google Workspace directory, identified by its immutable directory id, not by email. Google Workspace is the source of truth for who they are, which organization and groups they belong to, and whether they are active, suspended or deleted. A person outside the directory who still needs access is an External Person, never an Employee. Defined in ADR-0017.
+_Avoid_: user, member, staff account
+
+**Host Account**:
+A login account on a Linux Asset, kept in the Host Account Ledger with one of three kinds: `person` (owned by exactly one Employee or External Person), `service` (an application runs as it) or `automation` (the automation logs in as it; root is one). Every `service` and `automation` account has a responsible Employee, and an account several people share is never `person`. System accounts — below the host's UID_MIN and unable to log in — are not Host Accounts and are only counted. An account the ledger has not yet attributed to anyone is unclassified. Defined in ADR-0017.
+_Avoid_: user, local user, account (unqualified)
+
+**External Person**:
+Someone outside the Google Workspace directory (contractor, partner) who owns a `person` Host Account. Always has an expiry date and a responsible Employee, and loses access when either runs out. Defined in ADR-0017.
+_Avoid_: guest, vendor account
+
+**Host Account Ledger**:
+The source of truth for Host Accounts, their public keys and their Access Grants, kept in a separate private repository (`idc-access`), not in this one. Changed only by merging a reviewed pull request; a bot commits only snapshots, observations and the dashboard. Secrets never live in it. Defined in ADR-0017.
+_Avoid_: account list, user database, CMDB
+
+**Access Grant**:
+One entry in the Host Account Ledger saying that a Host Account should exist on an Asset or a named host set, with what sudo level and which supplementary groups, optionally until a date. Login permission is the existence of a Grant. Defined in ADR-0017.
+_Avoid_: permission, access rule, ACL
+
+**Account Drift**:
+A difference between the Host Account Ledger and the accounts collected from a host — an account, key, sudo level, group or shell present on one side and not the other, or a login still possible for someone who left or whose Grant expired. Removed only by a ledger pull request or by fixing the host; there is no ignore list. Unlike Firewall Drift it compares accounts, not traffic. Defined in ADR-0017.
+_Avoid_: drift (unqualified), account change
