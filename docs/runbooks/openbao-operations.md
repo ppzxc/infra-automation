@@ -11,7 +11,7 @@
 | 네임스페이스 | `infra`. 모든 명령에 네임스페이스를 지정한다(`bao` CLI의 `-namespace=infra`) |
 | 마운트 | `inventory/`(비밀 아님), `secrets/`(비밀) |
 | AppRole | 계열별: `provision`·`host_agents`·`backup_maintenance`·`openobserve_config`·`host_audit`·`network_backup`·`github_webhook_watch`·`ledger`, 그리고 `periodic_check`·`agent_session`·`applier` |
-| secret_id 수명 | Semaphore 계열 AppRole(7개)과 `periodic_check`: 180일(단 이 AppRole은 만료되면 알림을 보낼 검사 자체가 멈추므로 알림 대상이 아니고 §3 4번으로 따로 챙긴다). `applier`: 1일(적용할 때마다 발급). `agent_session`: 24시간. 30일 전 만료 알림은 Semaphore 계열 AppRole 7개가 대상이다. `applier`·`agent_session`은 만료가 짧아 알림 없이 필요할 때 새로 발급한다 |
+| secret_id 수명 | Semaphore 계열 AppRole(8개)과 `periodic_check`: 180일(단 이 AppRole은 만료되면 알림을 보낼 검사 자체가 멈추므로 알림 대상이 아니고 §3 4번으로 따로 챙긴다). `applier`: 1일(적용할 때마다 발급). `agent_session`: 24시간. 30일 전 만료 알림은 Semaphore 계열 AppRole 8개가 대상이다. `applier`·`agent_session`은 만료가 짧아 알림 없이 필요할 때 새로 발급한다 |
 | 정책·AppRole 원본 | `openbao/roles.yml`과 `openbao/policies/*.hcl`. 손으로 바꾸지 않는다(바꾸면 Periodic Check가 코드 밖 객체(`not_in_code`)로 잡는다) |
 | 비밀을 쓰는 곳 | secret_id는 Semaphore Environment(`VAULT_ROLE_ID`·`VAULT_SECRET_ID`)에만 둔다. Git·이슈·채팅에 붙이지 않는다 |
 

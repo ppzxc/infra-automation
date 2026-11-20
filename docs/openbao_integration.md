@@ -111,7 +111,7 @@ Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나�
 | `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review |
 | `network_backup` | Cisco·FortiGate 백업 |
 | `github_webhook_watch` | 조직 웹훅 감시 |
-| `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap |
+| `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap. 서버 접속(`connect`)은 아직 없고 수집 템플릿(#645)의 별도 PR에서 더한다 |
 | `periodic_check` | OpenBao — Periodic Check |
 | `agent_session` | 에이전트 세션(Semaphore 밖) |
 | `applier` | `scripts/openbao_apply.py`(적용 전용, Semaphore 밖) |

@@ -1,5 +1,5 @@
 # 원장 계열(Spec #630): GWS 디렉터리 읽기 키와 Forgejo 봇 쓰기 토큰. 읽기만 한다.
-# 봇 로그인(idc_access_bot_login)과 개인 읽기 토큰 문서는 어느 계열도 읽지 않으므로 여기에 넣지 않는다.
+# 봇 로그인(idc_access_bot_login)과 개인 읽기 토큰 문서는 여기에 넣지 않는다. 스키마 대조용 전체 읽기인 periodic_check와 operator를 제외한 계열은 읽지 못한다.
 
 path "secrets/data/services/gws/directory_read" {
   capabilities = ["read"]

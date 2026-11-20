@@ -22,7 +22,7 @@ CAPS = {"create", "read", "update", "delete", "list", "sudo", "deny", "patch"}
 NON_KV_POLICIES = {"applier", "periodic-check"}
 # list 권한을 가질 수 있는 정책(기계는 periodic_check, 에이전트 세션은 metadata 한정).
 LIST_POLICIES = {"periodic-check", "operator", "agent-session"}
-SERVER_FAMILIES = {"provision", "host_agents", "host_audit", "ledger"}
+SERVER_FAMILIES = {"provision", "host_agents", "host_audit"}
 ALL_FAMILIES = {
     "provision", "host_agents", "backup_maintenance", "openobserve_config", "host_audit", "network_backup",
     "github_webhook_watch", "ledger", "periodic_check", "agent_session",
@@ -178,7 +178,7 @@ def test_service_permission_policies_are_named_after_the_permission():
 
 
 def test_ledger_secrets_reads_only_gws_key_and_bot_token_not_login_or_personal_token():
-    # 원장 저장소(Spec #630): GWS 디렉터리 읽기 키와 봇 쓰기 토큰만. 봇 로그인 문서와 개인 읽기 토큰 문서는 어느 계열도 읽지 않는다.
+    # 원장 저장소(Spec #630): GWS 디렉터리 읽기 키와 봇 쓰기 토큰만. 봇 로그인 문서와 개인 읽기 토큰 문서는 스키마 대조용 전체 읽기인 periodic_check와 operator를 제외한 계열이 읽지 못한다.
     assert readable_patterns(["ledger-secrets"]) == {
         "secrets/services/gws/directory_read", "secrets/services/forgejo/idc_access_bot"}
     fam, _ = _role_policies()
@@ -186,6 +186,7 @@ def test_ledger_secrets_reads_only_gws_key_and_bot_token_not_login_or_personal_t
     readable_by_any = readable_patterns([n for f, names in fam.items() if f != "periodic_check" for n in names])
     forgejo = {p for p in readable_by_any if p.startswith("secrets/services/forgejo/")}
     assert forgejo == {"secrets/services/forgejo/idc_access_bot"}
+    assert "connect" not in fam["ledger"]
 
 
 def test_connect_bundle_is_assets_credentials_automation_identity_and_operator_public_keys():
@@ -248,8 +249,8 @@ EXPECTED_READS = {
     "network_backup": COMMON | ASSETS | CRED | {"secrets/services/alert/notify"},
     "github_webhook_watch": COMMON | {"secrets/services/github/org_hooks_read"} | OO_ING
     | {"inventory/config/github_webhook_watch"},
-    # 원장 계열(Spec #630): 수집기가 서버에 읽기 전용으로 접속(connect), 알림, GWS 키·봇 토큰. 쓰기 권한 없음.
-    "ledger": COMMON | ASSETS | CRED | SSH | OPERATORS | {"secrets/services/alert/notify"}
+    # 원장 계열(Spec #630): 알림, GWS 키·봇 토큰. 쓰기 권한 없음. 서버 접속(connect)은 수집 템플릿(#645) PR에서 더한다.
+    "ledger": COMMON | {"secrets/services/alert/notify"}
     | {"secrets/services/gws/directory_read", "secrets/services/forgejo/idc_access_bot"},
 }
 
