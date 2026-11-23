@@ -109,7 +109,7 @@ def firing_alerts(desired, *events, among=NEW_ALERTS):
 
 # --- 1. 등록: 알림 정의·등급·재통지 -------------------------------------------------------------------------------------
 @pytest.mark.parametrize("name, severity, silence", [(AUTH, "P2 경고", 5), (CONTAINER, "P2 경고", 5), (SECRET, "P2 경고", 5),
-                                                      (PROVISIONING, "P3 주의", 5)])
+                                                      (PROVISIONING, "P3 주의", 1440)])
 def test_the_new_audit_watch_alerts_are_security_log_event_alerts_with_a_grade_a_silence_and_a_runbook_entry(desired, name, severity, silence):
     alert = desired.store["alert"][name]
     assert name in EXPECTED_ALERTS and alert["stream_name"] == "security_logs" and alert["query_condition"]["type"] == "sql"
@@ -291,7 +291,7 @@ def test_the_signature_is_one_sql_fragment_a_sibling_alert_can_reuse(desired):
     """#430(`infra-audit-watch-change`에 키를 더하는 티켓)이 같은 구분을 그대로 쓰도록, 조건은 이름 있는 변수 하나이고 키 목록도 변수다."""
     assert "tty=(none)" in DEFAULTS["o2c_audit_provisioning_filter"] or "o2c_audit_provisioning_cond" in DEFAULTS["o2c_audit_provisioning_filter"]
     assert {"auth_config", "container_config", "secret_access"} <= set(DEFAULTS["o2c_audit_provisioning_keys"])   # #430이 키를 더해도 깨지지 않는다
-    assert DEFAULTS["o2c_audit_provisioning_silence_minutes"] == 5 and DEFAULTS["o2c_audit_watch_silence_minutes"] == 5
+    assert DEFAULTS["o2c_audit_provisioning_silence_minutes"] == 1440 and DEFAULTS["o2c_audit_watch_silence_minutes"] == 5
     assert DEFAULTS["o2c_audit_watch_min_events"] == 1
 
 
