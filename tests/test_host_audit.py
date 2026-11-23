@@ -220,6 +220,18 @@ def test_report_template_renders_the_model():
         assert text in html
 
 
+def test_report_template_renders_without_switch_scope_under_strict_undefined():
+    # 호스트를 지정한 실행처럼 스위치가 대상이 아니면 cover에 switch_scope 키가 없다. Ansible은 없는 속성 접근을 오류로 다룬다.
+    jinja2 = __import__("jinja2")
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader(str(ROOT_DIR / "roles" / "host_audit" / "templates")),
+                             undefined=jinja2.StrictUndefined)
+    model = host_audit_report_model(records(), run_meta())
+    assert "switch_scope" not in model["cover"]
+    html = env.get_template("report.html.j2").render(host_audit_model=model)
+
+    assert "점검대상" in html
+
+
 def test_collection_targets_follow_spec_and_raw_probe_is_read_only():
     play_file = ROOT_DIR / "playbooks" / "host_audit.yml"
     plays = yaml.safe_load(play_file.read_text(encoding="utf-8"))
