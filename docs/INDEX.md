@@ -30,7 +30,7 @@
 * [OpenBao 정책·AppRole 적용 도구](openbao_apply.md) - `openbao/roles.yml`·`policies/`와 `scripts/openbao_apply.py`(plan·apply), 입력 환경변수(`OPENBAO_*`), bootstrap, 운영자 해시 만드는 법 (Spec #511, #505 변경)
 * [OpenBao 문서 도구](openbao_docs.md) - `openbao_docs.py` 하위 명령별 절. Periodic Check(`check`): 점검 항목·규칙 이름·종료 코드·알림·실패 대응 (Spec #511 / Ticket-8, #519)
 * [Semaphore 셋업 가이드](semaphore-setup.md) - Key Store·Repository·Inventory·Variable Group·Host Agents/OpenObserve 템플릿·스케줄(UTC/KST) 등록 절차와 자주 겪는 문제
-* Host Agents — Deploy All 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상
+* [에이전트] 수집·백업 에이전트 설치와 설정 (전체) 배포 내역서: [Simple](host-agents-deploy-inventory-simple.md) · [Full](host-agents-deploy-inventory-full.md) - otelcol-contrib·restic·resticprofile 버전/SHA256, 호스트 변경 파일, 기본 수집 로그, 기본 백업 대상
 * [Log Structuring ADR-0008](adr/0008-log-structuring-edge-envelope-central-semantics.md) - 엣지 Envelope Parsing + 중앙(OpenObserve VRL·알림) 의미 해석
 * [스위치 syslog 수신 경로 런북](runbooks/switch-syslog.md) - 스위치 syslog → syslog-ng → 파일 보관 → otelcol → OpenObserve 경로, 설정 위치와 점검 절차(#276)
 * [포티게이트 방화벽 로그 수신 런북](runbooks/fortigate-syslog.md) - 방화벽 syslog → `security_logs`(`fortigate-syslog`) 경로, 장비 쪽 로그 거름 기준, HA 멤버 구성, 점검·편입 절차(#283)

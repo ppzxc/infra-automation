@@ -42,7 +42,7 @@
 | 3 | 호스트 키로 `locks/zz-policy-probe-<시각>` 업로드 후 삭제 | 둘 다 성공 |
 | 4 | 카나리 호스트에서 수동 백업(`systemctl start host-agents-backup` 또는 `/etc/cron.d`의 같은 명령) | 성공, `backup_logs`에 `job=backup` `success=true` |
 | 5 | 중단된 잠금 정리: `restic unlock`(호스트 쪽 같은 환경) | 성공(잠금 삭제만 일어남) |
-| 6 | 중앙 유지보수: Semaphore "Host Agents — Repo Maintenance"를 `-e target_hosts=<카나리> -e backup_maintenance_read_subset=always`로 실행 | `check`, `check --read-data-subset`, `forget --prune` 모두 성공 |
+| 6 | 중앙 유지보수: Semaphore "[백업] 백업 저장소 점검·정리 (매일)"를 `-e target_hosts=<카나리> -e backup_maintenance_read_subset=always`로 실행 | `check`, `check --read-data-subset`, `forget --prune` 모두 성공 |
 
 - 시험 2의 거부를 확인한 뒤 시험 1의 잔여 객체는 중앙 유지보수 키(운영자)로 지운다. 호스트 키로는 지워지지 않는 것이 정상이다.
 - 시험 6이 실패하면 확대하지 않는다. 유지보수 키는 호스트 키와 별개이므로 실패 원인은 유지보수 키 정책·네트워크·restic 잠금에서 찾는다.

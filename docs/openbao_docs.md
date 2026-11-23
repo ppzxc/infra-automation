@@ -62,7 +62,7 @@ python3 scripts/openbao_docs.py put <문서 경로> <입력 YAML> [--merge]
 
 ## 4. Periodic Check (`check`, Ticket-8 #519)
 
-Semaphore 템플릿 "OpenBao — Periodic Check"가 `periodic_check` AppRole Environment로 **매일 1회** 돌린다(템플릿 정의와 Environment는 [semaphore-setup.md](semaphore-setup.md) 4·5절, 스케줄은 전환 뒤). 코드는 `scripts/openbao_check.py`이고 `openbao_docs.py check`가 부른다.
+Semaphore 템플릿 "[점검] 비밀 저장소 정기 점검 (OpenBao)"가 `periodic_check` AppRole Environment로 **매일 1회** 돌린다(템플릿 정의와 Environment는 [semaphore-setup.md](semaphore-setup.md) 4·5절, 스케줄은 전환 뒤). 코드는 `scripts/openbao_check.py`이고 `openbao_docs.py check`가 부른다.
 
 ### 입력
 

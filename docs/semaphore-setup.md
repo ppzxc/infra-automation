@@ -1,6 +1,6 @@
 # Semaphore 셋업 가이드 (Host Agents · OpenObserve · Host Audit)
 
-> Semaphore UI에 Host Agents 템플릿 4개, OpenObserve — Config, Host Audit 템플릿 4개를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
+> Semaphore UI에 Host Agents 템플릿 4개, [구성] 로그 플랫폼 설정 반영 (OpenObserve), Host Audit 템플릿 4개를 등록하는 절차다. 값은 저장소 코드 기준이며, 시크릿은 모두 OpenBao에 두고 Git에는 두지 않는다.
 > OpenBao 구조와 공통 접속 모듈은 [openbao_integration.md](openbao_integration.md), 배포 내용은 [Host Agents 배포 내역서](host-agents-deploy-inventory-simple.md)를 본다.
 
 ---
@@ -12,14 +12,14 @@
 3. Inventory: Static 인벤토리 (Semaphore UI에서 편집, `inventory/hosts.yml.example` 형식)
 4. Variable Group(Environment): OpenBao 접속 값 (AppRole 계열마다 1개, §4)
 5. Task Template 9개 (아래 §5)
-6. Schedule: Repo Maintenance(매일), Host Audit — Monthly(월 1회)
-7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → OpenObserve — Config → Host Audit(§7.1)
+6. Schedule: Repo Maintenance(매일), [점검] 호스트 보안 점검 (월간 정기)(월 1회)
+7. 확인 실행: Config `--check` → Deploy(1대) → Deploy(전체) → Repo Maintenance → [구성] 로그 플랫폼 설정 반영 (OpenObserve) → Host Audit(§7.1)
 
 ---
 
 ## 1. 러너(컨트롤러) 요구사항
 
-템플릿은 모두 Semaphore 러너에서 실행된다. Repo Maintenance와 OpenObserve — Config는 러너에서만 동작하고 호스트에 접속하지 않는다.
+템플릿은 모두 Semaphore 러너에서 실행된다. Repo Maintenance와 [구성] 로그 플랫폼 설정 반영 (OpenObserve)는 러너에서만 동작하고 호스트에 접속하지 않는다.
 
 | 항목 | 이유 |
 |---|---|
@@ -66,7 +66,7 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 **백업만 적용하는 호스트**: 로그를 다른 체계가 수집하는 호스트는 `servers`에 두고 `host_agents_backup_only` 그룹에도 넣는다(ADR-0006 §2.1). Deploy·Config·Backup이 이 호스트에는 otelcol 단계를 건너뛰고 restic·resticprofile만 적용하며, Repo Maintenance도 포함한다. OpenBao `secrets/assets/<ns>/agents` 문서의 수집 토큰은 없어도 된다. 매일의 `job=backup` 결과는 OpenObserve로 가지 않는다. `host_agents_excluded`와 함께 넣지 않는다(제외가 우선한다).
 
-**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`OpenObserve — Config`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao Asset 문서(`inventory/assets/<ns>`)의 `agents.otel.app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `OpenObserve — Config`의 AppRole이 `inventory/assets/+` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
+**호스트 편입·폐기 절차**: 인벤토리에 호스트를 넣거나 빼는 작업(`servers`·`host_agents_excluded`·`host_agents_backup_only` 그룹 변경)을 마친 뒤 **`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행**한다. 이 템플릿이 인벤토리에서 수집 로스터(`servers` − Host Agents Exclusion − Host Agents Backup Only, ns0266·ns0331 포함)와 유지보수 로스터(`servers` − Host Agents Exclusion)를 만들어 Silent Host 등 부재 알림의 SQL에 반영한다. 재실행을 잊으면 신규 호스트는 감시에서 빠지고 폐기한 호스트는 계속 Silent Host로 울린다. 며칠 이상 계획 정지하는 호스트는 폐기 대신 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`(만료일 필수)에 등록한다. 앱 텔레메트리 무소식 알림(`infra-app-telemetry-silent`)의 대상은 수집 로스터 중 OpenBao Asset 문서(`inventory/assets/<ns>`)의 `agents.otel.app_telemetry`가 `true`인 호스트다(Config가 호스트마다 읽는다 — `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 AppRole이 `inventory/assets/+` 읽기 권한을 가져야 하며, 스위치를 바꾸면 Config를 다시 실행한다). 스위치 syslog 알림(Spec #277)의 수신 중단 감시 장비(`o2c_switch_syslog_roster`)·업링크 포트(`o2c_switch_uplinks`)·잡음 메시지 코드(`o2c_switch_noise_events`)는 이 템플릿의 Environment(`-e`)로 덮어쓰며, 새 스위치에 syslog 전송을 설정한 뒤 목록에 더하고 Config를 다시 실행한다(절차는 [런북](runbooks/alerts.md) 스위치 syslog 절).
 
 **방화벽을 건드리지 않는 호스트**: `servers`(또는 `loadbalancers`)에 두면서 `firewall_unmanaged` 그룹에도 넣는다. HOST PROVISIONING(`site.yml`)이 이 호스트의 방화벽(UFW·firewalld·iptables, CentOS 7 raw 경로 포함) 태스크를 모두 건너뛴다. sshd·SELinux·fail2ban·auditd·sudo 정책은 그대로 적용한다. Host Audit 드리프트 검사는 같은 인벤토리로 `site.yml`을 check 실행하므로 따로 설정할 것이 없다. 프로비저닝 전에 `--check --diff`로 방화벽 태스크가 하나도 나오지 않는지 확인한다(#220).
 
@@ -87,7 +87,7 @@ Galaxy 의존성은 저장소 루트 `requirements.yml`에 있으며, 실행 로
 
 `provision_excluded`에는 `setup_complete`를 뺀 나머지를 둔다. Semaphore 자신은 완료돼도 `setup_complete`와 `provision_excluded`에 함께 둔다.
 
-**Host Audit에서 빼는 호스트**: 러너(Semaphore 서버)에서 접속할 수 없는 호스트 등은 `host_audit_excluded` 그룹에 넣는다. Host Audit — Monthly·On-demand가 이 그룹을 빼며(`host_audit_scope_pattern`), 보고서와 Asset Inventory에도 나오지 않는다. 다른 템플릿에는 영향이 없다.
+**Host Audit에서 빼는 호스트**: 러너(Semaphore 서버)에서 접속할 수 없는 호스트 등은 `host_audit_excluded` 그룹에 넣는다. [점검] 호스트 보안 점검 (월간 정기)·On-demand가 이 그룹을 빼며(`host_audit_scope_pattern`), 보고서와 Asset Inventory에도 나오지 않는다. 다른 템플릿에는 영향이 없다.
 
 ```yaml
 all:
@@ -148,13 +148,13 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 | Environment(계열) | 템플릿 | 주요 읽기 범위(정책 HCL이 원본) |
 |---|---|---|
 | `provision` | Host Provisioning | Asset·Endpoint·Credential·Automation Identity, Service 문서, FUNA 소비자별 시크릿 |
-| `host_agents` | Host Agents — Deploy All·Config All·Deploy Restic | `provision`의 접속 경로, 호스트별 `agents` 비밀, OpenObserve 수집 계정, 알림 URL |
-| `backup_maintenance` | Host Agents — Repo Maintenance | 호스트별 `agents`(restic 비밀번호), RustFS 유지보수 키, OpenObserve 수집 계정 |
-| `openobserve_config` | OpenObserve — Config | Asset·Endpoint, OpenObserve 관리·수집 계정, 알림 URL, 작업 설정 |
-| `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review | `provision`·`host_agents`의 합집합(드리프트 하위 실행 때문), 보고서 보관 키, 메일 설정, 알림 URL |
+| `host_agents` | [에이전트] 수집·백업 에이전트 설치와 설정 (전체)·Config All·Deploy Restic | `provision`의 접속 경로, 호스트별 `agents` 비밀, OpenObserve 수집 계정, 알림 URL |
+| `backup_maintenance` | [백업] 백업 저장소 점검·정리 (매일) | 호스트별 `agents`(restic 비밀번호), RustFS 유지보수 키, OpenObserve 수집 계정 |
+| `openobserve_config` | [구성] 로그 플랫폼 설정 반영 (OpenObserve) | Asset·Endpoint, OpenObserve 관리·수집 계정, 알림 URL, 작업 설정 |
+| `host_audit` | [점검] 호스트 보안 점검 (월간 정기)·On-demand·Resend·Register Signed Log Review | `provision`·`host_agents`의 합집합(드리프트 하위 실행 때문), 보고서 보관 키, 메일 설정, 알림 URL |
 | `network_backup` | Cisco 백업, FortiGate 백업 | Asset·Endpoint, Credential, 알림 URL |
 | `ledger` | 원장 저장소(idc-access) 템플릿 | 알림 URL, GWS 디렉터리 읽기 키, Forgejo 봇 쓰기 토큰. 봇 로그인·개인 토큰 문서는 스키마 대조용 전체 읽기인 `periodic_check`와 `operator`를 제외한 계열이 읽지 못한다. 서버 접속은 `connect` 대신 읽기 전용 `ledger-connect`(Asset·Endpoint·로그인 Credential·Automation Identity 키) |
-| `periodic_check` | OpenBao — Periodic Check | 전체 읽기와 메타데이터 목록(스키마 대조용) |
+| `periodic_check` | [점검] 비밀 저장소 정기 점검 (OpenBao) | 전체 읽기와 메타데이터 목록(스키마 대조용) |
 
 정책·AppRole 적용(`scripts/openbao_apply.py`)은 Semaphore 템플릿이 아니라 운영자 작업 환경에서 돌리므로 Environment가 없다([openbao_apply.md](openbao_apply.md)). 에이전트 세션의 `agent_session`은 Semaphore 밖에서 쓰므로 Environment가 없다.
 
@@ -162,7 +162,7 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 
 ### Periodic Check Environment
 
-`OpenBao — Periodic Check`(§5)의 `periodic_check` Environment는 `scripts/openbao_docs.py check`가 읽는 환경변수 이름 그대로 `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`(위 공통 변수)에 더해 선택 `VAULT_NAMESPACE`(생략하면 `infra`)를 가진다([openbao_docs.md §4](openbao_docs.md)). AppRole 자격만 주입하고 값은 저장소에 쓰지 않는다. 토큰 TTL·secret_id 바인딩은 선언 코드(`openbao/roles.yml`)가 정한다.
+`[점검] 비밀 저장소 정기 점검 (OpenBao)`(§5)의 `periodic_check` Environment는 `scripts/openbao_docs.py check`가 읽는 환경변수 이름 그대로 `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`(위 공통 변수)에 더해 선택 `VAULT_NAMESPACE`(생략하면 `infra`)를 가진다([openbao_docs.md §4](openbao_docs.md)). AppRole 자격만 주입하고 값은 저장소에 쓰지 않는다. 토큰 TTL·secret_id 바인딩은 선언 코드(`openbao/roles.yml`)가 정한다.
 
 ### 한계
 
@@ -184,23 +184,23 @@ https 주소의 인증서는 기본으로 검증한다. 사설 CA는 Environment
 
 | 이름 | Playbook | CLI args | Survey variables | 실행 방식 | 대상 |
 |---|---|---|---|---|---|
-| Host Provisioning | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_removed_users`(선택) | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). `provision_allowed` 그룹에 있는 호스트만 가능(기본 거부). 지정하지 않거나 허용 목록에 없으면 접속 전에 실패한다 |
-| Host Agents — Deploy All | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `target_hosts`로 지정(필수, 전체는 `servers` 입력), 한 번에 25%씩. otelcol과 restic 모두 설치·설정 |
-| Host Agents — Config All | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `target_hosts`로 지정(필수). otelcol과 restic **설정 모두** 재적용(설치·repo 초기화·등록 이벤트는 하지 않음) |
-| Host Agents — Deploy Restic | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `target_hosts`로 지정(필수), 한 번에 25%씩 (restic·resticprofile만 설치·설정) |
-| Host Agents — Repo Maintenance | `playbooks/host_agents_maintenance.yml` | (없음) | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
-| OpenObserve — Config | `playbooks/openobserve_config.yml` | (없음) | (없음) | 수동 | localhost (OpenObserve API). Silent Host 로스터를 만들려고 `servers` 인벤토리를 읽는다 |
-| Host Audit — Monthly | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | (없음 — 두지 않는다) | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함, `host_audit_excluded` 제외) |
-| Host Audit — On-demand | `playbooks/host_audit.yml` | (없음) | `target_hosts`, `host_audit_mail_enabled`, `host_audit_storage_enabled` | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
-| Host Audit — Resend | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |
+| [구성] 서버 초기 구성 (프로비저닝) | `playbooks/provision_hosts.yml` | (없음) | `target_hosts`, `target_removed_users`(선택) | 수동 | `target_hosts`로 지정한 서버만(필수, 기본 5대까지). `provision_allowed` 그룹에 있는 호스트만 가능(기본 거부). 지정하지 않거나 허용 목록에 없으면 접속 전에 실패한다 |
+| [에이전트] 수집·백업 에이전트 설치와 설정 (전체) | `playbooks/host_agents.yml` | (없음) | `target_hosts` | 수동 | `target_hosts`로 지정(필수, 전체는 `servers` 입력), 한 번에 25%씩. otelcol과 restic 모두 설치·설정 |
+| [에이전트] 수집·백업 에이전트 설정만 재적용 | `playbooks/host_agents.yml` | `--tags agents_config` | `target_hosts` | 수동 | `target_hosts`로 지정(필수). otelcol과 restic **설정 모두** 재적용(설치·repo 초기화·등록 이벤트는 하지 않음) |
+| [에이전트] 백업 에이전트만 설치와 설정 | `playbooks/host_agents.yml` | `--tags backup` | `target_hosts` | 수동 | `target_hosts`로 지정(필수), 한 번에 25%씩 (restic·resticprofile만 설치·설정) |
+| [백업] 백업 저장소 점검·정리 (매일) | `playbooks/host_agents_maintenance.yml` | (없음) | (없음) | **스케줄** (§6) | `servers`의 repo (러너에서 실행) |
+| [구성] 로그 플랫폼 설정 반영 (OpenObserve) | `playbooks/openobserve_config.yml` | (없음) | (없음) | 수동 | localhost (OpenObserve API). Silent Host 로스터를 만들려고 `servers` 인벤토리를 읽는다 |
+| [점검] 호스트 보안 점검 (월간 정기) | `playbooks/host_audit.yml` | `-e host_audit_run_kind=scheduled` | (없음 — 두지 않는다) | **스케줄** (§6) | `servers:loadbalancers:overseer` 전체 (Host Agents Exclusion 호스트 포함, `host_audit_excluded` 제외) |
+| [점검] 호스트 보안 점검 (수시 실행) | `playbooks/host_audit.yml` | (없음) | `target_hosts`, `host_audit_mail_enabled`, `host_audit_storage_enabled` | 수동 | 위와 같음. `target_hosts`로 좁힐 수 있다 |
+| [점검] 호스트 보안 점검 보고서 재발송 | `playbooks/host_audit_resend.yml` | (없음) | `host_audit_resend_run_id`, `host_audit_resend_month` | 수동 | localhost (Host Audit 버킷 → 메일) |
 | Host Audit — Register Signed Log Review | `playbooks/host_audit_log_review_sign.yml` | (없음) | `host_audit_signed_run_id`, `host_audit_signed_sha256` | 수동 | localhost (러너 접수 폴더의 서명본 PDF → Host Audit 버킷 `signed/`) |
 
 
-**Periodic Check 템플릿(위 표와 별개, #520)**: `OpenBao — Periodic Check`는 Ansible이 아니라 **Bash** 앱 템플릿이라 위 9개에 세지 않는다.
+**Periodic Check 템플릿(위 표와 별개, #520)**: `[점검] 비밀 저장소 정기 점검 (OpenBao)`는 Ansible이 아니라 **Bash** 앱 템플릿이라 위 9개에 세지 않는다.
 
 | 항목 | 값 |
 |---|---|
-| Name | `OpenBao — Periodic Check` |
+| Name | `[점검] 비밀 저장소 정기 점검 (OpenBao)` |
 | App | Bash |
 | Script filename | `scripts/run-periodic-check.sh` (저장소 루트에서 `openbao_docs.py check` 실행) |
 | Repository | `infra-automation` |
@@ -216,8 +216,8 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 | 템플릿 | 변수 | 형식 | 기본값 | 필수 |
 |---|---|---|---|---|
-| Host Provisioning | `target_hosts` | String | (없음) | 예 |
-| Host Provisioning | `target_removed_users` | String | (없음) | 아니오. 이번 실행에서만 지울 계정(일회성 명령). 관리·bootstrap 계정은 Asset 문서의 `access` 절이 정한다 |
+| [구성] 서버 초기 구성 (프로비저닝) | `target_hosts` | String | (없음) | 예 |
+| [구성] 서버 초기 구성 (프로비저닝) | `target_removed_users` | String | (없음) | 아니오. 이번 실행에서만 지울 계정(일회성 명령). 관리·bootstrap 계정은 Asset 문서의 `access` 절이 정한다 |
 | Deploy All, Config All, Deploy Restic | `target_hosts` | String | (없음) | 예 |
 | On-demand | `target_hosts` | String | (비움 = 전체) | 아니오 |
 | On-demand | `host_audit_mail_enabled`, `host_audit_storage_enabled` | Enum `true`/`false` | `true` | 예 |
@@ -233,13 +233,13 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - Monthly에는 Survey를 두지 않는다. 정기 실행은 항상 전체 대상·보관·발송이어야 Audit Baseline이 맞다.
 - Survey에 없는 변수(아래의 `host_audit_drift_enabled`, `backup_maintenance_read_subset` 등)는 API로 실행할 때 `POST /api/project/<id>/tasks`의 `environment`(JSON 문자열)로 넘긴다. 자주 쓰게 되면 해당 템플릿 Survey에 추가한다.
 
-**restic 백업만 적용할 때 (Host Agents — Deploy Restic)**
+**restic 백업만 적용할 때 ([에이전트] 백업 에이전트만 설치와 설정)**
 
 - Deploy에서 `backup` 역할만 실행한다. restic·resticprofile 바이너리 배포, 백업 설정, timer/cron, repo 초기화, `job=inventory` 이벤트까지 하고 otelcol은 건드리지 않는다. OS 프로브, OpenBao 입력 검증, 연결 해석·임시 개인키 정리는 `always` 태그라 함께 돈다.
 - 멱등이라 백업 설정만 바꿨을 때도 이 템플릿을 다시 돌리면 된다. 이미 수렴한 설치·스케줄 단계는 `ok`로 지나간다.
 - restic **설정만** 따로 돌리는 템플릿은 두지 않는다. `--tags agents_config,backup`은 교집합이 아니라 합집합이라 otel 설정과 restic 설치가 같이 돈다. `--tags agents_config --skip-tags otel`은 쓰지 않는다. `monitoring` 역할 전체가 `otel` 태그를 물려받아 `always`인 OS 프로브·입력 검증까지 건너뛰므로 backup이 입력 미정의로 실패한다.
 
-**Host Audit — Monthly와 On-demand** ([host_audit.md](host_audit.md), ADR-0009)
+**[점검] 호스트 보안 점검 (월간 정기)와 On-demand** ([host_audit.md](host_audit.md), ADR-0009)
 
 - 둘은 같은 플레이북이고 실행 종류만 다르다. **Monthly의 결과만 Audit Baseline이 된다.** 다음 정기 실행이 이 결과와 비교해 신규·지속·해소·재발을 표시한다. On-demand(기본값 `on_demand`)는 보관·발송되지만 기준선이 되지 않는다.
 - `host_audit_run_kind=scheduled`는 Monthly 템플릿의 CLI args에만 고정한다. On-demand의 CLI args·Survey에 넣지 않는다. 부분 대상(`target_hosts`)으로 돈 실행이 기준선이 되면 다음 정기 실행에서 나머지 호스트의 발견이 모두 '신규'로 나온다.
@@ -252,7 +252,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - Host Audit은 `--check`로 돌리지 않는다. 그 자체가 읽기 전용이고, check 모드에서는 보관·발송을 하지 않는다.
 - Environment는 `host_audit`(§4)다. Configuration Drift가 `site.yml`·Host Agents Config를 하위 실행하므로 이 AppRole은 `provision`·`host_agents`가 읽는 경로도 읽는다.
 
-**Host Audit 보고서 다시 보내기 (Host Audit — Resend)**
+**Host Audit 보고서 다시 보내기 ([점검] 호스트 보안 점검 보고서 재발송)**
 
 - 다시 점검하지 않고, 버킷에 보관된 실행의 보고서를 같은 첨부(같은 SHA-256)로 다시 보낸다. 메일 발송이 실패했거나 받는 사람을 추가할 때 쓴다.
 - Survey `host_audit_resend_run_id`(예: `ha-20261031T220000Z`) — 실행 ID는 메일 제목 아래·본문 상단, 실패 메시지, Semaphore 로그(`AUD-003`)에 있다.
@@ -279,8 +279,8 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 **미리 보기**
 
-- Config와 OpenObserve — Config는 CLI args에 `--check --diff`를 추가하면 바뀔 내용만 보여 준다. 별도 템플릿으로 두거나 실행할 때 추가한다.
-- **OpenObserve — Config는 반영 전에 계획 전용으로 먼저 확인한다.** Semaphore에는 dry run이 없어 계획을 실행한 뒤에야 읽게 되므로, task `environment`에 `{"o2c_plan_only": true}`를 넣어 먼저 실행한다. OpenObserve를 읽고 계획(`O2C-013`)과 관리 밖 `infra-` 알림 줄(`unmanaged infra- alert on server (kept): …`)만 출력하고, 마지막에 `plan only: no changes were made`를 남긴 채 쓰기·주입 없이 정상 종료한다. 계획에서 `delete alert`가 의도한 폐기 알림뿐인지 확인한 뒤 `o2c_plan_only` 없이 다시 실행한다. 서버에서 지우는 알림은 역할 변수 `o2c_retired_alerts`에 이름이 있는 것뿐이다(접두어만으로는 지우지 않는다, [OpenObserve Config 명세](openobserve_config.md)).
+- Config와 [구성] 로그 플랫폼 설정 반영 (OpenObserve)는 CLI args에 `--check --diff`를 추가하면 바뀔 내용만 보여 준다. 별도 템플릿으로 두거나 실행할 때 추가한다.
+- **[구성] 로그 플랫폼 설정 반영 (OpenObserve)는 반영 전에 계획 전용으로 먼저 확인한다.** Semaphore에는 dry run이 없어 계획을 실행한 뒤에야 읽게 되므로, task `environment`에 `{"o2c_plan_only": true}`를 넣어 먼저 실행한다. OpenObserve를 읽고 계획(`O2C-013`)과 관리 밖 `infra-` 알림 줄(`unmanaged infra- alert on server (kept): …`)만 출력하고, 마지막에 `plan only: no changes were made`를 남긴 채 쓰기·주입 없이 정상 종료한다. 계획에서 `delete alert`가 의도한 폐기 알림뿐인지 확인한 뒤 `o2c_plan_only` 없이 다시 실행한다. 서버에서 지우는 알림은 역할 변수 `o2c_retired_alerts`에 이름이 있는 것뿐이다(접두어만으로는 지우지 않는다, [OpenObserve Config 명세](openobserve_config.md)).
 - Repo Maintenance를 수동으로 돌릴 때 쓸 수 있는 변수(Survey가 없으므로 API `environment`로 넘긴다):
   - `{"backup_maintenance_read_subset": "always"}`: 10% 데이터 읽기 검사를 강제
   - `{"backup_maintenance_read_subset": "never"}`: 10% 데이터 읽기 검사를 생략
@@ -293,7 +293,7 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 
 | 항목 | 값 |
 |---|---|
-| Template | Host Agents — Repo Maintenance |
+| Template | [백업] 백업 저장소 점검·정리 (매일) |
 | 의도한 시각 | 매일 05:00 **KST** |
 | Cron | Semaphore 스케줄 시간대가 **Asia/Seoul**이면 `0 5 * * *`, 기본값인 **UTC**면 `0 20 * * *`(전날 20:00 UTC) |
 
@@ -301,11 +301,11 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - 매일 돌아도 10% 읽기 검사는 "첫째 일요일"에만 한다. 판정은 플레이북이 `backup_maintenance_timezone: Asia/Seoul` 기준 날짜로 하므로, 스케줄을 UTC 20:00으로 잡아도 KST 날짜로 맞게 판정된다.
 - 호스트의 백업은 KST 02:00~03:59에 돈다. 그래서 05:00 유지보수와 겹치지 않는다.
 
-### 6.2 Host Audit — Monthly
+### 6.2 [점검] 호스트 보안 점검 (월간 정기)
 
 | 항목 | 값 |
 |---|---|
-| Template | Host Audit — Monthly |
+| Template | [점검] 호스트 보안 점검 (월간 정기) |
 | 의도한 시각 | 매월 1일 07:00 **KST** |
 | Cron | Semaphore 스케줄 시간대가 **Asia/Seoul**이면 `0 7 1 * *`. 기본값인 **UTC**면 07:00 KST가 전달 말일 22:00 UTC라 표준 cron으로 표현할 수 없으므로 `0 0 1 * *`(1일 09:00 KST)로 잡는다 |
 
@@ -313,13 +313,13 @@ Semaphore v2.19의 Run 창에는 자유 형식 Extra variables 칸이 없다. Me
 - 07:00은 호스트 백업(KST 02:00~03:59)과 Repo Maintenance(매일 05:00)가 끝난 뒤다. Configuration Drift 하위 실행이 대상 수에 비례해 오래 걸릴 수 있다(`host_audit_drift_timeout` 기본 3600초).
 - **점검 주기**: ISMS 2.11.2(취약점 점검 및 조치)는 정기 점검을 요구한다. 내부 지침에는 **분기 1회 이상** 점검하고 결과를 결재·보관하도록 정하고, 그 이행 수단으로 **월 1회 자동 실행**(이 스케줄)을 둔다. 월 보고서 중 분기마다 최소 한 부는 결재란에 서명해 ISMS 증적 보관 위치에 둔다.
 
-Deploy, Config, Backup, OpenObserve — Config, Host Audit — On-demand, Host Audit — Resend는 스케줄을 걸지 않는다.
+Deploy, Config, Backup, [구성] 로그 플랫폼 설정 반영 (OpenObserve), [점검] 호스트 보안 점검 (수시 실행), [점검] 호스트 보안 점검 보고서 재발송는 스케줄을 걸지 않는다.
 
-### 6.3 OpenBao — Periodic Check
+### 6.3 [점검] 비밀 저장소 정기 점검 (OpenBao)
 
 | 항목 | 값 |
 |---|---|
-| Template | OpenBao — Periodic Check |
+| Template | [점검] 비밀 저장소 정기 점검 (OpenBao) |
 | 의도한 시각 | 매일 `<HH:MM>` KST(시각은 운영자 비공개 노트에 둔다) |
 | Cron | 6.1과 같은 시간대 규칙으로 계산한다 |
 
@@ -331,11 +331,11 @@ Deploy, Config, Backup, OpenObserve — Config, Host Audit — On-demand, Host A
 
 | 순서 | 실행 | 확인 |
 |---|---|---|
-| 1 | Host Agents — Config All + `--check --diff` + `target_hosts=<1대>` | OpenBao 로그인과 KV 검증 통과(필수 키 누락 시 변경 전에 실패) |
-| 2 | Host Agents — Deploy All + `target_hosts=<1대>` | otelcol 서비스 기동, repo 초기화, 마지막에 `job=inventory` 이벤트 전송 |
-| 3 | Host Agents — Deploy All (전체) | 신규 호스트는 `site.yml`을 먼저 실행한 뒤 Deploy |
-| 4 | Host Agents — Repo Maintenance (수동 Run) | `[BAK-087]` AppRole 로그인 → check → forget, `job=maintenance` 이벤트 |
-| 5 | OpenObserve — Config + `--check` → 실제 실행 | VRL 함수, 파이프라인, 통지 대상, 알림 반영 |
+| 1 | [에이전트] 수집·백업 에이전트 설정만 재적용 + `--check --diff` + `target_hosts=<1대>` | OpenBao 로그인과 KV 검증 통과(필수 키 누락 시 변경 전에 실패) |
+| 2 | [에이전트] 수집·백업 에이전트 설치와 설정 (전체) + `target_hosts=<1대>` | otelcol 서비스 기동, repo 초기화, 마지막에 `job=inventory` 이벤트 전송 |
+| 3 | [에이전트] 수집·백업 에이전트 설치와 설정 (전체) (전체) | 신규 호스트는 `site.yml`을 먼저 실행한 뒤 Deploy |
+| 4 | [백업] 백업 저장소 점검·정리 (매일) (수동 Run) | `[BAK-087]` AppRole 로그인 → check → forget, `job=maintenance` 이벤트 |
+| 5 | [구성] 로그 플랫폼 설정 반영 (OpenObserve) + `--check` → 실제 실행 | VRL 함수, 파이프라인, 통지 대상, 알림 반영 |
 
 OpenObserve에서 `backup_logs` 스트림에 `job=inventory`, `job=backup`(다음 날 새벽), `job=maintenance` 이벤트가 들어오는지 확인한다.
 

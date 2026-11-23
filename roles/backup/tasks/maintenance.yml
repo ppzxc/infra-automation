@@ -1,6 +1,6 @@
 ---
 # ==============================================================================
-# Host Agents — Repo Maintenance (ADR-0006 §2.5, Spec #38 / Ticket-7)
+# [백업] 백업 저장소 점검·정리 (매일) (ADR-0006 §2.5, Spec #38 / Ticket-7)
 # ==============================================================================
 # playbooks/host_agents_maintenance.yml이 컨트롤러(connection: local)에서 호스트마다 include_role(tasks_from: maintenance)로 호출한다.
 # restic은 backup 역할이 고정한 버전·체크섬(monitoring/vars/main.yml)을 쓰고 Deploy와 같은 컨트롤러 캐시를 공유한다(별도 버전 표 없음).

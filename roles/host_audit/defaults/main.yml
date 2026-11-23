@@ -1,7 +1,7 @@
 ---
 # Host Audit (ADR-0009) — 사용자가 덮어쓸 수 있는 기본값.
 
-# 실행 종류: scheduled(Host Audit — Monthly, Audit Baseline이 됨) | on_demand(수시).
+# 실행 종류: scheduled([점검] 호스트 보안 점검 (월간 정기), Audit Baseline이 됨) | on_demand(수시).
 # Semaphore 템플릿에 고정한다.
 host_audit_run_kind: on_demand
 

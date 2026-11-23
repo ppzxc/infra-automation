@@ -1073,7 +1073,7 @@ def test_roster_follows_check_mode_without_writes(o2, tmp_path):
 
 def test_semaphore_docs_say_the_config_template_reads_the_servers_inventory():
     setup = (ROOT_DIR / "docs" / "semaphore-setup.md").read_text(encoding="utf-8")
-    row = next(line for line in setup.splitlines() if line.startswith("| OpenObserve — Config |"))
+    row = next(line for line in setup.splitlines() if line.startswith("| [구성] 로그 플랫폼 설정 반영 (OpenObserve) |"))
     assert "servers" in row
 
 

@@ -187,7 +187,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 - **수집 경로**: otelcol `filelog/host_status_logs`가 JSON으로 파싱해 `host_status_logs` 스트림으로 보낸다(`service.name=raid`). 백업 결과처럼 본문(원문 JSON)은 유지한다. 같은 수신기에 다른 점검 결과(시각 동기, #336)를 `otel_host_status_logs`로 더한다.
 - **로그 회전**: `/etc/logrotate.d/host-agents-raid-status`가 매일 회전, 3개 보관(`create 0640 root root`). otelcol은 modern에서 `CAP_DAC_READ_SEARCH`, legacy에서 root로 읽는다.
 - **알림**: `docs/openobserve_config.md`의 RAID 상태 알림 7개(`infra-raid-*`, `infra-host-status-silent`)와 런북 `docs/runbooks/alerts.md#raid-write-cache-disabled` 이하.
-- **롤아웃 순서**: Host Agents Deploy(카나리: CentOS 6·CentOS 7·Rocky 9 각 1대) → OpenObserve에 `host_status_logs` 레코드와 컬럼 도착 확인 → 전체 Deploy → `OpenObserve — Config`(plan 결과를 읽은 뒤 적용). Config를 먼저 적용하면 알림 SQL이 아직 없는 컬럼을 읽고, 무소식 알림이 모든 호스트에서 난다.
+- **롤아웃 순서**: Host Agents Deploy(카나리: CentOS 6·CentOS 7·Rocky 9 각 1대) → OpenObserve에 `host_status_logs` 레코드와 컬럼 도착 확인 → 전체 Deploy → `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`(plan 결과를 읽은 뒤 적용). Config를 먼저 적용하면 알림 SQL이 아직 없는 컬럼을 읽고, 무소식 알림이 모든 호스트에서 난다.
 
 ## 3-7. 시각 동기 수집기 (`time_sync.yml`, `MON-250~254`, `MON-260~263`, Spec #322 / Ticket-14, #336)
 
@@ -198,7 +198,7 @@ CentOS 6 Test Image가 없으므로 첫 실제 호스트가 카나리입니다. 
 - **안전장치·이식성**: POSIX sh와 POSIX awk만 쓴다(CentOS 6 gawk 3.1.7에서 실제 호스트로 확인). 도구 호출마다 `timeout`(CentOS 6 coreutils 8.4는 `-k` 없음)을 건다. 어떤 경우에도 종료 코드는 0이다.
 - **스케줄·경로**: 모든 OS에서 `/etc/cron.d/host-agents-time-sync` 하나(5분 주기), logrotate는 매일·3개 보관. otelcol `filelog/host_status_logs`가 RAID 결과와 같은 수신기에서 파일별 `service.name=timesync`를 달아 `host_status_logs` 스트림으로 보낸다. `enable_time_sync: false`면 modern 경로는 cron을 지운다(`MON-254`).
 - **알림**: `docs/openobserve_config.md`의 시각 동기 알림 3개(`infra-time-offset-exceeded`, `infra-time-unsynced`, `infra-time-sync-unavailable`)와 런북 `docs/runbooks/alerts.md#time-offset-exceeded` 이하.
-- **롤아웃 순서**: Host Agents Deploy(카나리) → OpenObserve에 `kind=time_sync` 레코드와 `sync_status`·`offset_ms` 컬럼 도착 확인 → 전체 Deploy → `OpenObserve — Config`(plan 결과를 읽은 뒤 적용). Config를 먼저 적용하면 알림 SQL이 아직 없는 컬럼을 읽는다.
+- **롤아웃 순서**: Host Agents Deploy(카나리) → OpenObserve에 `kind=time_sync` 레코드와 `sync_status`·`offset_ms` 컬럼 도착 확인 → 전체 Deploy → `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`(plan 결과를 읽은 뒤 적용). Config를 먼저 적용하면 알림 SQL이 아직 없는 컬럼을 읽는다.
 
 ---
 

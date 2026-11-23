@@ -16,7 +16,7 @@ def test_runner_image_installs_jsonschema():
 
 
 def test_template_defined_in_setup_doc():
-    assert "OpenBao — Periodic Check" in SETUP
+    assert "[점검] 비밀 저장소 정기 점검 (OpenBao)" in SETUP
     assert "scripts/run-periodic-check.sh" in SETUP
     assert "periodic_check" in SETUP
 
