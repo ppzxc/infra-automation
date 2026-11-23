@@ -42,6 +42,7 @@
 * [탐지 복구 적용 런북](runbooks/detection-recovery.md) - 방화벽 비관리 서버의 fail2ban(banaction)·auditd 규칙 축소·journald 영구 저장·중앙 수집 적용·검증·롤백 절차(#372)
 * [서버 시각 동기 현황 조사 (2026-10-26)](research/time-sync-host-survey-2026-10-26.md) - CentOS 6은 ntpd 없이 하루 한 번 rdate, CentOS 7·Rocky 9은 chrony 동기. 수집기·`infra-time-unsynced`에 미치는 영향과 열린 결정(#336)
 * [Host Audit ADR-0009](adr/0009-host-audit-read-only-inspection.md) - 읽기 전용 정기 점검(Asset Inventory·Drift·KISA-2026·Trivy)과 A4 통합 보고서 메일
+* [기능별 저장소 분리 ADR-0018](adr/0018-split-playbooks-into-feature-repositories.md) - 플레이북을 기능별 공개 저장소로 나누는 원칙(로컬 우선·테스트 먼저·동결·병행 대조), 첫 대상 `vulnerability`
 * [Host Audit 태스크 명세](host_audit.md) - 실행 흐름, 호스트별 JSON 구조(schema_version 2), 변수, AUD-xxx 태스크 매트릭스
 * [Security Hardening Frameworks Evaluation ADR-0004](adr/0004-hardening-framework-evaluation.md) - dev-sec 및 ansible-lockdown 도입 검토 (CIS 감사 파일럿은 ADR-0009로 대체·제거)
 * [Compose 프로젝트·서비스 이름 규칙 ADR-0011](adr/0011-compose-project-and-service-naming.md) - 수동 관리 docker compose의 `name:` 명시, 구성요소 서비스명, `<프로젝트>-<서비스>` 식별자 (FUNA Cluster 편입)
