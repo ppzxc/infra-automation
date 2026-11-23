@@ -62,7 +62,7 @@
   <h1>{{ m.title | e }}</h1>
   <div class="kv keep">
     <div>점검일시</div><div>{{ m.cover.started_at | e }} 시작 · {{ m.cover.generated_at | e }} 작성 · {{ m.cover.run_kind | e }} ({{ m.cover.run_id | e }})</div>
-    <div>점검대상</div><div>{{ m.cover.scope | e }}{% if m.cover.switch_scope %}<br>{{ m.cover.switch_scope | e }}{% endif %}<br><span class="small mute">범위 밖: {{ m.cover.out_of_scope | e }}</span></div>
+    <div>점검대상</div><div>{{ m.cover.scope | e }}{% if m.cover.get('switch_scope') %}<br>{{ m.cover.switch_scope | e }}{% endif %}<br><span class="small mute">범위 밖: {{ m.cover.out_of_scope | e }}</span></div>
     <div>점검방법</div><div>{{ m.cover.method | e }}</div>
     <div>점검내용</div><div>{% for c in m.cover.contents %}{{ c | e }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
     <div>비교 기준</div><div>{{ m.cover.baseline | e }}</div>
