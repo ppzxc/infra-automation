@@ -164,6 +164,8 @@ o2c_audit_su_actor_sql: >-
 o2c_parse_error_percent: 10
 o2c_parse_error_min_lines: 20
 o2c_parse_error_window_minutes: 30
+# 해석 실패 알림 재통지 간격(분). 비율이 계속 높은 동안 하루 한 번만 다시 알린다(알림 피로 감소).
+o2c_parse_error_silence_minutes: 1440
 # 디스크 지연 알림(infra-disk-read-latency·infra-disk-write-latency)이 평균 지연을 믿을 최소 초당 요청 수(IOPS).
 # 입출력이 거의 없을 때 느린 요청 한두 건이 평균을 끌어올리는 오탐을 막는다. 너무 높이면 진짜 문제를 가리니 낮게 유지한다.
 o2c_disk_latency_min_iops: 5
@@ -1178,7 +1180,7 @@ o2c_alerts:
       ORDER BY parse_errors DESC
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
-    silence: "{{ o2c_parse_error_window_minutes }}"
+    silence: "{{ o2c_parse_error_silence_minutes }}"
   - name: infra-log-parse-errors-system-logs
     severity: "P3 주의"
     severity_icon: "🟡"
@@ -1200,7 +1202,7 @@ o2c_alerts:
       ORDER BY parse_errors DESC
     period: "{{ o2c_parse_error_window_minutes }}"
     frequency: 10
-    silence: "{{ o2c_parse_error_window_minutes }}"
+    silence: "{{ o2c_parse_error_silence_minutes }}"
   - name: infra-disk-usage-p2
     severity: "P2 경고"
     severity_icon: "🟠"
@@ -1974,7 +1976,7 @@ o2c_alerts:
     action: "① 양쪽 장비의 인터페이스 로그와 오류 카운터 비교 ② 광모듈·케이블·속도/duplex 협상 상태 점검 ③ 반복되면 포트를 우회하거나 부품 교체"
     runbook: "{{ o2c_runbook_base }}#switch-interface-flapping"
     row_template: '• {device_id} {if_name}({if_alias}): 상태 변경 {value}회/10분'
-    description: "Core:/Transit:로 지정된 물리 Ethernet·Port-channel의 IF-MIB ifOperStatus가 10분 동안 3회 이상 변경(changes, P2; 재통지 60분)"
+    description: "Core:/Transit:로 지정된 물리 Ethernet·Port-channel의 IF-MIB ifOperStatus가 10분 동안 3회 이상 변경(changes, P2; 재통지 240분)"
     stream: network_device_interface_oper_status
     stream_type: metrics
     promql: "changes(network_device_interface_oper_status{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'}[10m])"
@@ -1982,7 +1984,7 @@ o2c_alerts:
     promql_value: 3
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
   - name: infra-switch-cpu-high
     severity: "P2 경고"
     severity_icon: "🟠"
@@ -1992,7 +1994,7 @@ o2c_alerts:
     action: "① CPU 상위 프로세스와 직전 설정 변경 확인 ② 브로드캐스트·멀티캐스트 폭주와 SNMP polling 부하 확인 ③ 반복되면 원인 트래픽을 줄이고 IOS 버전·장비 용량 검토"
     runbook: "{{ o2c_runbook_base }}#switch-cpu-high"
     row_template: '• {device_id} CPU {value}% (표본 {index})'
-    description: "CISCO-PROCESS-MIB cpmCPUTotal5minRev가 90% 이상으로 10분 지속 (P2; 재통지 60분)"
+    description: "CISCO-PROCESS-MIB cpmCPUTotal5minRev가 90% 이상으로 10분 지속 (P2; 재통지 240분)"
     stream: network_device_cpu_utilization_percent
     stream_type: metrics
     promql: "network_device_cpu_utilization_percent{cpu_window='5m'}"
@@ -2000,7 +2002,7 @@ o2c_alerts:
     promql_value: 90
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 10
   - name: infra-switch-memory-pool-high
     severity: "P2 경고"
@@ -2011,7 +2013,7 @@ o2c_alerts:
     action: "① Processor 풀의 used/free 추세와 IOS 프로세스 확인 ② 메모리 누수·설정 변경·라우팅 테이블 급증 여부 점검 ③ 계속 증가하면 장비 재기동은 변경 승인 후 진행하고 모델 용량 검토"
     runbook: "{{ o2c_runbook_base }}#switch-memory-pool-high"
     row_template: '• {device_id} {pool_name} 메모리 {value}%'
-    description: "CISCO-MEMORY-POOL-MIB Processor 풀의 used/(used+free)가 90% 이상으로 10분 지속 (P2; 재통지 60분)"
+    description: "CISCO-MEMORY-POOL-MIB Processor 풀의 used/(used+free)가 90% 이상으로 10분 지속 (P2; 재통지 240분)"
     stream: network_device_memory_pool_used_bytes
     stream_type: metrics
     promql: >-
@@ -2023,7 +2025,7 @@ o2c_alerts:
     promql_value: 90
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 10
   - name: infra-switch-interface-in-errors
     severity: "P2 경고"
@@ -2034,7 +2036,7 @@ o2c_alerts:
     action: "① 행의 포트 방향과 카운터 증가를 확인 ② 양쪽 장비의 CRC·input/output error와 광신호 수치 비교 ③ 케이블·광모듈·포트를 교체하거나 속도 협상 설정 확인"
     runbook: "{{ o2c_runbook_base }}#switch-interface-in-errors"
     row_template: '• {device_id} {if_name}({if_alias}): 수신 오류 증가 {value}건/5분'
-    description: "Core:/Transit: 포트의 IF-MIB ifInErrors Counter32가 5분에 30건 이상 증가. 패킷 카운터 없이 절대 증가량 사용 (P2; 재통지 60분)"
+    description: "Core:/Transit: 포트의 IF-MIB ifInErrors Counter32가 5분에 30건 이상 증가. 패킷 카운터 없이 절대 증가량 사용 (P2; 재통지 240분)"
     stream: network_device_interface_in_errors
     stream_type: metrics
     promql: "increase(network_device_interface_in_errors{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'}[5m])"
@@ -2042,7 +2044,7 @@ o2c_alerts:
     promql_value: 30
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 10
   - name: infra-switch-interface-out-errors
     severity: "P2 경고"
@@ -2053,7 +2055,7 @@ o2c_alerts:
     action: "① 행의 포트와 송신 오류 카운터 증가 확인 ② 양쪽 장비의 CRC·input/output error와 광신호 수치 비교 ③ 케이블·광모듈·포트를 교체하거나 속도 협상 설정 확인"
     runbook: "{{ o2c_runbook_base }}#switch-interface-out-errors"
     row_template: '• {device_id} {if_name}({if_alias}): 송신 오류 증가 {value}건/5분'
-    description: "Core:/Transit: 포트의 IF-MIB ifOutErrors Counter32가 5분에 30건 이상 증가. 패킷 카운터 없이 절대 증가량 사용 (P2; 재통지 60분)"
+    description: "Core:/Transit: 포트의 IF-MIB ifOutErrors Counter32가 5분에 30건 이상 증가. 패킷 카운터 없이 절대 증가량 사용 (P2; 재통지 240분)"
     stream: network_device_interface_out_errors
     stream_type: metrics
     promql: "increase(network_device_interface_out_errors{if_alias=~'^(Core:|Transit:).*',if_type=~'^(6|53)$'}[5m])"
@@ -2061,7 +2063,7 @@ o2c_alerts:
     promql_value: 30
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 10
   - name: infra-cpu-usage-p1
     severity: "P2 경고"
@@ -2072,7 +2074,7 @@ o2c_alerts:
     action: "① 대상 호스트에서 CPU 상위 프로세스·컨테이너 확인 ② 폭주한 프로세스면 재기동하거나 원인(배포·배치·공격 트래픽) 조치 ③ 지속되면 증설 또는 부하 분산 검토"
     runbook: "{{ o2c_runbook_base }}#cpu-usage-p1"
     row_template: '• {host_name}: CPU {value}%'
-    description: "호스트 CPU 사용률(1 − idle − iowait − steal)이 90% 이상, 5분마다 평가해 15분 지속 (PromQL, P2, State Alert, 재통지 60분)"
+    description: "호스트 CPU 사용률(1 − idle − iowait − steal)이 90% 이상, 5분마다 평가해 15분 지속 (PromQL, P2, State Alert, 재통지 240분)"
     stream: system_cpu_utilization
     stream_type: metrics
     promql: "(1 - sum by(host_name)(avg by(host_name,state)(system_cpu_utilization{state=~'^(idle|wait|steal)$'}))) * 100"
@@ -2080,7 +2082,7 @@ o2c_alerts:
     promql_value: 90
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 15
   - name: infra-cpu-usage-p2
     severity: "P3 주의"
@@ -2184,7 +2186,7 @@ o2c_alerts:
     action: "① 행의 호스트·인터페이스·방향 확인 후 ip -s link로 오류 카운터 증가 여부 확인 ② 케이블·SFP·스위치 포트의 오류와 속도·duplex 협상 확인 ③ 반복되면 해당 포트·NIC 교체 검토"
     runbook: "{{ o2c_runbook_base }}#network-errors"
     row_template: '• {host_name} {device}({direction}): 오류 비율 {value}%'
-    description: "물리 인터페이스의 5분 오류/패킷 비율이 1% 초과이고 같은 5분 오류가 10건 이상, 1시간 지속(node-mixin NodeNetworkReceiveErrs·TransmitErrs) — 비율 비교는 반올림 전에 PromQL 안에서 한다 (PromQL, State Alert, 재통지 60분)"
+    description: "물리 인터페이스의 5분 오류/패킷 비율이 1% 초과이고 같은 5분 오류가 10건 이상, 1시간 지속(node-mixin NodeNetworkReceiveErrs·TransmitErrs) — 비율 비교는 반올림 전에 PromQL 안에서 한다 (PromQL, State Alert, 재통지 240분)"
     stream: system_network_errors
     extra_streams: [system_network_packets]
     stream_type: metrics
@@ -2193,7 +2195,7 @@ o2c_alerts:
     promql_value: 0
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 60
   - name: infra-cpu-load-saturation
     severity: "P2 경고"
@@ -2204,7 +2206,7 @@ o2c_alerts:
     action: "① 대상 호스트에서 top·uptime으로 load와 대기 프로세스 확인 ② CPU 사용이 낮은데 load가 높으면 디스크 I/O 대기 확인 ③ 원인 프로세스·배치를 줄이거나 증설 검토"
     runbook: "{{ o2c_runbook_base }}#cpu-load-saturation"
     row_template: '• {host_name}: 코어당 load {value}'
-    description: "1분 load average / 논리 코어 수가 2 초과, 5분마다 평가해 15분 지속(node-mixin NodeSystemSaturation) — 비교는 반올림 전에 PromQL 안에서 한다 (PromQL, State Alert, 재통지 60분)"
+    description: "1분 load average / 논리 코어 수가 2 초과, 5분마다 평가해 15분 지속(node-mixin NodeSystemSaturation) — 비교는 반올림 전에 PromQL 안에서 한다 (PromQL, State Alert, 재통지 240분)"
     stream: system_cpu_load_average_1m
     stream_type: metrics
     promql: "(system_cpu_load_average_1m / on(host_name) system_cpu_logical_count) > 2"
@@ -2212,7 +2214,7 @@ o2c_alerts:
     promql_value: 0
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 15
   - name: infra-cpu-iowait
     severity: "P3 주의"
@@ -2261,7 +2263,7 @@ o2c_alerts:
     action: "① 대상 호스트·장치에서 iostat -x로 사용률·대기 시간 확인 ② I/O를 많이 쓰는 프로세스(백업·DB·로그) 확인 ③ 지속되면 디스크 성능 증설 또는 부하 분산 검토"
     runbook: "{{ o2c_runbook_base }}#disk-io-saturation"
     row_template: '• {host_name} {device}: 큐 깊이 {value}'
-    description: "디스크 장치(sd·nvme·vd·xvd·dm·md, 파티션 제외) 평균 I/O 큐 깊이(weighted io time 5분 증가율)가 10 초과, 5분마다 평가해 30분 지속(node-mixin NodeDiskIOSaturation) (PromQL, State Alert, 재통지 60분)"
+    description: "디스크 장치(sd·nvme·vd·xvd·dm·md, 파티션 제외) 평균 I/O 큐 깊이(weighted io time 5분 증가율)가 10 초과, 5분마다 평가해 30분 지속(node-mixin NodeDiskIOSaturation) (PromQL, State Alert, 재통지 240분)"
     stream: system_disk_weighted_io_time
     stream_type: metrics
     promql: "sum by(host_name,device)(rate(system_disk_weighted_io_time{device=~'^(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+|xvd[a-z]+|dm-[0-9]+|md[0-9]+)$'}[5m]))"
@@ -2269,7 +2271,7 @@ o2c_alerts:
     promql_value: 10
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 30
   - name: infra-disk-read-latency
     severity: "P2 경고"
@@ -2280,7 +2282,7 @@ o2c_alerts:
     action: "① 대상 호스트·장치에서 iostat -x로 읽기 지연과 사용률 확인 ② dmesg·SMART와 RAID 컨트롤러 캐시·배터리 상태 확인 ③ 지속되면 디스크 교체 또는 I/O 부하 분산"
     runbook: "{{ o2c_runbook_base }}#disk-read-latency"
     row_template: '• {host_name} {device}: 읽기 지연 {value}ms'
-    description: "디스크 장치(파티션 제외) 30분 평균 읽기 지연(처리 시간 / 요청 수)이 100ms 초과이면서 30분 평균 읽기 IOPS가 o2c_disk_latency_min_iops 이상, 5분마다 평가해 30분 지속 (PromQL, State Alert, 재통지 60분)"
+    description: "디스크 장치(파티션 제외) 30분 평균 읽기 지연(처리 시간 / 요청 수)이 100ms 초과이면서 30분 평균 읽기 IOPS가 o2c_disk_latency_min_iops 이상, 5분마다 평가해 30분 지속 (PromQL, State Alert, 재통지 240분)"
     stream: system_disk_operation_time
     extra_streams: [system_disk_operations]
     stream_type: metrics
@@ -2289,7 +2291,7 @@ o2c_alerts:
     promql_value: 100
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 30
   - name: infra-disk-write-latency
     severity: "P2 경고"
@@ -2300,7 +2302,7 @@ o2c_alerts:
     action: "① 대상 호스트·장치에서 iostat -x로 쓰기 지연과 사용률 확인 ② dmesg·SMART와 RAID 컨트롤러 쓰기 캐시·배터리 상태 확인 ③ 지속되면 디스크·배터리 교체 또는 쓰기 부하 분산"
     runbook: "{{ o2c_runbook_base }}#disk-write-latency"
     row_template: '• {host_name} {device}: 쓰기 지연 {value}ms'
-    description: "디스크 장치(파티션 제외) 30분 평균 쓰기 지연(처리 시간 / 요청 수)이 100ms 초과이면서 30분 평균 쓰기 IOPS가 o2c_disk_latency_min_iops 이상, 5분마다 평가해 30분 지속 (PromQL, State Alert, 재통지 60분)"
+    description: "디스크 장치(파티션 제외) 30분 평균 쓰기 지연(처리 시간 / 요청 수)이 100ms 초과이면서 30분 평균 쓰기 IOPS가 o2c_disk_latency_min_iops 이상, 5분마다 평가해 30분 지속 (PromQL, State Alert, 재통지 240분)"
     stream: system_disk_operation_time
     extra_streams: [system_disk_operations]
     stream_type: metrics
@@ -2309,7 +2311,7 @@ o2c_alerts:
     promql_value: 100
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 30
   - name: infra-inode-fill-24h
     severity: "P2 경고"
@@ -2339,7 +2341,7 @@ o2c_alerts:
     action: "① 대상 호스트에서 conntrack -C와 nf_conntrack_max 확인 ② 연결을 많이 만드는 프로세스·출발지(스캔·DDoS) 확인 ③ 정상 트래픽이면 nf_conntrack_max 상향 검토"
     runbook: "{{ o2c_runbook_base }}#conntrack-limit"
     row_template: '• {host_name}: conntrack 사용률 {value}%'
-    description: "conntrack 사용 수 / 최대 수가 80% 초과 (PromQL, State Alert, 재통지 60분)"
+    description: "conntrack 사용 수 / 최대 수가 80% 초과 (PromQL, State Alert, 재통지 240분)"
     stream: system_network_conntrack_count
     stream_type: metrics
     promql: "system_network_conntrack_count / system_network_conntrack_max * 100"
@@ -2347,7 +2349,7 @@ o2c_alerts:
     promql_value: 80
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
   - name: infra-swap-usage
     severity: "P3 주의"
     severity_icon: "🟡"
@@ -2376,7 +2378,7 @@ o2c_alerts:
     action: "① 대상 호스트에서 free -m, vmstat으로 메모리·스왑 상태 확인 ② 메모리 상위 프로세스와 한도(JVM 힙, 컨테이너 limit) 점검 ③ 반복되면 메모리 증설·한도 조정"
     runbook: "{{ o2c_runbook_base }}#memory-pressure"
     row_template: '• {host_name}: 주요 페이지 폴트 초당 {value}건'
-    description: "주요 페이지 폴트가 초당 1000건 초과이면서 사용 가능 메모리가 10% 미만, 5분마다 평가해 15분 지속(node-mixin NodeMemoryMajorPagesFaults) (PromQL, State Alert, 재통지 60분)"
+    description: "주요 페이지 폴트가 초당 1000건 초과이면서 사용 가능 메모리가 10% 미만, 5분마다 평가해 15분 지속(node-mixin NodeMemoryMajorPagesFaults) (PromQL, State Alert, 재통지 240분)"
     stream: system_paging_faults
     extra_streams: [system_linux_memory_available, system_memory_limit]
     stream_type: metrics
@@ -2385,7 +2387,7 @@ o2c_alerts:
     promql_value: 1000
     period: 5
     frequency: 5
-    silence: 60
+    silence: 240
     pending_minutes: 15
   - name: infra-appsec-daily-report
     severity: "P3 주의"
