@@ -117,3 +117,107 @@ firewalld-docker reset -f
 ```bash
 ./scripts/test_firewalld_docker.sh
 ```
+
+---
+
+## 5. 기능별 저장소 분리 계획
+
+이 저장소의 플레이북은 기능별 저장소로 하나씩 옮길 예정입니다. 옮기는 동안 이 저장소의 동작은 바꾸지 않습니다. 기능은 새 저장소에서 병행 실행과 결과 대조를 통과한 뒤에만 이 저장소에서 지웁니다. 결정 근거는 [ADR-0018](docs/adr/0018-split-playbooks-into-feature-repositories.md)(기능별 저장소 분리)에 둡니다.
+
+### 5.1 원칙
+
+- **새 저장소 양식**: `ansible-creator init playbook` 양식을 쓰고, 롤과 플러그인은 인접 컬렉션 `ppzxc.<이름>`에 둡니다.
+- **설정은 로컬 우선**: 로컬 설정 파일(인벤토리 변수)과 로컬 저장이 기본입니다. 설정 블록이 있을 때만 OpenBao, RustFS S3, 메일, webhook을 씁니다. 인증 값은 환경 변수로만 받습니다.
+- **테스트를 먼저 옮깁니다**: 기능을 옮기기 전에 이 저장소의 해당 테스트와 특성화(golden) 테스트를 새 저장소에 먼저 둡니다.
+- **옮기는 동안 동결**: 새 저장소에 첫 커밋을 하면 이 저장소의 해당 기능은 동결합니다. 수정은 새 저장소에서만 합니다.
+- **공개 저장소 규칙**: 새 저장소도 공개라서 IP, 호스트 목록, 주소, 점검 결과는 넣지 않습니다.
+
+### 5.2 저장소별 공통 체크리스트
+
+저장소마다 아래 순서로 진행합니다.
+
+1. 스펙 이슈를 등록합니다. 새 저장소에 둡니다.
+2. 테스트를 먼저 작성합니다. 옮긴 테스트와 특성화 테스트이고, 처음에는 실패하는 상태로 둡니다.
+3. 기능을 옮깁니다. 테스트가 모두 통과해야 합니다.
+4. Semaphore에 새 템플릿을 만들고 기존 템플릿과 병행 실행합니다. 같은 날 수동으로 돌립니다.
+5. 두 실행의 결과를 대조해 통과를 확인합니다.
+6. 정기 실행 템플릿을 새 저장소로 옮기고, 전용 OpenBao AppRole을 만듭니다.
+7. 이 저장소에서 해당 롤, 플레이북, 테스트, 문서를 지웁니다.
+8. 문서를 정리합니다: ADR, `CONTEXT.md`, `docs/INDEX.md`.
+
+### 5.3 진행 현황
+
+| 순서 | 새 저장소 | 옮길 대상 | 상태 |
+|---|---|---|---|
+| 1 | [`ppzxc/vulnerability`](https://github.com/ppzxc/vulnerability) | `host_audit`의 취약점 점검: 설정(KISA)·패키지·스위치 취약점, 조치 가이드, Remediation Plan, 보고서·보관·메일, 직전 정기 보고서 대비 비교와 악화 알림 | 스펙 등록 ([#1](https://github.com/ppzxc/vulnerability/issues/1)) |
+| 2 | `configuration-backup` | `playbooks/backup_cisco.yml`, `playbooks/backup_fortigate.yml` (`cisco_backup`, `fortigate_backup`) | 예정 |
+| 3 | `host-agents` | `playbooks/host_agents.yml`, `playbooks/host_agents_maintenance.yml` (`monitoring`, `backup`) | 예정 |
+| 4 | `provisioning` | `playbooks/site.yml`, `playbooks/provision_hosts.yml` (`common`, `security`, `access_security`, `docker_engine`, `funa_env`) | 예정 |
+| 5 | `observability-config` | `playbooks/openobserve_config.yml` (`openobserve_config`) | 예정 |
+| 6 | `host-audit` (남는 부분) | Asset Inventory, Configuration Drift, Security Regression, Audit Baseline, Log Review Report, 메일·재발송 (`playbooks/host_audit.yml`, `playbooks/host_audit_resend.yml`, `playbooks/host_audit_log_review_sign.yml`) | 예정 |
+
+저장소 이름과 묶음은 vulnerability를 옮긴 뒤 다시 확인합니다. Configuration Drift는 `provisioning`과 `host-agents`의 플레이북을 check 모드로 돌리므로 마지막에 정리합니다.
+
+### 5.4 공통 기반 추출
+
+- [ ] OpenBao 읽기(`openbao_doc`)와 접속 해석(`playbooks/common/resolve_connection.yml`, `playbooks/common/cleanup_connection.yml`)을 공통 컬렉션(`ppzxc.infra_common`)으로 뽑습니다. 두 번째 저장소(`configuration-backup`)를 나눌 때 합니다. 그 전까지는 vulnerability가 읽기 전용 축소판을 복사해 둡니다.
+
+### 5.5 저장소별 체크리스트
+
+#### `vulnerability`
+- [x] 스펙 이슈 등록 ([ppzxc/vulnerability#1](https://github.com/ppzxc/vulnerability/issues/1))
+- [ ] 이 저장소의 `host_audit` 취약점 부분 동결 (KISA 스크립트·판정, 패키지 점검, 스위치 점검, 조치 가이드, Remediation Plan)
+- [ ] 테스트 선행 작성과 기능 이전. 기능 8개를 순서대로 옮깁니다:
+  1. 뼈대
+  2. KISA
+  3. 패키지
+  4. 스위치
+  5. 조치 가이드·Remediation Plan
+  6. 보관
+  7. 메일
+  8. 비교·악화 알림
+- [ ] Semaphore 병행 실행과 결과 대조 (호스트별 KISA 판정, 패키지 취약점 건수, 스위치 판정 일치)
+- [ ] 정기 실행 전환과 전용 OpenBao AppRole 생성. 기존 Audit Baseline은 변환하지 않으므로, 새 저장소의 첫 정기 실행 달에는 비교와 악화 알림이 없습니다.
+- [ ] 이 저장소에서 `host_audit`의 취약점 부분과 `cisco_backup`의 audit 경로 삭제
+- [ ] 문서 정리 (ADR-0009, `docs/host_audit.md`, `docs/host_audit_switch.md`, `CONTEXT.md`)
+
+#### `configuration-backup`
+- [ ] 스펙 이슈 등록
+- [ ] 공통 기반 추출(5.4)
+- [ ] 테스트 선행 작성과 기능 이전
+- [ ] Semaphore 병행 실행과 결과 대조
+- [ ] 정기 실행 전환과 전용 OpenBao AppRole 생성
+- [ ] 이 저장소에서 삭제
+- [ ] 문서 정리
+
+#### `host-agents`
+- [ ] 스펙 이슈 등록
+- [ ] 테스트 선행 작성과 기능 이전
+- [ ] Semaphore 병행 실행과 결과 대조
+- [ ] 정기 실행 전환과 전용 OpenBao AppRole 생성
+- [ ] 이 저장소에서 삭제
+- [ ] 문서 정리
+
+#### `provisioning`
+- [ ] 스펙 이슈 등록
+- [ ] 테스트 선행 작성과 기능 이전
+- [ ] Semaphore 병행 실행과 결과 대조
+- [ ] 정기 실행 전환과 전용 OpenBao AppRole 생성
+- [ ] 이 저장소에서 삭제
+- [ ] 문서 정리
+
+#### `observability-config`
+- [ ] 스펙 이슈 등록
+- [ ] 테스트 선행 작성과 기능 이전
+- [ ] Semaphore 병행 실행과 결과 대조
+- [ ] 정기 실행 전환과 전용 OpenBao AppRole 생성
+- [ ] 이 저장소에서 삭제
+- [ ] 문서 정리
+
+#### `host-audit` (남는 부분)
+- [ ] 스펙 이슈 등록. Drift가 `provisioning`·`host-agents` 저장소를 어떻게 참조할지 정합니다.
+- [ ] 테스트 선행 작성과 기능 이전
+- [ ] Semaphore 병행 실행과 결과 대조
+- [ ] 정기 실행 전환과 전용 OpenBao AppRole 생성
+- [ ] 이 저장소에서 삭제
+- [ ] 문서 정리
