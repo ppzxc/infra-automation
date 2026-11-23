@@ -79,7 +79,7 @@ backup_conditional_paths:
 backup_hook_write_paths:
   - /var/backups
 
-# Repo Maintenance (Semaphore "Host Agents — Repo Maintenance", 컨트롤러 실행, playbooks/host_agents_maintenance.yml)
+# Repo Maintenance (Semaphore "[백업] 백업 저장소 점검·정리 (매일)", 컨트롤러 실행, playbooks/host_agents_maintenance.yml)
 # 호스트별 repo에 대해 check → (성공 시) forget --prune. 유지보수 키/컨트롤러 토큰은 OpenBao secrets/services/rustfs/maintenance(유지보수 키), secrets/services/openobserve/ingest(컨트롤러 토큰).
 backup_retention_daily: 7
 backup_retention_weekly: 4

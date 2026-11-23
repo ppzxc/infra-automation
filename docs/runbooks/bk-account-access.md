@@ -29,7 +29,7 @@
 1. `bk`로 로그인되는지만 확인한다(`id`). 실패하면 이 호스트는 대상에서 뺀다.
 2. 4절로 sudoers를 추가한다.
 3. 5절로 OpenBao의 `ssh` Endpoint를 `bk` Credential로 바꾼다.
-4. Semaphore `Host Agents — Deploy All`을 `target_hosts=<카나리 1대>`로 실행한다. 로그의 `Connection decision summary`에 `원격 접속 계정: bk (부트스트랩 계정)`이 찍히고 `failed=0`, `unreachable=0`이어야 한다.
+4. Semaphore `[에이전트] 수집·백업 에이전트 설치와 설정 (전체)`을 `target_hosts=<카나리 1대>`로 실행한다. 로그의 `Connection decision summary`에 `원격 접속 계정: bk (부트스트랩 계정)`이 찍히고 `failed=0`, `unreachable=0`이어야 한다.
 5. 6절을 확인한 뒤 같은 OS의 나머지 호스트로 넓힌다. 나머지는 `target_hosts`에 쉼표로 묶어 한 번에 실행해도 된다.
 
 ## 4. sudoers 추가 (호스트마다 한 번, root 권한 필요)

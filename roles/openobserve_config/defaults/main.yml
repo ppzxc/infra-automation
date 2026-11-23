@@ -444,7 +444,7 @@ o2c_resource_cfg:
   exclusions: "{{ o2c_resource_exclusions }}"
   thresholds: "{{ o2c_resource_thresholds }}"
 
-# 로스터(Spec #184 / Ticket-4): 실행 시 인벤토리 그룹에서 만든다(OpenObserve — Config 템플릿은 servers 인벤토리를 읽는다).
+# 로스터(Spec #184 / Ticket-4): 실행 시 인벤토리 그룹에서 만든다([구성] 로그 플랫폼 설정 반영 (OpenObserve) 템플릿은 servers 인벤토리를 읽는다).
 #   수집 로스터   = servers - host_agents_excluded - host_agents_backup_only (ns0266·ns0331 포함) — Silent Host·백업 누락
 #   유지보수 로스터 = servers - host_agents_excluded — 유지보수 누락
 # 호스트 이름은 인벤토리 호스트명(관리번호)이며 수집기가 보내는 host_name과 같다. 편입·폐기 후 Config를 다시 실행하면 따라온다.
@@ -1013,7 +1013,7 @@ o2c_alerts:
     title: "일반 계정이 등록되지 않은 출발지에서 SSH 로그인 성공"
     what: "root가 아닌 계정이 정상 출발지 목록(OpenBao normal_sources)에 없는 출발지에서 SSH 로그인에 성공했습니다."
     why: "계정이 탈취되면 처음 보는 출발지에서 로그인합니다. 출발지를 등록하지 않은 정상 접속도 같은 모양이라 사람이 확인해야 합니다(ISMS 2.5 사용자 인증)."
-    action: "① 행의 계정과 출발지가 본인·작업자·자동화인지 확인 ② 정상 접속이면 그 출발지를 normal_sources에 등록(OpenBao inventory/config/openobserve_config)하고 OpenObserve — Config를 다시 실행 ③ 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 후 보안 담당 보고"
+    action: "① 행의 계정과 출발지가 본인·작업자·자동화인지 확인 ② 정상 접속이면 그 출발지를 normal_sources에 등록(OpenBao inventory/config/openobserve_config)하고 [구성] 로그 플랫폼 설정 반영 (OpenObserve)를 다시 실행 ③ 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 후 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#ssh-login-unregistered-source"
     row_template: '• {host_label}: {user_name} ← {source_address} ({logins}회) · {event_time}'
     description: "일반 계정(root 제외)의 SSH 로그인 성공이 정상 출발지 목록(normal_sources, kind 무관)에 없는 출발지에서 발생 (Event Alert, 재통지 {{ o2c_unregistered_login_silence_minutes }}분). 목록이 비어 있으면 모든 출발지가 미등록이다"
@@ -1052,7 +1052,7 @@ o2c_alerts:
     title: "방화벽 관리자 로그인 성공: 등록되지 않은 출발지"
     what: "방화벽 관리자 로그인이 정상 출발지 목록(OpenBao normal_sources)에 없는 출발지에서 성공했습니다."
     why: "방화벽 관리자 계정이 뚫리면 모든 통신 정책을 바꿀 수 있습니다. 처음 보는 출발지의 관리자 로그인은 사람이 확인해야 합니다(ISMS 2.5 사용자 인증)."
-    action: "① 행의 출발지가 사내 작업자·Semaphore인지 확인 ② 정상이면 출발지를 normal_sources에 등록하고 OpenObserve — Config를 다시 실행 ③ 확인되지 않으면 관리자 비밀번호 변경·관리 접속 허용 주소(trusted host) 점검 후 보안 담당 보고"
+    action: "① 행의 출발지가 사내 작업자·Semaphore인지 확인 ② 정상이면 출발지를 normal_sources에 등록하고 [구성] 로그 플랫폼 설정 반영 (OpenObserve)를 다시 실행 ③ 확인되지 않으면 관리자 비밀번호 변경·관리 접속 허용 주소(trusted host) 점검 후 보안 담당 보고"
     runbook: "{{ o2c_runbook_base }}#fortigate-admin-login-new-source"
     row_template: '• {device}: 출발지 {source_address} 관리자 로그인 성공 {logins}회 · {event_time}'
     description: "방화벽 관리자 로그인 성공(subtype=system, action=login, status=success)이 정상 출발지 목록에 없는 출발지에서 발생 (Event Alert, 재통지 {{ o2c_fortigate_new_source_silence_minutes }}분). 목록이 비어 있으면 모든 출발지가 미등록이다"
@@ -2486,7 +2486,7 @@ o2c_selftest_alert:
   severity: "TEST"
   severity_icon: "🧪"
   title: "알림 통지 경로 시험 (실제 장애 아님)"
-  what: "OpenObserve — Config가 o2c_verify_notify=true로 실행되어 통지 경로 시험 레코드를 넣었습니다."
+  what: "[구성] 로그 플랫폼 설정 반영 (OpenObserve)가 o2c_verify_notify=true로 실행되어 통지 경로 시험 레코드를 넣었습니다."
   why: "알림 템플릿·통지 대상·webhook이 끝까지 동작하는지 확인하는 시험이며 실제 장애가 아닙니다."
   action: "이 통지가 도착했으면 통지 경로는 정상입니다. 조치할 것이 없습니다."
   runbook: "{{ o2c_runbook_base }}"

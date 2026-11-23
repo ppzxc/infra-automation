@@ -13,7 +13,7 @@
     fail_msg: >-
       Host Audit 메일 발송 실패 — {{ host_audit_mail_outcome.error }}.
       보고서 원본은 {{ host_audit_mail_doc.report.archive }}{{ (' · xlsx zip은 ' ~ host_audit_mail_doc.xlsx_zip.archive) if (host_audit_mail_doc.xlsx_zip is defined and host_audit_mail_doc.xlsx_zip) else '' }}{{ (' · Log Review Report는 ' ~ host_audit_mail_doc.log_review.archive) if (host_audit_mail_doc.log_review is defined and host_audit_mail_doc.log_review) else '' }}에 그대로 있다
-      (실행 ID {{ host_audit_mail_doc.run_id }}로 Host Audit — Resend를 실행해 다시 보낼 수 있다).
+      (실행 ID {{ host_audit_mail_doc.run_id }}로 [점검] 호스트 보안 점검 보고서 재발송을 실행해 다시 보낼 수 있다).
       {{ ('Log Review Report 작성 실패도 있음 — ' ~ _host_audit_log_review_problem) if (_host_audit_log_review_problem | default('')) | length > 0 else '' }}
     success_msg: >-
       {{ 'Host Audit 메일 발송 완료' if host_audit_mail_outcome.sent | bool

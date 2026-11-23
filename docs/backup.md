@@ -10,7 +10,7 @@
 - **호스트별 저장소**: RustFS에 **호스트마다 전용 버킷**(규칙 `backup-prod-<호스트명>`. 이름 규칙 밖인 이전·개명 호스트는 Asset 문서의 `agents.backup.bucket`, 일회성 재정의는 Extra variables `rustfs_bucket`)과 그 버킷 루트의 전용 repo, 호스트 전용 백업 키(쓰기와 잠금 해제용 삭제, 삭제는 `locks/*`만 — 정책: `roles/backup/files/host-key-policy.json`, §2.5, [런북](runbooks/backup-host-key-scope.md))와 비밀번호. 스냅샷 `host` 라벨은 OS hostname이 아닌 Inventory Hostname(`nsXXXX`)으로 고정(프로파일 `backup.host`).
 - **일일 백업 스케줄**: systemd timer(`Persistent=true`) 또는 `/etc/cron.d/host-agents-backup`(CentOS 6/7, Rocky 8), 02:00–03:59 호스트별 고정 분.
 - **백업 결과 방출**: status-file + `/var/log/host-agents/backup.jsonl` → otelcol → OpenObserve `backup_logs` (§2.6).
-- **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "Host Agents — Repo Maintenance" 템플릿이 컨트롤러에서 실행 (§7).
+- **중앙 유지보수**: `check` / `forget --prune`은 호스트가 아닌 Semaphore "[백업] 백업 저장소 점검·정리 (매일)" 템플릿이 컨트롤러에서 실행 (§7).
 
 ---
 
@@ -169,7 +169,7 @@
 
 `playbooks/host_agents_maintenance.yml`(`roles/backup/tasks/maintenance.yml`)는 호스트에 접속하지 않고 컨트롤러에서 `servers` 호스트별 repo를 유지보수합니다.
 
-**Semaphore 템플릿 "Host Agents — Repo Maintenance"**
+**Semaphore 템플릿 "[백업] 백업 저장소 점검·정리 (매일)"**
 
 | 항목 | 값 |
 |---|---|

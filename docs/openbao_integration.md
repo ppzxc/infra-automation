@@ -105,13 +105,13 @@ Semaphore 템플릿은 작업 계열마다 AppRole 하나와 Environment 하나�
 | 계열(AppRole·Environment) | 템플릿 |
 |---|---|
 | `provision` | Host Provisioning |
-| `host_agents` | Host Agents — Deploy·Config·Deploy Restic |
-| `backup_maintenance` | Host Agents — Repo Maintenance |
-| `openobserve_config` | OpenObserve — Config |
-| `host_audit` | Host Audit — Monthly·On-demand·Resend·Register Signed Log Review |
+| `host_agents` | [에이전트] 수집·백업 에이전트 템플릿 3종 (설치와 설정 전체, 설정만 재적용, 백업 에이전트만) |
+| `backup_maintenance` | [백업] 백업 저장소 점검·정리 (매일) |
+| `openobserve_config` | [구성] 로그 플랫폼 설정 반영 (OpenObserve) |
+| `host_audit` | [점검] 호스트 보안 점검 (월간 정기)·On-demand·Resend·Register Signed Log Review |
 | `network_backup` | Cisco·FortiGate 백업 |
 | `ledger` | 원장 저장소(idc-access) 템플릿: GWS 동기화·Asset 스냅샷·계정 수집·비교·알람·bootstrap. 서버 접속은 `connect` 묶음 대신 읽기 전용 `ledger-connect`(Asset·Endpoint·로그인 Credential·Automation Identity 키)만 준다. list는 예외로 `inventory/metadata/assets/` 한 경로뿐이다(Asset 스냅샷이 호스트 이름 목록을 나열해야 하고, 목록에는 이름만 보이며 `agent_session`이 이미 `inventory/` 전체를 list한다). 로그인 Credential(`secrets/assets/+/credentials/+`)은 읽기로 연다(사용자 결정 2026-11-20): 수집기가 Endpoint의 credential type(password·ssh_key)대로 접속한다. 관리 계정 공개키(`inventory/operators`)는 열지 않는다 |
-| `periodic_check` | OpenBao — Periodic Check |
+| `periodic_check` | [점검] 비밀 저장소 정기 점검 (OpenBao) |
 | `agent_session` | 에이전트 세션(Semaphore 밖) |
 | `applier` | `scripts/openbao_apply.py`(적용 전용, Semaphore 밖) |
 

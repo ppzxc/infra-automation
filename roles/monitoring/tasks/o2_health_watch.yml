@@ -35,7 +35,7 @@
           - (_alert_notify.auth_header | default('X-NANOIT-ACCESS', true)) is match('^[A-Za-z0-9-]+$')
         fail_msg: >-
           {{ inventory_hostname }}: OpenBao secrets/services/alert/notify의 url을 읽지 못했거나 형식이 잘못되어
-          OpenObserve 생존 타이머를 배포할 수 없습니다(OpenObserve — Config와 같은 값을 쓴다).
+          OpenObserve 생존 타이머를 배포할 수 없습니다([구성] 로그 플랫폼 설정 반영 (OpenObserve)와 같은 값을 쓴다).
         quiet: true
 
     - name: "[MON-221] Ensure OpenObserve health config and state directories exist"

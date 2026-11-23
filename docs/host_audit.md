@@ -682,7 +682,7 @@ report.yml
 
 ### 13.4 재발송
 
-`playbooks/host_audit_resend.yml`(Semaphore 템플릿 Host Audit — Resend)은 다시 점검하지 않는다. 버킷 `<YYYY-MM>/<run_id>/`에서 `report.html`과 `mail_summary.json`을 받아 SHA-256을 비교하고(다르면 보내지 않음), 요약이 xlsx zip을 기록했으면 `xlsx/host-audit-<run_id>-xlsx.zip`도 받아(`AUD-629`) 기록된 해시와 대조한다(`AUD-633`: 받지 못함·이름 불일치·해시 불일치면 하나도 보내지 않고 멈춘다). 같은 첨부 둘·같은 요약에 제목 앞 `[재발송]`을 붙여 지금의 수신자에게 보낸다. 받은 보고서와 zip은 보낸 뒤 러너에서 지운다(`AUD-628`). zip의 받을 이름은 요약의 값이 아니라 실행 ID에서 정한다(요약은 버킷에서 받은 값이라 경로 문자를 믿지 않는다).
+`playbooks/host_audit_resend.yml`(Semaphore 템플릿 [점검] 호스트 보안 점검 보고서 재발송)은 다시 점검하지 않는다. 버킷 `<YYYY-MM>/<run_id>/`에서 `report.html`과 `mail_summary.json`을 받아 SHA-256을 비교하고(다르면 보내지 않음), 요약이 xlsx zip을 기록했으면 `xlsx/host-audit-<run_id>-xlsx.zip`도 받아(`AUD-629`) 기록된 해시와 대조한다(`AUD-633`: 받지 못함·이름 불일치·해시 불일치면 하나도 보내지 않고 멈춘다). 같은 첨부 둘·같은 요약에 제목 앞 `[재발송]`을 붙여 지금의 수신자에게 보낸다. 받은 보고서와 zip은 보낸 뒤 러너에서 지운다(`AUD-628`). zip의 받을 이름은 요약의 값이 아니라 실행 ID에서 정한다(요약은 버킷에서 받은 값이라 경로 문자를 믿지 않는다).
 
 - `host_audit_resend_run_id`: 보관된 실행 ID(필수, 영문·숫자·`._-`).
 - `host_audit_resend_month`: 기본 형식(`ha-<UTC 시작 시각>`)이 아닌 실행 ID일 때 `YYYY-MM`(보고서 시간대 기준 실행 시작 월). 기본 형식이면 ID에서 계산한다(예: `ha-20261031T220000Z` → KST 11월 1일 → `2026-11/`).
@@ -1015,7 +1015,7 @@ OOM 등으로 중간에 죽은 실행은 정리 단계에 가지 못한다. 실�
 | 7 | 로그인 성공 출발지를 정상 출발지 목록과 대조. 관리 호스트 주소에서 온 것은 행에만 싣고 확인 필요로 세지 않음 | 점검 불가(파싱 없음) |
 | 12 | 같은 관리자 계정(장비 무관)이 서버와 같은 시간·출발지 수 기준 | 점검 불가(파싱 없음) |
 
-- **FortiGate 로그인 결과**: VRL `fortigate_semantics`가 관리자 로그인 줄(`subtype=system`, `action=login`)에 `event_outcome`(success·failure)과 실패 사유 `event_reason`을 붙인다(#562에서 추가, 서버 적용은 다음 `OpenObserve — Config` 실행). VRL 보완 전에 들어온 기록은 `event_outcome`이 없으므로 조회가 원문 `status` 키로 가른다(OpenObserve Config의 방화벽 로그인 알림과 같은 원문 일치). 어느 쪽으로도 가르지 못한 로그인이 있으면 장비 몫은 `일부 자동`·`확인 필요`이고 건수를 적는다. `event_outcome`·`event_reason`은 서버 로그로 이미 있는 컬럼이라 스키마 문제는 없다.
+- **FortiGate 로그인 결과**: VRL `fortigate_semantics`가 관리자 로그인 줄(`subtype=system`, `action=login`)에 `event_outcome`(success·failure)과 실패 사유 `event_reason`을 붙인다(#562에서 추가, 서버 적용은 다음 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)` 실행). VRL 보완 전에 들어온 기록은 `event_outcome`이 없으므로 조회가 원문 `status` 키로 가른다(OpenObserve Config의 방화벽 로그인 알림과 같은 원문 일치). 어느 쪽으로도 가르지 못한 로그인이 있으면 장비 몫은 `일부 자동`·`확인 필요`이고 건수를 적는다. `event_outcome`·`event_reason`은 서버 로그로 이미 있는 컬럼이라 스키마 문제는 없다.
 - **수집 공백 장비**: 3부 수집 공백에 든 장비는 장비 몫 요약에 이름이 적히고 `일부 자동`·`확인 필요`다. 그 종류의 수집 공백 조회(스위치 `system_logs`·FortiGate `security_logs` 일자별)가 실패해도 공백을 모르므로 같다(`수집 공백을 확인하지 못함`).
 - **입력**: AUD-804 `settings.command_burst`(`threshold`·`window_minutes`)와 `settings.devices`(`fortigate`: `fortigate_firewalls` 그룹, `switch`: `host_audit_log_review_switch_syslog_devices`, `parsing`, `admin_accounts`: 작업 설정 문서 `inventory/config/log_review`의 `device_admin_accounts` `[{device, accounts}]`). 장비 관리자 계정 이름은 공개 저장소에 두지 않는다.
 

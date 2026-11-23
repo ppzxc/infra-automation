@@ -1,6 +1,6 @@
-# Host Agents — Deploy All 배포 내역서 (Simple)
+# [에이전트] 수집·백업 에이전트 설치와 설정 (전체) 배포 내역서 (Simple)
 
-> Semaphore **Host Agents — Deploy All**(`playbooks/host_agents.yml`, 태그 없음)가 설치하는 항목의 요약이다. 경로별 권한, SHA256, 파서 등 상세 내용은 [Full 버전](host-agents-deploy-inventory-full.md)을 본다.
+> Semaphore **[에이전트] 수집·백업 에이전트 설치와 설정 (전체)**(`playbooks/host_agents.yml`, 태그 없음)가 설치하는 항목의 요약이다. 경로별 권한, SHA256, 파서 등 상세 내용은 [Full 버전](host-agents-deploy-inventory-full.md)을 본다.
 
 ## 1. 설치 구성요소
 
@@ -49,11 +49,11 @@
 
 - **저장소**: RustFS 버킷 `backup-prod-<호스트명>` (호스트 전용 키)
 - **스케줄**: 매일 02:00~03:59 중 호스트별 고정 시각
-- **보관**: daily 7 / weekly 4 / monthly 12. 정리는 별도 템플릿 **Host Agents — Repo Maintenance**가 수행한다.
+- **보관**: daily 7 / weekly 4 / monthly 12. 정리는 별도 템플릿 **[백업] 백업 저장소 점검·정리 (매일)**가 수행한다.
 
 ## 5. Deploy에서만 하는 일
 
 - restic repo가 없으면 초기화한다.
 - 완료 시 OpenObserve `backup_logs`에 `job=inventory` 등록 이벤트를 보낸다.
-- 설정만 다시 적용할 때는 **Host Agents — Config All**(`--tags agents_config`)를 쓴다. otelcol과 restic 설정이 모두 재적용된다.
-- otelcol은 두고 restic·resticprofile만 설치·설정할 때는 **Host Agents — Deploy Restic**(`--tags backup`)을 쓴다.
+- 설정만 다시 적용할 때는 **[에이전트] 수집·백업 에이전트 설정만 재적용**(`--tags agents_config`)를 쓴다. otelcol과 restic 설정이 모두 재적용된다.
+- otelcol은 두고 restic·resticprofile만 설치·설정할 때는 **[에이전트] 백업 에이전트만 설치와 설정**(`--tags backup`)을 쓴다.

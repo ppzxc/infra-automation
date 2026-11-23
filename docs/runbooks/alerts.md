@@ -32,7 +32,7 @@
 
 **조건**: `security_logs`에서 `user_name = 'root'`인 SSH 로그인 성공이 5분 안에 1건 이상이고, 출발지가 **정상 출발지 목록에도 사설 대역에도 없을 때**(진짜 외부 출발지). 목록의 출발지(kind 무관)와 미등록 사설 대역은 아래 P2(알고 있는 출발지)로 간다. 출발지 값이 없는 로그인은 알 수 없는 출발지라 이 P1이다.
 
-**정상 출발지 목록**: OpenBao `inventory/config/openobserve_config`의 `normal_sources`(`[{"address": "<IP>", "kind": "semaphore|office"}]`)에만 둔다. 저장소에는 주소를 두지 않는다. 바꾼 뒤 `OpenObserve — Config`를 다시 실행하면 반영된다. `kind`는 구분용 표시이고 판정은 같다(semaphore·office 모두 P1에서 빠지고 P2로 간다). 사설 대역은 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16이다. 목록이 비어 있으면 모든 공인 출발지 root 로그인이 이 P1로 오고 사설 대역은 P2로 간다. SSH 로그인 실패 급증 알림에는 이 목록을 적용하지 않는다(정상 출발지의 실패 급증도 신호다).
+**정상 출발지 목록**: OpenBao `inventory/config/openobserve_config`의 `normal_sources`(`[{"address": "<IP>", "kind": "semaphore|office"}]`)에만 둔다. 저장소에는 주소를 두지 않는다. 바꾼 뒤 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행하면 반영된다. `kind`는 구분용 표시이고 판정은 같다(semaphore·office 모두 P1에서 빠지고 P2로 간다). 사설 대역은 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 169.254.0.0/16이다. 목록이 비어 있으면 모든 공인 출발지 root 로그인이 이 P1로 오고 사설 대역은 P2로 간다. SSH 로그인 실패 급증 알림에는 이 목록을 적용하지 않는다(정상 출발지의 실패 급증도 신호다).
 
 **왜 중요한가**: root 직접 접속은 누가 접속했는지 식별할 수 없고, 프로비저닝 이후에는 막혀야 한다(`PermitRootLogin`, KISA U-01). 등록되지도 사내도 아닌 곳의 성공 기록은 침해이거나 설정이 우회된 것이다.
 
@@ -398,7 +398,7 @@ sudo journalctl -u sshd --since "30 min ago" | grep -iE "libcrypto|buffer_get_st
 ssh -V   # OpenSSH 버전(알려진 취약 버전인지)
 ```
 
-**대응**: 출발지가 외부면 방화벽에서 막고 sshd 패키지의 보안 업데이트 여부를 확인한다. 같은 시각의 로그인 성공 기록이 있으면 그 계정을 점검한다. 문구를 늘리거나 줄이려면 `o2c_sshd_fatal_keywords`·`o2c_sshd_scanner_noise`를 바꾸고(근거는 `docs/openobserve_config.md`) `OpenObserve — Config`를 다시 실행한다. 스캐너 문구가 새로 늘어 울리면 `o2c_sshd_scanner_noise`에 더한다.
+**대응**: 출발지가 외부면 방화벽에서 막고 sshd 패키지의 보안 업데이트 여부를 확인한다. 같은 시각의 로그인 성공 기록이 있으면 그 계정을 점검한다. 문구를 늘리거나 줄이려면 `o2c_sshd_fatal_keywords`·`o2c_sshd_scanner_noise`를 바꾸고(근거는 `docs/openobserve_config.md`) `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행한다. 스캐너 문구가 새로 늘어 울리면 `o2c_sshd_scanner_noise`에 더한다.
 
 ---
 
@@ -433,7 +433,7 @@ sudo auditctl -l | grep var_log_delete           # 규칙이 적재돼 있는지
 ```
 지운 로그는 OpenObserve에 이미 수집된 사본(`security_logs`·`system_logs`)과 비교한다.
 
-**대응**: 계획에 없던 작업이면 해당 계정·세션을 막고 보안 담당에게 보고한다. 지워진 구간은 OpenObserve 사본으로 복원해 조사한다. 정상 정리 작업이 반복해서 울리면 그 실행 파일 경로를 `o2c_var_log_excluded_exes`에 더하고(`_`·공백이 든 경로는 받지 않는다. python 같은 범용 실행 파일이면 `o2c_var_log_excluded_exe_comm_pairs`에 `{exe, comm}` 쌍으로 더한다) `OpenObserve — Config`를 다시 실행한다. 실행 파일 하나를 제외하면 그 도구가 지우는 로그는 알림에서 빠지므로 범용 도구(`rm`·`bash`)는 제외하지 않는다. **제외의 위험**: 제외는 경로만 보므로 로그인 사용자가 `logrotate -f /tmp/내_설정.conf`로 자기 설정을 돌려 로그를 지워도 알림이 울리지 않는다. 기본 제외(`/usr/sbin/logrotate`)는 사람이 손으로 돌린 logrotate의 소음만 덜어 주고(auid 없는 시스템 logrotate는 이미 거른다) 이 우회를 열어 두므로, 1주 관찰(#436) 뒤 비우는 것을 검토한다.
+**대응**: 계획에 없던 작업이면 해당 계정·세션을 막고 보안 담당에게 보고한다. 지워진 구간은 OpenObserve 사본으로 복원해 조사한다. 정상 정리 작업이 반복해서 울리면 그 실행 파일 경로를 `o2c_var_log_excluded_exes`에 더하고(`_`·공백이 든 경로는 받지 않는다. python 같은 범용 실행 파일이면 `o2c_var_log_excluded_exe_comm_pairs`에 `{exe, comm}` 쌍으로 더한다) `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행한다. 실행 파일 하나를 제외하면 그 도구가 지우는 로그는 알림에서 빠지므로 범용 도구(`rm`·`bash`)는 제외하지 않는다. **제외의 위험**: 제외는 경로만 보므로 로그인 사용자가 `logrotate -f /tmp/내_설정.conf`로 자기 설정을 돌려 로그를 지워도 알림이 울리지 않는다. 기본 제외(`/usr/sbin/logrotate`)는 사람이 손으로 돌린 logrotate의 소음만 덜어 주고(auid 없는 시스템 logrotate는 이미 거른다) 이 우회를 열어 두므로, 1주 관찰(#436) 뒤 비우는 것을 검토한다.
 
 ---
 
@@ -481,7 +481,7 @@ sudo ausearch -k firewall_config -ts today -i
 <a id="audit-auth-config-change"></a>
 ## 🟠 PAM·로그인 정책 파일이 변경됨 (`infra-audit-auth-config-change`)
 
-> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
 
 **조건**: auditd 감시 키 `auth_config`(`/etc/pam.d/`, `/etc/login.defs`)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 패키지 관리자(`rpm`·`dnf`·`yum`·`dpkg`·`apt`, `o2c_audit_package_managers`)와 계정 관리 도구(`o2c_audit_account_tools`)가 만든 변경은 뺀다. 터미널 없이 로그인 사용자 권한으로 한 변경(프로비저닝·배포 후보)은 아래 정상 변경 후보 알림(P3)이 맡는다. 그래서 한 변경에 알림이 두 번 오지 않는다. 행은 호스트·사용자(AUID)·실행 파일·대상 경로·건수·발생 시각이다.
 
@@ -497,7 +497,7 @@ sudo ausearch -k auth_config -ts today -i
 <a id="audit-container-config-change"></a>
 ## 🟠 컨테이너 런타임 설정이 변경됨 (`infra-audit-container-config-change`)
 
-> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
 
 **조건**: auditd 감시 키 `container_config`(docker 데몬 설정 `/etc/docker/`와 호스트별 compose 위치)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 터미널 없이 로그인 사용자 권한으로 한 변경은 정상 변경 후보 알림(P3)이 맡는다.
 
@@ -513,7 +513,7 @@ sudo ausearch -k container_config -ts today -i
 <a id="audit-secret-access"></a>
 ## 🟠 지정한 비밀 파일이 열리거나 바뀜 (`infra-audit-secret-access`)
 
-> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
+> **기본 설정의 한계**: 서명 계정 목록 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없이 로그인 사용자가 한 변경은 모두 정상 변경 후보(P3)로 내려간다. 같은 로그인 키로 터미널 없이 `ssh host 'sudo …'`를 실행한 공격도 이 P2가 아니라 P3로만 온다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 Extra variables `o2c_audit_provisioning_accounts`, 권고 절차는 명세 `docs/openobserve_config.md` 참조).
 
 **조건**: auditd 감시 키 `secret_access`(호스트별 지정 비밀 파일, 읽기·쓰기·속성 변경 감시)의 SYSCALL 기록이 5분 안에 1건 이상(재통지 `o2c_audit_watch_silence_minutes`, 기본 5분). 다음은 뺀다. ① 파일을 열지 않고 속성만 보는 syscall(`getxattr`·`listxattr`·`readlink` 등, `o2c_audit_secret_metadata_syscalls`) ② 로그인 사용자 없이(`auid unset`) 도는 서비스 프로세스(`o2c_audit_secret_service_exes`, 기본 백업 에이전트) — 같은 바이너리를 사람이 손으로 돌리면 울린다 ③ 정상 소비자(`o2c_audit_secret_operator_exes`, 기본 compose 플러그인) ④ 제외 사용자(`o2c_audit_secret_excluded_users`, 기본 비어 있음) ⑤ 터미널 없이 로그인 사용자 권한으로 한 접근(정상 변경 후보 알림(P3)이 맡는다). 감시 대상이 없는 호스트(`audit_watch_paths` 비어 있음)에는 이 키의 기록이 없어 아무 것도 하지 않는다.
 
@@ -531,7 +531,7 @@ sudo ausearch -k secret_access -ts today -i
 
 > **기본 설정의 한계**: 이 알림은 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없는 로그인 사용자 전부를 받는다. 같은 키로 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 이 P3로만 오므로 무시하지 않는다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(권고 절차는 명세 참조).
 
-**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(`OpenObserve — Config`의 Extra variables `o2c_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
+**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 Extra variables `o2c_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
 
 **왜 이 알림이 있는가**: Ansible 프로비저닝·배포가 만드는 정상 변경은 감사 행으로 식별할 수 없다(프로세스 제목이 인터프리터뿐이고, 래퍼 문자열 `BECOME-SUCCESS`는 감사 행이 아니라 sudo 로그에만 있다). 같은 방식으로 도는 다른 명령과 구분되지 않아 제외하지 않고 등급만 낮춰 따로 알린다. 그래서 P2 알림은 `AND NOT <서명>`, 이 알림은 `AND <서명>`이라 한 변경에 알림이 하나만 온다.
 
@@ -551,7 +551,7 @@ sudo ausearch -k secret_access -ts today -i
 
 **확인**: 행의 계정과 출발지가 본인·작업자·자동화인지 확인한다. 로그 보기에서 같은 출발지의 직전 실패 기록(무차별 대입 뒤 성공인지)을 본다.
 
-**대응**: 정상 접속이면 출발지를 `normal_sources`에 등록하고 `OpenObserve — Config`를 다시 실행한다. 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 뒤 보안 담당에게 보고한다. 등록은 값이 IP라 저장소가 아니라 OpenBao에만 둔다.
+**대응**: 정상 접속이면 출발지를 `normal_sources`에 등록하고 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행한다. 확인되지 않으면 계정 잠금·비밀번호 변경·세션 종료 뒤 보안 담당에게 보고한다. 등록은 값이 IP라 저장소가 아니라 OpenBao에만 둔다.
 
 <a id="root-crontab-change"></a>
 ## 🟠 root crontab 변경 (`infra-root-crontab-change`)
@@ -593,7 +593,7 @@ systemctl list-timers openobserve-health.timer
 journalctl -u openobserve-health.service -n 20
 ```
 
-**대응**: ns0331의 OpenObserve 서비스·디스크·메모리를 복구한다. 복구 뒤 Silent Host 알림이 남아 있으면 수집 재개를 확인한다. ns0266에서 타이머 자체가 안 돌면 `Host Agents — Config All`를 다시 실행한다.
+**대응**: ns0331의 OpenObserve 서비스·디스크·메모리를 복구한다. 복구 뒤 Silent Host 알림이 남아 있으면 수집 재개를 확인한다. ns0266에서 타이머 자체가 안 돌면 `[에이전트] 수집·백업 에이전트 설정만 재적용`를 다시 실행한다.
 
 **수동 검증 절차** (배포 후 한 번, 또는 webhook 값을 바꾼 뒤): ns0266에서 대상 URL을 틀린 값으로 한 번 실행해 통지가 도착하는지 본다.
 ```bash
@@ -613,7 +613,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 1. 같은 호스트의 서버 응답 없음(Unreachable Host) 알림이 있으면 그쪽이 원인이다. 서버·네트워크부터 복구한다.
 2. 서버가 살아 있으면 호스트에서 `systemctl status otelcol-contrib`(CentOS 6은 `service otelcol-contrib status`)와 최근 로그를 본다.
 
-**대응**: 수집기를 재기동하고 하트비트가 돌아오는지 본다. P1이면 끊긴 구간 로그가 5시간 한도 안에 들어오는지 확인하고, 넘었다면 호스트의 원본 로그를 보존한다. 며칠 이상 계획 정지하는 호스트는 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`에 만료일과 함께 등록하고 `OpenObserve — Config`를 다시 실행한다. 호스트를 편입·폐기했다면 같은 Config 재실행이 필요하다.
+**대응**: 수집기를 재기동하고 하트비트가 돌아오는지 본다. P1이면 끊긴 구간 로그가 5시간 한도 안에 들어오는지 확인하고, 넘었다면 호스트의 원본 로그를 보존한다. 며칠 이상 계획 정지하는 호스트는 OpenBao `inventory/config/openobserve_config`의 `silent_host_exceptions`에 만료일과 함께 등록하고 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행한다. 호스트를 편입·폐기했다면 같은 Config 재실행이 필요하다.
 
 ---
 
@@ -648,7 +648,7 @@ sudo O2_HEALTH_URL_OVERRIDE=http://127.0.0.1:1/healthz /usr/local/sbin/openobser
 <a id="app-telemetry-silent"></a>
 ## 🟠 앱 텔레메트리 무소식 — funa JVM 메트릭 끊김 (`infra-app-telemetry-silent`)
 
-OpenBao Asset 문서(`inventory/assets/<ns>`)의 `agents.otel.app_telemetry`가 켜진 호스트에서 funa JVM 메트릭(`jvm_memory_used`, `service_name=funa`)이 15분 넘게 오지 않으면 온다. 스위치가 꺼진 호스트는 대상이 아니다. 대상 목록은 `OpenObserve — Config`를 실행할 때 만들어지므로 스위치를 바꾸면 Config를 다시 실행한다.
+OpenBao Asset 문서(`inventory/assets/<ns>`)의 `agents.otel.app_telemetry`가 켜진 호스트에서 funa JVM 메트릭(`jvm_memory_used`, `service_name=funa`)이 15분 넘게 오지 않으면 온다. 스위치가 꺼진 호스트는 대상이 아니다. 대상 목록은 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 실행할 때 만들어지므로 스위치를 바꾸면 Config를 다시 실행한다.
 
 **왜 중요한가**: 2026-10-01처럼 앱 텔레메트리(트레이스, 앱 메트릭)가 알림 없이 버려질 수 있다.
 
@@ -685,7 +685,7 @@ nc -vz -w 5 <주소> <포트>
 2. 접속이 되는데 알림이 온다면 ns0266 수집기(`otelcol-contrib`) 상태, ns0266에서 대상까지의 방화벽 경로, OpenBao `inventory/assets/<호스트>/endpoints`의 `ssh` Endpoint(`address`·`port`)가 실제 SSH 주소·포트와 같은지 본다(대상은 OpenBao 값으로 만든다).
 3. ns0266이 죽으면 `tcpcheck` 메트릭 전체가 끊긴다. 이는 ns0266의 Silent Host 알림으로 잡힌다.
 
-**편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `inventory/assets/<호스트>/endpoints`의 `ssh` Endpoint(`address`, `port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `Host Agents — Deploy All`(또는 Config)를 ns0266에 다시 반영해야 한다.
+**편입·폐기**: 대상 목록은 검사하는 쪽이 Host Agents 실행 때마다 `servers` 전체의 OpenBao `inventory/assets/<호스트>/endpoints`의 `ssh` Endpoint(`address`, `port`)에서 만든다. 실행 범위(`target_hosts`)와 무관하다. 호스트를 편입·폐기하면 `[에이전트] 수집·백업 에이전트 설치와 설정 (전체)`(또는 Config)를 ns0266에 다시 반영해야 한다.
 **제외**: 검사하는 쪽에서 도달할 수 없는 것이 정상인 서버는 Semaphore 인벤토리(`hosts`)의 `tcpcheck_excluded` 그룹에 넣는다(`host_agents_excluded`와 같은 방식). 현재 `ns0229`·`ns0246`이 들어 있다: 순수 내부 IP(10.10.10.x)만 할당된 서버라 공인 `218.234.206.79`의 포트 2002·2001 포워딩으로만 접근하고, ns0266에서는 이 경로가 막혀 있다(`connect: no route to host`). 그래서 서버 도달성 감시의 사각지대다. 접속 못 하는 이유가 없어지면 그룹에서 뺀다. 목록에서 빠진 서버는 도달성 알림을 받지 못한다. Extra variables `host_agents_tcpcheck_excluded`로도 지정할 수 있다. 저장소의 `inventory/group_vars`는 Semaphore에서 읽히지 않으니 거기에 두지 않는다.
 <a id="backup-failure"></a>
 ## 🟠 백업 실패 (`infra-backup-failure`)
@@ -888,7 +888,7 @@ Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 �
 
 **한계**: 장비 시각은 연도가 없고 시간대가 장비 설정에 달려 있어 `_timestamp`(수신 시각)가 기준이다. 장비 시각은 원문에 그대로 있다. 알림은 일부 메시지에만 생기는 필드를 쓰지 않고 `body`에서 뽑는다(그 메시지가 한 번도 오지 않은 동안 컬럼이 없어 알림이 `unknown field`로 오류가 나지 않게).
 
-**목록 갱신 절차**: 아래 목록은 모두 역할 기본 변수(`roles/openobserve_config/defaults/main.yml`)이며 Semaphore의 `OpenObserve — Config` 템플릿 Environment(`-e`)나 저장소 기본값을 고쳐 반영한다. 고친 뒤 **`OpenObserve — Config`를 다시 실행**해야 알림 SQL이 바뀐다.
+**목록 갱신 절차**: 아래 목록은 모두 역할 기본 변수(`roles/openobserve_config/defaults/main.yml`)이며 Semaphore의 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)` 템플릿 Environment(`-e`)나 저장소 기본값을 고쳐 반영한다. 고친 뒤 **`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행**해야 알림 SQL이 바뀐다.
 - `o2c_switch_syslog_roster`(수신 중단 감시 장비, 관리번호 목록): 새 스위치에 syslog 전송을 설정하고 로그가 `switch-syslog`로 도착하는 것을 확인한 **뒤에** 추가한다. 철거·교체한 장비는 뺀다. 전송을 설정하지 않은 장비를 넣으면 허위 알림이 온다.
 - `o2c_switch_uplinks`(업링크 포트 다운 감시, `[{device: ns0250, port: Gi1/0/49}]`): 포트는 약어(`Gi1/0/49`)와 전체 이름(`GigabitEthernet1/0/49`) 어느 쪽이든 쓴다(링크 다운 메시지는 전체 이름, MAC 플랩 메시지는 약어로 찍힌다). **목록이 비어 있으면 규칙 자체가 만들어지지 않는다.** 링크 다운은 심각도 3이라 미사용 포트 다운까지 전부 알림이 되므로 핵심 연결만 넣는다. 용어 `Watched Port`(CONTEXT.md)는 SNMP 감시(#175)의 라벨 기반 개념이며 이 로그 기반 목록과 별개다.
 - `o2c_switch_noise_events`(잡음 메시지 코드): 반복되는 의미 없는 메시지를 `FACILITY-SEVERITY-MNEMONIC`로 추가한다. 기본값은 ARP 해소 실패(`ADJ-3-RESOLVE_REQ`)다. 잡음으로 뺀 줄도 검색은 그대로 되고 수신 중단 판단에는 수신으로 센다. 설정 변경·로그인 실패·MAC 플랩 메시지 코드를 잡음에 넣으면 그 알림도 꺼지므로 넣지 않는다.
@@ -994,8 +994,8 @@ Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 �
 
 **공통 한계**: 알림 SQL은 `service_name`과 원문 `body`의 `key=value`만 읽는다. `security_logs`에는 첫 방화벽 줄이 들어오기 전까지 방화벽 필드(`device_id` 등) 컬럼이 없어서, 그 컬럼을 참조하면 알림 평가가 매번 오류가 나고 Config 실행(`O2C-036`)이 막히기 때문이다. 필드 추출([OpenObserve 구성](../openobserve_config.md), #285)과 별개로 동작한다. 따옴표 있는 값(`subtype="ha"`)과 없는 값(`subtype=ha`)을 모두 받는다.
 
-**목록 갱신 절차**: 아래 값은 모두 역할 기본 변수(`roles/openobserve_config/defaults/main.yml`)이며 Semaphore의 `OpenObserve — Config` 템플릿 Environment(`-e`)나 저장소 기본값을 고친 뒤 **`OpenObserve — Config`를 다시 실행**해야 반영된다. 잘못된 형식(장비 이름, 경로 문자, 승인 시간)은 요청 전에 실패한다.
-- `o2c_fortigate_syslog_roster`(수신 중단 감시 장비): **기본값은 비어 있다.** 전송을 시작하기 전 장비(`ns0380`, `ns0381`, `ns0399`)를 넣으면 허위 알림이 계속 오기 때문이다. 장비가 로그를 보내기 시작하고 `security_logs`에 도착하는 것을 확인한 **뒤에** 관리번호를 더한다(사무실 `ns0399`가 먼저). IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤에는 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶어 한 항목으로 쓴다(어느 한 멤버라도 보내면 수신 중). **hostname을 관리번호로 바꾸지 못한 장비는 관리번호가 아닌 원래 이름(`devname` 그대로, 대소문자 무관)으로도 목록에 넣을 수 있다**(예: `Example_Branch_FW`). 이 장비의 `device_id`(관리번호)를 채우려면 `o2c_fortigate_device_aliases`에 `{example_branch_fw: ns0000}`처럼 소문자 정규화한 이름 → 관리번호를 넣는다(표에 없으면 `ns`+숫자 추출). 공개 저장소라 실제 이름과 값은 저장소에 쓰지 않고 Semaphore `OpenObserve — Config` 템플릿의 Environment(Extra variables)로 넣는다. 목록에 없는 장비는 로그가 없어도 알리지 않는다. 목록이 비면 규칙은 있지만 행을 돌려주지 않는다.
+**목록 갱신 절차**: 아래 값은 모두 역할 기본 변수(`roles/openobserve_config/defaults/main.yml`)이며 Semaphore의 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)` 템플릿 Environment(`-e`)나 저장소 기본값을 고친 뒤 **`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행**해야 반영된다. 잘못된 형식(장비 이름, 경로 문자, 승인 시간)은 요청 전에 실패한다.
+- `o2c_fortigate_syslog_roster`(수신 중단 감시 장비): **기본값은 비어 있다.** 전송을 시작하기 전 장비(`ns0380`, `ns0381`, `ns0399`)를 넣으면 허위 알림이 계속 오기 때문이다. 장비가 로그를 보내기 시작하고 `security_logs`에 도착하는 것을 확인한 **뒤에** 관리번호를 더한다(사무실 `ns0399`가 먼저). IDC HA 쌍은 대기 멤버가 평소 조용하고 장애 전환 뒤에는 반대가 되므로 `ns0380+ns0381`처럼 `+`로 묶어 한 항목으로 쓴다(어느 한 멤버라도 보내면 수신 중). **hostname을 관리번호로 바꾸지 못한 장비는 관리번호가 아닌 원래 이름(`devname` 그대로, 대소문자 무관)으로도 목록에 넣을 수 있다**(예: `Example_Branch_FW`). 이 장비의 `device_id`(관리번호)를 채우려면 `o2c_fortigate_device_aliases`에 `{example_branch_fw: ns0000}`처럼 소문자 정규화한 이름 → 관리번호를 넣는다(표에 없으면 `ns`+숫자 추출). 공개 저장소라 실제 이름과 값은 저장소에 쓰지 않고 Semaphore `[구성] 로그 플랫폼 설정 반영 (OpenObserve)` 템플릿의 Environment(Extra variables)로 넣는다. 목록에 없는 장비는 로그가 없어도 알리지 않는다. 목록이 비면 규칙은 있지만 행을 돌려주지 않는다.
 - `o2c_fortigate_approved_start_hour`, `o2c_fortigate_approved_end_hour`(승인 시간, 기본 9, 18, 끝 미포함): 변경 로그 원문의 `time=`(장비 시계)을 읽는다. **장비 시간대가 운영 시간대(KST)여야 한다.** 시각이 없는 줄은 승인 시간 밖으로 본다. 요일은 구분하지 않는다.
 - `o2c_fortigate_policy_cfgpaths`, `o2c_fortigate_account_cfgpaths`(변경을 알릴 `cfgpath`): 기본은 정책(`firewall.policy`, `firewall.policy6`, `firewall.proxy-policy`)과 계정(`system.admin`, `system.accprofile`, `system.api-user`, `user.local`, `user.group`)이다.
 - `o2c_fortigate_detection_severities`(기본 `critical`), `o2c_fortigate_login_fail_threshold`(기본 5), `o2c_fortigate_silent_minutes`(기본 30, 스위치 24시간보다 짧다. 방화벽은 로그가 계속 나오므로), 재통지 간격 `o2c_fortigate_*_silence_minutes`.
@@ -1020,7 +1020,7 @@ Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 �
 
 **확인**: 행의 출발지가 사내 작업자·Semaphore인지 본다. 로그 보기에서 계정과 접속 방식(`ui`)을 읽고, 같은 출발지의 직전 로그인 실패(실패 알림)가 있었는지 본다.
 
-**대응**: 정상이면 출발지를 `normal_sources`에 등록하고 `OpenObserve — Config`를 다시 실행한다. 확인되지 않으면 관리자 비밀번호 변경과 관리 접속 허용 주소(trusted host) 점검 뒤 보안 담당에게 보고한다.
+**대응**: 정상이면 출발지를 `normal_sources`에 등록하고 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행한다. 확인되지 않으면 관리자 비밀번호 변경과 관리 접속 허용 주소(trusted host) 점검 뒤 보안 담당에게 보고한다.
 
 <a id="fortigate-change-unapproved"></a>
 ### 🔴 방화벽 정책·계정 변경, 승인 시간 밖 (`infra-fortigate-change-unapproved`)
@@ -1103,7 +1103,7 @@ Watched Port의 outErrors가 5분에 30건 이상 증가하는 상태가 10분 �
 
 ## 리소스 알림 (디스크·inode·메모리)
 
-사용률은 `_timestamp`별로 묶은 값의 **조회 구간 최솟값**으로 판정한다(구간 내내 높아야 발화). 디스크·inode는 15분, 메모리는 10분. 90% 이상 95% 미만은 P2(재통지 1440분), 95% 이상은 P1(재통지 60분). 통지 행에 호스트·마운트·사용률이 나온다. squashfs·iso9660·tmpfs·devtmpfs·overlay는 감시하지 않고 `/boot`·`/boot/efi`는 감시한다. 항상 높게 쓰는 볼륨은 `OpenObserve — Config`의 Extra variables `o2c_resource_exclusions`(호스트·마운트 예외)나 `o2c_resource_thresholds`(임계값 덮어쓰기)에 넣고 `OpenObserve — Config`를 다시 실행한다.
+사용률은 `_timestamp`별로 묶은 값의 **조회 구간 최솟값**으로 판정한다(구간 내내 높아야 발화). 디스크·inode는 15분, 메모리는 10분. 90% 이상 95% 미만은 P2(재통지 1440분), 95% 이상은 P1(재통지 60분). 통지 행에 호스트·마운트·사용률이 나온다. squashfs·iso9660·tmpfs·devtmpfs·overlay는 감시하지 않고 `/boot`·`/boot/efi`는 감시한다. 항상 높게 쓰는 볼륨은 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 Extra variables `o2c_resource_exclusions`(호스트·마운트 예외)나 `o2c_resource_thresholds`(임계값 덮어쓰기)에 넣고 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)`를 다시 실행한다.
 
 <a id="disk-usage"></a>
 ### 🟠/🔴 디스크 사용률 (`infra-disk-usage-p2`, `infra-disk-usage-p1`)
@@ -1146,7 +1146,7 @@ docker stats --no-stream   # Docker 사용 호스트
 
 **대응**: 메모리를 많이 쓰는 프로세스·컨테이너의 누수와 한도를 점검하고 재기동하거나 증설한다. OOM kill이 이미 있었는지 시스템 로그에서 확인한다.
 
-**알림 정의가 바뀌어 `OpenObserve — Config` 계획에 `recreate alert infra-memory-usage-p1 (stream changed)`가 나오면**: 서버 알림의 스트림이 정의와 달라 삭제 후 재생성하는 것이다(PUT은 스트림을 못 바꾼다). 반영 중 생성이 실패하면 알림이 서버에 없는 채로 남으므로 원인(새 스트림에 데이터 없음 등)을 고친 뒤 Config를 다시 실행한다.
+**알림 정의가 바뀌어 `[구성] 로그 플랫폼 설정 반영 (OpenObserve)` 계획에 `recreate alert infra-memory-usage-p1 (stream changed)`가 나오면**: 서버 알림의 스트림이 정의와 달라 삭제 후 재생성하는 것이다(PUT은 스트림을 못 바꾼다). 반영 중 생성이 실패하면 알림이 서버에 없는 채로 남으므로 원인(새 스트림에 데이터 없음 등)을 고친 뒤 Config를 다시 실행한다.
 
 ---
 
