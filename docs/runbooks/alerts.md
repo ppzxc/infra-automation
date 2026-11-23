@@ -134,9 +134,9 @@ docker logs vrrp-keepalived-1 2>&1 | grep -iE "unsafe permissions|disabling trac
 <a id="app-log-errors"></a>
 ## 🟠 컨테이너 로그에 ERROR 이상 기록 (`infra-app-log-errors`)
 
-**조건**: `app_logs`에서 수집기가 올린 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄이 호스트·컨테이너별로 5분 안에 1건 이상(Event Alert). 단, Caddy 컨테이너에서 `failed to set read deadline`과 `use of closed network connection`이 함께 기록된 연결 정리 오류는 제외한다. 실제 upstream 502 등 다른 ERROR는 계속 알린다.
+**조건**: `app_logs`에서 수집기가 올린 `severity`가 error 이상(`error`·`err`·`severe`·`fatal`·`critical`·`panic`·`dpanic`, 대소문자 무시)인 줄이 호스트·컨테이너별로 5분 안에 1건 이상(Event Alert). 단, Caddy 컨테이너의 다음 세 가지는 제외한다: ① `failed to set read deadline`과 `use of closed network connection`이 함께 기록된 연결 정리 오류, ② `readfrom tcp`와 `i/o timeout`이 함께 기록된 프록시 중 연결 지연, ③ `http: panic serving`·`nil pointer dereference`·`FlushError`가 함께 기록된 응답 flush 중 패닉(연결 하나만 끊기고 서비스는 계속된다). 이 셋은 단발로 자주 나와 알림 피로의 원인이었다. 실제 upstream 502 등 다른 ERROR는 계속 알린다.
 
-**레벨이 올라오는 형식**: JSON 한 줄 로그의 `level` 또는 `log.level`(앱·Caddy), valkey 텍스트 로그의 레벨 문자. keepalived처럼 레벨이 없는 로그와 JSON이 아닌 줄(스택 트레이스 이어지는 줄 등)은 알림 대상이 아니다(키워드로 추정하지 않는다). WARN은 알리지 않고 검색용으로만 남는다. Caddy의 취소된 연결 정리 오류는 ERROR로 파싱되더라도 사용자 요청 실패와 구분해 제외한다.
+**레벨이 올라오는 형식**: JSON 한 줄 로그의 `level` 또는 `log.level`(앱·Caddy), valkey 텍스트 로그의 레벨 문자. keepalived처럼 레벨이 없는 로그와 JSON이 아닌 줄(스택 트레이스 이어지는 줄 등)은 알림 대상이 아니다(키워드로 추정하지 않는다). WARN은 알리지 않고 검색용으로만 남는다. Caddy의 위 세 가지 소음은 ERROR로 파싱되더라도 서비스 영향이 없는 단발 오류라 제외하고, `dial tcp … connection refused`처럼 업스트림이 내려간 오류는 계속 알린다.
 
 **왜 중요한가**: 앱 장애, 요청 실패, DB·큐·캐시 연결 문제의 첫 신호일 수 있다.
 
@@ -531,7 +531,7 @@ sudo ausearch -k secret_access -ts today -i
 
 > **기본 설정의 한계**: 이 알림은 `o2c_audit_provisioning_accounts`가 비어 있으면 터미널 없는 로그인 사용자 전부를 받는다. 같은 키로 `ssh host 'sudo …'`를 실행한 공격도 P2가 아니라 이 P3로만 오므로 무시하지 않는다. **프로비저닝 계정을 목록에 채워 서명을 좁히는 것을 권한다**(권고 절차는 명세 참조).
 
-**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 5분: 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 Extra variables `o2c_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
+**조건**: 감시 키 `auth_config`·`container_config`·`secret_access`와 파일 감시 키 `audit_config`·`syslog_config`·`ssh_keys`·`firewall_config`(`o2c_audit_provisioning_keys`)의 SYSCALL 기록 중 **터미널 없이(`tty=(none)`) 로그인 사용자(`auid` 설정)가 한 것**이 5분 안에 1건 이상(재통지 `o2c_audit_provisioning_silence_minutes`, 기본 1440분(하루): 재통지 간격은 알림 전체에 적용되므로 길게 잡으면 그 시간 동안 다른 서명 행이 통지되지 않는다). `o2c_audit_provisioning_accounts`(`[구성] 로그 플랫폼 설정 반영 (OpenObserve)`의 Extra variables `o2c_audit_provisioning_accounts`)를 주면 그 로그인(AUID)으로 좁힌다. 같은 제외(패키지 관리자·서비스 프로세스 등)가 먼저 적용된다.
 
 **왜 이 알림이 있는가**: Ansible 프로비저닝·배포가 만드는 정상 변경은 감사 행으로 식별할 수 없다(프로세스 제목이 인터프리터뿐이고, 래퍼 문자열 `BECOME-SUCCESS`는 감사 행이 아니라 sudo 로그에만 있다). 같은 방식으로 도는 다른 명령과 구분되지 않아 제외하지 않고 등급만 낮춰 따로 알린다. 그래서 P2 알림은 `AND NOT <서명>`, 이 알림은 `AND <서명>`이라 한 변경에 알림이 하나만 온다.
 

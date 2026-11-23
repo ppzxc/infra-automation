@@ -309,7 +309,9 @@ def test_app_log_error_alert_is_a_p2_event_alert_on_error_or_worse_per_host_and_
     assert "lower(coalesce(container_name, '')) LIKE '%caddy%'" in sql
     assert "lower(coalesce(body, '')) LIKE '%failed to set read deadline%'" in sql
     assert "lower(coalesce(body, '')) LIKE '%use of closed network connection%'" in sql
-    assert "AND NOT (" in sql    # Caddy의 취소된 연결 정리 오류만 빼고 upstream ERROR는 계속 알린다
+    assert "AND NOT (" in sql    # Caddy의 단발 소음 세 가지만 빼고 upstream ERROR는 계속 알린다
+    assert "lower(coalesce(body, '')) LIKE '%readfrom tcp%'" in sql and "lower(coalesce(body, '')) LIKE '%i/o timeout%'" in sql
+    assert "lower(coalesce(body, '')) LIKE '%http: panic serving%'" in sql and "lower(coalesce(body, '')) LIKE '%flusherror%'" in sql
     assert alert["trigger_condition"]["period"] == 5 and alert["trigger_condition"]["silence"] == 5
     assert alert["context_attributes"]["severity"] == "P2 경고"
 
@@ -326,6 +328,26 @@ def test_app_log_error_alert_excludes_only_caddy_closed_connection_cleanup_error
     upstream_failure = dict(caddy_noise, body='{"msg":"dial tcp: lookup semaphore: no such host"}')
     assert _row_lines(desired, name, [upstream_failure], "app_logs") == [
         "• ns0272 / ingress-caddy-1: ERROR 이상 1건 · 10-23 08:59:14"]
+
+
+def test_app_log_error_alert_also_excludes_caddy_proxy_timeouts_and_flush_panics_but_not_other_failures(desired):
+    name = "infra-app-log-errors"
+    base = _ev("2026-11-23 10:30:15", severity="error", container_name="ingress-caddy-1", body="")
+    timeout = dict(base, body='{"msg":"readfrom tcp 172.22.0.2:443->10.0.0.9:51234: i/o timeout"}')
+    stream_timeout = dict(base, body='{"msg":"readfrom tcp 1.2.3.4:443->5.6.7.8:1: stream error: stream ID 7; INTERNAL_ERROR; i/o timeout"}')
+    flush_panic = dict(base, body='{"msg":"http: panic serving 59.25.177.53:49667: runtime error: invalid memory address or nil pointer dereference\\n bufio.(*Writer).Flush\\n caddyhttp.(*IdleTimeoutWriter).FlushError"}')
+    for noise in (timeout, stream_timeout, flush_panic):
+        assert _row_lines(desired, name, [noise], "app_logs") == [], noise["body"][:40]
+
+    keep = "• ns0272 / ingress-caddy-1: ERROR 이상 1건 · 11-23 10:30:15"
+    other_panic = dict(base, body='{"msg":"http: panic serving 1.2.3.4:1: runtime error: index out of range"}')
+    refused = dict(base, body='{"msg":"dial tcp 172.22.0.9:8080: connect: connection refused"}')
+    nil_elsewhere = dict(base, body='{"msg":"http: panic serving 1.2.3.4:1: runtime error: nil pointer dereference in handler"}')
+    for real in (other_panic, refused, nil_elsewhere):   # 패닉은 FlushError 스택일 때만 제외한다
+        assert _row_lines(desired, name, [real], "app_logs") == [keep], real["body"][:40]
+
+    non_caddy = dict(timeout, container_name="api")        # Caddy 컨테이너만 제외한다
+    assert _row_lines(desired, name, [non_caddy], "app_logs") == ["• ns0272 / api: ERROR 이상 1건 · 11-23 10:30:15"]
 
 
 def test_memory_alert_sql_uses_available_and_limit_streams_not_usage_states(desired):
